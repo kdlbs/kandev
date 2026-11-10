@@ -1,6 +1,7 @@
 ---
 status: draft
 system: agents
+updated: 2026-11-10
 requirements:
   - REQ-AGENTS-CLAUDE-SESSION-LIMIT-001
 ---
@@ -39,13 +40,22 @@ A generic period-word expression also matches `you've hit your rate limit`, inco
 Other period signatures require captured evidence before expansion.
 Claude's weekly notice is captured evidence (`Internal error: You've hit your weekly limit · resets 4am (<zone>)`).
 Add `claude.stderr.weekly_limit.v1` with the same shape as the session-limit rule and the explicit period word `weekly`.
-Keep clock-only reset parsing restricted to the session-limit rule: a weekly reset can be days away, so its clock alone does not identify the date.
-Structured HTTP status continues to run before provider rules.
+Clock-only reset parsing applies to the session and five-hour rules.
+A weekly reset can be days away, so its clock alone does not identify the date.
+Structured HTTP status runs before provider rules, with the existing explicit hard-quota exception for HTTP 429.
+
+Criteria .9 through .11 add `claude.stderr.five_hour_limit.v1` and `claude.stderr.usage_limit.v1`.
+Keep these rules separate because only the five-hour wording establishes a renewal period for clock inference.
+Use `mustRuleOutsideMarkdownFences` with a diagnostic-line anchor and horizontal whitespace.
+Accept the complete second-person phrase and the established optional error labels.
+Keep existing credit and session rules ahead of these additions, and keep the new rules ahead of the rate rule.
+Add both rule IDs to `hardQuotaRuleOutranksRateStatus` so HTTP 429 cannot relabel explicit quota exhaustion as a transient throttle.
+Other structured signals retain precedence.
 
 ## Reset clock
 
 Keep `parseResetHintAt(text, now)` for the existing dated `try again at` format and its year-resolution behavior.
-Add a separate clock-only parser and invoke it only when the classified rule is `claude.stderr.session_limit.v1`.
+Use the existing clock-only parser for `claude.stderr.session_limit.v1` and `claude.stderr.five_hour_limit.v1`.
 Do not broaden the existing offset parser to load arbitrary zone strings.
 
 The new branch accepts `resets 11:10am (Europe/Helsinki)` and `resets 11am (Europe/Helsinki)`.
@@ -71,8 +81,11 @@ The parser receives a clock argument for deterministic tests.
 No new public clock API is needed.
 
 `Classify` parses text only for quota or rate errors with no structured `ResetHint`.
-It retains generic dated parsing for compatibility, while clock-only parsing is restricted to the exact Claude session-limit rule.
-It passes input text to the parser, while rules consume sanitized text.
+It retains generic dated parsing for compatibility.
+Clock-only parsing is restricted to the exact Claude session and five-hour rules.
+The generic usage rule has no renewal period and therefore receives no clock-only hint.
+For the five-hour and usage rules, both dated and clock text hints come only from the unfenced diagnostic line that matched the rule, so fenced examples, unrelated prose, and the other output channel cannot supply a deadline.
+It passes that scoped text to the parser, while rules consume sanitized text.
 Retain this separation and do not persist raw text.
 
 The provider diagnostic already carries `OccurredAt`; `classifyKanbanFailure` passes it through the internal `routingerr.Input.OccurredAt` field.
@@ -94,6 +107,14 @@ Invocation correlation and output/tool safety remain prerequisites for automatic
 The specialized rendered quota metadata currently serves OpenCode diagnostics.
 This package does not expand that card or promise an automatic wake at Claude's reset time.
 
+Legacy Office consumes the same result through `SchedulerService.HandlePostStartFailure` and `applyPostStartFallback`.
+These functions update provider health, finish the failed route attempt, and requeue the run before terminal agent-failure accounting.
+`routing.Schedule` uses the validated reset hint or its existing bounded backoff when no hint exists.
+`Service.handleAgentFailed` and its taskless counterpart return after a handled fallback.
+Thus, configured quota fallback does not reach `IncrementAgentConsecutiveFailures` or automatic pause.
+Current dynamic profiles consume the same classification through their saved hard-error policies and credential circuits.
+Keep both consumers unchanged and prove their behavior with real classifier results.
+
 ## Compatibility
 
 | Input boundary | Behavior | Unsupported-shape fallback |
@@ -102,7 +123,7 @@ This package does not expand that card or promise an automatic wake at Claude's 
 | Claude notice after existing ACP sanitization | Same result when the explicit zone survives | Quota without hint if sanitization removed the zone |
 | Raw clock with a nested IANA name | Shared parser loads the complete zone name | No hint for an unknown name |
 | Codex dated notice | Existing date and explicit-offset parser | Existing no-hint behavior for an unzoned date |
-| Structured HTTP status or reset hint | Existing structured precedence | No text override |
+| Structured HTTP status or reset hint | Existing precedence, including hard quota over HTTP 429 | Other statuses and supplied reset hints retain authority |
 | Other provider, same session prose | Existing provider classification | Unknown post-start error unless another existing rule matches |
 
 The existing path sanitizer removes part of `America/Argentina/Buenos_Aires` in projected messages.
@@ -123,3 +144,4 @@ No browser test is required because no rendered component changes.
 - [Platform recovery requirements](../../platform/requirements/provider-error-recovery.md).
 - [Codex reset parser design](codex-usage-limit-classification.md).
 - [Fix package](../../../plans/claude-session-limit-classification/plan.md).
+- [Office mid-run quota package](../../../plans/office-midrun-quota-classification/plan.md).

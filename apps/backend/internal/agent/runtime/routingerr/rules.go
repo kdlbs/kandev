@@ -25,6 +25,13 @@ const RuleOpenCodeCapacityAdmission = "opencode.capacity.admission_refused.v1"
 
 const ruleOpenCodeGoUsageLimit = "opencode.acp.go_usage_limit.v1"
 
+const (
+	ruleClaudeSessionLimit  = "claude.stderr.session_limit.v1"
+	ruleClaudeFiveHourLimit = "claude.stderr.five_hour_limit.v1"
+	ruleClaudeUsageLimit    = "claude.stderr.usage_limit.v1"
+	ruleCodexOutOfCredits   = "codex.stderr.out_of_credits.v1"
+)
+
 const openCodeAdmissionRefusedSignature = `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?` +
 	`upstream\s+request\s+failed:\s*\[ttft_admission_refused\]\s+the\s+cell\s+is\s+at\s+capacity\b`
 
@@ -80,8 +87,23 @@ const (
 var providerRules = map[string][]rule{
 	"claude-acp": {
 		mustRule("claude.stderr.quota.v1", `(?im)^\s*(?:(?:Error|Internal\s+error|API\s+Error):\s*)?(?:anthropic_quota_exceeded\b|(?:your\s+)?credit\s+balance\s+is\s+too\s+low\b|insufficient\s+credits\b)`, CodeQuotaLimited, ConfHigh),
-		mustRule("claude.stderr.session_limit.v1", `(?im)^\s*(?:(?:Internal\s+error|Error):\s*)?(?:you['’]ve|you\s+have)\s+hit\s+your\s+session\s+limit\b`, CodeQuotaLimited, ConfHigh),
+		mustRule(ruleClaudeSessionLimit, `(?im)^\s*(?:(?:Internal\s+error|Error):\s*)?(?:you['’]ve|you\s+have)\s+hit\s+your\s+session\s+limit\b`, CodeQuotaLimited, ConfHigh),
 		mustRule("claude.stderr.weekly_limit.v1", `(?im)^\s*(?:(?:Internal\s+error|Error):\s*)?(?:you['’]ve|you\s+have)\s+hit\s+your\s+weekly\s+limit\b`, CodeQuotaLimited, ConfHigh),
+		// Only the five-hour wording names a renewal period, so Classify's
+		// clock-only reset inference is scoped to this exact rule. The
+		// generic usage notice keeps the existing backoff behavior.
+		mustRuleOutsideMarkdownFences(
+			ruleClaudeFiveHourLimit,
+			`(?im)^[ \t]*(?:(?:Internal[ \t]+error|Error|API[ \t]+Error):[ \t]*)?`+
+				`(?:you['’]ve|you[ \t]+have)[ \t]+hit[ \t]+your[ \t]+(?:5[- ]hour|five[- ]hour)[ \t]+limit\b`,
+			CodeQuotaLimited, ConfHigh,
+		),
+		mustRuleOutsideMarkdownFences(
+			ruleClaudeUsageLimit,
+			`(?im)^[ \t]*(?:(?:Internal[ \t]+error|Error|API[ \t]+Error):[ \t]*)?`+
+				`(?:you['’]ve|you[ \t]+have)[ \t]+hit[ \t]+your[ \t]+usage[ \t]+limit\b`,
+			CodeQuotaLimited, ConfHigh,
+		),
 		mustRule("claude.stderr.rate.v1", claudeRateLimitSignature, CodeRateLimited, ConfHigh),
 		// A proxy can reject every account credential before it sends a request
 		// upstream. This is a hard credential condition; a retry or a switch
@@ -99,6 +121,12 @@ var providerRules = map[string][]rule{
 			"codex.stderr.quota.v1",
 			`(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?(?:insufficient_quota\b|quota_exceeded\b|usagelimitexceeded\b|(?:you['’]ve|you have)\s+hit\s+your\s+usage\s+limit\b)|`+
 				`(?im)^\s*\{[^\n]*"codexErrorInfo"\s*:\s*"usageLimitExceeded"`,
+			CodeQuotaLimited, ConfHigh,
+		),
+		mustRuleOutsideMarkdownFences(
+			ruleCodexOutOfCredits,
+			`(?im)^[ \t]*(?:(?:AI_APICallError|Error|Internal[ \t]+error|API[ \t]+Error):[ \t]*)?`+
+				`(?:your[ \t]+)?workspace[ \t]+is[ \t]+out[ \t]+of[ \t]+credits\b`,
 			CodeQuotaLimited, ConfHigh,
 		),
 		mustRule("codex.stderr.rate.retry_exhausted.v1", codexRetryExhaustedRateLimitSignature, CodeRateLimited, ConfHigh),
@@ -221,6 +249,49 @@ func matchProviderRules(providerID, excerpt, rawText string) (*Error, bool) {
 		}
 	}
 	return nil, false
+}
+
+// providerRuleMatchedLine returns the first raw diagnostic line that matches
+// the named provider rule after applying the same sanitization and fence
+// filtering as classification. Text-derived reset hints for a rule that
+// rejects fenced examples must not be read from an unrelated line.
+func providerRuleMatchedLine(providerID, ruleID, rawText string) (string, bool) {
+	rules, ok := providerRules[providerID]
+	if !ok {
+		return "", false
+	}
+	for _, r := range rules {
+		if r.id != ruleID {
+			continue
+		}
+		text := rawText
+		if r.ignoreMarkdownFences {
+			text = withoutMarkdownFencedCode(text)
+		}
+		for _, line := range strings.Split(text, "\n") {
+			matchText := Sanitize(line)
+			if r.rawText {
+				matchText = line
+			}
+			if r.pattern.MatchString(matchText) {
+				return line, true
+			}
+		}
+		return "", false
+	}
+	return "", false
+}
+
+// ruleUsesScopedTextReset reports whether text-derived reset hints for rule
+// must come only from its matched diagnostic line. The session, weekly, and
+// Codex usage-limit rules retain their whole-diagnostic compatibility.
+func ruleUsesScopedTextReset(rule string) bool {
+	switch rule {
+	case ruleClaudeFiveHourLimit, ruleClaudeUsageLimit, ruleCodexOutOfCredits:
+		return true
+	default:
+		return false
+	}
 }
 
 // withoutMarkdownFencedCode blanks fenced examples and preserves diagnostic lines.
