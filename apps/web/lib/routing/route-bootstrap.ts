@@ -79,6 +79,7 @@ export function mapWorkspaceItem(ws: WorkspaceItem): WorkspaceState["items"][num
     acp_idle_suspension_enabled: ws.acp_idle_suspension_enabled ?? false,
     acp_idle_timeout_minutes: ws.acp_idle_timeout_minutes ?? 120,
     office_workflow_id: ws.office_workflow_id ?? null,
+    task_prefix: ws.task_prefix,
     created_at: ws.created_at,
     updated_at: ws.updated_at,
   };

@@ -15,6 +15,7 @@ import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { useChatMotion } from "@/hooks/use-chat-motion";
 import { useAppStore } from "@/components/state-provider";
+import { selectActiveWorkspace } from "@/lib/state/slices/workspace/selectors";
 import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { selectCommandCount } from "@/lib/state/slices/session/selectors";
 import { createComment } from "@/lib/api/domains/office-api";
@@ -105,6 +106,7 @@ function CommentEntry({
   // Resolve the agent name from the office agents store so renames
   // flow through automatically. Backend session-bridged comments don't
   // carry a name; the mapper leaves authorName empty for agents.
+  const taskPrefix = useAppStore((s) => selectActiveWorkspace(s)?.task_prefix);
   const resolvedAgentName = useAppStore((s) =>
     isAgent
       ? (selectOfficeAgentProfiles(s).find((a) => a.id === comment.authorId)?.name ??
@@ -143,7 +145,7 @@ function CommentEntry({
           </span>
         </div>
         <div className="mt-1">
-          <MarkdownComment content={comment.content} />
+          <MarkdownComment content={comment.content} taskPrefix={taskPrefix} />
         </div>
         {!isAgent &&
           comment.runStatus &&

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import {
@@ -13,9 +13,9 @@ import { remarkTaskLinks } from "./task-identifier-link";
 
 type MarkdownCommentProps = {
   content: string;
+  /** Workspace task prefix (e.g. "KAN"); only matching identifiers are linked. */
+  taskPrefix?: string;
 };
-
-const localRemarkPlugins = [...remarkPlugins, remarkTaskLinks];
 
 // Extend the default sanitize schema to allow relative hrefs (for task links like /office/tasks/KAN-42).
 // The default schema only allows http/https/irc/mailto protocols, stripping relative paths.
@@ -25,7 +25,14 @@ const sanitizeSchema = withMarkdownMathSanitizeSchema({
   protocols: otherProtocols,
 });
 
-export const MarkdownComment = memo(function MarkdownComment({ content }: MarkdownCommentProps) {
+export const MarkdownComment = memo(function MarkdownComment({
+  content,
+  taskPrefix,
+}: MarkdownCommentProps) {
+  const localRemarkPlugins = useMemo(
+    () => [...remarkPlugins, [remarkTaskLinks, { prefix: taskPrefix }] as never],
+    [taskPrefix],
+  );
   return (
     <div className="prose prose-sm max-w-none text-sm markdown-body">
       <ReactMarkdown

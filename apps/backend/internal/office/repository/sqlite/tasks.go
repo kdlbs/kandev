@@ -582,6 +582,23 @@ func cursorValueForTask(t *TaskRow, sortField TaskListSortField) string {
 	}
 }
 
+// GetTaskIDByIdentifier returns the id of the task carrying the given
+// human-readable identifier (e.g. "KAN-11") in a workspace. Identifiers are
+// only unique per workspace. Returns "", nil when no task matches.
+func (r *Repository) GetTaskIDByIdentifier(ctx context.Context, workspaceID, identifier string) (string, error) {
+	var id string
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT id FROM tasks WHERE workspace_id = ? AND identifier = ? LIMIT 1`,
+	), workspaceID, identifier).Scan(&id)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get task by identifier %s: %w", identifier, err)
+	}
+	return id, nil
+}
+
 // GetTaskByID returns a single task as a TaskRow.
 // Returns nil, nil when the task does not exist.
 func (r *Repository) GetTaskByID(ctx context.Context, taskID string) (*TaskRow, error) {
