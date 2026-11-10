@@ -1313,7 +1313,11 @@ func (a *lifecycleAdapter) GetGitStatusWithDetails(ctx context.Context, sessionI
 
 // WaitForAgentctlReady waits for the agentctl HTTP server to be ready for a session.
 func (a *lifecycleAdapter) WaitForAgentctlReady(ctx context.Context, sessionID string) error {
-	return a.mgr.WaitForAgentctlReadyForSession(ctx, sessionID)
+	err := a.mgr.WaitForAgentctlReadyForSession(ctx, sessionID)
+	if errors.Is(err, lifecycle.ErrAgentctlClientUnavailable) || errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+		return fmt.Errorf("%w: %v", executor.ErrAgentctlClientUnavailable, err)
+	}
+	return err
 }
 
 // orchestratorWrapper wraps orchestrator.Service to implement taskhandlers.OrchestratorService.

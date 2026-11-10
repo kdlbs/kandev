@@ -358,7 +358,9 @@ type mockAgentManager struct {
 	// Optional override for GetExecutionIDForSession. When unset, the default
 	// implementation reads from repoForExecutionLookup if provided so tests that
 	// seed an executors_running row don't also have to mock this function.
-	getExecutionIDForSessionFunc func(context.Context, string) (string, error)
+	getExecutionIDForSessionFunc           func(context.Context, string) (string, error)
+	ensureWorkspaceExecutionForSessionFunc func(context.Context, string, string) error
+	waitForAgentctlReadyFunc               func(context.Context, string) error
 	// Optional repo used as a fallback by GetExecutionIDForSession when no
 	// override is provided — keeps tests that seed executors_running automatically
 	// resolvable without per-test boilerplate.
@@ -873,7 +875,10 @@ func (m *mockAgentManager) CleanupStaleExecutionBySessionIDIfCurrent(
 ) error {
 	return m.CleanupStaleExecutionBySessionID(ctx, sessionID)
 }
-func (m *mockAgentManager) EnsureWorkspaceExecutionForSession(_ context.Context, _, _ string) error {
+func (m *mockAgentManager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error {
+	if m.ensureWorkspaceExecutionForSessionFunc != nil {
+		return m.ensureWorkspaceExecutionForSessionFunc(ctx, taskID, sessionID)
+	}
 	return nil
 }
 func (m *mockAgentManager) GetExecutionIDForSession(ctx context.Context, sessionID string) (string, error) {
@@ -934,7 +939,10 @@ func (m *mockAgentManager) GetGitStatusFresh(ctx context.Context, sessionID stri
 	}
 	return nil, nil
 }
-func (m *mockAgentManager) WaitForAgentctlReady(_ context.Context, _ string) error {
+func (m *mockAgentManager) WaitForAgentctlReady(ctx context.Context, sessionID string) error {
+	if m.waitForAgentctlReadyFunc != nil {
+		return m.waitForAgentctlReadyFunc(ctx, sessionID)
+	}
 	return nil
 }
 
