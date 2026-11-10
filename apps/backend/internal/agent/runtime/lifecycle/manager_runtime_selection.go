@@ -286,16 +286,6 @@ func identityRequiredForSelection(selected executor.Name, execution *AgentExecut
 	if strings.TrimSpace(string(execution.RuntimeName)) != "" {
 		return false
 	}
-	executorType := execution.ExecutorType
-	if executorType == "" && execution.MetadataSnapshot() != nil {
-		executorType = getMetadataString(execution.MetadataSnapshot(), MetadataKeyExecutorType)
-	}
-	mapped, required := normalizeExecutorSelection(executorType)
-	if required && mapped == selected {
-		// The retained binding selects the same non-Docker runtime that was
-		// admitted for this execution. No container boundary needs identity.
-		return false
-	}
 	return selected != executor.NameStandalone
 }
 
@@ -361,9 +351,7 @@ func validateDurableRow(selected executor.Name, row *models.ExecutorRunning, tas
 		return nil
 	}
 	if row == nil || row.Runtime == "" {
-		// A non-Docker boundary with no container identity can recover an
-		// empty legacy runtime row; Docker still requires container evidence.
-		if selected != executor.NameDocker && row != nil && strings.TrimSpace(row.ContainerID) == "" {
+		if selected == executor.NameStandalone && row != nil && strings.TrimSpace(row.ContainerID) == "" {
 			return nil
 		}
 		return identityUnverifiedError("", selected, "retained runtime identity is unavailable")
