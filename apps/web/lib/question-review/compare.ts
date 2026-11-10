@@ -60,6 +60,11 @@ function candidates(state: CompareState, ids: readonly string[]): string[] {
 }
 
 /** Zero-based position of B among the candidates. */
+/** The state actually displayed: holding to compare shows A in Toggle. */
+export function effectiveCompareState(state: CompareState, holding: boolean): CompareState {
+  return holding ? { ...state, mode: "toggle", showB: false } : state;
+}
+
 export function candidatePosition(state: CompareState, ids: readonly string[]) {
   const list = candidates(state, ids);
   return { index: list.indexOf(state.bId), total: list.length };

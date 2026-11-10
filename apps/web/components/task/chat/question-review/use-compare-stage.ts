@@ -1,5 +1,10 @@
 import { useEffect, useRef, type Dispatch, type RefObject } from "react";
-import type { CompareAction, CompareSettings, CompareState } from "@/lib/question-review/compare";
+import {
+  effectiveCompareState,
+  type CompareAction,
+  type CompareSettings,
+  type CompareState,
+} from "@/lib/question-review/compare";
 import type { QuestionImageState } from "@/hooks/domains/session/use-question-images";
 import type { ReviewImage, ReviewSegment } from "@/lib/question-review/segments";
 import type { Size } from "@/lib/question-review/viewport";
@@ -140,7 +145,8 @@ export function useCompareStage(props: CompareStageProps) {
   useEffect(() => {
     fitView();
   }, [pinned, fitView]);
-  const shown = state.showB ? b : a;
+  const effective = effectiveCompareState(state, hold.holding);
+  const shown = effective.showB ? b : a;
   const regions = useStageAnnotations({
     controller: annotations,
     segment,
@@ -163,7 +169,6 @@ export function useCompareStage(props: CompareStageProps) {
     zoomToRect: viewport.zoomToRect,
   });
   const diff = changes.diff;
-  const effective: CompareState = hold.holding ? { ...state, mode: "toggle", showB: false } : state;
   const wipe = {
     value: pinned ? viewport.pinnedFraction : state.wipe,
     onChange: (value: number) =>

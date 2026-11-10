@@ -140,18 +140,17 @@ function PhoneBottomBar({ model }: { model: CompareStageModel }) {
           <ModeControls compare={compare} wipe={model.wipe} />
         </div>
       )}
-      {stepping && (
-        <div className={cn(state.mode === "side" && "ml-auto")}>
-          <ImagePickerSheetButton
-            images={model.segment.images}
-            urls={model.urls}
-            aId={state.aId}
-            bId={state.bId}
-            onPick={(slot, id) => compare.dispatch({ type: "pick", slot, id })}
-            onSwap={() => compare.dispatch({ type: "swap" })}
-          />
-        </div>
-      )}
+      <div className={cn(state.mode === "side" && "ml-auto")}>
+        <ImagePickerSheetButton
+          images={model.segment.images}
+          urls={model.urls}
+          aId={state.aId}
+          bId={state.bId}
+          compact={!stepping}
+          onPick={(slot, id) => compare.dispatch({ type: "pick", slot, id })}
+          onSwap={() => compare.dispatch({ type: "swap" })}
+        />
+      </div>
     </ReviewBottomBar>
   );
 }

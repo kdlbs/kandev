@@ -162,4 +162,32 @@ describe("answer draft authority", () => {
     expect(canRetainAnswerDrafts(enabledAuth(false))).toBe(false);
     expect(canRetainAnswerDrafts({ mode: "setup", authenticated: false, user: null })).toBe(true);
   });
+
+  it("stores annotation-only changes to an existing draft", () => {
+    const store = createAppStore();
+    const generation = answerDraftGeneration(store);
+    const region = {
+      image_id: "img-1",
+      x: 1,
+      y: 2,
+      width: 3,
+      height: 4,
+      image_width: 10,
+      image_height: 10,
+      comment: "first",
+    };
+    writeAnswerDraft(store, identity("task"), generation, {
+      ...draft("keep"),
+      annotations: { q1: [region] },
+    });
+
+    writeAnswerDraft(store, identity("task"), generation, {
+      ...draft("keep"),
+      annotations: { q1: [{ ...region, comment: "edited" }] },
+    });
+    expect(readAnswerDraft(store, identity("task"))?.annotations?.q1?.[0]?.comment).toBe("edited");
+
+    writeAnswerDraft(store, identity("task"), generation, { ...draft("keep"), annotations: {} });
+    expect(readAnswerDraft(store, identity("task"))?.annotations).toEqual({});
+  });
 });

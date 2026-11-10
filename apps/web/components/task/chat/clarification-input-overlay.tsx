@@ -16,10 +16,10 @@ import type {
   Message,
   ClarificationRequestMetadata,
   ClarificationAnswer,
-  ClarificationAnswerAnnotation,
   ClarificationOption,
   ClarificationQuestion,
 } from "@/lib/types/http";
+import { withAnswerExtras } from "@/lib/clarification/answer-extras";
 import {
   useClarificationGroup,
   type ClarificationOutcome,
@@ -192,18 +192,6 @@ function clarificationAttachmentInputProps(props: CardProps) {
     finalSubmitDisabled: props.finalSubmitDisabled,
     onFinalSubmit: props.onFinalSubmit,
   };
-}
-
-/** Adds ready answer files and drawn regions to an answer, omitting empty lists. */
-function withAnswerExtras(
-  answer: ClarificationAnswer,
-  files: NonNullable<ClarificationAnswer["attachments"]>,
-  regions: readonly ClarificationAnswerAnnotation[] | undefined,
-): ClarificationAnswer {
-  const extras: Partial<ClarificationAnswer> = {};
-  if (files.length > 0) extras.attachments = files;
-  if (regions && regions.length > 0) extras.annotations = [...regions];
-  return Object.keys(extras).length > 0 ? { ...answer, ...extras } : answer;
 }
 
 function renderCardOptionPreview(props: CardProps, option: ClarificationOption): ReactNode {

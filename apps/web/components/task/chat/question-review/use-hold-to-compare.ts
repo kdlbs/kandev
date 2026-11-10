@@ -26,6 +26,20 @@ export function useHoldToCompare(enabled: boolean) {
     if (!enabled) release();
   }, [enabled, release]);
   useEffect(() => clearTimer, [clearTimer]);
+  // Space can be released after focus moves off the stage, and the window can
+  // lose focus mid-hold; either ends the hold.
+  useEffect(() => {
+    if (!holding) return;
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.key === " ") release();
+    };
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", release);
+    return () => {
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", release);
+    };
+  }, [holding, release]);
 
   const onPointerDown = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {

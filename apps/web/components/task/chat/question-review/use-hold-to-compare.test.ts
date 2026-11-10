@@ -57,4 +57,23 @@ describe("useHoldToCompare", () => {
     expect(result.current.holding).toBe(false);
     expect(result.current.keyDown({ key: " ", repeat: false })).toBe(false);
   });
+
+  it("releases when Space is let go elsewhere or the window loses focus", () => {
+    const { result } = renderHook(() => useHoldToCompare(true));
+    act(() => {
+      result.current.keyDown({ key: " ", repeat: false });
+    });
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keyup", { key: " " }));
+    });
+    expect(result.current.holding).toBe(false);
+
+    act(() => {
+      result.current.keyDown({ key: " ", repeat: false });
+    });
+    act(() => {
+      window.dispatchEvent(new Event("blur"));
+    });
+    expect(result.current.holding).toBe(false);
+  });
 });

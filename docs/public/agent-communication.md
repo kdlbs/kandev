@@ -308,7 +308,9 @@ text:
 - `image_id` names one of the question's own images or its choices' images.
 - `x`, `y`, `width`, and `height` are pixels of the image as the operator saw it.
   `image_width` and `image_height` give that size. If you changed the file since,
-  scale the rectangle by the new size.
+  scale the rectangle by the new size. For an image over 16 megapixels, the
+  rectangle is reported in a proportionally smaller size, so always scale by
+  `image_width` and `image_height` rather than assuming the file's own size.
 - An answer carries at most eight regions. Each comment has 1 to 500 characters.
 - A regions-only answer is not possible: the operator still selects an option or
   writes a custom answer.

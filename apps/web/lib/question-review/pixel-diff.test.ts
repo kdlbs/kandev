@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffPixels, type RasterImage } from "./pixel-diff";
+import { MAX_DIFF_PIXELS, diffFitsBudget, diffPixels, type RasterImage } from "./pixel-diff";
 
 function raster(
   width: number,
@@ -82,5 +82,14 @@ describe("changed bounds", () => {
       height: 6,
     });
     expect(diffPixels(raster(2, 2, WHITE), raster(2, 2, WHITE), 0).bounds).toBeNull();
+  });
+
+  it("refuses a union larger than the pixel budget before allocating", () => {
+    const wide = { width: 16_000, height: 1_000, data: new Uint8ClampedArray(0) };
+    const tall = { width: 1_000, height: 16_000, data: new Uint8ClampedArray(0) };
+    expect(diffFitsBudget(wide, wide)).toBe(true);
+    expect(diffFitsBudget(wide, tall)).toBe(false);
+    expect(() => diffPixels(wide, tall, 0)).toThrow();
+    expect(MAX_DIFF_PIXELS).toBe(16_000_000);
   });
 });

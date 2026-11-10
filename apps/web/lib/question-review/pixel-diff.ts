@@ -14,6 +14,18 @@ export type PixelDiff = {
 
 const MARK = [255, 0, 255, 255] as const;
 
+/** Largest comparison area, in pixels, matching the per-image annotation limit. */
+export const MAX_DIFF_PIXELS = 16_000_000;
+const DIFF_TOO_LARGE = Symbol("diff-too-large");
+
+/** Whether the union of two images fits the comparison budget. */
+export function diffFitsBudget(
+  a: Pick<RasterImage, "width" | "height">,
+  b: Pick<RasterImage, "width" | "height">,
+): boolean {
+  return Math.max(a.width, b.width) * Math.max(a.height, b.height) <= MAX_DIFF_PIXELS;
+}
+
 function pixelChanged(a: RasterImage, b: RasterImage, x: number, y: number, tolerance: number) {
   if (x >= a.width || y >= a.height || x >= b.width || y >= b.height) return true;
   const ai = (y * a.width + x) * 4;
@@ -27,9 +39,11 @@ function pixelChanged(a: RasterImage, b: RasterImage, x: number, y: number, tole
 /**
  * Compares two images pixel by pixel at full resolution, aligned at their
  * top-left corners. A pixel changes when any RGBA channel differs by more than
- * `tolerance`, or when it lies outside one of the images.
+ * `tolerance`, or when it lies outside one of the images. Throws when the union
+ * exceeds `MAX_DIFF_PIXELS`, so callers report the comparison as unavailable.
  */
 export function diffPixels(a: RasterImage, b: RasterImage, tolerance: number): PixelDiff {
+  if (!diffFitsBudget(a, b)) throw DIFF_TOO_LARGE;
   const width = Math.max(a.width, b.width);
   const height = Math.max(a.height, b.height);
   const mask = new Uint8ClampedArray(width * height * 4);

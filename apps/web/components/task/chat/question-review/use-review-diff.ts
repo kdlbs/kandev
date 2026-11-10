@@ -30,6 +30,10 @@ function blobId(blob: Blob): number {
   return id;
 }
 
+function diffKey(a: Blob, b: Blob, tolerance: number): string {
+  return `${blobId(a)}:${blobId(b)}:${tolerance}`;
+}
+
 /**
  * Computes the pixel difference of two loaded images in a worker. Results that
  * arrive after the inputs changed are discarded. The worker ends with the stage.
@@ -42,7 +46,12 @@ export function useReviewDiff(
 ): ReviewDiffState {
   const workerRef = useRef<Worker | null | undefined>(undefined);
   const requestRef = useRef(0);
-  const [state, setState] = useState<ReviewDiffState>({ status: "idle" });
+  // Each state is tagged with the inputs it describes, so a result kept from
+  // earlier inputs is never returned for new ones.
+  const [tagged, setTagged] = useState<{ key: string; state: ReviewDiffState }>({
+    key: "",
+    state: { status: "idle" },
+  });
 
   useEffect(
     () => () => {
@@ -57,6 +66,8 @@ export function useReviewDiff(
     if (workerRef.current === undefined) workerRef.current = createPixelDiffWorker();
     const worker = workerRef.current;
     const id = ++requestRef.current;
+    const key = diffKey(a, b, tolerance);
+    const setState = (state: ReviewDiffState) => setTagged({ key, state });
     if (!worker) {
       setState({ status: "unavailable" });
       return;
@@ -98,5 +109,7 @@ export function useReviewDiff(
     };
   }, [enabled, a, b, tolerance]);
 
-  return enabled && a && b ? state : { status: "idle" };
+  if (!enabled || !a || !b) return { status: "idle" };
+  if (tagged.key !== diffKey(a, b, tolerance)) return { status: "computing" };
+  return tagged.state;
 }

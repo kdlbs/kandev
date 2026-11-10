@@ -46,3 +46,12 @@ Implemented on 2026-11-09 in `review-image-option.tsx`, used by
 model exposes `urls` from loaded images. Unit test for the row contents and
 markers; desktop and phone E2E pass (7 and 4 tests), including descriptions,
 thumbnails, the "In B" marker, and 44px phone rows.
+
+PR review follow-up (2026-11-10): the phone A/B picker stays in the bottom bar in
+every mode, icon-only where Wipe, Onion skin, and Difference controls need the
+row. The same round fixed region drafts not retaining annotation-only edits,
+regions deleted after a failed submit being resent, a stale diff result moving
+Zoom to changes, Space held while focus moved, region outlines during hold, the
+Difference memory budget, and regions on images over 16 megapixels (reported in
+a scaled pixel space). Unit tests cover each fix; the phone E2E checks the picker
+in Wipe, Onion skin, and Difference.

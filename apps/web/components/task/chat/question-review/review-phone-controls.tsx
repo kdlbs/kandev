@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { IconArrowsExchange, IconChevronDown, IconDots } from "@tabler/icons-react";
+import { IconArrowsExchange, IconChevronDown, IconDots, IconPhoto } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
 import { useTranslation } from "react-i18next";
@@ -141,6 +141,8 @@ type PickerProps = {
   bId: string;
   onPick: (slot: "a" | "b", id: string) => void;
   onSwap: () => void;
+  /** Icon-only trigger, for modes whose own controls need the row. */
+  compact?: boolean;
 };
 
 /** Pair button for the bottom bar; opens large tiles for choosing A and B. */
@@ -151,20 +153,27 @@ export function ImagePickerSheetButton(props: PickerProps) {
     const index = props.images.findIndex((image) => image.id === id);
     return index >= 0 ? imageShortName(props.images[index], index) : "";
   };
+  const pairLabel = t("task:questionReviewPairLabel", { a: name(props.aId), b: name(props.bId) });
   return (
     <>
       <Button
         type="button"
         variant="outline"
-        className={cn(touchButton, "max-w-40 min-w-0")}
+        size={props.compact ? "icon" : "default"}
+        className={cn(touchButton, props.compact ? "w-11 shrink-0" : "max-w-40 min-w-0")}
         aria-haspopup="dialog"
+        aria-label={props.compact ? pairLabel : undefined}
         data-testid="question-review-picker-button"
         onClick={() => setOpen(true)}
       >
-        <span className="min-w-0 truncate">
-          {t("task:questionReviewPairLabel", { a: name(props.aId), b: name(props.bId) })}
-        </span>
-        <IconChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
+        {props.compact ? (
+          <IconPhoto className="h-4 w-4" aria-hidden="true" />
+        ) : (
+          <>
+            <span className="min-w-0 truncate">{pairLabel}</span>
+            <IconChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
+          </>
+        )}
       </Button>
       <Sheet
         title={t("task:questionReviewChooseImages")}

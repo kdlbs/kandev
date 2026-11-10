@@ -53,7 +53,12 @@ function sameDraft(left: RetainedAnswerDraft, right: RetainedAnswerDraft): boole
   const leftKeys = Object.keys(left.customDrafts);
   if (leftKeys.length !== Object.keys(right.customDrafts).length) return false;
   if (leftKeys.some((key) => left.customDrafts[key] !== right.customDrafts[key])) return false;
-  return sameAnswers(left.answers, right.answers);
+  return sameAnswers(left.answers, right.answers) && sameAnnotations(left, right);
+}
+
+function sameAnnotations(left: RetainedAnswerDraft, right: RetainedAnswerDraft): boolean {
+  if (left.annotations === right.annotations) return true;
+  return JSON.stringify(left.annotations ?? {}) === JSON.stringify(right.annotations ?? {});
 }
 
 function cacheFor(owner: object): DraftCache {

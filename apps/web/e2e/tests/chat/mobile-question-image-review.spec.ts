@@ -108,6 +108,8 @@ test("phone wipe pins its line and scrubs the images; Side by side fits", async 
   const handle = dialog.getByTestId("question-review-wipe-handle");
   await expect(handle).toHaveAttribute("data-pinned", "true");
   await expect(handle).toHaveAttribute("aria-valuenow", "50");
+  const bar = dialog.getByTestId("question-review-bottom-bar");
+  await expect(bar.getByTestId("question-review-picker-button")).toBeInViewport();
   const stage = dialog.getByTestId("question-review-stage");
   const box = (await stage.boundingBox())!;
   const center = box.x + box.width / 2;
@@ -129,6 +131,15 @@ test("phone wipe pins its line and scrubs the images; Side by side fits", async 
     expect(image.y + image.height).toBeLessThanOrEqual(paneBox.y + paneBox.height + 1);
   }
   await expectNoHorizontalOverflow(testPage);
+
+  for (const mode of ["Onion skin", "Difference"]) {
+    await choosePhoneMode(testPage, dialog, mode);
+    await expect(bar.getByTestId("question-review-picker-button")).toBeInViewport();
+    await expectTouchTargets(bar);
+    await expectNoHorizontalOverflow(testPage);
+  }
+  await bar.getByTestId("question-review-picker-button").tap();
+  await expect(testPage.getByTestId("question-review-picker-sheet")).toBeVisible();
 });
 
 test("phone regions: mark from More, comment in a drawer, review in a sheet", async ({

@@ -10,8 +10,11 @@ requirements:
   - REQ-TASKS-QUESTION-IMAGE-REVIEW-006
   - REQ-TASKS-QUESTION-IMAGE-REVIEW-007
   - REQ-TASKS-QUESTION-IMAGE-REVIEW-008
+  - REQ-TASKS-QUESTION-IMAGE-REVIEW-009
+  - REQ-TASKS-QUESTION-IMAGES-003
 system_design:
   - ../../specs/tasks/system-design/question-image-review.md
+  - ../../specs/tasks/system-design/question-image-previews.md
 legacy_specs: []
 ---
 

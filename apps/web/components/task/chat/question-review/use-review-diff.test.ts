@@ -88,3 +88,25 @@ it("stays idle when disabled and terminates the worker on unmount", () => {
   unmount();
   expect(worker.terminated).toBe(true);
 });
+
+it("never returns a ready result computed for other images", () => {
+  const c = new Blob(["c"]);
+  const seen: string[] = [];
+  const { result, rerender } = renderHook(
+    ({ enabled, candidate }) => {
+      const state = useReviewDiff(enabled, a, candidate, 16);
+      seen.push(state.status === "ready" ? `ready:${state.result.changed}` : state.status);
+      return state;
+    },
+    { initialProps: { enabled: true, candidate: b } },
+  );
+  act(() => vi.advanceTimersByTime(150));
+  act(() => mocks.worker!.respond(ready(mocks.worker!.posted[0].id, 5)));
+  expect(result.current).toMatchObject({ status: "ready", result: { changed: 5 } });
+
+  rerender({ enabled: false, candidate: b });
+  seen.length = 0;
+  rerender({ enabled: true, candidate: c });
+  expect(seen).not.toContain("ready:5");
+  expect(result.current.status).toBe("computing");
+});

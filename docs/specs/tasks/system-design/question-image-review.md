@@ -248,8 +248,9 @@ magenta and unchanged pixels transparent, and transfers its `ArrayBuffer` with
 `{ changed, total, width, height }`. The stage draws the mask into a canvas inside
 the shared transformed layer, so it follows zoom and pan.
 
-The worker never resizes inputs. Peak memory for two 16-megapixel images and a
-mask is about 192 MB. If `Worker`, `OffscreenCanvas`, or `createImageBitmap` is
+The worker never resizes inputs. It refuses an image, or a union of both sizes,
+above 16,000,000 pixels (`MAX_DIFF_PIXELS`) before allocating, so peak memory for
+two 16-megapixel images and a mask stays about 192 MB. If `Worker`, `OffscreenCanvas`, or `createImageBitmap` is
 unavailable, or decoding or allocation throws, the worker posts `{ ok: false }`
 and the stage shows the unavailable state. Each request carries an increasing ID,
 and the stage ignores responses to older requests. The worker keeps the decoded
@@ -296,7 +297,11 @@ claim. It enforces all of the following and returns a `validationError`:
 - At most eight entries per answer.
 - `ImageID` matches an image in `q.ImageReferences()`.
 - `ImageWidth` and `ImageHeight` are positive, and their product is at most
-  16,000,000, computed without overflow.
+  16,000,000, computed without overflow. The web client mirrors this limit
+  (`MAX_ANNOTATION_IMAGE_PIXELS`): for a larger image it reports the region in a
+  proportionally smaller pixel space at submission (`fitAnnotationToPixelLimit`),
+  so marking stays available and the agent's scaling by the reported size still
+  names the same area.
 - `X` and `Y` are at least 0, `Width` and `Height` are at least 1, and
   `X+Width <= ImageWidth` and `Y+Height <= ImageHeight`.
 - `Comment`, after trimming, has 1 to 500 Unicode code points and contains no

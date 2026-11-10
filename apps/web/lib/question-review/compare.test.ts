@@ -3,6 +3,7 @@ import {
   candidatePosition,
   compareReducer,
   compareSettings,
+  effectiveCompareState,
   initialCompareState,
   type CompareState,
 } from "./compare";
@@ -105,5 +106,13 @@ describe("settings across segments", () => {
       showB: false,
     });
     expect(compareSettings(initialCompareState(["x", "y"], settings))).toEqual(settings);
+  });
+});
+
+describe("effectiveCompareState", () => {
+  it("shows A in Toggle while held, so overlays follow the displayed image", () => {
+    const showingB: CompareState = { ...start, mode: "wipe", showB: true };
+    expect(effectiveCompareState(showingB, true)).toMatchObject({ mode: "toggle", showB: false });
+    expect(effectiveCompareState(showingB, false)).toBe(showingB);
   });
 });

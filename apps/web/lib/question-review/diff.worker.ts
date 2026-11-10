@@ -1,4 +1,4 @@
-import { diffPixels, type PixelDiff, type RasterImage } from "./pixel-diff";
+import { MAX_DIFF_PIXELS, diffPixels, type PixelDiff, type RasterImage } from "./pixel-diff";
 
 export type DiffRequest = { id: number; pairKey: string; a: Blob; b: Blob; tolerance: number };
 export type DiffResponse =
@@ -21,11 +21,13 @@ type WorkerScope = {
 
 const scope = self as unknown as WorkerScope;
 const NO_CONTEXT = Symbol("no-2d-context");
+const IMAGE_TOO_LARGE = Symbol("image-too-large");
 let decoded: { key: string; a: RasterImage; b: RasterImage } | null = null;
 
 async function decode(blob: Blob): Promise<RasterImage> {
   const bitmap = await createImageBitmap(blob);
   try {
+    if (bitmap.width * bitmap.height > MAX_DIFF_PIXELS) throw IMAGE_TOO_LARGE;
     const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
     const context = canvas.getContext("2d", { willReadFrequently: true });
     if (!context) throw NO_CONTEXT;
