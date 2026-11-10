@@ -38,6 +38,8 @@ export type RuntimeUpdateOverviewProps = {
   onOpenRuntime: (agentName: string, opener?: HTMLElement) => void;
   individualErrors: Record<string, string | undefined>;
   bulk?: RuntimeUpdateBulkProps;
+  bulkBusy?: boolean;
+  bulkError?: string;
   onClose: () => void;
   onReviewAgain: () => void;
   initialScrollTop: number;
@@ -179,6 +181,7 @@ function RuntimeBatchOverview({
 function RuntimeReviewOverview({
   model,
   bulk,
+  bulkError,
   statusLoading,
   refreshFailed,
   refreshing,
@@ -190,6 +193,7 @@ function RuntimeReviewOverview({
 }: {
   model: RuntimeUpdateManagerModel;
   bulk?: RuntimeUpdateBulkProps;
+  bulkError?: string;
   statusLoading: boolean;
   refreshFailed: boolean;
   refreshing: boolean;
@@ -209,6 +213,15 @@ function RuntimeReviewOverview({
         empty={empty}
         onRefresh={onRefresh}
       />
+      {bulkError && (
+        <p
+          className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-sm text-destructive"
+          role="alert"
+          data-testid="runtime-bulk-error"
+        >
+          {bulkError}
+        </p>
+      )}
       {bulk?.batch.status === "review" && (
         <>
           <RuntimeReviewHeader bulk={bulk} loading={statusLoading || refreshing} />
@@ -245,6 +258,7 @@ function RuntimeOverviewBody({
   onOpenRuntime,
   individualErrors,
   bulk,
+  bulkError,
   onReviewAgain,
   initialScrollTop,
   onScrollTopChange,
@@ -308,6 +322,7 @@ function RuntimeOverviewBody({
         <RuntimeReviewOverview
           model={model}
           bulk={bulk}
+          bulkError={bulkError}
           statusLoading={statusLoading}
           refreshFailed={refreshFailed}
           refreshing={refreshing}
@@ -343,6 +358,7 @@ function bulkApprovalState(
       !props.statusLoading &&
       !props.refreshing &&
       !props.refreshFailed &&
+      !props.bulkBusy &&
       props.canManage,
     label: allEligibleSelected
       ? t("agents:runtimeUpdateAll", { count: selectedEligible.size })

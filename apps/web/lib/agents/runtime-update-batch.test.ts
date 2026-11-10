@@ -15,6 +15,7 @@ import {
 
 const CLAUDE = "claude-acp";
 const CODEX = "codex-acp";
+const PACKAGE = "@example/claude";
 const JOB_CLAUDE = "job-claude";
 const JOB_CODEX = "job-codex";
 const updateAgent = vi.fn();
@@ -38,8 +39,8 @@ function status(overrides: Partial<AgentUpdateStatus> = {}): AgentUpdateStatus {
     mechanism: "npm_candidate",
     management: "managed",
     update_mode: "pinned",
-    package: "@example/claude",
-    source: "@example/claude",
+    package: PACKAGE,
+    source: PACKAGE,
     available: true,
     enabled: true,
     auto_update_supported: true,
@@ -123,7 +124,7 @@ describe("runtime update review evidence", () => {
       operation: "update",
       reviewed_runtime: {
         runtime_id: "npm:@example/claude",
-        package: "@example/claude",
+        package: PACKAGE,
         current_version: "1.0.0",
         effective_version: "1.0.0",
         active_version: "1.0.0",
@@ -379,5 +380,26 @@ describe("runtime update batch retry review", () => {
         reviewed_runtime: expect.objectContaining({ active_version: "1.1.0" }),
       }),
     );
+  });
+});
+
+describe("runtime update review row identity", () => {
+  it("labels the observed current version instead of the configured effective version", () => {
+    const row = runtimeBatchTarget(
+      status({ current_version: "1.0.0", effective_version: "2.0.0", latest_version: "2.1.0" }),
+      {
+        target_version: "2.1.0",
+        operation: "update",
+        reviewed_runtime: {
+          runtime_id: "npm:@example/claude",
+          package: PACKAGE,
+          current_version: "1.0.0",
+          effective_version: "2.0.0",
+          active_version: "2.0.0",
+        },
+      },
+    );
+    expect(row?.currentVersion).toBe("1.0.0");
+    expect(row?.effectiveVersion).toBe("2.0.0");
   });
 });

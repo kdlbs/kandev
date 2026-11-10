@@ -125,6 +125,7 @@ function Harness({
   onPreview,
   onStartUpdate = vi.fn(),
   refreshResult = true,
+  refreshRejects = false,
   initialView = { kind: "overview" },
 }: {
   statuses: AgentUpdateStatus[];
@@ -136,6 +137,7 @@ function Harness({
     ...args: unknown[]
   ) => Promise<import("@/lib/api").AgentUpdateJob>;
   refreshResult?: boolean;
+  refreshRejects?: boolean;
   initialView?: RuntimeUpdateManagerView;
 }) {
   const [view, setView] = useState<RuntimeUpdateManagerView>(initialView);
@@ -159,7 +161,9 @@ function Harness({
             }
             previewUpdate={onPreview}
             startUpdate={onStartUpdate}
-            refresh={() => Promise.resolve(refreshResult)}
+            refresh={() =>
+              refreshRejects ? Promise.reject(new Error("offline")) : Promise.resolve(refreshResult)
+            }
             onClose={() => setView({ kind: "closed" })}
             onBack={() => setView({ kind: "overview" })}
             onOpenRuntime={(agentName) => setView({ kind: "runtime", agentName })}
@@ -511,5 +515,50 @@ describe("AgentRuntimeUpdateManager missing status", () => {
     await waitFor(() => expect(onPreview).toHaveBeenCalled());
     expect(screen.getByTestId(CLAUDE_DETAIL)).toBeTruthy();
     expect(screen.queryByTestId("runtime-guidance-dialog-claude-acp")).toBeNull();
+  });
+});
+
+describe("AgentRuntimeUpdateManager refresh rejection", () => {
+  it("treats a rejected refresh as a failed required check", async () => {
+    render(
+      <Harness
+        statuses={[status()]}
+        onPreview={(name) => Promise.resolve(preview(name))}
+        refreshRejects
+      />,
+    );
+    const approve = await screen.findByTestId(BULK_APPROVE);
+    await waitFor(() => expect((approve as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByTestId("runtime-manager-refresh"));
+    await waitFor(() => expect((approve as HTMLButtonElement).disabled).toBe(true));
+    expect(screen.getByText(/Could not refresh runtime information/)).toBeTruthy();
+  });
+
+  it("disables bulk approval while an exclusive update is in flight", async () => {
+    const pending = Promise.withResolvers<import("@/lib/api").AgentUpdateJob>();
+    const startUpdate = vi.fn(() => pending.promise);
+    render(
+      <Harness
+        statuses={[status()]}
+        onPreview={(name) => Promise.resolve(preview(name))}
+        onStartUpdate={startUpdate}
+      />,
+    );
+    const approve = await screen.findByTestId(BULK_APPROVE);
+    await waitFor(() => expect((approve as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByTestId(CLAUDE_MANAGE));
+    const confirm = await screen.findByTestId("agent-update-confirm-claude-acp");
+    await waitFor(() => expect((confirm as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(confirm);
+    fireEvent.click(screen.getByTestId("agent-update-back-claude-acp"));
+    await waitFor(() =>
+      expect((screen.getByTestId(BULK_APPROVE) as HTMLButtonElement).disabled).toBe(true),
+    );
+    pending.resolve({
+      job_id: CLAUDE_JOB,
+      agent_name: AGENT_NAME,
+      status: "queued",
+      started_at: STARTED_AT,
+    });
   });
 });

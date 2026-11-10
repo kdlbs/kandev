@@ -134,3 +134,24 @@ describe("runtime policy drafts", () => {
     expect(screen.queryByRole("switch")).toBeNull();
   });
 });
+
+describe("runtime automatic policy accessibility", () => {
+  it("omits the help reference when the runtime is unavailable", () => {
+    const unavailable = { ...status, available: false };
+    render(
+      <StateProvider>
+        <SettingsSaveProvider>
+          <RuntimePolicyControllers statuses={[unavailable]}>
+            <RuntimePolicyDetail status={unavailable} />
+          </RuntimePolicyControllers>
+        </SettingsSaveProvider>
+      </StateProvider>,
+    );
+    expect(screen.getByRole("switch").getAttribute("aria-describedby")).toBeNull();
+    expect(
+      screen.queryByText(
+        "Update future sessions after candidate validation. Off by default. Manual version changes turn this off.",
+      ),
+    ).toBeNull();
+  });
+});

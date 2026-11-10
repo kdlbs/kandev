@@ -65,7 +65,7 @@ export function AgentRuntimeUpdateSurface({
     return (
       <Drawer open={open} onOpenChange={onOpenChange}>
         <DrawerContent
-          className="max-h-[92dvh] overflow-hidden data-[vaul-drawer-direction=bottom]:max-h-[92dvh]"
+          className="flex max-h-[92dvh] flex-col overflow-hidden data-[vaul-drawer-direction=bottom]:max-h-[92dvh]"
           data-testid={`agent-update-drawer-${agentName}`}
         >
           <DrawerHeader className="shrink-0 px-4 py-3 text-left">
@@ -82,10 +82,10 @@ export function AgentRuntimeUpdateSurface({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-h-[92dvh] gap-0 overflow-hidden p-0 sm:min-w-[40rem] sm:max-w-2xl"
+        className="flex max-h-[92dvh] flex-col gap-0 overflow-hidden p-0 sm:min-w-[40rem] sm:max-w-2xl"
         data-testid={`agent-update-dialog-${agentName}`}
       >
-        <DialogHeader className="px-4 pb-1 pt-3">
+        <DialogHeader className="shrink-0 px-4 pb-1 pt-3">
           {back}
           <DialogTitle>{t(UPDATE_AGENT_KEY, { name: displayName })}</DialogTitle>
           <DialogDescription className="sr-only">{description}</DialogDescription>

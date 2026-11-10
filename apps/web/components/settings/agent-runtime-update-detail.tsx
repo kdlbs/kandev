@@ -56,33 +56,31 @@ export function AgentRuntimeUpdateDetail({
       onBack={onBack}
       backLabel={backLabel}
       body={
-        <>
-          {beforeBody}
-          <AgentRuntimeUpdateBody
-            agentName={agentName}
-            preview={state.preview}
-            loading={state.loading}
-            previewError={state.previewError}
-            approveError={state.approveError}
-            job={state.activeJob}
-            onRetryPreview={() =>
-              void state.loadPreview(
-                state.selectedUseDefault ? undefined : state.selectedTarget,
-                state.selectedUseDefault,
-                state.selectedFamily,
-              )
-            }
-            selectedTarget={state.selectedTarget}
-            onSelectTarget={state.selectTarget}
-            selectedUseDefault={state.selectedUseDefault}
-            selectedFamily={state.selectedFamily}
-            onSelectDefault={state.selectDefault}
-            onSelectMigration={state.selectMigration}
-            onSelectCurrentRuntime={state.selectCurrentRuntime}
-            starting={state.starting}
-            isMobile={isMobile}
-          />
-        </>
+        <AgentRuntimeUpdateBody
+          before={beforeBody}
+          agentName={agentName}
+          preview={state.preview}
+          loading={state.loading}
+          previewError={state.previewError}
+          approveError={state.approveError}
+          job={state.activeJob}
+          onRetryPreview={() =>
+            void state.loadPreview(
+              state.selectedUseDefault ? undefined : state.selectedTarget,
+              state.selectedUseDefault,
+              state.selectedFamily,
+            )
+          }
+          selectedTarget={state.selectedTarget}
+          onSelectTarget={state.selectTarget}
+          selectedUseDefault={state.selectedUseDefault}
+          selectedFamily={state.selectedFamily}
+          onSelectDefault={state.selectDefault}
+          onSelectMigration={state.selectMigration}
+          onSelectCurrentRuntime={state.selectCurrentRuntime}
+          starting={state.starting}
+          isMobile={isMobile}
+        />
       }
       footer={(mobile) => (
         <AgentRuntimeUpdateFooter

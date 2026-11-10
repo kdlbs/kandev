@@ -86,6 +86,7 @@ function UpdateResult({ agentName, job }: { agentName: string; job?: AgentUpdate
 }
 
 export type AgentRuntimeUpdateBodyProps = {
+  before?: ReactNode;
   agentName: string;
   preview: AgentUpdatePreview | null;
   loading: boolean;
@@ -206,6 +207,7 @@ function RuntimeUpdatePreviewDetails({
 }
 
 export function AgentRuntimeUpdateBody({
+  before,
   agentName,
   preview,
   loading,
@@ -227,9 +229,10 @@ export function AgentRuntimeUpdateBody({
   const phase = updatePhase(t, job?.status);
   return (
     <div
-      className="max-h-[calc(92dvh-10rem)] min-h-0 space-y-2 overflow-y-auto overscroll-contain px-4 py-2 text-xs/normal sm:max-h-[calc(92dvh-8rem)]"
+      className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-4 py-2 text-xs/normal"
       data-testid={`agent-update-dialog-body-${agentName}`}
     >
+      {before}
       {loading && !preview && (
         <p className="flex items-center gap-2 text-muted-foreground" role="status">
           <IconLoader2 className="size-4 animate-spin" />
@@ -372,14 +375,14 @@ export function AgentRuntimeUpdateFooter({
   );
   if (mobile) {
     return (
-      <DrawerFooter className="border-t px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <DrawerFooter className="shrink-0 border-t px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
         {beforeActions}
         {content}
       </DrawerFooter>
     );
   }
   return (
-    <DialogFooter className="border-t px-4 py-2">
+    <DialogFooter className="shrink-0 border-t px-4 py-2">
       {beforeActions}
       {content}
     </DialogFooter>

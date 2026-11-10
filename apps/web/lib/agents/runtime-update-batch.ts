@@ -114,7 +114,10 @@ export function runtimeBatchTarget(
     displayName: status.display_name || status.agent_name,
     runtimeId: status.runtime_id,
     package: status.package,
-    currentVersion: status.effective_version,
+    currentVersion:
+      preview.reviewed_runtime.current_version ||
+      status.current_version ||
+      status.effective_version,
     effectiveVersion: status.effective_version,
     targetVersion: preview.target_version,
     reviewedRuntime: preview.reviewed_runtime,

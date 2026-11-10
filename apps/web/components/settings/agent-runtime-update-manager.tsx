@@ -92,6 +92,8 @@ function useRuntimeManagerActions({
     setRefreshing(true);
     try {
       setRefreshError(!(await refresh()));
+    } catch {
+      setRefreshError(true);
     } finally {
       setRefreshing(false);
     }
@@ -195,7 +197,9 @@ function RuntimeManagerOverview({
   onClose,
   controllers,
   bulk,
-  coordinator,
+  bulkBusy,
+  bulkError,
+  onBulkStart,
   initialScrollTop,
   onScrollTopChange,
   openGroups,
@@ -212,7 +216,9 @@ function RuntimeManagerOverview({
   onClose: () => void;
   controllers: ReturnType<typeof useRuntimePolicyControllers>;
   bulk: ReturnType<typeof useRuntimeUpdateReview>;
-  coordinator: SettingsSaveCoordinator;
+  bulkBusy: boolean;
+  bulkError: string | null;
+  onBulkStart: (eligibleKeys: ReadonlySet<string>) => void;
   initialScrollTop: number;
   onScrollTopChange: (scrollTop: number) => void;
   openGroups: ReadonlySet<string>;
@@ -235,6 +241,8 @@ function RuntimeManagerOverview({
       onScrollTopChange={onScrollTopChange}
       openGroups={openGroups}
       onGroupOpenChange={onGroupOpenChange}
+      bulkBusy={bulkBusy}
+      bulkError={bulkError ?? undefined}
       bulk={{
         batch: bulk.batch,
         reviewRows: bulk.reviewRows,
@@ -245,8 +253,7 @@ function RuntimeManagerOverview({
         allSelected: bulk.allSelected,
         onToggleSelected: bulk.toggleSelected,
         onSelectAll: bulk.selectAll,
-        onStart: (eligibleKeys) =>
-          void coordinator.runExclusive(() => bulk.startSelected(eligibleKeys)),
+        onStart: onBulkStart,
         onRetryFailed: () => bulk.retryFailed(),
         onRefreshStatus: () => void bulk.refreshStatus(),
         onRetryPreviews: bulk.retryPreviews,
@@ -337,6 +344,7 @@ export function AgentRuntimeUpdateManager(props: AgentRuntimeUpdateManagerProps)
   });
   const overviewScrollTop = useRef(0);
   const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(new Set());
+  const [bulkError, setBulkError] = useState<string | null>(null);
   const { controllers, model, bulk } = useRuntimeManagerModel({
     active: view.kind === "overview",
     statuses,
@@ -360,7 +368,16 @@ export function AgentRuntimeUpdateManager(props: AgentRuntimeUpdateManagerProps)
         onClose={onClose}
         controllers={controllers}
         bulk={bulk}
-        coordinator={coordinator}
+        bulkBusy={coordinator.exclusiveBusy}
+        bulkError={bulkError}
+        onBulkStart={(eligibleKeys) => {
+          setBulkError(null);
+          void coordinator
+            .runExclusive(() => bulk.startSelected(eligibleKeys))
+            .then((result) => {
+              if (!result) setBulkError(t("agents:runtimePolicyBusy"));
+            });
+        }}
         initialScrollTop={overviewScrollTop.current}
         onScrollTopChange={(scrollTop) => {
           overviewScrollTop.current = scrollTop;

@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { settledBoundingBox } from "../../helpers/settled-box";
 import { expectTouchDimension } from "../../helpers/touch-targets";
 import { installRuntimeUpdateFixture, updateJob } from "./agent-runtime-update-helpers";
@@ -319,4 +320,31 @@ test.describe("managed agent runtime updates on mobile", () => {
       await testPage.locator("html").evaluate((element) => element.clientWidth),
     );
   });
+});
+
+test("keeps policy detail and fixed actions reachable in a short phone viewport", async ({
+  testPage,
+}) => {
+  await testPage.setViewportSize({ width: 390, height: 520 });
+  await installRuntimeUpdateFixture(testPage);
+  await testPage.goto("/settings/agents");
+  await testPage.getByTestId("runtime-updates-button").tap();
+  await testPage.getByTestId("runtime-manage-versions-claude-acp").tap();
+
+  const drawer = testPage.getByTestId("agent-update-drawer-claude-acp");
+  await expect(drawer).toBeVisible();
+  await waitForFiniteAnimations(drawer);
+  const body = drawer.getByTestId("agent-update-dialog-body-claude-acp");
+  await expect(drawer.getByTestId("runtime-policy-detail-claude-acp")).toBeAttached();
+  await expect
+    .poll(() => body.evaluate((element) => element.scrollHeight > element.clientHeight))
+    .toBe(true);
+  await body.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+
+  const confirm = drawer.getByTestId("agent-update-confirm-claude-acp");
+  await expect(confirm).toBeInViewport();
+  const box = (await confirm.boundingBox())!;
+  expect(box.y + box.height).toBeLessThanOrEqual(testPage.viewportSize()!.height);
 });

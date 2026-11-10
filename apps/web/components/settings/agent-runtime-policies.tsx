@@ -234,6 +234,8 @@ function RuntimeAutomaticPolicy({
   const { t } = useTranslation();
   if (status.management !== "managed") return null;
   const controlId = `runtime-automatic-detail-${status.agent_name}`;
+  const helpId = `${controlId}-help`;
+  const showHelp = status.available && status.enabled;
   return (
     <>
       <div className="flex items-center justify-between gap-3">
@@ -246,14 +248,14 @@ function RuntimeAutomaticPolicy({
         </label>
         <Switch
           id={controlId}
-          aria-describedby="runtime-automatic-help-detail"
+          aria-describedby={showHelp ? helpId : undefined}
           checked={draft}
           onCheckedChange={onChange}
           disabled={!canManage || !onChange || (!status.auto_update_supported && !draft)}
         />
       </div>
-      {status.available && status.enabled && (
-        <p id="runtime-automatic-help-detail" className="text-xs text-muted-foreground">
+      {showHelp && (
+        <p id={helpId} className="text-xs text-muted-foreground">
           {t("agents:runtimeAutomaticHelp")}
         </p>
       )}
