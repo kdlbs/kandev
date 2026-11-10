@@ -52,7 +52,11 @@ function PRCIBubble({ state }: { state: PRCIState }) {
   }
   if (state === "approval_required") {
     return (
-      <span data-testid="pr-ci-bubble-approval-required" className={cn(CI_BUBBLE_CLASS, AMBER)}>
+      <span
+        data-testid="pr-ci-bubble-approval-required"
+        data-legacy-testid="pr-workflow-approval-warning"
+        className={cn(CI_BUBBLE_CLASS, AMBER)}
+      >
         <IconLockFilled className="h-2 w-2" />
       </span>
     );

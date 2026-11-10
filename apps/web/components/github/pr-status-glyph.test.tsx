@@ -34,6 +34,13 @@ describe("PRStatusGlyph", () => {
     expect(screen.getByTestId(APPROVAL_BUBBLE).className).toContain("dark:text-[#FBBF24]");
   });
 
+  it("retains the legacy approval test id", () => {
+    render(<PRStatusGlyph ciState="approval_required" />);
+    expect(screen.getByTestId(APPROVAL_BUBBLE).getAttribute("data-legacy-testid")).toBe(
+      "pr-workflow-approval-warning",
+    );
+  });
+
   it("animates the progress ring only under motion-safe", () => {
     render(<PRStatusGlyph ciState="in_progress" />);
     const ring = screen.getByTestId("pr-ci-bubble-in-progress").firstElementChild;

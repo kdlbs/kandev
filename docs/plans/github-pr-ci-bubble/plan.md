@@ -223,7 +223,7 @@ Every work order is sequential. No subagents are authorized.
 Implemented on 2026-11-10. Tasks 01-03 are complete.
 
 - Backend: `go test ./internal/github -count=1`, `go test ./internal/task/statussummary -count=1`, `go test ./internal/backendapp -run 'StatusSummary|CIState' -count=1`, and `go build ./...` passed. `bash scripts/lint-go-changed` reported 0 issues.
-- Frontend: 23 targeted test files and 311 tests passed, including the review-remediation regressions for retained all-skipped history, superseded compact outcomes, same-number repository attribution, and compact CI disclosure during loading/unavailable hydration. `pnpm run typecheck`, `pnpm run lint`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet` passed.
+- Frontend: 23 targeted test files and 316 tests passed, including the review-remediation and PR-fixup regressions for retained all-skipped history, superseded compact outcomes, same-number repository attribution, compact CI disclosure during loading/unavailable hydration, sibling outcome clearing, approval-row deduplication, and explicit success precedence. `pnpm run typecheck`, `pnpm run lint`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet` passed.
 - Browser: the new desktop spec passed 5 tests, the new phone spec passed 1 test, and the affected desktop and phone regression suites passed after their placement assertions were updated. Both new specs were rerun after review remediation and passed again.
 - Documentation: public-doc validation, specification validation, specification lint, and the PR documentation coverage preflight passed.
 - PostgreSQL replay coverage remains environment-gated and was skipped without `KANDEV_TEST_POSTGRES_DSN`.

@@ -372,3 +372,17 @@ describe("retained all-skipped history beside newer live CI", () => {
     });
   });
 });
+
+describe("explicit check success precedence", () => {
+  it("keeps explicit success ahead of an unstable merge state", () => {
+    const summary = derivePRTaskStatusSummary(
+      makePR({ checks_state: "success", mergeable_state: "unstable" }),
+      false,
+    );
+
+    expect(summary.rows).toContainEqual({ kind: "ci", status: "passed", tone: "success" });
+    expect(summary.rows).not.toContainEqual(
+      expect.objectContaining({ status: "checks_not_successful" }),
+    );
+  });
+});

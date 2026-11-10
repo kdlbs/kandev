@@ -163,9 +163,18 @@ Review remediation on 2026-11-10:
 - Passed compact CI authority into the no-full-record disclosure. The known CI row and selected identity now render beside loading or unavailable hydration copy on desktop and in the touch drawer.
 - Added focused regressions for retained all-skipped history, stale outcome replacement, two-repository same-number attribution, ambiguous numbers, and compact CI disclosure during loading/unavailable hydration.
 
+PR fixup on 2026-11-10:
+
+- Cleared sibling check outcomes that a newer task-wide compact aggregate rules out, while preserving outcomes the aggregate does not rule out.
+- Deduplicated compact approval rows when approval and CI share the same PR identity, retaining both when identities differ.
+- Kept explicit check success ahead of the merge-state unstable fallback.
+- Retained `data-legacy-testid="pr-workflow-approval-warning"` on the renamed approval bubble.
+- Extracted the Go CI selection helper to remove variable shadowing and shorten `derivePullRequestSummary`.
+- Added focused regressions for each fix.
+
 Verification:
 
-- `pnpm exec vitest run` on the task 02 component, helper, and regression list, plus the new `pr-status-glyph.test.tsx`, `pr-topbar-button.ci-state.test.tsx`, `pr-task-icon.ci-bubble.test.tsx`, `pr-task-icon.compact-ci.test.tsx`, `pr-task-workflow-projection.ci-disclosure.test.ts`, and `pr-status-chip.ci-state.test.tsx`: 23 files, 311 tests passed.
+- `pnpm exec vitest run` on the task 02 component, helper, and regression list, plus the new `pr-status-glyph.test.tsx`, `pr-topbar-button.ci-state.test.tsx`, `pr-task-icon.ci-bubble.test.tsx`, `pr-task-icon.compact-ci.test.tsx`, `pr-task-workflow-projection.ci-disclosure.test.ts`, and `pr-status-chip.ci-state.test.tsx`: 23 files, 316 tests passed.
 - `pnpm run typecheck`: passed.
 - `pnpm run lint`: passed.
 - `pnpm run i18n:check`: passed with every locale complete and the pseudo locale in sync.

@@ -53,8 +53,7 @@ func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 	var representative *pullRequestObservation
 	var approvalRepresentative *pullRequestObservation
 	var conflictRepresentative *pullRequestObservation
-	var ciRepresentative *pullRequestObservation
-	var ciRepresentativeState string
+	var ciPick ciSelection
 	keys := make([]string, 0, len(state.prs))
 	for key := range state.prs {
 		keys = append(keys, key)
@@ -75,13 +74,7 @@ func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 		}
 		if strings.EqualFold(observation.state, prStateOpen) {
 			summary.OpenCount++
-			if state := pullRequestCIState(observation); state != prCIStateNone {
-				if betterCIRepresentative(observation, state, ciRepresentative, ciRepresentativeState) {
-					copy := observation
-					ciRepresentative = &copy
-					ciRepresentativeState = state
-				}
-			}
+			ciPick.consider(observation)
 			if workflowApprovalRequired(observation) {
 				if approvalRepresentative == nil ||
 					(approvalRepresentative.workflowAttentionStale && !observation.workflowAttentionStale) ||
@@ -123,14 +116,35 @@ func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 		summary.MergeConflictPRNumber = conflictRepresentative.number
 		summary.MergeConflictRepository = pullRequestRepositoryIdentity(*conflictRepresentative)
 	}
-	summary.CIState = prCIStateNone
-	if ciRepresentative != nil {
-		summary.CIState = ciRepresentativeState
-		summary.CIPRNumber = ciRepresentative.number
-		summary.CIRepository = pullRequestRepositoryIdentity(*ciRepresentative)
-		summary.CIStale = ciRepresentative.workflowAttentionStale
-	}
+	ciPick.apply(&summary)
 	return &summary
+}
+
+// ciSelection keeps the highest-priority CI observation and its state
+// together so the reduction does not track parallel variables.
+type ciSelection struct {
+	observation *pullRequestObservation
+	state       string
+}
+
+func (c *ciSelection) consider(observation pullRequestObservation) {
+	next := pullRequestCIState(observation)
+	if next == prCIStateNone || !betterCIRepresentative(observation, next, c.observation, c.state) {
+		return
+	}
+	copy := observation
+	c.observation, c.state = &copy, next
+}
+
+func (c ciSelection) apply(summary *PullRequestSummary) {
+	summary.CIState = prCIStateNone
+	if c.observation == nil {
+		return
+	}
+	summary.CIState = c.state
+	summary.CIPRNumber = c.observation.number
+	summary.CIRepository = pullRequestRepositoryIdentity(*c.observation)
+	summary.CIStale = c.observation.workflowAttentionStale
 }
 
 func pullRequestRepositoryIdentity(observation pullRequestObservation) string {

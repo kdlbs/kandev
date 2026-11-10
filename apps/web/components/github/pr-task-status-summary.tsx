@@ -125,7 +125,7 @@ function primaryCIRow(
       historyDetail ?? mixedDetail,
     );
   }
-  if (pr.checks_state === "unstable" || pr.mergeable_state === "unstable") {
+  if (pr.checks_state === "unstable") {
     if (attentionExplainsUnstable) return null;
     return withSkippedDetail(
       { kind: "ci", status: "checks_not_successful", tone: "warning" },
@@ -134,6 +134,13 @@ function primaryCIRow(
   }
   if (pr.checks_state === "success") {
     return withSkippedDetail({ kind: "ci", status: "passed", tone: "success" }, mixedDetail);
+  }
+  if (pr.mergeable_state === "unstable") {
+    if (attentionExplainsUnstable) return null;
+    return withSkippedDetail(
+      { kind: "ci", status: "checks_not_successful", tone: "warning" },
+      historyDetail ?? mixedDetail,
+    );
   }
   if (isAllSkippedCheckSummary(pr)) {
     return {

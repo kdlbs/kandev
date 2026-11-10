@@ -170,7 +170,7 @@ export function getCompactWorkflowStatusSummaries(
   }
   if (includeCI) {
     const ciRow = compactCIRow(prInfo);
-    if (ciRow) {
+    if (ciRow && !compactApprovalRowAlreadyAdded(prInfo, ciRow)) {
       addRow(prInfo.ciPRNumber ?? prInfo.number, prInfo.ciRepository, ciRow);
     }
   }
@@ -183,6 +183,16 @@ export function getCompactWorkflowStatusSummaries(
     });
   }
   return [...summaries.values()];
+}
+
+function compactApprovalRowAlreadyAdded(prInfo: TaskPRInfo, ciRow: ProjectedSummaryRow): boolean {
+  return (
+    prInfo.workflowApprovalRequired === true &&
+    ciRow.id === WORKFLOW_ATTENTION_ROW_ID &&
+    (prInfo.workflowApprovalPRNumber ?? prInfo.number) === (prInfo.ciPRNumber ?? prInfo.number) &&
+    normalizeRepositoryName(prInfo.workflowApprovalRepository) ===
+      normalizeRepositoryName(prInfo.ciRepository)
+  );
 }
 
 type ProjectedSummaryRow = ProjectedPRTaskStatusSummary["rows"][number];
@@ -212,8 +222,35 @@ function isCheckOutcomeRow(row: ProjectedSummaryRow): boolean {
 function supersededWorkflowRow(row: ProjectedSummaryRow, ciState: TaskPRInfo["ciState"]): boolean {
   if (row.kind !== "ci") return false;
   if (ciState === "approval_required") return WORKFLOW_ATTENTION_STATUSES.has(row.status);
-  if (ciState === "attention") return row.status === "workflow_unavailable";
+  if (ciState === "attention") {
+    return row.status === "awaiting_approval" || row.status === "workflow_unavailable";
+  }
+  if (ciState === "in_progress") {
+    return row.status === "awaiting_approval" || row.status === "workflow_attention";
+  }
   return false;
+}
+
+function siblingRuledOutStatuses(
+  ciState: TaskPRInfo["ciState"],
+): Set<ProjectedSummaryRow["status"]> {
+  switch (ciState) {
+    case "none":
+      return new Set([...CHECK_OUTCOME_STATUSES, "awaiting_approval", "workflow_attention"]);
+    case "in_progress":
+      return new Set([
+        "failed",
+        "checks_not_successful",
+        "awaiting_approval",
+        "workflow_attention",
+      ]);
+    case "approval_required":
+      return new Set(["failed"]);
+    case "attention":
+      return new Set(["failed", "awaiting_approval"]);
+    default:
+      return new Set();
+  }
 }
 
 function compactCIRow(prInfo: TaskPRInfo): ProjectedSummaryRow | null {
@@ -274,7 +311,14 @@ export function applyCompactCIDisclosure(
   }));
   if (prInfo.ciState === "none") {
     for (const entry of entries) {
-      entry.rows = entry.rows.filter((row) => !isCheckOutcomeRow(row));
+      entry.rows = entry.rows.filter(
+        (row) =>
+          !isCheckOutcomeRow(row) &&
+          !(
+            row.kind === "ci" &&
+            (row.status === "awaiting_approval" || row.status === "workflow_attention")
+          ),
+      );
     }
     return stripDisclosureRepositories(entries);
   }
@@ -283,6 +327,13 @@ export function applyCompactCIDisclosure(
   const selectedNumber = prInfo.ciPRNumber ?? prInfo.number;
   const selectedRepository = normalizeRepositoryName(prInfo.ciRepository);
   const match = findProjectedSummary(entries, selectedNumber, selectedRepository);
+  const siblingStatuses = siblingRuledOutStatuses(prInfo.ciState);
+  for (const entry of entries) {
+    if (entry === match) continue;
+    entry.rows = entry.rows.filter(
+      (existing) => !(existing.kind === "ci" && siblingStatuses.has(existing.status)),
+    );
+  }
   const target: ProjectedDisclosureEntry =
     match ??
     ({

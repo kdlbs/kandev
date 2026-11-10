@@ -4,6 +4,7 @@ import type { TaskPRInfo } from "./pr-task-automation";
 import { derivePRTaskStatusSummary } from "./pr-task-status-summary";
 import {
   applyCompactCIDisclosure,
+  getCompactWorkflowStatusSummaries,
   getTaskPRIconDisclosureProjection,
 } from "./pr-task-workflow-projection";
 
@@ -148,4 +149,71 @@ describe("compact CI disclosure through the shared projection", () => {
       );
     },
   );
+});
+
+describe("compact CI sibling reconciliation", () => {
+  it("clears sibling check outcomes ruled out by a newer aggregate", () => {
+    const prs = [
+      makePR({
+        repository_id: "repo-a",
+        owner: "org",
+        repo: "a",
+        pr_number: 42,
+        checks_state: "failure",
+      }),
+      makePR({
+        repository_id: "repo-b",
+        owner: "org",
+        repo: "b",
+        pr_number: 43,
+        checks_state: "pending",
+      }),
+    ];
+    const result = applyCompactCIDisclosure(
+      summariesFor(prs),
+      prs,
+      makePRInfo({ ciState: "in_progress", ciPRNumber: 43, ciRepository: "org/b" }),
+      true,
+    );
+    expect(result[0].rows).not.toContainEqual(expect.objectContaining({ status: "failed" }));
+    expect(result[1].rows).toContainEqual(expect.objectContaining({ status: "in_progress" }));
+  });
+});
+
+describe("compact approval row identity", () => {
+  it("adds one approval row when approval and CI share the same PR identity", () => {
+    const summaries = getCompactWorkflowStatusSummaries(
+      makePRInfo({
+        ciState: "approval_required",
+        ciPRNumber: 42,
+        ciRepository: "org/repo",
+        workflowApprovalRequired: true,
+        workflowApprovalPRNumber: 42,
+        workflowApprovalRepository: "org/repo",
+      }),
+      true,
+    );
+    const approvalRows = summaries.flatMap((summary) =>
+      summary.rows.filter((row) => row.status === "awaiting_approval"),
+    );
+    expect(approvalRows).toHaveLength(1);
+  });
+
+  it("keeps both approval rows when the PR identities differ", () => {
+    const summaries = getCompactWorkflowStatusSummaries(
+      makePRInfo({
+        ciState: "approval_required",
+        ciPRNumber: 43,
+        ciRepository: "org/other",
+        workflowApprovalRequired: true,
+        workflowApprovalPRNumber: 42,
+        workflowApprovalRepository: "org/repo",
+      }),
+      true,
+    );
+    const approvalRows = summaries.flatMap((summary) =>
+      summary.rows.filter((row) => row.status === "awaiting_approval"),
+    );
+    expect(approvalRows).toHaveLength(2);
+  });
 });
