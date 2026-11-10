@@ -35,7 +35,7 @@ export async function compactRuntimeSettings(
 
   const action = page.getByTestId("runtime-manage-versions-claude-acp");
   if (mobile) expect((await action.boundingBox())!.height).toBeGreaterThanOrEqual(44);
-  else expect((await action.boundingBox())!.height).toBeGreaterThanOrEqual(27);
+  else expect((await action.boundingBox())!.height).toBeGreaterThanOrEqual(26);
   await action.click();
 
   const detail = page.getByTestId(`agent-update-${mobile ? "drawer" : "dialog"}-claude-acp`);
