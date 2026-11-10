@@ -128,7 +128,7 @@ func provideLifecycleManager(
 		credsMgr,
 		profileResolver,
 		mcpService,
-		lifecycle.ExecutorFallbackWarn,
+		lifecycle.ExecutorFallbackDeny,
 		cfg.ResolvedHomeDir(),
 		log,
 	)

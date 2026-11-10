@@ -356,6 +356,8 @@ export function ChangeRequestChecksSection({
   rows,
   loading,
   emptyLabel,
+  skippedCount = 0,
+  skippedLabel,
   passRateLabel,
   groupLabels,
 }: {
@@ -363,6 +365,8 @@ export function ChangeRequestChecksSection({
   rows: readonly ChangeRequestCheckRow[];
   loading?: boolean;
   emptyLabel?: string;
+  skippedCount?: number;
+  skippedLabel?: string;
   passRateLabel?: string;
   groupLabels?: Partial<Record<IntegrationChangeRequestPipelineState, string>>;
 }) {
@@ -379,6 +383,14 @@ export function ChangeRequestChecksSection({
   return (
     <div data-testid="pr-checks-section" className="flex flex-col gap-1">
       <ChecksProgress counts={counts} passRateLabel={passRateLabel} />
+      {skippedCount > 0 && skippedLabel ? (
+        <div
+          data-testid="pr-checks-skipped-count"
+          className="px-1 text-[11px] leading-snug text-muted-foreground"
+        >
+          {skippedLabel}
+        </div>
+      ) : null}
       {CHECK_STATES.map((state) => {
         const stateRows = rows.filter((row) => row.state === state);
         const count = countForState(counts, state);

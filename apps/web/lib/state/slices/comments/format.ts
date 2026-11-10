@@ -164,7 +164,11 @@ export function formatAgentMessageCommentsAsMarkdown(comments: AgentMessageComme
         ? `Selected comment from ${comment.authorName}:`
         : "Selected agent response:",
     );
-    lines.push(toBlockquote(protectSourceMentions(comment.selectedText)));
+    lines.push(
+      toBlockquote(
+        comment.authorName ? protectSourceMentions(comment.selectedText) : comment.selectedText,
+      ),
+    );
     lines.push("");
     lines.push("User feedback:");
     lines.push(toBlockquote(comment.text));

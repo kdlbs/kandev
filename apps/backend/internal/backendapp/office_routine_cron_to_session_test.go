@@ -627,6 +627,14 @@ func (m *stubAgentManager) LaunchAgent(ctx context.Context, req *executor.Launch
 	return &executor.LaunchAgentResponse{AgentExecutionID: "exec-" + req.SessionID}, nil
 }
 
+func (m *stubAgentManager) RequiresCloneURL(string) bool          { return false }
+func (m *stubAgentManager) ShouldApplyPreferredShell(string) bool { return false }
+func (m *stubAgentManager) ValidateExecutorRuntime(string) error  { return nil }
+
+func (m *stubAgentManager) ValidateExecutionRuntime(context.Context, string, string, string) error {
+	return nil
+}
+
 func (m *stubAgentManager) StartAgentProcess(_ context.Context, _ string) error { return nil }
 func (m *stubAgentManager) IsAgentCommandConfigured(_ string) bool              { return true }
 func (m *stubAgentManager) StopAgent(_ context.Context, _ string, _ bool) error { return nil }

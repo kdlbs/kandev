@@ -132,6 +132,10 @@ export type TaskStatusSummary = {
     workflow_approval_repository?: string;
     merge_conflict_pr_number?: number;
     merge_conflict_repository?: string;
+    ci_state?: string;
+    ci_pr_number?: number;
+    ci_repository?: string;
+    ci_stale?: boolean;
     aggregate_state?: string;
     state?: string;
     number?: number;

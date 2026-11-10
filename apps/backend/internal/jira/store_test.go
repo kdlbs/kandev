@@ -24,6 +24,13 @@ func newTestStore(t *testing.T) *Store {
 	if err != nil {
 		t.Fatalf("new store: %v", err)
 	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS tasks (
+		id TEXT PRIMARY KEY,
+		archived_at DATETIME,
+		workflow_step_id TEXT NOT NULL DEFAULT ''
+	)`); err != nil {
+		t.Fatalf("create tasks fixture: %v", err)
+	}
 	return store
 }
 

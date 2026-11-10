@@ -68,6 +68,7 @@ func newForkTestService(t *testing.T, manager executor.AgentManagerClient, activ
 	} else {
 		repo = existing[0]
 	}
+	seedExecutorRow(t, repo, "executor-local", models.ExecutorTypeLocal)
 	seedSession(t, repo, "task-fork", "session-fork", "step1")
 	source, err := repo.GetTaskSession(ctx, "session-fork")
 	require.NoError(t, err)
@@ -97,7 +98,7 @@ func newForkTestService(t *testing.T, manager executor.AgentManagerClient, activ
 	taskRepo.tasks["task-fork"] = &v1.Task{ID: "task-fork"}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, manager)
 	svc.config.CodexAppServerEnabled = true
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.queue = queue.NewTaskQueue(10)
 	svc.scheduler = scheduler.NewScheduler(svc.queue, svc.executor, taskRepo, testLogger(), scheduler.DefaultSchedulerConfig())
 	svc.SetTurnService(&forkTestTurnService{turn: turn, active: active})
@@ -307,7 +308,7 @@ func TestForkConversationOfficeSourceDoesNotUseLaunchProfilePreview(t *testing.T
 
 	manager := &forkTestAgentManager{mockAgentManager: &mockAgentManager{}, forkID: "fork-office-thread"}
 	svc.agentManager = manager
-	svc.executor = executor.NewExecutor(manager, sqlRepo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, sqlRepo, testLogger(), executor.ExecutorConfig{}))
 	svc.config.CodexAppServerEnabled = true
 	completedAt := time.Now().UTC()
 	turnService := &forkTestTurnService{turn: &models.Turn{

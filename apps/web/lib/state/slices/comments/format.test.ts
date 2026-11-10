@@ -365,10 +365,19 @@ describe("formatAgentMessageCommentsAsMarkdown for Office thread comments", () =
     expect(result).toContain("User feedback:\n> Please ask @QA");
   });
 
-  it("keeps the chat label for extracts without an author", () => {
-    const chat = officeComment("c", "x", "plain", "ok");
+  it("preserves selected source text for chat extracts without an author", () => {
+    const chat = officeComment(
+      "c",
+      "x",
+      "Ask @QA, read &commat;QA, and open agent://550e8400-e29b-41d4-a716-446655440000.",
+      "ok",
+    );
     delete (chat as { authorName?: string }).authorName;
-    expect(formatAgentMessageCommentsAsMarkdown([chat])).toContain("Selected agent response:");
+    const result = formatAgentMessageCommentsAsMarkdown([chat]);
+    expect(result).toContain("Selected agent response:");
+    expect(result).toContain(
+      "> Ask @QA, read &commat;QA, and open agent://550e8400-e29b-41d4-a716-446655440000.",
+    );
   });
 });
 

@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentruntime"
 	p "github.com/kandev/kandev/internal/mcp/profile"
 )
 
@@ -222,6 +223,7 @@ func TestPromoteWorkspaceExecutionUsesResolvedExecutionProfileForCursorAuth(t *t
 		WorkspacePath:        workspace,
 		WorkspaceSourceRoots: []string{secondaryRepository},
 		ExecutorType:         "worktree",
+		RuntimeName:          agentruntime.RuntimeStandalone,
 		metadata:             map[string]interface{}{},
 		standalonePort:       45678,
 	}

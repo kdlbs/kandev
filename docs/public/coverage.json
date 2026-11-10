@@ -925,7 +925,11 @@
         "apps/web/app/office/workspace/costs/create-budget-form.tsx",
         "apps/web/app/office/components/workspace-pause-banner.tsx",
         "apps/backend/internal/office/shared/assignment_eligibility.go",
-        "apps/backend/internal/office/costs/range.go"
+        "apps/backend/internal/office/costs/range.go",
+        "apps/web/components/task/simple/comment-extract-surface.tsx",
+        "apps/web/components/task/simple/task-chat.tsx",
+        "apps/web/hooks/domains/comments/use-thread-extracts.ts",
+        "apps/web/lib/state/slices/comments/format.ts"
       ],
       "tests": [
         "apps/backend/internal/office/onboarding/service_test.go",
@@ -942,7 +946,15 @@
         "apps/web/e2e/tests/office/workspace-kill-switch.spec.ts",
         "apps/backend/internal/office/shared/assignment_eligibility_test.go",
         "apps/backend/internal/office/costs/range_test.go",
-        "apps/web/app/office/workspace/costs/budget-policy-card.test.tsx"
+        "apps/web/app/office/workspace/costs/budget-policy-card.test.tsx",
+        "apps/web/components/task/chat/messages/message-comment-surface.test.tsx",
+        "apps/web/components/task/simple/task-chat.extracts.test.tsx",
+        "apps/backend/internal/office/scheduler/mentions_test.go",
+        "apps/web/hooks/domains/comments/use-thread-extracts.test.ts",
+        "apps/web/lib/state/slices/comments/format.test.ts",
+        "apps/web/lib/state/slices/comments/message-comments.test.ts",
+        "apps/web/e2e/tests/office/thread-extract-comments.spec.ts",
+        "apps/web/e2e/tests/office/mobile-thread-extract-comments.spec.ts"
       ]
     },
     {

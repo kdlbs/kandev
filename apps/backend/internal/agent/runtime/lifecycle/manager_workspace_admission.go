@@ -227,5 +227,42 @@ func (m *Manager) ensureCachedWorkspaceExecutionAdmitted(ctx context.Context, ex
 		}
 		info = resolved
 	}
-	return m.ensureWorkspaceSessionAdmitted(ctx, execution.TaskID, info)
+	if err := m.ensureWorkspaceSessionAdmitted(ctx, execution.TaskID, info); err != nil {
+		return err
+	}
+	return m.ensureRetainedExecutionSelection(ctx, execution, info)
+}
+
+// ensureRetainedExecutionSelection compares a cached execution with the
+// selection resolved for its session/environment. It is read-only and never
+// removes, rotates, or replaces the retained worker.
+func (m *Manager) ensureRetainedExecutionSelection(
+	ctx context.Context,
+	execution *AgentExecution,
+	info *WorkspaceInfo,
+) error {
+	if execution == nil || info == nil {
+		return nil
+	}
+	executorType := firstNonEmpty(info.ExecutorType, execution.ExecutorType)
+	if executorType == "" {
+		return nil
+	}
+	selected, required := normalizeExecutorSelection(executorType)
+	if !required {
+		return nil
+	}
+	if err := m.validateRetainedExecutionRuntime(ctx, execution, selected, info.TaskEnvironmentID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

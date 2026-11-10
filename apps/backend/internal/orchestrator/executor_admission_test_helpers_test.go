@@ -11,6 +11,7 @@ import (
 // restores for a persisted session. Tests for admission behavior install their
 // own callback and do not use this helper.
 func withTestExecutorActor(exec *executor.Executor) *executor.Executor {
+	exec.SetCapabilities(permissiveTestCapabilities{})
 	exec.SetExecutorAdmission(func(ctx context.Context, _, _, _ string) (context.Context, error) {
 		if _, ok := authn.IdentityFromContext(ctx); ok {
 			return ctx, nil

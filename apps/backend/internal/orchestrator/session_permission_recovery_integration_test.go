@@ -47,7 +47,7 @@ func TestRecoverSessionPermissionRetryRetiresMatchingError(t *testing.T) {
 	taskRepo := newMockTaskRepo()
 	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentManager)
-	svc.executor = executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{}))
 	admissionCalls := 0
 	svc.executor.SetSelectedWorktreeRecoveryAdmission(func(callCtx context.Context, request worktree.RecoveryAdmissionRequest) (*worktree.RecoveryAdmission, error) {
 		admissionCalls++

@@ -3,7 +3,7 @@ status: current
 system: tasks
 requirements:
   - REQ-TASKS-WORKFLOW-CANCELLED-TURN-COMPLETION-001
-updated: 2026-11-05
+updated: 2026-11-10
 ---
 
 # Cancelled turn completion: dispatch and stream coordination
@@ -170,6 +170,40 @@ The initiating request may disconnect without aborting the accepted operation.
 Runtime cancellation escalation and its timeouts remain unchanged.
 If runtime cancellation succeeded but reconciliation could not acquire its guard,
 return an error and preserve existing retry reconciliation instead of claiming completion.
+
+## Cancellation client lease and concurrent stop
+
+`cancelAgentExecution` acquires one agentctl client lease and releases it on return.
+Every cancellation helper uses that captured client through escalation and durable submission settlement.
+These helpers must not acquire the lease again.
+The [client lease design](../../platform/system-design/agentctl-client-lease.md) defines the existing reader and writer boundary.
+
+`stopExecutionAgentctl` takes the write side to stop and close the transport.
+Go blocks new readers behind a queued writer, including a second reader from an existing lease holder.
+A nested read therefore prevents both cancellation and Stop from completing.
+The caller's context cannot interrupt that `RWMutex.RLock` wait.
+
+Pass the captured client explicitly through `waitForPromptFinishedAfterCancel`,
+`cancelDispatchOnlyPrompt`, `waitForCapturedDispatchCompletion`, and `finishDispatchCancelTimeout`.
+`escalateStuckCancel` requires that client argument and does not contain an implicit lease acquisition.
+Immediate rejection, disconnected streams, missing dispatch gates, and timeout escalation use the same rule.
+The contended-prompt path through `escalateCapturedDispatchWithoutPromptLock` retains its existing local settlement behavior.
+
+The lease remains held through `CancelDeliverySubmission` for the captured submission.
+Stop cannot close or replace that transport before settlement finishes.
+Prompt, startup, execution, and turn fencing remain authoritative throughout this operation.
+Escalation keeps its asynchronous ready publication and existing error semantics.
+Neither a queued Stop nor successful local escalation authorizes deletion of an unconfirmed live runtime.
+
+For session deletion, the existing [quiescence contract](session-delete-resource-cleanup.md#runtime-quiescence)
+continues to stop the captured execution before removing the session row.
+The cancellation lease must release so queued stop and deletion requests can proceed.
+This rule applies to all cancellation sources that enter `cancelAgentExecution`.
+
+Regression tests queue a real stop writer behind cancellation's client lease, then exercise each escalation branch.
+They prove cancellation and teardown drain without manual lease release.
+Additional cases preserve durable settlement, late completion ordering, and successor identity.
+The [cancel/stop fix package](../../../plans/cancel-stop-client-deadlock/plan.md) defines the exact tests and commands.
 
 ## Compatibility and persistence
 

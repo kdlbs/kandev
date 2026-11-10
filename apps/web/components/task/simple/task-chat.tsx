@@ -15,6 +15,7 @@ import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { useChatMotion } from "@/hooks/use-chat-motion";
 import { useAppStore } from "@/components/state-provider";
+import { selectActiveWorkspace, selectWorkspaceById } from "@/lib/state/slices/workspace/selectors";
 import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { selectCommandCount } from "@/lib/state/slices/session/selectors";
 import { createComment } from "@/lib/api/domains/office-api";
@@ -93,20 +94,46 @@ function formatDuration(ms: number): string {
   return `${minutes}m ${remaining}s`;
 }
 
+function useTaskCommentLinkContext(taskWorkspaceId: string) {
+  const taskWorkspace = useAppStore((state) =>
+    taskWorkspaceId ? selectWorkspaceById(taskWorkspaceId)(state) : selectActiveWorkspace(state),
+  );
+  return {
+    taskPrefix: taskWorkspace?.task_prefix,
+    workspaceId: taskWorkspaceId || taskWorkspace?.id,
+  };
+}
+
+function shouldShowCommentRunBadge(
+  comment: TaskComment,
+  isAgent: boolean,
+  hasLaterAgentReply?: boolean,
+): comment is TaskComment & { runStatus: NonNullable<TaskComment["runStatus"]> } {
+  return Boolean(
+    !isAgent && comment.runStatus && comment.runStatus !== "finished" && !hasLaterAgentReply,
+  );
+}
+
 function CommentBody({
   taskId,
   comment,
   isAgent,
   authorName,
   readOnly,
+  taskPrefix,
+  workspaceId,
 }: {
   taskId: string;
   comment: TaskComment;
   isAgent: boolean;
   authorName: string;
   readOnly: boolean;
+  taskPrefix?: string;
+  workspaceId?: string;
 }) {
-  const markdown = <MarkdownComment content={comment.content} />;
+  const markdown = (
+    <MarkdownComment content={comment.content} taskPrefix={taskPrefix} workspaceId={workspaceId} />
+  );
   if (!isAgent) return markdown;
   return (
     <CommentExtractSurface
@@ -121,16 +148,46 @@ function CommentBody({
   );
 }
 
+function CommentEntryMetadata({
+  comment,
+  isAgent,
+  displayName,
+}: {
+  comment: TaskComment;
+  isAgent: boolean;
+  displayName: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="font-medium text-sm">{displayName}</span>
+      {isAgent && comment.source === "session" && (
+        <span className="text-xs text-muted-foreground">{t("task:viaSession")}</span>
+      )}
+      {comment.status && (
+        <span className="text-xs text-muted-foreground">
+          {comment.status}
+          {comment.durationMs != null &&
+            t("task:afterDuration", { duration: formatDuration(comment.durationMs) })}
+        </span>
+      )}
+      <span className="text-xs text-muted-foreground">{formatRelativeTime(comment.createdAt)}</span>
+    </div>
+  );
+}
+
 function CommentEntry({
   comment,
   taskId,
   readOnly,
+  taskWorkspaceId,
   turn,
   hasLaterAgentReply,
 }: {
   comment: TaskComment;
   taskId: string;
   readOnly: boolean;
+  taskWorkspaceId: string;
   turn?: CommentTurnContext;
   hasLaterAgentReply?: boolean;
 }) {
@@ -139,6 +196,7 @@ function CommentEntry({
   // Resolve the agent name from the office agents store so renames
   // flow through automatically. Backend session-bridged comments don't
   // carry a name; the mapper leaves authorName empty for agents.
+  const { taskPrefix, workspaceId } = useTaskCommentLinkContext(taskWorkspaceId);
   const resolvedAgentName = useAppStore((s) =>
     isAgent
       ? (selectOfficeAgentProfiles(s).find((a) => a.id === comment.authorId)?.name ??
@@ -160,22 +218,7 @@ function CommentEntry({
         </div>
       )}
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-medium text-sm">{displayName}</span>
-          {isAgent && comment.source === "session" && (
-            <span className="text-xs text-muted-foreground">{t("task:viaSession")}</span>
-          )}
-          {comment.status && (
-            <span className="text-xs text-muted-foreground">
-              {comment.status}
-              {comment.durationMs != null &&
-                t("task:afterDuration", { duration: formatDuration(comment.durationMs) })}
-            </span>
-          )}
-          <span className="text-xs text-muted-foreground">
-            {formatRelativeTime(comment.createdAt)}
-          </span>
-        </div>
+        <CommentEntryMetadata comment={comment} isAgent={isAgent} displayName={displayName} />
         <div className="mt-1">
           <CommentBody
             taskId={taskId}
@@ -183,16 +226,15 @@ function CommentEntry({
             isAgent={isAgent}
             authorName={displayName}
             readOnly={readOnly}
+            taskPrefix={taskPrefix}
+            workspaceId={workspaceId}
           />
         </div>
-        {!isAgent &&
-          comment.runStatus &&
-          comment.runStatus !== "finished" &&
-          !hasLaterAgentReply && (
-            <div className="mt-1.5">
-              <UserCommentRunBadge status={comment.runStatus} errorMessage={comment.runError} />
-            </div>
-          )}
+        {shouldShowCommentRunBadge(comment, isAgent, hasLaterAgentReply) && (
+          <div className="mt-1.5">
+            <UserCommentRunBadge status={comment.runStatus} errorMessage={comment.runError} />
+          </div>
+        )}
         {comment.toolCalls && comment.toolCalls.length > 0 && (
           <Collapsible>
             <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground mt-1 cursor-pointer hover:text-foreground transition-colors">
@@ -612,6 +654,7 @@ function ChatEntries({
               comment={entry.data}
               taskId={taskId}
               readOnly={readOnly}
+              taskWorkspaceId={workspaceId}
               turn={entry.turn}
               hasLaterAgentReply={entry.hasLaterAgentReply}
             />
