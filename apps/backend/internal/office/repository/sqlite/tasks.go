@@ -588,7 +588,7 @@ func cursorValueForTask(t *TaskRow, sortField TaskListSortField) string {
 func (r *Repository) GetTaskIDByIdentifier(ctx context.Context, workspaceID, identifier string) (string, error) {
 	var id string
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
-		`SELECT id FROM tasks WHERE workspace_id = ? AND identifier = ? LIMIT 1`,
+		`SELECT id FROM tasks WHERE workspace_id = ? AND identifier = ? ORDER BY created_at, id LIMIT 1`,
 	), workspaceID, identifier).Scan(&id)
 	if err == sql.ErrNoRows {
 		return "", nil

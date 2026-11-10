@@ -2,6 +2,7 @@
 
 import { memo, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
+import type { PluggableList } from "unified";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import {
   markdownComponents,
@@ -15,6 +16,8 @@ type MarkdownCommentProps = {
   content: string;
   /** Workspace task prefix (e.g. "KAN"); only matching identifiers are linked. */
   taskPrefix?: string;
+  /** Workspace the prefix belongs to; carried in task links so they resolve there. */
+  workspaceId?: string;
 };
 
 // Extend the default sanitize schema to allow relative hrefs (for task links like /office/tasks/KAN-42).
@@ -28,10 +31,11 @@ const sanitizeSchema = withMarkdownMathSanitizeSchema({
 export const MarkdownComment = memo(function MarkdownComment({
   content,
   taskPrefix,
+  workspaceId,
 }: MarkdownCommentProps) {
   const localRemarkPlugins = useMemo(
-    () => [...remarkPlugins, [remarkTaskLinks, { prefix: taskPrefix }] as never],
-    [taskPrefix],
+    (): PluggableList => [...remarkPlugins, [remarkTaskLinks, { prefix: taskPrefix, workspaceId }]],
+    [taskPrefix, workspaceId],
   );
   return (
     <div className="prose prose-sm max-w-none text-sm markdown-body">

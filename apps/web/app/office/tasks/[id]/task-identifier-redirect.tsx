@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useRouter } from "@/lib/routing/client-router";
+import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { useAppStore } from "@/components/state-provider";
 import { IssueDetailSkeleton } from "./task-detail-skeleton";
 import { resolveTaskIdentifier } from "@/lib/api/domains/office-extended-api";
@@ -16,9 +16,13 @@ export function isTaskIdentifierParam(param: string): boolean {
  * Resolves an identifier-shaped route param to the task id and replaces the URL
  * with the canonical /office/tasks/<id>. Returns "failed" when no task matches.
  */
-function useTaskIdentifierRedirect(identifier: string): "resolving" | "failed" {
+export function useTaskIdentifierRedirect(identifier: string): "resolving" | "failed" {
   const router = useRouter();
-  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const searchParams = useSearchParams();
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  // A comment link names its own workspace; the active one is the fallback for
+  // hand-typed URLs. Identifiers are unique per workspace only.
+  const workspaceId = searchParams.get("workspace") || activeWorkspaceId;
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {

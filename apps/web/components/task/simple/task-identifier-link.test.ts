@@ -14,6 +14,16 @@ describe("task identifier links", () => {
     ]);
   });
 
+  it("carries the workspace in the link when given", () => {
+    expect(splitTaskIdentifierText("KAN-11", "KAN", "ws 1")).toEqual([
+      {
+        type: "link",
+        url: "/office/tasks/KAN-11?workspace=ws%201",
+        children: [{ type: "text", value: "KAN-11" }],
+      },
+    ]);
+  });
+
   it("leaves external tracker keys as plain text", () => {
     expect(splitTaskIdentifierText("VG-30375 and NTTVS-618", "KAN")).toEqual([
       { type: "text", value: "VG-30375 and NTTVS-618" },

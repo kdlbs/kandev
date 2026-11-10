@@ -107,6 +107,7 @@ function CommentEntry({
   // flow through automatically. Backend session-bridged comments don't
   // carry a name; the mapper leaves authorName empty for agents.
   const taskPrefix = useAppStore((s) => selectActiveWorkspace(s)?.task_prefix);
+  const workspaceId = useAppStore((s) => s.workspaces.activeId ?? undefined);
   const resolvedAgentName = useAppStore((s) =>
     isAgent
       ? (selectOfficeAgentProfiles(s).find((a) => a.id === comment.authorId)?.name ??
@@ -145,7 +146,11 @@ function CommentEntry({
           </span>
         </div>
         <div className="mt-1">
-          <MarkdownComment content={comment.content} taskPrefix={taskPrefix} />
+          <MarkdownComment
+            content={comment.content}
+            taskPrefix={taskPrefix}
+            workspaceId={workspaceId}
+          />
         </div>
         {!isAgent &&
           comment.runStatus &&
