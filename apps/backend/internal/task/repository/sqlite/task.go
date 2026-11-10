@@ -2176,6 +2176,14 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 		}
 		return false, false, &admissionSourceChangedError{stepID: actualSourceStepID}
 	}
+	// A completion-owned move may commit only while the accepted signal still
+	// owns the pending bag for this exact entry. The bag is read under the task
+	// lock that also serializes signal replacement.
+	if matches, err := r.stepCompletionSignalMatchesGuardTx(ctx, tx, task.ID, actualSourceStepID); err != nil {
+		return false, false, err
+	} else if !matches {
+		return false, false, nil
+	}
 	// A later move may have left and returned to the same source step: the step
 	// id still matches, but the transition ledger advanced. Compare the ledger id
 	// the deferred move captured when it was requested, so a move superseded by a
@@ -2355,6 +2363,12 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 	}
 	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, expectedWorkflowID, false, false, workflowChangeSource)
 	if err != nil {
+		return false, false, err
+	}
+	// Commit proof for the exact accepted signal with the move. A missing
+	// receipt rolls the move back so the signal stays retryable instead of
+	// leaving an untraceable transition.
+	if err := r.recordStepCompletionProofTx(ctx, tx, task.ID, actualSourceStepID, task, admitted); err != nil {
 		return false, false, err
 	}
 	if exactOperation != nil {

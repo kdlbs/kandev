@@ -180,6 +180,12 @@ func (s *Service) processOnTurnCompleteWithCause(
 		ctx = cancellationTransitionAttribution(ctx)
 	}
 	s.executeStepTransition(ctx, taskID, sessionID, currentStep, targetStepID, true)
+	// A completion-guarded legacy move that remains on the source step failed
+	// before committing. Rewind the generation this attempt consumed so the same
+	// durable signal can be retried without a newer session snapshot.
+	if updated, err := s.repo.GetTask(ctx, taskID); err == nil && updated.WorkflowStepID == currentStep.ID {
+		s.releaseTurnCompletionGenerationForCompletion(ctx, taskID, currentStep.ID, session)
+	}
 	return true
 }
 
@@ -504,6 +510,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	// Get the target step
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, toStepID)
 	if err != nil {
+		s.markStepCompletionBlocked(ctx, taskID, fromStep.ID, sessionID, models.StepCompletionReasonDestinationUnavailable)
 		s.logger.Warn("failed to get target workflow step",
 			zap.String("target_step_id", toStepID),
 			zap.Error(err))
@@ -7903,6 +7910,7 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 		PreloadedState: &state,
 	})
 	if err != nil {
+		s.releaseTurnCompletionGenerationForCompletion(ctx, taskID, currentStep.ID, session)
 		s.logger.Error("workflow engine error on_turn_complete",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
@@ -8042,6 +8050,18 @@ func (s *Service) acquireTurnCompletionCriticalSection(
 	}
 	s.turnCompletionConsumedGeneration.Store(session.ID, session.UpdatedAt)
 	return unlock, current, true
+}
+
+func (s *Service) releaseTurnCompletionGenerationForCompletion(ctx context.Context, taskID, stepID string, session *models.TaskSession) {
+	if session == nil {
+		return
+	}
+	if _, ok := models.WorkflowStepCompletionGuardFromContext(ctx, taskID, stepID); !ok {
+		return
+	}
+	// Only rewind the generation this exact completion attempt consumed. A newer
+	// session write keeps its own generation and remains deduplicated.
+	s.turnCompletionConsumedGeneration.CompareAndDelete(session.ID, session.UpdatedAt)
 }
 
 func (s *Service) prepareEngineTurnCompletion(
@@ -8459,6 +8479,8 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 	// (e.g., a template-level alias like "review" that doesn't resolve to a real UUID).
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, result.ToStepID)
 	if err != nil {
+		s.markStepCompletionBlocked(ctx, taskID, result.FromStepID, session.ID, models.StepCompletionReasonDestinationUnavailable)
+		s.releaseTurnCompletionGenerationForCompletion(ctx, taskID, result.FromStepID, session)
 		recordWorkflowTransitionError(ctx, err)
 		s.logger.Warn("target step not found, skipping transition",
 			zap.String("step_id", result.ToStepID),
@@ -8468,6 +8490,8 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 	}
 	if sessionLifecycle {
 		if err := s.preflightWorkflowStepCredentials(ctx, taskID, session, targetStep); err != nil {
+			s.markStepCompletionBlocked(ctx, taskID, result.FromStepID, session.ID, models.StepCompletionReasonDestinationUnavailable)
+			s.releaseTurnCompletionGenerationForCompletion(ctx, taskID, result.FromStepID, session)
 			recordWorkflowTransitionError(ctx, err)
 			s.logger.Warn("target profile credential preflight failed, skipping transition",
 				zap.String("task_id", taskID),
@@ -8484,6 +8508,7 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 
 	fromStep, err := s.loadWorkflowStepForLifecycle(ctx, result.FromStepID, "transition source")
 	if err != nil {
+		s.releaseTurnCompletionGenerationForCompletion(ctx, taskID, result.FromStepID, session)
 		recordWorkflowTransitionError(ctx, err)
 		s.logger.Warn("failed to load from-step for on_exit",
 			zap.String("step_id", result.FromStepID),
@@ -8513,6 +8538,7 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 	}
 	commitResult, err := commit(applyCtx)
 	if err != nil {
+		s.releaseTurnCompletionGenerationForCompletion(ctx, taskID, result.FromStepID, session)
 		recordWorkflowTransitionError(ctx, err)
 		s.logger.Error("failed to apply engine transition",
 			zap.String("task_id", taskID),
@@ -8522,6 +8548,7 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 		return false
 	}
 	if !commitResult.Applied {
+		s.releaseTurnCompletionGenerationForCompletion(ctx, taskID, result.FromStepID, session)
 		recordWorkflowTransitionError(ctx, errors.New("workflow transition commit was not applied"))
 		return false
 	}

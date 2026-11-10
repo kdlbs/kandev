@@ -1395,6 +1395,12 @@ const (
 // that the orchestrator should consume to drive a workflow step transition.
 // See ADR 0015 for the lifecycle (set → read → clear).
 type PendingStepCompletionSignal struct {
+	// SignalID is minted only for an accepted claim. It fences transition
+	// commitment to this exact source without changing public tool arguments.
+	SignalID string `json:"signal_id,omitempty"`
+	// SourceTurnID is the persisted turn the backend resolved at admission.
+	// Empty means the legacy no-turn compatibility identity.
+	SourceTurnID             string    `json:"source_turn_id,omitempty"`
 	WorkflowStepTransitionID *int64    `json:"workflow_step_transition_id,omitempty"`
 	StepID                   string    `json:"step_id"`
 	Source                   string    `json:"source"`
@@ -1402,6 +1408,22 @@ type PendingStepCompletionSignal struct {
 	Handoff                  string    `json:"handoff,omitempty"`
 	Blockers                 string    `json:"blockers,omitempty"`
 	SignaledAt               time.Time `json:"signaled_at"`
+}
+
+// SameCompletionSource reports whether two signals share the authenticated
+// idempotency key: source turn and workflow entry within one step. An empty
+// source turn is the legacy entry-wide compatibility identity.
+func (s PendingStepCompletionSignal) SameCompletionSource(other PendingStepCompletionSignal) bool {
+	return s.StepID == other.StepID &&
+		s.SourceTurnID == other.SourceTurnID &&
+		s.MatchesWorkflowEntry(other.StepID, entryIDOrZero(other.WorkflowStepTransitionID))
+}
+
+func entryIDOrZero(entry *int64) int64 {
+	if entry == nil {
+		return 0
+	}
+	return *entry
 }
 
 // LoadSessionRuntimeConfig decodes the runtime-config bag entry from session
@@ -1524,11 +1546,13 @@ func LoadPendingStepSignal(metadata map[string]interface{}) (PendingStepCompleti
 		return v, v.StepID != "" && (v.WorkflowStepTransitionID == nil || *v.WorkflowStepTransitionID >= 0)
 	case map[string]interface{}:
 		out := PendingStepCompletionSignal{
-			StepID:   StringFromAny(v["step_id"]),
-			Source:   StringFromAny(v["source"]),
-			Summary:  StringFromAny(v["summary"]),
-			Handoff:  StringFromAny(v["handoff"]),
-			Blockers: StringFromAny(v["blockers"]),
+			SignalID:     StringFromAny(v["signal_id"]),
+			SourceTurnID: StringFromAny(v["source_turn_id"]),
+			StepID:       StringFromAny(v["step_id"]),
+			Source:       StringFromAny(v["source"]),
+			Summary:      StringFromAny(v["summary"]),
+			Handoff:      StringFromAny(v["handoff"]),
+			Blockers:     StringFromAny(v["blockers"]),
 		}
 		if raw, present := v["workflow_step_transition_id"]; present {
 			entry, valid := WorkflowEntryIDFromAny(raw)
