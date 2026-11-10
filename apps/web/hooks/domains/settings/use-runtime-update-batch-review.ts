@@ -49,7 +49,7 @@ function useRuntimeReviewLoader({
       return;
     }
     if (observedRun.current && (batchStatus === "complete" || batchStatus === "review")) return;
-    if (signature.current === candidateSignature && batchStatus !== "idle") return;
+    if (signature.current === candidateSignature) return;
     signature.current = candidateSignature;
     const id = ++requestID.current;
     setReviewLoading(true);

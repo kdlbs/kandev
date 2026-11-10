@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -559,6 +559,23 @@ describe("AgentRuntimeUpdateManager refresh rejection", () => {
       agent_name: AGENT_NAME,
       status: "queued",
       started_at: STARTED_AT,
+    });
+  });
+});
+
+describe("AgentRuntimeUpdateManager preview deduplication", () => {
+  it("does not start another preview load when a mid-load render repeats the candidates", async () => {
+    const pending = Promise.withResolvers<AgentUpdatePreview>();
+    const onPreview = vi.fn(() => pending.promise);
+    const view = render(<Harness statuses={[status()]} onPreview={onPreview} />);
+    await waitFor(() => expect(onPreview).toHaveBeenCalledTimes(1));
+
+    view.rerender(<Harness statuses={[status()]} onPreview={onPreview} />);
+    await Promise.resolve();
+    expect(onPreview).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      pending.resolve(preview(AGENT_NAME));
     });
   });
 });
