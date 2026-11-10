@@ -21,7 +21,7 @@ type ReviewLoaderOptions = {
   candidates: AgentUpdateStatus[];
   preview: RuntimePreviewLoader;
   beginReview: (rows: RuntimeBatchTarget[]) => boolean;
-  onLoaded: (keys: Set<string>) => void;
+  onLoaded: (rows: RuntimeBatchTarget[]) => void;
 };
 
 function useRuntimeReviewLoader({
@@ -58,7 +58,7 @@ function useRuntimeReviewLoader({
         if (id !== requestID.current) return;
         setPreviewFailures(failures);
         beginReview(rows);
-        onLoaded(new Set(rows.map((row) => row.key)));
+        onLoaded(rows);
       })
       .finally(() => {
         if (id === requestID.current) setReviewLoading(false);
@@ -91,6 +91,7 @@ function useRuntimeReviewLoader({
 function useReviewSelection(batch: RuntimeUpdateBatchState) {
   const [selection, setSelection] = useState<ReadonlySet<string>>(new Set());
   const touched = useRef(false);
+  const selectedTargets = useRef(new Map<string, string>());
   const reviewRows =
     batch.status === "review"
       ? batch.order.map((key) => batch.rows[key]).filter((row) => row?.phase === "review")
@@ -101,32 +102,78 @@ function useReviewSelection(batch: RuntimeUpdateBatchState) {
     if (batch.status !== "review") return;
     setSelection((previous) => {
       const next = new Set([...previous].filter((key) => reviewKeys.has(key)));
+      for (const key of selectedTargets.current.keys()) {
+        if (!next.has(key)) selectedTargets.current.delete(key);
+      }
       return next.size > 0 || touched.current ? next : new Set(reviewKeys);
     });
   }, [batch.status, batch.order]);
 
-  const toggleSelected = useCallback((key: string, selected: boolean) => {
-    touched.current = true;
+  const rememberLoaded = useCallback((rows: RuntimeBatchTarget[]) => {
+    const rowTargets = new Map(rows.map((row) => [row.key, row.targetVersion]));
+    for (const key of selectedTargets.current.keys()) {
+      if (!rowTargets.has(key)) selectedTargets.current.delete(key);
+    }
     setSelection((previous) => {
-      const next = new Set(previous);
-      if (selected) next.add(key);
-      else next.delete(key);
+      if (!touched.current) {
+        selectedTargets.current = rowTargets;
+        return new Set(rowTargets.keys());
+      }
+      const next = new Set(
+        [...previous].filter(
+          (key) => rowTargets.has(key) && selectedTargets.current.get(key) === rowTargets.get(key),
+        ),
+      );
+      for (const key of selectedTargets.current.keys()) {
+        if (!next.has(key)) selectedTargets.current.delete(key);
+      }
       return next;
     });
   }, []);
 
+  const replaceSelection = useCallback((rows: RuntimeBatchTarget[]) => {
+    selectedTargets.current = new Map(rows.map((row) => [row.key, row.targetVersion]));
+    setSelection(new Set(rows.map((row) => row.key)));
+  }, []);
+
+  const toggleSelected = useCallback(
+    (key: string, selected: boolean) => {
+      touched.current = true;
+      const targetVersion = reviewRows.find((row) => row.key === key)?.targetVersion;
+      setSelection((previous) => {
+        const next = new Set(previous);
+        if (selected) {
+          next.add(key);
+          if (targetVersion) selectedTargets.current.set(key, targetVersion);
+        } else {
+          next.delete(key);
+          selectedTargets.current.delete(key);
+        }
+        return next;
+      });
+    },
+    [reviewRows],
+  );
+
   const selectAll = useCallback(
     (selected: boolean) => {
       touched.current = true;
-      setSelection(selected ? new Set(reviewKeys) : new Set());
+      if (selected) {
+        selectedTargets.current = new Map(reviewRows.map((row) => [row.key, row.targetVersion]));
+        setSelection(new Set(reviewKeys));
+      } else {
+        selectedTargets.current.clear();
+        setSelection(new Set());
+      }
     },
-    [reviewKeys],
+    [reviewKeys, reviewRows],
   );
 
   return {
     selection,
-    setSelection,
     touched,
+    rememberLoaded,
+    replaceSelection,
     reviewRows: reviewRows.filter((row): row is RuntimeBatchRow => Boolean(row)),
     reviewKeys,
     toggleSelected,
@@ -143,7 +190,7 @@ type FreshRetryOptions = {
   refreshStatus: () => Promise<void>;
   loader: ReturnType<typeof useRuntimeReviewLoader>;
   touched: { current: boolean };
-  setSelection: (value: ReadonlySet<string>) => void;
+  replaceSelection: (rows: RuntimeBatchTarget[]) => void;
   reviewRows: RuntimeBatchRow[];
   batch: RuntimeUpdateBatchState;
 };
@@ -157,11 +204,13 @@ function useFreshRetryReview({
   refreshStatus,
   loader,
   touched,
-  setSelection,
+  replaceSelection,
   reviewRows,
   batch,
 }: FreshRetryOptions) {
   const [retrying, setRetrying] = useState(false);
+  const pendingPreviewRows = useRef<RuntimeBatchRow[]>([]);
+  const retryActive = useRef(false);
 
   const loadFreshRetryRows = useCallback(
     async (rows: RuntimeBatchRow[]) => {
@@ -181,11 +230,14 @@ function useFreshRetryReview({
       }
       const result = await loadRuntimeUpdateReviewRows(eligible, preview);
       beginRetryReview(result.rows);
+      const freshKeys = new Set(result.rows.map((row) => row.key));
+      pendingPreviewRows.current = rows.filter((row) => !freshKeys.has(row.key));
       loader.setPreviewFailures({ ...failures, ...result.failures });
       touched.current = false;
-      setSelection(new Set(result.rows.map((row) => row.key)));
+      replaceSelection(result.rows);
+      retryActive.current = true;
     },
-    [beginRetryReview, candidates, isEligible, loader, preview, setSelection, store, touched],
+    [beginRetryReview, candidates, isEligible, loader, preview, replaceSelection, store, touched],
   );
 
   const retry = useCallback(async () => {
@@ -204,15 +256,21 @@ function useFreshRetryReview({
   }, [batch.order, batch.rows, loadFreshRetryRows, refreshStatus]);
 
   const retryPreviews = useCallback(() => {
-    const hasSucceeded = batch.order.some((key) => batch.rows[key]?.phase === "succeeded");
-    if (hasSucceeded) {
-      void loadFreshRetryRows(reviewRows);
+    if (retryActive.current) {
+      const byKey = new Map<string, RuntimeBatchRow>();
+      for (const row of [...pendingPreviewRows.current, ...reviewRows]) byKey.set(row.key, row);
+      void loadFreshRetryRows([...byKey.values()]);
       return;
     }
     loader.retryPreviews();
-  }, [batch.order, batch.rows, loader, loadFreshRetryRows, reviewRows]);
+  }, [loader, loadFreshRetryRows, reviewRows]);
 
-  return { retrying, retry, retryPreviews };
+  const resetRetry = useCallback(() => {
+    retryActive.current = false;
+    pendingPreviewRows.current = [];
+  }, []);
+
+  return { retrying, retry, retryPreviews, resetRetry };
 }
 
 /**
@@ -235,23 +293,14 @@ export function useRuntimeUpdateReview({
   const { batch, beginReview, beginRetryReview, start, refreshStatus } =
     useAgentRuntimeUpdateBatch();
   const selectionState = useReviewSelection(batch);
-  const { selection, setSelection, touched, reviewRows, reviewKeys } = selectionState;
-  const onLoaded = useCallback(
-    (keys: Set<string>) => {
-      setSelection((previous) => {
-        if (!touched.current) return keys;
-        return new Set([...previous].filter((key) => keys.has(key)));
-      });
-    },
-    [setSelection, touched],
-  );
+  const { selection, touched, reviewRows, reviewKeys } = selectionState;
   const loader = useRuntimeReviewLoader({
     active,
     batchStatus: batch.status,
     candidates,
     preview,
     beginReview,
-    onLoaded,
+    onLoaded: selectionState.rememberLoaded,
   });
   const freshRetry = useFreshRetryReview({
     store,
@@ -262,7 +311,7 @@ export function useRuntimeUpdateReview({
     refreshStatus,
     loader,
     touched,
-    setSelection,
+    replaceSelection: selectionState.replaceSelection,
     reviewRows,
     batch,
   });
@@ -276,8 +325,9 @@ export function useRuntimeUpdateReview({
   );
   const resetAfterCompletion = useCallback(() => {
     touched.current = false;
+    freshRetry.resetRetry();
     loader.resetForNewReview();
-  }, [loader, touched]);
+  }, [freshRetry, loader, touched]);
 
   return {
     batch,

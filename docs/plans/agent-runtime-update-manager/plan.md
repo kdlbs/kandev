@@ -391,7 +391,7 @@ Static review identified nine correctness gaps. All are fixed with focused regre
 Implementation completed on 2026-11-10 and review remediation completed the same day.
 
 - Backend: `go test ./internal/agent/settings/... -count=1` passed for controller, handlers, dto, store, catalog, cliflags, and profileconfig; `go test -race ./internal/agent/settings/controller -run 'TestReviewedAgentUpdate' -count=1` passed; `bash scripts/lint-go-changed ...` reported 0 issues.
-- Web unit suites: combined Task 01 and Task 02 focused Vitest run passed 115 tests across 15 files; Task 03 focused run passed 57 tests across 9 files, including authority fencing, malformed 202, fresh retry evidence, completion reset, WebSocket reconnect recovery, refresh gating, read-only details, and scroll restoration.
+- Web unit suites: combined Task 01 and Task 02 focused Vitest run passed 115 tests across 15 files; Task 03 focused run passed 60 tests across 10 files, including authority fencing, malformed 202, fresh retry evidence, completion reset, WebSocket reconnect recovery, refresh gating, read-only details, and scroll restoration.
 - Web static checks: `pnpm run typecheck`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet` passed. Changed-file Oxlint reported no warnings.
 - Documentation: `node --test scripts/validate-public-docs.test.mjs` passed 63 tests; `node scripts/validate-public-docs.mjs` validated 55 published pages.
 - Specification gates: `python3 scripts/list-docs.py validate` validated 446 decisions and 1,965 specifications; `python3 scripts/lint-spec-files.test.py` passed 36 tests; `python3 scripts/lint-spec-files.py --all` passed; `git diff --check` passed.

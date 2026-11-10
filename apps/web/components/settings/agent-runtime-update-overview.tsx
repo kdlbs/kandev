@@ -142,7 +142,7 @@ function RuntimeSecondaryGroups({
             open={openGroups.has(group)}
             onToggle={(event) => onGroupOpenChange(group, event.currentTarget.open)}
           >
-            <summary className="flex min-h-8 cursor-pointer items-center gap-1 py-1 text-sm font-medium">
+            <summary className="flex min-h-8 cursor-pointer items-center gap-1 py-1 text-sm font-medium max-md:min-h-11 [@media(pointer:coarse)]:min-h-11">
               <IconChevronRight className="size-4 shrink-0" aria-hidden="true" />
               {groupLabel(t, group, groupRows.length)}
             </summary>

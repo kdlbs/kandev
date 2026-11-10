@@ -146,7 +146,7 @@ function RuntimeManagerDetail({
   const dirtyFooter = (
     <RuntimePolicyDirtyFooter controllers={controllers} canManage={canManage} embedded />
   );
-  if (!status || !runtimeUpdate?.supported) {
+  if (!runtimeUpdate?.supported) {
     return (
       <RuntimeUpdateGuidanceSurface
         agentName={agentName}
@@ -176,7 +176,7 @@ function RuntimeManagerDetail({
       onOpenChange={(open) => !open && onClose()}
       isMobile={isMobile}
       onBack={onBack}
-      beforeBody={<RuntimePolicyDetail status={status} />}
+      beforeBody={status ? <RuntimePolicyDetail status={status} /> : null}
       footerBefore={dirtyFooter}
       approveDisabledReason={dirty ? dirtyBlockedLabel : undefined}
     />

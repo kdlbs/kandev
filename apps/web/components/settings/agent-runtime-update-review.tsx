@@ -47,7 +47,7 @@ export function RuntimeReviewHeader({
             type="button"
             variant="outline"
             size="sm"
-            className="cursor-pointer"
+            className="cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
             onClick={bulk.onRetryPreviews}
             data-testid="runtime-bulk-retry-preview"
           >
