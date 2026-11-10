@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-SESSION-DELETE-RESOURCE-CLEANUP-001
 created: 2026-08-08
-updated: 2026-08-30
+updated: 2026-11-10
 owners:
   - cfl
 ---
@@ -18,7 +18,28 @@ This design preserves the technical source detail for `REQ-TASKS-SESSION-DELETE-
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-TASKS-SESSION-DELETE-RESOURCE-CLEANUP-001` | [Migrated source detail](#migrated-source-detail), [Frontend environment-handle continuity](#frontend-environment-handle-continuity) |
+| `REQ-TASKS-SESSION-DELETE-RESOURCE-CLEANUP-001` | [Migrated source detail](#migrated-source-detail), [Runtime quiescence](#runtime-quiescence), [Frontend environment-handle continuity](#frontend-environment-handle-continuity) |
+
+## Runtime quiescence
+
+`orchestrator.Service.DeleteSession` calls `quiesceSessionExecutionBeforeDeletion` before removing the session row.
+Quiescence captures the session's execution ID and stops that exact execution with the `session deleted` reason and force enabled.
+A confirmed absent runtime permits deletion.
+A transport error or deadline retains the session and its activity for retry.
+The executor's compatibility error prefix alone does not prove runtime absence.
+
+A concurrent cancellation must release its client lease so queued teardown can proceed.
+The [cancellation design](workflow-cancelled-turn-completion.md#cancellation-client-lease-and-concurrent-stop) owns that lease rule.
+Stop still serializes runtime teardown and revalidates the captured execution before acting.
+
+Shared environment ownership does not make sibling agentctl clients interchangeable.
+`ensureWorkspaceExecutionLocked` creates or reuses the requesting session's own controller.
+`launchRestoreWorkspace` requires its execution ID, waits for readiness, and rechecks that binding before returning success.
+Environment-keyed Git state and session-owned transport identity retain their separate roles.
+An unrelated sibling readiness event does not complete a restore attempt.
+
+The [cancel/stop fix package](../../../plans/cancel-stop-client-deadlock/plan.md) covers concurrent teardown and workspace compatibility.
+It preserves the session-owned restoration repair in PR #5177.
 
 ## Migrated source detail
 
