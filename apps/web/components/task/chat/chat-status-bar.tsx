@@ -107,7 +107,9 @@ function getRightControlVisibility({
 }) {
   const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
   const showConversationUsage = !!taskId && !!sessionId;
+  // A qualifying task keeps the graph action before its first session exists.
   const showRightControls =
+    !!taskId ||
     (showAutoScrollControl && !!sessionId) ||
     showConversationUsage ||
     canShare ||
@@ -249,6 +251,7 @@ function ChatStatusBarRightControls({
           ) : null
         }
       />
+      <TaskGraphButton taskId={taskId} />
     </div>
   );
 }
@@ -410,7 +413,6 @@ export function ChatStatusBar({
         {showTodos && <TodoIndicator todos={todoItems} />}
         {autopilot && <AutopilotChatChip />}
         <TaskDependencyChip taskId={taskId} />
-        <TaskGraphButton taskId={taskId} />
         {!separateCI && <ComposerCIStatus taskId={taskId} sessionId={sessionId} />}
         {activeGoal && <AgentGoalChip key={sessionId ?? "none"} goal={activeGoal} />}
         <BackgroundWorkChip

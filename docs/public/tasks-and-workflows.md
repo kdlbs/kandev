@@ -952,8 +952,10 @@ change links in the task's **Edit** dialog or over MCP.
 
 There are two graphs:
 
-- **Task graph tab.** Inside a task, select **Task graph** in the status row
-  above the chat box, or **View graph** in the dependency chip. The tab opens
+- **Task graph tab.** Inside a task, select the hierarchy icon at the right of
+  the status row above the chat box, after token stats and Share, or
+  **View graph** in the dependency chip. The icon appears only when the task
+  has a parent, subtasks, dependency links, or related tasks. The tab opens
   beside the chat and follows the task you are viewing.
 - **Board Graph view.** On Home, select **Graph** in the view switcher, next
   to **Pipeline**. Each workflow lane shows the tasks the board currently
@@ -989,7 +991,7 @@ it; double-click opens it directly.
   another workflow is not drawn there, so the step and parallel counts only
   reflect links inside the lane. Use the task graph's **Chain** mode to see
   links across workflows.
-- On a phone, **Task graph** and **Show in graph** open a full-screen sheet.
+- On a phone, the graph icon and **Show in graph** open a full-screen sheet.
   Pan with one finger, pinch to zoom, tap a card to open it, and long-press
   to highlight its chain. The board Graph view, like Pipeline, is shown as
   Kanban on a phone.

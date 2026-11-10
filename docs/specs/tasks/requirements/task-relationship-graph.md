@@ -63,6 +63,25 @@ can see how its related cards are ordered without opening each card.
 - **AC-TASKS-TASK-RELATIONSHIP-GRAPH-001.5:** The phone sheet shall close
   through its close control and the Escape key. Closing shall return focus to
   the control that opened it.
+- **AC-TASKS-TASK-RELATIONSHIP-GRAPH-001.6:** The chat status row shall show
+  the graph as an icon without a visible text label or pill border. The icon
+  shall follow Share in the right-aligned action group above the composer.
+  When Share or token stats are absent, the icon shall keep its place in that
+  group. The left status group shall not contain a second graph control.
+- **AC-TASKS-TASK-RELATIONSHIP-GRAPH-001.7:** The icon shall have the localized
+  accessible name Task graph. Pointer hover and keyboard focus shall show that
+  name in a tooltip. Click, tap, Enter, and Space shall open the task's graph
+  through the same action.
+- **AC-TASKS-TASK-RELATIONSHIP-GRAPH-001.8:** On phones, the icon shall remain
+  in the right-aligned action group when the row wraps. Phone and coarse-pointer
+  targets shall measure at least 44 CSS pixels in both dimensions. On a desktop
+  with a fine pointer, the icon shall match the adjacent compact 24-pixel actions.
+  The control shall not cause horizontal document overflow or overlap adjacent
+  controls.
+- **AC-TASKS-TASK-RELATIONSHIP-GRAPH-001.9:** When a task qualifies under
+  AC-TASKS-TASK-RELATIONSHIP-GRAPH-001.1, the icon shall remain available without
+  a session, token stats, or Share. The passthrough toolbar shall use the same
+  icon presentation and visibility rules in its existing action area.
 
 ### REQ-TASKS-TASK-RELATIONSHIP-GRAPH-002: Show a parent's subtasks in order
 
