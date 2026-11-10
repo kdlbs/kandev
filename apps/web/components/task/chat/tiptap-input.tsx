@@ -31,7 +31,6 @@ import {
 } from "./tiptap-suggestion";
 import { useTipTapEditor, type TipTapInputHandle } from "./use-tiptap-editor";
 import { useSuggestionEscapeFallback } from "./use-suggestion-escape-fallback";
-import { useTipTapEditorEventHandlers } from "./tiptap-editor-events";
 import { getSuggestionMenuOpenState } from "./suggestion-menu-state";
 import {
   useClarificationEscapeGuard,
@@ -59,6 +58,7 @@ type TipTapInputProps = {
   onChange: (value: string) => void;
   onSubmit?: () => void;
   onEscape?: (event: React.KeyboardEvent<HTMLElement>) => void;
+  shouldHandleEscape?: (event: KeyboardEvent) => boolean;
   placeholder?: string;
   disabled?: boolean;
   className?: string;
@@ -450,6 +450,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     onChange,
     onSubmit,
     onEscape,
+    shouldHandleEscape,
     placeholder = "",
     disabled = false,
     className,
@@ -469,21 +470,22 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
   },
   ref,
 ) {
+  const inputSurface = useChatComposerInputSurface(
+    sessionId,
+    taskId ?? null,
+    workspaceId,
+    entityReferencesEnabled,
+  );
   const {
-    menu,
     mentionSuggestion,
     slashSuggestion,
     slashCommands,
     entityReferences,
-    editorWrapperRef,
-    editorRef,
     overlay,
     isSuggestionMenuOpen,
     closeEntityReferenceMenu,
-    history,
     getHistory,
-    isDraining,
-  } = useChatComposerInputSurface(sessionId, taskId ?? null, workspaceId, entityReferencesEnabled);
+  } = inputSurface;
   const { editor, applyHistoryEntry } = useTipTapEditor({
     value,
     onChange,
@@ -510,30 +512,21 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     isReverseSearchOpen: overlay.isReverseSearchOpen,
     ref,
   });
-  const handleReverseSearchSelect = useTipTapEditorEventHandlers({
-    editor,
-    editorRef,
-    editorWrapperRef,
-    suggestion,
-    dismissSuggestion,
-    closeReverseSearch: overlay.closeReverseSearch,
-    applyHistoryEntry,
-  });
   return (
     <TipTapInputSurface
-      menu={menu}
-      slashCommands={slashCommands}
-      entityReferences={entityReferences}
-      overlay={overlay}
-      history={history}
-      isDraining={isDraining}
-      onReverseSearchSelect={handleReverseSearchSelect}
+      {...inputSurface}
       onEntityReferenceClose={closeEntityReferenceMenu}
       editor={editor}
-      editorWrapperRef={editorWrapperRef}
       sessionId={sessionId}
       taskId={taskId ?? null}
       detailActive={detailActive}
+      promptSuggestion={suggestion}
+      onPromptSuggestionDismiss={dismissSuggestion}
+      applyHistoryEntry={applyHistoryEntry}
+      escapeGuard={{
+        shouldHandleEscape,
+        isPromptSuggestionVisible: Boolean(suggestion && !value.trim()),
+      }}
       onKeyDownCapture={createComposerEscapeCaptureHandler(
         onEscape,
         isSuggestionMenuOpen,

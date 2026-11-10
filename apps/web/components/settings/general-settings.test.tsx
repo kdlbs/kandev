@@ -484,7 +484,9 @@ function keyboardStore(patch: Record<string, unknown> = {}) {
 
 it("saves the opt-in Escape cancellation preference", async () => {
   keyboardStore();
-  apiMocks.updateUserSettings.mockResolvedValue({ settings: {} });
+  apiMocks.updateUserSettings.mockResolvedValue({
+    settings: { escape_cancels_agent: true, chat_submit_key: "enter", revision: 2 },
+  });
   renderKeyboardSettings();
   const toggle = screen.getByRole("switch", { name: "Escape pauses the agent" });
   expect(toggle.getAttribute("data-state")).toBe("unchecked");
@@ -499,6 +501,7 @@ it("saves the opt-in Escape cancellation preference", async () => {
     expect.objectContaining({ escapeCancelsAgent: true }),
   );
 });
+
 const GITHUB_INTEGRATION_SHORTCUT_ID = "integration:github";
 const GITHUB_INTEGRATION_RECORDER_ID = `shortcut-recorder-${GITHUB_INTEGRATION_SHORTCUT_ID}`;
 

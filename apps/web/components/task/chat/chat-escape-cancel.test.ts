@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createComposerEscapeCaptureHandler,
+  shouldCancelAgentWithEscape,
+  shouldClaimComposerEscape,
   shouldDeferComposerEscapeToExistingControls,
 } from "./chat-escape-cancel";
 
@@ -30,5 +32,93 @@ describe("shouldDeferComposerEscapeToExistingControls", () => {
     handler({} as React.KeyboardEvent<HTMLElement>);
 
     expect(onEscape).not.toHaveBeenCalled();
+  });
+});
+
+describe("composer Escape cancellation eligibility", () => {
+  const active = {
+    canCancelAgent: true,
+    escapeCancelsAgent: true,
+    hasPendingClarification: false,
+  };
+
+  it("claims Escape only for an eligible focused composer", () => {
+    expect(
+      shouldClaimComposerEscape(true, true, {
+        isSuggestionMenuOpen: false,
+        isReverseSearchOpen: false,
+        isPromptSuggestionVisible: false,
+      }),
+    ).toBe(true);
+  });
+
+  it.each([
+    {
+      targetIsInsideEditor: false,
+      shouldHandleEscape: true,
+      controls: {
+        isSuggestionMenuOpen: false,
+        isReverseSearchOpen: false,
+        isPromptSuggestionVisible: false,
+      },
+    },
+    {
+      targetIsInsideEditor: true,
+      shouldHandleEscape: false,
+      controls: {
+        isSuggestionMenuOpen: false,
+        isReverseSearchOpen: false,
+        isPromptSuggestionVisible: false,
+      },
+    },
+    {
+      targetIsInsideEditor: true,
+      shouldHandleEscape: true,
+      controls: {
+        isSuggestionMenuOpen: true,
+        isReverseSearchOpen: false,
+        isPromptSuggestionVisible: false,
+      },
+    },
+    {
+      targetIsInsideEditor: true,
+      shouldHandleEscape: true,
+      controls: {
+        isSuggestionMenuOpen: false,
+        isReverseSearchOpen: true,
+        isPromptSuggestionVisible: false,
+      },
+    },
+    {
+      targetIsInsideEditor: true,
+      shouldHandleEscape: true,
+      controls: {
+        isSuggestionMenuOpen: false,
+        isReverseSearchOpen: false,
+        isPromptSuggestionVisible: true,
+      },
+    },
+  ])(
+    "does not claim Escape outside the eligible composer state: %o",
+    ({ targetIsInsideEditor, shouldHandleEscape, controls }) => {
+      expect(shouldClaimComposerEscape(targetIsInsideEditor, shouldHandleEscape, controls)).toBe(
+        false,
+      );
+    },
+  );
+
+  it.each([
+    { key: "Enter" },
+    { key: "Escape", isComposing: true },
+    { key: "Escape", keyCode: 229 },
+    { key: "Escape", repeat: true },
+  ])("does not cancel for a different or non-cancelable Escape event: %o", (init) => {
+    expect(shouldCancelAgentWithEscape(new KeyboardEvent("keydown", init), active)).toBe(false);
+  });
+
+  it("does not cancel an event that another handler prevented", () => {
+    const handled = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    handled.preventDefault();
+    expect(shouldCancelAgentWithEscape(handled, active)).toBe(false);
   });
 });

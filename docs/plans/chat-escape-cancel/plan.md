@@ -1,6 +1,6 @@
 ---
 created: 2026-11-05
-status: draft
+status: implemented
 requirements:
   - REQ-TASKS-KEYBOARD-ACTIONS-004
 system_design:
@@ -21,24 +21,28 @@ interactions keep their existing key behavior.
 
 ### In scope
 
-- Handle Escape from the focused task chat composer only when its agent is
-  running.
+- Add the off-by-default account preference for Escape cancellation.
+- Handle Escape in the shared task chat and Quick Chat composer only when the
+  setting is enabled and cancellation is available.
 - Reuse `handleCancelTurn` and the current resolved session.
 - Prove the behavior and guards with unit and desktop/phone browser coverage.
 
 ### Out of scope
 
-- A new keyboard-shortcut preference or global shortcut.
+- A global shortcut binding.
 - Cancellation from transcript focus or other chat controls.
-- A touch button, backend/API change, or new cancellation transport.
+- A touch button or a new cancellation transport.
 
 ## Technical approach
 
 Use `useChatPanelHandlers` in `apps/web/components/task/chat/chat-input-area.tsx`
-and its existing `handleCancelTurn`. Scope the Escape keydown to the actual
-composer, consume it only when the user has enabled the setting, cancellation is available, and the event is not an IME
-composition event, and preserve the existing cancel request and error handling.
-The rendered chat's running state and resolved session remain authoritative.
+and its existing `handleCancelTurn`. The account preference uses the existing
+user-settings API and defaults to off. Scope the Escape keydown to the actual
+composer. Consume it only when the user enabled the setting, cancellation is
+available, no editor control owns Escape, and the event is not an IME
+composition event. Quick Chat uses the existing Escape guard registry to keep
+Radix from closing the dialog when the composer will cancel the turn. The
+resolved session and existing cancel request remain authoritative.
 
 ## ASCII UI preview
 
@@ -75,8 +79,10 @@ AC-TASKS-KEYBOARD-ACTIONS-004.1 through .4.
 `apps/web/components/task/chat/chat-input-body.test.tsx` covers the composer
 key handler, running/idle state, IME composition, repeated keys, and default
 prevention. `chat-escape-cancel.test.ts` covers preserving Escape ownership
-for editor menus and suggestions. Existing chat-input tests cover surrounding
-composer behavior.
+for editor menus and suggestions. `apps/web/components/settings/general-settings.test.tsx`
+covers account-setting reconciliation and saves. `apps/web/components/quick-chat/quick-chat-modal.test.tsx`
+covers the dialog guard. Existing chat-input tests cover surrounding composer
+behavior.
 
 ## E2E tests
 
@@ -87,6 +93,8 @@ composer behavior.
 - Phone Chromium: `apps/web/e2e/tests/session/mobile-pause-resume-recovery.spec.ts`
   uses the existing mobile chat layout with an attached keyboard, focuses the
   composer, and presses Escape during a running turn.
+- Chromium: `apps/web/e2e/tests/chat/quick-chat.spec.ts` checks that Escape
+  cancels a running Quick Chat turn and keeps its dialog open.
 
 ## Work orders
 

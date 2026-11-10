@@ -57,6 +57,7 @@ import {
   rebaseAppearanceDraft,
   type AppearanceState,
 } from "@/components/settings/appearance-settings-state";
+import { useChatInputSettingsDraft } from "./use-chat-input-settings-draft";
 
 function ThemeSettingsCard({
   theme,
@@ -549,38 +550,11 @@ export function AppearanceSettings() {
 
 export function KeyboardShortcutsSettings() {
   const { t } = useTranslation();
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const storeApi = useAppStoreApi();
   const { items: pluginItems } = usePlugins();
   const pluginShortcutEntries = buildPluginShortcutEntries(pluginItems);
   const integrationEntries = useIntegrationShortcutEntries(pluginItems);
   const shortcuts = useShortcutDraft("general-keyboard-shortcuts");
-  const [saved, setSaved] = useState(() => ({
-    chatSubmitKey: userSettings.chatSubmitKey,
-    escapeCancelsAgent: userSettings.escapeCancelsAgent,
-  }));
-  const [draft, setDraft] = useState(saved);
-  const revision = JSON.stringify(draft);
-
-  useSettingsSaveContributor({
-    id: "general-chat-submit-key",
-    revision,
-    isDirty: revision !== JSON.stringify(saved),
-    save: async () => {
-      const submitted = draft;
-      const current = storeApi.getState().userSettings;
-      await updateUserSettings({
-        workspace_id: current.workspaceId || "",
-        repository_ids: current.repositoryIds || [],
-        chat_submit_key: submitted.chatSubmitKey,
-        escape_cancels_agent: submitted.escapeCancelsAgent,
-      });
-      setSaved(submitted);
-      setUserSettings({ ...storeApi.getState().userSettings, ...submitted });
-    },
-    discard: () => setDraft(saved),
-  });
+  const { saved, draft, updateDraft } = useChatInputSettingsDraft();
 
   return (
     <div className="space-y-8">
@@ -600,16 +574,14 @@ export function KeyboardShortcutsSettings() {
             <Switch
               id="escape-cancels-agent"
               checked={draft.escapeCancelsAgent}
-              onCheckedChange={(escapeCancelsAgent) =>
-                setDraft((current) => ({ ...current, escapeCancelsAgent }))
-              }
+              onCheckedChange={(escapeCancelsAgent) => updateDraft({ escapeCancelsAgent })}
             />
           }
         />
         <ChatSubmitKeyCard
           value={draft.chatSubmitKey}
           isDirty={draft.chatSubmitKey !== saved.chatSubmitKey}
-          onChange={(chatSubmitKey) => setDraft((current) => ({ ...current, chatSubmitKey }))}
+          onChange={(chatSubmitKey) => updateDraft({ chatSubmitKey })}
         />
       </SettingsSection>
 

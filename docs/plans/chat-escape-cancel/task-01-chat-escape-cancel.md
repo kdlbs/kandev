@@ -22,13 +22,15 @@ system_design:
 ## Summary
 
 Add a composer-scoped Escape shortcut that invokes the existing cancel-turn
-action only while the task's agent is running. Preserve Escape behavior in all
-other chat surfaces and support the same behavior in the phone chat layout with
-an attached keyboard.
+action when the account preference is enabled and cancellation is available.
+Preserve Escape behavior in other chat surfaces. The shared composer also works
+inside Quick Chat and in the phone chat layout with an attached keyboard.
 
 ## In scope
 
 - Add a guarded key handler using the current `handleCancelTurn` callback.
+- Reconcile account-setting drafts with live updates and send only edited fields.
+- Keep Quick Chat open when Escape cancels a turn.
 - Cover running, idle, focus, IME, and resolved-session behavior with unit tests.
 - Add desktop and phone Playwright coverage for the chat flow.
 
@@ -74,10 +76,11 @@ composition and introduces no touch control.
 ## Verification
 
 ```bash
-(cd apps/web && pnpm exec vitest run components/task/chat/chat-input-body.test.tsx components/task/chat/chat-escape-cancel.test.ts components/task/chat/chat-input-container.test.tsx components/task/chat/chat-input-area.test.tsx components/task/chat/tiptap-input-file-search-ownership.test.tsx)
+(cd apps/web && pnpm exec vitest run components/settings/general-settings.test.tsx components/quick-chat/quick-chat-modal.test.tsx components/task/chat/chat-input-body.test.tsx components/task/chat/chat-escape-cancel.test.ts components/task/chat/chat-input-container.test.tsx components/task/chat/chat-input-area.test.tsx components/task/chat/tiptap-input-file-search-ownership.test.tsx)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm e2e:run --project chromium tests/session/pause-resume-recovery.spec.ts)
 (cd apps/web && pnpm e2e:run --project mobile-chrome tests/session/mobile-pause-resume-recovery.spec.ts)
+(cd apps/web && pnpm e2e:run --project chromium tests/chat/quick-chat.spec.ts --grep "Escape cancels a running Quick Chat turn without closing the dialog")
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check
