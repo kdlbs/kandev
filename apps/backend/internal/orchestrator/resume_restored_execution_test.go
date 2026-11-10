@@ -30,7 +30,7 @@ func TestEnsureSessionRunning_BindsRestoredExecutionAfterFailedResume(t *testing
 		isAgentRunning:         true,
 	}}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	registry := svc.resumeAttemptStore()
 	failed, owner := registry.begin(ctx, taskID, sessionID)
 	require.True(t, owner)

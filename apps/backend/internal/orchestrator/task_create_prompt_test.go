@@ -423,7 +423,7 @@ func TestInitialCreatePrompt_PassthroughEvidenceSurvivesPredecessorTerminalEvent
 	seedMockTaskState(taskRepo, "task-create-successor", v1.TaskStateInProgress)
 	agentMgr := &mockAgentManager{isPassthrough: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	session, err := repo.GetTaskSession(ctx, "session-create-successor")
 	require.NoError(t, err)
 	svc.activeTurns.Store(session.ID, "turn-successor")

@@ -210,7 +210,7 @@ func Classify(in Input) *Error {
 		// consumer (short retry, circuit breaker) honor it uniformly.
 		text := in.Stderr + "\n" + in.Stdout
 		hint := parseResetHintAt(text, observedAt)
-		if hint == nil && e.ClassifierRule == "claude.stderr.session_limit.v1" {
+		if hint == nil && e.ClassifierRule == ruleClaudeSessionLimit {
 			hint = parseResetClockHintAt(text, observedAt)
 			e.ResetHintInferred = hint != nil
 		}
@@ -302,12 +302,12 @@ func classify(in Input) *Error {
 func hardQuotaRuleOutranksRateStatus(rule string) bool {
 	switch rule {
 	case "claude.stderr.quota.v1",
-		"claude.stderr.session_limit.v1",
-		"claude.stderr.weekly_limit.v1",
+		ruleClaudeSessionLimit,
+		ruleClaudeWeeklyLimit,
 		"codex.stderr.quota.v1",
-		"opencode.stderr.usage_limit.v1",
+		ruleOpenCodeUsageLimit,
 		ruleOpenCodeGoUsageLimit,
-		"opencode.stderr.credit.v1":
+		ruleOpenCodeCredit:
 		return true
 	default:
 		return false

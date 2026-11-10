@@ -78,7 +78,7 @@ func TestPromptTask_QueuedStreamBoundaryDoesNotDeadlock(t *testing.T) {
 	agent := &queuedStreamBoundaryAgentManager{mockAgentManager: baseAgent}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
 	agent.service = svc
-	svc.executor = executor.NewExecutor(agent, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agent, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageQueue = newAuthoritativeMemoryQueue(repo, testLogger())
 	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, taskID, sessionID)
 	if err != nil {
@@ -375,7 +375,7 @@ func newPreparedPromptFixture(t *testing.T, suffix string, alternateSession bool
 	agent := &queuedStreamBoundaryAgentManager{mockAgentManager: baseAgent}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
 	agent.service = svc
-	svc.executor = executor.NewExecutor(agent, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agent, repo, testLogger(), executor.ExecutorConfig{}))
 	turnService := &repoTurnService{repo: repo}
 	svc.turnService = turnService
 	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, taskID, sessionID)

@@ -317,6 +317,7 @@ func TestAcquireEnsureLock_AllowsConcurrencyAcrossTaskIDs(t *testing.T) {
 func TestPrepareTaskSession_UsesExecutorIDFromTaskMetadata(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
+	seedExecutorRow(t, repo, "exec-special", models.ExecutorTypeLocal)
 	taskRepo := newMockTaskRepo()
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
 
@@ -508,7 +509,7 @@ func TestEnsureSession_EnsureExecution_TriggersResume(t *testing.T) {
 	agentMgr := &mockAgentManager{isAgentRunning: false}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	log := testLogger()
-	svc.executor = executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 
 	resp, err := svc.EnsureSession(ctx, "task1", EnsureSessionOptions{EnsureExecution: true})
 	if err != nil {

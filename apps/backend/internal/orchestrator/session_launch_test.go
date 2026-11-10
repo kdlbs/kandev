@@ -746,7 +746,7 @@ func TestRecoverSession_ContextContinuationCommitsBeforePromptAdmission(t *testi
 	}
 	svc := createTestServiceWithAgent(baseRepo, newMockStepGetter(), newMockTaskRepo(), manager)
 	svc.repo = repo
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 
 	_, err = svc.RecoverSession(ctx, taskID, sessionID, sessionRecoveryActionContinueFromHistory)
 	if !errors.Is(err, commitErr) {
@@ -901,6 +901,54 @@ func TestLaunchRestoreWorkspace_Success(t *testing.T) {
 	}
 	if resp.State != string(models.TaskSessionStateCompleted) {
 		t.Errorf("expected state %q, got %q", models.TaskSessionStateCompleted, resp.State)
+	}
+}
+
+func TestLaunchRestoreWorkspaceRetriesWhilePreviousExecutionStops(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCompleted)
+	ensureCalls := 0
+	waitCalls := 0
+	lookupCalls := 0
+	executionID := "exec-stopping"
+	agentMgr := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			lookupCalls++
+			if lookupCalls == 2 {
+				return "", errors.New("execution was removed during cleanup")
+			}
+			return executionID, nil
+		},
+		ensureWorkspaceExecutionForSessionFunc: func(context.Context, string, string) error {
+			ensureCalls++
+			if ensureCalls == 3 {
+				executionID = "exec-restored"
+			}
+			return nil
+		},
+		waitForAgentctlReadyFunc: func(context.Context, string) error {
+			waitCalls++
+			if waitCalls == 1 {
+				return executor.ErrAgentctlClientUnavailable
+			}
+			return nil
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	resp, err := svc.LaunchSession(context.Background(), &LaunchSessionRequest{
+		TaskID:    "task1",
+		Intent:    IntentRestoreWorkspace,
+		SessionID: "session1",
+	})
+	if err != nil {
+		t.Fatalf("restore should succeed after the failed execution is removed: %v", err)
+	}
+	if resp.AgentExecutionID != "exec-restored" {
+		t.Fatalf("agent_execution_id = %q, want replacement execution", resp.AgentExecutionID)
+	}
+	if ensureCalls != 3 || waitCalls != 2 || lookupCalls != 4 {
+		t.Fatalf("workspace ensure/readiness/lookups = %d/%d/%d, want 3/2/4", ensureCalls, waitCalls, lookupCalls)
 	}
 }
 

@@ -4,6 +4,7 @@ import { dwell } from "../../helpers/causal-waits";
 import {
   assertLocatorWithinViewportX,
   assertNoDocumentHorizontalOverflow,
+  expectLocatorContainedBy,
 } from "../../helpers/layout-assertions";
 
 async function expectTouchTarget(locator: import("@playwright/test").Locator, label: string) {
@@ -42,8 +43,16 @@ test("mobile task graph opens full screen with touch-sized controls", async ({
   });
 
   await testPage.goto(`/t/${a.id}`);
-  const button = testPage.getByTestId("task-graph-button").first();
+  const bar = testPage.getByTestId("chat-status-bar");
+  const controls = bar.getByTestId("chat-status-bar-right-controls");
+  const button = controls.getByTestId("task-graph-button");
+  await expect(button).toHaveCount(1);
+  await expect(button).toHaveAccessibleName("Task graph");
+  await expect(controls).toHaveCSS("flex-wrap", "wrap");
+  await expect(bar).toHaveCSS("flex-wrap", "wrap");
+  await expectLocatorContainedBy(button, controls, "phone graph action");
   await expectTouchTarget(button, "graph button");
+  await assertNoDocumentHorizontalOverflow(testPage, "graph entry");
   await button.tap();
 
   const dialog = testPage.getByTestId("task-graph-dialog");
@@ -101,7 +110,10 @@ test("narrow touch layout keeps the graph sheet full width and returns focus", a
   });
 
   await testPage.goto(`/t/${child.id}`);
-  const button = testPage.getByTestId("task-graph-button").first();
+  const controls = testPage.getByTestId("chat-status-bar-right-controls");
+  const button = controls.getByTestId("task-graph-button");
+  await expect(button).toHaveCount(1);
+  await expectLocatorContainedBy(button, controls, "narrow graph action");
   await button.focus();
   await button.tap();
 
@@ -111,4 +123,37 @@ test("narrow touch layout keeps the graph sheet full width and returns focus", a
   await dialog.getByTestId("task-graph-close").tap();
   await expect(dialog).toHaveCount(0);
   await expect(button).toBeFocused();
+});
+
+test.describe("coarse-pointer tablet", () => {
+  test.use({ hasTouch: true, viewport: { width: 900, height: 1000 } });
+
+  test("keeps the graph action touch-sized in the right utility group", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const base = {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    };
+    const parent = await apiClient.createTask(seedData.workspaceId, "Tablet graph parent", base);
+    const child = await apiClient.createTask(seedData.workspaceId, "Tablet graph child", {
+      ...base,
+      parent_id: parent.id,
+    });
+
+    await testPage.goto(`/t/${child.id}`);
+    const controls = testPage.getByTestId("chat-status-bar-right-controls");
+    const button = controls.getByTestId("task-graph-button");
+    await expect(button).toHaveCount(1);
+    await expect(button).toHaveAccessibleName("Task graph");
+    await expectLocatorContainedBy(button, controls, "tablet graph action");
+    await expectTouchTarget(button, "tablet graph button");
+    await assertNoDocumentHorizontalOverflow(testPage, "tablet graph entry");
+
+    await button.tap();
+    await expect(testPage.getByTestId("task-graph-dialog")).toBeVisible();
+  });
 });

@@ -1,8 +1,14 @@
+import type { Locator } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForHttp } from "../../helpers/causal-waits";
+import {
+  assertNoDocumentHorizontalOverflow,
+  expectLocatorContainedBy,
+} from "../../helpers/layout-assertions";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { openConversationUsageTask } from "../chat/conversation-usage-helpers";
 
 // Task relationship graph (docs/specs/tasks/requirements/task-relationship-graph.md).
 // Topology: outside → a → b → c, with sibling d unordered, all children of parent.
@@ -33,6 +39,14 @@ async function seedGraph(apiClient: ApiClient, seed: Seed) {
 const node = (page: import("@playwright/test").Page, id: string) =>
   page.getByTestId(`task-graph-node-${id}`);
 
+async function expectRenderedTarget(control: Locator, size: number, label: string) {
+  const box = await control.boundingBox();
+  expect(box, `${label}: control has geometry`).not.toBeNull();
+  if (!box) return;
+  expect(Math.abs(box.width - size), `${label}: width`).toBeLessThanOrEqual(1);
+  expect(Math.abs(box.height - size), `${label}: height`).toBeLessThanOrEqual(1);
+}
+
 test.describe("Task graph", () => {
   test("opens as a workbench tab, shows order, follows live state and navigates", async ({
     testPage,
@@ -42,7 +56,16 @@ test.describe("Task graph", () => {
     const g = await seedGraph(apiClient, seedData);
     await testPage.goto(`/t/${g.b.id}`);
 
-    await testPage.getByTestId("task-graph-button").first().click();
+    const bar = testPage.getByTestId("chat-status-bar");
+    const controls = bar.getByTestId("chat-status-bar-right-controls");
+    const graphButton = bar.getByTestId("task-graph-button");
+    await expect(graphButton).toHaveCount(1);
+    await expect(graphButton).toHaveAccessibleName("Task graph");
+    await expect(graphButton).toBeVisible();
+    await expectLocatorContainedBy(graphButton, controls, "desktop graph action");
+    await expectRenderedTarget(graphButton, 24, "desktop graph action");
+
+    await graphButton.click();
     const panel = testPage.getByTestId("task-graph-panel");
     await expect(panel).toBeVisible();
     await expect(testPage).not.toHaveURL(/panel=task-graph/);
@@ -85,6 +108,62 @@ test.describe("Task graph", () => {
       "data-focused",
       "true",
     );
+  });
+
+  test("keeps the graph icon after Share across width and pointer changes", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { taskId, session } = await openConversationUsageTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Graph action neighbors",
+    );
+    await apiClient.createTask(seedData.workspaceId, "Graph action child", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+      parent_id: taskId,
+    });
+    await testPage.reload();
+    await session.waitForLoad();
+
+    const bar = session.chatStatusBar();
+    const controls = bar.getByTestId("chat-status-bar-right-controls");
+    const graph = controls.getByTestId("task-graph-button");
+    const share = controls.getByTestId("share-task-button");
+    await expect(graph).toHaveCount(1);
+    await expect(graph).toHaveAccessibleName("Task graph");
+    await expect(share).toBeVisible();
+    await expect(controls.getByTestId("conversation-usage-trigger")).toBeVisible();
+
+    const followsShare = await controls.evaluate((group) => {
+      const shareButton = group.querySelector('[data-testid="share-task-button"]');
+      const graphButton = group.querySelector('[data-testid="task-graph-button"]');
+      return Boolean(
+        shareButton &&
+        graphButton &&
+        shareButton.compareDocumentPosition(graphButton) & Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+    });
+    expect(followsShare).toBe(true);
+    await expectLocatorContainedBy(graph, controls, "desktop graph action");
+    await expectRenderedTarget(graph, 24, "desktop graph action");
+
+    await testPage.setViewportSize({ width: 390, height: 844 });
+    await expectRenderedTarget(graph, 44, "narrow fine-pointer graph action");
+    await expectLocatorContainedBy(graph, controls, "narrow fine-pointer graph action");
+    await assertNoDocumentHorizontalOverflow(testPage, "narrow graph action");
+    await testPage.setViewportSize({ width: 767, height: 844 });
+    await expectRenderedTarget(graph, 44, "phone breakpoint graph action");
+    await testPage.setViewportSize({ width: 768, height: 900 });
+    await expectRenderedTarget(graph, 24, "breakpoint graph action");
+    await expectLocatorContainedBy(graph, controls, "breakpoint graph action");
+
+    await graph.click();
+    await expect(testPage.getByTestId("task-graph-panel")).toBeVisible();
   });
 
   test("an open graph tab is kept in the task's saved layout", async ({
