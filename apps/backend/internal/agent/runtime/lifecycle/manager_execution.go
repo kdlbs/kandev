@@ -238,12 +238,16 @@ func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID
 		}
 	}
 
-	// Fast path: execution already in memory
+	// Fast path: execution already in memory. A terminal execution is not a
+	// reusable workspace host; fall through so the coalesced path can retire it
+	// and create a fresh workspace-only execution.
 	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
 		if err := m.ensureCachedWorkspaceExecutionAdmitted(ctx, execution); err != nil {
 			return nil, err
 		}
-		return execution, nil
+		if workspaceExecutionStatusReusable(execution) {
+			return execution, nil
+		}
 	}
 
 	value, err := m.doCoalescedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
@@ -341,6 +345,21 @@ func awaitCoalescedResult(
 // ensureWorkspaceExecutionLocked is the body of EnsureWorkspaceExecutionForSession
 // run inside the sessionID-keyed singleflight bucket. Callers other than
 // EnsureWorkspaceExecutionForSession must already hold the singleflight slot.
+// workspaceExecutionStatusReusable reports whether a cached execution can host
+// workspace-only work. Terminal executions must be replaced, not reused: their
+// agentctl may already be stopped even though the execution remains in memory.
+func workspaceExecutionStatusReusable(execution *AgentExecution) bool {
+	if execution == nil {
+		return false
+	}
+	switch execution.Status {
+	case v1.AgentStatusFailed, v1.AgentStatusStopped, v1.AgentStatusCompleted:
+		return false
+	default:
+		return true
+	}
+}
+
 func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, sessionID string) (*AgentExecution, error) {
 	// Double-check after acquiring the slot — a peer in the same group may have
 	// finished while we were waiting.
@@ -348,7 +367,12 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 		if err := m.ensureCachedWorkspaceExecutionAdmitted(ctx, execution); err != nil {
 			return nil, err
 		}
-		return execution, nil
+		if workspaceExecutionStatusReusable(execution) {
+			return execution, nil
+		}
+		if err := m.cleanupStaleExecution(ctx, execution); err != nil {
+			return nil, fmt.Errorf("replace stale workspace execution: %w", err)
+		}
 	}
 
 	if m.workspaceInfoProvider == nil {
