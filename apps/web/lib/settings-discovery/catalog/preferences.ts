@@ -14,6 +14,7 @@ export const TERMINAL_EDITORS_SETTINGS_HREF = `${PREFERENCES_SETTINGS_HREF}/term
 const NOTIFICATIONS_ID = "preferences-notifications";
 export const NOTIFICATIONS_SETTINGS_HREF = `${PREFERENCES_SETTINGS_HREF}/notifications`;
 export const KEYBOARD_SHORTCUTS_SETTINGS_HREF = `${PREFERENCES_SETTINGS_HREF}/keyboard-shortcuts`;
+const KEYBOARD_SHORTCUTS_ID = "preferences-keyboard-shortcuts";
 const TASK_BEHAVIOR_ID = "preferences-task-behavior";
 export const TASK_BEHAVIOR_SETTINGS_HREF = `${PREFERENCES_SETTINGS_HREF}/task-behavior`;
 export const GENERAL_SETTINGS_TARGETS = {
@@ -363,7 +364,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     order: 44,
   },
   {
-    id: "preferences-keyboard-shortcuts",
+    id: KEYBOARD_SHORTCUTS_ID,
     kind: "page",
     labelKey: "settings:keyboardShortcuts",
     groupId: "preferences",
@@ -375,7 +376,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     kind: "control",
     labelKey: "settings:submitShortcut",
     aliasesKey: "settings:discoveryAliasesSubmitShortcut",
-    parentId: "preferences-keyboard-shortcuts",
+    parentId: KEYBOARD_SHORTCUTS_ID,
     groupId: "preferences",
     href: KEYBOARD_SHORTCUTS_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.submitShortcut,
@@ -386,7 +387,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     kind: "control",
     labelKey: "settings:escapeCancelsAgent",
     aliasesKey: "settings:escapeCancelsAgentDescription",
-    parentId: "preferences-keyboard-shortcuts",
+    parentId: KEYBOARD_SHORTCUTS_ID,
     groupId: "preferences",
     href: KEYBOARD_SHORTCUTS_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.escapeCancelsAgent,
@@ -397,7 +398,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     kind: "control",
     labelKey: "settings:keyboardShortcuts",
     aliasesKey: "settings:discoveryAliasesKeyboardShortcuts",
-    parentId: "preferences-keyboard-shortcuts",
+    parentId: KEYBOARD_SHORTCUTS_ID,
     groupId: "preferences",
     href: KEYBOARD_SHORTCUTS_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.keyboardShortcuts,
