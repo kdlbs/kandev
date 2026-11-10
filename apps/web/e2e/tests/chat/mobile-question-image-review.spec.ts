@@ -59,7 +59,11 @@ test("phone review uses a top row, the image, the form, and a thumb-zone bar", a
   );
   await bar.getByTestId("question-review-picker-button").tap();
   const picker = testPage.getByTestId("question-review-picker-sheet");
-  await picker.getByTestId("question-review-tile-b").nth(1).tap();
+  const optionB = picker.getByTestId("question-review-pick-b-option").nth(1);
+  await expect(optionB).toContainText(reviewImages.after.alt);
+  await expect(optionB.locator("img")).toBeVisible();
+  expect((await optionB.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await optionB.tap();
   await testPage.keyboard.press("Escape");
   await expect(bar.getByTestId("question-review-picker-button")).toContainText("B: after");
 

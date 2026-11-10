@@ -3241,5 +3241,8 @@
   "questionReviewNoChanges": "Ńō ćĥàńĝēś ƒōũńď",
   "questionReviewShortcuts": "Ķēŷƀōàŕď àńď ĝēśţũŕē śĥōŕţćũţś",
   "questionReviewSlotImage": "{{slot}}: {{image}}",
-  "questionReviewCandidateCount": "{{index}}/{{total}}"
+  "questionReviewCandidateCount": "{{index}}/{{total}}",
+  "questionReviewInA": "Ĩń À",
+  "questionReviewInB": "Ĩń Ɓ",
+  "questionReviewChoiceName": "Ćĥōĩćē: {{choice}}"
 }

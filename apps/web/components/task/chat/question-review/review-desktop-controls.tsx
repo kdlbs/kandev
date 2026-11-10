@@ -16,6 +16,7 @@ import { imageShortName, type ReviewImage } from "@/lib/question-review/segments
 import { formatZoom } from "@/lib/question-review/viewport";
 import { cn } from "@/lib/utils";
 import { CandidateStepper } from "./review-compare-controls";
+import { ReviewImageOptions } from "./review-image-option";
 import { useReviewImageLabel } from "./review-image-picker";
 import type { ChangesStatus } from "./use-changes-zoom";
 
@@ -31,6 +32,7 @@ type PairProps = {
   bId: string;
   onPick: (slot: "a" | "b", id: string) => void;
   onSwap: () => void;
+  urls: Record<string, string | undefined>;
   stepper?: { position: { index: number; total: number }; onStep: (direction: 1 | -1) => void };
 };
 
@@ -99,26 +101,18 @@ function ImageSlotPicker(props: PairProps & { slot: "a" | "b" }) {
           <IconChevronDown className="h-3 w-3 shrink-0" aria-hidden="true" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-72 p-1 data-closed:animate-none!" align="start">
-        {props.images.map((image, position) => (
-          <button
-            key={image.id}
-            type="button"
-            aria-pressed={image.id === selectedId}
-            data-testid={`question-review-pick-${props.slot}-option`}
-            className={cn(
-              "flex w-full cursor-pointer flex-col items-start rounded-sm px-2 py-1.5 text-left text-xs hover:bg-muted",
-              image.id === selectedId && "bg-primary/10",
-            )}
-            onClick={() => {
-              props.onPick(props.slot, image.id);
-              setOpen(false);
-            }}
-          >
-            <span className="font-medium">{imageShortName(image, position)}</span>
-            <span className="text-muted-foreground">{imageLabel(image, position)}</span>
-          </button>
-        ))}
+      <PopoverContent className="w-[22.5rem] p-1 data-closed:animate-none!" align="start">
+        <ReviewImageOptions
+          slot={props.slot}
+          images={props.images}
+          aId={props.aId}
+          bId={props.bId}
+          urls={props.urls}
+          onPick={(slot, id) => {
+            props.onPick(slot, id);
+            setOpen(false);
+          }}
+        />
       </PopoverContent>
     </Popover>
   );

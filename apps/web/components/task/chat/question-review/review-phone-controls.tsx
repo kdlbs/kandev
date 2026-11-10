@@ -10,7 +10,7 @@ import { imageShortName, type ReviewImage } from "@/lib/question-review/segments
 import { formatZoom } from "@/lib/question-review/viewport";
 import { cn } from "@/lib/utils";
 import { useCompareModeLabel } from "./review-compare-toolbar";
-import { useReviewImageLabel } from "./review-image-picker";
+import { ReviewImageOptions } from "./review-image-option";
 
 const touchButton = "min-h-11 cursor-pointer";
 
@@ -172,8 +172,8 @@ export function ImagePickerSheetButton(props: PickerProps) {
         onOpenChange={setOpen}
         testId="question-review-picker-sheet"
       >
-        <PickerTiles {...props} slot="a" />
-        <PickerTiles {...props} slot="b" />
+        <PickerSection {...props} slot="a" />
+        <PickerSection {...props} slot="b" />
         <Button
           type="button"
           variant="outline"
@@ -188,43 +188,21 @@ export function ImagePickerSheetButton(props: PickerProps) {
   );
 }
 
-function PickerTiles(props: PickerProps & { slot: "a" | "b" }) {
+function PickerSection(props: PickerProps & { slot: "a" | "b" }) {
   const { t } = useTranslation();
-  const imageLabel = useReviewImageLabel();
-  const selected = props.slot === "a" ? props.aId : props.bId;
   return (
     <fieldset className="space-y-1.5">
       <legend className="text-xs font-medium">
         {t(props.slot === "a" ? "task:questionReviewPickA" : "task:questionReviewPickB")}
       </legend>
-      <div className="grid grid-cols-2 gap-2">
-        {props.images.map((image, index) => (
-          <button
-            key={image.id}
-            type="button"
-            aria-pressed={image.id === selected}
-            aria-label={imageLabel(image, index)}
-            data-testid={`question-review-tile-${props.slot}`}
-            className={cn(
-              "flex min-h-12 cursor-pointer flex-col items-start gap-1 rounded-md border p-1.5 text-left",
-              image.id === selected ? "border-primary bg-primary/10" : "border-border",
-            )}
-            onClick={() => props.onPick(props.slot, image.id)}
-          >
-            {props.urls[image.id] && (
-              <img
-                src={props.urls[image.id]}
-                alt=""
-                className="h-16 w-full rounded-sm object-contain"
-                draggable={false}
-              />
-            )}
-            <span className="w-full truncate text-xs font-medium">
-              {imageShortName(image, index)}
-            </span>
-          </button>
-        ))}
-      </div>
+      <ReviewImageOptions
+        slot={props.slot}
+        images={props.images}
+        aId={props.aId}
+        bId={props.bId}
+        urls={props.urls}
+        onPick={props.onPick}
+      />
     </fieldset>
   );
 }

@@ -27,9 +27,14 @@ const toggleItemSize = "h-7 cursor-pointer px-2 text-xs [@media(pointer:coarse)]
 
 type WipeControl = { value: number; onChange: (value: number) => void };
 
-type Props = { compare: ReviewCompare; images: readonly ReviewImage[]; wipe: WipeControl };
+type Props = {
+  compare: ReviewCompare;
+  images: readonly ReviewImage[];
+  wipe: WipeControl;
+  urls: Record<string, string | undefined>;
+};
 
-export function ReviewCompareToolbar({ compare, images, wipe }: Props) {
+export function ReviewCompareToolbar({ compare, images, wipe, urls }: Props) {
   const { t } = useTranslation();
   const modeLabel = useCompareModeLabel();
   const { state, dispatch } = compare;
@@ -57,6 +62,7 @@ export function ReviewCompareToolbar({ compare, images, wipe }: Props) {
         bId={state.bId}
         onPick={(slot, id) => dispatch({ type: "pick", slot, id })}
         onSwap={() => dispatch({ type: "swap" })}
+        urls={urls}
         stepper={
           state.mode === "toggle" || state.mode === "side"
             ? { position: compare.position, onStep: compare.step }

@@ -3241,5 +3241,8 @@
   "questionReviewNoChanges": "変更箇所は見つかりませんでした",
   "questionReviewShortcuts": "キーボードとジェスチャーのショートカット",
   "questionReviewSlotImage": "{{slot}}：{{image}}",
-  "questionReviewCandidateCount": "{{index}}/{{total}}"
+  "questionReviewCandidateCount": "{{index}}/{{total}}",
+  "questionReviewInA": "A に表示中",
+  "questionReviewInB": "B に表示中",
+  "questionReviewChoiceName": "選択肢：{{choice}}"
 }

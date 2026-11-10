@@ -411,6 +411,11 @@ History: `AnswerSummary` lists `metadata.response.annotations` as
   report `none` when nothing changed.
 - **Inspector:** gallery handles sit over the image edges inside the canvas
   wrapper; the bottom row keeps the counter.
+- **Image picker rows:** `ReviewImageOptions` is the one option list for both the
+  desktop A/B popovers and the phone picker sheet. Each row shows a thumbnail from
+  the stage's loaded blob URLs (a placeholder otherwise, never a new read), the
+  nickname, a two-line description, the choice label, a check on the current pick,
+  and an "In A" or "In B" marker on the image in the other slot.
 
 ## Image labels
 

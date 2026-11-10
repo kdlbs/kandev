@@ -3241,5 +3241,8 @@
   "questionReviewNoChanges": "未發現更改",
   "questionReviewShortcuts": "鍵盤和手勢快捷方式",
   "questionReviewSlotImage": "{{slot}}：{{image}}",
-  "questionReviewCandidateCount": "{{index}}/{{total}}"
+  "questionReviewCandidateCount": "{{index}}/{{total}}",
+  "questionReviewInA": "在 A 中",
+  "questionReviewInB": "在 B 中",
+  "questionReviewChoiceName": "選項：{{choice}}"
 }

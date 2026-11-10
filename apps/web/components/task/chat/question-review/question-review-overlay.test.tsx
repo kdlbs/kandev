@@ -573,11 +573,12 @@ describe("review usability round", () => {
     ).toBeTruthy();
     fireEvent.click(within(dialog).getByTestId("question-review-pick-b"));
     const options = screen.getAllByTestId("question-review-pick-b-option");
-    expect(options.map((option) => option.firstChild?.textContent)).toEqual([
-      "before",
-      "after",
-      "alt",
+    expect(options.map((option) => option.textContent)).toEqual([
+      expect.stringContaining("beforeIn A"),
+      expect.stringContaining("after"),
+      expect.stringContaining("alt"),
     ]);
+    expect(options[0].textContent).toContain("Before");
     fireEvent.click(options[2]);
     expect(
       within(within(dialog).getByTestId("question-review-pick-b")).getByText("alt"),

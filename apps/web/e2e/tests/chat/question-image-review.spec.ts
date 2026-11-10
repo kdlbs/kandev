@@ -266,6 +266,14 @@ test("steps candidates, keeps the mode, zooms to changes, and holds to compare",
   const dialog = testPage.getByTestId("question-review-dialog");
   await expect(dialog.getByRole("img", { name: reviewImages.before.alt })).toBeVisible();
   await expect(dialog.getByTestId("question-review-pick-b")).toContainText("after");
+  await dialog.getByTestId("question-review-pick-a").click();
+  const optionsA = testPage.getByTestId("question-review-pick-a-option");
+  await expect(optionsA).toHaveCount(3);
+  await expect(optionsA.nth(1)).toContainText(reviewImages.after.alt);
+  await expect(optionsA.nth(1)).toContainText("In B");
+  await expect(optionsA.nth(0).locator("img")).toBeVisible();
+  await testPage.keyboard.press("Escape");
+  await expect(optionsA).toHaveCount(0);
 
   const stepLabel = dialog.getByTestId("question-review-step-label");
   await expect(stepLabel).toHaveText("B: after (1 of 2)");

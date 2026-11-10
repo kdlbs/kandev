@@ -46,6 +46,7 @@ committed and was lost with its worktree. This package recreates it.
 | 5 | [06 Test feedback](task-06-test-feedback.md) | 05 | Wipe reach, Fit on phones, region comment popover, wrapping thumbnails. |
 | 6 | [07 Usability round](task-07-usability-round.md) | 06 | Ten usability changes from the second test round, including agent image labels. |
 | 7 | [08 Toolbar round](task-08-toolbar-round.md) | 07 | Inspector side handles, zoom to changes in every mode, one-row desktop toolbar. |
+| 8 | [09 Picker rows](task-09-picker-rows.md) | 08 | One image option row for desktop and phone pickers. |
 
 Wave 1 work orders touch separate files and can run in either order. Work
 order 04 is backend-only and could start early, but the user asked for

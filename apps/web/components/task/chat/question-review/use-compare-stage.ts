@@ -169,8 +169,15 @@ export function useCompareStage(props: CompareStageProps) {
     onChange: (value: number) =>
       pinned ? viewport.setPinnedFraction(value) : compare.dispatch({ type: "wipe", value }),
   };
+  const urls = Object.fromEntries(
+    Object.entries(images.states).map(([id, image]) => [
+      id,
+      image.kind === "loaded" ? image.url : undefined,
+    ]),
+  );
   return {
     ...props,
+    urls,
     layout,
     images,
     compare,

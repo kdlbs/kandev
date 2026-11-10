@@ -3243,5 +3243,8 @@
   "questionReviewNoChanges": "No changes found",
   "questionReviewShortcuts": "Keyboard and gesture shortcuts",
   "questionReviewSlotImage": "{{slot}}: {{image}}",
-  "questionReviewCandidateCount": "{{index}}/{{total}}"
+  "questionReviewCandidateCount": "{{index}}/{{total}}",
+  "questionReviewInA": "In A",
+  "questionReviewInB": "In B",
+  "questionReviewChoiceName": "Choice: {{choice}}"
 }

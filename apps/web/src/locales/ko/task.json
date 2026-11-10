@@ -3241,5 +3241,8 @@
   "questionReviewNoChanges": "변경 부분이 없습니다",
   "questionReviewShortcuts": "키보드 및 제스처 단축키",
   "questionReviewSlotImage": "{{slot}}: {{image}}",
-  "questionReviewCandidateCount": "{{index}}/{{total}}"
+  "questionReviewCandidateCount": "{{index}}/{{total}}",
+  "questionReviewInA": "A에 있음",
+  "questionReviewInB": "B에 있음",
+  "questionReviewChoiceName": "선택지: {{choice}}"
 }

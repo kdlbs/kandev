@@ -49,7 +49,12 @@ export function ReviewCompareStage(props: CompareStageProps) {
 
 function DesktopToolbar({ model }: { model: CompareStageModel }) {
   return (
-    <ReviewCompareToolbar compare={model.compare} images={model.segment.images} wipe={model.wipe} />
+    <ReviewCompareToolbar
+      compare={model.compare}
+      images={model.segment.images}
+      wipe={model.wipe}
+      urls={model.urls}
+    />
   );
 }
 
@@ -106,12 +111,6 @@ function PhoneBottomBar({ model }: { model: CompareStageModel }) {
   const { t } = useTranslation();
   const { state, compare } = model;
   const stepping = state.mode === "toggle" || state.mode === "side";
-  const urls = Object.fromEntries(
-    Object.entries(model.images.states).map(([id, image]) => [
-      id,
-      image.kind === "loaded" ? image.url : undefined,
-    ]),
-  );
   return (
     <ReviewBottomBar>
       <SwapButton model={model} />
@@ -144,7 +143,7 @@ function PhoneBottomBar({ model }: { model: CompareStageModel }) {
         <div className={cn(state.mode === "side" && "ml-auto")}>
           <ImagePickerSheetButton
             images={model.segment.images}
-            urls={urls}
+            urls={model.urls}
             aId={state.aId}
             bId={state.bId}
             onPick={(slot, id) => compare.dispatch({ type: "pick", slot, id })}
