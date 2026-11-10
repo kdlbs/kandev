@@ -129,9 +129,10 @@ function PhoneBottomBar({ model }: { model: CompareStageModel }) {
           className={cn(reviewControlSize, "min-w-0 flex-1")}
           aria-pressed={state.showB}
           data-testid="question-review-flip"
+          aria-label={t("task:questionReviewFlip")}
           onClick={() => compare.dispatch({ type: "flip" })}
         >
-          {t("task:questionReviewFlip")}
+          <span className="truncate">{t("task:questionReviewFlipShort")}</span>
         </Button>
       )}
       {!stepping && (

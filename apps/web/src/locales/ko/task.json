@@ -3244,5 +3244,6 @@
   "questionReviewCandidateCount": "{{index}}/{{total}}",
   "questionReviewInA": "A에 있음",
   "questionReviewInB": "B에 있음",
-  "questionReviewChoiceName": "선택지: {{choice}}"
+  "questionReviewChoiceName": "선택지: {{choice}}",
+  "questionReviewFlipShort": "뒤집기"
 }

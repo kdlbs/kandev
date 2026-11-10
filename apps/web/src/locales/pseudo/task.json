@@ -3244,5 +3244,6 @@
   "questionReviewCandidateCount": "{{index}}/{{total}}",
   "questionReviewInA": "Ĩń À",
   "questionReviewInB": "Ĩń Ɓ",
-  "questionReviewChoiceName": "Ćĥōĩćē: {{choice}}"
+  "questionReviewChoiceName": "Ćĥōĩćē: {{choice}}",
+  "questionReviewFlipShort": "Ƒĺĩƥ"
 }

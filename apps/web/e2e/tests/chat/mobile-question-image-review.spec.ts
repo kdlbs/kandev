@@ -50,7 +50,12 @@ test("phone review uses a top row, the image, the form, and a thumb-zone bar", a
     caption: "Phone image review with frequent actions in the bottom bar",
   });
 
-  await bar.getByTestId("question-review-flip").tap();
+  const flip = bar.getByTestId("question-review-flip");
+  expect(
+    await flip.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    "Flip label fits its button",
+  ).toBe(true);
+  await flip.tap();
   await expect(dialog.getByRole("img", { name: reviewImages.after.alt })).toBeVisible();
   await bar.getByTestId("question-review-step-next").tap();
   await expect(dialog.getByRole("img", { name: reviewImages.taller.alt })).toBeVisible();

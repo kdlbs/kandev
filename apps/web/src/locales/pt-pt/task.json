@@ -3244,5 +3244,6 @@
   "questionReviewCandidateCount": "{{index}}/{{total}}",
   "questionReviewInA": "Em A",
   "questionReviewInB": "Em B",
-  "questionReviewChoiceName": "Opção: {{choice}}"
+  "questionReviewChoiceName": "Opção: {{choice}}",
+  "questionReviewFlipShort": "Inverter"
 }

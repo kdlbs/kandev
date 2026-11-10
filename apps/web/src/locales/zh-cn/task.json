@@ -3244,5 +3244,6 @@
   "questionReviewCandidateCount": "{{index}}/{{total}}",
   "questionReviewInA": "在 A 中",
   "questionReviewInB": "在 B 中",
-  "questionReviewChoiceName": "选项：{{choice}}"
+  "questionReviewChoiceName": "选项：{{choice}}",
+  "questionReviewFlipShort": "翻转"
 }
