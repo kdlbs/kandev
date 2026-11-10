@@ -48,7 +48,7 @@ function unitLabel(t: TFunction, unit: string, count: number): string {
  * (AC-PLATFORM-STARTUP-PROGRESS-001.4/001.5/001.6, AC-003.8): opaque steps
  * report no count, counting steps pluralize the unit off `done`, counted
  * steps pluralize off `total`. Byte steps use the shared readable-size
- * helper instead of the unit noun (AC-PLATFORM-STARTUP-PROGRESS-003.14).
+ * helper instead of the unit noun.
  */
 export function formatStepProgress(t: TFunction, step: StartupStepSnapshot): string {
   if (step.measure === "opaque") return t("startup:page.progressUnavailable");

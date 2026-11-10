@@ -424,9 +424,8 @@ func waitForReady(ctx context.Context, baseURL string, proc childState) error {
 // whichever of done, total, rate, and estimate the snapshot carries, rather
 // than only for a `counted` step, since a `counting` step (for example
 // database.backup) carries a done count and a rate with no total. Byte counts
-// and byte rates render through the shared readable-unit helpers
-// (AC-PLATFORM-STARTUP-PROGRESS-003.14/003.15). An opaque step states plainly
-// that it cannot report progress
+// and byte rates render through the shared readable-unit helpers. An opaque
+// step states plainly that it cannot report progress
 // (AC-PLATFORM-STARTUP-PROGRESS-001.5) instead of a bar at any position, and
 // a stalled step states how long it has gone without progress
 // (AC-PLATFORM-STARTUP-PROGRESS-004.6).
@@ -471,8 +470,8 @@ func formatStartupLine(snapshot startup.Snapshot) string {
 }
 
 // stepCountText renders one count in the terminal line. Byte steps use the
-// shared readable-size policy (AC-PLATFORM-STARTUP-PROGRESS-003.14); every
-// other unit keeps its raw integer, since its noun is not implied by a symbol.
+// shared readable-size policy; every other unit keeps its raw integer, since
+// its noun is not implied by a symbol.
 func stepCountText(step *startup.StepSnapshot, count int64) string {
 	if step.Unit == startup.UnitBytes {
 		return startup.FormatBytes(count)
@@ -481,8 +480,7 @@ func stepCountText(step *startup.StepSnapshot, count int64) string {
 }
 
 // stepRateText renders the rate that follows a step's count. Only byte rates
-// gain a scaled unit (AC-PLATFORM-STARTUP-PROGRESS-003.15); other units keep
-// the launcher's historical bare "<rate>/s".
+// gain a scaled unit; other units keep the launcher's bare "<rate>/s" form.
 func stepRateText(step *startup.StepSnapshot, rate float64) string {
 	if step.Unit == startup.UnitBytes {
 		return startup.FormatByteRate(rate)

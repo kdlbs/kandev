@@ -421,11 +421,10 @@ const startupPageScript = `
 
   var byteUnitSymbols = ["B", "KB", "MB", "GB", "TB"];
 
-  // Mirrors startup.FormatBytes (AC-PLATFORM-STARTUP-PROGRESS-003.14): the
-  // largest 1024-based unit wins before rounding, B stays whole, and TB caps
-  // the scale. toFixed is the shared web policy; rounding by hand (for example
-  // Math.floor(value * 10 + 0.5) / 10) can land a value just below a midpoint
-  // on it and disagree with formatBytes.
+  // Mirrors startup.FormatBytes: the largest 1024-based unit wins before
+  // rounding, B stays whole, and TB caps the scale. toFixed is the shared web
+  // policy; rounding by hand (for example Math.floor(value * 10 + 0.5) / 10)
+  // can land a value just below a midpoint on it and disagree with formatBytes.
   function formatBytes(bytes) {
     if (!(bytes > 0)) return "0 B";
     var unit = 0;
