@@ -2,7 +2,10 @@ import type { Locator } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForHttp } from "../../helpers/causal-waits";
-import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import {
+  assertNoDocumentHorizontalOverflow,
+  expectLocatorContainedBy,
+} from "../../helpers/layout-assertions";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { openConversationUsageTask } from "../chat/conversation-usage-helpers";
@@ -36,21 +39,6 @@ async function seedGraph(apiClient: ApiClient, seed: Seed) {
 const node = (page: import("@playwright/test").Page, id: string) =>
   page.getByTestId(`task-graph-node-${id}`);
 
-async function expectContainedBy(control: Locator, group: Locator, label: string) {
-  const [controlBox, groupBox] = await Promise.all([control.boundingBox(), group.boundingBox()]);
-  expect(controlBox, `${label}: control has geometry`).not.toBeNull();
-  expect(groupBox, `${label}: group has geometry`).not.toBeNull();
-  if (!controlBox || !groupBox) return;
-  expect(controlBox.x, `${label}: left edge`).toBeGreaterThanOrEqual(groupBox.x - 1);
-  expect(controlBox.x + controlBox.width, `${label}: right edge`).toBeLessThanOrEqual(
-    groupBox.x + groupBox.width + 1,
-  );
-  expect(controlBox.y, `${label}: top edge`).toBeGreaterThanOrEqual(groupBox.y - 1);
-  expect(controlBox.y + controlBox.height, `${label}: bottom edge`).toBeLessThanOrEqual(
-    groupBox.y + groupBox.height + 1,
-  );
-}
-
 async function expectRenderedTarget(control: Locator, size: number, label: string) {
   const box = await control.boundingBox();
   expect(box, `${label}: control has geometry`).not.toBeNull();
@@ -74,7 +62,7 @@ test.describe("Task graph", () => {
     await expect(graphButton).toHaveCount(1);
     await expect(graphButton).toHaveAccessibleName("Task graph");
     await expect(graphButton).toBeVisible();
-    await expectContainedBy(graphButton, controls, "desktop graph action");
+    await expectLocatorContainedBy(graphButton, controls, "desktop graph action");
     await expectRenderedTarget(graphButton, 24, "desktop graph action");
 
     await graphButton.click();
@@ -161,18 +149,18 @@ test.describe("Task graph", () => {
       );
     });
     expect(followsShare).toBe(true);
-    await expectContainedBy(graph, controls, "desktop graph action");
+    await expectLocatorContainedBy(graph, controls, "desktop graph action");
     await expectRenderedTarget(graph, 24, "desktop graph action");
 
     await testPage.setViewportSize({ width: 390, height: 844 });
     await expectRenderedTarget(graph, 44, "narrow fine-pointer graph action");
-    await expectContainedBy(graph, controls, "narrow fine-pointer graph action");
+    await expectLocatorContainedBy(graph, controls, "narrow fine-pointer graph action");
     await assertNoDocumentHorizontalOverflow(testPage, "narrow graph action");
     await testPage.setViewportSize({ width: 767, height: 844 });
     await expectRenderedTarget(graph, 44, "phone breakpoint graph action");
     await testPage.setViewportSize({ width: 768, height: 900 });
     await expectRenderedTarget(graph, 24, "breakpoint graph action");
-    await expectContainedBy(graph, controls, "breakpoint graph action");
+    await expectLocatorContainedBy(graph, controls, "breakpoint graph action");
 
     await graph.click();
     await expect(testPage.getByTestId("task-graph-panel")).toBeVisible();

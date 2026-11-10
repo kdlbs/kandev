@@ -4,6 +4,7 @@ import { dwell } from "../../helpers/causal-waits";
 import {
   assertLocatorWithinViewportX,
   assertNoDocumentHorizontalOverflow,
+  expectLocatorContainedBy,
 } from "../../helpers/layout-assertions";
 
 async function expectTouchTarget(locator: import("@playwright/test").Locator, label: string) {
@@ -13,25 +14,6 @@ async function expectTouchTarget(locator: import("@playwright/test").Locator, la
     Math.min(box?.width ?? 0, box?.height ?? 0),
     `${label} touch target`,
   ).toBeGreaterThanOrEqual(44);
-}
-
-async function expectContainedBy(
-  control: import("@playwright/test").Locator,
-  group: import("@playwright/test").Locator,
-  label: string,
-) {
-  const [controlBox, groupBox] = await Promise.all([control.boundingBox(), group.boundingBox()]);
-  expect(controlBox, `${label}: control has geometry`).not.toBeNull();
-  expect(groupBox, `${label}: group has geometry`).not.toBeNull();
-  if (!controlBox || !groupBox) return;
-  expect(controlBox.x, `${label}: left edge`).toBeGreaterThanOrEqual(groupBox.x - 1);
-  expect(controlBox.x + controlBox.width, `${label}: right edge`).toBeLessThanOrEqual(
-    groupBox.x + groupBox.width + 1,
-  );
-  expect(controlBox.y, `${label}: top edge`).toBeGreaterThanOrEqual(groupBox.y - 1);
-  expect(controlBox.y + controlBox.height, `${label}: bottom edge`).toBeLessThanOrEqual(
-    groupBox.y + groupBox.height + 1,
-  );
 }
 
 test("mobile task graph opens full screen with touch-sized controls", async ({
@@ -68,7 +50,7 @@ test("mobile task graph opens full screen with touch-sized controls", async ({
   await expect(button).toHaveAccessibleName("Task graph");
   await expect(controls).toHaveCSS("flex-wrap", "wrap");
   await expect(bar).toHaveCSS("flex-wrap", "wrap");
-  await expectContainedBy(button, controls, "phone graph action");
+  await expectLocatorContainedBy(button, controls, "phone graph action");
   await expectTouchTarget(button, "graph button");
   await assertNoDocumentHorizontalOverflow(testPage, "graph entry");
   await button.tap();
@@ -131,7 +113,7 @@ test("narrow touch layout keeps the graph sheet full width and returns focus", a
   const controls = testPage.getByTestId("chat-status-bar-right-controls");
   const button = controls.getByTestId("task-graph-button");
   await expect(button).toHaveCount(1);
-  await expectContainedBy(button, controls, "narrow graph action");
+  await expectLocatorContainedBy(button, controls, "narrow graph action");
   await button.focus();
   await button.tap();
 
@@ -167,7 +149,7 @@ test.describe("coarse-pointer tablet", () => {
     const button = controls.getByTestId("task-graph-button");
     await expect(button).toHaveCount(1);
     await expect(button).toHaveAccessibleName("Task graph");
-    await expectContainedBy(button, controls, "tablet graph action");
+    await expectLocatorContainedBy(button, controls, "tablet graph action");
     await expectTouchTarget(button, "tablet graph button");
     await assertNoDocumentHorizontalOverflow(testPage, "tablet graph entry");
 
