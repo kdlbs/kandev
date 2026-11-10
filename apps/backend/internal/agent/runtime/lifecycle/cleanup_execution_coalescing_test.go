@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -97,6 +98,8 @@ func TestWorkspaceLookupWaitsForCleanupThenUsesItsOwnResult(t *testing.T) {
 	}
 }
 
+// TestWorkspaceLookupDoesNotReturnExecutionOwnedByPendingCleanup
+// verifies cached reads join the cleanup operation.
 func TestWorkspaceLookupDoesNotReturnExecutionOwnedByPendingCleanup(t *testing.T) {
 	for _, lookup := range []string{"session", "task session"} {
 		t.Run(lookup, func(t *testing.T) {
@@ -133,39 +136,47 @@ func TestWorkspaceLookupDoesNotReturnExecutionOwnedByPendingCleanup(t *testing.T
 	}
 }
 
+// TestWorkspaceLookupWaitsForRuntimeRetirement
+// verifies lookup blocks until the registered runtime retires.
 func TestWorkspaceLookupWaitsForRuntimeRetirement(t *testing.T) {
-	mgr := newTestManager(t)
-	execution := &AgentExecution{ID: "retiring", SessionID: "session", TaskID: "task"}
-	require.NoError(t, mgr.executionStore.Add(execution))
-	execution.remoteInstanceLifecycleMu.Lock()
-	var once sync.Once
-	retire := func() {
-		once.Do(func() {
-			mgr.executionStore.Remove(execution.ID)
-			execution.remoteInstanceLifecycleMu.Unlock()
-		})
-	}
-	defer retire()
-	type result struct {
-		execution *AgentExecution
-		err       error
-	}
-	finished := make(chan result, 1)
-	go func() {
-		got, err := mgr.EnsureWorkspaceExecutionForSession(t.Context(), execution.TaskID, execution.SessionID)
-		finished <- result{execution: got, err: err}
-	}()
-	select {
-	case <-finished:
-		t.Fatal("workspace lookup returned while runtime retirement still owns the execution")
-	case <-time.After(100 * time.Millisecond):
-	}
-	retire()
-	got := <-finished
-	require.Nil(t, got.execution)
-	require.ErrorContains(t, got.err, "workspace info provider not configured")
+	synctest.Test(t, func(t *testing.T) {
+		mgr := newTestManager(t)
+		execution := &AgentExecution{ID: "retiring", SessionID: "session", TaskID: "task"}
+		require.NoError(t, mgr.executionStore.Add(execution))
+		execution.remoteInstanceLifecycleMu.Lock()
+		var once sync.Once
+		retire := func() {
+			once.Do(func() {
+				mgr.executionStore.Remove(execution.ID)
+				execution.remoteInstanceLifecycleMu.Unlock()
+			})
+		}
+		defer retire()
+		type result struct {
+			execution *AgentExecution
+			err       error
+		}
+		finished := make(chan result, 1)
+		go func() {
+			got, err := mgr.EnsureWorkspaceExecutionForSession(t.Context(), execution.TaskID, execution.SessionID)
+			finished <- result{execution: got, err: err}
+		}()
+		synctest.Wait()
+		select {
+		case <-finished:
+			t.Fatal("workspace lookup returned while runtime retirement still owns the execution")
+		default:
+		}
+		retire()
+		got := <-finished
+		require.Nil(t, got.execution)
+		require.ErrorContains(t, got.err, "workspace info provider not configured")
+
+	})
 }
 
+// TestCachedWorkspaceLookupHonorsCancellationDuringRetirement
+// verifies cancelled admission does not wait for retirement.
 func TestCachedWorkspaceLookupHonorsCancellationDuringRetirement(t *testing.T) {
 	mgr := newTestManager(t)
 	execution := &AgentExecution{ID: "retiring", SessionID: "session", TaskID: "task"}

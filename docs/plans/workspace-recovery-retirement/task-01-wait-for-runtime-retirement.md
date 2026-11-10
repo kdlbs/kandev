@@ -55,4 +55,7 @@ The mobile scenario also passed three consecutive runs with retries disabled.
 The corresponding desktop scenario passed with retries disabled. Scoped Go lint
 reports zero issues. The targeted lifecycle suite also passes with the race
 detector enabled. A further regression verifies cancellation while retirement holds the lock.
+The retirement regression uses `testing/synctest` to prove the lookup has
+blocked before retirement proceeds. It also fails when the retirement guard
+is deliberately omitted; no wall-clock scheduling assumption is required.
 Final remote CI remains a publication gate.

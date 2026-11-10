@@ -319,7 +319,7 @@ func awaitCoalescedResult(
 	}
 }
 
-// Cached workspace access waits for runtime retirement and rechecks its owner.
+// cachedWorkspaceExecutionForSession waits for retirement, then validates the cached owner.
 func (m *Manager) cachedWorkspaceExecutionForSession(ctx context.Context, sessionID string) (*AgentExecution, error) {
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
