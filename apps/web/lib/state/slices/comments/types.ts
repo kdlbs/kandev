@@ -180,6 +180,7 @@ export type CommentsActions = {
   clearPending: () => void;
   setEditingComment: (commentId: string | null) => void;
   markCommentsSent: (commentIds: string[]) => void;
+  markCommentsSentIfUnchanged: (comments: AgentMessageComment[]) => void;
   clearSessionComments: (sessionId: string) => void;
   hydrateSession: (sessionId: string) => void;
   /** Remove an acknowledged legacy plan row from memory without rewriting storage. */

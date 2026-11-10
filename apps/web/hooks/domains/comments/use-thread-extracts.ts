@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  formatAgentMessageCommentsAsMarkdown,
   officeTaskCommentScope,
   useCommentsStore,
   type AgentMessageComment,
@@ -18,22 +17,20 @@ function shortQuote(text: string): string {
   return flat.length > CHIP_QUOTE_MAX_LENGTH ? `${flat.slice(0, CHIP_QUOTE_MAX_LENGTH)}…` : flat;
 }
 
-/** Prepends the formatted extracts block to the user's text; either part may be empty. */
-export function composeCommentBody(extracts: AgentMessageComment[], text: string): string {
-  const block = formatAgentMessageCommentsAsMarkdown(extracts);
-  return block ? `${block}\n${text.trim()}`.trimEnd() : text.trim();
-}
-
 /** Pending extracts of an Office task thread, exposed as composer context chips. */
 export function useThreadExtracts(taskId: string) {
   const { t } = useTranslation();
   const scope = officeTaskCommentScope(taskId);
   const hydrateSession = useCommentsStore((state) => state.hydrateSession);
   const removeComment = useCommentsStore((state) => state.removeComment);
-  const markCommentsSent = useCommentsStore((state) => state.markCommentsSent);
+  const markCommentsSentIfUnchanged = useCommentsStore(
+    (state) => state.markCommentsSentIfUnchanged,
+  );
   const extracts = usePendingAgentMessageComments(scope);
 
-  useEffect(() => hydrateSession(scope), [hydrateSession, scope]);
+  useEffect(() => {
+    hydrateSession(scope);
+  }, [hydrateSession, scope]);
 
   const items = useMemo<ContextItem[]>(
     () =>
@@ -50,8 +47,8 @@ export function useThreadExtracts(taskId: string) {
     [extracts, removeComment, t],
   );
   const markSent = useCallback(
-    (sent: AgentMessageComment[]) => markCommentsSent(sent.map((extract) => extract.id)),
-    [markCommentsSent],
+    (sent: AgentMessageComment[]) => markCommentsSentIfUnchanged(sent),
+    [markCommentsSentIfUnchanged],
   );
   return { extracts, items, markSent };
 }

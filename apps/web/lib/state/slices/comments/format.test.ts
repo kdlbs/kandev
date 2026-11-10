@@ -5,6 +5,7 @@ import {
   formatPRFeedbackAsMarkdown,
   formatWalkthroughCommentsAsMarkdown,
   formatAgentMessageCommentsAsMarkdown,
+  composeAgentMessageCommentBody,
   formatCommentsForMessage,
 } from "./format";
 import type {
@@ -327,6 +328,41 @@ describe("formatAgentMessageCommentsAsMarkdown for Office thread comments", () =
     expect(result).toContain("Selected comment from Worker:\n> ten days");
     expect(result).toContain("User feedback:\n> Cut this down.");
     expect(result).not.toContain("Selected agent response:");
+  });
+
+  it("composes extracts before trimmed user text", () => {
+    const body = composeAgentMessageCommentBody(
+      [officeComment("a", "CEO", "the plan", "Too vague.")],
+      "Please revise.",
+    );
+    expect(body.startsWith("### Agent Message Comments")).toBe(true);
+    expect(body).toContain("Selected comment from CEO:\n> the plan");
+    expect(body.endsWith("---\n\nPlease revise.")).toBe(true);
+  });
+
+  it("uses trimmed user text when no extracts exist", () => {
+    expect(composeAgentMessageCommentBody([], "  hello ")).toBe("hello");
+  });
+
+  it("posts the extract block alone when user text is empty", () => {
+    expect(composeAgentMessageCommentBody([officeComment("a", "CEO", "x", "y")], "  ")).toContain(
+      "---",
+    );
+  });
+
+  it("keeps source mentions literal while leaving new feedback mentions active", () => {
+    const result = formatAgentMessageCommentsAsMarkdown([
+      officeComment(
+        "mention",
+        "Worker",
+        "Ask @QA, read &commat;QA, and open [the profile](agent://550e8400-e29b-41d4-a716-446655440000).",
+        "Please ask @QA to check this again.",
+      ),
+    ]);
+
+    expect(result).toContain("Ask \\@QA, read \\&commat;QA");
+    expect(result).toContain("agent:\\/\\/550e8400");
+    expect(result).toContain("User feedback:\n> Please ask @QA");
   });
 
   it("keeps the chat label for extracts without an author", () => {

@@ -19,9 +19,10 @@ import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { selectCommandCount } from "@/lib/state/slices/session/selectors";
 import { createComment } from "@/lib/api/domains/office-api";
 import { formatRelativeTime } from "@/lib/utils";
+import { composeAgentMessageCommentBody } from "@/lib/state/slices/comments";
 import { MarkdownComment } from "./markdown-comment";
 import { CommentExtractSurface } from "./comment-extract-surface";
-import { composeCommentBody, useThreadExtracts } from "./use-thread-extracts";
+import { useThreadExtracts } from "@/hooks/domains/comments/use-thread-extracts";
 import { ContextZone } from "@/components/task/chat/context-items/context-zone";
 import { AgentTurnPanel } from "./components/agent-turn-panel";
 import { RunErrorEntry } from "./components/run-error-entry";
@@ -97,11 +98,13 @@ function CommentBody({
   comment,
   isAgent,
   authorName,
+  readOnly,
 }: {
   taskId: string;
   comment: TaskComment;
   isAgent: boolean;
   authorName: string;
+  readOnly: boolean;
 }) {
   const markdown = <MarkdownComment content={comment.content} />;
   if (!isAgent) return markdown;
@@ -111,6 +114,7 @@ function CommentBody({
       commentId={comment.id}
       content={comment.content}
       authorName={authorName}
+      readOnly={readOnly}
     >
       {markdown}
     </CommentExtractSurface>
@@ -120,11 +124,13 @@ function CommentBody({
 function CommentEntry({
   comment,
   taskId,
+  readOnly,
   turn,
   hasLaterAgentReply,
 }: {
   comment: TaskComment;
   taskId: string;
+  readOnly: boolean;
   turn?: CommentTurnContext;
   hasLaterAgentReply?: boolean;
 }) {
@@ -176,6 +182,7 @@ function CommentEntry({
             comment={comment}
             isAgent={isAgent}
             authorName={displayName}
+            readOnly={readOnly}
           />
         </div>
         {!isAgent &&
@@ -431,22 +438,19 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
   const { promptDelivery, isUtilityConfigured, isEnhancingPrompt, handleEnhance } =
     useCommentPromptEnhance({ taskId, taskTitle, taskDescription, inputValueRef, setInputAndSync });
   const { handleFileSelect, handlePaste } = useChatInputHandlers(setInputAndSync);
-  const threadExtracts = useThreadExtracts(taskId);
-  const extractsRef = useRef(threadExtracts.extracts);
-  extractsRef.current = threadExtracts.extracts;
-  const { markSent } = threadExtracts;
+  const { extracts, items, markSent } = useThreadExtracts(taskId);
 
   const handleSubmit = useCallback(async () => {
     const current = inputValueRef.current;
-    const extracts = extractsRef.current;
-    if ((!current.trim() && extracts.length === 0) || submitting) return;
+    const submittedExtracts = extracts;
+    if ((!current.trim() && submittedExtracts.length === 0) || submitting) return;
     setSubmitting(true);
     try {
       await createComment(taskId, {
-        body: composeCommentBody(extracts, current),
+        body: composeAgentMessageCommentBody(submittedExtracts, current),
         author_type: "user",
       });
-      markSent(extracts);
+      markSent(submittedExtracts);
       setInputAndSync((latest) => (latest === current ? "" : latest));
       onSubmitted?.();
     } catch (err) {
@@ -454,12 +458,12 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
     } finally {
       setSubmitting(false);
     }
-  }, [submitting, taskId, onSubmitted, setInputAndSync, markSent, t]);
+  }, [extracts, submitting, taskId, onSubmitted, setInputAndSync, markSent, t]);
 
   return (
     <div className="mt-4 pt-4 border-t border-border">
       <div className="rounded-md border bg-muted/30 focus-within:ring-1 focus-within:ring-ring">
-        <ContextZone items={threadExtracts.items} />
+        <ContextZone items={items} />
         <textarea
           ref={textareaRef}
           value={input}
@@ -482,7 +486,7 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
           isEnhancingPrompt={isEnhancingPrompt}
           isUtilityConfigured={isUtilityConfigured}
           submitting={submitting}
-          canSend={Boolean(input.trim()) || threadExtracts.extracts.length > 0}
+          canSend={Boolean(input.trim()) || extracts.length > 0}
           handleSubmit={handleSubmit}
           pendingResult={promptDelivery.pendingResult}
           applyPending={promptDelivery.applyPending}
@@ -590,11 +594,13 @@ function ChatEntries({
   workspaceId,
   repositories,
   entries,
+  readOnly,
 }: {
   taskId: string;
   workspaceId: string;
   repositories?: TaskRepository[];
   entries: ChatEntry[];
+  readOnly: boolean;
 }) {
   return (
     <>
@@ -605,6 +611,7 @@ function ChatEntries({
               key={`c-${entry.data.id}`}
               comment={entry.data}
               taskId={taskId}
+              readOnly={readOnly}
               turn={entry.turn}
               hasLaterAgentReply={entry.hasLaterAgentReply}
             />
@@ -718,6 +725,7 @@ export function TaskChat({
             workspaceId={workspaceId}
             repositories={repositories}
             entries={entries}
+            readOnly={readOnly}
           />
         </div>
       )}

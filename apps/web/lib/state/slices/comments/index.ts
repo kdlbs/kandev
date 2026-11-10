@@ -29,6 +29,7 @@ export {
   formatPRFeedbackAsMarkdown,
   formatWalkthroughCommentsAsMarkdown,
   formatAgentMessageCommentsAsMarkdown,
+  composeAgentMessageCommentBody,
   formatCommentsForMessage,
 } from "./format";
 export {

@@ -10,6 +10,7 @@ type CommentExtractSurfaceProps = {
   commentId: string;
   content: string;
   authorName: string;
+  readOnly: boolean;
   children: ReactNode;
 };
 
@@ -22,6 +23,7 @@ export function CommentExtractSurface({
   commentId,
   content,
   authorName,
+  readOnly,
   children,
 }: CommentExtractSurfaceProps) {
   const message = useMemo<Message>(
@@ -42,6 +44,8 @@ export function CommentExtractSurface({
       sessionId={officeTaskCommentScope(taskId)}
       isTurnActive={false}
       authorName={authorName}
+      allowRun={false}
+      readOnly={readOnly}
     >
       {children}
     </MessageCommentSurface>
