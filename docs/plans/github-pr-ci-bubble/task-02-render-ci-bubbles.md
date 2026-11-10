@@ -171,6 +171,7 @@ PR fixup on 2026-11-10:
 - Retained `data-legacy-testid="pr-workflow-approval-warning"` on the renamed approval bubble.
 - Extracted the Go CI selection helper to remove variable shadowing and shorten `derivePullRequestSummary`.
 - Added focused regressions for each fix.
+- Updated the topbar and refresh-route SVG-count assertions to include the independent CI bubble alongside the inline conflict triangle.
 
 Verification:
 
