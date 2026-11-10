@@ -4,7 +4,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { typeWhileBusy } from "../../helpers/type-while-busy";
-import { dwell } from "../../helpers/causal-waits";
+import { dwell, watchWs } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 
 // ---------------------------------------------------------------------------
@@ -62,6 +62,7 @@ test.describe("Pause → resume recovery", () => {
     apiClient,
     seedData,
   }) => {
+    const ws = watchWs(testPage);
     const session = await seedTaskAndWaitForIdle(
       testPage,
       apiClient,
@@ -79,9 +80,11 @@ test.describe("Pause → resume recovery", () => {
 
     const editor = session.activeChat().locator(".tiptap.ProseMirror:visible").first();
     await editor.focus();
+    const cancelResponse = ws.waitForResponse("agent.cancel");
     await editor.press("Escape");
-    await expect(session.agentStatus()).not.toBeVisible({ timeout: 30_000 });
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await cancelResponse;
+    await expect(session.agentStatus()).not.toBeVisible();
+    await expect(session.idleInput()).toBeVisible();
   });
 
   test("pausing a running turn lets a newly typed message resume the same session", async ({

@@ -235,6 +235,7 @@ function buildEditorAreaProps(
     canCancelAgent:
       p.showCancelAgent !== false &&
       shouldShowCancelAgent(p.isWorking, p.pendingClarification, p.sessionId),
+    hasPendingClarification: Boolean(p.pendingClarification),
     onPlanModeChange: p.onPlanModeChange,
     taskTitle: p.taskTitle,
     taskDescription: p.taskDescription,

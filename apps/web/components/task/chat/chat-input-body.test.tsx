@@ -122,7 +122,12 @@ describe("ChatInputBody Escape cancellation", () => {
         <ChatInputBody
           {...props({
             isAgentBusy: true,
-            editorAreaProps: { ...props().editorAreaProps, isAgentBusy: true, onCancel },
+            editorAreaProps: {
+              ...props().editorAreaProps,
+              isAgentBusy: true,
+              canCancelAgent: true,
+              onCancel,
+            },
           })}
         />
       </TooltipProvider>,
@@ -158,6 +163,54 @@ describe("ChatInputBody Escape cancellation", () => {
     expect(event.defaultPrevented).toBe(false);
   });
 
+  it("uses cancel eligibility when the agent is running without queued-input busy state", () => {
+    const onCancel = vi.fn();
+    const base = props().editorAreaProps;
+    render(
+      <TooltipProvider>
+        <ChatInputBody
+          {...props({
+            editorAreaProps: { ...base, isAgentBusy: false, canCancelAgent: true, onCancel },
+          })}
+        />
+      </TooltipProvider>,
+    );
+
+    const editor = screen.getByTestId(MOCK_TIPTAP_INPUT_TEST_ID);
+    editor.focus();
+    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    editor.dispatchEvent(event);
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("lets Escape reach a pending clarification instead of cancelling", () => {
+    const onCancel = vi.fn();
+    const base = props().editorAreaProps;
+    render(
+      <TooltipProvider>
+        <ChatInputBody
+          {...props({
+            editorAreaProps: {
+              ...base,
+              isAgentBusy: true,
+              canCancelAgent: true,
+              hasPendingClarification: true,
+              onCancel,
+            },
+          })}
+        />
+      </TooltipProvider>,
+    );
+
+    const editor = screen.getByTestId(MOCK_TIPTAP_INPUT_TEST_ID);
+    editor.focus();
+    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    editor.dispatchEvent(event);
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
   it("does not cancel on composing or repeated Escape keydowns", () => {
     const onCancel = vi.fn();
     render(
@@ -165,7 +218,12 @@ describe("ChatInputBody Escape cancellation", () => {
         <ChatInputBody
           {...props({
             isAgentBusy: true,
-            editorAreaProps: { ...props().editorAreaProps, isAgentBusy: true, onCancel },
+            editorAreaProps: {
+              ...props().editorAreaProps,
+              isAgentBusy: true,
+              canCancelAgent: true,
+              onCancel,
+            },
           })}
         />
       </TooltipProvider>,

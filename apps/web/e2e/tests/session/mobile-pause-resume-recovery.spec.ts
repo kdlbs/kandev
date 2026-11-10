@@ -1,7 +1,7 @@
 // Filename starts with "mobile-" so this runs on the mobile-chrome project.
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
-import { dwell } from "../../helpers/causal-waits";
+import { dwell, watchWs } from "../../helpers/causal-waits";
 import { seedIdleSession } from "../../helpers/session";
 import { typeWhileBusy } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
@@ -13,6 +13,7 @@ test.describe("mobile: pause queue recovery", () => {
     seedData,
   }) => {
     test.setTimeout(90_000);
+    const ws = watchWs(testPage);
     await apiClient.updateWorkflowStep(seedData.startStepId, {
       cancel_triggers_turn_complete: false,
     });
@@ -32,9 +33,11 @@ test.describe("mobile: pause queue recovery", () => {
 
     const editor = session.activeChat().locator(".tiptap.ProseMirror:visible").first();
     await editor.focus();
+    const cancelResponse = ws.waitForResponse("agent.cancel");
     await editor.press("Escape");
-    await expect(session.agentStatus()).not.toBeVisible({ timeout: 30_000 });
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await cancelResponse;
+    await expect(session.agentStatus()).not.toBeVisible();
+    await expect(session.idleInput()).toBeVisible();
     await assertNoDocumentHorizontalOverflow(testPage);
   });
 
