@@ -1347,6 +1347,7 @@ type createInstanceExecutor struct {
 	client       *agentctl.Client
 	createCount  atomic.Int32
 	stopCount    atomic.Int32
+	stopErr      error
 	forceStopped atomic.Bool
 	lastRequest  *ExecutorCreateRequest
 	authToken    string
@@ -1417,7 +1418,7 @@ func dockerTestContainerID(name executor.Name, instanceID string) string {
 func (e *createInstanceExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {
 	e.stopCount.Add(1)
 	e.forceStopped.Store(force)
-	return nil
+	return e.stopErr
 }
 
 func newEnvironmentExecutionTestManager(t *testing.T, provider WorkspaceInfoProvider) (*Manager, *createInstanceExecutor) {

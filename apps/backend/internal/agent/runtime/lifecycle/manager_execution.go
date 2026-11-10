@@ -245,7 +245,7 @@ func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID
 		if err := m.ensureCachedWorkspaceExecutionAdmitted(ctx, execution); err != nil {
 			return nil, err
 		}
-		if workspaceExecutionStatusReusable(execution) {
+		if m.workspaceExecutionStatusReusable(execution) {
 			return execution, nil
 		}
 	}
@@ -342,24 +342,28 @@ func awaitCoalescedResult(
 	}
 }
 
-// ensureWorkspaceExecutionLocked is the body of EnsureWorkspaceExecutionForSession
-// run inside the sessionID-keyed singleflight bucket. Callers other than
-// EnsureWorkspaceExecutionForSession must already hold the singleflight slot.
 // workspaceExecutionStatusReusable reports whether a cached execution can host
 // workspace-only work. Terminal executions must be replaced, not reused: their
 // agentctl may already be stopped even though the execution remains in memory.
-func workspaceExecutionStatusReusable(execution *AgentExecution) bool {
+func (m *Manager) workspaceExecutionStatusReusable(execution *AgentExecution) bool {
 	if execution == nil {
 		return false
 	}
-	switch execution.Status {
-	case v1.AgentStatusFailed, v1.AgentStatusStopped, v1.AgentStatusCompleted:
+	reusable := true
+	if err := m.executionStore.WithRLock(execution.ID, func(current *AgentExecution) {
+		switch current.Status {
+		case v1.AgentStatusFailed, v1.AgentStatusStopped, v1.AgentStatusCompleted:
+			reusable = false
+		}
+	}); err != nil {
 		return false
-	default:
-		return true
 	}
+	return reusable
 }
 
+// ensureWorkspaceExecutionLocked is the body of EnsureWorkspaceExecutionForSession
+// run inside the sessionID-keyed singleflight bucket. Callers other than
+// EnsureWorkspaceExecutionForSession must already hold the singleflight slot.
 func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, sessionID string) (*AgentExecution, error) {
 	// Double-check after acquiring the slot — a peer in the same group may have
 	// finished while we were waiting.
@@ -367,7 +371,7 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 		if err := m.ensureCachedWorkspaceExecutionAdmitted(ctx, execution); err != nil {
 			return nil, err
 		}
-		if workspaceExecutionStatusReusable(execution) {
+		if m.workspaceExecutionStatusReusable(execution) {
 			return execution, nil
 		}
 		if err := m.cleanupStaleExecution(ctx, execution); err != nil {
