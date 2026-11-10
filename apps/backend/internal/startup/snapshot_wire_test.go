@@ -62,6 +62,35 @@ func TestSnapshotJSONOmitsStepWhenNoneActive(t *testing.T) {
 	}
 }
 
+// TestStepSnapshotKeepsRawByteCounts guards AC-PLATFORM-STARTUP-PROGRESS-
+// 003.14's payload boundary: readable sizes are presentation only, so the
+// readiness wire keeps integer bytes and a bytes-per-second rate.
+func TestStepSnapshotKeepsRawByteCounts(t *testing.T) {
+	done := int64(15389753344)
+	rate := 1048576.0
+	raw, err := json.Marshal(StepSnapshot{
+		ID: StepDatabaseBackup, LabelKey: "startup.step.database_backup",
+		Measure: MeasureCounting, Unit: UnitBytes, Done: &done, RatePerSecond: &rate,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded struct {
+		Done          *int64   `json:"done"`
+		RatePerSecond *float64 `json:"rate_per_second"`
+		Unit          string   `json:"unit"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.Unit != string(UnitBytes) || decoded.Done == nil || *decoded.Done != done {
+		t.Fatalf("payload changed the raw byte count: %s", raw)
+	}
+	if decoded.RatePerSecond == nil || *decoded.RatePerSecond != rate {
+		t.Fatalf("payload changed the raw byte rate: %s", raw)
+	}
+}
+
 func TestStepSnapshotJSONFieldPresenceByMeasure(t *testing.T) {
 	r := New(nil)
 	r.Set(ApplyingMigrations)
