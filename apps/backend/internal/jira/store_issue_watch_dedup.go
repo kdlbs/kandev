@@ -21,6 +21,9 @@ func (s *Store) ReserveIssueWatchTask(ctx context.Context, watchID, issueKey, is
 		return false, fmt.Errorf("begin Jira issue claim: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 
 	if err := lockJiraIssueWatchClaim(ctx, tx, s.db.DriverName(), watchID, issueKey); err != nil {
 		return false, err
@@ -79,9 +82,15 @@ func lockJiraIssueWatchClaim(ctx context.Context, tx *sqlx.Tx, driver, watchID, 
 	if !dialect.IsPostgres(driver) {
 		return nil
 	}
-	key := fmt.Sprintf("jira-issue-watch-claim:%q:%q", watchID, issueKey)
+	key := jiraIssueWatchClaimLockKey(watchID, issueKey)
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, key); err != nil {
 		return fmt.Errorf("acquire Jira issue watch claim lock: %w", err)
 	}
 	return nil
+}
+
+// jiraIssueWatchClaimLockKey builds the advisory-lock identity for one watch
+// and issue. Production and tests use this helper so both target the same lock.
+func jiraIssueWatchClaimLockKey(watchID, issueKey string) string {
+	return fmt.Sprintf("jira-issue-watch-claim:%q:%q", watchID, issueKey)
 }

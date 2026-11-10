@@ -121,8 +121,8 @@ Store tests cover absent mappings, unfinished reservations, active tasks, archiv
 Include several watches sharing a missing task and separate workspaces using the same issue key.
 
 Concurrency tests use independent database connections and an observable barrier. A simultaneous burst proves one claimant wins; all later claimants retain the winner's unfinished or assigned mapping.
-A waiting-claimant test holds the writer or advisory lock in one transaction, observes the claimant's SQLITE_BUSY or PostgreSQL advisory-lock wait, installs a replacement task and mapping in the holder transaction, then commits. The waiting claim must lose and preserve the replacement reservation identity.
-An insert failure after stale-row removal must roll back the original row unchanged.
+A waiting-claimant test holds the writer or advisory lock in one transaction, observes the claimant's SQLITE_BUSY or exact PostgreSQL advisory-lock wait in the current database, installs a replacement task and mapping in the holder transaction, then commits. The waiting claim must lose and preserve the replacement reservation identity.
+An insert failure after stale-row removal must roll back the original row unchanged. A claim cancelled immediately after `BEGIN` must also leave the original mapping unchanged.
 
 A poller test publishes a recovered issue after native repository deletion. Force the watch due again and await events through bounded channels.
 A native HTTP test obtains deletion preflight consent, deletes the task, and invokes the existing immediate Jira watch trigger.

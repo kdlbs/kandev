@@ -177,12 +177,13 @@ Implemented on 2026-11-10:
 - SQLite serialization uses the production `db.OpenSQLite` writer transaction. PostgreSQL uses a transaction-scoped advisory lock on the watch-and-issue identity.
 - Standalone Jira fixtures now provide a minimal `tasks` table; the PostgreSQL schema replay test creates its mapped task instead of referencing a missing one.
 - Added permanent store, service, poller, PostgreSQL, and native HTTP regressions, including mixed watch states, shared missing tasks, concurrent recovery, rollback, lookup failure, archive control, and native deletion followed by replacement.
-- Added deterministic waiting-claimant regressions for SQLite and PostgreSQL. Each holds the writer or advisory lock in one transaction, observes the claimant's SQLITE_BUSY or PostgreSQL advisory-lock wait, installs a replacement task and mapping in the holder transaction, commits, and verifies the waiting claim loses while preserving the replacement reservation ID and task ID.
+- Added deterministic waiting-claimant regressions for SQLite and PostgreSQL. Each holds the writer or advisory lock in one transaction, observes the claimant's SQLITE_BUSY or exact PostgreSQL advisory-lock wait in the current database, installs a replacement task and mapping in the holder transaction, commits, and verifies the waiting claim loses while preserving the replacement reservation ID and task ID.
+- Added a cancellation regression proving a claim cancelled immediately after `BEGIN` leaves the original mapping unchanged.
 - Updated `docs/public/integrations.md` with archived-task protection, permanent-deletion recovery, per-watch identity, and unfinished-reservation behavior.
 
 Verification results:
 
-- `(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/jira -count=1)`: passed, including `TestPostgresIssueWatchDedup`, `TestPostgresIssueWatchDedup_WaitingClaimantPreservesReplacement`, and `TestPostgresStoreSchemaReplay` against a disposable PostgreSQL 16 instance.
+- `(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/jira -count=1)`: passed, including `TestPostgresIssueWatchDedup`, `TestPostgresIssueWatchDedup_WaitingClaimantPreservesReplacement`, `TestStore_IssueWatchDedup_CancelledClaimAfterBegin`, and `TestPostgresStoreSchemaReplay` against a disposable PostgreSQL 16 instance.
 - `(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/task/handlers -run '^TestHTTPDeleteTask_JiraWatchRecovery$' -count=1)`: passed.
 - `(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/orchestrator -run 'TestCoordinator_Dispatch_|TestCreateJiraIssueTask_|TestInterpolateJiraPrompt' -count=1)`: passed.
 - `(cd apps/backend && go run ./cmd/sqlguard ./internal)`: passed.

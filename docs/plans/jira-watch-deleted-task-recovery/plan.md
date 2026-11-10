@@ -143,6 +143,7 @@ All test names below are permanent regressions.
 | `.5` | `internal/jira/store_issue_watch_dedup_test.go`: `TestStore_IssueWatchDedup_WatchIsolation`; include missing, active, archived, and unfinished mappings for the same issue |
 | `.5`, `.6` | `internal/jira/store_issue_watch_dedup_test.go`: `TestStore_IssueWatchDedup_SharedMissingTask`; several watches reference one missing task |
 | `.7` | `internal/jira/store_issue_watch_dedup_test.go`: `TestStore_IssueWatchDedup_ReclaimRollback`; compare every original mapping field after injected insert failure |
+| `.7` | `internal/jira/store_issue_watch_dedup_wait_test.go`: `TestStore_IssueWatchDedup_CancelledClaimAfterBegin`; cancellation after BEGIN leaves the mapping unchanged |
 | `.7` | `internal/jira/service_issue_watch_dedup_test.go`: `TestService_CheckIssueWatch_TaskLookupFailure`; retain the existing dedup-query error test |
 | `.1` through `.7` | `internal/jira/store_issue_watch_dedup_postgres_test.go`: `TestPostgresIssueWatchDedup`; exercise both store methods with real connection contention |
 
@@ -190,7 +191,8 @@ Diagnosis: the temporary native repository/service reproduction failed at both i
 Assignment: GitHub confirmed `carlosflorencio` as the issue assignee.
 Implementation and permanent regressions verified on 2026-11-10:
 
-- `(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/jira -count=1)`: passed with a disposable PostgreSQL 16 `KANDEV_TEST_POSTGRES_DSN`, including `TestPostgresIssueWatchDedup` and `TestPostgresIssueWatchDedup_WaitingClaimantPreservesReplacement`.
+- `(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/jira -count=1)`: passed with a disposable PostgreSQL 16 `KANDEV_TEST_POSTGRES_DSN`, including `TestPostgresIssueWatchDedup`, `TestPostgresIssueWatchDedup_WaitingClaimantPreservesReplacement`, and `TestStore_IssueWatchDedup_CancelledClaimAfterBegin`.
+- The PostgreSQL waiting barrier matches the current database and exact advisory-lock key. Cancellation after `BEGIN` returns no reservation and leaves the original mapping unchanged.
 - `(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/task/handlers -run '^TestHTTPDeleteTask_JiraWatchRecovery$' -count=1)`: passed.
 - `(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/orchestrator -run 'TestCoordinator_Dispatch_|TestCreateJiraIssueTask_|TestInterpolateJiraPrompt' -count=1)`: passed.
 - `(cd apps/backend && go run ./cmd/sqlguard ./internal)`: passed with no findings.

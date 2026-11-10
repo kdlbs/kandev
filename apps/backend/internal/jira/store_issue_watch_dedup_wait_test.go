@@ -20,8 +20,9 @@ import (
 )
 
 type sqliteBeginBarrier struct {
-	blocked chan struct{}
-	enabled atomic.Bool
+	blocked        chan struct{}
+	enabled        atomic.Bool
+	onBeginSuccess func()
 }
 
 func (b *sqliteBeginBarrier) signalBlocked() {
@@ -60,6 +61,9 @@ func (c *instrumentedSQLiteConn) BeginTx(ctx context.Context, opts driver.TxOpti
 	for {
 		tx, err := c.begin(ctx, opts)
 		if err == nil {
+			if c.barrier.onBeginSuccess != nil {
+				c.barrier.onBeginSuccess()
+			}
 			return tx, nil
 		}
 		if !isSQLiteBusy(err) {
@@ -249,6 +253,62 @@ func TestStore_IssueWatchDedup_WaitingClaimantPreservesReplacement(t *testing.T)
 	}
 }
 
+func TestStore_IssueWatchDedup_CancelledClaimAfterBegin(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	path := filepath.Join(t.TempDir(), "jira-cancelled-claim.db")
+	baseRaw, err := dbutil.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("open base: %v", err)
+	}
+	baseDB := sqlx.NewDb(baseRaw, "sqlite3")
+	t.Cleanup(func() { _ = baseDB.Close() })
+	baseStore, err := NewStore(baseDB, baseDB)
+	if err != nil {
+		t.Fatalf("base store: %v", err)
+	}
+	if _, err := baseDB.Exec(`CREATE TABLE IF NOT EXISTS tasks (
+		id TEXT PRIMARY KEY,
+		archived_at DATETIME,
+		workflow_step_id TEXT NOT NULL DEFAULT ''
+	)`); err != nil {
+		t.Fatalf("create tasks fixture: %v", err)
+	}
+	watch := createDedupWatch(t, baseStore, "ws-1")
+	seedDedupMapping(t, baseStore, watch.ID, "PROJ-1", "task-missing", nil)
+	before := readIssueWatchTaskRecord(t, baseStore, watch.ID, "PROJ-1")
+
+	barrier := &sqliteBeginBarrier{blocked: make(chan struct{}, 1), onBeginSuccess: cancel}
+	driverName := registerInstrumentedSQLiteDriver(t, barrier)
+	claimantRaw, err := sql.Open(driverName, instrumentedSQLiteDSN(path))
+	if err != nil {
+		t.Fatalf("open claimant: %v", err)
+	}
+	claimantRaw.SetMaxOpenConns(1)
+	claimantRaw.SetMaxIdleConns(1)
+	claimantDB := sqlx.NewDb(claimantRaw, "sqlite3")
+	t.Cleanup(func() { _ = claimantDB.Close() })
+	claimantStore, err := NewStore(claimantDB, claimantDB)
+	if err != nil {
+		t.Fatalf("claimant store: %v", err)
+	}
+	barrier.enabled.Store(true)
+
+	reserved, err := claimantStore.ReserveIssueWatchTask(
+		ctx, watch.ID, "PROJ-1", "https://example.test/browse/PROJ-1")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled claim error = %v, want context.Canceled", err)
+	}
+	if reserved {
+		t.Fatal("cancelled claim must not reserve")
+	}
+	after := readIssueWatchTaskRecord(t, baseStore, watch.ID, "PROJ-1")
+	if after.ID != before.ID || after.TaskID != before.TaskID {
+		t.Fatalf("cancelled claim changed mapping: before=%+v after=%+v", before, after)
+	}
+}
+
 func TestPostgresIssueWatchDedup_WaitingClaimantPreservesReplacement(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -293,7 +353,7 @@ func TestPostgresIssueWatchDedup_WaitingClaimantPreservesReplacement(t *testing.
 		wg.Wait()
 	}()
 
-	waitForWaitingJiraClaimLock(t, ctx, database)
+	waitForWaitingJiraClaimLock(t, ctx, database, watch.ID, "PROJ-1")
 	if _, err := tx.ExecContext(ctx, `INSERT INTO tasks (id) VALUES ($1)`, "task-replacement"); err != nil {
 		t.Fatalf("create replacement task: %v", err)
 	}
@@ -324,15 +384,22 @@ func TestPostgresIssueWatchDedup_WaitingClaimantPreservesReplacement(t *testing.
 	}
 }
 
-func waitForWaitingJiraClaimLock(t *testing.T, ctx context.Context, database *sqlx.DB) {
+func waitForWaitingJiraClaimLock(
+	t *testing.T, ctx context.Context, database *sqlx.DB, watchID, issueKey string,
+) {
 	t.Helper()
+	key := jiraIssueWatchClaimLockKey(watchID, issueKey)
 	for {
 		var waiting bool
 		if err := database.GetContext(ctx, &waiting, `
 			SELECT EXISTS (
 				SELECT 1 FROM pg_locks
 				WHERE locktype = 'advisory' AND NOT granted
-			)`); err != nil {
+				  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+				  AND objsubid = 1
+				  AND (classid::bigint::bit(32) || objid::bigint::bit(32)) =
+				      hashtextextended($1, 0)::bit(64)
+			)`, key); err != nil {
 			t.Fatalf("read advisory waiters: %v", err)
 		}
 		if waiting {

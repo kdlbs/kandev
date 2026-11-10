@@ -699,7 +699,11 @@ Create a watch with JQL, test the query, then choose a workflow and starting ste
 
 The maximum in-flight value defaults to 5. Leave it blank for no cap. A cap defers remaining matches rather than importing them all at once. Each poll fetches only the first 50 JQL matches and does not paginate. Already-seen issues still occupy that provider result window, so a stable broad query can leave later matches unseen indefinitely; narrow the JQL enough that every important issue can enter the first page. Pause the watch before changing a broad query. Jira task-preset prompts can use ticket key, URL, title, and description placeholders from the preset editor.
 
-A watch suppresses an issue while its mapped task exists, including an archived task or a task on a completed step. Permanently deleting that task removes the suppression. If the issue still matches a later poll and appears in its first 50 results, the watch can create a new task without resetting the watch or editing the database. Deduplication is per watch: deleting a task from one watch's mapping does not change another watch's mapping for the same issue. An unfinished reservation stays protected until the watch is reset, the reservation is released, or the watch is deleted.
+A watch suppresses an issue while its mapped task exists, including an archived task or a task on a completed step. Permanently deleting that task removes the suppression. If the issue still matches a later poll and appears in its first 50 results, the watch can create a new task without resetting the watch or editing the database.
+
+Deduplication is per watch. Deleting a task makes the issue eligible again only for the watch whose mapping pointed to that task. Another watch that maps the same issue to a different task keeps its own suppression.
+
+An unfinished reservation stays protected until you reset the watch or delete it.
 
 Deleting a Jira watch leaves its previously created tasks in place. **Reset** is destructive: after the preview, it permanently deletes every watch-created task, including archived tasks, clears cursor/deduplication state, and makes current matches eligible for the next poll.
 
