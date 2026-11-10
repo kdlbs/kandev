@@ -1,9 +1,11 @@
 import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/animations";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { SessionPage } from "../../pages/session-page";
 import {
+  armHtmlPreviewPublication,
   createHtmlDiffTask,
   nativeHtmlDocument,
   SOURCE_COPY,
@@ -52,14 +54,17 @@ test.describe("HTML diff preview", () => {
     await expect(header.getByRole("button", { name: "Preview HTML" })).toBeVisible();
     await expect(header.getByRole("checkbox")).not.toBeChecked();
     const openTabs = await testPage.locator(".dv-default-tab:visible").count();
+    const publication = armHtmlPreviewPublication(testPage);
     await header.getByRole("button", { name: "Preview HTML" }).click();
+    await publication.published;
+    await publication.resources;
 
     const preview = testPage.getByTestId("review-html-diff-preview");
-    await expect(preview).toBeVisible({ timeout: 15_000 });
+    await expect(preview).toBeVisible();
     await expect(preview.getByTestId("review-html-preview-source")).toContainText(SOURCE_COPY);
     await expect(preview.getByTestId("html-preview-trust-warning")).toContainText(TRUST_COPY);
     const frame = preview.frameLocator("iframe");
-    await expect(frame.locator("h1")).toHaveText("Diff preview workspace", { timeout: 15_000 });
+    await expect(frame.locator("h1")).toHaveText("Diff preview workspace");
     await expect(frame.locator("#script-status")).toHaveText("script:ready");
     await expect(frame.locator("#css-status")).toHaveCSS("font-weight", "700");
 
@@ -100,13 +105,16 @@ test.describe("HTML diff preview", () => {
 
     const header = await openSingleFileDiff(testPage, session, filePath);
     await expect(header.getByRole("button", { name: "Preview HTML" })).toBeVisible();
+    const publication = armHtmlPreviewPublication(testPage);
     await header.getByRole("button", { name: "Preview HTML" }).click();
+    await publication.published;
+    await publication.resources;
 
     const preview = testPage.getByTestId("review-html-diff-preview");
-    await expect(preview).toBeVisible({ timeout: 15_000 });
+    await expect(preview).toBeVisible();
     await expect(preview.getByTestId("review-html-preview-source")).toContainText(SOURCE_COPY);
     const frame = preview.frameLocator("iframe");
-    await expect(frame.locator("h1")).toHaveText("Workspace revision", { timeout: 15_000 });
+    await expect(frame.locator("h1")).toHaveText("Workspace revision");
     await expect(frame.locator("h1")).not.toHaveText("Staged revision");
   });
 
@@ -135,7 +143,9 @@ test.describe("HTML diff preview", () => {
       });
     });
 
+    const failedPublication = waitForHttp(testPage, "POST", /\/html-previews$/);
     await header.getByRole("button", { name: "Preview HTML" }).click();
+    await failedPublication;
     const preview = testPage.getByTestId("review-html-diff-preview");
     await expect(preview.getByTestId("html-preview-error")).toContainText(
       "HTML preview session is not available",
@@ -144,10 +154,12 @@ test.describe("HTML diff preview", () => {
     await expect(session.browserPanel).toHaveCount(0);
 
     await testPage.unroute("**/api/v1/task-sessions/*/html-previews");
+    const retryPublication = armHtmlPreviewPublication(testPage);
     await preview.getByRole("button", { name: "Retry HTML preview" }).click();
+    await retryPublication.published;
+    await retryPublication.resources;
     await expect(preview.frameLocator("iframe").locator("h1")).toHaveText(
       "Recovered workspace preview",
-      { timeout: 15_000 },
     );
 
     await header.getByRole("button", { name: "Show diff" }).click();
@@ -185,13 +197,15 @@ test.describe("HTML diff preview", () => {
     const header = dialog.locator(
       `[data-testid="review-file-header"][data-file-path="${filePath}"]`,
     );
+    const publication = armHtmlPreviewPublication(testPage);
     await header.getByRole("button", { name: "Preview HTML" }).click();
+    await publication.published;
+    await publication.resources;
 
     const preview = dialog.getByTestId("review-html-diff-preview");
-    await expect(preview).toBeVisible({ timeout: 15_000 });
+    await expect(preview).toBeVisible();
     await expect(preview.frameLocator("iframe").locator("h1")).toHaveText(
       "Expanded review preview",
-      { timeout: 15_000 },
     );
     await expect(dialog).toBeVisible();
 
@@ -233,13 +247,15 @@ test.describe("HTML diff preview", () => {
 
     const confirm = drawer.getByTestId("review-html-preview-confirm");
     await expectTouchTarget(confirm);
+    const publication = armHtmlPreviewPublication(tabletTestPage);
     await confirm.click();
+    await publication.published;
+    await publication.resources;
 
     const preview = tabletTestPage.getByTestId("review-html-diff-preview");
-    await expect(preview).toBeVisible({ timeout: 15_000 });
+    await expect(preview).toBeVisible();
     await expect(preview.frameLocator("iframe").locator("h1")).toHaveText(
       "Tablet disclosure preview",
-      { timeout: 15_000 },
     );
     await expect(tabletTestPage.getByTestId("review-html-preview-help-drawer")).toHaveCount(0);
 
@@ -301,10 +317,12 @@ test.describe("HTML diff preview", () => {
         body: JSON.stringify({ error: "agentctl unavailable" }),
       });
     });
+    const failedPublication = waitForHttp(testPage, "POST", /\/html-previews$/);
     await menuItem.click();
+    await failedPublication;
 
     const preview = testPage.getByTestId("review-html-diff-preview");
-    await expect(preview).toBeVisible({ timeout: 15_000 });
+    await expect(preview).toBeVisible();
     await expect(preview.getByTestId("html-preview-error")).toContainText(
       "HTML preview session is not available",
     );
@@ -312,11 +330,13 @@ test.describe("HTML diff preview", () => {
     await expectTouchTarget(retry);
     await expectTouchTarget(preview.getByRole("button", { name: "Show diff" }));
     await testPage.unroute("**/api/v1/task-sessions/*/html-previews");
+    const retryPublication = armHtmlPreviewPublication(testPage);
     await retry.click();
+    await retryPublication.published;
+    await retryPublication.resources;
 
     await expect(preview.frameLocator("iframe").locator("h1")).toHaveText(
       "Narrow viewport preview",
-      { timeout: 15_000 },
     );
     const source = preview.getByTestId("review-html-preview-source");
     await expect(source).toContainText(SOURCE_COPY);

@@ -3,6 +3,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import {
+  armHtmlPreviewPublication,
   createHtmlDiffTask,
   nativeHtmlDocument,
   SOURCE_COPY,
@@ -65,14 +66,17 @@ test.describe("HTML diff preview on mobile", () => {
     await expect(help).toContainText(TRUST_COPY);
     const menuItem = menu.getByRole("menuitem", { name: "Preview HTML" });
     await expectTouchTarget(menuItem);
+    const publication = armHtmlPreviewPublication(testPage);
     await menuItem.tap();
+    await publication.published;
+    await publication.resources;
 
     const preview = sheet.getByTestId("review-html-diff-preview");
-    await expect(preview).toBeVisible({ timeout: 15_000 });
+    await expect(preview).toBeVisible();
     await expect(preview.getByTestId("review-html-preview-source")).toContainText(SOURCE_COPY);
     await expect(preview.getByTestId("html-preview-trust-warning")).toContainText(TRUST_COPY);
     const frame = preview.frameLocator("iframe");
-    await expect(frame.locator("h1")).toHaveText("Mobile diff preview", { timeout: 15_000 });
+    await expect(frame.locator("h1")).toHaveText("Mobile diff preview");
     await expect(frame.locator("#script-status")).toHaveText("script:ready");
     await expect(frame.locator("#css-status")).toHaveCSS("font-weight", "700");
 
@@ -129,16 +133,18 @@ test.describe("HTML diff preview on mobile", () => {
     await expect(dialog).toBeVisible();
     const header = dialog.locator(htmlPreviewFrame(filePath));
     await header.getByRole("button", { name: `More actions for ${filePath}` }).tap();
-    await testPage
+    const menuItem = testPage
       .getByTestId("review-file-actions-menu")
-      .getByRole("menuitem", { name: "Preview HTML" })
-      .tap();
+      .getByRole("menuitem", { name: "Preview HTML" });
+    const publication = armHtmlPreviewPublication(testPage);
+    await menuItem.tap();
+    await publication.published;
+    await publication.resources;
 
     const preview = dialog.getByTestId("review-html-diff-preview");
-    await expect(preview).toBeVisible({ timeout: 15_000 });
+    await expect(preview).toBeVisible();
     await expect(preview.frameLocator("iframe").locator("h1")).toHaveText(
       "Mobile review dialog preview",
-      { timeout: 15_000 },
     );
     await expect(dialog).toBeVisible();
     await assertNoDocumentHorizontalOverflow(testPage, "mobile review HTML diff preview");

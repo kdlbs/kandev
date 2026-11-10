@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { BackendContext } from "../../fixtures/backend";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { waitForWorkspacePath } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
@@ -32,6 +33,26 @@ const PREVIEW_SCRIPT = `(() => {
 })();`;
 
 const PREVIEW_CSS = "#css-status { font-weight: 700; }";
+
+/**
+ * Arms the publication response and the entry/CSS/script GETs before the
+ * preview action, so assertions can use their default timeout after the
+ * backend events that cause them have landed.
+ */
+export function armHtmlPreviewPublication(page: Page) {
+  return {
+    published: waitForHttp(page, "POST", /\/html-previews$/),
+    resources: Promise.all([
+      waitForHttp(page, "GET", /\/port-proxy\/[^/]+\/\d+\/html-diff-preview\/[^/]+\.html$/),
+      waitForHttp(
+        page,
+        "GET",
+        /\/port-proxy\/[^/]+\/\d+\/html-diff-preview\/assets\/preview\.css$/,
+      ),
+      waitForHttp(page, "GET", /\/port-proxy\/[^/]+\/\d+\/html-diff-preview\/assets\/preview\.js$/),
+    ]),
+  };
+}
 
 export type HtmlDiffFixture = {
   session: SessionPage;
