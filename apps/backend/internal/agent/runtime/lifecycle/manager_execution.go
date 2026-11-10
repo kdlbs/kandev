@@ -184,7 +184,10 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 	// GetOrEnsureExecution(sessionID) / EnsureWorkspaceExecutionForSession for
 	// the same session.
 	value, err := m.doCoalescedExecution(ctx, info.SessionID, func(sharedCtx context.Context) (interface{}, error) {
-		if execution, exists := m.executionStore.GetBySessionID(info.SessionID); exists {
+		if execution, err := m.cachedWorkspaceExecutionForSession(sharedCtx, info.SessionID); execution != nil || err != nil {
+			if err != nil {
+				return nil, err
+			}
 			if err := m.ensureWorkspaceSessionAdmitted(sharedCtx, info.TaskID, info); err != nil {
 				return nil, err
 			}

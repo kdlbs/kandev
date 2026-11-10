@@ -31,7 +31,10 @@ If retirement removed the execution, lookup continues through normal
 workspace-only admission and creation. Otherwise, recheck cached admission
 before returning it. Neither cache fast path may bypass the session operation
 or the runtime owner. Concurrent workspace requests retain existing
-singleflight deduplication. Do not extend readiness timeouts or retry prompts.
+singleflight deduplication. The environment operation uses the same guarded
+session-cache read inside its shared operation, so joined session lookups
+cannot inherit a retiring execution after an environment cache miss.
+Do not extend readiness timeouts or retry prompts.
 
 ## Verification and delivery
 

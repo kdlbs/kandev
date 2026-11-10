@@ -35,7 +35,7 @@ persistence. This work has no delivery dependencies.
 From the repository root:
 
 ```sh
-GOMAXPROCS=4 GOMEMLIMIT=2GiB go -C apps/backend test -race -trimpath -p=2 ./internal/agent/runtime/lifecycle -run 'Test(WorkspaceLookup|CachedWorkspaceLookup|ConditionalCleanupRunsAfterWorkspacePeer|PromotionRejectsExecutionRemovedByCleanup|EnsureWorkspaceExecutionForSession|CachedWorkspaceRestore|WorkspaceRestore)' -count=1
+GOMAXPROCS=4 GOMEMLIMIT=2GiB go -C apps/backend test -race -trimpath -p=2 ./internal/agent/runtime/lifecycle -run 'Test(EnvironmentWorkspaceLookup|WorkspaceLookup|CachedWorkspaceLookup|ConditionalCleanupRunsAfterWorkspacePeer|PromotionRejectsExecutionRemovedByCleanup|EnsureWorkspaceExecutionForSession|CachedWorkspaceRestore|WorkspaceRestore)' -count=1
 bash scripts/lint-go-changed apps/backend/internal/agent/runtime/lifecycle/manager_execution.go apps/backend/internal/agent/runtime/lifecycle/cleanup_execution_coalescing_test.go
 ```
 
@@ -58,4 +58,11 @@ detector enabled. A further regression verifies cancellation while retirement ho
 The retirement regression uses `testing/synctest` to prove the lookup has
 blocked before retirement proceeds. It also fails when the retirement guard
 is deliberately omitted; no wall-clock scheduling assumption is required.
+The environment operation also guards its session-cache read before sharing a
+result with joined session lookups. A deterministic regression publishes the
+retiring execution after the initial environment cache miss, joins a session
+lookup, and verifies that both wait. It fails before the guard is applied.
+A later CI cancellation-control test exposed a visibility/disabled-state
+check race after the button unmounted. Its poll now reads both states in one
+browser evaluation. Cancellation behavior and timeout limits are unchanged.
 Final remote CI remains a publication gate.

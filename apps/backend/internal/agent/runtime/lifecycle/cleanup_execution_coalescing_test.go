@@ -171,7 +171,6 @@ func TestWorkspaceLookupWaitsForRuntimeRetirement(t *testing.T) {
 		got := <-finished
 		require.Nil(t, got.execution)
 		require.ErrorContains(t, got.err, "workspace info provider not configured")
-
 	})
 }
 
@@ -198,4 +197,62 @@ func TestCachedWorkspaceLookupHonorsCancellationDuringRetirement(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("cancelled workspace lookup remained blocked on retirement")
 	}
+}
+
+// TestEnvironmentWorkspaceLookupWaitsForRetirementBeforeSharingResult verifies
+// a joined session lookup cannot receive the environment operation's retiring cache entry.
+func TestEnvironmentWorkspaceLookupWaitsForRetirementBeforeSharingResult(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mgr := newTestManager(t)
+		execution := &AgentExecution{ID: "retiring", SessionID: "session", TaskID: "task", TaskEnvironmentID: "environment"}
+		provider := &siblingDuringEnvironmentLookupProvider{mockWorkspaceInfoProvider: &mockWorkspaceInfoProvider{
+			envInfos: map[string]*WorkspaceInfo{"environment": {
+				TaskID: execution.TaskID, SessionID: execution.SessionID, TaskEnvironmentID: execution.TaskEnvironmentID,
+				WorkspacePath: "/workspace/task", AgentID: "auggie",
+			}},
+		}}
+		mgr.workspaceInfoProvider = provider
+		// Publish the execution after the environment fast path has missed it.
+		provider.onEnvironment = func() {
+			require.NoError(t, mgr.executionStore.Add(execution))
+			execution.remoteInstanceLifecycleMu.Lock()
+		}
+		var once sync.Once
+		retire := func() {
+			once.Do(func() {
+				mgr.executionStore.Remove(execution.ID)
+				execution.remoteInstanceLifecycleMu.Unlock()
+			})
+		}
+		defer retire()
+		type result struct {
+			execution *AgentExecution
+			err       error
+		}
+		environmentFinished := make(chan result, 1)
+		go func() {
+			got, err := mgr.GetOrEnsureExecutionForEnvironment(t.Context(), execution.TaskEnvironmentID)
+			environmentFinished <- result{execution: got, err: err}
+		}()
+		synctest.Wait()
+		sessionFinished := make(chan result, 1)
+		go func() {
+			got, err := mgr.GetOrEnsureExecution(t.Context(), execution.SessionID)
+			sessionFinished <- result{execution: got, err: err}
+		}()
+		synctest.Wait()
+		select {
+		case <-environmentFinished:
+			t.Fatal("environment operation returned while its cached runtime was retiring")
+		case <-sessionFinished:
+			t.Fatal("joined session lookup returned while its cached runtime was retiring")
+		default:
+		}
+		retire()
+		for _, finished := range []chan result{environmentFinished, sessionFinished} {
+			got := <-finished
+			require.Nil(t, got.execution)
+			require.Error(t, got.err, "without a runtime, lookup must fail creation instead of sharing the retired execution")
+		}
+	})
 }
