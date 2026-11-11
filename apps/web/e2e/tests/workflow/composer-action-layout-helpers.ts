@@ -67,11 +67,16 @@ export async function expectComposerActionLayout(
   await expect(proceed).toHaveCount(1);
   await expect(proceed).toBeVisible();
   const rowBox = await row.boundingBox();
-  const controlBoxes = await controls.locator("button:visible").evaluateAll((elements) =>
-    elements.map((element) => {
-      const { x, y, width, height } = element.getBoundingClientRect();
-      return { x, y, width, height };
-    }),
+  const controlBoxes = await controls.evaluate((group) =>
+    Array.from(group.querySelectorAll("button"))
+      .filter(
+        (element) =>
+          element.getClientRects().length > 0 && getComputedStyle(element).visibility !== "hidden",
+      )
+      .map((element) => {
+        const { x, y, width, height } = element.getBoundingClientRect();
+        return { x, y, width, height };
+      }),
   );
   expect(controlBoxes.length).toBeGreaterThan(0);
   const controlsBox = {

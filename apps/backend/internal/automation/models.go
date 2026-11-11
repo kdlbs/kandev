@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
 )
 
 // TriggerType identifies the kind of trigger.
@@ -228,7 +229,12 @@ type Automation struct {
 	ContinuationPolicy               ContinuationPolicy              `json:"continuation_policy" db:"continuation_policy"`
 	RetryPolicy                      RetryPolicy                     `json:"retry_policy" db:"-"`
 	RetryPolicyJSON                  string                          `json:"-" db:"retry_policy"`
-	AutomationRevision               int64                           `json:"-" db:"automation_revision"`
+	// PluginTools is the exact plugin tool approval saved by the native
+	// automation editor. It is omitted from portable exports and never copied
+	// to tasks, runs, or retry snapshots.
+	PluginTools        []plugintools.Selection `json:"plugin_tools" db:"-"`
+	PluginToolsJSON    string                  `json:"-" db:"plugin_tools"`
+	AutomationRevision int64                   `json:"-" db:"automation_revision"`
 	// ContinuationTaskID is runtime state. It is intentionally omitted from
 	// the public automation JSON because the saved task is not portable
 	// configuration and may be deleted or replaced by the server.
@@ -625,6 +631,7 @@ type CreateAutomationRequest struct {
 	ManagedDestination *ManagedConversationDestination `json:"managed_destination,omitempty"`
 	RepositoryMode     RepositoryMode                  `json:"repository_mode,omitempty"`
 	RetryPolicy        RetryPolicy                     `json:"retry_policy"`
+	PluginTools        []plugintools.Selection         `json:"plugin_tools,omitempty"`
 	Triggers           []CreateTriggerSpec             `json:"triggers"`
 	Enabled            *bool                           `json:"enabled,omitempty"`
 }
@@ -660,6 +667,10 @@ type UpdateAutomationRequest struct {
 	ManagedDestinationConversationID string                          `json:"-"`
 	RepositoryMode                   *RepositoryMode                 `json:"repository_mode,omitempty"`
 	RetryPolicy                      *RetryPolicy                    `json:"retry_policy,omitempty"`
+	// PluginTools has explicit presence: nil preserves the stored selection,
+	// an empty slice clears it, and a non-empty list replaces it. Only a
+	// native configuration save may change it.
+	PluginTools *[]plugintools.Selection `json:"plugin_tools,omitempty"`
 }
 
 // AddTriggerRequest adds a trigger to an existing automation.

@@ -12,6 +12,8 @@ import type { KandevRenderer } from "../types";
 import { ActionProvider, Renderer, StateProvider, VisibilityProvider } from "@json-render/react";
 import { normalizeRichOutput } from "@/lib/rich-output/normalize";
 import { RichOutputHostContext, registry } from "./registry";
+import { RichOutputErrorDisclosure } from "./rich-output-error-disclosure";
+import { getRichOutputErrorText } from "./rich-output-error";
 
 export const RichOutputRenderer: KandevRenderer = ({
   args,
@@ -44,12 +46,17 @@ export const RichOutputRenderer: KandevRenderer = ({
   const spec = useMemo(() => output && withHostElementIds(output.spec), [output]);
 
   if (status !== "complete") {
+    const errorText =
+      status === "error"
+        ? getRichOutputErrorText(result, t("task:richOutputErrorUnavailable"))
+        : undefined;
     return (
       <KandevRow
         Icon={IconChartBar}
         title={t("task:richOutputTool")}
         status={status}
         hasExpandableContent={false}
+        statusControl={errorText ? <RichOutputErrorDisclosure diagnostic={errorText} /> : undefined}
       />
     );
   }

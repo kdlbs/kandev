@@ -876,7 +876,7 @@ func TestSSHExecutorResetTrackedManagedBrokerResumeLosesRaceReturnsSuccess(t *te
 	state := &sshSessionState{client: &ssh.Client{}}
 	req := &ExecutorCreateRequest{InstanceID: "instance-1"}
 
-	err := exec.resetTrackedManagedBrokerResume(context.Background(), req, state, brokerPreflight, stopRemote)
+	err := exec.resetTrackedManagedBrokerResume(context.Background(), req, state, nil, brokerPreflight, stopRemote)
 	if err != nil {
 		t.Fatalf("resetTrackedManagedBrokerResume: %v", err)
 	}
@@ -909,7 +909,7 @@ func TestSSHExecutorResetTrackedManagedBrokerResumeAbandonsAWedgedPreflight(t *t
 	req := &ExecutorCreateRequest{InstanceID: "instance-1"}
 	done := make(chan error, 1)
 	go func() {
-		done <- exec.resetTrackedManagedBrokerResume(context.Background(), req, state, brokerPreflight, stopRemote)
+		done <- exec.resetTrackedManagedBrokerResume(context.Background(), req, state, nil, brokerPreflight, stopRemote)
 	}()
 	select {
 	case err := <-done:

@@ -219,6 +219,10 @@ read. That is a build cost, not a contract gap.
 
 ## Shipped primitives reused, all confirmed present
 
+Question presentation and reference links follow the
+[clarification Markdown design](clarification-markdown.md). That contract does
+not change this design's History eligibility, query isolation, or record state.
+
 - `IconShieldQuestion` and `STYLE_PERMISSION = "text-amber-500"`
   (`apps/web/lib/ui/state-icons.tsx`). A `PENDING_PERMISSION_ICON` pairing already
   exists, so AC .12 reuses rather than introduces.

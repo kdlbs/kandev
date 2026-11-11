@@ -70,6 +70,17 @@ export type AgentUpdatePreview = {
   available_versions?: AgentUpdateVersion[];
   command: string[];
   command_string: string;
+  copilot_plugin_compatibility?: CopilotPluginCompatibility;
+};
+
+export type CopilotPluginCompatibilityState = "not_checked" | "compatible" | "incompatible";
+
+export type CopilotPluginCompatibility = {
+  runtime_version: string;
+  /** Missing state is treated as unchecked for older servers. */
+  state?: CopilotPluginCompatibilityState;
+  /** Null means the saved-profile impact could not be read. */
+  selected_profile_count: number | null;
 };
 
 export async function previewAgentUpdate(

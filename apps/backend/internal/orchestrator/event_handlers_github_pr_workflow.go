@@ -354,19 +354,20 @@ func (s *Service) applyTaskPRWorkflowTransition(
 	if !live {
 		return s.applyGuardedTransitionLifecycle(ctx, task.ID, session.ID, result.FromStepID, result.ToStepID, trigger)
 	}
-	casAttempted, casApplied := false, false
+	casAttempted := false
 	var commitErr error
-	applied := s.applyEngineTransitionWithCommitMode(ctx, task.ID, session, result, trigger,
+	var commitResult workflowTransitionCommitResult
+	applied := s.applyEngineTransitionWithCommitResultMode(ctx, task.ID, session, result, trigger,
 		task.Description, transitionLifecycleWithOnEnter,
-		func(commitCtx context.Context) (bool, error) {
+		func(commitCtx context.Context) (workflowTransitionCommitResult, error) {
 			casAttempted = true
-			casApplied, commitErr = s.commitTaskPRWorkflowTransition(commitCtx, task.ID, session.ID, result, trigger)
-			return casApplied, commitErr
+			commitResult, commitErr = s.commitTaskPRWorkflowTransition(commitCtx, task.ID, session.ID, result, trigger)
+			return commitResult, commitErr
 		})
 	switch {
 	case commitErr != nil:
 		return false, fmt.Errorf("commit %s transition: %w", trigger, commitErr)
-	case applied || casApplied:
+	case applied || commitResult.Applied:
 		return true, nil
 	case casAttempted:
 		return false, nil
@@ -380,17 +381,17 @@ func (s *Service) applyTaskPRWorkflowTransition(
 // ApplyTransition does.
 func (s *Service) commitTaskPRWorkflowTransition(
 	ctx context.Context, taskID, sessionID string, result engine.HandleResult, trigger engine.Trigger,
-) (bool, error) {
+) (workflowTransitionCommitResult, error) {
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, result.ToStepID)
 	if err != nil {
-		return false, err
+		return workflowTransitionCommitResult{}, err
 	}
 	transitionCtx := transitionContext(ctx, sessionID, trigger, targetStep)
-	task, oldWorkflowID, applied, err := s.workflowStore.applyTransitionIfAtStepRaw(
+	task, oldWorkflowID, applied, wipLimit, err := s.workflowStore.applyTransitionIfAtStepRaw(
 		transitionCtx, taskID, result.FromStepID, result.ToStepID,
 	)
 	if err != nil || !applied {
-		return false, err
+		return workflowTransitionCommitResult{}, err
 	}
 	s.publishTaskUpdated(ctx, task, oldWorkflowID)
 	if task.QueuedForStepID == "" {
@@ -401,7 +402,12 @@ func (s *Service) commitTaskPRWorkflowTransition(
 		}
 	}
 	s.workflowStore.pullNextTaskOnVacate(ctx, result.FromStepID, taskID)
-	return true, nil
+	return workflowTransitionCommitResult{
+		Applied:        true,
+		AdmissionKnown: true,
+		WIPAdmitted:    task.QueuedForStepID != result.ToStepID || task.WIPAdmitted,
+		WIPLimit:       wipLimit,
+	}, nil
 }
 
 // scheduleTaskPRWorkflowRetry re-runs a failed PR workflow event with bounded

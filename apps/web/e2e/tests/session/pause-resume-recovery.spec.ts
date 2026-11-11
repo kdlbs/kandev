@@ -4,6 +4,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { typeWhileBusy } from "../../helpers/type-while-busy";
+import { dwell, watchWs } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 
 // ---------------------------------------------------------------------------
@@ -55,6 +56,53 @@ async function seedTaskAndWaitForIdle(
 
 test.describe("Pause → resume recovery", () => {
   // Cancel/resume timing can be sensitive under CI load.
+
+  test("Escape leaves the running agent alone when the setting is off", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.saveUserSettings({ escape_cancels_agent: false });
+    const session = await seedTaskAndWaitForIdle(testPage, apiClient, seedData, "Escape disabled");
+    await session.sendMessage("/slow 8s");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    const editor = session.activeChat().locator(".tiptap.ProseMirror:visible").first();
+    await editor.focus();
+    await editor.press("Escape");
+    await dwell(testPage, 300, "negative-assertion", "Escape must not pause when disabled");
+    await expect(session.agentStatus()).toBeVisible();
+  });
+
+  test("Escape cancels only while the chat composer is focused", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const ws = watchWs(testPage);
+    await apiClient.saveUserSettings({ escape_cancels_agent: true });
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Escape cancels focused chat turn",
+    );
+
+    await session.sendMessage("/slow 8s");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+
+    await session.cancelAgentButton().focus();
+    await testPage.keyboard.press("Escape");
+    await dwell(testPage, 300, "negative-assertion", "Escape outside the composer must not cancel");
+    await expect(session.agentStatus()).toBeVisible();
+
+    const editor = session.activeChat().locator(".tiptap.ProseMirror:visible").first();
+    await editor.focus();
+    const cancelResponse = ws.waitForResponse("agent.cancel");
+    await editor.press("Escape");
+    await cancelResponse;
+    await expect(session.agentStatus()).not.toBeVisible();
+    await expect(session.idleInput()).toBeVisible();
+  });
 
   test("pausing a running turn lets a newly typed message resume the same session", async ({
     testPage,

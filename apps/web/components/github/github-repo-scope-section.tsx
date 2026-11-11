@@ -31,6 +31,7 @@ import type {
   RepoFilter,
   UpdateGitHubWorkspaceSettingsRequest,
 } from "@/lib/types/github";
+import { useConnectionRequestGuard } from "./github-connection-draft";
 import { useTranslation } from "react-i18next";
 import { t as translate } from "@/lib/i18n";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
@@ -222,6 +223,8 @@ function RepositoryScopeFields({
 function useGitHubRepoScopeDraft(workspaceId: string) {
   const { t } = useTranslation();
   const { toast } = useToast();
+  const [draftHost, setDraftHost] = useState("github.com");
+  const captureRequest = useConnectionRequestGuard(`${workspaceId}:${draftHost}`);
   const [mode, setMode] = useState<GitHubRepoScopeMode>("all");
   const [orgs, setOrgs] = useState("");
   const [repos, setRepos] = useState("");
@@ -243,11 +246,8 @@ function useGitHubRepoScopeDraft(workspaceId: string) {
     void fetchGitHubWorkspaceSettings(workspaceId)
       .then((settings) => {
         if (cancelled) return;
-        const next = {
-          mode: settings.repo_scope_mode ?? "all",
-          orgs: (settings.repo_scope_orgs ?? []).join(", "),
-          repos: repoFiltersToInput(settings.repo_scope_repos ?? []),
-        };
+        const next = settingsScopeDraft(settings);
+        setDraftHost(settings.github_host ?? "github.com");
         setBaseline(next);
         setMode(next.mode);
         setOrgs(next.orgs);
@@ -273,26 +273,26 @@ function useGitHubRepoScopeDraft(workspaceId: string) {
   }, [toast, workspaceId]);
 
   const save = useCallback(async () => {
+    const isCurrent = captureRequest();
     const submitted = { mode, orgs, repos };
     try {
-      const updated = await updateGitHubWorkspaceSettings(
-        scopePayload({ workspaceId, mode, orgs, parsedRepos }),
-      );
-      const saved = {
-        mode: updated.repo_scope_mode,
-        orgs: (updated.repo_scope_orgs ?? []).join(", "),
-        repos: repoFiltersToInput(updated.repo_scope_repos ?? []),
-      };
+      const updated = await updateGitHubWorkspaceSettings({
+        ...scopePayload({ workspaceId, mode, orgs, parsedRepos }),
+        expected_host: draftHost,
+      });
+      if (!isCurrent()) return;
+      const saved = settingsScopeDraft(updated);
       setBaseline(saved);
       setMode((current) => (current === submitted.mode ? saved.mode : current));
       setOrgs((current) => (current === submitted.orgs ? saved.orgs : current));
       setRepos((current) => (current === submitted.repos ? saved.repos : current));
       toast({ description: t("github:githubWorkspaceSettingsSaved"), variant: "success" });
     } catch {
+      if (!isCurrent()) return;
       toast({ description: t("github:failedToSaveGithubWorkspaceSettings"), variant: "error" });
       throw new Error("Failed to save GitHub workspace settings");
     }
-  }, [mode, orgs, parsedRepos, repos, t, toast, workspaceId]);
+  }, [draftHost, mode, orgs, parsedRepos, repos, t, toast, workspaceId]);
   const discard = useCallback(() => {
     setMode(baseline.mode);
     setOrgs(baseline.orgs);
@@ -347,4 +347,12 @@ export function GitHubRepoScopeSection({ workspaceId }: { workspaceId: string })
       />
     </SettingsSection>
   );
+}
+
+function settingsScopeDraft(settings: Awaited<ReturnType<typeof fetchGitHubWorkspaceSettings>>) {
+  return {
+    mode: settings.repo_scope_mode ?? "all",
+    orgs: (settings.repo_scope_orgs ?? []).join(", "),
+    repos: repoFiltersToInput(settings.repo_scope_repos ?? []),
+  };
 }

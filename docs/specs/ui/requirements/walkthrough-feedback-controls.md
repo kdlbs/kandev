@@ -1,5 +1,5 @@
 ---
-status: active
+status: deprecated
 system: ui
 created: 2026-08-03
 owners:
@@ -8,6 +8,10 @@ owners:
 # Walkthrough Feedback Controls Requirements
 
 ## Overview
+
+The replacement is [step feedback](walkthrough-step-feedback.md). It introduces
+a temporary composer with a real Cancel action. This document records the
+previous persistent-form contract.
 
 The walkthrough note form remains available while a walkthrough is open. A visible **Cancel** action is misleading when that form has no temporary mode to dismiss and the action cannot change anything.
 

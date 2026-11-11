@@ -39,6 +39,9 @@ func isSSHPassthrough(execution *AgentExecution) bool {
 }
 
 func (m *Manager) passthroughRunnerForExecution(execution *AgentExecution) executionPassthroughRunner {
+	if m.passthroughRunnerOverride != nil {
+		return m.passthroughRunnerOverride
+	}
 	if isSSHPassthrough(execution) {
 		return &remotePassthroughRunner{execution: execution, manager: m}
 	}
@@ -103,6 +106,9 @@ func (r *remotePassthroughRunner) target(processID string) (types.PassthroughTar
 }
 
 func (r *remotePassthroughRunner) Start(ctx context.Context, request process.InteractiveStartRequest) (*process.InteractiveProcessInfo, error) {
+	if !request.LaunchWrapper.IsZero() {
+		return nil, errors.New("remote terminal transport does not support launch wrappers")
+	}
 	snapshot, err := r.snapshot(ctx)
 	if err != nil {
 		return nil, err

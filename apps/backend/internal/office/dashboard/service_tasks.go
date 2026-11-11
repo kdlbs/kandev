@@ -586,7 +586,13 @@ type TaskStatusUpdateRequest struct {
 	// the canonical task.state_changed event that owns the activity row. Gate
 	// redirects still log here because they do not publish that event.
 	SuppressStatusActivity bool
+	// Automatic terminal writes must not overwrite a later business-state change.
+	ExpectedCurrentState   string
+	ExpectedWorkflowStepID string
 }
+
+// ErrAutomaticCompletionStale means a newer task state owns the outcome.
+var ErrAutomaticCompletionStale = errors.New("task changed before automatic completion")
 
 // UpdateTaskStatus persists a new task status, optionally creates a comment,
 // and publishes an office.task.status_changed event so execution policy
@@ -612,6 +618,9 @@ func (s *DashboardService) UpdateTaskStatus(ctx context.Context, req TaskStatusU
 	if dbState == "" {
 		return &InvalidTaskStatusError{Status: req.NewStatus}
 	}
+	if s.taskStateWriter == nil {
+		return errors.New("task status writer is not configured")
+	}
 
 	preStatus := ""
 	if exec, err := s.repo.GetTaskExecutionFields(ctx, req.TaskID); err == nil && exec != nil {
@@ -625,16 +634,8 @@ func (s *DashboardService) UpdateTaskStatus(ctx context.Context, req TaskStatusU
 		return gateErr
 	}
 
-	if dbState == stateCompleted {
-		updated, err := s.repo.UpdateTaskStateIfWorkflowStep(ctx, req.TaskID, expectedStepID, dbState)
-		if err != nil {
-			return fmt.Errorf("update task state: %w", err)
-		}
-		if !updated {
-			return &WorkflowStepChangedError{TaskID: req.TaskID}
-		}
-	} else if err := s.repo.UpdateTaskState(ctx, req.TaskID, dbState); err != nil {
-		return fmt.Errorf("update task state: %w", err)
+	if err := s.persistTaskStatus(ctx, req, dbState, expectedStepID); err != nil {
+		return err
 	}
 
 	commentID := s.maybeCreateStatusComment(ctx, req)

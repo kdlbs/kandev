@@ -73,12 +73,16 @@ type UpdateUserSettingsRequest struct {
 	PreferredShell                    *string
 	DefaultEditorID                   *string
 	EnablePreviewOnClick              *bool
+	EscapeCancelsAgent                *bool
 	ChatSubmitKey                     *string
 	ReviewAutoMarkOnScroll            *bool
 	ConfirmTaskArchive                *bool
 	PreventAutoStartAgentOnOpen       *bool
 	UnreadDivider                     *bool
+	UnreadTaskDot                     *bool
+	UnreadTaskDotHideDelaySeconds     *int
 	AgentGeneratedTaskTitles          *bool
+	PromptSuggestions                 *bool
 	AutoFocusNewTasks                 *bool
 	MCPTaskAgentProfileDefault        *string
 	ShowAnchoredPromptBar             *bool
@@ -230,6 +234,13 @@ func (s *Service) GetDefaultUtilitySettings(ctx context.Context) (agentID, model
 		return "", "", err
 	}
 	return settings.DefaultUtilityAgentID, settings.DefaultUtilityModel, nil
+}
+
+// PromptSuggestionsEnabled reports whether the user opted in to next-prompt
+// suggestions. A settings read failure leaves suggestions off.
+func (s *Service) PromptSuggestionsEnabled(ctx context.Context) bool {
+	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
+	return err == nil && settings != nil && settings.PromptSuggestions
 }
 
 // GetDefaultUtilityAgentProfileID returns the profile used by new built-in utility actions.
@@ -420,17 +431,14 @@ func (s *Service) RecordTaskCreateLastUsed(ctx context.Context, patch models.Tas
 	if taskCreateLastUsedPatchEmpty(patch) {
 		return nil
 	}
-	settings, err := s.updateTaskCreateLastUsed(ctx, patch)
+	settings, changed, err := s.repo.UpdateTaskCreateLastUsed(ctx, s.settingsUserID(ctx), patch)
 	if err != nil {
 		return err
 	}
-	s.publishUserSettingsEvent(ctx, settings)
+	if changed {
+		s.publishUserSettingsEvent(ctx, settings)
+	}
 	return nil
-}
-
-// updateTaskCreateLastUsed delegates the patch to the repository.
-func (s *Service) updateTaskCreateLastUsed(ctx context.Context, patch models.TaskCreateLastUsed) (*models.UserSettings, error) {
-	return s.repo.UpdateTaskCreateLastUsed(ctx, s.settingsUserID(ctx), patch)
 }
 
 // taskCreateLastUsedPatchEmpty reports whether every field of the patch is
@@ -455,6 +463,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 		return err
 	}
 	if err := applySidebarHoverSettings(settings, req); err != nil {
+		return err
+	}
+	if err := applyUnreadTaskDotHideDelay(settings, req); err != nil {
 		return err
 	}
 	if err := applyWorkspaceAndTaskListPreferences(settings, req); err != nil {
@@ -729,6 +740,9 @@ func applyStartupPage(settings *models.UserSettings, value *string) error {
 // (archive confirmation, auto-start prevention, transcript display toggles,
 // MCP default profile, release notification) from the patch.
 func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.EscapeCancelsAgent != nil {
+		settings.EscapeCancelsAgent = *req.EscapeCancelsAgent
+	}
 	if req.ReviewAutoMarkOnScroll != nil {
 		settings.ReviewAutoMarkOnScroll = *req.ReviewAutoMarkOnScroll
 	}
@@ -741,8 +755,14 @@ func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSe
 	if req.UnreadDivider != nil {
 		settings.UnreadDivider = *req.UnreadDivider
 	}
+	if req.UnreadTaskDot != nil {
+		settings.UnreadTaskDot = *req.UnreadTaskDot
+	}
 	if req.AgentGeneratedTaskTitles != nil {
 		settings.AgentGeneratedTaskTitles = *req.AgentGeneratedTaskTitles
+	}
+	if req.PromptSuggestions != nil {
+		settings.PromptSuggestions = *req.PromptSuggestions
 	}
 	if req.AutoFocusNewTasks != nil {
 		settings.AutoFocusNewTasks = *req.AutoFocusNewTasks
@@ -1239,12 +1259,16 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"preferred_shell":                          settings.PreferredShell,
 		"default_editor_id":                        settings.DefaultEditorID,
 		"enable_preview_on_click":                  settings.EnablePreviewOnClick,
+		"escape_cancels_agent":                     settings.EscapeCancelsAgent,
 		"chat_submit_key":                          settings.ChatSubmitKey,
 		"review_auto_mark_on_scroll":               settings.ReviewAutoMarkOnScroll,
 		"confirm_task_archive":                     settings.ConfirmTaskArchive,
 		"prevent_auto_start_agent_on_open":         settings.PreventAutoStartAgentOnOpen,
 		"unread_divider":                           settings.UnreadDivider,
+		"unread_task_dot":                          settings.UnreadTaskDot,
+		"unread_task_dot_hide_delay_seconds":       settings.UnreadTaskDotHideDelaySeconds,
 		"agent_generated_task_titles":              settings.AgentGeneratedTaskTitles,
+		"prompt_suggestions":                       settings.PromptSuggestions,
 		"auto_focus_new_tasks":                     settings.AutoFocusNewTasks,
 		"mcp_task_agent_profile_default":           models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_anchored_prompt_bar":                 settings.ShowAnchoredPromptBar,

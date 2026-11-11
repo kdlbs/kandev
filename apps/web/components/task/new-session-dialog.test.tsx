@@ -300,6 +300,20 @@ describe("NewSessionDialog", () => {
     );
   });
 
+  // @covers AC-UI-NEW-SESSION-ADVANCED-001.1, AC-UI-NEW-SESSION-ADVANCED-001.4
+  it("keeps a draft while Advanced settings opens and closes without launching", () => {
+    render(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
+    const prompt = screen.getByTestId(DESCRIPTION_INPUT_TEST_ID);
+    fireEvent.change(prompt, { target: { value: "Keep this draft" } });
+    const advanced = screen.getByRole("button", { name: "Advanced settings" });
+    expect(advanced.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(advanced);
+    expect(advanced.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(advanced);
+    expect((prompt as HTMLTextAreaElement).value).toBe("Keep this draft");
+    expect(mockLaunchSession).not.toHaveBeenCalled();
+  });
+
   it("opens handoff with blank context without summarizing", () => {
     render(
       <NewSessionDialog

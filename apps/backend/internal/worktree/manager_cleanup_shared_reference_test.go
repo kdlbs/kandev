@@ -78,6 +78,9 @@ func TestCleanupWorktrees_PreservesParentWorkspaceWhenInheritedSubtaskDeleted(t 
 	if len(parentInventory) != 1 || parentInventory[0].ID != parent.ID {
 		t.Fatalf("parent inventory = %+v, want exactly one deduplicated worktree", parentInventory)
 	}
+	if parentInventory[0].SessionID != "session-parent" {
+		t.Fatalf("parent inventory session = %q, want the environment owner's session", parentInventory[0].SessionID)
+	}
 
 	if _, err := store.db.ExecContext(ctx, `DELETE FROM tasks WHERE id = ?`, "task-child"); err != nil {
 		t.Fatalf("delete inherited subtask: %v", err)

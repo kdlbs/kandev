@@ -92,6 +92,16 @@ func (wt *WorkspaceTracker) DetachWorkspaceStreamSubscriber(sub types.WorkspaceS
 	wt.logger.Info("workspace stream subscriber removed", zap.Int("subscribers", count))
 }
 
+// detachAllWorkspaceStreamSubscribers clears this tracker's subscription set
+// without closing any channel. Graph handoff uses it because a subscriber can
+// leave the manager registry before retirement runs; the retired tracker must
+// still drop every channel it actually holds before that channel is closed.
+func (wt *WorkspaceTracker) detachAllWorkspaceStreamSubscribers() {
+	wt.workspaceSubMu.Lock()
+	clear(wt.workspaceStreamSubscribers)
+	wt.workspaceSubMu.Unlock()
+}
+
 // notifyWorkspaceStreamGitStatus sends git status to all workspace stream subscribers
 func (wt *WorkspaceTracker) notifyWorkspaceStreamGitStatus(update types.GitStatusUpdate) {
 	wt.workspaceSubMu.RLock()

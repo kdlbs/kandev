@@ -97,9 +97,7 @@ function manyRunningChecks(count: number) {
 
 async function expectScrollablePopoverWithinViewport(testPage: Page, locator: Locator) {
   const metrics = await locator.evaluate((node) => {
-    const content = node.classList.contains("overflow-y-auto")
-      ? node
-      : node.closest(".overflow-y-auto");
+    const content = node.querySelector('[data-testid="pr-popover-scroll-body"]');
     const rect = content?.getBoundingClientRect();
     return {
       top: rect?.top ?? -1,
@@ -174,7 +172,9 @@ test.describe("PR top-bar CI popover", () => {
       /Checks failed.*Changes requested.*Conflicts/,
     );
     await expect(badge.getByTestId("pr-merge-conflict-warning")).toBeVisible();
-    await expect(badge.locator("svg")).toHaveCount(2);
+    await expect(badge.getByTestId("pr-ci-bubble-failed")).toBeVisible();
+    // Base PR glyph, inline conflict triangle, and the independent CI bubble.
+    await expect(badge.locator("svg")).toHaveCount(3);
     await badge.focus();
     await expect(testPage.getByTestId("pr-topbar-popover")).toBeVisible();
     await badge.click();

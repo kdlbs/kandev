@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // TestCountAgentInitiatedAssignmentWakes_BasicCount covers
@@ -18,9 +18,9 @@ func TestCountAgentInitiatedAssignmentWakes_BasicCount(t *testing.T) {
 	windowStart := now.Add(-10 * time.Minute)
 
 	inWindow := func(id, payload string) {
-		r := mustCreateRun(t, repo, &models.Run{
+		r := mustCreateRun(t, repo, &runsmodels.Run{
 			ID: id, AgentProfileID: "a1", Reason: "task_assigned",
-			Payload: payload, Status: models.RunStatusQueued, CoalescedCount: 1,
+			Payload: payload, Status: runsmodels.RunStatusQueued, CoalescedCount: 1,
 		})
 		setRequestedAt(t, repo, r.ID, now)
 	}
@@ -30,9 +30,9 @@ func TestCountAgentInitiatedAssignmentWakes_BasicCount(t *testing.T) {
 	inWindow("cnt-user", `{"task_id":"t1","actor_type":"user"}`)
 	inWindow("cnt-other-task", `{"task_id":"t2","actor_type":"agent"}`)
 
-	other := mustCreateRun(t, repo, &models.Run{
+	other := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "cnt-other-reason", AgentProfileID: "a1", Reason: "task_comment",
-		Payload: `{"task_id":"t1","actor_type":"agent"}`, Status: models.RunStatusQueued, CoalescedCount: 1,
+		Payload: `{"task_id":"t1","actor_type":"agent"}`, Status: runsmodels.RunStatusQueued, CoalescedCount: 1,
 	})
 	setRequestedAt(t, repo, other.ID, now)
 
@@ -54,15 +54,15 @@ func TestCountAgentInitiatedAssignmentWakes_WindowIsHalfOpenExclusiveStart(t *te
 	ctx := context.Background()
 	windowStart := time.Now().UTC()
 
-	atBoundary := mustCreateRun(t, repo, &models.Run{
+	atBoundary := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "win-at-boundary", AgentProfileID: "a1", Reason: "task_assigned",
-		Payload: `{"task_id":"t1","actor_type":"agent"}`, Status: models.RunStatusQueued, CoalescedCount: 1,
+		Payload: `{"task_id":"t1","actor_type":"agent"}`, Status: runsmodels.RunStatusQueued, CoalescedCount: 1,
 	})
 	setRequestedAt(t, repo, atBoundary.ID, windowStart)
 
-	insideWindow := mustCreateRun(t, repo, &models.Run{
+	insideWindow := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "win-inside", AgentProfileID: "a1", Reason: "task_assigned",
-		Payload: `{"task_id":"t1","actor_type":"agent"}`, Status: models.RunStatusQueued, CoalescedCount: 1,
+		Payload: `{"task_id":"t1","actor_type":"agent"}`, Status: runsmodels.RunStatusQueued, CoalescedCount: 1,
 	})
 	setRequestedAt(t, repo, insideWindow.ID, windowStart.Add(time.Millisecond))
 
@@ -86,15 +86,15 @@ func TestCountAgentInitiatedAssignmentWakes_WindowIsHalfOpenInclusiveEnd(t *test
 	evaluationInstant := time.Now().UTC()
 	windowStart := evaluationInstant.Add(-10 * time.Minute)
 
-	atBoundary := mustCreateRun(t, repo, &models.Run{
+	atBoundary := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "win-end-at-boundary", AgentProfileID: "a1", Reason: "task_assigned",
-		Payload: `{"task_id":"t-end","actor_type":"agent"}`, Status: models.RunStatusQueued, CoalescedCount: 1,
+		Payload: `{"task_id":"t-end","actor_type":"agent"}`, Status: runsmodels.RunStatusQueued, CoalescedCount: 1,
 	})
 	setRequestedAt(t, repo, atBoundary.ID, evaluationInstant)
 
-	future := mustCreateRun(t, repo, &models.Run{
+	future := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "win-end-future", AgentProfileID: "a1", Reason: "task_assigned",
-		Payload: `{"task_id":"t-end","actor_type":"agent"}`, Status: models.RunStatusQueued, CoalescedCount: 1,
+		Payload: `{"task_id":"t-end","actor_type":"agent"}`, Status: runsmodels.RunStatusQueued, CoalescedCount: 1,
 	})
 	setRequestedAt(t, repo, future.ID, evaluationInstant.Add(time.Millisecond))
 
@@ -116,9 +116,9 @@ func TestCountAgentInitiatedAssignmentWakes_GuardsNonStringTaskID(t *testing.T) 
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	r := mustCreateRun(t, repo, &models.Run{
+	r := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "guard-numeric", AgentProfileID: "a1", Reason: "task_assigned",
-		Payload: `{"task_id":42,"actor_type":"agent"}`, Status: models.RunStatusQueued, CoalescedCount: 1,
+		Payload: `{"task_id":42,"actor_type":"agent"}`, Status: runsmodels.RunStatusQueued, CoalescedCount: 1,
 	})
 	setRequestedAt(t, repo, r.ID, now)
 
@@ -142,14 +142,14 @@ func TestCountAgentInitiatedAssignmentWakes_NoStatusFilter(t *testing.T) {
 
 	for _, tc := range []struct {
 		id     string
-		status models.RunStatus
+		status runsmodels.RunStatus
 	}{
-		{"status-queued", models.RunStatusQueued},
-		{"status-claimed", models.RunStatusClaimed},
-		{"status-finished", models.RunStatusFinished},
-		{"status-failed", models.RunStatusFailed},
+		{"status-queued", runsmodels.RunStatusQueued},
+		{"status-claimed", runsmodels.RunStatusClaimed},
+		{"status-finished", runsmodels.RunStatusFinished},
+		{"status-failed", runsmodels.RunStatusFailed},
 	} {
-		r := mustCreateRun(t, repo, &models.Run{
+		r := mustCreateRun(t, repo, &runsmodels.Run{
 			ID: tc.id, AgentProfileID: "a1", Reason: "task_assigned",
 			Payload: `{"task_id":"t-status","actor_type":"agent"}`,
 			Status:  tc.status, CoalescedCount: 1,
@@ -174,15 +174,15 @@ func TestCountAgentInitiatedAssignmentWakes_TasklessAndAbsentActorDoNotMatch(t *
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	taskless := mustCreateRun(t, repo, &models.Run{
+	taskless := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "taskless", AgentProfileID: "a1", Reason: "task_assigned",
-		Payload: `{"actor_type":"agent"}`, Status: models.RunStatusQueued, CoalescedCount: 1,
+		Payload: `{"actor_type":"agent"}`, Status: runsmodels.RunStatusQueued, CoalescedCount: 1,
 	})
 	setRequestedAt(t, repo, taskless.ID, now)
 
-	noActor := mustCreateRun(t, repo, &models.Run{
+	noActor := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "no-actor", AgentProfileID: "a1", Reason: "task_assigned",
-		Payload: `{"task_id":"t1"}`, Status: models.RunStatusQueued, CoalescedCount: 1,
+		Payload: `{"task_id":"t1"}`, Status: runsmodels.RunStatusQueued, CoalescedCount: 1,
 	})
 	setRequestedAt(t, repo, noActor.ID, now)
 

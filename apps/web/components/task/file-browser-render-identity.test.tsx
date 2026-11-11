@@ -4,6 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileTreeNode } from "@/lib/types/backend";
 import type { FileBrowserRow } from "./file-browser-hooks";
 
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: vi.fn() }),
+}));
+
 const fileContextMenuRender = vi.hoisted(() => vi.fn());
 
 vi.mock("./file-context-menu", () => ({

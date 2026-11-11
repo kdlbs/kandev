@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-ATTACH-WORKSPACE-SOURCES-001
 created: 2026-07-22
-updated: 2026-09-18
+updated: 2026-11-07
 owners:
   - kandev
 ---
@@ -19,6 +19,8 @@ This design record preserves the technical source for the capability mapped to R
 | Requirement | Design source |
 | --- | --- |
 | REQ-TASKS-ATTACH-WORKSPACE-SOURCES-001 | Migrated legacy design detail below; [Legacy add-branch effective environment](#legacy-add-branch-effective-environment) |
+
+[Workspace source script turns](workspace-source-script-turns.md) defines script-message binding without acquiring the workspace mutation gate again.
 
 ## Placement extension
 
@@ -202,11 +204,10 @@ root. In a multi-source task this is the parent that contains every repository a
 workspace-source and sibling-materialization events update `workspace_path` without replacing the
 primary `worktree_path`, and a later session refresh returns the same effective root.
 
-Chat file links resolve against `workspace_path`, so an absolute path under any attached source is
-converted to its task-root-relative Files path before it is opened. Clients may fall back to
-`worktree_path` for legacy session payloads that do not yet include `workspace_path`. Absolute paths
-outside the effective workspace remain non-actionable and are never rewritten into a workspace
-file request.
+Chat file links use `workspace_path` as the Files containment boundary.
+The [chat file-link context design](chat-file-link-context.md) extends relative-base selection and absolute aliases.
+Legacy payloads retain `worktree_path` as the existing Files-root fallback.
+Unrelated host paths remain non-actionable.
 
 `add_workspace_sources_kandev` accepts the same source union and defaults `task_id` to the current
 task. The caller may target only itself or a same-workspace direct child. The task MCP server injects
@@ -424,3 +425,5 @@ See also the [repository placement implementation package](../../../plans/worksp
 ## Current-workspace extension
 
 The [current-workspace design](current-workspace-sources.md) supersedes the original toolbar location and repositoryless exclusion. It adds root-preserving Local/scratch attachment while retaining remote host-folder restrictions. [New plan](../../../plans/current-workspace-sources/plan.md).
+
+The [current managed source recovery design](current-managed-attachment-recovery.md) extends host attachment for absent current clone destinations. It preserves this design's session/environment admission and compensation. Missing legacy recreation is excluded.

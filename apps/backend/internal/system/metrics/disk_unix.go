@@ -55,14 +55,6 @@ func DiskUsage(ctx context.Context, path string) (DiskCapacity, error) {
 	}
 }
 
-func diskPercentFromStatfs(stat syscall.Statfs_t) (float64, error) {
-	capacity, err := diskCapacityFromStatfs(stat)
-	if err != nil {
-		return 0, err
-	}
-	return capacity.UsedPercent, nil
-}
-
 func diskCapacityFromStatfs(stat syscall.Statfs_t) (DiskCapacity, error) {
 	total := stat.Blocks * uint64(stat.Bsize)
 	available := stat.Bavail * uint64(stat.Bsize)

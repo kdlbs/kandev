@@ -38,6 +38,8 @@ import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 
+test.use({ trace: "retain-on-failure" });
+
 const PARKED_PROBE_INTERVAL = "1s";
 const PARKED_FIXTURE_SCRIPT = "/parked-fixture 3s";
 const AC73_MIN_LIVE_SAMPLES = 3;
@@ -130,7 +132,8 @@ async function createClaudeAcpProfile(apiClient: ApiClient): Promise<string> {
 
 /** Creates a task whose foreground turn registers a shell-kind detached
  * launch after `settleDelay`, scripts its probe to hold "live" indefinitely
- * before that settle can happen, then waits for the settle itself. */
+ * before that settle can happen, then waits for the foreground settle and
+ * the authoritative parked projection before sampling its UI. */
 async function createParkedTask(
   apiClient: ApiClient,
   seedData: { workspaceId: string; repositoryId: string; workflowId: string; startStepId: string },
@@ -158,6 +161,15 @@ async function createParkedTask(
     "WAITING_FOR_INPUT",
     `${title}'s foreground turn should settle`,
   );
+  await expect
+    .poll(
+      async () => (await apiClient.getTaskSession(sessionId)).session.parked_on_background_work,
+      {
+        message: `${title}'s background probe should publish its parked projection`,
+        timeout: 30_000,
+      },
+    )
+    .toBe(true);
 
   return { taskId: task.id, sessionId };
 }

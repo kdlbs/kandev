@@ -7,8 +7,11 @@ import { MessageSendError } from "@/lib/chat/message-send-error";
 import { findPendingClarification } from "@/lib/utils/pending-clarification";
 import type { Message } from "@/lib/types/http";
 import { fetchTaskSession, listTaskSessionMessages } from "@/lib/api/domains/session-api";
+import { isStaleSessionStateEvent } from "@/lib/session-state";
+import { captureTaskSessionHydrationEpoch } from "@/lib/state/slices/session/hydration-epochs";
 import {
   formatLateClarificationMessage,
+  orderedLateClarificationAnswers,
   type LateClarificationSnapshot,
 } from "@/lib/clarification/late-clarification-message";
 import { generateUUID } from "@/lib/utils";
@@ -134,12 +137,14 @@ async function hydrateSourceSession({
     throw new MessageSendError("session-unavailable", unavailableMessage);
   }
 
-  const needsSession = cachedSession === undefined;
+  // Admission derives direct-vs-queue from the source session state, and a
+  // cached row can lag the backend, so the session is always read fresh. The
+  // transcript is only loaded when this client has none for the session.
   const needsMessages = !Object.prototype.hasOwnProperty.call(state.messages.bySession, sessionId);
-  if (!needsSession && !needsMessages) return;
+  const hydrationEpochAtRequestStart = captureTaskSessionHydrationEpoch(state, sessionId);
 
   const [sessionResponse, messagesResponse] = await Promise.all([
-    needsSession ? fetchTaskSession(sessionId, { cache: "no-store" }) : null,
+    fetchTaskSession(sessionId, { cache: "no-store" }),
     needsMessages
       ? listTaskSessionMessages(sessionId, { limit: 100, sort: "asc" }, { cache: "no-store" })
       : null,
@@ -149,7 +154,10 @@ async function hydrateSourceSession({
     if (sessionResponse.session.task_id !== taskId) {
       throw new MessageSendError("session-unavailable", unavailableMessage);
     }
-    storeApi.getState().setTaskSession(sessionResponse.session);
+    const current = storeApi.getState().taskSessions.items[sessionId];
+    if (!isStaleSessionStateEvent(current, sessionResponse.session.updated_at)) {
+      storeApi.getState().setTaskSession(sessionResponse.session, hydrationEpochAtRequestStart);
+    }
   }
   if (messagesResponse) {
     const messages = messagesResponse.messages ?? [];
@@ -159,6 +167,19 @@ async function hydrateSourceSession({
       oldestCursor: messages[0]?.id ?? null,
     });
   }
+}
+
+function snapshotAttachments(snapshot: LateClarificationSnapshot) {
+  return orderedLateClarificationAnswers(snapshot.messages, snapshot.answers).flatMap((answer) =>
+    (answer.attachments ?? []).map((attachment) => ({
+      type: attachment.type,
+      attachment_id: attachment.attachment_id,
+      mime_type: attachment.mime_type,
+      name: attachment.name,
+      size_bytes: attachment.size_bytes,
+      delivery_mode: attachment.delivery_mode,
+    })),
+  );
 }
 
 export function useLateClarificationMessage(sourceMessage: Message | undefined) {
@@ -226,6 +247,7 @@ export function useLateClarificationMessage(sourceMessage: Message | undefined) 
           const outcome = await handleSendMessageWithOutcome({
             message,
             clientMessageId: record.clientMessageId,
+            attachments: snapshotAttachments(snapshot),
           });
           if (outcome === false || outcome === undefined) {
             throw new MessageSendError("late-answer-admission-failed", t("task:lateAnswerFailed"));

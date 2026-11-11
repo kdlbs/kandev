@@ -1406,6 +1406,9 @@ func (s *Service) publishRepositoryEvent(ctx context.Context, eventType string, 
 		"created_at":             repository.CreatedAt.Format(time.RFC3339),
 		"updated_at":             repository.UpdatedAt.Format(time.RFC3339),
 	}
+	if remoteURL, ok := displayableRemoteURL(repository.RemoteURL); ok {
+		data["remote_url"] = remoteURL
+	}
 	event := bus.NewEvent(eventType, "task-service", data)
 	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
 		s.logger.Error("failed to publish repository event",

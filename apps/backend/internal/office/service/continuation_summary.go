@@ -3,7 +3,8 @@ package service
 import (
 	"context"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/summary"
 )
@@ -13,7 +14,7 @@ import (
 // indirection so the event subscriber doesn't import the summary
 // package's helpers directly — easier to stub in tests.
 func summaryLoadInputs(
-	ctx context.Context, repo *sqlite.Repository, run *models.Run, agentID, scope string,
+	ctx context.Context, repo *sqlite.Repository, run *runsmodels.Run, agentID, scope string,
 ) (summary.BuildInputs, error) {
 	if run == nil {
 		return summary.BuildInputs{}, nil

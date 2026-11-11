@@ -22,6 +22,7 @@ and [Browser access](../requirements/port-proxy-browser-panel.md).
 | .1, .2, .5 | Projection and ordering |
 | .3, .6, .7 | Presentation and responsive behavior |
 | .4, .8 | State transitions and response scope |
+| .9 | Dedicated and proxy URL construction |
 
 ## Components and responsibilities
 
@@ -91,6 +92,19 @@ focus as grouping changes. Maintain visible focus, localized accessible names,
 Escape/dismiss focus restoration, and no reorder animation. Reuse the existing
 mutation toast feedback rather than adding duplicate live announcements.
 
+## Dedicated and proxy URL construction
+
+`PortListSection` shares URL construction across the desktop Dialog and phone
+Drawer. Construct a dedicated URL with `http:`, the hostname parsed from the
+configured backend base URL, and the active map's returned tunnel port at `/`.
+The gateway's dedicated listener is an `http.Server` served without TLS; the
+dashboard's scheme therefore does not describe that listener. Do not reuse the
+backend's port for the dedicated URL. Continue to append the existing
+`/port-proxy/<session>/<target>/` path to the unmodified backend base URL for
+proxy access. Feed the same computed URL to row text, Copy, and system-browser
+Open; preserve the proxy-only Browser panel action. No listener, API, lifecycle,
+authorization, layout, or translation changes are needed.
+
 ## State transitions and response scope
 
 Confirmed active map entries determine grouping. Pending Start remains under
@@ -133,3 +147,4 @@ database schema, permissions, logs, metrics, or runtime flag changes.
 ## Implementation Plans
 
 - [Active-first port forwarding](../../../plans/port-forwarding-active-first/plan.md)
+- [Dedicated tunnel URL scheme](../../../plans/dedicated-tunnel-url-scheme/plan.md)

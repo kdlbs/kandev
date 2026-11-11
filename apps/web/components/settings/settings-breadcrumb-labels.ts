@@ -67,6 +67,7 @@ const SEGMENT_LABEL_KEYS: Record<string, string> = {
   integrations: "common:integrations",
   "keyboard-shortcuts": "settings:keyboardShortcuts",
   layouts: "settings:layouts",
+  "mcp-servers": "settings:mcpServers",
   new: "settings:new",
   notifications: "settings:notifications",
   plugins: "common:plugins",

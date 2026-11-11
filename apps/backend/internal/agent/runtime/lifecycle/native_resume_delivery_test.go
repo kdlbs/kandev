@@ -21,11 +21,17 @@ type nativeDeliveryResumer interface {
 	AcknowledgeNativeResumeDelivery(context.Context, string) error
 }
 
-func nativeResumeJournalPeer(t *testing.T, store *journal.Journal, rejectRetirement bool) *agentctl.Client {
+func nativeResumeJournalPeer(t *testing.T, store *journal.Journal, rejectRetirement bool, beforeStatus ...func(context.Context) error) *agentctl.Client {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/api/v1/agent/delivery":
+			if len(beforeStatus) > 0 {
+				if err := beforeStatus[0](r.Context()); err != nil {
+					http.Error(w, "status fixture unavailable", http.StatusServiceUnavailable)
+					return
+				}
+			}
 			status, err := store.RecoveryDescriptor(r.Context(), "session", "incarnation", 2, "stream")
 			if err != nil {
 				http.Error(w, "unavailable", http.StatusConflict)

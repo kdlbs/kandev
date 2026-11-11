@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -92,7 +94,7 @@ type RunSessionLaunch struct {
 // task session. A route is optional; when present it is the concrete provider
 // selection chosen by the routing dispatcher.
 type RunSessionLauncher interface {
-	StartRunSession(ctx context.Context, run *models.Run, agent *models.AgentInstance,
+	StartRunSession(ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance,
 		launch LaunchContext, route *RouteOverride) (RunSessionLaunch, error)
 }
 
@@ -169,17 +171,17 @@ type RoutingDispatcher interface {
 	// with err=nil means routing is disabled (caller falls through to
 	// the legacy launch path) OR the run was parked (caller treats as
 	// handled — no failure escalation).
-	DispatchWithRouting(ctx context.Context, run *models.Run,
+	DispatchWithRouting(ctx context.Context, run *runsmodels.Run,
 		agent *models.AgentInstance, launch LaunchContext) (launched bool, parked bool, err error)
 	// HandlePostStartFailure classifies a streaming/tool failure for a
 	// run that was launched via routing. Returns handled=true when the
 	// routing path requeued the run (caller should NOT escalate).
-	HandlePostStartFailure(ctx context.Context, run *models.Run,
+	HandlePostStartFailure(ctx context.Context, run *runsmodels.Run,
 		agent *models.AgentInstance, errorMessage string,
 		providerError *streams.ProviderError) (handled bool, err error)
 	// MarkRunSuccessHealth flips a successful run's resolved provider /
 	// model / tier scopes back to healthy.
-	MarkRunSuccessHealth(ctx context.Context, run *models.Run,
+	MarkRunSuccessHealth(ctx context.Context, run *runsmodels.Run,
 		agent *models.AgentInstance)
 }
 
@@ -333,9 +335,11 @@ type TaskCreator interface {
 	// CreateOfficeTaskAsAgent's metadata carries the task-boundary causation
 	// carrier set (AC-OFFICE-RUN-CAUSATION-001.18) when the caller resolved
 	// one; nil when there is none to persist (e.g. no causing run).
+	// relations carries the blocker and workspace-mode fields the runtime
+	// already validated; the zero value declares nothing.
 	CreateOfficeTaskAsAgent(
 		ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string,
-		metadata map[string]interface{},
+		metadata map[string]interface{}, relations shared.AgentTaskRelations,
 	) (taskID string, err error)
 }
 
@@ -348,7 +352,7 @@ type TaskCreator interface {
 type SubtaskCreator interface {
 	CreateOfficeSubtask(
 		ctx context.Context, parentTaskID, assigneeAgentID, title, description string,
-		metadata map[string]interface{},
+		metadata map[string]interface{}, relations shared.AgentTaskRelations,
 	) (taskID string, err error)
 }
 
@@ -420,6 +424,8 @@ type Service struct {
 	taskStarter             TaskStarter
 	runSessionLauncher      RunSessionLauncher
 	runStopper              RunExecutionStopper
+	runPermissions          RunPermissionResolver
+	permissionRetryDelays   []time.Duration
 	routingDispatcher       RoutingDispatcher
 	taskCanceller           TaskCanceller
 	taskWorkspace           TaskWorkspaceService
@@ -427,6 +433,7 @@ type Service struct {
 	workspaceGroupCleaner   WorkspaceGroupCleaner
 	configSyncCleaner       ConfigSyncCleaner
 	taskCreator             TaskCreator
+	taskStateWriter         shared.TaskStateWriter
 	workspaceCreator        WorkspaceCreator
 	taskPRs                 TaskPRLister
 	agentTokenMinter        AgentTokenMinter
@@ -434,6 +441,7 @@ type Service struct {
 	apiBaseURL              string
 	agentctlBinaryPath      string
 	syncHandlers            bool // when true, event handlers run synchronously (for tests)
+	handoffCompletionPolicy HandoffCompletionPolicy
 
 	// Phase 4 (ADR-0004): engine-driven run queuing. When set, the four
 	// event subscribers (comment_created, blockers_resolved,
@@ -653,6 +661,12 @@ func (s *Service) SetTaskTreeDeleter(deleter TaskTreeDeleter) {
 	s.taskTreeDeleter = deleter
 }
 
+// SetTaskStateWriter wires the task repository that owns transactional state
+// changes and completion guards.
+func (s *Service) SetTaskStateWriter(writer shared.TaskStateWriter) {
+	s.taskStateWriter = writer
+}
+
 // SetConfigSyncCleaner wires the config sync service after startup
 // constructs it, mirroring SetWorkspaceGroupCleaner.
 func (s *Service) SetConfigSyncCleaner(cleaner ConfigSyncCleaner) {
@@ -704,7 +718,7 @@ const defaultWorkspaceName = "default"
 // absent carrier).
 func (s *Service) CreateOfficeTaskAsAgent(
 	ctx context.Context, callerAgentID, workspaceID, projectID, assigneeAgentID, title, description string,
-	causingRunID string,
+	causingRunID string, relations shared.AgentTaskRelations,
 ) (string, error) {
 	if err := s.requireTaskCreatePermission(ctx, callerAgentID); err != nil {
 		return "", err
@@ -718,7 +732,7 @@ func (s *Service) CreateOfficeTaskAsAgent(
 			metadata = carrierMetadataFromRunForAgent(run, callerAgentID)
 		}
 	}
-	return s.taskCreator.CreateOfficeTaskAsAgent(ctx, workspaceID, projectID, assigneeAgentID, title, description, metadata)
+	return s.taskCreator.CreateOfficeTaskAsAgent(ctx, workspaceID, projectID, assigneeAgentID, title, description, metadata, relations)
 }
 
 // CreateOfficeSubtaskAsAgent checks can_create_tasks for the caller before
@@ -731,7 +745,7 @@ func (s *Service) CreateOfficeTaskAsAgent(
 // a runtime action is an Office trigger the same as creating a root task.
 func (s *Service) CreateOfficeSubtaskAsAgent(
 	ctx context.Context, callerAgentID, parentTaskID, assigneeAgentID, title, description string,
-	causingRunID string,
+	causingRunID string, relations shared.AgentTaskRelations,
 ) (string, error) {
 	if err := s.requireTaskCreatePermission(ctx, callerAgentID); err != nil {
 		return "", err
@@ -749,7 +763,7 @@ func (s *Service) CreateOfficeSubtaskAsAgent(
 			metadata = carrierMetadataFromRunForAgent(run, callerAgentID)
 		}
 	}
-	return creator.CreateOfficeSubtask(ctx, parentTaskID, assigneeAgentID, title, description, metadata)
+	return creator.CreateOfficeSubtask(ctx, parentTaskID, assigneeAgentID, title, description, metadata, relations)
 }
 
 // GetTaskWorkspaceID returns the workspace that owns a task for runtime scope validation.
@@ -1152,7 +1166,7 @@ func (s *Service) ReleaseTaskCheckout(ctx context.Context, taskID string) error 
 // -- Runs --
 
 // ListRuns returns run requests for a workspace.
-func (s *Service) ListRuns(ctx context.Context, wsID string) ([]*models.Run, error) {
+func (s *Service) ListRuns(ctx context.Context, wsID string) ([]*runsmodels.Run, error) {
 	return s.repo.ListRuns(ctx, wsID)
 }
 

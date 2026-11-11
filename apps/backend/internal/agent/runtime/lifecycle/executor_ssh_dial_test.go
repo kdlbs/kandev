@@ -15,6 +15,9 @@ func newTestHomeDir(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".ssh"), 0o700); err != nil {
+		t.Fatalf("create fake ~/.ssh: %v", err)
+	}
 	return home
 }
 func TestDialSSHConnectsAndEnforcesThePinnedFingerprint(t *testing.T) {

@@ -27,6 +27,7 @@ import type * as SettingsSliceTypes from "./slices/settings/types";
 import type * as UISliceTypes from "./slices/ui/types";
 import type { AgentUpdateJob } from "@/lib/api";
 import type { InstallJob, NotificationProvidersUpdate } from "./slices/settings/types";
+import type { UserShellScope } from "./user-shell-scope";
 import {
   defaultWorkspaceState,
   defaultSettingsState,
@@ -193,7 +194,6 @@ export type AppState = KanbanSlice & {
   gitlabIssueWatches: (typeof defaultGitLabState)["gitlabIssueWatches"];
   gitlabMRWatches: (typeof defaultGitLabState)["gitlabMRWatches"];
   gitlabActionPresets: (typeof defaultGitLabState)["gitlabActionPresets"];
-  gitlabStats: (typeof defaultGitLabState)["gitlabStats"];
   gitlabStatus: (typeof defaultGitLabState)["gitlabStatus"];
   taskMRAutomation: (typeof defaultGitLabState)["taskMRAutomation"];
 
@@ -277,6 +277,7 @@ export type AppState = KanbanSlice & {
   sidebarTaskPrefs: (typeof defaultUIState)["sidebarTaskPrefs"];
   appSidebar: (typeof defaultUIState)["appSidebar"];
   settingsMenu: (typeof defaultUIState)["settingsMenu"];
+  imagePreviewsExpandedByDefault: (typeof defaultUIState)["imagePreviewsExpandedByDefault"];
   richOutputMotion: (typeof defaultUIState)["richOutputMotion"];
   chatMotion: (typeof defaultUIState)["chatMotion"];
   acknowledgedAgentErrors: (typeof defaultUIState)["acknowledgedAgentErrors"];
@@ -485,13 +486,7 @@ export type AppState = KanbanSlice & {
     hydrationEpoch: number,
     observationAtRequestStart?: ActiveTurnWindowObservation,
   ) => void;
-  completeTurn: (
-    sessionId: string,
-    turnId: string,
-    completedAt: string,
-    metadata?: Record<string, unknown>,
-    updatedAt?: string,
-  ) => void;
+  completeTurn: import("./slices/session/types").SessionSliceActions["completeTurn"];
   /** Marks a turn as the session's active turn (or null to clear it). */
   setActiveTurn: (sessionId: string, turnId: string | null) => void;
   /** Reconciles the active-turn marker after REST hydration, epoch-guarded. */
@@ -568,6 +563,12 @@ export type AppState = KanbanSlice & {
   ) => void;
   clearGitStatus: (sessionId: string) => void;
   clearLegacyGitStatusEntry: (sessionId: string) => void;
+  invalidateGitStatusInventory: (sessionId: string) => void;
+  reconcileGitStatusInventory: (
+    environmentId: string,
+    generation: number,
+    scopes: readonly string[],
+  ) => boolean;
   registerSessionEnvironment: (sessionId: string, environmentId: string) => void;
   setSessionCommits: (
     sessionId: string,
@@ -587,6 +588,8 @@ export type AppState = KanbanSlice & {
   setActiveModel: (sessionId: string, modelId: string) => void;
   clearActiveModel: (sessionId: string) => void;
   // Task plan actions
+  beginTaskPlanRead: (taskId: string) => symbol;
+  finishTaskPlanRead: (taskId: string, token: symbol, plan?: TaskPlan | null) => boolean;
   setTaskPlan: (taskId: string, plan: TaskPlan | null) => void;
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;
@@ -668,12 +671,17 @@ export type AppState = KanbanSlice & {
   // Session todos actions
   setSessionTodos: (sessionId: string, entries: TodoEntry[]) => void;
   // User shells actions
-  setUserShells: (sessionId: string, shells: UserShellInfo[]) => void;
-  setUserShellsLoading: (sessionId: string, loading: boolean) => void;
-  addUserShell: (sessionId: string, shell: UserShellInfo) => void;
-  removeUserShell: (sessionId: string, terminalId: string) => void;
+  setUserShells: (
+    scope: UserShellScope,
+    shells: UserShellInfo[],
+    sharedGeneration?: number,
+  ) => void;
+  setUserShellsLoading: (scope: UserShellScope, loading: boolean) => void;
+  setUserShellsFailed: (scope: UserShellScope) => void;
+  addUserShell: (scope: UserShellScope, shell: UserShellInfo) => void;
+  removeUserShell: (scope: UserShellScope, terminalId: string) => void;
   updateUserShell: (
-    environmentId: string,
+    scope: UserShellScope,
     terminalId: string,
     patch: Partial<Omit<UserShellInfo, "terminalId">>,
   ) => void;
@@ -684,6 +692,7 @@ export type AppState = KanbanSlice & {
     entry: import("./slices/session-runtime/types").LaunchWarningEntry,
   ) => void;
   clearLaunchWarning: (sessionId: string) => void;
+  beginBackgroundWorkRead: (sessionId: string) => number;
   setBackgroundWorkloads: (
     sessionId: string,
     workloads: import("@/lib/types/background-work").WorkloadRunObservation[],
@@ -742,6 +751,7 @@ export type AppState = KanbanSlice & {
   commitSettingsMenuMode: UIA["commitSettingsMenuMode"];
   restoreSettingsMenuMode: UIA["restoreSettingsMenuMode"];
   setSettingsMenuExpandedKeys: UIA["setSettingsMenuExpandedKeys"];
+  commitImagePreviewsExpandedByDefault: UIA["commitImagePreviewsExpandedByDefault"];
   previewRichOutputAnimations: UIA["previewRichOutputAnimations"];
   commitRichOutputAnimations: UIA["commitRichOutputAnimations"];
   restoreRichOutputAnimations: UIA["restoreRichOutputAnimations"];

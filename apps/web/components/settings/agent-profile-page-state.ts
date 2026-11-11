@@ -85,6 +85,22 @@ function changedCursorPluginsMcpPreference(
   return draftValue === (savedProfile.cursorPluginsMcpEnabled ?? true) ? undefined : draftValue;
 }
 
+function sameStringSet(left: string[] = [], right: string[] = []): boolean {
+  if (left.length !== right.length) return false;
+  const sortedLeft = [...left].sort();
+  const sortedRight = [...right].sort();
+  return sortedLeft.every((value, index) => value === sortedRight[index]);
+}
+
+function changedCopilotPlugins(
+  draft: AgentProfile,
+  savedProfile: AgentProfile,
+): string[] | undefined {
+  const draftValue = draft.copilotSelectedPlugins ?? [];
+  if (sameStringSet(draftValue, savedProfile.copilotSelectedPlugins)) return undefined;
+  return [...draftValue].sort();
+}
+
 export function useProfileEditorState(
   profile: AgentProfile,
   permissionSettings: Record<string, PermissionSetting>,
@@ -224,6 +240,7 @@ function buildProfileUpdatePatch(
     cursor_plugins_mcp_enabled: changedCursorPluginsMcpPreference(draft, savedProfile),
     mcp_selection_mode: draft.mcpSelectionMode,
     mcp_selected_servers: draft.mcpSelectedServers,
+    copilot_selected_plugins: changedCopilotPlugins(draft, savedProfile),
     // Omit an unchanged enabled value so a profile editor save cannot
     // resurrect a concurrent list-toggle response from its stale draft.
     enabled: changedEnabledPreference(draft, savedProfile),

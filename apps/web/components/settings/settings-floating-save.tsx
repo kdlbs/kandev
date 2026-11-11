@@ -22,9 +22,10 @@ import { settingsActionClassName } from "@/components/settings/settings-control"
 
 export type SettingsSaveStatus = "dirty" | "saving" | "saved" | "error";
 export type SettingsSaveErrorKind = "save" | "reset";
-export type SettingsSavePlacement = "content" | "viewport";
+export type SettingsSavePlacement = "content" | "viewport" | "panel";
 
 function standalonePositioningClass(placement: SettingsSavePlacement): string {
+  if (placement === "panel") return "shrink-0 px-1 py-3";
   if (placement === "content") {
     return "absolute inset-x-0 bottom-[calc(5rem_+_env(safe-area-inset-bottom))] pl-[calc(1rem_+_env(safe-area-inset-left))] pr-[calc(1rem_+_env(safe-area-inset-right))] md:bottom-[calc(1.6875rem_+_env(safe-area-inset-bottom))]";
   }
@@ -34,6 +35,7 @@ function standalonePositioningClass(placement: SettingsSavePlacement): string {
 type SettingsFloatingSaveProps = {
   status: SettingsSaveStatus;
   placement?: SettingsSavePlacement;
+  saveTestId?: string;
   canSave?: boolean;
   errorKind?: SettingsSaveErrorKind | null;
   dirtyContributorIds?: string;
@@ -47,6 +49,7 @@ type SettingsFloatingSaveProps = {
 };
 
 type SaveActionButtonsProps = {
+  saveTestId?: string;
   isBusy: boolean;
   isSaved: boolean;
   isInvalid: boolean;
@@ -58,6 +61,7 @@ type SaveActionButtonsProps = {
 };
 
 function SaveActionButtons({
+  saveTestId,
   isBusy,
   isSaved,
   isInvalid,
@@ -81,6 +85,7 @@ function SaveActionButtons({
       </Button>
       <Button
         type="button"
+        data-testid={saveTestId}
         className={settingsActionClassName(
           "shrink-0 cursor-pointer bg-success px-3 text-sm text-success-foreground hover:bg-success/85 focus-visible:border-success focus-visible:ring-success/35",
         )}
@@ -98,6 +103,7 @@ function SaveActionButtons({
 export function SettingsFloatingSave({
   status,
   placement = "viewport",
+  saveTestId,
   canSave = true,
   errorKind,
   dirtyContributorIds,
@@ -118,7 +124,7 @@ export function SettingsFloatingSave({
   const errorMessage = errorMessageKeys(errorKind);
   const accessibleLabel = t(accessibleKey);
   const configChatFloatingActionsHost = useConfigChatFloatingActionsHost();
-  const isHostedByConfigChat = configChatFloatingActionsHost !== null;
+  const isHostedByConfigChat = placement !== "panel" && configChatFloatingActionsHost !== null;
   const positioningClass = standalonePositioningClass(placement);
   const primaryAction = status === "error" && errorKind === "reset" ? onReset : onSave;
   const saveAction = (
@@ -155,6 +161,7 @@ export function SettingsFloatingSave({
           )}
         </div>
         <SaveActionButtons
+          saveTestId={saveTestId}
           isBusy={isBusy}
           isSaved={isSaved}
           isInvalid={isInvalid}

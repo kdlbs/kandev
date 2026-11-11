@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"go.uber.org/zap"
@@ -208,7 +209,8 @@ func workspaceRepositorySpecsFromLaunch(req *LaunchRequest) []WorkspaceRepositor
 		result = append(result, WorkspaceRepositorySpec{
 			RepositoryID: spec.RepositoryID, RepositoryPath: spec.RepositoryPath, RepoName: spec.RepoName,
 			IntegrationRef: spec.IntegrationRef,
-			BaseBranch:     spec.BaseBranch, DefaultBranch: spec.DefaultBranch, CheckoutBranch: spec.CheckoutBranch,
+			BaseBranch:     spec.BaseBranch, BaseBranchFallbackPolicy: spec.BaseBranchFallbackPolicy,
+			DefaultBranch: spec.DefaultBranch, CheckoutBranch: spec.CheckoutBranch,
 			PRNumber: spec.PRNumber, QualifiedPRBase: spec.QualifiedPRBase,
 			ComparisonTarget: spec.ComparisonTarget,
 			WorktreeID:       spec.WorktreeID, WorktreeBranchPrefix: spec.WorktreeBranchPrefix,
@@ -219,6 +221,44 @@ func workspaceRepositorySpecsFromLaunch(req *LaunchRequest) []WorkspaceRepositor
 		})
 	}
 	return result
+}
+
+func repositoryIDsFromLaunch(req *LaunchRequest) []string {
+	if req == nil {
+		return nil
+	}
+	specs := req.RepoSpecs()
+	ids := make([]string, 0, len(specs))
+	seen := make(map[string]struct{}, len(specs))
+	for _, spec := range specs {
+		if spec.RepositoryID == "" {
+			continue
+		}
+		if _, exists := seen[spec.RepositoryID]; exists {
+			continue
+		}
+		seen[spec.RepositoryID] = struct{}{}
+		ids = append(ids, spec.RepositoryID)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func repositoryIDsFromWorkspace(specs []WorkspaceRepositorySpec) []string {
+	ids := make([]string, 0, len(specs))
+	seen := make(map[string]struct{}, len(specs))
+	for _, spec := range specs {
+		if spec.RepositoryID == "" {
+			continue
+		}
+		if _, exists := seen[spec.RepositoryID]; exists {
+			continue
+		}
+		seen[spec.RepositoryID] = struct{}{}
+		ids = append(ids, spec.RepositoryID)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // workspaceRepositoryCandidate resolves the physical checkout represented by

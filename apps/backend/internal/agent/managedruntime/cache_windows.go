@@ -82,6 +82,15 @@ func openManagedRuntimeEntryRelative(parent windows.Handle, name string) (window
 }
 
 func openManagedRuntimeHandle(parent windows.Handle, name string, createOption uint32) (windows.Handle, error) {
+	return openManagedRuntimeHandleWithAccess(parent, name, createOption,
+		windows.FILE_GENERIC_READ|windows.FILE_GENERIC_WRITE|windows.DELETE)
+}
+
+func openManagedRuntimeReadHandle(parent windows.Handle, name string, createOption uint32) (windows.Handle, error) {
+	return openManagedRuntimeHandleWithAccess(parent, name, createOption, windows.FILE_GENERIC_READ)
+}
+
+func openManagedRuntimeHandleWithAccess(parent windows.Handle, name string, createOption, access uint32) (windows.Handle, error) {
 	objectName, err := windows.NewNTUnicodeString(name)
 	if err != nil {
 		return 0, err
@@ -97,7 +106,7 @@ func openManagedRuntimeHandle(parent windows.Handle, name string, createOption u
 	var handle windows.Handle
 	err = windows.NtCreateFile(
 		&handle,
-		windows.FILE_GENERIC_READ|windows.FILE_GENERIC_WRITE|windows.DELETE,
+		access,
 		objectAttributes,
 		&ioStatus,
 		&allocationSize,
@@ -112,6 +121,52 @@ func openManagedRuntimeHandle(parent windows.Handle, name string, createOption u
 		return 0, err
 	}
 	return handle, nil
+}
+
+func openNpxInventoryDirectoryPath(path string) (*os.File, error) {
+	handle, err := openManagedRuntimeReadHandle(0, managedRuntimeWindowsNTPath(path), windows.FILE_DIRECTORY_FILE)
+	if err != nil {
+		return nil, normalizeNpxInventoryOpenError(err)
+	}
+	if err := rejectManagedRuntimeReparse(handle); err != nil {
+		return nil, err
+	}
+	return os.NewFile(uintptr(handle), "npm-cache"), nil
+}
+
+func openNpxInventoryDirectory(parent *os.File, name string) (*os.File, error) {
+	if !validInventoryEntryName(name) {
+		return nil, errors.New("invalid npm execution entry name")
+	}
+	handle, err := openManagedRuntimeReadHandle(windows.Handle(parent.Fd()), name, windows.FILE_DIRECTORY_FILE)
+	if err != nil {
+		return nil, normalizeNpxInventoryOpenError(err)
+	}
+	if err := rejectManagedRuntimeReparse(handle); err != nil {
+		return nil, err
+	}
+	return os.NewFile(uintptr(handle), name), nil
+}
+
+func openNpxInventoryFile(parent *os.File, name string) (*os.File, error) {
+	if !validInventoryEntryName(name) {
+		return nil, errors.New("invalid npm execution entry name")
+	}
+	handle, err := openManagedRuntimeReadHandle(windows.Handle(parent.Fd()), name, windows.FILE_NON_DIRECTORY_FILE)
+	if err != nil {
+		return nil, normalizeNpxInventoryOpenError(err)
+	}
+	if err := rejectManagedRuntimeReparse(handle); err != nil {
+		return nil, err
+	}
+	return os.NewFile(uintptr(handle), name), nil
+}
+
+func normalizeNpxInventoryOpenError(err error) error {
+	if isManagedRuntimeNotFound(err) {
+		return os.ErrNotExist
+	}
+	return err
 }
 
 func managedRuntimeWindowsNTPath(path string) string {

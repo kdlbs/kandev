@@ -86,6 +86,7 @@ export type WalkthroughComment = CommentBase & {
   taskId: string;
   walkthroughId?: string;
   walkthroughTitle?: string;
+  walkthroughUpdatedAt?: string;
   stepIndex: number;
   stepCount: number;
   repo?: string;

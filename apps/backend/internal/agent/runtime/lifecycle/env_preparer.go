@@ -84,18 +84,19 @@ type RepoPrepareSpec struct {
 	// CopyFiles is the repository's seeding spec. Carried here only so the
 	// preparer can report a seed the agent cannot reach in a multi-repository
 	// layout; materialization itself still happens in the worktree manager.
-	CopyFiles          string
-	RepositoryPath     string
-	RepoName           string
-	BaseBranch         string
-	IntegrationRef     string
-	DefaultBranch      string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch     string
-	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	QualifiedPRBase    *models.PRBase
-	RemoteContribution *models.RemoteContribution
-	CheckoutOptions    *models.RepositoryCheckoutOptions
-	WorktreeID         string
+	CopyFiles                string
+	RepositoryPath           string
+	RepoName                 string
+	BaseBranch               string
+	BaseBranchFallbackPolicy models.BaseBranchFallbackPolicy
+	IntegrationRef           string
+	DefaultBranch            string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch           string
+	PRNumber                 int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	QualifiedPRBase          *models.PRBase
+	RemoteContribution       *models.RemoteContribution
+	CheckoutOptions          *models.RepositoryCheckoutOptions
+	WorktreeID               string
 	// WorkspaceReuseRequired makes preparation attach to the exact canonical
 	// environment. It forbids worktree creation/recreation and all repository
 	// mutating setup paths.
@@ -131,31 +132,32 @@ type RepoPrepareSpec struct {
 
 // EnvPrepareRequest contains the parameters for environment preparation.
 type EnvPrepareRequest struct {
-	TaskID                  string
-	WorkspaceID             string
-	SessionID               string
-	TaskEnvironmentID       string
-	TaskTitle               string
-	ExecutionID             string
-	ExecutorType            executor.Name
-	WorkspacePath           string
-	RepositoryPath          string
-	RepositoryID            string
-	TaskRepositoryID        string
-	UseWorktree             bool
-	SetupScript             string
-	RepoSetupScript         string // Repository-level setup script (e.g. "make install")
-	BaseBranch              string
-	IntegrationRef          string
-	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch          string
-	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	QualifiedPRBase         *models.PRBase
-	RemoteContribution      *models.RemoteContribution
-	CheckoutOptions         *models.RepositoryCheckoutOptions
-	ContributionDestination *models.ContributionDestination
-	WorktreeID              string
-	WorktreeBranch          string
+	TaskID                   string
+	WorkspaceID              string
+	SessionID                string
+	TaskEnvironmentID        string
+	TaskTitle                string
+	ExecutionID              string
+	ExecutorType             executor.Name
+	WorkspacePath            string
+	RepositoryPath           string
+	RepositoryID             string
+	TaskRepositoryID         string
+	UseWorktree              bool
+	SetupScript              string
+	RepoSetupScript          string // Repository-level setup script (e.g. "make install")
+	BaseBranch               string
+	BaseBranchFallbackPolicy models.BaseBranchFallbackPolicy
+	IntegrationRef           string
+	DefaultBranch            string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch           string
+	PRNumber                 int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	QualifiedPRBase          *models.PRBase
+	RemoteContribution       *models.RemoteContribution
+	CheckoutOptions          *models.RepositoryCheckoutOptions
+	ContributionDestination  *models.ContributionDestination
+	WorktreeID               string
+	WorktreeBranch           string
 	// WorkspaceReuseRequired applies attach-only semantics to every repository
 	// in this request. RepoPrepareSpec carries the same value so multi-repo
 	// callers can retain it while requests are split.
@@ -216,6 +218,7 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		RepositoryPath:             r.RepositoryPath,
 		RepoName:                   r.RepoName,
 		BaseBranch:                 r.BaseBranch,
+		BaseBranchFallbackPolicy:   r.BaseBranchFallbackPolicy,
 		IntegrationRef:             r.IntegrationRef,
 		DefaultBranch:              r.DefaultBranch,
 		CheckoutBranch:             r.CheckoutBranch,

@@ -11,7 +11,7 @@ import {
 import type {
   PluginWorkspaceTaskSurfaceProps,
   PluginWorkspaceTaskUsageProps,
-} from "@kandev/plugin-sdk";
+} from "@kdlbs/plugin-sdk";
 
 function TaskStatusContent({ query }: { query: ReturnType<typeof usePluginTaskStatus> }) {
   const { t } = useTranslation("plugins");

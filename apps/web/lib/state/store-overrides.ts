@@ -78,7 +78,6 @@ export function buildStateOverrides(m: DefaultState) {
     gitlabIssueWatches: m.gitlabIssueWatches,
     gitlabMRWatches: m.gitlabMRWatches,
     gitlabActionPresets: m.gitlabActionPresets,
-    gitlabStats: m.gitlabStats,
     gitlabStatus: m.gitlabStatus,
     jiraIssueWatches: m.jiraIssueWatches,
     linearIssueWatches: m.linearIssueWatches,

@@ -372,7 +372,19 @@ func (s *Service) prepareRepositoryWorkspaceSource(ctx context.Context, task *mo
 	if _, duplicate := scanForBranchAddDuplicate(existing, id, base, checkout, repo); duplicate != nil {
 		return nil, createdID, false, fmt.Errorf("%w: %v", ErrWorkspaceSourceConflict, duplicate)
 	}
-	return &models.TaskRepository{RepositoryID: id, BaseBranch: base, CheckoutBranch: checkout, Metadata: map[string]interface{}{}}, createdID, false, nil
+	selectionSource := models.BaseBranchSelectionSourceExplicit
+	if strings.TrimSpace(input.BaseBranch) == "" {
+		selectionSource = models.BaseBranchSelectionSourceRepositoryDefault
+	}
+	metadata := map[string]interface{}{}
+	if err := models.PutBaseBranchSelection(metadata, &models.BaseBranchSelection{
+		Version: models.BaseBranchSelectionVersion,
+		Branch:  base,
+		Source:  selectionSource,
+	}); err != nil {
+		return nil, createdID, false, err
+	}
+	return &models.TaskRepository{RepositoryID: id, BaseBranch: base, CheckoutBranch: checkout, Metadata: metadata}, createdID, false, nil
 }
 
 func hasExactWorkspaceSourceRepository(existing []*models.TaskRepository, repositoryID, baseBranch, checkoutBranch string) bool {

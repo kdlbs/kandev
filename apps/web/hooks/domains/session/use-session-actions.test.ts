@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import {
   isSessionStoppable,
   isSessionDeletable,
@@ -13,21 +13,41 @@ const mockRequest = vi.fn();
 const mockDeleteTask = vi.hoisted(() => vi.fn());
 const mockRemoveTaskSession = vi.fn();
 const mockRemoveQuickChatSession = vi.fn();
-const mockSetActiveSessionAuto = vi.fn();
+const mockSetActiveSession = vi.fn((taskId: string, sessionId: string) => {
+  mockState.tasks = {
+    ...(mockState.tasks as object),
+    activeTaskId: taskId,
+    activeSessionId: sessionId,
+  };
+});
+const mockSetActiveSessionAuto = vi.fn((taskId: string, sessionId: string) => {
+  mockState.tasks = {
+    ...(mockState.tasks as object),
+    activeTaskId: taskId,
+    activeSessionId: sessionId,
+  };
+});
 const mockClearActiveSession = vi.fn();
 const networkErrorMessage = "network down";
 
+let mockConnected = true;
+const mockStoreApi = { getState: () => mockState };
+
 let mockState: Record<string, unknown> = {};
 
+/** Resets transport fakes and eligible-session state for each lifecycle scenario. */
 function resetSessionActionMocks() {
   vi.clearAllMocks();
+  mockConnected = true;
   mockToast.mockReturnValue("toast-1");
   mockRequest.mockResolvedValue(undefined);
   mockDeleteTask.mockResolvedValue(undefined);
   mockState = {
-    tasks: { activeSessionId: null },
-    taskSessionsByTask: { itemsByTaskId: {} },
+    tasks: { activeTaskId: "t1", activeSessionId: null },
+    taskRemoval: { navigationRevision: 0 },
+    taskSessionsByTask: { itemsByTaskId: { t1: [{ id: "s1", state: "RUNNING" }] } },
     quickChat: { sessions: [] },
+    setActiveSession: mockSetActiveSession,
     setActiveSessionAuto: mockSetActiveSessionAuto,
     clearActiveSession: mockClearActiveSession,
   };
@@ -38,7 +58,7 @@ vi.mock("@/components/toast-provider", () => ({
 }));
 
 vi.mock("@/lib/ws/connection", () => ({
-  getWebSocketClient: () => ({ request: mockRequest }),
+  getWebSocketClient: () => (mockConnected ? { request: mockRequest } : null),
 }));
 
 vi.mock("@/lib/api/domains/kanban-api", () => ({
@@ -52,9 +72,7 @@ vi.mock("@/components/state-provider", () => ({
       removeTaskSession: mockRemoveTaskSession,
       removeQuickChatSession: mockRemoveQuickChatSession,
     }),
-  useAppStoreApi: () => ({
-    getState: () => mockState,
-  }),
+  useAppStoreApi: () => mockStoreApi,
 }));
 
 describe("session state predicates", () => {
@@ -257,5 +275,220 @@ describe("useSessionActions inline feedback", () => {
       variant: "error",
     });
     expect(mockUpdateToast).not.toHaveBeenCalled();
+  });
+});
+
+// @covers AC-TASKS-SESSION-TAB-RESTART-001.2, AC-TASKS-SESSION-TAB-RESTART-001.3, AC-TASKS-SESSION-TAB-RESTART-001.4
+// eslint-disable-next-line max-lines-per-function -- restart scenarios exercise one shared transport fixture.
+describe("useSessionActions restart", () => {
+  beforeEach(resetSessionActionMocks);
+
+  it("stops before resuming the captured session and keeps local data", async () => {
+    let finishStop!: () => void;
+    mockRequest.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishStop = resolve;
+      }),
+    );
+    const { result } = renderHook(() => useSessionActions({ sessionId: "s1", taskId: "t1" }));
+    expect(result.current).toHaveProperty("restart");
+    let pending!: Promise<boolean>;
+    act(() => {
+      pending = result.current.restart();
+    });
+    expect(mockRequest.mock.calls).toEqual([["session.stop", { session_id: "s1" }, 15000]]);
+    expect(result.current.isRestarting).toBe(true);
+    await act(async () => {
+      finishStop();
+      expect(await pending).toBe(true);
+    });
+    expect(mockRequest.mock.calls[1]).toEqual([
+      "session.launch",
+      { task_id: "t1", intent: "resume", session_id: "s1" },
+      30000,
+    ]);
+    expect(result.current.isRestarting).toBe(false);
+    expect(mockRemoveTaskSession).not.toHaveBeenCalled();
+    expect(mockSetActiveSessionAuto).not.toHaveBeenCalled();
+    expect(mockToast).toHaveBeenCalledTimes(1);
+    expect(mockUpdateToast).toHaveBeenCalledWith("toast-1", {
+      title: "Session restart requested",
+      variant: "success",
+    });
+  });
+
+  it.each([false, true])(
+    "restores the selected session after sibling adoption (launch fails: %s)",
+    async (launchFails) => {
+      mockState.tasks = { activeTaskId: "t1", activeSessionId: "s1" };
+      let finishStop!: () => void;
+      mockRequest.mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          finishStop = resolve;
+        }),
+      );
+      if (launchFails) mockRequest.mockRejectedValueOnce(new Error(networkErrorMessage));
+      const { result } = renderHook(() => useSessionActions({ sessionId: "s1", taskId: "t1" }));
+      let pending!: Promise<boolean>;
+      act(() => {
+        pending = result.current.restart();
+      });
+      mockState.tasks = { activeTaskId: "t1", activeSessionId: "s2" };
+      await act(async () => {
+        finishStop();
+        expect(await pending).toBe(!launchFails);
+      });
+      expect(mockState.tasks).toMatchObject({ activeTaskId: "t1", activeSessionId: "s1" });
+      expect(mockRequest.mock.calls.map(([action]) => action)).toEqual([
+        "session.stop",
+        "session.launch",
+      ]);
+    },
+  );
+
+  it.each(["t1", "t2"])(
+    "preserves later user navigation to task %s during restart",
+    async (activeTaskId) => {
+      mockState.tasks = { activeTaskId: "t1", activeSessionId: "s1" };
+      let finishStop!: () => void;
+      mockRequest.mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          finishStop = resolve;
+        }),
+      );
+      const { result } = renderHook(() => useSessionActions({ sessionId: "s1", taskId: "t1" }));
+      let pending!: Promise<boolean>;
+      act(() => {
+        pending = result.current.restart();
+      });
+      mockState.tasks = { activeTaskId, activeSessionId: "s2" };
+      mockState.taskRemoval = { navigationRevision: 1 };
+      await act(async () => {
+        finishStop();
+        await pending;
+      });
+      expect(mockState.tasks).toMatchObject({ activeTaskId, activeSessionId: "s2" });
+      expect(mockSetActiveSession).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([0, 1])(
+    "releases pending state when request %s fails without replay",
+    async (failedRequest) => {
+      if (failedRequest) mockRequest.mockResolvedValueOnce(undefined);
+      mockRequest.mockRejectedValueOnce(new Error(networkErrorMessage));
+      const { result } = renderHook(() => useSessionActions({ sessionId: "s1", taskId: "t1" }));
+      expect(result.current).toHaveProperty("restart");
+      await act(async () => {
+        expect(await result.current.restart()).toBe(false);
+      });
+      expect(mockRequest).toHaveBeenCalledTimes(failedRequest + 1);
+      expect(result.current.isRestarting).toBe(false);
+      expect(mockUpdateToast).toHaveBeenCalledWith("toast-1", {
+        title: "Session restart failed",
+        description: networkErrorMessage,
+        variant: "error",
+      });
+    },
+  );
+
+  it("guards duplicate consumers and conflicting actions until the initiator unmounts and completes", async () => {
+    let finishStop!: () => void;
+    mockRequest.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishStop = resolve;
+      }),
+    );
+    const first = renderHook(() => useSessionActions({ sessionId: "s1", taskId: "t1" }));
+    const second = renderHook(() => useSessionActions({ sessionId: "s1", taskId: "t1" }));
+    expect(first.result.current).toHaveProperty("restart");
+    let pending!: Promise<boolean>;
+    act(() => {
+      pending = first.result.current.restart();
+    });
+    expect(second.result.current.isRestarting).toBe(true);
+    await act(async () => {
+      expect(await second.result.current.restart()).toBe(false);
+      await second.result.current.stop();
+      await second.result.current.resume();
+      await second.result.current.remove();
+    });
+    expect(mockRequest).toHaveBeenCalledTimes(1);
+    first.unmount();
+    await act(async () => {
+      finishStop();
+      await pending;
+    });
+    expect(second.result.current.isRestarting).toBe(false);
+  });
+
+  it("does not retarget an accepted restart after navigation", async () => {
+    let finishStop!: () => void;
+    mockRequest.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishStop = resolve;
+      }),
+    );
+    const { result, rerender } = renderHook(
+      ({ sessionId }) => useSessionActions({ sessionId, taskId: "t1" }),
+      { initialProps: { sessionId: "s1" } },
+    );
+    expect(result.current).toHaveProperty("restart");
+    let pending!: Promise<boolean>;
+    act(() => {
+      pending = result.current.restart();
+    });
+    rerender({ sessionId: "s2" });
+    expect(result.current.isRestarting).toBe(false);
+    await act(async () => {
+      finishStop();
+      await pending;
+    });
+    expect(mockRequest.mock.calls[1][1]).toEqual({
+      task_id: "t1",
+      intent: "resume",
+      session_id: "s1",
+    });
+  });
+
+  it.each(["COMPLETED", "FAILED", "CANCELLED", null])(
+    "rejects an ineligible or missing session: %s",
+    async (state) => {
+      mockState.taskSessionsByTask = { itemsByTaskId: { t1: state ? [{ id: "s1", state }] : [] } };
+      const { result } = renderHook(() => useSessionActions({ sessionId: "s1", taskId: "t1" }));
+      expect(result.current).toHaveProperty("restart");
+      await act(async () => {
+        expect(await result.current.restart()).toBe(false);
+      });
+      expect(mockRequest).not.toHaveBeenCalled();
+      expect(mockToast).toHaveBeenCalledWith(expect.objectContaining({ variant: "error" }));
+    },
+  );
+
+  it("does not retry after an uncertain Stop timeout", async () => {
+    mockRequest.mockRejectedValueOnce(new Error("Request timed out"));
+    const { result } = renderHook(() => useSessionActions({ sessionId: "s1", taskId: "t1" }));
+    await act(async () => {
+      expect(await result.current.restart()).toBe(false);
+    });
+    expect(mockRequest).toHaveBeenCalledTimes(1);
+    expect(result.current.isRestarting).toBe(false);
+  });
+
+  it("reports a missing connection", async () => {
+    mockConnected = false;
+    const { result } = renderHook(() => useSessionActions({ sessionId: "s1", taskId: "t1" }));
+    expect(result.current).toHaveProperty("restart");
+    await act(async () => {
+      expect(await result.current.restart()).toBe(false);
+    });
+    expect(mockRequest).not.toHaveBeenCalled();
+    expect(mockUpdateToast).toHaveBeenCalledWith(
+      "toast-1",
+      expect.objectContaining({
+        description: "The connection is unavailable. Reconnect, then try again.",
+        variant: "error",
+      }),
+    );
   });
 });

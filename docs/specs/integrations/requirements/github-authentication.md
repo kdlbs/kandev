@@ -11,6 +11,9 @@ owners:
 
 GitHub credentials must not silently cross workspace boundaries. A local workspace may only need a human PAT or a named `gh` CLI account, while unattended company automation benefits from a GitHub App's short-lived, repository-scoped installation tokens. Users also need to keep work and personal automation under different GitHub Apps without operating separate Kandev deployments.
 
+Host families and host-specific authentication policy are defined by the
+[GitHub Enterprise host requirements](github-enterprise-hosts.md).
+
 ## Requirements
 
 ### REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-001: Workspace GitHub Authentication
@@ -27,13 +30,16 @@ GitHub credentials must not silently cross workspace boundaries. A local workspa
 - **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.6:** Reusing one registration shares its App private key, client secret, webhook secret, permission policy, and bot identity. Installation tokens, workspace repository scope, connection generation, broker leases, health, and personal OAuth tokens remain workspace isolated.
 - **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.7:** A newly created App defaults to private, meaning GitHub permits installation only on the account that owns it. The user may explicitly choose public when the same App must be installable on other GitHub accounts or organizations. Public does not list the App in Marketplace, reveal secrets, or grant repository access without installation approval.
 - **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.8:** PAT and named CLI automation act as the verified human account. A separate `My GitHub` connection is only offered when workspace automation uses a GitHub App, because App installations are not people and cannot provide authenticated-viewer semantics.
-- **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.9:** When a Local or Worktree task inherits executor Git credentials, every Kandev-managed GitHub checkout shall use the current host `gh` clone protocol for `github.com`. Host-specific configuration takes precedence over global configuration, and SSH is used when neither scope provides a supported protocol.
+- **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.9:** When a Local or Worktree task inherits executor Git credentials, every Kandev-managed GitHub checkout shall use the current host `gh` clone protocol for the repository's validated GitHub host. Host-specific configuration takes precedence over global configuration, and SSH is used when neither scope provides a supported protocol.
 - **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.10:** Every Local or Worktree launch and resume shall re-evaluate the inherited clone protocol. The system shall reconcile the Kandev-managed checkout before task preparation continues. This behavior shall not require a backend restart. Kandev shall not rewrite the origin of a user-managed local checkout.
 - **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.11:** When a Local or Worktree task launches or resumes, the system shall inspect each attached Kandev-managed GitHub checkout before the agent starts. This behavior includes a prepared workspace that the task reuses.
 - **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.12:** The system shall reconcile each managed checkout to the canonical transport for the current task policy. It shall not rewrite an already-canonical origin or a user-managed local checkout.
 - **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.13:** The public guide shall explain historical managed defaults, preserved upgrade policies, and recovery through explicit task-access selection. It shall distinguish managed checkouts, user-managed checkouts, and remote executors.
 - **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.14:** When the managed `gh` shim resolves the real GitHub CLI, it shall skip every `PATH` candidate inside a Kandev shim directory, whichever `agentctl` that candidate links to or copies, and every candidate that is the running `agentctl` executable. A nested shim invocation below a fixed depth bound shall still launch the real CLI, so a `gh` extension that calls `gh` keeps working. At the bound the shim shall fail with an error that names the nesting and shall launch no process.
 - **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.15:** When a managed task launches and no per-run environment overlay has been delivered for the execution, the agent subprocess shall receive the launch-composed environment unchanged, including the managed helper path, broker URL, and lease that its generated credential helper entries expand.
+- **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.16:** During App installation and personal authorization, Kandev shall verify access to the exact selected installation through the authorizing user's credentials. An accessible installation on a later results page shall remain eligible. Other accessible installations shall not authorize the selected installation.
+- **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.17:** When GitHub cannot complete installation-access verification, Kandev shall report an error instead of treating that error as confirmed absence. A failed callback shall preserve the previous connection. Existing bounded installation retries shall remain available for confirmed absence immediately after installation.
+- **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.18:** When personal tokens refresh, verified access to the selected installation shall permit the existing atomic token rotation. Confirmed loss of access or a definitive authentication error shall invalidate the personal connection. Other verification errors shall preserve its stored status and tokens, and shall fail the current request.
 
 ### REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-002: Executor HTTPS access through host GitHub CLI
 
@@ -58,3 +64,10 @@ It does not change managed repository materialization, credential snapshots, UI 
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/github-authentication-01.md), [part 2](../system-design/github-authentication-02.md), [part 3](../system-design/github-authentication-03.md).
+
+## Implementation plans
+
+The [installation access repair](../../../plans/github-installation-access-check/plan.md)
+clarifies criteria 001.16 through 001.18 and corrects the provider verification path.
+The [original authentication package](../../../plans/github-authentication/plan.md)
+records the earlier delivery. Its completed work remains historical evidence.

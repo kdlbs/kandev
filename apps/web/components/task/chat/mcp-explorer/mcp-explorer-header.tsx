@@ -13,7 +13,7 @@ function ExplorerCloseButton({ onClose }: { onClose: () => void }) {
       type="button"
       variant="ghost"
       size="icon"
-      className="h-11 w-11 shrink-0 cursor-pointer"
+      className="h-7 w-7 shrink-0 cursor-pointer [@media(pointer:coarse)]:h-12 [@media(pointer:coarse)]:w-12 max-md:h-12 max-md:w-12"
       aria-label={t("task:mcpClose")}
       data-testid="mcp-explorer-close"
       onClick={onClose}
@@ -23,22 +23,14 @@ function ExplorerCloseButton({ onClose }: { onClose: () => void }) {
   );
 }
 
-function HeaderCopy({ mobile }: { mobile: boolean }) {
+function HeaderCopy() {
   const { t } = useTranslation();
-  if (mobile) {
-    return (
-      <div className="min-w-0">
-        <DrawerTitle className="text-[13px] leading-5">{t("task:mcpExplorerTitle")}</DrawerTitle>
-        <DrawerDescription className="text-[13px] leading-5">
-          {t("task:mcpExplorerDescription")}
-        </DrawerDescription>
-      </div>
-    );
-  }
   return (
     <div className="min-w-0">
-      <DialogTitle className="text-[13px] leading-5">{t("task:mcpExplorerTitle")}</DialogTitle>
-      <DialogDescription className="text-[13px] leading-5">
+      <DialogTitle className="text-base font-semibold leading-6">
+        {t("task:mcpExplorerTitle")}
+      </DialogTitle>
+      <DialogDescription className="mt-1 text-pretty text-[13px] leading-5">
         {t("task:mcpExplorerDescription")}
       </DialogDescription>
     </div>
@@ -46,14 +38,30 @@ function HeaderCopy({ mobile }: { mobile: boolean }) {
 }
 
 export function McpExplorerHeader({ onClose, mobile }: { onClose: () => void; mobile: boolean }) {
-  const content = (
-    <div className="flex min-w-0 items-start justify-between gap-3">
-      <HeaderCopy mobile={mobile} />
-      <ExplorerCloseButton onClose={onClose} />
-    </div>
-  );
+  const { t } = useTranslation();
   if (mobile) {
-    return <DrawerHeader className="shrink-0 border-b text-left">{content}</DrawerHeader>;
+    return (
+      <DrawerHeader className="shrink-0 border-b">
+        <div className="grid min-w-0 grid-cols-[3rem_minmax(0,1fr)_3rem] items-center gap-x-2">
+          <DrawerTitle className="col-start-2 text-center text-base font-semibold leading-6">
+            {t("task:mcpExplorerTitle")}
+          </DrawerTitle>
+          <div className="col-start-3 row-start-1 justify-self-end">
+            <ExplorerCloseButton onClose={onClose} />
+          </div>
+          <DrawerDescription className="col-span-3 mt-1 text-center text-pretty text-[13px] leading-5">
+            {t("task:mcpExplorerDescription")}
+          </DrawerDescription>
+        </div>
+      </DrawerHeader>
+    );
   }
-  return <DialogHeader className="shrink-0">{content}</DialogHeader>;
+  return (
+    <DialogHeader className="shrink-0">
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <HeaderCopy />
+        <ExplorerCloseButton onClose={onClose} />
+      </div>
+    </DialogHeader>
+  );
 }

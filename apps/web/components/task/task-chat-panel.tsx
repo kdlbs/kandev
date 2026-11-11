@@ -42,9 +42,15 @@ import { PanelSearchBar } from "@/components/search/panel-search-bar";
 import { SessionSearchHits } from "@/components/task/chat/session-search-hits";
 import { usePanelSearch } from "@/hooks/use-panel-search";
 import { useSessionSearch } from "@/hooks/domains/session/use-session-search";
+import { useSessionSubscriptionUsage } from "@/hooks/domains/session/use-session-subscription-usage";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
-import { findUnreadDividerItemId, lastRenderedMessageId } from "@/lib/session-unread-divider";
+import {
+  dividerCursorForRenderedItems,
+  findUnreadDividerItemId,
+  newestAcknowledgeableMessageId,
+} from "@/lib/session-unread-divider";
 import { useSessionReadTracking } from "./chat/use-session-read-tracking";
+import { isSessionReadableInPanel } from "./chat/session-read-ownership";
 import { useDrainOlderMessages } from "@/components/task/chat/use-drain-older-messages";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import { useSessionPrompts } from "@/hooks/domains/session/use-session-prompts";
@@ -657,15 +663,17 @@ export function usePendingScrollToStart({
 }
 
 /** Computes the render-item key the unread "New" divider should appear
- * immediately before: tracks the latest rendered message id for session read
- * tracking, then maps the resulting divider anchor onto the grouped items. */
+ * immediately before. Read tracking acknowledges the newest loaded message,
+ * including rows the transcript hides; the resulting divider anchor is mapped
+ * onto the rendered items before placement. */
 function useUnreadDividerBeforeItemKey(
   sessionId: string | null,
   isVisible: boolean,
-  groupedItems: Parameters<typeof lastRenderedMessageId>[0],
+  messages: Message[],
+  groupedItems: RenderItem[],
   isInitialMessagesLoading: boolean,
 ) {
-  const latestMessageId = useMemo(() => lastRenderedMessageId(groupedItems), [groupedItems]);
+  const latestMessageId = useMemo(() => newestAcknowledgeableMessageId(messages), [messages]);
   const dividerAnchor = useSessionReadTracking(
     sessionId,
     isVisible,
@@ -673,8 +681,12 @@ function useUnreadDividerBeforeItemKey(
     isInitialMessagesLoading,
   );
   return useMemo(
-    () => findUnreadDividerItemId(groupedItems, dividerAnchor),
-    [groupedItems, dividerAnchor],
+    () =>
+      findUnreadDividerItemId(
+        groupedItems,
+        dividerCursorForRenderedItems(messages, groupedItems, dividerAnchor),
+      ),
+    [messages, groupedItems, dividerAnchor],
   );
 }
 
@@ -773,6 +785,7 @@ type TaskChatPanelProps = {
   onSend?: (payload: ChatSubmitPayload) => ChatSubmitResult;
   sessionId?: string | null;
   taskId?: string | null;
+  workspaceId?: string | null;
   /**
    * Task this panel belongs to, independent of whether it has a session yet.
    * Only the status row uses it, so a task with no session still shows its
@@ -1263,6 +1276,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     historyError,
     retryHistory,
     groupedItems,
+    messages,
     allMessages,
     footerActionMessages,
     permissionsByToolCallId,
@@ -1286,10 +1300,18 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const { clarificationKey, handleClarificationResolved } = useClarificationKey(agentMessageCount);
 
   const panelRef = useRef<HTMLDivElement>(null);
+  const launchQueueStatusRef = useRef<HTMLDivElement>(null);
+  const wipQueueStatusRef = useRef<HTMLDivElement>(null);
+  const chatFooterRef = useRef<HTMLDivElement>(null);
+  const clarificationReservations = useMemo(
+    () => [launchQueueStatusRef, wipQueueStatusRef, chatFooterRef],
+    [],
+  );
   const messageListRef = useRef<MessageListHandle>(null);
   const dividerBeforeItemKey = useUnreadDividerBeforeItemKey(
     resolvedSessionId,
-    isVisible,
+    isSessionReadableInPanel(isVisible, session?.task_id, statusTaskId ?? taskIdHint),
+    messages,
     groupedItems,
     isInitialMessagesLoading,
   );
@@ -1512,6 +1534,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   );
   const search = useSessionSearch(resolvedSessionId, loadMoreRaw, navigateSearchHit);
   const { label: agentLabel, name: agentName } = useSessionAgentIdentity(resolvedSessionId);
+  const subscriptionUsage = useSessionSubscriptionUsage(resolvedSessionId);
   usePanelSearch({
     containerRef: panelRef,
     isOpen: search.isOpen,
@@ -1546,8 +1569,14 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         onMouseDown={handlePanelMouseDown}
         className="outline-none"
       >
-        {!hideLaunchQueueStatus && <LaunchQueueStatus queue={launchStatusSummary?.launch_queue} />}
-        {!hideWipQueueStatus && <WipQueueStatus taskId={summaryTaskId} />}
+        <div ref={launchQueueStatusRef} className="shrink-0">
+          {!hideLaunchQueueStatus && (
+            <LaunchQueueStatus queue={launchStatusSummary?.launch_queue} />
+          )}
+        </div>
+        <div ref={wipQueueStatusRef} className="shrink-0">
+          {!hideWipQueueStatus && <WipQueueStatus taskId={summaryTaskId} />}
+        </div>
         <PanelBody
           padding={false}
           scroll={false}
@@ -1576,6 +1605,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
                   childrenByParentToolCallId={childrenByParentToolCallId}
                   taskId={taskId ?? undefined}
                   sessionId={resolvedSessionId}
+                  detailActive={detailActive}
                   messagesLoading={messagesLoading}
                   historyRefreshPending={historyRefreshPending}
                   historyStatus={historyStatus}
@@ -1638,33 +1668,40 @@ export const TaskChatPanel = memo(function TaskChatPanel({
               onLateAnswer={lateAnswer.send}
               lateAnswerState={lateAnswer.state}
               shortcutScopeRef={panelRef}
-              maxHeightVh={50}
+              initialMaxHeightVh={50}
+              allocationRef={panelRef}
+              anchorRef={panelRef}
+              reservedSiblingRefs={clarificationReservations}
+              reservedHeightPx={80}
             />
           )}
-          <ChatFooter
-            isArchived={isArchived}
-            chatInputRef={chatInputRef}
-            clarificationKey={clarificationKey}
-            onClarificationResolved={handleClarificationResolved}
-            handleSubmit={handleSubmit}
-            handleCancelTurn={handleCancelTurn}
-            showRequestChangesTooltip={showRequestChangesTooltip}
-            onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
-            panelState={panelState}
-            isSending={isSending}
-            hideSessionsDropdown={hideSessionsDropdown}
-            hidePlanMode={embedded}
-            showScrollToLastPrompt={showScrollButton}
-            onScrollToLastPrompt={scrollToLastPrompt}
-            lastPromptScrollDirection={scrollDirection}
-            showJumpToLatest={showJumpToLatest}
-            onJumpToLatest={jumpToLatest}
-            showScrollToStart={showScrollToStartButton}
-            onScrollToStart={scrollToStart}
-            statusTaskId={statusTaskId ?? taskIdHint}
-            showAgentStartHint={showAgentStartHint}
-            launchErrorOwned={launchErrorOwned}
-          />
+          <div ref={chatFooterRef} className="shrink-0">
+            <ChatFooter
+              isArchived={isArchived}
+              chatInputRef={chatInputRef}
+              clarificationKey={clarificationKey}
+              onClarificationResolved={handleClarificationResolved}
+              handleSubmit={handleSubmit}
+              handleCancelTurn={handleCancelTurn}
+              showRequestChangesTooltip={showRequestChangesTooltip}
+              onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
+              panelState={panelState}
+              isSending={isSending}
+              hideSessionsDropdown={hideSessionsDropdown}
+              hidePlanMode={embedded}
+              showScrollToLastPrompt={showScrollButton}
+              onScrollToLastPrompt={scrollToLastPrompt}
+              lastPromptScrollDirection={scrollDirection}
+              showJumpToLatest={showJumpToLatest}
+              onJumpToLatest={jumpToLatest}
+              showScrollToStart={showScrollToStartButton}
+              onScrollToStart={scrollToStart}
+              statusTaskId={statusTaskId ?? taskIdHint}
+              showAgentStartHint={showAgentStartHint}
+              launchErrorOwned={launchErrorOwned}
+              subscriptionUsage={subscriptionUsage}
+            />
+          </div>
         </ComposerFooterAllocation>
       </PanelRoot>
     </SessionRecoveryProvider>
@@ -1697,6 +1734,8 @@ type ChatFooterProps = {
   /** Recovered-idle sessions render the composer hint (see ChatInputArea). */
   showAgentStartHint: boolean;
   launchErrorOwned: boolean;
+  /** Antigravity personal sessions show the subscription cost guidance. */
+  subscriptionUsage: boolean;
 };
 
 /**
@@ -1727,6 +1766,7 @@ function ChatFooter({
   statusTaskId,
   showAgentStartHint,
   launchErrorOwned,
+  subscriptionUsage,
 }: ChatFooterProps) {
   const { t } = useTranslation();
   if (isArchived) {
@@ -1741,6 +1781,7 @@ function ChatFooter({
             taskId={panelState.taskId ?? statusTaskId}
             sessionId={panelState.resolvedSessionId}
             detailActive={panelState.detailActive}
+            subscriptionBilling={subscriptionUsage}
           />
           <JumpToLatestButton isVisible={showJumpToLatest} onClick={onJumpToLatest} />
         </div>

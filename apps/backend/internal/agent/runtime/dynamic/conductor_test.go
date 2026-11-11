@@ -19,11 +19,15 @@ func (l conductorTestProfileLoader) LoadDynamicProfile(context.Context, string) 
 
 type conductorTestDownstream struct {
 	launches []DownstreamLaunch
+	firstErr error
 }
 
 func (d *conductorTestDownstream) Launch(_ context.Context, launch DownstreamLaunch) (DownstreamExecution, error) {
 	d.launches = append(d.launches, launch)
 	if len(d.launches) == 1 {
+		if d.firstErr != nil {
+			return DownstreamExecution{}, d.firstErr
+		}
 		return DownstreamExecution{}, &routingerr.Error{
 			Code:            routingerr.CodeProviderUnavailable,
 			FallbackAllowed: true,
@@ -84,6 +88,57 @@ func TestConductorFallsBackAfterClassifiedLaunchFailure(t *testing.T) {
 	}
 	if got := downstream.launches[1].PriorACPSession; got != "" {
 		t.Fatalf("fallback prior ACP session = %q, want empty", got)
+	}
+}
+
+func TestConductorUsesKeywordActionForStartupFallback(t *testing.T) {
+	failure := &routingerr.Error{
+		Code: routingerr.CodeProviderUnavailable, Phase: routingerr.PhaseProcessStart,
+		FallbackAllowed: true,
+		Keyword:         &routingerr.KeywordDecision{Action: "try_next"},
+	}
+	for _, tc := range []struct {
+		name      string
+		candidate Candidate
+		fallback  bool
+	}{
+		{
+			name:      "keyword default",
+			candidate: Candidate{ID: "candidate-first", Enabled: true, BindingKey: "first", KeywordContextEnabled: true},
+			fallback:  true,
+		},
+		{
+			name: "saved stop rule",
+			candidate: Candidate{
+				ID: "candidate-first", Enabled: true, BindingKey: "first", KeywordContextEnabled: true,
+				Rules: map[string]Action{string(routingerr.CodeProviderUnavailable): ActionStop},
+			},
+		},
+		{
+			name:      "keyword context disabled",
+			candidate: Candidate{ID: "candidate-first", Enabled: true, BindingKey: "first"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			profile := Profile{
+				ID:         "dynamic-profile",
+				Candidates: []Candidate{tc.candidate, {ID: "candidate-second", Enabled: true, BindingKey: "second"}},
+			}
+			downstream := &conductorTestDownstream{firstErr: failure}
+			conductor := NewConductor(NewEngine(), conductorTestProfileLoader{profile: profile}, downstream)
+			result, err := conductor.Launch(context.Background(), ConductorLaunch{
+				SessionID: "session-keyword-start", LogicalProfileID: profile.ID, Prompt: "hello",
+			})
+			if tc.fallback {
+				if err != nil || result.Decision.ExecutionProfileID != "candidate-second" || len(downstream.launches) != 2 {
+					t.Fatalf("Launch = result %+v, err %v, launches %d; want fallback", result, err, len(downstream.launches))
+				}
+				return
+			}
+			if err == nil || len(downstream.launches) != 1 {
+				t.Fatalf("Launch = result %+v, err %v, launches %d; want stop", result, err, len(downstream.launches))
+			}
+		})
 	}
 }
 

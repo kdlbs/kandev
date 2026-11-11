@@ -1,6 +1,7 @@
 ---
 status: draft
 system: agents
+updated: 2026-11-10
 requirements:
   - REQ-AGENTS-CODEX-USAGE-LIMIT-001
 ---
@@ -19,7 +20,7 @@ classification rules of other providers.
 
 | Requirement | Design sections |
 | --- | --- |
-| `REQ-AGENTS-CODEX-USAGE-LIMIT-001` | [Classification](#classification), [Reset time](#reset-time), [Manual recovery](#manual-recovery) |
+| `REQ-AGENTS-CODEX-USAGE-LIMIT-001` | [Classification](#classification), [Workspace credit exhaustion](#workspace-credit-exhaustion), [Reset time](#reset-time), [Manual recovery](#manual-recovery) |
 
 ## Components and responsibilities
 
@@ -42,7 +43,7 @@ classification rules of other providers.
   classification unchanged. A quota failure opens the shared credential
   binding circuit, so every candidate on the same account is skipped as
   described by
-  [dynamic-agent-routing-rollout-blockers](../../requirements/dynamic-agent-routing-rollout-blockers.md).
+  [dynamic-agent-routing-rollout-blockers](../requirements/dynamic-agent-routing-rollout-blockers.md).
 
 ## Classification
 
@@ -70,6 +71,39 @@ the sanitized notice text is contained in the terminal provider message. This
 lets dynamic routing apply its existing quota policy. The wrapped error text
 also gives manual recovery the usage-limit notice, so a queued prompt remains
 available to the user.
+
+## Workspace credit exhaustion
+
+Criteria .5 through .7 add `codex.stderr.out_of_credits.v1` in `routingerr/rules.go`.
+Keep this provider-specific rule after the existing Codex quota rule and before rate-limit rules.
+Use `mustRuleOutsideMarkdownFences` with a diagnostic-line anchor and horizontal whitespace.
+Accept the complete workspace-credit phrase, optional `Your`, and the established error labels.
+Assign `CodeQuotaLimited` and `ConfHigh` through the existing hard-quota invariants.
+Add this rule to `hardQuotaRuleOutranksRateStatus` for the established HTTP 429 exception.
+Without a structured or valid dated reset hint, retain the existing backoff behavior.
+Text-derived hints for this rule come only from its matched unfenced diagnostic line, so fenced examples, unrelated prose, or the other output channel cannot supply a deadline.
+Do not invent a daily reset for credit exhaustion.
+
+The existing `Adapter.observeCodexProviderEvidence` already stores any marked, high-confidence, fallback-eligible quota diagnostic on the current prompt.
+The new rule makes the credit notice eligible for that existing path.
+`sendPrompt` drains notifications and combines that notice only with the matching generic Codex terminal error.
+Preserve `promptGeneration`, cancellation, notification-drain, remote-response, runtime-retention, and output/effect guards.
+The projected `codex_acp` diagnostic remains bounded and sanitized.
+Existing ACP error metadata and error unwrapping retain their current paths.
+No adapter production change is expected for a complete same-prompt message chunk.
+
+A log line alone is insufficient because the existing correlation path consumes ACP message chunks.
+The issue report does not include captured Codex wire frames or a prompt-scoped stderr envelope.
+Do not add a generic `Internal error` classifier rule or attach an unrelated stderr tail.
+If an installation exposes only the generic terminal error, preserve its existing classification until stronger evidence is available.
+
+For legacy Office, `SchedulerService.HandlePostStartFailure` reads the typed diagnostic through `ProviderError.RoutingInput`.
+The existing `applyPostStartFallback` degrades the provider, finishes its attempt, and requeues the run.
+Handled fallbacks return before `Service.HandleAgentFailure` increments agent failures.
+Dynamic profiles continue to use saved hard-error policies and shared credential circuits.
+Tests cover each consumer with a real quota classification and a distinct healthy fallback binding.
+
+This extension does not change the separate manual-recovery predicate or queued-prompt rules.
 
 ## Reset time
 
@@ -104,3 +138,10 @@ value, invalid calendar date, invalid offset, or absent explicit timezone
 produces no hint rather than an incorrect one. Classification never depends on
 a successfully parsed hint, and dynamic routing selection is unchanged when
 no hint is available. Classification rules for other providers are untouched.
+
+## Related contracts and implementation packages
+
+- [Provider-neutral recovery](../../../decisions/2026-08-08-provider-neutral-agent-error-recovery.md).
+- [Provider classes and policies](../../../decisions/2026-08-17-provider-error-classes-and-policies.md).
+- [Codex usage-limit package](../../../plans/codex-usage-limit-classification/plan.md) owns the original notice, parser, and manual recovery.
+- [Office mid-run quota package](../../../plans/office-midrun-quota-classification/plan.md) owns credit-notice classification and consumer regressions.

@@ -24,6 +24,7 @@ existing controls, recovery actions, and persistence.
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criteria .7 and .10 | Workspace-only access |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criteria .8, .9, .11 and .12 | Manual resume |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criteria .1 through .6 | Existing delivery and continuity designs |
+| REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criteria .25 and .26 | Bounded projection wait |
 
 ## Workspace-only access
 
@@ -84,6 +85,14 @@ after matching every unresolved SQL row to its peer record by ID, session, incar
 generation, and payload hash. Missing or conflicting evidence prevents every retirement write.
 It then re-reads both stores and requires retained retirement for each unresolved SQL row
 before clearing the database block. Already-retired matching records make this idempotent.
+If background recovery resolves the same block while explicit Resume gathers proof,
+SQL verification revalidates the complete proof under the delivery lock. It accepts
+the completed resolution only for the same session, incarnation, generation, and
+authorized `resume` action, with no remaining open session recovery block. It does
+not update recovery metadata or timestamps again. Stale proof, a different action,
+or a new incident remains blocked.
+The resolver's change flag remains false for repeated resolution. Explicit Resume
+uses the separate verification result to report completed recovery as success.
 The eligible journal records belong to the current incarnation at or before the current generation.
 Historical blocks may predate recovery-notice metadata. After the same authenticated retirement
 check, SQL resolution accepts that case only when persisted ACP native identity matches the
@@ -99,10 +108,71 @@ its payload; previously terminal outcomes remain unchanged. A refreshed capabili
 before SQL block resolution and parked queue release. Legacy peers retain ordinary compatibility;
 authentication and storage errors fail closed.
 
+A transport notice marked `recovered` can outlive its execution after a later readiness
+failure. Explicit Resume can reuse the current ready native execution and restore that
+notice through the same authenticated retirement transaction. The current execution,
+native identity, full submission inventory, and cursor checks remain mandatory. Preserve
+the notice's historical execution ID, submission, payload, and unknown outcome; update
+its recovery phase, revision, and timestamp through the existing transaction. State-only
+Retry retains its exact-execution guard.
+
 On backend adoption, unknown SQL history is excluded from active work only when authenticated
 full peer records retain matching retirement, uncertain state, session/incarnation, generation,
 and payload hash. Missing or conflicting proof remains blocked. No recovery summary field,
 new endpoint, migration, native conversation replacement, or generation rotation is needed.
+
+## Bounded projection wait
+
+The [silent prompt work package](../../../plans/silent-prompt-recovery/plan.md)
+records implementation and verification. `nativeResumeProofCursor` returns the
+distinct `errNativeResumeProjectionLag` sentinel when received and projected
+sequences differ. It wraps `ErrDurableAdoptionBlocked` for compatibility.
+The retry loop owned by `GetNativeResumeDeliveryEvidence` must match
+`errNativeResumeProjectionLag` with `errors.Is` before handling
+`ErrDurableAdoptionBlocked`. Compatibility handling must not short-circuit the
+bounded projection wait. Never classify errors by message text.
+
+`GetNativeResumeDeliveryEvidence` owns the wait because it owns the complete
+proof. Retry only verified projection lag or monotonic same-owner stream progress
+after authentication, cursor coverage, submission retirement, and identity
+validation. Either result starts the bounded wait, including on the first proof
+attempt. Capture session, execution,
+incarnation, stream, native session, and harness generation from that proof
+attempt. Use a 10-second maximum and 200 ms polling, shortened by caller
+cancellation/deadline. Do not detach this wait from the recovery request.
+
+Poll the cursor through the existing repository and verify current execution
+ownership. No event-bus, projection, cancellation, or stream lock may span the
+wait. A notification primitive may replace polling if it already has the same
+bounded and cancellation-safe behavior. Do not add a general retry service.
+
+When the cursor catches up, discard the partial proof and rerun the full
+existing authenticated status, SQL/journal inventory, retirement, cursor and
+final-status checks. Revalidate captured identity before returning. One full
+proof with equal cursors and matching opening/closing authenticated status is
+sufficient; no additional quiet polling interval is required. If same-owner
+stream progress invalidates that proof, retry no sooner than the next 200 ms
+poll, using the original deadline. A stream that prevents a stable full proof
+throughout the budget times out and stays blocked. Changed identity,
+storage/authentication failure, unresolved live work, and conflicting evidence
+fail immediately. Never retry native initialization or send a prompt as part of
+this loop. Empty streams keep their current behavior.
+
+The existing transactional SQL resolver remains the final authority. Resolving
+one block cannot clear unrelated restrictions. Timeout returns the typed blocked
+result and preserves retired history and prior uncertainty for a later explicit
+attempt. Cancellation or a replacement execution prevents a late result from
+resolving the block. Existing concurrent recovery ownership prevents duplicate
+resolution and queue release.
+
+The browser retains its existing 60-second manual Resume timeout and busy
+controls on desktop and phone. No extra action or new layout is needed.
+Tests use a projection barrier and real journal/SQL state to prove one-request
+success, timeout, cancellation, owner change, same-owner progress, unavailable
+storage, no historical resend, and preservation of unrelated blocks. Continuously
+advancing status must time out on the original deadline without a tight retry
+loop. Unresolved journal work, even with a lagging cursor, must return blocked
+before starting a wait or scheduling a retry.
 
 ## Failure and compatibility
 
@@ -146,3 +216,27 @@ publishes the cleared block array even when no runtime recovery metadata exists.
 Explicit Resume publishes the same projection after resolving the saved block,
 before releasing parked queue work. A later queue failure does not hide a
 committed block resolution from the browser.
+
+## SSH transport restoration before delivery proof
+
+This extension satisfies AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.4 and .16. Platform owns delivery proof; Executors owns SSH trust, process verification and connection disposal. The transport-liveness contract deliberately closes failed transport without redialing and may skip remote Stop after loss.
+
+`Manager.RecoverAgentPromptStreamWithIdentity` calls `reconnectSSHDelivery` for an exact tracked SSH owner before `StreamManager.ReconcileAgentDelivery`. The manager holds the execution's remote lifecycle lease, resolves the recorded credentials through the existing secret boundary, and requests a staged `ReconnectDeliveryInstance` from the executor. Healthy tracked transports are retained.
+
+`SSHExecutor.prepareSSHRecovery` is shared with startup recovery. It dials the pinned target, proves the recorded remote PID and session/task directory, authenticates the exact native instance, and opens replacement forwarding. `stagedSSHDeliveryRefresh` commits only if the original transport-lost state is still current. It publishes the new lifecycle client through the existing client replacement write lease before releasing old local transport handles. Candidate abortion and losing concurrent commits never stop the remote controller. Request cancellation prevents commit; a later request can retry.
+
+The lifecycle owner merges and persists refreshed metadata, commits the matching client, and persists its endpoint. It then uses ordinary authenticated descriptor/submission reconciliation and cursor replay. Task/session/execution/native identity, incarnation, harness generation, stream and submission remain unchanged. Only authoritative terminal settlement and projection can resolve the matching delivery block. Old client callbacks retain existing client and stream fences.
+
+If no execution is tracked, `recoverSavedSSHDelivery` resolves the persisted runtime first and places a saved SSH owner behind the existing remote recovery guard. Exact-owner startup recovery performs adoption and replay. Unavailable remote evidence remains retryable instead of reading the local retained journal for that remote owner. A remote PID is checked on its remote host; local original-runtime PID zero never proves remote termination.
+
+No new endpoint, configuration, schema, UI layout or dispatch authority is introduced. Reattachment never initializes or resumes ACP, creates a conversation, replays an instruction, or overrides SQL evidence. Other executors keep their existing paths. Stop keeps its existing transport-liveness contract.
+
+### First Retry response and committed settlement
+
+AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.5 and .16 require the response to reflect committed evidence. A completion can retire the in-memory active prompt while retained events are replayed, causing the runtime peer to return owner mismatch after the matching SQL recovery already settled. The orchestrator must reread the canonical task/session, current generation, recovery binding and original submission after reconciliation before returning that transient failure.
+
+Only a matching execution, incarnation, harness generation, stream, submission and prompt generation with authoritative terminal SQL evidence is eligible. Reuse existing terminal settlement and recovery-block checks with the refreshed records and revision. A new owner or generation, missing proof or an independent block preserves failure. This is a bounded read and existing reconciliation, not a retry of the prompt or a new polling loop.
+
+Both direct runtime settlement and transient-failure responses pass through the canonical refresh after settlement reconciliation. The response therefore uses the persisted post-settlement revision on either path.
+
+The canonical reread has an independent five-second context derived from the cancellation-independent caller context; exhausting the runtime recovery budget does not invalidate the final evidence read. Shared remote refresh publication acquires the client source write lease before executor commit, so a pinned workspace callback cannot hold the SSH executor-wide mutex while publication waits. Executor identity checks and matching client/session publication remain atomic, and an unpublished candidate restores the prior URL fallback.

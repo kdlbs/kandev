@@ -50,12 +50,22 @@ dialog also shares the selection behavior.
   retain their existing validation and composition rules. A completed edit
   shall produce at most one terminal action. Deferred focus work shall not
   submit or cancel a later edit or a different target.
+  In shared session and terminal tab renames, Enter or Escape during IME
+  composition shall leave the rename open without submitting or cancelling
+  it, and shall preserve the key's default composition behavior. A separate
+  Enter after composition finishes shall commit the completed draft once.
 - **AC-UI-EDIT-FOCUS-001.5:** Updates to confirmed data for the same target
   shall not replace an open draft. Changing the edit target or unmounting
   shall release the old edit without applying its draft to another target.
 - **AC-UI-EDIT-FOCUS-001.6:** Desktop and phone entry points shall preserve
   unfinished input across external focus changes. Returning shall not force
   focus or reopen the phone keyboard over another control.
+- **AC-UI-EDIT-FOCUS-001.7:** When an earlier task Rename save succeeds or
+  fails after a later edit opens, its completion shall preserve the later
+  dialog and exact draft, including a reopened edit of the same task.
+  The submitted save shall retain its original target and normalized title,
+  immediate dialog dismissal, and existing failure feedback. The later edit
+  shall remain available for explicit Save or Cancel.
 
 ## Compatibility
 

@@ -1,3 +1,4 @@
+import type { RootSplitview } from "./dockview-internals";
 /**
  * Pinned-column target enforcement primitives.
  *
@@ -45,8 +46,7 @@ export function setSashDragging(v: boolean): void {
   sashDragging = v;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function restoreColumnToTarget(sv: any, idx: number, target: number | undefined): void {
+function restoreColumnToTarget(sv: RootSplitview, idx: number, target: number | undefined): void {
   if (target === undefined) return;
   const cur = sv.getViewSize(idx);
   if (Math.abs(cur - target) <= 1) return;
@@ -72,8 +72,11 @@ export type EnforcePinnedTargetsCtx = {
   envId?: string | null;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function resolveRightTarget(api: DockviewApi, ctx: EnforcePinnedTargetsCtx, sv: any): number {
+function resolveRightTarget(
+  api: DockviewApi,
+  ctx: EnforcePinnedTargetsCtx,
+  sv: RootSplitview,
+): number {
   const sidebarWidth = ctx.sidebarVisible && sv.length >= 3 ? sv.getViewSize(0) : 0;
   const persistedTarget =
     getManualRightWidth(ctx.envId ?? null) ?? getPinnedTarget("right") ?? null;

@@ -197,6 +197,9 @@ func (r *Repository) createCoreTables() error {
 	if err := r.createDeferredAssignmentsTable(); err != nil {
 		return err
 	}
+	if err := r.createHandoffCompletionOutboxTable(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -769,6 +772,14 @@ func (r *Repository) createTaskExtensionTables() error {
 		created_at TIMESTAMP NOT NULL,
 		PRIMARY KEY (task_id, blocker_task_id),
 		CHECK (task_id != blocker_task_id)
+	);
+
+	CREATE TABLE IF NOT EXISTS task_relations (
+		task_id_low TEXT NOT NULL,
+		task_id_high TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (task_id_low, task_id_high),
+		CHECK (task_id_low < task_id_high)
 	);
 
 	CREATE TABLE IF NOT EXISTS task_comments (

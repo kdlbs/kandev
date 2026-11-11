@@ -207,3 +207,8 @@ it("keeps registered-provider caches isolated between hook instances and workspa
   expect(first.result.current.branches(ALPHA)).toEqual([]);
   expect(second.result.current.branches(ALPHA)[0]?.name).toBe("workspace-b");
 });
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: unknown) => unknown) =>
+    selector({ githubStatus: { byWorkspaceId: {} } }),
+}));

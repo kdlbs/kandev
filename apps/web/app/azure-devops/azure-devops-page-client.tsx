@@ -57,6 +57,7 @@ import type {
   AzureDevOpsWorkItem,
 } from "@/lib/types/azure-devops";
 import { Trans, useTranslation } from "react-i18next";
+import { toast } from "@/lib/toast/sonner";
 
 const PAGE_SIZE = 25;
 const WORK_ITEMS_MODE: AzureDevOpsBrowseMode = "work-items";
@@ -309,7 +310,7 @@ function useAzureSavedViewControls({
         reviewer: mode === PULL_REQUESTS_MODE ? filters.reviewer : undefined,
         createdAt: new Date().toISOString(),
       };
-      await savedViews.replace([...savedViews.views, view]);
+      await savedViews.replace((current) => [...current, view]);
       setSelection({ kind: view.kind, source: "saved", id: view.id });
     },
     [filters, mode, savedViews, setSelection],
@@ -618,7 +619,13 @@ function AzureDevOpsPageContent({ workspaceId, workflows, steps, repositories }:
         selected={state.selection}
         onSelect={state.selectScope}
         savedViews={state.savedViews.views}
-        onDeleteSaved={(id) => void state.savedViews.remove(id)}
+        onDeleteSaved={(id) => {
+          void state.savedViews.remove(id).catch((error: unknown) => {
+            toast.error(t("integrations:failedToDeleteSavedQuery"), {
+              description: error instanceof Error ? error.message : undefined,
+            });
+          });
+        }}
         canSaveCurrent={state.canSaveCurrent}
         onSaveCurrent={() => state.setSaveViewOpen(true)}
         queryPresets={state.queryPresets}

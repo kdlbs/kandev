@@ -31,8 +31,14 @@ Event-bus subscribers alone cannot guarantee those boundaries.
 Completion state authority remains unchanged; checkpoint processing is a separate state.
 
 Resolve and persist the initiating user's settings policy before dispatch.
-Missing settings enable capture; explicit false disables subsequent capture.
+New defaults disable capture; existing saved preferences still control subsequent capture.
 The viewer's setting controls card visibility independently of retained history.
+
+## Storage amendment (2026-10-28)
+
+[Git turn history and unified compaction](2026-10-28-git-turn-history-and-unified-compaction.md) selects Git objects for historical content.
+Durable backend Git storage satisfies preservation before ephemeral source destruction.
+SQL keeps metadata, with a legacy reader for previously materialized patches.
 
 ## Consequences
 

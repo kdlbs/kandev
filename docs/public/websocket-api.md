@@ -266,6 +266,8 @@ The agent tool has additional rules:
 
 If `intent` is omitted, the backend infers it from those fields. That inference exists for first-party compatibility; an external client should send an explicit intent so a later field change does not select a different path.
 
+For `intent: "start_created"`, Kandev trims leading and trailing whitespace from `prompt`. A prompt that is empty after trimming uses the normal empty-prompt fallback. A non-empty trimmed prompt is an explicit launch instruction. Kandev preserves it in the first stored and agent-bound message even when the destination step prompt has no `{{task_prompt}}` placeholder. A step prompt with the placeholder inserts the instruction there; a replacing step prompt runs before the retained instruction. When `skip_message_record` is true, no history message is created, so the caller must store the prompt itself if needed. Task creation and other internal callers can transport the task description in the same field. That input keeps the step template's normal replacement behavior, and the backend never infers its origin from text equality. Legacy queued `start_created` payloads created before this behavior was introduced may still replace an explicit brief with a destination step template; review pending launches before relying on the guarantee. Sending an instruction does not grant read-only or other provider permissions.
+
 ```json
 {
   "id": "launch-session-1",
@@ -303,6 +305,10 @@ A successful response contains `success`, `task_id`, `state`, and usually `sessi
 The action succeeds only when Kandev proves one unmatched canonical slot, one server-owned managed checkout, the exact registered Git worktree and branch, an unchanged HEAD plus dirty/untracked content, current database revisions, and no competing task session. It then inserts or corrects only that environment-repository row and appends an audit receipt in one transaction. The unchanged checkout is inspected again, and matching post-repair evidence must be durably recorded, before the resume proceeds through the normal fail-closed inventory validator.
 
 The response can include `workspace_inventory_recovery_receipt`. Its `result_code` is `repaired` for the first successful write or `deduplicated` when the same task, idempotency key, and request identity were already recorded. The receipt contains hashes and server identifiers but no host checkout path. Reusing a key for a different derived request returns a conflict.
+
+After a completed positive repair, ordinary Resume and additional-session launch allow a later branch switch or rename when the recorded current branch matches the same registered Git worktree. Later commits and file edits remain intact, and the original repair receipt remains unchanged. Existing receipts support this check without a migration.
+
+Use ordinary Resume after a branch change. An explicit repair retry with the original key still requires the original request identity. Incomplete or failed repair evidence still blocks admission, and workspace recovery does not clear an independent `unknown_prompt_outcome` block or replay its prompt.
 
 Invalid input returns a validation error. Ambiguous inventory, a path or branch mismatch, a symlinked checkout, a deleted or failed row, a user-owned local repository, a remote-only executor, revision drift, or a concurrent writer returns a conflict without rematerializing, resetting, cleaning, or deleting the workspace. Resolve those cases manually after preserving the checkout.
 
@@ -385,6 +391,16 @@ query validation.
   }
 }
 ```
+
+When **Limit automatic sessions** is enabled and the instance has no turn
+capacity, Kandev still accepts an ordinary message. It persists the visible
+message and a durable queue receipt in one transaction before responding, then
+dispatches one new turn after capacity is released. The success response keeps
+the existing message shape; clients observe the pending input through
+`message.queue.get` and `message.queue.status_changed`. Auto-run OFF leaves the
+entry pending. Explicit `message.queue.send_now` keeps its override. A failed
+queue or transcript write returns the existing error instead of a false
+success.
 
 `entity_references` is the structured companion to work-item Markdown links inserted by the `#` composer. Each version-1 entry carries `ref`, `provider`, `kind`, immutable `id`, optional display `key`, title snapshot, canonical `url`, and provider-connection `scope`. The backend derives the workspace from the persisted session, validates canonical identity and destination through the registered provider, deduplicates by `ref`, and rejects the request when a supplied reference is invalid or unauthorized. CLI-passthrough sessions do not accept structured references.
 
@@ -588,6 +604,7 @@ repository.script.delete
 repository.script.get
 repository.script.list
 repository.script.update
+repository.remote_url.validate
 repository.update
 repository_set.create
 repository_set.delete
@@ -664,6 +681,24 @@ vscode.stop
 `worktree.create_pr` is a provider-neutral compatibility action despite its name. For a successful GitLab remote it returns `success:true`, `provider:"gitlab"`, and the merge-request URL in `pr_url`; successful GitHub and Azure responses use the same URL field. See [Git Operations](git-operations.md#create-a-pull-request-or-merge-request) for provider detection, authentication, and partial-failure behavior.
 
 `ssh.test` checks an SSH profile and `ssh.sessions.list` reads the backend's active SSH-session view; both are registered with literal action names rather than `actions.go` constants. `user_shell.stop` is a compatibility alias for destroy. Port-tunnel handlers require the tunnel service to be wired. Git semantics and destructive behavior are documented in [Git Operations](git-operations.md); executor-specific filesystem and credential boundaries are documented in [Executors](executors.md).
+
+#### Repository clone URL validation
+
+`repository.remote_url.validate` accepts `id` and `remote_url`. It performs the
+same authorization, read-only, and provider identity checks as
+`repository.update`, but writes nothing and publishes no event. The response is
+the bounded preview described in
+[Repair a registered clone URL](git-operations.md#repair-a-registered-clone-url):
+saved and effective URLs, provider identity, `validation_scope`, and `changed`.
+`repository.update` accepts an optional `remote_url` with the same validation.
+`repository.get` returns the committed value.
+
+HTTP equivalents are `POST /api/v1/repositories/{id}/remote-url/validate` and
+`PATCH /api/v1/repositories/{id}`. An omitted or JSON `null` `remote_url` keeps
+the stored value. Invalid or mismatched locators return a validation error,
+a changed saved identity returns a conflict, and the read-only Improve Kandev
+workspace returns a conflict. `repository.updated` includes the committed
+`remote_url` when the stored value is safe to publish.
 
 ### Settings, secrets, and automations
 
@@ -1019,6 +1054,8 @@ an earlier generation from replacing current state when HTTP and WebSocket deliv
 overlap, even after client state is rebuilt.
 When both fields are absent, clients preserve their current projection and
 reconcile through normal session refetch after a gap.
+
+Session detail and compact session payloads carry `agent_workspace_path`, the confirmed native working directory of the current session incarnation. It is `null` when Kandev has no committed generation evidence. `workspace_path` remains the effective Files root, and `worktree_path` remains the primary checkout, so the three values can differ after a live repository attachment promotes the task root without restarting the agent. Ready and materialization events also publish `agent_workspace_path`; a client that receives a partial event without the field must preserve its current value, while an explicit `null` clears it.
 
 File changes are batched for up to 100 ms and flushed immediately at 50 entries. `session.shell.output` also represents shell exit events through its payload. Treat all stream messages as lossy and refresh session/Git status after a gap.
 

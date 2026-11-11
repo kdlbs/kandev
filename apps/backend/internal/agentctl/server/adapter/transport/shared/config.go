@@ -3,6 +3,8 @@ package shared
 import (
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
+	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 )
 
@@ -24,6 +26,11 @@ type Config struct {
 
 	// McpServers is a list of MCP servers to configure for the agent
 	McpServers []McpServerConfig
+
+	// ProjectMCPDelivery is execution-bound evidence that the host materialized
+	// the bound built-in packages into a project configuration file. Session
+	// request payloads cannot replace it.
+	ProjectMCPDelivery *types.ProjectMCPDelivery
 
 	// AgentID is the agent identifier from the registry (e.g., "auggie", "amp", "claude-code").
 	// Used for logging and debug capture. Adapters should use this instead of hardcoded names.
@@ -61,12 +68,30 @@ type Config struct {
 	// capacity. Zero keeps compatibility for directly constructed test configs.
 	NotificationQueueCapacity int
 
+	// AgentBackgroundWorkEnabled is the effective shared background-work
+	// feature value for this launch. It gates provider attestation whose
+	// later lifecycle the adapter cannot otherwise confirm; older callers
+	// omit it and keep the provider-neutral behavior.
+	AgentBackgroundWorkEnabled bool
+
 	// PromptCancelJoinTimeout is an optional per-adapter ACP cancellation join bound.
 	PromptCancelJoinTimeout time.Duration
 
 	// ProviderGatewayAuth, when set, makes the ACP adapter authenticate the
 	// agent against an OpenAI-compatible gateway right after initialize.
 	ProviderGatewayAuth *acpprovider.GatewayAuth
+
+	// AuthPolicy selects a provider-specific authentication method after
+	// initialize.
+	AuthPolicy *acpcompat.AuthPolicy
+
+	// PromptSuggestions asks an agent with native next-prompt suggestions to
+	// emit them. Only dialects that support native suggestions act on it.
+	PromptSuggestions bool
+
+	// CopilotNativeSessionEvents enables Copilot's opt-in native compaction and
+	// attributed usage notifications for this launch.
+	CopilotNativeSessionEvents bool
 }
 
 // GetPermissionTimeout returns the configured permission timeout or the default.
@@ -92,5 +117,8 @@ type McpServerConfig struct {
 	// Env holds environment variables for stdio transport
 	Env map[string]string `json:"env,omitempty"`
 	// Headers holds HTTP headers for SSE/HTTP transport
-	Headers map[string]string `json:"headers,omitempty"`
+	Headers            map[string]string       `json:"headers,omitempty"`
+	DefinitionID       string                  `json:"definition_id,omitempty"`
+	DefinitionRevision int64                   `json:"definition_revision,omitempty"`
+	Origins            []types.McpServerOrigin `json:"origins,omitempty"`
 }

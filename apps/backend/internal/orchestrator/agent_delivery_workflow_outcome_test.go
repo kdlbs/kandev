@@ -230,3 +230,42 @@ func eventTurnID(event models.AgentDeliveryEvent) string {
 	}
 	return payload.TurnID
 }
+
+// TestOnTurnComplete_OfficeBlockedRecordsNoAutomaticTransition pins the
+// turn-end half of #4889: an Office task in BLOCKED records a guarded no-op
+// outcome, leaves its step and state untouched, and parks the session waiting
+// for input instead of completing the turn.
+func TestOnTurnComplete_OfficeBlockedRecordsNoAutomaticTransition(t *testing.T) {
+	fixture := newDeliveryWorkflowOutcomeFixture(t, "office-blocked", "blocked-step")
+	if _, err := fixture.repo.DB().ExecContext(fixture.ctx,
+		`UPDATE tasks SET project_id = ?, state = ? WHERE id = ?`,
+		"project-office", string(v1.TaskStateBlocked), fixture.taskID,
+	); err != nil {
+		t.Fatalf("mark task Office-blocked: %v", err)
+	}
+	stepTime := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	fixture.installStep(t, &wfmodels.WorkflowStep{
+		ID: "blocked-step", WorkflowID: "wf1", Position: 0, UpdatedAt: stepTime,
+		Events: wfmodels.StepEvents{OnTurnComplete: []wfmodels.OnTurnCompleteAction{{
+			Type: wfmodels.OnTurnCompleteMoveToNext,
+		}}},
+	})
+	fixture.setStep(t, &wfmodels.WorkflowStep{ID: "blocked-next", WorkflowID: "wf1", Position: 1})
+
+	fixture.run(t, "no_automatic_transition", turnCompletionCauseAgentTurn)
+
+	task, err := fixture.repo.GetTask(fixture.ctx, fixture.taskID)
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if task.WorkflowStepID != "blocked-step" || task.State != v1.TaskStateBlocked {
+		t.Fatalf("task = step %q state %q, want blocked-step/BLOCKED", task.WorkflowStepID, task.State)
+	}
+	session, err := fixture.repo.GetTaskSession(fixture.ctx, fixture.session.ID)
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state = %q, want WAITING_FOR_INPUT", session.State)
+	}
+}

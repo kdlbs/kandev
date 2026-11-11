@@ -7,13 +7,14 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/state"
 	pluginstore "github.com/kandev/kandev/internal/plugins/store"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -25,6 +26,8 @@ type fakeExactTaskCreateWriter struct {
 	archiveCalls int
 	externalID   string
 	lastTask     *taskmodels.Task
+	committed    map[string]*taskmodels.Task
+	lookupCalls  int
 	lastUpdate   ExactTaskUpdateInput
 	lastMove     ExactTaskMoveInput
 	failOnce     bool
@@ -37,11 +40,21 @@ func (f *fakeExactTaskCreateWriter) CreateTaskExact(_ context.Context, input Exa
 		ID: "task-created", WorkspaceID: input.Task.WorkspaceID,
 		Title: input.Task.Title, UpdatedAt: time.Date(2026, 9, 26, 10, 0, 0, 0, time.UTC),
 	}
+	if f.committed == nil {
+		f.committed = make(map[string]*taskmodels.Task)
+	}
+	f.committed[input.ExternalID] = f.lastTask
 	if f.failOnce {
 		f.failOnce = false
 		return nil, false, context.DeadlineExceeded
 	}
 	return f.lastTask, f.calls > 1, nil
+}
+
+func (f *fakeExactTaskCreateWriter) FindTaskByExternalID(_ context.Context, _, externalID string) (*taskmodels.Task, bool, error) {
+	f.lookupCalls++
+	task, ok := f.committed[externalID]
+	return task, ok, nil
 }
 
 func (f *fakeExactTaskCreateWriter) UpdateTaskExact(_ context.Context, input ExactTaskUpdateInput) (*taskmodels.Task, bool, error) {
@@ -289,28 +302,99 @@ func TestExactTaskCommands(t *testing.T) {
 }
 
 func TestExactTaskCreateRecoversDomainCommit(t *testing.T) {
-	host, writer := newExactTaskCommandHost(t)
-	writer.failOnce = true
-	manager, ok := pluginsdk.HostTaskCommands(host)
-	if !ok {
-		t.Fatal("plugin Host does not expose exact task commands")
+	for _, tc := range []struct {
+		name          string
+		launch        *pluginsdk.PluginTaskLaunchOptions
+		removeProfile func(*pluginHost)
+	}{
+		{
+			name:   "deleted agent profile",
+			launch: &pluginsdk.PluginTaskLaunchOptions{AgentProfileID: stringPointer("agent-recovery")},
+			removeProfile: func(host *pluginHost) {
+				host.agentProfiles.(*fakeAgentProfileDataSource).resp = &agentsettingsdto.ListAgentsResponse{}
+			},
+		},
+		{
+			name:   "deleted executor profile",
+			launch: &pluginsdk.PluginTaskLaunchOptions{ExecutorProfileID: stringPointer("executor-recovery")},
+			removeProfile: func(host *pluginHost) {
+				host.taskData.(*fakeTaskDataSource).executorProfiles = nil
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			host, writer := newExactTaskCommandHost(t)
+			writer.failOnce = true
+			host.agentProfiles = &fakeAgentProfileDataSource{resp: &agentsettingsdto.ListAgentsResponse{Agents: []agentsettingsdto.AgentDTO{{
+				Profiles: []agentsettingsdto.AgentProfileDTO{{ID: "agent-recovery"}},
+			}}}}
+			host.taskData = &fakeTaskDataSource{executorProfiles: []*taskmodels.ExecutorProfile{{ID: "executor-recovery"}}}
+			manager, ok := pluginsdk.HostTaskCommands(host)
+			if !ok {
+				t.Fatal("plugin Host does not expose exact task commands")
+			}
+			input := pluginsdk.ExactTaskCreate{
+				RequestID: "request-recovery", WorkspaceID: "workspace-task-commands", IdempotencyKey: "create-recovery",
+				ExternalID: "proposal-recovery", ApprovalRevision: 1,
+				ManifestDigest: ManifestCapabilityDigest(host.service.installedRecordByInstallationID(host.installationID).Manifest),
+				Task: pluginsdk.CreateTaskInput{
+					WorkspaceID: "workspace-task-commands", WorkflowID: "workflow-task-commands", Title: "Recovered create", Launch: tc.launch,
+				},
+			}
+			first, _, err := manager.CreateTask(context.Background(), input)
+			if err != nil || first == nil || first.Status != pluginsdk.CommandUnavailable {
+				t.Fatalf("interrupted create = result:%+v err:%v", first, err)
+			}
+			tc.removeProfile(host)
+			recovered, task, err := manager.CreateTask(context.Background(), input)
+			if err != nil || task == nil || recovered == nil || recovered.Status != pluginsdk.CommandAlreadyApplied {
+				t.Fatalf("recovered create = result:%+v task:%+v err:%v", recovered, task, err)
+			}
+			if writer.calls != 1 || writer.lastTask.ID != "task-created" {
+				t.Fatalf("recovery calls/task = %d/%+v, want committed task returned without another create", writer.calls, writer.lastTask)
+			}
+		})
 	}
-	input := pluginsdk.ExactTaskCreate{
-		RequestID: "request-recovery", WorkspaceID: "workspace-task-commands", IdempotencyKey: "create-recovery",
-		ExternalID: "proposal-recovery", ApprovalRevision: 1,
-		ManifestDigest: ManifestCapabilityDigest(host.service.installedRecordByInstallationID(host.installationID).Manifest),
-		Task:           pluginsdk.CreateTaskInput{WorkspaceID: "workspace-task-commands", WorkflowID: "workflow-task-commands", Title: "Recovered create"},
-	}
-	first, _, err := manager.CreateTask(context.Background(), input)
-	if err != nil || first == nil || first.Status != pluginsdk.CommandUnavailable {
-		t.Fatalf("interrupted create = result:%+v err:%v", first, err)
-	}
-	recovered, task, err := manager.CreateTask(context.Background(), input)
-	if err != nil || task == nil || recovered == nil || recovered.Status != pluginsdk.CommandAlreadyApplied {
-		t.Fatalf("recovered create = result:%+v task:%+v err:%v", recovered, task, err)
-	}
-	if writer.calls != 2 || writer.lastTask.ID != "task-created" {
-		t.Fatalf("recovery calls/task = %d/%+v, want one create and one source-identity lookup", writer.calls, writer.lastTask)
+}
+
+func TestExactTaskCreateRejectsUnknownLaunchProfilesForNewTasks(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		launch *pluginsdk.PluginTaskLaunchOptions
+	}{
+		{
+			name:   "agent",
+			launch: &pluginsdk.PluginTaskLaunchOptions{AgentProfileID: stringPointer("missing-agent")},
+		},
+		{
+			name:   "executor",
+			launch: &pluginsdk.PluginTaskLaunchOptions{ExecutorProfileID: stringPointer("missing-executor")},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			host, writer := newExactTaskCommandHost(t)
+			host.agentProfiles = &fakeAgentProfileDataSource{resp: &agentsettingsdto.ListAgentsResponse{}}
+			host.taskData = &fakeTaskDataSource{}
+			manager, ok := pluginsdk.HostTaskCommands(host)
+			if !ok {
+				t.Fatal("plugin Host does not expose exact task commands")
+			}
+			input := pluginsdk.ExactTaskCreate{
+				RequestID: "request-invalid-profile", WorkspaceID: "workspace-task-commands", IdempotencyKey: "create-invalid-profile",
+				ExternalID: "proposal-invalid-profile", ApprovalRevision: 1,
+				ManifestDigest: ManifestCapabilityDigest(host.service.installedRecordByInstallationID(host.installationID).Manifest),
+				Task: pluginsdk.CreateTaskInput{
+					WorkspaceID: "workspace-task-commands", WorkflowID: "workflow-task-commands", Title: "Invalid profile", Launch: tc.launch,
+				},
+			}
+			result, task, err := manager.CreateTask(context.Background(), input)
+			if err != nil || result == nil || result.Status != pluginsdk.CommandInvalid || task != nil {
+				t.Fatalf("create with missing profile = result:%+v task:%+v err:%v, want invalid without a task", result, task, err)
+			}
+			if writer.calls != 0 {
+				t.Fatalf("task writer calls = %d, want 0 for an invalid launch profile", writer.calls)
+			}
+		})
 	}
 }
 

@@ -120,7 +120,7 @@ func TestResolveSurvivingAgentctlAdoptsWhenSurvivalEnabled(t *testing.T) {
 	server, store, secretStore, cfg := newGateFixture(t)
 	cfg.Features.AgentSurvival = true
 
-	result, _ := resolveSurvivingAgentctl(context.Background(), cfg, newSurvivalTestLogger(t), store, secretStore)
+	result, _ := resolveSurvivingAgentctl(context.Background(), context.Background(), cfg, newSurvivalTestLogger(t), store, secretStore)
 	if result == nil {
 		t.Fatal("result = nil, want the recorded server to be adopted")
 	}
@@ -147,7 +147,7 @@ func TestResolveSurvivingAgentctlReclaimsDetachedServerWhenSurvivalDisabled(t *t
 	server, store, secretStore, cfg := newGateFixture(t)
 	cfg.Features.AgentSurvival = false
 
-	result, _ := resolveSurvivingAgentctl(context.Background(), cfg, newSurvivalTestLogger(t), store, secretStore)
+	result, _ := resolveSurvivingAgentctl(context.Background(), context.Background(), cfg, newSurvivalTestLogger(t), store, secretStore)
 	if result != nil {
 		t.Fatalf("result = %+v, want nil: nothing may be adopted with the capability disabled", result)
 	}

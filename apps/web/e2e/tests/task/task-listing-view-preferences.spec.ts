@@ -85,6 +85,9 @@ test.describe("Task listing display preferences", () => {
     await expect(row).toContainText(RICH_TASK_DESCRIPTION);
     await expect(row.getByTestId(`pr-task-icon-${task.id}`)).toBeVisible();
 
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.tasks_list_show_details)
+      .toBe(true);
     await testPage.reload();
     await expect(row).toContainText(SEEDED_REPOSITORY_LABEL);
     await expect(row).toContainText(RICH_TASK_DESCRIPTION);

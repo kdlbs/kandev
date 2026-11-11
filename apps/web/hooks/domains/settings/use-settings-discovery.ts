@@ -15,6 +15,7 @@ export function useSettingsDiscovery() {
   const sshEnabled = useFeature("sshConnectionManager");
   const isAdmin = useIsAdmin();
   const showSSHConnections = sshEnabled && isAdmin;
+  const officeEnabled = useFeature("office");
   const authMode = useAppStore((state) => state.auth.mode);
   const role = useAppStore((state) => state.auth.user?.role);
   const workspaces = useAppStore((state) => state.workspaces.items);
@@ -36,6 +37,7 @@ export function useSettingsDiscovery() {
         showOrganizations,
         coordinatorEnabled,
         showSSHConnections,
+        officeEnabled,
         workspaces,
         agents,
         executors,
@@ -43,6 +45,7 @@ export function useSettingsDiscovery() {
     [
       agents,
       coordinatorEnabled,
+      officeEnabled,
       executors,
       showAccount,
       showOrganizations,

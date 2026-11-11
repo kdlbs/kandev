@@ -206,6 +206,7 @@ func (f *assignmentBlockerFixture) dashboardComplete(t *testing.T, id, done stri
 	blockerMust(t, f.tasks.UpdateTask(ctx, task))
 	log := logger.Default()
 	dash := dashboard.NewDashboardService(f.repo, log, shared.NewActivityLogger(f.repo, log), f.svc, nil)
+	dash.SetTaskStateWriter(f.tasks)
 	dash.SetReactivityApplier(scheduler.NewDashboardReactivityAdapter(f.scheduler))
 	blockerMust(t, dash.UpdateTaskStatus(ctx, dashboard.TaskStatusUpdateRequest{TaskID: id, NewStatus: "done", SuppressStatusActivity: true}))
 	// Canonical terminal completion publishes this state transition after Dashboard.

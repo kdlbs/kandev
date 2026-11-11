@@ -42,16 +42,115 @@ def job_block(workflow: str, job: str, next_job: str | None) -> str:
 
 
 class ClaudeCodeReviewWorkflowContractTest(unittest.TestCase):
-    def test_review_workflow_ignores_pr_updates(self) -> None:
+    # @covers AC-CI-ACTIONS-SECURITY-001.1, AC-CI-ACTIONS-SECURITY-001.2
+    def test_automatic_fork_review_keeps_trusted_policy_and_event_head_data(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        block = job_block(workflow, "claude-review-fork", None)
+        self.assertIn("ref: ${{ github.workflow_sha }}", block)
+        self.assertNotIn("ref: refs/pull/", block)
+        self.assertIn("bash .github/scripts/prepare-pr-review.sh", block)
+        self.assertIn("CLAUDE_REVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}", block)
+        review = workflow_step(block, "Run Claude Code Review (GITHUB_TOKEN fallback)")
+        self.assertIn("--permission-mode dontAsk", review)
+        self.assertIn("Bash(python3 .github/scripts/claude-read-pr-file.py:*)", review)
+        self.assertNotIn("Bash(gh pr diff:*)", review)
+        self.assertIn(".claude-review/review.patch", review)
+
+    def test_review_workflow_limits_automatic_triggers(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
 
-        self.assertEqual(["opened"], activity_types(workflow, "pull_request"))
+        self.assertEqual(
+            ["opened", "synchronize"],
+            activity_types(workflow, "pull_request"),
+        )
         self.assertEqual(
             ["opened", "labeled"],
             activity_types(workflow, "pull_request_target"),
         )
         self.assertNotIn("  strip-safe-to-review:", workflow)
         self.assertEqual(workflow.count("persist-credentials: false"), 2)
+
+    # @covers AC-CI-CLAUDE-INITIAL-REVIEW-001.1, AC-CI-CLAUDE-INITIAL-REVIEW-001.2,
+    #         AC-CI-CLAUDE-INITIAL-REVIEW-001.4
+    def test_same_repository_conflict_resolution_can_start_initial_review(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        block = job_block(workflow, "claude-review-same-repo", "label-allowlisted-fork")
+
+        self.assertIn("actions: read", block)
+        self.assertIn(
+            "cancel-in-progress: ${{ github.event_name != 'pull_request' }}",
+            workflow,
+            "a same-repository push must not cancel an admitted review, while "
+            "fork target runs keep their current cancellation behavior",
+        )
+        admission = workflow_step(
+            block,
+            "Decide whether to start the initial review",
+        )
+        self.assertIn(
+            "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3",
+            admission,
+        )
+        self.assertIn("claude-initial-review.cjs", admission)
+        self.assertIn("shouldStartInitialReview({", admission)
+        self.assertIn("owner: context.repo.owner,", admission)
+        self.assertIn("repo: context.repo.repo,", admission)
+        self.assertIn("pullNumber,", admission)
+        self.assertIn(
+            "eventHeadSha: context.payload.pull_request.head.sha,",
+            admission,
+        )
+        self.assertIn("currentRunId: context.runId,", admission)
+        review = workflow_step(
+            block,
+            "Run Claude Code Review (App token, inline comments)",
+        )
+        self.assertIn(
+            "if: steps.initial-review.outputs.should_review == 'true'",
+            review,
+            "the review action must run only when admission returns should_review=true",
+        )
+        self.assertLess(
+            block.index("Decide whether to start the initial review"),
+            block.index("Run Claude Code Review (App token, inline comments)"),
+        )
+
+    # @covers AC-CI-CLAUDE-INITIAL-REVIEW-001.6
+    def test_same_repository_review_keeps_identity_and_tool_policy(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        block = job_block(workflow, "claude-review-same-repo", "label-allowlisted-fork")
+        review = workflow_step(
+            block,
+            "Run Claude Code Review (App token, inline comments)",
+        )
+
+        self.assertIn(
+            "claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}",
+            review,
+        )
+        self.assertNotIn("\n          github_token:", review)
+        self.assertIn("track_progress: true", review)
+        self.assertIn(
+            "CLAUDE_REVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}",
+            review,
+        )
+        self.assertIn("CLAUDE_REVIEW_HEAD_SHA", review)
+        self.assertIn("headRefOid", review)
+        self.assertIn(
+            '--allowedTools "mcp__github_inline_comment__create_inline_comment,'
+            'Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"',
+            review,
+        )
+        self.assertIn("Bash(git push:*)", review)
+        self.assertIn("pull-requests: write", block)
+        self.assertIn("id-token: write", block)
+        self.assertNotIn("contents: write", block)
+        fork = job_block(workflow, "claude-review-fork", None)
+        self.assertNotIn(
+            "actions: read",
+            fork,
+            "the fork path must not gain the admission history scope",
+        )
 
     def test_fork_review_uses_only_open_or_safe_to_review_label(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -205,6 +304,15 @@ class ClaudeCodeReviewWorkflowContractTest(unittest.TestCase):
         )
         self.assertIn(
             "python3 .github/scripts/preview-env-workflow-contract_test.py",
+            workflow,
+        )
+
+    # @covers AC-CI-CLAUDE-INITIAL-REVIEW-001.3
+    def test_lint_workflow_runs_initial_review_admission_suite(self) -> None:
+        workflow = LINT_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "node --test .github/scripts/claude-initial-review.test.cjs",
             workflow,
         )
 

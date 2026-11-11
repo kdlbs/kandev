@@ -36,8 +36,9 @@ import {
   isPRReadyToMerge,
 } from "@/components/github/pr-task-icon";
 import { PRStatusGlyph } from "@/components/github/pr-status-glyph";
+import { aggregatePRCIState, getPRCIState } from "@/components/github/pr-ci-state";
 import { prIdentitySlug, prTaskKey } from "@/components/github/pr-utils";
-import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS, PRCIPopover } from "@/components/github/pr-ci-popover";
+import { PR_CI_DESKTOP_POPOVER_CLASS, PRCIPopover } from "@/components/github/pr-ci-popover";
 import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
 import { useAppStore } from "@/components/state-provider";
 import {
@@ -92,6 +93,7 @@ function PRMultiButtonContent({ prs, colorClassName }: { prs: TaskPR[]; colorCla
           size="topbar"
           colorClassName={colorClassName}
           hasMergeConflicts={hasAnyPRMergeConflict(prs)}
+          ciState={aggregatePRCIState(prs).state}
         />
       }
       dropdown={<IconChevronDown className="h-3 w-3 text-muted-foreground" />}
@@ -201,6 +203,7 @@ function buildPRSingleButtonTrigger({
             size="topbar"
             colorClassName={getPRStatusColor(pr)}
             hasMergeConflicts={hasPRMergeConflict(pr)}
+            ciState={getPRCIState(pr)}
           />
         }
       />
@@ -278,10 +281,12 @@ function PRSingleButton({
           data-testid="pr-topbar-popover"
           align="end"
           sideOffset={4}
-          className={`w-80 ${PR_CI_DESKTOP_POPOVER_SCROLL_CLASS}`}
+          className={`w-80 ${PR_CI_DESKTOP_POPOVER_CLASS}`}
           onMouseEnter={onContentEnter}
           onMouseMove={onContentEnter}
           onMouseLeave={onContentLeave}
+          onFocus={onContentEnter}
+          onBlur={onContentLeave}
           onOpenAutoFocus={(e) => e.preventDefault()}
         >
           <PRCIPopover pr={pr} enabled={open} refreshTaskPR={refreshTaskPR} />
@@ -387,10 +392,12 @@ function PRMultiDesktopSurface({
           data-testid="pr-topbar-popover"
           align="end"
           sideOffset={4}
-          className={`w-96 ${PR_CI_DESKTOP_POPOVER_SCROLL_CLASS}`}
+          className={`w-96 ${PR_CI_DESKTOP_POPOVER_CLASS}`}
           onMouseEnter={interactions.onContentEnter}
           onMouseMove={interactions.onContentEnter}
           onMouseLeave={interactions.onContentLeave}
+          onFocus={interactions.onContentEnter}
+          onBlur={interactions.onContentLeave}
           onOpenAutoFocus={(event) => event.preventDefault()}
         >
           <MultiPRCIPopover
@@ -543,6 +550,7 @@ function MultiPRMenuContent({ prs }: { prs: TaskPR[] }) {
             size="topbar"
             colorClassName={getPRStatusColor(pr)}
             hasMergeConflicts={hasPRMergeConflict(pr)}
+            ciState={getPRCIState(pr)}
           />
           <div className="flex flex-col min-w-0 flex-1">
             <span className="text-xs font-medium">

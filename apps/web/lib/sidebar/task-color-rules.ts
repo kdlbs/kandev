@@ -5,7 +5,7 @@ import type {
   SidebarTaskColorRule,
 } from "@/lib/task-color-automation-settings";
 import {
-  fixedAutomaticTaskColor,
+  taskColorPresentation,
   parseWorkflowStepColor,
   type TaskMarkerPresentation,
 } from "@/lib/task-color-presentation";
@@ -54,7 +54,7 @@ export function resolveAutomaticTaskColor(
     const color =
       rule.output.kind === "workflow_step"
         ? parseWorkflowStepColor(facts.workflowStepColor)
-        : fixedAutomaticTaskColor(rule.output.color);
+        : taskColorPresentation(rule.output.color);
     return {
       color,
       source: {

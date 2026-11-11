@@ -590,6 +590,44 @@ describe("ChatMessage blocked delivery badge", () => {
   });
 });
 
+describe("ChatMessage not-delivered badge", () => {
+  it("shows the localized not-delivered status on the saved user instruction", async () => {
+    await activateLocale("en");
+    const Wrapper = wrapper();
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({
+            content: "Fix the button spacing (2 notes)",
+            metadata: { delivery_status: "not_delivered" },
+          })}
+          label="Message"
+          className=""
+        />
+      </Wrapper>,
+    );
+
+    expect(screen.getByTestId("user-message-delivery-not-delivered").textContent).toBe(
+      "Not delivered. Send it again.",
+    );
+    expect(screen.getByTestId("user-message-delivery-not-delivered").getAttribute("role")).toBe(
+      "status",
+    );
+    expect(screen.getByText("Fix the button spacing (2 notes)", { exact: true })).not.toBeNull();
+
+    await act(async () => {
+      await activateLocale("pseudo");
+    });
+    expect(screen.getByTestId("user-message-delivery-not-delivered").textContent).toBe(
+      "Ńōţ ďēĺĩvēŕēď. Śēńď ĩţ àĝàĩń.",
+    );
+    await act(async () => {
+      await activateLocale("en");
+    });
+  });
+});
+
 describe("ChatMessage raw view", () => {
   it("shows user raw_content with hidden kandev-system blocks when raw view is enabled", () => {
     const raw = `<kandev-system>This message was sent by an agent working in task "Sender" (${SENDER_TASK_ID}).</kandev-system>
@@ -846,10 +884,13 @@ describe("ChatMessage image attachments", () => {
     expect(openSpy).not.toHaveBeenCalled();
     const dialog = screen.getByRole("dialog");
     const preview = screen.getByAltText(FULL_SIZE_ATTACHMENT_1_ALT);
-    expect(dialog.className).toContain("w-fit");
+    expect(dialog.className).toContain("w-[min(96vw,1126px)]");
     expect(dialog.className).toContain("max-w-[calc(100vw-1rem)]");
-    expect(preview.className).toContain("w-[min(92vw,1100px)]");
-    expect(preview.className).toContain("max-h-[calc(100dvh-5rem)]");
+    expect(screen.getByRole("button", { name: "Fit" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Actual size" }));
+    expect(screen.getByRole("button", { name: "Actual size" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
     expect(preview.getAttribute("src")).toBe(`data:image/png;base64,${PNG_BASE64}`);
   });
 

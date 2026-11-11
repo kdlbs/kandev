@@ -1,12 +1,11 @@
-import type { StateCreator } from "zustand";
+import type { SliceCreator } from "@/lib/state/slice-creator";
+
 import type { Draft } from "immer";
 import type { ActiveTurnWindowObservation, SessionSlice } from "./types";
 import type { Turn, TaskSession } from "@/lib/types/http";
 import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 
-type ImmerSet = Parameters<
-  StateCreator<SessionSlice, [["zustand/immer", never]], [], SessionSlice>
->[0];
+type ImmerSet = Parameters<SliceCreator<SessionSlice>>[0];
 
 type TurnReconciliationDraft = Pick<Draft<SessionSlice>, "turns" | "taskSessions">;
 

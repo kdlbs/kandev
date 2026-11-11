@@ -51,8 +51,9 @@ The automation is the object; its runs are its history. The surface is a list an
   with the same `IconBolt`. `/runs` still resolves so shared links keep working. Two entries pointing at the same place is
   what made the destination hard to place: the automation is the object, so the
   nav lists automations.
-- The section fetches only while it is on screen — a collapsed rail or a folded
-  section issues no requests, since the sidebar is mounted on every page.
+- Definition reads follow the visible desktop header, including its folded
+  count. Health reads require expanded rows. A collapsed or hidden builtin
+  section does not initiate its own reads.
 - While the section is expanded in the desktop rail, `AutomationsSection` uses
   the shared 10-second live-refresh cadence to re-read
   `automation.summaries`. `useAutomationSummaries` retains its request-order
@@ -328,6 +329,68 @@ The action is workspace-scoped: the caller must be authorized for `workspace_id`
 - **GIVEN** an automation with an open run older than its own capped run window, **WHEN** its detail page renders, **THEN** it still reports that something is running and keeps polling, because the count comes from the server rather than from the window.
 - **GIVEN** the user switches to another workspace while a detail page is open, **WHEN** the switch lands, **THEN** the page leaves for `/automations` rather than showing another workspace's automation.
 - **GIVEN** a run still in progress with no summary yet, **WHEN** the feed renders, **THEN** the entry says it is still running rather than showing blank outcome text.
+
+## Sidebar definition freshness
+
+This section maps AC-OFFICE-AUTOMATION-RUNS-001.3 and .10 through .12.
+Office owns this behavior because automation definitions supply the navigation
+rows. [Sidebar customization](../../ui/system-design/sidebar-customization.md)
+owns saved visibility and ordering. ADR 0041 retains preference ownership.
+
+`AutomationsSection` owns its `useWorkspaceAutomations` instance. The shortcut
+catalog owns another instance. Updating either instance does not publish rows
+to the other. Preserve those boundaries for this correction.
+
+Enable definition refreshes when `listScope` is present and the definition hook
+is not loading. Pass that gate to `useLiveRefresh` and `useForegroundRefresh`. This includes a folded
+header because its count is visible. Retain the separate `showing` gate for
+`useAutomationSummaries`. After a definition read settles, the interval requests again after
+`LIVE_REFRESH_INTERVAL_MS`. While loading, disable automatic interval and
+foreground refresh so slow successful reads can publish without replacement. Do not add polling inside the shared definition
+hook, because existing catalog consumers already own refresh intervals.
+
+Use `useForegroundRefresh` for the section's definitions with the same enable
+condition and workspace scope key. It handles focus, visibility restoration,
+pageshow, and online recovery. Initial mounting, workspace changes, and rail
+reopening keep the existing hook-driven initial read. Opening a folded section
+uses the current definition snapshot and the existing periodic cadence.
+
+Keep `useWorkspaceAutomations` workspace-tagged rows and request generations.
+A response may publish only for its latest request. The render-time owner check
+hides old-workspace rows before passive effects run. Do not replace this hook
+with the flat settings store. Preserve current failure settlement and retry on
+the next cadence or foreground event. No new copy or error presentation is
+part of this correction.
+
+Saved-layout rendering must continue to omit hidden builtin nodes. Refreshes
+must not write sidebar layout, expansion, ordering, or other user settings.
+Other catalog consumers can continue their own reads when this builtin is hidden.
+
+### Phone composition
+
+`useHasSavedSidebarLayout` returns true for every selected workspace. The phone
+route therefore renders `MobilePhoneResource` with `SavedMobileAutomationRows`.
+Those rows already consume `useSidebarShortcutCatalog`, which owns periodic and
+foreground definition refreshes. Keep this single phone refresh path.
+
+The no-children `MobileAutomationRows` fallback has an independent list, but
+`NavigationAutomations` cannot select it with a workspace under current routing.
+Do not expand this repair into that inactive route. If routing changes later,
+its definition refresh must be assessed before activation.
+
+Keep the existing inset navigation drawer, disclosure, row links, setup link,
+and Open automations action. The drawer remains the scroll owner. The repair
+changes no geometry, touch targets, breakpoints, focus behavior, or labels.
+
+### Focused evidence
+
+Component tests exercise external create/rename/delete while the section stays
+mounted, with real definition and refresh hooks. Deferred responses cover
+workspace switches and newest-request ordering. A two-consumer test proves that
+catalog freshness does not substitute for builtin freshness. Browser tests use
+an external API client and retain the same mounted section. Phone coverage
+keeps the drawer open through external creation. See the
+[repair package](../../../plans/sidebar-automation-definition-refresh/plan.md).
 
 ## Out of scope
 

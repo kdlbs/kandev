@@ -48,13 +48,19 @@ func deliveryTerminalSettlementEffect(event *models.AgentDeliveryEvent) (*models
 	}, nil
 }
 
+const (
+	deliveryCompleteEventType = "complete"
+	deliveryErrorEventType    = "error"
+	deliveryCanceledEventType = "canceled"
+)
+
 func deliveryTerminalOutcome(eventType string) models.DeliverySubmissionState {
 	switch eventType {
 	case streams.EventTypeComplete:
 		return models.DeliverySubmissionCompleted
 	case streams.EventTypeError:
 		return models.DeliverySubmissionFailed
-	case string(models.DeliverySubmissionCancelled), "canceled":
+	case string(models.DeliverySubmissionCancelled), deliveryCanceledEventType:
 		return models.DeliverySubmissionCancelled
 	default:
 		return ""

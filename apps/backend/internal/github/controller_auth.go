@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/githubauth"
 )
 
 const defaultGitHubUserID = DefaultUserID
@@ -240,25 +241,11 @@ func (c *Controller) httpGitHubAppWebhook(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, result)
 }
 
-type credentialBrokerHTTPRequest struct {
-	Lease            string `json:"lease"`
-	Capability       string `json:"capability"`
-	TaskID           string `json:"task_id"`
-	SessionID        string `json:"session_id"`
-	RepositoryID     string `json:"repository_id"`
-	Owner            string `json:"owner"`
-	Repo             string `json:"repo"`
-	Host             string `json:"host"`
-	Path             string `json:"path"`
-	ProviderID       string `json:"provider_id"`
-	ParentProviderID string `json:"parent_provider_id"`
-}
-
-func decodeCredentialBrokerHTTPRequest(ctx *gin.Context) (credentialBrokerHTTPRequest, bool) {
-	var request credentialBrokerHTTPRequest
+func decodeCredentialBrokerHTTPRequest(ctx *gin.Context) (githubauth.CredentialBrokerRequest, bool) {
+	var request githubauth.CredentialBrokerRequest
 	if err := ctx.ShouldBindJSON(&request); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": credentialBrokerInvalidRequestCode(ctx), "error": "invalid payload"})
-		return credentialBrokerHTTPRequest{}, false
+		return githubauth.CredentialBrokerRequest{}, false
 	}
 	return request, true
 }
@@ -287,7 +274,7 @@ func (c *Controller) httpReissueCredentialLease(ctx *gin.Context) {
 		return
 	}
 	lease, err := c.service.ReissueGitHubCredentialLease(ctx.Request.Context(), CredentialLeaseReissueRequest{
-		Capability: request.Capability, TaskID: request.TaskID, SessionID: request.SessionID,
+		Capability: request.ReissueCapability, TaskID: request.TaskID, SessionID: request.SessionID,
 		RepositoryID: request.RepositoryID, Owner: request.Owner, Repo: request.Repo,
 		Host: request.Host, Path: request.Path, ProviderID: request.ProviderID,
 		ParentProviderID: request.ParentProviderID,

@@ -101,6 +101,7 @@ func RegisterRoutes(api *gin.RouterGroup, svc *DashboardService, labelRepo label
 	api.GET("/workspaces/:wsId/runs", h.listRuns)
 	api.GET("/workspaces/:wsId/tasks/search", h.searchTasks)
 	api.GET("/workspaces/:wsId/tasks", h.listTasks)
+	api.GET("/workspaces/:wsId/tasks/by-identifier/:identifier", h.resolveTaskIdentifier)
 	api.GET("/workspaces/:wsId/settings", h.getWorkspaceSettings)
 	api.PATCH("/workspaces/:wsId/settings", h.updateWorkspaceSettings)
 	api.GET("/tasks/:id", h.getTask)
@@ -488,6 +489,26 @@ func (h *Handler) attachLabelsToTasks(ctx context.Context, tasks []*sqlite.TaskR
 	return dtos
 }
 
+const errTaskNotFound = "task not found"
+
+// resolveTaskIdentifier maps a workspace-scoped task identifier (e.g. "KAN-11")
+// to the task id so the UI can redirect to the canonical /office/tasks/<id> URL.
+func (h *Handler) resolveTaskIdentifier(c *gin.Context) {
+	if rejectAgentTaskReader(c) {
+		return
+	}
+	id, err := h.svc.ResolveTaskIdentifier(c.Request.Context(), c.Param("wsId"), c.Param("identifier"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if id == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": errTaskNotFound})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": id})
+}
+
 func (h *Handler) getTask(c *gin.Context) {
 	ctx := c.Request.Context()
 	task, err := h.svc.GetTask(ctx, c.Param("id"))
@@ -496,7 +517,7 @@ func (h *Handler) getTask(c *gin.Context) {
 		return
 	}
 	if task == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": errTaskNotFound})
 		return
 	}
 

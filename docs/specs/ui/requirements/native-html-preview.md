@@ -15,6 +15,9 @@ does not need to start a development server. The preview shall use the current
 editor buffer as its entry document and shall resolve relative assets from the
 task workspace. Desktop and phone surfaces replace the active file editor body
 with the same proxied page while preserving a direct return to source.
+Changes and expanded Review also expose this action from an HTML file's diff.
+Those previews use the complete current workspace file and preserve a return
+to the same diff.
 
 HTML preview is a trusted-workspace-code feature. Previewed scripts have native
 browser behavior and the authority already granted to Browser-panel content.
@@ -36,6 +39,8 @@ session authorization across local and remote executors.
   preview iframe or an explicitly opened Browser panel.
 - **Trusted workspace code:** Content the user permits to run with the existing
   Browser-panel sandbox and origin policy. It is not isolated as hostile code.
+- **Diff preview:** A native preview of the complete current workspace file,
+  opened from a diff. It does not represent a historical or staged revision.
 
 ## Requirements
 
@@ -90,6 +95,51 @@ development-server command is not necessary.
   not persist file contents to Kandev storage. A stale preview URL after an
   executor restart shall be recoverable by activating `Preview HTML` again.
 
+### REQ-UI-NATIVE-HTML-PREVIEW-002: Preview HTML from file diffs
+
+**Intent:** Let reviewers inspect an HTML page directly from its diff without
+first opening the source editor.
+
+#### Acceptance criteria
+
+- **AC-UI-NATIVE-HTML-PREVIEW-002.1:** In Changes and expanded Review, eligible
+  `.html` and `.htm` files shall expose `Preview HTML`. Extension matching shall
+  ignore case. Desktop shall use a file-header action. Phones shall use the
+  existing visible file-actions menu. Deleted files and known binary files
+  shall not expose the action.
+- **AC-UI-NATIVE-HTML-PREVIEW-002.2:** Activation shall replace only the selected
+  file's diff body with the native preview. The current diff surface shall stay
+  open. `Show diff` shall restore that file's textual diff and display controls.
+- **AC-UI-NATIVE-HTML-PREVIEW-002.3:** Publication and refresh shall read the
+  complete current workspace file in the selected repository. Before activation
+  and within the preview, localized copy shall identify that source and the
+  existing trusted-code consequence. The preview shall not claim to show the
+  selected patch revision or reconstruct missing lines from diff hunks.
+- **AC-UI-NATIVE-HTML-PREVIEW-002.4:** Phone and coarse-pointer actions shall
+  have active touch dimensions of at least 44 pixels. The preview and return
+  action shall remain inside the focused diff surface without document-level
+  horizontal overflow. Keyboard users shall also reach both actions.
+- **AC-UI-NATIVE-HTML-PREVIEW-002.5:** A file-read or publication error shall show
+  localized recovery copy with retry and `Show diff`. Retry shall read the
+  current file again. A file identified as binary during that read shall never
+  be published as HTML. Failure shall leave the underlying diff available.
+- **AC-UI-NATIVE-HTML-PREVIEW-002.6:** Preview shall start only after explicit
+  activation. Returning to the diff, closing the surface, or changing its
+  session, repository, file, or review source shall retire pending results.
+  Late results shall not activate or replace another preview. Reload shall
+  restore the diff rather than automatically execute HTML.
+- **AC-UI-NATIVE-HTML-PREVIEW-002.7:** Preview activation, refresh, and return
+  shall not write workspace files, change editor buffers or dirty state, or
+  change review status or comments. Existing Markdown preview behavior shall
+  remain unchanged.
+
+## Implementation plans
+
+- [Native HTML preview](../../../plans/native-html-preview/plan.md) records the
+  original native runtime and file-editor delivery.
+- [HTML preview from diffs](../../../plans/html-diff-preview/plan.md) tracks
+  `REQ-UI-NATIVE-HTML-PREVIEW-002`.
+
 ## Out of scope
 
 - Safely executing hostile or untrusted HTML.
@@ -98,6 +148,9 @@ development-server command is not necessary.
 - Framework build pipelines, hot-module replacement, package installation, or
   replacing an application's configured development-server command.
 - Rendering HTML reconstructed from a Review diff.
+- Previewing historical commit or turn snapshots, or unsaved editor buffers,
+  through the diff action. Dedicated commit-detail and historical-turn viewers
+  are outside this extension.
 - Mapping rendered elements to source lines or forwarding console output.
   Task-owned text, element, and screenshot review feedback is specified by
   [Web Preview Feedback Requirements](../../tasks/requirements/web-preview-feedback.md).

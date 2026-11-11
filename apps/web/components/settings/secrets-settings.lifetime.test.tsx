@@ -154,7 +154,7 @@ async function renameThroughSettings() {
       { cache: "no-store", workspaceId: WORKSPACE_ID },
     ),
   );
-  expectMetadataRows([original]);
+  expectMetadataRows([]);
   await acknowledge(request, renamed);
 }
 
@@ -248,4 +248,46 @@ describe("rendered workspace settings acknowledgments", () => {
       expect(scopedRequests()).toHaveLength(source === "fetched" ? 1 : 0);
     },
   );
+});
+
+describe("rendered workspace settings edit visibility", () => {
+  it("replaces the edited secret's row with the edit form until the update settles", async () => {
+    render(<SettingsTree initialItems={[original]} />);
+    expectMetadataRows([original]);
+
+    const update = deferred(renamed);
+    transport.update.mockReturnValue(update.promise);
+    fireEvent.click(screen.getByRole("button", { name: `Edit secret ${original.name}` }));
+    expectMetadataRows([]);
+    expect(screen.queryByRole("button", { name: `Reveal secret ${original.name}` })).toBeNull();
+
+    fireEvent.change(screen.getByPlaceholderText(NAME_PLACEHOLDER), {
+      target: { value: renamed.name },
+    });
+    await saveForm();
+    await waitFor(() => expect(transport.update).toHaveBeenCalled());
+    expectMetadataRows([]);
+
+    await acknowledge(update, renamed);
+    expectMetadataRows([renamed]);
+  });
+});
+
+it("retains a failed edit and restores an unrevealed row when cancelled", async () => {
+  render(<SettingsTree initialItems={[original]} />);
+  const update = deferred(renamed);
+  transport.update.mockReturnValue(update.promise);
+  fireEvent.click(screen.getByRole("button", { name: `Edit secret ${original.name}` }));
+  const nameInput = screen.getByPlaceholderText(NAME_PLACEHOLDER) as HTMLInputElement;
+  fireEvent.change(nameInput, { target: { value: renamed.name } });
+  await saveForm();
+  await waitFor(() => expect(transport.update).toHaveBeenCalledTimes(1));
+  await act(async () => update.reject(new Error("synthetic update failure")));
+  await waitFor(() => expect(nameInput.disabled).toBe(false));
+  expect(nameInput.value).toBe(renamed.name);
+  expectMetadataRows([]);
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expectMetadataRows([original]);
+  expect(screen.queryByPlaceholderText(NAME_PLACEHOLDER)).toBeNull();
+  expect(screen.getByRole("button", { name: `Reveal secret ${original.name}` })).not.toBeNull();
 });

@@ -7,7 +7,7 @@ requirements:
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004
 created: 2026-08-24
-updated: 2026-10-14
+updated: 2026-11-08
 owners:
   - cfl12
 ---
@@ -360,6 +360,10 @@ response, reload/reconnect, and retry identity. Include mixed healthy/failed tab
 Public recovery guidance belongs in `docs/public/tasks-and-workflows.md` when
 implementation lands. See [delivery package](../../../plans/setup-recovery-ux/plan.md).
 
+The [startup amendment](quick-chat-opening-composer.md#startup-acceptance-amendment)
+moves ordinary creation acceptance before preparation. Its background path
+preserves this retention contract.
+
 ### Quick Chat launch admission coverage
 
 For a newly allocated ephemeral session, the orchestrator retains the allocated
@@ -466,9 +470,12 @@ Callers:
   `workspace_preparing` while the new owner prepares it.
 - `LaunchPreparedSession` re-elects an eligible `failed` environment of the same
   task for the session that it launches. It uses a standalone transaction that
-  takes the task cleanup barrier and the recovery-claim admission. An
-  environment owned by another task, which is the `inherit_parent` case, stays
-  fail-closed.
+  takes the task cleanup barrier and recovery-claim admission. A failed foreign
+  environment (`inherit_parent` or `shared_group`) is never re-elected by the
+  child. A launch meeting
+  `AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.5` claims its own environment
+  before allocation (see [additional-session workspace reuse](additional-session-workspace-reuse.md)).
+  Other starts stay fail-closed.
 
 Every caller runs after `taskCleanupBarrierLocked` and
 `recoveryclaim.EnsureAvailableTx`, so a deleting task or a held recovery claim

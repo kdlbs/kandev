@@ -99,6 +99,8 @@
   "failedToMigrateTasks": "遷移任務失敗",
   "failedToSaveWorkflowChanges": "儲存工作流程更改失敗",
   "failedToUpdateWorkflowStep": "更新工作流程步驟失敗",
+  "holdStep": "保留步驟",
+  "holdStepHelp": "將此步驟標記為保留步驟。分類儲存在步驟上，不會啟動、停止或移動任務。",
   "hopNumber": "躍點 {{index}}",
   "import": "匯入",
   "importCompleteTitle": "匯入完成",

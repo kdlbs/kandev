@@ -45,6 +45,7 @@ type BoardContext = {
     columnDone?: boolean,
   ) => Promise<AzureDevOpsBoardWorkItem | undefined>;
   onItemUpdated?: (item: AzureDevOpsBoardWorkItem) => void;
+  onMoveCompleted?: (item: AzureDevOpsBoardWorkItem) => void;
 };
 
 type Props = {
@@ -136,18 +137,12 @@ function BoardActions({
 }: {
   context: BoardContext;
   saving: boolean;
-  onMove: (
-    item: AzureDevOpsBoardWorkItem,
-    columnId: string,
-    columnDone?: boolean,
-  ) => Promise<AzureDevOpsBoardWorkItem | undefined>;
+  onMove: (item: AzureDevOpsBoardWorkItem, columnId: string, columnDone?: boolean) => Promise<void>;
 }) {
   const { t } = useTranslation();
-  const [currentItem, setCurrentItem] = useState(context.item);
   const [columnId, setColumnId] = useState(context.item.columnId);
   const [columnDone, setColumnDone] = useState(context.item.columnDone);
   useEffect(() => {
-    setCurrentItem(context.item);
     setColumnId(context.item.columnId);
     setColumnDone(context.item.columnDone);
   }, [context.item.columnDone, context.item.columnId, context.item.id, context.item.revision]);
@@ -192,11 +187,7 @@ function BoardActions({
           disabled={
             saving || (columnId === context.item.columnId && columnDone === context.item.columnDone)
           }
-          onClick={() =>
-            void onMove(currentItem, columnId, columnDone).then((updated) => {
-              if (updated) setCurrentItem(updated);
-            })
-          }
+          onClick={() => void onMove(context.item, columnId, columnDone)}
         >
           {t("azuredevops:move")}
         </Button>
@@ -265,6 +256,8 @@ function DetailBody({
   }
   const planningFields = item.planningFields ?? [];
   const updateAssignee = async (action: "assign_current_user" | "unassign") => {
+    const mutation = state.beginMutation();
+    if (!mutation.isCurrent()) return;
     setSaving(true);
     setMutationError(null);
     try {
@@ -273,9 +266,9 @@ function DetailBody({
         boardContext.onItemUpdated({ ...boardContext.item, ...updated });
       }
     } catch (error) {
-      setMutationError(String(error));
+      if (mutation.isCurrent()) setMutationError(String(error));
     } finally {
-      setSaving(false);
+      if (mutation.isCurrent()) setSaving(false);
     }
   };
   return (
@@ -347,23 +340,25 @@ function DetailBody({
       </section>
       {boardContext && (
         <BoardActions
-          context={boardContext}
+          context={{ ...boardContext, item: { ...boardContext.item, ...item } }}
           saving={saving}
           onMove={async (item, columnId, columnDone) => {
+            const mutation = state.beginMutation();
+            if (!mutation.isCurrent()) return undefined;
             setSaving(true);
             setMutationError(null);
             try {
               const updated = await boardContext.onMove(item, columnId, columnDone);
+              if (!mutation.isCurrent()) return undefined;
               if (updated) {
-                state.mergeItem(updated);
-                boardContext.onItemUpdated?.(updated);
+                mutation.mergeItem(updated);
+                boardContext.onMoveCompleted?.(updated);
               }
-              return updated;
             } catch (error) {
-              setMutationError(String(error));
+              if (mutation.isCurrent()) setMutationError(String(error));
               return undefined;
             } finally {
-              setSaving(false);
+              if (mutation.isCurrent()) setSaving(false);
             }
           }}
         />
@@ -488,6 +483,7 @@ export function AzureDevOpsWorkItemDetail({
   );
   const body = (
     <DetailBody
+      key={`${workspaceId}:${projectId}:${initialItem?.id}:${open}`}
       state={state}
       boardContext={boardContext}
       quickActions={quickActions}

@@ -29,6 +29,26 @@ type BlockedPop = {
 
 let blockedPop: BlockedPop | null = null;
 
+type HistoryCommitListener = (fromHref: string, toHref: string) => void;
+const historyCommitListeners = new Set<HistoryCommitListener>();
+
+export function subscribeHistoryCommit(listener: HistoryCommitListener): () => void {
+  ensureHistoryTracking();
+  historyCommitListeners.add(listener);
+  return () => {
+    historyCommitListeners.delete(listener);
+  };
+}
+
+function locationHref(): string {
+  return window.location.pathname + window.location.search + window.location.hash;
+}
+
+function notifyHistoryCommit(fromHref: string): void {
+  const toHref = locationHref();
+  for (const listener of historyCommitListeners) listener(fromHref, toHref);
+}
+
 export function setNavigationBlocker(blocker: NavigationBlocker | null): () => void {
   ensureHistoryTracking();
   activeBlocker = blocker;
@@ -201,6 +221,7 @@ function trackNativeHistoryMutations(): void {
   const pushState = window.history.pushState.bind(window.history);
   const replaceState = window.history.replaceState.bind(window.history);
   window.history.pushState = (state, title, url) => {
+    const fromHref = locationHref();
     const position = readPosition(state) ?? (currentPosition ?? 0) + 1;
     pushState(withPosition(state, position), title, url);
     currentPosition = position;
@@ -208,12 +229,15 @@ function trackNativeHistoryMutations(): void {
     // without this the cancelled restoration position could eat a later
     // legitimate popstate to the same position.
     canceledRestorationPosition = null;
+    notifyHistoryCommit(fromHref);
   };
   window.history.replaceState = (state, title, url) => {
+    const fromHref = locationHref();
     const position = readPosition(state) ?? currentPosition ?? 0;
     replaceState(withPosition(state, position), title, url);
     currentPosition = position;
     canceledRestorationPosition = null;
+    notifyHistoryCommit(fromHref);
   };
 }
 

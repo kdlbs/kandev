@@ -1,6 +1,6 @@
 ---
 created: 2026-10-12
-status: complete
+status: done
 requirements:
   - REQ-PLATFORM-SQLITE-SNAPSHOT-001
   - REQ-PLATFORM-STARTUP-LIFECYCLE-001
@@ -86,3 +86,26 @@ Full integrity checking remains significant. Page-copy backups may include free 
 Continuous work increases resource use while a backlog exists; bounded leases, gate
 contention and cancellation must remain effective. Protected discovery wrap must not
 be mistaken for productive continuation, or the worker could spin forever.
+
+## Concurrent WAL commits follow-up
+
+The original active-writer control holds an uncommitted write; it does not prove
+progress across repeated independent commits. An isolated SQLite Online Backup
+API observation reproduced unchanged remaining pages after eight committed writes.
+A deferred reader snapshot completed the same four bounded steps while three
+independent writes committed, retaining the initial view. The actual Go
+`BackupSQLite` entrypoint then confirmed the distinction: the baseline was
+cancelled after eight repeated commits; the candidate completed with snapshot
+epoch 0 and live epoch 3. The candidate and cancellation/pool-release controls
+passed under `-race` (1.269s). No live backup or operating retry was performed,
+and the original failing job's writer remains unknown.
+
+Task 01 now has a narrow follow-up to pin an autocommit WAL reader snapshot and
+release only its own transaction on every exit. Original publication, five-second
+stall handling, non-WAL/caller-transaction behavior and Task 02 remain unchanged.
+
+Existing locked-copy cancellation, active-WAL-writer and stalled-copy controls
+passed. The memory/failure-cleanup control also passed under `-race` after its
+disposable fixture removed only a filename character Windows forbids. The
+pre-migration POSIX-mode privacy assertion fails identically on this Windows
+host with pristine and candidate code; it is not reported as passed or weakened.

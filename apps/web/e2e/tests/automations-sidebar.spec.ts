@@ -168,3 +168,64 @@ test.describe("Automations section in the app sidebar", () => {
     });
   });
 });
+
+// @covers AC-OFFICE-AUTOMATION-RUNS-001.10 AC-OFFICE-AUTOMATION-RUNS-001.12
+test("external definitions update the mounted builtin after create, rename, and delete", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const ws = watchWs(testPage);
+  await testPage.goto("/");
+  await automationsHeader(testPage).click();
+  await expect(testPage.getByTestId("sidebar-automations-empty")).toBeVisible();
+  const section = testPage.locator("#sidebar-section-automations");
+  const original = await section.elementHandle();
+  const url = testPage.url();
+  const timeOrigin = await testPage.evaluate(() => performance.timeOrigin);
+  const layout = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+    seedData.workspaceId
+  ];
+
+  const createdRead = ws.waitForResponse("automation.list", {
+    where: (rows) => Array.isArray(rows) && rows.some((row) => row.name === "External definition"),
+  });
+  const created = await apiClient.wsRequest<{ id: string }>("automation.create", {
+    workspace_id: seedData.workspaceId,
+    name: "External definition",
+    enabled: false,
+    repository_mode: "none",
+  });
+  const row = testPage.getByTestId(`sidebar-automation-${created.id}`);
+  await createdRead;
+  await expect(row).toContainText("External definition");
+  await expect(row).toHaveAttribute("href", `/automations/${created.id}`);
+
+  const renamedRead = ws.waitForResponse("automation.list", {
+    where: (rows) =>
+      Array.isArray(rows) &&
+      rows.some((row) => row.id === created.id && row.name === "External rename"),
+  });
+  await apiClient.wsRequest("automation.update", { id: created.id, name: "External rename" });
+  await renamedRead;
+  await expect(row).toContainText("External rename");
+
+  const deletedRead = ws.waitForResponse("automation.list", {
+    where: (rows) =>
+      rows === null || (Array.isArray(rows) && rows.every((row) => row.id !== created.id)),
+  });
+  await apiClient.wsRequest("automation.delete", { id: created.id });
+  await deletedRead;
+  await expect(row).toHaveCount(0);
+  await expect(testPage.getByTestId("sidebar-automations-empty")).toBeVisible();
+  await expect(automationsHeader(testPage)).toHaveAttribute("aria-expanded", "true");
+  expect(await section.evaluate((element, previous) => element === previous, original)).toBe(true);
+  expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(timeOrigin);
+  await expect(testPage).toHaveURL(url);
+  expect(
+    (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+      seedData.workspaceId
+    ],
+  ).toEqual(layout);
+  await original?.dispose();
+});

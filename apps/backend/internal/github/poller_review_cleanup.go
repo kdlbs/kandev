@@ -65,8 +65,7 @@ func (c *reviewCleanupCycle) admit(task *ReviewPRTask, tracker *RateTracker) (bo
 	if allowed, stopWorkspace := c.admitWorkspace(watch.WorkspaceID); !allowed {
 		return false, stopWorkspace
 	}
-	serviceTracker := c.poller.service.rateTracker
-	if tracker != nil && tracker != serviceTracker && tracker.WaitDuration(ResourceCore) > 0 {
+	if tracker != nil && tracker.BackgroundWaitDuration(ResourceCore) > 0 {
 		c.recordCoreQuotaSkip()
 		return false, true
 	}
@@ -83,11 +82,6 @@ func (c *reviewCleanupCycle) admitWorkspace(workspaceID string) (bool, bool) {
 		return false, false
 	}
 	c.workspaceFingerprint(workspaceID)
-	if c.poller.service != nil && c.poller.service.rateTracker != nil &&
-		c.poller.service.rateTracker.WaitDuration(ResourceCore) > 0 {
-		c.recordCoreQuotaSkip()
-		return false, true
-	}
 	now := time.Now().UTC()
 	if open, class := c.poller.reviewCleanupCircuits.workspaceOpen(workspaceID, now); open {
 		if !c.workspaceSkipRecorded[workspaceID] {
@@ -247,7 +241,7 @@ func reviewCleanupRecordFingerprint(connectionFingerprint string, watch *ReviewW
 func reviewCleanupFailureMetricClass(err error, class authcircuit.FailureClass) string {
 	var apiErr *GitHubAPIError
 	if errors.As(err, &apiErr) && isGitHubRateLimitAPIError(apiErr) {
-		return "rate_limit"
+		return reviewCleanupMetricClassRateLimit
 	}
 	return string(class)
 }

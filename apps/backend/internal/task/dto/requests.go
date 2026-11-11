@@ -291,6 +291,7 @@ type CreateTaskRequest struct {
 	Repositories   []TaskRepositoryInput
 	Position       int
 	Metadata       map[string]interface{}
+	MCPServerIDs   []string
 
 	// Office extensions
 	AssigneeAgentProfileID string

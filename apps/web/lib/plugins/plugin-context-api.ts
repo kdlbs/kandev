@@ -1,5 +1,5 @@
 import type { StoreApi } from "zustand";
-import type { PluginContextApi, TaskCreationContext } from "@kandev/plugin-sdk";
+import type { PluginContextApi, TaskCreationContext } from "@kdlbs/plugin-sdk";
 import type { AppState } from "@/lib/state/store";
 import { toPluginHostRepository } from "./host-repository";
 

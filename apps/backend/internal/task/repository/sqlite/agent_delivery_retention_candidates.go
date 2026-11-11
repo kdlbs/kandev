@@ -67,7 +67,8 @@ func agentDeliveryRetentionFilteredQuery(sourceFilters []string, args []any, lim
 const agentDeliveryRetentionOutputTypesSQL = `'message_chunk', 'reasoning', 'tool_call', 'tool_update', 'plan', 'agent_plan', 'shell_output_update'`
 
 const agentDeliveryRetentionControlTypesSQL = `'agent_capabilities', 'session_status', 'available_commands',
- 'session_mode', 'session_models', 'session_info', 'context_window', 'mcp_attachment', 'turn_started'`
+ 'session_mode', 'session_models', 'session_info', 'context_window',
+ 'mcp_attachment', 'turn_started'`
 
 const agentDeliveryRetentionNonterminalTypesSQL = agentDeliveryRetentionOutputTypesSQL + ", " + agentDeliveryRetentionControlTypesSQL
 

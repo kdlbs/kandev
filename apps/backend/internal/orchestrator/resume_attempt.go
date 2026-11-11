@@ -55,6 +55,9 @@ type resumeAttempt struct {
 	// acceptance is recorded, explicit session cancellation no longer owns
 	// startup teardown for this attempt.
 	accepted bool
+	// promptReady records successful startup without claiming provider prompt
+	// acceptance. It is protected by resumeAttemptRegistry.mu.
+	promptReady bool
 	// settingsPolicy is protected by resumeAttemptRegistry.mu and can only be
 	// set by the current owner during startup admission.
 	settingsPolicy executor.ResumeSettingsPolicy
@@ -121,6 +124,7 @@ type resumeAttemptTombstone struct {
 	recoveryErrorStamp        string
 	cancelled                 bool
 	accepted                  bool
+	promptReady               bool
 	interruptedMarker         string
 	interruptedMarkerCaptured bool
 }
@@ -324,6 +328,7 @@ func (r *resumeAttemptRegistry) retainLocked(attempt *resumeAttempt) {
 			}
 			if entries[index].id == attempt.id {
 				entries[index].accepted = attempt.accepted
+				entries[index].promptReady = attempt.promptReady
 				entries[index].recoveryErrorStamp = attempt.recoveryErrorStamp
 				entries[index].interruptedMarker = attempt.interruptedMarkerValue()
 				entries[index].interruptedMarkerCaptured = attempt.interruptedMarkerSnapshotCaptured()
@@ -341,6 +346,7 @@ func (r *resumeAttemptRegistry) retainLocked(attempt *resumeAttempt) {
 		recoveryErrorStamp:        attempt.recoveryErrorStamp,
 		cancelled:                 attempt.ctx.Err() != nil,
 		accepted:                  attempt.accepted,
+		promptReady:               attempt.promptReady,
 		interruptedMarker:         attempt.interruptedMarkerValue(),
 		interruptedMarkerCaptured: attempt.interruptedMarkerSnapshotCaptured(),
 	})
@@ -353,6 +359,38 @@ func (r *resumeAttemptRegistry) retainLocked(attempt *resumeAttempt) {
 func (r *resumeAttemptRegistry) hasRecoveryHistoryLocked(sessionID string) bool {
 	_, ok := r.recoveryHistory[sessionID]
 	return ok
+}
+
+func (r *resumeAttemptRegistry) canPromptWithoutResume(sessionID, executionID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.attempts[sessionID] != nil {
+		return false
+	}
+	if !r.hasRecoveryHistoryLocked(sessionID) {
+		return true
+	}
+	var latest resumeAttemptTombstone
+	for _, entry := range r.tombstones[sessionID] {
+		if entry.id > latest.id {
+			latest = entry
+		}
+	}
+	// A failed resume can overlap startup reconciliation. Its restored
+	// execution needs a new binding before callbacks can pass the history guard.
+	return (latest.accepted || latest.promptReady) && !latest.cancelled && executionID != "" &&
+		latest.executionID == executionID
+}
+
+func (r *resumeAttemptRegistry) markPromptReady(attempt *resumeAttempt) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if attempt == nil || r.attempts[attempt.sessionID] != attempt ||
+		attempt.ctx.Err() != nil || attempt.execution() == "" {
+		return false
+	}
+	attempt.promptReady = true
+	return true
 }
 
 func (r *resumeAttemptRegistry) setRecoveryErrorStamp(attempt *resumeAttempt, stamp string) bool {
@@ -687,6 +725,9 @@ func (s *Service) beginResumeAttempt(
 		if s.cancelledResumeTeardownForSession(sessionID) != nil {
 			return nil, false, fmt.Errorf("%w: cancelled startup teardown is still in progress", ErrResumeAttemptCancelled)
 		}
+		if err := s.validateWorkflowAutoStartResumeAdmission(ctx, taskID, sessionID); err != nil {
+			return nil, false, err
+		}
 		// The guard marker is only valid for this registration call. Do not
 		// carry it into lifecycle work that can outlive the guard owner.
 		attemptCtx := context.WithValue(ctx, cancelInFlightGuardHeldContextKey{}, false)
@@ -709,6 +750,11 @@ func (s *Service) beginResumeAttempt(
 					return nil, false, fmt.Errorf("wait for cancelled startup teardown before resume: %w", err)
 				}
 				continue
+			}
+			if err := s.validateWorkflowAutoStartResumeAdmission(ctx, taskID, sessionID); err != nil {
+				lock.Unlock()
+				release()
+				return nil, false, err
 			}
 			attempt, owner := s.resumeAttemptStore().begin(ctx, taskID, sessionID)
 			if owner {
@@ -1043,6 +1089,10 @@ func (s *Service) cancelResumeAttempts() {
 // this safe when a retry has already installed a replacement execution.
 func (s *Service) cleanupCancelledResumeAttempt(attempt *resumeAttempt) {
 	if attempt == nil || s.executor == nil {
+		return
+	}
+	if owned, _ := attempt.ctx.Value(silentRestoreStartupContextKey{}).(bool); owned {
+		// The restore owner must checkpoint termination before inventory cleanup.
 		return
 	}
 	executionID := attempt.execution()

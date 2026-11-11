@@ -2,8 +2,12 @@ name: Cache Go compilation
 description: Separate module downloads from daily compatible compilation snapshots
 inputs:
   family:
-    description: Compilation family (static, test-1, test-2, ambient, or e2e-build)
+    description: Compilation family
     required: true
+  save-mode:
+    description: Cache publication role (all, build, or none)
+    required: false
+    default: all
 runs:
   using: composite
   steps:
@@ -13,20 +17,29 @@ runs:
       shell: bash
       env:
         CACHE_FAMILY: ${{ inputs.family }}
+        CACHE_SAVE_MODE: ${{ inputs.save-mode }}
       run: node "$GITHUB_WORKSPACE/.github/scripts/go-cache-identity.mjs"
 
-    # actions/cache registers success-only post saves. Cache service failures
-    # remain optional and cannot suppress the caller's build or verification.
+    # The combined cache action saves in its post step only when the job
+    # succeeds and the primary key was not restored.
     - name: Cache Go module downloads
-      if: steps.identity.outputs.enabled == 'true'
+      if: steps.identity.outputs.enabled == 'true' && steps.identity.outputs.moduleSave == 'true'
       continue-on-error: true
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.identity.outputs.modulePath }}
         key: ${{ steps.identity.outputs.moduleKey }}
 
+    - name: Restore Go module downloads
+      if: steps.identity.outputs.enabled == 'true' && steps.identity.outputs.moduleSave != 'true'
+      continue-on-error: true
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.identity.outputs.modulePath }}
+        key: ${{ steps.identity.outputs.moduleKey }}
+
     - name: Cache Go build generation
-      if: steps.identity.outputs.enabled == 'true'
+      if: steps.identity.outputs.enabled == 'true' && steps.identity.outputs.buildSave == 'true'
       continue-on-error: true
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
@@ -34,10 +47,28 @@ runs:
         key: ${{ steps.identity.outputs.buildKey }}
         restore-keys: ${{ steps.identity.outputs.buildPrefix }}
 
+    - name: Restore Go build generation
+      if: steps.identity.outputs.enabled == 'true' && steps.identity.outputs.buildSave != 'true'
+      continue-on-error: true
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.identity.outputs.buildPath }}
+        key: ${{ steps.identity.outputs.buildKey }}
+        restore-keys: ${{ steps.identity.outputs.buildPrefix }}
+
     - name: Cache static analysis generation
-      if: steps.identity.outputs.enabled == 'true' && inputs.family == 'static'
+      if: steps.identity.outputs.enabled == 'true' && inputs.family == 'static' && steps.identity.outputs.lintSave == 'true'
       continue-on-error: true
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.identity.outputs.lintPath }}
+        key: ${{ steps.identity.outputs.lintKey }}
+        restore-keys: ${{ steps.identity.outputs.lintPrefix }}
+
+    - name: Restore static analysis generation
+      if: steps.identity.outputs.enabled == 'true' && inputs.family == 'static' && steps.identity.outputs.lintSave != 'true'
+      continue-on-error: true
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.identity.outputs.lintPath }}
         key: ${{ steps.identity.outputs.lintKey }}

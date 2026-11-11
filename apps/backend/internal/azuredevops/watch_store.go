@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"time"
 
 	"github.com/google/uuid"
@@ -63,7 +64,7 @@ func (s *Store) CreateWorkItemWatch(ctx context.Context, watch *WorkItemWatch) e
 		return err
 	}
 	watch.Enabled = true
-	watch.CreatedByUserID = executorCreatorUserID(ctx)
+	watch.CreatedByUserID = executoridentity.CreatorUserID(ctx)
 	now := time.Now().UTC()
 	if watch.CreatedAt.IsZero() {
 		watch.CreatedAt = now
@@ -158,7 +159,7 @@ func (s *Store) CreatePullRequestWatch(ctx context.Context, watch *PullRequestWa
 		return err
 	}
 	watch.Enabled = true
-	watch.CreatedByUserID = executorCreatorUserID(ctx)
+	watch.CreatedByUserID = executoridentity.CreatorUserID(ctx)
 	now := time.Now().UTC()
 	if watch.CreatedAt.IsZero() {
 		watch.CreatedAt = now

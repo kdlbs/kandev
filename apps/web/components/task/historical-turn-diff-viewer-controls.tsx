@@ -5,9 +5,12 @@ import { turnChangeRepositoryOptionName } from "@/lib/turn-changes/tree";
 import type { TurnFileChange, TurnChangeSetSummary } from "@/lib/types/turn-changes";
 import { resolveTurnChangeScope } from "@/lib/turn-changes/history-scope";
 import {
+  isTurnChangePartial,
+  isUnavailableHistoryComparison,
   projectTurnRepositoryAvailability,
   projectTurnChangeSummary,
 } from "@/lib/turn-changes/projection";
+import { summaryCountText } from "@/lib/turn-changes/counts";
 import { useTranslation } from "react-i18next";
 
 export function HistoricalViewerHeader({
@@ -25,13 +28,15 @@ export function HistoricalViewerHeader({
           {t("task:turnChangesHistoricalTitle", { turn: summary?.turn_ordinal ?? "" })}
         </p>
         <HistoricalSummaryStatus summary={summary} />
-        {summary && (
-          <p className="truncate text-xs text-muted-foreground">
-            {t("task:turnChangesFileCount", { count: summary.file_count })}
-            {summary.added_lines != null ? `  +${summary.added_lines}` : ""}
-            {summary.deleted_lines != null ? `  -${summary.deleted_lines}` : ""}
-          </p>
-        )}
+        {summary &&
+          !isUnavailableHistoryComparison(summary) &&
+          summary.counts_available !== false && (
+            <p className="truncate text-xs text-muted-foreground">
+              {summaryCountText(summary, t)}
+              {summary.added_lines != null ? `  +${summary.added_lines}` : ""}
+              {summary.deleted_lines != null ? `  -${summary.deleted_lines}` : ""}
+            </p>
+          )}
         <HistoricalRepositoryStatuses repositories={summary?.repositories ?? []} />
         {(summary?.overlap_intervals?.length ?? 0) > 0 && (
           <p role="status" className="truncate text-xs text-amber-700 dark:text-amber-400">
@@ -58,8 +63,17 @@ function HistoricalSummaryStatus({ summary }: { summary?: TurnChangeSetSummary }
   const { t } = useTranslation();
   if (!summary) return <p className="truncate text-xs text-muted-foreground" />;
   const timestamp = summary.terminal_at ? formatDateTime(summary.terminal_at) : "";
-  const label = isPartial(summary) ? t("task:turnChangesPartial") : timestamp;
+  const label = summaryStatusLabel(summary, timestamp, t);
   return <p className="truncate text-xs text-muted-foreground">{label}</p>;
+}
+
+function summaryStatusLabel(
+  summary: TurnChangeSetSummary,
+  timestamp: string,
+  t: (key: string) => string,
+): string {
+  if (isUnavailableHistoryComparison(summary)) return timestamp;
+  return isTurnChangePartial(summary) ? t("task:turnChangesPartial") : timestamp;
 }
 
 function HistoricalRepositoryStatuses({
@@ -140,10 +154,6 @@ export function HistoricalScopeSelect({
   );
 }
 
-function isPartial(summary: TurnChangeSetSummary): boolean {
-  return summary.availability === "failed" || !summary.complete || !summary.summary_complete;
-}
-
 export function FileSelectionControls({
   files,
   repositories,
@@ -211,6 +221,30 @@ export function FileSelectionControls({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+export function HistoricalDiffLoadMoreButton({
+  loading,
+  onClick,
+}: {
+  loading: boolean;
+  onClick: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="p-3">
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+        disabled={loading}
+        onClick={onClick}
+      >
+        {loading ? t("task:turnChangesLoading") : t("task:turnChangesLoadMore")}
+      </Button>
     </div>
   );
 }

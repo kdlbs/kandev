@@ -10,6 +10,7 @@ import (
 )
 
 const turnChangeTerminalCaptureTimeout = 20 * time.Second
+const turnChangeSummaryTimeout = 90 * time.Second
 const turnChangeTerminalCompletionBudget = time.Second
 const turnChangeCancelRequestTimeout = 2 * time.Second
 const turnChangeRetryInitialDelay = 250 * time.Millisecond
@@ -140,7 +141,7 @@ func (m *Manager) processTurnChangeSummaryBeforeTeardown(execution *AgentExecuti
 	}
 	client, release := execution.AcquireAgentCtlClient()
 	defer release()
-	ctx, cancel := m.turnChangeAttemptContext(turnChangeTerminalCaptureTimeout)
+	ctx, cancel := m.turnChangeAttemptContext(turnChangeSummaryTimeout)
 	defer cancel()
 	if err := processor.ProcessTurnChanges(ctx, terminal, client); err != nil {
 		m.logger.Warn("failed to process turn-change summary before executor teardown",
@@ -272,7 +273,7 @@ func (m *Manager) scheduleTurnChangeSummary(execution *AgentExecution, terminal 
 				}
 			}
 			client, release := execution.AcquireAgentCtlClient()
-			ctx, cancel := m.turnChangeAttemptContext(turnChangeTerminalCaptureTimeout)
+			ctx, cancel := m.turnChangeAttemptContext(turnChangeSummaryTimeout)
 			err := processor.ProcessTurnChanges(ctx, terminal, client)
 			cancel()
 			release()
@@ -342,41 +343,69 @@ func finishTurnChangeCaptureLocked(execution *AgentExecution, generation uint64)
 // preserveTurnChangesBeforeStop records the terminal interval before runtime
 // cleanup. Explicit stops cancel the prompt; backend shutdown has already
 // stopped its process. An existing completion capture is joined.
-func (m *Manager) preserveTurnChangesBeforeStop(ctx context.Context, execution *AgentExecution, reason string) {
+func (m *Manager) preserveTurnChangesBeforeStop(ctx context.Context, execution *AgentExecution, reason string) error {
 	if m == nil || m.turnChangeCaptureHandler == nil || !eligibleTurnChangeExecution(execution) {
-		return
+		return nil
 	}
+	ctx, cancel := context.WithTimeout(ctx, turnChangeTerminalCaptureTimeout)
+	defer cancel()
 	if reason != StopReasonBackendShutdown {
 		m.cancelTurnChangePromptBeforeStop(ctx, execution)
 	}
 
-	execution.promptLifecycleMu.Lock()
+	if err := execution.promptLifecycleMu.LockContext(ctx); err != nil {
+		return err
+	}
 	generation := execution.promptGeneration
 	turnID := execution.promptTurnIDs[generation]
 	if generation == 0 || turnID == "" {
 		execution.promptLifecycleMu.Unlock()
-		return
+		return nil
 	}
 	if execution.turnChangeCaptureGeneration == generation {
 		done := execution.turnChangeCaptureDone
 		execution.promptLifecycleMu.Unlock()
-		m.waitForTurnChangeCaptureBeforeStop(ctx, execution, generation, done)
-		return
+		return m.waitForTurnChangeCaptureBeforeStop(ctx, execution, generation, done)
 	}
 	if execution.promptCompletionGeneration == generation {
 		execution.promptLifecycleMu.Unlock()
-		return
+		return nil
 	}
 	beginTurnChangeCaptureLocked(execution, generation)
 	event := &agentctl.AgentEvent{PromptGeneration: generation, TurnID: turnID}
-	m.finishTurnChangeCapture(execution, event, false, "stopped")
-	if execution.turnChangeCaptureGeneration == generation {
-		done := execution.turnChangeCaptureDone
-		execution.promptLifecycleMu.Unlock()
-		m.waitForTurnChangeCaptureBeforeStop(ctx, execution, generation, done)
-		return
-	}
+	terminal := turnChangeTerminalForEvent(execution, event, false, "stopped")
+	done := execution.turnChangeCaptureDone
 	execution.promptLifecycleMu.Unlock()
+	return m.captureTurnChangesBeforeStop(ctx, execution, terminal, done)
+}
+
+func (m *Manager) captureTurnChangesBeforeStop(ctx context.Context, execution *AgentExecution, terminal TurnChangeTerminal, done <-chan struct{}) error {
+	client, release := execution.AcquireAgentCtlClient()
+	captureCtx, cancel := context.WithTimeout(ctx, turnChangeTerminalCompletionBudget)
+	err := m.turnChangeCaptureHandler.FinishTurnChanges(captureCtx, terminal, client)
+	cancel()
+	release()
+	if err != nil {
+		m.retryTurnChangeCapture(execution, terminal)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if m.shuttingDown.Load() {
+			return err
+		}
+		return m.waitForTurnChangeCaptureBeforeStop(ctx, execution, terminal.PromptGeneration, done)
+	}
+	if err := execution.promptLifecycleMu.LockContext(ctx); err != nil {
+		m.retryTurnChangeCapture(execution, terminal)
+		return err
+	}
+	clearTurnChangeCaptureAnchor(execution, terminal.PromptGeneration)
+	finishTurnChangeCaptureLocked(execution, terminal.PromptGeneration)
+	execution.promptLifecycleMu.Unlock()
+	// The accepted checkpoint is the stop-safety boundary. Summary generation
+	// is derived work and continues through the retry worker after teardown.
+	m.scheduleTurnChangeSummary(execution, terminal)
+	return nil
 }
 
 func (m *Manager) cancelTurnChangePromptBeforeStop(ctx context.Context, execution *AgentExecution) {
@@ -395,17 +424,19 @@ func (m *Manager) cancelTurnChangePromptBeforeStop(ctx context.Context, executio
 	}
 }
 
-func (m *Manager) waitForTurnChangeCaptureBeforeStop(ctx context.Context, execution *AgentExecution, generation uint64, done <-chan struct{}) {
+func (m *Manager) waitForTurnChangeCaptureBeforeStop(ctx context.Context, execution *AgentExecution, generation uint64, done <-chan struct{}) error {
 	if done == nil {
-		return
+		return nil
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, turnChangeTerminalCaptureTimeout)
 	defer cancel()
 	select {
 	case <-done:
+		return nil
 	case <-waitCtx.Done():
 		m.logger.Warn("timed out waiting for in-flight turn-change capture before executor stop",
 			zap.String("execution_id", execution.ID), zap.Uint64("prompt_generation", generation), zap.Error(waitCtx.Err()))
+		return waitCtx.Err()
 	}
 }
 

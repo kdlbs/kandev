@@ -33,7 +33,7 @@ function layoutWidth(api: DockviewApi): number | undefined {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function visibleSidebarWidth(sv: any): number {
-  return sv?.length >= 3 ? sv.getViewSize(0) : 0;
+  return sv && sv.length >= 3 ? sv.getViewSize(0) : 0;
 }
 
 /** Best-effort caller chain for the fixups-capture debug log: pull the first
@@ -221,8 +221,7 @@ function captureRightTarget(
   }
 }
 
-/** Emit the `fixups-capture` width snapshot. Pulled out of `applyLayoutFixups`
- *  to keep that function under the complexity limit; no-op in prod. */
+/** Emit the debug width snapshot for layout fixups. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function logFixupsCapture(api: DockviewApi, sv: any): void {
   if (!isDebug()) return;

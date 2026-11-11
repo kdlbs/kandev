@@ -44,19 +44,27 @@ func (m *Manager) NotifyWorktreeMaterialized(ctx context.Context, wt Materialize
 	execution, _ := m.GetExecutionBySessionID(wt.SessionID)
 	execID := ""
 	taskEnvID := ""
+	// The launched execution keeps running in its original checkout. Publish
+	// that native workspace rather than the newly materialized sibling's
+	// worktree path so relative chat links keep resolving from the checkout
+	// the agent actually uses.
+	agentWorkspacePath := ""
 	if execution != nil {
 		execID = execution.ID
 		taskEnvID = execution.TaskEnvironmentID
+		agentWorkspacePath = execution.WorkspacePath
 	}
 	payload := AgentctlEventPayload{
-		TaskID:            wt.TaskID,
-		SessionID:         wt.SessionID,
-		TaskEnvironmentID: taskEnvID,
-		AgentExecutionID:  execID,
-		WorktreeID:        wt.WorktreeID,
-		WorktreePath:      wt.WorktreePath,
-		WorktreeBranch:    wt.WorktreeBranch,
-		TaskWorkspacePath: wt.TaskWorkspacePath,
+		TaskID:               wt.TaskID,
+		SessionID:            wt.SessionID,
+		TaskEnvironmentID:    taskEnvID,
+		AgentExecutionID:     execID,
+		WorktreeID:           wt.WorktreeID,
+		WorktreeRepositoryID: wt.RepositoryID,
+		WorktreePath:         wt.WorktreePath,
+		WorktreeBranch:       wt.WorktreeBranch,
+		TaskWorkspacePath:    wt.TaskWorkspacePath,
+		AgentWorkspacePath:   agentWorkspacePath,
 	}
 	if execution != nil {
 		payload.AttemptID = execution.currentStartupAttemptID()

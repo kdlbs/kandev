@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useAzureDevOpsMutationOwner } from "./use-azure-devops-mutation-owner";
 import {
   getAzureDevOpsBoardSnapshot,
   listAzureDevOpsBoards,
@@ -29,16 +30,19 @@ function replaceBoardItem(
   if (!snapshot) return snapshot;
   return {
     ...snapshot,
-    items: snapshot.items.map((candidate) => (candidate.id === id ? item : candidate)),
+    items: snapshot.items.map((candidate) =>
+      candidate.id === id && candidate.revision <= item.revision ? item : candidate,
+    ),
   };
 }
 
 function useBoardDiscovery(
   workspaceId: string | undefined,
   projectId: string,
-  preferredTeamId?: string,
-  preferredBoardId?: string,
+  preference?: { teamId?: string; boardId?: string },
 ) {
+  const preferredTeamId = preference?.teamId;
+  const preferredBoardId = preference?.boardId;
   const preferredTeamIdRef = useRef(preferredTeamId);
   const preferredBoardIdRef = useRef(preferredBoardId);
   preferredTeamIdRef.current = preferredTeamId;
@@ -120,18 +124,12 @@ function useBoardDiscovery(
   return { teams, boards, teamId, setTeamId, boardId, setBoardId, error };
 }
 
-export function useAzureDevOpsBoard(
+function useBoardSnapshot(
   workspaceId: string | undefined,
   projectId: string,
-  preference?: { teamId?: string; boardId?: string },
+  teamId: string,
+  boardId: string,
 ) {
-  const discovery = useBoardDiscovery(
-    workspaceId,
-    projectId,
-    preference?.teamId,
-    preference?.boardId,
-  );
-  const { teamId, boardId } = discovery;
   const [snapshot, setSnapshot] = useState<AzureDevOpsBoardSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -150,12 +148,33 @@ export function useAzureDevOpsBoard(
     };
   }, [boardId, projectId, teamId, workspaceId]);
 
+  return { snapshot, loading, error, setSnapshot, setError };
+}
+
+export function useAzureDevOpsBoard(
+  workspaceId: string | undefined,
+  projectId: string,
+  preference?: { teamId?: string; boardId?: string },
+) {
+  const discovery = useBoardDiscovery(workspaceId, projectId, preference);
+  const { teamId, boardId } = discovery;
+  const beginMutation = useAzureDevOpsMutationOwner(
+    JSON.stringify([workspaceId, projectId, teamId, boardId]),
+  );
+  const { snapshot, loading, error, setSnapshot, setError } = useBoardSnapshot(
+    workspaceId,
+    projectId,
+    teamId,
+    boardId,
+  );
+
   const updateItem = useCallback(
     async (
       item: AzureDevOpsBoardWorkItem,
       values: BoardWorkItemChanges,
     ): Promise<AzureDevOpsBoardWorkItem | undefined> => {
-      if (!workspaceId || !teamId || !boardId) return undefined;
+      const isCurrent = beginMutation();
+      if (!workspaceId || !teamId || !boardId || !isCurrent()) return undefined;
       setError(null);
       const optimistic = { ...item, ...values };
       setSnapshot((current) => replaceBoardItem(current, item.id, optimistic));
@@ -168,11 +187,15 @@ export function useAzureDevOpsBoard(
           item.id,
           { revision: item.revision, ...values },
         );
-        setSnapshot((current) => replaceBoardItem(current, item.id, updated));
+        if (!isCurrent()) return undefined;
+        setSnapshot((current) =>
+          isCurrent() ? replaceBoardItem(current, item.id, updated) : current,
+        );
         return updated;
       } catch (cause) {
+        if (!isCurrent()) return undefined;
         setSnapshot((current) => {
-          if (!current) return current;
+          if (!current || !isCurrent()) return current;
           return {
             ...current,
             items: current.items.map((candidate) => (candidate === optimistic ? item : candidate)),
@@ -182,7 +205,7 @@ export function useAzureDevOpsBoard(
         throw cause;
       }
     },
-    [boardId, projectId, teamId, workspaceId],
+    [beginMutation, boardId, projectId, setError, setSnapshot, teamId, workspaceId],
   );
 
   const moveItem = useCallback(
@@ -205,9 +228,14 @@ export function useAzureDevOpsBoard(
     [updateItem],
   );
 
-  const mergeItem = useCallback((item: AzureDevOpsBoardWorkItem) => {
-    setSnapshot((current) => replaceBoardItem(current, item.id, item));
-  }, []);
+  const mergeItem = useCallback(
+    (item: AzureDevOpsBoardWorkItem) => {
+      const isCurrent = beginMutation();
+      if (!isCurrent()) return;
+      setSnapshot((current) => (isCurrent() ? replaceBoardItem(current, item.id, item) : current));
+    },
+    [beginMutation, setSnapshot],
+  );
 
   return {
     teams: discovery.teams,

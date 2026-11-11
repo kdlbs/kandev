@@ -48,6 +48,7 @@ func TestProcessOnTurnComplete_ExplicitSignalGating(t *testing.T) {
 				Summary:    "all done",
 				SignaledAt: time.Now().UTC(),
 			}
+			signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 			if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 				t.Fatalf("seed pending signal: %v", err)
 			}
@@ -193,6 +194,7 @@ func TestProcessOnTurnComplete_OfficeExplicitSignalGating_AllowsWithSignal(t *te
 		Summary:    "work complete",
 		SignaledAt: time.Now().UTC(),
 	}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s-office-allow")
 	if err := repo.SetSessionMetadataKey(ctx, "s-office-allow", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
@@ -446,6 +448,7 @@ func TestOnStepCompletionSignaled(t *testing.T) {
 			Summary:    "ok",
 			SignaledAt: time.Now().UTC(),
 		}
+		signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 		if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 			t.Fatalf("seed bag: %v", err)
 		}
@@ -486,6 +489,7 @@ func TestOnStepCompletionSignaled(t *testing.T) {
 			Summary:    "ok",
 			SignaledAt: time.Now().UTC(),
 		}
+		signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 		if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 			t.Fatalf("seed bag: %v", err)
 		}
@@ -527,6 +531,7 @@ func TestOnStepCompletionSignaled(t *testing.T) {
 			Summary:    "stale",
 			SignaledAt: time.Now().UTC(),
 		}
+		stale.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 		if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, stale); err != nil {
 			t.Fatalf("seed stale signal: %v", err)
 		}
@@ -567,6 +572,7 @@ func TestOnStepCompletionSignaled(t *testing.T) {
 			Summary:    "valid current-step signal",
 			SignaledAt: time.Now().UTC(),
 		}
+		valid.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 		if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, valid); err != nil {
 			t.Fatalf("seed valid signal: %v", err)
 		}
@@ -634,6 +640,7 @@ func TestOnStepCompletionSignaled(t *testing.T) {
 			StepID: "step1", Source: models.StepCompletionSourceAgent,
 			Summary: "done", SignaledAt: time.Now().UTC(),
 		}
+		signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 		if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 			t.Fatalf("seed signal: %v", err)
 		}
@@ -720,6 +727,7 @@ func seedPendingStepCompletionSignal(t *testing.T, repo *sqliterepo.Repository, 
 		Summary:    summary,
 		SignaledAt: time.Now().UTC(),
 	}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 	if err := repo.SetSessionMetadataKey(context.Background(), "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
@@ -848,4 +856,17 @@ func TestOfficeStepCompletionSignalDoesNotAdvanceAfterTurnFailure(t *testing.T) 
 	if task.WorkflowStepID != "step1" {
 		t.Fatalf("expected Office task to stay on step1, got %q", task.WorkflowStepID)
 	}
+}
+
+func signalEntryForSession(t *testing.T, repo *sqliterepo.Repository, sessionID string) *int64 {
+	t.Helper()
+	session, err := repo.GetTaskSession(t.Context(), sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, entry, err := repo.GetTaskWorkflowStepEntry(t.Context(), session.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &entry
 }

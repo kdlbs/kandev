@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import { waitForFiniteAnimations } from "../helpers/animations";
 
 export class ChangeWorkflowPage {
   readonly form: Locator;
@@ -21,6 +22,8 @@ export class ChangeWorkflowPage {
     await expect(option).toBeVisible();
     if (this.mobile) await option.tap();
     else await option.click();
+    await expect(option).toBeHidden();
+    await expect(trigger).toBeFocused();
     await expect
       .poll(async () => {
         const stepPicker = this.form.getByTestId("change-workflow-step");
@@ -38,6 +41,8 @@ export class ChangeWorkflowPage {
     await expect(option).toBeVisible();
     if (this.mobile) await option.tap();
     else await option.click();
+    await expect(option).toBeHidden();
+    await expect(trigger).toBeFocused();
   }
 
   async chooseProfile(sourceProfileId: string, replacementProfileName: string) {
@@ -47,6 +52,8 @@ export class ChangeWorkflowPage {
     await expect(option).toBeVisible();
     if (this.mobile) await option.tap();
     else await option.click();
+    await expect(option).toBeHidden();
+    await expect(trigger).toBeFocused();
   }
 
   async expectStepOptionColor(stepId: string, cssColor: string) {
@@ -75,6 +82,7 @@ export class ChangeWorkflowPage {
 
   private async openSelector(trigger: Locator) {
     await expect(trigger).toBeVisible();
+    if (this.mobile) await waitForFiniteAnimations(this.phoneDrawer);
     if ((await trigger.getAttribute("aria-expanded")) !== "true") {
       if (this.mobile) await trigger.tap();
       else await trigger.click();

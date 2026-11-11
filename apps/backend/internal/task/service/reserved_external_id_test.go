@@ -90,3 +90,31 @@ func TestReleaseTaskExternalIDRefusesReservedPrefix(t *testing.T) {
 		t.Fatal("release must leave the reserved external_id bound to its task")
 	}
 }
+
+func TestQuickChatCreationExternalIDPrefixIsReserved(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	wfID := seedWorkspaceAndWorkflowForCreate(t, ctx, repo, "ws-quick-chat-reserved")
+	externalID := ReservedExternalIDPrefixQuickChatCreation + "v1:principal:creation"
+
+	_, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-quick-chat-reserved",
+		WorkflowID:  wfID,
+		Title:       "Public create",
+		ExternalID:  externalID,
+	})
+	if !errors.Is(err, ErrExternalIDInvalid) {
+		t.Fatalf("CreateTask error = %v, want ErrExternalIDInvalid", err)
+	}
+	if count := countTasksHoldingExternalID(t, ctx, repo, "ws-quick-chat-reserved", externalID); count != 0 {
+		t.Fatalf("public create retained %d tasks with reserved identity, want none", count)
+	}
+
+	seeded := &models.Task{WorkspaceID: "ws-quick-chat-reserved", Title: "Reserved", ExternalID: externalID}
+	if err := repo.CreateTask(ctx, seeded); err != nil {
+		t.Fatalf("seed reserved holder: %v", err)
+	}
+	if _, err := svc.ReleaseTaskExternalID(ctx, "ws-quick-chat-reserved", externalID); !errors.Is(err, ErrExternalIDInvalid) {
+		t.Fatalf("ReleaseTaskExternalID error = %v, want ErrExternalIDInvalid", err)
+	}
+}

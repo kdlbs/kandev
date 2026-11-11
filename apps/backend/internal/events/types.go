@@ -130,6 +130,16 @@ const (
 	// error message itself is projected into the task summary rather than
 	// streamed to task-list subscribers.
 	TaskSessionErrorChanged = "task_session.error_changed"
+	// TaskSessionRuntimeStorageChanged carries an owner-verified advisory
+	// capacity observation. It is independent of journal writes and transcript
+	// persistence.
+	TaskSessionRuntimeStorageChanged = "task_session.runtime_storage_changed"
+
+	// TaskSessionReadCursorChanged carries a session's persisted read cursor
+	// (last_read_message_id and its created_at) after a write. The task
+	// status projector derives the task unread aggregate from it. reset is
+	// true only when a test route force-set a possibly lower cursor.
+	TaskSessionReadCursorChanged = "task_session.read_cursor_changed"
 )
 
 // TaskStatusSummaryUpdated is a complete replacement projection for one
@@ -354,6 +364,7 @@ const (
 	SessionModelFallbackUpdated         = "session_model_fallback.updated"          // Session started on the profile's fallback model
 	SessionModelSelectionWarningUpdated = "session_model_selection_warning.updated" // Executor-authoritative model decision warning
 	SessionInfoUpdated                  = "session_info.updated"                    // ACP session info received
+	SessionPromptSuggestionUpdated      = "session_prompt_suggestion.updated"       // Native next-prompt suggestion received
 	SessionMCPStatusUpdated             = "session_mcp_status.updated"              // MCP attachment evidence changed
 	BackgroundWorkUpdated               = "background_work.updated"                 // Background workload updated
 	BackgroundWorkOutput                = "background_work.output"                  // Background workload output streamed
@@ -636,6 +647,16 @@ func BuildSessionInfoWildcardSubject() string {
 	return SessionInfoUpdated + ".*"
 }
 
+// BuildSessionPromptSuggestionSubject creates a prompt suggestion subject for a specific session.
+func BuildSessionPromptSuggestionSubject(sessionID string) string {
+	return SessionPromptSuggestionUpdated + "." + sessionID
+}
+
+// BuildSessionPromptSuggestionWildcardSubject subscribes to every session's prompt suggestions.
+func BuildSessionPromptSuggestionWildcardSubject() string {
+	return SessionPromptSuggestionUpdated + ".*"
+}
+
 // BuildSessionTodosSubject creates a session todos subject for a specific session
 func BuildSessionTodosSubject(sessionID string) string {
 	return SessionTodosUpdated + "." + sessionID
@@ -644,6 +665,16 @@ func BuildSessionTodosSubject(sessionID string) string {
 // BuildSessionTodosWildcardSubject creates a wildcard subscription for all session todos events
 func BuildSessionTodosWildcardSubject() string {
 	return SessionTodosUpdated + ".*"
+}
+
+// BuildSessionRuntimeStorageSubject creates one session's advisory storage subject.
+func BuildSessionRuntimeStorageSubject(sessionID string) string {
+	return TaskSessionRuntimeStorageChanged + "." + sessionID
+}
+
+// BuildSessionRuntimeStorageWildcardSubject subscribes to every advisory storage event.
+func BuildSessionRuntimeStorageWildcardSubject() string {
+	return TaskSessionRuntimeStorageChanged + ".*"
 }
 
 // BuildSessionPromptUsageSubject creates a prompt usage subject for a specific session

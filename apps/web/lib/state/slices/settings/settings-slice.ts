@@ -1,6 +1,7 @@
+import type { SliceCreator } from "@/lib/state/slice-creator";
 import { mapSidebarWorkspaces } from "../ui/sidebar-workspace-state";
 import type { UISliceState } from "../ui/types";
-import type { StateCreator } from "zustand";
+
 import { createDefaultUserSettings } from "@/lib/ssr/user-settings";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 import {
@@ -52,9 +53,7 @@ export const defaultSettingsState: SettingsSliceState = {
   sshReachability: { byExecutorId: {} },
 };
 
-type ImmerSet = Parameters<
-  StateCreator<SettingsSlice, [["zustand/immer", never]], [], SettingsSlice>
->[0];
+type ImmerSet = Parameters<SliceCreator<SettingsSlice>>[0];
 
 const JOB_OUTPUT_MAX = 64 * 1024;
 
@@ -573,12 +572,7 @@ function createSSHReachabilityActions(set: ImmerSet): Pick<SettingsSlice, "setSS
   };
 }
 
-export const createSettingsSlice: StateCreator<
-  SettingsSlice,
-  [["zustand/immer", never]],
-  [],
-  SettingsSlice
-> = (set) => ({
+export const createSettingsSlice: SliceCreator<SettingsSlice> = (set) => ({
   ...defaultSettingsState,
   setAgentRuntimeUpdateStatuses: (statuses, checkedAt) =>
     set((draft) => {

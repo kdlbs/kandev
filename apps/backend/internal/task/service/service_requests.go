@@ -1,6 +1,7 @@
 package service
 
 import (
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -69,6 +70,12 @@ type TaskRepositoryInput struct {
 	// active plugin's provider ownership and clone origin.
 	TrustedProviderDescriptor bool                           `json:"-"`
 	BranchPolicySnapshot      *models.RepositoryBranchPolicy `json:"-"`
+
+	// BaseBranchSelectionSource records who selected BaseBranch. It is
+	// internal-only so public transports cannot request permissive
+	// repository-default recovery. An empty value is resolved from whether
+	// BaseBranch was supplied; unknown values stay strict.
+	BaseBranchSelectionSource models.BaseBranchSelectionSource `json:"-"`
 }
 
 // CreateTaskRequest contains the data for creating a new task
@@ -92,6 +99,8 @@ type CreateTaskRequest struct {
 	// server-authored provenance fields. It is internal-only and never decoded
 	// from a request body; ordinary task creation cannot forge those fields.
 	TrustedHandoffMetadata bool `json:"-"`
+	// RequiredSubtaskCount is set only by the trusted routine materializer.
+	RequiredSubtaskCount int `json:"-"`
 	// AutomationStartOwned reserves the new task's initial start for the
 	// automation run that creates it (models.MetaKeyAutomationStartOwned). It is
 	// internal-only: the marker suppresses workflow auto-start, so it is never
@@ -106,9 +115,18 @@ type CreateTaskRequest struct {
 	// ExecutorID and ExecutorProfileID are resolved by authenticated create
 	// adapters and are used to validate task-scoped replacement profiles before
 	// any task row is written.
-	ExecutorID        string                 `json:"-"`
-	ExecutorProfileID string                 `json:"-"`
-	DeferredLaunch    map[string]interface{} `json:"deferred_launch,omitempty"`
+	ExecutorID        string `json:"-"`
+	ExecutorProfileID string `json:"-"`
+	// ExecutorProfileIDExplicit marks a caller-selected profile. Deferred
+	// inherited profile IDs remain valid until launch-time admission.
+	ExecutorProfileIDExplicit bool `json:"-"`
+	// Attachments is the creation-time submission. File-backed descriptors are
+	// claimed atomically with the task row; the bounded inline compatibility
+	// path stays on DeferredLaunch.
+	Attachments           []v1.MessageAttachment                `json:"attachments,omitempty"`
+	DeferredLaunch        map[string]interface{}                `json:"deferred_launch,omitempty"`
+	MCPServerIDs          []string                              `json:"mcp_server_ids,omitempty"`
+	BuiltinMCPPreferences *mcpconfig.BuiltinCreationPreferences `json:"builtin_mcp_preferences,omitempty"`
 	// RecordAgentProfileRecentUse opts this deferred launch into task_create
 	// profile-history attribution. Only the authenticated HTTP/WS selector
 	// surfaces set it; programmatic callers such as MCP must leave it false.
@@ -138,12 +156,9 @@ type CreateTaskRequest struct {
 	// (docs/specs/tasks/requirements/external-id-idempotency.md). Accepted on REST
 	// and MCP; empty means no idempotency key.
 	ExternalID string `json:"external_id,omitempty"`
-	// AllowReservedExternalID permits ExternalID to carry the
-	// ReservedExternalIDPrefixCoordinatorProposal prefix, which every other
-	// caller is refused (docs/specs/coordinator/system-design/proposals.md#reserved-prefix).
-	// Tagged json:"-" so no HTTP or MCP request body can set it; only the
-	// coordinator service sets it, when creating the task behind an approved
-	// proposal.
+	// AllowReservedExternalID permits an internal adapter to claim a reserved
+	// external identity namespace. Tagged json:"-" so public HTTP and MCP
+	// request bodies cannot set it.
 	AllowReservedExternalID bool `json:"-"`
 	// AllowReservedMetadata permits Metadata keys with the
 	// ReservedMetadataKeyPrefixCoordinator prefix. Tagged json:"-" so no
@@ -156,6 +171,7 @@ type CreateTaskRequest struct {
 	ProjectID              string   `json:"project_id,omitempty"`
 	Labels                 string   `json:"labels,omitempty"`
 	BlockedBy              []string `json:"blocked_by,omitempty"`
+	RelatedTaskIDs         []string `json:"related_task_ids,omitempty"`
 
 	// RequireAssigneeAgentProfileValidation opts this request into create-time
 	// validation of AssigneeAgentProfileID (must name an Office agent instance
@@ -319,25 +335,26 @@ type InitializeLocalRepositoryRequest struct {
 
 // UpdateRepositoryRequest contains the data for updating a repository
 type UpdateRepositoryRequest struct {
-	ExpectedUpdatedAt      *time.Time `json:"-"`
-	Name                   *string    `json:"name,omitempty"`
-	SourceType             *string    `json:"source_type,omitempty"`
-	LocalPath              *string    `json:"local_path,omitempty"`
-	Provider               *string    `json:"provider,omitempty"`
-	ProviderRepoID         *string    `json:"provider_repo_id,omitempty"`
-	ProviderHost           *string    `json:"provider_host,omitempty"`
-	ProviderScope          *string    `json:"provider_scope,omitempty"`
-	ProviderOwner          *string    `json:"provider_owner,omitempty"`
-	ProviderName           *string    `json:"provider_name,omitempty"`
-	RemoteURL              *string    `json:"remote_url,omitempty"`
-	DefaultBranch          *string    `json:"default_branch,omitempty"`
-	WorktreeBranchPrefix   *string    `json:"worktree_branch_prefix,omitempty"`
-	WorktreeBranchTemplate *string    `json:"worktree_branch_template,omitempty"`
-	PullBeforeWorktree     *bool      `json:"pull_before_worktree,omitempty"`
-	SetupScript            *string    `json:"setup_script,omitempty"`
-	CleanupScript          *string    `json:"cleanup_script,omitempty"`
-	DevScript              *string    `json:"dev_script,omitempty"`
-	CopyFiles              *string    `json:"copy_files,omitempty"`
+	ExpectedUpdatedAt      *time.Time                      `json:"-"`
+	ObservedIdentity       *models.RepositoryIdentityFence `json:"-"`
+	Name                   *string                         `json:"name,omitempty"`
+	SourceType             *string                         `json:"source_type,omitempty"`
+	LocalPath              *string                         `json:"local_path,omitempty"`
+	Provider               *string                         `json:"provider,omitempty"`
+	ProviderRepoID         *string                         `json:"provider_repo_id,omitempty"`
+	ProviderHost           *string                         `json:"provider_host,omitempty"`
+	ProviderScope          *string                         `json:"provider_scope,omitempty"`
+	ProviderOwner          *string                         `json:"provider_owner,omitempty"`
+	ProviderName           *string                         `json:"provider_name,omitempty"`
+	RemoteURL              *string                         `json:"remote_url,omitempty"`
+	DefaultBranch          *string                         `json:"default_branch,omitempty"`
+	WorktreeBranchPrefix   *string                         `json:"worktree_branch_prefix,omitempty"`
+	WorktreeBranchTemplate *string                         `json:"worktree_branch_template,omitempty"`
+	PullBeforeWorktree     *bool                           `json:"pull_before_worktree,omitempty"`
+	SetupScript            *string                         `json:"setup_script,omitempty"`
+	CleanupScript          *string                         `json:"cleanup_script,omitempty"`
+	DevScript              *string                         `json:"dev_script,omitempty"`
+	CopyFiles              *string                         `json:"copy_files,omitempty"`
 	// SecretBindings uses nil to preserve the current set and a non-nil empty
 	// slice to clear it.
 	SecretBindings *[]RepositorySecretBindingInput `json:"secret_bindings,omitempty"`

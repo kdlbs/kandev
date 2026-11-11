@@ -1,3 +1,4 @@
+import { useWalkthroughDrafts } from "@/lib/walkthrough-feedback-state";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import type { Comment, DiffComment, CommentsSlice, CommentsState } from "./types";
@@ -49,21 +50,27 @@ function removeCommentFromState(state: CommentsState, commentId: string): void {
   persistSession(state, sessionId);
 }
 
-/** Mark a batch of comments as sent: remove from store + persist affected sessions. */
+/** Keep walkthrough history while consuming acknowledged pending context. */
 function markSentInState(state: CommentsState, commentIds: string[]): void {
-  const idsToRemove = new Set(commentIds);
+  const acknowledgedIds = new Set(commentIds);
+  const idsToRemove = new Set<string>();
   const affectedSessions = new Set<string>();
   for (const id of commentIds) {
     const comment = state.byId[id];
     if (comment) affectedSessions.add(comment.sessionId);
-    delete state.byId[id];
+    if (comment?.source === "walkthrough") {
+      comment.status = "sent";
+    } else {
+      delete state.byId[id];
+      idsToRemove.add(id);
+    }
   }
   for (const sessionId of Object.keys(state.bySession)) {
     state.bySession[sessionId] = state.bySession[sessionId].filter((id) => !idsToRemove.has(id));
     if (state.bySession[sessionId].length === 0) delete state.bySession[sessionId];
   }
-  state.pendingForChat = state.pendingForChat.filter((id) => !idsToRemove.has(id));
-  if (state.editingCommentId && idsToRemove.has(state.editingCommentId))
+  state.pendingForChat = state.pendingForChat.filter((id) => !acknowledgedIds.has(id));
+  if (state.editingCommentId && acknowledgedIds.has(state.editingCommentId))
     state.editingCommentId = null;
   for (const sessionId of affectedSessions) persistSession(state, sessionId);
 }
@@ -139,7 +146,12 @@ export const useCommentsStore = create<CommentsSlice>()(
 
     addToPending: (commentId: string) =>
       set((state) => {
-        if (!state.pendingForChat.includes(commentId)) state.pendingForChat.push(commentId);
+        if (
+          state.byId[commentId]?.status === "pending" &&
+          !state.pendingForChat.includes(commentId)
+        ) {
+          state.pendingForChat.push(commentId);
+        }
       }),
 
     removeFromPending: (commentId: string) =>
@@ -159,8 +171,10 @@ export const useCommentsStore = create<CommentsSlice>()(
 
     markCommentsSent: (commentIds: string[]) => set((state) => markSentInState(state, commentIds)),
 
-    clearSessionComments: (sessionId: string) =>
-      set((state) => clearSessionInState(state, sessionId)),
+    clearSessionComments: (sessionId: string) => {
+      useWalkthroughDrafts.getState().clearSession(sessionId);
+      set((state) => clearSessionInState(state, sessionId));
+    },
 
     hydrateSession: (sessionId: string) => set((state) => hydrateSessionInState(state, sessionId)),
 
@@ -192,7 +206,7 @@ export const useCommentsStore = create<CommentsSlice>()(
       const pending: Comment[] = [];
       for (const id of state.pendingForChat) {
         const comment = state.byId[id];
-        if (comment) pending.push(comment);
+        if (comment?.status === "pending") pending.push(comment);
       }
       return pending;
     },

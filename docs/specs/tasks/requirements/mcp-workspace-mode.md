@@ -110,8 +110,10 @@ from the advertised contract.
   `["inherit_parent", "new_workspace"]` and no schema default.
 - **AC-TASKS-MCP-WORKSPACE-MODE-004.2:** The field description shall explain
   that omission for a subtask inherits its parent's materialized workspace,
-  explicit `inherit_parent` requires `parent_id` and reuses that workspace or
-  worktree, and `new_workspace` requests a separate workspace or worktree.
+  explicit `inherit_parent` requires `parent_id` and normally reuses that
+  workspace or worktree, and `new_workspace` requests a separate workspace or
+  worktree. It shall link the eligible executor-transition exception to
+  `AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.5`.
 - **AC-TASKS-MCP-WORKSPACE-MODE-004.3:** Omitted input shall retain existing
   parent-dependent defaulting. Both explicit enum values shall reach existing
   backend validation, including the parent requirement for `inherit_parent`.

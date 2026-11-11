@@ -76,6 +76,7 @@ function useSelectedPRCommits(selectedPR: TaskPR | null) {
     selectedPR?.repo ?? null,
     selectedPR?.pr_number ?? null,
     selectedPR?.last_synced_at ?? null,
+    selectedPR?.github_host,
   );
 }
 

@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
 
@@ -29,13 +30,13 @@ func TestCoalesceRun_MergesIntoMostRecentQueuedRun(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	older := mustCreateRun(t, repo, &models.Run{
+	older := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "older", AgentProfileID: "a1", Reason: "task_assigned",
 		Payload: `{"task_id":"t1"}`, Status: "queued", CoalescedCount: 1,
 	})
 	setRequestedAt(t, repo, older.ID, now.Add(-30*time.Second))
 
-	newer := mustCreateRun(t, repo, &models.Run{
+	newer := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "newer", AgentProfileID: "a1", Reason: "task_assigned",
 		Payload: `{"task_id":"t1"}`, Status: "queued", CoalescedCount: 1,
 	})
@@ -89,7 +90,7 @@ func TestCoalesceRun_DoesNotMergeDifferentTaskRuns(t *testing.T) {
 func TestCoalesceRun_ManualResumeAfterFailure_DoesNotMergeDifferentTaskRuns(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-	queued := mustCreateRun(t, repo, &models.Run{
+	queued := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "task-a", AgentProfileID: "a1", Reason: "manual_resume_after_failure",
 		Payload: `{"task_id":"task-a"}`, Status: "queued", CoalescedCount: 1,
 	})
@@ -116,7 +117,7 @@ func TestCoalesceRun_DoesNotMergeDifferentTaskRuns_ForOtherReasons(t *testing.T)
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	queued := mustCreateRun(t, repo, &models.Run{
+	queued := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "task-a-run", AgentProfileID: "a1", Reason: "task_blockers_resolved",
 		Payload: `{"task_id":"task-a"}`, Status: "queued", CoalescedCount: 1,
 	})
@@ -142,7 +143,7 @@ func TestCoalesceRun_DoesNotMergeDifferentTaskRuns_ForOtherReasons(t *testing.T)
 func TestCoalesceRun_ManualResumeAfterFailure_MergesSameTaskDuplicates(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-	queued := mustCreateRun(t, repo, &models.Run{
+	queued := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "task-a", AgentProfileID: "a1", Reason: "manual_resume_after_failure",
 		Payload: `{"task_id":"task-a","attempt":1}`, Status: "queued", CoalescedCount: 1,
 	})
@@ -204,7 +205,7 @@ func TestCoalesceRun_MergesTasklessIntoTasklessRun(t *testing.T) {
 			repo := newTestRepo(t)
 			ctx := context.Background()
 
-			queued := mustCreateRun(t, repo, &models.Run{
+			queued := mustCreateRun(t, repo, &runsmodels.Run{
 				ID: "taskless", AgentProfileID: "a1", Reason: "heartbeat",
 				Payload: tc.payload, Status: "queued", CoalescedCount: 1,
 			})
@@ -234,7 +235,7 @@ func TestCoalesceRun_DoesNotMergeNonStringTaskIDIntoTasklessRun(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	queued := mustCreateRun(t, repo, &models.Run{
+	queued := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "taskless", AgentProfileID: "a1", Reason: "custom_reason",
 		Payload: `{"note":"real taskless launch"}`, Status: "queued", CoalescedCount: 1,
 	})
@@ -264,7 +265,7 @@ func TestCoalesceRun_DoesNotMergeIntoNonStringQueuedTaskID(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	queued := mustCreateRun(t, repo, &models.Run{
+	queued := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "malformed", AgentProfileID: "a1", Reason: "task_assigned",
 		Payload: `{"task_id":42}`, Status: "queued", CoalescedCount: 1,
 	})
@@ -368,12 +369,12 @@ func TestCoalesceRun_SkipsCommentKeyedRuns(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	plain := mustCreateRun(t, repo, &models.Run{
+	plain := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "plain", AgentProfileID: "a1", Reason: "task_comment",
 		Payload: `{"task_id":"t1"}`, Status: "queued", CoalescedCount: 1,
 	})
 	setRequestedAt(t, repo, plain.ID, now.Add(-20*time.Second))
-	keyed := mustCreateRun(t, repo, &models.Run{
+	keyed := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "keyed", AgentProfileID: "a1", Reason: "task_comment",
 		Payload: `{"task_id":"t1","comment_id":"cm-1"}`, Status: "queued",
 		CoalescedCount: 1, IdempotencyKey: strPtr("task_comment:cm-1"),
@@ -398,7 +399,7 @@ func TestCoalesceRun_SkipsCommentKeyedRuns(t *testing.T) {
 func TestCheckIdempotencyKey_WindowEdges(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "idem", AgentProfileID: "a1", Reason: "task_assigned",
 		IdempotencyKey: strPtr("wake:t1"),
 	})
@@ -437,11 +438,11 @@ func TestCheckIdempotencyKey_WindowEdges(t *testing.T) {
 func TestCheckIdempotencyKey_MatchesOnTheExactKey(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-	mustCreateRun(t, repo, &models.Run{
+	mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "idem", AgentProfileID: "a1", Reason: "task_assigned",
 		IdempotencyKey: strPtr("wake:t1"),
 	})
-	mustCreateRun(t, repo, &models.Run{
+	mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "no-key", AgentProfileID: "a1", Reason: "task_assigned",
 	})
 
@@ -462,12 +463,12 @@ func TestCheckIdempotencyKey_MatchesOnTheExactKey(t *testing.T) {
 func TestCreateRun_DuplicateIdempotencyKeyIsRejected(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-	first := mustCreateRun(t, repo, &models.Run{
+	first := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "first", AgentProfileID: "a1", Reason: "task_comment",
 		Payload: `{"task_id":"t1"}`, IdempotencyKey: strPtr("task_comment:cm-1"),
 	})
 
-	err := repo.CreateRun(ctx, &models.Run{
+	err := repo.CreateRun(ctx, &runsmodels.Run{
 		ID: "second", AgentProfileID: "a1", Reason: "task_comment",
 		Payload: `{"task_id":"t2"}`, IdempotencyKey: strPtr("task_comment:cm-1"),
 	})
@@ -565,15 +566,15 @@ func TestScheduleRetry_RestampsPriorityClassToRecoveryUnlessAlreadyHuman(t *test
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	periodic := mustCreateRun(t, repo, &models.Run{
+	periodic := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "retry-periodic", AgentProfileID: "a1", WorkspaceID: "ws-a1",
 		Reason: "routine_dispatch_cron", Payload: `{}`, Status: "queued",
-		CoalescedCount: 1, PriorityClass: models.PriorityClassPeriodic,
+		CoalescedCount: 1, PriorityClass: runsmodels.PriorityClassPeriodic,
 	})
-	human := mustCreateRun(t, repo, &models.Run{
+	human := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "retry-human", AgentProfileID: "a1", WorkspaceID: "ws-a1",
 		Reason: "manual_resume_after_failure", Payload: `{}`, Status: "queued",
-		CoalescedCount: 1, PriorityClass: models.PriorityClassHuman,
+		CoalescedCount: 1, PriorityClass: runsmodels.PriorityClassHuman,
 	})
 	setStatus(t, repo, periodic.ID, "failed", nil, timePtr(now))
 	setStatus(t, repo, human.ID, "failed", nil, timePtr(now))
@@ -585,10 +586,10 @@ func TestScheduleRetry_RestampsPriorityClassToRecoveryUnlessAlreadyHuman(t *test
 		t.Fatalf("schedule retry (human): %v", err)
 	}
 
-	if got := mustGetRun(t, repo, periodic.ID).PriorityClass; got != models.PriorityClassRecovery {
+	if got := mustGetRun(t, repo, periodic.ID).PriorityClass; got != runsmodels.PriorityClassRecovery {
 		t.Errorf("periodic run's priority_class after retry = %v, want PriorityClassRecovery", got)
 	}
-	if got := mustGetRun(t, repo, human.ID).PriorityClass; got != models.PriorityClassHuman {
+	if got := mustGetRun(t, repo, human.ID).PriorityClass; got != runsmodels.PriorityClassHuman {
 		t.Errorf("human run's priority_class after retry = %v, want PriorityClassHuman (unchanged)", got)
 	}
 }
@@ -716,15 +717,15 @@ func TestRecoverStale_RestampsPriorityClassToRecoveryUnlessAlreadyHuman(t *testi
 	ctx := context.Background()
 	cutoff := time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC)
 
-	periodic := mustCreateRun(t, repo, &models.Run{
+	periodic := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "stale-periodic", AgentProfileID: "a1", WorkspaceID: "ws-a1",
 		Reason: "heartbeat", Payload: `{}`, Status: "queued",
-		CoalescedCount: 1, PriorityClass: models.PriorityClassPeriodic,
+		CoalescedCount: 1, PriorityClass: runsmodels.PriorityClassPeriodic,
 	})
-	human := mustCreateRun(t, repo, &models.Run{
+	human := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "stale-human", AgentProfileID: "a1", WorkspaceID: "ws-a1",
 		Reason: "manual_resume_after_failure", Payload: `{}`, Status: "queued",
-		CoalescedCount: 1, PriorityClass: models.PriorityClassHuman,
+		CoalescedCount: 1, PriorityClass: runsmodels.PriorityClassHuman,
 	})
 	setStatus(t, repo, periodic.ID, "claimed", timePtr(cutoff.Add(-time.Minute)), nil)
 	setStatus(t, repo, human.ID, "claimed", timePtr(cutoff.Add(-time.Minute)), nil)
@@ -733,10 +734,10 @@ func TestRecoverStale_RestampsPriorityClassToRecoveryUnlessAlreadyHuman(t *testi
 		t.Fatalf("recover stale: %v", err)
 	}
 
-	if got := mustGetRun(t, repo, periodic.ID).PriorityClass; got != models.PriorityClassRecovery {
+	if got := mustGetRun(t, repo, periodic.ID).PriorityClass; got != runsmodels.PriorityClassRecovery {
 		t.Errorf("periodic run's priority_class after recovery = %v, want PriorityClassRecovery", got)
 	}
-	if got := mustGetRun(t, repo, human.ID).PriorityClass; got != models.PriorityClassHuman {
+	if got := mustGetRun(t, repo, human.ID).PriorityClass; got != runsmodels.PriorityClassHuman {
 		t.Errorf("human run's priority_class after recovery = %v, want PriorityClassHuman (unchanged)", got)
 	}
 }

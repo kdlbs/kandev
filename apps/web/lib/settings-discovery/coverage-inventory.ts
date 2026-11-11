@@ -228,6 +228,7 @@ const UI_SETTINGS_COVERAGE_INVENTORY: SettingsCoverageEvidence[] = [
     "turn-changed-files-01",
   ),
   userSettingField("keyboard-shortcuts", "keyboard_shortcuts", "keyboard-shortcuts-card.tsx"),
+  userSettingField("escape-cancels-agent", "escape_cancels_agent", "general-settings.tsx"),
   userSettingField("terminal", "terminal_font_size", "terminal-editors-settings.tsx"),
   userSettingField("saved-layouts", "saved_layouts", "layouts/layout-settings.tsx"),
   userSettingField("utility-defaults", "default_utility_model", "utility-agents-settings.tsx"),

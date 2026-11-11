@@ -31,6 +31,9 @@ function makeStore() {
 const TASK_ID = toTaskId("task-1");
 const SESSION_ID = toSessionId("session-1");
 const TS = "2026-04-20T00:00:00Z";
+const TASK_ROOT = "/task-root";
+const NATIVE_WORKSPACE = `${TASK_ROOT}/master`;
+const PRIMARY_WORKSPACE = `${TASK_ROOT}/kandev`;
 const LATER_TS = "2026-04-20T00:01:00Z";
 const INCARNATION_ID = "incarnation-1";
 const FIRST_AGENT_EXECUTION_ID = "execution-1";
@@ -113,15 +116,62 @@ describe("upsertTaskSessionFromEvent", () => {
       .getState()
       .upsertTaskSessionFromEvent(
         TASK_ID,
-        makeSession({ workspace_path: "/task-root", worktree_path: "/task-root/kandev" }),
+        makeSession({ workspace_path: TASK_ROOT, worktree_path: PRIMARY_WORKSPACE }),
       );
     store.getState().setTaskSessionsForTask(TASK_ID, [makeSession()], {});
 
     const session = store.getState().taskSessions.items[SESSION_ID];
-    expect(session.workspace_path).toBe("/task-root");
-    expect(session.worktree_path).toBe("/task-root/kandev");
+    expect(session.workspace_path).toBe(TASK_ROOT);
+    expect(session.worktree_path).toBe(PRIMARY_WORKSPACE);
+  });
+});
+
+describe("upsertTaskSessionFromEvent native workspace", () => {
+  it("preserves the native workspace across a partial refresh that omits it", () => {
+    const store = makeStore();
+
+    store.getState().upsertTaskSessionFromEvent(
+      TASK_ID,
+      makeSession({
+        workspace_path: TASK_ROOT,
+        worktree_path: NATIVE_WORKSPACE,
+        agent_workspace_path: NATIVE_WORKSPACE,
+      }),
+    );
+    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession()], {});
+
+    const session = store.getState().taskSessions.items[SESSION_ID];
+    expect(session.workspace_path).toBe(TASK_ROOT);
+    expect(session.agent_workspace_path).toBe(NATIVE_WORKSPACE);
   });
 
+  it("clears the native workspace only on an authoritative null", () => {
+    const store = makeStore();
+
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(TASK_ID, makeSession({ agent_workspace_path: NATIVE_WORKSPACE }));
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(TASK_ID, makeSession({ agent_workspace_path: null }));
+
+    expect(store.getState().taskSessions.items[SESSION_ID].agent_workspace_path).toBeNull();
+  });
+
+  it("records a native workspace carried by a session event", () => {
+    const store = makeStore();
+
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(TASK_ID, makeSession({ agent_workspace_path: NATIVE_WORKSPACE }));
+
+    expect(store.getState().taskSessions.items[SESSION_ID].agent_workspace_path).toBe(
+      NATIVE_WORKSPACE,
+    );
+  });
+});
+
+describe("upsertTaskSessionFromEvent environment registry", () => {
   it("does not seed environmentIdBySessionId when task_environment_id is absent", () => {
     const store = makeStore();
 

@@ -67,6 +67,7 @@ function PullRequestChip({ pullRequests }: { pullRequests: AzureDevOpsTaskPullRe
       <TooltipTrigger asChild>
         <Button
           asChild
+          data-slot="change-request-status-chip"
           variant="outline"
           size="sm"
           className={`h-7 max-w-56 shrink-0 cursor-pointer gap-1.5 px-2 ${TONE_CLASS[presentation.tone]}`}

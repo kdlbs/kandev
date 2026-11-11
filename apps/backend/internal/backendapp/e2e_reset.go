@@ -103,7 +103,7 @@ func registerE2EResetRoutes(
 	// endpoint's monotonic (forward-only) guard, so specs can deterministically
 	// seed "the user last read up through an earlier message" without a real
 	// background agent turn.
-	api.PATCH("/task-sessions/:id/read-cursor", handleE2ESetSessionReadCursor(repo, log))
+	api.PATCH("/task-sessions/:id/read-cursor", handleE2ESetSessionReadCursor(repo, eventBus, log))
 	// Stamps a task's origin. Production sets origin=automation_run inside the
 	// automation firing path, so a task seeded through the ordinary task API is
 	// an ordinary task — it shows on the kanban and in task lists, which is the
@@ -1101,6 +1101,13 @@ func e2eForceColumn(
 		c.JSON(http.StatusNotFound, gin.H{errKey: opts.subject + " not found: " + opts.id})
 		return
 	}
+	if opts.afterWrite != nil {
+		if err := opts.afterWrite(c.Request.Context()); err != nil {
+			log.Error("e2e: "+opts.failLog, zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+			return
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{"id": opts.id, opts.responseKey: opts.value})
 }
 
@@ -1111,6 +1118,8 @@ type e2eForceColumnOpts struct {
 	subject     string
 	responseKey string
 	failLog     string
+	// afterWrite runs once the row was updated, before the success response.
+	afterWrite func(context.Context) error
 }
 
 func handleE2ESetTaskOrigin(repo *sqliterepo.Repository, log *logger.Logger) gin.HandlerFunc {
@@ -1303,7 +1312,7 @@ func e2ePollNewRun(ctx context.Context, svc *automation.Service, automationID, b
 	return "", fmt.Errorf("timeout")
 }
 
-func handleE2ESetSessionReadCursor(repo *sqliterepo.Repository, log *logger.Logger) gin.HandlerFunc {
+func handleE2ESetSessionReadCursor(repo *sqliterepo.Repository, eventBus bus.EventBus, log *logger.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sessionID := c.Param("id")
 		var body e2eSetSessionReadCursorRequest
@@ -1318,8 +1327,41 @@ func handleE2ESetSessionReadCursor(repo *sqliterepo.Repository, log *logger.Logg
 			subject:     "session",
 			responseKey: "last_read_message_id",
 			failLog:     "failed to force-set session read cursor",
+			afterWrite: func(ctx context.Context) error {
+				return publishE2EReadCursorReset(ctx, repo, eventBus, sessionID, body.MessageID)
+			},
 		})
 	}
+}
+
+// publishE2EReadCursorReset lets a warm task status projector follow a
+// force-set cursor, which may be lower than the one it already holds.
+func publishE2EReadCursorReset(
+	ctx context.Context,
+	repo *sqliterepo.Repository,
+	eventBus bus.EventBus,
+	sessionID, messageID string,
+) error {
+	if eventBus == nil {
+		return nil
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("read session %s: %w", sessionID, err)
+	}
+	message, err := repo.GetMessage(ctx, messageID)
+	if err != nil {
+		return fmt.Errorf("read cursor message %s: %w", messageID, err)
+	}
+	data := map[string]interface{}{
+		taskIDPayloadKey:       session.TaskID,
+		sessionIDPayloadKey:    session.ID,
+		"last_read_message_id": message.ID,
+		"last_read_created_at": message.CreatedAt.UTC().Format(time.RFC3339Nano),
+		"reset":                true,
+	}
+	return eventBus.Publish(ctx, events.TaskSessionReadCursorChanged,
+		bus.NewEvent(events.TaskSessionReadCursorChanged, "e2e", data))
 }
 
 // handleE2EAddTrigger seeds an automation trigger via HTTP for E2E tests that

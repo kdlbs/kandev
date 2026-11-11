@@ -313,27 +313,6 @@ func (e *Executor) configureManagedGitCredentials(
 	return e.configureGitCredentialEnvironment(req, scopes, helpers)
 }
 
-func (e *Executor) resolveManagedGitHubCredentials(
-	ctx context.Context,
-	req *LaunchAgentRequest,
-	infos []*repoInfo,
-) (bool, error) {
-	if e.githubCredentialPolicyResolver == nil || !includesGitHubRepository(infos) {
-		return true, nil
-	}
-	policy, err := e.githubCredentialPolicyResolver.ResolveTaskGitCredentialPolicy(ctx, req.WorkspaceID)
-	if err != nil {
-		return false, fmt.Errorf("resolve task Git credential policy: %w", err)
-	}
-	if policy.Mode != taskGitCredentialsModeExecutor {
-		return true, nil
-	}
-	if err := removeManagedGitCredentials(req); err != nil {
-		return false, err
-	}
-	return false, nil
-}
-
 // PreflightManagedGitCredentials validates every task repository binding that
 // would use a managed Git credential lease, without cloning or issuing one.
 // It is a read-only check meant to run before a new session row is persisted
@@ -442,15 +421,6 @@ func executorProfileHasGitHubToken(execConfig executorConfig) bool {
 		return false
 	}
 	return strings.TrimSpace(authSecrets["gh_cli_env"]) != ""
-}
-
-func (e *Executor) issueGitCredentialScopes(
-	ctx context.Context,
-	req *LaunchAgentRequest,
-	infos []*repoInfo,
-	githubManaged bool,
-) ([]githubCredentialScope, map[string]struct{}, error) {
-	return e.issueGitCredentialScopesWithProfileEnv(ctx, req, infos, githubManaged, nil)
 }
 
 func (e *Executor) issueGitCredentialScopesWithProfileEnv(
@@ -651,15 +621,6 @@ func isHTTPSCredentialHelperKey(key string) bool {
 func isManagedGitHubCredentialHelper(value string) bool {
 	return value == gitCredentialHelper || value == legacyShimGitCredentialHelper ||
 		value == legacyGitHubCredentialHelper
-}
-
-func (e *Executor) issueGitCredentialScope(
-	ctx context.Context,
-	req *LaunchAgentRequest,
-	info *repoInfo,
-	githubManaged bool,
-) (*githubCredentialScope, error) {
-	return e.issueGitCredentialScopeWithProfileEnv(ctx, req, info, githubManaged, nil)
 }
 
 func (e *Executor) issueGitCredentialScopeWithProfileEnv(

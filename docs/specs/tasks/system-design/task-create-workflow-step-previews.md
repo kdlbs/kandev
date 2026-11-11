@@ -14,8 +14,11 @@ step definitions through the existing `listWorkflowSteps` API. It does not
 require task-bearing Kanban snapshots to populate those previews.
 
 The [launch preview design](task-create-launch-preview.md) remains authoritative
-for the destination label and prompt composition. This repair leaves
-`useWorkflowStepsEffect`, `fetchedSteps`, and launch resolution unchanged.
+for the destination label and prompt composition. The selector preview contract
+does not own selected-workflow launch or replacement state. The
+[workflow override design](workflow-agent-overrides.md#selected-workflow-metadata)
+owns their shared selected-metadata observer. Both consumers reuse
+`readJourneyWorkflowSteps` for concurrent request sharing.
 
 ## Requirement mapping
 

@@ -319,7 +319,9 @@ test("buildEntry resolves release, manifest, icon_url and stars", async () => {
   assert.equal(error, undefined);
   assert.equal(record.name, "Foo");
   assert.equal(record.version, "1.2.0");
-  assert.equal(record.author, "kandev");
+  // The manifest declares `author: kandev`, but native identity follows the
+  // reviewed registry pointer.
+  assert.equal(record.author, "acme");
   assert.equal(record.package_url, "https://dl/foo-1.2.0.tar.gz");
   assert.equal(record.package_sha256, "a".repeat(64));
   assert.equal(
@@ -329,6 +331,127 @@ test("buildEntry resolves release, manifest, icon_url and stars", async () => {
   assert.equal(record.stars, 42);
   assert.equal(record.updated_at, "2026-02-02T00:00:00Z");
   assert.deepEqual(record.categories, ["x"]);
+});
+
+test("buildEntry attributes native plugins to the curated repository owner", async () => {
+  stubGitHub({
+    release: {
+      tag_name: "v1.4.2",
+      assets: [
+        {
+          name: "foo-1.4.2.tar.gz",
+          browser_download_url: "https://dl/foo-1.4.2.tar.gz",
+        },
+      ],
+    },
+    manifestText: "display_name: Foo\nauthor: kandev",
+    repoMeta: {
+      stargazers_count: 7,
+      pushed_at: "2026-02-02T00:00:00Z",
+      owner: { login: "different-login" },
+    },
+  });
+
+  const { record, error } = await buildEntry(
+    { id: "foo", repo: "Fclem/kandev-plugin-foo" },
+    { verifyPackage: async () => verifiedPackage({ version: "1.4.2" }) },
+  );
+
+  assert.equal(error, undefined);
+  assert.equal(record.author, "Fclem");
+});
+
+test("buildEntry derives plugin ownership from the curated pointer in every case", async () => {
+  const cases = [
+    {
+      name: "spoofed first-party declaration",
+      repo: "kdlbs/kandev-plugin-foo",
+      manifestText: "display_name: Foo\nauthor: kandev",
+      repoMeta: { stargazers_count: 1, owner: { login: "kdlbs" } },
+      want: "kdlbs",
+    },
+    {
+      name: "community declaration",
+      repo: "Fclem/kandev-plugin-foo",
+      manifestText: "display_name: Foo\nauthor: Fclem",
+      repoMeta: { stargazers_count: 1, owner: { login: "Fclem" } },
+      want: "Fclem",
+    },
+    {
+      name: "missing manifest author",
+      repo: "acme/kandev-plugin-foo",
+      manifestText: "display_name: Foo",
+      repoMeta: { stargazers_count: 1, owner: { login: "acme" } },
+      want: "acme",
+    },
+    {
+      name: "repository metadata failure",
+      repo: "acme/kandev-plugin-foo",
+      manifestText: "display_name: Foo\nauthor: kandev",
+      repoMeta: null,
+      want: "acme",
+    },
+    {
+      name: "missing metadata owner",
+      repo: "acme/kandev-plugin-foo",
+      manifestText: "display_name: Foo\nauthor: kandev",
+      repoMeta: { stargazers_count: 1 },
+      want: "acme",
+    },
+    {
+      name: "conflicting metadata login",
+      repo: "acme/kandev-plugin-foo",
+      manifestText: "display_name: Foo\nauthor: kandev",
+      repoMeta: { stargazers_count: 1, owner: { login: "someone-else" } },
+      want: "acme",
+    },
+  ];
+
+  for (const testCase of cases) {
+    stubGitHub({
+      release: {
+        tag_name: "v1.2.0",
+        assets: [
+          {
+            name: "foo-1.2.0.tar.gz",
+            browser_download_url: "https://dl/foo-1.2.0.tar.gz",
+          },
+        ],
+      },
+      manifestText: testCase.manifestText,
+      repoMeta: testCase.repoMeta,
+    });
+    const { record, error } = await buildEntry(
+      { id: "foo", repo: testCase.repo },
+      { verifyPackage: async () => verifiedPackage() },
+    );
+    assert.equal(error, undefined, testCase.name);
+    assert.equal(record.author, testCase.want, testCase.name);
+  }
+});
+
+test("buildEntry ignores a manifest repository claim for native plugins", async () => {
+  stubGitHub({
+    release: {
+      tag_name: "v1.2.0",
+      assets: [
+        {
+          name: "foo-1.2.0.tar.gz",
+          browser_download_url: "https://dl/foo-1.2.0.tar.gz",
+        },
+      ],
+    },
+    manifestText:
+      "display_name: Foo\nauthor: kandev\nrepo_url: https://github.com/evil/foo",
+    repoMeta: { stargazers_count: 1, owner: { login: "acme" } },
+  });
+
+  const { record } = await buildEntry(
+    { id: "foo", repo: "acme/foo" },
+    { verifyPackage: async () => verifiedPackage() },
+  );
+
+  assert.equal(record.repo_url, "https://github.com/acme/foo");
 });
 
 test("buildEntry errors (not throws) when there is no installable release", async () => {
@@ -357,7 +480,7 @@ test("buildEntry keeps stars null (never 0) when repo metadata lookup fails", as
     { verifyPackage: async () => verifiedPackage({ version: "1.0.0" }) },
   );
   assert.equal(record.stars, null);
-  assert.equal(record.author, "acme"); // legacy fallback when the manifest has no author
+  assert.equal(record.author, "acme"); // curated owner survives a metadata outage
   assert.equal(record.icon_url, null); // no manifest icon
 });
 
@@ -400,6 +523,67 @@ test("buildEntry uses inspected canvas presentation metadata and preserves previ
     assert.equal(result.record.min_kandev_version, "2.0.0");
     assert.deepEqual(result.record.previews, [{ url: "https://cdn.example/cover.webp", alt: "Board cover" }]);
     assert.equal(result.record.package_sha256, createHash("sha256").update(packageBytes).digest("hex"));
+  } finally {
+    if (previousInspector === undefined) delete process.env.KANDEV_CANVAS_PACKAGE_INSPECTOR;
+    else process.env.KANDEV_CANVAS_PACKAGE_INSPECTOR = previousInspector;
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("buildEntry keeps the canvas metadata-owner fallback when the archive omits an author", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "kandev-registry-canvas-author-"));
+  const inspector = path.join(directory, "inspector.mjs");
+  await fs.writeFile(
+    inspector,
+    `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({id:"board",version:"1.0.0",kind:"canvas",display_name:"Board",author:"",repo_url:"https://github.com/acme/board",license:"MIT"}));\n`,
+    { mode: 0o755 },
+  );
+  const previousInspector = process.env.KANDEV_CANVAS_PACKAGE_INSPECTOR;
+  process.env.KANDEV_CANVAS_PACKAGE_INSPECTOR = inspector;
+  const packageBytes = new Uint8Array([1, 2, 3]);
+  const cases = [
+    {
+      name: "repository metadata owner",
+      repoMeta: { stargazers_count: 4, owner: { login: "metadata-owner" } },
+      want: "metadata-owner",
+    },
+    {
+      name: "metadata lookup failure falls back to the curated owner",
+      repoMeta: null,
+      want: "acme",
+    },
+  ];
+  try {
+    for (const testCase of cases) {
+      globalThis.fetch = async (url) => {
+        const value = String(url);
+        if (value.includes("/releases/latest")) {
+          return jsonResponse({
+            tag_name: "v1.0.0",
+            assets: [
+              {
+                name: "board-1.0.0.tar.gz",
+                browser_download_url: "https://dl.example/board.tar.gz",
+              },
+            ],
+          });
+        }
+        if (value.includes("/manifest.yaml")) return textResponse("display_name: Board\n");
+        if (value.includes("/repos/")) return jsonResponse(testCase.repoMeta);
+        if (value === "https://dl.example/board.tar.gz") return binaryResponse(packageBytes);
+        throw new Error(`unexpected fetch: ${value}`);
+      };
+
+      const result = await buildEntry({
+        id: "board",
+        repo: "acme/board",
+        kind: "canvas",
+        previews: [{ url: "https://cdn.example/cover.webp", alt: "Board cover" }],
+      });
+
+      assert.equal(result.error, undefined, testCase.name);
+      assert.equal(result.record.author, testCase.want, testCase.name);
+    }
   } finally {
     if (previousInspector === undefined) delete process.env.KANDEV_CANVAS_PACKAGE_INSPECTOR;
     else process.env.KANDEV_CANVAS_PACKAGE_INSPECTOR = previousInspector;
@@ -643,6 +827,83 @@ test("buildIndex refuses publication when a failed curated entry has no trustwor
 
   assert.equal(result.publishable, false);
   assert.deepEqual(result.document.plugins, []);
+  assert.match(result.fatalErrors[0], /no trusted prior record/);
+});
+
+test("buildIndex replaces retained native attribution without changing release evidence", async () => {
+  const prior = {
+    ...priorRecord("b", "o/b", "0.9.0"),
+    author: "kandev",
+    description: "Retained release",
+    categories: ["ops"],
+    package_sha256: "c".repeat(64),
+    stars: 17,
+    updated_at: "2026-03-04T00:00:00Z",
+  };
+  const priorDocument = { schema_version: 1, plugins: [prior] };
+  const priorSnapshot = JSON.parse(JSON.stringify(priorDocument));
+
+  const result = await buildIndex(
+    [
+      { id: "a", repo: "o/a" },
+      { id: "b", repo: "o/b" },
+    ],
+    {
+      priorDocument,
+      buildEntryFn: async (spec) =>
+        spec.id === "a"
+          ? { record: priorRecord("a", "o/a", "2.0.0") }
+          : { error: "b: release package failed integrity verification" },
+    },
+  );
+
+  assert.equal(result.publishable, true);
+  assert.deepEqual(result.retained, ["b"]);
+  const retained = result.document.plugins[1];
+  assert.deepEqual(retained, { ...prior, author: "o" });
+  assert.equal(retained.version, "0.9.0");
+  assert.equal(retained.package_url, prior.package_url);
+  assert.equal(retained.package_sha256, prior.package_sha256);
+  assert.deepEqual(priorDocument, priorSnapshot);
+});
+
+test("buildIndex keeps retained canvas attribution from the inspected descriptor", async () => {
+  const prior = {
+    ...priorRecord("board", "acme/board", "1.0.0"),
+    kind: "canvas",
+    author: "archive-author",
+  };
+  const result = await buildIndex([{ id: "board", repo: "acme/board", kind: "canvas" }], {
+    priorDocument: { schema_version: 1, plugins: [prior] },
+    buildEntryFn: async () => ({ error: "board: canvas package inspection failed" }),
+  });
+
+  assert.equal(result.publishable, false);
+  assert.equal(result.document.plugins[0].author, "archive-author");
+});
+
+test("buildIndex retains only a uniquely matching prior record for the same repository", async () => {
+  const prior = priorRecord("a", "o/a", "1.0.0");
+  const result = await buildIndex(
+    [
+      { id: "a", repo: "o/a" },
+      { id: "b", repo: "o/b" },
+    ],
+    {
+      priorDocument: {
+        schema_version: 1,
+        plugins: [
+          prior,
+          { ...priorRecord("a", "o/a", "0.8.0") },
+          priorRecord("b", "o/other", "1.0.0"),
+        ],
+      },
+      buildEntryFn: async () => ({ error: "provider unavailable" }),
+    },
+  );
+
+  assert.equal(result.publishable, false);
+  assert.deepEqual(result.retained, []);
   assert.match(result.fatalErrors[0], /no trusted prior record/);
 });
 

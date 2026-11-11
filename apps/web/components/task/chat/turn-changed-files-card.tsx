@@ -2,13 +2,9 @@
 
 import { memo, useEffect, useMemo, useState } from "react";
 import { Button } from "@kandev/ui/button";
-import {
-  IconChevronDown,
-  IconChevronRight,
-  IconFile,
-  IconFolder,
-  IconFolderOpen,
-} from "@tabler/icons-react";
+import { LineStat } from "@/components/diff-stat";
+import { FileIcon } from "@/components/ui/file-icon";
+import { IconChevronDown, IconChevronRight, IconFolder, IconFolderOpen } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { useTurnChangeFiles } from "@/hooks/domains/session/use-turn-change-files";
 import { buildTurnChangeTree, summarizeTurnChangeTreeFolder } from "@/lib/turn-changes/tree";
@@ -16,7 +12,12 @@ import type { TurnChangeSetSummary, TurnFileChange } from "@/lib/types/turn-chan
 import type { TurnChangeTreeFolder } from "@/lib/turn-changes/tree";
 import type { HistoricalTurnDiffTarget } from "@/lib/state/diff-target-types";
 import { readTurnChangeViewState, updateTurnChangeViewState } from "@/lib/turn-changes/view-state";
-import { projectTurnRepositoryAvailability } from "@/lib/turn-changes/projection";
+import {
+  isTurnChangePartial,
+  projectTurnRepositoryAvailability,
+} from "@/lib/turn-changes/projection";
+import { repositoryCountText, summaryCountText } from "@/lib/turn-changes/counts";
+import { CardNotice, LoadMoreButton, RetryFilesButton } from "./turn-changed-files-card-parts";
 
 type TurnChangedFilesCardProps = {
   sessionId: string;
@@ -49,6 +50,13 @@ function kindLabel(file: TurnFileChange, t: (key: string) => string): string {
   };
   return t(`task:${keyByKind[file.kind] ?? "turnChangesKindModified"}`);
 }
+
+const KIND_COLOR_CLASS: Record<string, string> = {
+  added: "text-emerald-600",
+  deleted: "text-rose-600",
+  modified: "text-amber-600",
+  renamed: "text-purple-600",
+};
 
 function targetForFile(
   sessionId: string,
@@ -95,7 +103,7 @@ function FolderRows({
     <div>
       <button
         type="button"
-        className="flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded px-2 text-left text-xs hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+        className="flex min-h-7 w-full min-w-0 flex-wrap cursor-pointer items-center gap-2 rounded px-2 text-left text-xs hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
         style={{ paddingInlineStart: `${12 + Math.min(depth, 3) * 16}px` }}
         aria-expanded={isExpanded}
         onClick={() => onToggle(`${repositoryChangeId}:${folder.path}`)}
@@ -118,12 +126,10 @@ function FolderRows({
           <IconFolder className="size-4 shrink-0 text-muted-foreground" />
         )}
         <span className="min-w-0 flex-1 truncate">{folder.name}/</span>
-        <span className="shrink-0 text-muted-foreground">
+        <span className="ml-auto shrink-0 text-muted-foreground">
           {t("task:turnChangesLoadedFileCount", { count: totals.loadedFiles })}
         </span>
-        <span className="shrink-0 text-muted-foreground">
-          +{totals.addedLines} -{totals.deletedLines}
-        </span>
+        <LineStat added={totals.addedLines} removed={totals.deletedLines} className="shrink-0" />
         {totals.unknownCountFiles > 0 && (
           <span className="shrink-0 text-muted-foreground">
             {t("task:turnChangesUnknownCount", { count: totals.unknownCountFiles })}
@@ -172,10 +178,19 @@ function FileRow({
   onOpen: () => void;
   t: (key: string, options?: Record<string, unknown>) => string;
 }) {
+  const counts = fileCounts(file);
+  const statusContent =
+    file.binary || !counts ? (
+      <span className="min-w-0 [overflow-wrap:anywhere] text-muted-foreground">
+        {statusLabel(file, t)}
+      </span>
+    ) : (
+      <LineStat added={counts.added} removed={counts.deleted} className="shrink-0" />
+    );
   return (
     <button
       type="button"
-      className="flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded px-2 text-left text-xs hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+      className="flex min-h-7 w-full min-w-0 flex-wrap cursor-pointer items-center gap-2 rounded px-2 text-left text-xs hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
       style={{ paddingInlineStart: `${12 + Math.min(depth, 3) * 16}px` }}
       onClick={onOpen}
       aria-label={t("task:turnChangesFileAccessibleLabel", {
@@ -190,8 +205,12 @@ function FileRow({
       title={file.path}
       data-turn-file-change-id={file.id}
     >
-      <IconFile className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-      <span className="min-w-0 flex-1 py-1">
+      <FileIcon
+        filePath={file.path}
+        className="flex-shrink-0"
+        style={{ width: "14px", height: "14px" }}
+      />
+      <span className="min-w-0 flex-1 py-1 [overflow-wrap:anywhere]">
         <span className="block truncate">{file.path.split("/").at(-1) || file.path}</span>
         {file.old_path && (
           <span className="block truncate text-muted-foreground">
@@ -199,8 +218,14 @@ function FileRow({
           </span>
         )}
       </span>
-      <span className="shrink-0 text-muted-foreground">{kindLabel(file, t)}</span>
-      <span className="shrink-0 text-muted-foreground">{statusLabel(file, t)}</span>
+      <span className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-0.5">
+        <span
+          className={`min-w-0 [overflow-wrap:anywhere] ${KIND_COLOR_CLASS[file.kind] ?? "text-muted-foreground"}`}
+        >
+          {kindLabel(file, t)}
+        </span>
+        {statusContent}
+      </span>
       {file.old_mode && file.new_mode && file.old_mode !== file.new_mode && (
         <span className="sr-only">
           {t("task:turnChangesModeStatus", { oldMode: file.old_mode, newMode: file.new_mode })}
@@ -265,49 +290,51 @@ export const TurnChangedFilesCard = memo(function TurnChangedFilesCard({
   };
 
   return (
-    <section
-      className="mt-2 overflow-hidden rounded-lg border border-border/70 bg-card/70 text-card-foreground"
-      data-testid="turn-changed-files-card"
-      data-change-set-id={summary.id}
-      data-fallback-anchor={summary.fallback_anchor}
-    >
-      <TurnChangesCardHeader
-        summary={summary}
-        allExpanded={allExpanded}
-        hasRows={hasRows}
-        hasFolders={tree.some((repository) => repository.folders.length > 0) || tree.length > 1}
-        isExpired={isExpired}
-        isPending={isPending}
-        isUnavailable={isUnavailable}
-        onToggleAll={toggleAll}
-        onOpenDiff={() => onOpenDiff({ sessionId, changeSetId: summary.id })}
-      />
-      <TurnChangesAvailability
-        isExpired={isExpired}
-        isPending={isPending}
-        isUnavailable={isUnavailable}
-        loading={loading}
-        hasRows={hasRows}
-        hasError={Boolean(error)}
-      />
-      {Boolean(error) && <RetryFilesButton onClick={() => void retry()} />}
-      <RepositoryRows
-        sessionId={sessionId}
-        summary={summary}
-        tree={tree}
-        filesByRepository={filesByRepository}
-        fileTotalsByRepository={fileTotalsByRepository}
-        expanded={expanded}
-        onToggle={toggleExpanded}
-        onOpenDiff={onOpenDiff}
-      />
-      {hasMore && !isExpired && (
-        <LoadMoreButton loading={loading} onClick={() => void loadMore()} />
-      )}
-      {(summary.overlap_intervals?.length ?? 0) > 0 && (
-        <CardNotice role="status" text={t("task:turnChangesSharedCheckout")} />
-      )}
-    </section>
+    <div className="pb-4">
+      <section
+        className="mt-2 overflow-hidden rounded-lg border border-border/70 bg-card/70 text-card-foreground"
+        data-testid="turn-changed-files-card"
+        data-change-set-id={summary.id}
+        data-fallback-anchor={summary.fallback_anchor}
+      >
+        <TurnChangesCardHeader
+          summary={summary}
+          allExpanded={allExpanded}
+          hasRows={hasRows}
+          hasFolders={tree.some((repository) => repository.folders.length > 0) || tree.length > 1}
+          isExpired={isExpired}
+          isPending={isPending}
+          isUnavailable={isUnavailable}
+          onToggleAll={toggleAll}
+          onOpenDiff={() => onOpenDiff({ sessionId, changeSetId: summary.id })}
+        />
+        <TurnChangesAvailability
+          isExpired={isExpired}
+          isPending={isPending}
+          isUnavailable={isUnavailable}
+          loading={loading}
+          hasRows={hasRows}
+          hasError={Boolean(error)}
+        />
+        {Boolean(error) && <RetryFilesButton onClick={() => void retry()} />}
+        <RepositoryRows
+          sessionId={sessionId}
+          summary={summary}
+          tree={tree}
+          filesByRepository={filesByRepository}
+          fileTotalsByRepository={fileTotalsByRepository}
+          expanded={expanded}
+          onToggle={toggleExpanded}
+          onOpenDiff={onOpenDiff}
+        />
+        {hasMore && !isExpired && (
+          <LoadMoreButton loading={loading} onClick={() => void loadMore()} />
+        )}
+        {(summary.overlap_intervals?.length ?? 0) > 0 && (
+          <CardNotice role="status" text={t("task:turnChangesSharedCheckout")} />
+        )}
+      </section>
+    </div>
   );
 });
 
@@ -382,7 +409,7 @@ function TurnChangesCardSummary({
   return (
     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
       <TurnChangesCardCounts summary={summary} isUnavailable={isUnavailable} />
-      {isPartial(summary) && (
+      {!isUnavailable && isTurnChangePartial(summary) && (
         <span className="text-amber-700 dark:text-amber-400">{t("task:turnChangesPartial")}</span>
       )}
       {isExpired && <span className="text-muted-foreground">{t("task:turnChangesExpired")}</span>}
@@ -399,22 +426,14 @@ function TurnChangesCardCounts({
 }) {
   const { t } = useTranslation();
   if (isUnavailable) {
-    return (
-      <span className="font-medium text-amber-700 dark:text-amber-400">
-        {t("task:turnChangesUnavailable")}
-      </span>
-    );
+    return null;
   }
+  const countText = summaryCountText(summary, t);
   return (
     <>
-      <span className="font-medium">
-        {t("task:turnChangesFileCount", { count: summary.file_count })}
-      </span>
-      {summary.added_lines != null && (
-        <span className="text-emerald-700 dark:text-emerald-400">+{summary.added_lines}</span>
-      )}
-      {summary.deleted_lines != null && (
-        <span className="text-red-700 dark:text-red-400">-{summary.deleted_lines}</span>
+      <span className="font-medium">{countText}</span>
+      {(summary.added_lines != null || summary.deleted_lines != null) && (
+        <LineStat added={summary.added_lines} removed={summary.deleted_lines} />
       )}
       {summary.binary_file_count > 0 && (
         <span className="text-muted-foreground">
@@ -428,10 +447,6 @@ function TurnChangesCardCounts({
       )}
     </>
   );
-}
-
-function isPartial(summary: TurnChangeSetSummary): boolean {
-  return summary.availability === "failed" || !summary.complete || !summary.summary_complete;
 }
 
 function TurnChangesAvailability({
@@ -459,21 +474,6 @@ function TurnChangesAvailability({
   return null;
 }
 
-function CardNotice({ text, role }: { text: string; role?: "status" | "alert" }) {
-  return (
-    <p
-      className={
-        role === "alert"
-          ? "px-3 py-2 text-xs text-destructive"
-          : "px-3 py-2 text-xs text-muted-foreground"
-      }
-      role={role}
-    >
-      {text}
-    </p>
-  );
-}
-
 function RepositoryRows({
   sessionId,
   summary,
@@ -499,17 +499,17 @@ function RepositoryRows({
     const files = filesByRepository[repository.id] ?? [];
     const repo = summary.repositories.find((item) => item.id === repository.id);
     const repositoryState = repo ? projectTurnRepositoryAvailability(repo) : null;
-    const repositoryCount =
-      repo?.enumeration_complete === false
-        ? t("task:turnChangesLoadedFileCount", { count: files.length })
-        : t("task:turnChangesFileCount", {
-            count: fileTotalsByRepository[repository.id] ?? files.length,
-          });
+    const repositoryCount = repositoryCountText(
+      repo,
+      files.length,
+      fileTotalsByRepository[repository.id],
+      t,
+    );
     return (
       <div key={repository.id} className="border-b border-border/40 last:border-b-0">
         <button
           type="button"
-          className="flex min-h-7 w-full cursor-pointer items-center gap-2 px-3 text-left text-xs font-medium hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+          className="flex min-h-7 w-full min-w-0 flex-wrap cursor-pointer items-center gap-2 px-3 text-left text-xs font-medium hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
           aria-expanded={isExpanded}
           onClick={() => onToggle(repository.id)}
         >
@@ -519,7 +519,9 @@ function RepositoryRows({
             <IconChevronRight className="size-3.5" />
           )}
           <span className="min-w-0 flex-1 truncate">{repository.label}</span>
-          <span className="text-muted-foreground">{repositoryCount}</span>
+          {repositoryCount && (
+            <span className="ml-auto shrink-0 text-muted-foreground">{repositoryCount}</span>
+          )}
           {repositoryState && repositoryState !== "ready" && (
             <span className="text-amber-700 dark:text-amber-400">
               {t("task:turnChangesRepositoryStatus", {
@@ -558,38 +560,4 @@ function RepositoryRows({
       </div>
     );
   });
-}
-
-function LoadMoreButton({ loading, onClick }: { loading: boolean; onClick: () => void }) {
-  const { t } = useTranslation();
-  return (
-    <div className="px-3 py-2">
-      <Button
-        type="button"
-        size="sm"
-        variant="ghost"
-        className="h-7 min-h-7 cursor-pointer px-2 text-xs max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
-        disabled={loading}
-        onClick={onClick}
-      >
-        {loading ? t("task:turnChangesLoading") : t("task:turnChangesLoadMore")}
-      </Button>
-    </div>
-  );
-}
-
-function RetryFilesButton({ onClick }: { onClick: () => void }) {
-  const { t } = useTranslation();
-  return (
-    <div className="px-3 pb-2">
-      <Button
-        size="sm"
-        variant="ghost"
-        className="cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
-        onClick={onClick}
-      >
-        {t("task:turnChangesRetry")}
-      </Button>
-    </div>
-  );
 }

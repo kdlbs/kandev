@@ -48,10 +48,36 @@ and displace the actual matching task from a bounded result page.
   of workspace task search shall receive the corrected rows and totals
   through their existing requests and interactions.
 
+### REQ-TASKS-WORKSPACE-SEARCH-002: Idle command-panel task eligibility
+
+**Intent:** Hidden workflow steps must not displace eligible tasks from the
+bounded idle command-panel results.
+
+#### Acceptance criteria
+
+- **AC-TASKS-WORKSPACE-SEARCH-002.1:** When the selected workflow and its steps
+  are loaded, the empty-query Commands and Tasks scopes shall select unarchived
+  workspace tasks in that workflow whose step is shown in the command panel
+  before selecting the first twenty by the existing workspace-list order. If
+  twenty newer hidden-step tasks precede an eligible task, that task shall be
+  available as an actionable result on desktop and phone.
+- **AC-TASKS-WORKSPACE-SEARCH-002.2:** The eligible twenty-row window shall
+  retain the existing step-position ordering, five-row Commands preview, and
+  twenty-row Tasks limit. An all-hidden workflow shall yield no task results;
+  a terminal workflow state alone shall not mean archived.
+- **AC-TASKS-WORKSPACE-SEARCH-002.3:** Workspace authorization and existing
+  archive, ephemeral, configuration-task, and automation-origin restrictions
+  shall remain intact. With no steps loaded, the existing unfiltered fallback
+  remains in effect. Requests for a different workspace shall never leak rows.
+- **AC-TASKS-WORKSPACE-SEARCH-002.4:** Nonempty metadata and conversation
+  searches shall retain literal-query behavior, active-before-archived
+  grouping, bounds, selection, and cancellation behavior. The correction shall
+  use bounded requests and shall not fetch all task pages into the client.
+
 ## Out of scope
 
 - Global, sidebar, board, file, message, or PR-number search redesign.
-- New searchable fields, ordering rules, filters, settings, or normalization.
+- New searchable fields, search ordering rules, settings, or normalization.
 - Search syntax, schema changes, migrations, or new dependencies.
 - Frontend layout, navigation, scrolling, touch targets, and localized copy.
 

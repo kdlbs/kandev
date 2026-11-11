@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { SessionPage } from "../../pages/session-page";
 
@@ -20,22 +21,21 @@ test.describe("session mode mismatch on mobile", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     test.setTimeout(120_000);
-    const task = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Mobile session mode mismatch",
-      seedData.agentProfileId,
-      {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
-    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+    const task = await apiClient.seedTask(seedData.workspaceId, "Mobile session mode mismatch", {
+      state: "IN_PROGRESS",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    const { session_id: sessionId } = await apiClient.seedTaskSession(task.task_id, {
+      state: "WAITING_FOR_INPUT",
+      agentProfileId: seedData.agentProfileId,
+    });
 
-    await testPage.goto(`/t/${task.id}`);
+    // This synthetic mismatch has no provider process that can replace its mode snapshot.
+    await testPage.goto(`/t/${task.task_id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
@@ -51,7 +51,7 @@ test.describe("session mode mismatch on mobile", () => {
         ],
         "bypassPermissions",
       );
-    }, task.session_id);
+    }, sessionId);
 
     const leftActions = testPage.getByTestId("mobile-chat-toolbar-left-actions");
     const trigger = leftActions.getByTestId("session-mode-selector");
@@ -65,13 +65,19 @@ test.describe("session mode mismatch on mobile", () => {
     await expect(picker).toContainText("Default");
 
     const close = picker.getByRole("button", { name: "Close" });
-    expect((await close.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await waitForFiniteAnimations(picker);
+    const closeBounds = await close.boundingBox();
+    expect(closeBounds?.height).toBeGreaterThanOrEqual(44);
+    expect(closeBounds?.width).toBeGreaterThanOrEqual(44);
+    await prCapture.screenshot("phone-session-mode-close-target", {
+      caption: "Phone permission-mode picker with a 48px close target.",
+    });
     await close.tap();
     await expect(picker).not.toBeVisible();
     await expect(trigger).toBeFocused();
 
     let selectedModeId: string | undefined;
-    await testPage.route(`**/api/v1/task-sessions/${task.session_id}/set-mode`, async (route) => {
+    await testPage.route(`**/api/v1/task-sessions/${sessionId}/set-mode`, async (route) => {
       selectedModeId = (route.request().postDataJSON() as { mode_id?: string }).mode_id;
       await route.fulfill({
         status: 200,
@@ -82,6 +88,7 @@ test.describe("session mode mismatch on mobile", () => {
     await trigger.tap();
     const scrollArea = picker.getByTestId("session-mode-picker-scroll");
     await expect(scrollArea).toBeVisible();
+    await waitForFiniteAnimations(picker);
     const scrollStyle = await scrollArea.evaluate((element) => ({
       overflowY: getComputedStyle(element).overflowY,
       paddingBottom: Number.parseFloat(getComputedStyle(element).paddingBottom),

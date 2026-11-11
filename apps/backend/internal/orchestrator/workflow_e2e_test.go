@@ -456,7 +456,7 @@ func createEngineServiceWithTaskRepo(t *testing.T, repo *sqliterepo.Repository, 
 		taskRepo:     taskRepo,
 		agentManager: agentMgr,
 		messageQueue: newAuthoritativeMemoryQueue(repo, log),
-		executor:     executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}),
+		executor:     withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})),
 	}
 	svc.SetWorkflowStepGetter(sg)
 	return svc

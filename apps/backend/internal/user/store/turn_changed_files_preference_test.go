@@ -16,7 +16,8 @@ func TestTurnChangedFilesPreferenceScanAndMarshal(t *testing.T) {
 		raw  string
 		want bool
 	}{
-		{name: "missing defaults on", raw: `{"unrelated":true}`, want: true},
+		{name: "missing defaults off", raw: `{"unrelated":true}`, want: false},
+		{name: "null defaults off", raw: `{"show_turn_changed_files":null}`, want: false},
 		{name: "explicit false survives", raw: `{"show_turn_changed_files":false}`, want: false},
 		{name: "explicit true survives", raw: `{"show_turn_changed_files":true}`, want: true},
 	} {

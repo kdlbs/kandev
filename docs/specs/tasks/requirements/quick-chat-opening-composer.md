@@ -2,6 +2,7 @@
 status: active
 system: tasks
 created: 2026-10-02
+updated: 2026-10-26
 owners:
   - kandev
 ---
@@ -39,6 +40,17 @@ repository, attachment, and session contracts remain dependencies.
 - **AC-TASKS-QUICK-CHAT-COMPOSER-001.11:** Phone users shall complete the same flow in a full-height surface. Agent and repository choices shall use touch-accessible pickers. The primary action shall remain reachable with a reduced viewport and bottom safe area. Controls shall have at least 44px touch targets, and the document shall have no horizontal overflow.
 - **AC-TASKS-QUICK-CHAT-COMPOSER-001.12:** Labels, validation, and errors shall be localized. Controls shall have accessible names, keyboard navigation, and focus return from pickers. An active configuration conversation shall retain a visible mode indicator. Existing chats, configuration entry points, and terminal-backed profiles shall continue to work.
 
+#### Startup acceptance amendment (2026-10-26)
+
+The following criteria are active. Their implementation is recorded in the
+[startup acceptance package](../../../plans/quick-chat-startup-acceptance/plan.md).
+The existing criteria remain active.
+
+- **AC-TASKS-QUICK-CHAT-COMPOSER-001.13:** An ordinary Quick Chat shall return its allocated conversation identity before repository preparation, setup scripts, or agent startup finishes. Slow startup shall show progress in that conversation. A later startup failure shall retain the conversation and its opening payload for explicit recovery.
+- **AC-TASKS-QUICK-CHAT-COMPOSER-001.14:** An ordinary Quick Chat submission shall keep one creation identity through a lost response, explicit retry, reconnect, and same-browser reload. A same-token POST retry may resume missing preparation and settlement for the exact retained Quick Chat task under per-creation serialization. It shall reuse an existing session and dispatch its deferred start only when that session remains `CREATED`; it shall never allocate another task or session or replay an opening message. A concurrent `FoundUnsettled` create outcome shall remain an incomplete descriptor without post-create work. An incomplete creation shall remain observable without an automatic replacement. Explicit deletion shall retire the browser's submission identity.
+- **AC-TASKS-QUICK-CHAT-COMPOSER-001.15:** An uncertain creation result shall preserve the submitted text, ready attachment descriptors, and creation identity. Recovery shall select only the matching authorized conversation. It shall not select an unrelated chat by title, profile, repository, or recency. A late result shall preserve newer drafts, selection, explicit deletion, and dismissal. Reload or status lookup shall not replay a message whose delivery was attempted.
+- **AC-TASKS-QUICK-CHAT-COMPOSER-001.16:** A typed response that proves validation or a referenced repository failed before allocation shall retire the rejected submission identity and keep its editable draft. Untyped HTTP errors, transport failures, and a status lookup miss shall remain uncertain and shall not authorize a new identity.
+
 ## Related contracts
 
 - [Repository context](quick-chat-repository-context.md): branches, isolation, and rollback.
@@ -57,3 +69,11 @@ alter existing session selection, tab ordering, or repository isolation.
 ## Implementation plan
 
 [Quick Chat opening composer](../../../plans/quick-chat-opening-composer/plan.md).
+
+
+Follow-up implementation: [draft and rate retry package](../../../plans/quick-chat-draft-and-rate-retry/plan.md).
+Criteria .9 and .10 already cover lossless accepted-payload cleanup; no new
+requirement is introduced for this regression.
+
+[Quick Chat startup acceptance](../../../plans/quick-chat-startup-acceptance/plan.md)
+records the implemented startup and uncertain-response repair.

@@ -15,8 +15,9 @@
 # ---------------------------------------------------------------------------
 FROM golang:1.26-bookworm AS go-builder
 
-WORKDIR /build
+WORKDIR /build/apps/backend
 
+COPY pluginsdk/ /build/pluginsdk/
 COPY apps/backend/go.mod apps/backend/go.sum ./
 RUN go mod download
 
@@ -25,7 +26,8 @@ COPY apps/backend/ ./
 RUN go build -ldflags "-s -w" -o /out/kandev ./cmd/kandev && \
     go build -ldflags "-s -w" -o /out/agentctl ./cmd/agentctl && \
     go build -ldflags "-s -w" -o /out/mock-agent ./cmd/mock-agent && \
-    go test -c -trimpath -tags fts5 -o /out/e2e-delivery-fixture ./internal/agent/runtime/lifecycle
+    go test -c -trimpath -tags fts5 -o /out/e2e-delivery-fixture ./internal/agent/runtime/lifecycle && \
+    go test -c -trimpath -tags fts5 -o /out/e2e-send-now-fixture ./internal/orchestrator
 
 # ---------------------------------------------------------------------------
 # Stage 2: Node builder — install deps + build web app
@@ -78,6 +80,7 @@ COPY --from=node-builder /build/apps/ ./apps/
 COPY --from=go-builder /out/kandev ./apps/backend/bin/kandev
 COPY --from=go-builder /out/mock-agent ./apps/backend/bin/mock-agent
 COPY --from=go-builder /out/e2e-delivery-fixture ./apps/backend/bin/e2e-delivery-fixture
+COPY --from=go-builder /out/e2e-send-now-fixture ./apps/backend/bin/e2e-send-now-fixture
 # agentctl must be in PATH — kandev spawns it as a subprocess
 COPY --from=go-builder /out/agentctl /usr/local/bin/agentctl
 

@@ -5,7 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
@@ -23,7 +24,7 @@ func TestQueueRun_DepthRefusalPersistsDurableCausationRefusal(t *testing.T) {
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "root_reason",
-		ActorKind:      models.ActorKindSystem,
+		ActorKind:      runsmodels.ActorKindSystem,
 	}); err != nil {
 		t.Fatalf("queue root: %v", err)
 	}
@@ -32,7 +33,7 @@ func TestQueueRun_DepthRefusalPersistsDurableCausationRefusal(t *testing.T) {
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "child1_reason",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-primary",
 		CausingRunID:   root.ID,
 	}); err != nil {
@@ -43,7 +44,7 @@ func TestQueueRun_DepthRefusalPersistsDurableCausationRefusal(t *testing.T) {
 	_, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "child2_reason",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-primary",
 		CausingRunID:   child1.ID,
 	})
@@ -86,7 +87,7 @@ func TestQueueRun_SelfTriggerRefusalPersistsDurableCausationRefusal(t *testing.T
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "same_reason",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-primary",
 		IdempotencyKey: "task_comment:durable-1",
 	}); err != nil {
@@ -96,7 +97,7 @@ func TestQueueRun_SelfTriggerRefusalPersistsDurableCausationRefusal(t *testing.T
 	_, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "same_reason",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-primary",
 		IdempotencyKey: "task_comment:durable-2",
 	})
@@ -136,7 +137,7 @@ func TestQueueRun_SelfTriggerTotalRefusalPersistsDurableCausationRefusal(t *test
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "reason_a",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-primary",
 		IdempotencyKey: "task_comment:durable-total-1",
 	}); err != nil {
@@ -145,7 +146,7 @@ func TestQueueRun_SelfTriggerTotalRefusalPersistsDurableCausationRefusal(t *test
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "reason_b",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-primary",
 		IdempotencyKey: "task_comment:durable-total-2",
 	}); err != nil {
@@ -155,7 +156,7 @@ func TestQueueRun_SelfTriggerTotalRefusalPersistsDurableCausationRefusal(t *test
 	_, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "reason_c",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-primary",
 		IdempotencyKey: "task_comment:durable-total-3",
 	})

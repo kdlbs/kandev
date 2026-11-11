@@ -186,8 +186,11 @@ func (m *Manager) runCheckoutLocalGitInspect(ctx context.Context, path string, a
 
 func cleanupCheckoutGitPresent(path string) (bool, error) {
 	present, err := cleanupPathPresent(path)
-	if err != nil || !present {
-		return false, err
+	if err != nil {
+		return false, classifyCleanupInspectionError(CleanupInspectionStageCommit, err)
+	}
+	if !present {
+		return false, nil
 	}
 	// Git can discover an ancestor repository when the checkout has no .git.
 	// Only checkout-local metadata may supply this worktree's HEAD identity.

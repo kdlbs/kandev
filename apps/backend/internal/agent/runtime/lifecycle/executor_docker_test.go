@@ -826,7 +826,7 @@ func TestDockerManagedBrokerReconnectRecreatesInstanceWithFreshLease(t *testing.
 	) error {
 		return nil
 	}
-	gotPort, reused, err := dockerExec.findExistingInstance(
+	gotPort, reused, _, err := dockerExec.findExistingInstance(
 		context.Background(), stubHostPortLookup{host: "127.0.0.1", port: 1}, control,
 		req, "container-1", "172.17.0.2", "instance-1", "",
 	)
@@ -866,7 +866,7 @@ func TestDockerManagedBrokerReconnectStopsBeforeReplacementWhenUnreachable(t *te
 	) error {
 		return ErrGitHubCredentialBrokerUnreachable
 	}
-	_, _, err := dockerExec.findExistingInstance(
+	_, _, _, err := dockerExec.findExistingInstance(
 		context.Background(), stubHostPortLookup{host: "127.0.0.1", port: 1}, control,
 		req, "container-1", "172.17.0.2", "instance-1", "",
 	)
@@ -886,7 +886,7 @@ func TestDockerExplicitTokenReconnectDoesNotReplaceInstance(t *testing.T) {
 		Env:        map[string]string{"GITHUB_TOKEN": "explicit-profile-token"},
 	}
 	dockerExec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
-	port, _, err := dockerExec.findExistingInstance(
+	port, _, _, err := dockerExec.findExistingInstance(
 		context.Background(), stubHostPortLookup{host: "127.0.0.1", port: 1}, control,
 		req, "container-1", "172.17.0.2", "instance-1", "",
 	)

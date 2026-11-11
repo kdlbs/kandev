@@ -74,6 +74,7 @@ func (p *NormalizedPayload) SetMonitorIdentity(taskID string, ended bool) {
 	}
 	p.monitor.Ended = ended
 	p.SetBackgroundWorkIdentity(BackgroundWorkKindMonitor, taskID, false, ended)
+	p.SetBackgroundWorkCapabilities(InspectionOnlyWorkloadCapabilities())
 }
 
 // IsActiveMonitor reports whether this payload is a live Claude Monitor watch.

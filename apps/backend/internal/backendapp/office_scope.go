@@ -113,12 +113,13 @@ func officeParamScopeResolvers(repo *officesqlite.Repository) map[string]officeW
 // unresolvable param on an Office route is denied at runtime and fails
 // TestOfficeRouteScopeCompleteness at build time.
 var officeScopedSubResourceParams = map[string]string{
-	"documents/:key":         "a task document, addressed under its task",
-	"revisions/:revId":       "a revision of a task document, addressed under its task",
-	"instructions/:filename": "an instruction file, addressed under its agent",
-	"memory/:entryId":        "a memory entry, addressed under its agent",
-	"blockers/:blockerId":    "a task blocker, addressed under its task",
-	"labels/:labelName":      "a label name, resolved under its task and workspace by the service",
+	"documents/:key":            "a task document, addressed under its task",
+	"revisions/:revId":          "a revision of a task document, addressed under its task",
+	"instructions/:filename":    "an instruction file, addressed under its agent",
+	"memory/:entryId":           "a memory entry, addressed under its agent",
+	"blockers/:blockerId":       "a task blocker, addressed under its task",
+	"labels/:labelName":         "a label name, resolved under its task and workspace by the service",
+	"by-identifier/:identifier": "a task identifier, looked up within the workspace named by `:wsId` on the same route",
 }
 
 // officeWorkspacelessRoutes are the Office routes that legitimately carry no

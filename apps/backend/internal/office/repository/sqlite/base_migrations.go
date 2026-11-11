@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/db"
@@ -419,7 +421,7 @@ func (r *Repository) backfillContinuationScopes() error {
 	}
 	for _, legacyRun := range legacyRuns {
 		scope := models.ContinuationScopeForRun(
-			&models.Run{ContextSnapshot: legacyRun.ContextSnapshot},
+			&runsmodels.Run{ContextSnapshot: legacyRun.ContextSnapshot},
 			legacyRun.AgentProfileID,
 		)
 		if _, err := r.db.Exec(r.db.Rebind(`

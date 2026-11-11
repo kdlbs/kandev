@@ -36,7 +36,7 @@ import (
 // exercises the same authorization (AuthorizeStep, trivially satisfied by
 // context.Background()'s unscoped caller) and lookup path production uses,
 // mirroring setupParitySurfaces in workflow_step_parity_test.go.
-func newTestWorkflowController(t *testing.T) (*workflowctrl.Controller, *workflowrepo.Repository) {
+func newTestWorkflowController(t *testing.T, workflowID string) (*workflowctrl.Controller, *workflowrepo.Repository) {
 	t.Helper()
 	rawDB, err := sql.Open("sqlite3", ":memory:")
 	require.NoError(t, err)
@@ -53,6 +53,13 @@ func newTestWorkflowController(t *testing.T) (*workflowctrl.Controller, *workflo
 
 	repo, err := workflowrepo.NewWithDB(db, db, nil)
 	require.NoError(t, err)
+	if workflowID != "" {
+		_, err = db.Exec(`
+			INSERT OR IGNORE INTO workflows (id, workspace_id, name, created_at, updated_at)
+			VALUES (?, 'ws-1', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`, workflowID, workflowID)
+		require.NoError(t, err)
+	}
 	svc := workflowsvc.NewService(repo, testLogger(t))
 	t.Cleanup(func() { _ = svc.Close() })
 	return workflowctrl.NewController(svc), repo
@@ -74,7 +81,7 @@ func TestHandleStepComplete_AdvancesFieldReflectsAutoAdvanceRequiresSignal(t *te
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			taskSvc, taskRepo := newTestTaskService(t)
-			ctrl, wfRepo := newTestWorkflowController(t)
+			ctrl, wfRepo := newTestWorkflowController(t, "wf-advances")
 			ctx := context.Background()
 
 			seedStepCompleteTarget(t, taskRepo, "task-advances", "session-advances", "step-advances", models.TaskSessionStateRunning)
@@ -156,7 +163,7 @@ func TestHandleStepComplete_SignalGatedStepWithoutMoveActionDoesNotAdvance(t *te
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			taskSvc, taskRepo := newTestTaskService(t)
-			ctrl, wfRepo := newTestWorkflowController(t)
+			ctrl, wfRepo := newTestWorkflowController(t, "wf-no-move")
 			ctx := context.Background()
 
 			seedStepCompleteTarget(t, taskRepo, "task-no-move", "session-no-move", "step-no-move", models.TaskSessionStateRunning)
@@ -206,7 +213,7 @@ func TestHandleStepComplete_SignalGatedStepWithoutMoveActionDoesNotAdvance(t *te
 // carry an `advances` key at all, rather than defaulting to true or false.
 func TestHandleStepComplete_AdvancesFieldOmittedOnLookupFailure(t *testing.T) {
 	taskSvc, taskRepo := newTestTaskService(t)
-	ctrl, _ := newTestWorkflowController(t)
+	ctrl, _ := newTestWorkflowController(t, "")
 	ctx := context.Background()
 
 	seedStepCompleteTarget(t, taskRepo, "task-no-step", "session-no-step", "step-missing", models.TaskSessionStateRunning)

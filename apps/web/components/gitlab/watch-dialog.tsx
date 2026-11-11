@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
 import {
@@ -374,26 +374,27 @@ function dialogTitle(t: TFunction, kind: GitLabWatchKind, editing: boolean): str
   return editing ? t("gitlab:editIssueWatch") : t("gitlab:createIssueWatch");
 }
 
-export function GitLabWatchDialog({
-  kind,
-  open,
-  onOpenChange,
-  watch,
-  workspaceId,
-  onCreate,
-  onUpdate,
-}: GitLabWatchDialogProps) {
+function useWatchSave(props: GitLabWatchDialogProps, payload: CreateRequest | null) {
+  const { watch, onCreate, onUpdate, onOpenChange } = props;
   const { t } = useTranslation();
-  const [form, setForm] = useState(() => makeWatchForm(kind, workspaceId));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  useEffect(() => {
-    setForm(watch ? watchFormFromWatch(kind, watch) : makeWatchForm(kind, workspaceId));
-    setError("");
-  }, [kind, open, watch, workspaceId]);
-  const payload = buildWatchPayload(kind as "review", form, Boolean(watch)) as CreateRequest | null;
+  const live = useRef(false);
+  useLayoutEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+  const changeOpen = useCallback(
+    (open: boolean) => {
+      if (!open) live.current = false;
+      onOpenChange(open);
+    },
+    [onOpenChange],
+  );
   const save = useCallback(async () => {
-    if (!payload) return;
+    if (!payload || !live.current) return;
     setSaving(true);
     setError("");
     try {
@@ -403,18 +404,41 @@ export function GitLabWatchDialog({
       } else {
         await onCreate(payload);
       }
-      onOpenChange(false);
+      if (live.current) changeOpen(false);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("gitlab:gitlabWatchCouldNotBeSaved"));
+      if (live.current) {
+        setError(cause instanceof Error ? cause.message : t("gitlab:gitlabWatchCouldNotBeSaved"));
+      }
     } finally {
-      setSaving(false);
+      if (live.current) setSaving(false);
     }
-  }, [onCreate, onOpenChange, onUpdate, payload, t, watch]);
+  }, [changeOpen, onCreate, onUpdate, payload, t, watch]);
+  return { saving, error, save, changeOpen };
+}
+
+export function GitLabWatchDialog(props: GitLabWatchDialogProps) {
+  if (!props.open) return null;
+  return (
+    <WatchDialogOpening
+      key={JSON.stringify([props.kind, props.workspaceId, props.watch?.id ?? null])}
+      {...props}
+    />
+  );
+}
+
+function WatchDialogOpening(props: GitLabWatchDialogProps) {
+  const { kind, watch, workspaceId } = props;
+  const { t } = useTranslation();
+  const [form, setForm] = useState(() =>
+    watch ? watchFormFromWatch(kind, watch) : makeWatchForm(kind, workspaceId),
+  );
+  const payload = buildWatchPayload(kind as "review", form, Boolean(watch)) as CreateRequest | null;
+  const { saving, error, save, changeOpen } = useWatchSave(props, payload);
   let saveLabel = t("gitlab:createWatch");
   if (watch) saveLabel = t("gitlab:updateWatch");
   if (saving) saveLabel = t("gitlab:saving");
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open onOpenChange={changeOpen}>
       <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-none overflow-y-auto sm:max-h-[90vh] sm:w-[min(900px,calc(100vw-2rem))]">
         <DialogHeader>
           {/* Four whole sentences rather than "Edit"/"Create" + a `kind` noun:
@@ -440,7 +464,7 @@ export function GitLabWatchDialog({
           <ScheduleFields kind={kind} form={form} setForm={setForm} />
         </div>
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
+          <Button variant="outline" onClick={() => changeOpen(false)} className="cursor-pointer">
             {t("common:cancel")}
           </Button>
           <Button

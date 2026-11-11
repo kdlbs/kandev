@@ -6,6 +6,11 @@ import { useToast } from "@/components/toast-provider";
 import { cancelPtyTerminalStart } from "@/components/settings/pty-terminal-lifecycle";
 import { deleteQuickTerminalTab } from "@/lib/api/domains/quick-terminal-api";
 import { ApiError } from "@/lib/api/client";
+import {
+  isTaskDeleteDirtyWorktreeError,
+  isTaskDeletePreviewOutdatedError,
+} from "@/lib/api/task-delete-errors";
+import type { DeleteTaskParams } from "@/lib/api/domains/kanban-api";
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import type {
   QuickChatActiveKind,
@@ -44,9 +49,9 @@ export function resolveQuickChatTaskId(
   );
 }
 
-async function deleteQuickChatTask(taskId: string) {
-  const { deleteTaskAfterUserAction } = await import("@/lib/api/domains/kanban-api");
-  await deleteTaskAfterUserAction(taskId);
+async function deleteQuickChatTask(taskId: string, options: DeleteTaskParams) {
+  const { deleteTask } = await import("@/lib/api/domains/kanban-api");
+  await deleteTask(taskId, options);
 }
 
 type QuickChatTabCloseNavigation = {
@@ -114,43 +119,53 @@ function useQuickChatSessionClose(
     [activeTabReference, resetPendingStarts, store, tabOrder],
   );
 
-  const handleConfirmClose = useCallback(async () => {
-    if (!sessionToClose) return;
-    const sessionId = sessionToClose;
-    const replacement = replacementReference;
-    setSessionToClose(null);
-    setReplacementReference(null);
-    const taskId = resolveQuickChatTaskId(store, sessionId);
-    if (!taskId) {
-      store.removeQuickChatSession(sessionId);
-      removeTabReference(conversationTabReference(sessionId));
-      if (replacement) onActivateTabReference(replacement);
-      return;
-    }
-    try {
-      await deleteQuickChatTask(taskId);
-      store.removeQuickChatSession(sessionId);
-      removeTabReference(conversationTabReference(sessionId));
-      if (replacement) onActivateTabReference(replacement);
-    } catch (error) {
-      console.error("Failed to delete quick chat task:", error);
-      toast({
-        title: t("chat:failedToDeleteQuickChat"),
-        description: error instanceof Error ? error.message : t("chat:unknownError"),
-        variant: "error",
-      });
-    }
-  }, [
-    onActivateTabReference,
-    removeTabReference,
-    replacementReference,
-    sessionToClose,
-    store,
-    t,
-    toast,
-  ]);
+  const handleConfirmClose = useCallback(
+    async (options: DeleteTaskParams = {}) => {
+      if (!sessionToClose) return;
+      const sessionId = sessionToClose;
+      const replacement = replacementReference;
+      setSessionToClose(null);
+      setReplacementReference(null);
+      const taskId = resolveQuickChatTaskId(store, sessionId);
+      if (!taskId) {
+        store.removeQuickChatSession(sessionId);
+        removeTabReference(conversationTabReference(sessionId));
+        if (replacement) onActivateTabReference(replacement);
+        return;
+      }
+      try {
+        await deleteQuickChatTask(taskId, options);
+        store.removeQuickChatSession(sessionId);
+        removeTabReference(conversationTabReference(sessionId));
+        if (replacement) onActivateTabReference(replacement);
+      } catch (error) {
+        console.error("Failed to delete quick chat task:", error);
+        const dirtyWorktree = isTaskDeleteDirtyWorktreeError(error);
+        let description = error instanceof Error ? error.message : t("chat:unknownError");
+        if (dirtyWorktree) description = t("task:deleteDirtyWorktreeDescription");
+        if (isTaskDeletePreviewOutdatedError(error)) description = t("task:deletePreflightError");
+        toast({
+          title: t(
+            dirtyWorktree ? "task:deleteDirtyWorktreeTitle" : "chat:failedToDeleteQuickChat",
+          ),
+          description,
+          variant: "error",
+        });
+      }
+    },
+    [
+      onActivateTabReference,
+      removeTabReference,
+      replacementReference,
+      sessionToClose,
+      store,
+      t,
+      toast,
+    ],
+  );
 
-  return { sessionToClose, setSessionToClose, handleCloseTab, handleConfirmClose };
+  const taskIdToClose = sessionToClose ? resolveQuickChatTaskId(store, sessionToClose) : undefined;
+  return { sessionToClose, taskIdToClose, setSessionToClose, handleCloseTab, handleConfirmClose };
 }
 
 function useQuickTerminalClose(

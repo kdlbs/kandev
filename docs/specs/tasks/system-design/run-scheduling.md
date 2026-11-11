@@ -36,6 +36,12 @@ An ordinary Kanban runner never becomes autonomous by assignment alone.
 Office recovery and cron work are disabled when their corresponding Office
 configuration is absent.
 
+The Office recovery query uses the selected database dialect for JSON
+extraction and its lookback expression. PostgreSQL `created_at` values are
+naive timestamps written as UTC, so the query interprets them as UTC before it
+compares the lookback window. A queued, claimed, or finished run suppresses
+redispatch. Failed and cancelled runs remain eligible for recovery.
+
 ## Scheduler lifecycle
 
 The scheduler and each cron loop own one goroutine and one cancellation context.

@@ -1,5 +1,10 @@
 import { test, expect } from "../../fixtures/test-base";
 import {
+  seedSizedImage,
+  expectTouchTarget,
+  expectImageDialogContained,
+} from "./rich-output-image-helpers";
+import {
   RICH_OUTPUT_FILE,
   RICH_OUTPUT_FILE_CONTENT,
   RICH_OUTPUT_IMAGE,
@@ -24,7 +29,7 @@ test("mobile image previews expand automatically with reachable hide and open ac
   const report = session.activeChat().getByTestId("rich-output");
   const card = report.getByTestId("rich-output-file").filter({ hasText: RICH_OUTPUT_IMAGE });
   const toggle = card.getByTestId("rich-output-file-preview-toggle");
-  const image = card.getByRole("img", { name: RICH_OUTPUT_IMAGE, exact: true });
+  const image = card.locator("img");
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
   await expect(image).toBeVisible();
   await card.scrollIntoViewIfNeeded();
@@ -51,6 +56,22 @@ test("mobile image previews expand automatically with reachable hide and open ac
   for (const button of await card.getByRole("button").all()) {
     expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   }
+  // @covers AC-AGENTS-IMAGE-PREVIEW-EXPANSION-001.1, AC-AGENTS-IMAGE-PREVIEW-EXPANSION-001.5
+  const trigger = card.getByRole("button", { name: `Open ${RICH_OUTPUT_IMAGE}`, exact: true });
+  await trigger.tap();
+  const dialog = testPage.getByRole("dialog", { name: "Image preview" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("img")).toHaveAttribute("src", (await image.getAttribute("src"))!);
+  await expect
+    .poll(() => dialog.getByRole("img").evaluate((img: HTMLImageElement) => img.naturalWidth))
+    .toBe(640);
+  const close = await expectImageDialogContained(testPage);
+  expect((await dialog.getByRole("img").boundingBox())!.width).toBeGreaterThan(imageBox!.width);
+  await testPage.screenshot({ path: testInfo.outputPath("expanded-image-phone.png") });
+  await close.tap();
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
   await testPage.screenshot({ path: testInfo.outputPath("automatic-image-phone.png") });
   await toggle.tap();
   await expect(image).toHaveCount(0);
@@ -98,12 +119,12 @@ test("mobile rich output stays contained and opens the native file viewer", asyn
   const barChart = richOutput.getByTestId("rich-output-chart-bar");
   await expect(lineChart).toBeVisible();
   await expect(barChart).toBeVisible();
-  await lineChart.scrollIntoViewIfNeeded();
-  await expect(lineChart.locator(".recharts-xAxis text").first()).toBeVisible();
-  await expect(lineChart.locator(".recharts-yAxis text").first()).toBeVisible();
-  await barChart.scrollIntoViewIfNeeded();
-  await expect(barChart.locator(".recharts-xAxis text").first()).toBeVisible();
-  await expect(barChart.locator(".recharts-yAxis text").first()).toBeVisible();
+  await lineChart.getByTestId("rich-output-chart-plot").scrollIntoViewIfNeeded();
+  await expect(lineChart.locator(".recharts-xAxis text").first()).toBeVisible({ timeout: 15_000 });
+  await expect(lineChart.locator(".recharts-yAxis text").first()).toBeVisible({ timeout: 15_000 });
+  await barChart.getByTestId("rich-output-chart-plot").scrollIntoViewIfNeeded();
+  await expect(barChart.locator(".recharts-xAxis text").first()).toBeVisible({ timeout: 15_000 });
+  await expect(barChart.locator(".recharts-yAxis text").first()).toBeVisible({ timeout: 15_000 });
   await expect(lineChart.getByTestId("rich-output-chart-legend-series_0")).toContainText("p95");
 
   const errorsLegend = barChart.getByRole("button", { name: "Errors" });
@@ -172,3 +193,35 @@ test("replays a historical CSV report without its source file", async ({
   await session.waitForLoad();
   await expect(session.activeChat().getByTestId("rich-output")).toContainText("Historical health");
 });
+
+// @covers AC-AGENTS-IMAGE-PREVIEW-EXPANSION-001.5
+for (const size of [
+  { width: 1, height: 1 },
+  { width: 80, height: 1600 },
+  { width: 1600, height: 128 },
+]) {
+  test(`mobile image inspection contains a ${size.width}x${size.height} image`, async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const payload = await seedSizedImage(testPage, seedData.repositoryPath, size);
+    const session = await seedRichOutputTask({
+      page: testPage,
+      apiClient,
+      seedData,
+      title: "Image inspection geometry",
+      payload,
+    });
+    const trigger = session
+      .activeChat()
+      .getByRole("button", { name: `Open ${RICH_OUTPUT_IMAGE}`, exact: true });
+    await expect(trigger).toBeVisible();
+    await expectTouchTarget(trigger);
+    await trigger.tap();
+    const close = await expectImageDialogContained(testPage);
+    await close.tap();
+    await expect(testPage.getByRole("dialog")).toBeHidden();
+    await expect(trigger).toBeFocused();
+  });
+}

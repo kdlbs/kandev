@@ -37,6 +37,7 @@ identity, inline editable properties, and the chat / activity views.
 - **AC-OFFICE-TASKS-001.6:** Tasks form a tree via `parent_id`. Parent tasks act as the default home for shared specs, plans, and coordination documents.
 - **AC-OFFICE-TASKS-001.7:** Child tasks can read parent-owned documents and write parent-owned coordination documents by default. Document handoffs reuse the existing **blocker mechanism**: a consumer task is blocked-by the producer task and reads the resulting documents from its wakeup prompt context. There is no separate "required documents" data type.
 - **AC-OFFICE-TASKS-001.8:** Agents can list related tasks (parent, children, siblings, blockers, blocked) and can read/write allowed task documents via MCP or CLI tools.
+- **AC-OFFICE-TASKS-001.9:** An Office task whose observed state is `blocked` shall not be moved to `done` by the automatic terminal-step or turn-complete path. The automatic terminal write shall succeed only when the stored state and workflow step still match the observed values; a stale automatic write shall change nothing and publish no completion side effects. Manual status changes, approval redirects, and non-Office completion keep their existing paths.
 
 The current schema stores the agent identity in `task_sessions.agent_profile_id`.
 The schema does not yet enforce one live Office row per pair. A future migration

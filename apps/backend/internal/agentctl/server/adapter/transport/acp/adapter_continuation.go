@@ -20,12 +20,17 @@ func (a *Adapter) continuationSafetySnapshot(turn *promptTurnState) *streams.Con
 	}
 	turn.evidenceMu.Lock()
 	defer turn.evidenceMu.Unlock()
+	if turn.continuationSupportOverride != "" {
+		support = turn.continuationSupportOverride
+	}
 	snapshot := &streams.ContinuationSafetySnapshot{
 		Support:          support,
 		PromptGeneration: turn.promptGeneration,
 		Known:            true,
 		Unsafe:           turn.continuationUnsafe,
 		Pending:          turn.continuationPermissions != 0,
+		PermissionsResolved: support == streams.ContinuationAgentManagedToolsV3 &&
+			turn.continuationPermissions == 0 && !turn.continuationPermissionUnsafe,
 	}
 	for _, completed := range turn.continuationTools {
 		if completed {
@@ -39,8 +44,11 @@ func (a *Adapter) continuationSafetySnapshot(turn *promptTurnState) *streams.Con
 		}
 	}
 	for id := range turn.continuationPermissionTools {
-		if !turn.continuationTools[id] {
+		if _, observed := turn.continuationTools[id]; !observed {
 			snapshot.Pending = true
+			if support == streams.ContinuationAgentManagedToolsV3 {
+				snapshot.PermissionsResolved = false
+			}
 		}
 	}
 	return snapshot

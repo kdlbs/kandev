@@ -20,6 +20,7 @@ func CreateProfileRequestFromDTO(request dto.ProfileCreateRequest) CreateProfile
 		CLIPassthrough:          request.CLIPassthrough,
 		CLIFlags:                request.CLIFlags,
 		EnvVars:                 request.EnvVars,
+		DevinSandboxInherited:   request.DevinSandboxInherited,
 		CommandPrefix:           request.CommandPrefix,
 		ProviderKind:            request.ProviderKind,
 		ProviderBaseURL:         request.ProviderBaseURL,
@@ -28,6 +29,7 @@ func CreateProfileRequestFromDTO(request dto.ProfileCreateRequest) CreateProfile
 		CursorPluginsMCPEnabled: request.CursorPluginsMCPEnabled,
 		MCPSelectionMode:        request.MCPSelectionMode,
 		MCPSelectedServers:      request.MCPSelectedServers,
+		CopilotSelectedPlugins:  request.CopilotSelectedPlugins.Pointer(),
 		Dynamic:                 request.Dynamic,
 	}
 }
@@ -59,6 +61,7 @@ func UpdateProfileRequestFromDTO(request dto.ProfileUpdateRequest) UpdateProfile
 		CursorPluginsMCPEnabled: request.CursorPluginsMCPEnabled,
 		MCPSelectionMode:        request.MCPSelectionMode,
 		MCPSelectedServers:      request.MCPSelectedServers,
+		CopilotSelectedPlugins:  request.CopilotSelectedPlugins.Pointer(),
 		Dynamic:                 request.Dynamic,
 		Force:                   request.Force,
 	}

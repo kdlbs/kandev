@@ -141,6 +141,15 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 		}
 		return wt, err
 	}
+	if wt, handled, err := m.tryReuseRetainedTaskCheckout(ctx, req); handled {
+		if err == nil {
+			err = gitcheckout.Check(wt.Path, req.CheckoutOptions)
+			if err == nil {
+				err = m.configureContributionDestination(ctx, req.RepositoryPath, wt.Path, wt.Branch, req.ContributionDestination)
+			}
+		}
+		return wt, err
+	}
 	if err := m.refreshRepositoryForMaterialization(ctx, &req); err != nil {
 		return nil, err
 	}
@@ -629,13 +638,6 @@ func requestBranchIdentitySlug(req CreateRequest) string {
 	return SanitizeBranchSlug(req.BranchSlug)
 }
 
-func recreateSourceBranch(existingBranch, checkoutBranch string) string {
-	if checkoutBranch != "" {
-		return checkoutBranch
-	}
-	return existingBranch
-}
-
 // resolveBaseRefWithFallback resolves the base ref for a new worktree, optionally
 // pulling from origin first, and falling back to req.FallbackBaseBranch when the
 // requested base branch is missing. When the fallback path is taken, req.BaseBranch
@@ -645,6 +647,7 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 	if req.QualifiedPRBase != nil {
 		return m.materializeQualifiedPRBase(ctx, req)
 	}
+	fallbackCandidate := m.authorizedFallbackCandidate(req)
 	baseRef = req.BaseBranch
 	warning = req.baseRefreshFallbackWarning
 	detail = req.baseRefreshFallbackDetail
@@ -665,12 +668,12 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 			baseRef = baselineRef
 		case req.RemoteSyncHandled:
 			baseRef, warning, detail, resolvedFallback, err = m.resolveRefreshedBaseRefWithFallback(
-				ctx, req.RepositoryPath, req.BaseBranch, req.FallbackBaseBranch,
+				ctx, req.RepositoryPath, req.BaseBranch, fallbackCandidate,
 			)
 		case req.PullBeforeWorktree:
 			if req.PRNumber > 0 {
 				baseRef, resolvedFallback, err = m.pullBaseBranchWithFallback(
-					ctx, req.RepositoryPath, req.BaseBranch, req.FallbackBaseBranch, req.OnSyncProgress,
+					ctx, req.RepositoryPath, req.BaseBranch, fallbackCandidate, req.OnSyncProgress,
 				)
 			} else {
 				baseRef, err = m.pullBaseBranch(ctx, req.RepositoryPath, req.BaseBranch, req.OnSyncProgress)
@@ -678,12 +681,12 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 		}
 	case req.RemoteSyncHandled:
 		baseRef, warning, detail, resolvedFallback, err = m.resolveRefreshedBaseRefWithFallback(
-			ctx, req.RepositoryPath, req.BaseBranch, req.FallbackBaseBranch,
+			ctx, req.RepositoryPath, req.BaseBranch, fallbackCandidate,
 		)
 	case req.PullBeforeWorktree:
 		if req.PRNumber > 0 {
 			baseRef, resolvedFallback, err = m.pullBaseBranchWithFallback(
-				ctx, req.RepositoryPath, req.BaseBranch, req.FallbackBaseBranch, req.OnSyncProgress,
+				ctx, req.RepositoryPath, req.BaseBranch, fallbackCandidate, req.OnSyncProgress,
 			)
 		} else {
 			baseRef, err = m.pullBaseBranch(ctx, req.RepositoryPath, req.BaseBranch, req.OnSyncProgress)
@@ -705,8 +708,14 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 	if baseExists {
 		return baseRef, warning, detail, nil
 	}
+	if !req.BaseBranchFallbackPolicy.PermitsRepositoryDefaultSubstitution() {
+		// A strict selection never consults the configured fallback or the
+		// live remote default. With refresh disabled this path performs no
+		// network operation at all.
+		return "", "", "", fmt.Errorf("%w: %s", ErrInvalidBaseBranch, baseRef)
+	}
 
-	fallback := strings.TrimSpace(req.FallbackBaseBranch)
+	fallback := strings.TrimSpace(fallbackCandidate)
 	if fallback != "" && fallback != baseRef {
 		resolvedFallback, err = m.resolveFallbackRef(ctx, req, fallback)
 		if err != nil {
@@ -747,6 +756,16 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 	}
 	fallback = liveFallback
 	return m.finishBaseFallback(req, baseRef, fallback, resolvedFallback)
+}
+
+// authorizedFallbackCandidate returns the configured fallback only when the
+// request's policy permits repository-default substitution. The candidate is
+// never permission by itself.
+func (m *Manager) authorizedFallbackCandidate(req *CreateRequest) string {
+	if req == nil || !req.BaseBranchFallbackPolicy.PermitsRepositoryDefaultSubstitution() {
+		return ""
+	}
+	return req.FallbackBaseBranch
 }
 
 func (m *Manager) materializeQualifiedPRBase(ctx context.Context, req *CreateRequest) (string, string, string, error) {
@@ -2418,6 +2437,10 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		m.mu.Lock()
 		m.worktrees[cacheKey(req.SessionID, req.RepositoryID, existing.BranchSlug)] = existing
 		m.mu.Unlock()
+	}
+
+	if req.OnWorktreeCreated != nil {
+		req.OnWorktreeCreated(existing)
 	}
 
 	m.logger.Info("recreated worktree",

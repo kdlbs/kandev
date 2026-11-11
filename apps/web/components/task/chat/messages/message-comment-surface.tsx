@@ -271,7 +271,7 @@ function MessageCommentDrawer({
         <DrawerHeader className="shrink-0 px-4 pb-3 text-left">
           <DrawerTitle>{isEditing ? t("task:editComment") : t("task:comment")}</DrawerTitle>
           <DrawerDescription className="line-clamp-2 text-pretty italic">
-            &ldquo;{target.selection.selectedText}&rdquo;
+            “{target.selection.selectedText}”
           </DrawerDescription>
         </DrawerHeader>
         <div className="min-h-0 overflow-y-auto px-4 pb-2">

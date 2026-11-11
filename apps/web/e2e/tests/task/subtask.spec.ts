@@ -4,6 +4,12 @@ import path from "node:path";
 import type { Locator } from "@playwright/test";
 import { expect, resetSeedRepositoryCheckout, test } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
+import { attachMainFrameNavigationCapture } from "../../helpers/document-navigation";
+import {
+  countSessionStatusRequests,
+  expectOwnedSessionStatusRequests,
+} from "../../helpers/session-status-ownership";
+import { attachSessionStatusRequestCapture } from "../../helpers/ws-capture";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
@@ -117,6 +123,12 @@ test.describe("Subtask basics", () => {
     seedData,
     prCapture,
   }) => {
+    // Distinct prompt markers prove the child chat is not the stale parent
+    // conversation. Both resolve to the simple-message mock scenario.
+    const runMarker = Date.now();
+    const parentPrompt = `/e2e:simple-message parent-conversation-${runMarker}`;
+    const childPrompt = `/e2e:simple-message child-activation-${runMarker}`;
+
     // The dialog inherits the active session's branch, but the agent does not
     // need to finish before the task context menu can be exercised.
     const task = await apiClient.createTaskWithAgent(
@@ -124,7 +136,7 @@ test.describe("Subtask basics", () => {
       "Subtask Parent",
       seedData.agentProfileId,
       {
-        description: "/e2e:simple-message",
+        description: parentPrompt,
         workflow_id: seedData.workflowId,
         repository_ids: [seedData.repositoryId],
         executor_profile_id: seedData.worktreeExecutorProfileId,
@@ -135,6 +147,8 @@ test.describe("Subtask basics", () => {
         timeout: 30_000,
       })
       .toBe("ready");
+
+    const statusRequests = attachSessionStatusRequestCapture(testPage);
 
     // Navigate to the session page
     await testPage.goto(`/t/${task.id}`);
@@ -183,14 +197,77 @@ test.describe("Subtask basics", () => {
     // Fill prompt and submit
     const promptInput = testPage.getByTestId("subtask-prompt-input");
     await expect(promptInput).toBeVisible();
-    await promptInput.fill("/e2e:simple-message");
+    await promptInput.fill(childPrompt);
 
     const submitBtn = testPage.getByRole("button", { name: "Create Subtask" });
+    const createdResponse = waitForHttp(testPage, "POST", /\/api\/v1\/tasks$/);
+    // Arm before submission: the handoff must stay client-side. Any main-frame
+    // document navigation here would mean a reload recovered the page.
+    const documentNavigations = attachMainFrameNavigationCapture(testPage);
     await submitBtn.click();
+    const created = (await (await createdResponse).json()) as {
+      id: string;
+      title: string;
+      session_id?: string;
+      primary_session_id?: string;
+    };
+    const childSessionId = created.session_id ?? created.primary_session_id;
+    if (!childSessionId) throw new Error("creation must return the child session");
     await expect(titleInput).not.toBeVisible({ timeout: 10_000 });
 
-    // After creation, we navigate to the new subtask's session
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    // The child's own route and conversation, not the parent route the local
+    // URL helper previously left behind. These assertions are passive: they
+    // cannot reload the document or recover a broken handoff.
+    const childUrl = new RegExp(`/t/${created.id}\\?sessionId=${childSessionId}$`);
+    await expect(testPage).toHaveURL(childUrl, { timeout: 15_000 });
+    await expect(testPage.getByTestId("task-topbar-title")).toHaveText(created.title);
+    const childChat = testPage.locator('[data-testid="session-chat"]:visible');
+    await expect(childChat).toHaveCount(1);
+    await expect(childChat).toHaveAttribute("data-session-id", childSessionId);
+    await expect(childChat.getByText(childPrompt)).toBeVisible();
+    await expect(childChat.getByText(parentPrompt)).toHaveCount(0);
+    await expect(testPage.getByTestId("session-recovery-error")).toHaveCount(0);
+    await expect(testPage.getByText(/does not belong to task/i)).toHaveCount(0);
+    await expect
+      .poll(() => countSessionStatusRequests(statusRequests.frames, created.id, childSessionId))
+      .toBeGreaterThan(0);
+    await expectOwnedSessionStatusRequests(apiClient, statusRequests.frames, [
+      { taskId: task.id },
+      { taskId: created.id, sessionIds: [childSessionId] },
+    ]);
+    expect(
+      documentNavigations.requests,
+      `the child conversation must appear before any document reload: ${JSON.stringify(
+        documentNavigations.requests,
+      )}`,
+    ).toEqual([]);
+    await prCapture.screenshot("desktop-subtask-child-conversation", {
+      caption: "Desktop child task conversation opened directly after subtask creation",
+    });
+
+    // Reload after the handoff assertions as a separate persistence check and
+    // repeat the exact child-session/content assertions.
+    const childStatusRequestsBeforeReload = countSessionStatusRequests(
+      statusRequests.frames,
+      created.id,
+      childSessionId,
+    );
+    await testPage.reload();
+    const reloadedChildChat = testPage.locator('[data-testid="session-chat"]:visible');
+    await expect(reloadedChildChat).toHaveCount(1);
+    await expect(reloadedChildChat).toHaveAttribute("data-session-id", childSessionId);
+    await expect(reloadedChildChat.getByText(childPrompt)).toBeVisible();
+    await expect(reloadedChildChat.getByText(parentPrompt)).toHaveCount(0);
+    await expect(testPage).toHaveURL(childUrl);
+    await expect(testPage.getByTestId("task-topbar-title")).toHaveText(created.title);
+    await expect
+      .poll(() => countSessionStatusRequests(statusRequests.frames, created.id, childSessionId))
+      .toBeGreaterThan(childStatusRequestsBeforeReload);
+    await expect(testPage.getByTestId("session-recovery-error")).toHaveCount(0);
+    await expectOwnedSessionStatusRequests(apiClient, statusRequests.frames, [
+      { taskId: task.id },
+      { taskId: created.id, sessionIds: [childSessionId] },
+    ]);
 
     // Verify the subtask card appears on the kanban board with "Subtask" badge
     const kanban = new KanbanPage(testPage);

@@ -41,6 +41,7 @@ export type MessageListProps = {
   childrenByParentToolCallId: Map<string, Message[]>;
   taskId?: string;
   sessionId: string | null;
+  detailActive?: boolean;
   messagesLoading: boolean;
   /** Latest-session history is still reconciling while cached rows remain visible. */
   historyRefreshPending?: boolean;

@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
@@ -22,7 +24,7 @@ import (
 type captureDispatcher struct {
 	mu     sync.Mutex
 	calls  []service.LaunchContext
-	runs   []*models.Run
+	runs   []*runsmodels.Run
 	agents []*models.AgentInstance
 	// launched, parked, and err control the (launched, parked, err) tuple
 	// the fake returns. Default zero-value is (false, false, nil) — routing
@@ -34,7 +36,7 @@ type captureDispatcher struct {
 }
 
 func (c *captureDispatcher) DispatchWithRouting(
-	_ context.Context, run *models.Run,
+	_ context.Context, run *runsmodels.Run,
 	agent *models.AgentInstance, launch service.LaunchContext,
 ) (bool, bool, error) {
 	c.mu.Lock()
@@ -46,14 +48,14 @@ func (c *captureDispatcher) DispatchWithRouting(
 }
 
 func (c *captureDispatcher) HandlePostStartFailure(
-	_ context.Context, _ *models.Run, _ *models.AgentInstance, _ string,
+	_ context.Context, _ *runsmodels.Run, _ *models.AgentInstance, _ string,
 	_ *streams.ProviderError,
 ) (bool, error) {
 	return false, nil
 }
 
 func (c *captureDispatcher) MarkRunSuccessHealth(
-	_ context.Context, _ *models.Run, _ *models.AgentInstance,
+	_ context.Context, _ *runsmodels.Run, _ *models.AgentInstance,
 ) {
 }
 
@@ -195,7 +197,7 @@ func TestSchedulerIntegration_SeatActionFlowsToPromptAndLaunch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	var run *models.Run
+	var run *runsmodels.Run
 	for _, candidate := range runs {
 		if candidate.AgentProfileID == agent.ID && candidate.Reason == service.RunReasonTaskAssigned {
 			run = candidate
@@ -274,7 +276,7 @@ func TestSchedulerIntegration_NonSeatRunDoesNotReceiveDecisionSkill(t *testing.T
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	var run *models.Run
+	var run *runsmodels.Run
 	for _, candidate := range runs {
 		if candidate.AgentProfileID == agent.ID && candidate.Reason == service.RunReasonTaskAssigned {
 			run = candidate

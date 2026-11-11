@@ -2,7 +2,10 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // BindResumeAttempt attaches a prompt-owned recovery identity to the startup
@@ -21,6 +24,10 @@ func (m *Manager) BindResumeAttempt(_ context.Context, sessionID, attemptID stri
 	if !exists || execution == nil {
 		return ErrExecutionNotFound
 	}
+	return m.bindResumeAttemptToExecution(execution, attemptID)
+}
+
+func (m *Manager) bindResumeAttemptToExecution(execution *AgentExecution, attemptID string) error {
 	// Startup callbacks acquire startupCallbackMu before they take the
 	// execution-store lock. Acquire the same locks in that order here so an
 	// adopted execution cannot deadlock a callback while its identity is bound.
@@ -28,15 +35,12 @@ func (m *Manager) BindResumeAttempt(_ context.Context, sessionID, attemptID stri
 	defer execution.startupCallbackMu.Unlock()
 	bound := false
 	err := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
-		if current == execution && current.SessionID == sessionID {
+		if current == execution {
 			bound = current.bindStartupAttemptIDWithLease(attemptID)
 		}
 	})
-	if err != nil {
-		return err
+	if errors.Is(err, ErrExecutionNotFound) || (err == nil && !bound) {
+		return models.ErrExecutionRotated
 	}
-	if !bound {
-		return fmt.Errorf("execution %q has no startup generation", execution.ID)
-	}
-	return nil
+	return err
 }

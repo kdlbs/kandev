@@ -1,11 +1,10 @@
-import type { StateCreator } from "zustand";
+import type { SliceCreator } from "@/lib/state/slice-creator";
+
 import type { Draft } from "immer";
 import type { SessionSlice } from "./types";
 import type { TurnChangeSetSummary } from "@/lib/types/turn-changes";
 
-type ImmerSet = Parameters<
-  StateCreator<SessionSlice, [["zustand/immer", never]], [], SessionSlice>
->[0];
+type ImmerSet = Parameters<SliceCreator<SessionSlice>>[0];
 
 function upsertByRevision(
   summaries: Draft<TurnChangeSetSummary>[],

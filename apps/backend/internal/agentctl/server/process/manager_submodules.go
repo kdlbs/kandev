@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,13 +12,29 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/fsdiagnostics"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
 
 const submoduleDiscoveryTimeout = 10 * time.Second
 const maxSubmoduleDiscoveryDepth = 32
+
+// submoduleDiagnosticFields supplies the closed operation and error class for
+// submodule discovery failures. An exit code is added only when a typed
+// process result supplies one.
+func submoduleDiagnosticFields(err error) []zap.Field {
+	fields := []zap.Field{zap.String("operation", "submodule_discovery")}
+	if err == nil {
+		return fields
+	}
+	fields = append(fields, zap.String("error_class", fsdiagnostics.ErrorClass(err)))
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		fields = append(fields, zap.Int("exit_code", exitErr.ExitCode()))
+	}
+	return fields
+}
 
 func (m *Manager) hasBareMultiRepoTrackerGraph() bool {
 	root, trackers := m.snapshotTrackers()
@@ -50,6 +67,7 @@ func (m *Manager) buildWorkspaceTrackerGraph(
 
 	if !rootIsGit && (len(directRepos) >= 2 || forceBareRoot) {
 		root := NewWorkspaceTrackerForRepo(workDir, "", m.logger)
+		root.suppressGitPublication = true
 		m.configureTracker(root, "", roots)
 
 		trackers := make([]*WorkspaceTracker, 0, len(directRepos))
@@ -102,10 +120,11 @@ func (m *Manager) buildRepositoryScopeTrackers(
 	return append(trackers, m.discoverSubmoduleTrackers(ctx, tracker, roots, workspaceRoot, 0)...)
 }
 
-// reconcileWorkspaceTrackerGraph keeps existing tracker instances when their
-// scope and path are unchanged, while adding or removing submodule trackers
-// discovered by a workspace rescan. New trackers inherit subscribers and the
-// current polling mode just like the existing sibling-repository rescan path.
+// reconcileWorkspaceTrackerGraph keeps live tracker instances when their scope
+// and path are unchanged, while adding or removing submodule trackers
+// discovered by a workspace rescan. Stopped trackers are never reused: Stop is
+// terminal, so they are replaced and retired like any other removed scope. New
+// trackers inherit subscribers and the current polling mode.
 func (m *Manager) reconcileWorkspaceTrackerGraph(
 	ctx context.Context,
 	workDir string,
@@ -113,31 +132,21 @@ func (m *Manager) reconcileWorkspaceTrackerGraph(
 	forceBareRoot bool,
 ) error {
 	desiredRoot, desiredTrackers := m.buildWorkspaceTrackerGraph(ctx, workDir, roots, true, forceBareRoot)
-	subs := m.snapshotSubscribers()
 	oldRoot, oldTrackers := m.snapshotTrackers()
-
-	oldByIdentity := make(map[repositoryTrackerKey]*WorkspaceTracker, len(oldTrackers))
-	for _, tracker := range oldTrackers {
-		oldByIdentity[repositoryTrackerIdentity(tracker.RepositoryName(), tracker.workDir)] = tracker
-	}
+	oldByIdentity := liveRepositoryTrackersByIdentity(oldTrackers)
 
 	root := desiredRoot
-	rootReused := false
-	if oldRoot != nil && repositoryTrackerIdentity(oldRoot.RepositoryName(), oldRoot.workDir) ==
-		repositoryTrackerIdentity(desiredRoot.RepositoryName(), desiredRoot.workDir) {
-		root = oldRoot
-		rootReused = true
-		syncTrackerConfiguration(root, desiredRoot, roots)
-		m.prepareTrackerComparisonTarget(root, false)
+	rootReused := canReuseRootTracker(oldRoot, desiredRoot)
+	if rootReused {
+		syncTrackerConfiguration(oldRoot, desiredRoot, roots)
+		m.prepareTrackerComparisonTarget(oldRoot, false)
 		desiredRoot.Stop()
-	}
-	if !rootReused {
-		startAndAttachTracker(ctx, root, subs)
+		root = oldRoot
 	}
 
 	retained := make([]*WorkspaceTracker, 0, len(desiredTrackers))
+	added := make([]*WorkspaceTracker, 0, len(desiredTrackers)+1)
 	used := make(map[*WorkspaceTracker]struct{}, len(desiredTrackers))
-	newTrackers := make([]*WorkspaceTracker, 0)
 	for _, desired := range desiredTrackers {
 		identity := repositoryTrackerIdentity(desired.RepositoryName(), desired.workDir)
 		if existing := oldByIdentity[identity]; existing != nil {
@@ -148,38 +157,19 @@ func (m *Manager) reconcileWorkspaceTrackerGraph(
 			used[existing] = struct{}{}
 			continue
 		}
-		startAndAttachTracker(ctx, desired, subs)
+		m.prepareTrackerComparisonTarget(desired, false)
+		desired.Start(ctx)
 		retained = append(retained, desired)
-		newTrackers = append(newTrackers, desired)
+		added = append(added, desired)
+	}
+	if !rootReused {
+		m.prepareTrackerComparisonTarget(root, false)
+		root.Start(ctx)
+		added = append(added, root)
 	}
 
-	m.repoTrackersMu.Lock()
-	m.workspaceTracker = root
-	m.repoTrackers = retained
-	m.cfg.WorkDir = workDir
-	m.workspaceSourceRoots = append([]string(nil), roots...)
-	m.cfg.WorkspaceSourceRoots = append([]string(nil), roots...)
-	m.applyWorkspacePollModeLocked(newTrackers...)
-	m.repoTrackersMu.Unlock()
-	if m.processRunner != nil {
-		m.processRunner.setWorkspaceTracker(root)
-	}
-
-	if oldRoot != nil && oldRoot != root {
-		for _, sub := range subs {
-			oldRoot.DetachWorkspaceStreamSubscriber(sub)
-		}
-		oldRoot.Stop()
-	}
-	for _, old := range oldTrackers {
-		if _, keep := used[old]; keep {
-			continue
-		}
-		for _, sub := range subs {
-			old.DetachWorkspaceStreamSubscriber(sub)
-		}
-		old.Stop()
-	}
+	retiredRoot, retired := splitRetiredWorkspaceTrackers(root, oldRoot, oldTrackers, used)
+	m.installWorkspaceTrackerGraph(root, retained, workDir, roots, added, retiredRoot, retired)
 	return nil
 }
 
@@ -189,38 +179,132 @@ func (m *Manager) replaceWorkspaceTrackerGraph(
 	roots []string,
 ) error {
 	desiredRoot, desiredTrackers := m.buildWorkspaceTrackerGraph(ctx, workDir, roots, true, true)
-	subs := m.snapshotSubscribers()
-	startAndAttachTracker(ctx, desiredRoot, subs)
-	for _, tracker := range desiredTrackers {
-		startAndAttachTracker(ctx, tracker, subs)
-	}
-
 	oldRoot, oldTrackers := m.snapshotTrackers()
+	m.prepareTrackerComparisonTarget(desiredRoot, false)
+	desiredRoot.Start(ctx)
+	for _, tracker := range desiredTrackers {
+		m.prepareTrackerComparisonTarget(tracker, false)
+		tracker.Start(ctx)
+	}
+	all := append([]*WorkspaceTracker{desiredRoot}, desiredTrackers...)
+	retiredRoot, retired := splitRetiredWorkspaceTrackers(desiredRoot, oldRoot, oldTrackers, nil)
+	m.installWorkspaceTrackerGraph(desiredRoot, desiredTrackers, workDir, roots, all, retiredRoot, retired)
+	return nil
+}
+
+// splitRetiredWorkspaceTrackers separates the previous graph into trackers
+// that are leaving it. Reused trackers stay in the published graph and must not
+// be detached or stopped.
+func splitRetiredWorkspaceTrackers(
+	root, oldRoot *WorkspaceTracker,
+	oldTrackers []*WorkspaceTracker,
+	used map[*WorkspaceTracker]struct{},
+) (*WorkspaceTracker, []*WorkspaceTracker) {
+	var retiredRoot *WorkspaceTracker
+	if oldRoot != nil && oldRoot != root {
+		retiredRoot = oldRoot
+	}
+	retired := make([]*WorkspaceTracker, 0, len(oldTrackers))
+	for _, old := range oldTrackers {
+		if _, keep := used[old]; keep {
+			continue
+		}
+		retired = append(retired, old)
+	}
+	return retiredRoot, retired
+}
+
+// liveRepositoryTrackersByIdentity indexes only trackers whose lifetime is
+// still open. A stopped tracker keeps its old identity fields but cannot serve
+// reads or polling, so it must not authorize reuse.
+func liveRepositoryTrackersByIdentity(trackers []*WorkspaceTracker) map[repositoryTrackerKey]*WorkspaceTracker {
+	byIdentity := make(map[repositoryTrackerKey]*WorkspaceTracker, len(trackers))
+	for _, tracker := range trackers {
+		if !tracker.live() {
+			continue
+		}
+		byIdentity[repositoryTrackerIdentity(tracker.RepositoryName(), tracker.workDir)] = tracker
+	}
+	return byIdentity
+}
+
+func canReuseRootTracker(oldRoot, desiredRoot *WorkspaceTracker) bool {
+	return oldRoot.live() &&
+		repositoryTrackerIdentity(oldRoot.RepositoryName(), oldRoot.workDir) ==
+			repositoryTrackerIdentity(desiredRoot.RepositoryName(), desiredRoot.workDir) &&
+		oldRoot.suppressGitPublication == desiredRoot.suppressGitPublication
+}
+
+// installWorkspaceTrackerGraph publishes a replacement graph and moves
+// workspace-stream subscribers from the retired trackers to the new ones as a
+// single ownership handoff under streamSubscribersMu. Subscribe, unsubscribe
+// and graph publication therefore cannot interleave: a retired tracker is
+// detached from every channel it actually holds before any concurrent
+// unsubscribe may close that channel, including a subscriber already removed
+// from the manager registry during the transition.
+//
+// Tracker Stop and waits happen after the handoff lock is released. The caller
+// starts new trackers before entry; no Git work runs here.
+func (m *Manager) installWorkspaceTrackerGraph(
+	root *WorkspaceTracker,
+	trackers []*WorkspaceTracker,
+	workDir string,
+	roots []string,
+	started []*WorkspaceTracker,
+	retiredRoot *WorkspaceTracker,
+	retired []*WorkspaceTracker,
+) {
+	m.streamSubscribersMu.Lock()
+	m.publishWorkspaceTrackerGraph(root, trackers, workDir, roots, started...)
+	m.rebindGitOperatorTrackers(root, trackers)
+	if m.workspaceGraphAfterPublish != nil {
+		m.workspaceGraphAfterPublish()
+	}
+	for _, tracker := range started {
+		if tracker == nil {
+			continue
+		}
+		for sub := range m.streamSubscribers {
+			tracker.AttachWorkspaceStreamSubscriber(sub)
+		}
+	}
+	if retiredRoot != nil {
+		retiredRoot.detachAllWorkspaceStreamSubscribers()
+	}
+	for _, old := range retired {
+		old.detachAllWorkspaceStreamSubscribers()
+	}
+	m.streamSubscribersMu.Unlock()
+
+	if m.processRunner != nil {
+		m.processRunner.setWorkspaceTracker(root)
+	}
+	if retiredRoot != nil {
+		retiredRoot.Stop()
+	}
+	for _, old := range retired {
+		old.Stop()
+	}
+}
+
+// publishWorkspaceTrackerGraph swaps the root and repository tracker set under
+// the graph lock and stamps the new trackers with the effective polling mode.
+// Tracker start, Stop, Git work and subscriber callbacks stay outside it.
+func (m *Manager) publishWorkspaceTrackerGraph(
+	root *WorkspaceTracker,
+	trackers []*WorkspaceTracker,
+	workDir string,
+	roots []string,
+	started ...*WorkspaceTracker,
+) {
 	m.repoTrackersMu.Lock()
-	m.workspaceTracker = desiredRoot
-	m.repoTrackers = desiredTrackers
-	m.cfg.WorkDir = workDir
+	m.workspaceTracker = root
+	m.repoTrackers = trackers
+	m.setWorkspaceWorkDirLocked(workDir)
 	m.workspaceSourceRoots = append([]string(nil), roots...)
 	m.cfg.WorkspaceSourceRoots = append([]string(nil), roots...)
-	m.applyWorkspacePollModeLocked(append([]*WorkspaceTracker{desiredRoot}, desiredTrackers...)...)
+	m.applyWorkspacePollModeLocked(started...)
 	m.repoTrackersMu.Unlock()
-	if m.processRunner != nil {
-		m.processRunner.setWorkspaceTracker(desiredRoot)
-	}
-
-	if oldRoot != nil {
-		for _, sub := range subs {
-			oldRoot.DetachWorkspaceStreamSubscriber(sub)
-		}
-		oldRoot.Stop()
-	}
-	for _, tracker := range oldTrackers {
-		for _, sub := range subs {
-			tracker.DetachWorkspaceStreamSubscriber(sub)
-		}
-		tracker.Stop()
-	}
-	return nil
 }
 
 func syncTrackerConfiguration(target, source *WorkspaceTracker, roots []string) {
@@ -239,13 +323,6 @@ func syncTrackerConfiguration(target, source *WorkspaceTracker, roots []string) 
 	target.SetBaseBranch(source.BaseBranch())
 }
 
-func startAndAttachTracker(ctx context.Context, tracker *WorkspaceTracker, subs []types.WorkspaceStreamSubscriber) {
-	tracker.Start(ctx)
-	for _, sub := range subs {
-		tracker.AttachWorkspaceStreamSubscriber(sub)
-	}
-}
-
 // discoverSubmoduleTrackers returns initialized, declared gitlink children in
 // stable path order. A child is anchored to the gitlink SHA in the parent's
 // comparison tree, not to the child's current/default branch. The recursion
@@ -259,17 +336,21 @@ func (m *Manager) discoverSubmoduleTrackers(
 ) []*WorkspaceTracker {
 	if depth >= maxSubmoduleDiscoveryDepth {
 		m.logger.Warn("submodule discovery depth limit reached",
-			zap.String("repository_name", parent.RepositoryName()),
-			zap.Int("depth", depth),
-			zap.Int("max_depth", maxSubmoduleDiscoveryDepth))
+			append([]zap.Field{
+				zap.String("repository_name", parent.RepositoryName()),
+				zap.Int("depth", depth),
+				zap.Int("max_depth", maxSubmoduleDiscoveryDepth),
+			}, submoduleDiagnosticFields(nil)...)...)
 		return nil
 	}
 	paths, err := listGitlinkPaths(ctx, parent.workDir, "HEAD")
 	if err != nil {
 		m.logger.Warn("could not discover submodules",
-			zap.String("repository_name", parent.RepositoryName()),
-			zap.String("path", parent.workDir),
-			zap.Error(err))
+			append([]zap.Field{
+				zap.String("repository_name", parent.RepositoryName()),
+				zap.String("path", parent.workDir),
+				zap.Error(err),
+			}, submoduleDiagnosticFields(err)...)...)
 		return nil
 	}
 	parentAnchor, _ := parent.ResolveBaseAnchor(ctx)
@@ -288,9 +369,11 @@ func (m *Manager) discoverSubmoduleTrackers(
 			anchor, err = gitlinkCommitAt(ctx, parent.workDir, parentAnchor, relativePath)
 			if err != nil {
 				m.logger.Warn("could not resolve submodule comparison anchor",
-					zap.String("repository_name", name),
-					zap.String("parent_anchor", parentAnchor),
-					zap.Error(err))
+					append([]zap.Field{
+						zap.String("repository_name", name),
+						zap.String("parent_anchor", parentAnchor),
+						zap.Error(err),
+					}, submoduleDiagnosticFields(err)...)...)
 			}
 		}
 		child.SetComparisonAnchor(anchor)
@@ -307,13 +390,14 @@ func (m *Manager) discoverSubmoduleTrackers(
 // authenticated workspace root.
 func (m *Manager) initializedSubmodulePath(workspaceRoot, parentPath, relativePath string) (string, bool) {
 	if !safeGitRelativePath(relativePath) {
-		m.logger.Warn("submodule discovery rejected unsafe path", zap.String("path", relativePath))
+		m.logger.Warn("submodule discovery rejected unsafe path",
+			append([]zap.Field{zap.String("path", relativePath)}, submoduleDiagnosticFields(nil)...)...)
 		return "", false
 	}
 	parentRoot, err := os.OpenRoot(parentPath)
 	if err != nil {
 		m.logger.Warn("submodule discovery could not open parent worktree",
-			zap.String("path", parentPath), zap.Error(err))
+			append([]zap.Field{zap.String("path", parentPath), zap.Error(err)}, submoduleDiagnosticFields(err)...)...)
 		return "", false
 	}
 	defer func() { _ = parentRoot.Close() }()
@@ -323,7 +407,7 @@ func (m *Manager) initializedSubmodulePath(workspaceRoot, parentPath, relativePa
 	childPath := filepath.Clean(filepath.Join(parentPath, filepath.FromSlash(relativePath)))
 	if err != nil || !childInfo.IsDir() || childInfo.Mode()&os.ModeSymlink != 0 {
 		m.logger.Warn("submodule discovery rejected child worktree",
-			zap.String("path", childPath), zap.Error(err))
+			append([]zap.Field{zap.String("path", childPath), zap.Error(err)}, submoduleDiagnosticFields(err)...)...)
 		return "", false
 	}
 	childRoot, ok := m.openVerifiedSubmoduleRoot(parentRoot, childInfo, childPath, relativePath)
@@ -334,31 +418,35 @@ func (m *Manager) initializedSubmodulePath(workspaceRoot, parentPath, relativePa
 	resolvedRoot, err := filepath.EvalSymlinks(workspaceRoot)
 	if err != nil {
 		m.logger.Warn("submodule discovery could not resolve workspace root",
-			zap.String("path", workspaceRoot), zap.Error(err))
+			append([]zap.Field{zap.String("path", workspaceRoot), zap.Error(err)}, submoduleDiagnosticFields(err)...)...)
 		return "", false
 	}
 	resolvedChild, err := filepath.EvalSymlinks(childPath)
 	if err != nil {
 		m.logger.Warn("submodule discovery could not resolve child worktree",
-			zap.String("path", childPath), zap.Error(err))
+			append([]zap.Field{zap.String("path", childPath), zap.Error(err)}, submoduleDiagnosticFields(err)...)...)
 		return "", false
 	}
 	relativeToRoot, err := filepath.Rel(resolvedRoot, resolvedChild)
 	if err != nil || pathEscapesRoot(relativeToRoot) {
 		m.logger.Warn("submodule discovery rejected child outside workspace root",
-			zap.String("path", childPath), zap.String("workspace_root", workspaceRoot), zap.Error(err))
+			append([]zap.Field{
+				zap.String("path", childPath),
+				zap.String("workspace_root", workspaceRoot),
+				zap.Error(err),
+			}, submoduleDiagnosticFields(err)...)...)
 		return "", false
 	}
 	if resolveGitIndexPath(childPath) == "" {
 		m.logger.Warn("submodule discovery rejected uninitialized child",
-			zap.String("path", childPath))
+			append([]zap.Field{zap.String("path", childPath)}, submoduleDiagnosticFields(nil)...)...)
 		return "", false
 	}
 	currentChildInfo, err := parentRoot.Lstat(filepath.FromSlash(relativePath))
 	if err != nil || currentChildInfo.Mode()&os.ModeSymlink != 0 ||
 		!os.SameFile(childInfo, currentChildInfo) {
 		m.logger.Warn("submodule discovery rejected changed child worktree",
-			zap.String("path", childPath), zap.Error(err))
+			append([]zap.Field{zap.String("path", childPath), zap.Error(err)}, submoduleDiagnosticFields(err)...)...)
 		return "", false
 	}
 	return childPath, true
@@ -373,20 +461,20 @@ func (m *Manager) openVerifiedSubmoduleRoot(
 	childRoot, err := parentRoot.OpenRoot(filepath.FromSlash(relativePath))
 	if err != nil {
 		m.logger.Warn("submodule discovery could not open child worktree",
-			zap.String("path", childPath), zap.Error(err))
+			append([]zap.Field{zap.String("path", childPath), zap.Error(err)}, submoduleDiagnosticFields(err)...)...)
 		return nil, false
 	}
 	openedChildInfo, err := childRoot.Stat(".")
 	if err != nil || !os.SameFile(childInfo, openedChildInfo) {
 		_ = childRoot.Close()
 		m.logger.Warn("submodule discovery rejected replaced child worktree",
-			zap.String("path", childPath), zap.Error(err))
+			append([]zap.Field{zap.String("path", childPath), zap.Error(err)}, submoduleDiagnosticFields(err)...)...)
 		return nil, false
 	}
 	if _, err := childRoot.Lstat(".git"); err != nil {
 		_ = childRoot.Close()
 		m.logger.Warn("submodule discovery rejected child without git entry",
-			zap.String("path", childPath), zap.Error(err))
+			append([]zap.Field{zap.String("path", childPath), zap.Error(err)}, submoduleDiagnosticFields(err)...)...)
 		return nil, false
 	}
 	return childRoot, true

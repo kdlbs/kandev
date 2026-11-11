@@ -357,6 +357,29 @@ func TestCleanupPendingRequests_ScopesToRetiredStream(t *testing.T) {
 	}
 }
 
+func TestRegisterPendingRequestRejectsDisconnectedStream(t *testing.T) {
+	retiredConn := &websocket.Conn{}
+	c := &Client{
+		agentStreamConn:     retiredConn,
+		pendingRequests:     make(map[string]chan *ws.Message),
+		pendingRequestConns: make(map[string]*websocket.Conn),
+	}
+
+	c.mu.Lock()
+	c.agentStreamConn = nil
+	c.mu.Unlock()
+	c.cleanupPendingRequests(retiredConn)
+
+	if c.registerPendingRequest("late", make(chan *ws.Message, 1), retiredConn) {
+		t.Fatal("request was registered after its stream disconnected")
+	}
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+	if len(c.pendingRequests) != 0 || len(c.pendingRequestConns) != 0 {
+		t.Fatalf("late request was retained: %d requests, %d connections", len(c.pendingRequests), len(c.pendingRequestConns))
+	}
+}
+
 // --- Tests for the 7 migrated methods ---
 
 func TestInitialize_Success(t *testing.T) {
@@ -400,6 +423,28 @@ func TestInitialize_Success(t *testing.T) {
 	capability, advertised := c.DurableDeliveryCapability()
 	if !advertised || !capability.Durable || capability.Version != 1 {
 		t.Fatalf("durable delivery capability = %#v, advertised=%v", capability, advertised)
+	}
+}
+
+func TestInitializeStoresSessionCapabilities(t *testing.T) {
+	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{
+			"success": true,
+			"agent_info": map[string]any{
+				"name": "test-agent", "version": "1.0.0",
+				"supports_session_resume": true, "supports_session_load": true,
+			},
+		})
+		return resp
+	})
+	defer ts.Close()
+	defer c.Close()
+
+	if _, err := c.Initialize(context.Background(), "kandev", "1.0.0"); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	if !c.SupportsSessionResume() || !c.SupportsSessionLoad() {
+		t.Fatalf("capabilities = resume:%v load:%v", c.SupportsSessionResume(), c.SupportsSessionLoad())
 	}
 }
 
@@ -482,6 +527,95 @@ func TestInitializeStartupEvidence(t *testing.T) {
 	}
 }
 
+func TestInitializeStartupEvidenceDropsMalformedOptionalFields(t *testing.T) {
+	evidence := managedStartupEvidenceFromDetails(map[string]any{
+		"startup_evidence": map[string]any{
+			"process_generation":      9,
+			"exit_disposition":        "private_disposition",
+			"exit_code":               1.5,
+			"diagnostic_reason":       "mise_config_untrusted",
+			"diagnostic_complete":     false,
+			"collection_complete":     true,
+			"npm_diagnostic_complete": true,
+		},
+	})
+	if evidence == nil {
+		t.Fatal("required generation evidence was dropped")
+	}
+	if evidence.ProcessGeneration != 9 || evidence.ExitDisposition != types.ManagedStartupExitUnknown {
+		t.Fatalf("evidence = %#v, want generation 9 and unknown disposition", evidence)
+	}
+	if evidence.ExitCode != nil {
+		t.Fatalf("fractional exit code = %#v, want nil", evidence.ExitCode)
+	}
+	if evidence.DiagnosticReason != "" {
+		t.Fatalf("incomplete diagnostic reason = %q, want empty", evidence.DiagnosticReason)
+	}
+}
+
+func TestInitializeStartupEvidenceAcceptsCompleteMiseReason(t *testing.T) {
+	evidence := managedStartupEvidenceFromDetails(map[string]any{
+		"startup_evidence": map[string]any{
+			"process_generation":  uint64(9),
+			"exit_disposition":    "ordinary_exit",
+			"exit_code":           1,
+			"diagnostic_reason":   "mise_config_untrusted",
+			"diagnostic_complete": true,
+		},
+	})
+	if evidence == nil || evidence.ExitCode == nil || *evidence.ExitCode != 1 ||
+		evidence.DiagnosticReason != "mise_config_untrusted" || !evidence.DiagnosticComplete {
+		t.Fatalf("evidence = %#v, want a complete recognized mise refusal", evidence)
+	}
+}
+
+func TestInitializeStartupEvidenceExitCodeNullMissingAndZero(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		evidence   map[string]any
+		wantNil    bool
+		wantStatus int
+	}{
+		{
+			name: "missing",
+			evidence: map[string]any{
+				"process_generation": uint64(9), "exit_disposition": "ordinary_exit",
+			},
+			wantNil: true,
+		},
+		{
+			name: "explicit null",
+			evidence: map[string]any{
+				"process_generation": uint64(9), "exit_disposition": "ordinary_exit", "exit_code": nil,
+			},
+			wantNil: true,
+		},
+		{
+			name: "zero",
+			evidence: map[string]any{
+				"process_generation": uint64(9), "exit_disposition": "ordinary_exit", "exit_code": 0,
+			},
+			wantStatus: 0,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			evidence := managedStartupEvidenceFromDetails(map[string]any{"startup_evidence": tt.evidence})
+			if evidence == nil {
+				t.Fatal("required generation evidence was dropped")
+			}
+			if tt.wantNil {
+				if evidence.ExitCode != nil {
+					t.Fatalf("exit code = %#v, want missing status", evidence.ExitCode)
+				}
+				return
+			}
+			if evidence.ExitCode == nil || *evidence.ExitCode != tt.wantStatus {
+				t.Fatalf("exit code = %#v, want %d", evidence.ExitCode, tt.wantStatus)
+			}
+		})
+	}
+}
+
 func TestStartStoresProcessGenerationWithoutChangingReturnValue(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/start" {
@@ -550,6 +684,34 @@ func TestNewSession_Success(t *testing.T) {
 	}
 	if sessionID != "sess-123" {
 		t.Errorf("expected session ID 'sess-123', got %q", sessionID)
+	}
+}
+
+func TestResumeSession_SuccessStoresAttachmentAttempt(t *testing.T) {
+	var received map[string]any
+	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
+		if msg.Action != "agent.session.resume" {
+			t.Fatalf("action = %q, want agent.session.resume", msg.Action)
+		}
+		if err := json.Unmarshal(msg.Payload, &received); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{
+			"success": true, "attachment_attempt_id": "attempt-7",
+		})
+		return resp
+	})
+	defer ts.Close()
+	defer c.Close()
+
+	if err := c.ResumeSession(context.Background(), "acp-session", "/workspace", nil); err != nil {
+		t.Fatalf("ResumeSession: %v", err)
+	}
+	if received["session_id"] != "acp-session" || received["cwd"] != "/workspace" {
+		t.Fatalf("resume request = %#v", received)
+	}
+	if got := c.GetLastAttachmentAttemptID(); got != "attempt-7" {
+		t.Fatalf("attachment attempt = %q, want attempt-7", got)
 	}
 }
 
@@ -1350,6 +1512,136 @@ func TestReadUpdatesStream_EventBurstDoesNotStarveResponse(t *testing.T) {
 	}
 	if resp.Type != ws.MessageTypeResponse {
 		t.Fatalf("expected response type, got %q", resp.Type)
+	}
+}
+
+func TestStreamUpdatesFromWithOwnerReportsAcceptedConnectionBeforeEvents(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	stageQueries := make(chan string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		stageQueries <- r.URL.Query().Get("stage")
+		data, _ := json.Marshal(AgentEvent{Type: "message_chunk", Text: "ready"})
+		_ = conn.WriteMessage(websocket.TextMessage, data)
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	var previousOwner uint64
+	for i := 0; i < 2; i++ {
+		client := &Client{
+			baseURL:         server.URL,
+			httpClient:      server.Client(),
+			logger:          newTestLogger(),
+			pendingRequests: make(map[string]chan *ws.Message),
+		}
+		eventsHandled := atomic.Int32{}
+		var observedAtConnect atomic.Int32
+		var ownerID uint64
+		err := client.StreamUpdatesFromWithOwner(context.Background(), func(AgentEvent) {
+			eventsHandled.Add(1)
+		}, nil, nil, 0, func(acceptedOwner uint64) {
+			ownerID = acceptedOwner
+			observedAtConnect.Store(eventsHandled.Load())
+		})
+		if err != nil {
+			t.Fatalf("StreamUpdatesFromWithOwner: %v", err)
+		}
+		stage, ok := client.UpdateStreamStage()
+		if !ok || stage.OwnerID != ownerID {
+			t.Fatalf("stage owner = %d (available %t), callback owner = %d", stage.OwnerID, ok, ownerID)
+		}
+		if ownerID <= previousOwner {
+			t.Fatalf("accepted owner = %d, want greater than %d", ownerID, previousOwner)
+		}
+		if got := observedAtConnect.Load(); got != 0 {
+			t.Fatalf("events handled before connection owner callback = %d, want 0", got)
+		}
+		if got := <-stageQueries; got != "1" {
+			t.Fatalf("stage query = %q, want opt-in value 1", got)
+		}
+		previousOwner = ownerID
+		client.Close()
+	}
+}
+
+func TestStreamUpdatesConsumesStageHeartbeatAsMetadata(t *testing.T) {
+	for _, sendHeartbeat := range []bool{true, false} {
+		name := "older peer without heartbeat"
+		if sendHeartbeat {
+			name = "heartbeat peer"
+		}
+		t.Run(name, func(t *testing.T) {
+			upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+			stageQueries := make(chan string, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				conn, err := upgrader.Upgrade(w, r, nil)
+				if err != nil {
+					return
+				}
+				defer func() { _ = conn.Close() }()
+				stageQueries <- r.URL.Query().Get("stage")
+				if sendHeartbeat {
+					heartbeat, _ := ws.NewNotification(streams.UpdateStreamStageAction, streams.UpdateStreamStageHeartbeat{
+						AdapterSeen: 4, AdapterAgeMillis: 9, WriterSent: 3, WriterAgeMillis: 12,
+					})
+					data, _ := json.Marshal(heartbeat)
+					if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+						return
+					}
+				}
+				data, _ := json.Marshal(AgentEvent{Type: "message_chunk", Text: "ordinary event"})
+				_ = conn.WriteMessage(websocket.TextMessage, data)
+				for {
+					if _, _, err := conn.ReadMessage(); err != nil {
+						return
+					}
+				}
+			}))
+			t.Cleanup(server.Close)
+
+			client := &Client{
+				baseURL:         server.URL,
+				httpClient:      server.Client(),
+				logger:          newTestLogger(),
+				pendingRequests: make(map[string]chan *ws.Message),
+			}
+			t.Cleanup(client.Close)
+			events := make(chan AgentEvent, 2)
+			if err := client.StreamUpdates(context.Background(), func(event AgentEvent) { events <- event }, nil, nil); err != nil {
+				t.Fatalf("StreamUpdates: %v", err)
+			}
+			if got := <-stageQueries; got != "1" {
+				t.Fatalf("stage query = %q, want opt-in value 1", got)
+			}
+			select {
+			case event := <-events:
+				if event.Type != "message_chunk" || event.Text != "ordinary event" {
+					t.Fatalf("event handler received %+v; heartbeat metadata must not reach it", event)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("ordinary agent event was not dispatched")
+			}
+			stage, ok := client.UpdateStreamStage()
+			if !ok {
+				t.Fatal("update stream stage snapshot is unavailable")
+			}
+			if sendHeartbeat {
+				if stage.AgentctlStage.AdapterSeen != 4 || stage.AgentctlStage.WriterSent != 3 || stage.ReadCount != 1 {
+					t.Fatalf("heartbeat snapshot = %+v, want heartbeat plus one event read", stage)
+				}
+			} else if stage.HeartbeatAgeMillis != -1 || stage.AgentctlStage.AdapterSeen != 0 {
+				t.Fatalf("older peer snapshot = %+v, want unavailable heartbeat and zero observed heartbeat count", stage)
+			}
+		})
 	}
 }
 

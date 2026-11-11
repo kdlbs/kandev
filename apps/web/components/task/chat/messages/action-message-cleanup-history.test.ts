@@ -25,9 +25,7 @@ it("keeps resolved cleanup evidence in localized history without recovery contro
       { error_stamp: "cleanup-stamp", resolved_at: "2026-10-10T11:00:00Z", attempt_id: "resume-2" },
     ],
   };
-  expect(resolveRecoveryHistoryState(comment, metadata, undefined, sessionMetadata)).toEqual({
-    activeOwner: false,
-  });
+  expect(resolveRecoveryHistoryState(comment, metadata, undefined, sessionMetadata)).toBe(true);
   expect(
     resolveRecoveryHistoryState(
       comment,

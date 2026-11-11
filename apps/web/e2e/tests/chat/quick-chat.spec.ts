@@ -1,8 +1,10 @@
 import { type Locator, type Page } from "@playwright/test";
+import { assertDirtyQuickChatDeletion } from "./quick-chat-dirty-delete-helpers";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { attachAvailableCommandsCapture, attachShellInputCapture } from "../../helpers/ws-capture";
+import { watchWs } from "../../helpers/causal-waits";
 import { waitForSessionState } from "../../helpers/session";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import {
@@ -13,6 +15,7 @@ import {
   selectAgentIfNeeded,
   sendQuickChatMessage,
   startQuickChatFromSetup,
+  waitForSessionSettledBaseline,
 } from "./quick-chat-helpers";
 
 /**
@@ -56,6 +59,49 @@ async function dragQuickChatTab(page: Page, source: Locator, target: Locator) {
 }
 
 test.describe("Quick Chat", () => {
+  test("Escape cancels a running Quick Chat turn without closing the dialog", async ({
+    testPage,
+    apiClient,
+  }) => {
+    test.setTimeout(90_000);
+    const ws = watchWs(testPage);
+    await apiClient.saveUserSettings({ escape_cancels_agent: true });
+
+    const dialog = await openQuickChatSetup(testPage);
+    const started = await startQuickChatFromSetup(dialog, testPage);
+    await sendQuickChatMessage(dialog, testPage, "/slow 8s");
+    await waitForSessionState(apiClient, {
+      taskId: started.task_id,
+      sessionId: started.session_id,
+      expectedState: "RUNNING",
+      message: "Quick Chat did not start the slow turn",
+      timeout: 30_000,
+    });
+
+    const editor = dialog.locator('.tiptap.ProseMirror[contenteditable="true"]:visible').first();
+    const cancelResponse = ws.waitForResponse("agent.cancel");
+    await editor.press("Escape");
+    await cancelResponse;
+
+    await expect(dialog).toBeVisible();
+  });
+
+  // @covers AC-UI-TASK-CLEANUP-CONFIRMATION-001.12 AC-UI-TASK-CLEANUP-CONFIRMATION-001.13
+  test("deletes dirty repository quick chat with consent", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    await assertDirtyQuickChatDeletion(
+      testPage,
+      apiClient,
+      seedData.repositoryId,
+      false,
+      prCapture,
+    );
+  });
+
   // @covers AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.1 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.2 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.3 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.4 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.6
   test("keeps the viewport layout contained for new and long chats", async ({ testPage }) => {
     await testPage.setViewportSize({ width: 1440, height: 800 });
@@ -1016,6 +1062,7 @@ test.describe("Quick Chat", () => {
     await startQuickChatFromSetup(dialog, testPage);
     const first = (await (await firstStart).json()) as { session_id: string; task_id: string };
     const firstReference = `conversation:${first.session_id}`;
+    await waitForSessionSettledBaseline(apiClient, first.task_id, first.session_id);
 
     // The deterministic script calls the real title MCP endpoint through the
     // mock agent, then the task.updated event relabels the open tab.

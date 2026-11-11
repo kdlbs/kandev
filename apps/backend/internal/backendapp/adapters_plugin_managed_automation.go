@@ -6,7 +6,7 @@ import (
 
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/plugins"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 type managedConversationScheduleAdapter struct{ service *automation.Service }

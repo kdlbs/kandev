@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 )
@@ -21,6 +22,51 @@ type quickChatListRepo struct {
 	mockRepository
 	tasks    []*models.Task
 	sessions map[string]*models.TaskSession
+}
+
+func TestHTTPListQuickChatSessionsProjectsCreationID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+	creationID := "a7c0fd51-6526-4732-95bc-c6e25f745e7f"
+	externalID, err := service.NewQuickChatCreationExternalID("user-a", creationID)
+	require.NoError(t, err)
+	failedCreationID := "c30965fd-95ee-4322-8fbb-780eb3151bc1"
+	failedExternalID, err := service.NewQuickChatCreationExternalID("user-a", failedCreationID)
+	require.NoError(t, err)
+	repo := &quickChatListRepo{
+		tasks: []*models.Task{
+			{ID: "task-chat", WorkspaceID: "ws-1", IsEphemeral: true, ExternalID: externalID},
+			{ID: "task-failed", WorkspaceID: "ws-1", IsEphemeral: true, ExternalID: failedExternalID},
+		},
+		sessions: map[string]*models.TaskSession{
+			"task-chat":   {ID: "session-chat", TaskID: "task-chat", State: models.TaskSessionStateCreated},
+			"task-failed": {ID: "session-failed", TaskID: "task-failed", State: models.TaskSessionStateFailed},
+		},
+	}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := &TaskHandlers{service: svc, logger: log}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/workspaces/ws-1/quick-chats", nil)
+	c.Request = c.Request.WithContext(authn.WithIdentity(c.Request.Context(), authn.Identity{
+		UserID: "user-a", Role: authn.RoleMember, Synthetic: true,
+	}))
+	c.Params = gin.Params{{Key: "id", Value: "ws-1"}}
+
+	h.httpListQuickChatSessions(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var body httpListQuickChatSessionsResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Len(t, body.Sessions, 2)
+	assert.Equal(t, creationID, body.Sessions[0].CreationID)
+	assert.Equal(t, failedCreationID, body.Sessions[1].CreationID)
 }
 
 func (r *quickChatListRepo) ListTasksByWorkspace(

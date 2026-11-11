@@ -30,6 +30,8 @@ The shared [task summary](../../ui/requirements/pr-task-status-summary.md) owns 
 - **AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001.6:** Missing checks or unstable mergeability alone shall not imply approval. Unavailable provider evidence shall remain distinct from an observed absence of approval gates.
 - **AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001.7:** When GitHub requires an action but the reason is ambiguous, Kandev shall show "Workflow needs attention" instead of an approval claim.
 - **AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001.8:** An approval reason shall replace unexplained "unstable" copy in the affected summary. Independent conflicts, reviews, queue state, and actual failures shall remain visible.
+- **AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001.9:** Automatic monitoring shall refresh workflow attention for every open known PR on the same one-minute cadence as its check status, including when many monitored PRs share one GitHub principal. When local admission defers that refresh, the attempt shall resume at its retry boundary without waiting for the next minute. Until it completes, the stored observation shall remain unchanged and shall not be marked stale.
+- **AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001.10:** When the job evidence that classifies an action-required workflow is unavailable, Kandev shall treat the observation as unavailable. It shall neither claim approval nor claim generic workflow attention from that missing evidence.
 
 ### REQ-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-002: Bounded Actions caching
 
@@ -47,11 +49,11 @@ The shared [task summary](../../ui/requirements/pr-task-status-summary.md) owns 
 #### Acceptance criteria
 
 - **AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003.1:** When an open linked PR has approval evidence for its current head, its task icon shall show an amber padlock badge. The badge shall appear before the user opens the status disclosure.
-- **AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003.2:** The badge shall occupy the upper-right warning position and retain the PR icon's status color. It shall use amber `#D97706` in light mode and `#FBBF24` in dark mode, with a background halo. Existing automation dots shall remain visible in their current positions.
-- **AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003.3:** When conflicts and approval coexist, the red conflict triangle shall occupy the shared warning position. The accessible name and status disclosure shall still identify both conditions.
+- **AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003.2:** The badge shall occupy the upper-right CI bubble position and retain the PR icon's status color. It shall use amber `#D97706` in light mode and `#FBBF24` in dark mode, with a background halo. Existing automation dots shall remain visible in their current positions. The separate conflict position and CI priority belong to [GitHub PR CI bubble](github-pr-ci-bubble.md).
+- **AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003.3:** When conflicts and approval coexist, the red conflict triangle shall occupy its separate inline slot beside the PR glyph while the approval lock stays in the upper-right CI bubble. The accessible name and status disclosure shall identify both conditions.
 - **AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003.4:** Without prior eligible approval evidence, missing checks, pending checks, unavailable evidence, and ambiguous action-required evidence shall not produce the approval badge. The badge shall disappear after an authoritative observation clears approval, a head change, PR closure, PR merge, or unlinking.
 - **AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003.5:** A failed refresh shall retain a last-known approval badge only for the same open PR head. The detailed disclosure shall retain the existing stale-evidence explanation.
-- **AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003.6:** When a task has multiple linked PRs, approval on any open PR shall contribute to its badge. Conflicts on any open PR shall take visual priority. Details shall attribute each condition to its PR, and terminal siblings shall contribute neither condition.
+- **AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003.6:** When a task has multiple linked PRs, approval on any open PR shall contribute to its badge. Conflicts on any open PR shall remain visible in their separate slot. Details shall attribute each condition to its PR, and terminal siblings shall contribute neither condition.
 - **AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003.7:** Compact task rows, hydrated task rows, and rows restored after reload shall agree on approval visibility. Rendering a badge shall not add provider reads or session subscriptions.
 - **AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003.8:** The existing desktop hover/focus disclosure and phone tap disclosure shall explain approval with localized text. The icon's accessible name shall include the approval reason. Touch users shall reach the explanation through the existing PR drawer without hover, task navigation, or layout overflow caused by the badge.
 
@@ -70,3 +72,5 @@ The shared [task summary](../../ui/requirements/pr-task-status-summary.md) owns 
 - [Task approval badge](../../../plans/github-workflow-approval-badge/plan.md)
 
 - [Preserve PR details after approval clears](../../../plans/pr-task-disclosure-negative-projection/plan.md).
+- [Workflow approval freshness](../../../plans/github-workflow-approval-freshness/plan.md)
+- [GitHub PR CI bubble](../../../plans/github-pr-ci-bubble/plan.md)

@@ -41,6 +41,29 @@ function layoutWithSections(): SidebarLayout {
 }
 
 describe("sidebar layout operations", () => {
+  // @covers AC-UI-SIDEBAR-CUSTOMIZATION-001.11
+  it("keeps integration moves within siblings and preserves unrelated positions", () => {
+    const layout: SidebarLayout = {
+      ...defaultSidebarLayout(),
+      revision: 7,
+      navigationHeight: 180,
+      nodes: [
+        { id: "a", kind: "plugin", visible: true, pluginSection: "integrations" },
+        { id: "home", kind: "builtin", visible: true, destinationId: "home" },
+        { id: "b", kind: "plugin", visible: false, pluginSection: "integrations" },
+        { id: "integrations", kind: "builtin", visible: true, destinationId: "integrations" },
+      ],
+    };
+    expect(moveSection(layout, "a", 1)).toBe(layout);
+    expect(moveSection(layout, "home", 0)).toBe(layout);
+    expect(moveSection(layout, "a", 0)).toBe(layout);
+    const moved = moveSection(layout, "a", 2);
+    expect(moved.nodes.map((node) => node.id)).toEqual(["b", "home", "a", "integrations"]);
+    expect(moved.revision).toBe(7);
+    expect(moved.navigationHeight).toBe(180);
+    expect(moved.nodes[0].visible).toBe(false);
+    expect(layout.nodes[0].id).toBe("a");
+  });
   it("creates and renames an empty section", () => {
     const created = createShortcutSection(defaultSidebarLayout(), "  Team  ", "group-1");
 

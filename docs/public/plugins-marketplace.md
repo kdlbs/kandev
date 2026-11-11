@@ -60,6 +60,15 @@ and GitHub star count. To narrow the list:
 - **Sort**: **Most stars** (default), **Recently updated** (by latest release
   / repo activity), or **Name**.
 
+The catalog attributes a native plugin to the **owner of its curated
+repository**, not to the `author` field in its manifest. First-party
+`kdlbs/kandev-plugin-*` repositories show **by kdlbs**, and a curated community
+repository shows the contributor or organization that owns it. The manifest
+`author` is shown on an installed plugin's Manifest card as **Declared
+author**; that label records what the package declares, not a verified
+publisher identity. For an additional source, the metadata is only as
+trustworthy as the maintainer who publishes it.
+
 Stars are a **sort hint, not a quality score**. kandev collects no download or
 usage telemetry, so there is no "most installed" metric; ranking is GitHub
 stars only, and "Recently updated" surfaces new or actively maintained plugins
@@ -193,8 +202,11 @@ mirroring Obsidian's community-plugin registry: each plugin lives in its own
 public GitHub repository and publishes its package as a GitHub **Release**
 asset; the official catalog is a curated pointer list that names *which repos*
 are included. The descriptive metadata (name, description, version, tarball
-URL, stars) is always read from your latest release, so a listing can never
-drift from what actually ships.
+URL, stars) is read from the repository at your latest release. Package
+verification checks the archive's identity and digest, not display-name parity
+with the repository manifest. Catalog attribution follows the owner of the
+curated repository, so a manifest cannot override the listing's catalog
+attribution.
 
 ### 1. Publish the plugin package as a release
 
@@ -244,6 +256,9 @@ a PR that lists it.
    filtering (not the manifest's category enum). `featured` is a maintainer-only
    pin; leave it out of submissions. The pointer-list shape is defined by
    [`plugin-registry/schema.json`](https://github.com/kdlbs/kandev/blob/main/plugin-registry/schema.json).
+   The catalog attributes the listing to the owner in `repo`. Your manifest
+   `author` stays your own declaration and appears on the installed plugin's
+   Manifest card as **Declared author**.
 2. Open a pull request. The registry index-build workflow runs on your PR
    (build + tests, no Pages deploy), resolving your entry against the GitHub
    API. Your latest release must publish the exact `<id>-<version>.tar.gz`

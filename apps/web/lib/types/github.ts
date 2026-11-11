@@ -2,7 +2,7 @@
 
 import type { GitHubAppRegistration } from "./github-app";
 import type { GitHubPRDiscoveryHealth } from "./github-pr-discovery";
-import type { CheckRun, WorkflowAttention } from "./github-checks";
+import type { CheckRun, CheckSummary, WorkflowAttention } from "./github-checks";
 
 export * from "./github-app";
 export * from "./github-pr-discovery";
@@ -119,6 +119,7 @@ export type GitHubRateLimitUpdate = {
 };
 
 export type GitHubPR = {
+  github_host?: string;
   number: number;
   title: string;
   body?: string;
@@ -194,6 +195,7 @@ export type GitHubPRStatus = {
   checks_total: number;
   checks_passing: number;
   workflow_attention?: WorkflowAttention | null;
+  check_summary?: CheckSummary | null;
 };
 
 export type MergeMethod = "merge" | "squash" | "rebase";
@@ -231,6 +233,7 @@ export type MergeQueueState =
   | (string & {});
 
 export type TaskPR = {
+  github_host?: string;
   id: string;
   workspace_id: string;
   task_id: string;
@@ -273,6 +276,8 @@ export type TaskPR = {
   head_sha?: string;
   /** Head-scoped GitHub Actions evidence that needs human attention. */
   workflow_attention?: WorkflowAttention | null;
+  /** Last selected detailed check snapshot. Null when never observed. */
+  check_summary?: CheckSummary | null;
   /** Empty when GitHub did not return an active merge-queue entry. */
   merge_queue_state?: MergeQueueState;
   merge_queue_entry_id?: string;
@@ -400,6 +405,7 @@ export type TaskCIAutomationPatch = {
 };
 
 export type PRWatch = {
+  github_host?: string;
   id: string;
   session_id: string;
   task_id: string;
@@ -423,6 +429,7 @@ export type GitHubRepoScopeMode = "all" | "orgs" | "repos";
 export type TaskGitCredentialsMode = "managed" | "executor";
 
 export type GitHubWorkspaceSettings = {
+  github_host?: string;
   workspace_id: string;
   task_git_credentials_mode?: TaskGitCredentialsMode;
   repo_scope_mode: GitHubRepoScopeMode;
@@ -435,6 +442,7 @@ export type GitHubWorkspaceSettings = {
 };
 
 export type UpdateGitHubWorkspaceSettingsRequest = {
+  expected_host?: string;
   workspace_id: string;
   task_git_credentials_mode?: TaskGitCredentialsMode;
   repo_scope_mode?: GitHubRepoScopeMode;
@@ -450,6 +458,7 @@ export type GitHubOrg = {
 };
 
 export type GitHubRepoInfo = {
+  github_host?: string;
   full_name: string;
   owner: string;
   name: string;
@@ -470,6 +479,7 @@ export type ReviewScope = "user" | "user_and_teams";
 export type CleanupPolicy = "auto" | "always" | "never";
 
 export type ReviewWatch = {
+  github_host?: string;
   id: string;
   workspace_id: string;
   workflow_id: string;
@@ -550,6 +560,7 @@ export type CleanupTasksResponse = {
 // Issue watch types
 
 export type IssueWatch = {
+  github_host?: string;
   id: string;
   workspace_id: string;
   workflow_id: string;
@@ -634,6 +645,7 @@ export type PRCommitDetail = {
 
 // GitHub Issue (separate from Pull Request)
 export type GitHubIssue = {
+  github_host?: string;
   number: number;
   title: string;
   body: string;
@@ -651,6 +663,7 @@ export type GitHubIssue = {
 };
 
 export type TaskIssueLink = {
+  github_host?: string;
   task_id: string;
   task_title: string;
   owner: string;

@@ -70,7 +70,7 @@ host before any bundle loads. Bundles are authored with React as an **external**
 they must use `host.React` (NOT bundle their own React) to share the host instance.
 
 The independently consumable frontend type contract is the runtime-free
-`@kandev/plugin-sdk` package in `apps/packages/plugin-sdk`. Official plugins import
+`@kdlbs/plugin-sdk` package in `apps/packages/plugin-sdk`. Official plugins import
 these types instead of re-declaring this document or importing `apps/web` internals.
 The host has a compile-time assignability test, and the real Bitbucket package is a
 required exact-head compatibility consumer.
@@ -98,7 +98,7 @@ interface PluginHostApi {
     resolveRepositoryId(identity: RepositoryIdentityInput): string | undefined;
   };
   // Compatibility only for older bundles. Deliberately absent from
-  // @kandev/plugin-sdk; new/official plugins must use host.context.
+  // @kdlbs/plugin-sdk; new/official plugins must use host.context.
   store: Pick<StoreApi<AppState>, "getState" | "setState" | "subscribe">;
   api: {
     // Low-level request scoped to this plugin's host path. It MUST NOT target a
@@ -409,7 +409,7 @@ interface PluginUIShape {
 ```
 
 The complete `PluginActionProps`, including exact event/ref field types, is exported from
-`@kandev/plugin-sdk` and defined in `apps/packages/plugin-sdk/src/index.ts`.
+`@kdlbs/plugin-sdk` and defined in `apps/packages/plugin-sdk/src/index.ts`.
 `Action` renders one native button. The host owns its outer geometry, icon box,
 state styling, tooltip behavior, and responsive presentation. It does not
 accept `className`, `style`, `size`, `variant`, `asChild`, arbitrary props, or

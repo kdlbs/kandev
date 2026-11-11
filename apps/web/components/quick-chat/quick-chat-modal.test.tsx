@@ -1,7 +1,10 @@
 import { useCallback, useState } from "react";
 import { cleanup, fireEvent, render, screen, within, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
+import {
+  useClarificationEscapeGuard,
+  wasEscapeClaimedByDialog,
+} from "@/hooks/use-clarification-escape-guard";
 import { ResetContextButton } from "@/components/task/chat/reset-context-button";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { getChatDraftText, setChatDraftText } from "@/lib/local-storage";
@@ -16,6 +19,7 @@ const persistTabOrder = vi.fn();
 const handleOpenChange = vi.fn();
 const handleNewChat = vi.fn();
 const escapePreventDefault = vi.fn();
+const escapeEvents: KeyboardEvent[] = [];
 const CHAT_NAME = "Chat one";
 const WORKSPACE_ID = "ws-1";
 const TERMINAL_TAB_ID = "terminal-1";
@@ -58,7 +62,7 @@ vi.mock("@kandev/ui/dialog", () => ({
     onEscapeKeyDown,
   }: {
     children: React.ReactNode;
-    onEscapeKeyDown?: (event: { preventDefault: () => void }) => void;
+    onEscapeKeyDown?: (event: KeyboardEvent) => void;
   }) => (
     <div>
       {children}
@@ -67,7 +71,14 @@ vi.mock("@kandev/ui/dialog", () => ({
       <button
         type="button"
         data-testid={FIRE_ESCAPE_TESTID}
-        onClick={() => onEscapeKeyDown?.({ preventDefault: escapePreventDefault })}
+        onClick={() => {
+          const event = {
+            key: "Escape",
+            preventDefault: escapePreventDefault,
+          } as unknown as KeyboardEvent;
+          escapeEvents.push(event);
+          onEscapeKeyDown?.(event);
+        }}
       />
     </div>
   ),
@@ -232,6 +243,7 @@ afterEach(() => {
   for (const key of Object.keys(quickChatSessionItems)) delete quickChatSessionItems[key];
   for (const key of Object.keys(quickChatPrepareProgress)) delete quickChatPrepareProgress[key];
   vi.clearAllMocks();
+  escapeEvents.length = 0;
   useQuickChatModalMock.mockReset();
   useQuickChatModalMock.mockReturnValue(defaultQuickChatModalState);
   responsiveMock.isFinePointer = true;
@@ -399,6 +411,7 @@ describe("QuickChatModal — Escape with a pending clarification", () => {
     fireEvent.click(screen.getByTestId(FIRE_ESCAPE_TESTID));
 
     expect(escapePreventDefault).toHaveBeenCalledTimes(1);
+    expect(wasEscapeClaimedByDialog(escapeEvents[0]!)).toBe(true);
     expect(screen.getByTestId("quick-chat-dialog")).toBeTruthy();
   });
 

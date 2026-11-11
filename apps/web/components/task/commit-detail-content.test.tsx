@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileInfo } from "@/lib/state/store";
+import * as clipboard from "@/lib/utils/copy-to-clipboard";
 
 const mocks = vi.hoisted(() => ({
   provider: "pierre-diffs" as "pierre-diffs" | "monaco",
@@ -374,5 +375,80 @@ describe("CommitDetailContent navigation", () => {
     );
     expect(scrollIntoView).toHaveBeenCalledTimes(2);
     expect(focus).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("CommitDetailContent identifier copy", () => {
+  const copyLabel = "Copy identifier";
+  const firstSha = "1234567890abcdef1234567890abcdef12345678";
+  const secondSha = "abcdef0123456789abcdef0123456789abcdef01";
+  const commit = { authorName: "Developer", commitMessage: "Copy test", committedAt: "" };
+  const local = (sha: string) => ({ source: "local" as const, sha, repo: "frontend" });
+  const github = (sha: string) => ({
+    source: "github" as const,
+    sha,
+    workspaceId: "workspace-1",
+    owner: "acme",
+    repo: "widget",
+  });
+
+  it("copies the exact current full identifier for local and GitHub details", async () => {
+    const copy = vi.spyOn(clipboard, "copyToClipboard").mockResolvedValue(true);
+    const { rerender } = render(
+      <CommitDetailContent target={local(firstSha)} fileEntries={[]} commit={commit} />,
+    );
+    expect(screen.getByText(firstSha.slice(0, 7))).toBeTruthy();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: copyLabel })));
+    expect(copy).toHaveBeenLastCalledWith(firstSha);
+    expect(screen.getByRole("status").textContent).toContain("Copied!");
+    rerender(<CommitDetailContent target={github(secondSha)} fileEntries={[]} commit={commit} />);
+    expect(screen.getByText(secondSha.slice(0, 7))).toBeTruthy();
+    expect(screen.queryByText("Copied!")).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: copyLabel })));
+    expect(copy).toHaveBeenLastCalledWith(secondSha);
+  });
+
+  it("does not claim success on failure, permits retry, and preserves the previous success deadline", async () => {
+    vi.useFakeTimers();
+    const copy = vi
+      .spyOn(clipboard, "copyToClipboard")
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      render(<CommitDetailContent target={local(firstSha)} fileEntries={[]} commit={commit} />);
+      const button = screen.getByRole("button", { name: copyLabel });
+      await act(async () => fireEvent.click(button));
+      expect(screen.queryByText("Copied!")).toBeNull();
+      await act(async () => fireEvent.click(button));
+      expect(screen.getByRole("status").textContent).toContain("Copied!");
+      act(() => vi.advanceTimersByTime(1000));
+      await act(async () => fireEvent.click(button));
+      expect(copy).toHaveBeenCalledTimes(3);
+      expect(screen.getByRole("status").textContent).toContain("Copied!");
+      act(() => vi.advanceTimersByTime(1000));
+      expect(screen.queryByText("Copied!")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not associate an old pending success with a changed identifier", async () => {
+    let complete!: (value: boolean) => void;
+    vi.spyOn(clipboard, "copyToClipboard").mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    const { rerender } = render(
+      <CommitDetailContent target={local(firstSha)} fileEntries={[]} commit={commit} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: copyLabel }));
+    rerender(<CommitDetailContent target={local(secondSha)} fileEntries={[]} commit={commit} />);
+    await act(async () => complete(true));
+    expect(screen.queryByText("Copied!")).toBeNull();
+    expect(screen.getByRole("button", { name: copyLabel })).toBeTruthy();
   });
 });
