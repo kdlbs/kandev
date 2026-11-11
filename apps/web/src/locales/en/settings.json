@@ -929,8 +929,6 @@
   "queueMergeShort": "Combine related queued messages before the agent reads them.",
   "queueAutoMergeShort": "Merge compatible consecutive messages automatically.",
   "sleepShort": "Prevent the computer running Kandev from sleeping during tasks.",
-  "promptAllowAgentEdits": "Allow agent edits",
-  "promptAgentEditsDescription": "Agents can change this prompt wherever it is used.",
   "sidebarPresentation": "Sidebar appearance",
   "sidebarFastActions": "Show fast action icons",
   "sidebarFastActionsDescription": "Show Terminal, Quick Chat, Canvas settings, and integration shortcuts beside their buttons.",

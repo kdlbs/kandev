@@ -7,7 +7,6 @@ import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Input } from "@kandev/ui/input";
 import { PromptDeleteConfirmation } from "@/components/settings/prompt-delete-confirmation";
-import { PromptAgentPermission } from "@/components/settings/prompt-agent-permission";
 import { PromptRowActions } from "@/components/settings/prompt-row-actions";
 import {
   filterSavedPrompts,
@@ -26,12 +25,11 @@ import { useRequest } from "@/lib/http/use-request";
 import { t } from "@/lib/i18n";
 import type { CustomPrompt } from "@/lib/types/http";
 
-type PromptFormState = { name: string; content: string; allowAgentEdits?: boolean };
+type PromptFormState = { name: string; content: string };
 
 const defaultFormState: PromptFormState = {
   name: "",
   content: "",
-  allowAgentEdits: undefined,
 };
 
 /** The sigil the chat input matches on. Typed verbatim, so never translated. */
@@ -156,19 +154,6 @@ function PromptEditForm({
         isDirty={contentIsDirty}
         dirtyLevel="field"
       />
-      {!prompt.builtin && (
-        <PromptAgentPermission
-          allowed={formState.allowAgentEdits ?? prompt.allow_agent_edits ?? false}
-          saved={prompt.allow_agent_edits ?? false}
-          disabled={isBusy}
-          onChange={(allowed) =>
-            onFormChange({
-              allowAgentEdits:
-                allowed === (prompt.allow_agent_edits ?? false) ? undefined : allowed,
-            })
-          }
-        />
-      )}
       <div className="flex items-center gap-2">
         <Button variant="ghost" onClick={onCancel} disabled={isBusy}>
           {t("settings:cancel")}
@@ -198,18 +183,13 @@ function PromptListItem({
   const deleteAnchorRef = useRef<HTMLButtonElement | null>(null);
   const nameIsDirty = isEditing && formState.name !== prompt.name;
   const contentIsDirty = isEditing && formState.content !== prompt.content;
-  const permissionIsDirty =
-    isEditing &&
-    formState.allowAgentEdits !== undefined &&
-    formState.allowAgentEdits !== (prompt.allow_agent_edits ?? false);
-
   return (
     <div
       className="rounded-lg border border-border/70 bg-background p-4 flex flex-col gap-3"
       ref={isEditing ? editingRef : null}
       data-testid="prompt-list-item"
       data-prompt-name={prompt.name}
-      data-settings-dirty={nameIsDirty || contentIsDirty || permissionIsDirty}
+      data-settings-dirty={nameIsDirty || contentIsDirty}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
@@ -400,7 +380,6 @@ function usePromptRequests(
       {
         name: s.name.trim(),
         content: s.content.trim(),
-        ...(s.allowAgentEdits === undefined ? {} : { allow_agent_edits: s.allowAgentEdits }),
       },
       { cache: "no-store" },
     );
@@ -470,7 +449,6 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
     setFormState({
       name: prompt.name,
       content: prompt.content,
-      allowAgentEdits: undefined,
     });
   };
   const startCreate = () => {
@@ -510,14 +488,10 @@ export function getPromptDraftMeta(
   formState: PromptFormState,
 ) {
   const editingPrompt = prompts.find((prompt) => prompt.id === editingId);
-  const revision = JSON.stringify({
-    ...formState,
-    allowAgentEdits: formState.allowAgentEdits ?? editingPrompt?.allow_agent_edits ?? false,
-  });
+  const revision = JSON.stringify(formState);
   const savedRevision = JSON.stringify({
     name: editingPrompt?.name ?? "",
     content: editingPrompt?.content ?? "",
-    allowAgentEdits: editingPrompt?.allow_agent_edits ?? false,
   });
   return {
     isDirty: showCreate || (Boolean(editingId) && revision !== savedRevision),

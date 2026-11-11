@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CustomPrompt } from "@/lib/types/http";
 import { SettingsSaveProvider } from "./settings-save-provider";
-import { getPromptDraftMeta, PromptsSettings } from "./prompts-settings";
+import { PromptsSettings } from "./prompts-settings";
 
 const mocks = vi.hoisted(() => ({
   createPrompt: vi.fn(),
@@ -277,15 +277,6 @@ describe("PromptsSettings deletion requests", () => {
 });
 
 describe("PromptsSettings coordinated creation", () => {
-  it("treats an opened create form as a dirty route draft", () => {
-    expect(
-      getPromptDraftMeta([], null, true, { name: "", content: "", allowAgentEdits: false }),
-    ).toEqual({
-      isDirty: true,
-      revision: 'new:{"name":"","content":"","allowAgentEdits":false}',
-    });
-  });
-
   it("creates a prompt only when the floating route Save is pressed", async () => {
     render(
       <SettingsSaveProvider>
@@ -328,9 +319,9 @@ describe("PromptsSettings coordinated creation", () => {
   });
 });
 
-describe("PromptsSettings agent permission intent", () => {
-  it("preserves a remote revocation when saving an unrelated local draft", async () => {
-    mocks.prompts = [{ ...existingPrompt, allow_agent_edits: true }];
+describe("PromptsSettings custom prompt editing", () => {
+  it("preserves a local draft across remote refresh without rendering or saving permission state", async () => {
+    mocks.prompts = [{ ...existingPrompt, allow_agent_edits: false }];
     mocks.updatePrompt.mockImplementation(async (_id, patch) => ({
       ...mocks.prompts[0],
       ...patch,
@@ -345,30 +336,41 @@ describe("PromptsSettings agent permission intent", () => {
     fireEvent.change(screen.getByTestId(promptContentInputTestId), {
       target: { value: "Local draft" },
     });
-    mocks.prompts = [{ ...existingPrompt, allow_agent_edits: false }];
+    mocks.prompts = [{ ...existingPrompt, content: "Remote revision", allow_agent_edits: true }];
     rerender(
       <SettingsSaveProvider>
         <PromptsSettings />
       </SettingsSaveProvider>,
     );
-    expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("false");
+    expect(screen.queryByRole("switch", { name: "Allow agent edits" })).toBeNull();
+    expect(screen.queryByText("Allow agent edits")).toBeNull();
     expect((screen.getByTestId(promptContentInputTestId) as HTMLTextAreaElement).value).toBe(
       "Local draft",
     );
     fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
     await waitFor(() => expect(mocks.updatePrompt).toHaveBeenCalledOnce());
-    expect(mocks.updatePrompt.mock.calls[0][1]).not.toHaveProperty("allow_agent_edits");
-    expect(mocks.prompts[0].allow_agent_edits).toBe(false);
+    expect(mocks.updatePrompt.mock.calls[0][1]).toEqual({
+      name: promptName,
+      content: "Local draft",
+    });
   });
 
-  it("sends an explicitly changed permission with the draft", async () => {
-    mocks.updatePrompt.mockResolvedValue({ ...existingPrompt, allow_agent_edits: true });
+  it("saves prompt name and content and discards an edit without permission controls", async () => {
+    mocks.updatePrompt.mockResolvedValue({
+      ...existingPrompt,
+      name: "Renamed",
+      content: "Updated",
+    });
     renderPromptSettings();
     fireEvent.click(screen.getByTestId(promptEditButtonTestId));
-    fireEvent.click(screen.getByRole("switch"));
+    expect(screen.queryByRole("switch", { name: "Allow agent edits" })).toBeNull();
+    fireEvent.change(screen.getByTestId("prompt-name-input"), { target: { value: "Renamed" } });
+    fireEvent.change(screen.getByTestId(promptContentInputTestId), {
+      target: { value: "Updated" },
+    });
     fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
     await waitFor(() => expect(mocks.updatePrompt).toHaveBeenCalledOnce());
-    expect(mocks.updatePrompt.mock.calls[0][1].allow_agent_edits).toBe(true);
+    expect(mocks.updatePrompt.mock.calls[0][1]).toEqual({ name: "Renamed", content: "Updated" });
   });
 });
 

@@ -9,71 +9,125 @@ requirements:
 
 ## Boundaries and mapping
 
-Extends [saved prompt reads](external-mcp-shared-prompts.md). The integration system
-owns discovery, authorization, and results; `internal/prompts` owns persistence,
-validation, and agent-write restrictions. All acceptance criteria of
-`REQ-INTEGRATIONS-SHARED-PROMPT-WRITES-001` map to the contracts below.
+This design replaces the per-prompt permission design.
+It extends [saved prompt reads](external-mcp-shared-prompts.md).
+The integration system owns tool discovery, authorization, instructions, and results.
+`internal/prompts` owns persistence, validation, and reference expansion.
+
+The policy decision is
+[Agent editing for every custom prompt](../../../decisions/2026-11-11-custom-prompt-agent-editing.md).
+The [implementation package](../../../plans/custom-prompt-agent-editing/plan.md)
+tracks delivery. The earlier package remains a historical delivery record.
+
+| Acceptance criteria | Design section |
+| --- | --- |
+| .1, .2, .3, .11, .14 | Tools and authority |
+| .9, .10, .13, .16 | Persistence and concurrent writes |
+| .3, .15 | Compatibility projections |
+| .7, .8, .12 | Live delivery and Settings |
+
+All suffixes refer to `AC-INTEGRATIONS-SHARED-PROMPT-WRITES-001`.
+Retired criteria .4, .5, and .6 describe the previous policy only.
 
 ## Tools and authority
 
-The config and external catalogs register create/update tools with required string
-`name` and `content`. Both are closed-world writes. Create is non-destructive and
-non-idempotent; update replaces content and is marked destructive. Both return the
-saved read shape, extended with `allow_agent_edits`. No permission input is exposed.
-The backend checks `org.config.manage` from the trusted authentication context.
+The configuration and external catalogs retain `create_shared_prompt_kandev`
+and `update_shared_prompt_kandev`. Their required inputs remain `name` and `content`.
+Other catalogs gain no dedicated prompt-write tools.
+The backend continues to require `org.config.manage` from trusted authentication context.
 Existing transport authentication and automation dispatch restrictions remain.
 
-The generic settings prompt adapter uses the same guarded service update as the
-new tool and includes the permission in its read projection. It cannot change agent-edit permission. Existing generic rename support
-remains available only for eligible custom prompts.
+Creation rejects an existing exact name. Dedicated updates replace content by
+an exact, case-sensitive name. Generic settings retains its existing rename
+support for custom prompts through `settingsOperations.updatePrompt`.
+Both paths call the guarded prompt service and reject built-ins.
+Name and content validation retain their 512-byte and 1 MiB limits.
 
-## Persistence and failures
+Configuration context and tool descriptions require explicitly requested or
+agreed prompt changes, followed by readback. They describe effects on future references.
+Request intent remains an agent instruction. There is no additional backend
+approval token, prompt attestation, or automatic rewrite process.
 
-Add `custom_prompts.allow_agent_edits INTEGER NOT NULL DEFAULT 0` through an
-idempotent dialect-aware migration before built-in seeding. Preserve every legacy
-content value, identity, and timestamp. Model and HTTP/MCP DTOs expose a boolean.
-Operator PATCH accepts an optional permission; omission preserves it. Operator
-updates also compare the observed modification timestamp and return HTTP 409 on
-a concurrent change, so content-only saves cannot restore revoked permission. Built-in
-prompts cannot acquire effective agent-write permission. MCP creation sets it true.
+## Persistence and concurrent writes
 
-Agent updates use a conditional database write over the observed ID and name,
-`builtin = 0`, `allow_agent_edits = 1`, and the observed modification timestamp.
-A concurrent edit, rename, deletion, or revocation rejects the write; it never restores permission from a stale model.
-Unique name constraints arbitrate concurrent creation. Service validation retains
-512-byte names and 1 MiB content limits and existing trim behavior.
+Remove `models.Prompt.AllowAgentEdits` and the service permission branch.
+`CreatePromptForAgent` can delegate to ordinary creation without a separate default.
+Operator updates use `UpdatePrompt` without a permission argument.
+`UpdatePromptForAgent` retains its built-in check and existing field validation.
 
-MCP maps invalid, duplicate, missing, and protected prompts to explicit errors;
-concurrent writes return conflict rather than validation errors, and
-unexpected storage errors are logged without returning internals or prompt bodies.
-See [permission decision](../../../decisions/2026-09-29-shared-prompt-agent-permissions.md).
+The repository's conditional agent update matches the observed ID, name,
+`builtin = 0`, and `updated_at`. It no longer tests a permission value.
+Renames, content edits, deletion, or built-in reclassification reject stale writes.
+Operator updates retain their modification-time guard and HTTP 409 conflict result.
+The change does not add client revision parameters to either write API.
+
+Prompt SQL no longer selects, scans, inserts, or updates `allow_agent_edits`.
+Fresh schema initialization omits that column and removes `migrateAgentPermission`.
+Existing databases can retain an unused column. Its value never affects reads or writes.
+This is the final compatibility policy, without a later cleanup dependency.
+No startup backfill or table reconstruction changes prompt content or timestamps.
+
+Upgrade tests cover databases before and after introduction of the old column.
+Previously stored zero and one values produce the same custom-prompt eligibility.
+The shared dialect-aware repository must support SQLite and PostgreSQL.
+Conformance assertions must stop requiring a retired permission value in the target schema.
+Original upgrade fixtures remain historical inputs.
+
+## Compatibility projections
+
+HTTP `PromptDTO`, MCP summaries and detail results, and generic settings reads
+retain `allow_agent_edits`. Each projection derives it from `!prompt.Builtin`.
+This field describes effective eligibility, without storing a configurable permission.
+
+HTTP `UpdatePromptRequest` can decode its deprecated permission field for old clients.
+The controller ignores that input and passes only name and content to the service.
+A permission-only HTTP patch returns the current representation without a mutation.
+Neither true nor false input changes eligibility.
+Generic settings continues to reject undeclared permission changes.
+No frontend write sends the deprecated field.
 
 ## Live delivery and Settings
 
-Successful prompt mutations publish a content-free `prompts.changed` invalidation
-through the event bus and existing WebSocket broadcaster. Browser handlers invalidate
-the prompts cache, and the shared prompt loader refreshes it. A per-store request
-generation prevents an in-flight response from clearing newer invalidation. Existing
-editor form state stays local and survives remote refreshes. Reconnection invalidates
-saved prompts as well, including the initial connection to close the gap between
-the first read and live subscription. Failed mutations publish nothing. Failed
-reads retain cached content without marking it loaded and retry up to three
-attempts with bounded backoff. A later invalidation or consumer mount can retry
-after exhaustion.
+Successful mutations retain content-free `prompts.changed` invalidation and the
+existing WebSocket broadcaster. Failed writes publish no successful change.
+Cache generations, reconnection invalidation, bounded retry, and local editor
+draft preservation keep their current behavior.
+Later reference expansions see saved changes. Running turns retain captured instructions.
 
-Settings retains its existing inline prompt edit surface. An accessible translated
-“Allow agent edits” switch appears for custom prompts, with explanatory text that
-edits affect every reference. It shares the existing floating Save changes action,
-dirty tracking, and error handling. Only explicitly changed permission is sent
-on save; otherwise the switch follows the latest remote permission while the
-content draft stays local. Phone presentation keeps the single-column
-page scroller and a labelled touch target at least 44px tall; there is no new overlay.
+Remove `PromptAgentPermission` and its permission-only form, dirty-state,
+save-payload, and draft-revision fields from `prompts-settings.tsx`.
+The editor retains name, content, Cancel, and the floating Discard/Save changes action.
+Remove the two unused permission strings from every locale, including pseudo.
+There is no new user-facing copy or replacement control.
+
+Desktop and phone use the existing inline editor at `/settings/prompts`.
+The nearest shipped mobile exemplar is the prompt editor and floating save bar
+covered by `mobile-prompts-settings.spec.ts`.
+The mobile composition retains one page scroll owner and the existing action order.
+Inline editing suits this persistent settings form and requires no new overlay.
+Existing safe-area behavior, touch targets, keyboard access, and error states remain required.
+The shared form and save logic stay common to both viewports.
+
+The plan's UI-01 preview defines the affected region for both viewport sizes.
+Desktop and mobile E2E checks cover content save, absent permission controls,
+and a subsequent agent edit without an opt-in action.
+
+## Failures and observability
+
+Invalid, duplicate, missing, protected, unauthorized, and conflicting writes
+retain explicit errors. Unexpected storage errors retain structured logging without content.
+Remove the permission-disabled service error and its MCP mapping.
+Existing events and logs provide the required evidence. No new metric is necessary.
 
 ## Verification
 
-SQLite and PostgreSQL repository tests cover migration replay and conditional
-permission enforcement. Service/handler tests cover duplicate, missing, invalid,
-protected, authorized, and storage-error paths plus generic-settings bypass
-prevention. Catalog tests cover all MCP modes and input annotations. Browser tests
-cover external MCP create/update, live refresh, draft preservation, and
-desktop/phone permission save. Service tests verify future reference expansion. Loader tests exercise invalidation during a pending response.
+Repository tests cover both historical permission values, fresh schema,
+upgrade replay, preserved timestamps, built-in rejection, and concurrent changes.
+Service and handler tests cover Settings-created and MCP-created prompts, all
+write adapters, configuration authority, compatibility fields, and legacy input.
+Catalog and embedded-context tests cover explicit-request instructions and unchanged tool availability.
+
+Component tests cover name/content save payloads, dirty tracking, draft revisions,
+and drafts during remote refresh. Existing loader and WebSocket tests cover invalidation.
+Chromium and mobile-Chrome E2E prove the simplified editor and live agent edits.
+The work order owns exact commands and public-documentation updates.

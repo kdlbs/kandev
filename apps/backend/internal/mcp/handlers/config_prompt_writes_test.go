@@ -98,7 +98,6 @@ func TestSharedPromptWriteErrors(t *testing.T) {
 	for _, tc := range []struct{ action, name, content, code string }{
 		{ws.ActionMCPCreateSharedPrompt, "human", "Duplicate", ws.ErrorCodeValidation},
 		{ws.ActionMCPUpdateSharedPrompt, "code-review", "Overwrite builtin", ws.ErrorCodeForbidden},
-		{ws.ActionMCPUpdateSharedPrompt, "human", "Overwrite human", ws.ErrorCodeForbidden},
 		{ws.ActionMCPUpdateSharedPrompt, "missing", "Missing", ws.ErrorCodeNotFound},
 		{ws.ActionMCPCreateSharedPrompt, " ", "Content", ws.ErrorCodeValidation},
 		{ws.ActionMCPCreateSharedPrompt, "empty-content", " ", ws.ErrorCodeValidation},
@@ -107,10 +106,16 @@ func TestSharedPromptWriteErrors(t *testing.T) {
 		require.NoError(t, err)
 		assertWSError(t, resp, tc.code)
 	}
+	resp, err := dispatcher.Dispatch(ctx, makeWSMessage(t, ws.ActionMCPUpdateSharedPrompt, map[string]any{"name": "human", "content": "Overwrite custom"}))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	var result sharedPromptRead
+	require.NoError(t, json.Unmarshal(resp.Payload, &result))
+	require.True(t, result.AllowAgentEdits)
+	require.Equal(t, "Overwrite custom", result.Content)
 	saved, err := svc.GetPromptByName(ctx, human.Name)
 	require.NoError(t, err)
-	require.Equal(t, human.Content, saved.Content)
-	require.False(t, saved.AllowAgentEdits)
+	require.Equal(t, "Overwrite custom", saved.Content)
 	for _, writer := range []failedPromptWriter{
 		{result: &promptmodels.Prompt{Content: "secret"}, err: errors.New("private SQL detail")}, {},
 	} {

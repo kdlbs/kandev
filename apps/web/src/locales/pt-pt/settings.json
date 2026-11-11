@@ -929,8 +929,6 @@
   "queueMergeShort": "Combina mensagens relacionadas na fila antes de o agente as ler.",
   "queueAutoMergeShort": "Combina automaticamente mensagens consecutivas compatíveis.",
   "sleepShort": "Impede que o computador onde o Kandev está a correr entre em suspensão durante as tarefas.",
-  "promptAllowAgentEdits": "Permitir edições por agentes",
-  "promptAgentEditsDescription": "Os agentes podem alterar este prompt em todos os locais onde é utilizado.",
   "sidebarPresentation": "Aspeto da barra lateral",
   "sidebarFastActions": "Mostrar ícones de ações rápidas",
   "sidebarFastActionsDescription": "Mostrar atalhos do Terminal, Conversa rápida, definições de telas e integrações junto aos respetivos botões.",
