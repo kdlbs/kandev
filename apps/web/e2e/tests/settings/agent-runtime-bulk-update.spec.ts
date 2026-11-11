@@ -9,8 +9,13 @@ import {
 // @covers AC-AGENTS-RUNTIME-MANAGER-002.4, AC-AGENTS-RUNTIME-MANAGER-003.4
 test("failed checks explain the cause and retry without installing updates", async ({
   testPage,
+  prCapture,
 }) => {
-  await checkBulkPreviewRecovery(testPage, false);
+  await checkBulkPreviewRecovery(testPage, false, () =>
+    prCapture.screenshot("runtime-update-manager-desktop", {
+      caption: "Runtime manager with a preview failure reason and one ready update",
+    }),
+  );
 });
 
 // @covers AC-AGENTS-RUNTIME-MANAGER-003.1, AC-AGENTS-RUNTIME-MANAGER-003.2

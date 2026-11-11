@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { installRuntimeUpdateFixture } from "./agent-runtime-update-helpers";
 
 const CLAUDE_PACKAGE = "@agentclientprotocol/claude-agent-acp";
@@ -305,7 +306,11 @@ export async function expectBulkManager(page: Page, mobile: boolean) {
   return surface;
 }
 
-export async function checkBulkPreviewRecovery(page: Page, mobile: boolean) {
+export async function checkBulkPreviewRecovery(
+  page: Page,
+  mobile: boolean,
+  captureOverview?: () => Promise<void>,
+) {
   const runtime = await installBulkRuntimeFixture(page, { failCodexPreviewOnce: true });
   await page.goto("/settings/agents");
   const interact = async (testId: string) => {
@@ -327,6 +332,10 @@ export async function checkBulkPreviewRecovery(page: Page, mobile: boolean) {
   await expect(retry).toHaveText("Retry checks");
   if (mobile) expect((await retry.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+  if (captureOverview) {
+    await waitForFiniteAnimations(surface);
+    await captureOverview();
+  }
 
   await interact("runtime-bulk-retry-preview");
   await expect(retry).toHaveCount(0);

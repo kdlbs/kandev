@@ -9,8 +9,13 @@ import {
 // @covers AC-AGENTS-RUNTIME-MANAGER-001.6, AC-AGENTS-RUNTIME-MANAGER-002.4
 test("phone failed checks explain the cause and retry without installing updates", async ({
   testPage,
+  prCapture,
 }) => {
-  await checkBulkPreviewRecovery(testPage, true);
+  await checkBulkPreviewRecovery(testPage, true, () =>
+    prCapture.screenshot("runtime-update-manager-mobile", {
+      caption: "Phone runtime manager with a preview failure reason and one ready update",
+    }),
+  );
 });
 
 // @covers AC-AGENTS-RUNTIME-MANAGER-001.6, AC-AGENTS-RUNTIME-MANAGER-003.2
