@@ -27,6 +27,19 @@ func TestPostgresRestartRecoveryBlockEnsureReusesIncident(t *testing.T) {
 	})
 }
 
+func TestRestartRecoveryBlockEnsureCreatesAfterResolvedFence(t *testing.T) {
+	testRestartRecoveryBlockEnsureCreatesAfterResolvedFence(t, newRepoForSessionTests)
+}
+
+func TestPostgresRestartRecoveryBlockEnsureCreatesAfterResolvedFence(t *testing.T) {
+	testRestartRecoveryBlockEnsureCreatesAfterResolvedFence(t, func(t *testing.T) *Repository {
+		database := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 2)
+		repo, err := NewWithDB(database, database, nil)
+		require.NoError(t, err)
+		return repo
+	})
+}
+
 func TestRestartRecoveryBlockEnsureRefusesUnsafeInventory(t *testing.T) {
 	testRestartRecoveryBlockEnsureRefusesUnsafeInventory(t, newRepoForSessionTests)
 }
@@ -165,8 +178,58 @@ func testRestartRecoveryBlockEnsureReusesIncident(t *testing.T, open func(*testi
 	})
 }
 
+func testRestartRecoveryBlockEnsureCreatesAfterResolvedFence(t *testing.T, open func(*testing.T) *Repository) {
+	t.Helper()
+	repo := open(t)
+	ctx := context.Background()
+	fixture := newSilentRestoreFixture(t, repo, "ensure-after-resolved", models.TaskSessionStateWaitingForInput)
+
+	_, err := repo.ResolveSessionRecoveryBlock(ctx, fixture.block.ID, "resume", time.Now().UTC())
+	require.NoError(t, err)
+	historical := models.SessionRecoveryBlock{
+		ID: "resolved-generic-fence", SessionID: fixture.session.ID,
+		IncarnationID: fixture.session.QueueIncarnationID, ExpectedGeneration: 1,
+		Reason: deliveryUnresolvedWorkReason, State: models.RecoveryBlockOpen,
+		ConsumerReference: reconstructionDeliveryConsumer,
+	}
+	require.NoError(t, repo.UpsertSessionRecoveryBlock(ctx, &historical))
+	_, err = repo.ResolveSessionRecoveryBlock(ctx, historical.ID, "resume", time.Now().UTC())
+	require.NoError(t, err)
+
+	successor := models.AgentDeliverySubmission{
+		ID: "successor-interrupted-prompt", SessionID: fixture.session.ID,
+		IncarnationID: fixture.session.QueueIncarnationID, HarnessGeneration: 1,
+		OwnerGeneration: 1, PayloadHash: "successor-payload-hash",
+		Payload: []byte("a distinct interrupted prompt"), State: models.DeliverySubmissionInterruptedUnknown,
+	}
+	_, err = repo.PrepareAgentDeliverySubmission(ctx, &successor)
+	require.NoError(t, err)
+
+	candidate := restartRecoveryBlockCandidate(fixture.session.ID, fixture.session.QueueIncarnationID, 1)
+	candidate.ID = "successor-generic-fence"
+	store, ok := any(repo).(restartRecoveryBlockEnsurer)
+	require.True(t, ok)
+	block, created, err := store.EnsureRestartRecoveryBlock(ctx, &candidate)
+	require.NoError(t, err)
+	require.True(t, created)
+	require.NotNil(t, block)
+	require.Equal(t, candidate.ID, block.ID)
+
+	openBlocks, err := repo.ListOpenSessionRecoveryBlocks(ctx, fixture.session.ID, fixture.session.QueueIncarnationID, 1)
+	require.NoError(t, err)
+	require.Len(t, openBlocks, 1)
+	require.Equal(t, candidate.ID, openBlocks[0].ID)
+	require.Equal(t, deliveryUnresolvedWorkReason, openBlocks[0].Reason)
+	resolved, err := repo.GetSessionRecoveryBlock(ctx, historical.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.RecoveryBlockResolved, resolved.State)
+	retained, err := repo.GetAgentDeliverySubmission(ctx, successor.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.DeliverySubmissionInterruptedUnknown, retained.State)
+}
+
 func testRestartRecoveryBlockEnsureRefusesUnsafeInventory(t *testing.T, open func(*testing.T) *Repository) {
-	for _, scenario := range []string{"multiple fences", "independent fence", "generation replaced", "resolved predecessor", "insert failure"} {
+	for _, scenario := range []string{"multiple fences", "independent fence", "generation replaced", "resolved predecessor", "resolved generic predecessor", "insert failure"} {
 		t.Run(scenario, func(t *testing.T) {
 			repo := open(t)
 			ctx := context.Background()
@@ -200,6 +263,18 @@ func testRestartRecoveryBlockEnsureRefusesUnsafeInventory(t *testing.T, open fun
 				candidate.Reason = deliveryUnknownPromptReason
 				candidate.DeliverySubmissionID = fixture.block.DeliverySubmissionID
 				candidate.DeliveryStreamID = fixture.block.DeliveryStreamID
+			case "resolved generic predecessor":
+				_, err := repo.ResolveSessionRecoveryBlock(ctx, fixture.block.ID, "resume", time.Now().UTC())
+				require.NoError(t, err)
+				generic := models.SessionRecoveryBlock{
+					ID: "resolved-generic-predecessor", SessionID: fixture.session.ID,
+					IncarnationID: fixture.session.QueueIncarnationID, ExpectedGeneration: 1,
+					Reason: deliveryUnresolvedWorkReason, State: models.RecoveryBlockOpen,
+					ConsumerReference: reconstructionDeliveryConsumer,
+				}
+				require.NoError(t, repo.UpsertSessionRecoveryBlock(ctx, &generic))
+				_, err = repo.ResolveSessionRecoveryBlock(ctx, generic.ID, "resume", time.Now().UTC())
+				require.NoError(t, err)
 			case "insert failure":
 				if repo.db.DriverName() != "sqlite3" {
 					t.Skip("SQLite insert trigger injects the storage failure")
@@ -226,7 +301,7 @@ func testRestartRecoveryBlockEnsureRefusesUnsafeInventory(t *testing.T, open fun
 			switch scenario {
 			case "multiple fences":
 				require.Len(t, blocks, 2)
-			case "insert failure", "resolved predecessor":
+			case "insert failure", "resolved predecessor", "resolved generic predecessor":
 				require.Empty(t, blocks)
 			case "generation replaced":
 				require.Len(t, blocks, 1)
@@ -240,6 +315,11 @@ func testRestartRecoveryBlockEnsureRefusesUnsafeInventory(t *testing.T, open fun
 				require.NoError(t, err)
 				require.Equal(t, models.RecoveryBlockResolved, previous.State)
 				require.Equal(t, "stop", previous.AuthorizedAction)
+			}
+			if scenario == "resolved generic predecessor" {
+				previous, err := repo.GetSessionRecoveryBlock(ctx, "resolved-generic-predecessor")
+				require.NoError(t, err)
+				require.Equal(t, models.RecoveryBlockResolved, previous.State)
 			}
 		})
 	}

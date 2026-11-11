@@ -82,6 +82,13 @@ or unprojected receipt refuses resolution. A transaction rollback changes none
 of the binding, notice or fence. A retry reuses retired journal proof. Retained inspection has a separate
 metadata-only stored-submission request for unretired legacy history; retirement
 proof still requires the actual retired marker and preserves the original label.
+A recovery block remains as resolved history after settlement. Uniqueness applies
+to open blocks by session, incarnation, generation and reason, so a later
+same-reason incident can receive its own block. Restart repair does not recreate
+a block for a resolved bound submission. A generic block after a resolved
+generic fence requires retained current-generation interrupted work created
+after that fence resolved. Without that evidence, the old incident remains
+closed.
 A retained submission with an existing canonical SQL row can repair its recovery
 presentation without a user-message row, including initial prompts and internal
 continuations. It preserves the stored dispatch-attempt identity: an initial

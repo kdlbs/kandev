@@ -113,6 +113,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 			return fmt.Errorf("apply migration %q: %w", migration.name, err)
 		}
 	}
+	if err := r.migrateSessionRecoveryBlockIncidentUniqueness(ctx); err != nil {
+		return fmt.Errorf("migrate session recovery block incident uniqueness: %w", err)
+	}
 	if err := r.migrateWorkspaceProtection(ctx); err != nil {
 		return err
 	}

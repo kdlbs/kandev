@@ -1,5 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { expect, test, type Page } from "@playwright/test";
@@ -10,6 +11,7 @@ import { SessionPage } from "../pages/session-page";
 import { attachGatewayTrafficCapture } from "./ws-traffic";
 import { attachMessageAddCapture } from "./ws-capture";
 import { countSessionMessageAdds } from "./silent-restart-recovery";
+import { readMockACPTrace } from "./transient-turn-runtime-continuity";
 import {
   findSessionJournal,
   withDatabase,
@@ -239,6 +241,36 @@ function readRepeatedNativeResumeState(
   }));
 }
 
+function expectNoInterruptedPromptReplay(
+  tracePath: string,
+  fixture: Awaited<ReturnType<typeof seedSuccessorGenerationInterruption>>,
+) {
+  const prompts = readMockACPTrace(tracePath)
+    .filter((record) => record.event === "prompt")
+    .map((record) => record.prompt ?? "");
+  const oldPayload = Buffer.from(fixture.previousSubmission.payload, "base64").toString("utf8");
+  const successorPayload = "A distinct successor-generation instruction.";
+  expect(prompts.filter((prompt) => prompt.includes("/e2e:simple-message"))).toHaveLength(1);
+  expect(prompts.some((prompt) => prompt.includes(oldPayload))).toBe(false);
+  expect(prompts.some((prompt) => prompt.includes(successorPayload))).toBe(false);
+}
+
+function expectIndependentFencesRemainOpen(
+  blocks: Array<{ id: string; consumer_reference: string }>,
+  fixture: Awaited<ReturnType<typeof seedSuccessorGenerationInterruption>>,
+) {
+  const independentBlockId = fixture.independentBlockId;
+  if (!independentBlockId)
+    throw new Error("independent recovery fixture has no independent block ID");
+  expect(blocks.map(({ id, consumer_reference }) => ({ id, consumer_reference }))).toEqual(
+    [
+      { id: fixture.blockId, consumer_reference: "agent_delivery" },
+      { id: fixture.genericBlockId, consumer_reference: "agent_delivery" },
+      { id: independentBlockId, consumer_reference: "office" },
+    ].sort((left, right) => left.id.localeCompare(right.id)),
+  );
+}
+
 export async function verifyRepeatedNativeResume(
   page: Page,
   api: ApiClient,
@@ -252,11 +284,29 @@ export async function verifyRepeatedNativeResume(
     KANDEV_LOG_LEVEL: "debug",
   });
   let taskId: string | undefined;
+  let profileId: string | undefined;
+  const tracePath = path.join(backend.tmpDir, `repeated-native-resume-${randomUUID()}.jsonl`);
+  fs.writeFileSync(tracePath, "");
   try {
+    const { agents } = await api.listAgents();
+    const owner = agents.find((agent) =>
+      agent.profiles?.some((profile) => profile.id === seed.agentProfileId),
+    );
+    if (!owner) throw new Error("mock-agent profile owner is missing");
+    const profile = await api.createAgentProfile(
+      owner.id,
+      `Repeated native resume ${randomUUID()}`,
+      {
+        model: "mock-fast",
+        auto_fallback: false,
+        env_vars: [{ key: "E2E_MOCK_AGENT_ACP_TRACE_FILE", value: tracePath }],
+      },
+    );
+    profileId = profile.id;
     const task = await api.createTaskWithAgent(
       seed.workspaceId,
       "Repeated native resume",
-      seed.agentProfileId,
+      profile.id,
       {
         workflow_id: seed.workflowId,
         workflow_step_id: seed.startStepId,
@@ -350,6 +400,7 @@ export async function verifyRepeatedNativeResume(
       )
       .toBe(true);
     const afterResume = readRepeatedNativeResumeState(backend.tmpDir, fixture);
+    expectNoInterruptedPromptReplay(tracePath, fixture);
     const [oldPeer, currentPeer] = await Promise.all([
       readJournalSubmission(fixture.journalPath, fixture.historicalSubmissionId),
       readJournalSubmission(fixture.journalPath, fixture.submissionId),
@@ -393,6 +444,7 @@ export async function verifyRepeatedNativeResume(
     expect(recovery.harness_generation).toBe(fixture.generation - 1);
 
     if (shape === "independent") {
+      expectIndependentFencesRemainOpen(afterResume.blocks, fixture);
       await expect(page.getByTestId("failed-session-banner")).toBeVisible();
       await expect(page.getByTestId("session-recovery-error")).toBeVisible();
       await expect(resume).toBeEnabled();
@@ -419,6 +471,9 @@ export async function verifyRepeatedNativeResume(
       await expect
         .poll(() => readRepeatedNativeResumeState(backend.tmpDir, fixture).blocks.length)
         .toBe(3);
+      const afterRetry = readRepeatedNativeResumeState(backend.tmpDir, fixture);
+      expectIndependentFencesRemainOpen(afterRetry.blocks, fixture);
+      expectNoInterruptedPromptReplay(tracePath, fixture);
       return;
     }
 
@@ -437,6 +492,13 @@ export async function verifyRepeatedNativeResume(
       session.chat.getByText("Slow response complete after 1s.", { exact: false }),
     ).toBeVisible({ timeout: 30_000 });
     await session.waitForChatIdle({ timeout: 30_000 });
+    const dispatchedPrompts = readMockACPTrace(tracePath).filter(
+      (record) => record.event === "prompt",
+    );
+    expect(dispatchedPrompts.filter((record) => record.prompt?.includes("/slow 1s"))).toHaveLength(
+      1,
+    );
+    expectNoInterruptedPromptReplay(tracePath, fixture);
     const messages = (await api.listSessionMessages(active.id)).messages;
     expect(
       messages.filter(
@@ -459,7 +521,12 @@ export async function verifyRepeatedNativeResume(
     try {
       if (taskId) await api.deleteTask(taskId);
     } finally {
-      await release();
+      try {
+        if (profileId) await api.deleteAgentProfile(profileId, true);
+      } finally {
+        fs.rmSync(tracePath, { force: true });
+        await release();
+      }
     }
   }
 }

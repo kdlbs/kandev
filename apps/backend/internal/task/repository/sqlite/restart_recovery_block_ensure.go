@@ -37,10 +37,14 @@ func (r *Repository) EnsureRestartRecoveryBlock(
 	}
 	if len(open) != 0 {
 		existing := reusableRestartRecoveryBlock(open)
-		if err := tx.Commit(); err != nil {
-			return nil, false, err
-		}
-		return existing, false, nil
+		return commitRestartRecoveryBlockResult(tx, existing, false)
+	}
+	repeated, err := r.matchesResolvedRestartRecoveryIncidentTx(ctx, tx, block)
+	if err != nil {
+		return nil, false, err
+	}
+	if repeated {
+		return commitRestartRecoveryBlockResult(tx, nil, false)
 	}
 	inserted, err := r.insertRestartRecoveryBlockTx(ctx, tx, &block)
 	if err != nil || !inserted {
@@ -53,6 +57,43 @@ func (r *Repository) EnsureRestartRecoveryBlock(
 		return nil, false, err
 	}
 	return &block, true, nil
+}
+
+func commitRestartRecoveryBlockResult(
+	tx *sqlx.Tx,
+	block *models.SessionRecoveryBlock,
+	created bool,
+) (*models.SessionRecoveryBlock, bool, error) {
+	if err := tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	return block, created, nil
+}
+
+func (r *Repository) matchesResolvedRestartRecoveryIncidentTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	block models.SessionRecoveryBlock,
+) (bool, error) {
+	query := `SELECT EXISTS (SELECT 1 FROM session_recovery_blocks resolved
+		WHERE resolved.session_id = ? AND resolved.incarnation_id = ? AND resolved.expected_generation = ?
+		AND resolved.reason = ? AND resolved.state = 'resolved' AND resolved.consumer_reference = 'agent_delivery'`
+	args := []any{block.SessionID, block.IncarnationID, block.ExpectedGeneration, block.Reason}
+	if block.Reason == deliveryUnknownPromptReason {
+		query += ` AND resolved.delivery_submission_id = ?)`
+		args = append(args, block.DeliverySubmissionID)
+	} else {
+		query += ` AND (resolved.resolved_at IS NULL OR NOT EXISTS (
+			SELECT 1 FROM agent_delivery_submissions successor
+			WHERE successor.session_id = resolved.session_id AND successor.incarnation_id = resolved.incarnation_id
+			AND successor.harness_generation = resolved.expected_generation
+			AND successor.state IN ('dispatching', 'interrupted_unknown')
+			AND successor.created_at > resolved.resolved_at
+		)))`
+	}
+	var repeated bool
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(query), args...).Scan(&repeated)
+	return repeated, err
 }
 
 func validateRestartRecoveryBlockCandidate(block *models.SessionRecoveryBlock) error {
@@ -173,7 +214,7 @@ func (r *Repository) insertRestartRecoveryBlockTx(
 		delivery_submission_id, delivery_stream_id, delivery_sequence, delivery_turn_id, delivery_outcome,
 		authorized_action, created_at, updated_at, resolved_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (session_id, incarnation_id, expected_generation, reason) DO NOTHING`),
+		ON CONFLICT (session_id, incarnation_id, expected_generation, reason) WHERE state = 'open' DO NOTHING`),
 		block.ID, block.SessionID, block.IncarnationID, block.ExpectedGeneration, block.Reason, block.State,
 		block.ConsumerReference, block.DeliverySubmissionID, block.DeliveryStreamID, block.DeliverySequence,
 		block.DeliveryTurnID, block.DeliveryOutcome, block.AuthorizedAction, block.CreatedAt, block.UpdatedAt, block.ResolvedAt)

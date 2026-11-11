@@ -34,6 +34,8 @@ Keep already duplicated incidents recoverable through Task 01's authenticated pr
 - Add the narrow `EnsureRestartRecoveryBlock` repository capability.
 - Under existing turn/delivery locks, revalidate the current generation before reading and creating a fence.
 - Return one eligible existing fence unchanged. Insert only when no current fence exists.
+- Permit resolved history and a later open fence with the same key by migrating to an open-only uniqueness index.
+- Refuse to recreate the same resolved submission fence; create a new generic fence only when retained interrupted work proves a later incident.
 - Preserve multiple and independent fences without another insertion.
 - Use the capability in restart presentation repair and propagate read/write failures.
 - Cover PostgreSQL concurrent repair and delivery-fence insertion using separate connections and synchronization barriers.
@@ -41,7 +43,7 @@ Keep already duplicated incidents recoverable through Task 01's authenticated pr
 
 ## Out of scope
 
-- Global recovery-block uniqueness changes or deletion of existing fences.
+- Deletion of existing recovery fences or broadening generic recovery authority.
 - Relaxing the generic resolver's single-fence guard.
 - Changing independent consumer, ordinary upsert or Office admission behavior.
 
@@ -50,7 +52,7 @@ Keep already duplicated incidents recoverable through Task 01's authenticated pr
 1. `TestRestartRecoveryBlockEnsureReusesIncident` reproduces the companion defect before the correction.
    Repeated and concurrent repair then retain the existing fence ID, reason, submission and stream.
 2. Missing-fence repair creates one fence for the current eligible generation.
-   Generation replacement, independent fences, multiple causes and storage failures preserve the refusal without partial writes.
+   A resolved same-incident fence remains closed, while a distinct retained successor interruption permits a new generic fence. Generation replacement, independent fences, multiple causes and storage failures preserve the refusal without partial writes.
 3. `TestRepeatedNativeResumeAfterSilentRestore` proves exact authenticated resolution of the issue's existing matching companion fences.
    A mixed matching/independent set remains blocked, with no old dispatch or outcome rewrite.
 
@@ -61,6 +63,8 @@ Use barriers instead of timing-based sleeps.
 
 ```bash
 (cd apps/backend && GOMEMLIMIT=2048MiB GOMAXPROCS=2 go test -trimpath -tags fts5 -p 1 -race ./internal/task/repository/sqlite -run 'Test(Postgres)?(RestartRecoveryBlockEnsure|NativeResumeAfterSilentRestore)' -count=1)
+(cd apps/backend && GOMEMLIMIT=2048MiB GOMAXPROCS=2 go test -trimpath -tags fts5 -p 1 -race ./internal/task/repository/sqlite -run 'Test(Postgres)?SessionRecoveryBlockIncidentUniquenessMigration' -count=1)
+(cd apps/backend && GOMEMLIMIT=2048MiB GOMAXPROCS=2 go test -trimpath -p 1 ./internal/automation -run '^TestRetryLegacyQuarantineUsesOpenRecoveryFenceIndex$' -count=1)
 (cd apps/backend && GOMEMLIMIT=2048MiB GOMAXPROCS=2 go test -trimpath -tags fts5 -p 1 -race ./internal/orchestrator -run 'Test(RepeatedNativeResumeAfterSilentRestore|RestartRecovery|RestartInventory|RecoverSessionUnknownPromptKeepsNativeHistory)' -count=1)
 (cd apps/backend && go run ./cmd/sqlguard ./internal)
 (cd apps/backend && GOMEMLIMIT=2048MiB GOMAXPROCS=2 go test -trimpath -p 1 -race ./internal/persistence/storeconformance -count=1)
@@ -105,9 +109,12 @@ Implemented `EnsureRestartRecoveryBlock` with the existing turn and delivery loc
 
 Restart presentation repair now uses this repository operation. It preserves existing bindings and does not add a generic companion beside an existing incident fence. The authenticated resolver still rejects an independent restriction.
 
+Review remediation permits resolved recovery history to coexist with later open incidents. SQLite rebuilds legacy `session_recovery_blocks` tables with all bindings and timestamps preserved; PostgreSQL drops the matching legacy unique constraint. Both engines enforce one open block per session, incarnation, generation and reason. A bound candidate cannot reopen its resolved submission. A generic candidate needs a retained interrupted submission created after the resolved generic fence. Automation's legacy quarantine insert now tolerates both the partial open index and its deterministic row ID.
+
 Verification passed:
 
 - The SQLite race suite passed for `RestartRecoveryBlockEnsure` and `NativeResumeAfterSilentRestore`.
+- The SQLite race suite passed for resolved same-incident refusal, distinct successor creation and legacy-constraint migration replay. The automation quarantine test passed with the open-only index.
 - The orchestrator race suite passed for repeated Resume and restart recovery.
 - SQL guard and store-conformance race tests passed.
 - Changed-Go-file lint reported `0 issues`. `git diff --check` passed.

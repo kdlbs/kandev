@@ -236,6 +236,15 @@ Implementation verification passed:
 - PR-documentation preflight passed with six accepted references and no errors. `git diff --check` passed.
 - PostgreSQL cases did not run because `KANDEV_TEST_POSTGRES_DSN` is unset. No public docs changed; the existing session recovery guide already states that Resume preserves the native conversation and does not resend uncertain prompts.
 
+PR review remediation passed:
+
+- Recovery-block identity now applies to open rows. SQLite rebuilds a legacy constrained table while preserving every row and binding; PostgreSQL removes the old unique constraint before creating the open-only index.
+- Resolved bound submissions remain closed. A later generic fence requires retained interrupted work created after the resolved fence. SQLite migration replay, same-incident refusal and distinct-successor creation passed under `-race`.
+- Automation's legacy quarantine backfill passed with the open-only index. SQL guard, store-conformance race tests, orchestrator recovery race tests and changed-Go-file lint passed.
+- Desktop and mobile repeated-resume E2E reruns each passed 2 tests. The mock-agent trace confirms no historical or interrupted-successor replay, one initial prompt, and one distinct follow-up dispatch. The independent case retains the exact seeded block IDs and consumers across Resume attempts.
+- Both managed E2E runs rebuilt the backend, Vite assets and fixture plugin. Web typecheck, Prettier, documentation catalog, all 36 spec-linter tests, full spec lint, PR-documentation coverage and `git diff --check` passed. The latest docs catalog validated 449 decisions and 1,984 specifications.
+- PostgreSQL migration and repository cases remain pending because `KANDEV_TEST_POSTGRES_DSN` is unset.
+
 The preflight deliberately includes a planned production path to exercise coverage validation for this documentation-only package.
 Run it from the repository root:
 
@@ -275,7 +284,7 @@ The current session recovery guide already describes the native conversation and
 
 - Accepting an action name without complete provenance can authorize a foreign or unresolved source.
 - Missing-stream recovery must use current authenticated evidence rather than guessed identifiers.
-- A global recovery-block uniqueness change would prevent legitimate independent causes.
+- Open-fence uniqueness must preserve resolved history while allowing a distinct later incident with the same natural key.
 - PostgreSQL serialization requires the same session-turn and delivery lock order as existing writers.
 - Journal retirement can precede a failed SQL commit. Retry must reuse that proof and preserve unknown labels.
 - Reconnect, Stop and terminal-reclaim follow-ups remain outside the demonstrated repair.
