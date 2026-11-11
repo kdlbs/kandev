@@ -265,7 +265,8 @@ func createAdoptionEnvironment(t *testing.T, ctx context.Context, repo *sqlitere
 	commonDir := filepath.Join(primary, ".git")
 	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
 		ID: "env-1", TaskID: taskID, ExecutorType: string(models.ExecutorTypeWorktree),
-		WorkspacePath: primary, Status: models.TaskEnvironmentStatusReady,
+		WorkspacePath: primary, TaskDirName: filepath.Base(filepath.Dir(primary)),
+		Status: models.TaskEnvironmentStatusReady,
 		Repos: []*models.TaskEnvironmentRepo{{
 			ID: "env-repo-primary", RepositoryID: "repo-1", WorktreeID: "wt-primary",
 			WorktreePath: primary, WorktreeBranch: "main", BranchSlug: "main",
@@ -400,8 +401,8 @@ func TestAdoptWorktree_ExcludesNestedCheckoutFromOuterStatus(t *testing.T) {
 	if err := svc.DetachTaskRepository(ctx, task.ID, adopted.ID); err != nil {
 		t.Fatalf("DetachTaskRepository: %v", err)
 	}
-	if len(exclusions.removed) != 1 || exclusions.removed[0][0] != primary || exclusions.removed[0][1] != linked {
-		t.Fatalf("nested exclusion remove = %+v", exclusions.removed)
+	if len(exclusions.removed) != 0 {
+		t.Fatalf("user detach must keep the nested exclusion, removed = %+v", exclusions.removed)
 	}
 
 	reported, err := svc.AdoptWorktree(ctx, AdoptWorktreeRequest{TaskID: task.ID, Path: linked})
@@ -417,7 +418,7 @@ func TestAdoptWorktree_ExcludesNestedCheckoutFromOuterStatus(t *testing.T) {
 	if err := svc.DetachTaskRepositoryFromDisk(ctx, task.ID, reported.ID); err != nil {
 		t.Fatalf("DetachTaskRepositoryFromDisk: %v", err)
 	}
-	if len(exclusions.removed) != 2 || exclusions.removed[1][0] != primary || exclusions.removed[1][1] != linked {
+	if len(exclusions.removed) != 1 || exclusions.removed[0][0] != primary || exclusions.removed[0][1] != linked {
 		t.Fatalf("removed-from-disk exclusion remove = %+v", exclusions.removed)
 	}
 }
@@ -603,5 +604,63 @@ func gitWorktreeAddBranch(t *testing.T, primary, path, branch, base string) {
 	cmd.Env = isolatedGitEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git worktree add: %v: %s", err, out)
+	}
+}
+
+func TestAdoptWorktree_RepairsMissingAttachmentRow(t *testing.T) {
+	isolateGitEnvForTest(t)
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	_, primary, linked := setupAdoptionRepository(t)
+	task := createAdoptionTask(t, ctx, svc, repo, primary)
+	createAdoptionEnvironment(t, ctx, repo, task.ID, primary)
+	addLinkedWorktree(t, primary, linked, "fix-b")
+	adopted, err := svc.AdoptWorktree(ctx, AdoptWorktreeRequest{TaskID: task.ID, Path: linked})
+	if err != nil {
+		t.Fatalf("initial AdoptWorktree: %v", err)
+	}
+	if err := repo.DeleteTaskRepository(ctx, adopted.ID); err != nil {
+		t.Fatalf("delete attachment row: %v", err)
+	}
+
+	repaired, err := svc.AdoptWorktree(ctx, AdoptWorktreeRequest{
+		TaskID: task.ID, Path: linked, BaseBranch: "main",
+	})
+	if err != nil {
+		t.Fatalf("repair AdoptWorktree: %v", err)
+	}
+	if repaired.TaskRepository == nil || repaired.ID == "" {
+		t.Fatalf("repair result = %+v", repaired)
+	}
+	rows, err := repo.ListTaskRepositories(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list task repositories: %v", err)
+	}
+	var found bool
+	for _, row := range rows {
+		if row.CheckoutBranch == "fix-b" && row.BaseBranch == "main" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("repair did not recreate the attachment row: %+v", rows)
+	}
+}
+
+func TestTaskWorkspaceRootLegacyFlatKeepsPrimaryContainment(t *testing.T) {
+	isolateGitEnvForTest(t)
+	_, primary, _ := setupAdoptionRepository(t)
+	svc := &Service{}
+	root, err := svc.taskWorkspaceRoot(
+		&models.TaskEnvironment{ExecutorType: string(models.ExecutorTypeWorktree), WorkspacePath: primary},
+		[]*models.TaskEnvironmentRepo{{
+			RepositoryID: "repo-1", WorktreePath: primary, Status: models.TaskEnvironmentRepoStatusActive,
+		}},
+	)
+	if err != nil {
+		t.Fatalf("taskWorkspaceRoot: %v", err)
+	}
+	if !sameResolvedPath(root, primary) {
+		t.Fatalf("legacy workspace root = %q, want primary checkout %q", root, primary)
 	}
 }

@@ -42,20 +42,19 @@ export function useFileTreeRootReveal({
         return next;
       });
     }
-    let shouldApply = true;
     let loadingAncestor = false;
     for (const path of rootPaths) {
       const missing = findUnloadedAncestor(tree, path, getAncestorPaths(path));
       if (missing) {
         loadingAncestor = true;
-        void loadChildren(missing, () => shouldApply);
+        // Do not cancel this load when expansion state changes: the request
+        // is deduplicated upstream, so cancelling would discard the only
+        // response that can finish the reveal.
+        void loadChildren(missing);
         break;
       }
     }
     if (!loadingAncestor) revealedRootKeyRef.current = rootKey;
-    return () => {
-      shouldApply = false;
-    };
     // rootKey covers the array identity; join avoids a new effect per render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootKey, tree, expandedPaths, isLoadingTree, loadChildren, setExpandedPaths]);

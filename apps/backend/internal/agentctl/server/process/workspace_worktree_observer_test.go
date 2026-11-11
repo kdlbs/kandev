@@ -61,6 +61,29 @@ func TestWorktreeObserverPublishesOnlyInRootLinkedWorktrees(t *testing.T) {
 	}
 }
 
+func TestWorktreeObserverResolvesSymlinkedWorkspaceRoot(t *testing.T) {
+	taskRoot := t.TempDir()
+	primary := filepath.Join(taskRoot, "primary")
+	initGitRepoAt(t, primary)
+	linked := filepath.Join(taskRoot, ".claude", "worktrees", "fix-b")
+	addObserverWorktree(t, primary, linked, "fix-b")
+	link := filepath.Join(t.TempDir(), "task-link")
+	if err := os.Symlink(taskRoot, link); err != nil {
+		t.Fatalf("symlink workspace root: %v", err)
+	}
+
+	wt := NewWorkspaceTrackerForRepo(primary, "primary", newTestLogger(t))
+	wt.SetWorkspaceRoot(link)
+	sub := wt.SubscribeWorkspaceStream()
+	defer func() { wt.UnsubscribeWorkspaceStream(sub) }()
+
+	wt.observeWorktreeInventory(context.Background())
+	inventory := nextWorktreeInventory(t, sub)
+	if len(inventory.Entries) != 1 || inventory.Entries[0].Path != linked {
+		t.Fatalf("entries through symlinked root = %+v, want %q", inventory.Entries, linked)
+	}
+}
+
 func TestWorktreeObserverIgnoresNonRepositoryTracker(t *testing.T) {
 	taskRoot := t.TempDir()
 	wt := NewWorkspaceTrackerForRepo(taskRoot, "", newTestLogger(t))

@@ -155,6 +155,9 @@ func (s *Service) reuseAdoptedWorktree(ctx context.Context, req AdoptWorktreeReq
 	if taskRepo == nil {
 		// The inventory row survives without its attachment row. Repair the
 		// task-side row instead of creating a second physical root.
+		if state.repository == nil {
+			return nil, fmt.Errorf("%w: repository is unavailable", ErrWorktreeNotAdoptable)
+		}
 		return s.commitAdoptedWorktree(ctx, req, WorktreeAdoptionSourceReported, state)
 	}
 	if requestedBase := strings.TrimSpace(req.BaseBranch); requestedBase != "" && requestedBase != taskRepo.BaseBranch {
@@ -207,18 +210,14 @@ func (s *Service) inspectAdoptableWorktree(ctx context.Context, req AdoptWorktre
 	if req.CheckoutBranch != "" && req.CheckoutBranch != candidate.Branch {
 		return nil, fmt.Errorf("%w: checkout_branch %q does not match the worktree branch %q", ErrWorktreeNotAdoptable, req.CheckoutBranch, candidate.Branch)
 	}
-	detached, err := s.isWorktreeDetached(ctx, req.TaskID, candidate.Path)
-	if err != nil {
+	if err := s.rejectDetachedAdoptionCandidate(ctx, req, candidate.Path); err != nil {
 		return nil, err
-	}
-	if detached {
-		if req.Source == WorktreeAdoptionSourceDetected {
-			return nil, fmt.Errorf("%w: worktree %q was removed from this task", errAdoptionSuppressed, candidate.Path)
-		}
 	}
 	state := &worktreeAdoptionState{environment: environment, workspaceRoot: root, envRepos: envRepos, candidate: candidate}
 	if existing := environmentRepoByPath(envRepos, candidate.Path); existing != nil {
-		state.existingPath = existing
+		if err := s.loadExistingAdoptionRepository(ctx, state, existing); err != nil {
+			return nil, err
+		}
 		return state, nil
 	}
 	repository, err := s.repositoryForWorktree(ctx, envRepos, candidate)
@@ -274,12 +273,12 @@ func (s *Service) taskWorkspaceRoot(environment *models.TaskEnvironment, envRepo
 	}
 	if workspace != "" {
 		if primary != nil && primary.WorktreePath != "" && sameResolvedPath(workspace, primary.WorktreePath) {
-			return canonicalDirectory(filepath.Dir(primary.WorktreePath))
+			return taskContainmentRoot(environment, workspace, primary.WorktreePath)
 		}
 		return canonicalDirectory(workspace)
 	}
 	if primary != nil && primary.WorktreePath != "" {
-		return canonicalDirectory(filepath.Dir(primary.WorktreePath))
+		return taskContainmentRoot(environment, primary.WorktreePath, primary.WorktreePath)
 	}
 	if primary != nil {
 		repository, err := s.repoEntities.GetRepository(context.Background(), primary.RepositoryID)
@@ -291,6 +290,13 @@ func (s *Service) taskWorkspaceRoot(environment *models.TaskEnvironment, envRepo
 		}
 	}
 	return "", fmt.Errorf("%w: task workspace root could not be resolved", ErrWorktreeNotAdoptable)
+}
+
+func taskContainmentRoot(environment *models.TaskEnvironment, workspace, primaryPath string) (string, error) {
+	if environment.TaskDirName == "" {
+		return canonicalDirectory(workspace)
+	}
+	return canonicalDirectory(filepath.Dir(primaryPath))
 }
 
 func primaryEnvironmentRepo(envRepos []*models.TaskEnvironmentRepo) *models.TaskEnvironmentRepo {
@@ -616,6 +622,30 @@ func repositoryNameOrID(repository *models.Repository) string {
 		return repository.Name
 	}
 	return repository.ID
+}
+
+func (s *Service) rejectDetachedAdoptionCandidate(ctx context.Context, req AdoptWorktreeRequest, path string) error {
+	detached, err := s.isWorktreeDetached(ctx, req.TaskID, path)
+	if err != nil {
+		return err
+	}
+	if detached && req.Source == WorktreeAdoptionSourceDetected {
+		return fmt.Errorf("%w: worktree %q was removed from this task", errAdoptionSuppressed, path)
+	}
+	return nil
+}
+
+func (s *Service) loadExistingAdoptionRepository(ctx context.Context, state *worktreeAdoptionState, existing *models.TaskEnvironmentRepo) error {
+	state.existingPath = existing
+	repository, err := s.repoEntities.GetRepository(ctx, existing.RepositoryID)
+	if err != nil {
+		return fmt.Errorf("load repository %q: %w", existing.RepositoryID, err)
+	}
+	if repository == nil {
+		return fmt.Errorf("%w: repository %q is no longer available", ErrWorktreeNotAdoptable, existing.RepositoryID)
+	}
+	state.repository = repository
+	return nil
 }
 
 func (s *Service) rejectAdoptionDuplicate(existing []*models.TaskRepository, repositoryID, baseBranch, checkoutBranch, path string) error {

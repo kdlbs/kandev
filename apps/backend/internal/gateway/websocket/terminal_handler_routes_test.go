@@ -300,6 +300,13 @@ func TestResolveWorkingDirUsesInWorkspaceRootOnly(t *testing.T) {
 	if got, err := handler.resolveWorkingDir(execution, root); err != nil || got != root {
 		t.Fatalf("resolveWorkingDir(source root) = %q, %v", got, err)
 	}
+	link := filepath.Join(t.TempDir(), "workspace-link")
+	if err := os.Symlink(root, link); err != nil {
+		t.Fatalf("symlink workspace root: %v", err)
+	}
+	if got, err := handler.resolveWorkingDir(execution, link); err != nil || got != link {
+		t.Fatalf("resolveWorkingDir(symlinked workspace) = %q, %v", got, err)
+	}
 	outside, err := handler.resolveWorkingDir(execution, t.TempDir())
 	if err != nil || outside != workspace {
 		t.Fatalf("outside root should fall back to workspace, got %q, %v", outside, err)

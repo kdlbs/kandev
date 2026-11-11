@@ -34,6 +34,8 @@ type RootRepository = NonNullable<
   NonNullable<AppState["kanban"]["tasks"][number]>["repositories"]
 >[number];
 
+const NO_REPOSITORIES: RootRepository[] = [];
+
 function repoBasename(path: string): string {
   const segments = path.replace(/\\/g, "/").split("/");
   return segments.filter(Boolean).pop() ?? "";
@@ -206,8 +208,9 @@ function useTaskRepositoryRootsFromIds(
 ): TaskRepositoryRoots {
   const repositories = useAppStore((state) =>
     taskId
-      ? ((state.kanban?.tasks ?? []).find((task) => task.id === taskId)?.repositories ?? [])
-      : [],
+      ? ((state.kanban?.tasks ?? []).find((task) => task.id === taskId)?.repositories ??
+        NO_REPOSITORIES)
+      : NO_REPOSITORIES,
   );
   const session = useAppStore((state) =>
     sessionId ? (state.taskSessions?.items?.[sessionId] ?? null) : null,

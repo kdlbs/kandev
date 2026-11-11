@@ -129,9 +129,20 @@ func scanLinkedWorktreeRoots(workDir, workspaceRoot string, roots []string, dire
 	if err != nil {
 		return nil
 	}
+	if resolved, err := filepath.EvalSymlinks(rootAbs); err == nil {
+		rootAbs = resolved
+	}
+	workspaceAbs := filepath.Clean(workspaceRoot)
+	if resolved, err := filepath.EvalSymlinks(workspaceAbs); err == nil {
+		workspaceAbs = resolved
+	}
 	directPaths := make(map[string]struct{}, len(direct))
 	for _, repo := range direct {
-		directPaths[filepath.Clean(repo.path)] = struct{}{}
+		directPath := filepath.Clean(repo.path)
+		if resolved, err := filepath.EvalSymlinks(directPath); err == nil {
+			directPath = resolved
+		}
+		directPaths[directPath] = struct{}{}
 	}
 	var linked []repositorySubdir
 	for _, root := range roots {
@@ -148,7 +159,7 @@ func scanLinkedWorktreeRoots(workDir, workspaceRoot string, roots []string, dire
 		if !isLinkedWorktreeRoot(resolved) {
 			continue
 		}
-		name := linkedWorktreeTrackerName(workspaceRoot, resolved)
+		name := linkedWorktreeTrackerName(workspaceAbs, resolved)
 		if name == "" {
 			continue
 		}

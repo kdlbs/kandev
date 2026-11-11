@@ -430,8 +430,8 @@ func workingDirWithinRoots(requested string, roots []string) bool {
 }
 
 func workingDirWithinWorkspace(requested, workspace string) bool {
-	requested = filepath.Clean(requested)
-	workspace = filepath.Clean(workspace)
+	requested = resolvePathForContainment(requested)
+	workspace = resolvePathForContainment(workspace)
 	if !filepath.IsAbs(requested) || !filepath.IsAbs(workspace) {
 		return false
 	}
@@ -440,6 +440,21 @@ func workingDirWithinWorkspace(requested, workspace string) bool {
 		return false
 	}
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+// resolvePathForContainment canonicalizes both sides of a containment check.
+// Missing leaves are resolved through their parent so a symlinked ancestor
+// cannot make an in-workspace path look external.
+func resolvePathForContainment(path string) string {
+	cleaned := filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(cleaned); err == nil {
+		return resolved
+	}
+	parent := filepath.Dir(cleaned)
+	if resolvedParent, err := filepath.EvalSymlinks(parent); err == nil {
+		return filepath.Join(resolvedParent, filepath.Base(cleaned))
+	}
+	return cleaned
 }
 
 // resolveShellLabel returns the label and initial command for a user shell, derived

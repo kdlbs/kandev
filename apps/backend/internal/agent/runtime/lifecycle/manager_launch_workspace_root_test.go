@@ -15,8 +15,18 @@ func TestTaskWorkspaceRootForLaunch(t *testing.T) {
 	}{
 		{
 			name: "single worktree uses task folder",
-			req:  &LaunchRequest{ExecutorType: string(models.ExecutorTypeWorktree), WorkspacePath: "/tasks/task-1/primary"},
+			req: &LaunchRequest{
+				ExecutorType: string(models.ExecutorTypeWorktree), WorkspacePath: "/tasks/task-1/primary",
+				TaskDirName: "task-1",
+			},
 			want: "/tasks/task-1",
+		},
+		{
+			name: "legacy flat worktree keeps containment at the checkout",
+			req: &LaunchRequest{
+				ExecutorType: string(models.ExecutorTypeWorktree), WorkspacePath: "/shared/worktrees/repo-feature",
+			},
+			want: "/shared/worktrees/repo-feature",
 		},
 		{
 			name: "task-root layout uses workspace path",

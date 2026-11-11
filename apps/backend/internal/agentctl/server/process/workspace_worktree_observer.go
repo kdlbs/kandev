@@ -31,8 +31,18 @@ type worktreeObserverState struct {
 }
 
 // SetWorkspaceRoot sets the task workspace root used to contain discovery.
+// The root is resolved so a symlinked workspace and its resolved worktrees
+// compare on the same canonical path.
 func (wt *WorkspaceTracker) SetWorkspaceRoot(root string) {
-	wt.workspaceRoot = filepath.Clean(root)
+	if strings.TrimSpace(root) == "" {
+		wt.workspaceRoot = ""
+		return
+	}
+	cleaned := filepath.Clean(root)
+	if resolved, err := filepath.EvalSymlinks(cleaned); err == nil {
+		cleaned = resolved
+	}
+	wt.workspaceRoot = cleaned
 }
 
 // observeWorktreeInventory publishes a filtered linked-worktree snapshot when
@@ -56,11 +66,11 @@ func (wt *WorkspaceTracker) observeWorktreeInventory(ctx context.Context) {
 	if !full && stamp == wt.worktreeObserver.worktreesStamp {
 		return
 	}
-	wt.worktreeObserver.worktreesStamp = stamp
 	entries, err := wt.listWorkspaceWorktrees(ctx)
 	if err != nil {
 		return
 	}
+	wt.worktreeObserver.worktreesStamp = stamp
 	if sameWorktreeInventory(entries, wt.worktreeObserver.lastEntries) &&
 		wt.worktreeObserver.publishedOnce {
 		return

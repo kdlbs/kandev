@@ -110,6 +110,16 @@ describe("useTaskRepositoryRoots", () => {
     expect(result.current.byPath.get(ROOT_TRACKER)?.worktreeId).toBe("wt-adopted");
   });
 
+  it("keeps a stable empty projection when no task is selected", () => {
+    const { result, rerender } = renderHook(() => useTaskRepositoryRoots(null, null), {
+      wrapper: wrapperFor({}),
+    });
+    const first = result.current;
+    rerender();
+    expect(result.current).toBe(first);
+    expect(result.current.roots).toEqual([]);
+  });
+
   it("maps a single-repo empty tracker name to the primary root", () => {
     const state = stateWithRoots();
     state.kanban!.tasks[0]!.repositories = [state.kanban!.tasks[0]!.repositories![0]!];

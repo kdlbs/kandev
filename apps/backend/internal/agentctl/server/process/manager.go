@@ -1180,8 +1180,14 @@ func scanRepositorySubdirs(workDir string, allowedSourceRoots []string) []reposi
 		if resolveGitIndexPath(repositoryPath) == "" {
 			continue
 		}
-		if len(allowedSourceRoots) > 0 && !pathWithinSourceRoots(repositoryPath, allowedSourceRoots) {
-			continue
+		if len(allowedSourceRoots) > 0 {
+			contained := repositoryPath
+			if resolved, err := filepath.EvalSymlinks(repositoryPath); err == nil {
+				contained = resolved
+			}
+			if !pathWithinSourceRoots(contained, allowedSourceRoots) {
+				continue
+			}
 		}
 		out = append(out, repositorySubdir{name: entry.Name(), path: repositoryPath})
 	}

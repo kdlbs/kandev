@@ -3590,6 +3590,14 @@ func (m *Manager) initGitRepo(ctx context.Context, workspacePath string) error {
 // agentctl's linked-worktree observer. Host worktree tasks always live under
 // the task root, even when the agent's CWD is a single repository checkout.
 func (m *Manager) taskWorkspaceRootForLaunch(req *LaunchRequest) string {
+	return launchTaskWorkspaceRoot(req)
+}
+
+// launchTaskWorkspaceRoot returns the containing directory that is provably
+// owned by this task. A legacy flat worktree shares its parent with other
+// tasks, so containment stays at the primary checkout unless TaskDirName
+// matches the parent directory.
+func launchTaskWorkspaceRoot(req *LaunchRequest) string {
 	if req == nil || req.WorkspacePath == "" {
 		return ""
 	}
@@ -3600,12 +3608,13 @@ func (m *Manager) taskWorkspaceRootForLaunch(req *LaunchRequest) string {
 		return ""
 	}
 	parentLayout := req.WorkspaceLayout == workspaceLayoutTaskRoot ||
-		(req.WorkspaceLayout == "" && len(workspaceRepositorySpecsFromLaunch(req)) > 1)
+		(req.WorkspaceLayout == "" && len(req.RepoSpecs()) > 1)
 	if parentLayout {
 		return req.WorkspacePath
 	}
-	if parent := filepath.Dir(req.WorkspacePath); parent != req.WorkspacePath {
-		return parent
+	parent := filepath.Dir(req.WorkspacePath)
+	if parent == req.WorkspacePath || req.TaskDirName == "" || filepath.Base(parent) != req.TaskDirName {
+		return req.WorkspacePath
 	}
-	return ""
+	return parent
 }

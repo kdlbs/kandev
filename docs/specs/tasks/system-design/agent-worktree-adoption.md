@@ -152,8 +152,11 @@ The observer runs inside the existing git poll tick of each non-submodule tracke
   the last tick. Run `git worktree list --porcelain -z` only when they changed, or every tenth tick
   to catch branch switches inside a worktree that was still in detached `HEAD`.
 - Use `subproc.RunGit*` with the `background` class.
-- Filter by containment against the manager's workspace root and by the identity rules above.
-- Publish `worktree_inventory` only when the filtered list differs from the last one sent.
+- Filter by symlink-resolved containment against a task-owned workspace root and by the identity
+  rules above. A legacy flat worktree layout shares its parent with other tasks, so containment
+  stays at the primary checkout unless the parent matches the task directory name.
+- Publish `worktree_inventory` only when the filtered list differs from the last one sent, and
+  replay the latest snapshot to a subscriber that connects after publication.
 
 The observer never writes Git state and never changes the tracker graph itself.
 
@@ -186,9 +189,10 @@ on disk is kept.
 position, or the row whose checkout contains the agent working directory). In one transaction it
 inserts the `task_detached_worktrees` suppression row first, marks the `task_environment_repos` row
 `status = "detached"` so task cleanup can still remove the physical checkout, and deletes the
-`task_repositories` row. It removes the managed nested workspace exclusion, publishes
-`task.updated`, then calls `RescanWorkspaceForSession` with the reduced source roots so agentctl
-retires the tracker. It performs no filesystem or Git checkout operation, and does not touch
+`task_repositories` row. It keeps the managed nested workspace exclusion while the directory
+remains on disk so the containing checkout does not report it as untracked; the from-disk path
+removes the stale exclusion at the same time as the attachment. It publishes `task.updated`, then
+calls `RescanWorkspaceForSession` with the reduced source roots so agentctl retires the tracker. It performs no filesystem or Git checkout operation, and does not touch
 `task_prs`. A running agent turn does not block it.
 
 Kandev-created secondary roots follow the same path. Their directory stays inside the task folder;

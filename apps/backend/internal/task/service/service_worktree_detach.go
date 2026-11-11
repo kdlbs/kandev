@@ -58,7 +58,10 @@ func (s *Service) detachTaskRepositoryLocked(ctx context.Context, taskID, taskRe
 	if err := s.detachAttachmentRows(ctx, taskID, taskRepo.ID, envRepo, detachPath, markDetached); err != nil {
 		return err
 	}
-	if detachPath != "" {
+	// A user detach leaves the worktree directory on disk. Keep the managed
+	// exclusion so the containing checkout does not start reporting it as
+	// untracked; the from-disk path removes the stale rule after deletion.
+	if detachPath != "" && !markDetached {
 		s.removeNestedWorkspaceExclusion(context.WithoutCancel(ctx), rows, detachPath)
 	}
 	s.PublishTaskUpdatedByID(context.WithoutCancel(ctx), taskID)

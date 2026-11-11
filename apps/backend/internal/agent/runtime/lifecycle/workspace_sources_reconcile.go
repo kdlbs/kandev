@@ -205,9 +205,15 @@ func workspaceRepositorySpecsFromLaunch(req *LaunchRequest) []WorkspaceRepositor
 	}
 	specs := req.RepoSpecs()
 	result := make([]WorkspaceRepositorySpec, 0, len(specs))
+	taskRoot := launchTaskWorkspaceRoot(req)
 	for _, spec := range specs {
+		worktreePath := ""
+		if taskRoot != "" && strings.TrimSpace(spec.WorkspaceRelativePath) != "" {
+			worktreePath = filepath.Join(taskRoot, filepath.FromSlash(spec.WorkspaceRelativePath))
+		}
 		result = append(result, WorkspaceRepositorySpec{
-			RepositoryID: spec.RepositoryID, RepositoryPath: spec.RepositoryPath, RepoName: spec.RepoName,
+			RepositoryID: spec.RepositoryID, RepositoryPath: spec.RepositoryPath, WorktreePath: worktreePath,
+			RepoName:       spec.RepoName,
 			IntegrationRef: spec.IntegrationRef,
 			BaseBranch:     spec.BaseBranch, BaseBranchFallbackPolicy: spec.BaseBranchFallbackPolicy,
 			DefaultBranch: spec.DefaultBranch, CheckoutBranch: spec.CheckoutBranch,
@@ -340,6 +346,9 @@ func workspaceSourceRoots(folders []WorkspaceFolderSpec, repositories []Workspac
 	roots := make([]string, 0, len(folders)+len(repositories))
 	seen := make(map[string]struct{}, cap(roots))
 	add := func(path string) {
+		if strings.TrimSpace(path) == "" {
+			return
+		}
 		resolved, err := filepath.EvalSymlinks(filepath.Clean(path))
 		if err != nil {
 			return
