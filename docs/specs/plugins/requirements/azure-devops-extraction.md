@@ -10,7 +10,7 @@ owners:
 
 ## Overview
 
-The [Azure DevOps connector plugin](../../integrations/requirements/azure-devops-plugin.md)
+The [Azure DevOps connector plugin](https://github.com/JnManso/kandev-plugin-azure-devops/blob/main/docs/specs/requirements/azure-devops-plugin.md)
 replaces the first-party Azure DevOps integration. Kandev removes the
 integration in one change and lists the plugin in its registry in another, as
 agreed with the maintainer. Like the [Voice](voice-extraction.md) and

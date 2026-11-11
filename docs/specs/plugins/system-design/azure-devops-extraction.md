@@ -20,7 +20,7 @@ It uses but does not own the plugin repository-provider ownership model
 ([plugins-02](plugins-02.md)) and the Git credential broker.
 
 The plugin side is in the
-[connector plugin design](../../integrations/system-design/azure-devops-plugin.md).
+[connector plugin design](https://github.com/JnManso/kandev-plugin-azure-devops/blob/main/docs/specs/system-design/azure-devops-plugin.md).
 
 ## Requirement mapping
 

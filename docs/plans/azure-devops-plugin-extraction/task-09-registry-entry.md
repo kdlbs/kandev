@@ -3,8 +3,7 @@ id: "09-registry-entry"
 title: "Registry entry and public docs"
 status: pending
 wave: 5
-depends_on: 
-  - "07-plugin-release"
+depends_on:
   - "08-core-removal"
 plan: "plan.md"
 requirements:
@@ -49,7 +48,7 @@ Commands run from the Kandev repository root; the plugin worktree is its sibling
 
 ## Dependencies
 
-Task 07-plugin-release, Task 08-core-removal
+Task 08-core-removal, and the plugin `v0.1.0` release (plugin work order 07, owned by the plugin repository)
 
 ## Risks
 
