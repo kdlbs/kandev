@@ -35,9 +35,9 @@ its comment data, composer, and delivery behavior.
   extracts, Markdown preview comments, and code file editor comments.
 - **Floating selection trigger:** A Kandev control positioned next to the
   current text selection.
-- **Selection action dock:** A compact Kandev toolbar positioned at the visible
-  bottom edge of the hosting surface, or immediately above the software
-  keyboard when one is open.
+- **Selection action dock:** Compact Kandev icon actions positioned at the
+  bottom-right of the hosting surface's visible bottom edge, or immediately
+  above the software keyboard when one is open.
 - **Touch presentation:** The presentation used when the primary pointer is
   coarse, the same condition that already selects the touch comment Drawer.
 
@@ -83,9 +83,11 @@ device's selection menu cannot cover it and I can reach it with my thumb.
 - **AC-UI-TOUCH-SELECTION-ACTIONS-001.7:** Kandev shall leave the device's
   native selection actions available while the dock is shown.
 - **AC-UI-TOUCH-SELECTION-ACTIONS-001.8:** The dock shall be a labelled
-  toolbar. Its Comment action shall have a localized accessible name and a
-  touch target of at least 44 CSS pixels. The dock shall be no taller than
-  48 CSS pixels and shall not cause document-level horizontal overflow.
+  toolbar of icon-only actions aligned to the trailing edge, like the Plan
+  dock's Comment action: a 32 CSS pixel square visual surface inside a touch
+  target of at least 44 CSS pixels, with a localized accessible name. It shall
+  not occupy or block the rest of its row, shall be no taller than 48 CSS
+  pixels, and shall not cause document-level horizontal overflow.
 - **AC-UI-TOUCH-SELECTION-ACTIONS-001.9:** Selections that a surface does not
   accept today (streaming replies, read-only Office tasks, disabled editor
   comments, whitespace-only text) shall not show the dock.

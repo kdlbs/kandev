@@ -436,10 +436,10 @@ test.describe("Mobile file viewer panel", () => {
     const previewBox = await viewer.getByTestId("markdown-preview").boundingBox();
     const dockBox = await dock.boundingBox();
     if (!previewBox || !dockBox) throw new Error("Expected visible preview and selection dock");
-    // Docked at the preview's bottom edge, away from the native selection menu.
-    expect(
-      Math.abs(dockBox.y + dockBox.height - (previewBox.y + previewBox.height)),
-    ).toBeLessThanOrEqual(2);
+    // A small square docked at the preview's bottom-right, away from the native selection menu.
+    expect(dockBox.width).toBeLessThanOrEqual(56);
+    expect(previewBox.x + previewBox.width - (dockBox.x + dockBox.width)).toBeLessThanOrEqual(16);
+    expect(previewBox.y + previewBox.height - (dockBox.y + dockBox.height)).toBeLessThanOrEqual(8);
     await commentButton.tap();
 
     await testPage

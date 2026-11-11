@@ -2,7 +2,6 @@
 
 import { useLayoutEffect, useRef, type ElementType, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { cn } from "@/lib/utils";
 import { dockedBarStyle, useDockedBarPosition } from "@/hooks/use-docked-bar-position";
 import { SELECTION_ACTION_DOCK_ATTRIBUTE } from "@/hooks/use-touch-selection-tracking";
 
@@ -29,8 +28,9 @@ type SelectionActionDockProps = {
 
 /**
  * Touch presentation for text-selection actions. Native selection menus are
- * positioned beside the selection, so these actions dock at the bottom edge of
- * the hosting surface, or directly above the software keyboard.
+ * positioned beside the selection, so these actions dock as compact icon
+ * buttons at the bottom-right of the hosting surface, or directly above the
+ * software keyboard. The surrounding row stays transparent to taps.
  */
 export function SelectionActionDock({
   hostRef,
@@ -49,18 +49,22 @@ export function SelectionActionDock({
 
   return createPortal(
     <div
-      role="toolbar"
-      aria-label={label}
-      data-testid={testId}
-      {...{ [SELECTION_ACTION_DOCK_ATTRIBUTE]: "" }}
-      className="pointer-events-auto z-40 flex items-center justify-end gap-1 overflow-x-auto overscroll-x-contain border-t border-border bg-popover/95 px-2 backdrop-blur"
+      className="pointer-events-none z-40 flex items-center justify-end px-2"
       style={{
         position: portalContainer ? "absolute" : "fixed",
         ...dockedBarStyle(position, origin),
         height: SELECTION_ACTION_DOCK_HEIGHT_PX,
       }}
     >
-      {children}
+      <div
+        role="toolbar"
+        aria-label={label}
+        data-testid={testId}
+        {...{ [SELECTION_ACTION_DOCK_ATTRIBUTE]: "" }}
+        className="pointer-events-auto flex items-center gap-1"
+      >
+        {children}
+      </div>
     </div>,
     portalContainer ?? document.body,
   );
@@ -69,14 +73,11 @@ export function SelectionActionDock({
 export function SelectionActionDockButton({
   icon: Icon,
   label,
-  text,
   onActivate,
   testId,
 }: {
   icon: ElementType;
-  /** Accessible name; it must contain the visible `text`. */
   label: string;
-  text: string;
   onActivate: () => void;
   testId?: string;
 }) {
@@ -84,18 +85,15 @@ export function SelectionActionDockButton({
     <button
       type="button"
       aria-label={label}
+      title={label}
       data-testid={testId}
-      className={cn(
-        "flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded px-1",
-        "text-sm font-medium transition-transform duration-150 ease-out active:scale-[0.96]",
-      )}
+      className="flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center rounded transition-transform duration-150 ease-out active:scale-[0.96]"
       onPointerDown={(event) => event.preventDefault()}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onActivate}
     >
-      <span className="inline-flex h-8 items-center gap-1.5 rounded bg-primary px-3 text-primary-foreground hover:bg-primary/90">
+      <span className="inline-flex h-8 w-8 items-center justify-center rounded bg-primary text-primary-foreground shadow-lg hover:bg-primary/90">
         <Icon className="h-4 w-4" aria-hidden="true" />
-        <span>{text}</span>
       </span>
     </button>
   );

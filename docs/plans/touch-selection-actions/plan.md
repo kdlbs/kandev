@@ -79,10 +79,9 @@ unchanged and not redrawn.
 |            | Copy  Share  All  |     |  <- native menu, unobstructed
 |            +-------------------+     |
 |  and backfills existing rows.        |
-|======================================|  dock: fixed, 48px, transcript bottom
-|                        [ (C) Comment]|  toolbar "Selection actions"
-|--------------------------------------|
-| [ Message the agent...         ] (>) |
+|  Done ->                       [(C)] |  dock: 32px square icon in a 44px target,
+|--------------------------------------|  bottom-right of transcript; rest of row
+| [ Message the agent...         ] (>) |  stays visible and tappable
 +--------------------------------------+
 ```
 
@@ -100,8 +99,7 @@ bottom of its transcript.
 |  ## Install                          |
 |  Run [pnpm install] from apps/.      |
 |            | Copy  Share  All  |     |
-|======================================|  dock at preview/editor bottom
-|                        [ (C) Comment]|
+|                                [(C)] |  square icon, preview/editor bottom-right
 +--------------------------------------+
 ```
 
@@ -115,6 +113,7 @@ Maps to `AC-UI-TOUCH-SELECTION-ACTIONS-001.2`, `.3`, `.4`, `.6`, `.8`.
 | --- | --- | --- | --- |
 | [01](task-01-shared-dock-and-chat-messages.md) | 1 | none | Shared dock primitives; chat and Office thread comments docked on touch |
 | [02](task-02-preview-and-editor-dock.md) | 2 | 01 | Markdown preview and code editors docked on touch |
+| [03](task-03-compact-square-dock.md) | 3 | 01, 02 | Dock shrinks to a Plan-style square icon after phone review |
 
 ## Verification summary
 

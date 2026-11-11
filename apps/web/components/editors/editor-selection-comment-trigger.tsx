@@ -2,7 +2,7 @@
 
 import type { RefObject } from "react";
 import { Button } from "@kandev/ui/button";
-import { IconMessagePlus } from "@tabler/icons-react";
+import { IconMessage, IconMessagePlus } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import {
@@ -37,9 +37,8 @@ export function EditorSelectionCommentTrigger({
     return (
       <SelectionActionDock hostRef={hostRef} label={t("task:selectionActions")}>
         <SelectionActionDockButton
-          icon={IconMessagePlus}
+          icon={IconMessage}
           label={t("task:commentOnSelection")}
-          text={t("editors:comment")}
           onActivate={onOpen}
           testId={testId}
         />

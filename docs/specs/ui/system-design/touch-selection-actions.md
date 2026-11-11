@@ -92,15 +92,18 @@ New component in `components/shared/selection-action-dock.tsx`:
   label={string}                            // localized toolbar name
   testId={string}
 >
-  <SelectionActionDockButton icon={...} label={...} text={...} onActivate={...} testId={...} />
+  <SelectionActionDockButton icon={...} label={...} onActivate={...} testId={...} />
 </SelectionActionDock>
 ```
 
-- Renders `role="toolbar"` with `aria-label`, fixed (or absolute inside a
-  portal container) using `useDockedBarPosition` and a 48 px height.
-- `SelectionActionDockButton` renders a 44 px minimum hit area with a 32 px
-  visual surface, the existing accent comment styling, `cursor-pointer`, a
-  short visible `text` ("Comment"), and an accessible `label` that contains it
+- Renders a transparent, `pointer-events-none` 48 px positioner spanning the
+  host's bottom edge (fixed, or absolute inside a portal container) using
+  `useDockedBarPosition`, with the `role="toolbar"` group right-aligned inside
+  it and `pointer-events-auto`. Only the icon buttons intercept taps; the rest
+  of the row stays visible and interactive.
+- `SelectionActionDockButton` is icon-only, matching the Plan dock's Comment
+  action: a 44 px minimum hit area around a 32 px `bg-primary` square with the
+  `IconMessage` glyph, `cursor-pointer`, and a localized `aria-label`/`title`
   ("Comment on selection").
 - The toolbar carries `data-selection-action-dock`, which
   `useTouchSelectionTracking` uses to keep the captured selection while the
@@ -220,6 +223,7 @@ container coordinates exactly as `SelectionCommentTrigger` does today.
   `codemirror-selection.test.ts` for the other surfaces.
 - Regression: existing Plan bubble menu tests stay green after the geometry
   extraction.
-- E2E (`mobile-chrome`): chat and Markdown preview docks align with their
-  host's bottom edge, keep the DOM selection, and open the existing composer;
+- E2E (`mobile-chrome`): chat and Markdown preview docks are at most 56 px
+  wide and sit in their host's bottom-right corner, keep the DOM selection, and
+  open the existing composer;
   the Quick Chat dock is interactive; Office extracts use the dock.

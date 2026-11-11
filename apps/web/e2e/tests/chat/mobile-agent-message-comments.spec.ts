@@ -32,17 +32,18 @@ async function expectDrawerContained(page: Page, drawer: Locator) {
   expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
 }
 
-async function expectDockedAtHostBottom(page: Page, dock: Locator) {
+async function expectCompactDockAtHostCorner(page: Page, dock: Locator) {
   const host = page.locator("[data-selection-dock-host]:visible").first();
   const hostBox = await host.boundingBox();
   const dockBox = await dock.boundingBox();
   if (!hostBox || !dockBox) throw new Error("Expected a visible dock and dock host");
-  // Docked to the transcript's bottom edge, not floated beside the selection
-  // where the native selection menu is drawn.
-  expect(Math.abs(dockBox.y + dockBox.height - (hostBox.y + hostBox.height))).toBeLessThanOrEqual(
-    2,
-  );
+  // A small square in the transcript's bottom-right corner, away from the
+  // native selection menu and without taking a whole row.
+  expect(dockBox.width).toBeLessThanOrEqual(56);
   expect(dockBox.height).toBeLessThanOrEqual(48);
+  expect(hostBox.x + hostBox.width - (dockBox.x + dockBox.width)).toBeLessThanOrEqual(16);
+  expect(hostBox.y + hostBox.height - (dockBox.y + dockBox.height)).toBeLessThanOrEqual(8);
+  expect(hostBox.y + hostBox.height - (dockBox.y + dockBox.height)).toBeGreaterThanOrEqual(0);
 }
 
 test.describe("Agent message comments on mobile", () => {
@@ -67,7 +68,7 @@ test.describe("Agent message comments on mobile", () => {
     const commentTrigger = dock.getByTestId("agent-message-comment-trigger");
     await expect(commentTrigger).toBeVisible();
     await expectTouchTarget(commentTrigger);
-    await expectDockedAtHostBottom(testPage, dock);
+    await expectCompactDockAtHostCorner(testPage, dock);
     expect(await testPage.evaluate(() => window.getSelection()?.toString())).toBe(
       SELECTED_REPLY_TEXT,
     );

@@ -247,7 +247,6 @@ function DockedCommentTrigger({
       <SelectionActionDockButton
         icon={IconMessage}
         label={t("task:commentOnSelection")}
-        text={t("task:comment")}
         onActivate={onOpen}
         testId="agent-message-comment-trigger"
       />
