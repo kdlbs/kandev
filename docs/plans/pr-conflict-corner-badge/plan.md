@@ -186,6 +186,8 @@ Completed on 2026-11-11:
 - The phone pseudo-element provided a 44px touch target. Its outer edge opened the existing drawer and returned focus to the trigger after dismissal.
 - Inspected desktop and phone captures matched UI-01 and UI-02: conflict owns the corner, automation markers remain visible, and existing details retain both reasons. No preview mismatch remains.
 - Public documentation and the amended specifications passed the validation commands in the work order. The documentation coverage preflight accepted both requirement/design chains and one work order.
+- PR review clarified that failed-check crosses outrank approval locks without conflicts, while conflict triangles outrank both. The existing design already defines this priority, so no product behavior or spec contract changed.
+- After the public-doc correction, `node --test scripts/validate-public-docs.test.mjs` passed 63 tests and `node scripts/validate-public-docs.mjs` validated 55 pages. `git diff --check` passed.
 - `git diff --check` passed. No dependencies, provider behavior, or API requests changed.
 
 ## Risks

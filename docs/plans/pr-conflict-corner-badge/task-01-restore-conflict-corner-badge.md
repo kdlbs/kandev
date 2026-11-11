@@ -197,6 +197,8 @@ Completed on 2026-11-11.
 - A follow-up review found that host button and menu rules enlarged the nested triangle. The explicit `size-2` class keeps it at 8px; the topbar and multi-PR menu cases passed with this measurement enabled (2/2).
 - Inspected the desktop `desktop-ci-conflict-automation` capture, phone `mobile-ci-bubble-before-tap` and `sidebar-workflow-conflict-and-approval-badge-mobile` captures, and the conflict details drawer capture. They match UI-01/UI-02: one conflict badge owns the corner, automation markers remain visible, and the current disclosure retains both reasons. No preview mismatch remains.
 - The public-doc tests and validator, documentation catalog validation, spec-linter tests and full lint, coverage preflight, and `git diff --check` passed.
+- PR review clarified that failed-check crosses outrank approval locks without conflicts, while conflict triangles outrank both. The existing design and code already define this priority, so no product behavior or spec contract changed.
+- After the review correction, `node --test scripts/validate-public-docs.test.mjs` passed 63 tests, `node scripts/validate-public-docs.mjs` validated 55 pages, and `git diff --check` passed.
 - The managed Vite production builds completed. They emitted existing chunk-size and dynamic-import warnings. No build errors occurred.
 
 The amended requirements are active, the designs are current, and the plan is implemented. No provider behavior, classification, API requests, dependencies, or localized copy changed.
