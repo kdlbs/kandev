@@ -5,7 +5,15 @@ status: done
 wave: 4
 depends_on: ["03-web-descriptor-reconciliation"]
 plan: "plan.md"
-spec: "../../specs/ui/requirements/quick-terminal.md"
+requirements:
+  - REQ-UI-QUICK-TERMINAL-001
+acceptance_criteria:
+  - AC-UI-QUICK-TERMINAL-001.3
+  - AC-UI-QUICK-TERMINAL-001.5
+  - AC-UI-QUICK-TERMINAL-001.8
+  - AC-UI-QUICK-TERMINAL-001.13
+system_design:
+  - ../../specs/ui/system-design/quick-terminal.md
 ---
 
 # Task 04: Prove refresh reattachment

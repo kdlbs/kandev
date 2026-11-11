@@ -293,7 +293,7 @@ Implemented and validated on 2026-11-11.
 - Phone recovery explicitly closed its tab and waited for the tab count to reach zero. Desktop `finally` cleanup closed all remaining Quick Terminal tabs; each managed worker was disposable and torn down after its suite.
 - Backend tests: `go test -trimpath ./internal/quickterminal/... ./internal/agent/loginpty/... -count=1` passed.
 - `node scripts/validate-public-docs.mjs`: 55 published documentation pages validated.
-- `python3 scripts/list-docs.py validate`: 448 decisions and 1,982 specifications validated.
+- `python3 scripts/list-docs.py validate`: 449 decisions and 1,985 specifications validated.
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - Local public-document coverage preflight: `covered`, zero errors.
 - `git diff --check`: passed.
@@ -310,5 +310,7 @@ The two P1 review findings were fixed and revalidated on 2026-11-11:
 - `pnpm run build:vite`: passed. Vite retained its existing dynamic-import and chunk-size warnings.
 - Desktop managed E2E: **9 passed**; the seven recovery and two Quick Terminal cases passed.
 - Phone managed E2E: **3 passed**; recovery and both existing phone Quick Terminal cases passed.
-- `python3 scripts/list-docs.py validate`: 448 decisions and 1,982 specifications validated; `python3 scripts/lint-spec-files.py --all`: passed.
+- `python3 scripts/list-docs.py validate`: 449 decisions and 1,985 specifications validated; `python3 scripts/lint-spec-files.py --all`: passed.
+- Review-comment sibling-isolation E2E rerun: **1 passed**. It now compares the sibling's original session ID and reads the environment marker set before recovery.
+- PR documentation coverage preflight: `covered`, zero errors, including both changed work orders.
 - `git diff --check`: passed.

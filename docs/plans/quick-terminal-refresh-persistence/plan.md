@@ -1,7 +1,11 @@
 ---
-spec: docs/specs/ui/requirements/quick-terminal.md
 created: 2026-08-05
 status: complete
+requirements:
+  - REQ-UI-QUICK-TERMINAL-001
+system_design:
+  - ../../specs/ui/system-design/quick-terminal.md
+legacy_specs: []
 ---
 
 # Implementation Plan: Quick Terminal Refresh Persistence

@@ -239,6 +239,13 @@ test.describe("quick terminal shell recovery", () => {
       if (!siblingSequence) throw new Error("Sibling tab is missing its sequence");
       const siblingTerminal = (await selectedTerminal(dialog)).terminal;
       await sendShellCommand(testPage, siblingTerminal, "export KANDEV_QT_SIBLING=LIVE_SIBLING");
+      const siblingDescriptorBefore = await readQuickTerminalDescriptor(
+        apiClient,
+        seedData.workspaceId,
+        siblingId,
+      );
+      const siblingSessionId = siblingDescriptorBefore.sessionId;
+      if (!siblingSessionId) throw new Error("Sibling shell did not receive a session ID");
 
       await dialog.getByTestId("quick-chat-add-menu-trigger").click();
       await testPage.getByTestId("quick-chat-new-terminal").click();
@@ -259,14 +266,18 @@ test.describe("quick terminal shell recovery", () => {
         .getByRole("button", { name: `Terminal ${siblingSequence}`, exact: true })
         .click();
       const siblingPanel = (await selectedTerminal(dialog)).terminal;
-      await sendShellCommand(testPage, siblingPanel, "printf 'SIBLING%s\\n' '_STILL_LIVE'");
-      await waitForTerminalText(siblingPanel, "SIBLING_STILL_LIVE");
+      await sendShellCommand(
+        testPage,
+        siblingPanel,
+        "printf 'SIBLING%s\\n' \"$KANDEV_QT_SIBLING\"",
+      );
+      await waitForTerminalText(siblingPanel, "SIBLINGLIVE_SIBLING");
       const siblingDescriptor = await readQuickTerminalDescriptor(
         apiClient,
         seedData.workspaceId,
         siblingId,
       );
-      expect(siblingDescriptor.sessionId).toBeTruthy();
+      expect(siblingDescriptor.sessionId).toBe(siblingSessionId);
       expect(siblingDescriptor.sessionId).not.toBe(recovered.sessionId);
       expect(siblingDescriptor.status).toBe("running");
     } finally {
