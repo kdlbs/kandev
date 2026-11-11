@@ -41,8 +41,9 @@ export function SessionRecoveryProvider({
   onDeliveryReconciled?: () => void;
   children: ReactNode;
 }) {
-  const pending = usePendingSessionRecovery(`${taskId ?? ""}\u0000${session?.id ?? ""}`);
-  const lastPending = useLastPendingRecovery(pending);
+  const recoveryKey = `${taskId ?? ""}\u0000${session?.id ?? ""}`;
+  const pending = usePendingSessionRecovery(recoveryKey);
+  const lastPending = useLastPendingRecovery(pending, recoveryKey);
   const previous = useRef<ActiveSessionRecovery | null>(null);
   const selected = useCurrentRecovery(session, messages, enabled);
   const { automaticRecovery, guidanceModel } = useRequestLocalGuidance(taskId, session);
@@ -98,10 +99,17 @@ function useRequestLocalGuidance(taskId: string | null, session: TaskSession | n
   };
 }
 
-function useLastPendingRecovery(pending: RecoveryContext["pending"]): RecoveryContext["pending"] {
-  const lastPending = useRef(pending);
-  if (pending) lastPending.current = pending;
-  return lastPending.current;
+function useLastPendingRecovery(
+  pending: RecoveryContext["pending"],
+  key: string,
+): RecoveryContext["pending"] {
+  const lastPending = useRef({ key, pending });
+  if (lastPending.current.key !== key) {
+    lastPending.current = { key, pending };
+  } else if (pending) {
+    lastPending.current.pending = pending;
+  }
+  return lastPending.current.pending;
 }
 
 function useDeletedGuidanceCleanup(

@@ -10,6 +10,7 @@ import {
   selectSessionRecoveryGuidance,
   sessionRecoveryGuidanceIdentityFromSession,
 } from "@/lib/session/session-recovery-guidance";
+import { claimSessionRecovery } from "@/hooks/domains/session/session-recovery-pending";
 import { SessionRecoveryProvider, useSessionComposerRecovery } from "./session-recovery-context";
 
 const mockLaunchErrorContext = vi.hoisted(() => ({ value: null as unknown }));
@@ -221,4 +222,42 @@ it("does not place an authoritatively usable session behind unprojected recovery
   });
   expect(lateFailureAccepted).toBe(false);
   expect(result.current.context?.model).toBeNull();
+});
+
+it("does not carry a pending recovery action into another session", () => {
+  mockLaunchErrorContext.value = null;
+  const sessionA = { ...session, id: sessionId("session-a") };
+  const sessionB = { ...session, id: sessionId("session-b"), state: "STARTING" as const };
+  let currentSession = sessionA;
+  const releasePending = claimSessionRecovery(`task\u0000${sessionA.id}`, "continue_from_history");
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <StateProvider
+      initialState={{
+        taskSessions: { items: { [sessionA.id]: sessionA, [sessionB.id]: sessionB } },
+      }}
+    >
+      <SessionRecoveryProvider session={currentSession} messages={[]} taskId="task" enabled>
+        {children}
+      </SessionRecoveryProvider>
+    </StateProvider>
+  );
+  const { result, rerender } = renderHook(() => useSessionComposerRecovery(currentSession.id), {
+    wrapper,
+  });
+
+  expect(result.current?.pending).toBe("continue_from_history");
+
+  currentSession = sessionB;
+  mockLaunchErrorContext.value = {
+    automaticRecovery: {
+      requestIdentity: { taskId: "task", sessionId: sessionB.id, generation: 2, attemptId: 1 },
+      resumptionState: "error",
+      error: "Session recovery failed",
+    },
+  };
+  rerender();
+
+  expect(result.current?.model?.requestLocal).toBe(true);
+  expect(result.current?.pending).toBe("resume");
+  releasePending?.();
 });
