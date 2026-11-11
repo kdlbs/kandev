@@ -153,6 +153,20 @@ func (e *sessionRecoveryRequiredError) RecoveryGeneration() int64 {
 	return e.Block.ExpectedGeneration
 }
 
+func (e *sessionRecoveryRequiredError) RecoveryBlockID() string {
+	if e == nil || e.Block == nil {
+		return ""
+	}
+	return e.Block.ID
+}
+
+func (e *sessionRecoveryRequiredError) RecoveryIncarnationID() string {
+	if e == nil || e.Block == nil {
+		return ""
+	}
+	return e.Block.IncarnationID
+}
+
 // DispatchDeferred leaves an automation run admitted but open until the
 // operator resolves the persisted recovery block. The method satisfies the
 // automation package's generic deferred-dispatch contract without coupling
@@ -649,6 +663,9 @@ func (s *Service) resolveSessionRecoveryBlock(ctx context.Context, sessionID, ac
 		return fmt.Errorf("resolve session recovery block: %w", err)
 	}
 	if !resolved {
+		if action == recoveryActionResume {
+			return sessionRecoveryBlockResolutionGuidance(ctx, store, sessionID, incarnationID, generation, block)
+		}
 		return fmt.Errorf("resolve session recovery block: block changed or recovery evidence is incomplete")
 	}
 	s.publishAgentDeliveryRecoveryState(ctx, sessionID)

@@ -2445,6 +2445,8 @@
   "workspaceRecoveryInspectionBusy": "此工作区仍在检查中。请尝试恢复会话。",
   "continueOnNewBranch": "在新分支上继续",
   "continueFromHistory": "从已保存的历史记录继续",
+  "continueFromHistoryDisclosure": "已保存的历史记录会开启新的原生对话。中断提示的处理结果仍然未知。",
+  "continuingFromHistory": "正在从已保存的历史记录继续...",
   "restoreReadOnlyWorkspace": "还原只读工作区",
   "sessionRecoveryGuardInProgress": "Kandev 正在重启后检查代理。请等待检查完成后再恢复会话。",
   "sessionRecoveryGuardUnstoppable": "后端重启后无法停止此会话之前的代理进程。请重启后端以解除此状态，然后重试。",

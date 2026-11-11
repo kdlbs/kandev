@@ -2463,6 +2463,8 @@
   "workspaceRecoveryInspectionBusy": "This workspace is still being checked. Try resuming the session again.",
   "continueOnNewBranch": "Continue on a new branch",
   "continueFromHistory": "Continue from saved history",
+  "continueFromHistoryDisclosure": "Saved history starts a new native conversation. The interrupted prompt outcome remains unknown.",
+  "continuingFromHistory": "Continuing from saved history...",
   "restoreReadOnlyWorkspace": "Restore read-only workspace",
   "sessionRecoveryGuardInProgress": "Kandev is checking the agent after a restart. Wait for this check to finish before resuming.",
   "sessionRecoveryGuardUnstoppable": "This session's previous agent process couldn't be stopped after the backend restarted. Restart the backend to clear this, then try again.",
