@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/common/wskeepalive"
 )
 
 // wsWriter wraps a gorilla WebSocket to implement process.DirectOutputWriter.
@@ -48,6 +49,13 @@ func (w *wsWriter) Close() error {
 // bridgeBinaryWebSockets forwards binary WebSocket frames bidirectionally between
 // a client connection and an agentctl connection until either side disconnects.
 func (h *TerminalHandler) bridgeBinaryWebSockets(clientConn, agentctlConn *gorillaws.Conn, terminalID string) {
+	stopKeepalive, err := wskeepalive.Start(clientConn, h.keepalive)
+	if err != nil {
+		h.logger.Debug("remote terminal keepalive setup failed", zap.String("terminal_id", terminalID), zap.Error(err))
+		_ = agentctlConn.Close()
+		_ = clientConn.Close()
+		return
+	}
 	done := make(chan struct{}, 2)
 
 	// agentctl → client (shell output)
@@ -98,6 +106,7 @@ func (h *TerminalHandler) bridgeBinaryWebSockets(clientConn, agentctlConn *goril
 	<-done
 	_ = agentctlConn.Close()
 	_ = clientConn.Close()
+	stopKeepalive()
 	<-done
 }
 
@@ -112,16 +121,24 @@ func (h *TerminalHandler) runTerminalBridge(
 ) {
 	var ptyWriter io.Writer
 	var directOutputSet bool
+	stopKeepalive := func() {}
 
 	defer func() {
+		_ = conn.Close()
+		stopKeepalive()
 		// Clean up: clear direct output at session level (process may have been restarted with new ID)
 		interactiveRunner.ClearDirectOutputBySession(sessionID)
 		_ = wsw.Close()
-		_ = conn.Close()
 
 		h.logger.Info("terminal WebSocket disconnected",
 			zap.String("session_id", sessionID))
 	}()
+	stop, err := wskeepalive.Start(conn, h.keepalive)
+	if err != nil {
+		h.logger.Debug("terminal keepalive setup failed", zap.String("session_id", sessionID), zap.Error(err))
+		return
+	}
+	stopKeepalive = stop
 
 	// Read from WebSocket and handle input/resize
 	for {
@@ -424,15 +441,17 @@ func (h *TerminalHandler) runUserShellBridge(
 ) {
 	var ptyWriter io.Writer
 	var directOutputSet bool
+	stopKeepalive := func() {}
 
 	defer func() {
+		_ = conn.Close()
+		stopKeepalive()
 		// Clean up WebSocket resources but DON'T stop the process
 		// The process is stopped by explicit user_shell.stop/destroy or task cleanup.
 		// Keeping it alive here allows reconnect after React remounts or temporary disconnects.
 		interactiveRunner.ClearUserShellDirectOutput(scopeID, terminalID)
 
 		_ = wsw.Close()
-		_ = conn.Close()
 
 		h.logger.Info("user shell WebSocket disconnected (process still running for potential reconnect)",
 			zap.String("session_id", sessionID),
@@ -440,6 +459,12 @@ func (h *TerminalHandler) runUserShellBridge(
 			zap.String("process_id", processID),
 			zap.Int("os_pid", osPIDForInteractiveProcess(interactiveRunner, processID)))
 	}()
+	stop, err := wskeepalive.Start(conn, h.keepalive)
+	if err != nil {
+		h.logger.Debug("user shell keepalive setup failed", zap.String("session_id", sessionID), zap.String("terminal_id", terminalID), zap.Error(err))
+		return
+	}
+	stopKeepalive = stop
 
 	// Read from WebSocket and handle input/resize
 	for {
