@@ -20,6 +20,7 @@ const RUNTIME_PACKAGES = [
 ];
 const WORKFLOW_SHA = "d".repeat(40);
 const CHECKOUT_SHA = "e".repeat(40);
+const FIXED_NOW = Date.UTC(2026, 10, 11, 12);
 const APPROVED_ENV = {
   GITHUB_ACTIONS: "true",
   GITHUB_REPOSITORY: "kdlbs/kandev",
@@ -40,7 +41,7 @@ function env(overrides = {}) {
 
 function makeJwt({
   audience = OIDC_AUDIENCE,
-  expires = Math.floor(Date.now() / 1000) + 3600,
+  expires = Math.floor((FIXED_NOW + 3_600_000) / 1000),
 } = {}) {
   const header = Buffer.from(
     JSON.stringify({ alg: "none", typ: "JWT" }),
@@ -65,7 +66,7 @@ function makeTransport({
   sdkStatus = sdkExists ? 200 : 404,
   failPackage = null,
   exchangeStatus = 201,
-  exchangeBody = null,
+  exchangeBody,
   oidcBody = null,
 } = {}) {
   const calls = [];
@@ -124,12 +125,7 @@ function makeTransport({
           : exchangeBody;
       return jsonResponse(
         201,
-        body ?? {
-          token_type: "oidc",
-          token: `npm_${"a".repeat(36)}`,
-          created: new Date().toISOString(),
-          expires: new Date(Date.now() + 3_600_000).toISOString(),
-        },
+        body === undefined ? { token: `npm_${"a".repeat(36)}` } : body,
         target,
       );
     }
@@ -138,21 +134,31 @@ function makeTransport({
   return { fetchImpl, calls, exchanges };
 }
 
+function cliFetchBootstrap({
+  oidcToken,
+  exchangeStatus = 201,
+  exchangeBody = { token: "npm_token_only_secret" },
+}) {
+  const sdkMetadata = {
+    name: sdkPackageName,
+    versions: {},
+    "dist-tags": {},
+  };
+  return `Date.now = () => ${FIXED_NOW}; const response = (status, body, url) => { const value = new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }); Object.defineProperty(value, 'url', { value: url }); return value; }; globalThis.fetch = async (input) => { const target = String(input); if (target.startsWith('https://actions.test/token')) return response(200, { value: ${JSON.stringify(oidcToken)} }, target); if (target === ${JSON.stringify(`${registryURL}/@kdlbs%2fplugin-sdk`)}) return response(200, ${JSON.stringify(sdkMetadata)}, target); return response(${exchangeStatus}, ${JSON.stringify(exchangeBody)}, target); };`;
+}
+
 test("one rejected publisher blocks the whole preflight before any release mutation", async () => {
   const transport = makeTransport({
     failPackage: "@kdlbs/runtime-linux-arm64",
     exchangeStatus: 403,
-    exchangeBody: () => ({
-      token_type: "oidc",
-      token: `npm_${"a".repeat(36)}`,
-      expires: new Date(Date.now() + 3_600_000).toISOString(),
-    }),
+    exchangeBody: () => ({ token: `npm_${"a".repeat(36)}` }),
   });
   await assert.rejects(
     runPreflight({
       packages: RUNTIME_PACKAGES,
       env: env(),
       fetchImpl: transport.fetchImpl,
+      now: () => FIXED_NOW,
       checkoutSha: CHECKOUT_SHA,
     }),
     (error) => {
@@ -186,6 +192,7 @@ test("checks the audience and encoded package route for every exchange", async (
     packages: RUNTIME_PACKAGES,
     env: env(),
     fetchImpl: transport.fetchImpl,
+    now: () => FIXED_NOW,
     checkoutSha: CHECKOUT_SHA,
   });
   assert.equal(summary.status, "passed");
@@ -216,66 +223,134 @@ test("checks the audience and encoded package route for every exchange", async (
   assert.equal(serialized.includes("eyJ"), false);
 });
 
-test("valid package exchanges without created metadata pass the full preflight", async () => {
-  const fixedNow = Date.UTC(2026, 10, 11, 12);
-  const createdValues = [
-    { name: "absent", omit: true },
+test("token-only package exchanges pass the full preflight", async () => {
+  const transport = makeTransport({
+    oidcBody: {
+      value: makeJwt({ expires: Math.floor((FIXED_NOW + 3_600_000) / 1000) }),
+    },
+    exchangeBody: () => ({ token: "npm_token_only_secret" }),
+  });
+
+  const summary = await runPreflight({
+    packages: RUNTIME_PACKAGES,
+    env: env(),
+    fetchImpl: transport.fetchImpl,
+    now: () => FIXED_NOW,
+    checkoutSha: CHECKOUT_SHA,
+  });
+
+  assert.equal(summary.status, "passed");
+  assert.deepEqual(
+    summary.packages.map(({ package: packageName, status }) => ({
+      package: packageName,
+      status,
+    })),
+    [...RUNTIME_PACKAGES, sdkPackageName].map((packageName) => ({
+      package: packageName,
+      status: "authenticated",
+    })),
+  );
+  assert.equal(
+    JSON.stringify(summary).includes("npm_token_only_secret"),
+    false,
+  );
+  assert.equal(JSON.stringify(summary).includes("expires_at"), false);
+});
+
+test("exchange metadata is ignored across the full package inventory", async () => {
+  const metadataFields = ["token_type", "created", "expires"];
+  const metadataValues = [
+    { name: "absent", absent: true },
     { name: "null", value: null },
-    { name: "malformed string", value: "ignored-created-metadata-sentinel" },
+    { name: "malformed", value: "ignored-metadata-sentinel" },
     { name: "numeric", value: 1_234_567_890 },
     {
       name: "object",
-      value: { source: "ignored-created-metadata-sentinel" },
+      value: { source: "ignored-metadata-sentinel" },
+    },
+    {
+      name: "past date",
+      value: new Date(FIXED_NOW - 3_600_000).toISOString(),
     },
   ];
 
-  for (const { name, omit, value } of createdValues) {
-    const transport = makeTransport({
-      oidcBody: {
-        value: makeJwt({ expires: Math.floor((fixedNow + 3_600_000) / 1000) }),
-      },
-      exchangeBody: () => {
-        const body = {
-          token_type: "oidc",
-          token: `npm_${"a".repeat(36)}`,
-          expires: new Date(fixedNow + 3_600_000).toISOString(),
-        };
-        if (!omit) body.created = value;
-        return body;
-      },
-    });
+  for (const field of metadataFields) {
+    for (const { name, absent, value } of metadataValues) {
+      const responseMetadataSentinel = `ignored-${field}-${name}-metadata-sentinel`;
+      const transport = makeTransport({
+        oidcBody: {
+          value: makeJwt({
+            expires: Math.floor((FIXED_NOW + 3_600_000) / 1000),
+          }),
+        },
+        exchangeBody: () => {
+          const body = {
+            token_type: "oidc",
+            token: "npm_ignored_exchange_credential",
+            created: new Date(FIXED_NOW).toISOString(),
+            expires: new Date(FIXED_NOW + 3_600_000).toISOString(),
+            provider_notice: responseMetadataSentinel,
+          };
+          if (absent) delete body[field];
+          else body[field] = value;
+          return body;
+        },
+      });
 
-    const summary = await runPreflight({
-      packages: RUNTIME_PACKAGES,
-      env: env(),
-      fetchImpl: transport.fetchImpl,
-      now: () => fixedNow,
-      checkoutSha: CHECKOUT_SHA,
-    });
+      const summary = await runPreflight({
+        packages: RUNTIME_PACKAGES,
+        env: env(),
+        fetchImpl: transport.fetchImpl,
+        now: () => FIXED_NOW,
+        checkoutSha: CHECKOUT_SHA,
+      });
+      const caseName = `${field} ${name}`;
 
-    assert.equal(summary.status, "passed", name);
-    assert.deepEqual(
-      summary.packages.map(({ package: packageName, status }) => ({
-        package: packageName,
-        status,
-      })),
-      [...RUNTIME_PACKAGES, sdkPackageName].map((packageName) => ({
-        package: packageName,
-        status: "authenticated",
-      })),
-      name,
-    );
-    assert.equal(
-      JSON.stringify(summary).includes("ignored-created-metadata-sentinel"),
-      false,
-      name,
-    );
-    assert.equal(
-      summary.packages.every((pkg) => !Object.hasOwn(pkg, "created")),
-      true,
-      name,
-    );
+      assert.equal(summary.status, "passed", caseName);
+      assert.deepEqual(
+        summary.packages.map(({ package: packageName, status }) => ({
+          package: packageName,
+          status,
+        })),
+        [...RUNTIME_PACKAGES, sdkPackageName].map((packageName) => ({
+          package: packageName,
+          status: "authenticated",
+        })),
+        caseName,
+      );
+      const serialized = JSON.stringify(summary);
+      assert.equal(
+        serialized.includes("npm_ignored_exchange_credential"),
+        false,
+      );
+      assert.equal(serialized.includes(responseMetadataSentinel), false);
+      assert.equal(serialized.includes("expires_at"), false);
+    }
   }
+});
+
+test("full documented exchange metadata remains accepted", async () => {
+  const transport = makeTransport({
+    oidcBody: {
+      value: makeJwt({ expires: Math.floor((FIXED_NOW + 3_600_000) / 1000) }),
+    },
+    exchangeBody: () => ({
+      token_type: "oidc",
+      token: "npm_documented_metadata_token",
+      created: new Date(FIXED_NOW).toISOString(),
+      expires: new Date(FIXED_NOW + 3_600_000).toISOString(),
+    }),
+  });
+  const summary = await runPreflight({
+    packages: RUNTIME_PACKAGES,
+    env: env(),
+    fetchImpl: transport.fetchImpl,
+    now: () => FIXED_NOW,
+    checkoutSha: CHECKOUT_SHA,
+  });
+
+  assert.equal(summary.status, "passed");
+  assert.equal(JSON.stringify(summary).includes("expires_at"), false);
 });
 
 test("confirmed whole-package SDK absence defers only the SDK check", async () => {
@@ -284,6 +359,7 @@ test("confirmed whole-package SDK absence defers only the SDK check", async () =
     packages: RUNTIME_PACKAGES,
     env: env(),
     fetchImpl: transport.fetchImpl,
+    now: () => FIXED_NOW,
     checkoutSha: CHECKOUT_SHA,
   });
   assert.equal(summary.status, "passed");
@@ -313,6 +389,7 @@ test("a missing runtime package fails explicitly while SDK absence defers", asyn
       packages: RUNTIME_PACKAGES,
       env: env(),
       fetchImpl: transport.fetchImpl,
+      now: () => FIXED_NOW,
       checkoutSha: CHECKOUT_SHA,
     }),
     (error) => {
@@ -332,6 +409,7 @@ test("unreadable SDK registry state never becomes bootstrap deferral", async () 
       packages: RUNTIME_PACKAGES,
       env: env(),
       fetchImpl: transport.fetchImpl,
+      now: () => FIXED_NOW,
       checkoutSha: CHECKOUT_SHA,
     }),
     (error) => {
@@ -347,33 +425,14 @@ test("unreadable SDK registry state never becomes bootstrap deferral", async () 
   );
 });
 
-test("rejected, malformed, missing, and expired exchange responses fail safely", async () => {
+test("publisher rejection and invalid exchange bodies or tokens still fail", async () => {
   const cases = [
     { exchangeStatus: 500, failPackage: "kandev" },
-    {
-      exchangeBody: {
-        token_type: "oidc",
-        token: "",
-        created: new Date().toISOString(),
-        expires: new Date(Date.now() + 3_600_000).toISOString(),
-      },
-    },
-    {
-      exchangeBody: {
-        token_type: "oidc",
-        token: `npm_${"b".repeat(36)}`,
-        created: new Date().toISOString(),
-        expires: new Date(Date.now() - 1_000).toISOString(),
-      },
-    },
-    {
-      exchangeBody: {
-        token_type: "other",
-        token: `npm_${"b".repeat(36)}`,
-        created: new Date().toISOString(),
-        expires: new Date(Date.now() + 3_600_000).toISOString(),
-      },
-    },
+    { exchangeBody: null },
+    { exchangeBody: [] },
+    { exchangeBody: {} },
+    { exchangeBody: { token: "" } },
+    { exchangeBody: { token: 4 } },
   ];
   for (const options of cases) {
     const transport = makeTransport(options);
@@ -382,18 +441,18 @@ test("rejected, malformed, missing, and expired exchange responses fail safely",
         packages: ["kandev"],
         env: env(),
         fetchImpl: transport.fetchImpl,
+        now: () => FIXED_NOW,
         checkoutSha: CHECKOUT_SHA,
       }),
       (error) => {
         assert.equal(error.package, "kandev");
         assert.equal(
           error.category,
-          options.exchangeStatus || error.reason === "expired_token"
+          options.exchangeStatus
             ? "npm_authentication"
             : "npm_exchange_response",
         );
         assert.equal(error.message.includes("sensitive-server-body"), false);
-        assert.equal(error.message.includes(`npm_${"b".repeat(36)}`), false);
         return true;
       },
     );
@@ -404,73 +463,31 @@ test("exchange validation reports fixed reasons for each response condition", as
   const cases = [
     { body: null, reason: "invalid_body_shape" },
     { body: [], reason: "invalid_body_shape" },
-    {
-      body: { token_type: "other", token: "x", created: "1", expires: "2" },
-      reason: "invalid_token_type",
-    },
-    {
-      body: { token_type: "oidc", token: "", created: "1", expires: "2" },
-      reason: "missing_token",
-    },
-    {
-      body: { token_type: "oidc", created: "1", expires: "2" },
-      reason: "missing_token",
-    },
-    {
-      body: { token_type: "oidc", token: 4, created: "1", expires: "2" },
-      reason: "missing_token",
-    },
-    {
-      body: { token_type: "oidc", token: "x", expires: "bad" },
-      reason: "invalid_expires",
-    },
-    {
-      body: { token_type: "oidc", token: "x", expires: null },
-      reason: "invalid_expires",
-    },
-    {
-      body: { token_type: "oidc", token: "x" },
-      reason: "invalid_expires",
-    },
-    {
-      body: {
-        token_type: "oidc",
-        token: "x",
-        expires: new Date(1000).toISOString(),
-      },
-      reason: "expired_token",
-      category: "npm_authentication",
-    },
+    { body: { token: "" }, reason: "missing_token" },
+    { body: {}, reason: "missing_token" },
+    { body: { token: 4 }, reason: "missing_token" },
   ];
   for (const { body, reason, category = "npm_exchange_response" } of cases) {
-    const fetchImpl = async (input) => ({
-      status: 201,
-      url: String(input),
-      json: async () => body,
-    });
+    const fetchImpl = async (input) => jsonResponse(201, body, String(input));
     await assert.rejects(
-      exchangePackageToken("kandev", "oidc", { fetchImpl, now: () => 1000 }),
+      exchangePackageToken("kandev", "oidc", { fetchImpl }),
       (error) => {
         assert.equal(error.status, 201);
         assert.equal(error.category, category);
         assert.equal(error.reason, reason);
-        if (reason === "expired_token") {
-          assert.match(error.message, /trusted publisher/);
-          assert.match(error.message, /kandev/);
-        }
         return true;
       },
     );
   }
   await assert.rejects(
     exchangePackageToken("kandev", "oidc", {
-      fetchImpl: async (input) => ({
-        status: 201,
-        url: String(input),
-        json: async () => {
-          throw new Error("untrusted-body-secret");
-        },
-      }),
+      fetchImpl: async (input) => {
+        const response = new Response('{"token":"untrusted-body-secret"', {
+          status: 201,
+        });
+        Object.defineProperty(response, "url", { value: String(input) });
+        return response;
+      },
     }),
     (error) => {
       assert.equal(error.category, "npm_exchange_response");
@@ -482,15 +499,67 @@ test("exchange validation reports fixed reasons for each response condition", as
   );
 });
 
-test("failure summary serialization includes safe context and excludes untrusted metadata", () => {
+test("CLI emits a credential-free summary for token-only package exchanges", () => {
+  const jwt = makeJwt();
+  const exchangeToken = "npm_cli_token_only_secret";
+  const bootstrap = cliFetchBootstrap({
+    oidcToken: jwt,
+    exchangeBody: { token: exchangeToken },
+  });
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      `data:text/javascript,${encodeURIComponent(bootstrap)}`,
+      fileURLToPath(new URL("./npm-auth-preflight.mjs", import.meta.url)),
+      "--package",
+      "kandev",
+      "--checkout-sha",
+      CHECKOUT_SHA,
+    ],
+    { encoding: "utf8", env: env() },
+  );
+  const emitted = `${result.stdout}\n${result.stderr}`;
+
+  assert.equal(result.status, 0, emitted);
+  assert.deepEqual(JSON.parse(result.stdout.trim()), {
+    status: "passed",
+    workflow_sha: WORKFLOW_SHA,
+    checkout_sha: CHECKOUT_SHA,
+    packages: [
+      { package: "kandev", status: "authenticated" },
+      { package: sdkPackageName, status: "authenticated" },
+    ],
+  });
+  for (const secret of [
+    exchangeToken,
+    jwt,
+    "request-token-value",
+    "token_type",
+    "created",
+    "expires",
+    "expires_at",
+  ])
+    assert.equal(emitted.includes(secret), false, secret);
+});
+
+test("failure summary serialization includes safe context and excludes credentials and metadata", () => {
   const credentialSecret = "npm_sentinel_secret_123";
   const createdMetadata = "ignored-created-metadata-sentinel";
   const untrustedMetadata = "untrusted-response-metadata-sentinel";
-  const payload = Buffer.from(
-    JSON.stringify({ aud: OIDC_AUDIENCE, exp: 4_102_444_800 }),
-  ).toString("base64url");
-  const jwt = `e30.${payload}.sig`;
-  const bootstrap = `globalThis.fetch = async (input) => ({ status: String(input).includes('actions.test') ? 200 : 201, url: String(input), json: async () => String(input).includes('actions.test') ? { value: ${JSON.stringify(jwt)} } : { token_type: 'oidc', token: ${JSON.stringify(credentialSecret)}, created: ${JSON.stringify(createdMetadata)}, expires: 'not-a-date', malicious: ${JSON.stringify(untrustedMetadata)} } });`;
+  const ignoredExpiry = "ignored-expiry-metadata-sentinel";
+  const jwt = makeJwt();
+  const bootstrap = cliFetchBootstrap({
+    oidcToken: jwt,
+    exchangeBody: {
+      token: 4,
+      token_echo: credentialSecret,
+      token_type: null,
+      created: createdMetadata,
+      expires: ignoredExpiry,
+      malicious: untrustedMetadata,
+    },
+  });
   const result = spawnSync(
     process.execPath,
     [
@@ -514,20 +583,22 @@ test("failure summary serialization includes safe context and excludes untrusted
     package: "kandev",
     category: "npm_exchange_response",
     http_status: 201,
-    reason: "invalid_expires",
+    reason: "missing_token",
     workflow_sha: WORKFLOW_SHA,
     checkout_sha: CHECKOUT_SHA,
     message:
-      "npm returned an invalid exchange response for kandev (invalid_expires).",
+      "npm returned an invalid exchange response for kandev (missing_token).",
   });
   assert.equal(emitted.includes(credentialSecret), false);
   assert.equal(emitted.includes(createdMetadata), false);
+  assert.equal(emitted.includes(ignoredExpiry), false);
   assert.equal(emitted.includes(untrustedMetadata), false);
   assert.equal(emitted.includes("request-token-value"), false);
   assert.equal(emitted.includes(jwt), false);
+  assert.equal(emitted.includes("expires_at"), false);
 
   const transportSecret = "transport-exception-secret";
-  const failedTransport = `let calls = 0; globalThis.fetch = async (input) => { calls += 1; if (calls > 1) throw new Error(${JSON.stringify(transportSecret)}); return { status: 200, url: String(input), json: async () => ({ value: ${JSON.stringify(jwt)} }) }; };`;
+  const failedTransport = `Date.now = () => ${FIXED_NOW}; let calls = 0; globalThis.fetch = async (input) => { calls += 1; if (calls > 1) throw new Error(${JSON.stringify(transportSecret)}); const target = String(input); const response = new Response(JSON.stringify({ value: ${JSON.stringify(jwt)} }), { status: 200, headers: { 'content-type': 'application/json' } }); Object.defineProperty(response, 'url', { value: target }); return response; };`;
   const transportResult = spawnSync(
     process.execPath,
     [
@@ -551,11 +622,12 @@ test("failure summary serialization includes safe context and excludes untrusted
 });
 
 test("failure summaries retain safe publisher and OIDC recovery guidance", () => {
-  const payload = Buffer.from(
-    JSON.stringify({ aud: OIDC_AUDIENCE, exp: 4_102_444_800 }),
-  ).toString("base64url");
-  const jwt = `e30.${payload}.sig`;
-  const authRejected = `let calls = 0; globalThis.fetch = async (input) => { calls += 1; return calls === 1 ? { status: 200, url: String(input), json: async () => ({ value: ${JSON.stringify(jwt)} }) } : { status: 403, url: String(input), json: async () => ({ error: 'sensitive-body' }) }; };`;
+  const jwt = makeJwt();
+  const authRejected = cliFetchBootstrap({
+    oidcToken: jwt,
+    exchangeStatus: 403,
+    exchangeBody: { error: "sensitive-body" },
+  });
   const script = fileURLToPath(
     new URL("./npm-auth-preflight.mjs", import.meta.url),
   );
@@ -647,6 +719,7 @@ test("unsupported release context is rejected before a network request", async (
         packages: RUNTIME_PACKAGES,
         env: env(override),
         fetchImpl,
+        now: () => FIXED_NOW,
         checkoutSha: CHECKOUT_SHA,
       }),
       /release|scope|workflow|runner/,
@@ -659,7 +732,7 @@ test("GitHub OIDC token failures are rejected before package exchange", async ()
   for (const oidcBody of [
     { value: "not-a-jwt" },
     { value: makeJwt({ audience: "other" }) },
-    { value: makeJwt({ expires: Math.floor(Date.now() / 1000) - 60 }) },
+    { value: makeJwt({ expires: Math.floor(FIXED_NOW / 1000) - 60 }) },
     {},
   ]) {
     const transport = makeTransport({ oidcBody });
@@ -668,6 +741,7 @@ test("GitHub OIDC token failures are rejected before package exchange", async ()
         packages: ["kandev"],
         env: env(),
         fetchImpl: transport.fetchImpl,
+        now: () => FIXED_NOW,
         checkoutSha: CHECKOUT_SHA,
       }),
       (error) => {
@@ -685,6 +759,7 @@ test("GitHub OIDC token failures are rejected before package exchange", async ()
       packages: ["kandev"],
       env: env({ ACTIONS_ID_TOKEN_REQUEST_URL: "" }),
       fetchImpl: makeTransport().fetchImpl,
+      now: () => FIXED_NOW,
       checkoutSha: CHECKOUT_SHA,
     }),
     (error) => {
@@ -728,6 +803,7 @@ test("requires exact workflow and checkout revisions", async () => {
       packages: RUNTIME_PACKAGES,
       env: env({ GITHUB_WORKFLOW_SHA: "" }),
       fetchImpl: transport.fetchImpl,
+      now: () => FIXED_NOW,
       checkoutSha: CHECKOUT_SHA,
     }),
     /workflow revision/,
@@ -737,6 +813,7 @@ test("requires exact workflow and checkout revisions", async () => {
       packages: RUNTIME_PACKAGES,
       env: env(),
       fetchImpl: transport.fetchImpl,
+      now: () => FIXED_NOW,
       checkoutSha: "",
     }),
     /checkout revision/,
@@ -752,6 +829,7 @@ test("rejects an alternate SDK package name before any request", async () => {
       sdkPackage: "@other/plugin-sdk",
       env: env(),
       fetchImpl: transport.fetchImpl,
+      now: () => FIXED_NOW,
       checkoutSha: CHECKOUT_SHA,
     }),
     (error) => {
