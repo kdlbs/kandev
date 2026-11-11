@@ -38,6 +38,10 @@ Explicit restoration uses the existing serialized operation helper so its
 terminal-execution replacement checks cannot inherit an ordinary cached read's
 result. Ordinary workspace access retains admitted terminal infrastructure.
 Both operations share the session gate and retirement guard.
+An environment cache hit also enters the serialized session operation before
+acquiring the retirement guard. While holding that guard, recheck the session
+registration and requested environment identity under the store read lock.
+A removed or rebound entry falls through to normal environment resolution.
 Do not extend readiness timeouts or retry prompts.
 
 ## Verification and delivery

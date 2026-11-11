@@ -102,10 +102,10 @@ func TestWorkspaceLookupWaitsForCleanupThenUsesItsOwnResult(t *testing.T) {
 // TestWorkspaceLookupDoesNotReturnExecutionOwnedByPendingCleanup
 // verifies cached reads join the cleanup operation.
 func TestWorkspaceLookupDoesNotReturnExecutionOwnedByPendingCleanup(t *testing.T) {
-	for _, lookup := range []string{"session", "task session"} {
+	for _, lookup := range []string{"session", "task session", "environment"} {
 		t.Run(lookup, func(t *testing.T) {
 			mgr := newTestManager(t)
-			execution := &AgentExecution{ID: "stopping", SessionID: "session", TaskID: "task"}
+			execution := &AgentExecution{ID: "stopping", SessionID: "session", TaskID: "task", TaskEnvironmentID: "environment"}
 			require.NoError(t, mgr.executionStore.Add(execution))
 			entered, release := make(chan struct{}), make(chan struct{})
 			var once sync.Once
@@ -125,10 +125,13 @@ func TestWorkspaceLookupDoesNotReturnExecutionOwnedByPendingCleanup(t *testing.T
 			ctx := &coalescedRecoveryWaitContext{Context: t.Context(), onWait: releaseCleanup}
 			var got *AgentExecution
 			var err error
-			if lookup == "session" {
+			switch lookup {
+			case "session":
 				got, err = mgr.GetOrEnsureExecution(ctx, execution.SessionID)
-			} else {
+			case "task session":
 				got, err = mgr.EnsureWorkspaceExecutionForSession(ctx, execution.TaskID, execution.SessionID)
+			case "environment":
+				got, err = mgr.GetOrEnsureExecutionForEnvironment(ctx, execution.TaskEnvironmentID)
 			}
 			require.True(t, got == nil, "workspace access must wait for the current cleanup owner")
 			require.ErrorContains(t, err, "workspace info provider not configured")
@@ -189,7 +192,7 @@ func TestCachedWorkspaceLookupHonorsCancellationDuringRetirement(t *testing.T) {
 	cancel()
 	finished := make(chan error, 1)
 	go func() {
-		_, err := mgr.cachedWorkspaceExecutionForSession(ctx, execution.SessionID)
+		_, err := mgr.cachedWorkspaceExecution(ctx, execution.SessionID, "")
 		finished <- err
 	}()
 	select {
@@ -292,4 +295,48 @@ func TestWorkspaceRestoreDoesNotBorrowTerminalCacheResult(t *testing.T) {
 		require.Nil(t, restore.execution, "explicit restore must not borrow a terminal cache result")
 		require.ErrorContains(t, restore.err, "workspace info provider not configured")
 	})
+}
+
+// TestEnvironmentCacheLookupWaitsForRetirement verifies an existing environment
+// cache entry is rechecked after removal or rebinding while its runtime retires.
+func TestEnvironmentCacheLookupWaitsForRetirement(t *testing.T) {
+	for _, mutation := range []string{"remove", "rebind"} {
+		t.Run(mutation, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				mgr := newTestManager(t)
+				execution := &AgentExecution{ID: "retiring", SessionID: "session", TaskID: "task", TaskEnvironmentID: "environment"}
+				require.NoError(t, mgr.executionStore.Add(execution))
+				execution.remoteInstanceLifecycleMu.Lock()
+				var once sync.Once
+				release := func() { once.Do(execution.remoteInstanceLifecycleMu.Unlock) }
+				defer release()
+				type result struct {
+					execution *AgentExecution
+					err       error
+				}
+				finished := make(chan result, 1)
+				go func() {
+					got, err := mgr.GetOrEnsureExecutionForEnvironment(t.Context(), "environment")
+					finished <- result{execution: got, err: err}
+				}()
+				synctest.Wait()
+				select {
+				case <-finished:
+					t.Fatal("environment cache lookup returned while runtime retirement held its lock")
+				default:
+				}
+				if mutation == "remove" {
+					mgr.executionStore.Remove(execution.ID)
+				} else {
+					require.NoError(t, mgr.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
+						current.TaskEnvironmentID = "replacement-environment"
+					}))
+				}
+				release()
+				got := <-finished
+				require.True(t, got.execution == nil, "lookup must not return a removed or rebound execution")
+				require.ErrorContains(t, got.err, "workspace info provider not configured")
+			})
+		})
+	}
 }

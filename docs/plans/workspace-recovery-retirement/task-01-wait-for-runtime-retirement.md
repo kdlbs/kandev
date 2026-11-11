@@ -35,7 +35,7 @@ persistence. This work has no delivery dependencies.
 From the repository root:
 
 ```sh
-GOMAXPROCS=4 GOMEMLIMIT=2GiB go -C apps/backend test -race -trimpath -p=2 ./internal/agent/runtime/lifecycle -run 'Test(EnvironmentWorkspaceLookup|WorkspaceLookup|CachedWorkspaceLookup|ConditionalCleanupRunsAfterWorkspacePeer|PromotionRejectsExecutionRemovedByCleanup|EnsureWorkspaceExecutionForSession|CachedWorkspaceRestore|WorkspaceRestore)' -count=1
+GOMAXPROCS=4 GOMEMLIMIT=2GiB go -C apps/backend test -race -trimpath -p=2 ./internal/agent/runtime/lifecycle -run 'Test(EnvironmentCacheLookup|EnvironmentWorkspaceLookup|WorkspaceLookup|CachedWorkspaceLookup|ConditionalCleanupRunsAfterWorkspacePeer|PromotionRejectsExecutionRemovedByCleanup|EnsureWorkspaceExecutionForSession|CachedWorkspaceRestore|WorkspaceRestore)' -count=1
 bash scripts/lint-go-changed apps/backend/internal/agent/runtime/lifecycle/manager_execution.go apps/backend/internal/agent/runtime/lifecycle/cleanup_execution_coalescing_test.go
 ```
 
@@ -78,4 +78,13 @@ A deterministic joined-read regression also proves explicit restoration runs
 its own replacement check rather than borrowing the ordinary read's terminal
 result. It fails before restoration uses the existing serialized operation
 helper. Creation still shares the session gate and remains deduplicated.
+The environment cache-hit path also enters the serialized session operation
+and uses the shared retirement guard. It rechecks session registration and the
+requested environment under store ownership before returning a cached runtime.
+Regressions fail before the correction for pending cleanup, retirement removal,
+and environment rebinding. They pass after the correction.
+A backend CI shard also exposed an unsynchronized start-call counter in the
+executor test mock. The existing sibling-start scenario reproduced the race
+under a 1,000-run local stress test. The counter now uses atomic increment and
+load; no production executor behavior changes.
 Final remote CI remains a publication gate.

@@ -109,7 +109,7 @@ func (m *Manager) GetOrEnsureExecution(ctx context.Context, sessionID string) (*
 	// to avoid recursing into the same singleflight slot we already hold.
 	value, err := m.doCoalescedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
 		// Workspace access can reuse retained terminal infrastructure after admission.
-		if execution, err := m.cachedWorkspaceExecutionForSession(sharedCtx, sessionID); execution != nil || err != nil {
+		if execution, err := m.cachedWorkspaceExecution(sharedCtx, sessionID, ""); execution != nil || err != nil {
 			return execution, err
 		}
 		return m.ensureWorkspaceExecutionLocked(sharedCtx, "", sessionID)
@@ -148,11 +148,8 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 		}
 	}
 
-	if execution, exists := m.executionStore.GetByTaskEnvironmentID(taskEnvironmentID); exists {
-		if err := m.ensureCachedWorkspaceExecutionAdmitted(ctx, execution); err != nil {
-			return nil, err
-		}
-		return execution, nil
+	if execution, err := m.cachedWorkspaceExecutionForEnvironment(ctx, taskEnvironmentID); execution != nil || err != nil {
+		return execution, err
 	}
 
 	if m.workspaceInfoProvider == nil {
@@ -188,7 +185,7 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 	// GetOrEnsureExecution(sessionID) / EnsureWorkspaceExecutionForSession for
 	// the same session.
 	value, err := m.doCoalescedExecution(ctx, info.SessionID, func(sharedCtx context.Context) (interface{}, error) {
-		if execution, err := m.cachedWorkspaceExecutionForSession(sharedCtx, info.SessionID); execution != nil || err != nil {
+		if execution, err := m.cachedWorkspaceExecution(sharedCtx, info.SessionID, ""); execution != nil || err != nil {
 			if err != nil {
 				return nil, err
 			}
@@ -328,8 +325,32 @@ func awaitCoalescedResult(
 	}
 }
 
-// cachedWorkspaceExecutionForSession waits for retirement, then validates the cached owner.
-func (m *Manager) cachedWorkspaceExecutionForSession(ctx context.Context, sessionID string) (*AgentExecution, error) {
+// cachedWorkspaceExecutionForEnvironment serializes cache access with session cleanup.
+func (m *Manager) cachedWorkspaceExecutionForEnvironment(ctx context.Context, taskEnvironmentID string) (*AgentExecution, error) {
+	candidate, exists := m.executionStore.GetByTaskEnvironmentID(taskEnvironmentID)
+	if !exists {
+		return nil, nil
+	}
+	var sessionID string
+	if err := m.executionStore.WithRLock(candidate.ID, func(current *AgentExecution) {
+		if current == candidate {
+			sessionID = current.SessionID
+		}
+	}); err != nil || sessionID == "" {
+		return nil, nil
+	}
+	value, err := m.doSerializedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
+		return m.cachedWorkspaceExecution(sharedCtx, sessionID, taskEnvironmentID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return value.(*AgentExecution), nil
+}
+
+// cachedWorkspaceExecution waits for retirement and validates the cached owner.
+// An empty environment ID checks only the session registration and admission.
+func (m *Manager) cachedWorkspaceExecution(ctx context.Context, sessionID, taskEnvironmentID string) (*AgentExecution, error) {
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
 		return nil, nil
@@ -340,6 +361,14 @@ func (m *Manager) cachedWorkspaceExecutionForSession(ctx context.Context, sessio
 	defer execution.remoteInstanceLifecycleMu.Unlock()
 	if current, present := m.executionStore.GetBySessionID(sessionID); !present || current != execution {
 		return nil, nil
+	}
+	if taskEnvironmentID != "" {
+		matches := false
+		if err := m.executionStore.WithRLock(execution.ID, func(current *AgentExecution) {
+			matches = current == execution && current.TaskEnvironmentID == taskEnvironmentID
+		}); err != nil || !matches {
+			return nil, nil
+		}
 	}
 	if err := m.ensureCachedWorkspaceExecutionAdmitted(ctx, execution); err != nil {
 		return nil, err
@@ -370,7 +399,7 @@ func (m *Manager) workspaceExecutionStatusReusable(execution *AgentExecution) bo
 // run inside the sessionID-keyed singleflight bucket. Callers other than
 // EnsureWorkspaceExecutionForSession must already hold the singleflight slot.
 func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, sessionID string) (*AgentExecution, error) {
-	if execution, err := m.cachedWorkspaceExecutionForSession(ctx, sessionID); execution != nil || err != nil {
+	if execution, err := m.cachedWorkspaceExecution(ctx, sessionID, ""); execution != nil || err != nil {
 		if err != nil {
 			return nil, err
 		}
