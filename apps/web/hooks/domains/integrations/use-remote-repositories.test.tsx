@@ -601,3 +601,32 @@ describe("useRemoteRepositories workspace scope", () => {
     await waitFor(() => expect(mocks.fetchAccessibleRepos).toHaveBeenCalledTimes(2));
   });
 });
+
+describe("useRemoteRepositories provider restriction", () => {
+  it("loads only the requested providers", async () => {
+    const pluginList = vi.fn(async () => []);
+    pluginRegistry.forPlugin(PLUGIN_ID).registerRepositoryProvider({
+      id: "bitbucket",
+      label: "Bitbucket",
+      matchesURL: () => false,
+      listBranches: async () => [],
+      inspectURL: async () => null,
+      listRepositories: pluginList,
+    });
+    mocks.fetchAccessibleRepos.mockResolvedValue([githubRepo("api")]);
+    mocks.listUserProjects.mockResolvedValue({ projects: [] });
+    mocks.listAzureDevOpsProjects.mockResolvedValue({ projects: [] });
+
+    const { result } = renderHook(() =>
+      useRemoteRepositories(WORKSPACE_ID, { providers: ["github"] }),
+    );
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expectWorkspaceScopedGitHubRequest();
+    expect(mocks.listUserProjects).not.toHaveBeenCalled();
+    expect(mocks.listAzureDevOpsProjects).not.toHaveBeenCalled();
+    expect(pluginList).not.toHaveBeenCalled();
+    expect(result.current.availableProviders).toEqual(["github"]);
+    expect(result.current.repos.map((repo) => repo.fullName)).toEqual(["acme/api"]);
+  });
+});

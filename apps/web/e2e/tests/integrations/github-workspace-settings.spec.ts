@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { Page } from "@playwright/test";
 import { stubGitHubRateLimits } from "./github-rate-limit-fixture";
 import { dwell } from "../../helpers/causal-waits";
 
@@ -368,7 +369,7 @@ test.describe("GitHub workspace settings", () => {
 
     await testPage.getByTestId("github-scope-mode").click();
     await testPage.getByRole("option", { name: "Selected repositories" }).click();
-    await testPage.getByTestId("github-scope-repos-input").fill("kdlbs/kandev");
+    await addScopeRepository(testPage, "kdlbs/kandev");
     await testPage
       .getByTestId("settings-floating-save")
       .getByRole("button", { name: "Save changes" })
@@ -417,7 +418,7 @@ test.describe("GitHub workspace settings", () => {
 
     await testPage.getByTestId("github-scope-mode").click();
     await testPage.getByRole("option", { name: "Selected repositories" }).click();
-    await testPage.getByTestId("github-scope-repos-input").fill("kdlbs/kandev");
+    await addScopeRepository(testPage, "kdlbs/kandev");
     await testPage.getByTestId("github-scope-mode").click();
     await testPage.getByRole("option", { name: "Organizations" }).click();
     await testPage.getByTestId("github-scope-orgs-input").fill("kdlbs");
@@ -445,7 +446,7 @@ test.describe("GitHub workspace settings", () => {
 
     await testPage.getByTestId("github-scope-mode").click();
     await testPage.getByRole("option", { name: "Selected repositories" }).click();
-    await testPage.getByTestId("github-scope-repos-input").fill("not-a-repo");
+    await addScopeRepository(testPage, "other/repo");
     await testPage.getByTestId("github-scope-mode").click();
     await testPage.getByRole("option", { name: "Organizations" }).click();
     await testPage
@@ -471,3 +472,14 @@ test.describe("GitHub workspace settings", () => {
     expect(secondSettings.repo_scope_repos).toEqual([]);
   });
 });
+
+async function addScopeRepository(page: Page, repository: string): Promise<void> {
+  const field = page.getByTestId("github-scope-repos");
+  await field.getByRole("button", { name: "Add repository" }).click();
+  const input = field.getByTestId("remote-repo-input");
+  await input.fill(repository);
+  await input.press("Enter");
+  await expect(
+    field.getByTestId("github-repository-chip").filter({ hasText: repository }),
+  ).toBeVisible();
+}

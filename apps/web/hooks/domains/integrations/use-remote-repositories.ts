@@ -393,21 +393,50 @@ function usePluginRepositorySource(
   return { repos, availableProviders, sourceErrors, loading };
 }
 
-export function useRemoteRepositories(workspaceId: string): UseRemoteRepositoriesResult {
+export type UseRemoteRepositoriesOptions = {
+  /** Restricts listing to these providers. Omitted means every connected provider. */
+  providers?: readonly RemoteRepositoryProvider[];
+};
+
+function useProviderRestriction(providers: readonly RemoteRepositoryProvider[] | undefined) {
+  const key = providers ? providers.join("\u0000") : null;
+  return useMemo(() => (key === null ? null : new Set(key.split("\u0000"))), [key]);
+}
+
+function useRestrictedEligibility(
+  eligibility: BuiltInRepositoryEligibility,
+  allowed: ReadonlySet<string> | null,
+): BuiltInRepositoryEligibility {
+  return useMemo(() => {
+    if (!allowed) return eligibility;
+    const providers = new Set([...eligibility.providers].filter((p) => allowed.has(p)));
+    return { providers, loading: eligibility.loading };
+  }, [allowed, eligibility]);
+}
+
+export function useRemoteRepositories(
+  workspaceId: string,
+  options?: UseRemoteRepositoriesOptions,
+): UseRemoteRepositoriesResult {
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebouncedValue(query, 250);
   const [refreshVersion, setRefreshVersion] = useState(0);
+  const allowedProviders = useProviderRestriction(options?.providers);
   const registry = usePluginRegistry();
   const registryVersion = registry.getVersion();
   const pluginProviders = useMemo(
-    () => registry.getRepositoryProviders(),
-    [registry, registryVersion],
+    () =>
+      registry
+        .getRepositoryProviders()
+        .filter((provider) => !allowedProviders || allowedProviders.has(provider.id)),
+    [allowedProviders, registry, registryVersion],
   );
   const {
-    eligibility,
+    eligibility: connectedEligibility,
     refresh: refreshBuiltIns,
     githubHost,
   } = useBuiltInRepositoryAccess(workspaceId);
+  const eligibility = useRestrictedEligibility(connectedEligibility, allowedProviders);
   const builtInSource = useBuiltInRepositorySource(workspaceId, refreshVersion, eligibility);
   const pluginSource = usePluginRepositorySource(
     workspaceId,
