@@ -43,15 +43,17 @@ export function RuntimeReviewHeader({
           <p className="text-xs text-amber-700 dark:text-amber-400">
             {t("agents:runtimeUpdatePreviewFailed", { count: failures })}
           </p>
+          <p className="text-xs text-muted-foreground">{t("agents:runtimeUpdatePreviewHelp")}</p>
           <Button
             type="button"
             variant="outline"
             size="sm"
             className="cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+            disabled={loading || bulk.reviewLoading || bulk.batch.status === "running"}
             onClick={bulk.onRetryPreviews}
             data-testid="runtime-bulk-retry-preview"
           >
-            {t("agents:runtimeRetryRefresh")}
+            {t("agents:runtimeUpdatePreviewRetry")}
           </Button>
         </div>
       )}

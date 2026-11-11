@@ -5,7 +5,10 @@ const CLAUDE_PACKAGE = "@agentclientprotocol/claude-agent-acp";
 const CODEX_PACKAGE = "@openai/codex";
 const NOW = "2026-07-26T12:00:00.000Z";
 
-export async function installBulkRuntimeFixture(page: Page) {
+export async function installBulkRuntimeFixture(
+  page: Page,
+  options: { failCodexPreviewOnce?: boolean } = {},
+) {
   const runtime = await installRuntimeUpdateFixture(page, {
     statusResponse: [
       {
@@ -189,8 +192,16 @@ export async function installBulkRuntimeFixture(page: Page) {
       },
     }),
   );
-  await page.route("**/api/v1/agent-update/codex-app-server/preview**", (route) =>
-    route.fulfill({
+  let codexPreviewRequests = 0;
+  await page.route("**/api/v1/agent-update/codex-app-server/preview**", (route) => {
+    codexPreviewRequests += 1;
+    if (options.failCodexPreviewOnce && codexPreviewRequests === 1) {
+      return route.fulfill({
+        status: 503,
+        json: { error: "Version registry is temporarily unavailable." },
+      });
+    }
+    return route.fulfill({
       json: {
         update_mode: "pinned",
         agent_name: "codex-app-server",
@@ -216,8 +227,8 @@ export async function installBulkRuntimeFixture(page: Page) {
           source: "managed",
         },
       },
-    }),
-  );
+    });
+  });
   await page.route("**/api/v1/agent-update/claude-acp", (route) => {
     if (route.request().method() !== "POST") return route.fallback();
     claudePosts += 1;
@@ -292,4 +303,38 @@ export async function expectBulkManager(page: Page, mobile: boolean) {
   await expect(page.getByTestId("runtime-updates-count")).toHaveText("2");
   await expect(page.getByTestId("runtime-bulk-approve")).toBeEnabled();
   return surface;
+}
+
+export async function checkBulkPreviewRecovery(page: Page, mobile: boolean) {
+  const runtime = await installBulkRuntimeFixture(page, { failCodexPreviewOnce: true });
+  await page.goto("/settings/agents");
+  const interact = async (testId: string) => {
+    const control = page.getByTestId(testId);
+    if (mobile) await control.tap();
+    else await control.click();
+  };
+  await interact("runtime-updates-button");
+  const surface = await expectBulkManager(page, mobile);
+  await expect(surface.getByRole("alert")).toContainText(
+    "Couldn't prepare 1 update for bulk updating.",
+  );
+  await expect(surface.getByRole("alert")).toContainText("Checking does not install updates.");
+  const codex = surface.getByTestId("runtime-manager-row-codex-app-server");
+  await expect(codex).toContainText("Version registry is temporarily unavailable.");
+  await expect(page.getByTestId("runtime-bulk-select-codex-app-server")).toBeDisabled();
+  await expect(page.getByTestId("runtime-bulk-approve")).toHaveText("Update selected (1)");
+  const retry = page.getByTestId("runtime-bulk-retry-preview");
+  await expect(retry).toHaveText("Retry checks");
+  if (mobile) expect((await retry.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+
+  await interact("runtime-bulk-retry-preview");
+  await expect(retry).toHaveCount(0);
+  await expect(page.getByTestId("runtime-bulk-select-codex-app-server")).toBeEnabled();
+  await expect(page.getByTestId("runtime-bulk-approve")).toHaveText("Update all (2)");
+  expect(runtime.claudePosts()).toBe(0);
+  expect(runtime.codexPosts()).toBe(0);
+  await interact("runtime-bulk-approve");
+  await expect.poll(() => runtime.claudePosts()).toBe(1);
+  await expect.poll(() => runtime.codexPosts()).toBe(1);
 }

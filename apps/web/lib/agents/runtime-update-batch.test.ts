@@ -17,6 +17,7 @@ import {
 const CLAUDE = "claude-acp";
 const CODEX = "codex-acp";
 const PACKAGE = "@example/claude";
+const RUNTIME_ID = "npm:@example/claude";
 const JOB_CLAUDE = "job-claude";
 const JOB_CODEX = "job-codex";
 const updateAgent = vi.fn();
@@ -35,7 +36,7 @@ function status(overrides: Partial<AgentUpdateStatus> = {}): AgentUpdateStatus {
   return {
     agent_name: CLAUDE,
     display_name: "Claude",
-    runtime_id: "npm:@example/claude",
+    runtime_id: RUNTIME_ID,
     owner: "kandev",
     mechanism: "npm_candidate",
     management: "managed",
@@ -124,7 +125,7 @@ describe("runtime update review evidence", () => {
       target_version: "1.1.0",
       operation: "update",
       reviewed_runtime: {
-        runtime_id: "npm:@example/claude",
+        runtime_id: RUNTIME_ID,
         package: PACKAGE,
         current_version: "1.0.0",
         effective_version: "1.0.0",
@@ -172,6 +173,42 @@ describe("runtime update review evidence", () => {
     });
     expect(result.rows).toHaveLength(4);
     expect(maxActive).toBeLessThanOrEqual(2);
+  });
+
+  // @covers AC-AGENTS-RUNTIME-MANAGER-002.4, AC-AGENTS-RUNTIME-MANAGER-003.4
+  it.each([
+    ["missing verification", { reviewed_runtime: undefined }, "review_unavailable"],
+    ["a repair", { operation: "repair" }, "individual_required"],
+    ["a changed target", { target_version: "1.2.0" }, "runtime_changed"],
+    ["a changed runtime", { runtime_id: "npm:other" }, "runtime_changed"],
+    ["a changed package", { package: "other" }, "runtime_changed"],
+    ["a changed effective version", { effective_version: "0.9.0" }, "runtime_changed"],
+    ["a changed current version", { current_version: "0.9.0" }, "runtime_changed"],
+    ["a native runtime", { source: "native" }, "individual_required"],
+  ] as const)("explains why %s cannot join bulk updating", async (_reason, changes, code) => {
+    const reviewed = {
+      ...target(CLAUDE).reviewedRuntime,
+      runtime_id: RUNTIME_ID,
+      package: PACKAGE,
+      ...changes,
+    };
+    const result = await loadRuntimeUpdateReviewRows([status()], async () => ({
+      target_version: "1.1.0",
+      operation: "update",
+      reviewed_runtime: reviewed,
+      ...changes,
+    }));
+    expect(result).toEqual({ rows: [], failures: { [`${CLAUDE}:npm:${PACKAGE}`]: { code } } });
+  });
+
+  it("retains the request failure cause without treating it as a user approval requirement", async () => {
+    const result = await loadRuntimeUpdateReviewRows([status()], async () => {
+      throw new ApiError("Version registry is temporarily unavailable.", 503, null);
+    });
+    expect(result.failures[`${CLAUDE}:npm:${PACKAGE}`]).toEqual({
+      code: "request_failed",
+      message: "Version registry is temporarily unavailable.",
+    });
   });
 });
 

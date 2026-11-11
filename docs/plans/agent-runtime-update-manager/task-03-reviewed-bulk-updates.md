@@ -178,4 +178,28 @@ Task 02 supplies the manager overview, shared detail presentation, policy-dirty 
 
 ## Results
 
+### Preview failure clarity follow-up
+
+Status: done (2026-11-11). The user requested this correction and a push to PR #5248.
+Keep the existing update eligibility and approval boundaries. Replace the misleading review
+warning with an explanation of failed checks, retain a specific cause on each excluded row,
+and label the action Retry checks. Use Update selected when some checks failed.
+The existing phone runtime-manager drawer is the mobile exemplar: retain its single scroll
+owner, fixed footer, and touch targets. Verify failure recovery and no update submissions
+during checks on desktop and phone, plus focused preview-classification and locale checks.
+
+Implemented typed failure causes, translated row-specific explanations, Retry checks help,
+and accurate ready-selection and partial-update labels. Retry is disabled during initial
+checks. Request failures preserve the API error message. Missing verification, changed
+runtime data, and individual-only operations have separate recovery guidance.
+
+Validation: the new unit cases first failed on the generic failure value, and the desktop
+browser case first failed on the old approval warning. Focused Vitest passed 43 tests
+across `runtime-update-batch.test.ts`, `agent-runtime-update-manager-review.test.tsx`,
+and `agent-runtime-update-manager.test.tsx`. The desktop and phone bulk-update Playwright
+suites each passed 3/3 after rebuilding production assets. These include retry recovery,
+no POST during checks, partial-selection labels, phone touch size, and no horizontal overflow.
+Typecheck, changed-file Oxlint, i18n check, and diff whitespace checks passed.
+Public documentation impact: error explanations within the existing workflow only.
+
 Completed 2026-11-10. Added optional server review evidence on preview and pinned admission, guarded managed activation, exact preview review with two active requests, store-owned sequential submission, per-row outcomes, failed-only retry, retained-job recovery, and desktop/phone bulk specs. Backend settings tests and the reviewed race test passed; scoped Go lint reported 0 issues. Frontend focused Vitest run passed 70 tests across 11 files, including authority fencing, malformed success responses, fresh retry evidence, completion reset, and WebSocket reconnect recovery. Typecheck, i18n check, i18n ratchet, changed-file Oxlint, public-doc validation, and specification lint passed. Bulk E2E passed: desktop 2/2 and phone 2/2, including partial failure, fresh-evidence retry, completion-to-review, and dismissal during an active run. The static-review corrections and their regressions, including guarded review-changed drift classification, pre-lock catalogue resolution, and stable job-progress row identity, are recorded in plan.md.

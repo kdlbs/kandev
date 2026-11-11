@@ -1,6 +1,17 @@
 import { expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
-import { expectBulkManager, installBulkRuntimeFixture } from "./agent-runtime-bulk-update-helpers";
+import {
+  checkBulkPreviewRecovery,
+  expectBulkManager,
+  installBulkRuntimeFixture,
+} from "./agent-runtime-bulk-update-helpers";
+
+// @covers AC-AGENTS-RUNTIME-MANAGER-002.4, AC-AGENTS-RUNTIME-MANAGER-003.4
+test("failed checks explain the cause and retry without installing updates", async ({
+  testPage,
+}) => {
+  await checkBulkPreviewRecovery(testPage, false);
+});
 
 // @covers AC-AGENTS-RUNTIME-MANAGER-003.1, AC-AGENTS-RUNTIME-MANAGER-003.2
 test("bulk manager reviews exact targets and approves only the selection", async ({ testPage }) => {

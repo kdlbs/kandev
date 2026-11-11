@@ -134,6 +134,25 @@ export type RuntimePreviewLoader = (
   reviewed_runtime?: AgentRuntimeReview;
 }>;
 
+export type RuntimePreviewFailure =
+  | { code: "request_failed"; message?: string }
+  | { code: "review_unavailable" | "runtime_changed" | "individual_required" };
+
+function runtimePreviewFailure(
+  status: AgentUpdateStatus,
+  preview: Awaited<ReturnType<RuntimePreviewLoader>>,
+): RuntimePreviewFailure {
+  if (!preview.reviewed_runtime) return { code: "review_unavailable" };
+  if (
+    preview.operation !== "update" ||
+    status.runtime_source === "native" ||
+    preview.reviewed_runtime.source === "native"
+  ) {
+    return { code: "individual_required" };
+  }
+  return { code: "runtime_changed" };
+}
+
 /**
  * Loads exact review evidence for bulk candidates with at most two active
  * preview requests. A failed or unsupported preview disables only its row.
@@ -142,9 +161,9 @@ export async function loadRuntimeUpdateReviewRows(
   statuses: AgentUpdateStatus[],
   preview: RuntimePreviewLoader,
   concurrency = 2,
-): Promise<{ rows: RuntimeBatchTarget[]; failures: Record<string, string> }> {
+): Promise<{ rows: RuntimeBatchTarget[]; failures: Record<string, RuntimePreviewFailure> }> {
   const rows: RuntimeBatchTarget[] = [];
-  const failures: Record<string, string> = {};
+  const failures: Record<string, RuntimePreviewFailure> = {};
   let next = 0;
   const worker = async () => {
     while (next < statuses.length) {
@@ -155,9 +174,12 @@ export async function loadRuntimeUpdateReviewRows(
         const result = await preview(status.agent_name, status.latest_version);
         const row = runtimeBatchTarget(status, result);
         if (row) rows.push(row);
-        else failures[key] = "review_changed";
+        else failures[key] = runtimePreviewFailure(status, result);
       } catch (error) {
-        failures[key] = error instanceof Error ? error.message : String(error);
+        failures[key] = {
+          code: "request_failed",
+          message: error instanceof Error ? error.message : undefined,
+        };
       }
     }
   };

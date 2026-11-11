@@ -347,7 +347,9 @@ function bulkApprovalState(
     [...(bulk?.selection ?? [])].filter((key) => eligibleKeys.has(key)),
   );
   const allEligibleSelected =
-    Boolean(bulk) && bulk!.reviewKeys.size > 0 && selectedEligible.size === bulk!.reviewKeys.size;
+    selectedEligible.size > 0 &&
+    Object.keys(bulk!.previewFailures).length === 0 &&
+    selectedEligible.size === bulk!.reviewKeys.size;
   return {
     eligibleKeys,
     canApprove:

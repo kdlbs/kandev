@@ -248,7 +248,11 @@ Runtime updates
   Could not refresh. Last known information remains visible. [Retry]
   Claude   Current: Unknown   Latest: 0.103.0    [Manage versions]
   Cursor   Managed externally                   [Manual guidance]
-  Selected target needs review.                 [Retry preview]
+  Could not prepare 3 updates for bulk updating. [Retry checks]
+  Checking does not install updates. Use Manage versions for individual updates.
+  Codex: Runtime or target version changed.      [Manage versions]
+  Claude: Ready                                [x]
+                                               [Update selected (1)]
 ```
 
 No-update entry shows an explicit empty available group and keeps version management accessible.

@@ -10,6 +10,7 @@ import {
   runtimeBatchKey,
   type RuntimeBatchRow,
   type RuntimeBatchTarget,
+  type RuntimePreviewFailure,
   type RuntimePreviewLoader,
   type RuntimeUpdateBatchState,
 } from "@/lib/agents/runtime-update-batch";
@@ -32,7 +33,7 @@ function useRuntimeReviewLoader({
   beginReview,
   onLoaded,
 }: ReviewLoaderOptions) {
-  const [previewFailures, setPreviewFailures] = useState<Record<string, string>>({});
+  const [previewFailures, setPreviewFailures] = useState<Record<string, RuntimePreviewFailure>>({});
   const [reviewLoading, setReviewLoading] = useState(false);
   const [retryEpoch, setRetryEpoch] = useState(0);
   const signature = useRef<string | null>(null);
@@ -219,11 +220,11 @@ function useFreshRetryReview({
         ...store.getState().agentRuntimeUpdates.byAgent,
       };
       const eligible: AgentUpdateStatus[] = [];
-      const failures: Record<string, string> = {};
+      const failures: Record<string, RuntimePreviewFailure> = {};
       for (const row of rows) {
         const status = statusByAgent[row.agentName];
         if (!status || !isBulkCandidateStatus(status) || (isEligible && !isEligible(status))) {
-          failures[row.key] = "review_changed";
+          failures[row.key] = { code: "runtime_changed" };
           continue;
         }
         eligible.push(status);

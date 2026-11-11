@@ -1,6 +1,17 @@
 import { expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
-import { expectBulkManager, installBulkRuntimeFixture } from "./agent-runtime-bulk-update-helpers";
+import {
+  checkBulkPreviewRecovery,
+  expectBulkManager,
+  installBulkRuntimeFixture,
+} from "./agent-runtime-bulk-update-helpers";
+
+// @covers AC-AGENTS-RUNTIME-MANAGER-001.6, AC-AGENTS-RUNTIME-MANAGER-002.4
+test("phone failed checks explain the cause and retry without installing updates", async ({
+  testPage,
+}) => {
+  await checkBulkPreviewRecovery(testPage, true);
+});
 
 // @covers AC-AGENTS-RUNTIME-MANAGER-001.6, AC-AGENTS-RUNTIME-MANAGER-003.2
 test("phone bulk review keeps one scrolling drawer and touch-sized approval", async ({

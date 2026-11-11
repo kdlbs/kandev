@@ -7,6 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
 import type {
   RuntimeBatchTarget,
+  RuntimePreviewFailure,
   RuntimeUpdateBatchState,
 } from "@/lib/agents/runtime-update-batch";
 import type { RuntimeUpdateManagerRow } from "@/lib/agents/runtime-update-manager";
@@ -16,7 +17,7 @@ export type RuntimeUpdateBulkProps = {
   batch: RuntimeUpdateBatchState;
   reviewRows: RuntimeBatchTarget[];
   reviewKeys: ReadonlySet<string>;
-  previewFailures: Record<string, string>;
+  previewFailures: Record<string, RuntimePreviewFailure>;
   reviewLoading: boolean;
   selection: ReadonlySet<string>;
   allSelected: boolean;
@@ -123,13 +124,25 @@ function rowDescription(row: RuntimeUpdateManagerRow): string | null {
   return null;
 }
 
+const PREVIEW_FAILURE_KEYS: Record<RuntimePreviewFailure["code"], string> = {
+  request_failed: "agents:runtimeUpdatePreviewRequestFailed",
+  review_unavailable: "agents:runtimeUpdatePreviewUnavailable",
+  runtime_changed: "agents:runtimeUpdatePreviewChanged",
+  individual_required: "agents:runtimeUpdatePreviewIndividual",
+};
+
 function rowBulkIssue(
   row: RuntimeUpdateManagerRow,
   bulk: RuntimeUpdateBulkProps | undefined,
-  t: (key: string) => string,
+  t: (key: string, values?: Record<string, unknown>) => string,
 ): string | undefined {
   if (!bulk || row.group !== "available" || !row.bulkEligible) return undefined;
-  if (bulk.previewFailures[row.key]) return t("agents:runtimeUpdatePreviewNeedsReview");
+  const failure = bulk.previewFailures[row.key];
+  if (failure) {
+    return failure.code === "request_failed" && failure.message
+      ? t("agents:runtimeUpdatePreviewRequestError", { error: failure.message })
+      : t(PREVIEW_FAILURE_KEYS[failure.code]);
+  }
   if (bulk.reviewLoading) return t("agents:runtimeUpdateReviewing");
   return undefined;
 }
@@ -203,7 +216,9 @@ function RuntimeOverviewRow({
             <span className="text-xs text-muted-foreground">{versions}</span>
           </div>
           {description && <p className="text-xs text-muted-foreground">{t(description)}</p>}
-          {bulkIssue && <p className="text-xs text-amber-600 dark:text-amber-400">{bulkIssue}</p>}
+          {bulkIssue && (
+            <p className="break-words text-xs text-amber-600 dark:text-amber-400">{bulkIssue}</p>
+          )}
           {row.busy && (
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
               <IconLoader2 className="size-3.5 animate-spin" />
