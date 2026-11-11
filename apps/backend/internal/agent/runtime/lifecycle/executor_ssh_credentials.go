@@ -37,7 +37,9 @@ func (r *SSHExecutor) uploadCredentials(
 	platform SSHRemotePlatform,
 ) error {
 	catalog := r.buildRemoteAuthCatalog()
-	r.resolveAuthSecrets(ctx, req, catalog)
+	if err := r.resolveAuthSecrets(ctx, req, catalog); err != nil {
+		return err
+	}
 
 	var fileMethods []remoteauth.Method
 	if credsJSON := getMetadataString(req.Metadata, "remote_credentials"); credsJSON != "" {
@@ -150,21 +152,21 @@ func (r *SSHExecutor) resolveGHToken(ids []string) []string {
 }
 
 // resolveAuthSecrets reads remote_auth_secrets from metadata and resolves
-// secret values into env vars (e.g. gh_cli secret → GITHUB_TOKEN). Skips
-// any methods that aren't env-type.
+// secret values into env vars (e.g. gh_cli secret → GITHUB_TOKEN). It fails
+// closed when a selected env-type binding can no longer be revealed so a
+// queued or deferred launch cannot continue without the admitted credential.
 func (r *SSHExecutor) resolveAuthSecrets(
 	ctx context.Context,
 	req *ExecutorCreateRequest,
 	catalog remoteauth.Catalog,
-) {
+) error {
 	authSecretsJSON := getMetadataString(req.Metadata, "remote_auth_secrets")
 	if authSecretsJSON == "" {
-		return
+		return nil
 	}
 	var authSecrets map[string]string
 	if err := json.Unmarshal([]byte(authSecretsJSON), &authSecrets); err != nil {
-		r.logger.Warn("failed to parse remote_auth_secrets", zap.Error(err))
-		return
+		return fmt.Errorf("parse remote_auth_secrets: %w", err)
 	}
 	for methodID, secretID := range authSecrets {
 		if secretID == "" {
@@ -176,10 +178,10 @@ func (r *SSHExecutor) resolveAuthSecrets(
 		}
 		value, err := revealGlobalSecret(ctx, r.secretStore, secretID)
 		if err != nil {
-			r.logger.Warn("failed to resolve auth secret",
-				zap.String("method_id", methodID),
-				zap.Error(err))
-			continue
+			return fmt.Errorf("resolve selected authentication secret for %s: %w", method.EnvVar, err)
+		}
+		if value == "" || strings.Contains(value, "\x00") {
+			return fmt.Errorf("selected authentication secret for %s is empty or invalid", method.EnvVar)
 		}
 		if req.Env == nil {
 			req.Env = make(map[string]string)
@@ -187,6 +189,7 @@ func (r *SSHExecutor) resolveAuthSecrets(
 		req.Env[method.EnvVar] = value
 		r.logger.Debug("set env from auth secret", zap.String("key", method.EnvVar), zap.String("method_id", methodID))
 	}
+	return nil
 }
 
 func (r *SSHExecutor) buildRemoteAuthCatalog() remoteauth.Catalog {

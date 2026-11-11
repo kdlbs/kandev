@@ -31,6 +31,8 @@
   "fixComments": "Ƒĩx Ćōḿḿēńţś",
   "goToFindings_one": "Ĝō ţō {{count}} ŕēvĩēŵ ƒĩńďĩńĝ",
   "goToFindings_other": "Ĝō ţō {{count}} ŕēvĩēŵ ƒĩńďĩńĝś",
+  "htmlPreviewReadFailed": "Ćōũĺď ńōţ ŕēàď ţĥē ćũŕŕēńţ ĤŢḾĹ ƒĩĺē. Ţŕŷ àĝàĩń, ōŕ śĥōŵ ţĥē ďĩƒƒ.",
+  "htmlPreviewWorkspaceSource": "Ćũŕŕēńţ ŵōŕķśƥàćē ƒĩĺē. Ĩţ ćàń ďĩƒƒēŕ ƒŕōḿ ţĥĩś ďĩƒƒ.",
   "loadingChangedFiles": "Ĺōàďĩńĝ ćĥàńĝēď ƒĩĺēś...",
   "loadingPRChanges": "Ĺōàďĩńĝ {{repo}} #{{prNumber}} ćĥàńĝēś…",
   "markdownPreviewPartialNotice": "Śĥōŵĩńĝ ćĥàńĝēď Ḿàŕķďōŵń ƒŕàĝḿēńţś. Ũńćĥàńĝēď ćōńţēńţ ĩś ńōţ ĩńćĺũďēď ĩń ţĥĩś ďĩƒƒ.",

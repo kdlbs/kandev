@@ -41,7 +41,7 @@ func TestCompletedSessionResumePreservesConversation(t *testing.T) {
 		onStartCalled: &started,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(
 		t,
@@ -238,7 +238,7 @@ func TestCompletedSessionResumeRaces(t *testing.T) {
 		finishOnce:    &sync.Once{},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(
 		t,

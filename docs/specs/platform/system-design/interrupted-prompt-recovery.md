@@ -108,6 +108,14 @@ its payload; previously terminal outcomes remain unchanged. A refreshed capabili
 before SQL block resolution and parked queue release. Legacy peers retain ordinary compatibility;
 authentication and storage errors fail closed.
 
+A transport notice marked `recovered` can outlive its execution after a later readiness
+failure. Explicit Resume can reuse the current ready native execution and restore that
+notice through the same authenticated retirement transaction. The current execution,
+native identity, full submission inventory, and cursor checks remain mandatory. Preserve
+the notice's historical execution ID, submission, payload, and unknown outcome; update
+its recovery phase, revision, and timestamp through the existing transaction. State-only
+Retry retains its exact-execution guard.
+
 On backend adoption, unknown SQL history is excluded from active work only when authenticated
 full peer records retain matching retirement, uncertain state, session/incarnation, generation,
 and payload hash. Missing or conflicting proof remains blocked. No recovery summary field,

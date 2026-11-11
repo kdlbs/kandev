@@ -1,6 +1,6 @@
 # ADR-2026-08-22: Let Users Configure Continuity, Not MCP Authority
 
-**Status:** accepted (amended by ADR-2026-09-02-automation-self-archive)
+**Status:** accepted (amended by ADR-2026-09-02-automation-self-archive and ADR-2026-11-04-automation-mcp-selection)
 **Date:** 2026-08-22
 **Area:** backend, agentctl, frontend, protocol, security, workflow
 **Related ADRs:** [MCP tool profiles](2026-08-08-mcp-tool-profiles.md), [task-owned worktree lifetime](2026-08-08-task-owned-worktree-lifetime.md), [live agent permission authority](2026-08-11-live-agent-permission-authority.md)
@@ -99,6 +99,12 @@ actions such as messaging and restarting task sessions.
 16. Portable automation export includes `continuation_policy`. It excludes the fixed MCP profile,
     continuation task pointers, and run bindings because they are product/runtime behavior rather
     than per-automation portable configuration.
+
+## Later decision
+
+[Explicit automation MCP selection](2026-11-04-automation-mcp-selection.md) accepts human-selected native packages, including Configuration.
+It supersedes the rejection of human-selected per-automation packages, the fixed catalog, and the related Configuration, authoring, Rich Output, and Diagnostics exclusions in decision 8.
+The remaining continuity and coordination decisions continue to apply.
 
 ## Consequences
 

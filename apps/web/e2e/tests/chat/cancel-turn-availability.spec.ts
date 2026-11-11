@@ -48,13 +48,22 @@ test.describe.serial("Cancel turn availability", () => {
     ).toBeVisible();
 
     await waitForActiveSessionSupportsSteering(testPage);
-    await expect(session.activeChat().getByTestId("cancel-agent-button")).toBeVisible();
-    await expect(session.activeChat().getByTestId("submit-message-button")).toBeVisible();
+    const activeSessionChat = testPage
+      .locator(`[data-testid="session-chat"][data-session-id="${sessionId}"]:visible`)
+      .first();
+    await expect(activeSessionChat.getByTestId("cancel-agent-button")).toBeVisible();
+    await expect(activeSessionChat.getByTestId("submit-message-button")).toBeVisible();
 
-    const cancelButton = session.activeChat().getByTestId("cancel-agent-button");
+    const cancelButton = activeSessionChat.getByTestId("cancel-agent-button");
     cancellation.arm(sessionId);
     try {
       await cancelButton.click();
+      await expect
+        .poll(cancellation.pendingObserved, {
+          message: "the WebSocket barrier should receive the pending cancellation event",
+          timeout: 15_000,
+        })
+        .toBe(true);
       await waitForActiveSessionCancellationPending(testPage, true, sessionId);
       await expect(cancelButton).toBeDisabled();
     } finally {
@@ -63,7 +72,7 @@ test.describe.serial("Cancel turn availability", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
     await waitForActiveSessionCancellationPending(testPage, false, sessionId);
     await waitForActiveSessionForegroundActivity(testPage, null, sessionId);
-    await expect(session.activeChat().getByTestId("cancel-agent-button")).not.toBeVisible({
+    await expect(activeSessionChat.getByTestId("cancel-agent-button")).not.toBeVisible({
       timeout: 15_000,
     });
   });

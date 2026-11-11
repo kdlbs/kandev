@@ -183,12 +183,21 @@ export type UpdateTaskPayload = {
   resume?: boolean;
 };
 
+// `status`, `queued` and `workflow_step` are present only when a Done request
+// moved the task to its workflow's final step.
+export type UpdateTaskResponse = {
+  ok: boolean;
+  status?: string;
+  queued?: boolean;
+  workflow_step?: { id?: string; name?: string };
+};
+
 export function updateTask(
   taskId: string,
   payload: UpdateTaskPayload,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<{ ok: boolean }>(`${BASE}/tasks/${taskId}`, {
+  return fetchJson<UpdateTaskResponse>(`${BASE}/tasks/${taskId}`, {
     ...options,
     init: { method: "PATCH", body: JSON.stringify(payload), ...options?.init },
   });
@@ -381,6 +390,18 @@ export function createComment(
     ...options,
     init: { method: "POST", body: JSON.stringify(data), ...options?.init },
   });
+}
+
+/** Resolves a workspace-scoped task identifier (e.g. "KAN-11") to the task id. */
+export function resolveTaskIdentifier(
+  workspaceId: string,
+  identifier: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ id: string }>(
+    `${BASE}/workspaces/${workspaceId}/tasks/by-identifier/${encodeURIComponent(identifier)}`,
+    options,
+  );
 }
 
 export function searchTasks(

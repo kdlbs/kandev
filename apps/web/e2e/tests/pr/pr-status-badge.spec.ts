@@ -635,7 +635,7 @@ test.describe("PR status badge", () => {
     const sidebar = testPage.getByTestId("app-sidebar");
     const taskRow = sidebar.getByTestId("sidebar-task-item").filter({ hasText: task.title });
     const sidebarIcon = taskRow.getByTestId(`pr-task-icon-${task.id}`);
-    const approvalWarning = sidebarIcon.getByTestId("pr-workflow-approval-warning");
+    const approvalWarning = sidebarIcon.getByTestId("pr-ci-bubble-approval-required");
     await expect(approvalWarning).toBeVisible();
     await expect(sidebarIcon).toHaveAttribute("aria-label", /Awaiting maintainer approval/);
     const lightWarningColor = await approvalWarning.evaluate(
@@ -654,7 +654,7 @@ test.describe("PR status badge", () => {
       .getByTestId("sidebar-task-item")
       .filter({ hasText: task.title })
       .getByTestId(`pr-task-icon-${task.id}`);
-    const darkApprovalWarning = darkSidebarIcon.getByTestId("pr-workflow-approval-warning");
+    const darkApprovalWarning = darkSidebarIcon.getByTestId("pr-ci-bubble-approval-required");
     await expect(darkApprovalWarning).toBeVisible();
     const darkWarningColor = await darkApprovalWarning.evaluate(
       (element) => getComputedStyle(element).color,
@@ -698,7 +698,7 @@ test.describe("PR status badge", () => {
     const kanbanIcon = kanban
       .taskCardInColumn(task.title, inboxStep.id)
       .getByTestId(`pr-task-icon-${task.id}`);
-    await expect(kanbanIcon.getByTestId("pr-workflow-approval-warning")).toBeVisible();
+    await expect(kanbanIcon.getByTestId("pr-ci-bubble-approval-required")).toBeVisible();
 
     await testPage.goto(`/t/${task.id}`);
     let session = new SessionPage(testPage);
@@ -755,7 +755,7 @@ test.describe("PR status badge", () => {
       .getByTestId("sidebar-task-item")
       .filter({ hasText: task.title })
       .getByTestId(`pr-task-icon-${task.id}`);
-    await expect(clearedIcon.getByTestId("pr-workflow-approval-warning")).toHaveCount(0);
+    await expect(clearedIcon.getByTestId("pr-ci-bubble-approval-required")).toHaveCount(0);
   });
 
   /**
@@ -1173,5 +1173,6 @@ test.describe("PR status badge", () => {
     await expect(icon).toBeVisible({ timeout: 15_000 });
     await expect(icon).toHaveClass(/text-muted-foreground/);
     await expect(icon).not.toHaveClass(/text-red-500/);
+    await expect(icon.getByTestId("pr-ci-bubble-failed")).toBeVisible();
   });
 });

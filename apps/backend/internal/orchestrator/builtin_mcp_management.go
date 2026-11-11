@@ -61,11 +61,11 @@ func (s *Service) ReadBuiltinSessionMCP(ctx context.Context, sessionID string) (
 	if err != nil {
 		return nil, err
 	}
-	profile, err := s.executor.PrepareTaskSessionMCPProfile(ctx, task.ID, session, false)
-	if err != nil {
-		return nil, err
+	profile, desiredErr := s.executor.PrepareTaskSessionMCPProfile(ctx, task.ID, session, false)
+	view := &mcpconfig.BuiltinSessionView{WorkspaceID: task.WorkspaceID, TaskID: task.ID, SessionID: sessionID, BindingState: builtinStateUnknown, WalkthroughAvailability: builtinStateUnknown}
+	if desiredErr == nil {
+		view.Desired = profile.BuiltinPackages
 	}
-	view := &mcpconfig.BuiltinSessionView{WorkspaceID: task.WorkspaceID, TaskID: task.ID, SessionID: sessionID, Desired: profile.BuiltinPackages, BindingState: builtinStateUnknown, WalkthroughAvailability: builtinStateUnknown}
 	if history, ok := runtime.LoadMCPAttachmentHistory(session.Metadata[models.SessionMetaKeyMCPAttachmentState]); ok && history.Current.TaskID == task.ID && history.Current.SessionID == sessionID {
 		view.History = &history
 	}

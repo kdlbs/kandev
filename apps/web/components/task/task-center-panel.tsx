@@ -99,6 +99,11 @@ function useLeftTabState(
     return () => window.removeEventListener("switch-to-changes-tab", handler);
   }, [hasChanges]);
   useEffect(() => {
+    const handler = () => setLeftTab("files");
+    window.addEventListener("switch-to-files-tab", handler);
+    return () => window.removeEventListener("switch-to-files-tab", handler);
+  }, []);
+  useEffect(() => {
     if (leftTab.startsWith("file:")) onActiveFileChange?.(leftTab.replace("file:", ""));
     else onActiveFileChange?.(null);
   }, [leftTab, onActiveFileChange]);

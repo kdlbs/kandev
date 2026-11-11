@@ -163,7 +163,7 @@ func TestSendQueuedNowSerializesFIFOPredispatchAdmission(t *testing.T) {
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.messageQueue.SetAutoMergeEnabled(false)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 	turns := &armedTurnCaptureService{
 		repoTurnService: &repoTurnService{repo: repo},

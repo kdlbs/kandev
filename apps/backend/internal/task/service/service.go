@@ -410,6 +410,7 @@ var (
 	ErrActiveTaskSessions        = errors.New("active agent sessions exist")
 	ErrWIPLimitExceeded          = wfmodels.ErrWIPLimitExceeded
 	ErrInvalidRepositorySettings = errors.New("invalid repository settings")
+	ErrRepositoryReadOnly        = errors.New("repository workspace is read-only")
 	ErrInvalidExecutorConfig     = errors.New("invalid executor config")
 	ErrExecutorProfileInUse      = errors.New("executor profile is referenced by a retained environment")
 	// Workspace-source sentinels are the service boundary consumed by the HTTP
@@ -555,6 +556,10 @@ type Service struct {
 	cleanupActivity                 TaskResourceCleanupActivityGate
 	branchMaterializer              BranchMaterializer
 	workspaceSourceMaterializer     WorkspaceSourceMaterializer
+	workspaceSourceRescanner        WorkspaceSourceRescanner
+	nestedWorkspaceExclusioner      NestedWorkspaceExclusioner
+	worktreeObservationMu           sync.Mutex
+	worktreeObservations            *worktreeObservationWorker
 	workspaceSourceLocksMu          sync.Mutex
 	workspaceSourceLocks            map[string]*sync.Mutex
 	taskDeletePreviewMu             sync.Mutex
@@ -602,6 +607,7 @@ type Service struct {
 	gitHubRepositoryOriginVerifier GitHubRepositoryOriginVerifier
 	repoCloneLocation              RepoCloneLocation
 	blockers                       BlockerRepository
+	relations                      RelationRepository
 	comments                       CommentRepository
 	taskStateActivity              TaskStateActivityLogger
 	secretStore                    secrets.SecretStore
@@ -626,6 +632,9 @@ type Service struct {
 	// task.updated events. Optional — unset omits the field's live update path
 	// and task.updated payloads read false/0/0, matching D9's defaults.
 	taskParkedProvider TaskParkedProvider
+	// officeApprovalGuard blocks a human move from completing an Office
+	// task with pending approvers. Optional; see SetOfficeApprovalGuard.
+	officeApprovalGuard OfficeApprovalGuard
 	// taskActivityMu guards lastTaskActivity, the last task-level activity aggregate
 	// emitted per task. It bounds live-propagation task.updated emissions to an
 	// actual change of the aggregated three-state value.
@@ -913,6 +922,19 @@ func (s *Service) SetBranchMaterializer(m BranchMaterializer) {
 
 func (s *Service) SetWorkspaceSourceMaterializer(m WorkspaceSourceMaterializer) {
 	s.workspaceSourceMaterializer = m
+}
+
+// SetWorkspaceSourceRescanner wires live tracker updates for adoption and
+// detach. Optional — without it, attachment rows persist and the next session
+// launch builds the tracker graph from the inventory.
+func (s *Service) SetWorkspaceSourceRescanner(r WorkspaceSourceRescanner) {
+	s.workspaceSourceRescanner = r
+}
+
+// SetNestedWorkspaceExclusioner wires the managed Git exclude used when a
+// task root is nested inside another attached checkout.
+func (s *Service) SetNestedWorkspaceExclusioner(e NestedWorkspaceExclusioner) {
+	s.nestedWorkspaceExclusioner = e
 }
 
 // SetWorkspaceSourceProviderRefresher wires the best-effort live MCP provider

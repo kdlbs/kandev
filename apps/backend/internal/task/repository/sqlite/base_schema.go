@@ -1486,6 +1486,7 @@ const sessionWorktreeSchemaDDL = `
 		worktree_source_clone_path TEXT NOT NULL DEFAULT '',
 		worktree_source_common_dir TEXT NOT NULL DEFAULT '',
 		worktree_branch_compacted_at TIMESTAMP,
+		worktree_origin TEXT NOT NULL DEFAULT 'kandev',
 		position INTEGER DEFAULT 0,
 		error_message TEXT DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'active',
@@ -1499,6 +1500,14 @@ const sessionWorktreeSchemaDDL = `
 
 	CREATE INDEX IF NOT EXISTS idx_task_environment_repos_env_id ON task_environment_repos(task_environment_id);
 	CREATE INDEX IF NOT EXISTS idx_task_environment_repos_repository_id ON task_environment_repos(repository_id);
+
+	CREATE TABLE IF NOT EXISTS task_detached_worktrees (
+		task_id TEXT NOT NULL,
+		worktree_path TEXT NOT NULL,
+		detached_at TIMESTAMP NOT NULL,
+		PRIMARY KEY (task_id, worktree_path),
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
 `
 
 func (r *Repository) initSessionWorktreeSchema() error {

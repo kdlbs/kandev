@@ -75,7 +75,7 @@ func TestPrepareWorkflowStepSessionSwitchesPassthroughProfile(t *testing.T) {
 		passthroughSessionID: session.ID,
 	}
 	log := testLogger()
-	exec := executor.NewExecutor(agentManager, repo, log, executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentManager, repo, log, executor.ExecutorConfig{}))
 	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentManager)
 	svc.logger = log
 	svc.executor = exec
@@ -162,7 +162,7 @@ func TestApplyEngineTransitionRejectsPassthroughTargetProfileBeforePersistingSte
 		passthroughSessionID: session.ID,
 	}
 	log := testLogger()
-	exec := executor.NewExecutor(agentManager, repo, log, executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentManager, repo, log, executor.ExecutorConfig{}))
 	// The custom forge host has no persisted provider_host identity, so
 	// preflightWorkflowStepCredentials rejects it before the transition is
 	// committed. The credential broker is not called on this failure path.

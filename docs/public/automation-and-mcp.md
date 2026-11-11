@@ -59,7 +59,9 @@ Task creation depends on the caller surface and the destination workspace:
 
 Office sessions do not receive an MCP task-creation tool. A direct backend call from an Office session is also denied. External MCP uses the same `create_task_kandev` contract for both workspace modes, subject to the client's authorization. The `workspace_mode` argument controls materialized workspace behavior, not Kanban or Office mode. `agent_profile_id` selects a launch profile and is not an Office assignee.
 
-The optional `workspace_mode` field advertises exactly two values: `inherit_parent` reuses the parent's materialized workspace/worktree and requires `parent_id`; `new_workspace` requests a separate workspace/worktree. Omitting the field for a subtask selects `inherit_parent`. There is no unconditional schema default for top-level tasks.
+The optional `workspace_mode` field advertises exactly two values: `inherit_parent` normally reuses the parent's materialized workspace/worktree and requires `parent_id`; `new_workspace` requests a separate workspace/worktree. Omitting the field for a subtask selects `inherit_parent`. There is no unconditional schema default for top-level tasks.
+
+If a new launch for an inherited child selects a different non-Kubernetes executor from the parent's materialized environment, Kandev creates a separate workspace owned by the child. Uncommitted parent changes are not copied into that workspace. A session that is still bound to the inherited environment must resume with its original executor. Kubernetes environments remain task-owned and cannot be shared across tasks.
 
 For a Kubernetes parent, use `workspace_mode: "new_workspace"` when creating a child that will run. Kubernetes Pods belong to one task, so a child cannot attach to the parent's environment.
 
@@ -202,6 +204,13 @@ A retry keeps one task, session, turn and submission identity through queued sta
 
 The scheduler checks every 30 seconds and computes each expression's next calendar fire time in its configured timezone. A schedule created part-way through the day first fires at its next scheduled occurrence after creation (not immediately). A schedule missed while the backend was stopped fires once on the next check rather than once per missed occurrence.
 
+Editing a saved schedule starts the new definition at its first occurrence after the successful save. Earlier occurrences of the replacement expression do not run, so changing a weekday or time does not replay history.
+
+- **Replacement:** a changed cron expression or effective timezone starts a new schedule boundary.
+- **Not a replacement:** JSON formatting, expression whitespace, an empty timezone versus `UTC`, or a timezone field that an `@every` or `TZ=`/`CRON_TZ=` expression ignores. These saves keep the pending occurrence.
+
+Clearing the expression stops automatic runs. Entering a non-empty expression later starts from that later save.
+
 <DocsVideo
   webm="./media/feature-guides/scheduled-workflow-automation.webm"
   mp4="./media/feature-guides/scheduled-workflow-automation.mp4"
@@ -328,7 +337,24 @@ Native session continuation and provider-managed compaction remain authoritative
 
 ### Automation coordinator MCP
 
-Automation sessions receive one fixed, workspace-scoped coordinator MCP surface. The server resolves the trusted automation principal before dispatch and uses that principal for workspace, caller task, caller session, surface, and audit identity; a prompt or tool argument cannot forge those values. The catalog includes coordination and pending-question or permission actions needed by an automation, but excludes task deletion, configuration mutation, task-local authoring, provider PR/MR actions, diagnostics, arbitrary plugin tools, and arbitrary capability settings.
+Private automation sessions receive required, workspace-scoped Core tools for coordination and pending blockers. The backend binds the automation, workspace, task, and session identities. Tool arguments cannot replace them.
+
+### Choose MCP access
+
+1. Open **Settings > Workspaces > your workspace > Automations** and select an automation.
+2. Under **MCP access**, open a built-in package and choose **On** or **Off**. Use **Back to packages** to return to the list. Configuration, Rich Output, Walkthroughs, and Diagnostics are optional. Core stays required.
+3. Select additional **Workspace MCP servers** from that workspace's saved catalog. Repository and agent-profile inheritance remains additive.
+4. Use **Save changes**. Use **Reset** to remove unsaved edits.
+
+**Configuration grants mutation access** to authorized workflows, profiles, prompts, executors, and automations. The private run keeps its automation identity and workspace restrictions. Native Configuration tools cannot change package grants, automation MCP selections, plugin approvals, or profile MCP server access. Selected third-party servers use their own tools and credentials. The native dispatcher does not sandbox those servers.
+
+Private-run choices apply at the **next agent process start**. Saving does not restart a run. A new turn in a reused process keeps its accepted selection. A fresh process, including a retry or replacement, reads current choices. Run details distinguish desired packages, the current process binding, and observed tool catalogs. Unknown evidence stays Unknown.
+
+For **normal task** automations, MCP choices form a template for newly created tasks. Workspace task-package limits still apply. Reusing an existing task preserves that task's later customization. Managed conversations use their destination's tool policy.
+
+Existing automations keep their current tools until an explicit selection is saved. Portable exports omit access selections, so imports require a native configuration save. An older helper that cannot enforce explicit automation selection reports an upgrade error before starting.
+
+An unavailable definition remains visible for removal. Selecting a server does not create credentials or prove a connection. Confirmed catalog deletion leaves its automation reference unavailable until you remove it in the editor. See [Built-in MCP packages](builtin-mcp-packages.md) for package identities and application timing.
 
 ### Opt-in plugin tools
 
@@ -339,7 +365,7 @@ Access is bounded to the automation, workspace, plugin installation, and plugin 
 Discovery and every call re-read the current approval. Removed tools, disabled plugins, stale policy versions, and unreadable approval data fail closed. Plugin tools add no core or administrative MCP capability, and results stay in automation history: a hidden run never adds a task to Kanban or the sidebar without an explicit task-creation action.
 
 
-The automation's own hidden task and every session on it are invalid targets for messaging, stopping, spawning, and blocker discovery or resolution, and for every mutation except archiving. An automation can archive its own hidden task; that is its normal end-of-run completion signal, not a self-mutation. Foreign-workspace targets return the same not-found result as unknown targets. The archive exemption covers only the automation's own hidden task; sessions on it remain invalid targets. A task spawned on another allowed task receives that target task's normal MCP profile and never inherits the automation surface. Reused worktrees are not reset or rebased by coordinator actions.
+The automation's own hidden task and every session on it are invalid targets for messaging, stopping, spawning, and blocker discovery or resolution, and for coordination mutations except archiving. Selected authoring packages can write output and walkthroughs for the current hidden task. An automation can archive its own hidden task; that is its normal end-of-run completion signal, not a self-mutation. Foreign-workspace targets return the same not-found result as unknown targets. The archive exemption covers only the automation's own hidden task; sessions on it remain invalid targets. A task spawned on another allowed task receives that target task's normal MCP profile and never inherits the automation surface. Reused worktrees are not reset or rebased by coordinator actions.
 
 ## Export automations
 
@@ -1005,9 +1031,11 @@ After an accepted stop, Kandev attempts to move an unarchived, non-Office task f
 - The task must be repository-backed and have no active turn or tool call.
 - Exact normalized retries are idempotent. Contradictory duplicates, unsupported sources, or failed sources roll back the batch.
 
-`add_branch_to_task_kandev` is a Worktree-only compatibility path for adding one repository and branch during an active turn:
+`add_branch_to_task_kandev` adds one repository and branch during an active turn on host Worktree and Local executors:
 
 - It creates a sibling worktree, makes its parent the Files root, and rescans without restarting the agent or workspace processes.
+- Pass `worktree_path` to attach a linked Git worktree the agent already created inside the task workspace. Kandev validates the path, repository, and branch, attaches it in place, and never moves, recreates, or rewrites it. The response adds `adopted: true` and `already_attached: true` when an existing root is reused.
+- A `worktree_path` report on a Docker, SSH, Kubernetes, or Sprites executor is rejected with an actionable error. Detection never adopts paths outside the task workspace root, foreign repositories, submodules, detached `HEAD`, or a path the user removed from the task.
 - The response includes `worktree_path`, `task_workspace_path`, and `agent_cwd_changed: false`. Deferred pre-launch materialization omits both paths.
 - The running agent keeps its original working directory. Repository-relative chat links emitted before or after attachment therefore continue to open the original checkout under the new Files root. Explicit source prefixes such as `master/docs/guide.md` are preserved, and Kandev never searches sibling repositories for a duplicate filename.
 - The original repository stays a separate worktree, so Git does not report the sibling as embedded or untracked files.
@@ -1039,7 +1067,9 @@ The HTTP equivalent is `POST /api/v1/tasks/:id/workspace-sources`, with `{ "sour
 
 `step_complete_kandev` is registered and discoverable in every task-mode session, and in Office sessions per ADR 0015. Kandev includes its completion instruction, and acts on its signal, only on steps whose auto-advance action explicitly requires that signal: on Kanban boards this is opt-in per step, while office-default's `work` step ships with the requirement on. A user message arriving before transition can cancel that automatic move.
 
-If an agent resumes itself after background work finishes, its new output turn can signal completion for the workflow entry in which that turn started. An older turn stays tied to its original entry, including when the task leaves and returns to the same step.
+The tool result separates acceptance from movement. `accepted: true` with a `pending` outcome means the signal is durably recorded. It does not prove that a transition committed, that the task entered the workflow step named Review, or that a reviewer received the handoff. A committed result includes the exact `transition` ledger and destination. A duplicate returns `already_signaled` with the retained `signal_id`, `source`, `outcome`, `transition` when one exists, and a `current` snapshot of the task route.
+
+If an agent resumes itself after background work finishes, its new output turn can signal completion for the workflow entry in which that turn started. A later turn in the same entry can replace an unconsumed earlier signal with its own summary and handoff. An older turn stays tied to its original entry, including when the task leaves and returns to the same step. A native verification turn without another completion call leaves the accepted handoff unchanged.
 
 When the response says that the workflow step or entry changed, the calling turn is stale. A step-change error identifies the launch and current steps. Retrying the same stale turn cannot recover. End the turn and have the user resume the session, then complete the current step and call the tool from the fresh turn. A normal manual workflow move remains available to an operator after verifying the work and destination. This recovery path does not grant an agent automatic move authority.
 
@@ -1060,6 +1090,12 @@ Kandev transfers the task UUID atomically and preserves its sessions and active 
 Every attempt writes a redacted audit row. A successful receipt includes the operation ID, source and destination placement, committed task generation, step-transition ID, session census, preservation counts and digest, idempotency key, and policy. It never contains prompts, message bodies, secrets, or repository credentials. An exact retry by the bound actor and session returns the stored receipt after current task and destination-workspace access is confirmed; it does not depend on mutable workflow or lane configuration. Reusing the key for a changed request or actor returns a conflict. Destination-bound Office authorization is replay-only and cannot create a fresh transfer.
 
 Configuration access is derived from the calling session's stored purpose. Office CEO authority requires an enabled, active profile. Lane equivalence also checks session start/end policy, session target, completion on entry, and the unclassified fallback veto. An unmapped workspace-owned record blocks its task's transfer; empty tables and records for other tasks do not. After a denied or failed attempt, that caller must supply a fresh idempotency key.
+
+A busy PostgreSQL transfer reservation returns a conflict and leaves the task
+unchanged. This can happen while another task's related rows are being written.
+After that operation finishes, manually retry the same unchanged request and
+idempotency key. Kandev does not automatically retry this conflict. Denied or
+failed attempts still require a fresh key as described above.
 
 The database migration is additive. Rolling back the application binary leaves transfer receipts and audit rows intact for a later upgrade; do not drop the transfer ledger tables during an application rollback.
 
@@ -1134,6 +1170,13 @@ $KANDEV_CLI kandev task create \
   --project "$PROJECT_ID" \
   --assignee "$AGENT_ID"
 ```
+
+`task create` also accepts two relation flags:
+
+- `--blocked-by ID,ID` makes the new task wait for the listed tasks. Each one must be the run's own task, a task in the run's scope, or a task the run's task can read (the run task's ancestors, descendants, siblings, or blockers). Anything else is refused without revealing whether the task exists. Blockers can only be declared on the task being created.
+- `--workspace-mode new_workspace` gives the new task its own workspace and worktree. `inherit_parent` (valid only with `--parent`) shares the parent's. Omit the flag to keep the default: a subtask shares its parent's workspace.
+
+`--priority`, `--workspace-group-id`, `--default-child-workspace`, and `--default-child-ordering` are not available to Office runs.
 
 Project list and create operations are forced to the workspace in the validated Office run token; the agent cannot select another workspace in these commands. Office runs cannot create or administer workspaces. Create additional workspaces through Kandev's user-facing setup and settings surfaces.
 
@@ -1315,6 +1358,39 @@ at runtime instead of assuming that a domain's full schema is present in the
 tool definition. Existing lifecycle tools and compatibility MCP tools remain
 available where documented.
 
+Repository clone URLs use the same tools. Read the saved value with
+`get_settings_kandev`, then preview one replacement without writing:
+
+```json
+{
+  "target": {
+    "resource_type": "repository",
+    "resource_id": "repository-id",
+    "workspace_id": "workspace-id"
+  },
+  "changes": { "remote_url": "git@github.com:acme/widget.git" },
+  "options": { "validate_only": true }
+}
+```
+
+The result carries a `validation` object with the saved and effective URLs,
+provider identity, and `validation_scope`. Repeat the same call without
+`options`, or with `"validate_only": false`, to commit the change. A committed
+update republishes `settings.remote_url` and a `repository.updated` event. With
+`validate_only` set to `true`, the option accepts only a repository target with
+exactly one `remote_url` change. With `validate_only` set to `false`, ordinary
+repository settings updates and combined URL/settings or binding writes remain
+available. Unknown options, non-boolean values, mixed preview changes, and null
+or blank URLs are rejected without a write.
+
+Built-in GitHub, GitLab, and Azure DevOps providers verify the credential-free
+locator against the saved provider, host, namespace or project, and repository
+name. An active plugin provider must instead return its exact HTTPS clone URL
+and matching immutable descriptor. The preview is advisory: every update repeats
+validation. The repair changes registration data only. It does not rewrite an
+existing checkout or restart a task. See
+[Repair a registered clone URL](git-operations.md#repair-a-registered-clone-url).
+
 `export_workflow_kandev` takes `workflow_id` and returns one version 2
 `kandev_workflow` JSON document with explicit step completion booleans. It omits
 instance IDs and timestamps. Pass its JSON text unchanged as `document` to
@@ -1360,17 +1436,22 @@ of an existing, case-sensitive name and cannot rename it. Names allow up to 512
 UTF-8 bytes, content up to 1 MiB; surrounding whitespace is trimmed. Success
 returns the same saved-prompt fields as `get_shared_prompt_kandev`.
 
-**Built-in prompts cannot be changed by agents.** Existing custom prompts and
-prompts created in Settings default to human-only editing. An operator can edit a
-custom prompt in **Settings > Prompts**, enable **Allow agent edits**, and save.
-MCP-created prompts allow later agent edits by default; an operator can turn that
-off. MCP cannot change this permission, and generic `update_settings_kandev`
-prompt writes enforce the same protection.
+**Built-in prompts cannot be changed by agents.** Every custom prompt can be
+updated through the existing authorized MCP write tools, including prompts
+created in Settings and prompts that were previously marked as protected. The
+`allow_agent_edits` response field remains for compatibility: it is `true` for
+custom prompts and `false` for built-ins. It does not control a stored permission.
+Generic `update_settings_kandev` writes can change custom prompt names and
+content, but cannot change agent-edit eligibility.
 
-Apply shared prompt changes before changing workflow steps that inject them, then
-read back both the prompts and steps. Successful writes refresh open prompt
-settings pages and affect future `@name` expansions. They preserve unsaved editor
-drafts and do not rewrite instructions already captured by a running turn.
+Configuration assistants should create or update a shared prompt only when the
+operator explicitly requests or agrees to the change. The backend does not
+verify that request or agreement. Authorized prompt writes require
+`org.config.manage`. Read the saved prompt back after writing it. Apply requested
+shared prompt changes before changing workflow steps that inject them, then read
+back both the prompts and steps. Successful writes refresh open prompt settings
+pages and affect future `@name` expansions. They preserve unsaved editor drafts
+and do not rewrite instructions already captured by a running turn.
 There is no shared-prompt deletion tool.
 
 ### Answer a pending clarification question
@@ -1510,7 +1591,7 @@ workspace. Unknown and unauthorized task/session IDs return the same not-found r
 
 ## Troubleshooting
 
-- **No scheduled run:** confirm the cron expression is valid five-field or `@`-shorthand text and the automation/trigger is enabled; a schedule fires at its next occurrence after creation, not immediately.
+- **No scheduled run:** confirm the cron expression is valid five-field or `@`-shorthand text and the automation/trigger is enabled; a schedule fires at its next occurrence after creation or after its expression or effective timezone changes, not immediately.
 - **No GitHub push or CI runs:** connect a workspace GitHub App whose installation is subscribed to `push`/`check_run` events, reinstall a pre-existing App so it receives them, and select explicit repositories (an empty repository list is not evaluated).
 - **Scheduled run happened as well as a PR run:** clear the schedule expression. The two stored triggers fire independently.
 - **No GitHub PR runs:** connect GitHub and select explicit repositories; **All repos** currently evaluates none.

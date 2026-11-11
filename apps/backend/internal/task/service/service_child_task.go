@@ -28,6 +28,13 @@ type ChildTaskSpec struct {
 	// server-side from a run record; nil otherwise. Forwarded verbatim to
 	// CreateTaskRequest.OfficeCarrierMetadata.
 	OfficeCarrierMetadata map[string]interface{}
+	// BlockedBy names the tasks the new child depends on. Each edge goes
+	// through the single dependency validator; nil records none.
+	BlockedBy []string
+	// WorkspaceMode is an explicit workspace mode for the new child. Empty
+	// keeps inherit_parent; a parent's default_child_workspace is not
+	// consulted on this path.
+	WorkspaceMode string
 }
 
 // CreateChildTask creates a new task whose parent_id is parent.ID. The
@@ -58,6 +65,10 @@ func (s *Service) CreateChildTask(
 	if assignee == "" {
 		assignee = parent.AssigneeAgentProfileID
 	}
+	workspaceMode := spec.WorkspaceMode
+	if workspaceMode == "" {
+		workspaceMode = workspaceModeInheritParent
+	}
 
 	req := &CreateTaskRequest{ //nolint:exhaustruct
 		WorkspaceID:            parent.WorkspaceID,
@@ -69,9 +80,10 @@ func (s *Service) CreateChildTask(
 		AssigneeAgentProfileID: assignee,
 		Origin:                 models.TaskOriginAgentCreated,
 		ProjectID:              parent.ProjectID,
-		WorkspacePolicy:        &WorkspacePolicy{Mode: workspaceModeInheritParent},
+		WorkspacePolicy:        &WorkspacePolicy{Mode: workspaceMode},
 		Metadata:               spec.Metadata,
 		OfficeCarrierMetadata:  spec.OfficeCarrierMetadata,
+		BlockedBy:              spec.BlockedBy,
 	}
 	result, err := s.CreateTask(ctx, req)
 	if err != nil {

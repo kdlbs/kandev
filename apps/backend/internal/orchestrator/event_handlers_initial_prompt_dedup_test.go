@@ -556,7 +556,7 @@ func newInitialPromptDedupFixture(t *testing.T, prompted, passthrough bool) init
 	}
 	messages := &mockMessageCreator{}
 	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agent)
-	svc.executor = executor.NewExecutor(agent, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agent, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = messages
 
 	return initialPromptDedupFixture{

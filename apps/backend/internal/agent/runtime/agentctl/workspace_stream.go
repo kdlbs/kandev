@@ -14,17 +14,19 @@ import (
 
 // WorkspaceStreamCallbacks defines callbacks for workspace stream events
 type WorkspaceStreamCallbacks struct {
-	OnShellOutput   func(data string)
-	OnShellExit     func(code int)
-	OnGitStatus     func(update *GitStatusUpdate)
-	OnGitCommit     func(notification *GitCommitNotification)
-	OnGitReset      func(notification *GitResetNotification)
-	OnBranchSwitch  func(notification *GitBranchSwitchNotification)
-	OnFileChange    func(notification *FileChangeNotification)
-	OnProcessOutput func(output *types.ProcessOutput)
-	OnProcessStatus func(status *types.ProcessStatusUpdate)
-	OnConnected     func()
-	OnError         func(err string)
+	OnShellOutput  func(data string)
+	OnShellExit    func(code int)
+	OnGitStatus    func(update *GitStatusUpdate)
+	OnGitCommit    func(notification *GitCommitNotification)
+	OnGitReset     func(notification *GitResetNotification)
+	OnBranchSwitch func(notification *GitBranchSwitchNotification)
+	OnFileChange   func(notification *FileChangeNotification)
+	// OnWorktreeInventory receives change-only linked-worktree snapshots.
+	OnWorktreeInventory func(inventory *WorktreeInventory)
+	OnProcessOutput     func(output *types.ProcessOutput)
+	OnProcessStatus     func(status *types.ProcessStatusUpdate)
+	OnConnected         func()
+	OnError             func(err string)
 }
 
 // WorkspaceStream represents an active workspace stream connection
@@ -122,14 +124,15 @@ func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamC
 // workspaceTracedTypes contains message types that are low-volume and worth tracing.
 // High-volume types (shell_output, process_output, shell_input, ping, pong) are excluded.
 var workspaceTracedTypes = map[types.WorkspaceMessageType]bool{
-	types.WorkspaceMessageTypeGitStatus:     true,
-	types.WorkspaceMessageTypeGitCommit:     true,
-	types.WorkspaceMessageTypeGitReset:      true,
-	types.WorkspaceMessageTypeBranchSwitch:  true,
-	types.WorkspaceMessageTypeFileChange:    true,
-	types.WorkspaceMessageTypeProcessStatus: true,
-	types.WorkspaceMessageTypeConnected:     true,
-	types.WorkspaceMessageTypeError:         true,
+	types.WorkspaceMessageTypeGitStatus:         true,
+	types.WorkspaceMessageTypeGitCommit:         true,
+	types.WorkspaceMessageTypeGitReset:          true,
+	types.WorkspaceMessageTypeBranchSwitch:      true,
+	types.WorkspaceMessageTypeFileChange:        true,
+	types.WorkspaceMessageTypeWorktreeInventory: true,
+	types.WorkspaceMessageTypeProcessStatus:     true,
+	types.WorkspaceMessageTypeConnected:         true,
+	types.WorkspaceMessageTypeError:             true,
 }
 
 // readWorkspaceStream is the read loop for the workspace WebSocket stream.

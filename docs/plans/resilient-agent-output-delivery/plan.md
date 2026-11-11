@@ -246,6 +246,10 @@ The implementation is committed and published for review; focused unit, race, de
 
 ## Delivery boundary
 
+The [delivery storage recovery package](../delivery-storage-recovery/plan.md) adds post-turn health refresh and exact settled-state convergence.
+It preserves this package's completed status and existing terminal, uncertainty, native identity, and admission boundaries.
+Its tests and results are separate from the historical verification recorded here.
+
 All three work orders are complete in this package pull request.
 After acceptance, promote the bounded-tool pair and new failure design.
 The broader durable-delivery requirement and companion packages retain their independent maturity gates.

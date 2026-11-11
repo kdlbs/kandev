@@ -164,6 +164,18 @@ export function isRuntimeStorageStale(
 }
 
 /**
+ * Pressure freshness is unknown when an older backend omits its independent
+ * receipt. Unknown never becomes a fresh claim, even when capacity is current.
+ */
+export function isRuntimeStoragePressureStale(
+  ageSeconds: number | null | undefined,
+  elapsedMs: number,
+): boolean {
+  if (ageSeconds === undefined || ageSeconds === null) return true;
+  return isRuntimeStorageStale(ageSeconds, elapsedMs);
+}
+
+/**
  * A newer observation from the same backend epoch wins. A newer epoch always
  * wins so a backend restart is not ignored by an old client revision.
  */
@@ -253,6 +265,7 @@ function readRuntimeStorageOptionalFields(
       ? record.executor_label.trim().slice(0, 64)
       : undefined;
   const observedAt = readStrictTimestamp(record.observed_at);
+  const pressureObservedAt = readStrictTimestamp(record.pressure_observed_at);
   const deliveryState =
     typeof record.delivery_state === "string" ? record.delivery_state.slice(0, 64) : undefined;
   const failure = readRuntimeStorageFailure(record.failure_storage);
@@ -263,6 +276,7 @@ function readRuntimeStorageOptionalFields(
       : {}),
     ...(label ? { executor_label: label } : {}),
     ...(observedAt ? { observed_at: observedAt } : {}),
+    ...(pressureObservedAt ? { pressure_observed_at: pressureObservedAt } : {}),
     ...(record.write_pressure === true ? { write_pressure: true } : {}),
     ...(record.producer_paused === true ? { producer_paused: true } : {}),
     ...(deliveryState ? { delivery_state: deliveryState } : {}),
@@ -277,9 +291,11 @@ function readRuntimeStorageMeasurements(
   const totalBytes = optionalSafeInteger(record.total_bytes);
   const availableBytes = optionalSafeInteger(record.available_bytes);
   const ageSeconds = optionalSafeInteger(record.age_seconds);
+  const pressureAgeSeconds = optionalSafeInteger(record.pressure_age_seconds);
   if (totalBytes !== undefined) measurements.total_bytes = totalBytes;
   if (availableBytes !== undefined) measurements.available_bytes = availableBytes;
   if (ageSeconds !== undefined) measurements.age_seconds = ageSeconds;
+  if (pressureAgeSeconds !== undefined) measurements.pressure_age_seconds = pressureAgeSeconds;
   return measurements;
 }
 
@@ -287,17 +303,34 @@ function readRuntimeStorageMeasurements(
  * Merge runtime-only storage state at the shared session boundary. Incoming
  * snapshots with an older epoch or revision never replace a newer live update.
  */
+function runtimeStorageSnapshotIdentity(health: RuntimeStorageHealth): string {
+  return `${health.epoch}:${health.revision}:${health.pressure_observed_at ?? ""}:${
+    health.pressure_age_seconds ?? ""
+  }`;
+}
+
 export function mergeRuntimeStorageHealth(
   existing: RuntimeStorageHealth | null | undefined,
   incoming: RuntimeStorageHealth | null | undefined,
 ): RuntimeStorageHealth | undefined {
   if (incoming === undefined) return existing ?? undefined;
   if (incoming === null) return undefined;
+  const priorReceivedAt = existing?.client_received_at_ms;
   const next = normalizeRuntimeStorageHealth(incoming);
   const prior = existing ? normalizeRuntimeStorageHealth(existing) : null;
+  if (prior && priorReceivedAt !== undefined) prior.client_received_at_ms = priorReceivedAt;
   if (!next) return prior ?? existing ?? undefined;
-  if (!prior) return next;
-  return shouldAcceptRuntimeStorageHealth(prior, next) ? next : prior;
+  if (!prior) {
+    next.client_received_at_ms = Date.now();
+    return next;
+  }
+  if (!shouldAcceptRuntimeStorageHealth(prior, next)) return prior;
+  next.client_received_at_ms =
+    runtimeStorageSnapshotIdentity(prior) === runtimeStorageSnapshotIdentity(next) &&
+    prior.client_received_at_ms !== undefined
+      ? prior.client_received_at_ms
+      : Date.now();
+  return next;
 }
 
 export function formatStorageUsage(value: number | null): string | null {

@@ -232,9 +232,12 @@ type Automation struct {
 	// PluginTools is the exact plugin tool approval saved by the native
 	// automation editor. It is omitted from portable exports and never copied
 	// to tasks, runs, or retry snapshots.
-	PluginTools        []plugintools.Selection `json:"plugin_tools" db:"-"`
-	PluginToolsJSON    string                  `json:"-" db:"plugin_tools"`
-	AutomationRevision int64                   `json:"-" db:"automation_revision"`
+	PluginTools          []plugintools.Selection `json:"plugin_tools" db:"-"`
+	MCPSelection         *MCPSelection           `json:"mcp_selection" db:"-"`
+	MCPSelectionJSON     string                  `json:"-" db:"mcp_selection"`
+	MCPSelectionRevision int64                   `json:"mcp_selection_revision" db:"mcp_selection_revision"`
+	PluginToolsJSON      string                  `json:"-" db:"plugin_tools"`
+	AutomationRevision   int64                   `json:"-" db:"automation_revision"`
 	// ContinuationTaskID is runtime state. It is intentionally omitted from
 	// the public automation JSON because the saved task is not portable
 	// configuration and may be deleted or replaced by the server.
@@ -613,6 +616,7 @@ type TaskOriginLookup interface {
 
 // CreateAutomationRequest is the payload for creating an automation.
 type CreateAutomationRequest struct {
+	MCPSelection       *MCPSelection                   `json:"mcp_selection,omitempty"`
 	ID                 string                          `json:"id,omitempty"`
 	WorkspaceID        string                          `json:"workspace_id"`
 	Name               string                          `json:"name"`
@@ -645,12 +649,16 @@ type CreateTriggerSpec struct {
 
 // UpdateAutomationRequest is the payload for updating an automation.
 type UpdateAutomationRequest struct {
-	Name              *string `json:"name,omitempty"`
-	Description       *string `json:"description,omitempty"`
-	WorkflowID        *string `json:"workflow_id,omitempty"`
-	WorkflowStepID    *string `json:"workflow_step_id,omitempty"`
-	AgentProfileID    *string `json:"agent_profile_id,omitempty"`
-	ExecutorProfileID *string `json:"executor_profile_id,omitempty"`
+	validatedTaskMode *TaskMode
+
+	MCPSelection                 *MCPSelection `json:"mcp_selection,omitempty"`
+	ExpectedMCPSelectionRevision *int64        `json:"expected_mcp_selection_revision,omitempty"`
+	Name                         *string       `json:"name,omitempty"`
+	Description                  *string       `json:"description,omitempty"`
+	WorkflowID                   *string       `json:"workflow_id,omitempty"`
+	WorkflowStepID               *string       `json:"workflow_step_id,omitempty"`
+	AgentProfileID               *string       `json:"agent_profile_id,omitempty"`
+	ExecutorProfileID            *string       `json:"executor_profile_id,omitempty"`
 	// Repositories replaces the exact repository/base-branch list when non-nil.
 	Repositories []AutomationRepository `json:"repositories,omitempty"`
 	// RepositoryIDs replaces the automation's repository list when non-nil.

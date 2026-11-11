@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentruntime"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -107,6 +108,7 @@ func newPassthroughMCPTestManager(t *testing.T, agentName string) (*Manager, *Ag
 		AgentProfileID: "profile-1",
 		WorkspacePath:  t.TempDir(),
 		ExecutorType:   "local",
+		RuntimeName:    agentruntime.RuntimeStandalone,
 		metadata: map[string]interface{}{
 			"standalone_port": 45678,
 		},

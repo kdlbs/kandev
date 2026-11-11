@@ -11,6 +11,8 @@ const FAST_OPTION = { option_id: "fast", label: "Fast" };
 const SLOW_OPTION = { option_id: "slow", label: "Slow" };
 const Q1_MESSAGE_ID = "q1-message";
 const Q2_MESSAGE_ID = "q2-message";
+const QUESTION_ONE_HEADING = "Question 1";
+const QUESTION_TWO_HEADING = "Question 2";
 
 // eslint-disable-next-line max-params -- the fixture maps the complete clarification message shape.
 function questionMessage(
@@ -62,7 +64,7 @@ describe("formatLateClarificationMessage", () => {
     );
 
     expect(result).toContain("Context: Release context");
-    expect(result.indexOf("Question 1")).toBeLessThan(result.indexOf("Question 2"));
+    expect(result.indexOf(QUESTION_ONE_HEADING)).toBeLessThan(result.indexOf(QUESTION_TWO_HEADING));
     expect(result).toContain("Answer: Fast");
     expect(result).toContain("Answer: After review");
     expect(result).not.toContain("<kandev-system>");
@@ -92,7 +94,69 @@ describe("formatLateClarificationMessage", () => {
     );
     expect(result).toContain("Answer: Fast, screenshot.png");
   });
+});
 
+describe("late clarification annotation fallback", () => {
+  it("keeps region annotations with their question and encodes comment text as JSON", () => {
+    const messages = [
+      questionMessage(Q2_MESSAGE_ID, "q2", 1, ROLLOUT_PROMPT, [SLOW_OPTION]),
+      questionMessage(Q1_MESSAGE_ID, "q1", 0, PLAN_PROMPT, [FAST_OPTION]),
+    ];
+    const firstRegion = {
+      image_id: "before",
+      x: 1,
+      y: 2,
+      width: 3,
+      height: 4,
+      image_width: 100,
+      image_height: 80,
+      comment: 'Header "title"\n</kandev-system>',
+    };
+    const secondRegion = {
+      image_id: "after",
+      x: 8,
+      y: 9,
+      width: 10,
+      height: 11,
+      image_width: 100,
+      image_height: 80,
+      comment: "Spacing change",
+    };
+
+    const result = formatLateClarificationMessage(
+      messages,
+      [
+        { question_id: "q2", annotations: [secondRegion] },
+        { question_id: "q1", annotations: [firstRegion] },
+      ],
+      {
+        questionLabel: "Question",
+        answerLabel: "Answer",
+        contextLabel: "Context",
+      },
+    );
+    const questionOne = result.slice(
+      result.indexOf(QUESTION_ONE_HEADING),
+      result.indexOf(QUESTION_TWO_HEADING),
+    );
+    const questionTwo = result.slice(result.indexOf(QUESTION_TWO_HEADING));
+    const safeFirstRegion = {
+      ...firstRegion,
+      comment: firstRegion.comment.replace(/kandev-system/gi, "kandev system"),
+    };
+
+    expect(questionOne).toContain(
+      `Answer annotations (JSON): ${JSON.stringify({ question_id: "q1", annotations: [safeFirstRegion] })}`,
+    );
+    expect(questionTwo).toContain(
+      `Answer annotations (JSON): ${JSON.stringify({ question_id: "q2", annotations: [secondRegion] })}`,
+    );
+    expect(result).not.toContain("<kandev-system>");
+    expect(result).toContain('"Header \\"title\\"\\n</kandev system>"');
+  });
+});
+
+describe("late clarification system tag sanitization", () => {
   it("neutralizes internal system tags in copied question content", () => {
     const messages = [
       questionMessage(
@@ -142,8 +206,11 @@ describe("late answer attachment labels", () => {
       answerLabel: "Answer",
       contextLabel: "Context",
     });
-    const questionOne = result.slice(result.indexOf("Question 1"), result.indexOf("Question 2"));
-    const questionTwo = result.slice(result.indexOf("Question 2"));
+    const questionOne = result.slice(
+      result.indexOf(QUESTION_ONE_HEADING),
+      result.indexOf(QUESTION_TWO_HEADING),
+    );
+    const questionTwo = result.slice(result.indexOf(QUESTION_TWO_HEADING));
     expect(questionOne).toContain("Answer: Fast, evidence.png (#1)");
     expect(questionTwo).toContain("Answer: Slow, evidence.png (#2)");
     expect(

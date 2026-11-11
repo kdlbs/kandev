@@ -1,4 +1,4 @@
-import { type Page } from "@playwright/test";
+import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
@@ -32,6 +32,13 @@ type E2EStoreWindow = Window & {
     };
   };
 };
+
+function panelFillsCurrentHost(container: Locator): Promise<boolean> {
+  return container.evaluate((element) => {
+    const hostHeight = Number(element.getAttribute("data-host-max-height"));
+    return Math.abs(element.getBoundingClientRect().height - hostHeight) <= 1;
+  });
+}
 
 /**
  * Mobile parity for the multiline custom clarification answer. On a coarse-pointer
@@ -760,7 +767,6 @@ test.describe("Mobile clarification multiline answer", () => {
     const input = session.clarificationInput();
     await expect(container).toBeVisible({ timeout: 30_000 });
     await input.fill("Phone draft remains here.");
-    const phoneHost = Number(await container.getAttribute("data-host-max-height"));
     const sizeToggle = container.getByTestId("clarification-panel-size-toggle");
     await expect(sizeToggle).toHaveCount(1);
     await expect(sizeToggle).toHaveAttribute("aria-label", "Expand");
@@ -770,30 +776,21 @@ test.describe("Mobile clarification multiline answer", () => {
     expect(phoneBox.width).toBeGreaterThanOrEqual(44);
     await expect(sizeToggle).toBeEnabled();
     await sizeToggle.tap();
-    await expect(container).toHaveCSS("height", `${phoneHost}px`);
+    await expect.poll(() => panelFillsCurrentHost(container)).toBe(true);
     await expect(sizeToggle).toHaveAttribute("aria-label", "Restore");
 
     await testPage.setViewportSize({ width: 900, height: 900 });
     await expect.poll(() => container.evaluate((el) => (el as HTMLElement).style.height)).toBe("");
     await expect(input).toHaveValue("Phone draft remains here.");
     await input.fill("Desktop draft remains here.");
-    const desktopHost = Number(await container.getAttribute("data-host-max-height"));
     await expect(sizeToggle).toHaveAttribute("aria-label", "Expand");
     await expect(sizeToggle).toBeEnabled();
     await sizeToggle.click();
-    await expect(container).toHaveCSS("height", `${desktopHost}px`);
+    await expect.poll(() => panelFillsCurrentHost(container)).toBe(true);
     await expect(sizeToggle).toHaveAttribute("aria-label", "Restore");
 
     await testPage.setViewportSize({ width: 393, height: 852 });
-    await expect
-      .poll(() =>
-        container.evaluate((element, desiredHeight) => {
-          const hostHeight = Number(element.getAttribute("data-host-max-height"));
-          const effectiveHeight = Number.parseFloat(getComputedStyle(element).height);
-          return Math.abs(effectiveHeight - Math.min(desiredHeight, hostHeight)) <= 1;
-        }, phoneHost),
-      )
-      .toBe(true);
+    await expect.poll(() => panelFillsCurrentHost(container)).toBe(true);
     await expect(input).toHaveValue("Desktop draft remains here.");
     await expect(sizeToggle).toHaveAttribute("aria-label", "Restore");
     await sizeToggle.tap();
@@ -801,7 +798,7 @@ test.describe("Mobile clarification multiline answer", () => {
     await expect(sizeToggle).toHaveAttribute("aria-label", "Expand");
 
     await testPage.setViewportSize({ width: 900, height: 900 });
-    await expect(container).toHaveCSS("height", `${desktopHost}px`);
+    await expect.poll(() => panelFillsCurrentHost(container)).toBe(true);
     await expect(input).toHaveValue("Desktop draft remains here.");
     await testPage.setViewportSize({ width: 393, height: 500 });
     await expect(sizeToggle).toBeVisible();

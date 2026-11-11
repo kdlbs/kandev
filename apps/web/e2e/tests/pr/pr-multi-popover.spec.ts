@@ -239,7 +239,8 @@ test.describe("Multi-PR CI popover", () => {
     const badge = session.prTopbarButton();
     await expect(badge).toHaveAttribute("data-pr-count", "2");
     await expect(badge.getByTestId("pr-merge-conflict-warning")).toBeVisible();
-    await expect(badge.locator("svg")).toHaveCount(3);
+    await expect(badge.getByTestId("pr-ci-bubble-failed")).toBeVisible();
+    await expect(badge.locator("svg")).toHaveCount(4);
 
     await badge.click();
     const conflicted = testPage.getByTestId(`pr-topbar-menu-item-${OWNER}-web-42`);

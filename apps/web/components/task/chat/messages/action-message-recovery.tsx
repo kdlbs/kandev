@@ -66,11 +66,14 @@ export function addHistoryContinuationChoice(
   enabled: boolean,
   onContinueFromHistory: () => void,
   label: string,
+  options?: { disclosure?: string; disabled?: boolean },
 ) {
   if (!enabled || choices.some((choice) => choice.kind === "continue_from_history")) return;
   choices.push({
     kind: "continue_from_history",
     label,
+    disclosure: options?.disclosure,
+    disabled: options?.disabled,
     testId: "recovery-continue-from-history-button",
     onClick: onContinueFromHistory,
   });

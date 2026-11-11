@@ -210,6 +210,43 @@ describe("buildRecoveryCardModel", () => {
   });
 });
 
+it("lets a successful manual restore supersede an earlier automatic failure", () => {
+  const model = buildRecoveryCardModel({
+    error: error([
+      {
+        operation: "resume",
+        code: "model_unavailable",
+        reason: "requested_not_advertised",
+        requested_model: "unlisted-model",
+      } as NonNullable<TaskStatusSummaryActiveError["causes"]>[number],
+    ]),
+    automaticRecovery: {
+      resumptionState: "error",
+      error: "Resume and workspace restore failed",
+      notice: null,
+      recoveryFailure: {
+        outcome: "recovery_failed",
+        resumeError: "resume failed",
+        restoreError: "workspace restore failed",
+      },
+      resumeSession: async () => false,
+    },
+    manualFailure: null,
+    manualError: null,
+    recoveryNotice: "Workspace restored in read-only mode",
+    recoveryNoticeKind: "workspace_read_only",
+    translate,
+    agentDisplayName: "Auggie",
+  });
+
+  expect(model).toMatchObject({
+    displayNotice: "Workspace restored in read-only mode",
+    hasRecoveryFailure: false,
+    isReadOnly: true,
+    workspaceStatus: "task:sessionRecoveryWorkspaceReadOnly",
+  });
+});
+
 it("uses the model actually attempted when its application failed", () => {
   const translateAttempt = ((key: string, options?: { model?: string }) =>
     `${key}:${options?.model ?? ""}`) as unknown as TFunction;

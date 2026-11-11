@@ -17,6 +17,21 @@ func (m *Manager) beginManagedStartupGeneration() uint64 {
 	m.startupGeneration++
 	m.startupEvidence = nil
 	m.startupEvidenceDone = make(chan struct{})
+	m.startupRuntime = managedRuntimeStartupSnapshot{}
+	if m.cfg != nil {
+		m.startupRuntime = managedRuntimeStartupSnapshot{
+			AgentID:  m.cfg.AgentType,
+			Command:  append([]string(nil), m.managedRuntimeCommand...),
+			Env:      append([]string(nil), m.cfg.AgentEnv...),
+			StripEnv: append([]string(nil), m.cfg.StripEnv...),
+			WorkDir:  m.cfg.WorkDir,
+			Wrapped:  !m.cfg.LaunchWrapper.IsZero() || m.cfg.LaunchWrapperRequired,
+			Valid:    true,
+		}
+		if len(m.startupRuntime.Command) == 0 {
+			m.startupRuntime.Command = append([]string(nil), m.cfg.AgentArgs...)
+		}
+	}
 	return m.startupGeneration
 }
 
@@ -92,7 +107,39 @@ func cloneManagedStartupEvidence(evidence *types.ManagedStartupEvidence) *types.
 		code := *evidence.ExitCode
 		cloned.ExitCode = &code
 	}
+	if evidence.CacheEvidence != nil {
+		cacheEvidence := *evidence.CacheEvidence
+		cloned.CacheEvidence = &cacheEvidence
+	}
 	return &cloned
+}
+
+func (m *Manager) takeManagedRuntimeStartupSnapshot(generation uint64) managedRuntimeStartupSnapshot {
+	m.startupEvidenceMu.Lock()
+	defer m.startupEvidenceMu.Unlock()
+	if generation != m.startupGeneration {
+		return managedRuntimeStartupSnapshot{}
+	}
+	snapshot := m.startupRuntime.clone()
+	m.startupRuntime = managedRuntimeStartupSnapshot{}
+	return snapshot
+}
+
+type managedRuntimeStartupSnapshot struct {
+	AgentID  string
+	Command  []string
+	Env      []string
+	StripEnv []string
+	WorkDir  string
+	Wrapped  bool
+	Valid    bool
+}
+
+func (s managedRuntimeStartupSnapshot) clone() managedRuntimeStartupSnapshot {
+	s.Command = append([]string(nil), s.Command...)
+	s.Env = append([]string(nil), s.Env...)
+	s.StripEnv = append([]string(nil), s.StripEnv...)
+	return s
 }
 
 func newManagedStartupEvidence(
@@ -103,6 +150,8 @@ func newManagedStartupEvidence(
 	stderrRetainedComplete bool,
 	stderrPresent bool,
 	stderr []string,
+	diagnosticReason string,
+	diagnosticRetained bool,
 ) *types.ManagedStartupEvidence {
 	disposition, exitCode := managedProcessExitDisposition(exitErr)
 	if intentionalStop {
@@ -110,11 +159,16 @@ func newManagedStartupEvidence(
 		exitCode = nil
 	}
 	diagnostics := npmresolution.AnalyzeManagedStartupDiagnostics(strings.Join(stderr, "\n"))
-	diagnosticComplete := collectionComplete && stderrRetainedComplete && diagnostics.Complete &&
+	diagnosticComplete := collectionComplete && stderrRetainedComplete && diagnosticRetained
+	npmDiagnosticComplete := collectionComplete && stderrRetainedComplete && diagnostics.Complete &&
 		(!stderrPresent || diagnostics.Present)
 	npmCode := ""
-	if diagnosticComplete {
+	if npmDiagnosticComplete {
 		npmCode = preferredManagedStartupCode(diagnostics.Codes)
+	}
+	reason := ""
+	if diagnosticComplete {
+		reason = diagnosticReason
 	}
 	return &types.ManagedStartupEvidence{
 		ProcessGeneration:     generation,
@@ -123,8 +177,10 @@ func newManagedStartupEvidence(
 		NPMCode:               npmCode,
 		CollectionComplete:    collectionComplete,
 		NPMDiagnosticPresent:  diagnostics.Present,
-		NPMDiagnosticComplete: diagnosticComplete,
+		NPMDiagnosticComplete: npmDiagnosticComplete,
 		UnclassifiedNPMCode:   diagnostics.UnclassifiedCode,
+		DiagnosticReason:      reason,
+		DiagnosticComplete:    diagnosticComplete,
 	}
 }
 
@@ -143,4 +199,15 @@ func preferredManagedStartupCode(codes []string) string {
 		return ""
 	}
 	return codes[0]
+}
+
+func (m *Manager) invalidateManagedStartupEvidence() {
+	m.startupEvidenceMu.Lock()
+	defer m.startupEvidenceMu.Unlock()
+	m.startupEvidence = nil
+	if m.startupEvidenceDone != nil {
+		close(m.startupEvidenceDone)
+		m.startupEvidenceDone = nil
+	}
+	m.startupRuntime.Valid = false
 }
