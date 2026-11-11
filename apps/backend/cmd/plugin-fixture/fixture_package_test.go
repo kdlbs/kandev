@@ -33,12 +33,18 @@ func TestFixtureManifest_ParsesAndValidates(t *testing.T) {
 	require.True(t, m.Capabilities.State)
 	require.True(t, m.Capabilities.UserState)
 	require.Equal(t, []string{"fixture-source-control"}, m.RepositoryProviders)
-	require.Equal(t, "connection-status", m.Actions[0].Key)
-	require.Equal(t, "workspace", m.Actions[0].ResourceScope)
 	actions := make(map[string]manifest.Action, len(m.Actions))
 	for _, action := range m.Actions {
 		actions[action.Key] = action
 	}
+	require.Contains(t, actions, "connection-status")
+	require.Equal(t, "workspace", actions["connection-status"].ResourceScope)
+	require.Contains(t, actions, "notification.prepare")
+	require.Equal(t, "notification_provider", actions["notification.prepare"].ResourceScope)
+	require.EqualValues(t, 131072, actions["notification.prepare"].MaxBodyBytes)
+	require.Len(t, m.NotificationFormatters, 1)
+	require.Equal(t, "fixture-text", m.NotificationFormatters[0].Key)
+	require.Equal(t, []string{"notification.prepare"}, m.NotificationFormatters[0].ManagementActions)
 	require.Equal(t, "workspace", actions[repositoryInspectActionKey].ResourceScope)
 	require.Equal(t, "workspace", actions[repositoryBranchesActionKey].ResourceScope)
 	require.Equal(t, "workspace", actions[utilityDefaultAction].ResourceScope)
