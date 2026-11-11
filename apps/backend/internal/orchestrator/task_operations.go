@@ -2081,10 +2081,11 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		}
 	}
 
-	ctx, err = s.executor.PrepareMCPLaunch(ctx, task.ID, launchSession, true)
+	preparedMCPContext, err := s.executor.PrepareMCPLaunch(ctx, task.ID, launchSession, true)
 	if err != nil {
 		return nil, failPreparedLaunch(fmt.Errorf("prepare built-in MCP launch: %w", err))
 	}
+	ctx = preparedMCPContext
 
 	// Wrap the first prompt with the Kandev MCP system block (task/session IDs +
 	// tool list). Done at the orchestrator layer so recordInitialMessage persists

@@ -2026,6 +2026,25 @@ const askUserQuestionOutputSchema = `{
           "additionalProperties": false
         }
       },
+      "annotations": {
+        "type": "array",
+        "description": "Regions the user marked on this question's images, each with a comment. Coordinates are image pixels of the image as the user saw it; image_width and image_height give that size.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "image_id": {"type": "string", "description": "ID of the question or choice image the region is on."},
+            "x": {"type": "integer"},
+            "y": {"type": "integer"},
+            "width": {"type": "integer"},
+            "height": {"type": "integer"},
+            "image_width": {"type": "integer"},
+            "image_height": {"type": "integer"},
+            "comment": {"type": "string"}
+          },
+          "required": ["image_id", "x", "y", "width", "height", "image_width", "image_height", "comment"],
+          "additionalProperties": false
+        }
+      },
       "answered": {"type": "boolean"},
       "rejected": {"type": "boolean"}
     },

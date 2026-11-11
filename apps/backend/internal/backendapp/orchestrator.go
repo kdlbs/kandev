@@ -885,6 +885,7 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 		})
 	}
 	result, err := a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+		BuiltinMCPPreferences: req.BuiltinMCPPreferences, MCPServerIDs: req.MCPServerIDs,
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,

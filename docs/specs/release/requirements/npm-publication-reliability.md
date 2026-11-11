@@ -99,3 +99,5 @@ This document adds delivery requirements without changing that contract.
 ## Implementation plan
 
 - [npm publication reliability](../../../plans/npm-publication-reliability/plan.md).
+- [Preflight response diagnostics repair](../../../plans/npm-preflight-response-diagnostics/plan.md).
+- [Creation metadata compatibility repair](../../../plans/npm-preflight-created-metadata/plan.md).

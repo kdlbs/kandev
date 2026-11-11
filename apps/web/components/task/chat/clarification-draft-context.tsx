@@ -11,7 +11,7 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
-import type { ClarificationAnswer } from "@/lib/types/http";
+import type { ClarificationAnswer, ClarificationAnswerAnnotation } from "@/lib/types/http";
 import { useOptionalAppStore, useOptionalAppStoreApi } from "@/components/state-provider";
 import {
   answerDraftGeneration,
@@ -171,15 +171,15 @@ function restoreAnswers(
   });
 }
 
-function restoreCustomDrafts(
-  customDrafts: Record<string, string>,
+function restoreCustomDrafts<T>(
+  customDrafts: Record<string, T>,
   questions: readonly ClarificationDraftQuestion[],
   complete: boolean,
-): Record<string, string> {
+): Record<string, T> {
   const questionIds = new Set(questions.map((question) => question.id));
-  const restored: Record<string, string> = {};
-  for (const [questionId, text] of Object.entries(customDrafts)) {
-    if (questionIds.has(questionId) || !complete) restored[questionId] = text;
+  const restored: Record<string, T> = {};
+  for (const [questionId, value] of Object.entries(customDrafts)) {
+    if (questionIds.has(questionId) || !complete) restored[questionId] = value;
   }
   return restored;
 }
@@ -193,6 +193,7 @@ function restoreDraft(
   const complete = isBundleComplete(questions, questionTotal);
   return {
     customDrafts: restoreCustomDrafts(draft.customDrafts, questions, complete),
+    annotations: restoreCustomDrafts(draft.annotations ?? {}, questions, complete),
     answers: restoreAnswers(draft.answers, questions, complete),
     activeIndex: clampIndex(
       draft.activeIndex,
@@ -201,12 +202,15 @@ function restoreDraft(
   };
 }
 
+type DraftAnnotations = Record<string, readonly ClarificationAnswerAnnotation[]>;
+
 type DraftState = {
   scopeKey: string | null;
   generation: number;
   /** True once the form has taken over the restored answers. */
   consumedAnswers: boolean;
   customDrafts: Record<string, string>;
+  annotations: DraftAnnotations;
   activeIndex: number;
   pendingAnswers: readonly ClarificationAnswer[];
   /** Answers captured from the previous form identity, ignored for persistence. */
@@ -224,6 +228,7 @@ function draftStateFor(
     generation,
     consumedAnswers: false,
     customDrafts: restored?.customDrafts ?? {},
+    annotations: restored?.annotations ?? {},
     activeIndex: restored?.activeIndex ?? 0,
     pendingAnswers: restored?.answers ?? [],
     staleAnswers: answers,
@@ -250,13 +255,22 @@ function visibleDraft(
   state: DraftState,
   questions: readonly ClarificationDraftQuestion[] | undefined,
   questionTotal: number | undefined,
-): { customDrafts: Record<string, string>; activeIndex: number } {
-  if (!questions) return { customDrafts: state.customDrafts, activeIndex: state.activeIndex };
+): { customDrafts: Record<string, string>; annotations: DraftAnnotations; activeIndex: number } {
+  if (!questions) {
+    return {
+      customDrafts: state.customDrafts,
+      annotations: state.annotations,
+      activeIndex: state.activeIndex,
+    };
+  }
   const complete = isBundleComplete(questions, questionTotal);
   return {
     customDrafts: complete
       ? restoreCustomDrafts(state.customDrafts, questions, true)
       : state.customDrafts,
+    annotations: complete
+      ? restoreCustomDrafts(state.annotations, questions, true)
+      : state.annotations,
     activeIndex: clampIndex(
       state.activeIndex,
       complete ? questions.length : bundleLength(questions, questionTotal),
@@ -294,6 +308,10 @@ function persistedAnswers(
       !base.some((candidate) => candidate.question_id === answer.question_id),
   );
   return retained.length > 0 ? [...base, ...retained] : base;
+}
+
+function hasAnnotations(annotations: DraftAnnotations): boolean {
+  return Object.values(annotations).some((list) => list.length > 0);
 }
 
 function hasMeaningfulCustomText(customDrafts: Record<string, string>): boolean {
@@ -351,6 +369,12 @@ export function useClarificationDraft(
       customDrafts: typeof value === "function" ? value(current.customDrafts) : value,
     }));
   }, []);
+  const setAnnotations: Dispatch<SetStateAction<DraftAnnotations>> = useCallback((value) => {
+    setState((current) => ({
+      ...current,
+      annotations: typeof value === "function" ? value(current.annotations) : value,
+    }));
+  }, []);
   const setActiveIndex: Dispatch<SetStateAction<number>> = useCallback((value) => {
     setState((current) => ({
       ...current,
@@ -366,9 +390,12 @@ export function useClarificationDraft(
     questions,
     questionTotal,
   );
-  const { customDrafts, activeIndex } = visibleDraft(state, questions, questionTotal);
+  const { customDrafts, annotations, activeIndex } = visibleDraft(state, questions, questionTotal);
   const hasContent =
-    hasMeaningfulCustomText(customDrafts) || answersToPersist.length > 0 || activeIndex > 0;
+    hasMeaningfulCustomText(customDrafts) ||
+    hasAnnotations(annotations) ||
+    answersToPersist.length > 0 ||
+    activeIndex > 0;
   useEffect(() => {
     if (!consumedAnswers || state.consumedAnswers) return;
     setState((current) => ({ ...current, consumedAnswers }));
@@ -381,11 +408,13 @@ export function useClarificationDraft(
     }
     writeAnswerDraft(owner, identity, generation, {
       customDrafts,
+      annotations,
       activeIndex,
       answers: answersToPersist,
     });
   }, [
     activeIndex,
+    annotations,
     answersToPersist,
     customDrafts,
     generation,
@@ -398,6 +427,8 @@ export function useClarificationDraft(
   return {
     customDrafts,
     setCustomDrafts,
+    annotations,
+    setAnnotations,
     rawActiveIndex: activeIndex,
     setActiveIndex,
     savedAnswers: state.pendingAnswers.length > 0 ? state.pendingAnswers : undefined,

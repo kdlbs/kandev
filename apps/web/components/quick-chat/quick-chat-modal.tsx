@@ -14,6 +14,7 @@ import { useQuickChatModal } from "./use-quick-chat-modal";
 import { useQuickChatWidth } from "@/hooks/use-quick-chat-width";
 import {
   ClarificationEscapeGuardProvider,
+  markEscapeClaimedByDialog,
   type ClarificationEscapePredicate,
   type ClarificationEscapeGuardRegistry,
 } from "@/hooks/use-clarification-escape-guard";
@@ -376,6 +377,7 @@ function handleQuickChatEscape(
   }
   for (const test of guards.values()) {
     if (test(event)) {
+      markEscapeClaimedByDialog(event);
       event.preventDefault();
       break;
     }

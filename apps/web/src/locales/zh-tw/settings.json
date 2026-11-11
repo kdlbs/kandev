@@ -492,6 +492,8 @@
   "memory": "記憶體 %",
   "mergeThisSplitIntoTheSplit": "將此拆分割槽域合併到包含 {{target}} 的拆分割槽域。",
   "mergeWithTarget": "與 {{target}} 合併",
+  "escapeCancelsAgent": "按 Escape 暫停代理程式",
+  "escapeCancelsAgentDescription": "在聊天輸入框中按 Escape 可暫停執行中的代理程式。",
   "messageSubmitKey": "訊息提交快捷鍵",
   "messageTimeDisplay": "訊息時間",
   "messageTimeDisplayDescription": "選擇訊息時間戳的顯示方式。將滑鼠懸停或點選時間戳可檢視另一種格式。",
@@ -986,6 +988,7 @@
   "mcpDeleted": "MCP 伺服器已刪除。",
   "mcpDeleteFailed": "無法刪除 MCP 伺服器。",
   "mcpDeleteDescription": "刪除 {{name}}？確認後，所有設定、儲存庫、任務或工作階段選擇也會被刪除。",
+  "mcpAutomationDeleteWarning": "刪除後，自動化會保留已儲存的選擇，但新的代理程式處理程序無法連線此伺服器。請在每個自動化中移除或替換此伺服器。",
   "mcpEnabled": "已啟用",
   "mcpDisabled": "已停用",
   "mcpEnable": "啟用",
@@ -1059,6 +1062,8 @@
   "mcpRepositorySelectionDescription": "為使用此儲存庫的任務選擇 MCP 伺服器。",
   "mcpProfileUsage_one": "{{count}} 個設定",
   "mcpProfileUsage_other": "{{count}} 個設定",
+  "mcpAutomationUsage_one": "{{count}} 個自動化",
+  "mcpAutomationUsage_other": "{{count}} 個自動化",
   "mcpRepositoryUsage_one": "{{count}} 個儲存庫",
   "mcpRepositoryUsage_other": "{{count}} 個儲存庫",
   "mcpTaskUsage_one": "{{count}} 個任務",
@@ -1219,5 +1224,8 @@
   "builtinMcp.backToPackages": "返回工具包",
   "builtinMcp.packageDetails": "工具包詳情",
   "builtinMcp.packageSummary": "選擇任務可使用的 Kandev 工具。",
-  "builtinMcp.currentUnknown": "無法確定目前代理程式的工具包。以下是為下次啟動代理程式儲存的選擇。"
+  "builtinMcp.currentUnknown": "無法確定目前代理程式的工具包。以下是為下次啟動代理程式儲存的選擇。",
+  "mcpFromAutomation": "來自自動化",
+  "mcpFromAutomationDescription": "啟動此處理程序的自動化所選的伺服器。",
+  "builtinMcp.surfaces.automation": "自動化"
 }

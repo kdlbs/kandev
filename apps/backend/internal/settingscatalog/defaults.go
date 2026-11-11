@@ -643,7 +643,7 @@ func userSettingsDomain() DomainDescriptor {
 		"workflow_filter_id", "workflow filter", "string", "repository_ids", "repository selection", "array", "tasks_list_sort", "task sort", "string",
 		"tasks_list_group", "task grouping", "string", "tasks_list_show_details", "task details", "boolean", "initial_setup_complete", "setup complete", "boolean",
 		"preferred_shell", "preferred shell", "string", "default_editor_id", "default editor", "string", "enable_preview_on_click", "preview on click", "boolean",
-		"chat_submit_key", "chat submit key", "string", "review_auto_mark_on_scroll", "review auto mark", "boolean", "confirm_task_archive", "confirm task archive", "boolean",
+		"chat_submit_key", "chat submit key", "string", "escape_cancels_agent", "Escape pauses the agent", "boolean", "review_auto_mark_on_scroll", "review auto mark", "boolean", "confirm_task_archive", "confirm task archive", "boolean",
 		"prevent_auto_start_agent_on_open", "prevent auto start", "boolean", "unread_divider", "unread divider", "boolean", "unread_task_dot", "unread task dot", "boolean",
 		"unread_task_dot_hide_delay_seconds", "unread task dot hide delay", "integer",
 		"agent_generated_task_titles", "generated titles", "boolean", "prompt_suggestions", "prompt suggestions", "boolean", "auto_focus_new_tasks", "auto focus new tasks", "boolean",

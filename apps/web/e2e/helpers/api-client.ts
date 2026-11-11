@@ -1527,6 +1527,7 @@ export class ApiClient {
   }
 
   async saveUserSettings(settings: {
+    escape_cancels_agent?: boolean;
     enable_preview_on_click?: boolean;
     confirm_task_archive?: boolean;
     prevent_auto_start_agent_on_open?: boolean;

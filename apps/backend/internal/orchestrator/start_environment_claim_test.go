@@ -73,3 +73,16 @@ func TestReleaseStartEnvironmentClaimKeepsDeferredAndReusedClaims(t *testing.T) 
 	svc.releaseStartEnvironmentClaim(ctx, "task1", owner.ID, true, errors.New("dynamic resolution failed"))
 	assertClaim(models.TaskEnvironmentStatusFailed, "")
 }
+
+func TestStartReleasesEnvironmentClaimWhenMCPPreparationFails(t *testing.T) {
+	ctx := context.Background()
+	repo, svc := seedStartClaimTask(t)
+	svc.executor.SetBuiltinPolicyReader(unavailableBuiltinReader{})
+	_, err := svc.LaunchSession(ctx, &LaunchSessionRequest{TaskID: "task1", Intent: IntentStart, AgentProfileID: "profile1", ProfileExplicit: true})
+	require.ErrorContains(t, err, "prepare built-in MCP launch")
+	environment, err := repo.GetTaskEnvironmentByTaskID(ctx, "task1")
+	require.NoError(t, err)
+	require.NotNil(t, environment)
+	require.Equal(t, models.TaskEnvironmentStatusFailed, environment.Status)
+	require.Empty(t, environment.MaterializationSessionID)
+}

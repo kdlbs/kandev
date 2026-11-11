@@ -18,6 +18,14 @@ var uuidLinkRe = regexp.MustCompile(`agent://([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9
 // "Code Reviewer", etc.). The capture is trimmed/lowercased before lookup.
 var mentionTokenRe = regexp.MustCompile(`@([A-Za-z][A-Za-z0-9_\- ]{0,63})`)
 
+func hasOddMarkdownEscape(body string, index int) bool {
+	backslashes := 0
+	for cursor := index - 1; cursor >= 0 && body[cursor] == '\\'; cursor-- {
+		backslashes++
+	}
+	return backslashes%2 == 1
+}
+
 // FindMentionedAgents extracts @mentions from a comment body and resolves
 // each token against agent display names in the workspace. Resolution is
 // case-insensitive; all collisions win (two agents sharing a name both
@@ -45,12 +53,13 @@ func (ss *SchedulerService) FindMentionedAgents(
 
 	// Name tokens (lowercase, deduped).
 	tokens := map[string]struct{}{}
-	for _, m := range mentionTokenRe.FindAllStringSubmatch(decoded, -1) {
-		if len(m) > 1 {
-			t := strings.TrimSpace(strings.ToLower(m[1]))
-			if t != "" {
-				tokens[t] = struct{}{}
-			}
+	for _, match := range mentionTokenRe.FindAllStringSubmatchIndex(decoded, -1) {
+		if len(match) < 4 || hasOddMarkdownEscape(decoded, match[0]) {
+			continue
+		}
+		t := strings.TrimSpace(strings.ToLower(decoded[match[2]:match[3]]))
+		if t != "" {
+			tokens[t] = struct{}{}
 		}
 	}
 
