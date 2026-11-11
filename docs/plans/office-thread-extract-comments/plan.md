@@ -87,7 +87,7 @@ In both views, Add stores a draft. Send posts it. The preview shows order and be
 
 ## Verification results
 
-The focused frontend suite passed with 52 tests. The scheduler test, web typecheck, desktop and phone E2E flows, changed-file lint and formatting checks, and documentation validators passed. The previously failing background handoff E2E case also passed locally. Hosted CI will run against the pushed branch.
+The focused frontend suite passed with 52 tests. The scheduler test, web typecheck, desktop and phone E2E flows, changed-file lint and formatting checks, and documentation validators passed. The previously failing background handoff E2E case also passed locally. GitHub CI passed on final PR head `2c4831f32df7895fda9435e02ad3f25be963a4aa`: 83 passed, 21 skipped, 0 failed, and 0 pending.
 
 ## Risks
 

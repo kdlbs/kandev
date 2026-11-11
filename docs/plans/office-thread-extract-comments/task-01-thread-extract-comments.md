@@ -106,4 +106,4 @@ None.
 
 ## Results
 
-The feature and targeted regression coverage are implemented on the PR branch. The main-branch conflict is resolved. The focused frontend suite passed with 52 tests, the scheduler test and web typecheck passed, and the desktop, phone, and previously failing background handoff E2E cases passed locally. Changed-file lint, formatting, and documentation validators passed. Hosted CI will verify the pushed branch.
+The feature and targeted regression coverage are implemented on the PR branch. The main-branch conflict is resolved. The focused frontend suite passed with 52 tests, the scheduler test and web typecheck passed, and the desktop, phone, and previously failing background handoff E2E cases passed locally. Changed-file lint, formatting, and documentation validators passed. GitHub CI passed on final PR head `2c4831f32df7895fda9435e02ad3f25be963a4aa`: 83 passed, 21 skipped, 0 failed, and 0 pending.
