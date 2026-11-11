@@ -1031,9 +1031,11 @@ After an accepted stop, Kandev attempts to move an unarchived, non-Office task f
 - The task must be repository-backed and have no active turn or tool call.
 - Exact normalized retries are idempotent. Contradictory duplicates, unsupported sources, or failed sources roll back the batch.
 
-`add_branch_to_task_kandev` is a Worktree-only compatibility path for adding one repository and branch during an active turn:
+`add_branch_to_task_kandev` adds one repository and branch during an active turn on host Worktree and Local executors:
 
 - It creates a sibling worktree, makes its parent the Files root, and rescans without restarting the agent or workspace processes.
+- Pass `worktree_path` to attach a linked Git worktree the agent already created inside the task workspace. Kandev validates the path, repository, and branch, attaches it in place, and never moves, recreates, or rewrites it. The response adds `adopted: true` and `already_attached: true` when an existing root is reused.
+- A `worktree_path` report on a Docker, SSH, Kubernetes, or Sprites executor is rejected with an actionable error. Detection never adopts paths outside the task workspace root, foreign repositories, submodules, detached `HEAD`, or a path the user removed from the task.
 - The response includes `worktree_path`, `task_workspace_path`, and `agent_cwd_changed: false`. Deferred pre-launch materialization omits both paths.
 - The running agent keeps its original working directory. Repository-relative chat links emitted before or after attachment therefore continue to open the original checkout under the new Files root. Explicit source prefixes such as `master/docs/guide.md` are preserved, and Kandev never searches sibling repositories for a duplicate filename.
 - The original repository stays a separate worktree, so Git does not report the sibling as embedded or untracked files.

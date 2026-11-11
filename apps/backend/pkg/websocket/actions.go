@@ -78,6 +78,7 @@ const (
 	ActionTaskGet                   = "task.get"
 	ActionTaskUpdate                = "task.update"
 	ActionTaskRepoUpdate            = "task.repository.update"
+	ActionTaskRepoDetach            = "task.repository.detach"
 	ActionTaskDelete                = "task.delete"
 	ActionTaskMove                  = "task.move"
 	ActionTaskState                 = "task.state"

@@ -632,6 +632,36 @@ func (h *TaskHandlers) wsUpdateTaskRepository(ctx context.Context, msg *ws.Messa
 	return ws.NewResponse(msg.ID, msg.Action, taskRepo)
 }
 
+// wsDetachTaskRepository removes a non-primary root from the task. The
+// payload names task_id so the gateway dispatch backstop scopes it.
+func (h *TaskHandlers) wsDetachTaskRepository(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID           string `json:"task_id"`
+		TaskRepositoryID string `json:"task_repository_id"`
+	}
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" || req.TaskRepositoryID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id and task_repository_id are required", nil)
+	}
+	if err := h.service.DetachTaskRepository(ctx, req.TaskID, req.TaskRepositoryID); err != nil {
+		h.logger.Error("failed to detach task repository", zap.Error(err))
+		if errors.Is(err, service.ErrTaskRepositoryNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, err.Error(), nil)
+		}
+		if errors.Is(err, service.ErrPrimaryTaskRepositoryRoot) || isValidationError(err) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to detach task repository", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"detached":           true,
+		"task_id":            req.TaskID,
+		"task_repository_id": req.TaskRepositoryID,
+	})
+}
+
 func (h *TaskHandlers) wsUpdateTaskState(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsUpdateTaskStateRequest
 	if err := msg.ParsePayload(&req); err != nil {

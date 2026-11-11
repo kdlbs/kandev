@@ -2115,6 +2115,29 @@ func (h *TaskHandlers) httpUpdateTaskRepository(c *gin.Context) {
 	c.JSON(http.StatusOK, taskRepo)
 }
 
+// httpDetachTaskRepository handles DELETE /tasks/:id/repositories/:repo_id.
+// It removes only the task attachment; files, branch, and pull requests stay.
+func (h *TaskHandlers) httpDetachTaskRepository(c *gin.Context) {
+	err := h.service.DetachTaskRepository(c.Request.Context(), c.Param("id"), c.Param("repo_id"))
+	if err == nil {
+		c.JSON(http.StatusOK, gin.H{"detached": true})
+		return
+	}
+	if errors.Is(err, service.ErrTaskRepositoryNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, service.ErrPrimaryTaskRepositoryRoot) || isValidationError(err) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	h.logger.Error("detach task repository failed",
+		zap.String("task_id", c.Param("id")),
+		zap.String("repo_id", c.Param("repo_id")),
+		zap.Error(err))
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to detach task repository"})
+}
+
 type httpMoveTaskRequest struct {
 	WorkflowID         string                                     `json:"workflow_id"`
 	WorkflowStepID     string                                     `json:"workflow_step_id"`

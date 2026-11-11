@@ -1105,6 +1105,17 @@ type TaskEnvironmentRepository interface {
 	DeleteTaskEnvironmentReposByEnv(ctx context.Context, envID string) error
 }
 
+// TaskDetachedWorktreeRepository stores task-scoped suppression records for
+// worktrees the user removed. Detection never re-adopts a suppressed path;
+// an explicit agent report clears the record.
+type TaskDetachedWorktreeRepository interface {
+	MarkTaskWorktreeDetached(ctx context.Context, taskID, worktreePath string, detachedAt time.Time) error
+	ClearTaskWorktreeDetached(ctx context.Context, taskID, worktreePath string) error
+	IsTaskWorktreeDetached(ctx context.Context, taskID, worktreePath string) (bool, error)
+	DeleteTaskDetachedWorktreesByTask(ctx context.Context, taskID string) error
+	DetachTaskRepositoryAttachment(ctx context.Context, taskID, taskRepositoryID, environmentRepoID, worktreePath string, markDetached bool) error
+}
+
 // TaskEnvironmentRecoveryRepository is the optional durable authority
 // capability required by automatic host worktree recovery. Keeping it
 // separate preserves lightweight repository adapters used by tests and by

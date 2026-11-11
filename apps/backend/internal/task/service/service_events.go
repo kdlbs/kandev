@@ -836,6 +836,9 @@ func serializeTaskRepositories(repos []*models.TaskRepository) []map[string]inte
 		if r.CheckoutBranch != "" {
 			serialized["checkout_branch"] = r.CheckoutBranch
 		}
+		if r.WorkspaceRelativePath != "" {
+			serialized["workspace_relative_path"] = r.WorkspaceRelativePath
+		}
 		if r.BranchPolicyID != "" {
 			serialized["branch_policy_id"] = r.BranchPolicyID
 		}
