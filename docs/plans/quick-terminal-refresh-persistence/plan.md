@@ -8,6 +8,11 @@ status: complete
 
 ## Overview
 
+Follow-up: [shell recovery](../quick-terminal-shell-recovery/plan.md) owns the planned same-tab recovery action from issue #5260.
+Its restart matrix extends this package's original New-Terminal-only expectation.
+The verification counts below remain the historical results of this package.
+New recovery results belong to the follow-up package.
+
 Quick Terminal currently loses its tab descriptors on a full page reload because they exist only
 in the in-memory Zustand UI slice. This repair adds a backend-owned descriptor lifecycle scoped to
 the authenticated user and workspace, returns those descriptors through boot and resync, and

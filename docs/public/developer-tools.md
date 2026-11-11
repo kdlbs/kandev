@@ -120,6 +120,12 @@ Shortcuts target the selected terminal and keep the keyboard focused. The row
 stays above the on-screen keyboard. Modifiers reset when you switch terminal
 tabs or close the view.
 
+### Recover a Quick Terminal
+
+After a shell exits or the backend restarts, the shell process and its state are gone. This includes environment changes, running commands, command history, and screen output.
+
+To start a shell in the same tab, select the tab and then select **Start new shell**. Selecting or reopening a tab does not start a shell automatically. To open a separate shell, select **New Terminal**.
+
 ### Start a chat
 
 1. Enter a non-empty opening prompt. Add files when they help explain the request. Wait for each

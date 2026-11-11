@@ -223,6 +223,8 @@ const defaultQuickChatModalState = {
   handleNewTerminal,
   handleActivateTerminal,
   handleTerminalStateChange: vi.fn(),
+  handleRecoverTerminal: vi.fn(),
+  terminalRecoveryByTab: {},
   handleSetupKindChange: vi.fn(),
   handleSelectAgent: vi.fn(),
   handleCloseTab: vi.fn(),

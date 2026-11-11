@@ -54,6 +54,9 @@ any environment-only limitations. Synchronize task/plan status and verification 
 
 ## Results
 
+The [shell recovery package](../quick-terminal-shell-recovery/plan.md) owns new same-tab recovery scenarios for issue #5260.
+The pass counts below remain this task's historical results.
+
 - `(cd apps/web && pnpm e2e:run --host --project chromium tests/terminal/quick-terminal.spec.ts)` passed (2/2), including reload/reopen and marker replay.
 - `(cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/terminal/mobile-quick-terminal.spec.ts)` passed (1/1) on the Pixel 5 project, including dynamic-viewport containment, touch-safe controls, internal scrolling, focus/dismissal, and zero horizontal overflow.
 - Both managed runs completed fixture teardown, and the tests explicitly closed surviving terminal descriptors in `finally` blocks.
