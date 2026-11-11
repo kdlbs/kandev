@@ -383,6 +383,34 @@ Implementation review closure (2026-10-25):
 - Review closure is not contract-owner acceptance, deployment or publication.
   No push, PR, primary-instance mutation or workflow completion signal occurred.
 
+Renewed implementation review closure (2026-11-11):
+
+- The user reopened the review loop after the original closure. Round15 found
+  one P3: mounted plugin tabs changed display title while their visible
+  placeholder bodies stayed stale. Commit
+  `9ed5fa74ff89aed0ba06e691ec74f87d2827072e` fixes the title subscription,
+  with disposal on unmount and no registry/locale-only dirty event.
+- The fix had three failing-before mounted regressions. Final focused settings
+  and plugin-validation coverage passed 7 files / 83 tests; changed-file lint,
+  Prettier, owning typecheck, documentation checks and normal hooks passed.
+  Disposable Chromium rendered the real editor through registration loss,
+  re-registration and English/Japanese locale changes, including a 390px
+  locale check. This was not a rebuilt backend settings or real-package E2E run.
+- Independent exact Sol 6.1 rounds16, 17 and 18 each reported zero actionable
+  findings against the unchanged `9ed5fa74ff` snapshot. Their executed
+  current-head counts were respectively 233, 28 and 279 passing consumer
+  checks; round18 included 22 fresh probes. These are overlapping per-round
+  evidence, not a cumulative unique-test count or Chromium/backend proof.
+  The renewed three-consecutive-clean stopping condition is met; no round19.
+- Round18 disclosed a possible transient config-bundle write outside the
+  cache drive during an intermediate run. It reported no residue and reran
+  the complete final matrix with the cache-safe runner loader. This is a
+  recorded process deviation, not a product defect or ignored failing test.
+- The earlier broad-test, real Prompt History package and baseline exclusions
+  above remain unchanged. This closure does not claim full `make test` green,
+  exact-final-head real-package smoke, contract acceptance, push, PR,
+  deployment, primary-instance mutation or workflow completion.
+
 Design-package evidence (2026-10-10):
 
 - `python3 scripts/list-docs.py validate`: passed; 370 decisions and 1521
