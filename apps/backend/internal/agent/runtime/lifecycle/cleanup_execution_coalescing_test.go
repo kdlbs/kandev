@@ -340,3 +340,24 @@ func TestEnvironmentCacheLookupWaitsForRetirement(t *testing.T) {
 		})
 	}
 }
+
+// TestEnvironmentSharedLookupRejectsReboundExecution verifies environment
+// resolution cannot publish a different environment's cached session execution.
+func TestEnvironmentSharedLookupRejectsReboundExecution(t *testing.T) {
+	mgr := newTestManager(t)
+	provider := &siblingDuringEnvironmentLookupProvider{mockWorkspaceInfoProvider: &mockWorkspaceInfoProvider{
+		envInfos: map[string]*WorkspaceInfo{"requested": {
+			TaskID: "task", SessionID: "session", TaskEnvironmentID: "requested",
+			WorkspacePath: "/workspace/task", AgentID: "auggie",
+		}},
+	}}
+	mgr.workspaceInfoProvider = provider
+	provider.onEnvironment = func() {
+		require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+			ID: "rebound", SessionID: "session", TaskID: "task", TaskEnvironmentID: "other",
+		}))
+	}
+	got, err := mgr.GetOrEnsureExecutionForEnvironment(t.Context(), "requested")
+	require.True(t, got == nil, "environment resolution must not return another environment's cached execution")
+	require.ErrorContains(t, err, "no runtime configured")
+}

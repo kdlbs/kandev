@@ -109,6 +109,7 @@ func (m *mockAgentManager) SetMcpMode(_ context.Context, _ string, _ string) err
 	return nil
 }
 
+// StartAgentProcess counts asynchronous starts before invoking the configured handler.
 func (m *mockAgentManager) StartAgentProcess(ctx context.Context, agentExecutionID string) error {
 	m.startAgentProcessCallCount.Add(1)
 	if m.startAgentProcessFunc != nil {
