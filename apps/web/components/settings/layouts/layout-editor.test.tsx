@@ -158,12 +158,18 @@ describe("LayoutEditor plugin panels", () => {
     const onChange = mountEditor(profileWithPlugin());
     await waitForEditor();
     expect(tabLabels()).toContain(LOCALIZED_TITLE);
+    expect(screen.getByTestId(`layout-placeholder-${PANEL_ID}`).textContent).toBe(LOCALIZED_TITLE);
     onChange.mockClear();
 
     act(() => pluginRegistry.unregisterPlugin(PLUGIN_ID));
 
     await waitFor(() => expect(tabLabels()).toContain(CANONICAL_TITLE));
     expect(tabLabels()).not.toContain(LOCALIZED_TITLE);
+    await waitFor(() =>
+      expect(screen.getByTestId(`layout-placeholder-${PANEL_ID}`).textContent).toBe(
+        CANONICAL_TITLE,
+      ),
+    );
     expect(onChange).not.toHaveBeenCalled();
   });
 
@@ -193,6 +199,7 @@ describe("LayoutEditor plugin panels", () => {
     const onChange = mountEditor(profileWithPlugin());
     await waitForEditor();
     expect(tabLabels()).toContain(CANONICAL_TITLE);
+    expect(screen.getByTestId(`layout-placeholder-${PANEL_ID}`).textContent).toBe(CANONICAL_TITLE);
 
     await moveTabLeft("計画");
 
@@ -205,7 +212,33 @@ describe("LayoutEditor plugin panels", () => {
     act(() => registerPrompts());
 
     await waitFor(() => expect(tabLabels()).toContain(LOCALIZED_TITLE));
+    await waitFor(() =>
+      expect(screen.getByTestId(`layout-placeholder-${PANEL_ID}`).textContent).toBe(
+        LOCALIZED_TITLE,
+      ),
+    );
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("updates the visible placeholder and tab on locale changes without editing the layout", async () => {
+    registerPrompts();
+    const onChange = mountEditor(profileWithPlugin());
+    await waitForEditor();
+    expect(screen.getByTestId(`layout-placeholder-${PANEL_ID}`).textContent).toBe(LOCALIZED_TITLE);
+    onChange.mockClear();
+
+    await act(async () => {
+      await i18n.changeLanguage("en");
+    });
+
+    await waitFor(() => expect(tabLabels()).toContain(CANONICAL_TITLE));
+    await waitFor(() =>
+      expect(screen.getByTestId(`layout-placeholder-${PANEL_ID}`).textContent).toBe(
+        CANONICAL_TITLE,
+      ),
+    );
+    expect(onChange).not.toHaveBeenCalled();
+    expect(pluginComponent).not.toHaveBeenCalled();
   });
 });
 

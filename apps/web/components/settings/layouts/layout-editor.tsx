@@ -34,12 +34,20 @@ type LayoutEditorProps = {
 };
 
 function PlaceholderPanel({ api }: IDockviewPanelProps) {
+  const [title, setTitle] = useState(() => api.title ?? api.id);
+  useEffect(() => {
+    const syncTitle = () => setTitle(api.title ?? api.id);
+    const subscription = api.onDidTitleChange(syncTitle);
+    syncTitle();
+    return () => subscription.dispose();
+  }, [api]);
+
   return (
     <div
       className="flex h-full items-center justify-center bg-background/60 p-4 text-center text-sm text-muted-foreground"
       data-testid={`layout-placeholder-${api.id}`}
     >
-      {api.title ?? api.id}
+      {title}
     </div>
   );
 }

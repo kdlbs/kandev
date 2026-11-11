@@ -117,10 +117,12 @@ restores canonical titles from the retained map when the registry cannot
 resolve them. Apply this consistently to authoritative tree leaves and their
 flat group projection. An initially unavailable profile seeds the same map
 from saved titles; it must not require a previous registration. Mounted preview
-titles resolve registered localized copy when available and the retained
-canonical fallback when absent; title-only reconciliation must not mark the
-profile dirty or change placement/selection. Keep the map transient and
-host-owned, outside plugin params, portable schema, and plugin-facing APIs.
+titles in both tabs and visible placeholder bodies resolve registered localized
+copy when available and the retained canonical fallback when absent. Placeholder
+content subscribes to Dockview title changes and disposes that subscription on
+unmount. Title-only reconciliation must not mark the profile dirty or change
+placement/selection. Keep the map transient and host-owned, outside plugin
+params, portable schema, and plugin-facing APIs.
 
 `useLayoutSettings.updateLayout`, compatibility/default resolution,
 `upsertBuiltInLayoutOverride`, and custom-profile mutations continue to use

@@ -1866,3 +1866,43 @@ Round 8 accepted automatic all-root geometry remediation (2026-10-24, Sol 6.1):
   `python3 scripts/lint-spec-files.test.py`, `git diff --check` and
   `validateCoverage` over all nine intended paths and the six package
   documents. Full coverage receipt: `round11-coverage.json` in review scratch.
+
+### Round15 mounted placeholder title reconciliation
+
+- Independent Sol review round15 found one P3 display defect: registry/locale
+  reconciliation changed the editor tab title without updating its visible
+  placeholder body. No canonical payload or geometry corruption was reported.
+- `PlaceholderPanel` now subscribes to Dockview title changes, synchronizes
+  immediately after subscription, and disposes the listener on unmount.
+  Plugin content remains unmounted; titles stay outside plugin params.
+- Extended existing mounted revocation and initially-unavailable tests to
+  assert the visible placeholder body. Added a locale-transition case that
+  checks both tab/body consistency and the unchanged clean draft.
+- Strict RED before the production edit: `layout-editor.test.tsx` had
+  **3 failed, 12 passed**, with stale Japanese/canonical placeholder text.
+  Final focused command from `apps/web`:
+  `TMPDIR=/home/clem/.cache/plugin-layout-round15-fix/tmp pnpm exec vitest run
+  --config /home/clem/.cache/plugin-layout-round15-fix/vitest.config.mts
+  components/settings/layouts lib/layout/layout-profiles.plugin-panels.test.ts`
+  passed **7 files, 83 tests**. The external config extends the repository
+  config and puts Vite caches on the verified `/dev/sdd` cache drive.
+  Initial runner-loader and external dependency resolution failures were
+  scratch configuration issues before assertions, not product RED.
+- Real Chromium smoke mounted the actual `LayoutEditor` in an isolated Vite
+  harness with real registry/i18n modules, separate origin and local state.
+  Japanese registration, revocation, re-registration and English/Japanese
+  locale transitions updated the visible body without dirty events. The same
+  locale transitions passed at a 390px phone viewport. Desktop visual capture
+  was inspected; evidence retained under
+  `/home/clem/.cache/plugin-layout-round15-fix/`.
+  This is rendered component proof, not a rebuilt backend settings E2E run
+  or real Prompt History package re-smoke. No primary runtime/settings changed.
+  No new phone composition, touch target or viewport-dependent logic changed.
+- Existing historical broad-test and real-package limitations remain unchanged.
+  The disposable browser/server were closed after smoke verification.
+- Changed-file ESLint with `--max-warnings 0` and Prettier passed.
+  The combined formatting/lint/typecheck command reached its 300-second
+  deadline without a diagnostic. Isolated ESLint passed; the owning
+  `rich-output:check` plus `tsc --noEmit --incremental` completed successfully
+  with a longer deadline, 10GiB heap and cache-drive `--tsBuildInfoFile`.
+  Documentation catalog/specification lint and whitespace checks passed.
