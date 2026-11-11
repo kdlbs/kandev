@@ -93,23 +93,24 @@ export function PRStatusGlyph({
   // The topbar button shrinks SVGs without an explicit size-* class.
   const dimension = size === "topbar" ? "size-4" : "h-3.5 w-3.5";
   return (
-    <span className="inline-flex shrink-0 items-center gap-1" aria-hidden="true">
+    <span className="inline-flex shrink-0 items-center" aria-hidden="true">
       <span className={cn("relative inline-flex shrink-0", dimension, colorClassName)}>
         <IconGitPullRequest className={cn(dimension, colorClassName)} />
         <AutomationIndicatorDots
           autoFixEnabled={autoFixEnabled}
           autoMergeEnabled={autoMergeEnabled}
         />
-        <PRCIBubble state={ciState} />
+        {hasMergeConflicts ? (
+          <span
+            data-testid="pr-merge-conflict-warning"
+            className={cn(CI_BUBBLE_CLASS, "text-red-500")}
+          >
+            <IconAlertTriangleFilled className="size-2" />
+          </span>
+        ) : (
+          <PRCIBubble state={ciState} />
+        )}
       </span>
-      {hasMergeConflicts && (
-        <span
-          data-testid="pr-merge-conflict-warning"
-          className="inline-flex h-3 w-3 shrink-0 items-center justify-center text-red-500"
-        >
-          <IconAlertTriangleFilled className="h-3 w-3" />
-        </span>
-      )}
     </span>
   );
 }

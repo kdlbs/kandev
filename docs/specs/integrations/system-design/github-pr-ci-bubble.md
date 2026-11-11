@@ -20,8 +20,9 @@ Dependencies:
 - [Bounded task delivery](../../platform/system-design/bounded-task-status-delivery.md): bounded persisted task projections.
 - [Replayable migrations](../../../decisions/0027-replayable-schema-migrations.md).
 
-The requirements and design were promoted to active and current after delivery. The completed approval-badge package remains historical evidence.
-During implementation, reconcile its active placement clauses with this package. Do not reset completed work orders or rewrite historical results.
+The original CI-bubble package completed on November 10. Its completed work orders and results remain historical evidence.
+The November 11 corner-badge amendment is implemented in its linked fix work order.
+The amendment restores conflict priority in the shared corner slot. Provider data, CI classification, and freshness selection retain their existing contracts.
 The base icon's existing color, review precedence, and merge permissions remain independent.
 No new ADR is needed for this local display extension.
 
@@ -34,13 +35,14 @@ All suffixes reference `AC-INTEGRATIONS-GITHUB-PR-CI-BUBBLE-001`.
 | .1-.4, .7-.8, .14, .17 | CI classification |
 | .5-.6, .13, .17 | Selected check summary |
 | .8, .12-.14 | Compact projection and freshness |
-| .9-.11, .15-.16 | Shared presentation |
+| .9-.12, .15-.16, .18 | Shared presentation |
 
 ## CI classification
 
 Add the display-only `PRCIState` union to `lib/types/github-checks.ts`:
 `none`, `failed`, `approval_required`, `attention`, and `in_progress`.
 `none` means no CI bubble. It does not certify successful checks.
+The classification table selects a CI state independently of conflict presentation. A conflict can hide its marker without changing that state.
 
 A pure `components/github/pr-ci-state.ts` helper derives and aggregates this value from full `TaskPR` records.
 The backend summary projector uses the same ordered decision table, covered by equivalent fixtures.
@@ -60,7 +62,8 @@ In particular, count differences do not establish running jobs.
 Preserve the selected-check reducer's active-workflow signal when jobs have not appeared yet.
 
 Reuse `getTaskPRWorkflowAttention` and `isWorkflowApprovalRequired` for workflow eligibility.
-An approval-only workflow does not become a failed check. If real failure and approval coexist, show the cross and retain both explanations.
+An approval-only workflow does not become a failed check.
+Without conflicts, real failure takes priority over approval. Details retain both explanations regardless of the visible corner badge.
 Unexplained provider attention remains attention, rather than an invented approval gate.
 Same-head stale workflow positives retain the existing qualified explanation.
 
@@ -148,13 +151,24 @@ Extend `PRStatusGlyph` with an explicit `ciState` prop.
 Use a 10px upper-right wrapper and an 8px inner symbol, with a background halo.
 Reuse existing red status tokens and approval amber `#D97706` in light mode, `#FBBF24` in dark mode.
 The progress ring animates only under `motion-safe`; its static shape still communicates progress.
-`none` renders no upper-right element. Success never produces a green bubble.
+`PRStatusGlyph` owns one relative container and one upper-right badge slot.
+When `hasMergeConflicts` is true, render `IconAlertTriangleFilled` in that slot and omit `PRCIBubble`.
+Reuse the 10px wrapper, 8px triangle, background halo, and `absolute -right-1 -top-1` placement.
+Retain `pr-merge-conflict-warning` as the conflict test identifier.
+Otherwise render `PRCIBubble` from the unchanged `ciState` prop.
+Without conflicts, `none` renders no upper-right element. Success never produces a green bubble.
 
-Move the conflict triangle into a separate inline trailing slot beside the PR glyph.
-Reserve its width only when a conflict exists. The PR count follows the complete glyph/conflict group.
+The base glyph retains its existing inline footprint. Remove the trailing conflict span and its flex gap.
+The PR count follows the glyph without a reserved conflict column.
 Keep auto-fix at the upper-left and auto-merge at the lower-right.
-Update wrappers that assume a fixed 14px total width so they account for the inline conflict indicator.
 Keep the 14px task and 16px top-bar base glyph sizes.
+
+Badge priority is presentation-only: conflict, then the existing ordered CI state.
+Do not clear or replace `ciState` upstream to hide its marker.
+Existing accessible-name builders and disclosure projections continue to receive both conflict and CI evidence.
+For multi-PR glyphs, any eligible open-PR conflict wins the corner, even when CI belongs to another open sibling.
+Details retain each condition's repository and PR identity. Terminal siblings contribute neither condition.
+After conflict resolution, the next render uses the already selected CI state. No new fetch or local recovery timer is needed.
 
 Consumers:
 
@@ -187,13 +201,16 @@ No new route, sheet, badge button, or independent scroll owner is needed.
 
 Desktop hover/focus retains the current details. Phone tap opens the existing drawer without selecting the task.
 The existing drawer body owns scrolling, dynamic viewport bounds, and safe-area clearance.
-The whole PR control owns the touch target. Recalculate it for the wider conflict group and prove at least 44px on phones and coarse pointers.
+The whole PR control owns the touch target. Preserve its effective 44px minimum on phones and coarse pointers despite the smaller visual group.
 Fine-pointer desktop controls retain their existing density.
 Measure containment at the canonical phone viewport and just below/above 768px, including a narrow fine-pointer phone viewport.
 Verify focus return, reduced motion, light/dark status meaning, and no document horizontal overflow.
+Rendered checks compare the conflict badge with the main PR SVG: the badge overlaps its right edge and extends above its top edge.
+Measure both glyph sizes and the allocated inline width. Presence assertions alone cannot detect a trailing-triangle regression.
 
 ## Delivery and compatibility
 
 The [plan](../../../plans/github-pr-ci-bubble/plan.md) sequences additive metadata/projection, presentation, then browser evidence and documentation.
+The [corner-badge fix](../../../plans/pr-conflict-corner-badge/plan.md) amends presentation and its regression coverage without reopening that completed delivery.
 Current runtime flags, credentials, check selection, CI cache policy, and merge/repair authorization remain outside this extension.
 No new metrics are required. Existing sync logs and the projected API state provide diagnostic evidence.

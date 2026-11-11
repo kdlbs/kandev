@@ -3,6 +3,7 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { Page } from "@playwright/test";
+import { expectConflictCornerGeometry } from "../../helpers/pr-badge-geometry";
 
 async function seedCITest(
   apiClient: ApiClient,
@@ -157,7 +158,7 @@ test.describe("PR CI bubble", () => {
     await expect(icon).toHaveClass(/text-muted-foreground/);
   });
 
-  test("keeps conflict, CI, and automation visible together", async ({
+  test("prioritizes conflict in the badge while keeping CI details and automation", async ({
     testPage,
     apiClient,
     seedData,
@@ -203,32 +204,27 @@ test.describe("PR CI bubble", () => {
     await testPage.goto("/tasks");
     const icon = sidebarIcon(testPage, task.id, title);
     await expect(icon).toBeVisible({ timeout: 15_000 });
-    await expect(icon.getByTestId("pr-ci-bubble-failed")).toBeVisible();
+    await expect(icon.getByTestId("pr-ci-bubble-failed")).toHaveCount(0);
     await expect(icon.getByTestId("pr-merge-conflict-warning")).toBeVisible();
     await expect(icon.getByTestId("pr-task-automation-auto-fix")).toBeVisible();
     await expect(icon.getByTestId("pr-task-automation-auto-merge")).toBeVisible();
     await expect(icon).toHaveAttribute("aria-label", /Checks failed/);
     await expect(icon).toHaveAttribute("aria-label", /Conflicts/);
 
-    const geometry = await icon.evaluate((element) => {
-      const bubble = element.querySelector<HTMLElement>('[data-testid="pr-ci-bubble-failed"]');
-      const conflict = element.querySelector<HTMLElement>(
-        '[data-testid="pr-merge-conflict-warning"]',
-      );
-      if (!bubble || !conflict) return null;
-      const bubbleBox = bubble.getBoundingClientRect();
-      const conflictBox = conflict.getBoundingClientRect();
-      return {
-        bubble: { left: bubbleBox.left, right: bubbleBox.right, top: bubbleBox.top },
-        conflict: { left: conflictBox.left, right: conflictBox.right, top: conflictBox.top },
-      };
-    });
-    expect(geometry).not.toBeNull();
-    expect(geometry!.conflict.left).toBeGreaterThanOrEqual(geometry!.bubble.right - 1);
-    expect(geometry!.conflict.top).toBeGreaterThanOrEqual(geometry!.bubble.top - 1);
+    await expectConflictCornerGeometry(icon, 14);
     await prCapture.screenshot("desktop-ci-conflict-automation", {
-      caption: "CI bubble, inline conflict triangle, and automation dots stay independent.",
+      caption: "The conflict triangle takes the corner while CI details and automation remain.",
     });
+
+    await icon.hover();
+    const summary = testPage
+      .locator('[data-slot="tooltip-content"]:not([data-state="closed"])')
+      .getByTestId("pr-task-summary-scroll-body")
+      .getByTestId("pr-task-status-summary")
+      .filter({ hasText: "PR #602" })
+      .first();
+    await expect(summary.getByTestId("pr-task-status-ci")).toContainText("Failed");
+    await expect(summary.getByTestId("pr-task-status-merge")).toContainText("Conflicts");
   });
 
   test("explains all-skipped checks without a bubble or a passed claim", async ({
@@ -302,7 +298,11 @@ test.describe("PR CI bubble", () => {
     await expect(ciRow).toContainText("Last detailed observation");
   });
 
-  test("mirrors draft CI failure in the task topbar", async ({ testPage, apiClient, seedData }) => {
+  test("uses the conflict corner badge in the task topbar and retains failed CI", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     test.setTimeout(120_000);
     const title = "Topbar draft CI bubble";
     const { task } = await seedCITest(
@@ -315,7 +315,8 @@ test.describe("PR CI bubble", () => {
     await apiClient.mockGitHubAssociateTaskPR({
       ...basePR(task.id, seedData.workspaceId, seedData.repositoryId, 604),
       checks_state: "failure",
-      mergeable_state: "draft",
+      mergeable_state: "dirty",
+      has_merge_conflicts: true,
     });
     await seedCheck(apiClient, 604, "failure");
     await waitForCIState(apiClient, seedData.workspaceId, task.id, "failed");
@@ -325,8 +326,11 @@ test.describe("PR CI bubble", () => {
     await session.waitForLoad();
     const button = session.prTopbarButton();
     await expect(button).toBeVisible({ timeout: 15_000 });
-    await expect(button.getByTestId("pr-ci-bubble-failed")).toBeVisible();
+    await expect(button.getByTestId("pr-ci-bubble-failed")).toHaveCount(0);
+    await expect(button.getByTestId("pr-merge-conflict-warning")).toBeVisible();
     await expect(button).toHaveAttribute("aria-label", /Checks failed/);
+    await expect(button).toHaveAttribute("aria-label", /Conflicts/);
+    await expectConflictCornerGeometry(button, 16);
   });
 });
 
