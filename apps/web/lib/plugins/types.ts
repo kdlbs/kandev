@@ -381,7 +381,7 @@ export type PluginTaskFilterRegistrationKey = `${string}:${string}`;
  */
 export type TaskFilterRegistration = PluginSDK.TaskFilterRegistration;
 
-/** A plugin-provided, client-side facet for sorting and grouping `/tasks`. */
+/** A client-side facet for `/tasks` sorting/grouping and saved sidebar view grouping. */
 export type TaskListFacetContext = PluginSDK.TaskListFacetContext;
 export type TaskListFacetRegistration = PluginSDK.TaskListFacetRegistration;
 export type TaskListFacetValue = PluginSDK.TaskListFacetValue;

@@ -853,7 +853,7 @@ export interface TaskListFacetContext {
   workspaceId?: string;
 }
 
-/** A synchronous, page-local facet contribution for the host task list. */
+/** A synchronous, page-local facet for the task list and saved sidebar view grouping. */
 export interface TaskListFacetRegistration {
   id: string;
   label: string;

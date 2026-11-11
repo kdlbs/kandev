@@ -6,6 +6,7 @@ import {
   multiSelectReducer,
   useTaskMultiSelectStore,
 } from "./use-task-multi-select";
+import type { TaskSelectionRange } from "./use-task-multi-select";
 import { useTaskActions, type TaskActionOptions } from "./use-task-actions";
 import { useTaskRemoval, useTaskRemovalSuccessNotifier } from "./use-task-removal";
 import { useTaskWorkflowMove } from "./use-task-workflow-move";
@@ -154,13 +155,14 @@ export function useSidebarMultiSelect(workspaceId: string | null) {
   }, [workspaceId]);
 
   const toggleSelect = useCallback(
-    (taskId: string) => dispatch({ type: "toggle_select", taskId }),
+    (taskId: string, occurrenceId?: string) =>
+      dispatch({ type: "toggle_select", taskId, occurrenceId }),
     [],
   );
 
   const selectRange = useCallback(
-    (taskId: string, orderedIds: string[]) =>
-      dispatch({ type: "select_range", taskId, orderedIds }),
+    (taskId: string, orderedIds: string[], occurrence?: TaskSelectionRange) =>
+      dispatch({ type: "select_range", taskId, orderedIds, occurrence }),
     [],
   );
 

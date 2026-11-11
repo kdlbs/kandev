@@ -8,6 +8,12 @@ import { sidebarSortHasKey } from "@/lib/sidebar/sidebar-sort-chain";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 
 type TaskSwitcherComponentProps = ComponentProps<typeof TaskSwitcher>;
+export type TaskSessionSidebarProps = {
+  workspaceId: string | null;
+  workflowId: string | null;
+  /** Hide the embedded filter bar when the host surface (e.g. AppSidebar) renders its own. */
+  hideFilterBar?: boolean;
+};
 
 /**
  * Maps the sidebar's assembled hook state onto `TaskSwitcher`'s prop names.

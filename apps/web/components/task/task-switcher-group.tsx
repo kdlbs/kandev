@@ -1,6 +1,7 @@
 import { IconChevronDown } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import { isBoundedCssColor } from "@/components/plugins/web-app-appearance";
 
 export function TaskSwitcherSkeleton() {
   return (
@@ -17,6 +18,7 @@ export function GroupHeader({
   id,
   controlsId,
   label,
+  color,
   groupKey,
   count,
   isCollapsed,
@@ -26,6 +28,7 @@ export function GroupHeader({
   id?: string;
   controlsId?: string;
   label: string;
+  color?: string;
   groupKey: string;
   count: number;
   isCollapsed: boolean;
@@ -52,6 +55,14 @@ export function GroupHeader({
           isCollapsed && "-rotate-90",
         )}
       />
+      {isBoundedCssColor(color) && (
+        <span
+          aria-hidden="true"
+          data-testid="sidebar-group-color"
+          className="h-2 w-2 shrink-0 rounded-full"
+          style={{ backgroundColor: color }}
+        />
+      )}
       <span className="flex-1 truncate text-left text-[12px] font-semibold text-foreground/90">
         {label}
       </span>

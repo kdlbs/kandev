@@ -76,6 +76,18 @@ afterEach(() => {
 });
 
 describe("useSidebarMultiSelect", () => {
+  it("keeps repeated row identity for ranges while exposing only deduplicated task IDs", () => {
+    const { result } = renderHook(() => useSidebarMultiSelect("ws1"));
+    act(() => result.current.toggleSelect("b", "beta:b"));
+    act(() =>
+      result.current.selectRange("a", ["a", "x", "b", "a"], {
+        key: "beta:a",
+        orderedKeys: ["alpha:a", "alpha:x", "beta:b", "beta:a"],
+      }),
+    );
+    expect(result.current.selectedIds).toEqual(new Set(["a", "b"]));
+  });
+
   it("toggles, ranges, and clears the selection", () => {
     const { result } = renderHook(() => useSidebarMultiSelect("ws1"));
     expect(result.current.isSelecting).toBe(false);

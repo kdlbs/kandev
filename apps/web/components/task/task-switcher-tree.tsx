@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 export type TaskRowBaseProps = Omit<
   TaskRowProps,
   | "task"
+  | "occurrenceId"
   | "nestCandidateTasks"
   | "getNestCandidateTasks"
   | "getNestHierarchyTasks"
@@ -28,6 +29,7 @@ export type TaskRowBaseProps = Omit<
 
 type TaskTreeContext = {
   subTasksByParentId: Map<string, TaskSwitcherItem[]>;
+  sectionKey?: string;
   collapsedSubs: Set<string>;
   onToggleSubtasks?: (parentTaskId: string) => void;
   pinnedSet: Set<string>;
@@ -60,7 +62,8 @@ function nodeSubtreeEqual(
   if (visited.has(taskId)) return true;
   visited.add(taskId);
   if (
-    previous.collapsedSubs.has(taskId) !== next.collapsedSubs.has(taskId) ||
+    previous.collapsedSubs.has(subtaskCollapseKey(previous, taskId)) !==
+      next.collapsedSubs.has(subtaskCollapseKey(next, taskId)) ||
     previous.nestTargetIds.has(taskId) !== next.nestTargetIds.has(taskId)
   ) {
     return false;
@@ -100,21 +103,36 @@ function taskTreeNodeEqual(previous: TaskTreeNodeProps, next: TaskTreeNodeProps)
   return nodeSubtreeEqual(previous.task.id, previous.ctx, next.ctx, new Set());
 }
 
+function subtaskCollapseKey(ctx: TaskTreeContext, taskId: string): string {
+  return ctx.sectionKey ? JSON.stringify([ctx.sectionKey, taskId]) : taskId;
+}
+
+function TaskContinuationLabel({ title }: { title?: string }) {
+  const { t } = useTranslation();
+  if (!title) return null;
+  return (
+    <div className="truncate pl-3 pt-1 text-xs text-muted-foreground">
+      {t("sidebar:continuedFrom", { title })}
+    </div>
+  );
+}
+
 const TaskTreeNode = memo(function TaskTreeNode({
   task,
   depth,
   ctx,
   isDraggable,
 }: TaskTreeNodeProps) {
-  const { t } = useTranslation();
   const subs = ctx.subTasksByParentId.get(task.id);
   const subtaskCount =
-    task.subtaskCount ?? (subs ? countGroupTasks(subs, ctx.subTasksByParentId) : 0);
+    (!ctx.sectionKey ? task.subtaskCount : undefined) ??
+    (subs ? countGroupTasks(subs, ctx.subTasksByParentId) : 0);
   const hasSubs = subtaskCount > 0 || !!subs?.length;
-  const subsHidden = hasSubs && !!ctx.onToggleSubtasks && ctx.collapsedSubs.has(task.id);
+  const collapseKey = subtaskCollapseKey(ctx, task.id);
+  const subsHidden = hasSubs && !!ctx.onToggleSubtasks && ctx.collapsedSubs.has(collapseKey);
   const handleToggleSubtasks = useCallback(
-    () => ctx.onToggleSubtasks?.(task.id),
-    [ctx.onToggleSubtasks, task.id],
+    () => ctx.onToggleSubtasks?.(collapseKey),
+    [ctx.onToggleSubtasks, collapseKey],
   );
   const toggleInfo: SubtaskToggleInfo | undefined = useMemo(
     () =>
@@ -133,11 +151,7 @@ const TaskTreeNode = memo(function TaskTreeNode({
     // The relative wrapper keeps the nest drop zone pinned to this row's
     // left edge rather than spanning the nested subtree below it.
     <div className="relative">
-      {task.continuationParentTitle && (
-        <div className="truncate pl-3 pt-1 text-xs text-muted-foreground">
-          {t("sidebar:continuedFrom", { title: task.continuationParentTitle })}
-        </div>
-      )}
+      <TaskContinuationLabel title={task.continuationParentTitle} />
       <TaskRow
         task={task}
         depth={depth}
@@ -145,6 +159,7 @@ const TaskTreeNode = memo(function TaskTreeNode({
         subtaskToggle={toggleInfo}
         isPinned={isRoot && ctx.pinnedSet.has(task.id)}
         {...ctx.rowProps}
+        occurrenceId={ctx.sectionKey ? collapseKey : undefined}
         getNestCandidateTasks={ctx.getNestCandidateTasks}
         getNestHierarchyTasks={ctx.getNestHierarchyTasks}
         onTogglePin={isRoot ? ctx.rowProps.onTogglePin : undefined}
@@ -186,7 +201,7 @@ function TaskTreeLevel({
       externalDragContext={ctx.externalDragContext}
       renderNode={(task, levelDraggable) => (
         <TaskTreeNode
-          key={task.id}
+          key={ctx.sectionKey ? JSON.stringify([ctx.sectionKey, task.id]) : task.id}
           task={task}
           depth={depth}
           ctx={ctx}
@@ -347,6 +362,7 @@ export const GroupSection = memo(function GroupSection({
     if (isCollapsed) return null;
     const ctx: TaskTreeContext = {
       subTasksByParentId,
+      sectionKey: group.subTasksByParentId ? group.key : undefined,
       collapsedSubs: new Set(collapsedSubtaskParentIds ?? []),
       onToggleSubtasks,
       pinnedSet,
@@ -382,6 +398,7 @@ export const GroupSection = memo(function GroupSection({
           id={headerId}
           controlsId={bodyId}
           label={group.label}
+          color={group.color}
           groupKey={group.key}
           count={totalCount}
           isCollapsed={isCollapsed}
