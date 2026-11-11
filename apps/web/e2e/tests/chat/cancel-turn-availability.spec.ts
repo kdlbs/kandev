@@ -58,12 +58,16 @@ test.describe.serial("Cancel turn availability", () => {
     cancellation.arm(sessionId);
     try {
       await cancelButton.click();
+      // Read presence and disabled state together: cancellation can remove the
+      // button between separate locator calls.
       await expect
         .poll(
-          async () => {
-            if (!(await cancelButton.isVisible().catch(() => false))) return true;
-            return cancelButton.isDisabled();
-          },
+          () =>
+            cancelButton.evaluateAll((buttons) =>
+              buttons.every(
+                (button) => button.matches(":disabled") || button.getClientRects().length === 0,
+              ),
+            ),
           { timeout: 15_000 },
         )
         .toBe(true);
