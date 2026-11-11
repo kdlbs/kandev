@@ -69,6 +69,7 @@ type Repository interface {
 	ListTasksByWorkspace(ctx context.Context, workspaceID string, includeSystem bool) ([]*sqlite.TaskRow, error)
 	ListTasksFiltered(ctx context.Context, workspaceID string, opts sqlite.ListTasksOptions) (*sqlite.ListTasksFilteredResult, error)
 	GetTaskByID(ctx context.Context, taskID string) (*sqlite.TaskRow, error)
+	GetTaskIDByIdentifier(ctx context.Context, workspaceID, identifier string) (string, error)
 	ListChildTasks(ctx context.Context, parentID string) ([]*sqlite.TaskRow, error)
 	ListBlockersForTasks(ctx context.Context, taskIDs []string) (map[string][]string, error)
 	ListTaskComments(ctx context.Context, taskID string) ([]*models.TaskComment, error)
@@ -858,6 +859,12 @@ func (s *DashboardService) ListTasksFiltered(
 // GetTask returns a single task by ID. Returns nil, nil when not found.
 func (s *DashboardService) GetTask(ctx context.Context, taskID string) (*sqlite.TaskRow, error) {
 	return s.repo.GetTaskByID(ctx, taskID)
+}
+
+// ResolveTaskIdentifier returns the task id for a workspace-scoped identifier
+// such as "KAN-11". Returns "", nil when no task matches.
+func (s *DashboardService) ResolveTaskIdentifier(ctx context.Context, workspaceID, identifier string) (string, error) {
+	return s.repo.GetTaskIDByIdentifier(ctx, workspaceID, identifier)
 }
 
 // ListChildTasks returns direct child tasks of a parent task.

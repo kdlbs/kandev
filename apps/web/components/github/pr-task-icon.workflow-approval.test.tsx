@@ -12,7 +12,7 @@ const getTaskCIAutomationOptionsMock = vi.hoisted(() => vi.fn());
 const TASK_ID = "task-1";
 const WORKSPACE_ID = "workspace-1";
 const ARIA_LABEL_ATTRIBUTE = "aria-label";
-const APPROVAL_WARNING_TEST_ID = "pr-workflow-approval-warning";
+const APPROVAL_WARNING_TEST_ID = "pr-ci-bubble-approval-required";
 const STATUS_ENTRY_TEST_ID = "pr-task-status-entry";
 const APPROVAL_LABEL = "Awaiting maintainer approval";
 const STALE_STATUS_COPY = "Last known status. GitHub could not provide a fresh workflow result.";
@@ -178,7 +178,7 @@ describe("PRTaskIcon workflow approval conflict priority", () => {
 
     const icon = screen.getByTestId(`pr-task-icon-${TASK_ID}`);
     expect(icon.querySelector('[data-testid="pr-merge-conflict-warning"]')).not.toBeNull();
-    expect(icon.querySelector(`[data-testid="${APPROVAL_WARNING_TEST_ID}"]`)).toBeNull();
+    expect(icon.querySelector(`[data-testid="${APPROVAL_WARNING_TEST_ID}"]`)).not.toBeNull();
     expect(icon.getAttribute(ARIA_LABEL_ATTRIBUTE)).toContain("Conflicts");
     expect(icon.getAttribute(ARIA_LABEL_ATTRIBUTE)).toContain(APPROVAL_LABEL);
     const matches = vi.spyOn(icon, "matches").mockReturnValue(true);
@@ -379,7 +379,7 @@ describe("PRTaskIcon current-head workflow approval evidence", () => {
 
     const icon = screen.getByTestId(`pr-task-icon-${TASK_ID}`);
     expect(icon.querySelector('[data-testid="pr-merge-conflict-warning"]')).not.toBeNull();
-    expect(icon.querySelector(`[data-testid="${APPROVAL_WARNING_TEST_ID}"]`)).toBeNull();
+    expect(icon.querySelector(`[data-testid="${APPROVAL_WARNING_TEST_ID}"]`)).not.toBeNull();
     expect(icon.getAttribute(ARIA_LABEL_ATTRIBUTE)).toContain("Conflicts");
     expect(icon.getAttribute(ARIA_LABEL_ATTRIBUTE)).toContain(APPROVAL_LABEL);
     const matches = vi.spyOn(icon, "matches").mockReturnValue(true);

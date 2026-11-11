@@ -40,12 +40,16 @@ test.describe("Task create relationships on mobile", () => {
     const dialog = testPage.getByTestId("create-task-dialog");
     await dialog.getByTestId("task-create-advanced-settings-trigger").tap();
     const parentTrigger = dialog.getByTestId("task-create-parent-trigger");
-    expect((await parentTrigger.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await expect
+      .poll(async () => (await parentTrigger.boundingBox())?.height ?? 0)
+      .toBeGreaterThanOrEqual(44);
     await assertLocatorWithinViewportX(parentTrigger, "Parent selector");
     await parentTrigger.tap();
     await dialog.getByTestId(`task-create-parent-option-${parent.id}`).tap();
     const relatedTrigger = dialog.getByTestId("task-create-related-trigger");
-    expect((await relatedTrigger.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await expect
+      .poll(async () => (await relatedTrigger.boundingBox())?.height ?? 0)
+      .toBeGreaterThanOrEqual(44);
     await assertLocatorWithinViewportX(relatedTrigger, "Related-to selector");
     await relatedTrigger.tap();
     await dialog.getByTestId(`task-create-related-option-${related.id}`).tap();
@@ -65,7 +69,9 @@ test.describe("Task create relationships on mobile", () => {
     await testPage.getByRole("menuitem", { name: "Create Subtask", exact: true }).tap();
     const subtaskDialog = testPage.getByTestId("new-subtask-dialog");
     const subtaskRelated = subtaskDialog.getByTestId("task-create-related-trigger");
-    expect((await subtaskRelated.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await expect
+      .poll(async () => (await subtaskRelated.boundingBox())?.height ?? 0)
+      .toBeGreaterThanOrEqual(44);
     await subtaskRelated.tap();
     await subtaskDialog.getByTestId(`task-create-related-option-${related.id}`).tap();
     await assertLocatorWithinViewportX(subtaskRelated, "subtask Related-to selector");

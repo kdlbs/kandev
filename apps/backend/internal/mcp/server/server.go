@@ -1931,7 +1931,7 @@ func (s *Server) updateRepositoryBaseBranchHandler() server.ToolHandlerFunc {
 func (s *Server) registerStepCompleteTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("step_complete_kandev",
-			mcp.WithDescription(`Complete the current workflow step as your final action. Do not call before asking the user or during partial work; put blockers in blockers. The signal is idempotent, transitions run asynchronously, and a new user message cancels it. If the response says the workflow step changed, this turn is stale: retries cannot recover. End it and ask the user to resume the session for the current step, then complete it in the new turn. This differs from already_signaled, which means the signal was accepted. Do not move the task solely to bypass a stale-turn error.`),
+			mcp.WithDescription(`Complete the current workflow step as your final action. Do not call before a question or partial work; put blockers in blockers. Signal is idempotent per source turn; a later turn in the same step can replace an unconsumed signal. Response reports signal_id, source, outcome, transition proof, current route. pending means recorded, not committed, and never proves reviewer delivery. If the workflow step changed, retries cannot recover: end the turn, ask the user to resume the session for the current step, then complete it in the new turn. already_signaled returns the retained outcome. Do not move the task solely to bypass a stale-turn error.`),
 			mcp.WithString("summary", mcp.Required(), mcp.Description("One-paragraph plain-text summary of what was done in this step. Shown to the user.")),
 			mcp.WithString("handoff", mcp.Description("Optional context for the immediately-following step's agent, delivered once in that step's first prompt and not carried beyond it. Up to 8,192 bytes; longer values are truncated.")),
 			mcp.WithString("blockers", mcp.Description("Optional list of known unresolved issues. Recorded on this step's transition history, not delivered to the next step's agent — do not use it to pass context forward. Use sparingly, only when you cannot make further progress without input. Up to 8,192 bytes; longer values are truncated.")),
@@ -2029,6 +2029,25 @@ const askUserQuestionOutputSchema = `{
             "path": {"type": "string", "description": "Readable path inside the current execution."}
           },
           "required": ["attachment_id", "name", "path"],
+          "additionalProperties": false
+        }
+      },
+      "annotations": {
+        "type": "array",
+        "description": "Regions the user marked on this question's images, each with a comment. Coordinates are image pixels of the image as the user saw it; image_width and image_height give that size.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "image_id": {"type": "string", "description": "ID of the question or choice image the region is on."},
+            "x": {"type": "integer"},
+            "y": {"type": "integer"},
+            "width": {"type": "integer"},
+            "height": {"type": "integer"},
+            "image_width": {"type": "integer"},
+            "image_height": {"type": "integer"},
+            "comment": {"type": "string"}
+          },
+          "required": ["image_id", "x", "y", "width", "height", "image_width", "image_height", "comment"],
           "additionalProperties": false
         }
       },

@@ -55,6 +55,12 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 	if enabled, err := store.ListEnabledIssueWatches(ctx); err != nil || len(enabled) != 1 {
 		t.Fatalf("list enabled Jira issue watches: watches=%d err=%v", len(enabled), err)
 	}
+	if _, err := database.Exec(`CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatalf("create tasks fixture: %v", err)
+	}
+	if _, err := database.Exec(`INSERT INTO tasks (id) VALUES ($1)`, "task-1"); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
 
 	reserved, err := store.ReserveIssueWatchTask(ctx, watch.ID, "ENG-123", "https://jira.example.com/browse/ENG-123")
 	if err != nil || !reserved {

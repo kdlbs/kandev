@@ -13,6 +13,10 @@ This document is the migrated task-system source for the capability. The source 
 
 ## Requirements
 
+The [completion outcomes contract](workflow-completion-outcomes.md) extends
+source identity and result reporting. It narrows duplicate scope to one source
+turn without changing the stale-entry or clarification guards below.
+
 ### REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-001: Explicit Workflow-Step Completion Signal
 
 **Intent:** Preserve the observable task or workflow behavior recorded by the legacy specification.

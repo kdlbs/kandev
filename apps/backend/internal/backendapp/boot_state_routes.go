@@ -687,6 +687,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"shellOptions":                    response.ShellOptions,
 		"defaultEditorId":                 nullString(settings.DefaultEditorID),
 		"enablePreviewOnClick":            settings.EnablePreviewOnClick,
+		"escapeCancelsAgent":              settings.EscapeCancelsAgent,
 		"chatSubmitKey":                   defaultString(settings.ChatSubmitKey, "cmd_enter"),
 		"reviewAutoMarkOnScroll":          settings.ReviewAutoMarkOnScroll,
 		"confirmTaskArchive":              settings.ConfirmTaskArchive,

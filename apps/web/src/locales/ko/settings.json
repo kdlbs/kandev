@@ -489,6 +489,8 @@
   "memory": "메모리 %",
   "mergeThisSplitIntoTheSplit": "이 분할을 {{target}}이 있는 분할에 병합합니다.",
   "mergeWithTarget": "{{target}}과 병합",
+  "escapeCancelsAgent": "Escape 키로 에이전트 일시 중지",
+  "escapeCancelsAgentDescription": "채팅 입력창에서 Escape 키를 눌러 실행 중인 에이전트를 일시 중지합니다.",
   "messageSubmitKey": "메시지 전송 키",
   "messageTimeDisplay": "메시지 시간",
   "messageTimeDisplayDescription": "메시지 타임스탬프 표시 방식을 선택하세요. 타임스탬프에 마우스를 올리거나 탭하면 다른 형식을 볼 수 있습니다.",

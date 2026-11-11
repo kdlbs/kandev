@@ -204,6 +204,13 @@ A retry keeps one task, session, turn and submission identity through queued sta
 
 The scheduler checks every 30 seconds and computes each expression's next calendar fire time in its configured timezone. A schedule created part-way through the day first fires at its next scheduled occurrence after creation (not immediately). A schedule missed while the backend was stopped fires once on the next check rather than once per missed occurrence.
 
+Editing a saved schedule starts the new definition at its first occurrence after the successful save. Earlier occurrences of the replacement expression do not run, so changing a weekday or time does not replay history.
+
+- **Replacement:** a changed cron expression or effective timezone starts a new schedule boundary.
+- **Not a replacement:** JSON formatting, expression whitespace, an empty timezone versus `UTC`, or a timezone field that an `@every` or `TZ=`/`CRON_TZ=` expression ignores. These saves keep the pending occurrence.
+
+Clearing the expression stops automatic runs. Entering a non-empty expression later starts from that later save.
+
 <DocsVideo
   webm="./media/feature-guides/scheduled-workflow-automation.webm"
   mp4="./media/feature-guides/scheduled-workflow-automation.mp4"
@@ -1043,7 +1050,9 @@ The HTTP equivalent is `POST /api/v1/tasks/:id/workspace-sources`, with `{ "sour
 
 `step_complete_kandev` is registered and discoverable in every task-mode session, and in Office sessions per ADR 0015. Kandev includes its completion instruction, and acts on its signal, only on steps whose auto-advance action explicitly requires that signal: on Kanban boards this is opt-in per step, while office-default's `work` step ships with the requirement on. A user message arriving before transition can cancel that automatic move.
 
-If an agent resumes itself after background work finishes, its new output turn can signal completion for the workflow entry in which that turn started. An older turn stays tied to its original entry, including when the task leaves and returns to the same step.
+The tool result separates acceptance from movement. `accepted: true` with a `pending` outcome means the signal is durably recorded. It does not prove that a transition committed, that the task entered the workflow step named Review, or that a reviewer received the handoff. A committed result includes the exact `transition` ledger and destination. A duplicate returns `already_signaled` with the retained `signal_id`, `source`, `outcome`, `transition` when one exists, and a `current` snapshot of the task route.
+
+If an agent resumes itself after background work finishes, its new output turn can signal completion for the workflow entry in which that turn started. A later turn in the same entry can replace an unconsumed earlier signal with its own summary and handoff. An older turn stays tied to its original entry, including when the task leaves and returns to the same step. A native verification turn without another completion call leaves the accepted handoff unchanged.
 
 When the response says that the workflow step or entry changed, the calling turn is stale. A step-change error identifies the launch and current steps. Retrying the same stale turn cannot recover. End the turn and have the user resume the session, then complete the current step and call the tool from the fresh turn. A normal manual workflow move remains available to an operator after verifying the work and destination. This recovery path does not grant an agent automatic move authority.
 
@@ -1554,7 +1563,7 @@ workspace. Unknown and unauthorized task/session IDs return the same not-found r
 
 ## Troubleshooting
 
-- **No scheduled run:** confirm the cron expression is valid five-field or `@`-shorthand text and the automation/trigger is enabled; a schedule fires at its next occurrence after creation, not immediately.
+- **No scheduled run:** confirm the cron expression is valid five-field or `@`-shorthand text and the automation/trigger is enabled; a schedule fires at its next occurrence after creation or after its expression or effective timezone changes, not immediately.
 - **No GitHub push or CI runs:** connect a workspace GitHub App whose installation is subscribed to `push`/`check_run` events, reinstall a pre-existing App so it receives them, and select explicit repositories (an empty repository list is not evaluated).
 - **Scheduled run happened as well as a PR run:** clear the schedule expression. The two stored triggers fire independently.
 - **No GitHub PR runs:** connect GitHub and select explicit repositories; **All repos** currently evaluates none.

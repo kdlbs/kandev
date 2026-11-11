@@ -56,6 +56,13 @@ func TestMapWorkflowItemStateIncludesPrompt(t *testing.T) {
 	}
 }
 
+func TestMapUserSettingsStateIncludesEscapeCancelsAgent(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{Settings: userdto.UserSettingsDTO{EscapeCancelsAgent: true}}, "workspace-1")
+	if state["escapeCancelsAgent"] != true {
+		t.Fatalf("escapeCancelsAgent = %#v, want true", state["escapeCancelsAgent"])
+	}
+}
+
 func TestMapUserSettingsStateIncludesTurnChangedFilesPreference(t *testing.T) {
 	state := mapUserSettingsState(userdto.UserSettingsResponse{
 		Settings: userdto.UserSettingsDTO{ShowTurnChangedFiles: false},

@@ -169,7 +169,8 @@ func FormatOfficeContext(taskID, sessionID string) string {
 
 const stepCompleteRecoveryInstruction = "If it reports that the workflow step changed, retries in this turn cannot recover. " +
 	"End the turn and have the user resume the session for the current step, then complete it in the new turn. " +
-	"already_signaled means the signal was accepted. " +
+	"already_signaled returns the retained outcome; pending means only that the signal was recorded, not that a transition committed or a reviewer received the handoff. " +
+	"A later turn in the same step can replace an unconsumed signal, so end the turn after an accepted signal. " +
 	"Do not move the task solely to bypass a stale-turn error.\n"
 
 const officeStepCompleteInstruction = "This workflow step requires an explicit completion signal. " +

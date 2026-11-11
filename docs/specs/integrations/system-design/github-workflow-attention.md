@@ -312,16 +312,17 @@ The observation state must equal `approval_required`; `action_required`, `unknow
 Same-head stale positives remain eligible. The task summary retains their stale flag so the last-known status stays qualified by PR after hydration.
 
 Aggregate eligibility across open PRs independently from the status-color calculation.
-`PRTaskIconView` supplies the approval flag through `PRTaskIconGlyph` to `PRStatusGlyph`.
-The new `hasWorkflowApprovalRequired` glyph prop defaults to false.
-Other glyph callers remain compatible; adding the badge to the topbar is outside this package.
+`PRTaskIconView` supplies the approval flag through the shared CI state to `PRStatusGlyph`.
+The `ciState` glyph prop defaults to `none`.
+Other glyph callers remain compatible; the topbar, subtask, and composer glyphs consume the same CI state through the [CI bubble package](github-pr-ci-bubble.md).
 
-Use Tabler `IconLockFilled` in the existing upper-right warning wrapper.
-Keep the wrapper at 10px and the glyph at 8px, matching the current conflict badge.
+Use Tabler `IconLockFilled` in the shared 10px upper-right CI bubble wrapper.
+Keep the glyph at 8px.
 Use `text-[#D97706] dark:text-[#FBBF24]` and the existing `bg-background` halo.
 Explicit colors preserve the accepted palette independently of Tailwind's amber token version.
 Keep the PR color and automation dot positions intact. Do not add animation or a separate badge interaction target.
-Render the red conflict triangle when both flags are true; retain both facts in text and accessible names.
+Render the red conflict triangle in its separate inline slot when both flags are true; retain both facts in text and accessible names.
+Conflict placement, CI priority, and skipped-check neutrality belong to the [CI bubble design](github-pr-ci-bubble.md).
 
 ### Bounded projection
 
