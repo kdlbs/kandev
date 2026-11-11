@@ -3,6 +3,9 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
+	"unicode"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
@@ -102,7 +105,7 @@ func (h *Handlers) authorizeAutomationRequest(ctx context.Context, msg *ws.Messa
 	if !ok || !principal.IsAutomation() {
 		return nil, msg, nil
 	}
-	if _, allowed := automationSurfaceActions[msg.Action]; !allowed {
+	if _, allowed := automationSurfaceActions[msg.Action]; !allowed && !automationPackageAction(ctx, msg.Action) {
 		response, err := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction,
 			"tool is not available on the automation MCP surface", nil)
 		return response, nil, err
@@ -117,7 +120,11 @@ func (h *Handlers) authorizeAutomationRequest(ctx context.Context, msg *ws.Messa
 			"Invalid payload: "+err.Error(), nil)
 		return response, nil, responseErr
 	}
-	if !h.authorizeAutomationScalarFields(ctx, principal, msg.Action, fields) ||
+	if automationLocalPackageAction(msg.Action) && ((jsonStringField(fields, "task_id") != "" && jsonStringField(fields, "task_id") != principal.CallerTaskID) || (jsonStringField(fields, "session_id") != "" && jsonStringField(fields, "session_id") != principal.CallerSessionID)) {
+		return automationNotFound(msg)
+	}
+	if !h.authorizeAutomationProfileFields(ctx, principal, msg.Action, fields) ||
+		!h.authorizeAutomationScalarFields(ctx, principal, msg.Action, fields) ||
 		!h.authorizeAutomationReferenceFields(ctx, principal, msg.Action, fields) {
 		return automationNotFound(msg)
 	}
@@ -134,6 +141,9 @@ func (h *Handlers) authorizeAutomationRequest(ctx context.Context, msg *ws.Messa
 	return nil, &replacement, nil
 }
 
+// automationPayloadFields requires lowercase ASCII root keys before authorization and typed JSON
+// decoding.
+// This prevents alternate JSON field spellings from bypassing resource checks.
 func automationPayloadFields(payload json.RawMessage) (map[string]json.RawMessage, error) {
 	fields := make(map[string]json.RawMessage)
 	if len(payload) == 0 {
@@ -141,6 +151,11 @@ func automationPayloadFields(payload json.RawMessage) (map[string]json.RawMessag
 	}
 	if err := json.Unmarshal(payload, &fields); err != nil {
 		return nil, err
+	}
+	for key := range fields {
+		if key != strings.ToLower(key) || strings.IndexFunc(key, func(r rune) bool { return r > unicode.MaxASCII }) >= 0 {
+			return nil, errors.New("payload field names must use lowercase ASCII")
+		}
 	}
 	if fields == nil {
 		fields = make(map[string]json.RawMessage)
@@ -172,6 +187,8 @@ func (h *Handlers) authorizeAutomationScalarFields(
 	return taskID == "" || h.authorizeAutomationTask(ctx, principal, taskID, action, true)
 }
 
+// authorizeAutomationReferenceFields requires referenced workflows, sessions, dependencies, steps,
+// and repositories to share the principal's workspace.
 func (h *Handlers) authorizeAutomationReferenceFields(
 	ctx context.Context,
 	principal mcpscope.Principal,
@@ -199,7 +216,7 @@ func (h *Handlers) authorizeAutomationReferenceFields(
 			return false
 		}
 	}
-	return h.authorizeAutomationRepositoryFields(ctx, principal, fields)
+	return h.authorizeAutomationStepFields(ctx, principal, fields) && h.authorizeAutomationRepositoryFields(ctx, principal, fields)
 }
 
 func (h *Handlers) authorizeAutomationRepositoryFields(
@@ -303,3 +320,82 @@ func automationNotFound(msg *ws.Message) (*ws.Message, *ws.Message, error) {
 }
 
 var _ mcpActionRegistrar = (*guardedMCPDispatcher)(nil)
+
+// The stream carries the accepted grant. Resource and caller checks still run.
+func automationPackageAction(ctx context.Context, action string) bool {
+	if action == ws.ActionMCPUpdateMcpConfig {
+		return false
+	}
+	execution, ok := streams.MCPExecutionContextFromContext(ctx)
+	if !ok || !execution.BuiltinAuthority.Required || execution.BuiltinAuthority.Manifest == nil {
+		return false
+	}
+	manifest := execution.BuiltinAuthority.Manifest
+	return manifest.AutomationID != "" && manifest.Validate() == nil && mcpscope.BuiltinPrincipalMatches(ctx, manifest) && execution.BuiltinAuthority.Allows(action)
+}
+
+// automationLocalPackageAction identifies tools whose task and session targets must match the
+// calling automation run.
+func automationLocalPackageAction(action string) bool {
+	switch action {
+	case ws.ActionMCPShowWalkthrough, ws.ActionMCPGetWalkthrough, ws.ActionMCPDeleteWalkthrough, ws.ActionMCPGetDiagnosticBundle:
+		return true
+	default:
+		return false
+	}
+}
+
+const (
+	automationStepField         = "step_id"
+	automationWorkflowStepField = "workflow_step_id"
+	automationPullFromStepField = "pull_from_step_id"
+	automationStepsField        = "step_ids"
+)
+
+const automationAgentProfileField = "agent_profile_id"
+const automationProfileField = "profile_id"
+
+// authorizeAutomationProfileFields checks agent profile ownership while preserving executor profile
+// field semantics.
+func (h *Handlers) authorizeAutomationProfileFields(ctx context.Context, principal mcpscope.Principal, action string, fields map[string]json.RawMessage) bool {
+	keys := []string{automationAgentProfileField}
+	if action != ws.ActionMCPUpdateExecutorProfile && action != ws.ActionMCPDeleteExecutorProfile {
+		keys = append(keys, automationProfileField)
+	}
+	for _, key := range keys {
+		id := jsonStringField(fields, key)
+		if id == "" {
+			continue
+		}
+		if h.agentSettingsCtrl == nil {
+			return false
+		}
+		allowed, err := h.agentSettingsCtrl.AgentProfileBelongsToWorkspace(ctx, id, principal.WorkspaceID)
+		if err != nil || !allowed {
+			return false
+		}
+	}
+	return h.taskSvc.AuthorizeWorkspaceAccess(ctx, principal.WorkspaceID) == nil
+}
+
+// authorizeAutomationStepFields verifies every supplied step through its owning workflow's
+// workspace.
+func (h *Handlers) authorizeAutomationStepFields(ctx context.Context, principal mcpscope.Principal, fields map[string]json.RawMessage) bool {
+	ids := jsonStringSliceField(fields, automationStepsField)
+	for _, key := range []string{automationStepField, automationWorkflowStepField, automationPullFromStepField} {
+		if id := jsonStringField(fields, key); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	for _, id := range ids {
+		step, err := h.taskSvc.GetWorkflowStep(ctx, id)
+		if err != nil || step == nil {
+			return false
+		}
+		workflow, err := h.taskSvc.GetWorkflow(ctx, step.WorkflowID)
+		if err != nil || workflow == nil || workflow.WorkspaceID != principal.WorkspaceID {
+			return false
+		}
+	}
+	return true
+}

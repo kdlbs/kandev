@@ -33,8 +33,9 @@
 | `requirements/automation-retries.md` + `system-design/automation-retries.md` | draft | Durable retry policy, attempt scheduling, safe recovery, and paged run history |
 | `requirements/agent-task-relations.md` + `system-design/agent-task-relations.md` | shipped | Runtime `task create` accepts `blocked_by` (read-relation scoped, ancestors allowed) and an explicit `workspace_mode`; omitted fields behave as before |
 | `requirements/blocker-terminal-policy.md` + `system-design/blocker-terminal-policy.md` | active | Only `COMPLETED` satisfies an Office blocker; a `FAILED`/`CANCELLED` blocker holds its dependents and wakes the parent's runner (or the CEO) once per failure with a `task_blocker_failed` run |
+| `requirements/human-done-final-step.md` + `system-design/human-done-final-step.md` | draft (shipped) | A user's Done (board drop or status picker) before the final workflow step moves the task to that step via the human move path; human moves into a completing step are refused while approvers are pending. Agents keep the `in_review` redirect |
 
-The nine rows above are the only entries in this table reflecting the newer
+The ten rows above are the only entries in this table reflecting the newer
 `requirements/` + `system-design/` split; the other 16 entries in this table
 predate this migration. The separately listed tier-routing specification above
 is outside this table, which has not been reconciled with the full current

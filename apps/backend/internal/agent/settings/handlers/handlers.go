@@ -109,19 +109,14 @@ func RegisterRoutesWithMCPCatalogAndMarketplaceAndSelections(
 	if repo != nil {
 		catalog := mcpconfig.NewCatalogService(repo)
 		catalog.SetWorkspaceAuthorizer(authorizer)
-		catalog.SetSelectionRepository(selectionRepositoryForCatalog(selections))
+		if selections != nil {
+			selections.ConfigureCatalogUsage(catalog)
+		}
 		handlers.catalog = catalog
 	}
 	handlers.marketplace = marketplace
 	handlers.selections = selections
 	handlers.registerHTTP(router)
-}
-
-func selectionRepositoryForCatalog(selections *mcpconfig.SelectionService) mcpconfig.SelectionRepository {
-	if selections == nil {
-		return nil
-	}
-	return selections.Repository()
 }
 
 func (h *Handlers) registerHTTP(router *gin.Engine) {

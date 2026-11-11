@@ -2,6 +2,7 @@ import type React from "react";
 import type { FileTreeNode } from "@/lib/types/backend";
 import type { FileInfo } from "@/lib/state/store";
 import type { VisibleRow } from "@/hooks/use-tree";
+import type { TaskRepositoryRoot } from "@/hooks/domains/session/use-task-repository-roots";
 
 type GitFileStatus = FileInfo["status"] | undefined;
 
@@ -33,6 +34,7 @@ export type TreeNodeRowProps = {
   selectedPaths?: Set<string>;
   showTouchActions?: boolean;
   onAddToChatContext?: (node: FileTreeNode) => void;
+  repositoryRoot?: TaskRepositoryRoot;
 };
 
 function rowIdentity(props: TreeNodeRowProps): unknown[] {
@@ -71,6 +73,7 @@ function rowIdentity(props: TreeNodeRowProps): unknown[] {
     props.selectedPaths,
     props.showTouchActions,
     props.onAddToChatContext,
+    props.repositoryRoot?.key,
   ];
 }
 

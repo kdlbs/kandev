@@ -929,8 +929,6 @@
   "queueMergeShort": "在代理读取前合并队列中的相关消息。",
   "queueAutoMergeShort": "自动合并兼容的连续消息。",
   "sleepShort": "任务运行期间防止运行 Kandev 的计算机休眠。",
-  "promptAllowAgentEdits": "允许智能体编辑",
-  "promptAgentEditsDescription": "智能体可以修改此提示词，影响所有使用它的位置。",
   "sidebarPresentation": "侧边栏外观",
   "sidebarFastActions": "显示快捷操作图标",
   "sidebarFastActionsDescription": "在相应按钮旁显示终端、快速聊天、画布设置和集成快捷方式。",
@@ -988,6 +986,7 @@
   "mcpDeleted": "MCP 服务器已删除。",
   "mcpDeleteFailed": "无法删除 MCP 服务器。",
   "mcpDeleteDescription": "删除 {{name}}？确认后，所有配置、仓库、任务或会话选择也会被删除。",
+  "mcpAutomationDeleteWarning": "删除后，自动化会保留已保存的选择，但新的智能体进程无法连接此服务器。请在每个自动化中移除或替换此服务器。",
   "mcpEnabled": "已启用",
   "mcpDisabled": "已停用",
   "mcpEnable": "启用",
@@ -1061,6 +1060,8 @@
   "mcpRepositorySelectionDescription": "为使用此仓库的任务选择 MCP 服务器。",
   "mcpProfileUsage_one": "{{count}} 个配置",
   "mcpProfileUsage_other": "{{count}} 个配置",
+  "mcpAutomationUsage_one": "{{count}} 个自动化",
+  "mcpAutomationUsage_other": "{{count}} 个自动化",
   "mcpRepositoryUsage_one": "{{count}} 个仓库",
   "mcpRepositoryUsage_other": "{{count}} 个仓库",
   "mcpTaskUsage_one": "{{count}} 个任务",
@@ -1221,5 +1222,8 @@
   "builtinMcp.backToPackages": "返回工具包",
   "builtinMcp.packageDetails": "工具包详情",
   "builtinMcp.packageSummary": "选择任务可使用的 Kandev 工具。",
-  "builtinMcp.currentUnknown": "无法确定当前智能体的工具包。以下是为下次启动智能体保存的选择。"
+  "builtinMcp.currentUnknown": "无法确定当前智能体的工具包。以下是为下次启动智能体保存的选择。",
+  "mcpFromAutomation": "来自自动化",
+  "mcpFromAutomationDescription": "启动此进程的自动化所选的服务器。",
+  "builtinMcp.surfaces.automation": "自动化"
 }

@@ -16,6 +16,14 @@ vi.mock("@/hooks/use-copy-repository-path", () => ({
   useCopyRepositoryPath: () => vi.fn(),
 }));
 
+vi.mock("@/hooks/domains/session/use-task-repository-roots", () => ({
+  useActiveTaskRepositoryRoots: () => ({
+    roots: [],
+    byTrackerName: new Map(),
+    byPath: new Map(),
+  }),
+}));
+
 const resizeObservers: ControlledResizeObserver[] = [];
 const INLINE_FILE_PATH = "src/file.ts";
 

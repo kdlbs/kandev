@@ -2285,6 +2285,7 @@ func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (
 		GitHubURL      string `json:"github_url"`
 		BaseBranch     string `json:"base_branch"`
 		CheckoutBranch string `json:"checkout_branch"`
+		WorktreePath   string `json:"worktree_path"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -2292,14 +2293,22 @@ func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
+	if req.WorktreePath != "" {
+		return h.handleReportedWorktreeAdoption(ctx, msg, req.TaskID, req.WorktreePath, req.BaseBranch, req.CheckoutBranch)
+	}
 	// Mutual exclusion across the three repo identifiers. resolveRepoInput
 	// applies a silent precedence (repository_id > github_url > local_path),
 	// so an agent that accidentally passes two of them gets a behaviour
 	// change with no signal. Reject early instead so the agent sees the
 	// mistake.
-	if locatorCount := boolCount(req.RepositoryID != "", req.LocalPath != "", req.GitHubURL != ""); locatorCount > 1 {
+	locatorCount := boolCount(req.RepositoryID != "", req.LocalPath != "", req.GitHubURL != "")
+	if locatorCount > 1 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
 			"pass at most one of repository_id, github_url, local_path", nil)
+	}
+	if req.WorktreePath != "" && locatorCount > 0 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"worktree_path cannot be combined with repository_id, github_url, or local_path", nil)
 	}
 	// repository_id / local_path / github_url are all optional: the service
 	// defaults to the task's only repository (or its primary row) when none
@@ -2335,6 +2344,42 @@ func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (
 	}
 	if taskRepo.TaskWorkspacePath != "" {
 		response["task_workspace_path"] = taskRepo.TaskWorkspacePath
+	}
+	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
+// handleReportedWorktreeAdoption attaches an existing linked worktree the
+// agent already created inside the task workspace. The backend validates the
+// path, repository, and branch; this handler only shapes the response.
+func (h *Handlers) handleReportedWorktreeAdoption(ctx context.Context, msg *ws.Message, taskID, worktreePath, baseBranch, checkoutBranch string) (*ws.Message, error) {
+	result, err := h.taskSvc.AdoptWorktree(ctx, service.AdoptWorktreeRequest{
+		TaskID:         taskID,
+		Path:           worktreePath,
+		BaseBranch:     baseBranch,
+		CheckoutBranch: checkoutBranch,
+		Source:         service.WorktreeAdoptionSourceReported,
+	})
+	if err != nil {
+		h.logger.Error("failed to adopt worktree", zap.Error(err))
+		code := classifyAddBranchError(err)
+		return ws.NewError(msg.ID, msg.Action, code, "Failed to add branch: "+err.Error(), nil)
+	}
+	response := map[string]interface{}{
+		"id":                result.ID,
+		keyTaskID:           result.TaskID,
+		keyRepositoryID:     result.RepositoryID,
+		keyBaseBranch:       result.BaseBranch,
+		keyCheckoutBranch:   result.WorktreeBranch,
+		keyPosition:         result.Position,
+		"agent_cwd_changed": false,
+		"adopted":           result.Adopted,
+		"already_attached":  result.AlreadyAttached,
+	}
+	if result.WorktreePath != "" {
+		response["worktree_path"] = result.WorktreePath
+	}
+	if result.TaskWorkspacePath != "" {
+		response["task_workspace_path"] = result.TaskWorkspacePath
 	}
 	return ws.NewResponse(msg.ID, msg.Action, response)
 }
@@ -2595,7 +2640,11 @@ func classifyAddBranchError(err error) string {
 	case strings.Contains(msg, "repository_id is required"),
 		strings.Contains(msg, "only supported on the worktree executor"),
 		strings.Contains(msg, "task_id is required"),
-		strings.Contains(msg, "cannot resolve base_branch"):
+		strings.Contains(msg, "cannot resolve base_branch"),
+		strings.Contains(msg, "is not adoptable"),
+		strings.Contains(msg, "does not support worktree adoption"),
+		strings.Contains(msg, "only supported on host Worktree and Local executors"),
+		strings.Contains(msg, "checkout_branch"):
 		return ws.ErrorCodeValidation
 	case strings.Contains(msg, "GitHub URL"),
 		strings.Contains(msg, "github.com/owner/repo"),

@@ -929,8 +929,6 @@
   "queueMergeShort": "Combine related queued messages before the agent reads them.",
   "queueAutoMergeShort": "Merge compatible consecutive messages automatically.",
   "sleepShort": "Prevent the computer running Kandev from sleeping during tasks.",
-  "promptAllowAgentEdits": "Allow agent edits",
-  "promptAgentEditsDescription": "Agents can change this prompt wherever it is used.",
   "sidebarPresentation": "Sidebar appearance",
   "sidebarFastActions": "Show fast action icons",
   "sidebarFastActionsDescription": "Show Terminal, Quick Chat, Canvas settings, and integration shortcuts beside their buttons.",
@@ -988,6 +986,7 @@
   "mcpDeleted": "MCP server deleted.",
   "mcpDeleteFailed": "Could not delete the MCP server.",
   "mcpDeleteDescription": "Delete {{name}}? Any profile, repository, task, or session selections will also be removed after confirmation.",
+  "mcpAutomationDeleteWarning": "Automations keep their saved selection after deletion. New agent processes cannot attach this server. Remove or replace it in each automation.",
   "mcpEnabled": "Enabled",
   "mcpDisabled": "Disabled",
   "mcpEnable": "Enable",
@@ -1061,6 +1060,8 @@
   "mcpRepositorySelectionDescription": "Choose MCP servers for tasks using this repository.",
   "mcpProfileUsage_one": "{{count}} profile",
   "mcpProfileUsage_other": "{{count}} profiles",
+  "mcpAutomationUsage_one": "{{count}} automation",
+  "mcpAutomationUsage_other": "{{count}} automations",
   "mcpRepositoryUsage_one": "{{count}} repository",
   "mcpRepositoryUsage_other": "{{count}} repositories",
   "mcpTaskUsage_one": "{{count}} task",
@@ -1221,5 +1222,8 @@
   "builtinMcp.backToPackages": "Back to packages",
   "builtinMcp.packageDetails": "Package details",
   "builtinMcp.packageSummary": "Choose the Kandev tools available to your tasks.",
-  "builtinMcp.currentUnknown": "Current agent packages are unknown. These are the saved choices for the next agent start."
+  "builtinMcp.currentUnknown": "Current agent packages are unknown. These are the saved choices for the next agent start.",
+  "mcpFromAutomation": "From automation",
+  "mcpFromAutomationDescription": "Servers selected by the automation that started this process.",
+  "builtinMcp.surfaces.automation": "Automation"
 }

@@ -14,10 +14,13 @@ function htmlPreviewFrame(filePath: string) {
   return `[data-testid="review-file-header"][data-file-path="${filePath}"]`;
 }
 
+/** Checks the 44px touch target with 0.001 CSS pixels of coordinate tolerance. */
 async function expectTouchTarget(locator: Locator) {
   const box = await locator.boundingBox();
-  expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
-  expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  // Transformed browser coordinates can differ by less than 0.001 CSS pixels.
+  const precision = 0.001;
+  expect((box?.width ?? 0) + precision).toBeGreaterThanOrEqual(44);
+  expect((box?.height ?? 0) + precision).toBeGreaterThanOrEqual(44);
 }
 
 test.describe("HTML diff preview on mobile", () => {

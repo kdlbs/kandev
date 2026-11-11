@@ -990,8 +990,14 @@ func (h *TaskHandlers) httpBulkMoveTasks(c *gin.Context) {
 		c.Request.Context(),
 		body.SourceWorkflowID, body.SourceStepID,
 		body.TargetWorkflowID, body.TargetStepID,
+		wfmodels.StepTransitionActorHuman,
 	)
 	if err != nil {
+		var approvals *service.ApprovalsPendingMoveError
+		if errors.As(err, &approvals) || errors.Is(err, service.ErrWorkflowChangeConflict) {
+			handleSelectedMoveError(c, h.logger, err)
+			return
+		}
 		h.logger.Error("failed to bulk move tasks", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to bulk move tasks"})
 		return
@@ -1005,6 +1011,7 @@ func (h *TaskHandlers) httpBulkMoveSelectedTasks(c *gin.Context, body httpBulkMo
 		body.TaskIDs,
 		body.TargetWorkflowID,
 		body.TargetStepID,
+		wfmodels.StepTransitionActorHuman,
 	)
 	if err != nil {
 		handleSelectedMoveError(c, h.logger, err)
@@ -2035,7 +2042,7 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 		description = &trimmed
 	}
 
-	task, err := h.service.UpdateTask(c.Request.Context(), c.Param("id"), &service.UpdateTaskRequest{
+	task, err := h.service.UpdateTaskAsHuman(c.Request.Context(), c.Param("id"), &service.UpdateTaskRequest{
 		Title:          title,
 		Description:    description,
 		Priority:       body.Priority,
@@ -2106,6 +2113,29 @@ func (h *TaskHandlers) httpUpdateTaskRepository(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, taskRepo)
+}
+
+// httpDetachTaskRepository handles DELETE /tasks/:id/repositories/:repo_id.
+// It removes only the task attachment; files, branch, and pull requests stay.
+func (h *TaskHandlers) httpDetachTaskRepository(c *gin.Context) {
+	err := h.service.DetachTaskRepository(c.Request.Context(), c.Param("id"), c.Param("repo_id"))
+	if err == nil {
+		c.JSON(http.StatusOK, gin.H{"detached": true})
+		return
+	}
+	if errors.Is(err, service.ErrTaskRepositoryNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, service.ErrPrimaryTaskRepositoryRoot) || isValidationError(err) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	h.logger.Error("detach task repository failed",
+		zap.String("task_id", c.Param("id")),
+		zap.String("repo_id", c.Param("repo_id")),
+		zap.Error(err))
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to detach task repository"})
 }
 
 type httpMoveTaskRequest struct {

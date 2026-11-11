@@ -337,7 +337,24 @@ Native session continuation and provider-managed compaction remain authoritative
 
 ### Automation coordinator MCP
 
-Automation sessions receive one fixed, workspace-scoped coordinator MCP surface. The server resolves the trusted automation principal before dispatch and uses that principal for workspace, caller task, caller session, surface, and audit identity; a prompt or tool argument cannot forge those values. The catalog includes coordination and pending-question or permission actions needed by an automation, but excludes task deletion, configuration mutation, task-local authoring, provider PR/MR actions, diagnostics, arbitrary plugin tools, and arbitrary capability settings.
+Private automation sessions receive required, workspace-scoped Core tools for coordination and pending blockers. The backend binds the automation, workspace, task, and session identities. Tool arguments cannot replace them.
+
+### Choose MCP access
+
+1. Open **Settings > Workspaces > your workspace > Automations** and select an automation.
+2. Under **MCP access**, open a built-in package and choose **On** or **Off**. Use **Back to packages** to return to the list. Configuration, Rich Output, Walkthroughs, and Diagnostics are optional. Core stays required.
+3. Select additional **Workspace MCP servers** from that workspace's saved catalog. Repository and agent-profile inheritance remains additive.
+4. Use **Save changes**. Use **Reset** to remove unsaved edits.
+
+**Configuration grants mutation access** to authorized workflows, profiles, prompts, executors, and automations. The private run keeps its automation identity and workspace restrictions. Native Configuration tools cannot change package grants, automation MCP selections, plugin approvals, or profile MCP server access. Selected third-party servers use their own tools and credentials. The native dispatcher does not sandbox those servers.
+
+Private-run choices apply at the **next agent process start**. Saving does not restart a run. A new turn in a reused process keeps its accepted selection. A fresh process, including a retry or replacement, reads current choices. Run details distinguish desired packages, the current process binding, and observed tool catalogs. Unknown evidence stays Unknown.
+
+For **normal task** automations, MCP choices form a template for newly created tasks. Workspace task-package limits still apply. Reusing an existing task preserves that task's later customization. Managed conversations use their destination's tool policy.
+
+Existing automations keep their current tools until an explicit selection is saved. Portable exports omit access selections, so imports require a native configuration save. An older helper that cannot enforce explicit automation selection reports an upgrade error before starting.
+
+An unavailable definition remains visible for removal. Selecting a server does not create credentials or prove a connection. Confirmed catalog deletion leaves its automation reference unavailable until you remove it in the editor. See [Built-in MCP packages](builtin-mcp-packages.md) for package identities and application timing.
 
 ### Opt-in plugin tools
 
@@ -348,7 +365,7 @@ Access is bounded to the automation, workspace, plugin installation, and plugin 
 Discovery and every call re-read the current approval. Removed tools, disabled plugins, stale policy versions, and unreadable approval data fail closed. Plugin tools add no core or administrative MCP capability, and results stay in automation history: a hidden run never adds a task to Kanban or the sidebar without an explicit task-creation action.
 
 
-The automation's own hidden task and every session on it are invalid targets for messaging, stopping, spawning, and blocker discovery or resolution, and for every mutation except archiving. An automation can archive its own hidden task; that is its normal end-of-run completion signal, not a self-mutation. Foreign-workspace targets return the same not-found result as unknown targets. The archive exemption covers only the automation's own hidden task; sessions on it remain invalid targets. A task spawned on another allowed task receives that target task's normal MCP profile and never inherits the automation surface. Reused worktrees are not reset or rebased by coordinator actions.
+The automation's own hidden task and every session on it are invalid targets for messaging, stopping, spawning, and blocker discovery or resolution, and for coordination mutations except archiving. Selected authoring packages can write output and walkthroughs for the current hidden task. An automation can archive its own hidden task; that is its normal end-of-run completion signal, not a self-mutation. Foreign-workspace targets return the same not-found result as unknown targets. The archive exemption covers only the automation's own hidden task; sessions on it remain invalid targets. A task spawned on another allowed task receives that target task's normal MCP profile and never inherits the automation surface. Reused worktrees are not reset or rebased by coordinator actions.
 
 ## Export automations
 
@@ -1014,9 +1031,11 @@ After an accepted stop, Kandev attempts to move an unarchived, non-Office task f
 - The task must be repository-backed and have no active turn or tool call.
 - Exact normalized retries are idempotent. Contradictory duplicates, unsupported sources, or failed sources roll back the batch.
 
-`add_branch_to_task_kandev` is a Worktree-only compatibility path for adding one repository and branch during an active turn:
+`add_branch_to_task_kandev` adds one repository and branch during an active turn on host Worktree and Local executors:
 
 - It creates a sibling worktree, makes its parent the Files root, and rescans without restarting the agent or workspace processes.
+- Pass `worktree_path` to attach a linked Git worktree the agent already created inside the task workspace. Kandev validates the path, repository, and branch, attaches it in place, and never moves, recreates, or rewrites it. The response adds `adopted: true` and `already_attached: true` when an existing root is reused.
+- A `worktree_path` report on a Docker, SSH, Kubernetes, or Sprites executor is rejected with an actionable error. Detection never adopts paths outside the task workspace root, foreign repositories, submodules, detached `HEAD`, or a path the user removed from the task.
 - The response includes `worktree_path`, `task_workspace_path`, and `agent_cwd_changed: false`. Deferred pre-launch materialization omits both paths.
 - The running agent keeps its original working directory. Repository-relative chat links emitted before or after attachment therefore continue to open the original checkout under the new Files root. Explicit source prefixes such as `master/docs/guide.md` are preserved, and Kandev never searches sibling repositories for a duplicate filename.
 - The original repository stays a separate worktree, so Git does not report the sibling as embedded or untracked files.
@@ -1071,6 +1090,12 @@ Kandev transfers the task UUID atomically and preserves its sessions and active 
 Every attempt writes a redacted audit row. A successful receipt includes the operation ID, source and destination placement, committed task generation, step-transition ID, session census, preservation counts and digest, idempotency key, and policy. It never contains prompts, message bodies, secrets, or repository credentials. An exact retry by the bound actor and session returns the stored receipt after current task and destination-workspace access is confirmed; it does not depend on mutable workflow or lane configuration. Reusing the key for a changed request or actor returns a conflict. Destination-bound Office authorization is replay-only and cannot create a fresh transfer.
 
 Configuration access is derived from the calling session's stored purpose. Office CEO authority requires an enabled, active profile. Lane equivalence also checks session start/end policy, session target, completion on entry, and the unclassified fallback veto. An unmapped workspace-owned record blocks its task's transfer; empty tables and records for other tasks do not. After a denied or failed attempt, that caller must supply a fresh idempotency key.
+
+A busy PostgreSQL transfer reservation returns a conflict and leaves the task
+unchanged. This can happen while another task's related rows are being written.
+After that operation finishes, manually retry the same unchanged request and
+idempotency key. Kandev does not automatically retry this conflict. Denied or
+failed attempts still require a fresh key as described above.
 
 The database migration is additive. Rolling back the application binary leaves transfer receipts and audit rows intact for a later upgrade; do not drop the transfer ledger tables during an application rollback.
 
@@ -1411,17 +1436,22 @@ of an existing, case-sensitive name and cannot rename it. Names allow up to 512
 UTF-8 bytes, content up to 1 MiB; surrounding whitespace is trimmed. Success
 returns the same saved-prompt fields as `get_shared_prompt_kandev`.
 
-**Built-in prompts cannot be changed by agents.** Existing custom prompts and
-prompts created in Settings default to human-only editing. An operator can edit a
-custom prompt in **Settings > Prompts**, enable **Allow agent edits**, and save.
-MCP-created prompts allow later agent edits by default; an operator can turn that
-off. MCP cannot change this permission, and generic `update_settings_kandev`
-prompt writes enforce the same protection.
+**Built-in prompts cannot be changed by agents.** Every custom prompt can be
+updated through the existing authorized MCP write tools, including prompts
+created in Settings and prompts that were previously marked as protected. The
+`allow_agent_edits` response field remains for compatibility: it is `true` for
+custom prompts and `false` for built-ins. It does not control a stored permission.
+Generic `update_settings_kandev` writes can change custom prompt names and
+content, but cannot change agent-edit eligibility.
 
-Apply shared prompt changes before changing workflow steps that inject them, then
-read back both the prompts and steps. Successful writes refresh open prompt
-settings pages and affect future `@name` expansions. They preserve unsaved editor
-drafts and do not rewrite instructions already captured by a running turn.
+Configuration assistants should create or update a shared prompt only when the
+operator explicitly requests or agrees to the change. The backend does not
+verify that request or agreement. Authorized prompt writes require
+`org.config.manage`. Read the saved prompt back after writing it. Apply requested
+shared prompt changes before changing workflow steps that inject them, then read
+back both the prompts and steps. Successful writes refresh open prompt settings
+pages and affect future `@name` expansions. They preserve unsaved editor drafts
+and do not rewrite instructions already captured by a running turn.
 There is no shared-prompt deletion tool.
 
 ### Answer a pending clarification question

@@ -929,8 +929,6 @@
   "queueMergeShort": "Combina mensagens relacionadas na fila antes de o agente as ler.",
   "queueAutoMergeShort": "Combina automaticamente mensagens consecutivas compatíveis.",
   "sleepShort": "Impede que o computador onde o Kandev está a correr entre em suspensão durante as tarefas.",
-  "promptAllowAgentEdits": "Permitir edições por agentes",
-  "promptAgentEditsDescription": "Os agentes podem alterar este prompt em todos os locais onde é utilizado.",
   "sidebarPresentation": "Aspeto da barra lateral",
   "sidebarFastActions": "Mostrar ícones de ações rápidas",
   "sidebarFastActionsDescription": "Mostrar atalhos do Terminal, Conversa rápida, definições de telas e integrações junto aos respetivos botões.",
@@ -988,6 +986,7 @@
   "mcpDeleted": "Servidor MCP eliminado.",
   "mcpDeleteFailed": "Não foi possível eliminar o servidor MCP.",
   "mcpDeleteDescription": "Eliminar {{name}}? Todas as seleções de perfil, repositório, tarefa ou sessão também serão removidas após a confirmação.",
+  "mcpAutomationDeleteWarning": "As automações mantêm a seleção guardada após a eliminação. Os novos processos do agente não podem ligar-se a este servidor. Remova-o ou substitua-o em cada automação.",
   "mcpEnabled": "Ativado",
   "mcpDisabled": "Desativado",
   "mcpEnable": "Ativar",
@@ -1061,6 +1060,8 @@
   "mcpRepositorySelectionDescription": "Escolha servidores MCP para tarefas que utilizam este repositório.",
   "mcpProfileUsage_one": "{{count}} perfil",
   "mcpProfileUsage_other": "{{count}} perfis",
+  "mcpAutomationUsage_one": "{{count}} automação",
+  "mcpAutomationUsage_other": "{{count}} automações",
   "mcpRepositoryUsage_one": "{{count}} repositório",
   "mcpRepositoryUsage_other": "{{count}} repositórios",
   "mcpTaskUsage_one": "{{count}} tarefa",
@@ -1221,5 +1222,8 @@
   "builtinMcp.backToPackages": "Voltar aos pacotes",
   "builtinMcp.packageDetails": "Detalhes do pacote",
   "builtinMcp.packageSummary": "Escolha as ferramentas do Kandev disponíveis para as suas tarefas.",
-  "builtinMcp.currentUnknown": "Os pacotes do agente atual são desconhecidos. Estas são as opções guardadas para o próximo arranque do agente."
+  "builtinMcp.currentUnknown": "Os pacotes do agente atual são desconhecidos. Estas são as opções guardadas para o próximo arranque do agente.",
+  "mcpFromAutomation": "Da automatização",
+  "mcpFromAutomationDescription": "Servidores selecionados pela automatização que iniciou este processo.",
+  "builtinMcp.surfaces.automation": "Automatização"
 }

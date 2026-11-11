@@ -2,7 +2,7 @@ import { appendFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
-import { assertReleaseContext } from "./sdk-runtime.mjs";
+import { assertReleaseContext, ReleaseContextError } from "./sdk-runtime.mjs";
 import {
   packageName as sdkPackageName,
   publicRegistryURL,
@@ -20,7 +20,12 @@ export class NpmAuthPreflightError extends Error {
   constructor(
     packageName,
     message,
-    { category = "npm_authentication", status = null, cause } = {},
+    {
+      category = "npm_authentication",
+      status = null,
+      reason = null,
+      cause,
+    } = {},
   ) {
     super(message, cause ? { cause } : undefined);
     this.name = "NpmAuthPreflightError";
@@ -28,6 +33,7 @@ export class NpmAuthPreflightError extends Error {
     this.package = packageName;
     this.category = category;
     this.status = status;
+    this.reason = reason;
   }
 }
 
@@ -137,7 +143,7 @@ export async function requestGitHubOidcToken({
 export async function exchangePackageToken(
   packageName,
   idToken,
-  { fetchImpl = fetch, now = Date.now } = {},
+  { fetchImpl = fetch } = {},
 ) {
   const url = `${registryURL}${OIDC_EXCHANGE_PATH}${encodeURIComponent(packageName)}`;
   let response;
@@ -173,7 +179,7 @@ export async function exchangePackageToken(
     throw new NpmAuthPreflightError(
       packageName,
       authenticationGuidance(packageName, response.status),
-      { status: response.status },
+      { status: response.status, reason: "authentication_rejected" },
     );
   let state;
   try {
@@ -181,27 +187,27 @@ export async function exchangePackageToken(
   } catch {
     throw new NpmAuthPreflightError(
       packageName,
-      `npm returned an unreadable authentication response for ${packageName}. Configure this package's trusted publisher and retry the release.`,
+      `npm returned an unreadable exchange response for ${packageName}.`,
+      {
+        category: "npm_exchange_response",
+        status: response.status,
+        reason: "unreadable_json",
+      },
     );
   }
-  const created = Date.parse(state?.created);
-  const expires = Date.parse(state?.expires);
-  if (
-    state?.token_type !== "oidc" ||
-    typeof state?.token !== "string" ||
-    state.token.length === 0 ||
-    !Number.isFinite(created) ||
-    !Number.isFinite(expires) ||
-    expires <= now()
-  )
-    throw new NpmAuthPreflightError(
+  const invalidResponse = (reason) =>
+    new NpmAuthPreflightError(
       packageName,
-      `npm returned an invalid or expired authentication token for ${packageName}. Configure this package's trusted publisher and retry the release.`,
+      `npm returned an invalid exchange response for ${packageName} (${reason}).`,
+      { category: "npm_exchange_response", status: response.status, reason },
     );
+  if (!state || typeof state !== "object" || Array.isArray(state))
+    throw invalidResponse("invalid_body_shape");
+  if (typeof state.token !== "string" || state.token.length === 0)
+    throw invalidResponse("missing_token");
   return {
     package: packageName,
     status: "authenticated",
-    expires_at: new Date(expires).toISOString(),
   };
 }
 
@@ -229,7 +235,7 @@ async function checkSdkPublisher({
       reason: "package_absent",
     };
   const token = await requestGitHubOidcToken({ env, fetchImpl, now });
-  return exchangePackageToken(sdkPackage, token, { fetchImpl, now });
+  return exchangePackageToken(sdkPackage, token, { fetchImpl });
 }
 
 export async function runPreflight({
@@ -241,7 +247,23 @@ export async function runPreflight({
   now = Date.now,
   checkoutSha,
 } = {}) {
-  assertReleaseContext(env);
+  try {
+    assertReleaseContext(env);
+  } catch (error) {
+    const knownContext = error instanceof ReleaseContextError;
+    throw new NpmAuthPreflightError(
+      null,
+      knownContext
+        ? `npm authentication preflight requires release context ${error.setting}=${error.expected}.`
+        : "npm authentication preflight requires the protected release workflow context on GitHub-hosted runners.",
+      {
+        category: "release_context",
+        reason: knownContext
+          ? `invalid_${error.setting.toLowerCase()}`
+          : "invalid_release_context",
+      },
+    );
+  }
   if (!Array.isArray(packages) || packages.length === 0)
     throw new NpmAuthPreflightError(
       null,
@@ -281,7 +303,7 @@ export async function runPreflight({
   const results = [];
   for (const packageName of [...new Set(packages)]) {
     const token = await requestGitHubOidcToken({ env, fetchImpl, now });
-    results.push(await exchangePackageToken(packageName, token, { fetchImpl, now }));
+    results.push(await exchangePackageToken(packageName, token, { fetchImpl }));
   }
   results.push(
     await checkSdkPublisher({
@@ -333,7 +355,18 @@ if (
       status: "failed",
       package: error?.package ?? null,
       category: error?.category ?? "npm_authentication",
-      message: error?.message ?? "npm authentication preflight failed",
+      http_status: Number.isInteger(error?.status) ? error.status : null,
+      reason: typeof error?.reason === "string" ? error.reason : null,
+      workflow_sha: /^[0-9a-f]{40}$/.test(process.env.GITHUB_WORKFLOW_SHA ?? "")
+        ? process.env.GITHUB_WORKFLOW_SHA
+        : null,
+      checkout_sha: /^[0-9a-f]{40}$/.test(values["checkout-sha"] ?? "")
+        ? values["checkout-sha"]
+        : null,
+      message:
+        error instanceof NpmAuthPreflightError
+          ? error.message
+          : "npm authentication preflight failed before package authentication completed.",
     };
     await writePreflightSummary(summary, process.env).catch(() => {});
     console.error(JSON.stringify(summary));
