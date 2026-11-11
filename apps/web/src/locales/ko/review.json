@@ -31,6 +31,8 @@
   "fixComments": "댓글 수정",
   "goToFindings_one": "리뷰 지적 {{count}}건으로 이동",
   "goToFindings_other": "리뷰 지적 {{count}}건으로 이동",
+  "htmlPreviewReadFailed": "현재 HTML 파일을 읽을 수 없습니다. 다시 시도하거나 diff를 표시하세요.",
+  "htmlPreviewWorkspaceSource": "현재 작업 공간 파일입니다. 이 diff와 다를 수 있습니다.",
   "loadingChangedFiles": "변경된 파일 불러오는 중...",
   "loadingPRChanges": "{{repo}} #{{prNumber}} 변경 사항 불러오는 중...",
   "markdownPreviewPartialNotice": "변경된 Markdown 조각을 표시 중입니다. 변경되지 않은 내용은 이 diff에 포함되지 않습니다.",

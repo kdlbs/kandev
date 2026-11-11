@@ -40,6 +40,15 @@ Users want to schedule an agent to run a prompt on a cron (or on a GitHub PR eve
 
 - **AC-OFFICE-AUTOMATIONS-SETTINGS-001.19:** A `github_pr` trigger shall poll for matching open PRs only when its saved event selection contains at least one exact `opened` value, including a mixed selection. Empty, missing, null, or unsupported-only selections shall produce no provider search, automation-triggered event, dedup reservation, admission, or run. The new-trigger default shall remain explicitly `opened`; clearing the selection shall remain cleared. Selecting `opened` shall retain existing enabled, ownership, repository, branch, author, draft, and successful firing/dedup behavior on desktop and phone.
 
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-001.20:** When a saved cron expression or effective timezone changes, automatic execution shall start with the first occurrence strictly after the successful edit. Earlier occurrences of the replacement schedule shall not cause a run. This rule shall also apply to a trigger that never ran.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-001.21:** When a save leaves the schedule definition unchanged, it shall preserve the next execution and any pending occurrence. JSON formatting, member order, surrounding expression whitespace, and an empty timezone versus UTC shall not replace the schedule. A timezone field ignored by an interval or an explicit expression timezone shall not replace the schedule.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-001.22:** When a disabled trigger receives a replacement schedule, it shall remain disabled and shall use the replacement boundary after re-enabling. An enabled-state-only update shall preserve the existing schedule boundary.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-001.23:** When a schedule becomes empty, automatic checks shall create no runs. When that schedule later becomes non-empty, its first automatic occurrence shall follow that later edit.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-001.24:** When a schedule edit fails validation or persistence, the previously saved schedule, enabled state, and evaluation history shall remain unchanged.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-001.25:** When an edit completes before an automatic occurrence reaches run admission, the scheduler shall discard its obsolete observation. That observation shall create no run, skipped run, event, or evaluation-history change. A later check shall evaluate the saved schedule.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-001.26:** When the backend misses occurrences after the current schedule boundary, it shall retain the existing single catch-up execution on its next check. Saving an unchanged schedule shall not discard that pending execution.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-001.27:** When a schedule edit follows run admission, the admitted run shall retain its lifecycle and history. That run's evaluation shall not move the replacement boundary backward.
+
 ## List contract exclusions
 
 These criteria govern settings list reads and their visible state. They do not
@@ -50,4 +59,4 @@ their existing contracts.
 
 ## System design
 
-The migrated technical source is split into [part 1](../system-design/automations-settings-01.md), [part 2](../system-design/automations-settings-02.md).
+The technical source is split into [part 1](../system-design/automations-settings-01.md), [part 2](../system-design/automations-settings-02.md), and [schedule replacement](../system-design/automations-settings-03.md).

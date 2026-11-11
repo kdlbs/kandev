@@ -2176,6 +2176,14 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 		}
 		return false, false, &admissionSourceChangedError{stepID: actualSourceStepID}
 	}
+	// A completion-owned move may commit only while the accepted signal still
+	// owns the pending bag for this exact entry. The bag is read under the task
+	// lock that also serializes signal replacement.
+	if matches, err := r.stepCompletionSignalMatchesGuardTx(ctx, tx, task.ID, actualSourceStepID); err != nil {
+		return false, false, err
+	} else if !matches {
+		return false, false, nil
+	}
 	// A later move may have left and returned to the same source step: the step
 	// id still matches, but the transition ledger advanced. Compare the ledger id
 	// the deferred move captured when it was requested, so a move superseded by a
@@ -2355,6 +2363,12 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 	}
 	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, expectedWorkflowID, false, false, workflowChangeSource)
 	if err != nil {
+		return false, false, err
+	}
+	// Commit proof for the exact accepted signal with the move. A missing
+	// receipt rolls the move back so the signal stays retryable instead of
+	// leaving an untraceable transition.
+	if err := r.recordStepCompletionProofTx(ctx, tx, task.ID, actualSourceStepID, task, admitted); err != nil {
 		return false, false, err
 	}
 	if exactOperation != nil {
@@ -3647,6 +3661,9 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 		return false, err
 	}
 	task.WorkflowStepTransitionID = transitionID
+	if err := r.pinCrossStepPromotionEntry(ctx, tx, task, fromStepID, destinationStepID, transitionID); err != nil {
+		return false, err
+	}
 	entryID := formatEntryID(transitionID)
 	if transitionID != 0 {
 		task.FromWorkflowID = fromWorkflowID
@@ -3691,6 +3708,40 @@ func (r *Repository) pinSameStepPromotionEntry(ctx context.Context, tx *sql.Tx, 
 	}
 	if entryID > 0 {
 		marker[models.QueuePromotionEntryTransitionIDKey] = strconv.FormatInt(entryID, 10)
+	}
+	return nil
+}
+
+func (r *Repository) pinCrossStepPromotionEntry(
+	ctx context.Context,
+	tx *sql.Tx,
+	task *models.Task,
+	fromStepID string,
+	destinationStepID string,
+	transitionID int64,
+) error {
+	if fromStepID == destinationStepID || transitionID <= 0 {
+		return nil
+	}
+	marker, ok := task.Metadata[models.MetaKeyQueuePromotionPending].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	marker[models.QueuePromotionEntryTransitionIDKey] = strconv.FormatInt(transitionID, 10)
+	encodedMetadata, err := json.Marshal(task.Metadata)
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET metadata = ? WHERE id = ?`), string(encodedMetadata), task.ID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrTaskNotFound
 	}
 	return nil
 }

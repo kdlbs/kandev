@@ -1,4 +1,4 @@
-import type { ClarificationAnswer } from "@/lib/types/http";
+import type { ClarificationAnswer, ClarificationAnswerAnnotation } from "@/lib/types/http";
 
 /**
  * Browser-memory retention for unsubmitted clarification answers.
@@ -15,6 +15,8 @@ export type RetainedAnswerDraft = {
   customDrafts: Record<string, string>;
   activeIndex: number;
   answers: readonly ClarificationAnswer[];
+  /** Image regions drawn in the review view, keyed by question ID. */
+  annotations?: Record<string, readonly ClarificationAnswerAnnotation[]>;
 };
 
 type DraftCache = {
@@ -51,7 +53,12 @@ function sameDraft(left: RetainedAnswerDraft, right: RetainedAnswerDraft): boole
   const leftKeys = Object.keys(left.customDrafts);
   if (leftKeys.length !== Object.keys(right.customDrafts).length) return false;
   if (leftKeys.some((key) => left.customDrafts[key] !== right.customDrafts[key])) return false;
-  return sameAnswers(left.answers, right.answers);
+  return sameAnswers(left.answers, right.answers) && sameAnnotations(left, right);
+}
+
+function sameAnnotations(left: RetainedAnswerDraft, right: RetainedAnswerDraft): boolean {
+  if (left.annotations === right.annotations) return true;
+  return JSON.stringify(left.annotations ?? {}) === JSON.stringify(right.annotations ?? {});
 }
 
 function cacheFor(owner: object): DraftCache {

@@ -1307,6 +1307,7 @@ func prStatusFromTaskPRSnapshot(snapshot *TaskPR) *PRStatus {
 	return &PRStatus{
 		PR:                                    pr,
 		WorkflowAttention:                     snapshot.WorkflowAttention,
+		CheckSummary:                          cloneCheckSummary(snapshot.CheckSummary),
 		ReviewState:                           snapshot.ReviewState,
 		ChecksState:                           snapshot.ChecksState,
 		MergeableState:                        snapshot.MergeableState,
@@ -1448,6 +1449,7 @@ type taskPRSyncState struct {
 	mergedByLogin, closedByLogin                         *string
 	autoMergeObservedAt                                  *time.Time
 	workflowAttention                                    *WorkflowAttention
+	checkSummary                                         *CheckSummary
 }
 
 type taskPRMergeQueueState struct {
@@ -1652,6 +1654,7 @@ func (s *Service) prepareTaskPRSyncStateWithRequiredReviews(
 		nextHeadSHA = status.PR.HeadSHA
 	}
 	nextWorkflowAttention := resolveTaskPRWorkflowAttention(tp, status, nextHeadSHA)
+	nextCheckSummary := resolveTaskPRCheckSummary(tp, status, nextHeadSHA)
 	nextIsDraft, nextChangedFiles, nextMergedByLogin, nextClosedByLogin, nextAutoMergeObservedAt :=
 		resolveTaskPROutcomeFields(tp, status)
 	return taskPRSyncState{
@@ -1669,6 +1672,7 @@ func (s *Service) prepareTaskPRSyncStateWithRequiredReviews(
 		mergedByLogin: nextMergedByLogin, closedByLogin: nextClosedByLogin,
 		autoMergeObservedAt: nextAutoMergeObservedAt,
 		workflowAttention:   nextWorkflowAttention,
+		checkSummary:        nextCheckSummary,
 	}
 }
 
@@ -1761,6 +1765,11 @@ func taskPRChangedFields(tp *TaskPR, status *PRStatus, next taskPRSyncState) []s
 		changed,
 		"workflow_attention",
 		!workflowAttentionSemanticEqual(tp.WorkflowAttention, next.workflowAttention),
+	)
+	changed = appendChangedField(
+		changed,
+		"check_summary",
+		!checkSummarySemanticEqual(tp.CheckSummary, next.checkSummary),
 	)
 	return changed
 }
@@ -1876,6 +1885,8 @@ func (s *Service) prepareTaskPRSyncFromRowWithRequiredReviews(
 	tp.AutoMergeObservedAt = next.autoMergeObservedAt
 	tp.WorkflowAttention = next.workflowAttention
 	tp.WorkflowAttentionJSON = marshalWorkflowAttention(next.workflowAttention)
+	tp.CheckSummary = next.checkSummary
+	tp.CheckSummaryJSON = marshalCheckSummary(next.checkSummary)
 	// CommentCount is no longer updated from polling -- only refreshed on-demand
 	tp.LastSyncedAt = nextLastSyncedAt
 	if len(changedFields) > 0 && s.logger != nil {

@@ -704,6 +704,7 @@ func startAgentInfrastructure(
 		services.Task,
 		repos.Task,
 		startupRecoveryGuard,
+		services.Auth,
 	)
 	if err != nil {
 		log.Error("Failed to initialize agent manager", zap.Error(err))
@@ -846,8 +847,12 @@ func startAgentInfrastructure(
 		repos.Task,
 		repos.AgentSettings,
 		services.DynamicProfileResolver,
+		orchestratorSvc.PersistDynamicCandidateSwitch,
 		orchestratorSvc.LaunchDynamicRouteAction,
 	))
+	if services.DynamicProfileResolver != nil {
+		services.DynamicProfileResolver.SetKeywordCredentialBindingResolver(keywordCredentialBindingResolver(lifecycleMgr, agentRegistry))
+	}
 	orchestratorSvc.SetProfileExecutionResolver(services.DynamicProfileResolver)
 
 	// Wire the soft-deleted-profile pre-flight into the watcher dispatch.
@@ -1238,6 +1243,7 @@ func startGatewayAndServe(
 	hostUtilityMgr.SetProfileEnvironmentResolver(lifecycleMgr.ResolveUtilityProfileEnvironment)
 	hostUtilityMgr.SetProviderGatewayAuthResolver(lifecycleMgr.ResolveProviderGatewayAuth)
 	hostUtilityMgr.SetManagedRuntimeSelectionStore(services.ManagedRuntimeSelections)
+	hostUtilityMgr.SetManagedRuntimeSingleUserOwner(singleUserManagedRuntimeOwner(services.Auth))
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)
@@ -1757,6 +1763,7 @@ func constructOfficeServices(
 	// below. Wiring it after left a Kanban-only install with no dependency store
 	// at all: blocked_by on create failed and list_related_tasks reported nothing.
 	services.Task.SetBlockerRepository(repos.Office)
+	services.Task.SetRelationRepository(repos.Office)
 
 	// office-costs Wave B: lazy models.dev pricing lookup. The Client
 	// allocates no resources at startup — the first non-claude-acp cost
@@ -2015,6 +2022,9 @@ func wireOfficeProviderRouting(
 	resolver := routing.NewResolver(&officeRoutingRepoAdapter{repo: repos.Office}, nil)
 	resolver.SetExecutionProfileStore(repos.AgentSettings, agentRegistry)
 	scheduler.SetResolver(resolver)
+	orchestratorSvc.SetOfficeLaunchProfilePreview((&officeLaunchProfilePreview{
+		agents: repos.Office, resolver: resolver,
+	}).Preview)
 	scheduler.SetTaskStarter(&schedulerTaskStarterAdapter{orch: orchestratorSvc})
 	scheduler.SetRunSessionLauncher(services.Office.RunSessionLauncherHandle())
 	scheduler.SetEventBus(eventBus)

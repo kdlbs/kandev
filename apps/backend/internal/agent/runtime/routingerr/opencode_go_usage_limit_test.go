@@ -17,8 +17,8 @@ func TestClassify_OpenCodeGoUsageLimitExceededIsHighConfidenceQuota(t *testing.T
 			if e.Code != CodeQuotaLimited || e.Confidence != ConfHigh || e.Class != ClassHard {
 				t.Fatalf("classification = %+v, want high-confidence hard quota_limited", e)
 			}
-			if e.ClassifierRule != "opencode.acp.go_usage_limit.v1" {
-				t.Fatalf("classifier rule = %s, want opencode.acp.go_usage_limit.v1", e.ClassifierRule)
+			if e.ClassifierRule != ruleOpenCodeGoUsageLimit {
+				t.Fatalf("classifier rule = %s, want %s", e.ClassifierRule, ruleOpenCodeGoUsageLimit)
 			}
 			if !e.FallbackAllowed || !e.AutoRetryable || e.UserAction {
 				t.Fatalf("Go usage limit recovery flags violated: %+v", e)
@@ -55,12 +55,12 @@ func TestClassify_OpenCodeGoUsageLimitRejectsUnrelatedText(t *testing.T) {
 		"The agent explained: Go usage limit exceeded on the free plan",
 		"Go usage limit",
 	} {
-		if e := Classify(Input{Phase: PhaseStreaming, ProviderID: "opencode-acp", Stderr: stderr}); e.ClassifierRule == "opencode.acp.go_usage_limit.v1" {
+		if e := Classify(Input{Phase: PhaseStreaming, ProviderID: "opencode-acp", Stderr: stderr}); e.ClassifierRule == ruleOpenCodeGoUsageLimit {
 			t.Fatalf("%q acquired the Go usage-limit rule: %+v", stderr, e)
 		}
 	}
 	e := Classify(Input{Phase: PhaseStreaming, ProviderID: "codex-acp", Stderr: "AI_APICallError: Go usage limit exceeded"})
-	if e.ClassifierRule == "opencode.acp.go_usage_limit.v1" {
+	if e.ClassifierRule == ruleOpenCodeGoUsageLimit {
 		t.Fatalf("other providers must not use the OpenCode Go rule: %+v", e)
 	}
 }

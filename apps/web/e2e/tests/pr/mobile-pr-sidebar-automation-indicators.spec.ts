@@ -339,12 +339,12 @@ test.describe("Mobile sidebar PR automation indicators", () => {
     await expect(icon.getByTestId("pr-task-automation-auto-merge")).toBeVisible();
     await expect(icon).toHaveAttribute("aria-label", /Awaiting maintainer approval/);
     await expect(icon).not.toHaveAttribute("aria-label", /Conflicts/);
-    const approvalWarning = icon.getByTestId("pr-workflow-approval-warning");
+    const approvalWarning = icon.getByTestId("pr-ci-bubble-approval-required");
     await expect(approvalWarning).toBeVisible();
     await expect(icon.getByTestId("pr-merge-conflict-warning")).toHaveCount(0);
     const approvalContainment = await targetRow.evaluate((row) => {
       const warning = row.querySelector<HTMLElement>(
-        '[data-testid="pr-workflow-approval-warning"]',
+        '[data-testid="pr-ci-bubble-approval-required"]',
       );
       if (!warning) return null;
       const rowBox = row.getBoundingClientRect();
@@ -456,12 +456,13 @@ test.describe("Mobile sidebar PR automation indicators", () => {
       )
       .toEqual({ hasMergeConflicts: true, workflowApprovalRequired: true });
 
-    await expect(icon.getByTestId("pr-workflow-approval-warning")).toHaveCount(0);
+    await expect(icon.getByTestId("pr-ci-bubble-approval-required")).toBeVisible();
     await expect(icon.getByTestId("pr-merge-conflict-warning")).toBeVisible();
     await expect(icon).toHaveAttribute("aria-label", /Conflicts/);
     await expect(icon).toHaveAttribute("aria-label", /Awaiting maintainer approval/);
-    await prCapture.screenshot("sidebar-workflow-conflict-priority-badge-mobile", {
-      caption: "Phone task picker gives the red conflict warning priority over the approval lock.",
+    await prCapture.screenshot("sidebar-workflow-conflict-and-approval-badge-mobile", {
+      caption:
+        "Phone task picker shows the approval lock and the separate conflict triangle together.",
     });
 
     await icon.tap();
@@ -518,7 +519,7 @@ test.describe("Mobile sidebar PR automation indicators", () => {
     await expect(icon.getByTestId("pr-task-automation-auto-fix")).toHaveCount(0);
     await expect(icon.getByTestId("pr-task-automation-auto-merge")).toHaveCount(0);
     await expect(icon.getByTestId("pr-merge-conflict-warning")).toHaveCount(0);
-    await expect(icon.getByTestId("pr-workflow-approval-warning")).toHaveCount(0);
+    await expect(icon.getByTestId("pr-ci-bubble-approval-required")).toHaveCount(0);
   });
 
   // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.23

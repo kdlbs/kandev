@@ -98,8 +98,8 @@ OpenCode v1 and v2 share the `opencode-acp` identity and can access the same ses
 `native_prompt_suggestions_supported` is support alone (nil = unknown) and must
 never enable the composer. `dialect_claude_prompt_suggestions.go` accepts
 literal `_meta.claudeCode.promptSuggestions: true`, or, when absent, only the
-exact official bridge `@agentclientprotocol/claude-agent-acp` `0.81.2` with
-`promptQueueing: true`; false or malformed denies support, and names,
+exact official bridge `@agentclientprotocol/claude-agent-acp` `0.81.2` or
+`0.100.0` with `promptQueueing: true`; false or malformed denies support, and names,
 namespaces, queueing, and models never qualify. Supported sessions configure
 new/load/resume with `claudeCode.options.promptSuggestions` plus the requested
 raw `prompt_suggestion` filter; `adapter_prompt_suggestion.go` owns window and

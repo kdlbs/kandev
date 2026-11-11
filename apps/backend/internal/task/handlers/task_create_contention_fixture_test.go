@@ -71,6 +71,14 @@ type contentionAgentManager struct {
 	executor.AgentManagerClient
 }
 
+func (*contentionAgentManager) RequiresCloneURL(string) bool          { return false }
+func (*contentionAgentManager) ShouldApplyPreferredShell(string) bool { return false }
+func (*contentionAgentManager) ValidateExecutorRuntime(string) error  { return nil }
+
+func (*contentionAgentManager) ValidateExecutionRuntime(context.Context, string, string, string) error {
+	return nil
+}
+
 func (m *contentionAgentManager) ResolveAgentProfile(_ context.Context, profileID string) (*executor.AgentProfileInfo, error) {
 	return &executor.AgentProfileInfo{ProfileID: profileID, ProfileName: profileID}, nil
 }

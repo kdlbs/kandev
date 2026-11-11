@@ -15,6 +15,7 @@ import (
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	protocol "github.com/kandev/kandev/pkg/codexappserver"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -67,6 +68,7 @@ func newForkTestService(t *testing.T, manager executor.AgentManagerClient, activ
 	} else {
 		repo = existing[0]
 	}
+	seedExecutorRow(t, repo, "executor-local", models.ExecutorTypeLocal)
 	seedSession(t, repo, "task-fork", "session-fork", "step1")
 	source, err := repo.GetTaskSession(ctx, "session-fork")
 	require.NoError(t, err)
@@ -96,7 +98,7 @@ func newForkTestService(t *testing.T, manager executor.AgentManagerClient, activ
 	taskRepo.tasks["task-fork"] = &v1.Task{ID: "task-fork"}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, manager)
 	svc.config.CodexAppServerEnabled = true
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.queue = queue.NewTaskQueue(10)
 	svc.scheduler = scheduler.NewScheduler(svc.queue, svc.executor, taskRepo, testLogger(), scheduler.DefaultSchedulerConfig())
 	svc.SetTurnService(&forkTestTurnService{turn: turn, active: active})
@@ -287,4 +289,51 @@ func TestForkConversationRetiredRetryRequiresExplicitCreationAndBlocksPendingOwn
 	updated, err := repo.GetTaskSession(ctx, source.ID)
 	require.NoError(t, err)
 	require.NotContains(t, updated.Metadata, models.SessionMetaKeyCodexForkRequestPrefix+requestID)
+}
+
+func TestForkConversationOfficeSourceDoesNotUseLaunchProfilePreview(t *testing.T) {
+	ctx := context.Background()
+	svc, repoView, _ := newOfficeEnsureService(t)
+	sqlRepo, ok := repoView.(*sqliterepo.Repository)
+	require.True(t, ok)
+	now := time.Now().UTC()
+	source := &models.TaskSession{
+		ID: "session-office-fork", TaskID: "t-prepare", AgentProfileID: "agent-ceo",
+		ExecutionProfileID: "agent-ceo", State: models.TaskSessionStateWaitingForInput,
+		AgentProfileSnapshot: map[string]interface{}{"agent_id": "codex-app-server"},
+		Metadata:             map[string]interface{}{"acp_session_id": "source-acp-session"},
+		StartedAt:            now, UpdatedAt: now,
+	}
+	require.NoError(t, sqlRepo.CreateTaskSession(ctx, source))
+
+	manager := &forkTestAgentManager{mockAgentManager: &mockAgentManager{}, forkID: "fork-office-thread"}
+	svc.agentManager = manager
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, sqlRepo, testLogger(), executor.ExecutorConfig{}))
+	svc.config.CodexAppServerEnabled = true
+	completedAt := time.Now().UTC()
+	turnService := &forkTestTurnService{turn: &models.Turn{
+		ID: "turn-office-fork", TaskID: source.TaskID, TaskSessionID: source.ID,
+		StartedAt: time.Now().Add(-time.Minute), CompletedAt: &completedAt,
+		Metadata: map[string]interface{}{
+			"agent_type":                        "codex-app-server",
+			models.TurnMetaKeyCodexNativeTurnID: "provider-turn-office",
+		},
+	}}
+	svc.SetTurnService(turnService)
+	previewCalls := 0
+	svc.SetOfficeLaunchProfilePreview(func(context.Context, string, string) (string, error) {
+		previewCalls++
+		return "profile-routed", nil
+	})
+
+	response, err := svc.ForkConversation(ctx, ForkConversationRequest{
+		TaskID: source.TaskID, SourceSessionID: source.ID, TurnID: turnService.turn.ID, RequestID: uuid.NewString(),
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, response.SessionID)
+	assert.Zero(t, previewCalls, "fork preparation must not route and rebind its source session")
+	updatedSource, err := svc.repo.GetTaskSession(ctx, source.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "agent-ceo", updatedSource.ExecutionProfileID)
+	assert.Equal(t, "source-acp-session", updatedSource.Metadata["acp_session_id"])
 }

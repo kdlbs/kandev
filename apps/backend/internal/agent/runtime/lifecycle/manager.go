@@ -29,15 +29,22 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
-// ExecutorFallbackPolicy controls behavior when a requested runtime is unavailable.
+// ExecutorFallbackPolicy is retained for internal source compatibility only.
+// A concrete executor selection is always required: an unavailable mapped
+// backend is refused instead of replaced, regardless of this value. The
+// constants remain so existing wiring and tests can migrate independently of
+// the required-runtime correction.
 type ExecutorFallbackPolicy string
 
 const (
-	// ExecutorFallbackAllow silently falls back to the default runtime (current behavior).
+	// ExecutorFallbackAllow is retained for compatibility; it no longer
+	// authorizes replacing a concrete selection with the default runtime.
 	ExecutorFallbackAllow ExecutorFallbackPolicy = "allow"
-	// ExecutorFallbackWarn falls back but logs a warning (current behavior, explicit).
+	// ExecutorFallbackWarn is retained for compatibility; it no longer
+	// authorizes replacing a concrete selection with the default runtime.
 	ExecutorFallbackWarn ExecutorFallbackPolicy = "warn"
-	// ExecutorFallbackDeny returns an error if the requested runtime is unavailable.
+	// ExecutorFallbackDeny expresses the required-runtime intent. Production
+	// wiring uses it, although selection admission no longer depends on it.
 	ExecutorFallbackDeny ExecutorFallbackPolicy = "deny"
 )
 
@@ -109,6 +116,10 @@ type Manager struct {
 	// startupRecoveryDelay overrides the managed-runtime retry delay in tests.
 	startupRecoveryDelay func() time.Duration
 
+	// managedRuntimeSingleUserOwner supplies the disabled-authentication
+	// single-user repair owner. Backend composition owns the live auth mode.
+	managedRuntimeSingleUserOwner func() (string, bool)
+
 	// preparerRegistry maps executor types to environment preparers.
 	preparerRegistry *PreparerRegistry
 
@@ -133,6 +144,9 @@ type Manager struct {
 	// runtimeStorage holds the latest owner-verified advisory capacity per
 	// session. It is runtime-only and never persisted.
 	runtimeStorage *runtimeStorageProbeState
+	// runtimeStorageClock is a test seam for independent capacity and pressure
+	// receipt ages.
+	runtimeStorageClock func() time.Time
 
 	// retrackedSessionsMu guards retrackedSessions.
 	retrackedSessionsMu sync.RWMutex
@@ -379,6 +393,13 @@ type ManagedGoCacheEnvironmentProvider interface {
 // SetManagedGoCacheEnvironmentProvider wires install-wide managed cache settings.
 func (m *Manager) SetManagedGoCacheEnvironmentProvider(provider ManagedGoCacheEnvironmentProvider) {
 	m.managedGoCache = provider
+}
+
+// SetManagedRuntimeSingleUserOwner wires the live authentication mode and the
+// established single-user identity. The callback must return allowed=false for
+// setup, enabled, unknown, or unavailable authentication.
+func (m *Manager) SetManagedRuntimeSingleUserOwner(owner func() (string, bool)) {
+	m.managedRuntimeSingleUserOwner = owner
 }
 
 // SetManagedRuntimeSelectionStore wires the install-wide exact-version

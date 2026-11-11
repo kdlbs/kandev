@@ -2152,28 +2152,29 @@ func (s *Service) fireTriggerWithMatchedTriggers(
 	if duplicate {
 		return FireResult{Skipped: true, Duplicate: true, Reason: "this trigger has already fired"}, nil
 	}
-
-	// Record that the trigger was evaluated now that the cap check itself
-	// has succeeded. Scheduled triggers use this to pace themselves against
-	// their cron interval (CronScheduler.shouldFire): if this were updated
-	// before the cap check (or despite the cap check returning an error), an
-	// infrastructural failure in the check would look like a completed
-	// evaluation and suppress the next attempt until the full cron interval
-	// elapses, instead of retrying on the next scheduler tick. And if it
-	// were only updated on an actual fire, a trigger stuck behind
-	// max_concurrent_runs would look "overdue" again on every subsequent
-	// tick and get re-evaluated — and re-skipped — far more often than its
-	// configured schedule.
-	if updateErr := s.store.UpdateTriggerEvaluatedAt(ctx, triggerID, now); updateErr != nil {
-		s.logger.Warn("failed to update last_evaluated_at",
-			zap.String("trigger_id", triggerID), zap.Error(updateErr))
-	}
 	if capReason != "" {
 		return FireResult{Skipped: true, Reason: capReason}, nil
 	}
+	return s.completeAdmittedFire(
+		ctx, admittedRun, automationID, triggerID, triggerType,
+		triggerData, initialTriggerData, dedup.Key(), now,
+	)
+}
 
+// completeAdmittedFire publishes an admitted run outside the admission lock
+// and records its automation-level trigger time. The evaluation cursor is
+// already advanced by admitTriggerLocked while that lock was held.
+func (s *Service) completeAdmittedFire(
+	ctx context.Context,
+	admittedRun *AutomationRun,
+	automationID, triggerID string,
+	triggerType TriggerType,
+	triggerData, initialTriggerData json.RawMessage,
+	dedupKey string,
+	resolvedAt time.Time,
+) (FireResult, error) {
 	evt := automationTriggeredEventForAdmission(
-		admittedRun, automationID, triggerID, triggerType, triggerData, initialTriggerData, dedup.Key(),
+		admittedRun, automationID, triggerID, triggerType, triggerData, initialTriggerData, dedupKey,
 	)
 
 	if admittedRun.RetryGroupID != "" {
@@ -2191,7 +2192,7 @@ func (s *Service) fireTriggerWithMatchedTriggers(
 	if err := s.publishAutomationTriggered(ctx, admittedRun, evt); err != nil {
 		return FireResult{}, err
 	}
-	if updateErr := s.store.UpdateLastTriggered(ctx, automationID, now); updateErr != nil {
+	if updateErr := s.store.UpdateLastTriggered(ctx, automationID, resolvedAt); updateErr != nil {
 		s.logger.Warn("failed to update last_triggered_at",
 			zap.String("automation_id", automationID), zap.Error(updateErr))
 	}
@@ -2249,6 +2250,7 @@ func (s *Service) admitTriggerLocked(
 	}
 	if full {
 		s.recordSkippedTrigger(ctx, a, triggerID, triggerType, triggerData, dedupKey, dedupReason, capReason, active)
+		s.recordTriggerEvaluation(ctx, triggerID, resolvedAt)
 		return nil, capReason, false, nil
 	}
 
@@ -2310,7 +2312,18 @@ func (s *Service) admitTriggerLocked(
 	if persistErr != nil {
 		return nil, "", false, persistErr
 	}
+	s.recordTriggerEvaluation(ctx, triggerID, resolvedAt)
 	return run, "", false, nil
+}
+
+// recordTriggerEvaluation advances the trigger's evaluation cursor while the
+// caller still holds the per-automation admission lock. A failed write keeps
+// the existing warning policy and must not fail the admitted firing.
+func (s *Service) recordTriggerEvaluation(ctx context.Context, triggerID string, evaluatedAt time.Time) {
+	if err := s.store.UpdateTriggerEvaluatedAt(ctx, triggerID, evaluatedAt); err != nil {
+		s.logger.Warn("failed to update last_evaluated_at",
+			zap.String("trigger_id", triggerID), zap.Error(err))
+	}
 }
 
 func (s *Service) persistAdmittedRun(

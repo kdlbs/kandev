@@ -94,7 +94,7 @@ Choose a workspace mode:
 
 | Mode                         | Default and inheritance                                                                                                                                                                    | Use it when                                                               |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
-| **Inherit parent workspace** | Default when the parent has an active worktree. Reuses the parent's executor, repositories, worktrees, branch, and current uncommitted files. Repository and executor controls are hidden. | The child is a focused collaborator on the same file state.               |
+| **Inherit parent workspace** | Default when the parent has an active worktree. Normally reuses the parent's materialized workspace, repositories, worktrees, branch, and current files. If a new launch selects a different non-Kubernetes executor, Kandev creates a separate child-owned workspace; uncommitted parent changes are not copied. Repository and executor controls are hidden. | The child is a focused collaborator on the same file state.               |
 | **Create new workspace**     | Default when the parent has no active worktree branch. Lets you choose another configured/discovered repository, folder, remote URL, branch, and executor.                                 | The child needs isolation, a different branch, or a different repository. |
 
 The context choices are **Blank**, **Copy initial prompt**, and, when a utility agent is configured, **Summarize session**. Context supplies background; it does not create a shared conversation. Attachments and prompt enhancement are also available.
@@ -124,7 +124,7 @@ For redirected calls, `parent_resolution` contains `requested_parent_id`, `resol
 
 - `start_agent` defaults to `true`. A subtask or redirected sibling needs a detailed `prompt` when it is true. Set it to `false` for a placeholder task.
 - `autopilot` defaults to `false`. Set it to `true` to start an autonomous task. This choice is immutable and is not inherited by subtasks. An autopilot child receives `ask_parent_question_kandev` instead of `ask_user_question_kandev`; an autopilot root receives neither question tool. See [Agent Communication](agent-communication.md#autopilot-parent-questions) for the answer protocol.
-- The tool inherits the parent workspace, workflow, profile, executor, repositories, and base branches unless overridden.
+- The tool inherits the parent workspace, workflow, profile, executor, repositories, and base branches unless overridden. If a new child launch selects a different non-Kubernetes executor from the inherited environment, Kandev creates a separate child-owned workspace; uncommitted parent changes are not copied. A session still bound to the inherited environment must resume with its original executor, and Kubernetes environments cannot be shared across tasks.
 - Inherited repository attachments deliberately do not copy an explicit checkout branch.
 - An explicit same-repository child uses the inherited base branch. An explicit cross-repository child defaults to that repository's default branch unless `base_branch` is supplied.
 - Every created task must resolve an agent profile, even with `start_agent: false`.
@@ -348,7 +348,7 @@ The [Office task guide](office-tasks.md) covers its projects, assignments, deepe
 - **Parallel agents overwrite work:** stop one writer, assign disjoint files, or create an isolated subtask workspace.
 - **Subtask cannot be created:** confirm the prompt (and title unless **Agent-generated task titles** is enabled), compatible profile, workflow, and the one-level Kanban depth limit. From a Kanban child, use `parent_id: "self"` for the supported sibling placement; an explicit child ID still returns the depth error.
 - **Subtask creates but its agent or repositories fail to start:** the dialog does not enforce agent/executor compatibility. Confirm the agent is configured on that executor; multi-repository creation supports Worktree, Local Docker, SSH, and Sprites.
-- **Inherited subtask sees unexpected changes:** it intentionally shares the parent's materialized files and branch.
+- **Inherited subtask sees unexpected changes:** it normally shares the parent's materialized files and branch. A launch on a different non-Kubernetes executor receives a separate child-owned workspace, which does not include uncommitted parent changes.
 - **Message remains queued:** the target is busy and only one queued message drains per turn. Check for `queue_full` before retrying.
 - **Interrupt is rejected:** only the target's direct parent may use interrupt delivery.
 - **Stop is rejected:** `stop_task_kandev` is task-mode only and accepts only a same-workspace direct child of the caller.

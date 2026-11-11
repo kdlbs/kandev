@@ -39,6 +39,7 @@ change Git commands that an agent runs after launch.
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.13` | [Missing-base fallback](#missing-base-fallback) |
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.14` | [Safe refresh diagnostics](#safe-refresh-diagnostics) |
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.24` | [Required refresh verification cause](#required-refresh-verification-cause) |
+| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.29` through `.34` | [Lock recovery](worktree-base-refresh-recovery.md) |
 
 ## Components and responsibilities
 
@@ -449,17 +450,16 @@ HTTPS route must not replace an executor-owned SSH route.
 
 ## Missing-base fallback
 
-A fetch error that explicitly reports a missing remote ref is the only failed
-fetch eligible for fallback. When the request carries a different non-empty
-fallback base, the manager fetches that branch through the same non-interactive
-route and applies the normal containing-ref checks. Success completes sync,
-uses the fallback ref, and records a warning naming the requested and fallback
-branches.
+The [worktree base selection design](worktree-base-selection.md) defines
+substitution eligibility for criteria .25 through .28. `FallbackBaseBranch`
+supplies a candidate, not permission to abandon an explicit selection.
 
-If the fallback is absent or its refresh fails, preparation remains failed. A
-missing requested or fallback remote ref uses `missing_remote_ref`; auth,
-network, timeout, cancellation, and other Git failures keep their existing
-fail-closed classifications.
+For an eligible inherited/default selection, a proven missing remote ref can
+use a separately refreshed fallback through the same non-interactive route.
+Containing-ref checks and warnings remain required. Without a usable fallback,
+preparation fails. Auth, network, timeout, cancellation, and unproven errors
+retain their existing classifications. The selection amendment is implemented;
+its linked plan owns the recorded evidence.
 
 ## Empty remote
 
@@ -533,11 +533,10 @@ reading its remote URL. Existing failure or fallback logs can carry these fields
 instead of adding a duplicate diagnostic. Cover both required and best-effort
 paths, including a failed configured fallback branch.
 
-Classification is observational. Do not feed new diagnostic categories into
-missing-base fallback eligibility or alter `syncFailureCause` identities.
-Preserve context errors and current progress/error payloads. Correct the
-`syncFailureCause` comment that implies raw output reaches internal logs.
-No new logging configuration, subprocess, retry, or persistence is required.
+Diagnostic categories do not authorize missing-base fallback.
+The [lock recovery design](worktree-base-refresh-recovery.md) adds bounded
+re-execution and fixed lock errors under criteria .29 through .34.
+Context precedence, error identities, and credential exclusion remain authoritative.
 
 Delivery: [Recovery diagnostic fixes](../../../plans/recovery-diagnostics/plan.md).
 

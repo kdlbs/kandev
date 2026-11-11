@@ -73,6 +73,13 @@ conversation. Actual workflow configuration determines each step's recipient.
   render visibly. Missing or unsupported colors shall use a neutral dot. Step
   names shall remain readable and searchable, independently of color. Changing
   the destination workflow shall clear the old selection and its color.
+- **AC-TASKS-CHANGE-WORKFLOW-001.10:** On desktop and phone, the destination
+  workflow, destination step, and replacement-profile selectors shall show a
+  visible border and input surface before interaction. Each selector shall retain
+  its external label, left-aligned value or placeholder, and visible trailing
+  chevron. Keyboard focus shall remain visible. Hover, expanded, and disabled
+  states shall retain the field boundary in light and dark themes. State changes
+  shall not shift adjacent content or obscure step colors and long names.
 
 ### REQ-TASKS-CHANGE-WORKFLOW-002: Consistent task transition
 
@@ -130,3 +137,4 @@ Those documents continue to own unrelated actions and bulk behavior.
 - [System design](../system-design/change-workflow.md)
 - [Implementation package](../../../plans/change-workflow/plan.md)
 - [Step-color follow-up package](../../../plans/change-workflow-step-colors/plan.md)
+- [Selector appearance package](../../../plans/change-workflow-selector-affordance/plan.md)

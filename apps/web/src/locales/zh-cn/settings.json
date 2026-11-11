@@ -492,6 +492,8 @@
   "memory": "内存 %",
   "mergeThisSplitIntoTheSplit": "将此拆分区域合并到包含 {{target}} 的拆分区域。",
   "mergeWithTarget": "与 {{target}} 合并",
+  "escapeCancelsAgent": "按 Escape 暂停智能体",
+  "escapeCancelsAgentDescription": "在聊天输入框中按 Escape 可暂停正在运行的智能体。",
   "messageSubmitKey": "消息提交快捷键",
   "messageTimeDisplay": "消息时间",
   "messageTimeDisplayDescription": "选择消息时间戳的显示方式。将鼠标悬停或点击时间戳可查看另一种格式。",

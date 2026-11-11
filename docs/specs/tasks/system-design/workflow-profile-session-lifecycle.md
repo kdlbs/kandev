@@ -141,11 +141,14 @@ If runtime stop fails after parking is committed, Kandev reports the error and
 retains the stamped intent. A retry can stop the same execution. A delayed
 callback cannot advance the destination step.
 
-A reuse candidate that becomes terminal before promotion is not revived. The
-orchestrator creates a new destination when the start setting is `reuse`.
-Completed sessions remain excluded from automatic workflow reuse. Explicit
-conversation follow-ups use [task completion](task-completion.md) and do not
-promote the historical session or advance the current workflow.
+A reuse candidate that becomes terminal before promotion is not revived. If a
+prepared route has recorded that candidate for the accepted profile entry, the
+orchestrator does not create a replacement for the same entry, even when the
+start setting is `reuse`. A distinct accepted entry may allocate a fresh
+destination under its start setting. Completed sessions remain excluded from
+automatic workflow reuse. Explicit conversation follow-ups use
+[task completion](task-completion.md). They do not promote the historical
+session or advance the current workflow.
 
 Changing a step setting affects later transitions only.
 
@@ -344,17 +347,20 @@ does not define recipient provenance. Conditional repository operations use
 existing transition and lifecycle serialization. Session insertion and the
 prepared route commit together. Promotion and the committed phase advance
 together. Preflight credentials before these transactions. Runtime calls stay
-outside them. Retry uses the recorded destination and stamped source cleanup.
+outside them. Runtime continuation and source cleanup require separate ownership
+checks.
 
-Reject an obsolete entry against the current transition/entry identity before
-replacing this record. A newer entry cannot overtake an unfinished route without
-reconciliation. Keep the committed record until a newer valid entry replaces it;
-task deletion removes it and task duplication strips it. A deleted recorded
-destination, like a terminal one, cannot satisfy reuse: the retry logs it and
-allocates the target profile's fresh session, which replaces the record. Any
-other failure to load the destination fails that entry visibly. A user or a
-compensation path can delete the destination without leaving the step, so
-failing every later start in the entry would lock the task until it moves.
+Profile destinations reject obsolete entries before replacing the route. A newer
+accepted profile entry may replace an unfinished or committed route; this gate
+does not reconcile the prior runtime. Task deletion removes the route and
+duplication strips it. A deleted or terminal profile destination cannot be
+reused. The same accepted profile entry cannot allocate again when its recorded
+destination is missing, failed, terminal, or has uncertain ownership;
+re-admission is refused. Only a distinct accepted profile entry may allocate a
+fresh destination under its start setting. The fence does not restart a runtime
+or replay a prompt. Explicit initial/step targets keep their separate
+replacement rules.
+
 Test prepared/committed restart and rollback on both
 databases. Extend existing task metadata transaction helpers; do not assume
 unconditional `SetTaskMetadataKey` provides compare-and-set or write-once safety.

@@ -59,7 +59,9 @@ Task creation depends on the caller surface and the destination workspace:
 
 Office sessions do not receive an MCP task-creation tool. A direct backend call from an Office session is also denied. External MCP uses the same `create_task_kandev` contract for both workspace modes, subject to the client's authorization. The `workspace_mode` argument controls materialized workspace behavior, not Kanban or Office mode. `agent_profile_id` selects a launch profile and is not an Office assignee.
 
-The optional `workspace_mode` field advertises exactly two values: `inherit_parent` reuses the parent's materialized workspace/worktree and requires `parent_id`; `new_workspace` requests a separate workspace/worktree. Omitting the field for a subtask selects `inherit_parent`. There is no unconditional schema default for top-level tasks.
+The optional `workspace_mode` field advertises exactly two values: `inherit_parent` normally reuses the parent's materialized workspace/worktree and requires `parent_id`; `new_workspace` requests a separate workspace/worktree. Omitting the field for a subtask selects `inherit_parent`. There is no unconditional schema default for top-level tasks.
+
+If a new launch for an inherited child selects a different non-Kubernetes executor from the parent's materialized environment, Kandev creates a separate workspace owned by the child. Uncommitted parent changes are not copied into that workspace. A session that is still bound to the inherited environment must resume with its original executor. Kubernetes environments remain task-owned and cannot be shared across tasks.
 
 For a Kubernetes parent, use `workspace_mode: "new_workspace"` when creating a child that will run. Kubernetes Pods belong to one task, so a child cannot attach to the parent's environment.
 
@@ -201,6 +203,13 @@ A retry keeps one task, session, turn and submission identity through queued sta
 ### Schedule
 
 The scheduler checks every 30 seconds and computes each expression's next calendar fire time in its configured timezone. A schedule created part-way through the day first fires at its next scheduled occurrence after creation (not immediately). A schedule missed while the backend was stopped fires once on the next check rather than once per missed occurrence.
+
+Editing a saved schedule starts the new definition at its first occurrence after the successful save. Earlier occurrences of the replacement expression do not run, so changing a weekday or time does not replay history.
+
+- **Replacement:** a changed cron expression or effective timezone starts a new schedule boundary.
+- **Not a replacement:** JSON formatting, expression whitespace, an empty timezone versus `UTC`, or a timezone field that an `@every` or `TZ=`/`CRON_TZ=` expression ignores. These saves keep the pending occurrence.
+
+Clearing the expression stops automatic runs. Entering a non-empty expression later starts from that later save.
 
 <DocsVideo
   webm="./media/feature-guides/scheduled-workflow-automation.webm"
@@ -1056,7 +1065,9 @@ The HTTP equivalent is `POST /api/v1/tasks/:id/workspace-sources`, with `{ "sour
 
 `step_complete_kandev` is registered and discoverable in every task-mode session, and in Office sessions per ADR 0015. Kandev includes its completion instruction, and acts on its signal, only on steps whose auto-advance action explicitly requires that signal: on Kanban boards this is opt-in per step, while office-default's `work` step ships with the requirement on. A user message arriving before transition can cancel that automatic move.
 
-If an agent resumes itself after background work finishes, its new output turn can signal completion for the workflow entry in which that turn started. An older turn stays tied to its original entry, including when the task leaves and returns to the same step.
+The tool result separates acceptance from movement. `accepted: true` with a `pending` outcome means the signal is durably recorded. It does not prove that a transition committed, that the task entered the workflow step named Review, or that a reviewer received the handoff. A committed result includes the exact `transition` ledger and destination. A duplicate returns `already_signaled` with the retained `signal_id`, `source`, `outcome`, `transition` when one exists, and a `current` snapshot of the task route.
+
+If an agent resumes itself after background work finishes, its new output turn can signal completion for the workflow entry in which that turn started. A later turn in the same entry can replace an unconsumed earlier signal with its own summary and handoff. An older turn stays tied to its original entry, including when the task leaves and returns to the same step. A native verification turn without another completion call leaves the accepted handoff unchanged.
 
 When the response says that the workflow step or entry changed, the calling turn is stale. A step-change error identifies the launch and current steps. Retrying the same stale turn cannot recover. End the turn and have the user resume the session, then complete the current step and call the tool from the fresh turn. A normal manual workflow move remains available to an operator after verifying the work and destination. This recovery path does not grant an agent automatic move authority.
 
@@ -1151,6 +1162,13 @@ $KANDEV_CLI kandev task create \
   --project "$PROJECT_ID" \
   --assignee "$AGENT_ID"
 ```
+
+`task create` also accepts two relation flags:
+
+- `--blocked-by ID,ID` makes the new task wait for the listed tasks. Each one must be the run's own task, a task in the run's scope, or a task the run's task can read (the run task's ancestors, descendants, siblings, or blockers). Anything else is refused without revealing whether the task exists. Blockers can only be declared on the task being created.
+- `--workspace-mode new_workspace` gives the new task its own workspace and worktree. `inherit_parent` (valid only with `--parent`) shares the parent's. Omit the flag to keep the default: a subtask shares its parent's workspace.
+
+`--priority`, `--workspace-group-id`, `--default-child-workspace`, and `--default-child-ordering` are not available to Office runs.
 
 Project list and create operations are forced to the workspace in the validated Office run token; the agent cannot select another workspace in these commands. Office runs cannot create or administer workspaces. Create additional workspaces through Kandev's user-facing setup and settings surfaces.
 
@@ -1331,6 +1349,39 @@ The compact envelope is stable as domains grow. Agents should discover fields
 at runtime instead of assuming that a domain's full schema is present in the
 tool definition. Existing lifecycle tools and compatibility MCP tools remain
 available where documented.
+
+Repository clone URLs use the same tools. Read the saved value with
+`get_settings_kandev`, then preview one replacement without writing:
+
+```json
+{
+  "target": {
+    "resource_type": "repository",
+    "resource_id": "repository-id",
+    "workspace_id": "workspace-id"
+  },
+  "changes": { "remote_url": "git@github.com:acme/widget.git" },
+  "options": { "validate_only": true }
+}
+```
+
+The result carries a `validation` object with the saved and effective URLs,
+provider identity, and `validation_scope`. Repeat the same call without
+`options`, or with `"validate_only": false`, to commit the change. A committed
+update republishes `settings.remote_url` and a `repository.updated` event. With
+`validate_only` set to `true`, the option accepts only a repository target with
+exactly one `remote_url` change. With `validate_only` set to `false`, ordinary
+repository settings updates and combined URL/settings or binding writes remain
+available. Unknown options, non-boolean values, mixed preview changes, and null
+or blank URLs are rejected without a write.
+
+Built-in GitHub, GitLab, and Azure DevOps providers verify the credential-free
+locator against the saved provider, host, namespace or project, and repository
+name. An active plugin provider must instead return its exact HTTPS clone URL
+and matching immutable descriptor. The preview is advisory: every update repeats
+validation. The repair changes registration data only. It does not rewrite an
+existing checkout or restart a task. See
+[Repair a registered clone URL](git-operations.md#repair-a-registered-clone-url).
 
 `export_workflow_kandev` takes `workflow_id` and returns one version 2
 `kandev_workflow` JSON document with explicit step completion booleans. It omits
@@ -1527,7 +1578,7 @@ workspace. Unknown and unauthorized task/session IDs return the same not-found r
 
 ## Troubleshooting
 
-- **No scheduled run:** confirm the cron expression is valid five-field or `@`-shorthand text and the automation/trigger is enabled; a schedule fires at its next occurrence after creation, not immediately.
+- **No scheduled run:** confirm the cron expression is valid five-field or `@`-shorthand text and the automation/trigger is enabled; a schedule fires at its next occurrence after creation or after its expression or effective timezone changes, not immediately.
 - **No GitHub push or CI runs:** connect a workspace GitHub App whose installation is subscribed to `push`/`check_run` events, reinstall a pre-existing App so it receives them, and select explicit repositories (an empty repository list is not evaluated).
 - **Scheduled run happened as well as a PR run:** clear the schedule expression. The two stored triggers fire independently.
 - **No GitHub PR runs:** connect GitHub and select explicit repositories; **All repos** currently evaluates none.

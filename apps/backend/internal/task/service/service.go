@@ -410,6 +410,7 @@ var (
 	ErrActiveTaskSessions        = errors.New("active agent sessions exist")
 	ErrWIPLimitExceeded          = wfmodels.ErrWIPLimitExceeded
 	ErrInvalidRepositorySettings = errors.New("invalid repository settings")
+	ErrRepositoryReadOnly        = errors.New("repository workspace is read-only")
 	ErrInvalidExecutorConfig     = errors.New("invalid executor config")
 	ErrExecutorProfileInUse      = errors.New("executor profile is referenced by a retained environment")
 	// Workspace-source sentinels are the service boundary consumed by the HTTP
@@ -602,6 +603,7 @@ type Service struct {
 	gitHubRepositoryOriginVerifier GitHubRepositoryOriginVerifier
 	repoCloneLocation              RepoCloneLocation
 	blockers                       BlockerRepository
+	relations                      RelationRepository
 	comments                       CommentRepository
 	taskStateActivity              TaskStateActivityLogger
 	secretStore                    secrets.SecretStore

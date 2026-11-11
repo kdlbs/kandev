@@ -213,7 +213,7 @@ func TestResetAgentContext_ActiveTurnAllowsSuccessorPrompt(t *testing.T) {
 		manager.events <- "prompt"
 		return &executor.PromptResult{}, nil
 	}
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resetDone := make(chan bool, 1)
 	go func() {

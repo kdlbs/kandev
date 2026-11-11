@@ -20,7 +20,7 @@ func newWakePromptFixture(t *testing.T, state models.TaskSessionState) *wakeProm
 	repo := setupTestRepo(t)
 	agent := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
-	svc.executor = executor.NewExecutor(agent, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agent, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.turnService = &repoBackedTurnService{repo: repo}
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
