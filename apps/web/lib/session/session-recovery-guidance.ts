@@ -22,7 +22,7 @@ export type SessionRecoveryGuidanceIdentity = {
   deliveryPhase?: AgentDeliveryRecovery["phase"];
   deliveryRevision?: number;
   deliverySubmissionId?: string;
-  openDeliveryBlockIds?: string[];
+  openRecoveryBlockIds?: string[];
 };
 
 export type SessionRecoveryGuidanceEntry = {
@@ -45,8 +45,15 @@ export type SessionRecoveryGuidanceState = {
 
 type GuidanceStore = ReturnType<typeof createGuidanceStore>;
 const storesByOwner = new WeakMap<object, GuidanceStore>();
+const historyContinuationBlockReasons = new Set([
+  "native_state_missing",
+  "native_resume_unsupported",
+  "workspace_incompatible",
+  "unresolved_durable_work",
+  "unknown_prompt_outcome",
+]);
 
-export function deliveryRecoveryGuidanceIdentity(
+function recoveryGuidanceIncidentIdentity(
   recovery: AgentDeliveryRecovery | null,
   block: SessionRecoveryBlockProjection | undefined,
 ): string | null {
@@ -72,14 +79,14 @@ export function sessionRecoveryGuidanceIdentityFromSession(
   session: Pick<TaskSession, "id" | "state" | "metadata" | "session_recovery_blocks">,
   errorStamp?: string | null,
 ): SessionRecoveryGuidanceIdentity {
-  const projection = sessionDeliveryProjection(session);
+  const projection = sessionRecoveryGuidanceProjection(session);
   return {
     taskId,
     sessionId: session.id,
     requestKey: sessionRecoveryRequestKey(taskId, session.id, errorStamp, projection.identity),
     errorStamp,
     sessionState: session.state,
-    ...sessionDeliveryIdentityFields(projection),
+    ...sessionRecoveryGuidanceIdentityFields(projection),
   };
 }
 
@@ -93,8 +100,8 @@ function sessionRecoveryRequestKey(
   return `${taskId}\u0000${sessionId}\u0000${identity}`;
 }
 
-function sessionDeliveryIdentityFields(
-  projection: ReturnType<typeof sessionDeliveryProjection>,
+function sessionRecoveryGuidanceIdentityFields(
+  projection: ReturnType<typeof sessionRecoveryGuidanceProjection>,
 ): Pick<
   SessionRecoveryGuidanceIdentity,
   | "generation"
@@ -104,7 +111,7 @@ function sessionDeliveryIdentityFields(
   | "deliveryPhase"
   | "deliveryRevision"
   | "deliverySubmissionId"
-  | "openDeliveryBlockIds"
+  | "openRecoveryBlockIds"
 > {
   const fields: Pick<
     SessionRecoveryGuidanceIdentity,
@@ -115,15 +122,17 @@ function sessionDeliveryIdentityFields(
     | "deliveryPhase"
     | "deliveryRevision"
     | "deliverySubmissionId"
-    | "openDeliveryBlockIds"
+    | "openRecoveryBlockIds"
   > = {};
   if (projection.block) {
     fields.generation = projection.block.expected_generation;
     fields.blockId = projection.block.id;
     fields.incarnationId = projection.block.incarnation_id;
     fields.reason = projection.block.reason;
-    fields.deliverySubmissionId =
-      projection.block.delivery_submission_id ?? projection.recovery?.submissionId;
+    if (projection.block.consumer_reference === "agent_delivery") {
+      fields.deliverySubmissionId =
+        projection.block.delivery_submission_id ?? projection.recovery?.submissionId;
+    }
   } else if (projection.recovery) {
     fields.generation = projection.recovery.harnessGeneration;
     fields.incarnationId = projection.recovery.incarnationId;
@@ -133,24 +142,26 @@ function sessionDeliveryIdentityFields(
     fields.deliveryPhase = projection.recovery.phase;
     fields.deliveryRevision = projection.recovery.revision;
   }
-  if (projection.openBlockIds !== undefined) {
-    fields.openDeliveryBlockIds = projection.openBlockIds;
+  if (projection.openRecoveryBlockIds !== undefined) {
+    fields.openRecoveryBlockIds = projection.openRecoveryBlockIds;
   }
   return fields;
 }
 
-function sessionDeliveryProjection(
+function sessionRecoveryGuidanceProjection(
   session: Pick<TaskSession, "metadata" | "session_recovery_blocks">,
 ) {
-  const recovery = readAgentDeliveryRecovery(session.metadata);
+  const projectedRecovery = readAgentDeliveryRecovery(session.metadata);
   const blocks = session.session_recovery_blocks;
-  const block = blocks?.find((candidate) => candidate.consumer_reference === "agent_delivery");
+  const block = blocks?.find((candidate) => historyContinuationBlockReasons.has(candidate.reason));
+  const recovery =
+    !block || block.consumer_reference === "agent_delivery" ? projectedRecovery : null;
   return {
     recovery,
     block,
-    identity: deliveryRecoveryGuidanceIdentity(recovery, block),
-    openBlockIds: blocks?.flatMap((candidate) =>
-      candidate.consumer_reference === "agent_delivery" ? [candidate.id] : [],
+    identity: recoveryGuidanceIncidentIdentity(recovery, block),
+    openRecoveryBlockIds: blocks?.flatMap((candidate) =>
+      historyContinuationBlockReasons.has(candidate.reason) ? [candidate.id] : [],
     ),
   };
 }
@@ -216,7 +227,7 @@ export function publishSessionRecoveryGuidance(
   const capturedBlockId = identity.blockId;
   const observedBlockId =
     capturedBlockId &&
-    [operation.identity.openDeliveryBlockIds, currentIdentity.openDeliveryBlockIds].some(
+    [operation.identity.openRecoveryBlockIds, currentIdentity.openRecoveryBlockIds].some(
       (blocks) => blocks?.includes(capturedBlockId) === true,
     )
       ? capturedBlockId
@@ -271,7 +282,7 @@ export function reconcileSessionRecoveryGuidanceProjection(
   if (
     !entry.observedBlockId &&
     observedBlockId &&
-    currentIdentity.openDeliveryBlockIds?.includes(observedBlockId)
+    currentIdentity.openRecoveryBlockIds?.includes(observedBlockId)
   ) {
     const entries = new Map(state.entries);
     entries.set(key, { ...entry, observedBlockId });
@@ -370,11 +381,10 @@ function guidanceResolvedByProjection(
   baseline: SessionRecoveryGuidanceIdentity = entry.identity,
 ) {
   if (isAuthoritativelyUsableSession(entry.identity, current)) return true;
+  if (hasObservedBlockBeenResolved(entry, current)) return true;
   const stored = entry.identity;
   if (!sameIncidentGeneration(stored, current)) return false;
-  return (
-    isResolvedDeliveryProjection(baseline, current) || hasObservedBlockBeenResolved(entry, current)
-  );
+  return isResolvedDeliveryProjection(baseline, current);
 }
 
 function isAuthoritativelyUsableSession(
@@ -400,9 +410,9 @@ function isResolvedDeliveryProjection(
   stored: SessionRecoveryGuidanceIdentity,
   current: SessionRecoveryGuidanceIdentity,
 ) {
-  const deliveryBlocks = current.openDeliveryBlockIds;
+  const recoveryBlocks = current.openRecoveryBlockIds;
   const storedBlockRemainsOpen =
-    stored.blockId !== undefined && deliveryBlocks?.includes(stored.blockId) === true;
+    stored.blockId !== undefined && recoveryBlocks?.includes(stored.blockId) === true;
   const matchingSubmission =
     stored.deliverySubmissionId !== undefined &&
     stored.deliverySubmissionId === current.deliverySubmissionId;
@@ -425,11 +435,11 @@ function hasObservedBlockBeenResolved(
   entry: SessionRecoveryGuidanceEntry,
   current: SessionRecoveryGuidanceIdentity,
 ) {
-  const deliveryBlocks = current.openDeliveryBlockIds;
+  const recoveryBlocks = current.openRecoveryBlockIds;
   return (
     entry.observedBlockId !== undefined &&
-    deliveryBlocks !== undefined &&
-    !deliveryBlocks.includes(entry.observedBlockId)
+    recoveryBlocks !== undefined &&
+    !recoveryBlocks.includes(entry.observedBlockId)
   );
 }
 
@@ -512,7 +522,7 @@ function mergeIdentity(
     deliveryPhase: current.deliveryPhase ?? captured.deliveryPhase,
     deliveryRevision: current.deliveryRevision ?? captured.deliveryRevision,
     deliverySubmissionId: captured.deliverySubmissionId ?? current.deliverySubmissionId,
-    openDeliveryBlockIds: current.openDeliveryBlockIds ?? captured.openDeliveryBlockIds,
+    openRecoveryBlockIds: current.openRecoveryBlockIds ?? captured.openRecoveryBlockIds,
     sessionState: captured.sessionState ?? current.sessionState,
   };
 }

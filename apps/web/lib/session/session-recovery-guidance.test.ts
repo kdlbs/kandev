@@ -8,6 +8,7 @@ import {
   invalidateSessionRecoveryGuidance,
   matchesContinuationDetailsToIdentity,
   publishSessionRecoveryGuidance,
+  reconcileSessionRecoveryGuidanceProjection,
   selectSessionRecoveryGuidance,
   sessionRecoveryGuidanceIdentityFromSession,
   type SessionRecoveryGuidanceIdentity,
@@ -234,6 +235,72 @@ describe("resolved delivery projections", () => {
     },
   );
 });
+
+describe("interactive recovery blocks", () => {
+  const transitions: [string, NonNullable<TaskSession["session_recovery_blocks"]>][] = [
+    ["is replaced", [interactiveBlock("block-2")]],
+    ["is removed", []],
+  ];
+
+  it.each(transitions)("retires guidance when an observed block %s", (_, currentBlocks) => {
+    const owner = {};
+    const original = sessionWithBlocks([interactiveBlock(BLOCK_ID)]);
+    const originalIdentity = sessionRecoveryGuidanceIdentityFromSession(TASK_ID, original);
+    expect(originalIdentity.deliveryPhase).toBeUndefined();
+    expect(originalIdentity.deliverySubmissionId).toBeUndefined();
+    const operation = beginSessionRecoveryGuidanceOperation(owner, originalIdentity);
+    const error = continuationHint({
+      reason: "native_state_missing",
+      block_id: BLOCK_ID,
+    });
+
+    expect(publishSessionRecoveryGuidance(owner, operation, error, originalIdentity)).toBe(true);
+
+    const currentIdentity = sessionRecoveryGuidanceIdentityFromSession(TASK_ID, {
+      ...original,
+      session_recovery_blocks: currentBlocks,
+    });
+    reconcileSessionRecoveryGuidanceProjection(owner, currentIdentity);
+
+    expect(selectSessionRecoveryGuidance(owner, currentIdentity)).toBeNull();
+    expect(publishSessionRecoveryGuidance(owner, operation, error, currentIdentity)).toBe(false);
+  });
+});
+
+function interactiveBlock(id: string): NonNullable<TaskSession["session_recovery_blocks"]>[number] {
+  return {
+    id,
+    incarnation_id: INCARNATION_ID,
+    expected_generation: 3,
+    reason: "native_state_missing",
+    consumer_reference: "interactive",
+    updated_at: RECOVERY_TIMESTAMP,
+  };
+}
+
+function sessionWithBlocks(blocks: TaskSession["session_recovery_blocks"]): TaskSession {
+  return {
+    id: sessionId(SESSION_ID),
+    task_id: taskId(TASK_ID),
+    state: "FAILED",
+    started_at: RECOVERY_TIMESTAMP,
+    updated_at: RECOVERY_TIMESTAMP,
+    metadata: {
+      agent_delivery_recovery: {
+        phase: "settled",
+        revision: 4,
+        session_id: SESSION_ID,
+        agent_execution_id: "execution-1",
+        submission_id: "old-delivery-submission",
+        stream_id: "stream-1",
+        incarnation_id: INCARNATION_ID,
+        harness_generation: 3,
+        prompt_generation: 1,
+      },
+    },
+    session_recovery_blocks: blocks,
+  };
+}
 
 describe("session recovery guidance ownership", () => {
   it("rejects late operation results and stale success while retaining newer guidance", () => {
