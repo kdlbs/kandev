@@ -157,6 +157,11 @@ For each existing required package:
 3. Require HTTP 201 and a valid, unexpired OIDC exchange-token response.
 4. Discard both tokens after the check.
 
+The response must be an object with `token_type: oidc`, a nonempty token string, and a parseable future `expires` value.
+The `created` value is descriptive metadata and does not gate authentication.
+The preflight ignores it, including absent or unparseable values, and never includes it in diagnostics.
+Creation time does not establish token validity. Expiry retains its independent check.
+
 Use bounded requests and reject redirects during authentication.
 Fail with a package-specific category for a rejected or unreadable response.
 Do not log the response body.
@@ -176,9 +181,8 @@ The helper distinguishes an HTTP rejection from a response that fails local vali
 An HTTP 201 response does not establish that every returned field is valid.
 A local validation error does not establish that the trusted publisher rejected authentication.
 
-Keep the existing token acceptance rules during the diagnostic repair.
 Report one fixed reason for each failed condition.
-These conditions cover unreadable JSON, invalid body shape, invalid token type, missing token, invalid creation date, invalid expiry, and expired tokens.
+These conditions cover unreadable JSON, invalid body shape, invalid token type, missing token, invalid expiry, and expired tokens.
 Use `npm_exchange_response` for malformed successful responses.
 Keep `npm_authentication` for HTTP authentication rejection and an expired exchange token.
 Preserve the package and HTTP status in the error.
@@ -196,9 +200,9 @@ Response-validation guidance directs maintainers to compare the named condition 
 
 Tests cover each validation condition separately and use a fixed clock.
 The documented success fixture remains accepted.
-Every invalid fixture remains rejected before release preparation.
-An acceptance-rule correction requires evidence of the actual incompatible response shape.
-The diagnostic repair does not infer that shape from a generic error message.
+Invalid authentication, token, and expiry fixtures remain rejected before release preparation.
+Absent or unparseable creation metadata remains accepted when all authentication and expiry checks pass.
+The creation-metadata correction follows the observed `invalid_created` failure in release run `43068047253`.
 
 ## Workflow modes
 
@@ -252,3 +256,4 @@ No browser scenario applies to this infrastructure change.
 - [Immutable SDK recovery](../../../plans/immutable-release-sdk-recovery/plan.md).
 - [Implementation plan](../../../plans/npm-publication-reliability/plan.md).
 - [Preflight response diagnostics repair](../../../plans/npm-preflight-response-diagnostics/plan.md).
+- [Creation metadata compatibility repair](../../../plans/npm-preflight-created-metadata/plan.md).
