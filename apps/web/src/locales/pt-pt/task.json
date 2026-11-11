@@ -2445,6 +2445,8 @@
   "workspaceRecoveryInspectionBusy": "Este workspace ainda está a ser verificado. Tente retomar a sessão.",
   "continueOnNewBranch": "Continuar numa nova branch",
   "continueFromHistory": "Continuar a partir do histórico guardado",
+  "continueFromHistoryDisclosure": "O histórico guardado inicia uma nova conversa nativa. O resultado da instrução interrompida permanece desconhecido.",
+  "continuingFromHistory": "A continuar a partir do histórico guardado...",
   "restoreReadOnlyWorkspace": "Restaurar workspace só de leitura",
   "sessionRecoveryGuardInProgress": "O Kandev está a verificar o agente após um reinício. Aguarde a conclusão da verificação antes de retomar.",
   "sessionRecoveryGuardUnstoppable": "Não foi possível parar o processo do agente anterior desta sessão após o reinício do backend. Reinicie o backend para resolver isto e tente novamente.",

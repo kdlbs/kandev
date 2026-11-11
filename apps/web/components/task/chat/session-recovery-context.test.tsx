@@ -1,17 +1,21 @@
 import type { ReactNode } from "react";
-import { renderHook } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, renderHook } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { sessionId, taskId, type TaskSession } from "@/lib/types/http";
+import { StateProvider, useAppStoreApi } from "@/components/state-provider";
+import { WebSocketRequestError } from "@/lib/ws/client";
+import {
+  beginSessionRecoveryGuidanceOperation,
+  publishSessionRecoveryGuidance,
+  selectSessionRecoveryGuidance,
+  sessionRecoveryGuidanceIdentityFromSession,
+} from "@/lib/session/session-recovery-guidance";
 import { SessionRecoveryProvider, useSessionComposerRecovery } from "./session-recovery-context";
 
+const mockLaunchErrorContext = vi.hoisted(() => ({ value: null as unknown }));
+
 vi.mock("../task-launch-error-context", () => ({
-  useTaskLaunchErrorContext: () => ({
-    automaticRecovery: {
-      requestIdentity: { taskId: "task", sessionId: "session", generation: 1, attemptId: 1 },
-      resumptionState: "error",
-      error: "Session recovery failed",
-    },
-  }),
+  useTaskLaunchErrorContext: () => mockLaunchErrorContext.value,
 }));
 
 const session: TaskSession = {
@@ -22,14 +26,71 @@ const session: TaskSession = {
   updated_at: "2026-10-15T10:00:00Z",
 };
 
+const recoveryBlock = {
+  id: "block-1",
+  incarnation_id: "incarnation-1",
+  expected_generation: 2,
+  reason: "unresolved_durable_work",
+  consumer_reference: "agent_delivery",
+  delivery_submission_id: "submission-1",
+  updated_at: "2026-10-15T10:00:00Z",
+};
+
+function deliverySession(
+  phase: "uncertain" | "restored",
+  blocks: TaskSession["session_recovery_blocks"],
+): TaskSession {
+  return {
+    ...session,
+    state: phase === "restored" ? "RUNNING" : "WAITING_FOR_INPUT",
+    metadata: {
+      agent_delivery_recovery: {
+        phase,
+        revision: phase === "restored" ? 2 : 1,
+        session_id: "session",
+        agent_execution_id: "execution-1",
+        submission_id: "submission-1",
+        stream_id: "stream-1",
+        incarnation_id: "incarnation-1",
+        harness_generation: 2,
+        prompt_generation: 1,
+      },
+    },
+    session_recovery_blocks: blocks,
+  };
+}
+
+beforeEach(() => {
+  mockLaunchErrorContext.value = {
+    automaticRecovery: {
+      requestIdentity: { taskId: "task", sessionId: "session", generation: 1, attemptId: 1 },
+      resumptionState: "error",
+      error: "Session recovery failed",
+    },
+  };
+});
+
 function recoveryFor(current: TaskSession) {
   return renderHook(() => useSessionComposerRecovery("session"), {
-    wrapper: ({ children }: { children: ReactNode }) => (
-      <SessionRecoveryProvider session={current} messages={[]} taskId="task" enabled>
-        {children}
-      </SessionRecoveryProvider>
-    ),
+    wrapper: recoveryWrapper(current),
   });
+}
+
+function recoveryWrapper(current: TaskSession) {
+  return recoveryWrapperFor(() => current);
+}
+
+function recoveryWrapperFor(getSession: () => TaskSession) {
+  return ({ children }: { children: ReactNode }) => {
+    const current = getSession();
+    return (
+      <StateProvider initialState={{ taskSessions: { items: { [current.id]: current } } }}>
+        <SessionRecoveryProvider session={current} messages={[]} taskId="task" enabled>
+          {children}
+        </SessionRecoveryProvider>
+      </StateProvider>
+    );
+  };
 }
 
 describe("recovery model provenance", () => {
@@ -51,4 +112,113 @@ describe("recovery model provenance", () => {
     expect(result.current?.model?.summary).toBe("Agent process exited");
     expect(result.current?.model?.requestLocal).not.toBe(true);
   });
+
+  it("uses typed Restart guidance while its durable recovery projection is delayed", () => {
+    const { result } = renderHook(
+      () => ({ owner: useAppStoreApi(), context: useSessionComposerRecovery("session") }),
+      { wrapper: recoveryWrapper(session) },
+    );
+    const operation = beginSessionRecoveryGuidanceOperation(
+      result.current.owner,
+      sessionRecoveryGuidanceIdentityFromSession("task", session),
+    );
+
+    act(() => {
+      publishSessionRecoveryGuidance(
+        result.current.owner,
+        operation,
+        new WebSocketRequestError("Saved history is available", "CONFLICT", {
+          kind: "session_restore_required",
+          recovery_action: "continue_from_history",
+          reason: "unresolved_durable_work",
+          session_id: "session",
+          generation: 2,
+        }),
+      );
+    });
+
+    expect(result.current.context?.model).toMatchObject({
+      kind: "session_restore_required",
+      requestLocal: true,
+    });
+  });
+});
+
+it("restores the composer after external native recovery and fences the late failure", () => {
+  mockLaunchErrorContext.value = null;
+  let currentSession = deliverySession("uncertain", [recoveryBlock]);
+  const { result, rerender } = renderHook(
+    () => ({ owner: useAppStoreApi(), context: useSessionComposerRecovery("session") }),
+    { wrapper: recoveryWrapperFor(() => currentSession) },
+  );
+  const owner = result.current.owner;
+  const identity = sessionRecoveryGuidanceIdentityFromSession("task", currentSession);
+  const operation = beginSessionRecoveryGuidanceOperation(owner, identity);
+  const error = new WebSocketRequestError("Saved history is available", "CONFLICT", {
+    kind: "session_restore_required",
+    recovery_action: "continue_from_history",
+    reason: recoveryBlock.reason,
+    session_id: "session",
+    generation: recoveryBlock.expected_generation,
+    block_id: recoveryBlock.id,
+    incarnation_id: recoveryBlock.incarnation_id,
+  });
+
+  act(() => {
+    publishSessionRecoveryGuidance(owner, operation, error, identity);
+  });
+  expect(result.current.context?.model?.kind).toBe("session_restore_required");
+
+  currentSession = deliverySession("restored", []);
+  rerender();
+
+  expect(result.current.context?.model).toBeNull();
+  expect(selectSessionRecoveryGuidance(owner, identity)).toBeNull();
+  let lateFailureAccepted = true;
+  act(() => {
+    lateFailureAccepted = publishSessionRecoveryGuidance(owner, operation, error, identity);
+  });
+  expect(lateFailureAccepted).toBe(false);
+  expect(result.current.context?.model).toBeNull();
+});
+
+it("does not place an authoritatively usable session behind unprojected recovery guidance", () => {
+  mockLaunchErrorContext.value = null;
+  let currentSession = deliverySession("uncertain", undefined);
+  const { result, rerender } = renderHook(
+    () => ({ owner: useAppStoreApi(), context: useSessionComposerRecovery("session") }),
+    { wrapper: recoveryWrapperFor(() => currentSession) },
+  );
+  const owner = result.current.owner;
+  const identity = sessionRecoveryGuidanceIdentityFromSession("task", currentSession);
+  const operation = beginSessionRecoveryGuidanceOperation(owner, identity);
+  const error = new WebSocketRequestError("Saved history is available", "CONFLICT", {
+    kind: "session_restore_required",
+    recovery_action: "continue_from_history",
+    reason: "unresolved_durable_work",
+    session_id: "session",
+    generation: 2,
+    block_id: recoveryBlock.id,
+    incarnation_id: recoveryBlock.incarnation_id,
+  });
+
+  act(() => {
+    publishSessionRecoveryGuidance(owner, operation, error, identity);
+  });
+  expect(result.current.context?.model?.kind).toBe("session_restore_required");
+
+  currentSession = {
+    ...deliverySession("uncertain", undefined),
+    state: "RUNNING",
+  };
+  rerender();
+
+  expect(result.current.context?.model).toBeNull();
+  expect(selectSessionRecoveryGuidance(owner, identity)).toBeNull();
+  let lateFailureAccepted = true;
+  act(() => {
+    lateFailureAccepted = publishSessionRecoveryGuidance(owner, operation, error, identity);
+  });
+  expect(lateFailureAccepted).toBe(false);
+  expect(result.current.context?.model).toBeNull();
 });
