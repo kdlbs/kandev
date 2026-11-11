@@ -890,7 +890,7 @@ func (s *Service) MoveTaskWithOptions(
 	// are always the source step and workflow the task actually left on this
 	// commit.
 	if resultTransitioned {
-		s.publishTaskMovedEvent(ctx, task, resultFromWorkflowID, resultFromStepID, workflowStepID, sessionID, moveID)
+		s.publishTaskMovedEvent(ctx, task, resultFromWorkflowID, resultFromStepID, workflowStepID, sessionID, moveID, oldState)
 		historySessionID := opts.StepHistorySessionID
 		if historySessionID == "" {
 			historySessionID = sessionID
@@ -1245,7 +1245,7 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 			s.publishTaskEvent(ctx, events.TaskStateChanged, candidate, &oldState)
 		}
 		s.recordQueuedPromotion(ctx, candidate.ID, fromStepID, targetStep.ID)
-		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, sessionID, "")
+		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, sessionID, "", oldState)
 		return true
 	} else if admissionRepo, ok := s.tasks.(workflowMoveAdmissionRepository); ok {
 		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, fromStepID, targetStep.ID, targetStep.WIPLimit)
@@ -1263,7 +1263,7 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 			s.publishTaskEvent(ctx, events.TaskStateChanged, candidate, &oldState)
 		}
 		s.recordQueuedPromotion(ctx, candidate.ID, fromStepID, targetStep.ID)
-		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, sessionID, "")
+		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, sessionID, "", oldState)
 		return true
 	}
 	// ctx here still carries the identity of whoever triggered the move that

@@ -28,6 +28,7 @@ import (
 	"github.com/kandev/kandev/internal/runs/dedupkeys"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // dispatchEngineTrigger invokes the configured WorkflowEngineDispatcher.
@@ -104,6 +105,8 @@ func (s *Service) dispatchEngineTriggerForRecovery(
 type TaskMovedData struct {
 	TaskID                 string `json:"task_id"`
 	WorkspaceID            string `json:"workspace_id"`
+	OldState               string `json:"old_state"`
+	NewState               string `json:"new_state"`
 	FromStepID             string `json:"from_step_id"`
 	ToStepID               string `json:"to_step_id"`
 	ToStepName             string `json:"to_step_name"`
@@ -1387,7 +1390,7 @@ func (s *Service) queueTaskAssignedRun(
 // on_exit / on_enter).
 func (s *Service) handleTaskMoved(ctx context.Context, event *bus.Event) error {
 	data, err := decodeEventData[TaskMovedData](event)
-	if err != nil || data.AssigneeAgentProfileID == "" {
+	if err != nil {
 		return nil
 	}
 
@@ -1395,7 +1398,7 @@ func (s *Service) handleTaskMoved(ctx context.Context, event *bus.Event) error {
 	// resolved from the currently-claimed run for this task so the
 	// activity row joins back to it on the run detail page's Tasks
 	// Touched surface.
-	if data.WorkspaceID != "" && data.FromStepName != data.ToStepName {
+	if data.AssigneeAgentProfileID != "" && data.WorkspaceID != "" && data.FromStepName != data.ToStepName {
 		runID := s.ResolveRunForTask(ctx, data.TaskID)
 		s.LogActivityWithRun(ctx, data.WorkspaceID, "system", "orchestrator",
 			"task_status_changed", "task", data.TaskID,
@@ -1403,11 +1406,26 @@ func (s *Service) handleTaskMoved(ctx context.Context, event *bus.Event) error {
 			runID, data.SessionID)
 	}
 
-	if categorizeStep(data.ToStepName) == stepCategoryDone &&
-		categorizeStep(data.FromStepName) != stepCategoryDone {
-		return s.finalizeDone(ctx, data)
+	completed := data.NewState == string(v1.TaskStateCompleted) || data.NewState == string(v1.TaskStateCancelled)
+	previouslyCompleted := data.OldState == string(v1.TaskStateCompleted) || data.OldState == string(v1.TaskStateCancelled)
+	enteredTerminalState := completed && !previouslyCompleted
+	if data.NewState == "" {
+		enteredTerminalState = categorizeStep(data.ToStepName) == stepCategoryDone &&
+			categorizeStep(data.FromStepName) != stepCategoryDone
 	}
-	return nil
+	if !enteredTerminalState {
+		return nil
+	}
+	if data.NewState != "" {
+		fields, err := s.repo.GetTaskExecutionFields(ctx, data.TaskID)
+		if err != nil {
+			return err
+		}
+		if fields == nil || !fields.IsFromOffice {
+			return nil
+		}
+	}
+	return s.finalizeDone(ctx, data)
 }
 
 // finalizeDone resolves blockers, notifies parents, and closes out a
@@ -1419,7 +1437,7 @@ func (s *Service) handleTaskMoved(ctx context.Context, event *bus.Event) error {
 func (s *Service) finalizeDone(ctx context.Context, data *TaskMovedData) error {
 	if s.routineRunSyncer != nil {
 		terminal := "done"
-		if strings.EqualFold(data.ToStepName, "cancelled") {
+		if data.NewState == string(v1.TaskStateCancelled) || (data.NewState == "" && strings.EqualFold(data.ToStepName, "cancelled")) {
 			terminal = "cancelled"
 		}
 		if err := s.routineRunSyncer.SyncRunStatus(ctx, data.TaskID, terminal); err != nil {

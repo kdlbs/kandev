@@ -12,6 +12,24 @@ import (
 
 type officeEligibilityLocator struct{ workspace, workflow, step string }
 
+type officeCompletionSchemaTx struct {
+	tx         *sql.Tx
+	driverName string
+	rebind     func(string) string
+}
+
+func (q officeCompletionSchemaTx) DriverName() string { return q.driverName }
+func (q officeCompletionSchemaTx) Query(query string, args ...any) (*sql.Rows, error) {
+	return q.tx.Query(query, args...)
+}
+func (q officeCompletionSchemaTx) QueryRow(query string, args ...any) *sql.Row {
+	return q.tx.QueryRow(query, args...)
+}
+func (q officeCompletionSchemaTx) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return q.tx.QueryRowContext(ctx, query, args...)
+}
+func (q officeCompletionSchemaTx) Rebind(query string) string { return q.rebind(query) }
+
 // lockOfficeEligibilityScopes serializes slate and workflow policy writers
 // through the workspace exclusion used by task admission. Locators are checked
 // again after locking; a changed source never acquires another workspace late.
@@ -112,13 +130,9 @@ func (r *Repository) officeTaskEligibilityLocators(ctx context.Context, tx *sql.
 }
 
 func (r *Repository) officeTaskTablePresent(ctx context.Context, tx *sql.Tx) (bool, error) {
-	var present bool
-	query := `SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='tasks')`
-	if dialect.IsPostgres(r.db.DriverName()) {
-		query = `SELECT to_regclass('tasks') IS NOT NULL`
-	}
-	err := tx.QueryRowContext(ctx, query).Scan(&present)
-	return present, err
+	return db.TableExistsContext(ctx, officeCompletionSchemaTx{
+		tx: tx, driverName: r.db.DriverName(), rebind: r.db.Rebind,
+	}, "tasks")
 }
 
 type officeParticipantLocator struct {
