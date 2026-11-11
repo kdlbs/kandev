@@ -123,3 +123,6 @@ No live token exchange, release dispatch, or publication occurred during impleme
 - [Requirements](../../specs/release/requirements/npm-publication-reliability.md).
 - [System design](../../specs/release/system-design/npm-publication-reliability.md#early-authentication-gate).
 - [Completed diagnostic repair](../npm-preflight-response-diagnostics/plan.md).
+
+The [exchange response contract repair](../npm-preflight-exchange-contract/plan.md) supersedes this package's requirement for expiry metadata.
+This package's completed results remain historical evidence.
