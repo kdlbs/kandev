@@ -65,11 +65,11 @@ func (s *DashboardService) UpdateTaskStatusAsHuman(
 	if normaliseStatus(req.NewStatus) != stateCompleted || s.finalStepMover == nil {
 		return nil, s.UpdateTaskStatus(ctx, req)
 	}
-	terminal, hasStep, err := s.repo.IsTaskWorkflowStepTerminal(ctx, req.TaskID)
+	final, hasStep, err := s.repo.IsTaskOnFinalStep(ctx, req.TaskID)
 	if err != nil {
 		return nil, fmt.Errorf("human done: resolve workflow step: %w", err)
 	}
-	if !hasStep || terminal {
+	if !hasStep || final {
 		if s.humanDoneCompleter != nil {
 			return s.completeHumanDone(ctx, req)
 		}

@@ -1942,8 +1942,15 @@ func wireOfficeSvcsDependencies(
 	// Wire the workflow-domain decisions store so approve/request-changes
 	// route to workflow_step_decisions (ADR 0005 Wave E).
 	services.OfficeSvcs.Dashboard.SetDecisionStore(repos.Workflow)
-	configureOfficeHumanCompletionGuard(repos.Task, repos.Office, repos.Workflow)
-	if !repos.Task.OfficeHumanCompletionGuardConfigured() {
+	registerOfficeCompletionPolicy(repos.Task, repos.Office, repos.Workflow)
+	if orchestratorSvc != nil && repos.Office != nil {
+		orchestratorSvc.SetParentChildrenCompletionWakeRecorder(func(
+			ctx context.Context, parentID, childSetKey, generation, operationID string,
+		) error {
+			return repos.Office.RecordWorkflowChildrenCompletedWake(ctx, parentID, childSetKey, generation, operationID)
+		})
+	}
+	if !repos.Task.CompletionPoliciesConfigured() {
 		panic("Office completion gate not configured")
 	}
 	services.OfficeSvcs.Dashboard.SetTaskHumanDoneCompleter(officeHumanDoneCompleterAdapter{tasks: services.Task})
@@ -1972,7 +1979,7 @@ func wireOfficeSvcsDependencies(
 	orchestratorSvc.SetOfficeTaskStatusUpdater(services.OfficeSvcs.Dashboard)
 	// A human move that would complete an Office task is refused while its
 	// approvers are pending.
-	services.Task.SetOfficeApprovalGuard(officeApprovalGuardAdapter{reader: services.OfficeSvcs.Dashboard})
+	services.Task.SetApproverNameResolver(officeApproverNameResolverAdapter{reader: services.OfficeSvcs.Dashboard})
 	// Wire the office service as the retry canceller for task reassignment.
 	services.OfficeSvcs.Dashboard.SetRetryCanceller(services.Office)
 	// Wire the office service as the terminal-shape recorder so a

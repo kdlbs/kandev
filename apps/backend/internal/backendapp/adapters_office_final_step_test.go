@@ -104,7 +104,7 @@ func TestOfficeFinalStepMover_TranslatesRefusals(t *testing.T) {
 		},
 		{
 			name:       "active session",
-			err:        errors.New("task has an active session"),
+			err:        taskservice.ErrTaskMoveActiveSession,
 			wantReason: dashboard.FinalStepMoveReasonWorkflowMove,
 			wantCode:   "task_move_active_session",
 		},

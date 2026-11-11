@@ -34,6 +34,15 @@ func (s *Service) handleTaskStateChanged(ctx context.Context, data watcher.TaskE
 	s.handleTaskDependenciesForTerminalState(ctx, data.TaskID, *data.NewState)
 }
 
+// SetParentChildrenCompletionWakeRecorder records that the state path already
+// delivered a parent's current child wave, so the Office reconciler does not
+// dispatch the same wake again.
+func (s *Service) SetParentChildrenCompletionWakeRecorder(
+	recorder func(context.Context, string, string, string, string) error,
+) {
+	s.parentChildrenCompletionWakeRecorder = recorder
+}
+
 func (s *Service) processParentChildrenCompletedForTaskState(ctx context.Context, taskID string, state v1.TaskState) {
 	if !models.IsTerminalTaskState(state) {
 		return
@@ -235,6 +244,7 @@ func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID strin
 	defer unlock()
 
 	if s.childCompletionAlreadyApplied(ctx, parentID, operationID) {
+		s.recordParentChildrenCompletionWake(ctx, parentID, rows, operationID)
 		return false
 	}
 
@@ -245,6 +255,7 @@ func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID strin
 
 	if !result.Transitioned {
 		s.markChildCompletionApplied(ctx, parentID, operationID, "non-transition")
+		s.recordParentChildrenCompletionWake(ctx, parentID, rows, operationID)
 		return false
 	}
 
@@ -261,7 +272,47 @@ func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID strin
 		return false
 	}
 	s.markChildCompletionApplied(ctx, parentID, operationID, "transition")
+	s.recordParentChildrenCompletionWake(ctx, parentID, rows, operationID)
 	return true
+}
+
+func (s *Service) recordParentChildrenCompletionWake(
+	ctx context.Context,
+	parentID string,
+	rows []models.ChildCompletionRow,
+	operationID string,
+) {
+	if s.parentChildrenCompletionWakeRecorder == nil {
+		return
+	}
+	childSetKey, generation := childCompletionReceiptIdentity(rows)
+	if err := s.parentChildrenCompletionWakeRecorder(ctx, parentID, childSetKey, generation, operationID); err != nil {
+		s.logger.Warn("on_children_completed: failed to record parent wake receipt",
+			zap.String("parent_task_id", parentID), zap.String("operation_id", operationID), zap.Error(err))
+	}
+}
+
+func childCompletionReceiptIdentity(rows []models.ChildCompletionRow) (string, string) {
+	ordered := append([]models.ChildCompletionRow(nil), rows...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
+	var key strings.Builder
+	var newest time.Time
+	for i, row := range ordered {
+		if i > 0 {
+			key.WriteByte(',')
+		}
+		key.WriteString(row.ID)
+		key.WriteByte(':')
+		key.WriteString(string(row.State))
+		if row.UpdatedAt.After(newest) {
+			newest = row.UpdatedAt
+		}
+	}
+	generation := ""
+	if !newest.IsZero() {
+		generation = newest.UTC().Format("2006-01-02 15:04:05")
+	}
+	return key.String(), generation
 }
 
 func (s *Service) readyChildCompletionRows(ctx context.Context, parentID string) ([]models.ChildCompletionRow, bool) {
@@ -391,6 +442,8 @@ func allChildrenCompleted(rows []models.ChildCompletionRow) bool {
 	return true
 }
 
+// workflowStepIsTerminal answers the completing-step question used for task
+// lifecycle decisions, not whether the step has the greatest position.
 func (s *Service) workflowStepIsTerminal(ctx context.Context, workflowStepID string) bool {
 	if s.workflowStepGetter == nil || workflowStepID == "" {
 		return false
@@ -406,7 +459,8 @@ func (s *Service) workflowStepIsTerminal(ctx context.Context, workflowStepID str
 			zap.Error(err))
 		return false
 	}
-	return wfmodels.IsTerminalStep(step, nextStep)
+	// Child completion can advance a parent only from a completing step.
+	return wfmodels.CompletesTaskOnEnter(step, nextStep)
 }
 
 // childCompletionPayload builds the engine payload for an

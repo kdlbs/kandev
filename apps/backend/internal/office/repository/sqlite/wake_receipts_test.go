@@ -44,6 +44,54 @@ func seedWakeCandidate(t *testing.T, repo *sqlite.Repository, ctx context.Contex
 	return childID + ":COMPLETED"
 }
 
+func TestRecordWorkflowChildrenCompletedWakeSuppressesReconcileForEvaluatedWave(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+	parentID := "parent-state-path"
+	waveSetKey := seedWakeCandidate(t, repo, ctx, "ws-1", parentID)
+	_, waveGeneration, err := repo.GetChildSetKeyAndGeneration(ctx, parentID)
+	if err != nil {
+		t.Fatalf("get initial wave generation: %v", err)
+	}
+
+	// A non-wave child can change independently. The state path receipt must
+	// validate the evaluated wave, then record the broader snapshot that the
+	// reconciler uses for candidate detection.
+	insertTask(t, repo, ctx, parentID+"-ephemeral", "ws-1", "Ephemeral", "", "")
+	if _, err := repo.ExecRaw(ctx,
+		"UPDATE tasks SET parent_id = ?, state = 'COMPLETED', is_ephemeral = 1, updated_at = datetime('now', '+5 seconds') WHERE id = ?",
+		parentID, parentID+"-ephemeral"); err != nil {
+		t.Fatalf("add non-wave child: %v", err)
+	}
+
+	if err := repo.RecordWorkflowChildrenCompletedWake(
+		ctx, parentID, waveSetKey, waveGeneration, "on_children_completed:state-path",
+	); err != nil {
+		t.Fatalf("record state-path wake: %v", err)
+	}
+
+	rows, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+	if err != nil {
+		t.Fatalf("list stuck parents after state-path receipt: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("state-path receipt left a duplicate reconciler candidate: %#v", rows)
+	}
+
+	receipt, err := repo.GetWakeReceipt(ctx, parentID)
+	if err != nil {
+		t.Fatalf("read state-path receipt: %v", err)
+	}
+	childSetKey, childGeneration, err := repo.GetChildSetKeyAndGeneration(ctx, parentID)
+	if err != nil {
+		t.Fatalf("get broad child snapshot: %v", err)
+	}
+	if receipt == nil || receipt.ChildSetKey != childSetKey || receipt.ChildGeneration != childGeneration {
+		t.Fatalf("state-path receipt = %+v, want current reconciler snapshot %q at %q",
+			receipt, childSetKey, childGeneration)
+	}
+}
+
 // seedWakeAgentProfile inserts (or, for a second call against the same
 // agentID, replaces) an agent_profiles row with the given status, using
 // the same columns TestListStuckParents_ExcludesUnresolvedOrPausedAssignee

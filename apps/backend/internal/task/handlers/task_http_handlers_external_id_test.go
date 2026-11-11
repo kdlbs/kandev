@@ -20,6 +20,7 @@ import (
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/completion"
 	"github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
@@ -111,6 +112,16 @@ func (r *idempotentCreateTaskRepo) UpdateTaskFieldsWithParentAdmission(_ context
 	}
 	r.tasks[id] = &task
 	return &models.TaskFieldUpdateResult{Task: &task, PriorState: current.State, PriorWorkflowStepID: current.WorkflowStepID}, nil
+}
+
+func (r *idempotentCreateTaskRepo) UpdateTaskFieldsWithParentAdmissionAndCompletionAdmission(
+	ctx context.Context,
+	id string,
+	update models.TaskFieldUpdate,
+	validate repository.TaskParentValidator,
+	_ *completion.Admission,
+) (*models.TaskFieldUpdateResult, error) {
+	return r.UpdateTaskFieldsWithParentAdmission(ctx, id, update, validate)
 }
 
 func (r *idempotentCreateTaskRepo) CreateTask(_ context.Context, task *models.Task) error {

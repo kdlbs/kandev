@@ -25,7 +25,7 @@ func TestPostgresWorkflowChangeAtomicAdmissionGuardsSourceVersion(t *testing.T) 
 		t.Fatalf("UpdateTask concurrent edit: %v", err)
 	}
 	if _, err := repoA.UpdateTaskWithWorkflowChangeAdmissionAndState(
-		ctx, candidate, source.WorkflowStepID, candidate.WorkflowStepID, 0, nil, true, guard,
+		ctx, candidate, source.WorkflowStepID, candidate.WorkflowStepID, 0, nil, true, guard, nil,
 	); !errors.Is(err, repoerrors.ErrWorkflowChangeConflict) {
 		t.Fatalf("stale guarded write error = %v, want ErrWorkflowChangeConflict", err)
 	}
@@ -41,7 +41,7 @@ func TestPostgresWorkflowChangeAtomicAdmissionGuardsSourceVersion(t *testing.T) 
 	currentGuard := &models.WorkflowChangeSource{WorkflowID: current.WorkflowID, StepID: current.WorkflowStepID, UpdatedAt: current.UpdatedAt}
 	currentCandidate := workflowChangeCandidate(t, current)
 	if _, err := repoA.UpdateTaskWithWorkflowChangeAdmissionAndState(
-		ctx, currentCandidate, current.WorkflowStepID, currentCandidate.WorkflowStepID, 0, nil, true, currentGuard,
+		ctx, currentCandidate, current.WorkflowStepID, currentCandidate.WorkflowStepID, 0, nil, true, currentGuard, nil,
 	); err != nil {
 		t.Fatalf("current guarded write: %v", err)
 	}

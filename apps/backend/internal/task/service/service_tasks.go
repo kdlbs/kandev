@@ -30,6 +30,7 @@ import (
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/completion"
 	"github.com/kandev/kandev/internal/task/repository/hierarchy"
 	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -2194,42 +2195,16 @@ func (s *Service) ListTaskRepositoryIDsByTaskIDs(ctx context.Context, taskIDs []
 
 // UpdateTask updates an existing task and publishes a task.updated event
 func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequest) (*models.Task, error) {
-	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
+	return s.updateTask(ctx, id, req, nil)
+}
+
+func (s *Service) updateTask(ctx context.Context, id string, req *UpdateTaskRequest, admission *completion.Admission) (*models.Task, error) {
+	if err := s.validateTaskUpdateInput(ctx, id, req); err != nil {
 		return nil, err
 	}
-	if err := refuseReservedMetadata(req.Metadata, req.AllowReservedMetadata); err != nil {
-		return nil, err
-	}
-	if req.Title != nil {
-		if err := validateTaskTitle(*req.Title); err != nil {
-			return nil, err
-		}
-	}
-	if req.Priority != nil {
-		if err := ValidateTaskPriority(*req.Priority); err != nil {
-			return nil, err
-		}
-	}
-	task, err := s.tasks.GetTask(ctx, id)
+	task, assignee, replacement, err := s.prepareTaskUpdate(ctx, id, req)
 	if err != nil {
 		return nil, err
-	}
-	if err := s.authorizeTaskExecutorMutation(ctx, task); err != nil {
-		return nil, executorMutationDenial(err)
-	}
-	if err := s.authorizeTaskExecutorSelection(ctx, task, req.Metadata); err != nil {
-		return nil, executorMutationDenial(err)
-	}
-	assignee, err := s.validateTaskUpdateReferences(ctx, task, req)
-	if err != nil {
-		return nil, err
-	}
-	var replacement *preparedRepositoryReplacement
-	if req.Repositories != nil {
-		replacement, err = s.prepareRepositoryReplacement(ctx, task.WorkspaceID, req.Repositories, task)
-		if err != nil {
-			return nil, err
-		}
 	}
 	if isPriorityOnlyTaskUpdate(req) {
 		updated, handled, err := s.tryUpdateTaskPriorityOnly(ctx, id, task, *req.Priority)
@@ -2237,6 +2212,70 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 			return updated, err
 		}
 	}
+	result, err := s.writeTaskUpdateFields(ctx, id, req, assignee, admission)
+	if err != nil {
+		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(err))
+		return nil, err
+	}
+	return s.finishTaskUpdate(ctx, id, req, replacement, result)
+}
+
+func (s *Service) validateTaskUpdateInput(ctx context.Context, id string, req *UpdateTaskRequest) error {
+	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
+		return err
+	}
+	if err := refuseReservedMetadata(req.Metadata, req.AllowReservedMetadata); err != nil {
+		return err
+	}
+	if req.Title != nil {
+		if err := validateTaskTitle(*req.Title); err != nil {
+			return err
+		}
+	}
+	if req.Priority != nil {
+		if err := ValidateTaskPriority(*req.Priority); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) prepareTaskUpdate(
+	ctx context.Context,
+	id string,
+	req *UpdateTaskRequest,
+) (*models.Task, string, *preparedRepositoryReplacement, error) {
+	task, err := s.tasks.GetTask(ctx, id)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if err := s.authorizeTaskExecutorMutation(ctx, task); err != nil {
+		return nil, "", nil, executorMutationDenial(err)
+	}
+	if err := s.authorizeTaskExecutorSelection(ctx, task, req.Metadata); err != nil {
+		return nil, "", nil, executorMutationDenial(err)
+	}
+	assignee, err := s.validateTaskUpdateReferences(ctx, task, req)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	var replacement *preparedRepositoryReplacement
+	if req.Repositories != nil {
+		replacement, err = s.prepareRepositoryReplacement(ctx, task.WorkspaceID, req.Repositories, task)
+		if err != nil {
+			return nil, "", nil, err
+		}
+	}
+	return task, assignee, replacement, nil
+}
+
+func (s *Service) writeTaskUpdateFields(
+	ctx context.Context,
+	id string,
+	req *UpdateTaskRequest,
+	assignee string,
+	admission *completion.Admission,
+) (*models.TaskFieldUpdateResult, error) {
 	update := models.TaskFieldUpdate{
 		Title: req.Title, Description: req.Description, Priority: req.Priority,
 		State: req.State, WorkflowStepID: req.WorkflowStepID, Position: req.Position,
@@ -2253,13 +2292,26 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 			Trigger: steptelemetry.TriggerTaskUpdate, ActorKind: actorKind, ActorID: actorID,
 		})
 	}
-	result, err := s.tasks.UpdateTaskFieldsWithParentAdmission(updateCtx, id, update, s.resolveParentWithReader)
-	if err != nil {
-		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(err))
-		return nil, err
+	if admission == nil {
+		return s.tasks.UpdateTaskFieldsWithParentAdmission(updateCtx, id, update, s.resolveParentWithReader)
 	}
-	ctx = models.WithOfficeHumanCompletionIntent(ctx, models.OfficeHumanCompletionIntent{})
-	task = result.Task
+	writer, ok := s.tasks.(interface {
+		UpdateTaskFieldsWithParentAdmissionAndCompletionAdmission(context.Context, string, models.TaskFieldUpdate, hierarchy.TaskParentValidator, *completion.Admission) (*models.TaskFieldUpdateResult, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("human task completion admission repository unavailable")
+	}
+	return writer.UpdateTaskFieldsWithParentAdmissionAndCompletionAdmission(updateCtx, id, update, s.resolveParentWithReader, admission)
+}
+
+func (s *Service) finishTaskUpdate(
+	ctx context.Context,
+	id string,
+	req *UpdateTaskRequest,
+	replacement *preparedRepositoryReplacement,
+	result *models.TaskFieldUpdateResult,
+) (*models.Task, error) {
+	task := result.Task
 	oldWorkflowStepID := result.PriorWorkflowStepID
 	oldState := result.PriorState
 	stateChanged := req.State != nil && oldState != task.State

@@ -89,7 +89,7 @@ func (f *assignmentBlockerFixture) wireResolutionEngine(t *testing.T) {
 
 // @covers AC-OFFICE-SCHEDULER-002.7
 func TestOfficeAssignmentBlockerResolution(t *testing.T) {
-	for _, source := range []string{"service_event", "reactivity_without_session"} {
+	for _, source := range []string{"state_event", "reactivity_without_session"} {
 		t.Run(source, func(t *testing.T) {
 			f := newAssignmentBlockerFixture(t)
 			f.task(t, "dependent", "assignment-work", v1.TaskStateTODO, "assignment-worker")
@@ -98,8 +98,9 @@ func TestOfficeAssignmentBlockerResolution(t *testing.T) {
 			if got := len(f.taskRuns(t, "dependent", service.RunReasonTaskAssigned)); got != 0 {
 				t.Errorf("assignment while pending=%d, want 0", got)
 			}
-			if source == "service_event" {
+			if source == "state_event" {
 				f.wireResolutionEngine(t)
+				blockerMust(t, f.scheduler.RegisterTaskCompletionSubscriber(f.eb))
 			} else {
 				_, err := f.tasks.GetActiveTaskSessionByTaskID(context.Background(), "dependent")
 				if !errors.Is(err, taskmodels.ErrTaskSessionNotFound) {
@@ -111,9 +112,8 @@ func TestOfficeAssignmentBlockerResolution(t *testing.T) {
 				_, err := f.repo.UpdateTaskAssignee(context.Background(), id, "assignment-worker")
 				blockerMust(t, err)
 				blockerMust(t, f.tasks.UpdateTaskState(context.Background(), id, v1.TaskStateCompleted))
-				if source == "service_event" {
-					data := service.TaskMovedData{TaskID: id, WorkspaceID: "assignment-ws", AssigneeAgentProfileID: "assignment-worker", FromStepName: "Work", ToStepName: "Done"}
-					blockerMust(t, f.eb.Publish(context.Background(), events.TaskMoved, bus.NewEvent(events.TaskMoved, "resolution-test", data)))
+				if source == "state_event" {
+					f.completedStateEvent(t, id)
 				} else {
 					done := "done"
 					_, err := f.scheduler.ApplyTaskMutation(context.Background(), &scheduler.TaskSnapshot{ID: id, WorkspaceID: "assignment-ws", State: "IN_PROGRESS"}, scheduler.TaskMutation{NewStatus: &done, ActorType: "user", ActorID: "operator"})
@@ -151,7 +151,7 @@ func (f *assignmentBlockerFixture) completionSteps(t *testing.T, kanban bool) (s
 		blockerMust(t, f.tasks.CreateWorkflow(ctx, &taskmodels.Workflow{ID: workflow, WorkspaceID: "assignment-ws", Name: "Kanban"}))
 		blockerMust(t, f.workflows.CreateStep(ctx, &wfmodels.WorkflowStep{ID: work, WorkflowID: workflow, Name: "Work"}))
 	}
-	blockerMust(t, f.workflows.CreateStep(ctx, &wfmodels.WorkflowStep{ID: done, WorkflowID: workflow, Name: "Done", Position: 2, CompleteTaskOnEnter: true}))
+	blockerMust(t, f.workflows.CreateStep(ctx, &wfmodels.WorkflowStep{ID: done, WorkflowID: workflow, Name: "Shipped", Position: 2, CompleteTaskOnEnter: true}))
 	return work, done
 }
 
@@ -166,7 +166,11 @@ func (f *assignmentBlockerFixture) heldCompletionTask(t *testing.T, ts *taskserv
 	blockerMust(t, err)
 	ids := []string{"first", "final"}
 	for _, id := range ids {
-		blockerMust(t, f.tasks.CreateTask(ctx, &taskmodels.Task{ID: id, WorkspaceID: "assignment-ws", WorkflowID: step.WorkflowID, WorkflowStepID: work, Title: id, State: v1.TaskStateInProgress, Priority: "medium", AssigneeAgentProfileID: "assignment-worker"}))
+		assignee := "assignment-worker"
+		if id == "final" {
+			assignee = ""
+		}
+		blockerMust(t, f.tasks.CreateTask(ctx, &taskmodels.Task{ID: id, WorkspaceID: "assignment-ws", WorkflowID: step.WorkflowID, WorkflowStepID: work, Title: id, State: v1.TaskStateInProgress, Priority: "medium", AssigneeAgentProfileID: assignee}))
 		blockerMust(t, ts.AddDependency(ctx, "dependent", id))
 	}
 	f.assignment(t, events.TaskCreated, "dependent", "assignment-worker")

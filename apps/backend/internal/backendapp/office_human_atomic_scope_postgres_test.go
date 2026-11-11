@@ -2,7 +2,6 @@ package backendapp
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -12,6 +11,7 @@ import (
 	internaldb "github.com/kandev/kandev/internal/db"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/completion"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/testutil"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -140,7 +140,6 @@ func TestOfficeMutationScopeUsesReadCommitted(t *testing.T) {
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	reader := officeHumanCompletionPendingReader(f.office, f.workflow)
 	reached := make(chan int, 1)
 	resume := make(chan struct{})
 	released := false
@@ -149,22 +148,18 @@ func TestOfficeMutationScopeUsesReadCommitted(t *testing.T) {
 			close(resume)
 		}
 	}()
-	f.h.repo.SetOfficeHumanCompletionPendingReader(func(ctx context.Context, tx *sql.Tx, taskID, stepID string) ([]string, error) {
-		ids, err := reader(ctx, tx, taskID, stepID)
-		if err != nil {
-			return nil, err
-		}
+	registerOfficeCompletionPolicyWithHook(f.h.repo, f.office, f.workflow, func(ctx context.Context, q completion.Querier, _, _ *models.Task, _ completion.Admission) error {
 		var pid int
-		if err := tx.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
-			return nil, err
+		if err := q.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+			return err
 		}
 		reached <- pid
 		select {
 		case <-resume:
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return ctx.Err()
 		}
-		return ids, nil
+		return nil
 	})
 	completed := make(chan error, 1)
 	go func() {

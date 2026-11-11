@@ -1829,7 +1829,8 @@ func (s *Service) syncTaskStateForQueuePromotion(ctx context.Context, task *mode
 		return fmt.Errorf("load next step after promoted step %s: %w", targetStep.ID, err)
 	}
 	oldState := task.State
-	if wfmodels.IsTerminalStep(targetStep, next) {
+	// Queue promotion derives lifecycle state from the completing-step policy.
+	if wfmodels.CompletesTaskOnEnter(targetStep, next) {
 		if !models.IsTerminalTaskState(task.State) {
 			task.State = v1.TaskStateCompleted
 		}

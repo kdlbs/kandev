@@ -37,6 +37,23 @@ func TestProcessOnChildrenCompleted_TransitionsParentWhenAllActiveChildrenComple
 
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createEngineService(t, repo, stepGetter, agentMgr)
+	var wakeReceipt struct {
+		parentID    string
+		childSetKey string
+		generation  string
+		operationID string
+		called      bool
+	}
+	svc.SetParentChildrenCompletionWakeRecorder(func(_ context.Context, parentID, childSetKey, generation, operationID string) error {
+		wakeReceipt = struct {
+			parentID    string
+			childSetKey string
+			generation  string
+			operationID string
+			called      bool
+		}{parentID, childSetKey, generation, operationID, true}
+		return nil
+	})
 	onEnterDone := make(chan struct{}, 1)
 	svc.onProcessOnEnterComplete = func() {
 		select {
@@ -87,6 +104,10 @@ func TestProcessOnChildrenCompleted_TransitionsParentWhenAllActiveChildrenComple
 	}
 	if transitioned := svc.processOnChildrenCompleted(ctx, "parent"); !transitioned {
 		t.Fatalf("expected all active children completed successfully to transition parent")
+	}
+	if !wakeReceipt.called || wakeReceipt.parentID != "parent" || wakeReceipt.childSetKey == "" ||
+		wakeReceipt.generation == "" || wakeReceipt.operationID == "" {
+		t.Fatalf("parent wake receipt = %+v, want the committed child completion", wakeReceipt)
 	}
 	waitForChildrenCompletedOnEnter(t, onEnterDone)
 

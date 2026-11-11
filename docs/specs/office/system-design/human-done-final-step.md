@@ -23,27 +23,25 @@ Two existing paths meet here:
   `reason: "workflow_step"`.
 - `POST /api/v1/tasks/:id/move`: `task/handlers.httpMoveTask` ->
   `task/service.MoveTaskWithOptions`. `syncTaskStateForWorkflowMove` sets
-  `COMPLETED` when the target step is terminal (`wfmodels.IsTerminalStep`: no
-  next step and `CompleteTaskOnEnter`). The state is written in the move's
+  `COMPLETED` when the target step completes the task on entry
+  (`wfmodels.CompletesTaskOnEnter`: no next step and `CompleteTaskOnEnter`). The state is written in the move's
   admission transaction, where the completion gate
   (`guardTaskCompletionTransitionTx`) also runs. The orchestrator's Office seam
   (`markOfficeTaskCompletedForTerminalStep`) later skips the task because it is
   already complete, so Office approvers are never consulted.
 
-The design adds a pre-write approver guard to the human move, then routes a
-human Office Done request on a non-final step through that move. The agent
-and engine paths remain unchanged. The selected atomic amendment below also
-protects human final-step Done and same-step completion; it is not implemented
-yet.
+The completion policy hook checks approvers inside the human move's mutation
+transaction, then routes a human Office Done request on a non-final step through
+that move. The agent and engine paths remain unchanged. The same hook protects
+same-step state completion and explicit final-step Done.
 
 ## Current preflight and transport
 
-The current `OfficeApprovalGuard` in task/service reads pending names through
-backendapp before repository admission. `MoveTaskWithOptions` checks human
-actor, pre-read Office membership and speculative completed state. This leaves
-a read/write window and does not yet know actual WIP admission. It is not an
-implementation of the concurrent guarantee. The selected amendment below
-replaces production eligibility with a transaction-local check.
+The task service creates a typed `completion.Admission` after authorization.
+The task repository checks its scope and completing-step predicate under the
+write transaction, then runs the registered Office policy against the locked
+current and candidate task. Pending names are resolved after the repository
+returns a refusal; name lookup does not participate in eligibility.
 
 The existing canonical slate includes per-task seats across the destination
 workflow and templates at the destination step, including tasks with no current
@@ -76,10 +74,9 @@ type FinalStepMoveResult struct {
 ```
 
 `UpdateTaskStatusAsHuman` calls the mover only when the requested state is
-`COMPLETED`, the mover is wired, and `IsTaskWorkflowStepTerminal` reports
-`hasStep && !terminal`. The current implementation otherwise delegates to `UpdateTaskStatus`; the
-selected amendment replaces that human Done delegation with the transaction
-completer. On the
+`COMPLETED`, the mover is wired, and `IsTaskOnFinalStep` reports
+`hasStep && !final`. On a final step or a task without a workflow step, the
+human Done completer writes the state with a `FinalStepDone` admission. On the
 move path it writes no state, activity or event of its own: the move publishes
 `task.updated`, `task.state_changed` and `task.moved`, and the orchestrator
 owns completion side effects. A step lookup error aborts the request.
@@ -180,98 +177,52 @@ actual queued noncompletion remain unchanged.
 
 ### Boundary and transaction authority
 
-Keep eligibility inside the task repository's existing mutation transaction;
-compose the canonical Office and workflow readers through `backendapp`. Ordinary
-human completion does not acquire relation-table locks, a new advisory namespace,
-a schema revision, or a general transaction framework.
-
-Domain-specific APIs in the existing owning packages:
+Keep eligibility inside the task repository's existing mutation transaction.
+Human authority travels as a typed parameter, never through `context.Context`:
 
 ```go
-// task/models: internal provenance, following TaskCompletionMoveOverride's pattern.
-// Values are never decoded from JSON. Expected scope came from existing authorization.
-type OfficeHumanCompletionIntent struct {
-    TaskID, ExpectedWorkspaceID, ExpectedWorkflowID, ExpectedStepID string
-    ExpectedTaskState string // source state used to prepare automatic move metadata
-    Kind string // move, set_state, office_done
+type Admission struct {
+    TaskID string
+    Actor StepTransitionActor
+    Kind AdmissionKind // move, set_state, final_step_done, fields
+    Expected Scope // workspace, workflow, step, and source state
 }
-func WithOfficeHumanCompletionIntent(context.Context, OfficeHumanCompletionIntent) context.Context
-func OfficeHumanCompletionIntentFromContext(context.Context) (OfficeHumanCompletionIntent, bool)
 
-// task/repository/sqlite: configured once in backendapp, before serving requests.
-func (r *Repository) SetOfficeHumanCompletionPendingReader(
-    func(context.Context, *sql.Tx, string, string) ([]string, error))
-func (r *Repository) OfficeHumanCompletionGuardConfigured() bool
-
-// Canonical implementations share private query helpers between reader pool and tx.
-// office/repository/sqlite
-func (r *Repository) ListTaskParticipantsAtStepTx(
-    context.Context, *sql.Tx, string, string, string) ([]Participant, error)
-// workflow/repository
-func (r *Repository) ListActiveTaskDecisionsTx(
-    context.Context, *sql.Tx, string) ([]*wfmodels.WorkflowStepDecision, error)
-
-// office/dashboard; configured by backendapp, like TaskFinalStepMover.
-type TaskHumanDoneCompleter interface {
-    CompleteOfficeTaskAsHuman(context.Context, string, string) (*FinalStepMoveResult, error)
+type Policy interface {
+    AdmitCompletion(context.Context, Querier, *Task, *Task, Admission) error
 }
-func (s *DashboardService) SetTaskHumanDoneCompleter(TaskHumanDoneCompleter)
-func (s *DashboardService) ResolvePendingApproverNames(context.Context, []string) []PendingApproverDTO
 
-// task/service and task/repository/sqlite; result is the persisted task snapshot.
-func (s *Service) CompleteOfficeTaskAsHuman(ctx context.Context, taskID, expectedStepID string) (*Task, error)
-func (r *Repository) CompleteOfficeTaskAsHuman(ctx context.Context, taskID, expectedWorkspaceID, expectedWorkflowID, expectedStepID string) (*Task, error)
-// Generic HTTP/WS state edits use this wrapper; agent/internal UpdateTask stays unchanged.
-func (s *Service) UpdateTaskAsHuman(ctx context.Context, taskID string, req *UpdateTaskRequest) (*Task, error)
-func (s *Service) UpdateTaskStateAsHuman(context.Context, string, v1.TaskState) (*Task, error)
-func (r *Repository) UpdateTaskStateAsHuman(context.Context, string, v1.TaskState) (*Task, error)
+func (r *Repository) SetCompletionPolicies(...Policy)
+func (r *Repository) CompleteTaskOnFinalStep(context.Context, string, *Admission) (*Task, error)
 ```
 
-The canonical pending-reader callback receives the *same* `*sql.Tx` as the task
-write. `backendapp` composes the Office destination slate and workflow active
-decisions, preserving `pendingApproversAtStep` semantics: destination workflow
-per-task seats, target templates, existing per-task precedence/canonicalization,
-and approved active decisions by decider ID. Extract the pure approved-by
-comparison once; do not fork or narrow the current predicate. SQL helpers take a
-small private `QueryContext`/`QueryRowContext` interface; `sqlx.Tx.Tx` joins the
-standard transaction when needed. No pool read escapes the transaction.
+After the existing workspace, step, and task locks, `admitCompletionTx` reads
+the current row again, checks the admission scope, checks that a completed
+candidate enters a completing step, and runs each registered policy against
+the same SQL transaction. `backendapp` registers `office/completionpolicy` at
+startup and fails startup if the policy hook is absent. Its policy owns the
+Office-specific rules: Office identity for `FinalStepDone`, the final-step
+check, and the canonical destination approver slate compared with active
+decisions. The shared approved-by comparison is also used by dashboard
+projections. SQL query helpers accept the small `QueryContext` and
+`QueryRowContext` surface implemented by `*sql.Tx` and the read pool.
 
-The repository helper is
-`guardOfficeHumanCompletionTx(ctx context.Context, tx *sql.Tx, candidate *models.Task) error`;
-it reads the fresh locked snapshot itself. It runs before task, completion-history,
-transition, marker or durable-effect writes, including replay paths that would
-actually mutate. Existing exact-operation replays return their stored result
-without redoing effects; they are not a new completion. The helper is called
-from `updateTaskTx` (manual/same-step/exact move),
-`UpdateTaskFieldsWithParentAdmission` (same-step HTTP/WS state edits), and the
-new scalar Office human completer. The existing generic completion-criteria
-check remains in its current task mutation paths. The Office direct Done path
-keeps its separate existing criteria exclusion; this amendment closes its
-Office-approver window, not a new generic criteria policy.
+The service creates an admission only after human request authorization and
+passes it to the one repository write it authorizes. The task repository has
+explicit admission-aware entry points for full task writes, field updates,
+state writes, and cross-step moves; ordinary engine and agent writes keep the
+nil-admission methods. `MoveTaskWithOptions` derives `move` only from its
+server-supplied human actor. HTTP and WS human state routes use typed service
+entry points. The Office adapter uses `CompleteOfficeTaskAsHuman` for the
+explicit final-step action. No request data can construct an admission.
 
-`MoveTaskWithOptions` attaches intent whenever its *server-supplied*
-`StepHistoryActor` is Human, regardless of the pre-read `IsFromOffice` flag.
-ApproveSession keeps Human. HTTP/WS generic task-state handlers call
-`UpdateTaskAsHuman`; direct WS task.state uses `UpdateTaskStateAsHuman`.
-HTTP bulk moves pass trusted Human provenance into the existing per-item move
-path. Existing MCP/internal agent calls keep their original methods. The
-Office handler's already-established empty `agentIDFromCtx` classification
-selects the human path. Do not infer humanity merely from an owner identity:
-agent operations also carry their owner's identity. Reject inherited intent
-for a different task; agent/engine entry points must not inherit a human
-intent into nested work. One observed task snapshot receives the existing workspace-write authorization;
-that same workspace/workflow/step is carried to the transaction fence.
-The transaction never silently follows a different scope.
-
-The early service guard is not authoritative when the repository reports its
-transaction reader configured; defer eligibility until actual admission is
-known. This also avoids refusing a WIP-queued noncompletion from a speculative
-completed candidate. Legacy narrow test stores with no transaction capability
-retain the current optional preflight behavior. Both nil guard and nil reader
-fixtures preserve existing compatibility. Production `backendapp` must assert
-that the concrete repository reader is configured before exposing Office
-mutations; it cannot silently take the legacy path. Names may fall back to IDs
-when the optional resolver is absent; eligibility never does.
+Step-entry dispatch, publication callbacks, and other post-commit work receive
+no admission. No manual context clearing is needed. A policy refusal returns
+`completion.RefusedError{Code, Subjects}` with stable approver IDs. After the
+transaction rolls back, the service resolves display names through the
+optional `SetApproverNameResolver`; name resolution cannot change eligibility.
+The service-level approval fallback is removed. A missing name resolver falls
+back to the stable ID, while a missing registered policy fails startup.
 
 ### Fresh state and policy at the boundary
 
@@ -288,10 +239,11 @@ exclusion only while actual Office membership holds.
 
 Ordinary field edits fence the authorized workspace but apply supplied fields
 to fresh placement. Explicit state/step edits retain source placement fences.
-Human admission intent ends at commit: entry dispatch, published callbacks and
-queue reconciliation must not inherit it. An Office participant add observing
-no task returns the existing unchanged result before role locking; it cannot
-follow a task created later without workspace exclusion.
+The typed admission is passed only to the authorized repository write. Entry
+dispatch, published callbacks and queue reconciliation receive no admission.
+An Office participant add observing no task returns the existing unchanged
+result before role locking; it cannot follow a task created later without
+workspace exclusion.
 
 Read destination `complete_task_on_enter`, WIP limit and workflow positions in
 this transaction. Every step create/update/reorder/delete now takes the same
@@ -299,8 +251,8 @@ workspace exclusion first, so a sibling insertion or reorder cannot change
 terminality behind a locked target step. The task repository decides actual
 capacity using the fresh target limit before the Office check.
 
-- A step-changing human move derives terminal completion with the existing
-  `IsTerminalStep` semantics (last-by-position plus complete-on-entry), after
+- A step-changing human move derives completion with `CompletesTaskOnEnter`
+  (last-by-position plus complete-on-entry), after
   admission. If queued, preserve current state and normal queued placement;
   do not treat the speculative completed state as a completion.
 - A same-step reorder stays a reorder; it does not become an arrival or start
@@ -321,17 +273,16 @@ capacity using the fresh target limit before the Office check.
   stale state into it. Existing authorized scope and source-entry retries rebuild the entire
   candidate; they do not retain stale completion or entry options.
 
-The final-step PATCH no longer delegates a human completed write to the Office
-repository's unguarded `UpdateTaskState[IfWorkflowStep]`. Add a narrow
-`TaskHumanDoneCompleter` seam in `human_done_final_step.go`, implemented in
-backendapp over the new service method. It handles final/no-step status writes
-with a transaction-local scope/policy fence. Non-final Done keeps the existing
-mover, with `office_done` intent, the actual-final-step fence and normal WIP
-admission. No branch falls back to the agent redirect after a human guard
-refusal. Only after successful scalar persistence does the dashboard run its
-existing status comment/activity/event/reactivity sequence once. On refusal it
-runs none. The move path retains existing task-service/orchestrator ownership;
-no duplicate status/event pipeline is added.
+The final-step PATCH uses the `TaskHumanDoneCompleter` seam in
+`human_done_final_step.go`, implemented in backendapp over the service's
+`CompleteTaskOnFinalStep` repository path. It handles final/no-step status
+writes with a transaction-local scope and policy fence. Non-final Done uses
+the existing mover with a `Move` admission, the actual-final-step fence and
+normal WIP admission. No branch falls back to the agent redirect after a
+policy refusal. Only after successful scalar persistence does the dashboard run
+its existing status comment/activity/event/reactivity sequence once. On refusal
+it runs none. The move path retains existing task-service/orchestrator
+ownership; no duplicate status/event pipeline is added.
 
 Return a typed repository refusal carrying only the stable pending agent IDs.
 After rollback, task service converts it to existing
@@ -399,7 +350,7 @@ Required participation is concrete:
 | SupersedeTaskDecisions and ClearStepDecisions | Replace autocommit with one short writer transaction; workspace first, then unchanged canonical UPDATE/DELETE. |
 | ClearStepDecisionsAndCompleteMarker | Same workspace-first prefix inside its existing transaction; deletion and marker completion still commit together. No call to a separate workflow-store transaction. |
 | CreateStep, UpdateStep variants, ReorderStepsIfUnchanged, ClearStartStepFlag, DeleteStep and relevant workflow deletion | Resolve workflow workspace first; lock it before demotion, cleanup, policy or step writes. Revalidate IDs/expected versions. Step deletion cascades participants, not decisions; preserve existing orphan/active-decision semantics. |
-| Existing task hierarchy/field/move writers | Keep workspace-before-step/task order; add locator revalidation and intent evaluation at the shared write sites. No new ordering for scalar engine state writers is required for Office eligibility, because they do not mutate the slate; transfer's reservation must also tolerate their row-first shape. |
+| Existing task hierarchy/field/move writers | Keep workspace-before-step/task order; add locator revalidation and typed admission evaluation at the shared write sites. No new ordering for scalar engine state writers is required for Office eligibility, because they do not mutate the slate; transfer's reservation must also tolerate their row-first shape. |
 | TransferTask | Lock explicit source/destination workspaces first, revalidate exact source predicates, then nonblocking complete relation reservation, then existing mapping/census/mutation. |
 
 Runner-only helpers do not introduce approvers and need no new Office gate.
