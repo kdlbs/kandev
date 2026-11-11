@@ -1,0 +1,114 @@
+---
+id: "02-restart-fence-creation"
+title: "Preserve restart recovery incident fences"
+status: done
+wave: 2
+depends_on:
+  - "01-historical-native-proof"
+plan: "plan.md"
+requirements:
+  - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006
+acceptance_criteria:
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.5
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.9
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.12
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.23
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.24
+system_design:
+  - ../../specs/platform/system-design/interrupted-prompt-recovery.md
+  - ../../specs/platform/system-design/session-recovery-convergence.md
+---
+
+# Task 02: Preserve restart recovery incident fences
+
+## Summary
+
+Make restart fence creation conditional on the complete current open-fence inventory.
+Reuse an existing eligible fence without changing its binding.
+Keep already duplicated incidents recoverable through Task 01's authenticated proof.
+
+## In scope
+
+- Reproduce `recreateRestartRecoveryBlock` adding a generic companion beside a current submission-bound fence.
+- Keep the passing ordinary-presentation-repair control.
+- Add the narrow `EnsureRestartRecoveryBlock` repository capability.
+- Under existing turn/delivery locks, revalidate the current generation before reading and creating a fence.
+- Return one eligible existing fence unchanged. Insert only when no current fence exists.
+- Preserve multiple and independent fences without another insertion.
+- Use the capability in restart presentation repair and propagate read/write failures.
+- Cover PostgreSQL concurrent repair and delivery-fence insertion using separate connections and synchronization barriers.
+- Cover a real `RecoverSession` retry after historical silent restoration and already duplicated incident fences.
+
+## Out of scope
+
+- Global recovery-block uniqueness changes or deletion of existing fences.
+- Relaxing the generic resolver's single-fence guard.
+- Changing independent consumer, ordinary upsert or Office admission behavior.
+
+## Acceptance
+
+1. `TestRestartRecoveryBlockEnsureReusesIncident` reproduces the companion defect before the correction.
+   Repeated and concurrent repair then retain the existing fence ID, reason, submission and stream.
+2. Missing-fence repair creates one fence for the current eligible generation.
+   Generation replacement, independent fences, multiple causes and storage failures preserve the refusal without partial writes.
+3. `TestRepeatedNativeResumeAfterSilentRestore` proves exact authenticated resolution of the issue's existing matching companion fences.
+   A mixed matching/independent set remains blocked, with no old dispatch or outcome rewrite.
+
+## Verification
+
+Run from the repository root. Set `KANDEV_TEST_POSTGRES_DSN` for the concurrent PostgreSQL acceptance case.
+Use barriers instead of timing-based sleeps.
+
+```bash
+(cd apps/backend && GOMEMLIMIT=2048MiB GOMAXPROCS=2 go test -trimpath -tags fts5 -p 1 -race ./internal/task/repository/sqlite -run 'Test(Postgres)?(RestartRecoveryBlockEnsure|NativeResumeAfterSilentRestore)' -count=1)
+(cd apps/backend && GOMEMLIMIT=2048MiB GOMAXPROCS=2 go test -trimpath -tags fts5 -p 1 -race ./internal/orchestrator -run 'Test(RepeatedNativeResumeAfterSilentRestore|RestartRecovery|RestartInventory|RecoverSessionUnknownPromptKeepsNativeHistory)' -count=1)
+(cd apps/backend && go run ./cmd/sqlguard ./internal)
+(cd apps/backend && GOMEMLIMIT=2048MiB GOMAXPROCS=2 go test -trimpath -p 1 -race ./internal/persistence/storeconformance -count=1)
+bash scripts/lint-go-changed apps/backend/internal/task/repository/interface.go apps/backend/internal/task/repository/sqlite/restart_recovery_block_ensure.go apps/backend/internal/task/repository/sqlite/restart_recovery_block_ensure_test.go apps/backend/internal/orchestrator/restart_recovery_presentation.go apps/backend/internal/orchestrator/restart_recovery_presentation_test.go apps/backend/internal/orchestrator/repeated_native_resume_test.go
+git diff --check
+```
+
+## Files likely touched
+
+- `apps/backend/internal/task/repository/interface.go`
+- `apps/backend/internal/task/repository/sqlite/restart_recovery_block_ensure.go` (new)
+- `apps/backend/internal/task/repository/sqlite/restart_recovery_block_ensure_test.go` (new)
+- `apps/backend/internal/orchestrator/restart_recovery_presentation.go`
+- `apps/backend/internal/orchestrator/restart_recovery_presentation_test.go`
+- `apps/backend/internal/orchestrator/repeated_native_resume_test.go` (new)
+
+## Dependencies
+
+Task 01 supplies verified historical proof and current incident-set resolution.
+
+## Risks
+
+A read followed by an unlocked upsert leaves the concurrency defect open.
+Preserve the existing PostgreSQL advisory-lock namespace and turn-before-delivery lock order.
+Do not infer common incident ownership merely from matching generation numbers.
+
+## Parallelism
+
+`sequential`
+
+## Inputs
+
+- The plan's helper reproduction and passing serial control.
+- Interrupted prompt recovery design, section `Repeated recovery after silent restoration`.
+- `session_continuity.go`: current upsert, lock and block-list helpers.
+- `session_delivery_reconstruction.go`: `selectDeliveryReconstructionBlock`.
+- `restart_recovery_presentation_test.go` and `session_native_delivery_recovery_test.go`.
+
+## Results
+
+Implemented `EnsureRestartRecoveryBlock` with the existing turn and delivery locks. The transaction rechecks the current generation and complete open-fence inventory. It returns one eligible fence unchanged and inserts only when no fence exists.
+
+Restart presentation repair now uses this repository operation. It preserves existing bindings and does not add a generic companion beside an existing incident fence. The authenticated resolver still rejects an independent restriction.
+
+Verification passed:
+
+- The SQLite race suite passed for `RestartRecoveryBlockEnsure` and `NativeResumeAfterSilentRestore`.
+- The orchestrator race suite passed for repeated Resume and restart recovery.
+- SQL guard and store-conformance race tests passed.
+- Changed-Go-file lint reported `0 issues`. `git diff --check` passed.
+- PostgreSQL concurrency cases did not run because `KANDEV_TEST_POSTGRES_DSN` is unset.

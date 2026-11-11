@@ -74,7 +74,9 @@ Carry authenticated stream and exact submission identities into missing-binding
 resolution. Pin session/native generation, block identity and current SQL rows
 under existing turn/delivery locks; no derivation from a guessed canonical name.
 Absent metadata and an earlier already-resolved notice are presentation states,
-not new outcome authority. Restore the current notice and resolve only matching
+not new outcome authority. Verified silent-restore history follows the
+[repeated native recovery rules](interrupted-prompt-recovery.md#repeated-recovery-after-silent-restoration).
+Restore the current notice and resolve only matching
 incident fences atomically. A changed source, independent fence, pending restore
 or unprojected receipt refuses resolution. A transaction rollback changes none
 of the binding, notice or fence. A retry reuses retired journal proof. Retained inspection has a separate
