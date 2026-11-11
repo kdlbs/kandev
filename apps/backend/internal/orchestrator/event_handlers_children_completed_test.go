@@ -11,7 +11,7 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-func TestProcessOnChildrenCompleted_TransitionsParentWhenAllActiveChildrenTerminal(t *testing.T) {
+func TestProcessOnChildrenCompleted_TransitionsParentWhenAllActiveChildrenCompleted(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "parent", "parent-session", "step_wait")
@@ -72,7 +72,7 @@ func TestProcessOnChildrenCompleted_TransitionsParentWhenAllActiveChildrenTermin
 	}
 
 	if transitioned := svc.processOnChildrenCompleted(ctx, "parent"); transitioned {
-		t.Fatalf("expected mixed terminal/non-terminal children not to transition")
+		t.Fatalf("expected mixed completed/in-progress children not to transition")
 	}
 	parent, err := repo.GetTask(ctx, "parent")
 	if err != nil {
@@ -86,7 +86,7 @@ func TestProcessOnChildrenCompleted_TransitionsParentWhenAllActiveChildrenTermin
 		t.Fatalf("complete child-open: %v", err)
 	}
 	if transitioned := svc.processOnChildrenCompleted(ctx, "parent"); !transitioned {
-		t.Fatalf("expected all-terminal active children to transition parent")
+		t.Fatalf("expected all active children completed successfully to transition parent")
 	}
 	waitForChildrenCompletedOnEnter(t, onEnterDone)
 

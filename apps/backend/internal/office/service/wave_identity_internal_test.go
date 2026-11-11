@@ -43,17 +43,12 @@ func insertWaveIdentityTask(t *testing.T, repo *sqlite.Repository, ctx context.C
 	}
 }
 
-// TestResolveWaveIdentity_NonTerminalMemberReportsNotOK is
-// AC-OFFICE-WAKE-WAVE-IDENTITY-002.15's regression test for P2/P3's
-// shared terminality gate: resolveWaveIdentity must report ok=false (and
-// derive no wave key/string at all) when any wave member has not yet
-// reached a terminal state, exactly like P1's byte-identical gate in
-// cascadeChildrenCompleted (reactivity.go). Before this test, only P1's
-// arm of the same invariant was pinned — a regression here (e.g.
-// dropping the state check, or loosening it to only COMPLETED) would ship
-// P2/P3 dispatching a wave identity for a wave that has not actually
-// finished.
-func TestResolveWaveIdentity_NonTerminalMemberReportsNotOK(t *testing.T) {
+// TestResolveWaveIdentity_NonCompletedMemberReportsNotOK pins the workflow
+// readiness rule: resolveWaveIdentity must report ok=false (and derive no
+// wave key/string at all) when any wave member is not completed. A regression
+// here could dispatch a wave identity while a member is active, failed,
+// cancelled, or unknown.
+func TestResolveWaveIdentity_NonCompletedMemberReportsNotOK(t *testing.T) {
 	repo := newWaveIdentityTestRepo(t)
 	ctx := context.Background()
 	var log *logger.Logger
@@ -65,18 +60,35 @@ func TestResolveWaveIdentity_NonTerminalMemberReportsNotOK(t *testing.T) {
 
 	waveKey, waveString, ok := resolveWaveIdentity(ctx, repo, parentID, log)
 	if ok {
-		t.Fatalf("ok = true, want false — child-1 is not terminal, so no wave identity is derivable")
+		t.Fatalf("ok = true, want false — child-1 is not completed, so no wave identity is derivable")
 	}
 	if waveKey != "" || waveString != "" {
 		t.Fatalf("waveKey=%q waveString=%q, want both empty when ok=false", waveKey, waveString)
 	}
 }
 
-// TestResolveWaveIdentity_AllTerminalReportsOK is the control alongside
-// TestResolveWaveIdentity_NonTerminalMemberReportsNotOK: once the
-// remaining member also reaches a terminal state, resolveWaveIdentity
-// derives a non-empty wave key/string and reports ok=true.
-func TestResolveWaveIdentity_AllTerminalReportsOK(t *testing.T) {
+// TestResolveWaveIdentity_AllCompletedReportsOK is the control alongside
+// TestResolveWaveIdentity_NonCompletedMemberReportsNotOK.
+func TestResolveWaveIdentity_AllCompletedReportsOK(t *testing.T) {
+	repo := newWaveIdentityTestRepo(t)
+	ctx := context.Background()
+	var log *logger.Logger
+
+	const parentID = "parent-1"
+	insertWaveIdentityTask(t, repo, ctx, parentID, "", "TODO")
+	insertWaveIdentityTask(t, repo, ctx, parentID+"-child-0", parentID, "COMPLETED")
+	insertWaveIdentityTask(t, repo, ctx, parentID+"-child-1", parentID, "COMPLETED")
+
+	waveKey, waveString, ok := resolveWaveIdentity(ctx, repo, parentID, log)
+	if !ok {
+		t.Fatalf("ok = false, want true — every wave member is completed")
+	}
+	if waveKey == "" || waveString == "" {
+		t.Fatalf("waveKey=%q waveString=%q, want both non-empty when ok=true", waveKey, waveString)
+	}
+}
+
+func TestResolveWaveIdentity_CancelledMemberReportsNotOK(t *testing.T) {
 	repo := newWaveIdentityTestRepo(t)
 	ctx := context.Background()
 	var log *logger.Logger
@@ -87,10 +99,10 @@ func TestResolveWaveIdentity_AllTerminalReportsOK(t *testing.T) {
 	insertWaveIdentityTask(t, repo, ctx, parentID+"-child-1", parentID, "CANCELLED")
 
 	waveKey, waveString, ok := resolveWaveIdentity(ctx, repo, parentID, log)
-	if !ok {
-		t.Fatalf("ok = false, want true — every wave member is terminal (COMPLETED or CANCELLED)")
+	if ok {
+		t.Fatal("ok = true, want false — a cancelled wave member is not successful")
 	}
-	if waveKey == "" || waveString == "" {
-		t.Fatalf("waveKey=%q waveString=%q, want both non-empty when ok=true", waveKey, waveString)
+	if waveKey != "" || waveString != "" {
+		t.Fatalf("waveKey=%q waveString=%q, want both empty when ok=false", waveKey, waveString)
 	}
 }

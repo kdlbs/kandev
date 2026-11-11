@@ -211,9 +211,9 @@ Replies close the loop: the receiving agent calls `message_task_kandev` back wit
 
 ## Wait for child tasks
 
-On the parent's current workflow step, configure **When Child Tasks Complete** to move next, previous, or to a selected step. It runs once when every active direct child is `COMPLETED`, `FAILED`, or `CANCELLED` and the parent has an active session.
+On the parent's current workflow step, configure **When Child Tasks Complete** to move next, previous, or to a selected step. It runs once only when every active direct child is `COMPLETED` and the parent has an active session. A `FAILED` or `CANCELLED` child keeps the parent waiting until that child completes successfully.
 
-It ignores archived and ephemeral children, ignores grandchildren, and does not run if the parent has no children. The qualifying parent-session states are `CREATED`, `STARTING`, `RUNNING`, and `WAITING_FOR_INPUT`; no session, `IDLE`, or a terminal session prevents the transition. Terminal child state means work stopped; it does not mean every child succeeded. Put a human Review step after the transition when failures, diffs, or pull requests must be inspected.
+It ignores archived and ephemeral children, ignores grandchildren, and does not run if the parent has no children. The qualifying parent-session states are `CREATED`, `STARTING`, `RUNNING`, and `WAITING_FOR_INPUT`; no session, `IDLE`, or a terminal session prevents the transition. Existing workflows follow this rule too. If a workflow previously advanced after a child failed or was cancelled, it now waits until that child completes successfully. Put a human Review step after the transition when completed work, diffs, or pull requests must be inspected.
 
 For a human gate, use **On Turn Complete → Do nothing (wait for user)** and require a person to review before moving the task or sending the next instruction. `step_complete_kandev` proves only that the agent emitted the configured completion signal.
 
