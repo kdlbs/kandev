@@ -59,6 +59,7 @@ A SQLite-persisted queue of "wake this agent up" requests. Every periodic, event
 | `user` | User mention / explicit wake from the UI | `{user_id, context?}` |
 | `task_assigned` | An authoritative Office task's `assignee_agent_instance_id` is set or changed, including a newly-created task/subtask that already has a runner | `{task_id}` |
 | `task_blockers_resolved` | All blocking tasks of an assigned task reach `done` | `{task_id, resolved_blocker_ids}` |
+| `task_blocker_failed` | [A held dependent's blocker fails](blocker-terminal-policy.md) | `{blocker_task_id, blocker_state, held_dependent_ids}` |
 | `task_children_completed` | All child tasks of an assigned task reach terminal state | `{task_id}` |
 | `approval_resolved` | An approval requested by this agent is approved/rejected | `{approval_id, status, decision_note}` |
 | `budget_alert` | Budget threshold crossed for a sub-agent (coordinator only) | `{agent_instance_id, budget_pct}` |
@@ -299,11 +300,10 @@ Each producer retains its Office identity check. The step must have
 error, nil getter/result, lookup error) fails open for this condition only. Preserve
 step Info/Warn logs; a known ineligible step refuses. Participant wakes stay separate.
 
-The structural task lookup uses Office repository `ListTaskBlockers` and
-`IsTaskInTerminalStep`: any known pending blocker refuses; no edges or all terminal
-permit. Preserve COMPLETED/FAILED/CANCELLED and archival policy; do not copy SQL or
-import the task service's successful-only
-[dependency policy](../../tasks/system-design/task-dependencies.md).
+The structural task lookup uses Office repository `ListTaskBlockers` and the
+[blocker policy](blocker-terminal-policy.md#single-classifier) classifier: any known
+unsatisfied blocker refuses; no edges or all satisfied permit. Do not import the task
+service's [dependency policy](../../tasks/system-design/task-dependencies.md).
 
 List errors fail open with Warn. State errors, including missing rows, warn and
 continue: unknown preserves admission unless any known pending blocker is found,
@@ -471,7 +471,7 @@ When resuming a task-bound session (same agent, same task, session ID preserved)
 Agents sequence subtasks with existing blocker edges, such as `blocked_by: [subtask 1]`.
 [Assignment admission](#assignment-wake-step-eligibility) holds pending work. Approval-required
 completion first enters review; only successful completion releases assigned dependents
-whose other blockers are terminal under Office policy. The
+whose other blockers are satisfied under Office policy. The
 [completion bridge](#manual-status-changes-kanban-drag-drop) covers manual moves and converges
 with canonical agent completion. Parent completion remains `task_children_completed`.
 

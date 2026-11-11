@@ -230,6 +230,12 @@ func (ss *SchedulerService) reactToStatusChange(
 	case next == statusCancelled:
 		// Hard-cancel the active session.
 		res.InterruptSessionID = task.ID
+		if prev != statusCancelled && !strings.EqualFold(task.State, taskStateFailed) {
+			if err := ss.escalateBlockerFailure(ctx, task.ID, taskStateCancelled); err != nil {
+				ss.logger.Error("blocker failure escalation failed",
+					zap.String("task_id", task.ID), zap.Error(err))
+			}
+		}
 
 	case next == statusInReview && prev != statusInReview:
 		// Fan out task_review_requested to every reviewer AND every
@@ -759,7 +765,7 @@ func childrenCompletedIdempotencyKey(parentID, agentID string, children []sqlite
 }
 
 // allBlockersResolvedExcept returns true if every blocker on `taskID`
-// other than `excludeBlockerID` is in a terminal step, alongside the full
+// other than `excludeBlockerID` is satisfied, alongside the full
 // blocker-task-id set it read to decide — the caller digests that same
 // slice for the wake's dedup key rather than re-reading it (AC-001.9
 // applied to a set: a second read could observe a different set than the
@@ -775,11 +781,11 @@ func (ss *SchedulerService) allBlockersResolvedExcept(
 		if b.BlockerTaskID == excludeBlockerID {
 			continue
 		}
-		done, err := ss.repo.IsTaskInTerminalStep(ctx, b.BlockerTaskID)
+		status, err := ss.repo.GetBlockerStatus(ctx, b.BlockerTaskID)
 		if err != nil {
 			return false, nil, err
 		}
-		if !done {
+		if status != models.BlockerSatisfied {
 			return false, blockers, nil
 		}
 	}

@@ -25,8 +25,8 @@ func (f assignmentEligibilityTestStepIDs) ListTaskBlockers(context.Context, stri
 	return nil, nil
 }
 
-func (f assignmentEligibilityTestStepIDs) IsTaskInTerminalStep(context.Context, string) (bool, error) {
-	return true, nil
+func (f assignmentEligibilityTestStepIDs) GetBlockerStatus(context.Context, string) (models.BlockerStatus, error) {
+	return models.BlockerSatisfied, nil
 }
 
 type assignmentEligibilityTestSteps struct {

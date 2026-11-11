@@ -1457,6 +1457,9 @@ func (s *Service) queueBlockersResolvedRuns(ctx context.Context, completedTaskID
 	return nil
 }
 
+// resolveAndWakeIfUnblocked wakes blockedTaskID only when every blocker,
+// including the one whose step move triggered the check, is satisfied. A step
+// name never satisfies a blocker on its own.
 func (s *Service) resolveAndWakeIfUnblocked(ctx context.Context, blockedTaskID, resolvedBlockerID string) error {
 	blockers, err := s.repo.ListTaskBlockers(ctx, blockedTaskID)
 	if err != nil {
@@ -1465,11 +1468,8 @@ func (s *Service) resolveAndWakeIfUnblocked(ctx context.Context, blockedTaskID, 
 	blockerIDs := make([]string, 0, len(blockers))
 	for _, b := range blockers {
 		blockerIDs = append(blockerIDs, b.BlockerTaskID)
-		if b.BlockerTaskID == resolvedBlockerID {
-			continue
-		}
-		done, err := s.repo.IsTaskInTerminalStep(ctx, b.BlockerTaskID)
-		if err != nil || !done {
+		status, err := s.repo.GetBlockerStatus(ctx, b.BlockerTaskID)
+		if err != nil || status != models.BlockerSatisfied {
 			return err // still blocked
 		}
 	}

@@ -1881,6 +1881,11 @@ func activateOfficeServices(
 		return false
 	}
 
+	if err := services.OfficeSvcs.Scheduler.RegisterBlockerFailureSubscriber(eventBus); err != nil {
+		log.Error("Failed to register office blocker failure subscriber", zap.Error(err))
+		return false
+	}
+
 	return true
 }
 

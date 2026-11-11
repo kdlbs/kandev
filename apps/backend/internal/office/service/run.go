@@ -31,6 +31,7 @@ const (
 	RunReasonHandoffCompleted      = shared.RunReasonHandoffCompleted
 	RunReasonTaskBlockersResolved  = shared.RunReasonTaskBlockersResolved
 	RunReasonTaskChildrenCompleted = shared.RunReasonTaskChildrenCompleted
+	RunReasonTaskBlockerFailed     = shared.RunReasonTaskBlockerFailed
 	RunReasonApprovalResolved      = shared.RunReasonApprovalResolved
 	RunReasonTaskReviewRequested   = shared.RunReasonTaskReviewRequested
 	RunReasonTaskChangesRequested  = shared.RunReasonTaskChangesRequested
