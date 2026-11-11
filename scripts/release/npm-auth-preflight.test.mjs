@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
   OIDC_AUDIENCE,
@@ -40,10 +42,12 @@ function makeJwt({
   audience = OIDC_AUDIENCE,
   expires = Math.floor(Date.now() / 1000) + 3600,
 } = {}) {
-  const header = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" }))
-    .toString("base64url");
-  const payload = Buffer.from(JSON.stringify({ aud: audience, exp: expires }))
-    .toString("base64url");
+  const header = Buffer.from(
+    JSON.stringify({ alg: "none", typ: "JWT" }),
+  ).toString("base64url");
+  const payload = Buffer.from(
+    JSON.stringify({ aud: audience, exp: expires }),
+  ).toString("base64url");
   return `${header}.${payload}.c2lnbmF0dXJl`;
 }
 
@@ -84,14 +88,20 @@ function makeTransport({
       if (sdkStatus === 404)
         return jsonResponse(404, { error: "Not found" }, target);
       if (sdkStatus !== 200)
-        return jsonResponse(sdkStatus, { error: "registry unavailable" }, target);
+        return jsonResponse(
+          sdkStatus,
+          { error: "registry unavailable" },
+          target,
+        );
       return jsonResponse(
         200,
         { name: sdkPackageName, versions: {}, "dist-tags": {} },
         target,
       );
     }
-    if (target.startsWith(`${registryURL}/-/npm/v1/oidc/token/exchange/package/`)) {
+    if (
+      target.startsWith(`${registryURL}/-/npm/v1/oidc/token/exchange/package/`)
+    ) {
       const encoded = target.slice(
         target.indexOf("/package/") + "/package/".length,
       );
@@ -189,10 +199,7 @@ test("checks the audience and encoded package route for every exchange", async (
     call.target.startsWith("https://actions.test/token"),
   );
   assert.equal(oidcRequests.length, RUNTIME_PACKAGES.length + 1);
-  assert.equal(
-    summary.packages.at(-1).package,
-    sdkPackageName,
-  );
+  assert.equal(summary.packages.at(-1).package, sdkPackageName);
   assert.equal(summary.packages.at(-1).status, "authenticated");
   const serialized = JSON.stringify(summary);
   assert.equal(serialized.includes("request-token-value"), false);
@@ -215,14 +222,11 @@ test("confirmed whole-package SDK absence defers only the SDK check", async () =
     reason: "package_absent",
   });
   assert.equal(
-    transport.exchanges.some(
-      (exchange) => exchange.package === sdkPackageName,
-    ),
+    transport.exchanges.some((exchange) => exchange.package === sdkPackageName),
     false,
   );
   assert.equal(
-    transport.calls.filter((call) => call.target.includes("/exchange/"))
-      .length,
+    transport.calls.filter((call) => call.target.includes("/exchange/")).length,
     RUNTIME_PACKAGES.length,
   );
 });
@@ -267,9 +271,7 @@ test("unreadable SDK registry state never becomes bootstrap deferral", async () 
     },
   );
   assert.equal(
-    transport.exchanges.some(
-      (exchange) => exchange.package === sdkPackageName,
-    ),
+    transport.exchanges.some((exchange) => exchange.package === sdkPackageName),
     false,
   );
 });
@@ -313,13 +315,232 @@ test("rejected, malformed, missing, and expired exchange responses fail safely",
       }),
       (error) => {
         assert.equal(error.package, "kandev");
-        assert.equal(error.category, "npm_authentication");
+        assert.equal(
+          error.category,
+          options.exchangeStatus || error.reason === "expired_token"
+            ? "npm_authentication"
+            : "npm_exchange_response",
+        );
         assert.equal(error.message.includes("sensitive-server-body"), false);
         assert.equal(error.message.includes(`npm_${"b".repeat(36)}`), false);
         return true;
       },
     );
   }
+});
+
+test("exchange validation reports fixed reasons for each response condition", async () => {
+  const cases = [
+    { body: null, reason: "invalid_body_shape" },
+    { body: [], reason: "invalid_body_shape" },
+    {
+      body: { token_type: "other", token: "x", created: "1", expires: "2" },
+      reason: "invalid_token_type",
+    },
+    {
+      body: { token_type: "oidc", token: "", created: "1", expires: "2" },
+      reason: "missing_token",
+    },
+    {
+      body: { token_type: "oidc", created: "1", expires: "2" },
+      reason: "missing_token",
+    },
+    {
+      body: { token_type: "oidc", token: 4, created: "1", expires: "2" },
+      reason: "missing_token",
+    },
+    {
+      body: { token_type: "oidc", token: "x", created: null, expires: "2" },
+      reason: "invalid_created",
+    },
+    {
+      body: { token_type: "oidc", token: "x", created: "bad", expires: "2" },
+      reason: "invalid_created",
+    },
+    {
+      body: { token_type: "oidc", token: "x", created: {}, expires: "2" },
+      reason: "invalid_created",
+    },
+    {
+      body: { token_type: "oidc", token: "x", created: "1", expires: "bad" },
+      reason: "invalid_expires",
+    },
+    {
+      body: { token_type: "oidc", token: "x", created: "1", expires: null },
+      reason: "invalid_expires",
+    },
+    {
+      body: {
+        token_type: "oidc",
+        token: "x",
+        created: "1",
+        expires: new Date(1000).toISOString(),
+      },
+      reason: "expired_token",
+      category: "npm_authentication",
+    },
+  ];
+  for (const { body, reason, category = "npm_exchange_response" } of cases) {
+    const fetchImpl = async (input) => ({
+      status: 201,
+      url: String(input),
+      json: async () => body,
+    });
+    await assert.rejects(
+      exchangePackageToken("kandev", "oidc", { fetchImpl, now: () => 1000 }),
+      (error) => {
+        assert.equal(error.status, 201);
+        assert.equal(error.category, category);
+        assert.equal(error.reason, reason);
+        if (reason === "expired_token") {
+          assert.match(error.message, /trusted publisher/);
+          assert.match(error.message, /kandev/);
+        }
+        return true;
+      },
+    );
+  }
+  await assert.rejects(
+    exchangePackageToken("kandev", "oidc", {
+      fetchImpl: async (input) => ({
+        status: 201,
+        url: String(input),
+        json: async () => {
+          throw new Error("untrusted-body-secret");
+        },
+      }),
+    }),
+    (error) => {
+      assert.equal(error.category, "npm_exchange_response");
+      assert.equal(error.status, 201);
+      assert.equal(error.reason, "unreadable_json");
+      assert.equal(error.message.includes("untrusted-body-secret"), false);
+      return true;
+    },
+  );
+});
+
+test("failure summary serialization includes safe context and excludes untrusted metadata", () => {
+  const secret = "npm_sentinel_secret_123";
+  const payload = Buffer.from(
+    JSON.stringify({ aud: OIDC_AUDIENCE, exp: 4_102_444_800 }),
+  ).toString("base64url");
+  const jwt = `e30.${payload}.sig`;
+  const bootstrap = `globalThis.fetch = async (input) => ({ status: String(input).includes('actions.test') ? 200 : 201, url: String(input), json: async () => String(input).includes('actions.test') ? { value: ${JSON.stringify(jwt)} } : { token_type: 'oidc', token: 'valid', expires: '2030-01-01', malicious: ${JSON.stringify(secret)} } });`;
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      `data:text/javascript,${encodeURIComponent(bootstrap)}`,
+      fileURLToPath(new URL("./npm-auth-preflight.mjs", import.meta.url)),
+      "--package",
+      "kandev",
+      "--checkout-sha",
+      CHECKOUT_SHA,
+    ],
+    {
+      encoding: "utf8",
+      env: env(),
+    },
+  );
+  const emitted = `${result.stdout}\n${result.stderr}`;
+  assert.equal(result.status, 1);
+  assert.match(emitted, /"category":"npm_exchange_response"/);
+  assert.match(emitted, /"http_status":201/);
+  assert.match(emitted, /"reason":"invalid_created"/);
+  assert.match(emitted, new RegExp(WORKFLOW_SHA));
+  assert.match(emitted, new RegExp(CHECKOUT_SHA));
+  assert.equal(emitted.includes(secret), false);
+
+  const transportSecret = "transport-exception-secret";
+  const failedTransport = `let calls = 0; globalThis.fetch = async (input) => { calls += 1; if (calls > 1) throw new Error(${JSON.stringify(transportSecret)}); return { status: 200, url: String(input), json: async () => ({ value: ${JSON.stringify(jwt)} }) }; };`;
+  const transportResult = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      `data:text/javascript,${encodeURIComponent(failedTransport)}`,
+      fileURLToPath(new URL("./npm-auth-preflight.mjs", import.meta.url)),
+      "--package",
+      "kandev",
+      "--checkout-sha",
+      CHECKOUT_SHA,
+    ],
+    { encoding: "utf8", env: env() },
+  );
+  assert.equal(transportResult.status, 1);
+  assert.equal(
+    `${transportResult.stdout}\n${transportResult.stderr}`.includes(
+      transportSecret,
+    ),
+    false,
+  );
+});
+
+test("failure summaries retain safe publisher and OIDC recovery guidance", () => {
+  const payload = Buffer.from(
+    JSON.stringify({ aud: OIDC_AUDIENCE, exp: 4_102_444_800 }),
+  ).toString("base64url");
+  const jwt = `e30.${payload}.sig`;
+  const authRejected = `let calls = 0; globalThis.fetch = async (input) => { calls += 1; return calls === 1 ? { status: 200, url: String(input), json: async () => ({ value: ${JSON.stringify(jwt)} }) } : { status: 403, url: String(input), json: async () => ({ error: 'sensitive-body' }) }; };`;
+  const script = fileURLToPath(
+    new URL("./npm-auth-preflight.mjs", import.meta.url),
+  );
+  const publisherResult = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      `data:text/javascript,${encodeURIComponent(authRejected)}`,
+      script,
+      "--package",
+      "kandev",
+      "--checkout-sha",
+      CHECKOUT_SHA,
+    ],
+    { encoding: "utf8", env: env() },
+  );
+  const publisherOutput = `${publisherResult.stdout}\n${publisherResult.stderr}`;
+  assert.equal(publisherResult.status, 1);
+  assert.match(publisherOutput, /trusted publisher/);
+  assert.match(publisherOutput, /kandev/);
+  assert.equal(publisherOutput.includes("sensitive-body"), false);
+
+  const oidcEnv = env({
+    ACTIONS_ID_TOKEN_REQUEST_URL: undefined,
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: undefined,
+  });
+  delete oidcEnv.ACTIONS_ID_TOKEN_REQUEST_URL;
+  delete oidcEnv.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+  const oidcResult = spawnSync(
+    process.execPath,
+    [script, "--package", "kandev", "--checkout-sha", CHECKOUT_SHA],
+    { encoding: "utf8", env: oidcEnv },
+  );
+  assert.equal(oidcResult.status, 1);
+  assert.match(`${oidcResult.stdout}\n${oidcResult.stderr}`, /id-token: write/);
+});
+
+test("HTTP 201 with a missing creation date reports invalid_created instead of publisher rejection", async () => {
+  const transport = makeTransport({
+    exchangeBody: {
+      token_type: "oidc",
+      token: `npm_${"c".repeat(36)}`,
+      expires: new Date(Date.now() + 3_600_000).toISOString(),
+    },
+  });
+  await assert.rejects(
+    runPreflight({
+      packages: ["kandev"],
+      env: env(),
+      fetchImpl: transport.fetchImpl,
+      checkoutSha: CHECKOUT_SHA,
+    }),
+    (error) => {
+      assert.equal(error.status, 201);
+      assert.equal(error.category, "npm_exchange_response");
+      assert.equal(error.reason, "invalid_created");
+      return true;
+    },
+  );
 });
 
 test("unsupported release context is rejected before a network request", async () => {
@@ -407,7 +628,10 @@ test("authentication requests reject redirects and remain bounded", async () => 
   assert.equal(observed.options.redirect, "error");
   assert.equal(observed.options.signal !== undefined, true);
   assert.equal(observed.options.method, "POST");
-  assert.equal(observed.url, `${registryURL}/-/npm/v1/oidc/token/exchange/package/kandev`);
+  assert.equal(
+    observed.url,
+    `${registryURL}/-/npm/v1/oidc/token/exchange/package/kandev`,
+  );
 });
 
 test("requires exact workflow and checkout revisions", async () => {

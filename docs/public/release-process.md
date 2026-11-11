@@ -122,7 +122,13 @@ succeeded. Inspect the landing workflow separately.
 
 Normal Stable dispatches run a read-only `npm-auth-preflight` job before `prepare`. The job requests a fresh GitHub OIDC token for each package, exchanges it for a package-scoped npm token at the public registry, and discards both tokens. It checks the `kandev` launcher, all five `@kdlbs/runtime-*` packages, and `@kdlbs/plugin-sdk` when that package exists. Dry runs, desktop validation, Nightly releases, and existing-tag backfills skip the job and keep their existing validation or repair path.
 
-A rejected or unreadable package stops the run before release branch creation, release PR creation, host tagging, or builds. The result names the package and directs the maintainer to its trusted publisher configuration. A confirmed whole-package SDK absence is deferred to the existing first-package bootstrap. A registry read failure or a missing runtime package is an error, never a bootstrap state.
+A rejected publisher or an exchange response that fails local validation stops the run before release branch creation, release PR creation, host tagging, or builds. The summary names the package, HTTP status, and a fixed failure reason.
+
+For an HTTP authentication rejection or expired exchange token, check that package's trusted publisher configuration. For a malformed HTTP 201 response, inspect the safe reason and investigate the response contract. The preflight does not retain response bodies.
+
+After a fix is merged, dispatch a new Stable run from `main`. Rerunning the failed run uses its original workflow revision and does not pick up the fix.
+
+A confirmed whole-package SDK absence is deferred to the existing first-package bootstrap. A registry read failure or a missing runtime package is an error, never a bootstrap state.
 
 The exchange proves package-scoped authentication only. It does not prove direct-publish or dist-tag permission, and a trusted publisher can still expire before publication. The publishing jobs remain responsible for their own authentication and allowed actions.
 
