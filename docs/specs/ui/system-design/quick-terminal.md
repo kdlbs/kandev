@@ -5,7 +5,7 @@ requirements:
   - REQ-UI-QUICK-TERMINAL-001
   - REQ-UI-QUICK-TERMINAL-002
 created: 2026-08-03
-updated: 2026-10-09
+updated: 2026-11-11
 owners:
   - kandev
 ---
@@ -13,8 +13,8 @@ owners:
 
 ## Purpose and boundaries
 
-This design owns the shared Quick Chat tab presentation and interaction contract. Quick Chat task
-records and Quick Terminal descriptors remain owned by their existing backend services.
+This design owns shared-tab interaction. Backend services retain task and descriptor ownership.
+Browser resource continuity follows the [render lifecycle design](quick-terminal-render-lifecycle.md).
 
 ## Requirement mapping
 
@@ -148,10 +148,7 @@ and persistence after reload.
 
 ## Why
 
-Quick Chat and Quick Terminal are both short-lived utilities reached from the same navigation
-surfaces, but they currently open separate dialogs with different tab and lifecycle behavior. Users
-should be able to keep several host terminals beside their utility conversations, switch between
-them without losing work, and return to the most recent terminal without managing another window.
+Users keep host terminals beside utility conversations and switch between them without losing work.
 
 ## What
 

@@ -117,19 +117,16 @@ export function QuickTerminalTabView({ tab, onStateChange, onDescriptorReady }: 
   }, [needsDescriptor, tab.tabId, tab.workspaceId]);
 
   const shouldRenderTerminal = Boolean(tab.sessionId) || (needsDescriptor && descriptorReady);
-  const startSession = useCallback<StartPtySession>(
-    async (size, options) => {
-      const session = await startHostShell(size, options);
-      onStateChange({
-        status: session.running ? "running" : "exited",
-        sessionId: session.session_id,
-        exitCode: session.exit_code ?? null,
-        error: null,
-      });
-      return session;
-    },
-    [onStateChange],
-  );
+  const startSession = useCallback<StartPtySession>(async (size, options) => {
+    const session = await startHostShell(size, options);
+    onStateChangeRef.current({
+      status: session.running ? "running" : "exited",
+      sessionId: session.session_id,
+      exitCode: session.exit_code ?? null,
+      error: null,
+    });
+    return session;
+  }, []);
 
   return (
     <div

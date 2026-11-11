@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const startHostShell = vi.hoisted(() =>
   vi.fn().mockResolvedValue({
@@ -38,7 +38,7 @@ vi.mock("@/components/settings/pty-terminal-view", () => ({
   }) => (
     <button
       type="button"
-      data-testid="pty-view-probe"
+      data-testid={PTY_VIEW_PROBE_TEST_ID}
       data-lifecycle={props.lifecycle}
       onClick={() => props.startSession({ cols: 80, rows: 24 }, { clientId: props.clientId })}
     >
@@ -49,6 +49,8 @@ vi.mock("@/components/settings/pty-terminal-view", () => ({
 
 import { QuickTerminalTabView } from "./quick-terminal-tab-view";
 
+const PTY_VIEW_PROBE_TEST_ID = "pty-view-probe";
+
 const tab = {
   tabId: "6f2d7f2d-0d0c-4c9b-8b73-1c53a5ed5b6b",
   workspaceId: "workspace-1",
@@ -57,18 +59,20 @@ const tab = {
   status: "connecting" as const,
 };
 
+afterEach(() => cleanup());
+
 describe("QuickTerminalTabView", () => {
   it("starts a host shell with the terminal tab's stable client id and detaches on unmount", async () => {
     const onStateChange = vi.fn();
     const view = render(<QuickTerminalTabView tab={tab} onStateChange={onStateChange} />);
 
     await waitFor(() =>
-      expect(screen.getByTestId("pty-view-probe").getAttribute("data-lifecycle")).toBe(
+      expect(screen.getByTestId(PTY_VIEW_PROBE_TEST_ID).getAttribute("data-lifecycle")).toBe(
         "detach-on-unmount",
       ),
     );
 
-    fireEvent.click(screen.getByTestId("pty-view-probe"));
+    fireEvent.click(screen.getByTestId(PTY_VIEW_PROBE_TEST_ID));
     expect(startHostShell).toHaveBeenCalledWith({ cols: 80, rows: 24 }, { clientId: tab.tabId });
     await waitFor(() =>
       expect(onStateChange).toHaveBeenCalledWith({
@@ -81,7 +85,46 @@ describe("QuickTerminalTabView", () => {
 
     view.unmount();
   });
+});
 
+describe("QuickTerminalTabView deferred start", () => {
+  it("reports a deferred start through the latest status handler", async () => {
+    let resolveStart: ((value: Awaited<ReturnType<typeof startHostShell>>) => void) | undefined;
+    startHostShell.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStart = resolve;
+        }),
+    );
+    const originalHandler = vi.fn();
+    const latestHandler = vi.fn();
+    const view = render(<QuickTerminalTabView tab={tab} onStateChange={originalHandler} />);
+
+    await waitFor(() => expect(screen.getByTestId(PTY_VIEW_PROBE_TEST_ID)).toBeTruthy());
+    fireEvent.click(screen.getByTestId(PTY_VIEW_PROBE_TEST_ID));
+    view.rerender(<QuickTerminalTabView tab={tab} onStateChange={latestHandler} />);
+    await act(async () => {
+      resolveStart?.({
+        session_id: "session-1",
+        agent_id: "_host_shell",
+        cmd: ["/bin/bash"],
+        running: true,
+        started_at: "2026-08-04T00:00:00Z",
+      });
+    });
+
+    expect(originalHandler).not.toHaveBeenCalled();
+    expect(latestHandler).toHaveBeenCalledWith({
+      status: "running",
+      sessionId: "session-1",
+      exitCode: null,
+      error: null,
+    });
+    view.unmount();
+  });
+});
+
+describe("QuickTerminalTabView", () => {
   it("keeps the shared descriptor when a connecting mount is cancelled before its create resolves", async () => {
     // Under StrictMode the descriptor-create effect runs, tears down, and runs
     // again for the same stable tabId. The idempotent backend create returns the
@@ -126,7 +169,7 @@ describe("QuickTerminalTabView", () => {
     );
 
     await waitFor(() => expect(onDescriptorReady).toHaveBeenCalledWith({ ...tab }));
-    expect(screen.getByTestId("pty-view-probe")).toBeTruthy();
+    expect(screen.getByTestId(PTY_VIEW_PROBE_TEST_ID)).toBeTruthy();
     view.unmount();
   });
 

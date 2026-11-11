@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-08-03
-updated: 2026-10-09
+updated: 2026-11-11
 owners:
   - kandev
 ---
@@ -35,6 +35,8 @@ Quick Chat and Quick Terminal are both short-lived utilities reached from the sa
 
 - **AC-UI-QUICK-TERMINAL-001.13:** On phones, the selected running Quick Terminal exposes the same shortcut controls as a task terminal, including Ctrl/Shift, interrupt, EOF, Escape, Tab, navigation keys, and symbols. Shortcuts and modified keyboard input target only that terminal. The controls retain terminal focus, remain reachable above the on-screen keyboard, and disappear when selecting a conversation or dismissing the dialog. Modifiers reset when leaving the selected terminal.
 - **AC-UI-QUICK-TERMINAL-001.14:** If a terminal start is active in this client, an earlier resync response shall not replace its connecting state. The client shall continue the host-shell start.
+- **AC-UI-QUICK-TERMINAL-001.15:** While the same terminal tab remains selected, unrelated application updates and terminal status persistence shall preserve its displayed output, partially typed command, and keyboard focus. These updates shall not reconnect its terminal stream or start another shell. This applies to desktop and phone surfaces.
+- **AC-UI-QUICK-TERMINAL-001.16:** After a terminal connection detaches or is replaced, late events from that connection shall not change terminal status, alter displayed output, or send input. Events from that connection shall not disrupt another terminal.
 
 ## Out of scope
 
@@ -100,3 +102,5 @@ Cross-device selection synchronization and transcript scroll-position restoratio
 Remembered selection follows the [selection design](../system-design/quick-chat-selection.md).
 
 The migrated technical source is split into [part 1](../system-design/quick-terminal.md).
+
+Browser continuity follows the [render lifecycle design](../system-design/quick-terminal-render-lifecycle.md).
