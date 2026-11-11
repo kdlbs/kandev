@@ -335,7 +335,11 @@ func TestEnvironmentCacheLookupWaitsForRetirement(t *testing.T) {
 				release()
 				got := <-finished
 				require.True(t, got.execution == nil, "lookup must not return a removed or rebound execution")
-				require.ErrorContains(t, got.err, "workspace info provider not configured")
+				if mutation == "remove" {
+					require.ErrorContains(t, got.err, "workspace info provider not configured")
+				} else {
+					require.ErrorIs(t, got.err, ErrSessionWorkspaceNotReady)
+				}
 			})
 		})
 	}
@@ -344,14 +348,13 @@ func TestEnvironmentCacheLookupWaitsForRetirement(t *testing.T) {
 // TestEnvironmentSharedLookupRejectsReboundExecution verifies environment
 // resolution cannot publish a different environment's cached session execution.
 func TestEnvironmentSharedLookupRejectsReboundExecution(t *testing.T) {
-	mgr := newTestManager(t)
 	provider := &siblingDuringEnvironmentLookupProvider{mockWorkspaceInfoProvider: &mockWorkspaceInfoProvider{
 		envInfos: map[string]*WorkspaceInfo{"requested": {
 			TaskID: "task", SessionID: "session", TaskEnvironmentID: "requested",
-			WorkspacePath: "/workspace/task", AgentID: "auggie",
+			WorkspacePath: t.TempDir(), AgentID: "auggie",
 		}},
 	}}
-	mgr.workspaceInfoProvider = provider
+	mgr, backend := newEnvironmentExecutionTestManager(t, provider)
 	provider.onEnvironment = func() {
 		require.NoError(t, mgr.executionStore.Add(&AgentExecution{
 			ID: "rebound", SessionID: "session", TaskID: "task", TaskEnvironmentID: "other",
@@ -359,5 +362,75 @@ func TestEnvironmentSharedLookupRejectsReboundExecution(t *testing.T) {
 	}
 	got, err := mgr.GetOrEnsureExecutionForEnvironment(t.Context(), "requested")
 	require.True(t, got == nil, "environment resolution must not return another environment's cached execution")
-	require.ErrorContains(t, err, "no runtime configured")
+	require.ErrorIs(t, err, ErrSessionWorkspaceNotReady)
+	require.EqualValues(t, 0, backend.createCount.Load(), "conflicting environment must fail before allocation")
+}
+
+// TestEnvironmentCreationRejectsMismatchedWinner covers a conflicting execution
+// registered after allocation starts but before the new runtime is registered.
+func TestEnvironmentCreationRejectsMismatchedWinner(t *testing.T) {
+	provider := &mockWorkspaceInfoProvider{envInfos: map[string]*WorkspaceInfo{"requested": {
+		TaskID: "task", SessionID: "session", TaskEnvironmentID: "requested",
+		WorkspacePath: t.TempDir(), AgentID: "auggie",
+	}}}
+	mgr, backend := newEnvironmentExecutionTestManager(t, provider)
+	backend.entered, backend.barrier = make(chan struct{}, 1), make(chan struct{})
+	var once sync.Once
+	release := func() { once.Do(func() { close(backend.barrier) }) }
+	defer release()
+	type result struct {
+		execution *AgentExecution
+		err       error
+	}
+	finished := make(chan result, 1)
+	go func() {
+		got, err := mgr.GetOrEnsureExecutionForEnvironment(t.Context(), "requested")
+		finished <- result{got, err}
+	}()
+	select {
+	case <-backend.entered:
+	case <-finished:
+		t.Fatal("lookup finished before allocation")
+	case <-time.After(5 * time.Second):
+		t.Fatal("allocation did not start")
+	}
+	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+		ID: "winner", SessionID: "session", TaskID: "task", TaskEnvironmentID: "other",
+	}))
+	release()
+	got := <-finished
+	require.True(t, got.execution == nil, "registration fallback must not return another environment's execution")
+	require.ErrorIs(t, got.err, ErrSessionWorkspaceNotReady)
+	require.EqualValues(t, 1, backend.createCount.Load())
+	require.EqualValues(t, 1, backend.stopCount.Load(), "only the newly allocated runtime is rolled back")
+}
+
+// TestEnvironmentLookupRejectsMismatchedCoalescedResult covers an environment
+// lookup joining a session operation whose result belongs to another environment.
+func TestEnvironmentLookupRejectsMismatchedCoalescedResult(t *testing.T) {
+	provider := &mockWorkspaceInfoProvider{envInfos: map[string]*WorkspaceInfo{"requested": {
+		TaskID: "task", SessionID: "session", TaskEnvironmentID: "requested",
+		WorkspacePath: t.TempDir(), AgentID: "auggie",
+	}}}
+	mgr, backend := newEnvironmentExecutionTestManager(t, provider)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	defer unblock()
+	peer := mgr.ensureExecutionGroup.DoChan("session", func() (interface{}, error) {
+		close(entered)
+		<-release
+		execution := &AgentExecution{ID: "peer", SessionID: "session", TaskID: "task", TaskEnvironmentID: "other"}
+		if err := mgr.executionStore.Add(execution); err != nil {
+			return nil, err
+		}
+		return execution, nil
+	})
+	<-entered
+	ctx := &coalescedRecoveryWaitContext{Context: t.Context(), onWait: unblock}
+	got, err := mgr.GetOrEnsureExecutionForEnvironment(ctx, "requested")
+	require.True(t, got == nil, "a joined result must retain the requested environment constraint")
+	require.ErrorIs(t, err, ErrSessionWorkspaceNotReady)
+	require.NoError(t, (<-peer).Err)
+	require.EqualValues(t, 0, backend.createCount.Load())
 }

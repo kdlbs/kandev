@@ -41,7 +41,11 @@ Both operations share the session gate and retirement guard.
 An environment cache hit also enters the serialized session operation before
 acquiring the retirement guard. While holding that guard, recheck the session
 registration and requested environment identity under the store read lock.
-A removed or rebound entry falls through to normal environment resolution.
+A removed entry falls through to normal environment resolution. A registered
+execution bound to another environment returns a workspace conflict before
+allocation. Revalidate created or registration-conflict results through the
+retirement guard before publishing them. Validate the final coalesced result's
+registration and environment so joined callers cannot bypass the constraint.
 Do not extend readiness timeouts or retry prompts.
 
 ## Verification and delivery

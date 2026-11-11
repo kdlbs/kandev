@@ -35,7 +35,7 @@ persistence. This work has no delivery dependencies.
 From the repository root:
 
 ```sh
-GOMAXPROCS=4 GOMEMLIMIT=2GiB go -C apps/backend test -race -trimpath -p=2 ./internal/agent/runtime/lifecycle -run 'Test(EnvironmentSharedLookup|EnvironmentCacheLookup|EnvironmentWorkspaceLookup|WorkspaceLookup|CachedWorkspaceLookup|ConditionalCleanupRunsAfterWorkspacePeer|PromotionRejectsExecutionRemovedByCleanup|EnsureWorkspaceExecutionForSession|CachedWorkspaceRestore|WorkspaceRestore)' -count=1
+GOMAXPROCS=4 GOMEMLIMIT=2GiB go -C apps/backend test -race -trimpath -p=2 ./internal/agent/runtime/lifecycle -run 'Test(Environment|WorkspaceLookup|CachedWorkspaceLookup|ConditionalCleanupRunsAfterWorkspacePeer|PromotionRejectsExecutionRemovedByCleanup|EnsureWorkspaceExecution|GetOrEnsureExecutionForEnvironment|CachedWorkspaceRestore|WorkspaceRestore)' -count=1
 bash scripts/lint-go-changed apps/backend/internal/agent/runtime/lifecycle/manager_execution.go apps/backend/internal/agent/runtime/lifecycle/cleanup_execution_coalescing_test.go
 ```
 
@@ -90,4 +90,10 @@ A backend CI shard also exposed an unsynchronized start-call counter in the
 executor test mock. The existing sibling-start scenario reproduced the race
 under a 1,000-run local stress test. The counter now uses atomic increment and
 load; no production executor behavior changes.
+Configured-runtime regressions also cover a mismatch before allocation, a
+registration-conflict winner, and a mismatched result borrowed from another
+coalesced lookup. All three failed before the correction. Conflicts now fail
+before allocation where detectable, created results pass the retirement guard
+before publication, and the final coalesced result retains its environment
+constraint. A late allocation conflict rolls back only its own new runtime.
 Final remote CI remains a publication gate.

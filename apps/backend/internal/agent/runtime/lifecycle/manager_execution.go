@@ -203,16 +203,26 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 		// createExecution publishes AgentctlStarting before spawning the
 		// waitForAgentctlReady goroutine, so frontend gates flip out of
 		// `undefined` even on this lazy-create path.
-		execution, err := m.createExecution(sharedCtx, info.TaskID, info)
+		if _, err := m.createExecution(sharedCtx, info.TaskID, info); err != nil {
+			return nil, err
+		}
+		execution, err := m.cachedWorkspaceExecution(sharedCtx, info.SessionID, taskEnvironmentID)
 		if err != nil {
 			return nil, err
+		}
+		if execution == nil {
+			return nil, fmt.Errorf("%w: workspace execution retired during creation", ErrSessionWorkspaceNotReady)
 		}
 		return execution, nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return value.(*AgentExecution), nil
+	execution := value.(*AgentExecution)
+	if err := m.validateWorkspaceExecutionEnvironment(execution, taskEnvironmentID); err != nil {
+		return nil, err
+	}
+	return execution, nil
 }
 
 // EnsureWorkspaceExecutionForSession ensures an agentctl execution exists for a specific task session.
@@ -363,17 +373,28 @@ func (m *Manager) cachedWorkspaceExecution(ctx context.Context, sessionID, taskE
 		return nil, nil
 	}
 	if taskEnvironmentID != "" {
-		matches := false
-		if err := m.executionStore.WithRLock(execution.ID, func(current *AgentExecution) {
-			matches = current == execution && current.TaskEnvironmentID == taskEnvironmentID
-		}); err != nil || !matches {
-			return nil, nil
+		if err := m.validateWorkspaceExecutionEnvironment(execution, taskEnvironmentID); err != nil {
+			return nil, err
 		}
 	}
 	if err := m.ensureCachedWorkspaceExecutionAdmitted(ctx, execution); err != nil {
 		return nil, err
 	}
 	return execution, nil
+}
+
+// validateWorkspaceExecutionEnvironment rejects missing or mismatched registered runtimes.
+func (m *Manager) validateWorkspaceExecutionEnvironment(execution *AgentExecution, taskEnvironmentID string) error {
+	if execution == nil {
+		return fmt.Errorf("%w: workspace execution is unavailable", ErrSessionWorkspaceNotReady)
+	}
+	matches := false
+	if err := m.executionStore.WithRLock(execution.ID, func(current *AgentExecution) {
+		matches = current == execution && current.TaskEnvironmentID == taskEnvironmentID
+	}); err != nil || !matches {
+		return fmt.Errorf("%w: execution does not match the requested task environment", ErrSessionWorkspaceNotReady)
+	}
+	return nil
 }
 
 // workspaceExecutionStatusReusable reports whether a cached execution can host
