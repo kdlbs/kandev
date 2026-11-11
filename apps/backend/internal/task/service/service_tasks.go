@@ -1571,10 +1571,14 @@ func (s *Service) backfillReplacementRemoteURL(ctx context.Context, replacement,
 		strings.TrimSpace(source.RemoteURL) == "" {
 		return
 	}
-	replacement.RemoteURL = strings.TrimSpace(source.RemoteURL)
-	if err := s.repoEntities.UpdateRepository(ctx, replacement); err != nil {
+	filled, err := s.repoEntities.FillRepositoryRemoteURL(ctx, replacement.ID, strings.TrimSpace(source.RemoteURL))
+	if err != nil {
 		s.logger.Warn("failed to backfill the replacement repository clone URL",
 			zap.String("repository_id", replacement.ID), zap.Error(err))
+		return
+	}
+	if filled {
+		replacement.RemoteURL = strings.TrimSpace(source.RemoteURL)
 	}
 }
 

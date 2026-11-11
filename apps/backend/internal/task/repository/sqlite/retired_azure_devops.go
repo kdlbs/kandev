@@ -21,7 +21,8 @@ var retiredAzureDevOpsTables = []string{
 
 // dropRetiredAzureDevOpsSchema removes the built-in Azure DevOps tables and
 // the workspace PATs it stored. It runs after the boot backup and is a no-op
-// on replay or on a database that never had the integration.
+// on replay or on a database that never had the integration. The provider
+// host backfill runs separately, after the repositories columns it reads.
 func (r *Repository) dropRetiredAzureDevOpsSchema() error {
 	ctx := r.migrationContext()
 	for _, table := range retiredAzureDevOpsTables {
@@ -33,7 +34,7 @@ func (r *Repository) dropRetiredAzureDevOpsSchema() error {
 	if err != nil && !db.IsMissingTableError(err) {
 		return fmt.Errorf("delete retired azure devops secrets: %w", err)
 	}
-	return r.recordRetiredAzureDevOpsProviderHost()
+	return nil
 }
 
 // retiredAzureDevOpsOrigin is the only origin the built-in integration

@@ -12,11 +12,15 @@ requirements:
   - REQ-INTEGRATIONS-AZURE-DEVOPS-PLUGIN-SPRINTS-001
   - REQ-INTEGRATIONS-AZURE-DEVOPS-PLUGIN-CHILDREN-001
   - REQ-PLUGINS-AZURE-DEVOPS-EXTRACTION-001
+  - REQ-PLUGINS-PLUGINS-001
+  - REQ-PLUGINS-REPOSITORY-TASK-CREATION-001
 system_design:
   - ../../specs/integrations/system-design/azure-devops-plugin.md
   - ../../specs/integrations/system-design/azure-devops-plugin-sprints.md
   - ../../specs/integrations/system-design/azure-devops-plugin-board-children.md
   - ../../specs/plugins/system-design/azure-devops-extraction.md
+  - ../../specs/plugins/system-design/plugins-03.md
+  - ../../specs/plugins/system-design/repository-provider-task-creation.md
 legacy_specs:
   - ../../specs/integrations/requirements/azure-devops-integration.md
 ---
