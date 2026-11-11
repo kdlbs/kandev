@@ -227,3 +227,4 @@ PR fixup follow-up, 2026-11-11:
 - The guidance identity ref now updates after commit. A Suspense regression proves that an abandoned render for a different incident cannot replace the committed identity.
 - Desktop and phone Restart regressions now assert that failed continuation leaves the action enabled and shows failure feedback; both focused E2E cases passed.
 - Focused guidance/provider/card tests passed: 4 files, 42 tests. `pnpm run typecheck`, `pnpm run lint`, and `pnpm run build:vite` passed. Task 03 remains in progress; issue 5256 remains a separate hard dependency for real-backend acceptance.
+- The d89 frontend run exposed three older test mocks that lacked the optional store API or `taskSessions` state. Updated those fixtures; the combined guidance/provider/card, chat-input restart, last-prompt, and run-error suites pass locally: 7 files, 66 tests.
