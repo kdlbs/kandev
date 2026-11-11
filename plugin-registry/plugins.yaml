@@ -38,6 +38,9 @@ plugins:
   - id: kandev-plugin-slack
     repo: kdlbs/kandev-plugin-slack
     categories: [integrations, automation]
+  - id: kandev-plugin-azure-devops
+    repo: JnManso/kandev-plugin-azure-devops
+    categories: [integrations]
   - id: kandev-plugin-bitbucket
     repo: kdlbs/kandev-plugin-bitbucket
     categories: [integrations]
