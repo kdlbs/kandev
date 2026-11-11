@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, act } from "@testing-library/react";
 import type { ReactNode } from "react";
 import type { TaskRepositoryRoot } from "@/hooks/domains/session/use-task-repository-roots";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 
 const pushMock = vi.fn();
 const ROOT_TRACKER = ".claude/worktrees/fix-b";
@@ -55,8 +56,8 @@ vi.mock("@/components/state-provider", () => ({
     }),
 }));
 
-import { RootContextMenu } from "./root-context-menu";
-import { FileContextMenu } from "./file-context-menu";
+import { RootContextMenu, ROOT_FOCUS_EVENT } from "./root-context-menu";
+import { TreeNodeItem } from "./file-browser-parts";
 
 afterEach(() => {
   cleanup();
@@ -157,16 +158,28 @@ describe("RootContextMenu", () => {
   });
 
   it("renders the root menu instead of Delete and Rename for a Files root row", () => {
+    const node = { name: "fix-b", path: ROOT_TRACKER, is_dir: true };
+    const tree = { name: "root", path: "", is_dir: true, children: [node] };
     render(
-      <FileContextMenu
-        node={{ name: "fix-b", path: ROOT_TRACKER, is_dir: true }}
-        tree={{ name: "root", path: "", is_dir: true }}
-        setTree={vi.fn()}
-        onStartRename={vi.fn()}
-        rootDescriptor={root()}
-      >
-        <div>fix-b</div>
-      </FileContextMenu>,
+      <TreeNodeItem
+        row={{
+          node,
+          chainRoot: node,
+          displayName: "fix-b",
+          path: ROOT_TRACKER,
+          depth: 0,
+          isExpanded: false,
+          isDir: true,
+        }}
+        activeFolderPath=""
+        visibleLoadingPaths={new Set()}
+        fileStatuses={new Map()}
+        tree={tree}
+        onToggleExpand={vi.fn()}
+        onOpenFile={vi.fn()}
+        setTree={() => {}}
+        repositoryRoot={root()}
+      />,
     );
     expect(screen.getByText("Open terminal here")).toBeTruthy();
     expect(screen.queryByText("Delete")).toBeNull();
@@ -181,5 +194,27 @@ describe("RootContextMenu", () => {
     );
     expect(screen.getByText("Show in Changes")).toBeTruthy();
     expect(screen.queryByText("Show in Files")).toBeNull();
+  });
+});
+
+describe("RootContextMenu navigation", () => {
+  it("activates the destination surface before requesting the root reveal", async () => {
+    const addFilesPanel = vi.spyOn(useDockviewStore.getState(), "addFilesPanel");
+    const switched = vi.fn();
+    const revealed = vi.fn();
+    window.addEventListener("switch-to-files-tab", switched);
+    window.addEventListener(ROOT_FOCUS_EVENT, revealed);
+    try {
+      renderMenu();
+      act(() => screen.getByTestId("root-menu-show-other").click());
+      expect(addFilesPanel).toHaveBeenCalled();
+      expect(switched).toHaveBeenCalled();
+      expect(revealed).not.toHaveBeenCalled();
+      await vi.waitFor(() => expect(revealed).toHaveBeenCalledTimes(1));
+    } finally {
+      window.removeEventListener("switch-to-files-tab", switched);
+      window.removeEventListener(ROOT_FOCUS_EVENT, revealed);
+      addFilesPanel.mockRestore();
+    }
   });
 });

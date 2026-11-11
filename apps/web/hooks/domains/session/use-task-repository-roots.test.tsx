@@ -107,9 +107,7 @@ describe("useTaskRepositoryRoots", () => {
     expect(adopted.displayLabel).toBe("kandev · fix-b");
     expect(result.current.byTrackerName.get(ROOT_TRACKER)?.taskRepositoryId).toBe("tr-adopted");
     expect(result.current.byTrackerName.get("")).toBe(primary);
-    expect(result.current.byPath.get("/task-root/.claude/worktrees/fix-b")?.worktreeId).toBe(
-      "wt-adopted",
-    );
+    expect(result.current.byPath.get(ROOT_TRACKER)?.worktreeId).toBe("wt-adopted");
   });
 
   it("maps a single-repo empty tracker name to the primary root", () => {

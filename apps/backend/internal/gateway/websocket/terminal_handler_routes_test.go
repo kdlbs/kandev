@@ -296,6 +296,10 @@ func TestResolveWorkingDirUsesInWorkspaceRootOnly(t *testing.T) {
 	if err != nil || got != root {
 		t.Fatalf("resolveWorkingDir(root) = %q, %v", got, err)
 	}
+	execution.WorkspaceSourceRoots = []string{root}
+	if got, err := handler.resolveWorkingDir(execution, root); err != nil || got != root {
+		t.Fatalf("resolveWorkingDir(source root) = %q, %v", got, err)
+	}
 	outside, err := handler.resolveWorkingDir(execution, t.TempDir())
 	if err != nil || outside != workspace {
 		t.Fatalf("outside root should fall back to workspace, got %q, %v", outside, err)

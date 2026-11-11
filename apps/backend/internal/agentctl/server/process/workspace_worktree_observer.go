@@ -67,12 +67,34 @@ func (wt *WorkspaceTracker) observeWorktreeInventory(ctx context.Context) {
 	}
 	wt.worktreeObserver.lastEntries = entries
 	wt.worktreeObserver.publishedOnce = true
-	wt.notifyWorkspaceStreamWorktreeInventory(&types.WorktreeInventory{
+	inventory := &types.WorktreeInventory{
 		RepositoryName: wt.repositoryName,
 		CommonDir:      commonDir,
 		Entries:        entries,
 		ObservedAt:     time.Now().UTC(),
-	})
+	}
+	wt.worktreeInventoryMu.Lock()
+	wt.latestWorktreeInventory = inventory
+	wt.worktreeInventoryMu.Unlock()
+	if !wt.notifyWorkspaceStreamWorktreeInventory(inventory) {
+		// A full subscriber queue dropped this change. Force the next tick to
+		// publish it again instead of treating the list as already delivered.
+		wt.worktreeObserver.publishedOnce = false
+		wt.worktreeObserver.worktreesStamp = ""
+	}
+}
+
+func (wt *WorkspaceTracker) replayWorktreeInventory(sub types.WorkspaceStreamSubscriber) {
+	wt.worktreeInventoryMu.RLock()
+	inventory := wt.latestWorktreeInventory
+	wt.worktreeInventoryMu.RUnlock()
+	if inventory == nil {
+		return
+	}
+	select {
+	case sub <- types.NewWorkspaceWorktreeInventory(inventory):
+	default:
+	}
 }
 
 func (wt *WorkspaceTracker) resolveWorktreeCommonDir(ctx context.Context) (string, error) {
@@ -220,15 +242,18 @@ func sameWorktreeInventory(left, right []types.WorktreeInventoryEntry) bool {
 	return true
 }
 
-func (wt *WorkspaceTracker) notifyWorkspaceStreamWorktreeInventory(inventory *types.WorktreeInventory) {
+func (wt *WorkspaceTracker) notifyWorkspaceStreamWorktreeInventory(inventory *types.WorktreeInventory) bool {
 	wt.workspaceSubMu.RLock()
 	defer wt.workspaceSubMu.RUnlock()
 
 	msg := types.NewWorkspaceWorktreeInventory(inventory)
+	delivered := true
 	for sub := range wt.workspaceStreamSubscribers {
 		select {
 		case sub <- msg:
 		default:
+			delivered = false
 		}
 	}
+	return delivered
 }

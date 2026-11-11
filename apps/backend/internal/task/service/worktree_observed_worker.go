@@ -8,9 +8,9 @@ import (
 )
 
 // worktreeObservationWorker coalesces linked-worktree snapshots per task
-// environment. Event-bus delivery only enqueues; git inspection, database
-// writes, and agentctl rescans run on this worker instead of the workspace
-// stream goroutine.
+// environment and repository. Event-bus delivery only enqueues; git inspection,
+// database writes, and agentctl rescans run on this worker instead of the
+// workspace stream goroutine.
 type worktreeObservationWorker struct {
 	mu      sync.Mutex
 	latest  map[string]*events.WorktreeInventoryData
@@ -69,6 +69,7 @@ func (w *worktreeObservationWorker) enqueue(payload *events.WorktreeInventoryDat
 	if key == "" {
 		return
 	}
+	key += "\x00" + payload.CommonDir
 	w.mu.Lock()
 	w.latest[key] = payload
 	w.mu.Unlock()

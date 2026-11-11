@@ -30,6 +30,7 @@ import {
 } from "./file-context-menu";
 import { FileTreeNodeTouchActions } from "./file-tree-touch-actions";
 import { FileTreeRootBadge } from "./file-tree-root-badge";
+import { RootContextMenu } from "./root-context-menu";
 export { FileTreeNodeTouchActions };
 
 export {
@@ -131,6 +132,69 @@ function getTreeNodeRowClass(
   );
 }
 
+type TreeNodeMenuProps = {
+  children: React.ReactNode;
+  node: FileTreeNode;
+  tree: FileTreeNode | null;
+  treeRef?: React.RefObject<FileTreeNode | null>;
+  setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
+  onDeleteFile?: (path: string) => Promise<boolean>;
+  onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
+  onDownloadFile?: (path: string) => Promise<boolean>;
+  onUploadFilesHere?: (path: string) => void;
+  onStartRename: () => void;
+  onAddToChatContext?: (node: FileTreeNode) => void;
+  selectedCount?: number;
+  selectedPaths?: Set<string>;
+  anchorRef: React.RefObject<HTMLElement | null>;
+  repositoryRoot?: TaskRepositoryRoot;
+};
+
+function TreeNodeMenu({
+  children,
+  node,
+  tree,
+  treeRef,
+  setTree,
+  onDeleteFile,
+  onRenameFile,
+  onDownloadFile,
+  onUploadFilesHere,
+  onStartRename,
+  onAddToChatContext,
+  selectedCount,
+  selectedPaths,
+  anchorRef,
+  repositoryRoot,
+}: TreeNodeMenuProps) {
+  if (repositoryRoot) {
+    return (
+      <RootContextMenu root={repositoryRoot} surface="files">
+        {children}
+      </RootContextMenu>
+    );
+  }
+  return (
+    <FileContextMenu
+      node={node}
+      tree={tree}
+      treeRef={treeRef}
+      setTree={setTree}
+      onDeleteFile={onDeleteFile}
+      onRenameFile={onRenameFile}
+      onDownloadFile={onDownloadFile}
+      onUploadFilesHere={onUploadFilesHere}
+      onStartRename={onStartRename}
+      onAddToChatContext={onAddToChatContext}
+      selectedCount={selectedCount}
+      selectedPaths={selectedPaths}
+      anchorRef={anchorRef}
+    >
+      {children}
+    </FileContextMenu>
+  );
+}
+
 export const TreeNodeItem = React.memo(function TreeNodeItem(props: TreeNodeRowProps) {
   const { row, activeFolderPath, activeFilePath, visibleLoadingPaths } = props;
   const {
@@ -215,7 +279,7 @@ export const TreeNodeItem = React.memo(function TreeNodeItem(props: TreeNodeRowP
   );
 
   return (
-    <FileContextMenu
+    <TreeNodeMenu
       node={node}
       tree={tree}
       treeRef={props.treeRef}
@@ -229,10 +293,10 @@ export const TreeNodeItem = React.memo(function TreeNodeItem(props: TreeNodeRowP
       selectedCount={props.selectedCount}
       selectedPaths={props.selectedPaths}
       anchorRef={rowAnchorRef}
-      rootDescriptor={props.repositoryRoot}
+      repositoryRoot={props.repositoryRoot}
     >
       {rowContent}
-    </FileContextMenu>
+    </TreeNodeMenu>
   );
 }, areTreeNodeRowPropsEqual);
 

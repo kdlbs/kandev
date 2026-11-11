@@ -1,11 +1,14 @@
 import { expect, test } from "../../fixtures/test-base";
 import {
-  agentWorktreeGroup,
   agentWorktreePrompt,
   AGENT_WORKTREE_FILE,
+  expectAgentWorktreeAttached,
   expectAgentWorktreeGroup,
   removeAgentWorktreeRoot,
+  waitForAgentWorktreeStatus,
+  waitForAgentWorktreeTaskUpdate,
 } from "../../helpers/agent-worktree-adoption";
+import { watchWs } from "../../helpers/causal-waits";
 import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
@@ -32,25 +35,31 @@ test.describe("Agent worktree adoption", () => {
     if (!task.session_id) throw new Error("task creation did not return a session id");
     await waitForSessionDone(apiClient, task.id, task.session_id, "initial turn", 120_000);
 
+    // Detection runs from the live session poll, so the page has to be open.
+    // The status event is the git snapshot that renders the adopted file list.
+    const watcher = watchWs(testPage);
+    const statusPublished = waitForAgentWorktreeStatus(watcher, task.session_id);
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 60_000 });
+    await session.waitForChatIdle();
     await session.clickTab("Changes");
+    await expectAgentWorktreeAttached(apiClient, task.id);
+    await statusPublished;
 
     const group = await expectAgentWorktreeGroup(testPage);
-    await expect(group.getByText(AGENT_WORKTREE_FILE, { exact: true })).toBeVisible({
-      timeout: 30_000,
-    });
+    await expect(group.getByText(AGENT_WORKTREE_FILE, { exact: true })).toBeVisible();
 
     await removeAgentWorktreeRoot(testPage);
-    expect(await agentWorktreeGroup(testPage).count()).toBe(0);
 
+    const reattachedTask = waitForAgentWorktreeTaskUpdate(watcher, task.id);
+    const reattachedStatus = waitForAgentWorktreeStatus(watcher, task.session_id);
     await apiClient.addUserMessage(task.id, task.session_id, agentWorktreePrompt(true));
     await waitForSessionDone(apiClient, task.id, task.session_id, "reported turn", 120_000);
+    await reattachedTask;
+    await reattachedStatus;
+
     const reattached = await expectAgentWorktreeGroup(testPage);
-    await expect(reattached.getByText(AGENT_WORKTREE_FILE, { exact: true })).toBeVisible({
-      timeout: 30_000,
-    });
+    await expect(reattached.getByText(AGENT_WORKTREE_FILE, { exact: true })).toBeVisible();
   });
 });

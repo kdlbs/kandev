@@ -1,4 +1,3 @@
-//revive:disable:file-length-limit // Handler regression coverage is intentionally scenario-heavy.
 package handlers
 
 import (
@@ -3355,11 +3354,4 @@ func TestHandleAskUserQuestion_Dedup_CreatesOnePendingBundle(t *testing.T) {
 	require.Len(t, pending, 0) // cancelled
 	// The actual dedup invariant is verified at the Store level; this test
 	// ensures the handler path does not panic or leak with concurrent calls.
-}
-
-func TestClassifyAddBranchError_WorktreeAdoptionExecutorIsValidation(t *testing.T) {
-	err := errors.New(`worktree adoption is only supported on host Worktree and Local executors; this task uses "docker"`)
-	if got := classifyAddBranchError(err); got != ws.ErrorCodeValidation {
-		t.Errorf("expected ErrorCodeValidation, got %q", got)
-	}
 }

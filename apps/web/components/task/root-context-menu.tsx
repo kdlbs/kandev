@@ -35,8 +35,16 @@ import type { TaskRepositoryRoot } from "@/hooks/domains/session/use-task-reposi
 import { RemoveRootDialog } from "./remove-root-dialog";
 
 export const ROOT_FOCUS_EVENT = "kandev:task-root:focus";
+export const ROOT_ACTIVATE_EVENT = "kandev:task-root:activate";
 
-type RootSurface = "changes" | "files";
+export type RootSurface = "changes" | "files";
+
+export type RootActivationDetail = {
+  surface: RootSurface;
+  trackerName: string;
+  repositoryName: string;
+  path: string;
+};
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
 type MenuAction = {
@@ -309,16 +317,30 @@ function useRootMenuActions(
       void editor.open({ worktreeId: root.worktreeId, isDirectory: true });
     },
     focusOtherSurface: () => {
-      window.dispatchEvent(
-        new CustomEvent(ROOT_FOCUS_EVENT, {
-          detail: {
-            surface: surface === "changes" ? "files" : "changes",
-            trackerName: root.trackerName,
-            repositoryName: root.repositoryName,
-            path: root.relativePath,
-          },
-        }),
-      );
+      const target = surface === "changes" ? "files" : "changes";
+      const detail: RootActivationDetail = {
+        surface: target,
+        trackerName: root.trackerName,
+        repositoryName: root.repositoryName,
+        path: root.relativePath,
+      };
+      // The mobile layout switches panels itself, then reveals the root after
+      // the destination mounts. Desktop dockview panels exist already or mount
+      // synchronously, so one animation frame is enough for the listener.
+      if (isMobile) {
+        window.dispatchEvent(new CustomEvent(ROOT_ACTIVATE_EVENT, { detail }));
+        return;
+      }
+      if (target === "files") {
+        useDockviewStore.getState().addFilesPanel();
+        window.dispatchEvent(new CustomEvent("switch-to-files-tab"));
+      } else {
+        useDockviewStore.getState().addChangesPanel();
+        window.dispatchEvent(new CustomEvent("switch-to-changes-tab"));
+      }
+      requestAnimationFrame(() => {
+        window.dispatchEvent(new CustomEvent(ROOT_FOCUS_EVENT, { detail }));
+      });
     },
     openPR: linkedPR ? () => window.open(linkedPR.pr_url, "_blank", "noopener,noreferrer") : null,
     createPR: dialogs ? () => dialogs.openPRDialog(gitScope ?? undefined) : null,
@@ -373,23 +395,7 @@ export function RootContextMenuIfAvailable({
   );
 }
 
-/** Menu items rendered inside an already-open ContextMenuContent. */
-export function RootContextMenuItems({
-  root,
-  surface,
-}: {
-  root: TaskRepositoryRoot;
-  surface: RootSurface;
-}) {
-  const { items, dialog } = useRootMenuActions(root, surface);
-  return (
-    <>
-      <RootMenuItems items={items} />
-      {dialog}
-    </>
-  );
-}
-
+/** Action rows shared by the root context menus. */
 function RootMenuItems({ items }: { items: MenuAction[] }) {
   return (
     <>

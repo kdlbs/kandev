@@ -193,7 +193,7 @@ function buildRoots(
   const byTrackerName = new Map<string, TaskRepositoryRoot>();
   const byPath = new Map<string, TaskRepositoryRoot>();
   for (const root of roots) {
-    byPath.set(root.path, root);
+    if (root.relativePath) byPath.set(root.relativePath, root);
     if (root.trackerName) byTrackerName.set(root.trackerName, root);
     if (root.isPrimary) byTrackerName.set("", root);
   }

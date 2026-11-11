@@ -1,9 +1,12 @@
 import { expect, test } from "../../fixtures/test-base";
 import {
-  agentWorktreeGroup,
   agentWorktreePrompt,
+  confirmAgentWorktreeRemoval,
+  expectAgentWorktreeAttached,
   expectAgentWorktreeGroup,
+  waitForAgentWorktreeStatus,
 } from "../../helpers/agent-worktree-adoption";
+import { watchWs } from "../../helpers/causal-waits";
 import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
@@ -33,22 +36,25 @@ test.describe("Mobile agent worktree adoption", () => {
     );
     if (!task.session_id) throw new Error("task creation did not return a session id");
     await waitForSessionDone(apiClient, task.id, task.session_id, "reported turn", 120_000);
+    await expectAgentWorktreeAttached(apiClient, task.id);
 
+    const watcher = watchWs(testPage);
+    const statusPublished = waitForAgentWorktreeStatus(watcher, task.session_id);
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 60_000 });
+    await session.waitForChatIdle();
     await openMobilePanel(testPage, /Changes$/);
+    await statusPublished;
     const group = await expectAgentWorktreeGroup(testPage);
     const header = group.getByTestId("changes-repo-header");
 
     // Radix's ContextMenu trigger listens for the native contextmenu event,
     // which is also what a touch long-press emits in the browser.
     await header.dispatchEvent("contextmenu", { bubbles: true, clientX: 40, clientY: 40 });
-    await expect(testPage.getByTestId("root-context-menu")).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTestId("root-context-menu")).toBeVisible();
     await testPage.getByTestId("root-menu-remove").click();
-    await testPage.getByTestId("remove-root-confirm").click();
-    await expect(agentWorktreeGroup(testPage)).toHaveCount(0, { timeout: 30_000 });
+    await confirmAgentWorktreeRemoval(testPage);
 
     const overflow = await testPage.evaluate(() => {
       const root = document.documentElement;

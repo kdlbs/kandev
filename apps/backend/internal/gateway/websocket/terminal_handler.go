@@ -409,7 +409,8 @@ func (h *TerminalHandler) resolveWorkingDir(execution *lifecycle.AgentExecution,
 		return "", fmt.Errorf("%w: task environment %s has no workspace path configured",
 			lifecycle.ErrSessionWorkspaceNotReady, execution.TaskEnvironmentID)
 	}
-	if requested != "" && workingDirWithinWorkspace(requested, execution.WorkspacePath) {
+	if requested != "" && (workingDirWithinWorkspace(requested, execution.WorkspacePath) ||
+		workingDirWithinRoots(requested, execution.WorkspaceSourceRoots)) {
 		return requested, nil
 	}
 	h.logger.Info("handleUserShellWS: got working directory from environment execution",
@@ -419,6 +420,15 @@ func (h *TerminalHandler) resolveWorkingDir(execution *lifecycle.AgentExecution,
 
 // workingDirWithinWorkspace keeps a user-requested terminal directory inside
 // the live agent workspace. Adopted worktrees are nested inside that root.
+func workingDirWithinRoots(requested string, roots []string) bool {
+	for _, root := range roots {
+		if workingDirWithinWorkspace(requested, root) {
+			return true
+		}
+	}
+	return false
+}
+
 func workingDirWithinWorkspace(requested, workspace string) bool {
 	requested = filepath.Clean(requested)
 	workspace = filepath.Clean(workspace)

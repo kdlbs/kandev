@@ -102,6 +102,10 @@ func TestAdoptWorktree_RejectsInvalidCandidates(t *testing.T) {
 	task := createAdoptionTask(t, ctx, svc, repo, primary)
 	createAdoptionEnvironment(t, ctx, repo, task.ID, primary)
 	addLinkedWorktree(t, primary, linked, "fix-b")
+	subdirectory := filepath.Join(linked, "src")
+	if err := os.MkdirAll(subdirectory, 0o755); err != nil {
+		t.Fatalf("mkdir subdirectory: %v", err)
+	}
 
 	outside := filepath.Join(t.TempDir(), "outside")
 	cmd := exec.Command("git", "worktree", "add", "-b", "outside", outside, "main")
@@ -120,6 +124,7 @@ func TestAdoptWorktree_RejectsInvalidCandidates(t *testing.T) {
 		{name: "not a worktree", path: primary},
 		{name: "missing path", path: filepath.Join(taskWorkspaceRootForTest(primary), "missing")},
 		{name: "branch mismatch", path: linked, checkoutBranch: "other"},
+		{name: "worktree subdirectory", path: subdirectory},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -546,5 +551,57 @@ func TestDetachKandevCreatedRootRetainsCleanupInventory(t *testing.T) {
 	}
 	if retained.WorktreeBranchOwner != worktree.BranchOwnerManaged {
 		t.Fatalf("branch owner lost on detach: %+v", retained)
+	}
+}
+
+func TestWorktreeObservedRetriesRescanForAlreadyAttachedRoot(t *testing.T) {
+	isolateGitEnvForTest(t)
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	_, primary, linked := setupAdoptionRepository(t)
+	task := createAdoptionTask(t, ctx, svc, repo, primary)
+	createAdoptionEnvironment(t, ctx, repo, task.ID, primary)
+	addLinkedWorktree(t, primary, linked, "fix-b")
+	commonDir := filepath.Join(primary, ".git")
+	svc.processWorkspaceWorktreesObserved(ctx, observedInventory(task, commonDir, linked, "fix-b"))
+
+	rescanner := &recordingWorkspaceRescanner{}
+	svc.SetWorkspaceSourceRescanner(rescanner)
+	svc.processWorkspaceWorktreesObserved(ctx, observedInventory(task, commonDir, linked, "fix-b"))
+	if len(rescanner.sessions) == 0 {
+		t.Fatal("already-attached adopted root did not retry its workspace rescan")
+	}
+}
+
+func TestAdoptWorktree_ReportedBaseUpdatesExistingAttachment(t *testing.T) {
+	isolateGitEnvForTest(t)
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	_, primary, linked := setupAdoptionRepository(t)
+	task := createAdoptionTask(t, ctx, svc, repo, primary)
+	createAdoptionEnvironment(t, ctx, repo, task.ID, primary)
+	gitWorktreeAddBranch(t, primary, linked, "fix-b", "main")
+	if _, err := svc.AdoptWorktree(ctx, AdoptWorktreeRequest{TaskID: task.ID, Path: linked}); err != nil {
+		t.Fatalf("initial AdoptWorktree: %v", err)
+	}
+	reported, err := svc.AdoptWorktree(ctx, AdoptWorktreeRequest{TaskID: task.ID, Path: linked, BaseBranch: "release"})
+	if err != nil {
+		t.Fatalf("reported AdoptWorktree: %v", err)
+	}
+	if !reported.AlreadyAttached || reported.BaseBranch != "release" {
+		t.Fatalf("reported adoption = %+v", reported)
+	}
+}
+
+func gitWorktreeAddBranch(t *testing.T, primary, path, branch, base string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir linked parent: %v", err)
+	}
+	cmd := exec.Command("git", "worktree", "add", "-b", branch, path, base)
+	cmd.Dir = primary
+	cmd.Env = isolatedGitEnv()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add: %v: %s", err, out)
 	}
 }

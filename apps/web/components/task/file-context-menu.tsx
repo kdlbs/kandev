@@ -18,8 +18,6 @@ import { useToast } from "@/components/toast-provider";
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { RootContextMenuItems } from "./root-context-menu";
-import type { TaskRepositoryRoot } from "@/hooks/domains/session/use-task-repository-roots";
 import { useTranslation } from "react-i18next";
 import type { FileTreeNode } from "@/lib/types/backend";
 import { FileContextMenuItems } from "./file-context-menu-items";
@@ -161,7 +159,6 @@ function useFileContextMenuDelete({
 type FileContextMenuSurfaceProps = {
   children: React.ReactNode;
   node: FileTreeNode;
-  rootDescriptor?: TaskRepositoryRoot;
   onDeleteFile?: (path: string) => Promise<boolean>;
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
   onDownloadFile?: (path: string) => Promise<boolean>;
@@ -214,7 +211,6 @@ function useFileContextMenuFocus(
 function FileContextMenuSurface({
   children,
   node,
-  rootDescriptor,
   onDeleteFile,
   onRenameFile,
   onDownloadFile,
@@ -245,39 +241,31 @@ function FileContextMenuSurface({
       <ContextMenu>
         <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
         <ContextMenuContent onCloseAutoFocus={handleCloseAutoFocus}>
-          {rootDescriptor ? (
-            <RootContextMenuItems root={rootDescriptor} surface="files" />
-          ) : (
-            <>
-              {showOpenInEditor && <OpenInEditorMenuItems node={node} />}
-              {showOpenInEditor && (hasFileActions || showAddToChatContext) && (
-                <ContextMenuSeparator />
-              )}
-              {showAddToChatContext && onAddToChatContext && (
-                <ChatContextMenuItem node={node} onAddToChatContext={onAddToChatContext} />
-              )}
-              {showAddToChatContext && hasFileActions && <ContextMenuSeparator />}
-              <FileContextMenuItems
-                node={node}
-                isBulk={isBulk}
-                selectedCount={selectedCount}
-                onDeleteFile={onDeleteFile}
-                onRenameFile={onRenameFile}
-                onDownloadFile={onDownloadFile}
-                onUploadFilesHere={onUploadFilesHere}
-                onStartRename={handleStartRename}
-                onDelete={(event) => {
-                  const item = event.currentTarget;
-                  focusBoundaryRef.current =
-                    item instanceof HTMLElement
-                      ? (item.closest('[data-slot="context-menu-content"]') as HTMLElement | null)
-                      : null;
-                  if (isBulk) onDelete(event);
-                  else deletePendingRef.current = true;
-                }}
-              />
-            </>
+          {showOpenInEditor && <OpenInEditorMenuItems node={node} />}
+          {showOpenInEditor && (hasFileActions || showAddToChatContext) && <ContextMenuSeparator />}
+          {showAddToChatContext && onAddToChatContext && (
+            <ChatContextMenuItem node={node} onAddToChatContext={onAddToChatContext} />
           )}
+          {showAddToChatContext && hasFileActions && <ContextMenuSeparator />}
+          <FileContextMenuItems
+            node={node}
+            isBulk={isBulk}
+            selectedCount={selectedCount}
+            onDeleteFile={onDeleteFile}
+            onRenameFile={onRenameFile}
+            onDownloadFile={onDownloadFile}
+            onUploadFilesHere={onUploadFilesHere}
+            onStartRename={handleStartRename}
+            onDelete={(event) => {
+              const item = event.currentTarget;
+              focusBoundaryRef.current =
+                item instanceof HTMLElement
+                  ? (item.closest('[data-slot="context-menu-content"]') as HTMLElement | null)
+                  : null;
+              if (isBulk) onDelete(event);
+              else deletePendingRef.current = true;
+            }}
+          />
         </ContextMenuContent>
       </ContextMenu>
       {isBulk && (
@@ -368,7 +356,6 @@ export function FileContextMenu({
   selectedCount = 0,
   selectedPaths,
   anchorRef: providedAnchorRef,
-  rootDescriptor,
 }: {
   children: React.ReactNode;
   node: FileTreeNode;
@@ -384,7 +371,6 @@ export function FileContextMenu({
   selectedCount?: number;
   selectedPaths?: Set<string>;
   anchorRef?: React.RefObject<HTMLElement | null>;
-  rootDescriptor?: TaskRepositoryRoot;
 }) {
   const editorActions = useFileTreeEditorActions();
   const { isFinePointer } = useResponsiveBreakpoint();
@@ -420,13 +406,11 @@ export function FileContextMenu({
     handleConfirmDelete,
   });
 
-  if (!hasFileActions && !showOpenInEditor && !showAddToChatContext && !rootDescriptor)
-    return <>{children}</>;
+  if (!hasFileActions && !showOpenInEditor && !showAddToChatContext) return <>{children}</>;
 
   return (
     <FileContextMenuSurface
       node={node}
-      rootDescriptor={rootDescriptor}
       onDeleteFile={onDeleteFile}
       onRenameFile={onRenameFile}
       onDownloadFile={onDownloadFile}

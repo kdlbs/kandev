@@ -76,6 +76,7 @@ type AdoptWorktreeResult struct {
 
 type gitWorktreeState struct {
 	Path         string
+	TopLevel     string
 	CommonDir    string
 	GitDir       string
 	Branch       string
@@ -155,6 +156,15 @@ func (s *Service) reuseAdoptedWorktree(ctx context.Context, req AdoptWorktreeReq
 		// The inventory row survives without its attachment row. Repair the
 		// task-side row instead of creating a second physical root.
 		return s.commitAdoptedWorktree(ctx, req, WorktreeAdoptionSourceReported, state)
+	}
+	if requestedBase := strings.TrimSpace(req.BaseBranch); requestedBase != "" && requestedBase != taskRepo.BaseBranch {
+		updated, updateErr := s.UpdateRepositoryBaseBranch(ctx, UpdateRepositoryBaseBranchRequest{
+			TaskID: req.TaskID, TaskRepositoryID: taskRepo.ID, BaseBranch: requestedBase,
+		})
+		if updateErr != nil {
+			return nil, updateErr
+		}
+		taskRepo = updated
 	}
 	s.rescanAdoptedWorkspace(ctx, req.TaskID, state.environment)
 	recordWorktreeAdoption(req.Source, worktreeAdoptionResultAttached)
@@ -340,6 +350,12 @@ func (s *Service) resolveAdoptionCandidate(ctx context.Context, root, requested 
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrWorktreeNotAdoptable, err)
 	}
+	if state.TopLevel == "" {
+		return nil, fmt.Errorf("%w: cannot resolve the worktree root for %q", ErrWorktreeNotAdoptable, requested)
+	}
+	if !sameResolvedPath(state.TopLevel, resolved) {
+		return nil, fmt.Errorf("%w: %q is inside a worktree; report the worktree root %q", ErrWorktreeNotAdoptable, requested, state.TopLevel)
+	}
 	if state.GitDir == state.CommonDir {
 		return nil, fmt.Errorf("%w: %q is a primary checkout, not a linked worktree", ErrWorktreeNotAdoptable, requested)
 	}
@@ -377,8 +393,16 @@ func inspectGitWorktree(ctx context.Context, path string) (*gitWorktreeState, er
 	}
 	head, _ := runGitValue(ctx, path, "rev-parse", "--verify", "HEAD")
 	superproject, _ := runGitValue(ctx, path, "rev-parse", "--show-superproject-working-tree")
+	topLevel, topLevelErr := runGitPath(ctx, path, "rev-parse", "--show-toplevel")
+	if topLevelErr == nil {
+		if resolved, resolveErr := filepath.EvalSymlinks(filepath.Clean(topLevel)); resolveErr == nil {
+			topLevel = resolved
+		}
+	} else {
+		topLevel = ""
+	}
 	return &gitWorktreeState{
-		Path: path, CommonDir: commonDir, GitDir: filepath.Clean(gitDir),
+		Path: path, TopLevel: topLevel, CommonDir: commonDir, GitDir: filepath.Clean(gitDir),
 		Branch: strings.TrimSpace(branch), HeadSHA: strings.TrimSpace(head),
 		Superproject: strings.TrimSpace(superproject),
 	}, nil

@@ -113,3 +113,22 @@ func nextWorktreeInventory(t *testing.T, sub types.WorkspaceStreamSubscriber) *t
 		}
 	}
 }
+
+func TestWorktreeObserverReplaysLatestInventoryToNewSubscriber(t *testing.T) {
+	taskRoot := t.TempDir()
+	primary := filepath.Join(taskRoot, "primary")
+	initGitRepoAt(t, primary)
+	linked := filepath.Join(taskRoot, ".claude", "worktrees", "fix-b")
+	addObserverWorktree(t, primary, linked, "fix-b")
+
+	wt := NewWorkspaceTrackerForRepo(primary, "primary", newTestLogger(t))
+	wt.SetWorkspaceRoot(taskRoot)
+	wt.observeWorktreeInventory(context.Background())
+
+	sub := wt.SubscribeWorkspaceStream()
+	defer func() { wt.UnsubscribeWorkspaceStream(sub) }()
+	inventory := nextWorktreeInventory(t, sub)
+	if len(inventory.Entries) != 1 || inventory.Entries[0].Path != linked {
+		t.Fatalf("replayed inventory = %+v", inventory)
+	}
+}

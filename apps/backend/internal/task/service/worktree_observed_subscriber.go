@@ -114,8 +114,15 @@ func observedEntrySet(payload *events.WorktreeInventoryData) map[string]bool {
 
 func (s *Service) adoptObservedEntries(ctx context.Context, payload *events.WorktreeInventoryData, environment *models.TaskEnvironment, rows []*models.TaskEnvironmentRepo, entries map[string]bool) {
 	for path := range entries {
-		if observedRootAlreadyAttached(rows, environment, path) {
-			continue
+		if existing := environmentRepoByPath(rows, path); existing != nil {
+			if existing.WorktreeOrigin == models.WorktreeOriginAdopted {
+				// A rescan failure after attachment is retried on every later
+				// inventory change instead of waiting for a new worktree.
+				s.rescanAdoptedWorkspace(ctx, payload.TaskID, environment)
+			}
+			if observedRootAlreadyAttached(rows, environment, path) {
+				continue
+			}
 		}
 		detached, err := s.isWorktreeDetached(ctx, payload.TaskID, path)
 		if err != nil {

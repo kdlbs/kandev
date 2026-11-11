@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { FileTreeNode } from "@/lib/types/backend";
 import { findUnloadedAncestor, getAncestorPaths } from "./file-tree-utils";
 
@@ -17,7 +17,8 @@ type UseRootRevealOptions = {
  * Expands hidden ancestors of every repository root so an adopted worktree
  * under a collapsed folder such as `.claude/worktrees` is visible on load.
  * One missing ancestor is materialized per effect pass; the tree update
- * re-runs the effect for the next level.
+ * re-runs the effect for the next level. A reveal completes once per root-list
+ * change so collapsing an ancestor afterwards stays collapsed.
  */
 export function useFileTreeRootReveal({
   rootPaths,
@@ -28,8 +29,10 @@ export function useFileTreeRootReveal({
   loadChildren,
 }: UseRootRevealOptions) {
   const rootKey = rootPaths.join("|");
+  const revealedRootKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (isLoadingTree || !tree || rootPaths.length === 0) return;
+    if (revealedRootKeyRef.current === rootKey) return;
     const ancestors = rootPaths.flatMap((path) => getAncestorPaths(path));
     const missingExpanded = ancestors.filter((path) => !expandedPaths.has(path));
     if (missingExpanded.length > 0) {
@@ -40,13 +43,16 @@ export function useFileTreeRootReveal({
       });
     }
     let shouldApply = true;
+    let loadingAncestor = false;
     for (const path of rootPaths) {
       const missing = findUnloadedAncestor(tree, path, getAncestorPaths(path));
       if (missing) {
+        loadingAncestor = true;
         void loadChildren(missing, () => shouldApply);
         break;
       }
     }
+    if (!loadingAncestor) revealedRootKeyRef.current = rootKey;
     return () => {
       shouldApply = false;
     };

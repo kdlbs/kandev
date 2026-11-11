@@ -20,7 +20,7 @@ func TestWorktreeObservationWorkerCoalescesLatestSnapshotPerEnvironment(t *testi
 	defer cancel()
 	worker.start(ctx)
 
-	worker.enqueue(&events.WorktreeInventoryData{TaskID: "first", TaskEnvironmentID: "env-1"})
+	worker.enqueue(&events.WorktreeInventoryData{TaskID: "first", TaskEnvironmentID: "env-1", CommonDir: "/repo/.git"})
 	select {
 	case taskID := <-started:
 		if taskID != "first" {
@@ -29,8 +29,8 @@ func TestWorktreeObservationWorkerCoalescesLatestSnapshotPerEnvironment(t *testi
 	case <-time.After(2 * time.Second):
 		t.Fatal("worker did not start processing")
 	}
-	worker.enqueue(&events.WorktreeInventoryData{TaskID: "latest", TaskEnvironmentID: "env-1"})
-	worker.enqueue(&events.WorktreeInventoryData{TaskID: "other", TaskEnvironmentID: "env-2"})
+	worker.enqueue(&events.WorktreeInventoryData{TaskID: "latest", TaskEnvironmentID: "env-1", CommonDir: "/repo/.git"})
+	worker.enqueue(&events.WorktreeInventoryData{TaskID: "other", TaskEnvironmentID: "env-2", CommonDir: "/other/.git"})
 	close(release)
 
 	got := map[string]bool{}
@@ -44,6 +44,45 @@ func TestWorktreeObservationWorkerCoalescesLatestSnapshotPerEnvironment(t *testi
 	}
 	if !got["latest"] || !got["other"] || got["first"] {
 		t.Fatalf("processed snapshots = %v, want latest for env-1 and other for env-2", got)
+	}
+	worker.stop()
+}
+
+func TestWorktreeObservationWorkerKeepsEachRepositoryInOneEnvironment(t *testing.T) {
+	started := make(chan string, 4)
+	release := make(chan struct{})
+	worker := newWorktreeObservationWorker(func(_ context.Context, payload *events.WorktreeInventoryData) {
+		started <- payload.TaskID
+		<-release
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	worker.start(ctx)
+
+	worker.enqueue(&events.WorktreeInventoryData{TaskID: "repo-a", TaskEnvironmentID: "env-1", CommonDir: "/repo-a/.git"})
+	select {
+	case taskID := <-started:
+		if taskID != "repo-a" {
+			t.Fatalf("first processing = %q", taskID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker did not start processing")
+	}
+	worker.enqueue(&events.WorktreeInventoryData{TaskID: "repo-a-latest", TaskEnvironmentID: "env-1", CommonDir: "/repo-a/.git"})
+	worker.enqueue(&events.WorktreeInventoryData{TaskID: "repo-b", TaskEnvironmentID: "env-1", CommonDir: "/repo-b/.git"})
+	close(release)
+
+	got := map[string]bool{}
+	for len(got) < 2 {
+		select {
+		case taskID := <-started:
+			got[taskID] = true
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for repository snapshots, got %v", got)
+		}
+	}
+	if !got["repo-a-latest"] || !got["repo-b"] || got["repo-a"] {
+		t.Fatalf("processed snapshots = %v, want latest for repo-a and repo-b", got)
 	}
 	worker.stop()
 }

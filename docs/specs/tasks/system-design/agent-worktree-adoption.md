@@ -136,7 +136,8 @@ with `Source` in `reported` or `detected`. Both entry points share it.
 8. After commit, call `RescanWorkspaceForSession` for every live session of the environment with
    the current source roots plus the adopted path, so agentctl creates one tracker per adopted
    path. The tracker name is the canonical task-relative path, which the web client also uses as
-   the root identity. Publish `task.updated` through the normal task path.
+   the root identity. Publish `task.updated` through the normal task path with each repository's
+   `workspace_relative_path`, so live clients can render the adopted root without a reload.
 
 A rescan failure does not undo the attachment. The next observer snapshot triggers another rescan,
 because step 4 finds the row but the tracker is still missing.
@@ -235,20 +236,21 @@ rendered empty otherwise. The section text:
   `ContextMenuTrigger` for the shared root menu; no overflow button is added.
 - **Files panel:** `task-files-panel.tsx` receives the task's root list (path relative to the task
   workspace, branch, removable flag) from the task store. The file tree marks those folders with a
-  repository-root icon and branch label and auto-reveals hidden ancestors of each root. For a root
-  row, `file-context-menu.tsx` renders the shared root menu instead of `FileContextMenuItems`, so
-  the generic Delete and Rename never apply to a root; the tree's delete and rename shortcuts check
-  the same root list. Files are already read by path through agentctl, so a file under the adopted
-  folder reads the worktree's copy.
-- **Shared root menu:** new `root-context-menu-items.tsx`, driven by one root descriptor (task
+  repository-root icon and branch label and reveals hidden ancestors once per root-list change, so a
+  later collapse stays collapsed. A root row is wrapped in `RootContextMenu` itself rather than
+  `FileContextMenu`, so the generic Delete and Rename never apply and the removal dialog stays
+  mounted after the menu closes; the tree's delete and rename shortcuts check the same root list.
+  Files are already read by path through agentctl, so a file under the adopted folder reads the
+  worktree's copy.
+- **Shared root menu:** `root-context-menu.tsx`, driven by one root descriptor (task
   repository ID, absolute path, task-relative path, branch, linked PR, removable flag) and rendered
   by both surfaces. Items: Open in editor (reuses `file-tree-editor-menu.tsx`), Open terminal here
   (a user terminal with the root as working directory; agentctl `shell` already accepts `WorkDir`),
-  Show in Files / Show in Changes (focus the other panel and scroll to the root), Copy full path,
-  Copy relative path, Copy branch name, Push, Create PR or Open PR, and Remove from task. Disabled
-  items carry a reason tooltip. Touch layouts open the same items through the existing Files touch
-  trigger pattern (long-press), as a bottom sheet on phone; the context-menu key and Shift+F10 open
-  it on the focused row and focus returns to the row on close.
+  Show in Files / Show in Changes (activate the destination panel, then reveal the root after it
+  mounts), Copy full path, Copy relative path, Copy branch name, Push, Create PR or Open PR, and
+  Remove from task. Disabled items carry a reason tooltip. Touch layouts open the same items through
+  the existing Files touch trigger pattern (long-press), as a bottom sheet on phone; the
+  context-menu key and Shift+F10 open it on the focused row and focus returns to the row on close.
 - **Confirmation:** one shared dialog for both surfaces. On phone it is a bottom drawer with full
   width actions, following `/mobile-parity`.
 - **i18n:** new `task:` keys for the action, dialog title, body and errors, in all seven catalogs.
