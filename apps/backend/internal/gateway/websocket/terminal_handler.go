@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -219,7 +220,7 @@ func (h *TerminalHandler) handleRemoteUserShellWS(
 		return
 	}
 	var initialCommandOnce bool
-	_, initialCommand, initialCommandOnce, httpErr = h.resolveOrdinaryTerminalLaunch(c, execution, scopeID, terminalID, label, initialCommand)
+	_, initialCommand, initialCommandOnce, _, httpErr = h.resolveOrdinaryTerminalLaunch(c, execution, scopeID, terminalID, label, initialCommand)
 	if httpErr != "" {
 		releaseClient()
 		c.JSON(http.StatusNotFound, gin.H{"error": httpErr})
@@ -400,7 +401,7 @@ func (h *TerminalHandler) resolvePreferredShell(ctx context.Context) string {
 }
 
 // resolveWorkingDir returns the workspace path from the environment execution.
-func (h *TerminalHandler) resolveWorkingDir(execution *lifecycle.AgentExecution) (string, error) {
+func (h *TerminalHandler) resolveWorkingDir(execution *lifecycle.AgentExecution, requested string) (string, error) {
 	if execution == nil {
 		return "", fmt.Errorf("environment execution is not ready")
 	}
@@ -408,9 +409,27 @@ func (h *TerminalHandler) resolveWorkingDir(execution *lifecycle.AgentExecution)
 		return "", fmt.Errorf("%w: task environment %s has no workspace path configured",
 			lifecycle.ErrSessionWorkspaceNotReady, execution.TaskEnvironmentID)
 	}
+	if requested != "" && workingDirWithinWorkspace(requested, execution.WorkspacePath) {
+		return requested, nil
+	}
 	h.logger.Info("handleUserShellWS: got working directory from environment execution",
 		zap.String("working_dir", execution.WorkspacePath))
 	return execution.WorkspacePath, nil
+}
+
+// workingDirWithinWorkspace keeps a user-requested terminal directory inside
+// the live agent workspace. Adopted worktrees are nested inside that root.
+func workingDirWithinWorkspace(requested, workspace string) bool {
+	requested = filepath.Clean(requested)
+	workspace = filepath.Clean(workspace)
+	if !filepath.IsAbs(requested) || !filepath.IsAbs(workspace) {
+		return false
+	}
+	rel, err := filepath.Rel(workspace, requested)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
 // resolveShellLabel returns the label and initial command for a user shell, derived
@@ -448,7 +467,8 @@ func (h *TerminalHandler) startUserShellProcess(
 		return "", http.StatusBadRequest, httpErr
 	}
 	var initialCommandOnce bool
-	label, initialCommand, initialCommandOnce, httpErr = h.resolveOrdinaryTerminalLaunch(c, execution, scopeID, terminalID, label, initialCommand)
+	var requestedWorkingDir string
+	label, initialCommand, initialCommandOnce, requestedWorkingDir, httpErr = h.resolveOrdinaryTerminalLaunch(c, execution, scopeID, terminalID, label, initialCommand)
 	if httpErr != "" {
 		return "", http.StatusNotFound, httpErr
 	}
@@ -476,7 +496,7 @@ func (h *TerminalHandler) startUserShellProcess(
 		zap.Bool("has_initial_command", initialCommand != ""))
 
 	preferredShell := h.resolvePreferredShell(c.Request.Context())
-	workingDir, err := h.resolveWorkingDir(execution)
+	workingDir, err := h.resolveWorkingDir(execution, requestedWorkingDir)
 	if err != nil {
 		h.logger.Warn("handleUserShellWS: workspace path not ready",
 			zap.String("session_id", sessionID),
@@ -555,9 +575,9 @@ func (h *TerminalHandler) resolveOrdinaryTerminalLaunch(
 	c *gin.Context,
 	execution *lifecycle.AgentExecution,
 	scopeID, terminalID, label, initialCommand string,
-) (string, string, bool, string) {
+) (string, string, bool, string, string) {
 	if h.terminalSvc == nil || !terminalservice.IsManaged(terminalID) {
-		return label, initialCommand, false, ""
+		return label, initialCommand, false, "", ""
 	}
 	// Ownership comes from persisted terminal metadata, never from the
 	// execution that happens to serve this environment. Tasks can share one
@@ -568,14 +588,14 @@ func (h *TerminalHandler) resolveOrdinaryTerminalLaunch(
 			zap.String("session_id", execution.SessionID),
 			zap.String("terminal_id", terminalID),
 			zap.Error(err))
-		return "", "", false, errTerminalNotFound
+		return "", "", false, "", errTerminalNotFound
 	}
 	if err := h.lifecycleMgr.CheckTaskEnvironmentAccess(c.Request.Context(), owner, scopeID); err != nil {
 		h.logger.Warn("terminal owner is not authorized for this environment",
 			zap.String("session_id", execution.SessionID),
 			zap.String("terminal_id", terminalID),
 			zap.Error(err))
-		return "", "", false, errTerminalNotFound
+		return "", "", false, "", errTerminalNotFound
 	}
 	// The one-shot command is consumed only after the task/environment pair
 	// above is authorized.
@@ -583,9 +603,9 @@ func (h *TerminalHandler) resolveOrdinaryTerminalLaunch(
 	if err != nil {
 		h.logger.Warn("failed to resolve persisted terminal launch info",
 			zap.String("session_id", execution.SessionID), zap.Error(err))
-		return "", "", false, errTerminalNotFound
+		return "", "", false, "", errTerminalNotFound
 	}
-	return info.Label, info.InitialCommand, info.InitialCommandOnce, ""
+	return info.Label, info.InitialCommand, info.InitialCommandOnce, info.WorkingDir, ""
 }
 
 // handleUserShellWS handles WebSocket connections for user shell terminals.

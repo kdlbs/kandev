@@ -734,7 +734,15 @@ func startAgentInfrastructure(
 	services.Task.SetBranchMaterializer(liveBranchMaterializer)
 	workspaceSourceMaterializer := newWorkspaceSourceMaterializer(repos.Task, worktreeMgr, lifecycleMgr, log)
 	services.Task.SetWorkspaceSourceMaterializer(workspaceSourceMaterializer)
+	services.Task.SetWorkspaceSourceRescanner(lifecycleMgr)
+	services.Task.SetNestedWorkspaceExclusioner(worktreeMgr)
 	services.Task.SetWorkspaceSourceProviderRefresher(newTaskMCPProviderRefresher(repos.Task, lifecycleMgr, log))
+	services.Task.StartWorktreeAdoptionWorker(ctx)
+	addRuntimeCleanup(func() error {
+		services.Task.StopWorktreeAdoptionWorker()
+		return nil
+	})
+	registerWorktreeAdoptionSubscriber(eventBus, services.Task, log)
 	services.Task.SetAgentBaseBranchPusher(lifecycleMgr)
 	services.Task.SetAgentComparisonTargetPusher(lifecycleMgr)
 	services.Task.SetExecutorCapabilityProber(lifecycleMgr)

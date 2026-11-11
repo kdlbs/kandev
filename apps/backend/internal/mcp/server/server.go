@@ -1759,11 +1759,12 @@ func (s *Server) registerListTaskSessionsTool() {
 func (s *Server) registerAddBranchToTaskTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("add_branch_to_task_kandev",
-			mcp.WithDescription(`Attach another repository branch worktree to the current task for an additional PR or repository. This works only with the worktree executor. Single-repository tasks can omit the repository locator; multi-repository tasks must pass exactly one of repository_id, repository_url, or local_path. checkout_branch selects an existing branch; omit it to create a feature branch from base_branch. Returns worktree_path and task_workspace_path.`),
+			mcp.WithDescription(`Attach another repository branch worktree to the current task for an additional PR or repository. Works with host Worktree and Local executors. Single-repository tasks can omit the repository locator; multi-repository tasks must pass exactly one of repository_id, repository_url, or local_path. checkout_branch selects an existing branch; omit it to create a feature branch from base_branch. When you already created a linked worktree inside the task workspace, pass worktree_path to attach it in place instead. Returns worktree_path and task_workspace_path.`),
 			mcp.WithString("task_id", mcp.Description("The current task. Defaults to the current task when omitted.")),
 			mcp.WithString("repository_id", mcp.Description("Repository UUID. Optional for single-repo tasks (auto-resolved). Required for multi-repo tasks unless repository_url or local_path is supplied.")),
 			mcp.WithString("repository_url", mcp.Description("GitHub repository URL (e.g. 'https://github.com/owner/repo'). Alternative to repository_id when you don't have the UUID handy. The repository is found-or-created in the task's workspace.")),
 			mcp.WithString("local_path", mcp.Description("Local repository folder path (e.g. '/Users/me/projects/myrepo'). Alternative to repository_id for the local worktree flow. The repository is found-or-created in the task's workspace.")),
+			mcp.WithString("worktree_path", mcp.Description("Path of an existing linked Git worktree inside the task workspace. Attaches it in place without moving or recreating it. The repository is inferred; checkout_branch must match the worktree branch.")),
 			mcp.WithString("checkout_branch", mcp.Description("Existing branch to check out in the new worktree (e.g. a PR head branch). Empty to create a fresh feature branch from base_branch.")),
 			mcp.WithString("base_branch", mcp.Description("Branch to base the worktree on. Defaults to the repository's default_branch.")),
 		),
@@ -1848,6 +1849,10 @@ func (s *Server) addBranchToTaskHandler() server.ToolHandlerFunc {
 		if locatorCount(repositoryID, repositoryURL, localPath) > 1 {
 			return mcp.NewToolResultError("pass at most one of repository_id, repository_url, local_path"), nil
 		}
+		worktreePath := req.GetString("worktree_path", "")
+		if worktreePath != "" && locatorCount(repositoryID, repositoryURL, localPath) > 0 {
+			return mcp.NewToolResultError("worktree_path cannot be combined with repository_id, repository_url, or local_path"), nil
+		}
 		// repository_url is the tool-facing alias used by create_task_kandev;
 		// translate to github_url on the wire so the WS handler can reuse the
 		// same field name as the rest of the multi-repo payloads.
@@ -1856,6 +1861,7 @@ func (s *Server) addBranchToTaskHandler() server.ToolHandlerFunc {
 			mcpKeyRepositoryID:   repositoryID,
 			mcpKeyLocalPath:      localPath,
 			mcpKeyGitHubURL:      repositoryURL,
+			"worktree_path":      worktreePath,
 			mcpKeyCheckoutBranch: req.GetString(mcpKeyCheckoutBranch, ""),
 			mcpKeyBaseBranch:     req.GetString(mcpKeyBaseBranch, ""),
 		}

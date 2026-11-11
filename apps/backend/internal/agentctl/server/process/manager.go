@@ -1872,6 +1872,9 @@ func (m *Manager) resolveSubpath(subpath string) (string, string, error) {
 	// from Git's slash-separated gitlink paths and create an unanchored lazy
 	// tracker instead.
 	scope := filepath.ToSlash(cleaned)
+	if tracked := m.trackedRepositoryPath(scope); tracked != "" {
+		return scope, tracked, nil
+	}
 	full := filepath.Join(m.cfg.WorkDir, filepath.FromSlash(scope))
 	info, err := os.Stat(full)
 	if err != nil {
@@ -1881,6 +1884,36 @@ func (m *Manager) resolveSubpath(subpath string) (string, string, error) {
 		return "", "", fmt.Errorf("repo subpath is not a directory: %q", subpath)
 	}
 	return scope, full, nil
+}
+
+// workspaceRootForDiscovery is the containment boundary for linked-worktree
+// discovery. Host launches pass the task root explicitly; single-repository
+// legacy launches fall back to the agent workspace.
+func (m *Manager) workspaceRootForDiscovery() string {
+	if m == nil || m.cfg == nil {
+		return ""
+	}
+	if m.cfg.TaskWorkspaceRoot != "" {
+		return filepath.Clean(m.cfg.TaskWorkspaceRoot)
+	}
+	return filepath.Clean(m.cfg.WorkDir)
+}
+
+// trackedRepositoryPath returns the live tracker root for a repository scope.
+// A linked worktree can live at an arbitrary depth (for example
+// .claude/worktrees/fix-b), so its repository name cannot be joined onto the
+// workspace root.
+func (m *Manager) trackedRepositoryPath(repositoryName string) string {
+	if repositoryName == "" {
+		return ""
+	}
+	_, trackers := m.snapshotTrackers()
+	for _, tracker := range trackers {
+		if tracker != nil && tracker.live() && tracker.RepositoryName() == repositoryName {
+			return tracker.workDir
+		}
+	}
+	return ""
 }
 
 // WorkDir returns the absolute workspace root for this agentctl instance.

@@ -359,6 +359,10 @@ func workspaceSourceRoots(folders []WorkspaceFolderSpec, repositories []Workspac
 	}
 	for _, repository := range repositories {
 		add(repository.RepositoryPath)
+		// An adopted worktree is a linked checkout at an arbitrary depth below
+		// the task root. The agentctl tracker graph discovers it through this
+		// explicit source root after restart or session resume.
+		add(repository.WorktreePath)
 	}
 	return roots
 }

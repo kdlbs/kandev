@@ -219,6 +219,21 @@ func (s *Service) CreateWithOneShotInitialCommand(ctx context.Context, taskID, e
 	return s.create(ctx, taskID, envID, initialCommand, true)
 }
 
+// CreateWithWorkingDir creates an ordinary terminal whose first shell starts
+// in workingDir. The terminal handler re-validates containment against the
+// live workspace before starting the PTY.
+func (s *Service) CreateWithWorkingDir(ctx context.Context, taskID, envID, initialCommand, workingDir string) (*models.Terminal, error) {
+	id := "shell-" + uuid.New().String()
+	term, err := s.repo.CreateWithWorkingDir(ctx, taskID, envID, id, initialCommand, workingDir, false)
+	if err != nil {
+		return nil, err
+	}
+	if s.pty != nil {
+		s.pty.Register(envID, id)
+	}
+	return term, nil
+}
+
 func (s *Service) create(ctx context.Context, taskID, envID, initialCommand string, once bool) (*models.Terminal, error) {
 	id := "shell-" + uuid.New().String()
 	term, err := s.repo.CreateWithInitialCommandOnce(ctx, taskID, envID, id, initialCommand, once)

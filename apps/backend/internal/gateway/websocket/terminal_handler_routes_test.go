@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -261,22 +263,42 @@ func TestResolveWorkingDirRequiresAMaterializedWorkspace(t *testing.T) {
 	log, _ := observedTerminalLogger(t)
 	handler, _ := newBridgeTestHandler(t, log)
 
-	if _, err := handler.resolveWorkingDir(nil); err == nil {
+	if _, err := handler.resolveWorkingDir(nil, ""); err == nil {
 		t.Fatal("resolveWorkingDir(nil) error = nil, want a failure")
 	}
 
-	_, err := handler.resolveWorkingDir(&lifecycle.AgentExecution{TaskEnvironmentID: "env-1"})
+	_, err := handler.resolveWorkingDir(&lifecycle.AgentExecution{TaskEnvironmentID: "env-1"}, "")
 	if !errors.Is(err, lifecycle.ErrSessionWorkspaceNotReady) {
 		t.Fatalf("resolveWorkingDir() error = %v, want ErrSessionWorkspaceNotReady", err)
 	}
 
 	dir := t.TempDir()
-	got, err := handler.resolveWorkingDir(&lifecycle.AgentExecution{WorkspacePath: dir})
+	got, err := handler.resolveWorkingDir(&lifecycle.AgentExecution{WorkspacePath: dir}, "")
 	if err != nil {
 		t.Fatalf("resolveWorkingDir() error = %v", err)
 	}
 	if got != dir {
 		t.Fatalf("resolveWorkingDir() = %q, want %q", got, dir)
+	}
+}
+
+func TestResolveWorkingDirUsesInWorkspaceRootOnly(t *testing.T) {
+	log, _ := observedTerminalLogger(t)
+	handler, _ := newBridgeTestHandler(t, log)
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, ".claude", "worktrees", "fix")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+	execution := &lifecycle.AgentExecution{WorkspacePath: workspace}
+
+	got, err := handler.resolveWorkingDir(execution, root)
+	if err != nil || got != root {
+		t.Fatalf("resolveWorkingDir(root) = %q, %v", got, err)
+	}
+	outside, err := handler.resolveWorkingDir(execution, t.TempDir())
+	if err != nil || outside != workspace {
+		t.Fatalf("outside root should fall back to workspace, got %q, %v", outside, err)
 	}
 }
 

@@ -556,6 +556,10 @@ type Service struct {
 	cleanupActivity                 TaskResourceCleanupActivityGate
 	branchMaterializer              BranchMaterializer
 	workspaceSourceMaterializer     WorkspaceSourceMaterializer
+	workspaceSourceRescanner        WorkspaceSourceRescanner
+	nestedWorkspaceExclusioner      NestedWorkspaceExclusioner
+	worktreeObservationMu           sync.Mutex
+	worktreeObservations            *worktreeObservationWorker
 	workspaceSourceLocksMu          sync.Mutex
 	workspaceSourceLocks            map[string]*sync.Mutex
 	taskDeletePreviewMu             sync.Mutex
@@ -915,6 +919,19 @@ func (s *Service) SetBranchMaterializer(m BranchMaterializer) {
 
 func (s *Service) SetWorkspaceSourceMaterializer(m WorkspaceSourceMaterializer) {
 	s.workspaceSourceMaterializer = m
+}
+
+// SetWorkspaceSourceRescanner wires live tracker updates for adoption and
+// detach. Optional — without it, attachment rows persist and the next session
+// launch builds the tracker graph from the inventory.
+func (s *Service) SetWorkspaceSourceRescanner(r WorkspaceSourceRescanner) {
+	s.workspaceSourceRescanner = r
+}
+
+// SetNestedWorkspaceExclusioner wires the managed Git exclude used when a
+// task root is nested inside another attached checkout.
+func (s *Service) SetNestedWorkspaceExclusioner(e NestedWorkspaceExclusioner) {
+	s.nestedWorkspaceExclusioner = e
 }
 
 // SetWorkspaceSourceProviderRefresher wires the best-effort live MCP provider

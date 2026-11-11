@@ -226,7 +226,8 @@ func matchingCanonicalEnvironmentRepoRows(spec RepoSpec, rows []*models.TaskEnvi
 
 func canonicalEnvironmentRepoRowEligible(row *models.TaskEnvironmentRepo, useWorktree bool) bool {
 	return row != nil && row.DeletedAt == nil && row.Status != taskEnvironmentRepoStatusFailed &&
-		row.Status != taskEnvironmentRepoStatusDeleted && (!useWorktree || row.WorktreeID != "")
+		row.Status != taskEnvironmentRepoStatusDeleted && row.Status != models.TaskEnvironmentRepoStatusDetached &&
+		(!useWorktree || row.WorktreeID != "")
 }
 
 // pinDirtyCloneRelocationToSelectedWorktrees keeps an explicitly relocated

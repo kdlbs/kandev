@@ -454,6 +454,10 @@ type InstanceConfig struct {
 	// linked workspace file operations.
 	WorkspaceSourceRoots []string
 
+	// TaskWorkspaceRoot is the containment boundary for linked-worktree
+	// discovery. Empty falls back to WorkDir.
+	TaskWorkspaceRoot string
+
 	// DurableJournalPath is an optional owner-scoped bbolt path on retained
 	// executor storage. Empty means the instance uses legacy delivery.
 	DurableJournalPath string
@@ -864,6 +868,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.WorkspaceSourceRoots != nil {
 		cfg.WorkspaceSourceRoots = append([]string(nil), overrides.WorkspaceSourceRoots...)
 	}
+	if overrides.TaskWorkspaceRoot != "" {
+		cfg.TaskWorkspaceRoot = overrides.TaskWorkspaceRoot
+	}
 	if overrides.DurableJournalPath != "" {
 		cfg.DurableJournalPath = overrides.DurableJournalPath
 	}
@@ -929,6 +936,7 @@ type InstanceOverrides struct {
 	RemoteContributions          map[string]models.RemoteContribution
 	ContributionDestinations     map[string]models.ContributionDestination
 	WorkspaceSourceRoots         []string
+	TaskWorkspaceRoot            string
 	DurableJournalPath           string
 	DeliveryStreamID             string
 	DeliveryIncarnationID        string

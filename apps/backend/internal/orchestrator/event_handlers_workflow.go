@@ -6446,6 +6446,7 @@ func (s *Service) injectAutoStartRuntimeContext(
 		IncludeCoordinatorTaskControls: !configMode,
 		IncludeTaskTitleTool:           !configMode && titleOwner,
 		IncludeCanvasGuidance:          includeCanvasGuidance,
+		IncludeWorktreeAdoption:        s.worktreeAdoptionGuidance(state.ctx, state.taskID, state.sessionID),
 		Autopilot:                      taskForPrompt != nil && taskForPrompt.Autopilot,
 		IncludeUserQuestionTool:        taskForPrompt == nil || !taskForPrompt.Autopilot,
 		IncludeParentQuestionTool:      taskForPrompt != nil && taskForPrompt.Autopilot && taskForPrompt.ParentID != "",
