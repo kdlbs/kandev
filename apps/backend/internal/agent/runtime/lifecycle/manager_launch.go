@@ -1527,6 +1527,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		DurableJournalHostRoot:           m.dataDir,
 		DurableJournalOwnerID:            journalOwnerID,
 		WorkspaceSourceRoots:             workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
+		WorkspaceExcludedRoots:           append([]string(nil), reqWithWorktree.DetachedWorkspaceRoots...),
 		TaskWorkspaceRoot:                m.taskWorkspaceRootForLaunch(reqWithWorktree),
 		Protocol:                         string(agentConfig.Runtime().Protocol),
 		CodexAppServerEnabled:            agentConfig.Enabled() && agentConfig.Runtime().Protocol == agent.ProtocolCodexAppServer,

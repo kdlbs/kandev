@@ -228,6 +228,7 @@ type Manager struct {
 	// repoTrackersMu so a rebind snapshots its proposed policy before creating
 	// replacement trackers.
 	workspaceSourceRoots           []string
+	workspaceExcludedRoots         []string
 	workspaceFileExclusions        []string
 	workspaceFileExclusionRevision uint64
 	// rescanMu serializes RescanRepositories calls so two concurrent
@@ -545,6 +546,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		deliveryPromptByGeneration: make(map[uint64]string),
 		deliverySubmissionHistory:  make(map[uint64]string),
 		workspaceSourceRoots:       canonicalWorkspaceSourceRoots(cfg.WorkspaceSourceRoots),
+		workspaceExcludedRoots:     canonicalWorkspaceSourceRoots(cfg.WorkspaceExcludedRoots),
 		trackerGitEnv:              append([]string(nil), cfg.AgentEnv...),
 	}
 	if cfg.HomeDir != "" {
@@ -1026,6 +1028,16 @@ func (m *Manager) SetWorkspaceSourceRoots(roots []string) {
 	}
 }
 
+// SetWorkspaceExcludedRoots replaces the detached checkouts that repository
+// discovery must not re-adopt.
+func (m *Manager) SetWorkspaceExcludedRoots(roots []string) {
+	canonical := canonicalWorkspaceSourceRoots(roots)
+	m.repoTrackersMu.Lock()
+	defer m.repoTrackersMu.Unlock()
+	m.workspaceExcludedRoots = canonical
+	m.cfg.WorkspaceExcludedRoots = append([]string(nil), canonical...)
+}
+
 // SetWorkspaceFileExclusions installs exact trusted recovery-artifact paths
 // on every current tracker. The update is serialized with tracker rescans so
 // newly created trackers inherit the same filter.
@@ -1143,13 +1155,17 @@ type repositorySubdir struct {
 // that are themselves git repositories or worktrees. Returns an empty slice
 // when workDir doesn't exist, isn't readable, or contains zero git children.
 // Used to detect multi-repo task roots at Manager construction.
-func scanRepositorySubdirs(workDir string, allowedSourceRoots []string) []repositorySubdir {
+func scanRepositorySubdirs(workDir string, allowedSourceRoots []string, excludedRoots ...[]string) []repositorySubdir {
 	if workDir == "" {
 		return nil
 	}
 	entries, err := os.ReadDir(workDir)
 	if err != nil {
 		return nil
+	}
+	var excluded []string
+	if len(excludedRoots) > 0 {
+		excluded = excludedRoots[0]
 	}
 	var out []repositorySubdir
 	for _, entry := range entries {
@@ -1161,37 +1177,44 @@ func scanRepositorySubdirs(workDir string, allowedSourceRoots []string) []reposi
 		if err != nil {
 			continue
 		}
-		repositoryPath := candidate
-		if linkInfo.Mode()&os.ModeSymlink != 0 {
-			resolved, err := filepath.EvalSymlinks(candidate)
-			if err != nil || !pathWithinSourceRoots(resolved, allowedSourceRoots) {
-				continue
-			}
-			repositoryPath = resolved
-		}
-		// Directory links are how a Local task exposes durable folder and
-		// repository attachments. DirEntry.IsDir is false for a Unix symlink;
-		// Stat follows only a link already proven under a registered source root.
-		// codeql[go/path-injection] Candidate is a child of workDir; links pass containment above.
-		info, err := os.Stat(repositoryPath)
-		if err != nil || !info.IsDir() {
+		repositoryPath, contained, ok := repositorySubdirPath(candidate, linkInfo, allowedSourceRoots)
+		if !ok {
 			continue
 		}
-		if resolveGitIndexPath(repositoryPath) == "" {
+		if len(excluded) > 0 && pathWithinSourceRoots(contained, excluded) {
 			continue
-		}
-		if len(allowedSourceRoots) > 0 {
-			contained := repositoryPath
-			if resolved, err := filepath.EvalSymlinks(repositoryPath); err == nil {
-				contained = resolved
-			}
-			if !pathWithinSourceRoots(contained, allowedSourceRoots) {
-				continue
-			}
 		}
 		out = append(out, repositorySubdir{name: entry.Name(), path: repositoryPath})
 	}
 	return out
+}
+
+// repositorySubdirPath validates one directory entry as a repository scope.
+// Directory links are how a Local task exposes durable folder and repository
+// attachments. DirEntry.IsDir is false for a Unix symlink; Stat follows only a
+// link already proven under a registered source root.
+// codeql[go/path-injection] Candidate is a child of workDir; links pass containment at the caller.
+func repositorySubdirPath(candidate string, linkInfo os.FileInfo, allowedSourceRoots []string) (string, string, bool) {
+	repositoryPath := candidate
+	if linkInfo.Mode()&os.ModeSymlink != 0 {
+		resolved, err := filepath.EvalSymlinks(candidate)
+		if err != nil || !pathWithinSourceRoots(resolved, allowedSourceRoots) {
+			return "", "", false
+		}
+		repositoryPath = resolved
+	}
+	info, err := os.Stat(repositoryPath)
+	if err != nil || !info.IsDir() {
+		return "", "", false
+	}
+	if resolveGitIndexPath(repositoryPath) == "" {
+		return "", "", false
+	}
+	contained := repositoryPath
+	if resolved, err := filepath.EvalSymlinks(repositoryPath); err == nil {
+		contained = resolved
+	}
+	return repositoryPath, contained, true
 }
 
 func canonicalWorkspaceSourceRoots(roots []string) []string {

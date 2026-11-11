@@ -454,6 +454,10 @@ type InstanceConfig struct {
 	// linked workspace file operations.
 	WorkspaceSourceRoots []string
 
+	// WorkspaceExcludedRoots are paths that must not be rediscovered as
+	// repository children, such as a detached worktree kept for cleanup.
+	WorkspaceExcludedRoots []string
+
 	// TaskWorkspaceRoot is the containment boundary for linked-worktree
 	// discovery. Empty falls back to WorkDir.
 	TaskWorkspaceRoot string
@@ -868,6 +872,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.WorkspaceSourceRoots != nil {
 		cfg.WorkspaceSourceRoots = append([]string(nil), overrides.WorkspaceSourceRoots...)
 	}
+	if overrides.WorkspaceExcludedRoots != nil {
+		cfg.WorkspaceExcludedRoots = append([]string(nil), overrides.WorkspaceExcludedRoots...)
+	}
 	if overrides.TaskWorkspaceRoot != "" {
 		cfg.TaskWorkspaceRoot = overrides.TaskWorkspaceRoot
 	}
@@ -936,6 +943,7 @@ type InstanceOverrides struct {
 	RemoteContributions          map[string]models.RemoteContribution
 	ContributionDestinations     map[string]models.ContributionDestination
 	WorkspaceSourceRoots         []string
+	WorkspaceExcludedRoots       []string
 	TaskWorkspaceRoot            string
 	DurableJournalPath           string
 	DeliveryStreamID             string

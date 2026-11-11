@@ -120,6 +120,8 @@ type CreateInstanceRequest struct {
 	// workspace. Agentctl permits file operations through links only beneath
 	// these roots.
 	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
+	// WorkspaceExcludedRoots are detached checkouts that discovery must skip.
+	WorkspaceExcludedRoots []string `json:"workspace_excluded_roots,omitempty"`
 	// TaskWorkspaceRoot is the containment boundary for linked-worktree
 	// discovery. Empty falls back to the agent workspace.
 	TaskWorkspaceRoot string `json:"task_workspace_root,omitempty"`

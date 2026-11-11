@@ -1206,6 +1206,7 @@ func (m *Manager) prepareExecutionCreateRequestForPurpose(
 			OfficeAgentProfileID:             workspaceOfficeAgentProfileID(info),
 			WorkspacePath:                    info.WorkspacePath,
 			WorkspaceSourceRoots:             workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories),
+			WorkspaceExcludedRoots:           append([]string(nil), info.DetachedWorkspaceRoots...),
 			Protocol:                         protocolForAgent(agentConfig),
 			CodexAppServerEnabled:            codexAppServerEnabledForAgent(agentConfig),
 			Env:                              envPreparation.env,

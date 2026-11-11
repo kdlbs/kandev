@@ -125,18 +125,27 @@ func (s *Service) rescanAdoptedWorkspace(ctx context.Context, taskID string, env
 		return nil
 	}
 	workDir := environment.WorkspacePath
+	excluded := []string(nil)
 	if rows, listErr := s.taskEnvironments.ListTaskEnvironmentRepos(ctx, environment.ID); listErr == nil {
+		excluded = detachedEnvironmentRepoPaths(rows)
 		if root, rootErr := s.taskWorkspaceRoot(environment, rows); rootErr == nil {
 			workDir = root
 		}
 	}
+	rescanExcluding, hasExclusions := s.workspaceSourceRescanner.(WorkspaceSourceRescanExcluder)
 	ids := make([]string, 0, len(sessions))
 	for _, session := range sessions {
 		if session == nil || session.TaskEnvironmentID != environment.ID || !branchMaterializationSessionEligible(session) {
 			continue
 		}
 		ids = append(ids, session.ID)
-		if err := s.workspaceSourceRescanner.RescanWorkspaceForSession(ctx, session.ID, workDir, roots); err != nil {
+		var err error
+		if hasExclusions {
+			err = rescanExcluding.RescanWorkspaceForSessionWithExclusions(ctx, session.ID, workDir, roots, excluded)
+		} else {
+			err = s.workspaceSourceRescanner.RescanWorkspaceForSession(ctx, session.ID, workDir, roots)
+		}
+		if err != nil {
 			s.logger.Warn("workspace rescan after adoption failed",
 				zap.String("task_id", taskID),
 				zap.String("session_id", session.ID),

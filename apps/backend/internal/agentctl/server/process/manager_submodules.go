@@ -62,7 +62,7 @@ func (m *Manager) buildWorkspaceTrackerGraph(
 	includeAttachedRepos bool,
 	forceBareRoot bool,
 ) (*WorkspaceTracker, []*WorkspaceTracker) {
-	directRepos := scanRepositorySubdirs(workDir, roots)
+	directRepos := scanRepositorySubdirs(workDir, roots, m.workspaceExcludedRoots)
 	linkedRepos := scanLinkedWorktreeRoots(workDir, m.workspaceRootForDiscovery(), roots, directRepos)
 	rootIsGit := resolveGitIndexPath(workDir) != ""
 

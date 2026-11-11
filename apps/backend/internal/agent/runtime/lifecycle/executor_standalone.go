@@ -312,6 +312,7 @@ func buildStandaloneCreateInstanceRequest(
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
 		WorkspaceSourceRoots:       req.WorkspaceSourceRoots,
+		WorkspaceExcludedRoots:     req.WorkspaceExcludedRoots,
 		TaskWorkspaceRoot:          req.TaskWorkspaceRoot,
 		OpenCodePluginRuntime:      req.OpenCodePluginRuntime,
 	}

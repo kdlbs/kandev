@@ -715,6 +715,7 @@ type ExecutorCreateRequest struct {
 	// peer capability. Executors only forward it; they never re-derive it.
 	CopilotNativeSessionEvents bool
 	WorkspaceSourceRoots       []string
+	WorkspaceExcludedRoots     []string
 	TaskWorkspaceRoot          string
 	Protocol                   string
 	CodexAppServerEnabled      bool

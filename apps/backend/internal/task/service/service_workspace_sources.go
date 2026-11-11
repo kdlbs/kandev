@@ -88,6 +88,12 @@ type WorkspaceSourceRescanner interface {
 	RescanWorkspaceForSession(ctx context.Context, sessionID, workDir string, sourceRoots ...[]string) error
 }
 
+// WorkspaceSourceRescanExcluder keeps detached checkouts out of discovery
+// while a live session rescans its remaining roots.
+type WorkspaceSourceRescanExcluder interface {
+	RescanWorkspaceForSessionWithExclusions(ctx context.Context, sessionID, workDir string, sourceRoots, excludedRoots []string) error
+}
+
 // NestedWorkspaceExclusioner manages the outer checkout's Git excludes for a
 // worktree nested inside it. It keeps outer status and staging from exposing
 // the nested repository.

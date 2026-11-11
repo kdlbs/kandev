@@ -155,6 +155,9 @@ The observer runs inside the existing git poll tick of each non-submodule tracke
 - Filter by symlink-resolved containment against a task-owned workspace root and by the identity
   rules above. A legacy flat worktree layout shares its parent with other tasks, so containment
   stays at the primary checkout unless the parent matches the task directory name.
+- Repository-child discovery also skips explicit excluded roots carried by instance config and
+  rescan/reconcile requests. Detached worktrees stay on disk for cleanup but never rejoin the
+  tracker graph.
 - Publish `worktree_inventory` only when the filtered list differs from the last one sent, and
   replay the latest snapshot to a subscriber that connects after publication.
 
@@ -192,7 +195,8 @@ inserts the `task_detached_worktrees` suppression row first, marks the `task_env
 `task_repositories` row. It keeps the managed nested workspace exclusion while the directory
 remains on disk so the containing checkout does not report it as untracked; the from-disk path
 removes the stale exclusion at the same time as the attachment. It publishes `task.updated`, then
-calls `RescanWorkspaceForSession` with the reduced source roots so agentctl retires the tracker. It performs no filesystem or Git checkout operation, and does not touch
+calls `RescanWorkspaceForSessionWithExclusions` with the reduced source roots plus the detached
+path, so agentctl retires the tracker and keeps the retained directory out of child discovery. It performs no filesystem or Git checkout operation, and does not touch
 `task_prs`. A running agent turn does not block it.
 
 Kandev-created secondary roots follow the same path. Their directory stays inside the task folder;
