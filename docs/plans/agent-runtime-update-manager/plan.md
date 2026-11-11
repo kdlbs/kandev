@@ -375,7 +375,7 @@ NODE
 
 ## Review remediation
 
-Static review identified nine correctness gaps. All are fixed with focused regressions:
+Static review identified correctness gaps across several rounds. All are fixed with focused regressions:
 
 - Bulk coordinator runs and retained-job recovery capture an authenticated authority fingerprint, stop unsubmitted rows on identity or permission loss, never publish a replaced identity's responses, and classify 401/403 as authority failures. Malformed successful POST responses remain unconfirmed.
 - Overview Update and Review update actions open the normal detail review; a failed or changed preview cannot be bypassed by the row action.
@@ -389,6 +389,9 @@ Static review identified nine correctness gaps. All are fixed with focused regre
 - Bulk admission surfaces the shared busy state when exclusive work refuses a start, and rejected refresh reads become explicit failures.
 - Review rows label the observed current version, and automatic-update help ids are scoped to their switch and omitted when no help renders.
 - Repeated renders while a review preview is in flight do not start duplicate preview loads.
+- Runtime drift discovered at guarded admission returns review-changed so the client can request fresh evidence, while static harness rejection stays invalid.
+- Catalogue resolution and target validation run before the runtime policy mutex, so a slow registry cannot stall other runtime status or policy work.
+- Repeated running-job snapshots preserve row and batch state identity, so log chunks do not force needless rerenders.
 
 ## Verification results
 
