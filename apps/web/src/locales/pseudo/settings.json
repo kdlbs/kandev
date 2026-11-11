@@ -988,6 +988,7 @@
   "mcpDeleted": "ḾĆƤ śēŕvēŕ ďēĺēţēď.",
   "mcpDeleteFailed": "Ćōũĺď ńōţ ďēĺēţē ţĥē ḾĆƤ śēŕvēŕ.",
   "mcpDeleteDescription": "Ďēĺēţē {{name}}? Àńŷ ƥŕōƒĩĺē, ŕēƥōśĩţōŕŷ, ţàśķ, ōŕ śēśśĩōń śēĺēćţĩōńś ŵĩĺĺ àĺśō ƀē ŕēḿōvēď àƒţēŕ ćōńƒĩŕḿàţĩōń.",
+  "mcpAutomationDeleteWarning": "Àũţōḿàţĩōńś ķēēƥ ţĥēĩŕ śàvēď śēĺēćţĩōń àƒţēŕ ďēĺēţĩōń. Ńēŵ àĝēńţ ƥŕōćēśśēś ćàńńōţ àţţàćĥ ţĥĩś śēŕvēŕ. Ŕēḿōvē ōŕ ŕēƥĺàćē ĩţ ĩń ēàćĥ àũţōḿàţĩōń.",
   "mcpEnabled": "Ēńàƀĺēď",
   "mcpDisabled": "Ďĩśàƀĺēď",
   "mcpEnable": "Ēńàƀĺē",
@@ -1061,6 +1062,8 @@
   "mcpRepositorySelectionDescription": "Ćĥōōśē ḾĆƤ śēŕvēŕś ƒōŕ ţàśķś ũśĩńĝ ţĥĩś ŕēƥōśĩţōŕŷ.",
   "mcpProfileUsage_one": "{{count}} ƥŕōƒĩĺē",
   "mcpProfileUsage_other": "{{count}} ƥŕōƒĩĺēś",
+  "mcpAutomationUsage_one": "{{count}} àũţōḿàţĩōń",
+  "mcpAutomationUsage_other": "{{count}} àũţōḿàţĩōńś",
   "mcpRepositoryUsage_one": "{{count}} ŕēƥōśĩţōŕŷ",
   "mcpRepositoryUsage_other": "{{count}} ŕēƥōśĩţōŕĩēś",
   "mcpTaskUsage_one": "{{count}} ţàśķ",
@@ -1221,5 +1224,8 @@
   "builtinMcp.backToPackages": "Ɓàćķ ţō ƥàćķàĝēś",
   "builtinMcp.packageDetails": "Ƥàćķàĝē ďēţàĩĺś",
   "builtinMcp.packageSummary": "Ćĥōōśē ţĥē Ķàńďēv ţōōĺś àvàĩĺàƀĺē ţō ŷōũŕ ţàśķś.",
-  "builtinMcp.currentUnknown": "Ćũŕŕēńţ àĝēńţ ƥàćķàĝēś àŕē ũńķńōŵń. Ţĥēśē àŕē ţĥē śàvēď ćĥōĩćēś ƒōŕ ţĥē ńēxţ àĝēńţ śţàŕţ."
+  "builtinMcp.currentUnknown": "Ćũŕŕēńţ àĝēńţ ƥàćķàĝēś àŕē ũńķńōŵń. Ţĥēśē àŕē ţĥē śàvēď ćĥōĩćēś ƒōŕ ţĥē ńēxţ àĝēńţ śţàŕţ.",
+  "mcpFromAutomation": "Ƒŕōḿ àũţōḿàţĩōń",
+  "mcpFromAutomationDescription": "Śēŕvēŕś śēĺēćţēď ƀŷ ţĥē àũţōḿàţĩōń ţĥàţ śţàŕţēď ţĥĩś ƥŕōćēśś.",
+  "builtinMcp.surfaces.automation": "Àũţōḿàţĩōń"
 }

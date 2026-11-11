@@ -337,7 +337,24 @@ Native session continuation and provider-managed compaction remain authoritative
 
 ### Automation coordinator MCP
 
-Automation sessions receive one fixed, workspace-scoped coordinator MCP surface. The server resolves the trusted automation principal before dispatch and uses that principal for workspace, caller task, caller session, surface, and audit identity; a prompt or tool argument cannot forge those values. The catalog includes coordination and pending-question or permission actions needed by an automation, but excludes task deletion, configuration mutation, task-local authoring, provider PR/MR actions, diagnostics, arbitrary plugin tools, and arbitrary capability settings.
+Private automation sessions receive required, workspace-scoped Core tools for coordination and pending blockers. The backend binds the automation, workspace, task, and session identities. Tool arguments cannot replace them.
+
+### Choose MCP access
+
+1. Open **Settings > Workspaces > your workspace > Automations** and select an automation.
+2. Under **MCP access**, open a built-in package and choose **On** or **Off**. Use **Back to packages** to return to the list. Configuration, Rich Output, Walkthroughs, and Diagnostics are optional. Core stays required.
+3. Select additional **Workspace MCP servers** from that workspace's saved catalog. Repository and agent-profile inheritance remains additive.
+4. Use **Save changes**. Use **Reset** to remove unsaved edits.
+
+**Configuration grants mutation access** to authorized workflows, profiles, prompts, executors, and automations. The private run keeps its automation identity and workspace restrictions. Native Configuration tools cannot change package grants, automation MCP selections, plugin approvals, or profile MCP server access. Selected third-party servers use their own tools and credentials. The native dispatcher does not sandbox those servers.
+
+Private-run choices apply at the **next agent process start**. Saving does not restart a run. A new turn in a reused process keeps its accepted selection. A fresh process, including a retry or replacement, reads current choices. Run details distinguish desired packages, the current process binding, and observed tool catalogs. Unknown evidence stays Unknown.
+
+For **normal task** automations, MCP choices form a template for newly created tasks. Workspace task-package limits still apply. Reusing an existing task preserves that task's later customization. Managed conversations use their destination's tool policy.
+
+Existing automations keep their current tools until an explicit selection is saved. Portable exports omit access selections, so imports require a native configuration save. An older helper that cannot enforce explicit automation selection reports an upgrade error before starting.
+
+An unavailable definition remains visible for removal. Selecting a server does not create credentials or prove a connection. Confirmed catalog deletion leaves its automation reference unavailable until you remove it in the editor. See [Built-in MCP packages](builtin-mcp-packages.md) for package identities and application timing.
 
 ### Opt-in plugin tools
 
@@ -348,7 +365,7 @@ Access is bounded to the automation, workspace, plugin installation, and plugin 
 Discovery and every call re-read the current approval. Removed tools, disabled plugins, stale policy versions, and unreadable approval data fail closed. Plugin tools add no core or administrative MCP capability, and results stay in automation history: a hidden run never adds a task to Kanban or the sidebar without an explicit task-creation action.
 
 
-The automation's own hidden task and every session on it are invalid targets for messaging, stopping, spawning, and blocker discovery or resolution, and for every mutation except archiving. An automation can archive its own hidden task; that is its normal end-of-run completion signal, not a self-mutation. Foreign-workspace targets return the same not-found result as unknown targets. The archive exemption covers only the automation's own hidden task; sessions on it remain invalid targets. A task spawned on another allowed task receives that target task's normal MCP profile and never inherits the automation surface. Reused worktrees are not reset or rebased by coordinator actions.
+The automation's own hidden task and every session on it are invalid targets for messaging, stopping, spawning, and blocker discovery or resolution, and for coordination mutations except archiving. Selected authoring packages can write output and walkthroughs for the current hidden task. An automation can archive its own hidden task; that is its normal end-of-run completion signal, not a self-mutation. Foreign-workspace targets return the same not-found result as unknown targets. The archive exemption covers only the automation's own hidden task; sessions on it remain invalid targets. A task spawned on another allowed task receives that target task's normal MCP profile and never inherits the automation surface. Reused worktrees are not reset or rebased by coordinator actions.
 
 ## Export automations
 

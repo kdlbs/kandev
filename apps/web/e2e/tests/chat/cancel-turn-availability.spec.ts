@@ -32,6 +32,7 @@ test.describe.serial("Cancel turn availability", () => {
     backend,
   }) => {
     test.setTimeout(120_000);
+    const cancellation = await holdCancellationSettlement(testPage);
     const releaseMarker = path.join(backend.tmpDir, `cancel-availability-${randomUUID()}`);
     const { session, sessionId } = await seedRunningGeneratingSession(
       testPage,
@@ -54,23 +55,17 @@ test.describe.serial("Cancel turn availability", () => {
     await expect(activeSessionChat.getByTestId("submit-message-button")).toBeVisible();
 
     const cancelButton = activeSessionChat.getByTestId("cancel-agent-button");
-    const cancellation = await holdCancellationSettlement(testPage);
     cancellation.arm(sessionId);
     try {
       await cancelButton.click();
-      // Read presence and disabled state together: cancellation can remove the
-      // button between separate locator calls.
       await expect
-        .poll(
-          () =>
-            cancelButton.evaluateAll((buttons) =>
-              buttons.every(
-                (button) => button.matches(":disabled") || button.getClientRects().length === 0,
-              ),
-            ),
-          { timeout: 15_000 },
-        )
+        .poll(cancellation.pendingObserved, {
+          message: "the WebSocket barrier should receive the pending cancellation event",
+          timeout: 15_000,
+        })
         .toBe(true);
+      await waitForActiveSessionCancellationPending(testPage, true);
+      await expect(cancelButton).toBeDisabled();
     } finally {
       cancellation.release();
     }
