@@ -184,6 +184,10 @@ Keep `npm_authentication` for HTTP authentication rejection and an expired excha
 Preserve the package and HTTP status in the error.
 
 The failure summary includes the reason, package, HTTP status, workflow SHA, and checkout SHA.
+`sdk-runtime.mjs` owns the protected-context checks and throws `ReleaseContextError` with the failed setting and its required value.
+It never stores the supplied value in that error.
+The preflight derives a fixed reason from the known setting and reports its required value.
+An unexpected context exception retains a fixed fallback message.
 Only fixed diagnostic labels can describe response fields.
 Never interpolate a response value, token fragment, unknown property name, body, or underlying exception message.
 The error message identifies the failed validation condition.

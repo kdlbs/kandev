@@ -126,6 +126,8 @@ A rejected publisher or an exchange response that fails local validation stops t
 
 For an HTTP authentication rejection or expired exchange token, check that package's trusted publisher configuration. For a malformed HTTP 201 response, inspect the safe reason and investigate the response contract. The preflight does not retain response bodies.
 
+Setup errors name the required context variable and its expected value. They do not show supplied values.
+
 After a fix is merged, dispatch a new Stable run from `main`. Rerunning the failed run uses its original workflow revision and does not pick up the fix.
 
 A confirmed whole-package SDK absence is deferred to the existing first-package bootstrap. A registry read failure or a missing runtime package is an error, never a bootstrap state.

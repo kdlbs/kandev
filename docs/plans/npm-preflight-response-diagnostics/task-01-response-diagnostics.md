@@ -32,6 +32,7 @@ Keep credential values private and preserve the current authentication gate.
 - `npm_exchange_response` for malformed successful responses.
 - Existing authentication category for HTTP rejection and expired tokens.
 - Failure summaries with the safe reason, package, HTTP status, workflow SHA, and checkout SHA.
+- Safe metadata for each failed protected-context check from the existing shared context validator.
 - TDD at the transport and emitted-summary boundaries.
 - Release-guide recovery instructions for the distinct errors.
 
@@ -67,9 +68,11 @@ Retain the existing mixed-package, SDK-deferral, redirect, request-bound, and co
 ## Verification
 
 Run from the repository root after implementation.
+The SDK consumer command requires Node 24.19.0 and npm 11.21.0, as pinned in `scripts/pluginsdk/pack-config.json`.
 
 ```bash
 node --test scripts/release/npm-auth-preflight.test.mjs scripts/release/sdk-runtime.test.mjs scripts/release/sdk-registry.test.mjs
+node --test scripts/release/publish-plugin-sdk.test.mjs scripts/release/sdk-release-io.test.mjs
 python3 .github/scripts/release-workflow-contract_test.py
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
@@ -84,6 +87,8 @@ Run the repository documentation coverage preflight with the actual changed prod
 
 - `scripts/release/npm-auth-preflight.mjs`
 - `scripts/release/npm-auth-preflight.test.mjs`
+- `scripts/release/sdk-runtime.mjs`
+- `scripts/release/sdk-runtime.test.mjs`
 - `docs/public/release-process.md`
 - `docs/plans/npm-preflight-response-diagnostics/plan.md`
 - `docs/plans/npm-preflight-response-diagnostics/task-01-response-diagnostics.md`
@@ -122,7 +127,8 @@ Completed on 2026-11-11 by the user-selected Luna subagent under primary-session
 - Publisher and expired-token guidance regressions failed before their fixed recovery messages were restored.
   Known preflight errors retain safe messages. Unexpected exceptions use a fixed fallback.
 - Updated the release guide with authentication, response-validation, and rerun recovery instructions.
-- `node --test scripts/release/npm-auth-preflight.test.mjs scripts/release/sdk-runtime.test.mjs scripts/release/sdk-registry.test.mjs`: 21 passed after the final production edit.
+- `node --test scripts/release/npm-auth-preflight.test.mjs scripts/release/sdk-runtime.test.mjs scripts/release/sdk-registry.test.mjs`: 22 passed after the final production edit.
+- `node --test scripts/release/publish-plugin-sdk.test.mjs scripts/release/sdk-release-io.test.mjs`: 32 passed with pinned SDK tools, including real consumers.
 - `python3 .github/scripts/release-workflow-contract_test.py`: 78 passed.
 - `node --test scripts/validate-public-docs.test.mjs`: 63 passed.
 - `node scripts/validate-public-docs.mjs`: 55 published pages validated.
@@ -130,6 +136,18 @@ Completed on 2026-11-11 by the user-selected Luna subagent under primary-session
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - Documentation coverage preflight: covered with zero errors for the actual changed paths.
 - Prettier and `git diff --check`: passed.
+
+Review remediation in the primary session:
+
+- Reproduced lost setup detail before production edits. The CLI reason was null, and the shared validator exposed no structured setting.
+- Added `ReleaseContextError` metadata from the existing required-context map.
+  Existing SDK error messages and rejection conditions remain effective.
+- The preflight reports each required context variable with its required value and a fixed reason.
+  Actual supplied values and unexpected exception messages remain private.
+- The shared-validator regression and CLI regressions cover every protected-context check.
+- The initial SDK consumer run refused the default tools. The final run passed with Node 24.19.0 and npm 11.21.0.
+
+The original remote CI result is historical. Fresh review-correction CI belongs to the PR delivery evidence.
 
 The exact response incompatibility in the original release remains unknown.
 No live authentication, publication, or release dispatch occurred.

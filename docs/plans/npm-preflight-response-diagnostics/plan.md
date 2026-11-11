@@ -125,7 +125,8 @@ Design validation passed on 2026-11-11:
 
 Implementation verification passed on 2026-11-11:
 
-- `node --test scripts/release/npm-auth-preflight.test.mjs scripts/release/sdk-runtime.test.mjs scripts/release/sdk-registry.test.mjs`: 21 tests passed.
+- `node --test scripts/release/npm-auth-preflight.test.mjs scripts/release/sdk-runtime.test.mjs scripts/release/sdk-registry.test.mjs`: 22 tests passed after review remediation.
+- `node --test scripts/release/publish-plugin-sdk.test.mjs scripts/release/sdk-release-io.test.mjs`: 32 tests passed with the SDK's pinned Node and npm versions.
 - `python3 .github/scripts/release-workflow-contract_test.py`: 78 tests passed.
 - `node --test scripts/validate-public-docs.test.mjs`: 63 tests passed.
 - `node scripts/validate-public-docs.mjs`: 55 published pages validated.
@@ -143,6 +144,14 @@ No live token exchange or release dispatch occurred.
 The initial regression failed before production edits because the local HTTP 201 validation error lost its HTTP status.
 Integration regressions also failed before the publisher and expired-token recovery messages were restored.
 The final implementation retains known safe errors and sanitizes unexpected exceptions.
+
+PR review identified lost setup detail in the fixed context-error wrapper.
+The primary session reproduced that defect with failing CLI and shared-validator tests.
+The shared validator now carries only the failed setting and its required value.
+All seven protected-context checks preserve specific reasons without exposing supplied values.
+SDK consumer validation initially refused the default tools. It passed with Node 24.19.0 and npm 11.21.0.
+The original 48 passing remote checks describe the initial implementation head.
+Remote verification of the review correction remains pending in the PR.
 
 The implementation work order is complete. Remote CI and review state belong to the PR delivery evidence.
 

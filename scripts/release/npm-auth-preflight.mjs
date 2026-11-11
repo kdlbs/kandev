@@ -2,7 +2,7 @@ import { appendFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
-import { assertReleaseContext } from "./sdk-runtime.mjs";
+import { assertReleaseContext, ReleaseContextError } from "./sdk-runtime.mjs";
 import {
   packageName as sdkPackageName,
   publicRegistryURL,
@@ -268,11 +268,19 @@ export async function runPreflight({
 } = {}) {
   try {
     assertReleaseContext(env);
-  } catch {
+  } catch (error) {
+    const knownContext = error instanceof ReleaseContextError;
     throw new NpmAuthPreflightError(
       null,
-      "npm authentication preflight requires the protected release workflow context on GitHub-hosted runners.",
-      { category: "release_context" },
+      knownContext
+        ? `npm authentication preflight requires release context ${error.setting}=${error.expected}.`
+        : "npm authentication preflight requires the protected release workflow context on GitHub-hosted runners.",
+      {
+        category: "release_context",
+        reason: knownContext
+          ? `invalid_${error.setting.toLowerCase()}`
+          : "invalid_release_context",
+      },
     );
   }
   if (!Array.isArray(packages) || packages.length === 0)

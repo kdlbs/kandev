@@ -543,6 +543,43 @@ test("HTTP 201 with a missing creation date reports invalid_created instead of p
   );
 });
 
+test("failure summaries identify every protected setup condition without exposing input", () => {
+  const cases = [
+    ["GITHUB_ACTIONS", "invalid_github_actions"],
+    ["GITHUB_REPOSITORY", "invalid_github_repository"],
+    ["GITHUB_EVENT_NAME", "invalid_github_event_name"],
+    ["GITHUB_REF", "invalid_github_ref"],
+    ["GITHUB_WORKFLOW_REF", "invalid_github_workflow_ref"],
+    ["RUNNER_ENVIRONMENT", "invalid_runner_environment"],
+    ["SDK_SCOPE_OWNERSHIP_CONFIRMED", "invalid_sdk_scope_ownership_confirmed"],
+  ];
+  const script = fileURLToPath(
+    new URL("./npm-auth-preflight.mjs", import.meta.url),
+  );
+  const secret = "untrusted-context-secret";
+  for (const [setting, reason] of cases) {
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        "data:text/javascript,globalThis.fetch=async()=>{throw new Error('network must not run')}",
+        script,
+        "--package",
+        "kandev",
+        "--checkout-sha",
+        CHECKOUT_SHA,
+      ],
+      { encoding: "utf8", env: env({ [setting]: secret }) },
+    );
+    assert.equal(result.status, 1);
+    const summary = JSON.parse(result.stdout.trim());
+    assert.equal(summary.category, "release_context");
+    assert.equal(summary.reason, reason);
+    assert.ok(summary.message.includes(`${setting}=${APPROVED_ENV[setting]}`));
+    assert.equal(`${result.stdout}\n${result.stderr}`.includes(secret), false);
+  }
+});
+
 test("unsupported release context is rejected before a network request", async () => {
   const calls = [];
   const fetchImpl = async (input) => {
