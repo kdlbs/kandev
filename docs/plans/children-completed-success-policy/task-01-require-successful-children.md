@@ -34,6 +34,8 @@ recovery. Update existing help and prove the behavior without a new setting.
 
 - Orchestrator readiness predicate and its terminal-event comment.
 - The Office service helper shared by edge and recovery workflow producers.
+- The Office recovery candidate query filters incomplete counted children
+  before applying its bounded candidate limit.
 - Failed, cancelled, mixed, unknown, empty, membership, recovery, and duplicate
   regression cases through real service paths.
 - Existing help translations and desktop/phone rendered checks.
@@ -57,6 +59,8 @@ recovery. Update existing help and prove the behavior without a new setting.
    release one eligible reaction without a new retry mechanism.
 3. Both Office workflow producers obey the rule. Existing help and public docs
    explain it, and focused backend plus desktop/phone checks pass.
+4. The Office recovery query excludes parents with incomplete counted children
+   before `LIMIT`, so blocked waves cannot starve a successful parent.
 
 ## TDD sequence
 
@@ -92,6 +96,7 @@ Required RED command, from the repository root:
 | Duplicate delivery and reopen/complete cycle | Existing operation idempotency remains effective |
 | Move action and side-effect-only declaration | No move, prompt, queued run, or decision mutation before readiness |
 | Office edge and recovery paths with cancelled member | No engine dispatch or recovery receipt |
+| Five cancelled parents ahead of a successful parent, limit five | Only the successful parent is selected |
 | Office all-success and ordinary no-action handling | Existing acceptance behavior remains |
 | Missing parent session | No automatic session creation |
 
@@ -190,6 +195,10 @@ documentation-coverage preflight before closing the package.
   `wave_identity_internal_test.go`,
   `children_completed_wave_identity_test.go`, and
   `scheduler_wake_reconciler_test.go`.
+- Office recovery-query readiness and starvation regression:
+  `apps/backend/internal/office/repository/sqlite/wake_receipts.go`,
+  `wake_receipts_wave_identity_test.go`, and
+  `wake_receipts_postgres_test.go`.
 - Existing workflow help in the English, Portuguese, Simplified Chinese,
   Traditional Chinese, Japanese, and Korean catalogs, plus generated
   pseudo-locale catalogs.
@@ -257,5 +266,40 @@ The UI change is content-only inside the existing help surface.
   types, and grandchildren. Desktop Chromium passed: 1 test. Mobile Chromium
   passed: 1 test. The updated Traditional Chinese and pseudo catalogs were
   generated; localization checks passed.
+- PR review follow-up filters incomplete counted wave members in the Office
+  recovery query before `LIMIT`. The SQLite regression with five cancelled
+  parents ahead of a successful parent passed. The PostgreSQL twin was skipped
+  because `KANDEV_TEST_POSTGRES_DSN` was not set. The focused Office service
+  race suite passed. The successful-child contract did not change; this applies
+  its existing readiness rule before the bounded candidate limit to prevent
+  recovery starvation. No requirement or system-design change was needed.
+- `make -C apps/backend build` passed. Changed-Go lint passed for all 12
+  changed backend Go files with zero issues. `pnpm run i18n:check` and
+  `pnpm run i18n:ratchet` passed after removing the unrelated locale edits.
 
-No commit, pull request, or release publication was performed.
+The focused review-fixup commands were:
+
+```bash
+cd apps/backend
+GOMAXPROCS=2 go test -trimpath -tags fts5 -p 2 -race -count=1 ./internal/office/repository/sqlite -run 'TestListStuckParents_CancelledWaveMembersDoNotConsumeLimit|TestPostgresListStuckParents_CancelledWaveMembersDoNotConsumeLimit' -v
+GOMAXPROCS=2 go test -trimpath -tags fts5 -p 2 -race -count=1 ./internal/office/service -run 'Children|ParentWake|WaveIdentity|ResolveWave'
+cd ../..
+make -C apps/backend build
+(cd apps/web && pnpm run i18n:check)
+(cd apps/web && pnpm run i18n:ratchet)
+bash scripts/lint-go-changed \
+  apps/backend/internal/office/repository/sqlite/wake_receipts.go \
+  apps/backend/internal/office/repository/sqlite/wake_receipts_postgres_test.go \
+  apps/backend/internal/office/repository/sqlite/wake_receipts_wave_identity_test.go \
+  apps/backend/internal/office/service/children_completed_wave_identity_test.go \
+  apps/backend/internal/office/service/scheduler_wake_reconciler.go \
+  apps/backend/internal/office/service/scheduler_wake_reconciler_test.go \
+  apps/backend/internal/office/service/wave_identity.go \
+  apps/backend/internal/office/service/wave_identity_internal_test.go \
+  apps/backend/internal/orchestrator/event_handlers_children_completed.go \
+  apps/backend/internal/orchestrator/event_handlers_children_completed_success_test.go \
+  apps/backend/internal/orchestrator/event_handlers_children_completed_test.go \
+  apps/backend/internal/orchestrator/event_handlers_children_completed_wave_test.go
+```
+
+No release publication was performed.

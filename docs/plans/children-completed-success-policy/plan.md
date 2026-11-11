@@ -180,6 +180,12 @@ failed before the Office gate because a cancelled member dispatched. A managed
 desktop E2E RED run showed the failed child batch moving its parent. Their
 corresponding final green runs are recorded in the work order.
 
+PR review follow-up added a recovery-query regression for five cancelled
+parents ahead of a successful parent. The query now filters incomplete counted
+children before its bounded `LIMIT`; the SQLite case passed and its PostgreSQL
+twin is environment-gated. This preserves the existing successful-child
+contract while preventing blocked candidates from starving recovery.
+
 ## Documentation coverage preflight
 
 Run from the repository root:
@@ -219,6 +225,5 @@ JS
 
 ## Design handoff
 
-The implementation and permanent regressions are complete. The package remains
-unstaged and uncommitted; no commit, pull request, or release publication was
-requested.
+The implementation and permanent regressions are complete and in review. No
+release publication was performed.
