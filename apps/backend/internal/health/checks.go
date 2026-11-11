@@ -17,8 +17,8 @@ type GitHubStatusProvider interface {
 // connections. It intentionally contains no process-global auth state.
 //
 // Every field counts connection rows, never workspaces. A workspace with no
-// connection at all appears nowhere here: it uses Azure DevOps, or no code
-// host, and never had a GitHub connection to lose. Counting those as
+// connection at all appears nowhere here: it uses another code host, or none,
+// and never had a GitHub connection to lose. Counting those as
 // "disconnected" is what made this warning permanent for anyone using GitHub
 // in some workspaces but not all, so the type no longer carries a field that
 // could be folded back into a degraded tally.

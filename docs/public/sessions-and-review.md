@@ -753,7 +753,7 @@ available.
 
 ### Open a file in its external repository
 
-When Kandev has unambiguous repository context, file toolbars in Changes, Review, built-in viewers and editors, and their mobile layouts show **Open file in GitHub**, **Open file in GitLab**, or **Open file in Azure DevOps**. The action opens the provider page in a new browser tab. GitLab links support both `gitlab.com` and configured self-managed hosts.
+When Kandev has unambiguous repository context, file toolbars in Changes, Review, built-in viewers and editors, and their mobile layouts show **Open file in GitHub** or **Open file in GitLab**. The action opens the provider page in a new browser tab. GitLab links support both `gitlab.com` and configured self-managed hosts.
 
 The link uses the published source branch from a linked pull or merge request for that repository when available. For a merged GitHub pull request, Kandev uses its saved head commit so the link survives source-branch deletion and opens the reviewed task snapshot. Without a saved revision, the link falls back to the task repository's base branch. Added or untracked files require a published branch or saved head commit. Deleted files open their base-branch version, while renamed files open the new path at the published revision or the previous path on the base branch.
 
@@ -855,7 +855,7 @@ The creation dialog requires a title, defaults it from the task title, accepts a
 
 - GitHub uses `gh pr create` and requires an installed, authenticated GitHub CLI.
 - GitLab uses `glab mr create` when available or the matching workspace connection's token through GitLab REST. It supports `gitlab.com` and configured self-managed HTTPS or SSH remotes, resolves an omitted target from the project default, and attempts to link the resulting MR back to the task repository.
-- Azure Repos uses `az repos pr create` and requires Azure CLI, the `azure-devops` extension, and either `az login` or `AZURE_DEVOPS_EXT_PAT`.
+- Plugin-owned providers, such as Bitbucket and Azure DevOps, create pull requests through their plugin after Kandev pushes the branch.
 - Other Git hosts do not have a built-in creation path. Use that host's tooling from the terminal.
 
 GitHub has the complete in-app PR review path. A linked PR detail panel shows checks, reviews, comments, conflicts, and merge readiness. It can add PR feedback to agent context, submit an approval when allowed, ask an agent to address conflicts, and merge using a method allowed by the repository. On an open PR, use the reviews list to re-request a reviewer whose review was dismissed. On a phone, open **Review** from the task bottom navigation to reach the same PR detail. GitHub permissions and repository policy remain authoritative; merge is enabled only when required checks, review state, and mergeability are ready.

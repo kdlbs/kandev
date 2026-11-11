@@ -382,7 +382,6 @@
   "inferenceAgentThisAgent": "このエージェント",
   "inferenceAgentUnavailable": "{{name}} はもう利用不可。",
   "installed": "インストール済み",
-  "integrationDescriptionAzureDevops": "Azure Boards の作業項目と Azure Repos の pull request。",
   "integrationDescriptionGithub": "PR レビューキュー、issue ウォッチャー、OAuth 認証情報。",
   "integrationDescriptionGitlab": "merge request 作成、会話返信、セルフ管理ホスト。",
   "integrationDescriptionJira": "Atlassian Cloud 認証情報と JQL issue ウォッチャー。",

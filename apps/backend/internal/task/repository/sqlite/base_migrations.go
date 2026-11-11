@@ -116,6 +116,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	if err := r.migrateWorkspaceProtection(ctx); err != nil {
 		return err
 	}
+	if err := r.dropRetiredAzureDevOpsSchema(); err != nil {
+		return err
+	}
 	if err := r.migrateTaskPriorityToTextPostgres(); err != nil {
 		return err
 	}

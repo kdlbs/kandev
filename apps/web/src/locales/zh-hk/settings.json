@@ -385,7 +385,6 @@
   "inferenceAgentThisAgent": "此代理程式",
   "inferenceAgentUnavailable": "{{name}} 已不可用。",
   "installed": "已安裝",
-  "integrationDescriptionAzureDevops": "Azure Boards 工作項與 Azure Repos 拉取要求。",
   "integrationDescriptionGithub": "PR 審閱佇列、議題監控與 OAuth 認證資料。",
   "integrationDescriptionGitlab": "合併請求建立、討論回覆與自託管主機。",
   "integrationDescriptionJira": "Atlassian Cloud 認證資料與 JQL 議題監控。",

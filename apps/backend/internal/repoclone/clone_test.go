@@ -742,9 +742,9 @@ func TestWorkspaceCloneAuthPreservesNonGitHubURL(t *testing.T) {
 	t.Parallel()
 
 	cloner := NewCloner(Config{BasePath: t.TempDir()}, ProtocolSSH, "", logger.Default())
-	want := "git@ssh.dev.azure.com:v3/acme/Platform/api"
+	want := "git@gitlab.com:acme/platform/api.git"
 	got, auth, err := cloner.workspaceCloneAuth(
-		context.Background(), "workspace-a", "azure_devops", "", want, "Platform", "api", "", "",
+		context.Background(), "workspace-a", "gitlab", "", want, "acme/platform", "api", "", "",
 	)
 	if err != nil {
 		t.Fatalf("workspaceCloneAuth() unexpected error: %v", err)

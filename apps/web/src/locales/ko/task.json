@@ -646,7 +646,7 @@
   "enterInspectMode": "검사 모드 시작",
   "enterMessageContent": "메시지 내용 입력...",
   "enterNewCommitMessage": "새 커밋 메시지 입력...",
-  "enterRepositoryUrl": "GitHub, GitLab 또는 Azure DevOps 리포지토리 URL을 입력하세요.",
+  "enterRepositoryUrl": "GitHub, GitLab 또는 연결된 플러그인 제공자의 리포지토리 URL을 입력하세요.",
   "environment": "환경 {{label}}",
   "environmentPreparationFailed": "환경 준비 실패",
   "environmentPrepared": "환경 준비됨",

@@ -36,7 +36,6 @@ import {
   defaultUIState,
   defaultGitHubState,
   defaultGitLabState,
-  defaultAzureDevOpsState,
   defaultJiraState,
   defaultLinearState,
   defaultOfficeState,
@@ -196,10 +195,6 @@ export type AppState = KanbanSlice & {
   gitlabActionPresets: (typeof defaultGitLabState)["gitlabActionPresets"];
   gitlabStatus: (typeof defaultGitLabState)["gitlabStatus"];
   taskMRAutomation: (typeof defaultGitLabState)["taskMRAutomation"];
-
-  // Azure DevOps slice
-  azureDevOpsTaskPullRequests: (typeof defaultAzureDevOpsState)["azureDevOpsTaskPullRequests"];
-  azureDevOpsTaskWorkItems: (typeof defaultAzureDevOpsState)["azureDevOpsTaskWorkItems"];
 
   // JIRA slice
   jiraIssueWatches: (typeof defaultJiraState)["jiraIssueWatches"];

@@ -619,7 +619,7 @@
   "enterInspectMode": "进入检查模式",
   "enterMessageContent": "输入消息内容…",
   "enterNewCommitMessage": "输入新的提交说明…",
-  "enterRepositoryUrl": "输入 GitHub、GitLab 或 Azure DevOps 仓库 URL。",
+  "enterRepositoryUrl": "输入 GitHub、GitLab 或已连接插件提供方的仓库 URL。",
   "environment": "环境 {{label}}",
   "environmentPreparationFailed": "环境准备失败",
   "environmentPrepared": "环境已准备",

@@ -1232,13 +1232,6 @@ type Service struct {
 	gitlabService      GitLabWatchService
 	gitlabReviewSource *GitLabReviewWatcherSource
 	gitlabIssueSource  *GitLabIssueWatcherSource
-	// Azure DevOps watcher service + sources for work-item and pull-request
-	// polling events. The integration publishes provider-native matches; the
-	// shared watcher coordinator owns task creation and throttling.
-	azureDevOpsService     AzureDevOpsWatchService
-	azureWorkItemSource    *AzureDevOpsWorkItemWatcherSource
-	azurePullRequestSource *AzureDevOpsPullRequestWatcherSource
-
 	// gitlabMRLinkService auto-links merge requests opened outside Kandev's
 	// Create-PR action, mirroring what githubService does for PRs. Separate
 	// from gitlabService (the review/issue watch surface) — see
@@ -3573,9 +3566,6 @@ func (s *Service) subscribeStartupEvents() {
 
 	// Subscribe to GitLab integration events
 	s.subscribeGitLabEvents()
-
-	// Subscribe to Azure DevOps watcher events
-	s.subscribeAzureDevOpsEvents()
 
 	// Subscribe to JIRA integration events
 	s.subscribeJiraEvents()

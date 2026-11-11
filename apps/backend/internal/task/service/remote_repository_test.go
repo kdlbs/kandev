@@ -20,9 +20,7 @@ func TestParseRemoteRepositoryURL(t *testing.T) {
 		{"github", "https://github.com/acme/api/pull/12", "github", "acme", "api", "https://github.com/acme/api.git"},
 		{"gitlab subgroup", "https://gitlab.com/acme/platform/api.git", "gitlab", "acme/platform", "api", "https://gitlab.com/acme/platform/api.git"},
 		{"gitlab merge request", "https://gitlab.com/acme/platform/api/-/merge_requests/12", "gitlab", "acme/platform", "api", "https://gitlab.com/acme/platform/api.git"},
-		{"azure devops", "https://dev.azure.com/acme/Platform/_git/api", "azure_devops", "Platform", "api", "https://dev.azure.com/acme/Platform/_git/api"},
 		{"github ssh", "git@github.com:acme/api.git", "github", "acme", "api", "git@github.com:acme/api.git"},
-		{"azure ssh", "git@ssh.dev.azure.com:v3/acme/Platform/api", "azure_devops", "Platform", "api", "git@ssh.dev.azure.com:v3/acme/Platform/api"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -39,8 +37,15 @@ func TestParseRemoteRepositoryURL(t *testing.T) {
 
 func TestParseRemoteRepositoryURLRejectsUnsupportedHost(t *testing.T) {
 	t.Parallel()
-	if _, _, _, _, err := parseRemoteRepositoryURL("https://example.com/acme/api", ""); err == nil {
-		t.Fatal("expected unsupported host error")
+	for _, raw := range []string{
+		"https://example.com/acme/api",
+		// Azure Repos is served by the Azure DevOps connector plugin.
+		"https://dev.azure.com/acme/Platform/_git/api",
+		"git@ssh.dev.azure.com:v3/acme/Platform/api",
+	} {
+		if _, _, _, _, err := parseRemoteRepositoryURL(raw, ""); err == nil {
+			t.Fatalf("expected unsupported host error for %s", raw)
+		}
 	}
 }
 

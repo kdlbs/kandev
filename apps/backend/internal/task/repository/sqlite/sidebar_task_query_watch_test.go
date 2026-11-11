@@ -25,12 +25,11 @@ func sidebarWatcherCases() []sidebarWatcherCase {
 		{"jira", map[string]interface{}{"jira_issue_watch_id": "watch-1"}, true, false},
 		{"linear", map[string]interface{}{"linear_issue_watch_id": "watch-1"}, true, false},
 		{"sentry", map[string]interface{}{"sentry_issue_watch_id": "watch-1"}, true, false},
-		{"azure-work-item", map[string]interface{}{"azure_devops_work_item_watch_id": "watch-1"}, true, false},
-		{"azure-pr", map[string]interface{}{"azure_devops_pr_watch_id": "watch-1"}, false, true},
+		{"retired-azure-keys", map[string]interface{}{"azure_devops_work_item_watch_id": "watch-1", "azure_devops_pr_watch_id": "watch-1"}, false, false},
 		{"ordinary", nil, false, false},
 		{"manual-links", map[string]interface{}{"issue_url": "https://example.test/issues/1", "pr_url": "https://example.test/pulls/2"}, false, false},
 		{"unknown-keys", map[string]interface{}{"custom_issue_watch_id": "watch-1", "custom_review_watch_id": "watch-1"}, false, false},
-		{"mixed", map[string]interface{}{"issue_watch_id": "", "gitlab_issue_watch_id": "watch-1", "review_watch_id": nil, "azure_devops_pr_watch_id": "watch-2"}, true, true},
+		{"mixed", map[string]interface{}{"issue_watch_id": "", "gitlab_issue_watch_id": "watch-1", "review_watch_id": nil, "gitlab_review_watch_id": "watch-2"}, true, true},
 		{"opaque-strings", map[string]interface{}{"issue_watch_id": " ", "review_watch_id": "null"}, true, true},
 	}
 	for index, value := range []interface{}{nil, "", "undefined", false, true, 0, 42, []string{"id"}, map[string]string{"id": "watch"}} {
@@ -94,8 +93,8 @@ func TestSidebarWatchFieldsDialects(t *testing.T) {
 				alias string
 				keys  []string
 			}{
-				{sidebarBaseNeeds{issueWatch: true}, "is_issue_watch", []string{"issue_watch_id", "gitlab_issue_watch_id", "jira_issue_watch_id", "linear_issue_watch_id", "sentry_issue_watch_id", "azure_devops_work_item_watch_id"}},
-				{sidebarBaseNeeds{reviewWatch: true}, "is_pr_review", []string{"review_watch_id", "gitlab_review_watch_id", "azure_devops_pr_watch_id"}},
+				{sidebarBaseNeeds{issueWatch: true}, "is_issue_watch", []string{"issue_watch_id", "gitlab_issue_watch_id", "jira_issue_watch_id", "linear_issue_watch_id", "sentry_issue_watch_id"}},
+				{sidebarBaseNeeds{reviewWatch: true}, "is_pr_review", []string{"review_watch_id", "gitlab_review_watch_id"}},
 			} {
 				fields := sidebarWatchFields(driver, item.needs)
 				require.Len(t, fields, 1)

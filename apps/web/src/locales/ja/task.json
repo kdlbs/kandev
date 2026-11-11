@@ -666,7 +666,7 @@
   "enterInspectMode": "inspect mode を入力",
   "enterMessageContent": "メッセージ内容を入力...",
   "enterNewCommitMessage": "新しいコミットメッセージを入力...",
-  "enterRepositoryUrl": "GitHub, GitLab, Azure DevOps のリポジトリ URL を入力。",
+  "enterRepositoryUrl": "GitHub、GitLab、または接続済みのプラグインプロバイダーのリポジトリ URL を入力。",
   "environment": "環境 {{label}}",
   "environmentPreparationFailed": "環境準備失敗",
   "environmentPrepared": "環境準備完了",
