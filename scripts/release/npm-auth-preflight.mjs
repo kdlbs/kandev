@@ -213,8 +213,6 @@ export async function exchangePackageToken(
       return Number.NaN;
     }
   };
-  const created = parseDate(state?.created);
-  if (!Number.isFinite(created)) throw invalidResponse("invalid_created");
   const expires = parseDate(state?.expires);
   if (!Number.isFinite(expires)) throw invalidResponse("invalid_expires");
   if (expires <= now())

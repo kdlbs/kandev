@@ -118,9 +118,13 @@ function makeTransport({
           { error: "sensitive-server-body" },
           target,
         );
+      const body =
+        typeof exchangeBody === "function"
+          ? exchangeBody(packageName)
+          : exchangeBody;
       return jsonResponse(
         201,
-        exchangeBody ?? {
+        body ?? {
           token_type: "oidc",
           token: `npm_${"a".repeat(36)}`,
           created: new Date().toISOString(),
@@ -138,6 +142,11 @@ test("one rejected publisher blocks the whole preflight before any release mutat
   const transport = makeTransport({
     failPackage: "@kdlbs/runtime-linux-arm64",
     exchangeStatus: 403,
+    exchangeBody: () => ({
+      token_type: "oidc",
+      token: `npm_${"a".repeat(36)}`,
+      expires: new Date(Date.now() + 3_600_000).toISOString(),
+    }),
   });
   await assert.rejects(
     runPreflight({
@@ -205,6 +214,68 @@ test("checks the audience and encoded package route for every exchange", async (
   assert.equal(serialized.includes("request-token-value"), false);
   assert.equal(serialized.includes(`npm_${"a".repeat(36)}`), false);
   assert.equal(serialized.includes("eyJ"), false);
+});
+
+test("valid package exchanges without created metadata pass the full preflight", async () => {
+  const fixedNow = Date.UTC(2026, 10, 11, 12);
+  const createdValues = [
+    { name: "absent", omit: true },
+    { name: "null", value: null },
+    { name: "malformed string", value: "ignored-created-metadata-sentinel" },
+    { name: "numeric", value: 1_234_567_890 },
+    {
+      name: "object",
+      value: { source: "ignored-created-metadata-sentinel" },
+    },
+  ];
+
+  for (const { name, omit, value } of createdValues) {
+    const transport = makeTransport({
+      oidcBody: {
+        value: makeJwt({ expires: Math.floor((fixedNow + 3_600_000) / 1000) }),
+      },
+      exchangeBody: () => {
+        const body = {
+          token_type: "oidc",
+          token: `npm_${"a".repeat(36)}`,
+          expires: new Date(fixedNow + 3_600_000).toISOString(),
+        };
+        if (!omit) body.created = value;
+        return body;
+      },
+    });
+
+    const summary = await runPreflight({
+      packages: RUNTIME_PACKAGES,
+      env: env(),
+      fetchImpl: transport.fetchImpl,
+      now: () => fixedNow,
+      checkoutSha: CHECKOUT_SHA,
+    });
+
+    assert.equal(summary.status, "passed", name);
+    assert.deepEqual(
+      summary.packages.map(({ package: packageName, status }) => ({
+        package: packageName,
+        status,
+      })),
+      [...RUNTIME_PACKAGES, sdkPackageName].map((packageName) => ({
+        package: packageName,
+        status: "authenticated",
+      })),
+      name,
+    );
+    assert.equal(
+      JSON.stringify(summary).includes("ignored-created-metadata-sentinel"),
+      false,
+      name,
+    );
+    assert.equal(
+      summary.packages.every((pkg) => !Object.hasOwn(pkg, "created")),
+      true,
+      name,
+    );
+  }
 });
 
 test("confirmed whole-package SDK absence defers only the SDK check", async () => {
@@ -350,30 +421,21 @@ test("exchange validation reports fixed reasons for each response condition", as
       reason: "missing_token",
     },
     {
-      body: { token_type: "oidc", token: "x", created: null, expires: "2" },
-      reason: "invalid_created",
-    },
-    {
-      body: { token_type: "oidc", token: "x", created: "bad", expires: "2" },
-      reason: "invalid_created",
-    },
-    {
-      body: { token_type: "oidc", token: "x", created: {}, expires: "2" },
-      reason: "invalid_created",
-    },
-    {
-      body: { token_type: "oidc", token: "x", created: "1", expires: "bad" },
+      body: { token_type: "oidc", token: "x", expires: "bad" },
       reason: "invalid_expires",
     },
     {
-      body: { token_type: "oidc", token: "x", created: "1", expires: null },
+      body: { token_type: "oidc", token: "x", expires: null },
+      reason: "invalid_expires",
+    },
+    {
+      body: { token_type: "oidc", token: "x" },
       reason: "invalid_expires",
     },
     {
       body: {
         token_type: "oidc",
         token: "x",
-        created: "1",
         expires: new Date(1000).toISOString(),
       },
       reason: "expired_token",
@@ -421,12 +483,14 @@ test("exchange validation reports fixed reasons for each response condition", as
 });
 
 test("failure summary serialization includes safe context and excludes untrusted metadata", () => {
-  const secret = "npm_sentinel_secret_123";
+  const credentialSecret = "npm_sentinel_secret_123";
+  const createdMetadata = "ignored-created-metadata-sentinel";
+  const untrustedMetadata = "untrusted-response-metadata-sentinel";
   const payload = Buffer.from(
     JSON.stringify({ aud: OIDC_AUDIENCE, exp: 4_102_444_800 }),
   ).toString("base64url");
   const jwt = `e30.${payload}.sig`;
-  const bootstrap = `globalThis.fetch = async (input) => ({ status: String(input).includes('actions.test') ? 200 : 201, url: String(input), json: async () => String(input).includes('actions.test') ? { value: ${JSON.stringify(jwt)} } : { token_type: 'oidc', token: 'valid', expires: '2030-01-01', malicious: ${JSON.stringify(secret)} } });`;
+  const bootstrap = `globalThis.fetch = async (input) => ({ status: String(input).includes('actions.test') ? 200 : 201, url: String(input), json: async () => String(input).includes('actions.test') ? { value: ${JSON.stringify(jwt)} } : { token_type: 'oidc', token: ${JSON.stringify(credentialSecret)}, created: ${JSON.stringify(createdMetadata)}, expires: 'not-a-date', malicious: ${JSON.stringify(untrustedMetadata)} } });`;
   const result = spawnSync(
     process.execPath,
     [
@@ -445,12 +509,22 @@ test("failure summary serialization includes safe context and excludes untrusted
   );
   const emitted = `${result.stdout}\n${result.stderr}`;
   assert.equal(result.status, 1);
-  assert.match(emitted, /"category":"npm_exchange_response"/);
-  assert.match(emitted, /"http_status":201/);
-  assert.match(emitted, /"reason":"invalid_created"/);
-  assert.match(emitted, new RegExp(WORKFLOW_SHA));
-  assert.match(emitted, new RegExp(CHECKOUT_SHA));
-  assert.equal(emitted.includes(secret), false);
+  assert.deepEqual(JSON.parse(result.stdout.trim()), {
+    status: "failed",
+    package: "kandev",
+    category: "npm_exchange_response",
+    http_status: 201,
+    reason: "invalid_expires",
+    workflow_sha: WORKFLOW_SHA,
+    checkout_sha: CHECKOUT_SHA,
+    message:
+      "npm returned an invalid exchange response for kandev (invalid_expires).",
+  });
+  assert.equal(emitted.includes(credentialSecret), false);
+  assert.equal(emitted.includes(createdMetadata), false);
+  assert.equal(emitted.includes(untrustedMetadata), false);
+  assert.equal(emitted.includes("request-token-value"), false);
+  assert.equal(emitted.includes(jwt), false);
 
   const transportSecret = "transport-exception-secret";
   const failedTransport = `let calls = 0; globalThis.fetch = async (input) => { calls += 1; if (calls > 1) throw new Error(${JSON.stringify(transportSecret)}); return { status: 200, url: String(input), json: async () => ({ value: ${JSON.stringify(jwt)} }) }; };`;
@@ -517,30 +591,6 @@ test("failure summaries retain safe publisher and OIDC recovery guidance", () =>
   );
   assert.equal(oidcResult.status, 1);
   assert.match(`${oidcResult.stdout}\n${oidcResult.stderr}`, /id-token: write/);
-});
-
-test("HTTP 201 with a missing creation date reports invalid_created instead of publisher rejection", async () => {
-  const transport = makeTransport({
-    exchangeBody: {
-      token_type: "oidc",
-      token: `npm_${"c".repeat(36)}`,
-      expires: new Date(Date.now() + 3_600_000).toISOString(),
-    },
-  });
-  await assert.rejects(
-    runPreflight({
-      packages: ["kandev"],
-      env: env(),
-      fetchImpl: transport.fetchImpl,
-      checkoutSha: CHECKOUT_SHA,
-    }),
-    (error) => {
-      assert.equal(error.status, 201);
-      assert.equal(error.category, "npm_exchange_response");
-      assert.equal(error.reason, "invalid_created");
-      return true;
-    },
-  );
 });
 
 test("failure summaries identify every protected setup condition without exposing input", () => {
