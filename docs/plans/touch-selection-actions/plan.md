@@ -79,9 +79,10 @@ unchanged and not redrawn.
 |            | Copy  Share  All  |     |  <- native menu, unobstructed
 |            +-------------------+     |
 |  and backfills existing rows.        |
-|  Done ->                       [(C)] |  dock: 32px square icon in a 44px target,
-|--------------------------------------|  bottom-right of transcript; rest of row
-| [ Message the agent...         ] (>) |  stays visible and tappable
+|--------------------------------------|
+| [Done ->]      [=] [v] [|] [<] [(C)] |  one composer status row: next step,
+|--------------------------------------|  utilities, then the Comment icon while
+| [ Message the agent...         ] (>) |  text is selected (32px in 44px target)
 +--------------------------------------+
 ```
 
@@ -114,6 +115,7 @@ Maps to `AC-UI-TOUCH-SELECTION-ACTIONS-001.2`, `.3`, `.4`, `.6`, `.8`.
 | [01](task-01-shared-dock-and-chat-messages.md) | 1 | none | Shared dock primitives; chat and Office thread comments docked on touch |
 | [02](task-02-preview-and-editor-dock.md) | 2 | 01 | Markdown preview and code editors docked on touch |
 | [03](task-03-compact-square-dock.md) | 3 | 01, 02 | Dock shrinks to a Plan-style square icon after phone review |
+| [04](task-04-inline-composer-row.md) | 4 | 03 | Chat Comment action and workflow action join the composer utility row |
 
 ## Verification summary
 

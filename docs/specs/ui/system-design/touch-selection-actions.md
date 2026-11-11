@@ -46,6 +46,7 @@ Plan editor and resolved it with a docked strip.
 | `.7` | [Interaction and accessibility](#interaction-and-accessibility) |
 | `.8` | [Interaction and accessibility](#interaction-and-accessibility) |
 | `.9` | [Surface integration](#surface-integration) |
+| `.10` | [Toolbar slot](#toolbar-slot) |
 
 ## Presentation selection
 
@@ -112,6 +113,23 @@ New component in `components/shared/selection-action-dock.tsx`:
   `[data-selection-dock-host]` ancestor into a ref after each render.
 - Every button prevents default on `pointerdown` and `mousedown` so tapping it
   does not collapse the DOM selection before `onActivate` runs.
+
+### Toolbar slot
+
+`components/shared/selection-action-slot.tsx` provides
+`SelectionActionSlotProvider`, `SelectionActionSlot`, and
+`useSelectionActionSlot`. `TaskChatPanel` and `QuickChatContent` wrap their
+transcript and composer in the provider; `ChatStatusBar` renders the slot as
+the last child of its utility controls. The slot is a `display: contents` span
+carrying `data-selection-action-dock`, so pressing a slotted action keeps the
+tracked selection. When a slot is mounted, `MessageCommentControls` portals the
+icon-only Comment button into it instead of rendering `SelectionActionDock`.
+Without a provider (Office threads, Markdown preview, code editors, minimal
+Quick Chat toolbars) the slot renders nothing and surfaces use the dock.
+
+On phones the composer status row's workflow action no longer forces its own
+row (see `REQ-UI-COMPOSER-ACTION-WRAP-001`), so the workflow action, status
+icons, utilities, and the Comment action share one row when they fit.
 
 ## Dock geometry
 

@@ -3,6 +3,10 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import { createMessageTextAnchor } from "@/lib/chat/agent-message-comments";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
+import {
+  SelectionActionSlot,
+  SelectionActionSlotProvider,
+} from "@/components/shared/selection-action-slot";
 import { MessageCommentSurface } from "./message-comment-surface";
 
 const COMMENT_TEXT = vi.hoisted(() => "Make this concrete.");
@@ -438,6 +442,36 @@ describe("MessageCommentSurface touch selection dock", () => {
     expect(screen.getByTestId("agent-message-comment-drawer").textContent).toContain(
       SELECTED_QUOTE,
     );
+  });
+
+  it("places the comment action in the chat toolbar slot when one is mounted", () => {
+    TOUCH_DRAWER.enabled = true;
+    frames = [];
+    vi.stubGlobal("requestAnimationFrame", (frame: FrameRequestCallback) => frames.push(frame));
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    render(
+      <SelectionActionSlotProvider>
+        <div data-selection-dock-host="">
+          <MessageCommentSurface
+            message={message(content)}
+            sessionId={SESSION_ID}
+            isTurnActive={false}
+          >
+            <span data-testid={MESSAGE_TEXT_TEST_ID}>{content}</span>
+          </MessageCommentSurface>
+        </div>
+        <div data-testid="chat-toolbar">
+          <SelectionActionSlot />
+        </div>
+      </SelectionActionSlotProvider>,
+    );
+    selectText(0, 3);
+
+    const trigger = screen.getByTestId(COMMENT_TRIGGER_TEST_ID);
+    expect(screen.getByTestId("selection-action-slot").contains(trigger)).toBe(true);
+    expect(screen.queryByRole("toolbar", { name: "Selection actions" })).toBeNull();
+    fireEvent.click(trigger);
+    expect(screen.getByTestId("agent-message-comment-drawer")).not.toBeNull();
   });
 
   it("hides the dock when the selection collapses", () => {

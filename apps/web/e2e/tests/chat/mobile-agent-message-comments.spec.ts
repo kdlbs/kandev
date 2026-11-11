@@ -32,18 +32,21 @@ async function expectDrawerContained(page: Page, drawer: Locator) {
   expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
 }
 
-async function expectCompactDockAtHostCorner(page: Page, dock: Locator) {
-  const host = page.locator("[data-selection-dock-host]:visible").first();
-  const hostBox = await host.boundingBox();
-  const dockBox = await dock.boundingBox();
-  if (!hostBox || !dockBox) throw new Error("Expected a visible dock and dock host");
-  // A small square in the transcript's bottom-right corner, away from the
-  // native selection menu and without taking a whole row.
-  expect(dockBox.width).toBeLessThanOrEqual(56);
-  expect(dockBox.height).toBeLessThanOrEqual(48);
-  expect(hostBox.x + hostBox.width - (dockBox.x + dockBox.width)).toBeLessThanOrEqual(16);
-  expect(hostBox.y + hostBox.height - (dockBox.y + dockBox.height)).toBeLessThanOrEqual(8);
-  expect(hostBox.y + hostBox.height - (dockBox.y + dockBox.height)).toBeGreaterThanOrEqual(0);
+async function expectCommentInUtilityRow(chat: Locator, trigger: Locator) {
+  const controls = chat.getByTestId("chat-status-bar-right-controls");
+  // The comment action joins the transcript utility icons instead of adding a row.
+  await expect(controls.getByTestId("agent-message-comment-trigger")).toHaveCount(1);
+  const triggerBox = await trigger.boundingBox();
+  const utilityBox = await controls
+    .locator("button:visible")
+    .filter({ hasNot: chat.page().getByTestId("agent-message-comment-trigger") })
+    .first()
+    .boundingBox();
+  if (!triggerBox || !utilityBox) throw new Error("Expected measurable comment and utility icons");
+  expect(
+    Math.abs(triggerBox.y + triggerBox.height / 2 - (utilityBox.y + utilityBox.height / 2)),
+  ).toBeLessThanOrEqual(2);
+  expect(triggerBox.width).toBeLessThanOrEqual(48);
 }
 
 test.describe("Agent message comments on mobile", () => {
@@ -63,12 +66,11 @@ test.describe("Agent message comments on mobile", () => {
     // The fixture seeds a completed agent turn in a waiting session, so Run
     // sends directly and does not depend on mock-agent completion timing.
     await selectAgentReplyText(body, SELECTED_REPLY_TEXT);
-    const dock = testPage.getByRole("toolbar", { name: "Selection actions" });
-    await expect(dock).toBeVisible();
-    const commentTrigger = dock.getByTestId("agent-message-comment-trigger");
+    const chat = body.locator('xpath=ancestor::*[@data-testid="session-chat"][1]');
+    const commentTrigger = chat.getByTestId("agent-message-comment-trigger");
     await expect(commentTrigger).toBeVisible();
     await expectTouchTarget(commentTrigger);
-    await expectCompactDockAtHostCorner(testPage, dock);
+    await expectCommentInUtilityRow(chat, commentTrigger);
     expect(await testPage.evaluate(() => window.getSelection()?.toString())).toBe(
       SELECTED_REPLY_TEXT,
     );
@@ -118,9 +120,7 @@ test.describe("Agent message comments on mobile", () => {
     );
 
     await selectAgentReplyText(body, SELECTED_REPLY_TEXT);
-    const dock = dialog.getByRole("toolbar", { name: "Selection actions" });
-    await expect(dock).toBeVisible();
-    await dock.getByTestId("agent-message-comment-trigger").click();
+    await dialog.getByTestId("agent-message-comment-trigger").click();
     const drawer = testPage.getByTestId("agent-message-comment-drawer");
     await expect(drawer).toBeVisible();
     const input = drawer.getByTestId("agent-message-comment-input");

@@ -171,8 +171,8 @@ async function expectSameControlRow(status: Locator, utility: Locator) {
     .toBeLessThanOrEqual(1);
 }
 
-// @covers AC-UI-COMPOSER-ACTION-WRAP-001.6, .7
-test("shares status and transcript controls when they fit", async ({
+// @covers AC-UI-COMPOSER-ACTION-WRAP-001.2, .6, .7
+test("shares the workflow action, status, and transcript controls when they fit", async ({
   testPage,
   apiClient,
   seedData,
@@ -194,16 +194,23 @@ test("shares status and transcript controls when they fit", async ({
   await expect(todo).toBeVisible();
   await expect(ci).toBeVisible();
   await expect(usage).toBeVisible();
-  for (const width of [393, 640, 767]) {
+  const proceed = bar.getByTestId("proceed-next-step");
+  for (const width of [640, 767]) {
     await testPage.setViewportSize({ width, height: 851 });
+    // The workflow action leads the same row as status icons and utilities.
+    await expectSameControlRow(proceed, usage);
     await expectSameControlRow(todo, usage);
     await expectSameControlRow(ci, usage);
     await expectContainedTouchTargets(bar);
   }
+  // A crowded phone row wraps utilities below without shrinking targets.
+  await testPage.setViewportSize({ width: 393, height: 851 });
+  await expectSameControlRow(proceed, todo);
+  await expectContainedTouchTargets(bar);
   await testPage.setViewportSize({ width: 393, height: 851 });
   await waitForFiniteAnimations(bar);
   await prCapture.screenshot("mobile-composer-shared-row", {
-    caption: "Status icons and transcript utilities share a phone row",
+    caption: "Workflow action and status icons lead a phone row; utilities wrap when crowded",
   });
   await bar.getByTestId("proceed-next-step").focus();
   await testPage.keyboard.press("Tab");

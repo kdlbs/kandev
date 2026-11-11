@@ -21,6 +21,7 @@ import {
   SelectionActionDock,
   SelectionActionDockButton,
 } from "@/components/shared/selection-action-dock";
+import { useSelectionActionSlot } from "@/components/shared/selection-action-slot";
 import { useTranslation } from "react-i18next";
 
 export type CommentTarget = {
@@ -237,6 +238,16 @@ function DockedCommentTrigger({
   portalContainer?: HTMLElement | null;
 }) {
   const { t } = useTranslation();
+  const slot = useSelectionActionSlot();
+  const button = (
+    <SelectionActionDockButton
+      icon={IconMessage}
+      label={t("task:commentOnSelection")}
+      onActivate={onOpen}
+      testId="agent-message-comment-trigger"
+    />
+  );
+  if (slot) return createPortal(button, slot);
   return (
     <SelectionActionDock
       hostRef={hostRef}
@@ -244,12 +255,7 @@ function DockedCommentTrigger({
       label={t("task:selectionActions")}
       testId="agent-message-comment-dock"
     >
-      <SelectionActionDockButton
-        icon={IconMessage}
-        label={t("task:commentOnSelection")}
-        onActivate={onOpen}
-        testId="agent-message-comment-trigger"
-      />
+      {button}
     </SelectionActionDock>
   );
 }
