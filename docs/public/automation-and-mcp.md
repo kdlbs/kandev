@@ -344,7 +344,7 @@ Private automation sessions receive required, workspace-scoped Core tools for co
 1. Open **Settings > Workspaces > your workspace > Automations** and select an automation.
 2. Under **MCP access**, open a built-in package and choose **On** or **Off**. Use **Back to packages** to return to the list. Configuration, Rich Output, Walkthroughs, and Diagnostics are optional. Core stays required.
 3. Select additional **Workspace MCP servers** from that workspace's saved catalog. Repository and agent-profile inheritance remains additive.
-4. Use **Save changes**. Use **Discard** to remove unsaved edits.
+4. Use **Save changes**. Use **Reset** to remove unsaved edits.
 
 **Configuration grants mutation access** to authorized workflows, profiles, prompts, executors, and automations. The private run keeps its automation identity and workspace restrictions. Native Configuration tools cannot change package grants, automation MCP selections, plugin approvals, or profile MCP server access. Selected third-party servers use their own tools and credentials. The native dispatcher does not sandbox those servers.
 
