@@ -3247,5 +3247,6 @@
   "questionReviewInA": "In A",
   "questionReviewInB": "In B",
   "questionReviewChoiceName": "Choice: {{choice}}",
-  "questionReviewFlipShort": "Flip"
+  "questionReviewFlipShort": "Flip",
+  "threadExtractChipLabel": "{{author}}: “{{quote}}”"
 }

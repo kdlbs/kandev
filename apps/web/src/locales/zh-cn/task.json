@@ -3245,5 +3245,6 @@
   "questionReviewInA": "在 A 中",
   "questionReviewInB": "在 B 中",
   "questionReviewChoiceName": "选项：{{choice}}",
-  "questionReviewFlipShort": "翻转"
+  "questionReviewFlipShort": "翻转",
+  "threadExtractChipLabel": "{{author}}：“{{quote}}”"
 }

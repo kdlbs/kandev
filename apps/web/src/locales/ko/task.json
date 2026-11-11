@@ -3245,5 +3245,6 @@
   "questionReviewInA": "A에 있음",
   "questionReviewInB": "B에 있음",
   "questionReviewChoiceName": "선택지: {{choice}}",
-  "questionReviewFlipShort": "뒤집기"
+  "questionReviewFlipShort": "뒤집기",
+  "threadExtractChipLabel": "{{author}}의 “{{quote}}”"
 }

@@ -3245,5 +3245,6 @@
   "questionReviewInA": "Em A",
   "questionReviewInB": "Em B",
   "questionReviewChoiceName": "Opção: {{choice}}",
-  "questionReviewFlipShort": "Inverter"
+  "questionReviewFlipShort": "Inverter",
+  "threadExtractChipLabel": "{{author}}: «{{quote}}»"
 }

@@ -3245,5 +3245,6 @@
   "questionReviewInA": "Ĩń À",
   "questionReviewInB": "Ĩń Ɓ",
   "questionReviewChoiceName": "Ćĥōĩćē: {{choice}}",
-  "questionReviewFlipShort": "Ƒĺĩƥ"
+  "questionReviewFlipShort": "Ƒĺĩƥ",
+  "threadExtractChipLabel": "{{author}}: “{{quote}}”"
 }
