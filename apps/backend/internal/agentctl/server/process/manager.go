@@ -1918,9 +1918,13 @@ func (m *Manager) trackedRepositoryPath(repositoryName string) string {
 	}
 	_, trackers := m.snapshotTrackers()
 	for _, tracker := range trackers {
-		if tracker != nil && tracker.live() && tracker.RepositoryName() == repositoryName {
-			return tracker.workDir
+		if tracker == nil || !tracker.live() || tracker.RepositoryName() != repositoryName {
+			continue
 		}
+		if _, err := os.Stat(tracker.workDir); err != nil {
+			return ""
+		}
+		return tracker.workDir
 	}
 	return ""
 }

@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -205,12 +206,8 @@ func workspaceRepositorySpecsFromLaunch(req *LaunchRequest) []WorkspaceRepositor
 	}
 	specs := req.RepoSpecs()
 	result := make([]WorkspaceRepositorySpec, 0, len(specs))
-	taskRoot := launchTaskWorkspaceRoot(req)
 	for _, spec := range specs {
-		worktreePath := ""
-		if taskRoot != "" && strings.TrimSpace(spec.WorkspaceRelativePath) != "" {
-			worktreePath = filepath.Join(taskRoot, filepath.FromSlash(spec.WorkspaceRelativePath))
-		}
+		worktreePath := launchRepoWorktreePath(req, spec)
 		result = append(result, WorkspaceRepositorySpec{
 			RepositoryID: spec.RepositoryID, RepositoryPath: spec.RepositoryPath, WorktreePath: worktreePath,
 			RepoName:       spec.RepoName,
@@ -227,6 +224,29 @@ func workspaceRepositorySpecsFromLaunch(req *LaunchRequest) []WorkspaceRepositor
 		})
 	}
 	return result
+}
+
+func launchRepoWorktreePath(req *LaunchRequest, spec RepoLaunchSpec) string {
+	root := launchTaskWorkspaceRoot(req)
+	if root == "" {
+		return ""
+	}
+	relative := strings.TrimSpace(spec.WorkspaceRelativePath)
+	if relative == "" {
+		primaryOnly := !launchUsesTaskRoot(req) && filepath.Clean(root) == filepath.Clean(req.WorkspacePath)
+		if req.ExecutorType != string(models.ExecutorTypeWorktree) || primaryOnly {
+			return ""
+		}
+		repoDir := worktree.SanitizeRepoDirName(spec.RepoName)
+		if repoDir == "" {
+			return ""
+		}
+		relative = repoDir
+		if slug := worktree.SanitizeBranchSlug(spec.BranchSlug); slug != "" {
+			relative += "-" + slug
+		}
+	}
+	return filepath.Join(root, filepath.FromSlash(relative))
 }
 
 func repositoryIDsFromLaunch(req *LaunchRequest) []string {

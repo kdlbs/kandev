@@ -3593,6 +3593,14 @@ func (m *Manager) taskWorkspaceRootForLaunch(req *LaunchRequest) string {
 	return launchTaskWorkspaceRoot(req)
 }
 
+func launchUsesTaskRoot(req *LaunchRequest) bool {
+	if req == nil {
+		return false
+	}
+	return req.WorkspaceLayout == workspaceLayoutTaskRoot ||
+		(req.WorkspaceLayout == "" && len(req.RepoSpecs()) > 1)
+}
+
 // launchTaskWorkspaceRoot returns the containing directory that is provably
 // owned by this task. A legacy flat worktree shares its parent with other
 // tasks, so containment stays at the primary checkout unless TaskDirName

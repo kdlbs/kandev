@@ -22,7 +22,7 @@ func TestNewManagerUsesTaskWorkspaceRootForLinkedWorktreeDiscovery(t *testing.T)
 	if manager.workspaceTracker == nil {
 		t.Fatal("workspace tracker is nil")
 	}
-	if manager.workspaceTracker.workspaceRoot != taskRoot {
+	if !sameTestPath(t, manager.workspaceTracker.workspaceRoot, taskRoot) {
 		t.Fatalf("tracker workspace root = %q, want %q", manager.workspaceTracker.workspaceRoot, taskRoot)
 	}
 }

@@ -38,7 +38,7 @@ func TestWorktreeObserverPublishesOnlyInRootLinkedWorktrees(t *testing.T) {
 		t.Fatalf("entries = %+v, want only the in-root named worktree", inventory.Entries)
 	}
 	entry := inventory.Entries[0]
-	if entry.Path != linked || entry.Branch != "fix-b" || entry.HeadSHA == "" {
+	if !sameTestPath(t, entry.Path, linked) || entry.Branch != "fix-b" || entry.HeadSHA == "" {
 		t.Fatalf("unexpected entry: %+v", entry)
 	}
 
@@ -69,7 +69,7 @@ func TestWorktreeObserverResolvesSymlinkedWorkspaceRoot(t *testing.T) {
 	addObserverWorktree(t, primary, linked, "fix-b")
 	link := filepath.Join(t.TempDir(), "task-link")
 	if err := os.Symlink(taskRoot, link); err != nil {
-		t.Fatalf("symlink workspace root: %v", err)
+		t.Skip("symlinks not supported")
 	}
 
 	wt := NewWorkspaceTrackerForRepo(primary, "primary", newTestLogger(t))
@@ -79,7 +79,7 @@ func TestWorktreeObserverResolvesSymlinkedWorkspaceRoot(t *testing.T) {
 
 	wt.observeWorktreeInventory(context.Background())
 	inventory := nextWorktreeInventory(t, sub)
-	if len(inventory.Entries) != 1 || inventory.Entries[0].Path != linked {
+	if len(inventory.Entries) != 1 || !sameTestPath(t, inventory.Entries[0].Path, linked) {
 		t.Fatalf("entries through symlinked root = %+v, want %q", inventory.Entries, linked)
 	}
 }
@@ -96,6 +96,19 @@ func TestWorktreeObserverIgnoresNonRepositoryTracker(t *testing.T) {
 		t.Fatalf("non-repository tracker published inventory: %+v", message)
 	default:
 	}
+}
+
+func sameTestPath(t *testing.T, left, right string) bool {
+	t.Helper()
+	leftInfo, err := os.Stat(left)
+	if err != nil {
+		return false
+	}
+	rightInfo, err := os.Stat(right)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(leftInfo, rightInfo)
 }
 
 func addObserverWorktree(t *testing.T, primary, path, branch string) {
@@ -151,7 +164,7 @@ func TestWorktreeObserverReplaysLatestInventoryToNewSubscriber(t *testing.T) {
 	sub := wt.SubscribeWorkspaceStream()
 	defer func() { wt.UnsubscribeWorkspaceStream(sub) }()
 	inventory := nextWorktreeInventory(t, sub)
-	if len(inventory.Entries) != 1 || inventory.Entries[0].Path != linked {
-		t.Fatalf("replayed inventory = %+v", inventory)
+	if len(inventory.Entries) != 1 || !sameTestPath(t, inventory.Entries[0].Path, linked) {
+		t.Fatalf("replayed inventory = %+v, want entry %q", inventory, linked)
 	}
 }
