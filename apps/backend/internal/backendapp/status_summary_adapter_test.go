@@ -205,3 +205,44 @@ func TestGitHubTaskStatusSummaryPRReaderIncludesPerPRAutomationFlags(t *testing.
 		t.Fatalf("automation flags = %+v, want both enabled", inputs[0])
 	}
 }
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-CI-BUBBLE-001.2, AC-INTEGRATIONS-GITHUB-PR-CI-BUBBLE-001.7
+func TestGitHubTaskStatusSummaryPRReaderProjectsCIState(t *testing.T) {
+	ctx := context.Background()
+	store := newStatusSummaryTestStore(t)
+	failingPR := &github.TaskPR{
+		TaskID: "task-ci-summary", RepositoryID: "repo-ci-summary", PRNumber: 42,
+		Owner: "acme", Repo: "widget", PRURL: "https://example.test/42",
+		State: "open", ChecksState: "failure", CreatedAt: time.Now().UTC(),
+	}
+	terminalPR := &github.TaskPR{
+		TaskID: "task-ci-summary-terminal", RepositoryID: "repo-ci-terminal", PRNumber: 43,
+		Owner: "acme", Repo: "widget", PRURL: "https://example.test/43",
+		State: "merged", ChecksState: "failure", CreatedAt: time.Now().UTC(),
+	}
+	for _, pr := range []*github.TaskPR{failingPR, terminalPR} {
+		if err := store.CreateTaskPR(ctx, pr); err != nil {
+			t.Fatalf("CreateTaskPR: %v", err)
+		}
+	}
+	reader := &githubTaskStatusSummaryPRReader{
+		gh: github.NewService(nil, "", nil, store, nil, nil),
+	}
+	result, err := reader.ListTaskStatusSummaryPullRequests(ctx, []string{failingPR.TaskID, terminalPR.TaskID})
+	if err != nil {
+		t.Fatalf("ListTaskStatusSummaryPullRequests: %v", err)
+	}
+	failingSummary := statussummary.BuildFromAuthoritative(statussummary.RebuildInput{
+		PRObserved: true, PullRequests: result[failingPR.TaskID], Now: time.Now().UTC(),
+	}).PullRequest
+	if failingSummary == nil || failingSummary.CIState != "failed" ||
+		failingSummary.CIPRNumber != 42 || failingSummary.CIRepository != "acme/widget" {
+		t.Fatalf("failing CI projection = %+v", failingSummary)
+	}
+	terminalSummary := statussummary.BuildFromAuthoritative(statussummary.RebuildInput{
+		PRObserved: true, PullRequests: result[terminalPR.TaskID], Now: time.Now().UTC(),
+	}).PullRequest
+	if terminalSummary == nil || terminalSummary.CIState != "none" || terminalSummary.CIPRNumber != 0 {
+		t.Fatalf("terminal CI projection = %+v, want explicit none", terminalSummary)
+	}
+}

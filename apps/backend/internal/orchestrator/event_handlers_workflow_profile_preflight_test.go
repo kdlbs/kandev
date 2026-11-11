@@ -84,7 +84,7 @@ func TestSwitchSessionForStep_RejectsIrreparableManagedCredentialRepository(t *t
 
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	log := testLogger()
-	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 	exec.SetGitHubCredentialBroker(fakeSwitchSessionCredentialIssuer{}, "https://kandev.example/api/v1/github/credentials/resolve")
 	sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
 	svc := &Service{
@@ -175,7 +175,7 @@ func TestApplyEngineTransitionRejectsTargetProfileBeforePersistingStep(t *testin
 	}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	log := testLogger()
-	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 	exec.SetGitHubCredentialBroker(fakeSwitchSessionCredentialIssuer{}, "https://kandev.example/api/v1/github/credentials/resolve")
 	svc := &Service{
 		logger: log, repo: repo, workflowStepGetter: steps, taskRepo: taskRepo, agentManager: agentMgr,
@@ -263,7 +263,7 @@ func TestSwitchSessionForStepUsesReusableSessionExecutorProfileForCredentialAdmi
 	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", WorkspaceID: "ws1", WorkflowID: "wf1", State: v1.TaskStateInProgress}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	log := testLogger()
-	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 	exec.SetGitHubCredentialBroker(fakeSwitchSessionCredentialIssuer{}, "https://kandev.example/api/v1/github/credentials/resolve")
 	svc := &Service{
 		logger: log, repo: repo, taskRepo: taskRepo, agentManager: agentMgr,

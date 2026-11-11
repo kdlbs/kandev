@@ -108,6 +108,10 @@ func (m *Manager) GetOrEnsureExecution(ctx context.Context, sessionID string) (*
 	// Use ensureWorkspaceExecutionLocked (not EnsureWorkspaceExecutionForSession)
 	// to avoid recursing into the same singleflight slot we already hold.
 	value, err := m.doCoalescedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
+		// Workspace access can reuse retained terminal infrastructure after admission.
+		if execution, err := m.cachedWorkspaceExecutionForSession(sharedCtx, sessionID); execution != nil || err != nil {
+			return execution, err
+		}
 		return m.ensureWorkspaceExecutionLocked(sharedCtx, "", sessionID)
 	})
 	if err != nil {
@@ -191,6 +195,9 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 			if err := m.ensureWorkspaceSessionAdmitted(sharedCtx, info.TaskID, info); err != nil {
 				return nil, err
 			}
+			if err := m.ensureRetainedExecutionSelection(sharedCtx, execution, info); err != nil {
+				return nil, err
+			}
 			return execution, nil
 		}
 		// This slot is keyed by info.SessionID, so session-keyed peers receive
@@ -216,10 +223,9 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 // If an execution already exists for the session, it returns it. Otherwise, it creates a new execution
 // using the session's workspace configuration from the database.
 //
-// Concurrent calls (including from GetOrEnsureExecution and
-// GetOrEnsureExecutionForEnvironment) are deduplicated via the same
-// sessionID-keyed singleflight bucket so they cannot race past their
-// individual check-then-act guards and create duplicate executions.
+// Concurrent calls share the sessionID-keyed singleflight bucket with workspace
+// access. Restoration runs its own admission and replacement checks so it cannot
+// inherit a terminal execution from a concurrent cache read.
 func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) (*AgentExecution, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
@@ -230,7 +236,7 @@ func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID
 		}
 	}
 
-	value, err := m.doCoalescedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
+	value, err := m.doSerializedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
 		return m.ensureWorkspaceExecutionLocked(sharedCtx, taskID, sessionID)
 	})
 	if err != nil {
@@ -341,12 +347,39 @@ func (m *Manager) cachedWorkspaceExecutionForSession(ctx context.Context, sessio
 	return execution, nil
 }
 
+// workspaceExecutionStatusReusable reports whether a cached execution can host
+// workspace-only work. Terminal executions must be replaced, not reused: their
+// agentctl may already be stopped even though the execution remains in memory.
+func (m *Manager) workspaceExecutionStatusReusable(execution *AgentExecution) bool {
+	if execution == nil {
+		return false
+	}
+	reusable := true
+	if err := m.executionStore.WithRLock(execution.ID, func(current *AgentExecution) {
+		switch current.Status {
+		case v1.AgentStatusFailed, v1.AgentStatusStopped, v1.AgentStatusCompleted:
+			reusable = false
+		}
+	}); err != nil {
+		return false
+	}
+	return reusable
+}
+
 // ensureWorkspaceExecutionLocked is the body of EnsureWorkspaceExecutionForSession
 // run inside the sessionID-keyed singleflight bucket. Callers other than
 // EnsureWorkspaceExecutionForSession must already hold the singleflight slot.
 func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, sessionID string) (*AgentExecution, error) {
 	if execution, err := m.cachedWorkspaceExecutionForSession(ctx, sessionID); execution != nil || err != nil {
-		return execution, err
+		if err != nil {
+			return nil, err
+		}
+		if m.workspaceExecutionStatusReusable(execution) {
+			return execution, nil
+		}
+		if err := m.cleanupStaleExecution(ctx, execution); err != nil {
+			return nil, fmt.Errorf("replace stale workspace execution: %w", err)
+		}
 	}
 
 	if m.workspaceInfoProvider == nil {
@@ -675,6 +708,9 @@ func (m *Manager) EnsurePassthroughExecution(ctx context.Context, sessionID stri
 	// otherwise a fast-failed resume launch would keep returning the dead ID
 	// and the WS handler's IsProcessReadyOrPending check would 503 forever.
 	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
+		if err := m.requireExecutionSelectionCompatibility(ctx, execution); err != nil {
+			return nil, err
+		}
 		if execution.PassthroughProcessID != "" {
 			if runner := m.passthroughRunnerForExecution(execution); runner != nil && runner.IsProcessReadyOrPending(execution.PassthroughProcessID) {
 				return execution, nil
@@ -873,12 +909,22 @@ func (m *Manager) prepareExecutionCreation(
 	if err := m.ensureExecutionAdmission(ctx, taskID, info, agentLaunch, ""); err != nil {
 		return nil, err
 	}
-	if err := m.reconcileExecutionWorkspace(ctx, taskID, info); err != nil {
+	// A cold ensure (no in-memory execution) still has to satisfy any durable
+	// retained record before workspace reconciliation, preparation secrets, or
+	// backend allocation. A genuinely fresh session has no row and passes.
+	effectiveExecutorType := firstNonEmpty(info.ExecutorType, info.ValidatedExecutorType)
+	retainedEvidence := info.AgentExecutionID != "" || info.RuntimeName != ""
+	if err := m.ensureDurableExecutionSelectionCompatible(
+		ctx, info.SessionID, info.TaskEnvironmentID, effectiveExecutorType, retainedEvidence,
+	); err != nil {
 		return nil, err
 	}
 	rt, err := m.getExecutorBackend(info.ExecutorType)
 	if err != nil {
 		return nil, fmt.Errorf("no runtime configured: %w", err)
+	}
+	if err := m.reconcileExecutionWorkspace(ctx, taskID, info); err != nil {
+		return nil, err
 	}
 	executionID := uuid.New().String()
 	preparation, err := m.prepareExecutionCreateRequestForPurpose(ctx, taskID, info, executionID, agentLaunch)
@@ -959,6 +1005,13 @@ func (m *Manager) createExecutionWithMode(
 	runtimeInstance, err := inputs.runtime.CreateInstance(launchCtx, inputs.preparation.request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create execution: %w", err)
+	}
+	if err := validateCreatedExecutionIdentity(
+		inputs.preparation.request.ExecutorType, inputs.runtime, runtimeInstance,
+	); err != nil {
+		// This attempt created the instance, so an exact rollback is owned.
+		rollbackErr := m.stopLaunchRuntimeOnRollback(operationCtx, inputs.runtime, runtimeInstance, nil)
+		return nil, errors.Join(err, rollbackErr)
 	}
 
 	execution := m.initializeCreatedExecution(

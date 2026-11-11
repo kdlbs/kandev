@@ -4668,6 +4668,21 @@
           "settings_href": "/settings/preferences"
         },
         {
+          "key": "user_settings.escape_cancels_agent",
+          "field_path": "escape_cancels_agent",
+          "label": "Escape pauses the agent",
+          "description": "Portable preference owned by the current user.",
+          "json_type": "boolean",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "user-settings",
+          "writable": true,
+          "validator": "user-settings",
+          "authority": "user.self",
+          "change_timing": "future_views",
+          "settings_href": "/settings/preferences"
+        },
+        {
           "key": "user_settings.review_auto_mark_on_scroll",
           "field_path": "review_auto_mark_on_scroll",
           "label": "review auto mark",
@@ -6592,6 +6607,7 @@
       "default_utility_agent_profile_id",
       "default_utility_model",
       "enable_preview_on_click",
+      "escape_cancels_agent",
       "github_default_query_presets",
       "github_saved_presets",
       "gitlab_saved_presets",

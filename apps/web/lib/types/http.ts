@@ -324,6 +324,8 @@ export type Workspace = {
   acp_idle_suspension_enabled: boolean;
   acp_idle_timeout_minutes: number;
   office_workflow_id?: WorkflowId;
+  /** Office task identifier prefix (e.g. "KAN"). */
+  task_prefix?: string;
   created_at: string;
   updated_at: string;
 };
@@ -761,6 +763,11 @@ export type TaskSession = ActiveSubagentCountFields & {
   /** Downstream ACP session ID for the currently selected concrete candidate. */
   downstream_acp_session_id?: string;
   container_id?: string;
+  /**
+   * Observed runtime recorded for the same execution as `container_id`.
+   * `null` means unknown; never infer it from the selected executor.
+   */
+  execution_runtime?: string | null;
   executor_id?: string;
   environment_id?: string;
   /** Current backend agent process execution identity for this session. */

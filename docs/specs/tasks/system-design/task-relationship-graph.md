@@ -284,14 +284,50 @@ A lint rule (`no-restricted-imports` in `apps/web/eslint.config.mjs`) rejects
 
 ## Entry points
 
-`TaskGraphButton` is a labelled "Task graph" pill styled like the dependency chip. It is mounted next to
-`TaskDependencyChip` in `components/task/chat/chat-status-bar.tsx` and
-`components/task/passthrough-toolbar.tsx`. It renders when the store task has
-dependency refs, a `parentTaskId`, a subtask from `useTaskSubtasks`, or a
-related-to link (`task.related` from
-[`task-create-relationships.md`](task-create-relationships.md)). Only when
-none of those is known does it read `GET /tasks/:id/subtask-count`, which
-covers a parent whose subtasks are not on a loaded board.
+`TaskGraphButton` uses the shared `@kandev/ui/button` and tooltip primitives.
+It shows only `IconHierarchy3`, with the existing `task:taskGraphTitle` key for
+its accessible name and tooltip. It keeps `data-testid="task-graph-button"`.
+The glyph is decorative. The button has no visible text label or pill border.
+Its compact desktop target is 24 by 24 pixels, like the adjacent Share and
+auto-scroll controls. Phone and coarse-pointer variants expand both dimensions
+to at least 44 pixels. A tap opens the graph directly.
+
+`ChatStatusBarRightControls` in `components/task/chat/chat-status-bar.tsx`
+mounts the button immediately after `TranscriptNavGroup`. That group already
+orders transcript navigation, Usage, and Share. The graph therefore follows
+Share when Share is present. It remains before the desktop workflow action.
+The left status children no longer mount a graph control.
+
+`getRightControlVisibility` admits the right-control shell whenever a task ID
+exists, including a task without a session. `TaskGraphButton` retains sole
+ownership of graph availability through `useTaskGraphAvailable`. This avoids a
+second availability subscription at the row level. The shell keeps its existing
+`empty:hidden` behavior when no child qualifies. Graph access does not depend on
+the session-owned Usage or Share conditions.
+
+`useTaskGraphAvailable` reuses dependency projections, `parentTaskId`,
+`useTaskSubtasks`, and related-to links. Only when those sources do not establish
+availability does it read `GET /tasks/:id/subtask-count`. That read covers a
+parent whose subtasks are not on a loaded board. No new graph read or polling
+loop is required before activation.
+
+`components/task/passthrough-toolbar.tsx` retains its existing action area and
+consumes the shared icon presentation. It does not gain session usage or share
+controls as part of this revision.
+
+Phone composition reuses `ChatStatusBarActions`: banners and the workflow
+action precede status items, then the utility group wraps with right alignment.
+The graph icon stays in that utility group. The composer keeps its existing
+scroll and safe-area owners. `useResponsiveBreakpoint` remains the layout
+authority. Phone sizing also applies to narrow fine-pointer windows.
+
+`useOpenTaskGraph().openTab(taskId)` remains the activation path. Desktop opens
+or focuses the workbench tab. Phones keep the full-screen graph sheet and its
+focus-return path. The icon does not introduce an intermediate menu or drawer.
+The existing graph sheet is the local example for dense content. The mobile
+UI language selects a full-height surface for this content depth. The adjacent
+`AutoScrollToggleButton` supplies the compact desktop and touch target pattern.
+
 `TaskDependencyChip` adds a "View graph" action to its popover and drawer that
 opens the same dialog with the default mode.
 
@@ -441,4 +477,10 @@ forms. xyflow's built-in English aria labels are replaced through
   `traceChain`, `layoutTaskGraph` rank equals step, `useTaskGraph` debounce and
   retry, button visibility, and the dialog's loading, error, empty, truncated,
   and disabled-mode states with a stub renderer.
+- Composer entry tests: localized icon name, tooltip, keyboard activation,
+  placement in the right group, a qualifying task without a session, and one
+  control across responsive changes. Existing availability tests retain the parent,
+  child, dependency, related-only, and isolated-task cases.
 - Playwright: desktop and mobile specs in `apps/web/e2e/tests/task/`.
+  The entry revision adds action-group containment, compact desktop geometry,
+  phone and coarse-pointer targets, wrapping, and narrow fine-pointer coverage.

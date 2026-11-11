@@ -1558,16 +1558,25 @@ func (s *Store) UpdateTrigger(ctx context.Context, id string, req *UpdateTrigger
 	if err != nil {
 		return err
 	}
+	previousConfig := t.ConfigJSON
 	if req.Config != nil {
 		t.ConfigJSON = string(*req.Config)
 	}
 	if req.Enabled != nil {
 		t.Enabled = *req.Enabled
 	}
-	t.UpdatedAt = time.Now().UTC()
-	_, err = s.db.ExecContext(ctx, s.db.Rebind(
-		`UPDATE automation_triggers SET config = ?, enabled = ?, trigger_revision = trigger_revision + 1, updated_at = ? WHERE id = ?`),
-		t.ConfigJSON, t.Enabled, t.UpdatedAt, id)
+	editAt := time.Now().UTC()
+	t.UpdatedAt = editAt
+	query := `UPDATE automation_triggers SET config = ?, enabled = ?, trigger_revision = trigger_revision + 1, updated_at = ? WHERE id = ?`
+	args := []any{t.ConfigJSON, t.Enabled, editAt, id}
+	if t.Type == TriggerTypeScheduled && req.Config != nil &&
+		scheduledDefinitionChanged(json.RawMessage(previousConfig), *req.Config) {
+		// The replacement definition must not be visible with the previous
+		// definition's cursor, so both timestamps move in this one update.
+		query = `UPDATE automation_triggers SET config = ?, enabled = ?, trigger_revision = trigger_revision + 1, updated_at = ?, last_evaluated_at = ? WHERE id = ?`
+		args = []any{t.ConfigJSON, t.Enabled, editAt, editAt, id}
+	}
+	_, err = s.db.ExecContext(ctx, s.db.Rebind(query), args...)
 	return err
 }
 

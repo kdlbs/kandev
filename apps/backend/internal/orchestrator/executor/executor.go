@@ -311,6 +311,10 @@ const (
 	ProbeResultUnknown = client.ProbeResultUnknown
 )
 
+// ErrAgentctlClientUnavailable indicates that a session's execution is being
+// replaced and its agentctl client is not currently available.
+var ErrAgentctlClientUnavailable = errors.New("agentctl client not available")
+
 // AgentManagerClient is an interface for the Agent Manager service
 // This will be implemented via gRPC or HTTP client
 type AgentManagerClient interface {
@@ -1125,13 +1129,6 @@ type PrimarySessionSetFunc func(ctx context.Context, taskID, sessionID string)
 // ContextWindowResetFunc clears a session's persisted context-window reading
 // and invalidates updates captured before the reset.
 type ContextWindowResetFunc func(ctx context.Context, sessionID string) error
-
-// ExecutorTypeCapabilities provides behavioral queries about executor types.
-// Implemented by the lifecycle manager using its backend registry.
-type ExecutorTypeCapabilities interface {
-	RequiresCloneURL(executorType string) bool
-	ShouldApplyPreferredShell(executorType string) bool
-}
 
 // AttachmentReader is the narrow attachment-store seam used to stream a
 // claimed descriptor into a passthrough workspace.

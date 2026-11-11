@@ -383,6 +383,18 @@ export function createComment(
   });
 }
 
+/** Resolves a workspace-scoped task identifier (e.g. "KAN-11") to the task id. */
+export function resolveTaskIdentifier(
+  workspaceId: string,
+  identifier: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ id: string }>(
+    `${BASE}/workspaces/${workspaceId}/tasks/by-identifier/${encodeURIComponent(identifier)}`,
+    options,
+  );
+}
+
 export function searchTasks(
   workspaceId: string,
   query: string,

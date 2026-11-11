@@ -112,7 +112,7 @@ func TestCheckQueueAdmissionReadinessDispatchesOneConcurrentHead(t *testing.T) {
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateWaitingForInput)
 	agentMgr := &mockAgentManager{isAgentRunning: true}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	seedExecutorRunning(t, repo, "session-1", "task-1", "execution-1")
 	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, "task-1", "session-1")
 	require.NoError(t, err)
@@ -173,7 +173,7 @@ func TestCheckQueueAdmissionReadinessPreservesFIFOAndProviderAcceptance(t *testi
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 	svc.messageQueue.SetAutoMergeEnabled(false)
 	svc.onQueuedMessageExecutionComplete = func() { completed <- struct{}{} }

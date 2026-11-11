@@ -193,8 +193,9 @@ describe("TaskPR refresh routes", () => {
     renderWithStore(taskState([failed], true), <PRTopbarButton />);
     const button = screen.getByTestId(TOPBAR_BUTTON_TESTID);
     expect(button.textContent).toBe("#42");
-    expect(button.querySelectorAll("svg")).toHaveLength(2);
+    expect(button.querySelectorAll("svg")).toHaveLength(3);
     expect(button.querySelectorAll(":scope > svg")).toHaveLength(0);
+    expect(button.querySelector('[data-testid="pr-ci-bubble-failed"]')).not.toBeNull();
     expect(button.querySelector('[data-testid="pr-merge-conflict-warning"]')).not.toBeNull();
     expect(ariaLabel(button)).toContain(CHECKS_FAILED);
     expect(ariaLabel(button)).toContain(CONFLICTS);
@@ -273,7 +274,9 @@ describe("TaskPR refresh routes", () => {
     renderWithStore(taskState([failed, passing], true), <PRTopbarButton />);
     await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
     expectTopbarStatusIcon("text-red-500");
-    expect(screen.getByTestId(TOPBAR_BUTTON_TESTID).querySelectorAll("svg")).toHaveLength(2);
+    const multiButton = screen.getByTestId(TOPBAR_BUTTON_TESTID);
+    expect(multiButton.querySelectorAll("svg")).toHaveLength(3);
+    expect(multiButton.querySelector('[data-testid="pr-ci-bubble-failed"]')).not.toBeNull();
     fireEvent.mouseEnter(screen.getByTestId(TOPBAR_BUTTON_TESTID));
 
     await expectTopbarRefresh(request);

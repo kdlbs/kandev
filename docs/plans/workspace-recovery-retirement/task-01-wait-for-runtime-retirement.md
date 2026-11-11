@@ -65,4 +65,17 @@ lookup, and verifies that both wait. It fails before the guard is applied.
 A later CI cancellation-control test exposed a visibility/disabled-state
 check race after the button unmounted. Its poll now reads both states in one
 browser evaluation. Cancellation behavior and timeout limits are unchanged.
+Integration with the current base preserves terminal-execution replacement and
+retained-runtime selection checks after guarded cache lookup. The cancellation
+E2E keeps the base's session-scoped locator and settlement barrier alongside
+the atomic DOM check. Run the replacement, retirement, and cancellation suites
+again after integration. The first integrated lifecycle run caught the distinct
+cached-access contract: `GetOrEnsureExecution` retains admitted terminal
+infrastructure, while explicit `EnsureWorkspaceExecutionForSession` replaces
+terminal executions. Both now read the cache inside the session gate and wait
+for retirement before applying their existing behavior.
+A deterministic joined-read regression also proves explicit restoration runs
+its own replacement check rather than borrowing the ordinary read's terminal
+result. It fails before restoration uses the existing serialized operation
+helper. Creation still shares the session gate and remains deduplicated.
 Final remote CI remains a publication gate.

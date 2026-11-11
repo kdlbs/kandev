@@ -489,6 +489,8 @@
   "memory": "Memory %",
   "mergeThisSplitIntoTheSplit": "Merge this split into the split containing {{target}}.",
   "mergeWithTarget": "Merge with {{target}}",
+  "escapeCancelsAgent": "Escape pauses the agent",
+  "escapeCancelsAgentDescription": "Press Escape in the chat input to pause the running agent.",
   "messageSubmitKey": "Message Submit Key",
   "messageTimeDisplay": "Message time",
   "messageTimeDisplayDescription": "Choose how message timestamps are shown. The other form is available when you hover over or tap the timestamp.",

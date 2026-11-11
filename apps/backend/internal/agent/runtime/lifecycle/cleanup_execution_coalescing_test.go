@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 func TestPromotionRejectsExecutionRemovedByCleanup(t *testing.T) {
@@ -254,5 +255,41 @@ func TestEnvironmentWorkspaceLookupWaitsForRetirementBeforeSharingResult(t *test
 			require.Nil(t, got.execution)
 			require.Error(t, got.err, "without a runtime, lookup must fail creation instead of sharing the retired execution")
 		}
+	})
+}
+
+// TestWorkspaceRestoreDoesNotBorrowTerminalCacheResult verifies explicit restore
+// performs replacement even when it joins an ordinary cached workspace read.
+func TestWorkspaceRestoreDoesNotBorrowTerminalCacheResult(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mgr := newTestManager(t)
+		retained := &AgentExecution{ID: "retained", SessionID: "session", TaskID: "task", Status: v1.AgentStatusStopped}
+		require.NoError(t, mgr.executionStore.Add(retained))
+		retained.remoteInstanceLifecycleMu.Lock()
+		var once sync.Once
+		release := func() { once.Do(retained.remoteInstanceLifecycleMu.Unlock) }
+		defer release()
+		type result struct {
+			execution *AgentExecution
+			err       error
+		}
+		readFinished, restoreFinished := make(chan result, 1), make(chan result, 1)
+		go func() {
+			got, err := mgr.GetOrEnsureExecution(t.Context(), retained.SessionID)
+			readFinished <- result{execution: got, err: err}
+		}()
+		synctest.Wait()
+		go func() {
+			got, err := mgr.EnsureWorkspaceExecutionForSession(t.Context(), retained.TaskID, retained.SessionID)
+			restoreFinished <- result{execution: got, err: err}
+		}()
+		synctest.Wait()
+		release()
+		read := <-readFinished
+		require.NoError(t, read.err)
+		require.Same(t, retained, read.execution)
+		restore := <-restoreFinished
+		require.Nil(t, restore.execution, "explicit restore must not borrow a terminal cache result")
+		require.ErrorContains(t, restore.err, "workspace info provider not configured")
 	})
 }

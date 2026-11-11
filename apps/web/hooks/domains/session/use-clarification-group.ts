@@ -11,7 +11,7 @@ import { isPendingClarificationMessage } from "@/lib/utils/pending-clarification
 import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 import type { LateClarificationSnapshot } from "@/lib/clarification/late-clarification-message";
 
-type SubmitState = "idle" | "submitting" | "ok" | "error" | "expired";
+export type SubmitState = "idle" | "submitting" | "ok" | "error" | "expired";
 export type LateAnswerDelivery = "sent" | "queued";
 export type LateAnswerState = "idle" | "sending" | "sent" | "queued" | "error";
 

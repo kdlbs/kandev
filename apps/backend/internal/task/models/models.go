@@ -1395,6 +1395,12 @@ const (
 // that the orchestrator should consume to drive a workflow step transition.
 // See ADR 0015 for the lifecycle (set → read → clear).
 type PendingStepCompletionSignal struct {
+	// SignalID is minted only for an accepted claim. It fences transition
+	// commitment to this exact source without changing public tool arguments.
+	SignalID string `json:"signal_id,omitempty"`
+	// SourceTurnID is the persisted turn the backend resolved at admission.
+	// Empty means the legacy no-turn compatibility identity.
+	SourceTurnID             string    `json:"source_turn_id,omitempty"`
 	WorkflowStepTransitionID *int64    `json:"workflow_step_transition_id,omitempty"`
 	StepID                   string    `json:"step_id"`
 	Source                   string    `json:"source"`
@@ -1524,11 +1530,13 @@ func LoadPendingStepSignal(metadata map[string]interface{}) (PendingStepCompleti
 		return v, v.StepID != "" && (v.WorkflowStepTransitionID == nil || *v.WorkflowStepTransitionID >= 0)
 	case map[string]interface{}:
 		out := PendingStepCompletionSignal{
-			StepID:   StringFromAny(v["step_id"]),
-			Source:   StringFromAny(v["source"]),
-			Summary:  StringFromAny(v["summary"]),
-			Handoff:  StringFromAny(v["handoff"]),
-			Blockers: StringFromAny(v["blockers"]),
+			SignalID:     StringFromAny(v["signal_id"]),
+			SourceTurnID: StringFromAny(v["source_turn_id"]),
+			StepID:       StringFromAny(v["step_id"]),
+			Source:       StringFromAny(v["source"]),
+			Summary:      StringFromAny(v["summary"]),
+			Handoff:      StringFromAny(v["handoff"]),
+			Blockers:     StringFromAny(v["blockers"]),
 		}
 		if raw, present := v["workflow_step_transition_id"]; present {
 			entry, valid := WorkflowEntryIDFromAny(raw)
@@ -2502,13 +2510,17 @@ type SessionBranchInfo struct {
 // TaskSession represents a persistent agent execution session for a task.
 // This replaces the in-memory TaskExecution tracking and survives backend restarts.
 type TaskSession struct {
-	ExecutorActorUserID    string     `json:"-"`
-	ID                     string     `json:"id"`
-	TaskID                 string     `json:"task_id"`
-	QueueIncarnationID     string     `json:"queue_incarnation_id"`
-	Name                   string     `json:"name,omitempty"`       // Optional user-supplied label shown on the session tab
-	AgentExecutionID       string     `json:"agent_execution_id"`   // Docker container/agent execution
-	ContainerID            string     `json:"container_id"`         // Docker container ID for cleanup
+	ExecutorActorUserID string `json:"-"`
+	ID                  string `json:"id"`
+	TaskID              string `json:"task_id"`
+	QueueIncarnationID  string `json:"queue_incarnation_id"`
+	Name                string `json:"name,omitempty"`     // Optional user-supplied label shown on the session tab
+	AgentExecutionID    string `json:"agent_execution_id"` // Docker container/agent execution
+	ContainerID         string `json:"container_id"`       // Docker container ID for cleanup
+	// ExecutionRuntime is the observed runtime recorded by executors_running
+	// for this session's execution. Empty means unknown; it is never derived
+	// from the selected executor configuration.
+	ExecutionRuntime       string     `json:"execution_runtime,omitempty"`
 	AgentProfileID         string     `json:"agent_profile_id"`     // ID of the agent profile used
 	ExecutionProfileID     string     `json:"execution_profile_id"` // Concrete profile used for this execution
 	RouteGeneration        int64      `json:"route_generation,omitempty"`
@@ -2626,6 +2638,15 @@ type ActiveSessionRecoveryCandidate struct {
 	ExpectedExecutorUpdatedAt        time.Time
 }
 
+// observedExecutionRuntime projects an empty observed runtime as nil so a
+// response distinguishes "unknown" from any configured selection.
+func observedExecutionRuntime(runtime string) interface{} {
+	if runtime == "" {
+		return nil
+	}
+	return runtime
+}
+
 // ToAPI converts internal TaskSession to API type
 // TODO: Add v1.TaskSession type to pkg/api/v1/
 func (s *TaskSession) ToAPI() map[string]interface{} {
@@ -2635,6 +2656,7 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 		"queue_incarnation_id": s.QueueIncarnationID,
 		"agent_execution_id":   s.AgentExecutionID,
 		"container_id":         s.ContainerID,
+		"execution_runtime":    observedExecutionRuntime(s.ExecutionRuntime),
 		"agent_profile_id":     s.AgentProfileID,
 		"execution_profile_id": s.ExecutionProfileID,
 		"executor_id":          s.ExecutorID,

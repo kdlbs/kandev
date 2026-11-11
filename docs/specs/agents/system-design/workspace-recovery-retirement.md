@@ -34,6 +34,10 @@ or the runtime owner. Concurrent workspace requests retain existing
 singleflight deduplication. The environment operation uses the same guarded
 session-cache read inside its shared operation, so joined session lookups
 cannot inherit a retiring execution after an environment cache miss.
+Explicit restoration uses the existing serialized operation helper so its
+terminal-execution replacement checks cannot inherit an ordinary cached read's
+result. Ordinary workspace access retains admitted terminal infrastructure.
+Both operations share the session gate and retirement guard.
 Do not extend readiness timeouts or retry prompts.
 
 ## Verification and delivery

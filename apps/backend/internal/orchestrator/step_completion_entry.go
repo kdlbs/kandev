@@ -18,6 +18,9 @@ func matchingWorkflowSignal(ctx context.Context, repo sessionExecutorStore, task
 	if !has || signal.StepID != stepID {
 		return nil, false
 	}
+	if guard, completion := models.WorkflowStepCompletionGuardFromContext(ctx, taskID, stepID); completion {
+		return &signal, completionSignalMatchesGuard(ctx, signal, guard, taskID, stepID)
+	}
 	if expected, guarded := models.WorkflowStepTransitionGuardFromContext(ctx, taskID, stepID); guarded {
 		return &signal, signal.MatchesWorkflowEntry(stepID, expected)
 	}
@@ -32,6 +35,15 @@ func matchingWorkflowSignal(ctx context.Context, repo sessionExecutorStore, task
 	return &signal, currentStep == stepID && signal.MatchesWorkflowEntry(stepID, entry)
 }
 
+// completionSignalMatchesGuard keeps the entry fence and adds exact accepted-
+// signal identity when the guard carries one.
+func completionSignalMatchesGuard(ctx context.Context, signal models.PendingStepCompletionSignal, guard models.WorkflowStepCompletionGuard, taskID, stepID string) bool {
+	if expected, guarded := models.WorkflowStepTransitionGuardFromContext(ctx, taskID, stepID); guarded && !signal.MatchesWorkflowEntry(stepID, expected) {
+		return false
+	}
+	return guard.SignalID == "" || signal.SignalID == guard.SignalID
+}
+
 func (s *Service) withStepCompletionEntryGuard(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, cause turnCompletionCause) context.Context {
 	if cause == turnCompletionCauseUserCancellation || !step.AutoAdvanceRequiresSignal {
 		return ctx
@@ -43,6 +55,9 @@ func (s *Service) withStepCompletionEntryGuard(ctx context.Context, taskID strin
 	entry := int64(0)
 	if signal.WorkflowStepTransitionID != nil {
 		entry = *signal.WorkflowStepTransitionID
+	}
+	if signal.SignalID != "" && session.ID != "" {
+		return models.WithWorkflowStepCompletionSignalGuard(ctx, taskID, step.ID, entry, session.ID, signal.SignalID)
 	}
 	return models.WithWorkflowStepCompletionGuard(ctx, taskID, step.ID, entry)
 }

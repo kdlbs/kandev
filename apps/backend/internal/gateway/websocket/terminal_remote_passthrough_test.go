@@ -11,6 +11,7 @@ import (
 	gorillaws "github.com/gorilla/websocket"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentruntime"
 )
 
 func TestHandleRemoteAgentTerminalSanitizesUpstreamFailure(t *testing.T) {
@@ -38,6 +39,7 @@ func TestHandleRemoteAgentTerminalSanitizesUpstreamFailure(t *testing.T) {
 			t.Cleanup(upstream.Close)
 			execution := remoteExecutionFor(t, manager, "privacy-session", upstream.URL, log)
 			execution.ExecutorType = "ssh"
+			execution.RuntimeName = agentruntime.RuntimeSSH
 			execution.PassthroughProcessID = "remote-proc"
 			if _, err := manager.EnsurePassthroughExecution(t.Context(), execution.SessionID); err != nil {
 				t.Fatalf("prime actual remote passthrough: %v", err)

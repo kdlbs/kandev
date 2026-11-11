@@ -172,7 +172,9 @@ test.describe("PR top-bar CI popover", () => {
       /Checks failed.*Changes requested.*Conflicts/,
     );
     await expect(badge.getByTestId("pr-merge-conflict-warning")).toBeVisible();
-    await expect(badge.locator("svg")).toHaveCount(2);
+    await expect(badge.getByTestId("pr-ci-bubble-failed")).toBeVisible();
+    // Base PR glyph, inline conflict triangle, and the independent CI bubble.
+    await expect(badge.locator("svg")).toHaveCount(3);
     await badge.focus();
     await expect(testPage.getByTestId("pr-topbar-popover")).toBeVisible();
     await badge.click();

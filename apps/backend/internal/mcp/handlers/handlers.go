@@ -2653,13 +2653,31 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return errMsg, err
 	}
 
-	launchStepID, launchEntryID, err := h.stepCompletionLaunchStep(ctx, req.SessionID, task.WorkflowStepID)
+	launch, err := h.stepCompletionLaunchStep(ctx, req.SessionID, task.WorkflowStepID)
 	if err != nil {
+		if isTerminalStepCompleteSession(session.State) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+				"cannot signal completion for a terminal session (state: "+string(session.State)+")", nil)
+		}
 		h.logger.Error("failed to resolve step-completion turn",
 			zap.String("task_id", req.TaskID),
 			zap.String("session_id", req.SessionID),
 			zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to resolve calling turn", nil)
+	}
+	launchStepID := launch.StepID
+	// An exact retained receipt is a read-only duplicate. Check it before the
+	// stale-step and terminal-session rejections so a retry after the source
+	// entry was consumed, the destination began entry, or the backend restarted
+	// still receives the outcome instead of a new transition or a dead end.
+	if receipt, ok := h.exactStepCompletionReceipt(ctx, task, session, launch); ok {
+		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, launchStepID, session, models.SignalFromReceipt(*receipt))
+	}
+	// A terminal session cannot accept a new signal; no future turn-end can
+	// consume it. An exact retained receipt was already returned above.
+	if isTerminalStepCompleteSession(session.State) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"cannot signal completion for a terminal session (state: "+string(session.State)+")", nil)
 	}
 	if launchStepID != task.WorkflowStepID {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, fmt.Sprintf(
@@ -2674,7 +2692,8 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 	boundedHandoff, handoffTruncated := boundStepCompletionSignalField(strings.TrimSpace(req.Handoff))
 	boundedBlockers, blockersTruncated := boundStepCompletionSignalField(strings.TrimSpace(req.Blockers))
 	signal := models.PendingStepCompletionSignal{
-		WorkflowStepTransitionID: launchEntryID,
+		SourceTurnID:             launch.TurnID,
+		WorkflowStepTransitionID: launch.Entry,
 		StepID:                   launchStepID,
 		Source:                   models.StepCompletionSourceAgent,
 		Summary:                  strings.TrimSpace(req.Summary),
@@ -2714,12 +2733,24 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return errMsg, err
 	}
 
+	advances, note, outcomeReason, advancesKnown := h.resolveStepCompletionAdvances(ctx, task.WorkflowStepID)
+	outcomeStatus := models.StepCompletionOutcomePending
+	if advancesKnown && !advances {
+		outcomeStatus = models.StepCompletionOutcomeNotConfigured
+		h.persistStepCompletionReceiptOutcome(ctx, req.SessionID, signal.SignalID, outcomeStatus, outcomeReason)
+	}
 	response := map[string]interface{}{
 		"accepted":    true,
 		"step_id":     task.WorkflowStepID,
 		"signaled_at": signal.SignaledAt,
+		"signal_id":   signal.SignalID,
+		"source":      stepCompletionSignalSource(req.SessionID, signal),
+		"outcome":     stepCompletionOutcome(outcomeStatus, outcomeReason),
 	}
-	if advances, note, ok := h.resolveStepCompletionAdvances(ctx, task.WorkflowStepID); ok {
+	if current := h.stepCompletionCurrent(ctx, req.TaskID, task); current != nil {
+		response["current"] = current
+	}
+	if advancesKnown {
 		response["advances"] = advances
 		if note != "" {
 			response["note"] = note
@@ -2745,25 +2776,37 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 // durably recorded — a step whose AutoAdvanceRequiresSignal is false never
 // reads it, and a signal-gated step whose on_turn_complete has no move that
 // runs automatically reads it without transitioning, so the caller can accept
-// a signal that changes nothing. ok is false (both other return values
-// ignored) when the current step cannot be resolved: the caller must never
-// guess this field into existence.
-func (h *Handlers) resolveStepCompletionAdvances(ctx context.Context, workflowStepID string) (advances bool, note string, ok bool) {
+// a signal that changes nothing. ok is false (reason and note ignored) when the
+// current step cannot be resolved: the caller must never guess this field into
+// existence.
+func (h *Handlers) resolveStepCompletionAdvances(ctx context.Context, workflowStepID string) (advances bool, note, reason string, ok bool) {
 	if h.workflowCtrl == nil || workflowStepID == "" {
-		return false, "", false
+		return false, "", "", false
 	}
 	resp, err := h.workflowCtrl.GetStep(ctx, workflowStepID)
 	if err != nil || resp == nil || resp.Step == nil {
-		return false, "", false
+		return false, "", "", false
 	}
 	if !resp.Step.AutoAdvanceRequiresSignal {
-		return false, "this step does not advance on a completion signal", true
+		return false, "this step does not advance on a completion signal", models.StepCompletionReasonStepNotSignalGated, true
 	}
 	if !resp.Step.AdvancesOnTurnComplete() {
 		return false, "this step has no on_turn_complete move that runs automatically, " +
-			"so the signal will not move the task", true
+			"so the signal will not move the task", models.StepCompletionReasonNoAutomaticMove, true
 	}
-	return true, "", true
+	return true, "", "", true
+}
+
+// isTerminalStepCompleteSession reports states that can never consume a fresh
+// completion signal. An exact retained receipt is still readable.
+func isTerminalStepCompleteSession(state models.TaskSessionState) bool {
+	switch state {
+	case models.TaskSessionStateCompleted,
+		models.TaskSessionStateFailed,
+		models.TaskSessionStateCancelled:
+		return true
+	}
+	return false
 }
 
 // resolveStepCompleteTarget loads the session + task the signal applies to
@@ -2790,19 +2833,6 @@ func (h *Handlers) resolveStepCompleteTarget(
 	}
 	if session.TaskID != taskID {
 		errMsg, mErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session does not belong to task", nil)
-		return nil, nil, errMsg, mErr
-	}
-	// Terminal sessions cannot consume a signal: the orchestrator's
-	// out-of-band subscriber short-circuits on every state other than
-	// WAITING_FOR_INPUT, and no future turn-end will fire on a closed
-	// session. Reject up front so the agent gets a clear error instead of
-	// `accepted: true` followed by silent no-op.
-	switch session.State {
-	case models.TaskSessionStateCompleted,
-		models.TaskSessionStateFailed,
-		models.TaskSessionStateCancelled:
-		errMsg, mErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
-			"cannot signal completion for a terminal session (state: "+string(session.State)+")", nil)
 		return nil, nil, errMsg, mErr
 	}
 
@@ -2843,12 +2873,14 @@ func (h *Handlers) publishStepCompletionEvent(
 	if err := h.eventBus.Publish(ctx, events.WorkflowStepCompletionSignaled, bus.NewEvent(
 		events.WorkflowStepCompletionSignaled, "mcp-handlers",
 		map[string]interface{}{
-			"task_id":     taskID,
-			"session_id":  sessionID,
-			"step_id":     stepID,
-			"source":      signal.Source,
-			"summary":     signal.Summary,
-			"signaled_at": signal.SignaledAt,
+			"task_id":        taskID,
+			"session_id":     sessionID,
+			"step_id":        stepID,
+			"signal_id":      signal.SignalID,
+			"source_turn_id": signal.SourceTurnID,
+			"source":         signal.Source,
+			"summary":        signal.Summary,
+			"signaled_at":    signal.SignaledAt,
 		},
 	)); err != nil {
 		h.logger.Error("failed to publish step-completion signal",

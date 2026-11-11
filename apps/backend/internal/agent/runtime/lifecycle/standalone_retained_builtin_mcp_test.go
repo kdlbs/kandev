@@ -171,6 +171,11 @@ func TestStandaloneRetainedLifecycleStartupAdoptsResolverOwner(t *testing.T) {
 	runtime := NewStandaloneExecutor(agentctl.NewControlClient(host, port, newTestLogger()), host, port, newTestLogger())
 	mgr := newRetainedBuiltinTestManager(t, runtime)
 	mgr.dataDir = root
+	mgr.SetExecutorRunningWriter(&captureExecutorRunningWriter{prior: &models.ExecutorRunning{
+		ID: "session-a", SessionID: "session-a", TaskID: "task-a",
+		AgentExecutionID: "retained-execution", Runtime: agentruntime.RuntimeStandalone,
+		Status: models.ExecutorRunningStatusRunning, Resumable: true,
+	}})
 	repository := durableAdoptionRepository()
 	repository.generation.SessionID = "session-a"
 	repository.cursor.SessionID = "session-a"
@@ -245,6 +250,11 @@ func TestStandaloneRetainedWorkspaceRestoreKeepsBuiltinBinding(t *testing.T) {
 		client:       createTestClient(t, peer.server.URL),
 	}
 	mgr := newRetainedBuiltinTestManager(t, backend)
+	mgr.SetExecutorRunningWriter(&captureExecutorRunningWriter{prior: &models.ExecutorRunning{
+		ID: "session-a", SessionID: "session-a", TaskID: "task-a",
+		AgentExecutionID: "retained-execution", Runtime: agentruntime.RuntimeStandalone,
+		Status: models.ExecutorRunningStatusRunning, Resumable: true,
+	}})
 	repository := durableAdoptionRepository()
 	repository.generation.SessionID = "session-a"
 	repository.cursor.SessionID = "session-a"

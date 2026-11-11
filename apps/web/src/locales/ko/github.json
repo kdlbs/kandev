@@ -100,6 +100,10 @@
   "checksPendingCount_other": "{{count}}개 대기 중",
   "checksRunning": "검사 실행 중",
   "checksNotSuccessful": "검사가 성공하지 않음",
+  "allChecksSkipped": "모든 검사가 건너뛰어짐",
+  "checksSkippedCount_one": "{{count}}개 검사 건너뜀",
+  "checksSkippedCount_other": "{{count}}개 검사 건너뜀",
+  "lastDetailedObservation": "마지막 상세 관측",
   "chooseAGithubApp": "GitHub App 선택",
   "chooseHowNewlyLaunchedTasksAuthenticate": "새로 시작된 작업이 GitHub에 인증하는 방식을 선택하세요. 위의 워크스페이스 자동화 연결은 변경되지 않습니다.",
   "chooseMergeMethod": "병합 방법 선택",
@@ -663,5 +667,6 @@
   "mergeAccessDeniedByActor": "{{actor}} 님은 {{repository}}에 병합할 수 없습니다.",
   "mergeAccessDenied": "이 계정은 {{repository}}에 병합할 수 없습니다.",
   "checkMergeAccess": "다시 확인",
-  "mergeAsActor": "{{actor}} 계정으로"
+  "mergeAsActor": "{{actor}} 계정으로",
+  "lastDetailedObservationAllSkipped": "마지막 상세 관측: 모든 검사가 건너뛰어짐"
 }
