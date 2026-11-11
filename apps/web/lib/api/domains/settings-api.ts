@@ -350,7 +350,7 @@ export async function createPrompt(
 
 export async function updatePrompt(
   promptId: string,
-  payload: { name?: string; content?: string },
+  payload: { name?: string; content?: string; expected_updated_at: string },
   options?: ApiRequestOptions,
 ) {
   return fetchJson<CustomPrompt>(`/api/v1/prompts/${promptId}`, {

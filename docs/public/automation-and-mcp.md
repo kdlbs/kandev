@@ -1420,7 +1420,8 @@ Generic `update_settings_kandev` writes can change custom prompt names and
 content, but cannot change agent-edit eligibility.
 
 Configuration assistants should create or update a shared prompt only when the
-operator explicitly requests or agrees to the change. Prompt writes require
+operator explicitly requests or agrees to the change. The backend does not
+verify that request or agreement. Authorized prompt writes require
 `org.config.manage`. Read the saved prompt back after writing it. Apply requested
 shared prompt changes before changing workflow steps that inject them, then read
 back both the prompts and steps. Successful writes refresh open prompt settings

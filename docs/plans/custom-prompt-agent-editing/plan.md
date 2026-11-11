@@ -49,8 +49,9 @@ records the policy and compatibility rationale.
   Ignore historical columns without rebuilding tables or backfilling prompt rows.
 - Derive existing HTTP, MCP, and settings response metadata from `!Builtin`.
   Accept deprecated HTTP permission input without applying it.
-- Remove `PromptAgentPermission`, permission form state, payloads, revision tracking,
-  and unused locale keys. Keep the existing save bar and local content drafts.
+- Remove `PromptAgentPermission`, permission-specific form state and payloads, and
+  unused locale keys. Keep the existing save bar and local content drafts. Track
+  the edit-start prompt revision so stale saves report conflicts.
 - Update configuration context and tool descriptions to describe all custom prompts
   and explicitly requested changes. Preserve current tool catalogs and authority checks.
 - Update `docs/public/automation-and-mcp.md` (reference) and
@@ -97,19 +98,22 @@ All suffixes refer to `AC-INTEGRATIONS-SHARED-PROMPT-WRITES-001`.
 | .15, .13 | `prompts/handlers/agent_permission_test.go`: replace `TestPromptHTTPAgentPermission` with derived metadata and ignored legacy input. Retain `TestPromptHTTPConcurrentUpdateReturnsConflict`. |
 | .9, .10, .15 | `backendapp/settings_prompt_permissions_test.go`: replace `TestSettingsPromptWritesRespectAgentPermission` with `TestSettingsPromptWritesAllowCustomPrompts`. Keep built-in rejection and effective metadata checks. |
 | .1, .14 | `mcp/server/config_prompt_writes_test.go`: retain `TestSharedPromptWritesCatalog`; assert requested-change wording. Extend existing `config/prompts` context checks. |
-| .12, .7 | `prompts-settings.test.tsx` and `prompts-settings-draft-meta.test.tsx`: replace permission-intent cases with content/name save, no permission payload, name/content-only dirty and revision tracking, and draft-preserving refresh. |
+| .12, .7, .13 | `prompts-settings.test.tsx`, `prompts-settings-revisions.test.tsx`, and `prompts-settings-draft-meta.test.tsx`: cover content/name save, no permission payload, dirty tracking, edit-start revision tracking, pristine refresh, draft preservation, and stale-save conflicts. |
 | .16 | `storeconformance/upgrade_test.go`: retain fixture and previous-stable replay, without a required permission value in the resulting schema. |
 
 ## E2E tests
 
 - Chromium `tests/settings/shared-prompt-mcp-writes.spec.ts`: an HTTP-created prompt
   accepts MCP edits immediately. An open editor keeps its draft during a remote
-  update. Built-ins reject writes. No permission switch appears (`.9`, `.10`, `.7`, `.12`).
+  update. A pristine editor adopts remote content; saving a dirty stale draft is
+  rejected without replacing that content. Built-ins reject writes. No permission
+  switch appears (`.9`, `.10`, `.7`, `.12`, `.13`).
 - Chromium `tests/settings/prompts-settings.spec.ts`: name/content editing, save,
   cancellation, and existing prompt workflows remain functional (`.12`).
 - Mobile Chrome `tests/settings/mobile-prompts-settings.spec.ts`: replace the
   permission scenario with touch editing, save/reopen, and a subsequent MCP edit.
-  Assert the absent switch, reachable save action, and no document overflow (`.9`, `.12`).
+  Assert the absent switch, reachable save action, stale-save conflict after a
+  remote edit, draft preservation, and no document overflow (`.9`, `.12`, `.13`).
 
 Both projects capture the simplified editor through existing `prCapture` fixtures.
 The mobile project supplies its normal Pixel 5 profile. No per-test device override is needed.
@@ -145,8 +149,21 @@ The work order contains all exact verification commands.
   specification lint, public-doc tests and validation, and `git diff --check`
   passed after the final status updates.
 - Documentation-linkage preflight returned `status: covered` with no errors.
+- PR fixup re-ran the prompt, MCP, and server Go race suite, the backend settings
+  prompt tests, SQLite/PostgreSQL-capable upgrade conformance, and changed-Go lint.
+  All passed. `KANDEV_TEST_POSTGRES_DSN` was absent in this fixup session, so its
+  PostgreSQL-only cases were not exercised here; the earlier isolated PostgreSQL 16
+  run above remains the PostgreSQL evidence.
+- PR fixup frontend checks passed: the final prompt and invalidation Vitest command
+  passed 34 tests across 6 files, including the new revision suite. Web typecheck,
+  `i18n:check`, and focused Oxlint passed. Managed E2E rebuilt the backend and
+  pseudo-locale web assets; Chromium passed 9 tests and Mobile Chrome passed 2 tests
+  with retries disabled.
+- Fresh desktop and phone captures were inspected and compressed. Both show the
+  simplified prompt editor without a permission control. Specification, public-doc,
+  whitespace, and documentation-linkage validations passed again after the fixup.
 
-The worktree remains unstaged and uncommitted.
+Delivery and review continue in [PR #5265](https://github.com/kdlbs/kandev/pull/5265).
 
 ## Risks
 

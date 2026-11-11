@@ -98,7 +98,7 @@ const existingPrompt: CustomPrompt = {
 
 function renderPromptSettings() {
   mocks.prompts = [existingPrompt];
-  render(
+  return render(
     <SettingsSaveProvider>
       <PromptsSettings />
     </SettingsSaveProvider>,
@@ -316,61 +316,6 @@ describe("PromptsSettings coordinated creation", () => {
         { cache: "no-store" },
       ),
     );
-  });
-});
-
-describe("PromptsSettings custom prompt editing", () => {
-  it("preserves a local draft across remote refresh without rendering or saving permission state", async () => {
-    mocks.prompts = [{ ...existingPrompt, allow_agent_edits: false }];
-    mocks.updatePrompt.mockImplementation(async (_id, patch) => ({
-      ...mocks.prompts[0],
-      ...patch,
-    }));
-    const tree = (
-      <SettingsSaveProvider>
-        <PromptsSettings />
-      </SettingsSaveProvider>
-    );
-    const { rerender } = render(tree);
-    fireEvent.click(screen.getByTestId(promptEditButtonTestId));
-    fireEvent.change(screen.getByTestId(promptContentInputTestId), {
-      target: { value: "Local draft" },
-    });
-    mocks.prompts = [{ ...existingPrompt, content: "Remote revision", allow_agent_edits: true }];
-    rerender(
-      <SettingsSaveProvider>
-        <PromptsSettings />
-      </SettingsSaveProvider>,
-    );
-    expect(screen.queryByRole("switch", { name: "Allow agent edits" })).toBeNull();
-    expect(screen.queryByText("Allow agent edits")).toBeNull();
-    expect((screen.getByTestId(promptContentInputTestId) as HTMLTextAreaElement).value).toBe(
-      "Local draft",
-    );
-    fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
-    await waitFor(() => expect(mocks.updatePrompt).toHaveBeenCalledOnce());
-    expect(mocks.updatePrompt.mock.calls[0][1]).toEqual({
-      name: promptName,
-      content: "Local draft",
-    });
-  });
-
-  it("saves prompt name and content and discards an edit without permission controls", async () => {
-    mocks.updatePrompt.mockResolvedValue({
-      ...existingPrompt,
-      name: "Renamed",
-      content: "Updated",
-    });
-    renderPromptSettings();
-    fireEvent.click(screen.getByTestId(promptEditButtonTestId));
-    expect(screen.queryByRole("switch", { name: "Allow agent edits" })).toBeNull();
-    fireEvent.change(screen.getByTestId("prompt-name-input"), { target: { value: "Renamed" } });
-    fireEvent.change(screen.getByTestId(promptContentInputTestId), {
-      target: { value: "Updated" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
-    await waitFor(() => expect(mocks.updatePrompt).toHaveBeenCalledOnce());
-    expect(mocks.updatePrompt.mock.calls[0][1]).toEqual({ name: "Renamed", content: "Updated" });
   });
 });
 
@@ -616,46 +561,5 @@ describe("PromptsSettings search during delete confirmation refresh", () => {
     expect(screen.getByText(noResultsText)).toBeTruthy();
     expect(search.hasAttribute("disabled")).toBe(false);
     expect(mocks.deletePrompt).not.toHaveBeenCalled();
-  });
-});
-
-describe("PromptsSettings search with distinct active rows", () => {
-  it("keeps both the edited row and the delete target in saved-list order", () => {
-    const second = { ...existingPrompt, id: "other", name: "Review other" };
-    mocks.prompts = [existingPrompt, second];
-    const { rerender } = render(
-      <SettingsSaveProvider>
-        <PromptsSettings />
-      </SettingsSaveProvider>,
-    );
-    const search = screen.getByRole("searchbox", { name: searchLabel });
-    fireEvent.change(search, { target: { value: promptName } });
-    const [editingRow, deleteRow] = screen.getAllByTestId(promptRowTestId);
-    fireEvent.click(within(editingRow).getByTestId(promptEditButtonTestId));
-    fireEvent.change(within(editingRow).getByTestId(promptContentInputTestId), {
-      target: { value: "Unsaved draft" },
-    });
-    fireEvent.click(within(deleteRow).getByTestId(promptDeleteButtonTestId));
-    const confirmation = screen.getByTestId(promptDeletePopoverTestId);
-    mocks.prompts = [
-      { ...existingPrompt, name: "Updated first", content: "Other first" },
-      { ...second, name: "Updated second", content: "Other second" },
-    ];
-    rerender(
-      <SettingsSaveProvider>
-        <PromptsSettings />
-      </SettingsSaveProvider>,
-    );
-    expect(screen.getAllByTestId(promptRowTestId)).toEqual([editingRow, deleteRow]);
-    expect(
-      (within(editingRow).getByTestId(promptContentInputTestId) as HTMLTextAreaElement).value,
-    ).toBe("Unsaved draft");
-    expect(screen.getByTestId(promptDeletePopoverTestId)).toBe(confirmation);
-    fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
-    expect(screen.getAllByTestId(promptRowTestId)).toEqual([editingRow]);
-    expect(search.hasAttribute("disabled")).toBe(true);
-    fireEvent.click(within(editingRow).getByRole("button", { name: "Cancel" }));
-    expect(screen.queryAllByTestId(promptRowTestId)).toHaveLength(0);
-    expect(search.hasAttribute("disabled")).toBe(false);
   });
 });

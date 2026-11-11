@@ -36,12 +36,14 @@ The [plan](plan.md) supplies test mapping and delivery boundaries.
 ## In scope
 
 - Meaningful TDD cases for previously disabled custom prompts, authority, built-ins,
-  concurrent edits, compatibility metadata, and historical schema replay.
+  concurrent edits, stale editor saves, compatibility metadata, and historical schema replay.
 - Remove the model permission, service default/permission branch, and SQL column use.
   Fresh schema omits the column. Existing columns remain unused.
 - Keep `allow_agent_edits` reads as derived eligibility. Ignore legacy HTTP input,
   including a non-mutating permission-only patch. Reject generic permission changes.
 - Remove the editor control, component, form state, payloads, and unused locale keys.
+- Include the edit-start prompt revision in editor saves. Refresh pristine open forms
+  from remote changes and reject stale dirty saves without overwriting newer content.
 - Replace obsolete permission tests with the plan's content-editing and live-refresh scenarios.
 - Update configuration instructions, MCP descriptions, and both affected public pages.
 - After all checks pass, promote the requirement to `active`, the design to `current`,
@@ -57,7 +59,8 @@ rewrites, captured running-turn instructions, unrelated settings changes, and pu
 - All custom prompts accept existing authorized agent updates, regardless of historical
   permission or creation path. Built-ins, unauthorized requests, and conflicting writes remain rejected.
 - Desktop and phone prompt editors save name/content without a permission control
-  or payload. Live updates preserve local drafts and affect future references.
+  or payload. Pristine forms adopt remote updates; dirty forms preserve drafts and
+  stale saves return a conflict without replacing the current prompt.
 - Compatibility reads, historical upgrades, explicit-request instructions, and public
   documentation match the paired design. Every required command has recorded evidence.
 
@@ -88,13 +91,15 @@ From the repository root:
 (cd apps/backend && go test -race ./internal/prompts/... ./internal/mcp/handlers ./internal/mcp/server ./config/prompts -count=1)
 (cd apps/backend && go test -race ./internal/backendapp -run 'Test.*(Prompt|Settings)' -count=1)
 (cd apps/backend && go test ./internal/persistence/storeconformance -run 'Test(UpgradeFixtureManifest|PreviousStableUpgrade)$' -count=1)
+git diff --name-only --diff-filter=ACMR -z origin/main...HEAD -- '*.go' | xargs -0 -r bash scripts/lint-go-changed
 git diff --name-only --diff-filter=ACMR -z -- '*.go' | xargs -0 -r bash scripts/lint-go-changed
-(cd apps/web && pnpm exec vitest run components/settings/prompts-settings.test.tsx components/settings/prompts-settings-draft-meta.test.tsx hooks/domains/settings/use-custom-prompts.test.tsx lib/ws/handlers/prompts.test.ts lib/ws/use-websocket.test.tsx)
+git diff --cached --name-only --diff-filter=ACMR -z -- '*.go' | xargs -0 -r bash scripts/lint-go-changed
+(cd apps/web && pnpm exec vitest run components/settings/prompts-settings.test.tsx components/settings/prompts-settings-revisions.test.tsx components/settings/prompts-settings-draft-meta.test.tsx hooks/domains/settings/use-custom-prompts.test.tsx lib/ws/handlers/prompts.test.ts lib/ws/use-websocket.test.tsx)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm run i18n:check)
-(cd apps/web && pnpm exec oxlint -c oxlint.config.mjs --deny-warnings components/settings/prompts-settings.tsx components/settings/prompts-settings.test.tsx lib/api/domains/settings-api.ts)
-(cd apps/web && CAPTURE_PR_ASSETS=1 pnpm e2e:run --host --no-build --shards 1 --project chromium tests/settings/shared-prompt-mcp-writes.spec.ts tests/settings/prompts-settings.spec.ts)
-(cd apps/web && CAPTURE_PR_ASSETS=1 pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome tests/settings/mobile-prompts-settings.spec.ts)
+(cd apps/web && pnpm exec oxlint -c oxlint.config.mjs --deny-warnings components/settings/prompts-settings.tsx components/settings/use-prompt-editor-effects.ts components/settings/prompts-settings.test.tsx components/settings/prompts-settings-revisions.test.tsx lib/api/domains/settings-api.ts)
+(cd apps/web && CAPTURE_PR_ASSETS=1 pnpm e2e:run --host --shards 1 --project chromium tests/settings/shared-prompt-mcp-writes.spec.ts tests/settings/prompts-settings.spec.ts -- --retries=0)
+(cd apps/web && CAPTURE_PR_ASSETS=1 pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome tests/settings/mobile-prompts-settings.spec.ts -- --retries=0)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.test.py
 python3 scripts/lint-spec-files.py --all
@@ -194,3 +199,10 @@ Implementation and required verification are complete.
 - Captured desktop and phone screenshots were inspected against UI-01. The desktop shows name, content, Cancel, and the floating Discard/Save bar, with no permission row. The phone shows the same editor order and touch-sized floating save actions; its existing bottom bar overlays part of the content editor at the captured scroll position. No structural mismatch remains.
 - After promoting specification/package statuses, `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.test.py` (36 tests), `python3 scripts/lint-spec-files.py --all`, `node --test scripts/validate-public-docs.test.mjs`, `node scripts/validate-public-docs.mjs`, and `git diff --check` passed.
 - Documentation-linkage preflight returned `status: covered` with no errors.
+
+### PR fixup verification (2026-11-11)
+
+- `go test -race ./internal/prompts/... ./internal/mcp/handlers ./internal/mcp/server ./config/prompts -count=1`, `go test -race ./internal/backendapp -run 'Test.*(Prompt|Settings)' -count=1`, the focused `storeconformance` upgrade tests, and both working-tree/base changed-Go lint invocations passed. PostgreSQL-only cases were not exercised in this session because `KANDEV_TEST_POSTGRES_DSN` was absent; the isolated PostgreSQL 16 evidence above predates this fixup.
+- `pnpm exec vitest run components/settings/prompts-settings.test.tsx components/settings/prompts-settings-revisions.test.tsx components/settings/prompts-settings-draft-meta.test.tsx hooks/domains/settings/use-custom-prompts.test.tsx lib/ws/handlers/prompts.test.ts lib/ws/use-websocket.test.tsx` passed 34 tests across 6 files. `pnpm run typecheck`, `pnpm run i18n:check`, and focused Oxlint passed.
+- The managed Chromium run built the host backend and pseudo-locale Vite assets and passed 9 tests; Mobile Chrome passed 2 tests against those artifacts. Both ran with retries disabled. Desktop and phone captures were inspected and compressed.
+- `python3 scripts/list-docs.py validate`, all 36 specification-validator tests, `python3 scripts/lint-spec-files.py --all`, both public-doc validators, and `git diff --check` passed after the fixup edits. The documentation-linkage preflight returned `status: covered` with no errors.

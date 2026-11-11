@@ -101,6 +101,40 @@ test("edits a custom prompt on a phone and accepts a later MCP update", async ({
   });
   expect(updated.isError).not.toBe(true);
   await expect(row).toContainText("Updated through MCP.");
+  await row.getByTestId("prompt-edit-button").tap();
+  await replacePromptEditor(
+    testPage,
+    row.getByTestId("prompt-content-input"),
+    "Unsaved phone draft",
+  );
+  const remoteUpdate = await callPromptTool(backend.baseUrl, "update_shared_prompt_kandev", {
+    name: "mobile-review-policy",
+    content: "Remote phone revision.",
+  });
+  expect(remoteUpdate.isError).not.toBe(true);
+
+  const currentPrompt = (await apiClient.listPrompts()).prompts.find(
+    (prompt) => prompt.name === "mobile-review-policy",
+  )!;
+  const staleSave = testPage.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/api/v1/prompts/${currentPrompt.id}`) &&
+      response.request().method() === "PATCH",
+  );
+  await testPage
+    .getByTestId("settings-floating-save")
+    .getByRole("button", { name: "Save changes" })
+    .tap();
+  expect((await staleSave).status()).toBe(409);
+  expect(
+    (await apiClient.listPrompts()).prompts.find((prompt) => prompt.id === currentPrompt.id)
+      ?.content,
+  ).toBe("Remote phone revision.");
+  await expect(promptEditorText(row.getByTestId("prompt-content-input"))).toContainText(
+    "Unsaved phone draft",
+  );
+  await row.getByRole("button", { name: "Cancel" }).tap();
+  await expect(row).toContainText("Remote phone revision.");
   expect(
     await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
   ).toBe(false);

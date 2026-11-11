@@ -240,9 +240,10 @@ Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusab
 Shared prompt reads and reference use are available to org members. Creating,
 editing, or deleting prompts requires `org.config.manage` permission.
 
-The configuration assistant can update a custom prompt when you explicitly
-request or agree to the change. There is no per-prompt agent-edit control. This
-also applies to existing prompts that were previously marked as protected.
+The configuration assistant should update a custom prompt only when you
+explicitly request or agree to the change. The backend does not verify that
+request or agreement. Authorized tools can update any custom prompt. There is no
+per-prompt agent-edit control, including for previously protected prompts.
 Built-in prompts always reject agent writes, while remaining editable by an
 operator. Changes affect every future reference to that prompt. See the
 [MCP write contract](automation-and-mcp.md#create-or-update-a-saved-prompt).

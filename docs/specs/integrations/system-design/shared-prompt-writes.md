@@ -58,8 +58,13 @@ Operator updates use `UpdatePrompt` without a permission argument.
 The repository's conditional agent update matches the observed ID, name,
 `builtin = 0`, and `updated_at`. It no longer tests a permission value.
 Renames, content edits, deletion, or built-in reclassification reject stale writes.
-Operator updates retain their modification-time guard and HTTP 409 conflict result.
-The change does not add client revision parameters to either write API.
+Prompt Settings captures the prompt's `updated_at` when editing begins and sends
+it as `expected_updated_at` with every save. The service rejects a mismatched
+revision with the existing write-conflict error before applying fields. The
+repository's conditional update still catches a concurrent change after that
+comparison. HTTP returns 409 and preserves the newer prompt. The request field
+remains optional for older clients. The response serializes `updated_at` with
+RFC3339Nano precision so distinct revisions remain distinct.
 
 Prompt SQL no longer selects, scans, inserts, or updates `allow_agent_edits`.
 Fresh schema initialization omits that column and removes `migrateAgentPermission`.
@@ -80,9 +85,9 @@ retain `allow_agent_edits`. Each projection derives it from `!prompt.Builtin`.
 This field describes effective eligibility, without storing a configurable permission.
 
 HTTP `UpdatePromptRequest` can decode its deprecated permission field for old clients.
-The controller ignores that input and passes only name and content to the service.
-A permission-only HTTP patch returns the current representation without a mutation.
-Neither true nor false input changes eligibility.
+The controller ignores that input and passes name, content, and the optional
+expected revision to the service. A permission-only HTTP patch returns the current
+representation without a mutation. Neither true nor false input changes eligibility.
 Generic settings continues to reject undeclared permission changes.
 No frontend write sends the deprecated field.
 
@@ -90,8 +95,11 @@ No frontend write sends the deprecated field.
 
 Successful mutations retain content-free `prompts.changed` invalidation and the
 existing WebSocket broadcaster. Failed writes publish no successful change.
-Cache generations, reconnection invalidation, bounded retry, and local editor
-draft preservation keep their current behavior.
+Cache generations, reconnection invalidation, and bounded retry keep their
+current behavior. When a remote change arrives, a pristine open editor adopts
+the saved name, content, and revision. A dirty editor keeps its local draft and
+original revision; saving it returns the existing 409 conflict rather than
+replacing a newer remote change. Cancel and reopen adopts the latest revision.
 Later reference expansions see saved changes. Running turns retain captured instructions.
 
 Remove `PromptAgentPermission` and its permission-only form, dirty-state,
@@ -127,7 +135,9 @@ Service and handler tests cover Settings-created and MCP-created prompts, all
 write adapters, configuration authority, compatibility fields, and legacy input.
 Catalog and embedded-context tests cover explicit-request instructions and unchanged tool availability.
 
-Component tests cover name/content save payloads, dirty tracking, draft revisions,
-and drafts during remote refresh. Existing loader and WebSocket tests cover invalidation.
-Chromium and mobile-Chrome E2E prove the simplified editor and live agent edits.
+Component tests cover name/content save payloads, edit-start revision tracking,
+pristine refresh, and draft preservation during remote refresh. Handler tests
+prove stale revisions return 409 without replacing content. Existing loader and
+WebSocket tests cover invalidation. Chromium and mobile-Chrome E2E prove the
+simplified editor and stale-save conflict after a live agent edit.
 The work order owns exact commands and public-documentation updates.

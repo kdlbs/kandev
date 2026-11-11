@@ -75,6 +75,27 @@ test("custom prompts accept requested MCP edits while preserving editor drafts",
   await expect(promptEditorText(row.getByTestId("prompt-content-input"))).toContainText(
     "Unsaved operator draft",
   );
+
+  const currentPrompt = (await apiClient.listPrompts()).prompts.find(
+    (prompt) => prompt.name === "review-policy",
+  )!;
+  const staleSave = testPage.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/api/v1/prompts/${currentPrompt.id}`) &&
+      response.request().method() === "PATCH",
+  );
+  await testPage
+    .getByTestId("settings-floating-save")
+    .getByRole("button", { name: "Save changes" })
+    .click();
+  expect((await staleSave).status()).toBe(409);
+  expect(
+    (await apiClient.listPrompts()).prompts.find((prompt) => prompt.id === currentPrompt.id)
+      ?.content,
+  ).toBe("Remote revision");
+  await expect(promptEditorText(row.getByTestId("prompt-content-input"))).toContainText(
+    "Unsaved operator draft",
+  );
   await row.getByRole("button", { name: "Cancel" }).click();
   await expect(row).toContainText("Remote revision");
 });

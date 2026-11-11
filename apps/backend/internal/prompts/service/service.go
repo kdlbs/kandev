@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -149,12 +150,25 @@ func (s *Service) assertNameAvailable(ctx context.Context, name, excludeID strin
 }
 
 func (s *Service) UpdatePrompt(ctx context.Context, promptID string, name *string, content *string) (*models.Prompt, error) {
+	return s.UpdatePromptAtRevision(ctx, promptID, nil, name, content)
+}
+
+// UpdatePromptAtRevision rejects an operator save based on an obsolete prompt revision.
+func (s *Service) UpdatePromptAtRevision(
+	ctx context.Context,
+	promptID string,
+	expectedUpdatedAt *time.Time,
+	name, content *string,
+) (*models.Prompt, error) {
 	if name == nil && content == nil {
 		return s.GetPromptByID(ctx, promptID)
 	}
 	prompt, err := s.GetPromptByID(ctx, promptID)
 	if err != nil {
 		return nil, err
+	}
+	if expectedUpdatedAt != nil && !prompt.UpdatedAt.Equal(*expectedUpdatedAt) {
+		return nil, promptstore.ErrPromptWriteRejected
 	}
 	if err := s.applyPromptFields(ctx, prompt, name, content); err != nil {
 		return nil, err
