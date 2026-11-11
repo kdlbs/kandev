@@ -414,6 +414,12 @@ On macOS, a LaunchAgent belongs to the user's login domain; choose system mode w
 
 Reinstall using the upgraded `kandev` binary, preserve the original `--system` and `--home-dir` choices, and then run an explicit restart. Inspect `systemctl cat kandev.service` or the launchd plist if the recorded executable still points at an old package-manager path.
 
+### GitHub CLI credentials are unavailable to the service
+
+Kandev resolves some host-side GitHub credentials by running `gh` as the service account. Check that the service account's `HOME` and `GH_CONFIG_DIR` point to a `gh` configuration with the intended host and account.
+
+File-stored `gh` credentials can work without a Linux user session. Do not enable lingering only for those credentials. An account stored only in a keyring still requires the service to reach that account's keyring through its user bus.
+
 ### Service starts but agents fail
 
 Read service logs first. A service has a smaller `PATH` and no interactive shell environment, so tools or credentials visible in a terminal may be absent. Configure executor credentials through Kandev's profile/settings paths, use stable executable paths, and verify Docker/SSH/Sprites connectivity as described in [Executors](executors.md#troubleshooting).
