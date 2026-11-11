@@ -35,11 +35,20 @@ func runHumanDoneTaskMovedWake(t *testing.T, c humanDoneBlockerWakeCase) int {
 		_, err := f.repo.UpdateTaskAssignee(ctx, blocker, c.blockerAssignee)
 		blockerMust(t, err)
 	}
+	blockerMust(t, f.scheduler.RegisterTaskCompletionSubscriber(f.eb))
 	blockerMust(t, f.tasks.UpdateTaskState(ctx, blocker, v1.TaskStateCompleted))
 
 	data := map[string]any{"task_id": blocker}
 	for k, v := range c.payload {
 		data[k] = v
+	}
+	if data["old_state"] != nil && data["new_state"] == string(v1.TaskStateCompleted) {
+		// Production publishes the committed state event before the step-move event.
+		blockerMust(t, f.eb.Publish(ctx, events.TaskStateChanged, bus.NewEvent(events.TaskStateChanged, "human-done-test", map[string]any{
+			"task_id":   blocker,
+			"old_state": data["old_state"],
+			"new_state": data["new_state"],
+		})))
 	}
 	blockerMust(t, f.eb.Publish(ctx, events.TaskMoved, bus.NewEvent(events.TaskMoved, "human-done-test", data)))
 	return len(f.taskRuns(t, "dependent", service.RunReasonTaskBlockersResolved))

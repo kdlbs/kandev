@@ -1444,8 +1444,11 @@ func (s *Service) finalizeDone(ctx context.Context, data *TaskMovedData) error {
 			s.logger.Warn("sync routine run status", zap.Error(err))
 		}
 	}
-	if err := s.queueBlockersResolvedRuns(ctx, data.TaskID); err != nil {
-		s.logger.Error("blocker resolution runs failed", zap.Error(err))
+	// A committed completion emits TaskStateChanged, whose subscriber owns blocker wakes.
+	if data.NewState != string(v1.TaskStateCompleted) {
+		if err := s.queueBlockersResolvedRuns(ctx, data.TaskID); err != nil {
+			s.logger.Error("blocker resolution runs failed", zap.Error(err))
+		}
 	}
 	if data.ParentID != "" {
 		if err := s.queueChildrenCompletedRun(ctx, data.ParentID); err != nil {
