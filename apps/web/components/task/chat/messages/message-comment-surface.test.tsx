@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import { createMessageTextAnchor } from "@/lib/chat/agent-message-comments";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
@@ -46,6 +46,7 @@ const COMMENT_POPOVER_TEST_ID = "comment-popover";
 const SESSION_ID = "session-1";
 const MESSAGE_TEXT_TEST_ID = "message-text";
 const SELECTED_QUOTE = "settled answer";
+const SETTLED_DETAIL = "The settled answer contains detail.";
 
 function message(content: string): Message {
   return {
@@ -209,7 +210,7 @@ describe("MessageCommentSurface selection dismissal", () => {
 
 describe("MessageCommentSurface", () => {
   it("anchors a pending selection to the same quote when message text shifts", () => {
-    const original = "The settled answer contains detail.";
+    const original = SETTLED_DETAIL;
     const updated = "Intro. The settled answer contains detail.";
     const { rerender } = render(
       <MessageCommentSurface
@@ -265,7 +266,7 @@ describe("MessageCommentSurface", () => {
   });
 
   it("keeps feedback open and reports when the selected quote was rewritten", () => {
-    const original = "The settled answer contains detail.";
+    const original = SETTLED_DETAIL;
     const updated = "The response was completely rewritten.";
     const { rerender } = render(
       <MessageCommentSurface
@@ -336,7 +337,7 @@ describe("MessageCommentSurface layering", () => {
 describe("MessageCommentSurface mobile drawer", () => {
   it("keeps mobile feedback open when the selected quote was rewritten", () => {
     TOUCH_DRAWER.enabled = true;
-    const original = "The settled answer contains detail.";
+    const original = SETTLED_DETAIL;
     const updated = "The response was completely rewritten.";
     const { rerender } = render(
       <MessageCommentSurface
@@ -373,6 +374,78 @@ describe("MessageCommentSurface mobile drawer", () => {
     expect(screen.getByRole("alert").textContent).toBe(
       "The agent response changed. Select the text again.",
     );
+  });
+});
+
+describe("MessageCommentSurface touch selection dock", () => {
+  const content = SETTLED_DETAIL;
+  let frames: FrameRequestCallback[] = [];
+
+  function selectText(start: number, end: number) {
+    const text = screen.getByTestId(MESSAGE_TEXT_TEST_ID).firstChild!;
+    const range = document.createRange();
+    range.setStart(text, start);
+    range.setEnd(text, end);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+      const pending = frames;
+      frames = [];
+      pending.forEach((frame) => frame(0));
+    });
+  }
+
+  function renderTouchSurface() {
+    TOUCH_DRAWER.enabled = true;
+    frames = [];
+    vi.stubGlobal("requestAnimationFrame", (frame: FrameRequestCallback) => frames.push(frame));
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    render(
+      <div data-selection-dock-host="">
+        <MessageCommentSurface
+          message={message(content)}
+          sessionId={SESSION_ID}
+          isTurnActive={false}
+        >
+          <span data-testid={MESSAGE_TEXT_TEST_ID}>{content}</span>
+        </MessageCommentSurface>
+      </div>,
+    );
+  }
+
+  it("docks the comment action in a toolbar instead of floating it beside the selection", () => {
+    renderTouchSurface();
+    selectText(0, 3);
+
+    const toolbar = screen.getByRole("toolbar", { name: "Selection actions" });
+    const trigger = screen.getByTestId(COMMENT_TRIGGER_TEST_ID);
+    expect(trigger.parentElement).toBe(toolbar);
+    expect(document.querySelectorAll('[data-testid="agent-message-comment-trigger"]')).toHaveLength(
+      1,
+    );
+  });
+
+  it("follows native handle adjustments and survives scrolling", () => {
+    renderTouchSurface();
+    selectText(0, 3);
+    const start = content.indexOf(SELECTED_QUOTE);
+    selectText(start, start + SELECTED_QUOTE.length);
+    fireEvent.scroll(document);
+
+    fireEvent.click(screen.getByTestId(COMMENT_TRIGGER_TEST_ID));
+    expect(screen.getByTestId("agent-message-comment-drawer").textContent).toContain(
+      SELECTED_QUOTE,
+    );
+  });
+
+  it("hides the dock when the selection collapses", () => {
+    renderTouchSurface();
+    selectText(0, 3);
+    selectText(2, 2);
+
+    expect(screen.queryByRole("toolbar", { name: "Selection actions" })).toBeNull();
   });
 });
 

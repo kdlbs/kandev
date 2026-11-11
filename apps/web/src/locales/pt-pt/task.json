@@ -407,6 +407,7 @@
   "commentCount_other": "{{count}} comentários",
   "commentOnAgentResponse": "Comentar a resposta do agente",
   "commentOnSelection": "Comentar a seleção",
+  "selectionActions": "Ações da seleção",
   "comments": "Comentários",
   "commentsOnFiles_one": "{{count}} comentário em {{files}}",
   "commentsOnFiles_other": "{{count}} comentários em {{files}}",

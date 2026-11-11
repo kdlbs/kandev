@@ -32,6 +32,19 @@ async function expectDrawerContained(page: Page, drawer: Locator) {
   expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
 }
 
+async function expectDockedAtHostBottom(page: Page, dock: Locator) {
+  const host = page.locator("[data-selection-dock-host]:visible").first();
+  const hostBox = await host.boundingBox();
+  const dockBox = await dock.boundingBox();
+  if (!hostBox || !dockBox) throw new Error("Expected a visible dock and dock host");
+  // Docked to the transcript's bottom edge, not floated beside the selection
+  // where the native selection menu is drawn.
+  expect(Math.abs(dockBox.y + dockBox.height - (hostBox.y + hostBox.height))).toBeLessThanOrEqual(
+    2,
+  );
+  expect(dockBox.height).toBeLessThanOrEqual(48);
+}
+
 test.describe("Agent message comments on mobile", () => {
   test("opens the native drawer and Run sends the comment immediately", async ({
     testPage,
@@ -49,9 +62,15 @@ test.describe("Agent message comments on mobile", () => {
     // The fixture seeds a completed agent turn in a waiting session, so Run
     // sends directly and does not depend on mock-agent completion timing.
     await selectAgentReplyText(body, SELECTED_REPLY_TEXT);
-    const commentTrigger = testPage.getByTestId("agent-message-comment-trigger");
+    const dock = testPage.getByRole("toolbar", { name: "Selection actions" });
+    await expect(dock).toBeVisible();
+    const commentTrigger = dock.getByTestId("agent-message-comment-trigger");
     await expect(commentTrigger).toBeVisible();
     await expectTouchTarget(commentTrigger);
+    await expectDockedAtHostBottom(testPage, dock);
+    expect(await testPage.evaluate(() => window.getSelection()?.toString())).toBe(
+      SELECTED_REPLY_TEXT,
+    );
     await commentTrigger.click();
     const drawer = testPage.getByTestId("agent-message-comment-drawer");
     await expect(drawer).toBeVisible();
@@ -98,7 +117,9 @@ test.describe("Agent message comments on mobile", () => {
     );
 
     await selectAgentReplyText(body, SELECTED_REPLY_TEXT);
-    await testPage.getByTestId("agent-message-comment-trigger").click();
+    const dock = dialog.getByRole("toolbar", { name: "Selection actions" });
+    await expect(dock).toBeVisible();
+    await dock.getByTestId("agent-message-comment-trigger").click();
     const drawer = testPage.getByTestId("agent-message-comment-drawer");
     await expect(drawer).toBeVisible();
     const input = drawer.getByTestId("agent-message-comment-input");

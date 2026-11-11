@@ -26,10 +26,8 @@ import { cn } from "@/lib/utils";
 import type { TextSelection } from "./tiptap-plan-editor";
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import {
-  resolveVisualViewportPosition,
-  useVisualViewportOffset,
-} from "@/hooks/use-visual-viewport-offset";
+import { useVisualViewportOffset } from "@/hooks/use-visual-viewport-offset";
+import { dockedBarStyle, useDockedBarPosition } from "@/hooks/use-docked-bar-position";
 
 export const PLAN_FORMATTING_TOOLBAR_HEIGHT_PX = 48;
 
@@ -383,96 +381,24 @@ function useMobileVisibilityChange(
   );
 }
 
-function resolveMobileToolbarPosition({
-  keyboardOpen,
-  viewportBottom,
-  barHeight,
-  baseBottomOffset,
-  containerBottom,
-}: {
-  keyboardOpen: boolean;
-  viewportBottom: number;
-  barHeight: number;
-  baseBottomOffset?: string;
-  containerBottom?: number;
-}) {
-  if (typeof containerBottom === "number") {
-    const visibleBottom = keyboardOpen
-      ? Math.min(containerBottom, viewportBottom)
-      : containerBottom;
-    return { top: `${visibleBottom - barHeight}px`, bottom: "auto" };
-  }
-
-  return resolveVisualViewportPosition({
-    keyboardOpen,
-    viewportBottom,
-    barHeight,
-    baseBottomOffset,
-  });
-}
-
 function MobileFormattingToolbar({
   content,
   label,
-  keyboardOpen,
-  viewportBottom,
   mobileBottomOffset,
   mobileContainerRef,
 }: {
   content: ReactNode;
   label: string;
-  keyboardOpen: boolean;
-  viewportBottom: number;
   mobileBottomOffset?: string;
   mobileContainerRef?: RefObject<HTMLElement | null>;
 }) {
-  const [containerBounds, setContainerBounds] = useState<{
-    left: number;
-    width: number;
-    bottom: number;
-  } | null>(null);
-
-  useEffect(() => {
-    const container = mobileContainerRef?.current;
-    if (!container) return;
-
-    const updateBounds = () => {
-      const { left, width, bottom } = container.getBoundingClientRect();
-      setContainerBounds({ left, width, bottom });
-    };
-    updateBounds();
-
-    const resizeObserver =
-      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateBounds);
-    resizeObserver?.observe(container);
-    window.addEventListener("resize", updateBounds);
-    window.addEventListener("scroll", updateBounds);
-    window.visualViewport?.addEventListener("resize", updateBounds);
-    window.visualViewport?.addEventListener("scroll", updateBounds);
-    return () => {
-      resizeObserver?.disconnect();
-      window.removeEventListener("resize", updateBounds);
-      window.removeEventListener("scroll", updateBounds);
-      window.visualViewport?.removeEventListener("resize", updateBounds);
-      window.visualViewport?.removeEventListener("scroll", updateBounds);
-    };
-  }, [mobileContainerRef]);
-
-  if (typeof document === "undefined") return null;
-  const position = resolveMobileToolbarPosition({
-    keyboardOpen,
-    viewportBottom,
+  const position = useDockedBarPosition({
+    containerRef: mobileContainerRef,
     barHeight: PLAN_FORMATTING_TOOLBAR_HEIGHT_PX,
     baseBottomOffset: mobileBottomOffset,
-    containerBottom: containerBounds?.bottom,
   });
-  const horizontalPosition = containerBounds
-    ? {
-        left: `${containerBounds.left}px`,
-        right: "auto",
-        width: `${containerBounds.width}px`,
-      }
-    : undefined;
+
+  if (typeof document === "undefined") return null;
   return createPortal(
     <div
       data-testid="plan-mobile-formatting-toolbar"
@@ -480,8 +406,7 @@ function MobileFormattingToolbar({
       aria-label={label}
       className="fixed left-0 right-0 z-40 border-t border-border bg-popover/95 backdrop-blur"
       style={{
-        ...position,
-        ...horizontalPosition,
+        ...dockedBarStyle(position),
         height: `${PLAN_FORMATTING_TOOLBAR_HEIGHT_PX}px`,
       }}
     >
@@ -502,7 +427,7 @@ export function PlanBubbleMenu({
 }: PlanBubbleMenuProps) {
   const { t } = useTranslation();
   const { isMobile, isTablet, usesDesktopWorkbench } = useResponsiveBreakpoint();
-  const { bottomOffset, keyboardOpen, viewportBottom } = useVisualViewportOffset();
+  const { bottomOffset, keyboardOpen } = useVisualViewportOffset();
   const [showLinkInput, setShowLinkInput] = useState(false);
   const snapshot = useEditorSnapshot(editor);
   const isMobilePresentation = isMobile || isTablet || !usesDesktopWorkbench;
@@ -578,8 +503,6 @@ export function PlanBubbleMenu({
       <MobileFormattingToolbar
         content={content}
         label={t("editors:planFormattingToolbar")}
-        keyboardOpen={keyboardOpen}
-        viewportBottom={viewportBottom}
         mobileBottomOffset={mobileBottomOffset}
         mobileContainerRef={mobileContainerRef}
       />

@@ -438,6 +438,7 @@
   "commentCount_other": "{{count}}件のコメント",
   "commentOnAgentResponse": "エージェント応答にコメント",
   "commentOnSelection": "選択範囲にコメント",
+  "selectionActions": "選択範囲の操作",
   "comments": "コメント",
   "commentsOnFiles_one": "{{files}}に{{count}}件のコメント",
   "commentsOnFiles_other": "{{files}}に{{count}}件のコメント",

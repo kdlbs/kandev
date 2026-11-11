@@ -11,6 +11,7 @@ import { useCommandPanelOpen } from "@/lib/commands/command-registry";
 import { useGutterComments } from "@/hooks/use-gutter-comments";
 import type { DiffComment } from "@/lib/diff/types";
 import { useTranslation } from "react-i18next";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 
 export type FormZoneRange = {
   startLine: number;
@@ -47,6 +48,7 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
   const { t } = useTranslation();
   const { path, repo, enableComments, sessionId, wrapperRef, onChange, onSave, contentRef } = opts;
 
+  const touch = useTouchDrawer();
   const [wrapEnabled, setWrapEnabled] = useState(true);
   const [formZoneRange, setFormZoneRange] = useState<FormZoneRange>(null);
   const [floatingButtonPos, setFloatingButtonPos] = useState<FloatingButtonPosition>(null);
@@ -317,9 +319,9 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
   );
 
   const handleFloatingButtonClick = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
+    (e?: React.MouseEvent) => {
+      e?.preventDefault();
+      e?.stopPropagation();
       if (!currentSelection) return;
       setFormZoneRange({
         startLine: currentSelection.startLine,
@@ -461,6 +463,8 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
   }, [handleCommentRun]);
 
   return {
+    touch,
+    hasSelection: currentSelection !== null,
     wrapEnabled,
     setWrapEnabled,
     showDiffIndicators,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import { IconMessage, IconPlus, IconPlayerPlay, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -17,6 +17,10 @@ import { floatingBounds, placeFloatingRect } from "@/components/task/floating-se
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
 import type { MessageSelection } from "@/lib/chat/agent-message-comments";
 import { cn } from "@/lib/utils";
+import {
+  SelectionActionDock,
+  SelectionActionDockButton,
+} from "@/components/shared/selection-action-dock";
 import { useTranslation } from "react-i18next";
 
 export type CommentTarget = {
@@ -36,17 +40,15 @@ export type MessageCommentActions = {
 
 function SelectionCommentTrigger({
   selection,
-  isTouch,
   onOpen,
   portalContainer,
 }: {
   selection: MessageSelection;
-  isTouch: boolean;
   onOpen: () => void;
   portalContainer?: HTMLElement | null;
 }) {
   const { t } = useTranslation();
-  const size = isTouch ? 44 : 28;
+  const size = 28;
   const portalRect = portalContainer?.getBoundingClientRect();
   const outerSize = size + 8;
   const position = placeFloatingRect({
@@ -225,6 +227,34 @@ function MessageCommentDrawer({
   );
 }
 
+function DockedCommentTrigger({
+  onOpen,
+  hostRef,
+  portalContainer,
+}: {
+  onOpen: () => void;
+  hostRef?: RefObject<HTMLElement | null>;
+  portalContainer?: HTMLElement | null;
+}) {
+  const { t } = useTranslation();
+  return (
+    <SelectionActionDock
+      hostRef={hostRef}
+      portalContainer={portalContainer}
+      label={t("task:selectionActions")}
+      testId="agent-message-comment-dock"
+    >
+      <SelectionActionDockButton
+        icon={IconMessage}
+        label={t("task:commentOnSelection")}
+        text={t("task:comment")}
+        onActivate={onOpen}
+        testId="agent-message-comment-trigger"
+      />
+    </SelectionActionDock>
+  );
+}
+
 export function MessageCommentControls({
   target,
   composerOpen,
@@ -234,6 +264,7 @@ export function MessageCommentControls({
   actions,
   handleRun,
   portalContainer,
+  dockHostRef,
 }: {
   target: CommentTarget | null;
   composerOpen: boolean;
@@ -243,13 +274,20 @@ export function MessageCommentControls({
   actions: MessageCommentActions;
   handleRun: ((feedback: string) => boolean | void) | undefined;
   portalContainer: HTMLElement | null;
+  dockHostRef?: RefObject<HTMLElement | null>;
 }) {
   return (
     <>
-      {target && !composerOpen ? (
+      {target && !composerOpen && useDrawer ? (
+        <DockedCommentTrigger
+          onOpen={() => setComposerOpen(true)}
+          hostRef={dockHostRef}
+          portalContainer={portalContainer}
+        />
+      ) : null}
+      {target && !composerOpen && !useDrawer ? (
         <SelectionCommentTrigger
           selection={target.selection}
-          isTouch={useDrawer}
           onOpen={() => setComposerOpen(true)}
           portalContainer={portalContainer}
         />

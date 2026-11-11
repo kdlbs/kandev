@@ -20,6 +20,8 @@ import {
 import { buildMarkdownPreviewComment, commentsOverlapRange } from "@/lib/markdown/preview-comments";
 import { useDiffFileComments } from "./use-diff-comments";
 import { useRunComment } from "./use-run-comment";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { useTouchSelectionTracking } from "@/hooks/use-touch-selection-tracking";
 
 export type MarkdownCommentView = {
   comments: DiffComment[];
@@ -69,15 +71,27 @@ function isCommentShortcut(event: KeyboardEvent): boolean {
 function useMarkdownSelectionCapture({
   content,
   enabled,
+  touchTracking,
   rootRef,
   onSelectionStart,
 }: {
   content: string;
   enabled: boolean;
+  touchTracking: boolean;
   rootRef: RefObject<HTMLDivElement | null>;
   onSelectionStart: () => void;
 }) {
   const [currentSelection, setCurrentSelection] = useState<MarkdownPreviewSelection | null>(null);
+  const followTouchSelection = useCallback(
+    (selection: Selection | null) => {
+      const root = rootRef.current;
+      setCurrentSelection(
+        root && selection ? resolveMarkdownDomSelection(root, content, selection) : null,
+      );
+    },
+    [content, rootRef],
+  );
+  useTouchSelectionTracking(rootRef, enabled && touchTracking, followTouchSelection);
   const resolveSelectionRef = useRef<() => void>(() => {});
   const timeoutRef = useRef<number | null>(null);
 
@@ -333,6 +347,7 @@ export function useMarkdownPreviewComments({
   enabled,
   rootRef,
 }: UseMarkdownPreviewCommentsArgs) {
+  const touch = useTouchDrawer();
   const [textSelection, setTextSelection] = useState<MarkdownPreviewSelection | null>(null);
   const [commentView, setCommentView] = useState<MarkdownCommentView>(null);
   const comments = useDiffFileComments(
@@ -346,6 +361,7 @@ export function useMarkdownPreviewComments({
   const { currentSelection, setCurrentSelection } = useMarkdownSelectionCapture({
     content,
     enabled,
+    touchTracking: touch && !textSelection,
     rootRef,
     onSelectionStart: closeCommentView,
   });
@@ -375,10 +391,11 @@ export function useMarkdownPreviewComments({
     clearBrowserSelection();
   }, []);
   const dismissOverlays = useCallback(() => {
-    setCurrentSelection(null);
+    // A docked touch trigger follows the live selection, not scroll position.
+    if (!touch) setCurrentSelection(null);
     setTextSelection(null);
     closeCommentView();
-  }, [closeCommentView, setCurrentSelection]);
+  }, [closeCommentView, setCurrentSelection, touch]);
 
   const { submitComment, submitAndRunComment } = useMarkdownCommentSubmitters({
     path,
@@ -398,6 +415,7 @@ export function useMarkdownPreviewComments({
   });
 
   return {
+    touch,
     comments,
     currentSelection,
     textSelection,

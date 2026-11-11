@@ -407,6 +407,7 @@
   "commentCount_other": "{{count}} 条评论",
   "commentOnAgentResponse": "对智能体回复发表评论",
   "commentOnSelection": "对选中内容发表评论",
+  "selectionActions": "选中内容操作",
   "comments": "评论",
   "commentsOnFiles_one": "{{files}} 上有 {{count}} 条评论",
   "commentsOnFiles_other": "{{files}} 上有 {{count}} 条评论",

@@ -407,6 +407,7 @@
   "commentCount_other": "{{count}} 條評論",
   "commentOnAgentResponse": "對代理程式回覆發表評論",
   "commentOnSelection": "對選中內容發表評論",
+  "selectionActions": "選中內容操作",
   "comments": "評論",
   "commentsOnFiles_one": "{{files}} 上有 {{count}} 條評論",
   "commentsOnFiles_other": "{{files}} 上有 {{count}} 條評論",

@@ -430,8 +430,16 @@ test.describe("Mobile file viewer panel", () => {
     await expect(viewer.locator('div[align="center"]')).toContainText("Embedded HTML body");
 
     await selectMarkdownPreviewText(viewer.getByTestId("markdown-preview").locator("p").first());
-    const commentButton = testPage.getByTestId("markdown-preview-comment-button");
+    const dock = testPage.getByRole("toolbar", { name: "Selection actions" });
+    const commentButton = dock.getByTestId("markdown-preview-comment-button");
     await expect(commentButton).toBeVisible({ timeout: 5_000 });
+    const previewBox = await viewer.getByTestId("markdown-preview").boundingBox();
+    const dockBox = await dock.boundingBox();
+    if (!previewBox || !dockBox) throw new Error("Expected visible preview and selection dock");
+    // Docked at the preview's bottom edge, away from the native selection menu.
+    expect(
+      Math.abs(dockBox.y + dockBox.height - (previewBox.y + previewBox.height)),
+    ).toBeLessThanOrEqual(2);
     await commentButton.tap();
 
     await testPage
