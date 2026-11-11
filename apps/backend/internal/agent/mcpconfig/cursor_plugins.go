@@ -271,6 +271,11 @@ func readMCPFileCandidates(
 	if candidates, ok := tryParseStandaloneCandidates(data, path, modTime, kind, pluginName, pluginRoot); ok {
 		return candidates, nil
 	}
+	// A plugin manifest can publish an author or repository URL without declaring
+	// servers. Bare parsing would treat that URL as an MCP endpoint and hide mcp.json.
+	if pluginManifestWithoutMCPServers(data) {
+		return nil, errors.New("plugin manifest has no MCP servers")
+	}
 	if candidates, ok := tryParseBareCandidates(data, path, modTime, kind, pluginName, pluginRoot); ok {
 		return candidates, nil
 	}
@@ -321,6 +326,28 @@ func tryParseStandaloneCandidates(
 		return parseRawServerMap(container.MCPServers, path, modTime, kind, pluginName, pluginRoot), true
 	}
 	return nil, false
+}
+
+func pluginManifestWithoutMCPServers(data []byte) bool {
+	var doc struct {
+		Name        string          `json:"name"`
+		Version     string          `json:"version"`
+		Description string          `json:"description"`
+		Author      json.RawMessage `json:"author"`
+		MCPServers  json.RawMessage `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return false
+	}
+	if hasJSONValue(doc.MCPServers) || strings.TrimSpace(doc.Name) == "" {
+		return false
+	}
+	return strings.TrimSpace(doc.Version) != "" || strings.TrimSpace(doc.Description) != "" || hasJSONValue(doc.Author)
+}
+
+func hasJSONValue(raw json.RawMessage) bool {
+	trimmed := strings.TrimSpace(string(raw))
+	return trimmed != "" && trimmed != "null"
 }
 
 func tryParseBareCandidates(

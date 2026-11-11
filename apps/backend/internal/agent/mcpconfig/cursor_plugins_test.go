@@ -317,3 +317,55 @@ func TestCursorPluginCacheWithoutEnabledStateIsNotImported(t *testing.T) {
 		})
 	}
 }
+
+func TestDiscoverCursorPluginMCPServers_ManifestAuthorURLDoesNotHideMCPEndpoints(t *testing.T) {
+	tempHome := t.TempDir()
+	commit := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+	stripeDir := filepath.Join(tempHome, "plugins", "cache", "cursor-public", "stripe", commit)
+	require.NoError(t, os.MkdirAll(filepath.Join(stripeDir, ".cursor-plugin"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(stripeDir, ".cursor-plugin", "plugin.json"), []byte(`{
+		"name": "stripe",
+		"description": "Stripe plugin",
+		"version": "0.9.10",
+		"author": {"name": "Stripe", "url": "https://stripe.com"},
+		"homepage": "https://docs.stripe.com"
+	}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(stripeDir, "mcp.json"), []byte(`{
+		"mcpServers": {
+			"stripe": {"type": "http", "url": "https://mcp.stripe.com"}
+		}
+	}`), 0o644))
+
+	resendDir := filepath.Join(tempHome, "plugins", "cache", "cursor-public", "resend", commit)
+	require.NoError(t, os.MkdirAll(filepath.Join(resendDir, ".cursor-plugin"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(resendDir, ".cursor-plugin", "plugin.json"), []byte(`{
+		"name": "resend",
+		"description": "Resend plugin",
+		"version": "1.0.4",
+		"author": {"name": "Resend", "url": "https://resend.com"}
+	}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(resendDir, "mcp.json"), []byte(`{
+		"mcpServers": {
+			"resend": {"type": "streamable-http", "url": "https://mcp.resend.com/mcp"}
+		}
+	}`), 0o644))
+
+	servers, err := DiscoverCursorPluginMCPServersWithInventory(tempHome, CursorNativeInventory{
+		Plugins: []CursorNativePlugin{
+			{Name: "stripe", Marketplace: "cursor-public", Revision: commit},
+			{Name: "resend", Marketplace: "cursor-public", Revision: commit},
+		},
+	})
+	require.NoError(t, err)
+
+	got := make(map[string]string, len(servers))
+	for _, server := range servers {
+		got[server.Name] = server.URL
+	}
+	require.Equal(t, map[string]string{
+		"stripe": "https://mcp.stripe.com",
+		"resend": "https://mcp.resend.com/mcp",
+	}, got)
+	require.NotContains(t, got, "author")
+}
