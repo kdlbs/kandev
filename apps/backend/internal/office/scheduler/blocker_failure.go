@@ -26,12 +26,49 @@ func isFailedTaskState(state string) bool {
 	return state == taskStateFailed || state == taskStateCancelled
 }
 
+func isTerminalTaskState(state string) bool {
+	return state == taskStateCompleted || isFailedTaskState(state)
+}
+
 // RegisterBlockerFailureSubscriber evaluates every task-service transition
-// into FAILED or CANCELLED. Office status changes do not publish this event;
-// reactToStatusChange evaluates those.
+// into FAILED or CANCELLED and every task a tree cancel moves to CANCELLED.
+// Office status changes publish neither event; reactToStatusChange evaluates
+// those.
 func (ss *SchedulerService) RegisterBlockerFailureSubscriber(eb bus.EventBus) error {
-	_, err := eb.Subscribe(events.TaskStateChanged, ss.handleBlockerFailure)
+	if _, err := eb.Subscribe(events.TaskStateChanged, ss.handleBlockerFailure); err != nil {
+		return err
+	}
+	_, err := eb.Subscribe(events.OfficeTaskTreeHoldCreated, ss.handleTreeCancelBlockerFailures)
 	return err
+}
+
+// handleTreeCancelBlockerFailures evaluates each task a cancel hold moved to
+// CANCELLED. Members that were already FAILED or CANCELLED made no failure
+// transition.
+func (ss *SchedulerService) handleTreeCancelBlockerFailures(ctx context.Context, event *bus.Event) error {
+	var hold models.TreeHold
+	encoded, err := json.Marshal(event.Data)
+	if err != nil {
+		return fmt.Errorf("encode tree hold: %w", err)
+	}
+	if err := json.Unmarshal(encoded, &hold); err != nil {
+		return fmt.Errorf("decode tree hold: %w", err)
+	}
+	if hold.Mode != models.TreeHoldModeCancel {
+		return nil
+	}
+	members, err := ss.repo.ListHoldMembers(ctx, hold.ID)
+	if err != nil {
+		return fmt.Errorf("list cancelled tree members: %w", err)
+	}
+	var errs []error
+	for _, member := range members {
+		if member.SkipReason != "" || isFailedTaskState(member.TaskStatus) {
+			continue
+		}
+		errs = append(errs, ss.escalateBlockerFailure(ctx, member.TaskID, taskStateCancelled))
+	}
+	return errors.Join(errs...)
 }
 
 func (ss *SchedulerService) handleBlockerFailure(ctx context.Context, event *bus.Event) error {
@@ -124,16 +161,17 @@ func (ss *SchedulerService) heldDependents(
 			return nil, fmt.Errorf("read failed blocker dependent: %w", err)
 		}
 		if dependent.IsFromOffice && !dependent.Archived &&
-			dependent.WorkspaceID == blocker.WorkspaceID && dependent.State != taskStateCompleted && !isFailedTaskState(dependent.State) {
+			dependent.WorkspaceID == blocker.WorkspaceID && !isTerminalTaskState(dependent.State) {
 			held = append(held, id)
 		}
 	}
 	return held, nil
 }
 
-// blockerFailureRecipient returns the runner of the blocker's parent task,
-// woken on that parent, or else the workspace CEO with a taskless wake. An
-// empty recipient means nobody is responsible.
+// blockerFailureRecipient returns the runner of the blocker's live parent
+// task, woken on that parent, or else the workspace CEO with a taskless wake.
+// A completed, failed or cancelled parent no longer coordinates its children.
+// An empty recipient means nobody is responsible.
 func (ss *SchedulerService) blockerFailureRecipient(
 	ctx context.Context, blocker *sqlite.TaskExecutionFields,
 ) (recipient, taskID string, err error) {
@@ -142,12 +180,12 @@ func (ss *SchedulerService) blockerFailureRecipient(
 		return "", "", fmt.Errorf("read failed blocker parent: %w", err)
 	}
 	if parentID != "" {
-		runner, err := ss.repo.GetTaskAssignee(ctx, parentID)
-		if err != nil {
-			return "", "", fmt.Errorf("read failed blocker parent runner: %w", err)
+		parent, err := ss.repo.GetTaskExecutionFields(ctx, parentID)
+		if err != nil && !errors.Is(err, sqlite.ErrTaskNotFound) {
+			return "", "", fmt.Errorf("read failed blocker parent: %w", err)
 		}
-		if runner != "" {
-			return runner, parentID, nil
+		if parent != nil && parent.AssigneeAgentProfileID != "" && !isTerminalTaskState(parent.State) {
+			return parent.AssigneeAgentProfileID, parentID, nil
 		}
 	}
 	ceos, err := ss.svc.ListAgentInstancesFiltered(ctx, blocker.WorkspaceID,

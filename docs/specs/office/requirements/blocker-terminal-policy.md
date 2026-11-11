@@ -44,8 +44,8 @@ classification those producers apply.
 - **Failure transition:** a committed task state change from a state other than
   `FAILED` or `CANCELLED` into `FAILED` or `CANCELLED`.
 - **Responsible agent:** the runner of the failed blocker's parent task. When the
-  blocker has no parent, or the parent has no runner, it is the workspace's CEO
-  agent.
+  blocker has no parent, the parent has no runner, or the parent is `COMPLETED`,
+  `FAILED` or `CANCELLED`, it is the workspace's CEO agent.
 
 ## Requirements
 
@@ -108,8 +108,8 @@ polling or receiving duplicate alerts.
   any committed path shall cause the same evaluation. This includes task service and
   dashboard state writes, Office status changes from the UI or an agent, agent
   runtime and launch-failure writes, and workflow step moves that change the task
-  state. Tree cancel is excluded: it is a restorable operator hold, and dependents
-  outside the cancelled tree stay held until it is restored or the edge is removed.
+  state. A tree cancel is a failure transition for each task it moves to
+  `CANCELLED`; only dependents outside the cancelled tree remain held.
 - **AC-OFFICE-BLOCKER-POLICY-002.4:** When the same failure transition is delivered
   more than once, the system shall persist at most one `task_blocker_failed` run for
   it. When the blocker later leaves the failed state and makes another failure

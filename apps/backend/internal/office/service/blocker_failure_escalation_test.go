@@ -135,6 +135,10 @@ func TestOfficeBlockerFailureFallsBackToCEO(t *testing.T) {
 			f.task(t, escalationParent, "assignment-work", v1.TaskStateInProgress, "")
 			blockerMust(t, f.repo.UpdateTaskParentID(context.Background(), escalationBlocker, escalationParent))
 		},
+		"parent_terminal": func(t *testing.T, f *escalationFixture) {
+			f.task(t, escalationParent, "assignment-work", v1.TaskStateCancelled, escalationRunner)
+			blockerMust(t, f.repo.UpdateTaskParentID(context.Background(), escalationBlocker, escalationParent))
+		},
 	}
 	for name, arrange := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -288,4 +292,60 @@ func TestOfficeBlockerFailureOfficeCancelOfFailedBlockerDoesNotEscalate(t *testi
 	f.withCEO(t)
 	f.officeStatus(t, escalationBlocker, "cancelled", "")
 	f.wantEscalations(t, 0, "failed to cancelled through office")
+}
+
+// withTree makes the blocker and an in-tree dependent children of a tree root
+// whose runner would be the recipient while the root is live.
+func (f *escalationFixture) withTree(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	f.task(t, "tree-root", "assignment-work", v1.TaskStateInProgress, escalationRunner)
+	f.task(t, "tree-dependent", "assignment-work", v1.TaskStateTODO, "assignment-worker")
+	for _, child := range []string{escalationBlocker, "tree-dependent"} {
+		blockerMust(t, f.repo.UpdateTaskParentID(ctx, child, "tree-root"))
+	}
+	blockerMust(t, f.repo.CreateTaskBlocker(ctx,
+		&models.TaskBlocker{TaskID: "tree-dependent", BlockerTaskID: escalationBlocker}))
+}
+
+// @covers AC-OFFICE-BLOCKER-POLICY-002.1 AC-OFFICE-BLOCKER-POLICY-002.3
+func TestOfficeBlockerFailureTreeCancelEscalatesOutsideDependents(t *testing.T) {
+	f := newEscalationFixture(t)
+	f.withCEO(t)
+	f.withTree(t)
+	_, err := f.svc.CancelTaskTree(context.Background(), "tree-root", "user:test")
+	blockerMust(t, err)
+	run := f.wantEscalations(t, 1, "tree cancel")[0]
+	p := decodeEscalation(t, run)
+	if run.AgentProfileID != escalationCEO || p.TaskID != "" || p.BlockerTaskID != escalationBlocker ||
+		p.BlockerState != string(v1.TaskStateCancelled) {
+		t.Fatalf("recipient=%q payload=%+v", run.AgentProfileID, p)
+	}
+	if len(p.HeldDependentIDs) != 1 || p.HeldDependentIDs[0] != "dependent" {
+		t.Fatalf("held dependents=%v, want only the dependent outside the tree", p.HeldDependentIDs)
+	}
+}
+
+// @covers AC-OFFICE-BLOCKER-POLICY-002.5
+func TestOfficeBlockerFailureTreeHoldWithoutFailureTransition(t *testing.T) {
+	cases := map[string]func(t *testing.T, f *escalationFixture){
+		"pause": func(t *testing.T, f *escalationFixture) {
+			_, err := f.svc.PauseTaskTree(context.Background(), "tree-root")
+			blockerMust(t, err)
+		},
+		"cancel_failed_blocker": func(t *testing.T, f *escalationFixture) {
+			blockerMust(t, f.tasks.UpdateTaskState(context.Background(), escalationBlocker, v1.TaskStateFailed))
+			_, err := f.svc.CancelTaskTree(context.Background(), "tree-root", "user:test")
+			blockerMust(t, err)
+		},
+	}
+	for name, act := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newEscalationFixture(t)
+			f.withTree(t)
+			f.withCEO(t)
+			act(t, f)
+			f.wantEscalations(t, 0, name)
+		})
+	}
 }

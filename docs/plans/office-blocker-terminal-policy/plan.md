@@ -41,8 +41,8 @@ In scope:
 - Confirmation that every runtime `FAILED` writer already publishes
   `task.state_changed` (through `backendapp.taskRepositoryAdapter` and the task
   service). No new publisher is needed.
-- A `task_blocker_failed` wake: a `task.state_changed` subscriber plus the Office
-  status-change trigger in `reactToStatusChange`, recipient resolution, key,
+- A `task_blocker_failed` wake: a `task.state_changed` subscriber, the Office
+  status-change trigger in `reactToStatusChange`, a tree-cancel trigger, recipient resolution, key,
   registry entries, and a prompt branch.
 - The scheduler requirement and design cross-references, already updated in this
   package.
@@ -100,8 +100,8 @@ runs `/docs-maintainer` to confirm that no public page changes.
   dependent now stay held, and their coordinator is woken.
 - An archived failed blocker holds its dependents until the edge is removed. This
   matches Kanban, and the escalation tells the coordinator what to remove.
-- Tree cancel does not escalate. Dependents outside a cancelled tree stay held
-  until the tree is restored or the edge is removed.
+- Restoring a cancelled tree leaves an already-queued escalation stale. This is
+  accepted: the restore is the retry the escalation asks for.
 - A failed `task.state_changed` publication leaves its transition unescalated. The
   dependent stays held, and a `FAILED` blocker remains in the Inbox Failed bucket.
 - Agent sessions outside any Office run that cancel a blocker still wake the

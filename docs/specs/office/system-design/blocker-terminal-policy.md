@@ -55,7 +55,10 @@ stay owned by the shared runs service and the
   repository and publish only `office.task.status_changed`, never
   `task.state_changed`. They reach the scheduler through `reactToStatusChange`.
 - Tree cancel (`service.CancelTaskTree`) bulk-writes `CANCELLED` through
-  `BulkUpdateTaskState` under a restorable hold and publishes no state event.
+  `BulkUpdateTaskState` under a restorable hold. It publishes no state event, only
+  `task.tree_hold_created` with the hold.
+- Making every Office state write publish `task.state_changed` is tracked
+  separately in issue #5274.
 
 ## Single classifier
 
@@ -116,10 +119,16 @@ Add `scheduler/blocker_failure.go` with one evaluation,
   Office status vocabulary has no `failed`), unless the pre-update state was
   already `FAILED` or `CANCELLED` (AC-002.5). Evaluation errors are logged; they
   do not fail the status mutation.
+- The same subscriber registration also subscribes to `task.tree_hold_created`.
+  For a `cancel` hold it lists the hold members and evaluates each member the
+  hold moved to `CANCELLED`: members whose recorded prior status was `FAILED` or
+  `CANCELLED` are skipped (AC-002.5). Members inside the tree are now terminal,
+  so only dependents outside the tree count as held. `pause` holds change no
+  state and are ignored.
 
-The two triggers are disjoint: an Office status write never publishes
-`task.state_changed`. Both derive the same occurrence key, so a transition seen
-by both would still queue one run.
+The three triggers are disjoint: neither an Office status write nor a tree
+cancel publishes `task.state_changed`. All derive the same occurrence key, so a
+transition seen by more than one would still queue one run.
 
 Evaluation steps:
 
@@ -142,11 +151,14 @@ for its dependents, not the blocker's type.
 
 ## Recipient resolution
 
-1. When the blocker has a `parent_id`, use `GetTaskAssignee(parent)`. A non-empty
-   runner is the recipient, and the run's `task_id` is the parent, as for
-   `task_children_completed`. The run never names the failed blocker as its task,
+1. When the blocker has a `parent_id`, read the parent with
+   `GetTaskExecutionFields`. When the parent is not `COMPLETED`, `FAILED` or
+   `CANCELLED` and has a runner, that runner is the recipient, and the run's
+   `task_id` is the parent, as for `task_children_completed`. A terminal parent no
+   longer coordinates its children; after a tree cancel the parent is usually
+   inside the cancelled tree. The run never names the failed blocker as its task,
    so the wake cannot launch the recipient on the failed task.
-2. Otherwise, use the first CEO agent in the workspace with a taskless run. Use the
+2. Otherwise, including a missing parent row, use the first CEO agent in the workspace with a taskless run. Use the
    same `ListAgentInstancesFiltered(role=ceo)` lookup that `queueCEOAgentError`
    uses. Step 1 reads `parent_id` with `GetTaskParentID`.
 3. When neither step yields a recipient, log
@@ -181,14 +193,12 @@ orchestrator's runtime callback and early launch-failure writer go through
 `backendapp.taskRepositoryAdapter`, whose `UpdateTaskStateIfNotArchived` and
 `UpdateTaskStateIfPrimarySessionState` call the task service writers that publish
 on a committed change and stay silent for an archived skip. The existing
-task-service tests pin that publication. Office status changes are covered by the
-`reactToStatusChange` trigger instead. This design adds no publisher.
+task-service tests pin that publication. Office status changes and tree cancel
+are covered by their own triggers instead. This design adds no publisher.
 
-Tree cancel is excluded. It cancels a whole subtree under a hold that
-`RestoreTaskTree` reverses, the operator who placed it is the actor, and the
-recipient rule would usually name the runner of a parent inside the cancelled
-tree. Dependents outside the tree stay held until the tree is restored or their
-edge is removed.
+`RestoreTaskTree` returns members to their prior states. An escalation already
+queued for a restored blocker is then stale, which is harmless: restoring is the
+retry it asks for.
 
 ## Prompt and registry
 
@@ -247,7 +257,10 @@ edges, real writers, the real bus, and actual run admission:
   give zero `task_blockers_resolved`. B is then retried to `COMPLETED`, which gives
   one.
 - Step path: a move to a Cancelled-named step without `COMPLETED` gives zero.
-- Escalation: one run for a parent's runner, CEO fallback, no recipient → Warn and
+- Escalation: one run for a parent's runner, CEO fallback (no parent, runner-less
+  parent, terminal parent), Office status cancel as user and agent, tree cancel
+  (outside dependents only; pause hold and already-failed member → zero), no
+  recipient → Warn and
   zero, no held dependents → zero, duplicate delivery → one, refail after retry →
   two, two distinct blockers → two, `FAILED`→`CANCELLED` → zero, and terminal,
   archived, or Kanban dependents → zero.

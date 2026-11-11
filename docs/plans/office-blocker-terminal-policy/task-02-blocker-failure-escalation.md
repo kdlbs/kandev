@@ -130,12 +130,16 @@ design:
   `task.state_changed`; manual testing found a UI cancel that escalated nothing.
   `reactToStatusChange` now runs the same evaluation on `cancelled`, and the
   occurrence key uses the blocker row's committed `updated_at` so both triggers
-  share one identity. Tree cancel is excluded as a restorable operator hold.
+  share one identity. Tree cancel (`task.tree_hold_created`, cancel mode) runs it
+  for each member it moved to `CANCELLED`, and a terminal parent's runner is no
+  longer a recipient (CEO fallback). Making Office state writes publish
+  `task.state_changed` is tracked in issue #5274.
 
 Tests: `blocker_failure_escalation_test.go` (recipient, CEO fallback, no-recipient,
 non-held dependents, `FAILED`→`CANCELLED`, stale event, success, duplicate delivery,
 refail, distinct blockers, Office status path as user and agent, Office cancel of
-a failed blocker), `prompt_blocker_failed_test.go`, and
+a failed blocker, terminal parent, tree cancel, pause hold, tree cancel of a failed
+blocker), `prompt_blocker_failed_test.go`, and
 `backendapp/office_blocker_subscriber_wiring_test.go` (activation registration). The
 activation check is a source guard, matching `scheduler_wiring_test.go`, rather than
 a real-bus boot test.
