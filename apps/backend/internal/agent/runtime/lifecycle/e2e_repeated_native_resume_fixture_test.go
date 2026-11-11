@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,6 +21,49 @@ import (
 )
 
 const repeatedNativeResumeFixtureMarker = "KANDEV_REPEATED_NATIVE_RESUME_FIXTURE:"
+
+func openRepeatedNativeResumeFixtureJournal(ctx context.Context, path string) (*journal.Journal, error) {
+	const attemptTimeout = 50 * time.Millisecond
+	const retryInterval = 50 * time.Millisecond
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		retained, err := journal.Open(journal.Config{Path: path, OpenTimeout: attemptTimeout})
+		if err == nil {
+			return retained, nil
+		}
+		var openErr *journal.OpenError
+		if !errors.As(err, &openErr) || openErr.Reason() != journal.OpenReasonLockTimeout {
+			return nil, err
+		}
+		if !time.Now().Before(deadline) {
+			return nil, fmt.Errorf("timed out waiting for the existing journal owner to release its lock: %w", err)
+		}
+		timer := time.NewTimer(retryInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, fmt.Errorf("waiting for the existing journal owner to release its lock: %w", ctx.Err())
+		case <-timer.C:
+		}
+	}
+}
+
+func TestRepeatedNativeResumeFixtureWaitsForJournalRelease(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "delivery.bbolt")
+	owner, err := journal.Open(journal.Config{Path: path})
+	require.NoError(t, err)
+	release := time.AfterFunc(200*time.Millisecond, func() {
+		_ = owner.Close()
+	})
+	t.Cleanup(func() {
+		release.Stop()
+		_ = owner.Close()
+	})
+
+	fixture, err := openRepeatedNativeResumeFixtureJournal(t.Context(), path)
+	require.NoError(t, err)
+	require.NoError(t, fixture.Close())
+}
 
 type repeatedNativeResumeFixtureResult struct {
 	SubmissionID           string `json:"submission_id"`
@@ -100,7 +144,7 @@ func seedRepeatedNativeResumeFixture(t *testing.T, root, sessionID, shape string
 
 	journalRoot := filepath.Join(root, ".kandev")
 	capability := journal.CheckStorage(journalRoot, sessionID)
-	retained, err := journal.Open(journal.Config{Path: capability.Path})
+	retained, err := openRepeatedNativeResumeFixtureJournal(ctx, capability.Path)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, retained.Close()) })
 
