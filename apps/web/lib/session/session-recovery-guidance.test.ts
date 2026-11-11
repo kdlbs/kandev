@@ -18,6 +18,7 @@ const SESSION_ID = "session-1";
 const BLOCK_ID = "block-1";
 const INCARNATION_ID = "incarnation-1";
 const UNKNOWN_OUTCOME = "unknown_prompt_outcome";
+const RECOVERY_TIMESTAMP = "2026-11-11T00:00:00Z";
 
 const target = (overrides: Partial<SessionRecoveryGuidanceIdentity> = {}) => ({
   taskId: TASK_ID,
@@ -126,8 +127,8 @@ describe("session recovery guidance validation", () => {
       id: sessionId(SESSION_ID),
       task_id: taskId(TASK_ID),
       state: "FAILED",
-      started_at: "2026-11-11T00:00:00Z",
-      updated_at: "2026-11-11T00:00:00Z",
+      started_at: RECOVERY_TIMESTAMP,
+      updated_at: RECOVERY_TIMESTAMP,
       metadata: {
         agent_delivery_recovery: {
           phase: "uncertain",
@@ -148,7 +149,7 @@ describe("session recovery guidance validation", () => {
           expected_generation: 3,
           reason: UNKNOWN_OUTCOME,
           consumer_reference: "agent_delivery",
-          updated_at: "2026-11-11T00:00:00Z",
+          updated_at: RECOVERY_TIMESTAMP,
         },
       ],
     };
@@ -170,6 +171,68 @@ describe("session recovery guidance validation", () => {
 
     expect(after.requestKey).toBe(before.requestKey);
   });
+});
+
+describe("resolved delivery projections", () => {
+  it.each(["recovered", "settled", "restored"] as const)(
+    "does not treat a prior %s delivery phase as recovery of a newer failure",
+    (phase) => {
+      const owner = {};
+      const session: TaskSession = {
+        id: sessionId(SESSION_ID),
+        task_id: taskId(TASK_ID),
+        state: "FAILED",
+        started_at: RECOVERY_TIMESTAMP,
+        updated_at: RECOVERY_TIMESTAMP,
+        metadata: {
+          agent_delivery_recovery: {
+            phase,
+            revision: 4,
+            session_id: SESSION_ID,
+            agent_execution_id: "execution-1",
+            submission_id: "previous-submission",
+            stream_id: "stream-1",
+            incarnation_id: INCARNATION_ID,
+            harness_generation: 3,
+            prompt_generation: 1,
+          },
+        },
+        session_recovery_blocks: [],
+      };
+      const identity = sessionRecoveryGuidanceIdentityFromSession(
+        TASK_ID,
+        session,
+        "later-failure",
+      );
+      const operation = beginSessionRecoveryGuidanceOperation(owner, identity);
+      const laterFailure = new WebSocketRequestError("Native state is missing", "CONFLICT", {
+        kind: "session_restore_required",
+        recovery_action: "continue_from_history",
+        reason: "native_state_missing",
+        session_id: SESSION_ID,
+      });
+
+      expect(publishSessionRecoveryGuidance(owner, operation, laterFailure, identity)).toBe(true);
+      expect(selectSessionRecoveryGuidance(owner, identity)).not.toBeNull();
+
+      const nextRecoveryProjection: TaskSession = {
+        ...session,
+        metadata: {
+          ...session.metadata,
+          agent_delivery_recovery: {
+            ...(session.metadata?.agent_delivery_recovery as Record<string, unknown>),
+            revision: 5,
+          },
+        },
+      };
+      const projectedIdentity = sessionRecoveryGuidanceIdentityFromSession(
+        TASK_ID,
+        nextRecoveryProjection,
+        "later-failure",
+      );
+      expect(selectSessionRecoveryGuidance(owner, projectedIdentity)).toBeNull();
+    },
+  );
 });
 
 describe("session recovery guidance ownership", () => {

@@ -213,3 +213,10 @@ Review follow-up, 2026-11-11:
 - Focused recovery Vitest run passed: 15 files, 100 tests. `pnpm run typecheck`, `pnpm run lint`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet` passed.
 - `pnpm run build:vite` and `make -C apps/backend build` passed. Targeted orchestrator and handler tests passed. `golangci-lint run ./internal/orchestrator ./internal/orchestrator/handlers --new-from-rev=HEAD --timeout=10m --concurrency=2` passed with zero issues.
 - Issue 5256 remains a hard dependency for Task 03 real-backend acceptance. That acceptance remains incomplete and no successful real recovery is claimed.
+
+PR fixup follow-up, 2026-11-11:
+
+- Resolved guidance now compares recovery evidence against the identity captured when the operation began. A resolved delivery phase retires guidance only when the matching submission has a newer projection revision; an observed block that disappears also retires the hint. An omitted block projection remains distinct from a block observed and later removed.
+- Added a regression for prior `recovered`, `settled`, and `restored` metadata followed by a later failure and a newer resolution projection. Existing provider and hook regressions cover external native recovery, restoration of the composer, same-generation recovery projected before the successful response, and rejection of a late failure.
+- Focused recovery Vitest run passed: 13 files, 136 tests. `pnpm run typecheck`, `pnpm run lint`, and `pnpm run build:vite` passed. The changed behavior is session identity and projection reconciliation only; it does not change layout, touch behavior, or viewport interaction, so the provider and hook tests cover the phone and desktop outcome without a new mobile E2E case.
+- Task 03 remains in progress. Issue 5256 remains a separate hard dependency; real-backend acceptance is incomplete, and no successful real recovery is claimed.

@@ -20,6 +20,7 @@ export type SessionRecoveryGuidanceIdentity = {
   incarnationId?: string;
   reason?: string;
   deliveryPhase?: AgentDeliveryRecovery["phase"];
+  deliveryRevision?: number;
   deliverySubmissionId?: string;
   openDeliveryBlockIds?: string[];
 };
@@ -101,6 +102,7 @@ function sessionDeliveryIdentityFields(
   | "incarnationId"
   | "reason"
   | "deliveryPhase"
+  | "deliveryRevision"
   | "deliverySubmissionId"
   | "openDeliveryBlockIds"
 > {
@@ -111,6 +113,7 @@ function sessionDeliveryIdentityFields(
     | "incarnationId"
     | "reason"
     | "deliveryPhase"
+    | "deliveryRevision"
     | "deliverySubmissionId"
     | "openDeliveryBlockIds"
   > = {};
@@ -126,7 +129,10 @@ function sessionDeliveryIdentityFields(
     fields.incarnationId = projection.recovery.incarnationId;
     fields.deliverySubmissionId = projection.recovery.submissionId;
   }
-  if (projection.recovery) fields.deliveryPhase = projection.recovery.phase;
+  if (projection.recovery) {
+    fields.deliveryPhase = projection.recovery.phase;
+    fields.deliveryRevision = projection.recovery.revision;
+  }
   if (projection.openBlockIds !== undefined) {
     fields.openDeliveryBlockIds = projection.openBlockIds;
   }
@@ -207,12 +213,16 @@ export function publishSessionRecoveryGuidance(
     return false;
 
   const identity = mergeIdentity(operation.identity, currentIdentity, details);
+  const capturedBlockId = identity.blockId;
   const observedBlockId =
-    identity.blockId && currentIdentity.openDeliveryBlockIds?.includes(identity.blockId)
-      ? identity.blockId
+    capturedBlockId &&
+    [operation.identity.openDeliveryBlockIds, currentIdentity.openDeliveryBlockIds].some(
+      (blocks) => blocks?.includes(capturedBlockId) === true,
+    )
+      ? capturedBlockId
       : undefined;
   const entry = { details, identity, operationId: operation.operationId, observedBlockId };
-  if (guidanceResolvedByProjection(entry, currentIdentity)) {
+  if (guidanceResolvedByProjection(entry, currentIdentity, operation.identity)) {
     invalidateSessionRecoveryGuidance(owner, identity.taskId, identity.sessionId);
     return false;
   }
@@ -357,12 +367,13 @@ function matchesKnownIncidentFields(
 function guidanceResolvedByProjection(
   entry: SessionRecoveryGuidanceEntry,
   current: SessionRecoveryGuidanceIdentity,
+  baseline: SessionRecoveryGuidanceIdentity = entry.identity,
 ) {
   if (isAuthoritativelyUsableSession(entry.identity, current)) return true;
   const stored = entry.identity;
   if (!sameIncidentGeneration(stored, current)) return false;
   return (
-    isResolvedDeliveryProjection(stored, current) || hasObservedBlockBeenResolved(entry, current)
+    isResolvedDeliveryProjection(baseline, current) || hasObservedBlockBeenResolved(entry, current)
   );
 }
 
@@ -395,10 +406,15 @@ function isResolvedDeliveryProjection(
   const matchingSubmission =
     stored.deliverySubmissionId !== undefined &&
     stored.deliverySubmissionId === current.deliverySubmissionId;
+  const newerProjection =
+    stored.deliveryRevision !== undefined &&
+    current.deliveryRevision !== undefined &&
+    current.deliveryRevision > stored.deliveryRevision;
   if (
     isResolvedDeliveryPhase(current.deliveryPhase) &&
     !storedBlockRemainsOpen &&
-    (matchingSubmission || deliveryBlocks?.length === 0)
+    matchingSubmission &&
+    newerProjection
   ) {
     return true;
   }
@@ -494,6 +510,7 @@ function mergeIdentity(
     generation: captured.generation ?? current.generation ?? details.generation,
     reason: captured.reason ?? current.reason ?? details.reason,
     deliveryPhase: current.deliveryPhase ?? captured.deliveryPhase,
+    deliveryRevision: current.deliveryRevision ?? captured.deliveryRevision,
     deliverySubmissionId: captured.deliverySubmissionId ?? current.deliverySubmissionId,
     openDeliveryBlockIds: current.openDeliveryBlockIds ?? captured.openDeliveryBlockIds,
     sessionState: captured.sessionState ?? current.sessionState,
