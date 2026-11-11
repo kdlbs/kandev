@@ -170,6 +170,36 @@ The operating guide must retain both permission prerequisites.
 The npm [OIDC API](https://api-docs.npmjs.com/#tag/oidc) defines the audience, package exchange route, and response fields.
 The npm [publisher guide](https://docs.npmjs.com/trusted-publishers/) defines package-specific trust and allowed actions.
 
+### Exchange response diagnostics
+
+The helper distinguishes an HTTP rejection from a response that fails local validation.
+An HTTP 201 response does not establish that every returned field is valid.
+A local validation error does not establish that the trusted publisher rejected authentication.
+
+Keep the existing token acceptance rules during the diagnostic repair.
+Report one fixed reason for each failed condition.
+These conditions cover unreadable JSON, invalid body shape, invalid token type, missing token, invalid creation date, invalid expiry, and expired tokens.
+Use `npm_exchange_response` for malformed successful responses.
+Keep `npm_authentication` for HTTP authentication rejection and an expired exchange token.
+Preserve the package and HTTP status in the error.
+
+The failure summary includes the reason, package, HTTP status, workflow SHA, and checkout SHA.
+`sdk-runtime.mjs` owns the protected-context checks and throws `ReleaseContextError` with the failed setting and its required value.
+It never stores the supplied value in that error.
+The preflight derives a fixed reason from the known setting and reports its required value.
+An unexpected context exception retains a fixed fallback message.
+Only fixed diagnostic labels can describe response fields.
+Never interpolate a response value, token fragment, unknown property name, body, or underlying exception message.
+The error message identifies the failed validation condition.
+Publisher guidance applies to authentication rejection.
+Response-validation guidance directs maintainers to compare the named condition with the npm API and client contract.
+
+Tests cover each validation condition separately and use a fixed clock.
+The documented success fixture remains accepted.
+Every invalid fixture remains rejected before release preparation.
+An acceptance-rule correction requires evidence of the actual incompatible response shape.
+The diagnostic repair does not infer that shape from a generic error message.
+
 ## Workflow modes
 
 `prepare` gains the new dependency and an explicit status-function condition.
@@ -221,3 +251,4 @@ No browser scenario applies to this infrastructure change.
 - [Original SDK publication](../../../plans/plugin-sdk-publishing/task-04-stable-publication.md).
 - [Immutable SDK recovery](../../../plans/immutable-release-sdk-recovery/plan.md).
 - [Implementation plan](../../../plans/npm-publication-reliability/plan.md).
+- [Preflight response diagnostics repair](../../../plans/npm-preflight-response-diagnostics/plan.md).
