@@ -3246,6 +3246,7 @@
   "questionReviewInB": "在 B 中",
   "questionReviewChoiceName": "選項：{{choice}}",
   "questionReviewFlipShort": "翻轉",
+  "threadExtractChipLabel": "{{author}}：“{{quote}}”",
   "rootOpenInEditor": "在編輯器中開啟",
   "rootOpenTerminal": "在此開啟終端機",
   "rootShowInFiles": "在檔案中顯示",

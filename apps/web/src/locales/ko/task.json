@@ -3246,6 +3246,7 @@
   "questionReviewInB": "B에 있음",
   "questionReviewChoiceName": "선택지: {{choice}}",
   "questionReviewFlipShort": "뒤집기",
+  "threadExtractChipLabel": "{{author}}의 “{{quote}}”",
   "rootOpenInEditor": "편집기에서 열기",
   "rootOpenTerminal": "여기에서 터미널 열기",
   "rootShowInFiles": "파일에서 표시",

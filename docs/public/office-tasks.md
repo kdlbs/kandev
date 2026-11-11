@@ -96,6 +96,8 @@ Removing a task association does not delete the workspace label.
 
 Comments are durable task discussion and can wake the relevant agent. In Work they target the primary agent; in Review or Approval the default workflow targets participants who have not yet decided. State what you want the recipient to do, such as “Address the two accessibility findings and request another review.”
 
+To give feedback on an exact passage in an agent comment, select the passage, enter a remark, and choose **Add**. The quote and remark stay in the composer until you send the task comment. On a phone, use **Add** in the selection drawer. Mentions in your remark can route the comment to agents. Mentions copied from the source passage stay quoted and do not start another agent run.
+
 Use **Advanced** mode when you need the task's execution workbench and session conversation. **Simple** mode returns to the Office task view. See [Sessions and review](sessions-and-review.md) and [Developer tools](developer-tools.md) for chat, terminal, editor, changes, and diff behavior.
 
 ## Keep deliverables in documents

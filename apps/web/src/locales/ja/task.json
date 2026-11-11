@@ -3246,6 +3246,7 @@
   "questionReviewInB": "B に表示中",
   "questionReviewChoiceName": "選択肢：{{choice}}",
   "questionReviewFlipShort": "切替",
+  "threadExtractChipLabel": "{{author}}：「{{quote}}」",
   "rootOpenInEditor": "エディターで開く",
   "rootOpenTerminal": "ここでターミナルを開く",
   "rootShowInFiles": "ファイルで表示",

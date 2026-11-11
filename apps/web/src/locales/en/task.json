@@ -3246,6 +3246,7 @@
   "questionReviewInB": "In B",
   "questionReviewChoiceName": "Choice: {{choice}}",
   "questionReviewFlipShort": "Flip",
+  "threadExtractChipLabel": "{{author}}: “{{quote}}”",
   "rootOpenInEditor": "Open in editor",
   "rootOpenTerminal": "Open terminal here",
   "rootShowInFiles": "Show in Files",

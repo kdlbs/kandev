@@ -3246,6 +3246,7 @@
   "questionReviewInB": "Em B",
   "questionReviewChoiceName": "Opção: {{choice}}",
   "questionReviewFlipShort": "Inverter",
+  "threadExtractChipLabel": "{{author}}: «{{quote}}»",
   "rootOpenInEditor": "Abrir no editor",
   "rootOpenTerminal": "Abrir terminal aqui",
   "rootShowInFiles": "Mostrar em Ficheiros",
