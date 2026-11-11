@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { useStore } from "zustand";
 import { useOptionalAppStoreApi } from "@/components/state-provider";
 import type { TaskSession } from "@/lib/types/http";
@@ -27,7 +27,9 @@ export function useSessionRecoveryGuidance(
     [errorStamp, session, sessionId, taskId],
   );
   const identityRef = useRef(identity);
-  identityRef.current = identity;
+  useLayoutEffect(() => {
+    identityRef.current = identity;
+  }, [identity]);
   const store = getSessionRecoveryGuidanceStore(owner);
   const key = taskId && sessionId ? sessionRecoveryGuidanceKey(taskId, sessionId) : null;
   const entry = useStore(store, (state) => {

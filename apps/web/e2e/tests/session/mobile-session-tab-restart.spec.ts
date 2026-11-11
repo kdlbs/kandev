@@ -200,6 +200,10 @@ test("mobile: keeps typed continuation guidance after Restart closes its menus",
   await continuation.tap();
   expect(await retry).toBeInstanceOf(Error);
   await expect(continuation).toBeVisible();
+  await expect(continuation).toBeEnabled();
+  const failure = card.getByTestId("session-recovery-error");
+  await expect(failure).toBeVisible();
+  await expect(failure).toHaveText("Failed to resume session");
   expect(routed?.requests.filter((request) => request.action === "session.recover")).toHaveLength(
     1,
   );
