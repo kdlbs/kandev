@@ -115,7 +115,7 @@ func useCountingCapacityManager(
 		repoForExecutionLookup: repo, isAgentRunning: true,
 	}}
 	svc.agentManager = manager
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.scheduler = schedpkg.NewScheduler(queue.NewTaskQueue(10), svc.executor, svc.taskRepo, testLogger(), schedpkg.SchedulerConfig{})
 	return manager
 }

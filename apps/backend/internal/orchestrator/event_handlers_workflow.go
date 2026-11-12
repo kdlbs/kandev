@@ -504,6 +504,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	// Get the target step
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, toStepID)
 	if err != nil {
+		s.markStepCompletionBlocked(ctx, taskID, fromStep.ID, sessionID, models.StepCompletionReasonDestinationUnavailable)
 		s.logger.Warn("failed to get target workflow step",
 			zap.String("target_step_id", toStepID),
 			zap.Error(err))
@@ -844,7 +845,7 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 		return
 	}
 	queuePromotionToken := queuePromotionLifecycleToken(task)
-	if data.QueuePromotion && !s.claimTaskEventMetadata(ctx, task, models.MetaKeyQueuePromotionPending) {
+	if data.QueuePromotion && !s.claimMovedPromotion(ctx, task, data.StepTransitionID) {
 		return
 	}
 
@@ -895,6 +896,33 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 		return
 	}
 	s.handleTaskMovedWithBarrier(ctx, data, manualBarrier, queuePromotionToken)
+}
+
+func (s *Service) claimMovedPromotion(ctx context.Context, task *models.Task, entryID int64) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	if entryID < 0 {
+		return false
+	}
+	if _, ok := task.Metadata[models.MetaKeyQueuePromotionPending]; !ok {
+		return false
+	}
+	claimer, ok := s.repo.(interface {
+		ClaimQueuePromotionEntry(context.Context, string, int64) (bool, error)
+	})
+	if !ok {
+		if entryID == 0 {
+			return s.claimTaskEventMetadata(ctx, task, models.MetaKeyQueuePromotionPending)
+		}
+		s.logger.Warn("task.moved: repository cannot claim a specific promotion entry", zap.String("task_id", task.ID))
+		return false
+	}
+	claimed, err := claimer.ClaimQueuePromotionEntry(ctx, task.ID, entryID)
+	if err != nil {
+		s.logger.Warn("task.moved: failed to claim promotion entry", zap.String("task_id", task.ID), zap.Error(err))
+	}
+	return err == nil && claimed
 }
 
 // workflowMovePendingOptions decodes the one-shot entry options carried on a
@@ -5869,7 +5897,8 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 	if ok && queuedMsg != nil && completionEffect != nil {
 		hasInput, inputErr := s.queuedMessageHasDispatchInput(ctx, queuedMsg)
 		if hasInput && inputErr == nil {
-			if err := s.settleQueuedDeliveryPredecessor(ctx, taskID, sessionID, completionEffect); err != nil {
+			settleCtx := withSettledDeliverySessionStateGuardHeld(ctx)
+			if err := s.settleQueuedDeliveryPredecessor(settleCtx, taskID, sessionID, completionEffect); err != nil {
 				s.logger.Warn("failed to settle delivery before queued successor",
 					zap.String("session_id", sessionID), zap.Error(err))
 				s.requeueMessageForReservation(ctx, &queuedDispatchReservation{identity: queueIdentity}, queuedMsg, queuedMsg.QueuedBy)
@@ -6418,6 +6447,7 @@ func (s *Service) injectAutoStartRuntimeContext(
 		IncludeCoordinatorTaskControls: !configMode,
 		IncludeTaskTitleTool:           !configMode && titleOwner,
 		IncludeCanvasGuidance:          includeCanvasGuidance,
+		IncludeWorktreeAdoption:        s.worktreeAdoptionGuidance(state.ctx, state.taskID, state.sessionID),
 		Autopilot:                      taskForPrompt != nil && taskForPrompt.Autopilot,
 		IncludeUserQuestionTool:        taskForPrompt == nil || !taskForPrompt.Autopilot,
 		IncludeParentQuestionTool:      taskForPrompt != nil && taskForPrompt.Autopilot && taskForPrompt.ParentID != "",
@@ -7875,6 +7905,7 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 		PreloadedState: &state,
 	})
 	if err != nil {
+		s.releaseTurnCompletionGenerationForCompletion(ctx, taskID, currentStep.ID, session)
 		s.logger.Error("workflow engine error on_turn_complete",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
@@ -8014,6 +8045,18 @@ func (s *Service) acquireTurnCompletionCriticalSection(
 	}
 	s.turnCompletionConsumedGeneration.Store(session.ID, session.UpdatedAt)
 	return unlock, current, true
+}
+
+func (s *Service) releaseTurnCompletionGenerationForCompletion(ctx context.Context, taskID, stepID string, session *models.TaskSession) {
+	if session == nil {
+		return
+	}
+	if _, ok := models.WorkflowStepCompletionGuardFromContext(ctx, taskID, stepID); !ok {
+		return
+	}
+	// Only rewind the generation this exact completion attempt consumed. A newer
+	// session write keeps its own generation and remains deduplicated.
+	s.turnCompletionConsumedGeneration.CompareAndDelete(session.ID, session.UpdatedAt)
 }
 
 func (s *Service) prepareEngineTurnCompletion(
@@ -8380,6 +8423,10 @@ func (s *Service) recoverCompletedTurnAfterWorkflowPreflightFailure(
 		return
 	}
 	s.setSessionWaitingForInput(ctx, taskID, currentSession.ID, currentSession)
+	// Early settled-state convergence may already have moved the session to
+	// WAITING, which makes the helper above a no-op. Reconcile REVIEW here so
+	// the failed workflow preflight cannot leave an idle task IN_PROGRESS.
+	s.writeTaskReviewState(ctx, taskID, currentSession.ID)
 }
 
 // applyEngineTransitionWithCommitMode adapts bool-only commit callbacks to the
@@ -8427,6 +8474,7 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 	// (e.g., a template-level alias like "review" that doesn't resolve to a real UUID).
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, result.ToStepID)
 	if err != nil {
+		s.markStepCompletionBlocked(ctx, taskID, result.FromStepID, session.ID, models.StepCompletionReasonDestinationUnavailable)
 		recordWorkflowTransitionError(ctx, err)
 		s.logger.Warn("target step not found, skipping transition",
 			zap.String("step_id", result.ToStepID),
@@ -8436,6 +8484,7 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 	}
 	if sessionLifecycle {
 		if err := s.preflightWorkflowStepCredentials(ctx, taskID, session, targetStep); err != nil {
+			s.markStepCompletionBlocked(ctx, taskID, result.FromStepID, session.ID, models.StepCompletionReasonDestinationUnavailable)
 			recordWorkflowTransitionError(ctx, err)
 			s.logger.Warn("target profile credential preflight failed, skipping transition",
 				zap.String("task_id", taskID),
@@ -8481,6 +8530,7 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 	}
 	commitResult, err := commit(applyCtx)
 	if err != nil {
+		s.releaseTurnCompletionGenerationForCompletion(ctx, taskID, result.FromStepID, session)
 		recordWorkflowTransitionError(ctx, err)
 		s.logger.Error("failed to apply engine transition",
 			zap.String("task_id", taskID),
@@ -8490,6 +8540,7 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 		return false
 	}
 	if !commitResult.Applied {
+		s.releaseTurnCompletionGenerationForCompletion(ctx, taskID, result.FromStepID, session)
 		recordWorkflowTransitionError(ctx, errors.New("workflow transition commit was not applied"))
 		return false
 	}

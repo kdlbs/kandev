@@ -249,7 +249,7 @@ func TestLaunchResumeRecoveryActionReportsBlockedRouteAsError(t *testing.T) {
 	}
 	agentMgr := &mockAgentManager{isAgentRunningFn: func(context.Context, string) bool { return false }}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	response, err := svc.launchResume(ctx, &LaunchSessionRequest{
 		TaskID: "task1", SessionID: "session1", RecoveryAction: recoveryActionResume,

@@ -19,12 +19,13 @@ const MaxCompleteProviderDiagnosticBytes = 1024
 var (
 	providerMessageURLPattern         = regexp.MustCompile(`(?i)https?://[^\s]+`)
 	providerMessageIdentifierPattern  = regexp.MustCompile(`(?i)\b(?:wrk|ses|run)_[A-Za-z0-9_-]+\b`)
-	providerMessageDailyReasonPattern = regexp.MustCompile(`(?im)^(\s*(?:AI_APICallError:\s*)?rate\s+limit\s+exceeded:\s*)(free-models-per-day\b\S*|limit_rpd/\S+)`)
+	providerMessageDailyReasonPattern = regexp.MustCompile(`(?im)^([ \t]*(?:AI_APICallError:[ \t]*)?rate[ \t]+limit[ \t]+exceeded:[ \t]*)(free-models-per-day\b\S*|limit_rpd/\S+)`)
 )
 
 // SanitizeProviderMessage redacts likely credentials (via
 // routingerr.SanitizeFullUnbounded), strips URLs, redacts workspace/session/run
-// identifiers, collapses internal whitespace, and trims trailing punctuation
+// identifiers, collapses whitespace within lines while preserving line
+// boundaries, and trims trailing punctuation
 // from a raw provider-supplied error string, bounding it to
 // MaxProviderMessageBytes. It is the single sanitized-projection transform the
 // ACP transport layer and the recovery-evidence layer must observe
@@ -36,11 +37,17 @@ var (
 // applies its own MaxProviderMessageBytes cut below, on top of any redaction
 // the shared tier already performed.
 func SanitizeProviderMessage(message string) string {
+	message = strings.ReplaceAll(message, "\r\n", "\n")
+	message = strings.ReplaceAll(message, "\r", "\n")
 	message = preserveProviderDailyReason(message)
 	message = routingerr.SanitizeFullUnbounded(message)
 	message = providerMessageURLPattern.ReplaceAllString(message, "")
 	message = providerMessageIdentifierPattern.ReplaceAllString(message, "[redacted]")
-	message = strings.Join(strings.Fields(message), " ")
+	lines := strings.Split(message, "\n")
+	for i, line := range lines {
+		lines[i] = strings.Join(strings.Fields(line), " ")
+	}
+	message = strings.Join(lines, "\n")
 	message = strings.TrimSpace(strings.TrimRight(message, ".:;,-"))
 	if len(message) > MaxProviderMessageBytes {
 		message = message[:MaxProviderMessageBytes]
@@ -106,6 +113,10 @@ type ProviderError struct {
 	// RPCCode is the JSON-RPC error code from a terminal ACP prompt error,
 	// carried verbatim. JSON-RPC forbids code 0, so 0 means absent.
 	RPCCode int `json:"rpc_code,omitempty"`
+	// HTTPStatus is a provider HTTP error status supplied as structured metadata.
+	HTTPStatus int `json:"http_status,omitempty"`
+	// ProviderCode is an opaque, bounded provider error code, not a routing code.
+	ProviderCode string `json:"provider_code,omitempty"`
 	// ErrorKind is the adapter-declared error kind from a terminal ACP prompt
 	// error's structured Data, allowlisted and validated before it crosses the
 	// boundary.

@@ -18,8 +18,22 @@ test("release mutations require the canonical protected workflow and confirmed s
   assertReleaseContext(approved);
   for (const key of Object.keys(approved))
     assert.throws(
-      () => assertReleaseContext({ ...approved, [key]: "other" }),
-      /release|scope|workflow|runner/,
+      () =>
+        assertReleaseContext({
+          ...approved,
+          [key]: "untrusted-context-secret",
+        }),
+      (error) => {
+        assert.equal(error.name, "ReleaseContextError");
+        assert.equal(error.setting, key);
+        assert.equal(error.expected, approved[key]);
+        assert.equal(
+          error.message,
+          `SDK release requires ${key}=${approved[key]}`,
+        );
+        assert.equal(error.message.includes("untrusted-context-secret"), false);
+        return true;
+      },
     );
 });
 test("SDK npm publication has fresh config and no token fallback", () => {

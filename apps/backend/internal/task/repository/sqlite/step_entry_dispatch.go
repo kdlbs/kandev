@@ -1,6 +1,9 @@
 package sqlite
 
-import "context"
+import (
+	"context"
+	"github.com/kandev/kandev/internal/task/models"
+)
 
 // StepEntryDispatcher executes a step's session-independent on_enter
 // sequence for one committed arrival. Implemented in production by an
@@ -44,5 +47,8 @@ func (r *Repository) dispatchStepEntry(ctx context.Context, taskID, workflowID, 
 	}
 	// The transition is committed before this hook runs. Do not let request
 	// cancellation strand the committed entry before its on_enter actions run.
+	// Human admission provenance ends at the committed mutation. Entry actions
+	// execute independently against the destination they just entered.
+	ctx = models.WithOfficeHumanCompletionIntent(ctx, models.OfficeHumanCompletionIntent{})
 	r.stepEntryDispatcher.DispatchStepEntry(context.WithoutCancel(ctx), taskID, workflowID, stepID, entryID, markerEntryID)
 }

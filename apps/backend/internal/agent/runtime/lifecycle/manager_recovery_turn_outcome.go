@@ -138,6 +138,9 @@ func (m *Manager) publishRecoveredExecutionRunning(ctx context.Context, executio
 	if !m.runtimeExecutionCurrent(execution) {
 		return
 	}
+	if !m.recoveredAvailabilityCompatible(ctx, execution) {
+		return
+	}
 	// Only an unknown generation can be adopted from a live completion.
 	// Authenticated restored generations retain their stale-event fence.
 	execution.promptLifecycleMu.Lock()
@@ -170,6 +173,9 @@ func (m *Manager) publishRecoveredExecutionReady(ctx context.Context, execution 
 	if execution == nil {
 		return
 	}
+	if !m.recoveredAvailabilityCompatible(ctx, execution) {
+		return
+	}
 	execution.recoveredPromptGenerationPending.Store(false)
 	if err := m.markReadyEventWithContext(ctx, execution.ID, events.AgentReady, false); err != nil {
 		m.logger.Error("failed to mark idle recovered execution as ready",
@@ -184,6 +190,9 @@ func (m *Manager) prepareRecoveredAvailability(
 	execution *AgentExecution,
 ) (*AgentEventPayload, error) {
 	if execution == nil || !m.runtimeExecutionCurrent(execution) {
+		return nil, nil
+	}
+	if !m.recoveredAvailabilityCompatible(ctx, execution) {
 		return nil, nil
 	}
 	var payload AgentEventPayload

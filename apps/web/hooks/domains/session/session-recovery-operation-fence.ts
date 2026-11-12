@@ -4,6 +4,7 @@ import { useCallback, useRef } from "react";
 import {
   managedCloneRelocationRecoveryDetails,
   runtimeCleanupFailureDetails,
+  sessionRecoveryFailureDetails,
   type SessionRecoveryAction,
 } from "@/lib/services/session-recovery-service";
 import type { WorkspaceRecoveryProjection } from "@/lib/types/http";
@@ -72,6 +73,8 @@ export function recoveryFailureAssociation({
   isCurrentOperation,
   isCurrentSession,
   matchesLatestErrorStamp,
+  continuationMatchesCurrent = false,
+  continuationRequestKey,
 }: {
   cause: unknown;
   operation: RecoveryOperation;
@@ -81,28 +84,37 @@ export function recoveryFailureAssociation({
   isCurrentOperation: (operation: RecoveryOperation) => boolean;
   isCurrentSession: (operation: RecoveryOperation) => boolean;
   matchesLatestErrorStamp: (stamp: string | undefined) => boolean;
+  continuationMatchesCurrent?: boolean;
+  continuationRequestKey?: string;
 }): RecoveryFailureAssociation | null {
   const managedClone = managedCloneRelocationRecoveryDetails(cause);
   const currentOperation = isCurrentOperation(operation);
-  const successorStamp = recoveryFailureSuccessorStamp(cause, sessionId, managedClone);
+  const responseStamp = recoveryFailureResponseStamp(cause, sessionId, managedClone);
   const isSuccessor = Boolean(
-    successorStamp && isCurrentSession(operation) && matchesLatestErrorStamp(successorStamp),
+    responseStamp && isCurrentSession(operation) && matchesLatestErrorStamp(responseStamp),
   );
-  if (!currentOperation && !isSuccessor) return null;
-  const associatedStamp = isSuccessor ? (successorStamp ?? null) : (errorStamp ?? null);
-  const requestKey = currentOperation
-    ? operation.requestKey
-    : `${taskId}\u0000${sessionId}\u0000${associatedStamp ?? ""}`;
+  const isMatchingContinuation = continuationMatchesCurrent && isCurrentSession(operation);
+  if (!currentOperation && !isSuccessor && !isMatchingContinuation) return null;
+  const associatedStamp = responseStamp ?? errorStamp ?? null;
+  let requestKey = operation.requestKey;
+  if (!currentOperation) {
+    requestKey =
+      isMatchingContinuation && continuationRequestKey
+        ? continuationRequestKey
+        : `${taskId}\u0000${sessionId}\u0000${associatedStamp ?? ""}`;
+  }
   return { managedClone, errorStamp: associatedStamp, requestKey };
 }
 
-function recoveryFailureSuccessorStamp(
+function recoveryFailureResponseStamp(
   cause: unknown,
   sessionId: string,
   managedClone: RecoveryFailureAssociation["managedClone"],
 ): string | undefined {
   const cleanup = runtimeCleanupFailureDetails(cause, sessionId);
   if (cleanup?.errorStamp) return cleanup.errorStamp;
+  const failure = sessionRecoveryFailureDetails(cause, sessionId);
+  if (failure?.error_stamp) return failure.error_stamp;
   if (managedClone?.kind === "managed_clone_relocation_required") return managedClone.error_stamp;
   return undefined;
 }

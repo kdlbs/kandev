@@ -295,6 +295,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/tasks/:id/workspace-sources", h.httpAttachWorkspaceSources)
 	api.POST("/tasks/:id/workspace-sources/preview", h.httpPreviewWorkspaceSources)
 	api.PATCH("/tasks/:id/repositories/:repo_id", h.httpUpdateTaskRepository)
+	api.DELETE("/tasks/:id/repositories/:repo_id", h.httpDetachTaskRepository)
 	api.POST("/tasks/:id/move", h.httpMoveTask)
 	api.POST("/tasks/:id/move-preview", h.httpMoveTaskPreview)
 	api.DELETE("/tasks/:id", h.httpDeleteTask)
@@ -315,6 +316,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/tasks/:id/dependencies", h.httpAddTaskDependency)
 	api.PUT("/tasks/:id/dependencies", h.httpReplaceTaskDependencies)
 	api.DELETE("/tasks/:id/dependencies/:depId", h.httpRemoveTaskDependency)
+	api.GET("/tasks/:id/graph", h.httpGetTaskGraph)
 
 	api.POST("/tasks/bulk-move", h.httpBulkMoveTasks)
 	api.GET("/workflows/:id/task-count", h.httpGetWorkflowTaskCount)
@@ -351,6 +353,7 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskGet, h.wsGetTask)
 	dispatcher.RegisterFunc(ws.ActionTaskUpdate, h.wsUpdateTask)
 	dispatcher.RegisterFunc(ws.ActionTaskRepoUpdate, h.wsUpdateTaskRepository)
+	dispatcher.RegisterFunc(ws.ActionTaskRepoDetach, h.wsDetachTaskRepository)
 	dispatcher.RegisterFunc(ws.ActionTaskDelete, h.wsDeleteTask)
 	dispatcher.RegisterFunc(ws.ActionTaskMove, h.wsMoveTask)
 	dispatcher.RegisterFunc(ws.ActionTaskState, h.wsUpdateTaskState)

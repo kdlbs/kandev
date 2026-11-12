@@ -1,13 +1,14 @@
 ---
 status: draft
 system: agents
-updated: 2026-10-19
+updated: 2026-11-09
 requirements:
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-001
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-002
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-003
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-004
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-005
+  - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-006
 ---
 
 # Managed npm runtime recovery system design
@@ -31,6 +32,7 @@ Kandev backend.
 | `REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-002` | [Executor-local cache contract](#executor-local-cache-contract) |
 | `REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-004` | [Bounded setup retry](#bounded-setup-retry) |
 | `REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-005` | [Missing bundled Codex dependency](#missing-bundled-codex-dependency) |
+| `REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-006` | [Incomplete execution trees](managed-npm-cache-recovery.md) |
 | `REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-003` | [Project-independent npm configuration](#project-independent-npm-configuration); [Release-date policy failure](#release-date-policy-failure) |
 
 ## Components and responsibilities
@@ -76,9 +78,11 @@ same prefix and effective environment as that launch; otherwise a repository
 `.npmrc` can direct repair to a different cache. A prefix preparation failure
 stops startup with a sanitized runtime error before launching npm.
 
-Keep exact-command recognition in lifecycle recovery, host utility recovery,
-and agentctl probe classification aligned with the new argument shape. Their
-trusted package and version checks continue to reject arbitrary commands.
+Keep lifecycle, hostutility, and agentctl recognition aligned with the
+[registered launcher and agent argument boundary](managed-npm-cache-recovery.md#registered-launcher-and-agent-argument-boundary).
+Validate the trusted npm prefix, package/version, and required runtime arguments.
+Preserve authorized profile arguments while rejecting arbitrary launchers.
+The [review-fix package](../../../plans/managed-npm-review-fixes/plan.md) owns this correction.
 
 ## Probe failure contract
 
@@ -143,8 +147,10 @@ For a host capability probe, the equivalent flow is:
 5. A successful retry becomes the live capability or model-configuration catalogue. Retry-preparation or final probe failure becomes the published failed status.
 
 The proposed missing-dependency extension below adds a narrow eligible
-classification to task and probe recovery. Other host probe failures retain
-the ETARGET-only rule.
+classification to task and probe recovery. The proposed
+[incomplete execution-tree extension](managed-npm-cache-recovery.md) adds
+verified cache metadata failures. Other host probe failures retain the
+ETARGET-only rule.
 
 Retain current host utility admission ordering while removing automatic cache deletion.
 No backend-wide launch mutex or cache lease is introduced.
@@ -212,6 +218,10 @@ owner, and phone touch targets from the session recovery design. No new page,
 dialog, or storage table is needed.
 
 ## Observability
+
+The [reusable repair design](managed-npm-repair-reuse.md) owns publication
+and later selection after verified incomplete-cache recovery. It leaves this
+document's eligibility, exact-version, deadline, and shared-tree rules intact.
 
 Structured recovery logs include the recovery scope, agent ID, attempt, outcome,
 and, for task sessions, the execution ID, runtime type, and startup generation.
@@ -383,6 +393,10 @@ evidence do not authorize repair. Permanent failures and cancellation continue
 to take priority.
 
 ### Private preparation primitive
+
+The [incomplete-cache design](managed-npm-cache-recovery.md#private-preparation)
+owns the common preparation primitive. This section adds the Codex dependency
+validator and optional-package inclusion policy to that primitive.
 
 Add a narrow executor-local prepared-runtime owner under `agent/managedruntime`,
 shared by agentctl task and utility subprocess paths. It owns a private project

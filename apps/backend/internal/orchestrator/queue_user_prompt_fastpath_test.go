@@ -25,7 +25,7 @@ func newFastPathDispatchService(t *testing.T, repo *sqliterepo.Repository) *Serv
 	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
 	agentManager := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
-	svc.executor = executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{}))
 	workerDone := make(chan struct{})
 	svc.onQueuedMessageExecutionComplete = func() { close(workerDone) }
 	t.Cleanup(func() {
@@ -378,7 +378,7 @@ func TestQueueUserPrompt_T2DrainsWhenTaskAdmitted(t *testing.T) {
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	workerDone := make(chan struct{})
 	svc.onQueuedMessageExecutionComplete = func() { close(workerDone) }
 

@@ -10,3 +10,13 @@ describe("mobile Kanban view resolution", () => {
     expect(getEffectiveView("graph2", false).id).toBe("graph2");
   });
 });
+
+describe("board Graph view", () => {
+  it("resolves the saved Graph view on non-mobile layouts", () => {
+    expect(getEffectiveView("graph", false).id).toBe("graph");
+  });
+
+  it("falls back to Kanban on mobile", () => {
+    expect(getEffectiveView("graph", true).id).toBe("kanban");
+  });
+});

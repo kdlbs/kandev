@@ -433,7 +433,7 @@ func TestAgentTurnFailedRoutesAutomationOriginsToTerminalFailureOwner(t *testing
 			agentManager := &mockAgentManager{isAgentRunning: true}
 			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
 			t.Cleanup(svc.cancelAllTransientRetries)
-			svc.executor = agentexecutor.NewExecutor(agentManager, repo, testLogger(), agentexecutor.ExecutorConfig{})
+			svc.executor = withTestCapabilities(agentexecutor.NewExecutor(agentManager, repo, testLogger(), agentexecutor.ExecutorConfig{}))
 			messageCreator := &mockMessageCreator{}
 			svc.messageCreator = messageCreator
 			svc.beginPromptAttempt("s-auto", "exec-auto", 9, false)
@@ -513,7 +513,7 @@ func TestAutomationOwnedCapacityFailureBeforeEffectsKeepsReplayPolicy(t *testing
 	agentManager := &mockAgentManager{isAgentRunning: true}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
 	t.Cleanup(svc.cancelAllTransientRetries)
-	svc.executor = agentexecutor.NewExecutor(agentManager, repo, testLogger(), agentexecutor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(agentexecutor.NewExecutor(agentManager, repo, testLogger(), agentexecutor.ExecutorConfig{}))
 	svc.SetAutomationService(&mockAutomationRunService{})
 	svc.beginPromptAttempt("s-auto", "exec-auto", 9, false)
 

@@ -84,7 +84,7 @@ func TestDeliveryRetentionNoResend(t *testing.T) {
 		},
 	}
 	service := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-	service.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	service.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 
 	// The distinct prompt is a positive control: the same live session still
 	// reaches the harness when the submission identity has not been consumed.

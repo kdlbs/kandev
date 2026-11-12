@@ -62,7 +62,7 @@ func TestSessionCleanupFailureProjection(t *testing.T) {
 			}
 			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
 			svc.messageCreator = newServiceBackedMessageCreator(repo)
-			svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+			svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 			_, err = svc.ResumeTaskSession(ctx, "task1", "session1")
 			require.ErrorIs(t, err, cleanupErr)
 			current, getErr := repo.GetTaskSession(ctx, "session1")

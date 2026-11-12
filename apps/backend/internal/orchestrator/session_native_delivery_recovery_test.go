@@ -469,7 +469,7 @@ func nativeResumeFixture(t *testing.T, reason string, failLaunch, failAcknowledg
 		return nil
 	}}
 	service := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), resumer)
-	service.executor = executor.NewExecutor(resumer, repo, testLogger(), executor.ExecutorConfig{})
+	service.executor = withTestCapabilities(executor.NewExecutor(resumer, repo, testLogger(), executor.ExecutorConfig{}))
 	return service, resumer, block, submission, &launched, &started
 }
 

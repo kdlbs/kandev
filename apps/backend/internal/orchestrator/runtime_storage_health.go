@@ -33,21 +33,31 @@ func (s *Service) RuntimeStorageHealth(sessionID string) *taskdto.RuntimeStorage
 			ageSeconds = 0
 		}
 	}
+	var pressureAgeSeconds *int64
+	if !observation.PressureReceivedAt.IsZero() {
+		age := int64(time.Since(observation.PressureReceivedAt.UTC()).Seconds())
+		if age < 0 {
+			age = 0
+		}
+		pressureAgeSeconds = &age
+	}
 	result := &taskdto.RuntimeStorageHealthDTO{
-		State:          observation.State,
-		StorageKind:    observation.StorageKind,
-		Location:       observation.Location,
-		ExecutorLabel:  observation.ExecutorLabel,
-		TotalBytes:     observation.TotalBytes,
-		AvailableBytes: observation.AvailableBytes,
-		ObservedAt:     observation.ObservedAt,
-		AgeSeconds:     ageSeconds,
-		WritePressure:  observation.WritePressure,
-		ProducerPaused: observation.ProducerPaused,
-		DeliveryState:  observation.DeliveryState,
-		FailureStorage: observation.FailureStorage,
-		Revision:       observation.Revision,
-		Epoch:          observation.Epoch,
+		State:              observation.State,
+		StorageKind:        observation.StorageKind,
+		Location:           observation.Location,
+		ExecutorLabel:      observation.ExecutorLabel,
+		TotalBytes:         observation.TotalBytes,
+		AvailableBytes:     observation.AvailableBytes,
+		ObservedAt:         observation.ObservedAt,
+		AgeSeconds:         ageSeconds,
+		PressureObservedAt: observation.PressureObservedAt,
+		PressureAgeSeconds: pressureAgeSeconds,
+		WritePressure:      observation.WritePressure,
+		ProducerPaused:     observation.ProducerPaused,
+		DeliveryState:      observation.DeliveryState,
+		FailureStorage:     observation.FailureStorage,
+		Revision:           observation.Revision,
+		Epoch:              observation.Epoch,
 	}
 	if result.Location == "" {
 		result.Location = taskdto.RuntimeStorageLocationUnknown

@@ -10,6 +10,10 @@ const MinimumMessagesCapabilityVersion = "0.91.1"
 // the coordinator and external agent-tool contexts.
 const MinimumInstanceReadContextsVersion = "0.99.0"
 
+// MinimumWorkspaceScopeVersion is the first Host release that supports
+// workspace-scoped agent tools.
+const MinimumWorkspaceScopeVersion = "0.100.0"
+
 // RequiresMessagesCapabilityMinimum reports whether a manifest opts into the
 // messages read resource whose Host contract requires a minimum release.
 func RequiresMessagesCapabilityMinimum(manifest *Manifest) bool {
@@ -27,6 +31,20 @@ func RequiresInstanceReadContextMinimum(manifest *Manifest) bool {
 			if surface == AgentToolSurfaceCoordinator || surface == AgentToolSurfaceExternal {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// RequiresWorkspaceScopeMinimum reports whether a manifest declares a
+// workspace-scoped tool that first appeared in the workspace scope release.
+func RequiresWorkspaceScopeMinimum(manifest *Manifest) bool {
+	if manifest == nil {
+		return false
+	}
+	for _, tool := range manifest.AgentTools {
+		if tool.NormalizedInvocationScope() == AgentToolInvocationScopeWorkspace {
+			return true
 		}
 	}
 	return false
@@ -50,6 +68,15 @@ func (m *Manifest) validateCapabilityMinimumVersions() []error {
 			errs = append(errs, fmt.Errorf(
 				"agent_tools surfaces coordinator/external require min_kandev_version >= %s",
 				MinimumInstanceReadContextsVersion,
+			))
+		}
+	}
+	if RequiresWorkspaceScopeMinimum(m) {
+		minimum, valid := NormalizeReleaseVersion(m.MinKandevVersion)
+		if !valid || CompareVersions(minimum, MinimumWorkspaceScopeVersion) < 0 {
+			errs = append(errs, fmt.Errorf(
+				"agent_tools invocation_scope: workspace requires min_kandev_version >= %s",
+				MinimumWorkspaceScopeVersion,
 			))
 		}
 	}

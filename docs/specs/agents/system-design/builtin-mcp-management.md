@@ -46,6 +46,8 @@ Backend paths are relative to `apps/backend`; web paths are relative to `apps/we
 | REQ-AGENTS-BUILTIN-MCP-003 | Persistence; Binding; Compatibility |
 | REQ-AGENTS-BUILTIN-MCP-004 | Evidence; Desktop and phone |
 
+[Automation extension](../../office/system-design/automation-mcp-selection.md).
+
 ## Packages and defaults
 
 These are logical MCP servers in the existing agentctl process, each with its
@@ -65,9 +67,8 @@ option to block Configuration in regular tasks. That option must be labelled
 "Allow Configuration for regular tasks", not "Disable Configuration". Existing
 authorization still determines who can start and use a configuration chat.
 Office can change Rich output using the same workspace/task policy. No other
-Office grants expand. External, Automation, Coordinator, and managed-plugin
-surfaces retain their current exact catalogs and legacy host routing. They do
-not become user-selectable packages or accept task package preferences.
+Office grants expand. External, Coordinator, and managed-plugin surfaces retain
+fixed catalogs. Automation uses explicit grants under the linked extension.
 
 Keep existing optional task capabilities enabled by default for both existing
 and new workspaces. Configuration is never workspace-default-on for a regular
@@ -191,8 +192,8 @@ limits/defaults. Neither Reset changes third-party server selections.
 
 Agent profiles have no package preference in this release. Reusing one profile
 across workspaces cannot copy a package grant. Session overrides and workflow
-presets are deferred. Task duplication, agent-created children, automation-created
-tasks, and profile changes do not copy explicit Configuration grants. A human
+presets are deferred. Task duplication, agent-created children, and profile
+changes do not copy explicit Configuration grants. A human
 creating a task can explicitly choose Configuration in the same authorized create
 flow; a default duplicate uses inherited optional defaults. Record actor and
 revision for explicit task choices. Existing sessions are not retroactively
@@ -381,11 +382,12 @@ package-capable start.
 
 | Path | Intended support and evidence | Unsupported behavior |
 | --- | --- | --- |
-| Structured ACP/native adapter | Multiple exact injected entries, transport negotiation, per-package observations; wire/adapter tests | Refuse package-mode start if entries cannot be represented |
+| Structured adapter | ACP or [prepared project delivery](builtin-mcp-project-delivery.md); per-package evidence | Refuse any undelivered selected package |
 | CLI passthrough | Extend each supported config builder, quoting and reserved-name handling; config-generation tests | No synthetic connected badge; missing injection strategy is unsupported |
 | Local/worktree and remote executors | Shared manifest plus each launch carrier; round-trip and helper negotiation tests | Old helper fails before fresh start |
 | Retained monolithic agent | Existing routes/catalog and honest legacy evidence | No hot migration or automatic restart |
-| External/Automation/Coordinator/managed conversation | Existing exact catalogs, gates, and routes | No user package grants |
+| External/Coordinator/managed conversation | Existing catalogs and gates | No user package grants |
+| Automation | Linked extension | Task preference fallback; agent-authored grants |
 
 Mock wire tests do not certify installed provider connectivity. Record provider
 and transport coverage precisely; do not claim all providers from a shared code path.

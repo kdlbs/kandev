@@ -21,6 +21,7 @@ type preparedAgentEvent struct {
 	receiptDeferred     bool
 	skipCallback        bool
 	skipAcknowledgement bool
+	staleTerminal       bool
 	duplicate           bool
 }
 
@@ -84,13 +85,17 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 	// callbacks can advance or clear prompt state, but the inbox payload must
 	// remain byte-identical from admission through projection.
 	durableEvent := durableAgentEvent(execution, event)
+	// A replayed event keeps its own prompt-attempt identity. Do not let it
+	// overwrite the live execution's submission before completion claims run.
+	staleSubmission := event.Recovered && deliverySubmissionIdentityMismatch(execution, event.DeliverySubmissionID)
+	staleTerminal := staleSubmission && durableEvent.Terminal
 	process, skipCallback, effect, deferred, err := sm.prepareDurableAgentDeliveryEvent(
 		ctx, execution, durableEvent, delivery, client, deferReceipt, attempt,
 	)
 	if err != nil {
 		return preparedAgentEvent{}, fmt.Errorf("durable agent event ownership check: %w", err)
 	}
-	if event.DeliverySubmissionID != "" {
+	if event.DeliverySubmissionID != "" && !staleSubmission {
 		execution.setDeliverySubmissionID(event.DeliverySubmissionID)
 	}
 	if !process {
@@ -105,6 +110,7 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 		deliveryEffect:  effect,
 		receiptDeferred: deferred,
 		skipCallback:    skipCallback,
+		staleTerminal:   staleTerminal,
 	}, nil
 }
 
