@@ -147,14 +147,62 @@ describe("RepoFilterSelector repository picker", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("renders saved repository and organization entries and removes them", () => {
+  it("hides the organization picker in repos mode and keeps saved organization entries removable", async () => {
+    mocks.fetchGitHubWorkspaceSettings.mockResolvedValue(
+      scope({ repo_scope_mode: "repos", repo_scope_repos: [{ owner: "acme", name: "api" }] }),
+    );
     const onChange = renderSelector([
       { owner: "kdlbs", name: "kandev" },
       { owner: "acme", name: "" },
     ]);
-    expect(screen.getByText("kdlbs/kandev")).toBeTruthy();
-    expect(screen.getByText("acme/*")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByTestId("github-organization-add")).toBeNull());
     fireEvent.click(screen.getByRole("button", { name: /remove acme\/\*/i }));
     expect(onChange).toHaveBeenCalledWith([{ owner: "kdlbs", name: "kandev" }]);
+  });
+});
+
+const org = (login: string) => ({ login, avatar_url: "" });
+
+function orgOptionTexts() {
+  return screen.queryAllByTestId("github-organization-option").map((o) => o.textContent ?? "");
+}
+
+describe("RepoFilterSelector organization picker", () => {
+  it("adds an organization as an owner-wide filter", async () => {
+    mocks.listUserOrgs.mockResolvedValue({ orgs: [org("octocat"), org("kdlbs")] });
+    const onChange = renderSelector([{ owner: "acme", name: "api" }]);
+    fireEvent.click(screen.getByTestId("github-organization-add"));
+    await waitFor(() => expect(orgOptionTexts()).toEqual(["octocat", "kdlbs"]));
+    fireEvent.click(screen.getAllByTestId("github-organization-option")[1]!);
+    expect(onChange).toHaveBeenCalledWith([
+      { owner: "kdlbs", name: "" },
+      { owner: "acme", name: "api" },
+    ]);
+  });
+
+  it("separates saved organizations from repositories and removes an organization", () => {
+    const onChange = renderSelector([
+      { owner: "kdlbs", name: "kandev" },
+      { owner: "acme", name: "" },
+    ]);
+    expect(screen.getAllByTestId("github-organization-chip").map((c) => c.textContent)).toEqual([
+      "acme",
+    ]);
+    expect(screen.getAllByTestId("github-repository-chip").map((c) => c.textContent)).toEqual([
+      "kdlbs/kandev",
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: /remove acme/i }));
+    expect(onChange).toHaveBeenCalledWith([{ owner: "kdlbs", name: "kandev" }]);
+  });
+
+  it("offers only organizations allowed by an orgs-mode workspace scope", async () => {
+    mocks.listUserOrgs.mockResolvedValue({ orgs: [org("octocat"), org("kdlbs"), org("acme")] });
+    mocks.fetchGitHubWorkspaceSettings.mockResolvedValue(
+      scope({ repo_scope_mode: "orgs", repo_scope_orgs: ["kdlbs"] }),
+    );
+    renderSelector();
+    await waitFor(() => expect(mocks.fetchGitHubWorkspaceSettings).toHaveBeenCalled());
+    fireEvent.click(screen.getByTestId("github-organization-add"));
+    await waitFor(() => expect(orgOptionTexts()).toEqual(["kdlbs"]));
   });
 });

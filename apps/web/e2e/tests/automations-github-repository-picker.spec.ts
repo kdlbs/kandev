@@ -4,6 +4,7 @@ import {
   ACCESSIBLE_REPOSITORIES,
   expandPrTriggerCard,
   openRestrictedPrAutomation,
+  organizationOptions,
   repositoryOptions,
   seedAccessibleRepositories,
 } from "../helpers/github-repository-picker";
@@ -54,5 +55,46 @@ test.describe("automations: GitHub repository picker", () => {
       "mock-user/beta",
       "other-org/tool",
     ]);
+  });
+
+  // @covers AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.10 .11
+  test("selects an organization and refreshes the repository list", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedAccessibleRepositories(apiClient, seedData.workspaceId);
+    await apiClient.mockGitHubAddOrgs([{ login: "kdlbs" }]);
+    const card = await openRestrictedPrAutomation(
+      testPage,
+      apiClient,
+      seedData,
+      "Organization picker and refresh",
+    );
+
+    await card.getByTestId("github-organization-add").click();
+    const orgPicker = card.getByTestId("github-organization-picker");
+    await expect(organizationOptions(orgPicker)).toHaveText(["mock-user", "kdlbs"]);
+    await organizationOptions(orgPicker).filter({ hasText: "kdlbs" }).click();
+    await expect(card.getByTestId("github-organization-chip")).toHaveText(["kdlbs"]);
+
+    await card.getByTestId("github-repository-add").click();
+    const repoPicker = card.getByTestId("github-repository-picker");
+    await expect(repositoryOptions(repoPicker)).toHaveCount(ACCESSIBLE_REPOSITORIES.length);
+    await apiClient.mockGitHubAddRepos("mock-user", [
+      { full_name: "mock-user/delta", owner: "mock-user", name: "delta", private: false },
+    ]);
+    await repoPicker.getByTestId("remote-repo-refresh").click();
+    await repositoryOptions(repoPicker).filter({ hasText: "mock-user/delta" }).click();
+    await expect(card.getByTestId("github-repository-chip")).toHaveText(["mock-user/delta"]);
+
+    const { saveButton } = new AutomationsPage(testPage, seedData.workspaceId);
+    await saveButton.click();
+    await expect(saveButton).toBeHidden();
+    await testPage.reload();
+    await testPage.getByTestId("automation-editor").waitFor({ state: "visible" });
+    const reopened = await expandPrTriggerCard(testPage);
+    await expect(reopened.getByTestId("github-organization-chip")).toHaveText(["kdlbs"]);
+    await expect(reopened.getByTestId("github-repository-chip")).toHaveText(["mock-user/delta"]);
   });
 });

@@ -667,5 +667,13 @@
   "removeRepositoryFilter": "{{repository}} を削除",
   "repositoryOutsideWorkspaceScope": "ワークスペースのリポジトリ範囲では、このリポジトリは許可されていません。",
   "searchRepositoriesOrEnterOwnerRepo": "リポジトリを検索するか {{format}} を入力",
-  "pressEnterToAddRepository": "Enter キーを押してこのリポジトリを追加します。"
+  "pressEnterToAddRepository": "Enter キーを押してこのリポジトリを追加します。",
+  "addOrganization": "組織を追加",
+  "removeOrganization": "{{organization}} を削除",
+  "searchOrganizationsOrEnterLogin": "組織を検索するかログイン名を入力",
+  "pressEnterToAddOrganization": "Enter キーを押してこの組織を追加します。",
+  "organizationOutsideWorkspaceScope": "ワークスペースのリポジトリ範囲では、この組織は許可されていません。",
+  "noOrganizationsFound": "組織が見つかりません。",
+  "couldNotLoadOrganizations": "組織を読み込めませんでした: {{message}}",
+  "refreshOrganizations": "組織を再読み込み"
 }

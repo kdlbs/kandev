@@ -1032,6 +1032,7 @@ func (c *Controller) httpListUserOrgs(ctx *gin.Context) {
 // user can access (own repos + each org they belong to). Accepts:
 //   - q: optional GitHub search qualifier appended to the per-source query
 //   - limit: 1..100, defaults to 50 when missing / non-positive
+//   - refresh: "true" bypasses the 60s cache and stores the fresh list
 //
 // Returns 503 with `{"code":"github_not_configured"}` (matches every other
 // GitHub-not-configured 503 in this file) when GitHub is not configured /
@@ -1039,8 +1040,9 @@ func (c *Controller) httpListUserOrgs(ctx *gin.Context) {
 func (c *Controller) httpListAccessibleRepos(ctx *gin.Context) {
 	query := ctx.Query("q")
 	limit, _ := strconv.Atoi(ctx.Query("limit"))
+	refresh := ctx.Query("refresh") == "true"
 	repos, err := c.service.ListAccessibleReposForWorkspace(
-		ctx.Request.Context(), ctx.Query("workspace_id"), currentGitHubUserID(ctx), query, limit,
+		ctx.Request.Context(), ctx.Query("workspace_id"), currentGitHubUserID(ctx), query, limit, refresh,
 	)
 	if err != nil {
 		if isGitHubNotConfiguredError(err) {

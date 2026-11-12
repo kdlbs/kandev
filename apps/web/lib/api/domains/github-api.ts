@@ -356,11 +356,14 @@ export async function fetchAccessibleRepos(opts: {
   workspaceId: string;
   q?: string;
   limit?: number;
+  /** Bypasses the server's short-lived repository-list cache. */
+  refresh?: boolean;
   signal?: AbortSignal;
 }): Promise<AccessibleRepo[]> {
   const params = new URLSearchParams({ workspace_id: opts.workspaceId });
   if (opts.q) params.set("q", opts.q);
   if (typeof opts.limit === "number") params.set("limit", String(opts.limit));
+  if (opts.refresh) params.set("refresh", "true");
   const suffix = params.toString();
   const path = `/api/v1/github/repos${suffix ? `?${suffix}` : ""}`;
   try {

@@ -3248,5 +3248,6 @@
   "questionReviewInB": "In B",
   "questionReviewChoiceName": "Choice: {{choice}}",
   "questionReviewFlipShort": "Flip",
-  "threadExtractChipLabel": "{{author}}: “{{quote}}”"
+  "threadExtractChipLabel": "{{author}}: “{{quote}}”",
+  "refreshRepositories": "Refresh repositories"
 }

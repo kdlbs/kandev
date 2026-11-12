@@ -63,3 +63,7 @@ export async function expandPrTriggerCard(page: Page): Promise<Locator> {
 export function repositoryOptions(scope: Locator): Locator {
   return scope.getByTestId("remote-repo-option");
 }
+
+export function organizationOptions(scope: Locator): Locator {
+  return scope.getByTestId("github-organization-option");
+}

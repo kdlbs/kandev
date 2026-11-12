@@ -630,3 +630,30 @@ describe("useRemoteRepositories provider restriction", () => {
     expect(result.current.repos.map((repo) => repo.fullName)).toEqual(["acme/api"]);
   });
 });
+
+describe("useRemoteRepositories cache bypass", () => {
+  it("asks GitHub to bypass its cache only for the load after a manual refresh", async () => {
+    mocks.fetchAccessibleRepos.mockResolvedValue([githubRepo("api")]);
+    const { result, rerender } = renderHook(() =>
+      useRemoteRepositories(WORKSPACE_ID, { providers: ["github"] }),
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(mocks.fetchAccessibleRepos).toHaveBeenLastCalledWith({
+      workspaceId: WORKSPACE_ID,
+      limit: 100,
+    });
+
+    act(() => result.current.refresh?.());
+    await waitFor(() => expect(mocks.fetchAccessibleRepos).toHaveBeenCalledTimes(2));
+    expect(mocks.fetchAccessibleRepos).toHaveBeenLastCalledWith({
+      workspaceId: WORKSPACE_ID,
+      limit: 100,
+      refresh: true,
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    setBuiltInAvailability({ github: true });
+    rerender();
+    expect(mocks.fetchAccessibleRepos).toHaveBeenCalledTimes(2);
+  });
+});

@@ -667,5 +667,13 @@
   "removeRepositoryFilter": "Remove {{repository}}",
   "repositoryOutsideWorkspaceScope": "The workspace repository scope does not allow this repository.",
   "searchRepositoriesOrEnterOwnerRepo": "Search repositories or enter {{format}}",
-  "pressEnterToAddRepository": "Press Enter to add this repository."
+  "pressEnterToAddRepository": "Press Enter to add this repository.",
+  "addOrganization": "Add organization",
+  "removeOrganization": "Remove {{organization}}",
+  "searchOrganizationsOrEnterLogin": "Search organizations or enter a login",
+  "pressEnterToAddOrganization": "Press Enter to add this organization.",
+  "organizationOutsideWorkspaceScope": "The workspace repository scope does not allow this organization.",
+  "noOrganizationsFound": "No organizations found.",
+  "couldNotLoadOrganizations": "Could not load organizations: {{message}}",
+  "refreshOrganizations": "Refresh organizations"
 }

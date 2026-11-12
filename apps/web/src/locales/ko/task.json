@@ -3246,5 +3246,6 @@
   "questionReviewInB": "B에 있음",
   "questionReviewChoiceName": "선택지: {{choice}}",
   "questionReviewFlipShort": "뒤집기",
-  "threadExtractChipLabel": "{{author}}의 “{{quote}}”"
+  "threadExtractChipLabel": "{{author}}의 “{{quote}}”",
+  "refreshRepositories": "리포지토리 새로 고침"
 }

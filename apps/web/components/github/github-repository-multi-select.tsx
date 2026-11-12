@@ -1,11 +1,8 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { IconPlus, IconX } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
-import { Badge } from "@kandev/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
-import { cn } from "@/lib/utils";
 import {
   useRemoteRepositories,
   type RemoteRepository,
@@ -17,6 +14,7 @@ import {
 import { parseGitHubRepositoryInput } from "@/lib/github/repository-input";
 import { repoAllowedByScope, sameRepoFilter } from "@/lib/github/repo-scope";
 import type { GitHubWorkspaceSettings, RepoFilter } from "@/lib/types/github";
+import { SelectionAddButton, SelectionChip } from "./selection-chip";
 
 // Stable module-level reference so the hook's provider restriction is not rebuilt per render.
 const GITHUB_ONLY = { providers: ["github"] } as const;
@@ -82,22 +80,13 @@ function SelectedRepositoryChip({
   const { t } = useTranslation();
   const label = filterLabel(filter);
   return (
-    <Badge
-      variant="secondary"
-      className={cn("gap-1 pr-0.5 text-xs", disabled && "opacity-50")}
-      data-testid="github-repository-chip"
-    >
-      <span>{label}</span>
-      <button
-        type="button"
-        className="inline-flex h-11 w-11 items-center justify-center rounded-sm cursor-pointer hover:text-foreground md:h-5 md:w-5"
-        aria-label={t("github:removeRepositoryFilter", { repository: label })}
-        onClick={() => onRemove(filter)}
-        disabled={disabled}
-      >
-        <IconX className="h-3 w-3" />
-      </button>
-    </Badge>
+    <SelectionChip
+      label={label}
+      removeLabel={t("github:removeRepositoryFilter", { repository: label })}
+      testId="github-repository-chip"
+      disabled={disabled}
+      onRemove={() => onRemove(filter)}
+    />
   );
 }
 
@@ -132,20 +121,11 @@ function AddGitHubRepository({
   return (
     <Popover open={open && !disabled} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button
-          type="button"
+        <SelectionAddButton
+          label={t("github:addRepository")}
+          testId="github-repository-add"
           disabled={disabled}
-          data-testid="github-repository-add"
-          className={cn(
-            "inline-flex h-11 items-center justify-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground md:h-7",
-            disabled
-              ? "cursor-not-allowed opacity-40"
-              : "cursor-pointer hover:bg-muted hover:text-foreground",
-          )}
-        >
-          <IconPlus className="h-3.5 w-3.5" />
-          <span>{t("github:addRepository")}</span>
-        </button>
+        />
       </PopoverTrigger>
       <PopoverContent
         className="w-[380px] max-w-[calc(100vw-2rem)] max-h-[min(420px,calc(100vh-12rem))] overflow-hidden p-0"

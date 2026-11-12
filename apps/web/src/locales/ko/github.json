@@ -667,5 +667,13 @@
   "removeRepositoryFilter": "{{repository}} 제거",
   "repositoryOutsideWorkspaceScope": "워크스페이스 리포지토리 범위에서 이 리포지토리를 허용하지 않습니다.",
   "searchRepositoriesOrEnterOwnerRepo": "리포지토리를 검색하거나 {{format}}을 입력하세요",
-  "pressEnterToAddRepository": "Enter 키를 눌러 이 리포지토리를 추가하세요."
+  "pressEnterToAddRepository": "Enter 키를 눌러 이 리포지토리를 추가하세요.",
+  "addOrganization": "조직 추가",
+  "removeOrganization": "{{organization}} 제거",
+  "searchOrganizationsOrEnterLogin": "조직을 검색하거나 로그인 이름을 입력하세요",
+  "pressEnterToAddOrganization": "Enter 키를 눌러 이 조직을 추가하세요.",
+  "organizationOutsideWorkspaceScope": "워크스페이스 리포지토리 범위에서 이 조직을 허용하지 않습니다.",
+  "noOrganizationsFound": "조직을 찾을 수 없습니다.",
+  "couldNotLoadOrganizations": "조직을 불러오지 못했습니다: {{message}}",
+  "refreshOrganizations": "조직 새로 고침"
 }

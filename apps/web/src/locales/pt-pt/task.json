@@ -3246,5 +3246,6 @@
   "questionReviewInB": "Em B",
   "questionReviewChoiceName": "Opção: {{choice}}",
   "questionReviewFlipShort": "Inverter",
-  "threadExtractChipLabel": "{{author}}: «{{quote}}»"
+  "threadExtractChipLabel": "{{author}}: «{{quote}}»",
+  "refreshRepositories": "Atualizar repositórios"
 }

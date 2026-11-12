@@ -667,5 +667,13 @@
   "removeRepositoryFilter": "Remover {{repository}}",
   "repositoryOutsideWorkspaceScope": "O âmbito dos repositórios do espaço de trabalho não permite este repositório.",
   "searchRepositoriesOrEnterOwnerRepo": "Pesquise repositórios ou introduza {{format}}",
-  "pressEnterToAddRepository": "Prima Enter para adicionar este repositório."
+  "pressEnterToAddRepository": "Prima Enter para adicionar este repositório.",
+  "addOrganization": "Adicionar organização",
+  "removeOrganization": "Remover {{organization}}",
+  "searchOrganizationsOrEnterLogin": "Pesquise organizações ou introduza um nome de utilizador",
+  "pressEnterToAddOrganization": "Prima Enter para adicionar esta organização.",
+  "organizationOutsideWorkspaceScope": "O âmbito dos repositórios do espaço de trabalho não permite esta organização.",
+  "noOrganizationsFound": "Nenhuma organização encontrada.",
+  "couldNotLoadOrganizations": "Não foi possível carregar as organizações: {{message}}",
+  "refreshOrganizations": "Atualizar organizações"
 }

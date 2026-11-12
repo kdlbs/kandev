@@ -1,14 +1,12 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { IconLoader2 } from "@tabler/icons-react";
-import { Badge } from "@kandev/ui/badge";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
-import { cn } from "@/lib/utils";
-import { fetchGitHubWorkspaceSettings, listUserOrgs } from "@/lib/api/domains/github-api";
-import type { RepoFilter, GitHubOrg, GitHubWorkspaceSettings } from "@/lib/types/github";
+import { fetchGitHubWorkspaceSettings } from "@/lib/api/domains/github-api";
+import type { RepoFilter, GitHubWorkspaceSettings } from "@/lib/types/github";
 import { orgAllowedByScope } from "@/lib/github/repo-scope";
+import { GitHubOrganizationMultiSelect } from "./github-organization-multi-select";
 import { GitHubRepositoryMultiSelect } from "./github-repository-multi-select";
 import { useTranslation } from "react-i18next";
 
@@ -19,35 +17,6 @@ type RepoFilterSelectorProps = {
   onSelectedReposChange: (repos: RepoFilter[]) => void;
   workspaceId?: string;
 };
-
-function useGitHubOrgs(workspaceId: string | undefined) {
-  const [orgs, setOrgs] = useState<GitHubOrg[]>([]);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    if (!workspaceId) {
-      setOrgs([]);
-      setLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    listUserOrgs(workspaceId)
-      .then((r) => {
-        if (!cancelled) setOrgs(r.orgs ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setOrgs([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId]);
-
-  return { orgs, loading };
-}
 
 function useWorkspaceRepoScope(workspaceId: string | undefined) {
   const [settings, setSettings] = useState<GitHubWorkspaceSettings | null>(null);
@@ -73,50 +42,23 @@ function useWorkspaceRepoScope(workspaceId: string | undefined) {
   return settings;
 }
 
-function OrgBadges({
-  orgs,
-  loading,
-  selectedRepos,
-  disabled,
-  onToggleOrg,
-}: {
-  orgs: GitHubOrg[];
-  loading: boolean;
-  selectedRepos: RepoFilter[];
-  disabled: boolean;
-  onToggleOrg: (login: string) => void;
-}) {
-  const { t } = useTranslation();
-  if (loading) {
-    return (
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <IconLoader2 className="h-3 w-3 animate-spin" />
-        {t("github:loadingOrganizations")}
-      </div>
-    );
-  }
-  if (orgs.length === 0) return null;
+const isOrgEntry = (filter: RepoFilter) => filter.name === "";
 
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {orgs.map((org) => {
-        const isSelected = selectedRepos.some((r) => r.owner === org.login && r.name === "");
-        return (
-          <Badge
-            key={org.login}
-            variant={isSelected ? "default" : "outline"}
-            className={cn(
-              "text-xs cursor-pointer select-none",
-              disabled && "opacity-50 pointer-events-none",
-            )}
-            onClick={() => onToggleOrg(org.login)}
-          >
-            {org.login}
-          </Badge>
-        );
-      })}
-    </div>
-  );
+function useSplitSelection(
+  selectedRepos: RepoFilter[],
+  onSelectedReposChange: (repos: RepoFilter[]) => void,
+) {
+  return useMemo(() => {
+    const orgEntries = selectedRepos.filter(isOrgEntry);
+    const repoEntries = selectedRepos.filter((filter) => !isOrgEntry(filter));
+    return {
+      orgLogins: orgEntries.map((filter) => filter.owner),
+      repoEntries,
+      setOrgs: (logins: string[]) =>
+        onSelectedReposChange([...logins.map((owner) => ({ owner, name: "" })), ...repoEntries]),
+      setRepos: (repos: RepoFilter[]) => onSelectedReposChange([...orgEntries, ...repos]),
+    };
+  }, [onSelectedReposChange, selectedRepos]);
 }
 
 export function RepoFilterSelector({
@@ -127,25 +69,10 @@ export function RepoFilterSelector({
   workspaceId,
 }: RepoFilterSelectorProps) {
   const { t } = useTranslation();
-  const { orgs, loading: orgsLoading } = useGitHubOrgs(workspaceId);
   const scope = useWorkspaceRepoScope(workspaceId);
-  const scopedOrgs = useMemo(
-    () => orgs.filter((org) => orgAllowedByScope(scope, org.login)),
-    [orgs, scope],
-  );
-  const showOrgBadges = !scope || scope.repo_scope_mode !== "repos";
-
-  const toggleOrg = useCallback(
-    (login: string) => {
-      const exists = selectedRepos.some((r) => r.owner === login && r.name === "");
-      if (exists) {
-        onSelectedReposChange(selectedRepos.filter((r) => !(r.owner === login && r.name === "")));
-      } else {
-        onSelectedReposChange([...selectedRepos, { owner: login, name: "" }]);
-      }
-    },
-    [selectedRepos, onSelectedReposChange],
-  );
+  const showOrgs = !scope || scope.repo_scope_mode !== "repos";
+  const split = useSplitSelection(selectedRepos, onSelectedReposChange);
+  const isOrgAllowed = useCallback((login: string) => orgAllowedByScope(scope, login), [scope]);
 
   return (
     <div className="space-y-3">
@@ -170,28 +97,33 @@ export function RepoFilterSelector({
 
       {!allRepos && (
         <>
-          {showOrgBadges && (
+          {showOrgs && (
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground font-normal">
                 {t("github:organizations")}
               </Label>
-              <OrgBadges
-                orgs={scopedOrgs}
-                loading={orgsLoading}
-                selectedRepos={selectedRepos}
-                disabled={allRepos}
-                onToggleOrg={toggleOrg}
+              <GitHubOrganizationMultiSelect
+                workspaceId={workspaceId}
+                selected={split.orgLogins}
+                onChange={split.setOrgs}
+                isOrgAllowed={isOrgAllowed}
               />
             </div>
           )}
 
-          <GitHubRepositoryMultiSelect
-            workspaceId={workspaceId}
-            selected={selectedRepos}
-            onChange={onSelectedReposChange}
-            scope={scope}
-            disabled={allRepos}
-          />
+          <div className="space-y-1.5">
+            {showOrgs && (
+              <Label className="text-xs text-muted-foreground font-normal">
+                {t("github:repositories")}
+              </Label>
+            )}
+            <GitHubRepositoryMultiSelect
+              workspaceId={workspaceId}
+              selected={showOrgs ? split.repoEntries : selectedRepos}
+              onChange={showOrgs ? split.setRepos : onSelectedReposChange}
+              scope={scope}
+            />
+          </div>
         </>
       )}
     </div>

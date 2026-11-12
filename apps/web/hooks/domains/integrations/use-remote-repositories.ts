@@ -153,13 +153,17 @@ function useBuiltInRepositoryAccess(workspaceId: string): BuiltInRepositoryAcces
 async function loadBuiltInRepositories(
   workspaceId: string,
   eligibleProviders: ReadonlySet<RemoteRepositoryProvider>,
+  bypassCache: boolean,
 ): Promise<RemoteRepositoryLoad> {
   if (!workspaceId) return { repos: [], availableProviders: [], sourceErrors: [] };
   const requests: RepositoryRequest[] = [];
   if (eligibleProviders.has("github")) {
+    const request = bypassCache
+      ? { workspaceId, limit: 100, refresh: true }
+      : { workspaceId, limit: 100 };
     requests.push({
       provider: "github",
-      load: fetchAccessibleRepos({ workspaceId, limit: 100 }).then((repos) =>
+      load: fetchAccessibleRepos(request).then((repos) =>
         repos.map((repo) => ({
           provider: "github" as const,
           id: `${repo.github_host ?? "github.com"}/${repo.full_name}`,
@@ -313,6 +317,8 @@ function useBuiltInRepositorySource(
   const [sourceErrors, setSourceErrors] = useState<RemoteRepositorySourceError[]>([]);
   const [availableProviders, setAvailableProviders] = useState<RemoteRepositoryProvider[]>([]);
   const workspaceRef = useRef(workspaceId);
+  // The refresh version whose load has completed; a newer version bypasses server caches.
+  const loadedRefreshRef = useRef(refreshVersion);
 
   useEffect(() => {
     let cancelled = false;
@@ -329,9 +335,11 @@ function useBuiltInRepositorySource(
         cancelled = true;
       };
     }
-    loadBuiltInRepositories(workspaceId, eligibility.providers)
+    const bypassCache = loadedRefreshRef.current !== refreshVersion;
+    loadBuiltInRepositories(workspaceId, eligibility.providers, bypassCache)
       .then((result) => {
         if (cancelled) return;
+        loadedRefreshRef.current = refreshVersion;
         setRepos(result.repos);
         setAvailableProviders(result.availableProviders);
         setSourceErrors(result.sourceErrors);

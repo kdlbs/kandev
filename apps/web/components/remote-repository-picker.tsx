@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { IconCheck } from "@tabler/icons-react";
 import { Trans, useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { Badge } from "@kandev/ui/badge";
 import { Spinner } from "@kandev/ui/spinner";
 import { cn } from "@/lib/utils";
+import { AlreadyAddedMarker, isPlainEnter, PickerSearchRow } from "@/components/picker-controls";
 import type {
   RemoteRepository,
   RemoteRepositoryProvider,
@@ -36,20 +36,6 @@ export type RemoteRepositoryPickerPanelProps = {
   placeholder: string;
 };
 
-function isPlainEnter(event: React.KeyboardEvent<HTMLInputElement>): boolean {
-  return (
-    event.key === "Enter" &&
-    !event.defaultPrevented &&
-    !event.repeat &&
-    !event.altKey &&
-    !event.ctrlKey &&
-    !event.metaKey &&
-    !event.shiftKey &&
-    !event.nativeEvent.isComposing &&
-    event.keyCode !== 229
-  );
-}
-
 /**
  * Searchable list of the user's accessible provider repositories. Shared by
  * task creation's remote repository chip and GitHub repository selections.
@@ -64,6 +50,7 @@ export function RemoteRepositoryPickerPanel({
   stagedHint,
   placeholder,
 }: RemoteRepositoryPickerPanelProps) {
+  const { t } = useTranslation();
   const [value, setValue] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [activeProvider, setActiveProvider] = useState<RemoteRepositoryProvider | null>(null);
@@ -79,11 +66,10 @@ export function RemoteRepositoryPickerPanel({
   const allowedRepos = isRepoAllowed ? visibleRepos.filter(isRepoAllowed) : visibleRepos;
   return (
     <div className="flex flex-col">
-      <input
-        autoFocus
+      <PickerSearchRow
         value={value}
-        onChange={(event) => {
-          setValue(event.target.value);
+        onChange={(next) => {
+          setValue(next);
           setSubmitError(null);
         }}
         onPaste={(event) => {
@@ -99,15 +85,19 @@ export function RemoteRepositoryPickerPanel({
           setSubmitError(result.status === "rejected" ? result.message : null);
         }}
         placeholder={placeholder}
-        aria-label={placeholder}
-        aria-invalid={visibleError ? true : undefined}
-        data-testid="remote-repo-input"
-        data-legacy-testid="remote-paste-url-input"
-        className={cn(
-          "h-11 sm:h-9 mx-2 mt-2 rounded-md px-2 text-xs bg-muted/30 border border-border/60",
-          "outline-none focus:bg-muted focus:border-border placeholder:text-muted-foreground",
-          visibleError && "border-destructive focus:border-destructive",
-        )}
+        invalid={Boolean(visibleError)}
+        testId="remote-repo-input"
+        legacyTestId="remote-paste-url-input"
+        refresh={
+          accessible.refresh
+            ? {
+                onRefresh: accessible.refresh,
+                refreshing: accessible.loading,
+                label: t("task:refreshRepositories"),
+                testId: "remote-repo-refresh",
+              }
+            : undefined
+        }
       />
       {stagedHint && isTextSubmittable(value.trim()) ? stagedHint : null}
       <PickerList
@@ -227,20 +217,6 @@ function RepoOption({
         ) : null}
       </span>
     </button>
-  );
-}
-
-function AlreadyAddedMarker() {
-  const { t } = useTranslation();
-  return (
-    <span
-      role="img"
-      aria-label={t("task:alreadyAdded")}
-      data-testid="already-added-repository-marker"
-      className="text-primary"
-    >
-      <IconCheck aria-hidden="true" className="h-4 w-4" />
-    </span>
   );
 }
 

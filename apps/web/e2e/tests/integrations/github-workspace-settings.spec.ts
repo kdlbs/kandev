@@ -421,7 +421,7 @@ test.describe("GitHub workspace settings", () => {
     await addScopeRepository(testPage, "kdlbs/kandev");
     await testPage.getByTestId("github-scope-mode").click();
     await testPage.getByRole("option", { name: "Organizations" }).click();
-    await testPage.getByTestId("github-scope-orgs-input").fill("kdlbs");
+    await addScopeOrganization(testPage, "kdlbs");
     await testPage
       .getByTestId("settings-floating-save")
       .getByRole("button", { name: "Save changes" })
@@ -482,4 +482,13 @@ async function addScopeRepository(page: Page, repository: string): Promise<void>
   await expect(
     field.getByTestId("github-repository-chip").filter({ hasText: repository }),
   ).toBeVisible();
+}
+
+async function addScopeOrganization(page: Page, login: string): Promise<void> {
+  const field = page.getByTestId("github-scope-orgs");
+  await field.getByRole("button", { name: "Add organization" }).click();
+  const input = field.getByTestId("github-organization-input");
+  await input.fill(login);
+  await input.press("Enter");
+  await expect(field.getByTestId("github-organization-chip")).toHaveText([login]);
 }

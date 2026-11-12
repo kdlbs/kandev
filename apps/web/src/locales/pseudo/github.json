@@ -667,5 +667,13 @@
   "removeRepositoryFilter": "Ŕēḿōvē {{repository}}",
   "repositoryOutsideWorkspaceScope": "Ţĥē ŵōŕķśƥàćē ŕēƥōśĩţōŕŷ śćōƥē ďōēś ńōţ àĺĺōŵ ţĥĩś ŕēƥōśĩţōŕŷ.",
   "searchRepositoriesOrEnterOwnerRepo": "Śēàŕćĥ ŕēƥōśĩţōŕĩēś ōŕ ēńţēŕ {{format}}",
-  "pressEnterToAddRepository": "Ƥŕēśś Ēńţēŕ ţō àďď ţĥĩś ŕēƥōśĩţōŕŷ."
+  "pressEnterToAddRepository": "Ƥŕēśś Ēńţēŕ ţō àďď ţĥĩś ŕēƥōśĩţōŕŷ.",
+  "addOrganization": "Àďď ōŕĝàńĩźàţĩōń",
+  "removeOrganization": "Ŕēḿōvē {{organization}}",
+  "searchOrganizationsOrEnterLogin": "Śēàŕćĥ ōŕĝàńĩźàţĩōńś ōŕ ēńţēŕ à ĺōĝĩń",
+  "pressEnterToAddOrganization": "Ƥŕēśś Ēńţēŕ ţō àďď ţĥĩś ōŕĝàńĩźàţĩōń.",
+  "organizationOutsideWorkspaceScope": "Ţĥē ŵōŕķśƥàćē ŕēƥōśĩţōŕŷ śćōƥē ďōēś ńōţ àĺĺōŵ ţĥĩś ōŕĝàńĩźàţĩōń.",
+  "noOrganizationsFound": "Ńō ōŕĝàńĩźàţĩōńś ƒōũńď.",
+  "couldNotLoadOrganizations": "Ćōũĺď ńōţ ĺōàď ōŕĝàńĩźàţĩōńś: {{message}}",
+  "refreshOrganizations": "Ŕēƒŕēśĥ ōŕĝàńĩźàţĩōńś"
 }

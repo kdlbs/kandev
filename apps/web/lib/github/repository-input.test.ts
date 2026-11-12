@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseGitHubRepositoryInput } from "./repository-input";
+import { parseGitHubLogin, parseGitHubRepositoryInput } from "./repository-input";
 
 describe("parseGitHubRepositoryInput", () => {
   it("parses an owner/name slug", () => {
@@ -20,6 +20,23 @@ describe("parseGitHubRepositoryInput", () => {
     "rejects %j",
     (value) => {
       expect(parseGitHubRepositoryInput(value)).toBeNull();
+    },
+  );
+});
+
+describe("parseGitHubLogin", () => {
+  it.each([
+    ["kdlbs", "kdlbs"],
+    [" Octo-Cat ", "Octo-Cat"],
+    ["a1", "a1"],
+  ])("accepts %j", (value, expected) => {
+    expect(parseGitHubLogin(value)).toBe(expected);
+  });
+
+  it.each(["", "-kdlbs", "kd lbs", "kdlbs/kandev", "kd_lbs", "a".repeat(40)])(
+    "rejects %j",
+    (value) => {
+      expect(parseGitHubLogin(value)).toBeNull();
     },
   );
 });

@@ -39,6 +39,8 @@ task-creation remote chip, its branch pill, and its row state.
 | `AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.7` | [Failure and recovery](#failure-and-recovery) |
 | `AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.8` | [GitHub multi-select](#github-multi-select) |
 | `AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.9` | [Data and contracts](#data-and-contracts) |
+| `AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.10` | [GitHub organization multi-select](#github-organization-multi-select); [Watch filter](#watch-filter); [Repository scope setting](#repository-scope-setting) |
+| `AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.11` | [List refresh](#list-refresh) |
 
 ## Components and responsibilities
 
@@ -94,6 +96,41 @@ today's behavior for every existing caller.
   remote chip's height bound) and uses the existing touch-sized option, add,
   and remove sizes.
 
+### GitHub organization multi-select
+
+`apps/web/components/github/github-organization-multi-select.tsx` exports
+`GitHubOrganizationMultiSelect`:
+
+- Props: `workspaceId`, `selected: string[]` (logins), `onChange(string[])`,
+  `isOrgAllowed?(login): boolean`, `disabled?`.
+- Loads `GET /api/v1/github/orgs` through `useGitHubOrgs` in
+  `apps/web/hooks/domains/github/use-github-orgs.ts`. The backend already
+  prepends the authenticated login, so the account is listed first.
+- Same anatomy as the repository multi-select: removable chips (shared
+  `SelectionChip`), an "Add organization" trigger, and a popover panel with the
+  shared search row (`PickerSearchRow` in `apps/web/components/picker-controls.tsx`),
+  substring filtering, the "Already added" marker, and touch-sized rows.
+- Enter on a well-formed GitHub login (`parseGitHubLogin` in
+  `apps/web/lib/github/repository-input.ts`) adds it even when unlisted;
+  `isOrgAllowed` rejects it with a localized message.
+- Deduplicates case-insensitively.
+
+### List refresh
+
+`PickerSearchRow` renders a refresh icon button beside the search input when
+the caller passes `onRefresh`, spinning while the list loads. The repository
+panel passes `accessible.refresh`; the organization panel passes
+`useGitHubOrgs().refresh`. The task-creation remote chip inherits the control
+through the shared panel.
+
+`useRemoteRepositories().refresh` already bumped a refresh version. The
+built-in GitHub source now also sends `refresh=true` to
+`GET /api/v1/github/repos` for the first successful load after each refresh.
+The backend's `ListAccessibleReposForWorkspace(..., refresh)` then skips the
+60-second accessible-repository cache read for both the personal and the
+automation list, and stores the fresh result. The organizations endpoint is
+not cached, so its refresh is a plain refetch.
+
 ### Typed entry
 
 `parseGitHubRepositoryInput(value, githubHost?)` in
@@ -106,14 +143,18 @@ error instead of being added.
 
 ### Watch filter
 
-`RepoFilterSelector` keeps its props, header, "All repositories" switch, scope
-fetch, and organization badges. Scope predicates (`repoAllowedByScope`,
+`RepoFilterSelector` keeps its props, header, "All repositories" switch, and
+scope fetch. Its organization badges are replaced by
+`GitHubOrganizationMultiSelect`, fed the `name === ""` entries and filtered by
+`orgAllowedByScope`; it is hidden in `repos` scope mode as the badges were.
+Organization changes are merged back as `{ owner, name: "" }` entries. Scope predicates (`repoAllowedByScope`,
 `orgAllowedByScope`, `sameRepoFilter`) move to `apps/web/lib/github/repo-scope.ts`
 so the multi-select shares them. `RepoSearchCombobox`, `useRepoSearch`, and the
 `searchOrgRepos` call are removed; `GitHubRepositoryMultiSelect` with the
 fetched scope replaces the combobox and the `SelectedFilters` badges. The
-multi-select renders organization entries (`name === ""`) as `owner/*`, so the
-existing removal behavior for both kinds stays in one list. Every
+multi-select receives only repository entries while the organization picker is
+shown; when it is hidden, it receives every entry and renders organization
+entries as `owner/*` so saved ones stay removable. Every
 consumer must pass `workspaceId`: without it neither the scope nor the
 repository list can load. `github-pr-config.tsx` previously omitted it, which
 is why the automation "PR: opened" picker never returned results even for a
@@ -129,11 +170,14 @@ of a comma-separated string. In `repos` mode it renders
 discard, save payload (`repo_scope_repos`), and stale-response guards compare
 canonical `owner/name` lists. The invalid-entry message, its
 `useCommaSeparatedOwnerRepoValues` locale key, and `invalidReason` disappear because the control can no longer hold a malformed
-value. The organizations field is unchanged.
+value. The organizations draft is likewise a login list rendered by
+`GitHubOrganizationMultiSelect` without a scope filter, disabled unless the
+mode is `orgs`; the save payload (`repo_scope_orgs`) is unchanged.
 
 ## Data and contracts
 
-No API, persistence, or wire change. Watch filters and trigger configs keep
+No persistence change. The only API change is the optional `refresh=true`
+query parameter on `GET /api/v1/github/repos` (see [List refresh](#list-refresh)). Watch filters and trigger configs keep
 `RepoFilter[]`; repository scope keeps `repo_scope_repos: RepoFilter[]`. The
 frontend `searchOrgRepos` client stays exported but has no caller; the backend
 `/api/v1/github/repos/search` endpoint stays in place. The locale keys used only
@@ -154,7 +198,7 @@ Add repository -> popover opens -> useRemoteRepositories(ws, github)
 The panel reuses the task-creation states: loading, "No repositories found",
 load error, and the connect-provider banner when GitHub is unavailable. Typed
 `owner/name` entry remains available in each state. The hook's existing
-`refresh` keeps recovery explicit.
+`refresh`, now exposed as the refresh control, keeps recovery explicit.
 
 ## Persistence
 

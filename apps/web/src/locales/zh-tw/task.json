@@ -3246,5 +3246,6 @@
   "questionReviewInB": "在 B 中",
   "questionReviewChoiceName": "選項：{{choice}}",
   "questionReviewFlipShort": "翻轉",
-  "threadExtractChipLabel": "{{author}}：“{{quote}}”"
+  "threadExtractChipLabel": "{{author}}：“{{quote}}”",
+  "refreshRepositories": "重新整理儲存庫"
 }

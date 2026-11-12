@@ -667,5 +667,13 @@
   "removeRepositoryFilter": "移除 {{repository}}",
   "repositoryOutsideWorkspaceScope": "工作區儲存庫範圍不允許此儲存庫。",
   "searchRepositoriesOrEnterOwnerRepo": "搜尋儲存庫或輸入 {{format}}",
-  "pressEnterToAddRepository": "按 Enter 新增此儲存庫。"
+  "pressEnterToAddRepository": "按 Enter 新增此儲存庫。",
+  "addOrganization": "新增組織",
+  "removeOrganization": "移除 {{organization}}",
+  "searchOrganizationsOrEnterLogin": "搜尋組織或輸入登入名",
+  "pressEnterToAddOrganization": "按 Enter 新增此組織。",
+  "organizationOutsideWorkspaceScope": "工作區儲存庫範圍不允許此組織。",
+  "noOrganizationsFound": "未找到組織。",
+  "couldNotLoadOrganizations": "無法載入組織：{{message}}",
+  "refreshOrganizations": "重新整理組織"
 }

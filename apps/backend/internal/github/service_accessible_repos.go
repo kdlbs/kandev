@@ -59,13 +59,14 @@ func (s *Service) ListAccessibleRepos(ctx context.Context, query string, limit i
 	if s.client == nil {
 		return nil, ErrNoClient
 	}
-	return s.listAccessibleReposWithClient(ctx, s.client, "legacy", query, limit)
+	return s.listAccessibleReposWithClient(ctx, s.client, "legacy", query, limit, false)
 }
 
 // ListAccessibleReposForWorkspace returns the personal identity's repositories
 // intersected with both the workspace boundary and automation visibility.
+// refresh skips cached GitHub lists and replaces them with the fresh result.
 func (s *Service) ListAccessibleReposForWorkspace(
-	ctx context.Context, workspaceID, userID, query string, limit int,
+	ctx context.Context, workspaceID, userID, query string, limit int, refresh bool,
 ) ([]GitHubRepo, error) {
 	resolved, err := s.resolvePersonalReadClient(ctx, workspaceID, userID, "", "")
 	if err != nil {
@@ -75,11 +76,13 @@ func (s *Service) ListAccessibleReposForWorkspace(
 	if err != nil {
 		return nil, err
 	}
-	repos, err := s.listAccessibleReposWithClient(ctx, resolved.Client, resolved.CacheScope, query, maxAccessibleReposLimit)
+	repos, err := s.listAccessibleReposWithClient(
+		ctx, resolved.Client, resolved.CacheScope, query, maxAccessibleReposLimit, refresh,
+	)
 	if err != nil {
 		return nil, err
 	}
-	automationRepos, err := s.listAutomationAccessibleRepos(ctx, workspaceID, query)
+	automationRepos, err := s.listAutomationAccessibleRepos(ctx, workspaceID, query, refresh)
 	if err != nil {
 		return nil, err
 	}
@@ -106,13 +109,14 @@ func (s *Service) ListAccessibleReposForWorkspace(
 func (s *Service) listAutomationAccessibleRepos(
 	ctx context.Context,
 	workspaceID, query string,
+	refresh bool,
 ) ([]GitHubRepo, error) {
 	resolved, err := s.resolveAutomationClient(ctx, workspaceID, "", "")
 	if err != nil {
 		return nil, err
 	}
 	return s.listAccessibleReposWithClient(
-		ctx, resolved.Client, resolved.CacheScope, query, maxAccessibleReposLimit,
+		ctx, resolved.Client, resolved.CacheScope, query, maxAccessibleReposLimit, refresh,
 	)
 }
 
@@ -130,12 +134,14 @@ func repositorySetContains(set map[string]struct{}, owner, repo string) bool {
 }
 
 func (s *Service) listAccessibleReposWithClient(
-	ctx context.Context, client Client, cacheScope, query string, limit int,
+	ctx context.Context, client Client, cacheScope, query string, limit int, refresh bool,
 ) ([]GitHubRepo, error) {
 	limit = clampAccessibleReposLimit(limit)
 	key := scopedCacheKey(cacheScope, accessibleReposCacheKey(query, limit))
-	if v, ok := s.accessibleReposCache.get(key); ok {
-		return v.([]GitHubRepo), nil
+	if !refresh {
+		if v, ok := s.accessibleReposCache.get(key); ok {
+			return v.([]GitHubRepo), nil
+		}
 	}
 	// Snapshot the cache generation BEFORE the fetch. If a clear() runs while
 	// this fetch is in flight (token swap via ConfigureToken/ClearToken, or the

@@ -667,5 +667,13 @@
   "removeRepositoryFilter": "移除 {{repository}}",
   "repositoryOutsideWorkspaceScope": "工作区仓库范围不允许此仓库。",
   "searchRepositoriesOrEnterOwnerRepo": "搜索仓库或输入 {{format}}",
-  "pressEnterToAddRepository": "按 Enter 添加此仓库。"
+  "pressEnterToAddRepository": "按 Enter 添加此仓库。",
+  "addOrganization": "添加组织",
+  "removeOrganization": "移除 {{organization}}",
+  "searchOrganizationsOrEnterLogin": "搜索组织或输入登录名",
+  "pressEnterToAddOrganization": "按 Enter 添加此组织。",
+  "organizationOutsideWorkspaceScope": "工作区仓库范围不允许此组织。",
+  "noOrganizationsFound": "未找到组织。",
+  "couldNotLoadOrganizations": "无法加载组织：{{message}}",
+  "refreshOrganizations": "刷新组织"
 }

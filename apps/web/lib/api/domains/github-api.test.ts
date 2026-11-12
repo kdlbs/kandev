@@ -271,6 +271,14 @@ describe("fetchAccessibleRepos — URL & parsing", () => {
     expect(url).toContain("workspace_id=ws%2F1");
   });
 
+  it("asks the server to bypass its cache on refresh", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ repos: [] }));
+
+    await fetchAccessibleRepos({ workspaceId: workspaceID, refresh: true });
+
+    expect(lastCallUrl()).toContain("refresh=true");
+  });
+
   it("omits empty query and missing limit from the URL", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ repos: [] }));
 
@@ -280,6 +288,7 @@ describe("fetchAccessibleRepos — URL & parsing", () => {
     expect(url).toContain("/api/v1/github/repos");
     expect(url).not.toContain("q=");
     expect(url).not.toContain("limit=");
+    expect(url).not.toContain("refresh=");
   });
 
   it("parses the 200 response and injects provider: 'github' on each entry", async () => {

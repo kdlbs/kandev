@@ -322,7 +322,7 @@ func TestPersonalAccessibleReposIntersectAutomationVisibility(t *testing.T) {
 	)
 
 	repos, err := service.ListAccessibleReposForWorkspace(
-		context.Background(), "workspace-1", "user-1", "", 50,
+		context.Background(), "workspace-1", "user-1", "", 50, false,
 	)
 	if err != nil {
 		t.Fatalf("ListAccessibleReposForWorkspace() error = %v", err)

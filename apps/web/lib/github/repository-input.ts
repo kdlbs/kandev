@@ -11,3 +11,12 @@ export function parseGitHubRepositoryInput(value: string, githubHost?: string): 
   const url = parseGitHubRepoUrl(trimmed, githubHost);
   return url ? { owner: url.owner, name: url.repo } : null;
 }
+
+// GitHub logins: 1-39 alphanumerics or hyphens, starting with an alphanumeric.
+const LOGIN_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+
+/** Parses a typed GitHub user or organization login. */
+export function parseGitHubLogin(value: string): string | null {
+  const trimmed = value.trim();
+  return LOGIN_PATTERN.test(trimmed) ? trimmed : null;
+}

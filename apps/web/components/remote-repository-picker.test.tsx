@@ -51,6 +51,23 @@ describe("RemoteRepositoryPickerPanel", () => {
     expect(search).toHaveBeenLastCalledWith("kandev");
   });
 
+  it("reloads the list from the refresh control", () => {
+    const refresh = vi.fn();
+    renderPanel({ accessible: makeAccessible({ repos, refresh }) });
+    fireEvent.click(screen.getByTestId("remote-repo-refresh"));
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables the refresh control while the list loads", () => {
+    renderPanel({ accessible: makeAccessible({ repos, refresh: vi.fn(), loading: true }) });
+    expect(screen.getByTestId<HTMLButtonElement>("remote-repo-refresh").disabled).toBe(true);
+  });
+
+  it("omits the refresh control when the list cannot refresh", () => {
+    renderPanel();
+    expect(screen.queryByTestId("remote-repo-refresh")).toBeNull();
+  });
+
   it("hides repositories the caller does not allow", () => {
     renderPanel({ isRepoAllowed: (repo) => repo.owner === "kdlbs" });
     expect(optionNames()).toEqual([expect.stringContaining("kdlbs/kandev")]);

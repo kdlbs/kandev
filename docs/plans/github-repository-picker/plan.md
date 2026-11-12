@@ -18,7 +18,8 @@ multi-select; a focused E2E pass proves the desktop and phone flows.
   ([requirements](../../specs/integrations/requirements/github-repository-picker.md))
 - System design:
   [github-repository-picker.md](../../specs/integrations/system-design/github-repository-picker.md)
-- No backend, schema, API, or persisted-shape change.
+- No schema or persisted-shape change. Task 05 adds the optional
+  `refresh=true` parameter to `GET /api/v1/github/repos`.
 
 ## Root cause
 
@@ -123,6 +124,7 @@ Mode [Selected repositories v]   Organizations [kdlbs, example-org      ]
 | 02 | [Watch filter uses the GitHub picker](task-02-watch-filter-picker.md) | 01 | .1–.5, .7, .9 |
 | 03 | [Repository scope uses the GitHub picker](task-03-scope-setting-picker.md) | 02 | .6, .9 |
 | 04 | [E2E coverage, desktop and phone](task-04-e2e.md) | 03 | .1–.8 |
+| 05 | [Organization picker and list refresh](task-05-organization-picker-refresh.md) | 04 | .5, .10, .11 |
 
 Sequential. No delegation is authorized by this plan.
 
@@ -146,6 +148,6 @@ make fmt && make typecheck test lint
 
 ## Exclusions
 
-- Workspace repository chips ("Repository access") and task creation behavior.
-- Repository scope organizations field.
+- Workspace repository chips ("Repository access") and task creation behavior
+  (task creation only inherits the refresh control).
 - Backend `/api/v1/github/repos/search` endpoint (left in place).

@@ -12,6 +12,7 @@ import { AutomationsPage } from "../pages/automations-page";
  *  - Checking "All repositories" CLEARS repos; unchecking leaves list as-is
  *  - Toggle cycle: check → save → reopen → uncheck → empty repos + warning
  *  - workspaceId pass-through asserted on the outbound /api/v1/github/orgs request
+ *    once "All repositories" is turned off
  *  - List page badge label "GitHub PR Merged" in purple
  *  - Info tooltip mentions workspace and up-to-a-minute detection lag
  *  - Repository picker is ENABLED (unlike github_pr which disables it)
@@ -194,7 +195,7 @@ test.describe("automations — Pull request merged trigger", () => {
     await expect(tooltip).toContainText(/minute/i);
   });
 
-  test("workspaceId is passed to the orgs request when the config panel mounts", async ({
+  test("workspaceId is passed to the orgs request when repositories are restricted", async ({
     testPage,
     seedData,
   }) => {
@@ -204,8 +205,13 @@ test.describe("automations — Pull request merged trigger", () => {
     await automations.addConditionButton.click();
     await testPage.getByRole("option", { name: /Pull request merged/i }).click();
 
-    // Interceptor must be set up BEFORE expanding — the orgs fetch fires on
-    // RepoFilterSelector mount, which happens when the config panel becomes visible.
+    await testPage
+      .getByRole("button", { name: /PR merged/i })
+      .first()
+      .click();
+
+    // Interceptor must be set up BEFORE restricting repositories: the organization
+    // picker mounts, and fetches organizations, only when "All repositories" is off.
     const orgRequestPromise = testPage.waitForRequest(
       (req) =>
         req.url().includes("/api/v1/github/orgs") &&
@@ -213,10 +219,8 @@ test.describe("automations — Pull request merged trigger", () => {
       { timeout: 10_000 },
     );
 
-    // Expand the trigger card — this mounts RepoFilterSelector, which fires the orgs fetch
     await testPage
-      .getByRole("button", { name: /PR merged/i })
-      .first()
+      .getByRole("switch", { name: "All repositories allowed by this workspace" })
       .click();
 
     // The key assertion: the outbound request carries this workspace's id

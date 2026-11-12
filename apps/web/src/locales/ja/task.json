@@ -3246,5 +3246,6 @@
   "questionReviewInB": "B に表示中",
   "questionReviewChoiceName": "選択肢：{{choice}}",
   "questionReviewFlipShort": "切替",
-  "threadExtractChipLabel": "{{author}}：「{{quote}}」"
+  "threadExtractChipLabel": "{{author}}：「{{quote}}」",
+  "refreshRepositories": "リポジトリを再読み込み"
 }

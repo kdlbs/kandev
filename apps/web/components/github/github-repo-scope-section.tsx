@@ -12,7 +12,6 @@ import {
   DrawerTitle,
   DrawerTrigger,
 } from "@kandev/ui/drawer";
-import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
@@ -32,26 +31,24 @@ import type {
   UpdateGitHubWorkspaceSettingsRequest,
 } from "@/lib/types/github";
 import { useConnectionRequestGuard } from "./github-connection-draft";
+import { GitHubOrganizationMultiSelect } from "./github-organization-multi-select";
 import { GitHubRepositoryMultiSelect } from "./github-repository-multi-select";
 import { useTranslation } from "react-i18next";
 import { t as translate } from "@/lib/i18n";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
-function splitCSV(value: string): string[] {
-  return value
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
+function orgListKey(orgs: string[]): string {
+  return orgs.join(",");
 }
 
 function repoListKey(repos: RepoFilter[]): string {
   return repos.map((repo) => `${repo.owner}/${repo.name}`).join(",");
 }
 
-type ScopeDraft = { mode: GitHubRepoScopeMode; orgs: string; repos: RepoFilter[] };
+type ScopeDraft = { mode: GitHubRepoScopeMode; orgs: string[]; repos: RepoFilter[] };
 
 function draftRevision(draft: ScopeDraft): string {
-  return JSON.stringify([draft.mode, draft.orgs, repoListKey(draft.repos)]);
+  return JSON.stringify([draft.mode, orgListKey(draft.orgs), repoListKey(draft.repos)]);
 }
 
 // Only the list matching the selected mode is sent; the other stays untouched
@@ -64,14 +61,14 @@ function scopePayload({
 }: {
   workspaceId: string;
   mode: GitHubRepoScopeMode;
-  orgs: string;
+  orgs: string[];
   repos: RepoFilter[];
 }): UpdateGitHubWorkspaceSettingsRequest {
   const payload: UpdateGitHubWorkspaceSettingsRequest = {
     workspace_id: workspaceId,
     repo_scope_mode: mode,
   };
-  if (mode === "orgs") payload.repo_scope_orgs = splitCSV(orgs);
+  if (mode === "orgs") payload.repo_scope_orgs = orgs;
   if (mode === "repos") payload.repo_scope_repos = repos;
   return payload;
 }
@@ -121,12 +118,12 @@ function RepositoryScopeHelp() {
 type ScopeFieldsProps = {
   workspaceId: string;
   mode: GitHubRepoScopeMode;
-  orgs: string;
+  orgs: string[];
   repos: RepoFilter[];
   baseline: ScopeDraft;
   loading: boolean;
   onModeChange: (mode: GitHubRepoScopeMode) => void;
-  onOrgsChange: (orgs: string) => void;
+  onOrgsChange: (orgs: string[]) => void;
   onReposChange: (repos: RepoFilter[]) => void;
 };
 
@@ -142,9 +139,10 @@ function RepositoryScopeFields({
   onReposChange,
 }: ScopeFieldsProps) {
   const { t } = useTranslation();
+  const orgsDirty = orgListKey(orgs) !== orgListKey(baseline.orgs);
   const reposDirty = repoListKey(repos) !== repoListKey(baseline.repos);
   return (
-    <SettingsCard isDirty={mode !== baseline.mode || orgs !== baseline.orgs || reposDirty}>
+    <SettingsCard isDirty={mode !== baseline.mode || orgsDirty || reposDirty}>
       <CardContent className="grid gap-4 py-4 md:grid-cols-[220px_minmax(0,1fr)]">
         <div className="space-y-1.5">
           <SettingsFieldLabel htmlFor="github-scope-mode">{t("github:mode")}</SettingsFieldLabel>
@@ -169,23 +167,16 @@ function RepositoryScopeFields({
           </Select>
         </div>
         <div className="grid gap-3">
-          <div className="space-y-1.5">
-            <SettingsFieldLabel htmlFor="github-scope-orgs">
-              {t("github:organizations")}
-            </SettingsFieldLabel>
-            <Input
-              id="github-scope-orgs"
-              value={orgs}
-              data-settings-dirty={orgs !== baseline.orgs}
-              onChange={(event) => onOrgsChange(event.target.value)}
-              disabled={loading || mode !== "orgs"}
-              // Sample GitHub organization logins, i.e. the shape of the value
-              // this field accepts. A translated `example-org` would stop being
-              // a usable example.
-              // eslint-disable-next-line i18next/no-literal-string -- example org logins
-              placeholder="kdlbs, example-org"
-              data-testid="github-scope-orgs-input"
-            />
+          <div className="space-y-1.5" data-settings-dirty={orgsDirty}>
+            <SettingsFieldLabel>{t("github:organizations")}</SettingsFieldLabel>
+            <div data-testid="github-scope-orgs">
+              <GitHubOrganizationMultiSelect
+                workspaceId={workspaceId}
+                selected={orgs}
+                onChange={onOrgsChange}
+                disabled={loading || mode !== "orgs"}
+              />
+            </div>
           </div>
           <div className="space-y-1.5" data-settings-dirty={reposDirty}>
             <SettingsFieldLabel>{t("github:repositories")}</SettingsFieldLabel>
@@ -210,9 +201,9 @@ function useGitHubRepoScopeDraft(workspaceId: string) {
   const [draftHost, setDraftHost] = useState("github.com");
   const captureRequest = useConnectionRequestGuard(`${workspaceId}:${draftHost}`);
   const [mode, setMode] = useState<GitHubRepoScopeMode>("all");
-  const [orgs, setOrgs] = useState("");
+  const [orgs, setOrgs] = useState<string[]>([]);
   const [repos, setRepos] = useState<RepoFilter[]>([]);
-  const [baseline, setBaseline] = useState<ScopeDraft>({ mode: "all", orgs: "", repos: [] });
+  const [baseline, setBaseline] = useState<ScopeDraft>({ mode: "all", orgs: [], repos: [] });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -259,7 +250,9 @@ function useGitHubRepoScopeDraft(workspaceId: string) {
       const saved = settingsScopeDraft(updated);
       setBaseline(saved);
       setMode((current) => (current === submitted.mode ? saved.mode : current));
-      setOrgs((current) => (current === submitted.orgs ? saved.orgs : current));
+      setOrgs((current) =>
+        orgListKey(current) === orgListKey(submitted.orgs) ? saved.orgs : current,
+      );
       setRepos((current) =>
         repoListKey(current) === repoListKey(submitted.repos) ? saved.repos : current,
       );
@@ -329,7 +322,7 @@ function settingsScopeDraft(
 ): ScopeDraft {
   return {
     mode: settings.repo_scope_mode ?? "all",
-    orgs: (settings.repo_scope_orgs ?? []).join(", "),
+    orgs: settings.repo_scope_orgs ?? [],
     repos: settings.repo_scope_repos ?? [],
   };
 }
