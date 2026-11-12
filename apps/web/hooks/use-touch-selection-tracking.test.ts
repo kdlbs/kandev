@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { renderHook } from "@testing-library/react";
+import { cleanup, renderHook } from "@testing-library/react";
 import { useTouchSelectionTracking } from "./use-touch-selection-tracking";
 
 let root: HTMLDivElement;
@@ -39,6 +39,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   window.getSelection()?.removeAllRanges();
   document.body.innerHTML = "";
   vi.unstubAllGlobals();
@@ -86,6 +87,35 @@ describe("useTouchSelectionTracking", () => {
     document.dispatchEvent(new Event("selectionchange"));
     flushFrames();
     expect(onChange).toHaveBeenCalledWith(null);
+  });
+
+  it("shares one document listener and one frame across tracked surfaces", () => {
+    const second = document.createElement("div");
+    second.textContent = "Another agent reply.";
+    document.body.appendChild(second);
+    const addListener = vi.spyOn(document, "addEventListener");
+    const first = vi.fn();
+    const other = vi.fn();
+    const { unmount } = renderHook(() => {
+      useTouchSelectionTracking({ current: root }, true, first);
+      useTouchSelectionTracking({ current: second }, true, other);
+    });
+
+    const selectionListeners = addListener.mock.calls.filter(
+      ([type]) => type === "selectionchange",
+    );
+    expect(selectionListeners).toHaveLength(1);
+    select(root.firstChild!, 0, 4);
+    expect(frames).toHaveLength(1);
+    flushFrames();
+    expect(first.mock.calls[0][0]?.toString()).toBe("Sele");
+    expect(other).toHaveBeenCalledWith(null);
+
+    const removeListener = vi.spyOn(document, "removeEventListener");
+    unmount();
+    expect(removeListener.mock.calls.filter(([type]) => type === "selectionchange")).toHaveLength(
+      1,
+    );
   });
 
   it("does not listen while disabled", () => {

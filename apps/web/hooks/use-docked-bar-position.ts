@@ -27,9 +27,9 @@ export function resolveDockedBarPosition({
   container?: DockContainerBounds | null;
 }): DockedBarPosition {
   if (container) {
-    const visibleBottom = keyboardOpen
-      ? Math.min(container.bottom, viewportBottom)
-      : container.bottom;
+    // Clamp to the visual viewport so a host taller than the screen keeps the bar visible.
+    const visibleBottom =
+      viewportBottom > 0 ? Math.min(container.bottom, viewportBottom) : container.bottom;
     return { top: visibleBottom - barHeight, left: container.left, width: container.width };
   }
   if (keyboardOpen) return { top: viewportBottom - barHeight };

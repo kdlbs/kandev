@@ -3,8 +3,10 @@ created: 2026-11-11
 status: implemented
 requirements:
   - REQ-UI-TOUCH-SELECTION-ACTIONS-001
+  - REQ-UI-COMPOSER-ACTION-WRAP-001
 system_design:
   - ../../specs/ui/system-design/touch-selection-actions.md
+  - ../../specs/ui/system-design/composer-action-wrapping.md
 legacy_specs: []
 ---
 

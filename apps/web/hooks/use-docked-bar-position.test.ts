@@ -42,6 +42,17 @@ describe("resolveDockedBarPosition", () => {
     ).toEqual({ top: 402, left: 0, width: 400 });
   });
 
+  it("clamps a container that extends below the visible viewport", () => {
+    expect(
+      resolveDockedBarPosition({
+        keyboardOpen: false,
+        viewportBottom: 800,
+        barHeight: 48,
+        container: { left: 0, width: 400, bottom: 1200 },
+      }),
+    ).toEqual({ top: 752, left: 0, width: 400 });
+  });
+
   it("falls back to the visual viewport without a container", () => {
     expect(
       resolveDockedBarPosition({ keyboardOpen: true, viewportBottom: 450, barHeight: 48 }),

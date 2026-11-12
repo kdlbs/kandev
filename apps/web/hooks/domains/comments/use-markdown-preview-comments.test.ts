@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 import { SOURCE_END_ATTR, SOURCE_START_ATTR } from "@/lib/markdown/source-line-ranges";
 import { isIgnoredTarget, useMarkdownPreviewComments } from "./use-markdown-preview-comments";
 
@@ -36,6 +36,7 @@ describe("useMarkdownPreviewComments touch selection", () => {
   });
 
   afterEach(() => {
+    cleanup();
     TOUCH.enabled = false;
     window.getSelection()?.removeAllRanges();
     root.remove();
@@ -87,6 +88,18 @@ describe("useMarkdownPreviewComments touch selection", () => {
 
     selectAndFlush(4, 4);
     expect(result.current.currentSelection).toBeNull();
+  });
+
+  it("keeps an open comment draft when the viewport resizes", () => {
+    TOUCH.enabled = true;
+    const { result } = renderPreviewHook();
+    selectAndFlush(4, 8);
+    act(() => result.current.openComposer());
+    expect(result.current.textSelection?.selectedText).toBe("pnpm");
+
+    act(() => result.current.dismissForResize());
+
+    expect(result.current.textSelection?.selectedText).toBe("pnpm");
   });
 
   it("ignores selectionchange with a fine pointer", () => {

@@ -58,12 +58,12 @@ implements and verifies the revised row order; earlier screenshots and Task 01
 results describe the previous composition.
 
 The 2026-10-20 revision extends that placement with a shared status/utility row.
+The workflow action retained its separate upper row. Acceptance criteria .6
+and .7 were implemented and verified through Task 03.
 
 The 2026-11-11 user correction (kdlbs/kandev#5270) replaces the dedicated phone
 workflow row: the action now leads the shared status/utility row so the tray,
 together with the touch selection Comment action, fits on one row.
-The workflow action retains its separate upper row. Acceptance criteria .6
-and .7 are implemented and verified through Task 03.
 
 ## References
 

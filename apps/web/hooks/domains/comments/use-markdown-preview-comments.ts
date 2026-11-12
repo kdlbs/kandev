@@ -390,6 +390,11 @@ export function useMarkdownPreviewComments({
     setTextSelection(null);
     clearBrowserSelection();
   }, []);
+  // Viewport changes (rotation, keyboard) must not discard an open comment draft.
+  const dismissForResize = useCallback(() => {
+    if (!touch) setCurrentSelection(null);
+    closeCommentView();
+  }, [closeCommentView, setCurrentSelection, touch]);
   const dismissOverlays = useCallback(() => {
     // A docked touch trigger follows the live selection, not scroll position.
     if (!touch) setCurrentSelection(null);
@@ -429,5 +434,6 @@ export function useMarkdownPreviewComments({
     showCommentsForRange,
     closeCommentView,
     dismissOverlays,
+    dismissForResize,
   };
 }

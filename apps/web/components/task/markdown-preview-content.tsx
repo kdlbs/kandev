@@ -447,6 +447,7 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
     [commentState.comments, commentState.showCommentsForRange],
   );
   const dismissCommentOverlays = commentState.dismissOverlays;
+  const dismissCommentOverlaysForResize = commentState.dismissForResize;
 
   useEffect(() => {
     setOverlayRoot(document.body);
@@ -456,13 +457,14 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
     if (!commentsEnabled) return;
     const scrollElement = scrollRef.current;
     const dismissOverlays = () => dismissCommentOverlays();
+    const dismissForResize = () => dismissCommentOverlaysForResize();
     scrollElement?.addEventListener("scroll", dismissOverlays, { passive: true });
-    window.addEventListener("resize", dismissOverlays);
+    window.addEventListener("resize", dismissForResize);
     return () => {
       scrollElement?.removeEventListener("scroll", dismissOverlays);
-      window.removeEventListener("resize", dismissOverlays);
+      window.removeEventListener("resize", dismissForResize);
     };
-  }, [commentsEnabled, dismissCommentOverlays]);
+  }, [commentsEnabled, dismissCommentOverlays, dismissCommentOverlaysForResize]);
 
   return (
     <div className="relative flex h-full flex-col" data-testid="markdown-preview">

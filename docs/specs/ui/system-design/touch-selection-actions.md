@@ -143,8 +143,10 @@ icons, utilities, and the Comment action share one row when they fit.
 - Markdown preview: the preview's scroll container (`scrollRef`).
 - Code editors: the editor area below the toolbar (`editorAreaRef`).
 
-With the keyboard closed the dock's top is `hostBottom - 48`. With the keyboard
-open it is `min(hostBottom, visualViewportBottom) - 48`, matching the Plan dock.
+The dock's top is `min(hostBottom, visualViewportBottom) - 48` whether or not
+the keyboard is open, so a host taller than the screen still keeps the dock
+visible; the Plan dock shares this geometry. Without a visual-viewport
+measurement it falls back to `hostBottom - 48`.
 When no host is found, `resolveVisualViewportPosition` places it at the visual
 viewport bottom above `env(safe-area-inset-bottom)`.
 
@@ -157,7 +159,9 @@ handle drags fire only `selectionchange`. A shared hook
 
 - Subscribes to `document` `selectionchange` only while `enabled` (touch
   presentation and the surface accepts selections).
-- Coalesces events into one `requestAnimationFrame` callback.
+- Shares one `selectionchange` listener, one capture `pointerdown` listener,
+  and one `requestAnimationFrame` callback per document across every tracked
+  surface, so long transcripts do not multiply work while handles are dragged.
 - Reports the current selection when both anchor and focus nodes are inside
   `rootRef`, and `null` when the selection is collapsed, whitespace-only, or
   outside the root.
