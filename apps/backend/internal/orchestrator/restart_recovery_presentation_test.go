@@ -3,11 +3,79 @@ package orchestrator
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.5
+func TestRestartRecoveryRecreateDoesNotAddCompanionFence(t *testing.T) {
+	ctx := context.Background()
+	service, repo, _, session, _ := newSilentRestoreEligibilityFixture(t, "native", "companion-fence")
+	initial, err := repo.GetOpenSessionRecoveryBlock(ctx, session.ID, session.QueueIncarnationID, 1)
+	require.NoError(t, err)
+	changed, err := repo.ResolveSessionRecoveryBlock(ctx, initial.ID, "resume", time.Now().UTC())
+	require.NoError(t, err)
+	require.True(t, changed)
+	currentGeneration := &models.HarnessSessionGeneration{
+		SessionID: session.ID, IncarnationID: session.QueueIncarnationID,
+		Generation: 2, PredecessorGeneration: 1, NativeSessionID: "native",
+		CreationReason: models.SilentRestoreAction,
+	}
+	require.NoError(t, repo.CreateHarnessSessionGeneration(ctx, currentGeneration))
+	_, err = repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{
+		ID: "current-submission", SessionID: session.ID, IncarnationID: session.QueueIncarnationID,
+		HarnessGeneration: 2, OwnerGeneration: 2, PayloadHash: "current-hash",
+		Payload: []byte("current prompt"), State: models.DeliverySubmissionInterruptedUnknown,
+	})
+	require.NoError(t, err)
+	currentBlock := &models.SessionRecoveryBlock{
+		ID: "current-bound-block", SessionID: session.ID, IncarnationID: session.QueueIncarnationID,
+		ExpectedGeneration: 2, Reason: unknownPromptOutcome, State: models.RecoveryBlockOpen,
+		ConsumerReference: agentDeliveryConsumer, DeliverySubmissionID: "current-submission",
+		DeliveryStreamID: "current-stream",
+	}
+	require.NoError(t, repo.UpsertSessionRecoveryBlock(ctx, currentBlock))
+	storedSession, err := repo.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	historical, exists := models.LoadAgentDeliveryRecovery(storedSession.Metadata)
+	require.True(t, exists)
+	current, err := repo.GetCurrentHarnessSessionGeneration(ctx, session.ID, session.QueueIncarnationID)
+	require.NoError(t, err)
+	got, created, err := service.recreateRestartRecoveryBlock(ctx, storedSession, current, historical, true)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, currentBlock.ID, got.ID)
+	require.False(t, created)
+	blocks, err := repo.ListOpenSessionRecoveryBlocks(ctx, session.ID, session.QueueIncarnationID, 2)
+	require.NoError(t, err)
+	require.Len(t, blocks, 1)
+	require.Equal(t, currentBlock.ID, blocks[0].ID)
+}
+
+func TestRestartRecoveryRecreateReusesCurrentFenceControl(t *testing.T) {
+	ctx := context.Background()
+	service, repo, _, session, _ := newSilentRestoreEligibilityFixture(t, "native", "existing-fence-control")
+	block, err := repo.GetOpenSessionRecoveryBlock(ctx, session.ID, session.QueueIncarnationID, 1)
+	require.NoError(t, err)
+	storedSession, err := repo.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	recovery, exists := models.LoadAgentDeliveryRecovery(storedSession.Metadata)
+	require.True(t, exists)
+	generation, err := repo.GetCurrentHarnessSessionGeneration(ctx, session.ID, session.QueueIncarnationID)
+	require.NoError(t, err)
+	got, created, err := service.recreateRestartRecoveryBlock(ctx, storedSession, generation, recovery, true)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, block.ID, got.ID)
+	require.False(t, created)
+	blocks, err := repo.ListOpenSessionRecoveryBlocks(ctx, session.ID, session.QueueIncarnationID, 1)
+	require.NoError(t, err)
+	require.Len(t, blocks, 1)
+	require.Equal(t, block.ID, blocks[0].ID)
+}
 
 func TestRestartRecoveryRecreatesMissingPresentationFence(t *testing.T) {
 	ctx := context.Background()

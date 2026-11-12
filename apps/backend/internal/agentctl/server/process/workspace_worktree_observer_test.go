@@ -75,7 +75,10 @@ func TestWorktreeObserverResolvesSymlinkedWorkspaceRoot(t *testing.T) {
 	wt := NewWorkspaceTrackerForRepo(primary, "primary", newTestLogger(t))
 	wt.SetWorkspaceRoot(link)
 	sub := wt.SubscribeWorkspaceStream()
-	defer func() { wt.UnsubscribeWorkspaceStream(sub) }()
+	t.Cleanup(func() {
+		wt.Stop()
+		wt.UnsubscribeWorkspaceStream(sub)
+	})
 
 	wt.observeWorktreeInventory(context.Background())
 	inventory := nextWorktreeInventory(t, sub)
