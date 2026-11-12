@@ -39,6 +39,9 @@ stream, with connection-owned cleanup and regression evidence.
 - Close connections before output detachment, writer mutex acquisition, or
   joins. Preserve final exit delivery, existing unsubscribe operations, and
   retained PTY lifetime.
+- Keep the socket reader processing pongs while PTY input is being written.
+  Buffer one additional application message and close on overflow rather than
+  block control-frame handling.
 - Add the helper, handler, proxy, concurrency, and teardown tests named in the plan.
 - Update `docs/public/websocket-api.md` with a terminal-specific keepalive note.
   The note is protocol reference material. State the proxy interval constraint
@@ -56,7 +59,9 @@ stream, with connection-owned cleanup and regression evidence.
    preserve one connection over repeated idle windows and deliver subsequent input/output.
 2. Missed pongs, blocked control writes, disconnect, and upstream completion
    release connection work. Another responsive peer and retained PTYs remain usable.
-3. Race-enabled tests and the named desktop/phone flows pass. Terminal bytes,
+3. A PTY input write that blocks does not prevent pong handling; the queued
+   message remains ordered and is delivered after the writer resumes.
+4. Race-enabled tests and the named desktop/phone flows pass. Terminal bytes,
    resize messages, replay, exit notices, and one-shot command behavior remain compatible.
 
 ## Implementation sequence
@@ -110,6 +115,7 @@ All paths below are relative to the repository root. New files are marked.
 - `apps/backend/internal/common/wskeepalive/keepalive.go` (new)
 - `apps/backend/internal/common/wskeepalive/keepalive_test.go` (new)
 - `apps/backend/internal/common/wskeepalive/goleak_test.go` (new)
+- `apps/backend/internal/common/wsinput/reader.go` and `reader_test.go` (new)
 - `apps/backend/internal/gateway/websocket/client.go`
 - `apps/backend/internal/gateway/websocket/terminal_handler.go`
 - `apps/backend/internal/gateway/websocket/terminal_pumps.go`
@@ -172,10 +178,22 @@ Web dependencies were present, so the conditional install command was not run.
 
 Review remediation fixed local bridge cleanup when keepalive setup returns an
 error, changed the login proxy test to verify a real PTY input/acknowledgment
-round trip, and made its continuous-output producer cancelable and joinable on
-every exit path. Targeted verification on the reviewed snapshot passed:
-
-- `go test -tags fts5 -trimpath ./internal/gateway/websocket -run '^TestRun(Terminal|UserShell)BridgeKeepaliveSetupFailureCleansUp$' -count=1 -timeout 30s`.
-- `go test -tags fts5 -trimpath ./internal/agent/loginpty -run '^TestLoginStreamKeepalive(IdleProxy|UnresponsivePeer)$' -count=1 -timeout 30s`.
-
+round trip, made the continuous-output producer cancelable and joinable on
+every exit path, and made frame-observer cleanup cancellable before joining.
+Gateway regression cases cover invalid timing on open and closed sockets and a
+closed socket whose initial read-deadline setup fails. Each case verifies peer
+closure, output tracking cleanup, writer closure, and retained process lifetime.
 No build or broader suite was rerun for these review-only fixes.
+
+The PR review finding about blocked PTY input was reproduced by
+`TestLoginStreamKeepaliveReadsPongsDuringBlockedInput` before the reader change.
+The shared `wsinput.Reader` now keeps pongs flowing while handlers process a
+message and closes on a full one-message queue. Targeted verification passed:
+
+- `go test -tags fts5 -trimpath -race ./internal/common/wsinput -run '^TestReader' -count=1 -timeout 60s`.
+- `go test -tags fts5 -trimpath -race ./internal/agent/loginpty -run '^TestLoginStreamKeepalive(ReadsPongsDuringBlockedInput|IdleProxy|UnresponsivePeer)$' -count=1 -timeout 90s`.
+- `go test -tags fts5 -trimpath -race ./internal/gateway/websocket -run '^(TestRunTerminalBridgeKeepaliveSetupFailureCleansUp|TestRunUserShellBridgeKeepaliveSetupFailureCleansUp|TestTerminalKeepaliveUnresponsivePeer|TestTerminalKeepaliveConcurrentOutput)$' -count=1 -timeout 90s`.
+
+The corresponding non-race focused test commands also passed. Changed-Go lint
+passed with 0 issues after the final review changes. No build or broader suite
+was rerun.

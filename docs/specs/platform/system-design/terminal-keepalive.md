@@ -30,6 +30,7 @@ Backend-to-agentctl streams retain their existing control-frame behavior.
 | Component | Responsibility |
 | --- | --- |
 | New `internal/common/wskeepalive/keepalive.go` | Timing defaults, terminal ping loop, pong deadline, idempotent stop and join |
+| New `internal/common/wsinput/reader.go` | Sole WebSocket read loop, ordered input delivery, one-message buffer while consumers process input |
 | `internal/gateway/websocket/client.go` | Consume shared timing constants through its existing pumps |
 | `internal/gateway/websocket/terminal_handler.go` | Initialize private, per-handler keepalive timings |
 | `internal/gateway/websocket/terminal_pumps.go` | Attach keepalive to local shell, local passthrough, and browser side of the remote bridge |
@@ -81,14 +82,17 @@ existing status, authorization, and origin behavior.
 
 ## Concurrent reads and writes
 
-The helper sends pings with Gorilla `WriteControl`, with an absolute write
-deadline. Gorilla permits this operation concurrently with data writes and
-`Close`. A separate goroutine must not use `WriteMessage` or `SetWriteDeadline`
-on a terminal connection that already has a data writer.
+The keepalive helper sends pings with Gorilla `WriteControl`, with an absolute
+write deadline. Gorilla permits this operation concurrently with data writes
+and `Close`. A separate goroutine must not use `WriteMessage` or
+`SetWriteDeadline` on a terminal connection that already has a data writer.
 
-Install read deadlines and the pong handler before the existing reader starts.
-The pong callback then runs in that reader. Do not create another reader or
-change the gateway's `wsWriter` mutex and output ordering.
+Install read deadlines and the pong handler before starting `wsinput.Reader`.
+That goroutine is the sole Gorilla reader and continues processing pongs while
+the handler forwards an earlier application message to a PTY. It keeps message
+order with a one-message buffer. If another message arrives while the buffer is
+full, close the connection instead of blocking the reader and delaying pongs.
+Do not change the gateway's `wsWriter` mutex or output ordering.
 
 The ping loop must observe cancellation on every wait. Output traffic must not
 reset or starve its ticker. Use one loop per browser connection, without a
@@ -99,11 +103,15 @@ shared cancellation channel or process-wide timer mutation.
 Every successful start has one owning bridge or handler. Its stop function
 stops the ticker and joins the goroutine. Repeated stop calls are safe.
 Connection closure must precede a join that can wait for a blocked control write.
+Each `wsinput.Reader` is joined after its buffered messages are drained; closing
+the connection unblocks its read when the consumer returns early.
 
 A ping write failure closes the browser connection to unblock its reader and
 any pending data write. A read deadline follows the same existing cleanup path.
 Failure to install the initial deadline closes the new connection and returns
 without leaving a loop or subscription behind.
+Input backlog overflow closes the stream as a transport failure so pending PTY
+work cannot prevent control-frame processing.
 
 Local gateway cleanup retains `ClearDirectOutputBySession` or
 `ClearUserShellDirectOutput`. Close the socket before output detachment or
@@ -164,6 +172,10 @@ They observe control pings through an active peer reader, return pongs, and
 prove continued binary/text delivery after several cycles. One peer suppresses
 pongs while another remains responsive. PTY output cannot keep the silent peer
 alive. Cover disconnect, write failure, upstream exit, and subscription cleanup.
+`wsinput` tests hold the consumer while pongs and a queued message are read, and
+verify that a full input buffer closes the connection. The login stream
+regression blocks its PTY writer, keeps answering pings past the deadline, then
+delivers the queued input on the same connection.
 
 A test-owned TCP proxy enforces inactivity on bytes from the terminal backend.
 It forwards the actual upgraded byte stream, including control frames.

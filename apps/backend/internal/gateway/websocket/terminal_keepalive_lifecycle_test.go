@@ -3,6 +3,7 @@ package websocket
 import (
 	"errors"
 	"io"
+	"net"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -118,69 +119,110 @@ func TestTerminalKeepaliveConcurrentOutput(t *testing.T) {
 }
 
 func TestRunTerminalBridgeKeepaliveSetupFailureCleansUp(t *testing.T) {
-	log, _ := observedTerminalLogger(t)
-	handler, _ := newBridgeTestHandler(t, log)
-	handler.keepalive = wskeepalive.Timing{}
-	runner := newBridgeTestRunner(t, log)
-	info := startDeferredPassthrough(t, runner, "setup-failure-session")
-	browser, server := newTerminalWSPair(t)
-	wsw := newWsWriter(server)
-	const sessionID = "setup-failure-session"
-	runner.TrackSessionWebSocket(sessionID, wsw)
-	if !runner.HasActiveWebSocketBySession(sessionID) {
-		t.Fatal("session output was not tracked before setup failure")
-	}
-	if err := server.Close(); err != nil {
-		t.Fatalf("close server connection: %v", err)
-	}
+	for _, tc := range keepaliveSetupFailureCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			log, _ := observedTerminalLogger(t)
+			handler, _ := newBridgeTestHandler(t, log)
+			handler.keepalive = tc.timing
+			runner := newBridgeTestRunner(t, log)
+			info := startDeferredPassthrough(t, runner, "setup-failure-session")
+			browser, server := newTerminalWSPair(t)
+			wsw := newWsWriter(server)
+			const sessionID = "setup-failure-session"
+			runner.TrackSessionWebSocket(sessionID, wsw)
+			if !runner.HasActiveWebSocketBySession(sessionID) {
+				t.Fatal("session output was not tracked before setup failure")
+			}
+			if tc.serverAlreadyClosed {
+				if err := server.Close(); err != nil {
+					t.Fatalf("close server connection: %v", err)
+				}
+			}
 
-	handler.runTerminalBridge(server, sessionID, info.ID, runner, wsw)
+			handler.runTerminalBridge(server, sessionID, info.ID, runner, wsw)
 
-	if runner.HasActiveWebSocketBySession(sessionID) {
-		t.Fatal("session output remained tracked after keepalive setup failure")
+			if runner.HasActiveWebSocketBySession(sessionID) {
+				t.Fatal("session output remained tracked after keepalive setup failure")
+			}
+			if _, err := wsw.Write([]byte("late")); !errors.Is(err, io.ErrClosedPipe) {
+				t.Fatalf("wsWriter error = %v, want io.ErrClosedPipe", err)
+			}
+			if !runner.IsProcessReadyOrPending(info.ID) {
+				t.Fatal("keepalive setup failure stopped the retained passthrough process")
+			}
+			assertTerminalPeerClosed(t, browser, "terminal")
+		})
 	}
-	if _, err := wsw.Write([]byte("late")); !errors.Is(err, io.ErrClosedPipe) {
-		t.Fatalf("wsWriter error = %v, want io.ErrClosedPipe", err)
-	}
-	if !runner.IsProcessReadyOrPending(info.ID) {
-		t.Fatal("keepalive setup failure stopped the retained passthrough process")
-	}
-	_ = browser.Close()
 }
 
 func TestRunUserShellBridgeKeepaliveSetupFailureCleansUp(t *testing.T) {
-	log, _ := observedTerminalLogger(t)
-	handler, _ := newBridgeTestHandler(t, log)
-	handler.keepalive = wskeepalive.Timing{}
-	runner := newBridgeTestRunner(t, log)
-	const (
-		scopeID    = "setup-failure-env"
-		terminalID = "setup-failure-terminal"
-		sessionID  = "setup-failure-user-shell"
-	)
-	info := startDeferredUserShell(t, runner, scopeID, sessionID, terminalID)
-	browser, server := newTerminalWSPair(t)
-	wsw := newWsWriter(server)
-	if err := runner.SetDirectOutput(info.ID, wsw); err != nil {
-		t.Fatalf("SetDirectOutput: %v", err)
-	}
-	if !runner.HasActiveWebSocket(info.ID) {
-		t.Fatal("user shell output was not tracked before setup failure")
-	}
-	if err := server.Close(); err != nil {
-		t.Fatalf("close server connection: %v", err)
-	}
+	for _, tc := range keepaliveSetupFailureCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			log, _ := observedTerminalLogger(t)
+			handler, _ := newBridgeTestHandler(t, log)
+			handler.keepalive = tc.timing
+			runner := newBridgeTestRunner(t, log)
+			const (
+				scopeID    = "setup-failure-env"
+				terminalID = "setup-failure-terminal"
+				sessionID  = "setup-failure-user-shell"
+			)
+			info := startDeferredUserShell(t, runner, scopeID, sessionID, terminalID)
+			browser, server := newTerminalWSPair(t)
+			wsw := newWsWriter(server)
+			if err := runner.SetDirectOutput(info.ID, wsw); err != nil {
+				t.Fatalf("SetDirectOutput: %v", err)
+			}
+			if !runner.HasActiveWebSocket(info.ID) {
+				t.Fatal("user shell output was not tracked before setup failure")
+			}
+			if tc.serverAlreadyClosed {
+				if err := server.Close(); err != nil {
+					t.Fatalf("close server connection: %v", err)
+				}
+			}
 
-	handler.runUserShellBridge(server, sessionID, scopeID, terminalID, info.ID, runner, wsw)
+			handler.runUserShellBridge(server, sessionID, scopeID, terminalID, info.ID, runner, wsw)
 
-	if runner.HasActiveWebSocket(info.ID) {
-		t.Fatal("user shell output remained tracked after keepalive setup failure")
+			if runner.HasActiveWebSocket(info.ID) {
+				t.Fatal("user shell output remained tracked after keepalive setup failure")
+			}
+			if _, err := wsw.Write([]byte("late")); !errors.Is(err, io.ErrClosedPipe) {
+				t.Fatalf("wsWriter error = %v, want io.ErrClosedPipe", err)
+			}
+			if !runner.IsProcessReadyOrPending(info.ID) {
+				t.Fatal("keepalive setup failure stopped the retained user shell")
+			}
+			assertTerminalPeerClosed(t, browser, "user shell")
+		})
 	}
-	if _, err := wsw.Write([]byte("late")); !errors.Is(err, io.ErrClosedPipe) {
-		t.Fatalf("wsWriter error = %v, want io.ErrClosedPipe", err)
+}
+
+type keepaliveSetupFailureCase struct {
+	name                string
+	serverAlreadyClosed bool
+	timing              wskeepalive.Timing
+}
+
+func keepaliveSetupFailureCases() []keepaliveSetupFailureCase {
+	return []keepaliveSetupFailureCase{
+		{name: "closed_connection_invalid_timing", serverAlreadyClosed: true, timing: wskeepalive.Timing{}},
+		{name: "open_connection_invalid_timing", timing: wskeepalive.Timing{}},
+		{name: "closed_connection_read_deadline_failure", serverAlreadyClosed: true, timing: wskeepalive.DefaultTiming()},
 	}
-	if !runner.IsProcessReadyOrPending(info.ID) {
-		t.Fatal("keepalive setup failure stopped the retained user shell")
+}
+
+func assertTerminalPeerClosed(t *testing.T, browser *gorillaws.Conn, bridge string) {
+	t.Helper()
+	if err := browser.SetReadDeadline(time.Now().Add(wsTestTimeout)); err != nil {
+		t.Fatalf("set %s peer read deadline: %v", bridge, err)
 	}
-	_ = browser.Close()
+	if _, _, err := browser.ReadMessage(); err == nil {
+		t.Fatalf("%s peer remained open after keepalive setup failure", bridge)
+	} else {
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			t.Fatalf("%s peer timed out instead of observing bridge closure: %v", bridge, err)
+		}
+	}
 }

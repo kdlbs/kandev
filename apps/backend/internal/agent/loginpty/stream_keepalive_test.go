@@ -2,6 +2,7 @@ package loginpty
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -67,6 +68,57 @@ func TestLoginStreamKeepaliveIdleProxy(t *testing.T) {
 		t.Fatalf("write input after proxy idle: %v", err)
 	}
 	waitLoginOutputContaining(t, observer, "ACK:"+marker)
+	_ = conn.Close()
+	waitLoginSubscriberCount(t, sess, 0)
+}
+
+func TestLoginStreamKeepaliveReadsPongsDuringBlockedInput(t *testing.T) {
+	mgr := newTestManager(t, nil)
+	sess, pty := newLoginSessionWithBlockedInput(t, mgr, "blocked-input-session")
+	server := newLoginKeepaliveServer(t, mgr, shortLoginKeepalive(20*time.Millisecond, 80*time.Millisecond))
+	conn := connectHostShellStream(t, server.URL, sess.ID)
+	observer := observeLoginStreamFrames(t, conn, true)
+	waitLoginSubscriberCount(t, sess, 1)
+
+	if err := conn.WriteMessage(gorillaws.BinaryMessage, []byte("large-paste")); err != nil {
+		t.Fatalf("write first input: %v", err)
+	}
+	select {
+	case <-pty.writeStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("PTY writer did not block on the first input")
+	}
+	if err := conn.WriteMessage(gorillaws.BinaryMessage, []byte("input-after-paste")); err != nil {
+		t.Fatalf("write input queued behind paste: %v", err)
+	}
+
+	for range 6 {
+		waitLoginPing(t, observer.pings)
+	}
+
+	pty.releaseWrite()
+	select {
+	case <-pty.firstWriteDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("blocked PTY write did not resume")
+	}
+	if got := <-pty.writes; got != "large-paste" {
+		t.Fatalf("first PTY input = %q, want %q", got, "large-paste")
+	}
+	select {
+	case got := <-pty.writes:
+		if got != "input-after-paste" {
+			t.Fatalf("queued PTY input = %q, want %q", got, "input-after-paste")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("input queued behind the blocked write was not delivered")
+	}
+	select {
+	case err := <-observer.closed:
+		t.Fatalf("login stream closed after processing pongs during blocked input: %v", err)
+	default:
+	}
+
 	_ = conn.Close()
 	waitLoginSubscriberCount(t, sess, 0)
 }
@@ -175,6 +227,7 @@ type loginStreamObserver struct {
 	pings  chan struct{}
 	frames chan loginStreamFrame
 	closed chan error
+	stop   chan struct{}
 	done   chan struct{}
 }
 
@@ -184,6 +237,7 @@ func observeLoginStreamFrames(t *testing.T, conn *gorillaws.Conn, replyToPings b
 		pings:  make(chan struct{}, 32),
 		frames: make(chan loginStreamFrame, 128),
 		closed: make(chan error, 1),
+		stop:   make(chan struct{}),
 		done:   make(chan struct{}),
 	}
 	conn.SetPingHandler(func(payload string) error {
@@ -204,10 +258,15 @@ func observeLoginStreamFrames(t *testing.T, conn *gorillaws.Conn, replyToPings b
 				observer.closed <- err
 				return
 			}
-			observer.frames <- loginStreamFrame{kind: kind, data: data}
+			select {
+			case observer.frames <- loginStreamFrame{kind: kind, data: data}:
+			case <-observer.stop:
+				return
+			}
 		}
 	}()
 	t.Cleanup(func() {
+		close(observer.stop)
 		_ = conn.Close()
 		<-observer.done
 	})
@@ -293,6 +352,74 @@ func makeLoginSessionWithCommand(t *testing.T, mgr *Manager, key string, command
 	}
 	t.Cleanup(func() { sess.stop() })
 	return sess
+}
+
+type blockedLoginPty struct {
+	writeStarted   chan struct{}
+	firstWriteDone chan struct{}
+	writes         chan string
+	release        chan struct{}
+	closed         chan struct{}
+	startOnce      sync.Once
+	releaseOnce    sync.Once
+	closeOnce      sync.Once
+}
+
+func newLoginSessionWithBlockedInput(t *testing.T, mgr *Manager, id string) (*Session, *blockedLoginPty) {
+	t.Helper()
+	pty := &blockedLoginPty{
+		writeStarted:   make(chan struct{}),
+		firstWriteDone: make(chan struct{}),
+		writes:         make(chan string, 4),
+		release:        make(chan struct{}),
+		closed:         make(chan struct{}),
+	}
+	t.Cleanup(func() { _ = pty.Close() })
+	sess := &Session{
+		ID:          id,
+		AgentID:     id,
+		subscribers: make(map[chan<- []byte]struct{}),
+		pty:         pty,
+		running:     true,
+		startedAt:   time.Now(),
+		log:         mgr.log.WithFields(),
+	}
+	mgr.mu.Lock()
+	mgr.byID[id] = sess
+	mgr.mu.Unlock()
+	t.Cleanup(func() {
+		mgr.mu.Lock()
+		delete(mgr.byID, id)
+		mgr.mu.Unlock()
+	})
+	return sess, pty
+}
+
+func (p *blockedLoginPty) Read([]byte) (int, error) {
+	<-p.closed
+	return 0, io.EOF
+}
+
+func (p *blockedLoginPty) Write(data []byte) (int, error) {
+	p.writes <- string(data)
+	p.startOnce.Do(func() {
+		close(p.writeStarted)
+		<-p.release
+		close(p.firstWriteDone)
+	})
+	return len(data), nil
+}
+
+func (p *blockedLoginPty) Close() error {
+	p.closeOnce.Do(func() { close(p.closed) })
+	p.releaseWrite()
+	return nil
+}
+
+func (p *blockedLoginPty) Resize(uint16, uint16) error { return nil }
+
+func (p *blockedLoginPty) releaseWrite() {
+	p.releaseOnce.Do(func() { close(p.release) })
 }
 
 func startLoginStreamOutput(t *testing.T, sess *Session) (func(), *atomic.Int32) {

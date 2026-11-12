@@ -20,6 +20,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/common/wsinput"
 	"github.com/kandev/kandev/internal/common/wskeepalive"
 )
 
@@ -437,20 +438,20 @@ func (h *Handlers) handleStream(c *gin.Context) {
 		}
 	}()
 
-	// Reader: forward client → PTY (binary = input, text = JSON control).
-	for {
-		mt, data, err := conn.ReadMessage()
-		if err != nil {
-			break
-		}
-		switch mt {
+	// Keep the socket reader active while a PTY write waits for input capacity.
+	reader := wsinput.New(conn)
+	for message := range reader.Messages() {
+		switch message.Type {
 		case gorillaws.BinaryMessage:
-			if _, err := sess.Write(data); err != nil {
+			if _, err := sess.Write(message.Data); err != nil {
 				h.logger.Debug("pty write error", zap.Error(err))
 			}
 		case gorillaws.TextMessage:
-			h.handleControlMessage(sess, data)
+			h.handleControlMessage(sess, message.Data)
 		}
+	}
+	if err := reader.Err(); err != nil && !gorillaws.IsCloseError(err, gorillaws.CloseNormalClosure, gorillaws.CloseGoingAway) {
+		h.logger.Debug("login pty ws read error", zap.String("session_id", id), zap.Error(err))
 	}
 	close(disconnect)
 	_ = conn.Close()

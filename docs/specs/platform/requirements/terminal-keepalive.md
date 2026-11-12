@@ -41,7 +41,10 @@ shell process.
   timeout of at least 60 seconds, every terminal connection shall remain attached
   across repeated idle windows. The server shall send WebSocket pings every
   54 seconds, independently of PTY input and output. This applies to local and
-  remote task terminals and every terminal type defined above.
+  remote task terminals and every terminal type defined above. The socket reader
+  shall continue processing pongs while a terminal message is being handled.
+  It shall hold at most one additional application message; if that slot is full,
+  the server shall close the connection rather than block control-frame handling.
 - **AC-PLATFORM-TERMINAL-KEEPALIVE-001.2:** After connection or the last received
   pong, an unresponsive peer shall reach its liveness deadline after 60 seconds.
   The connection shall close even while the PTY produces output. Another
@@ -69,6 +72,9 @@ This contract does not cover proxy idle limits shorter than the ping interval,
 absolute connection-age limits, or suspended browsers that stop responding.
 It does not change reconnect reset/replay semantics, add output cursors, repair
 component remounts, or change executor-to-agentctl transport policy.
+When terminal input exceeds the bounded pending-message capacity, the server
+closes the stream as a transport failure and the existing reconnect behavior
+applies.
 
 ## Design and delivery
 

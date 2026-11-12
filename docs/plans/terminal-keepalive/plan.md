@@ -122,6 +122,7 @@ The cases below provide the implemented acceptance coverage.
 | Criteria | Test file and cases |
 | --- | --- |
 | `.1`, `.2` | `internal/common/wskeepalive/keepalive_test.go`: `TestKeepaliveDefaults`, `TestKeepalivePongDeadline`, `TestKeepaliveWriteFailure`, `TestKeepaliveStop`, `TestKeepaliveRejectsInvalidTiming`, `TestKeepaliveSetupFailureClosesConnection` |
+| `.1`, `.3` | `internal/common/wsinput/reader_test.go` and `internal/agent/loginpty/stream_keepalive_test.go`: pong handling with a stalled consumer and `TestLoginStreamKeepaliveReadsPongsDuringBlockedInput` |
 | `.1`, `.3` | `internal/gateway/websocket/terminal_keepalive_test.go`: `TestTerminalKeepaliveIdle`, covering local shell, local agent, and remote bridge |
 | `.1`, `.3` | `internal/agent/loginpty/stream_keepalive_test.go`: `TestLoginStreamKeepaliveIdle`, through the actual stream route |
 | `.1`, `.3`, `.5` | `TestTerminalKeepaliveIdleProxy` and `TestLoginStreamKeepaliveIdleProxy`: transparent TCP proxy, repeated idle windows, same attachment, subsequent input/output |
@@ -177,12 +178,23 @@ Implementation verification:
   specification lint passed.
 - `git diff --check` passed.
 
-Review remediation on the current snapshot passed the two focused gateway
-keepalive setup-failure tests and the focused login PTY idle-proxy and
-unresponsive-peer tests. These verify cleanup after setup failure, retained
-process lifetime, a real PTY input/acknowledgment round trip, and producer
-goroutine cleanup. No build or broader suite was rerun for these review-only
-fixes.
+Review remediation on the current snapshot passed the focused gateway
+keepalive setup-failure tests and login PTY idle-proxy, blocked-input, and
+unresponsive-peer tests. The gateway regressions cover invalid timing with an
+open and a closed connection, plus a closed-connection read-deadline failure;
+they verify peer closure, cleared output tracking, a closed writer, and retained
+process lifetime. The login tests verify a real PTY input/acknowledgment round
+trip and cancel/join the frame observer and continuous-output producer on every
+exit. No build or broader suite was rerun for these review-only fixes.
+
+The PR review finding that PTY input can block pong processing was reproduced
+by `TestLoginStreamKeepaliveReadsPongsDuringBlockedInput` before the reader
+change. The shared `wsinput.Reader` keeps the sole socket reader active and
+buffers one additional application message; it closes the connection if that
+buffer is exceeded. Focused tests passed for `wsinput`, the login stream
+regressions, and both local gateway bridge setup/keepalive paths. Race-enabled
+versions of all three focused checks passed after the review cleanup changes.
+Changed-Go lint passed with 0 issues. No build or broad suite was rerun.
 
 All 15 existing focused baseline tests passed during the original investigation.
 
