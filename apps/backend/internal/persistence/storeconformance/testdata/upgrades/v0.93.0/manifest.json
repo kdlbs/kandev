@@ -22,7 +22,14 @@
           "table": "agent_profiles",
           "key_column": "id",
           "key_value": "fixture-v0930-agent-profile",
-          "values": {"sort_order": "0"}
+          "values": {"sort_order": "0", "execution_grade": ""}
+        },
+        {
+          "owner": "task",
+          "table": "tasks",
+          "key_column": "id",
+          "key_value": "fixture-v0930-task",
+          "values": {"execution_grade": ""}
         },
         {
           "owner": "task",
@@ -230,7 +237,14 @@
           "table": "agent_profiles",
           "key_column": "id",
           "key_value": "fixture-v0930-agent-profile",
-          "values": {"sort_order": "0"}
+          "values": {"sort_order": "0", "execution_grade": ""}
+        },
+        {
+          "owner": "task",
+          "table": "tasks",
+          "key_column": "id",
+          "key_value": "fixture-v0930-task",
+          "values": {"execution_grade": ""}
         },
         {
           "owner": "task",
