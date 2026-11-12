@@ -1,10 +1,11 @@
 "use client";
 
-import { useRef, useLayoutEffect, useState } from "react";
+import { useRef, useEffect, useLayoutEffect, useState } from "react";
 import Link from "@/components/routing/app-link";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import type { ActiveSessionRecovery } from "@/lib/active-session-recovery";
+import type { RecoveryAuthMethod } from "./types";
 import type { SessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
 import { RecoveryActions } from "../recovery-actions";
 import { SessionErrorDetails } from "../session-error-details";
@@ -19,12 +20,48 @@ import { matchingAutomaticRecovery } from "@/lib/session-recovery-presentation";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { isLocalStorageCause, storageCauseFromError } from "@/lib/session-delivery-storage";
 import { isProcessExitCause } from "./session-process-exit-recovery";
+import { resolveAuthenticationRecovery } from "@/lib/session-authentication-recovery";
 
-function useFocusComposerAfterRecoveryCard(ref: { current: HTMLDivElement | null }) {
+function useFocusComposerAfterRecoveryCard(
+  ref: { current: HTMLDivElement | null },
+  recoveryPending: boolean,
+) {
+  const focusOwnedRef = useRef(false);
+  const recoveryPendingRef = useRef(recoveryPending);
+  recoveryPendingRef.current = recoveryPending;
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const trackFocus = (event: FocusEvent) => {
+      if (event.type === "focusout") {
+        const next = event.relatedTarget;
+        if (next instanceof Node && node.contains(next)) return;
+        if ((!next || next === document.body) && recoveryPendingRef.current) return;
+        focusOwnedRef.current = false;
+        return;
+      }
+      const target = event.target;
+      if (target instanceof Node && node.contains(target)) {
+        focusOwnedRef.current = true;
+      } else if (target !== document.body || !recoveryPendingRef.current) {
+        focusOwnedRef.current = false;
+      }
+    };
+    node.addEventListener("focusin", trackFocus);
+    node.addEventListener("focusout", trackFocus);
+    document.addEventListener("focusin", trackFocus, true);
+    return () => {
+      node.removeEventListener("focusin", trackFocus);
+      node.removeEventListener("focusout", trackFocus);
+      document.removeEventListener("focusin", trackFocus, true);
+    };
+  }, [ref]);
+
   useLayoutEffect(() => {
     const node = ref.current;
     return () => {
-      if (!node?.contains(document.activeElement)) return;
+      if (!node || (!focusOwnedRef.current && !node.contains(document.activeElement))) return;
       const panel = node.closest('[data-testid="session-chat"]');
       requestAnimationFrame(() =>
         panel?.querySelector<HTMLElement>('[contenteditable="true"]')?.focus(),
@@ -86,14 +123,12 @@ export function SessionRecoveryCard({
     onRelocateRequested: () => setRelocationConfirmationOpen(true),
     onInspectionRetry: automaticInspectionRetry(automaticRecovery, actions),
   });
-  const { copy, busy, busyAction, details, detailFields, failure } = useRecoveryPresentation(
-    model,
-    recoveryActions,
-    context,
-  );
+  const { copy, busy, busyAction, details, detailFields, failure, agentDisplayName } =
+    useRecoveryPresentation(model, recoveryActions, context);
+  const authentication = resolveAuthenticationRecovery(model.error?.causes, model.metadata);
   const { relevant: workspaceRecoveryRelevant, forActions: workspaceRecoveryForActions } =
     recoveryCardWorkspaceState(model, actions, projectionMatchesModel, choices);
-  useFocusComposerAfterRecoveryCard(ref);
+  useFocusComposerAfterRecoveryCard(ref, busyAction !== null);
   const storageCause = storageCauseFromError(model.error);
   if (projectionMatchesModel && actions.workspaceRecovery?.agent_ready) return null;
 
@@ -114,9 +149,15 @@ export function SessionRecoveryCard({
         profileExists={profileExists}
         copy={copy}
         failure={failure}
+        authenticationRequired={authentication.required}
+        authenticationProviderName={agentDisplayName}
       />
       <div className="min-w-0 bg-card px-3 pb-3 md:px-4 md:pb-4">
         <StorageSettingsLink cause={storageCause} />
+        <RecoveryAuthenticationGuidance
+          required={authentication.required}
+          methods={authentication.methods}
+        />
         <RecoveryActions
           actions={choices}
           busy={busy}
@@ -135,9 +176,7 @@ export function SessionRecoveryCard({
         <div className="mt-3 min-w-0 border-t border-border pt-1 [&_pre]:bg-muted">
           <SessionErrorDetails structuredFields={detailFields}>{details}</SessionErrorDetails>
         </div>
-        <ActionMessageDetails
-          metadata={model.metadata ? { ...model.metadata, error_output: undefined } : undefined}
-        />
+        <RecoveryTranscriptDetails required={authentication.required} metadata={model.metadata} />
       </div>
       <ManagedCloneRelocationConfirmation
         open={relocationConfirmationOpen}
@@ -147,6 +186,38 @@ export function SessionRecoveryCard({
         disabled={actions.busyAction !== null}
       />
     </div>
+  );
+}
+
+function RecoveryAuthenticationGuidance({
+  required,
+  methods,
+}: {
+  required: boolean;
+  methods: RecoveryAuthMethod[];
+}) {
+  if (!required) return null;
+  return (
+    <ActionMessageDetails
+      metadata={{ is_auth_error: true, auth_methods: methods }}
+      allowGenericTerminal={false}
+      executionHostGuidance
+    />
+  );
+}
+
+function RecoveryTranscriptDetails({
+  required,
+  metadata,
+}: {
+  required: boolean;
+  metadata: ActiveSessionRecovery["metadata"];
+}) {
+  if (required) return null;
+  return (
+    <ActionMessageDetails
+      metadata={metadata ? { ...metadata, error_output: undefined } : undefined}
+    />
   );
 }
 function recoveryCardWorkspaceState(
@@ -208,6 +279,8 @@ function RecoveryCardHeader({
   profileExists,
   copy,
   failure,
+  authenticationRequired,
+  authenticationProviderName,
 }: {
   model: ActiveSessionRecovery;
   actions: SessionRecoveryActions;
@@ -216,16 +289,24 @@ function RecoveryCardHeader({
   profileExists: boolean;
   copy: ReturnType<typeof useRecoveryPresentation>["copy"];
   failure: string;
+  authenticationRequired: boolean;
+  authenticationProviderName?: string;
 }) {
   const { t } = useTranslation();
   const explicitGuidance = hasExplicitRecoveryGuidance(actions);
   const displayedCopy = explicitGuidance ? { ...copy, prerequisite: null } : copy;
-  const { summary, suppressSummary } = recoveryHeaderCopy(
+  const { summary: recoverySummary, suppressSummary: suppressRecoverySummary } = recoveryHeaderCopy(
     copy,
     actions,
     failure,
     workspaceRecoveryRelevant,
   );
+  const authenticationSummary = recoveryAuthenticationSummary(
+    authenticationRequired,
+    authenticationProviderName,
+    t,
+  );
+  const suppressSummary = authenticationSummary ? false : suppressRecoverySummary;
   return (
     <div className="flex min-w-0 gap-3 border-b border-amber-500/20 bg-amber-500/5 p-3 dark:bg-amber-500/10 md:p-4">
       <IconAlertTriangle
@@ -247,7 +328,7 @@ function RecoveryCardHeader({
             role={actions.recoveryError || actions.recoveryNotice ? "status" : undefined}
             className="mt-1 wrap-anywhere text-sm text-muted-foreground data-[failed=true]:text-destructive"
           >
-            {summary}
+            {authenticationSummary ?? recoverySummary}
           </p>
         )}
         <RecoveryStatusNotices copy={displayedCopy} />
@@ -264,6 +345,16 @@ function RecoveryCardHeader({
       </div>
     </div>
   );
+}
+
+function recoveryAuthenticationSummary(
+  required: boolean,
+  providerName: string | undefined,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  if (!required) return undefined;
+  if (!providerName) return t("task:authenticationRequiredOnExecutionHost");
+  return t("task:authenticationRequiredForProvider", { provider: providerName });
 }
 
 function RecoveryStatusNotices({

@@ -179,6 +179,8 @@
   "authentication": "Autenticação",
   "authenticationRequiredLogInBeforeResuming": "É necessária autenticação; inicie sessão antes de retomar",
   "authenticationRequiredPleaseLogInVia": "É necessária autenticação; inicie sessão através do terminal",
+  "authenticationRequiredForProvider": "É necessária autenticação em {{provider}}. Inicie sessão no anfitrião de execução antes de tentar novamente.",
+  "authenticationRequiredOnExecutionHost": "Inicie sessão no fornecedor no anfitrião de execução e tente novamente.",
   "autoMarkReviewedOnScroll": "Marcar como revisto automaticamente ao deslocar",
   "autoStart": "Arranque automático",
   "automaticColorSource": "Automática: {{rule}}. A cor manual fica oculta enquanto esta regra corresponde.",

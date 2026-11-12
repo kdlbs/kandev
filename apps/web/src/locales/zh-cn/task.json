@@ -179,6 +179,8 @@
   "authentication": "身份验证",
   "authenticationRequiredLogInBeforeResuming": "需要身份验证，请先登录再恢复",
   "authenticationRequiredPleaseLogInVia": "需要身份验证；请通过终端登录",
+  "authenticationRequiredForProvider": "{{provider}} 需要身份验证。请在执行主机上登录后重试。",
+  "authenticationRequiredOnExecutionHost": "请在执行主机上登录提供商，然后重试。",
   "autoMarkReviewedOnScroll": "滚动时自动标记为已审阅",
   "autoStart": "自动启动",
   "automaticColorSource": "自动颜色：{{rule}}。此规则匹配时会隐藏手动颜色。",

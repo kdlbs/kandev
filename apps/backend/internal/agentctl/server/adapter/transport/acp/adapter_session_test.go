@@ -12,6 +12,7 @@ import (
 	acpsdk "github.com/coder/acp-go-sdk"
 	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 type sessionRequestCaptureAgent struct {
@@ -19,6 +20,7 @@ type sessionRequestCaptureAgent struct {
 	loadRequest   acpsdk.LoadSessionRequest
 	newResponse   *acpsdk.NewSessionResponse
 	loadResponse  *acpsdk.LoadSessionResponse
+	newErr        error
 	resumeRequest acpsdk.ResumeSessionRequest
 	newStarted    chan struct{}
 	releaseNew    chan struct{}
@@ -33,6 +35,7 @@ type sessionRequestCaptureAgent struct {
 	sessionCounter          int
 	failNewSessionOnAttempt int
 	loadErr                 error
+	resumeErr               error
 	closeRequests           []acpsdk.CloseSessionRequest
 	closeErr                error
 }
@@ -101,6 +104,9 @@ func (a *sessionRequestCaptureAgent) NewSession(_ context.Context, request acpsd
 		close(a.newStarted)
 		<-a.releaseNew
 	}
+	if a.newErr != nil {
+		return acpsdk.NewSessionResponse{}, a.newErr
+	}
 	a.mu.Lock()
 	attempt := a.sessionCounter + 1
 	if a.failNewSessionOnAttempt == attempt {
@@ -120,13 +126,90 @@ func (a *sessionRequestCaptureAgent) NewSession(_ context.Context, request acpsd
 	return acpsdk.NewSessionResponse{SessionId: acpsdk.SessionId(sessionID)}, nil
 }
 
+func TestNewSessionAuthenticationFailureDoesNotMarkMCPServersFailed(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{Http: true})
+	capture.newErr = acpsdk.NewAuthRequired(nil)
+	adapter.mu.Lock()
+	adapter.availableAuthMethods = []streams.AuthMethodInfo{{ID: "cursor_login", Name: "Cursor login"}}
+	adapter.mu.Unlock()
+
+	ctx := streams.WithMCPAttachmentContext(context.Background(), streams.MCPAttachmentAttempt{AttemptID: "auth-attempt"})
+	_, err := adapter.NewSession(ctx, []types.McpServer{{
+		Name: "external", Type: "http", URL: "https://mcp.example.test",
+	}})
+	if err == nil {
+		t.Fatal("NewSession succeeded, want authentication error")
+	}
+
+	events := drainEvents(adapter)
+	var sawAuthRequired bool
+	for _, event := range events {
+		if event.Type == streams.EventTypeAuthRequired {
+			sawAuthRequired = true
+		}
+		if event.Type == streams.EventTypeMCPAttachment {
+			t.Fatalf("authentication rejection published MCP attachment evidence: %+v", event.MCPAttachment)
+		}
+	}
+	if !sawAuthRequired {
+		t.Fatal("session/new authentication rejection did not preserve its supplementary auth event")
+	}
+}
+
+func TestLoadSessionAuthenticationFailureDoesNotMarkMCPServersFailed(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{Http: true})
+	capture.loadErr = acpsdk.NewAuthRequired(nil)
+	adapter.mu.Lock()
+	adapter.sessionID = "native-session"
+	adapter.availableAuthMethods = []streams.AuthMethodInfo{{ID: "cursor_login", Name: "Cursor login"}}
+	adapter.mu.Unlock()
+
+	ctx := streams.WithMCPAttachmentContext(context.Background(), streams.MCPAttachmentAttempt{AttemptID: "auth-attempt"})
+	err := adapter.LoadSession(ctx, "native-session", []types.McpServer{{
+		Name: "external", Type: "http", URL: "https://mcp.example.test",
+	}})
+	if err == nil {
+		t.Fatal("LoadSession succeeded, want authentication error")
+	}
+
+	for _, event := range drainEvents(adapter) {
+		if event.Type == streams.EventTypeMCPAttachment {
+			t.Fatalf("authentication rejection published MCP attachment evidence: %+v", event.MCPAttachment)
+		}
+	}
+}
+
+func TestResumeSessionAuthenticationFailureDoesNotMarkMCPServersFailed(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{Http: true})
+	capture.resumeErr = acpsdk.NewAuthRequired(nil)
+	adapter.mu.Lock()
+	adapter.sessionID = "native-session"
+	adapter.capabilities.SessionCapabilities.Resume = &acpsdk.SessionResumeCapabilities{}
+	adapter.availableAuthMethods = []streams.AuthMethodInfo{{ID: "cursor_login", Name: "Cursor login"}}
+	adapter.mu.Unlock()
+
+	ctx := streams.WithMCPAttachmentContext(context.Background(), streams.MCPAttachmentAttempt{AttemptID: "auth-attempt"})
+	err := adapter.ResumeSession(ctx, "native-session", []types.McpServer{{
+		Name: "external", Type: "http", URL: "https://mcp.example.test",
+	}})
+	if err == nil {
+		t.Fatal("ResumeSession succeeded, want authentication error")
+	}
+
+	for _, event := range drainEvents(adapter) {
+		if event.Type == streams.EventTypeMCPAttachment {
+			t.Fatalf("authentication rejection published MCP attachment evidence: %+v", event.MCPAttachment)
+		}
+	}
+}
+
 func (*sessionRequestCaptureAgent) Prompt(context.Context, acpsdk.PromptRequest) (acpsdk.PromptResponse, error) {
 	return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, nil
 }
 
 func (a *sessionRequestCaptureAgent) ResumeSession(_ context.Context, request acpsdk.ResumeSessionRequest) (acpsdk.ResumeSessionResponse, error) {
 	a.resumeRequest = request
-	return acpsdk.ResumeSessionResponse{}, nil
+	return acpsdk.ResumeSessionResponse{}, a.resumeErr
 }
 
 func (*sessionRequestCaptureAgent) SetSessionConfigOption(context.Context, acpsdk.SetSessionConfigOptionRequest) (acpsdk.SetSessionConfigOptionResponse, error) {

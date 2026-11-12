@@ -3194,6 +3194,9 @@ func (m *Manager) persistDeliveryEvent(update adapter.AgentEvent) (adapter.Agent
 // ingress. A cancelled caller receives an error and no acknowledgement even if
 // the writer later commits the queued observation.
 func (m *Manager) persistDeliveryEventContext(ctx context.Context, update adapter.AgentEvent) (adapter.AgentEvent, error) {
+	if connectionScopedStartupControlEvent(update) {
+		return update, nil
+	}
 	deliveryJournal, eventLimit, configured, writer := m.deliveryWriteState()
 	if eventLimit <= 0 {
 		eventLimit = deliverylimits.MaxEventBytes
@@ -3310,6 +3313,19 @@ func (m *Manager) persistDeliveryBatchRaw(ctx context.Context, updates []adapter
 	}
 	m.signalDeliveryWakeup()
 	return updates, nil
+}
+
+func connectionScopedStartupControlEvent(event adapter.AgentEvent) bool {
+	if event.SessionID != "" || event.DeliveryStreamID != "" || event.DeliveryIncarnationID != "" ||
+		event.DeliveryHarnessGeneration != 0 || event.DeliverySequence != 0 {
+		return false
+	}
+	switch event.Type {
+	case streams.EventTypeAgentCapabilities, streams.EventTypeAuthRequired:
+		return true
+	default:
+		return false
+	}
 }
 
 // GetUpdates returns the channel for agent event notifications

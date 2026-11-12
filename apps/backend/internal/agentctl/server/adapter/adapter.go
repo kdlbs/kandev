@@ -132,6 +132,12 @@ type SessionCapabilityProvider interface {
 	SupportsSessionLoad() bool
 }
 
+// SessionOperationAuthMethodsProvider exposes the initialize method snapshot
+// for a typed session-operation failure response.
+type SessionOperationAuthMethodsProvider interface {
+	GetSessionOperationAuthMethods() []streams.AuthMethodInfo
+}
+
 // StderrProviderSetter is an optional interface implemented by adapters that can use
 // stderr output for error context. The process manager checks for this interface
 // and calls SetStderrProvider if available.

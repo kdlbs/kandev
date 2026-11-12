@@ -11,6 +11,26 @@ The composer model picker shows the session's agent CLI logo beside the selected
 
 Agent authentication is separate from repository and integration credentials.
 
+## Recover from provider authentication failures
+
+An agent may need to sign in to its model provider before it can create or
+restore a conversation. Complete that sign-in on the host and as the operating
+system user that runs the selected executor. A local agent uses the Kandev
+backend user's environment. A remote agent uses the remote executor's
+environment.
+
+When Kandev confirms a provider authentication failure, the session recovery
+card names the configured provider and shows any login method the agent
+advertises. Some methods are protocol actions, not terminal commands. Follow
+the displayed guidance, then choose the available restart or resume action.
+Kandev keeps the recovery card until the agent confirms that it is ready.
+
+Provider account sign-in does not grant repository access or authenticate an
+MCP server. For those failures, check the repository's Git credentials and
+environment or the MCP server's own authentication settings. See [Scope agent
+profiles and MCP definitions](security.md#scope-agent-profiles-and-mcp-definitions)
+for the separate credential boundaries.
+
 ## Quick path
 
 1. Rescan or install the agent on the host running Kandev.
@@ -598,12 +618,12 @@ This order applies only to Settings. Task creation, in-task agents, handoff, and
 | Mode                                   | Requested through the installed agent's advertised ACP session control before the first prompt. Kandev prefers its mode config option and supports legacy `session/set_mode`. An explicit mode must be confirmed by the agent or startup holds the prompt. Applying a mode does not write Claude settings or redirect its configuration directory. |
 | Configuration options                  | Dynamic ACP values requested with `session/set_config_option`.                                                                                                                                                                                                                                                                                     |
 | CLI flags                              | Enabled entries are tokenized and appended to the ACP launch command.                                                                                                                                                                                                                                                                              |
-| Command prefix                         | Optional launcher argv for structured sessions, ACP probes, and native terminal passthrough. No provider plugin is required.                                                                                                                                                                                                                                                               |
+| Command prefix                         | Optional launcher argv for structured sessions, ACP probes, and native terminal passthrough. No provider plugin is required.                                                                                                                                                                                                                       |
 | Environment                            | Literal values or references to Kandev secrets, resolved when the process starts.                                                                                                                                                                                                                                                                  |
 | Provider                               | Native uses the agent default. OpenAI-compatible sends ACP requests to the configured HTTP(S) router and can use a Kandev global API-key secret.                                                                                                                                                                                                   |
 | CLI passthrough                        | Uses the CLI's native terminal interface instead of a structured ACP conversation.                                                                                                                                                                                                                                                                 |
 | Enabled                                | Keeps the profile available to existing sessions and settings while hiding it from new task, session, handoff, and Quick Chat selectors.                                                                                                                                                                                                           |
-| Auto-approve all permissions           | Answers automatically with an offered `allow_once` or `allow_always` option. Requests without an allow option stay pending for a person to answer. Every automatic decision keeps its option and source in permission history. It is off by default.                                                                                                                                          |
+| Auto-approve all permissions           | Answers automatically with an offered `allow_once` or `allow_always` option. Requests without an allow option stay pending for a person to answer. Every automatic decision keeps its option and source in permission history. It is off by default.                                                                                               |
 | MCP servers                            | Adds profile-specific external MCP servers when the agent supports MCP.                                                                                                                                                                                                                                                                            |
 | Share local Cursor MCP credentials     | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. It applies only to local executions that share the backend home directory.                                                                                                                                                                                                |
 | Import local Cursor plugin MCP servers | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. Imports supported local plugin and user MCP definitions into task worktrees. On supported macOS installations, enabled marketplace plugins are discovered from Cursor’s account service and matched to their exact cached revision.                                       |
@@ -799,12 +819,19 @@ in this request:
 
 ```js
 const profileId = "replace-with-execution-profile-id";
-const boot = await (await fetch("/api/v1/app-state", { credentials: "same-origin" })).json();
-const response = await fetch(`/api/v1/agent-profiles/${encodeURIComponent(profileId)}/account-block/release`, {
-  method: "POST",
-  credentials: "same-origin",
-  headers: { "X-Kandev-Interim-Settings-Interlock": boot.interimSettingsInterlockToken },
-});
+const boot = await (
+  await fetch("/api/v1/app-state", { credentials: "same-origin" })
+).json();
+const response = await fetch(
+  `/api/v1/agent-profiles/${encodeURIComponent(profileId)}/account-block/release`,
+  {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      "X-Kandev-Interim-Settings-Interlock": boot.interimSettingsInterlockToken,
+    },
+  },
+);
 console.log(response.status, await response.json());
 ```
 
@@ -973,7 +1000,6 @@ Wrapped ACP probes require an authenticated agentctl control connection. Agentct
 SSH native terminal passthrough does not yet carry wrapper settings. Kandev refuses a wrapped SSH terminal launch before starting the remote agent. Local native terminal wrapping and compatible remote ACP execution remain supported.
 
 Wrapping alone does not establish a sandbox policy. The wrapper owns its access rules and platform support. Rich sandbox configuration through plugins is not implemented.
-
 
 </details>
 
@@ -1350,7 +1376,6 @@ checkbox draft remains visible.
 In the existing task editor, a failed MCP save also exposes **Reload choices**.
 Reload keeps your task fields and MCP draft. Submit the task again only after
 you review those choices.
-
 
 For a saved global profile, **Workspace** selects the catalog context without
 changing your active workspace. If settings have unsaved changes, switching

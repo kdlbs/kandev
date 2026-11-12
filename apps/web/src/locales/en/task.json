@@ -210,6 +210,8 @@
   "authentication": "Authentication",
   "authenticationRequiredLogInBeforeResuming": "Authentication required, log in before resuming",
   "authenticationRequiredPleaseLogInVia": "Authentication required; please log in via the terminal",
+  "authenticationRequiredForProvider": "{{provider}} authentication is required. Sign in on the execution host before retrying.",
+  "authenticationRequiredOnExecutionHost": "Sign in to the provider on the execution host, then retry.",
   "autoMarkReviewedOnScroll": "Auto-mark reviewed on scroll",
   "autoStart": "Auto-start",
   "automaticColorSource": "Automatic: {{rule}}. Manual color is hidden while this rule matches.",
