@@ -7,6 +7,8 @@ import {
   seedAccessibleRepositories,
 } from "../helpers/github-repository-picker";
 
+const PICKER_EDGE_MARGIN = 8;
+
 // @covers AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.8 .10 .11
 test.describe("automations: GitHub repository picker on a phone", () => {
   test("keeps the picker inside the viewport with touch-sized options", async ({
@@ -72,5 +74,13 @@ test.describe("automations: GitHub repository picker on a phone", () => {
     const chip = card.getByTestId("github-organization-chip");
     await expect(chip).toHaveText(["kdlbs"]);
     await expectTouchSquareControl(chip.getByRole("button", { name: /remove kdlbs/i }));
+
+    // The chip pushes the trigger right; the reopened picker must keep a margin from the edge.
+    await add.tap();
+    await expect(picker.getByTestId("github-organization-option")).toHaveCount(2);
+    await waitForFiniteAnimations(picker);
+    const shifted = (await picker.boundingBox())!;
+    expect(shifted.x).toBeGreaterThanOrEqual(PICKER_EDGE_MARGIN - 1);
+    expect(shifted.x + shifted.width).toBeLessThanOrEqual(viewport.width - PICKER_EDGE_MARGIN + 1);
   });
 });

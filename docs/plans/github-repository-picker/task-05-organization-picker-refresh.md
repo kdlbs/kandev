@@ -96,5 +96,9 @@ make fmt && make typecheck test lint
 - `automations-pr-merged-trigger.spec.ts` "workspaceId is passed to the orgs
   request" now turns "All repositories" off first: organizations are fetched
   only when the organization picker mounts.
+- PR screenshots showed both picker popovers flush against the phone's right
+  edge once a chip shifted the trigger. Both now pass `collisionPadding={8}`;
+  the phone spec asserts an 8px margin after reopening (failed at 393px of a
+  393px viewport before the fix).
 - Organization rows show logins only; the backend's prepended account login is
   listed first without a separate "you" label.

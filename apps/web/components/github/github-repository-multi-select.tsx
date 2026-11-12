@@ -130,6 +130,7 @@ function AddGitHubRepository({
       <PopoverContent
         className="w-[380px] max-w-[calc(100vw-2rem)] max-h-[min(420px,calc(100vh-12rem))] overflow-hidden p-0"
         align="start"
+        collisionPadding={8}
         portal={false}
         data-testid="github-repository-picker"
       >
