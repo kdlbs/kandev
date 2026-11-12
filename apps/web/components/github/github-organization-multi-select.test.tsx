@@ -61,6 +61,7 @@ function typeAndEnter(value: string) {
 describe("GitHubOrganizationMultiSelect", () => {
   it("lists the account and organizations on open and filters by substring", () => {
     renderSelect();
+    expect(mocks.useGitHubOrgs).not.toHaveBeenCalled();
     openPicker();
     expect(mocks.useGitHubOrgs).toHaveBeenCalledWith("ws-1");
     expect(optionTexts()).toEqual(["octocat", "kdlbs", "acme"]);

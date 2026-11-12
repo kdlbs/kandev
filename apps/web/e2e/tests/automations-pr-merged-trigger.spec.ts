@@ -12,7 +12,7 @@ import { AutomationsPage } from "../pages/automations-page";
  *  - Checking "All repositories" CLEARS repos; unchecking leaves list as-is
  *  - Toggle cycle: check → save → reopen → uncheck → empty repos + warning
  *  - workspaceId pass-through asserted on the outbound /api/v1/github/orgs request
- *    once "All repositories" is turned off
+ *    when the organization picker opens
  *  - List page badge label "GitHub PR Merged" in purple
  *  - Info tooltip mentions workspace and up-to-a-minute detection lag
  *  - Repository picker is ENABLED (unlike github_pr which disables it)
@@ -195,7 +195,7 @@ test.describe("automations — Pull request merged trigger", () => {
     await expect(tooltip).toContainText(/minute/i);
   });
 
-  test("workspaceId is passed to the orgs request when repositories are restricted", async ({
+  test("workspaceId is passed to the orgs request when the organization picker opens", async ({
     testPage,
     seedData,
   }) => {
@@ -210,8 +210,11 @@ test.describe("automations — Pull request merged trigger", () => {
       .first()
       .click();
 
-    // Interceptor must be set up BEFORE restricting repositories: the organization
-    // picker mounts, and fetches organizations, only when "All repositories" is off.
+    await testPage
+      .getByRole("switch", { name: "All repositories allowed by this workspace" })
+      .click();
+
+    // Interceptor must be set up BEFORE opening the picker: organizations load on open.
     const orgRequestPromise = testPage.waitForRequest(
       (req) =>
         req.url().includes("/api/v1/github/orgs") &&
@@ -219,9 +222,7 @@ test.describe("automations — Pull request merged trigger", () => {
       { timeout: 10_000 },
     );
 
-    await testPage
-      .getByRole("switch", { name: "All repositories allowed by this workspace" })
-      .click();
+    await testPage.getByTestId("github-organization-add").click();
 
     // The key assertion: the outbound request carries this workspace's id
     const orgRequest = await orgRequestPromise;

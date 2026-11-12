@@ -105,10 +105,18 @@ function hasProviderConnection(status: ProviderConnectionStatus | null | undefin
   return Boolean(status?.authenticated || status?.token_configured);
 }
 
-function useBuiltInRepositoryAccess(workspaceId: string): BuiltInRepositoryAccess {
+function useBuiltInRepositoryAccess(
+  workspaceId: string,
+  allowed: ReadonlySet<string> | null,
+): BuiltInRepositoryAccess {
+  const wantsGitLab = !allowed || allowed.has("gitlab");
+  const wantsAzureDevOps = !allowed || allowed.has("azure_devops");
   const githubStatus = useGitHubStatus(workspaceId);
-  const gitlabStatus = useGitLabStatus(workspaceId);
-  const azureDevOpsConnection = useAzureDevOpsConnection(workspaceId || undefined);
+  // An empty workspace disables a status load that the caller did not request.
+  const gitlabStatus = useGitLabStatus(wantsGitLab ? workspaceId : "");
+  const azureDevOpsConnection = useAzureDevOpsConnection(
+    wantsAzureDevOps && workspaceId ? workspaceId : undefined,
+  );
   const providers = useMemo(() => {
     const eligible = new Set<RemoteRepositoryProvider>();
     if (hasProviderConnection(githubStatus.status)) eligible.add("github");
@@ -132,8 +140,8 @@ function useBuiltInRepositoryAccess(workspaceId: string): BuiltInRepositoryAcces
         Boolean(workspaceId) &&
         (githubStatus.loading ||
           !githubStatus.loaded ||
-          gitlabStatus.loading ||
-          azureDevOpsConnection.loading),
+          (wantsGitLab && gitlabStatus.loading) ||
+          (wantsAzureDevOps && azureDevOpsConnection.loading)),
     }),
     [
       azureDevOpsConnection.loading,
@@ -141,6 +149,8 @@ function useBuiltInRepositoryAccess(workspaceId: string): BuiltInRepositoryAcces
       githubStatus.loaded,
       githubStatus.loading,
       providers,
+      wantsAzureDevOps,
+      wantsGitLab,
       workspaceId,
     ],
   );
@@ -445,7 +455,7 @@ export function useRemoteRepositories(
     eligibility: connectedEligibility,
     refresh: refreshBuiltIns,
     githubHost,
-  } = useBuiltInRepositoryAccess(workspaceId);
+  } = useBuiltInRepositoryAccess(workspaceId, allowedProviders);
   const eligibility = useRestrictedEligibility(connectedEligibility, allowedProviders);
   const builtInSource = useBuiltInRepositorySource(workspaceId, refreshVersion, eligibility);
   const pluginSource = usePluginRepositorySource(

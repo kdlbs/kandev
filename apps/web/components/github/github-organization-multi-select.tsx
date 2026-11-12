@@ -71,7 +71,6 @@ function AddGitHubOrganization({
 }: Omit<GitHubOrganizationMultiSelectProps, "disabled"> & { disabled: boolean }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const orgs = useGitHubOrgs(workspaceId);
   const isSelected = (login: string) => selected.some((entry) => sameLogin(entry, login));
   const add = (login: string) => {
     if (!isSelected(login)) onChange([...selected, login]);
@@ -94,7 +93,7 @@ function AddGitHubOrganization({
         data-testid="github-organization-picker"
       >
         <OrganizationPickerPanel
-          orgs={orgs}
+          workspaceId={workspaceId}
           isSelected={isSelected}
           isOrgAllowed={isOrgAllowed}
           onAdd={add}
@@ -104,18 +103,20 @@ function AddGitHubOrganization({
   );
 }
 
+/** Mounted only while the popover is open, so organizations load on open. */
 function OrganizationPickerPanel({
-  orgs,
+  workspaceId,
   isSelected,
   isOrgAllowed,
   onAdd,
 }: {
-  orgs: UseGitHubOrgsResult;
+  workspaceId: string | undefined;
   isSelected: (login: string) => boolean;
   isOrgAllowed?: (login: string) => boolean;
   onAdd: (login: string) => void;
 }) {
   const { t } = useTranslation();
+  const orgs = useGitHubOrgs(workspaceId);
   const [value, setValue] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const needle = value.trim().toLowerCase();

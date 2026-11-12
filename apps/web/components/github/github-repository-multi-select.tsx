@@ -101,23 +101,12 @@ function AddGitHubRepository({
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const accessible = useRemoteRepositories(workspaceId ?? "", GITHUB_ONLY);
   const isSelected = (filter: RepoFilter) =>
     selected.some((entry) => sameRepoFilter(entry, filter));
   const add = (filter: RepoFilter) => {
     if (!isSelected(filter)) onChange([...selected, filter]);
     setOpen(false);
   };
-  const submitText = (value: string): RemoteRepositoryTextSubmitResult => {
-    const parsed = parseGitHubRepositoryInput(value, accessible.githubHost);
-    if (!parsed) return { status: "ignored" };
-    if (!repoAllowedByScope(scope, parsed.owner, parsed.name)) {
-      return { status: "rejected", message: t("github:repositoryOutsideWorkspaceScope") };
-    }
-    add(parsed);
-    return { status: "accepted" };
-  };
-  const toFilter = (repo: RemoteRepository): RepoFilter => ({ owner: repo.owner, name: repo.name });
   return (
     <Popover open={open && !disabled} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -134,20 +123,54 @@ function AddGitHubRepository({
         portal={false}
         data-testid="github-repository-picker"
       >
-        <RemoteRepositoryPickerPanel
-          accessible={accessible}
-          onPick={(repo) => add(toFilter(repo))}
-          isRepoSelected={(repo) => isSelected(toFilter(repo))}
-          isRepoAllowed={(repo) => repoAllowedByScope(scope, repo.owner, repo.name)}
-          isTextSubmittable={(value) =>
-            parseGitHubRepositoryInput(value, accessible.githubHost) !== null
-          }
-          onSubmitText={submitText}
-          stagedHint={<StagedRepositoryHint />}
-          placeholder={t("github:searchRepositoriesOrEnterOwnerRepo", { format: "owner/repo" })}
+        <GitHubRepositoryPickerContent
+          workspaceId={workspaceId}
+          scope={scope}
+          isSelected={isSelected}
+          onAdd={add}
         />
       </PopoverContent>
     </Popover>
+  );
+}
+
+const toFilter = (repo: RemoteRepository): RepoFilter => ({ owner: repo.owner, name: repo.name });
+
+/** Mounted only while the popover is open, so repositories load on open. */
+function GitHubRepositoryPickerContent({
+  workspaceId,
+  scope,
+  isSelected,
+  onAdd,
+}: {
+  workspaceId: string | undefined;
+  scope?: GitHubWorkspaceSettings | null;
+  isSelected: (filter: RepoFilter) => boolean;
+  onAdd: (filter: RepoFilter) => void;
+}) {
+  const { t } = useTranslation();
+  const accessible = useRemoteRepositories(workspaceId ?? "", GITHUB_ONLY);
+  const parse = (value: string) => parseGitHubRepositoryInput(value, accessible.githubHost);
+  const submitText = (value: string): RemoteRepositoryTextSubmitResult => {
+    const parsed = parse(value);
+    if (!parsed) return { status: "ignored" };
+    if (!repoAllowedByScope(scope, parsed.owner, parsed.name)) {
+      return { status: "rejected", message: t("github:repositoryOutsideWorkspaceScope") };
+    }
+    onAdd(parsed);
+    return { status: "accepted" };
+  };
+  return (
+    <RemoteRepositoryPickerPanel
+      accessible={accessible}
+      onPick={(repo) => onAdd(toFilter(repo))}
+      isRepoSelected={(repo) => isSelected(toFilter(repo))}
+      isRepoAllowed={(repo) => repoAllowedByScope(scope, repo.owner, repo.name)}
+      isTextSubmittable={(value) => parse(value) !== null}
+      onSubmitText={submitText}
+      stagedHint={<StagedRepositoryHint />}
+      placeholder={t("github:searchRepositoriesOrEnterOwnerRepo", { format: "owner/repo" })}
+    />
   );
 }
 

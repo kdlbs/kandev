@@ -103,8 +103,10 @@ describe("RepoFilterSelector repository picker", () => {
     expect(onChange).toHaveBeenCalledWith([{ owner: "kdlbs", name: "kandev" }]);
   });
 
-  it("requests GitHub repositories only", () => {
+  it("loads GitHub repositories only, and only once the picker opens", () => {
     renderSelector();
+    expect(mocks.useRemoteRepositories).not.toHaveBeenCalled();
+    openPicker();
     expect(mocks.useRemoteRepositories).toHaveBeenCalledWith("ws-1", { providers: ["github"] });
   });
 

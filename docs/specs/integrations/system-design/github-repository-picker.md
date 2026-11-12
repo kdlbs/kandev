@@ -85,7 +85,9 @@ behavior change.
 `options.providers?: readonly RemoteRepositoryProvider[]`. When it is set, only
 those built-in providers are eligible and plugin repository sources load only
 when their provider id is listed. GitHub selections pass `["github"]`, so they
-issue no GitLab, Azure DevOps, or plugin requests. Omitting the option keeps
+issue no GitLab, Azure DevOps, or plugin requests: the GitLab and Azure DevOps
+status hooks receive no workspace, and their loading flags do not gate the
+GitHub list. Omitting the option keeps
 today's behavior for every existing caller.
 
 ### GitHub multi-select
@@ -101,6 +103,9 @@ today's behavior for every existing caller.
   `useRemoteRepositories(workspaceId, { providers: ["github"] })`.
 - Picking a listed repository appends `{ owner, name }` unless an entry with
   the same case-insensitive owner and name exists, then closes the popover.
+- The repository hook (`useRemoteRepositories`) and the organization hook
+  (`useGitHubOrgs`) live in components mounted inside the popover content, so
+  lists load when a picker opens, not when a closed or disabled picker renders.
 - Popover content stays inside the viewport (`max-w-[calc(100vw-2rem)]`, the
   remote chip's height bound) and uses the existing touch-sized option, add,
   and remove sizes.
@@ -143,7 +148,9 @@ not cached, so its refresh is a plain refetch.
 ### Typed entry
 
 `useRemoteRepositories` exposes the workspace's `githubHost` so the
-multi-select parses GitHub Enterprise repository URLs.
+multi-select parses GitHub Enterprise repository URLs. Because the stored
+identity has no host, a URL from any other host (including github.com or
+`*.ghe.com` on a different workspace host) is rejected.
 `parseGitHubRepositoryInput(value, githubHost?)` in
 `apps/web/lib/github/repository-input.ts` returns `{ owner, name }` for
 `owner/name` (single slash, both segments matching GitHub's allowed

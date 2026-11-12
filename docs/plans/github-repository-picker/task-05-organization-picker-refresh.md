@@ -114,5 +114,9 @@ make fmt && make typecheck test lint
   while GitHub is unavailable except in task creation; loading rows announce a
   translated status. Hook GitHub-specific tests moved to
   `use-remote-repositories-github.test.tsx` to stay under the file-size limit.
+- Further review fixups: typed URLs must match the workspace host; GitHub-only
+  pickers ignore GitLab/Azure DevOps status loading; both pickers load their
+  lists only when opened, so the PR-merged E2E now opens the organization
+  picker before asserting the orgs request.
 - Organization rows show logins only; the backend's prepended account login is
   listed first without a separate "you" label.

@@ -162,3 +162,24 @@ describe("useRemoteRepositories GitHub host", () => {
     expect(result.current.githubHost).toBe("git.company.example");
   });
 });
+
+describe("useRemoteRepositories GitHub-only status", () => {
+  it("does not wait for or load other providers' status", async () => {
+    mocks.useGitLabStatus.mockReturnValue({ status: null, loading: true, refresh: vi.fn() });
+    mocks.useAzureDevOpsConnection.mockReturnValue({
+      data: null,
+      loading: true,
+      error: null,
+      refresh: vi.fn(),
+    });
+    mocks.fetchAccessibleRepos.mockResolvedValue([githubRepo("api")]);
+    const { result } = renderHook(() =>
+      useRemoteRepositories(WORKSPACE_ID, { providers: ["github"] }),
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.repos.map((repo) => repo.fullName)).toEqual(["acme/api"]);
+    expect(mocks.useGitLabStatus).toHaveBeenCalledWith("");
+    expect(mocks.useGitLabStatus).not.toHaveBeenCalledWith(WORKSPACE_ID);
+    expect(mocks.useAzureDevOpsConnection).not.toHaveBeenCalledWith(WORKSPACE_ID);
+  });
+});

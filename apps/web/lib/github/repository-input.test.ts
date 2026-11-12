@@ -40,3 +40,22 @@ describe("parseGitHubLogin", () => {
     },
   );
 });
+
+describe("parseGitHubRepositoryInput host matching", () => {
+  it("rejects a repository URL from a host other than the workspace host", () => {
+    expect(parseGitHubRepositoryInput("https://acme.ghe.com/kdlbs/kandev")).toBeNull();
+    expect(
+      parseGitHubRepositoryInput("https://github.com/kdlbs/kandev", "git.company.example"),
+    ).toBeNull();
+  });
+
+  it("accepts a repository URL on the workspace host", () => {
+    expect(
+      parseGitHubRepositoryInput("https://git.company.example/acme/widget", "git.company.example"),
+    ).toEqual({ owner: "acme", name: "widget" });
+    expect(parseGitHubRepositoryInput("https://acme.ghe.com/a/b", "acme.ghe.com")).toEqual({
+      owner: "a",
+      name: "b",
+    });
+  });
+});
