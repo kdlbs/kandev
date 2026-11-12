@@ -5,7 +5,19 @@ status: done
 wave: 4
 depends_on: ["03-scope-setting-picker"]
 plan: "plan.md"
-spec: "../../specs/integrations/requirements/github-repository-picker.md"
+requirements:
+  - REQ-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001
+acceptance_criteria:
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.1
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.2
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.3
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.4
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.5
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.6
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.7
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.8
+system_design:
+  - ../../specs/integrations/system-design/github-repository-picker.md
 ---
 
 # Task 04: E2E coverage, desktop and phone

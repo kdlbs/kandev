@@ -5,7 +5,18 @@ status: done
 wave: 2
 depends_on: ["01-shared-picker-panel"]
 plan: "plan.md"
-spec: "../../specs/integrations/requirements/github-repository-picker.md"
+requirements:
+  - REQ-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001
+acceptance_criteria:
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.1
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.2
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.3
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.4
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.5
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.7
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.9
+system_design:
+  - ../../specs/integrations/system-design/github-repository-picker.md
 ---
 
 # Task 02: Watch filter uses the GitHub picker

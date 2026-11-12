@@ -5,7 +5,14 @@ status: done
 wave: 5
 depends_on: ["04-e2e"]
 plan: "plan.md"
-spec: "../../specs/integrations/requirements/github-repository-picker.md"
+requirements:
+  - REQ-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001
+acceptance_criteria:
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.5
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.10
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.11
+system_design:
+  - ../../specs/integrations/system-design/github-repository-picker.md
 ---
 
 # Task 05: Organization picker and list refresh

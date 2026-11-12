@@ -1,7 +1,11 @@
 ---
-spec: docs/specs/integrations/requirements/github-repository-picker.md
 created: 2026-11-11
 status: complete
+requirements:
+  - REQ-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001
+system_design:
+  - ../../specs/integrations/system-design/github-repository-picker.md
+legacy_specs: []
 ---
 
 # Implementation Plan: GitHub Repository Picker

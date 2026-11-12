@@ -5,7 +5,14 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/integrations/requirements/github-repository-picker.md"
+requirements:
+  - REQ-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001
+acceptance_criteria:
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.1
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.2
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.7
+system_design:
+  - ../../specs/integrations/system-design/github-repository-picker.md
 ---
 
 # Task 01: Shared remote repository picker panel

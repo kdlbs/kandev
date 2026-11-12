@@ -5,7 +5,13 @@ status: done
 wave: 3
 depends_on: ["02-watch-filter-picker"]
 plan: "plan.md"
-spec: "../../specs/integrations/requirements/github-repository-picker.md"
+requirements:
+  - REQ-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001
+acceptance_criteria:
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.6
+  - AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.9
+system_design:
+  - ../../specs/integrations/system-design/github-repository-picker.md
 ---
 
 # Task 03: Repository scope uses the GitHub picker
