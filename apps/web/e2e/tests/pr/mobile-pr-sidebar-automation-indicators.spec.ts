@@ -4,6 +4,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { installNewerNegativePRProjectionFixture } from "../../helpers/pr-negative-projection-fixture";
+import { expectConflictCornerGeometry } from "../../helpers/pr-badge-geometry";
 
 const OWNER = "testorg";
 const REPO = "testrepo";
@@ -456,13 +457,13 @@ test.describe("Mobile sidebar PR automation indicators", () => {
       )
       .toEqual({ hasMergeConflicts: true, workflowApprovalRequired: true });
 
-    await expect(icon.getByTestId("pr-ci-bubble-approval-required")).toBeVisible();
+    await expect(icon.getByTestId("pr-ci-bubble-approval-required")).toHaveCount(0);
     await expect(icon.getByTestId("pr-merge-conflict-warning")).toBeVisible();
     await expect(icon).toHaveAttribute("aria-label", /Conflicts/);
     await expect(icon).toHaveAttribute("aria-label", /Awaiting maintainer approval/);
+    await expectConflictCornerGeometry(icon, 14);
     await prCapture.screenshot("sidebar-workflow-conflict-and-approval-badge-mobile", {
-      caption:
-        "Phone task picker shows the approval lock and the separate conflict triangle together.",
+      caption: "Phone task picker gives the corner to conflicts while retaining approval details.",
     });
 
     await icon.tap();

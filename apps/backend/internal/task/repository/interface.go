@@ -741,6 +741,12 @@ type SessionRecoveryBlockListRepository interface {
 	ListOpenSessionRecoveryBlocks(ctx context.Context, sessionID, incarnationID string, expectedGeneration int64) ([]*models.SessionRecoveryBlock, error)
 }
 
+// RestartRecoveryBlockRepository ensures presentation repair preserves the
+// complete current-generation recovery fence inventory.
+type RestartRecoveryBlockRepository interface {
+	EnsureRestartRecoveryBlock(ctx context.Context, block *models.SessionRecoveryBlock) (*models.SessionRecoveryBlock, bool, error)
+}
+
 // AgentDeliveryRecoveryRepository persists the revisioned session notice for
 // an uncertain durable prompt outcome.
 type AgentDeliveryRecoveryRepository interface {

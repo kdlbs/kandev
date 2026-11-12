@@ -5,7 +5,7 @@ requirements:
   - REQ-UI-QUICK-TERMINAL-001
   - REQ-UI-QUICK-TERMINAL-002
 created: 2026-08-03
-updated: 2026-11-11
+updated: 2026-11-12
 owners:
   - kandev
 ---
@@ -20,7 +20,7 @@ records and Quick Terminal descriptors remain owned by their existing backend se
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-UI-QUICK-TERMINAL-001` | [Migrated source detail](#migrated-source-detail), [Launcher focus return](#launcher-focus-return), [Launcher toggle and terminal Escape routing](#launcher-toggle-and-terminal-escape-routing), [Phone terminal shortcut controls](#phone-terminal-shortcut-controls), [Shell recovery](quick-terminal-recovery.md) |
+| `REQ-UI-QUICK-TERMINAL-001` | [Migrated source detail](#migrated-source-detail), [Launcher focus return](#launcher-focus-return), [Launcher toggle and terminal Escape routing](#launcher-toggle-and-terminal-escape-routing), [Phone terminal shortcut controls](#phone-terminal-shortcut-controls), [Shell recovery](quick-terminal-recovery.md), [Render lifecycle](quick-terminal-render-lifecycle.md) |
 | `REQ-UI-QUICK-TERMINAL-002` | [Tab order and editing](#tab-order-and-editing) |
 
 Remembered conversation selection is defined in the
@@ -145,6 +145,10 @@ coverage uses the `mobile-chrome` project and a `mobile-*.spec.ts` file. It prov
 the visible move fallback, rename discovery, 44 CSS pixel targets, tab-strip overflow containment,
 and persistence after reload.
 ## Migrated source detail
+
+## Why
+
+Users keep host terminals beside utility conversations and switch between them without losing work.
 
 ## What
 
