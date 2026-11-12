@@ -101,14 +101,14 @@ Keep contained label wrapping and pointer-specific disclosure behavior.
 
 Revise `expectComposerActionLayout` in
 `apps/web/e2e/tests/workflow/composer-action-layout-helpers.ts`. Below 768px,
-compare the workflow button's bottom with the minimum top of all visible utility
-buttons. Require the entire action to precede every utility; checking one icon
-is insufficient. Compare its right bound with the toolbar content right bound
-within one CSS pixel. Continue measuring actual utility bounds, not just wrapper
-boxes, and verify containment, 44px hit dimensions, center-point reachability,
-and document overflow. Replace the obsolete phone `display: contents` assertion
-with rendered row geometry. Wider wrap cases retain the previous trailing-line
-oracle; wide desktop retains single-line order and 24px height.
+the workflow button leads the shared row: when targets fit (`wrapped: false`),
+its vertical center matches the visible utility buttons and it ends before the
+first utility; when controls wrap, require that it overlaps no visible utility
+button. Keep it inside the toolbar content bounds. Continue measuring actual
+utility bounds, not just wrapper boxes, and verify containment, 44px hit
+dimensions, center-point reachability, and document overflow. Wider wrap cases
+retain the previous trailing-line oracle and right alignment; wide desktop
+retains single-line order and 24px height.
 
 Cover 360px, 393px, 767px, 768px, and wide desktop using the existing mobile and
 fine-pointer workflow move fixtures. Include dense controls, a longer fitting

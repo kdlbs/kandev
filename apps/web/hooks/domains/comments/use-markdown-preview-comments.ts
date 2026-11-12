@@ -122,6 +122,8 @@ function useMarkdownSelectionCapture({
     };
     const handleSelectionStart = (event: MouseEvent | TouchEvent) => {
       if (isIgnoredTarget(event.target)) return;
+      // Touch selections follow selectionchange; a swipe over selected text must keep the dock.
+      if (touchTracking && event.type === "touchstart") return;
       setCurrentSelection(null);
       onSelectionStart();
     };
@@ -140,7 +142,7 @@ function useMarkdownSelectionCapture({
         timeoutRef.current = null;
       }
     };
-  }, [enabled, onSelectionStart, rootRef]);
+  }, [enabled, onSelectionStart, rootRef, touchTracking]);
 
   return { currentSelection, setCurrentSelection };
 }

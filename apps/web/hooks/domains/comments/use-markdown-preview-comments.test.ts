@@ -90,6 +90,19 @@ describe("useMarkdownPreviewComments touch selection", () => {
     expect(result.current.currentSelection).toBeNull();
   });
 
+  it("keeps the touch selection when a swipe starts on selected text", () => {
+    TOUCH.enabled = true;
+    const { result } = renderPreviewHook();
+    selectAndFlush(4, 8);
+    expect(result.current.currentSelection?.selectedText).toBe("pnpm");
+
+    act(() => {
+      root.querySelector("p")!.dispatchEvent(new Event("touchstart", { bubbles: true }));
+    });
+
+    expect(result.current.currentSelection?.selectedText).toBe("pnpm");
+  });
+
   it("keeps an open comment draft when the viewport resizes", () => {
     TOUCH.enabled = true;
     const { result } = renderPreviewHook();
