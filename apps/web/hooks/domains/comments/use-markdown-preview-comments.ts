@@ -66,6 +66,105 @@ function isCommentShortcut(event: KeyboardEvent): boolean {
   );
 }
 
+type MarkdownSelectionCaptureRefs = {
+  timeoutRef: { current: number | null };
+  generationRef: { current: number };
+  touchCaptureActiveRef: { current: boolean };
+  resolveSelectionRef: { current: () => void };
+};
+
+function cancelPendingMarkdownSelection({
+  timeoutRef,
+  generationRef,
+}: MarkdownSelectionCaptureRefs) {
+  generationRef.current += 1;
+  if (timeoutRef.current !== null) {
+    window.clearTimeout(timeoutRef.current);
+    timeoutRef.current = null;
+  }
+}
+
+function scheduleMarkdownSelection(
+  refs: MarkdownSelectionCaptureRefs,
+  requiresTouchOwnership: boolean,
+) {
+  const { timeoutRef, generationRef, touchCaptureActiveRef, resolveSelectionRef } = refs;
+  if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
+  const generation = ++generationRef.current;
+  timeoutRef.current = window.setTimeout(() => {
+    timeoutRef.current = null;
+    if (generation !== generationRef.current) return;
+    if (requiresTouchOwnership && !touchCaptureActiveRef.current) return;
+    resolveSelectionRef.current();
+  }, 10);
+}
+
+function installMarkdownSelectionCapture({
+  root,
+  onSelectionStart,
+  cancelPendingSelection,
+  scheduleSelection,
+  touchCaptureActiveRef,
+  setCurrentSelection,
+}: {
+  root: HTMLDivElement;
+  onSelectionStart: () => void;
+  cancelPendingSelection: () => void;
+  scheduleSelection: (requiresTouchOwnership: boolean) => void;
+  touchCaptureActiveRef: { current: boolean };
+  setCurrentSelection: Dispatch<SetStateAction<MarkdownPreviewSelection | null>>;
+}) {
+  const handleSelectionEnd = (event: MouseEvent | TouchEvent) => {
+    if (!isIgnoredTarget(event.target)) scheduleSelection(event.type === "touchend");
+  };
+  const handleSelectionStart = (event: MouseEvent | TouchEvent) => {
+    if (isIgnoredTarget(event.target)) {
+      touchCaptureActiveRef.current = false;
+      cancelPendingSelection();
+      return;
+    }
+    cancelPendingSelection();
+    touchCaptureActiveRef.current = event.type === "touchstart";
+    setCurrentSelection(null);
+    onSelectionStart();
+  };
+  const handleTouchSelectionChange = () => {
+    if (touchCaptureActiveRef.current) scheduleSelection(true);
+  };
+  const handleOutsidePointerDown = (event: PointerEvent) => {
+    const target = event.target;
+    if (target instanceof Node && root.contains(target)) return;
+    touchCaptureActiveRef.current = false;
+    cancelPendingSelection();
+    if (
+      target instanceof Element &&
+      target.closest(
+        ".floating-comment-btn, [data-selection-comment-dock-action], [data-markdown-comment-popover]",
+      )
+    ) {
+      return;
+    }
+    setCurrentSelection(null);
+  };
+
+  root.addEventListener("mouseup", handleSelectionEnd);
+  root.addEventListener("touchend", handleSelectionEnd);
+  root.addEventListener("mousedown", handleSelectionStart);
+  root.addEventListener("touchstart", handleSelectionStart);
+  root.ownerDocument.addEventListener("selectionchange", handleTouchSelectionChange);
+  root.ownerDocument.addEventListener("pointerdown", handleOutsidePointerDown, true);
+  return () => {
+    root.removeEventListener("mouseup", handleSelectionEnd);
+    root.removeEventListener("touchend", handleSelectionEnd);
+    root.removeEventListener("mousedown", handleSelectionStart);
+    root.removeEventListener("touchstart", handleSelectionStart);
+    root.ownerDocument.removeEventListener("selectionchange", handleTouchSelectionChange);
+    root.ownerDocument.removeEventListener("pointerdown", handleOutsidePointerDown, true);
+    touchCaptureActiveRef.current = false;
+    cancelPendingSelection();
+  };
+}
+
 function useMarkdownSelectionCapture({
   content,
   enabled,
@@ -80,6 +179,20 @@ function useMarkdownSelectionCapture({
   const [currentSelection, setCurrentSelection] = useState<MarkdownPreviewSelection | null>(null);
   const resolveSelectionRef = useRef<() => void>(() => {});
   const timeoutRef = useRef<number | null>(null);
+  const touchCaptureActiveRef = useRef(false);
+  const captureGenerationRef = useRef(0);
+  const captureRefs = {
+    timeoutRef,
+    generationRef: captureGenerationRef,
+    touchCaptureActiveRef,
+    resolveSelectionRef,
+  };
+  const cancelPendingSelection = useCallback(() => cancelPendingMarkdownSelection(captureRefs), []);
+  const scheduleSelection = useCallback(
+    (requiresTouchOwnership: boolean) =>
+      scheduleMarkdownSelection(captureRefs, requiresTouchOwnership),
+    [],
+  );
 
   const resolveSelection = useCallback(() => {
     if (!enabled) return;
@@ -97,38 +210,22 @@ function useMarkdownSelectionCapture({
   useEffect(() => {
     const root = rootRef.current;
     if (!root || !enabled) return;
+    return installMarkdownSelectionCapture({
+      root,
+      onSelectionStart,
+      cancelPendingSelection,
+      scheduleSelection,
+      touchCaptureActiveRef,
+      setCurrentSelection,
+    });
+  }, [cancelPendingSelection, enabled, onSelectionStart, rootRef, scheduleSelection]);
 
-    const handleSelectionEnd = (event: MouseEvent | TouchEvent) => {
-      if (isIgnoredTarget(event.target)) return;
-      if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
-      timeoutRef.current = window.setTimeout(() => {
-        timeoutRef.current = null;
-        resolveSelectionRef.current();
-      }, 10);
-    };
-    const handleSelectionStart = (event: MouseEvent | TouchEvent) => {
-      if (isIgnoredTarget(event.target)) return;
-      setCurrentSelection(null);
-      onSelectionStart();
-    };
+  const stopTouchCapture = useCallback(() => {
+    touchCaptureActiveRef.current = false;
+    cancelPendingSelection();
+  }, [cancelPendingSelection]);
 
-    root.addEventListener("mouseup", handleSelectionEnd);
-    root.addEventListener("touchend", handleSelectionEnd);
-    root.addEventListener("mousedown", handleSelectionStart);
-    root.addEventListener("touchstart", handleSelectionStart);
-    return () => {
-      root.removeEventListener("mouseup", handleSelectionEnd);
-      root.removeEventListener("touchend", handleSelectionEnd);
-      root.removeEventListener("mousedown", handleSelectionStart);
-      root.removeEventListener("touchstart", handleSelectionStart);
-      if (timeoutRef.current !== null) {
-        window.clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
-      }
-    };
-  }, [enabled, onSelectionStart, rootRef]);
-
-  return { currentSelection, setCurrentSelection };
+  return { currentSelection, setCurrentSelection, stopTouchCapture };
 }
 
 function useMarkdownCommentShortcut({
@@ -323,6 +420,31 @@ function useVisibleMarkdownCommentActions({
   return { removeVisibleComment, updateVisibleComment };
 }
 
+function useMarkdownCommentIdentityReset({
+  identity,
+  stopTouchCapture,
+  setCurrentSelection,
+  setTextSelection,
+  setCommentView,
+}: {
+  identity: string;
+  stopTouchCapture: () => void;
+  setCurrentSelection: Dispatch<SetStateAction<MarkdownPreviewSelection | null>>;
+  setTextSelection: Dispatch<SetStateAction<MarkdownPreviewSelection | null>>;
+  setCommentView: Dispatch<SetStateAction<MarkdownCommentView>>;
+}) {
+  const previousIdentityRef = useRef(identity);
+  useEffect(() => {
+    if (previousIdentityRef.current === identity) return;
+    previousIdentityRef.current = identity;
+    stopTouchCapture();
+    setCurrentSelection(null);
+    setTextSelection(null);
+    setCommentView(null);
+    clearBrowserSelection();
+  }, [identity, setCommentView, setCurrentSelection, setTextSelection, stopTouchCapture]);
+}
+
 export function useMarkdownPreviewComments({
   path,
   repositoryId,
@@ -343,18 +465,32 @@ export function useMarkdownPreviewComments({
   );
 
   const closeCommentView = useCallback(() => setCommentView(null), []);
-  const { currentSelection, setCurrentSelection } = useMarkdownSelectionCapture({
+  const { currentSelection, setCurrentSelection, stopTouchCapture } = useMarkdownSelectionCapture({
     content,
     enabled,
     rootRef,
     onSelectionStart: closeCommentView,
   });
+  const identity = JSON.stringify([
+    path,
+    repositoryId ?? "",
+    repositoryName ?? "",
+    sessionId ?? "",
+  ]);
+  useMarkdownCommentIdentityReset({
+    identity,
+    stopTouchCapture,
+    setCurrentSelection,
+    setTextSelection,
+    setCommentView,
+  });
 
   const openComposer = useCallback(() => {
     if (!currentSelection) return;
+    stopTouchCapture();
     setTextSelection(currentSelection);
     setCurrentSelection(null);
-  }, [currentSelection, setCurrentSelection]);
+  }, [currentSelection, setCurrentSelection, stopTouchCapture]);
 
   useMarkdownCommentShortcut({
     currentSelection,
@@ -371,14 +507,16 @@ export function useMarkdownPreviewComments({
   });
 
   const closeComposer = useCallback(() => {
+    stopTouchCapture();
     setTextSelection(null);
     clearBrowserSelection();
-  }, []);
+  }, [stopTouchCapture]);
   const dismissOverlays = useCallback(() => {
+    stopTouchCapture();
     setCurrentSelection(null);
     setTextSelection(null);
     closeCommentView();
-  }, [closeCommentView, setCurrentSelection]);
+  }, [closeCommentView, setCurrentSelection, stopTouchCapture]);
 
   const { submitComment, submitAndRunComment } = useMarkdownCommentSubmitters({
     path,

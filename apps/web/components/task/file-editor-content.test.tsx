@@ -27,8 +27,20 @@ vi.mock("@/hooks/use-editor-resolver", () => ({
 }));
 
 vi.mock("@/components/editors/monaco/monaco-code-editor", () => ({
-  MonacoCodeEditor: (props: { path: string; content: string; onPreviewHtml?: () => void }) => (
-    <div data-testid="monaco-editor" data-path={props.path} data-content={props.content}>
+  MonacoCodeEditor: (props: {
+    path: string;
+    content: string;
+    readOnly?: boolean;
+    showToolbar?: boolean;
+    onPreviewHtml?: () => void;
+  }) => (
+    <div
+      data-testid="monaco-editor"
+      data-path={props.path}
+      data-content={props.content}
+      data-read-only={props.readOnly}
+      data-show-toolbar={props.showToolbar}
+    >
       {props.onPreviewHtml && (
         <button type="button" onClick={props.onPreviewHtml}>
           Preview HTML
@@ -132,6 +144,18 @@ describe("FileEditorContent preview selection", () => {
     expect(openBrowserPanel).toHaveBeenCalledWith(htmlPreview.url);
   });
 
+  it("passes read-only and toolbar visibility through to the selected editor", () => {
+    render(
+      <FileEditorContent {...baseProps} sessionId={SESSION_ID} readOnly showToolbar={false} />,
+    );
+
+    const editor = screen.getByTestId(MONACO_EDITOR_TEST_ID);
+    expect(editor.getAttribute("data-read-only")).toBe("true");
+    expect(editor.getAttribute("data-show-toolbar")).toBe("false");
+  });
+});
+
+describe("FileEditorContent preview updates", () => {
   it("refreshes from the latest unsaved buffer", () => {
     const { rerender } = render(
       <FileEditorContent {...baseProps} sessionId={SESSION_ID} previewKind="html" />,

@@ -14,6 +14,7 @@ import {
 } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { useSelectionCommentDockPresentation } from "@/components/shared/selection-comment-dock";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
 import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
@@ -33,6 +34,7 @@ import {
   useMessageCommentDecorations,
   useMessageCommentShortcut,
   useMessageCommentMouseSelection,
+  useMessageCommentTouchSelection,
 } from "./use-message-comment-dom";
 import {
   MessageCommentDecorationOverlay,
@@ -127,6 +129,8 @@ function useCommentTargetState(
   rootRef: RefObject<HTMLDivElement | null>,
   isSelectable: boolean,
   messageId: string,
+  identity: string,
+  keepSelectionOnScroll: boolean,
 ) {
   const [target, setTarget] = useState<CommentTarget | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
@@ -156,7 +160,15 @@ function useCommentTargetState(
     if (selection) setNewSelection(selection, false);
   }, [isSelectable, rootRef, setNewSelection]);
 
+  const captureTouchSelection = useCallback(() => {
+    if (!rootRef.current || !isSelectable) return;
+    const selection = getMessageSelection(rootRef.current, window.getSelection());
+    if (selection) setNewSelection(selection, false);
+    else setTarget(null);
+  }, [isSelectable, rootRef, setNewSelection]);
+
   useMessageCommentMouseSelection(rootRef, isSelectable && !composerOpen, captureSelection);
+  useMessageCommentTouchSelection(rootRef, isSelectable && !composerOpen, captureTouchSelection);
 
   const openFromShortcut = useCallback(
     (selection: MessageSelection) => setNewSelection(selection, true),
@@ -165,22 +177,36 @@ function useCommentTargetState(
   useMessageCommentShortcut(rootRef, isSelectable, openFromShortcut);
 
   useEffect(() => {
+    setTarget(null);
+    setComposerOpen(false);
+  }, [identity]);
+
+  useEffect(() => {
     if (!target || composerOpen) return;
     const dismiss = (event: Event) => {
       const element = event.target as HTMLElement | null;
       if (element?.closest('[data-testid="agent-message-comment-trigger"]')) return;
       setTarget(null);
     };
-    const dismissOnScroll = () => setTarget(null);
+    const dismissOnScroll = () => {
+      if (!keepSelectionOnScroll) setTarget(null);
+    };
     document.addEventListener("pointerdown", dismiss, true);
     document.addEventListener("scroll", dismissOnScroll, true);
     return () => {
       document.removeEventListener("pointerdown", dismiss, true);
       document.removeEventListener("scroll", dismissOnScroll, true);
     };
-  }, [composerOpen, target]);
+  }, [composerOpen, keepSelectionOnScroll, target]);
 
-  return { target, setTarget, composerOpen, setComposerOpen, close, captureSelection };
+  return {
+    target,
+    setTarget,
+    composerOpen,
+    setComposerOpen,
+    close,
+    captureSelection: captureTouchSelection,
+  };
 }
 
 function useExistingCommentHandlers(
@@ -317,9 +343,16 @@ export function MessageCommentSurface({
   const rootRef = useRef<HTMLDivElement>(null);
   const highlightInstanceId = useId();
   const useDrawer = useTouchDrawer();
+  const dockPresentation = useSelectionCommentDockPresentation();
   const pendingComments = usePendingCommentsForMessage(sessionId, message.id);
   const isSelectable = canSelectMessageText(message, sessionId, isTurnActive, readOnly);
-  const targetState = useCommentTargetState(rootRef, isSelectable, message.id);
+  const targetState = useCommentTargetState(
+    rootRef,
+    isSelectable,
+    message.id,
+    `${message.id}:${sessionId ?? ""}`,
+    dockPresentation,
+  );
   const { target, composerOpen, setTarget, setComposerOpen, close, captureSelection } = targetState;
   const openExistingComment = useExistingCommentHandlers(
     rootRef,

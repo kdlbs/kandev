@@ -38,9 +38,11 @@ types retain their current restrictions.
 
 ## Presentation and validation
 
-The existing trigger opens a desktop popover or a touch drawer. No layout,
-labels, touch targets, or storage format change. The drawer remains the phone
-surface for editing selected feedback, with the existing Add and Run actions.
+The trigger opens a desktop popover or a touch drawer. The drawer remains the
+touch surface for editing selected feedback, with the existing Add and Run actions.
+The proposed [selection comment actions design](selection-comment-actions.md)
+defines the shared touch dock and native selection tracking. This design retains
+the message eligibility, owned mouse capture, and comment delivery boundaries.
 
 Component tests cover releases outside the body, invalid selections, the open
 editor, and dismissal when an unrelated control preserves the DOM selection.

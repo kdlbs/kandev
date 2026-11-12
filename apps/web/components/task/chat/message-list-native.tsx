@@ -29,6 +29,7 @@ import { findMessageRow, useNativeScrollManagement } from "./message-list-native
 import { scheduleAfterPanelRestore, useActivationPending } from "./transcript-auto-scroll";
 import { useTranscriptAutoScrollEnabled } from "./use-transcript-auto-scroll-enabled";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { SelectionCommentHostProvider } from "@/components/shared/selection-comment-dock";
 import {
   type MessageListProps,
   type MessageListHandle,
@@ -459,6 +460,7 @@ function MessageRow({
 }
 
 type NativeMessageListBodyProps = {
+  contentRef: React.RefObject<HTMLDivElement | null>;
   items: RenderItem[];
   messages: Message[];
   footerActionMessages?: Message[];
@@ -643,6 +645,7 @@ function useDividerUserScrolling(
 /** Sentinel, status/footer, and transcript rows — everything below the
  * (optional) anchored prompt bar inside the scroll container. */
 function NativeMessageListBody({
+  contentRef,
   items,
   messages,
   footerActionMessages,
@@ -679,7 +682,7 @@ function NativeMessageListBody({
   launchErrorOccurredAt,
 }: NativeMessageListBodyProps) {
   return (
-    <div className="p-4" data-chat-content>
+    <div ref={contentRef} className="p-4" data-chat-content>
       {/* Sentinel for lazy loading older messages */}
       {hasMore && <div ref={sentinelRef} className="h-px" />}
 
@@ -975,6 +978,7 @@ export const NativeMessageList = memo(
     ref,
   ) {
     const scrollRef = useRef<HTMLDivElement>(null);
+    const contentRef = useRef<HTMLDivElement>(null);
     const showTurnChangedFiles = useAppStore((state) => state.userSettings.showTurnChangedFiles);
     const turnChanges = useSessionTurnChanges(sessionId, { detailActive });
 
@@ -1075,51 +1079,54 @@ export const NativeMessageList = memo(
         }`}
       >
         {stickyPromptBar}
-        <ChatMotionProvider
-          sessionId={sessionId}
-          messages={visibleMessages}
-          live={isVisible && !messagesLoading && !historyRefreshPending && !isLoadingMore}
-        >
-          <NativeMessageListBody
-            items={visibleItems}
-            messages={visibleMessages}
-            footerActionMessages={visibleFooterActionMessages}
-            permissionsByToolCallId={permissionsByToolCallId}
-            childrenByParentToolCallId={childrenByParentToolCallId}
-            taskId={taskId}
+        <SelectionCommentHostProvider ownerRef={scrollRef} reserveRef={contentRef}>
+          <ChatMotionProvider
             sessionId={sessionId}
-            isWorking={isWorking}
-            messagesLoading={messagesLoading}
-            sessionState={sessionState}
-            worktreePath={worktreePath}
-            onOpenFile={onOpenFile}
-            onOpenHistoricalDiff={onOpenHistoricalDiff}
-            turnChangeSummaries={turnChanges.summaries.filter((summary) =>
-              isTurnChangeCardVisible(summary),
-            )}
-            messageHistoryHasMore={hasMore}
-            showTurnChangedFiles={showTurnChangedFiles}
-            hasMore={hasMore}
-            isLoadingMore={isLoadingMore}
-            isInitialLoading={isInitialLoading}
-            showLoadingState={showLoadingState}
-            historyStatus={historyStatus}
-            historyError={historyError}
-            onRetryHistory={onRetryHistory}
-            retryLoadMore={retryLoadMore}
-            showRecovery={showRecovery}
-            sentinelRef={sentinelRef}
-            lastTurnGroupId={lastTurnGroupId}
-            activeTurnId={effectiveActiveTurnId}
-            streamingMessageId={streamingMessageId}
-            onScrollToMessage={handleScrollToMessage}
-            autoScrollEnabled={autoScrollEnabled}
-            dividerBeforeItemKey={dividerBeforeItemKey}
-            launchErrorOwned={launchErrorOwned}
-            launchErrorStamp={launchErrorStamp}
-            launchErrorOccurredAt={launchErrorOccurredAt}
-          />
-        </ChatMotionProvider>
+            messages={visibleMessages}
+            live={isVisible && !messagesLoading && !historyRefreshPending && !isLoadingMore}
+          >
+            <NativeMessageListBody
+              contentRef={contentRef}
+              items={visibleItems}
+              messages={visibleMessages}
+              footerActionMessages={visibleFooterActionMessages}
+              permissionsByToolCallId={permissionsByToolCallId}
+              childrenByParentToolCallId={childrenByParentToolCallId}
+              taskId={taskId}
+              sessionId={sessionId}
+              isWorking={isWorking}
+              messagesLoading={messagesLoading}
+              sessionState={sessionState}
+              worktreePath={worktreePath}
+              onOpenFile={onOpenFile}
+              onOpenHistoricalDiff={onOpenHistoricalDiff}
+              turnChangeSummaries={turnChanges.summaries.filter((summary) =>
+                isTurnChangeCardVisible(summary),
+              )}
+              messageHistoryHasMore={hasMore}
+              showTurnChangedFiles={showTurnChangedFiles}
+              hasMore={hasMore}
+              isLoadingMore={isLoadingMore}
+              isInitialLoading={isInitialLoading}
+              showLoadingState={showLoadingState}
+              historyStatus={historyStatus}
+              historyError={historyError}
+              onRetryHistory={onRetryHistory}
+              retryLoadMore={retryLoadMore}
+              showRecovery={showRecovery}
+              sentinelRef={sentinelRef}
+              lastTurnGroupId={lastTurnGroupId}
+              activeTurnId={effectiveActiveTurnId}
+              streamingMessageId={streamingMessageId}
+              onScrollToMessage={handleScrollToMessage}
+              autoScrollEnabled={autoScrollEnabled}
+              dividerBeforeItemKey={dividerBeforeItemKey}
+              launchErrorOwned={launchErrorOwned}
+              launchErrorStamp={launchErrorStamp}
+              launchErrorOccurredAt={launchErrorOccurredAt}
+            />
+          </ChatMotionProvider>
+        </SelectionCommentHostProvider>
       </SessionPanelContent>
     );
   }),

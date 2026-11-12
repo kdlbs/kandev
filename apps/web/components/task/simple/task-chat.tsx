@@ -48,6 +48,7 @@ import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
 import { useTranslation } from "react-i18next";
 import { DecisionTimelineEntry, TimelineEntry } from "./task-chat-timeline-entries";
+import { SelectionCommentHostProvider } from "@/components/shared/selection-comment-dock";
 
 const MAX_INLINE_SESSIONS = 50;
 const AUTOSCROLL_THRESHOLD_PX = 80;
@@ -334,6 +335,7 @@ type ChatInputProps = {
   taskTitle?: string;
   taskDescription?: string;
   onSubmitted?: () => void;
+  boundaryRef: React.RefObject<HTMLDivElement | null>;
 };
 
 type CommentComposerFooterProps = {
@@ -467,7 +469,13 @@ function useCommentPromptEnhance({
   return { promptDelivery, isUtilityConfigured, isEnhancingPrompt, handleEnhance };
 }
 
-function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInputProps) {
+function ChatInput({
+  taskId,
+  taskTitle,
+  taskDescription,
+  onSubmitted,
+  boundaryRef,
+}: ChatInputProps) {
   const { t } = useTranslation();
   const [input, setInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -503,7 +511,7 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
   }, [extracts, submitting, taskId, onSubmitted, setInputAndSync, markSent, t]);
 
   return (
-    <div className="mt-4 pt-4 border-t border-border">
+    <div ref={boundaryRef} className="mt-4 pt-4 border-t border-border">
       <div className="rounded-md border bg-muted/30 focus-within:ring-1 focus-within:ring-ring">
         <ContextZone items={items} />
         <textarea
@@ -705,6 +713,11 @@ export function TaskChat({
   repositories,
 }: TaskChatProps) {
   const { t } = useTranslation();
+  const chatRootRef = useRef<HTMLDivElement>(null);
+  const ownerRef = useRef<HTMLElement | null>(scrollParent ?? null);
+  const composerRef = useRef<HTMLDivElement>(null);
+  const transcriptRef = useRef<HTMLDivElement>(null);
+  ownerRef.current = scrollParent ?? chatRootRef.current;
   const [showOlder, setShowOlder] = useState(false);
   const groups = useMemo(
     () => groupSessionsForTimeline(sessions, reviewers, approvers),
@@ -748,38 +761,59 @@ export function TaskChat({
   const isEmpty = entries.length === 0;
 
   return (
-    <div className="flex flex-col" data-testid="task-chat-root">
-      {showOlderToggle && (
-        <button
-          type="button"
-          onClick={() => setShowOlder(true)}
-          className="self-start text-xs text-muted-foreground hover:text-foreground underline cursor-pointer mb-2"
-          data-testid="show-older-sessions"
-        >
-          {t("task:showOlderSessions", { count: olderGroups.length })}
-        </button>
-      )}
-      {isEmpty ? (
-        <p className="text-sm text-muted-foreground py-4">{t("task:noCommentsYet")}</p>
-      ) : (
-        <div data-testid="task-chat-entries">
-          <ChatEntries
+    <SelectionCommentHostProvider
+      ownerRef={ownerRef}
+      boundaryRef={composerRef}
+      reserveRef={transcriptRef}
+    >
+      <div
+        ref={(element) => {
+          chatRootRef.current = element;
+          if (!scrollParent) ownerRef.current = element;
+        }}
+        className="flex flex-col"
+        data-testid="task-chat-root"
+      >
+        {showOlderToggle ? (
+          <ShowOlderSessionsButton count={olderGroups.length} onClick={() => setShowOlder(true)} />
+        ) : null}
+        {isEmpty ? (
+          <p className="text-sm text-muted-foreground py-4">{t("task:noCommentsYet")}</p>
+        ) : (
+          <div ref={transcriptRef} data-testid="task-chat-entries">
+            <ChatEntries
+              taskId={taskId}
+              workspaceId={workspaceId}
+              repositories={repositories}
+              entries={entries}
+              readOnly={readOnly}
+            />
+          </div>
+        )}
+        {!readOnly && (
+          <ChatInput
             taskId={taskId}
-            workspaceId={workspaceId}
-            repositories={repositories}
-            entries={entries}
-            readOnly={readOnly}
+            taskTitle={taskTitle}
+            taskDescription={taskDescription}
+            onSubmitted={onCommentsChanged}
+            boundaryRef={composerRef}
           />
-        </div>
-      )}
-      {!readOnly && (
-        <ChatInput
-          taskId={taskId}
-          taskTitle={taskTitle}
-          taskDescription={taskDescription}
-          onSubmitted={onCommentsChanged}
-        />
-      )}
-    </div>
+        )}
+      </div>
+    </SelectionCommentHostProvider>
+  );
+}
+
+function ShowOlderSessionsButton({ count, onClick }: { count: number; onClick: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="self-start text-xs text-muted-foreground hover:text-foreground underline cursor-pointer mb-2"
+      data-testid="show-older-sessions"
+    >
+      {t("task:showOlderSessions", { count })}
+    </button>
   );
 }

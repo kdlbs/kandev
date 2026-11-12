@@ -95,6 +95,43 @@ export function useMessageCommentMouseSelection(
   }, [enabled, onSelect, rootRef]);
 }
 
+export function useMessageCommentTouchSelection(
+  rootRef: RefObject<HTMLDivElement | null>,
+  enabled: boolean,
+  onSelectionChange: () => void,
+) {
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!enabled || !root) return;
+    const ownerDocument = root.ownerDocument;
+    let touchOwnedByMessage = false;
+    const onTouchStart = (event: TouchEvent) => {
+      touchOwnedByMessage = event.target instanceof Node && root.contains(event.target);
+    };
+    const onSelectionChangeEvent = () => {
+      if (touchOwnedByMessage) onSelectionChange();
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest('[data-testid="agent-message-comment-trigger"]')
+      ) {
+        return;
+      }
+      if (!(target instanceof Node) || !root.contains(target)) touchOwnedByMessage = false;
+    };
+    root.addEventListener("touchstart", onTouchStart, { passive: true });
+    ownerDocument.addEventListener("selectionchange", onSelectionChangeEvent);
+    ownerDocument.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      root.removeEventListener("touchstart", onTouchStart);
+      ownerDocument.removeEventListener("selectionchange", onSelectionChangeEvent);
+      ownerDocument.removeEventListener("pointerdown", onPointerDown, true);
+    };
+  }, [enabled, onSelectionChange, rootRef]);
+}
+
 type HighlightRegistry = {
   set: (name: string, highlight: unknown) => void;
   delete: (name: string) => void;

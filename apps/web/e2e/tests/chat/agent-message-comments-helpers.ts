@@ -184,6 +184,31 @@ export async function selectAgentReplyText(
   }, selectedText);
 }
 
+export async function selectAgentReplyTextWithTouch(body: Locator, selectedText: string) {
+  await body.evaluate((element, quote) => {
+    element.dispatchEvent(new Event("touchstart", { bubbles: true, cancelable: true }));
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node) {
+      const value = node.nodeValue ?? "";
+      const start = value.indexOf(quote);
+      if (start >= 0) {
+        const range = document.createRange();
+        range.setStart(node, start);
+        range.setEnd(node, start + quote.length);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        document.dispatchEvent(new Event("selectionchange", { bubbles: true }));
+        element.dispatchEvent(new Event("touchend", { bubbles: true, cancelable: true }));
+        return;
+      }
+      node = walker.nextNode();
+    }
+    throw new Error(`Could not find selected text: ${quote}`);
+  }, selectedText);
+}
+
 export async function openSeededQuickChatReply(
   page: Page,
   apiClient: ApiClient,

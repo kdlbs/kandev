@@ -49,6 +49,11 @@ import {
   useExternalVcsFileStatus,
 } from "@/components/editors/external-vcs-file-link";
 import { useTranslation } from "react-i18next";
+import {
+  SelectionCommentDock,
+  SelectionCommentHostProvider,
+  useSelectionCommentDockPresentation,
+} from "@/components/shared/selection-comment-dock";
 
 interface MarkdownPreviewToolbarProps {
   path: string;
@@ -337,11 +342,21 @@ function MarkdownPreviewCommentOverlays({
   commentState: MarkdownPreviewCommentState;
 }) {
   const { t } = useTranslation();
+  const dockPresentation = useSelectionCommentDockPresentation();
   if (!commentsEnabled || !overlayRoot) return null;
 
   return createPortal(
     <>
-      {commentState.currentSelection && !commentState.textSelection && (
+      {commentState.currentSelection && !commentState.textSelection && dockPresentation ? (
+        <SelectionCommentDock
+          active
+          label={t("task:comment")}
+          accessibleName={t("task:commentOnSelection")}
+          testId="markdown-preview-comment-button"
+          onOpen={commentState.openComposer}
+        />
+      ) : null}
+      {commentState.currentSelection && !commentState.textSelection && !dockPresentation ? (
         <Button
           size="sm"
           variant="secondary"
@@ -357,7 +372,7 @@ function MarkdownPreviewCommentOverlays({
           <IconMessagePlus className="h-3.5 w-3.5" />
           {t("task:comment")}
         </Button>
-      )}
+      ) : null}
       {commentState.textSelection && (
         <div data-markdown-comment-popover>
           <EditorCommentPopover
@@ -430,6 +445,7 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [overlayRoot, setOverlayRoot] = useState<HTMLElement | null>(null);
   const commentsEnabled = enableComments && !!sessionId;
+  const dockPresentation = useSelectionCommentDockPresentation();
   const commentState = useMarkdownPreviewComments({
     path,
     content,
@@ -456,43 +472,52 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
   useEffect(() => {
     if (!commentsEnabled) return;
     const scrollElement = scrollRef.current;
-    const dismissOverlays = () => dismissCommentOverlays();
+    const dismissOverlays = () => {
+      if (dockPresentation && commentState.currentSelection) return;
+      dismissCommentOverlays();
+    };
     scrollElement?.addEventListener("scroll", dismissOverlays, { passive: true });
     window.addEventListener("resize", dismissOverlays);
     return () => {
       scrollElement?.removeEventListener("scroll", dismissOverlays);
       window.removeEventListener("resize", dismissOverlays);
     };
-  }, [commentsEnabled, dismissCommentOverlays]);
+  }, [commentsEnabled, commentState.currentSelection, dismissCommentOverlays, dockPresentation]);
 
   return (
-    <div className="relative flex h-full flex-col" data-testid="markdown-preview">
-      <MarkdownPreviewToolbar
-        isSymlink={isSymlink}
-        path={path}
-        worktreePath={worktreePath}
-        commentCount={commentState.comments.length}
-        commentsEnabled={commentsEnabled}
-        taskId={taskId}
-        sessionId={sessionId}
-        repositoryId={repositoryId}
-        repositoryName={repositoryName}
-        showExternalVcsLink={showExternalVcsLink}
-        onDownload={onDownload}
-        onTogglePreview={onTogglePreview}
-      />
-      <div ref={scrollRef} className="flex-1 overflow-auto p-6">
-        <div ref={rootRef} className="markdown-body max-w-3xl" tabIndex={commentsEnabled ? 0 : -1}>
-          <PreviewCommentContext.Provider value={previewCommentContextValue}>
-            <MarkdownPreviewRenderer content={content} taskId={taskId} />
-          </PreviewCommentContext.Provider>
+    <SelectionCommentHostProvider ownerRef={scrollRef} reserveRef={scrollRef}>
+      <div className="relative flex h-full flex-col" data-testid="markdown-preview">
+        <MarkdownPreviewToolbar
+          isSymlink={isSymlink}
+          path={path}
+          worktreePath={worktreePath}
+          commentCount={commentState.comments.length}
+          commentsEnabled={commentsEnabled}
+          taskId={taskId}
+          sessionId={sessionId}
+          repositoryId={repositoryId}
+          repositoryName={repositoryName}
+          showExternalVcsLink={showExternalVcsLink}
+          onDownload={onDownload}
+          onTogglePreview={onTogglePreview}
+        />
+        <div ref={scrollRef} className="flex-1 overflow-auto p-6">
+          <div
+            ref={rootRef}
+            className="markdown-body max-w-3xl"
+            tabIndex={commentsEnabled ? 0 : -1}
+          >
+            <PreviewCommentContext.Provider value={previewCommentContextValue}>
+              <MarkdownPreviewRenderer content={content} taskId={taskId} />
+            </PreviewCommentContext.Provider>
+          </div>
         </div>
+        <MarkdownPreviewCommentOverlays
+          commentsEnabled={commentsEnabled}
+          overlayRoot={overlayRoot}
+          commentState={commentState}
+        />
       </div>
-      <MarkdownPreviewCommentOverlays
-        commentsEnabled={commentsEnabled}
-        overlayRoot={overlayRoot}
-        commentState={commentState}
-      />
-    </div>
+    </SelectionCommentHostProvider>
   );
 });

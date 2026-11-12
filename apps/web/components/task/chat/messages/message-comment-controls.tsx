@@ -18,6 +18,10 @@ import type { AgentMessageComment } from "@/lib/state/slices/comments";
 import type { MessageSelection } from "@/lib/chat/agent-message-comments";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import {
+  SelectionCommentDock,
+  useSelectionCommentDockPresentation,
+} from "@/components/shared/selection-comment-dock";
 
 export type CommentTarget = {
   selection: MessageSelection;
@@ -244,9 +248,20 @@ export function MessageCommentControls({
   handleRun: ((feedback: string) => boolean | void) | undefined;
   portalContainer: HTMLElement | null;
 }) {
+  const { t } = useTranslation();
+  const dockPresentation = useSelectionCommentDockPresentation();
   return (
     <>
-      {target && !composerOpen ? (
+      {target && !composerOpen && dockPresentation ? (
+        <SelectionCommentDock
+          active
+          label={t("task:comment")}
+          accessibleName={t("task:commentOnSelection")}
+          testId="agent-message-comment-trigger"
+          onOpen={() => setComposerOpen(true)}
+        />
+      ) : null}
+      {target && !composerOpen && !dockPresentation ? (
         <SelectionCommentTrigger
           selection={target.selection}
           isTouch={useDrawer}

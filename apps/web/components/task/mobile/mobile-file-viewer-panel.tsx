@@ -7,6 +7,7 @@ import { IconEye, IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { PanelBody, PanelHeaderBarSplit, PanelRoot } from "../panel-primitives";
 import { FileViewerContent } from "../file-viewer-content";
+import { FileEditorContent } from "../file-editor-content";
 import { HtmlPreviewContent } from "../html-preview-content";
 import { MarkdownPreviewContent } from "../markdown-preview-content";
 import { FileImageViewer } from "../file-image-viewer";
@@ -33,6 +34,8 @@ type MobileFileViewerPanelProps = {
   onClose: () => void;
   initialRenderedPreview?: boolean;
 };
+
+const ignoreFileChange = () => {};
 
 function resolveViewerKind(file: OpenFileTab): "image" | "binary" | "text" {
   if (!file.isBinary) return "text";
@@ -106,7 +109,25 @@ function MobileViewerBody({
       />
     );
   } else {
-    viewerContent = (
+    viewerContent = sessionId ? (
+      <FileEditorContent
+        path={file.path}
+        content={file.content}
+        originalContent={file.originalContent}
+        isDirty={false}
+        isSaving={false}
+        sessionId={sessionId}
+        taskId={taskId}
+        repositoryId={repositoryId}
+        worktreePath={worktreePath}
+        repo={file.repo}
+        enableComments
+        readOnly
+        showToolbar={false}
+        onChange={ignoreFileChange}
+        onSave={ignoreFileChange}
+      />
+    ) : (
       <FileViewerContent
         path={file.path}
         repo={file.repo}
