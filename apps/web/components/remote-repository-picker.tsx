@@ -4,9 +4,14 @@ import { useEffect, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { Badge } from "@kandev/ui/badge";
-import { Spinner } from "@kandev/ui/spinner";
 import { cn } from "@/lib/utils";
-import { AlreadyAddedMarker, isPlainEnter, PickerSearchRow } from "@/components/picker-controls";
+import {
+  AlreadyAddedMarker,
+  isPlainEnter,
+  movePickerFocus,
+  PickerLoadingStatus,
+  PickerSearchRow,
+} from "@/components/picker-controls";
 import type {
   RemoteRepository,
   RemoteRepositoryProvider,
@@ -34,6 +39,8 @@ export type RemoteRepositoryPickerPanelProps = {
   onSubmitText: (value: string) => RemoteRepositoryTextSubmitResult;
   stagedHint?: React.ReactNode;
   placeholder: string;
+  /** Hides submit errors while the connect-provider banner is shown. */
+  hideSubmitErrorWhenUnavailable?: boolean;
 };
 
 /**
@@ -49,6 +56,7 @@ export function RemoteRepositoryPickerPanel({
   onSubmitText,
   stagedHint,
   placeholder,
+  hideSubmitErrorWhenUnavailable = false,
 }: RemoteRepositoryPickerPanelProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -58,14 +66,15 @@ export function RemoteRepositoryPickerPanel({
   useEffect(() => {
     triggerSearch(value);
   }, [value, triggerSearch]);
-  const visibleError = accessible.unavailable ? null : submitError;
+  const visibleError =
+    hideSubmitErrorWhenUnavailable && accessible.unavailable ? null : submitError;
   const { showProviderTabs, selectedProvider, visibleRepos } = visibleProviderRepositories(
     accessible,
     activeProvider,
   );
   const allowedRepos = isRepoAllowed ? visibleRepos.filter(isRepoAllowed) : visibleRepos;
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col" onKeyDown={movePickerFocus}>
       <PickerSearchRow
         value={value}
         onChange={(next) => {
@@ -79,9 +88,10 @@ export function RemoteRepositoryPickerPanel({
         }}
         onKeyDown={(event) => {
           if (!isPlainEnter(event)) return;
+          // Enter belongs to the picker: never let it reach a surrounding form or dialog.
+          event.preventDefault();
           const result = onSubmitText(value);
           if (result.status === "ignored") return;
-          event.preventDefault();
           setSubmitError(result.status === "rejected" ? result.message : null);
         }}
         placeholder={placeholder}
@@ -154,13 +164,10 @@ function PickerList({
       ) : null}
       {accessible.unavailable ? <ConnectProvidersBanner /> : null}
       {!accessible.unavailable && loading && repos.length === 0 ? (
-        <div
-          className="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground"
-          data-testid="remote-repo-picker-loading"
-        >
-          <Spinner className="size-3" />
-          <span>{t("task:loadingRepositories")}</span>
-        </div>
+        <PickerLoadingStatus
+          label={t("task:loadingRepositories")}
+          testId="remote-repo-picker-loading"
+        />
       ) : null}
       {!accessible.unavailable && !loading && repos.length === 0 && !error ? (
         <div className="px-2 py-3 text-xs text-muted-foreground">
@@ -199,6 +206,7 @@ function RepoOption({
       type="button"
       onClick={() => onPick(repo)}
       data-testid="remote-repo-option"
+      data-picker-option=""
       className={cn(
         "flex min-h-11 sm:min-h-8 w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-xs",
         "hover:bg-muted cursor-pointer text-left",

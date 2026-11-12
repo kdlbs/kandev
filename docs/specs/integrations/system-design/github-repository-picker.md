@@ -65,6 +65,15 @@ connect banner. Props:
   marker.
 - `placeholder` — localized search placeholder.
 
+Keyboard contract: plain Enter in the search input always stays inside the
+picker (`preventDefault`), even when `onSubmitText` ignores the text, so it
+never activates a surrounding dialog's default action; ArrowDown/ArrowUp move
+focus between the input and the option buttons (`movePickerFocus` in
+`picker-controls.tsx`). Submit errors stay visible while the provider list is
+unavailable; task creation opts out with `hideSubmitErrorWhenUnavailable`.
+Loading rows use `PickerLoadingStatus`, a translated `role="status"` region
+with the spinner hidden from assistive technology.
+
 The panel drives `accessible.search` from its input, so filtering stays the
 hook's existing case-insensitive substring match over `fullName`, host, and
 URL. Task creation's `RemoteRepoPill` renders this panel without visible
@@ -133,6 +142,8 @@ not cached, so its refresh is a plain refetch.
 
 ### Typed entry
 
+`useRemoteRepositories` exposes the workspace's `githubHost` so the
+multi-select parses GitHub Enterprise repository URLs.
 `parseGitHubRepositoryInput(value, githubHost?)` in
 `apps/web/lib/github/repository-input.ts` returns `{ owner, name }` for
 `owner/name` (single slash, both segments matching GitHub's allowed

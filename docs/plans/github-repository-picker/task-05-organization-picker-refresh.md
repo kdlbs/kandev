@@ -107,5 +107,12 @@ make fmt && make typecheck test lint
   edge once a chip shifted the trigger. Both now pass `collisionPadding={8}`;
   the phone spec asserts an 8px margin after reopening (failed at 393px of a
   393px viewport before the fix).
+- Review fixups: Enter stays inside both pickers and arrow keys move focus
+  (unit tests plus a review-watch dialog E2E with Update enabled; the old code
+  did not leak Enter in that dialog either, so the E2E guards the contract);
+  typed Enterprise URLs use the workspace `githubHost`; submit errors show
+  while GitHub is unavailable except in task creation; loading rows announce a
+  translated status. Hook GitHub-specific tests moved to
+  `use-remote-repositories-github.test.tsx` to stay under the file-size limit.
 - Organization rows show logins only; the backend's prepended account login is
   listed first without a separate "you" label.

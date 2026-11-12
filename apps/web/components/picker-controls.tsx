@@ -2,6 +2,7 @@
 
 import { IconCheck, IconRefresh } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import { Spinner } from "@kandev/ui/spinner";
 import { cn } from "@/lib/utils";
 
 /** Plain Enter on a text input: no modifiers, repeat, or IME composition. */
@@ -16,6 +17,39 @@ export function isPlainEnter(event: React.KeyboardEvent<HTMLInputElement>): bool
     !event.shiftKey &&
     !event.nativeEvent.isComposing &&
     event.keyCode !== 229
+  );
+}
+
+/**
+ * Arrow-key focus movement between a picker's search input and its options.
+ * Attach to the panel element; the input and option buttons are found by their
+ * `data-picker-input` and `data-picker-option` attributes.
+ */
+export function movePickerFocus(event: React.KeyboardEvent<HTMLElement>): void {
+  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+  const panel = event.currentTarget;
+  const targets = [
+    ...panel.querySelectorAll<HTMLElement>("[data-picker-input]"),
+    ...panel.querySelectorAll<HTMLElement>("[data-picker-option]"),
+  ];
+  const index = targets.findIndex((target) => target === document.activeElement);
+  if (index === -1) return;
+  const next = event.key === "ArrowDown" ? Math.min(index + 1, targets.length - 1) : index - 1;
+  event.preventDefault();
+  targets[Math.max(next, 0)]!.focus();
+}
+
+/** Loading row whose translated text is the only announced status. */
+export function PickerLoadingStatus({ label, testId }: { label: string; testId?: string }) {
+  return (
+    <div
+      role="status"
+      className="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground"
+      data-testid={testId}
+    >
+      <Spinner className="size-3" role="presentation" aria-hidden="true" aria-label={undefined} />
+      <span>{label}</span>
+    </div>
   );
 }
 
@@ -63,6 +97,7 @@ export function PickerSearchRow({
         aria-invalid={invalid ? true : undefined}
         data-testid={testId}
         data-legacy-testid={legacyTestId}
+        data-picker-input=""
         className={cn(
           "h-11 sm:h-9 min-w-0 flex-1 rounded-md px-2 text-xs bg-muted/30 border border-border/60",
           "outline-none focus:bg-muted focus:border-border placeholder:text-muted-foreground",

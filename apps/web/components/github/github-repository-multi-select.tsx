@@ -109,7 +109,7 @@ function AddGitHubRepository({
     setOpen(false);
   };
   const submitText = (value: string): RemoteRepositoryTextSubmitResult => {
-    const parsed = parseGitHubRepositoryInput(value);
+    const parsed = parseGitHubRepositoryInput(value, accessible.githubHost);
     if (!parsed) return { status: "ignored" };
     if (!repoAllowedByScope(scope, parsed.owner, parsed.name)) {
       return { status: "rejected", message: t("github:repositoryOutsideWorkspaceScope") };
@@ -139,7 +139,9 @@ function AddGitHubRepository({
           onPick={(repo) => add(toFilter(repo))}
           isRepoSelected={(repo) => isSelected(toFilter(repo))}
           isRepoAllowed={(repo) => repoAllowedByScope(scope, repo.owner, repo.name)}
-          isTextSubmittable={(value) => parseGitHubRepositoryInput(value) !== null}
+          isTextSubmittable={(value) =>
+            parseGitHubRepositoryInput(value, accessible.githubHost) !== null
+          }
           onSubmitText={submitText}
           stagedHint={<StagedRepositoryHint />}
           placeholder={t("github:searchRepositoriesOrEnterOwnerRepo", { format: "owner/repo" })}

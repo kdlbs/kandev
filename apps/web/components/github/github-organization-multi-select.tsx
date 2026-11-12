@@ -3,10 +3,15 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
-import { Spinner } from "@kandev/ui/spinner";
 import { cn } from "@/lib/utils";
 import { useGitHubOrgs, type UseGitHubOrgsResult } from "@/hooks/domains/github/use-github-orgs";
-import { AlreadyAddedMarker, isPlainEnter, PickerSearchRow } from "@/components/picker-controls";
+import {
+  AlreadyAddedMarker,
+  isPlainEnter,
+  movePickerFocus,
+  PickerLoadingStatus,
+  PickerSearchRow,
+} from "@/components/picker-controls";
 import { parseGitHubLogin } from "@/lib/github/repository-input";
 import { SelectionAddButton, SelectionChip } from "./selection-chip";
 
@@ -120,8 +125,10 @@ function OrganizationPickerPanel({
     .filter((login) => login.toLowerCase().includes(needle));
   const typedLogin = parseGitHubLogin(value);
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (!isPlainEnter(event) || !typedLogin) return;
+    if (!isPlainEnter(event)) return;
+    // Enter belongs to the picker: never let it reach a surrounding form or dialog.
     event.preventDefault();
+    if (!typedLogin) return;
     if (isOrgAllowed && !isOrgAllowed(typedLogin)) {
       setSubmitError(t("github:organizationOutsideWorkspaceScope"));
       return;
@@ -129,7 +136,7 @@ function OrganizationPickerPanel({
     onAdd(typedLogin);
   };
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col" onKeyDown={movePickerFocus}>
       <PickerSearchRow
         value={value}
         onChange={(next) => {
@@ -160,6 +167,7 @@ function OrganizationPickerPanel({
             type="button"
             onClick={() => onAdd(login)}
             data-testid="github-organization-option"
+            data-picker-option=""
             className={cn(
               "flex min-h-11 sm:min-h-8 w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-xs",
               "hover:bg-muted cursor-pointer text-left",
@@ -192,12 +200,7 @@ function OrganizationListStatus({
     );
   }
   if (orgs.loading && empty) {
-    return (
-      <div className="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground">
-        <Spinner className="size-3" />
-        <span>{t("github:loadingOrganizations")}</span>
-      </div>
-    );
+    return <PickerLoadingStatus label={t("github:loadingOrganizations")} />;
   }
   if (orgs.error) {
     return (

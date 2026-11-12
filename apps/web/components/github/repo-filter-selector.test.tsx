@@ -20,6 +20,8 @@ vi.mock("@/hooks/domains/integrations/use-remote-repositories", () => ({
 
 import { RepoFilterSelector } from "./repo-filter-selector";
 
+const REPO_INPUT = "remote-repo-input";
+
 function repo(owner: string, name: string): RemoteRepository {
   return {
     provider: "github",
@@ -94,7 +96,7 @@ describe("RepoFilterSelector repository picker", () => {
       expect.stringContaining("acme/api"),
     ]);
 
-    fireEvent.change(screen.getByTestId("remote-repo-input"), { target: { value: "kandev" } });
+    fireEvent.change(screen.getByTestId(REPO_INPUT), { target: { value: "kandev" } });
     await waitFor(() => expect(optionTexts()).toEqual([expect.stringContaining("kdlbs/kandev")]));
     fireEvent.click(screen.getByTestId("remote-repo-option"));
 
@@ -119,10 +121,24 @@ describe("RepoFilterSelector repository picker", () => {
   it("adds a typed owner/name that is not listed", () => {
     const onChange = renderSelector();
     openPicker();
-    const input = screen.getByTestId("remote-repo-input");
+    const input = screen.getByTestId(REPO_INPUT);
     fireEvent.change(input, { target: { value: "other/tool" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onChange).toHaveBeenCalledWith([{ owner: "other", name: "tool" }]);
+  });
+
+  it("adds a typed repository URL on the workspace's GitHub Enterprise host", () => {
+    const base = mocks.useRemoteRepositories.getMockImplementation()!;
+    mocks.useRemoteRepositories.mockImplementation((...args: unknown[]) => ({
+      ...base(...args),
+      githubHost: "git.company.example",
+    }));
+    const onChange = renderSelector();
+    openPicker();
+    const input = screen.getByTestId(REPO_INPUT);
+    fireEvent.change(input, { target: { value: "https://git.company.example/acme/widget" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith([{ owner: "acme", name: "widget" }]);
   });
 
   it("rejects a typed repository outside the workspace scope", async () => {
@@ -132,7 +148,7 @@ describe("RepoFilterSelector repository picker", () => {
     const onChange = renderSelector();
     await waitFor(() => expect(mocks.fetchGitHubWorkspaceSettings).toHaveBeenCalled());
     openPicker();
-    const input = screen.getByTestId("remote-repo-input");
+    const input = screen.getByTestId(REPO_INPUT);
     fireEvent.change(input, { target: { value: "other/tool" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onChange).not.toHaveBeenCalled();

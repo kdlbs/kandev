@@ -376,6 +376,7 @@ function RemoteRepoPopoverContent({
       }}
       stagedHint={<StagedRemoteUrlHint />}
       placeholder={t("task:searchRepositoriesOrPasteARemote")}
+      hideSubmitErrorWhenUnavailable
     />
   );
 }

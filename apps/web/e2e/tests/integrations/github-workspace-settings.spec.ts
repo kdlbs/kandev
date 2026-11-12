@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { seedAccessibleRepositories } from "../../helpers/github-repository-picker";
 import type { Page } from "@playwright/test";
 import { stubGitHubRateLimits } from "./github-rate-limit-fixture";
 import { dwell } from "../../helpers/causal-waits";
@@ -39,6 +40,46 @@ test.describe("GitHub workspace settings", () => {
     fixture.recoverPRDiscovery();
     await automation.getByRole("button", { name: "Refresh GitHub connection" }).click();
     await expect(automation.getByTestId("github-pr-discovery-health")).toHaveCount(0);
+  });
+
+  // @covers AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.2 .4
+  test("keeps Enter inside the repository picker of a watch dialog", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedAccessibleRepositories(apiClient, seedData.workspaceId);
+    const watch = await apiClient.createReviewWatch(
+      seedData.workspaceId,
+      seedData.workflowId,
+      seedData.startStepId,
+      seedData.agentProfileId,
+      // A prompt keeps Update enabled, so a leaked Enter would save and close the dialog.
+      { repos: [{ owner: "mock-user", name: "alpha" }], prompt: "Review this pull request." },
+    );
+    try {
+      await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations/github`);
+      await testPage.getByRole("row").filter({ hasText: "mock-user/alpha" }).click();
+      const dialog = testPage.getByRole("dialog", { name: "Edit Review Watch" });
+      await expect(dialog.getByRole("button", { name: "Update" })).toBeEnabled();
+      await dialog.getByTestId("github-repository-add").click();
+      const input = dialog.getByTestId("remote-repo-input");
+      await input.fill("beta");
+      await input.press("Enter");
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId("github-repository-picker")).toBeVisible();
+
+      await input.press("ArrowDown");
+      await expect(dialog.getByTestId("remote-repo-option").first()).toBeFocused();
+      await testPage.keyboard.press("Enter");
+      await expect(dialog.getByTestId("github-repository-chip")).toHaveText([
+        "mock-user/alpha",
+        "mock-user/beta",
+      ]);
+      await expect(dialog).toBeVisible();
+    } finally {
+      await apiClient.deleteReviewWatch(watch.id, seedData.workspaceId);
+    }
   });
 
   test("keeps review watch pause and resume visible after save", async ({

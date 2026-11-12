@@ -43,6 +43,8 @@ export type UseRemoteRepositoriesResult = {
   search: (query: string) => void;
   refresh?: () => void;
   matchesURL?: (url: string) => boolean;
+  /** The workspace's GitHub host, for parsing typed repository URLs. */
+  githubHost?: string;
 };
 
 async function loadAzureRepositories(workspaceId: string): Promise<RemoteRepository[]> {
@@ -495,6 +497,7 @@ export function useRemoteRepositories(
     search,
     refresh,
     matchesURL,
+    githubHost,
   };
 }
 

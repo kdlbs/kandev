@@ -10,6 +10,10 @@ import {
   type GitHubOrganizationMultiSelectProps,
 } from "./github-organization-multi-select";
 
+const ORG_OPTION = "github-organization-option";
+
+const ORG_INPUT = "github-organization-input";
+
 function orgsResult(overrides: Partial<UseGitHubOrgsResult> = {}): UseGitHubOrgsResult {
   return {
     orgs: ["octocat", "kdlbs", "acme"].map((login) => ({ login, avatar_url: "" })),
@@ -45,11 +49,11 @@ function openPicker() {
 }
 
 function optionTexts() {
-  return screen.queryAllByTestId("github-organization-option").map((o) => o.textContent ?? "");
+  return screen.queryAllByTestId(ORG_OPTION).map((o) => o.textContent ?? "");
 }
 
 function typeAndEnter(value: string) {
-  const input = screen.getByTestId("github-organization-input");
+  const input = screen.getByTestId(ORG_INPUT);
   fireEvent.change(input, { target: { value } });
   fireEvent.keyDown(input, { key: "Enter" });
 }
@@ -60,7 +64,7 @@ describe("GitHubOrganizationMultiSelect", () => {
     openPicker();
     expect(mocks.useGitHubOrgs).toHaveBeenCalledWith("ws-1");
     expect(optionTexts()).toEqual(["octocat", "kdlbs", "acme"]);
-    fireEvent.change(screen.getByTestId("github-organization-input"), {
+    fireEvent.change(screen.getByTestId(ORG_INPUT), {
       target: { value: "DL" },
     });
     expect(optionTexts()).toEqual(["kdlbs"]);
@@ -69,7 +73,7 @@ describe("GitHubOrganizationMultiSelect", () => {
   it("adds a picked organization", () => {
     const onChange = renderSelect({ selected: ["acme"] });
     openPicker();
-    fireEvent.click(screen.getAllByTestId("github-organization-option")[1]!);
+    fireEvent.click(screen.getAllByTestId(ORG_OPTION)[1]!);
     expect(onChange).toHaveBeenCalledWith(["acme", "kdlbs"]);
   });
 
@@ -77,7 +81,7 @@ describe("GitHubOrganizationMultiSelect", () => {
     const onChange = renderSelect({ selected: ["KDLBS"] });
     openPicker();
     expect(screen.getAllByTestId("already-added-repository-marker")).toHaveLength(1);
-    fireEvent.click(screen.getAllByTestId("github-organization-option")[1]!);
+    fireEvent.click(screen.getAllByTestId(ORG_OPTION)[1]!);
     expect(onChange).not.toHaveBeenCalled();
   });
 
@@ -141,5 +145,25 @@ describe("GitHubOrganizationMultiSelect", () => {
   it("cannot be opened while disabled", () => {
     renderSelect({ disabled: true });
     expect(screen.getByTestId<HTMLButtonElement>("github-organization-add").disabled).toBe(true);
+  });
+
+  it("keeps plain Enter inside the picker and supports arrow-key focus", () => {
+    renderSelect();
+    openPicker();
+    const input = screen.getByTestId(ORG_INPUT);
+    fireEvent.change(input, { target: { value: "kd lbs" } });
+    expect(fireEvent.keyDown(input, { key: "Enter" })).toBe(false);
+    fireEvent.change(input, { target: { value: "" } });
+    input.focus();
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(screen.getAllByTestId(ORG_OPTION)[0]);
+  });
+
+  it("announces loading through a translated status region", () => {
+    mocks.useGitHubOrgs.mockReturnValue(orgsResult({ orgs: [], loading: true }));
+    renderSelect();
+    openPicker();
+    expect(screen.getByRole("status").textContent).toMatch(/loading organizations/i);
+    expect(screen.queryByLabelText("Loading")).toBeNull();
   });
 });
