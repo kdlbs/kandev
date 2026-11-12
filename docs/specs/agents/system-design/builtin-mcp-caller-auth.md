@@ -62,9 +62,12 @@ read, `GET /api/v1/mcp/builtin-credential`
 (`types.BuiltinMCPCredentialResponse{credential, enforced}`, `Cache-Control:
 no-store`). The route is under `/api/v1`, so `instanceAuth` requires the
 control credential, and the MCP credential never satisfies it. The backend
-reads it on demand through the execution's own agentctl client
-(`agentctl.Client.BuiltinMCPCredential`) each time it builds a delivery
-artifact. It does not cache the value, so a replaced or adopted instance
+reads it on demand (`agentctl.Client.BuiltinMCPCredential`) each time it
+builds a delivery artifact, through the client of the instance that artifact
+targets. Project-file delivery reads through its placement client, so a
+restart that stages a replacement helper reads the replacement's credential
+before the replacement is published on the execution. Other paths read
+through the execution's own client. It does not cache the value, so a replaced or adopted instance
 always yields its own credential, for every executor, without threading the
 value through create responses or recovery inventories.
 

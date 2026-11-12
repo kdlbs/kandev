@@ -37,8 +37,17 @@ tests do not prove that a provider sends the header.
 
 ## Consequence for promotion
 
-Claude ACP, OpenCode ACP, and `atomica-code` send the configured header on
-streamable HTTP. Every other row stays "not verified". Promotion of
-`features.builtinMcpCallerAuth` to `prod: "true"` needs evidence for the
-providers in use on the target installation. Enabling the toggle on one
-installation is safe when that installation only uses verified providers.
+The probes show that Claude ACP, OpenCode ACP, and `atomica-code` send the
+configured header during MCP initialization and tool discovery on streamable
+HTTP, at the versions listed. The manual Claude ACP 0.100.0 session also showed
+a successful tool call before a restart, but no tool call ran after the resume.
+Tool calls across other delivery paths (passthrough, project files, remote
+executors) and recovery paths remain unverified, and so do other versions of
+these providers. Every other row stays "not verified".
+
+Promotion of `features.builtinMcpCallerAuth` to `prod: "true"` needs evidence
+for the providers, versions, and delivery paths in use on the target
+installation. Enabling the toggle on one installation remains an operator
+decision: an unverified provider, version, or path can lose Kandev tools while
+enforcement is on, and disabling the toggle and restarting recovers new
+sessions.

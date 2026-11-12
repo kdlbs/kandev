@@ -62,6 +62,7 @@ func NewMCPSentinel(recorder *Recorder) *MCPSentinel {
 	raw := make([]byte, 16)
 	_, _ = rand.Read(raw)
 	s := &MCPSentinel{recorder: recorder, connections: make(map[string]*sentinelConnection), credential: hex.EncodeToString(raw)}
+	recorder.Redact(s.credential)
 	s.server = httptest.NewServer(http.HandlerFunc(s.serveHTTP))
 	_ = recorder.Meta("mcp_sentinel_started", map[string]any{"target": s.server.URL + "/mcp"})
 	return s

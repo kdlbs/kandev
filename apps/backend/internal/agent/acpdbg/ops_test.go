@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -247,6 +248,11 @@ case "$session" in
   *'"name":"acpdbg-sentinel"'*'"type":"http"'*) ;;
   *) printf '%s\n' '{"jsonrpc":"2.0","id":2,"error":{"code":-32602,"message":"missing sentinel"}}'; exit 0 ;;
 esac
+case "$session" in
+  *'"value":"Bearer [redacted]"'*|*'"headers":null'*) printf '%s\n' '{"jsonrpc":"2.0","id":2,"error":{"code":-32602,"message":"sentinel header not sent"}}'; exit 0 ;;
+  *'"name":"Authorization","value":"Bearer '*) ;;
+  *) printf '%s\n' '{"jsonrpc":"2.0","id":2,"error":{"code":-32602,"message":"sentinel header not sent"}}'; exit 0 ;;
+esac
 printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}'
 `
 	runner, err := NewRunner(context.Background(), t.TempDir()+"/probe.jsonl", RunConfig{
@@ -274,6 +280,9 @@ printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}'
 	}
 	if !strings.Contains(string(content), "acpdbg-sentinel") {
 		t.Fatalf("session/new did not record injected sentinel: %s", content)
+	}
+	if regexp.MustCompile(`Bearer [0-9a-f]{32}`).Match(content) || !strings.Contains(string(content), "Bearer [redacted]") {
+		t.Fatalf("probe JSONL must record the sentinel header redacted: %s", content)
 	}
 }
 

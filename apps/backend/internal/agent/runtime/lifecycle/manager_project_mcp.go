@@ -98,7 +98,7 @@ func (m *Manager) materializeProjectMCPPlacement(
 		execution.clearProjectMCPDelivery()
 		return err
 	}
-	credential, err := executionBuiltinMCPCredential(ctx, execution)
+	credential, err := clientBuiltinMCPCredential(ctx, placement.client)
 	if err != nil {
 		execution.clearProjectMCPDelivery()
 		return err

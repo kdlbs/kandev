@@ -1,6 +1,7 @@
 package acpdbg
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -42,7 +43,22 @@ type Recorder struct {
 	path string
 	f    *os.File
 
-	mu sync.Mutex
+	mu      sync.Mutex
+	secrets [][]byte
+}
+
+// redactedValue replaces every registered secret in recorded entries.
+const redactedValue = "[redacted]"
+
+// Redact registers a value that must never appear in the JSONL output. Frames
+// sent to the child are unchanged; only their recorded copy is redacted.
+func (r *Recorder) Redact(secret string) {
+	if secret == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.secrets = append(r.secrets, []byte(secret))
 }
 
 // NewRecorder creates a JSONL file at the given path, creating parent
@@ -118,6 +134,9 @@ func (r *Recorder) write(e Entry) error {
 	data = append(data, '\n')
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	for _, secret := range r.secrets {
+		data = bytes.ReplaceAll(data, secret, []byte(redactedValue))
+	}
 	if r.f == nil {
 		return fmt.Errorf("recorder closed")
 	}

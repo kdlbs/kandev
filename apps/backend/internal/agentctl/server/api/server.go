@@ -101,7 +101,7 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	// - /sse, /message, /mcp and their package routes: MCP endpoints used by
 	//   the agent subprocess, which never holds the control credential. They
 	//   are gated by the instance's own MCP caller credential instead.
-	s.router.Use(s.instanceAuth(cfg.AuthToken, builtinMCPExemptPaths(cfg)...))
+	s.router.Use(s.instanceAuth(cfg.AuthToken, builtinMCPExemptPaths()...))
 	s.router.Use(s.builtinMCPCallerAuth())
 	// Validate X-Instance-ID so a client that holds a stale port (because
 	// the previous instance was deleted and the port recycled to a new

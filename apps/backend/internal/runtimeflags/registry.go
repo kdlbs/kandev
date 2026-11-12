@@ -287,7 +287,7 @@ var registrations = []runtimeFlagRegistration{
 			EnvVar:      "KANDEV_FEATURES_BUILTIN_MCP_CALLER_AUTH",
 			Kind:        KindFeature,
 			Label:       "Built-in MCP caller authentication",
-			Description: "New agent sessions accept Kandev MCP tool calls only from the agent that Kandev launched for that session, using a per-session credential.",
+			Description: "New agent sessions accept Kandev MCP tool calls only when they carry that session's credential, which Kandev gives to the agent it launches.",
 			Stability:   StabilityExperimental,
 			RiskLevel:   RiskMedium,
 			RiskDescription: "An agent that does not send the MCP headers Kandev configures loses access to Kandev tools in new sessions. " +

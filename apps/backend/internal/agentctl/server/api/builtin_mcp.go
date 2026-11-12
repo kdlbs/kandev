@@ -38,7 +38,7 @@ func (s *Server) builtinSessionMCPServers(requested []types.McpServer) ([]types.
 // builtinMCPExemptPaths lists the routes instanceAuth does not gate: the
 // liveness probe and the built-in MCP routes, which builtinMCPCallerAuth
 // gates with the instance caller credential instead.
-func builtinMCPExemptPaths(cfg *config.InstanceConfig) []string {
+func builtinMCPExemptPaths() []string {
 	return append([]string{"/health"}, builtinMCPRoutePaths()...)
 }
 

@@ -152,3 +152,20 @@ func TestCursorBuiltinFingerprintChangesWithCredential(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, first, second)
 }
+
+func TestProjectMCPFileUsesReplacementInstanceCredential(t *testing.T) {
+	mgr := newTestManager(t)
+	agentConfig, ok := mgr.registry.Get("pi-acp")
+	require.True(t, ok)
+	execution := newProjectMCPDeliveryTestExecution(t)
+	execution.agentctl = newBuiltinMCPCredentialTestClient(t, "retiring-credential")
+	replacement := newBuiltinMCPCredentialTestClient(t, "replacement-credential")
+
+	err := mgr.materializeRuntimeProjectMCPWithClient(context.Background(), execution, agentConfig, nil, "", replacement, nil)
+	require.NoError(t, err)
+
+	written, err := os.ReadFile(filepath.Join(execution.WorkspacePath, ".pi", "mcp.json"))
+	require.NoError(t, err)
+	require.Contains(t, string(written), "Bearer replacement-credential")
+	require.NotContains(t, string(written), "retiring-credential")
+}

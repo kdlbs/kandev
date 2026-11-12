@@ -2,6 +2,8 @@ package lifecycle
 
 import (
 	"context"
+
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 )
 
 // executionBuiltinMCPCredential reads the built-in MCP caller credential from
@@ -18,6 +20,13 @@ func executionBuiltinMCPCredential(ctx context.Context, execution *AgentExecutio
 	}
 	client, release := execution.AcquireAgentCtlClient()
 	defer release()
+	return clientBuiltinMCPCredential(ctx, client)
+}
+
+// clientBuiltinMCPCredential reads the credential from one specific agentctl
+// instance. Restart paths pass the staged replacement client, whose credential
+// differs from the instance still published on the execution.
+func clientBuiltinMCPCredential(ctx context.Context, client *agentctl.Client) (string, error) {
 	if client == nil {
 		return "", nil
 	}
