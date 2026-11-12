@@ -86,6 +86,10 @@ This document adds delivery requirements without changing that contract.
 - **AC-RELEASE-NPM-PUBLICATION-003.6:** The authentication result shall identify each checked or deferred package.
   Authentication errors shall provide publisher-configuration recovery guidance without exposing response credentials.
   A successful exchange shall not claim to prove direct-publish or dist-tag permissions.
+- **AC-RELEASE-NPM-PUBLICATION-003.7:** A successful package-scoped exchange with a nonempty token string shall pass without response metadata.
+  Missing or unexpected `token_type`, `created`, and `expires` metadata shall not block authentication.
+  The result shall not claim to verify the issued token's lifetime.
+  GitHub identity-token expiry validation and registry authentication rejection shall remain effective.
 
 ## Out of scope
 
@@ -100,3 +104,5 @@ This document adds delivery requirements without changing that contract.
 
 - [npm publication reliability](../../../plans/npm-publication-reliability/plan.md).
 - [Preflight response diagnostics repair](../../../plans/npm-preflight-response-diagnostics/plan.md).
+- [Creation metadata compatibility repair](../../../plans/npm-preflight-created-metadata/plan.md).
+- [Exchange response contract repair](../../../plans/npm-preflight-exchange-contract/plan.md).

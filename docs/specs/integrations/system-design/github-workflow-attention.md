@@ -14,6 +14,9 @@ requirements:
 Workflow attention supplements check results. It does not rewrite GitHub mergeability or manufacture check runs.
 The integration owns collection, storage, and interpretation. Existing shared components own presentation geometry.
 
+The November 11 amendment changes only badge priority through the implemented [corner-badge fix](../../../plans/pr-conflict-corner-badge/plan.md).
+All provider collection, caching, freshness, and projection contracts retain their existing behavior.
+
 ## Requirement mapping
 
 | Acceptance criteria | Design sections |
@@ -321,7 +324,8 @@ Keep the glyph at 8px.
 Use `text-[#D97706] dark:text-[#FBBF24]` and the existing `bg-background` halo.
 Explicit colors preserve the accepted palette independently of Tailwind's amber token version.
 Keep the PR color and automation dot positions intact. Do not add animation or a separate badge interaction target.
-Render the red conflict triangle in its separate inline slot when both flags are true; retain both facts in text and accessible names.
+When conflicts coexist with approval, the conflict triangle owns the shared upper-right slot and hides the lock.
+Retain both facts in text and accessible names. After conflict resolution, show the lock if approval remains the selected CI state.
 Conflict placement, CI priority, and skipped-check neutrality belong to the [CI bubble design](github-pr-ci-bubble.md).
 
 ### Bounded projection

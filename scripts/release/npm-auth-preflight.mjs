@@ -143,7 +143,7 @@ export async function requestGitHubOidcToken({
 export async function exchangePackageToken(
   packageName,
   idToken,
-  { fetchImpl = fetch, now = Date.now } = {},
+  { fetchImpl = fetch } = {},
 ) {
   const url = `${registryURL}${OIDC_EXCHANGE_PATH}${encodeURIComponent(packageName)}`;
   let response;
@@ -203,30 +203,11 @@ export async function exchangePackageToken(
     );
   if (!state || typeof state !== "object" || Array.isArray(state))
     throw invalidResponse("invalid_body_shape");
-  if (state.token_type !== "oidc") throw invalidResponse("invalid_token_type");
   if (typeof state.token !== "string" || state.token.length === 0)
     throw invalidResponse("missing_token");
-  const parseDate = (value) => {
-    try {
-      return Date.parse(value);
-    } catch {
-      return Number.NaN;
-    }
-  };
-  const created = parseDate(state?.created);
-  if (!Number.isFinite(created)) throw invalidResponse("invalid_created");
-  const expires = parseDate(state?.expires);
-  if (!Number.isFinite(expires)) throw invalidResponse("invalid_expires");
-  if (expires <= now())
-    throw new NpmAuthPreflightError(
-      packageName,
-      `npm returned an expired exchange token for ${packageName}. Configure this package's trusted publisher and retry the release.`,
-      { status: response.status, reason: "expired_token" },
-    );
   return {
     package: packageName,
     status: "authenticated",
-    expires_at: new Date(expires).toISOString(),
   };
 }
 
@@ -254,7 +235,7 @@ async function checkSdkPublisher({
       reason: "package_absent",
     };
   const token = await requestGitHubOidcToken({ env, fetchImpl, now });
-  return exchangePackageToken(sdkPackage, token, { fetchImpl, now });
+  return exchangePackageToken(sdkPackage, token, { fetchImpl });
 }
 
 export async function runPreflight({
@@ -322,9 +303,7 @@ export async function runPreflight({
   const results = [];
   for (const packageName of [...new Set(packages)]) {
     const token = await requestGitHubOidcToken({ env, fetchImpl, now });
-    results.push(
-      await exchangePackageToken(packageName, token, { fetchImpl, now }),
-    );
+    results.push(await exchangePackageToken(packageName, token, { fetchImpl }));
   }
   results.push(
     await checkSdkPublisher({

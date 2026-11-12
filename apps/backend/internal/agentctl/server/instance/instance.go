@@ -249,6 +249,8 @@ type CreateRequest struct {
 	RemoteContributions       map[string]models.RemoteContribution      `json:"remote_contributions,omitempty"`
 	ContributionDestinations  map[string]models.ContributionDestination `json:"contribution_destinations,omitempty"`
 	WorkspaceSourceRoots      []string                                  `json:"workspace_source_roots,omitempty"`
+	WorkspaceExcludedRoots    []string                                  `json:"workspace_excluded_roots,omitempty"`
+	TaskWorkspaceRoot         string                                    `json:"task_workspace_root,omitempty"`
 	DurableJournalPath        string                                    `json:"durable_journal_path,omitempty"`
 	DeliveryStreamID          string                                    `json:"delivery_stream_id,omitempty"`
 	DeliveryIncarnationID     string                                    `json:"delivery_incarnation_id,omitempty"`
@@ -307,6 +309,8 @@ type InstanceInfo struct {
 
 	// TaskID is the task ID this instance was created for, if any.
 	TaskID string `json:"task_id,omitempty"`
+
+	WorkspaceExcludedRoots []string `json:"workspace_excluded_roots,omitempty"`
 
 	// WorkspaceSourceRoots is the live, current source-root allowlist this
 	// instance is enforcing right now -- a rescan or rebind can change it

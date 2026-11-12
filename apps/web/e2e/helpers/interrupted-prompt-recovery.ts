@@ -29,7 +29,7 @@ export function withDatabase<T>(tmpDir: string, read: (db: TestDatabase) => T): 
   }
 }
 
-type JournalRecord = {
+export type JournalRecord = {
   id: string;
   session_id: string;
   incarnation_id: string;
@@ -41,7 +41,7 @@ type JournalRecord = {
   retired?: boolean;
 };
 
-function journalFixture(
+export function journalFixture(
   mode: "seed" | "read",
   journalPath: string,
   submission: Partial<JournalRecord>,
@@ -56,7 +56,7 @@ function journalFixture(
   );
 }
 
-function findSessionJournal(tmpDir: string, sessionId: string) {
+export function findSessionJournal(tmpDir: string, sessionId: string) {
   const root = path.join(tmpDir, ".kandev", "agentctl-journals");
   for (const owner of readdirSync(root)) {
     const journalPath = path.join(root, owner, "delivery.bbolt");

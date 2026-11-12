@@ -10,15 +10,15 @@ import (
 	"github.com/kandev/kandev/internal/office/waveidentity"
 )
 
-// resolveWaveIdentity performs the terminality-confirming last read
+// resolveWaveIdentity performs the successful-completion-confirming last read
 // shared by the two engine-routed task_children_completed producers:
 // the edge-triggered path (event_subscribers.go, queueChildrenCompletedRun)
 // and the backstop reconciler (scheduler_wake_reconciler.go,
 // ParentWakeReconciler.reconcileOne). A wave identity is derived from, and
 // only from, a wave-member read that itself observed every member
-// terminal — not from an earlier AreAllChildrenTerminal / GetChildSetKey
+// COMPLETED — not from an earlier AreAllChildrenTerminal / GetChildSetKey
 // read, which counts every child rather than just wave members. A read
-// error, any non-terminal wave member, or an empty wave-member set (a
+// error, any non-completed wave member, or an empty wave-member set (a
 // parent with no wave members has no wave) all report ok=false: the
 // caller must queue no run, and the log param (nilable) records why at
 // debug.
@@ -38,7 +38,7 @@ func resolveWaveIdentity(
 	}
 	ids := make([]string, 0, len(members))
 	for _, m := range members {
-		if m.State != "COMPLETED" && m.State != "CANCELLED" {
+		if m.State != "COMPLETED" {
 			return "", "", false
 		}
 		ids = append(ids, m.TaskID)

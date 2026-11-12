@@ -113,6 +113,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 			return fmt.Errorf("apply migration %q: %w", migration.name, err)
 		}
 	}
+	if err := r.migrateSessionRecoveryBlockIncidentUniqueness(ctx); err != nil {
+		return fmt.Errorf("migrate session recovery block incident uniqueness: %w", err)
+	}
 	if err := r.migrateWorkspaceProtection(ctx); err != nil {
 		return err
 	}
@@ -254,6 +257,18 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	// Must run after the task_environment_repos rebuild above, which copies an
 	// explicit column list and supplies the legacy empty default for this field.
 	_ = r.migrate.Apply("task_environment_repos.workspace_relative_path", `ALTER TABLE task_environment_repos ADD COLUMN workspace_relative_path TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("task_environment_repos.worktree_origin", `ALTER TABLE task_environment_repos ADD COLUMN worktree_origin TEXT NOT NULL DEFAULT 'kandev'`)
+	if err := r.migrate.Apply("task_detached_worktrees.table", `
+		CREATE TABLE IF NOT EXISTS task_detached_worktrees (
+			task_id TEXT NOT NULL,
+			worktree_path TEXT NOT NULL,
+			detached_at TIMESTAMP NOT NULL,
+			PRIMARY KEY (task_id, worktree_path),
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)
+	`); err != nil {
+		return err
+	}
 	r.migrate.Apply("workflows.sort_order", `ALTER TABLE workflows ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("workflows.agent_profile_id", `ALTER TABLE workflows ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
 	r.migrate.Apply("workflows.hidden", `ALTER TABLE workflows ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`)

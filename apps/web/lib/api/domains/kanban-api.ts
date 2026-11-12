@@ -230,6 +230,20 @@ export async function previewTaskWorkspaceSources(
   );
 }
 
+export async function detachTaskRepository(
+  taskId: string,
+  taskRepositoryId: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ detached: boolean }>(
+    `/api/v1/tasks/${encodeURIComponent(taskId)}/repositories/${encodeURIComponent(taskRepositoryId)}`,
+    {
+      ...options,
+      init: { method: "DELETE", ...(options?.init ?? {}) },
+    },
+  );
+}
+
 export async function updateTaskRepositoryBaseBranch(
   taskId: string,
   taskRepositoryId: string,

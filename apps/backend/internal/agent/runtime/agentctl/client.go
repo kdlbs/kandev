@@ -1280,6 +1280,8 @@ type (
 	GitCommitNotification       = types.GitCommitNotification
 	GitResetNotification        = types.GitResetNotification
 	GitBranchSwitchNotification = types.GitBranchSwitchNotification
+	WorktreeInventory           = types.WorktreeInventory
+	WorktreeInventoryEntry      = types.WorktreeInventoryEntry
 	FileInfo                    = types.FileInfo
 	FileEntry                   = types.FileEntry
 	FileTreeNode                = types.FileTreeNode

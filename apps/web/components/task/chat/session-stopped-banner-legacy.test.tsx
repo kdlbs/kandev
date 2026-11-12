@@ -20,6 +20,7 @@ vi.mock("@/components/state-provider", () => ({
         },
       },
     }),
+  useOptionalAppStoreApi: () => null,
 }));
 vi.mock("@/lib/ws/connection", () => ({ getWebSocketClient: () => ({ request: mocks.request }) }));
 vi.mock("@/hooks/domains/session/use-session-actions", () => ({

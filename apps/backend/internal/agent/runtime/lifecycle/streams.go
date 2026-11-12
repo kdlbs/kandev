@@ -30,6 +30,7 @@ type StreamCallbacks struct {
 	OnGitReset                       func(execution *AgentExecution, reset *agentctl.GitResetNotification)
 	OnBranchSwitch                   func(execution *AgentExecution, branchSwitch *agentctl.GitBranchSwitchNotification)
 	OnFileChange                     func(execution *AgentExecution, notification *agentctl.FileChangeNotification)
+	OnWorktreeInventory              func(execution *AgentExecution, inventory *agentctl.WorktreeInventory)
 	OnShellOutput                    func(execution *AgentExecution, data string)
 	OnShellExit                      func(execution *AgentExecution, code int)
 	OnProcessOutput                  func(execution *AgentExecution, output *agentctl.ProcessOutput)

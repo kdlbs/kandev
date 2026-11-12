@@ -741,6 +741,12 @@ type SessionRecoveryBlockListRepository interface {
 	ListOpenSessionRecoveryBlocks(ctx context.Context, sessionID, incarnationID string, expectedGeneration int64) ([]*models.SessionRecoveryBlock, error)
 }
 
+// RestartRecoveryBlockRepository ensures presentation repair preserves the
+// complete current-generation recovery fence inventory.
+type RestartRecoveryBlockRepository interface {
+	EnsureRestartRecoveryBlock(ctx context.Context, block *models.SessionRecoveryBlock) (*models.SessionRecoveryBlock, bool, error)
+}
+
 // AgentDeliveryRecoveryRepository persists the revisioned session notice for
 // an uncertain durable prompt outcome.
 type AgentDeliveryRecoveryRepository interface {
@@ -1103,6 +1109,17 @@ type TaskEnvironmentRepository interface {
 	UpdateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
 	DeleteTaskEnvironmentRepo(ctx context.Context, id string) error
 	DeleteTaskEnvironmentReposByEnv(ctx context.Context, envID string) error
+}
+
+// TaskDetachedWorktreeRepository stores task-scoped suppression records for
+// worktrees the user removed. Detection never re-adopts a suppressed path;
+// an explicit agent report clears the record.
+type TaskDetachedWorktreeRepository interface {
+	MarkTaskWorktreeDetached(ctx context.Context, taskID, worktreePath string, detachedAt time.Time) error
+	ClearTaskWorktreeDetached(ctx context.Context, taskID, worktreePath string) error
+	IsTaskWorktreeDetached(ctx context.Context, taskID, worktreePath string) (bool, error)
+	DeleteTaskDetachedWorktreesByTask(ctx context.Context, taskID string) error
+	DetachTaskRepositoryAttachment(ctx context.Context, taskID, taskRepositoryID, environmentRepoID, worktreePath string, markDetached bool) error
 }
 
 // TaskEnvironmentRecoveryRepository is the optional durable authority

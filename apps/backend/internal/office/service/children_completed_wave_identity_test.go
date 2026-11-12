@@ -28,7 +28,7 @@ func childMoveEvent(childID, parentID string) *bus.Event {
 // TestQueueChildrenCompletedRun_DispatchesWaveIdentity is
 // AC-OFFICE-WAKE-WAVE-IDENTITY-002.16's engine-seam half for P2: the edge-
 // triggered path must attach the wave identity derived from its own
-// terminality-confirming ListWaveMembers read.
+// successful-completion-confirming ListWaveMembers read.
 func TestQueueChildrenCompletedRun_DispatchesWaveIdentity(t *testing.T) {
 	svc, eb := newTestServiceWithBus(t)
 	ctx := context.Background()
@@ -154,5 +154,49 @@ func TestChildrenCompletedWaveIdentity_IdenticalAcrossEdgeAndReconcilerPaths(t *
 	if edge.WaveKey != reconciler.WaveKey {
 		t.Fatalf("edge and reconciler derived different wave keys: edge=%q reconciler=%q",
 			edge.WaveKey, reconciler.WaveKey)
+	}
+}
+
+func TestQueueChildrenCompletedRun_DoesNotDispatchWithCancelledWaveMember(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+	dispatcher := &fakeDispatcher{}
+	svc.SetWorkflowEngineDispatcher(dispatcher)
+
+	adoptOffice(t, svc, "ws-1")
+	seedStuckParent(t, svc, "ws-1", "parent-1", "worker-1")
+	svc.ExecSQL(t, `UPDATE tasks SET state = 'CANCELLED' WHERE id = ?`, "parent-1-child-2")
+
+	if err := eb.Publish(ctx, "task.moved", childMoveEvent("parent-1-child-0", "parent-1")); err != nil {
+		t.Fatalf("publish task.moved: %v", err)
+	}
+	if calls := dispatcher.Calls(); len(calls) != 0 {
+		t.Fatalf("dispatched %d workflow calls with a cancelled wave member, want 0", len(calls))
+	}
+}
+
+func TestParentWakeReconciler_DoesNotDispatchOrRecordReceiptWithCancelledWaveMember(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	dispatcher := &fakeDispatcher{}
+	svc.SetWorkflowEngineDispatcher(dispatcher)
+
+	adoptOffice(t, svc, "ws-1")
+	seedStuckParent(t, svc, "ws-1", "parent-1", "worker-1")
+	svc.ExecSQL(t, `UPDATE tasks SET state = 'CANCELLED' WHERE id = ?`, "parent-1-child-2")
+
+	handler := service.NewParentWakeReconciler(service.NewSchedulerIntegration(svc, 0))
+	if err := handler.Tick(ctx); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if calls := dispatcher.Calls(); len(calls) != 0 {
+		t.Fatalf("dispatched %d workflow calls with a cancelled wave member, want 0", len(calls))
+	}
+	receipt, err := svc.GetWakeReceiptForTest(ctx, "parent-1")
+	if err != nil {
+		t.Fatalf("get wake receipt: %v", err)
+	}
+	if receipt != nil {
+		t.Fatalf("cancelled wave member left a recovery receipt: %#v", receipt)
 	}
 }
