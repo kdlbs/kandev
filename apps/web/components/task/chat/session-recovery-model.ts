@@ -296,8 +296,22 @@ function authenticationResumeEligibility(
 ) {
   const tokenEvidence = model.metadata?.has_resume_token;
   if (nativeIdentity === true || tokenEvidence === true) return true;
-  if (nativeIdentity === false || tokenEvidence === false) return false;
+  if (
+    tokenEvidence === false ||
+    (nativeIdentity === false && isInitialAuthenticationStart(model))
+  ) {
+    return false;
+  }
   return undefined;
+}
+
+function isInitialAuthenticationStart(model: ActiveSessionRecovery) {
+  return (
+    model.error?.phase === "bootstrap" &&
+    model.error.causes?.some(
+      (cause) => cause.code === "authentication_required" && cause.operation === "start",
+    ) === true
+  );
 }
 
 function useCurrentNativeIdentity(sessionId: string) {

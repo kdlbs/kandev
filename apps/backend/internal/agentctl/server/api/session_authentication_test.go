@@ -13,7 +13,11 @@ import (
 	acptransport "github.com/kandev/kandev/internal/agentctl/server/adapter/transport/acp"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type sessionAuthenticationAdapter struct {
@@ -166,6 +170,60 @@ func TestSessionAuthenticationFailureProjection(t *testing.T) {
 			}
 			if strings.Contains(string(encoded), "never-project-this-secret") {
 				t.Errorf("session failure projection leaked raw method metadata: %s", encoded)
+			}
+		})
+	}
+}
+
+func TestSessionAuthenticationFailureDoesNotExposeACPErrorData(t *testing.T) {
+	const secret = "credential-bearing-acp-data"
+	operations := []struct {
+		name   string
+		action string
+		call   func(*Server, context.Context, *ws.Message) *ws.Message
+	}{
+		{name: "new", action: "agent.session.new", call: (*Server).handleWSNewSession},
+		{name: "load", action: "agent.session.load", call: (*Server).handleWSLoadSession},
+		{name: "resume", action: "agent.session.resume", call: (*Server).handleWSResumeSession},
+		{name: "reset", action: "agent.session.reset", call: (*Server).handleWSResetSession},
+	}
+	for _, operation := range operations {
+		t.Run(operation.name, func(t *testing.T) {
+			server := newTestServer(t)
+			core, observed := observer.New(zapcore.ErrorLevel)
+			log, err := logger.NewFromZap(zap.New(core))
+			if err != nil {
+				t.Fatalf("create observed logger: %v", err)
+			}
+			server.logger = log
+			server.procMgr.SetAdapterForTest(&sessionAuthenticationAdapter{
+				err: fmt.Errorf("provider rejected request: %w", &acpsdk.RequestError{
+					Code: -32000, Message: "authentication required", Data: secret,
+				}),
+			})
+			var payload any = NewSessionRequest{}
+			switch operation.name {
+			case "load":
+				payload = LoadSessionRequest{SessionID: "native-session"}
+			case "resume":
+				payload = ResumeSessionRequest{SessionID: "native-session"}
+			}
+			request, err := ws.NewRequest("auth-data-request", operation.action, payload)
+			if err != nil {
+				t.Fatalf("NewRequest: %v", err)
+			}
+			response := operation.call(server, context.Background(), request)
+			var responseText strings.Builder
+			if err := json.NewEncoder(&responseText).Encode(response); err != nil {
+				t.Fatalf("encode response: %v", err)
+			}
+			if strings.Contains(responseText.String(), secret) {
+				t.Fatalf("response leaked ACP error data: %s", responseText.String())
+			}
+			for _, entry := range observed.All() {
+				if strings.Contains(entry.Message, secret) || strings.Contains(fmt.Sprint(entry.ContextMap()), secret) {
+					t.Fatalf("log leaked ACP error data: %+v", entry)
+				}
 			}
 		})
 	}

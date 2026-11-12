@@ -165,4 +165,17 @@ Treat real Cursor verification as a separate recorded observation when a disposa
 - Desktop Chromium and mobile Chrome recovery E2E specs each passed against freshly built backend and web artifacts after the review corrections.
 - Public documentation checks passed: 63 validator tests and 55 published pages. Catalog validation covered 450 decisions and 1997 specifications; full specification lint passed.
 - `git diff --check` and trailing-whitespace checks across 60 changed files passed.
-- Native Cursor login and account repair were not attempted. No commit, push, or PR was created.
+- Native Cursor login and account repair were not attempted. The synthetic login verifies recovery flow only and does not demonstrate native Cursor account repair. PR #5298 was created from this implementation.
+
+### PR review follow-up
+
+- Kept authentication recovery inside the shared choice pipeline; mounted-card tests cover branch continuation, history continuation, eligible read-only workspace restore, and inspection prerequisites.
+- Preserved Resume eligibility from canonical current-session ACP identity when transcript metadata is missing. A missing identity or token now remains unknown unless an initial startup cause or explicit no-token evidence confirms Restart eligibility.
+- Confirmed advertised terminal commands remain copy-only during released-execution recovery. The mounted card test verifies a terminal-auth method exposes no Run in terminal control.
+- Added touch recovery focus ownership: tapping an explicit recovery action records the focus handoff, and cleanup finds the composer in the same session panel after the card is removed. Focused mounted-card coverage and the mobile recovery E2E pass.
+- The E2E fixture rejects whitespace-bearing temporary command paths, and the desktop spec polls durable API messages before asserting transcript rendering.
+- Current focused frontend run passed across four test files (26 tests). `pnpm run typecheck`, `pnpm run lint`, `pnpm run i18n:check`, `pnpm run i18n:ratchet`, and `pnpm run build:vite` passed.
+- Mobile MCP catalog E2E passed (4 tests). Desktop authentication recovery and mobile authentication recovery E2Es each passed (1 test).
+- Backend verification passed for the full MCP server, ACP adapter, process manager, and API package suites; the full backend build and changed-file Go lint passed. The focused orchestrator regression also passed.
+- Raw ACP error data remains redacted from authentication WebSocket responses and logs. Out-of-scope locale edits were removed.
+- PR CI and thread-resolution status are recorded at the final fixup checkpoint. Native Cursor login and account repair were not attempted.

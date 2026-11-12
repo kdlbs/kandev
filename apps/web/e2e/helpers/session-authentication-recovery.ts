@@ -38,6 +38,12 @@ export type SessionAuthenticationRecoveryFixture = {
   dispose(): Promise<void>;
 };
 
+export function assertWhitespaceFreeFixtureCommandPath(scriptPath: string) {
+  if (/\s/u.test(scriptPath)) {
+    throw new Error("E2E backend temp paths must not contain whitespace for fixture commands");
+  }
+}
+
 /** Starts a disposable ACP peer whose only login state is a file under the E2E backend temp directory. */
 export async function createSessionAuthenticationRecoveryFixture(
   apiClient: ApiClient,
@@ -52,6 +58,7 @@ export async function createSessionAuthenticationRecoveryFixture(
   const pendingPath = path.join(fixtureDir, "pending-session-start");
   const workspaceLogPath = path.join(fixtureDir, "workspaces.jsonl");
   const promptLogPath = path.join(fixtureDir, "prompts.jsonl");
+  assertWhitespaceFreeFixtureCommandPath(scriptPath);
   prepareACPFixture({
     scriptPath,
     loginPath,

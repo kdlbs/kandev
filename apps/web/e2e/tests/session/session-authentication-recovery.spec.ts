@@ -72,9 +72,20 @@ test("retains ACP authentication evidence and retries after fixture login", asyn
     await retry.getByTestId("recovery-fresh-button").click();
     await expect.poll(() => fixture.loginObservations(), { timeout: 30_000 }).toContain(true);
     await expect.poll(() => fixture.promptRequestCount(), { timeout: 30_000 }).toBeGreaterThan(0);
-    await expect(session.activeChat()).toContainText("Authenticated ACP fixture is ready", {
-      timeout: 60_000,
-    });
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(fixture.sessionId);
+          return messages.some(
+            (message) =>
+              message.author_type === "agent" &&
+              message.content.includes("Authenticated ACP fixture is ready"),
+          );
+        },
+        { timeout: 60_000 },
+      )
+      .toBe(true);
+    await expect(session.activeChat()).toContainText("Authenticated ACP fixture is ready");
     await expect(session.activeChat().getByTestId("session-recovery-card")).toBeHidden();
     const afterLogin = await apiClient.wsRequest<{ acp_session_id?: string }>(
       "task.session.status",

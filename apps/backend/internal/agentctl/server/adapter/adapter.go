@@ -309,6 +309,12 @@ type AgentAdapter interface {
 	RequiresProcessKill() bool
 }
 
+// MCPAttachmentEventPublisher routes best-effort attachment diagnostics through
+// the adapter's ordered event queue when one is available.
+type MCPAttachmentEventPublisher interface {
+	TryPublishMCPAttachmentEvent(AgentEvent, func(AgentEvent) (AgentEvent, error)) (bool, error)
+}
+
 // McpServerConfig holds configuration for an MCP server.
 type McpServerConfig struct {
 	// Name is the human-readable name of the MCP server

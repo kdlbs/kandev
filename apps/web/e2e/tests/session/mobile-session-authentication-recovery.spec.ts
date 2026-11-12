@@ -72,6 +72,7 @@ test("keeps authentication recovery touch-safe and pending on phone", async ({
       timeout: 60_000,
     });
     await expect(session.activeChat().getByTestId("session-recovery-card")).toBeHidden();
+    await expect(session.activeChat()).toHaveAttribute("data-session-id", fixture.sessionId);
     await expect(session.activeChat().locator('[contenteditable="true"]').first()).toBeFocused();
     expect(fixture.startedWorkspaces().length).toBeGreaterThanOrEqual(2);
     expect(new Set(fixture.startedWorkspaces()).size).toBe(1);

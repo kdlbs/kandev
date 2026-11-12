@@ -22,13 +22,18 @@ import { isLocalStorageCause, storageCauseFromError } from "@/lib/session-delive
 import { isProcessExitCause } from "./session-process-exit-recovery";
 import { resolveAuthenticationRecovery } from "@/lib/session-authentication-recovery";
 
-function useFocusComposerAfterRecoveryCard(
+function useRecoveryFocus(
   ref: { current: HTMLDivElement | null },
   recoveryPending: boolean,
+  sessionId: string,
 ) {
   const focusOwnedRef = useRef(false);
+  const recoveryActionActivatedRef = useRef(false);
   const recoveryPendingRef = useRef(recoveryPending);
-  recoveryPendingRef.current = recoveryPending;
+
+  useLayoutEffect(() => {
+    recoveryPendingRef.current = recoveryPending;
+  }, [recoveryPending]);
 
   useEffect(() => {
     const node = ref.current;
@@ -61,13 +66,28 @@ function useFocusComposerAfterRecoveryCard(
   useLayoutEffect(() => {
     const node = ref.current;
     return () => {
-      if (!node || (!focusOwnedRef.current && !node.contains(document.activeElement))) return;
-      const panel = node.closest('[data-testid="session-chat"]');
-      requestAnimationFrame(() =>
-        panel?.querySelector<HTMLElement>('[contenteditable="true"]')?.focus(),
-      );
+      if (
+        !node ||
+        (!focusOwnedRef.current &&
+          !recoveryActionActivatedRef.current &&
+          !node.contains(document.activeElement))
+      ) {
+        return;
+      }
+      requestAnimationFrame(() => {
+        const panel = Array.from(
+          document.querySelectorAll<HTMLElement>('[data-testid="session-chat"]'),
+        ).find((candidate) => candidate.dataset.sessionId === sessionId);
+        panel?.querySelector<HTMLElement>('[contenteditable="true"]')?.focus();
+      });
     };
-  }, []);
+  }, [sessionId]);
+
+  return (target: EventTarget | null) => {
+    if (target instanceof Element && target.closest('[data-testid^="recovery-"]')) {
+      recoveryActionActivatedRef.current = true;
+    }
+  };
 }
 
 function retryAutomaticRecovery(
@@ -128,7 +148,7 @@ export function SessionRecoveryCard({
   const authentication = resolveAuthenticationRecovery(model.error?.causes, model.metadata);
   const { relevant: workspaceRecoveryRelevant, forActions: workspaceRecoveryForActions } =
     recoveryCardWorkspaceState(model, actions, projectionMatchesModel, choices);
-  useFocusComposerAfterRecoveryCard(ref, busyAction !== null);
+  const markRecoveryInteraction = useRecoveryFocus(ref, busyAction !== null, model.sessionId);
   const storageCause = storageCauseFromError(model.error);
   if (projectionMatchesModel && actions.workspaceRecovery?.agent_ready) return null;
 
@@ -139,6 +159,7 @@ export function SessionRecoveryCard({
       tabIndex={-1}
       data-testid="session-recovery-card"
       data-recovering={busyAction !== null}
+      onClickCapture={(event) => markRecoveryInteraction(event.target)}
       className="max-h-[50dvh] min-h-0 min-w-0 overflow-y-auto overscroll-contain rounded-md border border-amber-500/35 bg-card"
     >
       <RecoveryCardHeader
@@ -157,6 +178,7 @@ export function SessionRecoveryCard({
         <RecoveryAuthenticationGuidance
           required={authentication.required}
           methods={authentication.methods}
+          metadata={model.metadata}
         />
         <RecoveryActions
           actions={choices}
@@ -192,14 +214,21 @@ export function SessionRecoveryCard({
 function RecoveryAuthenticationGuidance({
   required,
   methods,
+  metadata,
 }: {
   required: boolean;
   methods: RecoveryAuthMethod[];
+  metadata: ActiveSessionRecovery["metadata"];
 }) {
   if (!required) return null;
   return (
     <ActionMessageDetails
-      metadata={{ is_auth_error: true, auth_methods: methods }}
+      metadata={{
+        is_auth_error: true,
+        auth_methods: methods,
+        remediation_url: metadata?.remediation_url,
+        provider_error: metadata?.provider_error,
+      }}
       allowGenericTerminal={false}
       executionHostGuidance
     />
@@ -306,7 +335,12 @@ function RecoveryCardHeader({
     authenticationProviderName,
     t,
   );
-  const suppressSummary = authenticationSummary ? false : suppressRecoverySummary;
+  const { summary: statusSummary, suppressSummary } = recoveryHeaderStatus(
+    actions,
+    recoverySummary,
+    suppressRecoverySummary,
+    authenticationSummary,
+  );
   return (
     <div className="flex min-w-0 gap-3 border-b border-amber-500/20 bg-amber-500/5 p-3 dark:bg-amber-500/10 md:p-4">
       <IconAlertTriangle
@@ -328,7 +362,7 @@ function RecoveryCardHeader({
             role={actions.recoveryError || actions.recoveryNotice ? "status" : undefined}
             className="mt-1 wrap-anywhere text-sm text-muted-foreground data-[failed=true]:text-destructive"
           >
-            {authenticationSummary ?? recoverySummary}
+            {statusSummary}
           </p>
         )}
         <RecoveryStatusNotices copy={displayedCopy} />
@@ -355,6 +389,27 @@ function recoveryAuthenticationSummary(
   if (!required) return undefined;
   if (!providerName) return t("task:authenticationRequiredOnExecutionHost");
   return t("task:authenticationRequiredForProvider", { provider: providerName });
+}
+
+function recoveryHeaderStatus(
+  actions: SessionRecoveryActions,
+  recoverySummary: string,
+  suppressRecoverySummary: boolean,
+  authenticationSummary: string | undefined,
+) {
+  const recoveryOutcomeAvailable = Boolean(
+    actions.recoveryError ||
+    actions.recoveryNotice ||
+    actions.branchDetails ||
+    actions.guardDetails,
+  );
+  if (recoveryOutcomeAvailable) {
+    return { summary: recoverySummary, suppressSummary: suppressRecoverySummary };
+  }
+  if (authenticationSummary) {
+    return { summary: authenticationSummary, suppressSummary: false };
+  }
+  return { summary: recoverySummary, suppressSummary: suppressRecoverySummary };
 }
 
 function RecoveryStatusNotices({

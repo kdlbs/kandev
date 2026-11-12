@@ -132,7 +132,7 @@ function FocusRecoveryHarness() {
   );
 
   return (
-    <div data-testid="session-chat">
+    <div data-testid="session-chat" data-session-id={session.id}>
       {visible && (
         <SessionRecoveryCard
           model={{
@@ -181,6 +181,15 @@ describe("authentication recovery eligibility", () => {
     await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId(COMPOSER_TEST_ID)));
   });
 
+  it("returns focus after a touch-style retry when the browser does not focus the button", async () => {
+    renderFocusRecoveryHarness();
+
+    fireEvent.click(screen.getByTestId(RESTART_BUTTON_TEST_ID));
+
+    await waitFor(() => expect(screen.queryByTestId(RECOVERY_CARD_TEST_ID)).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId(COMPOSER_TEST_ID)));
+  });
+
   it("uses durable authentication evidence without transcript metadata or a live execution", () => {
     renderCard({
       ...authenticationModel(),
@@ -218,6 +227,23 @@ describe("authentication recovery eligibility", () => {
     renderCardWithOptions(authenticationModel(), { currentSession: null });
 
     expect(screen.queryByTestId(RESTART_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
+  });
+
+  it("does not infer an absent resume token from a loaded session without native identity", () => {
+    renderCardWithOptions(authenticationModel("resume"), { currentSession: session });
+
+    expect(screen.queryByTestId(RESTART_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
+  });
+
+  it("offers Restart when durable metadata confirms that no resume token exists", () => {
+    renderCardWithOptions(
+      { ...authenticationModel("resume"), metadata: { has_resume_token: false } },
+      { currentSession: session },
+    );
+
+    expect(screen.getByTestId(RESTART_BUTTON_TEST_ID)).toBeTruthy();
     expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
   });
 });
@@ -275,6 +301,17 @@ describe("authentication recovery choices", () => {
 
     expect(screen.getByTestId(RESUME_BUTTON_TEST_ID)).toBeTruthy();
     expect(screen.queryByTestId(RESTORE_BUTTON_TEST_ID)).toBeNull();
+  });
+
+  it("shows a retry failure instead of repeating the original authentication summary", () => {
+    renderCardWithOptions(authenticationModel("resume"), {
+      currentSession: { ...session, downstream_acp_session_id: NATIVE_SESSION_ID },
+      actionOverrides: { recoveryError: new Error("Provider login was not accepted.") },
+    });
+
+    const status = screen.getByTestId("session-recovery-error");
+    expect(status.textContent).toContain("Failed to resume session");
+    expect(status.textContent).not.toContain(PROVIDER_AUTH_SUMMARY);
   });
 
   it("does not invent Resume while startup authentication has no native identity and inspection is busy", () => {
@@ -339,6 +376,34 @@ describe("authentication method guidance", () => {
     expect(
       screen.getByText("Sign in to the provider on the execution host, then retry."),
     ).toBeTruthy();
+  });
+
+  it("preserves safe remediation metadata without exposing raw authentication output", () => {
+    const model = authenticationModel();
+    renderCard({
+      ...model,
+      metadata: {
+        is_auth_error: true,
+        auth_methods: [],
+        remediation_url: "https://opencode.ai/workspace/account/go",
+        provider_error: {
+          source: "acp",
+          provider_id: "cursor-provider",
+          error_kind: "authentication_required",
+          rpc_code: -32000,
+        },
+        error_output: "credential-bearing-raw-error-output",
+      },
+    });
+
+    const card = screen.getByTestId(RECOVERY_CARD_TEST_ID);
+    expect((screen.getByTestId("remediation-link") as HTMLAnchorElement).href).toBe(
+      "https://opencode.ai/workspace/account/go",
+    );
+    expect(card.textContent).toContain("cursor-provider");
+    expect(card.textContent).toContain("authentication_required");
+    expect(card.textContent).toContain("-32000");
+    expect(card.textContent).not.toContain("credential-bearing-raw-error-output");
   });
 
   it("updates provider guidance when the selected locale changes", async () => {

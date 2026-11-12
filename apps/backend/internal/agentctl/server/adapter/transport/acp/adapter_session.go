@@ -27,6 +27,24 @@ const configChangePollInterval = 10 * time.Millisecond
 // results for the servers that survive its own capability filtering.
 func (a *Adapter) PublishesMCPAttachmentResults() bool { return true }
 
+func (a *Adapter) TryPublishMCPAttachmentEvent(
+	event AgentEvent,
+	persist func(AgentEvent) (AgentEvent, error),
+) (bool, error) {
+	a.updateEmitMu.Lock()
+	defer a.updateEmitMu.Unlock()
+	if persist != nil {
+		persisted, err := persist(event)
+		if err != nil {
+			return false, err
+		}
+		event = persisted
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.sendUpdateLocked(event), nil
+}
+
 // lockSessionTransition waits for the previous reset's cleanup to finish before
 // allowing another session transition. The reset response remains independent
 // from session/close, while this gate keeps a later load/reset from overtaking
@@ -183,6 +201,7 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	caps := effectiveMcpCapabilities(a.capabilities.McpCapabilities, a.cfg)
 	filteredServers, decisions := filterMcpServersWithDecisions(mcpServers, caps, a.logger)
 	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers, a.projectDeliveryEvidence()); err != nil {
+		a.emitMCPAttachmentPreflightFailure(ctx, mcpServers, filteredServers, decisions, err)
 		return "", err
 	}
 	if err := ctx.Err(); err != nil {
@@ -666,6 +685,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	caps := effectiveMcpCapabilities(a.capabilities.McpCapabilities, a.cfg)
 	filteredServers, decisions := filterMcpServersWithDecisions(mcpServers, caps, a.logger)
 	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers, a.projectDeliveryEvidence()); err != nil {
+		a.emitMCPAttachmentPreflightFailure(ctx, mcpServers, filteredServers, decisions, err)
 		return err
 	}
 	if err := ctx.Err(); err != nil {
@@ -825,6 +845,7 @@ func (a *Adapter) ResumeSession(ctx context.Context, sessionID string, mcpServer
 	caps := effectiveMcpCapabilities(a.capabilities.McpCapabilities, a.cfg)
 	filteredServers, decisions := filterMcpServersWithDecisions(mcpServers, caps, a.logger)
 	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers, a.projectDeliveryEvidence()); err != nil {
+		a.emitMCPAttachmentPreflightFailure(ctx, mcpServers, filteredServers, decisions, err)
 		return err
 	}
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.resume")

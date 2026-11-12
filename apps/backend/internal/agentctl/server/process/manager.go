@@ -193,6 +193,7 @@ type Manager struct {
 	stderrReader       io.ReadCloser
 	stderrWriter       io.WriteCloser
 	status             atomic.Value // Status
+	stopInProgress     atomic.Int32
 	exitCode           atomic.Int32
 	exitErr            atomic.Value // error
 
@@ -3111,7 +3112,11 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 				continue
 			}
 		}
-		persisted, err := m.persistDeliveryEvent(update)
+		persisted := update
+		var err error
+		if !isCommittedMCPAttachmentEvent(update) {
+			persisted, err = m.persistDeliveryEvent(update)
+		}
 		if err != nil {
 			m.logger.Error("failed to commit durable delivery event", zap.Error(err))
 			// Capture the failure before cancellation, then keep the sole
@@ -3328,6 +3333,10 @@ func connectionScopedStartupControlEvent(event adapter.AgentEvent) bool {
 	}
 }
 
+func isCommittedMCPAttachmentEvent(event adapter.AgentEvent) bool {
+	return event.Type == streams.EventTypeMCPAttachment && event.DeliveryStreamID != "" && event.DeliverySequence > 0
+}
+
 // GetUpdates returns the channel for agent event notifications
 func (m *Manager) GetUpdates() <-chan adapter.AgentEvent {
 	return m.updatesCh
@@ -3374,12 +3383,37 @@ func (m *Manager) SendErrorEventWithProviderError(
 // existing agent update stream. Diagnostics are best effort: an overloaded
 // consumer must never delay the agent process or create a second stream.
 func (m *Manager) PublishMCPAttachment(evidence streams.MCPAttachmentEvidence) {
-	event := adapter.AgentEvent{
+	m.publishMCPAttachmentEvent(adapter.AgentEvent{
 		Type:          streams.EventTypeMCPAttachment,
 		MCPAttachment: &evidence,
+	},
+		"failed to commit durable MCP attachment event",
+		"adapter updates channel full, dropping MCP attachment evidence",
+		"updates channel full, dropping MCP attachment evidence",
+		zap.String("attempt_id", evidence.AttemptID),
+		zap.String("server_name", evidence.ServerName),
+		zap.String("kind", string(evidence.Kind)),
+	)
+}
+
+func (m *Manager) publishMCPAttachmentEvent(
+	event adapter.AgentEvent,
+	commitFailureMessage string,
+	adapterDropMessage string,
+	fallbackDropMessage string,
+	fields ...zap.Field,
+) {
+	if publisher := m.mcpAttachmentEventPublisher(); publisher != nil {
+		queued, err := publisher.TryPublishMCPAttachmentEvent(event, m.persistDeliveryEvent)
+		if err != nil {
+			m.logMCPAttachmentCommitError(commitFailureMessage, err)
+		} else if !queued {
+			m.logger.Warn(adapterDropMessage, fields...)
+		}
+		return
 	}
 	if persisted, err := m.persistDeliveryEvent(event); err != nil {
-		m.logMCPAttachmentCommitError("failed to commit durable MCP attachment event", err)
+		m.logMCPAttachmentCommitError(commitFailureMessage, err)
 		return
 	} else {
 		event = persisted
@@ -3387,32 +3421,33 @@ func (m *Manager) PublishMCPAttachment(evidence streams.MCPAttachmentEvidence) {
 	if m.sendUpdateNonBlockingRecorded(event) {
 		return
 	} else {
-		m.logger.Warn("updates channel full, dropping MCP attachment evidence",
-			zap.String("attempt_id", evidence.AttemptID),
-			zap.String("server_name", evidence.ServerName),
-			zap.String("kind", string(evidence.Kind)))
+		m.logger.Warn(fallbackDropMessage, fields...)
 	}
 }
 
 // PublishMCPAttachmentAttempt starts an attachment-evidence timeline through
 // the existing non-blocking agent update stream.
 func (m *Manager) PublishMCPAttachmentAttempt(attempt streams.MCPAttachmentAttempt) {
-	event := adapter.AgentEvent{
+	m.publishMCPAttachmentEvent(adapter.AgentEvent{
 		Type:                 streams.EventTypeMCPAttachment,
 		MCPAttachmentAttempt: &attempt,
+	},
+		"failed to commit durable MCP attachment attempt",
+		"adapter updates channel full, dropping MCP attachment attempt",
+		"updates channel full, dropping MCP attachment attempt",
+		zap.String("attempt_id", attempt.AttemptID),
+	)
+}
+
+func (m *Manager) mcpAttachmentEventPublisher() adapter.MCPAttachmentEventPublisher {
+	if m.stopInProgress.Load() > 0 {
+		return nil
 	}
-	if persisted, err := m.persistDeliveryEvent(event); err != nil {
-		m.logMCPAttachmentCommitError("failed to commit durable MCP attachment attempt", err)
-		return
-	} else {
-		event = persisted
+	if status, ok := m.status.Load().(Status); ok && (status == StatusStopping || status == StatusStopped) {
+		return nil
 	}
-	if m.sendUpdateNonBlockingRecorded(event) {
-		return
-	} else {
-		m.logger.Warn("updates channel full, dropping MCP attachment attempt",
-			zap.String("attempt_id", attempt.AttemptID))
-	}
+	publisher, _ := m.GetAdapter().(adapter.MCPAttachmentEventPublisher)
+	return publisher
 }
 
 // GetAdapter returns the protocol adapter
@@ -3580,6 +3615,8 @@ func (m *Manager) closeDeliveryJournal() error {
 
 func (m *Manager) stop(ctx context.Context) error {
 	m.retireManagedRuntimeRepair()
+	m.stopInProgress.Add(1)
+	defer m.stopInProgress.Add(-1)
 	if err := m.passthrough.StopAll(ctx); err != nil {
 		return err
 	}
