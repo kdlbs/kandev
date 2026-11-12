@@ -302,8 +302,11 @@ func TestService_MoveTaskReturnsErrorWhenFeederRefreshFails(t *testing.T) {
 	if err == nil {
 		t.Fatalf("MoveTask returned success with an unverified task response: result=%+v", result)
 	}
-	if result != nil {
-		t.Fatalf("MoveTask returned a result alongside refresh error: %+v", result)
+	if result == nil || !result.Committed {
+		t.Fatalf("MoveTask result = %+v, want committed result alongside refresh error", result)
+	}
+	if result.Task == nil || result.Task.ID != "task-feeder-refresh-failure" {
+		t.Fatalf("MoveTask committed task = %+v, want task-feeder-refresh-failure", result.Task)
 	}
 
 	stored, err := repo.GetTask(ctx, "task-feeder-refresh-failure")

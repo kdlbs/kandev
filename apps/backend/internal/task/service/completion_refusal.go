@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/completion"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // PendingApprover names one approver without a current approval.
@@ -25,7 +26,7 @@ type ApproverNameResolver interface {
 }
 
 type finalStepCompletionRepository interface {
-	CompleteTaskOnFinalStep(ctx context.Context, id string, admission *completion.Admission) (*models.Task, error)
+	CompleteTaskOnFinalStep(ctx context.Context, id string, admission *completion.Admission) (*models.Task, v1.TaskState, bool, error)
 }
 
 // ApprovalsPendingMoveError describes the approvers that refused a human
@@ -93,8 +94,14 @@ func (s *Service) CompleteOfficeTaskAsHuman(ctx context.Context, id, expectedSte
 	if !ok {
 		return nil, fmt.Errorf("final-step completion repository not configured")
 	}
-	updated, err := repo.CompleteTaskOnFinalStep(ctx, id, humanCompletionAdmission(task, completion.FinalStepDone))
-	return updated, s.translateCompletionError(ctx, err)
+	updated, previousState, changed, err := repo.CompleteTaskOnFinalStep(ctx, id, humanCompletionAdmission(task, completion.FinalStepDone))
+	if err != nil {
+		return nil, s.translateCompletionError(ctx, err)
+	}
+	if changed {
+		s.PublishTaskStateChanged(ctx, updated, previousState)
+	}
+	return updated, nil
 }
 
 // officeHumanCompletionTaskSnapshot binds the existing authorization decision
@@ -109,6 +116,9 @@ func (s *Service) officeHumanCompletionTaskSnapshot(ctx context.Context, id stri
 	}
 	_, err = s.requireWorkspaceScope(ctx, task.WorkspaceID, authz.ScopeTaskWrite, repoerrors.ErrTaskNotFound)
 	if errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+		if s.collaborationApplies(ctx) {
+			return nil, repoerrors.ErrTaskNotFound
+		}
 		err = nil
 	}
 	if err != nil {

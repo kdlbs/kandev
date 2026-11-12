@@ -34,8 +34,8 @@ func (s *Service) handleTaskStateChanged(ctx context.Context, data watcher.TaskE
 	s.handleTaskDependenciesForTerminalState(ctx, data.TaskID, *data.NewState)
 }
 
-// SetParentChildrenCompletionWakeRecorder records that the state path already
-// delivered a parent's current child wave, so the Office reconciler does not
+// SetParentChildrenCompletionWakeRecorder records a child wave handled by a
+// committed parent workflow transition, so the Office reconciler does not
 // dispatch the same wake again.
 func (s *Service) SetParentChildrenCompletionWakeRecorder(
 	recorder func(context.Context, string, string, string, string) error,
@@ -243,8 +243,15 @@ func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID strin
 	unlock := s.lockChildCompletionOperation(operationID)
 	defer unlock()
 
-	if s.childCompletionAlreadyApplied(ctx, parentID, operationID) {
-		s.recordParentChildrenCompletionWake(ctx, parentID, rows, operationID)
+	alreadyApplied, err := s.childCompletionAlreadyApplied(ctx, operationID)
+	if err != nil {
+		s.logger.Warn("on_children_completed: failed to check operation idempotency",
+			zap.String("parent_task_id", parentID),
+			zap.String("operation_id", operationID),
+			zap.Error(err))
+		return false
+	}
+	if alreadyApplied {
 		return false
 	}
 
@@ -255,7 +262,6 @@ func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID strin
 
 	if !result.Transitioned {
 		s.markChildCompletionApplied(ctx, parentID, operationID, "non-transition")
-		s.recordParentChildrenCompletionWake(ctx, parentID, rows, operationID)
 		return false
 	}
 
@@ -351,16 +357,8 @@ func (s *Service) parentCompletionContext(ctx context.Context, parentID string) 
 	return parent, session, true
 }
 
-func (s *Service) childCompletionAlreadyApplied(ctx context.Context, parentID, operationID string) bool {
-	applied, err := s.workflowStore.IsOperationApplied(ctx, operationID)
-	if err != nil {
-		s.logger.Warn("on_children_completed: failed to check operation idempotency",
-			zap.String("parent_task_id", parentID),
-			zap.String("operation_id", operationID),
-			zap.Error(err))
-		return true
-	}
-	return applied
+func (s *Service) childCompletionAlreadyApplied(ctx context.Context, operationID string) (bool, error) {
+	return s.workflowStore.IsOperationApplied(ctx, operationID)
 }
 
 type childCompletionOperationLock struct {

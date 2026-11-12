@@ -5904,7 +5904,7 @@ func (r *Repository) UpdateTaskStateWithCompletionAdmission(ctx context.Context,
 
 func (r *Repository) updateTaskState(ctx context.Context, id string, state v1.TaskState, admission *completion.Admission) error {
 	if admission != nil {
-		_, err := r.updateHumanTaskState(ctx, id, state, admission)
+		_, _, _, err := r.updateHumanTaskState(ctx, id, state, admission)
 		return err
 	}
 	tx, err := r.db.BeginTx(ctx, nil)

@@ -130,4 +130,9 @@ record the PostgreSQL admission and transfer checks passing; this follow-up
 could not repeat them because KANDEV_TEST_POSTGRES_DSN is unset. The full
 backendapp suite passed after the active-session translation test was updated
 to use the typed refusal sentinel; task repository, service, and handler
-package suites also passed in the work-order run.
+package suites also passed in the work-order run. The final serial verification
+passed across task repository, service, handler, Office, and backendapp
+packages, and `make -C apps/backend build` passed. The changed-Go wrapper
+reported zero lint issues but exceeded its five-minute package-loading limit;
+the same package set passed with a 15-minute lint timeout. The PostgreSQL
+rerun remained unavailable because KANDEV_TEST_POSTGRES_DSN is unset.

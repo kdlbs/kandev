@@ -442,6 +442,8 @@ type MoveTaskResult struct {
 	Task           *models.Task
 	WorkflowStep   *wfmodels.WorkflowStep
 	AlreadyApplied bool
+	// Committed remains true when a post-commit response refresh fails.
+	Committed bool
 	// FromStepID and Transitioned are read off Task's own write-transaction
 	// result (Task.FromStepID / Task.WorkflowStepTransitionID != 0), not from
 	// this call's earlier pre-move snapshot — see Task.FromStepID's doc.
@@ -871,6 +873,17 @@ func (s *Service) MoveTaskWithOptions(
 		// external test or adapter implementation that does not.
 		resultFromWorkflowID = oldWorkflowID
 	}
+	alreadyApplied := opts.AlreadyApplied != nil && *opts.AlreadyApplied
+	result := &MoveTaskResult{
+		Task:                  task,
+		Committed:             true,
+		AlreadyApplied:        alreadyApplied,
+		FromStepID:            resultFromStepID,
+		Transitioned:          resultTransitioned,
+		WorkflowEntryIdentity: workflowEntryIdentity,
+		MoveID:                moveID,
+		EntryOptions:          entryOptions,
+	}
 
 	// An optioned move (moveID != "") always changed step at read time —
 	// ValidateEntryOptions rejects a position-only optioned move — so a
@@ -885,7 +898,6 @@ func (s *Service) MoveTaskWithOptions(
 		return s.rejectStrandedOptionedMove(ctx, task, resultFromWorkflowID)
 	}
 
-	alreadyApplied := opts.AlreadyApplied != nil && *opts.AlreadyApplied
 	if !alreadyApplied {
 		s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, resultFromWorkflowID)
 		if oldState != task.State {
@@ -917,13 +929,14 @@ func (s *Service) MoveTaskWithOptions(
 		s.pullTasksFromNewFeederWork(ctx, workflowID, workflowStepID)
 		refreshed, err := s.tasks.GetTask(ctx, task.ID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to refresh task after feeder pull: %w", err)
+			return result, fmt.Errorf("failed to refresh task after feeder pull: %w", err)
 		}
 		if refreshed == nil {
-			return nil, errors.New("failed to refresh task after feeder pull: repository returned nil task")
+			return result, errors.New("failed to refresh task after feeder pull: repository returned nil task")
 		}
 		refreshed.Repositories = task.Repositories
 		task = refreshed
+		result.Task = task
 	}
 
 	s.logger.Info("task moved",
@@ -932,15 +945,7 @@ func (s *Service) MoveTaskWithOptions(
 		zap.String("workflow_step_id", workflowStepID),
 		zap.Int("position", position))
 
-	result := &MoveTaskResult{
-		Task:                  task,
-		AlreadyApplied:        opts.AlreadyApplied != nil && *opts.AlreadyApplied,
-		FromStepID:            resultFromStepID,
-		Transitioned:          resultTransitioned,
-		WorkflowEntryIdentity: workflowEntryIdentity,
-		MoveID:                moveID,
-		EntryOptions:          entryOptions,
-	}
+	result.Task = task
 
 	// Fetch the workflow step info if getter is available
 	if s.workflowStepGetter != nil {
@@ -2034,6 +2039,9 @@ func uniqueTaskIDs(taskIDs []string) []string {
 func (s *Service) loadSelectedMoveBatch(ctx context.Context, taskIDs []string) ([]*models.Task, error) {
 	tasks := make([]*models.Task, 0, len(taskIDs))
 	for _, id := range taskIDs {
+		if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
+			return nil, err
+		}
 		task, err := s.tasks.GetTask(ctx, id)
 		if err != nil {
 			return nil, err
@@ -2058,6 +2066,14 @@ func (s *Service) prepareBulkMoveBatch(
 	targetWorkflowID, targetStepID string,
 	actor wfmodels.StepTransitionActor,
 ) (context.Context, []*models.Task, func(), error) {
+	for _, task := range tasks {
+		if task == nil {
+			return nil, nil, nil, repoerrors.ErrTaskNotFound
+		}
+		if err := s.authorizeTaskScope(ctx, task.ID, authz.ScopeTaskWrite); err != nil {
+			return nil, nil, nil, err
+		}
+	}
 	orderedTasks, err := s.orderTasksForBulkMove(ctx, tasks)
 	if err != nil {
 		return nil, nil, nil, err
@@ -2094,18 +2110,38 @@ func (s *Service) writeBulkMoveBatch(
 		}
 		moveResult, err := s.MoveTaskWithOptions(ctx, task.ID, targetWorkflowID, targetStepID, 0, MoveTaskOptions{StepHistoryActor: actor})
 		if err != nil {
+			movedCount, movedTaskIDs = recordBulkMoveProgress(
+				task, moveResult, targetWorkflowID, targetStepID, movedCount, movedTaskIDs, false,
+			)
 			return nil, s.bulkMoveWriteError(ctx, task, movedTaskIDs, movedCount > 0, err)
 		}
-		movedCount++
-		if moveResult != nil && moveResult.Transitioned && moveResult.Task != nil &&
-			moveResult.Task.WorkflowID == targetWorkflowID && moveResult.Task.WorkflowStepID == targetStepID {
-			movedTaskIDs = append(movedTaskIDs, task.ID)
-		}
+		movedCount, movedTaskIDs = recordBulkMoveProgress(
+			task, moveResult, targetWorkflowID, targetStepID, movedCount, movedTaskIDs, true,
+		)
 		if s.bulkMoveAfterTaskForTest != nil {
 			s.bulkMoveAfterTaskForTest()
 		}
 	}
 	return &BulkMoveTasksResult{MovedCount: movedCount, MovedTaskIDs: movedTaskIDs}, nil
+}
+
+func recordBulkMoveProgress(
+	task *models.Task,
+	result *MoveTaskResult,
+	targetWorkflowID, targetStepID string,
+	movedCount int,
+	movedTaskIDs []string,
+	succeeded bool,
+) (int, []string) {
+	if !succeeded && (result == nil || !result.Committed) {
+		return movedCount, movedTaskIDs
+	}
+	movedCount++
+	if result != nil && result.Transitioned && result.Task != nil &&
+		result.Task.WorkflowID == targetWorkflowID && result.Task.WorkflowStepID == targetStepID {
+		movedTaskIDs = append(movedTaskIDs, task.ID)
+	}
+	return movedCount, movedTaskIDs
 }
 
 // BulkMoveTasks moves all tasks from a source workflow/step to a target workflow/step.

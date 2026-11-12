@@ -52,17 +52,59 @@ func (r *Repository) preflightTaskCompletionGateTx(
 	tx *sql.Tx,
 	current, candidate *models.Task,
 ) error {
-	if current == nil || candidate == nil || candidate.State != v1.TaskStateCompleted ||
-		current.State == v1.TaskStateCompleted {
+	if current == nil || candidate == nil {
 		return nil
 	}
-	required, assigned, err := r.readRequiredSubtaskAssignmentsTx(ctx, tx, current.ID)
+	completingMove, err := r.isCompletingTaskMoveTx(ctx, tx, current, candidate)
+	if err != nil {
+		return err
+	}
+	if !completingMove {
+		return nil
+	}
+	if err := r.checkRequiredSubtaskAssignmentsTx(ctx, tx, current.ID); err != nil {
+		return err
+	}
+	if candidate.State != v1.TaskStateCompleted || current.State == v1.TaskStateCompleted {
+		return nil
+	}
+	return r.checkTaskCompletionMoveOverrideTx(ctx, tx, current, candidate)
+}
+
+func (r *Repository) isCompletingTaskMoveTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	current, candidate *models.Task,
+) (bool, error) {
+	if candidate.State == v1.TaskStateCompleted && current.State != v1.TaskStateCompleted {
+		return true, nil
+	}
+	if candidate.WorkflowID == "" || candidate.WorkflowStepID == "" {
+		return false, nil
+	}
+	completing, err := r.isCompletingWorkflowStepTx(ctx, tx, candidate.WorkflowID, candidate.WorkflowStepID)
+	if err != nil {
+		return false, err
+	}
+	return completing, nil
+}
+
+func (r *Repository) checkRequiredSubtaskAssignmentsTx(ctx context.Context, tx *sql.Tx, taskID string) error {
+	required, assigned, err := r.readRequiredSubtaskAssignmentsTx(ctx, tx, taskID)
 	if err != nil {
 		return err
 	}
 	if required > assigned {
 		return fmt.Errorf("%w: required subtask assignments incomplete (%d/%d)", repoerrors.ErrTaskCompletionGateBlocked, assigned, required)
 	}
+	return nil
+}
+
+func (r *Repository) checkTaskCompletionMoveOverrideTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	current, candidate *models.Task,
+) error {
 	snapshot, err := r.readTaskCompletionGateTx(ctx, tx, current.ID, false)
 	if err != nil {
 		return err
@@ -134,20 +176,50 @@ func (r *Repository) validateAdmissionStepTx(
 	current, candidate *models.Task,
 	admission *completion.Admission,
 ) error {
-	if candidate.State != v1.TaskStateCompleted || current.State == v1.TaskStateCompleted {
-		return nil
-	}
 	switch admission.Kind {
 	case completion.Move:
-		return r.requireCompletingStepTx(ctx, tx, candidate)
+		return r.validateMoveAdmissionStepTx(ctx, tx, current, candidate)
 	case completion.SetState:
-		if candidate.WorkflowStepID == "" {
-			return nil
-		}
-		return r.requireWorkflowStepTx(ctx, tx, candidate)
+		return r.validateSetStateAdmissionStepTx(ctx, tx, current, candidate)
 	default:
 		return nil
 	}
+}
+
+func (r *Repository) validateMoveAdmissionStepTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	current, candidate *models.Task,
+) error {
+	// Queued moves have not entered the target step yet, so they do not
+	// complete a task or consume completion approval. The assignment gate
+	// still runs in the read-only preflight for a completing destination.
+	if !candidate.IsEphemeral && !candidate.WIPAdmitted {
+		return nil
+	}
+	completing, err := r.isCompletingWorkflowStepTx(ctx, tx, candidate.WorkflowID, candidate.WorkflowStepID)
+	if err != nil {
+		return err
+	}
+	completesTask := candidate.State == v1.TaskStateCompleted && current.State != v1.TaskStateCompleted
+	if completesTask && !completing {
+		return repoerrors.ErrWorkflowChangeConflict
+	}
+	if completing && !completesTask && !models.IsTerminalTaskState(current.State) {
+		return repoerrors.ErrWorkflowChangeConflict
+	}
+	return nil
+}
+
+func (r *Repository) validateSetStateAdmissionStepTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	current, candidate *models.Task,
+) error {
+	if candidate.State != v1.TaskStateCompleted || current.State == v1.TaskStateCompleted || candidate.WorkflowStepID == "" {
+		return nil
+	}
+	return r.requireWorkflowStepTx(ctx, tx, candidate)
 }
 
 func validateCompletionAdmission(admission *completion.Admission, candidate *models.Task) error {
@@ -173,14 +245,6 @@ func validateCompletionAdmissionScope(current, candidate *models.Task, admission
 		return repoerrors.ErrWorkflowChangeConflict
 	}
 	return nil
-}
-
-func (r *Repository) requireCompletingStepTx(ctx context.Context, tx *sql.Tx, candidate *models.Task) error {
-	completes, err := r.workflowStepPredicateTx(ctx, tx, workflowmodels.CompletingStepSQL("s"), candidate.WorkflowID, candidate.WorkflowStepID)
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && !completes) {
-		return repoerrors.ErrWorkflowChangeConflict
-	}
-	return err
 }
 
 func (r *Repository) requireWorkflowStepTx(ctx context.Context, tx *sql.Tx, candidate *models.Task) error {
@@ -213,6 +277,16 @@ func (r *Repository) workflowStepPredicateTx(
 	return matches, nil
 }
 
+func (r *Repository) isCompletingWorkflowStepTx(ctx context.Context, tx *sql.Tx, workflowID, stepID string) (bool, error) {
+	completing, err := r.workflowStepPredicateTx(
+		ctx, tx, workflowmodels.CompletingStepSQL("s"), workflowID, stepID,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return completing, err
+}
+
 func (r *Repository) refreshHumanAdmissionLimitTx(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -239,9 +313,9 @@ func (r *Repository) CompleteTaskOnFinalStep(
 	ctx context.Context,
 	id string,
 	admission *completion.Admission,
-) (*models.Task, error) {
+) (*models.Task, v1.TaskState, bool, error) {
 	if admission == nil || admission.Kind != completion.FinalStepDone {
-		return nil, repoerrors.ErrWorkflowChangeConflict
+		return nil, "", false, repoerrors.ErrWorkflowChangeConflict
 	}
 	return r.updateHumanTaskState(ctx, id, v1.TaskStateCompleted, admission)
 }
@@ -251,33 +325,31 @@ func (r *Repository) updateHumanTaskState(
 	id string,
 	state v1.TaskState,
 	admission *completion.Admission,
-) (*models.Task, error) {
+) (*models.Task, v1.TaskState, bool, error) {
 	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
 	if err != nil {
-		return nil, err
+		return nil, "", false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	task, err := r.lockTaskFieldUpdate(ctx, tx, id, models.TaskFieldUpdate{})
 	if err != nil {
-		return nil, err
+		return nil, "", false, err
 	}
 	previousState := task.State
 	task.State = state
 	if err := r.admitCompletionTx(ctx, tx, admission, task); err != nil {
-		return nil, err
+		return nil, "", false, err
 	}
-	if admission.Kind != completion.FinalStepDone {
-		if err := r.guardTaskCompletionTransitionTx(ctx, tx, id, previousState, task.State,
-			task.WorkflowID, task.WorkflowStepID, task.WorkflowID, task.WorkflowStepID); err != nil {
-			return nil, err
-		}
+	if err := r.guardTaskCompletionTransitionTx(ctx, tx, id, previousState, task.State,
+		task.WorkflowID, task.WorkflowStepID, task.WorkflowID, task.WorkflowStepID); err != nil {
+		return nil, "", false, err
 	}
 	task.UpdatedAt = r.nowUTC()
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`), task.State, task.UpdatedAt, id); err != nil {
-		return nil, err
+		return nil, "", false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, err
+		return nil, "", false, err
 	}
-	return task, nil
+	return task, previousState, previousState != state, nil
 }

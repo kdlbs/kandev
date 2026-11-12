@@ -130,6 +130,37 @@ func TestProcessOnChildrenCompleted_TransitionsParentWhenAllActiveChildrenComple
 	}
 }
 
+func TestProcessOnChildrenCompleted_DoesNotRecordWakeForNonTransition(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "parent", "parent-session", "step_wait")
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step_wait"] = &wfmodels.WorkflowStep{
+		ID: "step_wait", WorkflowID: "wf1", Name: "Wait", Position: 0,
+	}
+	svc := createEngineService(t, repo, stepGetter, &mockAgentManager{repoForExecutionLookup: repo})
+	var receiptCalls int
+	svc.SetParentChildrenCompletionWakeRecorder(func(context.Context, string, string, string, string) error {
+		receiptCalls++
+		return nil
+	})
+	requireCreateTask(t, repo, &models.Task{
+		ID: "child-complete", WorkflowID: "wf1", Title: "Child",
+		State: v1.TaskStateCompleted, ParentID: "parent",
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	})
+
+	if transitioned := svc.processOnChildrenCompleted(ctx, "parent"); transitioned {
+		t.Fatal("parent transitioned despite no on_children_completed action")
+	}
+	if transitioned := svc.processOnChildrenCompleted(ctx, "parent"); transitioned {
+		t.Fatal("duplicate non-transition delivery unexpectedly transitioned parent")
+	}
+	if receiptCalls != 0 {
+		t.Fatalf("wake receipts = %d, want no receipt for a non-transition", receiptCalls)
+	}
+}
+
 // TestProcessOnChildrenCompleted_StillIdempotentOnRedelivery is the AC-EO-16
 // pin for docs/specs/workflow-evaluate-only-operation-marking: this trigger
 // passes its operation ID with DeferOperationMark and keeps the outer

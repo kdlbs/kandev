@@ -125,6 +125,12 @@ confirms arbitrary repository text is not used as a refusal code or sent to
 the client. Backend verification passed: focused BulkMove service and handler
 tests, the full backendapp suite, and the backend build. Changed Go lint passed
 for the task, Office, orchestrator, workflow, backendapp, and analytics groups.
-Documentation validation, specification lint, and `git diff --check` also
-passed. PostgreSQL cases could not run because KANDEV_TEST_POSTGRES_DSN is
-unset.
+The final serial backend work-order suite passed across task repository,
+service, handlers, Office, and backendapp. A feeder-refresh regression now
+requires the committed move result to survive post-commit refresh failure, so
+bulk responses retain the committed task ID. The scoped web run passed 95 test
+files (701 tests), typecheck, and i18n checks. `make -C apps/backend build`,
+documentation validation, specification lint, and `git diff --check` passed.
+Changed-Go lint reported zero issues with an extended timeout after the
+five-minute wrapper limit elapsed during package loading. PostgreSQL cases
+could not run because KANDEV_TEST_POSTGRES_DSN is unset.

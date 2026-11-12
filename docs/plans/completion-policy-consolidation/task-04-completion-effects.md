@@ -111,5 +111,9 @@ orchestrator records the evaluated child-wave identity in the Office wake
 receipt after its state-path operation; the reconciler test confirms one tick
 does not dispatch that completion a second time. Wave identity is checked
 before persisting the broader child snapshot used by the reconciler, so a
-concurrent wave change is not hidden. PostgreSQL verification was unavailable
-because KANDEV_TEST_POSTGRES_DSN is unset.
+concurrent wave change is not hidden. A failed operation-ledger read now stops
+processing without writing a wake receipt; already-applied and non-transition
+deliveries also leave the state-path wake receipt untouched. The full serial
+backend verification passed, including Office, scheduler, and orchestrator
+packages. PostgreSQL verification was unavailable because
+KANDEV_TEST_POSTGRES_DSN is unset.

@@ -180,7 +180,8 @@ func TestBulkMoveErrorCodeDoesNotClassifyByMessageText(t *testing.T) {
 func TestBulkMoveWriteErrorPreservesPartialResultForUnexpectedFailure(t *testing.T) {
 	svc, _, _ := createTestService(t)
 	task := &models.Task{ID: "refused", Title: "Refused"}
-	err := svc.bulkMoveWriteError(context.Background(), task, []string{"moved"}, true, errors.New("database secret: postgres://private"))
+	writeErr := errors.New("database secret: postgres://private")
+	err := svc.bulkMoveWriteError(context.Background(), task, []string{"moved"}, true, writeErr)
 	var partial *BulkMovePartialError
 	if !errors.As(err, &partial) {
 		t.Fatalf("write error = %T (%v), want BulkMovePartialError", err, err)
@@ -188,8 +189,60 @@ func TestBulkMoveWriteErrorPreservesPartialResultForUnexpectedFailure(t *testing
 	if len(partial.MovedTaskIDs) != 1 || partial.MovedTaskIDs[0] != "moved" {
 		t.Fatalf("moved IDs = %v, want [moved]", partial.MovedTaskIDs)
 	}
-	if partial.Refusal.Code != bulkMoveGenericCode || strings.Contains(partial.Refusal.Message, "postgres://private") {
+	if partial.Refusal.Code != "task_move_failed" || strings.Contains(partial.Refusal.Message, "postgres://private") {
 		t.Fatalf("refusal = %+v, internal error detail leaked", partial.Refusal)
+	}
+	if !errors.Is(err, writeErr) {
+		t.Fatalf("partial error %v does not preserve the write error", err)
+	}
+}
+
+func TestBulkMovePreflightChecksRequiredAssignmentsBeforeQueueWrites(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedBulkCompletingTarget(t, ctx, svc, repo, func(string) bool { return false })
+	target, err := svc.workflowStepGetter.GetStep(ctx, "step-target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target.WIPLimit = 1
+	if _, err := repo.DB().ExecContext(ctx, `UPDATE workflow_steps SET wip_limit = 1 WHERE id = 'step-target'`); err != nil {
+		t.Fatal(err)
+	}
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-source": {ID: "step-source", WorkflowID: "wf-source", Name: "Source"},
+		"step-target": target,
+	}})
+	createMoveTask(t, ctx, repo, "occupant", "wf-target", "step-target", nil)
+	if _, err := repo.DB().ExecContext(ctx, `UPDATE tasks SET wip_admitted = 1 WHERE id = 'occupant'`); err != nil {
+		t.Fatal(err)
+	}
+	createMoveTask(t, ctx, repo, "task-a", "wf-source", "step-source", nil)
+	createMoveTask(t, ctx, repo, "task-b", "wf-source", "step-source", nil)
+	if _, err := repo.DB().ExecContext(ctx,
+		`UPDATE tasks SET metadata = ? WHERE id = 'task-b'`,
+		`{"kandev.office_required_subtask_count":1}`,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = svc.BulkMoveSelectedTasks(ctx, []string{"task-a", "task-b"}, "wf-target", "step-target", wfmodels.StepTransitionActorHuman)
+	var refused *BulkMoveRefusedError
+	if !errors.As(err, &refused) {
+		t.Fatalf("bulk move error = %v, want whole-batch refusal before queued writes", err)
+	}
+	if len(refused.Refusals) != 1 || refused.Refusals[0].TaskID != "task-b" {
+		t.Fatalf("refusals = %+v, want only task-b", refused.Refusals)
+	}
+	for _, id := range []string{"task-a", "task-b"} {
+		stored, readErr := repo.GetTask(ctx, id)
+		if readErr != nil {
+			t.Fatalf("GetTask(%s): %v", id, readErr)
+		}
+		if stored.WorkflowStepID != "step-source" {
+			t.Fatalf("%s moved or queued before preflight refusal: %+v", id, stored)
+		}
 	}
 }
 

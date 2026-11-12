@@ -12,12 +12,14 @@ import (
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"go.uber.org/zap"
 )
 
 const (
 	BulkMoveRefusedCode           = "bulk_move_refused"
 	BulkMovePartialCode           = "bulk_move_partial"
 	bulkMoveGenericCode           = "task_move_refused"
+	bulkMoveFailedCode            = "task_move_failed"
 	bulkMovePolicyUnavailableCode = "task_move_completion_preflight_unavailable"
 	bulkMoveApprovalsPendingCode  = "task_approvals_pending"
 )
@@ -44,11 +46,14 @@ func (e *BulkMoveRefusedError) Error() string {
 type BulkMovePartialError struct {
 	MovedTaskIDs []string
 	Refusal      TaskRefusal
+	Cause        error
 }
 
 func (e *BulkMovePartialError) Error() string {
 	return fmt.Sprintf("bulk move stopped after moving %d task(s): %s", len(e.MovedTaskIDs), e.Refusal.TaskID)
 }
+
+func (e *BulkMovePartialError) Unwrap() error { return e.Cause }
 
 type completionAdmissionPreflight interface {
 	CheckCompletionAdmission(ctx context.Context, current, candidate *models.Task, admission *completion.Admission) error
@@ -99,22 +104,57 @@ func (s *Service) preflightBulkMoveTask(
 	if err := s.loadBulkMoveOccupancy(ctx, targetStepID, targetStep, occupancy); err != nil {
 		return s.bulkMoveTaskRefusalPointer(ctx, task, err)
 	}
-	if occupancy.willQueue(task) {
-		return nil
+	candidate, willQueue, needsCompletionPreflight, err := s.prepareBulkMoveCandidate(
+		ctx, task, targetWorkflowID, targetStepID, targetStep, occupancy,
+	)
+	if err != nil {
+		return s.bulkMoveTaskRefusalPointer(ctx, task, err)
 	}
-	occupancy.admit(task)
+	if needsCompletionPreflight {
+		if refusal := s.checkBulkMoveCompletionAdmission(ctx, task, candidate, actor, willQueue, occupancy); refusal != nil {
+			return refusal
+		}
+	}
+	if !willQueue {
+		occupancy.admit(task)
+	}
+	return nil
+}
 
+func (s *Service) prepareBulkMoveCandidate(
+	ctx context.Context,
+	task *models.Task,
+	targetWorkflowID, targetStepID string,
+	targetStep *wfmodels.WorkflowStep,
+	occupancy *bulkMoveOccupancy,
+) (*models.Task, bool, bool, error) {
+	willQueue := occupancy.willQueue(task)
 	candidate := *task
 	candidate.WorkflowID = targetWorkflowID
 	candidate.WorkflowStepID = targetStepID
-	if task.WorkflowStepID != targetStepID {
+	if !willQueue && task.WorkflowStepID != targetStepID {
 		if err := s.syncTaskStateForWorkflowMove(ctx, &candidate, task.WorkflowStepID, targetStepID, MoveTaskOptions{}); err != nil {
-			return s.bulkMoveTaskRefusalPointer(ctx, task, err)
+			return nil, false, false, err
 		}
 	}
-	if candidate.State != v1.TaskStateCompleted {
-		return nil
+	needsCompletionPreflight := candidate.State == v1.TaskStateCompleted
+	if willQueue {
+		completing, err := s.terminalWorkflowStep(ctx, targetStepID)
+		if err != nil {
+			return nil, false, false, err
+		}
+		needsCompletionPreflight = completing
 	}
+	return &candidate, willQueue, needsCompletionPreflight, nil
+}
+
+func (s *Service) checkBulkMoveCompletionAdmission(
+	ctx context.Context,
+	task, candidate *models.Task,
+	actor wfmodels.StepTransitionActor,
+	willQueue bool,
+	occupancy *bulkMoveOccupancy,
+) *TaskRefusal {
 	if !occupancy.known {
 		return s.bulkMoveTaskRefusalPointer(ctx, task, errBulkMovePreflightUnavailable)
 	}
@@ -126,10 +166,10 @@ func (s *Service) preflightBulkMoveTask(
 		}
 	}
 	var admission *completion.Admission
-	if actor == wfmodels.StepTransitionActorHuman {
+	if actor == wfmodels.StepTransitionActorHuman && !willQueue {
 		admission = humanCompletionAdmission(task, completion.Move)
 	}
-	if err := checker.CheckCompletionAdmission(ctx, task, &candidate, admission); err != nil {
+	if err := checker.CheckCompletionAdmission(ctx, task, candidate, admission); err != nil {
 		return s.bulkMoveTaskRefusalPointer(ctx, task, err)
 	}
 	return nil
@@ -238,12 +278,14 @@ func isBulkMoveWriteRefusal(err error) bool {
 func (s *Service) bulkMoveWriteError(ctx context.Context, task *models.Task, movedTaskIDs []string, hadWrites bool, err error) error {
 	if !isBulkMoveWriteRefusal(err) {
 		if hadWrites {
+			s.logger.Error("bulk task move failed after partial writes", zap.String("task_id", task.ID), zap.Error(err))
 			return &BulkMovePartialError{
 				MovedTaskIDs: append([]string(nil), movedTaskIDs...),
 				Refusal: TaskRefusal{
 					TaskID: task.ID, TaskTitle: task.Title,
-					Code: bulkMoveGenericCode, Message: "Task move was refused.",
+					Code: bulkMoveFailedCode, Message: "Task move failed.",
 				},
+				Cause: err,
 			}
 		}
 		return fmt.Errorf("failed to move task %s: %w", task.ID, err)
@@ -252,5 +294,5 @@ func (s *Service) bulkMoveWriteError(ctx context.Context, task *models.Task, mov
 	if !hadWrites {
 		return &BulkMoveRefusedError{Refusals: []TaskRefusal{refusal}}
 	}
-	return &BulkMovePartialError{MovedTaskIDs: append([]string(nil), movedTaskIDs...), Refusal: refusal}
+	return &BulkMovePartialError{MovedTaskIDs: append([]string(nil), movedTaskIDs...), Refusal: refusal, Cause: err}
 }
