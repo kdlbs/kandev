@@ -20,6 +20,11 @@ type durableSessionTransferState struct {
 	stopLeaseRenewal  func() error
 	leaseRenewalErr   error
 	cancelTransfer    context.CancelFunc
+	// keepDestinationAutoRun marks a retired-source transfer.
+	keepDestinationAutoRun bool
+	// sourceAutoRunCleared records that a retired-source transfer turned the
+	// source's paused Auto-run on so rollback can pause it again.
+	sourceAutoRunCleared bool
 }
 
 // TransferSessionWithDurablePreparation preserves the original callback
@@ -60,7 +65,36 @@ func (s *Service) TransferSessionWithDurableAttachmentPreparation(
 	prepare func(context.Context, []string) error,
 	rollback func(context.Context, []string) error,
 ) error {
-	state := &durableSessionTransferState{}
+	return s.transferSessionWithDurableAttachmentPreparation(
+		ctx, taskID, oldSessionID, newSessionID, false, prepare, rollback,
+	)
+}
+
+// TransferRetiredSessionWithDurableAttachmentPreparation moves the queue of a
+// session that will never drain again. A normal transfer combines both
+// sessions' Auto-run settings; here the destination keeps its own. The
+// source's pause is lifted inside the transfer's admission on both sessions,
+// so the destination value the transfer keeps is the one it holds at commit,
+// including a change the user made while the transfer waited for admission.
+func (s *Service) TransferRetiredSessionWithDurableAttachmentPreparation(
+	ctx context.Context,
+	taskID, oldSessionID, newSessionID string,
+	prepare func(context.Context, []string) error,
+	rollback func(context.Context, []string) error,
+) error {
+	return s.transferSessionWithDurableAttachmentPreparation(
+		ctx, taskID, oldSessionID, newSessionID, true, prepare, rollback,
+	)
+}
+
+func (s *Service) transferSessionWithDurableAttachmentPreparation(
+	ctx context.Context,
+	taskID, oldSessionID, newSessionID string,
+	keepDestinationAutoRun bool,
+	prepare func(context.Context, []string) error,
+	rollback func(context.Context, []string) error,
+) error {
+	state := &durableSessionTransferState{keepDestinationAutoRun: keepDestinationAutoRun}
 	transferCtx, cancelTransfer := context.WithCancel(ctx)
 	defer cancelTransfer()
 	state.cancelTransfer = cancelTransfer
@@ -74,11 +108,15 @@ func (s *Service) TransferSessionWithDurableAttachmentPreparation(
 		newSessionID,
 		state.operationID,
 		func(admittedCtx context.Context) error {
+			if err := s.clearRetiredSourceAutoRunPause(admittedCtx, oldSessionID, state); err != nil {
+				return err
+			}
 			return s.prepareDurableSessionTransfer(
 				admittedCtx, taskID, oldSessionID, newSessionID, prepare, state,
 			)
 		},
 		func(rollbackCtx context.Context) error {
+			s.restoreRetiredSourceAutoRunPause(rollbackCtx, oldSessionID, state)
 			if !state.preparationCalled || rollback == nil {
 				state.rollbackSucceeded = true
 				return nil
@@ -348,4 +386,45 @@ func (s *Service) deleteSessionTransferCompensation(
 		return fmt.Errorf("delete session transfer compensation: %w", err)
 	}
 	return nil
+}
+
+// clearRetiredSourceAutoRunPause runs inside the transfer's admission on both
+// sessions. The repositories combine source and destination Auto-run on
+// transfer, so lifting a retired source's pause leaves the destination's own
+// setting in place, read in the same repository transaction as the move.
+func (s *Service) clearRetiredSourceAutoRunPause(
+	admittedCtx context.Context,
+	sourceSessionID string,
+	state *durableSessionTransferState,
+) error {
+	if !state.keepDestinationAutoRun {
+		return nil
+	}
+	enabled, err := s.repo.GetAutoRun(admittedCtx, sourceSessionID)
+	if err != nil {
+		return fmt.Errorf("read retired source auto-run: %w", err)
+	}
+	if enabled {
+		return nil
+	}
+	if err := s.repo.SetAutoRun(admittedCtx, sourceSessionID, true); err != nil {
+		return fmt.Errorf("lift retired source auto-run pause: %w", err)
+	}
+	state.sourceAutoRunCleared = true
+	return nil
+}
+
+func (s *Service) restoreRetiredSourceAutoRunPause(
+	rollbackCtx context.Context,
+	sourceSessionID string,
+	state *durableSessionTransferState,
+) {
+	if !state.sourceAutoRunCleared {
+		return
+	}
+	state.sourceAutoRunCleared = false
+	if err := s.repo.SetAutoRun(rollbackCtx, sourceSessionID, false); err != nil {
+		s.logger.Warn("failed to restore retired source Auto-run after transfer rollback",
+			zap.String("session_id", sourceSessionID), zap.Error(err))
+	}
 }
