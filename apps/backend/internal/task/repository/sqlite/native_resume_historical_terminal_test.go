@@ -140,6 +140,15 @@ func testHistoricalTerminalRecovery(t *testing.T, open func(*testing.T) *Reposit
 				require.NoError(t, err)
 			}
 			require.Equal(t, test.want, changed)
+			if test.want && test.staleNotice {
+				session, err := repo.GetTaskSession(ctx, fixture.session.ID)
+				require.NoError(t, err)
+				restored, exists := models.LoadAgentDeliveryRecovery(session.Metadata)
+				require.True(t, exists)
+				require.Equal(t, fixture.recovery.AgentExecutionID, restored.AgentExecutionID,
+					"later recovery retains the interrupted prompt's historical execution owner")
+				require.NotEqual(t, proof.ExecutionID, restored.AgentExecutionID)
+			}
 
 			currentBlock, err := repo.GetSessionRecoveryBlock(ctx, current.Block.ID)
 			require.NoError(t, err)

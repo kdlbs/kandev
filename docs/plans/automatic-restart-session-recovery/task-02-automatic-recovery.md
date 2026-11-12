@@ -175,3 +175,6 @@ An active successor or allocated candidate keeps its existing ownership.
 - `make -C apps/backend build` passed. Changed-Go lint passed for all updated Go
   paths with 0 issues after `gofmt`. The final race-enabled SQLite and
   orchestrator checks passed.
+- `TestGetExecutionBySessionDoesNotTreatStoppedRuntimeAsStarting` and the full
+  race-enabled orchestrator executor package passed. Focused reconstruction
+  tests passed after the complexity refactor.

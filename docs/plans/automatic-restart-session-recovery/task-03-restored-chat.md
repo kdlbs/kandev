@@ -192,3 +192,6 @@ Public documentation must describe the implemented eligibility limits accurately
   an older restoration. The five-file focused recovery UI suite passed 46 tests;
   web typecheck and `pnpm run i18n:check` passed. Desktop and phone production
   E2E each passed all three restart and upgrade scenarios.
+- Remote Docker confirmed-absence Resume passed on desktop and phone, including
+  the assertion that the interrupted prompt remains in the transcript without
+  being sent again.

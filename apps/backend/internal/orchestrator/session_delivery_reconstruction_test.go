@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/common/processidentity"
@@ -12,6 +13,57 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
+
+type reconstructionEvidenceClientFunc func(context.Context, agentruntime.DeliveryRecordEvidenceRequest) (*agentruntime.DeliveryRecordEvidence, error)
+
+func (f reconstructionEvidenceClientFunc) InspectDeliveryRecordEvidence(
+	ctx context.Context,
+	request agentruntime.DeliveryRecordEvidenceRequest,
+) (*agentruntime.DeliveryRecordEvidence, error) {
+	return f(ctx, request)
+}
+
+func (reconstructionEvidenceClientFunc) ReadDeliveryRecordSubmission(
+	context.Context,
+	agentruntime.DeliveryRecordSubmissionRequest,
+) (*agentruntime.DeliveryRecordSubmission, error) {
+	return nil, nil
+}
+
+func TestPersistedReconstructionRecheckTargetsStoredSubmission(t *testing.T) {
+	var requested agentruntime.DeliveryRecordEvidenceRequest
+	terminated := true
+	descriptor := journal.RecoveryDescriptor{
+		SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 3,
+	}
+	evidence := &agentruntime.DeliveryRecordEvidence{
+		Descriptor:       descriptor,
+		StoredSubmission: &journal.Submission{ID: "stored-submission"},
+	}
+	client := reconstructionEvidenceClientFunc(func(
+		_ context.Context,
+		request agentruntime.DeliveryRecordEvidenceRequest,
+	) (*agentruntime.DeliveryRecordEvidence, error) {
+		requested = request
+		return &agentruntime.DeliveryRecordEvidence{Descriptor: descriptor, ProcessTerminated: &terminated}, nil
+	})
+	service := &Service{}
+	request := &models.AgentDeliveryReconstructionRequest{
+		TaskID: "task", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 3,
+	}
+	identity := agentruntime.AgentDeliveryRecoveryIdentity{
+		TaskID: "task", SessionID: "session", ExecutionID: "execution",
+		SubmissionID: "stored-submission", IncarnationID: "incarnation", HarnessGeneration: 3,
+	}
+
+	reason, err := service.verifyReconstructionControlIdentity(
+		context.Background(), client, evidence, identity, true, request,
+	)
+
+	require.NoError(t, err)
+	require.Empty(t, reason)
+	require.Equal(t, "stored-submission", requested.StoredSubmissionID)
+}
 
 type retainedJournalRecoveryManager struct {
 	*mockAgentManager

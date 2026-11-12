@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/journal"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/stretchr/testify/require"
@@ -15,6 +16,24 @@ import (
 type failOnceRecoveryNoticeCreator struct {
 	MessageCreator
 	fail bool
+}
+
+func assertNoPendingSendNowClaims(t *testing.T, queue *messagequeue.Service, sessionID string) {
+	t.Helper()
+	claims, err := queue.ListPendingSendNowClaims(context.Background())
+	require.NoError(t, err)
+	for _, claim := range claims {
+		require.NotEqual(t, sessionID, claim.Claim.Identity.SessionID)
+	}
+}
+
+func TestRecoveryNoticeAcceptsSessionIDAsLegacyIncarnation(t *testing.T) {
+	session := &models.TaskSession{ID: "legacy-session"}
+	source := models.AgentDeliveryRecovery{
+		SessionID: "legacy-session", IncarnationID: "legacy-session",
+		HarnessGeneration: 1, SubmissionID: "interrupted-submission",
+	}
+	require.True(t, recoveryNoticeSourceMatchesSession(source, session))
 }
 
 func (m *failOnceRecoveryNoticeCreator) CreateSessionMessageIdempotent(
@@ -32,6 +51,25 @@ func (m *failOnceRecoveryNoticeCreator) CreateSessionMessageIdempotent(
 	)
 }
 
+func (m *failOnceRecoveryNoticeCreator) CreateSessionLifecycleMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, sessionID, messageType string,
+	metadata map[string]interface{},
+) error {
+	if m.fail {
+		m.fail = false
+		return errors.New("message store unavailable")
+	}
+	if creator, ok := m.MessageCreator.(lifecycleRecoveryNoticeMessageCreator); ok {
+		return creator.CreateSessionLifecycleMessageIdempotent(
+			ctx, messageID, taskID, content, sessionID, messageType, metadata,
+		)
+	}
+	return m.MessageCreator.CreateSessionMessageIdempotent(
+		ctx, messageID, taskID, content, sessionID, messageType, "", metadata, false,
+	)
+}
+
 func TestRecoveryNoticePublicationIdempotent(t *testing.T) {
 	ctx := context.Background()
 	service, manager, block, submission, _, _ := nativeResumeFixture(t, "unknown_prompt_outcome", false, false)
@@ -45,6 +83,14 @@ func TestRecoveryNoticePublicationIdempotent(t *testing.T) {
 	})
 	realCreator := newServiceBackedMessageCreator(repo)
 	service.messageCreator = &failOnceRecoveryNoticeCreator{MessageCreator: realCreator, fail: true}
+	queue, queueDB := newWorkflowTransferQueue(t, t.TempDir()+"/queue.db")
+	t.Cleanup(func() { _ = queueDB.Close() })
+	service.messageQueue = queue
+	queued, err := queue.QueueMessage(ctx, submission.SessionID, "task1",
+		"release after interrupted resume", "", messagequeue.QueuedByUser, false, nil)
+	require.NoError(t, err)
+	_, err = queue.ClaimSendNow(ctx, submission.SessionID, []messagequeue.QueuedMessage{*queued})
+	require.NoError(t, err)
 	manager.acknowledge = func(ctx context.Context, _ string) error {
 		current, err := repo.GetSessionRecoveryBlock(ctx, block.ID)
 		if err != nil {
@@ -74,6 +120,9 @@ func TestRecoveryNoticePublicationIdempotent(t *testing.T) {
 	response, err := service.RecoverSession(ctx, "task1", submission.SessionID, "resume")
 	require.ErrorContains(t, err, "message store unavailable")
 	require.Nil(t, response)
+	assertNoPendingSendNowClaims(t, queue, submission.SessionID)
+	status := queue.GetStatus(ctx, submission.SessionID)
+	require.Len(t, status.Entries, 1, "queue recovery commits before notice publication")
 	resolved, err := repo.GetSessionRecoveryBlock(ctx, block.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.RecoveryBlockResolved, resolved.State, "recovery commits before message publication")
@@ -86,13 +135,22 @@ func TestRecoveryNoticePublicationIdempotent(t *testing.T) {
 	_, err = repo.DB().ExecContext(ctx, `UPDATE agent_delivery_submissions SET state = 'failed', outcome = 'failed' WHERE id = ?`, submission.ID)
 	require.NoError(t, err, "the durable source may settle after restoration commits but before notice publication")
 
-	service.messageCreator = realCreator
+	service.messageCreator = &failOnceRecoveryNoticeCreator{MessageCreator: realCreator, fail: true}
+	secondQueued, err := queue.QueueMessage(ctx, submission.SessionID, "task1",
+		"release on duplicate resume", "", messagequeue.QueuedByUser, false, nil)
+	require.NoError(t, err)
+	_, err = queue.ClaimSendNow(ctx, submission.SessionID, []messagequeue.QueuedMessage{*secondQueued})
+	require.NoError(t, err)
+	require.ErrorContains(t, service.resolveSessionRecoveryBlock(ctx, submission.SessionID, "resume"), "message store unavailable",
+		"retry after block resolution must still release parked queue work before retrying notice publication")
+	assertNoPendingSendNowClaims(t, queue, submission.SessionID)
 	candidates, err := repo.ListSilentRestoreCandidates(ctx, "", 100)
 	require.NoError(t, err)
 	require.Len(t, candidates, 1, "startup inventory must find a notice left pending after a crash")
 	require.Equal(t, submission.SessionID, candidates[0].SessionID)
 	require.Equal(t, "task1", candidates[0].TaskID)
 	require.NotEmpty(t, candidates[0].WorkspaceID)
+	service.messageCreator = realCreator
 	require.NoError(t, service.restoreSilentRestartCandidate(ctx, repo, candidates[0]))
 	require.NoError(t, service.restoreSilentRestartCandidate(ctx, repo, candidates[0]), "retrying the same incident is idempotent")
 
@@ -105,6 +163,10 @@ func TestRecoveryNoticePublicationIdempotent(t *testing.T) {
 	require.Equal(t, submission.ID, messages[0].Metadata["source_submission_id"])
 	require.Equal(t, float64(submission.HarnessGeneration), messages[0].Metadata["source_harness_generation"])
 	require.False(t, messages[0].RequestsInput)
+	turn, err := repo.GetTurn(ctx, messages[0].TurnID)
+	require.NoError(t, err)
+	require.NotNil(t, turn.CompletedAt)
+	require.Equal(t, true, turn.Metadata[models.TurnMetaKeyLifecycleOnly])
 	require.Empty(t, manager.capturedPromptCalls)
 
 	firstNoticeID := messages[0].ID

@@ -10,6 +10,7 @@ describe("SessionRecoveryNotice", () => {
     expect(screen.getByRole("note").textContent).toBe(
       "The session was interrupted. Your conversation is restored. You can continue.",
     );
+    expect(screen.getByRole("note").getAttribute("aria-live")).toBe("polite");
     expect(screen.queryByRole("button")).toBeNull();
   });
 });

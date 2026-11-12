@@ -190,10 +190,14 @@ it("clears stale local recovery guidance after committed delivery restoration", 
     error_message: "The interrupted prompt failed",
     metadata: {
       ...deliverySession("restored", []).metadata,
+      agent_delivery_recovery: {
+        ...(deliverySession("restored", []).metadata?.agent_delivery_recovery as object),
+        submission_id: "stale-cleanup-submission",
+      },
       last_agent_error: {
         scope: "session",
         message: "The interrupted prompt failed",
-        delivery_submission_id: "submission-1",
+        delivery_submission_id: "stale-cleanup-submission",
       },
     },
   };
@@ -241,6 +245,46 @@ it("preserves a new session error after an older delivery incident was restored"
   });
 });
 
+it("preserves an unrelated provider failure while a restored incident remains in metadata", () => {
+  const bootstrapFailure = "A later provider bootstrap failed";
+  const restored = deliverySession("restored", []);
+  const currentSession: TaskSession = {
+    ...restored,
+    state: "FAILED",
+    error_message: bootstrapFailure,
+    metadata: {
+      ...restored.metadata,
+      agent_delivery_recovery: {
+        ...(restored.metadata?.agent_delivery_recovery as object),
+        submission_id: "incident-a",
+      },
+      last_agent_error: {
+        scope: "session",
+        phase: "bootstrap",
+        code: "provider_start_failed",
+        message: bootstrapFailure,
+      },
+    },
+  };
+  mockLaunchErrorContext.value = {
+    automaticRecovery: {
+      requestIdentity: { taskId: "task", sessionId: "session", generation: 2, attemptId: 4 },
+      resumptionState: "error",
+      error: bootstrapFailure,
+    },
+  };
+
+  const { result } = renderHook(() => useSessionComposerRecovery("session"), {
+    wrapper: recoveryWrapper(currentSession),
+  });
+
+  expect(result.current?.model).toMatchObject({
+    kind: "provider_start_failed",
+    summary: bootstrapFailure,
+  });
+  expect(result.current?.model?.requestLocal).not.toBe(true);
+});
+
 it("preserves a new request-local failure after committed restoration", () => {
   mockLaunchErrorContext.value = null;
   const currentSession = deliverySession("restored", []);
@@ -261,6 +305,48 @@ it("preserves a new request-local failure after committed restoration", () => {
   expect(result.current?.model).toMatchObject({
     kind: "generic",
     summary: "The new recovery request failed",
+    requestLocal: true,
+  });
+});
+
+it("keeps a request-local failure visible when chat remounts after restoration", () => {
+  const restored = {
+    ...deliverySession("restored", []),
+    metadata: {
+      ...deliverySession("restored", []).metadata,
+      agent_delivery_recovery: {
+        ...(deliverySession("restored", []).metadata?.agent_delivery_recovery as object),
+        submission_id: "submission-remount",
+      },
+    },
+  };
+  mockLaunchErrorContext.value = {
+    automaticRecovery: {
+      requestIdentity: { taskId: "task", sessionId: "session", generation: 1, attemptId: 1 },
+      resumptionState: "running",
+      error: null,
+    },
+  };
+  const firstMount = renderHook(() => useSessionComposerRecovery("session"), {
+    wrapper: recoveryWrapper(restored),
+  });
+  expect(firstMount.result.current?.model).toBeNull();
+  firstMount.unmount();
+
+  mockLaunchErrorContext.value = {
+    automaticRecovery: {
+      requestIdentity: { taskId: "task", sessionId: "session", generation: 1, attemptId: 2 },
+      resumptionState: "error",
+      error: "A newer resume request failed",
+    },
+  };
+  const secondMount = renderHook(() => useSessionComposerRecovery("session"), {
+    wrapper: recoveryWrapper(restored),
+  });
+
+  expect(secondMount.result.current?.model).toMatchObject({
+    kind: "generic",
+    summary: "A newer resume request failed",
     requestLocal: true,
   });
 });

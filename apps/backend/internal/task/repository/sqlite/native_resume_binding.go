@@ -251,7 +251,7 @@ func (r *Repository) restoreAuthenticatedNativeNoticeTx(ctx context.Context, tx 
 		return false, err
 	}
 	if record == nil {
-		return true, nil
+		return r.restoreMissingNativeNoticeTx(ctx, tx, proof, blocks, metadataRaw, completedAt)
 	}
 	if record.current.Phase == models.AgentDeliveryRecoverySettled {
 		return r.restoreHistoricalTerminalNoticeTx(ctx, tx, record, metadataRaw, proof, blocks, completedAt)
@@ -267,6 +267,29 @@ func (r *Repository) restoreAuthenticatedNativeNoticeTx(ctx context.Context, tx 
 	}
 	record.current.StreamID = proof.StreamID
 	return writeSilentRestoreRecoveryTx(ctx, tx, r.db.Rebind, record, metadataRaw, completedAt, "")
+}
+
+func (r *Repository) restoreMissingNativeNoticeTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	proof *models.NativeResumeDeliveryEvidence,
+	blocks []models.SessionRecoveryBlock,
+	metadataRaw sql.NullString,
+	completedAt time.Time,
+) (bool, error) {
+	incident, found := nativeResumeLaterInterruptedIncident(proof, "", blocks)
+	if !found {
+		return true, nil
+	}
+	metadata, err := decodeAgentDeliveryMetadata(metadataRaw)
+	if err != nil {
+		return false, err
+	}
+	source := models.AgentDeliveryRecovery{
+		SessionID: proof.SessionID, IncarnationID: proof.IncarnationID,
+		HarnessGeneration: incident.HarnessGeneration, SubmissionID: incident.ID, StreamID: incident.StreamID,
+	}
+	return true, r.markRecoveryNoticePendingTx(ctx, tx, metadata, metadataRaw, source, completedAt)
 }
 
 func (r *Repository) restorePreviouslyRestoredNativeNoticeTx(
@@ -313,7 +336,6 @@ func (r *Repository) restoreHistoricalTerminalNoticeTx(
 	if !found {
 		return false, nil
 	}
-	record.current.AgentExecutionID = proof.ExecutionID
 	record.current.HarnessGeneration = current.HarnessGeneration
 	record.current.SubmissionID = current.ID
 	record.current.StreamID = current.StreamID

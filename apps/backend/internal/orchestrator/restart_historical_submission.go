@@ -20,7 +20,7 @@ func (s *Service) hasNewRestartJournalSubmission(ctx context.Context, session *m
 		return false
 	}
 	descriptor := evidence.Descriptor
-	if !descriptor.Durable || descriptor.SubmissionsTruncated || descriptor.SessionID != session.ID || descriptor.IncarnationID != session.QueueIncarnationID || descriptor.HarnessGeneration != uint64(generation.Generation) {
+	if !restartJournalDescriptorMatches(descriptor, session, generation) {
 		return false
 	}
 	for _, submission := range descriptor.Submissions {
@@ -50,6 +50,70 @@ func (s *Service) hasNewRestartJournalSubmission(ctx context.Context, session *m
 			continue
 		}
 		return true
+	}
+	return false
+}
+
+func (s *Service) hasMissingCanonicalNewRestartJournalSubmission(
+	ctx context.Context,
+	session *models.TaskSession,
+	generation *models.HarnessSessionGeneration,
+	previousSubmissionID string,
+) bool {
+	inspector, supported := s.agentManager.(deliveryRecordEvidenceClient)
+	if !supported {
+		return false
+	}
+	reader, supported := s.repo.(nativeResumeDeliverySubmissionReader)
+	if !supported {
+		return false
+	}
+	evidence, err := inspector.InspectDeliveryRecordEvidence(ctx, agentruntime.DeliveryRecordEvidenceRequest{
+		TaskID: session.TaskID, SessionID: session.ID, IncarnationID: session.QueueIncarnationID,
+		HarnessGeneration: uint64(generation.Generation),
+	})
+	if err != nil || evidence == nil {
+		return false
+	}
+	descriptor := evidence.Descriptor
+	if !restartJournalDescriptorMatches(descriptor, session, generation) {
+		return false
+	}
+	stored, err := reader.ListAgentDeliverySubmissions(ctx, session.ID)
+	if err != nil {
+		return false
+	}
+	for _, candidate := range descriptor.Submissions {
+		if !restartJournalSubmissionUnsettled(candidate, previousSubmissionID) {
+			continue
+		}
+		if !restartSubmissionIsStored(stored, candidate.ID) {
+			return true
+		}
+	}
+	return false
+}
+
+func restartJournalDescriptorMatches(
+	descriptor journal.RecoveryDescriptor,
+	session *models.TaskSession,
+	generation *models.HarnessSessionGeneration,
+) bool {
+	return descriptor.Durable && !descriptor.SubmissionsTruncated &&
+		descriptor.SessionID == session.ID && descriptor.IncarnationID == session.QueueIncarnationID &&
+		descriptor.HarnessGeneration == uint64(generation.Generation)
+}
+
+func restartJournalSubmissionUnsettled(candidate journal.SubmissionSummary, previousSubmissionID string) bool {
+	return candidate.ID != previousSubmissionID &&
+		(candidate.State == journal.SubmissionDispatching || candidate.State == journal.SubmissionInterruptedUnknown)
+}
+
+func restartSubmissionIsStored(submissions []*models.AgentDeliverySubmission, submissionID string) bool {
+	for _, submission := range submissions {
+		if submission.ID == submissionID {
+			return true
+		}
 	}
 	return false
 }

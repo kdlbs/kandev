@@ -120,7 +120,10 @@ export function seedInterruptedPrompt(
   tmpDir: string,
   sessionId: string,
   recoveryExecutionId?: string,
-  options: { createCanonicalMessage?: boolean } = {},
+  options: {
+    createCanonicalMessage?: boolean;
+    allowUnverifiableRuntimeIdentity?: boolean;
+  } = {},
 ): SeededPrompt {
   const journalPath = findSessionJournal(tmpDir, sessionId);
   const seeded = withDatabase(tmpDir, (db) =>
@@ -138,7 +141,10 @@ function seedInterruptedPromptInDatabase(
   journalPath: string,
   sessionId: string,
   recoveryExecutionId: string | undefined,
-  options: { createCanonicalMessage?: boolean },
+  options: {
+    createCanonicalMessage?: boolean;
+    allowUnverifiableRuntimeIdentity?: boolean;
+  },
 ): SeededPrompt {
   const source = readLatestSourceSubmission(db, sessionId);
   const sourcePeer = journalFixture("read", journalPath, { id: source.id });
@@ -157,6 +163,7 @@ function seedInterruptedPromptInDatabase(
         sourcePeer,
         submissionId,
         turnId: message?.turnId,
+        allowUnverifiableRuntimeIdentity: options.allowUnverifiableRuntimeIdentity ?? false,
       })
     : undefined;
 
@@ -220,6 +227,7 @@ function preparePromptSeedRuntime({
   sourcePeer,
   submissionId,
   turnId,
+  allowUnverifiableRuntimeIdentity,
 }: {
   db: TestDatabase;
   sessionId: string;
@@ -229,6 +237,7 @@ function preparePromptSeedRuntime({
   sourcePeer: JournalRecord;
   submissionId: string;
   turnId: string | undefined;
+  allowUnverifiableRuntimeIdentity: boolean;
 }): PromptSeedRuntime {
   const running = db
     .prepare("SELECT agent_execution_id, metadata FROM executors_running WHERE session_id = ?")
@@ -252,7 +261,18 @@ function preparePromptSeedRuntime({
     throw persistedRuntimeOwnershipError();
   }
   const originalRuntime = binding.original_runtime;
-  if (!hasUsableRuntimeIdentity(originalRuntime)) throw persistedRuntimeOwnershipError();
+  if (
+    !originalRuntime ||
+    (!hasUsableRuntimeIdentity(originalRuntime) && !allowUnverifiableRuntimeIdentity)
+  ) {
+    const identityFields =
+      originalRuntime && typeof originalRuntime === "object"
+        ? Object.keys(originalRuntime).join(", ")
+        : typeof originalRuntime;
+    throw new Error(
+      `${persistedRuntimeOwnershipError().message}: incomplete original runtime identity (${identityFields})`,
+    );
+  }
 
   const promptGeneration = (binding.prompt_generation ?? 0) + 1;
   runtimeMetadata.delivery_prompt_turn_binding = {
@@ -307,10 +327,6 @@ function hasUsableRuntimeIdentity(
     identity &&
     typeof identity.pid === "number" &&
     identity.pid > 0 &&
-    typeof identity.group_id === "number" &&
-    identity.group_id > 0 &&
-    typeof identity.session_id === "number" &&
-    identity.session_id > 0 &&
     typeof identity.birth_token === "string" &&
     identity.birth_token.length > 0,
   );

@@ -149,9 +149,7 @@ func (s *Service) loadSilentRestoreSession(
 	}
 	recovery, ok := models.LoadAgentDeliveryRecovery(session.Metadata)
 	if ok && recovery.Phase == models.AgentDeliveryRecoveryRestored {
-		if err := s.publishPendingRecoveryNotice(ctx, session.ID); err != nil {
-			return nil, models.AgentDeliveryRecovery{}, false, err
-		}
+		s.warnPendingRecoveryNoticeFailure(session.ID, s.publishPendingRecoveryNotice(ctx, session.ID))
 	}
 	if !ok || !silentRestoreRecoveryPhase(recovery.Phase) || !silentRestoreRecoveryMatchesSession(recovery, session) {
 		return nil, models.AgentDeliveryRecovery{}, false, nil
@@ -251,7 +249,7 @@ func (s *Service) restoreSilentRestartCandidate(
 	candidate models.SilentRestoreCandidate,
 ) error {
 	if err := s.publishPendingRecoveryNoticeForCandidate(ctx, candidate); err != nil {
-		return fmt.Errorf("publish recovery notice before restore: %w", err)
+		s.warnPendingRecoveryNoticeFailure(candidate.SessionID, err)
 	}
 	inputs, err := s.loadSilentRestoreInputs(ctx, candidate)
 	if err != nil {

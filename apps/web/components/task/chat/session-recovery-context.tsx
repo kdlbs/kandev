@@ -24,6 +24,8 @@ type RecoveryContext = {
 };
 const Context = createContext<RecoveryContext | null>(null);
 const EMPTY_SESSION_ITEMS: Record<string, TaskSession> = {};
+const RESTORATION_REQUEST_BASELINE_LIMIT = 128;
+const restorationRequestBaselines = new Map<string, string | null>();
 
 export function SessionRecoveryProvider({
   session,
@@ -54,6 +56,7 @@ export function SessionRecoveryProvider({
   const retainPending = retainRecovery(enabled, session, previous.current);
   const committedRestoration = committedDeliveryRestoration(session);
   const newRecoveryRequest = useIsNewRequestAfterRestoration(
+    recoveryKey,
     committedRestoration,
     automaticRecovery,
   );
@@ -152,6 +155,7 @@ function recoveryModelBelongsToSubmission(
 }
 
 function useIsNewRequestAfterRestoration(
+  recoveryKey: string,
   restoration: ReturnType<typeof committedDeliveryRestoration>,
   automaticRecovery: ReturnType<typeof matchingAutomaticRecovery>,
 ): boolean {
@@ -162,21 +166,25 @@ function useIsNewRequestAfterRestoration(
   const restorationKey = restoration
     ? `${restoration.incarnationId}\u0000${restoration.harnessGeneration}\u0000${restoration.submissionId}`
     : null;
-  const initialRequest = useRef<{ restorationKey: string | null; requestKey: string | null }>({
-    restorationKey: null,
-    requestKey: null,
-  });
-  if (restorationKey === null) {
-    initialRequest.current = { restorationKey: null, requestKey: null };
-  } else if (initialRequest.current.restorationKey !== restorationKey) {
-    initialRequest.current = { restorationKey, requestKey };
+  const baselineRequestKey = restorationKey
+    ? rememberRestorationRequestBaseline(`${recoveryKey}\u0000${restorationKey}`, requestKey)
+    : null;
+  return Boolean(restorationKey && requestKey && baselineRequestKey !== requestKey);
+}
+
+function rememberRestorationRequestBaseline(key: string, requestKey: string | null): string | null {
+  if (restorationRequestBaselines.has(key)) {
+    const baseline = restorationRequestBaselines.get(key) ?? null;
+    restorationRequestBaselines.delete(key);
+    restorationRequestBaselines.set(key, baseline);
+    return baseline;
   }
-  return Boolean(
-    restorationKey &&
-    requestKey &&
-    initialRequest.current.restorationKey === restorationKey &&
-    initialRequest.current.requestKey !== requestKey,
-  );
+  if (restorationRequestBaselines.size >= RESTORATION_REQUEST_BASELINE_LIMIT) {
+    const oldestKey = restorationRequestBaselines.keys().next().value;
+    if (oldestKey !== undefined) restorationRequestBaselines.delete(oldestKey);
+  }
+  restorationRequestBaselines.set(key, requestKey);
+  return requestKey;
 }
 
 function useRequestLocalGuidance(taskId: string | null, session: TaskSession | null | undefined) {

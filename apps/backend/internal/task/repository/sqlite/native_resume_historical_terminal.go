@@ -29,7 +29,7 @@ func (r *Repository) HasResolvedHistoricalTerminalRecovery(
 	currentGeneration int64,
 	currentNativeSessionID string,
 ) (bool, error) {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.ro.BeginTxx(ctx, nil)
 	if err != nil {
 		return false, err
 	}

@@ -304,6 +304,12 @@ diff checks passed. The live instance was not repaired or restarted.
 - Created a distinct pending marker for a later incident in both same-generation
   and earlier-generation restored-notice paths, while retaining the older
   recovery snapshot.
+- Explicit Resume now treats an executor row marked `stopped` as absent during
+  startup grace, instead of binding the recovery attempt to a nonexistent live
+  execution. The race-enabled executor package and the focused reconstruction
+  regressions passed.
+- Remote Docker confirmed-absence Resume passed on desktop and phone. The E2Es
+  verify the same session resumes and the interrupted prompt is not replayed.
 - Focused frontend tests, web typecheck, localization checks, backend build,
   changed-Go lint, and desktop/phone production E2E passed. The four required
   PostgreSQL recovery suites and pending-marker candidate test passed, along

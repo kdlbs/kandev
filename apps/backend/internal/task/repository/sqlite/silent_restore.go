@@ -55,6 +55,12 @@ func (r *Repository) ListSilentRestoreCandidates(
 	sessionID := dialect.ByteOrderedText(driver, "ts.id")
 	pendingNotice := dialect.JSONTypeIsString(driver, "ts.metadata", models.SessionMetaKeyRecoveryNoticePending) +
 		" AND " + dialect.JSONExtract(driver, "ts.metadata", models.SessionMetaKeyRecoveryNoticePending) + " <> ''"
+	if dialect.IsPostgres(driver) {
+		pendingNotice = "CASE WHEN (" + pendingNotice + ") THEN 1 ELSE 0 END = 1"
+	} else {
+		pendingNotice = "CASE WHEN json_valid(ts.metadata) THEN CASE WHEN (" + pendingNotice +
+			") THEN 1 ELSE 0 END ELSE 0 END = 1"
+	}
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(fmt.Sprintf(`
 		SELECT ts.task_id, ts.id, t.workspace_id, ts.state, ts.metadata
 		FROM task_sessions ts

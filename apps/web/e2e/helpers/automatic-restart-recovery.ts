@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type { Page } from "@playwright/test";
 import { expect } from "@playwright/test";
 import type { BackendContext } from "../fixtures/backend";
@@ -7,6 +9,7 @@ import { setupPage } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
 import { PrAssetCapture } from "./pr-asset-capture";
 import { seedInterruptedPrompt, withDatabase } from "./interrupted-prompt-recovery";
+import { readMockACPTrace } from "./transient-turn-runtime-continuity";
 import { SessionPage } from "../pages/session-page";
 
 const restoredNotice =
@@ -30,28 +33,36 @@ export async function verifyAutomaticRestartRecovery({
   captureFile: string;
 }) {
   const context = initialPage.context();
-  const task = await api.createTaskWithAgent(
-    seed.workspaceId,
-    `Restart recovery ${recoveryCase}`,
-    seed.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seed.workflowId,
-      workflow_step_id: seed.startStepId,
-      repository_ids: [seed.repositoryId],
-      executor_profile_id: seed.worktreeExecutorProfileId,
-    },
-  );
+  const tracePath = path.join(backend.tmpDir, `automatic-restart-${randomUUID()}.jsonl`);
+  let profileId: string | undefined;
+  let taskId: string | undefined;
   let replacementPage: Page | undefined;
   let capture: PrAssetCapture | undefined;
   try {
+    fs.writeFileSync(tracePath, "");
+    const setup = await createRestartRecoveryTask(api, seed, tracePath, recoveryCase);
+    const { task, sessionId } = setup;
+    profileId = setup.profileId;
+    taskId = task.id;
     await initialPage.goto(`/t/${task.id}`);
     const sessionPage = new SessionPage(initialPage);
     await sessionPage.waitForLoad();
-    await sessionPage.expectChatResponseVisible("simple mock response", 0, { timeout: 30_000 });
+    await expect
+      .poll(
+        async () =>
+          (await api.listSessionMessages(sessionId)).messages.some((message) =>
+            message.content.includes("simple mock response"),
+          ),
+        { timeout: 30_000, message: "the initial mock response should be persisted" },
+      )
+      .toBe(true);
+    await sessionPage.expectChatResponseVisible("simple mock response", 0);
+    const originalPromptTrace = readMockACPTrace(tracePath)
+      .filter((record) => record.event === "prompt")
+      .map(({ session_id, prompt }) => ({ session_id, prompt }));
+    expect(originalPromptTrace.length).toBeGreaterThan(0);
 
-    const active = (await api.listTaskSessions(task.id)).sessions.find((item) => item.is_primary);
-    if (!active) throw new Error("created task has no primary session");
+    const active = await primarySessionForTask(api, task.id);
     await expect
       .poll(async () => (await api.getTaskSession(active.id)).session.state, { timeout: 30_000 })
       .toBe("WAITING_FOR_INPUT");
@@ -96,8 +107,19 @@ export async function verifyAutomaticRestartRecovery({
     const seeded = seedInterruptedPrompt(backend.tmpDir, active.id, before.agent_execution_id, {
       createCanonicalMessage: true,
     });
+    const sourcePrompt = JSON.parse(
+      Buffer.from(seeded.submission.payload, "base64").toString("utf8"),
+    ) as { text?: unknown };
+    if (typeof sourcePrompt.text !== "string")
+      throw new Error("interrupted prompt fixture has no source prompt text");
+    const interruptedPromptCount = (records: ReturnType<typeof readMockACPTrace>) =>
+      records.filter(
+        (record) =>
+          record.event === "prompt" && record.prompt?.includes(sourcePrompt.text as string),
+      ).length;
     expect(seeded.messageId).toBeTruthy();
     expect(seeded.submissionId).toBe(`prompt:${seeded.messageId}`);
+    expect(interruptedPromptCount(readMockACPTrace(tracePath))).toBe(1);
     originalMessages = (await api.listSessionMessages(active.id)).messages;
     if (recoveryCase === "historical-terminal") {
       seedHistoricalTerminalRecovery(
@@ -181,6 +203,12 @@ export async function verifyAutomaticRestartRecovery({
       });
 
     expect(context.pages()).toHaveLength(0);
+    expect(
+      readMockACPTrace(tracePath)
+        .filter((record) => record.event === "prompt")
+        .map(({ session_id, prompt }) => ({ session_id, prompt })),
+    ).toEqual(originalPromptTrace);
+    expect(interruptedPromptCount(readMockACPTrace(tracePath))).toBe(1);
     const recoveryRows = withDatabase(backend.tmpDir, (db) => ({
       block: db
         .prepare("SELECT state, authorized_action FROM session_recovery_blocks WHERE id = ?")
@@ -226,10 +254,15 @@ export async function verifyAutomaticRestartRecovery({
 
     replacementPage = await context.newPage();
     // Closing the page is required to prove backend-owned recovery. Restore
-    // the same tab's session-scoped draft in the replacement document.
-    await replacementPage.addInitScript((entries: [string, string][]) => {
-      for (const [key, value] of entries) window.sessionStorage.setItem(key, value);
-    }, savedDraft);
+    // the same tab's session-scoped draft once in the replacement document.
+    await replacementPage.addInitScript(
+      ({ entries, marker }: { entries: [string, string][]; marker: string }) => {
+        if (window.sessionStorage.getItem(marker) === "seeded") return;
+        window.sessionStorage.setItem(marker, "seeded");
+        for (const [key, value] of entries) window.sessionStorage.setItem(key, value);
+      },
+      { entries: savedDraft, marker: `kandev.e2e.recoveryDraftSeeded.${active.id}` },
+    );
     await setupPage(replacementPage, backend);
     await replacementPage.goto(`/t/${task.id}`);
     capture = new PrAssetCapture(replacementPage, captureFile, { captureKey: recoveryCase });
@@ -268,9 +301,31 @@ export async function verifyAutomaticRestartRecovery({
     } else {
       await restoredChat.clickSubmitWhenReady();
     }
-    await restoredChat.expectChatResponseVisible("Slow response complete after 1s.", 0, {
-      timeout: 30_000,
-    });
+    await expect
+      .poll(
+        async () =>
+          (await api.listSessionMessages(active.id)).messages.some((message) =>
+            message.content.includes("Slow response complete after 1s."),
+          ),
+        { timeout: 30_000, message: "the follow-up response should be persisted before rendering" },
+      )
+      .toBe(true);
+    await expect
+      .poll(() => readMockACPTrace(tracePath).filter((record) => record.event === "prompt"), {
+        timeout: 30_000,
+      })
+      .toHaveLength(originalPromptTrace.length + 1);
+    const promptsAfterFollowUp = readMockACPTrace(tracePath).filter(
+      (record) => record.event === "prompt",
+    );
+    expect(
+      promptsAfterFollowUp
+        .slice(0, originalPromptTrace.length)
+        .map(({ session_id, prompt }) => ({ session_id, prompt })),
+    ).toEqual(originalPromptTrace);
+    expect(interruptedPromptCount(readMockACPTrace(tracePath))).toBe(1);
+    expect(promptsAfterFollowUp.at(-1)?.prompt).toContain("/slow 1s");
+    await restoredChat.expectChatResponseVisible("Slow response complete after 1s.", 0);
     const followUp = (await api.listSessionMessages(active.id)).messages.filter(
       (message) => message.author_type === "user" && message.content.trim() === "/slow 1s",
     );
@@ -287,7 +342,53 @@ export async function verifyAutomaticRestartRecovery({
   } finally {
     capture?.flush();
     await replacementPage?.close().catch(() => undefined);
+    if (taskId) await api.deleteTask(taskId).catch(() => undefined);
+    if (profileId) await api.deleteAgentProfile(profileId, true).catch(() => undefined);
+    fs.rmSync(tracePath, { force: true });
   }
+}
+
+async function createRestartRecoveryTask(
+  api: ApiClient,
+  seed: SeedData,
+  tracePath: string,
+  recoveryCase: RecoveryCase,
+) {
+  const { agents } = await api.listAgents();
+  const profileOwner = agents.find((agent) =>
+    agent.profiles?.some((profile) => profile.id === seed.agentProfileId),
+  );
+  if (!profileOwner) throw new Error("mock-agent profile owner is missing");
+  const profile = await api.createAgentProfile(
+    profileOwner.id,
+    `Restart recovery ${randomUUID()}`,
+    {
+      model: "mock-fast",
+      auto_fallback: false,
+      env_vars: [{ key: "E2E_MOCK_AGENT_ACP_TRACE_FILE", value: tracePath }],
+    },
+  );
+  const task = await api.createTaskWithAgent(
+    seed.workspaceId,
+    `Restart recovery ${recoveryCase}`,
+    profile.id,
+    {
+      description: "/e2e:simple-message",
+      workflow_id: seed.workflowId,
+      workflow_step_id: seed.startStepId,
+      repository_ids: [seed.repositoryId],
+      executor_profile_id: seed.worktreeExecutorProfileId,
+    },
+  );
+  if (!task.session_id) throw new Error("created task has no session ID");
+  return { profileId: profile.id, task, sessionId: task.session_id };
+}
+
+async function primarySessionForTask(api: ApiClient, taskId: string) {
+  const { sessions } = await api.listTaskSessions(taskId);
+  const session = sessions.find((item) => item.is_primary);
+  if (!session) throw new Error("created task has no primary session");
+  return session;
 }
 
 async function createIndependentBlockedSibling(

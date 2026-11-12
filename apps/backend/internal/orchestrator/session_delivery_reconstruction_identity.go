@@ -83,9 +83,13 @@ func (s *Service) verifyReconstructionControlIdentity(
 ) (string, error) {
 	// Payload selection and process ownership are separate reads. Recheck the
 	// exact process-bound prompt before committing a control identity.
+	storedSubmissionID := ""
+	if evidence.StoredSubmission != nil {
+		storedSubmissionID = evidence.StoredSubmission.ID
+	}
 	latest, err := client.InspectDeliveryRecordEvidence(ctx, agentruntime.DeliveryRecordEvidenceRequest{
 		TaskID: request.TaskID, SessionID: request.SessionID, IncarnationID: request.IncarnationID,
-		HarnessGeneration: uint64(request.HarnessGeneration),
+		HarnessGeneration: uint64(request.HarnessGeneration), StoredSubmissionID: storedSubmissionID,
 	})
 	if err != nil {
 		return deliveryRecordEvidenceReason(err), nil
@@ -93,19 +97,53 @@ func (s *Service) verifyReconstructionControlIdentity(
 	if latest == nil {
 		return staleDeliveryRecoveryReason, nil
 	}
-	if persistedBinding {
-		if latest.ProcessTerminated == nil || !*latest.ProcessTerminated || !sameRestartDescriptor(evidence.Descriptor, latest.Descriptor) ||
-			(latest.ControlIdentity != nil && *latest.ControlIdentity != identity) {
-			return staleDeliveryRecoveryReason, nil
-		}
-	} else if latest.ControlIdentity == nil || *latest.ControlIdentity != identity {
-		return staleDeliveryRecoveryReason, nil
-	}
-	if request.Recovery.HistoryGap != nil && (!sameRestartDescriptor(evidence.Descriptor, latest.Descriptor) ||
-		latest.ProcessTerminated == nil || !*latest.ProcessTerminated) {
+	if !reconstructionControlIdentityMatchesLatest(evidence, latest, identity, persistedBinding, request) {
 		return staleDeliveryRecoveryReason, nil
 	}
 	return "", nil
+}
+
+func reconstructionControlIdentityMatchesLatest(
+	evidence, latest *agentruntime.DeliveryRecordEvidence,
+	identity agentruntime.AgentDeliveryRecoveryIdentity,
+	persistedBinding bool,
+	request *models.AgentDeliveryReconstructionRequest,
+) bool {
+	if persistedBinding {
+		if !persistedReconstructionIdentityMatches(evidence, latest, identity) {
+			return false
+		}
+	} else if !liveReconstructionIdentityMatches(latest, identity) {
+		return false
+	}
+	return reconstructionHistoryGapMatches(evidence, latest, request)
+}
+
+func persistedReconstructionIdentityMatches(
+	evidence, latest *agentruntime.DeliveryRecordEvidence,
+	identity agentruntime.AgentDeliveryRecoveryIdentity,
+) bool {
+	return latest.ProcessTerminated != nil && *latest.ProcessTerminated &&
+		sameRestartDescriptor(evidence.Descriptor, latest.Descriptor) &&
+		(latest.ControlIdentity == nil || *latest.ControlIdentity == identity)
+}
+
+func liveReconstructionIdentityMatches(
+	latest *agentruntime.DeliveryRecordEvidence,
+	identity agentruntime.AgentDeliveryRecoveryIdentity,
+) bool {
+	return latest.ControlIdentity != nil && *latest.ControlIdentity == identity
+}
+
+func reconstructionHistoryGapMatches(
+	evidence, latest *agentruntime.DeliveryRecordEvidence,
+	request *models.AgentDeliveryReconstructionRequest,
+) bool {
+	if request.Recovery.HistoryGap == nil {
+		return true
+	}
+	return sameRestartDescriptor(evidence.Descriptor, latest.Descriptor) &&
+		latest.ProcessTerminated != nil && *latest.ProcessTerminated
 }
 
 func (s *Service) persistedPromptTurnBinding(ctx context.Context, request *models.AgentDeliveryReconstructionRequest) (*models.AgentDeliveryPromptTurnBinding, error) {

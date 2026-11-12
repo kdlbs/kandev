@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"go.uber.org/zap"
 )
 
 const sessionRecoveryNoticeContent = "The session was interrupted. Your conversation is restored. You can continue."
@@ -21,6 +22,12 @@ type recoveryNoticeSubmissionReader interface {
 
 type recoveryNoticeDispositionVerifier interface {
 	VerifyCommittedRecoveryNoticeSource(context.Context, models.AgentDeliveryRecovery) (bool, error)
+}
+
+type lifecycleRecoveryNoticeMessageCreator interface {
+	CreateSessionLifecycleMessageIdempotent(
+		context.Context, string, string, string, string, string, map[string]interface{},
+	) error
 }
 
 func sessionRecoveryNoticeMessageIDFromIdentity(identity string) string {
@@ -51,7 +58,7 @@ func (s *Service) publishRecoveryNoticeForPending(
 	pending string,
 ) error {
 	source, valid := models.ParseRecoveryNoticeSourceIdentity(pending)
-	if !valid || source.SessionID != session.ID || source.IncarnationID != session.QueueIncarnationID ||
+	if !valid || !recoveryNoticeSourceMatchesSession(source, session) ||
 		source.HarnessGeneration <= 0 || source.SubmissionID == "" {
 		return errors.New("recovery notice source identity is incomplete")
 	}
@@ -62,6 +69,23 @@ func (s *Service) publishRecoveryNoticeForPending(
 		return err
 	}
 	return s.clearRecoveryNoticePendingMarker(ctx, session.ID, pending)
+}
+
+func recoveryNoticeSourceMatchesSession(source models.AgentDeliveryRecovery, session *models.TaskSession) bool {
+	if session == nil {
+		return false
+	}
+	incarnationID := session.QueueIncarnationID
+	if incarnationID == "" {
+		incarnationID = session.ID
+	}
+	return source.SessionID == session.ID && source.IncarnationID == incarnationID
+}
+
+func (s *Service) warnPendingRecoveryNoticeFailure(sessionID string, err error) {
+	if err != nil {
+		s.logger.Warn("could not publish pending session recovery notice", zap.String("session_id", sessionID), zap.Error(err))
+	}
 }
 
 func (s *Service) validateRecoveryNoticeSubmission(
@@ -108,10 +132,19 @@ func (s *Service) createRecoveryNoticeMessage(
 		"source_harness_generation": source.HarnessGeneration,
 		"source_submission_id":      source.SubmissionID,
 	}
-	if err := s.messageCreator.CreateSessionMessageIdempotent(
-		ctx, messageID, session.TaskID, sessionRecoveryNoticeContent, session.ID,
-		string(v1.MessageTypeStatus), "", metadata, false,
-	); err != nil {
+	var err error
+	if creator, ok := s.messageCreator.(lifecycleRecoveryNoticeMessageCreator); ok {
+		err = creator.CreateSessionLifecycleMessageIdempotent(
+			ctx, messageID, session.TaskID, sessionRecoveryNoticeContent, session.ID,
+			string(v1.MessageTypeStatus), metadata,
+		)
+	} else {
+		err = s.messageCreator.CreateSessionMessageIdempotent(
+			ctx, messageID, session.TaskID, sessionRecoveryNoticeContent, session.ID,
+			string(v1.MessageTypeStatus), "", metadata, false,
+		)
+	}
+	if err != nil {
 		return err
 	}
 	return nil

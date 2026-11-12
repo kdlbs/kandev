@@ -169,6 +169,9 @@ func (s *Service) currentRestartRecoverySnapshot(ctx context.Context, session *m
 		return recovery, true, nil
 	}
 	if recovery.Phase == models.AgentDeliveryRecoverySettled {
+		if s.hasMissingCanonicalNewRestartJournalSubmission(ctx, session, generation, recovery.SubmissionID) {
+			return recovery, false, nil
+		}
 		verifier, supported := s.repo.(historicalTerminalRecoveryVerifier)
 		if !supported {
 			return recovery, true, nil

@@ -646,6 +646,9 @@ func (s *Service) resolveSessionRecoveryBlock(ctx context.Context, sessionID, ac
 	}
 	block, err := store.GetOpenSessionRecoveryBlock(ctx, sessionID, incarnationID, generation)
 	if errors.Is(err, sql.ErrNoRows) {
+		if action == recoveryActionResume {
+			return s.finishSessionRecovery(ctx, sessionID)
+		}
 		return nil
 	}
 	if err != nil {
@@ -668,12 +671,16 @@ func (s *Service) resolveSessionRecoveryBlock(ctx context.Context, sessionID, ac
 		}
 		return fmt.Errorf("resolve session recovery block: block changed or recovery evidence is incomplete")
 	}
+	return s.finishSessionRecovery(ctx, sessionID)
+}
+
+func (s *Service) finishSessionRecovery(ctx context.Context, sessionID string) error {
 	s.publishAgentDeliveryRecoveryState(ctx, sessionID)
-	if err := s.publishPendingRecoveryNotice(ctx, sessionID); err != nil {
-		return fmt.Errorf("persist session recovery notice: %w", err)
-	}
 	if err := s.restorePendingQueueDispatchesForRecovery(ctx, sessionID); err != nil {
 		return fmt.Errorf("release parked queue work after session recovery: %w", err)
+	}
+	if err := s.publishPendingRecoveryNotice(ctx, sessionID); err != nil {
+		return fmt.Errorf("persist session recovery notice: %w", err)
 	}
 	return nil
 }
