@@ -139,7 +139,7 @@ async function reopenPRPopover(testPage: Page, session: SessionPage) {
 }
 
 test.describe("PR top-bar CI popover", () => {
-  test("single badge shows a conflict bubble beside the left status glyph and keeps its details", async ({
+  test("single badge prioritizes conflict in the status glyph and keeps its details", async ({
     testPage,
     apiClient,
     seedData,
@@ -172,9 +172,9 @@ test.describe("PR top-bar CI popover", () => {
       /Checks failed.*Changes requested.*Conflicts/,
     );
     await expect(badge.getByTestId("pr-merge-conflict-warning")).toBeVisible();
-    await expect(badge.getByTestId("pr-ci-bubble-failed")).toBeVisible();
-    // Base PR glyph, inline conflict triangle, and the independent CI bubble.
-    await expect(badge.locator("svg")).toHaveCount(3);
+    await expect(badge.getByTestId("pr-ci-bubble-failed")).toHaveCount(0);
+    // The conflict triangle occupies the shared corner slot.
+    await expect(badge.locator("svg")).toHaveCount(2);
     await badge.focus();
     await expect(testPage.getByTestId("pr-topbar-popover")).toBeVisible();
     await badge.click();
