@@ -23,7 +23,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-import type { TaskPR } from "@/lib/types/github";
+import type { PRCIState, TaskPR } from "@/lib/types/github";
 import type { TaskPRTooltipHydrationStatus } from "@/hooks/domains/github/use-task-pr-tooltip-hydration";
 import { useChangeRequestTaskTooltipState } from "@/components/integrations/use-change-request-task-tooltip-state";
 import type { TaskPRAutomationSummary, TaskPRInfo } from "./pr-task-automation";
@@ -71,6 +71,7 @@ export function createPRTaskIconDisclosureProps({
   ariaLabel,
   automation,
   hasMergeConflicts,
+  ciState,
   hasWorkflowApprovalRequired,
   summaries,
   staleWorkflowPRs,
@@ -78,6 +79,7 @@ export function createPRTaskIconDisclosureProps({
 }: Omit<PRTaskIconDisclosureProps, "icon" | "content"> & {
   automation: TaskPRAutomationSummary;
   hasMergeConflicts: boolean;
+  ciState: PRCIState;
   hasWorkflowApprovalRequired: boolean;
   summaries: PRTaskStatusSummaryData[];
   staleWorkflowPRs: StaleWorkflowAttentionPR[];
@@ -102,7 +104,7 @@ export function createPRTaskIconDisclosureProps({
       <PRTaskIconGlyph
         automation={automation}
         hasMergeConflicts={hasMergeConflicts}
-        hasWorkflowApprovalRequired={hasWorkflowApprovalRequired}
+        ciState={ciState}
       />
     ),
     content: getTaskPRIconDisclosureContent({
@@ -141,6 +143,7 @@ function getTaskPRIconDisclosureContent({
   }
   return (
     <>
+      {summaries.length > 0 && <PRTaskStatusSummary summaries={summaries} />}
       <CompactPRTooltipContent
         status={hydrationStatus}
         workflowApprovalRequired={hasWorkflowApprovalRequired}
@@ -153,16 +156,16 @@ function getTaskPRIconDisclosureContent({
 export function PRTaskIconGlyph({
   automation,
   hasMergeConflicts,
-  hasWorkflowApprovalRequired,
+  ciState,
 }: {
   automation: TaskPRAutomationSummary;
   hasMergeConflicts: boolean;
-  hasWorkflowApprovalRequired: boolean;
+  ciState: PRCIState;
 }) {
   return (
     <PRStatusGlyph
       hasMergeConflicts={hasMergeConflicts}
-      hasWorkflowApprovalRequired={hasWorkflowApprovalRequired}
+      ciState={ciState}
       autoFixEnabled={automation.autoFixEnabled}
       autoMergeEnabled={automation.autoMergeEnabled}
     />
@@ -364,7 +367,7 @@ export const PRTaskIconTrigger = forwardRef<HTMLElement, PRTaskIconTriggerProps>
           aria-haspopup="dialog"
           aria-expanded={open}
           className={cn(
-            "relative inline-flex h-3.5 w-3.5 shrink-0 cursor-pointer items-center justify-center [@media(pointer:coarse)]:after:absolute [@media(pointer:coarse)]:after:-inset-[15px] [@media(pointer:coarse)]:after:content-['']",
+            "relative inline-flex min-h-3.5 min-w-3.5 shrink-0 cursor-pointer items-center justify-center [@media(pointer:coarse)]:after:absolute [@media(pointer:coarse)]:after:-inset-[15px] [@media(pointer:coarse)]:after:content-['']",
             iconColor,
           )}
           onPointerDown={(event) => event.stopPropagation()}

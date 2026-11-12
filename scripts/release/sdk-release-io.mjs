@@ -13,11 +13,60 @@ import { packCandidate, inspectArchive } from "../pluginsdk/pack-candidate.mjs";
 import { smokeGo } from "../pluginsdk/consumer-smoke.mjs";
 import { publicationEnvironment } from "./sdk-runtime.mjs";
 import { digest } from "./sdk-artifact.mjs";
+import { collectSecrets, sanitizeOutput } from "./sdk-diagnostics.mjs";
 const exec = promisify(execFile);
 
+function mergeOutput(...values) {
+  return values
+    .filter((value) => typeof value === "string" && value)
+    .join("\n");
+}
+
+export function projectVerifiedRegistryState(
+  state,
+  { integrity, recordDigest, provenance },
+) {
+  return {
+    ...state,
+    version: {
+      version: state.version.version,
+      integrity,
+      recordDigest,
+      provenance,
+    },
+  };
+}
+
+const AUTH_NPM_CODES = new Set(["ENEEDAUTH", "E401", "E403"]);
+
+function npmErrorCode(error, output) {
+  if (typeof error?.code === "string" && /^E[A-Z0-9]+$/.test(error.code))
+    return error.code;
+  const match = `${output ?? ""}\n${error?.message ?? ""}`.match(
+    /\bnpm (?:error|ERR!) code (E[A-Z0-9]+)\b/,
+  );
+  return match?.[1] ?? null;
+}
+
 export class ReleaseIO {
-  constructor({ root, directory, repository, source, env = process.env }) {
+  constructor({
+    root,
+    directory,
+    repository,
+    source,
+    env = process.env,
+    now = () => performance.now(),
+    registryWait = (milliseconds) =>
+      new Promise((resolve) => setTimeout(resolve, milliseconds)),
+    diagnostics = null,
+    run = exec,
+  }) {
     Object.assign(this, { root, directory, repository, source, env });
+    this.now = now;
+    this.registryWait = registryWait;
+    this.diagnostics = diagnostics;
+    this.run = run;
+    this.secrets = collectSecrets(env);
     this.smoke = smokeGo;
     this.assets = new ReleaseAssets({
       root,
@@ -137,14 +186,11 @@ export class ReleaseIO {
       )
         throw new Error("unsupported npm provenance");
     }
-    return {
-      ...state,
-      version: {
-        integrity: state.version.dist.integrity,
-        recordDigest: inspected.recordDigest,
-        provenance: !!provenance,
-      },
-    };
+    return projectVerifiedRegistryState(state, {
+      integrity: state.version.dist.integrity,
+      recordDigest: inspected.recordDigest,
+      provenance: !!provenance,
+    });
   }
   async sourceForVersion(version) {
     const tag = await this.repository.readSignedTag(`pluginsdk/v${version}`);
@@ -178,12 +224,43 @@ export class ReleaseIO {
       join(cwd, "package.json"),
       JSON.stringify({ private: true }),
     );
-    return exec("npm", args, {
-      cwd,
-      env: publicationEnvironment(cwd, this.env),
-      timeout: 180_000,
-      maxBuffer: 4 * 1024 * 1024,
-    });
+    try {
+      const result = await this.run("npm", args, {
+        cwd,
+        env: publicationEnvironment(cwd, this.env),
+        timeout: 180_000,
+        maxBuffer: 4 * 1024 * 1024,
+      });
+      const output = sanitizeOutput(mergeOutput(result.stdout, result.stderr), {
+        secrets: this.secrets,
+      });
+      this.diagnostics?.command({
+        args,
+        outcome: "succeeded",
+        output,
+      });
+      return result;
+    } catch (error) {
+      const details = mergeOutput(error.stdout, error.stderr);
+      const raw = details || error.message;
+      const output = sanitizeOutput(raw, { secrets: this.secrets });
+      const npmCode = npmErrorCode(error, raw);
+      this.diagnostics?.command({
+        args,
+        outcome: "failed",
+        exitCode: error.code,
+        output,
+      });
+      const failure = new Error(
+        `npm ${args[0]} failed with exit code ${error.code ?? "unknown"}: ${output.text}`,
+      );
+      failure.code = error.code;
+      failure.command = args[0];
+      failure.npmCode = npmCode;
+      if (AUTH_NPM_CODES.has(npmCode)) failure.category = "authentication";
+      failure.sanitizedOutput = output;
+      throw failure;
+    }
   }
   publish(candidate) {
     return this.npm([
@@ -222,7 +299,16 @@ export class ReleaseIO {
         });
         break;
       } catch (error) {
-        if (attempt === 2) throw error;
+        if (attempt === 2) {
+          const safe = sanitizeOutput(error?.message ?? "consumer failed", {
+            secrets: this.secrets,
+          });
+          const failure = new Error(
+            `public consumer verification failed: ${safe.text}`,
+          );
+          failure.code = "CONSUMER_VERIFICATION";
+          throw failure;
+        }
         await this.wait(attempt);
       }
     }

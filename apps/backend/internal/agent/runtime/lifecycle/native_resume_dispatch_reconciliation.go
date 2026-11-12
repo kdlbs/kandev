@@ -18,6 +18,10 @@ func (m *Manager) reconcileNativeResumeSQLDispatch(ctx context.Context, executio
 	if err != nil {
 		return err
 	}
+	rows, err = contextContinuedNativeResumeHistory(ctx, execution, status, repository, peer, rows)
+	if err != nil {
+		return err
+	}
 	retained := make(map[string]journal.Submission, len(peer))
 	for _, submission := range peer {
 		if _, duplicate := retained[submission.ID]; duplicate {

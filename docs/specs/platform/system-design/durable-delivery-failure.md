@@ -2,8 +2,10 @@
 status: draft
 system: platform
 created: 2026-10-27
+updated: 2026-11-09
 requirements:
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-001
+  - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-007
 ---
@@ -20,6 +22,7 @@ It does not replace their ownership, terminal, or uncertainty rules.
 | Requirement | Design sections |
 | --- | --- |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-001 | Error classification and producer failure handling |
+| REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005 | Settled session state convergence |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006 | Independent observation, recovery, and user surface |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-007 | Retained peers and verification |
 
@@ -128,6 +131,78 @@ A recovered producer must reestablish a usable writer and current ownership befo
 A capacity read alone cannot erase a sticky writer failure.
 Repeated recovery uses the same existing idempotent operations.
 This package does not repair historical live sessions by direct database mutation.
+
+## Settled session state convergence
+
+This section specializes criteria 005.2, 005.3, and 006.5 for a retained terminal after a storage interruption.
+The [fix package](../../../plans/delivery-storage-recovery/plan.md) records the work orders and proof obligations.
+
+Current terminal settlement commits the submission outcome, queue claims, recovery notice, and completed effect.
+`reconcileAgentDeliverySettlements` reads pending effects only.
+Neither a completed effect nor `publishAgentDeliveryRecoveryState` repairs a stale coarse session state.
+The ordinary waiting helper also discards its state-update error.
+These boundaries permit a settled cancelled turn and ready executor to coexist with a `RUNNING` session.
+The incident proves that combination, but missing log writes prevent attribution to one exact failed SQL operation.
+
+Keep projection, settlement, and session-state correction inside the existing recovery pipeline.
+Do not synthesize another `agent.ready`, terminal event, turn, or workflow completion.
+Health reports can identify a recovery candidate but supply no terminal authority.
+
+### Required evidence
+
+Select the terminal through the current persisted prompt/turn binding, not the newest arbitrary historical event.
+Require an actual inbox receipt, contiguous projection through its sequence, matching terminal effect and outcome, and settled canonical turn.
+Match session, incarnation, harness generation, stream, submission, turn, execution, and prompt generation wherever recorded.
+A completed label without the actual receipt or a coarse persisted executor `ready` label is insufficient.
+Require current lifecycle ownership and idle foreground evidence, including absence of a pending dispatch or foreground tool.
+
+Every current-owner submission must be considered.
+Any independent prepared, accepted, or dispatching successor blocks the predecessor's state correction.
+A mixed inventory containing one settled terminal and one live successor must leave the successor unchanged.
+Unknown ownership, incomplete bindings, projection lag, conflicting outcomes, and unavailable reads preserve existing recovery restrictions.
+
+### Conditional correction and retry
+
+Extend the settlement repository with a narrow conditional session-state operation.
+Use the existing turn and delivery admission locks, in their established order, and re-read SQL evidence inside the writer transaction.
+Capture runtime identity before admission and revalidate it at the mutation boundary through the existing lifecycle ownership seam.
+Do not call runtime methods while holding a lock that a synchronous lifecycle publisher can reacquire.
+Serialize with cancellation, dispatch reservations, session reset, and replacement through the existing session guard.
+
+For the exact settled cancelled or completed turn, correct only `STARTING` or `RUNNING` to `WAITING_FOR_INPUT`.
+Do not change failed, cancelled, completed, archived, or superseded sessions.
+Retain independent recovery blocks. A waiting session does not grant prompt admission.
+Office, workflow, automation, and background-work policies retain their existing authority.
+The repair does not move a task, evaluate a workflow, release a queued prompt, or repeat a completed effect.
+
+Return an explicit changed, already-consistent, superseded, or unavailable result.
+A failed SQL state correction must remain retryable before terminal bookkeeping claims full convergence.
+Use existing terminal effects and recovery callbacks for retry. Do not add a persistence table or independent scheduler.
+Publish the normal session-state event and status-summary invalidation only after a successful commit.
+Publication failure does not undo SQL truth. Reload and repeated reconciliation must expose that same committed result.
+
+Existing installations can contain fully completed effects with stale session rows.
+At owned-runtime adoption and explicit recovery, assess the current bound terminal even when the pending-effect list is empty.
+Use the existing bounded startup/session recovery traversal, without scanning all historical event payloads.
+If current runtime evidence is not yet available, retry through that adoption/recovery path after it becomes available.
+An unavailable candidate cannot prevent application startup or recovery of other sessions.
+Its existing admission restrictions remain effective until the required evidence becomes available.
+An already waiting row is a no-op. A later prompt or replacement invalidates the candidate.
+No operator database edit or automatic replay forms part of this repair.
+
+SQLite and PostgreSQL must share the same predicate and interruption behavior.
+Use existing writer admission and PostgreSQL advisory locks. No schema or journal-version change is planned.
+Log only changes and bounded refusal categories. Keep record identifiers in structured log context and outside metric labels.
+
+### Verification boundary
+
+The regression starts with a real projected cancellation terminal and completed settlement effect, a ready current executor, and a `RUNNING` session.
+Reconciliation must produce `WAITING_FOR_INPUT` without another terminal or prompt.
+Inject a state-write failure, then retry without another output event.
+Block proof reads while a successor dispatches, replaces the execution, or activates a foreground tool.
+The delayed repair must leave that successor and all independent recovery blocks unchanged.
+Verify one committed state event, preserved outcome and conversation, and no duplicate workflow or queue effects.
+Use real multi-connection PostgreSQL coverage for the conditional mutation.
 
 ## User surface and mobile behavior
 

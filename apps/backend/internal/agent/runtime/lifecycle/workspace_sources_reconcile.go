@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -206,10 +207,13 @@ func workspaceRepositorySpecsFromLaunch(req *LaunchRequest) []WorkspaceRepositor
 	specs := req.RepoSpecs()
 	result := make([]WorkspaceRepositorySpec, 0, len(specs))
 	for _, spec := range specs {
+		worktreePath := launchRepoWorktreePath(req, spec)
 		result = append(result, WorkspaceRepositorySpec{
-			RepositoryID: spec.RepositoryID, RepositoryPath: spec.RepositoryPath, RepoName: spec.RepoName,
+			RepositoryID: spec.RepositoryID, RepositoryPath: spec.RepositoryPath, WorktreePath: worktreePath,
+			RepoName:       spec.RepoName,
 			IntegrationRef: spec.IntegrationRef,
-			BaseBranch:     spec.BaseBranch, DefaultBranch: spec.DefaultBranch, CheckoutBranch: spec.CheckoutBranch,
+			BaseBranch:     spec.BaseBranch, BaseBranchFallbackPolicy: spec.BaseBranchFallbackPolicy,
+			DefaultBranch: spec.DefaultBranch, CheckoutBranch: spec.CheckoutBranch,
 			PRNumber: spec.PRNumber, QualifiedPRBase: spec.QualifiedPRBase,
 			ComparisonTarget: spec.ComparisonTarget,
 			WorktreeID:       spec.WorktreeID, WorktreeBranchPrefix: spec.WorktreeBranchPrefix,
@@ -220,6 +224,29 @@ func workspaceRepositorySpecsFromLaunch(req *LaunchRequest) []WorkspaceRepositor
 		})
 	}
 	return result
+}
+
+func launchRepoWorktreePath(req *LaunchRequest, spec RepoLaunchSpec) string {
+	root := launchTaskWorkspaceRoot(req)
+	if root == "" {
+		return ""
+	}
+	relative := strings.TrimSpace(spec.WorkspaceRelativePath)
+	if relative == "" {
+		primaryOnly := !launchUsesTaskRoot(req) && filepath.Clean(root) == filepath.Clean(req.WorkspacePath)
+		if req.ExecutorType != string(models.ExecutorTypeWorktree) || primaryOnly {
+			return ""
+		}
+		repoDir := worktree.SanitizeRepoDirName(spec.RepoName)
+		if repoDir == "" {
+			return ""
+		}
+		relative = repoDir
+		if slug := worktree.SanitizeBranchSlug(spec.BranchSlug); slug != "" {
+			relative += "-" + slug
+		}
+	}
+	return filepath.Join(root, filepath.FromSlash(relative))
 }
 
 func repositoryIDsFromLaunch(req *LaunchRequest) []string {
@@ -339,6 +366,9 @@ func workspaceSourceRoots(folders []WorkspaceFolderSpec, repositories []Workspac
 	roots := make([]string, 0, len(folders)+len(repositories))
 	seen := make(map[string]struct{}, cap(roots))
 	add := func(path string) {
+		if strings.TrimSpace(path) == "" {
+			return
+		}
 		resolved, err := filepath.EvalSymlinks(filepath.Clean(path))
 		if err != nil {
 			return
@@ -358,6 +388,10 @@ func workspaceSourceRoots(folders []WorkspaceFolderSpec, repositories []Workspac
 	}
 	for _, repository := range repositories {
 		add(repository.RepositoryPath)
+		// An adopted worktree is a linked checkout at an arbitrary depth below
+		// the task root. The agentctl tracker graph discovers it through this
+		// explicit source root after restart or session resume.
+		add(repository.WorktreePath)
 	}
 	return roots
 }

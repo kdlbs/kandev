@@ -43,7 +43,7 @@ func TestDeleteSession_PreservesTaskWorkspaceAndNeverEnqueuesCleanup(t *testing.
 
 	manager := &mockAgentManager{}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 
 	if err := svc.DeleteSession(ctx, "session-only"); err != nil {
 		t.Fatalf("DeleteSession: %v", err)

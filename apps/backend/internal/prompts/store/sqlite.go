@@ -13,7 +13,6 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	promptcfg "github.com/kandev/kandev/config/prompts"
-	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/prompts/models"
 )
@@ -64,16 +63,11 @@ func (r *sqliteRepository) initSchema() error {
 			name TEXT NOT NULL UNIQUE,
 			content TEXT NOT NULL,
 			builtin INTEGER NOT NULL DEFAULT 0,
-			allow_agent_edits INTEGER NOT NULL DEFAULT 0,
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL
 		);
 	`
 	if _, err := r.db.Exec(schema); err != nil {
-		return err
-	}
-
-	if err := r.migrateAgentPermission(); err != nil {
 		return err
 	}
 
@@ -94,7 +88,7 @@ func (r *sqliteRepository) Close() error {
 
 func (r *sqliteRepository) ListPrompts(ctx context.Context) ([]*models.Prompt, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, name, content, builtin, allow_agent_edits, created_at, updated_at
+		SELECT id, name, content, builtin, created_at, updated_at
 		FROM custom_prompts
 		ORDER BY builtin DESC, name ASC
 		LIMIT ?
@@ -110,7 +104,7 @@ func (r *sqliteRepository) ListPrompts(ctx context.Context) ([]*models.Prompt, e
 	for rows.Next() {
 		prompt := &models.Prompt{}
 		var builtinInt int
-		if err := rows.Scan(&prompt.ID, &prompt.Name, &prompt.Content, &builtinInt, &prompt.AllowAgentEdits, &prompt.CreatedAt, &prompt.UpdatedAt); err != nil {
+		if err := rows.Scan(&prompt.ID, &prompt.Name, &prompt.Content, &builtinInt, &prompt.CreatedAt, &prompt.UpdatedAt); err != nil {
 			return nil, err
 		}
 		prompt.Builtin = builtinInt == 1
@@ -138,7 +132,7 @@ func (r *sqliteRepository) ListPromptsForReferenceExpansion(
 	nameLength := dialect.ByteLength(r.ro.DriverName(), "name")
 	contentLength := dialect.ByteLength(r.ro.DriverName(), "content")
 	query := fmt.Sprintf(`
-		SELECT id, name, content, builtin, allow_agent_edits, created_at, updated_at
+		SELECT id, name, content, builtin, created_at, updated_at
 		FROM custom_prompts
 		WHERE %s > 0
 			AND %s <= ?
@@ -161,7 +155,7 @@ func (r *sqliteRepository) ListPromptsForReferenceExpansion(
 	for rows.Next() {
 		prompt := &models.Prompt{}
 		var builtinInt int
-		if err := rows.Scan(&prompt.ID, &prompt.Name, &prompt.Content, &builtinInt, &prompt.AllowAgentEdits, &prompt.CreatedAt, &prompt.UpdatedAt); err != nil {
+		if err := rows.Scan(&prompt.ID, &prompt.Name, &prompt.Content, &builtinInt, &prompt.CreatedAt, &prompt.UpdatedAt); err != nil {
 			return nil, false, err
 		}
 		if len(prompts) >= limit {
@@ -185,13 +179,13 @@ func (r *sqliteRepository) ListPromptsForReferenceExpansion(
 
 func (r *sqliteRepository) GetPromptByID(ctx context.Context, id string) (*models.Prompt, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, name, content, builtin, allow_agent_edits, created_at, updated_at
+		SELECT id, name, content, builtin, created_at, updated_at
 		FROM custom_prompts
 		WHERE id = ?
 	`), id)
 	prompt := &models.Prompt{}
 	var builtinInt int
-	if err := row.Scan(&prompt.ID, &prompt.Name, &prompt.Content, &builtinInt, &prompt.AllowAgentEdits, &prompt.CreatedAt, &prompt.UpdatedAt); err != nil {
+	if err := row.Scan(&prompt.ID, &prompt.Name, &prompt.Content, &builtinInt, &prompt.CreatedAt, &prompt.UpdatedAt); err != nil {
 		return nil, err
 	}
 	prompt.Builtin = builtinInt == 1
@@ -200,13 +194,13 @@ func (r *sqliteRepository) GetPromptByID(ctx context.Context, id string) (*model
 
 func (r *sqliteRepository) GetPromptByName(ctx context.Context, name string) (*models.Prompt, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, name, content, builtin, allow_agent_edits, created_at, updated_at
+		SELECT id, name, content, builtin, created_at, updated_at
 		FROM custom_prompts
 		WHERE name = ?
 	`), name)
 	prompt := &models.Prompt{}
 	var builtinInt int
-	if err := row.Scan(&prompt.ID, &prompt.Name, &prompt.Content, &builtinInt, &prompt.AllowAgentEdits, &prompt.CreatedAt, &prompt.UpdatedAt); err != nil {
+	if err := row.Scan(&prompt.ID, &prompt.Name, &prompt.Content, &builtinInt, &prompt.CreatedAt, &prompt.UpdatedAt); err != nil {
 		return nil, err
 	}
 	prompt.Builtin = builtinInt == 1
@@ -230,14 +224,14 @@ func (r *sqliteRepository) CreatePrompt(ctx context.Context, prompt *models.Prom
 	}
 
 	query := `
-		INSERT INTO custom_prompts (id, name, content, builtin, allow_agent_edits, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO custom_prompts (id, name, content, builtin, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
 	`
-	args := []any{prompt.ID, prompt.Name, prompt.Content, builtinInt, boolInt(prompt.AllowAgentEdits && !prompt.Builtin), prompt.CreatedAt, prompt.UpdatedAt}
+	args := []any{prompt.ID, prompt.Name, prompt.Content, builtinInt, prompt.CreatedAt, prompt.UpdatedAt}
 	if !prompt.Builtin {
 		query = `
-			INSERT INTO custom_prompts (id, name, content, builtin, allow_agent_edits, created_at, updated_at)
-			SELECT ?, ?, ?, ?, ?, ?, ?
+			INSERT INTO custom_prompts (id, name, content, builtin, created_at, updated_at)
+			SELECT ?, ?, ?, ?, ?, ?
 			WHERE (SELECT COUNT(*) FROM custom_prompts) < ?
 		`
 		args = append(args, maxPromptListItems)
@@ -264,9 +258,9 @@ func (r *sqliteRepository) UpdatePrompt(ctx context.Context, prompt *models.Prom
 	updatedAt := time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE custom_prompts
-		SET name = ?, content = ?, allow_agent_edits = ?, updated_at = ?
+		SET name = ?, content = ?, updated_at = ?
 		WHERE id = ? AND updated_at = ?
-	`), prompt.Name, prompt.Content, boolInt(prompt.AllowAgentEdits && !prompt.Builtin), updatedAt, prompt.ID, prompt.UpdatedAt)
+	`), prompt.Name, prompt.Content, updatedAt, prompt.ID, prompt.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -291,8 +285,8 @@ func (r *sqliteRepository) DeletePrompt(ctx context.Context, id string) error {
 func (r *sqliteRepository) seedBuiltinPrompts() error {
 	for _, prompt := range r.getBuiltinPrompts() {
 		_, err := r.db.Exec(r.db.Rebind(`
-			INSERT INTO custom_prompts (id, name, content, builtin, allow_agent_edits, created_at, updated_at)
-			SELECT ?, ?, ?, 1, 0, ?, ?
+			INSERT INTO custom_prompts (id, name, content, builtin, created_at, updated_at)
+			SELECT ?, ?, ?, 1, ?, ?
 			WHERE (SELECT COUNT(*) FROM custom_prompts) < ?
 			ON CONFLICT DO NOTHING
 		`), prompt.ID, prompt.Name, prompt.Content, prompt.CreatedAt, prompt.UpdatedAt, maxPromptListItems)
@@ -412,18 +406,6 @@ func (r *sqliteRepository) getBuiltinPrompts() []*models.Prompt {
 		{ID: "builtin-mr-auto-fix", Name: "mr-auto-fix", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("mr-auto-fix")},
 		{ID: builtinChangesWalkthroughPromptID, Name: "changes-walkthrough", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("changes-walkthrough")},
 	}
-}
-
-func (r *sqliteRepository) migrateAgentPermission() error {
-	exists, err := db.ColumnExists(r.db, "custom_prompts", "allow_agent_edits")
-	if err != nil || exists {
-		return err
-	}
-	_, err = r.db.Exec(`ALTER TABLE custom_prompts ADD COLUMN allow_agent_edits INTEGER NOT NULL DEFAULT 0`)
-	if db.IsDuplicateColumnError(err) {
-		return nil
-	}
-	return err
 }
 
 func boolInt(value bool) int {

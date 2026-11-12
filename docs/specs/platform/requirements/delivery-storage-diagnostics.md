@@ -2,7 +2,7 @@
 status: draft
 system: platform
 created: 2026-10-27
-updated: 2026-10-28
+updated: 2026-11-09
 owners:
   - kandev
 ---
@@ -62,6 +62,9 @@ It does not change cleanup policy or infer why disk usage grew.
 - **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002.12:** Concurrent tasks shall reuse one capacity sample within a proven shared agentctl environment and filesystem. Separate executor filesystems shall receive separate samples.
 - **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002.13:** Capable agentctl instances shall support the advisory independently of durable delivery. Without a configured journal, workspace capacity shall remain explicitly identified as workspace storage.
 - **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002.14:** Background warning checks shall reuse existing executor connections. They shall not start, restore, or wake an inactive remote environment solely to collect capacity.
+- **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002.15:** After a turn settles, current delivery health shall remain observable while its runtime connection remains owned. A fresh, supported recovery report shall clear the matching live pressure without another prompt.
+- **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002.16:** Capacity and delivery pressure shall retain independent observation ages. A capacity refresh shall not make old pressure current. After 90 seconds without a pressure observation, its visible headline shall say last reported.
+- **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002.17:** Missing, unsupported, failed, or replaced-owner delivery reports shall not establish recovery. Healthy capacity alone shall not clear pressure or its historical failure evidence.
 
 ### REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-003: Actionable recovery presentation
 
@@ -91,3 +94,4 @@ It does not change cleanup policy or infer why disk usage grew.
 
 - [System design](../system-design/delivery-storage-diagnostics.md).
 - [Implementation package](../../../plans/delivery-storage-diagnostics/plan.md).
+- [Post-turn recovery fix package](../../../plans/delivery-storage-recovery/plan.md).

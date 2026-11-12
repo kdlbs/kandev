@@ -892,6 +892,8 @@
   "taskCreated": "タスク作成済み",
   "taskDescription": "タスク説明",
   "taskDescriptionTemplate": "タスク説明テンプレート",
+  "taskIdentifierLoadFailed": "このタスクを読み込めませんでした。接続を確認して、もう一度お試しください。",
+  "taskIdentifierWorkspaceUnavailable": "アクティブなワークスペースが選択されていません。ワークスペースを選択して、このリンクをもう一度お試しください。",
   "taskNotFound": "タスク見つからず",
   "taskPrefix": "タスク接頭辞",
   "taskReview": "タスクレビュー",

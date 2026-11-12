@@ -28,7 +28,9 @@ admission, and session activity stay with their existing owners.
 
 ## Wire evidence
 
-These agents were captured live on 2026-10-30 and 2026-11-01 at their pinned versions.
+These agents were captured live on 2026-10-30 and 2026-11-01 at their
+then-pinned versions. The table is historical wire evidence, not the current
+managed pin set.
 
 | Agent | Spawn | Child calls | End evidence |
 | --- | --- | --- | --- |

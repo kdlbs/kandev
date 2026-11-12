@@ -885,6 +885,15 @@ func TestService_MoveTaskMovedEventIncludesSourceWorkflow(t *testing.T) {
 	if got := data["to_workflow_id"]; got != "wf-target" {
 		t.Fatalf("to_workflow_id = %v, want wf-target", got)
 	}
+	if got := data["workspace_id"]; got != "ws-1" {
+		t.Fatalf("workspace_id = %v, want ws-1", got)
+	}
+	if got := data["old_state"]; got != string(v1.TaskStateTODO) {
+		t.Fatalf("old_state = %v, want TODO", got)
+	}
+	if got := data["new_state"]; got != string(v1.TaskStateTODO) {
+		t.Fatalf("new_state = %v, want TODO", got)
+	}
 }
 
 func TestService_BulkMoveTasksUpdatedEventIncludesSourceWorkflow(t *testing.T) {
@@ -934,6 +943,17 @@ func TestService_BulkMoveTasksToTerminalStepCompletesTasks(t *testing.T) {
 		t.Fatalf("bulk-moved task state = %q, want COMPLETED", task.State)
 	}
 	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskStateChanged)
+	movedEvent := findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskMoved)
+	movedData, ok := movedEvent.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("task.moved data type = %T, want map[string]interface{}", movedEvent.Data)
+	}
+	if got := movedData["old_state"]; got != string(v1.TaskStateTODO) {
+		t.Fatalf("task.moved old_state = %v, want TODO", got)
+	}
+	if got := movedData["new_state"]; got != string(v1.TaskStateCompleted) {
+		t.Fatalf("task.moved new_state = %v, want COMPLETED", got)
+	}
 }
 
 func TestService_BulkMoveTasksToTerminalStepPreservesTerminalFailureStates(t *testing.T) {

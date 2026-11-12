@@ -1,6 +1,6 @@
 # ADR-2026-09-29-shared-prompt-agent-permissions: Operator-owned prompt permissions
 
-**Status:** accepted
+**Status:** superseded by [ADR-2026-11-11-custom-prompt-agent-editing](2026-11-11-custom-prompt-agent-editing.md)
 **Date:** 2026-09-29
 **Area:** protocol
 

@@ -215,6 +215,11 @@ func (e *Executor) registerStopOwner(sessionID, executionID string, force bool) 
 	}
 }
 
+func (e *Executor) registerReplacementStopOwner(ctx context.Context, sessionID, executionID string) bool {
+	return e.onExecutionReplacementStopOwnerRegistration != nil &&
+		e.onExecutionReplacementStopOwnerRegistration(ctx, sessionID, executionID)
+}
+
 // registryRecoveredSession keeps the database row paired with the exact
 // execution captured from the registry snapshot.
 type registryRecoveredSession struct {
@@ -1514,6 +1519,7 @@ func (e *Executor) registerInitialPromptCallbacks(
 func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Task, session *models.TaskSession, sessionID, newModel, prompt, acpSessionID string, execConfig executorConfig, running *models.ExecutorRunning) (*LaunchAgentRequest, error) {
 	req := &LaunchAgentRequest{
 		TaskID:            task.ID,
+		OwnerUserID:       e.managedRuntimeOwnerUserID(ctx, task.WorkspaceID),
 		WorkspaceID:       task.WorkspaceID,
 		SessionID:         sessionID,
 		TaskTitle:         task.Title,

@@ -123,6 +123,10 @@ type taskAsyncQuestionGuidanceResolver interface {
 	TaskSessionAsyncQuestionsSupported(ctx context.Context, taskID, sessionID string) (bool, error)
 }
 
+type taskWorktreeAdoptionGuidanceResolver interface {
+	WorktreeAdoptionGuidance(ctx context.Context, taskID, sessionID string) (bool, error)
+}
+
 type promptTaskWithPromptContext interface {
 	PromptTaskWithPromptContext(
 		ctx context.Context,
@@ -291,6 +295,7 @@ func (h *MessageHandlers) injectMessageContext(
 		}
 		return content
 	}
+	includeWorktreeAdoption, _ := h.resolveWorktreeAdoptionGuidance(ctx, req.TaskID, req.TaskSessionID)
 	return sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, content, sysprompt.KandevContextOptions{
 		BuiltinPackages:                req.builtinPackages,
 		RequiresCompletionSignal:       requiresSignal,
@@ -298,6 +303,7 @@ func (h *MessageHandlers) injectMessageContext(
 		IncludeTaskTitleTool:           !configMode && titleOwner,
 		IncludeCanvasGuidance:          includeCanvasGuidance,
 		AsyncQuestionsSupported:        asyncQuestionsSupported,
+		IncludeWorktreeAdoption:        includeWorktreeAdoption,
 		Autopilot:                      task.Autopilot,
 		IncludeUserQuestionTool:        !task.Autopilot && !sessionResp.Session.IsPassthrough,
 		IncludeParentQuestionTool:      task.Autopilot && task.ParentID != "",
@@ -324,6 +330,17 @@ func (h *MessageHandlers) resolveAsyncQuestionGuidance(
 		return false, nil
 	}
 	return resolver.TaskSessionAsyncQuestionsSupported(ctx, taskID, sessionID)
+}
+
+func (h *MessageHandlers) resolveWorktreeAdoptionGuidance(
+	ctx context.Context,
+	taskID, sessionID string,
+) (bool, error) {
+	resolver, ok := h.orchestrator.(taskWorktreeAdoptionGuidanceResolver)
+	if !ok {
+		return false, nil
+	}
+	return resolver.WorktreeAdoptionGuidance(ctx, taskID, sessionID)
 }
 
 func (h *MessageHandlers) prepareDirectPrompt(

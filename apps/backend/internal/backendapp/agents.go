@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -51,6 +52,7 @@ func provideLifecycleManager(
 	passthroughSessionProvider lifecycle.PassthroughSessionProvider,
 	runningWriter lifecycle.ExecutorRunningWriter,
 	startupRecoveryGuard *lifecycle.RecoveryGuard,
+	authSvc *auth.Service,
 ) (*lifecycle.Manager, error) {
 	log.Info("Initializing Agent Manager...")
 	secretStores := newLifecycleSecretStores(rawSecretStore)
@@ -126,7 +128,7 @@ func provideLifecycleManager(
 		credsMgr,
 		profileResolver,
 		mcpService,
-		lifecycle.ExecutorFallbackWarn,
+		lifecycle.ExecutorFallbackDeny,
 		cfg.ResolvedHomeDir(),
 		log,
 	)
@@ -195,6 +197,7 @@ func provideLifecycleManager(
 	// but the reader still lets future Wave-B/C consumers light up.
 	lifecycleMgr.SetAgentProfileReader(agentSettingsRepo)
 	lifecycleMgr.SetManagedRuntimeSelectionStore(managedRuntimeSelections)
+	lifecycleMgr.SetManagedRuntimeSingleUserOwner(singleUserManagedRuntimeOwner(authSvc))
 
 	// MCP handler is set later in main.go after MCP handlers are registered
 	// via lifecycleMgr.SetMCPHandler(gateway.Dispatcher)

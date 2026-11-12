@@ -2,6 +2,7 @@
 status: active
 system: executors
 created: 2026-05-16
+updated: 2026-11-07
 owners:
   - tbd
 ---
@@ -36,7 +37,24 @@ Today the only ways to run an agent are: (1) locally on the user's own machine (
 - **AC-EXECUTORS-SSH-EXECUTOR-001.15:** The sweep shall never stop an `agentctl` process that backs a non-terminal session, that belongs to a task unknown to Kandev, or whose ownership it cannot prove; an unreadable inventory or pidfile shall preserve the process.
 - **AC-EXECUTORS-SSH-EXECUTOR-001.16:** The sweep shall stop an orphan with SIGTERM, then SIGKILL after a bounded grace period, and shall also signal the process groups of that `agentctl`'s direct children when SIGKILL is needed. It shall report per-run counts (found, stopped, preserved, failed) without logging credentials or environment values.
 - **AC-EXECUTORS-SSH-EXECUTOR-001.17:** On a remote host whose `ps` supports `-p` but has no `/proc` (macOS), a stop of a persisted `agentctl` whose pid has exited shall treat the pid as absent rather than failing the stop.
+- **AC-EXECUTORS-SSH-EXECUTOR-001.18:** After a supported SSH controller launch succeeds, its immutable launch identity shall survive backend restart and session-directory loss. A replacement launch shall receive a different identity.
+- **AC-EXECUTORS-SSH-EXECUTOR-001.19:** When the original controller remains alive after session-directory loss, sufficient launch-time proof shall permit owner-bound reconciliation. A responsive controller shall stop within the existing cleanup deadline. Repeated reconciliation shall succeed after its exit.
+- **AC-EXECUTORS-SSH-EXECUTOR-001.20:** When process, host, launch generation, or directory evidence conflicts with the recorded owner, reconciliation shall signal nothing and remove nothing. A replacement process or directory shall survive concurrent reconciliation.
+- **AC-EXECUTORS-SSH-EXECUTOR-001.21:** When launch proof is missing, unsupported, or unreadable, reconciliation shall preserve the cleanup inventory and report an actionable operator-reconciliation outcome. Recovery-time observations shall not create launch authority.
+- **AC-EXECUTORS-SSH-EXECUTOR-001.22:** When the recorded process is positively absent, no process from its recorded launch session remains, and directory evidence permits cleanup, reconciliation shall complete without signalling. A surviving child, a reused PID, or a conflicting directory shall remain protected. Existing confirmed-absence cleanup shall continue to work for legacy records.
+- **AC-EXECUTORS-SSH-EXECUTOR-001.23:** When SSH, permission, process inspection, or termination remains uncertain, reconciliation shall retain the recorded owner and report the reason. One completed target shall not erase another unresolved target.
+- **AC-EXECUTORS-SSH-EXECUTOR-001.24:** Automatic reconciliation shall use only launch evidence issued by Kandev for the selected task, session, and controller. A stale operation shall not stop or settle a successor launch.
+
+The directory-loss extension applies to Linux controllers with verified launch
+proof and race-safe signalling support. Other controllers retain the existing
+guarded stop and confirmed-absence paths.
+
+Automatic directory-loss reconciliation does not infer ownership from a PID,
+command, workdir, recreated pidfile, or process timestamp first read during
+recovery. It does not remove task workspaces or discover unrecorded processes.
 
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/ssh-executor.md).
+The [directory-loss reconciliation design](../system-design/ssh-agentctl-reconciliation.md)
+defines the extension for AC-001.18 through AC-001.24.

@@ -1,4 +1,5 @@
 import type { TFunction } from "i18next";
+import { formatBytes } from "@/lib/utils/format-bytes";
 import { estimateDurationComponents } from "./duration";
 import type { StartupStepSnapshot, StartupCompletedStep } from "./types";
 
@@ -46,16 +47,24 @@ function unitLabel(t: TFunction, unit: string, count: number): string {
  * Mirrors the Go page's countingProgressText/applyCountedProgress
  * (AC-PLATFORM-STARTUP-PROGRESS-001.4/001.5/001.6, AC-003.8): opaque steps
  * report no count, counting steps pluralize the unit off `done`, counted
- * steps pluralize off `total`.
+ * steps pluralize off `total`. Byte steps use the shared readable-size
+ * helper instead of the unit noun.
  */
 export function formatStepProgress(t: TFunction, step: StartupStepSnapshot): string {
   if (step.measure === "opaque") return t("startup:page.progressUnavailable");
   if (step.measure === "counting") {
     const done = step.done ?? 0;
+    if (step.unit === "bytes") return t("startup:page.countingBytes", { size: formatBytes(done) });
     return t("startup:page.countingProgress", { done, unit: unitLabel(t, step.unit, done) });
   }
   const done = step.done ?? 0;
   const total = step.total ?? 0;
+  if (step.unit === "bytes") {
+    return t("startup:page.countedBytes", {
+      done: formatBytes(done),
+      total: formatBytes(total),
+    });
+  }
   return t("startup:page.countedProgress", { done, total, unit: unitLabel(t, step.unit, total) });
 }
 

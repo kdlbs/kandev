@@ -18,6 +18,7 @@ import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
 import { MRStatusChip } from "@/components/gitlab/mr-status-chip";
 import { TaskDependencyChip } from "@/components/task/task-dependency-chip";
+import { TaskGraphButton } from "@/components/task-graph/task-graph-button";
 import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-devops-task-pull-request-chip";
 import { RegisteredChangeRequestStatus } from "@/components/integrations/registered-change-request-status";
 import { shareableSessionStateClient } from "@/components/task/share/share-button";
@@ -106,7 +107,9 @@ function getRightControlVisibility({
 }) {
   const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
   const showConversationUsage = !!taskId && !!sessionId;
+  // A qualifying task keeps the graph action before its first session exists.
   const showRightControls =
+    !!taskId ||
     (showAutoScrollControl && !!sessionId) ||
     showConversationUsage ||
     canShare ||
@@ -248,6 +251,7 @@ function ChatStatusBarRightControls({
           ) : null
         }
       />
+      <TaskGraphButton taskId={taskId} />
     </div>
   );
 }

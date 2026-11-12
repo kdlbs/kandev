@@ -96,6 +96,7 @@ vi.mock("@/components/state-provider", () => ({
   useOptionalAppStore: (selector: (value: typeof state) => unknown, fallback: unknown) =>
     selector(state) ?? fallback,
   useAppStoreApi: () => storeApi,
+  useOptionalAppStoreApi: () => null,
 }));
 vi.mock("@/hooks/domains/settings/use-settings-data", () => ({ useSettingsData: () => undefined }));
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({

@@ -119,3 +119,14 @@ it("clears revoked URLs before a four-image group reloads after collapse", async
     await act(async () => pending.forEach((resolve) => resolve(new Blob(["cleanup"]))));
   }
 });
+
+// @covers AC-TASKS-QUESTION-IMAGE-REVIEW-005.10
+it("keeps the loaded blob beside its URL so comparison can reuse the authorized bytes", async () => {
+  const blob = new Blob(["png"], { type: "image/png" });
+  mocks.fetch.mockResolvedValue(blob);
+  const { result } = renderHook(() =>
+    useQuestionImages("bundle", "q", images.slice(0, 1), true, "owner"),
+  );
+  await waitFor(() => expect(result.current.states.image1.kind).toBe("loaded"));
+  expect(result.current.states.image1).toEqual({ kind: "loaded", url: "blob:test", blob });
+});

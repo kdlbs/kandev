@@ -98,6 +98,9 @@ vi.mock("@/components/state-provider", () => ({
   useAppStoreApi: () => ({
     getState: () => appStoreState,
   }),
+  useOptionalAppStoreApi: () => ({
+    getState: () => appStoreState,
+  }),
 }));
 
 vi.mock("@/hooks/domains/settings/use-settings-data", () => ({

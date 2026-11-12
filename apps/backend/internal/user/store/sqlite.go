@@ -727,6 +727,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"preferred_shell":                          settings.PreferredShell,
 		"default_editor_id":                        settings.DefaultEditorID,
 		"enable_preview_on_click":                  settings.EnablePreviewOnClick,
+		"escape_cancels_agent":                     settings.EscapeCancelsAgent,
 		"chat_submit_key":                          settings.ChatSubmitKey,
 		"review_auto_mark_on_scroll":               settings.ReviewAutoMarkOnScroll,
 		"confirm_task_archive":                     settings.ConfirmTaskArchive,
@@ -926,6 +927,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		PreferredShell                    string                                  `json:"preferred_shell"`
 		DefaultEditorID                   string                                  `json:"default_editor_id"`
 		EnablePreviewOnClick              bool                                    `json:"enable_preview_on_click"`
+		EscapeCancelsAgent                bool                                    `json:"escape_cancels_agent"`
 		ChatSubmitKey                     string                                  `json:"chat_submit_key"`
 		ReviewAutoMarkOnScroll            *bool                                   `json:"review_auto_mark_on_scroll"`
 		ConfirmTaskArchive                *bool                                   `json:"confirm_task_archive"`
@@ -1014,6 +1016,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.PreferredShell = payload.PreferredShell
 	settings.DefaultEditorID = payload.DefaultEditorID
 	settings.EnablePreviewOnClick = payload.EnablePreviewOnClick
+	settings.EscapeCancelsAgent = payload.EscapeCancelsAgent
 	if payload.ChatSubmitKey != "" {
 		settings.ChatSubmitKey = payload.ChatSubmitKey
 	}

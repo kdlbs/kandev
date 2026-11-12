@@ -26,6 +26,9 @@ const (
 	InvocationScopeTask = "task"
 	// InvocationScopeInstance marks a read that does not require task identity.
 	InvocationScopeInstance = "instance"
+	// InvocationScopeWorkspace marks a read that requires a host-verified
+	// workspace on the external surface.
+	InvocationScopeWorkspace = "workspace"
 )
 
 const maxExposedNameLength = 64
@@ -143,6 +146,11 @@ func uniqueSorted(values []string) []string {
 // ProjectLegacySafe removes every surface an older retained agentctl does not
 // know so it can still accept the catalog. Tools declared only for a newer
 // context are omitted; a mixed tool keeps its legacy surfaces.
+//
+// Older agentctl builds also reject an unknown invocation scope and discard the
+// whole catalog. A workspace read dispatches identically to a task read on the
+// surviving task surfaces, so project that scope to task; the plugin service
+// still re-checks the real manifest declaration at dispatch time.
 func ProjectLegacySafe(snapshot Snapshot) Snapshot {
 	projected := Snapshot{Generation: snapshot.Generation, Revision: snapshot.Revision}
 	projected.Tools = make([]Definition, 0, len(snapshot.Tools))
@@ -154,6 +162,9 @@ func ProjectLegacySafe(snapshot Snapshot) Snapshot {
 			continue
 		}
 		definition.Surfaces = surfaces
+		if definition.InvocationScope == InvocationScopeWorkspace {
+			definition.InvocationScope = InvocationScopeTask
+		}
 		projected.Tools = append(projected.Tools, definition)
 	}
 	return projected
@@ -265,6 +276,12 @@ type Definition struct {
 // instance-only contexts. The host re-checks this at dispatch.
 func (d Definition) IsInstanceRead() bool {
 	return d.InvocationScope == InvocationScopeInstance && d.ReadOnlyHint
+}
+
+// IsWorkspaceRead reports whether the descriptor is a workspace-scoped read.
+// The host re-checks this at dispatch.
+func (d Definition) IsWorkspaceRead() bool {
+	return d.InvocationScope == InvocationScopeWorkspace && d.ReadOnlyHint
 }
 
 type Snapshot struct {

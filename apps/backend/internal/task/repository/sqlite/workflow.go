@@ -339,11 +339,14 @@ func (r *Repository) UpdateWorkflowIfUnchanged(ctx context.Context, workflow *mo
 // It deletes their workflow_steps explicitly: the table the task repository
 // creates first has no foreign key, so no CASCADE removes them.
 func (r *Repository) DeleteWorkflowsByWorkspace(ctx context.Context, workspaceID string, excludeIDs []string) (int64, error) {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, []string{workspaceID}, nil); err != nil {
+		return 0, err
+	}
 
 	var query string
 	var args []interface{}
@@ -394,11 +397,14 @@ func (r *Repository) DeleteWorkflowsByWorkspace(ctx context.Context, workspaceID
 // workflow_steps without the foreign key, so in a real database no cascade
 // exists. Where the foreign key does exist, the cascade finds nothing left.
 func (r *Repository) DeleteWorkflow(ctx context.Context, id string) error {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockWorkflowCompletionPolicyTx(ctx, tx, id); err != nil {
+		return err
+	}
 	if dialect.IsPostgres(r.db.DriverName()) {
 		var lockedID string
 		err := tx.QueryRowxContext(ctx, tx.Rebind(`

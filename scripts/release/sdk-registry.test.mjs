@@ -81,8 +81,7 @@ test("validates selected registry identity and archive integrity metadata", asyn
 });
 
 test("downloads only matching gzip bytes and leaves the destination untouched on failure", async () => {
-  const { downloadArchive } = await import("./sdk-registry.mjs");
-  const { mkdtemp, writeFile, readFile, rm } = await import("node:fs/promises");
+  const { downloadArchive } = await import("./sdk-registry.mjs");  const { mkdtemp, writeFile, readFile, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const { createHash } = await import("node:crypto");
@@ -128,6 +127,83 @@ test("downloads only matching gzip bytes and leaves the destination untouched on
         fetchArchive,
       ),
       /registry/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("classifies registry transport and response-body failures", async () => {
+  await assert.rejects(
+    readPackage("0.1.0", async () => {
+      throw new Error("network down");
+    }),
+    (error) => {
+      assert.equal(error.code, "REGISTRY_READ_FAILURE");
+      assert.match(error.message, /network down/);
+      return true;
+    },
+  );
+  const brokenBody = {
+    status: 200,
+    ok: true,
+    url: "https://registry.npmjs.org/@kdlbs%2fplugin-sdk",
+    headers: new Headers({ "content-type": "application/json" }),
+    text: async () => {
+      throw new Error("body down");
+    },
+  };
+  await assert.rejects(
+    readPackage("0.1.0", async () => brokenBody),
+    (error) => {
+      assert.equal(error.code, "REGISTRY_READ_FAILURE");
+      assert.match(error.message, /body could not be read/);
+      return true;
+    },
+  );
+  const { downloadArchive } = await import("./sdk-registry.mjs");
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "sdk-registry-body-"));
+  try {
+    const output = join(root, "sdk.tgz");
+    await assert.rejects(
+      downloadArchive(
+        "https://registry.npmjs.org/sdk.tgz",
+        output,
+        "sha512-x",
+        async () => {
+          throw new Error("archive network down");
+        },
+      ),
+      (error) => {
+        assert.equal(error.code, "REGISTRY_READ_FAILURE");
+        assert.match(error.message, /archive network down/);
+        return true;
+      },
+    );
+    const brokenArchive = {
+      status: 200,
+      ok: true,
+      url: "https://registry.npmjs.org/sdk.tgz",
+      headers: new Headers({ "content-type": "application/octet-stream" }),
+      arrayBuffer: async () => {
+        throw new Error("archive body down");
+      },
+    };
+    await assert.rejects(
+      downloadArchive(
+        "https://registry.npmjs.org/sdk.tgz",
+        output,
+        "sha512-x",
+        async () => brokenArchive,
+      ),
+      (error) => {
+        assert.equal(error.code, "REGISTRY_READ_FAILURE");
+        assert.match(error.message, /body could not be read/);
+        return true;
+      },
     );
   } finally {
     await rm(root, { recursive: true, force: true });

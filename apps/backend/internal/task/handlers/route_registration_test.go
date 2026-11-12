@@ -189,6 +189,7 @@ func TestRegisterRepositoryRoutesWiresHTTPAndWS(t *testing.T) {
 		"GET /api/v1/repositories/:id",
 		"GET /api/v1/repositories/:id/branches",
 		"GET /api/v1/repositories/:id/active-session-count",
+		"POST /api/v1/repositories/:id/remote-url/validate",
 		"PATCH /api/v1/repositories/:id",
 		"DELETE /api/v1/repositories/:id",
 		"GET /api/v1/repositories/:id/scripts",
@@ -199,7 +200,7 @@ func TestRegisterRepositoryRoutesWiresHTTPAndWS(t *testing.T) {
 	)
 	requireActions(t, dispatcher,
 		ws.ActionRepositoryList, ws.ActionRepositoryCreate, ws.ActionRepositoryGet,
-		ws.ActionRepositoryUpdate, ws.ActionRepositoryDelete,
+		ws.ActionRepositoryUpdate, ws.ActionRepositoryValidateRemoteURL, ws.ActionRepositoryDelete,
 		ws.ActionRepositoryScriptList, ws.ActionRepositoryScriptCreate,
 		ws.ActionRepositoryScriptGet, ws.ActionRepositoryScriptUpdate,
 		ws.ActionRepositoryScriptDelete,

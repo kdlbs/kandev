@@ -31,6 +31,8 @@
   "fixComments": "Corrigir comentários",
   "goToFindings_one": "Ir para {{count}} deteção da revisão",
   "goToFindings_other": "Ir para {{count}} deteções da revisão",
+  "htmlPreviewReadFailed": "Não foi possível ler o ficheiro HTML atual. Tente novamente ou mostre o diff.",
+  "htmlPreviewWorkspaceSource": "Ficheiro atual da área de trabalho. Pode ser diferente deste diff.",
   "loadingChangedFiles": "A carregar os ficheiros alterados...",
   "loadingPRChanges": "A carregar as alterações de {{repo}} #{{prNumber}}…",
   "markdownPreviewPartialNotice": "A mostrar os fragmentos de Markdown alterados. O conteúdo inalterado não está incluído neste diff.",

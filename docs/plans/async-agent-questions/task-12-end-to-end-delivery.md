@@ -148,3 +148,18 @@ The first changed-package Go lint over the complete PR diff reached its 5-minute
 The exact-head PR run on merge commit `a8f19ab0eae075b3fb88a977685762c0b28096b5` settled after the 15-minute strict wait and a further 7m13s all-terminal wait: `scripts/pr-await 4980` reported 89 passed, 13 skipped, 0 neutral, 0 failed, and 0 pending. `scripts/pr-state --compact 4980` confirmed the same head, complete check evidence, and `MERGEABLE` / `CLEAN`; `scripts/pr-resolve list 4980` found no unresolved review threads.
 
 While those checks ran, `main` advanced from `08a36b3fe0d49e1dd23007f30fc82ac426a2c1c8` to `628da65a0e0b48ada18d2e43f8d623e956becdfb`. The two diffs had no overlapping paths. The synthetic merge tree `7bc5dbaacea75692905dfb451a1aaa9131930ff3` was conflict-free, and the detached synthetic commit `819721790a5dfff7a9dcca6c4225df204ec50e75` passed `(cd apps/backend && go test -trimpath ./internal/mcp/profile ./internal/mcp/server -count=1)`.
+
+### Current-base conflict fixup (2026-11-12)
+
+Merged live `origin/main` at `dab0d02e4571c147adf8b9c193db595dbafdd190`. Resolved six conflicts across the MCP output schema, prompt-context construction and public coordination guide, preserving async question behavior and the newer worktree-adoption and image-annotation behavior. Updated `TestAskUserQuestionOutputSchemaAllowsAnnotations` to select the blocking answer branch in the `oneOf` schema.
+
+Passed:
+
+- `(cd apps/backend && go test -trimpath ./internal/mcp/server -count=1)`: passed in 15.296 seconds.
+- `(cd apps/backend && go test -trimpath ./internal/task/handlers -count=1)`: passed in 81.949 seconds.
+- `(cd apps/backend && go test -trimpath ./internal/orchestrator -count=1)`: passed in 323.353 seconds.
+- `node scripts/validate-public-docs.mjs`: 55 published pages validated.
+- Changed-file Go lint passed in separate `mcp/server`, `orchestrator`, and `task/handlers` runs, with 0 issues each.
+- The combined three-package lint command exceeded its 5-minute context-loading deadline; the printed `0 issues` is not counted as a pass.
+
+PR checks and review status will be refreshed after the merge commit is pushed and the requested 15-minute wait completes.

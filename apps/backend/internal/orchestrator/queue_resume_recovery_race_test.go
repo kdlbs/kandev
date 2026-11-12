@@ -68,7 +68,7 @@ func TestQueueUserPrompt_RecoveryRacePreservesSuccessor(t *testing.T) {
 				},
 			}
 			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-			svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+			svc.executor = withTestExecutorActor(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 			svc.executor.SetOnResumeFailureRollback(svc.rollbackResumeFailureIfCurrentAttempt)
 			done := make(chan struct{}, 1)
 			svc.onQueuedMessageExecutionComplete = func() { done <- struct{}{} }

@@ -87,6 +87,8 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"async-followup":                       scenarioAsyncFollowup,
 	"compaction":                           scenarioContextCompaction,
 	liveRepositoryAttachmentScenarioPrefix: scenarioLiveRepositoryAttachment,
+	"agent-worktree-unreported":            scenarioAgentWorktreeUnreported,
+	"agent-worktree-reported":              scenarioAgentWorktreeReported,
 }
 
 // steerSetupHoldMillis is how long steer-fold-setup and steer-defer-setup

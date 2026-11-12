@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { createQuickTerminalTab, startHostShell, toQuickTerminalTab } from "@/lib/api";
+import { Button } from "@kandev/ui/button";
 import {
   PtyTerminalView,
   type PtyTerminalState,
   type StartPtySession,
 } from "@/components/settings/pty-terminal-view";
 import type { QuickTerminalTab } from "@/lib/state/slices/ui/types";
+import type { QuickTerminalRecoveryPhase } from "@/hooks/domains/session/use-quick-terminal-lifecycle";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useVisualViewportOffset } from "@/hooks/use-visual-viewport-offset";
 
@@ -18,6 +20,10 @@ type Props = {
   tab: QuickTerminalTab;
   onStateChange: (state: PtyTerminalState) => void;
   onDescriptorReady?: (tab: QuickTerminalTab) => void;
+  onRecover?: () => void;
+  recoveryGeneration?: number;
+  recoveryPhase?: QuickTerminalRecoveryPhase;
+  recoveryClosing?: boolean;
 };
 
 function QuickTerminalLifecycleStatus({ tab }: { tab: QuickTerminalTab }) {
@@ -67,19 +73,20 @@ function QuickTerminalLifecycleStatus({ tab }: { tab: QuickTerminalTab }) {
   return null;
 }
 
-/** Selected terminal content for the shared Quick Chat surface. */
-export function QuickTerminalTabView({ tab, onStateChange, onDescriptorReady }: Props) {
-  const { isMobile } = useResponsiveBreakpoint();
-  const { bottomOffset } = useVisualViewportOffset();
-  const needsDescriptor = !tab.sessionId && tab.status === "connecting";
-  const [descriptorReady, setDescriptorReady] = useState(!needsDescriptor);
+function useQuickTerminalDescriptor(
+  tab: QuickTerminalTab,
+  shouldCreateDescriptor: boolean,
+  onStateChange: Props["onStateChange"],
+  onDescriptorReady: Props["onDescriptorReady"],
+) {
+  const [descriptorReady, setDescriptorReady] = useState(!shouldCreateDescriptor);
   const onStateChangeRef = useRef(onStateChange);
   const onDescriptorReadyRef = useRef(onDescriptorReady);
   onStateChangeRef.current = onStateChange;
   onDescriptorReadyRef.current = onDescriptorReady;
 
   useEffect(() => {
-    if (!needsDescriptor) {
+    if (!shouldCreateDescriptor) {
       setDescriptorReady(true);
       return undefined;
     }
@@ -114,22 +121,88 @@ export function QuickTerminalTabView({ tab, onStateChange, onDescriptorReady }: 
     return () => {
       cancelled = true;
     };
-  }, [needsDescriptor, tab.tabId, tab.workspaceId]);
+  }, [shouldCreateDescriptor, tab.tabId, tab.workspaceId]);
 
-  const shouldRenderTerminal = Boolean(tab.sessionId) || (needsDescriptor && descriptorReady);
-  const startSession = useCallback<StartPtySession>(
-    async (size, options) => {
-      const session = await startHostShell(size, options);
-      onStateChange({
-        status: session.running ? "running" : "exited",
-        sessionId: session.session_id,
-        exitCode: session.exit_code ?? null,
-        error: null,
-      });
-      return session;
-    },
-    [onStateChange],
+  return descriptorReady;
+}
+
+function QuickTerminalRecoveryAction({
+  tab,
+  recoveryPhase,
+  recoveryClosing,
+  onRecover,
+}: {
+  tab: QuickTerminalTab;
+  recoveryPhase?: QuickTerminalRecoveryPhase;
+  recoveryClosing?: boolean;
+  onRecover?: () => void;
+}) {
+  const { t } = useTranslation();
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const isRecoverable =
+    !recoveryClosing &&
+    (tab.status === "exited" || (!tab.sessionId && (tab.status === "error" || Boolean(tab.error))));
+  if (!isRecoverable && !recoveryPhase) return null;
+
+  const recoveryPending = recoveryClosing || recoveryPhase !== undefined;
+  let className = "h-12 min-h-12 shrink-0 px-4";
+  if (isMobile) className = "h-12 min-h-12 w-full shrink-0";
+  else if (isFinePointer) className = "h-7 min-h-7 shrink-0 px-2 text-xs";
+
+  return (
+    <div className="shrink-0 px-2 pb-2">
+      <Button
+        type="button"
+        variant="outline"
+        data-testid="quick-terminal-recovery"
+        className={className}
+        disabled={recoveryPending}
+        aria-busy={recoveryPending}
+        onClick={onRecover}
+      >
+        {t("sidebar:quickChatTerminalStartNewShell")}
+      </Button>
+    </div>
   );
+}
+
+/** Selected terminal content for the shared Quick Chat surface. */
+export function QuickTerminalTabView({
+  tab,
+  onStateChange,
+  onDescriptorReady,
+  onRecover,
+  recoveryGeneration = 0,
+  recoveryPhase,
+  recoveryClosing,
+}: Props) {
+  const { isMobile } = useResponsiveBreakpoint();
+  const { bottomOffset } = useVisualViewportOffset();
+  const onStateChangeRef = useRef(onStateChange);
+  onStateChangeRef.current = onStateChange;
+  const needsDescriptor = !tab.sessionId && tab.status === "connecting";
+  const shouldCreateDescriptor = needsDescriptor && recoveryGeneration === 0 && !recoveryClosing;
+  const descriptorReady = useQuickTerminalDescriptor(
+    tab,
+    shouldCreateDescriptor,
+    onStateChange,
+    onDescriptorReady,
+  );
+
+  const shouldRenderTerminal =
+    !recoveryClosing &&
+    (Boolean(tab.sessionId) ||
+      (needsDescriptor && descriptorReady && recoveryPhase !== "preparing"));
+  const startSession = useCallback<StartPtySession>(async (size, options) => {
+    const session = await startHostShell(size, options);
+    onStateChangeRef.current({
+      status: session.running ? "running" : "exited",
+      sessionId: session.session_id,
+      exitCode: session.exit_code ?? null,
+      error: null,
+    });
+    return session;
+  }, []);
 
   return (
     <div
@@ -140,6 +213,7 @@ export function QuickTerminalTabView({ tab, onStateChange, onDescriptorReady }: 
     >
       {shouldRenderTerminal && (
         <PtyTerminalView
+          key={recoveryGeneration}
           startSession={startSession}
           sessionId={tab.sessionId}
           clientId={tab.tabId}
@@ -152,6 +226,12 @@ export function QuickTerminalTabView({ tab, onStateChange, onDescriptorReady }: 
         />
       )}
       <QuickTerminalLifecycleStatus tab={tab} />
+      <QuickTerminalRecoveryAction
+        tab={tab}
+        recoveryPhase={recoveryPhase}
+        recoveryClosing={recoveryClosing}
+        onRecover={onRecover}
+      />
     </div>
   );
 }

@@ -369,7 +369,7 @@ func TestAcceptedSendNowMarkerFailureDoesNotRestoreDeliveredPrompt(t *testing.T)
 	}
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: taskRepo}
 	svc := createTestServiceWithAgent(taskRepo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, taskRepo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, taskRepo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageQueue = queue
 
 	source, err := queue.QueueMessage(
