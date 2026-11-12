@@ -32,6 +32,7 @@
 | `requirements/gate-comment-wake.md` + `system-design/gate-comment-wake-01.md` | shipped | A comment at a gated (`review`/`approval`) step wakes only its seat's undecided reviewers/approvers with a verdict-framing prompt, never the comment's own author; `office-default.yml`'s `on_comment` fan-out and the `healBuiltinWorkflowStepOnCommentFanOut` startup reconciler backfill it onto already-materialized system workflows |
 | `requirements/automation-retries.md` + `system-design/automation-retries.md` | draft | Durable retry policy, attempt scheduling, safe recovery, and paged run history |
 | `requirements/agent-task-relations.md` + `system-design/agent-task-relations.md` | shipped | Runtime `task create` accepts `blocked_by` (read-relation scoped, ancestors allowed) and an explicit `workspace_mode`; omitted fields behave as before |
+| `requirements/human-done-final-step.md` + `system-design/human-done-final-step.md` | draft (shipped) | A user's Done (board drop or status picker) before the final workflow step moves the task to that step via the human move path; human moves into a completing step are refused while approvers are pending. Agents keep the `in_review` redirect |
 
 The eight rows above are the only entries in this table reflecting the newer
 `requirements/` + `system-design/` split; the other 16 entries in this table

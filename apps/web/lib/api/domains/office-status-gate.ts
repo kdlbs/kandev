@@ -10,12 +10,28 @@
 import { ApiError } from "../client";
 import { updateTask } from "./office-extended-api";
 import { t } from "@/lib/i18n";
+import { getTaskMoveErrorMessage } from "@/components/task/task-move-error-message";
 import type { OfficeTaskStatus } from "@/lib/state/slices/office/types";
 import type { TaskStatus } from "@/app/office/tasks/[id]/types";
 
 export type PendingApprover = { agent_profile_id?: string; name?: string };
 
-type ApprovalGateReason = "approvals" | "workflow_step";
+type ApprovalGateReason = "approvals" | "workflow_step" | "completion_gate" | "workflow_move";
+
+const GATE_REASONS: ReadonlySet<string> = new Set([
+  "approvals",
+  "workflow_step",
+  "completion_gate",
+  "workflow_move",
+]);
+
+/** What the backend did with a status change that it accepted. */
+export type StatusUpdateOutcome = {
+  status: OfficeTaskStatus | TaskStatus;
+  workflowStepName?: string;
+  /** The move is waiting for room under the final step's WIP limit. */
+  queued?: boolean;
+};
 
 // Builds the message the user sees when the approver gate rejects the move.
 // Names render in the order the backend echoed them.
@@ -50,7 +66,9 @@ function extractGateReason(err: unknown): ApprovalGateReason | null {
   const body = err.body;
   if (!body || typeof body !== "object") return null;
   const reason = (body as { reason?: unknown }).reason;
-  return reason === "approvals" || reason === "workflow_step" ? reason : null;
+  return typeof reason === "string" && GATE_REASONS.has(reason)
+    ? (reason as ApprovalGateReason)
+    : null;
 }
 
 // Thrown instead of a plain Error when the approver gate fires. The backend
@@ -70,17 +88,71 @@ export class ApprovalGateError extends Error {
   }
 }
 
-// Sets a task's status, re-throwing the approver gate as an ApprovalGateError
-// so every caller surfaces the same sentence and can settle on the status the
-// server actually redirected to instead of blindly rolling back.
+// Thrown when the backend refused a status change without changing anything,
+// such as a Done request whose move to the final workflow step was refused.
+// Callers roll back to their pre-mutation snapshot.
+export class StatusChangeRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StatusChangeRefusedError";
+  }
+}
+
+function refusalMessage(err: ApiError, reason: ApprovalGateReason): string {
+  if (reason === "approvals") {
+    return formatPendingApproversMessage(extractPendingApprovers(err) ?? []);
+  }
+  if (reason === "completion_gate") return t("task:cannotMarkDoneCompletionCriteria");
+  const code = (err.body as { code?: unknown }).code;
+  return typeof code === "string" && code
+    ? getTaskMoveErrorMessage(err, "", (key) => t(key))
+    : t("task:cannotMarkDoneMoveRefused");
+}
+
+function toOutcome(
+  requested: OfficeTaskStatus | TaskStatus,
+  response: { status?: string; queued?: boolean; workflow_step?: { name?: string } } | undefined,
+): StatusUpdateOutcome {
+  const outcome: StatusUpdateOutcome = {
+    status: (response?.status as OfficeTaskStatus | TaskStatus | undefined) || requested,
+  };
+  const stepName = response?.workflow_step?.name;
+  if (stepName) outcome.workflowStepName = stepName;
+  if (response?.queued) outcome.queued = true;
+  return outcome;
+}
+
+// The info message for a Done request that moved the task to the final step
+// without completing it (or queued it behind the step's WIP limit), or null
+// when the task reached the requested status.
+export function finalStepMoveNotice(
+  requested: OfficeTaskStatus | TaskStatus,
+  outcome: StatusUpdateOutcome,
+): string | null {
+  if (outcome.status === requested || !outcome.workflowStepName) return null;
+  if (outcome.queued) {
+    return t("task:movedToFinalStepQueued", { step: outcome.workflowStepName });
+  }
+  return t("task:movedToFinalStepNotCompleted", { step: outcome.workflowStepName });
+}
+
+// Sets a task's status and returns what the backend did with it. A gate that
+// redirected the task is re-thrown as an ApprovalGateError so every caller
+// surfaces the same sentence and settles on the status the server actually
+// holds; a refusal that changed nothing is re-thrown as a
+// StatusChangeRefusedError so callers roll back.
 export async function updateTaskStatusOrTranslateGate(
   taskId: string,
   status: OfficeTaskStatus | TaskStatus,
-): Promise<void> {
+): Promise<StatusUpdateOutcome> {
   try {
-    await updateTask(taskId, { status });
+    return toOutcome(status, await updateTask(taskId, { status }));
   } catch (err) {
-    if (extractGateReason(err) === "workflow_step") {
+    const reason = extractGateReason(err);
+    if (err instanceof ApiError && err.status === 409 && reason && !extractRedirectedStatus(err)) {
+      throw new StatusChangeRefusedError(refusalMessage(err, reason));
+    }
+    if (reason === "workflow_step") {
       const redirectedStatus = extractRedirectedStatus(err) ?? "in_review";
       throw new ApprovalGateError(
         t("task:cannotMarkDoneBeforeFinalWorkflowStep"),

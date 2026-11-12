@@ -40,15 +40,15 @@ func TestPromptWritesPublishInvalidation(t *testing.T) {
 	_, err = svc.UpdatePromptContentForAgent(ctx, "live", "New content")
 	require.NoError(t, err)
 	require.Len(t, received, 2)
-	allow := false
-	_, err = svc.UpdatePromptWithPermission(ctx, prompt.ID, nil, nil, &allow)
+	operatorContent := "Operator content"
+	_, err = svc.UpdatePrompt(ctx, prompt.ID, nil, &operatorContent)
 	require.NoError(t, err)
 	require.Len(t, received, 3)
-	_, err = svc.UpdatePromptContentForAgent(ctx, "live", "Rejected")
-	require.Error(t, err)
-	require.Len(t, received, 3)
-	require.NoError(t, svc.DeletePrompt(ctx, prompt.ID))
+	_, err = svc.UpdatePromptContentForAgent(ctx, "live", "Agent after operator edit")
+	require.NoError(t, err)
 	require.Len(t, received, 4)
+	require.NoError(t, svc.DeletePrompt(ctx, prompt.ID))
+	require.Len(t, received, 5)
 }
 
 func TestPromptCreateTranslatesPostgresNameRace(t *testing.T) {

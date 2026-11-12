@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, renderHook, act, screen } from "@testing-library/react";
 import { useState } from "react";
 import type { OpenFileTab } from "@/lib/types/backend";
+import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import type { ReviewItemSummary } from "@/lib/plugins/types";
+import { ROOT_ACTIVATE_EVENT, ROOT_FOCUS_EVENT } from "../root-context-menu";
 
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: vi.fn() }),
@@ -114,7 +116,12 @@ describe("mobilePanelTopPadding", () => {
 function renderHandlers(initialSid: string | null = "s1") {
   const handlePanelChange = vi.fn();
   const view = renderHook(
-    ({ sid }) => useMobilePanelHandlers({ effectiveSessionId: sid, handlePanelChange }),
+    ({ sid }) =>
+      useMobilePanelHandlers({
+        effectiveSessionId: sid,
+        handlePanelChange,
+        activePanel: "chat",
+      }),
     { initialProps: { sid: initialSid } },
   );
   return { handlePanelChange, ...view };
@@ -193,6 +200,44 @@ describe("useMobilePanelHandlers", () => {
 
     expect(fetchAndOpenFileMock).not.toHaveBeenCalled();
     expect(result.current.selectedFile).toBeNull();
+  });
+
+  it("activates the destination panel before revealing the root", () => {
+    const handlePanelChange = vi.fn();
+    const view = renderHook(
+      ({ panel }: { panel: MobileSessionPanel }) =>
+        useMobilePanelHandlers({
+          effectiveSessionId: "s1",
+          handlePanelChange,
+          activePanel: panel,
+        }),
+      { initialProps: { panel: "chat" as MobileSessionPanel } },
+    );
+    const focus = vi.fn();
+    window.addEventListener(ROOT_FOCUS_EVENT, focus);
+    try {
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent(ROOT_ACTIVATE_EVENT, {
+            detail: {
+              surface: "files",
+              trackerName: ".claude/worktrees/fix-b",
+              repositoryName: "kandev",
+              path: ".claude/worktrees/fix-b",
+            },
+          }),
+        );
+      });
+      expect(handlePanelChange).toHaveBeenCalledWith("files");
+      expect(focus).not.toHaveBeenCalled();
+
+      act(() => view.rerender({ panel: "files" }));
+      expect(focus).toHaveBeenCalledTimes(1);
+      const focusEvent = focus.mock.calls[0]?.[0] as CustomEvent | undefined;
+      expect(focusEvent?.detail.surface).toBe("files");
+    } finally {
+      window.removeEventListener(ROOT_FOCUS_EVENT, focus);
+    }
   });
 });
 

@@ -2781,6 +2781,9 @@ func (s *TaskSession) WorktreesAPI() []map[string]interface{} {
 		if repo.WorktreeBranch != "" {
 			entry["worktree_branch"] = repo.WorktreeBranch
 		}
+		if repo.WorktreeOrigin != "" {
+			entry["worktree_origin"] = repo.WorktreeOrigin
+		}
 		out = append(out, entry)
 	}
 	return out
@@ -3263,14 +3266,29 @@ type TaskEnvironmentRepo struct {
 	WorktreeSourceClonePath   string     `json:"-"`
 	WorktreeSourceCommonDir   string     `json:"-"`
 	WorktreeBranchCompactedAt *time.Time `json:"-"`
-	Position                  int        `json:"position"`
-	ErrorMessage              string     `json:"error_message,omitempty"`
-	Status                    string     `json:"status,omitempty"`
-	CreatedAt                 time.Time  `json:"created_at"`
-	UpdatedAt                 time.Time  `json:"updated_at"`
-	MergedAt                  *time.Time `json:"merged_at,omitempty"`
-	DeletedAt                 *time.Time `json:"deleted_at,omitempty"`
+	// WorktreeOrigin records who created the checkout: "kandev" for a
+	// Kandev-materialized worktree, "adopted" for a linked worktree an agent
+	// created and Kandev attached in place.
+	WorktreeOrigin string     `json:"-"`
+	Position       int        `json:"position"`
+	ErrorMessage   string     `json:"error_message,omitempty"`
+	Status         string     `json:"status,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	MergedAt       *time.Time `json:"merged_at,omitempty"`
+	DeletedAt      *time.Time `json:"deleted_at,omitempty"`
 }
+
+const (
+	// WorktreeOriginKandev identifies a checkout Kandev materialized.
+	WorktreeOriginKandev = "kandev"
+	// WorktreeOriginAdopted identifies an agent-created worktree attached in place.
+	WorktreeOriginAdopted = "adopted"
+	// TaskEnvironmentRepoStatusDetached keeps a removed root's physical
+	// inventory visible to task cleanup while excluding it from projections.
+	TaskEnvironmentRepoStatusActive   = "active"
+	TaskEnvironmentRepoStatusDetached = "detached"
+)
 
 // TaskEnvironmentRecoveryClaimRequest identifies the environment authority
 // required while an automatic host-worktree recovery is in progress.

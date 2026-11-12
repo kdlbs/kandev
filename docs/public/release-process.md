@@ -120,11 +120,28 @@ succeeded. Inspect the landing workflow separately.
 
 ## Early npm authentication
 
-Normal Stable dispatches run a read-only `npm-auth-preflight` job before `prepare`. The job requests a fresh GitHub OIDC token for each package, exchanges it for a package-scoped npm token at the public registry, and discards both tokens. It checks the `kandev` launcher, all five `@kdlbs/runtime-*` packages, and `@kdlbs/plugin-sdk` when that package exists. Dry runs, desktop validation, Nightly releases, and existing-tag backfills skip the job and keep their existing validation or repair path.
+Normal Stable dispatches run a read-only `npm-auth-preflight` job before
+`prepare`. It requests a fresh GitHub OIDC identity token for each package and
+checks its audience and expiry. It exchanges that token for a package-scoped npm
+token at the public registry, then discards both tokens. The gate checks the
+`kandev` launcher, all five `@kdlbs/runtime-*` packages, and
+`@kdlbs/plugin-sdk` when that package exists. Dry runs, desktop validation,
+Nightly releases, and existing-tag backfills skip the job and keep their
+existing validation or repair path.
 
-A rejected publisher or an exchange response that fails local validation stops the run before release branch creation, release PR creation, host tagging, or builds. The summary names the package, HTTP status, and a fixed failure reason.
+Each successful HTTP 201 exchange must contain a JSON object with a nonempty
+token string. The preflight ignores `token_type`, `created`, `expires`, and
+unknown response fields. These fields do not prove authentication or token
+lifetime.
 
-For an HTTP authentication rejection or expired exchange token, check that package's trusted publisher configuration. For a malformed HTTP 201 response, inspect the safe reason and investigate the response contract. The preflight does not retain response bodies.
+A rejected publisher or invalid exchange response stops the run before release
+branch creation, release PR creation, host tagging, or builds. The summary names
+the package, HTTP status, and a fixed failure reason. It does not include
+response bodies or credentials.
+
+For an HTTP authentication rejection, check that package's trusted publisher
+configuration and the protected workflow context. For an invalid HTTP 201
+response, inspect the safe reason.
 
 Setup errors name the required context variable and its expected value. They do not show supplied values.
 
@@ -132,7 +149,10 @@ After a fix is merged, dispatch a new Stable run from `main`. Rerunning the fail
 
 A confirmed whole-package SDK absence is deferred to the existing first-package bootstrap. A registry read failure or a missing runtime package is an error, never a bootstrap state.
 
-The exchange proves package-scoped authentication only. It does not prove direct-publish or dist-tag permission, and a trusted publisher can still expire before publication. The publishing jobs remain responsible for their own authentication and allowed actions.
+The exchange proves current package-scoped authentication only. It does not
+prove direct-publish or dist-tag permission, and a trusted publisher can lose
+access before publication. The publishing jobs acquire fresh credentials and
+remain responsible for their own authentication and allowed actions.
 
 ## Normal release flow
 

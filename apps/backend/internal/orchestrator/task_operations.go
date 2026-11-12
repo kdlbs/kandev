@@ -1259,6 +1259,7 @@ func (s *Service) wrapCreatedSessionPrompt(
 			IncludeCoordinatorTaskControls: !configMode,
 			IncludeTaskTitleTool:           !configMode && titleOwner,
 			IncludeCanvasGuidance:          includeCanvasGuidance,
+			IncludeWorktreeAdoption:        s.worktreeAdoptionGuidance(ctx, taskID, sessionID),
 			Autopilot:                      dbTask.Autopilot,
 			IncludeUserQuestionTool:        !dbTask.Autopilot && !session.IsPassthrough,
 			IncludeParentQuestionTool:      dbTask.Autopilot && dbTask.ParentID != "",
@@ -2121,6 +2122,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			referenceContext:          promptReferenceContext,
 			includeTaskTitleTool:      !configMode && titleOwner,
 			includeCanvasGuidance:     includeCanvasGuidance,
+			includeWorktreeAdoption:   s.worktreeAdoptionGuidance(ctx, task.ID, sessionID),
 			autopilot:                 task.Autopilot,
 			includeParentQuestionTool: task.Autopilot && task.ParentID != "",
 			spawnOrigin:               opts.SpawnOrigin,
@@ -2246,6 +2248,7 @@ type launchPromptContext struct {
 	configMode                bool
 	includeTaskTitleTool      bool
 	includeCanvasGuidance     bool
+	includeWorktreeAdoption   bool
 	autopilot                 bool
 	includeParentQuestionTool bool
 	referenceContext          string
@@ -2289,6 +2292,7 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 		IncludeCoordinatorTaskControls: !p.configMode,
 		IncludeTaskTitleTool:           p.includeTaskTitleTool,
 		IncludeCanvasGuidance:          p.includeCanvasGuidance,
+		IncludeWorktreeAdoption:        p.includeWorktreeAdoption,
 		Autopilot:                      p.autopilot,
 		IncludeUserQuestionTool:        !p.autopilot && !p.isPassthrough,
 		IncludeParentQuestionTool:      p.autopilot && p.includeParentQuestionTool,

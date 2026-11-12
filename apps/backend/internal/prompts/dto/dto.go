@@ -26,9 +26,11 @@ type CreatePromptRequest struct {
 }
 
 type UpdatePromptRequest struct {
-	AllowAgentEdits *bool   `json:"allow_agent_edits,omitempty"`
-	Name            *string `json:"name,omitempty"`
-	Content         *string `json:"content,omitempty"`
+	// Retained for compatibility; updates ignore this field.
+	AllowAgentEdits   *bool      `json:"allow_agent_edits,omitempty"`
+	ExpectedUpdatedAt *time.Time `json:"expected_updated_at,omitempty"`
+	Name              *string    `json:"name,omitempty"`
+	Content           *string    `json:"content,omitempty"`
 }
 
 func FromPrompt(prompt *models.Prompt) PromptDTO {
@@ -37,8 +39,8 @@ func FromPrompt(prompt *models.Prompt) PromptDTO {
 		Name:            prompt.Name,
 		Content:         prompt.Content,
 		Builtin:         prompt.Builtin,
-		AllowAgentEdits: prompt.AllowAgentEdits && !prompt.Builtin,
+		AllowAgentEdits: !prompt.Builtin,
 		CreatedAt:       prompt.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt:       prompt.UpdatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:       prompt.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
 }

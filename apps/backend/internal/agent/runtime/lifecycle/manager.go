@@ -585,6 +585,7 @@ func NewManager(
 		OnGitReset:                       mgr.handleGitResetDetected,
 		OnBranchSwitch:                   mgr.handleBranchSwitch,
 		OnFileChange:                     mgr.handleFileChangeNotification,
+		OnWorktreeInventory:              mgr.handleWorktreeInventory,
 		OnShellOutput:                    mgr.handleShellOutput,
 		OnShellExit:                      mgr.handleShellExit,
 		OnProcessOutput:                  mgr.handleProcessOutput,

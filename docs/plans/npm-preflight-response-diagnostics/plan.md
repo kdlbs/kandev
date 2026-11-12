@@ -170,3 +170,6 @@ The implementation work order is complete. Remote CI and review state belong to 
 - [Original implementation](../npm-publication-reliability/task-03-early-oidc-preflight.md).
 
 The original package remains complete. Its test results describe its historical revision.
+
+The [creation metadata compatibility repair](../npm-preflight-created-metadata/plan.md) addresses the `invalid_created` failure exposed by these diagnostics.
+The [exchange response contract repair](../npm-preflight-exchange-contract/plan.md) addresses the later expiry failure and defines the complete acceptance contract.

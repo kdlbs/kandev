@@ -98,6 +98,7 @@ type Repository interface {
 	DeleteTaskBlocker(ctx context.Context, taskID, blockerTaskID string) error
 	ListTaskBlockers(ctx context.Context, taskID string) ([]*models.TaskBlocker, error)
 	ListTaskParticipants(ctx context.Context, taskID, role string) ([]sqlite.Participant, error)
+	ListTaskParticipantsAtStep(ctx context.Context, taskID, stepID, role string) ([]sqlite.Participant, error)
 	ListAllTaskParticipants(ctx context.Context, taskID string) ([]sqlite.Participant, error)
 	// ListTaskParticipantsAtCurrentStep is the step-scoped seat read
 	// AC-OFFICE-SESSION-TERM-002.3 requires for session-termination
@@ -445,6 +446,8 @@ type DashboardService struct {
 	assigneeWriter        HumanAssigneeWriter             // optional; nil rejects human-assignee writes rather than skipping authorization
 	projectBudget         ProjectBudgetEvaluator          // optional; nil means reassignment doesn't re-evaluate the destination project's budget policies
 	taskStateWriter       shared.TaskStateWriter          // task repository owns transactional state changes and completion guards
+	humanDoneCompleter    TaskHumanDoneCompleter
+	finalStepMover        TaskFinalStepMover // optional; nil keeps the in_review redirect for human Done on a non-final step
 }
 
 // SetRoutingProvider wires the provider-routing seam used by the

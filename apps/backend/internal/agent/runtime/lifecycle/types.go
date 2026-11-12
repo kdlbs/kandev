@@ -1871,8 +1871,9 @@ type LaunchRequest struct {
 	// When non-empty it is the source of truth; the legacy single-repo top-level
 	// fields above are populated from Repositories[0] for callers that have not
 	// yet been updated.
-	Repositories     []RepoLaunchSpec
-	WorkspaceFolders []WorkspaceFolderSpec
+	Repositories           []RepoLaunchSpec
+	WorkspaceFolders       []WorkspaceFolderSpec
+	DetachedWorkspaceRoots []string
 
 	// managedGoCachePath is resolved once before local preparation so setup
 	// scripts and the runtime instance cannot observe different settings.
@@ -2066,16 +2067,17 @@ type WorkspaceInfo struct {
 	WorkspacePath          string // Path to the effective workspace root or repository
 	// WorkspaceLayout classifies WorkspacePath so repository-relative source
 	// destinations can be resolved after a restart. Empty is legacy data.
-	WorkspaceLayout       string
-	WorkspaceFolders      []WorkspaceFolderSpec
-	WorkspaceRepositories []WorkspaceRepositorySpec
-	TaskDirName           string
-	WorkspaceID           string
-	AgentProfileID        string // Stable Office agent identity (or the execution profile for legacy sessions)
-	ExecutionProfileID    string // Concrete CLI profile selected for this execution
-	ExecutorProfileID     string // Concrete executor profile selected for this execution
-	AgentID               string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
-	ACPSessionID          string // Agent's session ID for conversation resumption (from session metadata)
+	WorkspaceLayout        string
+	WorkspaceFolders       []WorkspaceFolderSpec
+	WorkspaceRepositories  []WorkspaceRepositorySpec
+	DetachedWorkspaceRoots []string
+	TaskDirName            string
+	WorkspaceID            string
+	AgentProfileID         string // Stable Office agent identity (or the execution profile for legacy sessions)
+	ExecutionProfileID     string // Concrete CLI profile selected for this execution
+	ExecutorProfileID      string // Concrete executor profile selected for this execution
+	AgentID                string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
+	ACPSessionID           string // Agent's session ID for conversation resumption (from session metadata)
 	// SessionMode is the persisted session permission mode (e.g. "acceptEdits")
 	// from session metadata, declared via the set_session_mode workflow action or
 	// a user toggle. Applied as a mode override at ACP session init so a fresh
