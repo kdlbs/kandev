@@ -90,6 +90,7 @@ func (h *TerminalHandler) bridgeBinaryWebSockets(clientConn, agentctlConn *goril
 			_ = reader.Err()
 		}()
 		for message := range reader.Messages() {
+			reader.Consume(message)
 			if err := agentctlConn.WriteMessage(message.Type, message.Data); err != nil {
 				h.logger.Debug("remote terminal shell upstream write error",
 					zap.String("terminal_id", terminalID),
@@ -144,6 +145,7 @@ func (h *TerminalHandler) runTerminalBridge(
 
 	reader := wsinput.New(conn)
 	for message := range reader.Messages() {
+		reader.Consume(message)
 		messageType, data := message.Type, message.Data
 
 		if messageType != gorillaws.BinaryMessage && messageType != gorillaws.TextMessage {
@@ -467,6 +469,7 @@ func (h *TerminalHandler) runUserShellBridge(
 
 	reader := wsinput.New(conn)
 	for message := range reader.Messages() {
+		reader.Consume(message)
 		messageType, data := message.Type, message.Data
 
 		if messageType != gorillaws.BinaryMessage && messageType != gorillaws.TextMessage {

@@ -40,8 +40,9 @@ stream, with connection-owned cleanup and regression evidence.
   joins. Preserve final exit delivery, existing unsubscribe operations, and
   retained PTY lifetime.
 - Keep the socket reader processing pongs while PTY input is being written.
-  Buffer one additional application message and close on overflow rather than
-  block control-frame handling.
+  Buffer up to 256 pending messages and 1 MiB of payload; allow a single larger
+  message when the queue is empty, and close on overflow rather than block
+  control-frame handling.
 - Add the helper, handler, proxy, concurrency, and teardown tests named in the plan.
 - Update `docs/public/websocket-api.md` with a terminal-specific keepalive note.
   The note is protocol reference material. State the proxy interval constraint
@@ -188,7 +189,11 @@ No build or broader suite was rerun for these review-only fixes.
 The PR review finding about blocked PTY input was reproduced by
 `TestLoginStreamKeepaliveReadsPongsDuringBlockedInput` before the reader change.
 The shared `wsinput.Reader` now keeps pongs flowing while handlers process a
-message and closes on a full one-message queue. Targeted verification passed:
+message and closes when its 256-message or 1 MiB pending-payload budget fills.
+A single larger message remains valid when the queue is otherwise empty. The
+expanded blocked-input regression failed against the former one-message limit,
+then passed while queuing four additional messages and checking pong handling
+and ordered PTY delivery. Targeted verification passed:
 
 - `go test -tags fts5 -trimpath -race ./internal/common/wsinput -run '^TestReader' -count=1 -timeout 60s`.
 - `go test -tags fts5 -trimpath -race ./internal/agent/loginpty -run '^TestLoginStreamKeepalive(ReadsPongsDuringBlockedInput|IdleProxy|UnresponsivePeer)$' -count=1 -timeout 90s`.
@@ -196,4 +201,6 @@ message and closes on a full one-message queue. Targeted verification passed:
 
 The corresponding non-race focused test commands also passed. Changed-Go lint
 passed with 0 issues after the final review changes. No build or broader suite
-was rerun.
+was rerun. Public documentation tests passed (63), all 55 pages validated, the
+catalog validated (449 decisions and 1986 specifications), and full spec lint
+passed after the documentation update.

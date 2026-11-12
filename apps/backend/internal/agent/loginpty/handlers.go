@@ -441,6 +441,7 @@ func (h *Handlers) handleStream(c *gin.Context) {
 	// Keep the socket reader active while a PTY write waits for input capacity.
 	reader := wsinput.New(conn)
 	for message := range reader.Messages() {
+		reader.Consume(message)
 		switch message.Type {
 		case gorillaws.BinaryMessage:
 			if _, err := sess.Write(message.Data); err != nil {

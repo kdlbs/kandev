@@ -190,11 +190,17 @@ exit. No build or broader suite was rerun for these review-only fixes.
 The PR review finding that PTY input can block pong processing was reproduced
 by `TestLoginStreamKeepaliveReadsPongsDuringBlockedInput` before the reader
 change. The shared `wsinput.Reader` keeps the sole socket reader active and
-buffers one additional application message; it closes the connection if that
-buffer is exceeded. Focused tests passed for `wsinput`, the login stream
-regressions, and both local gateway bridge setup/keepalive paths. Race-enabled
-versions of all three focused checks passed after the review cleanup changes.
-Changed-Go lint passed with 0 issues. No build or broad suite was rerun.
+buffers up to 256 pending messages and 1 MiB of pending payload; a single larger
+message is accepted when the queue is empty. The expanded blocked-input test
+failed against the former one-message limit, then passed while queuing four
+additional frames and verifying pongs and input order. `wsinput` tests cover
+the count limit, byte limit, and lone oversized-message behavior. Focused tests
+passed for `wsinput`, the login stream regressions, and both local gateway
+bridge setup/keepalive paths. Race-enabled versions of all three focused checks
+passed. Changed-Go lint passed with 0 issues. After the documentation updates,
+public documentation tests passed (63), all 55 published pages validated, the
+catalog validated (449 decisions and 1986 specifications), and full spec lint
+passed. No build or broad suite was rerun.
 
 All 15 existing focused baseline tests passed during the original investigation.
 

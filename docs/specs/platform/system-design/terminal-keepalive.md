@@ -30,7 +30,7 @@ Backend-to-agentctl streams retain their existing control-frame behavior.
 | Component | Responsibility |
 | --- | --- |
 | New `internal/common/wskeepalive/keepalive.go` | Timing defaults, terminal ping loop, pong deadline, idempotent stop and join |
-| New `internal/common/wsinput/reader.go` | Sole WebSocket read loop, ordered input delivery, one-message buffer while consumers process input |
+| New `internal/common/wsinput/reader.go` | Sole WebSocket read loop, ordered input delivery, bounded pending-message queue while consumers process input |
 | `internal/gateway/websocket/client.go` | Consume shared timing constants through its existing pumps |
 | `internal/gateway/websocket/terminal_handler.go` | Initialize private, per-handler keepalive timings |
 | `internal/gateway/websocket/terminal_pumps.go` | Attach keepalive to local shell, local passthrough, and browser side of the remote bridge |
@@ -90,9 +90,11 @@ and `Close`. A separate goroutine must not use `WriteMessage` or
 Install read deadlines and the pong handler before starting `wsinput.Reader`.
 That goroutine is the sole Gorilla reader and continues processing pongs while
 the handler forwards an earlier application message to a PTY. It keeps message
-order with a one-message buffer. If another message arrives while the buffer is
-full, close the connection instead of blocking the reader and delaying pongs.
-Do not change the gateway's `wsWriter` mutex or output ordering.
+order with a queue limited to 256 pending messages and 1 MiB of pending payload.
+A single larger message may occupy an otherwise empty queue. If an incoming
+message exceeds either limit, close the connection instead of blocking the
+reader and delaying pongs. Do not change the gateway's `wsWriter` mutex or
+output ordering.
 
 The ping loop must observe cancellation on every wait. Output traffic must not
 reset or starve its ticker. Use one loop per browser connection, without a
@@ -172,10 +174,11 @@ They observe control pings through an active peer reader, return pongs, and
 prove continued binary/text delivery after several cycles. One peer suppresses
 pongs while another remains responsive. PTY output cannot keep the silent peer
 alive. Cover disconnect, write failure, upstream exit, and subscription cleanup.
-`wsinput` tests hold the consumer while pongs and a queued message are read, and
-verify that a full input buffer closes the connection. The login stream
-regression blocks its PTY writer, keeps answering pings past the deadline, then
-delivers the queued input on the same connection.
+`wsinput` tests hold the consumer while pongs and several queued messages are
+read, and verify that message-count and payload-size limits close the connection
+without rejecting one larger message by itself. The login stream regression
+blocks its PTY writer, keeps answering pings past the deadline with several
+queued inputs, then delivers them in order on the same connection.
 
 A test-owned TCP proxy enforces inactivity on bytes from the terminal backend.
 It forwards the actual upgraded byte stream, including control frames.

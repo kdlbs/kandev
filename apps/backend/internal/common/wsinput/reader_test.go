@@ -50,11 +50,14 @@ func TestReaderKeepsHandlingPongsWhileConsumerWaits(t *testing.T) {
 	if err := client.WriteMessage(websocket.BinaryMessage, []byte("blocked-input")); err != nil {
 		t.Fatalf("write first input: %v", err)
 	}
-	if got := receiveMessage(t, reader.Messages()); got.Type != websocket.BinaryMessage || string(got.Data) != "blocked-input" {
+	if got := receiveMessage(t, reader); got.Type != websocket.BinaryMessage || string(got.Data) != "blocked-input" {
 		t.Fatalf("first message = %+v, want blocked-input binary frame", got)
 	}
-	if err := client.WriteMessage(websocket.BinaryMessage, []byte("queued-input")); err != nil {
-		t.Fatalf("write queued input: %v", err)
+	queuedInputs := []string{"queued-input", "queued-input-3", "queued-input-4", "queued-input-5"}
+	for _, input := range queuedInputs {
+		if err := client.WriteMessage(websocket.BinaryMessage, []byte(input)); err != nil {
+			t.Fatalf("write queued input: %v", err)
+		}
 	}
 	for range 6 {
 		select {
@@ -63,8 +66,11 @@ func TestReaderKeepsHandlingPongsWhileConsumerWaits(t *testing.T) {
 			t.Fatal("reader stopped processing pongs while its consumer waited")
 		}
 	}
-	if got := receiveMessage(t, reader.Messages()); got.Type != websocket.BinaryMessage || string(got.Data) != "queued-input" {
-		t.Fatalf("queued message = %+v, want queued-input binary frame", got)
+	for _, want := range queuedInputs {
+		got := receiveMessage(t, reader)
+		if got.Type != websocket.BinaryMessage || string(got.Data) != want {
+			t.Fatalf("queued message = %+v, want %q binary frame", got, want)
+		}
 	}
 }
 
@@ -77,9 +83,9 @@ func TestReaderClosesConnectionWhenInputBacklogIsFull(t *testing.T) {
 		_ = reader.Err()
 	})
 
-	for _, data := range []string{"first", "second"} {
-		if err := client.WriteMessage(websocket.BinaryMessage, []byte(data)); err != nil {
-			t.Fatalf("write %q: %v", data, err)
+	for range maxBufferedMessages + 1 {
+		if err := client.WriteMessage(websocket.BinaryMessage, []byte("input")); err != nil {
+			break
 		}
 	}
 	errResult := make(chan error, 1)
@@ -92,8 +98,47 @@ func TestReaderClosesConnectionWhenInputBacklogIsFull(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("reader did not close the connection after its input backlog filled")
 	}
-	if got := receiveMessage(t, reader.Messages()); string(got.Data) != "first" {
-		t.Fatalf("buffered message = %q, want first", got.Data)
+	if got := receiveMessage(t, reader); string(got.Data) != "input" {
+		t.Fatalf("buffered message = %q, want input", got.Data)
+	}
+}
+
+func TestReaderClosesConnectionWhenByteBacklogIsFull(t *testing.T) {
+	client, server := newWebSocketPair(t)
+	reader := New(server)
+	t.Cleanup(func() {
+		_ = client.Close()
+		_ = server.Close()
+		_ = reader.Err()
+	})
+
+	payload := strings.Repeat("x", maxBufferedBytes/200+1)
+	messageCount := maxBufferedBytes/len(payload) + 1
+	for range messageCount {
+		if err := client.WriteMessage(websocket.BinaryMessage, []byte(payload)); err != nil {
+			break
+		}
+	}
+	if err := reader.Err(); err != ErrBacklogFull {
+		t.Fatalf("Reader.Err() = %v, want ErrBacklogFull", err)
+	}
+}
+
+func TestReaderAcceptsOversizedMessageWhenBacklogIsEmpty(t *testing.T) {
+	client, server := newWebSocketPair(t)
+	reader := New(server)
+	t.Cleanup(func() {
+		_ = client.Close()
+		_ = server.Close()
+		_ = reader.Err()
+	})
+
+	payload := strings.Repeat("x", maxBufferedBytes+1)
+	if err := client.WriteMessage(websocket.BinaryMessage, []byte(payload)); err != nil {
+		t.Fatalf("write oversized input: %v", err)
+	}
+	if got := receiveMessage(t, reader); len(got.Data) != len(payload) {
+		t.Fatalf("message size = %d, want %d", len(got.Data), len(payload))
 	}
 }
 
@@ -123,13 +168,14 @@ func newWebSocketPair(t *testing.T) (*websocket.Conn, *websocket.Conn) {
 	}
 }
 
-func receiveMessage(t *testing.T, messages <-chan Message) Message {
+func receiveMessage(t *testing.T, reader *Reader) Message {
 	t.Helper()
 	select {
-	case message, ok := <-messages:
+	case message, ok := <-reader.Messages():
 		if !ok {
 			t.Fatal("reader closed before delivering a message")
 		}
+		reader.Consume(message)
 		return message
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for a websocket input message")

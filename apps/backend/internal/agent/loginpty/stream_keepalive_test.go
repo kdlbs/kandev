@@ -88,8 +88,11 @@ func TestLoginStreamKeepaliveReadsPongsDuringBlockedInput(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("PTY writer did not block on the first input")
 	}
-	if err := conn.WriteMessage(gorillaws.BinaryMessage, []byte("input-after-paste")); err != nil {
-		t.Fatalf("write input queued behind paste: %v", err)
+	queuedInputs := []string{"input-after-paste", "queued-input-3", "queued-input-4", "queued-input-5"}
+	for _, input := range queuedInputs {
+		if err := conn.WriteMessage(gorillaws.BinaryMessage, []byte(input)); err != nil {
+			t.Fatalf("write input queued behind paste: %v", err)
+		}
 	}
 
 	for range 6 {
@@ -102,16 +105,15 @@ func TestLoginStreamKeepaliveReadsPongsDuringBlockedInput(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("blocked PTY write did not resume")
 	}
-	if got := <-pty.writes; got != "large-paste" {
-		t.Fatalf("first PTY input = %q, want %q", got, "large-paste")
-	}
-	select {
-	case got := <-pty.writes:
-		if got != "input-after-paste" {
-			t.Fatalf("queued PTY input = %q, want %q", got, "input-after-paste")
+	for _, want := range append([]string{"large-paste"}, queuedInputs...) {
+		select {
+		case got := <-pty.writes:
+			if got != want {
+				t.Fatalf("PTY input = %q, want %q", got, want)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("PTY input %q queued behind the blocked write was not delivered", want)
 		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("input queued behind the blocked write was not delivered")
 	}
 	select {
 	case err := <-observer.closed:
@@ -370,7 +372,7 @@ func newLoginSessionWithBlockedInput(t *testing.T, mgr *Manager, id string) (*Se
 	pty := &blockedLoginPty{
 		writeStarted:   make(chan struct{}),
 		firstWriteDone: make(chan struct{}),
-		writes:         make(chan string, 4),
+		writes:         make(chan string, 8),
 		release:        make(chan struct{}),
 		closed:         make(chan struct{}),
 	}
