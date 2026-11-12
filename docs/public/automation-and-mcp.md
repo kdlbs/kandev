@@ -129,7 +129,7 @@ The run destination and ordered repository/base-branch pairs are explicit saved 
 
 Selecting a run opens the complete shared transcript and focuses its exact turn. Replies sent from that transcript create a new turn in the same conversation and remain visible; run selection does not filter away newer replies.
 
-CLI passthrough output does not appear in the run transcript. You cannot recover this output later. To record output in future sessions, disable CLI passthrough in the automation's agent profile.
+CLI passthrough output does not appear in the run transcript. You cannot recover this output from the run transcript. To record output in future sessions, disable CLI passthrough in the automation's agent profile.
 
 A run cannot wait for a permission response. Kandev rejects the request and marks the run failed. Use only a profile whose intended, constrained actions can complete without a prompt.
 
