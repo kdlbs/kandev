@@ -390,5 +390,7 @@
   "mcpDesired": "期望的包",
   "mcpCurrentProcess": "目前處理程序",
   "mcpUnknown": "未知",
-  "mcpObserved": "已觀測的連線"
+  "mcpObserved": "已觀測的連線",
+  "passthroughOutputNotCapturedTitle": "此執行的記錄中不會捕獲 CLI passthrough 的輸出。",
+  "passthroughOutputFutureSessionsDescription": "如需在未來的工作階段中記錄輸出，請在自動化的代理程式設定檔中停用 CLI passthrough。此處無法恢復之前的終端輸出。"
 }
