@@ -332,7 +332,7 @@ func newProjectMCPDeliveryTestExecution(t *testing.T) *AgentExecution {
 	if err != nil {
 		t.Fatalf("marshal built-in binding: %v", err)
 	}
-	client := agentctl.NewClient("127.0.0.1", 1, newTestLogger(), agentctl.WithExecutionID("instance-1"))
+	client := newBuiltinMCPCredentialTestClient(t, projectMCPTestCredential)
 	execution := &AgentExecution{
 		ID: "exec-1", TaskID: "task-1", SessionID: "session-1", WorkspaceID: "workspace-1",
 		AgentProfileID: "profile-1", WorkspacePath: t.TempDir(), metadata: map[string]interface{}{},
@@ -369,6 +369,13 @@ func TestProjectMCPDeliveryPreparedOnlyAfterSuccessfulWrite(t *testing.T) {
 		}
 		if len(delivery.Packages) != 2 || delivery.Packages[0] != string(p.PackageCore) || delivery.Packages[1] != string(p.PackageDiagnostics) {
 			t.Fatalf("delivery packages = %v", delivery.Packages)
+		}
+		written, err := os.ReadFile(filepath.Join(execution.WorkspacePath, ".pi", "mcp.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(written), "Bearer "+projectMCPTestCredential) {
+			t.Fatalf("Pi project file lacks the instance credential header:\n%s", written)
 		}
 	})
 

@@ -619,6 +619,11 @@ type FeaturesConfig struct {
 	// OpenCodePlugin supplies the Kandev integration plugin to supported
 	// OpenCode v2 launches. Off in every shipped profile and restart-required.
 	OpenCodePlugin bool `mapstructure:"opencode_plugin" json:"opencodePlugin"`
+
+	// BuiltinMCPCallerAuth makes new agentctl instances reject built-in MCP
+	// calls without the instance's own caller credential. Restart-required;
+	// off in prod and dev, on in e2e.
+	BuiltinMCPCallerAuth bool `mapstructure:"builtin_mcp_caller_auth" json:"builtinMcpCallerAuth"`
 }
 
 // LoggingConfig holds logging configuration.

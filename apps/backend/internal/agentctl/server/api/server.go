@@ -96,11 +96,13 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	}
 
 	s.router.Use(httpmw.RequestLogger(s.logger, "agentctl-instance"))
-	// Exempt paths from auth:
+	// Exempt paths from control auth:
 	// - /health: liveness probe
-	// - /sse, /message, /mcp: MCP endpoints used by the agent subprocess which
-	//   runs in the same trust boundary but does not possess the auth token.
+	// - /sse, /message, /mcp and their package routes: MCP endpoints used by
+	//   the agent subprocess, which never holds the control credential. They
+	//   are gated by the instance's own MCP caller credential instead.
 	s.router.Use(s.instanceAuth(cfg.AuthToken, builtinMCPExemptPaths(cfg)...))
+	s.router.Use(s.builtinMCPCallerAuth())
 	// Validate X-Instance-ID so a client that holds a stale port (because
 	// the previous instance was deleted and the port recycled to a new
 	// instance) gets a clean 404 instead of accidentally configuring or
@@ -288,6 +290,7 @@ func (s *Server) setupRoutes() {
 		api.PUT("/mcp/mode", s.handleSetMcpMode)
 		api.PUT("/mcp/builtin-binding", s.handlePrepareBuiltinMCP)
 		api.GET("/mcp/builtin-binding", func(c *gin.Context) { c.JSON(http.StatusOK, s.mcpServer.Profile()) })
+		api.GET("/mcp/builtin-credential", s.handleGetBuiltinMCPCredential)
 		api.PUT("/mcp/providers", s.handleSetMcpProviders)
 		api.PUT("/mcp/plugin-tools", s.handleSetPluginTools)
 	}

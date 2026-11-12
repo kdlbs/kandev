@@ -98,7 +98,12 @@ func (m *Manager) materializeProjectMCPPlacement(
 		execution.clearProjectMCPDelivery()
 		return err
 	}
-	servers, err := builtinPassthroughMCPServers(execution, placement.coreURL, operation.servers)
+	credential, err := executionBuiltinMCPCredential(ctx, execution)
+	if err != nil {
+		execution.clearProjectMCPDelivery()
+		return err
+	}
+	servers, err := builtinPassthroughMCPServers(execution, placement.coreURL, credential, operation.servers)
 	if err != nil {
 		execution.clearProjectMCPDelivery()
 		return fmt.Errorf("resolve project MCP servers: %w", err)

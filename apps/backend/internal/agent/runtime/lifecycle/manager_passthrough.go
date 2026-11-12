@@ -535,7 +535,11 @@ func (m *Manager) passthroughMCPServers(
 			return nil, err
 		}
 	}
-	return builtinPassthroughMCPServers(execution, m.agentMCPURL(execution, port, builtinCoreMCPPath), operation.servers)
+	credential, err := executionBuiltinMCPCredential(ctx, execution)
+	if err != nil {
+		return nil, err
+	}
+	return builtinPassthroughMCPServers(execution, m.agentMCPURL(execution, port, builtinCoreMCPPath), credential, operation.servers)
 }
 
 // passthroughMCPPaths computes the filesystem locations a strategy may use: a

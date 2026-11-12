@@ -267,6 +267,23 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.builtinMcpCallerAuth",
+			EnvVar:      "KANDEV_FEATURES_BUILTIN_MCP_CALLER_AUTH",
+			Kind:        KindFeature,
+			Label:       "Built-in MCP caller authentication",
+			Description: "New agent sessions accept Kandev MCP tool calls only from the agent that Kandev launched for that session, using a per-session credential.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskMedium,
+			RiskDescription: "An agent that does not send the MCP headers Kandev configures loses access to Kandev tools in new sessions. " +
+				"Running sessions keep the mode they started with. Disable this toggle and restart if an agent reports unavailable Kandev tools.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.BuiltinMCPCallerAuth },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.BuiltinMCPCallerAuth = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "features.claudeBackgroundPromptHandoff",
 			EnvVar:      "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF",
 			Kind:        KindFeature,

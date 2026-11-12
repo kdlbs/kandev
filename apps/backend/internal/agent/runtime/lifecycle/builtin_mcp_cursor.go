@@ -10,28 +10,43 @@ import (
 	p "github.com/kandev/kandev/internal/mcp/profile"
 )
 
-func composeEffectiveMCPServers(execution *AgentExecution, profile []types.McpServer, user map[string]json.RawMessage, imported map[string]types.McpServer, host string) (map[string]any, map[string]string, error) {
+func composeEffectiveMCPServers(execution *AgentExecution, profile []types.McpServer, user map[string]json.RawMessage, imported map[string]types.McpServer, host, credential string) (map[string]any, map[string]string, error) {
 	if _, bound := execution.metadataValue(p.BuiltinBindingMetadataKey); !bound {
-		servers, ownership := composeLegacyMCPServers(execution, profile, user, imported, host)
+		servers, ownership := composeLegacyMCPServers(execution, profile, user, imported, host, credential)
 		return servers, ownership, nil
 	}
 	if err := validateBuiltinCursorNames(profile, user, imported); err != nil {
 		return nil, nil, err
 	}
 	coreURL := config.MCPServerURL(host, passthroughMCPConfigPort(execution), builtinCoreMCPPath)
-	native, err := builtinPassthroughMCPServers(execution, coreURL, nil)
+	native, err := builtinPassthroughMCPServers(execution, coreURL, credential, nil)
 	if err != nil {
 		return nil, nil, err
 	}
-	servers, ownership := composeLegacyMCPServers(execution, profile, user, imported, host)
+	servers, ownership := composeLegacyMCPServers(execution, profile, user, imported, host, credential)
 	for _, server := range native {
-		entry := map[string]any{"url": server.URL}
+		entry := cursorBuiltinMCPEntry(server.URL, server.Headers)
 		servers[server.Name] = entry
 		if server.Name != kandevMCPServerName {
 			ownership[strings.ToLower(server.Name)], _ = canonicalJSONFingerprint(entry)
 		}
 	}
 	return servers, ownership, nil
+}
+
+// cursorBuiltinMCPEntry is the .cursor/mcp.json entry for one built-in
+// server. The caller-credential header is part of the entry, so its approval
+// fingerprint changes with every new agentctl instance.
+func cursorBuiltinMCPEntry(url string, headers map[string]string) map[string]any {
+	entry := map[string]any{"url": url}
+	if len(headers) > 0 {
+		values := make(map[string]any, len(headers))
+		for name, value := range headers {
+			values[name] = value
+		}
+		entry["headers"] = values
+	}
+	return entry
 }
 
 func validateBuiltinCursorNames(profile []types.McpServer, user map[string]json.RawMessage, imported map[string]types.McpServer) error {

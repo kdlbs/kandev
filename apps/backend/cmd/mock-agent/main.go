@@ -41,8 +41,9 @@ var logOutput io.Writer = os.Stderr
 
 // mcpServerDef describes an MCP server endpoint parsed from --mcp-config.
 type mcpServerDef struct {
-	URL  string `json:"url"`
-	Type string `json:"type"`
+	URL     string            `json:"url"`
+	Type    string            `json:"type"`
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 // mcpServers holds MCP server definitions from --mcp-config.

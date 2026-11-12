@@ -141,6 +141,10 @@ func (m *Manager) reconcileCursorProjectMCPFiles(
 	projectMCPDir := filepath.Join(workspaceDir, ".cursor")
 	projectMCPPath := filepath.Join(projectMCPDir, "mcp.json")
 	ownershipPath := filepath.Join(projectMCPDir, ".kandev-mcp-imports.json")
+	credential, err := executionBuiltinMCPCredential(ctx, execution)
+	if err != nil {
+		return nil, err
+	}
 	cursorProjectMCPMutex.Lock()
 	defer cursorProjectMCPMutex.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -170,6 +174,7 @@ func (m *Manager) reconcileCursorProjectMCPFiles(
 		userOwnedProjectServers,
 		allowedImportCandidates,
 		m.agentMCPHost(execution),
+		credential,
 	)
 	if err != nil {
 		return nil, err

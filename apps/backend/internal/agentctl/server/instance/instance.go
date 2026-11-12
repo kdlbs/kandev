@@ -196,6 +196,10 @@ type CreateRequest struct {
 	// DisableAskQuestion disables the ask_user_question MCP tool (for TUI agents).
 	DisableAskQuestion bool `json:"disable_ask_question,omitempty"`
 
+	// BuiltinMCPAuthEnforced makes the instance's built-in MCP routes reject
+	// callers without its caller credential. Older agentctl builds ignore it.
+	BuiltinMCPAuthEnforced bool `json:"builtin_mcp_auth_enforced,omitempty"`
+
 	// PromptSuggestions asks an agent with native next-prompt suggestions to emit them.
 	PromptSuggestions bool `json:"prompt_suggestions,omitempty"`
 

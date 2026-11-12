@@ -73,6 +73,7 @@ type CreateInstanceRequest struct {
 	SessionID                  string              `json:"session_id,omitempty"`                    // Task session ID for MCP tool calls
 	TaskID                     string              `json:"task_id,omitempty"`                       // Task ID for MCP plan tool calls (server-side injection)
 	DisableAskQuestion         bool                `json:"disable_ask_question,omitempty"`          // Disable ask_user_question MCP tool (TUI agents)
+	BuiltinMCPAuthEnforced     bool                `json:"builtin_mcp_auth_enforced,omitempty"`     // Set by ControlClient.CreateInstance from the process-wide toggle
 	PromptSuggestions          bool                `json:"prompt_suggestions,omitempty"`            // Ask native-suggestion agents to emit next-prompt suggestions
 	CopilotNativeSessionEvents bool                `json:"copilot_native_session_events,omitempty"` // Enable Copilot native compaction and attributed usage
 	AssumeMcpSse               bool                `json:"assume_mcp_sse,omitempty"`                // Assume agent supports SSE MCP servers
@@ -334,7 +335,9 @@ func (c *ControlClient) CreateInstance(ctx context.Context, req *CreateInstanceR
 	if err := c.requireBuiltinPackages(ctx, req); err != nil {
 		return nil, err
 	}
-	body, err := json.Marshal(req)
+	wire := *req
+	wire.BuiltinMCPAuthEnforced = BuiltinMCPAuthEnforced()
+	body, err := json.Marshal(&wire)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}

@@ -9,6 +9,7 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 	mcpclient "github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -46,12 +47,12 @@ func getMCPClientForServersCtx(ctx context.Context, serverName string, sessionSe
 	if !ok {
 		return nil, fmt.Errorf("unknown MCP server: %s", serverName)
 	}
-	cacheKey := serverName + "\x00" + srv.URL
+	cacheKey := serverName + "\x00" + srv.URL + "\x00" + srv.Headers["Authorization"]
 	if c, ok := mcpClients[cacheKey]; ok {
 		return c, nil
 	}
 
-	c, err := mcpclient.NewSSEMCPClient(srv.URL)
+	c, err := mcpclient.NewSSEMCPClient(srv.URL, transport.WithHeaders(srv.Headers))
 	if err != nil {
 		return nil, fmt.Errorf("create SSE client for %s: %w", serverName, err)
 	}
@@ -191,7 +192,7 @@ func registerACPMcpServers(servers []acp.McpServer) map[string]mcpServerDef {
 	registered := make(map[string]mcpServerDef)
 	for _, s := range servers {
 		if s.Sse != nil && s.Sse.Name != "" && s.Sse.Url != "" {
-			registered[s.Sse.Name] = mcpServerDef{URL: s.Sse.Url, Type: "sse"}
+			registered[s.Sse.Name] = mcpServerDef{URL: s.Sse.Url, Type: "sse", Headers: acpHeaders(s.Sse.Headers)}
 		}
 	}
 
@@ -205,6 +206,19 @@ func registerACPMcpServers(servers []acp.McpServer) map[string]mcpServerDef {
 		_, _ = fmt.Fprintf(logOutput, "mock-agent: registered ACP MCP server %s at %s\n", name, server.URL)
 	}
 	return registered
+}
+
+// acpHeaders converts ACP session headers, such as the instance's built-in
+// MCP caller credential, into the map the MCP client sends on every request.
+func acpHeaders(headers []acp.HttpHeader) map[string]string {
+	if len(headers) == 0 {
+		return nil
+	}
+	converted := make(map[string]string, len(headers))
+	for _, header := range headers {
+		converted[header.Name] = header.Value
+	}
+	return converted
 }
 
 func cloneMCPServerDefs(defs map[string]mcpServerDef) map[string]mcpServerDef {

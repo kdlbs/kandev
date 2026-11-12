@@ -53,6 +53,9 @@ func provideLifecycleManager(
 	startupRecoveryGuard *lifecycle.RecoveryGuard,
 ) (*lifecycle.Manager, error) {
 	log.Info("Initializing Agent Manager...")
+	// Restart-required: every instance this process creates, through every
+	// executor, carries the same built-in MCP caller-auth decision.
+	agentctl.SetBuiltinMCPAuthEnforced(cfg.Features.BuiltinMCPCallerAuth)
 	secretStores := newLifecycleSecretStores(rawSecretStore)
 	agentctlResolver := lifecycle.NewAgentctlResolverWithOptions(log, lifecycle.AgentctlResolverOptions{
 		Version:   Version,

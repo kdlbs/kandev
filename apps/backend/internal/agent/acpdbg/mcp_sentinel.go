@@ -1,6 +1,7 @@
 package acpdbg
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -23,6 +24,9 @@ const (
 type MCPSentinel struct {
 	recorder *Recorder
 	server   *httptest.Server
+	// credential is a random per-probe value advertised as an Authorization
+	// header in session/new. Only whether it arrived is recorded.
+	credential string
 
 	mu          sync.Mutex
 	connections map[string]*sentinelConnection
@@ -33,6 +37,10 @@ type sentinelConnection struct {
 	toolsListed bool
 	toolCalled  bool
 	toolCount   int
+	// headerSeen and headerMissing record whether the configured
+	// Authorization header arrived on this connection's requests.
+	headerSeen    bool
+	headerMissing bool
 }
 
 // MCPSentinelSummary separates actual endpoint observations from ACP delivery.
@@ -41,18 +49,30 @@ type MCPSentinelSummary struct {
 	ToolsListObserved  bool
 	ToolCallObserved   bool
 	ToolCount          int
+	// HeaderObserved reports that at least one request carried the configured
+	// Authorization header; HeaderMissing that at least one request lacked it.
+	// Both false means the agent never contacted the sentinel.
+	HeaderObserved bool
+	HeaderMissing  bool
 }
 
 // NewMCPSentinel starts an in-process sentinel. Call Close after session/new
 // has returned; the server never exposes a host project endpoint or credentials.
 func NewMCPSentinel(recorder *Recorder) *MCPSentinel {
-	s := &MCPSentinel{recorder: recorder, connections: make(map[string]*sentinelConnection)}
+	raw := make([]byte, 16)
+	_, _ = rand.Read(raw)
+	s := &MCPSentinel{recorder: recorder, connections: make(map[string]*sentinelConnection), credential: hex.EncodeToString(raw)}
 	s.server = httptest.NewServer(http.HandlerFunc(s.serveHTTP))
 	_ = recorder.Meta("mcp_sentinel_started", map[string]any{"target": s.server.URL + "/mcp"})
 	return s
 }
 
 func (s *MCPSentinel) URL() string { return s.server.URL + "/mcp" }
+
+// Headers is the ACP header list advertised for the sentinel server entry.
+func (s *MCPSentinel) Headers() []map[string]string {
+	return []map[string]string{{"name": "Authorization", "value": "Bearer " + s.credential}}
+}
 
 func (s *MCPSentinel) Close() {
 	if s.server != nil {
@@ -68,6 +88,8 @@ func (s *MCPSentinel) Summary() MCPSentinelSummary {
 		result.InitializeObserved = result.InitializeObserved || connection.initialized
 		result.ToolsListObserved = result.ToolsListObserved || connection.toolsListed
 		result.ToolCallObserved = result.ToolCallObserved || connection.toolCalled
+		result.HeaderObserved = result.HeaderObserved || connection.headerSeen
+		result.HeaderMissing = result.HeaderMissing || connection.headerMissing
 		if connection.toolCount > result.ToolCount {
 			result.ToolCount = connection.toolCount
 		}
@@ -91,7 +113,7 @@ func (s *MCPSentinel) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	connectionID := s.connectionID(r)
-	s.record(connectionID, request.Method)
+	s.record(connectionID, request.Method, r.Header.Get("Authorization") == "Bearer "+s.credential)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Mcp-Session-Id", connectionID)
 	response := map[string]any{"jsonrpc": "2.0", "id": request.ID}
@@ -126,12 +148,17 @@ func opaqueConnectionID(value string) string {
 	return "sentinel-" + hex.EncodeToString(sum[:4])
 }
 
-func (s *MCPSentinel) record(connectionID, method string) {
+func (s *MCPSentinel) record(connectionID, method string, headerSeen bool) {
 	s.mu.Lock()
 	connection := s.connections[connectionID]
 	if connection == nil {
 		connection = &sentinelConnection{}
 		s.connections[connectionID] = connection
+	}
+	if headerSeen {
+		connection.headerSeen = true
+	} else {
+		connection.headerMissing = true
 	}
 	switch method {
 	case mcpInitializeMethod:
@@ -144,8 +171,9 @@ func (s *MCPSentinel) record(connectionID, method string) {
 	}
 	s.mu.Unlock()
 	_ = s.recorder.Meta("mcp_sentinel_"+method, map[string]any{
-		"connection_id": connectionID,
-		"timestamp":     time.Now().UTC().Format(time.RFC3339Nano),
+		"connection_id":   connectionID,
+		"header_observed": headerSeen,
+		"timestamp":       time.Now().UTC().Format(time.RFC3339Nano),
 	})
 }
 
