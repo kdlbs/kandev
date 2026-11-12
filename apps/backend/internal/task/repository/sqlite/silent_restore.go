@@ -51,7 +51,10 @@ func (r *Repository) ListSilentRestoreCandidates(
 	if limit < 1 || limit > 200 {
 		return nil, fmt.Errorf("silent restore candidate limit must be between 1 and 200")
 	}
-	sessionID := dialect.ByteOrderedText(r.db.DriverName(), "ts.id")
+	driver := r.db.DriverName()
+	sessionID := dialect.ByteOrderedText(driver, "ts.id")
+	pendingNotice := dialect.JSONTypeIsString(driver, "ts.metadata", models.SessionMetaKeyRecoveryNoticePending) +
+		" AND " + dialect.JSONExtract(driver, "ts.metadata", models.SessionMetaKeyRecoveryNoticePending) + " <> ''"
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(fmt.Sprintf(`
 		SELECT ts.task_id, ts.id, t.workspace_id, ts.state, ts.metadata
 		FROM task_sessions ts
@@ -65,7 +68,7 @@ func (r *Repository) ListSilentRestoreCandidates(
 			  AND b.incarnation_id = ts.queue_incarnation_id
 			  AND b.state = ?
 			  AND b.consumer_reference = 'agent_delivery'
-		  ) OR EXISTS (
+		  ) OR (%s) OR EXISTS (
 			SELECT 1 FROM agent_delivery_submissions d
 			WHERE d.session_id = ts.id AND d.incarnation_id = ts.queue_incarnation_id
 			  AND d.state IN ('dispatching', 'interrupted_unknown')
@@ -77,7 +80,7 @@ func (r *Repository) ListSilentRestoreCandidates(
 				  AND settled.authorized_action IN ('resume', 'silent_restart_restore'))
 		  ))
 		ORDER BY %s
-		LIMIT ?`, sessionID, sessionID)),
+		LIMIT ?`, sessionID, pendingNotice, sessionID)),
 		afterSessionID,
 		models.TaskSessionStateStarting, models.TaskSessionStateRunning,
 		models.TaskSessionStateWaitingForInput, models.TaskSessionStateFailed,
@@ -797,6 +800,11 @@ func writeSilentRestoreRecoveryTx(
 	}
 	clearSilentRestoreUncertainError(session.metadata, session.current)
 	session.metadata[models.SessionMetaKeyAgentDeliveryRecovery] = encodedRecovery
+	encodedNoticeIdentity, err := json.Marshal(models.RecoveryNoticeSourceIdentity(recovery))
+	if err != nil {
+		return false, err
+	}
+	session.metadata[models.SessionMetaKeyRecoveryNoticePending] = encodedNoticeIdentity
 	encodedMetadata, err := json.Marshal(session.metadata)
 	if err != nil {
 		return false, err

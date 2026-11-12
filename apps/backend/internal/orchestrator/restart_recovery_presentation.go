@@ -31,8 +31,13 @@ func (s *Service) repairRestartRecoveryPresentation(ctx context.Context, session
 	if !ok {
 		return session, nil
 	}
-	if open, readErr := blocks.GetOpenSessionRecoveryBlock(ctx, session.ID, session.QueueIncarnationID, generation.Generation); readErr == nil && open != nil {
-		if resolved, _ := s.finishLoadedNativeDeliveryBlock(ctx, open); resolved {
+	if open, readErr := blocks.GetOpenSessionRecoveryBlock(ctx, session.ID, session.QueueIncarnationID, generation.Generation); readErr == nil && open != nil &&
+		s.agentManager != nil && s.agentManager.IsAgentRunningForSession(ctx, session.ID) {
+		resolved, finishErr := s.finishLoadedNativeDeliveryBlock(ctx, open)
+		if finishErr != nil {
+			return nil, finishErr
+		}
+		if resolved {
 			return s.repo.GetTaskSession(ctx, session.ID)
 		}
 	}
@@ -157,11 +162,19 @@ func (s *Service) restartRecoveryPresentationRepairAllowed(ctx context.Context, 
 
 func (s *Service) currentRestartRecoverySnapshot(ctx context.Context, session *models.TaskSession, generation *models.HarnessSessionGeneration) (models.AgentDeliveryRecovery, bool, error) {
 	recovery, exists := models.LoadAgentDeliveryRecovery(session.Metadata)
-	if !exists || recovery.Phase != models.AgentDeliveryRecoveryRestored {
+	if !exists || (recovery.Phase != models.AgentDeliveryRecoveryRestored && recovery.Phase != models.AgentDeliveryRecoverySettled) {
 		return recovery, exists, nil
 	}
 	if !s.hasNewRestartJournalSubmission(ctx, session, generation, recovery.SubmissionID) {
 		return recovery, true, nil
+	}
+	if recovery.Phase == models.AgentDeliveryRecoverySettled {
+		verifier, supported := s.repo.(historicalTerminalRecoveryVerifier)
+		if !supported {
+			return recovery, true, nil
+		}
+		resolved, err := verifier.HasResolvedHistoricalTerminalRecovery(ctx, recovery, generation.Generation, generation.NativeSessionID)
+		return recovery, !resolved, err
 	}
 	verifier, supported := s.repo.(historicalNativeResumeRecoveryVerifier)
 	if !supported {

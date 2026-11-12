@@ -35,7 +35,10 @@ func (m *retainedJournalRecoveryManager) InspectDeliveryRecordEvidence(
 	if err != nil {
 		return nil, err
 	}
-	return &lifecycle.DeliveryRecordEvidence{Descriptor: retained.Descriptor, ControlIdentity: m.controlIdentity, RetiredSubmission: retained.RetiredSubmission, StoredSubmission: retained.StoredSubmission}, nil
+	terminated := m.terminated
+	return &lifecycle.DeliveryRecordEvidence{Descriptor: retained.Descriptor, ControlIdentity: m.controlIdentity,
+		RetiredSubmission: retained.RetiredSubmission, StoredSubmission: retained.StoredSubmission,
+		ProcessTerminated: &terminated}, nil
 }
 
 func (m *retainedJournalRecoveryManager) ReadDeliveryRecordSubmission(
@@ -184,19 +187,33 @@ func TestRetrySessionDeliveryReconstructsMissingSubmission(t *testing.T) {
 
 	_, err = repo.ResolveSessionRecoveryBlock(ctx, independent.ID, "retry", time.Now().UTC())
 	require.NoError(t, err)
-	require.NoError(t, repo.DeleteExecutorRunningBySessionID(ctx, session.ID))
-	manager.controlIdentity = &lifecycle.AgentDeliveryRecoveryIdentity{
+	running, err := repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	require.NoError(t, err)
+	if running.Metadata == nil {
+		running.Metadata = make(map[string]interface{})
+	}
+	running.Metadata[models.SessionMetaKeyDeliveryPromptTurnBinding] = models.AgentDeliveryPromptTurnBinding{
 		TaskID: session.TaskID, SessionID: session.ID, ExecutionID: "original-execution",
 		IncarnationID: session.QueueIncarnationID, HarnessGeneration: 1,
 		SubmissionID: submissionID, StreamID: streamID, PromptGeneration: 9,
 		OriginalRuntime: processidentity.Identity{PID: 42, BirthToken: "verified-birth"},
+		TurnID:          "turn-reconstruct-missing",
 	}
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, running))
+	manager.terminated = true
 	enriched, err := service.RetrySessionDelivery(ctx, session.TaskID, session.ID)
 	require.NoError(t, err)
-	require.Equal(t, SessionDeliveryRecoveryUncertain, enriched.Outcome)
+	require.Equal(t, SessionDeliveryRecoveryBlocked, enriched.Outcome)
+	require.Equal(t, "recovery_identity_mismatch", enriched.Reason,
+		"state-only Retry must not treat the replacement execution as the original prompt owner")
 	require.EqualValues(t, 2, enriched.RecoveryRevision)
-	require.EqualValues(t, 9, enriched.RecoveryIdentity.PromptGeneration)
-	manager.terminated = true
+	updated, err := repo.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	recovery, ok = models.LoadAgentDeliveryRecovery(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "original-execution", recovery.AgentExecutionID)
+	require.EqualValues(t, 9, recovery.PromptGeneration)
+	require.True(t, recovery.Reconstruction.ProcessIdentityKnown)
 	ready, err := service.RetrySessionDelivery(ctx, session.TaskID, session.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, ready.RecoveryRevision)

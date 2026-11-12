@@ -148,6 +148,11 @@ func (s *Service) loadSilentRestoreSession(
 		return nil, models.AgentDeliveryRecovery{}, false, err
 	}
 	recovery, ok := models.LoadAgentDeliveryRecovery(session.Metadata)
+	if ok && recovery.Phase == models.AgentDeliveryRecoveryRestored {
+		if err := s.publishPendingRecoveryNotice(ctx, session.ID); err != nil {
+			return nil, models.AgentDeliveryRecovery{}, false, err
+		}
+	}
 	if !ok || !silentRestoreRecoveryPhase(recovery.Phase) || !silentRestoreRecoveryMatchesSession(recovery, session) {
 		return nil, models.AgentDeliveryRecovery{}, false, nil
 	}
@@ -245,17 +250,26 @@ func (s *Service) restoreSilentRestartCandidate(
 	store taskrepo.SilentRestoreRepository,
 	candidate models.SilentRestoreCandidate,
 ) error {
+	if err := s.publishPendingRecoveryNoticeForCandidate(ctx, candidate); err != nil {
+		return fmt.Errorf("publish recovery notice before restore: %w", err)
+	}
 	inputs, err := s.loadSilentRestoreInputs(ctx, candidate)
-	if err != nil || inputs == nil {
-		return err
+	if err != nil {
+		return fmt.Errorf("load silent restart recovery inputs: %w", err)
+	}
+	if inputs == nil {
+		return s.publishPendingRecoveryNoticeForCandidate(ctx, candidate)
 	}
 	attemptID, err := silentRestoreIncidentAttemptID(ctx, store, inputs)
 	if err != nil {
-		return err
+		return fmt.Errorf("identify silent restart recovery attempt: %w", err)
 	}
 	attempt, err := s.ensureSilentRestoreAttempt(ctx, store, attemptID, inputs)
 	if err != nil || attempt == nil || attempt.Checkpoint == nil {
-		return err
+		if err != nil {
+			return fmt.Errorf("ensure silent restart recovery attempt: %w", err)
+		}
+		return nil
 	}
 	checkpoint := *attempt.Checkpoint
 	if !sameSilentRestorePinnedSource(checkpoint, inputs.checkpoint) {
@@ -266,18 +280,30 @@ func (s *Service) restoreSilentRestartCandidate(
 	}
 	if checkpoint.Stage == models.SilentRestoreStagePrepared {
 		if err := s.reconcileSilentRestoreSource(inputs.ownerCtx, inputs); err != nil {
-			return err
+			return fmt.Errorf("reconcile silent restart source: %w", err)
 		}
 		ownerCtx, err := s.revalidateSilentRestoreInputs(ctx, inputs, checkpoint)
 		if err != nil {
-			return err
+			return fmt.Errorf("revalidate prepared silent restart recovery: %w", err)
 		}
 		inputs.ownerCtx = ownerCtx
 		if restored, err := s.finishAlreadyResumedRestartRecovery(ownerCtx, inputs); err != nil || restored {
-			return err
+			if err != nil {
+				return fmt.Errorf("finish already-resumed restart recovery: %w", err)
+			}
+			if err := s.publishPendingRecoveryNotice(ownerCtx, inputs.session.ID); err != nil {
+				return fmt.Errorf("publish notice after already-resumed recovery: %w", err)
+			}
+			return nil
 		}
 	}
-	return s.ensureSilentRestoreCandidate(inputs.ownerCtx, store, attemptID, checkpoint, inputs)
+	if err := s.ensureSilentRestoreCandidate(inputs.ownerCtx, store, attemptID, checkpoint, inputs); err != nil {
+		return fmt.Errorf("ensure silent restart candidate: %w", err)
+	}
+	if err := s.publishPendingRecoveryNotice(inputs.ownerCtx, inputs.session.ID); err != nil {
+		return fmt.Errorf("publish notice after silent restart recovery: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) ensureSilentRestoreAttempt(

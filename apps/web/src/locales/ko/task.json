@@ -2338,6 +2338,7 @@
   "failedToResumeAndRestore": "세션 재개 실패 - 워크스페이스 복원도 사용할 수 없습니다",
   "resumeAndRestoreFailed": "재개 실패: {{resumeError}}. 워크스페이스 복원 실패: {{restoreError}}.",
   "sessionRecoveryFailed": "세션 복구 실패",
+  "sessionRestoredAfterInterruption": "세션이 중단되었습니다. 대화가 복원되었습니다. 계속할 수 있습니다.",
   "providerRestoredResumeDisclosure": "재개하면 이 대화를 유지하고, 이번 시도에서는 모드/모델 재정의를 건너뜁니다.",
   "providerRestoredResumeSuccess": "모드/모델 재정의 없이 세션을 재개했습니다.",
   "providerRestoredResumeSuccessWithModel": "세션이 다시 시작되었습니다: {{model}}. 이전 대화는 유지되었습니다.",

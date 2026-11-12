@@ -132,6 +132,25 @@ describe("MessageRenderer markdown file links", () => {
   });
 });
 
+it("renders a restored interruption by its typed status kind", () => {
+  render(
+    <MessageRenderer
+      comment={message({
+        type: "status",
+        content: "stored fallback content",
+        metadata: { kind: "session_restored_after_interruption" },
+      })}
+      isTaskDescription={false}
+    />,
+  );
+
+  expect(screen.getByTestId("session-recovery-notice").textContent).toBe(
+    "The session was interrupted. Your conversation is restored. You can continue.",
+  );
+  expect(screen.queryByTestId("status-message-renderer")).toBeNull();
+  expect(screen.queryByTestId("action-message-renderer")).toBeNull();
+});
+
 it.each(["tool_read", "tool_edit", "tool_search", "tool_call"])(
   "renders removed %s details without old payloads",
   (type) => {

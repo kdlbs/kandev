@@ -2,11 +2,13 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/stretchr/testify/require"
 )
 
@@ -53,6 +55,32 @@ func TestRestartRecoveryRecreateDoesNotAddCompanionFence(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, blocks, 1)
 	require.Equal(t, currentBlock.ID, blocks[0].ID)
+}
+
+// @covers AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.11
+func TestRestartPresentationDefersLoadedProofWithoutExecution(t *testing.T) {
+	ctx := context.Background()
+	service, manager, block, submission, _, _ := nativeResumeFixture(t, "unknown_prompt_outcome", false, false)
+	repo := service.repo.(*sqliterepo.Repository)
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, submission.SessionID, models.TaskSessionStateWaitingForInput, ""))
+
+	var reconcileCalls int
+	service.agentManager = &loadedNativeProofTestManager{&nativeProofTestManager{
+		nativeResumeTestManager: manager,
+		proof: func(context.Context, string) (*models.NativeResumeDeliveryEvidence, error) {
+			reconcileCalls++
+			return nil, errors.New("durable adoption evidence unavailable")
+		},
+	}}
+	session, err := repo.GetTaskSession(ctx, submission.SessionID)
+	require.NoError(t, err)
+
+	_, err = service.repairRestartRecoveryPresentation(ctx, session)
+	require.NoError(t, err)
+	require.Zero(t, reconcileCalls, "restart recovery must not require a loaded runtime")
+	open, err := repo.GetSessionRecoveryBlock(ctx, block.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.RecoveryBlockOpen, open.State)
 }
 
 func TestRestartRecoveryRecreateReusesCurrentFenceControl(t *testing.T) {

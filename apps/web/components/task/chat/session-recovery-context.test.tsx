@@ -183,6 +183,101 @@ it("restores the composer after external native recovery and fences the late fai
   expect(result.current.context?.model).toBeNull();
 });
 
+it("clears stale local recovery guidance after committed delivery restoration", () => {
+  const currentSession = {
+    ...deliverySession("restored", []),
+    state: "FAILED" as const,
+    error_message: "The interrupted prompt failed",
+    metadata: {
+      ...deliverySession("restored", []).metadata,
+      last_agent_error: {
+        scope: "session",
+        message: "The interrupted prompt failed",
+        delivery_submission_id: "submission-1",
+      },
+    },
+  };
+  const { result } = renderHook(
+    () => ({ owner: useAppStoreApi(), context: useSessionComposerRecovery("session") }),
+    { wrapper: recoveryWrapperFor(() => currentSession) },
+  );
+
+  expect(result.current.context?.model).toBeNull();
+});
+
+it("preserves a new session error after an older delivery incident was restored", () => {
+  let currentSession = deliverySession("restored", []);
+  mockLaunchErrorContext.value = null;
+  const { result, rerender } = renderHook(() => useSessionComposerRecovery("session"), {
+    wrapper: recoveryWrapperFor(() => currentSession),
+  });
+  expect(result.current?.model).toBeNull();
+
+  currentSession = {
+    ...currentSession,
+    state: "FAILED",
+    error_message: "A later provider failure",
+    metadata: {
+      ...currentSession.metadata,
+      last_agent_error: {
+        scope: "session",
+        message: "A later provider failure",
+        delivery_submission_id: "submission-2",
+      },
+    },
+  };
+  mockLaunchErrorContext.value = {
+    automaticRecovery: {
+      requestIdentity: { taskId: "task", sessionId: "session", generation: 1, attemptId: 2 },
+      resumptionState: "error",
+      error: "A later recovery request failed",
+    },
+  };
+  rerender();
+
+  expect(result.current?.model).toMatchObject({
+    kind: "generic",
+    summary: "A later provider failure",
+  });
+});
+
+it("preserves a new request-local failure after committed restoration", () => {
+  mockLaunchErrorContext.value = null;
+  const currentSession = deliverySession("restored", []);
+  const { result, rerender } = renderHook(() => useSessionComposerRecovery("session"), {
+    wrapper: recoveryWrapper(currentSession),
+  });
+  expect(result.current?.model).toBeNull();
+
+  mockLaunchErrorContext.value = {
+    automaticRecovery: {
+      requestIdentity: { taskId: "task", sessionId: "session", generation: 1, attemptId: 2 },
+      resumptionState: "error",
+      error: "The new recovery request failed",
+    },
+  };
+  rerender();
+
+  expect(result.current?.model).toMatchObject({
+    kind: "generic",
+    summary: "The new recovery request failed",
+    requestLocal: true,
+  });
+});
+
+it("keeps recovery guidance when another recovery block remains open", () => {
+  const currentSession = {
+    ...deliverySession("restored", [recoveryBlock]),
+    state: "WAITING_FOR_INPUT" as const,
+    session_recovery_blocks: [recoveryBlock],
+  };
+  const { result } = renderHook(() => useSessionComposerRecovery("session"), {
+    wrapper: recoveryWrapper(currentSession),
+  });
+
+  expect(result.current?.model).toMatchObject({ kind: "generic", requestLocal: true });
+});
+
 it("does not place an authoritatively usable session behind unprojected recovery guidance", () => {
   mockLaunchErrorContext.value = null;
   let currentSession = deliverySession("uncertain", undefined);

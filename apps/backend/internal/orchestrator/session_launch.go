@@ -669,6 +669,9 @@ func (s *Service) resolveSessionRecoveryBlock(ctx context.Context, sessionID, ac
 		return fmt.Errorf("resolve session recovery block: block changed or recovery evidence is incomplete")
 	}
 	s.publishAgentDeliveryRecoveryState(ctx, sessionID)
+	if err := s.publishPendingRecoveryNotice(ctx, sessionID); err != nil {
+		return fmt.Errorf("persist session recovery notice: %w", err)
+	}
 	if err := s.restorePendingQueueDispatchesForRecovery(ctx, sessionID); err != nil {
 		return fmt.Errorf("release parked queue work after session recovery: %w", err)
 	}
