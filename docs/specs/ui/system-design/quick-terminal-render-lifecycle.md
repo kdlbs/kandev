@@ -21,7 +21,7 @@ The backend retains descriptor membership, host-shell identity, process lifetime
 | --- | --- |
 | `REQ-UI-QUICK-TERMINAL-001` | Stable Quick Terminal startup; stream ownership; lifecycle compatibility; verification |
 
-The design covers AC-UI-QUICK-TERMINAL-001.15 and .16, with compatibility for .8, .13, and .14.
+The design covers AC-UI-QUICK-TERMINAL-001.21 and .22, with compatibility for .8, .13, and .14.
 
 ## Stable Quick Terminal startup
 

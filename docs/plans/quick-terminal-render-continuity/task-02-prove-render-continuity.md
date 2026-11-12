@@ -11,8 +11,8 @@ requirements:
 acceptance_criteria:
   - AC-UI-QUICK-TERMINAL-001.8
   - AC-UI-QUICK-TERMINAL-001.13
-  - AC-UI-QUICK-TERMINAL-001.15
-  - AC-UI-QUICK-TERMINAL-001.16
+  - AC-UI-QUICK-TERMINAL-001.21
+  - AC-UI-QUICK-TERMINAL-001.22
 system_design:
   - ../../specs/ui/system-design/quick-terminal.md
   - ../../specs/ui/system-design/quick-terminal-render-lifecycle.md
@@ -77,7 +77,7 @@ Restore any user setting changed for launcher setup.
 
 ## ASCII UI preview
 
-Relevant [UI-01 and UI-02](plan.md#ascii-ui-preview), covering .15 and .16 with .8 and .13 controls:
+Relevant [UI-01 and UI-02](plan.md#ascii-ui-preview), covering .21 and .22 with .8 and .13 controls:
 
 ```text
 UI-01 desktop, after unrelated updates
@@ -156,7 +156,7 @@ Task `01-preserve-terminal-lifecycle` must pass first.
 
 ## Inputs
 
-- [Requirement](../../specs/ui/requirements/quick-terminal.md), especially .8, .13, .15, and .16.
+- [Requirement](../../specs/ui/requirements/quick-terminal.md), especially .8, .13, .14, .21, and .22.
 - [Shared-tab design](../../specs/ui/system-design/quick-terminal.md).
 - [Render lifecycle design](../../specs/ui/system-design/quick-terminal-render-lifecycle.md).
 - Existing `quick-terminal.spec.ts`, `mobile-quick-terminal.spec.ts`, and `terminal-test-helpers.ts`.
@@ -185,3 +185,8 @@ Verification passed:
 - Focused Oxlint and E2E sleep-lint for the new specs and shared helper.
 - Web typecheck, catalog validation, all 36 specification-linter tests, and full specification lint.
 - Documentation-coverage validation and `git diff --check`.
+
+PR fixup after the animation-timing correction:
+
+- Desktop render-continuity E2E: fresh managed build, 1/1 passed.
+- Phone render-continuity E2E: fresh managed build, 1/1 passed.

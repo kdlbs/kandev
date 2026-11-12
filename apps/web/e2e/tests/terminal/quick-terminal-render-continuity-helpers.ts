@@ -83,7 +83,7 @@ export async function settleQuickTerminalAnimationsForCapture(page: Page): Promi
       .filter(
         (animation) =>
           animation.playState === "running" &&
-          Number.isFinite(animation.effect?.getTiming().endTime),
+          Number.isFinite(animation.effect?.getComputedTiming().endTime),
       );
     await Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)));
   });

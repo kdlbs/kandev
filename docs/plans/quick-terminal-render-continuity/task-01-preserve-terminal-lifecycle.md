@@ -11,8 +11,8 @@ acceptance_criteria:
   - AC-UI-QUICK-TERMINAL-001.8
   - AC-UI-QUICK-TERMINAL-001.13
   - AC-UI-QUICK-TERMINAL-001.14
-  - AC-UI-QUICK-TERMINAL-001.15
-  - AC-UI-QUICK-TERMINAL-001.16
+  - AC-UI-QUICK-TERMINAL-001.21
+  - AC-UI-QUICK-TERMINAL-001.22
 system_design:
   - ../../specs/ui/system-design/quick-terminal.md
   - ../../specs/ui/system-design/quick-terminal-render-lifecycle.md
@@ -68,7 +68,7 @@ Retain both failure results as behavioral RED evidence.
 
 ## ASCII UI preview
 
-Excerpt of [UI-01 and UI-02](plan.md#ascii-ui-preview), covering .15 and .16 with compatibility for .8 and .13:
+Excerpt of [UI-01 and UI-02](plan.md#ascii-ui-preview), covering .21 and .22 with compatibility for .8 and .13:
 
 ```text
 UI-01 desktop: floating shared dialog
@@ -135,7 +135,7 @@ None. Existing backend client-key idempotency and descriptor APIs are sufficient
 
 ## Inputs
 
-- [Requirement](../../specs/ui/requirements/quick-terminal.md), especially .8 and .13 through .16.
+- [Requirement](../../specs/ui/requirements/quick-terminal.md), especially .8, .13, .14, .21, and .22.
 - [Shared-tab design](../../specs/ui/system-design/quick-terminal.md).
 - [Render lifecycle design](../../specs/ui/system-design/quick-terminal-render-lifecycle.md).
 - Existing shared PTY mocks and lifecycle tests.
@@ -147,16 +147,18 @@ None. Existing backend client-key idempotency and descriptor APIs are sufficient
 
 The regressions were run before the repair. The callback-latest-handler test failed because the deferred result went to the old handler. The disposed-stream test observed old error/output/exit effects after cleanup. The real-component continuity test observed six starts/resources across five callback-only renders, and the persisted-state plus CONNECTING-close case observed repeated starts.
 
-The implementation stabilizes the Quick Terminal `startSession` adapter and stores the mount cancellation token in the shared PTY stream context. The four focused component suites passed: 29 tests total. This includes deferred-start latest-handler behavior, one xterm/socket/start over five renders, bounded CONNECTING-close behavior, stale callback fencing after replacement, live error/exit controls, detached late-start identity, existing cleanup, and agent-login compatibility.
+The implementation stabilizes the Quick Terminal `startSession` adapter and stores the mount cancellation token in the shared PTY stream context. Before the PR merge, the four focused component suites passed 29 tests total. This includes deferred-start latest-handler behavior, one xterm/socket/start over five renders, bounded CONNECTING-close behavior, stale callback fencing after replacement, live error/exit controls, detached late-start identity, existing cleanup, and agent-login compatibility.
 
 Review follow-up strengthened the stale-stream case to rerender one mounted `PtyTerminalView` with a changed `startSession` callback. It captures the old generation's handlers, attaches `session-2` on the same component instance, then invokes the old error, close, binary output, exit, and open handlers. The replacement resize must still target `session-2`. The updated PTY suite passed 16/16 tests. As a mutation check, removing only the old `onclose` cancellation guard caused the replacement resize assertion to fail with zero resize calls.
 
 Verification passed:
 
-- `pnpm exec vitest run components/quick-chat/quick-terminal-render-lifecycle.test.tsx components/quick-chat/quick-terminal-tab-view.test.tsx components/settings/pty-terminal-view.test.tsx components/settings/agent-login-dialog.test.tsx` (29 tests).
+- `pnpm exec vitest run components/quick-chat/quick-terminal-render-lifecycle.test.tsx components/quick-chat/quick-terminal-tab-view.test.tsx components/settings/pty-terminal-view.test.tsx components/settings/agent-login-dialog.test.tsx` (32 tests after merge).
 - `pnpm run typecheck`.
 - Focused Oxlint for the changed component source and test files.
 - `pnpm run i18n:check` and `pnpm run i18n:ratchet`.
 - `git diff --check` for the component and plan paths.
+
+After merging the current main branch, the same four focused suites passed 32/32 tests. This count includes the three shell-recovery cases added to the shared component suite by the base branch.
 
 Task 02 adds fresh-build desktop and phone browser proof and is recorded separately.

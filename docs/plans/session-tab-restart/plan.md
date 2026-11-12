@@ -10,6 +10,9 @@ legacy_specs: []
 
 # Implementation plan: Session tab restart
 
+Follow-up: [Blocked-session recovery guidance](../blocked-session-recovery-guidance/plan.md)
+extends the failed-Resume handoff. The completed results below remain historical evidence.
+
 ## Overview
 
 Add one action that stops and resumes the same session.

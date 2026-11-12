@@ -22,7 +22,7 @@ func adoptOffice(t *testing.T, svc *service.Service, wsID string) {
 	`, "office-project-"+wsID, wsID)
 }
 
-// seedStuckParent creates a parent task with three terminal (non-archived)
+// seedStuckParent creates a parent task with three completed (non-archived)
 // children and an assignee, satisfying ListStuckParents' predicate. The
 // project_id marker (matching scheduler_recovery_test.go's own
 // 'office-project' marker) satisfies the authoritative-Office-task
@@ -35,7 +35,7 @@ func seedStuckParent(t *testing.T, svc *service.Service, wsID, parentID, agentID
 	svc.ExecSQL(t, `UPDATE tasks SET project_id = 'office-project' WHERE id = ?`, parentID)
 	setTestTaskAssignee(t, svc, parentID, agentID)
 
-	states := []string{"COMPLETED", "COMPLETED", "CANCELLED"}
+	states := []string{"COMPLETED", "COMPLETED", "COMPLETED"}
 	for i, state := range states {
 		childID := fmt.Sprintf("%s-child-%d", parentID, i)
 		insertTestTask(t, svc, childID, wsID)
@@ -405,7 +405,7 @@ func TestParentWakeReconciler_SkipsPausedAssigneeWithoutPartialReceipt(t *testin
 func seedStuckParentNoAssignee(t *testing.T, svc *service.Service, wsID, parentID string) {
 	t.Helper()
 	insertTestTask(t, svc, parentID, wsID)
-	states := []string{"COMPLETED", "COMPLETED", "CANCELLED"}
+	states := []string{"COMPLETED", "COMPLETED", "COMPLETED"}
 	for i, state := range states {
 		childID := fmt.Sprintf("%s-child-%d", parentID, i)
 		insertTestTask(t, svc, childID, wsID)
@@ -423,7 +423,7 @@ func seedStuckParentDanglingAssignee(t *testing.T, svc *service.Service, wsID, p
 	t.Helper()
 	insertTestTask(t, svc, parentID, wsID)
 	setTestTaskAssignee(t, svc, parentID, parentID+"-dangling-agent")
-	states := []string{"COMPLETED", "COMPLETED", "CANCELLED"}
+	states := []string{"COMPLETED", "COMPLETED", "COMPLETED"}
 	for i, state := range states {
 		childID := fmt.Sprintf("%s-child-%d", parentID, i)
 		insertTestTask(t, svc, childID, wsID)

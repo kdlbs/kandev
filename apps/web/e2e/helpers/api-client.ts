@@ -3225,6 +3225,7 @@ export class ApiClient {
       repository_id: string;
       base_branch: string;
       checkout_branch?: string;
+      workspace_relative_path?: string;
       position: number;
     }>;
     workspace_folders?: Array<{

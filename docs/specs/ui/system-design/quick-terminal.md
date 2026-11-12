@@ -5,7 +5,7 @@ requirements:
   - REQ-UI-QUICK-TERMINAL-001
   - REQ-UI-QUICK-TERMINAL-002
 created: 2026-08-03
-updated: 2026-11-11
+updated: 2026-11-12
 owners:
   - kandev
 ---
@@ -13,14 +13,14 @@ owners:
 
 ## Purpose and boundaries
 
-This design owns shared-tab interaction. Backend services retain task and descriptor ownership.
-Browser resource continuity follows the [render lifecycle design](quick-terminal-render-lifecycle.md).
+This design owns the shared Quick Chat tab presentation and interaction contract. Quick Chat task
+records and Quick Terminal descriptors remain owned by their existing backend services.
 
 ## Requirement mapping
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-UI-QUICK-TERMINAL-001` | [Migrated source detail](#migrated-source-detail), [Launcher focus return](#launcher-focus-return), [Launcher toggle and terminal Escape routing](#launcher-toggle-and-terminal-escape-routing), [Phone terminal shortcut controls](#phone-terminal-shortcut-controls) |
+| `REQ-UI-QUICK-TERMINAL-001` | [Migrated source detail](#migrated-source-detail), [Launcher focus return](#launcher-focus-return), [Launcher toggle and terminal Escape routing](#launcher-toggle-and-terminal-escape-routing), [Phone terminal shortcut controls](#phone-terminal-shortcut-controls), [Shell recovery](quick-terminal-recovery.md), [Render lifecycle](quick-terminal-render-lifecycle.md) |
 | `REQ-UI-QUICK-TERMINAL-002` | [Tab order and editing](#tab-order-and-editing) |
 
 Remembered conversation selection is defined in the
@@ -193,9 +193,8 @@ Users keep host terminals beside utility conversations and switch between them w
 - After the active tab is removed, the dialog selects the nearest remaining tab in the same
   rendered tab order; if the workspace has no remaining chat, setup, or terminal tab, the dialog
   closes.
-- A terminal that exits naturally remains as an exited tab until the user closes it. The terminal
-  shortcut reopens that most recent tab rather than silently replacing it; **New Terminal** is the
-  explicit way to start another shell.
+- An exited tab remains available for inspection. Its shortcut reopens it without an implicit start.
+  **Start new shell** recovers that tab. **New Terminal** creates another tab.
 - Terminal tabs are associated with the workspace from which they were created and are visible,
   reusable, and selectable only while that workspace is active. They still run on the Kandev host
   and do not acquire a task workspace or repository working directory.
@@ -347,6 +346,7 @@ legacy singleton login surface retains its existing behavior and authorization c
 | Detached | Tab selected or terminal launcher used | Reattach to the same session and replay available buffered output. |
 | Running or detached | Quiet or long-running work | No timeout; it persists through tab switches, dismissal, and reload until closed, exited, or shutdown. |
 | Running or detached | PTY exits | Mark the tab exited when observed; retain it for inspection. |
+| Exited or unavailable | **Start new shell** | Recover the same tab through the [recovery design](quick-terminal-recovery.md). |
 | Connecting, running, exited, or error | Terminal tab close | Stop any session, remove the tab, select the nearest same-workspace tab, or close the dialog. |
 
 The current client's connecting state remains authoritative until a session ID is attached. A
@@ -369,7 +369,7 @@ authorization remain unchanged.
 - A detached session may exit on its own (for example the user runs `exit` or the shell process
   crashes). It is not reaped by an idle or hard timeout. Reattaching to a session that no longer
   exists marks the tab exited or unavailable; it does not create a replacement implicitly.
-- Missing PTYs retain an unavailable descriptor with no session. **New Terminal** creates a replacement.
+- Missing PTYs retain an unavailable descriptor. **Start new shell** recovers it on demand.
   Reconnect reads preserve an in-flight local start until its request settles. Bound sessions and
   restored descriptors remain authoritative.
 - A successful stop or an already-missing session removes the tab. Any other stop failure is
@@ -395,9 +395,8 @@ authorization remain unchanged.
 - Host-shell processes and their rolling output buffers live only in backend memory. Dismissing the
   shared dialog does not stop them, and quick-terminal sessions have no idle or hard timeout, so
   only explicit tab close, the shell process exiting, or the backend stopping ends one. A backend
-  restart leaves the descriptor behind and marks it unavailable until the user explicitly creates a
-  new terminal. On graceful backend shutdown all live quick-terminal sessions are stopped rather
-  than left to leak.
+  restart retains an unavailable descriptor. The user can recover it with **Start new shell**.
+  Graceful backend shutdown stops all live quick-terminal sessions.
 - Reconnection can replay only the backend's existing rolling output buffer; this feature does not
   add durable terminal history.
 
@@ -435,7 +434,7 @@ authorization remain unchanged.
   within the viewport instead of overhanging the leading edge.
 - **GIVEN** a persisted terminal descriptor whose PTY was lost during a backend restart, **WHEN** the
   user opens Quick Chat, **THEN** the tab remains visible as exited/unavailable and no replacement
-  session starts until **New Terminal** is chosen.
+  session starts until the user chooses **Start new shell** or **New Terminal**.
 - **GIVEN** the same authenticated user opens another client on the same workspace, **WHEN** its
   Quick Chat state loads, **THEN** it receives the persisted terminal descriptor and can reattach to
   the live session or see its authoritative exited/unavailable state.
@@ -486,6 +485,8 @@ authorization remain unchanged.
 [Quick Terminal durable session lifecycle and menu alignment](../../../plans/quick-terminal-durable-lifecycle/plan.md)
 
 [Quick Chat tab order and editing](../../../plans/quick-chat-tab-order/plan.md)
+
+[Explicit shell recovery](../../../plans/quick-terminal-shell-recovery/plan.md)
 
 ## Phone terminal shortcut controls
 

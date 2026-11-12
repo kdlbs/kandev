@@ -179,13 +179,20 @@ function QuickChatTerminalContent({
 }) {
   if (quickChat.activeKind !== "terminal" || !quickChat.activeTerminalTab) return null;
   const tab = quickChat.activeTerminalTab;
+  const recovery = quickChat.terminalRecoveryByTab[tab.tabId];
   return (
     <QuickTerminalTabView
       key={tab.tabId}
       tab={tab}
-      onStateChange={(state) => quickChat.handleTerminalStateChange(tab.tabId, state)}
+      recoveryGeneration={recovery?.generation ?? 0}
+      recoveryPhase={recovery?.phase}
+      recoveryClosing={recovery?.closing}
+      onRecover={() => quickChat.handleRecoverTerminal(tab.tabId)}
+      onStateChange={(state) =>
+        quickChat.handleTerminalStateChange(tab.tabId, state, recovery?.generation ?? 0)
+      }
       onDescriptorReady={(descriptor) =>
-        quickChat.handleTerminalDescriptorReady(tab.tabId, descriptor)
+        quickChat.handleTerminalDescriptorReady(tab.tabId, descriptor, recovery?.generation ?? 0)
       }
     />
   );

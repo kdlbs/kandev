@@ -70,7 +70,7 @@ The adjacent Platform shared-PTY design concerns Unix I/O closure and does not o
 
 Existing AC-UI-QUICK-TERMINAL-001.8, .13, and .14 constrain isolation, phone controls, and startup reconciliation.
 The requirement lacked explicit acceptance criteria for ordinary-render continuity and stale stream events.
-The package adds .15 and .16 to the existing requirement, with no separate repair requirement.
+The package adds .21 and .22 to the existing requirement, with no separate repair requirement.
 The focused lifecycle design supplements the existing design, which was already near its 32 KiB limit.
 
 Confirmed scope: investigate, assign a sufficiently clear issue, and produce the fix package.
@@ -148,7 +148,7 @@ After, across the same update:
 The header and tab strip remain fixed.
 The selected xterm remains the vertical scroll owner and retains input focus.
 Real connection errors still use the existing localized status presentation.
-Maps to .15 and .16, with sibling isolation under .8.
+Maps to .21 and .22, with sibling isolation under .8.
 
 ### UI-02: Phone, selected running terminal
 
@@ -264,7 +264,7 @@ Implementation results on 2026-11-11:
 - The shared PTY stream ignores callbacks from a disposed mount before reporting, writing output, handling exits, disarming resize, or sending delayed initial input. Detached late-start identity publication remains covered.
 - Review follow-up: the stale-stream regression rerenders the same `PtyTerminalView` instance with a changed `startSession` callback. Removing only the old `onclose` cancellation guard makes the successor resize assertion fail.
 - Review follow-up: the desktop E2E captures the prior sidebar preferences and restores them in a nested `finally`, including when terminal cleanup throws.
-- Four focused component suites passed: 29 tests, including the retained existing lifecycle and agent-login controls.
+- Before the PR merge, four focused component suites passed 29 tests, including the retained existing lifecycle and agent-login controls.
 - The updated PTY suite passed 16/16 tests after the same-instance race regression was added; the component-test count remains 29.
 - Focused Oxlint, web typecheck, i18n check, and i18n ratchet passed.
 - Fresh-build desktop E2E passed 3/3: the continuity regression and both existing Quick Terminal desktop cases.
@@ -274,6 +274,16 @@ Implementation results on 2026-11-11:
 - Catalog validation, the 36 specification-linter tests, full specification lint, documentation coverage, and diff checks passed.
 
 The managed browser runs built the backend fixture and fresh pseudo-locale Vite assets before each project. Vite emitted existing chunking and import warnings; both builds completed successfully.
+
+PR fixup results on 2026-11-12:
+
+- Merged current `main` commit `dab0d02e` to resolve the PR conflict. The main branch already owns recovery criteria .15 through .20; continuity remains the same behavior and is recorded as .21 and .22. Work-order and design references now point to those IDs.
+- The sidebar restoration and same-component stale-handler findings were already covered on the PR head. The continuity spec restores preferences from a nested `finally`, and the PTY regression rerenders one mounted component, fires the old handlers, and checks replacement resize.
+- Fixed the valid Greptile/CodeRabbit screenshot timing finding by reading `endTime` from `getComputedTiming()`.
+- Four focused component suites passed 32/32 tests after the merge.
+- The fresh-build desktop and phone continuity E2E tests each passed 1/1 with retries disabled.
+- Web typecheck, focused Oxlint and E2E sleep lint, catalog validation, all 36 specification-linter tests, full specification lint, and diff checks passed after the merge.
+- The post-merge catalog validated 450 decisions and 1993 specifications. Documentation coverage passed for both work orders.
 
 For documentation coverage, run this repository validator from the root.
 It includes the two planned production paths so the validator checks references rather than returning the documentation-only exemption.

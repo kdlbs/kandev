@@ -154,13 +154,18 @@ For each existing required package:
 
 1. Request a fresh GitHub OIDC ID token with audience `npm:registry.npmjs.org`.
 2. Exchange it through `POST /-/npm/v1/oidc/token/exchange/package/{package_name}` on the public npm registry.
-3. Require HTTP 201 and a valid, unexpired OIDC exchange-token response.
+3. Require HTTP 201 and a JSON object with a nonempty token string.
 4. Discard both tokens after the check.
 
-The response must be an object with `token_type: oidc`, a nonempty token string, and a parseable future `expires` value.
-The `created` value is descriptive metadata and does not gate authentication.
-The preflight ignores it, including absent or unparseable values, and never includes it in diagnostics.
-Creation time does not establish token validity. Expiry retains its independent check.
+The public package exchange is the authority for current package authentication.
+The helper ignores `token_type`, `created`, `expires`, and other descriptive response metadata.
+It neither verifies nor reports the issued token's lifetime.
+The success entry contains only the package and authentication status. It omits `expires_at`.
+The helper discards the returned token. Publication obtains a fresh credential through its existing path.
+GitHub identity-token audience and expiry validation remain mandatory before each exchange.
+
+This contract follows the [pinned npm client](https://github.com/npm/cli/blob/v11.21.0/lib/utils/oidc.js), which consumes the returned token without metadata checks.
+The registry documentation's timestamp example does not define an additional authentication condition.
 
 Use bounded requests and reject redirects during authentication.
 Fail with a package-specific category for a rejected or unreadable response.
@@ -182,9 +187,9 @@ An HTTP 201 response does not establish that every returned field is valid.
 A local validation error does not establish that the trusted publisher rejected authentication.
 
 Report one fixed reason for each failed condition.
-These conditions cover unreadable JSON, invalid body shape, invalid token type, missing token, invalid expiry, and expired tokens.
+These conditions cover unreadable JSON, invalid body shape, and a missing, empty, or non-string token.
 Use `npm_exchange_response` for malformed successful responses.
-Keep `npm_authentication` for HTTP authentication rejection and an expired exchange token.
+Keep `npm_authentication` for HTTP authentication rejection.
 Preserve the package and HTTP status in the error.
 
 The failure summary includes the reason, package, HTTP status, workflow SHA, and checkout SHA.
@@ -200,9 +205,10 @@ Response-validation guidance directs maintainers to compare the named condition 
 
 Tests cover each validation condition separately and use a fixed clock.
 The documented success fixture remains accepted.
-Invalid authentication, token, and expiry fixtures remain rejected before release preparation.
-Absent or unparseable creation metadata remains accepted when all authentication and expiry checks pass.
-The creation-metadata correction follows the observed `invalid_created` failure in release run `43068047253`.
+Invalid authentication, token, transport, and context fixtures remain rejected before release preparation.
+Token-only responses and responses with missing or unexpected metadata remain accepted.
+GitHub identity-token expiry tests remain separate from ignored exchange-response metadata.
+The observed `invalid_created` and `invalid_expires` failures exposed the extra metadata assumptions.
 
 ## Workflow modes
 
@@ -257,3 +263,4 @@ No browser scenario applies to this infrastructure change.
 - [Implementation plan](../../../plans/npm-publication-reliability/plan.md).
 - [Preflight response diagnostics repair](../../../plans/npm-preflight-response-diagnostics/plan.md).
 - [Creation metadata compatibility repair](../../../plans/npm-preflight-created-metadata/plan.md).
+- [Exchange response contract repair](../../../plans/npm-preflight-exchange-contract/plan.md).

@@ -5078,7 +5078,7 @@ const envRepoSelectCols = `
 	COALESCE(ter.worktree_branch_owner, 'unknown'), COALESCE(ter.worktree_integration_ref, ''),
 	COALESCE(ter.worktree_recovery_head_sha, ''),
 	COALESCE(ter.worktree_source_clone_path, ''), COALESCE(ter.worktree_source_common_dir, ''),
-	ter.worktree_branch_compacted_at,
+	ter.worktree_branch_compacted_at, COALESCE(ter.worktree_origin, 'kandev'),
 	ter.position, COALESCE(ter.error_message, ''), ter.status,
 	ter.created_at, ter.updated_at, ter.merged_at, ter.deleted_at`
 
@@ -5091,7 +5091,7 @@ func scanEnvRepoRow(scanner rowScanner) (*models.TaskEnvironmentRepo, error) {
 		&row.ID, &row.TaskEnvironmentID, &row.RepositoryID, &row.WorkspaceRelativePath, &row.BranchSlug,
 		&row.WorktreeID, &row.WorktreePath, &row.WorktreeBranch,
 		&row.WorktreeBranchOwner, &row.WorktreeIntegrationRef, &row.WorktreeRecoveryHeadSHA,
-		&row.WorktreeSourceClonePath, &row.WorktreeSourceCommonDir, &compactedAt, &row.Position,
+		&row.WorktreeSourceClonePath, &row.WorktreeSourceCommonDir, &compactedAt, &row.WorktreeOrigin, &row.Position,
 		&row.ErrorMessage, &row.Status, &row.CreatedAt, &row.UpdatedAt,
 		&mergedAt, &deletedAt,
 	); err != nil {
@@ -5277,7 +5277,7 @@ func (r *Repository) appendWorktreesForSessionChunk(
 		if err := rows.Scan(&sessionID, &row.ID, &row.TaskEnvironmentID, &row.RepositoryID,
 			&row.WorkspaceRelativePath, &row.BranchSlug, &row.WorktreeID, &row.WorktreePath, &row.WorktreeBranch,
 			&row.WorktreeBranchOwner, &row.WorktreeIntegrationRef, &row.WorktreeRecoveryHeadSHA,
-			&row.WorktreeSourceClonePath, &row.WorktreeSourceCommonDir, &compactedAt,
+			&row.WorktreeSourceClonePath, &row.WorktreeSourceCommonDir, &compactedAt, &row.WorktreeOrigin,
 			&row.Position, &row.ErrorMessage, &row.Status, &row.CreatedAt, &row.UpdatedAt,
 			&mergedAt, &deletedAt); err != nil {
 			return err
