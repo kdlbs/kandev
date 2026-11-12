@@ -293,6 +293,9 @@ type TaskReactivityChange struct {
 	// the caller could not supply one (e.g. the read-back itself failed);
 	// the pipeline then enqueues the task_assigned wake keyless.
 	AssignmentGeneration *int64
+	// BlockerFailureOccurrenceID carries the identity assigned to this
+	// committed failure transition into Office reactivity.
+	BlockerFailureOccurrenceID string
 	// PrevAssigneeID is the assignee BEFORE the mutation. Required when
 	// NewAssigneeID is set so the pipeline can detect a real change and
 	// hand off the previous assignee's session.

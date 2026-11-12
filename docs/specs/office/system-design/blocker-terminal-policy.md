@@ -87,9 +87,10 @@ are unchanged. The Info log for a refusal adds the field `blocker_status`
 
 ## Resolution cascade
 
-`allBlockersResolvedExcept` and `resolveAndWakeIfUnblocked` require every blocker
-other than the triggering one to be satisfied. The triggering blocker is already
-known to be `COMPLETED` on the success paths. Keys
+`allBlockersResolvedExcept` skips the triggering blocker because its caller has
+already committed it as `COMPLETED`. `resolveAndWakeIfUnblocked` checks every
+persisted blocker, including the step-move trigger, because a step name does not
+prove that the task state changed. Keys
 (`task_blockers_resolved:<dependent>:<runner>:<BlockerDigest>`), payloads, and the
 Office-dependent isolation in `task_completion.go` are unchanged. A retried blocker
 that reaches `COMPLETED` re-enters the same success bridge, which gives
@@ -107,44 +108,48 @@ converge. `finalizeDone`'s routine-run sync and parent wake are unchanged.
 ## Failure escalation producer
 
 Add `scheduler/blocker_failure.go` with one evaluation,
-`escalateBlockerFailure(blocker, failedState)`, and two triggers:
+`escalateBlockerFailure(blocker, failedState, occurrenceID)`, and three triggers:
 
 - `RegisterBlockerFailureSubscriber(eb)` subscribes to `events.TaskStateChanged`
   for task-service writes. Register it once in `backendapp.activateOfficeServices`
   next to `RegisterTaskCompletionSubscriber`. A subscription error fails
-  activation. It decodes `task_id`, `old_state` and `new_state`, and returns when
+  activation. It decodes `task_id`, `old_state`, `new_state` and the committed
+  `updated_at`, and returns when
   any is empty, when `new_state` is not `FAILED`/`CANCELLED`, or when `old_state`
   is `FAILED`/`CANCELLED` (AC-002.5).
 - `reactToStatusChange` evaluates an Office status change to `cancelled` (the
   Office status vocabulary has no `failed`), unless the pre-update state was
-  already `FAILED` or `CANCELLED` (AC-002.5). Evaluation errors are logged; they
-  do not fail the status mutation.
+  already `FAILED` or `CANCELLED` (AC-002.5). The status mutation supplies a new
+  occurrence ID. Evaluation errors are logged; they do not fail the status mutation.
 - The same subscriber registration also subscribes to `task.tree_hold_created`.
   For a `cancel` hold it lists the hold members and evaluates each member the
-  hold moved to `CANCELLED`: members whose recorded prior status was `FAILED` or
+  hold moved to `CANCELLED`, using the hold ID as occurrence evidence. Members
+  whose recorded prior status was `FAILED` or
   `CANCELLED` are skipped (AC-002.5). Members inside the tree are now terminal,
   so only dependents outside the tree count as held. `pause` holds change no
   state and are ignored.
 
-The three triggers are disjoint: neither an Office status write nor a tree
-cancel publishes `task.state_changed`. All derive the same occurrence key, so a
-transition seen by more than one would still queue one run.
+The triggers are disjoint: neither an Office status write nor a tree cancel
+publishes `task.state_changed`. Task-service writes carry their committed event
+timestamp, Office status writes carry a generated occurrence ID, and tree cancel
+uses its durable hold ID. The evaluator never reads mutable `updated_at` to build
+an idempotency key.
 
 Evaluation steps:
 
 1. Re-read the blocker with `GetTaskExecutionFields`. Return when its current state
    no longer equals the failed state. This keeps a stale event from waking anyone
    after a fast retry.
-2. Read the blocker row's committed `updated_at` (`GetTaskUpdatedAt`) as the
-   occurrence.
+2. Use the immutable occurrence ID supplied by the trigger.
 3. Run `ListTasksBlockedBy(blocker)`. Keep the dependents that are Office-owned, in
    the blocker's workspace, unarchived, and not in a terminal state. When none
    remain, return (AC-002.2).
    A dependency edge whose dependent row is missing is skipped.
 4. Resolve the recipient ([below](#recipient-resolution)).
-5. Queue through `QueueRunCtx` with `Reason: task_blocker_failed`, the task ID
-   chosen by recipient resolution, `WorkspaceID`, the system actor, and the key
-   defined below.
+5. Persist a `blocker_failure` wakeup request with the `task_blocker_failed` reason,
+   the parent task target when present, the held-dependent details, and the
+   occurrence key defined below. Then dispatch it through the shared wakeup
+   dispatcher. That dispatcher owns in-flight merge and run creation.
 
 The blocker may be a Kanban task. As in the success bridge, Office owns the outcome
 for its dependents, not the blocker's type.
@@ -174,17 +179,21 @@ recipient is woken.
 
 ## Idempotency and coalescing
 
-Key: `task_blocker_failed:<blocker_id>:<recipient>:<updated_at>`, where
-`updated_at` is the blocker row's committed `updated_at`, read after the state
-check and formatted as UTC RFC3339Nano. Duplicate delivery of one transition
-produces one key, whichever trigger observes it. A
-later failure after a retry commits a new `updated_at`, so it is a new occurrence
-(AC-002.4). The request sets `SkipCoalesce`. Queue-time coalescing replaces the
-queued row's payload, so two blockers failing within the 5-second window would
-otherwise drop the first blocker's escalation. Claim-time merge
-(AC-OFFICE-SCHEDULER-001.8) still applies, so an in-flight run for the recipient,
-including a concurrent `agent_error`, absorbs the wake (AC-002.6). No cross-reason
-correlation is added.
+Key: `task_blocker_failed:<blocker_id>:<occurrence_id>`. The recipient is not part
+of the key, so a reassignment does not turn one failure transition into a second
+alert. The payload stores each alert in a nested object keyed by blocker and
+occurrence. The wakeup repository's recursive JSON merge can then retain several
+failure details when requests coalesce into one run. The request stores the first
+coordinator target as `run_task_id`; this avoids overwriting a `task_id` in an
+in-flight run's context snapshot. For a fresh run, `QueueRunFromWakeup` converts
+`run_task_id` to `task_id`. Each alert also carries its coordinator task so
+merged prompts retain every target.
+
+The wakeup request is durable before dispatch. A confirmed workspace pause leaves
+the request queued. Pause resume and the recovery tick recheck the blocker and its
+currently held dependents before dispatch. They mark stale requests skipped when
+the blocker recovered, disappeared, or no longer holds an Office dependent.
+Transient dispatch failures leave the request queued for another attempt.
 
 ## Delivery of runtime state writes
 
@@ -196,9 +205,9 @@ on a committed change and stay silent for an archived skip. The existing
 task-service tests pin that publication. Office status changes and tree cancel
 are covered by their own triggers instead. This design adds no publisher.
 
-`RestoreTaskTree` returns members to their prior states. An escalation already
-queued for a restored blocker is then stale, which is harmless: restoring is the
-retry it asks for.
+`RestoreTaskTree` returns members to their prior states. A queued escalation is
+rechecked before replay and dropped if the blocker is no longer failed or no longer
+holds an Office dependent. An alert already delivered into a run cannot be recalled.
 
 ## Prompt and registry
 
@@ -209,10 +218,17 @@ retry it asks for.
   `runs/service/metrics_vars.go`. The existing registry tests enforce these
   declarations. Like `agent_error`, it stays off the attended allowlist in
   `shared/runprovenance.go`: a system escalation is unattended.
-- Payload: `{blocker_task_id, blocker_state, held_dependent_ids[]}`.
+- Queued request payload:
+  `{run_task_id?, blocker_failure_alerts{<blocker+occurrence>:{parent_task_id?,
+  blocker_task_id, blocker_state, held_dependent_ids[]}}}`. The fresh-run payload
+  uses `task_id` after the dispatcher selects it; merged requests keep
+  `run_task_id` separate from the active run's `task_id`. Legacy single-alert
+  fields remain readable for requests queued before deployment.
 - `prompt_blocker_failed.go` adds `buildBlockerFailedPrompt`, dispatched from
-  `BuildPrompt`, and its payload enrichment. The held-dependent list renders at most
-  20 entries plus a remainder count. It names the
+  `BuildPrompt`, and its payload enrichment. It reads the run payload and merged
+  context snapshot, even when another reason such as `agent_error` owns the run.
+  The held-dependent list renders at most 20 entries per alert plus a remainder
+  count. It names the
   blocker and its state, lists the held dependents, and states that they stay held
   until the blocker is retried or replaced, or its edge is removed. Agent prompts are
   English by design, so no i18n is involved.
@@ -225,11 +241,15 @@ other wake reason stay as they are.
 
 ## Failure and recovery
 
-- When a read fails in the escalation handler, it returns an error through the
-  existing subscriber path. It queues nothing, and no retry loop is added.
+- When an evaluation read fails before request persistence, the subscriber returns
+  an error. After persistence, a dispatch failure leaves the request queued for
+  pause resume or the recovery tick.
 - If a `task.state_changed` publication itself fails, that failure transition is
   not escalated. The requirement excludes sweeps. The dependent stays held, and
   the Inbox Failed bucket still lists a `FAILED` blocker.
+- When a blocker recovers while its alert is queued behind a workspace pause,
+  replay marks the stale request skipped instead of waking the recipient for
+  resolved work.
 - A known failed blocker always holds admission. Recovery skips the dependent under
   its existing quota rules.
 
@@ -242,9 +262,10 @@ intended behavior change.
 ## Observability
 
 Structured logs only: `office.assignment_wake.blocker_pending` gains
-`blocker_status`, and `office.blocker_failed.queued` and
-`office.blocker_failed.unescalated` are added. Run-reason counters come from the
-existing `metrics_vars` registry. No metric labels are added.
+`blocker_status`; `office.blocker_failed.queued` and
+`office.blocker_failed.unescalated` remain the evaluator logs. Successful
+dispatcher delivery also logs `office.blocker_failed.dispatched`. Run-reason
+counters come from the existing `metrics_vars` registry. No metric labels are added.
 
 ## Testing
 
@@ -262,7 +283,10 @@ edges, real writers, the real bus, and actual run admission:
   (outside dependents only; pause hold and already-failed member → zero), no
   recipient → Warn and
   zero, no held dependents → zero, duplicate delivery → one, refail after retry →
-  two, two distinct blockers → two, `FAILED`→`CANCELLED` → zero, and terminal,
+  a distinct occurrence, two distinct blockers → two retained alert details,
+  paused delivery → replay on resume and recovery tick, recovered blockers → stale
+  request skipped, in-flight queued/claimed `agent_error` runs → merged alert
+  details, `FAILED`→`CANCELLED` → zero, and terminal,
   archived, or Kanban dependents → zero.
 - Activation: a guard test requires `activateOfficeServices` to register the
   subscriber and fail activation on a subscription error.

@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/pause"
 	"github.com/kandev/kandev/internal/office/shared"
+	"github.com/kandev/kandev/internal/office/wakeup"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
 	runsmodels "github.com/kandev/kandev/internal/runs/models"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
@@ -255,9 +256,29 @@ func (s *Service) QueueRunFromWakeup(
 	if s.runsService == nil {
 		return "", fmt.Errorf("queue run from wakeup: runs service not configured")
 	}
+	payload := PayloadWithAgent("{}", agentProfileID)
+	if reason == RunReasonTaskBlockerFailed {
+		// Blocker failure runs must retain the coordinator task target and
+		// their alert payload. Keep run_task_id nested in the queued wakeup so
+		// a merge cannot overwrite an existing run's context_snapshot task_id.
+		var blockerPayload wakeup.BlockerFailurePayload
+		if err := wakeup.UnmarshalPayload(contextSnapshot, &blockerPayload); err != nil {
+			return "", fmt.Errorf("decode blocker failure wakeup payload: %w", err)
+		}
+		if blockerPayload.RunTaskID != "" {
+			blockerPayload.TaskID = blockerPayload.RunTaskID
+			blockerPayload.RunTaskID = ""
+			encoded, err := wakeup.MarshalPayload(blockerPayload)
+			if err != nil {
+				return "", fmt.Errorf("encode blocker failure run payload: %w", err)
+			}
+			contextSnapshot = encoded
+		}
+		payload = PayloadWithAgent(contextSnapshot, agentProfileID)
+	}
 	outcome, row, err := s.runsService.QueueRunAndReturn(ctx, runsservice.QueueRunRequest{
 		Reason:          reason,
-		Payload:         PayloadWithAgent("{}", agentProfileID),
+		Payload:         payload,
 		ActorKind:       runsmodels.ActorKindSystem,
 		RoutineID:       routineID,
 		ContextSnapshot: contextSnapshot,

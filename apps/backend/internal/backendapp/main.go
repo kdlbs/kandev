@@ -2928,6 +2928,9 @@ func buildOfficeFeatureServices(
 	// that field when Dispatch is actually called, well after startup
 	// completes (AC-OFFICE-ENQUEUE-CONSOLIDATION-001.2).
 	routineWakeupDispatcher.SetRunQueuer(services.Office)
+	if services.Office != nil {
+		services.Office.SetWakeupRequestDispatcher(routineWakeupDispatcher)
+	}
 	routineSvc.SetWakeupEnqueuer(&routineWakeupAdapter{
 		repo:       repo,
 		dispatcher: routineWakeupDispatcher,

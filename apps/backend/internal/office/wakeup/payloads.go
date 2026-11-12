@@ -26,11 +26,12 @@ import (
 // was retired in favour of the coordinator-heartbeat routine, so every
 // scheduled wake now flows through SourceRoutine.
 const (
-	SourceComment    = "comment"
-	SourceAgentError = "agent_error"
-	SourceRoutine    = "routine"
-	SourceSelf       = "self"
-	SourceUser       = "user"
+	SourceComment        = "comment"
+	SourceAgentError     = "agent_error"
+	SourceBlockerFailure = "blocker_failure"
+	SourceRoutine        = "routine"
+	SourceSelf           = "self"
+	SourceUser           = "user"
 )
 
 // CommentPayload is the wakeup-request payload for new task-comment
@@ -49,6 +50,32 @@ type AgentErrorPayload struct {
 	AgentProfileID string `json:"agent_profile_id"`
 	RunID          string `json:"run_id"`
 	Error          string `json:"error"`
+}
+
+// BlockerFailureAlert is one failure occurrence merged into an agent wake.
+// The occurrence ID is the key in BlockerFailurePayload.Alerts.
+type BlockerFailureAlert struct {
+	ParentTaskID     string   `json:"parent_task_id,omitempty"`
+	BlockerTaskID    string   `json:"blocker_task_id"`
+	BlockerState     string   `json:"blocker_state"`
+	HeldDependentIDs []string `json:"held_dependent_ids"`
+}
+
+// BlockerFailurePayload keeps each failed blocker occurrence under its own
+// key so a coalesced wake can retain every alert. RunTaskID targets a fresh
+// run at the first occurrence's coordinator task; each alert also carries its
+// own parent task in case a later wake merges from a different branch.
+type BlockerFailurePayload struct {
+	RunTaskID string `json:"run_task_id,omitempty"`
+	// TaskID is retained for older payloads and is the run.Payload form after
+	// the dispatcher has selected the fresh run's task target.
+	TaskID string `json:"task_id,omitempty"`
+	// Legacy fields keep already queued prompts readable and help older
+	// consumers that still expect one alert per run.
+	BlockerTaskID    string                         `json:"blocker_task_id,omitempty"`
+	BlockerState     string                         `json:"blocker_state,omitempty"`
+	HeldDependentIDs []string                       `json:"held_dependent_ids,omitempty"`
+	Alerts           map[string]BlockerFailureAlert `json:"blocker_failure_alerts"`
 }
 
 // RoutinePayload is the wakeup-request payload for cron-fired

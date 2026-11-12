@@ -123,6 +123,24 @@ func (r *Repository) GetWakeupRequest(ctx context.Context, id string) (*WakeupRe
 	return &row, nil
 }
 
+// GetWakeupRequestByIdempotencyKey returns the durable request for a source
+// occurrence. Callers use it after a uniqueness conflict to retry dispatch
+// of the original queued row.
+func (r *Repository) GetWakeupRequestByIdempotencyKey(ctx context.Context, key string) (*WakeupRequest, error) {
+	var row WakeupRequest
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT id, agent_profile_id, source, reason, payload, status,
+		       coalesced_count, idempotency_key, run_id,
+		       requested_at, claimed_at, finished_at, causation_id
+		FROM agent_wakeup_requests
+		WHERE idempotency_key = ?
+	`), key).StructScan(&row)
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
 // ListQueuedWakeupRequestsForAgent returns all wakeup requests in
 // status="queued" for the given agent, ordered oldest first. Used by
 // the dispatcher to drain the agent's queue per tick.
@@ -145,6 +163,70 @@ func (r *Repository) ListQueuedWakeupRequestsForAgent(
 		rows = []*WakeupRequest{}
 	}
 	return rows, nil
+}
+
+// ListQueuedWakeupRequestsForWorkspaceAndSource lists durable requests for
+// active agents in one workspace. A non-positive limit leaves the result
+// unbounded; resume uses that mode, while the recovery tick supplies a cap.
+func (r *Repository) ListQueuedWakeupRequestsForWorkspaceAndSource(
+	ctx context.Context, workspaceID, source string, limit int,
+) ([]*WakeupRequest, error) {
+	query := `
+		SELECT w.id, w.agent_profile_id, w.source, w.reason, w.payload, w.status,
+		       w.coalesced_count, w.idempotency_key, w.run_id,
+		       w.requested_at, w.claimed_at, w.finished_at, w.causation_id
+		FROM agent_wakeup_requests w
+		JOIN agent_profiles a ON a.id = w.agent_profile_id
+		WHERE a.deleted_at IS NULL AND w.source = ? AND w.status = ?
+	`
+	args := []any{source, WakeupStatusQueued}
+	if workspaceID != "" {
+		query += ` AND a.workspace_id = ?`
+		args = append(args, workspaceID)
+	}
+	query += ` ORDER BY w.requested_at ASC`
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	var rows []*WakeupRequest
+	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		rows = []*WakeupRequest{}
+	}
+	return rows, nil
+}
+
+// UpdateQueuedWakeupRequestPayload replaces payload only while a request is
+// still queued. It reports false when another dispatcher already claimed it.
+func (r *Repository) UpdateQueuedWakeupRequestPayload(ctx context.Context, id, payload string) (bool, error) {
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE agent_wakeup_requests SET payload = ?
+		WHERE id = ? AND status = ?
+	`), payload, id, WakeupStatusQueued)
+	if err != nil {
+		return false, err
+	}
+	updated, err := res.RowsAffected()
+	return updated > 0, err
+}
+
+// UpdateQueuedWakeupRequestRecipient replaces the target only while a request
+// remains queued. A retry after reassignment can then notify the current owner
+// without creating a second occurrence.
+func (r *Repository) UpdateQueuedWakeupRequestRecipient(ctx context.Context, id, agentProfileID string) (bool, error) {
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE agent_wakeup_requests SET agent_profile_id = ?
+		WHERE id = ? AND status = ?
+	`), agentProfileID, id, WakeupStatusQueued)
+	if err != nil {
+		return false, err
+	}
+	updated, err := res.RowsAffected()
+	return updated > 0, err
 }
 
 // MarkWakeupRequestClaimed transitions a request from queued → claimed

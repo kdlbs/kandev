@@ -473,6 +473,7 @@ type Service struct {
 	// gate is not wired (older tests, transitional deployments).
 	pauseGate               shared.PauseGate
 	deferredAssignmentQueue DeferredAssignmentQueue
+	wakeupRequestDispatcher WakeupRequestDispatcher
 
 	// workflowStepGetter resolves a task's current workflow step so
 	// task_assigned wakes (queueTaskAssignedRun, the unstarted-task
@@ -488,6 +489,19 @@ type Service struct {
 // package. terminalStatus is "done" or "cancelled".
 type RoutineRunSyncer interface {
 	SyncRunStatus(ctx context.Context, taskID, terminalStatus string) error
+}
+
+// WakeupRequestDispatcher is the claim-time merge and delivery owner for
+// durable agent wakeup requests. The office service keeps only this narrow
+// seam so it can replay queued blocker alerts without owning run dispatch.
+type WakeupRequestDispatcher interface {
+	Dispatch(ctx context.Context, requestID string) error
+}
+
+// SetWakeupRequestDispatcher wires the shared wakeup dispatcher used for
+// durable blocker failure alerts and their resume/recovery replay.
+func (s *Service) SetWakeupRequestDispatcher(d WakeupRequestDispatcher) {
+	s.wakeupRequestDispatcher = d
 }
 
 // SetRoutineRunSyncer wires the routines.RoutineService (or a test fake)

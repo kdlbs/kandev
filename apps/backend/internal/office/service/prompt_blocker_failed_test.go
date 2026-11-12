@@ -47,3 +47,20 @@ func TestBuildPrompt_BlockerFailedBoundsHeldDependents(t *testing.T) {
 		t.Fatalf("unexpected prompt:\n%s", prompt)
 	}
 }
+
+func TestBuildPrompt_IncludesEveryCoalescedBlockerFailure(t *testing.T) {
+	contextSnapshot := `{"blocker_failure_alerts":{
+		"transition-a":{"parent_task_id":"parent-a","blocker_task_id":"blocker-a","blocker_state":"FAILED","held_dependent_ids":["dependent-a"]},
+		"transition-b":{"parent_task_id":"parent-b","blocker_task_id":"blocker-b","blocker_state":"CANCELLED","held_dependent_ids":["dependent-b"]}
+	}}`
+	pc := service.BuildPromptContextWithSnapshotForTest(
+		newTestService(t), context.Background(), service.RunReasonAgentError,
+		`{"failed_agent_id":"agent-1"}`, contextSnapshot)
+	prompt := service.BuildPrompt(pc)
+
+	for _, want := range []string{"parent-a", "blocker-a", "dependent-a", "parent-b", "blocker-b", "dependent-b"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt missing coalesced alert detail %q:\n%s", want, prompt)
+		}
+	}
+}

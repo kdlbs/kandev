@@ -100,8 +100,9 @@ runs `/docs-maintainer` to confirm that no public page changes.
   dependent now stay held, and their coordinator is woken.
 - An archived failed blocker holds its dependents until the edge is removed. This
   matches Kanban, and the escalation tells the coordinator what to remove.
-- Restoring a cancelled tree leaves an already-queued escalation stale. This is
-  accepted: the restore is the retry the escalation asks for.
+- A queued escalation is rechecked before replay after a pause. If the blocker
+  recovered or no longer holds an Office dependent, replay skips the stale request.
+  An alert already delivered into a run cannot be recalled.
 - A failed `task.state_changed` publication leaves its transition unescalated. The
   dependent stays held, and a `FAILED` blocker remains in the Inbox Failed bucket.
 - Agent sessions outside any Office run that cancel a blocker still wake the

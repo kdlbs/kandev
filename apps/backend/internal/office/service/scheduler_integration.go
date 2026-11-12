@@ -1342,8 +1342,10 @@ func (si *SchedulerIntegration) buildPromptContext(
 		si.enrichCommentContext(ctx, pc, parsed["comment_id"])
 	}
 
-	if reason == RunReasonTaskBlockerFailed {
-		si.enrichBlockerFailedContext(ctx, pc, payload)
+	if reason == RunReasonTaskBlockerFailed ||
+		strings.Contains(payload, `"blocker_failure_alerts"`) ||
+		strings.Contains(contextSnapshot, `"blocker_failure_alerts"`) {
+		si.enrichBlockerFailedContext(ctx, pc, payload, contextSnapshot)
 	}
 
 	if reason == RunReasonAgentError {

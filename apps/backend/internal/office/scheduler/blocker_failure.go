@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -14,12 +13,13 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/service"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 const (
 	taskStateFailed    = "FAILED"
 	taskStateCancelled = "CANCELLED"
-	taskStateCompleted = "COMPLETED"
 )
 
 func isFailedTaskState(state string) bool {
@@ -27,7 +27,7 @@ func isFailedTaskState(state string) bool {
 }
 
 func isTerminalTaskState(state string) bool {
-	return state == taskStateCompleted || isFailedTaskState(state)
+	return taskmodels.IsTerminalTaskState(v1.TaskState(state))
 }
 
 // RegisterBlockerFailureSubscriber evaluates every task-service transition
@@ -66,16 +66,17 @@ func (ss *SchedulerService) handleTreeCancelBlockerFailures(ctx context.Context,
 		if member.SkipReason != "" || isFailedTaskState(member.TaskStatus) {
 			continue
 		}
-		errs = append(errs, ss.escalateBlockerFailure(ctx, member.TaskID, taskStateCancelled))
+		errs = append(errs, ss.escalateBlockerFailure(ctx, member.TaskID, taskStateCancelled, "tree:"+hold.ID))
 	}
 	return errors.Join(errs...)
 }
 
 func (ss *SchedulerService) handleBlockerFailure(ctx context.Context, event *bus.Event) error {
 	var data struct {
-		TaskID   string `json:"task_id"`
-		OldState string `json:"old_state"`
-		NewState string `json:"new_state"`
+		TaskID    string `json:"task_id"`
+		OldState  string `json:"old_state"`
+		NewState  string `json:"new_state"`
+		UpdatedAt string `json:"updated_at"`
 	}
 	encoded, err := json.Marshal(event.Data)
 	if err != nil {
@@ -88,25 +89,27 @@ func (ss *SchedulerService) handleBlockerFailure(ctx context.Context, event *bus
 		!isFailedTaskState(data.NewState) || isFailedTaskState(data.OldState) {
 		return nil
 	}
-	return ss.escalateBlockerFailure(ctx, data.TaskID, data.NewState)
+	if data.UpdatedAt == "" {
+		return errors.New("task state event is missing its committed updated_at")
+	}
+	return ss.escalateBlockerFailure(ctx, data.TaskID, data.NewState, "task-state:"+data.UpdatedAt)
 }
 
 // escalateBlockerFailure wakes the agent responsible for a blocker that has
 // just entered failedState, once per committed transition, when the blocker
-// still holds at least one Office dependent. The occurrence is the blocker
-// row's committed updated_at, so every path that observes the same
-// transition derives the same idempotency key.
-func (ss *SchedulerService) escalateBlockerFailure(ctx context.Context, blockerID, failedState string) error {
+// still holds at least one Office dependent. occurrenceID comes from the
+// committed state transition or tree hold that caused this check. Do not
+// derive it from the mutable task row or the current recipient.
+func (ss *SchedulerService) escalateBlockerFailure(ctx context.Context, blockerID, failedState, occurrenceID string) error {
+	if occurrenceID == "" {
+		return errors.New("blocker failure occurrence identity is empty")
+	}
 	blocker, err := ss.repo.GetTaskExecutionFields(ctx, blockerID)
 	if err != nil {
 		return fmt.Errorf("read failed blocker: %w", err)
 	}
 	if blocker.State != failedState {
 		return nil
-	}
-	committedAt, err := ss.repo.GetTaskUpdatedAt(ctx, blockerID)
-	if err != nil {
-		return fmt.Errorf("read failed blocker occurrence: %w", err)
 	}
 	held, err := ss.heldDependents(ctx, blocker)
 	if err != nil || len(held) == 0 {
@@ -121,19 +124,7 @@ func (ss *SchedulerService) escalateBlockerFailure(ctx context.Context, blockerI
 			zap.String("blocker_task_id", blocker.ID), zap.Strings("held_dependent_ids", held))
 		return nil
 	}
-	key := fmt.Sprintf("%s:%s:%s:%s", RunReasonTaskBlockerFailed, blocker.ID, recipient,
-		committedAt.UTC().Format(time.RFC3339Nano))
-	if _, err := ss.QueueRunCtx(ctx, recipient, RunContext{
-		Reason:         RunReasonTaskBlockerFailed,
-		TaskID:         taskID,
-		WorkspaceID:    blocker.WorkspaceID,
-		IdempotencyKey: key,
-		ExtraPayload: map[string]any{
-			"blocker_task_id":    blocker.ID,
-			"blocker_state":      blocker.State,
-			"held_dependent_ids": held,
-		},
-	}); err != nil {
+	if err := ss.svc.QueueBlockerFailureWakeup(ctx, recipient, taskID, blocker.ID, blocker.State, occurrenceID, held); err != nil {
 		return fmt.Errorf("queue blocker failure escalation: %w", err)
 	}
 	ss.logger.Info("office.blocker_failed.queued",
