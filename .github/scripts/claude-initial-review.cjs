@@ -134,10 +134,12 @@ async function collectHistoryPages({
       maxResults !== null &&
       total > maxResults
     ) {
-      throw new AdmissionError(
+      const error = new AdmissionError(
         REASON.HISTORY_INCOMPLETE,
         `${label} exceeds the ${maxResults}-result API limit`,
       );
+      error.resultLimitExceeded = true;
+      throw error;
     }
 
     items.push(...pageItems);
@@ -212,25 +214,48 @@ function isAssociatedWithPullRequest(run, pullNumber) {
 
 /** Read associated workflow runs for a pull request, bounded by the API limit. */
 async function listAssociatedRuns({ github, owner, repo, pullNumber, createdAt }) {
-  const created = `>=${createdAt.slice(0, 10)}`;
-  const runs = await collectHistoryPages({
+  const readRange = (created) => collectHistoryPages({
     label: 'workflow runs',
-    fetchPage: (page) =>
-      github.rest.actions.listWorkflowRuns({
-        owner,
-        repo,
-        workflow_id: WORKFLOW_FILE,
-        event: 'pull_request',
-        created,
-        per_page: HISTORY_PAGE_SIZE,
-        page,
-        // Associations are the supported way to bind a run to a PR number.
-        exclude_pull_requests: false,
-      }),
+    fetchPage: (page) => github.rest.actions.listWorkflowRuns({
+      owner, repo, workflow_id: WORKFLOW_FILE, event: 'pull_request', created,
+      per_page: HISTORY_PAGE_SIZE, page, exclude_pull_requests: false,
+    }),
     selectItems: (data) => data.workflow_runs,
     maxPages: MAX_WORKFLOW_RUN_PAGES,
     maxResults: MAX_WORKFLOW_RUN_RESULTS,
   });
+
+  let runs;
+  try {
+    runs = await readRange(`>=${createdAt.slice(0, 10)}`);
+  } catch (error) {
+    if (!error.resultLimitExceeded) throw error;
+    const start = Date.parse(`${createdAt.slice(0, 10)}T00:00:00Z`);
+    const end = Math.ceil(Date.now() / 1000) * 1000;
+    if (!Number.isFinite(start) || start > end) {
+      throw new AdmissionError(REASON.MALFORMED_HISTORY, 'pull request creation time');
+    }
+    const ranges = [[start, end]];
+    const collected = new Map();
+    let queries = 0;
+    while (ranges.length) {
+      if (++queries > 256) throw new AdmissionError(REASON.HISTORY_INCOMPLETE, 'workflow run range limit');
+      const [from, to] = ranges.pop();
+      const format = (time) => new Date(time).toISOString().replace('.000Z', 'Z');
+      try {
+        const page = await readRange(`${format(from)}..${format(to)}`);
+        for (const run of page) {
+          validateRun(run);
+          collected.set(run.id, run);
+        }
+      } catch (rangeError) {
+        if (!rangeError.resultLimitExceeded || to - from <= 1000) throw rangeError;
+        const midpoint = Math.floor((from + to) / 2000) * 1000;
+        ranges.push([from, midpoint], [midpoint, to]);
+      }
+    }
+    runs = [...collected.values()];
+  }
 
   for (const run of runs) {
     validateRun(run);
