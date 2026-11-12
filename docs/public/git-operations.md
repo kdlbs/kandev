@@ -207,6 +207,62 @@ attempt. Earlier attachments may already have created their checkouts and run
 repository setup scripts; rollback is best effort and cannot undo effects
 outside those checkouts.
 
+### Repair a registered clone URL
+
+A workspace repository stores its provider identity separately from its clone URL.
+If the saved URL is wrong, for example after a repository moved between HTTPS and
+SSH transports, repair the registration without deleting the repository or
+changing its attached tasks.
+
+Inspect the current value with `GET /api/v1/repositories/{id}`. Preview a
+replacement without writing:
+
+```bash
+curl -X POST "$KANDEV_URL/api/v1/repositories/$REPOSITORY_ID/remote-url/validate" \
+  -H "Authorization: Bearer $KANDEV_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"remote_url":"git@github.com:acme/widget.git"}'
+```
+
+The response reports the saved and effective URLs, provider identity, and
+`validation_scope`. `locator_identity` means Kandev checked the locator syntax
+and provider identity only. `provider_inspection` means the active plugin
+provider verified the repository descriptor. Neither scope proves that the
+remote is currently reachable or that the current credentials can fetch it.
+
+Apply the replacement, then inspect again:
+
+```bash
+curl -X PATCH "$KANDEV_URL/api/v1/repositories/$REPOSITORY_ID" \
+  -H "Authorization: Bearer $KANDEV_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"remote_url":"git@github.com:acme/widget.git"}'
+```
+
+The WebSocket surface is equivalent. Send `repository.get` to inspect,
+`repository.remote_url.validate` with `id` and `remote_url` to preview, and
+`repository.update` with the supplied field to apply. The compact MCP settings
+tools also expose the field. Use one `remote_url` change with
+`options.validate_only: true` to preview, then repeat the update without the
+option or with `validate_only: false` to write.
+
+A replacement must preserve the saved provider, host, namespace or project, and
+repository name. Credentials, local paths, browser resource URLs, queries,
+fragments, and ambiguous separators are refused. GitHub and GitLab accept a
+conventional `git@host:path` locator when the saved origin is the matching
+default-port HTTPS host. Other SSH ports and IPv6 forms require an explicitly
+supported URL form. HTTPS provider paths keep supported percent-encoded or
+Unicode segments; encoded separators, controls, and traversal remain invalid.
+Plugin providers must return their exact HTTPS clone URL. A missing saved
+provider origin or a legacy locator with a conflicting host fails closed
+instead of guessing a replacement.
+
+Repair changes registration data only. It does not rewrite an existing checkout's
+Git origin, fetch, clone, restart a session, or discard local commits. A
+materialized checkout can still fail exact-origin reuse checks after the repair.
+Recover such a checkout deliberately with the existing worktree recovery actions
+after preserving its local work.
+
 ### Branch names in executor scripts
 
 The `repository.branch` placeholder supplies an upstream branch name to executor scripts.

@@ -134,6 +134,16 @@ function buildSidePanelActions(get: StoreGet) {
         opts,
       );
     },
+    addTaskGraphPanel: (opts?: SidePanelOpts) => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      addSidePanel(
+        api,
+        centerGroupId,
+        { id: "task-graph", component: "task-graph", title: panelTitle("task-graph") },
+        { inCenter: true, ...opts },
+      );
+    },
     addBackgroundWorkPanel: (
       opts?: SidePanelOpts & { sessionId?: string; workId?: string; title?: string },
     ) => {

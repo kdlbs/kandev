@@ -359,6 +359,8 @@ export type TaskDependencyRef = {
 export type TaskDependencyProjection = {
   blocked?: boolean;
   blocked_reason?: "pending" | "failed" | "unknown";
+  parent_id?: string | null;
+  related?: TaskDependencyRef[];
   depends_on?: TaskDependencyRef[];
   blocks?: TaskDependencyRef[];
 };
@@ -451,6 +453,8 @@ type OptionalAgentTaskOpts = {
   start_when_unblocked?: boolean;
   /** Prepare the task without launching its session so E2E fixtures can bind it first. */
   start_agent?: boolean;
+  /** Create a prepared session without starting its agent (requires start_agent false). */
+  prepare_session?: boolean;
   mcp_server_ids?: string[];
 };
 
@@ -483,6 +487,7 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
     fields.start_when_unblocked = opts.start_when_unblocked;
   }
   if (opts.start_agent !== undefined) fields.start_agent = opts.start_agent;
+  if (opts.prepare_session !== undefined) fields.prepare_session = opts.prepare_session;
   return fields;
 }
 
@@ -1091,6 +1096,8 @@ export class ApiClient {
       start_when_unblocked?: boolean;
       /** Prepare the task without launching its session so E2E fixtures can bind it first. */
       start_agent?: boolean;
+      /** Create a prepared session without starting its agent (requires start_agent false). */
+      prepare_session?: boolean;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", {
@@ -1520,6 +1527,7 @@ export class ApiClient {
   }
 
   async saveUserSettings(settings: {
+    escape_cancels_agent?: boolean;
     enable_preview_on_click?: boolean;
     confirm_task_archive?: boolean;
     prevent_auto_start_agent_on_open?: boolean;
@@ -3217,6 +3225,7 @@ export class ApiClient {
       repository_id: string;
       base_branch: string;
       checkout_branch?: string;
+      workspace_relative_path?: string;
       position: number;
     }>;
     workspace_folders?: Array<{

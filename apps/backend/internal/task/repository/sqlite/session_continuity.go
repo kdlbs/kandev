@@ -106,11 +106,13 @@ const sessionContinuitySchema = `
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL,
 			resolved_at TIMESTAMP,
-			UNIQUE (session_id, incarnation_id, expected_generation, reason),
 			FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
 		);
 		CREATE INDEX IF NOT EXISTS idx_session_recovery_blocks_open
 			ON session_recovery_blocks(session_id, incarnation_id, state);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_session_recovery_blocks_open_reason
+			ON session_recovery_blocks(session_id, incarnation_id, expected_generation, reason)
+			WHERE state = 'open';
 	`
 
 func (r *Repository) initSessionContinuitySchema() error {
@@ -236,6 +238,9 @@ func (r *Repository) commitHarnessSessionGeneration(
 	if err := insertGenerationTx(ctx, tx, r.db.Rebind, generation); err != nil {
 		return false, err
 	}
+	if err := r.retireContextContinuationNoticeTx(ctx, tx, generation, expectedGeneration); err != nil {
+		return false, err
+	}
 	if err := r.moveOpenRecoveryBlocksWithGenerationTx(ctx, tx, generation, expectedGeneration); err != nil {
 		return false, err
 	}
@@ -329,6 +334,9 @@ func (r *Repository) CreateRestoreAttempt(ctx context.Context, attempt *models.R
 }
 
 func (r *Repository) CompleteRestoreAttempt(ctx context.Context, id, outcome string, completedAt time.Time) error {
+	if outcome == contextContinuationOutcome {
+		return r.completeContextContinuationAttempt(ctx, id, completedAt)
+	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE session_restore_attempts SET outcome = ?, completed_at = ? WHERE id = ?`), outcome, completedAt, id)
 	if err != nil {
@@ -438,13 +446,22 @@ func (r *Repository) upsertSessionRecoveryBlockTx(
 	if err := r.bindProjectedTerminalToRecoveryBlock(ctx, tx, block); err != nil {
 		return err
 	}
+	if block.State == models.RecoveryBlockResolved {
+		handled, err := r.upsertResolvedSessionRecoveryBlockTx(ctx, tx, block)
+		if err != nil {
+			return err
+		}
+		if handled {
+			return nil
+		}
+	}
 	query := `
 		INSERT INTO session_recovery_blocks
 		(id, session_id, incarnation_id, expected_generation, reason, state,
 		 consumer_reference, delivery_submission_id, delivery_stream_id, delivery_sequence,
 		 delivery_turn_id, delivery_outcome, authorized_action, created_at, updated_at, resolved_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (session_id, incarnation_id, expected_generation, reason) DO UPDATE SET
+		ON CONFLICT (session_id, incarnation_id, expected_generation, reason) WHERE state = 'open' DO UPDATE SET
 		 state = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
 		   AND excluded.consumer_reference = 'agent_delivery'

@@ -195,7 +195,11 @@ describe("TaskPR refresh routes", () => {
     expect(button.textContent).toBe("#42");
     expect(button.querySelectorAll("svg")).toHaveLength(2);
     expect(button.querySelectorAll(":scope > svg")).toHaveLength(0);
-    expect(button.querySelector('[data-testid="pr-merge-conflict-warning"]')).not.toBeNull();
+    const conflict = button.querySelector<HTMLElement>('[data-testid="pr-merge-conflict-warning"]');
+    expect(conflict).not.toBeNull();
+    expect(conflict?.className).toContain("-right-1");
+    expect(conflict?.className).toContain("-top-1");
+    expect(button.querySelector('[data-testid="pr-ci-bubble-failed"]')).toBeNull();
     expect(ariaLabel(button)).toContain(CHECKS_FAILED);
     expect(ariaLabel(button)).toContain(CONFLICTS);
   });
@@ -273,7 +277,9 @@ describe("TaskPR refresh routes", () => {
     renderWithStore(taskState([failed, passing], true), <PRTopbarButton />);
     await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
     expectTopbarStatusIcon("text-red-500");
-    expect(screen.getByTestId(TOPBAR_BUTTON_TESTID).querySelectorAll("svg")).toHaveLength(2);
+    const multiButton = screen.getByTestId(TOPBAR_BUTTON_TESTID);
+    expect(multiButton.querySelectorAll("svg")).toHaveLength(3);
+    expect(multiButton.querySelector('[data-testid="pr-ci-bubble-failed"]')).not.toBeNull();
     fireEvent.mouseEnter(screen.getByTestId(TOPBAR_BUTTON_TESTID));
 
     await expectTopbarRefresh(request);
@@ -281,20 +287,23 @@ describe("TaskPR refresh routes", () => {
 });
 
 describe("multi-PR accessible status", () => {
-  it("names aggregate and per-PR status in the topbar and menu", async () => {
-    const failed = makePR({ id: "failed", has_merge_conflicts: true });
-    const passing = makePR({
+  it("prioritizes a conflict on one PR and retains each sibling's CI details", async () => {
+    const failed = makePR({ id: "failed" });
+    const passingConflict = makePR({
       id: "passing",
       repo: "api",
       pr_number: 77,
       checks_state: "success",
-      mergeable_state: "clean",
+      mergeable_state: "dirty",
+      has_merge_conflicts: true,
       review_state: "approved",
     });
-    setupRefresh([failed, passing]);
-    renderWithStore(taskState([failed, passing], true), <PRTopbarButton />);
+    setupRefresh([failed, passingConflict]);
+    renderWithStore(taskState([failed, passingConflict], true), <PRTopbarButton />);
 
     const button = screen.getByTestId(TOPBAR_BUTTON_TESTID);
+    expect(button.querySelector('[data-testid="pr-ci-bubble-failed"]')).toBeNull();
+    expect(button.querySelector('[data-testid="pr-merge-conflict-warning"]')).not.toBeNull();
     expect(ariaLabel(button)).toContain(button.textContent);
     expect(ariaLabel(button)).toContain(CHECKS_FAILED);
     expect(ariaLabel(button)).toContain(CHECKS_PASSED);
@@ -304,9 +313,9 @@ describe("multi-PR accessible status", () => {
     const failedRow = await screen.findByTestId("pr-topbar-menu-item-acme-demo-42");
     const passingRow = screen.getByTestId("pr-topbar-menu-item-acme-api-77");
     expect(ariaLabel(failedRow)).toContain(CHECKS_FAILED);
-    expect(ariaLabel(failedRow)).toContain(CONFLICTS);
+    expect(ariaLabel(failedRow)).not.toContain(CONFLICTS);
     expect(ariaLabel(passingRow)).toContain(CHECKS_PASSED);
-    expect(ariaLabel(passingRow)).not.toContain(CONFLICTS);
+    expect(ariaLabel(passingRow)).toContain(CONFLICTS);
   });
 });
 

@@ -91,6 +91,15 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
     expect(env!.executor_type).toBe("local_docker");
     expect(env!.container_id, "task environment must record container_id").toBeTruthy();
     expect(dockerInspectExists(env!.container_id!), "container should exist on host").toBe(true);
+
+    // The session projection must describe the same worker execution as the
+    // environment: observed Docker runtime and the same daemon container ID.
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    expect(sessions).toHaveLength(1);
+    const { session } = await apiClient.getTaskSession(sessions[0].id);
+    expect(session.execution_runtime).toBe("docker");
+    expect(session.agent_execution_id).toBeTruthy();
+    expect(session.container_id).toBe(env!.container_id);
     // Suffix is the first 6 chars of the task UUID (deterministic so resume
     // lands on the same branch even when the env row predates the suffix
     // change), so the pattern is hex chars rather than a 3-char random tail.

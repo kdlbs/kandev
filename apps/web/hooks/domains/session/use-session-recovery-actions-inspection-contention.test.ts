@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   requestSessionRecover: vi.fn(),
   restoreSessionWorkspace: vi.fn(),
   getWorkspaceRecoveryStatus: vi.fn(),
+  guidanceOwner: {},
 }));
 
 vi.mock("@/lib/services/session-recovery-service", async (importOriginal) => ({
@@ -37,6 +38,8 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => mocks.guidanceOwner,
+  useOptionalAppStoreApi: () => mocks.guidanceOwner,
   useAppStore: (selector: (state: never) => unknown) =>
     selector({
       taskSessions: { items: {} },

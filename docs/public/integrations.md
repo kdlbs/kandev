@@ -405,7 +405,13 @@ For a task with linked GitHub pull requests, open the PR status control above th
 
 If a current pull-request head has a GitHub Actions workflow that requires maintainer approval, the PR status control shows **Awaiting maintainer approval**, even when GitHub reports no checks. Detailed desktop and mobile views show the workflow name, the reason, and a link to GitHub. Approval-only workflow attention is not a failed check, does not start **Auto-fix CI & address comments**, and does not make the pull request ready for **Auto-merge or requeue when ready**. If GitHub does not provide enough evidence, Kandev keeps the workflow state unavailable or marks the last same-head observation as stale instead of claiming approval.
 
-Task lists, Kanban cards, and the task picker also show an amber lock when the current PR head awaits maintainer approval. Hover the icon on desktop or tap it on a phone to see the PR details. If the PR also has merge conflicts, the icon shows the red conflict warning; the details still show both conditions.
+Task lists, Kanban cards, and the task picker show an amber lock when the current PR head awaits maintainer approval. A failed check's red cross takes priority over the lock, while a merge conflict's red triangle takes priority over both. Hover the icon on desktop or tap it on a phone to see each condition, including the approval reason, in the PR details.
+
+The pull-request icon shows one marker in its upper-right corner. A red triangle means a merge conflict and takes priority over CI and workflow-approval markers. Otherwise, a red cross means a check failed. An amber ring means checks are queued or active. An amber exclamation mark means workflow attention that is not an approval gate. Automation dots keep their existing corners.
+
+The accessible name and PR details retain each condition. After a conflict clears, the current eligible CI or approval marker appears without another refresh. A missing marker does not prove that CI passed.
+
+Successful checks add no marker. An all-skipped result also adds no marker. If every selected check completed as skipped, the details say **All checks skipped** and do not claim that tests passed. Details show the skipped count separately from the passed count.
 
 Kandev refreshes GitHub Actions observations for empty, running, changing, or
 attention-required results within 30 seconds. Nonempty completed results with
@@ -698,6 +704,12 @@ When editing, a blank secret preserves the saved credential only if the URL, acc
 Create a watch with JQL, test the query, then choose a workflow and starting step. A new watch starts with `project = PROJ AND status = "Open" ORDER BY created DESC`; replace `PROJ` before testing. Repository selection is optional: leaving it blank creates repo-less tasks. When a repository is selected, choose its default branch, a local branch such as `main`, or a qualified remote branch such as `origin/main`. Kandev saves the remote name with the selected branch. Before a watcher-created task worktree is made, branch freshness follows the repository's [worktree and branch lifecycle](git-operations.md#managed-worktree-and-branch-lifecycle) policy. **Always pull before creating a new worktree** controls that refresh; selecting `origin/main` does not enable a pull for this watcher. Blank agent and executor profile fields inherit the starting step's defaults. Customize the task prompt and set a poll interval, which defaults to 300 seconds and accepts 60–3,600 seconds.
 
 The maximum in-flight value defaults to 5. Leave it blank for no cap. A cap defers remaining matches rather than importing them all at once. Each poll fetches only the first 50 JQL matches and does not paginate. Already-seen issues still occupy that provider result window, so a stable broad query can leave later matches unseen indefinitely; narrow the JQL enough that every important issue can enter the first page. Pause the watch before changing a broad query. Jira task-preset prompts can use ticket key, URL, title, and description placeholders from the preset editor.
+
+A watch suppresses an issue while its mapped task exists, including an archived task or a task on a completed step. Permanently deleting that task removes the suppression. If the issue still matches a later poll and appears in its first 50 results, the watch can create a new task without resetting the watch or editing the database.
+
+Deduplication is per watch. Deleting a task makes the issue eligible again only for the watch whose mapping pointed to that task. Another watch that maps the same issue to a different task keeps its own suppression.
+
+An unfinished reservation stays protected until you reset the watch or delete it.
 
 Deleting a Jira watch leaves its previously created tasks in place. **Reset** is destructive: after the preview, it permanently deletes every watch-created task, including archived tasks, clears cursor/deduplication state, and makes current matches eligible for the next poll.
 

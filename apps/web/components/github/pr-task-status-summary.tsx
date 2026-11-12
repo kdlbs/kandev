@@ -20,6 +20,7 @@ import {
   isWorkflowApprovalRequired,
   workflowAttentionWorkflowNames,
 } from "./pr-workflow-attention";
+import { isAllSkippedCheckSummary, skippedCheckCount } from "./pr-ci-state";
 
 export type PRTaskSummaryRowKind = ChangeRequestTaskSummaryRowKind;
 export type PRTaskSummaryTone = ChangeRequestTaskSummaryTone;
@@ -83,26 +84,82 @@ function workflowAttentionRow(pr: TaskPR): PRTaskSummaryRow | null {
   };
 }
 
+function skippedDetail(pr: TaskPR): PRTaskSummaryRow["detail"] | undefined {
+  const skipped = skippedCheckCount(pr);
+  if (skipped <= 0) return undefined;
+  return { key: "github:checksSkippedCount", values: { count: skipped } };
+}
+
+function mixedSkippedDetail(pr: TaskPR): PRTaskSummaryRow["detail"] | undefined {
+  if (isAllSkippedCheckSummary(pr)) return undefined;
+  return skippedDetail(pr);
+}
+
+function allSkippedHistoryDetail(pr: TaskPR): PRTaskSummaryRow["detail"] | undefined {
+  if (!isAllSkippedCheckSummary(pr)) return undefined;
+  return { key: "github:lastDetailedObservationAllSkipped" };
+}
+
+function withSkippedDetail(
+  row: PRTaskSummaryRow,
+  detail: PRTaskSummaryRow["detail"] | undefined,
+): PRTaskSummaryRow {
+  return detail ? { ...row, detail } : row;
+}
+
+function primaryCIRow(
+  pr: TaskPR,
+  attentionExplainsUnstable: boolean,
+  mixedDetail: PRTaskSummaryRow["detail"] | undefined,
+): PRTaskSummaryRow | null {
+  const historyDetail = allSkippedHistoryDetail(pr);
+  if (pr.checks_state === "failure") {
+    return withSkippedDetail(
+      { kind: "ci", status: "failed", tone: "danger" },
+      historyDetail ?? mixedDetail,
+    );
+  }
+  if (pr.checks_state === "pending") {
+    return withSkippedDetail(
+      { kind: "ci", status: "in_progress", tone: "warning" },
+      historyDetail ?? mixedDetail,
+    );
+  }
+  if (pr.checks_state === "unstable") {
+    if (attentionExplainsUnstable) return null;
+    return withSkippedDetail(
+      { kind: "ci", status: "checks_not_successful", tone: "warning" },
+      historyDetail ?? mixedDetail,
+    );
+  }
+  if (pr.checks_state === "success") {
+    return withSkippedDetail({ kind: "ci", status: "passed", tone: "success" }, mixedDetail);
+  }
+  if (pr.mergeable_state === "unstable") {
+    if (attentionExplainsUnstable) return null;
+    return withSkippedDetail(
+      { kind: "ci", status: "checks_not_successful", tone: "warning" },
+      historyDetail ?? mixedDetail,
+    );
+  }
+  if (isAllSkippedCheckSummary(pr)) {
+    return {
+      kind: "ci",
+      status: "all_skipped",
+      tone: "muted",
+      detail: { key: "github:lastDetailedObservation" },
+    };
+  }
+  if (!pr.checks_state) return null;
+  return withSkippedDetail(rawRow("ci", pr.checks_state), historyDetail);
+}
+
 function deriveCIRows(pr: TaskPR): PRTaskSummaryRow[] {
   const attentionRow = workflowAttentionRow(pr);
   const attentionExplainsUnstable =
     attentionRow?.status === "awaiting_approval" || attentionRow?.status === "workflow_attention";
-  const rows: PRTaskSummaryRow[] = [];
-  if (pr.checks_state === "success") rows.push({ kind: "ci", status: "passed", tone: "success" });
-  else if (pr.checks_state === "failure") {
-    rows.push({ kind: "ci", status: "failed", tone: "danger" });
-  } else if (pr.checks_state === "pending") {
-    rows.push({ kind: "ci", status: "in_progress", tone: "warning" });
-  } else if (
-    pr.checks_state === "unstable" ||
-    (pr.mergeable_state === "unstable" && !attentionExplainsUnstable)
-  ) {
-    if (!attentionExplainsUnstable) {
-      rows.push({ kind: "ci", status: "checks_not_successful", tone: "warning" });
-    }
-  } else if (pr.checks_state) rows.push(rawRow("ci", pr.checks_state));
-  if (attentionRow) rows.push(attentionRow);
-  return rows;
+  const row = primaryCIRow(pr, attentionExplainsUnstable, mixedSkippedDetail(pr));
+  return [...(row ? [row] : []), ...(attentionRow ? [attentionRow] : [])];
 }
 
 function deriveMergeRow(pr: TaskPR, readyToMerge: boolean): PRTaskSummaryRow | null {
@@ -118,14 +175,14 @@ function deriveMergeRow(pr: TaskPR, readyToMerge: boolean): PRTaskSummaryRow | n
       ),
     };
   }
+  if (pr.has_merge_conflicts ?? pr.mergeable_state === "dirty") {
+    return { kind: "merge", status: "conflicts", tone: "danger" };
+  }
   if (pr.mergeable_state === "draft") {
     return { kind: "merge", status: "draft", tone: "muted" };
   }
   if (readyToMerge) return { kind: "merge", status: "ready", tone: "success" };
   if (!pr.mergeable_state || pr.mergeable_state === "unknown") return null;
-  if (pr.mergeable_state === "dirty") {
-    return { kind: "merge", status: "conflicts", tone: "danger" };
-  }
   if (pr.mergeable_state === "behind") {
     return { kind: "merge", status: "behind", tone: "warning" };
   }

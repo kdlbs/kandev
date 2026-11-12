@@ -118,3 +118,16 @@ SDK integration adds `publish-plugin-sdk` and `stable-complete` to automatic
 delivery and recovery-notice prerequisites. This preserves the requirement that
 announcements describe complete Stable publication after the SDK work lands.
 The workflow contract tests cover failed, skipped, and cancelled prerequisites.
+
+### Environment-secret forwarding correction
+
+Release run `43107458248` received an empty webhook value because the caller
+did not pass the environment secret to the reusable workflow. The release job
+now passes only `DISCORD_GENERAL_WEBHOOK_URL`. The reusable workflow declares
+that secret as optional so preview remains usable without credentials.
+
+The new caller/declaration regression failed before the correction and passed
+after it. Workflow contracts (5), delivery tests (16), release contracts (78),
+and action-pinning tests (9) passed. `git diff --check` passed. The offline
+Zizmor scan reported findings in unchanged workflow code. Public setup and
+recovery instructions remain accurate. No live announcement was sent.

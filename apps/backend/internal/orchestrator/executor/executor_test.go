@@ -186,6 +186,12 @@ func TestPrepareSession_Success(t *testing.T) {
 func TestPrepareSessionRetriesTaskRunnerChangedAfterReload(t *testing.T) {
 	repo := newMockRepository()
 	taskID := "task-runner-retry"
+	repo.executorProfiles["profile-old"] = &models.ExecutorProfile{
+		ID: "profile-old", ExecutorID: "executor-runner",
+	}
+	repo.executorProfiles["profile-new"] = &models.ExecutorProfile{
+		ID: "profile-new", ExecutorID: "executor-runner",
+	}
 	repo.tasks[taskID] = &models.Task{
 		ID:          taskID,
 		WorkspaceID: "workspace-runner-retry",

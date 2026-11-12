@@ -715,6 +715,8 @@ type ExecutorCreateRequest struct {
 	// peer capability. Executors only forward it; they never re-derive it.
 	CopilotNativeSessionEvents bool
 	WorkspaceSourceRoots       []string
+	WorkspaceExcludedRoots     []string
+	TaskWorkspaceRoot          string
 	Protocol                   string
 	CodexAppServerEnabled      bool
 	// Env is the launch request environment. Executors that adopt a retained
@@ -757,9 +759,13 @@ type ExecutorCreateRequest struct {
 	// launch. Remote executors use it during preflight before agentctl receives
 	// the final command.
 	ManagedRuntimeVersion string
-	ManagedRuntimeFamily  managedruntime.OpenCodeFamily
-	ManagedRuntimeSource  managedruntime.OpenCodeSource
-	NativeRuntimeVersion  string
+	// ManagedRuntimeInstallerEnvDigest fingerprints the authorized installer
+	// environment for reusable managed npm repairs. Empty disables reuse.
+	ManagedRuntimeInstallerEnvDigest string
+	ManagedRuntimeOwnerUserID        string
+	ManagedRuntimeFamily             managedruntime.OpenCodeFamily
+	ManagedRuntimeSource             managedruntime.OpenCodeSource
+	NativeRuntimeVersion             string
 	// OpenCodePluginRuntime is the typed resolved runtime evidence for the
 	// Kandev integration plugin. Nil keeps the integration off.
 	OpenCodePluginRuntime *agentctltypes.OpenCodePluginRuntime
@@ -990,44 +996,46 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	historyEnabled = historyEnabled || req.ForceContextContinuation
 
 	execution := &AgentExecution{
-		startupDisposition:         startupDispositionFromMetadata(metadata),
-		ID:                         ri.InstanceID,
-		CausingRunID:               causingRunID,
-		TerminalCausingRunID:       terminalCausingRunID,
-		ExecutorType:               executorType,
-		RunID:                      req.Env["KANDEV_RUN_ID"],
-		TaskID:                     req.TaskID,
-		SessionID:                  req.SessionID,
-		TaskEnvironmentID:          req.TaskEnvironmentID,
-		WorkspaceID:                req.WorkspaceID,
-		RepositoryIDs:              append([]string(nil), req.RepositoryIDs...),
-		AgentProfileID:             req.AgentProfileID,
-		OfficeAgentProfileID:       req.OfficeAgentProfileID,
-		promptTurnID:               req.PromptTurnID,
-		AgentID:                    agentID,
-		AuthPolicy:                 req.AuthPolicy,
-		ContainerID:                ri.ContainerID,
-		ContainerIP:                ri.ContainerIP,
-		WorkspacePath:              workspacePath,
-		OriginalWorkspacePath:      originalWorkspacePath,
-		WorkspaceSourceRoots:       append([]string(nil), workspaceSourceRoots...),
-		DeliveryStreamID:           req.DeliveryStreamID,
-		DeliveryIncarnationID:      req.DeliveryIncarnationID,
-		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
-		ForceContextContinuation:   req.ForceContextContinuation,
-		ReplacesNativeConversation: req.ReplacesNativeConversation,
-		RuntimeName:                ri.RuntimeName,
-		attachedExistingCompute:    ri.ReusedWorkspace,
-		Status:                     v1.AgentStatusRunning,
-		StartedAt:                  time.Now(),
-		metadata:                   metadata,
-		agentctl:                   ri.Client,
-		standaloneInstanceID:       ri.StandaloneInstanceID,
-		standalonePort:             ri.StandalonePort,
-		runtimeEpoch:               runtimeEpochFromClient(ri.Client),
-		standaloneHostPID:          runtimeProcessIDFromClient(ri.Client),
-		historyEnabled:             historyEnabled,
-		promptDoneCh:               make(chan PromptCompletionSignal, 1),
+		startupDisposition:               startupDispositionFromMetadata(metadata),
+		ID:                               ri.InstanceID,
+		CausingRunID:                     causingRunID,
+		TerminalCausingRunID:             terminalCausingRunID,
+		ExecutorType:                     executorType,
+		RunID:                            req.Env["KANDEV_RUN_ID"],
+		TaskID:                           req.TaskID,
+		SessionID:                        req.SessionID,
+		TaskEnvironmentID:                req.TaskEnvironmentID,
+		WorkspaceID:                      req.WorkspaceID,
+		RepositoryIDs:                    append([]string(nil), req.RepositoryIDs...),
+		AgentProfileID:                   req.AgentProfileID,
+		OfficeAgentProfileID:             req.OfficeAgentProfileID,
+		promptTurnID:                     req.PromptTurnID,
+		AgentID:                          agentID,
+		AuthPolicy:                       req.AuthPolicy,
+		ContainerID:                      ri.ContainerID,
+		ContainerIP:                      ri.ContainerIP,
+		WorkspacePath:                    workspacePath,
+		OriginalWorkspacePath:            originalWorkspacePath,
+		WorkspaceSourceRoots:             append([]string(nil), workspaceSourceRoots...),
+		DeliveryStreamID:                 req.DeliveryStreamID,
+		DeliveryIncarnationID:            req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:        req.DeliveryHarnessGeneration,
+		ForceContextContinuation:         req.ForceContextContinuation,
+		ReplacesNativeConversation:       req.ReplacesNativeConversation,
+		ManagedRuntimeInstallerEnvDigest: req.ManagedRuntimeInstallerEnvDigest,
+		ManagedRuntimeOwnerUserID:        req.ManagedRuntimeOwnerUserID,
+		RuntimeName:                      ri.RuntimeName,
+		attachedExistingCompute:          ri.ReusedWorkspace,
+		Status:                           v1.AgentStatusRunning,
+		StartedAt:                        time.Now(),
+		metadata:                         metadata,
+		agentctl:                         ri.Client,
+		standaloneInstanceID:             ri.StandaloneInstanceID,
+		standalonePort:                   ri.StandalonePort,
+		runtimeEpoch:                     runtimeEpochFromClient(ri.Client),
+		standaloneHostPID:                runtimeProcessIDFromClient(ri.Client),
+		historyEnabled:                   historyEnabled,
+		promptDoneCh:                     make(chan PromptCompletionSignal, 1),
 	}
 	execution.setRuntimeEnvironment(runtimeEnv)
 	execution.sshApprovedEnvKeys = append([]string(nil), req.ApprovedSecretEnvKeys...)

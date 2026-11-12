@@ -258,6 +258,10 @@ var (
 	ErrTaskArchived            = errors.New("task is archived")
 	ErrStaleExecution          = errors.New("stale execution: no live execution in memory")
 	ErrAgentCommandMissing     = errors.New("existing execution has no agent command configured")
+	// ErrExecutorActorUnavailable means executor admission could not establish
+	// the user a resume must launch as, so the resume fails closed instead of
+	// launching without an identity.
+	ErrExecutorActorUnavailable = errors.New("resume requires an executor actor, but none is available")
 	// ErrSessionAdvancedToRunning reports that another launch advanced the
 	// session before this launch could persist its prepared runtime data.
 	ErrSessionAdvancedToRunning = errors.New("session state advanced to RUNNING before runtime persistence")
@@ -306,6 +310,10 @@ const (
 	ProbeResultSettled = client.ProbeResultSettled
 	ProbeResultUnknown = client.ProbeResultUnknown
 )
+
+// ErrAgentctlClientUnavailable indicates that a session's execution is being
+// replaced and its agentctl client is not currently available.
+var ErrAgentctlClientUnavailable = errors.New("agentctl client not available")
 
 // AgentManagerClient is an interface for the Agent Manager service
 // This will be implemented via gRPC or HTTP client
@@ -544,7 +552,11 @@ type LaunchAgentRequest struct {
 	CandidateExecutionID         string
 	OnExecutionAllocated         func(context.Context, string) error
 
-	TaskID                string
+	TaskID string
+	// OwnerUserID is the authenticated application owner used for reusable
+	// repair identity. It is resolved from the actor or workspace owner and is
+	// never derived from child environment values.
+	OwnerUserID           string
 	TaskScope             lifecycle.TaskLaunchScope
 	SessionSettingsPolicy ResumeSettingsPolicy
 	WorkspaceID           string // Kandev workspace ID — used to build scratch dir for repo-less tasks
@@ -1118,13 +1130,6 @@ type PrimarySessionSetFunc func(ctx context.Context, taskID, sessionID string)
 // and invalidates updates captured before the reset.
 type ContextWindowResetFunc func(ctx context.Context, sessionID string) error
 
-// ExecutorTypeCapabilities provides behavioral queries about executor types.
-// Implemented by the lifecycle manager using its backend registry.
-type ExecutorTypeCapabilities interface {
-	RequiresCloneURL(executorType string) bool
-	ShouldApplyPreferredShell(executorType string) bool
-}
-
 // AttachmentReader is the narrow attachment-store seam used to stream a
 // claimed descriptor into a passthrough workspace.
 type AttachmentReader interface {
@@ -1158,6 +1163,7 @@ type Executor struct {
 	repo                          executorStore
 	secretStore                   secrets.SecretStore
 	shellPrefs                    ShellPreferenceProvider
+	managedRuntimeSingleUserOwner func() (string, bool)
 	capabilities                  ExecutorTypeCapabilities
 	gitlabCredentials             GitLabCredentialResolver
 	logger                        *logger.Logger
