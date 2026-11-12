@@ -131,6 +131,7 @@ Final E2E results:
 - After review remediation, the desktop repeated-resume spec passed 2 tests, including matching and independent-fence cases.
 - After review remediation, the mobile repeated-resume spec passed 2 tests, including matching and independent-fence cases.
 - Both remediated browser runs rebuilt the backend, Vite assets and fixture plugin.
+- After the final projected-terminal upsert review fix, the desktop and mobile repeated-resume specs were rerun independently and each passed 2 tests.
 
 Other verification passed:
 

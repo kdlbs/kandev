@@ -62,7 +62,7 @@ Run from the repository root. Set `KANDEV_TEST_POSTGRES_DSN` for the concurrent 
 Use barriers instead of timing-based sleeps.
 
 ```bash
-(cd apps/backend && GOMEMLIMIT=2048MiB GOMAXPROCS=2 go test -trimpath -tags fts5 -p 1 -race ./internal/task/repository/sqlite -run 'Test(Postgres)?(RestartRecoveryBlockEnsure|NativeResumeAfterSilentRestore)' -count=1)
+(cd apps/backend && GOMEMLIMIT=2048MiB GOMAXPROCS=2 go test -trimpath -tags fts5 -p 1 -race ./internal/task/repository/sqlite -run 'Test(Postgres)?(RestartRecoveryBlockEnsure|NativeResumeAfterSilentRestore|UpsertProjectedTerminalResolvesExistingOpenBlock)' -count=1)
 (cd apps/backend && GOMEMLIMIT=2048MiB GOMAXPROCS=2 go test -trimpath -tags fts5 -p 1 -race ./internal/task/repository/sqlite -run 'Test(Postgres)?SessionRecoveryBlockIncidentUniquenessMigration' -count=1)
 (cd apps/backend && GOMEMLIMIT=2048MiB GOMAXPROCS=2 go test -trimpath -p 1 ./internal/automation -run '^TestRetryLegacyQuarantineUsesOpenRecoveryFenceIndex$' -count=1)
 (cd apps/backend && GOMEMLIMIT=2048MiB GOMAXPROCS=2 go test -trimpath -tags fts5 -p 1 -race ./internal/orchestrator -run 'Test(RepeatedNativeResumeAfterSilentRestore|RestartRecovery|RestartInventory|RecoverSessionUnknownPromptKeepsNativeHistory)' -count=1)
@@ -111,6 +111,10 @@ Restart presentation repair now uses this repository operation. It preserves exi
 
 Review remediation permits resolved recovery history to coexist with later open incidents. SQLite rebuilds legacy `session_recovery_blocks` tables with all bindings and timestamps preserved; PostgreSQL drops the matching legacy unique constraint. Both engines enforce one open block per session, incarnation, generation and reason. A bound candidate cannot reopen its resolved submission. A generic candidate needs a retained interrupted submission created after the resolved generic fence. Automation's legacy quarantine insert now tolerates both the partial open index and its deterministic row ID.
 
+Terminal-effect binding now updates a matching open block by its existing ID before resolved rows are stored. Repeated upserts reuse the exact resolved binding, while a different open submission keeps its original binding.
+
+The projected-terminal upsert regression was first run against the partial-index implementation and failed with two rows instead of one. After the correction, the SQLite race test passes and confirms the original row is resolved in place with its terminal identity and outcome preserved across an idempotent retry. The PostgreSQL counterpart is gated and did not run because `KANDEV_TEST_POSTGRES_DSN` is unset.
+
 Verification passed:
 
 - The SQLite race suite passed for `RestartRecoveryBlockEnsure` and `NativeResumeAfterSilentRestore`.
@@ -118,4 +122,6 @@ Verification passed:
 - The orchestrator race suite passed for repeated Resume and restart recovery.
 - SQL guard and store-conformance race tests passed.
 - Changed-Go-file lint reported `0 issues`. `git diff --check` passed.
+- `make -C apps/backend build` passed. The focused SQLite repository race command, including terminal-effect upsert and repeated-resume regressions, passed.
+- A full SQLite repository race run timed out after the package's 10-minute limit in `TestSidebarQueryPreparationMemory/101`; it did not report a failure in the modified recovery paths.
 - PostgreSQL concurrency cases did not run because `KANDEV_TEST_POSTGRES_DSN` is unset.

@@ -446,6 +446,15 @@ func (r *Repository) upsertSessionRecoveryBlockTx(
 	if err := r.bindProjectedTerminalToRecoveryBlock(ctx, tx, block); err != nil {
 		return err
 	}
+	if block.State == models.RecoveryBlockResolved {
+		handled, err := r.upsertResolvedSessionRecoveryBlockTx(ctx, tx, block)
+		if err != nil {
+			return err
+		}
+		if handled {
+			return nil
+		}
+	}
 	query := `
 		INSERT INTO session_recovery_blocks
 		(id, session_id, incarnation_id, expected_generation, reason, state,
