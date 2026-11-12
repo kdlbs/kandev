@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
 
 const startHostShell = vi.hoisted(() =>
   vi.fn().mockResolvedValue({
@@ -59,6 +59,8 @@ const tab = {
 
 const PTY_VIEW_PROBE = "pty-view-probe";
 
+afterEach(() => cleanup());
+
 it("starts a host shell with the terminal tab's stable client id and detaches on unmount", async () => {
   const onStateChange = vi.fn();
   const view = render(<QuickTerminalTabView tab={tab} onStateChange={onStateChange} />);
@@ -80,6 +82,41 @@ it("starts a host shell with the terminal tab's stable client id and detaches on
     }),
   );
 
+  view.unmount();
+});
+
+it("reports a deferred start through the latest status handler", async () => {
+  let resolveStart: ((value: Awaited<ReturnType<typeof startHostShell>>) => void) | undefined;
+  startHostShell.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        resolveStart = resolve;
+      }),
+  );
+  const originalHandler = vi.fn();
+  const latestHandler = vi.fn();
+  const view = render(<QuickTerminalTabView tab={tab} onStateChange={originalHandler} />);
+
+  await waitFor(() => expect(screen.getByTestId(PTY_VIEW_PROBE)).toBeTruthy());
+  fireEvent.click(screen.getByTestId(PTY_VIEW_PROBE));
+  view.rerender(<QuickTerminalTabView tab={tab} onStateChange={latestHandler} />);
+  await act(async () => {
+    resolveStart?.({
+      session_id: "session-1",
+      agent_id: "_host_shell",
+      cmd: ["/bin/bash"],
+      running: true,
+      started_at: "2026-08-04T00:00:00Z",
+    });
+  });
+
+  expect(originalHandler).not.toHaveBeenCalled();
+  expect(latestHandler).toHaveBeenCalledWith({
+    status: "running",
+    sessionId: "session-1",
+    exitCode: null,
+    error: null,
+  });
   view.unmount();
 });
 
