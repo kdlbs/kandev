@@ -373,5 +373,18 @@
   "pluginToolsRead": "讀取",
   "pluginToolsWrite": "寫入",
   "pluginToolsClearedHint": "儲存以移除外掛程式工具存取權限。",
-  "pluginToolsUnavailable": "外掛程式不可用"
+  "pluginToolsUnavailable": "外掛程式不可用",
+  "mcpAccess": "MCP 存取",
+  "mcpNextStart": "更改在代理程序下次啓動時生效。複用的程序保留目前工具。",
+  "mcpNewTasks": "應用於新建任務。現有任務保留各自的選擇。",
+  "mcpBuiltinPackages": "內置包",
+  "mcpRequired": "必需",
+  "mcpBlocked": "已被工作區策略阻止",
+  "mcpConfigurationAuthority": "設定可更改已獲授權的工作流程、設定檔、提示詞、執行器和自動化。原生工具無法更改 MCP 存取授權。第三方伺服器使用各自的權限。",
+  "mcpWorkspaceServers": "工作區 MCP 伺服器",
+  "mcpSearch": "搜尋 MCP 伺服器",
+  "mcpInherited": "{{name}}（繼承）",
+  "mcpNoServers": "未找到其他 MCP 伺服器。",
+  "mcpUnavailable": "{{name}}（不可用）",
+  "mcpOptionsFailed": "無法載入 MCP 選項。已儲存的選擇保持不變。"
 }

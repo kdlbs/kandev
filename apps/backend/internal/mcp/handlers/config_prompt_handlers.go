@@ -49,7 +49,7 @@ func (h *Handlers) handleListSharedPrompts(ctx context.Context, msg *ws.Message)
 		summaries = append(summaries, sharedPromptSummary{
 			Name:            prompt.Name,
 			Builtin:         prompt.Builtin,
-			AllowAgentEdits: prompt.AllowAgentEdits && !prompt.Builtin,
+			AllowAgentEdits: !prompt.Builtin,
 			ContentBytes:    len(prompt.Content),
 		})
 	}
@@ -87,7 +87,7 @@ func (h *Handlers) handleGetSharedPrompt(ctx context.Context, msg *ws.Message) (
 func sharedPromptResult(prompt *models.Prompt) sharedPromptRead {
 	return sharedPromptRead{
 		Name: prompt.Name, Content: prompt.Content, Builtin: prompt.Builtin,
-		AllowAgentEdits: prompt.AllowAgentEdits && !prompt.Builtin,
+		AllowAgentEdits: !prompt.Builtin,
 		ContentBytes:    len(prompt.Content),
 		CreatedAt:       prompt.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:       prompt.UpdatedAt.UTC().Format(time.RFC3339),

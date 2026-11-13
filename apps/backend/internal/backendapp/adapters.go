@@ -489,6 +489,7 @@ func buildLifecycleLaunchRequest(
 		ApprovedSecretEnvKeys:         append([]string(nil), req.ApprovedSecretEnvKeys...),
 		EnvironmentDefinitions:        append([]runtimeenv.Definition(nil), req.EnvironmentDefinitions...),
 		EnvironmentResolutionRequired: req.EnvironmentResolutionRequired,
+		ManagedRuntimeOwnerUserID:     req.OwnerUserID,
 		ACPSessionID:                  req.ACPSessionID,
 		DeliveryStreamID:              req.DeliveryStreamID,
 		DeliveryIncarnationID:         req.DeliveryIncarnationID,
@@ -513,6 +514,7 @@ func buildLifecycleLaunchRequest(
 		TaskRepositoryID:              req.TaskRepositoryID,
 		RepositoryPath:                req.RepositoryPath,
 		BaseBranch:                    req.BaseBranch,
+		BaseBranchFallbackPolicy:      req.BaseBranchFallbackPolicy,
 		IntegrationRef:                req.IntegrationRef,
 		DefaultBranch:                 req.DefaultBranch,
 		CheckoutBranch:                req.CheckoutBranch,
@@ -592,6 +594,7 @@ func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchS
 			RepositoryURL:              r.RepositoryURL,
 			RepoName:                   r.RepoName,
 			BaseBranch:                 r.BaseBranch,
+			BaseBranchFallbackPolicy:   r.BaseBranchFallbackPolicy,
 			IntegrationRef:             r.IntegrationRef,
 			DefaultBranch:              r.DefaultBranch,
 			CheckoutBranch:             r.CheckoutBranch,
@@ -665,6 +668,17 @@ func (a *lifecycleAdapter) RequiresCloneURL(executorType string) bool {
 // ShouldApplyPreferredShell implements executor.ExecutorTypeCapabilities.
 func (a *lifecycleAdapter) ShouldApplyPreferredShell(executorType string) bool {
 	return a.mgr.ShouldApplyPreferredShell(executorType)
+}
+
+// ValidateExecutorRuntime implements executor.ExecutorTypeCapabilities. It is
+// the required production runtime-admission wiring.
+func (a *lifecycleAdapter) ValidateExecutorRuntime(executorType string) error {
+	return a.mgr.ValidateExecutorRuntime(executorType)
+}
+
+// ValidateExecutionRuntime implements executor.ExecutorExecutionRuntimeAdmission.
+func (a *lifecycleAdapter) ValidateExecutionRuntime(ctx context.Context, sessionID, taskEnvironmentID, executorType string) error {
+	return a.mgr.ValidateExecutionRuntime(ctx, sessionID, taskEnvironmentID, executorType)
 }
 
 // SetExecutionEnv updates per-run env vars in an existing execution.
@@ -1311,7 +1325,11 @@ func (a *lifecycleAdapter) GetGitStatusWithDetails(ctx context.Context, sessionI
 
 // WaitForAgentctlReady waits for the agentctl HTTP server to be ready for a session.
 func (a *lifecycleAdapter) WaitForAgentctlReady(ctx context.Context, sessionID string) error {
-	return a.mgr.WaitForAgentctlReadyForSession(ctx, sessionID)
+	err := a.mgr.WaitForAgentctlReadyForSession(ctx, sessionID)
+	if errors.Is(err, lifecycle.ErrAgentctlClientUnavailable) || errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+		return fmt.Errorf("%w: %v", executor.ErrAgentctlClientUnavailable, err)
+	}
+	return err
 }
 
 // orchestratorWrapper wraps orchestrator.Service to implement taskhandlers.OrchestratorService.
@@ -1861,10 +1879,31 @@ func (a *messageCreatorAdapter) CreateSessionMessageIdempotent(
 	messageID, taskID, content, agentSessionID, messageType, turnID string,
 	metadata map[string]interface{}, requestsInput bool,
 ) error {
+	return a.createSessionMessageIdempotent(
+		ctx, messageID, taskID, content, agentSessionID, messageType, turnID, metadata, requestsInput, false,
+	)
+}
+
+func (a *messageCreatorAdapter) CreateSessionLifecycleMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, agentSessionID, messageType string,
+	metadata map[string]interface{},
+) error {
+	return a.createSessionMessageIdempotent(
+		ctx, messageID, taskID, content, agentSessionID, messageType, "", metadata, false, true,
+	)
+}
+
+func (a *messageCreatorAdapter) createSessionMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, agentSessionID, messageType, turnID string,
+	metadata map[string]interface{}, requestsInput, completedTurn bool,
+) error {
 	_, err := a.svc.CreateMessageIdempotent(ctx, messageID, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
 		TaskID:        taskID,
 		TurnID:        turnID,
+		CompletedTurn: completedTurn,
 		Content:       content,
 		AuthorType:    "agent",
 		Type:          messageType,

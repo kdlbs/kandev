@@ -169,7 +169,8 @@ func FormatOfficeContext(taskID, sessionID string) string {
 
 const stepCompleteRecoveryInstruction = "If it reports that the workflow step changed, retries in this turn cannot recover. " +
 	"End the turn and have the user resume the session for the current step, then complete it in the new turn. " +
-	"already_signaled means the signal was accepted. " +
+	"already_signaled returns the retained outcome; pending means only that the signal was recorded, not that a transition committed or a reviewer received the handoff. " +
+	"A later turn in the same step can replace an unconsumed signal, so end the turn after an accepted signal. " +
 	"Do not move the task solely to bypass a stale-turn error.\n"
 
 const officeStepCompleteInstruction = "This workflow step requires an explicit completion signal. " +
@@ -236,6 +237,10 @@ This task runs in autopilot mode. Continue independently and make reasonable dec
 
 const canvasGuidanceSection = `CANVAS AUTHORING:
 Use these tools only when the user explicitly asks for a Kandev canvas: create_canvas_kandev, read_canvas_authoring_skill_kandev, and publish_canvas_kandev. Create it in Kandev before writing app files. Read the skill once, edit only in its returned source directory, then publish through MCP. Report publication status, including failures. Local files or a successful build do not publish a canvas.
+`
+
+const worktreeAdoptionSection = `WORKTREE ADOPTION:
+If you create a Git worktree, create it inside the task workspace, then call add_branch_to_task_kandev with worktree_path so Kandev tracks it. Or call add_branch_to_task_kandev without worktree_path and Kandev creates the worktree.
 `
 
 const richOutputSection = `- show_rich_output_kandev: For structured comparisons, recorded checks, charts/graphs/plots, file previews or KPI/metrics with data, call now. Table compares; StatusList checks; Callout notes. Use version=2,catalog_version=1,spec; discover schema/examples. Workspace-relative paths. Kandev owns layout/styling. Label series with units. No ASCII/SVG/HTML/separate app. Otherwise prose or small Markdown tables.
@@ -306,6 +311,10 @@ type KandevContextOptions struct {
 	Autopilot                      bool
 	IncludeUserQuestionTool        bool
 	IncludeParentQuestionTool      bool
+	// IncludeWorktreeAdoption tells the agent to create any new Git worktree
+	// inside the task workspace and report it. Only host Worktree and Local
+	// executors set this.
+	IncludeWorktreeAdoption bool
 }
 
 // FormatKandevContext returns the Kandev context prompt with task and session IDs injected.
@@ -350,6 +359,10 @@ func FormatKandevContextWithOptions(taskID, sessionID string, options KandevCont
 	if options.IncludeCanvasGuidance {
 		canvasGuidance = canvasGuidanceSection
 	}
+	worktreeAdoption := ""
+	if options.IncludeWorktreeAdoption {
+		worktreeAdoption = worktreeAdoptionSection
+	}
 	return resolveBuiltinPrompt("kandev-context", map[string]string{
 		"task_id":                          taskID,
 		"session_id":                       sessionID,
@@ -357,6 +370,7 @@ func FormatKandevContextWithOptions(taskID, sessionID string, options KandevCont
 		"task_title_section":               taskTitle,
 		"coordinator_task_control_section": coordinatorControls,
 		"canvas_guidance_section":          canvasGuidance,
+		"worktree_adoption_section":        worktreeAdoption,
 		"rich_output_section":              richOutputSection,
 		"autopilot_section":                autopilot,
 		"question_tool_section":            questionTool,

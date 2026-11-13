@@ -206,7 +206,7 @@ func TestProcessOnEnter_ResetFailureSettlesStateAfterPersistenceBudgetExpires(t 
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
 	svc.repo = barrier
 	svc.eventBus = &mockEventBus{}
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resetDone := make(chan struct{})
 	go func() {
@@ -232,7 +232,7 @@ func TestProcessOnEnter_ResetFailureSettlesStateAfterPersistenceBudgetExpires(t 
 func TestProcessOnEnter_SuccessfulResetDispatchesAutoStartPrompt(t *testing.T) {
 	svc, repo, manager, session := newActiveResetTestService(t)
 	manager.isAgentRunning = true
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
 
@@ -274,7 +274,7 @@ func TestProcessOnEnter_ResetFailureSettlementOwnsSuccessorAdmission(t *testing.
 		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
 		svc.repo = barrier
 		svc.eventBus = &mockEventBus{}
-		svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+		svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 
 		resetDone := make(chan struct{})
 		go func() {
@@ -328,7 +328,7 @@ func TestProcessOnEnter_ResetFailureSettlementOwnsSuccessorAdmission(t *testing.
 		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
 		svc.repo = barrier
 		svc.eventBus = &mockEventBus{}
-		svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+		svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 
 		resetDone := make(chan struct{})
 		go func() {
@@ -364,7 +364,7 @@ func TestResetAgentContext_BlocksDeletionWhileProviderCallIsInFlight(t *testing.
 		resetRelease:     make(chan struct{}),
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resetDone := make(chan error, 1)
 	go func() {

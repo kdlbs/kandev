@@ -94,6 +94,11 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	// New authenticated process effects require the retained execution to
+	// satisfy its selected runtime.
+	if err := m.requireExecutionSelectionCompatibility(ctx, execution); err != nil {
+		return err
+	}
 	if err := execution.validateBuiltinIntent(ctx); err != nil {
 		return err
 	}

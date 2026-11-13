@@ -38,6 +38,7 @@ function TaskPRIcon({ taskId, prInfo }: { taskId?: string; prInfo?: TaskPRInfo }
     >
       <PRStatusGlyph
         hasMergeConflicts={prInfo.hasMergeConflicts}
+        ciState={prInfo.ciState ?? "none"}
         autoFixEnabled={automation.autoFixEnabled}
         autoMergeEnabled={automation.autoMergeEnabled}
       />

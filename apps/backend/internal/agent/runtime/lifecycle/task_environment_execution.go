@@ -29,7 +29,7 @@ func (m *Manager) GetOrEnsureExecutionForTaskEnvironment(ctx context.Context, ta
 	}
 	// A sibling task's execution may already serve this shared environment.
 	// Do not borrow it: restore or create the owner session's own execution.
-	execution, err := m.ensureWorkspaceExecutionForSession(ctx, taskID, session.ID, false)
+	execution, err := m.EnsureWorkspaceExecutionForSession(ctx, taskID, session.ID)
 	if err != nil {
 		return nil, err
 	}

@@ -1,3 +1,4 @@
+import type { PRCIState } from "@/lib/types/github";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
 export type TaskPRInfo = {
@@ -8,6 +9,10 @@ export type TaskPRInfo = {
   autoFixEnabled?: boolean;
   autoMergeEnabled?: boolean;
   hasMergeConflicts?: boolean;
+  ciState?: PRCIState;
+  ciPRNumber?: number;
+  ciRepository?: string;
+  ciStale?: boolean;
   workflowApprovalRequired?: boolean;
   workflowApprovalStale?: boolean;
   workflowApprovalPRNumber?: number;
@@ -36,7 +41,27 @@ export function taskPRInfoFromSummary(
     aggregateState: pullRequest.aggregate_state,
     ...taskPRAutomationInfo(pullRequest),
     ...taskPRConflictInfo(pullRequest),
+    ...taskPRCISummaryInfo(pullRequest),
     ...taskPRWorkflowApprovalInfo(pullRequest, summary?.updated_at),
+  };
+}
+
+const PR_CI_STATES: readonly PRCIState[] = [
+  "none",
+  "failed",
+  "approval_required",
+  "attention",
+  "in_progress",
+];
+
+function taskPRCISummaryInfo(pullRequest: TaskPRSummary): Partial<TaskPRInfo> {
+  const state = pullRequest.ci_state;
+  if (typeof state !== "string" || !PR_CI_STATES.includes(state as PRCIState)) return {};
+  return {
+    ciState: state as PRCIState,
+    ...(pullRequest.ci_pr_number ? { ciPRNumber: pullRequest.ci_pr_number } : {}),
+    ...(pullRequest.ci_repository ? { ciRepository: pullRequest.ci_repository } : {}),
+    ...(pullRequest.ci_stale ? { ciStale: true } : {}),
   };
 }
 

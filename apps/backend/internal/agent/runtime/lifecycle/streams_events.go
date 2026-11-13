@@ -21,6 +21,7 @@ type preparedAgentEvent struct {
 	receiptDeferred     bool
 	skipCallback        bool
 	skipAcknowledgement bool
+	staleTerminal       bool
 	duplicate           bool
 }
 
@@ -63,6 +64,9 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 	deferReceipt bool,
 	attempt *deliveryStartupAttempt,
 ) (preparedAgentEvent, error) {
+	if connectionScopedStartupControlEvent(event) {
+		return preparedLegacyAgentEvent(execution, event), nil
+	}
 	if err := attempt.awaitNegotiation(ctx); err != nil {
 		return preparedAgentEvent{}, err
 	}
@@ -84,13 +88,17 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 	// callbacks can advance or clear prompt state, but the inbox payload must
 	// remain byte-identical from admission through projection.
 	durableEvent := durableAgentEvent(execution, event)
+	// A replayed event keeps its own prompt-attempt identity. Do not let it
+	// overwrite the live execution's submission before completion claims run.
+	staleSubmission := event.Recovered && deliverySubmissionIdentityMismatch(execution, event.DeliverySubmissionID)
+	staleTerminal := staleSubmission && durableEvent.Terminal
 	process, skipCallback, effect, deferred, err := sm.prepareDurableAgentDeliveryEvent(
 		ctx, execution, durableEvent, delivery, client, deferReceipt, attempt,
 	)
 	if err != nil {
-		return preparedAgentEvent{}, fmt.Errorf("durable agent event ownership check: %w", err)
+		return preparedAgentEvent{}, fmt.Errorf("durable agent event ownership check for %q: %w", event.Type, err)
 	}
-	if event.DeliverySubmissionID != "" {
+	if event.DeliverySubmissionID != "" && !staleSubmission {
 		execution.setDeliverySubmissionID(event.DeliverySubmissionID)
 	}
 	if !process {
@@ -105,6 +113,7 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 		deliveryEffect:  effect,
 		receiptDeferred: deferred,
 		skipCallback:    skipCallback,
+		staleTerminal:   staleTerminal,
 	}, nil
 }
 
@@ -540,6 +549,18 @@ func durableAgentEventIdentityPartial(event agentctl.AgentEvent) bool {
 		event.DeliveryIncarnationID != "" ||
 		event.DeliveryHarnessGeneration != 0 ||
 		event.DeliverySequence != 0
+}
+
+func connectionScopedStartupControlEvent(event agentctl.AgentEvent) bool {
+	if event.SessionID != "" || durableAgentEventIdentityPartial(event) {
+		return false
+	}
+	switch event.Type {
+	case streams.EventTypeAgentCapabilities, streams.EventTypeAuthRequired:
+		return true
+	default:
+		return false
+	}
 }
 
 func durableDeliveryExpected(execution *AgentExecution) bool {

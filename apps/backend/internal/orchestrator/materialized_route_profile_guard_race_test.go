@@ -288,7 +288,7 @@ func TestProfileChangeBeforePreparedRouteMaterializationKeepsNewRoute(t *testing
 
 	preparedDone := make(chan error, 1)
 	go func() {
-		_, prepareErr := svc.resolvePreparedSessionDynamicRoute(ctx, sessionID, guardRaceProfileA)
+		_, prepareErr := svc.resolvePreparedSessionDynamicRoute(ctx, sessionID, guardRaceProfileA, false)
 		preparedDone <- prepareErr
 	}()
 	barrierRepo.releaseStartRead()

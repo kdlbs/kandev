@@ -81,7 +81,11 @@ func (s *Service) retryMissingCanonicalDeliverySubmission(ctx context.Context, s
 	if reason != "" {
 		return blocked(reason)
 	}
-	if reason := enrichReconstructionControlIdentity(ctx, client, selected.evidence, request); reason != "" {
+	reason, err = s.enrichReconstructionControlIdentity(ctx, client, selected.evidence, request)
+	if err != nil {
+		return nil, err
+	}
+	if reason != "" {
 		return blocked(reason)
 	}
 	if err := s.verifyReconstructionRetiredHistory(ctx, session, request, selected.evidence); err != nil {
@@ -147,10 +151,16 @@ func selectReconstructionEvidence(
 		return journal.SubmissionSummary{}, nil, retainedEvidenceAmbiguousReason
 	}
 	descriptor := evidence.Descriptor
-	if descriptor.SubmissionCount != 1 || len(descriptor.Submissions) != 1 {
+	var candidate journal.SubmissionSummary
+	switch {
+	case descriptor.SubmissionCount == 1 && len(descriptor.Submissions) == 1:
+		candidate = descriptor.Submissions[0]
+	case descriptor.SubmissionCount == 0 && len(descriptor.Submissions) == 0 && evidence.StoredSubmission != nil &&
+		evidence.StoredSubmission.ID == block.DeliverySubmissionID:
+		candidate = journalSubmissionSummary(*evidence.StoredSubmission)
+	default:
 		return journal.SubmissionSummary{}, nil, retainedEvidenceAmbiguousReason
 	}
-	candidate := descriptor.Submissions[0]
 	if candidate.SessionID != session.ID || candidate.IncarnationID != incarnationID ||
 		candidate.HarnessGeneration != uint64(generation) || candidate.StreamID == "" ||
 		(block.DeliverySubmissionID != "" && block.DeliverySubmissionID != candidate.ID) ||

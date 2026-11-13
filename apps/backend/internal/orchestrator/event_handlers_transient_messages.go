@@ -229,15 +229,13 @@ func transientRetryNotices(messages []*models.Message, taskID, sessionID string)
 	return notices
 }
 
-func classifyKanbanFailure(data watcher.AgentEventData) *routingerr.Error {
-	providerID, message, resetHint, occurredAt := kanbanFailureDetails(data)
-	classified := routingerr.Classify(routingerr.Input{
-		Phase:      kanbanFailurePhase(data),
-		ProviderID: providerID,
-		ResetHint:  resetHint,
-		OccurredAt: occurredAt,
-		Stderr:     message,
-	})
+func classifyKanbanFailure(data watcher.AgentEventData, keywordContext ...routingerr.KeywordContext) *routingerr.Error {
+	providerID, message, _, _ := kanbanFailureDetails(data)
+	input := data.ProviderError.RoutingInput(kanbanFailurePhase(data), providerID, message)
+	if len(keywordContext) != 0 {
+		input.KeywordContext = keywordContext[0]
+	}
+	classified := routingerr.Classify(input)
 	if isExactUnknownDynamicProviderFailure(data, classified) {
 		// An exact terminal provider diagnostic can identify the unknown result
 		// shape without changing the global post-start classifier contract.
@@ -303,7 +301,12 @@ func hasCompleteProviderDiagnostic(providerError *streams.ProviderError) bool {
 
 func isUnknownPostStartClassification(classified *routingerr.Error) bool {
 	return classified != nil && classified.Code == routingerr.CodeAgentRuntime &&
-		classified.Class == routingerr.ClassUnclassified && classified.ClassifierRule == "phase.poststart.unknown"
+		classified.Class == routingerr.ClassUnclassified &&
+		(classified.ClassifierRule == "phase.poststart.unknown" ||
+			classified.ClassifierRule == "keyword_context.ambiguous.v1" ||
+			classified.ClassifierRule == "keyword_context.request.v1" ||
+			classified.ClassifierRule == "keyword_context.http.400.context.v1" ||
+			classified.ClassifierRule == "keyword_context.http.400.request.v1")
 }
 
 func cloneRoutingErrorWithCode(classified *routingerr.Error, code routingerr.Code) *routingerr.Error {

@@ -7,7 +7,7 @@ requirements:
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004
 created: 2026-08-24
-updated: 2026-10-26
+updated: 2026-11-08
 owners:
   - cfl12
 ---
@@ -470,9 +470,12 @@ Callers:
   `workspace_preparing` while the new owner prepares it.
 - `LaunchPreparedSession` re-elects an eligible `failed` environment of the same
   task for the session that it launches. It uses a standalone transaction that
-  takes the task cleanup barrier and the recovery-claim admission. An
-  environment owned by another task, which is the `inherit_parent` case, stays
-  fail-closed.
+  takes the task cleanup barrier and recovery-claim admission. A failed foreign
+  environment (`inherit_parent` or `shared_group`) is never re-elected by the
+  child. A launch meeting
+  `AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.5` claims its own environment
+  before allocation (see [additional-session workspace reuse](additional-session-workspace-reuse.md)).
+  Other starts stay fail-closed.
 
 Every caller runs after `taskCleanupBarrierLocked` and
 `recoveryclaim.EnsureAvailableTx`, so a deleting task or a held recovery claim
@@ -506,38 +509,33 @@ failure path, and its partial runtime is stopped by the existing cleanup.
 
 ### Boundary with explicit retry
 
-The failed state remains visible and the `session.ensure` latch is unchanged.
-Only a binding, start, or launch request re-elects: Retry, a new session,
-`spawn_session_kandev`, or a workflow or automation start. A consumer-free
-task-local failed environment may instead be retained and replaced below.
-Unsafe or inherited owners retain reset guidance.
+Failures stay visible and the `session.ensure` latch is unchanged. Only Retry,
+a new session, `spawn_session_kandev`, or a workflow or automation start can
+re-elect. A task-local failed environment without consumers can be replaced.
 
 ### Retain and replace an unusable environment
 
-A failed physical environment is never re-elected. For task-local binding or
-terminal worktree resume, one transaction may retire it, reserve a creating
-replacement, and persist the session binding before materialization. Task and
-materialization locks, owner generation, session state/binding, cleanup, and
-recovery-claim admission fence that transaction. A materializer, live bound
-session/runtime, recovery claim, or inherited owner retains the
-`ErrTaskEnvironmentResetRequired` refusal and reset guidance.
+A failed physical environment cannot be re-elected. Task-local binding or
+terminal worktree resume can retire it, reserve a creating replacement, and
+bind the session atomically before materialization. The transaction checks task
+and materialization locks, owner generation, session state and binding, cleanup,
+and recovery claims. Materializers, live sessions or runtimes, recovery claims,
+and inherited owners still require environment reset.
 
-Nullable `retired_at` preserves old IDs, inventory, files, and historical
-bindings. Canonical lookup, uniqueness, and startup healing select active rows;
-by-ID reads retain history. Root election checks all active/retained names under
-the task lock. The request uses the saved root and environment ID so inventory
-and ready publication share an owner. An already-retired retry joins or reserves
-a replacement; failed successors use the consumer guard. Retired-only starts
-reserve fresh roots. Cached or explicit-ID worktrees must match a specified
-environment; checkouts remain. Existing materialization failure release applies
-to its reserved row. No file reset, inherited-owner mutation, or historical
-outcome settlement occurs.
+`retired_at` preserves IDs, inventory, files, and historical bindings. Canonical
+lookup, uniqueness, and startup healing use active rows; by-ID reads keep history.
+Under the task lock, replacement excludes all recorded roots and uses the saved
+root and environment ID for inventory and ready publication. An already-retired
+retry joins or creates a reservation; failed successors use the consumer guard.
+Retired-only starts use fresh roots. Cached or explicit-ID checkouts must match
+the selected environment and remain on disk.
+Materialization failure releases only its reservation. No reset, inherited-owner mutation,
+or historical outcome settlement occurs.
 
 ### Interaction with workspace election waits
 
-A binding that loses election may wait for the winner. If that environment
-becomes `failed` at a release point, the wait ends with the existing refusal;
-the next start re-elects. The same request does not retry a second time.
+A binding that loses election can wait for the winner. If the winner becomes
+failed, the wait ends with the existing refusal. The next start re-elects.
 
 ### Verification
 

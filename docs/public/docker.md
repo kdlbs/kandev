@@ -265,6 +265,21 @@ TLS alone is not authentication. Put an identity-aware/authenticated gateway in 
 
 Host-installed Kandev can use **Settings > Executors > Docker** against a same-host daemon. The daemon must be reachable through global `docker.host`; the current runtime assumes bind-mount source paths exist on that daemon host. See [Local Docker executor](executors.md#local-docker) for image, credential, port, resume, and cleanup behavior.
 
+The published service image disables the Docker executor with `KANDEV_DOCKER_ENABLED=false`. Creating
+a Local Docker profile does not enable the runtime. While the runtime is disabled, a task that selects
+Local Docker is refused before any agent process, credential lease, or workspace change. Kandev does
+not fall back to running the agent inside the backend container or on the host.
+
+A successful Local Docker launch creates a separate worker container. The backend service container
+is not the runner. Session responses report the observed `execution_runtime` and the worker's full
+container ID, and the container appears in the daemon's own inventory with Kandev task and session
+labels. Treat the backend container ID and the worker container ID as different resources.
+
+Retry a refused launch after fixing the selected runtime. Correcting the global runtime or choosing a
+different saved executor is an operator action; Kandev never changes the selection, deployment
+configuration, or permissions automatically.
+
+
 ### Containerized control plane limitation
 
 Mounting `/var/run/docker.sock` into the Kandev service container is **not by itself a complete configuration**. Agent creation asks the daemon to bind-mount:

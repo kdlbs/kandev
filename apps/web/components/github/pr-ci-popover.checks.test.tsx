@@ -40,7 +40,9 @@ vi.mock("@/hooks/domains/github/use-task-ci-options", () => ({
 
 import { PRCIPopover } from "./pr-ci-popover";
 
-function makePR(): TaskPR {
+const EMPTY_CHECKS_TEST_ID = "pr-checks-empty";
+
+function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "id",
     workspace_id: "workspace-1",
@@ -70,15 +72,16 @@ function makePR(): TaskPR {
     closed_at: null,
     last_synced_at: null,
     updated_at: "",
+    ...overrides,
   };
 }
 
-function renderPopover() {
+function renderPopover(overrides: Partial<TaskPR> = {}) {
   return render(
     <TooltipProvider>
       <StateProvider>
         <ToastProvider>
-          <PRCIPopover pr={makePR()} enabled={true} />
+          <PRCIPopover pr={makePR(overrides)} enabled={true} />
         </ToastProvider>
       </StateProvider>
     </TooltipProvider>,
@@ -118,7 +121,7 @@ describe("PR check disclosure cancellation", () => {
   it("shows non-success empty copy without a failure action or fake pass state", () => {
     renderPopover();
 
-    expect(screen.getByTestId("pr-checks-empty").textContent).toBe("Checks not successful");
+    expect(screen.getByTestId(EMPTY_CHECKS_TEST_ID).textContent).toBe("Checks not successful");
     expect(screen.queryByText("No checks have started")).toBeNull();
     expect(screen.queryByTestId("pr-check-group")).toBeNull();
     expect(screen.queryByTestId("pr-workflow-add-context")).toBeNull();
@@ -145,7 +148,7 @@ describe("PR check disclosure cancellation", () => {
   it("retains cached check results while refreshing", () => {
     feedbackState.loading = true;
     renderPopover();
-    expect(screen.getByTestId("pr-checks-empty").textContent).toBe("Checks not successful");
+    expect(screen.getByTestId(EMPTY_CHECKS_TEST_ID).textContent).toBe("Checks not successful");
     expect(screen.queryByTestId("pr-checks-loading")).toBeNull();
     expect(screen.getByRole("status").textContent).toContain("Updating");
   });
@@ -158,7 +161,100 @@ describe("PR check disclosure cancellation", () => {
     };
     renderPopover();
 
-    expect(screen.getByTestId("pr-checks-empty").textContent).toBe("No checks have started");
+    expect(screen.getByTestId(EMPTY_CHECKS_TEST_ID).textContent).toBe("No checks have started");
     expect(screen.queryByTestId("pr-check-group")).toBeNull();
+  });
+});
+
+describe("PR check disclosure skipped checks", () => {
+  beforeEach(() => {
+    feedbackState.loading = false;
+    feedbackState.authenticated = true;
+  });
+
+  afterEach(() => {
+    cleanup();
+    feedbackState.value = null;
+  });
+
+  function skippedCheck(name: string) {
+    return {
+      name,
+      source: "check_run" as const,
+      status: "completed",
+      conclusion: "skipped",
+      html_url: "",
+      output: "",
+      started_at: null,
+      completed_at: null,
+    };
+  }
+
+  it("explains an all-skipped loaded snapshot without claiming tests ran", () => {
+    feedbackState.value = {
+      pr: {} as PRFeedback["pr"],
+      reviews: [],
+      comments: [],
+      checks: [skippedCheck("docs"), skippedCheck("lint")],
+      checks_state: "",
+      has_issues: false,
+    };
+    renderPopover({ checks_state: "", checks_total: 0, checks_passing: 0 });
+
+    expect(screen.getByTestId(EMPTY_CHECKS_TEST_ID).textContent).toBe("All checks skipped");
+    expect(screen.queryByText("No checks have started")).toBeNull();
+  });
+
+  it("uses persisted all-skipped metadata when detailed results are unavailable", () => {
+    feedbackState.value = null;
+    renderPopover({
+      checks_state: "",
+      checks_total: 0,
+      checks_passing: 0,
+      head_sha: "head-a",
+      check_summary: { head_sha: "head-a", observed: 2, skipped: 2 },
+    });
+
+    expect(screen.getByTestId(EMPTY_CHECKS_TEST_ID).textContent).toBe("All checks skipped");
+  });
+
+  it("keeps cancelled-only results distinct from skipped results", () => {
+    feedbackState.value = {
+      pr: {} as PRFeedback["pr"],
+      reviews: [],
+      comments: [],
+      checks: [
+        {
+          ...skippedCheck("deploy"),
+          conclusion: "cancelled",
+        },
+      ],
+      checks_state: "",
+      has_issues: false,
+    };
+    renderPopover({ checks_state: "", checks_total: 0, checks_passing: 0 });
+
+    expect(screen.getByTestId(EMPTY_CHECKS_TEST_ID).textContent).toBe("Checks not successful");
+  });
+
+  it("keeps skipped counts separate from passed counts", () => {
+    feedbackState.value = {
+      pr: {} as PRFeedback["pr"],
+      reviews: [],
+      comments: [],
+      checks: [
+        {
+          ...skippedCheck("unit"),
+          conclusion: "success",
+        },
+        skippedCheck("docs"),
+      ],
+      checks_state: "success",
+      has_issues: false,
+    };
+    renderPopover({ checks_state: "success", checks_total: 1, checks_passing: 1 });
+
+    expect(screen.getByTestId("pr-checks-skipped-count").textContent).toBe("1 check skipped");
+    expect(screen.getByTestId("pr-check-group-count").textContent).toBe("1");
   });
 });

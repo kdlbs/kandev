@@ -48,13 +48,19 @@ func deliveryTerminalSettlementEffect(event *models.AgentDeliveryEvent) (*models
 	}, nil
 }
 
+const (
+	deliveryCompleteEventType = "complete"
+	deliveryErrorEventType    = "error"
+	deliveryCanceledEventType = "canceled"
+)
+
 func deliveryTerminalOutcome(eventType string) models.DeliverySubmissionState {
 	switch eventType {
 	case streams.EventTypeComplete:
 		return models.DeliverySubmissionCompleted
 	case streams.EventTypeError:
 		return models.DeliverySubmissionFailed
-	case string(models.DeliverySubmissionCancelled), "canceled":
+	case string(models.DeliverySubmissionCancelled), deliveryCanceledEventType:
 		return models.DeliverySubmissionCancelled
 	default:
 		return ""
@@ -447,7 +453,14 @@ func (r *Repository) completeAgentDeliveryTerminalSettlementTx(
 	completedAt time.Time,
 ) (bool, error) {
 	if effect.State == models.DeliveryEffectCompleted {
-		return r.agentDeliveryTerminalFullySettledTx(ctx, tx, effect)
+		settled, err := r.agentDeliveryTerminalFullySettledTx(ctx, tx, effect)
+		if err != nil || !settled {
+			return settled, err
+		}
+		if err := r.retirePreparedTerminalAttemptsTx(ctx, tx, effect, completedAt); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
 	if effect.State != models.DeliveryEffectBlockResolved {
 		return false, nil
@@ -481,7 +494,13 @@ func (r *Repository) completeAgentDeliveryTerminalSettlementTx(
 		return false, err
 	}
 	rows, err = result.RowsAffected()
-	return rows == 1, err
+	if err != nil || rows != 1 {
+		return false, err
+	}
+	if err := r.retirePreparedTerminalAttemptsTx(ctx, tx, effect, completedAt); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (r *Repository) hasExactAgentDeliveryWorkflowOutcomeTx(

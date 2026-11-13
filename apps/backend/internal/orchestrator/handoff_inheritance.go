@@ -42,6 +42,16 @@ func (s *Service) markWorkspaceGroupMaterialized(ctx context.Context, taskID str
 // can publish a binding to another task's canonical environment.
 func (s *Service) admitInheritedEnvironment(ctx context.Context, task *v1.Task, executorID, executorProfileID string) error {
 	mode, _ := workspacePolicyMode(task.Metadata)
+	if mode != models.WorkspaceModeInheritParent && mode != models.WorkspaceModeSharedGroup {
+		return nil
+	}
+	canonical, err := s.repo.GetTaskEnvironmentByTaskID(ctx, task.ID)
+	if err != nil {
+		return fmt.Errorf("load child task environment: %w", err)
+	}
+	if canonical != nil {
+		return s.executor.AdmitInheritedEnvironment(ctx, task, canonical, executorID, executorProfileID)
+	}
 	var envID string
 	switch mode {
 	case models.WorkspaceModeInheritParent:
@@ -130,6 +140,9 @@ func (s *Service) propagateInheritedEnvironment(ctx context.Context, task *v1.Ta
 func (s *Service) inheritFromParentEnvironment(ctx context.Context, task *v1.Task, sessionID string) error {
 	if task.ParentID == "" {
 		return fmt.Errorf("%w: inherit_parent task has no parent", models.ErrWorkspaceReuseUnsafe)
+	}
+	if handled, err := s.bindCanonicalChildEnvironment(ctx, task, sessionID); err != nil || handled {
+		return err
 	}
 	envID, source, resolveErr := s.resolveInheritedEnvironmentChecked(ctx, task)
 	if resolveErr != nil {
@@ -275,6 +288,9 @@ func (s *Service) validateInheritedEnvironmentReference(ctx context.Context, tas
 // session — so any member of a shared_group ends up bound to the same
 // TaskEnvironment as every other member.
 func (s *Service) inheritFromSharedGroup(ctx context.Context, task *v1.Task, sessionID string) error {
+	if handled, err := s.bindCanonicalChildEnvironment(ctx, task, sessionID); err != nil || handled {
+		return err
+	}
 	if s.workspaceMaterializer == nil {
 		return fmt.Errorf("%w: shared workspace group is unavailable", models.ErrWorkspaceReuseUnsafe)
 	}
@@ -309,6 +325,33 @@ func (s *Service) inheritFromSharedGroup(ctx context.Context, task *v1.Task, ses
 		zap.String("session_id", sessionID),
 		zap.String("task_environment_id", envID))
 	return nil
+}
+
+func (s *Service) bindCanonicalChildEnvironment(ctx context.Context, task *v1.Task, sessionID string) (bool, error) {
+	env, err := s.repo.GetTaskEnvironmentByTaskID(ctx, task.ID)
+	if err != nil {
+		return false, fmt.Errorf("load canonical child environment: %w", err)
+	}
+	if env == nil {
+		return false, nil
+	}
+	target, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || target == nil {
+		return false, fmt.Errorf("load target session for canonical child environment: %w", err)
+	}
+	if err := s.admitSessionInheritedEnvironment(ctx, task, target, env.ID); err != nil {
+		return false, err
+	}
+	if target.TaskEnvironmentID == env.ID && target.WorkspacePath == env.WorkspacePath {
+		return true, nil
+	}
+	target.TaskEnvironmentID = env.ID
+	target.WorkspacePath = env.WorkspacePath
+	target.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpdateTaskSession(ctx, target); err != nil {
+		return false, fmt.Errorf("bind session to canonical child environment: %w", err)
+	}
+	return true, nil
 }
 
 // Propagation uses the prepared session's resolved executor before binding a

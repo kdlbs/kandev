@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"os"
 	"sort"
 	"strings"
@@ -917,6 +918,8 @@ func (s *Service) verifyRetryTaskOperation(ctx context.Context, evt *automation.
 	return fence.VerifyRetryTaskOperation(ctx, evt.RunID, evt.RetryGroupGeneration, operation.LeaseToken)
 }
 
+// prepareAutomationTask preserves a continued task's MCP settings and applies templates only to
+// newly created tasks.
 func (s *Service) prepareAutomationTask(
 	ctx context.Context,
 	a *automation.Automation,
@@ -973,7 +976,18 @@ func (s *Service) prepareAutomationTask(
 	if err := s.verifyRetryTaskOperation(ctx, evt, operations...); err != nil {
 		return nil, nil, action, reasons, err
 	}
-	task, err := s.reviewTaskCreator.CreateReviewTask(ctx, &ReviewTaskRequest{
+	builtinPreferences, definitionIDs, decisions, err := s.automationMCPTemplate(ctx, a)
+	if err != nil {
+		return nil, nil, action, reasons, err
+	}
+	if len(decisions) > 0 {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata[mcpconfig.TemplateUnavailableMetadataKey] = decisions
+	}
+	task, err = s.reviewTaskCreator.CreateReviewTask(ctx, &ReviewTaskRequest{
+		BuiltinMCPPreferences: builtinPreferences, MCPServerIDs: definitionIDs,
 		WorkspaceID:    a.WorkspaceID,
 		WorkflowID:     a.WorkflowID,
 		WorkflowStepID: a.WorkflowStepID,

@@ -74,7 +74,7 @@ func TestDetachedClarificationPersistsDeliveryBeforeDispatch(t *testing.T) {
 				},
 			}
 			service := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-			service.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+			service.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 			service.turnService = &repoBackedTurnService{repo: repo}
 			request := clarification.DetachedClarificationResume{
 				TaskID: "task-answer", SessionID: "session-answer", PendingID: "pending-answer",
@@ -122,7 +122,7 @@ func TestDetachedClarificationBlocksUnresolvedDelivery(t *testing.T) {
 		},
 	}
 	service := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-	service.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	service.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	service.turnService = &repoBackedTurnService{repo: repo}
 	err := service.ResumeDetachedClarification(ctx, clarification.DetachedClarificationResume{
 		TaskID: "task-unresolved-answer", SessionID: "session-unresolved-answer", PendingID: "pending-answer",
@@ -158,7 +158,7 @@ func TestClarificationWatchdogPersistsDeliveryBeforeDispatch(t *testing.T) {
 		},
 	}
 	service := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-	service.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	service.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	service.turnService = &repoTurnService{repo: repo}
 	turn, err := service.turnService.StartTurn(ctx, "session-watchdog")
 	require.NoError(t, err)

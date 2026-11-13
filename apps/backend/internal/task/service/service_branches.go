@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -68,6 +69,11 @@ type AddBranchToTaskResult struct {
 func (s *Service) AddBranchToTask(ctx context.Context, req AddBranchToTaskRequest) (*AddBranchToTaskResult, error) {
 	unlock := s.lockWorkspaceSources(req.TaskID)
 	defer unlock()
+	// prepareBranchAdd fills req.BaseBranch from LocalPath/GitHubURL resolution.
+	// Capture whether the caller supplied one before that mutation so the
+	// persisted selection intent does not depend on how the repository was
+	// identified.
+	suppliedBaseBranch := strings.TrimSpace(req.BaseBranch)
 	task, existing, cleanupOrphanRepo, preflightTarget, err := s.prepareBranchAdd(ctx, &req)
 	if err != nil {
 		return nil, err
@@ -79,8 +85,12 @@ func (s *Service) AddBranchToTask(ctx context.Context, req AddBranchToTaskReques
 	}
 
 	baseBranch := req.BaseBranch
-	if baseBranch == "" {
-		baseBranch = repo.DefaultBranch
+	selectionSource := models.BaseBranchSelectionSourceExplicit
+	if suppliedBaseBranch == "" {
+		if baseBranch == "" {
+			baseBranch = repo.DefaultBranch
+		}
+		selectionSource = models.BaseBranchSelectionSourceRepositoryDefault
 	}
 	// Gate before any task_repositories write: with no resolvable base branch
 	// the materialize step can only fail, leaving an orphan row + (worse) an
@@ -102,11 +112,20 @@ func (s *Service) AddBranchToTask(ctx context.Context, req AddBranchToTaskReques
 		return nil, dupErr
 	}
 
+	metadata := map[string]interface{}{}
+	if err := models.PutBaseBranchSelection(metadata, &models.BaseBranchSelection{
+		Version: models.BaseBranchSelectionVersion,
+		Branch:  baseBranch,
+		Source:  selectionSource,
+	}); err != nil {
+		cleanupOrphanRepo()
+		return nil, err
+	}
 	taskRepo := &models.TaskRepository{
 		RepositoryID:   req.RepositoryID,
 		BaseBranch:     baseBranch,
 		CheckoutBranch: checkoutBranch,
-		Metadata:       map[string]interface{}{},
+		Metadata:       metadata,
 	}
 	batch := &models.WorkspaceSourceBatch{TaskID: task.ID, Sources: []models.WorkspaceSource{{Repository: taskRepo}}}
 	if err := s.rejectRuntimeNameCollisions(ctx, append(existing, taskRepo), batch); err != nil {

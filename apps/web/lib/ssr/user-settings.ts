@@ -46,6 +46,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     shellOptions: [],
     defaultEditorId: null,
     enablePreviewOnClick: false,
+    escapeCancelsAgent: false,
     chatSubmitKey: "cmd_enter",
     reviewAutoMarkOnScroll: true,
     confirmTaskArchive: true,
@@ -290,6 +291,7 @@ function buildIdentityFields(s: UserSettingsData, current: UserSettingsState) {
 function buildBehaviorFields(s: UserSettingsData, current: UserSettingsState) {
   return {
     enablePreviewOnClick: s.enable_preview_on_click ?? current.enablePreviewOnClick,
+    escapeCancelsAgent: s.escape_cancels_agent ?? current.escapeCancelsAgent,
     chatSubmitKey: s.chat_submit_key ?? current.chatSubmitKey,
     reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? current.reviewAutoMarkOnScroll,
     confirmTaskArchive: s.confirm_task_archive ?? current.confirmTaskArchive,

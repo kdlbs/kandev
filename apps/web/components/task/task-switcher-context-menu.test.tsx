@@ -210,6 +210,7 @@ describe("TaskItemWithContextMenu — grouped single-task actions", () => {
       "Edit",
       "Rename",
       "Duplicate",
+      "Show in graph",
       "Create Subtask",
       "Nest under",
       "Link",

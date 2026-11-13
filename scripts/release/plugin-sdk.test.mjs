@@ -133,6 +133,88 @@ test("check mode validates draft intent without guessing a host release", () => 
   });
 });
 
+test("preparation ignores release tags beyond the checked-out ref", async () => {
+  const { mkdtemp, mkdir, readFile, writeFile, rm } =
+    await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { dirname, join } = await import("node:path");
+  const { execFileSync } = await import("node:child_process");
+  const { prepareMetadata } = await import("./plugin-sdk.mjs");
+  const root = await mkdtemp(join(tmpdir(), "sdk-release-ref-tags-"));
+  const git = (...args) =>
+    execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  const writeRecord = async (record) => {
+    const contents = JSON.stringify(record, null, 2) + "\n";
+    for (const path of [
+      "pluginsdk/sdk-release.json",
+      "apps/packages/plugin-sdk/sdk-release.json",
+    ]) {
+      await mkdir(dirname(join(root, path)), { recursive: true });
+      await writeFile(join(root, path), contents);
+    }
+    await writeFile(
+      join(root, "apps/packages/plugin-sdk/package.json"),
+      JSON.stringify({
+        name: "@kdlbs/plugin-sdk",
+        version: record.sdk_version,
+      }),
+    );
+  };
+  const commit = (message) => {
+    git("add", ".");
+    git("commit", "--quiet", "-m", message);
+    return git("rev-parse", "HEAD");
+  };
+
+  try {
+    git("init", "--quiet");
+    git("config", "user.name", "SDK release test");
+    git("config", "user.email", "sdk-release-test@example.invalid");
+    await writeRecord(published());
+    await mkdir(join(root, "pluginsdk"), { recursive: true });
+    await writeFile(join(root, "pluginsdk/types.go"), "package pluginsdk\n");
+    commit("publish SDK 0.1.0");
+    git("tag", "pluginsdk/v0.1.0");
+
+    const current = {
+      ...draft(),
+      sdk_version: "0.2.0",
+      change_kind: "additive",
+    };
+    await writeRecord(current);
+    await writeFile(
+      join(root, "pluginsdk/types.go"),
+      "package pluginsdk\ntype Message struct{}\n",
+    );
+    const checkedOutRef = commit("prepare SDK 0.2.0");
+
+    await writeRecord({
+      ...current,
+      host_release: "0.100.0",
+      min_kandev_version: "0.100.0",
+    });
+    commit("stamp SDK 0.2.0 release");
+    git("tag", "pluginsdk/v0.2.0");
+
+    const result = await prepareMetadata({ root, ref: checkedOutRef });
+
+    assert.equal(result.previousTag, "pluginsdk/v0.1.0");
+    assert.equal(result.record.sdk_version, "0.2.0");
+    assert.equal(result.record.host_release, null);
+    assert.equal(result.reused, false);
+    assert.equal(
+      await readFile(join(root, "pluginsdk/sdk-release.json"), "utf8"),
+      JSON.stringify(
+        { ...current, host_release: "0.100.0", min_kandev_version: "0.100.0" },
+        null,
+        2,
+      ) + "\n",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("release stamping changes only canonical and generated metadata in a disposable checkout", async () => {
   const { mkdtemp, mkdir, readFile, writeFile, rm } =
     await import("node:fs/promises");
@@ -143,6 +225,16 @@ test("release stamping changes only canonical and generated metadata in a dispos
   const root = await mkdtemp(join(tmpdir(), "sdk-release-record-"));
   try {
     execFileSync("git", ["init", "--quiet"], { cwd: root });
+    execFileSync("git", ["config", "user.name", "SDK release test"], {
+      cwd: root,
+    });
+    execFileSync(
+      "git",
+      ["config", "user.email", "sdk-release-test@example.invalid"],
+      {
+        cwd: root,
+      },
+    );
     await mkdir(join(root, "pluginsdk"));
     await mkdir(join(root, "apps/packages/plugin-sdk"), { recursive: true });
     const original = JSON.stringify(draft(), null, 2) + "\n";
@@ -155,6 +247,10 @@ test("release stamping changes only canonical and generated metadata in a dispos
       join(root, "apps/packages/plugin-sdk/package.json"),
       JSON.stringify({ name: "@kdlbs/plugin-sdk", version: "0.1.0" }),
     );
+    execFileSync("git", ["add", "."], { cwd: root });
+    execFileSync("git", ["commit", "--quiet", "-m", "create SDK fixture"], {
+      cwd: root,
+    });
     await prepareMetadata({ root, hostVersion: "0.100.0", stamp: false });
     assert.equal(
       await readFile(join(root, "pluginsdk/sdk-release.json"), "utf8"),

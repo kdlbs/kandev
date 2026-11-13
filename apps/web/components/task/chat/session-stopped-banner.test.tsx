@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/components/state-provider", () => ({
+  useOptionalAppStoreApi: () => mocks,
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
       agentProfiles: { items: mocks.agentProfiles },

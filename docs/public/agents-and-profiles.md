@@ -11,6 +11,26 @@ The composer model picker shows the session's agent CLI logo beside the selected
 
 Agent authentication is separate from repository and integration credentials.
 
+## Recover from provider authentication failures
+
+An agent may need to sign in to its model provider before it can create or
+restore a conversation. Complete that sign-in on the host and as the operating
+system user that runs the selected executor. A local agent uses the Kandev
+backend user's environment. A remote agent uses the remote executor's
+environment.
+
+When Kandev confirms a provider authentication failure, the session recovery
+card names the configured provider and shows any login method the agent
+advertises. Some methods are protocol actions, not terminal commands. Follow
+the displayed guidance, then choose the available restart or resume action.
+Kandev keeps the recovery card until the agent confirms that it is ready.
+
+Provider account sign-in does not grant repository access or authenticate an
+MCP server. For those failures, check the repository's Git credentials and
+environment or the MCP server's own authentication settings. See [Scope agent
+profiles and MCP definitions](security.md#scope-agent-profiles-and-mcp-definitions)
+for the separate credential boundaries.
+
 ## Quick path
 
 1. Rescan or install the agent on the host running Kandev.
@@ -377,7 +397,10 @@ Managed runtime startup can retry once when npm reports a strict `ETARGET` for
 the selected exact package or a recognized temporary network or cache error.
 The `ETARGET` retry prefers an online lookup. Kandev can also retry an ordinary
 process exit before ACP initialization when complete, generation-matched
-startup evidence confirms that stderr was empty. Incomplete evidence, other
+startup evidence confirms that stderr was empty. It can also recover an npm
+`ENOENT` when independent inspection verifies an installed exact package whose
+execution-tree root `package.json` is missing. Generic missing-file errors do
+not qualify. Incomplete evidence, other
 permanent or unrecognized npm errors, cancellation, signal termination, and
 failures after ACP initialization do not trigger this automatic retry. Kandev first confirms
 that the failed process has stopped, then waits two to three seconds before the
@@ -393,10 +416,45 @@ and shows one **Retry runtime** action with collapsed technical details.
 This startup recovery applies to managed npm runtimes on a local PC, in a local
 Docker executor, or in a remote SSH executor. It does not establish that an npm
 race caused any particular startup failure. Host capability discovery has a
-separate, narrower recovery: an exact-package `ETARGET` result can retry once
-with an online-preferred lookup. That probe retry also preserves npm execution
+separate recovery: an exact-package `ETARGET` result can retry once with an
+online-preferred lookup. Verified missing execution manifests also recover
+automatically during startup discovery, profile discovery, and model-option
+resolution, including managed Codex app-server profiles. These retries preserve npm execution
 trees and keeps the saved model, fallback model, mode, runtime version, and
 enabled state unchanged.
+
+For a verified missing execution manifest, Kandev prepares the same exact
+package in a private npm cache on the execution host. It validates the package
+and executable before replacement and keeps those files while the process uses
+them. The incomplete shared cache and healthy sessions remain available.
+Preparation and replacement share one retry and a maximum 90-second budget.
+
+After the replacement reaches protocol initialization, Kandev publishes it in
+an execution-host repair store. Later compatible cold launches use that
+validated installation on their first attempt, including saved-session resume
+and startup, profile, and profile-model discovery. Reuse does not run a package
+installation, change the saved profile, or restart a running agent. Normal npm
+freshness behavior still applies, so a later launch can make ordinary metadata
+requests. The store keeps each published installation on disk until you remove
+it explicitly, so disk use follows distinct repairs rather than session count.
+
+Reuse requires the same runtime owner, execution-host user, platform, exact
+package, npm toolchain and configuration, and authorized installer environment.
+A different version, user, registry configuration, or installation environment,
+a damaged publication record, or a replacement that never initialized does not
+authorize reuse. Kandev then falls back to the existing private preparation
+within the same attempt and deadline limits. Published installations last only
+while the execution host's Kandev storage persists: a new container, a rebuilt
+remote host, or lost executor storage is a normal cold start. Shared npm trees
+are never removed or rebuilt by automatic recovery.
+
+After an upgrade or restart, open the affected task normally. Eligible automatic
+resume keeps the saved conversation and transcript. You do not need to clean
+npm caches, change settings, update the runtime, or create another session.
+Archived sessions and sessions that require an explicit start keep those rules.
+Older executor helpers without private-preparation support report the failure
+without deleting cache files. Authentication, permissions, registry policy,
+disk-space failures, and custom launch wrappers do not qualify for this recovery.
 
 Managed `npx` runtimes use a Kandev-owned npm project directory, so an `.npmrc`
 in the task repository does not change the managed runtime's package lookup.
@@ -410,6 +468,26 @@ Do not use `npm cache clean --force` as the normal recovery step. It removes
 unrelated npm data and does not target the stale execution tree. If the
 specialized retry cannot resolve the runtime, check that the Kandev service
 uses the expected npm installation and configured registry. Run `npm config get registry` as the Kandev service user to inspect the registry used by that process. Then use the runtime update controls to select and prepare another trusted stable version.
+
+#### Remove published managed runtime repairs
+
+Published repairs live under
+`<KANDEV_HOME_DIR>/managed-runtime-repairs/v1/` on each execution host. Without
+a home-directory override, the path is `~/.kandev/managed-runtime-repairs/v1/`
+under the operating-system user that runs Kandev or agentctl. A Docker
+container, SSH host, or other remote executor has its own store.
+
+Kandev does not remove this store automatically. Before you remove it, stop
+every process that can use it: agent provider processes, npm installers,
+host-utility probes, retained or remote agentctl instances, and any service
+that would relaunch an agent automatically. Stopping the backend alone is not
+enough while a surviving or remote agent is still running.
+
+Remove only the exact repair store after those consumers are stopped. Preserve
+`.npm`, provider credentials and state, task workspaces, and the rest of the
+Kandev home directory. The next eligible launch uses ordinary preparation and
+recovery. If you are not sure whether a consumer still owns the store, keep the
+store instead of deleting it.
 
 ### Refresh profile models after a runtime update
 
@@ -540,12 +618,12 @@ This order applies only to Settings. Task creation, in-task agents, handoff, and
 | Mode                                   | Requested through the installed agent's advertised ACP session control before the first prompt. Kandev prefers its mode config option and supports legacy `session/set_mode`. An explicit mode must be confirmed by the agent or startup holds the prompt. Applying a mode does not write Claude settings or redirect its configuration directory. |
 | Configuration options                  | Dynamic ACP values requested with `session/set_config_option`.                                                                                                                                                                                                                                                                                     |
 | CLI flags                              | Enabled entries are tokenized and appended to the ACP launch command.                                                                                                                                                                                                                                                                              |
-| Command prefix                         | Optional launcher argv for structured sessions, ACP probes, and native terminal passthrough. No provider plugin is required.                                                                                                                                                                                                                                                               |
+| Command prefix                         | Optional launcher argv for structured sessions, ACP probes, and native terminal passthrough. No provider plugin is required.                                                                                                                                                                                                                       |
 | Environment                            | Literal values or references to Kandev secrets, resolved when the process starts.                                                                                                                                                                                                                                                                  |
 | Provider                               | Native uses the agent default. OpenAI-compatible sends ACP requests to the configured HTTP(S) router and can use a Kandev global API-key secret.                                                                                                                                                                                                   |
 | CLI passthrough                        | Uses the CLI's native terminal interface instead of a structured ACP conversation.                                                                                                                                                                                                                                                                 |
 | Enabled                                | Keeps the profile available to existing sessions and settings while hiding it from new task, session, handoff, and Quick Chat selectors.                                                                                                                                                                                                           |
-| Auto-approve all permissions           | Answers automatically with an offered `allow_once` or `allow_always` option. Requests without an allow option stay pending for a person to answer. Every automatic decision keeps its option and source in permission history. It is off by default.                                                                                                                                          |
+| Auto-approve all permissions           | Answers automatically with an offered `allow_once` or `allow_always` option. Requests without an allow option stay pending for a person to answer. Every automatic decision keeps its option and source in permission history. It is off by default.                                                                                               |
 | MCP servers                            | Adds profile-specific external MCP servers when the agent supports MCP.                                                                                                                                                                                                                                                                            |
 | Share local Cursor MCP credentials     | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. It applies only to local executions that share the backend home directory.                                                                                                                                                                                                |
 | Import local Cursor plugin MCP servers | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. Imports supported local plugin and user MCP definitions into task worktrees. On supported macOS installations, enabled marketplace plugins are discovered from Cursor’s account service and matched to their exact cached revision.                                       |
@@ -741,12 +819,19 @@ in this request:
 
 ```js
 const profileId = "replace-with-execution-profile-id";
-const boot = await (await fetch("/api/v1/app-state", { credentials: "same-origin" })).json();
-const response = await fetch(`/api/v1/agent-profiles/${encodeURIComponent(profileId)}/account-block/release`, {
-  method: "POST",
-  credentials: "same-origin",
-  headers: { "X-Kandev-Interim-Settings-Interlock": boot.interimSettingsInterlockToken },
-});
+const boot = await (
+  await fetch("/api/v1/app-state", { credentials: "same-origin" })
+).json();
+const response = await fetch(
+  `/api/v1/agent-profiles/${encodeURIComponent(profileId)}/account-block/release`,
+  {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      "X-Kandev-Interim-Settings-Interlock": boot.interimSettingsInterlockToken,
+    },
+  },
+);
 console.log(response.status, await response.json());
 ```
 
@@ -761,6 +846,22 @@ hold remains. A 401 or 403 requires checking authentication, settings access,
 and the current per-boot interlock. Bearer credentials are rejected on this
 settings route. The interlock is an accidental-mutation guard, not an
 authentication credential; see [Scope agent profiles and MCP definitions](security.md#scope-agent-profiles-and-mcp-definitions).
+
+#### Provider keyword and context classification
+
+> [!EXPERIMENTAL]
+> Provider keyword and context classification is disabled in all shipped profiles.
+> Enable `features.providerKeywordContext` under **Settings > System > Feature
+> Toggles** and restart Kandev to use it with dynamic routing.
+
+This classifier recognizes unmatched provider diagnostics using structural
+signals and keyword combinations. Existing typed errors,
+known signatures, candidate policies and output/tool safety checks still take
+precedence. New assistant text remains output unless the existing diagnostic
+correlation accepts it; this toggle does not authorize replay after effects.
+Explicit reset hints control suspension expiry. Model-scoped failures do not
+suspend unrelated models. Account-wide limits require a proven current launch
+credential binding; unknown bindings retain narrower scope.
 
 ### Host probes and executor model catalogs
 
@@ -900,7 +1001,6 @@ SSH native terminal passthrough does not yet carry wrapper settings. Kandev refu
 
 Wrapping alone does not establish a sandbox policy. The wrapper owns its access rules and platform support. Rich sandbox configuration through plugins is not implemented.
 
-
 </details>
 
 ## Environment variables and secrets
@@ -940,6 +1040,8 @@ API clients can explicitly force deletion. This leaves broken references and blo
 Repositories can bind an environment key to a Global secret or to a Workspace secret from the same workspace under **Settings > Workspaces > _workspace_ > Repositories**. A task inherits bindings from every attached repository. Repository bindings are secret references, never values, and a repository binding to a deleted or unreadable secret blocks that task's launch. If two sources provide the same key, Kandev deduplicates an identical secret reference and rejects every other collision; repository order never chooses a winner.
 
 Literal values remain in profile configuration. A secret reference avoids copying a token there, but the selected agent and its child processes still receive the plaintext at runtime. Use narrowly scoped credentials, and keep read-only review profiles separate from profiles allowed to publish, merge, deploy, or administer external systems.
+
+For Claude on a remote executor, an `ANTHROPIC_API_KEY` entry in the agent profile is enough. You do not need to select the same secret again on the executor profile. `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` are separate routes: the API-key route does not write an OAuth credential file, and the OAuth route keeps its existing setup script. Both bindings can be saved independently in executor settings. A guarded workflow preview or apply validates every retained profile and executor binding for the current user. It rejects a missing, deleted, workspace-scoped, unreadable, or empty binding even when another valid route exists. A valid API key therefore does not hide an unusable retained OAuth secret; repair or remove that binding if you no longer use it. This admission checks configuration only; the provider still decides at execution time whether it accepts the credential.
 
 ## Permissions and unattended work
 
@@ -1275,7 +1377,6 @@ In the existing task editor, a failed MCP save also exposes **Reload choices**.
 Reload keeps your task fields and MCP draft. Submit the task again only after
 you review those choices.
 
-
 For a saved global profile, **Workspace** selects the catalog context without
 changing your active workspace. If settings have unsaved changes, switching
 workspaces offers Save and leave, Discard and leave, or continued editing.
@@ -1312,7 +1413,7 @@ Only custom TUI agents can be deleted from the agent list. Built-in definitions 
 - **Login required:** use the agent card's login terminal or sign in under Kandev's operating-system user; signing in as another user does not help the service.
 - **Model, mode, or command probe fails:** authenticate first, refresh discovery, and choose a value advertised by the installed version.
 - **Launch fails after editing flags:** inspect the command preview, remove stale arguments, and correct unmatched quotes or trailing escapes. If a queued automatic launch has an invalid built agent or continue command, Kandev drops that launch instead of retrying it. Correct the profile before starting the task again. Temporary provider or environment failures are not command-validation failures.
-- **Managed npm runtime cannot start:** Retry is limited to strict exact-package `ETARGET`, recognized temporary npm errors, and an ordinary pre-ACP exit with complete generation-matched evidence of empty stderr. Other permanent or unclassified errors and incomplete evidence do not retry. Kandev confirms cleanup and keeps the selected package and npm trees. If startup still fails, review the card's technical details and verify the service user's npm configuration and registry. Use **Settings > Agents** to prepare another trusted stable version when needed. Do not start with `npm cache clean --force`.
+- **Managed npm runtime cannot start:** Retry covers strict exact-package `ETARGET`, recognized temporary npm errors, an ordinary pre-initialization exit with complete generation-matched evidence of empty stderr, and independently verified missing npm execution manifests. Other permanent or unclassified errors and incomplete evidence do not retry. Kandev confirms cleanup and keeps the selected package and npm trees. A successful repair is reused by later compatible cold launches on the same execution-host storage; a changed user, version, platform, npm configuration, or installer environment falls back to a normal start. If startup still fails, review the card's technical details and verify the service user's npm configuration and registry. Use **Settings > Agents** to prepare another trusted stable version when needed. Do not start with `npm cache clean --force`.
 - **Environment value is absent:** confirm the secret still exists, the key is not reserved, and an executor/runtime variable is not already taking precedence.
 - **MCP selection cannot save:** the previous saved selection remains in
   effect. A forbidden response explains that the current connection cannot save

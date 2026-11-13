@@ -2429,7 +2429,7 @@ func TestHandleTaskPRCIAutomationAtRoundCapReplacesPendingAutoFixForWaitingSessi
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateWaitingForInput)
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo, promptDone: make(chan struct{})}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
 	session, err := repo.GetTaskSession(ctx, "session-1")
 	if err != nil {
@@ -2511,7 +2511,7 @@ func TestHandleTaskPRCIAutomationReplacesPendingAutoFixBeforeDirectPrompt(t *tes
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateWaitingForInput)
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo, promptDone: make(chan struct{})}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
 	session, err := repo.GetTaskSession(ctx, "session-1")
 	if err != nil {
@@ -2728,7 +2728,7 @@ func TestDispatchCIAutomationPromptForPRRecordsUserMessageBeforeDirectPrompt(t *
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.agentManager = agentMgr
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	messageCreator := &mockMessageCreator{}
 	svc.messageCreator = messageCreator
 	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
@@ -2781,7 +2781,7 @@ func TestDispatchCIAutomationPromptForPRRecordsUserMessageBeforeDirectPromptFail
 	}
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.agentManager = agentMgr
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	messageCreator := &mockMessageCreator{}
 	svc.messageCreator = messageCreator
 	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
@@ -3486,7 +3486,7 @@ func TestHandleTaskPRCIAutoFixDirectDispatchPersistsWideMetadataEndToEnd(t *test
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.agentManager = agentMgr
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	messageCreator := &mockMessageCreator{}
 	svc.messageCreator = messageCreator
 	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
