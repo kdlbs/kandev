@@ -124,6 +124,11 @@ func TestPostgresTaskTransferRelationLockBlocksWriter(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
+	if err := repo.CreateWorkspace(context.Background(), &models.Workspace{
+		ID: "pg-transfer-lock-unrelated", Name: "Unrelated", OwnerID: "owner-1",
+	}); err != nil {
+		t.Fatalf("CreateWorkspace unrelated: %v", err)
+	}
 	if _, err := db.Exec(`CREATE TABLE pending_moves (
 		id TEXT PRIMARY KEY, task_id TEXT NOT NULL, workflow_id TEXT NOT NULL, workflow_step_id TEXT NOT NULL)`); err != nil {
 		t.Fatalf("create pending_moves: %v", err)
@@ -160,6 +165,12 @@ func TestPostgresTaskTransferRelationLockBlocksWriter(t *testing.T) {
 		VALUES ('pending-race', 'task-race', 'workflow-source', 'step-source')`)
 	if !errors.Is(writeErr, context.DeadlineExceeded) {
 		t.Fatalf("writer error = %v, want deadline while relation lock held", writeErr)
+	}
+	workspaceWriteCtx, cancelWorkspaceWrite := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancelWorkspaceWrite()
+	_, writeErr = db.ExecContext(workspaceWriteCtx, `UPDATE workspaces SET name = 'Updated' WHERE id = 'pg-transfer-lock-unrelated'`)
+	if !errors.Is(writeErr, context.DeadlineExceeded) {
+		t.Fatalf("workspace writer error = %v, want deadline while relation lock held", writeErr)
 	}
 	if err := tx.Rollback(); err != nil {
 		t.Fatalf("Rollback: %v", err)
