@@ -633,6 +633,9 @@ func (r *Repository) ResolveSessionRecoveryBlock(ctx context.Context, id, action
 	if err != nil {
 		return false, err
 	}
+	if consumerReference == models.InferenceClosureConsumer {
+		return false, models.ErrInferenceClosureBlocked
+	}
 	if consumerReference == "agent_delivery" {
 		if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
 			return false, err
