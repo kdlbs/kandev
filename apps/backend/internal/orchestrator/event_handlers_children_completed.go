@@ -265,7 +265,15 @@ func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID strin
 		return false
 	}
 
-	appliedTransition := s.applyEngineTransitionWithMode(
+	var onEnterComplete func(bool)
+	if s.parentChildrenCompletionWakeRecorder != nil {
+		onEnterComplete = func(delivered bool) {
+			if delivered {
+				s.recordParentChildrenCompletionWake(context.WithoutCancel(ctx), parentID, rows, operationID)
+			}
+		}
+	}
+	appliedTransition := s.applyEngineTransitionWithModeAndOnEnterCompletion(
 		ctx,
 		parentID,
 		session,
@@ -273,12 +281,12 @@ func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID strin
 		engine.TriggerOnChildrenCompleted,
 		parent.Description,
 		transitionLifecycleWithOnEnter,
+		onEnterComplete,
 	)
 	if !appliedTransition {
 		return false
 	}
 	s.markChildCompletionApplied(ctx, parentID, operationID, "transition")
-	s.recordParentChildrenCompletionWake(ctx, parentID, rows, operationID)
 	return true
 }
 

@@ -108,12 +108,15 @@ Follow-up review widened blocker resolution to COMPLETED, FAILED, and
 CANCELLED, retaining duplicate-delivery deduplication. The step-name-only test
 now confirms that a task.moved event does not trigger completion effects. The
 orchestrator records the evaluated child-wave identity in the Office wake
-receipt after its state-path operation; the reconciler test confirms one tick
-does not dispatch that completion a second time. Wave identity is checked
-before persisting the broader child snapshot used by the reconciler, so a
-concurrent wave change is not hidden. A failed operation-ledger read now stops
-processing without writing a wake receipt; already-applied and non-transition
-deliveries also leave the state-path wake receipt untouched. The full serial
-backend verification passed, including Office, scheduler, and orchestrator
-packages. PostgreSQL verification was unavailable because
-KANDEV_TEST_POSTGRES_DSN is unset.
+receipt only after destination `on_enter` reports successful delivery. A
+failed entry leaves the parent eligible for reconciliation, covered by
+`TestProcessOnChildrenCompleted_DoesNotRecordWakeWhenOnEnterDeliveryFails`;
+the successful state-path test still confirms the reconciler does not dispatch
+the same completion again. Wave identity is checked before persisting the
+broader child snapshot used by the reconciler, so a concurrent wave change is
+not hidden. A failed operation-ledger read stops processing without writing a
+wake receipt; already-applied and non-transition deliveries also leave the
+state-path wake receipt untouched. The Task 04 verification command passed for
+Office service, scheduler, routines, and the full orchestrator package. Changed
+Go lint and `make -C apps/backend build` passed. PostgreSQL verification was
+unavailable because `KANDEV_TEST_POSTGRES_DSN` is unset.
