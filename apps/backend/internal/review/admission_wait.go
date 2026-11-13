@@ -25,6 +25,7 @@ func (r *Runner) prepareRunReviewer(ctx context.Context, run *models.TaskReviewR
 }
 
 func (r *Runner) executePreparedRun(ctx context.Context, req RunRequest, run *models.TaskReviewRun, identity ReviewerIdentity, wait nativeAdmissionWaiter, files []ChangedFile) error {
+	ctx = withOriginExclusion(ctx, req.originExclusion)
 	defer r.resolver.releaseRunRoute(run.ID)
 	for wait != nil {
 		if err := wait.AwaitNativeRoute(ctx); err != nil {

@@ -2,10 +2,12 @@ package review
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -17,10 +19,73 @@ type Source struct {
 	HeadRef      string `json:"head_ref,omitempty"`
 }
 
+const SourceMetadataKey = "review_source"
+
+// SourceFromMetadata accepts typed and JSON-decoded source metadata.
+func SourceFromMetadata(metadata map[string]any) (*Source, error) {
+	value := metadata[SourceMetadataKey]
+	if value == nil {
+		return nil, nil
+	}
+	b, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid review source", ErrWorkspaceUnavailable)
+	}
+	var source Source
+	if err := json.Unmarshal(b, &source); err != nil {
+		return nil, fmt.Errorf("%w: invalid review source", ErrWorkspaceUnavailable)
+	}
+	return &source, nil
+}
+
 // ValidateSource verifies an existing local worktree and resolvable commit refs.
 func ValidateSource(ctx context.Context, source Source) error {
 	_, _, _, err := prepareLocalSource(ctx, source)
 	return err
+}
+
+// SourceWithinRoots reports whether worktreePath names one of roots or a
+// directory inside one. Both sides are compared after resolving symlinks (and
+// case on Windows), so a link inside a root cannot point outside it, and a
+// sibling that only shares a root's string prefix is outside.
+func SourceWithinRoots(worktreePath string, roots []string) bool {
+	if !localPath(worktreePath) || hasTraversalParent(worktreePath) {
+		return false
+	}
+	path, ok := canonicalLocalPath(worktreePath)
+	if !ok {
+		return false
+	}
+	for _, root := range roots {
+		if !localPath(root) {
+			continue
+		}
+		resolved, ok := canonicalLocalPath(root)
+		if ok && pathWithin(path, resolved) {
+			return true
+		}
+	}
+	return false
+}
+
+func canonicalLocalPath(path string) (string, bool) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil || !localPath(resolved) {
+		return "", false
+	}
+	resolved = filepath.Clean(resolved)
+	if runtime.GOOS == "windows" {
+		resolved = strings.ToLower(resolved)
+	}
+	return resolved, true
+}
+
+func pathWithin(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || filepath.IsAbs(rel) {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
 func localPath(path string) bool {

@@ -379,3 +379,33 @@ func TestHandleCancelTaskReview_FallsBackToServiceWithoutRunner(t *testing.T) {
 	require.NoError(t, err)
 	requireWSSuccess(t, resp)
 }
+
+func TestHandleRunTaskReview_ManualReviewExcludesOnlyAnAgentWriter(t *testing.T) {
+	h, _, runner := newReviewHandlers(t)
+	runner.run = &models.TaskReviewRun{ID: "run-1", Status: models.ReviewRunPending}
+	ctx := context.Background()
+	repo := h.taskRepo.(interface {
+		CreateTaskSession(context.Context, *models.TaskSession) error
+	})
+	seedReviewHandlerTask(t, h, "task-human")
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-human", TaskID: "task-human", IsPrimary: true, State: models.TaskSessionStateWaitingForInput,
+	}))
+	seedReviewHandlerTask(t, h, "task-agent")
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-agent", TaskID: "task-agent", IsPrimary: true, AgentProfileID: "writer-profile",
+		State: models.TaskSessionStateWaitingForInput,
+	}))
+
+	for _, taskID := range []string{"task-human", "task-agent"} {
+		resp, err := h.handleRunTaskReview(ctx, makeWSMessage(t, ws.ActionTaskReviewRun, map[string]interface{}{"task_id": taskID}))
+		require.NoError(t, err)
+		requireWSSuccess(t, resp)
+	}
+	require.Len(t, runner.launched, 2)
+	require.Nil(t, runner.launched[0].Origin, "a person's changes have no agent writer to exclude")
+	require.False(t, runner.launched[0].OriginRequired)
+	require.NotNil(t, runner.launched[1].Origin)
+	require.Equal(t, "writer-profile", runner.launched[1].Origin.ProfileID)
+	require.True(t, runner.launched[1].OriginRequired)
+}

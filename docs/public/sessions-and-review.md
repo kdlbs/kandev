@@ -813,6 +813,12 @@ If sending fails or the connection is unavailable, Kandev shows an error and pre
 
 You can still close Review while waiting. Reopen the current diff before sending old feedback: a valid line number can still refer to different code after a rewrite.
 
+### Review changes in a gate-slot worktree
+
+From a task-mode session, call `set_review_source_kandev` with `worktree_path` (the absolute Git worktree path on the Kandev backend host) and `base_ref` (for example, `origin/main`) before entering a workflow step with `run_code_review`. This saved task source is used when the Kandev workspace has no reviewable changes or is unavailable. Omit `head_ref` to review the working tree, including untracked files, against the base; supply a commit or branch as `head_ref` to review the committed range from their merge base. For an immediate review, call `run_code_review_kandev` with the same source fields, or omit them to use the workspace or saved task source. Read the stored run status and findings with `get_code_review_kandev`; a pending or running pass has not finished. Change the saved source when a gate slot changes, or remove it with `set_review_source_kandev(clear=true)`. Setting or using a source requires write access to the task.
+
+The path must exist and be a local Git worktree on the backend host, rather than a URL, UNC path, or remote executor path. A path an agent supplies through these tools must also belong to the task's registered repositories, including their other worktrees such as a gate slot created with `git worktree add`, or to a workspace or worktree of one of its local sessions; a path in an unrelated repository is rejected. A person calling the authenticated Kandev WebSocket API (`task.review.run` or `task.review.source.set`) directly may still name any local Git worktree on the backend host; the browser UI does not set a source. Collection and prompt size limits are unchanged.
+
 ## Generate a walkthrough
 
 Select **Walkthrough** from Changes or Review. Kandev sends the built-in `changes-walkthrough` prompt to the active session. If the agent is actively generating, the request queues; if it is idle, it starts a new turn immediately. A running Claude Code session that is only waiting on recognized background work also starts immediately when the high-risk **Claude background prompt handoff** experiment is enabled; the default behavior queues it. The agent must have task MCP and must call `show_walkthrough_kandev` with an ordered list of file and line anchors.

@@ -43,6 +43,7 @@ func CapturedResourceCircuitKey(metadata map[string]interface{}, executionID, pr
 }
 
 type AgentExecution = lifecycle.AgentExecution
+type WorkspaceInfo = lifecycle.WorkspaceInfo
 type CachedModeState = lifecycle.CachedModeState
 type IdleSuspensionIdentity = lifecycle.IdleSuspensionIdentity
 type DeliveryRecordEvidenceRequest = lifecycle.DeliveryRecordEvidenceRequest

@@ -232,6 +232,7 @@ var (
 		string(models.OnEnterQueueRunForEachParticipant): true,
 		string(models.OnEnterQueueRun):                   true,
 		string(models.OnEnterEnsureParticipantSeat):      true,
+		string(models.OnEnterRunCodeReview):              true,
 	}
 	validOnTurnStart = map[string]bool{
 		string(models.OnTurnStartMoveToNext):     true,
@@ -263,6 +264,13 @@ func convertEvents(e stepEventsYAML) (models.StepEvents, error) {
 		if a.Type == string(models.OnEnterSetSessionMode) {
 			if mode, _ := a.Config["mode"].(string); mode == "" {
 				return events, fmt.Errorf("on_enter set_session_mode requires a non-empty string \"mode\" config")
+			}
+		}
+		if a.Type == string(models.OnEnterRunCodeReview) {
+			if raw, present := a.Config[models.ReviewAgentProfileConfigKey]; present {
+				if _, ok := raw.(string); !ok {
+					return events, fmt.Errorf("on_enter run_code_review %q config must be a string", models.ReviewAgentProfileConfigKey)
+				}
 			}
 		}
 		events.OnEnter = append(events.OnEnter, models.OnEnterAction{

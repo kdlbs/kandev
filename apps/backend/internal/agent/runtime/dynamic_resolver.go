@@ -221,6 +221,9 @@ func (r *ProfileExecutionResolver) ResolveExecutionDetails(ctx context.Context, 
 	if err != nil {
 		return ProfileExecution{}, fmt.Errorf("resolve profile family %s: %w", profileID, err)
 	}
+	if agent.Name != agents.DynamicAgentID && !executionCandidateAllowed(ctx, profile, agent.Name) {
+		return ProfileExecution{}, ErrExecutionCandidateExcluded
+	}
 	if err := r.admitNativeRoute(ctx, sessionID, profileID); err != nil {
 		return ProfileExecution{}, err
 	}
@@ -978,43 +981,62 @@ func (r *ProfileExecutionResolver) dynamicProfileFromRoutes(ctx context.Context,
 		Candidates: make([]dynamic.Candidate, 0, len(routes)),
 	}
 	for _, route := range routes {
-		candidate := dynamic.Candidate{
-			KeywordContextEnabled: r.keywordContextEnabled.Load(),
-			ID:                    route.ExecutionProfileID, Enabled: route.Enabled,
-			BindingKey:            dynamic.ResourceKey(dynamic.ScopeProfile, route.ExecutionProfileID),
-			RequireExecutionUsage: r.executionUsageRequired(),
-		}
-		if r.candidateUsage != nil {
-			candidate.Usage = r.candidateUsage(route.ExecutionProfileID)
-		}
-		if err := applyDynamicCandidatePolicy(&candidate, route); err != nil {
+		candidate, err := r.dynamicCandidateFromRoute(ctx, sessionID, route)
+		if err != nil {
 			return dynamic.Profile{}, err
 		}
-		concrete, profileErr := r.profiles.GetAgentProfile(ctx, route.ExecutionProfileID)
-		switch {
-		case profileErr != nil:
-			if errors.Is(profileErr, sql.ErrNoRows) || errors.Is(profileErr, store.ErrAgentProfileDeleted) {
-				candidate.Enabled = false
-			} else {
-				return dynamic.Profile{}, fmt.Errorf("load dynamic candidate %s: %w", route.ExecutionProfileID, profileErr)
-			}
-		case concrete == nil || concrete.DeletedAt != nil || !concrete.Enabled:
-			candidate.Enabled = false
-		default:
-			candidate.ModelID = concrete.Model
-		}
-		if r.bindingResolver != nil && concrete != nil && concrete.DeletedAt == nil && concrete.Enabled {
-			binding := profileCredentialBindingDescriptor(concrete)
-			candidate.BindingKey = dynamic.ResourceKey(
-				dynamic.ScopeCredential,
-				r.bindingResolver.Resolve(binding, route.ExecutionProfileID),
-			)
-		}
-		r.populateKeywordCandidate(ctx, sessionID, concrete, &candidate)
 		profile.Candidates = append(profile.Candidates, candidate)
 	}
-	r.applyResourceLimits(ctx, profile.Candidates)
+	if err := r.finishDynamicCandidates(ctx, &profile); err != nil {
+		return dynamic.Profile{}, err
+	}
 	return profile, nil
+}
+
+// dynamicCandidateFromRoute builds one routing candidate from a dynamic route
+// and the concrete execution profile it names.
+func (r *ProfileExecutionResolver) dynamicCandidateFromRoute(ctx context.Context, sessionID string, route agentsettingsmodels.DynamicAgentRoute) (dynamic.Candidate, error) {
+	candidate := dynamic.Candidate{
+		KeywordContextEnabled: r.keywordContextEnabled.Load(),
+		ID:                    route.ExecutionProfileID, Enabled: route.Enabled,
+		BindingKey:            dynamic.ResourceKey(dynamic.ScopeProfile, route.ExecutionProfileID),
+		RequireExecutionUsage: r.executionUsageRequired(),
+	}
+	if r.candidateUsage != nil {
+		candidate.Usage = r.candidateUsage(route.ExecutionProfileID)
+	}
+	if err := applyDynamicCandidatePolicy(&candidate, route); err != nil {
+		return dynamic.Candidate{}, err
+	}
+	concrete, profileErr := r.profiles.GetAgentProfile(ctx, route.ExecutionProfileID)
+	switch {
+	case profileErr != nil:
+		if errors.Is(profileErr, sql.ErrNoRows) || errors.Is(profileErr, store.ErrAgentProfileDeleted) {
+			candidate.Enabled = false
+		} else {
+			return dynamic.Candidate{}, fmt.Errorf("load dynamic candidate %s: %w", route.ExecutionProfileID, profileErr)
+		}
+	case concrete == nil || concrete.DeletedAt != nil || !concrete.Enabled:
+		candidate.Enabled = false
+	default:
+		candidate.ModelID = concrete.Model
+	}
+	if r.bindingResolver != nil && concrete != nil && concrete.DeletedAt == nil && concrete.Enabled {
+		binding := profileCredentialBindingDescriptor(concrete)
+		candidate.BindingKey = dynamic.ResourceKey(
+			dynamic.ScopeCredential,
+			r.bindingResolver.Resolve(binding, route.ExecutionProfileID),
+		)
+	}
+	r.populateKeywordCandidate(ctx, sessionID, concrete, &candidate)
+	return candidate, nil
+}
+
+// finishDynamicCandidates annotates provider resource limits and then applies
+// the execution candidate filter to the assembled candidate list.
+func (r *ProfileExecutionResolver) finishDynamicCandidates(ctx context.Context, profile *dynamic.Profile) error {
+	r.applyResourceLimits(ctx, profile.Candidates)
+	return r.filterExecutionCandidates(ctx, profile)
 }
 
 func (r *ProfileExecutionResolver) executionUsageRequired() bool {

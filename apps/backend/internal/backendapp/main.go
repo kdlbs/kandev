@@ -1280,7 +1280,7 @@ func startGatewayAndServe(
 		if err != nil {
 			return nil, nil, err
 		}
-		releaseUtility, err := hostUtilityMgr.AcquireRuntimeMaintenance(activationCtx, "opencode-acp")
+		releaseUtility, err := hostUtilityMgr.AcquireRuntimeMaintenance(activationCtx, openCodeAgentID)
 		if err != nil {
 			releaseLifecycle()
 			return nil, nil, err

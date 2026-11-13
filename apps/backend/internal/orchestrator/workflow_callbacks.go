@@ -438,13 +438,16 @@ func (c *runCodeReviewCallback) Execute(ctx context.Context, in engine.ActionInp
 	if in.Action.RunCodeReview != nil {
 		profileID = in.Action.RunCodeReview.AgentProfileID
 	}
+	origin, writerSessionID := c.svc.reviewOrigin(ctx, in.State.TaskID, in.State.SessionID)
 	_, err := c.svc.reviewRunner.Launch(ctx, review.RunRequest{
 		TaskID:         in.State.TaskID,
-		SessionID:      in.State.SessionID,
+		SessionID:      writerSessionID,
 		AgentProfileID: profileID,
 		Trigger:        taskmodels.ReviewTriggerWorkflowStep,
 		WorkflowStepID: in.Step.ID,
 		EntryID:        in.EntryID,
+		Origin:         origin,
+		OriginRequired: true,
 	})
 	if err != nil {
 		c.svc.logger.Warn("workflow step code review did not start",

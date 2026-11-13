@@ -62,6 +62,7 @@ Kandev host, which retain their own plugin-system ownership.
 - [Injected Skill Naming](requirements/injected-skill-naming.md)
 - [Mock-agent slow command duration syntax](requirements/mock-agent-slow-duration.md)
 - [Native Code Review](requirements/native-code-review.md)
+- [Native Review Writer Exclusion](requirements/native-code-review-reviewer-exclusion.md)
 - [No Silent Model Fallback](requirements/no-silent-model-fallback.md)
 - [Harness session continuity](requirements/harness-session-continuity.md) (draft)
 - [Agent MCP Timeout Budgets](requirements/mcp-timeout-budgets.md)
@@ -86,6 +87,8 @@ Kandev host, which retain their own plugin-system ownership.
 - [Probe Failure Diagnostics](requirements/probe-failure-diagnostics.md)
 
 ### System design
+
+- [Native Review Writer Exclusion](system-design/native-code-review-reviewer-exclusion.md)
 
 - [Agent Resume and Runtime Recovery](system-design/agent-resume-runtime-recovery.md)
 - [Google Antigravity ACP Agent](system-design/antigravity-acp-agent.md)
