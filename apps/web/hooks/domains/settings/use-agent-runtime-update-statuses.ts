@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AgentUpdateJob } from "@/lib/api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -13,12 +13,23 @@ export function useAgentRuntimeUpdateStatuses(
 ) {
   const store = useAppStoreApi();
   const statusByAgent = useAppStore((s) => s.agentRuntimeUpdates.byAgent);
+  const loading = useAppStore((s) => s.agentRuntimeUpdates.loading);
+  const [refreshFailed, setRefreshFailed] = useState(false);
   const observedTerminalJobs = useRef(new Set<string>());
   const pendingTerminalJobs = useRef(new Set<string>());
 
-  const refresh = useCallback(() => refreshRuntimeUpdateStatuses(store, true), [store]);
+  const refresh = useCallback(
+    () =>
+      refreshRuntimeUpdateStatuses(store, true).then((succeeded) => {
+        setRefreshFailed(!succeeded);
+        return succeeded;
+      }),
+    [store],
+  );
   useEffect(() => {
-    void refreshRuntimeUpdateStatuses(store);
+    void refreshRuntimeUpdateStatuses(store).then((succeeded) => {
+      if (!succeeded) setRefreshFailed(true);
+    });
   }, [store]);
 
   useEffect(() => {
@@ -42,5 +53,5 @@ export function useAgentRuntimeUpdateStatuses(
     }
   }, [refresh, updateJobs]);
 
-  return { refresh, statusByAgent };
+  return { refresh, statusByAgent, loading, refreshFailed };
 }

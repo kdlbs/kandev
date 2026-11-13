@@ -59,6 +59,11 @@ type Props = {
     expectedRuntimeRevision?: number,
   ) => Promise<AgentUpdateJob>;
   /**
+   * Opens the page-owned runtime manager on this agent's details. Installed
+   * cards use this instead of mounting an update dialog of their own.
+   */
+  onOpenRuntime?: (agentName: string, opener: HTMLElement) => void;
+  /**
    * Called when the auth/shell dialog closes so the page can refresh
    * discovery + availability. Without this the yellow lock stays put even
    * after a successful sign-in, making the recovery flow look broken.
@@ -396,6 +401,7 @@ function RuntimeVersionControl({
   installJob,
   onPreview,
   onUpdate,
+  onOpenRuntime,
 }: Pick<
   Props,
   | "agent"
@@ -406,6 +412,7 @@ function RuntimeVersionControl({
   | "installJob"
   | "onPreview"
   | "onUpdate"
+  | "onOpenRuntime"
 >) {
   if (!runtimeUpdate?.supported || !onPreview || !onUpdate) return null;
   return (
@@ -418,6 +425,7 @@ function RuntimeVersionControl({
       installJob={installJob}
       onPreview={onPreview}
       onUpdate={onUpdate}
+      onOpen={onOpenRuntime ? (opener) => onOpenRuntime(agent.name, opener) : undefined}
     />
   );
 }
