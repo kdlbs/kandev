@@ -101,22 +101,45 @@ export async function waitForNewWorkflowProfileSession(
   taskId: string,
   profileId: string,
   excludedSessionIds: string[] = [],
+  options: { readiness?: "answerable" | "launched" } = {},
 ) {
+  const readiness = options.readiness ?? "answerable";
   let sessionId = "";
   await expect
     .poll(
       async () => {
         const { sessions } = await apiClient.listTaskSessions(taskId);
+        const matchesProfile = (candidate: (typeof sessions)[number]) =>
+          candidate.agent_profile_id === profileId && !excludedSessionIds.includes(candidate.id);
+        const failedSession = sessions.find(
+          (candidate) =>
+            matchesProfile(candidate) &&
+            (candidate.state === "FAILED" || candidate.state === "CANCELLED"),
+        );
+        if (failedSession) {
+          throw new Error(
+            `profile ${profileId} created a ${failedSession.state} session${failedSession.error_message ? `: ${failedSession.error_message}` : ""}`,
+          );
+        }
         const session = sessions.find(
           (candidate) =>
-            candidate.agent_profile_id === profileId &&
-            !excludedSessionIds.includes(candidate.id) &&
-            candidate.state === "WAITING_FOR_INPUT",
+            matchesProfile(candidate) &&
+            (readiness === "answerable"
+              ? candidate.state === "WAITING_FOR_INPUT"
+              : ["STARTING", "RUNNING", "WAITING_FOR_INPUT", "COMPLETED"].includes(
+                  candidate.state,
+                )),
         );
         sessionId = session?.id ?? "";
         return sessionId;
       },
-      { timeout: 45_000, message: `profile ${profileId} did not create a new answerable session` },
+      {
+        timeout: 45_000,
+        message:
+          readiness === "answerable"
+            ? `profile ${profileId} did not create a new answerable session`
+            : `profile ${profileId} did not launch a new session`,
+      },
     )
     .not.toBe("");
   return sessionId;

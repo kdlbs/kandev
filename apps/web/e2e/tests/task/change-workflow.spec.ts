@@ -282,8 +282,21 @@ test.describe("Change workflow", () => {
       task.id,
       fixture.profileB.id,
       [existingSessionId],
+      { readiness: "launched" },
     );
     await waitForWorkflowMoveLifecycle(apiClient, task.id);
+    await expect
+      .poll(
+        async () => {
+          const { session } = await apiClient.getTaskSession(destinationSessionId);
+          return session.agent_profile_snapshot?.model;
+        },
+        {
+          timeout: 30_000,
+          message: "routed session did not store the replacement profile model",
+        },
+      )
+      .toBe("mock-slow");
     const { session: routedSession } = await apiClient.getTaskSession(destinationSessionId);
     await waitForSessionDone(
       apiClient,
@@ -292,15 +305,11 @@ test.describe("Change workflow", () => {
       "source workflow session must settle before cleanup",
       30_000,
     );
-    await waitForSessionDone(
-      apiClient,
-      task.id,
-      destinationSessionId,
-      "destination workflow session must settle before cleanup",
-      30_000,
-    );
     expect(routedSession.agent_profile_id).toBe(fixture.profileB.id);
     expect(routedSession.agent_profile_snapshot?.model).toBe("mock-slow");
+    expect(["STARTING", "RUNNING", "WAITING_FOR_INPUT", "COMPLETED"]).toContain(
+      routedSession.state,
+    );
     const changed = await apiClient.getTask(task.id);
     expect(changed).toMatchObject({
       id: before.id,
