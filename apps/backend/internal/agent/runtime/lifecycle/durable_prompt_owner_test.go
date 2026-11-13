@@ -86,3 +86,29 @@ func TestDeliveryRecordUsesPersistedHistoricalBinding(t *testing.T) {
 		})
 	}
 }
+
+func TestDeliveryRecordUsesPersistedBindingFromMultipleJournalSubmissions(t *testing.T) {
+	process, err := processidentity.Capture(os.Getpid())
+	if err != nil {
+		t.Skip(err)
+	}
+	manager := newTestManager(t)
+	manager.SetExecutorRunningWriter(&captureExecutorRunningWriter{prior: &models.ExecutorRunning{
+		TaskID: "task", SessionID: "session", AgentExecutionID: "replacement",
+		Metadata: map[string]interface{}{deliveryPromptTurnBindingMetadataKey: deliveryPromptTurnBinding{
+			TaskID: "task", SessionID: "session", ExecutionID: "original", IncarnationID: "incarnation",
+			HarnessGeneration: 1, StreamID: "stream", SubmissionID: "prompt:current",
+			TurnID: "turn-current", OriginalRuntime: process, PromptGeneration: 3,
+		}},
+	}})
+	descriptor := journal.RecoveryDescriptor{SubmissionCount: 2, Submissions: []journal.SubmissionSummary{
+		{ID: "prompt:old", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1, StreamID: "stream"},
+		{ID: "prompt:current", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1, StreamID: "stream"},
+	}}
+	identity := manager.deliveryRecordControlIdentity(context.Background(), DeliveryRecordEvidenceRequest{
+		TaskID: "task", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1,
+	}, descriptor)
+	require.NotNil(t, identity, "a persisted source binding identifies its prompt among prior journal history")
+	require.Equal(t, "prompt:current", identity.SubmissionID)
+	require.Equal(t, "original", identity.ExecutionID)
+}

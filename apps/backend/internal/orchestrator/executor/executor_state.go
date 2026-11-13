@@ -38,7 +38,17 @@ func (e *Executor) GetExecutionBySession(sessionID string) (*TaskExecution, bool
 	if !e.agentManager.IsAgentRunningForSession(ctx, sessionID) {
 		if (session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning) &&
 			time.Since(session.UpdatedAt) < startupGracePeriod {
-			return FromTaskSession(session), true
+			running, runningErr := e.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+			if runningErr != nil && !errors.Is(runningErr, models.ErrExecutorRunningNotFound) {
+				return FromTaskSession(session), true
+			}
+			if runningErr == nil && running != nil &&
+				running.Status != models.ExecutorRunningStatusStopped &&
+				running.Status != models.ExecutorRunningStatusFailed &&
+				running.Status != models.ExecutorRunningStatusComplete &&
+				running.Status != models.ExecutorRunningStatusPrepared {
+				return FromTaskSession(session), true
+			}
 		}
 		return nil, false
 	}

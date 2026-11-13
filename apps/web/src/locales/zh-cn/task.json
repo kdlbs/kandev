@@ -2354,6 +2354,7 @@
   "failedToResumeAndRestore": "恢复会话失败 - 工作区还原同样不可用",
   "resumeAndRestoreFailed": "恢复失败：{{resumeError}}。还原工作区失败：{{restoreError}}。",
   "sessionRecoveryFailed": "会话恢复失败",
+  "sessionRestoredAfterInterruption": "会话已中断。对话已恢复。您可以继续。",
   "providerRestoredResumeDisclosure": "恢复会话会保留当前对话，并在此次尝试中跳过模式和模型覆盖设置。",
   "providerRestoredResumeSuccess": "会话已恢复。此前的对话已保留。",
   "providerRestoredResumeSuccessWithModel": "会话已使用 {{model}} 恢复。此前的对话已保留。",

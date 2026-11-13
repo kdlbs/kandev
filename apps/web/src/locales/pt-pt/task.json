@@ -2354,6 +2354,7 @@
   "failedToResumeAndRestore": "Falha ao retomar a sessão - o restauro do workspace também está indisponível",
   "resumeAndRestoreFailed": "Falha ao retomar: {{resumeError}}. Falha ao restaurar o workspace: {{restoreError}}.",
   "sessionRecoveryFailed": "Falha na recuperação da sessão",
+  "sessionRestoredAfterInterruption": "A sessão foi interrompida. A conversa foi restaurada. Pode continuar.",
   "providerRestoredResumeDisclosure": "Retomar mantém esta conversa e ignora as substituições de modo e modelo nesta tentativa.",
   "providerRestoredResumeSuccess": "A sessão foi retomada. A conversa anterior foi preservada.",
   "providerRestoredResumeSuccessWithModel": "A sessão foi retomada com {{model}}. A conversa anterior foi preservada.",

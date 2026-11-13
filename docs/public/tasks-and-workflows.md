@@ -751,6 +751,11 @@ session only after it verifies the saved owner and native conversation. If the
 owner, conversation, or delivery evidence is missing or changed, that session
 stays blocked with its available recovery controls. See [Manage session state](sessions-and-review.md#manage-session-state) for those controls and recovery details.
 
+After a verified restore, the same conversation shows one informational
+interruption message and the normal composer. Kandev does not resend the
+interrupted prompt. Existing failed sessions that meet the same identity and
+delivery checks are included in the first startup after an upgrade.
+
 Restart recovery also checks automatic workflow starts that were accepted but
 never delivered their step prompt. It resumes that entry through normal capacity
 and dependency admission. A hold step, deferred start, workflow queue, or Office

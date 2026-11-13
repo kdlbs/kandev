@@ -155,3 +155,29 @@ func TestLegacyNativeRestartWithoutRecoveryNotice(t *testing.T) {
 		})
 	}
 }
+
+func TestLegacyNativeRestartSkipsPersistedRecovery(t *testing.T) {
+	ctx := context.Background()
+	service, manager, _, submission, _, _ := nativeResumeFixture(t, "unknown_prompt_outcome", false, false)
+	repo := service.repo.(*sqliterepo.Repository)
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, submission.SessionID, models.TaskSessionStateWaitingForInput, ""))
+	session, err := repo.GetTaskSession(ctx, submission.SessionID)
+	require.NoError(t, err)
+	_, exists := models.LoadAgentDeliveryRecovery(session.Metadata)
+	require.True(t, exists)
+
+	var inspectCalls int
+	wrapper := &legacyNativeTestManager{
+		nativeProofTestManager: &nativeProofTestManager{nativeResumeTestManager: manager},
+		inspect: func(context.Context, agentruntime.DeliveryRecordEvidenceRequest) (*agentruntime.DeliveryRecordEvidence, error) {
+			inspectCalls++
+			return nil, errors.New("durable adoption evidence unavailable")
+		},
+	}
+	service.agentManager = wrapper
+
+	restored, err := service.resumeLegacyNativeRestart(ctx, session)
+	require.NoError(t, err)
+	require.False(t, restored)
+	require.Zero(t, inspectCalls, "persisted recovery must use the restart worker instead of the legacy probe")
+}

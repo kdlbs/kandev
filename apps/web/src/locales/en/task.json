@@ -2372,6 +2372,7 @@
   "failedToResumeAndRestore": "Failed to resume session - workspace restore also unavailable",
   "resumeAndRestoreFailed": "Resume failed: {{resumeError}}. Workspace restore failed: {{restoreError}}.",
   "sessionRecoveryFailed": "Session recovery failed",
+  "sessionRestoredAfterInterruption": "The session was interrupted. Your conversation is restored. You can continue.",
   "providerRestoredResumeDisclosure": "Resume keeps this conversation and skips mode/model overrides for this attempt.",
   "providerRestoredResumeSuccess": "Session resumed. Your previous conversation was preserved.",
   "providerRestoredResumeSuccessWithModel": "Session resumed with {{model}}. Your previous conversation was preserved.",

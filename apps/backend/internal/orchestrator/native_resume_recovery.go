@@ -13,3 +13,7 @@ type nativeResumeRecoveryVerifier interface {
 type historicalNativeResumeRecoveryVerifier interface {
 	HasResolvedHistoricalNativeResumeRecovery(context.Context, models.AgentDeliveryRecovery) (bool, error)
 }
+
+type historicalTerminalRecoveryVerifier interface {
+	HasResolvedHistoricalTerminalRecovery(context.Context, models.AgentDeliveryRecovery, int64, string) (bool, error)
+}

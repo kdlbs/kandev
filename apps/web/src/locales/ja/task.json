@@ -2403,6 +2403,7 @@
   "failedToResumeAndRestore": "セッション再開失敗。ワークスペース復元も不可",
   "resumeAndRestoreFailed": "再開失敗: {{resumeError}}。ワークスペース復元失敗: {{restoreError}}。",
   "sessionRecoveryFailed": "セッション復旧失敗",
+  "sessionRestoredAfterInterruption": "セッションが中断されました。会話は復元されています。続けることができます。",
   "providerRestoredResumeDisclosure": "再開するとこの会話を維持し、今回の試行ではモードとモデルの上書きを適用しません。",
   "providerRestoredResumeSuccess": "セッションが再開され、以前の会話は保持されました。",
   "providerRestoredResumeSuccessWithModel": "{{model}} でセッションが再開され、以前の会話は保持されました。",
