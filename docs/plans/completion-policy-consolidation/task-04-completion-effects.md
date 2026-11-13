@@ -120,3 +120,9 @@ state-path wake receipt untouched. The Task 04 verification command passed for
 Office service, scheduler, routines, and the full orchestrator package. Changed
 Go lint and `make -C apps/backend build` passed. PostgreSQL verification was
 unavailable because `KANDEV_TEST_POSTGRES_DSN` is unset.
+
+Routine-run closeout now verifies the task's current state before syncing, so a
+terminal event superseded by a reopen does not close the linked run. The
+regression test `TestRoutineRunCompletionIgnoresStaleTerminalTaskState` and
+the terminal closeout tests cover the state reread. The Task 04 verification
+command passed again, along with the full backendapp test package.

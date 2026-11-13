@@ -96,7 +96,7 @@ func TestBulkMovePartialErrorRetainsUnexpectedCauseAfterEarlierCommit(t *testing
 	}
 }
 
-func TestBulkMovePartialErrorIncludesCommitWhenRefreshFails(t *testing.T) {
+func TestBulkMoveKeepsCommittedResultWhenRefreshFails(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	seedMoveWorkflows(t, ctx, repo)
@@ -107,16 +107,12 @@ func TestBulkMovePartialErrorIncludesCommitWhenRefreshFails(t *testing.T) {
 	svc.tasks = &bulkMoveReviewRepository{
 		Repository: repo, failRefreshTask: "task-committed", refreshErr: refreshErr,
 	}
-	_, err := svc.BulkMoveSelectedTasks(ctx, []string{"task-committed"}, "wf-target", "step-target", wfmodels.StepTransitionActorHuman)
-	var partial *BulkMovePartialError
-	if !errors.As(err, &partial) {
-		t.Fatalf("bulk move error = %T (%v), want committed partial result", err, err)
+	result, err := svc.BulkMoveSelectedTasks(ctx, []string{"task-committed"}, "wf-target", "step-target", wfmodels.StepTransitionActorHuman)
+	if err != nil {
+		t.Fatalf("bulk move returned error after committed move: %v", err)
 	}
-	if !errors.Is(err, refreshErr) {
-		t.Fatalf("partial error %v does not retain refresh error", err)
-	}
-	if len(partial.MovedTaskIDs) != 1 || partial.MovedTaskIDs[0] != "task-committed" {
-		t.Fatalf("moved IDs = %v, want [task-committed]", partial.MovedTaskIDs)
+	if result == nil || result.MovedCount != 1 || len(result.MovedTaskIDs) != 1 || result.MovedTaskIDs[0] != "task-committed" {
+		t.Fatalf("bulk move result = %+v, want moved task ID [task-committed]", result)
 	}
 	stored, err := repo.GetTask(ctx, "task-committed")
 	if err != nil {

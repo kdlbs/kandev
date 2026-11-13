@@ -929,14 +929,15 @@ func (s *Service) MoveTaskWithOptions(
 		s.pullTasksFromNewFeederWork(ctx, workflowID, workflowStepID)
 		refreshed, err := s.tasks.GetTask(ctx, task.ID)
 		if err != nil {
-			return result, fmt.Errorf("failed to refresh task after feeder pull: %w", err)
-		}
-		if refreshed == nil {
+			s.logger.Warn("failed to refresh task after feeder pull; returning committed task",
+				zap.String("task_id", task.ID), zap.Error(err))
+		} else if refreshed == nil {
 			return result, errors.New("failed to refresh task after feeder pull: repository returned nil task")
+		} else {
+			refreshed.Repositories = task.Repositories
+			task = refreshed
+			result.Task = task
 		}
-		refreshed.Repositories = task.Repositories
-		task = refreshed
-		result.Task = task
 	}
 
 	s.logger.Info("task moved",

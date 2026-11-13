@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routines"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -28,6 +29,36 @@ type recordingRoutineRunSyncer struct {
 func (f *recordingRoutineRunSyncer) SyncRunStatus(_ context.Context, taskID, status string) error {
 	f.calls = append(f.calls, routineRunSyncCall{taskID: taskID, status: status})
 	return nil
+}
+
+type routineRunTaskStateReader struct {
+	states map[string]v1.TaskState
+}
+
+func (f routineRunTaskStateReader) GetTask(_ context.Context, taskID string) (*taskmodels.Task, error) {
+	return &taskmodels.Task{ID: taskID, State: f.states[taskID]}, nil
+}
+
+func TestRoutineRunCompletionIgnoresStaleTerminalTaskState(t *testing.T) {
+	taskID := "task-reopened-before-event"
+	taskStateReader := routineRunTaskStateReader{states: map[string]v1.TaskState{
+		taskID: v1.TaskStateInProgress,
+	}}
+	svc, eb := newTestServiceWithBus(t)
+	svc.SetRoutineRunTaskStateReader(taskStateReader)
+	syncer := &recordingRoutineRunSyncer{}
+	svc.SetRoutineRunSyncer(syncer)
+	event := bus.NewEvent(events.TaskStateChanged, "test", map[string]string{
+		"task_id":   taskID,
+		"old_state": "IN_PROGRESS",
+		"new_state": "COMPLETED",
+	})
+	if err := eb.Publish(context.Background(), events.TaskStateChanged, event); err != nil {
+		t.Fatalf("publish stale task.state_changed: %v", err)
+	}
+	if len(syncer.calls) != 0 {
+		t.Fatalf("SyncRunStatus calls = %d, want 0 for reopened task", len(syncer.calls))
+	}
 }
 
 func TestRoutineRunCompletionFollowsTerminalTaskState(t *testing.T) {
@@ -49,10 +80,13 @@ func TestRoutineRunCompletionFollowsTerminalTaskState(t *testing.T) {
 			}
 			t.Run(name, func(t *testing.T) {
 				svc, eb := newTestServiceWithBus(t)
+				taskID := "task-" + terminal.state
+				svc.SetRoutineRunTaskStateReader(routineRunTaskStateReader{states: map[string]v1.TaskState{
+					taskID: v1.TaskState(terminal.state),
+				}})
 				syncer := &recordingRoutineRunSyncer{}
 				svc.SetRoutineRunSyncer(syncer)
 
-				taskID := "task-" + terminal.state
 				event := bus.NewEvent(events.TaskStateChanged, "test", map[string]any{
 					"task_id":                   taskID,
 					"old_state":                 "IN_PROGRESS",
@@ -124,6 +158,8 @@ func TestRoutineRunCompletionClosesLinkedRunAndIgnoresDuplicateDelivery(t *testi
 	syncer := routines.NewRoutineService(repo, logger.Default(), nil)
 	svc, eb := newTestServiceWithBus(t)
 	svc.SetRoutineRunSyncer(syncer)
+	taskStates := make(map[string]v1.TaskState)
+	svc.SetRoutineRunTaskStateReader(routineRunTaskStateReader{states: taskStates})
 
 	terminalStates := []struct {
 		state  string
@@ -140,6 +176,7 @@ func TestRoutineRunCompletionClosesLinkedRunAndIgnoresDuplicateDelivery(t *testi
 			if assignee == "" {
 				taskID = "linked-" + terminal.state + "-unassigned"
 			}
+			taskStates[taskID] = v1.TaskState(terminal.state)
 			routine := &models.Routine{
 				WorkspaceID:       "ws-1",
 				Name:              taskID,

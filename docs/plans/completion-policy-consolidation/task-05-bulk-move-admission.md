@@ -134,3 +134,10 @@ documentation validation, specification lint, and `git diff --check` passed.
 Changed-Go lint reported zero issues with an extended timeout after the
 five-minute wrapper limit elapsed during package loading. PostgreSQL cases
 could not run because KANDEV_TEST_POSTGRES_DSN is unset.
+
+Post-commit feeder-refresh read failures now log a warning and preserve the
+committed task snapshot instead of turning a successful move into an error.
+Single and bulk move regressions verify that the stored move remains committed
+and the bulk result includes its task ID. The Task 05 BulkMove service and
+handler command passed, along with backendapp tests, changed-Go lint, and the
+backend build.

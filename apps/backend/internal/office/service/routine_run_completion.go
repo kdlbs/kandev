@@ -20,8 +20,27 @@ func (s *Service) handleRoutineRunTaskStateChanged(ctx context.Context, event *b
 	if err != nil || data.TaskID == "" || data.OldState == "" || data.OldState == data.NewState {
 		return nil
 	}
-	status := routineRunTerminalStatus(data.NewState)
-	if status == "" || s.routineRunSyncer == nil {
+	if routineRunTerminalStatus(data.NewState) == "" || s.routineRunSyncer == nil {
+		return nil
+	}
+	if s.routineRunStateReader == nil {
+		s.logger.Warn("cannot verify task state before routine run completion",
+			zap.String("task_id", data.TaskID))
+		return nil
+	}
+	task, err := s.routineRunStateReader.GetTask(ctx, data.TaskID)
+	if err != nil {
+		s.logger.Warn("read task state before routine run completion",
+			zap.String("task_id", data.TaskID), zap.Error(err))
+		return nil
+	}
+	if task == nil {
+		s.logger.Warn("task not found before routine run completion",
+			zap.String("task_id", data.TaskID))
+		return nil
+	}
+	status := routineRunTerminalStatus(string(task.State))
+	if status == "" {
 		return nil
 	}
 	if err := s.routineRunSyncer.SyncRunStatus(ctx, data.TaskID, status); err != nil {
