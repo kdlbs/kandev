@@ -2471,6 +2471,7 @@ func (m *Manager) buildAdapterConfig() error {
 		ProviderGatewayAuth:        m.cfg.ProviderGatewayAuth,
 		AuthPolicy:                 m.cfg.AuthPolicy,
 		PromptSuggestions:          m.cfg.PromptSuggestions,
+		Extra:                      map[string]string{"allow_archived_thread_restore": lookupEnvValue(m.cfg.AgentEnv, "KANDEV_FEATURES_AUTO_CONTINUE_FROM_HISTORY")},
 		CopilotNativeSessionEvents: m.cfg.CopilotNativeSessionEvents,
 	}
 	if m.cfg.AuthPolicy != nil && acpcompat.IsAntigravity(m.cfg.AgentType) {

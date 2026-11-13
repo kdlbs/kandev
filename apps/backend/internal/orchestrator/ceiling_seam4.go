@@ -10,6 +10,9 @@ import (
 const (
 	resumePayloadAllowCompletedKey = "allow_completed_session_resume"
 	resumePayloadIdleProvenanceKey = "require_idle_suspension_provenance"
+	resumePayloadRecoveryActionKey = "recovery_action"
+	resumePayloadSettingsPolicyKey = "session_settings_policy"
+	resumePayloadHistoryAttemptKey = "automatic_history_attempt"
 )
 
 // seam4ResumePayload builds the AC-42 "resume" replay row from
@@ -22,12 +25,22 @@ func seam4ResumePayloadWithBinding(
 	sessionID string,
 	options executor.ResumeOptions,
 	binding *models.CeilingWorkflowEntryBinding,
+	historyAttempts ...string,
 ) map[string]interface{} {
 	payload := map[string]interface{}{
 		metaKeySessionID:               sessionID,
 		"allow_branch_replacement":     options.AllowBranchReplacement,
 		resumePayloadAllowCompletedKey: options.AllowCompletedSessionResume,
 		resumePayloadIdleProvenanceKey: options.RequireIdleSuspensionProvenance,
+	}
+	// Native recovery keeps the original no-prompt, ready-before-ACK
+	// contract when capacity moves execution to a later replay.
+	if options.RecoveryAction == recoveryActionResume {
+		payload[resumePayloadRecoveryActionKey] = recoveryActionResume
+		payload[resumePayloadSettingsPolicyKey] = string(options.SettingsPolicy)
+		if len(historyAttempts) > 0 && historyAttempts[0] != "" {
+			payload[resumePayloadHistoryAttemptKey] = historyAttempts[0]
+		}
 	}
 	if binding != nil {
 		payload[models.CeilingLaunchEntryBindingKey] = map[string]interface{}{
