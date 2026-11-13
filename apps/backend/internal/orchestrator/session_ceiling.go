@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/constants"
@@ -128,6 +129,12 @@ type SessionCeilingObservation struct {
 // the reservation set happens under its one mutex, together with the population
 // read it is compared against.
 type sessionCeilingController struct {
+	inferenceStore   *sessioncapacity.Store
+	inferenceRefresh func(context.Context)
+	inferenceKnown   bool
+	inferenceWakeMu  sync.Mutex
+	inferenceWake    chan struct{}
+
 	policy       string
 	gradeLimits  map[string]int
 	resolveGrade func(context.Context, admissionRequest) (string, error)
@@ -141,6 +148,7 @@ type sessionCeilingController struct {
 	turnReservations map[string]*messageTurnReservation
 	lister           admittedSessionLister
 	logger           *zap.Logger
+	populationLogger *zap.Logger
 	now              func() time.Time
 	newKey           func() string
 }
@@ -155,6 +163,7 @@ func newSessionCeilingController(ceiling int, lister admittedSessionLister, logg
 		turnReservations: make(map[string]*messageTurnReservation),
 		lister:           lister,
 		logger:           logger,
+		populationLogger: newPopulationDiagnosticLogger(logger),
 		now:              time.Now,
 		newKey:           func() string { return "launch-" + uuid.NewString() },
 	}
@@ -275,6 +284,16 @@ func (s *Service) SessionCapacity() int {
 // decision time rather than kept as a running tally, so a restart, a panic or a
 // missed release cannot leak capacity permanently.
 func (c *sessionCeilingController) countedRowsLocked(ctx context.Context) (map[string]struct{}, error) {
+	if c.policy == sessioncapacity.PolicyAll {
+		population, err := c.readGradedPopulationLocked(ctx, "")
+		if err != nil {
+			return nil, err
+		}
+		if population.unknown {
+			return nil, fmt.Errorf("execution grade population is unknown")
+		}
+		return population.counted, nil
+	}
 	if c.lister == nil {
 		return map[string]struct{}{}, nil
 	}
@@ -481,6 +500,9 @@ func (c *sessionCeilingController) logDecision(req admissionRequest, origin laun
 		zap.String("task_id", req.taskID),
 		zap.String("session_id", req.sessionID),
 		zap.String("origin", string(origin)),
+		zap.String("grade", req.grade), zap.Bool("grade_known", req.gradeKnown),
+		zap.String("profile_id", req.profileID), zap.String("workflow_step_id", req.workflowStepID),
+		zap.String("reservation_id", decision.reservationKey), zap.Bool("population_known", decision.populationKnown),
 		zap.Int(ceilingFieldCeiling, decision.ceiling),
 		zap.Bool("admitted", decision.admitted),
 	}
@@ -500,8 +522,19 @@ func (c *sessionCeilingController) release(key string) {
 		return
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	held, exists := c.reservations[key]
+	flow := logger.ExecutionFlow{Stage: "reservation", Outcome: "released", ReservationID: key}
+	if held != nil {
+		flow.SessionID, flow.Grade = held.sessionID, held.grade
+		if !held.takenAt.IsZero() {
+			flow.DurationMS = time.Since(held.takenAt).Milliseconds()
+		}
+	}
 	delete(c.reservations, key)
+	c.mu.Unlock()
+	if exists {
+		logger.EmitExecutionFlow(c.logger, context.Background(), flow)
+	}
 }
 
 // rebind moves a launch-scoped reservation onto the session id that launch just

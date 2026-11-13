@@ -818,6 +818,7 @@ func (s *Service) replayCeilingLaunchStartCreated(ctx context.Context, task *mod
 		promptReferencesPrepared:    boolField(payload, "prompt_references_prepared"),
 		preserveDirectPrompt:        boolField(payload, "preserve_direct_prompt"),
 		ceilingEntryBinding:         entryBinding,
+		origin:                      launchOrigin(stringField(payload, "origin")),
 	}
 
 	execution, err := s.startCreatedSession(

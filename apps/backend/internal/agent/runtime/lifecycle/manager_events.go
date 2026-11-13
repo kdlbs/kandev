@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 
@@ -724,6 +725,7 @@ func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *ag
 // buffer — flushing would split the parent's in-flight streaming message into
 // separate DB rows mid-sentence, breaking markdown that spans the boundary.
 func (m *Manager) handleToolCallEvent(execution *AgentExecution, event agentctl.AgentEvent, promptGeneration uint64) agentctl.AgentEvent {
+	m.logger.Flow(context.Background(), logger.ExecutionFlow{Stage: "tool", Outcome: "started", TaskID: execution.TaskID, SessionID: execution.SessionID, ExecutionID: execution.ID, AttemptID: event.AttemptID, TurnID: event.TurnID, MessageID: event.ToolCallID, SubmissionID: event.DeliverySubmissionID, PromptGeneration: promptGeneration})
 	if event.ParentToolCallID == "" {
 		execution.setActiveTool(activeTopLevelTool{
 			ToolCallID: event.ToolCallID,

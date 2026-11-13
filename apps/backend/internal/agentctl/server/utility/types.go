@@ -15,6 +15,9 @@ import (
 
 // PromptRequest is the request for executing an inference prompt.
 type PromptRequest struct {
+	// AttemptID identifies one child execution; CallID only groups caller work.
+	AttemptID string `json:"attempt_id,omitempty"`
+	CallID    string `json:"call_id,omitempty"`
 	// Prompt is the fully resolved prompt text to send to the LLM.
 	Prompt string `json:"prompt" binding:"required"`
 
@@ -275,6 +278,7 @@ type InferenceConfigDTO struct {
 
 // PromptResponse is the response from executing a utility prompt.
 type PromptResponse struct {
+	Attempt *AttemptStatus `json:"attempt,omitempty"`
 	// Success indicates if the prompt completed successfully.
 	Success bool `json:"success"`
 

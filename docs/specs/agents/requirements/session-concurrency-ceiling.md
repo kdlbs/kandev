@@ -116,6 +116,12 @@ bounded instance capacity, so that one installation does not overload its host.
   incomplete, an unrouted entry whose step now routes sessions, and a task with
   no durable entry identity. A failed step, transition, or task read during that
   check shall preserve the record for a later pass.
+- **AC-AGENTS-SESSION-CEILING-001.13:** A start that an agent requests through a
+  Kandev MCP tool, such as the auto-start of a task it creates, is not a direct
+  user action. The ceiling shall admit it as automatic, including its prepared
+  start, and its replay shall keep that class. A user's own start keeps the
+  manual override. Delivery is recorded in the
+  [agent origin package](../../../plans/agent-origin-ceiling-admission/plan.md).
 
 ### REQ-AGENTS-SESSION-CEILING-002: Configure automatic session capacity
 

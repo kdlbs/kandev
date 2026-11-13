@@ -78,14 +78,14 @@ retains stale/conflict feedback rather than claiming an unapplied change.
 
 | Component | Responsibility |
 | --- | --- |
-| `sessionCeilingController` | Counts persisted `STARTING`/`RUNNING` sessions and process-local reservations. It admits, refuses, confirms, and releases launches. |
-| Orchestrator launch seams | Pass the launch origin and complete replay payload to the controller. They consume a reservation only after launch success. |
-| `deferCeilingRefusal` | Merges the ceiling-owned keys into task `deferred_launch` with compare-and-set semantics. |
+| `sessionCeilingController` | Counts persisted `STARTING`/`RUNNING` sessions and process-local reservations; admits, refuses, confirms and releases launches. |
+| Orchestrator launch seams | Pass the launch origin and full replay payload to the controller; consume a reservation only after launch success. |
+| `deferCeilingRefusal` | Merges ceiling-owned keys into task `deferred_launch` by compare-and-set. |
 | Ceiling sweep | Lists tasks with ceiling records, validates eligibility, and dispatches the stored launch kind. |
-| Task repository and service | Store and update the shared deferred record. Prompt edits update both legacy top-level data and the nested ceiling payload. |
+| Task repository and service | Store the shared deferred record. Prompt edits update legacy top-level data and the nested ceiling payload. |
 | Executor callbacks | Confirm or release only when the callback execution still owns the session row. |
-| Message-turn admission | Reserves bounded turns before warm or cold dispatch, independently of caller provenance. |
-| Message capacity wait registry | Tracks active queue-head identities for the existing capacity worker without owning their payload. |
+| Message-turn admission | Reserves bounded turns before warm or cold dispatch, whatever the caller. |
+| Message capacity wait registry | Tracks active queue-head identities for the capacity worker; it does not own their payload. |
 
 ## Data and contracts
 
@@ -211,6 +211,7 @@ launch request
 Explicit launch overrides bypass refusal and write a manual-override audit entry.
 Ordinary messages use bounded turn admission even when their caller has manual
 execution authority. Automatic origins never become manual during replay.
+Agent-requested MCP starts remain automatic through replay.
 Task focus that resumes an
 idle-suspended session is passive inspection, like opening a conversation, so it
 uses the automatic origin. Its deferred record keeps the completed-session
@@ -515,6 +516,8 @@ a replacement start.
 
 ## Persistence
 
+### [Inference](inference-attempt-ownership.md)
+
 `deferred_launch` is updated with a read-compare-write retry loop. The ceiling
 keys share the task record with other launch intents and are removed as a group
 after replay or a terminal drop. A prompt edit preserves unrelated keys and
@@ -545,9 +548,11 @@ manual overrides use the existing orchestrator logs and task status messages.
 The stored reason and population snapshot make a refusal diagnosable after a
 restart.
 
-Log applied capacity and its source on initialization and successful changes.
-Reuse existing observation and queue-status projection paths. Never log full
-environment dumps or launch payloads for a settings change.
+Log capacity and source on init and change.
+Reuse observation and queue-status projections. Never log environment dumps
+or launch payloads for a settings change.
+
+[Execution flow diagnostics](execution-flow-diagnostics.md).
 
 ## Related decisions
 

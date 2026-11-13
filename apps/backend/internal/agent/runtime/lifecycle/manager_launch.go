@@ -1928,23 +1928,13 @@ func (m *Manager) publishExecutionPrepareCompleted(execution *AgentExecution, re
 //
 // If req.SessionID is empty (quick chat / pre-session contexts), no
 // deduplication key exists and we fall through to direct execution.
-func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecution, error) {
+func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (launched *AgentExecution, launchResultErr error) {
 	if req == nil {
 		return nil, errors.New("launch request is required")
 	}
-	if req.McpProfile != nil && req.McpProfile.BuiltinPackages != nil {
-		if err := m.validateBuiltinOwner(ctx, req.TaskID, req.SessionID, req.WorkspaceID, req.McpProfile); err != nil {
-			return nil, err
-		}
-	}
-	if m.executorAdmission != nil {
-		var err error
-		ctx, err = m.executorAdmission(ctx, req.SessionID, getMetadataString(req.Metadata, "executor_id"), getMetadataString(req.Metadata, MetadataKeyExecutorProfileID))
-		if err != nil {
-			return nil, err
-		}
-	}
-	if err := m.validateManagedToolPolicyAdmission(ctx, req); err != nil {
+	defer m.beginLaunchFlow(ctx, req, &launched, &launchResultErr)()
+	ctx, err := m.prepareLaunchAdmission(ctx, req)
+	if err != nil {
 		return nil, err
 	}
 	if err := m.admitExecutionOwner(ctx, req); err != nil {
@@ -1966,24 +1956,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		}
 	}
 	if req.SessionID == "" {
-		activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStarting)
-		if err != nil {
-			return nil, err
-		}
-		transferredActivity := false
-		defer func() {
-			if !transferredActivity {
-				activityLease.Release()
-			}
-		}()
-		activityLease.SetKind(activity.KindExecutionPreparing)
-		execution, launchErr := m.launchInternal(ctx, req)
-		if launchErr == nil && req.StartAgent {
-			m.markAgentStartPending(execution)
-			m.trackActivity(executionActivityKey(execution.ID), activityLease)
-			transferredActivity = true
-		}
-		return execution, launchErr
+		return m.launchWithoutSession(ctx, req)
 	}
 	value, err := m.coalesceSessionLaunch(ctx, req)
 	if err != nil {
@@ -2003,15 +1976,8 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	// Promote it in place so the agent subprocess can start against the
 	// existing agentctl instance.
 	if execution.AgentCommand == "" {
-		if req.startsSuccessorGeneration() {
-			value, err = m.doCoalescedExecution(ctx, req.SessionID, func(sharedCtx context.Context) (interface{}, error) {
-				return m.launchInternal(sharedCtx, req)
-			})
-			if err != nil {
-				return nil, err
-			}
-			execution = value.(*AgentExecution)
-		} else if err := m.promoteWorkspaceExecution(ctx, execution, req); err != nil {
+		execution, err = m.completeWorkspaceLaunch(ctx, req, execution)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -2025,6 +1991,19 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	}
 	execution.bindSuccessorGenerationOwner(ctx, req)
 	return execution, nil
+}
+
+func (m *Manager) completeWorkspaceLaunch(ctx context.Context, req *LaunchRequest, execution *AgentExecution) (*AgentExecution, error) {
+	if !req.startsSuccessorGeneration() {
+		return execution, m.promoteWorkspaceExecution(ctx, execution, req)
+	}
+	value, err := m.doCoalescedExecution(ctx, req.SessionID, func(sharedCtx context.Context) (interface{}, error) {
+		return m.launchInternal(sharedCtx, req)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return value.(*AgentExecution), nil
 }
 
 // markAgentStartPending distinguishes a launch that owns an imminent agent

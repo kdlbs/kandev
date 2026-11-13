@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -48,27 +49,42 @@ func (c *sessionCeilingController) readGradedPopulationLocked(ctx context.Contex
 	}
 	lister, ok := c.lister.(admittedExecutionLister)
 	if !ok {
+		c.logPopulationUnknown("task_sessions", "reader_unavailable", "", "")
 		return population, errors.New("admitted execution grades unavailable")
 	}
 	rows, err := lister.ListAdmittedExecutions(ctx)
 	if err != nil {
+		c.logPopulationUnknown("task_sessions", populationReadFailure(err), "", "")
 		return population, err
 	}
 	seenGradeSessions := make(map[string]struct{}, len(rows)+len(c.reservations))
 	for _, row := range rows {
+		if !row.GradeKnown {
+			c.logPopulationUnknown("task_sessions", "grade_unknown", "session_id", row.ID)
+		}
 		population.counted[row.ID] = struct{}{}
 		if row.ID != "" {
 			seenGradeSessions[row.ID] = struct{}{}
 		}
 		c.observeGradeLocked(&population, row.Grade, row.GradeKnown, grade)
 	}
+	if err := c.appendInferenceGradesLocked(ctx, &population, grade); err != nil {
+		return population, err
+	}
 	population.total = c.populationLocked(population.counted)
-	for _, held := range c.reservations {
+	for key, held := range c.reservations {
 		if held.sessionID != "" {
 			if _, observed := seenGradeSessions[held.sessionID]; observed {
 				continue
 			}
 			seenGradeSessions[held.sessionID] = struct{}{}
+		}
+		if !held.gradeKnown {
+			id := held.sessionID
+			if id == "" {
+				id = key
+			}
+			c.logPopulationUnknown("reservations", "grade_unknown", "reservation_id", id)
 		}
 		c.observeGradeLocked(&population, held.grade, held.gradeKnown, grade)
 	}
@@ -112,9 +128,13 @@ func (c *sessionCeilingController) observeGradeLocked(population *gradedPopulati
 	}
 }
 
-func (c *sessionCeilingController) admitAllLocked(ctx context.Context, req admissionRequest, handoff bool) admissionDecision {
+func (c *sessionCeilingController) admitAllLocked(ctx context.Context, req admissionRequest, handoff bool) (decision admissionDecision) {
+	var observed *gradedPopulation
+	var gradeLimit int
+	defer func() { c.logGradedAdmissionFlow(ctx, req, decision, observed, gradeLimit) }()
 	d := admissionDecision{ceiling: c.ceiling}
 	p, err := c.readGradedPopulationLocked(ctx, req.grade)
+	observed = &p
 	d.population = p.total
 	d.populationKnown = err == nil && !p.unknown
 	// Existing ownership does not consume another slot when configuration changes.
@@ -127,28 +147,46 @@ func (c *sessionCeilingController) admitAllLocked(ctx context.Context, req admis
 		return c.persistAdmissionGradeLocked(ctx, req, existing)
 	}
 	maximum, configured := c.requestedGradeLimitLocked(req)
-	if !configured || (req.gradeKnown && p.missing) {
-		d.reasonCode = ceilingReasonNeedsConfiguration
+	gradeLimit = maximum
+	if reason := c.allAdmissionRejection(p, req, configured, d.populationKnown); reason != "" {
+		d.reasonCode = reason
 		return d
 	}
-	if !req.gradeKnown || !d.populationKnown {
-		d.reasonCode = ceilingReasonUnknownPopulation
-		return d
-	}
-	totalFull, gradeFull := p.total >= c.ceiling, p.grade >= maximum
-	switch {
-	case totalFull && gradeFull:
-		d.reasonCode = ceilingReasonBothLimits
-	case totalFull:
-		d.reasonCode = ceilingReasonTotalLimit
-	case gradeFull:
-		d.reasonCode = ceilingReasonGradeLimit
-	default:
+	d.reasonCode = c.allCapacityLimitReason(p, maximum)
+	if d.reasonCode == "" {
 		d.admitted = true
 		d.reservationKey = c.reserveGradeLocked(req)
 	}
 	c.logDecision(req, req.origin, d)
 	return c.persistAdmissionGradeLocked(ctx, req, d)
+}
+
+func (c *sessionCeilingController) allAdmissionRejection(p gradedPopulation, req admissionRequest, configured, populationKnown bool) string {
+	if !configured || (req.gradeKnown && p.missing) {
+		return ceilingReasonNeedsConfiguration
+	}
+	if !req.gradeKnown {
+		c.logPopulationUnknown("admission_grade", "grade_unknown", "session_id", req.sessionID)
+		return ceilingReasonUnknownPopulation
+	}
+	if !populationKnown {
+		return ceilingReasonUnknownPopulation
+	}
+	return ""
+}
+
+func (c *sessionCeilingController) allCapacityLimitReason(p gradedPopulation, maximum int) string {
+	totalFull, gradeFull := p.total >= c.ceiling, p.grade >= maximum
+	switch {
+	case totalFull && gradeFull:
+		return ceilingReasonBothLimits
+	case totalFull:
+		return ceilingReasonTotalLimit
+	case gradeFull:
+		return ceilingReasonGradeLimit
+	default:
+		return ""
+	}
 }
 
 func (c *sessionCeilingController) existingGradedAdmissionLocked(req admissionRequest, p gradedPopulation, handoff bool) (admissionDecision, bool) {
@@ -163,4 +201,15 @@ func (c *sessionCeilingController) existingGradedAdmissionLocked(req admissionRe
 func (c *sessionCeilingController) requestedGradeLimitLocked(req admissionRequest) (int, bool) {
 	maximum, configured := c.gradeLimits[req.grade]
 	return maximum, c.ceiling >= 1 && (!req.gradeKnown || (req.grade != "" && configured))
+}
+
+func (c *sessionCeilingController) logGradedAdmissionFlow(ctx context.Context, req admissionRequest, d admissionDecision, p *gradedPopulation, maximum int) {
+	e := logger.ExecutionFlow{Stage: "admission", Outcome: "waiting", Reason: d.reasonCode, TaskID: req.taskID, SessionID: req.sessionID, ProfileID: req.profileID, StepID: req.workflowStepID, Grade: req.grade, ReservationID: d.reservationKey, Limit: &d.ceiling, PopulationKnown: &d.populationKnown}
+	if d.admitted {
+		e.Outcome = "admitted"
+	}
+	if p != nil && d.populationKnown {
+		e.Population, e.GradePopulation, e.GradeLimit = &p.total, &p.grade, &maximum
+	}
+	logger.EmitExecutionFlow(c.logger, ctx, e)
 }

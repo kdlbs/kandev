@@ -182,6 +182,11 @@ type Manager struct {
 	runtimeStorageCacheMu sync.RWMutex
 	runtimeStorageCache   *streams.RuntimeStorageSnapshot
 
+	inferenceSnapshotMu    sync.RWMutex
+	inferenceSnapshotter   func() utility.AttemptSnapshot
+	finalInferenceSnapshot *utility.AttemptSnapshot
+	inferenceOwner         *utility.InferenceOwner
+
 	// Process state
 	cmd                *exec.Cmd
 	processLifecycle   processLifecycleHandle
@@ -431,6 +436,12 @@ func (m *Manager) admitStart() (func(), error) {
 		m.admissionMu.Unlock()
 		return nil, ErrManagerStopping
 	}
+	if m.inferenceOwner != nil {
+		if err := m.inferenceOwner.Activate(); err != nil {
+			m.admissionMu.Unlock()
+			return nil, err
+		}
+	}
 	if m.admissionCount == 0 {
 		m.admissionDrained = make(chan struct{})
 	}
@@ -560,8 +571,11 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 			m.repairStore = store
 		}
 	}
+	m.deliveryJournal, m.inferenceOwner, m.deliveryJournalErr = utility.OpenInferenceOwner(cfg)
+	if m.inferenceOwner != nil {
+		m.SetInferenceSnapshotter(m.inferenceOwner.FinalSnapshot)
+	}
 	if cfg.DurableJournalPath != "" {
-		m.deliveryJournal, m.deliveryJournalErr = journal.Open(journal.Config{Path: cfg.DurableJournalPath})
 		if m.deliveryJournalErr == nil {
 			m.deliveryLimit = m.deliveryJournal.MaxEventBytes()
 			sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
@@ -570,6 +584,9 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		if m.deliveryJournalErr != nil {
 			logDeliveryJournalOpenFailure(m.logger, cfg.InstanceID, cfg.SessionID, cfg.DurableJournalPath, m.deliveryJournalErr)
 		}
+	}
+	if m.deliveryJournalErr != nil && m.inferenceOwner != nil {
+		m.inferenceOwner.Unavailable(m.deliveryJournalErr)
 	}
 	// Build the root plus any immediate sibling repositories and recursively
 	// declared initialized submodules. The root remains a real empty-named
@@ -2165,14 +2182,20 @@ func (m *Manager) startWithGeneration(
 	expectedRevision *uint64,
 	expectedStopGeneration *uint64,
 	expectedRepairContext *managedruntime.RepairContext,
-) (uint64, error) {
+) (startedGeneration uint64, startErr error) {
+	finishFlow := m.logger.BeginFlow(ctx, logger.ExecutionFlow{Stage: "bootstrap", TaskID: m.cfg.TaskID, SessionID: m.cfg.SessionID, ExecutionID: m.cfg.InstanceID, HarnessGeneration: m.cfg.DeliveryHarnessGeneration})
+	failurePhase := "process_start"
+	successOutcome := "process_started"
+	defer finishProcessFlow(finishFlow, &startErr, &failurePhase, &successOutcome)
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 	release, err := m.admitStart()
 	if err != nil {
+		failurePhase = m.processAdmissionFailureReason(err)
 		return 0, err
 	}
 	defer release()
+	failurePhase = "already_running"
 	if m.passthrough.Live() {
 		return 0, fmt.Errorf("passthrough agent is already running")
 	}
@@ -2202,6 +2225,7 @@ func (m *Manager) startWithGeneration(
 			prepared = nil
 		}
 	}
+	failurePhase = "delivery_journal"
 	if m.cfg.DurableJournalPath != "" && m.deliveryJournalErr != nil {
 		m.status.Store(StatusError)
 		return 0, fmt.Errorf("durable delivery journal unavailable: %w", m.deliveryJournalErr)
@@ -2217,6 +2241,7 @@ func (m *Manager) startWithGeneration(
 	// never ran teardown, and Start is reachable without an intervening Stop.
 	m.finishPreviousLifecycle(ctx)
 	if prepared != nil {
+		failurePhase = "managed_runtime_preparation"
 		if preparation != nil {
 			if _, err := m.validateManagedRuntimePreparationDirective(*preparation); err != nil {
 				return 0, err
@@ -2231,34 +2256,31 @@ func (m *Manager) startWithGeneration(
 	// streams workspace state again.
 	m.renewWorkspaceTrackersForStart(ctx)
 
-	m.logger.Info("starting agent process",
-		zap.String("protocol", string(m.cfg.Protocol)),
-		zap.Strings("args", m.cfg.AgentArgs),
-		zap.String("workdir", m.cfg.WorkDir),
-		zap.Int("mcp_servers", len(m.cfg.McpServers)))
+	m.markProcessStarting()
 
-	m.status.Store(StatusStarting)
-	m.exitCode.Store(-1)
-	m.exitErr.Store(errorWrapper{err: nil})
-
+	failurePhase = "command_validation"
 	if err := config.ValidateCommandArgs(m.cfg.AgentArgs); err != nil {
 		m.status.Store(StatusError)
 		return 0, err
 	}
 
 	// Build adapter config and create protocol adapter
+	failurePhase = "adapter_configuration"
 	if err := m.buildAdapterConfig(); err != nil {
 		m.status.Store(StatusError)
 		return 0, err
 	}
 
-	return m.startConfiguredProcess()
+	return m.startConfiguredProcess(&failurePhase, &successOutcome)
 }
 
-func (m *Manager) startConfiguredProcess() (uint64, error) {
+func (m *Manager) startConfiguredProcess(failurePhase, successOutcome *string) (uint64, error) {
 	// One-shot adapters manage their own subprocess per prompt.
 	// Skip process creation — the adapter spawns processes in Prompt().
+	*failurePhase = "usage_binding"
 	if oneShotAdapter, ok := m.adapter.(adapter.OneShotAdapter); ok && oneShotAdapter.IsOneShot() {
+		*failurePhase = "oneshot_admission"
+		*successOutcome = "adapter_ready"
 		if err := m.startOneShot(); err != nil {
 			return 0, err
 		}
@@ -2266,11 +2288,13 @@ func (m *Manager) startConfiguredProcess() (uint64, error) {
 	}
 
 	// Assemble final command (does not start the process yet)
+	*failurePhase = "command_assembly"
 	if err := m.buildFinalCommand(); err != nil {
 		m.status.Store(StatusError)
 		m.closeOpenCodePlugin(context.Background())
 		return 0, err
 	}
+	*failurePhase = "managed_process_start"
 	generation, err := m.startManagedProcess()
 	if err != nil {
 		m.closeOpenCodePlugin(context.Background())
@@ -3462,6 +3486,9 @@ func (m *Manager) StopForTeardown(ctx context.Context) error {
 		return errors.Join(previewErr, fmt.Errorf("wait for process admission to drain: %w", err), m.closeDeliveryJournal())
 	}
 	stopErr := m.stop(ctx)
+	if passthroughErr == nil && previewErr == nil && stopErr == nil {
+		m.captureFinalInferenceSnapshot()
+	}
 	preparedErr := m.closePreparedRuntimeOwnersAfterTeardown()
 	instanceCleanupErr := m.closeInstanceCleanupHooks()
 	return errors.Join(passthroughErr, previewErr, stopErr, preparedErr, instanceCleanupErr, m.closeDeliveryJournal())
