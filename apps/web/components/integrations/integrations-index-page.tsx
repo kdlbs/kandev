@@ -5,7 +5,6 @@ import Link from "@/components/routing/app-link";
 import {
   IconBrandGithub,
   IconBrandGitlab,
-  IconBrandAzure,
   IconBrandSentry,
   IconHexagon,
   IconTicket,
@@ -19,7 +18,6 @@ import { SettingsPageHeader } from "@/components/settings/settings-typography";
 import { useTranslation } from "react-i18next";
 import { useDraftedIntegrationEnabled } from "@/components/integrations/use-drafted-integration-enabled";
 import { useHideDisabledIntegrationsInNav } from "@/hooks/domains/integrations/use-hide-disabled-integrations-in-nav";
-import { AzureDevOpsEnabledControl } from "@/components/azure-devops/azure-devops-enabled-control";
 import type { IntegrationEnabledControlProps } from "@/components/integrations/integration-enabled-control-props";
 import { GitHubEnabledControl } from "@/components/github/github-enabled-control";
 import { GitLabEnabledControl } from "@/components/gitlab/gitlab-enabled-control";
@@ -30,7 +28,7 @@ import { resolvePluginIcon } from "@/lib/plugins/icons";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import { PluginErrorBoundary } from "@/components/plugins/plugin-error-boundary";
 
-type IntegrationSlug = "azure-devops" | "github" | "gitlab" | "jira" | "linear" | "sentry";
+type IntegrationSlug = "github" | "gitlab" | "jira" | "linear" | "sentry";
 
 const INTEGRATIONS: Array<{
   slug: IntegrationSlug;
@@ -38,12 +36,6 @@ const INTEGRATIONS: Array<{
   descriptionKey: string;
   Icon: ComponentType<{ className?: string }>;
 }> = [
-  {
-    slug: "azure-devops",
-    label: "Azure DevOps",
-    descriptionKey: "settings:integrationDescriptionAzureDevops",
-    Icon: IconBrandAzure,
-  },
   {
     slug: "github",
     label: "GitHub",
@@ -83,7 +75,6 @@ const ENABLED_CONTROL_BY_SLUG: Record<
   IntegrationSlug,
   ComponentType<IntegrationEnabledControlProps>
 > = {
-  "azure-devops": AzureDevOpsEnabledControl,
   github: GitHubEnabledControl,
   gitlab: GitLabEnabledControl,
   jira: JiraEnabledControl,

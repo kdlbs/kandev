@@ -3636,40 +3636,6 @@ export class ApiClient {
     }
   }
 
-  // --- Azure DevOps Mock Control ---
-
-  async mockAzureDevOpsSeed(state: unknown): Promise<void> {
-    await this.request("POST", "/api/v1/azure-devops/mock/state", state);
-  }
-
-  async mockAzureDevOpsReset(): Promise<void> {
-    await this.request("DELETE", "/api/v1/azure-devops/mock/state");
-  }
-
-  async setAzureDevOpsConfig(
-    workspaceId: string,
-    payload: { organizationUrl: string; pat: string },
-  ): Promise<void> {
-    await this.request(
-      "POST",
-      `/api/v1/azure-devops/config?workspace_id=${encodeURIComponent(workspaceId)}`,
-      { ...payload, authMethod: "pat" },
-    );
-  }
-
-  async associateAzureDevOpsTaskPR(
-    workspaceId: string,
-    taskId: string,
-    repositoryId: string,
-    pullRequestId: number,
-  ): Promise<void> {
-    await this.request(
-      "POST",
-      `/api/v1/azure-devops/tasks/${encodeURIComponent(taskId)}/pull-requests?workspace_id=${encodeURIComponent(workspaceId)}`,
-      { repositoryId, pullRequestId },
-    );
-  }
-
   // --- Jira Mock Control ---
 
   async mockJiraReset(): Promise<void> {

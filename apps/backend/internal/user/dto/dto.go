@@ -72,7 +72,6 @@ type UserSettingsDTO struct {
 	GitHubSavedPresets                json.RawMessage                         `json:"github_saved_presets,omitempty"`
 	GitHubDefaultQueryPresets         json.RawMessage                         `json:"github_default_query_presets,omitempty"`
 	GitLabSavedPresets                json.RawMessage                         `json:"gitlab_saved_presets,omitempty"`
-	AzureDevOpsBrowsePreferences      json.RawMessage                         `json:"azure_devops_browse_preferences,omitempty"`
 	DefaultUtilityAgentID             string                                  `json:"default_utility_agent_id"`
 	DefaultUtilityModel               string                                  `json:"default_utility_model"`
 	DefaultUtilityAgentProfileID      string                                  `json:"default_utility_agent_profile_id"`
@@ -198,7 +197,6 @@ type UpdateUserSettingsRequest struct {
 	GitHubSavedPresets                NullableRawMessage                 `json:"github_saved_presets,omitempty"`
 	GitHubDefaultQueryPresets         NullableRawMessage                 `json:"github_default_query_presets,omitempty"`
 	GitLabSavedPresets                NullableRawMessage                 `json:"gitlab_saved_presets,omitempty"`
-	AzureDevOpsBrowsePreferences      NullableRawMessage                 `json:"azure_devops_browse_preferences,omitempty"`
 	DefaultUtilityAgentID             *string                            `json:"default_utility_agent_id,omitempty"`
 	DefaultUtilityModel               *string                            `json:"default_utility_model,omitempty"`
 	DefaultUtilityAgentProfileID      *string                            `json:"default_utility_agent_profile_id,omitempty"`
@@ -408,7 +406,6 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		GitHubSavedPresets:                settings.GitHubSavedPresets,
 		GitHubDefaultQueryPresets:         settings.GitHubDefaultQueryPresets,
 		GitLabSavedPresets:                settings.GitLabSavedPresets,
-		AzureDevOpsBrowsePreferences:      settings.AzureDevOpsBrowsePreferences,
 		DefaultUtilityAgentID:             settings.DefaultUtilityAgentID,
 		DefaultUtilityModel:               settings.DefaultUtilityModel,
 		DefaultUtilityAgentProfileID:      settings.DefaultUtilityAgentProfileID,

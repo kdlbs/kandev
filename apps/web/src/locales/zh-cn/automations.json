@@ -387,10 +387,6 @@
   "mcpNoServers": "未找到其他 MCP 服务器。",
   "mcpUnavailable": "{{name}}（不可用）",
   "mcpOptionsFailed": "无法加载 MCP 选项。已保存的选择保持不变。",
-  "mcpDesired": "期望的包",
-  "mcpCurrentProcess": "当前进程",
-  "mcpUnknown": "未知",
-  "mcpObserved": "已观测的连接",
   "passthroughOutputNotCapturedTitle": "此运行的记录中不会捕获 CLI passthrough 的输出。",
   "passthroughOutputFutureSessionsDescription": "如需在未来的会话中记录输出，请在自动化的智能体配置中停用 CLI passthrough。此处无法恢复之前的终端输出。"
 }

@@ -387,10 +387,6 @@
   "mcpNoServers": "No additional MCP servers found.",
   "mcpUnavailable": "{{name}} (unavailable)",
   "mcpOptionsFailed": "Could not load MCP choices. Saved choices remain unchanged.",
-  "mcpDesired": "Desired packages",
-  "mcpCurrentProcess": "Current process",
-  "mcpUnknown": "Unknown",
-  "mcpObserved": "Observed connections",
   "passthroughOutputNotCapturedTitle": "CLI passthrough output is not captured in this run's transcript.",
   "passthroughOutputFutureSessionsDescription": "Disable CLI passthrough in the automation's agent profile to record output for future sessions. Previous terminal output cannot be recovered here."
 }

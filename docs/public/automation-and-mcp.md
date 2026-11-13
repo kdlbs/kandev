@@ -344,13 +344,15 @@ Private automation sessions receive required, workspace-scoped Core tools for co
 ### Choose MCP access
 
 1. Open **Settings > Workspaces > your workspace > Automations** and select an automation.
-2. Under **MCP access**, open a built-in package and choose **On** or **Off**. Use **Back to packages** to return to the list. Configuration, Rich Output, Walkthroughs, and Diagnostics are optional. Core stays required.
+2. Under **MCP access**, use the **On** or **Off** switch in each package row. Select a package name to read its details. Configuration, Rich Output, Walkthroughs, and Diagnostics are optional. Core stays required.
 3. Select additional **Workspace MCP servers** from that workspace's saved catalog. Repository and agent-profile inheritance remains additive.
 4. Use **Save changes**. Use **Reset** to remove unsaved edits.
 
 **Configuration grants mutation access** to authorized workflows, profiles, prompts, executors, and automations. The private run keeps its automation identity and workspace restrictions. Native Configuration tools cannot change package grants, automation MCP selections, plugin approvals, or profile MCP server access. Selected third-party servers use their own tools and credentials. The native dispatcher does not sandbox those servers.
 
-Private-run choices apply at the **next agent process start**. Saving does not restart a run. A new turn in a reused process keeps its accepted selection. A fresh process, including a retry or replacement, reads current choices. Run details distinguish desired packages, the current process binding, and observed tool catalogs. Unknown evidence stays Unknown.
+Private-run choices apply at the **next agent process start**. Saving does not restart a run. A new turn in a reused process keeps its accepted selection. A fresh process, including a retry or replacement, reads current choices. Use the MCP plug icon to inspect MCP information when the viewer is available. The run conversation has no separate MCP access summary.
+
+Built-in package switches use explicit **On** or **Off** selections directly in the package list. Select a package name to inspect its details. Automations do not offer a package inheritance action. Core remains required.
 
 For **normal task** automations, MCP choices form a template for newly created tasks. Workspace task-package limits still apply. Reusing an existing task preserves that task's later customization. Managed conversations use their destination's tool policy.
 
