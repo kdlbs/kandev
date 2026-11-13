@@ -154,6 +154,36 @@ clear before a person saves an automation.
   and executor-profile selection shall use the same searchable controls,
   logos, repository/branch chips, and workflow step previews as task creation.
 
+### REQ-OFFICE-AUTOMATION-TARGETS-004: Assign an optional parent task
+
+**Intent:** Let a workspace owner make each firing's task a child of an existing
+task, so a coordinator can find the run's work through task relations.
+
+#### Acceptance criteria
+
+- **AC-OFFICE-AUTOMATION-TARGETS-004.1:** An automation shall accept an optional
+  `parent_task_id` naming a task in the same workspace. Omitting it keeps the
+  current top-level behavior.
+- **AC-OFFICE-AUTOMATION-TARGETS-004.2:** When set, each firing's created or
+  replacement task shall be a direct child of that parent for both
+  `automation_run` and `normal_task` targets, and the parent's task-relation
+  query shall list it.
+- **AC-OFFICE-AUTOMATION-TARGETS-004.3:** Parent resolution and hierarchy
+  admission shall reuse the existing task-creation parent validation; the
+  feature shall not add a second validation rule. An unchanged stale parent
+  shall not prevent disabling the automation.
+- **AC-OFFICE-AUTOMATION-TARGETS-004.4:** Retry and continuation firings shall
+  carry the same `parent_task_id`. Changing or clearing the configured parent
+  resets future continuation; older firings retain their saved parent without
+  replacing the current continuation binding.
+- **AC-OFFICE-AUTOMATION-TARGETS-004.5:** The editor shall offer a searchable,
+  workspace-scoped task selector, and the MCP create surface shall accept
+  `parent_task_id`. Typed searches shall reach workspace search so tasks beyond
+  the initial result page remain selectable.
+- **AC-OFFICE-AUTOMATION-TARGETS-004.6:** Portable export shall exclude
+  `parent_task_id` because it names a task row in this install and is not
+  portable.
+
 ## Out of scope
 
 - Concurrent turns or additional sessions on a reusable target.

@@ -143,6 +143,7 @@ export function ThenSection({
     "taskTitleTemplate",
     "prompt",
     "workflowId",
+    "parentTaskId",
     "taskMode",
     "agentProfileId",
     "executorProfileId",
@@ -193,12 +194,14 @@ export function ThenSection({
           <ConfigSection
             workspaceId={workspaceId}
             workflowId={form.workflowId}
+            parentTaskId={form.parentTaskId}
             agentProfileId={form.agentProfileId}
             executorProfileId={form.executorProfileId}
             taskMode={form.taskMode}
             repositorySelections={form.repositorySelections}
             dirtyFields={{
               workflowId: isAutomationFieldDirty(form, savedForm, "workflowId"),
+              parentTaskId: isAutomationFieldDirty(form, savedForm, "parentTaskId"),
               agentProfileId: isAutomationFieldDirty(form, savedForm, "agentProfileId"),
               executorProfileId: isAutomationFieldDirty(form, savedForm, "executorProfileId"),
               repositorySelections: isAutomationFieldDirty(form, savedForm, "repositorySelections"),
@@ -207,6 +210,7 @@ export function ThenSection({
               updateField("workflowId", value);
               updateField("workflowStepId", "");
             }}
+            onParentChange={(value) => updateField("parentTaskId", value)}
             onAgentProfileChange={(value) => updateField("agentProfileId", value)}
             onExecutorProfileChange={(value) => updateField("executorProfileId", value)}
             onRepositoriesChange={(value) => {

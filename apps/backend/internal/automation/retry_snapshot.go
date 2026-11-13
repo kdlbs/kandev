@@ -16,6 +16,7 @@ type RetryLaunchConfigSnapshot struct {
 	Name               string                 `json:"name"`
 	WorkflowID         string                 `json:"workflow_id"`
 	WorkflowStepID     string                 `json:"workflow_step_id"`
+	ParentTaskID       string                 `json:"parent_task_id"`
 	AgentProfileID     string                 `json:"agent_profile_id"`
 	ExecutorProfileID  string                 `json:"executor_profile_id"`
 	Prompt             string                 `json:"prompt"`
@@ -59,6 +60,7 @@ func buildRetryLaunchConfigSnapshot(a *Automation, triggerID string, triggerType
 		Name:               a.Name,
 		WorkflowID:         a.WorkflowID,
 		WorkflowStepID:     a.WorkflowStepID,
+		ParentTaskID:       a.ParentTaskID,
 		AgentProfileID:     a.AgentProfileID,
 		ExecutorProfileID:  a.ExecutorProfileID,
 		Prompt:             a.Prompt,

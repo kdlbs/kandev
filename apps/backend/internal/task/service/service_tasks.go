@@ -284,6 +284,13 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 	if err := s.validateRequestedExecutorAdmission(ctx, req); err != nil {
 		return CreateTaskResult{}, err
 	}
+	// An automation-started task re-validates its saved parent inside the
+	// creation admission, narrowed to the automation's own workspace.
+	parentValidator := hierarchy.ValidateCreationParent
+	if req.AutomationStartOwned {
+		parentValidator = hierarchy.CreationParentValidatorForWorkspace(req.WorkspaceID)
+	}
+	ctx = taskrepo.WithTaskCreationParentValidator(ctx, parentValidator)
 
 	prepared, err := s.prepareTaskForCreation(ctx, req, externalID)
 	if err != nil {
@@ -295,7 +302,6 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 		return CreateTaskResult{}, newPreAllocationTaskCreateError(err)
 	}
 
-	ctx = taskrepo.WithTaskCreationParentValidator(ctx, hierarchy.ValidateCreationParent)
 	insertTask := func() error { return s.createTaskWithCapacity(ctx, prepared.task) }
 	var createErr error
 	if prepared.task.CreationAttachmentClaim != nil && s.attachmentSvc != nil {
@@ -984,10 +990,14 @@ func (s *Service) validateSubtaskDepth(ctx context.Context, req *CreateTaskReque
 	if req.ParentID == "" {
 		return nil
 	}
-	if admission, ok := s.tasks.(taskrepo.TaskHierarchyAdmission); ok {
-		return admission.ValidateTaskCreationParent(ctx, req.WorkspaceID, req.ParentID, hierarchy.ValidateCreationParent)
+	validate := hierarchy.TaskCreationParentValidator(ctx)
+	if validate == nil {
+		validate = hierarchy.ValidateCreationParent
 	}
-	return hierarchy.ValidateCreationParent(ctx, s.tasks, nil, req.ParentID)
+	if admission, ok := s.tasks.(taskrepo.TaskHierarchyAdmission); ok {
+		return admission.ValidateTaskCreationParent(ctx, req.WorkspaceID, req.ParentID, validate)
+	}
+	return validate(ctx, s.tasks, nil, req.ParentID)
 }
 
 // resolveOfficeWorkflow sets WorkflowID on the request from the workspace's office workflow.

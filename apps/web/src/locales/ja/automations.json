@@ -110,6 +110,8 @@
   "openAutomations": "自動化を開く",
   "orUseWebhookInstead": "代わりに webhook 使用",
   "outcome": "結果",
+  "parentTaskHelp": "実行ごとに作成されるタスクはこのタスクの下に作成されます。空欄の場合は最上位のタスクになります。",
+  "parentTaskLabel": "親タスク(任意)",
   "pickAWorkflowFirst": "先にワークフロー選択",
   "prMergedDeadConfigWarning": "リポジトリ未選択。このトリガー発火しない。'All repositories'有効化するか、少なくとも1つリポジトリ追加して。",
   "prEventOpened": "オープン",
