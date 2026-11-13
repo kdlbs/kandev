@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/review"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -55,6 +56,10 @@ func buildReviewComponents(p routeParams) reviewComponents {
 		reviewUtilityLookup{agents: p.services.Utility},
 		reviewDefaultsLookup{settings: p.services.User},
 	)
+	taskContext := reviewTaskContext{tasks: p.taskSvc}
+	if p.authSvc != nil {
+		taskContext.operatorIdentity = p.authSvc.IdentityForUser
+	}
 	runner := review.NewRunner(review.RunnerDeps{
 		Store:            service,
 		Resolver:         resolver,
@@ -62,7 +67,7 @@ func buildReviewComponents(p routeParams) reviewComponents {
 		Inference:        reviewInference{session: p.lifecycleMgr, host: p.hostUtilityMgr, profiles: execution, runs: service, originProfiles: profileLookup},
 		InferenceContext: reviewInferenceContext(p.taskRepo),
 		Prompts:          review.NewTemplatePromptBuilder(reviewTemplateSource{agents: p.services.Utility, engine: utilitytemplate.NewEngine()}),
-		TaskContext:      reviewTaskContext{tasks: p.taskSvc},
+		TaskContext:      taskContext,
 		Sessions:         reviewSessionLookup{sessions: p.taskRepo},
 		Logger:           p.log,
 	})
@@ -441,7 +446,8 @@ func (r reviewInference) CompleteSelection(ctx context.Context, identity review.
 
 // reviewTaskContext supplies the task-level facts the review prompt interpolates.
 type reviewTaskContext struct {
-	tasks reviewTaskGetter
+	tasks            reviewTaskGetter
+	operatorIdentity func(context.Context, string) (authn.Identity, bool)
 }
 
 type reviewTaskGetter interface {

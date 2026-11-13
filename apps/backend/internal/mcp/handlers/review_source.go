@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+
 	"github.com/kandev/kandev/internal/authz"
 
 	"github.com/kandev/kandev/internal/review"
@@ -28,22 +29,33 @@ func (h *Handlers) handleSetReviewSource(ctx context.Context, msg *ws.Message) (
 	if err := h.taskSvc.AuthorizeTaskScope(ctx, req.TaskID, authz.ScopeTaskWrite); err != nil {
 		return reviewLaunchError(msg, err)
 	}
-	if denied := h.admitAgentReviewSource(ctx, msg, req.TaskID, req.WorktreePath); denied != nil {
-		return denied, nil
-	}
-	var value any
 	if req.Clear {
 		if req.WorktreePath != "" || req.BaseRef != "" || req.HeadRef != "" {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "clear cannot be combined with source fields", nil)
 		}
-	} else {
-		source := review.Source{WorktreePath: req.WorktreePath, BaseRef: req.BaseRef, HeadRef: req.HeadRef}
-		if err := review.ValidateSource(ctx, source); err != nil {
+		return h.saveReviewSource(ctx, msg, req.TaskID, nil, nil)
+	}
+	operator, denied := h.reviewSourceOperator(ctx, msg, req.TaskID, req.WorktreePath)
+	if denied != nil {
+		return denied, nil
+	}
+	source := review.Source{WorktreePath: req.WorktreePath, BaseRef: req.BaseRef, HeadRef: req.HeadRef}
+	if err := review.ValidateSource(ctx, source); err != nil {
+		return reviewLaunchError(msg, err)
+	}
+	var approval *models.ReviewSourceApproval
+	if operator != "" {
+		var err error
+		approval, err = review.ApproveSource(ctx, operator, source)
+		if err != nil {
 			return reviewLaunchError(msg, err)
 		}
-		value = source
 	}
-	task, err := h.taskSvc.UpdateTaskMetadata(ctx, req.TaskID, map[string]any{review.SourceMetadataKey: value})
+	return h.saveReviewSource(ctx, msg, req.TaskID, source, approval)
+}
+
+func (h *Handlers) saveReviewSource(ctx context.Context, msg *ws.Message, taskID string, value any, approval *models.ReviewSourceApproval) (*ws.Message, error) {
+	task, err := h.taskSvc.SetTaskReviewSource(ctx, taskID, value, approval)
 	if err != nil {
 		return reviewLaunchError(msg, err)
 	}

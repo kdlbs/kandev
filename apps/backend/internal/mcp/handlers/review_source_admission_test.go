@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/review"
 	"github.com/kandev/kandev/internal/task/models"
@@ -117,9 +118,40 @@ func TestAgentReviewSourceIsLimitedToTheTaskRepositories(t *testing.T) {
 	require.Equal(t, f.registered, source.WorktreePath, "a rejected path must not replace the saved source")
 }
 
-func TestPersonReviewSourceMayNameAnyLocalCheckout(t *testing.T) {
+func TestOperatorReviewSourceRecordsExplicitExternalCheckout(t *testing.T) {
 	f := newReviewSourceFixture(t)
-	requireWSSuccess(t, f.setSource(t, context.Background(), f.outside))
+	requireWSForbidden(t, f.setSource(t, context.Background(), f.outside))
+	_, err := f.h.taskSvc.UpdateTaskMetadata(context.Background(), "task-a", map[string]interface{}{
+		"kandev.review_source_approval": map[string]interface{}{"user_id": "operator-a"},
+	})
+	require.NoError(t, err)
+	legacy, err := f.h.taskSvc.ReadReviewSourceApproval(context.Background(), "task-a")
+	require.NoError(t, err)
+	require.Nil(t, legacy, "ordinary metadata written before approval is not an operator decision")
+	operator := authn.WithIdentity(context.Background(), authn.Identity{
+		UserID: "operator-a", Role: authn.RoleAdmin, SessionID: "browser-login",
+	})
+	requireWSSuccess(t, f.setSource(t, operator, f.outside))
+	task, err := f.h.taskSvc.GetTask(context.Background(), "task-a")
+	require.NoError(t, err)
+	source, err := review.SourceFromMetadata(task.Metadata)
+	require.NoError(t, err)
+	require.Equal(t, f.outside, source.WorktreePath)
+	approval, err := f.h.taskSvc.ReadReviewSourceApproval(context.Background(), "task-a")
+	require.NoError(t, err)
+	require.NotNil(t, approval)
+	require.Equal(t, "operator-a", approval.UserID)
+	_, err = f.h.taskSvc.UpdateTaskMetadata(context.Background(), "task-a", map[string]interface{}{
+		"kandev.review_source_approval": map[string]interface{}{"user_id": "forged"},
+	})
+	require.NoError(t, err)
+	current, err := f.h.taskSvc.ReadReviewSourceApproval(context.Background(), "task-a")
+	require.NoError(t, err)
+	require.Equal(t, approval, current)
+	requireWSSuccess(t, f.setSource(t, f.agent, f.registered))
+	current, err = f.h.taskSvc.ReadReviewSourceApproval(context.Background(), "task-a")
+	require.NoError(t, err)
+	require.Nil(t, current, "a task-owned selection clears the old external approval")
 }
 
 func TestAgentReviewRunIsLimitedToTheTaskRepositories(t *testing.T) {

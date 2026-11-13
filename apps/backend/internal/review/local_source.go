@@ -10,16 +10,20 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // Source names a backend-local Git worktree and the comparison it supplies.
 type Source struct {
-	WorktreePath string `json:"worktree_path"`
-	BaseRef      string `json:"base_ref"`
-	HeadRef      string `json:"head_ref,omitempty"`
+	WorktreePath         string `json:"worktree_path"`
+	BaseRef              string `json:"base_ref"`
+	HeadRef              string `json:"head_ref,omitempty"`
+	admittedCommonDir    string
+	admittedWorktreeRoot string
 }
 
-const SourceMetadataKey = "review_source"
+const SourceMetadataKey = models.MetaKeyReviewSource
 
 // SourceFromMetadata accepts typed and JSON-decoded source metadata.
 func SourceFromMetadata(metadata map[string]any) (*Source, error) {
@@ -110,6 +114,9 @@ func prepareLocalSource(ctx context.Context, source Source) (string, string, str
 	path, err := filepath.EvalSymlinks(source.WorktreePath)
 	if err != nil || !localPath(path) {
 		return "", "", "", fmt.Errorf("%w: worktree_path must exist on local disk", ErrWorkspaceUnavailable)
+	}
+	if source.admittedCommonDir != "" && !sourceRepositoryStillMatches(ctx, source, path) {
+		return "", "", "", fmt.Errorf("%w: admitted review checkout changed", ErrWorkspaceUnavailable)
 	}
 	info, err := os.Stat(path)
 	if err != nil || !info.IsDir() {

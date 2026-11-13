@@ -114,6 +114,8 @@ func TestSourceAdmittedAcceptsOtherWorktreesOfARegisteredRepository(t *testing.T
 	gitForSourceTest(t, registered, "worktree", "add", "-b", "gate-1", slot)
 	foreignSlot := filepath.Join(base, "slots", "foreign")
 	gitForSourceTest(t, unrelated, "worktree", "add", "-b", "foreign", foreignSlot)
+	disguisedSlot := filepath.Join(registered, "foreign-gitfile")
+	gitForSourceTest(t, unrelated, "worktree", "add", "-b", "disguised", disguisedSlot)
 	plain := filepath.Join(base, "plain")
 	if err := os.MkdirAll(plain, 0o755); err != nil {
 		t.Fatal(err)
@@ -134,6 +136,22 @@ func TestSourceAdmittedAcceptsOtherWorktreesOfARegisteredRepository(t *testing.T
 	}
 	if SourceAdmitted(ctx, slot, nil, nil) {
 		t.Fatal("without a registered repository a worktree must be rejected")
+	}
+	if SourceAdmitted(ctx, disguisedSlot, []string{registered}, repositories) {
+		t.Fatal("an in-root gitfile must not admit an unrelated common directory")
+	}
+	redirected := initSourceTestRepo(t, filepath.Join(registered, "redirected"))
+	gitForSourceTest(t, redirected, "config", "core.worktree", unrelated)
+	if SourceAdmitted(ctx, redirected, []string{registered}, repositories) {
+		t.Fatal("a repository must not redirect worktree collection outside its admitted checkout")
+	}
+	alternate := initSourceTestRepo(t, filepath.Join(registered, "with-alternates"))
+	if err := os.WriteFile(filepath.Join(alternate, ".git", "objects", "info", "alternates"),
+		[]byte(filepath.Join(unrelated, ".git", "objects")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if SourceAdmitted(ctx, alternate, []string{registered}, repositories) {
+		t.Fatal("an admitted directory must not borrow an unrelated Git object store")
 	}
 
 	// The probe describes the candidate itself; an inherited repository

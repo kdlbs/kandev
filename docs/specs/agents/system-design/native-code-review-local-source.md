@@ -47,7 +47,15 @@ cannot be combined with source fields.
 
 The runner reads the saved source only after workspace collection returns no
 files or fails. Task metadata takes precedence over a `review_source` carried by
-the writer session's metadata.
+the writer session's metadata. At collection it checks current task ownership,
+including an additional worktree of an attached Git repository. A browser
+operator with workspace-management authority can select an external checkout
+through the existing setter. It stores that operator, the canonical checkout,
+Git common directory and refs in a server-owned record, atomically with the
+existing task metadata selection. Collection
+rechecks the operator's current authority and the selected checkout. Ordinary
+metadata and session metadata cannot add this approval. A legacy external
+source can stay saved and needs an explicit operator selection before reuse.
 
 ## Agent-supplied paths
 
@@ -64,10 +72,13 @@ supplied path and each root, lower-cases on Windows, and accepts only a root or
 a directory below one by path components, so a link that leaves a root or a
 sibling such as `repo-evil` is rejected.
 
-Only when that path check fails, `review.SourceAdmitted` also admits the task's
-registered repositories, including their other worktrees, such as a gate slot.
-It runs one read-only `git rev-parse --path-format=absolute --git-common-dir` on
-the resolved candidate and on each registered checkout, with repository-binding
+An in-root checkout must also use a Git common directory inside the admitted
+roots or one belonging to the task's registered repositories. A linked gate
+worktree can use the registered common directory from outside those roots.
+The collector verifies the effective worktree root and Git object store.
+Repositories that borrow another object store through alternates are rejected.
+The collector uses read-only `git rev-parse --path-format=absolute --git-common-dir`
+on the resolved candidate and registered checkouts, with repository-binding
 variables such as `GIT_DIR`, `GIT_WORK_TREE`, and `GIT_COMMON_DIR` removed from
 the environment, and compares the common directories after the same symlink and
 Windows-case canonicalisation. A worktree of an unrelated repository, a
@@ -75,11 +86,10 @@ non-repository, or a failed probe is rejected. A rejection is a forbidden error
 before review Git validation or collection; no run starts and no source is
 saved.
 
-A request without either MCP marker comes from a person's authenticated WebSocket
-client and keeps the explicit and saved source rules above, including any
-backend-local checkout. The browser UI itself sends no source fields. A
-source saved that way is a person's choice, so a later agent-triggered review
-may read it.
+An authenticated browser WebSocket operator with workspace-management authority
+can explicitly select a backend-local checkout. The browser UI itself sends
+no source fields. A later workflow or agent review can use that saved source
+only while the protected selection and the operator's authority still match.
 
 ## Results
 
