@@ -391,6 +391,7 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	createReq := buildStandaloneCreateInstanceRequest(
 		req, env, agentType, disableAskQuestion, assumeMcpSse, assumeMcpHttp, requiresProcessKill, stripEnv,
 	)
+	createReq.InferenceClosureOperationID = agentctl.InferenceClosureAdoptionFromContext(ctx)
 	if req.DurableJournalHostRoot != "" && req.DurableJournalOwnerID != "" {
 		location, err := resolveDurableJournal(req)
 		if err != nil {

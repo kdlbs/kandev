@@ -3475,6 +3475,10 @@ func (m *Manager) Stop(ctx context.Context) error {
 // StopForTeardown permanently closes process admission and drains prior owners
 // before stopping every process owned by the manager.
 func (m *Manager) StopForTeardown(ctx context.Context) error {
+	return m.stopForTeardown(ctx, false)
+}
+
+func (m *Manager) stopForTeardown(ctx context.Context, retainJournal bool) error {
 	m.CloseAdmission()
 	passthroughErr := m.passthrough.StopAll(ctx)
 	passthroughErr = errors.Join(passthroughErr, m.cleanupPassthroughFiles(ctx))
@@ -3491,6 +3495,9 @@ func (m *Manager) StopForTeardown(ctx context.Context) error {
 	}
 	preparedErr := m.closePreparedRuntimeOwnersAfterTeardown()
 	instanceCleanupErr := m.closeInstanceCleanupHooks()
+	if retainJournal && errors.Join(passthroughErr, previewErr, stopErr, preparedErr, instanceCleanupErr) == nil {
+		return nil
+	}
 	return errors.Join(passthroughErr, previewErr, stopErr, preparedErr, instanceCleanupErr, m.closeDeliveryJournal())
 }
 

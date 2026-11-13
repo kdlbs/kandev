@@ -2511,13 +2511,16 @@ type SessionBranchInfo struct {
 // TaskSession represents a persistent agent execution session for a task.
 // This replaces the in-memory TaskExecution tracking and survives backend restarts.
 type TaskSession struct {
-	ExecutorActorUserID string `json:"-"`
-	ID                  string `json:"id"`
-	TaskID              string `json:"task_id"`
-	QueueIncarnationID  string `json:"queue_incarnation_id"`
-	Name                string `json:"name,omitempty"`     // Optional user-supplied label shown on the session tab
-	AgentExecutionID    string `json:"agent_execution_id"` // Docker container/agent execution
-	ContainerID         string `json:"container_id"`       // Docker container ID for cleanup
+	// Set only by a session read that also checked the independent closure
+	// block on the writer. It is never stored or exposed in API payloads.
+	InferenceClosureAbsenceConfirmed bool   `json:"-" db:"-"`
+	ExecutorActorUserID              string `json:"-"`
+	ID                               string `json:"id"`
+	TaskID                           string `json:"task_id"`
+	QueueIncarnationID               string `json:"queue_incarnation_id"`
+	Name                             string `json:"name,omitempty"`     // Optional user-supplied label shown on the session tab
+	AgentExecutionID                 string `json:"agent_execution_id"` // Docker container/agent execution
+	ContainerID                      string `json:"container_id"`       // Docker container ID for cleanup
 	// ExecutionRuntime is the observed runtime recorded by executors_running
 	// for this session's execution. Empty means unknown; it is never derived
 	// from the selected executor configuration.
@@ -2720,7 +2723,7 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 		result["completed_at"] = s.CompletedAt
 	}
 	if s.Metadata != nil {
-		result["metadata"] = s.Metadata
+		result["metadata"] = PublicSessionMetadata(s.Metadata)
 	}
 	if s.AgentProfileSnapshot != nil {
 		result["agent_profile_snapshot"] = s.AgentProfileSnapshot

@@ -1969,10 +1969,24 @@ func (r *Repository) hydrateDynamicRoutePolicy(ctx context.Context, session *mod
 
 // GetTaskSession retrieves an agent session by ID
 func (r *Repository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
+	checked := models.InferenceClosurePresenceCheckRequested(ctx)
+	if checked {
+		block, err := r.GetInferenceClosureBlock(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if block != nil {
+			return nil, models.ErrInferenceClosureBlocked
+		}
+	}
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
 		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+` WHERE ts.id = ?`,
 	), id)
-	return r.scanTaskSession(ctx, row, fmt.Sprintf("agent session not found: %s", id))
+	session, err := r.scanTaskSession(ctx, row, fmt.Sprintf("agent session not found: %s", id))
+	if err == nil && session != nil {
+		session.InferenceClosureAbsenceConfirmed = checked
+	}
+	return session, err
 }
 
 // ClaimPromptableTaskSessionIfActive atomically claims a ready session for a

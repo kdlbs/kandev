@@ -25,6 +25,9 @@ import (
 // collapsed: those rows never landed on main so the migrations were
 // pure no-ops at first boot.
 func (r *Repository) runMigrations() error {
+	if err := r.migrateRunSessionCapacity(); err != nil {
+		return err
+	}
 	if err := r.migrateSchedulerColumns(); err != nil {
 		return err
 	}

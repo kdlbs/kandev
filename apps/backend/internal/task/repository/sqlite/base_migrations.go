@@ -157,6 +157,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	if err := r.backfillLegacyActiveDynamicRoutes(); err != nil {
 		return err
 	}
+	if err := r.ensureNativeRouteOwners(ctx); err != nil {
+		return err
+	}
 	r.migrate.Apply("executors_running.execution_profile_id", `ALTER TABLE executors_running ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("executors_running.last_message_uuid", `ALTER TABLE executors_running ADD COLUMN last_message_uuid TEXT DEFAULT ''`)
 	r.migrate.Apply("executors_running.metadata", `ALTER TABLE executors_running ADD COLUMN metadata TEXT DEFAULT '{}'`)

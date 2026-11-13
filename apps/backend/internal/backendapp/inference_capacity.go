@@ -33,7 +33,7 @@ type sharedInferenceConsumer struct {
 	sources          []inferenceClientSource
 	refreshMu        sync.Mutex
 	workerMu         sync.Mutex
-	workers          map[string]struct{}
+	workers          map[string]inferenceWorker
 }
 
 func inferenceBindingKey(owner, attempt string) string { return "inference:" + owner + ":" + attempt }
@@ -137,6 +137,9 @@ func (b *sharedInferenceConsumer) waitInferenceCapacity(ctx context.Context, cli
 			b.logInferenceFlow(ctx, binding, "inference_admission", "waiting", reason, time.Since(started).Milliseconds())
 			lastReason = reason
 		}
+		if err != nil {
+			return &agentruntime.InferenceCapacityError{Reason: reason, Cause: err}
+		}
 		all, finite := b.capacity.InferenceCapacityPolicy()
 		if !all || !finite {
 			return nil
@@ -156,10 +159,10 @@ func (b *sharedInferenceConsumer) markWorker(key string, active bool) {
 	b.workerMu.Lock()
 	defer b.workerMu.Unlock()
 	if b.workers == nil {
-		b.workers = make(map[string]struct{})
+		b.workers = make(map[string]inferenceWorker)
 	}
 	if active {
-		b.workers[key] = struct{}{}
+		b.workers[key] = inferenceWorker{}
 	} else {
 		delete(b.workers, key)
 	}

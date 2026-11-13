@@ -297,7 +297,9 @@ describe("useSessionActions restart", () => {
     act(() => {
       pending = result.current.restart();
     });
-    expect(mockRequest.mock.calls).toEqual([["session.stop", { session_id: "s1" }, 15000]]);
+    expect(mockRequest.mock.calls).toEqual([
+      ["session.stop", { session_id: "s1", close_inference_for_restart: true }, 60000],
+    ]);
     expect(result.current.isRestarting).toBe(true);
     await act(async () => {
       finishStop();

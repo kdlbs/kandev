@@ -1253,7 +1253,8 @@ func startGatewayAndServe(
 	hostUtilityMgr.SetProviderGatewayAuthResolver(lifecycleMgr.ResolveProviderGatewayAuth)
 	hostUtilityMgr.SetManagedRuntimeSelectionStore(services.ManagedRuntimeSelections)
 	hostUtilityMgr.SetManagedRuntimeSingleUserOwner(singleUserManagedRuntimeOwner(services.Auth))
-	wireSharedInferenceCapacity(orchestratorSvc, repos.SystemSettings, log.Zap(), lifecycleMgr, hostUtilityMgr)
+	sharedInferenceOwner := wireSharedInferenceCapacity(orchestratorSvc, repos.SystemSettings, log.Zap(), lifecycleMgr, hostUtilityMgr)
+	wireNativeRouteCapacity(services.DynamicProfileResolver, orchestratorSvc, sharedInferenceOwner, repos.Task, repos.Utility)
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)
@@ -1927,7 +1928,9 @@ func newRunProcessorService(
 		AgentctlBinaryPath: agentctlBinaryPath,
 		EventBus:           eventBus,
 	})
-	svc.SetRunSessionLauncher(newOfficeRunSessionLauncher(repos.Office, lifecycleMgr, services.DynamicProfileResolver, log))
+	runLauncher := newOfficeRunSessionLauncher(repos.Office, lifecycleMgr, services.DynamicProfileResolver, log)
+	runLauncher.SetExecutionCapacityOwner(orchestratorSvc)
+	svc.SetRunSessionLauncher(runLauncher)
 	return svc
 }
 
@@ -2146,7 +2149,7 @@ func (a *schedulerTaskStarterAdapter) startTaskWithRoute(
 	launch officescheduler.LaunchContext,
 	route officescheduler.RouteOverride,
 ) (*orchexecutor.TaskExecution, error) {
-	return a.orch.StartTaskWithRoute(ctx, taskID, agentProfileID,
+	return officeTaskCapacityResult(a.orch.StartTaskWithRoute(ctx, taskID, agentProfileID,
 		orchestratorLaunchContext(launch),
 		orchexecutor.RouteOverride{
 			ExecutionProfileID: route.ExecutionProfileID,
@@ -2156,7 +2159,7 @@ func (a *schedulerTaskStarterAdapter) startTaskWithRoute(
 			Mode:               route.Mode,
 			Flags:              route.Flags,
 			Env:                route.Env,
-		})
+		}))
 }
 
 // launchSafetyLimits bundles the boot-time-resolved
@@ -2847,9 +2850,9 @@ func (a *officeOrchestratorTaskStarter) startTaskWithEnvAndSkills(
 	executorProfileID string, priority string, prompt, workflowStepID string,
 	planMode bool, attachments []v1.MessageAttachment, env map[string]string, additionalSkillSlugs []string,
 ) (*orchexecutor.TaskExecution, error) {
-	return a.orch.StartTaskWithEnvAndSkills(ctx, taskID, agentProfileID,
+	return officeTaskCapacityResult(a.orch.StartTaskWithEnvAndSkills(ctx, taskID, agentProfileID,
 		executorID, executorProfileID, priority, prompt,
-		workflowStepID, planMode, false, attachments, env, additionalSkillSlugs)
+		workflowStepID, planMode, false, attachments, env, additionalSkillSlugs))
 }
 
 func (a *officeOrchestratorTaskStarter) GetOpenSessionRecoveryBlock(

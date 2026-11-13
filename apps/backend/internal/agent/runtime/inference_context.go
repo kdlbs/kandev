@@ -47,3 +47,9 @@ func NewStopObservationCollector() *StopObservationCollector {
 func WithStopObservation(ctx context.Context, collector *StopObservationCollector) context.Context {
 	return client.WithStopObservation(ctx, collector)
 }
+
+// WithInferenceClosureAdoption carries the validated recovery identity through
+// the runtime seam without exposing its transport-owned context key.
+func WithInferenceClosureAdoption(ctx context.Context, operation string) context.Context {
+	return client.WithInferenceClosureAdoption(ctx, operation)
+}

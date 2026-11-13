@@ -30,6 +30,11 @@ func NewOwnedHandler(cfg *config.InstanceConfig, owner inferenceProcessOwner, lo
 		h.attempts.diagnostics.JournalErrorClass = attemptJournalErrorClass(journalErr)
 	}
 	h.beginOperation = owner.BeginOwnedOperation
+	if stopper, ok := owner.(interface {
+		StopForInferenceClosure(context.Context) (*ManagedProcessStopReceipt, error)
+	}); ok {
+		h.closureStop = stopper.StopForInferenceClosure
+	}
 	if finalOwner, ok := owner.(interface{ SetInferenceSnapshotter(func() AttemptSnapshot) }); ok {
 		finalOwner.SetInferenceSnapshotter(h.attempts.finalSnapshot)
 	}

@@ -44,6 +44,7 @@ type CurrentAttemptInventory struct {
 // AttemptSnapshot.Known retains historical continuity. An empty list is not proof
 // of zero population without either legacy Known or a gated, known Current scope.
 type AttemptSnapshot struct {
+	Closure     *InferenceScopeClosure   `json:"closure,omitempty"`
 	Current     *CurrentAttemptInventory `json:"current,omitempty"`
 	OwnerID     string                   `json:"owner_id"`
 	InstanceID  string                   `json:"instance_id,omitempty"`
@@ -85,6 +86,7 @@ type PrepareAttemptRequest struct {
 }
 
 type inferenceOwnerState struct {
+	Closure         *InferenceScopeClosure   `json:"closure,omitempty"`
 	Ownership       *inferenceOwnership      `json:"ownership,omitempty"`
 	Version         int                      `json:"version"`
 	ContinuityKnown bool                     `json:"continuity_known"`

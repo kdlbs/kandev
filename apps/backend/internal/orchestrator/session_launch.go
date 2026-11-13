@@ -469,6 +469,9 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 		return nil, err
 	}
 	ctx = preparedCtx
+	if err := s.checkInferenceClosureAdmission(ctx, req.SessionID, true); err != nil {
+		return nil, err
+	}
 	if req.QuickChatInitialStart {
 		releaseLifecycleLock, handleStartFailure, err := s.beginQuickChatStartFailureOwnership(ctx, req)
 		if err != nil {
@@ -568,6 +571,9 @@ func (s *Service) finishLaunchIntent(
 }
 
 func (s *Service) checkSessionRecoveryBlock(ctx context.Context, sessionID string) error {
+	if err := s.checkInferenceClosureAdmission(ctx, sessionID, true); err != nil {
+		return err
+	}
 	if sessionID == "" {
 		return nil
 	}
@@ -585,6 +591,10 @@ func (s *Service) checkSessionRecoveryBlock(ctx context.Context, sessionID strin
 	}
 	if err != nil {
 		return fmt.Errorf("check session recovery block: %w", err)
+	}
+	permit, _ := ctx.Value(inferenceClosurePermitKey{}).(*models.InferenceClosureCheckpoint)
+	if permit != nil && block != nil && block.ConsumerReference == models.InferenceClosureConsumer && block.ID == permit.OperationID {
+		return s.checkOtherRecoveryBlocksForClosure(ctx, sessionID, incarnationID, generation, permit)
 	}
 	if resolved, _ := s.finishLoadedNativeDeliveryBlock(ctx, block); resolved {
 		return nil
@@ -1572,9 +1582,10 @@ func waitForRestoreWorkspaceRetry(ctx context.Context, retry <-chan time.Time) e
 
 // RecoverSessionOptions carries action-specific recovery authority.
 type RecoverSessionOptions struct {
-	IdempotencyKey string
-	SettingsPolicy executor.ResumeSettingsPolicy
-	ErrorStamp     string
+	InferenceClosureOperationID string
+	IdempotencyKey              string
+	SettingsPolicy              executor.ResumeSettingsPolicy
+	ErrorStamp                  string
 }
 
 // RecoverSession handles user-initiated recovery after an agent CLI failure.
@@ -1605,6 +1616,9 @@ func (s *Service) RecoverSessionWithOptions(
 	taskID, sessionID, action string,
 	options RecoverSessionOptions,
 ) (*LaunchSessionResponse, error) {
+	if options.InferenceClosureOperationID != "" {
+		return s.recoverInferenceClosure(ctx, taskID, sessionID, action, options)
+	}
 	if err := validateSessionRecoverySettingsPolicyAction(action, options.SettingsPolicy); err != nil {
 		return nil, err
 	}
@@ -1778,7 +1792,7 @@ func (s *Service) RecoverSessionWithOptions(
 	}
 	if checkpoint == nil {
 		if action == recoveryActionResume {
-			if err := s.resolveSessionRecoveryBlock(ctx, sessionID, action); err != nil {
+			if err := s.completeResumeRecoveryBlock(ctx, sessionID); err != nil {
 				return nil, normalizeRecoverSessionError(err)
 			}
 		}

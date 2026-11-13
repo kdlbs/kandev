@@ -385,6 +385,7 @@ func (m *Manager) publishInstance(ctx context.Context, inst *Instance, bundle *p
 func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd string, agentEnv []string) *config.InstanceOverrides {
 	autoStart := req.AutoStart
 	return &config.InstanceOverrides{
+		InferenceClosureOperationID:  req.InferenceClosureOperationID,
 		InstanceID:                   id,
 		Protocol:                     agent.Protocol(req.Protocol),
 		AgentCommand:                 agentCmd,

@@ -22,6 +22,7 @@ const (
 // Handler provides HTTP handlers for inference operations.
 type Handler struct {
 	attempts             *attemptOwner
+	closureStop          func(context.Context) (*ManagedProcessStopReceipt, error)
 	beginOperation       func(context.Context) (context.Context, func(), error)
 	acpExecutor          inferenceExecutor
 	codexExecutor        inferenceExecutor
@@ -63,6 +64,7 @@ func (h *Handler) RegisterRoutes(api *gin.RouterGroup) {
 	aux.POST("/prompt", h.handlePrompt)
 	aux.POST("/probe", h.handleProbe)
 	aux.GET("/attempts", h.handleAttempts)
+	aux.POST("/closure", h.handleInferenceClosure)
 	aux.POST("/attempts", h.handlePrepareAttempt)
 	aux.GET("/attempts/:id", h.handleAttempt)
 	aux.POST("/attempts/:id/cancel", h.handleCancelPreparedAttempt)

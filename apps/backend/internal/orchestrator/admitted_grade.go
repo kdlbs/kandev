@@ -108,8 +108,14 @@ func (c *sessionCeilingController) resolveAdmissionGradeLocked(ctx context.Conte
 	if c.policy != sessioncapacity.PolicyAll {
 		req.startSelection = nil
 	}
+	if held := c.reservations[req.queuedGrantKey]; req.queuedGrantKey != "" && held != nil {
+		req.grade, req.gradeKnown, req.gradeHeld = held.grade, held.gradeKnown, true
+		carryAdmittedStartSelection(req, held)
+		return req
+	}
 	if held := c.reservations[req.sessionID]; req.sessionID != "" && held != nil {
 		req.grade, req.gradeKnown, req.gradeHeld = held.grade, held.gradeKnown, true
+		carryAdmittedStartSelection(req, held)
 		return req
 	}
 	if c.resolveGrade != nil {
@@ -122,6 +128,14 @@ func (c *sessionCeilingController) resolveAdmissionGradeLocked(ctx context.Conte
 }
 
 func (c *sessionCeilingController) persistAdmissionGradeLocked(ctx context.Context, req admissionRequest, decision admissionDecision) admissionDecision {
+	// Office persists its frozen grade with its own run-session reservation.
+	if req.seam == officeRunCapacitySeam {
+		return decision
+	}
+	// Native routes have no task session to receive the admitted grade.
+	if req.seam == nativeRouteCapacitySeam {
+		return decision
+	}
 	if !decision.admitted || !req.gradeKnown || req.sessionID == "" || c.persistGrade == nil {
 		return decision
 	}

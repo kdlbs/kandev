@@ -2975,10 +2975,15 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 		zap.String("task_id", taskID))
 }
 
+func (s *Service) readValidCeilingDeferredLaunch(ctx context.Context, task *models.Task) (models.CeilingDeferral, bool, error) {
+	return s.readCeilingDeferredLaunchSnapshot(ctx, task, s.validateCeilingEntry)
+}
+
 //nolint:cyclop,nestif // Queue reconciliation validates independent task, record, destination, and workflow-entry state.
-func (s *Service) readValidCeilingDeferredLaunch(
+func (s *Service) readCeilingDeferredLaunchSnapshot(
 	ctx context.Context,
 	task *models.Task,
+	validate func(context.Context, *models.Task, models.CeilingDeferral) (ceilingEntryDisposition, string, error),
 ) (models.CeilingDeferral, bool, error) {
 	if task == nil || task.ArchivedAt != nil || task.State == v1.TaskStateCancelled {
 		return models.CeilingDeferral{}, false, nil
@@ -3016,7 +3021,7 @@ func (s *Service) readValidCeilingDeferredLaunch(
 			return models.CeilingDeferral{}, false, nil
 		}
 	}
-	disposition, detail, validationErr := s.validateCeilingEntry(ctx, task, deferral)
+	disposition, detail, validationErr := validate(ctx, task, deferral)
 	if validationErr != nil {
 		return models.CeilingDeferral{}, false, validationErr
 	}
