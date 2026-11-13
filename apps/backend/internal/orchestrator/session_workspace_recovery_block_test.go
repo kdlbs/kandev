@@ -17,6 +17,8 @@ func TestWorkspaceRecoveryBlockPreservesPromptAdmission(t *testing.T) {
 			ctx := context.Background()
 			repo := setupTestRepo(t)
 			seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+			// Restoration completes only with this session's own ready execution.
+			seedExecutorRunning(t, repo, "session1", "task1", "exec-session1")
 			manager := &mockAgentManager{repoForExecutionLookup: repo}
 			service := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
 			session, err := repo.GetTaskSession(ctx, "session1")
@@ -26,7 +28,7 @@ func TestWorkspaceRecoveryBlockPreservesPromptAdmission(t *testing.T) {
 				Reason: "unknown_prompt_outcome", State: models.RecoveryBlockOpen,
 			}
 			require.NoError(t, repo.UpsertSessionRecoveryBlock(ctx, block))
-			service.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+			service.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 
 			response, err := service.LaunchSession(ctx, &LaunchSessionRequest{
 				TaskID: session.TaskID, SessionID: session.ID,

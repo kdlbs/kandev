@@ -35,7 +35,7 @@ func TestHandleAgentReady_PassthroughAttachmentOnlyOrdinaryMessageUsesAttachment
 	steps := newMockStepGetter()
 	steps.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "workflow1"}
 	svc := createTestServiceWithAgent(repo, steps, taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	_, err = svc.messageQueue.QueueMessage(
 		ctx,
@@ -87,7 +87,7 @@ func TestHandleAgentReady_PassthroughQueuedAttachmentUsesAttachmentAwarePrompt(t
 	steps := newMockStepGetter()
 	steps.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "workflow1"}
 	svc := createTestServiceWithAgent(repo, steps, taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	_, err = svc.messageQueue.QueueMessage(
 		ctx,

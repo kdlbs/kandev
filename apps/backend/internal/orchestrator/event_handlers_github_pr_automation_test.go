@@ -600,7 +600,7 @@ func TestDispatchTaskPRAgentPrompt_ArchiveAfterQueueAcceptanceDropsStaleLifecycl
 	// minimal fixture's nil executor before that guard.
 	agent.isAgentRunning = true
 	seedExecutorRunning(t, baseRepo, "session-1", "task-1", "execution-1")
-	svc.executor = executor.NewExecutor(agent, baseRepo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agent, baseRepo, testLogger(), executor.ExecutorConfig{}))
 	pr := &github.TaskPR{TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42}
 
 	// RUNNING deliberately prevents the initial dispatch from draining. The

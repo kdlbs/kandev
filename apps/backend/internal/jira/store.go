@@ -744,26 +744,6 @@ func (s *Store) DeleteIssueWatch(ctx context.Context, id string) error {
 	return tx.Commit()
 }
 
-// ReserveIssueWatchTask atomically claims a slot for a (watch, ticket) pair via
-// INSERT OR IGNORE. Returns true when this caller won the race and should
-// proceed to create the task. False either means another handler already
-// reserved the same ticket or the row already exists from a prior run.
-func (s *Store) ReserveIssueWatchTask(ctx context.Context, watchID, issueKey, issueURL string) (bool, error) {
-	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
-		INSERT INTO jira_issue_watch_tasks (id, issue_watch_id, issue_key, issue_url, task_id, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(issue_watch_id, issue_key) DO NOTHING`),
-		uuid.New().String(), watchID, issueKey, issueURL, "", time.Now().UTC())
-	if err != nil {
-		return false, err
-	}
-	rows, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return rows == 1, nil
-}
-
 // AssignIssueWatchTaskID stamps the created task ID onto a previously-reserved
 // dedup row. Returns an error if no reservation matches — callers should treat
 // that as a programming bug since they only call this after a successful
@@ -793,24 +773,6 @@ func (s *Store) ReleaseIssueWatchTask(ctx context.Context, watchID, issueKey str
 		`DELETE FROM jira_issue_watch_tasks WHERE issue_watch_id = ? AND issue_key = ?`),
 		watchID, issueKey)
 	return err
-}
-
-// ListSeenIssueKeys returns the set of ticket keys already reserved against a
-// watch. Returning a set in one query is cheaper than per-ticket existence
-// checks — a single JQL search can return up to 50 tickets per tick, so the
-// per-call savings scale with the workspace's watch count.
-func (s *Store) ListSeenIssueKeys(ctx context.Context, watchID string) (map[string]struct{}, error) {
-	var keys []string
-	err := s.ro.SelectContext(ctx, &keys, s.ro.Rebind(
-		`SELECT issue_key FROM jira_issue_watch_tasks WHERE issue_watch_id = ?`), watchID)
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]struct{}, len(keys))
-	for _, k := range keys {
-		out[k] = struct{}{}
-	}
-	return out, nil
 }
 
 // ListIssueWatchTaskIDs returns every task_id recorded against a watch,

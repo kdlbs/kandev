@@ -41,7 +41,7 @@ func (s *Server) registerConfigSettingsTools() {
 	s.mcpServer.AddTool(
 		mcp.NewToolWithRawSchema(
 			"update_settings_kandev",
-			"Update declared settings for one exact authorized target. Changes are validated by the owning domain before one mutation.",
+			"Update declared settings for one exact authorized target. Changes are validated by the owning domain before one mutation. Repository clone-URL previews use options.validate_only with exactly one remote_url change.",
 			json.RawMessage(`{"type":"object","additionalProperties":false,"required":["target","changes"],"properties":{"target":{"type":"object","additionalProperties":false,"required":["resource_type"],"properties":{"resource_type":{"type":"string"},"resource_id":{"type":"string"},"workspace_id":{"type":"string"}}},"changes":{"type":"object","minProperties":1,"maxProperties":50,"additionalProperties":true},"options":{"type":"object"}}}`),
 		),
 		s.wrapSensitiveHandler("update_settings_kandev", s.updateSettingsHandler()),

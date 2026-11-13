@@ -1,12 +1,21 @@
 ---
-spec: docs/specs/ui/requirements/quick-terminal.md
 created: 2026-08-05
 status: complete
+requirements:
+  - REQ-UI-QUICK-TERMINAL-001
+system_design:
+  - ../../specs/ui/system-design/quick-terminal.md
+legacy_specs: []
 ---
 
 # Implementation Plan: Quick Terminal Refresh Persistence
 
 ## Overview
+
+Follow-up: [shell recovery](../quick-terminal-shell-recovery/plan.md) owns the planned same-tab recovery action from issue #5260.
+Its restart matrix extends this package's original New-Terminal-only expectation.
+The verification counts below remain the historical results of this package.
+New recovery results belong to the follow-up package.
 
 Quick Terminal currently loses its tab descriptors on a full page reload because they exist only
 in the in-memory Zustand UI slice. This repair adds a backend-owned descriptor lifecycle scoped to

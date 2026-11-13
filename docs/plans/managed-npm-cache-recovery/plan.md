@@ -15,6 +15,12 @@ legacy_specs: []
 
 ## Overview
 
+The [managed npm review-fix package](../managed-npm-review-fixes/plan.md) owns the later CLI-argument recognition correction.
+Its work and evidence remain separate from this completed package.
+
+Follow-on design: [Reusable managed npm repairs](../managed-npm-repair-reuse/plan.md)
+adds cross-launch reuse. This completed package retains its original scope and results.
+
 An upgrade must recover an incomplete selected runtime without manual npm
 maintenance. Prepare the same exact package privately, then retry normal
 discovery or session initialization once. Preserve the shared cache and saved

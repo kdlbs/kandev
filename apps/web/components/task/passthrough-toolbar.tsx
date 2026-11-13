@@ -15,6 +15,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
 import { MRStatusChip } from "@/components/gitlab/mr-status-chip";
 import { TaskDependencyChip } from "@/components/task/task-dependency-chip";
+import { TaskGraphButton } from "@/components/task-graph/task-graph-button";
 import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-devops-task-pull-request-chip";
 import { RegisteredChangeRequestStatus } from "@/components/integrations/registered-change-request-status";
 import { PRMergedBanner } from "./chat/pr-archive-banners";
@@ -604,6 +605,7 @@ function PassthroughStatusRow({
 
       <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5 max-md:contents">
         <TaskDependencyChip taskId={taskId} />
+        <TaskGraphButton taskId={taskId} />
         <PRStatusChip taskId={taskId} />
         <MRStatusChip taskId={taskId} />
         <AzureDevOpsTaskPullRequestChip taskId={taskId} />

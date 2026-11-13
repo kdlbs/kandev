@@ -44,6 +44,9 @@ func (r *sqliteRepository) ReadMCPResolutionInputs(ctx context.Context, rc mcpco
 			inputs.Origins[id] = append(inputs.Origins[id], scope)
 		}
 	}
+	if err := mcpconfig.AddAutomationMCPOrigins(rc, inputs.Origins); err != nil {
+		return nil, err
+	}
 	for id := range inputs.Origins {
 		d, err := scanMCPServerDefinition(tx.QueryRowxContext(ctx, tx.Rebind(`SELECT `+mcpDefinitionColumns+` FROM mcp_server_definitions WHERE workspace_id = ? AND id = ?`), rc.WorkspaceID, id))
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {

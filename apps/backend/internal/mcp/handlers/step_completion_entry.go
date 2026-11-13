@@ -8,35 +8,43 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
-func (h *Handlers) stepCompletionLaunchStep(ctx context.Context, sessionID, fallback string) (string, *int64, error) {
+// stepCompletionLaunch identifies the immutable source captured at backend
+// admission: the turn that launched, its step, and its workflow entry.
+type stepCompletionLaunch struct {
+	StepID string
+	Entry  *int64
+	TurnID string
+}
+
+func (h *Handlers) stepCompletionLaunchStep(ctx context.Context, sessionID, fallback string) (stepCompletionLaunch, error) {
 	reader, ok := h.sessionRepo.(stepCompletionTurnReader)
 	if !ok {
-		return fallback, nil, nil
+		return stepCompletionLaunch{StepID: fallback}, nil
 	}
 	turns, err := reader.ListTurnsBySession(ctx, sessionID)
 	if err != nil {
-		return "", nil, err
+		return stepCompletionLaunch{}, err
 	}
 	if len(turns) == 0 {
-		return fallback, nil, nil
+		return stepCompletionLaunch{StepID: fallback}, nil
 	}
 	latest := turns[len(turns)-1]
 	if latest == nil {
-		return "", nil, errors.New("latest turn is missing")
+		return stepCompletionLaunch{}, errors.New("latest turn is missing")
 	}
 	stepID := models.StringFromAny(latest.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart])
 	if stepID == "" {
-		return "", nil, errors.New("latest turn has no workflow-step stamp")
+		return stepCompletionLaunch{}, errors.New("latest turn has no workflow-step stamp")
 	}
 	entry := int64(0)
 	if raw, present := latest.Metadata[models.TurnMetaKeyWorkflowStepTransitionIDAtStart]; present {
 		var valid bool
 		entry, valid = models.WorkflowEntryIDFromAny(raw)
 		if !valid {
-			return "", nil, errors.New("latest turn has an invalid workflow-entry stamp")
+			return stepCompletionLaunch{}, errors.New("latest turn has an invalid workflow-entry stamp")
 		}
 	}
-	return stepID, &entry, nil
+	return stepCompletionLaunch{StepID: stepID, Entry: &entry, TurnID: latest.ID}, nil
 }
 
 type stepCompletionEntryClaimer interface {
@@ -65,20 +73,42 @@ func (h *Handlers) handleDuplicateStepComplete(
 	session *models.TaskSession,
 	claimed models.PendingStepCompletionSignal,
 ) (*ws.Message, error) {
-	// If the initial snapshot already contained this step's signal, this is a
+	// If the initial snapshot already contained this source's signal, this is a
 	// retry after a possible publish failure and the event must be re-published
 	// while the session waits. If the initial snapshot was empty, another
 	// concurrent request won the claim and will publish the event itself.
 	existing, ok := models.LoadPendingStepSignal(session.Metadata)
-	if ok && existing.StepID == stepID && sameCompletionEntry(existing, claimed) && session.State == models.TaskSessionStateWaitingForInput {
+	if ok && existing.StepID == stepID && sameCompletionSource(existing, claimed) && session.State == models.TaskSessionStateWaitingForInput {
 		if errMsg, err := h.publishStepCompletionEvent(ctx, msg, taskID, sessionID, stepID, existing); errMsg != nil {
 			return errMsg, err
 		}
 	}
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		"accepted":   false,
-		mcpReasonKey: "already_signaled",
-	})
+	receipt, pending := h.stepCompletionReceiptForClaim(ctx, sessionID, claimed)
+	response := map[string]interface{}{
+		"accepted":    false,
+		mcpReasonKey:  "already_signaled",
+		"step_id":     claimed.StepID,
+		"signaled_at": claimed.SignaledAt,
+		"signal_id":   claimed.SignalID,
+		"source":      stepCompletionSignalSource(sessionID, claimed),
+		"outcome":     stepCompletionReceiptOutcome(receipt, pending),
+	}
+	if transition := stepCompletionTransitionProof(receipt); transition != nil {
+		response["transition"] = transition
+	}
+	if current := h.stepCompletionCurrent(ctx, taskID, nil); current != nil {
+		response["current"] = current
+	}
+	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
+// sameCompletionSource preserves entry-only deduplication for legacy signals
+// while requiring exact identity once either side minted a signal ID.
+func sameCompletionSource(a, b models.PendingStepCompletionSignal) bool {
+	if a.SignalID != "" && b.SignalID != "" {
+		return a.SignalID == b.SignalID
+	}
+	return sameCompletionEntry(a, b) && a.SourceTurnID == b.SourceTurnID
 }
 
 func sameCompletionEntry(a, b models.PendingStepCompletionSignal) bool {

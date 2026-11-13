@@ -12,7 +12,11 @@ import type { SidebarTaskRowPresentation } from "@/lib/state/slices/ui/sidebar-t
 import type { TaskMarkerPresentation } from "@/lib/task-color-presentation";
 import type { AutomaticTaskColorSource } from "@/lib/sidebar/task-color-rules";
 import type { TaskRepositoryRuleIdentity } from "@/lib/sidebar/repository-rule-identity";
-import type { TaskStatusSummaryLaunchQueue } from "@/lib/types/task-status-summary";
+import type {
+  TaskStatusSummaryLaunchQueue,
+  TaskStatusSummaryQuotaWait,
+} from "@/lib/types/task-status-summary";
+import type { TaskWaitReason } from "@/lib/ui/waiting-reason";
 
 export type StepDef = {
   id: string;
@@ -84,6 +88,8 @@ export type TaskSwitcherItem = {
   queuedCount?: number;
   /** Automatic session launch waiting for capacity or ownership. */
   launchQueue?: TaskStatusSummaryLaunchQueue | null;
+  quotaWait?: TaskStatusSummaryQuotaWait | null;
+  waitReason?: TaskWaitReason | null;
   /** Current failed-turn attention. Drives the task-menu dismissal action. */
   turnError?: { stamp: string; preview: string; sessionId?: string } | null;
   /** Destination-resident WIP queue position, separate from queued prompts. */

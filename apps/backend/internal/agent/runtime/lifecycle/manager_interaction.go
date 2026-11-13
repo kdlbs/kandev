@@ -161,6 +161,11 @@ func (m *Manager) PromptAgentWithDispatchCallbackAndSubmissionID(
 	if !exists {
 		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
+	// A new prompt is an authenticated effect on the retained worker. Refuse it
+	// when the recorded runtime cannot satisfy the selection.
+	if err := m.requireExecutionSelectionCompatibility(ctx, execution); err != nil {
+		return nil, err
+	}
 	if m.isIdleSettledRetiredLocalExecution(execution) {
 		m.retireStaleLocalExecution(execution)
 		return nil, fmt.Errorf("retired idle execution %q requires native restore: %w", executionID, ErrExecutionNotFound)
@@ -227,6 +232,9 @@ func (m *Manager) PromptAgentWithAdmissionCallbackAndSubmissionID(
 	if !exists {
 		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
+	if err := m.requireExecutionSelectionCompatibility(ctx, execution); err != nil {
+		return nil, err
+	}
 	lease, err := m.acquireActivity(ctx, activity.KindExecutionRunning)
 	if err != nil {
 		return nil, err
@@ -261,6 +269,9 @@ func (m *Manager) SteerAgentWithDispatchCallback(ctx context.Context, executionI
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	if err := m.requireExecutionSelectionCompatibility(ctx, execution); err != nil {
+		return nil, err
 	}
 	if err := m.runtimeReplacementRecoveryError(execution); err != nil {
 		return nil, err
@@ -338,6 +349,8 @@ func (m *Manager) CancelAgentForPrompt(
 func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExecution) error {
 	executionID := execution.ID
 
+	// Hold this lease through escalation and durable submission settlement so a
+	// queued Stop cannot close the transport while cancellation still owns it.
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
@@ -388,7 +401,7 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 				zap.String("execution_id", executionID),
 				zap.Error(cancelErr))
 		}
-		return m.cancelDispatchOnlyPrompt(ctx, execution, snapshot, immediate)
+		return m.cancelDispatchOnlyPrompt(ctx, execution, snapshot, immediate, client)
 	}
 
 	// Teardown may close the stream immediately before an explicit cancel (for
@@ -415,7 +428,7 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 	m.logger.Info("agent cancel sent, waiting for turn completion",
 		zap.String("execution_id", executionID))
 
-	return m.waitForPromptFinishedAfterCancel(ctx, execution, snapshot)
+	return m.waitForPromptFinishedAfterCancel(ctx, execution, snapshot, client)
 }
 
 // escalateStuckCancel unblocks a SendPrompt that is stuck waiting for a completion
@@ -424,6 +437,12 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 // exit and close promptFinished, and marks the execution ready so the workflow
 // leaves the running state. Returns ErrCancelEscalated so callers know the ACP
 // cancel did not get a clean acknowledgement.
+//
+// The client is the lease already held by cancelAgentExecution. Callers must
+// pass it through rather than acquiring the lease again: a queued stop writer
+// blocks new readers, so a nested read would deadlock the cancellation that
+// still owns the outer lease. A nil client is valid only for transport-free
+// fixtures; durable settlement is skipped in that case.
 //
 // The ready-event publish below is dispatched asynchronously (asyncPublish=true
 // on markReadyEventWithContext), not inline: every caller that can reach this
@@ -440,16 +459,8 @@ func (m *Manager) escalateStuckCancel(
 	ctx context.Context,
 	execution *AgentExecution,
 	ch <-chan struct{},
-	clients ...*agentctlclient.Client,
+	client *agentctlclient.Client,
 ) error {
-	var client *agentctlclient.Client
-	if len(clients) > 0 {
-		client = clients[0]
-	} else {
-		var release func()
-		client, release = execution.AcquireAgentCtlClient()
-		defer release()
-	}
 	promptGeneration := execution.promptGenerationSnapshot()
 	if promptGeneration != 0 {
 		// The agentctl stream can close after the local cancellation release.

@@ -120,6 +120,12 @@ Shortcuts target the selected terminal and keep the keyboard focused. The row
 stays above the on-screen keyboard. Modifiers reset when you switch terminal
 tabs or close the view.
 
+### Recover a Quick Terminal
+
+After a shell exits or the backend restarts, the shell process and its state are gone. This includes environment changes, running commands, command history, and screen output.
+
+To start a shell in the same tab, select the tab and then select **Start new shell**. Selecting or reopening a tab does not start a shell automatically. To open a separate shell, select **New Terminal**.
+
 ### Start a chat
 
 1. Enter a non-empty opening prompt. Add files when they help explain the request. Wait for each
@@ -222,7 +228,7 @@ The same settings page configures the **Configuration Chat Agent** for each work
 
 Open Configuration Chat from the floating chat button on Settings pages, turn on **Configuration chat** while creating a Quick Chat, or run **Configuration Chat** from the `Cmd/Ctrl+K` command menu. A workspace currently has one configuration conversation. The Settings panel shows that conversation without tabs; **Open in Quick Chat** moves the same setup or session into the larger tabbed dialog without copying it.
 
-Configuration Chat uses a repository-less ephemeral task. Its configuration-mode MCP can inspect and change workflows, agent profiles, and MCP configuration, and can read, create, and update saved prompts by exact name, subject to their agent-edit permission. The selected profile's model, credentials, permissions, and external MCP settings apply. Review requested configuration mutations before approving them.
+Configuration Chat uses a repository-less ephemeral task. Its configuration-mode MCP can inspect and change workflows, agent profiles, and MCP configuration, and can read, create, and update saved prompts by exact name. Every custom prompt is editable through these authorized tools; built-in prompts reject agent writes. The assistant should change a prompt only when the operator explicitly requests or agrees to the change, then read back the saved result. The selected profile's model, credentials, permissions, and external MCP settings apply. Review requested configuration mutations before approving them.
 
 Closing the floating Settings panel preserves the conversation. To delete it, open it in Quick Chat, close its tab, and confirm deletion. Configuration tasks are excluded from the seven-day Quick Chat sweeper and remain available until explicitly deleted or their workspace is deleted.
 
@@ -240,10 +246,10 @@ Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusab
 Shared prompt reads and reference use are available to org members. Creating,
 editing, or deleting prompts requires `org.config.manage` permission.
 
-To let the configuration assistant update an existing custom prompt, edit it,
-enable **Allow agent edits**, and choose **Save changes**. The control works on
-desktop and phone. Existing and Settings-created prompts default to human-only;
-MCP-created prompts allow later agent edits until you disable the permission.
+The configuration assistant should update a custom prompt only when you
+explicitly request or agree to the change. The backend does not verify that
+request or agreement. Authorized tools can update any custom prompt. There is no
+per-prompt agent-edit control, including for previously protected prompts.
 Built-in prompts always reject agent writes, while remaining editable by an
 operator. Changes affect every future reference to that prompt. See the
 [MCP write contract](automation-and-mcp.md#create-or-update-a-saved-prompt).
@@ -366,6 +372,8 @@ Files and workspace search omit only recovery artifacts that Kandev has register
 ### Preview an HTML file
 
 Open an `.html` or `.htm` file in **Files**, then select **Preview HTML**. Kandev publishes the current editor buffer to an ephemeral static server, so the preview includes unsaved changes while the source file stays dirty and unchanged on disk. On desktop, the preview replaces the editor body. On mobile, it replaces the source in the focused full-height viewer. Select **Show code** to return to the same source buffer. Select **Refresh HTML preview** to publish the latest buffer again, or use the Browser button to open the published page in a separate **Browser** panel.
+
+You can also preview an HTML file from its diff. In **Changes**, or in the expanded **Review** dialog, select **Preview HTML** in the file header. On phones, the same action is in the file actions menu. The preview replaces only that file's diff body, keeps the diff surface open, and provides **Show diff** to return. This preview reads the complete current workspace file rather than the patch, so staged, committed, and pull-request rows can look different from what you see. The preview states that source before you activate it. Deleted files and known binary files do not offer the action, and a file that is binary when read is never published. If the workspace read or publication fails, the preview keeps **Retry HTML preview** and **Show diff** available. Preview starts only when you select the action, so reloading or reopening the review returns to the diff instead of executing HTML.
 
 The preview uses the native browser engine. HTML, CSS, JavaScript, inline event handlers, browser APIs, forms, popups, and normal browser navigation behave as they do in a regular page. A visible warning identifies the preview as trusted workspace code. Preview only HTML you trust because this feature does not claim to isolate hostile content from the browser or task environment.
 

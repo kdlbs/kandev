@@ -21,6 +21,7 @@ func acknowledgedNativeResumeHistory(
 	status *agentctl.DeliveryStatus,
 	peerReader agentDeliveryPeerSubmissionReader,
 	backend []*models.AgentDeliverySubmission,
+	repository ...AgentDeliveryRepository,
 ) ([]*models.AgentDeliverySubmission, error) {
 	lister, supported := peerReader.(nativeResumePeerSubmissionLister)
 	if !supported || !hasUnlistedUnknownHistory(status, backend) {
@@ -41,6 +42,9 @@ func acknowledgedNativeResumeHistory(
 			continue
 		}
 		active = append(active, submission)
+	}
+	if len(repository) > 0 {
+		return contextContinuedNativeResumeHistory(ctx, execution, status, repository[0], submissions, active)
 	}
 	return active, nil
 }

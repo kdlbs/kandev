@@ -489,6 +489,7 @@ func buildLifecycleLaunchRequest(
 		ApprovedSecretEnvKeys:         append([]string(nil), req.ApprovedSecretEnvKeys...),
 		EnvironmentDefinitions:        append([]runtimeenv.Definition(nil), req.EnvironmentDefinitions...),
 		EnvironmentResolutionRequired: req.EnvironmentResolutionRequired,
+		ManagedRuntimeOwnerUserID:     req.OwnerUserID,
 		ACPSessionID:                  req.ACPSessionID,
 		DeliveryStreamID:              req.DeliveryStreamID,
 		DeliveryIncarnationID:         req.DeliveryIncarnationID,
@@ -667,6 +668,17 @@ func (a *lifecycleAdapter) RequiresCloneURL(executorType string) bool {
 // ShouldApplyPreferredShell implements executor.ExecutorTypeCapabilities.
 func (a *lifecycleAdapter) ShouldApplyPreferredShell(executorType string) bool {
 	return a.mgr.ShouldApplyPreferredShell(executorType)
+}
+
+// ValidateExecutorRuntime implements executor.ExecutorTypeCapabilities. It is
+// the required production runtime-admission wiring.
+func (a *lifecycleAdapter) ValidateExecutorRuntime(executorType string) error {
+	return a.mgr.ValidateExecutorRuntime(executorType)
+}
+
+// ValidateExecutionRuntime implements executor.ExecutorExecutionRuntimeAdmission.
+func (a *lifecycleAdapter) ValidateExecutionRuntime(ctx context.Context, sessionID, taskEnvironmentID, executorType string) error {
+	return a.mgr.ValidateExecutionRuntime(ctx, sessionID, taskEnvironmentID, executorType)
 }
 
 // SetExecutionEnv updates per-run env vars in an existing execution.
@@ -1313,7 +1325,11 @@ func (a *lifecycleAdapter) GetGitStatusWithDetails(ctx context.Context, sessionI
 
 // WaitForAgentctlReady waits for the agentctl HTTP server to be ready for a session.
 func (a *lifecycleAdapter) WaitForAgentctlReady(ctx context.Context, sessionID string) error {
-	return a.mgr.WaitForAgentctlReadyForSession(ctx, sessionID)
+	err := a.mgr.WaitForAgentctlReadyForSession(ctx, sessionID)
+	if errors.Is(err, lifecycle.ErrAgentctlClientUnavailable) || errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+		return fmt.Errorf("%w: %v", executor.ErrAgentctlClientUnavailable, err)
+	}
+	return err
 }
 
 // orchestratorWrapper wraps orchestrator.Service to implement taskhandlers.OrchestratorService.

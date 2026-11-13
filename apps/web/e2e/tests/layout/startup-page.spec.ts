@@ -123,4 +123,115 @@ test.describe("Startup page (real render)", () => {
 
     await context.close();
   });
+
+  /**
+   * AC-PLATFORM-STARTUP-PROGRESS-003.14/003.16: the same readable size must
+   * come from the Go initial render and from the embedded poll script. The
+   * first poll is held until the initial HTML has been asserted, so a page
+   * that formatted only one of the two would fail rather than pass on the
+   * later value.
+   */
+  test("renders readable byte progress in the initial page and poll updates", async ({
+    backend,
+    browser,
+    request,
+    prCapture,
+  }) => {
+    const byteSnapshot: StartupSnapshot = {
+      phase: "backing_up_database",
+      boot: 1,
+      seq: 1,
+      elapsed_ms: 30_000,
+      phase_elapsed_ms: 30_000,
+      step: {
+        id: "database.backup",
+        label_key: "startup.step.database_backup",
+        measure: "counting",
+        unit: "bytes",
+        elapsed_ms: 30_000,
+        done: 1_048_576,
+        rate_per_second: 1_048_576,
+        stalled: false,
+      },
+    };
+    const startingHtml = await request
+      .post(`${backend.baseUrl}/api/v1/e2e/startup-page-fixture`, { data: byteSnapshot })
+      .then((res) => res.text());
+
+    const context = await browser.newContext({ baseURL: backend.frontendUrl });
+    const page = await context.newPage();
+
+    let releaseFirstPoll!: () => void;
+    const initialRenderAsserted = new Promise<void>((resolve) => {
+      releaseFirstPoll = resolve;
+    });
+    const advancedBody = {
+      status: "starting",
+      startup: {
+        ...byteSnapshot,
+        seq: 2,
+        elapsed_ms: 60_000,
+        step: {
+          ...(byteSnapshot.step as Record<string, unknown>),
+          elapsed_ms: 60_000,
+          done: 15_389_753_344,
+          rate_per_second: 268_435_456,
+        },
+      },
+    };
+    // A large but exact count whose value sits just below a decimal midpoint.
+    // Rounding by hand after a float multiply would render 4097.0 TB here,
+    // while the Go renderer and the web helper both render 4096.9 TB.
+    const largeCountingBody = {
+      status: "starting",
+      startup: {
+        ...advancedBody.startup,
+        seq: 3,
+        elapsed_ms: 90_000,
+        step: { ...advancedBody.startup.step, elapsed_ms: 90_000, done: 4_504_644_163_416_883 },
+      },
+    };
+    let polledBody: unknown = advancedBody;
+
+    await page.route(
+      (url) => url.pathname === "/ready",
+      async (route) => {
+        await initialRenderAsserted;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify(polledBody),
+        });
+      },
+    );
+    await page.route(
+      (url) => url.pathname === "/startup-page-e2e-fixture",
+      (route) => route.fulfill({ status: 503, contentType: "text/html", body: startingHtml }),
+    );
+
+    try {
+      await page.goto("/startup-page-e2e-fixture");
+      await expect(page.locator("#startup-step-label")).toHaveText("Database backup");
+      await expect(page.locator("#startup-progress")).toHaveText("1.0 MB");
+      await expect(page.locator("#startup-progress")).toBeInViewport();
+      await expect(page.locator("#startup-bar")).toBeHidden();
+    } finally {
+      releaseFirstPoll();
+    }
+
+    // The embedded poll script re-renders the same policy without a reload.
+    await expect(page.locator("#startup-progress")).toHaveText("14.3 GB");
+    await expect(page.locator("#startup-progress")).toBeInViewport();
+    await expect(page.locator("#startup-bar")).toBeHidden();
+    await prCapture.screenshot("startup-byte-progress-desktop", {
+      page,
+      caption: "Desktop startup page showing a readable backup size",
+    });
+
+    polledBody = largeCountingBody;
+    await expect(page.locator("#startup-progress")).toHaveText("4096.9 TB");
+    await expect(page.locator("#startup-bar")).toBeHidden();
+
+    await context.close();
+  });
 });

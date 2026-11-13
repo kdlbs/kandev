@@ -87,8 +87,8 @@ export function recoveryCopy(
       }),
       showSummary: true,
     };
-  const managedRuntimeCopy = managedRuntimeFailureCopy(model, t);
-  if (managedRuntimeCopy) return managedRuntimeCopy;
+  const earlyCopy = requestLocalOrManagedRuntimeCopy(model, t);
+  if (earlyCopy) return earlyCopy;
   if (model.kind === "provider_quota_limited") return providerQuotaRecoveryCopy(model, t);
   if (model.kind === "managed_clone_relocation_required")
     return {
@@ -103,6 +103,20 @@ export function recoveryCopy(
     summary: safe ? summary : t("task:agentHasStopped"),
     showSummary: true,
   };
+}
+
+function requestLocalOrManagedRuntimeCopy(
+  model: ActiveSessionRecovery,
+  t: ReturnType<typeof useTranslation>["t"],
+): RecoveryCopy | null {
+  if (model.kind === "session_restore_required" && model.requestLocal) {
+    return {
+      title: t("task:sessionRecoveryFailed"),
+      summary: t("task:sessionRecoveryFailedDetail"),
+      showSummary: true,
+    };
+  }
+  return managedRuntimeFailureCopy(model, t);
 }
 
 function providerQuotaRecoveryCopy(
@@ -216,6 +230,7 @@ export function useRecoveryChoices({
     historyContinuationAvailable(actions, managedCloneRelocation),
     () => void actions.handleContinueFromHistory(),
     t("task:continueFromHistory"),
+    { disclosure: t("task:continueFromHistoryDisclosure") },
   );
   return actions.guardDetails ? choices.filter((choice) => choice.kind !== "restore") : choices;
 }

@@ -1,11 +1,47 @@
 // Filename starts with "mobile-" so this runs on the mobile-chrome project.
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { dwell, watchWs } from "../../helpers/causal-waits";
 import { seedIdleSession } from "../../helpers/session";
 import { typeWhileBusy } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("mobile: pause queue recovery", () => {
+  test("Escape from the focused composer cancels a running turn", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    const ws = watchWs(testPage);
+    await apiClient.saveUserSettings({ escape_cancels_agent: true });
+    await apiClient.updateWorkflowStep(seedData.startStepId, {
+      cancel_triggers_turn_complete: false,
+    });
+    const session = await seedIdleSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Escape cancels focused chat turn",
+    );
+
+    await session.sendMessageViaButton("/slow 8s");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    await session.cancelAgentButton().focus();
+    await testPage.keyboard.press("Escape");
+    await dwell(testPage, 300, "negative-assertion", "Escape outside the composer must not cancel");
+    await expect(session.agentStatus()).toBeVisible();
+
+    const editor = session.activeChat().locator(".tiptap.ProseMirror:visible").first();
+    await editor.focus();
+    const cancelResponse = ws.waitForResponse("agent.cancel");
+    await editor.press("Escape");
+    await cancelResponse;
+    await expect(session.agentStatus()).not.toBeVisible();
+    await expect(session.idleInput()).toBeVisible();
+    await assertNoDocumentHorizontalOverflow(testPage);
+  });
+
   test("Cancel persists Auto-run OFF across reload and the switch resumes", async ({
     testPage,
     apiClient,

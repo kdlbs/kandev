@@ -142,6 +142,7 @@ func TestHandleCreateTask_InitialPromptUsesRequestedWorkflowStepMode(t *testing.
 				require.Equal(t, orchestrator.IntentStartCreated, requests[1].Intent)
 				require.Equal(t, "session-1", requests[1].SessionID)
 				require.True(t, requests[1].InitialCreatePrompt)
+				require.True(t, requests[1].PromptIsTaskDescription)
 				require.Equal(t, "write the specification", requests[1].Prompt)
 			} else {
 				require.Equal(t, orchestrator.IntentStart, requests[0].Intent)

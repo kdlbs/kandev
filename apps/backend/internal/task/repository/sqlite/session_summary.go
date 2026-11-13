@@ -22,7 +22,7 @@ func (r *Repository) BatchGetTaskSessionSummaryObservations(
 	}
 	for _, chunk := range chunkIDs(ids, sqliteMaxHostParams) {
 		placeholders, args := buildInPlaceholders(chunk)
-		query := `SELECT ` + taskSessionSummarySelectCols(r.ro.DriverName()) + ` ` + taskSessionFromClause +
+		query := `SELECT ` + taskSessionSummarySelectCols(r.ro.DriverName()) + ` ` + taskSessionSummaryFromClause(r.ro.DriverName()) +
 			` LEFT JOIN executors e ON e.id = ts.executor_id` +
 			` WHERE ts.task_id IN (` + placeholders + `) ORDER BY ts.task_id, ts.started_at DESC`
 		rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
@@ -91,29 +91,56 @@ func uniqueSessionSummaryTaskIDs(taskIDs []string) []string {
 	return ids
 }
 
+// taskSessionSummarySelectCols returns the ordered projection for both drivers.
+// Keep the column order aligned with scanTaskSessionSummaryObservation.
+// PostgreSQL expressions reference aliases from taskSessionSummaryFromClause.
 func taskSessionSummarySelectCols(driver string) string {
-	metadata := "CASE WHEN ts.metadata IS NULL OR ts.metadata = 'null' OR ts.metadata = '' THEN '{}' ELSE ts.metadata END"
+	var (
+		agentProfileName    string
+		agentProfileAgentID string
+		repositoryPath      string
+		lastAgentErrorJSON  string
+		modelID             string
+		modelName           string
+	)
 	if dialect.IsPostgres(driver) {
-		metadata = "CASE WHEN ts.metadata IS NULL OR ts.metadata = 'null' OR ts.metadata = '' THEN '{}'::jsonb ELSE ts.metadata::jsonb END"
+		agentProfileName = "ms.prof ->> 'name'"
+		agentProfileAgentID = "ms.prof ->> 'agent_id'"
+		repositoryPath = "ms.repo ->> 'path'"
+		lastAgentErrorJSON = "mm.meta ->> '" + models.SessionMetaKeyLastAgentError + "'"
+		modelID, modelName = postgresSessionSummaryModelColumns()
+	} else {
+		metadata := "(CASE WHEN ts.metadata IS NULL OR ts.metadata = 'null' OR ts.metadata = '' THEN '{}' ELSE ts.metadata END)"
+		agentProfileName = dialect.JSONExtract(driver, "ts.agent_profile_snapshot", "name")
+		agentProfileAgentID = dialect.JSONExtract(driver, "ts.agent_profile_snapshot", "agent_id")
+		repositoryPath = dialect.JSONExtract(driver, "ts.repository_snapshot", "path")
+		lastAgentErrorJSON = dialect.JSONExtract(driver, metadata, models.SessionMetaKeyLastAgentError)
+		modelID, modelName = sessionSummaryModelColumns(metadata)
 	}
-	metadata = "(" + metadata + ")"
-	modelID, modelName := sessionSummaryModelColumns(driver, metadata)
 	return strings.Join([]string{
 		"ts.id", "ts.task_id", "ts.queue_incarnation_id",
-		"COALESCE(er.agent_execution_id, '')", "COALESCE(er.container_id, '')",
+		"COALESCE(er.agent_execution_id, '')", "COALESCE(er.container_id, '')", "COALESCE(er.runtime, '')",
 		"ts.agent_profile_id", "ts.execution_profile_id", "ts.route_generation", "ts.route_state", "ts.route_reason",
 		"ts.executor_id", "ts.executor_profile_id", "ts.environment_id",
 		"ts.repository_id", "ts.base_branch", "ts.base_commit_sha",
 		"COALESCE(NULLIF(te.workspace_path, ''), ts.workspace_path)",
 		taskSessionAgentWorkspaceSelect,
-		dialect.JSONExtract(driver, "ts.agent_profile_snapshot", "name"),
-		dialect.JSONExtract(driver, "ts.agent_profile_snapshot", "agent_id"),
+		agentProfileName, agentProfileAgentID,
 		"e.type AS executor_type", "e.name AS executor_name",
-		dialect.JSONExtract(driver, "ts.repository_snapshot", "path"),
-		"ts.state", "ts.error_message", dialect.JSONExtract(driver, metadata, models.SessionMetaKeyLastAgentError), modelID, modelName,
+		repositoryPath,
+		"ts.state", "ts.error_message", lastAgentErrorJSON, modelID, modelName,
 		"ts.started_at", "ts.completed_at", "ts.updated_at", "ts.is_primary", "ts.review_status",
 		"ts.is_passthrough", "ts.task_environment_id", "ts.name", "ts.last_read_message_id",
 	}, ", ")
+}
+
+// taskSessionSummaryFromClause returns the FROM clause that pairs with
+// taskSessionSummarySelectCols for the same driver.
+func taskSessionSummaryFromClause(driver string) string {
+	if dialect.IsPostgres(driver) {
+		return taskSessionFromClause + postgresSessionSummaryLateralFrom
+	}
+	return taskSessionFromClause
 }
 
 func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSummaryObservation, error) {
@@ -152,7 +179,7 @@ func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSumma
 	)
 	if err := rows.Scan(
 		&observation.ID, &observation.TaskID, &queueIncarnationID,
-		&observation.AgentExecutionID, &observation.ContainerID,
+		&observation.AgentExecutionID, &observation.ContainerID, &observation.ExecutionRuntime,
 		&agentProfileID, &executionProfileID, &observation.RouteGeneration,
 		&routeState, &routeReason, &executorID, &executorProfileID,
 		&environmentID, &repositoryID, &baseBranch, &baseCommitSHA, &workspacePath, &agentWorkspacePath,

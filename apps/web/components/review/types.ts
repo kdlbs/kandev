@@ -1,5 +1,6 @@
 import { djb2Hash } from "@/lib/utils/hash";
 import { t } from "@/lib/i18n";
+import { getFilePreviewKind } from "@/lib/utils/file-types";
 import type { FileChangeStatus } from "@/lib/utils/file-change-status";
 import type { GitChangeLayer } from "@/lib/state/slices/session-runtime/types";
 
@@ -51,6 +52,15 @@ export function isReviewFileDetailReady(
   file: Pick<ReviewFile, "diff_state" | "display_stale">,
 ): boolean {
   return !file.display_stale && file.diff_state !== "pending" && file.diff_state !== "unavailable";
+}
+
+/** A diff row exposes the native HTML preview only for the current readable file. */
+export function isReviewHtmlPreviewEligible(
+  file: Pick<ReviewFile, "path" | "status" | "diff_skip_reason">,
+): boolean {
+  if (file.status === "deleted") return false;
+  if (file.diff_skip_reason === "binary") return false;
+  return getFilePreviewKind(file.path) === "html";
 }
 
 /**

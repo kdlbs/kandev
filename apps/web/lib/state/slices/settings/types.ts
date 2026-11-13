@@ -434,6 +434,7 @@ export type UserSettingsState = {
   shellOptions: Array<{ value: string; label: string }>;
   defaultEditorId: string | null;
   enablePreviewOnClick: boolean;
+  escapeCancelsAgent: boolean;
   chatSubmitKey: "enter" | "cmd_enter";
   reviewAutoMarkOnScroll: boolean;
   confirmTaskArchive: boolean;

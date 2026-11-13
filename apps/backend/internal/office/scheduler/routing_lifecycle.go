@@ -47,12 +47,9 @@ func (ss *SchedulerService) HandlePostStartFailure(
 		}
 		resetHint = providerError.ResetAt
 	}
-	classified := routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhaseStreaming,
-		ProviderID: string(candidate.ProviderID),
-		Stderr:     message,
-		ResetHint:  resetHint,
-	})
+	input := providerError.RoutingInput(routingerr.PhaseStreaming, string(candidate.ProviderID), message)
+	input.ResetHint = resetHint
+	classified := routingerr.Classify(input)
 	if !classified.FallbackAllowed {
 		return false, nil
 	}

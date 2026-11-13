@@ -115,6 +115,13 @@ func TestConfigContext_DocumentsSettingsDiscoveryFlow(t *testing.T) {
 	assert.Contains(t, ctx, "Describe the setting with describe_setting_kandev before reading or writing it.")
 }
 
+func TestConfigContextRequiresExplicitPromptChanges(t *testing.T) {
+	ctx := ConfigContext()
+	assert.Contains(t, ctx, "explicitly requested or agreed")
+	assert.Contains(t, ctx, "read back")
+	assert.NotContains(t, ctx, "Allow agent edits")
+}
+
 func TestInjectConfigContext_WrapsInSystemTags(t *testing.T) {
 	result := InjectConfigContext(testSessionID, testConfigPrompt)
 	assert.True(t, strings.HasPrefix(result, TagStart))

@@ -134,6 +134,7 @@ func (wt *WorkspaceTracker) gitPollTick(ctx context.Context, consecutiveFailures
 	*consecutiveFailures = 0
 
 	noteSlowPollIdle(&wt.slowIdleGitPollTicks, wt.checkGitChanges(ctx, snap))
+	wt.observeWorktreeInventory(ctx)
 	return false
 }
 

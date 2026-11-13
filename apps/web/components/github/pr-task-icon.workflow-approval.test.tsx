@@ -12,7 +12,7 @@ const getTaskCIAutomationOptionsMock = vi.hoisted(() => vi.fn());
 const TASK_ID = "task-1";
 const WORKSPACE_ID = "workspace-1";
 const ARIA_LABEL_ATTRIBUTE = "aria-label";
-const APPROVAL_WARNING_TEST_ID = "pr-workflow-approval-warning";
+const APPROVAL_WARNING_TEST_ID = "pr-ci-bubble-approval-required";
 const STATUS_ENTRY_TEST_ID = "pr-task-status-entry";
 const APPROVAL_LABEL = "Awaiting maintainer approval";
 const STALE_STATUS_COPY = "Last known status. GitHub could not provide a fresh workflow result.";

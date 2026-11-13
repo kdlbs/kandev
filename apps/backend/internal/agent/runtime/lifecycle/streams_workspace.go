@@ -88,6 +88,11 @@ func (sm *StreamManager) buildWorkspaceCallbacks(execution *AgentExecution, stre
 				forward(func() { sm.callbacks.OnFileChange(execution, notification) })
 			}
 		},
+		OnWorktreeInventory: func(inventory *agentctl.WorktreeInventory) {
+			if sm.callbacks.OnWorktreeInventory != nil {
+				forward(func() { sm.callbacks.OnWorktreeInventory(execution, inventory) })
+			}
+		},
 		OnProcessOutput: func(output *agentctl.ProcessOutput) {
 			if sm.callbacks.OnProcessOutput != nil {
 				forward(func() { sm.callbacks.OnProcessOutput(execution, output) })
