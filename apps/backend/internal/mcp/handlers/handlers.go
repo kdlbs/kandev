@@ -4602,8 +4602,16 @@ func (h *Handlers) restoreTaskMessageSessions(ctx context.Context, rollback task
 			return fmt.Errorf("task message rollback cannot delete unowned selected session %q", rollback.selectedID)
 		}
 	}
+	restorePrimary := func(ctx context.Context, _, sessionID string) error {
+		return repo.SetSessionPrimary(ctx, sessionID)
+	}
+	if restorer, ok := h.sessionLauncher.(interface {
+		RestorePrimarySessionAfterTaskMessage(context.Context, string, string) error
+	}); ok {
+		restorePrimary = restorer.RestorePrimarySessionAfterTaskMessage
+	}
 	for _, snapshot := range rollback.sessions {
-		if err := restoreTaskMessageSessionSnapshot(ctx, repo, snapshot); err != nil {
+		if err := restoreTaskMessageSessionSnapshot(ctx, repo, snapshot, restorePrimary); err != nil {
 			return err
 		}
 	}
@@ -4782,7 +4790,12 @@ func (h *Handlers) restoreTaskMessageQueueOwner(ctx context.Context, taskID, sel
 	h.publishQueueStatusEvent(transferCtx, primaryIdentity, queue)
 	return nil
 }
-func restoreTaskMessageSessionSnapshot(ctx context.Context, repo taskMessageSessionRollbackRepository, rollback taskMessageSessionRollback) error {
+func restoreTaskMessageSessionSnapshot(
+	ctx context.Context,
+	repo taskMessageSessionRollbackRepository,
+	rollback taskMessageSessionRollback,
+	restorePrimary func(context.Context, string, string) error,
+) error {
 	session, err := loadOwnedTaskMessageSessionSnapshot(ctx, repo, rollback)
 	if err != nil {
 		return err
@@ -4815,9 +4828,7 @@ func restoreTaskMessageSessionSnapshot(ctx context.Context, repo taskMessageSess
 		return fmt.Errorf("task message rollback lost session %q state ownership", rollback.sessionID)
 	}
 	if rollback.isPrimary {
-		if err := repo.SetSessionPrimary(ctx, rollback.sessionID); err != nil {
-			return err
-		}
+		return restorePrimary(ctx, session.TaskID, rollback.sessionID)
 	}
 	return nil
 }

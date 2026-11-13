@@ -232,6 +232,7 @@ func (s *Service) startIdleSessionReaper(ctx context.Context) {
 		return
 	}
 	if !s.idleReaper.start(ctx, func(tickCtx context.Context) {
+		s.reclaimReplacedSessionsOnce(tickCtx)
 		s.reclaimIdleSessionsOnce(tickCtx)
 		s.suspendWorkspaceIdleSessionsOnce(tickCtx)
 		s.reclaimStuckSignalSessionsOnce(tickCtx)

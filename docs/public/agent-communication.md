@@ -61,6 +61,14 @@ The returned `agent_profile_id` is the actual profile persisted and launched on 
 
 Additional spawns preserve the workflow's existing source-session binding, including when the current step pins a profile. Later workflow steps can still target the original conversation.
 
+With `features.replacedSessionReclaim` on, when you make another session the
+primary, Kandev stops the previous primary's agent process within about 30
+seconds, after its active turn and known pending work settle. The conversation
+stays waiting for input and resumes when you message it again. Automatic
+promotion and workflow step switches do not stop anything. Office and
+coordinator owners and parked workflow sessions keep their existing lifecycle
+rules.
+
 Delivery behaviour depends on the target session's state at the moment of the call:
 
 | Target session state | What happens | Return value |
