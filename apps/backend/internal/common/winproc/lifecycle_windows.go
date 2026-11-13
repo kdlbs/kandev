@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -216,6 +217,8 @@ func createKillOnCloseJob() (windows.Handle, error) {
 	return createNamedKillOnCloseJob("")
 }
 
+var createJobObjectW = windows.NewLazySystemDLL("kernel32.dll").NewProc("CreateJobObjectW")
+
 func createNamedKillOnCloseJob(name string) (windows.Handle, error) {
 	var jobName *uint16
 	if name != "" {
@@ -225,8 +228,16 @@ func createNamedKillOnCloseJob(name string) (windows.Handle, error) {
 			return 0, err
 		}
 	}
-	job, err := windows.CreateJobObject(nil, jobName)
-	if err != nil {
+	rawHandle, _, err := createJobObjectW.Call(0, uintptr(unsafe.Pointer(jobName)))
+	runtime.KeepAlive(jobName)
+	job := windows.Handle(rawHandle)
+	if job == 0 {
+		return 0, fmt.Errorf("CreateJobObject: %w", err)
+	}
+	// CreateJobObjectW can succeed by opening an existing named object.
+	// Reject that handle before changing its limits or assigning a process.
+	if jobName != nil && errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
+		_ = windows.CloseHandle(job)
 		return 0, fmt.Errorf("CreateJobObject: %w", err)
 	}
 	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{
