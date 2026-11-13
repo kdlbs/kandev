@@ -386,5 +386,7 @@
   "mcpInherited": "{{name}} (herdado)",
   "mcpNoServers": "Não foram encontrados servidores MCP adicionais.",
   "mcpUnavailable": "{{name}} (indisponível)",
-  "mcpOptionsFailed": "Não foi possível carregar as opções MCP. As escolhas guardadas mantêm-se."
+  "mcpOptionsFailed": "Não foi possível carregar as opções MCP. As escolhas guardadas mantêm-se.",
+  "passthroughOutputNotCapturedTitle": "A saída do CLI passthrough não é capturada na transcrição desta execução.",
+  "passthroughOutputFutureSessionsDescription": "Desative o CLI passthrough no perfil de agente da automação para registar a saída em sessões futuras. Não é possível recuperar aqui a saída anterior do terminal."
 }

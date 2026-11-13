@@ -4391,11 +4391,13 @@ export class ApiClient {
     taskId: string,
     state: string,
     isPrimary = true,
+    options?: { isPassthrough?: boolean },
   ): Promise<{ id: string; task_id: string; status: string }> {
     return this.request("POST", "/api/v1/e2e/task-sessions", {
       task_id: taskId,
       state,
       is_primary: isPrimary,
+      is_passthrough: options?.isPassthrough,
     });
   }
 }
