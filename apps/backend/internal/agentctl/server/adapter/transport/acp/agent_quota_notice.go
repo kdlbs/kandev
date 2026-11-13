@@ -34,11 +34,12 @@ func (a *Adapter) observeUsageLimitNotice(sessionID string, promptGeneration uin
 	if !actionableQuotaNotice(classified) {
 		return false
 	}
-	if classified.ClassifierRule == relativeQuotaNoticeRule && classified.ResetHint == nil {
-		// The notice opens before its reset sentence ends: a chunk can stop
-		// after "1 hour" while ", 30 minutes." is still in flight. The waiter
-		// settles the prompt on the first notice, so it is held until a later
-		// chunk completes the duration and the reset hint is known.
+	if relativeQuotaNoticeContainsOutput(classified, buffer) {
+		turn.markQuotaNoticeDelivered()
+		return false
+	}
+	if quotaNoticeAwaitingReset(classified) {
+		// Hold a partial reset sentence until a later chunk completes it.
 		return true
 	}
 	message := streams.SanitizeProviderMessage(buffer)
@@ -51,6 +52,14 @@ func (a *Adapter) observeUsageLimitNotice(sessionID string, promptGeneration uin
 	default:
 	}
 	return true
+}
+
+func relativeQuotaNoticeContainsOutput(classified *routingerr.Error, text string) bool {
+	return classified.ClassifierRule == relativeQuotaNoticeRule && routingerr.RelativeQuotaNoticeHasTrailingOutput(text)
+}
+
+func quotaNoticeAwaitingReset(classified *routingerr.Error) bool {
+	return classified.ClassifierRule == relativeQuotaNoticeRule && classified.ResetHint == nil
 }
 
 func (turn *promptTurnState) markQuotaNoticeDelivered() {

@@ -842,7 +842,8 @@ func (a *Adapter) convertMessageChunkWithProtocolID(
 		// chunk, so a marked user chunk would never be cleared by the ordinary-
 		// output path.
 		event.ProviderDiagnosticCandidate = role == acpAssistantRole &&
-			(noticeFragment || (classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed))
+			(noticeFragment || (classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed &&
+				!relativeQuotaNoticeContainsOutput(classified, text)))
 		return event
 	}
 

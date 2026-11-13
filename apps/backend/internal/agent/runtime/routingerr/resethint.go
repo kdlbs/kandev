@@ -24,6 +24,19 @@ var resetClockHintPattern = regexp.MustCompile(
 var relativeQuotaResetPattern = regexp.MustCompile(`(?i)\breset\s+in\s+((?:\d+\s*(?:days?|hours?|hrs?|minutes?|mins?|min)\b[,\s]*)+)`)
 var relativeQuotaUnitPattern = regexp.MustCompile(`(?i)(\d+)\s*(days?|hours?|hrs?|minutes?|mins?|min)\b`)
 
+// RelativeQuotaNoticeHasTrailingOutput reports content after the reset sentence.
+// Terminal error envelopes may carry additional diagnostic context. Only the
+// assistant stream uses this check to distinguish that text from output.
+func RelativeQuotaNoticeHasTrailingOutput(text string) bool {
+	indices := relativeQuotaResetPattern.FindStringSubmatchIndex(text)
+	if indices == nil {
+		return false
+	}
+	remainder := strings.TrimSpace(text[indices[1]:])
+	return remainder != "" && (remainder[0] == '.' || remainder[0] == '!') &&
+		strings.TrimSpace(remainder[1:]) != ""
+}
+
 func parseRelativeQuotaResetAt(text string, now time.Time) *time.Time {
 	indices := relativeQuotaResetPattern.FindStringSubmatchIndex(text)
 	if indices == nil {
