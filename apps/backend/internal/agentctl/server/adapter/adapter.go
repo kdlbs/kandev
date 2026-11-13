@@ -315,6 +315,12 @@ type MCPAttachmentEventPublisher interface {
 	TryPublishMCPAttachmentEvent(AgentEvent, func(AgentEvent) (AgentEvent, error)) (bool, error)
 }
 
+// MCPAttachmentEventPersisterSetter lets an adapter commit its own attachment
+// events through the same ordered journal path used for observations.
+type MCPAttachmentEventPersisterSetter interface {
+	SetMCPAttachmentEventPersister(func(AgentEvent) (AgentEvent, error))
+}
+
 // McpServerConfig holds configuration for an MCP server.
 type McpServerConfig struct {
 	// Name is the human-readable name of the MCP server

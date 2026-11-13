@@ -45,6 +45,29 @@ func (a *Adapter) TryPublishMCPAttachmentEvent(
 	return a.sendUpdateLocked(event), nil
 }
 
+func (a *Adapter) SetMCPAttachmentEventPersister(persist func(AgentEvent) (AgentEvent, error)) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.mcpAttachmentEventPersister = persist
+}
+
+func (a *Adapter) sendMCPAttachmentUpdate(event AgentEvent) {
+	a.mu.RLock()
+	persist := a.mcpAttachmentEventPersister
+	a.mu.RUnlock()
+	if persist == nil {
+		a.sendUpdate(event)
+		return
+	}
+
+	queued, err := a.TryPublishMCPAttachmentEvent(event, persist)
+	if err != nil {
+		a.logger.Error("failed to commit MCP attachment event", zap.Error(err))
+	} else if !queued {
+		a.logger.Warn("adapter updates channel full, dropping MCP attachment event")
+	}
+}
+
 // lockSessionTransition waits for the previous reset's cleanup to finish before
 // allowing another session transition. The reset response remains independent
 // from session/close, while this gate keeps a later load/reset from overtaking
@@ -498,13 +521,13 @@ func (a *Adapter) emitMCPAttachmentStart(ctx context.Context) {
 		return
 	}
 	attempt := attachmentContext.Attempt
-	a.sendUpdate(AgentEvent{
+	a.sendMCPAttachmentUpdate(AgentEvent{
 		Type:                 streams.EventTypeMCPAttachment,
 		MCPAttachmentAttempt: &attempt,
 	})
 	for _, evidence := range attachmentContext.InitialEvidence {
 		observation := evidence
-		a.sendUpdate(AgentEvent{
+		a.sendMCPAttachmentUpdate(AgentEvent{
 			Type:          streams.EventTypeMCPAttachment,
 			MCPAttachment: &observation,
 		})
@@ -534,7 +557,7 @@ func (a *Adapter) emitMCPAttachmentEvidence(
 	if server.Name == kandevMCPServerName || server.IsInjectedBuiltin() {
 		source = streams.MCPServerSourceKandev
 	}
-	a.sendUpdate(AgentEvent{
+	a.sendMCPAttachmentUpdate(AgentEvent{
 		Type: streams.EventTypeMCPAttachment,
 		MCPAttachment: &streams.MCPAttachmentEvidence{
 			BuiltinPackage: server.BuiltinPackage,

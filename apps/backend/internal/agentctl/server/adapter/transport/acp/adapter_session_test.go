@@ -203,6 +203,61 @@ func TestResumeSessionAuthenticationFailureDoesNotMarkMCPServersFailed(t *testin
 	}
 }
 
+func TestMCPAttachmentEventsCommitInAdapterQueueOrder(t *testing.T) {
+	adapter, _ := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+	var committed []AgentEvent
+	persist := func(event AgentEvent) (AgentEvent, error) {
+		event.DeliverySequence = uint64(len(committed) + 1)
+		committed = append(committed, event)
+		return event, nil
+	}
+	adapter.SetMCPAttachmentEventPersister(persist)
+
+	attempt := streams.MCPAttachmentAttempt{AttemptID: "ordered-attempt"}
+	configured := streams.MCPAttachmentEvidence{
+		AttemptID:  attempt.AttemptID,
+		ServerName: "kandev",
+		Kind:       streams.MCPAttachmentEvidenceConfigured,
+	}
+	ctx := streams.WithMCPAttachmentContextAndEvidence(context.Background(), attempt, []streams.MCPAttachmentEvidence{configured})
+	adapter.emitMCPAttachmentStart(ctx)
+	adapter.emitMCPAttachmentEvidence(ctx, types.McpServer{Name: "kandev", Type: "sse"}, streams.MCPAttachmentEvidenceSessionAccepted, "", "")
+
+	observed := AgentEvent{
+		Type: streams.EventTypeMCPAttachment,
+		MCPAttachment: &streams.MCPAttachmentEvidence{
+			AttemptID:  attempt.AttemptID,
+			ServerName: "kandev",
+			Kind:       streams.MCPAttachmentEvidenceToolsListObserved,
+		},
+	}
+	queued, err := adapter.TryPublishMCPAttachmentEvent(observed, persist)
+	if err != nil || !queued {
+		t.Fatalf("publish tool observation = queued %t, err %v", queued, err)
+	}
+
+	if len(committed) != 4 {
+		t.Fatalf("committed events = %d, want attempt, configuration, accepted, and tool observation", len(committed))
+	}
+	if committed[0].MCPAttachmentAttempt == nil || committed[0].MCPAttachmentAttempt.AttemptID != attempt.AttemptID {
+		t.Fatalf("first committed event = %+v, want attempt preamble", committed[0])
+	}
+	wantKinds := []streams.MCPAttachmentEvidenceKind{
+		streams.MCPAttachmentEvidenceConfigured,
+		streams.MCPAttachmentEvidenceSessionAccepted,
+		streams.MCPAttachmentEvidenceToolsListObserved,
+	}
+	for index, kind := range wantKinds {
+		event := committed[index+1]
+		if event.MCPAttachment == nil || event.MCPAttachment.Kind != kind {
+			t.Fatalf("committed event %d = %+v, want evidence kind %q", index+1, event, kind)
+		}
+		if event.DeliverySequence != uint64(index+2) {
+			t.Fatalf("committed event %d sequence = %d, want %d", index+1, event.DeliverySequence, index+2)
+		}
+	}
+}
+
 func (*sessionRequestCaptureAgent) Prompt(context.Context, acpsdk.PromptRequest) (acpsdk.PromptResponse, error) {
 	return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, nil
 }

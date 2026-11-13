@@ -3051,6 +3051,9 @@ func (m *Manager) createAdapter() error {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
 	m.adapter = adpt
+	if setter, ok := m.adapter.(adapter.MCPAttachmentEventPersisterSetter); ok {
+		setter.SetMCPAttachmentEventPersister(m.persistDeliveryEvent)
+	}
 
 	// Set stderr provider if the adapter implements the optional StderrProviderSetter interface
 	if setter, ok := m.adapter.(adapter.StderrProviderSetter); ok {
