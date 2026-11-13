@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/retention"
 )
@@ -36,7 +37,7 @@ func (m *Manager) stopWorkspaceRuntime(ctx context.Context, backend ExecutorBack
 		}
 	}
 
-	return backend.StopInstance(ctx, instance, force)
+	return backend.StopInstance(agentctl.WithInferenceStopObserver(ctx, m.inferenceConsumer), instance, force)
 }
 
 func (m *Manager) stopWorkspaceRuntimeAndRelease(ctx context.Context, backend ExecutorBackend, instance *ExecutorInstance, force bool) error {
@@ -59,6 +60,9 @@ func (m *Manager) stopWorkspaceRuntimeAndRelease(ctx context.Context, backend Ex
 // instance field retaining its value as a defensive fallback.
 func rollbackPreservesRuntime(execInstance *ExecutorInstance, execution *AgentExecution) bool {
 	if execution != nil && retainsRuntimeOnLaunchRollback(execution) {
+		return true
+	}
+	if adoptionPreservesPeer(execInstance, execution) {
 		return true
 	}
 	if execInstance == nil || !execInstance.ReusedWorkspace {
@@ -86,6 +90,12 @@ func (m *Manager) stopLaunchRuntimeOnRollback(
 	}
 	if !rollbackPreservesRuntime(instance, execution) {
 		return m.stopWorkspaceRuntimeAndRelease(ctx, backend, instance, true)
+	}
+	if adoptionPreservesPeer(instance, execution) {
+		// A failed adoption owns only the transport client it opened. Keep the
+		// selected peer process, journal handle, and MCP claims for retry and
+		// explicit Stop.
+		return nil
 	}
 	if instance.RuntimeName == agentruntime.RuntimeRemoteDocker {
 		// Preserve the retained container even if an earlier stop attempt was

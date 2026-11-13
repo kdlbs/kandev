@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- task-create form state owns one complete reset and hydration contract. */
 
 "use client";
+import type { BuiltinMCPCreateDraft } from "@/lib/types/builtin-mcp";
 
 /* eslint-disable max-lines -- the state module owns the task creation form lifecycle and projections. */
 
@@ -26,8 +27,10 @@ import {
   useRepositoriesState,
 } from "@/components/task-create-dialog-repositories-state";
 import { useDialogComputed } from "@/components/task-create-dialog-computed";
+import { useTaskCreateWorkflowSteps } from "@/hooks/use-task-create-workflow-steps";
 import { truncateRemoteTaskTitle } from "@/lib/task-title";
 import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
+import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 
 export type {
   StepType,
@@ -94,9 +97,17 @@ function useTaskDependencyState() {
 }
 
 function useTaskMCPSelectionState() {
+  const [builtinMCPPreferences, setBuiltinMCPPreferences] = useState<BuiltinMCPCreateDraft>();
   const [mcpServerIds, setMcpServerIds] = useState<string[]>([]);
   const [mcpServerIdsDirty, setMcpServerIdsDirty] = useState(false);
-  return { mcpServerIds, setMcpServerIds, mcpServerIdsDirty, setMcpServerIdsDirty };
+  return {
+    mcpServerIds,
+    setMcpServerIds,
+    mcpServerIdsDirty,
+    setMcpServerIdsDirty,
+    builtinMCPPreferences,
+    setBuiltinMCPPreferences,
+  };
 }
 
 function useFreshBranchState() {
@@ -265,6 +276,7 @@ export function useDialogFormState(
     lockedWorkflow,
     resetters: {
       setBlockedBy: dependencies.setBlockedBy,
+      setBuiltinMCPPreferences: mcpSelections.setBuiltinMCPPreferences,
       setMcpServerIds: mcpSelections.setMcpServerIds,
       setMcpServerIdsDirty: mcpSelections.setMcpServerIdsDirty,
       setTaskName: form.setTaskName,
@@ -482,6 +494,7 @@ export function useSessionRepoName(isSessionMode: boolean) {
 
 type TaskCreateDialogDataArgs = {
   open: boolean;
+  enabled?: boolean;
   workspaceId: string | null;
   workflowId: string | null;
   defaultStepId: string | null;
@@ -490,8 +503,24 @@ type TaskCreateDialogDataArgs = {
   agentProfileRecentUseContext?: AgentProfileRecentUseContext;
 };
 
+function resolveLoadedWorkflowSnapshot(args: {
+  effectiveWorkflowId: string | null;
+  workspaceId: string | null;
+  workflows: Array<{ id: string; workspaceId?: string }>;
+  snapshots: Record<string, WorkflowSnapshotData>;
+}): WorkflowSnapshotData | null {
+  const { effectiveWorkflowId, workspaceId, workflows, snapshots } = args;
+  if (!effectiveWorkflowId || !workspaceId) return null;
+  const workflow = workflows.find((item) => item.id === effectiveWorkflowId);
+  if (!workflow || workflow.workspaceId !== workspaceId) return null;
+  const snapshot = snapshots[effectiveWorkflowId];
+  if (!snapshot || snapshot.isPlaceholder || snapshot.fetchFailed) return null;
+  return snapshot;
+}
+
 export function useTaskCreateDialogData({
   open,
+  enabled = true,
   workspaceId,
   workflowId,
   defaultStepId,
@@ -506,19 +535,6 @@ export function useTaskCreateDialogData({
   const settingsData = useAppStore((state) => state.settingsData);
   const availableAgentsLoaded = useAppStore((state) => state.availableAgents.loaded);
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
-  const workspaceSnapshotWorkspaceId = useAppStore(
-    (state) => state.workspaceContextRead.workspaceId,
-  );
-  const workspaceSnapshotPending = useAppStore(
-    (state) => state.workspaceContextRead.snapshotPending,
-  );
-  const workspaceSnapshotError = useAppStore((state) => state.workspaceContextRead.snapshotError);
-  const workspaceSnapshotRead = {
-    workspaceId: workspaceSnapshotWorkspaceId,
-    pending: workspaceSnapshotPending,
-    error: workspaceSnapshotError,
-  };
-  const refreshWorkspaceSnapshots = useAppStore((state) => state.requestWorkspaceContextRefresh);
   const taskCreateUserSettings = useEnsureUserSettings(open);
 
   useSettingsData(open);
@@ -554,14 +570,25 @@ export function useTaskCreateDialogData({
     userSettingsLoaded: taskCreateUserSettings.loaded,
     agentProfileRecentUseContext,
   });
+  const selectedWorkflowSteps = useTaskCreateWorkflowSteps({
+    open,
+    enabled,
+    workspaceId,
+    workflowId: computed.effectiveWorkflowId,
+    openCycle: fs.openCycle,
+    loadedSnapshot: resolveLoadedWorkflowSnapshot({
+      effectiveWorkflowId: computed.effectiveWorkflowId,
+      workspaceId,
+      workflows,
+      snapshots,
+    }),
+  });
   return {
     workflows,
     workspaces,
     agentProfiles,
     executors,
     snapshots,
-    workspaceSnapshotRead,
-    refreshWorkspaceSnapshots,
     repositories,
     repositoriesLoading,
     refreshRepositories,
@@ -569,5 +596,6 @@ export function useTaskCreateDialogData({
     taskCreateLastUsed: taskCreateUserSettings.userSettings.taskCreateLastUsed,
     userSettingsLoaded: taskCreateUserSettings.loaded,
     computed,
+    selectedWorkflowSteps,
   };
 }

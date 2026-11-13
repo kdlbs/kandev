@@ -1,6 +1,11 @@
 import { useCallback } from "react";
 import type { ApiRequestOptions } from "@/lib/api/client";
-import { readNativeDashboard } from "@/lib/api/domains/control-native-api";
+import {
+  readNativeDashboard,
+  readNativeLedger,
+  readNativeTasks,
+} from "@/lib/api/domains/control-native-api";
+import type { NativeArchive } from "@/lib/types/control-native";
 import { useControlResource, controlReadFailure, retainControlRows } from "./use-control-resource";
 
 function useWorkspaceReads<T>(
@@ -30,3 +35,21 @@ function useWorkspaceReads<T>(
 }
 export const useNativeDashboards = (ids: string[], revision: object | undefined) =>
   useWorkspaceReads(ids, revision, readNativeDashboard);
+export const useNativeLedger = (ids: string[], revision: object | undefined) =>
+  useWorkspaceReads(ids, revision, readNativeLedger);
+
+/** Per-task control rows for the stopped-work reasons; no timer, route-owned revision. */
+export function useNativeTasks(
+  ids: string[],
+  filter: string,
+  archive: NativeArchive,
+  limit: number,
+  revision: object | undefined,
+) {
+  const reader = useCallback(
+    (id: string, options: ApiRequestOptions) =>
+      readNativeTasks(id, filter, archive, limit, options),
+    [filter, archive, limit],
+  );
+  return useWorkspaceReads(ids, revision, reader);
+}

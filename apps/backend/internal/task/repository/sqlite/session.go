@@ -482,6 +482,29 @@ func (r *Repository) GetLatestTurnBySessionID(ctx context.Context, sessionID str
 	return turn, err
 }
 
+// CurrentClarificationTurnID returns the canonical current conversational turn
+// for a session using the same authority predicate and ordering as the
+// clarification claim and finalization transactions.
+func (r *Repository) CurrentClarificationTurnID(ctx context.Context, sessionID string) (string, error) {
+	predicate, orderBy := currentTurnAuthority(r.ro.DriverName(), "turn_row")
+	query := fmt.Sprintf(`
+		SELECT turn_row.id
+		FROM task_session_turns turn_row
+		WHERE turn_row.task_session_id = ? AND %s
+		ORDER BY %s
+		LIMIT 1
+	`, predicate, orderBy)
+	var turnID string
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID).Scan(&turnID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("resolve current clarification turn: %w", err)
+	}
+	return turnID, nil
+}
+
 // ListTurnsBySession returns all turns for a session ordered by start time
 func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTurnsBySession")
@@ -512,6 +535,22 @@ func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) (
 	return result, nil
 }
 
+// taskSessionAgentWorkspaceSelect projects the confirmed native workspace from
+// the current incarnation's latest committed harness generation. The raw
+// task_sessions.workspace_path column is mutable and can be overwritten with
+// the effective environment root, so it is not durable evidence of the
+// agent's checkout. The correlated subquery reuses the existing
+// (session_id, incarnation_id, generation DESC) index and stays portable
+// across SQLite and PostgreSQL.
+const taskSessionAgentWorkspaceSelect = `COALESCE((
+		SELECT NULLIF(hg.current_workspace, '')
+		FROM harness_session_generations hg
+		WHERE hg.session_id = ts.id
+		  AND hg.incarnation_id = COALESCE(NULLIF(ts.queue_incarnation_id, ''), ts.id)
+		ORDER BY hg.generation DESC
+		LIMIT 1
+	), '')`
+
 // taskSessionSelectCols is the column list used by every SELECT that scans
 // into a *models.TaskSession via scanTaskSession / scanTaskSessionRow. Centralised
 // so columns can be added in one place. Order MUST match the scan helpers.
@@ -531,10 +570,11 @@ const taskSessionSelectCols = `ts.id, ts.task_id, ts.queue_incarnation_id,
 	ts.executor_id, ts.executor_profile_id, ts.environment_id,
 	ts.repository_id, ts.base_branch, ts.base_commit_sha,
 	COALESCE(NULLIF(te.workspace_path, ''), ts.workspace_path),
+	` + taskSessionAgentWorkspaceSelect + `,
 	ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
 	ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
 	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id, ts.name, ts.last_read_message_id,
-	ts.cost_subcents, ts.tokens_in, ts.tokens_cached_in, ts.tokens_out, ts.executor_actor_user_id`
+	ts.cost_subcents, ts.tokens_in, ts.tokens_cached_in, ts.tokens_out, ts.executor_actor_user_id, ts.admitted_execution_grade, ts.admitted_execution_grade_known`
 
 // taskSessionFromClause is the FROM clause that pairs with taskSessionSelectCols.
 // Always reference task_sessions as `ts` and executors_running as `er` in WHERE/ORDER.
@@ -1103,15 +1143,12 @@ func (r *Repository) applyInitialRuntimeSeedTx(ctx context.Context, tx *sqlx.Tx,
 	if err != nil {
 		return err
 	}
-	var sessionCount, primaryCount int
+	var sessionCount int
 	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT COUNT(*), COALESCE(SUM(CASE WHEN is_primary = 1 THEN 1 ELSE 0 END), 0)
-		FROM task_sessions WHERE task_id = ?
-	`), session.TaskID).Scan(&sessionCount, &primaryCount); err != nil {
+		SELECT COUNT(*) FROM task_sessions WHERE task_id = ?
+	`), session.TaskID).Scan(&sessionCount); err != nil {
 		return fmt.Errorf("check task sessions before workspace binding: %w", err)
 	}
-	// The task lock or SQLite writer serializes primary election with insertion.
-	session.IsPrimary = session.IsPrimary && primaryCount == 0
 	if sessionCount == 0 {
 		if session.Metadata == nil {
 			session.Metadata = make(map[string]interface{})
@@ -1270,6 +1307,9 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		if err := r.prepareWorkflowInitialSessionTx(ctx, tx, session); err != nil {
 			return err
 		}
+		if err := r.electInitialSessionPrimaryTx(ctx, tx, session); err != nil {
+			return err
+		}
 	}
 
 	if err := r.authorizeManualCreation(ctx, exec, "session", session.ID, session.TaskID); err != nil {
@@ -1312,12 +1352,12 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 			repository_id, base_branch, base_commit_sha, workspace_path,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,
-			is_primary, review_status, is_passthrough, task_environment_id, name, executor_actor_user_id
+			is_primary, review_status, is_passthrough, task_environment_id, name, executor_actor_user_id, admitted_execution_grade, admitted_execution_grade_known
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-			?, ?
+			?, ?, ?, ?
 		)
 	`), session.ID, session.TaskID, session.QueueIncarnationID, agentProfileID,
 		session.ExecutionProfileID, session.RouteGeneration, session.RouteState, session.RouteReason, session.DownstreamACPSessionID,
@@ -1326,12 +1366,30 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		string(session.State), session.ErrorMessage, string(metadataJSON),
 		session.StartedAt, session.CompletedAt, session.UpdatedAt,
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
-		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name, session.ExecutorActorUserID)
+		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name, session.ExecutorActorUserID, session.AdmittedExecutionGrade, dialect.BoolToInt(session.AdmittedExecutionGradeKnown))
 
 	if err != nil {
 		return err
 	}
 	return r.clearManualCreation(ctx, exec, "session", session.ID, session.TaskID)
+}
+
+// electInitialSessionPrimaryTx resolves an election-if-missing request under
+// the caller's task lock and records the committed ownership on session. The
+// insert therefore carries the final flag, and a caller never needs a second
+// transaction to promote the row.
+func (r *Repository) electInitialSessionPrimaryTx(ctx context.Context, tx *sqlx.Tx, session *models.TaskSession) error {
+	if session == nil || !session.IsPrimary {
+		return nil
+	}
+	var primaryCount int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT COUNT(*) FROM task_sessions WHERE task_id = ? AND is_primary = 1
+	`), session.TaskID).Scan(&primaryCount); err != nil {
+		return fmt.Errorf("check task primary session before insertion: %w", err)
+	}
+	session.IsPrimary = primaryCount == 0
+	return nil
 }
 
 // verifyTaskRunnerResolutionTx rejects a session built from a task snapshot
@@ -1571,10 +1629,11 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 		&session.ExecutionProfileID, &session.RouteGeneration, &session.RouteState, &session.RouteReason, &session.DownstreamACPSessionID,
 		&session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA, &session.WorkspacePath,
+		&session.AgentWorkspacePath,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
-		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut, &session.ExecutorActorUserID,
+		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut, &session.ExecutorActorUserID, &session.AdmittedExecutionGrade, &session.AdmittedExecutionGradeKnown,
 	)
 
 	if err == sql.ErrNoRows {
@@ -1673,10 +1732,24 @@ func (r *Repository) hydrateDynamicRoutePolicy(ctx context.Context, session *mod
 
 // GetTaskSession retrieves an agent session by ID
 func (r *Repository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
+	checked := models.InferenceClosurePresenceCheckRequested(ctx)
+	if checked {
+		block, err := r.GetInferenceClosureBlock(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if block != nil {
+			return nil, models.ErrInferenceClosureBlocked
+		}
+	}
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
 		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+` WHERE ts.id = ?`,
 	), id)
-	return r.scanTaskSession(ctx, row, fmt.Sprintf("agent session not found: %s", id))
+	session, err := r.scanTaskSession(ctx, row, fmt.Sprintf("agent session not found: %s", id))
+	if err == nil && session != nil {
+		session.InferenceClosureAbsenceConfirmed = checked
+	}
+	return session, err
 }
 
 // ClaimPromptableTaskSessionIfActive atomically claims a ready session for a
@@ -3311,8 +3384,8 @@ func (r *Repository) SetSessionMetadataKeyIfState(
 }
 
 // UpdateSessionContextWindow stores a context-window sample and atomically
-// increments the session's inferred compaction count when the new used-token
-// value is lower than the previous persisted sample.
+// increments the session's inferred compaction count when an eligible
+// used-token value is lower than an eligible previous sample.
 func (r *Repository) UpdateSessionContextWindow(
 	ctx context.Context,
 	sessionID string,
@@ -3326,9 +3399,10 @@ func (r *Repository) UpdateSessionContextWindow(
 	if err != nil {
 		return 0, err
 	}
+	disabled := contextWindowCompactionInferenceDisabled(contextWindow)
 	now := time.Now().UTC()
 	var count int64
-	row := r.db.QueryRowxContext(ctx, r.db.Rebind(updateSessionContextWindowQuery(r.db.DriverName())), string(windowJSON), used, now, sessionID)
+	row := r.db.QueryRowxContext(ctx, r.db.Rebind(updateSessionContextWindowQuery(r.db.DriverName())), string(windowJSON), disabled, used, now, sessionID)
 	if err := row.Scan(&count); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, fmt.Errorf("agent session not found: %s", sessionID)
@@ -3336,6 +3410,14 @@ func (r *Repository) UpdateSessionContextWindow(
 		return 0, err
 	}
 	return count, nil
+}
+
+// contextWindowCompactionInferenceDisabled reports whether the sample is
+// excluded from usage-drop compaction inference. A missing or non-boolean
+// marker keeps the legacy eligible behavior.
+func contextWindowCompactionInferenceDisabled(contextWindow map[string]interface{}) bool {
+	disabled, ok := contextWindow["compaction_inference_disabled"].(bool)
+	return ok && disabled
 }
 
 func contextWindowUsed(contextWindow map[string]interface{}) (int64, error) {
@@ -3369,13 +3451,16 @@ func updateSessionContextWindowQuery(driver string) string {
 		base := "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END"
 		count := "GREATEST(COALESCE(NULLIF((" + base + ") #>> '{context_compaction_count}', '')::bigint, 0), 0)"
 		previousUsed := "(" + base + ") #>> '{context_window,used}'"
+		previousDisabled := "COALESCE((" + base + ") #>> '{context_window,compaction_inference_disabled}', 'false')"
 		return `
 			UPDATE task_sessions
 			SET metadata = jsonb_set(
 				jsonb_set(` + base + `, '{context_window}', ?::jsonb, true),
 				'{context_compaction_count}',
 				to_jsonb(CASE
-					WHEN jsonb_typeof((` + base + `) #> '{context_window,used}') = 'number'
+					WHEN NOT ?::boolean
+						AND ` + previousDisabled + ` = 'false'
+						AND jsonb_typeof((` + base + `) #> '{context_window,used}') = 'number'
 						AND (` + previousUsed + `)::bigint > ?
 					THEN ` + count + ` + 1
 					ELSE ` + count + `
@@ -3390,13 +3475,16 @@ func updateSessionContextWindowQuery(driver string) string {
 	base := "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END"
 	count := "MAX(COALESCE(CAST(json_extract(" + base + ", '$.context_compaction_count') AS INTEGER), 0), 0)"
 	previousUsed := "json_extract(" + base + ", '$.context_window.used')"
+	previousDisabled := "COALESCE(json_extract(" + base + ", '$.context_window.compaction_inference_disabled'), 0)"
 	return `
 		UPDATE task_sessions
 		SET metadata = json_set(
 			json_set(` + base + `, '$.context_window', json(?)),
 			'$.context_compaction_count',
 			CASE
-				WHEN json_type(` + base + `, '$.context_window.used') IN ('integer', 'real')
+				WHEN ? = 0
+					AND ` + previousDisabled + ` = 0
+					AND json_type(` + base + `, '$.context_window.used') IN ('integer', 'real')
 					AND CAST(` + previousUsed + ` AS INTEGER) > ?
 				THEN ` + count + ` + 1
 				ELSE ` + count + `
@@ -3910,13 +3998,13 @@ func (r *Repository) UpdateTaskSessionBaseCommit(ctx context.Context, id string,
 //
 // The write is monotonic: it only advances the cursor when messageID is not
 // older than the currently persisted one, comparing each message's
-// (created_at, id) — created_at as the primary ordering (matches every
-// other transcript ordering in this codebase, e.g. ListMessages' `ORDER BY
-// created_at ASC`), with id as a deterministic tiebreaker for messages
-// created in the same instant. Portable across SQLite and Postgres — no
-// dialect branching needed, unlike the rowid-based approach this replaced
-// (SQLite's rowid pseudo-column doesn't exist on Postgres). This guards
-// against out-of-order delivery — e.g. two overlapping mark-read requests
+// (created_at, id), with created_at compared at microsecond precision through
+// dialect.NormalizedMicrosecond. This is the same key the unread derivation uses
+// (statussummary.UnreadRank), so the cursor never sits on a different side of a
+// message than the unread walk. Messages sharing a microsecond are ordered by id.
+// The guard compares through dialect.NormalizedMicrosecond on both drivers, so
+// it holds on SQLite and Postgres alike. It does not depend on rowid ordering.
+// This guards against out-of-order delivery — e.g. two overlapping mark-read requests
 // where the response for an older message is processed after a newer one —
 // silently regressing last_read_message_id and resurrecting the "New"
 // divider over transcript the user already read. A cursor referencing a
@@ -3924,6 +4012,9 @@ func (r *Repository) UpdateTaskSessionBaseCommit(ctx context.Context, id string,
 // the guard never wedges: NOT EXISTS is satisfied and the update proceeds.
 func (r *Repository) UpdateTaskSessionLastReadMessageID(ctx context.Context, id, messageID string) error {
 	now := time.Now().UTC()
+	driver := r.db.DriverName()
+	nmCur := dialect.NormalizedMicrosecond(driver, "cur.created_at")
+	nmIncoming := dialect.NormalizedMicrosecond(driver, "incoming.created_at")
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions
 		   SET last_read_message_id = ?, updated_at = ?
@@ -3935,8 +4026,8 @@ func (r *Repository) UpdateTaskSessionLastReadMessageID(ctx context.Context, id,
 		               WHERE cur.id = task_sessions.last_read_message_id
 		                 AND incoming.id = ?
 		                 AND (
-		                       cur.created_at > incoming.created_at
-		                       OR (cur.created_at = incoming.created_at AND cur.id > incoming.id)
+		                       `+nmCur+` > `+nmIncoming+`
+		                       OR (`+nmCur+` = `+nmIncoming+` AND cur.id > incoming.id)
 		                     )
 		            )
 		       )
@@ -4261,9 +4352,10 @@ func (r *Repository) GetActiveTaskInfoByAgentProfile(ctx context.Context, agentP
 	// an old run afterwards fails. That is the accepted trade — see
 	// docs/specs/office/requirements/automations-settings.md.
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT DISTINCT t.id, t.title, t.is_ephemeral
+		SELECT DISTINCT t.id, t.title, t.is_ephemeral, t.workspace_id, COALESCE(w.name, '')
 		FROM task_sessions ts
 		JOIN tasks t ON t.id = ts.task_id
+		LEFT JOIN workspaces w ON w.id = t.workspace_id
 		WHERE ts.agent_profile_id = ? AND ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 		  AND NOT (COALESCE(t.origin, '') = '`+models.TaskOriginAutomationRun+`'
 		           AND ts.state = 'WAITING_FOR_INPUT')
@@ -4275,7 +4367,7 @@ func (r *Repository) GetActiveTaskInfoByAgentProfile(ctx context.Context, agentP
 	var result []agentdto.ActiveTaskInfo
 	for rows.Next() {
 		var info agentdto.ActiveTaskInfo
-		if err := rows.Scan(&info.TaskID, &info.TaskTitle, &info.IsEphemeral); err != nil {
+		if err := rows.Scan(&info.TaskID, &info.TaskTitle, &info.IsEphemeral, &info.WorkspaceID, &info.WorkspaceName); err != nil {
 			return nil, err
 		}
 		result = append(result, info)
@@ -4517,10 +4609,11 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 		&session.ExecutionProfileID, &session.RouteGeneration, &session.RouteState, &session.RouteReason, &session.DownstreamACPSessionID,
 		&session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA, &session.WorkspacePath,
+		&session.AgentWorkspacePath,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
-		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut, &session.ExecutorActorUserID,
+		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut, &session.ExecutorActorUserID, &session.AdmittedExecutionGrade, &session.AdmittedExecutionGradeKnown,
 	)
 	if err != nil {
 		return nil, err
@@ -5156,6 +5249,10 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 	}
 	return result, rows.Err()
 }
+
+// ElectsPrimaryOnCreate reports that session insertion commits the initial
+// primary election under the owning task lock.
+func (r *Repository) ElectsPrimaryOnCreate() bool { return true }
 
 // SetSessionPrimary marks a session as primary and clears the primary flag
 // on every other session for the same task, atomically. Both writes go

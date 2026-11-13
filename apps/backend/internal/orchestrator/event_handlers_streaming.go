@@ -298,6 +298,14 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case streams.EventTypeUsageObservation:
 		s.publishNativeUsageObservation(ctx, payload)
 
+	case streams.EventTypeContextCompactionObservation:
+		if payload != nil && payload.Data != nil {
+			s.publishCommittedContextCompaction(
+				ctx, payload.TaskID, payload.SessionID,
+				payload.Data.CanonicalProjection, payload.Data.Data,
+			)
+		}
+
 	case "plan":
 		s.handleSessionTodosEvent(ctx, payload)
 
@@ -589,7 +597,7 @@ func (s *Service) handleSessionStatusEvent(ctx context.Context, payload *lifecyc
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
 	if sessionID != "" && payload.Data.ACPSessionID != "" {
-		s.storeResumeToken(ctx, taskID, sessionID, payload.ExecutionID, payload.Data.ACPSessionID, "", payload.AttemptID)
+		s.storeResumeTokenFromAgentEvent(ctx, taskID, sessionID, payload.ExecutionID, payload.Data.ACPSessionID, "", payload.AttemptID)
 	}
 	if sessionID == "" || s.messageCreator == nil {
 		return
@@ -1187,7 +1195,30 @@ func (s *Service) resolveToolUpdateOwnership(payload *lifecycle.AgentStreamEvent
 		)
 		return toolOwnershipBackground
 	}
+	if terminalBackgroundWorkToolUpdate(payload) {
+		s.recordToolOwnership(
+			payload.SessionID,
+			payload.Data.ToolCallID,
+			payload.ExecutionID,
+			toolOwnershipBackground,
+		)
+		return toolOwnershipBackground
+	}
 	return s.toolOwnership(payload.SessionID, payload.Data.ToolCallID, payload.ExecutionID)
+}
+
+// terminalBackgroundWorkToolUpdate reports whether a tool update carries a
+// typed terminal workload observation for its own call. The launch tool's
+// earlier terminal result clears ownership, so the later job-end frame needs
+// this explicit evidence to reach the registration that still holds the turn
+// open. The source-call check keeps a mismatched observation from retiring a
+// different job.
+func terminalBackgroundWorkToolUpdate(payload *lifecycle.AgentStreamEventPayload) bool {
+	observation := payload.Data.BackgroundWork
+	if observation == nil || !observation.State.IsTerminal() || payload.Data.ToolCallID == "" {
+		return false
+	}
+	return observation.SourceCallID == "" || observation.SourceCallID == payload.Data.ToolCallID
 }
 
 func backgroundWorkID(payload *streams.NormalizedPayload) string {
@@ -2930,10 +2961,15 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 		zap.String("task_id", taskID))
 }
 
+func (s *Service) readValidCeilingDeferredLaunch(ctx context.Context, task *models.Task) (models.CeilingDeferral, bool, error) {
+	return s.readCeilingDeferredLaunchSnapshot(ctx, task, s.validateCeilingEntry)
+}
+
 //nolint:cyclop,nestif // Queue reconciliation validates independent task, record, destination, and workflow-entry state.
-func (s *Service) readValidCeilingDeferredLaunch(
+func (s *Service) readCeilingDeferredLaunchSnapshot(
 	ctx context.Context,
 	task *models.Task,
+	validate func(context.Context, *models.Task, models.CeilingDeferral) (ceilingEntryDisposition, string, error),
 ) (models.CeilingDeferral, bool, error) {
 	if task == nil || task.ArchivedAt != nil || task.State == v1.TaskStateCancelled {
 		return models.CeilingDeferral{}, false, nil
@@ -2971,7 +3007,7 @@ func (s *Service) readValidCeilingDeferredLaunch(
 			return models.CeilingDeferral{}, false, nil
 		}
 	}
-	disposition, detail, validationErr := s.validateCeilingEntry(ctx, task, deferral)
+	disposition, detail, validationErr := validate(ctx, task, deferral)
 	if validationErr != nil {
 		return models.CeilingDeferral{}, false, validationErr
 	}
@@ -3431,7 +3467,7 @@ func (s *Service) storeCompleteEventResumeToken(ctx context.Context, payload *li
 			lastMsgUUID = uuid
 		}
 	}
-	s.storeResumeToken(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID, payload.AttemptID)
+	s.storeResumeTokenFromAgentEvent(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID, payload.AttemptID)
 }
 
 func (s *Service) resolveCompleteEventTurnID(
@@ -4238,6 +4274,7 @@ func (s *Service) handleSessionModeEvent(ctx context.Context, payload *lifecycle
 	defer settingsLock.Unlock()
 	identity := sessionSettingsEventIdentity{
 		AttemptID: payload.AttemptID, ExecutionID: payload.ExecutionID,
+		ExecutionProfileID: payload.ExecutionProfileID,
 		SourceGeneration:   payload.SessionSettingsSourceGeneration,
 		SettingsGeneration: payload.Data.SessionSettingsGeneration,
 	}
@@ -4350,6 +4387,7 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	defer settingsLock.Unlock()
 	identity := sessionSettingsEventIdentity{
 		AttemptID: payload.AttemptID, ExecutionID: payload.ExecutionID,
+		ExecutionProfileID: payload.ExecutionProfileID,
 		SourceGeneration:   payload.SessionSettingsSourceGeneration,
 		SettingsGeneration: payload.Data.SessionSettingsGeneration,
 	}
@@ -4450,6 +4488,7 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 type sessionSettingsEventIdentity struct {
 	AttemptID          string
 	ExecutionID        string
+	ExecutionProfileID string
 	SourceGeneration   uint64
 	SettingsGeneration uint64
 }
@@ -4507,7 +4546,21 @@ func sessionSettingsEventIsStale(
 	}
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {
-		return false
+		// Without the session the candidate cannot be confirmed, so settings
+		// reported by a concrete dynamic candidate are treated as stale.
+		return identity.ExecutionProfileID != ""
+	}
+	// A dynamic session that switched concrete candidates must not accept
+	// settings reported by the previous candidate's execution.
+	if identity.ExecutionProfileID != "" && session.ExecutionProfileID != "" &&
+		identity.ExecutionProfileID != session.ExecutionProfileID {
+		return true
+	}
+	// Settings reported by an execution whose permission-mode rejection reset
+	// the runtime settings must not restore the discarded observations.
+	if rejected, _ := session.Metadata[rejectedRuntimeSettingsExecution].(string); rejected != "" &&
+		rejected == identity.ExecutionID {
+		return true
 	}
 	snapshot, ok := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
 	if !ok {

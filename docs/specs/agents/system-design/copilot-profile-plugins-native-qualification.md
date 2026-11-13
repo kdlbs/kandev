@@ -35,12 +35,37 @@ not grant policy, credential, or administrator authority.
 
 Numbers use prefix `REQ-AGENTS-COPILOT-PLUGINS-`.
 
+## Runtime compatibility amendment
+
+Work orders 01 through 03 delivered the exact-version preview and profile
+recovery recorded in the [package](../../../plans/copilot-runtime-plugin-compatibility/plan.md).
+The user subsequently confirmed contract-based admission, superseding the
+version/platform policy in that intermediate implementation.
+
+The [contract admission design](copilot-plugin-contract-compatibility.md) is
+now authoritative for capability checks, current preview states, preparation,
+and durable/UI plugin failure projection. Work orders 04 and 05 record its implementation evidence.
+The original settings layout, draft preservation, native unknown-status
+projection, authorization, and response-generation fences remain required.
+
+The [new ADR](../../../decisions/2026-11-05-copilot-plugin-contract-admission.md)
+amends only the version restriction in the accepted native-policy decision.
+This document retains native authority, historic observations, and diagnostic methods.
+
 ## Evidence baseline
 
-The inventory adapter supports `1.0.88` and `1.0.104`. WO-04 removed the empty
-`policyVerifiedVersions` gate and `RequireMountPolicy`. Mount preparation now
-uses the same supported-version predicate as discovery, not privileged
-qualification results.
+The following records the intermediate patch, not the new admission policy.
+
+The intermediate inventory adapter admits `1.0.88` and `1.0.104` on every supported host,
+and `1.0.105` on `linux/amd64`. WO-04 removed the empty
+`policyVerifiedVersions` gate and `RequireMountPolicy`. Mount preparation uses
+the same platform-scoped supported-version predicate as discovery, not
+privileged qualification results. The focused Linux x64 adapter test recorded
+exact package identity, a successful fresh inventory, a native-written remote
+marketplace install with `config.json` installed metadata and a
+`source=installed` row, a local directory marketplace `source=live` control,
+matching root manifests, production discovery/admission for both shapes, and
+two repeated mounts with special-character paths.
 
 The [sole evidence ledger](../../../plans/copilot-profile-plugins/compatibility-evidence.md)
 preserves historical Linux observations and macOS arm64 native attempts.
@@ -71,39 +96,16 @@ context alone is not demonstrated incompatibility.
 
 ## Qualification and admission
 
-Keep `RuntimeSupported` and its inventory/metadata version boundary. Unknown
-versions still return `runtime_unsupported`; never fall back to a global CLI or
-change the managed pin.
+The [current contract](copilot-plugin-contract-compatibility.md#shared-discovery-and-admission)
+replaces exact-version and platform certification maps. Preserve exact managed
+runtime identity, final profile environment, strict metadata/root checks,
+executor restrictions, all-or-nothing selected sets, and preflight before replacement.
+Unknown version strings alone no longer reject discovery or launch.
+Capability and format incompatibilities remain specific failures.
+Empty selection and retained-process behavior remain unchanged.
 
-Remove `policyVerifiedVersions` and `RequireMountPolicy` as launch prerequisites.
-`MountsPermitted(version)` may remain as a compatibility projection of supported
-native preparation, using the same version predicate as launch. It must not be
-a second policy allowlist or a platform-certification lookup.
-
-`ResolveLaunchSelection` retains this order:
-
-1. Empty selection is a no-op without inventory, filesystem, or policy reads.
-2. Validate Copilot provider, local/worktree executor, wrapper, and identity.
-3. Require the selected inventory/metadata adapter version.
-4. Resolve all selected roots and validate matching readable manifests.
-5. Preserve manual argument order, deduplicate equal mounts, reject conflicts.
-6. Pass separate `--plugin-dir` pairs to the selected native process.
-
-No browser input grants admission. Environment and profile options do not
-override version, root, or executor validation. Native policy remains a
-subsequent native decision, not a Kandev preflight authorization result.
-
-| Context | Intended preparation |
-| --- | --- |
-| Supported adapter version, valid local/worktree identity and roots | Attempt native mounts; native CLI decides policy and consent |
-| Unknown adapter version | `runtime_unsupported`, no global fallback |
-| Empty selection on any executor | Existing behavior, no added native work |
-| Nonempty isolated executor, changing wrapper, or invalid roots | Existing typed rejection before native launch/resource handoff |
-| Missing enterprise fixture or untested platform policy | No additional policy-only rejection |
-| Retained process or in-process reset | Preserve original mounts; no new preparation |
-
-This is preparation eligibility, not certification that an enterprise
-configuration, authentication method, or every plugin component was tested.
+Native policy and authentication are subsequent native decisions.
+No browser input, missing enterprise fixture, or diagnostic certification grants a policy exception.
 
 ## Evidence contract
 
@@ -131,9 +133,11 @@ implicit replacement release gate.
 ## Fixtures and execution
 
 Use the existing `copilot_native` build-tagged external acceptance harness.
-Ordinary tests remain offline and credential-free. Native runs use temporary
-plugin/MCP fixtures and structured argv under an existing authorized identity.
-Do not copy an authentication store or bootstrap credentials.
+The focused adapter test owns disposable home, config, npm cache, and work
+directories and needs no model prompt or authentication. Ordinary tests remain
+offline and credential-free. Native runs use temporary plugin/MCP fixtures and
+structured argv under an existing authorized identity. Do not copy an
+authentication store or bootstrap credentials.
 
 The explicit full diagnostic test still fails if its required controls are
 missing. That failure is a diagnostic result, not a production permission bit.
@@ -165,8 +169,8 @@ successful preparation at actual configure/start or inference boundaries:
 
 Assert selected version, final environment/cwd, separate argv, manual-mount
 deduplication/conflict handling, and intact ACP MCP attachments. Keep
-empty-selection, unknown-version, isolated/wrapped, agent-wide, and retained
-negative controls.
+empty-selection, incompatible-shape, isolated/wrapped, agent-wide, and retained
+negative controls. Compatible unknown versions are positive admission controls.
 
 Use one authorized profile snapshot for selection, command, and environment.
 A channel/barrier test proves a concurrent edit cannot mix revisions and that
@@ -217,19 +221,14 @@ remain owned by [probe failure diagnostics](probe-failure-diagnostics.md).
 
 ## Discovery projection and settings
 
-`DiscoverCopilotPlugins` returns `mount_permitted` from the same supported-version
-preparation predicate as launch. It is not a native policy/consent assertion.
-Retain runtime/context cache identity and refresh fencing.
-
-The existing inline Copilot editor hides the artificial policy warning for
-eligible preparation. Unsupported states and unavailable entries remain
-visible/removable with accurate recovery. Preserve native-enabled metadata,
-deferred preview, localization, dirty state, keyboard behavior, 44px phone
-targets, desktop density, the existing scroll owner, and safe-area Save/Reset.
-
-Browser mocks prove UI behavior, not native enforcement. Public docs distinguish
-supported adapter versions from platform-specific observations and explicitly
-state that Copilot governs component availability and authentication.
+The [current compatibility design](copilot-plugin-contract-compatibility.md#truthful-runtime-preview-and-profile-recovery)
+owns observed eligibility, unchecked preview, and safe cause projection.
+`mount_permitted` derives from the actual discovery observation, not a version map.
+Keep runtime/context cache identity and refresh fencing.
+Preserve native-enabled metadata, deferred preview, localization, drafts,
+keyboard behavior, phone targets, desktop density, and existing scroll ownership.
+Browser fixtures prove presentation; native fixtures prove the observed protocol contract.
+Public guidance must distinguish diagnostic observations from an admission restriction.
 
 ## Delivery records
 

@@ -157,14 +157,33 @@ func (h *Health) isSQLite() bool {
 	return h.pool != nil && h.pool.Writer() != nil && h.pool.Writer().DriverName() == dialect.SQLite3
 }
 
+// pingObserved acquires and releases each pool connection explicitly so an
+// unavailable connection is reported as an acquisition stage. A ping that runs
+// on an acquired connection keeps its own stage.
 func (h *Health) pingObserved(ctx context.Context) (*probeFailureDiagnostic, error) {
-	started := time.Now()
-	if err := h.pool.Writer().PingContext(ctx); err != nil {
-		return h.failureDiagnostic("writer_ping", time.Since(started), err, ""), fmt.Errorf("writer ping failed: %w", err)
+	if diagnostic, err := h.pingPoolConnection(ctx, h.pool.Writer().DB, "writer_acquire", "writer_ping", "writer ping failed"); err != nil {
+		return diagnostic, err
 	}
-	started = time.Now()
-	if err := h.pool.Reader().PingContext(ctx); err != nil {
-		return h.failureDiagnostic("reader_ping", time.Since(started), err, ""), fmt.Errorf("reader ping failed: %w", err)
+	if diagnostic, err := h.pingPoolConnection(ctx, h.pool.Reader().DB, "reader_acquire", "reader_ping", "reader ping failed"); err != nil {
+		return diagnostic, err
+	}
+	return nil, nil
+}
+
+func (h *Health) pingPoolConnection(
+	ctx context.Context,
+	pool *sql.DB,
+	acquireStage, pingStage, message string,
+) (*probeFailureDiagnostic, error) {
+	acquireStarted := time.Now()
+	conn, err := pool.Conn(ctx)
+	if err != nil {
+		return h.failureDiagnostic(acquireStage, time.Since(acquireStarted), err, ""), fmt.Errorf("%s: %w", message, err)
+	}
+	defer func() { _ = conn.Close() }()
+	pingStarted := time.Now()
+	if err := conn.PingContext(ctx); err != nil {
+		return h.failureDiagnostic(pingStage, time.Since(pingStarted), err, ""), fmt.Errorf("%s: %w", message, err)
 	}
 	return nil, nil
 }

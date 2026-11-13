@@ -7,25 +7,30 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/agent/copilotplugins"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 )
 
 // ProfileCreateRequest is the shared wire contract for HTTP and MCP profile
 // creation. Value fields retain the existing create defaults; omitted optional
 // fields are left at their domain defaults.
 type ProfileCreateRequest struct {
-	AgentID                 string                  `json:"agent_id"`
-	Name                    string                  `json:"name"`
-	Model                   string                  `json:"model,omitempty"`
-	FallbackModel           string                  `json:"fallback_model,omitempty"`
-	AutoFallback            bool                    `json:"auto_fallback,omitempty"`
-	RequireExactModel       bool                    `json:"require_exact_model,omitempty"`
-	Mode                    string                  `json:"mode,omitempty"`
-	ConfigOptions           map[string]string       `json:"config_options,omitempty"`
-	AllowIndexing           bool                    `json:"allow_indexing,omitempty"`
-	AutoApprove             bool                    `json:"auto_approve,omitempty"`
-	CLIPassthrough          bool                    `json:"cli_passthrough,omitempty"`
-	CLIFlags                []CLIFlagDTO            `json:"cli_flags,omitempty"`
-	EnvVars                 []ProfileEnvVarDTO      `json:"env_vars,omitempty"`
+	ExecutionGrade    string             `json:"execution_grade,omitempty"`
+	AgentID           string             `json:"agent_id"`
+	Name              string             `json:"name"`
+	Model             string             `json:"model,omitempty"`
+	FallbackModel     string             `json:"fallback_model,omitempty"`
+	AutoFallback      bool               `json:"auto_fallback,omitempty"`
+	RequireExactModel bool               `json:"require_exact_model,omitempty"`
+	Mode              string             `json:"mode,omitempty"`
+	ConfigOptions     map[string]string  `json:"config_options,omitempty"`
+	AllowIndexing     bool               `json:"allow_indexing,omitempty"`
+	AutoApprove       bool               `json:"auto_approve,omitempty"`
+	CLIPassthrough    bool               `json:"cli_passthrough,omitempty"`
+	CLIFlags          []CLIFlagDTO       `json:"cli_flags,omitempty"`
+	EnvVars           []ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	// DevinSandboxInherited marks an explicit "Use CLI settings" choice on a
+	// new Devin profile. It is request-only and never persisted.
+	DevinSandboxInherited   bool                    `json:"devin_sandbox_inherited,omitempty"`
 	CommandPrefix           string                  `json:"command_prefix,omitempty"`
 	ProviderKind            string                  `json:"provider_kind,omitempty"`
 	ProviderBaseURL         string                  `json:"provider_base_url,omitempty"`
@@ -42,6 +47,7 @@ type ProfileCreateRequest struct {
 // means that the caller omitted the field. A non-nil pointer preserves an
 // explicit false, empty string, empty map, or empty list.
 type ProfileUpdateRequest struct {
+	ExecutionGrade    *string             `json:"execution_grade,omitempty"`
 	ID                string              `json:"id"`
 	Name              *string             `json:"name,omitempty"`
 	Model             *string             `json:"model,omitempty"`
@@ -72,6 +78,9 @@ type ProfileUpdateRequest struct {
 }
 
 func (r ProfileCreateRequest) Validate() error {
+	if err := sessioncapacity.ValidateGrade(r.ExecutionGrade); err != nil {
+		return err
+	}
 	if strings.TrimSpace(r.AgentID) == "" {
 		return fmt.Errorf("agent_id is required")
 	}
@@ -85,6 +94,11 @@ func (r ProfileCreateRequest) Validate() error {
 }
 
 func (r ProfileUpdateRequest) Validate() error {
+	if r.ExecutionGrade != nil {
+		if err := sessioncapacity.ValidateGrade(*r.ExecutionGrade); err != nil {
+			return err
+		}
+	}
 	if strings.TrimSpace(r.ID) == "" {
 		return fmt.Errorf("id is required")
 	}
@@ -181,6 +195,7 @@ type ProfileContractField struct {
 // contract root used by schema export and coverage checks.
 func ProfileContractFields() []ProfileContractField {
 	return []ProfileContractField{
+		{Path: "execution_grade", JSONType: "string", Support: "read_write", Description: "Explicit execution classification; empty is unconfigured."},
 		{Path: "name", JSONType: "string", Support: "read_write", Description: "Profile display name."},
 		{Path: "model", JSONType: "string", Support: "read_write", Description: "Preferred model; empty uses the agent default."},
 		{Path: "fallback_model", JSONType: "string", Support: "read_write", Description: "Optional fallback model."},

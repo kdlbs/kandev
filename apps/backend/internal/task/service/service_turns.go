@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -21,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -117,6 +119,7 @@ func (s *Service) createTurn(
 	// Recorded only once the turn is durably persisted — the counter's
 	// "turns created" framing must not count a turn CreateTurn rejected.
 	steptelemetry.RecordTurnStamp(s.logger, stamped)
+	s.logger.Flow(ctx, logger.ExecutionFlow{Stage: "turn", Outcome: "persisted", TaskID: turn.TaskID, SessionID: turn.TaskSessionID, TurnID: turn.ID, ProfileID: turn.ExecutionProfileID, RouteGeneration: uint64(turn.RouteGeneration)})
 
 	if publishStarted {
 		// had_output is only meaningful on turn.completed; omit it from turn.started.
@@ -336,6 +339,7 @@ func (s *Service) createCompletedTurn(ctx context.Context, session *models.TaskS
 	// Recorded only once the turn is durably persisted — the counter's
 	// "turns created" framing must not count a turn CreateTurn rejected.
 	steptelemetry.RecordTurnStamp(s.logger, stamped)
+	s.logger.Flow(ctx, logger.ExecutionFlow{Stage: "turn", Outcome: "persisted", TaskID: turn.TaskID, SessionID: turn.TaskSessionID, TurnID: turn.ID, ProfileID: turn.ExecutionProfileID, RouteGeneration: uint64(turn.RouteGeneration)})
 	return turn, nil
 }
 
@@ -484,6 +488,7 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 		return nil
 	}
 
+	s.logger.Flow(ctx, logger.ExecutionFlow{Stage: "turn", Outcome: "completed", TaskID: turn.TaskID, SessionID: turn.TaskSessionID, TurnID: turn.ID, DurationMS: time.Since(turn.StartedAt).Milliseconds()})
 	hadOutput := s.turnHadOutput(ctx, turn)
 	_ = s.publishTurnEvent(events.TurnCompleted, turn, &hadOutput, receipt)
 
@@ -1006,6 +1011,12 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		info.RuntimeName = running.Runtime
 		info.AgentExecutionID = running.AgentExecutionID
 		mergePersistentWorkspaceMetadata(info, running.Metadata)
+		// A retained helper's built-in binding is execution authority, not a
+		// generic persistent launch preference. Carry it separately so only an
+		// adopted peer can restore it; fresh helpers still start unbound.
+		if value, bound := running.Metadata[mcpprofile.BuiltinBindingMetadataKey]; bound {
+			ensureWorkspaceMetadata(info)[mcpprofile.BuiltinBindingMetadataKey] = value
+		}
 		if officeProfileID, ok := running.Metadata[lifecycle.MetadataKeyOfficeAgentProfileID].(string); ok && strings.TrimSpace(officeProfileID) != "" {
 			info.AgentProfileID = officeProfileID
 		}
@@ -1256,7 +1267,11 @@ func (s *Service) workspaceRepositorySpec(
 		RepositorySubpath: projection.repoName, RepositorySubpathKnown: projection.repoName != "",
 		CloneRelocation:       cloneRelocation,
 		WorkspaceRelativePath: taskRepository.WorkspaceRelativePath,
-		BaseBranch:            taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
+		BaseBranch:            taskRepository.BaseBranch,
+		BaseBranchFallbackPolicy: models.ResolveAttachmentBaseBranchFallbackPolicy(
+			taskRepository.Metadata, taskRepository.BaseBranch,
+		),
+		DefaultBranch:  repository.DefaultBranch,
 		CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
 		WorktreeBranchTemplate: branchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
 	}
@@ -1349,7 +1364,7 @@ func taskRepositoryPRNumber(metadata map[string]interface{}) int {
 	if metadata == nil {
 		return 0
 	}
-	switch number := metadata["pr_number"].(type) {
+	switch number := metadata[models.TaskRepositoryPRNumberMetadataKey].(type) {
 	case float64:
 		if number > 0 {
 			return int(number)

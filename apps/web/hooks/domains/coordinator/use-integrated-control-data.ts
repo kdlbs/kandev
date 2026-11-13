@@ -4,11 +4,15 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { readJourneyWorkspaces } from "@/hooks/journey-metadata-resources";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { listCoordinators, type Coordinator } from "@/lib/api/domains/coordinator-api";
+import { fetchSessionCapacityObservation } from "@/lib/api/domains/session-capacity-api";
+import type { SessionCapacityObservation } from "@/lib/types/system";
 import { mapWorkspaceItem } from "@/lib/routing/route-bootstrap";
 import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
 import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { useWebSocketClient } from "@/lib/ws/connection";
+import { controlReadFailure, type ControlReadStatus } from "./use-control-resource";
+import { retainCapacity } from "./control-capacity-snapshot-state";
 import {
   createControlRefreshScheduler,
   type ControlRefreshOutcome,
@@ -19,6 +23,10 @@ export type ControlWorkspace = WorkspaceState["items"][number];
 export type ControlCoordinatorList = { items: Coordinator[]; error: boolean };
 type Snapshot = {
   receivedAt: string;
+  capacity?: SessionCapacityObservation;
+  lastConfirmedCapacity?: SessionCapacityObservation;
+  capacityStatus?: ControlReadStatus;
+  capacityReceivedAt?: string;
   identity: string;
   owner: object;
   workspaces: ControlWorkspace[];
@@ -104,17 +112,26 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
         const workspaces = result.workspaces
           .map(mapWorkspaceItem)
           .filter((item) => hasScope(item.scopes, SCOPE.workspaceRead));
-        const byWorkspace = coordinatorEnabled
-          ? await readCoordinatorLists(workspaces, signal)
-          : {};
+        const [byWorkspace, capacity] = await Promise.all([
+          coordinatorEnabled ? readCoordinatorLists(workspaces, signal) : Promise.resolve({}),
+          fetchSessionCapacityObservation({ init: { signal } }).then(
+            (value) => ({ value, status: "ready" as const }),
+            (error: unknown) => ({ value: undefined, status: controlReadFailure(error) }),
+          ),
+        ]);
         if (!current()) return "ok";
-        setSnapshot({
+        setSnapshot((previous) => ({
           identity,
           owner,
           workspaces,
           byWorkspace,
+          ...retainCapacity(
+            previous?.owner === owner ? previous : undefined,
+            capacity.value,
+            capacity.status,
+          ),
           receivedAt: new Date().toISOString(),
-        });
+        }));
         setFailure(null);
         return "ok";
       } catch (error) {

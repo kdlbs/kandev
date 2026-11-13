@@ -57,6 +57,11 @@ test.describe.serial("Session capacity task behavior settings", () => {
     await toggle.click();
     const maximum = card.getByTestId("session-capacity-maximum");
     await expect(maximum).toHaveValue(String(baseline.max_sessions));
+    await card.getByRole("button", { name: "About Enable the instance session limit" }).hover();
+    const help = testPage.getByRole("tooltip");
+    await expect(help).toContainText("new message turns in all workspaces");
+    await expect(help).toContainText("Start, Resume, and Send Now can exceed the limit");
+    await testPage.mouse.move(0, 0);
     await expect(maximum).toHaveAttribute("aria-describedby", "session-capacity-maximum-help");
     await maximum.fill("1");
     await testPage

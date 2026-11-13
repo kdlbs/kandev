@@ -106,6 +106,7 @@ func (r *sqliteRepository) initSchema() error {
 		failure_threshold INTEGER NOT NULL DEFAULT 3,
 		executor_preference TEXT NOT NULL DEFAULT '',
 		execution_agent_profile_id TEXT NOT NULL DEFAULT '',
+		execution_grade TEXT NOT NULL DEFAULT '',
 		budget_monthly_cents INTEGER NOT NULL DEFAULT 0,
 		settings TEXT NOT NULL DEFAULT '{}',
 		permissions TEXT NOT NULL DEFAULT '{}',
@@ -136,6 +137,15 @@ func (r *sqliteRepository) initSchema() error {
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (profile_id) REFERENCES agent_profiles(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS workspace_builtin_mcp_policies (
+		workspace_id TEXT PRIMARY KEY,
+		schema_version INTEGER NOT NULL,
+		revision BIGINT NOT NULL CHECK (revision > 0),
+		packages_json TEXT NOT NULL,
+		updated_by TEXT NOT NULL,
+		updated_at TIMESTAMP NOT NULL
 	);
 
 	CREATE TABLE IF NOT EXISTS mcp_server_definitions (
@@ -242,6 +252,7 @@ func (r *sqliteRepository) initSchema() error {
 	CREATE TABLE IF NOT EXISTS dynamic_agent_profiles (
 		profile_id TEXT PRIMARY KEY,
 		version INTEGER NOT NULL DEFAULT 1,
+		keep_model_while_running INTEGER NOT NULL DEFAULT 1,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (profile_id) REFERENCES agent_profiles(id) ON DELETE CASCADE
@@ -287,6 +298,12 @@ func (r *sqliteRepository) initSchema() error {
 
 	r.migrate.Apply("agents.tui_config", `ALTER TABLE agents ADD COLUMN tui_config TEXT DEFAULT NULL`)
 	if err := r.migrate.Apply("mcp_task_session_apply_state.accepted_setup_json", `ALTER TABLE mcp_task_session_apply_state ADD COLUMN accepted_setup_json TEXT DEFAULT NULL`); err != nil {
+		return err
+	}
+	// A fresh database carries the column inline, so this replays as a
+	// duplicate-column no-op; a legacy database is upgraded with default true.
+	if err := r.migrate.Apply("dynamic_agent_profiles.keep_model_while_running",
+		`ALTER TABLE dynamic_agent_profiles ADD COLUMN keep_model_while_running INTEGER NOT NULL DEFAULT 1`); err != nil {
 		return err
 	}
 	r.migrate.Apply("agent_profiles.mode", `ALTER TABLE agent_profiles ADD COLUMN mode TEXT DEFAULT NULL`)
@@ -346,6 +363,9 @@ func (r *sqliteRepository) initSchema() error {
 	// Office identifiers bind the execution profile that owns their launches.
 	// Added after the table-recreation block for the same reason as
 	// command_prefix / provider_kind.
+	if err := r.migrate.Apply("agent_profiles.execution_grade", `ALTER TABLE agent_profiles ADD COLUMN execution_grade TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 	_ = r.migrate.Apply("agent_profiles.execution_agent_profile_id", `ALTER TABLE agent_profiles ADD COLUMN execution_agent_profile_id TEXT NOT NULL DEFAULT ''`)
 	if err := r.migrate.Err(); err != nil {
 		return fmt.Errorf("required agent settings migration: %w", err)
@@ -475,6 +495,7 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 	srcHasEnvVars := columnExists(tx, "agent_profiles", "env_vars")
 	srcHasEnabled := columnExists(tx, "agent_profiles", "enabled")
 	srcHasSortOrder := columnExists(tx, "agent_profiles", "sort_order")
+	srcHasExecutionGrade := columnExists(tx, "agent_profiles", "execution_grade")
 
 	srcHasCommandPrefix := columnExists(tx, "agent_profiles", "command_prefix")
 	srcHasFallbackModel := columnExists(tx, "agent_profiles", "fallback_model")
@@ -537,6 +558,10 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 		srcCols += ", copilot_selected_plugins"
 		dstCols += ", copilot_selected_plugins"
 	}
+	if srcHasExecutionGrade {
+		srcCols += ", execution_grade"
+		dstCols += ", execution_grade"
+	}
 	if srcHasSortOrder {
 		srcCols += ", sort_order"
 		dstCols += ", sort_order"
@@ -572,6 +597,7 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 		mcp_selected_servers TEXT NOT NULL DEFAULT '[]',
 		copilot_selected_plugins TEXT NOT NULL DEFAULT '[]',
 		sort_order INTEGER NOT NULL DEFAULT 0,
+		execution_grade TEXT NOT NULL DEFAULT '',
 
 		FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
 	)`); err != nil {
@@ -891,6 +917,16 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 
 var _ DynamicProfileRepository = (*sqliteRepository)(nil)
 
+// keepModelWhileRunningValue resolves the stored continuity preference. An
+// omitted value keeps the documented default of on, both for a fresh insert
+// and for a caller that only replaces the route document.
+func keepModelWhileRunningValue(profile *models.DynamicAgentProfile) int {
+	if profile == nil || profile.KeepModelWhileRunning == nil {
+		return 1
+	}
+	return dialect.BoolToInt(*profile.KeepModelWhileRunning)
+}
+
 // CreateDynamicAgentProfile writes the dynamic document and its ordered route
 // rows in one transaction. The parent agent_profiles row is created by the
 // controller first; this transaction is the optimistic-routing document's
@@ -917,9 +953,10 @@ func (r *sqliteRepository) CreateDynamicAgentProfile(
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`
-		INSERT INTO dynamic_agent_profiles (profile_id, version, created_at, updated_at)
-		VALUES (?, ?, ?, ?)
-	`), profile.ProfileID, profile.Version, profile.CreatedAt, profile.UpdatedAt); err != nil {
+		INSERT INTO dynamic_agent_profiles (profile_id, version, keep_model_while_running, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), profile.ProfileID, profile.Version, keepModelWhileRunningValue(profile),
+		profile.CreatedAt, profile.UpdatedAt); err != nil {
 		return err
 	}
 	if err := insertDynamicRoutes(ctx, tx, profile.ProfileID, routes); err != nil {
@@ -947,12 +984,15 @@ func (r *sqliteRepository) GetDynamicAgentProfile(
 	profileID string,
 ) (*models.DynamicAgentProfile, []models.DynamicAgentRoute, error) {
 	profile := &models.DynamicAgentProfile{}
+	var keepModel int
 	if err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT profile_id, version, created_at, updated_at
+		SELECT profile_id, version, keep_model_while_running, created_at, updated_at
 		FROM dynamic_agent_profiles WHERE profile_id = ?
-	`), profileID).Scan(&profile.ProfileID, &profile.Version, &profile.CreatedAt, &profile.UpdatedAt); err != nil {
+	`), profileID).Scan(&profile.ProfileID, &profile.Version, &keepModel, &profile.CreatedAt, &profile.UpdatedAt); err != nil {
 		return nil, nil, err
 	}
+	keepModelEnabled := keepModel != 0
+	profile.KeepModelWhileRunning = &keepModelEnabled
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
 		SELECT dynamic_profile_id, position, execution_profile_id, enabled, rules_json
 		FROM dynamic_agent_routes WHERE dynamic_profile_id = ? ORDER BY position ASC
@@ -1010,9 +1050,9 @@ func (r *sqliteRepository) updateDynamicAgentProfileTx(
 	now := time.Now().UTC()
 	result, err := execer.ExecContext(ctx, execer.Rebind(`
 		UPDATE dynamic_agent_profiles
-		SET version = version + 1, updated_at = ?
+		SET version = version + 1, keep_model_while_running = ?, updated_at = ?
 		WHERE profile_id = ? AND version = ?
-	`), now, profile.ProfileID, expectedVersion)
+	`), keepModelWhileRunningValue(profile), now, profile.ProfileID, expectedVersion)
 	if err != nil {
 		return err
 	}
@@ -1242,7 +1282,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 			cursor_mcp_auth_enabled, cursor_plugins_mcp_enabled,
 			mcp_selection_mode, mcp_selected_servers,
 			copilot_selected_plugins,
-			execution_agent_profile_id
+			execution_agent_profile_id, execution_grade
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?,
@@ -1257,8 +1297,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 			?, ?, ?, ?,
 			?, ?,
 			?, ?,
-			?,
-			?
+			?, ?, ?
 		)
 	`),
 		profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
@@ -1282,7 +1321,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 		normalizeMCPSelectionMode(profile.MCPSelectionMode),
 		mcpSelectedServersJSON,
 		copilotSelectedPluginsJSON,
-		profile.ExecutionAgentProfileID,
+		profile.ExecutionAgentProfileID, profile.ExecutionGrade,
 	)
 	return err
 }
@@ -1619,11 +1658,11 @@ func (r *sqliteRepository) updateAgentProfile(
 		normalizeMCPSelectionMode(profile.MCPSelectionMode),
 		mcpSelectedServersJSON,
 		dialect.BoolToInt(selectionProvided), selectionJSON,
-		profile.ExecutionAgentProfileID,
+		profile.ExecutionAgentProfileID, executionGradeUpdate(ctx),
 		profile.ID)
 	var committedEnabled bool
 	var committedSelectionJSON string
-	if err := row.Scan(&committedEnabled, &committedSelectionJSON); err != nil {
+	if err := row.Scan(&committedEnabled, &committedSelectionJSON, &profile.ExecutionGrade); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, fmt.Errorf("agent profile not found: %s", profile.ID)
 		}
@@ -1674,9 +1713,9 @@ const updateAgentProfileQuery = `
 			cursor_mcp_auth_enabled = ?, cursor_plugins_mcp_enabled = ?,
 			mcp_selection_mode = ?, mcp_selected_servers = ?,
 			copilot_selected_plugins = CASE WHEN ? = 1 THEN ? ELSE copilot_selected_plugins END,
-			execution_agent_profile_id = ?
+			execution_agent_profile_id = ?, execution_grade = COALESCE(?, execution_grade)
 		WHERE id = ? AND deleted_at IS NULL
-		RETURNING enabled, copilot_selected_plugins
+		RETURNING enabled, copilot_selected_plugins, execution_grade
 	`
 
 // selectionIntentJSON distinguishes an omitted selection from an explicit
@@ -1802,7 +1841,7 @@ const agentProfileSelectColumns = `
 		COALESCE(mcp_selection_mode, 'inherit'),
 		COALESCE(mcp_selected_servers, '[]'),
 		COALESCE(copilot_selected_plugins, '[]'),
-		COALESCE(execution_agent_profile_id, '')
+		COALESCE(execution_agent_profile_id, ''), COALESCE(execution_grade, '')
 	FROM agent_profiles`
 
 func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
@@ -2039,7 +2078,7 @@ func scanAgentProfile(scanner interface {
 		&profile.MCPSelectionMode,
 		&mcpSelectedServersJSON,
 		&copilotSelectedPluginsJSON,
-		&profile.ExecutionAgentProfileID,
+		&profile.ExecutionAgentProfileID, &profile.ExecutionGrade,
 	); err != nil {
 		return nil, err
 	}

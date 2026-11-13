@@ -97,6 +97,7 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 	userSecretStore := secrets.NewUserVisibleStore(repos.Secrets)
 	agentSettingsController := agentsettingscontroller.NewController(repos.AgentSettings, discoveryRegistry, agentRegistry, repos.Task, log)
 	agentSettingsController.SetDynamicAgentRoutingEnabled(cfg.Features.DynamicAgentRouting)
+	agentSettingsController.SetDynamicProfileTiersEnabled(cfg.Features.DynamicProfileTiers)
 	agentSettingsController.SetSecretStore(userSecretStore)
 	agentSettingsController.SetManagedRuntimeSelectionStore(managedRuntimeSelections)
 	agentSettingsController.SetRuntimeAutoUpdateStore(managedruntime.NewAutoUpdateStore(repos.SystemSettings))
@@ -376,6 +377,8 @@ func initDynamicRuntimeResolver(
 		dynamicruntime.WithStateLoader(repos.Task),
 		dynamicruntime.WithCircuitRegistry(dynamicCircuits),
 		dynamicruntime.WithEngineLogger(log.Zap()),
+		dynamicruntime.WithOrderedTiers(cfg.Features.DynamicProfileTiers),
+		dynamicruntime.WithTierUsageAvailable(cfg.Features.ProviderUsageLimits),
 	)
 	dynamicBindingResolver, err := dynamicruntime.NewPersistentCredentialBindingResolver(ctx, repos.Task)
 	if err != nil {
@@ -492,6 +495,9 @@ func initIntegrationWiring(
 	coordinatorSvc, err := initCoordinatorWiring(ctx, dbPool, storeTracker, taskSvc, workflowSvc, repos.AgentSettings, cfg.Features.Coordinator, cfg.Features.CoordinatorPhase2, cfg.Features.CoordinatorPhase3, cfg.Features.CoordinatorPhase31, log)
 	if err != nil {
 		return nil, err
+	}
+	if coordinatorSvc != nil && pluginsSvc != nil {
+		coordinatorSvc.SetPluginBindingSource(pluginsSvc)
 	}
 	wiring := &integrationWiring{
 		pluginsSvc: pluginsSvc, pluginsCleanup: pluginsCleanup, agentConversationsSvc: agentConversationsSvc,

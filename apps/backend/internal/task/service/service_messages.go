@@ -344,10 +344,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 	_ = s.publishMessageEvent(ctx, events.MessageAdded, message, snapshots.receipt)
 	s.publishMessageFeedbackSnapshots(ctx, snapshots)
 
-	s.logger.Info("message created",
-		zap.String("message_id", message.ID),
-		zap.String("session_id", message.TaskSessionID),
-		zap.String("author_type", string(message.AuthorType)))
+	s.logMessageFlow(ctx, session.TaskID, message)
 
 	return message, nil
 }
@@ -402,6 +399,92 @@ func (s *Service) CreateMessageIdempotent(ctx context.Context, id string, req *C
 		return existing, nil
 	}
 	return nil, err
+}
+
+// CreateCompletedUserMessageIdempotent persists a caller-owned user message in
+// an already-completed lifecycle-only turn. It never starts or adopts an active
+// conversation turn, so history-only records cannot alter turn timing.
+func (s *Service) CreateCompletedUserMessageIdempotent(
+	ctx context.Context,
+	messageID string,
+	req *CreateMessageRequest,
+) (*models.Message, error) {
+	if messageID == "" {
+		return nil, errors.New("message id is required for idempotent creation")
+	}
+	if err := preparePlanCommentMessageRequest(req); err != nil {
+		return nil, err
+	}
+	if err := s.authorizeMessageCreate(ctx, req); err != nil {
+		return nil, err
+	}
+	admissionCtx, releaseAdmission, err := s.acquireMessageCreateAdmission(ctx, messageID, req)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseAdmission()
+	ctx = admissionCtx
+
+	existing, found, err := s.existingCompletedUserMessage(ctx, messageID, req)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		return existing, nil
+	}
+	session, err := s.getSessionWithRetry(
+		ctx, req.TaskSessionID, messageID, messageCreateMaxRetries, messageCreateRetryDelay,
+	)
+	if err != nil {
+		return nil, err
+	}
+	turn, err := s.createCompletedTurn(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	req.TurnID = turn.ID
+	req.CompletedTurn = true
+	message, err := s.CreateMessageWithID(ctx, messageID, req)
+	if err == nil {
+		return message, nil
+	}
+	// A concurrent writer can still win between the admitted lookup and this
+	// insert. Treat a matching committed row as success.
+	existing, found, lookupErr := s.existingCompletedUserMessage(ctx, messageID, req)
+	if lookupErr == nil && found {
+		return existing, nil
+	}
+	return nil, s.rollbackCompletedUserMessageTurn(ctx, session, turn, err)
+}
+
+func (s *Service) existingCompletedUserMessage(
+	ctx context.Context,
+	messageID string,
+	req *CreateMessageRequest,
+) (*models.Message, bool, error) {
+	existing, err := s.messages.GetMessageWithPromptIndex(ctx, messageID)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && existing == nil) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("check existing completed user message: %w", err)
+	}
+	if err := s.validateMessageReplay(ctx, existing, req); err != nil {
+		return nil, false, err
+	}
+	return existing, true, nil
+}
+
+func (s *Service) rollbackCompletedUserMessageTurn(
+	ctx context.Context,
+	session *models.TaskSession,
+	turn *models.Turn,
+	cause error,
+) error {
+	if _, rollbackErr := s.RollbackReservedTurn(ctx, session.ID, turn.ID); rollbackErr != nil {
+		return errors.Join(cause, rollbackErr)
+	}
+	return cause
 }
 
 type planCommentMessageValidator interface {
@@ -570,10 +653,7 @@ func (s *Service) CreateQueuedMessageIdempotent(
 
 	_ = s.publishMessageEvent(ctx, events.MessageAdded, message)
 	s.publishMessageFeedbackSnapshots(ctx, &snapshots)
-	s.logger.Info("queued message created with ID",
-		zap.String("message_id", message.ID),
-		zap.String("session_id", message.TaskSessionID),
-		zap.String("author_type", string(message.AuthorType)))
+	s.logMessageFlow(ctx, session.TaskID, message)
 	return message, nil
 }
 
@@ -663,10 +743,7 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 	_ = s.publishMessageEvent(ctx, events.MessageAdded, message, snapshots.receipt)
 	s.publishMessageFeedbackSnapshots(ctx, snapshots)
 
-	s.logger.Info("message created with ID",
-		zap.String("message_id", message.ID),
-		zap.String("session_id", message.TaskSessionID),
-		zap.String("author_type", string(message.AuthorType)))
+	s.logMessageFlow(ctx, session.TaskID, message)
 
 	return message, nil
 }
@@ -1277,6 +1354,43 @@ func (s *Service) updateMessageWithReceipt(ctx context.Context, message *models.
 		return writer.UpdateMessageWithConversationReceipt(ctx, message)
 	}
 	return nil, s.messages.UpdateMessage(ctx, message)
+}
+
+// SetUserMessageDeliveryStatus sets the delivery status on an exact
+// session-owned user message. It reports whether such a message exists, so a
+// caller can record the message when it is absent. Reapplying the same status
+// is a no-op and does not publish a duplicate update.
+func (s *Service) SetUserMessageDeliveryStatus(
+	ctx context.Context,
+	messageID, sessionID, status string,
+) (bool, error) {
+	if messageID == "" || sessionID == "" || status == "" {
+		return false, nil
+	}
+	message, err := s.messages.GetMessage(ctx, messageID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if message == nil || message.TaskSessionID != sessionID ||
+		message.AuthorType != models.MessageAuthorUser {
+		return false, nil
+	}
+	if message.Metadata != nil && message.Metadata[models.MessageMetaKeyDeliveryStatus] == status {
+		return true, nil
+	}
+	metadata := make(map[string]interface{}, len(message.Metadata)+1)
+	for key, value := range message.Metadata {
+		metadata[key] = value
+	}
+	metadata[models.MessageMetaKeyDeliveryStatus] = status
+	message.Metadata = metadata
+	if err := s.UpdateMessage(ctx, message); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // AppendMessageContent appends additional content to an existing message.

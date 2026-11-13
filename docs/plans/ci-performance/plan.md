@@ -26,6 +26,10 @@ legacy_specs: []
 
 ## Overview
 
+The [native web verification package](../native-web-verification/plan.md) adds the November 3 toolchain continuation.
+It targets full Oxlint with migrated plugins and `tsrs --fast` within existing jobs.
+Its acceptance does not complete this package's earlier cache, partition, or complete-CI targets.
+
 Reduce CI runner-minutes and PR feedback time within approximately 60 shared concurrent jobs.
 Continue the existing package instead of repeating its completed review-budget, setup-framework, and capacity-procedure work.
 The October continuation reduces frontend setup, avoids independent Go-test-only E2E runs, and removes redundant scheduling stages.

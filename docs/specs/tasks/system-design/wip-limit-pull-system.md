@@ -447,6 +447,20 @@ still blocked by the other. The phone banner/link uses the dedicated task
 layout and existing workflow Settings page with no hover requirement or extra
 modal. The follow-up plan contains desktop/mobile previews and tests.
 
+## Deferred entry observability
+
+For AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.11, the session-lifecycle transition
+logs the task, session, source and destination step IDs, WIP limit, and reason
+when the committed destination remains queued. Queue promotion still owns the
+later entry; the log does not change admission, promotion, or session state.
+Guarded decisions use a separate entry path and do not emit this session log.
+
+The transition commit returns its admission decision and the WIP limit used for
+that decision to the orchestrator. The lifecycle uses this result before it
+runs destination entry. If a compatibility commit does not return admission
+state and its task reread fails, the orchestrator logs the failure and stops
+before destination entry.
+
 ## Implementation plan
 
 See
@@ -457,3 +471,13 @@ Auto-start idempotency repair (single agent per review task):
 
 Queued task moves and queue presentation:
 [`../../plans/queued-task-moves/plan.md`](../../../plans/queued-task-moves/plan.md).
+
+The control dashboard aggregate
+(`GET /api/v1/office/workspaces/:wsId/dashboard?view=control`) reports
+`wip_waiting_tasks`: unarchived, non-ephemeral, non-automation tasks whose
+`queued_for_step_id` names their current step and whose `wip_admitted` is
+false. That is the same queued band promotion reads, with config-mode tasks
+excluded. The count is read-only; no deferral row, reason column, or table is
+stored. The same response carries `shared_capacity_waiting` from the
+session-capacity observation so the integrated control can show grade-ceiling
+waiters beside board WIP waiters.

@@ -274,7 +274,11 @@ func (m *Manager) retryPendingRemoteStop(ctx context.Context, entry *remoteRecov
 	if execution, exists := m.executionStore.GetBySessionID(entry.record.SessionID); exists && execution.ID == entry.record.AgentExecutionID {
 		return true
 	}
-	stopped, err := m.stopPendingRemoteRecovery(ctx, entry, reason, force)
+	stopWatch := newStopWaitWatch(30*time.Second, func(phase stopWaitPhase) {
+		reportStopWaitDiagnostic(m.logger, entry.record.AgentExecutionID, phase)
+	})
+	defer stopWatch.finish()
+	stopped, err := m.stopPendingRemoteRecovery(ctx, entry, reason, force, stopWatch)
 	if err != nil {
 		m.logger.Debug("pending remote stop remains retryable", zap.String("session_id", entry.record.SessionID), zap.Error(err))
 	} else if stopped {
@@ -328,7 +332,7 @@ func (m *Manager) attachRemoteRecovery(ctx context.Context, entry *remoteRecover
 		return
 	}
 	if ri == nil {
-		if err := m.settleRemoteRecoveryAbsence(ctx, entry, attemptRecord, rowPresent, outcomes[entry.record.SessionID]); err != nil {
+		if _, err := m.settleRemoteRecoveryAbsence(ctx, entry, attemptRecord, rowPresent, outcomes[entry.record.SessionID]); err != nil {
 			m.logger.Debug("confirmed remote absence remains guarded until its runtime row is repaired",
 				zap.String("session_id", entry.record.SessionID), zap.Error(err))
 		}

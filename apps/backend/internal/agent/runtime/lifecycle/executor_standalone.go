@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -51,18 +53,19 @@ type UnstoppableSessionRecorder interface {
 // StandaloneExecutor implements Runtime for standalone agentctl execution.
 // In this mode, a single agentctl control server manages multiple agent instances.
 type StandaloneExecutor struct {
-	ctl                 *agentctl.ControlClient
-	runtimeOwner        *agentctl.RuntimeOwner
-	host                string
-	port                int
-	authToken           string // per-launch auth token from launcher
-	logger              *logger.Logger
-	interactiveRunner   *process.InteractiveRunner
-	recoveryReadTimeout time.Duration
-	recoveryReadRetries int
-	unstoppableRecorder UnstoppableSessionRecorder
-	peerCapabilities    []string
-	peerCapabilitiesSet bool
+	inferenceStopConsumer agentctl.InferenceConsumer
+	ctl                   *agentctl.ControlClient
+	runtimeOwner          *agentctl.RuntimeOwner
+	host                  string
+	port                  int
+	authToken             string // per-launch auth token from launcher
+	logger                *logger.Logger
+	interactiveRunner     *process.InteractiveRunner
+	recoveryReadTimeout   time.Duration
+	recoveryReadRetries   int
+	unstoppableRecorder   UnstoppableSessionRecorder
+	peerCapabilities      []string
+	peerCapabilitiesSet   bool
 }
 
 // NewStandaloneExecutor creates a new standalone runtime.
@@ -150,6 +153,7 @@ func (r *StandaloneExecutor) stopWithRetry(ctx context.Context, instanceID strin
 }
 
 func (r *StandaloneExecutor) stopWithRetryClient(ctx context.Context, control *agentctl.ControlClient, instanceID string) error {
+	ctx = agentctl.WithInferenceStopObserver(ctx, r.inferenceStopConsumer)
 	timeout := r.recoveryReadTimeout
 	if timeout <= 0 {
 		timeout = defaultRecoveryReadTimeout
@@ -294,12 +298,14 @@ func buildStandaloneCreateInstanceRequest(
 		AssumeMcpHttp:              assumeMcpHttp,
 		McpMode:                    req.McpMode,
 		PromptSuggestions:          req.PromptSuggestions,
+		CopilotNativeSessionEvents: req.CopilotNativeSessionEvents,
 		McpProviders:               req.McpProviders,
 		McpProfile:                 req.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
 		RequiresProcessKill:        requiresProcessKill,
 		StripEnv:                   stripEnv,
 		ProviderGatewayAuth:        req.ProviderGatewayAuth,
+		AuthPolicy:                 req.AuthPolicy,
 		BaseBranches:               getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
@@ -310,6 +316,26 @@ func buildStandaloneCreateInstanceRequest(
 		WorkspaceSourceRoots:       req.WorkspaceSourceRoots,
 		OpenCodePluginRuntime:      req.OpenCodePluginRuntime,
 	}
+}
+
+func effectiveEnv(overrides map[string]string) []string {
+	return acpcompat.MergeEnvMap(os.Environ(), overrides)
+}
+
+func buildStandaloneInstanceMetadata(req *ExecutorCreateRequest, port int) map[string]interface{} {
+	metadata := make(map[string]interface{})
+	metadata["standalone_port"] = port
+	worktreeID := getMetadataString(req.Metadata, MetadataKeyWorktreeID)
+	if worktreeID != "" {
+		metadata["worktree_id"] = worktreeID
+		worktreePath := getMetadataString(req.Metadata, MetadataKeyWorktreePath)
+		if worktreePath == "" {
+			worktreePath = req.WorkspacePath
+		}
+		metadata[MetadataKeyWorktreePath] = worktreePath
+		metadata["worktree_branch"] = getMetadataString(req.Metadata, MetadataKeyWorktreeBranch)
+	}
+	return metadata
 }
 
 func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
@@ -324,13 +350,25 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	}
 	env["KANDEV_TASK_ID"] = req.TaskID
 	env["KANDEV_SESSION_ID"] = req.SessionID
-
-	// Create instance via control API
-	// Agent command is NOT set - workspace access only. Agent is started explicitly via agentctl client.
+	for key, value := range req.LocalRuntimeEnv {
+		env[key] = value
+	}
 	agentType := ""
 	if req.AgentConfig != nil {
 		agentType = req.AgentConfig.ID()
 	}
+	if req.AuthPolicy != nil && acpcompat.IsAntigravity(agentType) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("resolve the shared Antigravity home: %w", err)
+		}
+		if err := acpcompat.ValidateLocalAntigravityEnvSlice(effectiveEnv(env), home); err != nil {
+			return nil, err
+		}
+	}
+
+	// Create instance via control API
+	// Agent command is NOT set - workspace access only. Agent is started explicitly via agentctl client.
 	disableAskQuestion := !agents.SupportsInteractiveMCPTools(req.AgentConfig)
 	assumeMcpSse := false
 	assumeMcpHttp := false
@@ -344,10 +382,14 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 			stripEnv = rt.StripEnv
 		}
 	}
+	if req.AuthPolicy != nil && acpcompat.IsAntigravity(agentType) {
+		stripEnv = append(stripEnv, acpcompat.AntigravityCredentialEnvNames()...)
+	}
 
 	createReq := buildStandaloneCreateInstanceRequest(
 		req, env, agentType, disableAskQuestion, assumeMcpSse, assumeMcpHttp, requiresProcessKill, stripEnv,
 	)
+	createReq.InferenceClosureOperationID = agentctl.InferenceClosureAdoptionFromContext(ctx)
 	if req.DurableJournalHostRoot != "" && req.DurableJournalOwnerID != "" {
 		location, err := resolveDurableJournal(req)
 		if err != nil {
@@ -366,6 +408,22 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 		return nil, err
 	}
 	defer releaseControl()
+	if createReq.DurableJournalPath != "" {
+		adopted, resolveErr := r.reconcileRetainedStandaloneOwner(controlCtx, control, lease, req)
+		if resolveErr != nil {
+			return nil, fmt.Errorf("reconcile retained standalone journal owner: %w", resolveErr)
+		}
+		if adopted != nil {
+			r.logger.Info("adopted retained standalone agent instance",
+				zap.String("requested_instance_id", req.InstanceID),
+				zap.String("retained_instance_id", adopted.StandaloneInstanceID),
+				zap.Int("port", adopted.StandalonePort))
+			return adopted, nil
+		}
+	}
+	if err := checkStandaloneOwnerLease(lease); err != nil {
+		return nil, fmt.Errorf("standalone instance creation blocked before journal open: %w", err)
+	}
 	resp, err := control.CreateInstance(controlCtx, createReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create standalone instance: %w", err)
@@ -380,30 +438,16 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	var client *agentctl.Client
 	if lease != nil {
 		client = lease.NewBoundInstanceClient(resp.Port, r.logger,
-			agentctl.WithExecutionID(req.InstanceID), agentctl.WithSessionID(req.SessionID))
+			agentctl.WithExecutionID(resp.ID), agentctl.WithSessionID(req.SessionID))
 	} else {
 		client = agentctl.NewClient(r.host, resp.Port, r.logger,
-			agentctl.WithExecutionID(req.InstanceID),
+			agentctl.WithExecutionID(resp.ID),
 			agentctl.WithSessionID(req.SessionID),
 			agentctl.WithAuthToken(r.authToken))
 	}
 
-	// Extract runtime-specific values from metadata
-	worktreeID := getMetadataString(req.Metadata, MetadataKeyWorktreeID)
-	worktreeBranch := getMetadataString(req.Metadata, MetadataKeyWorktreeBranch)
-
 	// Build metadata
-	metadata := make(map[string]interface{})
-	metadata["standalone_port"] = resp.Port
-	if worktreeID != "" {
-		metadata["worktree_id"] = worktreeID
-		worktreePath := getMetadataString(req.Metadata, MetadataKeyWorktreePath)
-		if worktreePath == "" {
-			worktreePath = req.WorkspacePath
-		}
-		metadata[MetadataKeyWorktreePath] = worktreePath
-		metadata["worktree_branch"] = worktreeBranch
-	}
+	metadata := buildStandaloneInstanceMetadata(req, resp.Port)
 
 	r.logger.Debug("standalone instance created",
 		zap.String("instance_id", req.InstanceID),
@@ -411,7 +455,7 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 		zap.String("workspace", req.WorkspacePath))
 
 	return &ExecutorInstance{
-		InstanceID:           req.InstanceID,
+		InstanceID:           resp.ID,
 		TaskID:               req.TaskID,
 		SessionID:            req.SessionID,
 		RuntimeName:          r.Name(),
@@ -865,28 +909,42 @@ func (r *StandaloneExecutor) buildRecoveredInstancesWithLease(
 		}
 
 		recovered = append(recovered, &ExecutorInstance{
-			InstanceID:             inst.ID,
-			TaskID:                 taskID,
-			SessionID:              sessionID,
-			AgentProfileID:         agentProfileID,
-			RuntimeName:            r.Name(),
-			Client:                 client,
-			StandaloneInstanceID:   inst.ID,
-			StandalonePort:         inst.Port,
-			WorkspacePath:          workspacePath,
-			Metadata:               metadata,
-			Env:                    inst.Env,
-			WorkspaceSourceRoots:   inst.WorkspaceSourceRoots,
-			ProviderSessionID:      inst.ProviderSessionID,
-			DeliveryStatus:         deliveryStatus,
-			DeliveryLegacyEvidence: legacyEvidence,
-			DeliveryRecoveryError:  deliveryErr,
+			InstanceID:                 inst.ID,
+			TaskID:                     taskID,
+			SessionID:                  sessionID,
+			AgentProfileID:             agentProfileID,
+			RuntimeName:                r.Name(),
+			Client:                     client,
+			StandaloneInstanceID:       inst.ID,
+			StandalonePort:             inst.Port,
+			WorkspacePath:              workspacePath,
+			Metadata:                   metadata,
+			Env:                        inst.Env,
+			WorkspaceSourceRoots:       inst.WorkspaceSourceRoots,
+			ProviderSessionID:          inst.ProviderSessionID,
+			CopilotNativeSessionEvents: inst.CopilotNativeSessionEvents,
+			DeliveryStatus:             deliveryStatus,
+			DeliveryLegacyEvidence:     legacyEvidence,
+			DeliveryRecoveryError:      deliveryErr,
 		})
 	}
 	return recovered
 }
 
 const durableDeliveryCapabilityName = "agent-delivery.v1"
+
+// SupportsCopilotNativeSessionEvents reports whether this runtime can collect
+// Copilot native events. A fresh standalone launch uses the same agentctl build,
+// while an adopted retained peer must advertise the optional capability.
+func (r *StandaloneExecutor) SupportsCopilotNativeSessionEvents() bool {
+	if r == nil {
+		return false
+	}
+	if !r.peerCapabilitiesSet {
+		return true
+	}
+	return r.peerHasCapability(acpcompat.CopilotNativeCompactionCapability)
+}
 
 func (r *StandaloneExecutor) peerHasCapability(name string) bool {
 	for _, capability := range r.peerCapabilities {

@@ -1,6 +1,7 @@
 ---
 status: current
 system: ui
+updated: 2026-11-03
 requirements:
   - REQ-UI-CLARIFICATION-CONTEXT-001
 ---
@@ -12,7 +13,8 @@ requirements:
 UI owns this reusable context and sizing contract across clarification hosts.
 Task lifecycle, response delivery, and question barriers retain their existing owners.
 The [Markdown design](clarification-markdown.md) owns formatting and link safety.
-This design records the issue #4810 behavior implemented by the linked plan.
+The context transport and host geometry retain the issue #4810 behavior.
+The 2026-11-03 amendment replaces the size controls and adds a Restore target.
 
 ## Requirement mapping
 
@@ -20,6 +22,7 @@ This design records the issue #4810 behavior implemented by the linked plan.
 - AC-UI-CLARIFICATION-CONTEXT-001.9 and .10: Host geometry and height state.
 - AC-UI-CLARIFICATION-CONTEXT-001.11: Accessible desktop and phone interaction.
 - AC-UI-CLARIFICATION-CONTEXT-001.12: Agent guidance.
+- AC-UI-CLARIFICATION-CONTEXT-001.13 through .16: Single size control, restoration, and manual resize transitions.
 
 ## Shared context transport and presentation
 
@@ -53,19 +56,72 @@ Use the 120px minimum only when the host can contain it. A smaller host takes pr
 If the budget is temporarily unavailable, retain the bounded initial mode until measurement succeeds.
 
 Keep desired height separate from effective clamped height. Host shrinkage must not erase user intent.
-Track desktop and phone desired heights separately in component memory, keyed by the current bundle.
-Collapse keeps the form mounted and preserves height. New bundles reset both height preferences.
-Reset clears the current presentation's manual height. No local storage or backend preference is added.
+`useClarificationResizeState` in `clarification-draft-context.tsx` owns desktop and phone sizing for the current bundle.
+`ClarificationDraftProvider` retains the existing task-local, eight-bundle cache across responsive remounts.
+Extend that sizing record to retain each presentation's mode and Restore target together.
+The hook's standalone fallback uses the same shape when no provider exists.
+Collapse keeps the form mounted and preserves the complete sizing record. New bundles start in auto mode.
+Task changes and provider disposal retain their existing cache-reset behavior.
+No local storage or backend preference is added.
+
+### Sizing transitions
+
+Each desktop or phone record has one of three states:
+
+- `auto`: no explicit height. The existing initial cap and host budget bound the content.
+- `manual`: a desired pixel height. Existing host clamping determines the rendered height.
+- `expanded`: a saved normal state (`auto` or `manual`). The measured host maximum determines the rendered height.
+
+Store the expanded mode and its saved normal state in one record, through one state update.
+Do not derive expanded mode from pixel equality or `canExpand`, because host contraction and manual dragging can produce equal heights.
+The two-pixel headroom tolerance in `useResizableClarificationOverlay` remains the expansion eligibility check.
+
+| Input | Current state | Result |
+| --- | --- | --- |
+| Expand with measured headroom | auto or manual | Save the normal state and enter expanded mode. |
+| Expand without measured headroom | auto or manual | Keep state. Disable the visible Expand button. |
+| Restore | expanded | Return to the saved normal state and discard that saved target. |
+| Host resize | any | Recompute effective geometry without changing the stored mode or normal height. |
+| First actual mouse drag movement | any | Enter manual mode at the clamped drag height and discard an earlier Restore target. |
+| Grip double-click | any | Return the current presentation to auto mode and clear its Restore target. |
+| Collapse and reopen | any | Preserve the state and Restore target. |
+| Phone/desktop switch or responsive remount | any | Read that presentation's record from the existing bundle cache. |
+| New bundle or complete sizing reset | any | Start auto mode without a Restore target for the affected records. |
+
+Restore uses the saved desired manual height, rather than its temporarily clamped rendered height.
+When the host grows again, that saved manual preference becomes effective up to the new host bound.
+Expanded mode follows both host growth and contraction. It never replaces the Restore target during remeasurement.
+When measurement is unavailable, use the existing bounded initial fallback without discarding expanded mode.
+Restore remains enabled in expanded mode, including while measurement is unavailable or the host has no headroom.
+An expanded record with an auto Restore target is meaningful and must remain in the bounded cache.
+The cache eviction predicate must distinguish that state from an empty pair of auto records.
+
+`resetHeight` remains the grip's auto-sizing action. `resetAllHeights` clears both presentation records at the existing lifecycle boundary.
+These resets are distinct from the header's Restore action.
+No mouse movement means no drag transition. A grip click alone must preserve the Restore target.
 
 ## Accessible desktop and phone interaction
 
 Reuse the inline pending-question surface from `mobile-clarification.spec.ts`.
 This is a temporary decision inside an active conversation, so it does not require another route or stacked drawer.
 Keep the context before the question and the existing submit/skip flow.
-Add labelled Expand and Reset controls to the existing question header, alongside the collapse control.
-These are native buttons with keyboard activation and localized accessible names.
-Expand selects the available maximum. Reset restores auto sizing. Disable expansion when there is no headroom.
-Fine-pointer controls retain normal desktop density. Phone and coarse-pointer targets measure at least 44px.
+Replace the separate Expand and Reset controls in `ClarificationHeaderActions` with one native icon button.
+Use `IconArrowsMaximize` for Expand and `IconArrowsMinimize` for Restore.
+Both icons describe panel sizing, distinct from the existing collapse chevron and skip cross.
+The fixed control position does not change between modes. Existing conditional Submit stays in its current order.
+Use localized `Expand` and `Restore` for both the accessible name and the existing Tooltip primitive.
+The tooltip explains the same action as the accessible name and does not contain additional required instructions.
+It opens on keyboard focus and pointer hover. Touch activation runs the action directly without another sheet or menu.
+Use `aria-controls` for the panel content. Preserve keyboard focus on the same button after a toggle.
+Keep collapse's `aria-expanded` independent from the sizing state.
+
+Pass a single toggle handler, explicit expanded mode, and availability through `ClarificationPanelSection` and `ClarificationInputOverlay`.
+Use a stable `clarification-panel-size-toggle` test ID across both states.
+Migrate every old expand/reset selector, including Coordinator and Threads tests, in the same work order.
+Remove size labels from the persistent header. Remove unused translation keys across all catalogs after the caller search.
+Add new labels to English and the six translated catalogs, then regenerate Traditional Chinese and pseudo values through repository tooling.
+Fine-pointer buttons measure 28px. Phone and coarse-pointer targets measure at least 44px in both dimensions.
+Keep the inline phone hierarchy and existing multi-question header wrapping. Do not introduce a separate phone route or drawer.
 The existing mouse grip still supports incremental resizing and double-click reset.
 Touch users use the explicit controls. This does not claim touch-drag support for the mouse-only grip.
 
@@ -75,7 +131,7 @@ In that mode, remove the inner vertical scroll trap and preserve the existing fo
 Do not introduce a document scroller or two competing active scrollers within the question surface.
 Table wrappers own only horizontal overflow. Preserve dynamic viewport and safe-area rules from the host.
 Keep custom input and Submit reachable after keyboard viewport contraction.
-At desktop-to-phone transitions, derive phone geometry without rewriting desktop desired height or answers.
+At desktop-to-phone transitions, derive phone geometry without rewriting desktop mode, Restore target, or answers.
 
 ## Agent guidance
 
@@ -96,17 +152,24 @@ Do not log synthetic or real context to diagnose geometry.
 
 ## Verification
 
-Unit tests cover separate caps, observer updates, collapse/reset, and responsive state preservation.
+Unit tests cover separate caps, observer updates, normal/expanded transitions, Restore, and responsive state preservation.
+Cover auto and manual Restore targets, repeated cycles, manual-at-maximum, dragging after expansion, grip reset, and bundle replacement.
+Provider tests cover expanded-auto records across remounts, task isolation, and the existing eight-bundle eviction bound.
 Browser tests must measure actual bounds after pointer gestures and viewport changes.
 Cover task chat, Quick Chat, Needs You, Threads, keyboard expansion, and phone touch completion.
+Assert one size button, state-specific accessible names, focus continuity, tooltips, and phone hitbox width and height.
+Prove that toggling preserves a draft and never sends or skips an answer.
+Measure the control at 767px/768px fine-pointer widths and at a coarse-pointer tablet width.
 Use synthetic content only. Physical software-keyboard behavior remains a hardware check beyond viewport emulation.
 
 ## Delivery and related contracts
 
 - [Plan](../../../plans/clarification-context-usability/plan.md).
+- [Single size control plan](../../../plans/clarification-size-toggle/plan.md).
 - [Requirements](../requirements/clarification-context.md).
 - [Threads footer design](threads-saved-views.md).
 - [Question barrier](../../tasks/requirements/user-question-turn-boundary.md).
 - [Current-turn ownership](../../../decisions/2026-08-14-current-turn-clarification-ownership.md).
+- [Answer draft and local sizing ownership](../../../decisions/2026-11-03-clarification-answer-draft-ownership.md).
 
 The existing parser and host ownership remain authoritative. Local policy and geometry changes do not require a new ADR.

@@ -14,22 +14,22 @@ func (m *Manager) settleRemoteRecoveryAbsence(
 	attemptRecord *models.ExecutorRunning,
 	rowPresent bool,
 	outcome RecoveryCandidateOutcome,
-) error {
+) (bool, error) {
 	if !remoteRecoveryAbsenceEligible(entry, outcome) {
-		return nil
+		return false, nil
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := validateRemoteRecoveryAbsenceAttempt(entry, attemptRecord); err != nil {
-		return err
+		return false, err
 	}
 	writer, absentWriter, err := remoteRecoveryAbsencePersistence(m.runningWriter)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !m.remoteRecoveryAbsenceDispositionAllowed(ctx, entry) {
-		return nil
+		return false, nil
 	}
 	ownerLocks := remoteRecoveryOwnerLockIDs(entry.snapshot)
 	validateOwner := func(ownerCtx context.Context) error {
@@ -43,16 +43,16 @@ func (m *Manager) settleRemoteRecoveryAbsence(
 			ctx, entry.record.SessionID, attemptRecord.AgentExecutionID, attemptRecord.UpdatedAt,
 			ownerLocks, validateOwner,
 		); err != nil {
-			return fmt.Errorf("repair confirmed absent remote executor row: %w", err)
+			return false, fmt.Errorf("repair confirmed absent remote executor row: %w", err)
 		}
 	} else if err := absentWriter.ConfirmExecutorRunningAbsentIfOwnerCurrent(
 		ctx, entry.record.SessionID, ownerLocks, validateOwner,
 	); err != nil {
-		return fmt.Errorf("confirm absent remote executor row: %w", err)
+		return false, fmt.Errorf("confirm absent remote executor row: %w", err)
 	}
 
 	m.completeRemoteRecoveryAbsence(entry, ctx)
-	return nil
+	return true, nil
 }
 
 func remoteRecoveryAbsenceEligible(entry *remoteRecoveryRetry, outcome RecoveryCandidateOutcome) bool {

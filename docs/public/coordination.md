@@ -74,6 +74,7 @@ Task agents can call `spawn_session_kandev` with a prompt and optional `name`, `
 - A target task must be in the same workspace as the spawning task.
 - Profile selection prefers an explicit profile, then the spawner's profile for the same task, then the target task's primary-session profile.
 - The spawned session receives hidden attribution context identifying the sender and reply route.
+- Spawning does not change the conversation that the current workflow step records for later explicit targets. A step that already has a stored recipient keeps it, and a step with none still uses its fresh-session fallback.
 - A failure to apply the optional name does not fail an otherwise successful launch.
 
 Use the returned task ID, session ID, and state for subsequent targeted messages.

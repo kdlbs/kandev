@@ -13,7 +13,7 @@ import {
 } from "./session-delivery-recovery-view";
 import {
   asRecoveryError,
-  runtimeCleanupFailureCauses,
+  recoveryFailureCauses,
   runtimeCleanupFailureDetails,
   resolveRequestErrorMessage,
   branchRecoveryDetails,
@@ -300,7 +300,7 @@ export function useSessionRecoveryActions({
       setRecoveryNoticeKind(null);
       setManualRecoveryFailure({
         operation: "resume",
-        causes: runtimeCleanupFailureCauses(cause, sessionId),
+        causes: recoveryFailureCauses(cause, sessionId),
         sessionId,
         errorStamp: associatedStamp,
         requestKey,
@@ -325,6 +325,10 @@ export function useSessionRecoveryActions({
         sessionId,
         action,
         failureMessage: t(FAILED_TO_RESUME_MESSAGE_KEY),
+        ...(selectedSession?.task_id === taskId &&
+        selectedSession.metadata?.inference_scope_closure != null
+          ? { sessionMetadata: selectedSession.metadata }
+          : {}),
       };
       if (action === "relocate_and_resume") {
         return requestSessionRecover({
@@ -337,7 +341,15 @@ export function useSessionRecoveryActions({
       }
       return requestSessionRecover(request);
     },
-    [errorStamp, managedCloneRecoveryStamp, providerRestoredResumeEligible, sessionId, taskId, t],
+    [
+      errorStamp,
+      managedCloneRecoveryStamp,
+      providerRestoredResumeEligible,
+      selectedSession,
+      sessionId,
+      taskId,
+      t,
+    ],
   );
 
   const clearRecoveryResult = useCallback((operation: RecoveryOperation) => {

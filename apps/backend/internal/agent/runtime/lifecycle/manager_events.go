@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 
@@ -293,6 +294,13 @@ func (m *Manager) claimPromptCompletion(
 			return claim, false
 		}
 		return claim, true
+	}
+	if deliverySubmissionIdentityMismatch(execution, event.DeliverySubmissionID) {
+		m.logger.Debug("ignoring completion for superseded prompt submission",
+			zap.String("execution_id", execution.ID),
+			zap.String("event_submission_id", event.DeliverySubmissionID),
+			zap.String("current_submission_id", currentDeliverySubmissionID(execution)))
+		return claim, false
 	}
 
 	execution.promptLifecycleMu.Lock()
@@ -606,6 +614,10 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 // lease is held by the event dispatcher. Direct test and legacy callers use
 // handleCompleteEvent, which acquires that lease before entering here.
 func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *agentctl.AgentEvent) bool {
+	return m.handleCompleteEventWithSettlementLeased(execution, event, true)
+}
+
+func (m *Manager) handleCompleteEventWithSettlementLeased(execution *AgentExecution, event *agentctl.AgentEvent, confirmed bool) bool {
 	if event.TurnID == "" {
 		// Snapshot before publishing AgentReady. A queued successor may bind a
 		// new turn while the complete stream frame is still crossing the bus.
@@ -621,13 +633,11 @@ func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *ag
 		return true
 	}
 	claim, claimed := m.claimPromptCompletion(execution, event, isError)
+	m.settleConfirmedProviderCompletion(execution, event, confirmed, claimed)
 	if !claimed {
 		return false
 	}
-	if event.DeliverySubmissionID != "" {
-		execution.clearDeliverySubmissionID(event.DeliverySubmissionID)
-		clearInitialDeliverySubmissionID(execution, event.DeliverySubmissionID)
-	}
+	clearCompletedPromptSubmission(execution, event)
 	var failureEvidence *PromptAttemptEvidence
 	if isError {
 		evidence := execution.promptAttemptEvidenceSnapshot()
@@ -708,6 +718,13 @@ func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *ag
 	return true
 }
 
+func clearCompletedPromptSubmission(execution *AgentExecution, event *agentctl.AgentEvent) {
+	if event.DeliverySubmissionID != "" {
+		execution.clearDeliverySubmissionID(event.DeliverySubmissionID)
+		clearInitialDeliverySubmissionID(execution, event.DeliverySubmissionID)
+	}
+}
+
 // handleToolCallEvent processes the "tool_call" agent event: flushes the message buffer
 // and stores the tool call in session history.
 // Returns the (possibly updated) event.
@@ -717,6 +734,7 @@ func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *ag
 // buffer — flushing would split the parent's in-flight streaming message into
 // separate DB rows mid-sentence, breaking markdown that spans the boundary.
 func (m *Manager) handleToolCallEvent(execution *AgentExecution, event agentctl.AgentEvent, promptGeneration uint64) agentctl.AgentEvent {
+	m.logger.Flow(context.Background(), logger.ExecutionFlow{Stage: "tool", Outcome: "started", TaskID: execution.TaskID, SessionID: execution.SessionID, ExecutionID: execution.ID, AttemptID: event.AttemptID, TurnID: event.TurnID, MessageID: event.ToolCallID, SubmissionID: event.DeliverySubmissionID, PromptGeneration: promptGeneration})
 	if event.ParentToolCallID == "" {
 		execution.setActiveTool(activeTopLevelTool{
 			ToolCallID: event.ToolCallID,
@@ -763,13 +781,17 @@ func (m *Manager) handleToolUpdateEvent(execution *AgentExecution, event agentct
 // The raw error event is not published to the frontend stream; the agent failure
 // path (handleAgentFailed) sets session FAILED with the error message.
 func (m *Manager) handleErrorEvent(execution *AgentExecution, event agentctl.AgentEvent) bool {
+	return m.handlePromptErrorEvent(execution, event, true)
+}
+
+func (m *Manager) handlePromptErrorEvent(execution *AgentExecution, event agentctl.AgentEvent, confirmed bool) bool {
 	data := make(map[string]any, len(event.Data)+1)
 	for key, value := range event.Data {
 		data[key] = value
 	}
 	data["is_error"] = true
 	event.Data = data
-	return m.handleCompleteEventLeased(execution, &event)
+	return m.handleCompleteEventWithSettlementLeased(execution, &event, confirmed)
 }
 
 // handleContextWindowEvent processes the "context_window" agent event: logs and publishes it.
@@ -836,6 +858,17 @@ func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
 	}
 }
 
+// isStatuslessToolUpdate reports a tool_update whose ACP wire status was
+// missing. The adapter synthesizes in_progress for an update with a title,
+// input, content, or recognized shell output, so real progress still reaches
+// the finalizer. The lifecycle boundary must use the same evidence as the
+// finalizer, which ignores ToolStatusMissing updates: an empty or missing
+// status may not start a turn the finalizer will never close.
+func isStatuslessToolUpdate(event agentctl.AgentEvent) bool {
+	return event.Type == "tool_update" &&
+		(event.ToolStatus == "" || event.ToolStatusMissing)
+}
+
 // recordActivity updates the last-activity timestamp and, on the very first
 // event from an execution, publishes AgentRunning to transition STARTING → RUNNING.
 //
@@ -850,7 +883,9 @@ func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
 //
 // The flip is gated on `turnContentEventTypes` so post-boot metadata events
 // (available_commands_update arriving 50ms after MarkBootReady, etc.) don't
-// accidentally re-arm a freshly-booted no-prompt session as Running.
+// accidentally re-arm a freshly-booted no-prompt session as Running. A
+// tool_update with no status carries metadata only and is treated like a
+// terminal update here: the finalizer ignores it, so it must not start a turn.
 func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.AgentEvent) {
 	promptLifecycleLocked := false
 	unlockPromptLifecycle := func() {
@@ -913,7 +948,7 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 		unlockPromptLifecycle()
 		return
 	}
-	if isTerminalToolUpdate(event) {
+	if isTerminalToolUpdate(event) || isStatuslessToolUpdate(event) {
 		unlockPromptLifecycle()
 		return
 	}
@@ -1544,6 +1579,7 @@ func (m *Manager) handleMCPAttachmentEvent(
 		attempt.SessionID = execution.SessionID
 		attempt.ExecutionID = execution.ID
 		attempt.AgentID = execution.AgentID
+		attempt.BuiltinPackages = execution.builtinMCPManifestSnapshot()
 		event.MCPAttachmentAttempt = &attempt
 	}
 	// Attachment diagnostics must not count as model activity or alter turn

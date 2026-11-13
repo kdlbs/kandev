@@ -20,6 +20,7 @@ const maxMaterializedAttachmentRequestBytes int64 = models.MaxMessageAttachmentB
 
 type materializedAttachmentResponse struct {
 	Name      string `json:"name"`
+	Path      string `json:"path"`
 	SizeBytes int64  `json:"size_bytes"`
 }
 
@@ -125,7 +126,11 @@ func (s *Server) persistMaterializedAttachment(upload materializedAttachmentUplo
 		s.logger.Error("install agent attachment", zap.Error(err))
 		return materializedAttachmentResponse{}, newMaterializedAttachmentError(http.StatusInternalServerError, "attachment storage unavailable")
 	}
-	return materializedAttachmentResponse{Name: destinationName, SizeBytes: n}, nil
+	return materializedAttachmentResponse{
+		Name:      destinationName,
+		Path:      filepath.Join(dir, destinationName),
+		SizeBytes: n,
+	}, nil
 }
 
 type materializedAttachmentHTTPError struct {

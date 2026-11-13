@@ -1,3 +1,8 @@
+/**
+ * Retained ESLint host for RuleTester, API-based ratchets/inventory tools, and
+ * the focused adapter suites. The required full web lint command loads
+ * `oxlint.config.mjs`; this file is not a second full-project lint pass.
+ */
 import { defineConfig, globalIgnores } from "eslint/config";
 import tanstackQuery from "@tanstack/eslint-plugin-query";
 import js from "@eslint/js";

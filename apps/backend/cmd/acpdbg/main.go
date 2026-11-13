@@ -458,6 +458,10 @@ func probeOne(ctx context.Context, shared *sharedFlags, spec acpdbg.AgentSpec) m
 		AgentID: spec.ID,
 		Status:  "failed",
 	}
+	if spec.ResolveError != "" {
+		entry.Error = spec.ResolveError
+		return entry
+	}
 	jsonlPath := resolveJSONLPath(shared, spec.ID, "probe")
 	entry.JSONL = jsonlPath
 
@@ -497,6 +501,7 @@ func probeRunConfig(shared *sharedFlags, spec acpdbg.AgentSpec) acpdbg.RunConfig
 	return acpdbg.RunConfig{
 		AgentID:            spec.ID,
 		Command:            spec.Command,
+		Env:                spec.Env,
 		Workdir:            shared.workdir,
 		CaptureStderr:      shared.stderr,
 		ClientCapabilities: shared.clientCapabilities,
@@ -536,6 +541,7 @@ func resolveRunConfig(fs *flag.FlagSet, shared *sharedFlags, _ string) (acpdbg.R
 	}
 	cfg.AgentID = spec.ID
 	cfg.Command = spec.Command
+	cfg.Env = spec.Env
 	return cfg, nil
 }
 

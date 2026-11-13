@@ -184,11 +184,10 @@ const (
 	// after queue promotion. It prevents duplicate task.queue_promoted events
 	// from repeating on_enter or auto-start behavior.
 	MetaKeyQueuePromotionPending = "queue_promotion_pending"
-	// QueuePromotionEntryTransitionIDKey is the field of the
-	// MetaKeyQueuePromotionPending marker that pins the ledger row of the entry
-	// a same-step promotion admits. That promotion writes no ledger row of its
-	// own, so the delivery carries no transition id; the pinned row lets the
-	// entry guard tell the admitted entry from a later re-entry of the step.
+	// QueuePromotionEntryTransitionIDKey pins the ledger row associated with a
+	// promotion marker. Same-step promotions use it because admission writes no
+	// ledger row; cross-step promotions use it so legacy zero-ID deliveries
+	// cannot consume a newer identified marker.
 	QueuePromotionEntryTransitionIDKey = "entry_transition_id"
 	// MetaKeyWorkflowMovePending carries the one-shot entry options of a direct
 	// (immediately applied) workflow move whose target-step entry has not yet
@@ -607,6 +606,9 @@ const (
 	SessionOriginTaskInitial             = "task_initial"
 	SessionMetaKeyContextWindow          = "context_window"
 	SessionMetaKeyContextCompactionCount = "context_compaction_count"
+	// SessionMetaKeyContextCompactionReporting holds provider-derived collection
+	// availability, coverage, and a monotonic revision next to the lifetime count.
+	SessionMetaKeyContextCompactionReporting = "context_compaction_reporting"
 	// SessionMetaKeyRecoveryResolvedAt stores the server timestamp of the
 	// latest successful agent boot. Recovery cards compare this timestamp with
 	// their own creation time, so the result survives transcript write failures.
@@ -1300,10 +1302,17 @@ func decodeAgentErrorCauses(raw json.RawMessage) []AgentErrorCause {
 		decodeOptionalErrorCauseString(fields, "attempted_model", &cause.AttemptedModel)
 		decodeOptionalErrorCauseString(fields, "requested_mode", &cause.RequestedMode)
 		decodeOptionalErrorCauseString(fields, "effective_mode", &cause.EffectiveMode)
+		decodeOptionalErrorCauseString(fields, "runtime_version", &cause.RuntimeVersion)
 		if value, ok := fields["prompt_not_sent"]; ok {
 			var promptNotSent bool
 			if json.Unmarshal(value, &promptNotSent) == nil {
 				cause.PromptNotSent = &promptNotSent
+			}
+		}
+		if value, ok := fields["exit_code"]; ok {
+			var exitCode *int
+			if json.Unmarshal(value, &exitCode) == nil && exitCode != nil {
+				cause.ExitCode = exitCode
 			}
 		}
 		if value, ok := fields["storage"]; ok {
@@ -1558,6 +1567,7 @@ func IsAutomationTaskOrigin(origin string) bool {
 
 // Task represents a task in the database
 type Task struct {
+	ExecutionGrade         string `json:"execution_grade"`
 	ID                     string `json:"id"`
 	WorkspaceID            string `json:"workspace_id"`
 	InitialWorkspaceLayout string `json:"initial_workspace_layout,omitempty"`
@@ -1943,15 +1953,26 @@ type Workspace struct {
 	// UnitID places the workspace in the organization unit tree. Reach is
 	// resolved from this placement, so a workspace without one is reachable by
 	// nobody.
-	UnitID                      string    `json:"unit_id,omitempty"`
-	DefaultExecutorID           *string   `json:"default_executor_id,omitempty"`
-	DefaultEnvironmentID        *string   `json:"default_environment_id,omitempty"`
-	DefaultAgentProfileID       *string   `json:"default_agent_profile_id,omitempty"`
-	DefaultConfigAgentProfileID *string   `json:"default_config_agent_profile_id,omitempty"`
-	ACPIdleSuspensionEnabled    bool      `json:"acp_idle_suspension_enabled"`
-	ACPIdleTimeoutMinutes       int       `json:"acp_idle_timeout_minutes"`
-	CreatedAt                   time.Time `json:"created_at"`
-	UpdatedAt                   time.Time `json:"updated_at"`
+	UnitID                      string  `json:"unit_id,omitempty"`
+	DefaultExecutorID           *string `json:"default_executor_id,omitempty"`
+	DefaultEnvironmentID        *string `json:"default_environment_id,omitempty"`
+	DefaultAgentProfileID       *string `json:"default_agent_profile_id,omitempty"`
+	DefaultConfigAgentProfileID *string `json:"default_config_agent_profile_id,omitempty"`
+	ACPIdleSuspensionEnabled    bool    `json:"acp_idle_suspension_enabled"`
+	ACPIdleTimeoutMinutes       int     `json:"acp_idle_timeout_minutes"`
+	// DynamicMidTurnFailoverEnabled lets a dynamic task route try the next
+	// candidate once after a classified provider-capacity failure that happens
+	// after output or effects. Off by default; see dynamic_midturn_failover.go.
+	DynamicMidTurnFailoverEnabled bool `json:"dynamic_midturn_failover_enabled"`
+	// DynamicFailedRouteAutoRetryEnabled lets a dynamic task route that a
+	// classified provider-capacity failure left in recovery retry itself
+	// after its candidates' circuits recover. Off by default; see
+	// dynamic_failed_route_retry.go. DynamicFailedRouteAutoRetryMax caps the
+	// automatic retries between successful turns (1-3, default 1).
+	DynamicFailedRouteAutoRetryEnabled bool      `json:"dynamic_failed_route_auto_retry_enabled"`
+	DynamicFailedRouteAutoRetryMax     int       `json:"dynamic_failed_route_auto_retry_max"`
+	CreatedAt                          time.Time `json:"created_at"`
+	UpdatedAt                          time.Time `json:"updated_at"`
 
 	// Office extensions
 	TaskPrefix       string `json:"task_prefix,omitempty"`        // e.g. "KAN"
@@ -2028,6 +2049,10 @@ type MessageAuthorType string
 const (
 	MessageMetaKeyDeliveryStatus = "delivery_status"
 	MessageDeliveryStatusBlocked = "blocked"
+	// MessageDeliveryStatusNotDelivered marks a user message whose Send Now
+	// claim could neither deliver nor restore it. The message stays in the
+	// history so the user can send it again.
+	MessageDeliveryStatusNotDelivered = "not_delivered"
 )
 
 const (
@@ -2474,43 +2499,53 @@ type SessionBranchInfo struct {
 // TaskSession represents a persistent agent execution session for a task.
 // This replaces the in-memory TaskExecution tracking and survives backend restarts.
 type TaskSession struct {
-	ExecutorActorUserID    string                 `json:"-"`
-	ID                     string                 `json:"id"`
-	TaskID                 string                 `json:"task_id"`
-	QueueIncarnationID     string                 `json:"queue_incarnation_id"`
-	Name                   string                 `json:"name,omitempty"`       // Optional user-supplied label shown on the session tab
-	AgentExecutionID       string                 `json:"agent_execution_id"`   // Docker container/agent execution
-	ContainerID            string                 `json:"container_id"`         // Docker container ID for cleanup
-	AgentProfileID         string                 `json:"agent_profile_id"`     // ID of the agent profile used
-	ExecutionProfileID     string                 `json:"execution_profile_id"` // Concrete profile used for this execution
-	RouteGeneration        int64                  `json:"route_generation,omitempty"`
-	RouteState             string                 `json:"route_state,omitempty"`
-	RouteReason            string                 `json:"route_reason,omitempty"`
-	DownstreamACPSessionID string                 `json:"downstream_acp_session_id,omitempty"`
-	RouteErrorCode         string                 `json:"route_error_code,omitempty"`
-	RouteErrorClass        string                 `json:"route_error_class,omitempty"`
-	RouteCatalogueVersion  string                 `json:"route_catalogue_version,omitempty"`
-	RouteRetryOrdinal      int64                  `json:"route_retry_ordinal,omitempty"`
-	RouteDeadline          *time.Time             `json:"route_deadline,omitempty"`
-	RoutePendingOutcome    string                 `json:"route_pending_outcome,omitempty"`
-	ExecutorID             string                 `json:"executor_id"`
-	ExecutorProfileID      string                 `json:"executor_profile_id"`
-	EnvironmentID          string                 `json:"environment_id"`
-	RepositoryID           string                 `json:"repository_id"`   // Primary repository (for backward compatibility)
-	BaseBranch             string                 `json:"base_branch"`     // Primary base branch (for backward compatibility)
-	BaseCommitSHA          string                 `json:"base_commit_sha"` // Git commit SHA at session start (for cumulative diff)
-	WorkspacePath          string                 `json:"workspace_path"`  // Effective task workspace root; legacy repo-less sessions may use the picked host folder
-	Worktrees              []*TaskEnvironmentRepo `json:"-"`               // Environment repository rows for this session's workspace
-	AgentProfileSnapshot   map[string]interface{} `json:"agent_profile_snapshot,omitempty"`
-	ExecutorSnapshot       map[string]interface{} `json:"executor_snapshot,omitempty"`
-	EnvironmentSnapshot    map[string]interface{} `json:"environment_snapshot,omitempty"`
-	RepositorySnapshot     map[string]interface{} `json:"repository_snapshot,omitempty"`
-	State                  TaskSessionState       `json:"state"`
-	ErrorMessage           string                 `json:"error_message,omitempty"`
-	Metadata               map[string]interface{} `json:"metadata,omitempty"`
-	StartedAt              time.Time              `json:"started_at"`
-	CompletedAt            *time.Time             `json:"completed_at,omitempty"`
-	UpdatedAt              time.Time              `json:"updated_at"`
+	// Set only by a session read that also checked the independent closure
+	// block on the writer. It is never stored or exposed in API payloads.
+	InferenceClosureAbsenceConfirmed bool       `json:"-" db:"-"`
+	ExecutorActorUserID              string     `json:"-"`
+	ID                               string     `json:"id"`
+	TaskID                           string     `json:"task_id"`
+	QueueIncarnationID               string     `json:"queue_incarnation_id"`
+	Name                             string     `json:"name,omitempty"`       // Optional user-supplied label shown on the session tab
+	AgentExecutionID                 string     `json:"agent_execution_id"`   // Docker container/agent execution
+	ContainerID                      string     `json:"container_id"`         // Docker container ID for cleanup
+	AgentProfileID                   string     `json:"agent_profile_id"`     // ID of the agent profile used
+	ExecutionProfileID               string     `json:"execution_profile_id"` // Concrete profile used for this execution
+	RouteGeneration                  int64      `json:"route_generation,omitempty"`
+	RouteState                       string     `json:"route_state,omitempty"`
+	RouteReason                      string     `json:"route_reason,omitempty"`
+	DownstreamACPSessionID           string     `json:"downstream_acp_session_id,omitempty"`
+	RouteErrorCode                   string     `json:"route_error_code,omitempty"`
+	RouteErrorClass                  string     `json:"route_error_class,omitempty"`
+	RouteCatalogueVersion            string     `json:"route_catalogue_version,omitempty"`
+	RouteRetryOrdinal                int64      `json:"route_retry_ordinal,omitempty"`
+	RouteDeadline                    *time.Time `json:"route_deadline,omitempty"`
+	RoutePendingOutcome              string     `json:"route_pending_outcome,omitempty"`
+	ExecutorID                       string     `json:"executor_id"`
+	ExecutorProfileID                string     `json:"executor_profile_id"`
+	EnvironmentID                    string     `json:"environment_id"`
+	RepositoryID                     string     `json:"repository_id"`   // Primary repository (for backward compatibility)
+	BaseBranch                       string     `json:"base_branch"`     // Primary base branch (for backward compatibility)
+	BaseCommitSHA                    string     `json:"base_commit_sha"` // Git commit SHA at session start (for cumulative diff)
+	WorkspacePath                    string     `json:"workspace_path"`  // Effective task workspace root; legacy repo-less sessions may use the picked host folder
+	// AgentWorkspacePath is the confirmed native-session working directory.
+	// It can differ from WorkspacePath after a live attachment promotes the
+	// Files root without moving the running agent. Read-only projection of the
+	// current harness generation; empty means unknown.
+	AgentWorkspacePath          string                 `json:"agent_workspace_path,omitempty"`
+	Worktrees                   []*TaskEnvironmentRepo `json:"-"` // Environment repository rows for this session's workspace
+	AgentProfileSnapshot        map[string]interface{} `json:"agent_profile_snapshot,omitempty"`
+	ExecutorSnapshot            map[string]interface{} `json:"executor_snapshot,omitempty"`
+	EnvironmentSnapshot         map[string]interface{} `json:"environment_snapshot,omitempty"`
+	RepositorySnapshot          map[string]interface{} `json:"repository_snapshot,omitempty"`
+	State                       TaskSessionState       `json:"state"`
+	ErrorMessage                string                 `json:"error_message,omitempty"`
+	Metadata                    map[string]interface{} `json:"metadata,omitempty"`
+	StartedAt                   time.Time              `json:"started_at"`
+	CompletedAt                 *time.Time             `json:"completed_at,omitempty"`
+	UpdatedAt                   time.Time              `json:"updated_at"`
+	AdmittedExecutionGrade      string                 `json:"admitted_execution_grade"`
+	AdmittedExecutionGradeKnown bool                   `json:"admitted_execution_grade_known"`
 
 	// Environment reference
 	TaskEnvironmentID string `json:"task_environment_id,omitempty"` // FK to task_environments for shared env
@@ -2597,22 +2632,24 @@ type ActiveSessionRecoveryCandidate struct {
 // TODO: Add v1.TaskSession type to pkg/api/v1/
 func (s *TaskSession) ToAPI() map[string]interface{} {
 	result := map[string]interface{}{
-		"id":                   s.ID,
-		"task_id":              s.TaskID,
-		"queue_incarnation_id": s.QueueIncarnationID,
-		"agent_execution_id":   s.AgentExecutionID,
-		"container_id":         s.ContainerID,
-		"agent_profile_id":     s.AgentProfileID,
-		"execution_profile_id": s.ExecutionProfileID,
-		"executor_id":          s.ExecutorID,
-		"executor_profile_id":  s.ExecutorProfileID,
-		"environment_id":       s.EnvironmentID,
-		"repository_id":        s.RepositoryID,
-		"base_branch":          s.BaseBranch,
-		"base_commit_sha":      s.BaseCommitSHA,
-		"state":                string(s.State),
-		"started_at":           s.StartedAt,
-		"updated_at":           s.UpdatedAt,
+		"id":                             s.ID,
+		"task_id":                        s.TaskID,
+		"queue_incarnation_id":           s.QueueIncarnationID,
+		"agent_execution_id":             s.AgentExecutionID,
+		"container_id":                   s.ContainerID,
+		"agent_profile_id":               s.AgentProfileID,
+		"execution_profile_id":           s.ExecutionProfileID,
+		"admitted_execution_grade":       s.AdmittedExecutionGrade,
+		"admitted_execution_grade_known": s.AdmittedExecutionGradeKnown,
+		"executor_id":                    s.ExecutorID,
+		"executor_profile_id":            s.ExecutorProfileID,
+		"environment_id":                 s.EnvironmentID,
+		"repository_id":                  s.RepositoryID,
+		"base_branch":                    s.BaseBranch,
+		"base_commit_sha":                s.BaseCommitSHA,
+		"state":                          string(s.State),
+		"started_at":                     s.StartedAt,
+		"updated_at":                     s.UpdatedAt,
 	}
 	if s.RouteGeneration > 0 {
 		result["route_generation"] = s.RouteGeneration
@@ -2647,6 +2684,9 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 	if worktrees := s.WorktreesAPI(); len(worktrees) > 0 {
 		result["worktrees"] = worktrees
 	}
+	if s.AgentWorkspacePath != "" {
+		result["agent_workspace_path"] = s.AgentWorkspacePath
+	}
 	if s.Name != "" {
 		result["name"] = s.Name
 	}
@@ -2657,7 +2697,7 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 		result["completed_at"] = s.CompletedAt
 	}
 	if s.Metadata != nil {
-		result["metadata"] = s.Metadata
+		result["metadata"] = PublicSessionMetadata(s.Metadata)
 	}
 	if s.AgentProfileSnapshot != nil {
 		result["agent_profile_snapshot"] = s.AgentProfileSnapshot
@@ -3741,6 +3781,7 @@ func (t *Task) ToAPI() *v1.Task {
 	}
 
 	result := &v1.Task{
+		ExecutionGrade:         t.ExecutionGrade,
 		ID:                     t.ID,
 		WorkspaceID:            t.WorkspaceID,
 		InitialWorkspaceLayout: t.InitialWorkspaceLayout,

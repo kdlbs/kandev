@@ -9,6 +9,7 @@ import {
   isSelectionFailureRecoveryMetadata,
   isSuccessfulScriptExecutionMetadata,
 } from "./processed-message-filtering";
+import visibleMessageTypes from "@kandev/types/unread-message-visible-types.json";
 
 const ERROR_AT = "2026-05-30T00:00:00Z";
 const AFTER = "2026-05-30T00:01:00Z";
@@ -615,5 +616,21 @@ describe("filterVisibleMessages permission presentation", () => {
         (message) => message.id,
       ),
     ).toEqual(["tool-1"]);
+  });
+});
+
+describe("filterVisibleMessages shared visible-type manifest", () => {
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.10
+  it.each(visibleMessageTypes)("renders a %s message as visible", (type) => {
+    const message = baseMessage({ id: `visible-${type}`, type: type as Message["type"] });
+    expect(
+      filterVisibleMessages([message], new Set<string>(), new Set<string>()).map((m) => m.id),
+    ).toEqual([`visible-${type}`]);
+  });
+
+  it("hides a log message, which the manifest does not list", () => {
+    // Literal type: permission-style types are exempt from the manifest by design.
+    const message = baseMessage({ id: "hidden-log", type: "log" as Message["type"] });
+    expect(filterVisibleMessages([message], new Set<string>(), new Set<string>())).toEqual([]);
   });
 });

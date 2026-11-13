@@ -252,6 +252,12 @@ func (s *Service) claimQueuedDispatchForExecution(
 	lock.Lock()
 	defer lock.Unlock()
 
+	closureCtx, cancelClosure := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelClosure()
+	if err := s.checkInferenceClosureAdmission(closureCtx, sessionID, false); err != nil {
+		return false, err
+	}
+
 	var alreadyTracked bool
 	var err error
 	expected, alreadyTracked, err = s.resolveQueuedDispatchForClaim(sessionID, entryID, expected)
@@ -459,6 +465,28 @@ func (s *Service) clearQueuedDispatchInFlightIfCurrent(
 		if accepted.currentPhase() == queuedDispatchAwaitingAdmission {
 			return
 		}
+		accepted.phase.Store(uint32(queuedDispatchSupersededByNewDispatch))
+		s.acceptedQueuedDispatch.CompareAndDelete(sessionID, reservation)
+	}
+}
+
+// clearQueuedDispatchInFlightForCapacityRefusal releases the exact dispatch
+// reservation after a pre-dispatch capacity refusal. The accepted-phase guard
+// in clearQueuedDispatchInFlightIfCurrent intentionally retains ownership for
+// an awaiting admission, but a capacity refusal never reached admission and
+// must not block the restored head's retry.
+func (s *Service) clearQueuedDispatchInFlightForCapacityRefusal(
+	sessionID string,
+	reservation *queuedDispatchReservation,
+) {
+	if sessionID == "" || reservation == nil {
+		return
+	}
+	if pending := s.pendingQueuedDispatch(sessionID); pending == reservation {
+		pending.phase.Store(uint32(queuedDispatchSupersededByNewDispatch))
+		s.dispatchingQueued.CompareAndDelete(sessionID, reservation)
+	}
+	if accepted := s.acceptedQueuedDispatchForSession(sessionID); accepted == reservation {
 		accepted.phase.Store(uint32(queuedDispatchSupersededByNewDispatch))
 		s.acceptedQueuedDispatch.CompareAndDelete(sessionID, reservation)
 	}

@@ -237,13 +237,13 @@ fi
         self.assertIn("make -C apps/backend " + " ".join(other), helpers)
         self.assertIn("run: make -C apps/backend build-mock-agent-linux", build)
         self.assertNotIn("make build-backend", build)
-        self.assertIn("make build-e2e-delivery-fixture", build)
+        self.assertIn("make build-e2e-delivery-fixture build-e2e-send-now-fixture", build)
         def outputs(targets):
             result = subprocess.run(["make", "-n", "-C", str(REPO_ROOT / "apps/backend"), *targets],
                                     capture_output=True, text=True, check=True)
             return set(re.findall(r"-o (bin/[^ ]+)", result.stdout))
-        self.assertEqual(outputs(host + other + ["build-mock-agent-linux", "build-e2e-delivery-fixture"]),
-                         outputs(["build", "build-mock-agent-linux", "build-e2e-delivery-fixture"]))
+        self.assertEqual(outputs(host + other + ["build-mock-agent-linux", "build-e2e-delivery-fixture", "build-e2e-send-now-fixture"]),
+                         outputs(["build", "build-mock-agent-linux", "build-e2e-delivery-fixture", "build-e2e-send-now-fixture"]))
         report = workflow.split("  e2e-report:\n", 1)[1]
         self.assertIn("needs: [changes, helper_compile, build,", report)
         self.assertIn("HELPER_COMPILE_RESULT: ${{ needs.helper_compile.result }}", report)

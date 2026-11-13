@@ -63,7 +63,7 @@
  *
  * An **error** across {@link e2eSleepGuardFiles}, which now covers all of
  * `e2e/`. It began as a narrow allowlist of directories already converted to
- * zero — `pnpm lint` is `eslint --max-warnings 0`, so a repo-wide registration
+ * zero — `pnpm lint` fails on warnings, so a repo-wide registration
  * at *any* severity would have failed the build on the sleeps that predated the
  * rule and blocked every unrelated PR, the mistake the first i18n attempt made.
  * The conversion has finished, so that cost is gone and the list has graduated.
@@ -100,7 +100,7 @@ export const SLEEP_EXEMPT_FILES = [
  *
  * **Graduated.** This started as an opt-in allowlist of the handful of
  * directories the causal-waits conversion had already driven to zero, for the
- * same reason `i18nGuardFiles` is one: `pnpm lint` is `eslint --max-warnings 0`,
+ * same reason `i18nGuardFiles` is one: `pnpm lint` fails on warnings,
  * so a repo-wide registration at any severity would have failed the build on the
  * ~153 sleeps that predated the rule and blocked every unrelated PR — the
  * mistake the first i18n attempt made.
@@ -345,3 +345,6 @@ export const e2eSleepPlugin = {
 };
 
 export const SLEEP_RULE_ID = "e2e-sleeps/no-unsanctioned-sleep";
+
+/** Default export so an Oxlint JS-plugin registration can load this module directly. */
+export default e2eSleepPlugin;

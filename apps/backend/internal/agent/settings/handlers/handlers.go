@@ -134,6 +134,9 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	cfg := authz.RequireOrgScope(authz.ScopeOrgConfigManage)
 	api.GET("/agents/discovery", h.httpDiscoverAgents)
 	api.GET("/agents/available", h.httpListAvailableAgents)
+	api.GET("/agent-profiles/usage", h.httpListProfileUsage)
+	api.GET("/agent-profiles/:id/turn-allowance", h.httpGetTurnAllowance)
+	api.PATCH("/agent-profiles/:id/turn-allowance", cfg, h.interlock, h.httpPatchTurnAllowance)
 	api.GET("/agents", h.httpListAgents)
 	api.GET("/agents/:id/mcp-discovery", h.httpDiscoverAgentMCP)
 	api.POST("/agents/:id/plugin-discovery", cfg, h.httpDiscoverCopilotPlugins)
@@ -163,7 +166,11 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.PATCH("/agent-profiles/:id", cfg, h.interlock, h.httpUpdateProfile)
 	api.DELETE("/agent-profiles/:id", cfg, h.interlock, h.httpDeleteProfile)
 	api.POST("/agent-profiles/:id/duplicate", cfg, h.interlock, h.httpDuplicateProfile)
+	api.POST("/agent-profiles/dynamic-preview", h.requireDynamicTiers, cfg, h.httpPreviewDynamicTiers)
+	api.POST("/agent-profiles/:id/dynamic-preview", h.requireDynamicTiers, cfg, h.httpPreviewDynamicTiers)
 	api.GET("/agent-profiles/:id/mcp-config", h.httpGetProfileMcpConfig)
+	api.GET("/agent-profiles/:id/usage", cfg, h.httpReadNativeProfileUsage)
+	api.GET("/agent-profiles/:id/usage/cached", cfg, h.httpReadCachedNativeProfileUsage)
 	api.POST("/agent-profiles/:id/mcp-config", cfg, h.interlock, h.httpUpdateProfileMcpConfig)
 	api.GET("/agent-profiles/:id/mcp-selections", h.httpListProfileMCPSelections)
 	api.PUT("/agent-profiles/:id/mcp-selections", h.interlock, h.httpReplaceProfileMCPSelections)
@@ -189,6 +196,10 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	// profile edits and enablement never release it.
 	api.POST("/agent-profiles/:id/account-block/release", cfg, h.interlock, h.httpReleaseAccountBlock)
 	api.GET("/routing/circuits", h.httpListRoutingCircuits)
+	// Provider limits are org configuration. Reads stay open to any identity;
+	// the mutation uses the same interlock as other settings writes.
+	api.GET("/provider-limits", h.httpListProviderLimits)
+	api.PUT("/provider-limits/:provider", cfg, h.interlock, h.httpUpdateProviderLimit)
 }
 
 func (h *Handlers) httpDiscoverAgents(c *gin.Context) {
@@ -556,6 +567,7 @@ type createAgentRequest struct {
 }
 
 type createAgentProfileRequest struct {
+	ExecutionGrade          string                 `json:"execution_grade,omitempty"`
 	Name                    string                 `json:"name"`
 	Model                   string                 `json:"model"`
 	FallbackModel           string                 `json:"fallback_model,omitempty"`
@@ -566,6 +578,7 @@ type createAgentProfileRequest struct {
 	Mode                    string                 `json:"mode,omitempty"`
 	CLIFlags                []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
 	EnvVars                 []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	DevinSandboxInherited   bool                   `json:"devin_sandbox_inherited,omitempty"`
 	CommandPrefix           string                 `json:"command_prefix,omitempty"`
 }
 
@@ -585,8 +598,13 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "profile name is required"})
 			return
 		}
+		if err := (dto.ProfileCreateRequest{AgentID: body.Name, Name: profile.Name, ExecutionGrade: profile.ExecutionGrade}).Validate(); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		profiles = append(profiles, controller.CreateAgentProfileRequest{
 			Name:                    profile.Name,
+			ExecutionGrade:          profile.ExecutionGrade,
 			Model:                   profile.Model,
 			FallbackModel:           profile.FallbackModel,
 			AutoFallback:            profile.AutoFallback,
@@ -596,6 +614,7 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 			Mode:                    profile.Mode,
 			CLIFlags:                profile.CLIFlags,
 			EnvVars:                 profile.EnvVars,
+			DevinSandboxInherited:   profile.DevinSandboxInherited,
 			CommandPrefix:           profile.CommandPrefix,
 		})
 	}
@@ -606,7 +625,7 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 	})
 	if err != nil {
 		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
-			errors.Is(err, controller.ErrInvalidProviderConfig) ||
+			errors.Is(err, controller.ErrInvalidProviderConfig) || errors.Is(err, controller.ErrInvalidDevinPermissionIntent) ||
 			errors.Is(err, controller.ErrRequireExactModelNeedsModel) || errors.Is(err, controller.ErrRequireExactModelUnsupported) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return

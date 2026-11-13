@@ -24,6 +24,9 @@ type RunConfig struct {
 	// Command is the argv to spawn. First element is the executable, rest
 	// are arguments. No shell expansion.
 	Command []string
+	// Env, when non-nil, is the complete child environment. Nil inherits the
+	// debugger process environment.
+	Env []string
 	// Workdir is the child process cwd. If empty, a fresh kandev-acpdbg-*
 	// temp directory is created and cleaned up on exit.
 	Workdir string
@@ -170,6 +173,9 @@ func startChild(cfg RunConfig, workdir string) (*exec.Cmd, processTree, io.Write
 	//nolint:gosec // the command comes from the agent registry or the user's --exec flag; both are trusted inputs
 	cmd := exec.Command(cfg.Command[0], cfg.Command[1:]...)
 	cmd.Dir = workdir
+	if cfg.Env != nil {
+		cmd.Env = cfg.Env
+	}
 	configureProcessTree(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -359,6 +365,12 @@ func (r *Runner) NextOOB(ctx context.Context) (Frame, error) {
 		frame, ok, closed := r.popOOB()
 		if ok {
 			r.wakeNextOOBWaiter()
+			if isHumanQuestionFrame(r.cfg.AgentID, frame) {
+				// Never answer a native question: selecting an offered option
+				// would invent the user's answer. The frame is already recorded,
+				// so stop the capture without writing anything.
+				return frame, ErrHumanQuestionPending
+			}
 			if frame.Method() != "" && frame.ID() != nil {
 				reply := NewMethodNotFound(frame.ID(), frame.Method())
 				_ = r.rec.Sent(reply)

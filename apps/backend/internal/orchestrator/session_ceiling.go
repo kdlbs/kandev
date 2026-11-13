@@ -2,13 +2,17 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
+	"maps"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/constants"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 )
 
 // reservationExpiryAllowance is the slice of the backstop that follows the session's
@@ -40,7 +44,7 @@ const (
 const (
 	ceilingReasonRefused           = "ceiling"
 	ceilingReasonManualOverride    = "ceiling_manual_override"
-	ceilingReasonUnknownPopulation = "ceiling_unknown_population"
+	ceilingReasonUnknownPopulation = sessioncapacity.WaitingReasonUnknownPopulation
 	ceilingReasonSuperseded        = "ceiling_superseded"
 	ceilingReasonDeferWriteFailed  = "ceiling_defer_write_failed"
 	// ceilingReasonDroppedTaskIneligible covers AC-17b(a)-(d): the task is
@@ -74,20 +78,39 @@ type admittedSessionLister interface {
 // keyed by a launch-scoped identifier, which is the window between admission at
 // seam 1 and the session's creation.
 type ceilingReservation struct {
-	sessionID string
-	takenAt   time.Time
+	startSelection *explicitWorkflowStartSelection
+	grade          string
+	gradeKnown     bool
+	sessionID      string
+	takenAt        time.Time
+	nativeOwner    *NativeInferenceRoute
+	nativeQueued   bool
+	queuedOffice   *OfficeCapacityWaiter
+	officeRunID    string
+	queuedTask     *queuedTaskCapacityOwner
 }
 
 // admissionRequest is one launch asking for capacity.
 type admissionRequest struct {
-	taskID    string
-	sessionID string
-	origin    launchOrigin
-	seam      string
+	officeTaskID    string
+	profileExplicit bool
+	workflowStepID  string
+	startSelection  *explicitWorkflowStartSelection
+	profileID       string
+	grade           string
+	gradeKnown      bool
+	gradeHeld       bool
+	queuedGrantKey  string
+	officeRunID     string
+	taskID          string
+	sessionID       string
+	origin          launchOrigin
+	seam            string
 }
 
 // admissionDecision is the controller's answer.
 type admissionDecision struct {
+	officeRunID     string
 	admitted        bool
 	manualOverride  bool
 	reservationKey  string
@@ -102,23 +125,49 @@ type admissionDecision struct {
 // controller. It is deliberately separate from a launch deferral so callers
 // can refresh displayed capacity without changing queue ownership or time.
 type SessionCeilingObservation struct {
-	InUse      int
-	Limit      int
-	ObservedAt time.Time
-	Known      bool
+	Policy             string
+	GradeInUse         map[string]int
+	GradeLimits        map[string]int
+	NeedsConfiguration bool
+	InUse              int
+	Limit              int
+	ObservedAt         time.Time
+	Known              bool
 }
 
 // sessionCeilingController is the single admission controller. Every mutation of
 // the reservation set happens under its one mutex, together with the population
 // read it is compared against.
 type sessionCeilingController struct {
+	runSessions      RunSessionCapacitySource
+	inferenceStore   *sessioncapacity.Store
+	inferenceRefresh func(context.Context)
+	inferenceKnown   bool
+	inferenceWakeMu  sync.Mutex
+	inferenceWake    chan struct{}
+
+	policy       string
+	gradeLimits  map[string]int
+	resolveGrade func(context.Context, admissionRequest) (string, error)
+	persistGrade func(context.Context, string, string) error
 	mu           sync.Mutex
 	ceiling      int
 	reservations map[string]*ceilingReservation
-	lister       admittedSessionLister
-	logger       *zap.Logger
-	now          func() time.Time
-	newKey       func() string
+	// turnReservations are message-turn tickets. They are owned by the attempt
+	// token that created them, never by the session ID, so a successor turn or
+	// a delayed callback cannot release the wrong ticket.
+	turnReservations  map[string]*messageTurnReservation
+	lister            admittedSessionLister
+	logger            *zap.Logger
+	populationLogger  *zap.Logger
+	now               func() time.Time
+	newKey            func() string
+	queuedTasks       func(context.Context) ([]queuedTaskCapacityCandidate, error)
+	nativeWaiters     func(context.Context) ([]NativeCapacityWaiter, error)
+	officeWaiters     func(context.Context) ([]OfficeCapacityWaiter, error)
+	officeTaskRequest func(context.Context, OfficeCapacityWaiter) (admissionRequest, bool, error)
+	officeTaskRequeue func(context.Context, string, string) error
+	queuedWake        func()
 }
 
 func newSessionCeilingController(ceiling int, lister admittedSessionLister, logger *zap.Logger) *sessionCeilingController {
@@ -126,12 +175,14 @@ func newSessionCeilingController(ceiling int, lister admittedSessionLister, logg
 		logger = zap.NewNop()
 	}
 	return &sessionCeilingController{
-		ceiling:      ceiling,
-		reservations: make(map[string]*ceilingReservation),
-		lister:       lister,
-		logger:       logger,
-		now:          time.Now,
-		newKey:       func() string { return "launch-" + uuid.NewString() },
+		ceiling:          ceiling,
+		reservations:     make(map[string]*ceilingReservation),
+		turnReservations: make(map[string]*messageTurnReservation),
+		lister:           lister,
+		logger:           logger,
+		populationLogger: newPopulationDiagnosticLogger(logger),
+		now:              time.Now,
+		newKey:           func() string { return "launch-" + uuid.NewString() },
 	}
 }
 
@@ -166,21 +217,45 @@ func (c *sessionCeilingController) observation(ctx context.Context) (SessionCeil
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	counted, err := c.countedRowsLocked(ctx)
-	observedAt := time.Now().UTC()
+	observation, err := c.capacityObservationLocked(ctx)
+	observation.ObservedAt = time.Now().UTC()
 	if c.now != nil {
-		observedAt = c.now().UTC()
+		observation.ObservedAt = c.now().UTC()
 	}
-	observation := SessionCeilingObservation{
-		Limit:      c.ceiling,
-		ObservedAt: observedAt,
-		Known:      err == nil,
+	return observation, err
+}
+
+// capacityObservationLocked projects the exact population used for admission.
+// Counts are unavailable together when the shared inventory cannot be proved.
+func (c *sessionCeilingController) capacityObservationLocked(ctx context.Context) (SessionCeilingObservation, error) {
+	observation, _, err := c.capacitySnapshotLocked(ctx)
+	return observation, err
+}
+
+func (c *sessionCeilingController) capacitySnapshotLocked(ctx context.Context) (SessionCeilingObservation, gradedPopulation, error) {
+	observation := SessionCeilingObservation{Limit: c.ceiling, Policy: c.policy}
+	if observation.Policy == "" {
+		observation.Policy = sessioncapacity.PolicyAutomatic
 	}
-	if err != nil {
-		return observation, err
+	if c.policy == sessioncapacity.PolicyAll {
+		observation.GradeLimits = maps.Clone(c.gradeLimits)
+		population, err := c.readGradedPopulationLocked(ctx, "")
+		observation.NeedsConfiguration = population.missing
+		if err == nil && population.unknown {
+			err = fmt.Errorf("execution grade population is unknown")
+		}
+		observation.Known = err == nil
+		if err == nil {
+			observation.InUse, observation.GradeInUse = population.total, population.grades
+		}
+		return observation, population, err
 	}
-	observation.InUse = c.populationLocked(counted)
-	return observation, nil
+	counted, err := c.countedRowsLocked(ctx)
+	observation.Known = err == nil
+	if err == nil {
+		observation.InUse = c.populationLocked(counted)
+	}
+	return observation, gradedPopulation{counted: counted}, err
 }
 
 // CurrentSessionCeilingObservation exposes the controller's current bounded
@@ -231,6 +306,16 @@ func (s *Service) SessionCapacity() int {
 // decision time rather than kept as a running tally, so a restart, a panic or a
 // missed release cannot leak capacity permanently.
 func (c *sessionCeilingController) countedRowsLocked(ctx context.Context) (map[string]struct{}, error) {
+	if c.policy == sessioncapacity.PolicyAll {
+		population, err := c.readGradedPopulationLocked(ctx, "")
+		if err != nil {
+			return nil, err
+		}
+		if population.unknown {
+			return nil, fmt.Errorf("execution grade population is unknown")
+		}
+		return population.counted, nil
+	}
 	if c.lister == nil {
 		return map[string]struct{}{}, nil
 	}
@@ -250,15 +335,28 @@ func (c *sessionCeilingController) countedRowsLocked(ctx context.Context) (map[s
 // with no row because no row for it exists yet. It is deliberately not the sum of
 // two independent numbers.
 func (c *sessionCeilingController) populationLocked(counted map[string]struct{}) int {
+	seen := make(map[string]struct{}, len(counted)+len(c.reservations)+len(c.turnReservations))
+	for id := range counted {
+		seen[id] = struct{}{}
+	}
 	population := len(counted)
+	countSession := func(sessionID string) {
+		if sessionID == "" {
+			// A launch-scoped reservation has no row yet, so it always adds one.
+			population++
+			return
+		}
+		if _, ok := seen[sessionID]; ok {
+			return
+		}
+		seen[sessionID] = struct{}{}
+		population++
+	}
 	for _, reservation := range c.reservations {
-		if reservation.sessionID == "" {
-			population++
-			continue
-		}
-		if _, alreadyCounted := counted[reservation.sessionID]; !alreadyCounted {
-			population++
-		}
+		countSession(reservation.sessionID)
+	}
+	for _, reservation := range c.turnReservations {
+		countSession(reservation.sessionID)
 	}
 	return population
 }
@@ -271,6 +369,14 @@ func (c *sessionCeilingController) reserveLocked(sessionID string) string {
 		key = c.newKey()
 	}
 	c.reservations[key] = &ceilingReservation{sessionID: sessionID, takenAt: c.now()}
+	return key
+}
+
+func (c *sessionCeilingController) reserveGradeLocked(req admissionRequest) string {
+	key := c.reserveLocked(req.sessionID)
+	held := c.reservations[key]
+	held.grade, held.gradeKnown = req.grade, req.gradeKnown
+	held.startSelection = cloneAdmittedStartSelection(req.startSelection)
 	return key
 }
 
@@ -294,15 +400,36 @@ func (c *sessionCeilingController) admit(ctx context.Context, req admissionReque
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.admitLocked(ctx, req, origin)
+}
+
+func (c *sessionCeilingController) admitLocked(ctx context.Context, req admissionRequest, origin launchOrigin) (decision admissionDecision) {
+	req.origin = origin
+	req = taskOfficeAdmissionRequest(ctx, req)
+	if req.officeRunID != "" && req.officeTaskID != req.taskID {
+		return admissionDecision{officeRunID: req.officeRunID, ceiling: c.ceiling, reasonCode: ceilingReasonOfficeTaskOwnerMismatch}
+	}
+	if c.policy != sessioncapacity.PolicyAll {
+		c.releaseUnusedOfficeTaskGrantLocked(req)
+	}
+	defer func() {
+		if req.seam == "startTask" {
+			decision.officeRunID = req.officeRunID
+		}
+	}()
+	if c.policy == sessioncapacity.PolicyAll {
+		return c.admitAllLocked(ctx, req, false)
+	}
+	req = c.resolveAdmissionGradeLocked(ctx, req)
 	if c.ceiling == unlimitedSessionCeiling {
-		return c.admitUnlimitedLocked(req, origin)
+		return c.persistAdmissionGradeLocked(ctx, req, c.admitUnlimitedLocked(req, origin))
 	}
 
 	counted, err := c.countedRowsLocked(ctx)
 	if err != nil {
 		return c.decideUnknownPopulationLocked(req, origin, err)
 	}
-	return c.decideLocked(req, origin, counted)
+	return c.persistAdmissionGradeLocked(ctx, req, c.decideLocked(req, origin, counted))
 }
 
 // admitUnlimitedLocked keeps launch ownership and callback accounting intact
@@ -315,7 +442,7 @@ func (c *sessionCeilingController) admitUnlimitedLocked(req admissionRequest, or
 			return decision
 		}
 	}
-	decision.reservationKey = c.reserveLocked(req.sessionID)
+	decision.reservationKey = c.reserveGradeLocked(req)
 	c.logDecision(req, origin, decision)
 	return decision
 }
@@ -337,12 +464,12 @@ func (c *sessionCeilingController) decideLocked(req admissionRequest, origin lau
 	switch {
 	case c.ceiling == unlimitedSessionCeiling || population < c.ceiling:
 		decision.admitted = true
-		decision.reservationKey = c.reserveLocked(req.sessionID)
+		decision.reservationKey = c.reserveGradeLocked(req)
 	case origin == launchOriginManual:
 		decision.admitted = true
 		decision.manualOverride = true
 		decision.reasonCode = ceilingReasonManualOverride
-		decision.reservationKey = c.reserveLocked(req.sessionID)
+		decision.reservationKey = c.reserveGradeLocked(req)
 	default:
 		decision.reasonCode = ceilingReasonRefused
 	}
@@ -367,6 +494,12 @@ func (c *sessionCeilingController) alreadyAdmittedLocked(req admissionRequest, c
 		decision.reservationKey = req.sessionID
 		return decision, true
 	}
+	if c.hasTurnReservationLocked(req.sessionID) {
+		// A message turn already owns this session's capacity. A nested launch
+		// must not take a second unit or release the turn ticket as if it were
+		// a launch reservation.
+		return decision, true
+	}
 	if _, isCounted := counted[req.sessionID]; isCounted {
 		return decision, true
 	}
@@ -388,7 +521,7 @@ func (c *sessionCeilingController) decideUnknownPopulationLocked(req admissionRe
 	if origin == launchOriginManual {
 		decision.admitted = true
 		decision.manualOverride = true
-		decision.reservationKey = c.reserveLocked(req.sessionID)
+		decision.reservationKey = c.reserveGradeLocked(req)
 	}
 	c.logDecision(req, origin, decision)
 	return decision
@@ -402,6 +535,9 @@ func (c *sessionCeilingController) logDecision(req admissionRequest, origin laun
 		zap.String("task_id", req.taskID),
 		zap.String("session_id", req.sessionID),
 		zap.String("origin", string(origin)),
+		zap.String("grade", req.grade), zap.Bool("grade_known", req.gradeKnown),
+		zap.String("profile_id", req.profileID), zap.String("workflow_step_id", req.workflowStepID),
+		zap.String("reservation_id", decision.reservationKey), zap.Bool("population_known", decision.populationKnown),
 		zap.Int(ceilingFieldCeiling, decision.ceiling),
 		zap.Bool("admitted", decision.admitted),
 	}
@@ -421,8 +557,19 @@ func (c *sessionCeilingController) release(key string) {
 		return
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	held, exists := c.reservations[key]
+	flow := logger.ExecutionFlow{Stage: "reservation", Outcome: "released", ReservationID: key}
+	if held != nil {
+		flow.SessionID, flow.Grade = held.sessionID, held.grade
+		if !held.takenAt.IsZero() {
+			flow.DurationMS = time.Since(held.takenAt).Milliseconds()
+		}
+	}
 	delete(c.reservations, key)
+	c.mu.Unlock()
+	if exists {
+		logger.EmitExecutionFlow(c.logger, context.Background(), flow)
+	}
 }
 
 // rebind moves a launch-scoped reservation onto the session id that launch just
@@ -438,22 +585,31 @@ func (c *sessionCeilingController) release(key string) {
 // later release is a harmless no-op rather than deleting the winner's still
 // in-flight reservation.
 func (c *sessionCeilingController) rebind(launchKey, sessionID string) bool {
+	rebound, _ := c.rebindAdmission(context.Background(), launchKey, sessionID)
+	return rebound
+}
+
+func (c *sessionCeilingController) rebindAdmission(ctx context.Context, launchKey, sessionID string) (bool, error) {
 	if launchKey == "" || sessionID == "" {
-		return false
+		return false, nil
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	reservation, held := c.reservations[launchKey]
 	if !held {
-		return false
+		return false, nil
+	}
+	if _, collision := c.reservations[sessionID]; collision {
+		delete(c.reservations, launchKey)
+		return false, nil
+	}
+	if err := c.bindAdmissionGradeLocked(ctx, reservation, sessionID); err != nil {
+		return false, err
 	}
 	delete(c.reservations, launchKey)
-	if _, collision := c.reservations[sessionID]; collision {
-		return false
-	}
 	reservation.sessionID = sessionID
 	c.reservations[sessionID] = reservation
-	return true
+	return true, nil
 }
 
 // rekey moves a reservation from the session that was gated onto the replacement
@@ -461,33 +617,43 @@ func (c *sessionCeilingController) rebind(launchKey, sessionID string) bool {
 // or already reserved, the original is released and no second unit is consumed:
 // this is still one launch.
 func (c *sessionCeilingController) rekey(ctx context.Context, fromSessionID, toSessionID string) bool {
+	moved, _ := c.rekeyAdmission(ctx, fromSessionID, toSessionID)
+	return moved
+}
+
+func (c *sessionCeilingController) rekeyAdmission(ctx context.Context, fromSessionID, toSessionID string) (bool, error) {
 	if fromSessionID == "" || toSessionID == "" || fromSessionID == toSessionID {
-		return false
+		return false, nil
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	reservation, held := c.reservations[fromSessionID]
 	if !held {
-		return false
+		return false, nil
 	}
-	delete(c.reservations, fromSessionID)
 
 	if _, alreadyReserved := c.reservations[toSessionID]; alreadyReserved {
+		delete(c.reservations, fromSessionID)
 		// Do not transfer ownership onto a reservation the caller does not
 		// hold: the source key is already gone (deleted above), so the
 		// caller's later releaseIfNotConsumed becomes a no-op instead of
 		// deleting the actual holder's reservation and undercounting the
 		// population, matching rebind's collision behavior.
-		return false
+		return false, nil
 	}
 	if counted, err := c.countedRowsLocked(context.WithoutCancel(ctx)); err == nil {
 		if _, alreadyCounted := counted[toSessionID]; alreadyCounted {
-			return true
+			delete(c.reservations, fromSessionID)
+			return true, nil
 		}
 	}
+	if err := c.bindAdmissionGradeLocked(ctx, reservation, toSessionID); err != nil {
+		return false, err
+	}
+	delete(c.reservations, fromSessionID)
 	reservation.sessionID = toSessionID
 	c.reservations[toSessionID] = reservation
-	return true
+	return true, nil
 }
 
 // handOffOrAdmit serves the dynamic-route relaunch seam. Where the session is still
@@ -507,8 +673,12 @@ func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admis
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.policy == sessioncapacity.PolicyAll {
+		return c.admitAllLocked(ctx, req, true)
+	}
+	req = c.resolveAdmissionGradeLocked(ctx, req)
 	if c.ceiling == unlimitedSessionCeiling {
-		return c.admitUnlimitedLocked(req, origin)
+		return c.persistAdmissionGradeLocked(ctx, req, c.admitUnlimitedLocked(req, origin))
 	}
 
 	counted, err := c.countedRowsLocked(ctx)
@@ -516,7 +686,7 @@ func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admis
 		return c.decideUnknownPopulationLocked(req, origin, err)
 	}
 	if _, isCounted := counted[req.sessionID]; req.sessionID == "" || !isCounted {
-		return c.decideLocked(req, origin, counted)
+		return c.persistAdmissionGradeLocked(ctx, req, c.decideLocked(req, origin, counted))
 	}
 
 	decision := admissionDecision{
@@ -527,9 +697,9 @@ func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admis
 		populationKnown: true,
 		ceiling:         c.ceiling,
 	}
-	c.reservations[req.sessionID] = &ceilingReservation{sessionID: req.sessionID, takenAt: c.now()}
+	c.reservations[req.sessionID] = &ceilingReservation{sessionID: req.sessionID, takenAt: c.now(), grade: req.grade, gradeKnown: req.gradeKnown}
 	c.logDecision(req, origin, decision)
-	return decision
+	return c.persistAdmissionGradeLocked(ctx, req, decision)
 }
 
 // isSessionCeilingBacked implements AC-41: whether a session_id is currently
@@ -546,6 +716,9 @@ func (c *sessionCeilingController) isSessionCeilingBacked(ctx context.Context, s
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if _, reserved := c.reservations[sessionID]; reserved {
+		return true, nil
+	}
+	if c.hasTurnReservationLocked(sessionID) {
 		return true, nil
 	}
 	counted, err := c.countedRowsLocked(ctx)
@@ -567,6 +740,11 @@ func (c *sessionCeilingController) expireStaleReservations() int {
 	defer c.mu.Unlock()
 	released := 0
 	for key, reservation := range c.reservations {
+		// Native requests own explicit cleanup/transfer. Their live context may
+		// outlast a task launch budget; elapsed time is not ownership release.
+		if reservation.nativeOwner != nil {
+			continue
+		}
 		if now.Sub(reservation.takenAt) <= budget {
 			continue
 		}
@@ -574,6 +752,18 @@ func (c *sessionCeilingController) expireStaleReservations() int {
 		released++
 		c.logger.Warn("session ceiling released a reservation whose launch never reached a counted state",
 			zap.String("reservation_key", key),
+			zap.String("session_id", reservation.sessionID),
+			zap.Duration("held_for", now.Sub(reservation.takenAt)),
+			zap.Duration("budget", budget))
+	}
+	for token, reservation := range c.turnReservations {
+		if now.Sub(reservation.takenAt) <= budget {
+			continue
+		}
+		delete(c.turnReservations, token)
+		released++
+		c.logger.Warn("session ceiling released a message-turn ticket whose dispatch never reached a counted state",
+			zap.String("reservation_key", token),
 			zap.String("session_id", reservation.sessionID),
 			zap.Duration("held_for", now.Sub(reservation.takenAt)),
 			zap.Duration("budget", budget))

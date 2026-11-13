@@ -84,6 +84,38 @@ verified explicit provider envelope; a display title alone is insufficient.
 The [Copilot fix package](../../../plans/copilot-rich-output-identity/plan.md)
 records the reproduction and planned regression coverage.
 
+### Built-in package namespaces
+
+The shared identity parser must also recognize the exact runtime server names
+declared by `internal/mcp/profile/builtin_descriptors.go`: `kandev`,
+`kandev-configuration`, `kandev-rich-output`, `kandev-walkthroughs`, and
+`kandev-diagnostics`. The package split changes the server name, not the tool
+stem, arguments, result, or renderer. Existing bare and monolithic identities
+remain compatible.
+
+Apply this finite server set to the already supported slash, dotted,
+double-underscore, colon-space, and hyphenated identity formats. Match a full
+server name and delimiter before removing the tool suffix. Match longer server
+names before `kandev-` so package names cannot become part of the tool stem.
+Qualified namespaces use the exact server inventory. The legacy
+`kandev-<tool>_kandev` format still permits hyphens in the tool stem; such a stem
+selects native rendering only if it has a registered renderer. This parser is a
+presentation selector, not proof of built-in authorization or execution origin.
+
+Preserve the historical provider fallback guard for both
+`raw_input.providerIdentifier` and Codex `raw_input.server`: only `kandev`
+permits title fallback. A legacy imported external definition can retain
+one of the new reserved package names, so that name alone must not relax this
+guard. Current package calls use the normalized qualified identity. An explicit
+foreign normalized identity still prevents fallback to a trusted-looking title.
+
+Both renderer dispatch and rich-output grouping continue through
+`kandevToolStemOf`. Existing package-qualified messages recover on replay
+without a database rewrite, tool retry, or package enablement. Normal file
+preview reads retain session authorization and existing image visibility rules.
+The [repair plan](../../../plans/builtin-rich-output-identity/plan.md) records
+the observed Codex message, supported serialized formats, and negative controls.
+
 ## Result selection
 
 `extractMcpResult` uses this precedence:

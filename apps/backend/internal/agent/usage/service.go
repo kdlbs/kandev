@@ -41,6 +41,15 @@ func (s *UsageService) Register(profileID string, client ProviderUsageClient, ca
 	s.clients[profileID] = registration{client: client, cacheKey: cacheKey}
 }
 
+// IsRegistered reports whether a provider usage client is bound to the profile.
+// It answers registration questions without issuing a provider request.
+func (s *UsageService) IsRegistered(profileID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.clients[profileID]
+	return ok
+}
+
 // GetUsage returns fresh-or-cached utilization for the agent profile.
 // Returns nil, nil if the profile has no registered client.
 func (s *UsageService) GetUsage(ctx context.Context, profileID string) (*ProviderUsage, error) {
@@ -51,6 +60,17 @@ func (s *UsageService) GetUsage(ctx context.Context, profileID string) (*Provide
 		return nil, nil
 	}
 	return s.cache.GetOrFetch(ctx, reg.cacheKey, reg.client.FetchUsage)
+}
+
+// RefreshUsage re-reads a registered account after a classified model limit.
+func (s *UsageService) RefreshUsage(ctx context.Context, profileID string) (*ProviderUsage, error) {
+	s.mu.RLock()
+	reg, ok := s.clients[profileID]
+	s.mu.RUnlock()
+	if !ok {
+		return nil, nil
+	}
+	return s.cache.Refresh(ctx, reg.cacheKey, reg.client.FetchUsage)
 }
 
 // IsPotentiallyRateLimited returns true when any utilization window is at or

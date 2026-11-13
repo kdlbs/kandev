@@ -11,9 +11,7 @@ const mocks = vi.hoisted(() => ({
   nativePermissionGet: vi.fn(),
 }));
 const originalNotification = globalThis.Notification;
-const GROUP_SELECTOR = '[data-settings-group="true"]';
-const GROUP_CARD_SELECTOR = '[data-settings-group-card="true"]';
-const GROUP_CONTENT_SELECTOR = '[data-settings-group-content="true"]';
+const ROW_SELECTOR = '[data-notification-preference-row="true"]';
 const WARNING_SELECTOR = '[data-testid="notification-permission-warning"]';
 
 vi.mock("@/lib/desktop/native-notification-client", () => ({
@@ -115,20 +113,20 @@ describe("DesktopNotificationsSection", () => {
   });
 });
 
-describe("DesktopNotificationsSection permission frame", () => {
+describe("DesktopNotificationsSection compact row", () => {
   it.each(["default", "granted"] as const)(
-    "omits the warning card when permission is %s",
+    "keeps the actions in one compact row without a reserved warning when permission is %s",
     (permission) => {
       mocks.nativeAvailable.mockReturnValue(false);
       const { container } = renderSection(permission);
-      const group = container.querySelector(GROUP_SELECTOR);
-      const content = group?.querySelector(GROUP_CONTENT_SELECTOR);
+      const row = container.querySelector(ROW_SELECTOR);
 
-      expect(group).toBeTruthy();
-      expect(group?.querySelector(GROUP_CARD_SELECTOR)).toBeNull();
-      expect(group?.querySelector(WARNING_SELECTOR)).toBeNull();
-      expect(content?.childElementCount).toBe(0);
-      expect(content?.classList.contains("hidden")).toBe(true);
+      expect(row).toBeTruthy();
+      expect(row?.querySelector(WARNING_SELECTOR)).toBeNull();
+      expect(container.querySelector('[data-settings-group="true"]')).toBeNull();
+      for (const button of within(row as HTMLElement).getAllByRole("button")) {
+        expect(row?.contains(button)).toBe(true);
+      }
     },
   );
 
@@ -146,34 +144,32 @@ describe("DesktopNotificationsSection permission frame", () => {
       message: /could not check notification permission/i,
     },
   ])(
-    "shows the corresponding warning for denied, unsupported, and error states ($permission, native $native)",
+    "shows the corresponding warning inside the row for denied, unsupported, and error states ($permission, native $native)",
     ({ permission, native, message }) => {
       mocks.nativeAvailable.mockReturnValue(native);
       const { container } = renderSection(permission);
-      const card = container.querySelector(GROUP_CARD_SELECTOR);
+      const row = container.querySelector(ROW_SELECTOR);
       const warning = within(container).getByText(message);
 
-      expect(card).toBeTruthy();
-      expect(card?.contains(warning)).toBe(true);
-      expect(container.querySelector(GROUP_CONTENT_SELECTOR)).toBeNull();
+      expect(row?.contains(warning)).toBe(true);
     },
   );
 
-  it("updates the warning frame when permission changes", () => {
+  it("updates the warning inside the same row when permission changes", () => {
     mocks.nativeAvailable.mockReturnValue(true);
     const { container, rerender } = renderSection("granted");
-    const group = () => container.querySelector(GROUP_SELECTOR);
+    const row = () => container.querySelector(ROW_SELECTOR);
     const warning = () => container.querySelector(WARNING_SELECTOR);
 
-    expect(group()?.querySelector(GROUP_CARD_SELECTOR)).toBeNull();
+    expect(row()).toBeTruthy();
+    expect(warning()).toBeNull();
 
     rerender(section("denied"));
-    expect(group()?.querySelector(GROUP_CARD_SELECTOR)).toBeTruthy();
     expect(warning()?.textContent).toMatch(/OS app notification settings/i);
+    expect(row()?.contains(warning())).toBe(true);
 
     rerender(section("granted"));
-    expect(group()?.querySelector(GROUP_CARD_SELECTOR)).toBeNull();
     expect(warning()).toBeNull();
-    expect(group()?.querySelector(GROUP_CONTENT_SELECTOR)?.classList.contains("hidden")).toBe(true);
+    expect(row()).toBeTruthy();
   });
 });

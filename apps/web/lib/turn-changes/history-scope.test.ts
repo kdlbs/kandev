@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TurnChangeSetSummary } from "@/lib/types/turn-changes";
 import { resolveTurnChangeScope } from "./history-scope";
+import { isTurnChangeCardVisible } from "./projection";
 
 function summary(
   id: string,
@@ -55,5 +56,31 @@ describe("resolveTurnChangeScope", () => {
       resolveTurnChangeScope("turn-2", [summary("turn-2", 2, { reason: "capture_disabled" })]),
     ).toBeNull();
     expect(resolveTurnChangeScope("latest", [])).toBeNull();
+  });
+
+  it("retains explicit and latest unavailable history selections", () => {
+    const unavailableId = "turn-3-unavailable";
+    const unavailable = summary(unavailableId, 3, {
+      availability: "unavailable",
+      counts_available: false,
+      reason: "history_conflict",
+    });
+    const summaries = [
+      summary("turn-1", 1),
+      summary("turn-2-zero", 2, { file_count: 0 }),
+      unavailable,
+    ];
+
+    expect(isTurnChangeCardVisible(unavailable)).toBe(false);
+    expect(resolveTurnChangeScope("latest", summaries)).toEqual({
+      kind: "historical",
+      changeSetId: unavailableId,
+      scopeValue: "latest",
+    });
+    expect(resolveTurnChangeScope(unavailableId, summaries)).toEqual({
+      kind: "historical",
+      changeSetId: unavailableId,
+      scopeValue: unavailableId,
+    });
   });
 });

@@ -7,6 +7,8 @@ import { TaskItemWithContextMenu } from "./task-switcher-context-menu";
 import { dispatchSidebarRowClick } from "./task-switcher-click";
 import type { TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
 import type { SidebarTaskRowPresentation } from "@/lib/state/slices/ui/sidebar-task-row-presentation";
+import { useUnreadDotLinger } from "./use-unread-dot-linger";
+import { shouldShowUnreadDot } from "./task-unread-dot-visibility";
 
 export type SubtaskToggleInfo = {
   subtaskCount: number;
@@ -30,6 +32,12 @@ export type TaskRowProps = {
   /** False when the list is grouped by repository and the header already names it. */
   showRepository?: boolean;
   taskRowPresentation?: SidebarTaskRowPresentation;
+  /** The unread task dot setting; unread dots show only while it is on. */
+  unreadMessagesEnabled: boolean;
+  /** How long the open task keeps its unread dot after it is selected; 0 hides it at once. */
+  unreadDotHideDelayMs: number;
+  /** The open task's displayed session, which never keeps that task's dot. */
+  displayedSessionId: string | null;
   onSelectTask: (taskId: string) => void;
   onEditTask?: (task: TaskSwitcherItem) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
@@ -113,6 +121,9 @@ type TaskRowItemProps = Pick<
   | "showActivityTime"
   | "showRepository"
   | "taskRowPresentation"
+  | "unreadMessagesEnabled"
+  | "unreadDotHideDelayMs"
+  | "displayedSessionId"
   | "onSelectTask"
   | "selectedTaskIds"
   | "onToggleSelectTask"
@@ -121,6 +132,28 @@ type TaskRowItemProps = Pick<
   | "isPinned"
   | "stepsByWorkflowId"
 > & { isArchived: boolean; archiveConfirmation?: ReactNode };
+
+/** Applies the dot setting, open-task rule, and post-selection linger. */
+function useTaskRowUnreadDot(
+  unreadSessionIds: string[] | undefined,
+  isSelected: boolean,
+  enabled: boolean,
+  hideDelayMs: number,
+  displayedSessionId: string | null,
+): boolean {
+  const lingering = useUnreadDotLinger(
+    isSelected,
+    enabled && (unreadSessionIds?.length ?? 0) > 0,
+    hideDelayMs,
+  );
+  return shouldShowUnreadDot({
+    enabled,
+    unreadSessionIds,
+    isSelected,
+    lingering,
+    displayedSessionId,
+  });
+}
 
 function TaskRowItem({
   task,
@@ -131,6 +164,9 @@ function TaskRowItem({
   showActivityTime,
   showRepository,
   taskRowPresentation,
+  unreadMessagesEnabled,
+  unreadDotHideDelayMs,
+  displayedSessionId,
   onSelectTask,
   selectedTaskIds,
   onToggleSelectTask,
@@ -142,6 +178,13 @@ function TaskRowItem({
   archiveConfirmation,
 }: TaskRowItemProps) {
   const taskSteps = task.workflowId ? stepsByWorkflowId?.[task.workflowId] : undefined;
+  const hasUnreadMessages = useTaskRowUnreadDot(
+    task.unreadSessionIds,
+    isSelected,
+    unreadMessagesEnabled,
+    unreadDotHideDelayMs,
+    displayedSessionId,
+  );
   const stepId = task.workflowStepId;
   const isDeleting = deletingTaskId === task.id;
 
@@ -196,6 +239,7 @@ function TaskRowItem({
       launchQueue={task.launchQueue}
       issueInfo={task.issueInfo}
       agentErrorMessage={task.agentErrorMessage}
+      hasUnreadMessages={hasUnreadMessages}
       isSubTask={isSubTask}
       isOnLastWorkflowStep={!!stepId && taskSteps?.at(-1)?.id === stepId}
       depth={depth}
@@ -213,12 +257,15 @@ function TaskRowItem({
 export const TaskRow = memo(function TaskRow({
   activeTaskId,
   selectedTaskId,
+  displayedSessionId,
   ...props
 }: TaskRowProps) {
+  const isSelected = props.task.id === activeTaskId || props.task.id === selectedTaskId;
   return (
     <SelectedTaskRow
       {...props}
-      isSelected={props.task.id === activeTaskId || props.task.id === selectedTaskId}
+      isSelected={isSelected}
+      displayedSessionId={isSelected ? displayedSessionId : null}
     />
   );
 });

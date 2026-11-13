@@ -28,6 +28,8 @@ acceptance_criteria:
   - AC-UI-INTEGRATED-CONTROL-004.2
   - AC-UI-INTEGRATED-CONTROL-004.3
   - AC-UI-INTEGRATED-CONTROL-004.4
+  - AC-UI-INTEGRATED-CONTROL-004.5
+  - AC-UI-INTEGRATED-CONTROL-004.6
 system_design:
   - ../../specs/office/system-design/workspace-overview.md
   - ../../specs/ui/system-design/integrated-control-navigation.md
@@ -50,6 +52,7 @@ The dashboard stays behind the existing `features.integratedControl` flag
 1. [Task 01: Office workspace aggregate API](task-01-office-workspace-aggregate-api.md)
 2. [Task 02: Integrated control aggregate dashboard](task-02-control-aggregate-dashboard.md)
 3. [Task 03: Recorded waiting reasons](task-03-recorded-waiting-reasons.md)
+4. [Task 04: Per-task recorded wait reasons](task-04-per-task-wait-reasons.md)
 
 Task 02 depends on Task 01's response shape. Task 03 depends on Task 02's
 Native comparison read and adds no new read.

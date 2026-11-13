@@ -1,6 +1,7 @@
 package service
 
 import (
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -69,10 +70,17 @@ type TaskRepositoryInput struct {
 	// active plugin's provider ownership and clone origin.
 	TrustedProviderDescriptor bool                           `json:"-"`
 	BranchPolicySnapshot      *models.RepositoryBranchPolicy `json:"-"`
+
+	// BaseBranchSelectionSource records who selected BaseBranch. It is
+	// internal-only so public transports cannot request permissive
+	// repository-default recovery. An empty value is resolved from whether
+	// BaseBranch was supplied; unknown values stay strict.
+	BaseBranchSelectionSource models.BaseBranchSelectionSource `json:"-"`
 }
 
 // CreateTaskRequest contains the data for creating a new task
 type CreateTaskRequest struct {
+	ExecutionGrade string                `json:"execution_grade,omitempty"`
 	WorkspaceID    string                `json:"workspace_id"`
 	WorkflowID     string                `json:"workflow_id"`
 	WorkflowStepID string                `json:"workflow_step_id"`
@@ -116,9 +124,10 @@ type CreateTaskRequest struct {
 	// Attachments is the creation-time submission. File-backed descriptors are
 	// claimed atomically with the task row; the bounded inline compatibility
 	// path stays on DeferredLaunch.
-	Attachments    []v1.MessageAttachment `json:"attachments,omitempty"`
-	DeferredLaunch map[string]interface{} `json:"deferred_launch,omitempty"`
-	MCPServerIDs   []string               `json:"mcp_server_ids,omitempty"`
+	Attachments           []v1.MessageAttachment                `json:"attachments,omitempty"`
+	DeferredLaunch        map[string]interface{}                `json:"deferred_launch,omitempty"`
+	MCPServerIDs          []string                              `json:"mcp_server_ids,omitempty"`
+	BuiltinMCPPreferences *mcpconfig.BuiltinCreationPreferences `json:"builtin_mcp_preferences,omitempty"`
 	// RecordAgentProfileRecentUse opts this deferred launch into task_create
 	// profile-history attribution. Only the authenticated HTTP/WS selector
 	// surfaces set it; programmatic callers such as MCP must leave it false.
@@ -195,6 +204,7 @@ type CreateTaskRequest struct {
 
 // UpdateTaskRequest contains the data for updating a task
 type UpdateTaskRequest struct {
+	ExecutionGrade *string                `json:"execution_grade,omitempty"`
 	Title          *string                `json:"title,omitempty"`
 	Description    *string                `json:"description,omitempty"`
 	Priority       *string                `json:"priority,omitempty"`
@@ -253,15 +263,19 @@ type CreateWorkspaceRequest struct {
 
 // UpdateWorkspaceRequest contains the data for updating a workspace
 type UpdateWorkspaceRequest struct {
-	ExpectedUpdatedAt           *time.Time `json:"-"`
-	Name                        *string    `json:"name,omitempty"`
-	Description                 *string    `json:"description,omitempty"`
-	DefaultExecutorID           *string    `json:"default_executor_id,omitempty"`
-	DefaultEnvironmentID        *string    `json:"default_environment_id,omitempty"`
-	DefaultAgentProfileID       *string    `json:"default_agent_profile_id,omitempty"`
-	DefaultConfigAgentProfileID *string    `json:"default_config_agent_profile_id,omitempty"`
-	ACPIdleSuspensionEnabled    *bool      `json:"acp_idle_suspension_enabled,omitempty"`
-	ACPIdleTimeoutMinutes       *int       `json:"acp_idle_timeout_minutes,omitempty"`
+	ExpectedUpdatedAt             *time.Time `json:"-"`
+	Name                          *string    `json:"name,omitempty"`
+	Description                   *string    `json:"description,omitempty"`
+	DefaultExecutorID             *string    `json:"default_executor_id,omitempty"`
+	DefaultEnvironmentID          *string    `json:"default_environment_id,omitempty"`
+	DefaultAgentProfileID         *string    `json:"default_agent_profile_id,omitempty"`
+	DefaultConfigAgentProfileID   *string    `json:"default_config_agent_profile_id,omitempty"`
+	ACPIdleSuspensionEnabled      *bool      `json:"acp_idle_suspension_enabled,omitempty"`
+	ACPIdleTimeoutMinutes         *int       `json:"acp_idle_timeout_minutes,omitempty"`
+	DynamicMidTurnFailoverEnabled *bool      `json:"dynamic_midturn_failover_enabled,omitempty"`
+	// DynamicFailedRouteAutoRetryMax must be 1-3 when present.
+	DynamicFailedRouteAutoRetryEnabled *bool `json:"dynamic_failed_route_auto_retry_enabled,omitempty"`
+	DynamicFailedRouteAutoRetryMax     *int  `json:"dynamic_failed_route_auto_retry_max,omitempty"`
 	// Visibility is "private" or "org". Unknown values normalize to private:
 	// unrecognized input must never widen access.
 	Visibility *string `json:"visibility,omitempty"`

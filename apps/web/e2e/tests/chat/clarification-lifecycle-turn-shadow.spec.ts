@@ -10,6 +10,12 @@ import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { watchWs } from "../../helpers/causal-waits";
+import {
+  expectCleanSupersededProjection,
+  expectNoActiveSupersededQuestion,
+  seedSupersededClarification,
+  type SupersededClarificationStatus,
+} from "../../helpers/clarification";
 import { SessionPage } from "../../pages/session-page";
 
 const QUESTION_PROMPT = "Which environment should I deploy to?";
@@ -149,4 +155,59 @@ test.describe("Duplicate lifecycle turn does not hide a pending clarification", 
     await production.click();
     await expect(production).toHaveAttribute("data-selected", "true");
   });
+});
+
+test.describe("Superseded detached clarification stays history", () => {
+  for (const status of ["answered", "rejected"] as SupersededClarificationStatus[]) {
+    test(`does not reactivate the older detached question after the current question is ${status}`, async ({
+      testPage,
+      apiClient,
+      seedData,
+    }) => {
+      test.setTimeout(60_000);
+      const fixture = await seedSupersededClarification(
+        apiClient,
+        seedData,
+        `Superseded detached clarification - ${status}`,
+        status,
+      );
+      await expectCleanSupersededProjection(apiClient, fixture.sessionId);
+
+      let responseAttempts = 0;
+      await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+        responseAttempts += 1;
+        await route.abort();
+      });
+
+      const firstWatcher = watchWs(testPage);
+      const firstMessages = firstWatcher.waitForResponse("message.list");
+      await testPage.goto(`/t/${fixture.taskId}`);
+      await firstMessages;
+
+      const firstLoad = await expectNoActiveSupersededQuestion(testPage, fixture);
+      const answerAction = firstLoad.historical.getByTestId("clarification-answer-as-new-message");
+      await expect(answerAction).toBeVisible();
+      await answerAction.click();
+      const lateClose = firstLoad.historical.getByTestId("clarification-late-close");
+      await expect(lateClose).toBeVisible();
+      await expect(firstLoad.session.clarificationBar()).toBeHidden();
+      await lateClose.click();
+      await expect(lateClose).toBeHidden();
+      expect(responseAttempts).toBe(0);
+
+      await expectCleanSupersededProjection(apiClient, fixture.sessionId);
+
+      const reloadWatcher = watchWs(testPage);
+      const reloadMessages = reloadWatcher.waitForResponse("message.list");
+      await testPage.reload();
+      await reloadMessages;
+
+      const reloaded = await expectNoActiveSupersededQuestion(testPage, fixture);
+      await expect(
+        reloaded.historical.getByTestId("clarification-answer-as-new-message"),
+      ).toBeVisible();
+      expect(responseAttempts).toBe(0);
+      await expectCleanSupersededProjection(apiClient, fixture.sessionId);
+    });
+  }
 });

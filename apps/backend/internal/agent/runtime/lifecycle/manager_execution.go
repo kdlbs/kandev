@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/events"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -923,6 +924,13 @@ func (m *Manager) createExecutionWithMode(
 	if err != nil {
 		return nil, err
 	}
+	copilotAgentType := ""
+	if inputs.preparation.request.AgentConfig != nil {
+		copilotAgentType = inputs.preparation.request.AgentConfig.ID()
+	}
+	inputs.preparation.request.CopilotNativeSessionEvents = m.copilotNativeLaunchAllowed(
+		inputs.runtime, copilotAgentType, inputs.preparation.request.DeliveryStreamID,
+	)
 	activityLease, err := m.acquireActivity(operationCtx, activity.KindExecutionStarting)
 	if err != nil {
 		return nil, err
@@ -952,7 +960,6 @@ func (m *Manager) createExecutionWithMode(
 		operationCtx,
 		taskID,
 		info,
-		inputs.executionID,
 		inputs.runtime,
 		runtimeInstance,
 		inputs.preparation,
@@ -1030,7 +1037,7 @@ func (m *Manager) registerAndPublishCreatedExecution(
 		}
 		return nil, err
 	}
-	if err := m.publishCreatedExecution(ctx, runtimeInstance, execution, inputs.executionID, taskID); err != nil {
+	if err := m.publishCreatedExecution(ctx, runtimeInstance, execution, taskID); err != nil {
 		execution.remoteInstanceLifecycleMu.Unlock()
 		m.rollbackRegisteredLaunch(inputs.runtime, runtimeInstance, execution, "runtime secret persistence failed")
 		return nil, err
@@ -1116,8 +1123,12 @@ func (m *Manager) prepareExecutionCreateRequest(
 	for key, value := range info.Metadata {
 		metadata[key] = value
 	}
+	retainedResourceCircuitIdentity, hasRetainedResourceCircuitIdentity := metadata[MetadataKeyResourceCircuitIdentity]
 	captureResourceCircuitIdentity(metadata, executionID, profileInfo)
 	delete(metadata, managedGoCacheMetadataKey)
+	retainedBuiltinBinding, hasRetainedBuiltinBinding := metadata[mcpprofile.BuiltinBindingMetadataKey]
+	// A fresh workspace helper receives its binding at the next process launch.
+	delete(metadata, mcpprofile.BuiltinBindingMetadataKey)
 	m.seedExecutionBaseBranches(ctx, taskID, executionID, metadata)
 	if envPreparation.managedGoCachePath != "" {
 		metadata[managedGoCacheMetadataKey] = envPreparation.managedGoCachePath
@@ -1214,6 +1225,12 @@ func (m *Manager) prepareExecutionCreateRequest(
 		},
 		profileInfo: profileInfo,
 	}
+	if hasRetainedBuiltinBinding {
+		preparation.request.RetainedBuiltinBinding = retainedBuiltinBinding
+	}
+	if hasRetainedResourceCircuitIdentity {
+		preparation.request.RetainedResourceCircuitIdentity = retainedResourceCircuitIdentity
+	}
 	m.wireKubernetesInventoryPersistence(preparation.request, info.ExecutorType)
 	m.wirePluginExecutorInventoryPersistence(preparation.request, info.ExecutorType)
 	return preparation, nil
@@ -1285,13 +1302,13 @@ func (m *Manager) initializeCreatedExecution(
 	ctx context.Context,
 	taskID string,
 	info *WorkspaceInfo,
-	executionID string,
 	rt ExecutorBackend,
 	runtimeInstance *ExecutorInstance,
 	preparation *executionCreatePreparation,
 ) *AgentExecution {
 	execution := runtimeInstance.ToAgentExecution(preparation.request)
 	execution.RuntimeName = rt.Name()
+	m.applyCopilotNativeLaunchCapability(execution, rt, preparation.request.DeliveryStreamID)
 	// Set before executionStore.Add: once the execution is registered, a
 	// concurrent EnsurePassthroughExecution can reach it, and it must never
 	// observe a half-initialised resume intent.
@@ -1301,7 +1318,7 @@ func (m *Manager) initializeCreatedExecution(
 		execution.ACPSessionID = info.ACPSessionID
 	}
 	execution.TurnChangeCheckouts = turnChangeCheckoutsFromWorkspaceRepositories(info.WorkspaceRepositories)
-	_, sessionSpan := tracing.TraceSessionStart(context.Background(), taskID, info.SessionID, executionID)
+	_, sessionSpan := tracing.TraceSessionStart(context.Background(), taskID, info.SessionID, execution.ID)
 	execution.SetSessionSpan(sessionSpan)
 	if client, releaseClient := execution.AcquireAgentCtlClient(); client != nil {
 		client.SetTraceContext(execution.SessionTraceContext())
@@ -1314,7 +1331,6 @@ func (m *Manager) publishCreatedExecution(
 	ctx context.Context,
 	runtimeInstance *ExecutorInstance,
 	execution *AgentExecution,
-	executionID string,
 	taskID string,
 ) error {
 	m.setRuntimeInterest(execution.SessionID, true)
@@ -1336,7 +1352,7 @@ func (m *Manager) publishCreatedExecution(
 	go m.waitForAgentctlReady(execution)
 
 	m.logger.Info("execution created",
-		zap.String("execution_id", executionID),
+		zap.String("execution_id", execution.ID),
 		zap.String("task_id", taskID),
 		zap.String("workspace_path", execution.WorkspacePath),
 		zap.Stringer("runtime", execution.RuntimeName))
@@ -1358,8 +1374,9 @@ func (m *Manager) reconcileWorkspaceWorktrees(ctx context.Context, taskID string
 			TaskID: taskID, SessionID: info.SessionID, RepositoryID: repository.RepositoryID,
 			TaskEnvironmentID: info.TaskEnvironmentID, ReuseRequired: info.TaskEnvironmentID != "",
 			RepositoryPath: repository.RepositoryPath, BaseBranch: repository.BaseBranch,
-			IntegrationRef:     repository.IntegrationRef,
-			FallbackBaseBranch: repository.DefaultBranch, CheckoutBranch: repository.CheckoutBranch,
+			BaseBranchFallbackPolicy: repository.BaseBranchFallbackPolicy,
+			IntegrationRef:           repository.IntegrationRef,
+			FallbackBaseBranch:       repository.DefaultBranch, CheckoutBranch: repository.CheckoutBranch,
 			PRNumber: repository.PRNumber, QualifiedPRBase: repository.QualifiedPRBase,
 			WorktreeID: repository.WorktreeID, TaskDirName: info.TaskDirName, WorkspaceID: info.WorkspaceID,
 			RepoName: repository.RepoName, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
@@ -1516,6 +1533,14 @@ func (m *Manager) rollbackRacedExecution(ctx context.Context, rt ExecutorBackend
 	m.logger.Warn("rolling back duplicate execution after session-conflict race",
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID))
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if !adoptionPreservesPeer(runtimeInstance, execution) {
+		if err := m.cleanupProjectMCPFiles(ctx, execution, client); err != nil {
+			m.logger.Warn("failed to release project MCP files during raced launch rollback",
+				zap.String("execution_id", execution.ID), zap.Error(err))
+		}
+	}
+	releaseClient()
 	if rt != nil && runtimeInstance != nil {
 		if stopErr := m.stopLaunchRuntimeOnRollback(ctx, rt, runtimeInstance, execution); stopErr != nil {
 			m.logger.Warn("failed to stop raced runtime instance during rollback",

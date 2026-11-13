@@ -30,6 +30,7 @@ The decision and rejected alternatives are recorded in
 | AC-PLATFORM-DELIVERY-WRITE-COST-001.2 | Combined receipt and projection |
 | AC-PLATFORM-DELIVERY-WRITE-COST-001.3, AC-PLATFORM-PRUNED-DELIVERY-RECOVERY-001.1 | Durability barrier; Journal release gate |
 | AC-PLATFORM-DELIVERY-WRITE-COST-001.4 | Writer synchronous level |
+| AC-PLATFORM-DELIVERY-WRITE-COST-001.5 | Identity admission inside interactive writes |
 | AC-PLATFORM-DURABLE-AGENT-DELIVERY-005.1 | Combined receipt and projection |
 
 ## Measured baseline
@@ -173,6 +174,30 @@ A structural test in `internal/agent/runtime/lifecycle` fails if production
 code outside the releaser calls `AcknowledgeDelivery`,
 `RetireDeliverySubmission`, or `RetireInterruptedDeliverySubmission` on an
 agentctl client, so a new release path cannot bypass the gate.
+
+## Identity admission inside interactive writes
+
+Session creation calls `ensureAgentDeliveryIdentityAvailable` inside its
+writer transaction. The check rejects a session ID that retained delivery
+records still reference. It runs while every other writer waits, so each branch
+must be an index search keyed by the requested session ID:
+
+- Cleanup jobs, submissions, inbox rows, and cursors use their `session_id`
+  indexes.
+- Effects bound directly to the session use the partial
+  `idx_agent_delivery_effects_owned_retirement` index. The query repeats the
+  index predicate `session_id <> ''`; without it, SQLite cannot use the partial
+  index with a bound parameter.
+- Effects bound only through their stream need no separate branch. Their
+  cursor carries the session ID, so the cursor branch already rejects the
+  identity.
+
+An `OR` across a `LEFT JOIN` is not allowed in this query. It forces a full scan
+of the effects table. On a 14.7 GB production snapshot with 1,015,205 effect
+rows (about 260 MiB), that scan took 0.25 s warm and about 4.8 s cold. Session
+IDs are never empty at this boundary, so the indexed form returns the same
+result. A query-plan regression test asserts that no branch scans a delivery
+table.
 
 ## Observability
 

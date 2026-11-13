@@ -8,9 +8,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -117,6 +119,7 @@ func normalizeMode(mode string) string {
 
 // Server wraps the MCP server with backend client for communication.
 type Server struct {
+	builtinPackages            map[mcpprofile.PackageID]*builtinPackageServer
 	backend                    BackendClient
 	sessionID                  string
 	taskID                     string
@@ -144,6 +147,10 @@ type Server struct {
 	pluginToolsMu              sync.Mutex
 	pluginTools                plugintools.Snapshot
 	pluginToolsReady           bool
+	filteredPluginToolsMu      sync.Mutex
+	filteredPluginTools        plugintools.Snapshot
+	filteredPluginToolsReady   bool
+	pluginToolsEpoch           atomic.Uint64
 }
 
 // ServerOption configures the per-instance MCP transport.
@@ -207,8 +214,10 @@ func NewWithProfile(backend BackendClient, sessionID, taskID string, port int, l
 	)
 	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
 		server.WithEndpointPath("/mcp"),
+		server.WithStateful(s.profile.BuiltinPackages != nil),
 		server.WithHTTPContextFunc(s.mcpHTTPContext),
 	)
+	s.initializeBuiltinTransports(port)
 	return s
 }
 
@@ -316,7 +325,7 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 		s.observeMCPToolsListForRequest(ctx, result.Tools)
 	})
 	hooks.AddBeforeListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest) {
-		s.syncPluginTools(ctx)
+		_ = s.syncPluginTools(ctx)
 	})
 	hooks.AddAfterCallTool(func(ctx context.Context, _ any, _ *mcp.CallToolRequest, _ any) {
 		s.observeMCPRequest(ctx, streams.MCPAttachmentEvidenceToolCallObserved, 0, "")
@@ -328,15 +337,20 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 		s.unregisterMCPConnection(session.SessionID())
 	})
 	s.registerTools()
+	s.initializeBuiltinPackages()
 	s.running = true
 	return s
 }
 
 func (s *Server) presentTransportToolNames(result *mcp.ListToolsResult) {
+	s.presentPackageToolNames(s.mcpServer, result)
+}
+
+func (s *Server) presentPackageToolNames(registry *server.MCPServer, result *mcp.ListToolsResult) {
 	if !s.namespacesMCPToolsByServer || result == nil {
 		return
 	}
-	registeredTools := s.mcpServer.ListTools()
+	registeredTools := registry.ListTools()
 	for index := range result.Tools {
 		name := result.Tools[index].Name
 		if !strings.HasSuffix(name, mcpToolNameSuffix) {
@@ -353,14 +367,18 @@ func (s *Server) presentTransportToolNames(result *mcp.ListToolsResult) {
 }
 
 func (s *Server) restoreCanonicalToolName(request *mcp.CallToolRequest) {
+	s.restorePackageToolName(s.mcpServer, request)
+}
+
+func (s *Server) restorePackageToolName(registry *server.MCPServer, request *mcp.CallToolRequest) {
 	if !s.namespacesMCPToolsByServer || request == nil {
 		return
 	}
-	if s.mcpServer.GetTool(request.Params.Name) != nil {
+	if registry.GetTool(request.Params.Name) != nil {
 		return
 	}
 	canonicalName := request.Params.Name + mcpToolNameSuffix
-	if s.mcpServer.GetTool(canonicalName) != nil {
+	if registry.GetTool(canonicalName) != nil {
 		request.Params.Name = canonicalName
 	}
 }
@@ -402,6 +420,7 @@ func (s *Server) SetAttachmentReporter(reporter func(streams.MCPAttachmentEviden
 // MCP endpoint observations belong. It is called only by the local agentctl
 // API before handing configuration to an agent adapter.
 func (s *Server) SetAttachmentAttempt(attempt streams.MCPAttachmentAttempt) {
+	attempt.BuiltinPackages = s.Profile().BuiltinPackages
 	s.attachmentMu.Lock()
 	defer s.attachmentMu.Unlock()
 	s.attachmentAttempt = attempt
@@ -427,8 +446,8 @@ func (s *Server) observeMCPConnection(connectionID string, kind streams.MCPAttac
 	s.observeMCPConnectionWithTools(connectionID, kind, toolCount, summary, nil)
 }
 
-func (s *Server) observeMCPRequest(ctx context.Context, kind streams.MCPAttachmentEvidenceKind, toolCount int, summary string) {
-	s.observeMCPRequestWithTools(ctx, kind, toolCount, summary, nil)
+func (s *Server) observeMCPRequest(ctx context.Context, kind streams.MCPAttachmentEvidenceKind, toolCount int, summary string, serverNames ...string) {
+	s.observeMCPRequestWithTools(ctx, kind, toolCount, summary, nil, serverNames...)
 }
 
 func (s *Server) observeMCPToolsList(connectionID string, tools []mcp.Tool) {
@@ -439,12 +458,12 @@ func (s *Server) observeMCPToolsList(connectionID string, tools []mcp.Tool) {
 	s.observeMCPConnectionWithTools(connectionID, streams.MCPAttachmentEvidenceToolsListObserved, len(tools), "", summaries)
 }
 
-func (s *Server) observeMCPToolsListForRequest(ctx context.Context, tools []mcp.Tool) {
+func (s *Server) observeMCPToolsListForRequest(ctx context.Context, tools []mcp.Tool, serverNames ...string) {
 	summaries := make([]streams.MCPToolSummary, 0, len(tools))
 	for _, tool := range tools {
 		summaries = append(summaries, summarizeMCPTool(tool))
 	}
-	s.observeMCPRequestWithTools(ctx, streams.MCPAttachmentEvidenceToolsListObserved, len(tools), "", summaries)
+	s.observeMCPRequestWithTools(ctx, streams.MCPAttachmentEvidenceToolsListObserved, len(tools), "", summaries, serverNames...)
 }
 
 func summarizeMCPTool(tool mcp.Tool) streams.MCPToolSummary {
@@ -498,11 +517,12 @@ func (s *Server) observeMCPRequestWithTools(
 	toolCount int,
 	summary string,
 	tools []streams.MCPToolSummary,
+	serverNames ...string,
 ) {
 	if !server.IsModernRequest(ctx) {
 		connectionID := mcpConnectionID(ctx)
 		s.attachmentMu.RLock()
-		attempt, ok := s.attachmentAttempts[connectionID]
+		attempt, ok := s.attachmentAttempts[mcpAttachmentKey(connectionID, serverNames...)]
 		reporter := s.attachmentReporter
 		if !ok && connectionID != "" && kind == streams.MCPAttachmentEvidenceInitializeObserved {
 			// Streamable HTTP registers a legacy POST initialize session after
@@ -515,7 +535,7 @@ func (s *Server) observeMCPRequestWithTools(
 		if !ok || reporter == nil || attempt.AttemptID == "" {
 			return
 		}
-		s.reportMCPConnectionWithTools(reporter, attempt, connectionID, kind, toolCount, summary, tools)
+		s.reportMCPConnectionWithTools(reporter, attempt, connectionID, kind, toolCount, summary, tools, serverNames...)
 		return
 	}
 
@@ -529,33 +549,33 @@ func (s *Server) observeMCPRequestWithTools(
 	if reporter == nil || attempt.AttemptID == "" {
 		return
 	}
-	s.reportMCPConnectionWithTools(reporter, attempt, "", kind, toolCount, summary, tools)
+	s.reportMCPConnectionWithTools(reporter, attempt, "", kind, toolCount, summary, tools, serverNames...)
 }
 
-func (s *Server) registerMCPConnection(connectionID string) {
+func (s *Server) registerMCPConnection(connectionID string, serverNames ...string) {
 	s.attachmentMu.Lock()
 	attempt := s.attachmentAttempt
 	reporter := s.attachmentReporter
 	if connectionID != "" && attempt.AttemptID != "" {
-		s.attachmentAttempts[connectionID] = attempt
+		s.attachmentAttempts[mcpAttachmentKey(connectionID, serverNames...)] = attempt
 	}
 	s.attachmentMu.Unlock()
 	if reporter == nil || attempt.AttemptID == "" {
 		return
 	}
-	s.reportMCPConnection(reporter, attempt, connectionID, streams.MCPAttachmentEvidenceSessionAccepted, 0, "")
+	s.reportMCPConnection(reporter, attempt, connectionID, streams.MCPAttachmentEvidenceSessionAccepted, 0, "", serverNames...)
 }
 
-func (s *Server) unregisterMCPConnection(connectionID string) {
+func (s *Server) unregisterMCPConnection(connectionID string, serverNames ...string) {
 	s.attachmentMu.Lock()
-	attempt, ok := s.attachmentAttempts[connectionID]
+	attempt, ok := s.attachmentAttempts[mcpAttachmentKey(connectionID, serverNames...)]
 	reporter := s.attachmentReporter
-	delete(s.attachmentAttempts, connectionID)
+	delete(s.attachmentAttempts, mcpAttachmentKey(connectionID, serverNames...))
 	s.attachmentMu.Unlock()
 	if !ok || reporter == nil || attempt.AttemptID == "" {
 		return
 	}
-	s.reportMCPConnection(reporter, attempt, connectionID, streams.MCPAttachmentEvidenceConnectionClosed, 0, "")
+	s.reportMCPConnection(reporter, attempt, connectionID, streams.MCPAttachmentEvidenceConnectionClosed, 0, "", serverNames...)
 }
 
 func (s *Server) reportMCPConnection(
@@ -565,8 +585,9 @@ func (s *Server) reportMCPConnection(
 	kind streams.MCPAttachmentEvidenceKind,
 	toolCount int,
 	summary string,
+	serverNames ...string,
 ) {
-	s.reportMCPConnectionWithTools(reporter, attempt, connectionID, kind, toolCount, summary, nil)
+	s.reportMCPConnectionWithTools(reporter, attempt, connectionID, kind, toolCount, summary, nil, serverNames...)
 }
 
 func (s *Server) reportMCPConnectionWithTools(
@@ -577,6 +598,7 @@ func (s *Server) reportMCPConnectionWithTools(
 	toolCount int,
 	summary string,
 	tools []streams.MCPToolSummary,
+	serverNames ...string,
 ) {
 	if kind == streams.MCPAttachmentEvidenceToolsListObserved {
 		// Bound summaries at the publication boundary before the callback can
@@ -585,8 +607,9 @@ func (s *Server) reportMCPConnectionWithTools(
 		tools, _ = streams.NormalizeMCPToolCatalog(tools, toolCount)
 	}
 	reporter(streams.MCPAttachmentEvidence{
+		BuiltinPackage:     builtinEvidencePackage(attempt.BuiltinPackages, mcpEvidenceServerName(serverNames...)),
 		AttemptID:          attempt.AttemptID,
-		ServerName:         "kandev",
+		ServerName:         mcpEvidenceServerName(serverNames...),
 		Kind:               kind,
 		OccurredAt:         time.Now().UTC(),
 		Source:             streams.MCPServerSourceKandev,
@@ -626,9 +649,10 @@ func opaqueMCPConnectionID(connectionID string) string {
 // RegisterRoutes adds MCP routes to the gin router at the root.
 // Used by agentctl which serves the MCP transport at /sse, /message, /mcp.
 func (s *Server) RegisterRoutes(router gin.IRouter) {
+	s.registerBuiltinRoutes(router)
 	router.GET("/sse", gin.WrapH(s.sseServer.SSEHandler()))
 	router.POST("/message", gin.WrapH(s.sseServer.MessageHandler()))
-	router.Any("/mcp", gin.WrapH(s.streamableHTTPHandler()))
+	router.Any("/mcp", s.serveCurrentStreamableHTTP)
 
 	s.logger.Info("registered MCP routes", zap.String("sse", "/sse"), zap.String("http", "/mcp"))
 }
@@ -656,6 +680,7 @@ func (s *Server) Close(ctx context.Context) error {
 		return nil
 	}
 	s.running = false
+	s.closeBuiltinPackages(ctx)
 
 	if s.sseServer != nil {
 		if err := s.sseServer.Shutdown(ctx); err != nil {
@@ -791,6 +816,9 @@ func (s *Server) SetMode(mode string) {
 	}
 
 	normalizedMode := normalizeMode(mode)
+	if s.profile.BuiltinPackages != nil && surfaceForMode(normalizedMode) != s.profile.Surface {
+		return
+	}
 	if s.mode == normalizedMode {
 		return
 	}
@@ -812,7 +840,9 @@ func (s *Server) SetMode(mode string) {
 		capabilities = slices.Clone(s.legacyModeCapabilities)
 	}
 	s.mode = normalizedMode
+	manifest := s.profile.BuiltinPackages.Clone()
 	s.profile = mcpprofile.New(surfaceForMode(normalizedMode), capabilities, s.mcpProviders)
+	s.profile.BuiltinPackages = manifest
 	if normalizedMode == ModeTaskTitlePending {
 		s.profile = s.profile.WithCapability(mcpprofile.CapabilityTaskTitle)
 	} else {
@@ -879,16 +909,27 @@ func (s *Server) SetProfile(profileContext mcpprofile.Context) {
 	defer s.mu.Unlock()
 
 	profileContext = mcpprofile.Normalize(profileContext)
+	if s.profile.BuiltinPackages != nil && profileContext.Surface != s.profile.Surface {
+		return
+	}
+	profileContext.BuiltinPackages = s.profile.BuiltinPackages.Clone()
 	if s.profile.Surface == mcpprofile.SurfaceManagedConversation {
 		return
 	}
 	if sameProfile(s.profile, profileContext) {
 		return
 	}
-	if profileContext.Surface == mcpprofile.SurfaceAutomation {
-		if s.profile.Surface != mcpprofile.SurfaceAutomation {
+	if profileContext.Surface == mcpprofile.SurfaceAutomation ||
+		profileContext.Surface == mcpprofile.SurfaceCoordinator ||
+		profileContext.Surface == mcpprofile.SurfaceExternal {
+		if s.profile.Surface != profileContext.Surface {
 			s.legacyModeCapabilities = slices.Clone(s.profile.Capabilities)
 		}
+		s.filteredPluginToolsMu.Lock()
+		s.filteredPluginTools = plugintools.Snapshot{}
+		s.filteredPluginToolsReady = false
+		s.filteredPluginToolsMu.Unlock()
+		s.pluginToolsEpoch.Add(1)
 	} else {
 		s.legacyModeCapabilities = slices.Clone(profileContext.Capabilities)
 	}
@@ -910,6 +951,9 @@ func sameCoordinatorToolPolicy(left, right *mcpprofile.CoordinatorToolPolicy) bo
 }
 
 func sameProfile(left, right mcpprofile.Context) bool {
+	if !reflect.DeepEqual(left.BuiltinPackages, right.BuiltinPackages) {
+		return false
+	}
 	if left.Surface != right.Surface || len(left.Capabilities) != len(right.Capabilities) || len(left.Providers) != len(right.Providers) {
 		return false
 	}
@@ -946,7 +990,7 @@ func (s *Server) rebuildTools() {
 	// until the complete replacement is ready. mcp-go emits one notification
 	// for SetTools, while registering directly would expose every intermediate
 	// AddTool state to initialized clients.
-	s.mcpServer.SetTools(s.assembleTools()...)
+	s.publishBuiltinTools(s.assembleTools())
 }
 
 // SetPluginTools validates and atomically replaces sideloaded tools. SetTools
@@ -954,8 +998,31 @@ func (s *Server) rebuildTools() {
 func (s *Server) SetPluginTools(snapshot plugintools.Snapshot) error {
 	s.pluginToolsUpdateMu.Lock()
 	defer s.pluginToolsUpdateMu.Unlock()
+	return s.setPluginToolsLocked(snapshot)
+}
+
+func (s *Server) setPluginToolsLocked(snapshot plugintools.Snapshot) error {
 	if err := validatePluginToolSnapshot(snapshot); err != nil {
 		return err
+	}
+	s.mu.RLock()
+	filteredSurface := sessionFilteredPluginSurface(s.profile.Surface)
+	s.mu.RUnlock()
+	if filteredSurface {
+		if s.profile.Surface == mcpprofile.SurfaceCoordinator {
+			// A coordinator execution can filter the full catalog by its bound
+			// references locally, so install the coordinator projection instead
+			// of dropping live tools until the next list.
+			s.pluginToolsEpoch.Add(1)
+			return s.setFilteredPluginToolsLocked(plugintools.ProjectCoordinatorOnly(snapshot))
+		}
+		// A global push is only an invalidation notice for automation. Its
+		// candidate tools depend on a backend-owned exact approval, so they are
+		// never installed here; the next list fetches the filtered catalog.
+		// Bumping the epoch also discards any filtered fetch already in flight.
+		s.pluginToolsEpoch.Add(1)
+		s.clearFilteredPluginToolsLocked()
+		return nil
 	}
 	normalized := plugintools.Normalize(snapshot)
 	s.pluginToolsMu.Lock()
@@ -983,6 +1050,93 @@ func equivalentPluginToolCatalog(left, right plugintools.Snapshot) bool {
 	return plugintools.Equal(left, right)
 }
 
+func (s *Server) clearFilteredPluginToolsLocked() {
+	s.filteredPluginToolsMu.Lock()
+	wasReady := s.filteredPluginToolsReady
+	s.filteredPluginTools = plugintools.Snapshot{}
+	s.filteredPluginToolsReady = false
+	s.filteredPluginToolsMu.Unlock()
+	if !wasReady {
+		return
+	}
+	s.mu.Lock()
+	s.rebuildTools()
+	s.mu.Unlock()
+}
+
+// SetFilteredPluginTools replaces the backend-filtered snapshot for a
+// session-filtered context (automation, coordinator, or external). Selection
+// and binding changes can alter membership at the same global catalog
+// revision, so this setter compares definitions rather than revision ordering.
+func (s *Server) SetFilteredPluginTools(snapshot plugintools.Snapshot) error {
+	s.pluginToolsUpdateMu.Lock()
+	defer s.pluginToolsUpdateMu.Unlock()
+	// A direct replacement invalidates any older fetch that has not applied.
+	s.pluginToolsEpoch.Add(1)
+	return s.setFilteredPluginToolsLocked(snapshot)
+}
+
+// SetAutomationPluginTools is the automation-specific spelling retained for
+// callers that predate the shared filtered snapshot.
+func (s *Server) SetAutomationPluginTools(snapshot plugintools.Snapshot) error {
+	return s.SetFilteredPluginTools(snapshot)
+}
+
+func (s *Server) setFilteredPluginToolsLocked(snapshot plugintools.Snapshot) error {
+	if err := validatePluginToolSnapshot(snapshot); err != nil {
+		return err
+	}
+	normalized := plugintools.Normalize(snapshot)
+	s.filteredPluginToolsMu.Lock()
+	if s.filteredPluginToolsReady && equivalentPluginToolCatalog(s.filteredPluginTools, normalized) {
+		s.filteredPluginTools = normalized
+		s.filteredPluginToolsMu.Unlock()
+		return nil
+	}
+	s.filteredPluginTools = normalized
+	s.filteredPluginToolsReady = true
+	s.filteredPluginToolsMu.Unlock()
+	s.mu.Lock()
+	s.rebuildTools()
+	s.mu.Unlock()
+	return nil
+}
+
+// applyFilteredPluginTools applies a filtered fetch only while it is still the
+// newest request. A later list fetch or invalidation bumps the epoch and makes
+// an older delayed response a no-op.
+func (s *Server) applyFilteredPluginTools(epoch uint64, snapshot plugintools.Snapshot) error {
+	s.pluginToolsUpdateMu.Lock()
+	defer s.pluginToolsUpdateMu.Unlock()
+	if epoch != s.pluginToolsEpoch.Load() {
+		return nil
+	}
+	return s.setFilteredPluginToolsLocked(snapshot)
+}
+
+// discardFilteredPluginTools clears discovery after a failed fetch unless a
+// newer request has already superseded this one.
+func (s *Server) discardFilteredPluginTools(epoch uint64) {
+	s.pluginToolsUpdateMu.Lock()
+	defer s.pluginToolsUpdateMu.Unlock()
+	if epoch != s.pluginToolsEpoch.Load() {
+		return
+	}
+	s.pluginToolsEpoch.Add(1)
+	s.clearFilteredPluginToolsLocked()
+}
+
+// sessionFilteredPluginSurface reports whether a surface receives its catalog
+// from the backend-filtered path rather than the shared live snapshot.
+func sessionFilteredPluginSurface(surface mcpprofile.Surface) bool {
+	switch surface {
+	case mcpprofile.SurfaceAutomation, mcpprofile.SurfaceCoordinator, mcpprofile.SurfaceExternal:
+		return true
+	default:
+		return false
+	}
+}
+
 func validatePluginToolSnapshot(snapshot plugintools.Snapshot) error {
 	if snapshot.Generation == "" {
 		return fmt.Errorf("plugin tool snapshot generation is required")
@@ -1003,6 +1157,17 @@ func validatePluginToolSnapshot(snapshot plugintools.Snapshot) error {
 		if err := validatePluginToolSurfaces(name, definition.Surfaces); err != nil {
 			return err
 		}
+		if definition.InvocationScope != "" && definition.InvocationScope != plugintools.InvocationScopeTask &&
+			definition.InvocationScope != plugintools.InvocationScopeInstance &&
+			definition.InvocationScope != plugintools.InvocationScopeWorkspace {
+			return fmt.Errorf("%s has unsupported invocation scope %q", name, definition.InvocationScope)
+		}
+		if declaresCoordinatorSurface(definition.Surfaces) && !definition.IsInstanceRead() {
+			return fmt.Errorf("%s requires instance scope and a true read-only hint", name)
+		}
+		if declaresExternalSurface(definition.Surfaces) && !definition.IsInstanceRead() && !definition.IsWorkspaceRead() {
+			return fmt.Errorf("%s requires instance or workspace scope and a true read-only hint", name)
+		}
 		if err := validatePluginToolSchema(definition.ExposedName+"/input", definition.InputSchema); err != nil {
 			return fmt.Errorf("%s input schema: %w", name, err)
 		}
@@ -1021,7 +1186,9 @@ func validatePluginToolSurfaces(name string, surfaces []string) error {
 	}
 	seen := make(map[string]struct{}, len(surfaces))
 	for _, surface := range surfaces {
-		if surface != plugintools.SurfaceKanban && surface != plugintools.SurfaceOffice && surface != plugintools.SurfaceManaged {
+		if surface != plugintools.SurfaceKanban && surface != plugintools.SurfaceOffice &&
+			surface != plugintools.SurfaceManaged && surface != plugintools.SurfaceAutomation &&
+			surface != plugintools.SurfaceCoordinator && surface != plugintools.SurfaceExternal {
 			return fmt.Errorf("%s has unsupported surface %q", name, surface)
 		}
 		if _, ok := seen[surface]; ok {
@@ -1043,38 +1210,103 @@ func validatePluginToolSchema(name string, raw json.RawMessage) error {
 	return nil
 }
 
-func (s *Server) syncPluginTools(ctx context.Context) {
+func declaresCoordinatorSurface(surfaces []string) bool {
+	for _, surface := range surfaces {
+		if surface == plugintools.SurfaceCoordinator {
+			return true
+		}
+	}
+	return false
+}
+
+func declaresExternalSurface(surfaces []string) bool {
+	for _, surface := range surfaces {
+		if surface == plugintools.SurfaceExternal {
+			return true
+		}
+	}
+	return false
+}
+
+// RefreshPluginTools pulls the backend-filtered catalog for this server's
+// surface. Backend lifecycle wiring calls it so a live filtered client receives
+// an atomic replacement and tools/list_changed without waiting for a new list.
+func (s *Server) RefreshPluginTools(ctx context.Context) error {
+	return s.syncPluginTools(ctx)
+}
+
+func (s *Server) syncPluginTools(ctx context.Context) error {
 	if s.backend == nil {
-		return
+		return nil
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	s.mu.RLock()
 	surface := string(s.profile.Surface)
 	s.mu.RUnlock()
+	filteredSurface := sessionFilteredPluginSurface(mcpprofile.Surface(surface))
+	epoch := uint64(0)
+	if filteredSurface {
+		epoch = s.pluginToolsEpoch.Add(1)
+	}
 	var snapshot plugintools.Snapshot
 	if err := s.backend.RequestPayload(requestCtx, ws.ActionMCPListPluginTools, map[string]string{"surface": surface}, &snapshot); err != nil {
-		return
+		if filteredSurface {
+			s.discardFilteredPluginTools(epoch)
+		}
+		return err
+	}
+	if filteredSurface {
+		if err := s.applyFilteredPluginTools(epoch, snapshot); err != nil {
+			s.logger.Warn("ignoring invalid filtered plugin tool catalog",
+				zap.String("surface", surface), zap.Error(err))
+			s.discardFilteredPluginTools(epoch)
+			return err
+		}
+		return nil
 	}
 	if err := s.SetPluginTools(snapshot); err != nil {
 		s.logger.Warn("ignoring invalid plugin tool catalog", zap.Error(err))
+		return err
 	}
+	return nil
 }
 
 func (s *Server) registerPluginTools() {
-	s.pluginToolsMu.Lock()
-	ready := s.pluginToolsReady
-	snapshot := plugintools.Normalize(s.pluginTools)
-	s.pluginToolsMu.Unlock()
+	surface := s.profile.Surface
+	var snapshot plugintools.Snapshot
+	ready := false
+	if sessionFilteredPluginSurface(surface) {
+		s.filteredPluginToolsMu.Lock()
+		ready = s.filteredPluginToolsReady
+		snapshot = plugintools.Normalize(s.filteredPluginTools)
+		s.filteredPluginToolsMu.Unlock()
+	} else {
+		s.pluginToolsMu.Lock()
+		ready = s.pluginToolsReady
+		snapshot = plugintools.Normalize(s.pluginTools)
+		s.pluginToolsMu.Unlock()
+	}
 	if !ready {
 		return
 	}
 	for _, definition := range snapshot.Tools {
-		if !pluginToolSupportsSurface(definition, string(s.profile.Surface)) {
+		if !pluginToolSupportsSurface(definition, string(surface)) {
 			continue
 		}
-		if s.profile.Surface == mcpprofile.SurfaceManagedConversation &&
+		if surface == mcpprofile.SurfaceManagedConversation &&
 			(s.profile.ManagedToolPolicy == nil || !s.profile.ManagedToolPolicy.Allows(definition.PluginID, definition.LocalName)) {
+			continue
+		}
+		if surface == mcpprofile.SurfaceCoordinator &&
+			(s.profile.CoordinatorToolPolicy == nil ||
+				!s.profile.CoordinatorToolPolicy.AllowsPlugin(definition.PluginID, definition.LocalName, definition.InstallationID, definition.PolicyVersion)) {
+			continue
+		}
+		if surface == mcpprofile.SurfaceCoordinator && !definition.IsInstanceRead() {
+			continue
+		}
+		if surface == mcpprofile.SurfaceExternal && !definition.IsInstanceRead() && !definition.IsWorkspaceRead() {
 			continue
 		}
 		tool := mcp.NewToolWithRawSchema(definition.ExposedName, definition.Description, definition.InputSchema)
@@ -1155,85 +1387,6 @@ func (s *Server) assembleTools() []server.ServerTool {
 	return tools
 }
 
-type profileToolGroup struct {
-	name     string
-	enabled  func(mcpprofile.Context) bool
-	register func(*Server)
-}
-
-func surfaceEnabled(surface mcpprofile.Surface) func(mcpprofile.Context) bool {
-	return func(ctx mcpprofile.Context) bool { return ctx.Surface == surface }
-}
-
-func capabilityEnabled(capability mcpprofile.Capability) func(mcpprofile.Context) bool {
-	return func(ctx mcpprofile.Context) bool { return ctx.HasCapability(capability) }
-}
-
-func andProfilePredicates(predicates ...func(mcpprofile.Context) bool) func(mcpprofile.Context) bool {
-	return func(ctx mcpprofile.Context) bool {
-		for _, predicate := range predicates {
-			if !predicate(ctx) {
-				return false
-			}
-		}
-		return true
-	}
-}
-
-func (s *Server) profileToolGroups() []profileToolGroup {
-	config := surfaceEnabled(mcpprofile.SurfaceConfiguration)
-	external := surfaceEnabled(mcpprofile.SurfaceExternal)
-	office := surfaceEnabled(mcpprofile.SurfaceOfficeTask)
-	kanban := surfaceEnabled(mcpprofile.SurfaceKanbanTask)
-	automation := surfaceEnabled(mcpprofile.SurfaceAutomation)
-	coordinatorSurface := surfaceEnabled(mcpprofile.SurfaceCoordinator)
-	if s.profile.Surface == mcpprofile.SurfaceManagedConversation {
-		return nil
-	}
-	return []profileToolGroup{
-		{name: "configuration-automations", enabled: config, register: func(s *Server) { s.registerConfigAutomationTools() }},
-		{name: "automation", enabled: automation, register: func(s *Server) { s.registerAutomationTools() }},
-		{name: "coordinator", enabled: coordinatorSurface, register: func(s *Server) { s.registerCoordinatorTools() }},
-		{name: "configuration-workflows", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigWorkflowTools() }},
-		{name: "configuration-agents", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigAgentTools() }},
-		{name: "configuration-mcp", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigMcpTools() }},
-		{name: "configuration-prompts", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigPromptTools() }},
-		{name: "configuration-executors", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigExecutorTools() }},
-		{name: "configuration-tasks", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigTaskTools() }},
-		{name: "task-transfer", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) || office(ctx) }, register: func(s *Server) { s.registerTaskTransferTool() }},
-		{name: "configuration-settings", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigSettingsTools() }},
-		{name: "external-create-task", enabled: external, register: func(s *Server) { s.registerCreateTaskTool() }},
-		{name: "external-update-task", enabled: external, register: func(s *Server) { s.registerUpdateTaskTool() }},
-		{name: "external-questions", enabled: external, register: func(s *Server) { s.registerQuestionAnsweringTools() }},
-		{name: "external-agent-permissions", enabled: external, register: func(s *Server) { s.registerAgentPermissionTools() }},
-		// Dependency edges are manageable wherever a task can be created.
-		{name: "task-dependencies", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || external(ctx) }, register: func(s *Server) { s.registerTaskDependencyTools() }},
-		{name: "kanban-task", enabled: kanban, register: func(s *Server) { s.registerKanbanTools() }},
-		{name: "task-pr-links", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool {
-			return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) ||
-				mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab)
-		}), register: func(s *Server) { s.registerTaskPRLinkTools() }},
-		{name: "github-pr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) }), register: func(s *Server) { s.registerPRAutomationTools() }},
-		{name: "user-question", enabled: capabilityEnabled(mcpprofile.CapabilityUserQuestion), register: func(s *Server) { s.registerInteractionTools() }},
-		{name: "parent-question", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityParentQuestion)), register: func(s *Server) { s.registerParentQuestionTool() }},
-		{name: "plan", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerPlanTools() }},
-		{name: "rich-output", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerRichOutputTool() }},
-		{name: "walkthrough", enabled: kanban, register: func(s *Server) { s.registerWalkthroughTools() }},
-		{name: "review", enabled: kanban, register: func(s *Server) { s.registerReviewTools() }},
-		{name: "related-tasks", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerRelatedTasksTool() }},
-		{name: "office-documents", enabled: office, register: func(s *Server) { s.registerTaskDocumentTools() }},
-		{name: "task-branch-sources", enabled: kanban, register: func(s *Server) {
-			s.registerAddBranchToTaskTool()
-			s.registerAddWorkspaceSourcesTool()
-			s.registerUpdateRepositoryBaseBranchTool()
-		}},
-		{name: "step-completion", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerStepCompleteTool() }},
-		{name: "task-title", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityTaskTitle)), register: func(s *Server) { s.registerSetTaskTitleTool() }},
-		{name: "diagnostics", enabled: kanban, register: func(s *Server) { s.registerDiagnosticBundleTool() }},
-		{name: "canvas-authoring", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityCanvas)), register: func(s *Server) { s.registerCanvasTools() }},
-	}
-}
-
 func (s *Server) registerTaskTransferTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("transfer_task_kandev",
@@ -1280,18 +1433,10 @@ func (s *Server) registerAgentPermissionTools() {
 	)
 }
 
-// registerTools registers MCP tools from the declarative profile registry.
-// Each group owns one additive capability or base surface. The registry is
-// backend-owned: an agent receives the result, not an arbitrary tool list.
+// registerTools assembles the selected packages before publishing their views.
 func (s *Server) registerTools() {
-	for _, group := range s.profileToolGroups() {
-		if group.enabled(s.profile) {
-			group.register(s)
-		}
-	}
-	if s.profile.Surface != mcpprofile.SurfaceAutomation && s.profile.Surface != mcpprofile.SurfaceCoordinator {
-		s.registerPluginTools()
-	}
+	s.registerContextTools()
+	s.registerPluginTools()
 	s.logger.Info("registered MCP tools",
 		zap.String("mode", s.mode),
 		zap.Int("count", len(s.mcpServer.ListTools())),
@@ -1299,42 +1444,17 @@ func (s *Server) registerTools() {
 	s.rebuildToolArgumentValidators()
 }
 
-// registerAutomationTools composes the fixed coordinator catalog from the
-// existing read/task lifecycle registrations, then removes every mutation or
-// task-local capability that is not part of the automation authority. Keeping
-// this allowlist next to the profile registry makes accidental additions
-// visible in the catalog test instead of silently expanding automation power.
+// registerAutomationTools retains the fixed automation authority.
 func (s *Server) registerAutomationTools() {
-	s.registerKanbanTools()
+	s.registerCoreDiscoveryTools()
+	s.registerCoreTaskTools()
+	s.registerTaskExecutionTools()
+	s.registerListRepositoriesTool()
 	s.registerTaskDependencyTools()
 	s.registerRelatedTasksTool()
 	s.registerQuestionAnsweringTools()
 	s.registerAgentPermissionTools()
-	s.registerConfigWorkflowTools()
-	s.registerConfigExecutorTools()
-	s.mcpServer.DeleteTools(
-		"delete_task_kandev",
-		"update_task_state_kandev",
-		"create_workflow_kandev",
-		"update_workflow_kandev",
-		"delete_workflow_kandev",
-		"import_workflow_kandev",
-		"export_workflow_kandev",
-		"create_workflow_step_kandev",
-		"update_workflow_step_kandev",
-		"delete_workflow_step_kandev",
-		"reorder_workflow_steps_kandev",
-		"update_agent_kandev",
-		"create_agent_profile_kandev",
-		"delete_agent_profile_kandev",
-		"list_agent_profiles_kandev",
-		"update_agent_profile_kandev",
-		"get_mcp_config_kandev",
-		"update_mcp_config_kandev",
-		"create_executor_profile_kandev",
-		"update_executor_profile_kandev",
-		"delete_executor_profile_kandev",
-	)
+	s.mcpServer.DeleteTools("delete_task_kandev")
 }
 
 func (s *Server) registerDiagnosticBundleTool() {
@@ -1351,93 +1471,9 @@ func (s *Server) registerDiagnosticBundleTool() {
 	)
 }
 
-func (s *Server) registerKanbanTools() {
-	// Use NewToolWithRawSchema for parameter-less tools to ensure the schema
-	// includes "properties": {}. The default ToolInputSchema type in mcp-go uses
-	// omitempty which drops empty properties maps, causing OpenAI API validation
-	// errors ("object schema missing properties").
-	s.mcpServer.AddTool(
-		mcp.NewToolWithRawSchema("list_workspaces_kandev",
-			"List all workspaces. Use this first to get workspace IDs.",
-			json.RawMessage(`{"type":"object","properties":{}}`),
-		),
-		s.wrapHandler("list_workspaces_kandev", s.listWorkspacesHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("list_workflows_kandev",
-			mcp.WithDescription("List all workflows in a workspace."),
-			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
-		),
-		s.wrapHandler("list_workflows_kandev", s.listWorkflowsHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("list_workflow_steps_kandev",
-			mcp.WithDescription("List all workflow steps in a workflow."),
-			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
-		),
-		s.wrapHandler("list_workflow_steps_kandev", s.listWorkflowStepsHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("list_tasks_kandev",
-			mcp.WithDescription("List all tasks in a workflow. Each task includes its associated GitHub pull requests (number, url, title, state) under the \"prs\" field when any exist — use the PR state (open/closed/merged) to find tasks whose work has landed."),
-			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
-		),
-		s.wrapHandler("list_tasks_kandev", s.listTasksHandler()),
-	)
+func (s *Server) registerTaskExecutionTools() {
 	s.registerCreateTaskTool()
-	s.mcpServer.AddTool(
-		mcp.NewToolWithRawSchema("list_agents_kandev",
-			"List all configured agents with their profiles. Use this to find available agent_profile_ids for create_task_kandev and spawn_session_kandev.",
-			json.RawMessage(`{"type":"object","properties":{}}`),
-		),
-		s.wrapHandler("list_agents_kandev", s.listAgentsHandler()),
-	)
-	s.registerListExecutorsTool()
-	s.mcpServer.AddTool(
-		mcp.NewTool("list_executor_profiles_kandev",
-			mcp.WithDescription("List profiles for the specified executor. Call list_executors_kandev first to discover visible executors and their profiles, including custom executor IDs. A returned profile ID can be selected with executor_profile_id in create_task_kandev."),
-			mcp.WithString("executor_id", mcp.Required(), mcp.Description("The executor ID returned by list_executors_kandev")),
-		),
-		s.wrapHandler("list_executor_profiles_kandev", s.listExecutorProfilesHandler()),
-	)
 	s.registerUpdateTaskTool()
-	s.mcpServer.AddTool(
-		mcp.NewTool("move_task_kandev",
-			mcp.WithDescription(`Move a task to a different workflow step. A request naming the task's current workflow and step, without entry options, returns "applied" with the stored task because the destination already holds; no retry is needed. Only an actual step change is deferred to turn-end while the source session is RUNNING or STARTING. Idle-session and admin step changes apply immediately. Returns a move-result envelope: "disposition" is "applied" for a completed move or current-step no-op, or "deferred" when a step change was recorded for turn-end; "task" is the stored or moved task. An optioned step change also returns "move_id" and the accepted "entry_options" so you can correlate the one-shot override with the eventual entry. Moving to a manual step that does not start an agent on entry (for example Waiting, Blocked, or Done) must not carry a prompt or entry_options; such a call is rejected with a validation error. Record the instruction in the task description or plan instead.`),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
-			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("Target workflow ID")),
-			mcp.WithString("workflow_step_id", mcp.Required(), mcp.Description("Target workflow step ID")),
-			mcp.WithNumber("position", mcp.Description("Requested position (0-based); the server determines arrival order, and a current-step request preserves the stored position.")),
-			mcp.WithString("prompt", mcp.Description("Optional hand-off message for the receiving agent at a new step. Only actual step changes are deferred during an active turn; non-empty prompts are invalid for a current-step request. Omit it when the target step does not start an agent on entry.")),
-			moveTaskEntryOptionsToolOption(),
-		),
-		s.wrapHandler("move_task_kandev", s.moveTaskHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("delete_task_kandev",
-			mcp.WithDescription("Delete a task permanently. Use to clean up orphaned, duplicate, or test tasks you no longer need. This cannot be undone — prefer archive_task_kandev when the task may still be wanted. Restoring an archived task is a user action done from the UI, not via MCP."),
-			mcp.WithReadOnlyHintAnnotation(false),
-			mcp.WithDestructiveHintAnnotation(true),
-			mcp.WithIdempotentHintAnnotation(false),
-			mcp.WithOpenWorldHintAnnotation(false),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete")),
-			mcp.WithString("workspace_cleanup", mcp.Enum("delete", "retain"), mcp.Description("Use retain to delete the task while keeping workspace files, including when workspace inspection fails. Defaults to delete.")),
-			mcp.WithBoolean("discard_worktree_changes", mcp.Description("Allow removal of local workspace changes.")),
-			mcp.WithBoolean("allow_unverified_workspace_changes", mcp.Description("Acknowledge that workspace changes cannot be checked. Requires discard_worktree_changes=true and workspace_cleanup=delete. Task removal succeeds independently of pending physical cleanup.")),
-		),
-		s.wrapHandler("delete_task_kandev", s.deleteTaskHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("archive_task_kandev",
-			mcp.WithDescription("Archive a task. The task is hidden from active board views but kept in the database. Use to tidy up finished or abandoned tasks. Archiving an already-archived task is a no-op that succeeds with already_archived: true. Unarchiving is a user action done from the UI, not via MCP."),
-			mcp.WithReadOnlyHintAnnotation(false),
-			mcp.WithDestructiveHintAnnotation(false),
-			mcp.WithIdempotentHintAnnotation(true),
-			mcp.WithOpenWorldHintAnnotation(false),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to archive")),
-		),
-		s.wrapHandler("archive_task_kandev", s.archiveTaskHandler()),
-	)
 	messageDescription := `Send a prompt to an existing Kandev task session, not a native subagent. Use delivery_mode="queued" (default) for information that can wait, or delivery_mode="interrupt" for urgent replacement work on a running direct child; non-parent interrupts fail and if cancellation is unsafe, the prompt remains queued. Halt-only work uses stop_task_kandev. The primary session is used by default; if it is terminal, Kandev tries the newest session that can accept messages, or names spawn_session_kandev when none can. Pass reply_to_question_id for an autopilot child question.`
 	messageDeliveryModes := []string{"queued", "interrupt"}
 	if s.profile.HasCapability(mcpprofile.CapabilityWorkspaceCollaborationReport) {
@@ -1473,20 +1509,6 @@ func (s *Server) registerKanbanTools() {
 		s.wrapHandler("stop_task_kandev", s.stopTaskHandler()),
 	)
 	s.registerSpawnSessionTool()
-	s.mcpServer.AddTool(
-		mcp.NewTool("get_task_conversation_kandev",
-			mcp.WithDescription("Get conversation history for a task. If session_id is omitted, the primary session is used."),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
-			mcp.WithString("session_id", mcp.Description("Optional session ID (must belong to task_id)")),
-			mcp.WithNumber("limit", mcp.Description("Optional page size (defaults to backend setting, max backend-capped)")),
-			mcp.WithString("before", mcp.Description("Optional cursor message ID to fetch messages before this ID")),
-			mcp.WithString("after", mcp.Description("Optional cursor message ID to fetch messages after this ID")),
-			mcp.WithString("sort", mcp.Description("Optional sort order: asc or desc")),
-			mcp.WithArray("message_types", mcp.Description("Optional message type filters (e.g. message, tool_call, error)"), mcp.Items(map[string]any{"type": "string"})),
-		),
-		s.wrapHandler("get_task_conversation_kandev", s.getTaskConversationHandler()),
-	)
-	s.registerListTaskSessionsTool()
 }
 
 func (s *Server) registerUpdateTaskTool() {
@@ -1985,6 +2007,24 @@ const askUserQuestionOutputSchema = `{
       "selected_option": {"type": "string", "description": "ID of the selected option."},
       "selected_label": {"type": "string", "description": "Exact label of the selected option. Omitted when the ID cannot identify one offered option."},
       "custom_text": {"type": "string"},
+      "attachments": {
+        "type": "array",
+        "description": "Files the user attached to this answer. Read each path with your file tools; the path is readable in this execution.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "attachment_id": {"type": "string"},
+            "type": {"type": "string"},
+            "name": {"type": "string"},
+            "mime_type": {"type": "string"},
+            "size_bytes": {"type": "integer"},
+            "delivery_mode": {"type": "string"},
+            "path": {"type": "string", "description": "Readable path inside the current execution."}
+          },
+          "required": ["attachment_id", "name", "path"],
+          "additionalProperties": false
+        }
+      },
       "answered": {"type": "boolean"},
       "rejected": {"type": "boolean"}
     },
@@ -1995,7 +2035,7 @@ const askUserQuestionOutputSchema = `{
 func (s *Server) registerInteractionTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("ask_user_question_kandev",
-			mcp.WithDescription(`Ask the user 1-4 related questions; wait for all answers. Each needs a prompt and 2-6 labeled, described options. Use a stable id when response keys matter. Set allow_custom_text=false to require an offered option. Ask only when input is needed. Keep context to 1-3 short sentences or brief bullets, about 100 words or fewer. Put full reports, logs, and repeated conversation outside this call, before it; keep questions and options self-contained. Returns answers by question ID with selected_option ID and selected_label for matches. Rejections include rejected=true and may include reject_reason.`),
+			mcp.WithDescription(`Ask the user 1-4 related questions; wait for all answers. Each needs a prompt and 2-6 labeled, described options. Use a stable id when response keys matter. Set allow_custom_text=false to require an offered option. Ask only when input is needed. Keep context to 1-3 short sentences or brief bullets, about 100 words or fewer. Put full reports, logs, and repeated conversation outside this call, before it; keep questions and options self-contained. Returns answers by question ID with selected_option and selected_label for matches. Rejections include rejected=true and may include reject_reason.`),
 			mcp.WithDestructiveHintAnnotation(false),
 			mcp.WithRawOutputSchema(json.RawMessage(askUserQuestionOutputSchema)),
 			mcp.WithArray(questionsArg, mcp.Required(),

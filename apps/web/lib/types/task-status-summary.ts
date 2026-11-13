@@ -11,7 +11,9 @@ export type AgentErrorCause = {
   attempted_model?: string;
   requested_mode?: string;
   effective_mode?: string;
+  runtime_version?: string;
   prompt_not_sent?: boolean;
+  exit_code?: number;
   storage?: {
     reason?: string;
     location?: string;
@@ -60,6 +62,10 @@ export type TaskStatusSummaryLaunchQueue = {
   reason: "session_capacity" | "ownership_unavailable" | "replay_error";
   retrying: boolean;
   capacity?: {
+    policy?: "automatic" | "all";
+    grade_in_use?: Record<string, number>;
+    grade_limits?: Record<string, number>;
+    needs_configuration?: boolean;
     in_use: number;
     limit: number;
     observed_at: string;
@@ -93,6 +99,8 @@ export type TaskStatusSummary = {
   /** Automatic session launch waiting for admission, independent of the selected session. */
   launch_queue?: TaskStatusSummaryLaunchQueue | null;
   completion_gate?: TaskStatusSummaryCompletionGate | null;
+  /** Sorted IDs of sessions with an unread transcript-visible message. */
+  unread_session_ids?: string[];
   active_error?: TaskStatusSummaryActiveError | null;
   /** Current task-owned failure, independent of the selected session. */
   task_error?: TaskStatusSummaryActiveError | null;

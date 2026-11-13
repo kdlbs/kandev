@@ -126,6 +126,13 @@ type MessageCreator interface {
 	CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error
 	CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error
 	CreateUserMessageIdempotent(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error
+	// SetUserMessageDeliveryStatus sets the delivery status on an exact
+	// session-owned user message. It reports whether the message exists.
+	SetUserMessageDeliveryStatus(ctx context.Context, messageID, agentSessionID, status string) (bool, error)
+	// CreateCompletedUserMessageIdempotent records a user message in an
+	// already-completed lifecycle-only turn. It never starts or adopts an
+	// active conversation turn.
+	CreateCompletedUserMessageIdempotent(ctx context.Context, messageID, taskID, content, agentSessionID string, metadata map[string]interface{}) error
 	// CreateToolCallMessage creates a message for a tool call.
 	// normalized contains the typed tool payload data.
 	// parentToolCallID is the parent Task tool call ID for subagent nesting (empty for top-level).
@@ -183,12 +190,15 @@ type StreamingMessageRetractionService interface {
 // stale provider event from creating a new retry while terminal cleanup is in
 // flight, then allows the session entry to be reclaimed.
 type transientRetryNoticeState struct {
-	mu           sync.Mutex
-	retired      atomic.Bool
-	owned        atomic.Bool
-	retiredUntil atomic.Int64
-	refs         int
-	fenceTimer   *time.Timer
+	mu sync.Mutex
+	// retirementGeneration is protected by mu and distinguishes a fence
+	// already present when an attempt began from a later cancellation.
+	retirementGeneration uint64
+	retired              atomic.Bool
+	owned                atomic.Bool
+	retiredUntil         atomic.Int64
+	refs                 int
+	fenceTimer           *time.Timer
 }
 
 // SessionAttachmentCleaner removes file-backed prompt attachments after a
@@ -748,6 +758,14 @@ type passthroughDispatchToken struct {
 }
 
 // Service is the main orchestrator service
+// dynamicRecoveryTimer is the single per-session dynamic recovery timer and
+// the route generation it was armed for. A timer armed for a stale generation
+// never replaces a newer one.
+type dynamicRecoveryTimer struct {
+	timer      *time.Timer
+	generation int64
+}
+
 type Service struct {
 	autonomousExecutorContext func(context.Context, string, string) (context.Context, error)
 	config                    ServiceConfig
@@ -951,6 +969,10 @@ type Service struct {
 	routeActionLocksMu sync.Mutex
 	routeActionLocks   map[string]*routeActionOperationLock
 
+	// midTurnFailovers tracks the opt-in automatic Try next handoffs per
+	// session so each failed generation hands off at most once.
+	midTurnFailovers midTurnFailoverState
+
 	// profileExecutionResolver is the shared logical-to-concrete profile
 	// boundary used by task and workflow launch paths.
 	profileExecutionResolver *agentruntime.ProfileExecutionResolver
@@ -966,7 +988,11 @@ type Service struct {
 	dynamicRecoveryMu     sync.Mutex
 	dynamicRecoveryCtx    context.Context
 	dynamicRecoveryCancel context.CancelFunc
-	dynamicRecoveryTimers map[string]*time.Timer
+	dynamicRecoveryTimers map[string]*dynamicRecoveryTimer
+	// failedRouteRetryDeferrals records the generation whose automatic retry
+	// deferral was already logged at Info, so a turn that keeps the retry
+	// waiting does not repeat that line every minute.
+	failedRouteRetryDeferrals map[string]int64
 
 	// titleBranchRuntime performs the lifecycle-owned Git branch rename after
 	// an agent resolves a prompt-first task title. It is optional for tests and
@@ -975,6 +1001,10 @@ type Service struct {
 
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
+
+	// officeLaunchProfilePreview returns the execution profile Office would
+	// launch an agent with, without recording any routing decision.
+	officeLaunchProfilePreview OfficeLaunchProfilePreviewFunc
 
 	// stepHistoryRecorder persists the ADR 0015 audit row for orchestrator
 	// step transitions: auto-advance (StepTransitionTriggerAutoComplete) and
@@ -1270,6 +1300,10 @@ type Service struct {
 	// session launches. Its initial effective capacity is resolved by the
 	// composition root and can be changed by the install Settings service.
 	sessionCeiling *sessionCeilingController
+	// messageCapacityWaits tracks process-local queue heads blocked only by
+	// the session ceiling. It starts empty after restart by design.
+	messageCapacityWaits     *messageCapacityWaitRegistry
+	messageCapacityWaitsOnce sync.Once
 
 	// ceilingSweeper is the single background goroutine that expires stale
 	// reservations (AC-7) and retries deferred launches (AC-15, AC-17a).
@@ -1677,6 +1711,9 @@ type RouteActionRequest struct {
 	SessionID          string
 	Action             RouteAction
 	ExpectedGeneration int64
+	// Automatic marks an unattended action the orchestrator submits itself.
+	// Client requests never set it.
+	Automatic bool
 }
 
 type RouteActionResult struct {
@@ -1725,6 +1762,7 @@ func (s *Service) SetRouteActionHandler(handler func(context.Context, RouteActio
 // task and workflow launches.
 func (s *Service) SetProfileExecutionResolver(resolver *agentruntime.ProfileExecutionResolver) {
 	s.profileExecutionResolver = resolver
+	s.wireAdmissionGrade(resolver)
 }
 
 func (s *Service) ApplyRouteAction(ctx context.Context, request RouteActionRequest) (*RouteActionResult, error) {
@@ -1882,7 +1920,7 @@ func NewService(
 		taskLaunchRecoveryRepo:       taskLaunchRecoveryRepo,
 		clarificationWatchdogTimeout: 15 * time.Second,
 		gitSnapshotCache:             newGitSnapshotCache(),
-		dynamicRecoveryTimers:        make(map[string]*time.Timer),
+		dynamicRecoveryTimers:        make(map[string]*dynamicRecoveryTimer),
 		reservedPromptCallbacks:      newReservedPromptCallbackOwner(),
 		sendNowCtx:                   sendNowCtx,
 		sendNowCancel:                sendNowCancel,
@@ -1894,6 +1932,7 @@ func NewService(
 		idleReaper:                   newIdleSessionReaper(),
 		ceilingSweeper:               newCeilingSweeper(),
 		sessionCeiling:               newSessionCeilingForRepo(repo, cfg.SessionCapacity, svcLogger.Zap()),
+		messageCapacityWaits:         newMessageCapacityWaitRegistry(),
 		backgroundProbeConfig:        LoadBackgroundProbeConfig(svcLogger),
 		parkedStates:                 make(map[string]*parkedSessionState),
 		taskParkedStates:             make(map[string]*taskParkedState),
@@ -1904,6 +1943,7 @@ func NewService(
 		backgroundWorkSettleCancel:   backgroundWorkSettleCancel,
 		backgroundWorkSettleWorkers:  &sync.WaitGroup{},
 	}
+	s.wireQueuedTaskCapacityPriority()
 	if registrar, ok := repo.(interface {
 		SetTaskQueuePurgePreparer(func(context.Context, string))
 	}); ok {
@@ -1995,8 +2035,12 @@ func NewService(
 	})
 	exec.SetOnLaunchFailed(s.handleLaunchFailed)
 	exec.SetOnExecutionCleanupClaim(s.claimForcedExecutionCleanup)
+	exec.SetOnStaleExecutionCleanup(func(ctx context.Context, sessionID string) {
+		s.settleBackgroundWorkLocked(ctx, sessionID, "")
+	})
 	exec.SetOnCancelledResumeExecutionCleanup(s.cleanupCancelledResumeExecution)
 	exec.SetOnExecutionStopOwnerRegistration(s.RegisterExecutionStopOwner)
+	exec.SetOnExecutionReplacementStopOwnerRegistration(s.RegisterExecutionReplacementStopOwner)
 	exec.SetOnTaskReviewStateReconcile(func(ctx context.Context, taskID, completedSessionID string) {
 		s.writeTaskReviewState(ctx, taskID, completedSessionID)
 	})
@@ -2522,6 +2566,7 @@ func (s *Service) publishTaskMoved(ctx context.Context, task *models.Task, fromW
 		"wip_admitted":              task.WIPAdmitted,
 		"queued_for_step_id":        task.QueuedForStepID,
 		"queue_promotion":           queuePromotion,
+		"step_transition_id":        task.WorkflowStepTransitionID,
 	}
 	if task.QueuedAt != nil {
 		data["queued_at"] = task.QueuedAt.Format(time.RFC3339)
@@ -4433,6 +4478,9 @@ func (s *Service) QueueUserPrompt(
 	for key, value := range metadata {
 		queueMetadata[key] = value
 	}
+	if err := retainBuiltinIntent(ctx, taskID, sessionID, queueMetadata); err != nil {
+		return err
+	}
 	if userMessageRecorded {
 		queueMetadata[metaKeyUserMessageRecorded] = true
 	}
@@ -4506,16 +4554,13 @@ func (s *Service) NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID 
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err == nil && session != nil && session.State == models.TaskSessionStateCreated {
-		go func(profileID string) {
-			_, launchErr := s.startCreatedSessionWithComposedPrompt(
-				context.WithoutCancel(ctx), taskID, sessionID, profileID,
-				"", "", "", true, false, false, false, nil, nil, false,
-			)
-			if launchErr != nil && !errors.Is(launchErr, ErrAgentPromptInProgress) {
-				s.logger.Warn("failed to start session for durable queued prompt",
-					zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(launchErr))
-			}
-		}(session.AgentProfileID)
+		// Starting a CREATED session consumes a new slot. Register the accepted
+		// head for bounded startup instead of observing capacity and racing
+		// another start; the sweep acquires the actual ticket. The exported
+		// registration keeps a fallback wait when identity resolution is
+		// transiently unavailable.
+		s.RegisterMessageCapacityWait(ctx, taskID, sessionID, "")
+		s.signalCeilingSweep()
 		return
 	}
 	s.tryFastPathDrainAfterEnqueue(ctx, taskID, sessionID)

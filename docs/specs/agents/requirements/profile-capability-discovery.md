@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-09-29
-updated: 2026-10-05
+updated: 2026-11-07
 owners:
   - kandev
 ---
@@ -74,7 +74,7 @@ This capability extends the launch context of discovery.
 ## Out of scope
 
 - Updating the Codex CLI bundled inside an ACP bridge or changing runtime updater labels.
-- Selecting a runtime binary automatically or performing arbitrary package installation during profile refresh. The narrow isolated recovery of an already selected managed Codex runtime is owned by [missing bundled dependency recovery](managed-npm-runtime-recovery.md#req-agents-managed-runtime-recovery-005-missing-bundled-dependency-recovery); its draft extension does not authorize general updater behavior.
+- Selecting a runtime binary automatically or performing arbitrary package installation during profile refresh. [Managed runtime recovery](managed-npm-runtime-recovery.md) owns verified missing Codex dependencies (005). [Incomplete cache recovery](managed-npm-cache-recovery.md) owns missing execution metadata (006). These exceptions do not authorize general updater behavior.
 - Remote executor probes, workspace environment overlays, repository setup scripts, and executor authentication parity.
 - Changing live session model selection, exact-model policy, provider gateway authentication, or dynamic-profile routing.
 - Changing agent-wide or workflow-only discovery when no concrete profile context is available.
@@ -86,3 +86,4 @@ Host discovery remains an editing aid. Executor startup retains its existing mod
 - [Profile capability discovery](../../../plans/profile-capability-discovery/plan.md)
 - [First-run agent setup and compact profile refresh](../../../plans/first-run-agent-setup/plan.md)
 - [Generic launch wrapper implementation plan](../../../plans/generic-launch-wrappers/plan.md)
+- [First-draft profile discovery repair](../../../plans/first-draft-profile-discovery/plan.md)

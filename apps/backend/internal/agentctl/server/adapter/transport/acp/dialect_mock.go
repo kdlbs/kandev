@@ -12,7 +12,7 @@ func newMockACPDialect() acpDialect {
 		responseAttemptReset:        mockResponseAttemptResetMeta,
 		continuationSupport:         streams.ContinuationNativeSavedHistoryV2,
 		continuationSupportForError: mockContinuationSupportForError,
-		capacityContinuationSupport: streams.CapacityContinuationMockLiveSessionV1,
+		capacityContinuationSupport: streams.CapacityContinuationMockLiveSessionV2,
 		continuationError:           mockContinuationError}
 }
 

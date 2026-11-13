@@ -56,6 +56,14 @@ export async function selectRecoveryWorkflow(dialog: Locator, workflowId: string
 }
 
 /** Waits for the dialog's data-driven selectors before the default readiness gate. */
+/** Waits for the standard create dialog's data-backed controls, then the UI. */
+export async function expectStandardCreateReady(dialog: Locator) {
+  await expect(dialog.getByTestId("agent-profile-selector")).toBeVisible();
+  await expect(dialog.getByTestId("executor-profile-selector")).toBeVisible();
+  await expect(dialog.getByTestId("repo-chip-trigger").first()).toContainText("E2E Repo");
+  await expect(dialog.getByTestId("submit-start-agent")).toBeEnabled();
+}
+
 export async function expectCreateReady(dialog: Locator) {
   await expect(dialog.getByTestId("workflow-selector-trigger")).toBeVisible();
   await expect(dialog.getByTestId("agent-profile-selector")).toBeVisible();

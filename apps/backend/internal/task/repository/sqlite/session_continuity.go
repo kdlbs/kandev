@@ -35,6 +35,20 @@ const sessionContinuitySchema = `
 		CREATE INDEX IF NOT EXISTS idx_harness_generations_current
 			ON harness_session_generations(session_id, incarnation_id, generation DESC);
 
+		CREATE TABLE IF NOT EXISTS harness_native_session_rebinds (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			incarnation_id TEXT NOT NULL,
+			generation BIGINT NOT NULL,
+			previous_native_session_id TEXT NOT NULL,
+			native_session_id TEXT NOT NULL,
+			execution_id TEXT NOT NULL,
+			rebound_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+		);
+		CREATE INDEX IF NOT EXISTS idx_harness_native_rebinds_session
+			ON harness_native_session_rebinds(session_id, incarnation_id, generation);
+
 		CREATE TABLE IF NOT EXISTS session_restore_attempts (
 			id TEXT PRIMARY KEY,
 			session_id TEXT NOT NULL,
@@ -601,6 +615,9 @@ func (r *Repository) ResolveSessionRecoveryBlock(ctx context.Context, id, action
 	}
 	if err != nil {
 		return false, err
+	}
+	if consumerReference == models.InferenceClosureConsumer {
+		return false, models.ErrInferenceClosureBlocked
 	}
 	if consumerReference == "agent_delivery" {
 		if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {

@@ -94,6 +94,7 @@ export async function preparePublication(io, context) {
       writeError,
     );
   }
+  await io.finalizeCandidate(candidate, source);
   return { status: "prepared", candidate, source };
 }
 
@@ -135,6 +136,7 @@ export async function publishPublication(io, context) {
   });
   verifyCandidate(candidate, context);
   verifyRegistry(registry, candidate, source);
+  await io.verifyFinalizedCandidate(candidate, source);
   let uploaded = false;
   if (!registry.version) {
     if (!registry.packageExists && !context.firstPublishOIDCReady) {

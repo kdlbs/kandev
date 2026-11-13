@@ -5,6 +5,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 )
 
 const claudePermissionOtherActionType = "other"
@@ -59,7 +60,7 @@ func normalizeClaudePermissionToolName(
 	}
 	candidate := strings.TrimSpace(title)
 	server, _, ok := types.ParseQualifiedMCPToolName(candidate)
-	if !ok || server != kandevMCPServerName {
+	if !ok || mcpprofile.BuiltinPackageForRuntimeName(server) == "" {
 		return nil
 	}
 	return &candidate

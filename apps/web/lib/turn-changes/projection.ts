@@ -30,12 +30,12 @@ export type TurnChangeSummaryProjection =
 export function isTurnChangeCardVisible(summary: TurnChangeSetSummary): boolean {
   const projection = projectTurnChangeSummary(summary);
   if (!projection.visible) return false;
-  if (isUnavailableHistoryComparison(summary)) return true;
+  if (summary.availability === "unavailable" || summary.availability === "failed") return false;
   return summary.availability === "pending" || summary.file_count > 0;
 }
 
-// An unavailable history comparison is the only zero-entry exception: the
-// existing unavailable status explains why no turn totals exist.
+// Historical diagnostics and explicit history selection still need the
+// unavailable comparison even though its transcript card stays hidden.
 export function isUnavailableHistoryComparison(summary: TurnChangeSetSummary): boolean {
   if (summary.availability !== "unavailable" && summary.availability !== "failed") return false;
   if (summary.counts_available !== false) return false;

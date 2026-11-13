@@ -68,6 +68,19 @@ Existing token fields remain compatible projections of the current committed gen
 Historical native IDs remain available for diagnostics and recovery.
 SQL writes compare the expected incarnation and generation before replacement.
 
+### In-place context reset
+
+A workflow context reset replaces the native conversation inside a live execution without
+restarting the process or rotating the delivery stream. It keeps the current generation and
+rebinds that generation's native ID. The same transaction stores the new resume token,
+and both writes must succeed together. The rebind compares the generation's previous native ID,
+the owning execution, and the absence of a newer generation. It is refused while an
+incomplete restore attempt exists. An append-only history row keeps the previous native ID,
+the new native ID, the execution, and the time. If the rebind is refused, the reset fails and
+the previous token and generation stay authoritative. Explicit context continuation and Start
+fresh still create a new generation.
+Delivery: [Context reset native rebind](../../../plans/context-reset-native-rebind/plan.md).
+
 Outcomes are `native_resumed`, `reattached`, `context_continued`, and `blocked`.
 Context delivery status remains separate from the restore outcome.
 A created conversation is not proof that its first prompt ran.
@@ -146,9 +159,14 @@ The snapshot contains the current task objective, saved plan reference, workspac
 It includes recent user messages, assistant messages, and concise tool outcomes.
 It excludes debug protocol frames, credential material, sibling conversations, and private child-session history.
 It does not read arbitrary workspace files or private harness databases.
+The explicit continuation prompt labels that material as historical context and
+asks the agent not to retry an earlier action solely because its result is
+missing or uncertain. This guidance does not replace delivery authorization,
+queue fencing, or an operator's current explicit instructions.
 
 The serialized snapshot has a 64 KiB UTF-8 limit.
 The builder reserves 16 KiB for task, workspace, and reduced plan context.
+The historical-context guidance counts within that reservation.
 Included plan text uses `planinjection.Reduce` with `planinjection.HandoverBudget` (12,000 bytes).
 That plan text counts within the 16 KiB reservation and the 64 KiB total, not in addition to either.
 The remaining snapshot budget holds recent conversation.
@@ -281,6 +299,27 @@ The [Office status-only recovery](../../office/system-design/agent-recovery.md) 
 The [stall detector](../../office/requirements/stall-visibility.md) remains detection-only.
 It does not create, clear, or act on recovery blocks.
 The [budget admission contract](../../office/requirements/budget-admission-integrity.md) remains authoritative for every resumed unattended run.
+
+## Explicit inference-scope closure
+
+The existing awaited Stop and Resume actions accept one inference closure operation ID.
+Closure keeps the session ID and native conversation, allocating only a successor execution ID.
+Session metadata stores the checkpoint; an independent recovery block fences launch, queued dispatch, and inference admission across generations.
+Generic recovery cannot release this block.
+
+The current standalone owner must already have known historical continuity.
+Actual process teardown closes admission, drains operations, and proves managed children terminal while retaining the journal.
+Missing historical scope, another live execution, or unknown claims leave admission blocked.
+The captured binding population is persisted before existing provider settlement, exact binding removal, and retained-attempt acknowledgement.
+Unrelated bindings remain untouched; a missing binding alone never proves settlement.
+
+Journal transitions compare the complete observed owner state.
+SQL transitions compare the complete checkpoint and canonical execution identity.
+The committed receipt permits only its allocated successor with the same session and incarnation.
+A consumed but unadmitted successor can replay only with its exact persisted harness generation.
+The SQL fence is released only after observing the successor's consumed receipt and rechecking related claims.
+Interrupted cross-store transitions replay their durable stage without resending the uncertain prompt.
+An unknown original submission and its history remain unchanged.
 
 ## Failure and recovery
 

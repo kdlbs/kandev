@@ -9,6 +9,7 @@ func CreateProfileRequestFromDTO(request dto.ProfileCreateRequest) CreateProfile
 	return CreateProfileRequest{
 		AgentID:                 request.AgentID,
 		Name:                    request.Name,
+		ExecutionGrade:          request.ExecutionGrade,
 		Model:                   request.Model,
 		FallbackModel:           request.FallbackModel,
 		AutoFallback:            request.AutoFallback,
@@ -20,6 +21,7 @@ func CreateProfileRequestFromDTO(request dto.ProfileCreateRequest) CreateProfile
 		CLIPassthrough:          request.CLIPassthrough,
 		CLIFlags:                request.CLIFlags,
 		EnvVars:                 request.EnvVars,
+		DevinSandboxInherited:   request.DevinSandboxInherited,
 		CommandPrefix:           request.CommandPrefix,
 		ProviderKind:            request.ProviderKind,
 		ProviderBaseURL:         request.ProviderBaseURL,
@@ -40,6 +42,7 @@ func UpdateProfileRequestFromDTO(request dto.ProfileUpdateRequest) UpdateProfile
 	return UpdateProfileRequest{
 		ID:                      request.ID,
 		Name:                    request.Name,
+		ExecutionGrade:          request.ExecutionGrade,
 		Model:                   request.Model,
 		FallbackModel:           request.FallbackModel,
 		AutoFallback:            request.AutoFallback,

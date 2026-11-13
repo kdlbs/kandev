@@ -3,6 +3,8 @@ package sqlite
 import (
 	"context"
 	"time"
+
+	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 const controlTaskFrom = ` FROM tasks t LEFT JOIN workflow_steps w ON w.id=t.workflow_step_id `
@@ -23,21 +25,43 @@ type ControlTaskStage struct {
 	Count     int    `json:"count" db:"count"`
 }
 
+// controlWipQueued is the queued band of a WIP-limited step: the task already
+// names its destination but has not been admitted there yet.
+const controlWipQueued = `t.archived_at IS NULL AND t.queued_for_step_id <> '' AND t.workflow_step_id = t.queued_for_step_id AND COALESCE(t.wip_admitted,0)=0`
+
+// ControlWaiting reports installation-wide shared-capacity waiters. Grade
+// counts waiters refused by a grade limit (including both-limit refusals);
+// Total counts every refusal.
+type ControlWaiting struct {
+	Known bool `json:"known"`
+	Grade int  `json:"grade"`
+	Total int  `json:"total"`
+}
+
 // ControlMetrics reports recorded state. Sessions counts every session per state;
 // WaitingInputTasks counts unfinished tasks whose primary session waits for input.
+// WipWaitingTasks counts tasks queued at their destination step until its WIP
+// limit admits them. SharedCapacityWaiting is installation-wide and identical
+// across workspace responses: clients read it once and never sum it.
 type ControlMetrics struct {
-	WorkspaceID       string             `json:"workspace_id"`
-	GeneratedAt       time.Time          `json:"generated_at"`
-	Since             time.Time          `json:"since"`
-	Basis             string             `json:"basis"`
-	InferenceState    string             `json:"inference_state"`
-	Tasks             map[string]int     `json:"tasks"`
-	TaskStages        []ControlTaskStage `json:"task_stages,omitempty"`
-	Sessions          map[string]int     `json:"sessions"`
-	WaitingInputTasks int                `json:"waiting_input_tasks"`
-	QueuedMessages    int                `json:"queued_messages"`
-	Transitions24h    int                `json:"transitions_24h"`
-	CompletedTasks24h int                `json:"completed_tasks_24h"`
+	WorkspaceID           string             `json:"workspace_id"`
+	GeneratedAt           time.Time          `json:"generated_at"`
+	Since                 time.Time          `json:"since"`
+	Basis                 string             `json:"basis"`
+	InferenceState        string             `json:"inference_state"`
+	Tasks                 map[string]int     `json:"tasks"`
+	TaskStages            []ControlTaskStage `json:"task_stages,omitempty"`
+	Sessions              map[string]int     `json:"sessions"`
+	WaitingInputTasks     int                `json:"waiting_input_tasks"`
+	WipWaitingTasks       int                `json:"wip_waiting_tasks"`
+	SharedCapacityWaiting *ControlWaiting    `json:"shared_capacity_waiting,omitempty"`
+	QueuedMessages        int                `json:"queued_messages"`
+	Transitions24h        int                `json:"transitions_24h"`
+	CompletedTasks24h     int                `json:"completed_tasks_24h"`
+	// MergedChangeRequests24h counts built-in GitHub pull requests and
+	// plugin-reported change requests merged in the window, each merge once.
+	// Nil when either recorded merge source is unavailable.
+	MergedChangeRequests24h *int `json:"merged_change_requests_24h"`
 }
 
 func (r *Repository) ReadControlMetrics(ctx context.Context, wsID string, now time.Time) (*ControlMetrics, error) {
@@ -67,6 +91,7 @@ func (r *Repository) ReadControlMetrics(ctx context.Context, wsID string, now ti
 		args []any
 	}{
 		{&out.WaitingInputTasks, "SELECT COUNT(*) FROM tasks t WHERE " + controlTaskScope + " AND t.archived_at IS NULL AND " + controlLiveTask + " AND EXISTS (SELECT 1 FROM task_sessions p WHERE p.id=" + controlPrimarySession + " AND p.state='WAITING_FOR_INPUT')", []any{wsID}},
+		{&out.WipWaitingTasks, "SELECT COUNT(*) FROM tasks t WHERE " + controlTaskScope + " AND " + controlWipQueued + " AND " + dialect.ExcludeConfigModePredicate(r.ro.DriverName(), "t.metadata"), []any{wsID}},
 		{&out.QueuedMessages, "SELECT COUNT(*) FROM queued_messages q JOIN tasks t ON t.id=q.task_id WHERE " + controlTaskScope + " AND t.archived_at IS NULL", []any{wsID}},
 		{&out.Transitions24h, "SELECT COUNT(*) FROM task_step_transitions x JOIN tasks t ON t.id=x.task_id WHERE " + controlTaskScope + " AND x.occurred_at>=? AND x.occurred_at<=?", []any{wsID, out.Since, now}},
 		{&out.CompletedTasks24h, "SELECT COUNT(DISTINCT x.task_id) FROM task_step_transitions x JOIN tasks t ON t.id=x.task_id JOIN workflow_steps w ON w.id=x.to_workflow_step_id WHERE " + controlTaskScope + " AND w.complete_task_on_enter=1 AND x.occurred_at>=? AND x.occurred_at<=?", []any{wsID, out.Since, now}},
@@ -76,6 +101,7 @@ func (r *Repository) ReadControlMetrics(ctx context.Context, wsID string, now ti
 			return nil, err
 		}
 	}
+	out.MergedChangeRequests24h = r.controlMergedCount(ctx, wsID, out.Since, now)
 	return out, nil
 }
 

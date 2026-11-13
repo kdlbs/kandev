@@ -20,6 +20,27 @@ import (
 // to distinguish an already-stopped agent from a live transport failure.
 var ErrAgentStreamNotConnected = errors.New("agent stream not connected")
 
+// registerPendingRequest only registers requests on the active agent stream.
+func (c *Client) registerPendingRequest(reqID string, respCh chan *ws.Message, conn *websocket.Conn) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if conn == nil || c.agentStreamConn != conn {
+		return false
+	}
+
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+	if c.pendingRequests == nil {
+		c.pendingRequests = make(map[string]chan *ws.Message)
+	}
+	if c.pendingRequestConns == nil {
+		c.pendingRequestConns = make(map[string]*websocket.Conn)
+	}
+	c.pendingRequests[reqID] = respCh
+	c.pendingRequestConns[reqID] = conn
+	return true
+}
+
 // sendStreamRequest sends a request over the agent WebSocket stream and waits for a response.
 // It creates a ws.Message with a UUID, registers a pending response channel,
 // writes the message to the stream, and blocks until a response arrives or context is cancelled.
@@ -29,6 +50,9 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	c.mu.RUnlock()
 
 	if conn == nil {
+		if action == agentPromptAction {
+			return nil, &promptUnsentError{ErrAgentStreamNotConnected}
+		}
 		return nil, ErrAgentStreamNotConnected
 	}
 
@@ -49,16 +73,10 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 
 	// Register pending request
 	respCh := make(chan *ws.Message, 1)
-	c.pendingMu.Lock()
-	if c.pendingRequests == nil {
-		c.pendingRequests = make(map[string]chan *ws.Message)
+	if !c.registerPendingRequest(reqID, respCh, conn) {
+		tracing.TraceWSResponse(span, "", ErrAgentStreamNotConnected)
+		return nil, ErrAgentStreamNotConnected
 	}
-	if c.pendingRequestConns == nil {
-		c.pendingRequestConns = make(map[string]*websocket.Conn)
-	}
-	c.pendingRequests[reqID] = respCh
-	c.pendingRequestConns[reqID] = conn
-	c.pendingMu.Unlock()
 
 	// Clean up on exit
 	defer func() {

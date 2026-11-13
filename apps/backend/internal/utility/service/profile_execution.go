@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"strings"
 	"time"
 
@@ -35,7 +36,7 @@ func ExecuteProfilePrompt(ctx context.Context, resolver ExecutionFailureResolver
 		}
 		identity := agentruntime.InferenceIdentityFromContext(ctx)
 		identity.ExecutionProfileID = route.ExecutionProfileID
-		response, executeErr = execute(agentruntime.WithInferenceIdentity(ctx, identity), route.ExecutionProfileID)
+		response, executeErr = execute(agentruntime.WithInferenceIdentity(usage.WithSelectedUsagePolicy(ctx, route.UsagePolicy), identity), route.ExecutionProfileID)
 		if err := ctx.Err(); err != nil {
 			return response, err
 		}
@@ -43,6 +44,7 @@ func ExecuteProfilePrompt(ctx context.Context, resolver ExecutionFailureResolver
 			return response, executeErr
 		}
 		if response != nil && (response.Success || strings.TrimSpace(response.Response) != "") {
+			completeProfileSelection(ctx, resolver, route, response, executeErr)
 			return response, executeErr
 		}
 		failure := profilePromptFailure(executeErr, response, route.AgentCLI)
@@ -75,14 +77,9 @@ func profileFallbackAllowed(resolver ExecutionFailureResolver, route *PromptRequ
 
 func profilePromptFailure(err error, response *agentctlutil.PromptResponse, provider string) *routingerr.Error {
 	if errors.Is(err, context.DeadlineExceeded) {
-		// A live parent does not prove the child stopped: an HTTP transport
-		// deadline can return while its provider operation remains active.
-		// Preserve the original cause without authorizing another invocation.
-		return &routingerr.Error{Code: routingerr.CodeUnknownProvider, Class: routingerr.ClassUnclassified,
-			CatalogueVersion: routingerr.CatalogueVersion, Confidence: routingerr.ConfLow,
-			Phase: routingerr.PhasePromptSend, ClassifierRule: "utility.unconfirmed_request_deadline",
-			RawExcerpt: routingerr.Sanitize(err.Error())}
+		return deadlineRoutingFailure(err)
 	}
+
 	message := ""
 	if response != nil {
 		message = response.Error
@@ -105,6 +102,7 @@ func profilePromptError(response *agentctlutil.PromptResponse, err error) error 
 
 func applyProfileRoute(route *PromptRequest, next agentruntime.ProfileExecution) {
 	route.ExecutionProfileID, route.RouteGeneration = next.ExecutionProfileID, next.Generation
+	route.UsagePolicy = usage.CloneExecutionUsagePolicy(next.Decision.UsagePolicy)
 	if next.Profile != nil {
 		route.AgentCLI, route.Model = next.AgentName, next.Profile.Model
 		if route.AgentCLI == "" {

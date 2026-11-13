@@ -65,6 +65,9 @@ func (e *PendingDispatchedPromptTimeoutError) Error() string {
 // SessionManager handles ACP session initialization and management
 type SessionManager struct {
 	executorAdmission        func(context.Context, string, string, string) (context.Context, error)
+	providerTurnAdmission    ProviderTurnAdmission
+	providerTurnSettler      ProviderTurnSettlement
+	providerUsageLimits      bool
 	logger                   *logger.Logger
 	eventPublisher           *EventPublisher
 	streamManager            *StreamManager
@@ -190,6 +193,46 @@ func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
 	settingsPolicy SessionSettingsPolicy,
 	restoreIdentities ...RestoreIdentity,
 ) (*InitializeResult, error) {
+	attempt := deliveryStartupAttemptFor(execution)
+	return sm.initializeSessionWithSettingsPolicy(
+		ctx, execution, client, agentConfig, existingSessionID, workspacePath, mcpServers,
+		settingsPolicy, attempt, restoreIdentities...,
+	)
+}
+
+// deliveryStartupAttemptFor keeps direct InitializeSession callers compatible.
+// A startup attempt exists only while InitializeAndPromptWithLayers owns it.
+func deliveryStartupAttemptFor(execution *AgentExecution) *deliveryStartupAttempt {
+	if execution == nil {
+		return nil
+	}
+	return execution.deliveryStartupSnapshot()
+}
+
+func (sm *SessionManager) initializeSessionWithSettingsPolicy(
+	ctx context.Context,
+	execution *AgentExecution,
+	client *agentctl.Client,
+	agentConfig agents.Agent,
+	existingSessionID string,
+	workspacePath string,
+	mcpServers []agentctltypes.McpServer,
+	settingsPolicy SessionSettingsPolicy,
+	attempt *deliveryStartupAttempt,
+	restoreIdentities ...RestoreIdentity,
+) (finalResult *InitializeResult, initErr error) {
+	flow := logger.ExecutionFlow{Stage: "session_restore"}
+	if execution != nil {
+		flow.TaskID, flow.SessionID, flow.ExecutionID, flow.AttemptID, flow.ProfileID = execution.TaskID, execution.SessionID, execution.ID, execution.currentStartupAttemptID(), execution.AgentProfileID
+	}
+	finishFlow := sm.logger.BeginFlow(ctx, flow)
+	defer func() {
+		if initErr != nil {
+			finishFlow("failed", "session_initialization_failed")
+		} else {
+			finishFlow("ready", "")
+		}
+	}()
 	if settingsPolicy != SessionSettingsPolicyStrict && settingsPolicy != SessionSettingsPolicyProviderRestored {
 		return nil, fmt.Errorf("unsupported session settings policy: %d", settingsPolicy)
 	}
@@ -211,12 +254,17 @@ func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
 	sm.logger.Info("sending ACP initialize request",
 		zap.String("agent_type", agentConfig.ID()))
 
+	processGeneration := client.ProcessGeneration()
 	agentInfo, err := client.Initialize(ctx, "kandev", "1.0.0")
 	if err != nil {
 		sm.logger.Error("ACP initialize failed",
 			zap.String("agent_type", agentConfig.ID()),
 			zap.Error(err))
-		return nil, &SessionInitializationPhaseError{Phase: SessionInitializationPhaseACPInitialize, Cause: err}
+		return nil, &SessionInitializationPhaseError{
+			Phase:             SessionInitializationPhaseACPInitialize,
+			ProcessGeneration: processGeneration,
+			Cause:             err,
+		}
 	}
 
 	result := &InitializeResult{
@@ -227,41 +275,9 @@ func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
 		result.AgentName = agentInfo.Name
 		result.AgentVersion = agentInfo.Version
 	}
-	peerDelivery, advertised := client.DurableDeliveryCapability()
-	peerVersion := uint32(0)
-	peerDurable := false
-	peerUnresolved := false
-	if advertised {
-		peerVersion = peerDelivery.Version
-		peerDurable = peerDelivery.Durable
-		peerUnresolved = peerDelivery.Unresolved
-		if !peerDurable && peerDelivery.Reason == "storage_not_durable" {
-			// A supported peer can explicitly report that its executor has no
-			// retained volume. That is genuine legacy compatibility, unlike a
-			// configured journal that failed to open.
-			peerVersion = 0
-		}
+	if err := sm.publishNegotiatedDeliveryMode(client, execution, attempt, agentConfig.ID()); err != nil {
+		return nil, err
 	}
-	deliveryDecision := NegotiateDurableDelivery(
-		journal.StorageCapability{Version: journal.CurrentProtocolVersion, Durable: true},
-		peerVersion,
-		peerDurable,
-		peerUnresolved,
-	)
-	if deliveryDecision.Mode == DurableDeliveryBlocked {
-		return nil, fmt.Errorf("durable delivery negotiation blocked: %s", deliveryDecision.Reason)
-	}
-	if execution != nil {
-		// Publish the negotiated mode before session/new or session/load can
-		// emit events on the already-connected updates stream.
-		execution.DeliveryMode = deliveryDecision.Mode
-		execution.deliveryNegotiation.Load().finish(nil)
-	}
-	sm.logger.Info("agentctl delivery capability negotiated",
-		zap.String("agent_type", agentConfig.ID()),
-		zap.String("mode", string(deliveryDecision.Mode)),
-		zap.String("reason", deliveryDecision.Reason),
-		zap.Bool("capability_advertised", advertised))
 
 	sm.logger.Info("ACP initialize response received",
 		zap.String("agent_type", agentConfig.ID()),
@@ -290,6 +306,50 @@ func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
 	result.SessionID = sessionID.SessionID
 	result.AttachmentAttemptID = sessionID.AttachmentAttemptID
 	return result, nil
+}
+
+// publishNegotiatedDeliveryMode publishes the negotiated mode before
+// session/new or session/load can emit events on the connected updates stream.
+func (sm *SessionManager) publishNegotiatedDeliveryMode(
+	client *agentctl.Client,
+	execution *AgentExecution,
+	attempt *deliveryStartupAttempt,
+	agentType string,
+) error {
+	peerDelivery, advertised := client.DurableDeliveryCapability()
+	peerVersion := uint32(0)
+	peerDurable := false
+	peerUnresolved := false
+	if advertised {
+		peerVersion = peerDelivery.Version
+		peerDurable = peerDelivery.Durable
+		peerUnresolved = peerDelivery.Unresolved
+		if !peerDurable && peerDelivery.Reason == "storage_not_durable" {
+			// A supported peer can explicitly report that its executor has no
+			// retained volume. That is genuine legacy compatibility, unlike a
+			// configured journal that failed to open.
+			peerVersion = 0
+		}
+	}
+	decision := NegotiateDurableDelivery(
+		journal.StorageCapability{Version: journal.CurrentProtocolVersion, Durable: true},
+		peerVersion,
+		peerDurable,
+		peerUnresolved,
+	)
+	if decision.Mode == DurableDeliveryBlocked {
+		return fmt.Errorf("durable delivery negotiation blocked: %s", decision.Reason)
+	}
+	if execution != nil {
+		execution.DeliveryMode = decision.Mode
+		attempt.finishNegotiation(nil)
+	}
+	sm.logger.Info("agentctl delivery capability negotiated",
+		zap.String("agent_type", agentType),
+		zap.String("mode", string(decision.Mode)),
+		zap.String("reason", decision.Reason),
+		zap.Bool("capability_advertised", advertised))
+	return nil
 }
 
 type sessionMCPResult struct {
@@ -559,18 +619,22 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	startModelPolicy StartModelPolicy,
 	setupAccepted ...func(string),
 ) error {
-	negotiation := execution.beginDeliveryNegotiation()
-	defer negotiation.finish(ErrDurableAdoptionBlocked)
+	attempt := execution.beginDeliveryStartupAttempt(ctx)
+	defer execution.releaseDeliveryStartupAttempt(attempt)
+	// Every exit before native success releases pending setup-event work with
+	// its own cause. A published success is idempotent and stays final.
+	defer attempt.fail(ErrDurableAdoptionBlocked)
 	// A restored native conversation can be entering durable delivery for the
 	// first time. Its setup frames still need to wait for SQL authority.
 	execution.deliveryBootstrap.Store(execution.DeliveryHarnessGeneration == 1)
 	defer func() {
 		if !execution.isSessionInitialized() {
-			execution.deliveryBootstrap.Store(false)
+			execution.clearDeliveryBootstrapForAttempt(attempt)
 		}
 	}()
-	ctx, result, err := sm.initializeACPConnection(ctx, execution, agentConfig, mcpServers)
+	ctx, result, err := sm.initializeACPConnection(ctx, execution, agentConfig, mcpServers, attempt)
 	if err != nil {
+		attempt.fail(err)
 		return err
 	}
 	startModelPolicy = strictAuggieTaskStartModelPolicy(startModelPolicy, execution, agentConfig)
@@ -584,6 +648,10 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 			execution, result.SessionID, ResumeAttemptIDFromContext(ctx),
 		)
 	}
+	// Native success is final once the returned identity has been accepted and
+	// published. Later configuration waits and prompt dispatch must not hold
+	// this result, because setup events wait on it before SQL authority exists.
+	attempt.finishNative(nil)
 	if !cacheFreshSessionModelState(execution) && (profileModel != "" || runtimeModel != "") {
 		waitForFreshSessionModelState(ctx, sm.logger, execution)
 	}
@@ -728,6 +796,7 @@ func (sm *SessionManager) initializeACPConnection(
 	execution *AgentExecution,
 	agentConfig agents.Agent,
 	mcpServers []agentctltypes.McpServer,
+	attempt *deliveryStartupAttempt,
 ) (context.Context, *InitializeResult, error) {
 	_, sessionSpan := tracing.TraceSessionStart(
 		context.Background(), execution.TaskID, execution.SessionID, execution.ID,
@@ -770,7 +839,7 @@ func (sm *SessionManager) initializeACPConnection(
 	if execution.RequiredNativeConversationID != "" {
 		ctx = context.WithValue(ctx, requiredNativeConversationKey{}, execution.RequiredNativeConversationID)
 	}
-	result, err := sm.InitializeSessionWithSettingsPolicy(
+	result, err := sm.initializeSessionWithSettingsPolicy(
 		ctx,
 		execution,
 		client,
@@ -779,6 +848,7 @@ func (sm *SessionManager) initializeACPConnection(
 		execution.WorkspacePath,
 		mcpServers,
 		execution.sessionSettingsStartupPolicy(),
+		attempt,
 		RestoreIdentity{
 			SessionID:            execution.SessionID,
 			NativeSessionID:      execution.ACPSessionID,
@@ -1775,6 +1845,9 @@ func (sm *SessionManager) SendPromptSteerWithDispatchCallback(
 	dispatchOnly bool,
 	onDispatched func(),
 ) (*PromptResult, error) {
+	if err := execution.validateBuiltinIntent(ctx); err != nil {
+		return nil, err
+	}
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	releaseClient()
 	if client == nil {
@@ -1799,6 +1872,9 @@ func (sm *SessionManager) SendPromptSteerWithDispatchCallback(
 	// A failure here returns instead of falling back: the ordinary prompt route
 	// would carry the same unresolved descriptor, and the agent would receive a
 	// reference to bytes that are absent from the session.
+	if err := sm.checkExecutionUsage(ctx, execution); err != nil {
+		return nil, err
+	}
 	materialized, err := sm.materializeAttachments(ctx, execution, attachments)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrSteerAttachmentMaterialization, err)
@@ -2138,6 +2214,7 @@ func (sm *SessionManager) materializeAttachments(
 		result[i].Name = materialized.Name
 		result[i].MimeType = mimeType
 		result[i].SizeBytes = sizeBytes
+		result[i].Path = materialized.Path
 		result[i].Data = ""
 		if result[i].DeliveryMode == "" {
 			result[i].DeliveryMode = attachmentDeliveryPrompt
@@ -2167,6 +2244,9 @@ func (sm *SessionManager) preparePrompt(
 		if execution.Status != v1.AgentStatusRunning && execution.Status != v1.AgentStatusReady {
 			return ctx, "", fmt.Errorf("execution %q is not ready for prompts (status: %s)", execution.ID, execution.Status)
 		}
+	}
+	if err := sm.checkExecutionUsage(ctx, execution); err != nil {
+		return ctx, "", err
 	}
 	effectivePrompt := sm.buildEffectivePrompt(execution, prompt)
 	sm.logger.Info("sending prompt to agent",
@@ -2345,7 +2425,10 @@ func (sm *SessionManager) callAgentctlPrompt(
 	if client == nil {
 		return fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
-	var err error
+	newClaim, err := sm.admitProviderTurn(ctx, execution, promptGeneration, submissionID)
+	if err != nil {
+		return err
+	}
 	if steer {
 		if submissionID != "" {
 			err = client.PromptSteerWithSubmissionID(ctx, prompt, attachments, promptGeneration, submissionID)
@@ -2363,6 +2446,9 @@ func (sm *SessionManager) callAgentctlPrompt(
 		acknowledgedID := client.LastDeliverySubmissionID()
 		activeID := deliverySubmissionIdentityForPrompt(submissionID, acknowledgedID)
 		execution.setDeliverySubmissionID(activeID)
+	}
+	if newClaim && agentctl.PromptDefinitelyUnsent(err) {
+		sm.finishProviderTurn(execution.ID, promptGeneration, true)
 	}
 	return err
 }

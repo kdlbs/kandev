@@ -165,6 +165,7 @@ const ResponsiveTaskLayout = memo(function ResponsiveTaskLayout({
   // Desktop layout - dockview
   return (
     <DockviewDesktopLayout
+      taskId={taskId}
       workspaceId={workspaceId}
       workflowId={workflowId}
       sessionId={sessionId}

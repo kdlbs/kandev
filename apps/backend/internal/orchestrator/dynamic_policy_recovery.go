@@ -38,9 +38,10 @@ func (s *Service) startDynamicPolicyRecovery(ctx context.Context) {
 	s.dynamicRecoveryCtx = recoveryCtx
 	s.dynamicRecoveryCancel = cancel
 	if s.dynamicRecoveryTimers == nil {
-		s.dynamicRecoveryTimers = make(map[string]*time.Timer)
+		s.dynamicRecoveryTimers = make(map[string]*dynamicRecoveryTimer)
 	}
 	s.dynamicRecoveryMu.Unlock()
+	s.restoreFailedRouteAutoRetries(ctx)
 
 	states, err := lister.ListPendingRouteStates(ctx)
 	if err != nil {
@@ -126,8 +127,8 @@ func (s *Service) stopDynamicPolicyRecovery() {
 	if s.dynamicRecoveryCancel != nil {
 		s.dynamicRecoveryCancel()
 	}
-	for sessionID, timer := range s.dynamicRecoveryTimers {
-		timer.Stop()
+	for sessionID, entry := range s.dynamicRecoveryTimers {
+		entry.timer.Stop()
 		delete(s.dynamicRecoveryTimers, sessionID)
 	}
 	s.dynamicRecoveryCtx = nil
@@ -142,28 +143,46 @@ func (s *Service) scheduleDynamicPolicyRecovery(sessionID string, generation int
 	if err := json.Unmarshal([]byte(rawPolicyState), &policyState); err != nil || policyState.Deadline == nil {
 		return
 	}
-	deadline := policyState.Deadline.UTC()
+	s.armDynamicRecoveryTimer(sessionID, generation, policyState.Deadline.UTC(), func(ctx context.Context) {
+		s.runDynamicPolicyRecovery(ctx, sessionID, generation)
+	})
+}
+
+// armDynamicRecoveryTimer is the single per-session timer of durable dynamic
+// route recovery: a policy wait's deadline or an opted-in automatic
+// failed-route retry. A session holds at most one; arming replaces it, except
+// that a timer armed for an older route generation never replaces a newer
+// one. Every run re-reads the durable route before acting, so a replaced or
+// stale timer never acts on a later route state. Nothing is armed before
+// startDynamicPolicyRecovery or after stopDynamicPolicyRecovery.
+func (s *Service) armDynamicRecoveryTimer(
+	sessionID string,
+	generation int64,
+	due time.Time,
+	run func(context.Context),
+) {
 	s.dynamicRecoveryMu.Lock()
+	defer s.dynamicRecoveryMu.Unlock()
 	ctx := s.dynamicRecoveryCtx
 	if ctx == nil {
-		s.dynamicRecoveryMu.Unlock()
 		return
 	}
 	if previous := s.dynamicRecoveryTimers[sessionID]; previous != nil {
-		previous.Stop()
+		if previous.generation > generation {
+			return
+		}
+		previous.timer.Stop()
 	}
-	delay := time.Until(deadline)
+	delay := time.Until(due)
 	if delay < 0 {
 		delay = 0
 	}
-	s.dynamicRecoveryTimers[sessionID] = time.AfterFunc(delay, func() {
-		s.runDynamicPolicyRecovery(ctx, sessionID, generation)
-	})
-	s.dynamicRecoveryMu.Unlock()
+	timer := time.AfterFunc(delay, func() { run(ctx) })
+	s.dynamicRecoveryTimers[sessionID] = &dynamicRecoveryTimer{timer: timer, generation: generation}
 }
 
 func (s *Service) runDynamicPolicyRecovery(ctx context.Context, sessionID string, generation int64) {
-	s.removeDynamicPolicyRecoveryTimer(sessionID)
+	s.removeDynamicPolicyRecoveryTimer(sessionID, generation)
 	if !s.dynamicPolicyRecoveryActive(ctx) {
 		return
 	}
@@ -184,7 +203,7 @@ func (s *Service) runDynamicPolicyRecovery(ctx context.Context, sessionID string
 		}
 	}()
 	state, ok := loadDueDynamicPolicyState(ctx, loader, sessionID, generation)
-	if !ok {
+	if !ok || !s.dynamicPolicyRecoverySessionCurrent(ctx, sessionID, generation, state) {
 		return
 	}
 	if s.rescheduleEarlyDynamicPolicyRecovery(sessionID, generation, state.PolicyStateJSON) {
@@ -205,10 +224,30 @@ func (s *Service) runDynamicPolicyRecovery(ctx context.Context, sessionID string
 	}
 }
 
-func (s *Service) removeDynamicPolicyRecoveryTimer(sessionID string) {
+// removeDynamicPolicyRecoveryTimer forgets the timer that is now running. A
+// stale timer for an older route generation leaves a newer generation's armed
+// timer in place, so stopDynamicPolicyRecovery can still cancel it.
+func (s *Service) removeDynamicPolicyRecoveryTimer(sessionID string, generation int64) {
 	s.dynamicRecoveryMu.Lock()
-	delete(s.dynamicRecoveryTimers, sessionID)
+	if current := s.dynamicRecoveryTimers[sessionID]; current != nil && current.generation == generation {
+		delete(s.dynamicRecoveryTimers, sessionID)
+	}
 	s.dynamicRecoveryMu.Unlock()
+}
+
+// dynamicPolicyRecoverySessionCurrent reports whether the session still owns
+// the due route: it is not terminal, it still uses the route's logical
+// profile, and its projected route generation is the timer's generation. A
+// terminal or reassigned session leaves the durable route untouched.
+func (s *Service) dynamicPolicyRecoverySessionCurrent(
+	ctx context.Context,
+	sessionID string,
+	generation int64,
+	state *dynamicruntime.RouteState,
+) bool {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	return err == nil && session != nil && !isTerminalSessionState(session.State) &&
+		session.AgentProfileID == state.LogicalProfileID && session.RouteGeneration == generation
 }
 
 func (s *Service) dynamicPolicyRecoveryActive(ctx context.Context) bool {

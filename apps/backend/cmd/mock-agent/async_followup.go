@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -11,7 +12,7 @@ import (
 // ends normally, then an agent-started follow-up emits output and a
 // metadata-only tool_call_update for a tool that already reported completion.
 // The status-less update must not keep the follow-up turn open.
-func emitAsyncFollowup(e *emitter) {
+func emitAsyncFollowup(e *emitter, releasePath string) {
 	e.text("Foreground response before the async follow-up.")
 	e.startTool("async-followup-check", "Check follow-up", acp.ToolKindRead, nil)
 	e.completeTool("async-followup-check", "follow-up check complete")
@@ -31,14 +32,30 @@ func emitAsyncFollowup(e *emitter) {
 		background.metadataOnlyToolUpdate("async-followup-check")
 
 		time.Sleep(time.Second)
+		if !waitForAsyncFollowupRelease(background, releasePath) {
+			return
+		}
+		background.text("Background follow-up still running.")
 		background.completeTool("async-followup-work", "follow-up work complete")
 		background.text("Background follow-up finished.")
-
-		// Keep the follow-up turn open a little longer so the browser flow has a
-		// deterministic window to queue a message while it runs.
-		time.Sleep(2 * time.Second)
-		background.text("Background follow-up still running.")
 	}()
+}
+
+// waitForAsyncFollowupRelease keeps the tool active until the browser confirms
+// queue admission. Manual scenarios without a marker use a bounded delay.
+func waitForAsyncFollowupRelease(e *emitter, path string) bool {
+	if path == "" {
+		time.Sleep(15 * time.Second)
+		return true
+	}
+	ctx, cancel := context.WithTimeout(e.ctx, 2*time.Minute)
+	defer cancel()
+	if err := waitForScriptFile(ctx, path); err != nil {
+		// Release failure retains the active tool and blocks queue delivery.
+		e.text(fmt.Sprintf("Async follow-up release failed: %v", err))
+		return false
+	}
+	return true
 }
 
 // metadataOnlyToolUpdate emits the status-less tool_call_update Claude's

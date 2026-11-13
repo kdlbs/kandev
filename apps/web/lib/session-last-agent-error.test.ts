@@ -18,6 +18,9 @@ const OTHER_TAB_STAMP = "stamp-other";
 const THIS_TAB_STAMP = "stamp-this";
 const MANAGED_RUNTIME_NPM_FAILURE = "managed_runtime_npm_resolution";
 const NPM_ERROR_CODE_ETARGET = "npm error code ETARGET";
+const BOOTSTRAP_ERROR_MESSAGE = "The agent could not start.";
+const PROCESS_EXIT_MESSAGE = "The agent exited before startup completed.";
+const PROCESS_EXIT_CODE = "process_exited";
 
 describe("readLastAgentError", () => {
   it("reads structured failure fields in snake_case", () => {
@@ -93,7 +96,7 @@ describe("readLastAgentError optional metadata", () => {
     expect(
       readLastAgentError({
         last_agent_error: {
-          message: "The agent could not start.",
+          message: BOOTSTRAP_ERROR_MESSAGE,
           execution_id: "execution-1",
           phase: "bootstrap",
           attempt_id: "attempt-1",
@@ -123,7 +126,7 @@ describe("readLastAgentError optional metadata", () => {
   it("reads safe typed selection evidence and drops malformed optional fields", () => {
     const error = readLastAgentError({
       last_agent_error: {
-        message: "The agent could not start.",
+        message: BOOTSTRAP_ERROR_MESSAGE,
         causes: [
           {
             operation: "start",
@@ -167,7 +170,7 @@ describe("readLastAgentError optional metadata", () => {
     expect(
       readLastAgentError({
         last_agent_error: {
-          message: "The agent could not start.",
+          message: BOOTSTRAP_ERROR_MESSAGE,
           causes: [
             {
               operation: "resume",
@@ -180,6 +183,79 @@ describe("readLastAgentError optional metadata", () => {
         },
       })?.causes,
     ).toEqual([{ operation: "resume", code: "model_selection_failed" }]);
+  });
+
+  it("reads typed Copilot plugin evidence and validates the exact runtime identity", () => {
+    const error = readLastAgentError({
+      last_agent_error: {
+        message: BOOTSTRAP_ERROR_MESSAGE,
+        causes: [
+          {
+            operation: "start",
+            code: "plugin_preparation_failed",
+            detail: "private plugin path=/Users/alice/.config/copilot/plugins",
+            reason: "invalid_inventory",
+            runtime_version: "1.2.3+build.4",
+            plugin_id: "private-plugin",
+          },
+          {
+            operation: "resume",
+            code: "model_unavailable",
+            reason: "requested_not_advertised",
+            runtime_version: "/private/runtime",
+          },
+        ],
+      },
+    });
+
+    expect(error?.causes).toEqual([
+      {
+        operation: "start",
+        code: "plugin_preparation_failed",
+        detail: "The selected Copilot plugins could not be prepared.",
+        reason: "invalid_inventory",
+        runtime_version: "1.2.3+build.4",
+      },
+      {
+        operation: "resume",
+        code: "model_unavailable",
+        reason: "requested_not_advertised",
+      },
+    ]);
+
+    const invalid = readLastAgentError({
+      last_agent_error: {
+        message: BOOTSTRAP_ERROR_MESSAGE,
+        causes: [
+          {
+            operation: "start",
+            code: "plugin_preparation_failed",
+            detail: "private output",
+            reason: "invalid_inventory",
+            runtime_version: "1.2.3-beta.1",
+          },
+          {
+            operation: "start",
+            code: "plugin_preparation_failed",
+            reason: "private_reason",
+            runtime_version: "1.2.3",
+          },
+        ],
+      },
+    });
+    expect(invalid?.causes).toEqual([
+      {
+        operation: "start",
+        code: "plugin_preparation_failed",
+        detail: "The selected Copilot plugins could not be prepared.",
+        reason: "invalid_inventory",
+      },
+      {
+        operation: "start",
+        code: "plugin_preparation_failed",
+        detail: "The selected Copilot plugins could not be prepared.",
+      },
+    ]);
   });
 
   it("reads typed launch recovery fields and keeps action order bounded", () => {
@@ -286,6 +362,85 @@ describe("readLastAgentError optional metadata", () => {
         },
       }),
     ).toBeNull();
+  });
+});
+
+describe("process exit agent error causes", () => {
+  it("keeps the recognized reason and numeric exit status", () => {
+    const error = readLastAgentError({
+      last_agent_error: {
+        message: PROCESS_EXIT_MESSAGE,
+        phase: "bootstrap",
+        causes: [
+          {
+            operation: "resume",
+            code: PROCESS_EXIT_CODE,
+            reason: "mise_config_untrusted",
+            exit_code: 1,
+            detail: "raw /private/workspace/mise.toml",
+          },
+        ],
+      },
+    });
+    expect(error?.causes).toEqual([
+      {
+        operation: "resume",
+        code: PROCESS_EXIT_CODE,
+        reason: "mise_config_untrusted",
+        exit_code: 1,
+        detail: PROCESS_EXIT_MESSAGE,
+      },
+    ]);
+  });
+
+  it("degrades unknown reasons, malformed statuses, and hostile detail", () => {
+    const error = readLastAgentError({
+      last_agent_error: {
+        message: PROCESS_EXIT_MESSAGE,
+        causes: [
+          {
+            operation: "start",
+            code: PROCESS_EXIT_CODE,
+            reason: "private_reason",
+            exit_code: 1.5,
+            detail: "/Users/alice/.config/mise.toml",
+          },
+          {
+            operation: "start",
+            code: PROCESS_EXIT_CODE,
+            reason: "mise_config_untrusted",
+            exit_code: 4294967296,
+          },
+        ],
+      },
+    });
+    expect(error?.causes).toHaveLength(2);
+    expect(error?.causes?.[0]).toMatchObject({
+      code: PROCESS_EXIT_CODE,
+      reason: "unclassified",
+      detail: PROCESS_EXIT_MESSAGE,
+    });
+    expect(error?.causes?.[0]?.exit_code).toBeUndefined();
+    expect(error?.causes?.[1]).toMatchObject({
+      code: PROCESS_EXIT_CODE,
+      reason: "mise_config_untrusted",
+      detail: PROCESS_EXIT_MESSAGE,
+    });
+    expect(error?.causes?.[1]?.exit_code).toBeUndefined();
+    expect(JSON.stringify(error)).not.toContain("/Users/alice");
+    expect(JSON.stringify(error)).not.toContain("private_reason");
+  });
+
+  it("keeps exit status zero distinct from a missing status", () => {
+    const error = readLastAgentError({
+      last_agent_error: {
+        message: PROCESS_EXIT_MESSAGE,
+        causes: [
+          { operation: "start", code: PROCESS_EXIT_CODE, reason: "unclassified", exit_code: 0 },
+        ],
+      },
+    });
+    expect(error?.causes?.[0]?.exit_code).toBe(0);
   });
 });
 

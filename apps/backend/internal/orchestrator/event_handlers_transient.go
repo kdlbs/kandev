@@ -580,6 +580,7 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 	}
 
 	if _, err := s.promptTask(ctx, taskID, sessionID, cp.text, cp.model, cp.planMode, cp.attachments, false, launchOriginAutomatic, promptTaskOptions{
+		capacityIntent:                 turnCapacityOverride,
 		onAccepted:                     cp.onAccepted,
 		initialCreatePromptPassthrough: initialCreatePromptPassthrough,
 	}); err != nil {

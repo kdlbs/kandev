@@ -233,6 +233,65 @@ func (m *Manager) RemoveByIDWithReceipt(ctx context.Context, worktreeID string) 
 	return receipt, err
 }
 
+// RollbackCreatedPreparation removes a worktree created by a preparation
+// attempt that failed before its environment transaction persisted inventory.
+// Initial materialization defers persistence until that transaction, so the
+// manager may still own a physical checkout with no store row. Callers must
+// pass only checkouts their own attempt created; reused checkouts are never
+// rolled back through this method.
+func (m *Manager) RollbackCreatedPreparation(ctx context.Context, wt *Worktree) error {
+	if wt == nil || strings.TrimSpace(wt.Path) == "" {
+		return nil
+	}
+	if m.store != nil && wt.ID != "" {
+		stored, err := m.store.GetWorktreeByID(ctx, wt.ID)
+		if err != nil && !errors.Is(err, ErrWorktreeNotFound) {
+			return err
+		}
+		if stored != nil {
+			return m.RemoveByID(ctx, wt.ID, false)
+		}
+	}
+	// The store has no inventory row yet, but persistAndCacheWorktree still
+	// cached the checkout. Serialize physical cleanup with create/recreate on
+	// the same repository, then evict the exact aliases so a retry of the same
+	// session cannot reuse a directory this attempt removed.
+	repoLock := m.getRepoLock(wt.RepositoryPath)
+	repoLock.Lock()
+	defer func() {
+		repoLock.Unlock()
+		m.releaseRepoLock(wt.RepositoryPath)
+	}()
+	if err := m.removeWorktreeDir(ctx, wt.Path, wt.RepositoryPath); err != nil {
+		return err
+	}
+	m.evictRolledBackWorktree(wt)
+	return nil
+}
+
+// evictRolledBackWorktree removes every cache alias for one exact rolled-back
+// checkout. Callers hold no worktree cache lock; the repository lock keeps
+// concurrent creation out of the same repository path.
+func (m *Manager) evictRolledBackWorktree(wt *Worktree) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key, cached := range m.worktrees {
+		if cached == nil {
+			continue
+		}
+		if wt.ID != "" && cached.ID == wt.ID {
+			delete(m.worktrees, key)
+			continue
+		}
+		if cached.RepositoryID == wt.RepositoryID && cached.Path != "" && cached.Path == wt.Path {
+			delete(m.worktrees, key)
+		}
+	}
+	if wt.SessionID != "" {
+		delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID, wt.BranchSlug))
+	}
+}
+
 // removeWorktree performs the actual removal of a worktree.
 func (m *Manager) removeWorktree(
 	ctx context.Context, wt *Worktree, removeBranch bool, options WorktreeCleanupOptions,
@@ -709,6 +768,7 @@ func (m *Manager) cleanupWorktreesWithReceipt(
 		wt = m.enrichCleanupWorktreeFromCache(ctx, wt)
 		branchReceipt, err := m.removeWorktreeWithReceipt(ctx, wt, removeBranch, options)
 		receipt.merge(branchReceipt)
+		err = AnnotateCleanupInspectionWorktreeID(err, wt.ID)
 		if err != nil {
 			m.logger.Warn("failed to remove worktree during batch cleanup",
 				zap.String("task_id", wt.TaskID),

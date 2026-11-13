@@ -19,7 +19,13 @@ vi.mock("@/lib/api/domains/coordinator-api", () => ({ listCoordinators: api.coor
 vi.mock("@/lib/api/domains/office-extended-api", () => ({
   getWorkspaceAggregate: api.aggregate,
 }));
-vi.mock("@/lib/api/domains/control-native-api", () => ({ readNativeDashboard: api.native }));
+vi.mock("@/lib/api/domains/control-native-api", async (original) => ({
+  ...(await original<typeof import("@/lib/api/domains/control-native-api")>()),
+  readNativeDashboard: api.native,
+}));
+vi.mock("@/lib/api/domains/session-capacity-api", () => ({
+  fetchSessionCapacityObservation: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@/lib/ws/connection", () => ({ useWebSocketClient: () => null }));
 
 const workspace = { id: "alpha", name: "Alpha", scopes: ["workspace.read"] };

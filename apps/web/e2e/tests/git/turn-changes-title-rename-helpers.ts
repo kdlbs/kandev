@@ -3,6 +3,7 @@ import fs from "node:fs";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { dwell } from "../../helpers/causal-waits";
 import { closePreviewPanels } from "./diff-update-helpers";
 import { readTurnChangeHistory, waitForTurnChangeCount } from "./turn-changed-files-helpers";
 
@@ -124,7 +125,14 @@ export async function expectUnavailableRenameSwitch(apiClient: ApiClient, sessio
 }
 
 export async function assertNoTurnChangesCard(session: SessionPage) {
-  await expect(session.activeChat().getByTestId("turn-changed-files-card")).toHaveCount(0);
+  const chat = session.activeChat();
+  await dwell(
+    chat.page(),
+    500,
+    "negative-assertion",
+    "a hidden turn summary must never render a transcript card",
+  );
+  await expect(chat.getByTestId("turn-changed-files-card")).toHaveCount(0);
 }
 
 export function writeLiveWorktreeEdit(worktreePath: string) {

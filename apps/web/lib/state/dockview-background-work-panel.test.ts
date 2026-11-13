@@ -66,3 +66,33 @@ describe("addBackgroundWorkPanel", () => {
     expect(panel?.isActive).toBe(false);
   });
 });
+
+describe("addBackgroundWorkPanel session overview", () => {
+  it("opens the selected session's overview without a workload", () => {
+    const api = makeApi();
+    const store = makeStore(api);
+    const actions = buildExtraPanelActions(store.set, store.get);
+
+    actions.addBackgroundWorkPanel({ sessionId: "session-1", inCenter: true });
+
+    const panel = api.getPanel("background-work:session-1");
+    expect(panel).toMatchObject({
+      id: "background-work:session-1",
+      group: { id: CENTER_GROUP },
+      api: { component: BG_WORK_PANEL_ID },
+      params: { sessionId: "session-1", workId: undefined },
+    });
+  });
+
+  it("keeps repeated session overview activation on the same panel", () => {
+    const api = makeApi();
+    const store = makeStore(api);
+    const actions = buildExtraPanelActions(store.set, store.get);
+
+    actions.addBackgroundWorkPanel({ sessionId: "session-1" });
+    const countAfterFirst = api.panels.length;
+    actions.addBackgroundWorkPanel({ sessionId: "session-1" });
+
+    expect(api.panels.length).toBe(countAfterFirst);
+  });
+});

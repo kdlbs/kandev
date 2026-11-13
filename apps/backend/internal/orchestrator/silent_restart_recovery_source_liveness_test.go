@@ -15,7 +15,9 @@ import (
 func TestSilentRestoreSourceDeathProof(t *testing.T) {
 	identity := processidentity.Identity{
 		PID: 42, GroupID: 42, SessionID: 42, BirthToken: "linux:boot:1",
+		AgentGroupID: 84, AgentBirthToken: "linux:boot:2",
 	}
+	agentGroup := processidentity.Identity{PID: 84, GroupID: 84, BirthToken: "linux:boot:2"}
 	recovery := models.AgentDeliveryRecovery{
 		SessionID: "session", AgentExecutionID: "source", OriginalRuntime: identity,
 	}
@@ -25,70 +27,106 @@ func TestSilentRestoreSourceDeathProof(t *testing.T) {
 	probeError := errors.New("process inspection failed")
 
 	tests := []struct {
-		name           string
-		row            *models.ExecutorRunning
-		recovery       models.AgentDeliveryRecovery
-		liveness       models.ProcessLiveness
-		terminated     bool
-		terminationErr error
-		wantProbes     int
-		wantDead       bool
+		name                string
+		row                 *models.ExecutorRunning
+		recovery            models.AgentDeliveryRecovery
+		liveness            models.ProcessLiveness
+		terminated          bool
+		terminationErr      error
+		groupTerminated     bool
+		groupTerminationErr error
+		groupIdentity       processidentity.Identity
+		wantOwnerProbes     int
+		wantGroupProbes     int
+		wantDead            bool
 	}{
 		{
-			name: "unknown local row without persisted pid uses exact process proof",
+			name: "unknown inherited row uses original owner proof",
 			row:  row, recovery: recovery, liveness: models.ProcessLivenessUnknown,
-			terminated: true, wantProbes: 1, wantDead: true,
+			terminated: true, wantOwnerProbes: 1, wantDead: true,
 		},
 		{
 			name: "already dead row needs no fallback probe",
 			row:  row, recovery: recovery, liveness: models.ProcessLivenessDead,
-			wantProbes: 0, wantDead: true,
+			wantDead: true,
 		},
 		{
-			name: "live row blocks fallback",
+			name: "registered shared runtime allows an exited agent group",
 			row:  row, recovery: recovery, liveness: models.ProcessLivenessAlive,
-			terminated: true, wantProbes: 0,
+			groupTerminated: true, groupIdentity: agentGroup, wantGroupProbes: 1, wantDead: true,
+		},
+		{
+			name: "registered shared runtime blocks a live agent group",
+			row:  row, recovery: recovery, liveness: models.ProcessLivenessAlive,
+			groupIdentity: agentGroup, wantGroupProbes: 1,
+		},
+		{
+			name: "registered shared runtime blocks an unverifiable agent group",
+			row:  row, recovery: recovery, liveness: models.ProcessLivenessAlive,
+			groupTerminationErr: probeError, groupIdentity: agentGroup, wantGroupProbes: 1,
+		},
+		{
+			name: "registered row without agent group proof stays blocked",
+			row:  row, recovery: models.AgentDeliveryRecovery{
+				SessionID: "session", AgentExecutionID: "source",
+				OriginalRuntime: processidentity.Identity{PID: 42, GroupID: 42, SessionID: 42, BirthToken: "linux:boot:1"},
+			}, liveness: models.ProcessLivenessAlive,
 		},
 		{
 			name:     "mismatched execution blocks fallback",
 			row:      &models.ExecutorRunning{SessionID: "session", AgentExecutionID: "successor", Runtime: agentruntime.RuntimeStandalone},
-			recovery: recovery, liveness: models.ProcessLivenessUnknown, terminated: true, wantProbes: 0,
+			recovery: recovery, liveness: models.ProcessLivenessUnknown, terminated: true,
 		},
 		{
 			name: "incomplete process identity blocks fallback",
 			row:  row, recovery: models.AgentDeliveryRecovery{
 				SessionID: "session", AgentExecutionID: "source",
-			}, liveness: models.ProcessLivenessUnknown, terminated: true, wantProbes: 0,
+			}, liveness: models.ProcessLivenessUnknown, terminated: true,
 		},
 		{
 			name:     "remote row never uses local process proof",
 			row:      &models.ExecutorRunning{SessionID: "session", AgentExecutionID: "source", Runtime: agentruntime.RuntimeDocker},
-			recovery: recovery, liveness: models.ProcessLivenessUnknown, terminated: true, wantProbes: 0,
+			recovery: recovery, liveness: models.ProcessLivenessUnknown, terminated: true,
 		},
 		{
 			name: "live descendant blocks exact owner proof",
 			row:  row, recovery: recovery, liveness: models.ProcessLivenessUnknown,
-			terminated: false, wantProbes: 1,
+			terminated: false, wantOwnerProbes: 1,
 		},
 		{
 			name: "process inspection error blocks exact owner proof",
 			row:  row, recovery: recovery, liveness: models.ProcessLivenessUnknown,
-			terminationErr: probeError, wantProbes: 1,
+			terminationErr: probeError, wantOwnerProbes: 1,
+		},
+		{
+			name:     "remote live row cannot use local group proof",
+			row:      &models.ExecutorRunning{SessionID: "session", AgentExecutionID: "source", Runtime: agentruntime.RuntimeDocker},
+			recovery: recovery, liveness: models.ProcessLivenessAlive, groupTerminated: true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			probes := 0
+			ownerProbes, groupProbes := 0, 0
+			testRecovery := test.recovery
+			if testRecovery.SessionID == "" {
+				testRecovery = recovery
+			}
 			dead, err := silentRestoreSourceIsProvenDead(
-				test.row, test.recovery, test.liveness,
+				test.row, testRecovery, test.liveness,
 				func(got processidentity.Identity) (bool, error) {
-					probes++
-					require.Equal(t, identity, got)
+					ownerProbes++
+					require.Equal(t, testRecovery.OriginalRuntime, got)
 					return test.terminated, test.terminationErr
 				},
+				func(got processidentity.Identity) (bool, error) {
+					groupProbes++
+					require.Equal(t, test.groupIdentity, got)
+					return test.groupTerminated, test.groupTerminationErr
+				},
 			)
-			require.Equal(t, test.wantProbes, probes)
+			require.Equal(t, test.wantOwnerProbes, ownerProbes)
+			require.Equal(t, test.wantGroupProbes, groupProbes)
 			require.Equal(t, test.wantDead, dead)
 			if test.wantDead {
 				require.NoError(t, err)

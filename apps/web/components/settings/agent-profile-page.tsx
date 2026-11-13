@@ -58,6 +58,9 @@ import type { UtilityAgentReference } from "@/lib/types/agent-profile-errors";
 import { useAppStore } from "@/components/state-provider";
 import { AgentLogo } from "@/components/agent-logo";
 import { ProfileMcpConfigCard } from "@/app/settings/agents/[agentId]/profile-mcp-config-card";
+import { ProviderLimitsCard } from "@/components/settings/provider-limits-card";
+import { ProviderUsageCard } from "@/components/settings/provider-usage-card";
+import { providerOfModel } from "@/lib/settings/provider-limits";
 import { CommandPreviewCard } from "@/app/settings/agents/[agentId]/profiles/[profileId]/command-preview-card";
 import { useAgentProfileSettings } from "@/app/settings/agents/[agentId]/profiles/[profileId]/use-agent-profile-settings";
 import { agentProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
@@ -71,7 +74,7 @@ export {
 export { preserveNewerProfileDraft } from "@/components/settings/agent-profile-page-state";
 
 function toProfileFormData(
-  profile: AgentProfile,
+  profile: AgentProfile & { devinSandboxInherited?: boolean },
   permissionSettings: Record<string, PermissionSetting>,
 ): ProfileFormData {
   const pv = profilePermissionValues(profile, permissionSettings);
@@ -93,6 +96,7 @@ function toProfileFormData(
     copilot_selected_plugins: profile.copilotSelectedPlugins ?? [],
     cli_flags: profile.cliFlags ?? [],
     env_vars: profile.envVars ?? [],
+    devin_sandbox_inherited: profile.devinSandboxInherited,
     command_prefix: profile.commandPrefix ?? "",
     provider_kind: profile.providerKind ?? "",
   };
@@ -460,7 +464,12 @@ function ProfileEditor({
         unavailable={nativeCodexUnavailable}
       />
 
+      <ProviderUsageCard profileId={savedProfile.id} />
       <Separator />
+
+      {providerOfModel(savedProfile.model) ? (
+        <ProviderLimitsCard provider={providerOfModel(savedProfile.model)} />
+      ) : null}
 
       <fieldset disabled={nativeCodexUnavailable} className="min-w-0 space-y-8">
         <ProfileEditorBody

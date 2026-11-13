@@ -14,10 +14,12 @@ import (
 	agentkubernetes "github.com/kandev/kandev/internal/agent/kubernetes"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/sshlaunch"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 	agenttypes "github.com/kandev/kandev/pkg/agent"
@@ -348,6 +350,11 @@ const (
 	// task-supplied metadata can never enable it, because that would let a
 	// task arm a destructive remote operation its profile never approved.
 	MetadataKeySSHReclaimTaskDir = "ssh_reclaim_task_dir"
+	// MetadataKeySSHLaunchReceipt carries the immutable launch proof a managed
+	// SSH controller self-reported during its authenticated handshake. It is
+	// the only durable evidence that survives session-directory loss, so it
+	// must be cleared by every replacement/reset path rather than merged.
+	MetadataKeySSHLaunchReceipt = sshlaunch.MetadataKey
 )
 
 // persistentMetadataKeys lists metadata keys carried forward from a previous
@@ -356,6 +363,7 @@ const (
 // are NOT copied on resume.
 var persistentMetadataKeys = map[string]bool{
 	MetadataKeyResourceCircuitIdentity:   true,
+	"kandev.builtin_mcp_binding":         true,
 	idleActivityMetadataKey:              true,
 	metadataKeySSHPassthroughState:       true,
 	deliveryPromptTurnBindingMetadataKey: true,
@@ -386,6 +394,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySSHIdentityFile:         true,
 	MetadataKeySSHShell:                true,
 	MetadataKeySSHReclaimTaskDir:       true,
+	MetadataKeySSHLaunchReceipt:        true,
 
 	// Remote Docker adopted agentctl identity.
 	MetadataKeyRemoteDockerAgentctlInstanceID: true,
@@ -473,6 +482,7 @@ var persistentMetadataPrefixes = []string{
 // process and end up sharing its ACP session and instance port.
 var sessionScopedMetadataKeys = map[string]bool{
 	MetadataKeyResourceCircuitIdentity:   true,
+	"kandev.builtin_mcp_binding":         true,
 	idleActivityMetadataKey:              true,
 	metadataKeySSHPassthroughState:       true,
 	deliveryPromptTurnBindingMetadataKey: true,
@@ -489,6 +499,7 @@ var sessionScopedMetadataKeys = map[string]bool{
 	MetadataKeyOriginalWorkspacePath: true,
 
 	MetadataKeySSHRemoteSessionDir:              true,
+	MetadataKeySSHLaunchReceipt:                 true,
 	MetadataKeySSHRemoteAgentctlPort:            true,
 	MetadataKeySSHRemoteAgentctlPID:             true,
 	MetadataKeySSHAgentctlInstanceID:            true,
@@ -696,10 +707,24 @@ type ExecutorCreateRequest struct {
 	DeliveryStreamID          string
 	DeliveryIncarnationID     string
 	DeliveryHarnessGeneration uint64
-	WorkspaceSourceRoots      []string
-	Protocol                  string
-	CodexAppServerEnabled     bool
-	Env                       map[string]string
+	// CopilotNativeSessionEvents is the manager-resolved opt-in after checking
+	// the provider, durable delivery, canonical projector, and authenticated
+	// peer capability. Executors only forward it; they never re-derive it.
+	CopilotNativeSessionEvents bool
+	WorkspaceSourceRoots       []string
+	Protocol                   string
+	CodexAppServerEnabled      bool
+	// Env is the launch request environment. Executors that adopt a retained
+	// process keep the peer's own environment instead (see ExecutorInstance.Env).
+	Env map[string]string
+	// RetainedBuiltinBinding is the exact persisted built-in MCP binding of the
+	// previous execution, captured before fresh-helper launch metadata strips it.
+	// Only a retained-peer adoption may restore it; fresh helpers never inherit it.
+	RetainedBuiltinBinding any
+	// RetainedResourceCircuitIdentity is the exact persisted resource-circuit
+	// identity of the previous execution. Adoption restores only this value and
+	// leaves the resource unknown when it is unavailable.
+	RetainedResourceCircuitIdentity any
 	// ApprovedSecretEnvKeys contains repository binding keys explicitly
 	// approved for SSH forwarding. Other request env keys remain filtered.
 	ApprovedSecretEnvKeys  []string
@@ -719,7 +744,12 @@ type ExecutorCreateRequest struct {
 	// OpenAI-compatible gateway right after initialize. Resolved from the
 	// launching profile's OpenAI-compatible provider fields.
 	ProviderGatewayAuth *acpprovider.GatewayAuth
-	AgentConfig         agents.Agent // Agent type info needed by runtimes
+	// AuthPolicy is the internal child-process authentication contract for an
+	// eligible host-local provider. Nil preserves existing behavior.
+	AuthPolicy *acpcompat.AuthPolicy
+	// LocalRuntimeEnv pins a validated host-local helper after environment merge.
+	LocalRuntimeEnv map[string]string
+	AgentConfig     agents.Agent // Agent type info needed by runtimes
 	// ManagedRuntimeVersion is the effective exact version resolved for this
 	// launch. Remote executors use it during preflight before agentctl receives
 	// the final command.
@@ -827,6 +857,11 @@ type ExecutorInstance struct {
 	// "provider session identity" row). Same recovery-only shape as Env above.
 	ProviderSessionID string
 
+	// CopilotNativeSessionEvents reports the adopted instance's actual vendor
+	// subscription state. Recovery must not infer it from the launch request:
+	// an older peer may have ignored the opt-in.
+	CopilotNativeSessionEvents bool
+
 	// DeliveryStatus is the authenticated recovery descriptor captured from the
 	// surviving instance before lifecycle re-tracking. It is nil for legacy
 	// runtimes and isolated recovery callers that do not advertise the durable
@@ -882,6 +917,17 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	for k, v := range ri.Metadata {
 		metadata[k] = v
 	}
+	adoptedPeer := ri.RuntimeName == agentruntime.RuntimeStandalone && instanceReusesExistingProcess(ri)
+	if adoptedPeer {
+		// Only the retained execution's persisted resource identity may charge
+		// that process. Leave the resource unknown when the evidence is absent;
+		// the requested execution's current-policy identity must not apply.
+		if value, ok := ri.Metadata[MetadataKeyResourceCircuitIdentity]; ok {
+			metadata[MetadataKeyResourceCircuitIdentity] = value
+		} else {
+			delete(metadata, MetadataKeyResourceCircuitIdentity)
+		}
+	}
 	// The adopted agentctl identity is process/runtime provenance, not a
 	// request preference. A fresh allocation must not inherit a stale adopted
 	// ID from the previous execution's metadata.
@@ -898,6 +944,20 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	workspacePath := ri.WorkspacePath
 	if workspacePath == "" {
 		workspacePath = req.WorkspacePath
+	}
+	workspaceSourceRoots := req.WorkspaceSourceRoots
+	if adoptedPeer || ri.WorkspaceSourceRoots != nil {
+		// A retained instance's own live allowlist is authoritative for
+		// adoption, including an explicitly empty list; request roots describe
+		// the replacement launch.
+		workspaceSourceRoots = ri.WorkspaceSourceRoots
+	}
+	runtimeEnv := req.Env
+	if adoptedPeer || ri.Env != nil {
+		// An adopted instance keeps the environment it was created with,
+		// including an empty one; a launch request's overrides must not be
+		// pushed into a surviving peer.
+		runtimeEnv = ri.Env
 	}
 	originalWorkspacePath := req.OriginalWorkspacePath
 	if originalWorkspacePath == "" {
@@ -942,11 +1002,12 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		OfficeAgentProfileID:       req.OfficeAgentProfileID,
 		promptTurnID:               req.PromptTurnID,
 		AgentID:                    agentID,
+		AuthPolicy:                 req.AuthPolicy,
 		ContainerID:                ri.ContainerID,
 		ContainerIP:                ri.ContainerIP,
 		WorkspacePath:              workspacePath,
 		OriginalWorkspacePath:      originalWorkspacePath,
-		WorkspaceSourceRoots:       append([]string(nil), req.WorkspaceSourceRoots...),
+		WorkspaceSourceRoots:       append([]string(nil), workspaceSourceRoots...),
 		DeliveryStreamID:           req.DeliveryStreamID,
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
@@ -965,7 +1026,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		historyEnabled:             historyEnabled,
 		promptDoneCh:               make(chan PromptCompletionSignal, 1),
 	}
-	execution.setRuntimeEnvironment(req.Env)
+	execution.setRuntimeEnvironment(runtimeEnv)
 	execution.sshApprovedEnvKeys = append([]string(nil), req.ApprovedSecretEnvKeys...)
 	return execution
 }

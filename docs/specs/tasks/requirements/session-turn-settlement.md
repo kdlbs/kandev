@@ -63,6 +63,9 @@ finished background job, must not hold the session busy after the agent stops.
 - **AC-TASKS-SESSION-TURN-SETTLEMENT-002.5:** When an agent-started turn
   completes, auto-run queued messages for that session shall be delivered without
   another user action.
+- **AC-TASKS-SESSION-TURN-SETTLEMENT-002.6:** A tool update that carries no
+  status shall not mark a ready session busy. Only turn content or a tool update
+  with a reported active status shall start an agent-started turn.
 
 ## Exclusions
 
@@ -75,3 +78,4 @@ finished background job, must not hold the session busy after the agent stops.
 
 - [Completion callback lease repair](../../../plans/completion-callback-lease/plan.md).
 - [Stuck turn and queue delivery repair](../../../plans/stuck-turn-queue-delivery/plan.md).
+- [Send Now claim loss repair](../../../plans/send-now-claim-loss/plan.md).

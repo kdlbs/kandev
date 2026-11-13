@@ -2,18 +2,33 @@ import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { formatNumber } from "@/lib/i18n/formats";
 import { controlHref } from "@/lib/navigation/integrated-control";
-import type { NativeDashboard } from "@/lib/types/control-native";
+import type { NativeDashboard, NativeTask, NativeTaskList } from "@/lib/types/control-native";
+import type {
+  ControlRead,
+  ControlReadStatus,
+} from "@/hooks/domains/coordinator/use-control-resource";
 import {
   waitReasonCounts,
   WAIT_REASONS,
   type WaitReason,
   type WaitReasonCounts,
 } from "./control-wait-reasons";
+import { taskWaitReason, taskWaitReasonLabelKey } from "./control-task-wait";
 
 export type WaitReasonWorkspace = { id: string; name: string };
 export type WaitReasonRow = {
   workspace: WaitReasonWorkspace;
   data?: NativeDashboard;
+  /** Per-task read retains unknown, denied and stale states per workspace. */
+  taskRead?: ControlRead<NativeTaskList>;
+};
+
+const TASK_READ_LABELS: Record<ControlReadStatus, string> = {
+  loading: "common:loading",
+  ready: "common:unknown",
+  denied: "sidebar:integratedControl.readDenied",
+  unsupported: "sidebar:controlRestore.contractUnavailable",
+  error: "sidebar:integratedControl.loadError",
 };
 
 const REASON_LABELS: Record<WaitReason, string> = {
@@ -37,6 +52,32 @@ function ReasonValue({ reason, counts }: { reason: WaitReason; counts: WaitReaso
   );
 }
 
+/** The named stopped tasks and their recorded reason; running tasks are omitted. */
+function TaskWaitRows({ tasks }: { tasks: NativeTask[] }) {
+  const { t } = useTranslation();
+  const stopped = tasks.flatMap((task) => {
+    const reason = taskWaitReason(task);
+    return reason ? [{ task, reason }] : [];
+  });
+  if (stopped.length === 0) return null;
+  return (
+    <ul className="mt-3 space-y-1 border-t pt-2 text-xs" data-testid="control-task-wait-list">
+      {stopped.map(({ task, reason }) => (
+        <li
+          key={task.task_id}
+          className="flex items-baseline justify-between gap-3"
+          data-testid="control-task-wait-row"
+        >
+          <span className="min-w-0 truncate text-muted-foreground">
+            {task.title || task.task_id}
+          </span>
+          <span className="shrink-0">{t(taskWaitReasonLabelKey(reason))}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /**
  * Why recorded work is not executing, per authorized workspace. Every value is
  * a task count from the same Native dashboard read the comparison uses; a
@@ -49,7 +90,7 @@ export function ControlWaitReasons({ rows }: { rows: WaitReasonRow[] }) {
     <section className="space-y-2" data-testid="control-wait-reasons">
       <h3 className="text-sm font-medium">{t("sidebar:controlSummary.waitReasons.title")}</h3>
       <div className="divide-y rounded-lg border">
-        {rows.map(({ workspace, data }) => {
+        {rows.map(({ workspace, data, taskRead }) => {
           const counts = waitReasonCounts(data);
           return (
             <div
@@ -79,6 +120,19 @@ export function ControlWaitReasons({ rows }: { rows: WaitReasonRow[] }) {
               ) : (
                 <p className="mt-2 text-sm text-muted-foreground">{t("common:unknown")}</p>
               )}
+              {taskRead && (taskRead.status !== "ready" || taskRead.stale) && (
+                <p
+                  role={
+                    taskRead.status === "denied" || taskRead.status === "error" ? "alert" : "status"
+                  }
+                  className="mt-2 text-xs text-muted-foreground"
+                >
+                  {taskRead.stale && taskRead.receivedAt
+                    ? t("sidebar:controlRefresh.retainedAt", { time: taskRead.receivedAt })
+                    : t(TASK_READ_LABELS[taskRead.status])}
+                </p>
+              )}
+              {taskRead?.data && <TaskWaitRows tasks={taskRead.data.tasks} />}
             </div>
           );
         })}

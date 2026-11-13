@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import { moveTierCandidate, removeTierCandidate, toggleTierJoin } from "./ordered-dynamic-tiers";
 import type { AgentProfile } from "@/lib/types/http";
 import type {
   DynamicAgentCandidate,
@@ -25,14 +27,17 @@ export type DynamicAgentProfileEditorDraft = {
   candidates: DynamicAgentCandidate[];
   profileEnabled: boolean;
   dynamicVersion: number;
+  keepModelWhileRunning: boolean;
   currentProfile: AgentProfile;
   savedProfile: AgentProfile;
   hasExternalConflict: boolean;
   updateName: (name: string) => void;
   updateProfileEnabled: (enabled: boolean) => void;
+  updateKeepModelWhileRunning: (enabled: boolean) => void;
   addCandidate: (executionProfileId: string) => void;
   moveCandidate: (index: number, direction: -1 | 1) => void;
   removeCandidate: (index: number) => void;
+  toggleJoin: (index: number) => void;
   updateCandidate: (index: number, patch: Partial<DynamicAgentCandidate>) => void;
   updateCandidatePolicy: (
     index: number,
@@ -62,8 +67,9 @@ export function dynamicDraftRevision(
   name: string,
   candidates: DynamicAgentCandidate[],
   enabled: boolean,
+  keepModelWhileRunning = true,
 ): string {
-  return JSON.stringify({ name, candidates, enabled });
+  return JSON.stringify({ name, candidates, enabled, keepModelWhileRunning });
 }
 
 // eslint-disable-next-line max-lines-per-function -- coordinates one draft and its candidate mutations.
@@ -71,12 +77,16 @@ export function useDynamicAgentProfileEditorDraft({
   profile,
   onDraftChange,
 }: DynamicAgentProfileEditorDraftProps): DynamicAgentProfileEditorDraft {
+  const tiersEnabled = useFeature("dynamicProfileTiers");
   const [name, setName] = useState(profile.name);
   const [candidates, setCandidates] = useState<DynamicAgentCandidate[]>(
     profile.dynamic?.candidates ?? [],
   );
   const [profileEnabled, setProfileEnabled] = useState(profile.enabled !== false);
   const [dynamicVersion, setDynamicVersion] = useState(profile.dynamic?.version ?? 1);
+  const [keepModelWhileRunning, setKeepModelWhileRunning] = useState(
+    profile.dynamic?.keepModelWhileRunning !== false,
+  );
   const [savedProfile, setSavedProfile] = useState(profile);
   const [hasExternalConflict, setHasExternalConflict] = useState(false);
   const previousProfileRef = useRef(profile);
@@ -88,7 +98,7 @@ export function useDynamicAgentProfileEditorDraft({
     ...profile,
     name,
     enabled: profileEnabled,
-    dynamic: { version: dynamicVersion, candidates },
+    dynamic: { version: dynamicVersion, candidates, keepModelWhileRunning },
   };
   savedProfileRef.current = savedProfile;
   currentProfileRef.current = currentProfile;
@@ -97,11 +107,16 @@ export function useDynamicAgentProfileEditorDraft({
     nextName: string,
     nextCandidates: DynamicAgentCandidate[],
     nextEnabled = profileEnabled,
+    nextKeepModel = keepModelWhileRunning,
   ) => {
     onDraftChange?.({
       name: nextName,
       enabled: nextEnabled,
-      dynamic: { version: dynamicVersion, candidates: nextCandidates },
+      dynamic: {
+        version: dynamicVersion,
+        candidates: nextCandidates,
+        keepModelWhileRunning: nextKeepModel,
+      },
     });
   };
 
@@ -113,6 +128,11 @@ export function useDynamicAgentProfileEditorDraft({
   const updateProfileEnabled = (enabled: boolean) => {
     setProfileEnabled(enabled);
     notifyDraft(name, candidates, enabled);
+  };
+
+  const updateKeepModelWhileRunning = (enabled: boolean) => {
+    setKeepModelWhileRunning(enabled);
+    notifyDraft(name, candidates, profileEnabled, enabled);
   };
 
   const addCandidate = (executionProfileId: string) => {
@@ -133,6 +153,11 @@ export function useDynamicAgentProfileEditorDraft({
 
   const moveCandidate = (index: number, direction: -1 | 1) => {
     setCandidates((current) => {
+      if (tiersEnabled) {
+        const next = moveTierCandidate(current, index, direction);
+        notifyDraft(name, next);
+        return next;
+      }
       const target = index + direction;
       if (target < 0 || target >= current.length) return current;
       const next = [...current];
@@ -145,6 +170,11 @@ export function useDynamicAgentProfileEditorDraft({
 
   const removeCandidate = (index: number) => {
     setCandidates((current) => {
+      if (tiersEnabled) {
+        const next = removeTierCandidate(current, index);
+        notifyDraft(name, next);
+        return next;
+      }
       const next = current
         .filter((_, candidateIndex) => candidateIndex !== index)
         .map((candidate, position) => ({ ...candidate, position }));
@@ -158,6 +188,15 @@ export function useDynamicAgentProfileEditorDraft({
       const next = current.map((candidate, candidateIndex) =>
         candidateIndex === index ? { ...candidate, ...patch } : candidate,
       );
+      notifyDraft(name, next);
+      return next;
+    });
+  };
+
+  const toggleJoin = (index: number) => {
+    if (!tiersEnabled) return;
+    setCandidates((current) => {
+      const next = toggleTierJoin(current, index);
       notifyDraft(name, next);
       return next;
     });
@@ -191,6 +230,7 @@ export function useDynamicAgentProfileEditorDraft({
     setProfileEnabled(nextProfile.enabled !== false);
     setCandidates(nextProfile.dynamic?.candidates ?? []);
     setDynamicVersion(nextProfile.dynamic?.version ?? 1);
+    setKeepModelWhileRunning(nextProfile.dynamic?.keepModelWhileRunning !== false);
     setHasExternalConflict(false);
     submittedProfileRef.current = null;
   };
@@ -200,6 +240,7 @@ export function useDynamicAgentProfileEditorDraft({
     setProfileEnabled(nextProfile.enabled !== false);
     setCandidates(nextProfile.dynamic?.candidates ?? []);
     setDynamicVersion(nextProfile.dynamic?.version ?? 1);
+    setKeepModelWhileRunning(nextProfile.dynamic?.keepModelWhileRunning !== false);
   }, []);
 
   const markProfileSubmitted = useCallback((submitted: AgentProfile | null) => {
@@ -251,14 +292,17 @@ export function useDynamicAgentProfileEditorDraft({
     candidates,
     profileEnabled,
     dynamicVersion,
+    keepModelWhileRunning,
     currentProfile,
     savedProfile,
     hasExternalConflict,
     updateName,
     updateProfileEnabled,
+    updateKeepModelWhileRunning,
     addCandidate,
     moveCandidate,
     removeCandidate,
+    toggleJoin,
     updateCandidate,
     updateCandidatePolicy,
     applyProfile,

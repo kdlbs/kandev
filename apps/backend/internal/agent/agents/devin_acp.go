@@ -16,7 +16,11 @@ var devinACPLogoLight []byte
 //go:embed logos/devin_acp_dark.svg
 var devinACPLogoDark []byte
 
-const devinACPBin = "devin"
+const (
+	// DevinACPAgentID is Devin's registered agent identity.
+	DevinACPAgentID = "devin-acp"
+	devinACPBin     = "devin"
+)
 
 const (
 	devinCredentialsDir     = ".local/share/devin"
@@ -60,7 +64,7 @@ func NewDevinACP() *DevinACP {
 	}
 }
 
-func (a *DevinACP) ID() string          { return "devin-acp" }
+func (a *DevinACP) ID() string          { return DevinACPAgentID }
 func (a *DevinACP) Name() string        { return "Devin ACP Agent" }
 func (a *DevinACP) DisplayName() string { return "Devin" }
 func (a *DevinACP) Description() string {

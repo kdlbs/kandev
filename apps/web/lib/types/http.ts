@@ -323,6 +323,12 @@ export type Workspace = {
   default_config_agent_profile_id?: AgentProfileId | null;
   acp_idle_suspension_enabled: boolean;
   acp_idle_timeout_minutes: number;
+  /** Opt-in automatic Try next after a mid-turn provider-capacity failure. */
+  dynamic_midturn_failover_enabled?: boolean;
+  /** Opt-in automatic Retry of a route a provider-capacity failure left in recovery. */
+  dynamic_failed_route_auto_retry_enabled?: boolean;
+  /** Automatic retries allowed between successful turns, 1-3. */
+  dynamic_failed_route_auto_retry_max?: number;
   office_workflow_id?: WorkflowId;
   created_at: string;
   updated_at: string;
@@ -767,6 +773,12 @@ export type TaskSession = ActiveSubagentCountFields & {
   worktree_branch?: string;
   /** Effective task root containing every attached workspace source. */
   workspace_path?: string;
+  /**
+   * Confirmed native-session working directory used as the base for
+   * repository-relative chat links. Omitted means no update; null means the
+   * backend has no authoritative value.
+   */
+  agent_workspace_path?: string | null;
   worktrees?: TaskSessionWorktree[];
   task_environment_id?: string;
   /** Latest path-free managed workspace recovery operation for this environment. */

@@ -710,6 +710,8 @@ func (s *Server) handleAgentStreamRequest(ctx context.Context, msg *ws.Message) 
 		return s.handleWSSetConfigOption(ctx, msg)
 	case "agent.session.authenticate":
 		return s.handleWSAuthenticate(ctx, msg)
+	case "agent.auth.status":
+		return s.handleWSAuthStatus(msg)
 	case "agent.session.reset":
 		return s.handleWSResetSession(ctx, msg)
 	default:
@@ -930,6 +932,9 @@ func (s *Server) sessionMCPServers(requested []types.McpServer) ([]types.McpServ
 	if err != nil {
 		return nil, err
 	}
+	if s.cfg.McpProfile != nil && s.cfg.McpProfile.BuiltinPackages != nil {
+		return s.builtinSessionMCPServers(servers)
+	}
 	if s.mcpServer == nil && s.procMgr.RequiresManagedToolPolicy() {
 		return nil, errors.New("managed conversation MCP broker is unavailable")
 	}
@@ -950,6 +955,9 @@ func (s *Server) startMCPAttachmentAttempt(ctx context.Context, servers []types.
 		ExecutionID: s.cfg.InstanceID,
 		AgentID:     s.cfg.AgentType,
 		StartedAt:   time.Now().UTC(),
+	}
+	if s.cfg.McpProfile != nil {
+		attempt.BuiltinPackages = s.cfg.McpProfile.BuiltinPackages.Clone()
 	}
 	s.procMgr.PublishMCPAttachmentAttempt(attempt)
 	if s.mcpServer != nil {
@@ -1023,19 +1031,20 @@ func mcpAttachmentEvidence(
 		target = streams.SanitizeMCPNetworkTarget(mcpServer.URL)
 	}
 	source := streams.MCPServerSourceProfile
-	if mcpServer.Name == kandevMcpServerName {
+	if mcpServer.Name == kandevMcpServerName || mcpServer.IsInjectedBuiltin() {
 		source = streams.MCPServerSourceKandev
 	}
 	return streams.MCPAttachmentEvidence{
-		AttemptID:  attemptID,
-		ServerName: mcpServer.Name,
-		Kind:       kind,
-		OccurredAt: time.Now().UTC(),
-		Source:     source,
-		Transport:  mcpServer.Type,
-		Target:     target,
-		ReasonCode: reasonCode,
-		Summary:    streams.SanitizeMCPErrorSummary(summary),
+		BuiltinPackage: mcpServer.BuiltinPackage,
+		AttemptID:      attemptID,
+		ServerName:     mcpServer.Name,
+		Kind:           kind,
+		OccurredAt:     time.Now().UTC(),
+		Source:         source,
+		Transport:      mcpServer.Type,
+		Target:         target,
+		ReasonCode:     reasonCode,
+		Summary:        streams.SanitizeMCPErrorSummary(summary),
 	}
 }
 
@@ -1286,7 +1295,7 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 	// the user cancels, or agentctl shuts down.
 	go func() {
 		prompt := func(promptCtx context.Context) error {
-			return promptOrSteer(promptCtx, adapter, req)
+			return s.promptWithUsageSelection(promptCtx, adapter, req)
 		}
 		var err error
 		if durableDelivery {
@@ -1639,6 +1648,33 @@ func (s *Server) handleWSAuthenticate(ctx context.Context, msg *ws.Message) *ws.
 		}
 		return aa.Authenticate(ctx, req.MethodID)
 	})
+}
+
+func (s *Server) handleWSAuthStatus(msg *ws.Message) *ws.Message {
+	var req struct {
+		AttemptID string `json:"attempt_id,omitempty"`
+	}
+	if err := msg.ParsePayload(&req); err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid request: "+err.Error(), nil)
+		return resp
+	}
+	agentAdapter := s.procMgr.GetAdapter()
+	if agentAdapter == nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
+		return resp
+	}
+	provider, ok := agentAdapter.(adapter.AuthStatusProvider)
+	if !ok {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnavailable, "agentctl does not support auth status; upgrade required", nil)
+		return resp
+	}
+	status := provider.AuthStatus()
+	if req.AttemptID != "" && status.AttemptID != req.AttemptID {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "auth attempt is no longer active", nil)
+		return resp
+	}
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, status)
+	return resp
 }
 
 func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.Message {

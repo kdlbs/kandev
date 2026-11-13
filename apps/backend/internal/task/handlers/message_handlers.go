@@ -12,11 +12,14 @@ import (
 	"unicode"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/entityrefs"
+	builtinintent "github.com/kandev/kandev/internal/mcp/intent"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -95,6 +98,19 @@ type AtomicQueuedPromptCoordinator interface {
 	NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID string)
 }
 
+// messageTurnCapacityReserver reserves one bounded message-turn slot before a
+// direct request is acknowledged. admitted=false means the caller must persist
+// durable pending input instead of dispatching.
+type messageTurnCapacityReserver interface {
+	ReserveMessageTurn(ctx context.Context, taskID, sessionID, incarnationID string) (*orchestrator.MessageTurnReservation, bool)
+}
+
+// messageCapacityWaitRegistrar records an accepted queue head that is blocked
+// only by the session ceiling, so the shared capacity sweep can retry it.
+type messageCapacityWaitRegistrar interface {
+	RegisterMessageCapacityWait(ctx context.Context, taskID, sessionID, entryID string)
+}
+
 type recordedMessageSteerer interface {
 	SteerRecordedMessage(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error)
 }
@@ -144,6 +160,7 @@ type canvasGuidanceProjection struct {
 	promptReferencesPrepared      bool
 	initialTaskBriefDispatchOwner bool
 	deliverySubmissionID          string
+	promptTurnID                  string
 }
 
 // MessageHandlers handles WebSocket requests for messages
@@ -257,8 +274,8 @@ func (h *MessageHandlers) injectMessageContext(
 		content, h.taskPullRequestTargets(ctx, task),
 	)
 	if task.IsFromOffice {
-		return sysprompt.InjectOfficeContextWithOptions(
-			req.TaskID, req.TaskSessionID, content, requiresSignal,
+		return sysprompt.InjectOfficeContextWithPackages(
+			req.TaskID, req.TaskSessionID, content, requiresSignal, req.builtinPackages,
 			referenceContext, trustedPromptContext, pullRequestTargetContext,
 		)
 	}
@@ -269,6 +286,7 @@ func (h *MessageHandlers) injectMessageContext(
 		return content
 	}
 	return sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, content, sysprompt.KandevContextOptions{
+		BuiltinPackages:                req.builtinPackages,
 		RequiresCompletionSignal:       requiresSignal,
 		IncludeCoordinatorTaskControls: !configMode,
 		IncludeTaskTitleTool:           !configMode && titleOwner,
@@ -386,7 +404,7 @@ func (h *MessageHandlers) httpGetShellOutput(c *gin.Context) {
 }
 
 func (h *MessageHandlers) registerWS(dispatcher *ws.Dispatcher) {
-	dispatcher.RegisterFunc(ws.ActionMessageAdd, h.wsAddMessage)
+	dispatcher.RegisterFunc(ws.ActionMessageAdd, h.wsAddMessageWithFlow)
 	dispatcher.RegisterFunc(ws.ActionMessageDismissGitPushError, h.wsDismissGitPushErrorMessage)
 	dispatcher.RegisterFunc(ws.ActionMessageList, h.wsListMessages)
 	dispatcher.RegisterFunc(ws.ActionMessageSearch, h.wsSearchMessages)
@@ -609,6 +627,7 @@ func (h *MessageHandlers) httpListMessages(c *gin.Context) {
 // WS handlers
 
 type wsAddMessageRequest struct {
+	BuiltinIntent         builtinintent.Intent            `json:"builtin_intent,omitempty"`
 	TaskID                string                          `json:"task_id"`
 	TaskSessionID         string                          `json:"session_id"`
 	MessageID             string                          `json:"message_id,omitempty"`
@@ -631,14 +650,17 @@ type wsAddMessageRequest struct {
 	// These fields are server-owned and are carried only from message admission
 	// to the created-session dispatch. They are intentionally not JSON fields.
 	canvasGuidanceResolved          bool
+	builtinPackages                 *mcpprofile.BuiltinManifest
 	includeCanvasGuidance           bool
 	initialTaskBriefSelected        bool
 	promptReferencesPrepared        bool
 	initialTaskBriefDispatchPending bool
 	deliverySubmissionID            string
+	promptTurnID                    string
 }
 
 type addMessageReplayIdentity struct {
+	BuiltinIntent          builtinintent.Intent            `json:"builtin_intent,omitempty"`
 	TaskID                 string                          `json:"task_id"`
 	TaskSessionID          string                          `json:"session_id"`
 	Content                string                          `json:"content"`
@@ -657,7 +679,7 @@ type addMessageReplayIdentity struct {
 
 func addMessageRequestFingerprint(req wsAddMessageRequest) (string, error) {
 	return plancomments.Fingerprint(addMessageReplayIdentity{
-		TaskID: req.TaskID, TaskSessionID: req.TaskSessionID, Content: req.Content,
+		BuiltinIntent: req.BuiltinIntent, TaskID: req.TaskID, TaskSessionID: req.TaskSessionID, Content: req.Content,
 		AuthorID: req.AuthorID, Model: req.Model, PlanMode: req.PlanMode,
 		HasReviewComments: req.HasReviewComments, Attachments: req.Attachments,
 		ContextFiles: req.ContextFiles, EntityReferences: req.EntityReferences,
@@ -672,6 +694,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	var req wsAddMessageRequest
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if err := req.BuiltinIntent.Validate(); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
 	req.Content = strings.TrimSpace(req.Content)
 	req.MessageID = strings.TrimSpace(req.MessageID)
@@ -695,6 +720,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// before checking the live session state or running turn-start hooks so a
 	// retry is a read, not a second prompt.
 	if response, handled := h.addMessageReplayResponse(ctx, msg, req, requestFingerprint); handled {
+		h.logger.Flow(ctx, logger.ExecutionFlow{Stage: "request", Outcome: "replayed", TaskID: req.TaskID, SessionID: req.TaskSessionID, MessageID: req.ClientMessageID})
 		return response, nil
 	}
 	admissionCtx := ctx
@@ -863,8 +889,14 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	isCreatedSession := sessionResp.Session.State == models.TaskSessionStateCreated
 	startCreatedSession := isCreatedSession || wasCreatedSession
 
+	ctx, err = builtinintent.PrepareRequest(ctx, h.orchestrator, req.TaskID, req.TaskSessionID, req.BuiltinIntent)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+
 	// Build metadata with attachments, plan mode, review comments, and context files
 	meta := orchestrator.NewUserMessageMeta().
+		WithBuiltinIntent(req.BuiltinIntent).
 		WithPlanMode(req.PlanMode).
 		WithReviewComments(req.HasReviewComments).
 		WithAttachments(req.Attachments).
@@ -902,6 +934,10 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	titleOwner := false
 	hasMessageContent := req.Content != "" || len(req.Attachments) > 0 ||
 		len(req.PlanCommentRefs) > 0 || len(req.PreviewFeedbackRefs) > 0
+	// Comment-bearing messages already use the queue row as their durable
+	// dispatch receipt; ordinary messages only take that path when capacity
+	// refuses the new turn.
+	atomicQueuedTaskFeedback := len(req.PlanCommentRefs) > 0 || len(req.PreviewFeedbackRefs) > 0
 	initialTaskBriefEligible := eligibleForInitialTaskBrief(
 		task, sessionResp, configMode, startCreatedSession, hasMessageContent,
 	)
@@ -921,6 +957,16 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	)
 	if wsErr != nil {
 		return wsErr, nil
+	}
+	if (startCreatedSession || titleOwner || initialTaskBriefEligible) && hasMessageContent {
+		ctx, err = h.prepareBuiltinMessageContext(ctx, req.TaskID, req.TaskSessionID)
+		if err != nil {
+			h.logger.Warn("failed to prepare built-in MCP prompt", zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to prepare built-in MCP tools", nil)
+		}
+		if profile := executor.PreparedMCPProfile(ctx, req.TaskID, req.TaskSessionID); profile != nil {
+			req.builtinPackages = profile.BuiltinPackages
+		}
 	}
 	if (startCreatedSession || titleOwner) && hasMessageContent {
 		// The first prompt on a new or eager Quick Chat session is the kanban
@@ -951,10 +997,42 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		req.canvasGuidanceResolved = canvasGuidanceResolved
 		req.includeCanvasGuidance = includeCanvasGuidance
 	}
+	initialBriefRequest := req
 	initialTaskBrief := h.prepareInitialTaskBriefCandidate(
-		ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, hasMessageContent,
+		ctx, initialBriefRequest, sessionResp, task, configMode, startCreatedSession, titleOwner, hasMessageContent,
 		initialTaskBriefEligible,
 	)
+	// Reserve the new turn before the request is acknowledged. A refusal turns
+	// this ordinary message into durable pending input instead of starting a
+	// warm runtime beyond the enabled ceiling. Steers deliver into an existing
+	// admitted turn and are not new turns.
+	capacityQueue := false
+	var capacityReservation *orchestrator.MessageTurnReservation
+	if h.orchestrator != nil && !atomicQueuedTaskFeedback && !turnStartResult.Queued && !steer {
+		if reserver, ok := h.orchestrator.(messageTurnCapacityReserver); ok {
+			var admitted bool
+			capacityReservation, admitted = reserver.ReserveMessageTurn(
+				ctx, req.TaskID, req.TaskSessionID, sessionResp.Session.QueueIncarnationID,
+			)
+			capacityQueue = !admitted
+		}
+	}
+	if capacityQueue && initialTaskBrief != nil {
+		// The queue transaction used for capacity admission does not select an
+		// initial-brief candidate. Preserve its composed first prompt in the
+		// message content instead of dropping the brief.
+		storedContent = initialTaskBrief.Content
+		trustedPromptContext = initialTaskBrief.PromptReferenceContext
+		initialTaskBrief = nil
+	}
+	reservationTransferred := false
+	if capacityReservation != nil {
+		defer func() {
+			if !reservationTransferred {
+				capacityReservation.Release()
+			}
+		}()
+	}
 	req.Content = storedContent
 	if planCommentAttachmentClaim == nil {
 		err = h.service.ClaimMessageAttachments(ctx, req.TaskID, req.TaskSessionID, req.Attachments)
@@ -988,7 +1066,6 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// Every comment-bearing message uses the queue row as a durable dispatch
 	// receipt. Promptable sessions drain it immediately; workflow waits and
 	// process restarts retain the same caller-owned delivery identity.
-	atomicQueuedTaskFeedback := len(req.PlanCommentRefs) > 0 || len(req.PreviewFeedbackRefs) > 0
 	var queuedCoordinator AtomicQueuedPromptCoordinator
 	if atomicQueuedTaskFeedback {
 		var ok bool
@@ -1009,6 +1086,33 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 	}()
 	createMessage := func(messageCtx context.Context) (*models.Message, error) {
+		if capacityQueue {
+			capacityMessageID := req.ClientMessageID
+			if capacityMessageID == "" {
+				capacityMessageID = uuid.NewString()
+			}
+			queueMetadata := meta.ToMap()
+			if queueMetadata == nil {
+				queueMetadata = make(map[string]interface{})
+			}
+			queueMetadata["user_message_recorded"] = true
+			queueMetadata[messagequeue.MetadataDurableTranscriptMessageID] = capacityMessageID
+			queueMetadata[orchestrator.MetaKeyTurnStartAlreadyProcessed] = true
+			queued := &messagequeue.QueuedMessage{
+				ID: capacityMessageID, SessionID: req.TaskSessionID, TaskID: req.TaskID,
+				Content: storedContent, Model: req.Model, PlanMode: req.PlanMode,
+				Attachments: queuedMessageAttachments(req.Attachments), Metadata: queueMetadata,
+				QueuedBy: messagequeue.QueuedByUser,
+			}
+			maxPerSession := messagequeue.DefaultMaxPerSession
+			if coordinator, ok := h.orchestrator.(AtomicQueuedPromptCoordinator); ok {
+				maxPerSession = coordinator.MaxQueuedPromptsPerSession()
+			}
+			createdMessage, _, createErr := h.service.CreateQueuedMessageOnce(
+				messageCtx, capacityMessageID, createRequest, queued, maxPerSession,
+			)
+			return createdMessage, createErr
+		}
 		if atomicQueuedTaskFeedback {
 			queueMetadata := make(map[string]interface{}, len(createRequest.Metadata)+1)
 			for key, value := range createRequest.Metadata {
@@ -1023,14 +1127,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 				Attachments: queuedMessageAttachments(req.Attachments), Metadata: queueMetadata,
 				QueuedBy: messagequeue.QueuedByUser,
 			}
-			created, createErr := h.service.CreateQueuedMessageIdempotent(
+			return h.service.CreateQueuedMessageIdempotent(
 				messageCtx, req.ClientMessageID, createRequest, queued, queuedCoordinator.MaxQueuedPromptsPerSession(),
 			)
-			if createErr == nil && (createRequest.InitialTaskBrief == nil ||
-				createRequest.InitialTaskBrief.Selected || (created != nil && created.PromptIndex == 1)) {
-				queuedCoordinator.NotifyQueuedUserPrompt(messageCtx, req.TaskID, req.TaskSessionID)
-			}
-			return created, createErr
 		}
 		if req.ClientMessageID != "" {
 			return h.service.CreateMessageIdempotent(messageCtx, req.ClientMessageID, createRequest)
@@ -1078,7 +1177,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 		task = freshTask
 		initialTaskBrief = h.prepareInitialTaskBriefCandidate(
-			admissionCtx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, hasMessageContent,
+			admissionCtx, initialBriefRequest, sessionResp, task, configMode, startCreatedSession, titleOwner, hasMessageContent,
 			initialTaskBriefEligible,
 		)
 		createRequest.InitialTaskBrief = initialTaskBrief
@@ -1096,14 +1195,20 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		h.logger.Error("failed to create message", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create message", nil)
 	}
+	// Queue notification must run outside the session admission gate.
+	if atomicQueuedTaskFeedback && (createRequest.InitialTaskBrief == nil ||
+		createRequest.InitialTaskBrief.Selected || message.PromptIndex == 1) {
+		queuedCoordinator.NotifyQueuedUserPrompt(ctx, req.TaskID, req.TaskSessionID)
+	}
 	req.Content = message.Content
 	req.deliverySubmissionID = message.ID
+	req.promptTurnID = message.TurnID
 	initialTaskBriefQueued := (initialTaskBrief != nil && !initialTaskBrief.Selected) || queueBehindInitialBriefDispatch
 	// An idempotent create can return a row committed by another process, so
 	// the candidate pointer is not necessarily the object that selected the
 	// first slot. Recover that result from the committed row before deciding who
 	// owns created-session launch.
-	if initialTaskBriefQueued && message.PromptIndex == 1 && message.Content == initialTaskBrief.Content {
+	if initialTaskBriefQueued && initialTaskBrief != nil && message.PromptIndex == 1 && message.Content == initialTaskBrief.Content {
 		initialTaskBrief.Selected = true
 		initialTaskBriefQueued = false
 	}
@@ -1113,7 +1218,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		promptReferencesPrepared = initialTaskBrief.PromptReferencesPrepared
 		req.promptReferencesPrepared = promptReferencesPrepared
 	}
-	if initialTaskBriefQueued && h.orchestrator != nil && !atomicQueuedTaskFeedback {
+	if initialTaskBriefQueued && !capacityQueue && h.orchestrator != nil && !atomicQueuedTaskFeedback {
 		queueMetadata := meta.ToMap()
 		if queueMetadata == nil {
 			queueMetadata = make(map[string]interface{})
@@ -1169,9 +1274,19 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// an orchestrator is available. This runs async so the WS request can
 	// respond immediately. Plan mode changes the execution prompt and agent
 	// behavior; it does not make message.add a record-only operation.
-	if h.orchestrator != nil && !turnStartResult.Queued && !atomicQueuedTaskFeedback && !initialTaskBriefQueued {
+	if capacityQueue {
+		if registrar, ok := h.orchestrator.(messageCapacityWaitRegistrar); ok {
+			registrar.RegisterMessageCapacityWait(ctx, req.TaskID, req.TaskSessionID, req.ClientMessageID)
+		}
+	} else if h.orchestrator != nil && !turnStartResult.Queued && !atomicQueuedTaskFeedback && !initialTaskBriefQueued {
+		dispatchCtx := ctx
+		if capacityReservation != nil {
+			dispatchCtx = capacityReservation.Context(ctx)
+			reservationTransferred = true
+		}
 		h.dispatchPromptAsync(
-			ctx, req, sessionResp.Session.AgentProfileID, startCreatedSession, steer, trustedPromptContext,
+			dispatchCtx, req, sessionResp.Session.AgentProfileID, startCreatedSession, steer, trustedPromptContext,
+			capacityReservation,
 		)
 		// The async delivery now owns completion of the selected first dispatch.
 		initialBriefDispatchMarked = false
@@ -1683,6 +1798,7 @@ func (h *MessageHandlers) dispatchPromptAsync(
 	agentProfileID string,
 	isCreatedSession, steer bool,
 	trustedPromptContext string,
+	capacityReservation *orchestrator.MessageTurnReservation,
 ) {
 	taskID := req.TaskID
 	sessionID := req.TaskSessionID
@@ -1692,6 +1808,12 @@ func (h *MessageHandlers) dispatchPromptAsync(
 	attachments := req.Attachments
 	go func() {
 		promptCtx := context.WithoutCancel(ctx)
+		if capacityReservation != nil {
+			// A start path that never reaches promptTask must still return its
+			// reserved slot after the session is counted or the launch fails.
+			defer capacityReservation.Release()
+		}
+		h.logger.Flow(promptCtx, logger.ExecutionFlow{Stage: "dispatch", Outcome: "submitted", TaskID: taskID, SessionID: sessionID, ProfileID: agentProfileID, MessageID: req.ClientMessageID, SubmissionID: req.deliverySubmissionID, Model: model})
 		if req.initialTaskBriefDispatchPending {
 			if coordinator, ok := h.orchestrator.(initialTaskBriefDispatchCoordinator); ok {
 				defer coordinator.CompleteInitialTaskBriefDispatch(promptCtx, taskID, sessionID)
@@ -1699,7 +1821,7 @@ func (h *MessageHandlers) dispatchPromptAsync(
 		}
 		if steer {
 			h.forwardMessageAsSteer(
-				promptCtx, taskID, sessionID, content, model, planMode, attachments, req.deliverySubmissionID,
+				promptCtx, taskID, sessionID, content, model, planMode, attachments, req.deliverySubmissionID, req.promptTurnID,
 			)
 			return
 		}
@@ -1713,6 +1835,7 @@ func (h *MessageHandlers) dispatchPromptAsync(
 				promptReferencesPrepared:      req.promptReferencesPrepared,
 				initialTaskBriefDispatchOwner: req.initialTaskBriefDispatchPending,
 				deliverySubmissionID:          req.deliverySubmissionID,
+				promptTurnID:                  req.promptTurnID,
 			},
 		)
 	}()
@@ -1752,7 +1875,12 @@ func (h *MessageHandlers) forwardMessageAsSteer(
 	planMode bool,
 	attachments []v1.MessageAttachment,
 	deliverySubmissionID string,
+	promptTurnIDs ...string,
 ) {
+	promptTurnID := ""
+	if len(promptTurnIDs) > 0 {
+		promptTurnID = promptTurnIDs[0]
+	}
 	var err error
 	if steerer, ok := h.orchestrator.(recordedMessageSteerer); ok {
 		_, err = steerer.SteerRecordedMessage(ctx, taskID, sessionID, content, model, planMode, attachments)
@@ -1771,7 +1899,7 @@ func (h *MessageHandlers) forwardMessageAsSteer(
 		// targets a RUNNING session, never a CREATED one, so this takes the
 		// ordinary prompt branch (PromptTask + resume + error handling).
 		h.forwardMessageAsPrompt(ctx, taskID, sessionID, "", content, model, planMode, attachments, nil, false, "",
-			canvasGuidanceProjection{deliverySubmissionID: deliverySubmissionID})
+			canvasGuidanceProjection{deliverySubmissionID: deliverySubmissionID, promptTurnID: promptTurnID})
 		return
 	}
 	if errors.Is(err, orchestrator.ErrSessionRecoveryRequired) {
@@ -1779,7 +1907,7 @@ func (h *MessageHandlers) forwardMessageAsSteer(
 		return
 	}
 	if !isAgentReportedError(err) {
-		h.createPromptErrorMessage(ctx, taskID, sessionID, err)
+		h.createPromptErrorMessage(ctx, taskID, sessionID, err, promptTurnID)
 	}
 }
 
@@ -1868,6 +1996,7 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 			if _, createErr := h.service.CreateMessage(ctx, &service.CreateMessageRequest{
 				TaskSessionID: sessionID,
 				TaskID:        taskID,
+				TurnID:        projection.promptTurnID,
 				Content:       errorMsg,
 				AuthorType:    "agent",
 				Type:          string(v1.MessageTypeError),
@@ -1888,10 +2017,12 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 	promptReferencesPrepared := false
 	initialTaskBriefDispatchOwner := false
 	deliverySubmissionID := ""
+	promptTurnID := ""
 	if len(canvasGuidance) > 0 {
 		promptReferencesPrepared = canvasGuidance[0].promptReferencesPrepared
 		initialTaskBriefDispatchOwner = canvasGuidance[0].initialTaskBriefDispatchOwner
 		deliverySubmissionID = canvasGuidance[0].deliverySubmissionID
+		promptTurnID = canvasGuidance[0].promptTurnID
 	}
 	if deliveryPrompt, ok := h.orchestrator.(deliverySubmissionPromptOrchestrator); ok && len(canvasGuidance) > 0 && canvasGuidance[0].deliverySubmissionID != "" {
 		_, err = deliveryPrompt.PromptTaskWithDeliverySubmissionID(
@@ -1925,6 +2056,11 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 			trustedPromptContext, promptReferencesPrepared, references, initialTaskBriefDispatchOwner, deliverySubmissionID, err,
 		)
 	}
+	if err != nil && h.queuePromptIfCapacityRefused(
+		ctx, taskID, sessionID, content, model, planMode, attachments, deliverySubmissionID, err,
+	) {
+		return
+	}
 	if err != nil {
 		if errors.Is(err, orchestrator.ErrSessionRecoveryRequired) {
 			h.markDeliveryMessageBlocked(ctx, deliverySubmissionID)
@@ -1936,7 +2072,7 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 		if !isAgentReportedError(err) &&
 			!h.queuePromptIfRuntimeUnavailable(ctx, taskID, sessionID, content, model, planMode, attachments, err) &&
 			!isPromptErrorOwnedByRecovery(err) {
-			h.createPromptErrorMessage(ctx, taskID, sessionID, err)
+			h.createPromptErrorMessage(ctx, taskID, sessionID, err, promptTurnID)
 		}
 	}
 }
@@ -2009,6 +2145,54 @@ func (h *MessageHandlers) queuePromptIfRuntimeUnavailable(
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
 		zap.Error(promptErr))
+	return true
+}
+
+// queuePromptIfCapacityRefused turns an accepted direct message into durable
+// pending input when its fallback dispatch (for example a steer that is no
+// longer eligible) loses the capacity race. The transcript already exists, so
+// the queue receipt carries its identity and records no second row.
+func (h *MessageHandlers) queuePromptIfCapacityRefused(
+	ctx context.Context,
+	taskID, sessionID, content, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	deliverySubmissionID string,
+	promptErr error,
+) bool {
+	if !orchestrator.IsMessageTurnCapacityRefusal(promptErr) || h.orchestrator == nil ||
+		deliverySubmissionID == "" {
+		return false
+	}
+	session, err := h.service.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || isTerminalSessionState(session.State) {
+		return false
+	}
+	queueMetadata := orchestrator.NewUserMessageMeta().
+		WithPlanMode(planMode).
+		WithAttachments(attachments).
+		ToMap()
+	if queueMetadata == nil {
+		queueMetadata = make(map[string]interface{})
+	}
+	queueMetadata["user_message_recorded"] = true
+	queueMetadata[orchestrator.MetaKeyTurnStartAlreadyProcessed] = true
+	queueMetadata[messagequeue.MetadataDurableTranscriptMessageID] = deliverySubmissionID
+	if queueErr := h.orchestrator.QueueUserPrompt(
+		ctx, taskID, sessionID, content, model, planMode, attachments, queueMetadata, true,
+	); queueErr != nil {
+		h.logger.Warn("failed to queue prompt after capacity refusal",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(queueErr))
+		return false
+	}
+	if registrar, ok := h.orchestrator.(messageCapacityWaitRegistrar); ok {
+		registrar.RegisterMessageCapacityWait(ctx, taskID, sessionID, "")
+	}
+	h.logger.Info("queued accepted prompt until session ceiling capacity is available",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID))
 	return true
 }
 
@@ -2162,7 +2346,11 @@ func (h *MessageHandlers) handlePromptWithResume(
 
 // createPromptErrorMessage creates an agent error message visible to the user when
 // forwarding a prompt to the agent fails.
-func (h *MessageHandlers) createPromptErrorMessage(ctx context.Context, taskID, sessionID string, promptErr error) {
+func (h *MessageHandlers) createPromptErrorMessage(ctx context.Context, taskID, sessionID string, promptErr error, turnIDs ...string) {
+	turnID := ""
+	if len(turnIDs) > 0 {
+		turnID = turnIDs[0]
+	}
 	h.logger.Warn("failed to forward message as prompt to agent",
 		zap.String("task_id", taskID),
 		zap.Error(promptErr))
@@ -2180,6 +2368,7 @@ func (h *MessageHandlers) createPromptErrorMessage(ctx context.Context, taskID, 
 	if _, createErr := h.service.CreateMessage(ctx, &service.CreateMessageRequest{
 		TaskSessionID: sessionID,
 		TaskID:        taskID,
+		TurnID:        turnID,
 		Content:       errorMsg,
 		AuthorType:    "agent",
 		Type:          string(v1.MessageTypeError),

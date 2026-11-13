@@ -166,7 +166,7 @@ workspace's saved default or pick another machine.
 
 ## Admission and execution
 
-Legacy Office `local_pc` selections resolve to the built-in local executor for
+Legacy `local` and `local_pc` selections resolve to the built-in local executor for
 ownership admission only when no actual executor row has that ID. Existing
 rows (including retired rows), inaccessible profiles, unknown IDs, and repository failures never fall
 back through this compatibility alias. Session and inherited-environment checks

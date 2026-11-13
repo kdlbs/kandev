@@ -155,9 +155,6 @@ export class SessionPage {
   prClosedDismissButton() {
     return this.page.getByTestId("pr-closed-dismiss-button");
   }
-  prStatusChip() {
-    return this.activeChat().getByTestId("chat-status-bar").getByTestId("pr-status-chip");
-  }
   todoIndicator() {
     return this.activeChat().getByTestId("todo-indicator");
   }
@@ -555,6 +552,35 @@ export class SessionPage {
   /** Inline Send button shown next to the custom input on touch devices. */
   clarificationCustomSubmit(): Locator {
     return this.page.getByTestId("clarification-custom-submit");
+  }
+  /** Paperclip trigger for question-answer files (header or custom row). */
+  clarificationAttachmentTrigger(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-attachment-trigger");
+  }
+
+  /** Hidden file input used by the paperclip. */
+  clarificationAttachmentInput(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-attachment-input");
+  }
+
+  /** Paperclip count/progress/failure badge. */
+  clarificationAttachmentBadge(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-attachment-badge");
+  }
+
+  /** On-demand answer-file manager surface. */
+  clarificationAttachmentManager(): Locator {
+    return this.page.getByTestId("clarification-attachment-manager");
+  }
+
+  /** Submits the active single-question or multi-question answer explicitly. */
+  async submitClarification(): Promise<void> {
+    const headerSubmit = this.clarificationSubmit();
+    if ((await headerSubmit.count()) > 0) {
+      await headerSubmit.click();
+      return;
+    }
+    await this.clarificationCustomSubmit().click();
   }
 
   /** Deferred notice shown when agent has disconnected from clarification. */
@@ -1412,6 +1438,11 @@ export class SessionPage {
     await this.activePanel("terminal-panel")
       .getByTestId("passthrough-loading")
       .waitFor({ state: "hidden", timeout });
+  }
+
+  /** Buffer text of the active shell terminal panel. */
+  async readTerminalBuffer(): Promise<string> {
+    return this.readXtermBuffer("terminal-panel");
   }
 
   /** Wait for the active shell to emit its initial prompt before sending input. */

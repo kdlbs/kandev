@@ -285,6 +285,8 @@ export const i18nGuardFiles = [
   "components/settings/mcp-task-agent-profile-default-settings.tsx",
   "components/settings/settings-menu-mode-card.tsx",
   "components/settings/unread-divider-settings.tsx",
+  "components/settings/unread-task-dot-settings.tsx",
+  "components/settings/unread-task-dot-hide-delay-settings.tsx",
   // Settings → Integrations → GitHub, connection and authentication half: the
   // page, the settings shell, the status/identity panels, the connection dialog
   // and its PAT / CLI / App forms, and the App onboarding flow. The watch

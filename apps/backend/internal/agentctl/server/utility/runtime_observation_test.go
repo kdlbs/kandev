@@ -11,6 +11,8 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/agentctl/journal"
+	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"go.uber.org/zap"
 )
 
@@ -393,6 +395,107 @@ func TestRuntimeObservationUsesBundledClaudeSDKManifest(t *testing.T) {
 	}
 }
 
+func TestRuntimeObservationUsesPreparedPrivateNPMCacheArgument(t *testing.T) {
+	privateCache := filepath.Join(t.TempDir(), "private npm cache")
+	sharedCache := filepath.Join(t.TempDir(), "shared npm cache")
+	workDir := t.TempDir()
+
+	got, err := resolveNPMCacheRoot(
+		context.Background(),
+		filepath.Join(t.TempDir(), "npx"),
+		[]string{
+			"npx", "--yes", "--prefer-offline",
+			"--prefix", filepath.Join(t.TempDir(), "private project"),
+			"--cache", privateCache,
+			"@agentclientprotocol/claude-agent-acp@1.2.3",
+		},
+		[]string{"NPM_CONFIG_CACHE=" + sharedCache},
+		workDir,
+		zap.NewNop(),
+	)
+	if err != nil {
+		t.Fatalf("resolve private runtime cache: %v", err)
+	}
+	if got != privateCache {
+		t.Fatalf("runtime cache root = %q, want private cache %q", got, privateCache)
+	}
+}
+
+func TestRuntimeObservationUsesProviderFromPreparedPrivateCache(t *testing.T) {
+	bridgeSpec := "@agentclientprotocol/claude-agent-acp@1.2.3"
+	privateCache := t.TempDir()
+	sharedCache := t.TempDir()
+	for cacheRoot, providerVersion := range map[string]string{
+		privateCache: "0.16.1",
+		sharedCache:  "9.9.9",
+	} {
+		executionRoot := npxTreeRoot(cacheRoot, bridgeSpec)
+		writePackageManifest(t,
+			filepath.Join(executionRoot, "node_modules", "@agentclientprotocol", "claude-agent-acp", "package.json"),
+			"@agentclientprotocol/claude-agent-acp", "1.2.3",
+		)
+		writePackageManifest(t,
+			filepath.Join(executionRoot, "node_modules", "@anthropic-ai", "claude-agent-sdk", "package.json"),
+			"@anthropic-ai/claude-agent-sdk", providerVersion,
+		)
+	}
+	runtimeSpec, ok := agents.BuiltinManagedNPMRuntime("claude-acp")
+	if !ok {
+		t.Fatal("Claude ACP should be a registered managed npm runtime")
+	}
+	logicalCommand := runtimeSpec.RuntimeCommand("1.2.3").Args()
+	preparedArgs := append([]string(nil), logicalCommand...)
+	packageIndex := indexOfArgument(preparedArgs, bridgeSpec)
+	if packageIndex < 0 {
+		t.Fatal("logical command is missing the exact package spec")
+	}
+	preparedArgs[4] = filepath.Join(t.TempDir(), "private project")
+	preparedArgs = append(preparedArgs[:packageIndex], append([]string{"--cache", privateCache}, preparedArgs[packageIndex:]...)...)
+	provider := agents.RuntimeComponentDescriptor{
+		Name: "Claude Agent SDK", Package: "@anthropic-ai/claude-agent-sdk",
+		Source: agents.RuntimeComponentBundled, Owner: agents.RuntimeComponentOwnerKandev,
+	}
+	descriptor := &agents.RuntimeObservationDescriptor{
+		Bridge: agents.RuntimeComponentDescriptor{
+			Name: "Claude", Package: "@agentclientprotocol/claude-agent-acp",
+			Source: agents.RuntimeComponentManaged, Owner: agents.RuntimeComponentOwnerKandev,
+		},
+		Provider: &provider,
+	}
+	info := NewACPInferenceExecutor(zap.NewNop()).collectRuntimeObservation(
+		context.Background(), descriptor, logicalCommand, nil, preparedArgs,
+		[]string{"NPM_CONFIG_CACHE=" + sharedCache}, "", t.TempDir(), "1.2.3",
+	)
+	observed := runtimeComponentByRole(t, info, agents.RuntimeComponentProvider)
+	if observed.ObservedVersion != "0.16.1" {
+		t.Fatalf("provider version = %q, want private-cache version 0.16.1 (shared cache contains 9.9.9)", observed.ObservedVersion)
+	}
+}
+
+func TestRuntimeObservationIgnoresAgentCacheFlagAfterPackage(t *testing.T) {
+	privateCache := filepath.Join(t.TempDir(), "private npm cache")
+	got, found, err := managedNPMCacheArgument([]string{
+		"npx", "--cache", privateCache,
+		"@agentclientprotocol/claude-agent-acp@1.2.3", "--cache", "/agent/cli/cache",
+	})
+	if err != nil {
+		t.Fatalf("parse npx cache argument: %v", err)
+	}
+	if !found || got != privateCache {
+		t.Fatalf("parsed cache = (%q, %t), want private cache and found=true", got, found)
+	}
+
+	got, found, err = managedNPMCacheArgument([]string{
+		"npx", "@agentclientprotocol/claude-agent-acp@1.2.3", "--cache", "/agent/cli/cache",
+	})
+	if err != nil {
+		t.Fatalf("parse cache-like agent argument: %v", err)
+	}
+	if found || got != "" {
+		t.Fatalf("agent --cache was treated as npm cache: (%q, %t)", got, found)
+	}
+}
+
 func TestRuntimeObservationKeepsExternalIdentityAfterVersionFailure(t *testing.T) {
 	if runtime.GOOS == windowsGOOS {
 		t.Skip("uses a Unix executable fixture")
@@ -523,5 +626,77 @@ func writeRuntimeObservationExecutable(t *testing.T, path, contents string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(contents), 0o700); err != nil {
 		t.Fatalf("write executable: %v", err)
+	}
+}
+
+func TestRetainedHandoffRejectsIdentityMismatch(t *testing.T) {
+	j, err := journal.Open(journal.Config{Path: filepath.Join(t.TempDir(), "owner.bbolt")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = j.Close() })
+	prior := &inferenceOwnership{OwnerID: "old", InstanceID: "instance", SessionID: "session-old", IncarnationID: "incarnation", HarnessGeneration: 1, Revision: 1, Phase: ownerClosed}
+	o := &attemptOwner{cfg: &config.InstanceConfig{InstanceID: "instance", SessionID: "session-new", DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 1}, id: "new", journal: j, state: inferenceOwnerState{Ownership: prior, ContinuityKnown: true}}
+	o.adoptRetainedClaim(o.state)
+	if !o.storageUnavailable || o.admissionFailureReason != "retained_claim_identity_mismatch" {
+		t.Fatalf("identity mismatch adopted: storage=%v reason=%q", o.storageUnavailable, o.admissionFailureReason)
+	}
+}
+
+func TestRetainedHandoffRejectsActiveEmptyClaim(t *testing.T) {
+	j, err := journal.Open(journal.Config{Path: filepath.Join(t.TempDir(), "owner.bbolt")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = j.Close() })
+	prior := &inferenceOwnership{OwnerID: "old", InstanceID: "instance", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1, Revision: 1, Phase: ownerActive}
+	o := &attemptOwner{cfg: &config.InstanceConfig{InstanceID: "instance", SessionID: "session", DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 1}, id: "new", journal: j, state: inferenceOwnerState{Ownership: prior, ContinuityKnown: false}}
+	o.adoptRetainedClaim(o.state)
+	if !o.storageUnavailable || o.admissionFailureReason != "retained_claim_active" {
+		t.Fatalf("active empty claim adopted: storage=%v reason=%q", o.storageUnavailable, o.admissionFailureReason)
+	}
+}
+
+func TestRetainedHandoffAlwaysDropsHistoricalContinuity(t *testing.T) {
+	j, err := journal.Open(journal.Config{Path: filepath.Join(t.TempDir(), "owner.bbolt")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = j.Close() })
+	prior := &inferenceOwnership{OwnerID: "old", InstanceID: "instance", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1, Revision: 1, Phase: ownerClosed}
+	o := &attemptOwner{cfg: &config.InstanceConfig{InstanceID: "instance", SessionID: "session", DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 1}, id: "new", journal: j, state: inferenceOwnerState{Ownership: prior, ContinuityKnown: true}}
+	o.adoptRetainedClaim(o.state)
+	if o.storageUnavailable || o.state.ContinuityKnown || o.state.Ownership == nil || o.state.Ownership.OwnerID != "new" {
+		t.Fatalf("successor continuity/adoption wrong: storage=%v continuity=%v ownership=%+v", o.storageUnavailable, o.state.ContinuityKnown, o.state.Ownership)
+	}
+}
+
+func TestSettleAbandonedPredecessorAttemptsLeavesStartingUnknown(t *testing.T) {
+	attempts := map[string]*ownedAttempt{
+		"prepared": {Status: AttemptStatus{AttemptID: "prepared", OwnerID: "old", State: AttemptPrepared}},
+		"starting": {Status: AttemptStatus{AttemptID: "starting", OwnerID: "old", State: AttemptStarting}},
+	}
+	settleAbandonedPredecessorAttempts(attempts, "new")
+	prepared := attempts["prepared"].Status
+	if !prepared.Settled || prepared.State != AttemptNotStarted {
+		t.Fatalf("unsent preparation not settled: %+v", prepared)
+	}
+	starting := attempts["starting"].Status
+	if starting.Settled {
+		t.Fatalf("starting child without PID was settled: %+v", starting)
+	}
+}
+
+func TestRetainedHandoffRejectsDifferentInstance(t *testing.T) {
+	j, err := journal.Open(journal.Config{Path: filepath.Join(t.TempDir(), "owner.bbolt")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = j.Close() })
+	prior := &inferenceOwnership{OwnerID: "old", InstanceID: "instance-a", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1, Revision: 1, Phase: ownerClosed}
+	o := &attemptOwner{cfg: &config.InstanceConfig{InstanceID: "instance-b", SessionID: "session", DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 1}, id: "new", journal: j, state: inferenceOwnerState{Ownership: prior, ContinuityKnown: true}}
+	o.adoptRetainedClaim(o.state)
+	if !o.storageUnavailable || o.admissionFailureReason != "retained_claim_identity_mismatch" {
+		t.Fatalf("different instance adopted: storage=%v reason=%q", o.storageUnavailable, o.admissionFailureReason)
 	}
 }

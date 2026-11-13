@@ -13,7 +13,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
-	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/common/acpprovider"
@@ -31,19 +30,9 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 	if err != nil {
 		return nil, err
 	}
-	cliFlags, err := cliflags.Resolve(profile.CLIFlags)
+	cliFlags, prefix, _, err := agentctlutil.ProfileInferenceEnvironment(profile.CLIFlags, profile.CommandPrefix, profile.EnvVars)
 	if err != nil {
-		return nil, fmt.Errorf("resolve profile cli flags: %w", err)
-	}
-	var prefix []string
-	if profile.CommandPrefix != "" {
-		if err := cliflags.ValidateCommandPrefix(profile.CommandPrefix); err != nil {
-			return nil, err
-		}
-		prefix, err = cliflags.Tokenise(profile.CommandPrefix)
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
 	env, err := m.resolveProfileEnvironment(ctx, profile.AgentID, profile.EnvVars)
 	if err != nil {
@@ -71,7 +60,7 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 	if err != nil {
 		return nil, err
 	}
-	command, release, err := m.acquireInferenceCommand(ctx, inst, ia, agents.Command{})
+	command, localEnv, release, err := m.acquireInferenceCommand(ctx, inst, ia, agents.Command{})
 	if err != nil {
 		return nil, err
 	}
@@ -86,6 +75,7 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 	cfg := inferenceConfigForHostUtility(ia)
 	resolved := m.resolveModel(profile.AgentID, profile.Model, ia)
 	autoApprove := profile.AutoApprove
+	env = mergeInferenceEnv(env, localEnv)
 	req := &agentctlutil.PromptRequest{
 		Prompt:                 prompt,
 		AgentID:                profile.AgentID,
@@ -96,10 +86,10 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 			Protocol: cfg.Protocol,
 			Command:  command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: inst.workDir,
 			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: cliFlags, LaunchWrapper: launchwrapper.Profile(prefix),
-			ProviderGatewayAuth: gatewayAuth, OperatorDefined: cfg.OperatorDefined,
+			ProviderGatewayAuth: gatewayAuth, AuthPolicy: hostUtilityAuthPolicy(ia), OperatorDefined: cfg.OperatorDefined,
 		},
 	}
-	resp, err := inst.client.InferencePrompt(ctx, req)
+	resp, err := m.executeOwnedInference(ctx, inst, req, profileID)
 	if err != nil {
 		return nil, err
 	}
@@ -432,7 +422,7 @@ func (m *Manager) ExecutePromptWithMCP(
 	if err != nil {
 		return nil, err
 	}
-	command, release, err := m.acquireInferenceCommand(ctx, inst, ia, agents.Command{})
+	command, localEnv, release, err := m.acquireInferenceCommand(ctx, inst, ia, agents.Command{})
 	if err != nil {
 		return nil, err
 	}
@@ -451,13 +441,14 @@ func (m *Manager) ExecutePromptWithMCP(
 			Command:         command.Args(),
 			ModelFlag:       cfg.ModelFlag.Args(),
 			WorkDir:         inst.workDir,
-			Env:             agents.RuntimeEnvFor(ia),
+			Env:             mergeInferenceEnv(agents.RuntimeEnvFor(ia), localEnv),
 			StripEnv:        agents.StripEnvFor(ia),
+			AuthPolicy:      hostUtilityAuthPolicy(ia),
 			OperatorDefined: cfg.OperatorDefined,
 		},
 		MCPServers: mcpServers,
 	}
-	resp, err := inst.client.InferencePrompt(ctx, req)
+	resp, err := m.executeOwnedInference(ctx, inst, req, "")
 	if err != nil {
 		return nil, err
 	}
@@ -516,6 +507,7 @@ func configOptionsFromProbe(options []agentctlutil.ProbeConfigOption) []ConfigOp
 			CurrentValue: option.CurrentValue,
 			Category:     option.Category,
 			Options:      choices,
+			Catalog:      option.Catalog,
 		})
 	}
 	return out

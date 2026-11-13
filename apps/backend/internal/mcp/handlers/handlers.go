@@ -226,6 +226,18 @@ type liveClarificationReader interface {
 	SessionHasLiveClarification(ctx context.Context, sessionID string) bool
 }
 
+// messageCapacityWaitRegistrar records a queue head blocked only by the session
+// ceiling so the shared capacity sweep retries it.
+type messageCapacityWaitRegistrar interface {
+	RegisterMessageCapacityWait(ctx context.Context, taskID, sessionID, entryID string)
+}
+
+// messageTurnCapacityReserver reserves a bounded message-turn slot before a
+// created or idle session starts a new provider turn.
+type messageTurnCapacityReserver interface {
+	ReserveMessageTurn(ctx context.Context, taskID, sessionID, incarnationID string) (*orchestrator.MessageTurnReservation, bool)
+}
+
 var _ liveClarificationReader = (*orchestrator.Service)(nil)
 
 type peerMessageStartAdmissionProvider interface {
@@ -300,6 +312,7 @@ type AgentProfileVerifier interface {
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
 	automationCreator      AutomationCreator
+	automationPluginTools  AutomationPluginTools
 	taskSvc                *service.Service
 	workflowCtrl           *workflowctrl.Controller
 	clarificationSvc       ClarificationService
@@ -351,6 +364,10 @@ type Handlers struct {
 	reviewRunner       ReviewRunner
 	pluginSvc          *plugins.Service
 	canvasAuthoringSvc CanvasAuthoringService
+	// pluginToolAuthEnabled reports whether endpoint authentication is
+	// enforced; external workspace scope fails closed when it cannot resolve a
+	// real caller identity.
+	pluginToolAuthEnabled func() bool
 
 	// Optional task-bound GitHub PR automation controls.
 	taskPRAutomation            TaskPRAutomationService
@@ -381,6 +398,12 @@ type Handlers struct {
 	// registered and a coordinator principal's propose call 404s via the
 	// guard's nil-service check.
 	coordinatorSvc *coordinator.Service
+	// coordinatorPhase2ForTest overrides the phase-2 gate in focused handler
+	// tests that do not construct the full coordinator service.
+	coordinatorPhase2ForTest func() bool
+	// coordinatorConversationForTest overrides the live conversation lookup in
+	// focused handler tests that do not construct the full coordinator service.
+	coordinatorConversationForTest func(context.Context, string) (string, bool, error)
 	// coordinatorTurns reads the turn ledger; nil while phase 3.1 is off.
 	coordinatorTurns CoordinatorTurnReader
 }
@@ -538,6 +561,13 @@ func (h *Handlers) SetCanvasAuthoringService(svc CanvasAuthoringService) {
 // disabled so neither action is registered either.
 func (h *Handlers) SetCoordinatorService(svc *coordinator.Service) {
 	h.coordinatorSvc = svc
+}
+
+func (h *Handlers) coordinatorPhase2Enabled() bool {
+	if h.coordinatorPhase2ForTest != nil {
+		return h.coordinatorPhase2ForTest()
+	}
+	return h.coordinatorSvc != nil && h.coordinatorSvc.Phase2()
 }
 
 // RegisterHandlers registers all MCP handlers with the dispatcher.
@@ -1453,16 +1483,23 @@ func (h *Handlers) explicitRepoInputsWithDefaults(ctx context.Context, explicit 
 	repos := make([]service.TaskRepositoryInput, 0, len(explicit))
 	for _, r := range explicit {
 		baseBranch := r.BaseBranch
-		if baseBranch == "" && r.RepositoryID != "" && h.taskSvc != nil {
-			if repo, err := h.taskSvc.GetRepository(ctx, r.RepositoryID); err == nil && repo != nil {
-				baseBranch = repo.DefaultBranch
+		source := models.BaseBranchSelectionSourceExplicit
+		if baseBranch == "" {
+			// Record the omission before filling the repository default so the
+			// automatic selection remains distinguishable from an explicit one.
+			source = models.BaseBranchSelectionSourceRepositoryDefault
+			if r.RepositoryID != "" && h.taskSvc != nil {
+				if repo, err := h.taskSvc.GetRepository(ctx, r.RepositoryID); err == nil && repo != nil {
+					baseBranch = repo.DefaultBranch
+				}
 			}
 		}
 		repos = append(repos, service.TaskRepositoryInput{
-			RepositoryID: r.RepositoryID,
-			LocalPath:    r.LocalPath,
-			GitHubURL:    r.GitHubURL,
-			BaseBranch:   baseBranch,
+			RepositoryID:              r.RepositoryID,
+			LocalPath:                 r.LocalPath,
+			GitHubURL:                 r.GitHubURL,
+			BaseBranch:                baseBranch,
+			BaseBranchSelectionSource: source,
 		})
 	}
 	return repos
@@ -1488,8 +1525,9 @@ func inheritedRepoInputs(src []*models.TaskRepository) []service.TaskRepositoryI
 			continue
 		}
 		repos = append(repos, service.TaskRepositoryInput{
-			RepositoryID: r.RepositoryID,
-			BaseBranch:   r.BaseBranch,
+			RepositoryID:              r.RepositoryID,
+			BaseBranch:                r.BaseBranch,
+			BaseBranchSelectionSource: models.BaseBranchSelectionSourceInherited,
 		})
 	}
 	return repos
@@ -1912,6 +1950,8 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.AgentLaunchTimeout)
 		defer cancel()
 
+		// The calling agent, not a user, starts this task, so the session
+		// ceiling admits it as automatic rather than as a manual override.
 		launchReq := &orchestrator.LaunchSessionRequest{
 			TaskID:            task.ID,
 			Intent:            orchestrator.IntentStart,
@@ -1920,6 +1960,7 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 			ExecutorProfileID: config.ExecutorProfileID,
 			WorkflowStepID:    task.WorkflowStepID,
 			Prompt:            task.Description,
+			Automatic:         true,
 		}
 		if config.InitialCreatePrompt {
 			prepResp, prepErr := h.sessionLauncher.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
@@ -1931,6 +1972,7 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 				WorkflowStepID:       task.WorkflowStepID,
 				InitialPromptPreview: models.NewInitialPromptPreview(strings.TrimSpace(task.Description), nil),
 				DeferredStart:        true,
+				Automatic:            true,
 			})
 			if prepErr != nil {
 				h.logger.Error("failed to prepare initial MCP creation prompt",
@@ -1952,6 +1994,7 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 				WorkflowStepID:      task.WorkflowStepID,
 				Prompt:              task.Description,
 				InitialCreatePrompt: true,
+				Automatic:           true,
 			}
 		}
 
@@ -3610,6 +3653,28 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 		if !pinnedTarget {
 			return taskMessageDispatchResult{}, terminalSessionDispatchError(session)
 		}
+		if reserver, ok := h.sessionLauncher.(messageTurnCapacityReserver); ok {
+			reservation, admitted := reserver.ReserveMessageTurn(
+				ctx, taskID, session.ID, session.QueueIncarnationID,
+			)
+			if !admitted {
+				completedMetadata := make(map[string]interface{}, len(metadata)+1)
+				for key, value := range metadata {
+					completedMetadata[key] = value
+				}
+				completedMetadata[orchestrator.MetaKeyCompletedFollowUpIntent] = true
+				result, queueErr := h.queueRecordedTaskMessageForCapacity(
+					ctx, taskID, session, prompt, completedMetadata, nil,
+				)
+				if queueErr != nil {
+					return taskMessageDispatchResult{}, queueErr
+				}
+				return result, nil
+			}
+			if reservation != nil {
+				defer reservation.Release()
+			}
+		}
 		resumed, err := h.resumeCompletedTaskMessageSession(ctx, taskID, session.ID)
 		if err != nil {
 			return taskMessageDispatchResult{}, err
@@ -3928,6 +3993,22 @@ func (h *Handlers) startPreparedPeerTaskMessage(
 	if queued != nil {
 		return *queued, nil
 	}
+	if reserver, ok := h.sessionLauncher.(messageTurnCapacityReserver); ok {
+		reservation, admitted := reserver.ReserveMessageTurn(ctx, taskID, session.ID, session.QueueIncarnationID)
+		if !admitted {
+			releasePeerMessageStartAdmission(admission)
+			recorded := h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
+			result, queueErr := h.queueRecordedTaskMessageForCapacity(ctx, taskID, session, prompt, metadata, recorded)
+			if queueErr != nil {
+				h.deleteRecordedUserMessageWithoutTurnRollback(ctx, recorded)
+				return taskMessageDispatchResult{}, queueErr
+			}
+			return result, nil
+		}
+		if reservation != nil {
+			defer reservation.Release()
+		}
+	}
 	recorded := h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
 	if admission != nil {
 		_, err = admission.StartCreatedSession(ctx, session.AgentProfileID, prompt, true, false, true, nil, nil)
@@ -4008,10 +4089,65 @@ func (h *Handlers) promptPreparedTaskMessage(
 	recorded := h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
 	status, err := h.promptWithAutoResume(ctx, taskID, session.ID, prompt)
 	if err != nil {
+		if orchestrator.IsMessageTurnCapacityRefusal(err) {
+			result, queueErr := h.queueRecordedTaskMessageForCapacity(
+				ctx, taskID, session, prompt, metadata, recorded,
+			)
+			if queueErr == nil {
+				return result, nil
+			}
+			h.logger.Warn("failed to queue capacity-refused task message",
+				zap.String("task_id", taskID), zap.String("session_id", session.ID), zap.Error(queueErr))
+			err = queueErr
+		}
 		h.deleteRecordedUserMessage(ctx, recorded)
 		return taskMessageDispatchResult{}, err
 	}
 	return taskMessageDispatchResult{status: status, sessionID: session.ID}, nil
+}
+
+// queueRecordedTaskMessageForCapacity keeps an already-recorded agent message
+// as durable pending input when the enabled ceiling has no turn capacity. The
+// queued entry carries sender metadata and the transcript identity so dispatch
+// does not duplicate the visible message.
+func (h *Handlers) queueRecordedTaskMessageForCapacity(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	prompt string,
+	metadata map[string]interface{},
+	recorded *models.Message,
+) (taskMessageDispatchResult, error) {
+	queue := h.sessionLauncher.GetMessageQueue()
+	if queue == nil {
+		return taskMessageDispatchResult{}, errors.New("message queue not available")
+	}
+	identity, err := h.resolveTaskMessageQueueIdentity(ctx, taskID, session)
+	if err != nil {
+		return taskMessageDispatchResult{}, err
+	}
+	queueMetadata := make(map[string]interface{}, len(metadata)+2)
+	for key, value := range metadata {
+		queueMetadata[key] = value
+	}
+	queueMetadata[orchestrator.MetaKeyTurnStartAlreadyProcessed] = true
+	if recorded != nil {
+		queueMetadata["user_message_recorded"] = true
+		queueMetadata[messagequeue.MetadataDurableTranscriptMessageID] = recorded.ID
+	}
+	queued, err := queue.QueueMessageWithMetadataForSession(
+		ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil, queueMetadata,
+	)
+	if err != nil {
+		return taskMessageDispatchResult{}, err
+	}
+	if registrar, ok := h.sessionLauncher.(messageCapacityWaitRegistrar); ok {
+		registrar.RegisterMessageCapacityWait(ctx, taskID, session.ID, queued.ID)
+	}
+	h.publishQueueStatusEvent(ctx, identity, queue)
+	return taskMessageDispatchResult{
+		status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queued.ID,
+	}, nil
 }
 
 func (h *Handlers) shouldStartTaskMessageSession(ctx context.Context, session *models.TaskSession) bool {
@@ -4763,6 +4899,9 @@ func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, 
 	_, err := h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil, true)
 	if err == nil {
 		return taskMessageStatusSent, nil
+	}
+	if orchestrator.IsMessageTurnCapacityRefusal(err) {
+		return "", err
 	}
 	if !errors.Is(err, executor.ErrExecutionNotFound) {
 		return "", fmt.Errorf("failed to send prompt: %w", err)

@@ -89,7 +89,8 @@ func TestPipeOutputPreservesSeverityWithNestedDuplicateComponentFields(t *testin
 	})
 	for index, entry := range entries {
 		require.Equal(t, expectedChildEnvelope(t, lines[index]), entry.Message)
-		for _, sensitive := range []string{"private-session", "/private/workspace", "Read secret.txt", "https://private.test/pull/42", "process-manager", "workspace-tracker"} {
+		require.Contains(t, entry.Message, `"component":"workspace-tracker"`)
+		for _, sensitive := range []string{"private-session", "/private/workspace", "Read secret.txt", "https://private.test/pull/42", "process-manager"} {
 			require.NotContains(t, entry.Message, sensitive)
 		}
 	}
@@ -127,6 +128,7 @@ func expectedChildEnvelope(t *testing.T, line string) string {
 		Timestamp string `json:"timestamp"`
 		Caller    string `json:"caller"`
 		Message   string `json:"msg"`
+		Component string `json:"component,omitempty"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(line), &envelope))
 	encoded, err := json.Marshal(envelope)

@@ -239,7 +239,14 @@ type LaunchSessionRequest struct {
 	// InitialPromptSubmission is persisted during task-session preparation and
 	// is only set by the server for the explicit fresh-start replay path.
 	InitialPromptSubmission *models.InitialPromptSubmission `json:"-"`
-	Attachments             []v1.MessageAttachment          `json:"attachments,omitempty"`
+	// InitialPromptOverride replaces the description fallback for an eligible
+	// text-only fresh-start recovery. It is composed by the server before
+	// provider identity is cleared and is never accepted from a client.
+	InitialPromptOverride *string `json:"-"`
+	// InitialPromptRecovery carries the current workflow composition for an
+	// owned receipt replay. The raw receipt remains the transcript source.
+	initialPromptRecovery *initialRecoveryPrompt
+	Attachments           []v1.MessageAttachment `json:"attachments,omitempty"`
 	// SpawnOrigin identifies the agent session that requested this launch via
 	// spawn_session_kandev, so the new session's first turn can carry spawner
 	// attribution and reply instructions. Like DeferredStart it is kept off the
@@ -247,6 +254,12 @@ type LaunchSessionRequest struct {
 	// <kandev-system> block that survives first-turn canonicalization, so a WS
 	// client must not be able to forge one and fabricate server authority.
 	SpawnOrigin *SpawnOrigin `json:"-"`
+	// PreserveWorkflowSourceBinding marks a spawn_session_kandev launch: the
+	// helper session must not become the recorded recipient of the workflow
+	// step it was spawned from. It is server-only intent, independent of the
+	// optional SpawnOrigin attribution, and is kept off the wire protocol so a
+	// client cannot suppress source-binding writes.
+	PreserveWorkflowSourceBinding bool `json:"-"`
 	// AllowBranchReplacement is set only by RecoverSession for the explicit
 	// resume_new_branch action. Clients cannot grant this permission directly.
 	AllowBranchReplacement           bool   `json:"-"`
@@ -276,6 +289,11 @@ type LaunchSessionRequest struct {
 	// ActivationSource distinguishes passive task opening from an explicit
 	// launch action. An omitted value preserves the existing behavior.
 	ActivationSource LaunchActivationSource `json:"activation_source,omitempty"`
+	// Automatic marks a launch an agent requested through Kandev MCP tools
+	// rather than a direct user action, so the session ceiling admits it as
+	// automatic instead of as a manual override. It is set only by server-side
+	// handlers and is not part of the wire request.
+	Automatic bool `json:"-"`
 }
 
 // SpawnOrigin describes the agent session that spawned a new sibling session.
@@ -427,6 +445,9 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 		return nil, err
 	}
 	ctx = preparedCtx
+	if err := s.checkInferenceClosureAdmission(ctx, req.SessionID, true); err != nil {
+		return nil, err
+	}
 	if req.QuickChatInitialStart {
 		releaseLifecycleLock, handleStartFailure, err := s.beginQuickChatStartFailureOwnership(ctx, req)
 		if err != nil {
@@ -526,6 +547,9 @@ func (s *Service) finishLaunchIntent(
 }
 
 func (s *Service) checkSessionRecoveryBlock(ctx context.Context, sessionID string) error {
+	if err := s.checkInferenceClosureAdmission(ctx, sessionID, true); err != nil {
+		return err
+	}
 	if sessionID == "" {
 		return nil
 	}
@@ -543,6 +567,10 @@ func (s *Service) checkSessionRecoveryBlock(ctx context.Context, sessionID strin
 	}
 	if err != nil {
 		return fmt.Errorf("check session recovery block: %w", err)
+	}
+	permit, _ := ctx.Value(inferenceClosurePermitKey{}).(*models.InferenceClosureCheckpoint)
+	if permit != nil && block != nil && block.ConsumerReference == models.InferenceClosureConsumer && block.ID == permit.OperationID {
+		return s.checkOtherRecoveryBlocksForClosure(ctx, sessionID, incarnationID, generation, permit)
 	}
 	if resolved, _ := s.finishLoadedNativeDeliveryBlock(ctx, block); resolved {
 		return nil
@@ -966,10 +994,12 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		req.ExecutorProfileID, req.Priority, req.Prompt,
 		req.WorkflowStepID, req.PlanMode, autoStart, req.Attachments,
 		startTaskOptions{
-			ProfileExplicit:      req.ProfileExplicit,
-			SpawnOrigin:          req.SpawnOrigin,
-			MCPServerIDs:         req.MCPServerIDs,
-			reusePreparedPrimary: req.reusePreparedPrimary,
+			ProfileExplicit:               req.ProfileExplicit,
+			SpawnOrigin:                   req.SpawnOrigin,
+			Origin:                        agentLaunchOrigin(req),
+			PreserveWorkflowSourceBinding: req.PreserveWorkflowSourceBinding,
+			MCPServerIDs:                  req.MCPServerIDs,
+			reusePreparedPrimary:          req.reusePreparedPrimary,
 		},
 	)
 	if errors.Is(err, ErrCeilingLaunchDeferred) {
@@ -1031,7 +1061,7 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 	}
 	autoStart := req.AutoStart || req.ActivationSource == LaunchActivationSourceSessionOpen
 	parkingStamp := s.captureWorkflowParkingStamp(ctx, req.SessionID)
-	options := startCreatedSessionOptions{lifecycleLockHeld: req.QuickChatInitialStart}
+	options := startCreatedSessionOptions{lifecycleLockHeld: req.QuickChatInitialStart, origin: agentLaunchOrigin(req)}
 	if req.QuickChatInitialStart {
 		options.onQuickChatStartAttemptClaimed = func(attemptID string) {
 			req.QuickChatStartAgentAttemptID = attemptID
@@ -1110,8 +1140,12 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		ContinuationPrompt:               req.ContinuationPrompt,
 		DeferInitialPrompt:               req.DeferRecoveryResolution,
 		RecoveryAction:                   req.RecoveryAction,
+		InitialPromptOverride:            req.InitialPromptOverride,
 		StartAgentSynchronously: req.DeferRecoveryResolution &&
 			(req.ForceContextContinuation || req.RecoveryAction == recoveryActionResume),
+	}
+	if resumeOptions.InitialPromptOverride != nil {
+		s.installLegacyRecoveryPromptGuard(ctx, req.TaskID, &resumeOptions)
 	}
 	var execution *executor.TaskExecution
 	var err error
@@ -1123,7 +1157,8 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 			resumeCtx, req.TaskID, req.SessionID, resumeOptions,
 			func(promptCtx context.Context, attempt *resumeAttempt, _ *executor.TaskExecution) error {
 				return s.replayInitialPromptSubmission(
-					promptCtx, req.TaskID, req.SessionID, req.InitialPromptSubmission, attempt,
+					promptCtx, req.TaskID, req.SessionID, req.InitialPromptSubmission,
+					req.initialPromptRecovery, attempt,
 				)
 			},
 		)
@@ -1165,6 +1200,25 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 	return executionToLaunchResponse(req.TaskID, execution), nil
 }
 
+// installLegacyRecoveryPromptGuard binds a text-only fresh-start launch to the
+// workflow entry captured before reset. The resume dispatch fence remains held
+// until the executor reports prompt acceptance or failure.
+func (s *Service) installLegacyRecoveryPromptGuard(
+	ctx context.Context,
+	taskID string,
+	options *executor.ResumeOptions,
+) {
+	binding := ceilingEntryBindingFromContext(ctx)
+	if binding == nil {
+		return
+	}
+	options.BeforeInitialPromptDispatch = func(dispatchCtx context.Context) error {
+		guardCtx := withCeilingEntryBinding(dispatchCtx, binding)
+		guardCtx = withCeilingEntryKind(guardCtx, models.CeilingLaunchResume)
+		return s.validateClaimedCeilingBinding(guardCtx, taskID, binding)
+	}
+}
+
 func (s *Service) sessionOpenRecoveryWaitingResponse(
 	ctx context.Context,
 	req *LaunchSessionRequest,
@@ -1190,10 +1244,20 @@ func (s *Service) sessionOpenRecoveryWaitingResponse(
 }
 
 func launchOriginForActivation(req *LaunchSessionRequest) launchOrigin {
-	if req != nil && req.ActivationSource == LaunchActivationSourceSessionOpen {
+	if req != nil && (req.Automatic || req.ActivationSource == LaunchActivationSourceSessionOpen) {
 		return launchOriginAutomatic
 	}
 	return originFromAutoStart(req != nil && req.AutoStart)
+}
+
+// agentLaunchOrigin is the admission origin an agent-requested launch carries
+// into startTask or startCreatedSession. Empty keeps their autoStart-derived
+// origin.
+func agentLaunchOrigin(req *LaunchSessionRequest) launchOrigin {
+	if req != nil && req.Automatic {
+		return launchOriginAutomatic
+	}
+	return ""
 }
 
 func (s *Service) deferredLaunchResponse(
@@ -1414,9 +1478,10 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 
 // RecoverSessionOptions carries action-specific recovery authority.
 type RecoverSessionOptions struct {
-	IdempotencyKey string
-	SettingsPolicy executor.ResumeSettingsPolicy
-	ErrorStamp     string
+	InferenceClosureOperationID string
+	IdempotencyKey              string
+	SettingsPolicy              executor.ResumeSettingsPolicy
+	ErrorStamp                  string
 }
 
 // RecoverSession handles user-initiated recovery after an agent CLI failure.
@@ -1447,6 +1512,9 @@ func (s *Service) RecoverSessionWithOptions(
 	taskID, sessionID, action string,
 	options RecoverSessionOptions,
 ) (*LaunchSessionResponse, error) {
+	if options.InferenceClosureOperationID != "" {
+		return s.recoverInferenceClosure(ctx, taskID, sessionID, action, options)
+	}
 	if err := validateSessionRecoverySettingsPolicyAction(action, options.SettingsPolicy); err != nil {
 		return nil, err
 	}
@@ -1541,10 +1609,28 @@ func (s *Service) RecoverSessionWithOptions(
 		launchCtx = worktree.WithRecoveryAdmission(launchCtx, recoveryAdmission)
 	}
 	var initialSubmission *models.InitialPromptSubmission
+	var initialRecoveryPlan *initialRecoveryPromptPlan
 	if action == recoveryActionFreshStart {
 		initialSubmission, err = s.initialSubmissionForFreshStart(launchCtx, taskID, session)
 		if err != nil {
 			return nil, err
+		}
+		initialRecoveryPlan, err = s.prepareInitialRecoveryPrompt(launchCtx, taskID, session, initialSubmission)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var initialPromptRecovery *initialRecoveryPrompt
+	var initialPromptOverride *string
+	if initialRecoveryPlan != nil {
+		initialPromptRecovery = initialRecoveryPlan.receipt
+		initialPromptOverride = initialRecoveryPlan.legacyOverride
+		if initialRecoveryPlan.binding != nil {
+			launchCtx = withCeilingEntryBinding(launchCtx, initialRecoveryPlan.binding)
+			launchCtx = withCeilingEntryKind(launchCtx, models.CeilingLaunchResume)
+			if err := s.validateClaimedCeilingBinding(launchCtx, taskID, initialRecoveryPlan.binding); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -1571,6 +1657,8 @@ func (s *Service) RecoverSessionWithOptions(
 		RecoveryAction:                   action,
 		DeferRecoveryResolution:          checkpoint != nil || action == recoveryActionResume,
 		InitialPromptSubmission:          initialSubmission,
+		InitialPromptOverride:            initialPromptOverride,
+		initialPromptRecovery:            initialPromptRecovery,
 	})
 	if err == nil && action == recoveryActionResume {
 		err = s.acknowledgeNativeResumeDelivery(launchCtx, sessionID)
@@ -1588,7 +1676,7 @@ func (s *Service) RecoverSessionWithOptions(
 	}
 	if checkpoint == nil {
 		if action == recoveryActionResume {
-			if err := s.resolveSessionRecoveryBlock(ctx, sessionID, action); err != nil {
+			if err := s.completeResumeRecoveryBlock(ctx, sessionID); err != nil {
 				return nil, normalizeRecoverSessionError(err)
 			}
 		}

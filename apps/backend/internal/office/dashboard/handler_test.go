@@ -231,6 +231,8 @@ func newTestDepsWithLogger(t *testing.T, log *logger.Logger) *testDeps {
 			execution_state TEXT DEFAULT '',
 			workflow_id TEXT NOT NULL DEFAULT '',
 			workflow_step_id TEXT DEFAULT '',
+			wip_admitted INTEGER NOT NULL DEFAULT 1,
+			queued_for_step_id TEXT NOT NULL DEFAULT '',
 			archived_at TIMESTAMP,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP

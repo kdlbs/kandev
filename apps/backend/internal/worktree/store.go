@@ -591,7 +591,9 @@ func (s *SQLiteStore) GetWorktreesByTaskID(ctx context.Context, taskID string) (
 		SELECT `+worktreeSelectCols+`
 		FROM task_environment_repos ter
 		INNER JOIN task_environments te ON ter.task_environment_id = te.id
-		LEFT JOIN task_sessions s ON s.task_environment_id = ter.task_environment_id
+		LEFT JOIN task_sessions s
+		  ON s.task_environment_id = ter.task_environment_id
+		 AND s.task_id = te.task_id
 		LEFT JOIN repositories r ON ter.repository_id = r.id
 		WHERE te.task_id = ?
 		  AND ter.deleted_at IS NULL

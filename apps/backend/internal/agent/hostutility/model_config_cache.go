@@ -5,6 +5,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/modelcatalog"
 )
 
 const (
@@ -123,6 +125,44 @@ func cloneModelConfigResolution(in ModelConfigResolution) ModelConfigResolution 
 	out.ConfigOptions = append([]ConfigOption(nil), in.ConfigOptions...)
 	for i := range out.ConfigOptions {
 		out.ConfigOptions[i].Options = append([]ConfigOptionChoice(nil), in.ConfigOptions[i].Options...)
+		out.ConfigOptions[i].Catalog = cloneCatalog(in.ConfigOptions[i].Catalog)
+	}
+	return out
+}
+
+func cloneCatalog(catalog *modelcatalog.Catalog) *modelcatalog.Catalog {
+	if catalog == nil {
+		return nil
+	}
+	out := &modelcatalog.Catalog{Version: catalog.Version, Nodes: cloneCatalogNodes(catalog.Nodes)}
+	if len(catalog.Compositions) > 0 {
+		out.Compositions = make([]modelcatalog.Composition, len(catalog.Compositions))
+		for i, composition := range catalog.Compositions {
+			copied := composition
+			copied.Dimensions = make([]modelcatalog.Dimension, len(composition.Dimensions))
+			for j, dimension := range composition.Dimensions {
+				copied.Dimensions[j] = dimension
+				copied.Dimensions[j].Choices = append([]modelcatalog.Choose(nil), dimension.Choices...)
+			}
+			copied.Bindings = make([]modelcatalog.Binding, len(composition.Bindings))
+			for j, binding := range composition.Bindings {
+				values := make(map[string]string, len(binding.Values))
+				for key, value := range binding.Values {
+					values[key] = value
+				}
+				copied.Bindings[j] = modelcatalog.Binding{Values: values, Model: binding.Model}
+			}
+			out.Compositions[i] = copied
+		}
+	}
+	return out
+}
+
+func cloneCatalogNodes(nodes []modelcatalog.Node) []modelcatalog.Node {
+	out := make([]modelcatalog.Node, len(nodes))
+	for i, node := range nodes {
+		out[i] = node
+		out[i].Children = cloneCatalogNodes(node.Children)
 	}
 	return out
 }

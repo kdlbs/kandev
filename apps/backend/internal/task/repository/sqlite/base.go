@@ -49,6 +49,11 @@ type Repository struct {
 	// ownership cutover. It is separate from the worktree failpoint because the
 	// two migrations can be exercised independently in the same repository.
 	failGitSnapshotCutoverAfter string
+	// failNativeRouteOwnerCutoverAfter is a test-only failpoint for the native
+	// route owner cutover of dynamic_route_states and dynamic_route_attempts.
+	// When set to a cutover step name, the migration aborts after that step so
+	// tests can prove the transaction restores the legacy tables unchanged.
+	failNativeRouteOwnerCutoverAfter string
 	// failConversationJournalCleanupAfter is a test-only failpoint for the
 	// atomic removal of the retired conversation journal. It lets migration
 	// tests prove that a failed cleanup leaves the source tables and legacy

@@ -141,6 +141,8 @@ export function useTaskSessionMCPSelection(context: SessionMCPContext) {
   return {
     contextKey,
     ...(context.sessionId ? { assignmentSessionId: context.sessionId } : {}),
+    taskId: context.taskId,
+    sessionId: context.sessionId,
     workspaceId: ownerWorkspace,
     definitions: definitions.definitions,
     definitionsLoading: definitions.loading || editor.loading,

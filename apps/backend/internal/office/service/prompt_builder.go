@@ -1,7 +1,6 @@
 package service
 
 import (
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strconv"
@@ -46,6 +45,11 @@ type PromptContext struct {
 	CommentBody       string
 	CommentAuthor     string
 	CommentAuthorType string
+
+	// Handoff completion fields come from the durable delivery-task record.
+	HandoffDeliveryTaskID string
+	HandoffDeliveryTitle  string
+	HandoffDeliveryState  string
 
 	// Blocker fields
 	ResolvedBlockerTitles []string
@@ -126,6 +130,8 @@ func BuildPrompt(pc *PromptContext) string {
 		} else {
 			prompt = buildTaskCommentPrompt(pc)
 		}
+	case RunReasonHandoffCompleted:
+		prompt = buildHandoffCompletedPrompt(pc)
 	case RunReasonTaskBlockersResolved:
 		prompt = buildBlockersResolvedPrompt(pc)
 	case legacyRunReasonBlockersResolved:
@@ -420,6 +426,21 @@ func buildTaskCommentPrompt(pc *PromptContext) string {
 	return b.String()
 }
 
+func buildHandoffCompletedPrompt(pc *PromptContext) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "The handed-off task %q (%s) reached state %s.\n",
+		pc.HandoffDeliveryTitle, pc.HandoffDeliveryTaskID, pc.HandoffDeliveryState)
+	if pc.CommentBody != "" {
+		fmt.Fprintf(&b, "\nCompletion report:\n%s\n", pc.CommentBody)
+		fmt.Fprintf(&b, "\nReview the completion report for your task %s: %s, then continue if work remains.",
+			taskRef(pc), pc.TaskTitle)
+	} else {
+		fmt.Fprintf(&b, "\nReview this completion status for your task %s: %s, then continue if work remains.",
+			taskRef(pc), pc.TaskTitle)
+	}
+	return b.String()
+}
+
 // buildGateCommentPrompt frames a task_comment run at a review or approval
 // gate as a verdict request rather than the generic "address this comment"
 // prompt: it quotes the triggering comment (or notes it is gone) and asks
@@ -681,12 +702,7 @@ func taskRef(pc *PromptContext) string {
 
 // ParseRunPayload extracts common fields from a run payload JSON.
 func ParseRunPayload(payloadJSON string) map[string]string {
-	result := make(map[string]string)
-	if payloadJSON == "" || payloadJSON == "{}" {
-		return result
-	}
-	_ = json.Unmarshal([]byte(payloadJSON), &result)
-	return result
+	return runsmodels.ParsePayload(payloadJSON)
 }
 
 // continuationSummaryPromptCap is the byte slice of the continuation

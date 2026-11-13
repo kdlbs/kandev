@@ -722,6 +722,7 @@ const (
 	ActionAutomationTriggerUpdate       = "automation.trigger.update"
 	ActionAutomationTriggerDelete       = "automation.trigger.delete"
 	ActionAutomationTriggerTypes        = "automation.trigger_types"
+	ActionAutomationPluginToolOptions   = "automation.plugin_tool_options"
 	ActionAutomationWebhookRevealSecret = "automation.webhook.reveal_secret"
 	ActionAutomationRunDelete           = "automation.run.delete"
 	ActionAutomationRunStop             = "automation.run.stop"

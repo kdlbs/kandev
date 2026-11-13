@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"strings"
 
 	"github.com/kandev/kandev/internal/common/constants"
@@ -89,27 +90,29 @@ func (h *TaskHandlers) wsListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 }
 
 type wsCreateTaskRequest struct {
-	WorkspaceID            string                    `json:"workspace_id"`
-	WorkflowID             string                    `json:"workflow_id"`
-	WorkflowStepID         string                    `json:"workflow_step_id"`
-	WorkflowAgentOverrides map[string]string         `json:"workflow_agent_overrides,omitempty"`
-	Title                  string                    `json:"title"`
-	Description            string                    `json:"description,omitempty"`
-	Autopilot              bool                      `json:"autopilot,omitempty"`
-	Priority               string                    `json:"priority,omitempty"`
-	State                  *v1.TaskState             `json:"state,omitempty"`
-	Repositories           []httpTaskRepositoryInput `json:"repositories,omitempty"`
-	Position               int                       `json:"position,omitempty"`
-	Metadata               map[string]interface{}    `json:"metadata,omitempty"`
-	MCPServerIDs           []string                  `json:"mcp_server_ids,omitempty"`
-	StartAgent             bool                      `json:"start_agent,omitempty"`
-	AgentProfileID         string                    `json:"agent_profile_id,omitempty"`
-	ExecutorID             string                    `json:"executor_id,omitempty"`
-	ExecutorProfileID      string                    `json:"executor_profile_id,omitempty"`
-	PlanMode               bool                      `json:"plan_mode,omitempty"`
-	Attachments            []v1.MessageAttachment    `json:"attachments,omitempty"`
-	ParentID               string                    `json:"parent_id,omitempty"`
-	InitialWorkspaceLayout string                    `json:"initial_workspace_layout,omitempty"`
+	WorkspaceID            string                                `json:"workspace_id"`
+	WorkflowID             string                                `json:"workflow_id"`
+	WorkflowStepID         string                                `json:"workflow_step_id"`
+	WorkflowAgentOverrides map[string]string                     `json:"workflow_agent_overrides,omitempty"`
+	Title                  string                                `json:"title"`
+	Description            string                                `json:"description,omitempty"`
+	Autopilot              bool                                  `json:"autopilot,omitempty"`
+	Priority               string                                `json:"priority,omitempty"`
+	ExecutionGrade         string                                `json:"execution_grade,omitempty"`
+	State                  *v1.TaskState                         `json:"state,omitempty"`
+	Repositories           []httpTaskRepositoryInput             `json:"repositories,omitempty"`
+	Position               int                                   `json:"position,omitempty"`
+	Metadata               map[string]interface{}                `json:"metadata,omitempty"`
+	MCPServerIDs           []string                              `json:"mcp_server_ids,omitempty"`
+	StartAgent             bool                                  `json:"start_agent,omitempty"`
+	AgentProfileID         string                                `json:"agent_profile_id,omitempty"`
+	ExecutorID             string                                `json:"executor_id,omitempty"`
+	ExecutorProfileID      string                                `json:"executor_profile_id,omitempty"`
+	PlanMode               bool                                  `json:"plan_mode,omitempty"`
+	Attachments            []v1.MessageAttachment                `json:"attachments,omitempty"`
+	ParentID               string                                `json:"parent_id,omitempty"`
+	InitialWorkspaceLayout string                                `json:"initial_workspace_layout,omitempty"`
+	BuiltinMCPPreferences  *mcpconfig.BuiltinCreationPreferences `json:"builtin_mcp_preferences,omitempty"`
 }
 
 func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -197,11 +200,13 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Description:                 description,
 		Autopilot:                   req.Autopilot,
 		Priority:                    req.Priority,
+		ExecutionGrade:              req.ExecutionGrade,
 		State:                       req.State,
 		Repositories:                convertTaskRepositories(req.Repositories != nil, repos),
 		Position:                    req.Position,
 		Metadata:                    req.Metadata,
 		MCPServerIDs:                req.MCPServerIDs,
+		BuiltinMCPPreferences:       req.BuiltinMCPPreferences,
 		DeferredLaunch:              deferredLaunch,
 		RecordAgentProfileRecentUse: true,
 		PlanMode:                    req.PlanMode,
@@ -211,6 +216,9 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
+		if _, code, detail := builtinCreationError(err); code != "" {
+			return ws.NewError(msg.ID, msg.Action, code, err.Error(), map[string]interface{}{"error_code": detail})
+		}
 		if code, ok := repositorySelectionWSCode(err); ok {
 			return ws.NewError(msg.ID, msg.Action, code, err.Error(), taskErrorDetails(err))
 		}
@@ -304,14 +312,15 @@ func (h *TaskHandlers) wsGetTask(ctx context.Context, msg *ws.Message) (*ws.Mess
 }
 
 type wsUpdateTaskRequest struct {
-	ID           string                    `json:"id"`
-	Title        *string                   `json:"title,omitempty"`
-	Description  *string                   `json:"description,omitempty"`
-	Priority     *string                   `json:"priority,omitempty"`
-	State        *v1.TaskState             `json:"state,omitempty"`
-	Repositories []httpTaskRepositoryInput `json:"repositories,omitempty"`
-	Position     *int                      `json:"position,omitempty"`
-	Metadata     map[string]interface{}    `json:"metadata,omitempty"`
+	ID             string                    `json:"id"`
+	Title          *string                   `json:"title,omitempty"`
+	Description    *string                   `json:"description,omitempty"`
+	Priority       *string                   `json:"priority,omitempty"`
+	ExecutionGrade *string                   `json:"execution_grade,omitempty"`
+	State          *v1.TaskState             `json:"state,omitempty"`
+	Repositories   []httpTaskRepositoryInput `json:"repositories,omitempty"`
+	Position       *int                      `json:"position,omitempty"`
+	Metadata       map[string]interface{}    `json:"metadata,omitempty"`
 	// ParentID nests the task under another task. "" clears the parent.
 	ParentID *string `json:"parent_id,omitempty"`
 	// AssigneeUserID sets the human assignee. "" unassigns.
@@ -369,6 +378,7 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Title:          title,
 		Description:    description,
 		Priority:       req.Priority,
+		ExecutionGrade: req.ExecutionGrade,
 		State:          req.State,
 		Repositories:   convertTaskRepositories(req.Repositories != nil, repos),
 		Position:       req.Position,

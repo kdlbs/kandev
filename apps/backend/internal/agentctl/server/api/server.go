@@ -3,6 +3,9 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	"io"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -12,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
@@ -32,6 +36,7 @@ import (
 
 // Server is the HTTP API server for a single agent instance.
 type Server struct {
+	executionUsage   *usage.UsageService
 	cfg              *config.InstanceConfig
 	procMgr          *process.Manager
 	mcpServer        *mcp.Server
@@ -65,7 +70,7 @@ func (s *Server) SetCredentialSource(src InstanceCredentialSource) {
 // NewServer creates a new API server for an agent instance.
 // If mcpServer is provided, MCP routes will be registered.
 // If mcpBackendClient is provided, the agent stream becomes bidirectional for MCP.
-func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *mcp.Server, mcpBackendClient *mcp.ChannelBackendClient, log *logger.Logger) *Server {
+func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *mcp.Server, mcpBackendClient *mcp.ChannelBackendClient, log *logger.Logger, nativeUsage ...*usage.UsageService) *Server {
 	gin.SetMode(gin.ReleaseMode)
 
 	s := &Server{
@@ -84,6 +89,13 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 			},
 		},
 	}
+	if mcpServer != nil {
+		procMgr.SetBuiltinToolCatalog(mcpServer.BuiltinCatalog)
+	}
+	if len(nativeUsage) > 0 {
+		s.executionUsage = nativeUsage[0]
+		procMgr.SetExecutionUsageService(s.executionUsage)
+	}
 	if mcpBackendClient != nil && !cfg.DisableAskQuestion && cfg.SessionID != "" {
 		mcpBackendClient.SetSessionID(cfg.SessionID)
 		procMgr.SetUserInputRequestHandler(newCodexUserInputRequestHandler(cfg, mcpBackendClient, s.logger))
@@ -94,7 +106,7 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	// - /health: liveness probe
 	// - /sse, /message, /mcp: MCP endpoints used by the agent subprocess which
 	//   runs in the same trust boundary but does not possess the auth token.
-	s.router.Use(s.instanceAuth(cfg.AuthToken, "/health", "/sse", "/message", "/mcp"))
+	s.router.Use(s.instanceAuth(cfg.AuthToken, builtinMCPExemptPaths(cfg)...))
 	// Validate X-Instance-ID so a client that holds a stale port (because
 	// the previous instance was deleted and the port recycled to a new
 	// instance) gets a clean 404 instead of accidentally configuring or
@@ -120,6 +132,7 @@ func (s *Server) setupRoutes() {
 	// Agent control
 	api := s.router.Group("/api/v1")
 	s.registerPassthroughRoutes(api)
+	s.registerProjectMCPRoutes(api)
 	{
 		// Status and info
 		api.GET("/status", s.handleStatus)
@@ -130,6 +143,8 @@ func (s *Server) setupRoutes() {
 		// Process control
 		api.POST("/agent/configure", s.handleAgentConfigure)
 		api.GET("/agent/launch-wrapper", s.handleLaunchWrapper)
+		api.GET("/agent/usage", s.handleExecutionUsage)
+		api.GET("/agent/usage/cached", s.handleExecutionUsage)
 		api.POST("/agent/managed-runtime/cache-repair", s.handleManagedRuntimeCacheRepair)
 		api.POST("/agent/background-work/action", s.handleBackgroundWorkAction)
 		api.POST("/start", s.handleStart)
@@ -264,14 +279,24 @@ func (s *Server) setupRoutes() {
 	}
 
 	// Utility agent routes
-	auxHandler := utility.NewHandler(s.cfg.WorkDir, s.logger.Zap())
+	auxHandler := utility.NewOwnedHandler(s.cfg, s.procMgr, s.logger.Zap())
+	if err := s.procMgr.RegisterInstanceCleanupHook(auxHandler.Close); err != nil {
+		s.logger.Error("failed to register utility cleanup hook", zap.Error(err))
+		if closeErr := auxHandler.Close(); closeErr != nil {
+			s.logger.Error("failed to close utility resources", zap.Error(closeErr))
+		}
+	}
+	auxHandler.SetInstanceID(s.cfg.InstanceID)
 	auxHandler.SetControlAuthorization(func(c *gin.Context) bool { return c.GetBool(authenticatedControlContextKey) })
+	auxHandler.SetExecutionUsageService(s.executionUsage)
 	auxHandler.RegisterRoutes(api)
 
 	// MCP routes (if MCP server is configured)
 	if s.mcpServer != nil {
 		s.mcpServer.RegisterRoutes(s.router)
 		api.PUT("/mcp/mode", s.handleSetMcpMode)
+		api.PUT("/mcp/builtin-binding", s.handlePrepareBuiltinMCP)
+		api.GET("/mcp/builtin-binding", func(c *gin.Context) { c.JSON(http.StatusOK, s.mcpServer.Profile()) })
 		api.PUT("/mcp/providers", s.handleSetMcpProviders)
 		api.PUT("/mcp/plugin-tools", s.handleSetPluginTools)
 	}
@@ -389,6 +414,11 @@ func (s *Server) handleSetMcpMode(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', 'office', 'automation', or 'coordinator'"})
 		return
 	}
+	current := s.mcpServer.Profile()
+	if current.BuiltinPackages != nil && mcpprofile.Legacy(req.Mode, false, nil).Surface != current.Surface {
+		c.JSON(http.StatusForbidden, gin.H{"error": "built-in MCP surface is bound until the next process start"})
+		return
+	}
 	s.mcpServer.SetMode(req.Mode)
 	c.JSON(http.StatusOK, gin.H{"mode": req.Mode})
 }
@@ -459,7 +489,7 @@ func (s *Server) handleInfo(c *gin.Context) {
 
 // Start request/response
 type StartRequest struct {
-	// Future: could add options like custom command, env overrides
+	Preparation *agentctltypes.ManagedRuntimePreparationDirective `json:"preparation,omitempty"`
 }
 
 type StartResponse struct {
@@ -471,7 +501,24 @@ type StartResponse struct {
 }
 
 func (s *Server) handleStart(c *gin.Context) {
-	processGeneration, err := s.procMgr.StartWithGeneration(c.Request.Context())
+	var req StartRequest
+	if c.Request.Body != nil {
+		if err := json.NewDecoder(io.LimitReader(c.Request.Body, 16<<10)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			c.JSON(http.StatusBadRequest, StartResponse{Success: false, Error: "invalid start request"})
+			return
+		}
+	}
+	var processGeneration uint64
+	var err error
+	if req.Preparation != nil {
+		if !c.GetBool(authenticatedControlContextKey) {
+			c.AbortWithStatusJSON(http.StatusForbidden, StartResponse{Success: false, Error: "authenticated control is required for managed runtime preparation"})
+			return
+		}
+		processGeneration, err = s.procMgr.StartWithManagedRuntimePreparation(c.Request.Context(), *req.Preparation)
+	} else {
+		processGeneration, err = s.procMgr.StartWithGeneration(c.Request.Context())
+	}
 	if err != nil {
 		s.logger.Error("failed to start agent", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, StartResponse{
@@ -491,13 +538,18 @@ func (s *Server) handleStart(c *gin.Context) {
 
 // AgentConfigure request/response - configures the agent command before starting
 type AgentConfigureRequest struct {
-	LaunchWrapper   launchwrapper.Spec `json:"launch_wrapper,omitzero"`
-	Command         string             `json:"command"`
-	AgentArgs       optionalArgs       `json:"agent_args"`
-	ContinueCommand string             `json:"continue_command,omitempty"` // For one-shot agents: command for follow-up prompts
-	ContinueArgs    optionalArgs       `json:"continue_args"`
-	Env             map[string]string  `json:"env,omitempty"`
-	ReplaceEnv      bool               `json:"replace_env,omitempty"`
+	UsagePolicy     *usage.ExecutionUsagePolicy `json:"usage_policy,omitempty"`
+	LaunchWrapper   launchwrapper.Spec          `json:"launch_wrapper,omitzero"`
+	Command         string                      `json:"command"`
+	AgentArgs       optionalArgs                `json:"agent_args"`
+	ContinueCommand string                      `json:"continue_command,omitempty"` // For one-shot agents: command for follow-up prompts
+	ContinueArgs    optionalArgs                `json:"continue_args"`
+	Env             map[string]string           `json:"env,omitempty"`
+	ReplaceEnv      bool                        `json:"replace_env,omitempty"`
+	// ProjectMCPDelivery carries execution-bound project-file delivery
+	// evidence. It is trusted only on an authenticated control request and is
+	// validated against this instance before accepted configuration changes.
+	ProjectMCPDelivery *agentctltypes.ProjectMCPDelivery `json:"project_mcp_delivery,omitempty"`
 	// ApprovalPolicy is accepted and ignored. It was never consulted by any
 	// code path; the field remains so an older backend configuring a newer
 	// agentctl still succeeds. Permission auto-approval travels on
@@ -542,6 +594,11 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		}
 	}
 
+	if req.ProjectMCPDelivery != nil && !c.GetBool(authenticatedControlContextKey) {
+		c.JSON(http.StatusForbidden, AgentConfigureResponse{Error: "authenticated control is required for project MCP delivery"})
+		return
+	}
+
 	if !req.AgentArgs.Present && req.Command == "" {
 		c.JSON(http.StatusBadRequest, AgentConfigureResponse{
 			Success: false,
@@ -552,12 +609,16 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 
 	var configureErr error
 	if req.ReplaceEnv {
-		configureErr = s.procMgr.ConfigureWithEnvironment(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.LaunchWrapper)
+		configureErr = s.procMgr.ConfigureWithEnvironmentAndProjectDelivery(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ProjectMCPDelivery, req.LaunchWrapper)
 	} else {
-		configureErr = s.procMgr.Configure(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.LaunchWrapper)
+		configureErr = s.procMgr.ConfigureWithProjectDelivery(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ProjectMCPDelivery, req.LaunchWrapper)
+	}
+	if configureErr == nil {
+		configureErr = s.procMgr.ConfigureExecutionUsage(req.UsagePolicy)
 	}
 	if configureErr != nil {
-		s.logger.Error("failed to configure agent", zap.Error(configureErr))
+		s.logger.Error("failed to configure agent",
+			append(s.agentConfigureFailureFields(configureErr), zap.Error(configureErr))...)
 		c.JSON(http.StatusInternalServerError, AgentConfigureResponse{
 			Success: false,
 			Error:   configureErr.Error(),

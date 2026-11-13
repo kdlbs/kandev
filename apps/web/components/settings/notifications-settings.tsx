@@ -200,14 +200,16 @@ export function NotificationsSettings() {
       contentFrame="none"
     >
       <div className="space-y-6">
-        <DesktopNotificationsSection
-          notificationPermission={notificationPermission}
-          onRequestPermission={actions.handleRequestPermission}
-          onRefreshPermission={actions.handleRefreshPermission}
-          onTestNotification={actions.handleTestNotification}
-        />
+        <div className="space-y-3">
+          <DesktopNotificationsSection
+            notificationPermission={notificationPermission}
+            onRequestPermission={actions.handleRequestPermission}
+            onRefreshPermission={actions.handleRefreshPermission}
+            onTestNotification={actions.handleTestNotification}
+          />
+          <NotificationSoundSection onDirtyChange={setSoundIsDirty} />
+        </div>
         <WebPushSection />
-        <NotificationSoundSection onDirtyChange={setSoundIsDirty} />
         <ExternalProvidersSection
           appriseAvailable={appriseAvailable}
           appriseProviders={appriseProviders}

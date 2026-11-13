@@ -17,6 +17,9 @@ type RebuildSession struct {
 	ForegroundActivity  string
 	ActiveSubagentCount int
 	ActiveError         *ActiveErrorSummary
+	// Unread is the session's cursor and newest qualifying rank; nil when its
+	// unread state was not read.
+	Unread *SessionUnreadState
 }
 
 // RebuildGit is one authoritative Git snapshot. Repository is empty for the
@@ -79,7 +82,10 @@ type RebuildInput struct {
 	LaunchQueue            *LaunchQueueSummary
 	CompletionGate         *CompletionGateSummary
 	CompletionGateObserved bool
-	Now                    time.Time
+	// UnreadObserved marks Sessions' Unread ranks as authoritative. When false
+	// the rebuilt summary projects no unread aggregate.
+	UnreadObserved bool
+	Now            time.Time
 }
 
 // BuildFromAuthoritative derives the same summary semantics used by the live
@@ -105,6 +111,7 @@ func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 		launchQueue:            cloneLaunchQueue(input.LaunchQueue),
 		completionGateObserved: input.CompletionGateObserved,
 		completionGate:         cloneCompletionGate(input.CompletionGate),
+		unreadObserved:         input.UnreadObserved,
 	}
 	for _, inputSession := range input.Sessions {
 		if strings.TrimSpace(inputSession.ID) == "" {
@@ -116,6 +123,7 @@ func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 			isPrimary:           inputSession.IsPrimary,
 			foregroundActivity:  inputSession.ForegroundActivity,
 			activeSubagentCount: maxInt(inputSession.ActiveSubagentCount, 0),
+			unread:              unreadRanksFromState(inputSession.Unread),
 		}
 		if inputSession.ActiveError != nil {
 			if activeError := normalizeRebuildError(inputSession.ActiveError, input.Now); activeError != nil {

@@ -161,7 +161,7 @@ else
   BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' $(NULL_REDIR) || echo unknown)
 endif
 
-VERSION ?= $(shell git describe --tags --always --dirty $(NULL_REDIR) || echo dev)
+VERSION ?= $(shell git describe --tags --match "v[0-9]*" --exclude "*/*" --always --dirty $(NULL_REDIR) || echo dev)
 COMMIT := $(shell git rev-parse HEAD $(NULL_REDIR) || echo unknown)
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
@@ -245,6 +245,11 @@ build: build-runtime build-mock-agent build-acpdbg build-codexdbg build-winjob
 build-e2e-delivery-fixture:
 	@$(call MKDIR,$(BUILD_DIR))
 	$(CGO_LOCALE) $(GO) test -c -trimpath -tags fts5 -o $(BUILD_DIR)/e2e-delivery-fixture$(EXE) ./internal/agent/runtime/lifecycle
+
+.PHONY: build-e2e-send-now-fixture
+build-e2e-send-now-fixture:
+	@$(call MKDIR,$(BUILD_DIR))
+	$(CGO_LOCALE) $(GO) test -c -trimpath -tags fts5 -o $(BUILD_DIR)/e2e-send-now-fixture$(EXE) ./internal/orchestrator
 
 ## Build the lean development binary set. Unlike `build`, this does not build
 ## every cross-platform remote helper; dev needs the host helper and, for a

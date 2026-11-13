@@ -389,11 +389,12 @@ func TestCursorPluginMCPImportedIdentityMatchesSharedOAuth(t *testing.T) {
 func TestCursorPluginMCPNativeIdentityPreservesProjectPrecedence(t *testing.T) {
 	for _, explicitName := range []string{"atlassian", "plugin-atlassian-atlassian"} {
 		t.Run(explicitName, func(t *testing.T) {
-			servers, ownership := composeEffectiveMCPServers(&AgentExecution{}, nil,
+			servers, ownership, err := composeEffectiveMCPServers(&AgentExecution{}, nil,
 				map[string]json.RawMessage{explicitName: json.RawMessage(`{"url":"https://explicit.example"}`)},
 				map[string]agentctltypes.McpServer{
 					"atlassian": {Name: "plugin-atlassian-atlassian", URL: "https://plugin.example"},
 				}, "localhost")
+			require.NoError(t, err)
 			require.Len(t, servers, 1)
 			require.Contains(t, servers, explicitName)
 			require.Empty(t, ownership)

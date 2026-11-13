@@ -68,9 +68,10 @@ type Manager struct {
 	// observe activeCreations at zero and a creation could then Add(1) behind
 	// it: admission checks the flag and adds under m.mu, so every creation
 	// either is counted before the flag is set or sees the flag and refuses.
-	abandonWG       sync.WaitGroup
-	activeCreations sync.WaitGroup
-	shuttingDown    bool
+	abandonWG                 sync.WaitGroup
+	activeCreations           sync.WaitGroup
+	shuttingDown              bool
+	inferenceCapacityRequired bool
 
 	// afterTrackerStart runs immediately after StartAllWorkspaceTrackers and is
 	// nil in production. It exists so a test can cancel the caller's context at
@@ -140,8 +141,9 @@ func (m *Manager) SetServerFactory(factory ServerFactory) {
 // createAdmission is an admitted creation: its ID is reserved in m.provisional
 // and its port and listener are bound. The caller must publish or abandon it.
 type createAdmission struct {
-	bundle   *provisionalInstance
-	agentEnv []string
+	freshInferenceOwner bool
+	bundle              *provisionalInstance
+	agentEnv            []string
 }
 
 // CreateInstance creates a new agent instance.
@@ -270,7 +272,7 @@ func (m *Manager) admitCreate(ctx context.Context, req *CreateRequest) (*createA
 	bundle := &provisionalInstance{id: id, lease: lease, listener: listener}
 	m.provisional[id] = bundle
 	m.activeCreations.Add(1)
-	return &createAdmission{bundle: bundle, agentEnv: agentEnv}, nil
+	return &createAdmission{bundle: bundle, agentEnv: agentEnv, freshInferenceOwner: req.ID == ""}, nil
 }
 
 // startInstance builds an admitted instance without holding m.mu: its process
@@ -292,7 +294,12 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 		zap.String("override_protocol", string(overrides.Protocol)))
 
 	// Create instance config using the unified method
-	instanceCfg := m.config.NewInstanceConfig(port, overrides)
+	instanceCfg, err := m.config.NewInstanceConfig(port, overrides)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	instanceCfg.AgentCommandConfigured = req.AgentCommand != ""
+	instanceCfg.InferenceOwnerFresh = admission.freshInferenceOwner
 
 	m.logger.Info("CreateInstance: instance config created",
 		zap.String("config_protocol", string(instanceCfg.Protocol)))
@@ -366,6 +373,9 @@ func (m *Manager) publishInstance(ctx context.Context, inst *Instance, bundle *p
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("create instance abandoned before publication: %w", err)
 	}
+	if err := requireInstanceCapacity(inst, m.inferenceCapacityRequired); err != nil {
+		return err
+	}
 	inst.server = m.startHTTPServer(inst, bundle.listener, handler)
 	m.instances[inst.ID] = inst
 	delete(m.provisional, inst.ID)
@@ -375,38 +385,41 @@ func (m *Manager) publishInstance(ctx context.Context, inst *Instance, bundle *p
 func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd string, agentEnv []string) *config.InstanceOverrides {
 	autoStart := req.AutoStart
 	return &config.InstanceOverrides{
-		InstanceID:                 id,
-		Protocol:                   agent.Protocol(req.Protocol),
-		AgentCommand:               agentCmd,
-		WorkDir:                    req.WorkspacePath,
-		AutoStart:                  &autoStart,
-		Env:                        agentEnv,
-		AutoApprovePermissions:     req.AutoApprovePermissions,
-		AgentType:                  req.AgentType,
-		McpServers:                 m.buildMcpServerConfigs(req.McpServers),
-		SessionID:                  req.SessionID,
-		TaskID:                     req.TaskID,
-		DisableAskQuestion:         req.DisableAskQuestion,
-		PromptSuggestions:          req.PromptSuggestions,
-		AssumeMcpSse:               req.AssumeMcpSse,
-		AssumeMcpHttp:              req.AssumeMcpHttp,
-		McpMode:                    req.McpMode,
-		McpProviders:               req.McpProviders,
-		McpProfile:                 req.McpProfile,
-		NamespacesMCPToolsByServer: req.NamespacesMCPToolsByServer,
-		RequiresProcessKill:        req.RequiresProcessKill,
-		StripEnv:                   req.StripEnv,
-		ProviderGatewayAuth:        req.ProviderGatewayAuth,
-		BaseBranches:               req.BaseBranches,
-		ComparisonTargets:          req.ComparisonTargets,
-		RemoteContributions:        req.RemoteContributions,
-		ContributionDestinations:   req.ContributionDestinations,
-		WorkspaceSourceRoots:       req.WorkspaceSourceRoots,
-		DurableJournalPath:         req.DurableJournalPath,
-		DeliveryStreamID:           req.DeliveryStreamID,
-		DeliveryIncarnationID:      req.DeliveryIncarnationID,
-		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
-		OpenCodePluginRuntime:      req.OpenCodePluginRuntime,
+		InferenceClosureOperationID: req.InferenceClosureOperationID,
+		InstanceID:                  id,
+		Protocol:                    agent.Protocol(req.Protocol),
+		AgentCommand:                agentCmd,
+		WorkDir:                     req.WorkspacePath,
+		AutoStart:                   &autoStart,
+		Env:                         agentEnv,
+		AutoApprovePermissions:      req.AutoApprovePermissions,
+		AgentType:                   req.AgentType,
+		McpServers:                  m.buildMcpServerConfigs(req.McpServers),
+		SessionID:                   req.SessionID,
+		TaskID:                      req.TaskID,
+		DisableAskQuestion:          req.DisableAskQuestion,
+		PromptSuggestions:           req.PromptSuggestions,
+		CopilotNativeSessionEvents:  req.CopilotNativeSessionEvents,
+		AssumeMcpSse:                req.AssumeMcpSse,
+		AssumeMcpHttp:               req.AssumeMcpHttp,
+		McpMode:                     req.McpMode,
+		McpProviders:                req.McpProviders,
+		McpProfile:                  req.McpProfile,
+		NamespacesMCPToolsByServer:  req.NamespacesMCPToolsByServer,
+		RequiresProcessKill:         req.RequiresProcessKill,
+		StripEnv:                    req.StripEnv,
+		ProviderGatewayAuth:         req.ProviderGatewayAuth,
+		AuthPolicy:                  req.AuthPolicy,
+		BaseBranches:                req.BaseBranches,
+		ComparisonTargets:           req.ComparisonTargets,
+		RemoteContributions:         req.RemoteContributions,
+		ContributionDestinations:    req.ContributionDestinations,
+		WorkspaceSourceRoots:        req.WorkspaceSourceRoots,
+		DurableJournalPath:          req.DurableJournalPath,
+		DeliveryStreamID:            req.DeliveryStreamID,
+		DeliveryIncarnationID:       req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:   req.DeliveryHarnessGeneration,
+		OpenCodePluginRuntime:       req.OpenCodePluginRuntime,
 	}
 }
 
@@ -637,6 +650,40 @@ func (m *Manager) ListInstances() []*InstanceInfo {
 		result = append(result, inst.Info())
 	}
 	return result
+}
+
+// InferenceInventory closes unreserved starts before returning the current list.
+// Publication takes the same mutex and applies the mode to future instances.
+func (m *Manager) InferenceInventory(required bool) ([]*InstanceInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.shuttingDown {
+		return nil, ErrManagerShuttingDown
+	}
+	m.inferenceCapacityRequired = required
+	result := make([]*InstanceInfo, 0, len(m.instances))
+	for _, inst := range m.instances {
+		if inst == nil || inst.manager == nil {
+			return nil, errors.New("inference instance owner unavailable")
+		}
+		if err := requireInstanceCapacity(inst, required); err != nil {
+			return nil, err
+		}
+		result = append(result, inst.Info())
+	}
+	return result, nil
+}
+
+func requireInstanceCapacity(inst *Instance, required bool) error {
+	owner, ok := inst.manager.(interface{ RequireInferenceCapacity(bool) })
+	if !ok {
+		if required {
+			return errors.New("inference capacity owner unavailable")
+		}
+		return nil
+	}
+	owner.RequireInferenceCapacity(required)
+	return nil
 }
 
 // StopInstance stops and removes an instance by ID.

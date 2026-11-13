@@ -37,22 +37,25 @@ type WorkflowDTO struct {
 }
 
 type WorkspaceDTO struct {
-	ID                          string    `json:"id"`
-	Name                        string    `json:"name"`
-	Description                 *string   `json:"description,omitempty"`
-	OwnerID                     string    `json:"owner_id"`
-	UnitID                      string    `json:"unit_id,omitempty"`
-	DefaultExecutorID           *string   `json:"default_executor_id,omitempty"`
-	DefaultEnvironmentID        *string   `json:"default_environment_id,omitempty"`
-	DefaultAgentProfileID       *string   `json:"default_agent_profile_id,omitempty"`
-	DefaultConfigAgentProfileID *string   `json:"default_config_agent_profile_id,omitempty"`
-	ACPIdleSuspensionEnabled    bool      `json:"acp_idle_suspension_enabled"`
-	ACPIdleTimeoutMinutes       int       `json:"acp_idle_timeout_minutes"`
-	TaskPrefix                  string    `json:"task_prefix,omitempty"`
-	TaskSequence                int       `json:"task_sequence,omitempty"`
-	OfficeWorkflowID            string    `json:"office_workflow_id,omitempty"`
-	CreatedAt                   time.Time `json:"created_at"`
-	UpdatedAt                   time.Time `json:"updated_at"`
+	ID                                 string    `json:"id"`
+	Name                               string    `json:"name"`
+	Description                        *string   `json:"description,omitempty"`
+	OwnerID                            string    `json:"owner_id"`
+	UnitID                             string    `json:"unit_id,omitempty"`
+	DefaultExecutorID                  *string   `json:"default_executor_id,omitempty"`
+	DefaultEnvironmentID               *string   `json:"default_environment_id,omitempty"`
+	DefaultAgentProfileID              *string   `json:"default_agent_profile_id,omitempty"`
+	DefaultConfigAgentProfileID        *string   `json:"default_config_agent_profile_id,omitempty"`
+	ACPIdleSuspensionEnabled           bool      `json:"acp_idle_suspension_enabled"`
+	ACPIdleTimeoutMinutes              int       `json:"acp_idle_timeout_minutes"`
+	DynamicMidTurnFailoverEnabled      bool      `json:"dynamic_midturn_failover_enabled"`
+	DynamicFailedRouteAutoRetryEnabled bool      `json:"dynamic_failed_route_auto_retry_enabled"`
+	DynamicFailedRouteAutoRetryMax     int       `json:"dynamic_failed_route_auto_retry_max"`
+	TaskPrefix                         string    `json:"task_prefix,omitempty"`
+	TaskSequence                       int       `json:"task_sequence,omitempty"`
+	OfficeWorkflowID                   string    `json:"office_workflow_id,omitempty"`
+	CreatedAt                          time.Time `json:"created_at"`
+	UpdatedAt                          time.Time `json:"updated_at"`
 
 	// ViewerRole and Scopes describe what the *requesting* user may do here.
 	// The frontend gates every control on Scopes rather than comparing the
@@ -196,6 +199,7 @@ type EnvironmentDTO struct {
 }
 
 type TaskDTO struct {
+	ExecutionGrade              string                         `json:"execution_grade"`
 	ID                          string                         `json:"id"`
 	WorkspaceID                 string                         `json:"workspace_id"`
 	InitialWorkspaceLayout      string                         `json:"initial_workspace_layout,omitempty"`
@@ -411,9 +415,11 @@ type SessionRecoveryBlockDTO struct {
 }
 
 type TaskSessionDTO struct {
-	ID                 string `json:"id"`
-	TaskID             string `json:"task_id"`
-	QueueIncarnationID string `json:"queue_incarnation_id"`
+	AdmittedExecutionGrade      string `json:"admitted_execution_grade"`
+	AdmittedExecutionGradeKnown bool   `json:"admitted_execution_grade_known"`
+	ID                          string `json:"id"`
+	TaskID                      string `json:"task_id"`
+	QueueIncarnationID          string `json:"queue_incarnation_id"`
 	// Name is the user-supplied session tab label. Serialized without
 	// omitempty so a cleared name ("") overwrites stale client state.
 	Name               string `json:"name"`
@@ -436,6 +442,9 @@ type TaskSessionDTO struct {
 	// WorkspacePath is the effective task root used by Files and chat links;
 	// WorktreePath remains the flattened primary repository path.
 	WorkspacePath string `json:"workspace_path,omitempty"`
+	// AgentWorkspacePath is the confirmed native-session working directory used
+	// as the base for repository-relative chat links. Null means unknown.
+	AgentWorkspacePath *string `json:"agent_workspace_path"`
 	// Worktrees lists all session worktrees (one per repo on multi-repo tasks);
 	// the flattened Worktree* fields above carry only the first for backward
 	// compatibility. Entries use the stable session-worktree wire shape
@@ -611,9 +620,11 @@ func WorkspaceRecoveryFromOperation(
 // TaskSessionSummaryDTO is a lightweight version of TaskSessionDTO without snapshot fields.
 // Used for list endpoints where snapshots are not needed, reducing response size by ~40-60%.
 type TaskSessionSummaryDTO struct {
-	ID                 string `json:"id"`
-	TaskID             string `json:"task_id"`
-	QueueIncarnationID string `json:"queue_incarnation_id"`
+	AdmittedExecutionGrade      string `json:"admitted_execution_grade"`
+	AdmittedExecutionGradeKnown bool   `json:"admitted_execution_grade_known"`
+	ID                          string `json:"id"`
+	TaskID                      string `json:"task_id"`
+	QueueIncarnationID          string `json:"queue_incarnation_id"`
 	// Name is the user-supplied session tab label. Serialized without
 	// omitempty so a cleared name ("") overwrites stale client state.
 	Name               string `json:"name"`
@@ -636,6 +647,9 @@ type TaskSessionSummaryDTO struct {
 	// WorkspacePath is the effective task root used by Files and chat links;
 	// WorktreePath remains the flattened primary repository path.
 	WorkspacePath string `json:"workspace_path,omitempty"`
+	// AgentWorkspacePath is the confirmed native-session working directory used
+	// as the base for repository-relative chat links. Null means unknown.
+	AgentWorkspacePath *string `json:"agent_workspace_path"`
 	// Worktrees lists all session worktrees (one per repo on multi-repo tasks);
 	// the flattened Worktree* fields above carry only the first for backward
 	// compatibility. Entries use the stable session-worktree wire shape.
@@ -911,22 +925,25 @@ func FromWorkspace(workspace *models.Workspace) WorkspaceDTO {
 	}
 
 	return WorkspaceDTO{
-		ID:                          workspace.ID,
-		Name:                        workspace.Name,
-		Description:                 description,
-		OwnerID:                     workspace.OwnerID,
-		UnitID:                      workspace.UnitID,
-		DefaultExecutorID:           workspace.DefaultExecutorID,
-		DefaultEnvironmentID:        workspace.DefaultEnvironmentID,
-		DefaultAgentProfileID:       workspace.DefaultAgentProfileID,
-		DefaultConfigAgentProfileID: workspace.DefaultConfigAgentProfileID,
-		ACPIdleSuspensionEnabled:    workspace.ACPIdleSuspensionEnabled,
-		ACPIdleTimeoutMinutes:       workspace.ACPIdleTimeoutMinutes,
-		TaskPrefix:                  workspace.TaskPrefix,
-		TaskSequence:                workspace.TaskSequence,
-		OfficeWorkflowID:            workspace.OfficeWorkflowID,
-		CreatedAt:                   workspace.CreatedAt,
-		UpdatedAt:                   workspace.UpdatedAt,
+		ID:                                 workspace.ID,
+		Name:                               workspace.Name,
+		Description:                        description,
+		OwnerID:                            workspace.OwnerID,
+		UnitID:                             workspace.UnitID,
+		DefaultExecutorID:                  workspace.DefaultExecutorID,
+		DefaultEnvironmentID:               workspace.DefaultEnvironmentID,
+		DefaultAgentProfileID:              workspace.DefaultAgentProfileID,
+		DefaultConfigAgentProfileID:        workspace.DefaultConfigAgentProfileID,
+		ACPIdleSuspensionEnabled:           workspace.ACPIdleSuspensionEnabled,
+		ACPIdleTimeoutMinutes:              workspace.ACPIdleTimeoutMinutes,
+		DynamicMidTurnFailoverEnabled:      workspace.DynamicMidTurnFailoverEnabled,
+		DynamicFailedRouteAutoRetryEnabled: workspace.DynamicFailedRouteAutoRetryEnabled,
+		DynamicFailedRouteAutoRetryMax:     workspace.DynamicFailedRouteAutoRetryMax,
+		TaskPrefix:                         workspace.TaskPrefix,
+		TaskSequence:                       workspace.TaskSequence,
+		OfficeWorkflowID:                   workspace.OfficeWorkflowID,
+		CreatedAt:                          workspace.CreatedAt,
+		UpdatedAt:                          workspace.UpdatedAt,
 	}
 }
 
@@ -1175,6 +1192,7 @@ func FromTaskWithSessionInfo(
 		Description:                 task.Description,
 		State:                       task.State,
 		Priority:                    task.Priority,
+		ExecutionGrade:              task.ExecutionGrade,
 		WIPAdmitted:                 task.WIPAdmitted,
 		QueuedForStepID:             task.QueuedForStepID,
 		QueuedAt:                    task.QueuedAt,
@@ -1224,38 +1242,50 @@ func FromTaskWithSessionInfo(
 	}
 }
 
+// agentWorkspacePathPtr projects an empty native-workspace projection as an
+// explicit null so a full response can clear a stale client value.
+func agentWorkspacePathPtr(path string) *string {
+	if path == "" {
+		return nil
+	}
+	return &path
+}
+
 // FromTaskSessionSummary converts a session model to a summary DTO (no snapshot fields).
 func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 	result := TaskSessionSummaryDTO{
-		ID:                 session.ID,
-		TaskID:             session.TaskID,
-		QueueIncarnationID: session.QueueIncarnationID,
-		Name:               session.Name,
-		AgentExecutionID:   session.AgentExecutionID,
-		ContainerID:        session.ContainerID,
-		AgentProfileID:     session.AgentProfileID,
-		ExecutionProfileID: session.ExecutionProfileID,
-		RouteGeneration:    session.RouteGeneration,
-		RouteState:         session.RouteState,
-		RouteReason:        session.RouteReason,
-		ExecutorID:         session.ExecutorID,
-		ExecutorProfileID:  session.ExecutorProfileID,
-		EnvironmentID:      session.EnvironmentID,
-		RepositoryID:       session.RepositoryID,
-		BaseBranch:         session.BaseBranch,
-		BaseCommitSHA:      session.BaseCommitSHA,
-		WorkspacePath:      session.WorkspacePath,
-		State:              session.State,
-		ErrorMessage:       session.ErrorMessage,
-		Metadata:           session.Metadata,
-		StartedAt:          session.StartedAt,
-		CompletedAt:        session.CompletedAt,
-		UpdatedAt:          session.UpdatedAt,
-		IsPrimary:          session.IsPrimary,
-		IsPassthrough:      session.IsPassthrough,
-		ReviewStatus:       session.ReviewStatus,
-		TaskEnvironmentID:  session.TaskEnvironmentID,
-		LastReadMessageID:  session.LastReadMessageID,
+		ID:                          session.ID,
+		TaskID:                      session.TaskID,
+		QueueIncarnationID:          session.QueueIncarnationID,
+		Name:                        session.Name,
+		AgentExecutionID:            session.AgentExecutionID,
+		ContainerID:                 session.ContainerID,
+		AgentProfileID:              session.AgentProfileID,
+		ExecutionProfileID:          session.ExecutionProfileID,
+		RouteGeneration:             session.RouteGeneration,
+		RouteState:                  session.RouteState,
+		RouteReason:                 session.RouteReason,
+		ExecutorID:                  session.ExecutorID,
+		ExecutorProfileID:           session.ExecutorProfileID,
+		EnvironmentID:               session.EnvironmentID,
+		RepositoryID:                session.RepositoryID,
+		BaseBranch:                  session.BaseBranch,
+		BaseCommitSHA:               session.BaseCommitSHA,
+		WorkspacePath:               session.WorkspacePath,
+		AgentWorkspacePath:          agentWorkspacePathPtr(session.AgentWorkspacePath),
+		State:                       session.State,
+		ErrorMessage:                session.ErrorMessage,
+		Metadata:                    models.PublicSessionMetadata(session.Metadata),
+		StartedAt:                   session.StartedAt,
+		CompletedAt:                 session.CompletedAt,
+		UpdatedAt:                   session.UpdatedAt,
+		IsPrimary:                   session.IsPrimary,
+		IsPassthrough:               session.IsPassthrough,
+		ReviewStatus:                session.ReviewStatus,
+		TaskEnvironmentID:           session.TaskEnvironmentID,
+		LastReadMessageID:           session.LastReadMessageID,
+		AdmittedExecutionGrade:      session.AdmittedExecutionGrade,
+		AdmittedExecutionGradeKnown: session.AdmittedExecutionGradeKnown,
 	}
 	if worktrees := session.WorktreesAPI(); len(worktrees) > 0 {
 		result.WorktreeID = session.Worktrees[0].WorktreeID
@@ -1274,34 +1304,37 @@ func FromTaskSessionSummaryObservation(observation *models.TaskSessionSummaryObs
 
 func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 	result := TaskSessionDTO{
-		ID:                   session.ID,
-		TaskID:               session.TaskID,
-		QueueIncarnationID:   session.QueueIncarnationID,
-		Name:                 session.Name,
-		AgentExecutionID:     session.AgentExecutionID,
-		ContainerID:          session.ContainerID,
-		AgentProfileID:       session.AgentProfileID,
-		ExecutionProfileID:   session.ExecutionProfileID,
-		RouteGeneration:      session.RouteGeneration,
-		RouteState:           session.RouteState,
-		RouteReason:          session.RouteReason,
-		ExecutorID:           session.ExecutorID,
-		ExecutorProfileID:    session.ExecutorProfileID,
-		EnvironmentID:        session.EnvironmentID,
-		RepositoryID:         session.RepositoryID,
-		BaseBranch:           session.BaseBranch,
-		BaseCommitSHA:        session.BaseCommitSHA,
-		WorkspacePath:        session.WorkspacePath,
-		State:                session.State,
-		ErrorMessage:         session.ErrorMessage,
-		Metadata:             session.Metadata,
-		AgentProfileSnapshot: session.AgentProfileSnapshot,
-		ExecutorSnapshot:     session.ExecutorSnapshot,
-		EnvironmentSnapshot:  session.EnvironmentSnapshot,
-		RepositorySnapshot:   session.RepositorySnapshot,
-		StartedAt:            session.StartedAt,
-		CompletedAt:          session.CompletedAt,
-		UpdatedAt:            session.UpdatedAt,
+		ID:                          session.ID,
+		TaskID:                      session.TaskID,
+		QueueIncarnationID:          session.QueueIncarnationID,
+		Name:                        session.Name,
+		AgentExecutionID:            session.AgentExecutionID,
+		ContainerID:                 session.ContainerID,
+		AgentProfileID:              session.AgentProfileID,
+		ExecutionProfileID:          session.ExecutionProfileID,
+		RouteGeneration:             session.RouteGeneration,
+		RouteState:                  session.RouteState,
+		RouteReason:                 session.RouteReason,
+		ExecutorID:                  session.ExecutorID,
+		ExecutorProfileID:           session.ExecutorProfileID,
+		EnvironmentID:               session.EnvironmentID,
+		RepositoryID:                session.RepositoryID,
+		BaseBranch:                  session.BaseBranch,
+		BaseCommitSHA:               session.BaseCommitSHA,
+		WorkspacePath:               session.WorkspacePath,
+		AgentWorkspacePath:          agentWorkspacePathPtr(session.AgentWorkspacePath),
+		State:                       session.State,
+		ErrorMessage:                session.ErrorMessage,
+		Metadata:                    models.PublicSessionMetadata(session.Metadata),
+		AgentProfileSnapshot:        session.AgentProfileSnapshot,
+		ExecutorSnapshot:            session.ExecutorSnapshot,
+		EnvironmentSnapshot:         session.EnvironmentSnapshot,
+		RepositorySnapshot:          session.RepositorySnapshot,
+		StartedAt:                   session.StartedAt,
+		CompletedAt:                 session.CompletedAt,
+		UpdatedAt:                   session.UpdatedAt,
+		AdmittedExecutionGrade:      session.AdmittedExecutionGrade,
+		AdmittedExecutionGradeKnown: session.AdmittedExecutionGradeKnown,
 		// Workflow fields
 		IsPrimary:             session.IsPrimary,
 		IsPassthrough:         session.IsPassthrough,

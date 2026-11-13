@@ -61,10 +61,10 @@ type codexAuthJSON struct {
 }
 
 type codexWindow struct {
-	UsedPercent        float64 `json:"used_percent"`
-	LimitWindowSeconds int64   `json:"limit_window_seconds"`
-	ResetAfterSeconds  int64   `json:"reset_after_seconds"`
-	ResetAt            int64   `json:"reset_at"` // Unix seconds
+	UsedPercent        *float64 `json:"used_percent"`
+	LimitWindowSeconds int64    `json:"limit_window_seconds"`
+	ResetAfterSeconds  *int64   `json:"reset_after_seconds"`
+	ResetAt            int64    `json:"reset_at"` // Unix seconds
 }
 
 type codexUsageResponse struct {
@@ -85,7 +85,8 @@ func (c *CodexUsageClient) FetchUsage(ctx context.Context) (*ProviderUsage, erro
 		return nil, fmt.Errorf("codex usage: no ChatGPT OAuth tokens in %s", c.authPath)
 	}
 
-	body, statusErr, err := c.getUsage(ctx, auth.Tokens)
+	selected := auth.Tokens
+	body, statusErr, err := c.getUsage(ctx, selected)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +95,8 @@ func (c *CodexUsageClient) FetchUsage(ctx context.Context) (*ProviderUsage, erro
 		if refreshErr != nil {
 			return nil, fmt.Errorf("codex usage: refresh token: %w", refreshErr)
 		}
-		body, statusErr, err = c.getUsage(ctx, refreshed)
+		selected = refreshed
+		body, statusErr, err = c.getUsage(ctx, selected)
 		if err != nil {
 			return nil, err
 		}
@@ -102,7 +104,11 @@ func (c *CodexUsageClient) FetchUsage(ctx context.Context) (*ProviderUsage, erro
 	if statusErr != nil {
 		return nil, statusErr
 	}
-	return parseCodexUsage(body, time.Now())
+	result, err := parseCodexUsage(body, time.Now())
+	if result != nil {
+		result.AccountRef = selected.AccountID
+	}
+	return result, err
 }
 
 // getUsage returns the response body for an OK response and nil otherwise, so
@@ -146,8 +152,12 @@ func parseCodexUsage(body []byte, now time.Time) (*ProviderUsage, error) {
 		}
 		windows = append(windows, UtilizationWindow{
 			Label:          codexWindowLabel(w.LimitWindowSeconds),
-			UtilizationPct: w.UsedPercent,
+			UtilizationPct: legacyUtilization(w.UsedPercent),
 			ResetAt:        codexResetAt(w, now),
+			Observation: &WindowObservation{
+				UtilizationObserved: utilizationObserved(w.UsedPercent),
+				ResetAtObserved:     reportedCodexReset(w),
+			},
 		})
 	}
 	return &ProviderUsage{
@@ -172,11 +182,25 @@ func codexWindowLabel(seconds int64) string {
 	}
 }
 
+// reportedCodexReset reports a reset the provider stated explicitly. A relative
+// reset too large to represent as a duration stays unobserved.
+func reportedCodexReset(w *codexWindow) bool {
+	if w.ResetAt > 0 {
+		return true
+	}
+	return w.ResetAfterSeconds != nil && *w.ResetAfterSeconds >= 0 &&
+		*w.ResetAfterSeconds <= int64((1<<63-1)/time.Second)
+}
+
 func codexResetAt(w *codexWindow, now time.Time) time.Time {
 	if w.ResetAt > 0 {
 		return time.Unix(w.ResetAt, 0)
 	}
-	return now.Add(time.Duration(w.ResetAfterSeconds) * time.Second)
+	var seconds int64
+	if w.ResetAfterSeconds != nil {
+		seconds = *w.ResetAfterSeconds
+	}
+	return now.Add(time.Duration(seconds) * time.Second)
 }
 
 func (c *CodexUsageClient) readAuth() (*codexAuthJSON, error) {

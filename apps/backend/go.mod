@@ -24,6 +24,7 @@ require (
 	github.com/moby/moby/api v1.55.0
 	github.com/moby/moby/client v0.5.0
 	github.com/nats-io/nats.go v1.31.0
+	github.com/pelletier/go-toml/v2 v2.0.8
 	github.com/pkg/sftp v1.13.10
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
@@ -115,7 +116,6 @@ require (
 	github.com/oklog/run v1.1.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
-	github.com/pelletier/go-toml/v2 v2.0.8 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/spf13/afero v1.9.5 // indirect
 	github.com/spf13/cast v1.7.1 // indirect
@@ -151,7 +151,7 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.3 // indirect
 )
 
-replace github.com/coder/acp-go-sdk => github.com/kdlbs/acp-go-sdk v0.13.6-0.20261101161427-70cc752b95c6
+replace github.com/coder/acp-go-sdk => github.com/kdlbs/acp-go-sdk v0.13.6-0.20261106000654-ec6d622b1999
 
 require (
 	github.com/SherClockHolmes/webpush-go v1.4.0

@@ -28,6 +28,25 @@ const (
 // GinContextKey is the gin-context key holding the request Identity.
 const GinContextKey = "kandev_auth_identity"
 
+// AuthUnavailableCode is the stable machine-readable code for a credential
+// verification dependency that could not be read. Clients treat it as
+// retryable and keep the existing browser session.
+const AuthUnavailableCode = "persistence_unavailable"
+
+// AuthUnavailableMessage is the stable human-readable message paired with
+// AuthUnavailableCode.
+const AuthUnavailableMessage = "authentication temporarily unavailable"
+
+// AbortAuthenticationUnavailable writes the shared 503 contract without a
+// challenge header. The credential was not rejected, so clearing the cookie or
+// sending the browser to login would discard a session that may still be valid.
+func AbortAuthenticationUnavailable(c *gin.Context) {
+	c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+		"error": AuthUnavailableMessage,
+		"code":  AuthUnavailableCode,
+	})
+}
+
 type ctxKey struct{}
 
 // Identity describes the authenticated caller of a request or WS connection.

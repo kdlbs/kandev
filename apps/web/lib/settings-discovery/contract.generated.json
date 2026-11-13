@@ -4718,6 +4718,42 @@
           "settings_href": "/settings/preferences"
         },
         {
+          "key": "user_settings.unread_task_dot",
+          "field_path": "unread_task_dot",
+          "label": "unread task dot",
+          "description": "Portable preference owned by the current user.",
+          "json_type": "boolean",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "user-settings",
+          "writable": true,
+          "validator": "user-settings",
+          "authority": "user.self",
+          "change_timing": "future_views",
+          "settings_href": "/settings/preferences"
+        },
+        {
+          "key": "user_settings.unread_task_dot_hide_delay_seconds",
+          "field_path": "unread_task_dot_hide_delay_seconds",
+          "label": "unread task dot hide delay",
+          "description": "Portable preference owned by the current user.",
+          "json_type": "integer",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "user-settings",
+          "writable": true,
+          "validator": "user-settings",
+          "authority": "user.self",
+          "default_behavior": "2 seconds",
+          "change_timing": "future_views",
+          "settings_href": "/settings/preferences",
+          "schema": {
+            "maximum": 60,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        {
           "key": "user_settings.agent_generated_task_titles",
           "field_path": "agent_generated_task_titles",
           "label": "generated titles",
@@ -6607,6 +6643,8 @@
       "thread_view_draft",
       "thread_views",
       "unread_divider",
+      "unread_task_dot",
+      "unread_task_dot_hide_delay_seconds",
       "workflow_filter_id",
       "workflow_ids_with_auto_hide_empty_steps",
       "workspace_id"

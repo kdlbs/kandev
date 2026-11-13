@@ -15,6 +15,7 @@ import (
 //  2. Looking up the agent type from the registry to get its billing type.
 //  3. Delegating to the UsageService with the appropriate client registered.
 type usageProviderAdapter struct {
+	tierLimits    *providerTierLimitService
 	svc           *agentusage.UsageService
 	settingsStore settingsstore.Repository
 	agentRegistry *agentregistry.Registry
@@ -31,11 +32,20 @@ func (a *usageProviderAdapter) GetUsage(ctx context.Context, profileID string) (
 	if !ok {
 		return nil, nil
 	}
+	// With provider usage limits enabled, a reading feeds account allowances,
+	// so an unproved host binding must not borrow the host account's usage.
+	// The legacy reader keeps its existing behavior while limits are off.
+	if a.tierLimits != nil && !snapshotHostBinding(profile) {
+		return nil, nil
+	}
 	if a.proxyResolver != nil {
 		if client, cacheKey, ok := a.proxyResolver.Resolve(profile); ok {
 			a.svc.Register(profileID, client, cacheKey)
 			return a.svc.GetUsage(ctx, profileID)
 		}
+	}
+	if a.tierLimits != nil && !hostUsageBindingProved(profile, profile.AgentID) {
+		return nil, nil
 	}
 	if ag.BillingType() != agentusage.BillingTypeSubscription {
 		return nil, nil
@@ -60,6 +70,9 @@ func (a *usageProviderAdapter) ensureRegistered(profileID, agentName string) {
 	if err != nil {
 		return
 	}
+	// Antigravity's supported personal path is a subscription, but its native
+	// server owns the account allowance report and exposes no client-side quota
+	// API. Keep it out of this switch: /usage renders the native report instead.
 	switch agentName {
 	case claudeACPAgentID:
 		credPath := filepath.Join(home, ".claude", ".credentials.json")

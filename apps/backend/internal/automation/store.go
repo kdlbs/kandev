@@ -18,6 +18,7 @@ import (
 
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
@@ -75,6 +76,7 @@ const createTablesSQL = `
 		continuation_task_id TEXT DEFAULT '',
 		webhook_secret TEXT DEFAULT '',
 		retry_policy TEXT NOT NULL DEFAULT '{}',
+		plugin_tools TEXT NOT NULL DEFAULT '[]',
 		automation_revision BIGINT NOT NULL DEFAULT 0,
 		last_triggered_at DATETIME,
 		created_at DATETIME NOT NULL,
@@ -293,6 +295,7 @@ const (
 	migrateRunDeliveryStatusSQL                 = `ALTER TABLE automation_runs ADD COLUMN delivery_status TEXT NOT NULL DEFAULT ''`
 	migrateRunDeliveryAttemptsSQL               = `ALTER TABLE automation_runs ADD COLUMN managed_delivery_attempts INTEGER NOT NULL DEFAULT 0`
 	migrateRetryPolicySQL                       = `ALTER TABLE automations ADD COLUMN retry_policy TEXT NOT NULL DEFAULT '{}'`
+	migratePluginToolsSQL                       = `ALTER TABLE automations ADD COLUMN plugin_tools TEXT NOT NULL DEFAULT '[]'`
 	migrateRetryAutomationRevisionSQL           = `ALTER TABLE automations ADD COLUMN automation_revision BIGINT NOT NULL DEFAULT 0`
 	migrateTriggerRevisionSQL                   = `ALTER TABLE automation_triggers ADD COLUMN trigger_revision BIGINT NOT NULL DEFAULT 0`
 )
@@ -357,7 +360,7 @@ const automationColumns = `created_by_user_id, id, workspace_id, name, descripti
 	managed_destination_plugin_id, managed_destination_instance_key, managed_destination_revision,
 	resource_revision, repository_mode, prompt, task_title_template,
 	enabled, max_concurrent_runs, continuation_policy, continuation_task_id, webhook_secret,
-	retry_policy, automation_revision, last_triggered_at, created_at, updated_at,
+	retry_policy, plugin_tools, automation_revision, last_triggered_at, created_at, updated_at,
 	execution_mode = 'task' AS legacy_board_card`
 
 func (s *Store) initSchema() error {
@@ -402,6 +405,7 @@ func (s *Store) initSchema() error {
 		{"automation_runs.delivery_status", schemaSQLForDriver(migrateRunDeliveryStatusSQL, s.db.DriverName())},
 		{"automation_runs.managed_delivery_attempts", schemaSQLForDriver(migrateRunDeliveryAttemptsSQL, s.db.DriverName())},
 		{"automations.retry_policy", schemaSQLForDriver(migrateRetryPolicySQL, s.db.DriverName())},
+		{"automations.plugin_tools", schemaSQLForDriver(migratePluginToolsSQL, s.db.DriverName())},
 		{"automations.automation_revision", schemaSQLForDriver(migrateRetryAutomationRevisionSQL, s.db.DriverName())},
 		{"automation_triggers.trigger_revision", schemaSQLForDriver(migrateTriggerRevisionSQL, s.db.DriverName())},
 		{"automation_runs.retry_group_id", schemaSQLForDriver(migrateRunRetryGroupIDSQL, s.db.DriverName())},
@@ -615,6 +619,11 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 		return fmt.Errorf("encode retry policy: %w", err)
 	}
 	a.RetryPolicyJSON = string(policyJSON)
+	pluginToolsJSON, err := encodePluginTools(a.PluginTools)
+	if err != nil {
+		return err
+	}
+	a.PluginToolsJSON = pluginToolsJSON
 	now := time.Now().UTC()
 	a.CreatedAt = now
 	a.UpdatedAt = now
@@ -667,8 +676,8 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 			managed_destination_instance_key, managed_destination_revision, resource_revision,
 			repository_mode, prompt, task_title_template, execution_mode,
 			enabled, max_concurrent_runs, continuation_policy, continuation_task_id,
-			retry_policy, automation_revision, webhook_secret, last_triggered_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), a.CreatedByUserID,
+			retry_policy, plugin_tools, automation_revision, webhook_secret, last_triggered_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), a.CreatedByUserID,
 		a.ID, a.WorkspaceID, a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
 		a.AgentProfileID, a.ExecutorProfileID,
 		string(a.TaskMode), a.ManagedOwnerInstallationID, a.ManagedDestinationInstallationID,
@@ -676,7 +685,7 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 		a.ManagedDestinationInstanceKey, a.ManagedDestinationRevision, a.ResourceRevision, string(a.RepositoryMode),
 		a.Prompt, a.TaskTitleTemplate,
 		a.Enabled, a.MaxConcurrentRuns, a.ContinuationPolicy, a.ContinuationTaskID,
-		a.RetryPolicyJSON, a.AutomationRevision, a.WebhookSecret,
+		a.RetryPolicyJSON, a.PluginToolsJSON, a.AutomationRevision, a.WebhookSecret,
 		a.LastTriggeredAt, a.CreatedAt, a.UpdatedAt)
 	if err != nil {
 		return err
@@ -719,6 +728,7 @@ func (s *Store) GetAutomation(ctx context.Context, id string) (*Automation, erro
 	if err != nil {
 		return nil, err
 	}
+	a.PluginTools = decodePluginTools(a.PluginToolsJSON)
 	hydrateManagedDestination(&a)
 	triggers, err := s.ListTriggers(ctx, id)
 	if err != nil {
@@ -884,6 +894,7 @@ func (s *Store) hydrateAutomations(ctx context.Context, automations []*Automatio
 		if err != nil {
 			return fmt.Errorf("hydrate retry policy: %w", err)
 		}
+		a.PluginTools = decodePluginTools(a.PluginToolsJSON)
 		a.Triggers = triggersByAutomation[a.ID]
 		a.Repositories = repositoriesByAutomation[a.ID]
 		a.RepositoryIDs = repositoryIDs(a.Repositories)
@@ -938,6 +949,11 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 		return fmt.Errorf("encode retry policy: %w", err)
 	}
 	a.RetryPolicyJSON = string(policyJSON)
+	pluginToolsJSON, err := encodePluginTools(a.PluginTools)
+	if err != nil {
+		return err
+	}
+	a.PluginToolsJSON = pluginToolsJSON
 	if a.ContinuationPolicy == "" {
 		a.ContinuationPolicy = ContinuationPolicyNewTask
 	}
@@ -981,7 +997,7 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 			managed_destination_instance_key = ?, managed_destination_revision = ?, resource_revision = resource_revision + 1,
 			repository_mode = ?, prompt = ?, task_title_template = ?,
 			enabled = ?, max_concurrent_runs = ?, continuation_policy = ?,
-			retry_policy = ?, automation_revision = automation_revision + 1, updated_at = ?
+			retry_policy = ?, plugin_tools = ?, automation_revision = automation_revision + 1, updated_at = ?
 		WHERE id = ?`),
 		a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
 		a.AgentProfileID, a.ExecutorProfileID,
@@ -990,7 +1006,7 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 		a.ManagedDestinationInstanceKey, a.ManagedDestinationRevision, string(a.RepositoryMode),
 		a.Prompt, a.TaskTitleTemplate,
 		a.Enabled, a.MaxConcurrentRuns, a.ContinuationPolicy,
-		a.RetryPolicyJSON, a.UpdatedAt, id)
+		a.RetryPolicyJSON, a.PluginToolsJSON, a.UpdatedAt, id)
 	if err != nil {
 		return err
 	}
@@ -1035,6 +1051,9 @@ func applyAutomationUpdate(a *Automation, req *UpdateAutomationRequest) {
 			a.ManagedOwnerInstallationID = ""
 			a.ManagedDestinationInstallationID = ""
 			a.ManagedDestinationConversationID = ""
+		}
+		if a.TaskMode != TaskModeAutomationRun {
+			a.PluginTools = []plugintools.Selection{}
 		}
 	}
 	if req.ManagedDestination != nil {
@@ -1090,6 +1109,12 @@ func applyAutomationUpdate(a *Automation, req *UpdateAutomationRequest) {
 	}
 	if req.RetryPolicy != nil {
 		a.RetryPolicy = *req.RetryPolicy
+	}
+	if req.PluginTools != nil {
+		a.PluginTools = append([]plugintools.Selection(nil), (*req.PluginTools)...)
+		if a.TaskMode != TaskModeAutomationRun {
+			a.PluginTools = []plugintools.Selection{}
+		}
 	}
 }
 

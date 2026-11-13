@@ -28,6 +28,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/steptelemetry"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/hierarchy"
@@ -104,7 +105,7 @@ type pendingTaskTitleSetter interface {
 
 func isPriorityOnlyTaskUpdate(req *UpdateTaskRequest) bool {
 	return req != nil &&
-		req.Priority != nil &&
+		req.Priority != nil && req.ExecutionGrade == nil &&
 		req.Title == nil &&
 		req.Description == nil &&
 		req.State == nil &&
@@ -273,6 +274,9 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 		return result, err
 	}
 	if err := refuseReservedMetadata(req.Metadata, req.AllowReservedMetadata); err != nil {
+		return CreateTaskResult{}, err
+	}
+	if err := s.validateBuiltinTaskCreation(ctx, req); err != nil {
 		return CreateTaskResult{}, err
 	}
 	if err := s.validateRequestedExecutorAdmission(ctx, req); err != nil {
@@ -520,6 +524,9 @@ func (s *Service) loadContributionDestinationRepositories(
 // task repositories, the created-event publish, and the feeder-pull refresh.
 func (s *Service) finalizeCreatedTask(ctx context.Context, prepared *preparedTask, req *CreateTaskRequest) (CreateTaskResult, error) {
 	task := prepared.task
+	if err := s.applyBuiltinTaskCreation(ctx, task.ID, req); err != nil {
+		return CreateTaskResult{}, s.rollbackPartialTask(ctx, task.ID, err)
+	}
 	// Create blocker relationships if specified. Every id here was validated
 	// pre-insert, so a failure now means the blocker was deleted underneath
 	// us — rare, but it must not leave the half-built task behind.
@@ -854,9 +861,10 @@ func (s *Service) inheritParentRepositories(ctx context.Context, req *CreateTask
 			return err
 		}
 		inherited = append(inherited, TaskRepositoryInput{
-			CheckoutOptions: options,
-			RepositoryID:    r.RepositoryID,
-			BaseBranch:      r.BaseBranch,
+			CheckoutOptions:           options,
+			RepositoryID:              r.RepositoryID,
+			BaseBranch:                r.BaseBranch,
+			BaseBranchSelectionSource: models.BaseBranchSelectionSourceInherited,
 		})
 	}
 	if len(inherited) > 0 {
@@ -898,6 +906,9 @@ func (s *Service) inheritParentProject(ctx context.Context, req *CreateTaskReque
 
 // validateCreateTaskRequest validates constraints for task creation.
 func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
+	if err := sessioncapacity.ValidateGrade(req.ExecutionGrade); err != nil {
+		return err
+	}
 	if err := validateTaskTitle(req.Title); err != nil {
 		return err
 	}
@@ -1103,6 +1114,7 @@ func (s *Service) buildTask(ctx context.Context, req *CreateTaskRequest, workflo
 		Description:            req.Description,
 		State:                  state,
 		Priority:               priority,
+		ExecutionGrade:         req.ExecutionGrade,
 		Position:               req.Position,
 		Metadata:               metadata,
 		IsEphemeral:            req.IsEphemeral,
@@ -1257,6 +1269,10 @@ func buildResolvedTaskRepositoryRow(repositoryID, baseBranch string, index int, 
 	if err != nil {
 		return nil, err
 	}
+	selection := buildBaseBranchSelection(repoInput, baseBranch, policy)
+	if err := models.PutBaseBranchSelection(metadata, &selection); err != nil {
+		return nil, err
+	}
 	row := &models.TaskRepository{
 		RepositoryID:   repositoryID,
 		BaseBranch:     baseBranch,
@@ -1272,6 +1288,36 @@ func buildResolvedTaskRepositoryRow(repositoryID, baseBranch string, index int, 
 		row.BranchPolicyPullRequestTarget = policy.PullRequestTarget
 	}
 	return row, nil
+}
+
+// buildBaseBranchSelection records the effective branch and its trusted
+// source after branch-policy resolution. Policy-backed, contribution, and
+// PR-linked attachments are always explicit; an omitted base that resolves
+// from the repository default stays automatic.
+func buildBaseBranchSelection(
+	repoInput TaskRepositoryInput, finalBaseBranch string, policy *models.RepositoryBranchPolicy,
+) models.BaseBranchSelection {
+	source := repoInput.BaseBranchSelectionSource
+	switch source {
+	case models.BaseBranchSelectionSourceExplicit,
+		models.BaseBranchSelectionSourceInherited,
+		models.BaseBranchSelectionSourceRepositoryDefault:
+	default:
+		source = models.BaseBranchSelectionSourceExplicit
+		if repoInput.BaseBranchSelectionSource == "" && policy == nil &&
+			strings.TrimSpace(repoInput.BaseBranch) == "" &&
+			repoInput.RemoteContribution == nil && resolvePRNumber(repoInput) == 0 {
+			source = models.BaseBranchSelectionSourceRepositoryDefault
+		}
+	}
+	if policy != nil || repoInput.RemoteContribution != nil || resolvePRNumber(repoInput) > 0 {
+		source = models.BaseBranchSelectionSourceExplicit
+	}
+	return models.BaseBranchSelection{
+		Version: models.BaseBranchSelectionVersion,
+		Branch:  finalBaseBranch,
+		Source:  source,
+	}
 }
 
 // normalizeContributionBindings validates the remote-contribution and
@@ -1328,7 +1374,7 @@ func buildTaskRepositoryMetadata(repoInput TaskRepositoryInput) (map[string]inte
 		return nil, err
 	}
 	if prNum := resolvePRNumber(repoInput); prNum > 0 {
-		metadata["pr_number"] = prNum
+		metadata[models.TaskRepositoryPRNumberMetadataKey] = prNum
 	}
 	if repoInput.RemoteContribution != nil {
 		if err := models.PutRemoteContribution(metadata, repoInput.RemoteContribution); err != nil {
@@ -2141,6 +2187,11 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
 		return nil, err
 	}
+	if req.ExecutionGrade != nil {
+		if err := sessioncapacity.ValidateGrade(*req.ExecutionGrade); err != nil {
+			return nil, err
+		}
+	}
 	if err := refuseReservedMetadata(req.Metadata, req.AllowReservedMetadata); err != nil {
 		return nil, err
 	}
@@ -2179,7 +2230,7 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		}
 	}
 	update := models.TaskFieldUpdate{
-		Title: req.Title, Description: req.Description, Priority: req.Priority,
+		Title: req.Title, Description: req.Description, Priority: req.Priority, ExecutionGrade: req.ExecutionGrade,
 		State: req.State, WorkflowStepID: req.WorkflowStepID, Position: req.Position,
 		ParentID: req.ParentID, Metadata: req.Metadata,
 	}

@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
+)
 
 // AgentDeliveryRetentionBatchOptions bounds one repository-owned retention
 // transaction. Zero values select the default limit; requested limits are
@@ -174,6 +178,12 @@ type CanonicalAgentDeliveryProjectionResult struct {
 	// call. The canonical message identity is still returned so a caller can
 	// acknowledge the cursor without notifying the UI again.
 	AlreadyProjected bool
+	// ContextCompactionCount is the committed lifetime count after applying a
+	// native compaction observation. Nil means this event did not change it.
+	ContextCompactionCount *int64
+	// ContextCompactionReporting is the committed reporting metadata after
+	// applying a native observation. Nil means this event did not change it.
+	ContextCompactionReporting *streams.ContextCompactionReporting
 }
 
 // AgentDeliveryEffect is a durable idempotency key for a projected workflow

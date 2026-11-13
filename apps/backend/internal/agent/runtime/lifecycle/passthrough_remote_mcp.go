@@ -17,12 +17,9 @@ func (m *Manager) applySSHPassthroughMCP(ctx context.Context, execution *AgentEx
 	if err != nil {
 		return preparedPassthroughMCP{}, err
 	}
-	servers := operation.servers
-	resolved := []types.McpServer{{Name: kandevMCPServerName, Type: string(mcpconfig.ServerTypeHTTP), URL: snapshot.MCPURL}}
-	for _, server := range servers {
-		if server.Name != kandevMCPServerName {
-			resolved = append(resolved, server)
-		}
+	resolved, err := builtinPassthroughMCPServers(execution, snapshot.MCPURL, operation.servers)
+	if err != nil {
+		return preparedPassthroughMCP{}, err
 	}
 	artifacts, err := pt.MCPStrategy.BuildPassthroughMCP(resolved, mcpconfig.PassthroughPaths{
 		TempConfigPath: snapshot.ConfigPath, WorkspaceDir: snapshot.WorkspacePath, Unix: true,

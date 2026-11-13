@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { WebSocketClient } from "./client";
-import { requestFileContent, requestFileContentAtRef } from "./workspace-files";
+import {
+  requestFileContent,
+  requestFileContentAtRef,
+  searchWorkspaceFiles,
+} from "./workspace-files";
 
 function clientReturning(response: Record<string, unknown>) {
   return {
@@ -45,5 +49,17 @@ describe("workspace file content", () => {
     await expect(requestFileContent(client, "session-1", "image.bin")).resolves.toMatchObject({
       is_binary: true,
     });
+  });
+});
+
+it("preserves file-search defaults for callers without cancellation", async () => {
+  const client = clientReturning({ files: ["src/app.ts"] });
+  await expect(searchWorkspaceFiles(client, "session-1", "app")).resolves.toEqual({
+    files: ["src/app.ts"],
+  });
+  expect(client.request).toHaveBeenCalledWith("workspace.files.search", {
+    session_id: "session-1",
+    query: "app",
+    limit: 20,
   });
 });

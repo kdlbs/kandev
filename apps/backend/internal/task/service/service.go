@@ -421,6 +421,9 @@ var (
 	ErrUnsupportedWorkspaceSource  = errors.New("unsupported workspace source")
 	ErrWorkspaceSourceMaterialize  = errors.New("workspace source materialization failed")
 	ErrWorkspaceIdleTimeoutInvalid = errors.New("workspace ACP idle timeout must be a positive number of minutes")
+	// ErrWorkspaceFailedRouteAutoRetryMaxInvalid rejects an automatic
+	// failed-route retry limit outside 1-3.
+	ErrWorkspaceFailedRouteAutoRetryMaxInvalid = errors.New("workspace automatic failed-route retry limit must be between 1 and 3")
 )
 
 func validateExecutorConfig(config map[string]string) error {
@@ -611,6 +614,7 @@ type Service struct {
 	backgroundWorkActionDispatcher BackgroundWorkActionDispatcher
 	runtimeOverridesMu             sync.Mutex
 	mcpSelectionWriter             MCPSelectionWriter
+	builtinCreationWriter          BuiltinCreationWriter
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
 

@@ -67,6 +67,7 @@ test.describe("Coordinator answer in place: question", () => {
     await disclosure.click();
     await expect(overlay).toBeVisible();
     await databaseOption.click();
+    await overlay.getByTestId("clarification-custom-submit").click();
 
     await expect(card).toHaveCount(0, { timeout: 30_000 });
     await waitForAgentMessage(apiClient, task.session_id, "You answered:", 30_000);

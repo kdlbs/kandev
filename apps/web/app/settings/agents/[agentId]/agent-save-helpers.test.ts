@@ -123,6 +123,14 @@ describe("toAgentProfilePatch", () => {
     });
   });
 
+  it("maps profile environment entries to the camelCase field", () => {
+    expect(
+      toAgentProfilePatch({
+        env_vars: [{ key: "DEVIN_SANDBOX", value: "true" }],
+      }),
+    ).toEqual({ envVars: [{ key: "DEVIN_SANDBOX", value: "true" }] });
+  });
+
   it("maps require_exact_model to the camelCase field", () => {
     expect(toAgentProfilePatch({ require_exact_model: true })).toEqual({
       requireExactModel: true,

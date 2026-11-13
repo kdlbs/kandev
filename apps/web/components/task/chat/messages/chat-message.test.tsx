@@ -590,6 +590,44 @@ describe("ChatMessage blocked delivery badge", () => {
   });
 });
 
+describe("ChatMessage not-delivered badge", () => {
+  it("shows the localized not-delivered status on the saved user instruction", async () => {
+    await activateLocale("en");
+    const Wrapper = wrapper();
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({
+            content: "Fix the button spacing (2 notes)",
+            metadata: { delivery_status: "not_delivered" },
+          })}
+          label="Message"
+          className=""
+        />
+      </Wrapper>,
+    );
+
+    expect(screen.getByTestId("user-message-delivery-not-delivered").textContent).toBe(
+      "Not delivered. Send it again.",
+    );
+    expect(screen.getByTestId("user-message-delivery-not-delivered").getAttribute("role")).toBe(
+      "status",
+    );
+    expect(screen.getByText("Fix the button spacing (2 notes)", { exact: true })).not.toBeNull();
+
+    await act(async () => {
+      await activateLocale("pseudo");
+    });
+    expect(screen.getByTestId("user-message-delivery-not-delivered").textContent).toBe(
+      "Ńōţ ďēĺĩvēŕēď. Śēńď ĩţ àĝàĩń.",
+    );
+    await act(async () => {
+      await activateLocale("en");
+    });
+  });
+});
+
 describe("ChatMessage raw view", () => {
   it("shows user raw_content with hidden kandev-system blocks when raw view is enabled", () => {
     const raw = `<kandev-system>This message was sent by an agent working in task "Sender" (${SENDER_TASK_ID}).</kandev-system>

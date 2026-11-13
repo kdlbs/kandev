@@ -226,3 +226,36 @@ information; this slice does not infer conversation state or execution health.
 ## Recorded waiting reasons
 
 `REQ-UI-INTEGRATED-CONTROL-004` reuses the rows `useNativeDashboards` already returned for `REQ-UI-INTEGRATED-CONTROL-003`; it adds no read. `control-wait-reasons.ts` derives four task counts: `waiting_input_tasks`; recorded `BLOCKED` state from `task_stages` (falling back to the state histogram); `stage_type=approval`; and `stage_type=hold`. Terminal states (`COMPLETED`, `CANCELLED`) and `FAILED` are excluded from the stage reasons, and `BLOCKED` takes precedence over the stage reasons, so one task is not counted twice across them. An invalid recorded count makes that reason unknown instead of a partial sum. Input wait and the stage reasons stay independent, so the panel shows no total. Missing stage groups make approval/hold unknown, never zero. `control-wait-reasons-panel.tsx` mounts after the two comparison tables and before the read-state lines, links each workspace to its control workspace view, uses a two-column phone wrap with 44px links, and labels every figure through `sidebar:controlSummary.waitReasons.*`. No capacity or slot wait is inferred; it has no recorded read here.
+
+The task comparison table also shows each workspace's recorded board WIP queue count. It counts
+visible, unarchived tasks awaiting WIP admission at their queued destination, excluding configuration
+tasks. This is distinct from shared execution capacity; an unavailable count remains unknown.
+
+## Per-task recorded wait reasons
+
+`REQ-UI-INTEGRATED-CONTROL-004` also adds the per-task read and render that the
+count-only panel does not provide. `ListControlTasks` projects the workspace's
+recorded tasks with their deterministic primary session, the active native tree
+hold, and each queued message's current-incarnation session policy. It reuses the
+existing control metrics scope helpers and adds an opt-in `view=control` section
+to the existing authenticated workspace tasks GET; the legacy list payload and
+its authorization are unchanged without that query.
+
+The read keeps unknown separate from a measured value: `hold_mode` and the
+per-message pause/auto-run counts stay absent when their source cannot be read,
+and a failed optional read surfaces as an error instead of a known value. The
+known/unknown split requires a current session with a nonempty incarnation. A
+missing or stale policy uses the queue's auto-run default, while an unbound
+legacy policy retains its recorded setting. A missing session remains unknown.
+`control-task-wait.ts`
+derives one reason per stopped task from recorded fields only (hold, approval,
+blocked, paused, queued, queued-unknown, waiting, failed) and never reads a task
+or step name as a signal; the waiting-reasons panel lists those stopped tasks
+under each workspace. `NativeTask`/`NativeTaskList`, `nativeTasks`,
+`readNativeTasks` and `useNativeTasks` carry only these recorded fields and
+follow the same route-owned read identity and revision as the dashboard read.
+Each workspace preserves the task read's loading, denied, unsupported or error
+state rather than treating missing data as an empty list; a retained transient
+snapshot is labeled with its receipt time. Because the task and queue-policy
+queries are not atomic, a positive queued count with no observed paused or
+auto-run messages is reported as unknown rather than an auto-run queue.
