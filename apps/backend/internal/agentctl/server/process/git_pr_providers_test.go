@@ -387,7 +387,6 @@ func TestFinalizePRCreationAfterPushReturnsGenericProviderAwarePartialState(t *t
 		want     string
 	}{
 		{provider: prProviderGitHub, want: "branch was pushed; retry pull request creation"},
-		{provider: prProviderAzureRepos, want: "branch was pushed; retry pull request creation"},
 		{provider: prProviderGitLab, want: "branch was pushed; retry merge request creation"},
 	} {
 		result, err := finalizePRCreationAfterPush(&PRCreateResult{

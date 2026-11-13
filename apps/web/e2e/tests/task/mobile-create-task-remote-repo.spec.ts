@@ -302,24 +302,6 @@ test.describe("Create task Remote repo picker on mobile", () => {
       status: "active",
     });
     await apiClient.configureGitLab(seedData.workspaceId);
-    await apiClient.mockAzureDevOpsSeed({
-      authenticated: true,
-      projects: [{ id: "project-1", name: "Platform", url: "https://dev.azure.com/acme/Platform" }],
-      repositories: [
-        {
-          id: "azure-repo-1",
-          name: "api",
-          projectId: "project-1",
-          projectName: "Platform",
-          defaultBranch: "refs/heads/main",
-          webUrl: "https://dev.azure.com/acme/Platform/_git/api",
-        },
-      ],
-    });
-    await apiClient.setAzureDevOpsConfig(seedData.workspaceId, {
-      organizationUrl: "https://dev.azure.com/acme",
-      pat: "azure-test-pat",
-    });
 
     await openRemotePicker(testPage);
     const providerTabs = testPage.getByTestId("remote-repo-provider-tabs");
@@ -327,14 +309,13 @@ test.describe("Create task Remote repo picker on mobile", () => {
     await expect(providerTabs.getByRole("tab", { name: "GitHub" })).toBeVisible();
     const gitLabTab = providerTabs.getByRole("tab", { name: "GitLab" });
     await expect(gitLabTab).toBeVisible();
-    const azureTab = providerTabs.getByRole("tab", { name: "Azure DevOps" });
-    await expect(azureTab).toBeVisible();
     await testPage.getByTestId("remote-repo-popover-content").evaluate(async (element) => {
       await Promise.all(
         element.getAnimations().map((animation) => animation.finished.catch(() => undefined)),
       );
     });
-    const tabBoxes = await Promise.all([gitLabTab.boundingBox(), azureTab.boundingBox()]);
+    const githubTab = providerTabs.getByRole("tab", { name: "GitHub" });
+    const tabBoxes = await Promise.all([githubTab.boundingBox(), gitLabTab.boundingBox()]);
     for (const tabBox of tabBoxes) {
       expect(tabBox).not.toBeNull();
       expect(tabBox!.height).toBeGreaterThanOrEqual(44);

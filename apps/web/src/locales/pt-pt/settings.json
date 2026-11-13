@@ -378,7 +378,6 @@
   "inferenceAgentThisAgent": "este agente",
   "inferenceAgentUnavailable": "{{name}} já não está disponível.",
   "installed": "Instalado",
-  "integrationDescriptionAzureDevops": "Itens de trabalho do Azure Boards e pull requests do Azure Repos.",
   "integrationDescriptionGithub": "Filas de revisão de PRs, vigilâncias de issues e credenciais OAuth.",
   "integrationDescriptionGitlab": "Criação de merge requests, respostas em discussões e anfitriões autogeridos.",
   "integrationDescriptionJira": "Credenciais do Atlassian Cloud e vigilâncias de issues por JQL.",

@@ -675,7 +675,7 @@
   "enterInspectMode": "Enter inspect mode",
   "enterMessageContent": "Enter message content...",
   "enterNewCommitMessage": "Enter new commit message...",
-  "enterRepositoryUrl": "Enter a GitHub, GitLab, or Azure DevOps repository URL.",
+  "enterRepositoryUrl": "Enter a GitHub, GitLab, or connected plugin provider repository URL.",
   "environment": "Environment {{label}}",
   "environmentPreparationFailed": "Environment preparation failed",
   "environmentPrepared": "Environment prepared",

@@ -7,12 +7,10 @@ import type { KanbanState } from "@/lib/state/slices";
 import type { Worktree } from "@/lib/state/slices/session/types";
 import type { TaskPR } from "@/lib/types/github";
 import type { TaskMR } from "@/lib/types/gitlab";
-import type { AzureDevOpsTaskPullRequest } from "@/lib/types/azure-devops";
 import type { ExternalVcsFileURL } from "@/lib/utils/external-vcs-file-url";
 import { resolveExternalVcsFileURL } from "@/lib/utils/external-vcs-file-url";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useWorkspaceMRs } from "@/hooks/domains/gitlab/use-task-mr";
-import { useAzureDevOpsTaskPullRequests } from "@/hooks/domains/azure-devops/use-azure-devops-task-pull-requests";
 
 export type UseExternalVcsFileLinkInput = {
   filePath: string;
@@ -31,7 +29,6 @@ type TaskRepositoryLink = NonNullable<KanbanState["tasks"][number]["repositories
 const EMPTY_TASK_REPOSITORIES: TaskRepositoryLink[] = [];
 const EMPTY_GITHUB_PRS: TaskPR[] = [];
 const EMPTY_GITLAB_MRS: TaskMR[] = [];
-const EMPTY_AZURE_PRS: AzureDevOpsTaskPullRequest[] = [];
 
 type LinkSnapshot = {
   repositories: Repository[];
@@ -41,7 +38,6 @@ type LinkSnapshot = {
   sessionWorktrees: Worktree[];
   githubPRs: TaskPR[];
   gitlabMRs: TaskMR[];
-  azurePRs: AzureDevOpsTaskPullRequest[];
 };
 
 function sanitizedRepositoryName(value: string): string {
@@ -218,12 +214,6 @@ function publishedRevisions(repository: Repository, snapshot: LinkSnapshot): Pub
       .filter((mr) => Boolean(mr.head_branch))
       .map((mr) => ({ branch: mr.head_branch, revision: mr.head_branch }));
   }
-  if (repository.provider === "azure_devops") {
-    return snapshot.azurePRs
-      .filter((pr) => pr.repositoryId === repository.id)
-      .filter((pr) => Boolean(pr.sourceBranch))
-      .map((pr) => ({ branch: pr.sourceBranch, revision: pr.sourceBranch }));
-  }
   return [];
 }
 
@@ -301,11 +291,6 @@ export function useExternalVcsFileLink(
       : EMPTY_GITHUB_PRS,
   );
   const taskMRsByWorkspace = useAppStore((state) => state.taskMRs.byWorkspaceId);
-  const azurePRs = useAppStore((state) =>
-    resolvedTaskId
-      ? (state.azureDevOpsTaskPullRequests.byTaskId[resolvedTaskId] ?? EMPTY_AZURE_PRS)
-      : EMPTY_AZURE_PRS,
-  );
 
   const apiWorktrees: Worktree[] = session
     ? (session.worktrees ?? []).map((worktree) => ({
@@ -333,7 +318,6 @@ export function useExternalVcsFileLink(
     sessionWorktrees: apiWorktrees.concat(liveWorktrees),
     githubPRs,
     gitlabMRs,
-    azurePRs,
   });
 }
 
@@ -353,8 +337,4 @@ export function useExternalVcsFileLinkHydration(
   const workspaceId = task?.workspace_id ?? null;
   useTaskPR(providers.has("github") ? taskId : null);
   useWorkspaceMRs(providers.has("gitlab") ? workspaceId : null);
-  useAzureDevOpsTaskPullRequests(
-    providers.has("azure_devops") ? workspaceId : null,
-    providers.has("azure_devops") ? taskId : null,
-  );
 }

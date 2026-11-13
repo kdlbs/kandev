@@ -426,8 +426,7 @@ const SCREENS: Screen[] = [
   // the nav. `components/integrations/**` is now migrated, which cleared
   // `drafted-integration-enabled-control.tsx` ("Enabled"/"Disabled"),
   // `auth-status-banner.tsx` ("Authenticated", "· checked <relative>") and the
-  // watcher card's loading state. What is left is `stepPlaceholder`, shared
-  // with the un-migrated Azure DevOps surface, plus
+  // watcher card's loading state. What is left is `stepPlaceholder`, plus
   // `components/integrations/settings-section.tsx` chrome and `@kandev/ui`'s
   // built-in dialog "Close" label.
   //
@@ -483,7 +482,6 @@ const ALLOWED = [
   "Linear",
   "Slack",
   "Sentry",
-  "Azure DevOps",
   "ACP",
   "MCP",
   "SSH",

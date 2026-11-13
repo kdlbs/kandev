@@ -382,7 +382,6 @@
   "inferenceAgentThisAgent": "이 에이전트",
   "inferenceAgentUnavailable": "{{name}}을 더 이상 사용할 수 없습니다.",
   "installed": "설치됨",
-  "integrationDescriptionAzureDevops": "Azure Boards 작업 항목 및 Azure Repos 풀 리퀘스트.",
   "integrationDescriptionGithub": "PR 리뷰 대기열, 이슈 감시자, OAuth 자격 증명.",
   "integrationDescriptionGitlab": "머지 리퀘스트 생성, 토론 답장, 자체 관리 호스트.",
   "integrationDescriptionJira": "Atlassian Cloud 자격 증명 및 JQL 이슈 감시자.",
