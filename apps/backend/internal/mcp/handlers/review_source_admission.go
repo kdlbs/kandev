@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/review"
 	"github.com/kandev/kandev/internal/task/models"
@@ -15,11 +16,12 @@ var errReviewSourceNotAdmitted = errors.New("worktree_path is outside the task's
 // admitAgentReviewSource limits an MCP caller's non-empty worktree_path to the
 // target task's registered local repositories, including their other
 // worktrees, and its local session worktrees. A person's authenticated
-// WebSocket request carries no MCP principal and may name any backend-local
+// WebSocket request carries neither MCP transport marker and may name any backend-local
 // checkout; an agent, which may run in a container or on another host, must
 // not reach an unrelated backend-host repository.
 func (h *Handlers) admitAgentReviewSource(ctx context.Context, msg *ws.Message, taskID, worktreePath string) *ws.Message {
-	if _, agent := mcpscope.PrincipalFromContext(ctx); !agent || worktreePath == "" {
+	_, agent := mcpscope.PrincipalFromContext(ctx)
+	if worktreePath == "" || (!agent && !mcporigin.IsTrustedExternalTransport(ctx)) {
 		return nil
 	}
 	roots, repositories, err := h.reviewSourceRoots(ctx, taskID)
@@ -79,11 +81,11 @@ func (h *Handlers) localReviewExecutor(ctx context.Context, executorID string) b
 	if executorID == "" {
 		return false
 	}
-	executor, err := h.taskSvc.GetExecutor(ctx, executorID)
-	if err != nil || executor == nil {
+	executorType, err := h.taskSvc.ReadExecutorType(ctx, executorID)
+	if err != nil {
 		return false
 	}
-	switch executor.Type {
+	switch executorType {
 	case models.ExecutorTypeLocal, models.ExecutorTypeWorktree, models.ExecutorType("local_pc"):
 		return true
 	}
