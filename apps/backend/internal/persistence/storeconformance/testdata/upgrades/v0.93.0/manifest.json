@@ -442,7 +442,6 @@
     "linear",
     "notification",
     "sentry",
-    "azure-devops",
     "workflow-sync",
     "office-config-sync",
     "automation",

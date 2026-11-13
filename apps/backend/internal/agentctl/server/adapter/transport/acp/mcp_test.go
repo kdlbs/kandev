@@ -58,6 +58,24 @@ func TestEmitMCPAttachmentEvidenceUsesBackendOwnedAttempt(t *testing.T) {
 	}
 }
 
+func TestEmitMCPAttachmentStartOrdersAttemptBeforeConfiguration(t *testing.T) {
+	a := &Adapter{updatesCh: make(chan AgentEvent, 2)}
+	attempt := streams.MCPAttachmentAttempt{AttemptID: "attempt-1", SessionID: "session-1"}
+	evidence := streams.MCPAttachmentEvidence{
+		AttemptID: "attempt-1", ServerName: "external", Kind: streams.MCPAttachmentEvidenceConfigured,
+	}
+	ctx := streams.WithMCPAttachmentContextAndEvidence(context.Background(), attempt, []streams.MCPAttachmentEvidence{evidence})
+
+	a.emitMCPAttachmentStart(ctx)
+	first, second := <-a.updatesCh, <-a.updatesCh
+	if first.MCPAttachmentAttempt == nil || first.MCPAttachmentAttempt.AttemptID != attempt.AttemptID {
+		t.Fatalf("first event = %+v, want attempt preamble", first)
+	}
+	if second.MCPAttachment == nil || second.MCPAttachment.Kind != streams.MCPAttachmentEvidenceConfigured {
+		t.Fatalf("second event = %+v, want configured evidence", second)
+	}
+}
+
 func TestFilterMcpServersWithDecisionsReportsFilteredAndDuplicateServers(t *testing.T) {
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
 	if err != nil {

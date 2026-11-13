@@ -386,9 +386,5 @@
   "mcpInherited": "{{name}} (inherited)",
   "mcpNoServers": "No additional MCP servers found.",
   "mcpUnavailable": "{{name}} (unavailable)",
-  "mcpOptionsFailed": "Could not load MCP choices. Saved choices remain unchanged.",
-  "mcpDesired": "Desired packages",
-  "mcpCurrentProcess": "Current process",
-  "mcpUnknown": "Unknown",
-  "mcpObserved": "Observed connections"
+  "mcpOptionsFailed": "Could not load MCP choices. Saved choices remain unchanged."
 }

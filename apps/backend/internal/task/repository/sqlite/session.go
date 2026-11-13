@@ -3590,6 +3590,51 @@ func (r *Repository) SetSessionMetadataKeyIfJSONValue(
 	return rows > 0, nil
 }
 
+// ClearSessionMetadataKeyIfStringValue removes a string-valued metadata key
+// only when its complete value still matches expectedValue.
+func (r *Repository) ClearSessionMetadataKeyIfStringValue(
+	ctx context.Context,
+	sessionID, key, expectedValue string,
+) (bool, error) {
+	path := jsonPath(key)
+	query := `UPDATE task_sessions SET metadata = json_remove(
+		CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END,
+		?), updated_at = ?
+		WHERE id = ? AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) = 'text'
+		AND json_extract(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) = ?`
+	args := []interface{}{path, r.nowUTC(), sessionID, path, path, expectedValue}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `UPDATE task_sessions SET metadata = (
+			CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END - ?
+		)::text, updated_at = ?
+		WHERE id = ? AND (CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END ->> ?) = ?`
+		args = []interface{}{key, r.nowUTC(), sessionID, key, expectedValue}
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return false, err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, nil); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
 // SetSessionMetadataKeyIfState atomically sets one metadata key only while the
 // session remains in expectedState. Runtime recovery uses this to keep a
 // follow-up marker from being attached to a session that was stopped between

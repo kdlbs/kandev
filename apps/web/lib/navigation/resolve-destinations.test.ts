@@ -6,7 +6,6 @@ import type { AvailabilityMap, NavContext } from "./types";
 import type { PluginNavRegistration } from "@/lib/plugins/registry";
 
 const ALL_INTEGRATIONS: AvailabilityMap = {
-  "azure-devops": true,
   github: true,
   gitlab: true,
   jira: true,
@@ -40,7 +39,7 @@ describe("resolveDestinations", () => {
       availability: ALL_INTEGRATIONS,
     });
 
-    expect(ids(resolved)).toEqual(["stats", "azure-devops", "github", "gitlab", "jira", "linear"]);
+    expect(ids(resolved)).toEqual(["stats", "github", "gitlab", "jira", "linear"]);
   });
 
   it("hides integrations that are not configured", () => {

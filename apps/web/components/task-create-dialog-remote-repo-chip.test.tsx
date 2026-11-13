@@ -462,17 +462,16 @@ describe("RemoteRepoChip — picker loading state", () => {
 });
 
 describe("RemoteRepoChip — popover content", () => {
-  it.each([
-    "git@github.com:acme/api.git",
-    "git@gitlab.com:acme/api.git",
-    "git@ssh.dev.azure.com:v3/acme/project/api",
-  ])("shows the Enter hint for supported SCP remote %s", (remoteURL) => {
-    renderRemoteRepoChip();
-    fireEvent.click(screen.getByTestId(TRIGGER_TID));
-    fireEvent.change(screen.getByTestId(INPUT_TID), { target: { value: remoteURL } });
+  it.each(["git@github.com:acme/api.git", "git@gitlab.com:acme/api.git"])(
+    "shows the Enter hint for supported SCP remote %s",
+    (remoteURL) => {
+      renderRemoteRepoChip();
+      fireEvent.click(screen.getByTestId(TRIGGER_TID));
+      fireEvent.change(screen.getByTestId(INPUT_TID), { target: { value: remoteURL } });
 
-    expect(screen.getByText(/press Enter to submit it/i)).toBeTruthy();
-  });
+      expect(screen.getByText(/press Enter to submit it/i)).toBeTruthy();
+    },
+  );
 
   it("renders one top-level input for both repository search and GitHub URLs", () => {
     renderRemoteRepoChip();

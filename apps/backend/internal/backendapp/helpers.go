@@ -37,7 +37,6 @@ import (
 	authhttpapi "github.com/kandev/kandev/internal/auth/httpapi"
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/automation"
-	"github.com/kandev/kandev/internal/azuredevops"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -1321,9 +1320,6 @@ func registerRoutes(p routeParams) {
 	if p.services.GitLab != nil {
 		p.services.GitLab.SetCascadeTaskDeleter(handoffSvc)
 	}
-	if p.services.AzureDevOps != nil {
-		p.services.AzureDevOps.SetCascadeTaskDeleter(handoffSvc)
-	}
 	// repoLookup validates a watcher's optional repository binding (workspace
 	// ownership + default-branch fill) on create/update. Shared across the three
 	// repo-less watchers; one concrete adapter satisfies each package's
@@ -1335,12 +1331,6 @@ func registerRoutes(p routeParams) {
 			tasks: p.taskSvc, workflows: p.services.Workflow, agents: p.agentSettingsRepo,
 		})
 		p.services.GitLab.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
-	}
-	if p.services.AzureDevOps != nil {
-		p.services.AzureDevOps.SetWatchRepositoryLookup(repoLookup)
-		p.services.AzureDevOps.SetWatchDependencyValidator(&gitLabWatchDependencyValidator{
-			tasks: p.taskSvc, workflows: p.services.Workflow, agents: p.agentSettingsRepo,
-		})
 	}
 	if p.services.Jira != nil {
 		p.services.Jira.SetTaskDeleter(handoffSvc)
@@ -2075,12 +2065,6 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered GitLab handlers (HTTP)")
 	}
 
-	if p.services.AzureDevOps != nil {
-		azuredevops.RegisterRoutes(p.router, p.services.AzureDevOps, p.log)
-		azuredevops.RegisterMockRoutes(p.router, p.services.AzureDevOps, p.log)
-		p.log.Debug("Registered Azure DevOps handlers (HTTP)")
-	}
-
 	if p.services.Jira != nil {
 		jira.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Jira, p.log)
 		jira.RegisterMockRoutes(p.router, p.services.Jira, p.log)
@@ -2256,7 +2240,7 @@ func newSSHAgentctlResolver(p routeParams) *lifecycle.AgentctlResolver {
 // authorizes ownership for them when auth is enabled.
 var integrationWorkspacePrefixes = []string{
 	"/api/v1/jira/", "/api/v1/linear/", "/api/v1/sentry/",
-	"/api/v1/azure-devops/", "/api/v1/gitlab/", "/api/v1/github/", "/api/v1/workflow-sync/",
+	"/api/v1/gitlab/", "/api/v1/github/", "/api/v1/workflow-sync/",
 }
 
 // integrationWorkspaceScopeMiddleware enforces workspace ownership on the
@@ -2667,7 +2651,6 @@ func registerMCPAndDebugRoutes(
 				sentry:        settingsSentryServiceFromPointer(p.services.Sentry),
 				github:        settingsGitHubServiceFromPointer(p.services.GitHub),
 				gitlab:        settingsGitLabServiceFromPointer(p.services.GitLab),
-				azureDevOps:   settingsAzureDevOpsServiceFromPointer(p.services.AzureDevOps),
 			},
 		))
 	}

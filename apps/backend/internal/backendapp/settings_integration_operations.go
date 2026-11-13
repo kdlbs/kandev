@@ -9,7 +9,6 @@ import (
 
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/authz"
-	"github.com/kandev/kandev/internal/azuredevops"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/jira"
@@ -21,8 +20,8 @@ import (
 func isIntegrationResource(resourceType string) bool {
 	switch resourceType {
 	case "jira_settings", "linear_settings", "sentry_instance", "jira_issue_watch", "linear_issue_watch", "sentry_issue_watch",
-		"github_settings", "gitlab_settings", "azure_devops_settings", "github_review_watch", "github_issue_watch",
-		"gitlab_review_watch", "gitlab_issue_watch", "azure_devops_work_item_watch", "azure_devops_pull_request_watch":
+		"github_settings", "gitlab_settings", "github_review_watch", "github_issue_watch",
+		"gitlab_review_watch", "gitlab_issue_watch":
 		return true
 	default:
 		return false
@@ -56,8 +55,6 @@ func (s *settingsOperations) readIntegrationSettings(ctx context.Context, target
 		value, err = s.deps.github.GetWorkspaceSettings(ctx, requireWorkspaceTarget(target))
 	case "gitlab_settings":
 		value, err = s.deps.gitlab.GetConfigForWorkspace(ctx, requireWorkspaceTarget(target))
-	case "azure_devops_settings":
-		value, err = s.deps.azureDevOps.GetWorkspaceSettings(ctx, requireWorkspaceTarget(target))
 	case "github_review_watch":
 		value, err = s.deps.github.GetReviewWatch(ctx, requireResourceTarget(target))
 	case "github_issue_watch":
@@ -66,10 +63,6 @@ func (s *settingsOperations) readIntegrationSettings(ctx context.Context, target
 		value, err = s.deps.gitlab.GetReviewWatch(ctx, requireResourceTarget(target))
 	case "gitlab_issue_watch":
 		value, err = s.deps.gitlab.GetIssueWatch(ctx, requireResourceTarget(target))
-	case "azure_devops_work_item_watch":
-		value, err = s.findAzureWorkItemWatch(ctx, requireWorkspaceTarget(target), requireResourceTarget(target))
-	case "azure_devops_pull_request_watch":
-		value, err = s.findAzurePullRequestWatch(ctx, requireWorkspaceTarget(target), requireResourceTarget(target))
 	default:
 		return nil, fmt.Errorf("integration settings read is not implemented for resource type %q", target.ResourceType)
 	}
@@ -133,8 +126,6 @@ func (s *settingsOperations) updateIntegrationSettings(ctx context.Context, targ
 		updated, err = s.updateGitHubSettings(ctx, target, normalized)
 	case "gitlab_settings":
 		return nil, fmt.Errorf("gitlab connection settings are interactive-only")
-	case "azure_devops_settings":
-		updated, err = s.updateAzureDevOpsSettings(ctx, target, normalized)
 	case "github_review_watch":
 		updated, err = s.updateGitHubReviewWatch(ctx, target, normalized)
 	case "github_issue_watch":
@@ -143,10 +134,6 @@ func (s *settingsOperations) updateIntegrationSettings(ctx context.Context, targ
 		updated, err = s.updateGitLabReviewWatch(ctx, target, normalized)
 	case "gitlab_issue_watch":
 		updated, err = s.updateGitLabIssueWatch(ctx, target, normalized)
-	case "azure_devops_work_item_watch":
-		updated, err = s.updateAzureWorkItemWatch(ctx, target, normalized)
-	case "azure_devops_pull_request_watch":
-		updated, err = s.updateAzurePullRequestWatch(ctx, target, normalized)
 	default:
 		return nil, fmt.Errorf("integration settings update is not implemented for resource type %q", target.ResourceType)
 	}
@@ -315,28 +302,6 @@ func decodeGitHubRawChange(changes map[string]json.RawMessage, key string, targe
 	return nil
 }
 
-func (s *settingsOperations) updateAzureDevOpsSettings(ctx context.Context, target settingscatalog.ResourceTarget, changes map[string]json.RawMessage) (any, error) {
-	workspaceID := requireWorkspaceTarget(target)
-	request := &azuredevops.UpdateWorkspaceSettingsRequest{WorkspaceID: workspaceID}
-	if err := decodeOptionalChange(changes, "workItemQueries", &request.WorkItemQueries); err != nil {
-		return nil, err
-	}
-	if err := decodeOptionalChange(changes, "pullRequestQueries", &request.PullRequestQueries); err != nil {
-		return nil, err
-	}
-	if err := decodeOptionalChange(changes, "workItemActions", &request.WorkItemActions); err != nil {
-		return nil, err
-	}
-	if err := decodeOptionalChange(changes, "pullRequestActions", &request.PullRequestActions); err != nil {
-		return nil, err
-	}
-	request.WorkItemQueriesSet = request.WorkItemQueries != nil
-	request.PullRequestQueriesSet = request.PullRequestQueries != nil
-	request.WorkItemActionsSet = request.WorkItemActions != nil
-	request.PullRequestActionsSet = request.PullRequestActions != nil
-	return s.deps.azureDevOps.UpdateWorkspaceSettings(ctx, request)
-}
-
 func (s *settingsOperations) updateGitHubReviewWatch(ctx context.Context, target settingscatalog.ResourceTarget, changes map[string]json.RawMessage) (any, error) {
 	watch, err := s.deps.github.GetReviewWatch(ctx, requireResourceTarget(target))
 	if err != nil {
@@ -409,32 +374,6 @@ func (s *settingsOperations) updateGitLabIssueWatch(ctx context.Context, target 
 	return s.deps.gitlab.GetIssueWatch(ctx, watch.ID)
 }
 
-func (s *settingsOperations) updateAzureWorkItemWatch(ctx context.Context, target settingscatalog.ResourceTarget, changes map[string]json.RawMessage) (any, error) {
-	workspaceID, watchID := requireWorkspaceTarget(target), requireResourceTarget(target)
-	watch, err := s.findAzureWorkItemWatch(ctx, workspaceID, watchID)
-	if err != nil {
-		return nil, err
-	}
-	var request azuredevops.UpdateWorkItemWatchRequest
-	if err := decodePatch(changes, &request); err != nil {
-		return nil, err
-	}
-	return s.deps.azureDevOps.UpdateWorkItemWatch(ctx, workspaceID, watch.ID, &request)
-}
-
-func (s *settingsOperations) updateAzurePullRequestWatch(ctx context.Context, target settingscatalog.ResourceTarget, changes map[string]json.RawMessage) (any, error) {
-	workspaceID, watchID := requireWorkspaceTarget(target), requireResourceTarget(target)
-	watch, err := s.findAzurePullRequestWatch(ctx, workspaceID, watchID)
-	if err != nil {
-		return nil, err
-	}
-	var request azuredevops.UpdatePullRequestWatchRequest
-	if err := decodePatch(changes, &request); err != nil {
-		return nil, err
-	}
-	return s.deps.azureDevOps.UpdatePullRequestWatch(ctx, workspaceID, watch.ID, &request)
-}
-
 func requireWorkspaceTarget(target settingscatalog.ResourceTarget) string {
 	if target.WorkspaceID == nil {
 		return ""
@@ -478,32 +417,6 @@ func validateIntegrationTargetValue(target settingscatalog.ResourceTarget, value
 	return nil
 }
 
-func (s *settingsOperations) findAzureWorkItemWatch(ctx context.Context, workspaceID, id string) (*azuredevops.WorkItemWatch, error) {
-	items, err := s.deps.azureDevOps.ListWorkItemWatches(ctx, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	for _, item := range items {
-		if item != nil && item.ID == id {
-			return item, nil
-		}
-	}
-	return nil, fmt.Errorf("azure work item watch not found")
-}
-
-func (s *settingsOperations) findAzurePullRequestWatch(ctx context.Context, workspaceID, id string) (*azuredevops.PullRequestWatch, error) {
-	items, err := s.deps.azureDevOps.ListPullRequestWatches(ctx, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	for _, item := range items {
-		if item != nil && item.ID == id {
-			return item, nil
-		}
-	}
-	return nil, fmt.Errorf("azure pull request watch not found")
-}
-
 //nolint:cyclop,gocognit,funlen // Provider lookup keeps each provider's list and display label close to its service call.
 func (s *settingsOperations) listIntegrationSettingsResources(ctx context.Context, resourceType string, workspaceID *string, query string, limit int, cursor string) (any, error) {
 	if err := s.requireIntegrationDependency(resourceType); err != nil {
@@ -541,8 +454,6 @@ func (s *settingsOperations) listIntegrationSettingsResources(ctx context.Contex
 			add("", "GitHub settings ("+workspace.name+")", workspace.id)
 		case "gitlab_settings":
 			add("", "GitLab settings ("+workspace.name+")", workspace.id)
-		case "azure_devops_settings":
-			add("", "Azure DevOps settings ("+workspace.name+")", workspace.id)
 		case "sentry_instance":
 			instances, listErr := s.deps.sentry.ListInstances(ctx, workspace.id)
 			if listErr != nil {
@@ -623,26 +534,6 @@ func (s *settingsOperations) listIntegrationSettingsResources(ctx context.Contex
 					add(watch.ID, watch.CustomQuery, workspace.id)
 				}
 			}
-		case "azure_devops_work_item_watch":
-			watches, listErr := s.deps.azureDevOps.ListWorkItemWatches(ctx, workspace.id)
-			if listErr != nil {
-				return nil, listErr
-			}
-			for _, watch := range watches {
-				if watch != nil {
-					add(watch.ID, watch.WIQL, workspace.id)
-				}
-			}
-		case "azure_devops_pull_request_watch":
-			watches, listErr := s.deps.azureDevOps.ListPullRequestWatches(ctx, workspace.id)
-			if listErr != nil {
-				return nil, listErr
-			}
-			for _, watch := range watches {
-				if watch != nil {
-					add(watch.ID, watch.Status, workspace.id)
-				}
-			}
 		}
 	}
 	return pageSettingsResources(resources, limit, cursor), nil
@@ -675,8 +566,6 @@ func (s *settingsOperations) requireIntegrationDependency(resourceType string) e
 		available = s.deps.github != nil
 	case "gitlab_settings", "gitlab_review_watch", "gitlab_issue_watch":
 		available = s.deps.gitlab != nil
-	case "azure_devops_settings", "azure_devops_work_item_watch", "azure_devops_pull_request_watch":
-		available = s.deps.azureDevOps != nil
 	default:
 		return fmt.Errorf("unknown integration resource type %q", resourceType)
 	}

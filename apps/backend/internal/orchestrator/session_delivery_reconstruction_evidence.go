@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/task/models"
@@ -22,7 +23,7 @@ func (s *Service) readReconstructionSelection(ctx context.Context, client delive
 	blocked := func(reason string) (*reconstructionSelection, string, error) { return nil, reason, nil }
 	evidence, err := client.InspectDeliveryRecordEvidence(ctx, agentruntime.DeliveryRecordEvidenceRequest{
 		TaskID: session.TaskID, SessionID: session.ID, IncarnationID: incarnationID,
-		HarnessGeneration: uint64(generation),
+		HarnessGeneration: uint64(generation), StoredSubmissionID: block.DeliverySubmissionID,
 	})
 	if err != nil {
 		return blocked(deliveryRecordEvidenceReason(err))
@@ -41,6 +42,9 @@ func (s *Service) readReconstructionSelection(ctx context.Context, client delive
 	} else if reason != "" {
 		return blocked(reason)
 	}
+	if selected, ok := reconstructionFromRetiredStoredSource(candidate, evidence, canonical); ok {
+		return &reconstructionSelection{evidence: evidence, submission: selected, stream: stream, messageID: messageID, canonical: canonical}, "", nil
+	}
 	selected, err := client.ReadDeliveryRecordSubmission(ctx, agentruntime.DeliveryRecordSubmissionRequest{
 		TaskID: session.TaskID, SessionID: session.ID, IncarnationID: incarnationID,
 		HarnessGeneration: uint64(generation), Candidate: candidate,
@@ -52,6 +56,35 @@ func (s *Service) readReconstructionSelection(ctx context.Context, client delive
 		return blocked(deliveryIdentityMismatchReason)
 	}
 	return &reconstructionSelection{evidence: evidence, submission: selected, stream: stream, messageID: messageID, canonical: canonical}, "", nil
+}
+
+func reconstructionFromRetiredStoredSource(
+	candidate journal.SubmissionSummary,
+	evidence *agentruntime.DeliveryRecordEvidence,
+	canonical *models.AgentDeliverySubmission,
+) (*journal.Submission, bool) {
+	if evidence == nil || evidence.StoredSubmission == nil || canonical == nil {
+		return nil, false
+	}
+	stored := evidence.StoredSubmission
+	if !stored.Retired || !journal.HasUnprovenOutcome(*stored) ||
+		!journal.SubmissionSummariesEqual(candidate, journalSubmissionSummary(*stored)) ||
+		canonical.ID != stored.ID || canonical.SessionID != stored.SessionID || canonical.IncarnationID != stored.IncarnationID ||
+		canonical.HarnessGeneration != int64(stored.HarnessGeneration) || canonical.PayloadHash != stored.Hash {
+		return nil, false
+	}
+	selected := *stored
+	selected.Payload = append([]byte(nil), canonical.Payload...)
+	return &selected, true
+}
+
+func journalSubmissionSummary(submission journal.Submission) journal.SubmissionSummary {
+	return journal.SubmissionSummary{
+		ID: submission.ID, SessionID: submission.SessionID, IncarnationID: submission.IncarnationID,
+		HarnessGeneration: submission.HarnessGeneration, StreamID: submission.StreamID, Hash: submission.Hash,
+		State: submission.State, TerminalEventRetained: submission.TerminalEventRetained,
+		TerminalSequence: submission.TerminalSequence, CreatedAt: submission.CreatedAt, UpdatedAt: submission.UpdatedAt,
+	}
 }
 
 func (s *Service) prepareReconstructionRequest(ctx context.Context, session *models.TaskSession, incarnationID string, generation int64, block *models.SessionRecoveryBlock, selection *reconstructionSelection) (*models.AgentDeliveryReconstructionRequest, string, error) {

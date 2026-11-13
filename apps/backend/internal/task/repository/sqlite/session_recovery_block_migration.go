@@ -145,6 +145,10 @@ func (r *Repository) rebuildSQLiteRecoveryBlocks(ctx context.Context) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	triggers, err := suspendSQLiteRecoveryBlockTriggers(ctx, tx)
+	if err != nil {
+		return err
+	}
 	statements := []string{
 		`CREATE TABLE session_recovery_blocks_migration (
 			id TEXT PRIMARY KEY,
@@ -183,6 +187,11 @@ func (r *Repository) rebuildSQLiteRecoveryBlocks(ctx context.Context) error {
 	if err := ensureSQLiteRecoveryBlockIndexes(ctx, tx); err != nil {
 		return err
 	}
+	for _, trigger := range triggers {
+		if _, err := tx.ExecContext(ctx, trigger.SQL); err != nil {
+			return fmt.Errorf("restore recovery block trigger %q: %w", trigger.Name, err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
@@ -213,4 +222,26 @@ func (r *Repository) ensureRecoveryBlockIndexes(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// Recovery-block references in triggers must remain valid when SQLite validates
+// the replacement table rename. Trigger DDL shares the rebuild transaction.
+type sqliteRecoveryBlockTrigger struct {
+	Name string `db:"name"`
+	SQL  string `db:"sql"`
+}
+
+func suspendSQLiteRecoveryBlockTriggers(ctx context.Context, tx *sqlx.Tx) ([]sqliteRecoveryBlockTrigger, error) {
+	var triggers []sqliteRecoveryBlockTrigger
+	if err := tx.SelectContext(ctx, &triggers, `SELECT name, sql FROM sqlite_schema
+		WHERE type = 'trigger' AND instr(lower(sql), 'session_recovery_blocks') > 0
+		ORDER BY name`); err != nil {
+		return nil, fmt.Errorf("read recovery block triggers: %w", err)
+	}
+	for _, trigger := range triggers {
+		if _, err := tx.ExecContext(ctx, "DROP TRIGGER "+quoteSQLIdentifier(trigger.Name)); err != nil {
+			return nil, fmt.Errorf("suspend recovery block trigger %q: %w", trigger.Name, err)
+		}
+	}
+	return triggers, nil
 }

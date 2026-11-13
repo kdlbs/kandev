@@ -6,7 +6,6 @@ const STATIC_TOP_LEVEL_ROUTES: Record<string, SpaRoute> = {
   "/threads": { kind: "threads" },
   "/github": { kind: "github" },
   "/gitlab": { kind: "gitlab" },
-  "/azure-devops": { kind: "azure-devops" },
   "/jira": { kind: "jira" },
   "/linear": { kind: "linear" },
   "/login": { kind: "login" },

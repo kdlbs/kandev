@@ -2,7 +2,6 @@
 
 import { useMemo } from "react";
 
-import { useAzureDevOpsAvailable } from "@/hooks/domains/azure-devops/use-azure-devops-availability";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useGitLabStatus } from "@/hooks/domains/gitlab/use-gitlab-status";
 import { useJiraAuthed } from "@/hooks/domains/jira/use-jira-availability";
@@ -22,7 +21,6 @@ export type IntegrationSlug = (typeof WORKSPACE_INTEGRATIONS)[number][0];
  * consume saved preferences; settings drafts do not change them until Save.
  */
 export function useEnabledIntegrations(workspaceId: string): ReadonlySet<IntegrationSlug> {
-  const azureDevOps = useAzureDevOpsAvailable(workspaceId);
   const { status: githubStatus } = useGitHubStatus(workspaceId);
   const { status: gitlabStatus } = useGitLabStatus(workspaceId);
   const readEnabled = useIntegrationEnabledReader(INTEGRATION_ENABLED_SYNC_EVENTS);
@@ -39,7 +37,6 @@ export function useEnabledIntegrations(workspaceId: string): ReadonlySet<Integra
     // integration to WORKSPACE_INTEGRATIONS then fails to compile here until it
     // declares how it is probed, instead of silently never showing a badge.
     const connected: Record<IntegrationSlug, boolean> = {
-      "azure-devops": azureDevOps,
       github,
       gitlab,
       jira,
@@ -51,5 +48,5 @@ export function useEnabledIntegrations(workspaceId: string): ReadonlySet<Integra
         (slug) => connected[slug] && readEnabled(INTEGRATION_ENABLED_KEYS[slug], workspaceId),
       ),
     );
-  }, [azureDevOps, github, gitlab, jira, linear, sentry, readEnabled, workspaceId]);
+  }, [github, gitlab, jira, linear, sentry, readEnabled, workspaceId]);
 }

@@ -386,9 +386,5 @@
   "mcpInherited": "{{name}}（繼承）",
   "mcpNoServers": "未找到其他 MCP 伺服器。",
   "mcpUnavailable": "{{name}}（不可用）",
-  "mcpOptionsFailed": "無法載入 MCP 選項。已儲存的選擇保持不變。",
-  "mcpDesired": "期望的包",
-  "mcpCurrentProcess": "目前程序",
-  "mcpUnknown": "未知",
-  "mcpObserved": "已觀測的連接"
+  "mcpOptionsFailed": "無法載入 MCP 選項。已儲存的選擇保持不變。"
 }
