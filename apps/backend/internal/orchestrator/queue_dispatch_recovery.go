@@ -36,6 +36,13 @@ func (s *Service) reconcilePendingQueueDispatchesOnStartup(ctx context.Context) 
 				return fmt.Errorf("acknowledge restored queue dispatch %s: %w", msg.ID, err)
 			}
 		case errors.Is(findErr, messagequeue.ErrEntryNotFound):
+			handled, recoverErr := s.recoverAutomaticUnsentClaim(ctx, dispatch)
+			if recoverErr != nil {
+				s.logger.Debug("automatic queued request recovery remains parked", zap.String("session_id", msg.SessionID), zap.Error(recoverErr))
+			}
+			if handled {
+				continue
+			}
 			if _, supported := s.repo.(sessionRecoveryBlockStore); !supported {
 				// Focused legacy compositions do not own the canonical task
 				// repository. Preserve their historical recovery behavior, while

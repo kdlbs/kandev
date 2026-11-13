@@ -108,6 +108,17 @@ func (s *Service) resetSilentRestoreRecovery() {
 }
 
 func (s *Service) runSilentRestoreRecoveryPass(ctx context.Context, store taskrepo.SilentRestoreRepository) {
+	if s.config.AutoRetryUnsentRequests {
+		s.recoverAutomaticUnsentClaims(ctx)
+	}
+	if s.config.AutoStartPendingWork || s.config.AutoContinueFromHistory {
+		automaticDone := make(chan struct{})
+		go func() {
+			defer close(automaticDone)
+			s.runAutomaticExecutionPolicyPass(ctx)
+		}()
+		defer func() { <-automaticDone }()
+	}
 	queue := s.restartRestoreScheduler(ctx)
 	after := ""
 	for ctx.Err() == nil {
@@ -116,9 +127,9 @@ func (s *Service) runSilentRestoreRecoveryPass(ctx context.Context, store taskre
 			s.logger.Warn("could not list silent restart recovery candidates", zap.Error(err))
 			break
 		}
-		jobs := make([]*restartRestoreJob, 0, len(candidates))
+		jobs := make([]*restartRestoreWork, 0, len(candidates))
 		for _, candidate := range candidates {
-			jobs = append(jobs, queue.submit(candidate, func(opCtx context.Context, candidate models.SilentRestoreCandidate) error {
+			jobs = append(jobs, queue.submitWork(candidate, restartRestoreNative, func(opCtx context.Context, candidate models.SilentRestoreCandidate) error {
 				err := s.restoreSilentRestartCandidate(opCtx, store, candidate)
 				if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 					s.logger.Debug("silent restart recovery candidate remains pending", zap.String("session_id", candidate.SessionID), zap.Error(err))
@@ -128,10 +139,8 @@ func (s *Service) runSilentRestoreRecoveryPass(ctx context.Context, store taskre
 			after = candidate.SessionID
 		}
 		// Drain this bounded metadata page before retaining another backlog page.
-		for _, job := range jobs {
-			select {
-			case <-job.done:
-			case <-ctx.Done():
+		for _, work := range jobs {
+			if !queue.waitForWork(ctx, work) {
 				return
 			}
 		}
