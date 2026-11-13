@@ -97,21 +97,17 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState<ControlRefreshFailure | null>(null);
   const scheduler = useRef<ControlRefreshScheduler | null>(null);
-  const committedOwner = useRef<object | null>(null);
-  useLayoutEffect(() => {
-    committedOwner.current = owner;
-    return () => {
-      committedOwner.current = null;
-      scheduler.current?.dispose();
-    };
-  }, [owner]);
+  const activeRead = useRef<AbortSignal | null>(null);
+  const committedOwner = useCommittedControlOwner(owner, scheduler);
   const read = useCallback(
     async (signal: AbortSignal): Promise<ControlRefreshOutcome> => {
-      const current = () =>
-        !signal.aborted &&
-        committedOwner.current === owner &&
-        stateReadScopeIdentity(store.getState()) === identity;
-      if (!enabled || !current()) return "ok";
+      const sameIdentity = () => stateReadScopeIdentity(store.getState()) === identity;
+      const ownerCurrent = () =>
+        !signal.aborted && committedOwner.current === owner && sameIdentity();
+      if (!enabled || !ownerCurrent()) return "ok";
+      activeRead.current = signal;
+
+      const current = () => activeRead.current === signal && ownerCurrent();
       setLoading(true);
       try {
         const result = await readJourneyWorkspaces(store, { signal, refresh: true });
@@ -148,10 +144,13 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
         setFailure((previous) => ({ ...previous, kind }));
         return kind === "denied" || kind === "unsupported" ? "ok" : "retry";
       } finally {
-        if (current()) setLoading(false);
+        if (activeRead.current === signal && sameIdentity()) {
+          activeRead.current = null;
+          setLoading(false);
+        }
       }
     },
-    [enabled, coordinatorEnabled, store, identity, owner],
+    [enabled, coordinatorEnabled, store, identity, owner, committedOwner],
   );
 
   useEffect(() => {
@@ -163,11 +162,16 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
         setFailure((previous) =>
           previous ? { ...previous, retryAt: at ? new Date(at).toISOString() : undefined } : null,
         ),
+      onReadTimeout: () => {
+        setLoading(false);
+        setFailure((previous) => ({ ...previous, kind: "error" }));
+      },
     });
     scheduler.current = next;
     void next.request();
     return () => {
       next.dispose();
+      if (activeRead.current) activeRead.current = null;
       if (scheduler.current === next) scheduler.current = null;
     };
   }, [enabled, read]);
@@ -184,6 +188,21 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
     enabled && snapshot?.identity === identity && snapshot.owner === owner ? snapshot : undefined;
   const visibleFailure = enabled ? failure : null;
   return { data, loading, error: Boolean(visibleFailure), failure: visibleFailure, refresh };
+}
+
+function useCommittedControlOwner(
+  owner: object,
+  scheduler: { current: ControlRefreshScheduler | null },
+) {
+  const committed = useRef<object | null>(null);
+  useLayoutEffect(() => {
+    committed.current = owner;
+    return () => {
+      committed.current = null;
+      scheduler.current?.dispose();
+    };
+  }, [owner, scheduler]);
+  return committed;
 }
 
 const CONTROL_REFRESH_EVENTS = [

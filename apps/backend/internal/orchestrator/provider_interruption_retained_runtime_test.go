@@ -57,7 +57,7 @@ func TestRetainedContinuationPersistsSubmissionBeforeDispatch(t *testing.T) {
 		},
 	}
 	svc.agentManager = mgr
-	svc.executor = executor.NewExecutor(mgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(mgr, repo, testLogger(), executor.ExecutorConfig{}))
 	require.NoError(t, repo.UpsertExecutorRunning(context.Background(), &models.ExecutorRunning{
 		ID: "runtime-original", TaskID: "t1", SessionID: "s1", AgentExecutionID: "execution-1", Status: "ready",
 	}))

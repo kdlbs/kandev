@@ -81,9 +81,12 @@ export function useWorkspaceRestoration(
   );
   const environmentId = explicitEnvironmentId ?? sessionEnvironmentId;
   const environmentKey = resolveWorkspaceRestorationKey(sessionId, environmentId);
-  const attempt = useAppStore((state) =>
-    environmentKey ? (state.workspaceRestoration?.byEnvironmentId?.[environmentKey] ?? null) : null,
-  );
+  const attempt = useAppStore((state) => {
+    const current = environmentKey
+      ? state.workspaceRestoration?.byEnvironmentId?.[environmentKey]
+      : null;
+    return current && current.taskId === taskId && current.sessionId === sessionId ? current : null;
+  });
   const beginAction = useAppStore((state) => state.beginWorkspaceRestoration);
   const completeAction = useAppStore((state) => state.completeWorkspaceRestoration);
   const failAction = useAppStore((state) => state.failWorkspaceRestoration);

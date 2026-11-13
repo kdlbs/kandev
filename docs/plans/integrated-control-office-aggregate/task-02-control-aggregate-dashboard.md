@@ -50,20 +50,22 @@ dashboard GET opt-in, recorded metrics, DTO/parser/client, revision-based reads,
 five-stage grouping and two Native comparison tables with raw-step disclosure.
 Capacity, provider, task-list/history/ledger and conversation actions remain out.
 Only consumed copy is added to all seven real catalogs, using the existing
-Traditional Chinese converter. No new standing test, timer or runtime policy.
-
-Native validation passed: seven focused Go cases across dashboard/repository
-packages (including four opt-in route subcases), nine original read-boundary
-cases, five one-time parser/UI/unit/disclosure cases and four existing Office
-dashboard cases. These cover primary-task counting, recorded scopes, raw steps,
-24-hour bounds, denial, old responses and unchanged Office behavior. The existing
-locale-key check and documentation coverage evaluator also pass. One-time
-fixtures remain outside regular collection and are removed after delivery.
+Traditional Chinese converter. The Native query has permanent repository and
+handler coverage. The browser parser, row retention, stage derivation, wait
+reason precedence, and actual workspace destinations also have permanent tests.
+Control reads have a finite per-read deadline and abort expired requests.
+The 15-second deadline starts retry backoff after a stalled read. A late result
+from an expired read cannot replace a newer aggregate snapshot.
 
 - `cd apps/web && pnpm test -- components/integrated-control hooks/domains/coordinator/use-control-aggregate.test.tsx`
+- `cd apps/web && pnpm exec vitest run hooks/domains/coordinator/control-refresh-scheduler.test.ts hooks/domains/coordinator/use-control-aggregate.test.tsx hooks/domains/coordinator/use-integrated-control-data.test.tsx`
 - `cd apps/web && pnpm run i18n:check`
 - `cd apps/web && pnpm e2e:run --project chromium tests/coordinator/control-aggregate-dashboard.spec.ts`
 - `cd apps/web && pnpm e2e:run --project mobile-chrome tests/coordinator/mobile-control-aggregate-dashboard.spec.ts`
+
+The contributor branch previously used one-time Native checks that were not
+retained. The maintainer follow-up replaces those checks with collected
+regression tests in the files listed by Task 03.
 
 ## Number formatting follow-up
 
@@ -88,6 +90,6 @@ catalog conflicts retain both branches' values and all added keys. No ownership,
 counting or data-retention behavior is removed to obtain a clean merge.
 
 The full existing locale check also exposed a missing plural contract for the
-Native raw-stage disclosure label. Its count interpolation now has _one/_other
+Native raw-stage disclosure label. Its count interpolation now has \_one/\_other
 forms in all catalogs, preserving the current wording and raw-stage data. The
 checker and count semantics are unchanged.

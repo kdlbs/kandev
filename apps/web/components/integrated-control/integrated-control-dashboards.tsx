@@ -23,6 +23,10 @@ import { useNativeDashboards } from "@/hooks/domains/coordinator/use-control-nat
 import type { SessionCapacityObservation } from "@/lib/types/system";
 import { ControlInbox } from "./control-inbox";
 
+function selectWorkspaces<T extends { id: string }>(workspaces: T[], workspaceId?: string) {
+  return workspaceId ? workspaces.filter((workspace) => workspace.id === workspaceId) : workspaces;
+}
+
 export function IntegratedControlDashboard({
   view,
   workspaceId,
@@ -33,7 +37,8 @@ export function IntegratedControlDashboard({
   const { t } = useTranslation();
   const control = useIntegratedControl();
   if (!control?.data) return null;
-  const { workspaces, byWorkspace } = control.data;
+  const workspaces = selectWorkspaces(control.data.workspaces, workspaceId);
+  const { byWorkspace } = control.data;
   const rows = workspaces.flatMap((workspace) =>
     (byWorkspace[workspace.id]?.items ?? []).map((coordinator) => ({ workspace, coordinator })),
   );
@@ -80,6 +85,7 @@ export function IntegratedControlDashboard({
           <ControlAggregateOverview
             aggregate={control.aggregate}
             controlWorkspaceIds={workspaces.map((workspace) => workspace.id)}
+            workspaceId={workspaceId}
           />
           <ControlNativeComparison workspaces={workspaces} revision={control.data} />
         </>

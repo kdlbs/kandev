@@ -24,6 +24,7 @@ const RUN_ERROR_RESUME_TEST_ID = "run-error-resume-button";
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) => selector(appState),
+  useOptionalAppStoreApi: () => null,
 }));
 vi.mock("@/lib/state/slices/office/selectors", () => ({
   selectOfficeAgentProfiles: () => [],

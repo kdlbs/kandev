@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -42,6 +43,59 @@ func TestResolveExecutorConfig_PropagatesSSHShell(t *testing.T) {
 	got, _ := cfg.Metadata[lifecycle.MetadataKeySSHShell].(string)
 	if got != "zsh" {
 		t.Fatalf("metadata[%q] = %q, want %q", lifecycle.MetadataKeySSHShell, got, "zsh")
+	}
+}
+
+type executorConfigWorkspaceRepository struct {
+	*mockRepository
+	workspace    *models.Workspace
+	workspaceErr error
+}
+
+func executorTestStringPointer(value string) *string {
+	return &value
+}
+
+func (r *executorConfigWorkspaceRepository) GetWorkspace(context.Context, string) (*models.Workspace, error) {
+	return r.workspace, r.workspaceErr
+}
+
+func TestResolveExecutorConfigUsesImplicitLocalOnlyWithoutSelection(t *testing.T) {
+	tests := []struct {
+		name         string
+		executorID   string
+		metadata     map[string]interface{}
+		workspace    *models.Workspace
+		workspaceErr error
+		wantType     string
+		wantID       string
+		wantImplicit bool
+	}{
+		{name: "no selection stays implicit", wantImplicit: true},
+		{name: "explicit unresolved executor stays unknown", executorID: "missing-executor", wantID: "missing-executor"},
+		{name: "unresolved profile stays unknown", metadata: map[string]interface{}{"executor_profile_id": "missing-profile"}},
+		{name: "metadata executor identity stays unknown", metadata: map[string]interface{}{"executor_id": "missing-executor"}},
+		{
+			name:      "unresolved workspace default stays unknown",
+			workspace: &models.Workspace{DefaultExecutorID: executorTestStringPointer("missing-default")},
+			wantID:    "missing-default",
+		},
+		{name: "workspace default read error stays unknown", workspaceErr: errors.New("workspace read failed")},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo := &executorConfigWorkspaceRepository{
+				mockRepository: newMockRepository(),
+				workspace:      test.workspace,
+				workspaceErr:   test.workspaceErr,
+			}
+			exec := newTestExecutor(t, &mockAgentManager{}, repo)
+			cfg := exec.resolveExecutorConfig(context.Background(), test.executorID, "workspace-config", test.metadata)
+			if cfg.ExecutorType != test.wantType || cfg.ExecutorID != test.wantID || cfg.ImplicitSelection != test.wantImplicit {
+				t.Fatalf("resolved executor = type %q ID %q implicit %v; want type %q ID %q implicit %v", cfg.ExecutorType, cfg.ExecutorID, cfg.ImplicitSelection, test.wantType, test.wantID, test.wantImplicit)
+			}
+		})
 	}
 }
 
@@ -270,5 +324,82 @@ func TestResolveExecutorConfig_KubernetesProfileKeysDoNotClobberNonKubernetesMet
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("non-Kubernetes launch metadata = %#v, want task metadata unchanged %#v", got, want)
+	}
+}
+
+// TestResolveExecutorConfigUsesProfileParentWhenWorkspaceDefaultMissing proves
+// a selected profile's parent executor is resolved before a deleted workspace
+// default turns a profile-only launch into an unresolved selection.
+func TestResolveExecutorConfigUsesProfileParentWhenWorkspaceDefaultMissing(t *testing.T) {
+	repo := &executorConfigWorkspaceRepository{
+		mockRepository: newMockRepository(),
+		workspace: &models.Workspace{
+			DefaultExecutorID: executorTestStringPointer("deleted-default"),
+		},
+	}
+	repo.executorProfiles["profile-profile"] = &models.ExecutorProfile{
+		ID: "profile-profile", ExecutorID: "executor-docker", Name: "Docker profile",
+	}
+	repo.executors["executor-docker"] = &models.Executor{
+		ID: "executor-docker", Type: models.ExecutorTypeLocalDocker,
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	cfg := exec.resolveExecutorConfig(context.Background(), "", "workspace-config", map[string]interface{}{
+		"executor_profile_id": "profile-profile",
+	})
+	if cfg.ResolutionErr != nil {
+		t.Fatalf("resolveExecutorConfig error = %v", cfg.ResolutionErr)
+	}
+	if cfg.ExecutorID != "executor-docker" {
+		t.Fatalf("executor ID = %q, want executor-docker", cfg.ExecutorID)
+	}
+	if cfg.ExecutorType != string(models.ExecutorTypeLocalDocker) {
+		t.Fatalf("executor type = %q, want local_docker", cfg.ExecutorType)
+	}
+}
+
+// TestResolveExecutorConfigRefusesDeletedProfileWithoutSelection proves a
+// deleted profile with no workspace default is an unresolved concrete
+// selection, not the unspecified standalone fallback.
+func TestResolveExecutorConfigRefusesDeletedProfileWithoutSelection(t *testing.T) {
+	repo := &executorConfigWorkspaceRepository{mockRepository: newMockRepository()}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	cfg := exec.resolveExecutorConfig(context.Background(), "", "workspace-config", map[string]interface{}{
+		"executor_profile_id": "deleted-profile",
+	})
+	if cfg.ResolutionErr == nil {
+		t.Fatal("resolveExecutorConfig error = nil, want unresolved deleted profile")
+	}
+	if cfg.ImplicitSelection {
+		t.Fatal("deleted profile must not become an implicit selection")
+	}
+	if err := exec.admitConcreteExecutorRuntime(cfg); !errors.Is(err, ErrExecutorRuntimeSelectionUnresolved) {
+		t.Fatalf("admission error = %v, want unresolved selection", err)
+	}
+}
+
+// TestResolveExecutorConfigAcceptsLegacyStandaloneTypeAliases proves legacy
+// Office/task preferences that store a standalone type in the executor-ID field
+// resolve without a saved executor row, while arbitrary IDs stay unresolved.
+func TestResolveExecutorConfigAcceptsLegacyStandaloneTypeAliases(t *testing.T) {
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	for _, selection := range []models.ExecutorType{
+		models.ExecutorTypeLocal, models.ExecutorType("local_pc"),
+		models.ExecutorTypeWorktree, models.ExecutorTypeMockRemote,
+	} {
+		cfg := exec.resolveExecutorConfig(context.Background(), string(selection), "workspace-config", nil)
+		if cfg.ResolutionErr != nil {
+			t.Fatalf("%s resolution error = %v", selection, cfg.ResolutionErr)
+		}
+		if cfg.ExecutorType != string(selection) || cfg.ExecutorID != "" {
+			t.Fatalf("%s resolved type=%q id=%q, want type alias with no concrete row",
+				selection, cfg.ExecutorType, cfg.ExecutorID)
+		}
+	}
+	cfg := exec.resolveExecutorConfig(context.Background(), "missing-executor", "workspace-config", nil)
+	if cfg.ResolutionErr == nil {
+		t.Fatal("arbitrary missing executor must stay unresolved")
 	}
 }

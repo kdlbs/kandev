@@ -10,6 +10,7 @@ import {
   __resetIdParamsPromiseCacheForTests,
   idParamsPromise,
   resolveOfficeBootstrapWorkspaceId,
+  shouldHoldTaskIdentifierRouteForBootstrap,
 } from "./office-routes";
 
 describe("resolveOfficeBootstrapWorkspaceId (OfficeRoutes cookie reads)", () => {
@@ -103,5 +104,18 @@ describe("idParamsPromise", () => {
     const refetched = idParamsPromise("evict-target");
     expect(refetched).not.toBe(first);
     expect(idParamsPromise("evict-target")).toBe(refetched);
+  });
+});
+
+describe("shouldHoldTaskIdentifierRouteForBootstrap", () => {
+  it("holds identifier routes until workspace bootstrap completes", () => {
+    expect(shouldHoldTaskIdentifierRouteForBootstrap("/office/tasks/2FA-1", false)).toBe(true);
+    expect(shouldHoldTaskIdentifierRouteForBootstrap("/office/tasks/KAN-1", true)).toBe(false);
+    expect(
+      shouldHoldTaskIdentifierRouteForBootstrap(
+        "/office/tasks/12345678-1234-1234-1234-123456789012",
+        false,
+      ),
+    ).toBe(false);
   });
 });

@@ -1,13 +1,12 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, useEffect } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { IconLock } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Input } from "@kandev/ui/input";
 import { PromptDeleteConfirmation } from "@/components/settings/prompt-delete-confirmation";
-import { PromptAgentPermission } from "@/components/settings/prompt-agent-permission";
 import { PromptRowActions } from "@/components/settings/prompt-row-actions";
 import {
   filterSavedPrompts,
@@ -25,13 +24,15 @@ import { createPrompt, deletePrompt, updatePrompt } from "@/lib/api";
 import { useRequest } from "@/lib/http/use-request";
 import { t } from "@/lib/i18n";
 import type { CustomPrompt } from "@/lib/types/http";
-
-type PromptFormState = { name: string; content: string; allowAgentEdits?: boolean };
+import {
+  type PromptEditBaseline,
+  type PromptFormState,
+  usePromptEditorEffects,
+} from "./use-prompt-editor-effects";
 
 const defaultFormState: PromptFormState = {
   name: "",
   content: "",
-  allowAgentEdits: undefined,
 };
 
 /** The sigil the chat input matches on. Typed verbatim, so never translated. */
@@ -156,19 +157,6 @@ function PromptEditForm({
         isDirty={contentIsDirty}
         dirtyLevel="field"
       />
-      {!prompt.builtin && (
-        <PromptAgentPermission
-          allowed={formState.allowAgentEdits ?? prompt.allow_agent_edits ?? false}
-          saved={prompt.allow_agent_edits ?? false}
-          disabled={isBusy}
-          onChange={(allowed) =>
-            onFormChange({
-              allowAgentEdits:
-                allowed === (prompt.allow_agent_edits ?? false) ? undefined : allowed,
-            })
-          }
-        />
-      )}
       <div className="flex items-center gap-2">
         <Button variant="ghost" onClick={onCancel} disabled={isBusy}>
           {t("settings:cancel")}
@@ -198,18 +186,13 @@ function PromptListItem({
   const deleteAnchorRef = useRef<HTMLButtonElement | null>(null);
   const nameIsDirty = isEditing && formState.name !== prompt.name;
   const contentIsDirty = isEditing && formState.content !== prompt.content;
-  const permissionIsDirty =
-    isEditing &&
-    formState.allowAgentEdits !== undefined &&
-    formState.allowAgentEdits !== (prompt.allow_agent_edits ?? false);
-
   return (
     <div
       className="rounded-lg border border-border/70 bg-background p-4 flex flex-col gap-3"
       ref={isEditing ? editingRef : null}
       data-testid="prompt-list-item"
       data-prompt-name={prompt.name}
-      data-settings-dirty={nameIsDirty || contentIsDirty || permissionIsDirty}
+      data-settings-dirty={nameIsDirty || contentIsDirty}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
@@ -349,6 +332,7 @@ function usePromptsState() {
   const prompts = useAppStore((state) => state.prompts.items);
   const setPrompts = useAppStore((state) => state.setPrompts);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editBaseline, setEditBaseline] = useState<PromptEditBaseline | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [formState, setFormState] = useState(defaultFormState);
   const editingRef = useRef<HTMLDivElement | null>(null);
@@ -359,6 +343,8 @@ function usePromptsState() {
     setPrompts,
     editingId,
     setEditingId,
+    editBaseline,
+    setEditBaseline,
     showCreate,
     setShowCreate,
     formState,
@@ -394,19 +380,21 @@ function usePromptRequests(
     resetForm();
   });
 
-  const updateRequest = useRequest(async (id: string, s: typeof defaultFormState) => {
-    const updated = await updatePrompt(
-      id,
-      {
-        name: s.name.trim(),
-        content: s.content.trim(),
-        ...(s.allowAgentEdits === undefined ? {} : { allow_agent_edits: s.allowAgentEdits }),
-      },
-      { cache: "no-store" },
-    );
-    applyPrompts((current) => current.map((p) => (p.id === id ? updated : p)));
-    resetForm();
-  });
+  const updateRequest = useRequest(
+    async (id: string, s: typeof defaultFormState, expectedUpdatedAt: string) => {
+      const updated = await updatePrompt(
+        id,
+        {
+          name: s.name.trim(),
+          content: s.content.trim(),
+          expected_updated_at: expectedUpdatedAt,
+        },
+        { cache: "no-store" },
+      );
+      applyPrompts((current) => current.map((p) => (p.id === id ? updated : p)));
+      resetForm();
+    },
+  );
 
   const deleteRequest = useRequest(async (id: string) => {
     await deletePrompt(id, { cache: "no-store" });
@@ -422,6 +410,8 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
     setPrompts,
     editingId,
     setEditingId,
+    editBaseline,
+    setEditBaseline,
     setShowCreate,
     setFormState,
     setDeleteTarget,
@@ -434,7 +424,8 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
     setEditingId(null);
     setShowCreate(false);
     setFormState(defaultFormState);
-  }, [setEditingId, setShowCreate, setFormState]);
+    setEditBaseline(null);
+  }, [setEditingId, setShowCreate, setFormState, setEditBaseline]);
 
   const isValid = useMemo(
     () => Boolean(formState.name.trim() && formState.content.trim()),
@@ -458,24 +449,25 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
     );
   };
   const handleUpdate = () => {
-    if (!isValid || isBusy || !editingId) return;
+    if (!isValid || isBusy || !editingId || !editBaseline) return;
     return runPromptSave(
-      () => updateRequest.run(editingId, formState),
+      () => updateRequest.run(editingId, formState, editBaseline.updated_at),
       toastError(t("settings:promptSaveFailed")),
     );
   };
   const startEditing = (prompt: CustomPrompt) => {
     setEditingId(prompt.id);
     setShowCreate(false);
+    setEditBaseline({ name: prompt.name, content: prompt.content, updated_at: prompt.updated_at });
     setFormState({
       name: prompt.name,
       content: prompt.content,
-      allowAgentEdits: undefined,
     });
   };
   const startCreate = () => {
     setEditingId(null);
     setShowCreate(true);
+    setEditBaseline(null);
     setFormState(defaultFormState);
   };
   const openDeleteDialog = (prompt: CustomPrompt) => {
@@ -508,16 +500,13 @@ export function getPromptDraftMeta(
   editingId: string | null,
   showCreate: boolean,
   formState: PromptFormState,
+  editBaseline?: PromptEditBaseline | null,
 ) {
   const editingPrompt = prompts.find((prompt) => prompt.id === editingId);
-  const revision = JSON.stringify({
-    ...formState,
-    allowAgentEdits: formState.allowAgentEdits ?? editingPrompt?.allow_agent_edits ?? false,
-  });
+  const revision = JSON.stringify(formState);
   const savedRevision = JSON.stringify({
-    name: editingPrompt?.name ?? "",
-    content: editingPrompt?.content ?? "",
-    allowAgentEdits: editingPrompt?.allow_agent_edits ?? false,
+    name: editBaseline?.name ?? editingPrompt?.name ?? "",
+    content: editBaseline?.content ?? editingPrompt?.content ?? "",
   });
   return {
     isDirty: showCreate || (Boolean(editingId) && revision !== savedRevision),
@@ -534,6 +523,7 @@ export function PromptsSettings() {
     editingId,
     showCreate,
     formState,
+    editBaseline,
     setFormState,
     editingRef,
     deleteTarget,
@@ -552,15 +542,12 @@ export function PromptsSettings() {
     confirmDelete,
     resetForm,
   } = usePromptsActions(state);
-  const draft = getPromptDraftMeta(prompts, editingId, showCreate, formState);
+  const draft = getPromptDraftMeta(prompts, editingId, showCreate, formState, editBaseline);
+  const editingPrompt = prompts.find((prompt) => prompt.id === editingId);
   const deleteTargetId = deleteTarget?.id ?? null;
   const visiblePrompts = filterSavedPrompts(prompts, query, editingId, deleteTargetId);
   const searchDisabled = Boolean(editingId || showCreate || deleteTarget || isBusy);
-
-  useEffect(() => {
-    if (!editingId) return;
-    editingRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [editingId, editingRef]);
+  usePromptEditorEffects({ ...state, editingPrompt });
 
   return (
     <SettingsPageTemplate

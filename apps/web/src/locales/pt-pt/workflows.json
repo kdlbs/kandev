@@ -19,7 +19,7 @@
   "autoSyncOff": "sincronização automática desligada",
   "autoTransition": "Transição automática",
   "branchLabel": "Branch",
-  "childrenCompletedHelp": "Use isto num passo de tarefa-mãe. Quando todas as subtarefas diretas ativas estiverem CONCLUÍDAS, FALHADAS ou CANCELADAS, o Kandev executa esta transição uma vez. As subtarefas arquivadas e efémeras são ignoradas. As subtarefas de segundo nível não contam aqui e nada é executado se a tarefa-mãe não tiver subtarefas.",
+  "childrenCompletedHelp": "Executa após todas as subtarefas diretas ativas serem concluídas com sucesso. É necessária pelo menos uma subtarefa direta ativa contabilizada. Subtarefas arquivadas, efémeras ou de execução automática são ignoradas; as netas não contam. Subtarefas falhadas ou canceladas mantêm a tarefa-mãe à espera.",
   "childrenCompletedHelpAria": "Como funcionam as transições por conclusão de subtarefas",
   "prClosedHelp": "É executado uma vez quando um pull request ligado à tarefa é fechado sem ser integrado. Não é necessário um turno do agente. Um fecho reportado enquanto a tarefa está num passo sem este evento é ignorado.",
   "prClosedHelpAria": "Como funcionam as transições de fecho de pull requests",

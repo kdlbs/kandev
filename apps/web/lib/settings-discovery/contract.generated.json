@@ -129,6 +129,21 @@
       },
       "fields": [
         {
+          "key": "agent_profile.execution_grade",
+          "field_path": "execution_grade",
+          "label": "execution_grade",
+          "description": "Explicit execution classification; empty is unconfigured.",
+          "json_type": "string",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "agent-settings",
+          "writable": true,
+          "validator": "agent-settings.profile",
+          "authority": "org.config.manage",
+          "change_timing": "future_sessions",
+          "settings_href": "/settings/agents"
+        },
+        {
           "key": "agent_profile.name",
           "field_path": "name",
           "label": "name",
@@ -3528,7 +3543,7 @@
           "key": "repository.remote_url",
           "field_path": "remote_url",
           "label": "Remote URL",
-          "description": "Repository setting.",
+          "description": "Credential-free clone locator. A replacement must preserve the saved provider identity, host, namespace, and name.",
           "json_type": "string",
           "support": "supported",
           "classification": "writable",
@@ -3670,7 +3685,17 @@
         {
           "name": "update",
           "binding": "workspace.repository.update",
-          "authority": "workspace.manage"
+          "authority": "workspace.manage",
+          "options": {
+            "additionalProperties": false,
+            "properties": {
+              "validate_only": {
+                "description": "Validate a single remote_url replacement without writing.",
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          }
         }
       ],
       "settings_href": "/settings"
@@ -4648,6 +4673,21 @@
           "label": "chat submit key",
           "description": "Portable preference owned by the current user.",
           "json_type": "string",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "user-settings",
+          "writable": true,
+          "validator": "user-settings",
+          "authority": "user.self",
+          "change_timing": "future_views",
+          "settings_href": "/settings/preferences"
+        },
+        {
+          "key": "user_settings.escape_cancels_agent",
+          "field_path": "escape_cancels_agent",
+          "label": "Escape pauses the agent",
+          "description": "Portable preference owned by the current user.",
+          "json_type": "boolean",
           "support": "supported",
           "classification": "writable",
           "owner": "user-settings",
@@ -6556,6 +6596,7 @@
       "dynamic",
       "enabled",
       "env_vars",
+      "execution_grade",
       "fallback_model",
       "mcp_selected_servers",
       "mcp_selection_mode",
@@ -6582,6 +6623,7 @@
       "default_utility_agent_profile_id",
       "default_utility_model",
       "enable_preview_on_click",
+      "escape_cancels_agent",
       "github_default_query_presets",
       "github_saved_presets",
       "gitlab_saved_presets",

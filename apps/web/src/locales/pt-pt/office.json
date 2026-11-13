@@ -896,6 +896,8 @@
   "taskCreated": "Tarefa criada",
   "taskDescription": "Descrição da tarefa",
   "taskDescriptionTemplate": "Modelo de descrição da tarefa",
+  "taskIdentifierLoadFailed": "Não foi possível carregar esta tarefa. Verifique a ligação e tente novamente.",
+  "taskIdentifierWorkspaceUnavailable": "Não há um espaço de trabalho ativo selecionado. Selecione um espaço de trabalho e tente esta ligação novamente.",
   "taskNotFound": "Tarefa não encontrada",
   "taskPrefix": "Prefixo das tarefas",
   "taskReview": "Revisão da tarefa",

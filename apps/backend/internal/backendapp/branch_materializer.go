@@ -25,6 +25,7 @@ type branchMaterializerRepo interface {
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
 	GetRepository(ctx context.Context, id string) (*models.Repository, error)
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+	ListTaskEnvironmentRepos(ctx context.Context, envID string) ([]*models.TaskEnvironmentRepo, error)
 	GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
@@ -320,7 +321,7 @@ func (b *branchMaterializer) finalizeMaterialize(
 	repositoryID, slug, taskID string,
 ) string {
 	taskRoot := b.promoteWorkspacePathIfNeeded(ctx, env, wt.Path)
-	b.notifyAgentctlRescan(ctx, session, taskRoot)
+	b.notifyAgentctlRescan(ctx, session, taskRoot, wt.Path)
 	b.notifyMaterialized(&branchMaterialization{environment: env, session: session, worktree: wt, repositoryID: repositoryID, slug: slug, taskID: taskID}, taskRoot, ctx)
 	return taskRoot
 }
@@ -397,13 +398,33 @@ func (b *branchMaterializer) promoteWorkspacePathIfNeeded(ctx context.Context, e
 // No-op when no rescanner is wired (test stubs, agentless test envs) or
 // when the session has no active execution (agent stopped). The next
 // session launch picks up the new layout via prepareMultiRepo regardless.
-func (b *branchMaterializer) notifyAgentctlRescan(ctx context.Context, session *models.TaskSession, taskRoot string) {
+func (b *branchMaterializer) notifyAgentctlRescan(ctx context.Context, session *models.TaskSession, taskRoot, newWorktreePath string) {
 	if b.rescanner == nil {
 		return
 	}
+	roots := []string{newWorktreePath}
+	excluded := []string(nil)
+	if session != nil && session.TaskEnvironmentID != "" {
+		if rows, err := b.repo.ListTaskEnvironmentRepos(ctx, session.TaskEnvironmentID); err == nil {
+			excluded = detachedTaskEnvironmentRepoPaths(rows)
+			for _, row := range rows {
+				if row != nil && row.Status == models.TaskEnvironmentRepoStatusActive && row.WorktreePath != "" {
+					roots = append(roots, row.WorktreePath)
+				}
+			}
+		}
+	}
 	rescanCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if err := b.rescanner.RescanWorkspaceForSession(rescanCtx, session.ID, taskRoot); err != nil {
+	var err error
+	if excluder, ok := b.rescanner.(interface {
+		RescanWorkspaceForSessionWithExclusions(context.Context, string, string, []string, []string) error
+	}); ok {
+		err = excluder.RescanWorkspaceForSessionWithExclusions(rescanCtx, session.ID, taskRoot, roots, excluded)
+	} else {
+		err = b.rescanner.RescanWorkspaceForSession(rescanCtx, session.ID, taskRoot, roots)
+	}
+	if err != nil {
 		b.logger.Warn("agentctl rescan failed; new worktree will appear after next session restart",
 			zap.String("session_id", session.ID),
 			zap.String("task_root", taskRoot),

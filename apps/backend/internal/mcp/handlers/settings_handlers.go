@@ -103,6 +103,12 @@ func (e *settingsRequestError) Error() string {
 	return e.Code
 }
 
+// NewSettingsRequestError classifies a domain-level settings failure as a
+// bounded validation response while preserving the domain cause for logs.
+func NewSettingsRequestError(code string, cause error) error {
+	return &settingsRequestError{Code: code, Cause: cause}
+}
+
 func decodeSettingsUpdate(payload []byte) (settingsUpdateRequest, error) {
 	if len(payload) > maxSettingsPayloadBytes {
 		return settingsUpdateRequest{}, fmt.Errorf("settings update exceeds %d bytes", maxSettingsPayloadBytes)
@@ -158,6 +164,51 @@ func validateSettingsPatch(registry *settingscatalog.Registry, target settingsca
 		}
 		if err := validateJSONType(value, field.JSONType, field.Nullable); err != nil {
 			return &settingsRequestError{Code: "invalid_value_type", Key: field.Key, FieldPath: field.FieldPath, ExpectedType: field.JSONType, Cause: err}
+		}
+	}
+	return nil
+}
+
+// validateSettingsOptions enforces the repository repair option contract before
+// the domain adapter can turn an ignored option into a mutation.
+func validateSettingsOptions(
+	registry *settingscatalog.Registry,
+	target settingscatalog.ResourceTarget,
+	changes map[string]json.RawMessage,
+	options map[string]json.RawMessage,
+) error {
+	if len(options) == 0 {
+		return nil
+	}
+	if target.ResourceType != "repository" {
+		return nil
+	}
+	for key := range options {
+		if key != "validate_only" {
+			return &settingsRequestError{Code: "unknown_option", Key: key, Cause: fmt.Errorf("unknown repository option %q", key)}
+		}
+	}
+	raw, ok := options["validate_only"]
+	if !ok {
+		return nil
+	}
+	var validateOnly *bool
+	if err := json.Unmarshal(raw, &validateOnly); err != nil || validateOnly == nil {
+		return &settingsRequestError{Code: "invalid_option", Key: "validate_only", ExpectedType: "boolean",
+			Cause: fmt.Errorf("validate_only must be a JSON boolean")}
+	}
+	if !*validateOnly {
+		return nil
+	}
+	if len(changes) != 1 {
+		return &settingsRequestError{Code: "validate_only_requires_remote_url",
+			Cause: fmt.Errorf("validate_only accepts exactly one remote_url change")}
+	}
+	for key := range changes {
+		field, _, ok := findTargetField(registry, target.ResourceType, key)
+		if !ok || field.FieldPath != "remote_url" {
+			return &settingsRequestError{Code: "validate_only_requires_remote_url", Key: key,
+				Cause: fmt.Errorf("validate_only accepts only remote_url")}
 		}
 	}
 	return nil
@@ -441,6 +492,9 @@ func (h *Handlers) handleUpdateSettings(ctx context.Context, msg *ws.Message) (*
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, err.Error(), nil)
 	}
 	if err := validateSettingsPatch(h.settingsRegistry, request.Target, request.Changes); err != nil {
+		return h.settingsOperationError(msg, err)
+	}
+	if err := validateSettingsOptions(h.settingsRegistry, request.Target, request.Changes, request.Options); err != nil {
 		return h.settingsOperationError(msg, err)
 	}
 	result, err := h.settingsOperations.UpdateSettings(ctx, request.Target, request.Changes, request.Options)

@@ -17,10 +17,10 @@ import (
 
 // maxWakeReconcilePerTick caps the number of stuck parents processed in one
 // tick, mirroring maxRecoveryPerTick (scheduler_recovery.go). ListStuckParents
-// filters out every sticky non-actionable candidate — stale-or-missing
-// receipt, active/terminal run, unresolved or paused/stopped/pending-approval
-// assignee — in SQL before this cap is applied, so it bounds real work, not
-// resting or permanently-blocked parents.
+// filters out sticky non-actionable candidates — incomplete counted wave
+// members, stale-or-missing receipt, active/terminal run, and unresolved or
+// paused/stopped/pending-approval assignee — in SQL before this cap is
+// applied, so it bounds real work, not permanently-blocked parents.
 const maxWakeReconcilePerTick = 5
 
 // ParentWakeReconciler is a level-triggered backstop for the

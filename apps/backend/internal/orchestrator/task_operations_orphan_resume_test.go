@@ -99,7 +99,7 @@ func runOrphanStatusCase(t *testing.T, tc orphanStatusCase) {
 		agentMgr.isAgentRunningFn = func(context.Context, string) bool { return true }
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil {
@@ -203,7 +203,7 @@ func TestGetTaskSessionStatus_OrphanCancelledStatusIsIdempotent(t *testing.T) {
 	}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	first, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil {

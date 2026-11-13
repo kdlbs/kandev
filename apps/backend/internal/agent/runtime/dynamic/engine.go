@@ -67,7 +67,7 @@ type Engine struct {
 	states        map[string]RouteState
 	persistence   Persistence
 	loader        StateLoader
-	probes        map[string]ProbeLease
+	probes        map[string][]ProbeLease
 	logger        *zap.Logger
 	limits        LimitChecker
 	limitObserver LimitObserver
@@ -88,7 +88,7 @@ func NewEngine(options ...EngineOption) *Engine {
 		now:         time.Now,
 		circuits:    NewCircuitRegistry(),
 		states:      make(map[string]RouteState),
-		probes:      make(map[string]ProbeLease),
+		probes:      make(map[string][]ProbeLease),
 		logger:      zap.NewNop(),
 		retryClaims: make(map[string]int64),
 	}
@@ -303,17 +303,7 @@ func (e *Engine) candidateSelectable(ctx context.Context, candidate Candidate, s
 			return selectable
 		}
 	}
-	if candidate.BindingKey == "" || !e.circuits.IsOpen(candidate.BindingKey, now) {
-		return true
-	}
-	lease, ok := e.circuits.AcquireProbe(candidate.BindingKey, probeLeaseDuration)
-	if !ok {
-		return false
-	}
-	// The caller owns the generation fencing. The conductor releases this
-	// lease after the concrete launch result is known.
-	e.probes[probeKey(sessionID, generation, candidate.ID)] = lease
-	return true
+	return e.acquireCandidateProbes(candidate, sessionID, generation, now)
 }
 
 func (e *Engine) selectNarrowCircuit(ctx context.Context, candidate Candidate, sessionID string, generation int64, now time.Time) (bool, bool) {
@@ -335,7 +325,12 @@ func (e *Engine) selectNarrowCircuit(ctx context.Context, candidate Candidate, s
 			e.circuits.ReleaseProbe(lease, true, circuitBackoff)
 			return false, true
 		}
-		e.probes[probeKey(sessionID, generation, candidate.ID)] = lease
+		if !e.acquireCandidateProbes(candidate, sessionID, generation, now) {
+			e.circuits.ReleaseProbe(lease, false, 0)
+			return false, true
+		}
+		probeID := probeKey(sessionID, generation, candidate.ID)
+		e.probes[probeID] = append(e.probes[probeID], lease)
 		return true, true
 	}
 	return false, false
@@ -443,6 +438,19 @@ func (e *Engine) ActionFor(profile Profile, candidateID string, code routingerr.
 	return ActionStop
 }
 
+// ActionForFailure resolves the saved action and any admitted keyword default
+// through one path so callers cannot disagree about whether to advance.
+func (e *Engine) ActionForFailure(profile Profile, candidateID string, failure *routingerr.Error) Action {
+	if failure == nil {
+		return ActionStop
+	}
+	action := e.ActionFor(profile, candidateID, failure.Code)
+	if candidate, ok := candidateByID(profile, candidateID); ok {
+		return keywordDefaultAction(candidate, failure, action)
+	}
+	return action
+}
+
 func actionForCandidate(candidate Candidate, code routingerr.Code) Action {
 	if candidate.Policies.Version == 0 {
 		action := actionForRules(candidate.Rules, code)
@@ -505,7 +513,7 @@ func (e *Engine) ApplyFailureContext(
 	if candidate, ok := candidateByID(profile, currentCandidateID); ok && candidate.Policies.Version != 0 {
 		return e.applyPolicyFailure(ctx, sessionID, profile, expectedGeneration, currentCandidateID, candidate, failure)
 	}
-	action := e.ActionFor(profile, currentCandidateID, failure.Code)
+	action := e.ActionForFailure(profile, currentCandidateID, failure)
 	switch action {
 	case ActionRetrySame:
 		return e.selectContext(ctx, sessionID, profile, expectedGeneration, "", currentCandidateID, "retry")
@@ -1478,13 +1486,15 @@ func (e *Engine) ReleaseProbe(decision RouteDecision, success bool) {
 	}
 	e.mu.Lock()
 	key := probeKey(decision.SessionID, decision.Generation, decision.ExecutionProfileID)
-	lease, ok := e.probes[key]
+	leases, ok := e.probes[key]
 	if ok {
 		delete(e.probes, key)
 	}
 	e.mu.Unlock()
 	if ok {
-		e.circuits.ReleaseProbe(lease, success, circuitBackoff)
+		for _, lease := range leases {
+			e.circuits.ReleaseProbe(lease, success, circuitBackoff)
+		}
 	}
 }
 
@@ -1511,7 +1521,16 @@ func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, fail
 		if candidate.ID != candidateID || candidate.BindingKey == "" {
 			continue
 		}
-		e.openCandidateCircuitForFailure(candidate, failure, scope)
+		failure = keywordFailureForCandidate(candidate, failure)
+		if failure.Keyword == nil {
+			e.openCandidateCircuitForFailure(candidate, failure, scope)
+			return
+		}
+		if failure.Keyword.Action == "retry_same" && candidate.Policies.Version == 0 && len(candidate.Rules) == 0 {
+			return
+		}
+		until := keywordCircuitUntil(candidate, failure, e.now())
+		e.circuits.OpenPreservingDeadline(keywordCircuitKey(candidate, failure), until, failure.Code)
 		return
 	}
 }

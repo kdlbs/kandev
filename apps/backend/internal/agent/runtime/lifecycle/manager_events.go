@@ -1794,6 +1794,15 @@ func (m *Manager) handleFileChangeNotification(execution *AgentExecution, notifi
 	m.eventPublisher.PublishFileChange(execution, notification)
 }
 
+// handleWorktreeInventory publishes a linked-worktree snapshot from a live,
+// current execution. Detection never starts, resumes, or prompts an agent.
+func (m *Manager) handleWorktreeInventory(execution *AgentExecution, inventory *agentctl.WorktreeInventory) {
+	if execution == nil || inventory == nil || !m.runtimeExecutionCurrent(execution) {
+		return
+	}
+	m.eventPublisher.PublishWorktreeInventory(execution, inventory)
+}
+
 // handleShellOutput processes shell output from the workspace stream
 func (m *Manager) handleShellOutput(execution *AgentExecution, data string) {
 	if !m.runtimeExecutionCurrent(execution) {

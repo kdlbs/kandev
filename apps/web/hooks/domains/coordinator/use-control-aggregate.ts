@@ -42,11 +42,13 @@ export function useControlAggregate(enabled: boolean): ControlAggregateRead {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const scheduler = useRef<ControlRefreshScheduler | null>(null);
+  const activeRead = useRef<AbortSignal | null>(null);
 
   const read = useCallback(
     async (signal: AbortSignal): Promise<ControlRefreshOutcome> => {
-      const current = () =>
-        !signal.aborted && stateReadScopeIdentity(store.getState()) === identity;
+      activeRead.current = signal;
+      const sameIdentity = () => stateReadScopeIdentity(store.getState()) === identity;
+      const current = () => !signal.aborted && activeRead.current === signal && sameIdentity();
       setLoading(true);
       try {
         const wire = await getWorkspaceAggregate({ cache: "no-store", init: { signal } });
@@ -64,7 +66,10 @@ export function useControlAggregate(enabled: boolean): ControlAggregateRead {
         if (current()) setError(true);
         return "retry";
       } finally {
-        if (current()) setLoading(false);
+        if (activeRead.current === signal && sameIdentity()) {
+          activeRead.current = null;
+          setLoading(false);
+        }
       }
     },
     [store, identity],
@@ -75,11 +80,16 @@ export function useControlAggregate(enabled: boolean): ControlAggregateRead {
     const next = createControlRefreshScheduler({
       run: read,
       isVisible: () => document.visibilityState === "visible",
+      onReadTimeout: () => {
+        setLoading(false);
+        setError(true);
+      },
     });
     scheduler.current = next;
     void next.request();
     return () => {
       next.dispose();
+      if (activeRead.current) activeRead.current = null;
       if (scheduler.current === next) scheduler.current = null;
     };
   }, [enabled, read]);

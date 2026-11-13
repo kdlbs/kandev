@@ -683,3 +683,15 @@ func (m *Manager) EnsureWorkspaceLinkExclusion(ctx context.Context, linkPath str
 func (m *Manager) RemoveWorkspaceLinkExclusion(ctx context.Context, linkPath string) error {
 	return m.removeNestedWorkspaceExclusion(ctx, "", linkPath)
 }
+
+// AddNestedWorkspaceExclusion installs the managed Git exclude that keeps a
+// nested worktree out of the containing checkout's status and staging.
+func (m *Manager) AddNestedWorkspaceExclusion(ctx context.Context, outerRoot, nestedPath string) (bool, error) {
+	return m.addNestedWorkspaceExclusion(ctx, outerRoot, nestedPath)
+}
+
+// RemoveNestedWorkspaceExclusion removes the managed exclude for one nested
+// worktree without touching user-authored ignore rules.
+func (m *Manager) RemoveNestedWorkspaceExclusion(ctx context.Context, outerRoot, nestedPath string) error {
+	return m.removeNestedWorkspaceExclusion(ctx, outerRoot, nestedPath)
+}

@@ -380,6 +380,27 @@ func TestPostgresListStuckParents(t *testing.T) {
 	}
 }
 
+// TestPostgresListStuckParents_CancelledWaveMembersDoNotConsumeLimit ensures
+// blocked parents cannot starve a successful wave from the bounded query.
+func TestPostgresListStuckParents_CancelledWaveMembersDoNotConsumeLimit(t *testing.T) {
+	repo, ctx := newPostgresWakeRepo(t)
+
+	for _, parentID := range []string{"pg-parent-1", "pg-parent-2", "pg-parent-3", "pg-parent-4", "pg-parent-5"} {
+		seedPostgresStuckParent(t, ctx, repo, parentID, "pg-ws-starvation")
+		execPostgres(t, ctx, repo,
+			`UPDATE tasks SET state = 'CANCELLED' WHERE parent_id = ?`, parentID)
+	}
+	seedPostgresStuckParent(t, ctx, repo, "pg-parent-healthy", "pg-ws-starvation")
+
+	candidates, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+	if err != nil {
+		t.Fatalf("ListStuckParents: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].ParentTaskID != "pg-parent-healthy" {
+		t.Fatalf("candidates = %#v, want only [pg-parent-healthy]", candidates)
+	}
+}
+
 // TestPostgresListStuckParentsChildSetKeyMatchesGo pins the aggregate against
 // GetChildSetKey, which builds the same key in Go. The two must agree byte for
 // byte across engines: a receipt is recorded with the Go form and compared

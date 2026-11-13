@@ -97,6 +97,11 @@ type ProbeRequest struct {
 	Refresh bool `json:"refresh,omitempty"`
 	// Preparation carries one authenticated, attempt-bound private recovery.
 	Preparation *agentctltypes.ManagedRuntimePreparationDirective `json:"preparation,omitempty"`
+	// InstallContext carries the authenticated runtime-owner scope for
+	// reusable managed npm repairs. The effective installer environment is the
+	// probe's own InferenceConfig.Env, which is already the complete authorized
+	// child environment.
+	InstallContext *agentctltypes.ManagedRuntimeInstallContext `json:"install_context,omitempty"`
 	// ProfileContext marks probes started from a concrete profile discovery
 	// request. It prevents launch settings and provider diagnostics from entering
 	// command logs or client-visible errors.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { PanelBody } from "./panel-primitives";
@@ -10,6 +10,7 @@ import type { ChangesPanelBodyProps } from "./changes-panel-data";
 import { ChangesPanelTimelineContent } from "./changes-panel-timeline-content";
 import type { ChangesPanelTimelineContentProps } from "./changes-panel-timeline-types";
 import { WorkspaceUnavailable } from "./workspace-unavailable";
+import { ROOT_FOCUS_EVENT } from "./root-context-menu";
 
 function ComparisonTargetNotice({
   comparisonTargets,
@@ -99,6 +100,24 @@ function ChangesPanelTimeline(
 
 export function ChangesPanelBody(props: ChangesPanelBodyProps) {
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const handleRootFocus = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{ surface?: string; repositoryName?: string; trackerName?: string }>
+      ).detail;
+      if (detail?.surface !== "changes") return;
+      const groups = document.querySelectorAll("[data-repository-name]");
+      const target =
+        Array.from(groups).find(
+          (group) =>
+            group.getAttribute("data-repository-name") === detail.repositoryName ||
+            group.getAttribute("data-repository-name") === detail.trackerName,
+        ) ?? (groups.length === 1 ? groups[0] : null);
+      target?.scrollIntoView({ block: "nearest" });
+    };
+    window.addEventListener(ROOT_FOCUS_EVENT, handleRootFocus);
+    return () => window.removeEventListener(ROOT_FOCUS_EVENT, handleRootFocus);
+  }, []);
   const workspaceBlocked =
     props.workspaceRestoration && props.workspaceRestoration.status !== "ready";
   const beforeLayoutKey = [

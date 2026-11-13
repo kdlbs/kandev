@@ -62,10 +62,11 @@ const maxStartupTransferReconcileAttempts = 30
 
 // ServiceConfig holds orchestrator service configuration
 type ServiceConfig struct {
-	RetryClock RetryClock
-	Scheduler  scheduler.SchedulerConfig
-	QueueSize  int
-	QueueGroup string
+	ProviderKeywordContext bool
+	RetryClock             RetryClock
+	Scheduler              scheduler.SchedulerConfig
+	QueueSize              int
+	QueueGroup             string
 	// CodexAppServerEnabled controls native-only lifecycle actions such as
 	// conversation forks. It is restart-required, matching agentctl transport
 	// composition and the feature's runtime flag.
@@ -775,6 +776,9 @@ type Service struct {
 	repo                      sessionExecutorStore
 	promptTargets             taskPullRequestTargetStore
 	agentManager              executor.AgentManagerClient
+	// deliverySessionStateTestHook pauses the correction between its pre-guard
+	// proof and guarded recheck in deterministic race tests.
+	deliverySessionStateTestHook func()
 	// ACP mode and model reports mutate one selector snapshot per session.
 	sessionSettingsSnapshotLocks [64]sync.Mutex
 
@@ -1624,6 +1628,10 @@ type Service struct {
 	// from a predecessor. Automatic recovery requires an explicit no-output,
 	// no-effect result from this map.
 	dynamicAttemptEvidence sync.Map
+	// keywordFailureHistory survives prompt-evidence retirement so a routed
+	// successor can use bounded failure context without reusing stale auth data.
+	keywordFailureHistoryMu sync.Mutex
+	keywordFailureHistory   map[string][]keywordObservation
 	// pendingDynamicStreakResets coalesces ordinary output/effect observations
 	// until a semantic boundary can persist the reset outside the raw stream
 	// callback. Each entry retains the prompt and route identity that authorized
@@ -1763,6 +1771,9 @@ func (s *Service) SetRouteActionHandler(handler func(context.Context, RouteActio
 func (s *Service) SetProfileExecutionResolver(resolver *agentruntime.ProfileExecutionResolver) {
 	s.profileExecutionResolver = resolver
 	s.wireAdmissionGrade(resolver)
+	if resolver != nil {
+		resolver.SetKeywordContextEnabled(s.config.ProviderKeywordContext)
+	}
 }
 
 func (s *Service) ApplyRouteAction(ctx context.Context, request RouteActionRequest) (*RouteActionResult, error) {
@@ -2176,6 +2187,14 @@ func (s *Service) SetAttachmentReader(reader AttachmentReader) {
 func (s *Service) SetCanvasesEnabled(enabled bool) {
 	if s.executor != nil {
 		s.executor.SetCanvasesEnabled(enabled)
+	}
+}
+
+// SetManagedRuntimeSingleUserOwner wires the live single-user repair-owner
+// fallback. The callback must report allowed only for disabled authentication.
+func (s *Service) SetManagedRuntimeSingleUserOwner(owner func() (string, bool)) {
+	if s.executor != nil {
+		s.executor.SetManagedRuntimeSingleUserOwner(owner)
 	}
 }
 
@@ -4091,6 +4110,16 @@ func (s *Service) reconcileActiveSessionOnStartup(
 			} else {
 				s.publishTaskUpdated(ctx, task)
 			}
+		}
+	}
+
+	// An adopted runtime can still belong to a turn whose terminal settled
+	// before a coarse state write failed. Correct only that exact evidence; a
+	// genuine in-flight turn is rejected by the idle runtime proof.
+	if retracked {
+		if err := s.convergeSettledDeliverySessionState(ctx, sessionID, nil); err != nil {
+			s.logger.Warn("failed to converge settled delivery session state on adoption",
+				zap.String("session_id", sessionID), zap.Error(err))
 		}
 	}
 

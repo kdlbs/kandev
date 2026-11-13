@@ -47,6 +47,7 @@ import type { TaskSession as ApiTaskSession } from "@/lib/types/http";
 import { useSessionLiveSyncSubscriptions } from "./use-session-live-sync";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { isTaskIdentifierParam, TaskIdentifierRedirect } from "./task-identifier-redirect";
 import { mapOfficeTaskToTask } from "./map-office-task";
 import { captureTaskSessionHydrationEpochs } from "@/lib/state/slices/session/hydration-epochs";
 
@@ -673,8 +674,13 @@ export default function IssueDetailPage({ params }: IssueDetailPageProps) {
 }
 
 function IssueDetailContent({ params }: IssueDetailPageProps) {
-  const { t } = useTranslation();
   const { id } = use(params);
+  if (isTaskIdentifierParam(id)) return <TaskIdentifierRedirect identifier={id} />;
+  return <IssueDetailBody id={id} />;
+}
+
+function IssueDetailBody({ id }: { id: string }) {
+  const { t } = useTranslation();
   const router = useRouter();
   const searchParams = useSearchParams();
   const preferredSessionId = searchParams.get("session_id") ?? undefined;

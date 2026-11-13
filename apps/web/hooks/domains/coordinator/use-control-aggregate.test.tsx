@@ -45,7 +45,10 @@ function wrapper({ children }: { children: ReactNode }) {
 beforeEach(() => {
   api.aggregate.mockReset().mockResolvedValue(wire);
 });
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe("useControlAggregate", () => {
   it("does not read the aggregate while disabled", async () => {
@@ -86,6 +89,40 @@ describe("useControlAggregate", () => {
       await result.current.refresh();
     });
     expect(result.current.error).toBe(false);
+  });
+
+  it("recovers after a timed-out read and ignores its late response", async () => {
+    vi.useFakeTimers();
+    let resolveLate!: (value: typeof wire) => void;
+    const lateResponse = new Promise<typeof wire>((resolve) => {
+      resolveLate = resolve;
+    });
+    const recovered = {
+      workspaces: [{ ...wire.workspaces[0], workspace_id: "beta", name: "Beta" }],
+      recent_activity: [],
+    };
+    api.aggregate.mockReset().mockReturnValueOnce(lateResponse).mockResolvedValueOnce(recovered);
+
+    const { result } = renderHook(() => useControlAggregate(true), { wrapper });
+    const firstSignal = api.aggregate.mock.calls[0][0].init.signal as AbortSignal;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+
+    expect(firstSignal.aborted).toBe(true);
+    expect(result.current.loading).toBe(false);
+    expect(result.current.error).toBe(true);
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(api.aggregate).toHaveBeenCalledTimes(2);
+    expect(result.current.data?.workspaces[0].workspace_id).toBe("beta");
+
+    await act(async () => {
+      resolveLate(wire);
+      await Promise.resolve();
+    });
+    expect(result.current.data?.workspaces[0].workspace_id).toBe("beta");
   });
 
   it("treats missing lists in the wire shape as empty", async () => {

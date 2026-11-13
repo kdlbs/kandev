@@ -74,11 +74,22 @@ func applyDynamicRouteAction(
 	if err != nil {
 		return handleDynamicRouteActionError(ctx, repo, session, expectedState, err)
 	}
-	changed, err := persistDynamicRouteSelection(ctx, repo, session, expectedState, decision, persistCandidateSwitch)
+	changed, runtimeReset, err := persistDynamicRouteSelection(ctx, repo, session, expectedState, decision, persistCandidateSwitch)
 	if err != nil {
 		return nil, err
 	}
 	if !changed {
+		if runtimeReset {
+			// The route claim is already durable, so a failed projection must
+			// return that generation to manual recovery before reporting conflict.
+			if _, err := resolver.MarkRouteActionRequired(
+				ctx, session.ID, decision.Generation, session.RouteReason,
+			); err != nil {
+				wrappedErr := fmt.Errorf("settle unpersisted dynamic route selection: %w", err)
+				return nil, routeActionPersistenceError(ctx, repo, session, wrappedErr)
+			}
+			return nil, routeActionError(ctx, repo, session, dynamicruntime.ErrStaleGeneration)
+		}
 		return reloadRouteActionResult(ctx, repo, session.ID)
 	}
 	if request.Action == orchestrator.RouteActionCancelWait || request.Action == orchestrator.RouteActionStop {
@@ -179,7 +190,7 @@ func persistDynamicRouteSelection(
 	expectedState models.TaskSessionState,
 	decision agentruntime.ProfileExecution,
 	persistCandidateSwitch dynamicCandidateSwitchPersister,
-) (bool, error) {
+) (changed, runtimeReset bool, err error) {
 	previousExecutionProfileID, expectedUpdatedAt := session.ExecutionProfileID, session.UpdatedAt
 	session.ExecutionProfileID = decision.ExecutionProfileID
 	session.RouteGeneration = decision.Generation
@@ -197,21 +208,20 @@ func persistDynamicRouteSelection(
 	// A candidate change never carries a provider-native ACP identity across
 	// profiles. The conductor will populate this after a fresh launch.
 	session.DownstreamACPSessionID = ""
-	var changed bool
-	var err error
-	if orchestrator.DynamicCandidateSelectionResetRequired(session, previousExecutionProfileID) {
+	runtimeReset = orchestrator.DynamicCandidateSelectionResetRequired(session, previousExecutionProfileID)
+	if runtimeReset {
 		// The previous provider's model and mode must not reach the new candidate.
 		if persistCandidateSwitch == nil {
-			return false, errors.New("dynamic candidate switch persister unavailable")
+			return false, runtimeReset, errors.New("dynamic candidate switch persister unavailable")
 		}
 		changed, err = persistCandidateSwitch(ctx, session, expectedState, expectedUpdatedAt)
 	} else {
 		changed, err = repo.UpdateTaskSessionIfCurrentState(ctx, session, expectedState)
 	}
 	if err != nil {
-		return false, routeActionPersistenceError(ctx, repo, session, err)
+		return false, runtimeReset, routeActionPersistenceError(ctx, repo, session, err)
 	}
-	return changed, nil
+	return changed, runtimeReset, nil
 }
 
 func finishDynamicRouteAction(

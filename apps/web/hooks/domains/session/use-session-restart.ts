@@ -11,6 +11,14 @@ import {
   getSessionRestartStore,
   isSessionRestartPending,
 } from "@/lib/session/session-restart-state";
+import {
+  beginSessionRecoveryGuidanceOperation,
+  clearSessionRecoveryGuidance,
+  publishSessionRecoveryGuidance,
+  sessionRecoveryGuidanceIdentityFromSession,
+} from "@/lib/session/session-recovery-guidance";
+import { lastAgentErrorStamp, readLastAgentError } from "@/lib/session-last-agent-error";
+import type { TaskSession } from "@/lib/types/http";
 import { isSessionStoppable } from "./session-action-state";
 
 /** Subscribes to the target's pending entry in the current application store. */
@@ -41,15 +49,30 @@ function restoreRestartSelection(
   }
 }
 
-function closureStopResponse(value: unknown, failureMessage: string): Record<string, unknown> | null {
-  if (typeof value !== "object" || value === null || !("operation_id" in value || "stage" in value)) return null;
-  if (!("stage" in value) || value.stage !== "committed" || !("claims_settled" in value) || value.claims_settled !== true) {
+function closureStopResponse(
+  value: unknown,
+  failureMessage: string,
+): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || !("operation_id" in value || "stage" in value))
+    return null;
+  if (
+    !("stage" in value) ||
+    value.stage !== "committed" ||
+    !("claims_settled" in value) ||
+    value.claims_settled !== true
+  ) {
     throw new Error(failureMessage);
   }
   return value as Record<string, unknown>;
 }
 
-async function restartSession({ client, taskId, sessionId, metadata, failureMessage }: {
+async function restartSession({
+  client,
+  taskId,
+  sessionId,
+  metadata,
+  failureMessage,
+}: {
   client: NonNullable<ReturnType<typeof getWebSocketClient>>;
   taskId: string;
   sessionId: string;
@@ -114,6 +137,16 @@ export function useSessionRestart(sessionId: string | null | undefined, taskId: 
     }
 
     const initial = owner.getState();
+    const guidanceSession = initial.taskSessions.items[sessionId] ?? session;
+    const initialError = readLastAgentError(guidanceSession.metadata);
+    const guidanceOperation = beginSessionRecoveryGuidanceOperation(
+      owner,
+      sessionRecoveryGuidanceIdentityFromSession(
+        taskId,
+        guidanceSession,
+        initialError ? lastAgentErrorStamp(initialError) : undefined,
+      ),
+    );
     const wasSelected =
       initial.tasks.activeTaskId === taskId && initial.tasks.activeSessionId === sessionId;
     const navigationRevision = initial.taskRemoval.navigationRevision;
@@ -130,9 +163,20 @@ export function useSessionRestart(sessionId: string | null | undefined, taskId: 
         metadata: session.metadata,
         failureMessage: t("task:failedToResumeSession"),
       });
+      clearSessionRecoveryGuidance(
+        owner,
+        guidanceOperation,
+        currentGuidanceIdentity(owner, taskId, sessionId, guidanceSession),
+      );
       updateToast(toastId, { title: t("task:sessionRestartRequested"), variant: "success" });
       return true;
     } catch (error) {
+      publishSessionRecoveryGuidance(
+        owner,
+        guidanceOperation,
+        error,
+        currentGuidanceIdentity(owner, taskId, sessionId, guidanceSession),
+      );
       updateToast(toastId, {
         title: t("task:sessionRestartFailed"),
         description: error instanceof Error ? error.message : t("common:unknownError"),
@@ -149,4 +193,20 @@ export function useSessionRestart(sessionId: string | null | undefined, taskId: 
   }, [isRestartPending, owner, pending, sessionId, taskId, t, toast, updateToast]);
 
   return { restart, isRestarting, isRestartPending };
+}
+
+function currentGuidanceIdentity(
+  owner: ReturnType<typeof useAppStoreApi>,
+  taskId: string,
+  sessionId: string,
+  fallback: TaskSession,
+) {
+  const state = owner.getState();
+  const session = state.taskSessions.items[sessionId] ?? fallback;
+  const error = readLastAgentError(session.metadata);
+  return sessionRecoveryGuidanceIdentityFromSession(
+    taskId,
+    session,
+    error ? lastAgentErrorStamp(error) : undefined,
+  );
 }

@@ -147,8 +147,10 @@ RUN apk add --no-cache \\
 COPY mock-agent-linux-amd64 /usr/local/bin/mock-agent
 RUN rm -f /usr/local/bin/npx
 COPY managed-runtime-npx.sh /usr/local/bin/npx
+COPY managed-runtime-npm.sh /usr/local/bin/npm
 RUN chmod +x /usr/local/bin/mock-agent
 RUN chmod +x /usr/local/bin/npx
+RUN chmod +x /usr/local/bin/npm
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
@@ -193,6 +195,10 @@ export function buildE2ESSHImage(): void {
     fs.copyFileSync(
       path.resolve(__dirname, "managed-runtime-npx.sh"),
       path.join(ctxDir, "managed-runtime-npx.sh"),
+    );
+    fs.copyFileSync(
+      path.resolve(__dirname, "managed-runtime-npm.sh"),
+      path.join(ctxDir, "managed-runtime-npm.sh"),
     );
     execFileSync("docker", ["build", "-t", SSH_E2E_IMAGE_TAG, ctxDir], {
       stdio: process.env.E2E_DEBUG ? "inherit" : "ignore",

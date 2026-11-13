@@ -180,6 +180,34 @@ type FileContextMenuSurfaceProps = {
   onDelete: (event: Event) => void;
 };
 
+function useFileContextMenuFocus(
+  onStartRename: () => void,
+  setDeleteConfirmationOpen: (open: boolean) => void,
+) {
+  const renamePendingRef = useRef(false);
+  const deletePendingRef = useRef(false);
+  const touchTriggerRef = useRef<HTMLButtonElement>(null);
+  const handleStartRename = useCallback(() => {
+    renamePendingRef.current = true;
+  }, []);
+  const handleCloseAutoFocus = useCallback(
+    (event: Event) => {
+      if (deletePendingRef.current) {
+        event.preventDefault();
+        deletePendingRef.current = false;
+        setDeleteConfirmationOpen(true);
+        return;
+      }
+      if (!renamePendingRef.current) return;
+      event.preventDefault();
+      renamePendingRef.current = false;
+      onStartRename();
+    },
+    [onStartRename, setDeleteConfirmationOpen],
+  );
+  return { deletePendingRef, touchTriggerRef, handleStartRename, handleCloseAutoFocus };
+}
+
 function FileContextMenuSurface({
   children,
   node,
@@ -203,30 +231,8 @@ function FileContextMenuSurface({
   onConfirmDelete,
   onDelete,
 }: FileContextMenuSurfaceProps) {
-  const renamePendingRef = useRef(false);
-  const deletePendingRef = useRef(false);
-  const touchTriggerRef = useRef<HTMLButtonElement>(null);
-
-  const handleStartRename = useCallback(() => {
-    renamePendingRef.current = true;
-  }, []);
-
-  const handleCloseAutoFocus = useCallback(
-    (event: Event) => {
-      if (deletePendingRef.current) {
-        event.preventDefault();
-        deletePendingRef.current = false;
-        // Transfer focus to the confirmation after the context menu closes.
-        setDeleteConfirmationOpen(true);
-        return;
-      }
-      if (!renamePendingRef.current) return;
-      event.preventDefault();
-      renamePendingRef.current = false;
-      onStartRename();
-    },
-    [onStartRename, setDeleteConfirmationOpen],
-  );
+  const { deletePendingRef, touchTriggerRef, handleStartRename, handleCloseAutoFocus } =
+    useFileContextMenuFocus(onStartRename, setDeleteConfirmationOpen);
 
   return (
     <FileDeleteActionContext.Provider

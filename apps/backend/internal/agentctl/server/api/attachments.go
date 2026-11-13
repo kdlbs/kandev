@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
@@ -80,13 +81,26 @@ func parseMaterializedAttachmentUpload(c *gin.Context) (materializedAttachmentUp
 }
 
 func (s *Server) persistMaterializedAttachment(upload materializedAttachmentUpload) (materializedAttachmentResponse, error) {
+	var response materializedAttachmentResponse
+	err := s.procMgr.WithAttachmentWorkDir(func(workDir string) error {
+		var err error
+		response, err = s.persistMaterializedAttachmentAt(workDir, upload)
+		return err
+	})
+	if errors.Is(err, process.ErrManagerStopping) || errors.Is(err, process.ErrAttachmentAgentUnavailable) {
+		return response, newMaterializedAttachmentError(http.StatusServiceUnavailable, "attachment agent unavailable")
+	}
+	return response, err
+}
+
+func (s *Server) persistMaterializedAttachmentAt(workDir string, upload materializedAttachmentUpload) (materializedAttachmentResponse, error) {
 	file, err := upload.fileHeader.Open()
 	if err != nil {
 		return materializedAttachmentResponse{}, newMaterializedAttachmentError(http.StatusBadRequest, "file is unreadable")
 	}
 	defer func() { _ = file.Close() }()
 
-	dir, err := safeAttachmentPath(s.cfg.WorkDir, ".kandev", "attachments", upload.sessionID)
+	dir, err := safeAttachmentPath(workDir, ".kandev", "attachments", upload.sessionID)
 	if err != nil {
 		return materializedAttachmentResponse{}, newMaterializedAttachmentError(http.StatusBadRequest, "attachment identity is invalid")
 	}

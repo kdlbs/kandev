@@ -108,10 +108,60 @@ its payload; previously terminal outcomes remain unchanged. A refreshed capabili
 before SQL block resolution and parked queue release. Legacy peers retain ordinary compatibility;
 authentication and storage errors fail closed.
 
+A transport notice marked `recovered` can outlive its execution after a later readiness
+failure. Explicit Resume can reuse the current ready native execution and restore that
+notice through the same authenticated retirement transaction. The current execution,
+native identity, full submission inventory, and cursor checks remain mandatory. Preserve
+the notice's historical execution ID, submission, payload, and unknown outcome; update
+its recovery phase, revision, and timestamp through the existing transaction. State-only
+Retry retains its exact-execution guard.
+
 On backend adoption, unknown SQL history is excluded from active work only when authenticated
 full peer records retain matching retirement, uncertain state, session/incarnation, generation,
 and payload hash. Missing or conflicting proof remains blocked. No recovery summary field,
 new endpoint, migration, native conversation replacement, or generation rotation is needed.
+
+## Repeated recovery after silent restoration
+
+AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.9, .12, .23 and .24 also apply after an earlier silent restore.
+Delivery: [Repeated native Resume](../../../plans/repeated-native-resume/plan.md).
+
+Historical resolution proof accepts `resume` and `models.SilentRestoreAction`.
+The proof retains exact session, incarnation, source generation, submission, stream and resolution-time checks.
+The legacy empty-stream variant retains its interrupted-submission and same-native-conversation checks.
+Unknown actions and incomplete provenance remain invalid.
+`HasResolvedNativeResumeRecovery` remains the strict verifier for a current explicit Resume resolution.
+Historical action compatibility does not grant current admission.
+
+An older `restored` notice is historical only after its resolved source and unchanged native-conversation lineage are verified.
+Every generation crossed must belong to the same incarnation and preserve that native conversation.
+A future, foreign, unresolved or gap-bearing notice remains a refusal.
+Do not route a verified native-restore notice through context-continuation ancestry or relabel it `continued`.
+
+`ResolveSessionRecoveryBlockWithNativeEvidence` remains the authority for a submission-bound block with a missing stream.
+It obtains that binding from authenticated current native evidence.
+The transaction validates the complete SQL/journal inventory, current execution, native identity, cursor and restore-attempt restrictions.
+It preserves the historical restored notice and resolves only proven current incident fences.
+The simpler `restoreNativeResumeMetadataTx` path cannot infer a missing stream from stale metadata.
+Its generic fallback retains the single-open-block guard and requires verified historical resolution.
+An older generation alone never authorizes resolution.
+
+Restart presentation repair creates a fence only when the current generation has no open fence.
+A planned repository operation, `EnsureRestartRecoveryBlock`, performs that decision under the existing session-turn and delivery write locks.
+PostgreSQL acquires those locks before the first inventory read.
+The transaction revalidates current generation ownership and returns one existing eligible delivery fence unchanged.
+Multiple or independent fences prevent insertion and retain their restrictions.
+The operation does not change the general recovery-block upsert contract or add schema constraints.
+
+Existing generic and submission-bound companion fences can represent the same interrupted incident.
+Only the complete authenticated resolver can resolve that set atomically.
+An independent consumer, foreign submission, conflicting stream or known outcome prevents every resolution write.
+Restart repair never erases an existing binding or reopens a resolved predecessor to repair presentation.
+
+Regression evidence covers real silent-restore commits, repeated interruptions, missing bindings, legacy history and already duplicated incident fences.
+Negative cases include changed native identity, forged resolution action, mismatched timestamps, live work, projection lag, pending restore and transactional rollback.
+Desktop and phone use the existing Resume action and recovery feedback.
+There is no new rendered control, localization key, recovery action or dispatch authority.
 
 ## Bounded projection wait
 

@@ -31,6 +31,8 @@ export type WorkspaceState = {
     clarification_unanswered_inbox_enabled?: boolean;
     clarification_unanswered_retention_days?: number;
     office_workflow_id?: string | null;
+    /** Office task identifier prefix (e.g. "KAN"). */
+    task_prefix?: string;
     created_at: string;
     updated_at: string;
   }>;

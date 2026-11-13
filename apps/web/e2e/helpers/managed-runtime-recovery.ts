@@ -133,6 +133,7 @@ export type ManagedRuntimePreparationOptions = {
   cacheRoot?: string;
   registryHost?: string;
   runtimeFamily?: "v1" | "v2";
+  cliFlags?: string[];
 };
 
 export type IncompleteManagedRuntimeFixture = {
@@ -143,6 +144,8 @@ export type IncompleteManagedRuntimeFixture = {
   sharedRoot: string;
   sentinels: ReturnType<typeof managedRuntimeStartupSentinels>;
   npmInvocationLog?: string;
+  npmArgvCapture?: string;
+  npmPidCapture?: string;
   hostFixturePaths: string[];
   releaseBackendEnv: () => Promise<void>;
 };
@@ -179,6 +182,74 @@ function readOpenCodePackageSpec(backend: BackendContext): string {
  * per-test execution cache. The wrapper only models npm's first ENOENT; the
  * agentctl owner performs the private install through the real npm executable.
  */
+function appendHostSubprocessProfileEnv(input: {
+  profileEnv: Array<{ key: string; value: string }>;
+  hostSubprocess: boolean | undefined;
+  backendEnv: { E2E_REAL_NPX: string };
+  mockAgentPath: string;
+  npmInvocationLog: string | undefined;
+  npmArgvCapture: string | undefined;
+}): void {
+  if (!input.hostSubprocess) return;
+  input.profileEnv.push({ key: "E2E_MOCK_AGENT_PATH", value: input.mockAgentPath });
+  input.profileEnv.push({ key: "E2E_REAL_NPX", value: input.backendEnv.E2E_REAL_NPX });
+  input.profileEnv.push({ key: "E2E_NPM_EXEC_LOG", value: input.npmInvocationLog ?? "" });
+  if (input.npmArgvCapture) {
+    input.profileEnv.push({ key: "E2E_NPX_ARGV_CAPTURE", value: input.npmArgvCapture });
+  }
+}
+
+function containerCapturePaths(cacheRoot: string, launchId: string) {
+  return {
+    argv: path.join(cacheRoot, `managed-runtime-argv-${launchId}.log`),
+    npm: path.join(cacheRoot, `managed-runtime-npm-${launchId}.log`),
+    pids: path.join(cacheRoot, `managed-runtime-pids-${launchId}.log`),
+  };
+}
+
+function appendContainerCaptureEnv(
+  profileEnv: Array<{ key: string; value: string }>,
+  capture: { argv: string; npm: string; pids: string },
+): void {
+  profileEnv.push({ key: "E2E_NPX_ARGV_CAPTURE", value: capture.argv });
+  profileEnv.push({ key: "E2E_NPM_EXEC_LOG", value: capture.npm });
+  profileEnv.push({ key: "E2E_NPX_PID_CAPTURE", value: capture.pids });
+}
+
+export function parseProviderPIDLog(text: string): string[] {
+  return text.trim() ? text.trim().split(/\r?\n/).filter(Boolean) : [];
+}
+
+export function parseProviderArgvLog(text: string): string[][] {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  return trimmed.split(/\r?\n/).map((line) => line.split("\t").filter(Boolean));
+}
+
+export function countInstallerCalls(text: string, packageSpec: string): number {
+  return text.split(/\r?\n/).filter((line) => line.includes(`--package=${packageSpec}`)).length;
+}
+
+export function findOwnedProviderPID(containerId: string, matchArg: string): string {
+  const script = `last=""; for p in /proc/[0-9]*; do pid="\${p#/proc/}"; [ "$pid" = "1" ] && continue; grep -qa "mock-agent" "$p/cmdline" 2>/dev/null || continue; grep -qa -- "${matchArg}" "$p/cmdline" 2>/dev/null || continue; last="$pid"; done; printf '%s\n' "$last"`;
+  return execFileSync("docker", ["exec", containerId, "sh", "-c", script], {
+    encoding: "utf8",
+  }).trim();
+}
+
+export function killOwnedProviderPID(containerId: string, pid: string): void {
+  const script = `get_ppid() { awk '/^PPid:/{print $2}' "/proc/$1/status" 2>/dev/null; }; kill_tree() { for child in /proc/[0-9]*; do cpid="\${child#/proc/}"; [ "$cpid" = "1" ] && continue; cppid=$(get_ppid "$cpid"); [ "$cppid" = "$1" ] && kill_tree "$cpid"; done; kill -9 "$1" 2>/dev/null || true; }; current="$1"; while [ "$current" -gt 1 ]; do ppid=$(get_ppid "$current"); [ -z "$ppid" ] && break; [ "$ppid" = "1" ] && break; if grep -qa "agentctl" "/proc/$ppid/cmdline" 2>/dev/null; then break; fi; current="$ppid"; done; kill_tree "$current"`;
+  execFileSync("docker", ["exec", containerId, "sh", "-c", script, "sh", pid]);
+}
+
+function managedRuntimeProfileCLIFlags(flags: string[] | undefined) {
+  return (flags ?? []).map((flag) => ({
+    description: "E2E managed npm profile flag",
+    flag,
+    enabled: true,
+  }));
+}
+
 export async function prepareIncompleteManagedRuntimeProfile(
   apiClient: ApiClient,
   backend: BackendContext,
@@ -205,7 +276,18 @@ export async function prepareIncompleteManagedRuntimeProfile(
   hostFixturePaths.push(npxPath);
 
   let npmInvocationLog: string | undefined;
+  let npmArgvCapture: string | undefined;
+  let npmPidCapture: string | undefined;
+  let containerCapture: { argv: string; npm: string; pids: string } | undefined;
+  if (!options.hostSubprocess) {
+    containerCapture = containerCapturePaths(cacheRoot, launchId);
+    npmArgvCapture = containerCapture.argv;
+    npmInvocationLog = containerCapture.npm;
+    npmPidCapture = containerCapture.pids;
+  }
   if (options.hostSubprocess) {
+    npmArgvCapture = path.join(backend.tmpDir, `managed-runtime-argv-${launchId}.log`);
+    hostFixturePaths.push(npmArgvCapture);
     const realNpmPath = execFileSync("which", ["npm"], { encoding: "utf8" }).trim();
     // Keep Node available when the native OpenCode directory is excluded.
     const nodePath = path.join(binDirectory, "node");
@@ -270,17 +352,22 @@ export async function prepareIncompleteManagedRuntimeProfile(
         value: path.join(cacheRoot, "kandev-e2e-private-roots"),
       },
     ];
-    if (options.hostSubprocess) {
-      profileEnv.push({ key: "E2E_MOCK_AGENT_PATH", value: mockAgentPath });
-      profileEnv.push({ key: "E2E_REAL_NPX", value: backendEnv.E2E_REAL_NPX });
-      profileEnv.push({ key: "E2E_NPM_EXEC_LOG", value: npmInvocationLog ?? "" });
-    }
+    if (containerCapture) appendContainerCaptureEnv(profileEnv, containerCapture);
+    appendHostSubprocessProfileEnv({
+      profileEnv,
+      hostSubprocess: options.hostSubprocess,
+      backendEnv,
+      mockAgentPath,
+      npmInvocationLog,
+      npmArgvCapture,
+    });
     const profile = await apiClient.createAgentProfile(
       managedAgent.id,
       "E2E incomplete npm runtime",
       {
         model: MANAGED_RUNTIME_TEST_MODEL,
         env_vars: profileEnv,
+        cli_flags: managedRuntimeProfileCLIFlags(options.cliFlags),
       },
     );
     profileId = profile.id;
@@ -292,6 +379,8 @@ export async function prepareIncompleteManagedRuntimeProfile(
       sharedRoot,
       sentinels: managedRuntimeStartupSentinels(packageSpec, launchId, cacheRoot),
       npmInvocationLog,
+      npmArgvCapture,
+      npmPidCapture,
       hostFixturePaths,
       releaseBackendEnv: async () => {
         selectManagedRuntime(backend, true);
@@ -448,6 +537,7 @@ export async function prepareManagedRuntimeProfile(
     profile: await apiClient.createAgentProfile(agentId, "E2E managed npm recovery", {
       model: MANAGED_RUNTIME_TEST_MODEL,
       env_vars: envVars,
+      cli_flags: managedRuntimeProfileCLIFlags(options.cliFlags),
     }),
     packageSpec,
     hostFixturePath,

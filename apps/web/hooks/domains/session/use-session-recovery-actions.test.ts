@@ -49,6 +49,7 @@ const mocks = vi.hoisted(() => ({
   getWorkspaceRecoveryStatus: vi.fn(),
   setWorkspaceRecoveryProjection: vi.fn(),
   managedCloneRelocationRecoveryDetails: vi.fn().mockReturnValue(null),
+  guidanceOwner: {},
   appState: null as unknown as RecoveryEligibilityState,
 }));
 
@@ -79,6 +80,8 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => mocks.guidanceOwner,
+  useOptionalAppStoreApi: () => mocks.guidanceOwner,
   useAppStore: (selector: (state: never) => unknown) => selector(mocks.appState as never),
 }));
 
@@ -92,6 +95,7 @@ const MANAGED_CLONE_RELOCATION_ERROR = "workspace needs relocation";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.guidanceOwner = {};
   mocks.appState = emptyRecoveryEligibilityState();
 });
 

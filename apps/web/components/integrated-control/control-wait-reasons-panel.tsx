@@ -100,7 +100,7 @@ export function ControlWaitReasons({ rows }: { rows: WaitReasonRow[] }) {
               data-workspace-id={workspace.id}
             >
               <Link
-                href={controlHref("workspaces", workspace.id)}
+                href={controlHref("overview", workspace.id)}
                 className="inline-flex min-h-7 cursor-pointer items-center font-medium underline-offset-4 hover:underline max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
               >
                 {workspace.name}

@@ -91,6 +91,7 @@
   "quickChatTerminalConnecting": "Connecting to terminal…",
   "quickChatTerminalExited": "Terminal exited.",
   "quickChatTerminalExitedWithCode": "Terminal exited with code {{code}}.",
+  "quickChatTerminalStartNewShell": "Start new shell",
   "quickChatAdd": "Add or switch tab",
   "reconnecting": "Reconnecting",
   "reconnectingToKandev": "Reconnecting to Kandev",

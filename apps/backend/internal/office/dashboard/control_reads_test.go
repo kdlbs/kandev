@@ -22,8 +22,6 @@ func (s stubControlCapacity) SessionCapacityObservation(context.Context) session
 func controlDashboardSchema(t *testing.T, deps *testDeps) {
 	t.Helper()
 	stmts := []string{
-		`ALTER TABLE tasks ADD COLUMN wip_admitted INTEGER NOT NULL DEFAULT 1`,
-		`ALTER TABLE tasks ADD COLUMN queued_for_step_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE task_sessions ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0`,
 		`CREATE TABLE IF NOT EXISTS queued_messages (id TEXT PRIMARY KEY, task_id TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS task_step_transitions (

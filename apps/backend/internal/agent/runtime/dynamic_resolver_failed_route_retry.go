@@ -25,7 +25,7 @@ func (r *ProfileExecutionResolver) ScheduleFailedRouteRetry(
 	if r.engine == nil || r.profiles == nil {
 		return dynamic.PendingFailedRouteRetry{}, false, errFailedRouteRetryNotConfigured
 	}
-	profile, err := r.loadDynamicProfile(ctx, logicalProfileID)
+	profile, err := r.loadDynamicProfile(ctx, logicalProfileID, sessionID)
 	if err != nil {
 		return dynamic.PendingFailedRouteRetry{}, false, err
 	}

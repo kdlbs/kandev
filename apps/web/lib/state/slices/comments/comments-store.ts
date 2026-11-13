@@ -1,7 +1,13 @@
 import { useWalkthroughDrafts } from "@/lib/walkthrough-feedback-state";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
-import type { Comment, DiffComment, CommentsSlice, CommentsState } from "./types";
+import type {
+  AgentMessageComment,
+  Comment,
+  DiffComment,
+  CommentsSlice,
+  CommentsState,
+} from "./types";
 import { isDiffComment } from "./types";
 import {
   persistSessionComments,
@@ -73,6 +79,45 @@ function markSentInState(state: CommentsState, commentIds: string[]): void {
   if (state.editingCommentId && acknowledgedIds.has(state.editingCommentId))
     state.editingCommentId = null;
   for (const sessionId of affectedSessions) persistSession(state, sessionId);
+}
+
+const AGENT_MESSAGE_COMMENT_FIELDS = [
+  "id",
+  "sessionId",
+  "repositoryId",
+  "text",
+  "createdAt",
+  "status",
+  "messageId",
+  "selectedText",
+  "authorName",
+] as const satisfies readonly (keyof AgentMessageComment)[];
+
+const AGENT_MESSAGE_ANCHOR_FIELDS = [
+  "messageId",
+  "start",
+  "end",
+  "selectedText",
+  "prefix",
+  "suffix",
+] as const satisfies readonly (keyof AgentMessageComment["anchor"])[];
+
+function sameAgentMessageComment(current: Comment | undefined, submitted: AgentMessageComment) {
+  if (!current || current.source !== "agent-message") return false;
+  return (
+    AGENT_MESSAGE_COMMENT_FIELDS.every((field) => current[field] === submitted[field]) &&
+    AGENT_MESSAGE_ANCHOR_FIELDS.every((field) => current.anchor[field] === submitted.anchor[field])
+  );
+}
+
+function markUnchangedAgentMessageCommentsSentInState(
+  state: CommentsState,
+  submitted: AgentMessageComment[],
+): void {
+  const unchangedIds = submitted
+    .filter((comment) => sameAgentMessageComment(state.byId[comment.id], comment))
+    .map((comment) => comment.id);
+  if (unchangedIds.length > 0) markSentInState(state, unchangedIds);
 }
 
 /** Remove all comments for a session from state + storage. */
@@ -170,6 +215,9 @@ export const useCommentsStore = create<CommentsSlice>()(
       }),
 
     markCommentsSent: (commentIds: string[]) => set((state) => markSentInState(state, commentIds)),
+
+    markCommentsSentIfUnchanged: (comments: AgentMessageComment[]) =>
+      set((state) => markUnchangedAgentMessageCommentsSentInState(state, comments)),
 
     clearSessionComments: (sessionId: string) => {
       useWalkthroughDrafts.getState().clearSession(sessionId);

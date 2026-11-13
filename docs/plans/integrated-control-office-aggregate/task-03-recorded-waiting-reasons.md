@@ -1,7 +1,7 @@
 ---
 id: integrated-control-office-aggregate-task-03
 title: Recorded waiting reasons
-status: in-progress
+status: done
 wave: 3
 depends_on:
   - integrated-control-office-aggregate-task-02
@@ -62,7 +62,8 @@ review and unconsumed messages already have their own comparison columns.
 - Located after the task and session comparison tables, before the read-state
   lines, in the Overview Office/Native branch.
 - One row per authorized workspace with its name linking to
-  `/control/workspaces?workspace=<id>`.
+  `/control/overview?workspace=<id>`. The selected overview filters its tables
+  and totals to that workspace while preserving the same authorization list.
 - Four labelled figures per row; phone widths use a two-column wrap with no page
   overflow and retain the existing 44px link target.
 - A basis note states that the figures are recorded task counts and independent.
@@ -72,27 +73,33 @@ review and unconsumed messages already have their own comparison columns.
 
 ## Verification
 
-No new permanent test, CI job, or e2e assertion. New behavior is checked once in
-a temporary overlay outside regular collection and removed after verification;
-existing valid checks are reused.
+Permanent regression tests cover the Native API, read state, parser, stage
+counts, waiting reasons, and workspace navigation.
 
-- One-off: a temporary specification rendering the derivation and the panel,
-  covering blocked precedence, terminal/failed exclusion, absent
-  `task_stages` (unknown, not zero), invalid matching counts (unknown, not a
-  partial sum), unavailable read, links and values.
-- Existing unit suites under `components/integrated-control` and
-  `hooks/domains/coordinator/use-control-aggregate.test.tsx` remain the
-  regression check.
-- `pnpm run typecheck` (with `NODE_OPTIONS=--max-old-space-size=8192` on this
-  worktree), changed-file ESLint, `pnpm run i18n:check`,
-  `python3 scripts/lint-spec-files.py --all`, and
-  `python3 scripts/list-docs.py validate`.
-- Existing browser specs are read-only reuse; no new assertion is added.
+- Backend repository query: workspace isolation, archived/ephemeral/automation
+  exclusions, deterministic primary-session selection, queued-message scope,
+  inclusive 24-hour bounds, distinct completed tasks, and stage groups.
+- Backend handler: the existing authorized workspace route selects the Native
+  projection and accepts only the supported 24-hour window.
+- Web parser and derivations: workspace/window contract, malformed counts,
+  blocked precedence, terminal/failed exclusion, and unknown versus zero.
+- Web read hook: same-row stale retention after transient errors, access-denial
+  clearing, and response rejection after the workspace identity changes.
+- Component and browser coverage: selected workspace content after clicks on
+  the Native table link, table row, and waiting-reason link on desktop and phone.
+- `pnpm exec vitest run lib/control-ui/native-control.test.ts components/integrated-control/control-stages.test.ts components/integrated-control/control-wait-reasons.test.ts hooks/domains/coordinator/use-control-native.test.tsx components/integrated-control/integrated-control-page.test.tsx hooks/domains/coordinator/control-refresh-scheduler.test.ts hooks/domains/coordinator/use-control-aggregate.test.tsx hooks/domains/coordinator/use-integrated-control-data.test.tsx` (8 files, 44 tests passed).
+- `go test ./internal/office/repository/sqlite -run 'Test(ReadControlMetricsScopesCountsAndAnchorsTheHistoryWindow|CountAgentInstancesByWorkspaceIDsBatchesAndFiltersRows)' -count=1`.
+- `go test ./internal/office/dashboard -run 'Test(GetWorkspacesAggregate|ControlDashboardUsesTheAuthorizedWorkspaceRoute)' -count=1`.
+- `pnpm e2e:run --host --shards 1 --project chromium tests/coordinator/control-aggregate-dashboard.spec.ts` (2 tests passed).
+- `pnpm e2e:run --host --shards 1 --project mobile-chrome tests/coordinator/mobile-control-aggregate-dashboard.spec.ts` (2 tests passed).
+- `NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck` passes.
+- Targeted changed-file ESLint, changed-Go lint, and Prettier checks pass.
 
 ## Boundaries
 
-- No upstream push, PR creation, or comment; the fork branch update is a
-  separate approval immediately before push.
+- The original task required separate authorization before an upstream push or
+  comment. The user authorized this maintainer follow-up and asked for a commit,
+  push, and one concise PR comment.
 - No capacity, provider, conversation, execution, recovery, or ledger data is
   added.
 - No new runtime flag; the existing default-off feature gates are unchanged.

@@ -85,6 +85,7 @@ export function mapWorkspaceItem(ws: WorkspaceItem): WorkspaceState["items"][num
     clarification_unanswered_inbox_enabled: ws.clarification_unanswered_inbox_enabled,
     clarification_unanswered_retention_days: ws.clarification_unanswered_retention_days,
     office_workflow_id: ws.office_workflow_id ?? null,
+    task_prefix: ws.task_prefix,
     created_at: ws.created_at,
     updated_at: ws.updated_at,
   };

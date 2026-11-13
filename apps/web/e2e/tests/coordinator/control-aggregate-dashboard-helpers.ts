@@ -84,4 +84,64 @@ export function controlAggregateDashboardCases(mobile: boolean) {
       await release();
     }
   });
+
+  test("Native workspace links and rows open the selected overview", async ({
+    testPage,
+    backend,
+    apiClient,
+    officeSeed,
+  }) => {
+    const release = await backend.useEnv({ KANDEV_FEATURES_INTEGRATED_CONTROL: "true" });
+    try {
+      const { workspaces } = await apiClient.listWorkspaces();
+      const workspaceName = workspaces.find((item) => item.id === officeSeed.workspaceId)?.name;
+      expect(workspaceName).toBeTruthy();
+      const workspaceHref = `/control/overview?workspace=${encodeURIComponent(officeSeed.workspaceId)}`;
+      const workspaceLink = testPage.locator(`a[href="${workspaceHref}"]`);
+
+      await testPage.goto("/control/overview");
+      const native = testPage.getByTestId("control-native-comparison");
+      const taskTable = native.getByTestId("control-native-tasks");
+      const taskRow = taskTable
+        .getByTestId("control-native-tasks-row")
+        .filter({ has: workspaceLink });
+      await expect(taskRow).toHaveCount(1);
+
+      const expectSelectedWorkspace = async () => {
+        await expect
+          .poll(() => {
+            const url = new URL(testPage.url());
+            return `${url.pathname}${url.search}`;
+          })
+          .toBe(workspaceHref);
+        await expect(testPage.getByTestId("control-selected-workspace")).toHaveText(workspaceName!);
+        await expect(testPage.getByTestId("control-native-comparison")).toBeVisible();
+        await expect(
+          testPage
+            .getByTestId("control-native-tasks")
+            .getByTestId("control-native-tasks-row")
+            .filter({ has: workspaceLink }),
+        ).toHaveCount(1);
+        if (mobile) await assertNoPageOverflow(testPage);
+      };
+
+      await taskRow.getByRole("link", { name: workspaceName!, exact: true }).click();
+      await expectSelectedWorkspace();
+
+      await testPage.goto("/control/overview");
+      const sessionRow = testPage
+        .getByTestId("control-native-sessions-row")
+        .filter({ has: workspaceLink });
+      await expect(sessionRow).toHaveCount(1);
+      await sessionRow.click();
+      await expectSelectedWorkspace();
+
+      await testPage.goto("/control/overview");
+      const waitReasons = testPage.getByTestId("control-wait-reasons");
+      await waitReasons.locator(`a[href="${workspaceHref}"]`).click();
+      await expectSelectedWorkspace();
+    } finally {
+      await release();
+    }
+  });
 }

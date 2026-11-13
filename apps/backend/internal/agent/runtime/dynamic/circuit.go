@@ -53,7 +53,7 @@ type circuit struct {
 // held reports whether the circuit stays open until an owner release: it has
 // no expiry and admits no probe.
 func (c circuit) held() bool {
-	return c.state == CircuitOpen && routingerr.HoldsUntilRelease(c.code)
+	return c.state == CircuitOpen && (routingerr.HoldsUntilRelease(c.code) || (c.code == routingerr.CodeModelUnavailable && c.until.IsZero()))
 }
 
 // CircuitSnapshot is the durable representation of one resource circuit.
@@ -160,6 +160,38 @@ func (r *CircuitRegistry) Open(key string, until time.Time, code routingerr.Code
 		return
 	}
 	r.circuits[key] = circuit{state: CircuitOpen, until: until, code: code, updatedAt: r.now().UTC()}
+	_ = r.persistSnapshotLocked(key)
+}
+
+// OpenPreservingDeadline opens key without shortening an active timed circuit.
+// A model-change hold and an owner-release hold keep their existing semantics.
+// A live probe lease remains exclusive until it expires, even when a concurrent
+// failure reopens the circuit. The updated snapshot is persisted atomically.
+func (r *CircuitRegistry) OpenPreservingDeadline(key string, until time.Time, code routingerr.Code) {
+	if key == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.flushPendingLocked(key)
+	now := r.now()
+	previous := r.circuits[key]
+	if previous.held() {
+		return
+	}
+	isModelChangeHold := code == routingerr.CodeModelUnavailable && until.IsZero()
+	if !isModelChangeHold &&
+		previous.state != CircuitClosed && previous.until.After(now) && previous.until.After(until) {
+		until = previous.until
+	}
+	probeUntil := time.Time{}
+	if previous.state == CircuitHalfOpen && previous.probeUntil.After(now) {
+		probeUntil = previous.probeUntil
+	}
+	r.circuits[key] = circuit{
+		state: CircuitOpen, until: until, code: code,
+		probeUntil: probeUntil, updatedAt: now.UTC(),
+	}
 	_ = r.persistSnapshotLocked(key)
 }
 
@@ -322,6 +354,8 @@ func (r *CircuitRegistry) AcquireProbe(key string, duration time.Duration) (Prob
 	return lease, true
 }
 
+// ReleaseProbe settles a probe result. Zero backoff on an unsuccessful release
+// cancels an unlaunched reservation without charging a provider failure.
 func (r *CircuitRegistry) ReleaseProbe(lease ProbeLease, success bool, backoff time.Duration) {
 	if lease.Key == "" {
 		return
@@ -341,6 +375,8 @@ func (r *CircuitRegistry) ReleaseProbe(lease ProbeLease, success bool, backoff t
 		entry.state = CircuitClosed
 		entry.until = time.Time{}
 		entry.code = ""
+	} else if backoff == 0 {
+		entry.state = CircuitOpen
 	} else {
 		entry.state = CircuitOpen
 		entry.until = now.Add(backoff)

@@ -15,7 +15,7 @@
           "table": "custom_prompts",
           "key_column": "id",
           "key_value": "fixture-v0930-prompt",
-          "values": {"allow_agent_edits": "0"}
+          "values": {"content": "preserved prompt content"}
         },
         {
           "owner": "agent-settings",
@@ -230,7 +230,7 @@
           "table": "custom_prompts",
           "key_column": "id",
           "key_value": "fixture-v0930-prompt",
-          "values": {"allow_agent_edits": "0"}
+          "values": {"content": "preserved prompt content"}
         },
         {
           "owner": "agent-settings",

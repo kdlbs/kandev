@@ -315,9 +315,11 @@ const (
 
 // Event types for workspace/git status
 const (
-	GitEvent           = "git.event"            // Internal git events (agentctl -> orchestrator)
-	GitWSEvent         = "git.ws"               // WebSocket git events (orchestrator -> frontend)
-	FileChangeNotified = "file.change.notified" // File changed in workspace
+	GitEvent                        = "git.event"                    // Internal git events (agentctl -> orchestrator)
+	WorkspaceWorktreesObserved      = "workspace.worktrees.observed" // Linked-worktree snapshots (agentctl -> task service)
+	WorkspaceWorktreesSubjectPrefix = "workspace.worktrees."
+	GitWSEvent                      = "git.ws"               // WebSocket git events (orchestrator -> frontend)
+	FileChangeNotified              = "file.change.notified" // File changed in workspace
 )
 
 // Event types for shell I/O
@@ -490,6 +492,16 @@ func BuildGitEventSubject(sessionID string) string {
 // BuildGitEventWildcardSubject creates a wildcard subscription for all internal git events
 func BuildGitEventWildcardSubject() string {
 	return GitEvent + ".*"
+}
+
+// BuildWorkspaceWorktreesSubject creates a worktree inventory subject for one session.
+func BuildWorkspaceWorktreesSubject(sessionID string) string {
+	return WorkspaceWorktreesSubjectPrefix + sessionID
+}
+
+// BuildWorkspaceWorktreesWildcardSubject subscribes to every worktree inventory.
+func BuildWorkspaceWorktreesWildcardSubject() string {
+	return WorkspaceWorktreesSubjectPrefix + "*"
 }
 
 // BuildGitWSEventSubject creates a git WebSocket event subject for a specific session

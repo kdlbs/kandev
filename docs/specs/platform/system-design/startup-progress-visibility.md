@@ -370,6 +370,38 @@ Rendering an estimate is the surface's job: 60000 ms or less renders in whole
 seconds rounded up with a floor of one second, anything longer in whole minutes
 rounded up.
 
+### Readable byte units
+
+AC-PLATFORM-STARTUP-PROGRESS-003.14 through 003.16 extend presentation only.
+The snapshot keeps `UnitBytes`, integer byte counts, and rates in bytes per second.
+Bars and estimates use raw values.
+
+Go consumers share byte-size and byte-rate helpers in `internal/startup`.
+The policy matches `apps/web/lib/utils/format-bytes.ts`, including threshold
+selection before rounding, fixed decimal punctuation, and the TB cap.
+The final digit uses the exact-value rounding of JavaScript's `toFixed(1)`,
+never a preliminary `value * 10` multiply, so a count just below a decimal
+midpoint keeps the lower digit on every surface.
+Parity cases include `1280` as `1.3 KB`, `15389753344` as `14.3 GB`, and
+`4504644163416883` as `4096.9 TB`.
+Counts use whole B. Rates use one decimal even for B/s.
+
+`launcher.formatStartupLine` selects these helpers for `UnitBytes` only.
+`countingProgressText` and `applyCountedProgress` format bytes for initial HTML.
+The embedded `progressText` mirrors the policy for poll updates.
+The web application's `formatStepProgress` reuses the existing `formatBytes` helper.
+A counted byte step formats done and total independently.
+
+Localized byte-progress templates accept formatted sizes as display data.
+All prose stays in backend and web catalogs, with complete translations and
+generated Traditional Chinese and pseudo catalogs.
+The current startup page and restart dialog retain their desktop and phone
+composition. Their mobile E2E flow gains byte-unit and containment assertions.
+
+The [readable startup units plan](../../../plans/startup-readable-units/plan.md)
+owns this extension. Earlier startup progress and housekeeping plans retain
+their completed delivery records.
+
 ### Stall detection
 
 The reporter records the time of the last advance that increased `done`. A resume
@@ -452,8 +484,8 @@ identifier enters it. The row counts it does expose describe corpus size only, a
 the default bind is loopback.
 
 The server-rendered startup page contains no operator-supplied or database-derived
-text; every string comes from the backend catalog and every number is an integer
-from the snapshot.
+text. Prose comes from the backend catalog. Displayed measurements derive from
+the snapshot.
 
 ## Observability
 

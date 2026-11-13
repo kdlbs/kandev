@@ -19,6 +19,7 @@ import (
 const (
 	codexNPXExecutable        = "npx"
 	codexAppServerSubcommand  = "app-server"
+	codexPackageName          = "@openai/codex"
 	codexNpxYesFlag           = "--yes"
 	codexNpmPreferOfflineFlag = "--prefer-offline"
 	codexNpmPreferOnlineFlag  = "--prefer-online"
@@ -53,7 +54,13 @@ func (e *CodexAppServerInferenceExecutor) Probe(ctx context.Context, req *ProbeR
 	if strings.TrimSpace(req.InferenceConfig.WorkDir) == "" {
 		return &ProbeResponse{Error: "work_dir is required for Codex app-server probe"}, nil
 	}
-	if !req.InferenceConfig.LaunchWrapper.IsZero() || (req.ProfileContext && (len(req.InferenceConfig.CLIFlags) > 0 || len(req.InferenceConfig.CommandPrefix) > 0)) {
+	if !req.InferenceConfig.LaunchWrapper.IsZero() || len(req.InferenceConfig.CommandPrefix) > 0 {
+		return &ProbeResponse{
+			Error:       "profile launch settings are unsupported by the Codex app-server probe",
+			FailureCode: ProbeFailureUnsupportedContext,
+		}, nil
+	}
+	if len(req.InferenceConfig.CLIFlags) > 0 && !isManagedCodexAppServerCommand(req.InferenceConfig.Command) {
 		return &ProbeResponse{
 			Error:       "profile launch settings are unsupported by the Codex app-server probe",
 			FailureCode: ProbeFailureUnsupportedContext,
@@ -122,6 +129,11 @@ func (e *CodexAppServerInferenceExecutor) Probe(ctx context.Context, req *ProbeR
 			DurationMs:    int(time.Since(start).Milliseconds()),
 		}, nil
 	}
+	if prepared != nil && !prepared.RepairPublished() {
+		if publishErr := e.preparation.publishProbeRepair(ctx, prepared, req, req.InferenceConfig); publishErr != nil {
+			e.logger.Warn("managed runtime Codex probe repair publication failed", zap.Error(publishErr))
+		}
+	}
 	var listed protocol.ModelListResponse
 	if err := client.Call(ctx, protocol.MethodModelList, protocol.ModelListParams{}, &listed); err != nil {
 		cleanup()
@@ -184,6 +196,9 @@ func (e *CodexAppServerInferenceExecutor) Execute(ctx context.Context, req *Prom
 	if strings.TrimSpace(req.InferenceConfig.WorkDir) == "" {
 		return &PromptResponse{Error: "work_dir is required for Codex app-server inference"}, nil
 	}
+	if len(req.InferenceConfig.CLIFlags) > 0 {
+		return &PromptResponse{Error: "codex app-server utility requires the built-in unwrapped command"}, nil
+	}
 	command, args, err := resolveCodexAppServerCommand(req.InferenceConfig)
 	if err != nil {
 		return &PromptResponse{Error: err.Error()}, nil
@@ -241,6 +256,7 @@ func (e *CodexAppServerInferenceExecutor) startForProbe(
 	prepared *managedruntime.PreparedRuntime,
 ) (*protocol.Client, func(), *stderrBuffer, string, []string, []string, error) {
 	args = append([]string(nil), args...)
+	args = append(args, cfg.CLIFlags...)
 	if prepared != nil {
 		var err error
 		var rewritten []string
@@ -289,7 +305,7 @@ func resolveCodexAppServerCommand(cfg *InferenceConfigDTO) (string, []string, er
 	if cfg == nil {
 		return "", nil, errors.New("inference config is required")
 	}
-	if cfg.OperatorDefined || !cfg.LaunchWrapper.IsZero() || len(cfg.CommandPrefix) != 0 || len(cfg.CLIFlags) != 0 {
+	if cfg.OperatorDefined || !cfg.LaunchWrapper.IsZero() || len(cfg.CommandPrefix) != 0 {
 		return "", nil, errors.New("codex app-server utility requires the built-in unwrapped command")
 	}
 	args := cfg.Command
@@ -316,10 +332,8 @@ func isLegacyManagedCodexAppServerCommand(args []string) bool {
 }
 
 func isManagedCodexAppServerCommand(args []string) bool {
-	return len(args) == 7 && args[0] == codexNPXExecutable && args[1] == codexNpxYesFlag &&
-		(args[2] == codexNpmPreferOfflineFlag || args[2] == codexNpmPreferOnlineFlag) &&
-		args[3] == codexNpmPrefixFlag &&
-		args[4] == managedruntime.NPMProjectPrefix && codexPackageSpec.MatchString(args[5]) && args[6] == codexAppServerSubcommand
+	invocation, err := managedruntime.ParseManagedNPMInvocation(args, codexPackageName, []string{codexAppServerSubcommand})
+	return err == nil && len(invocation.AgentArgs()) == 0
 }
 
 func initializeCodexAppServer(ctx context.Context, client *protocol.Client) error {
@@ -470,11 +484,15 @@ func utilityUpstreamError(err error, stderr string) string {
 }
 
 func (e *CodexAppServerInferenceExecutor) prepareManagedProbeRuntime(ctx context.Context, req *ProbeRequest) (*managedruntime.PreparedRuntime, *ProbeResponse) {
+	if req == nil || req.InferenceConfig == nil {
+		return nil, nil
+	}
+	if selected, _ := e.preparation.selectProbeRuntime(ctx, req, req.InferenceConfig); selected != nil {
+		return selected, nil
+	}
 	if req.Preparation == nil {
 		return nil, nil
 	}
-	var prepared *managedruntime.PreparedRuntime
-	var err error
 	packageSpec, ok := managedRuntimeProbePackageForAgent(req.AgentID, req.InferenceConfig.Command)
 	if !ok || !e.preparation.validatesDirective(req.Preparation, req.AgentID, string(req.InferenceConfig.Protocol), req.InferenceConfig) {
 		return nil, &ProbeResponse{Error: "verified managed runtime evidence is stale"}
@@ -482,7 +500,7 @@ func (e *CodexAppServerInferenceExecutor) prepareManagedProbeRuntime(ctx context
 	if packageSpec != req.Preparation.PackageSpec {
 		return nil, &ProbeResponse{Error: "verified managed runtime package changed"}
 	}
-	prepared, err = preparePrivateProbeRuntime(ctx, packageSpec, sanitizeEnvForAgent(req.InferenceConfig), e.logger)
+	prepared, err := e.preparation.prepareProbeRepair(ctx, req, req.InferenceConfig, sanitizeEnvForAgent(req.InferenceConfig), e.logger)
 	if err != nil {
 		if prepared != nil {
 			e.preparation.retainOwner(prepared)

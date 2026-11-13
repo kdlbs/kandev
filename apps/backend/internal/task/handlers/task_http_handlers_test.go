@@ -233,7 +233,24 @@ func (r *quickChatHandlerRepo) ListTaskRepositories(_ context.Context, _ string)
 func newQuickChatHandlerForTest(t *testing.T) (*TaskHandlers, *captureOrchestrator, *quickChatHandlerRepo) {
 	t.Helper()
 	log := newTestLogger(t)
-	repo := &quickChatHandlerRepo{}
+	repo := &quickChatHandlerRepo{mockRepository: mockRepository{
+		executors: map[string]*models.Executor{
+			models.ExecutorIDLocal: {
+				ID:       models.ExecutorIDLocal,
+				Name:     "Local",
+				Type:     models.ExecutorTypeLocal,
+				Status:   models.ExecutorStatusActive,
+				IsSystem: true,
+			},
+			models.ExecutorIDWorktree: {
+				ID:       models.ExecutorIDWorktree,
+				Name:     "Worktree",
+				Type:     models.ExecutorTypeWorktree,
+				Status:   models.ExecutorStatusActive,
+				IsSystem: true,
+			},
+		},
+	}}
 	svc := service.NewService(service.Repos{
 		Workspaces: repo, Tasks: repo, TaskRepos: repo,
 		Workflows: repo, Messages: repo, Turns: repo,

@@ -150,7 +150,20 @@ test("keeps horizontal cues and column geometry stable while the board scrolls",
     await testPage.mouse.down();
     await testPage.mouse.move(finalCardBox!.x + 100, finalCardBox!.y + 30, { steps: 4 });
     await expect(testPage.getByTestId("desktop-kanban-drag-end-reserve")).toHaveCount(1);
-    await expect(rightFade).toHaveAttribute("data-visible", "false");
+    const heldGeometry = await scroll.evaluate((element) => ({
+      left: element.scrollLeft,
+      width: element.clientWidth,
+      physical: element.scrollWidth,
+      grid: element
+        .querySelector<HTMLElement>('[data-testid="desktop-kanban-lane-grid"]')!
+        .getBoundingClientRect()
+        .toJSON(),
+    }));
+    await testInfo.attach("held-final-column", {
+      body: await testPage.screenshot({ path: testInfo.outputPath("held-final-column.png") }),
+      contentType: "image/png",
+    });
+    await expect(rightFade, JSON.stringify(heldGeometry)).toHaveAttribute("data-visible", "false");
     await testPage.mouse.up();
 
     const finalGeometry = await firstColumn.evaluate((element) => {

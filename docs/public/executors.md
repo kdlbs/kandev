@@ -40,6 +40,33 @@ or updater is not available. Containers and npm Nightlies include all remote hel
 
 `mock_remote` also exists in backend models for tests. It is not a product executor.
 
+## Runtime selection is required
+
+A saved executor or executor profile is an execution boundary, not a preference. When a launch
+resolves to a concrete executor, Kandev requires that executor's runtime:
+
+- If the required runtime is disabled or not registered, the launch fails before credential
+  resolution, preparation scripts, workspace mutation, or worker allocation. Kandev does not run
+  the task on Local or Worktree instead. For example, a Local Docker profile fails while the global
+  Docker runtime is disabled.
+- A registered runtime that then fails to start (unreachable daemon, failed image build, or failed
+  container creation) reports the provider error. Kandev never retries the task on a different
+  runtime, and a retry keeps the same selection.
+- An empty selection keeps the existing default. Local, legacy `local_pc`, and Worktree all use the
+  standalone host runtime. An unknown or uninstalled plugin executor is refused.
+- A retained session is reused only when its recorded runtime satisfies the current selection.
+  A worker that actually runs standalone does not satisfy Local Docker, even if Docker later becomes
+  available. Refused reuse preserves the workspace, history, and runtime inventory, and an
+  authorized operator can still stop that exact worker.
+- Session detail and session summary responses include `execution_runtime`, the observed runtime
+  recorded for the same execution as `container_id`. `null` means unknown; the selected executor is
+  never used as a substitute. A successful Local Docker launch reports a separate container and its
+  daemon-verifiable container ID.
+
+Use **Stop** and start a new session on the intended runtime when a retained worker no longer matches
+the selection. Changing the saved selection is a deliberate operator action; Kandev never migrates a
+retained environment automatically.
+
 Only administrators can create, edit, or test a Remote Docker executor, and only administrators can build its image. A saved profile grants effective root on the remote host, and a build runs Dockerfile instructions with that daemon's authority.
 
 Remote Docker reaches its daemon over SSH, not over a daemon URL. The profile stores an SSH target, and Kandev rejects any value carrying a scheme, so `tcp://` is excluded by construction. An unsecured daemon port is remote root; `ssh://` needs no extra setup because Docker's SSH transport runs `docker system dial-stdio` over the connection you already have. The older stored fields `docker_host`, `docker_tls_verify`, and `docker_cert_path` are not used by this runtime.
@@ -161,6 +188,15 @@ starting, resuming, prompting, and shell access check executor eligibility.
 If a selected profile becomes unavailable, choose an accessible replacement
 before starting. Ownership changes apply to subsequent operations and do not
 terminate work already admitted.
+
+A deleted executor or profile can remain in a task's saved selection. These
+unavailable selections do not prevent task or workflow edits. The edit does not
+restore the deleted resource or authorize a launch. A live private selection
+still requires access, and new selections must exist and be accessible. Task
+and workflow edits return 403 (`FORBIDDEN` over WebSocket) when a live private
+selection is not accessible. A workflow edit returns 409 (`CONFLICT` over
+WebSocket) with `workspace_default_executor_unavailable` when the configured
+workspace default no longer resolves.
 
 The HTTP and MCP profile APIs accept `owner_user_id`. Omit it on creation for a
 shared resource. On update, omission preserves ownership; `null` or an empty
@@ -571,6 +607,8 @@ Plain Stop preserves the sandbox and workspace for resume. Archive/delete termin
 
 ## SSH
 
+Guarded workflow changes require a usable selected credential for the destination agent profile. The check uses the current user's Global secret visibility. An agent-profile `ANTHROPIC_API_KEY` binding satisfies the check without a duplicate executor binding. See [Agents and profiles](agents-and-profiles.md#environment-variables-and-secrets) for profile environment guidance.
+
 > **Trust boundary:** Verify the target host fingerprint before saving. Kandev pins the target key, but unknown ProxyJump bastion keys may be accepted on first use; remote credential transfers write sensitive material under the remote user's home.
 
 <details>
@@ -606,7 +644,15 @@ The profile editor exposes remote shell and agent-readiness checks. Backend/API 
 
 The remote-auth card is built from the currently enabled agents. Depending on an agent's declared methods, it can copy selected local credential files, resolve a stored secret into that agent's authentication environment variable, or run an agent-specific setup script on the remote host. GitHub can use an explicitly selected `GITHUB_TOKEN` secret as an unmanaged profile override; Kandev does not copy the host-active `gh` token.
 
+For Claude, the card offers two independent stored-secret choices: `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY`. Select the route that matches the account on the remote host. You can save both choices independently; clearing one does not convert or clear the other. The API-key route sets `ANTHROPIC_API_KEY` for the child process and does not create an OAuth credential file. The OAuth route keeps the existing remote credentials-file setup.
+
+Kandev checks the selected binding when it previews or applies a guarded workflow change, using the current user's Global secret visibility. A missing, deleted, workspace-scoped, unreadable, or empty binding blocks the change before the task moves. An agent-profile `ANTHROPIC_API_KEY` binding satisfies this check without a duplicate executor binding. This check validates configuration only. It does not contact Anthropic and does not prove that the provider accepts the credential.
+
 OpenCode credential copies merge top-level provider entries with the existing remote `auth.json`. Remote-only providers remain, and the selected host entry replaces the same provider on the remote. If either file is unreadable or is not a JSON object, Kandev leaves the remote file unchanged and reports the credential-copy error.
+
+Pi credential copies merge `~/.pi/agent/auth.json` the same way, by provider. Pi can also take an API key for Anthropic, OpenAI, Gemini or OpenRouter from a stored secret; a credential in the remote `auth.json` takes precedence over it. The **Copy Pi settings and models** bundle copies `settings.json` and `models.json` from `~/.pi/agent`; `models.json` can hold inline API keys, which the copy carries. Kandev reads the default agent directory and ignores `PI_CODING_AGENT_DIR`.
+
+Kandev copies selected bundle files during fresh provisioning or environment reset. A warm resume keeps remote edits to these files.
 
 These transfers write sensitive material under the remote user's home and are best-effort. Verify authentication on the remote after saving. Although the profile editor also stores Git name/email controls for SSH, the current SSH runtime does not apply them; configure Git identity on the remote host yourself.
 
@@ -652,7 +698,7 @@ support, update Kandev and start a fresh session.
 
 SSH materializes the primary attached repository at the remote task-workspace root and additional repository sources in direct child directories. The default prepare script initializes or reuses the root checkout, verifies the configured origin, fetches the base branch, runs repository setup, and lets Kandev's managed postlude select the task branch. A stored profile script replaces that default and must leave the same verified primary checkout before `agentctl` starts. Existing matching checkouts retain local commits and untracked files; a different origin, missing checkout, failed script, timeout, or cancellation fails the launch before a controller is started. Ensure the remote host has the required Git credentials and can reach every selected remote; folders cannot be attached to SSH tasks.
 
-The runtime preflights the selected agent command and reports an installation hint when missing; it does not install the agent or its toolchain. Only these resolved credential environment names are forwarded to the remote agent: `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GITHUB_TOKEN`, and `GH_TOKEN`. Arbitrary profile variables and control-plane process variables are not forwarded to that agent process. Agent-specific auth setup scripts can still consume a selected stored secret and materialize their own remote login state.
+The runtime preflights the selected agent command and reports an installation hint when missing; it does not install the agent or its toolchain. Only these resolved credential environment names are forwarded to the remote agent: `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `OPENROUTER_API_KEY`, `CURSOR_API_KEY`, `AUGMENT_SESSION_AUTH`, `META_API_KEY`, `WINDSURF_API_KEY`, `XAI_API_KEY`, `GITHUB_TOKEN`, and `GH_TOKEN`. Arbitrary profile variables and control-plane process variables are not forwarded to that agent process. Agent-specific auth setup scripts can still consume a selected stored secret and materialize their own remote login state.
 
 Stop attempts to kill the session's remote `agentctl` and remove only the remote session-runtime directory, then closes forwarding and SSH. Terminal archive/delete stops run the profile cleanup script first; cleanup is best-effort, so a failure does not block controller teardown. Plain Stop skips cleanup and preserves the task workspace for resume. The task directory always remains and no background sweeper currently removes it. The cached helper and checksum at `~/.kandev/bin/agentctl` and `agentctl.sha256` also remain for later sessions. Periodically audit the remote process list, session directories, and `<workdir-root>/tasks/` after confirming no session needs the data. An explicit resume re-dials SSH and reuses a live recorded PID when possible; otherwise Kandev starts a fresh remote controller and re-runs preparation.
 

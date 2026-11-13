@@ -55,9 +55,13 @@ export function IntegratedControlPage() {
           <h1 className="truncate text-sm font-semibold">
             {t("sidebar:integratedControl.title")} / {t(CONTROL_VIEW_LABEL_KEYS[view])}
           </h1>
-          {workspace && coordinator && (
-            <p className="truncate text-xs text-muted-foreground">
-              {workspace.name} / {coordinator.name}
+          {workspace && (
+            <p
+              className="truncate text-xs text-muted-foreground"
+              data-testid="control-selected-workspace"
+            >
+              {workspace.name}
+              {coordinator ? ` / ${coordinator.name}` : null}
             </p>
           )}
         </div>
@@ -146,5 +150,9 @@ function workspaceDashboard(
   coordinatorRequested: boolean,
   taskId: string | null,
 ) {
-  return !coordinatorRequested && !taskId && ["workspaces", "history", "providers"].includes(view);
+  return (
+    !coordinatorRequested &&
+    !taskId &&
+    ["overview", "workspaces", "history", "providers"].includes(view)
+  );
 }

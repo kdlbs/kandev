@@ -55,6 +55,12 @@ type workspaceAgentCounts struct {
 	running int
 }
 
+type workspaceAgentCountReader interface {
+	CountAgentInstancesByWorkspaceIDs(
+		ctx context.Context, workspaceIDs []string,
+	) (map[string]models.AgentWorkspaceCounts, error)
+}
+
 // GetWorkspacesAggregate builds the read-only Office overview from the
 // identity-scoped workspace list, using batched repository reads per dimension.
 // Counts default to zero for a workspace with no matching rows; the activity
@@ -91,7 +97,7 @@ func (s *DashboardService) GetWorkspacesAggregate(ctx context.Context) (*Workspa
 	for workspaceID, entries := range activityByWorkspace {
 		s.enrichActivityLabels(ctx, workspaceID, entries, nil)
 	}
-	agentCounts, err := s.aggregateAgentCounts(ctx)
+	agentCounts, err := s.aggregateAgentCounts(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -135,29 +141,41 @@ func officeAggregateWorkspaces(workspaces []*taskmodels.Workspace) ([]*taskmodel
 	return ordered, ids
 }
 
-// aggregateAgentCounts totals and running-agents per workspace from the shared
-// agent reader (empty workspace id = across all workspaces). A nil agent
-// reader yields an empty map, so every count stays zero; a read failure is
-// returned so the aggregate never reports a partial agent count.
-func (s *DashboardService) aggregateAgentCounts(ctx context.Context) (map[string]workspaceAgentCounts, error) {
+// aggregateAgentCounts reads counts only for the identity-scoped workspace set.
+// A nil agent reader yields zeros; a read failure prevents a partial response.
+func (s *DashboardService) aggregateAgentCounts(
+	ctx context.Context, workspaceIDs []string,
+) (map[string]workspaceAgentCounts, error) {
 	out := map[string]workspaceAgentCounts{}
 	if s.agents == nil {
 		return out, nil
 	}
-	agents, err := s.agents.ListAgentInstances(ctx, "")
-	if err != nil {
-		return nil, err
+	if reader, ok := s.agents.(workspaceAgentCountReader); ok {
+		counts, err := reader.CountAgentInstancesByWorkspaceIDs(ctx, workspaceIDs)
+		if err != nil {
+			return nil, err
+		}
+		for workspaceID, count := range counts {
+			out[workspaceID] = workspaceAgentCounts{total: count.Total, running: count.Running}
+		}
+		return out, nil
 	}
-	for _, a := range agents {
-		if a == nil || a.WorkspaceID == "" {
-			continue
+	for _, workspaceID := range workspaceIDs {
+		agents, err := s.agents.ListAgentInstances(ctx, workspaceID)
+		if err != nil {
+			return nil, err
 		}
-		c := out[a.WorkspaceID]
-		c.total++
-		if a.Status == models.AgentStatusWorking {
-			c.running++
+		for _, agent := range agents {
+			if agent == nil {
+				continue
+			}
+			count := out[workspaceID]
+			count.total++
+			if agent.Status == models.AgentStatusWorking {
+				count.running++
+			}
+			out[workspaceID] = count
 		}
-		out[a.WorkspaceID] = c
 	}
 	return out, nil
 }

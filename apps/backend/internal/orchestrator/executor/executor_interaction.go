@@ -1523,6 +1523,7 @@ func (e *Executor) registerInitialPromptCallbacks(
 func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Task, session *models.TaskSession, sessionID, newModel, prompt, acpSessionID string, execConfig executorConfig, running *models.ExecutorRunning) (*LaunchAgentRequest, error) {
 	req := &LaunchAgentRequest{
 		TaskID:            task.ID,
+		OwnerUserID:       e.managedRuntimeOwnerUserID(ctx, task.WorkspaceID),
 		WorkspaceID:       task.WorkspaceID,
 		SessionID:         sessionID,
 		TaskTitle:         task.Title,

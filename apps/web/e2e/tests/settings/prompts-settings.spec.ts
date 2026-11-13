@@ -10,7 +10,7 @@ import {
 // 409-mapping fix, posting a duplicate name returned 500 and the frontend
 // silently swallowed the error. These tests guard the toast contract so a
 // regression cannot ship unnoticed.
-test.describe("Prompts settings — duplicate name handling", () => {
+test.describe("Prompts settings", () => {
   test.afterEach(async ({ apiClient }) => {
     const { prompts } = await apiClient.listPrompts();
     for (const p of prompts) {
@@ -154,6 +154,52 @@ test.describe("Prompts settings — duplicate name handling", () => {
     ).toBeVisible({ timeout: 10_000 });
     // Form should be reset / closed on success.
     await expect(testPage.getByTestId("prompt-create-form")).toHaveCount(0);
+  });
+
+  test("saves prompt name and content, then discards a later draft", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const prompt = await apiClient.createPrompt("e2e-edit-prompt", "Original instructions.");
+    await testPage.goto("/settings/prompts");
+    const originalRow = testPage.locator(
+      '[data-testid="prompt-list-item"][data-prompt-name="e2e-edit-prompt"]',
+    );
+    await originalRow.getByTestId("prompt-edit-button").click();
+    await originalRow.getByTestId("prompt-name-input").fill("e2e-edited-prompt");
+    await replacePromptEditor(
+      testPage,
+      originalRow.getByTestId("prompt-content-input"),
+      "Updated instructions.",
+    );
+    await testPage
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: "Save changes" })
+      .click();
+
+    let editedRow = testPage.locator(
+      '[data-testid="prompt-list-item"][data-prompt-name="e2e-edited-prompt"]',
+    );
+    await expect(editedRow).toContainText("Updated instructions.");
+    await testPage.reload();
+    editedRow = testPage.locator(
+      '[data-testid="prompt-list-item"][data-prompt-name="e2e-edited-prompt"]',
+    );
+    await expect(editedRow).toContainText("Updated instructions.");
+
+    await editedRow.getByTestId("prompt-edit-button").click();
+    await editedRow.getByTestId("prompt-name-input").fill("discarded-prompt-name");
+    await replacePromptEditor(
+      testPage,
+      editedRow.getByTestId("prompt-content-input"),
+      "Discarded draft.",
+    );
+    await editedRow.getByRole("button", { name: "Cancel" }).click();
+    await expect(editedRow).toContainText("Updated instructions.");
+    await expect(testPage.locator('[data-prompt-name="discarded-prompt-name"]')).toHaveCount(0);
+    const saved = (await apiClient.listPrompts()).prompts.find((item) => item.id === prompt.id);
+    expect(saved?.name).toBe("e2e-edited-prompt");
+    expect(saved?.content).toBe("Updated instructions.");
   });
 
   test("does not suggest the prompt currently being edited", async ({ testPage, apiClient }) => {

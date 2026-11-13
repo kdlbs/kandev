@@ -190,7 +190,7 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	gatewayAuth *acpprovider.GatewayAuth,
 	authArgs ...authSessionArgs,
 ) (string, error) {
-	authPolicy, consent := authSessionOptions(authArgs)
+	authPolicy, consent, _ := authSessionOptions(authArgs)
 	// Collect response text from updates
 	var responseText strings.Builder
 	var mu sync.Mutex
@@ -509,6 +509,19 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	// default model and the complete availableModels list.
 	args := buildACPCommand(cfg, "")
 	var prepared *managedruntime.PreparedRuntime
+	// A remembered failure owns the replacement decision. Selecting a repair
+	// before prepareProbeRepair would rewrite the prefix/cache and then force a
+	// second rewrite when another caller publishes in between.
+	if req.Preparation == nil {
+		if selected, _ := e.preparation.selectProbeRuntime(ctx, req, cfg); selected != nil {
+			rewritten, rewriteErr := selected.RewriteNpxCommand(args)
+			if rewriteErr != nil {
+				_ = selected.Close()
+				return &ProbeResponse{Success: false, Error: "selected managed runtime repair is unusable"}, nil
+			}
+			prepared, args = selected, rewritten
+		}
+	}
 	var cleanup func()
 	defer func() {
 		if cleanup != nil {
@@ -533,9 +546,16 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		if packageSpec != req.Preparation.PackageSpec {
 			return &ProbeResponse{Success: false, Error: "verified managed runtime package changed"}, nil
 		}
+		if prepared != nil {
+			_ = prepared.Close()
+			prepared = nil
+		}
 		var prepareErr error
-		prepared, prepareErr = preparePrivateProbeRuntime(ctx, packageSpec, env, e.logger)
+		prepared, prepareErr = e.preparation.prepareProbeRepair(ctx, req, cfg, env, e.logger)
 		if prepareErr != nil {
+			if prepared != nil {
+				e.preparation.retainOwner(prepared)
+			}
 			return &ProbeResponse{Success: false, Error: "private managed runtime preparation failed"}, nil
 		}
 		args, prepareErr = prepared.RewriteNpxCommand(args)
@@ -591,8 +611,17 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		cleanupOnce.Do(func() { cleanupACPCommand(ctx, cmd, lifecycle, e.logger) })
 	}
 
+	publishInitialized := func() {
+		if prepared == nil || prepared.RepairPublished() {
+			return
+		}
+		if publishErr := e.preparation.publishProbeRepair(ctx, prepared, req, cfg); publishErr != nil {
+			e.logger.Warn("managed runtime ACP probe repair publication failed", zap.Error(publishErr))
+		}
+	}
 	resp, err := e.probeACPSessionWithContext(
-		ctx, stdin, stdout, workDir, req.AgentID, req.Model, req.Mode, req.ConfigOptions, cfg.ProviderGatewayAuth, authSessionArgs{policy: cfg.AuthPolicy, consent: stderr.consent()},
+		ctx, stdin, stdout, workDir, req.AgentID, req.Model, req.Mode, req.ConfigOptions, cfg.ProviderGatewayAuth,
+		authSessionArgs{policy: cfg.AuthPolicy, consent: stderr.consent(), onInitialized: publishInitialized},
 	)
 	if err != nil {
 		var authErr *probeAuthRequiredError
@@ -672,16 +701,18 @@ func managedRuntimeProbeFailureCode(command []string, stderr string) ProbeFailur
 }
 
 func managedRuntimeProbePackageSpec(command []string) (string, bool) {
-	// Accept only npx --yes --prefer-offline --prefix <fixed-prefix> <exact-spec>.
-	if len(command) < 6 || command[0] != "npx" || command[1] != "--yes" || command[2] != "--prefer-offline" ||
-		command[3] != "--prefix" || command[4] != managedruntime.NPMProjectPrefix {
+	if len(command) < 6 || command[2] != codexNpmPreferOfflineFlag {
 		return "", false
 	}
-	packageSpec := command[5]
-	if err := managedruntime.ValidateExactPackageSpec(packageSpec); err != nil {
+	packageName, ok := managedruntime.PackageNameFromExactSpec(command[5])
+	if !ok {
 		return "", false
 	}
-	return packageSpec, true
+	invocation, err := managedruntime.ParseManagedNPMInvocation(command, packageName, nil)
+	if err != nil {
+		return "", false
+	}
+	return invocation.PackageSpec, true
 }
 
 // isOpenCodeACPCommand reports whether the configured ACP probe command is
@@ -1014,7 +1045,7 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 	gatewayAuth *acpprovider.GatewayAuth,
 	authArgs ...authSessionArgs,
 ) (*ProbeResponse, error) {
-	authPolicy, consent := authSessionOptions(authArgs)
+	authPolicy, consent, onInitialized := authSessionOptions(authArgs)
 	updates := newACPProbeNotificationState(agentID)
 
 	client := acpclient.NewClient(
@@ -1043,6 +1074,9 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 	})
 	if err != nil {
 		return nil, describeACPFailure(ctx, "initialize", err)
+	}
+	if onInitialized != nil {
+		onInitialized()
 	}
 	if err := applyInferenceGatewayAuth(ctx, conn, gatewayAuth); err != nil {
 		return nil, err

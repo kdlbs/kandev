@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
 	"github.com/kandev/kandev/internal/agent/runtime/envmetrics"
 	"github.com/kandev/kandev/internal/secrets"
@@ -65,7 +66,37 @@ func (m *Manager) resolveStrictEnvironmentSnapshot(ctx context.Context, executio
 		}
 		return nil, nil, fmt.Errorf("resolve task environment: %w", err)
 	}
+	req.ManagedRuntimeInstallerEnvDigest = managedRuntimeInstallerEnvironmentDigest(definitions, resolved, req.Env)
 	return resolved, records, nil
+}
+
+// managedRuntimeInstallerEnvironmentDigest fingerprints only the authorized
+// installer environment. Generated Kandev runtime values (task, session,
+// instance, transport) never enter the identity, so compatible launches share
+// an installation without merging different profile or credential inputs.
+func managedRuntimeInstallerEnvironmentDigest(
+	definitions []runtimeenv.Definition,
+	resolved map[string]string,
+	requestEnv map[string]string,
+) string {
+	values := make(map[string]string)
+	for _, definition := range definitions {
+		if definition.Origin == runtimeenv.OriginManagedRuntime {
+			continue
+		}
+		if value, ok := resolved[definition.Key]; ok {
+			values[definition.Key] = value
+		}
+	}
+	for key, value := range requestEnv {
+		if managedruntime.InstallerEnvironmentKeyIsGenerated(key) {
+			continue
+		}
+		if _, exists := values[key]; !exists {
+			values[key] = value
+		}
+	}
+	return managedruntime.InstallerEnvironmentDigest(values)
 }
 
 // logEnvironmentOverrides emits the AC-23 structured log and the AC-24
