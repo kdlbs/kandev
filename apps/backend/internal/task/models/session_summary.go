@@ -12,6 +12,7 @@ type TaskSessionSummaryObservation struct {
 	Name                        string
 	AgentExecutionID            string
 	ContainerID                 string
+	ExecutionRuntime            string
 	AgentProfileID              string
 	AgentProfileName            string
 	AgentProfileAgentID         string
@@ -57,7 +58,8 @@ func (o *TaskSessionSummaryObservation) ToTaskSession() *TaskSession {
 		AdmittedExecutionGradeKnown: o.AdmittedExecutionGradeKnown,
 		ID:                          o.ID, TaskID: o.TaskID, QueueIncarnationID: o.QueueIncarnationID,
 		Name: o.Name, AgentExecutionID: o.AgentExecutionID, ContainerID: o.ContainerID,
-		AgentProfileID: o.AgentProfileID, ExecutionProfileID: o.ExecutionProfileID,
+		ExecutionRuntime: o.ExecutionRuntime,
+		AgentProfileID:   o.AgentProfileID, ExecutionProfileID: o.ExecutionProfileID,
 		RouteGeneration: o.RouteGeneration, RouteState: o.RouteState, RouteReason: o.RouteReason,
 		ExecutorID: o.ExecutorID, ExecutorProfileID: o.ExecutorProfileID,
 		EnvironmentID: o.EnvironmentID, RepositoryID: o.RepositoryID,

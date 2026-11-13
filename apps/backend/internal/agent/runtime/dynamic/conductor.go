@@ -115,7 +115,7 @@ func (c *Conductor) Launch(ctx context.Context, request ConductorLaunch) (Conduc
 	if c.engine == nil || c.profiles == nil || c.downstream == nil {
 		return ConductorResult{}, errors.New("dynamic conductor is not configured")
 	}
-	profile, err := c.loadProfile(ctx, request.LogicalProfileID, request.SessionID)
+	profile, err := c.loadProfile(ctx, request.SessionID, request.LogicalProfileID)
 	if err != nil {
 		return ConductorResult{}, err
 	}
@@ -148,7 +148,7 @@ func (c *Conductor) LaunchSelected(ctx context.Context, request ConductorSelecte
 	if c.engine == nil || c.profiles == nil || c.downstream == nil {
 		return ConductorResult{}, errors.New("dynamic conductor is not configured")
 	}
-	profile, err := c.loadProfile(ctx, request.LogicalProfileID, request.SessionID)
+	profile, err := c.loadProfile(ctx, request.SessionID, request.LogicalProfileID)
 	if err != nil {
 		return ConductorResult{}, err
 	}
@@ -205,7 +205,7 @@ func (c *Conductor) RouteAfterFailure(
 	if c.engine == nil || c.profiles == nil {
 		return RouteDecision{}, errors.New("dynamic conductor is not configured")
 	}
-	profile, err := c.loadProfile(ctx, logicalProfileID, sessionID)
+	profile, err := c.loadProfile(ctx, sessionID, logicalProfileID)
 	if err != nil {
 		return RouteDecision{}, err
 	}
@@ -233,7 +233,7 @@ func (c *Conductor) RouteAfterUnclassifiedFailure(
 			ctx, sessionID, logicalProfileID, currentExecutionProfileID, expectedGeneration, failure, evidence,
 		)
 	}
-	profile, err := c.loadProfile(ctx, logicalProfileID, sessionID)
+	profile, err := c.loadProfile(ctx, sessionID, logicalProfileID)
 	if err != nil {
 		return RouteDecision{}, err
 	}
@@ -348,7 +348,7 @@ func (c *Conductor) nextAfterLaunchFailure(
 	if !classified.FallbackAllowed {
 		return RouteDecision{}, false, nil
 	}
-	if c.engine.ActionFor(profile, decision.ExecutionProfileID, classified.Code) != ActionTryNext {
+	if c.engine.ActionForFailure(profile, decision.ExecutionProfileID, classified) != ActionTryNext {
 		return RouteDecision{}, false, nil
 	}
 	next, err := c.engine.ApplyFailureContext(
@@ -813,11 +813,11 @@ func boundedTailN(value string, limit int) string {
 
 // Optional scoped loader preserves older embeddings and supplies original
 // identity only at real conductor selection/recovery boundaries.
-func (c *Conductor) loadProfile(ctx context.Context, profileID, sessionID string) (Profile, error) {
+func (c *Conductor) loadProfile(ctx context.Context, sessionID, profileID string) (Profile, error) {
 	if scoped, ok := c.profiles.(interface {
 		LoadDynamicProfileForSession(context.Context, string, string) (Profile, error)
 	}); ok {
-		return scoped.LoadDynamicProfileForSession(ctx, profileID, sessionID)
+		return scoped.LoadDynamicProfileForSession(ctx, sessionID, profileID)
 	}
 	return c.profiles.LoadDynamicProfile(ctx, profileID)
 }

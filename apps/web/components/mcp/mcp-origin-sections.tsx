@@ -21,6 +21,10 @@ const SECTION_KEYS: Record<MCPOriginGroupScope, { title: string; description: st
     title: "settings:mcpFromAgentProfile",
     description: "settings:mcpFromAgentProfileDescription",
   },
+  automation: {
+    title: "settings:mcpFromAutomation",
+    description: "settings:mcpFromAutomationDescription",
+  },
   unknown: { title: "settings:mcpFromTaskSetup", description: "settings:mcpOriginUnavailable" },
 };
 
@@ -51,6 +55,10 @@ export function McpSectionHeading({
   );
 }
 
+/**
+ * Group inherited servers by origin while retaining complete provenance and attachment
+ * annotations.
+ */
 export function McpOriginSections({
   inherited,
   context,
@@ -62,6 +70,7 @@ export function McpOriginSections({
 }) {
   const { t } = useTranslation();
   const labels: Record<MCPSelectionOrigin["scope"], string> = {
+    automation: t("automations:automation"),
     profile: t("settings:mcpOriginProfile"),
     repository: t("settings:mcpOriginRepository"),
     task: t("settings:mcpOriginTask"),

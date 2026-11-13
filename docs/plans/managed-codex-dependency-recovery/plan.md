@@ -15,6 +15,10 @@ legacy_specs: []
 
 ## Overview
 
+The [reuse package](../managed-npm-repair-reuse/plan.md) extends the common
+owner for requirement-006 repairs. If it lands first, preserve its ownership
+boundary when this package extends preparation. Requirement 005 remains pending.
+
 Automatically prepare a private copy of the exact selected managed Codex ACP
 runtime after independently confirming a missing bundled platform dependency,
 then retry once. Agents owns this correction because it owns managed runtime

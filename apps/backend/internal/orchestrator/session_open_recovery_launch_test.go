@@ -50,7 +50,7 @@ func TestSessionOpenRecoveryStatusAndLaunch(t *testing.T) {
 		onStartCalled: &started,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.sessionCeiling = newSessionCeilingController(unlimitedSessionCeiling, nil, nil)
 
 	status, err := svc.GetTaskSessionStatus(ctx, "task-reused", "session-reused")
@@ -185,7 +185,7 @@ func TestSessionOpenRecoveryCapacityDisposition(t *testing.T) {
 				onStartCalled: &started,
 			}
 			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-			svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+			svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 			svc.sessionCeiling = newSessionCeilingController(test.ceiling, nil, nil)
 			if test.occupySlot {
 				decision := svc.sessionCeiling.admit(ctx, admissionRequest{
@@ -277,7 +277,7 @@ func TestSessionOpenRecoveryRechecksOwnership(t *testing.T) {
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.sessionCeiling = newSessionCeilingController(unlimitedSessionCeiling, nil, nil)
 
 	status, err := svc.GetTaskSessionStatus(ctx, "task-reused", "session-reused")
@@ -437,7 +437,7 @@ func TestSessionOpenRecoveryDelayedCallbacks(t *testing.T) {
 		onStartCalled: &started,
 	}
 	service := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	service.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	service.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	service.sessionCeiling = newSessionCeilingController(unlimitedSessionCeiling, nil, nil)
 	service.turnService = &repoTurnService{repo: repo}
 
@@ -482,7 +482,7 @@ func TestSessionOpenRecoveryDelayedCallbacks(t *testing.T) {
 
 	restartedAgentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	restarted := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), restartedAgentMgr)
-	restarted.executor = executor.NewExecutor(restartedAgentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	restarted.executor = withTestCapabilities(executor.NewExecutor(restartedAgentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	restarted.turnService = &repoTurnService{repo: repo}
 	restarted.handleAgentStopped(ctx, event)
 	restarted.handleAgentCompleted(ctx, event)

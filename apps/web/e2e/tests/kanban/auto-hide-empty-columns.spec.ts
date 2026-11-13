@@ -1,6 +1,7 @@
 import { type Locator, type Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { dwell } from "../../helpers/causal-waits";
 import { KanbanPage } from "../../pages/kanban-page";
 
 const TASK_TITLE = "Auto-hide drag source";
@@ -233,4 +234,276 @@ test("keeps the drag reserve after overflowing minimum-width tracks", async ({
     clientWidth - 280 - 1,
   );
   await cancelPointerDrag(testPage, apiClient, task.id, steps[0].id);
+});
+
+for (const width of [1440, 1920]) {
+  test(`keeps Done under a held drag at the final column (${width}px)`, async ({
+    testPage,
+    apiClient,
+    seedData,
+  }, testInfo) => {
+    // @covers AC-UI-ADAPTIVE-KANBAN-001.4, AC-UI-ADAPTIVE-KANBAN-003.9
+    await testPage.setViewportSize({ width, height: 900 });
+    const baseline = (await apiClient.getUserSettings()).settings;
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Held Done drag");
+    try {
+      const steps = [];
+      for (const [index, name] of ["Backlog", "In Progress", "Review", "Done"].entries()) {
+        steps.push(
+          await apiClient.createWorkflowStep(workflow.id, name, index, {
+            is_start_step: index === 0,
+          }),
+        );
+      }
+      const task = await apiClient.createTask(seedData.workspaceId, "Held drag source", {
+        workflow_id: workflow.id,
+        workflow_step_id: steps[0].id,
+      });
+      await apiClient.saveUserSettings({
+        workflow_filter_id: workflow.id,
+        kanban_hidden_step_ids: {},
+        workflow_ids_with_auto_hide_empty_steps: [],
+      });
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+      const beforeWidths = await renderedColumnWidths(testPage);
+      const target = kanban.columnByStepId(steps[3].id);
+      const box = await target.boundingBox();
+      if (!box) throw new Error("Done has no layout box");
+      const x = Math.min(box.x + box.width / 2, width - 70);
+      const y = box.y + 140;
+      await beginPointerDrag(testPage, kanban.taskCard(task.id));
+      const probe = await testPage.evaluateHandle(
+        ({ x, y, stepId }) => {
+          const state = { lostTarget: false, exceededContent: false, frame: 0 };
+          const sample = () => {
+            const scroll = document.querySelector<HTMLElement>(
+              '[data-testid="desktop-kanban-scroll-window"]',
+            )!;
+            const grid = scroll.querySelector<HTMLElement>(
+              '[data-testid="desktop-kanban-lane-grid"]',
+            )!;
+            state.lostTarget ||=
+              document
+                .elementsFromPoint(x, y)
+                .find((element) => element.closest("[data-kanban-step-id]"))
+                ?.closest("[data-kanban-step-id]")
+                ?.getAttribute("data-kanban-step-id") !== stepId;
+            state.exceededContent ||=
+              scroll.scrollLeft > Math.max(0, grid.scrollWidth - scroll.clientWidth) + 1;
+            state.frame = requestAnimationFrame(sample);
+          };
+          sample();
+          return state;
+        },
+        { x, y, stepId: steps[3].id },
+      );
+      try {
+        await testPage.mouse.move(x, y, { steps: 20 });
+        await dwell(
+          testPage,
+          1200,
+          "negative-assertion",
+          "A held drag must not scroll Done away from the stationary pointer.",
+        );
+        await testInfo.attach("held-done", {
+          body: await testPage.screenshot({ path: testInfo.outputPath("held-done.png") }),
+          contentType: "image/png",
+        });
+        const observations = await probe.evaluate((state) => ({
+          lostTarget: state.lostTarget,
+          exceededContent: state.exceededContent,
+        }));
+        expect(observations).toEqual({ lostTarget: false, exceededContent: false });
+        const duringWidths = await renderedColumnWidths(testPage);
+        duringWidths.forEach((value, index) =>
+          expect(Math.abs(value - beforeWidths[index])).toBeLessThanOrEqual(1),
+        );
+        await testPage.mouse.up();
+      } finally {
+        await probe.evaluate((state) => cancelAnimationFrame(state.frame));
+        await probe.dispose();
+        await testPage.mouse.up();
+      }
+      await expect
+        .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id)
+        .toBe(steps[3].id);
+      await expect(target.getByTestId(`task-card-${task.id}`)).toBeVisible();
+      await testPage.reload();
+      await expect(
+        kanban.columnByStepId(steps[3].id).getByTestId(`task-card-${task.id}`),
+      ).toBeVisible();
+      expect(
+        await testPage.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        ),
+      ).toBeLessThanOrEqual(1);
+    } finally {
+      await testPage.keyboard.press("Escape");
+      await testPage.mouse.up();
+      await apiClient.saveUserSettings(baseline);
+      await apiClient.deleteWorkflow(workflow.id);
+    }
+  });
+}
+
+async function createOverflowDragBoard(apiClient: ApiClient, workspaceId: string) {
+  const baseline = (await apiClient.getUserSettings()).settings;
+  const workflow = await apiClient.createWorkflow(workspaceId, "Drag scrolling boundaries");
+  const steps = [];
+  for (let index = 0; index < 6; index++) {
+    steps.push(
+      await apiClient.createWorkflowStep(workflow.id, `Step ${index + 1}`, index, {
+        is_start_step: index === 0,
+      }),
+    );
+  }
+  await apiClient.saveUserSettings({
+    workflow_filter_id: workflow.id,
+    kanban_hidden_step_ids: {},
+    workflow_ids_with_auto_hide_empty_steps: [],
+  });
+  return {
+    workflow,
+    steps,
+    dispose: async () => {
+      await apiClient.saveUserSettings(baseline);
+      await apiClient.deleteWorkflow(workflow.id);
+    },
+  };
+}
+
+test("reaches real columns in both directions within one drag", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  // @covers AC-UI-ADAPTIVE-KANBAN-001.3, AC-UI-ADAPTIVE-KANBAN-003.9
+  await testPage.setViewportSize({ width: 1440, height: 900 });
+  const board = await createOverflowDragBoard(apiClient, seedData.workspaceId);
+  try {
+    const task = await apiClient.createTask(seedData.workspaceId, "Bidirectional drag", {
+      workflow_id: board.workflow.id,
+      workflow_step_id: board.steps[0].id,
+    });
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    const scroll = testPage.getByTestId("desktop-kanban-scroll-window");
+    const box = await scroll.boundingBox();
+    if (!box) throw new Error("scroll window has no layout box");
+    const sourceBox = await kanban.taskCard(task.id).boundingBox();
+    if (!sourceBox) throw new Error("source card has no layout box");
+    await testPage.mouse.move(
+      sourceBox.x + sourceBox.width / 2,
+      sourceBox.y + sourceBox.height / 2,
+    );
+    await testPage.mouse.down();
+    const realMaximum = await scroll.evaluate(
+      (element) =>
+        element.querySelector<HTMLElement>('[data-testid="desktop-kanban-lane-grid"]')!
+          .scrollWidth - element.clientWidth,
+    );
+    expect(realMaximum).toBeGreaterThan(0);
+    await testPage.mouse.move(box.x + box.width - 4, box.y + 140, { steps: 1 });
+    await expect
+      .poll(() => scroll.evaluate((element) => element.scrollLeft))
+      .toBeCloseTo(realMaximum, 0);
+    await testPage.mouse.move(box.x + 4, box.y + 140, { steps: 20 });
+    await expect.poll(() => scroll.evaluate((element) => element.scrollLeft)).toBe(0);
+    await testPage.mouse.move(box.x + box.width - 4, box.y + 140, { steps: 20 });
+    await expect
+      .poll(() => scroll.evaluate((element) => element.scrollLeft))
+      .toBeCloseTo(realMaximum, 0);
+    await testPage.mouse.up();
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id)
+      .toBe(board.steps[5].id);
+    await expect(
+      kanban.columnByStepId(board.steps[5].id).getByTestId(`task-card-${task.id}`),
+    ).toBeVisible();
+  } finally {
+    await testPage.keyboard.press("Escape");
+    await testPage.mouse.up();
+    await board.dispose();
+  }
+});
+
+test("preserves source anchoring when earlier temporary columns appear", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  // @covers AC-UI-ADAPTIVE-KANBAN-003.9
+  await testPage.setViewportSize({ width: 1440, height: 900 });
+  const board = await createOverflowDragBoard(apiClient, seedData.workspaceId);
+  try {
+    const task = await apiClient.createTask(seedData.workspaceId, "Anchored source", {
+      workflow_id: board.workflow.id,
+      workflow_step_id: board.steps[4].id,
+    });
+    await apiClient.saveUserSettings({
+      workflow_ids_with_auto_hide_empty_steps: [board.workflow.id],
+    });
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    const source = kanban.columnByStepId(board.steps[4].id);
+    const before = await source.boundingBox();
+    if (!before) throw new Error("source has no layout box");
+    await beginPointerDrag(testPage, kanban.taskCard(task.id));
+    await expect(testPage.locator("[data-kanban-step-id]")).toHaveCount(6);
+    await expect.poll(async () => (await source.boundingBox())?.x).toBeCloseTo(before.x, 0);
+    const scroll = testPage.getByTestId("desktop-kanban-scroll-window");
+    const position = await scroll.evaluate((element) => element.scrollLeft);
+    const realMaximum = await scroll.evaluate(
+      (element) =>
+        element.querySelector<HTMLElement>('[data-testid="desktop-kanban-lane-grid"]')!
+          .scrollWidth - element.clientWidth,
+    );
+    expect(position).toBeGreaterThan(realMaximum);
+    await cancelPointerDrag(testPage, apiClient, task.id, board.steps[4].id);
+    await expect(testPage.locator("[data-kanban-step-id]")).toHaveCount(1);
+  } finally {
+    await testPage.keyboard.press("Escape");
+    await testPage.mouse.up();
+    await board.dispose();
+  }
+});
+
+test("retains vertical column auto-scroll during a task drag", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  // @covers AC-UI-ADAPTIVE-KANBAN-003.9
+  await testPage.setViewportSize({ width: 1440, height: 900 });
+  const board = await createOverflowDragBoard(apiClient, seedData.workspaceId);
+  try {
+    const tasks = [];
+    for (let index = 0; index < 30; index++) {
+      tasks.push(
+        await apiClient.createTask(seedData.workspaceId, `Vertical drag task ${index}`, {
+          workflow_id: board.workflow.id,
+          workflow_step_id: board.steps[0].id,
+        }),
+      );
+    }
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    const column = kanban.columnByStepId(board.steps[0].id).getByTestId("kanban-column-scroll");
+    const box = await column.boundingBox();
+    if (!box) throw new Error("column has no layout box");
+    await beginPointerDrag(testPage, kanban.taskCard(tasks[0].id));
+    await testPage.mouse.move(box.x + box.width / 2, box.y + box.height - 4, { steps: 20 });
+    await expect.poll(() => column.evaluate((element) => element.scrollTop)).toBeGreaterThan(100);
+    const lane = testPage.getByTestId("desktop-kanban-scroll-window");
+    expect(
+      await lane.evaluate((element) => element.scrollHeight - element.clientHeight),
+    ).toBeLessThanOrEqual(1);
+    expect(await lane.evaluate((element) => element.scrollTop)).toBe(0);
+    await cancelPointerDrag(testPage, apiClient, tasks[0].id, board.steps[0].id);
+  } finally {
+    await testPage.keyboard.press("Escape");
+    await testPage.mouse.up();
+    await board.dispose();
+  }
 });

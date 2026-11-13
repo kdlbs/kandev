@@ -90,6 +90,7 @@
   "quickChatTerminalConnecting": "正在连接终端…",
   "quickChatTerminalExited": "终端已退出。",
   "quickChatTerminalExitedWithCode": "终端已退出，代码为 {{code}}。",
+  "quickChatTerminalStartNewShell": "启动新 Shell",
   "quickChatAdd": "添加或切换标签页",
   "reconnecting": "正在重连",
   "reconnectingToKandev": "正在重新连接到 Kandev",

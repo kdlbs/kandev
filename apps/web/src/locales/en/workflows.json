@@ -19,7 +19,7 @@
   "autoSyncOff": "auto-sync off",
   "autoTransition": "Auto-transition",
   "branchLabel": "Branch",
-  "childrenCompletedHelp": "Use this on a parent task step. When every active direct child task is COMPLETED, FAILED, or CANCELLED, Kandev runs this transition once. Archived and ephemeral child tasks are ignored. Grandchildren do not count here, and nothing runs if the parent has no child tasks.",
+  "childrenCompletedHelp": "Runs after every active direct child succeeds. At least one counted active direct child is required. Archived, ephemeral, and automation-run children are ignored; grandchildren do not count. Failed or cancelled children keep the parent waiting.",
   "childrenCompletedHelpAria": "How child task completion transitions work",
   "prClosedHelp": "Runs once when a pull request linked to the task is closed without merging. No agent turn is needed. A close reported while the task is on a step without this event is ignored.",
   "prClosedHelpAria": "How pull request close transitions work",

@@ -2,7 +2,7 @@
 status: draft
 system: agents
 created: 2026-08-13
-updated: 2026-11-01
+updated: 2026-11-08
 owners:
   - cfl
 ---
@@ -17,7 +17,7 @@ Users often name profiles by the capability they want rather than a provider bra
 
 ### REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001: Dynamic Agent Routing
 
-**Intent:** Users often name profiles by the capability they want rather than a provider brand. A task can use a profile named Frontier for planning and one named Balanced for execution. The dynamic profile selects Claude, Codex, OpenCode, or another provider from an ordered list of complete agent profiles.
+**Intent:** Select a concrete agent profile from an ordered list under one capability name.
 
 #### Acceptance criteria
 
@@ -51,6 +51,7 @@ Users often name profiles by the capability they want rather than a provider bra
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.22:** Each workspace shall store a mid-turn provider failover setting that defaults to off for new and existing workspaces and survives the workspace HTTP, WebSocket, and boot-state round trips; an omitted update shall keep the saved value. Workspace settings shall show the toggle to a workspace manager only while dynamic agent routing is enabled.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.27:** When a workspace enables automatic failed-route retry and a classified `rate_limited`, `quota_limited`, `provider_unavailable`, `provider_overloaded`, or `model_capacity` failure leaves a Kanban/task dynamic route in `action_required` or in `waiting` with no eligible candidate, Kandev shall submit the same Retry route action a person can submit, once for that route generation, through the same route-action transaction and continuation package; it shall not resend the failed prompt or replay its tools. The retry shall run no earlier than one minute after the failure and no earlier than the earliest expiry of an open circuit of a candidate the retry could use, and shall record the route reason `auto_failed_route_retry`. Kandev shall submit at most the workspace's limit of automatic retries between successful turns, and shall not retry again when the same candidate fails with the same code as a failure it already retried. A repeated delivery of the failure, a backend restart, a moved or superseded route generation, a session that is not waiting for input, a held candidate, or a setting turned off before the retry runs shall not submit a second or a stale retry. A pending retry shall survive a backend restart. Every other failure, an Office session, a workspace with the setting off, and every declined or stopped case shall keep the existing recovery surface. A person's Retry on a route waiting with no eligible candidate shall reselect in candidate order. When mid-turn provider failover is also enabled, its automatic Try next shall run first and the automatic retry shall apply only after the route reaches one of these recovery states.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.28:** Each workspace shall store an automatic failed-route retry setting that defaults to off and a retry limit from 1 to 3 that defaults to 1, for new and existing workspaces, through the workspace HTTP, WebSocket, and boot-state round trips; an omitted update shall keep the saved value and a limit outside 1 to 3 shall be rejected as a validation error. Workspace settings shall show the toggle and the limit, independent of the mid-turn failover toggle, to a workspace manager while dynamic agent routing is enabled.
+- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.31:** When a workspace-only execution created with a logical profile is promoted to an agent execution after a concrete profile is resolved, the execution shall be bound to and persist that concrete profile, even when no Office profile is supplied. An acting Office profile shall remain in its separate field. Startup, persistence, and restart shall read the concrete profile.
 
 ### REQ-AGENTS-DYNAMIC-AGENT-ROUTING-002: Repeated unclassified failure fallback
 

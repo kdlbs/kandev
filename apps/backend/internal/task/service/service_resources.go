@@ -437,6 +437,10 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 			postCommitErr = errors.Join(postCommitErr, err)
 		}
 	}
+	// The edge tables have no foreign key to tasks, so the cascade leaves them behind.
+	for _, task := range deletedTasks {
+		s.deleteDependencyEdgesForTask(ctx, task.ID)
+	}
 	var lateCleanupErr error
 	cleanups, lateCleanupErr = s.appendWorkspaceDeleteMissingTaskCleanups(ctx, cleanups, deletedTasks)
 	postCommitErr = errors.Join(postCommitErr, lateCleanupErr)
@@ -1438,6 +1442,13 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 		return nil, repoerrors.ErrTaskVersionConflict
 	}
 	updates := *req
+	if req.RemoteURL != nil {
+		if err := s.applyRepositoryRemoteURLUpdate(ctx, repository, &updates); err != nil {
+			return nil, err
+		}
+	} else {
+		updates.ObservedIdentity = nil
+	}
 	if req.LocalPath != nil {
 		localPath, pathErr := canonicalRepositoryLocalPath(*req.LocalPath)
 		if pathErr != nil {
@@ -1469,7 +1480,10 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 			}
 			updateErr = exact.UpdateRepositoryWithSecretBindingsIfUnchanged(ctx, repository, replacement, *req.ExpectedUpdatedAt)
 		} else {
-			updateErr = mutator.UpdateRepositoryWithSecretBindingsAndCheckoutIntent(ctx, repository, replacement, taskrepo.RepositoryCheckoutIntent{DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree})
+			updateErr = mutator.UpdateRepositoryWithSecretBindingsAndCheckoutIntent(ctx, repository, replacement, taskrepo.RepositoryCheckoutIntent{
+				DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree,
+				RemoteURL: updates.RemoteURL, ObservedIdentity: updates.ObservedIdentity,
+			})
 		}
 		if updateErr != nil {
 			s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(updateErr))
@@ -1484,7 +1498,10 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 			s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(err))
 			return nil, err
 		}
-	} else if err := s.repoEntities.UpdateRepositoryWithCheckoutIntent(ctx, repository, taskrepo.RepositoryCheckoutIntent{DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree}); err != nil {
+	} else if err := s.repoEntities.UpdateRepositoryWithCheckoutIntent(ctx, repository, taskrepo.RepositoryCheckoutIntent{
+		DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree,
+		RemoteURL: updates.RemoteURL, ObservedIdentity: updates.ObservedIdentity,
+	}); err != nil {
 		s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(err))
 		return nil, err
 	}

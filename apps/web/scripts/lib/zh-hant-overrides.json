@@ -48,6 +48,9 @@
       },
       "inboxHistory": {
         "truncatedNotice": "還有更多歷史問題可查看。"
+      },
+      "automations": {
+        "pluginToolsReviewRequired": "需要審核：外掛設定已更改。"
       }
     },
     "zh-hk": {

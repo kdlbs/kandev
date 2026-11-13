@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -15,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/copilotplugins"
+	"github.com/kandev/kandev/internal/agent/profileenv"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
@@ -1655,69 +1655,16 @@ func envVarsFromDTO(in []dto.ProfileEnvVarDTO) []models.ProfileEnvVar {
 }
 
 const (
-	maxProfileEnvVars           = 100
-	maxProfileEnvVarKeyLen      = 256
-	maxProfileEnvVarValueLen    = 8 * 1024
-	reservedProfileEnvVarKey    = "TASK_DESCRIPTION"
-	reservedProfileEnvVarPrefix = "KANDEV_"
+	maxProfileEnvVars = profileenv.MaxEntries
 )
 
-var posixEnvIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-
 func validateProfileEnvVarDTOs(in []dto.ProfileEnvVarDTO) error {
-	if len(in) > maxProfileEnvVars {
-		return fmt.Errorf("%w: at most %d entries allowed", ErrInvalidProfileEnvVars, maxProfileEnvVars)
-	}
-	seen := make(map[string]int, len(in))
+	entries := make([]models.ProfileEnvVar, len(in))
 	for i, ev := range in {
-		key := strings.TrimSpace(ev.Key)
-		if key != ev.Key {
-			return fmt.Errorf("%w: env_vars[%d].key must be a POSIX environment identifier", ErrInvalidProfileEnvVars, i)
-		}
-		if err := validateEnvVarKey(key, i, seen); err != nil {
-			return err
-		}
-		seen[key] = i
-		if err := validateEnvVarValue(ev, i); err != nil {
-			return err
-		}
+		entries[i] = models.ProfileEnvVar{Key: ev.Key, Value: ev.Value, SecretID: ev.SecretID}
 	}
-	return nil
-}
-
-func validateEnvVarKey(key string, i int, seen map[string]int) error {
-	if key == "" {
-		return fmt.Errorf("%w: env_vars[%d].key is required", ErrInvalidProfileEnvVars, i)
-	}
-	if len(key) > maxProfileEnvVarKeyLen {
-		return fmt.Errorf("%w: env_vars[%d].key exceeds %d characters", ErrInvalidProfileEnvVars, i, maxProfileEnvVarKeyLen)
-	}
-	if !posixEnvIdentifier.MatchString(key) {
-		return fmt.Errorf("%w: env_vars[%d].key must be a POSIX environment identifier", ErrInvalidProfileEnvVars, i)
-	}
-	if strings.HasPrefix(key, reservedProfileEnvVarPrefix) || key == reservedProfileEnvVarKey {
-		return fmt.Errorf("%w: env_vars[%d].key %q is reserved", ErrInvalidProfileEnvVars, i, key)
-	}
-	if first, exists := seen[key]; exists {
-		return fmt.Errorf("%w: env_vars[%d].key duplicates env_vars[%d].key", ErrInvalidProfileEnvVars, i, first)
-	}
-	return nil
-}
-
-func validateEnvVarValue(ev dto.ProfileEnvVarDTO, i int) error {
-	if ev.SecretID != "" && ev.Value != "" {
-		return fmt.Errorf("%w: env_vars[%d]: set value or secret_id, not both", ErrInvalidProfileEnvVars, i)
-	}
-	if ev.SecretID == "" && ev.Value == "" {
-		return fmt.Errorf("%w: env_vars[%d]: must set either value or secret_id", ErrInvalidProfileEnvVars, i)
-	}
-	if ev.Value != "" {
-		if len(ev.Value) > maxProfileEnvVarValueLen {
-			return fmt.Errorf("%w: env_vars[%d].value exceeds %d characters", ErrInvalidProfileEnvVars, i, maxProfileEnvVarValueLen)
-		}
-		if strings.Contains(ev.Value, "\x00") {
-			return fmt.Errorf("%w: env_vars[%d].value must not contain null bytes", ErrInvalidProfileEnvVars, i)
-		}
+	if err := profileenv.Validate(entries); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidProfileEnvVars, err)
 	}
 	return nil
 }

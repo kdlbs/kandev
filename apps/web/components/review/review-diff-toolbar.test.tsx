@@ -2,7 +2,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ isMobile: false }));
+const previewHtmlLabel = "Preview HTML";
+const mocks = vi.hoisted(() => ({ isMobile: false, isFinePointer: true }));
 const clipboardMocks = vi.hoisted(() => ({ copyToClipboard: vi.fn() }));
 const toastMocks = vi.hoisted(() => ({ toast: vi.fn() }));
 const unsafePathCases = [
@@ -46,7 +47,10 @@ vi.mock("@/hooks/use-global-view-mode", () => ({
 }));
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
-  useResponsiveBreakpoint: () => ({ isMobile: mocks.isMobile }),
+  useResponsiveBreakpoint: () => ({
+    isMobile: mocks.isMobile,
+    isFinePointer: mocks.isFinePointer,
+  }),
 }));
 
 import { FileDiffToolbar, type FileDiffToolbarProps } from "./review-diff-toolbar";
@@ -56,6 +60,7 @@ afterEach(() => {
   clipboardMocks.copyToClipboard.mockReset();
   toastMocks.toast.mockReset();
   mocks.isMobile = false;
+  mocks.isFinePointer = true;
 });
 
 function externalLinkProps() {
@@ -138,6 +143,126 @@ describe("Markdown preview actions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show diff" }));
 
     expect(onToggleMarkdownPreview).toHaveBeenCalledOnce();
+  });
+});
+
+const baseHtmlProps: FileDiffToolbarProps = {
+  filePath: "site/index.html",
+  sessionId: "session-1",
+  source: "pr",
+  wordWrap: false,
+  expandUnchanged: false,
+  onDiscard: vi.fn(),
+  onToggleExpandUnchanged: vi.fn(),
+  onToggleWordWrap: vi.fn(),
+};
+
+describe("HTML preview actions", () => {
+  it("toggles the native preview from the desktop file header", async () => {
+    const onToggleHtmlPreview = vi.fn();
+    render(
+      <TooltipProvider>
+        <FileDiffToolbar {...baseHtmlProps} onToggleHtmlPreview={onToggleHtmlPreview} />
+      </TooltipProvider>,
+    );
+
+    const button = screen.getByRole("button", { name: previewHtmlLabel });
+    fireEvent.focus(button);
+    await waitFor(() => {
+      const tooltip = screen.getByRole("tooltip");
+      expect(tooltip.textContent).toContain("Current workspace file");
+      expect(tooltip.textContent).toContain("Previewing runs workspace code");
+    });
+
+    fireEvent.click(button);
+
+    expect(onToggleHtmlPreview).toHaveBeenCalledOnce();
+  });
+
+  it("matches HTML extensions case-insensitively", () => {
+    const onToggleHtmlPreview = vi.fn();
+    render(
+      <TooltipProvider>
+        <FileDiffToolbar
+          {...baseHtmlProps}
+          filePath="docs/PAGE.HTM"
+          onToggleHtmlPreview={onToggleHtmlPreview}
+        />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: previewHtmlLabel }));
+
+    expect(onToggleHtmlPreview).toHaveBeenCalledOnce();
+  });
+
+  it("offers Show diff while the row is previewing", () => {
+    const onToggleHtmlPreview = vi.fn();
+    render(
+      <TooltipProvider>
+        <FileDiffToolbar {...baseHtmlProps} htmlPreview onToggleHtmlPreview={onToggleHtmlPreview} />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Show diff" }));
+
+    expect(onToggleHtmlPreview).toHaveBeenCalledOnce();
+  });
+
+  it("does not expose the action for a non-HTML row", () => {
+    render(
+      <TooltipProvider>
+        <FileDiffToolbar {...baseHtmlProps} filePath="src/app.ts" onToggleHtmlPreview={vi.fn()} />
+      </TooltipProvider>,
+    );
+
+    expect(screen.queryByRole("button", { name: previewHtmlLabel })).toBeNull();
+  });
+});
+
+describe("HTML preview touch disclosure", () => {
+  it("discloses source and trust copy before activation on a coarse-pointer tablet", async () => {
+    mocks.isFinePointer = false;
+    const onToggleHtmlPreview = vi.fn();
+    render(
+      <TooltipProvider>
+        <FileDiffToolbar {...baseHtmlProps} onToggleHtmlPreview={onToggleHtmlPreview} />
+      </TooltipProvider>,
+    );
+
+    const trigger = screen.getByRole("button", { name: previewHtmlLabel });
+    expect(trigger.getAttribute("aria-haspopup")).toBe("dialog");
+    fireEvent.click(trigger);
+
+    const drawer = await screen.findByTestId("review-html-preview-help-drawer");
+    expect(drawer.textContent).toContain("Current workspace file");
+    expect(drawer.textContent).toContain("Previewing runs workspace code");
+    expect(onToggleHtmlPreview).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("review-html-preview-confirm"));
+
+    expect(onToggleHtmlPreview).toHaveBeenCalledOnce();
+  });
+
+  it("keeps source and trust copy visible before phone activation", () => {
+    mocks.isMobile = true;
+    const onToggleHtmlPreview = vi.fn();
+    render(
+      <TooltipProvider>
+        <FileDiffToolbar {...baseHtmlProps} onToggleHtmlPreview={onToggleHtmlPreview} />
+      </TooltipProvider>,
+    );
+
+    const trigger = screen.getByRole("button", { name: "More actions for site/index.html" });
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    fireEvent.click(trigger);
+
+    const help = screen.getByTestId("review-html-preview-help");
+    expect(help.textContent).toContain("Current workspace file");
+    expect(help.textContent).toContain("Previewing runs workspace code");
+
+    fireEvent.click(screen.getByRole("menuitem", { name: previewHtmlLabel }));
+    expect(onToggleHtmlPreview).toHaveBeenCalledOnce();
   });
 });
 

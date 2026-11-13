@@ -276,6 +276,9 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 	if err := refuseReservedMetadata(req.Metadata, req.AllowReservedMetadata); err != nil {
 		return CreateTaskResult{}, err
 	}
+	if err := s.authorizeTaskExecutorSelection(ctx, &models.Task{}, req.Metadata); err != nil {
+		return CreateTaskResult{}, err
+	}
 	if err := s.validateBuiltinTaskCreation(ctx, req); err != nil {
 		return CreateTaskResult{}, err
 	}
@@ -468,6 +471,9 @@ func (s *Service) resolveTaskCreationReferences(
 	if err := s.validateBlockerReferences(ctx, req); err != nil {
 		return nil, err
 	}
+	if err := s.validateRelationReferences(ctx, req); err != nil {
+		return nil, err
+	}
 	repositories, err := s.resolveTaskRepositoryRowsWithResolvedIdentityDedup(
 		ctx, req.WorkspaceID, req.Repositories, req.projectRepositoryDefaults,
 	)
@@ -534,6 +540,15 @@ func (s *Service) finalizeCreatedTask(ctx context.Context, prepared *preparedTas
 		if err := s.AddBlocker(ctx, task.ID, blockerID); err != nil {
 			return CreateTaskResult{}, s.rollbackPartialTask(ctx, task.ID, fmt.Errorf("add blocker %s: %w", blockerID, err))
 		}
+	}
+	for _, relatedID := range req.RelatedTaskIDs {
+		if err := s.relations.AddRelation(ctx, task.ID, relatedID); err != nil {
+			return CreateTaskResult{}, s.rollbackPartialTask(ctx, task.ID, fmt.Errorf("add related task %s: %w", relatedID, err))
+		}
+		// The peer already exists and may be open in another client; its own
+		// task.created already fired, so it only learns about this edge via an
+		// explicit refresh. publishDependencyChange covers both ends.
+		s.publishDependencyChange(ctx, task.ID, relatedID)
 	}
 
 	if err := s.persistTaskRepositoryRows(ctx, task.ID, prepared.repositories); err != nil {
@@ -2210,7 +2225,10 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		return nil, err
 	}
 	if err := s.authorizeTaskExecutorMutation(ctx, task); err != nil {
-		return nil, err
+		return nil, executorMutationDenial(err)
+	}
+	if err := s.authorizeTaskExecutorSelection(ctx, task, req.Metadata); err != nil {
+		return nil, executorMutationDenial(err)
 	}
 	assignee, err := s.validateTaskUpdateReferences(ctx, task, req)
 	if err != nil {
@@ -2250,6 +2268,7 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(err))
 		return nil, err
 	}
+	ctx = models.WithOfficeHumanCompletionIntent(ctx, models.OfficeHumanCompletionIntent{})
 	task = result.Task
 	oldWorkflowStepID := result.PriorWorkflowStepID
 	oldState := result.PriorState

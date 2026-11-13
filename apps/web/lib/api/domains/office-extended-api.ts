@@ -2,7 +2,6 @@ import { fetchJson, fetchJsonWithRetry, type ApiRequestOptions } from "../client
 import type { DashboardData } from "@/lib/state/slices/office/types";
 import type { QuorumResponseDTO } from "@/lib/state/slices/office/quorum-types";
 import { normalizeOfficeTask, type OfficeTaskWire } from "./office-task-normalize";
-import type { RawActivityEntry } from "./office-activity-normalize";
 
 const BASE = "/api/v1/office";
 
@@ -184,12 +183,21 @@ export type UpdateTaskPayload = {
   resume?: boolean;
 };
 
+// `status`, `queued` and `workflow_step` are present only when a Done request
+// moved the task to its workflow's final step.
+export type UpdateTaskResponse = {
+  ok: boolean;
+  status?: string;
+  queued?: boolean;
+  workflow_step?: { id?: string; name?: string };
+};
+
 export function updateTask(
   taskId: string,
   payload: UpdateTaskPayload,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<{ ok: boolean }>(`${BASE}/tasks/${taskId}`, {
+  return fetchJson<UpdateTaskResponse>(`${BASE}/tasks/${taskId}`, {
     ...options,
     init: { method: "PATCH", body: JSON.stringify(payload), ...options?.init },
   });
@@ -382,6 +390,18 @@ export function createComment(
     ...options,
     init: { method: "POST", body: JSON.stringify(data), ...options?.init },
   });
+}
+
+/** Resolves a workspace-scoped task identifier (e.g. "KAN-11") to the task id. */
+export function resolveTaskIdentifier(
+  workspaceId: string,
+  identifier: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ id: string }>(
+    `${BASE}/workspaces/${workspaceId}/tasks/by-identifier/${encodeURIComponent(identifier)}`,
+    options,
+  );
 }
 
 export function searchTasks(
@@ -603,33 +623,7 @@ export function getDashboard(workspaceId: string, options?: ApiRequestOptions) {
   return fetchJson<DashboardData>(`${BASE}/workspaces/${workspaceId}/dashboard`, options);
 }
 
-/**
- * One workspace row of the read-only multi-workspace aggregate
- * (GET /api/v1/office/workspaces/aggregate). Mirrors the snake_case wire shape.
- */
-export type WorkspaceAggregateEntry = {
-  workspace_id: string;
-  name: string;
-  task_count: number;
-  open_tasks: number;
-  in_progress_tasks: number;
-  blocked_tasks: number;
-  done_tasks: number;
-  pending_approvals: number;
-  agent_count: number;
-  running_agents: number;
-};
-
-export type WorkspaceAggregateWire = {
-  workspaces: WorkspaceAggregateEntry[];
-  recent_activity: RawActivityEntry[];
-};
-
-/** Every Office workspace the caller can reach, with counts and a merged activity feed. */
-export function getWorkspaceAggregate(options?: ApiRequestOptions) {
-  return fetchJson<WorkspaceAggregateWire>(`${BASE}/workspaces/aggregate`, options);
-}
-
+export * from "./office-aggregate-api";
 export * from "./office-runs-api";
 
 // --- Workspace Settings ---

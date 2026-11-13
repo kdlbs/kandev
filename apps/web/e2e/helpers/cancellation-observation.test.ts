@@ -29,12 +29,17 @@ const notification = (pending: boolean, sessionId = "target") =>
 it("buffers settlement that overtakes the native pending notification", async () => {
   const { send, receive, observation } = await fixture();
   observation.arm("target");
+  const other = notification(true, "other");
+  receive(other);
+  expect(observation.pendingObserved()).toBe(false);
   receive(notification(false));
   expect(send).not.toHaveBeenCalled();
+  expect(observation.pendingObserved()).toBe(false);
   receive(notification(true));
+  expect(observation.pendingObserved()).toBe(true);
   expect(send.mock.calls).toEqual([[notification(true)]]);
   observation.release();
-  expect(send.mock.calls).toEqual([[notification(true)], [notification(false)]]);
+  expect(send.mock.calls).toEqual([[notification(true)], [other], [notification(false)]]);
 });
 
 it("observes pending inside a batched gateway frame and releases remaining frames once", async () => {

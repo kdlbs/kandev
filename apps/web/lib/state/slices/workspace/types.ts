@@ -29,6 +29,8 @@ export type WorkspaceState = {
     dynamic_failed_route_auto_retry_enabled?: boolean;
     dynamic_failed_route_auto_retry_max?: number;
     office_workflow_id?: string | null;
+    /** Office task identifier prefix (e.g. "KAN"). */
+    task_prefix?: string;
     created_at: string;
     updated_at: string;
   }>;

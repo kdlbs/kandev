@@ -7,7 +7,7 @@ requirements:
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004
 created: 2026-08-24
-updated: 2026-10-26
+updated: 2026-11-08
 owners:
   - cfl12
 ---
@@ -470,9 +470,12 @@ Callers:
   `workspace_preparing` while the new owner prepares it.
 - `LaunchPreparedSession` re-elects an eligible `failed` environment of the same
   task for the session that it launches. It uses a standalone transaction that
-  takes the task cleanup barrier and the recovery-claim admission. An
-  environment owned by another task, which is the `inherit_parent` case, stays
-  fail-closed.
+  takes the task cleanup barrier and recovery-claim admission. A failed foreign
+  environment (`inherit_parent` or `shared_group`) is never re-elected by the
+  child. A launch meeting
+  `AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.5` claims its own environment
+  before allocation (see [additional-session workspace reuse](additional-session-workspace-reuse.md)).
+  Other starts stay fail-closed.
 
 Every caller runs after `taskCleanupBarrierLocked` and
 `recoveryclaim.EnsureAvailableTx`, so a deleting task or a held recovery claim

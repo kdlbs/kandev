@@ -42,12 +42,20 @@ function officeHref(path: string, workspaceId: string): string {
 export function ControlAggregateOverview({
   aggregate,
   controlWorkspaceIds,
+  workspaceId,
 }: {
   aggregate: ControlAggregateRead;
   controlWorkspaceIds: string[];
+  workspaceId?: string;
 }) {
   const { t } = useTranslation();
-  const entries = aggregate.data?.workspaces;
+  const entries = useMemo(
+    () =>
+      aggregate.data?.workspaces.filter(
+        (entry) => !workspaceId || entry.workspace_id === workspaceId,
+      ),
+    [aggregate.data, workspaceId],
+  );
   const totals = useMemo(() => aggregateTotals(entries ?? []), [entries]);
   const attention = useMemo(() => buildAggregateAttention(entries ?? []), [entries]);
   if (!entries) {

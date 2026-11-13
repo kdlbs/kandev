@@ -17,17 +17,18 @@ import (
 
 // Repository provides SQLite-based task storage operations.
 type Repository struct {
-	db                      *sqlx.DB // writer
-	ro                      *sqlx.DB // reader (read-only pool)
-	ownsDB                  bool
-	log                     *logger.Logger
-	migrate                 *db.MigrateLogger
-	queuePurgeMu            sync.RWMutex
-	clarificationAdmission  clarificationReadAdmission
-	queuePurger             func(context.Context, string)
-	queuePurgePrepare       func(context.Context, string)
-	queuePurgeNotify        func(context.Context, string)
-	queueSessionPurgeNotify func(context.Context, string, string)
+	officeHumanCompletionPendingReader func(context.Context, *sql.Tx, string, string) ([]string, error)
+	db                                 *sqlx.DB // writer
+	ro                                 *sqlx.DB // reader (read-only pool)
+	ownsDB                             bool
+	log                                *logger.Logger
+	migrate                            *db.MigrateLogger
+	queuePurgeMu                       sync.RWMutex
+	clarificationAdmission             clarificationReadAdmission
+	queuePurger                        func(context.Context, string)
+	queuePurgePrepare                  func(context.Context, string)
+	queuePurgeNotify                   func(context.Context, string)
+	queueSessionPurgeNotify            func(context.Context, string, string)
 	// stepArrivalLocks holds one *sync.Mutex per workflow step, serializing
 	// this process's own arrival-position writes (assignArrivalPosition)
 	// against each other for the same step. lockWorkflowStepForWrite alone

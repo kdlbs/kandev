@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
@@ -40,6 +41,11 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 	if handleBuiltinCreationHTTPError(c, err) {
 		return
 	}
+	var approvalsErr *service.ApprovalsPendingMoveError
+	if errors.As(err, &approvalsErr) || errors.Is(err, service.ErrWorkflowChangeConflict) {
+		handleSelectedMoveError(c, log, err)
+		return
+	}
 	if isClientDisconnect(err) {
 		abortClientDisconnect(c)
 		return
@@ -54,6 +60,14 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 	}
 	if errors.Is(err, taskrepository.ErrTaskCompletionGateBlocked) {
 		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_gate_blocked"})
+		return
+	}
+	if errors.Is(err, models.ErrWorkspaceDefaultExecutorUnavailable) {
+		c.JSON(http.StatusConflict, taskErrorBody(err))
+		return
+	}
+	if errors.Is(err, models.ErrExecutorMutationDenied) {
+		c.JSON(http.StatusForbidden, gin.H{"error": models.ErrExecutorMutationDenied.Error()})
 		return
 	}
 	if isNotFound(err) {
@@ -98,6 +112,12 @@ func cleanupInspectionFields(err error) []zap.Field {
 }
 
 func taskErrorBody(err error) gin.H {
+	if errors.Is(err, models.ErrWorkspaceDefaultExecutorUnavailable) {
+		return gin.H{
+			"error":      models.ErrWorkspaceDefaultExecutorUnavailable.Error(),
+			"error_code": models.WorkspaceDefaultExecutorUnavailableErrorCode,
+		}
+	}
 	body := gin.H{"error": err.Error()}
 	for key, value := range taskErrorDetails(err) {
 		body[key] = value
@@ -178,15 +198,18 @@ func repositorySelectionWSCode(err error) (string, bool) {
 }
 
 func handleSelectedMoveError(c *gin.Context, log *logger.Logger, err error) {
+	var approvalsErr *service.ApprovalsPendingMoveError
 	switch {
 	case isClientDisconnect(err):
 		abortClientDisconnect(c)
-	case errors.Is(err, taskrepository.ErrTaskCompletionGateBlocked):
-		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_gate_blocked"})
-	case errors.Is(err, taskrepository.ErrTaskCompletionCriteriaConflict):
-		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_criteria_conflict"})
-	case errors.Is(err, taskrepository.ErrTaskCompletionHumanConfirmationRequired):
-		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_human_confirmation_required"})
+	case errors.As(err, &approvalsErr):
+		c.JSON(http.StatusConflict, gin.H{
+			"code":              "task_approvals_pending",
+			"error":             approvalsErr.Error(),
+			"pending_approvers": pendingApproversBody(approvalsErr.Pending),
+		})
+	case CompletionGateCode(err) != "":
+		c.JSON(http.StatusConflict, gin.H{"code": CompletionGateCode(err)})
 	case isNotFound(err):
 		c.JSON(http.StatusNotFound, gin.H{"error": "task or workflow not found"})
 	case isMoveConflict(err):
@@ -249,6 +272,27 @@ func isNotFound(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "not found")
 }
 
+// CompletionGateCode returns the stable code for a move refused by the task
+// completion gate, or "" for any other error.
+func CompletionGateCode(err error) string {
+	switch {
+	case errors.Is(err, taskrepository.ErrTaskCompletionGateBlocked):
+		return "task_completion_gate_blocked"
+	case errors.Is(err, taskrepository.ErrTaskCompletionCriteriaConflict):
+		return "task_completion_criteria_conflict"
+	case errors.Is(err, taskrepository.ErrTaskCompletionHumanConfirmationRequired):
+		return "task_completion_human_confirmation_required"
+	default:
+		return ""
+	}
+}
+
+// MoveConflictCode returns the stable code for a refused task move, or ""
+// when the error is not a move conflict.
+func MoveConflictCode(err error) string {
+	return moveConflictCode(err)
+}
+
 func isMoveConflict(err error) bool {
 	return moveConflictCode(err) != ""
 }
@@ -283,7 +327,7 @@ func moveConflictCode(err error) string {
 	if errors.Is(err, workflowmove.ErrMoveConflict) {
 		return moveConflictCodePending
 	}
-	if errors.Is(err, service.ErrWorkflowChangeConflict) {
+	if errors.Is(err, service.ErrWorkflowChangeConflict) || errors.Is(err, service.ErrWorkflowResolutionConflict) {
 		return moveConflictCodeWorkflowChange
 	}
 	msg := strings.ToLower(err.Error())
@@ -341,4 +385,24 @@ func isTaskCreateValidationError(err error) bool {
 	}
 	return isValidationError(err) ||
 		strings.Contains(strings.ToLower(err.Error()), "workflow not found")
+}
+
+func pendingApproversBody(pending []service.PendingApprover) []gin.H {
+	out := make([]gin.H, 0, len(pending))
+	for _, p := range pending {
+		out = append(out, gin.H{"agent_profile_id": p.AgentProfileID, "name": p.Name})
+	}
+	return out
+}
+
+// humanCompletionWSError preserves the existing refusal shapes on state edits.
+func humanCompletionWSError(msg *ws.Message, err error) (*ws.Message, error) {
+	var approvals *service.ApprovalsPendingMoveError
+	if errors.As(err, &approvals) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, approvals.Error(), map[string]interface{}{"error_code": "task_approvals_pending", "pending_approvers": pendingApproversBody(approvals.Pending)})
+	}
+	if errors.Is(err, service.ErrWorkflowChangeConflict) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), map[string]interface{}{"error_code": moveConflictCodeWorkflowChange})
+	}
+	return nil, nil
 }

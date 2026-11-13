@@ -17,13 +17,13 @@ func (m *Manager) SetProviderUsageLimitsEnabled(enabled bool) {
 	m.sessionManager.providerUsageLimits = enabled
 }
 
-func (m *Manager) configureAgentUsage(ctx context.Context, client *agentctl.Client, execution *AgentExecution, agentArgs []string, env map[string]string, delivery *agentctltypes.ProjectMCPDelivery) error {
+func (m *Manager) configureAgentUsage(ctx context.Context, client *agentctl.Client, execution *AgentExecution, agentArgs []string, env map[string]string, delivery *agentctltypes.ProjectMCPDelivery, installContext *agentctltypes.ManagedRuntimeInstallContext) error {
 	if !m.providerUsageLimits {
-		return client.ConfigureAgentWithProjectDelivery(ctx, execution.AgentCommand, agentArgs, env, execution.ContinueCommand, execution.ContinueArgs, delivery, execution.LaunchWrapper)
+		return client.ConfigureAgentWithProjectDeliveryAndInstallContext(ctx, execution.AgentCommand, agentArgs, env, execution.ContinueCommand, execution.ContinueArgs, delivery, installContext, execution.LaunchWrapper)
 	}
 	policy := &usage.ExecutionUsagePolicy{ProfileID: execution.AgentProfileID, AgentID: execution.AgentID, ExecutorType: execution.ExecutorType}
 	usage.ApplySelectedUsage(ctx, policy)
-	return client.ConfigureAgentWithUsageAndProjectDelivery(ctx, execution.AgentCommand, agentArgs, env, execution.ContinueCommand, execution.ContinueArgs, policy, delivery, execution.LaunchWrapper)
+	return client.ConfigureAgentWithUsageAndProjectDelivery(ctx, execution.AgentCommand, agentArgs, env, execution.ContinueCommand, execution.ContinueArgs, policy, delivery, installContext, execution.LaunchWrapper)
 }
 
 // ReadProfileExecutionUsage observes existing native actors only. Session

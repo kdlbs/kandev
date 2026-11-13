@@ -102,6 +102,7 @@ func RegisterRoutes(api *gin.RouterGroup, svc *DashboardService, labelRepo label
 	api.GET("/workspaces/:wsId/runs", h.listRuns)
 	api.GET("/workspaces/:wsId/tasks/search", h.searchTasks)
 	api.GET("/workspaces/:wsId/tasks", h.listTasks)
+	api.GET("/workspaces/:wsId/tasks/by-identifier/:identifier", h.resolveTaskIdentifier)
 	api.GET("/workspaces/:wsId/settings", h.getWorkspaceSettings)
 	api.PATCH("/workspaces/:wsId/settings", h.updateWorkspaceSettings)
 	api.GET("/tasks/:id", h.getTask)
@@ -495,6 +496,26 @@ func (h *Handler) attachLabelsToTasks(ctx context.Context, tasks []*sqlite.TaskR
 	return dtos
 }
 
+const errTaskNotFound = "task not found"
+
+// resolveTaskIdentifier maps a workspace-scoped task identifier (e.g. "KAN-11")
+// to the task id so the UI can redirect to the canonical /office/tasks/<id> URL.
+func (h *Handler) resolveTaskIdentifier(c *gin.Context) {
+	if rejectAgentTaskReader(c) {
+		return
+	}
+	id, err := h.svc.ResolveTaskIdentifier(c.Request.Context(), c.Param("wsId"), c.Param("identifier"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if id == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": errTaskNotFound})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": id})
+}
+
 func (h *Handler) getTask(c *gin.Context) {
 	ctx := c.Request.Context()
 	task, err := h.svc.GetTask(ctx, c.Param("id"))
@@ -503,7 +524,7 @@ func (h *Handler) getTask(c *gin.Context) {
 		return
 	}
 	if task == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": errTaskNotFound})
 		return
 	}
 
@@ -668,7 +689,17 @@ func (h *Handler) updateTask(c *gin.Context) {
 	taskID := c.Param("id")
 	actorAgentID := agentIDFromCtx(c)
 
-	if !h.applyTaskMutations(c, taskID, actorAgentID, &req) {
+	moved, ok := h.applyTaskMutations(c, taskID, actorAgentID, &req)
+	if !ok {
+		return
+	}
+	if moved != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"ok":            true,
+			"status":        moved.Status,
+			"queued":        moved.Queued,
+			"workflow_step": gin.H{"id": moved.StepID, "name": moved.StepName},
+		})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -676,63 +707,88 @@ func (h *Handler) updateTask(c *gin.Context) {
 
 // applyTaskMutations runs each mutation in the canonical order and reports
 // whether all writes succeeded. When a mutation fails the handler responds
-// with the appropriate status code and applyTaskMutations returns false.
+// with the appropriate status code and applyTaskMutations returns false. A
+// human Done request that moved the task to its final step returns the move
+// result.
 //
 // Order: assignee (agent, then human) → priority → project → parent → status.
 // Status is last because it triggers the reactivity pipeline.
-func (h *Handler) applyTaskMutations(c *gin.Context, taskID, actorAgentID string, req *UpdateTaskRequest) bool {
+func (h *Handler) applyTaskMutations(
+	c *gin.Context, taskID, actorAgentID string, req *UpdateTaskRequest,
+) (*FinalStepMoveResult, bool) {
 	ctx := c.Request.Context()
 	if req.AssigneeAgentProfileID != nil {
 		if err := h.svc.SetTaskAssigneeAsAgent(ctx, actorAgentID, taskID, *req.AssigneeAgentProfileID); err != nil {
 			respondMutationError(c, err)
-			return false
+			return nil, false
 		}
 	}
 	if req.AssigneeUserID != nil {
 		if err := h.svc.SetTaskAssigneeUser(ctx, taskID, *req.AssigneeUserID); err != nil {
 			respondMutationError(c, err)
-			return false
+			return nil, false
 		}
 	}
 	if req.Priority != nil {
 		if err := h.svc.UpdateTaskPriority(ctx, taskID, *req.Priority); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return false
+			return nil, false
 		}
 	}
 	if req.ProjectID != nil {
 		if err := h.svc.UpdateTaskProjectID(ctx, taskID, *req.ProjectID); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return false
+			return nil, false
 		}
 	}
 	if req.ParentID != nil {
 		if err := h.svc.UpdateTaskParentID(ctx, taskID, *req.ParentID); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return false
+			return nil, false
 		}
 	}
-	if req.Status != "" {
-		err := h.svc.UpdateTaskStatus(ctx, TaskStatusUpdateRequest{
-			TaskID:       taskID,
-			NewStatus:    req.Status,
-			Comment:      req.Comment,
-			ActorAgentID: actorAgentID,
-			ReopenIntent: req.Reopen || req.Resume,
-			ResumeIntent: req.Resume,
-		})
-		if err != nil {
-			h.respondStatusUpdateError(c, err)
-			return false
-		}
+	if req.Status == "" {
+		return nil, true
 	}
-	return true
+	statusReq := TaskStatusUpdateRequest{
+		TaskID:       taskID,
+		NewStatus:    req.Status,
+		Comment:      req.Comment,
+		ActorAgentID: actorAgentID,
+		ReopenIntent: req.Reopen || req.Resume,
+		ResumeIntent: req.Resume,
+	}
+	var moved *FinalStepMoveResult
+	var err error
+	if actorAgentID == "" {
+		moved, err = h.svc.UpdateTaskStatusAsHuman(ctx, statusReq)
+	} else {
+		err = h.svc.UpdateTaskStatus(ctx, statusReq)
+	}
+	if err != nil {
+		h.respondStatusUpdateError(c, err)
+		return nil, false
+	}
+	return moved, true
 }
 
 // respondStatusUpdateError translates UpdateTaskStatus errors into HTTP
 // responses. Gate errors return 409 with a stable reason, pending approvers,
-// and the redirected status. Everything else returns 400.
+// and the redirected status. A refused final-step move returns 409 without a
+// status, because nothing changed. Everything else returns 400.
 func (h *Handler) respondStatusUpdateError(c *gin.Context, err error) {
+	var refused *FinalStepMoveRefusedError
+	if errors.As(err, &refused) {
+		body := gin.H{"error": err.Error(), "reason": refused.Reason}
+		if refused.Code != "" {
+			body["code"] = refused.Code
+		}
+		if len(refused.Pending) > 0 {
+			body["pending_approvers"] = refused.Pending
+		}
+		c.JSON(http.StatusConflict, body)
+		return
+	}
 	var pending *ApprovalsPendingError
 	if errors.As(err, &pending) {
 		c.JSON(http.StatusConflict, gin.H{

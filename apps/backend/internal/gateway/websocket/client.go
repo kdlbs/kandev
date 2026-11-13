@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/wskeepalive"
 	"github.com/kandev/kandev/internal/user/store"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -19,13 +20,13 @@ const maxConcurrentSessionGitRefreshes = 4
 
 const (
 	// Time allowed to write a message to the peer
-	writeWait = 10 * time.Second
+	writeWait = wskeepalive.DefaultWriteWait
 
 	// Time allowed to read the next pong message from the peer
-	pongWait = 60 * time.Second
+	pongWait = wskeepalive.DefaultPongWait
 
 	// Send pings to peer with this period (must be less than pongWait)
-	pingPeriod = (pongWait * 9) / 10
+	pingPeriod = wskeepalive.DefaultPingPeriod
 
 	// Maximum message size allowed from peer
 	// Increased to support image attachments (base64 encoded images are ~33% larger)

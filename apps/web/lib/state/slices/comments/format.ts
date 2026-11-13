@@ -66,6 +66,23 @@ export function toBlockquote(text: string): string {
     .join("\n");
 }
 
+function hasOddBackslashPrefix(text: string, index: number): boolean {
+  let backslashCount = 0;
+  for (let cursor = index - 1; cursor >= 0 && text[cursor] === "\\"; cursor -= 1) {
+    backslashCount += 1;
+  }
+  return backslashCount % 2 === 1;
+}
+
+function protectSourceMentions(text: string): string {
+  const protect = (token: string, index: number, source: string) =>
+    hasOddBackslashPrefix(source, index) ? token : "\\" + token;
+  return text
+    .replace(/&(?:#[0-9]+|#x[0-9a-f]+|[a-z][a-z0-9]+);/gi, protect)
+    .replace(/@[A-Za-z]/g, protect)
+    .replaceAll("agent://", "agent:\\/\\/");
+}
+
 /**
  * Format plan comments as markdown for sending to agent.
  * Uses the same style as code review comments: code block for selected text + blockquote for comment.
@@ -141,8 +158,17 @@ export function formatAgentMessageCommentsAsMarkdown(comments: AgentMessageComme
 
   const lines: string[] = ["### Agent Message Comments", ""];
   for (const comment of comments) {
-    lines.push("Selected agent response:");
-    lines.push(toBlockquote(comment.selectedText));
+    // i18n-exempt: agent-facing prompt text, not UI copy
+    lines.push(
+      comment.authorName
+        ? `Selected comment from ${comment.authorName}:`
+        : "Selected agent response:",
+    );
+    lines.push(
+      toBlockquote(
+        comment.authorName ? protectSourceMentions(comment.selectedText) : comment.selectedText,
+      ),
+    );
     lines.push("");
     lines.push("User feedback:");
     lines.push(toBlockquote(comment.text));
@@ -150,6 +176,15 @@ export function formatAgentMessageCommentsAsMarkdown(comments: AgentMessageComme
   }
   lines.push("---", "");
   return lines.join("\n");
+}
+
+/** Prepends the formatted extract block to user text; either part may be empty. */
+export function composeAgentMessageCommentBody(
+  comments: AgentMessageComment[],
+  text: string,
+): string {
+  const block = formatAgentMessageCommentsAsMarkdown(comments);
+  return block ? `${block}\n${text.trim()}`.trimEnd() : text.trim();
 }
 
 /**

@@ -45,6 +45,7 @@ function resetSessionActionMocks() {
   mockState = {
     tasks: { activeTaskId: "t1", activeSessionId: null },
     taskRemoval: { navigationRevision: 0 },
+    taskSessions: { items: {} },
     taskSessionsByTask: { itemsByTaskId: { t1: [{ id: "s1", state: "RUNNING" }] } },
     quickChat: { sessions: [] },
     setActiveSession: mockSetActiveSession,
@@ -296,7 +297,9 @@ describe("useSessionActions restart", () => {
     act(() => {
       pending = result.current.restart();
     });
-    expect(mockRequest.mock.calls).toEqual([["session.stop", { session_id: "s1", close_inference_for_restart: true }, 60000]]);
+    expect(mockRequest.mock.calls).toEqual([
+      ["session.stop", { session_id: "s1", close_inference_for_restart: true }, 60000],
+    ]);
     expect(result.current.isRestarting).toBe(true);
     await act(async () => {
       finishStop();

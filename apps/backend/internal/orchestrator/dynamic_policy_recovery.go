@@ -190,9 +190,13 @@ func (s *Service) runDynamicPolicyRecovery(ctx context.Context, sessionID string
 	if !ok {
 		return
 	}
-	// Serialize route recovery with manual actions through the durable
-	// projection. Release before lifecycle launch because launch takes the
-	// session lifecycle lock.
+	// Explicit recovery and route actions use the same session lock. Keep the
+	// policy claim, session projection, and successor launch in that ownership
+	// window so a timer cannot reset a session owned by explicit recovery.
+	releaseRouteAction := s.acquireRouteActionOperationLock(sessionID)
+	defer releaseRouteAction()
+	// The cancel guard protects projection writes. Release it before launch,
+	// which takes the session lifecycle lock; keep route-operation ownership.
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	lock.Lock()
 	locked := true
@@ -303,11 +307,34 @@ func (s *Service) handleDynamicPolicyResumeError(
 			s.scheduleDynamicPolicyRecovery(sessionID, generation, refreshed.PolicyStateJSON)
 		}
 	}
+	if errors.Is(err, dynamicruntime.ErrRecoveryPending) {
+		s.mirrorDynamicPolicyRecoveryProjection(ctx, loader, sessionID, generation)
+	}
 	if !errors.Is(err, dynamicruntime.ErrStaleGeneration) && !errors.Is(err, dynamicruntime.ErrRouteStateNotFound) {
 		s.logger.Warn("dynamic policy recovery could not resume route",
 			zap.String("session_id", sessionID), zap.Error(err))
 	}
 	return true
+}
+
+func (s *Service) mirrorDynamicPolicyRecoveryProjection(
+	ctx context.Context,
+	loader dynamicRouteStateLoader,
+	sessionID string,
+	generation int64,
+) {
+	if loader == nil || s.repo == nil {
+		return
+	}
+	state, err := loader.LoadRouteState(ctx, sessionID)
+	if err != nil || state == nil || state.Generation != generation || state.Status != dynamicRouteStatusActionRequired {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.RouteGeneration != generation {
+		return
+	}
+	s.mirrorDynamicRouteProjection(ctx, session, generation, state.Status, session.RouteReason)
 }
 
 func (s *Service) persistDynamicPolicyRecovery(

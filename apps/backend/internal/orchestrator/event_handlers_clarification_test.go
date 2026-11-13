@@ -587,7 +587,7 @@ func TestResumeDetachedClarificationDoesNotTreatAsyncRecoveryAsAcknowledgment(t 
 		return &executor.PromptResult{}, nil
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	seedTaskAndSession(t, repo, "task-busy", "session-busy", models.TaskSessionStateRunning)
 	seedExecutorRunning(t, repo, "session-busy", "task-busy", "exec-busy")
 
@@ -1504,7 +1504,7 @@ func TestClarificationWatchdogRecoveryIgnoresOwnCancelActivity(t *testing.T) {
 	agentMgr.currentPromptExecutionID = execution
 	agentMgr.currentPromptGeneration.Store(1)
 	svc = createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.turnService = &repoTurnService{repo: repo}
 	clarificationTurn, err := svc.turnService.StartTurn(ctx, sessionID)
 	if err != nil {
@@ -1572,7 +1572,7 @@ func TestClarificationWatchdogRecoveryCancelsOnIndependentActivity(t *testing.T)
 	agentMgr.currentPromptGeneration.Store(1)
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.messageCreator = &mockMessageCreator{}
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.turnService = &repoTurnService{repo: repo}
 	clarificationTurn, err := svc.turnService.StartTurn(ctx, sessionID)
 	if err != nil {
@@ -1658,7 +1658,7 @@ func TestClarificationWatchdogRecoveryCancelsOnSameExecutionMessageActivity(t *t
 	agentMgr.currentPromptGeneration.Store(1)
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.messageCreator = &mockMessageCreator{}
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.turnService = &repoTurnService{repo: repo}
 	clarificationTurn, err := svc.turnService.StartTurn(ctx, sessionID)
 	if err != nil {
@@ -1773,7 +1773,7 @@ func TestRetryClarificationAfterCancel_DoesNotStarveUserCancel(t *testing.T) {
 	}
 	taskRepo := newMockTaskRepo()
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	// The retry prompt (the only prompt this test dispatches) blocks in-flight
 	// after its provider-acceptance callback, standing in for a jammed agent
@@ -1840,7 +1840,7 @@ func TestRetryClarificationAfterCancel_CoordinatorCancellationWinsWhileRetryWait
 	seedTaskAndSession(t, repo, "task-retry-stop", "session-retry-stop", models.TaskSessionStateRunning)
 	manager := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 
 	guard, release := svc.acquireCancelInFlightGuard("session-retry-stop")
 	guard.Lock()
@@ -1931,7 +1931,7 @@ func TestRetryClarificationAfterCancel_DoesNotRecoverAfterGuardReacquireFails(t 
 		return errors.New("agent could not be cancelled")
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
-	svc.executor = executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.turnService = &repoTurnService{repo: repo}
 	turn, err := svc.turnService.StartTurn(context.Background(), sessionID)
 	if err != nil {
@@ -2014,7 +2014,7 @@ func TestDispatchClarificationResumeLocked_ReturnPaths(t *testing.T) {
 		repo := setupTestRepo(t)
 		agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-		svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+		svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 		recorded := &recordingEventBus{}
 		svc.eventBus = recorded
 		seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)

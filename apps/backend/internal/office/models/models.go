@@ -639,6 +639,13 @@ type TaskBlocker struct {
 	CreatedAt     time.Time `json:"created_at" db:"created_at"`
 }
 
+// RelationModel represents a symmetric, non-blocking task relationship.
+type RelationModel struct {
+	TaskIDLow  string    `json:"task_id_low" db:"task_id_low"`
+	TaskIDHigh string    `json:"task_id_high" db:"task_id_high"`
+	CreatedAt  time.Time `json:"created_at" db:"created_at"`
+}
+
 // Participant role values for the office_task_participants table.
 // The DB has a CHECK constraint that pins these to two literals.
 const (

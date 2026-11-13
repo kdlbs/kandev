@@ -69,6 +69,7 @@ type Repository interface {
 	ListTasksByWorkspace(ctx context.Context, workspaceID string, includeSystem bool) ([]*sqlite.TaskRow, error)
 	ListTasksFiltered(ctx context.Context, workspaceID string, opts sqlite.ListTasksOptions) (*sqlite.ListTasksFilteredResult, error)
 	GetTaskByID(ctx context.Context, taskID string) (*sqlite.TaskRow, error)
+	GetTaskIDByIdentifier(ctx context.Context, workspaceID, identifier string) (string, error)
 	ListChildTasks(ctx context.Context, parentID string) ([]*sqlite.TaskRow, error)
 	ListBlockersForTasks(ctx context.Context, taskIDs []string) (map[string][]string, error)
 	ListTaskComments(ctx context.Context, taskID string) ([]*models.TaskComment, error)
@@ -101,6 +102,7 @@ type Repository interface {
 	DeleteTaskBlocker(ctx context.Context, taskID, blockerTaskID string) error
 	ListTaskBlockers(ctx context.Context, taskID string) ([]*models.TaskBlocker, error)
 	ListTaskParticipants(ctx context.Context, taskID, role string) ([]sqlite.Participant, error)
+	ListTaskParticipantsAtStep(ctx context.Context, taskID, stepID, role string) ([]sqlite.Participant, error)
 	ListAllTaskParticipants(ctx context.Context, taskID string) ([]sqlite.Participant, error)
 	// ListTaskParticipantsAtCurrentStep is the step-scoped seat read
 	// AC-OFFICE-SESSION-TERM-002.3 requires for session-termination
@@ -450,6 +452,8 @@ type DashboardService struct {
 	workspaceLister       WorkspaceLister                 // optional; nil disables the multi-workspace aggregate endpoint
 	taskStateWriter       shared.TaskStateWriter          // task repository owns transactional state changes and completion guards
 	controlCapacity       ControlCapacitySource           // optional; nil omits shared_capacity_waiting from the control dashboard
+	humanDoneCompleter    TaskHumanDoneCompleter
+	finalStepMover        TaskFinalStepMover // optional; nil keeps the in_review redirect for human Done on a non-final step
 }
 
 // SetRoutingProvider wires the provider-routing seam used by the
@@ -871,6 +875,12 @@ func (s *DashboardService) ListTasksFiltered(
 // GetTask returns a single task by ID. Returns nil, nil when not found.
 func (s *DashboardService) GetTask(ctx context.Context, taskID string) (*sqlite.TaskRow, error) {
 	return s.repo.GetTaskByID(ctx, taskID)
+}
+
+// ResolveTaskIdentifier returns the task id for a workspace-scoped identifier
+// such as "KAN-11". Returns "", nil when no task matches.
+func (s *DashboardService) ResolveTaskIdentifier(ctx context.Context, workspaceID, identifier string) (string, error) {
+	return s.repo.GetTaskIDByIdentifier(ctx, workspaceID, identifier)
 }
 
 // ListChildTasks returns direct child tasks of a parent task.

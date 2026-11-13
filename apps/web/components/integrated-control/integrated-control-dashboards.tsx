@@ -74,6 +74,7 @@ export function IntegratedControlDashboard({
           <ControlAggregateOverview
             aggregate={control.aggregate}
             controlWorkspaceIds={workspaces.map((workspace) => workspace.id)}
+            workspaceId={workspaceId}
           />
           <ControlNativeComparison workspaces={workspaces} revision={control.data} />
         </>

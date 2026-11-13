@@ -73,3 +73,4 @@ separate [replacement behavior](configuration-chat-restart.md).
 ## Implementation plans
 
 - [Session tab restart](../../../plans/session-tab-restart/plan.md)
+- [Blocked-session recovery guidance](../../../plans/blocked-session-recovery-guidance/plan.md)

@@ -22,12 +22,12 @@ func (r *ProfileExecutionResolver) SetCandidateExecutionUsageReader(reader Candi
 	r.candidateUsageReader = reader
 }
 
-func (r *ProfileExecutionResolver) LoadDynamicProfileForSession(ctx context.Context, profileID, sessionID string) (dynamic.Profile, error) {
+func (r *ProfileExecutionResolver) LoadDynamicProfileForSession(ctx context.Context, sessionID, profileID string) (dynamic.Profile, error) {
 	return r.loadSelectionProfile(ctx, profileID, sessionID)
 }
 
 func (r *ProfileExecutionResolver) loadSelectionProfile(ctx context.Context, profileID, sessionID string) (dynamic.Profile, error) {
-	profile, err := r.loadDynamicProfile(ctx, profileID)
+	profile, err := r.loadDynamicProfile(ctx, profileID, sessionID)
 	if err != nil || sessionID == "" {
 		return profile, err
 	}

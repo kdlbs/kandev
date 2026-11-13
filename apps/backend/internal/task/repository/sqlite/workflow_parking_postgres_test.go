@@ -105,7 +105,7 @@ func TestPostgresWorkflowStepCreateSerializesWithDelete(t *testing.T) {
 
 	require.NoError(t, blocker.Rollback())
 	require.NoError(t, <-deleteDone)
-	require.ErrorIs(t, <-createDone, repoerrors.ErrWorkflowNotFound)
+	require.ErrorIs(t, <-createDone, repoerrors.ErrWorkflowChangeConflict)
 
 	var remaining int
 	require.NoError(t, db.GetContext(ctx, &remaining, db.Rebind(`
@@ -127,16 +127,15 @@ func waitForWorkflowStepLockWaiters(t *testing.T, ctx context.Context, db *sqlx.
 			WHERE datname = current_database()
 			  AND pid <> pg_backend_pid()
 			  AND wait_event_type = 'Lock'
-			  AND query LIKE '%FROM workflows%'
 		`); err != nil {
-			t.Fatalf("inspect PostgreSQL workflow row lock waiters: %v", err)
+			t.Fatalf("inspect PostgreSQL lock waiters: %v", err)
 		}
 		if waiters >= want {
 			return
 		}
 		select {
 		case <-waitCtx.Done():
-			t.Fatalf("timed out waiting for %d workflow row lock waiters", want)
+			t.Fatalf("timed out waiting for %d PostgreSQL lock waiters", want)
 		case <-ticker.C:
 		}
 	}

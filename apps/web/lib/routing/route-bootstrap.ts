@@ -82,6 +82,7 @@ export function mapWorkspaceItem(ws: WorkspaceItem): WorkspaceState["items"][num
     dynamic_failed_route_auto_retry_enabled: ws.dynamic_failed_route_auto_retry_enabled ?? false,
     dynamic_failed_route_auto_retry_max: ws.dynamic_failed_route_auto_retry_max ?? 1,
     office_workflow_id: ws.office_workflow_id ?? null,
+    task_prefix: ws.task_prefix,
     created_at: ws.created_at,
     updated_at: ws.updated_at,
   };

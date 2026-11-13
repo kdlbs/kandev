@@ -16,7 +16,7 @@ func (r *ProfileExecutionResolver) PreviewDynamicTiers(ctx context.Context, prof
 	if r.engine == nil {
 		return dynamic.TierPreview{}, errors.New("dynamic preview unavailable")
 	}
-	profile, err := r.dynamicProfileFromRoutes(ctx, profileID, version, routes)
+	profile, err := r.dynamicProfileFromRoutes(ctx, profileID, "", version, routes)
 	if err != nil {
 		return dynamic.TierPreview{}, err
 	}

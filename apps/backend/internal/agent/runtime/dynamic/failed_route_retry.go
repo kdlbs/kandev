@@ -167,11 +167,11 @@ func (e *Engine) failedRouteRetryDueLocked(ctx context.Context, profile Profile,
 		if state.Status == routeStatusActionRequired && candidate.ID != state.ExecutionProfileID {
 			continue
 		}
-		if candidate.BindingKey != "" && e.circuits.IsHeld(candidate.BindingKey) {
+		until, recoverable := e.candidateRetryWindow(ctx, candidate)
+		if !recoverable {
 			continue
 		}
-		until, open := e.candidateOpenUntil(ctx, candidate)
-		if !open {
+		if until.IsZero() {
 			// A closed candidate is usable now; the minimum delay decides.
 			return notBefore, true
 		}
@@ -279,22 +279,24 @@ func (e *Engine) FailedRouteRetryChainFor(ctx context.Context, sessionID string)
 	return *policyState.FailedRouteRetry, nil
 }
 
-// candidateOpenUntil returns the latest expiry among the candidate's binding
-// circuit and, with provider limits on, the narrow suspensions that
-// selectNarrowCircuit consults for it.
-func (e *Engine) candidateOpenUntil(ctx context.Context, candidate Candidate) (time.Time, bool) {
-	until, open := e.circuits.OpenUntil(candidate.BindingKey)
-	if e.limits == nil {
-		return until, open
+// candidateRetryWindow uses the same circuits as candidate selection.
+func (e *Engine) candidateRetryWindow(ctx context.Context, candidate Candidate) (time.Time, bool) {
+	keys := candidateBindingCircuitKeys(candidate)
+	if e.limits != nil {
+		circuitCandidate := candidate
+		if candidate.UsagePolicy != nil && candidate.UsagePolicy.ProfileID == candidate.ID && usage.MatchesSelectedUsage(ctx, candidate.UsagePolicy) {
+			circuitCandidate.ModelID = candidate.UsagePolicy.ExpectedModel
+		}
+		keys = append(keys, limitSuspensionKeys(circuitCandidate)...)
 	}
-	circuitCandidate := candidate
-	if candidate.UsagePolicy != nil && candidate.UsagePolicy.ProfileID == candidate.ID && usage.MatchesSelectedUsage(ctx, candidate.UsagePolicy) {
-		circuitCandidate.ModelID = candidate.UsagePolicy.ExpectedModel
-	}
-	for _, key := range limitSuspensionKeys(circuitCandidate) {
-		if keyUntil, keyOpen := e.circuits.OpenUntil(key); keyOpen && (!open || keyUntil.After(until)) {
-			until, open = keyUntil, true
+	var until time.Time
+	for _, key := range keys {
+		if e.circuits.IsHeld(key) {
+			return time.Time{}, false
+		}
+		if keyUntil, keyOpen := e.circuits.OpenUntil(key); keyOpen && keyUntil.After(until) {
+			until = keyUntil
 		}
 	}
-	return until, open
+	return until, true
 }

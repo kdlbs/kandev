@@ -50,7 +50,11 @@ func (s *Service) prepareInitialRecoveryPrompt(
 		return nil, nil
 	}
 	if submission != nil {
-		prepared, composeErr := s.composeFreshStartWorkflowPrompt(ctx, task, session, submission.Content)
+		explicitLaunch := false
+		if raw, ok := session.Metadata[models.SessionMetaKeyInitialPromptExplicitLaunch].(bool); ok {
+			explicitLaunch = raw
+		}
+		prepared, composeErr := s.composeFreshStartWorkflowPrompt(ctx, task, session, submission.Content, explicitLaunch)
 		if composeErr != nil {
 			return nil, composeErr
 		}
@@ -61,7 +65,7 @@ func (s *Service) prepareInitialRecoveryPrompt(
 	if err != nil || !eligible {
 		return nil, err
 	}
-	prepared, err := s.composeFreshStartWorkflowPrompt(ctx, task, session, task.Description)
+	prepared, err := s.composeFreshStartWorkflowPrompt(ctx, task, session, task.Description, false)
 	if err != nil {
 		return nil, err
 	}
@@ -143,6 +147,7 @@ func (s *Service) composeFreshStartWorkflowPrompt(
 	task *models.Task,
 	session *models.TaskSession,
 	content string,
+	preserveDirectPrompt bool,
 ) (*initialRecoveryPrompt, error) {
 	ctx = withWorkflowMetaCache(ctx)
 	if task.WorkflowStepID == "" {
@@ -179,7 +184,7 @@ func (s *Service) composeFreshStartWorkflowPrompt(
 	}
 	composed, referenceContext := s.buildWorkflowPromptWithContextOptions(
 		ctx, content, step, task.ID, session.ID, session.IsPassthrough,
-		false, false, false,
+		false, preserveDirectPrompt, false,
 	)
 	return &initialRecoveryPrompt{
 		content:          composed,

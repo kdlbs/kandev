@@ -1192,7 +1192,12 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	if s.drainQueuedBeforeWorkflowTransition(completionCtx, data.TaskID, data.SessionID, session) {
 		return
 	}
-	if err := s.reconcileAgentDeliverySettlements(context.WithoutCancel(completionCtx), data.SessionID); err != nil {
+	settlementCtx := context.WithoutCancel(completionCtx)
+	if guardLocked {
+		settlementCtx = withSettledDeliverySessionStateGuardHeld(settlementCtx)
+	}
+	settlementCtx = withSettledDeliverySessionStateConvergenceSkipped(settlementCtx)
+	if err := s.reconcileAgentDeliverySettlements(settlementCtx, data.SessionID); err != nil {
 		s.logger.Warn("failed to prepare terminal delivery settlement before workflow evaluation",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
 	}
@@ -1217,7 +1222,11 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			cause = turnCompletionCauseUserCancellation
 		}
 		transitioned := s.processOnTurnCompleteViaEngineWithCause(transitionCtx, data.TaskID, session, cause)
-		if err := s.reconcileAgentDeliverySettlements(context.WithoutCancel(completionCtx), data.SessionID); err != nil {
+		settlementCtx := context.WithoutCancel(completionCtx)
+		if guardLocked {
+			settlementCtx = withSettledDeliverySessionStateGuardHeld(settlementCtx)
+		}
+		if err := s.reconcileAgentDeliverySettlements(settlementCtx, data.SessionID); err != nil {
 			s.logger.Warn("failed to reconcile terminal delivery after workflow evaluation",
 				zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
 		}
@@ -2868,6 +2877,7 @@ func (s *Service) finishAgentCompleted(
 	session *models.TaskSession,
 	guard *lockedCancelInFlightGuard,
 ) {
+	s.clearKeywordFailureHistory(data.SessionID)
 	completionFollowUp := models.IsCompletionFollowUpSession(session.Metadata)
 	s.clearDynamicUnclassifiedStreakForCompletion(ctx, data)
 	s.resetDynamicCircuitFailuresForCompletion(ctx, data, session)
@@ -2920,7 +2930,12 @@ func (s *Service) finishAgentCompleted(
 	}
 
 	transitionCtx := agentCompletionTransitionAttribution(completionCtx, data)
-	if err := s.reconcileAgentDeliverySettlements(completionCtx, data.SessionID); err != nil {
+	settlementCtx := completionCtx
+	if guard != nil && guard.locked {
+		settlementCtx = withSettledDeliverySessionStateGuardHeld(settlementCtx)
+	}
+	settlementCtx = withSettledDeliverySessionStateConvergenceSkipped(settlementCtx)
+	if err := s.reconcileAgentDeliverySettlements(settlementCtx, data.SessionID); err != nil {
 		s.logger.Warn("failed to prepare terminal delivery settlement before completed workflow evaluation",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
 	}
@@ -2937,7 +2952,11 @@ func (s *Service) finishAgentCompleted(
 		}
 		transitioned = s.processOnTurnCompleteViaEngineWithCause(transitionCtx, data.TaskID, session, cause)
 	}
-	if err := s.reconcileAgentDeliverySettlements(completionCtx, data.SessionID); err != nil {
+	postSettlementCtx := completionCtx
+	if guard != nil && guard.locked {
+		postSettlementCtx = withSettledDeliverySessionStateGuardHeld(postSettlementCtx)
+	}
+	if err := s.reconcileAgentDeliverySettlements(postSettlementCtx, data.SessionID); err != nil {
 		s.logger.Warn("failed to reconcile terminal delivery after completed workflow evaluation",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
 	}
@@ -3108,6 +3127,9 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 		return nil
 	}
 	data = s.withPromptAttemptEvidence(data)
+	if data.OutputObserved || data.EffectObserved {
+		s.clearKeywordFailureHistory(data.SessionID)
+	}
 	defer s.clearPromptAttemptEvidence(data.SessionID, data.AgentExecutionID, data.PromptGeneration)
 	s.logger.Warn("handling agent failed",
 		zap.String("task_id", data.TaskID),
@@ -3142,7 +3164,7 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 	s.retireInitialCreatePromptPassthroughForEvent(ctx, data)
 	if data.SessionID != "" {
 		routeResult := s.routeDynamicAgentFailureWithEvidence(
-			ctx, data, classifyKanbanFailure(data), nil, true,
+			ctx, data, s.classifyKanbanFailure(data), nil, true,
 		)
 		if routeResult.handled && !routeResult.manualRecovery {
 			return nil
@@ -4180,7 +4202,7 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	// Resume-corrupted failures (poisoned extended-thinking state after a
 	// session/load) can't be fixed by resuming — steer the user to a fresh
 	// session instead of dumping the raw 400.
-	classified := classifyKanbanFailure(data)
+	classified := s.classifyKanbanFailure(data)
 	statusMsg := fmt.Sprintf("Agent encountered an error: %s", displayMsg)
 	if data.Phase == models.LaunchErrorPhaseBootstrap {
 		statusMsg = fmt.Sprintf("Agent startup failed: %s", displayMsg)
@@ -4330,11 +4352,7 @@ func applyProviderQuotaMetadata(meta map[string]interface{}, data watcher.AgentE
 		!data.ProviderError.Valid() {
 		return false
 	}
-	classified := routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhaseStreaming,
-		ProviderID: data.AgentID,
-		Stderr:     data.ProviderError.Message,
-	})
+	classified := routingerr.Classify(data.ProviderError.RoutingInput(routingerr.PhaseStreaming, data.AgentID, data.ProviderError.Message))
 	if classified.Code != routingerr.CodeQuotaLimited || classified.Confidence != routingerr.ConfHigh {
 		return false
 	}

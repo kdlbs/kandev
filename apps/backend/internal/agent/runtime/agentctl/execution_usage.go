@@ -13,7 +13,7 @@ import (
 )
 
 func (c *Client) ConfigureAgentWithUsage(ctx context.Context, command string, args []string, env map[string]string, continueCommand string, continueArgs []string, policy *usage.ExecutionUsagePolicy) error {
-	return c.configureAgent(ctx, command, args, env, continueCommand, continueArgs, false, policy, nil)
+	return c.configureAgent(ctx, command, args, env, continueCommand, continueArgs, false, policy, nil, nil)
 }
 
 func (c *Client) ReadExecutionUsage(ctx context.Context, model string) (*usage.ExecutionUsageReport, error) {

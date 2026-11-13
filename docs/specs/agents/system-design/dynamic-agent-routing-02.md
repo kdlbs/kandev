@@ -5,7 +5,7 @@ requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-ROLLOUT-BLOCKERS-001
 created: 2026-08-13
-updated: 2026-10-31
+updated: 2026-11-08
 owners:
   - cfl
 ---
@@ -305,6 +305,13 @@ require the current exclusive probe lease.
   start fail, while a profile change first makes preparation resolve the new
   profile. A different dynamic profile is reached through a new session (the
   workflow profile-switch path), not by relabelling this one.
+- A workspace-only execution can exist before a concrete candidate is
+  selected. When `promoteWorkspaceExecution` prepares the agent launch, it binds
+  the execution's profile ID to the resolved concrete profile and persists the
+  executor-running row whenever that profile or the acting Office profile
+  changes. The Office profile stays in its separate field, so command
+  construction, startup, persistence, and restart read the same concrete
+  profile (`AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.31`).
 
 ## Scenarios
 

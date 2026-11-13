@@ -14,6 +14,9 @@ requirements:
 Workflow attention supplements check results. It does not rewrite GitHub mergeability or manufacture check runs.
 The integration owns collection, storage, and interpretation. Existing shared components own presentation geometry.
 
+The November 11 amendment changes only badge priority through the implemented [corner-badge fix](../../../plans/pr-conflict-corner-badge/plan.md).
+All provider collection, caching, freshness, and projection contracts retain their existing behavior.
+
 ## Requirement mapping
 
 | Acceptance criteria | Design sections |
@@ -312,16 +315,18 @@ The observation state must equal `approval_required`; `action_required`, `unknow
 Same-head stale positives remain eligible. The task summary retains their stale flag so the last-known status stays qualified by PR after hydration.
 
 Aggregate eligibility across open PRs independently from the status-color calculation.
-`PRTaskIconView` supplies the approval flag through `PRTaskIconGlyph` to `PRStatusGlyph`.
-The new `hasWorkflowApprovalRequired` glyph prop defaults to false.
-Other glyph callers remain compatible; adding the badge to the topbar is outside this package.
+`PRTaskIconView` supplies the approval flag through the shared CI state to `PRStatusGlyph`.
+The `ciState` glyph prop defaults to `none`.
+Other glyph callers remain compatible; the topbar, subtask, and composer glyphs consume the same CI state through the [CI bubble package](github-pr-ci-bubble.md).
 
-Use Tabler `IconLockFilled` in the existing upper-right warning wrapper.
-Keep the wrapper at 10px and the glyph at 8px, matching the current conflict badge.
+Use Tabler `IconLockFilled` in the shared 10px upper-right CI bubble wrapper.
+Keep the glyph at 8px.
 Use `text-[#D97706] dark:text-[#FBBF24]` and the existing `bg-background` halo.
 Explicit colors preserve the accepted palette independently of Tailwind's amber token version.
 Keep the PR color and automation dot positions intact. Do not add animation or a separate badge interaction target.
-Render the red conflict triangle when both flags are true; retain both facts in text and accessible names.
+When conflicts coexist with approval, the conflict triangle owns the shared upper-right slot and hides the lock.
+Retain both facts in text and accessible names. After conflict resolution, show the lock if approval remains the selected CI state.
+Conflict placement, CI priority, and skipped-check neutrality belong to the [CI bubble design](github-pr-ci-bubble.md).
 
 ### Bounded projection
 

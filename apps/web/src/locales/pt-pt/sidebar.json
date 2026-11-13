@@ -88,6 +88,7 @@
   "quickChatTerminalConnecting": "A ligar ao terminal…",
   "quickChatTerminalExited": "O terminal terminou.",
   "quickChatTerminalExitedWithCode": "O terminal terminou com o código {{code}}.",
+  "quickChatTerminalStartNewShell": "Iniciar nova shell",
   "quickChatAdd": "Adicionar ou mudar de separador",
   "reconnecting": "A voltar a ligar",
   "reconnectingToKandev": "A voltar a ligar ao Kandev",

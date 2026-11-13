@@ -43,7 +43,9 @@ var (
 )
 
 type Candidate struct {
-	UsagePolicy *usage.ExecutionUsagePolicy `json:"-"`
+	KeywordContextEnabled bool
+	KeywordAccountID      string
+	UsagePolicy           *usage.ExecutionUsagePolicy `json:"-"`
 	// RequireExecutionUsage distinguishes an unknown execution source from
 	// the legacy path where execution-owned usage is disabled.
 	RequireExecutionUsage bool `json:"-"`

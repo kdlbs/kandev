@@ -172,6 +172,7 @@ type CreateTaskRequest struct {
 	ProjectID              string   `json:"project_id,omitempty"`
 	Labels                 string   `json:"labels,omitempty"`
 	BlockedBy              []string `json:"blocked_by,omitempty"`
+	RelatedTaskIDs         []string `json:"related_task_ids,omitempty"`
 
 	// RequireAssigneeAgentProfileValidation opts this request into create-time
 	// validation of AssigneeAgentProfileID (must name an Office agent instance
@@ -340,25 +341,26 @@ type InitializeLocalRepositoryRequest struct {
 
 // UpdateRepositoryRequest contains the data for updating a repository
 type UpdateRepositoryRequest struct {
-	ExpectedUpdatedAt      *time.Time `json:"-"`
-	Name                   *string    `json:"name,omitempty"`
-	SourceType             *string    `json:"source_type,omitempty"`
-	LocalPath              *string    `json:"local_path,omitempty"`
-	Provider               *string    `json:"provider,omitempty"`
-	ProviderRepoID         *string    `json:"provider_repo_id,omitempty"`
-	ProviderHost           *string    `json:"provider_host,omitempty"`
-	ProviderScope          *string    `json:"provider_scope,omitempty"`
-	ProviderOwner          *string    `json:"provider_owner,omitempty"`
-	ProviderName           *string    `json:"provider_name,omitempty"`
-	RemoteURL              *string    `json:"remote_url,omitempty"`
-	DefaultBranch          *string    `json:"default_branch,omitempty"`
-	WorktreeBranchPrefix   *string    `json:"worktree_branch_prefix,omitempty"`
-	WorktreeBranchTemplate *string    `json:"worktree_branch_template,omitempty"`
-	PullBeforeWorktree     *bool      `json:"pull_before_worktree,omitempty"`
-	SetupScript            *string    `json:"setup_script,omitempty"`
-	CleanupScript          *string    `json:"cleanup_script,omitempty"`
-	DevScript              *string    `json:"dev_script,omitempty"`
-	CopyFiles              *string    `json:"copy_files,omitempty"`
+	ExpectedUpdatedAt      *time.Time                      `json:"-"`
+	ObservedIdentity       *models.RepositoryIdentityFence `json:"-"`
+	Name                   *string                         `json:"name,omitempty"`
+	SourceType             *string                         `json:"source_type,omitempty"`
+	LocalPath              *string                         `json:"local_path,omitempty"`
+	Provider               *string                         `json:"provider,omitempty"`
+	ProviderRepoID         *string                         `json:"provider_repo_id,omitempty"`
+	ProviderHost           *string                         `json:"provider_host,omitempty"`
+	ProviderScope          *string                         `json:"provider_scope,omitempty"`
+	ProviderOwner          *string                         `json:"provider_owner,omitempty"`
+	ProviderName           *string                         `json:"provider_name,omitempty"`
+	RemoteURL              *string                         `json:"remote_url,omitempty"`
+	DefaultBranch          *string                         `json:"default_branch,omitempty"`
+	WorktreeBranchPrefix   *string                         `json:"worktree_branch_prefix,omitempty"`
+	WorktreeBranchTemplate *string                         `json:"worktree_branch_template,omitempty"`
+	PullBeforeWorktree     *bool                           `json:"pull_before_worktree,omitempty"`
+	SetupScript            *string                         `json:"setup_script,omitempty"`
+	CleanupScript          *string                         `json:"cleanup_script,omitempty"`
+	DevScript              *string                         `json:"dev_script,omitempty"`
+	CopyFiles              *string                         `json:"copy_files,omitempty"`
 	// SecretBindings uses nil to preserve the current set and a non-nil empty
 	// slice to clear it.
 	SecretBindings *[]RepositorySecretBindingInput `json:"secret_bindings,omitempty"`

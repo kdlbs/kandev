@@ -2,6 +2,108 @@
 
 All notable changes to Kandev.
 
+## 0.101.0 - 2026-11-11
+
+### Features
+
+- select built-in packages and workspace MCPs ([#5106](https://github.com/kdlbs/kandev/pull/5106))
+- clarify change workflow selector fields ([#5249](https://github.com/kdlbs/kandev/pull/5249))
+- comment on extracts of task thread comments ([#5233](https://github.com/kdlbs/kandev/pull/5233)) by @jcoatelen-ledger
+- review question images in a large A/B view ([#5239](https://github.com/kdlbs/kandev/pull/5239)) by @point-source
+- cancel running chat turn with escape ([#5241](https://github.com/kdlbs/kandev/pull/5241)) by @ZenitK
+- show CI bubbles on PR status icons ([#5244](https://github.com/kdlbs/kandev/pull/5244))
+- preview HTML files from review diffs ([#5243](https://github.com/kdlbs/kandev/pull/5243))
+- remote credentials and config bundle for Pi ([#4767](https://github.com/kdlbs/kandev/pull/4767)) by @naerymdan
+- add Telegram plugin to the registry ([#4756](https://github.com/kdlbs/kandev/pull/4756)) by @scottof
+- move the task graph action into composer actions ([#5232](https://github.com/kdlbs/kandev/pull/5232))
+- show readable byte sizes in startup progress ([#5236](https://github.com/kdlbs/kandev/pull/5236))
+- reuse verified managed npm repairs ([#5208](https://github.com/kdlbs/kandev/pull/5208))
+- classify unmatched provider diagnostics with opt-in context ([#4917](https://github.com/kdlbs/kandev/pull/4917)) by @dreampiler
+- add task relationship graph and create-time linking ([#5115](https://github.com/kdlbs/kandev/pull/5115)) by @ZenitK
+- distinguish recorded waiting reasons ([#5148](https://github.com/kdlbs/kandev/pull/5148)) by @dreampiler
+
+### Bug Fixes
+
+- match npm token exchange response contract ([#5275](https://github.com/kdlbs/kandev/pull/5275))
+- ignore creation metadata in npm preflight ([#5264](https://github.com/kdlbs/kandev/pull/5264))
+- explain npm preflight response failures ([#5261](https://github.com/kdlbs/kandev/pull/5261))
+- keep attachment previews open across the hover gap ([#5238](https://github.com/kdlbs/kandev/pull/5238))
+- bind step completion to its source ([#5173](https://github.com/kdlbs/kandev/pull/5173)) ([#5247](https://github.com/kdlbs/kandev/pull/5247))
+- start edited schedules after the save ([#5220](https://github.com/kdlbs/kandev/pull/5220)) ([#5245](https://github.com/kdlbs/kandev/pull/5245))
+- recover watch mappings after task deletion ([#5206](https://github.com/kdlbs/kandev/pull/5206)) ([#5246](https://github.com/kdlbs/kandev/pull/5246))
+- link only workspace-prefixed task identifiers ([#5231](https://github.com/kdlbs/kandev/pull/5231)) by @jcoatelen-ledger
+- classify mid-run provider quota notices ([#5222](https://github.com/kdlbs/kandev/pull/5222)) ([#5234](https://github.com/kdlbs/kandev/pull/5234))
+- carry pinned client through cancel escalation ([#5235](https://github.com/kdlbs/kandev/pull/5235))
+- create distinct sessions for explicit spawn requests ([#4475](https://github.com/kdlbs/kandev/pull/4475)) by @yattdev
+- require selected runtime admission ([#5228](https://github.com/kdlbs/kandev/pull/5228))
+- resolve managed npm prefix in ACP provider probe ([#5229](https://github.com/kdlbs/kandev/pull/5229)) by @jcoatelen-ledger
+- fence profile destination allocation by entry ([#4772](https://github.com/kdlbs/kandev/pull/4772)) by @yattdev
+- harden npm publication reliability ([#5226](https://github.com/kdlbs/kandev/pull/5226))
+- run executor admission on workflow cold resume ([#5176](https://github.com/kdlbs/kandev/pull/5176)) by @jumprope-jesse
+- isolate dynamic candidate runtime settings ([#4600](https://github.com/kdlbs/kandev/pull/4600)) by @dreampiler
+- preserve structured provider failure signals ([#4601](https://github.com/kdlbs/kandev/pull/4601)) by @dreampiler
+- ignore stopped executor rows when deleting a workspace ([#5227](https://github.com/kdlbs/kandev/pull/5227)) by @jcoatelen-ledger
+- recover delivery health and settled session state ([#5225](https://github.com/kdlbs/kandev/pull/5225))
+- preserve attachment delivery after workspace rescans ([#5223](https://github.com/kdlbs/kandev/pull/5223))
+- keep Done visible during task dragging ([#5224](https://github.com/kdlbs/kandev/pull/5224))
+- allow edits past unresolvable retained executor bindings ([#5179](https://github.com/kdlbs/kandev/pull/5179)) by @jumprope-jesse
+- settle context-continued notices and keep workspace recovery session-owned ([#5177](https://github.com/kdlbs/kandev/pull/5177)) by @dreampiler
+- preserve explicit workflow launch prompts ([#5178](https://github.com/kdlbs/kandev/pull/5178)) ([#5213](https://github.com/kdlbs/kandev/pull/5213))
+- repair SCP locators and clone URLs ([#5212](https://github.com/kdlbs/kandev/pull/5212))
+- retain selected profile when promoting a workspace ([#5162](https://github.com/kdlbs/kandev/pull/5162)) by @dreampiler
+- return typed workspace deletion errors ([#5209](https://github.com/kdlbs/kandev/pull/5209))
+- report bounded update stream stages ([#5138](https://github.com/kdlbs/kandev/pull/5138)) by @dreampiler
+- detach inherited environment on non-Kubernetes executor transition ([#5175](https://github.com/kdlbs/kandev/pull/5175)) by @dreampiler
+- recover brief refresh lock contention ([#5215](https://github.com/kdlbs/kandev/pull/5215))
+- admit authorized Claude API-key profiles on remote executors ([#5214](https://github.com/kdlbs/kandev/pull/5214))
+
+### Performance
+
+- reuse session summary observations and parse projection JSON once ([#5185](https://github.com/kdlbs/kandev/pull/5185)) by @jumprope-jesse
+
+### Documentation
+
+- fix PR screenshot publishing guidance ([#5242](https://github.com/kdlbs/kandev/pull/5242))
+
+## 0.100.0 - 2026-11-09
+
+### Features
+
+- let Office agents set blockers and workspace mode on task create ([#4614](https://github.com/kdlbs/kandev/pull/4614)) by @point-source
+- group profile delete conflict tasks by workspace ([#5041](https://github.com/kdlbs/kandev/pull/5041)) by @jhillyerd
+- add workspace-scoped plugin tools ([#5107](https://github.com/kdlbs/kandev/pull/5107))
+
+### Bug Fixes
+
+- preserve legacy handoff report identity ([#5150](https://github.com/kdlbs/kandev/pull/5150)) by @dreampiler
+- classify prefixed OpenCode free usage limits ([#5120](https://github.com/kdlbs/kandev/pull/5120)) by @dreampiler
+- diagnose stalled stop phases ([#5139](https://github.com/kdlbs/kandev/pull/5139)) by @dreampiler
+- reconcile SSH controllers after directory loss ([#5145](https://github.com/kdlbs/kandev/pull/5145)) ([#5201](https://github.com/kdlbs/kandev/pull/5201))
+- reconcile standalone retained journal owners ([#5165](https://github.com/kdlbs/kandev/pull/5165)) ([#5200](https://github.com/kdlbs/kandev/pull/5200))
+- preserve fresh-start workflow context ([#5137](https://github.com/kdlbs/kandev/pull/5137)) ([#5198](https://github.com/kdlbs/kandev/pull/5198))
+- fail closed on missing explicit base ([#5142](https://github.com/kdlbs/kandev/pull/5142)) ([#5199](https://github.com/kdlbs/kandev/pull/5199))
+- preserve explicit disable at equal timestamps ([#5153](https://github.com/kdlbs/kandev/pull/5153)) by @dreampiler
+- bind worktree script messages without opening a turn ([#5151](https://github.com/kdlbs/kandev/pull/5151)) ([#5196](https://github.com/kdlbs/kandev/pull/5196))
+- restore workspace trackers after agent restart ([#5197](https://github.com/kdlbs/kandev/pull/5197))
+- distinguish restored history from requests ([#5062](https://github.com/kdlbs/kandev/pull/5062)) by @dreampiler
+- preserve successful antigravity login streams ([#5195](https://github.com/kdlbs/kandev/pull/5195))
+- bound logs and temporary scratch for new executors ([#5147](https://github.com/kdlbs/kandev/pull/5147)) by @jumprope-jesse
+- restore transcript scroll after backend restart ([#5194](https://github.com/kdlbs/kandev/pull/5194))
+- preserve unpublished commits when resuming retained repositories ([#5100](https://github.com/kdlbs/kandev/pull/5100)) by @jumprope-jesse
+- carry cross-step promotion entry ID ([#5144](https://github.com/kdlbs/kandev/pull/5144)) by @dreampiler
+- make generic compaction help provider-neutral ([#5166](https://github.com/kdlbs/kandev/pull/5166))
+- launch Office runs into prepared sessions with a different profile ([#5133](https://github.com/kdlbs/kandev/pull/5133)) by @point-source
+- preserve startup process exit diagnostics ([#5128](https://github.com/kdlbs/kandev/pull/5128)) ([#5168](https://github.com/kdlbs/kandev/pull/5168))
+- release capacity-deferred watcher reservations ([#5099](https://github.com/kdlbs/kandev/pull/5099)) by @jumprope-jesse
+- replay uncommitted fresh-start successor streams ([#5136](https://github.com/kdlbs/kandev/pull/5136))
+- recover incomplete npm caches after upgrades ([#5164](https://github.com/kdlbs/kandev/pull/5164))
+- handle namespaced versions in upgrade backups ([#5154](https://github.com/kdlbs/kandev/pull/5154))
+- restore weekly managed runtime updates ([#5076](https://github.com/kdlbs/kandev/pull/5076))
+- recover interrupted foreground handoff deliveries ([#5104](https://github.com/kdlbs/kandev/pull/5104)) ([#5109](https://github.com/kdlbs/kandev/pull/5109))
+- scope terminal ownership across shared task environments ([#5108](https://github.com/kdlbs/kandev/pull/5108))
+- restore Pi built-in MCP project delivery ([#5090](https://github.com/kdlbs/kandev/pull/5090)) ([#5096](https://github.com/kdlbs/kandev/pull/5096))
+- render rich output from built-in MCP packages ([#5097](https://github.com/kdlbs/kandev/pull/5097))
+
 ## 0.99.1 - 2026-11-06
 
 ### Features

@@ -15,6 +15,9 @@ import (
 )
 
 const (
+	worktreeExecutor               = "worktree"
+	credentialHomeEnvKey           = "HOME"
+	credentialProfileEnvKey        = "USERPROFILE"
 	snapshotCodexACPAgentID        = "codex-acp"
 	snapshotCodexAppServerAgentID  = "codex-app-server"
 	snapshotHostDefault            = "host_default"
@@ -231,13 +234,13 @@ func snapshotHostBinding(profile *settingsmodels.AgentProfile) bool {
 		return false
 	}
 	switch strings.TrimSpace(profile.ExecutorPreference) {
-	case "", hostSourceLocal, "worktree", "standalone":
+	case "", hostSourceLocal, worktreeExecutor, "standalone":
 	default:
 		return false
 	}
 	for _, env := range profile.EnvVars {
 		switch snapshotEnvKey(env.Key) {
-		case "HOME", "USERPROFILE", "XDG_DATA_HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG_CONTENT":
+		case credentialHomeEnvKey, credentialProfileEnvKey, "XDG_DATA_HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG_CONTENT":
 			return false
 		}
 	}

@@ -28,6 +28,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/system/storage"
@@ -88,6 +89,7 @@ type Manager struct {
 	profileDiscoveryFlights       map[uint64]profileDiscoveryFlight
 	nextProfileDiscoveryFlight    uint64
 	managedRuntimeSelections      managedruntime.SelectionReader
+	managedRuntimeSingleUserOwner func() (string, bool)
 	loginMu                       sync.Mutex
 	loginAttempt                  *antigravityLoginAttempt
 	startCancel                   context.CancelFunc
@@ -141,6 +143,8 @@ type (
 
 // Shared probes and prompts each take one slot. Repair takes every slot so it
 // cannot remove an npm execution tree while another utility process uses it.
+const managedRuntimeSystemOwnerUserID = "system"
+
 const hostUtilityOperationCapacity int64 = 1 << 20
 
 func (i *instance) acquireOperation(ctx context.Context, exclusive bool) (func(), error) {
@@ -993,6 +997,62 @@ func (m *Manager) probeWithOverrides(
 	return caps
 }
 
+// managedRuntimeProbeInstallContext fingerprints the complete authorized
+// utility child environment. It carries no physical path or raw value.
+func managedRuntimeProbeInstallContext(
+	cfg *agentctlutil.InferenceConfigDTO,
+	ownerScope string,
+) *agentctltypes.ManagedRuntimeInstallContext {
+	if cfg == nil || ownerScope == "" {
+		return nil
+	}
+	values := make(map[string]string, len(cfg.Env))
+	for key, value := range cfg.Env {
+		values[key] = value
+	}
+	for _, key := range cfg.StripEnv {
+		values["strip:"+key] = ""
+	}
+	digest := managedruntime.InstallerEnvironmentDigest(values)
+	if digest == "" {
+		return nil
+	}
+	return &agentctltypes.ManagedRuntimeInstallContext{
+		InstallerEnvDigest: digest,
+		OwnerScope:         ownerScope,
+	}
+}
+
+// managedRuntimeProbeOwnerScope binds discovery to the authenticated actor.
+// Profile callers pass the settings layer's authorization scope; other probes
+// use the shared owner policy, retaining the explicit system scope for internal
+// discovery when no real actor or disabled-mode fallback applies.
+func (m *Manager) managedRuntimeProbeOwnerScope(ctx context.Context, profileScope string) string {
+	if profileScope != "" {
+		return managedruntime.RepairOwnerScopeProfile(profileScope)
+	}
+	input := managedruntime.RepairOwnerInput{}
+	if identity, ok := authn.IdentityFromContext(ctx); ok {
+		input.ActorUserID = identity.UserID
+		input.ActorSynthetic = identity.Synthetic
+	}
+	if m.managedRuntimeSingleUserOwner != nil {
+		input.SingleUserFallbackUserID, input.SingleUserFallbackAllowed = m.managedRuntimeSingleUserOwner()
+	}
+	owner := managedruntime.ResolveRepairOwner(input)
+	if owner == "" {
+		owner = managedRuntimeSystemOwnerUserID
+	}
+	return managedruntime.RepairOwnerScopeAgentWide(owner)
+}
+
+// SetManagedRuntimeSingleUserOwner wires the live authentication mode and the
+// established single-user identity. The callback must return allowed=false for
+// setup, enabled, unknown, or unavailable authentication.
+func (m *Manager) SetManagedRuntimeSingleUserOwner(owner func() (string, bool)) {
+	m.managedRuntimeSingleUserOwner = owner
+}
+
 func (m *Manager) probeManagedRuntime(
 	ctx context.Context,
 	inst *instance,
@@ -1006,6 +1066,10 @@ func (m *Manager) probeManagedRuntime(
 	}
 	req = cloneProbeRequestWithCommand(req, command)
 	req.InferenceConfig.Env = mergeInferenceEnv(req.InferenceConfig.Env, localEnv)
+	req.InstallContext = managedRuntimeProbeInstallContext(
+		req.InferenceConfig,
+		m.managedRuntimeProbeOwnerScope(ctx, ""),
+	)
 	resp, err := inst.client.Probe(ctx, req)
 	release()
 	if err != nil || !managedRuntimeProbeFailureRecoverable(resp) {
@@ -1065,7 +1129,7 @@ func (m *Manager) recoverManagedRuntimeProbe(
 	if initial.FailureCode == agentctlutil.ProbeFailureManagedRuntimeCacheIncomplete {
 		config := failedRequest.InferenceConfig
 		if config == nil || config.OperatorDefined || len(config.CommandPrefix) != 0 ||
-			len(config.CLIFlags) != 0 || !config.LaunchWrapper.IsZero() ||
+			!config.LaunchWrapper.IsZero() ||
 			initial.CacheEvidence == nil ||
 			initial.CacheEvidence.Condition != agentctltypes.ManagedRuntimeCacheRootManifestMissing ||
 			initial.CacheEvidence.PackageSpec != packageSpec || packageSpec == "" ||
@@ -1174,24 +1238,12 @@ func managedRuntimeProbeRetry(
 	spec agents.ManagedNPMRuntimeSpec,
 ) (agents.Command, string, bool) {
 	args := command.Args()
-	if len(args) < 6 || args[0] != "npx" || args[1] != "--yes" || args[2] != "--prefer-offline" ||
-		args[3] != "--prefix" || args[4] != managedruntime.NPMProjectPrefix {
+	invocation, ok := spec.MatchRuntimeCommand(args)
+	if !ok || len(args) <= invocation.PreferenceIndex || args[invocation.PreferenceIndex] != "--prefer-offline" {
 		return agents.Command{}, "", false
 	}
-	packageSpec := args[5]
-	if err := managedruntime.ValidateExactPackageSpec(packageSpec); err != nil {
-		return agents.Command{}, "", false
-	}
-	prefix := spec.Package + "@"
-	if !strings.HasPrefix(packageSpec, prefix) {
-		return agents.Command{}, "", false
-	}
-	version := strings.TrimPrefix(packageSpec, prefix)
-	want := spec.ACPCommandWithNpmPreference(version, false).Args()
-	if !slices.Equal(args, want) {
-		return agents.Command{}, "", false
-	}
-	return spec.ACPCommandWithNpmPreference(version, true), packageSpec, true
+	recovered := invocation.WithNpmPreference(true)
+	return agents.NewCommand(recovered...), invocation.PackageSpec, true
 }
 
 func capabilitiesFromProbe(agentType string, resp *agentctlutil.ProbeResponse, now time.Time) AgentCapabilities {

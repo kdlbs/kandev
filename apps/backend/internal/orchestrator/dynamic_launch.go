@@ -139,7 +139,7 @@ func (d *dynamicTaskDownstream) Launch(
 	defer releaseDispatchCommit()
 	execution, err := d.service.executor.LaunchPreparedSession(dispatchCtx, d.task, d.sessionID, options)
 	if err != nil {
-		return dynamicruntime.DownstreamExecution{}, classifyDynamicLaunchFailure(err, launch.ExecutionProfileID)
+		return dynamicruntime.DownstreamExecution{}, classifyDynamicLaunchFailure(err, launch.ExecutionProfileID, d.service.config.ProviderKeywordContext)
 	}
 	if startupEvidence != nil {
 		d.service.bindDynamicAttemptExecution(d.sessionID, execution.AgentExecutionID, startupEvidence)
@@ -991,6 +991,8 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 		}
 		return dynamicFailureRouteResult{}
 	}
+	data.ExecutionProfileID = session.ExecutionProfileID
+	classified = s.refineKeywordFailure(ctx, data, classified)
 	conductor := s.profileExecutionResolver.NewConductor(nil)
 	task, err := s.scheduler.GetTask(ctx, data.TaskID)
 	if err != nil {
@@ -1488,7 +1490,8 @@ func (s *Service) stopDynamicSuccessorWorkers() {
 // the backend route-action handler has claimed the successor generation. It
 // owns the predecessor shutdown, continuation persistence, successor launch,
 // and final launch error surface so the UI never has to issue a second launch
-// request.
+// request. An unresolved recovery fence retains the selected generation for
+// explicit session recovery instead of replaying the predecessor prompt.
 func (s *Service) LaunchDynamicRouteAction(ctx context.Context, sessionID string) error {
 	if automaticRouteActionFromContext(ctx) {
 		return s.launchDynamicRouteAction(ctx, sessionID, launchOriginAutomatic)
@@ -1526,6 +1529,18 @@ func (s *Service) launchDynamicRouteAction(ctx context.Context, sessionID string
 			s.markDynamicRouteActionRequired(ctx, sessionID, session.RouteGeneration, string(origin)+" dynamic route action failed")
 		}
 	}()
+	if origin == launchOriginManual && isPendingRecoveryRouteClaim(session) {
+		block, err := s.GetOpenSessionRecoveryBlock(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		if block != nil {
+			// Selection is accepted, but the fence still owns prompt admission.
+			// Keep the claim for explicit recovery without replaying old work.
+			succeeded = true
+			return nil
+		}
+	}
 	task, err := s.scheduler.GetTask(ctx, session.TaskID)
 	if err != nil {
 		return err

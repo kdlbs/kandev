@@ -58,11 +58,15 @@ func (c *sessionCeilingController) readGradedPopulationLocked(ctx context.Contex
 		c.logPopulationUnknown("task_sessions", populationReadFailure(err), "", "")
 		return population, err
 	}
+	seenGradeSessions := make(map[string]struct{}, len(rows)+len(c.reservations))
 	for _, row := range rows {
 		if !row.GradeKnown {
 			c.logPopulationUnknown("task_sessions", "grade_unknown", "session_id", row.ID)
 		}
 		population.counted[row.ID] = struct{}{}
+		if row.ID != "" {
+			seenGradeSessions[row.ID] = struct{}{}
+		}
 		c.observeGradeLocked(&population, row.Grade, row.GradeKnown, grade)
 	}
 	if err := c.appendRunSessionGradesLocked(ctx, &population, grade); err != nil {
@@ -73,8 +77,11 @@ func (c *sessionCeilingController) readGradedPopulationLocked(ctx context.Contex
 	}
 	population.total = c.populationLocked(population.counted)
 	for key, held := range c.reservations {
-		if _, counted := population.counted[held.sessionID]; held.sessionID != "" && counted {
-			continue
+		if held.sessionID != "" {
+			if _, observed := seenGradeSessions[held.sessionID]; observed {
+				continue
+			}
+			seenGradeSessions[held.sessionID] = struct{}{}
 		}
 		if !held.gradeKnown {
 			id := held.sessionID
