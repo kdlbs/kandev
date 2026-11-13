@@ -832,6 +832,9 @@ func (a *Adapter) cancelActiveToolCallsPreservingHandoff(
 func (a *Adapter) protectActiveBackgroundWorkForHandoff(sessionID string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if sessionID != "" && a.sessionID == sessionID {
+		a.quotaNoticeAmbiguousSessionID = sessionID
+	}
 
 	for toolCallID, payload := range a.activeToolCalls {
 		if payload != nil && payload.IsActiveBackgroundWork() {

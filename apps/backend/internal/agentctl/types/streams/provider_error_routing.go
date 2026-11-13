@@ -8,6 +8,9 @@ import "github.com/kandev/kandev/internal/agent/runtime/routingerr"
 // lend their metadata authority to an unrelated terminal message.
 func (e *ProviderError) RoutingInput(phase routingerr.Phase, agentID, message string) routingerr.Input {
 	in := routingerr.Input{Phase: phase, ProviderID: agentID, Stderr: message}
+	if agentID == "opencode-acp" {
+		in.OpenCodeRelativeResetUntrusted = e == nil || !e.DiagnosticSingleLine
+	}
 	if e == nil {
 		return in
 	}

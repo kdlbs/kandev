@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/server/opencodeplugin"
@@ -169,6 +170,8 @@ type Adapter struct {
 	acpClient *acpclient.Client
 	acpConn   *acp.ClientSideConnection
 	sessionID string
+	// A handed-off or abandoned RPC can still emit unowned assistant text.
+	quotaNoticeAmbiguousSessionID string
 
 	// Agent info (populated after Initialize)
 	agentInfo    *AgentInfo
@@ -440,6 +443,11 @@ type promptTurnState struct {
 	providerErrorCh              chan openCodeStderrDiagnostic
 	promptGeneration             uint64
 	evidenceMu                   sync.Mutex
+	quotaNoticeText              string
+	quotaNoticeClassified        string
+	quotaNoticeClass             *routingerr.Error
+	quotaNoticeOwnerAmbiguous    bool
+	quotaNoticeDelivered         bool
 	codexSystemError             bool
 	codexCapacity                bool
 	codexUsageLimit              *streams.ProviderError

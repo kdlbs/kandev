@@ -338,6 +338,37 @@ func TestCreateRecoveryStatusMessage_OpenCodeQuotaCarriesSafeMetadata(t *testing
 	}
 }
 
+// A quota diagnostic that states its reset only in text still shows that reset.
+func TestCreateRecoveryStatusMessage_QuotaUsesClassifiedResetHint(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-quota-text", "s-quota-text", "step1")
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+	occurredAt := time.Date(2026, 8, 2, 15, 15, 44, 0, time.UTC)
+	const notice = "You have reached your current quota for this period. Your limit will reset in 2 hours."
+
+	require.NoError(t, svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+		TaskID:       "t-quota-text",
+		SessionID:    "s-quota-text",
+		AgentID:      "codex-acp",
+		ErrorMessage: notice,
+		ProviderError: &streams.ProviderError{
+			Source:     streams.ProviderErrorSourceAgentMessage,
+			ProviderID: "codex-acp",
+			Message:    notice,
+			OccurredAt: occurredAt,
+		},
+	}, ""))
+
+	require.Len(t, mc.sessionMessages, 1)
+	meta := mc.sessionMessages[0].metadata
+	require.Equal(t, "provider_quota_limited", meta["failure_kind"])
+	require.Equal(t, occurredAt.Add(2*time.Hour).Format(time.RFC3339), meta["reset_at"])
+}
+
 func TestCreateRecoveryStatusMessage_GenericFailureCarriesRemediationURL(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

@@ -41,14 +41,19 @@ func (ss *SchedulerService) HandlePostStartFailure(
 	}
 	message := errorMessage
 	var resetHint *time.Time
+	var observedAt time.Time
 	if providerError != nil {
 		if providerError.Message != "" {
 			message = providerError.Message
 		}
 		resetHint = providerError.ResetAt
+		if candidate.ProviderID != "opencode-acp" || providerError.DiagnosticSingleLine {
+			observedAt = providerError.OccurredAt
+		}
 	}
 	input := providerError.RoutingInput(routingerr.PhaseStreaming, string(candidate.ProviderID), message)
 	input.ResetHint = resetHint
+	input.OccurredAt = observedAt
 	classified := routingerr.Classify(input)
 	if !classified.FallbackAllowed {
 		return false, nil

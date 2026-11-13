@@ -2,6 +2,7 @@ package securityutil
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -319,9 +320,65 @@ func scanContinuation(s string) int {
 var (
 	localUnixPathPattern    = regexp.MustCompile(`/(?:[^/\s"']+/)+[^\r\n\s"'<>]+`)
 	localWindowsPathPattern = regexp.MustCompile(`(?i)[A-Z]:[\\/][^\r\n"']+`)
+	providerDatePattern     = regexp.MustCompile(`\b(?:\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{2,4})\b`)
 )
 
 func redactLocalPaths(s string) string {
+	// Slash-separated dates are not local paths. Mask standalone dates only;
+	// a date inside an actual path must not hide that path from redaction.
+	indices := providerDatePattern.FindAllStringIndex(s, -1)
+	if len(indices) == 0 {
+		return redactLocalPathsMasked(s)
+	}
+	prefix := "kandevdatemask"
+	for strings.Contains(s, prefix) {
+		prefix += "x"
+	}
+	dates := make([]string, 0, len(indices))
+	var masked strings.Builder
+	last := 0
+	scanned, tokenHasSlash := 0, false
+	for _, index := range indices {
+		start, end := index[0], index[1]
+		for scanned < start {
+			switch s[scanned] {
+			case ' ', '\t', '\r', '\n':
+				tokenHasSlash = false
+			case '/', '\\':
+				tokenHasSlash = true
+			}
+			scanned++
+		}
+		if tokenHasSlash {
+			continue
+		}
+		if start > 0 && (s[start-1] == '/' || s[start-1] == '\\') {
+			continue
+		}
+		if end < len(s) && (s[end] == '/' || s[end] == '\\') {
+			continue
+		}
+		masked.WriteString(s[last:start])
+		masked.WriteString(prefix + strconv.Itoa(len(dates)) + "x")
+		dates = append(dates, s[start:end])
+		last = end
+		// A masked date's own slashes are not path separators, so they must not
+		// mark the rest of the token as a path: "1/2/2025-3/4/2025" is two dates.
+		scanned = end
+	}
+	masked.WriteString(s[last:])
+	redacted := redactLocalPathsMasked(masked.String())
+	if len(dates) == 0 {
+		return redacted
+	}
+	replacements := make([]string, 0, 2*len(dates))
+	for i, date := range dates {
+		replacements = append(replacements, prefix+strconv.Itoa(i)+"x", date)
+	}
+	return strings.NewReplacer(replacements...).Replace(redacted)
+}
+
+func redactLocalPathsMasked(s string) string {
 	s = localWindowsPathPattern.ReplaceAllStringFunc(s, func(path string) string {
 		if len(path) >= 4 && path[2:4] == "//" {
 			return path

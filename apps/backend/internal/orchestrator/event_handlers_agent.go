@@ -14,6 +14,7 @@ import (
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events"
@@ -4335,13 +4336,10 @@ func (s *Service) persistRecoveryStatusMessage(
 	return nil
 }
 
-// applyProviderQuotaMetadata promotes only a validated OpenCode terminal
-// diagnostic to the specialized recovery surface. Generic prose and provider
-// diagnostics from other agents retain the existing error card.
+// applyProviderQuotaMetadata promotes validated quota diagnostics to the
+// specialized recovery surface. Generic prose keeps the ordinary error card.
 func applyProviderQuotaMetadata(meta map[string]interface{}, data watcher.AgentEventData) bool {
-	if data.AgentID != "opencode-acp" || data.ProviderError == nil ||
-		data.ProviderError.Source != streams.ProviderErrorSourceOpenCodeStderr ||
-		!data.ProviderError.Valid() {
+	if data.ProviderError == nil || !data.ProviderError.Valid() {
 		return false
 	}
 	classified := routingerr.Classify(data.ProviderError.RoutingInput(routingerr.PhaseStreaming, data.AgentID, data.ProviderError.Message))
@@ -4350,17 +4348,44 @@ func applyProviderQuotaMetadata(meta map[string]interface{}, data watcher.AgentE
 	}
 
 	meta["failure_kind"] = "provider_quota_limited"
-	meta["provider_name"] = "OpenCode"
+	meta["provider_name"] = quotaProviderDisplayName(data.AgentID)
 	if modelID := routingerr.Sanitize(data.ProviderError.ModelID); modelID != "" {
 		meta["model_id"] = modelID
 	}
-	if resetAt := data.ProviderError.ResetAt; resetAt != nil && !resetAt.IsZero() {
+	resetAt := data.ProviderError.ResetAt
+	if (resetAt == nil || resetAt.IsZero()) && !classified.ResetHintInferred {
+		// A reset the diagnostic states in text is parsed by the classifier;
+		// only an inferred estimate stays off the card.
+		resetAt = classified.ResetHint
+	}
+	if resetAt != nil && !resetAt.IsZero() {
 		meta["reset_at"] = resetAt.UTC().Format(time.RFC3339)
 	}
 	if details := routingerr.Sanitize(data.ProviderError.Message); details != "" {
 		meta["error_output"] = details
 	}
 	return true
+}
+
+func quotaProviderDisplayName(agentID string) string {
+	switch agentID {
+	case "opencode-acp":
+		return "OpenCode"
+	case "antigravity-acp":
+		return "Antigravity"
+	case claudeACPProviderID:
+		return "Claude"
+	case "codex-acp":
+		return "Codex"
+	case acpcompat.CursorAgentID:
+		return "Cursor"
+	case "copilot-acp":
+		return "Copilot"
+	case "grok-acp":
+		return "Grok"
+	default:
+		return ""
+	}
 }
 
 // applyRecoverableFailureDetail populates the collapsed technical-details

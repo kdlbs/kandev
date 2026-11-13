@@ -80,7 +80,7 @@ Use the current cancellation/settlement owner so a step change or stop cannot ra
 
 ## Empty turn ends
 
-A prompt turn can end normally with stop reason `end_turn` and no error frame, yet produce no assistant text, reasoning, or tool activity.
+A prompt turn can end normally with stop reason `end_turn` and no error frame, yet produce no assistant answer text, plan content, or tool activity/effects. Reasoning-only turns also have no final result.
 Error paths never see it, so without this origin a candidate that keeps returning empty completions is never counted.
 
 The orchestrator's stream completion handler is the only producer of the `empty_turn_completion` origin.
@@ -89,12 +89,14 @@ It produces evidence only when all of these hold:
 
 - the completion is not a terminal replay, the stop reason is exactly `end_turn`, and the frame is not marked as an error;
 - the prompt attempt is a dynamic task attempt whose execution ID and nonzero prompt generation own the session;
-- that attempt has known evidence with no output and no effects;
+- that attempt has known evidence with no answer/plan output and no effects;
 - no cancellation is in flight for the session;
 - the current concrete candidate has an enabled `unclassified` policy with a valid threshold;
 - the workflow step is known and does not veto the policy.
 
 Assistant text or plan content on the completion frame itself is output, even when no earlier stream event carried it. The current prompt evidence records that output and clears a previous failure streak through the existing fenced reset boundary.
+
+Record reasoning separately from answer output in the process-local attempt evidence. Only the normal empty-completion producer may exclude reasoning from its output check. Generic provider/runtime failure evidence continues to treat reasoning as observed output, and tool effects remain a veto in both paths. Reasoning alone does not create a pending success reset, so consecutive reasoning-only empty completions can reach the existing threshold.
 
 If any precondition fails, the handler does nothing and the completion keeps its existing behavior.
 The policy and step checks happen before routing because the engine treats a current ineligible failure as a manual-recovery stop.
@@ -158,8 +160,8 @@ For a startup streak, successful initialization clears it before prompt dispatch
 Explicit stop, candidate/profile/step changes, profile-version changes, policy disabling, or step veto clear it.
 
 Prompt output and effects update the in-memory safety evidence as their original
-events arrive, while marking one coalesced pending clear intent per session.
-Raw message, reasoning, tool-update and effect callbacks do not read or write
+events arrive. Answer output and effects mark one coalesced pending clear intent
+per session; reasoning alone does not. Raw callbacks do not read or write
 route state. Transcript projections are not evidence sources and never create
 another clear intent. Persist a pending clear at a real tool-call boundary,
 terminal-failure decision, successful completion, explicit stop or before a
