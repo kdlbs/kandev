@@ -125,6 +125,7 @@ const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
+	executionUsage           nativeExecutionUsage
 	processManagerID         string
 	questionImageWorkDir     string
 	questionImageOnce        sync.Once
@@ -2054,6 +2055,22 @@ func (m *Manager) Start(ctx context.Context) error {
 	return err
 }
 
+// startOneShotWithUsage binds the execution usage observer and prepares a
+// one-shot adapter, which spawns its own subprocess per prompt. It updates the
+// caller's flow phase and outcome.
+func (m *Manager) startOneShotWithUsage(ctx context.Context, failurePhase, successOutcome *string) (uint64, error) {
+	if err := m.bindExecutionUsage(ctx); err != nil {
+		m.status.Store(StatusError)
+		return 0, err
+	}
+	*failurePhase = "oneshot_admission"
+	*successOutcome = "adapter_ready"
+	if err := m.startOneShot(); err != nil {
+		return 0, err
+	}
+	return m.ProcessGeneration(), nil
+}
+
 // StartWithGeneration starts the agent process and returns the generation
 // created by this call while startup remains serialized against replacement.
 // A compatible published repair is selected before the first attempt.
@@ -2271,25 +2288,26 @@ func (m *Manager) startWithGeneration(
 		return 0, err
 	}
 
-	return m.startConfiguredProcess(&failurePhase, &successOutcome)
+	return m.startConfiguredProcess(ctx, &failurePhase, &successOutcome)
 }
 
-func (m *Manager) startConfiguredProcess(failurePhase, successOutcome *string) (uint64, error) {
+func (m *Manager) startConfiguredProcess(ctx context.Context, failurePhase, successOutcome *string) (uint64, error) {
 	// One-shot adapters manage their own subprocess per prompt.
 	// Skip process creation — the adapter spawns processes in Prompt().
 	*failurePhase = "usage_binding"
 	if oneShotAdapter, ok := m.adapter.(adapter.OneShotAdapter); ok && oneShotAdapter.IsOneShot() {
-		*failurePhase = "oneshot_admission"
-		*successOutcome = "adapter_ready"
-		if err := m.startOneShot(); err != nil {
-			return 0, err
-		}
-		return m.ProcessGeneration(), nil
+		return m.startOneShotWithUsage(ctx, failurePhase, successOutcome)
 	}
 
 	// Assemble final command (does not start the process yet)
 	*failurePhase = "command_assembly"
 	if err := m.buildFinalCommand(); err != nil {
+		m.status.Store(StatusError)
+		m.closeOpenCodePlugin(context.Background())
+		return 0, err
+	}
+	*failurePhase = "usage_binding"
+	if err := m.bindExecutionUsage(ctx, m.cmd.Args); err != nil {
 		m.status.Store(StatusError)
 		m.closeOpenCodePlugin(context.Background())
 		return 0, err

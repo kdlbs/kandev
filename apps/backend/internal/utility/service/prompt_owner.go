@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"time"
 
 	"github.com/google/uuid"
@@ -75,6 +76,7 @@ func (s *Service) resolvePreparedExecution(ctx context.Context, request *PromptR
 			request.RouteSessionID = details.RouteSessionID
 		}
 		request.RouteGeneration = details.Generation
+		request.UsagePolicy = usage.CloneExecutionUsagePolicy(details.Decision.UsagePolicy)
 	} else if resolver, ok := s.executionResolver.(SessionExecutionProfileResolver); ok {
 		request.RouteSessionID = promptRouteID(request)
 		resolved, concreteID, err = resolver.ResolveExecutionForSession(ctx, request.RouteSessionID, profile.ID)

@@ -205,9 +205,10 @@ type AgentExecution struct {
 	// dispatched prompt. It is snapshotted onto terminal AgentEvents before
 	// AgentReady is published, so a queued successor cannot overwrite the
 	// completion's attribution while its stream frame is in flight.
-	promptTurnID      string
-	promptTurnIDs     map[uint64]string
-	promptLifecycleMu ctxmutex.Mutex
+	promptTurnID                    string
+	promptTurnIDs                   map[uint64]string
+	promptLifecycleMu               ctxmutex.Mutex
+	providerTurnUnmeteredGeneration atomic.Uint64
 	// cancelEscalatedPromptGeneration identifies a prompt whose cancellation
 	// released the execution locally before the agentctl stream closed. The
 	// resulting disconnect is expected teardown and must not replace the

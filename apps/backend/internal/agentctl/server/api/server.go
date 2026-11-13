@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
@@ -35,6 +36,7 @@ import (
 
 // Server is the HTTP API server for a single agent instance.
 type Server struct {
+	executionUsage   *usage.UsageService
 	cfg              *config.InstanceConfig
 	procMgr          *process.Manager
 	mcpServer        *mcp.Server
@@ -68,7 +70,7 @@ func (s *Server) SetCredentialSource(src InstanceCredentialSource) {
 // NewServer creates a new API server for an agent instance.
 // If mcpServer is provided, MCP routes will be registered.
 // If mcpBackendClient is provided, the agent stream becomes bidirectional for MCP.
-func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *mcp.Server, mcpBackendClient *mcp.ChannelBackendClient, log *logger.Logger) *Server {
+func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *mcp.Server, mcpBackendClient *mcp.ChannelBackendClient, log *logger.Logger, nativeUsage ...*usage.UsageService) *Server {
 	gin.SetMode(gin.ReleaseMode)
 
 	s := &Server{
@@ -89,6 +91,10 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	}
 	if mcpServer != nil {
 		procMgr.SetBuiltinToolCatalog(mcpServer.BuiltinCatalog)
+	}
+	if len(nativeUsage) > 0 {
+		s.executionUsage = nativeUsage[0]
+		procMgr.SetExecutionUsageService(s.executionUsage)
 	}
 	if mcpBackendClient != nil && !cfg.DisableAskQuestion && cfg.SessionID != "" {
 		mcpBackendClient.SetSessionID(cfg.SessionID)
@@ -137,6 +143,8 @@ func (s *Server) setupRoutes() {
 		// Process control
 		api.POST("/agent/configure", s.handleAgentConfigure)
 		api.GET("/agent/launch-wrapper", s.handleLaunchWrapper)
+		api.GET("/agent/usage", s.handleExecutionUsage)
+		api.GET("/agent/usage/cached", s.handleExecutionUsage)
 		api.POST("/agent/managed-runtime/cache-repair", s.handleManagedRuntimeCacheRepair)
 		api.POST("/agent/background-work/action", s.handleBackgroundWorkAction)
 		api.POST("/start", s.handleStart)
@@ -280,6 +288,7 @@ func (s *Server) setupRoutes() {
 	}
 	auxHandler.SetInstanceID(s.cfg.InstanceID)
 	auxHandler.SetControlAuthorization(func(c *gin.Context) bool { return c.GetBool(authenticatedControlContextKey) })
+	auxHandler.SetExecutionUsageService(s.executionUsage)
 	auxHandler.RegisterRoutes(api)
 
 	// MCP routes (if MCP server is configured)
@@ -529,13 +538,14 @@ func (s *Server) handleStart(c *gin.Context) {
 
 // AgentConfigure request/response - configures the agent command before starting
 type AgentConfigureRequest struct {
-	LaunchWrapper   launchwrapper.Spec `json:"launch_wrapper,omitzero"`
-	Command         string             `json:"command"`
-	AgentArgs       optionalArgs       `json:"agent_args"`
-	ContinueCommand string             `json:"continue_command,omitempty"` // For one-shot agents: command for follow-up prompts
-	ContinueArgs    optionalArgs       `json:"continue_args"`
-	Env             map[string]string  `json:"env,omitempty"`
-	ReplaceEnv      bool               `json:"replace_env,omitempty"`
+	UsagePolicy     *usage.ExecutionUsagePolicy `json:"usage_policy,omitempty"`
+	LaunchWrapper   launchwrapper.Spec          `json:"launch_wrapper,omitzero"`
+	Command         string                      `json:"command"`
+	AgentArgs       optionalArgs                `json:"agent_args"`
+	ContinueCommand string                      `json:"continue_command,omitempty"` // For one-shot agents: command for follow-up prompts
+	ContinueArgs    optionalArgs                `json:"continue_args"`
+	Env             map[string]string           `json:"env,omitempty"`
+	ReplaceEnv      bool                        `json:"replace_env,omitempty"`
 	// ProjectMCPDelivery carries execution-bound project-file delivery
 	// evidence. It is trusted only on an authenticated control request and is
 	// validated against this instance before accepted configuration changes.
@@ -614,6 +624,9 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		configureErr = s.procMgr.ConfigureWithProjectDeliveryAndInstallContext(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ProjectMCPDelivery, req.InstallContext, req.LaunchWrapper)
 	default:
 		configureErr = s.procMgr.ConfigureWithProjectDelivery(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ProjectMCPDelivery, req.LaunchWrapper)
+	}
+	if configureErr == nil {
+		configureErr = s.procMgr.ConfigureExecutionUsage(req.UsagePolicy)
 	}
 	if configureErr != nil {
 		s.logger.Error("failed to configure agent",

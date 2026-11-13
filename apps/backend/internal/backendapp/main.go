@@ -712,6 +712,7 @@ func startAgentInfrastructure(
 		return false
 	}
 	lifecycleMgr.SetAgentDeliveryRepository(repos.Task)
+	lifecycleMgr.SetProviderTurnSettlement(repos.Task)
 	if services.DynamicProfileResolver != nil {
 		lifecycleMgr.SetResourceCircuitKeyResolver(services.DynamicProfileResolver.ResourceCircuitKeyForProfile)
 	}
@@ -893,6 +894,9 @@ func startAgentInfrastructure(
 	if services.DynamicProfileResolver != nil {
 		agentSettingsController.SetAccountBlockReleaser(services.DynamicProfileResolver)
 		agentSettingsController.SetRoutingCircuitReader(newRoutingCircuitReader(services.DynamicProfileResolver))
+		if cfg.Features.DynamicProfileTiers {
+			agentSettingsController.SetDynamicTierPreviewer(services.DynamicProfileResolver)
+		}
 	}
 	// An enabled automation is a standing instruction to launch against a
 	// profile. Nothing is running, so it never reaches the active-session list,
@@ -1253,8 +1257,21 @@ func startGatewayAndServe(
 	hostUtilityMgr.SetProviderGatewayAuthResolver(lifecycleMgr.ResolveProviderGatewayAuth)
 	hostUtilityMgr.SetManagedRuntimeSelectionStore(services.ManagedRuntimeSelections)
 	hostUtilityMgr.SetManagedRuntimeSingleUserOwner(singleUserManagedRuntimeOwner(services.Auth))
+	lifecycleMgr.SetProviderUsageLimitsEnabled(cfg.Features.ProviderUsageLimits)
+	if cfg.Features.ProviderUsageLimits {
+		agentSettingsController.SetNativeUsageReader(lifecycleMgr.ReadProfileExecutionUsage)
+		services.DynamicProfileResolver.SetCandidateExecutionUsageReader(lifecycleMgr.PeekCandidateExecutionUsage)
+	}
+	hostUtilityMgr.SetProviderUsageLimitsEnabled(cfg.Features.ProviderUsageLimits)
+	lifecycleMgr.SetPreparedExecutionUsageReader(hostUtilityMgr.PreviewPreparedExecutionUsage)
 	sharedInferenceOwner := wireSharedInferenceCapacity(orchestratorSvc, repos.SystemSettings, log.Zap(), lifecycleMgr, hostUtilityMgr)
-	wireNativeRouteCapacity(services.DynamicProfileResolver, orchestratorSvc, sharedInferenceOwner, repos.Task, repos.Utility)
+	sharedInferenceOwner.settler = repos.Task
+	nativeUsageOwner := wireNativeRouteCapacity(services.DynamicProfileResolver, orchestratorSvc, sharedInferenceOwner, repos.Task, repos.Utility)
+	if cfg.Features.ProviderUsageLimits && nativeUsageOwner != nil {
+		nativeUsageOwner.sessionUsage = lifecycleMgr.PreviewInferenceProfileUsage
+		nativeUsageOwner.hostUsage = hostUtilityMgr.PreviewProfileUsage
+		services.DynamicProfileResolver.SetNativeCandidateExecutionUsageReader(nativeUsageOwner.candidateUsage)
+	}
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)
@@ -1369,6 +1386,40 @@ func startGatewayAndServe(
 	if !ok {
 		closeBoundListeners(server, listeners, log)
 		return false
+	}
+
+	// Wire subscription usage provider into the office agents service so the
+	// /agents/:id/utilization endpoint can fetch live utilization data.
+	// The added settings read surface shares this cache but is independently gated.
+	var usageAdapter *usageProviderAdapter
+	if cfg.Features.ProviderUsageLimits || (services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil) {
+		usageAdapter = newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
+	}
+	if services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil {
+		services.OfficeSvcs.Agents.SetUsageProvider(officeUsageProvider(cfg.Features.ProviderUsageLimits, lifecycleMgr.ReadOfficeProfileExecutionUsage, usageAdapter))
+	}
+	if cfg.Features.ProviderUsageLimits {
+		tierUsage := newTierUsageSnapshot()
+		allowances := &providerTurnAllowances{profileUsageSnapshot: newProfileUsageSnapshot(usageAdapter), claims: repos.Task}
+		allowances.inferencePopulation = sharedInferenceOwner.inferenceProviderPopulation
+		sharedInferenceOwner.provider = allowances
+		sharedInferenceOwner.providerPopulation = lifecycleMgr.InferenceProviderPopulation
+		agentSettingsController.SetProfileUsageProvider(&tierUsageRecordingProvider{next: allowances, sink: tierUsage})
+		lifecycleMgr.SetProviderTurnAdmission(allowances)
+		providerLimits := newProviderLimitService(repos.Task, repos.AgentSettings, newDynamicLimitCalendar(usageAdapter, repos.Task))
+		tierLimits := newProviderTierLimitService(usageAdapter, repos.Task)
+		usageAdapter.tierLimits = tierLimits
+		providerLimits.tiers = tierLimits
+		if cfg.Features.DynamicProfileTiers && services.DynamicProfileResolver != nil {
+			services.DynamicProfileResolver.SetCandidateUsageLookup(tierUsage.Lookup)
+		}
+		installTierLimitAdapter(services.DynamicProfileResolver, usageAdapter, providerLimits.calendar, repos.Task)
+		if subscription, err := tierLimits.Subscribe(eventBus); err != nil {
+			log.Warn("provider limit request observation unavailable", zap.Error(err))
+		} else {
+			addCleanup(func() error { return subscription.Unsubscribe() })
+		}
+		agentSettingsController.SetProviderLimitService(providerLimits)
 	}
 
 	if err := repos.RequiredStores.ValidateComplete(); err != nil {
@@ -1558,14 +1609,6 @@ func startGatewayAndServe(
 			)
 		})
 		return restoreQuiesceErr
-	}
-
-	// Wire subscription usage provider into the office agents service so the
-	// /agents/:id/utilization endpoint can fetch live utilization data.
-	// Skipped when the Office feature flag is off (services.OfficeSvcs is nil).
-	if services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil {
-		usageAdapter := newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
-		services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
 	}
 
 	startup.AfterReady(ctx, func() { services.Task.StartAutoArchiveLoop(ctx) })

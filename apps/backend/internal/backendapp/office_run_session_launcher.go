@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
@@ -24,12 +25,14 @@ import (
 // Office runs. It reserves the Office-owned attempt first, then delegates
 // process allocation and prompt delivery to the shared runtime.
 type officeRunSessionLauncher struct {
-	capacity *orchestrator.Service
-	repo     *officesqlite.Repository
-	runtime  runtimeapi.Runtime
-	recovery runtimeapi.RunOwnerRecovery
-	resolver *runtimeapi.ProfileExecutionResolver
-	logger   *logger.Logger
+	capacity             *orchestrator.Service
+	repo                 *officesqlite.Repository
+	runtime              runtimeapi.Runtime
+	recovery             runtimeapi.RunOwnerRecovery
+	resolver             *runtimeapi.ProfileExecutionResolver
+	preparedUsage        func(context.Context, *runtimeapi.LaunchRequest) *usage.ExecutionUsageReport
+	preparedUsageEnabled func() bool
+	logger               *logger.Logger
 }
 
 var _ officeservice.RunSessionLauncher = (*officeRunSessionLauncher)(nil)
@@ -40,12 +43,23 @@ func newOfficeRunSessionLauncher(
 	resolver *runtimeapi.ProfileExecutionResolver, log *logger.Logger,
 ) *officeRunSessionLauncher {
 	recovery, _ := runtimeBackend.(runtimeapi.RunOwnerRecovery)
+	var preparedUsage func(context.Context, *runtimeapi.LaunchRequest) *usage.ExecutionUsageReport
+	var preparedUsageEnabled func() bool
+	if reader, ok := runtimeBackend.(interface {
+		CandidateExecutionUsageEnabled() bool
+		PreviewLaunchExecutionUsage(context.Context, *runtimeapi.LaunchRequest) *usage.ExecutionUsageReport
+	}); ok {
+		preparedUsage = reader.PreviewLaunchExecutionUsage
+		preparedUsageEnabled = reader.CandidateExecutionUsageEnabled
+	}
 	return &officeRunSessionLauncher{
-		repo:     repo,
-		runtime:  runtimeapi.New(runtimeBackend),
-		recovery: recovery,
-		resolver: resolver,
-		logger:   log.WithFields(zap.String("component", "office-run-session-launcher")),
+		repo:                 repo,
+		runtime:              runtimeapi.New(runtimeBackend),
+		recovery:             recovery,
+		preparedUsage:        preparedUsage,
+		preparedUsageEnabled: preparedUsageEnabled,
+		resolver:             resolver,
+		logger:               log.WithFields(zap.String("component", "office-run-session-launcher")),
 	}
 }
 
@@ -116,6 +130,7 @@ func (l *officeRunSessionLauncher) StartRunSession(
 		route = nil
 	}
 
+	var selectedUsage *usage.ExecutionUsagePolicy
 	executionProfileID := launch.ProfileID
 	adapterOverride := ""
 	modelOverride := ""
@@ -128,11 +143,12 @@ func (l *officeRunSessionLauncher) StartRunSession(
 		// instead of launching the virtual family directly (which the lifecycle
 		// rejects with ErrVirtualProfile). The Office ID stays the request's
 		// AgentProfileID.
-		resolved, err := l.resolveTasklessDynamicExecution(ctx, agent, session.ID)
+		resolved, err := l.resolveTasklessDynamicExecution(ctx, agent, session.ID, &runtimeapi.LaunchRequest{WorkspaceID: agent.WorkspaceID, AgentProfileID: agent.ID, Env: cloneStringMap(launch.Env), ExecutorType: launch.ExecutorID, Owner: runtimeapi.ExecutionOwner{Kind: runtimeapi.ExecutionOwnerRun, WorkspaceID: agent.WorkspaceID, RunID: run.ID, RunSessionID: session.ID, Attempt: attempt, AgentProfileID: agent.ID}, OwnerAdmission: l})
 		if err != nil {
 			_, _ = capacityAttempt.finishLegacy(context.WithoutCancel(ctx), session.ID, models.RunSessionStateFailed, err.Error())
 			return officeservice.RunSessionLaunch{}, fmt.Errorf("resolve taskless execution profile: %w", err)
 		}
+		selectedUsage = usage.CloneExecutionUsagePolicy(resolved.Decision.UsagePolicy)
 		executionProfileID = resolved.ExecutionProfileID
 		if resolved.Profile != nil {
 			adapterOverride = resolved.Profile.AgentID
@@ -186,7 +202,7 @@ func (l *officeRunSessionLauncher) StartRunSession(
 	if err := capacityAttempt.prepareCandidate(ctx, request); err != nil {
 		return officeservice.RunSessionLaunch{}, err
 	}
-	ref, err := l.runtime.Launch(ctx, runtimeapi.LaunchSpec{
+	ref, err := l.runtime.Launch(usage.WithSelectedUsagePolicy(ctx, selectedUsage), runtimeapi.LaunchSpec{
 		AgentProfileID: agent.ID,
 		ExecutorID:     launch.ExecutorID,
 		Prompt:         launch.Prompt,
@@ -363,9 +379,18 @@ func isLiveExecution(status v1.AgentStatus) bool {
 
 // AdmitExecution is the fail-closed owner check used before allocation, at
 // lifecycle registration, and immediately before process start.
-//
-//nolint:cyclop // The ordered fail-closed checks are the owner admission invariant.
 func (l *officeRunSessionLauncher) AdmitExecution(ctx context.Context, owner runtimeapi.ExecutionOwner) error {
+	return l.checkRunExecutionOwner(ctx, owner, true)
+}
+
+// Candidate source observation precedes candidate grade admission. This checks
+// the same durable owner and stop/pause fences without admitting any execution.
+func (l *officeRunSessionLauncher) CheckExecutionUsageOwner(ctx context.Context, owner runtimeapi.ExecutionOwner) error {
+	return l.checkRunExecutionOwner(ctx, owner, false)
+}
+
+//nolint:cyclop // The ordered fail-closed checks are the owner admission invariant.
+func (l *officeRunSessionLauncher) checkRunExecutionOwner(ctx context.Context, owner runtimeapi.ExecutionOwner, requireGrade bool) error {
 	if owner.Kind != runtimeapi.ExecutionOwnerRun || owner.WorkspaceID == "" || owner.RunID == "" ||
 		owner.RunSessionID == "" || owner.Attempt <= 0 || owner.AgentProfileID == "" {
 		return errors.New("run execution owner is incomplete")
@@ -387,7 +412,7 @@ func (l *officeRunSessionLauncher) AdmitExecution(ctx context.Context, owner run
 		(session.State != models.RunSessionStatePreparing && session.State != models.RunSessionStateRunning) {
 		return fmt.Errorf("admit run execution: run session %q is stale", owner.RunSessionID)
 	}
-	if l.capacity != nil && l.capacity.RunSessionCapacityEnabled() && !session.AdmittedExecutionGradeKnown {
+	if requireGrade && l.capacity != nil && l.capacity.RunSessionCapacityEnabled() && !session.AdmittedExecutionGradeKnown {
 		return errors.New("run execution grade is unknown")
 	}
 	paused, err := l.repo.GetActiveWorkspacePause(ctx, owner.WorkspaceID)
@@ -412,7 +437,7 @@ func (l *officeRunSessionLauncher) AdmitExecution(ctx context.Context, owner run
 // uses the actual run-session owner when ordered tiers are enabled, keeping
 // task generation and Office run-session attribution separate.
 func (l *officeRunSessionLauncher) resolveTasklessDynamicExecution(
-	ctx context.Context, agent *models.AgentInstance, runSessionID string,
+	ctx context.Context, agent *models.AgentInstance, runSessionID string, prepared ...*runtimeapi.LaunchRequest,
 ) (runtimeapi.ProfileExecution, error) {
 	if l.resolver == nil {
 		return runtimeapi.ProfileExecution{}, errors.New("dynamic execution resolver is not configured")
@@ -423,6 +448,14 @@ func (l *officeRunSessionLauncher) resolveTasklessDynamicExecution(
 			return runtimeapi.ProfileExecution{}, errors.New("office route requires a run session owner")
 		}
 		routeID = "native:office-run-session:" + runSessionID
+	}
+	if l.preparedUsage != nil && l.preparedUsageEnabled != nil && l.preparedUsageEnabled() && len(prepared) != 0 && prepared[0] != nil {
+		base := *prepared[0]
+		ctx = usage.WithCandidateUsageReader(ctx, func(ctx context.Context, profileID string) *usage.ExecutionUsageReport {
+			request := base
+			request.ExecutionProfileID = profileID
+			return l.preparedUsage(ctx, &request)
+		})
 	}
 	return l.resolver.ResolveExecutionDetails(ctx, routeID, agent.ID)
 }

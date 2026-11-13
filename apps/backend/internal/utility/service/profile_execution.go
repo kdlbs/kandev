@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"strings"
 	"time"
 
@@ -35,7 +36,7 @@ func ExecuteProfilePrompt(ctx context.Context, resolver ExecutionFailureResolver
 		}
 		identity := agentruntime.InferenceIdentityFromContext(ctx)
 		identity.ExecutionProfileID = route.ExecutionProfileID
-		response, executeErr = execute(agentruntime.WithInferenceIdentity(ctx, identity), route.ExecutionProfileID)
+		response, executeErr = execute(agentruntime.WithInferenceIdentity(usage.WithSelectedUsagePolicy(ctx, route.UsagePolicy), identity), route.ExecutionProfileID)
 		if err := ctx.Err(); err != nil {
 			return response, err
 		}
@@ -101,6 +102,7 @@ func profilePromptError(response *agentctlutil.PromptResponse, err error) error 
 
 func applyProfileRoute(route *PromptRequest, next agentruntime.ProfileExecution) {
 	route.ExecutionProfileID, route.RouteGeneration = next.ExecutionProfileID, next.Generation
+	route.UsagePolicy = usage.CloneExecutionUsagePolicy(next.Decision.UsagePolicy)
 	if next.Profile != nil {
 		route.AgentCLI, route.Model = next.AgentName, next.Profile.Model
 		if route.AgentCLI == "" {

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/agent/usage"
 
 	"github.com/kandev/kandev/internal/agent/handlers"
 	"github.com/kandev/kandev/internal/agent/hostutility"
@@ -288,6 +289,7 @@ func (r reviewInference) Run(ctx context.Context, identity review.ReviewerIdenti
 	if identity.Route != nil {
 		identity.Route.ExecutionProfileID, identity.Route.Generation = prepared.ExecutionProfileID, prepared.RouteGeneration
 		identity.Route.AgentID, identity.Route.Model = prepared.AgentCLI, prepared.Model
+		identity.Route.UsagePolicy = usage.CloneExecutionUsagePolicy(prepared.UsagePolicy)
 	}
 	if err != nil {
 		return nil, err
@@ -371,7 +373,7 @@ func reviewSessionErrorFinal(err error, hasHost bool, provider string) bool {
 }
 
 func reviewerRoute(execution agentruntime.ProfileExecution) *review.ReviewerRoute {
-	return &review.ReviewerRoute{ExecutionProfileID: execution.ExecutionProfileID, SessionID: execution.RouteSessionID,
+	return &review.ReviewerRoute{UsagePolicy: usage.CloneExecutionUsagePolicy(execution.Decision.UsagePolicy), ExecutionProfileID: execution.ExecutionProfileID, SessionID: execution.RouteSessionID,
 		Generation: execution.Generation, AgentID: execution.AgentName, Model: execution.Profile.Model}
 }
 
@@ -381,6 +383,7 @@ func reviewPromptRoute(identity review.ReviewerIdentity) *utilityservice.PromptR
 	if route := identity.Route; route != nil {
 		prepared.ExecutionProfileID, prepared.RouteSessionID, prepared.RouteGeneration = route.ExecutionProfileID, route.SessionID, route.Generation
 		prepared.AgentCLI, prepared.Model = route.AgentID, route.Model
+		prepared.UsagePolicy = usage.CloneExecutionUsagePolicy(route.UsagePolicy)
 	}
 	return prepared
 }

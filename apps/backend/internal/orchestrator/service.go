@@ -759,6 +759,14 @@ type passthroughDispatchToken struct {
 }
 
 // Service is the main orchestrator service
+// dynamicRecoveryTimer is the single per-session dynamic recovery timer and
+// the route generation it was armed for. A timer armed for a stale generation
+// never replaces a newer one.
+type dynamicRecoveryTimer struct {
+	timer      *time.Timer
+	generation int64
+}
+
 type Service struct {
 	autonomousExecutorContext func(context.Context, string, string) (context.Context, error)
 	config                    ServiceConfig
@@ -965,6 +973,10 @@ type Service struct {
 	routeActionLocksMu sync.Mutex
 	routeActionLocks   map[string]*routeActionOperationLock
 
+	// midTurnFailovers tracks the opt-in automatic Try next handoffs per
+	// session so each failed generation hands off at most once.
+	midTurnFailovers midTurnFailoverState
+
 	// profileExecutionResolver is the shared logical-to-concrete profile
 	// boundary used by task and workflow launch paths.
 	profileExecutionResolver *agentruntime.ProfileExecutionResolver
@@ -980,7 +992,11 @@ type Service struct {
 	dynamicRecoveryMu     sync.Mutex
 	dynamicRecoveryCtx    context.Context
 	dynamicRecoveryCancel context.CancelFunc
-	dynamicRecoveryTimers map[string]*time.Timer
+	dynamicRecoveryTimers map[string]*dynamicRecoveryTimer
+	// failedRouteRetryDeferrals records the generation whose automatic retry
+	// deferral was already logged at Info, so a turn that keeps the retry
+	// waiting does not repeat that line every minute.
+	failedRouteRetryDeferrals map[string]int64
 
 	// titleBranchRuntime performs the lifecycle-owned Git branch rename after
 	// an agent resolves a prompt-first task title. It is optional for tests and
@@ -1703,6 +1719,9 @@ type RouteActionRequest struct {
 	SessionID          string
 	Action             RouteAction
 	ExpectedGeneration int64
+	// Automatic marks an unattended action the orchestrator submits itself.
+	// Client requests never set it.
+	Automatic bool
 }
 
 type RouteActionResult struct {
@@ -1912,7 +1931,7 @@ func NewService(
 		taskLaunchRecoveryRepo:       taskLaunchRecoveryRepo,
 		clarificationWatchdogTimeout: 15 * time.Second,
 		gitSnapshotCache:             newGitSnapshotCache(),
-		dynamicRecoveryTimers:        make(map[string]*time.Timer),
+		dynamicRecoveryTimers:        make(map[string]*dynamicRecoveryTimer),
 		reservedPromptCallbacks:      newReservedPromptCallbackOwner(),
 		sendNowCtx:                   sendNowCtx,
 		sendNowCancel:                sendNowCancel,

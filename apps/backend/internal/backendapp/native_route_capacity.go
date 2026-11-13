@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"strings"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	agentmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/orchestrator"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	utilitymodels "github.com/kandev/kandev/internal/utility/models"
@@ -20,21 +22,24 @@ type nativeCallIdentityReader interface {
 }
 
 type nativeRouteCapacity struct {
-	capacity *orchestrator.Service
-	consumer *sharedInferenceConsumer
-	tasks    nativeRouteIdentityReader
-	calls    nativeCallIdentityReader
+	sessionUsage func(context.Context, string, string) *usage.ExecutionUsageReport
+	hostUsage    func(context.Context, string) *usage.ExecutionUsageReport
+	capacity     *orchestrator.Service
+	consumer     *sharedInferenceConsumer
+	tasks        nativeRouteIdentityReader
+	calls        nativeCallIdentityReader
 }
 
 func wireNativeRouteCapacity(resolver *agentruntime.ProfileExecutionResolver, capacity *orchestrator.Service,
 	consumer *sharedInferenceConsumer, tasks nativeRouteIdentityReader, calls nativeCallIdentityReader,
-) {
+) *nativeRouteCapacity {
 	if resolver == nil {
-		return
+		return nil
 	}
 	owner := &nativeRouteCapacity{capacity: capacity, consumer: consumer, tasks: tasks, calls: calls}
 	resolver.SetNativeRouteAdmission(owner.admit, owner.release)
 	capacity.SetNativeCapacityWaiters(owner.waiters)
+	return owner
 }
 
 func (o *nativeRouteCapacity) route(ctx context.Context, id, profileID string) (orchestrator.NativeInferenceRoute, error) {
@@ -158,4 +163,23 @@ func (w *nativeRouteWait) AwaitNativeRoute(ctx context.Context) error {
 		}
 		wake = again.wake
 	}
+}
+
+// Reuse the durable owner/session verifier; no extra queue, actor, probe or
+// capacity admission occurs while observing this source namespace.
+func (o *nativeRouteCapacity) candidateUsage(ctx context.Context, id, logicalProfileID string, profile *agentmodels.AgentProfile) *usage.ExecutionUsageReport {
+	route, err := o.route(ctx, id, logicalProfileID)
+	if err != nil || profile == nil {
+		return nil
+	}
+	if route.SessionID != "" {
+		if o.sessionUsage == nil {
+			return nil
+		}
+		return o.sessionUsage(ctx, route.SessionID, profile.ID)
+	}
+	if o.hostUsage == nil {
+		return nil
+	}
+	return o.hostUsage(ctx, profile.ID)
 }

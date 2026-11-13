@@ -209,6 +209,7 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 	}
 
 	sessionless := req.SessionID == ""
+	ctx = h.withCandidateUsage(ctx, req.SessionID)
 
 	// Prepare the prompt request (resolve template, get agent/model info)
 	prepared, err := h.controller.PreparePromptRequest(ctx, req, defaults, sessionless)

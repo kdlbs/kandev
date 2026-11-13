@@ -3,6 +3,7 @@ package hostutility
 import (
 	"context"
 	"fmt"
+	"github.com/kandev/kandev/internal/agent/usage"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
@@ -15,6 +16,12 @@ func (m *Manager) SetInferenceConsumer(consumer agentruntime.InferenceConsumer) 
 }
 
 func (m *Manager) executeOwnedInference(ctx context.Context, inst *instance, req *utility.PromptRequest, profileID string) (*utility.PromptResponse, error) {
+	if m.providerUsageLimits {
+		copy := *req
+		copy.UsagePolicy = &usage.ExecutionUsagePolicy{ProfileID: profileID, AgentID: req.AgentID, ExecutorType: "standalone"}
+		usage.ApplySelectedUsage(ctx, copy.UsagePolicy)
+		req = &copy
+	}
 	if m.inferenceConsumer == nil {
 		return inst.client.InferencePromptOwned(ctx, req)
 	}
@@ -86,3 +93,5 @@ func (m *Manager) cachedInferenceClients() []agentruntime.InferenceClientRef {
 	}
 	return refs
 }
+
+func (m *Manager) SetProviderUsageLimitsEnabled(enabled bool) { m.providerUsageLimits = enabled }

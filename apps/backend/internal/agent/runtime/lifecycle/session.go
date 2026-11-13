@@ -65,6 +65,9 @@ func (e *PendingDispatchedPromptTimeoutError) Error() string {
 // SessionManager handles ACP session initialization and management
 type SessionManager struct {
 	executorAdmission        func(context.Context, string, string, string) (context.Context, error)
+	providerTurnAdmission    ProviderTurnAdmission
+	providerTurnSettler      ProviderTurnSettlement
+	providerUsageLimits      bool
 	logger                   *logger.Logger
 	eventPublisher           *EventPublisher
 	streamManager            *StreamManager
@@ -1870,6 +1873,9 @@ func (sm *SessionManager) SendPromptSteerWithDispatchCallback(
 	// A failure here returns instead of falling back: the ordinary prompt route
 	// would carry the same unresolved descriptor, and the agent would receive a
 	// reference to bytes that are absent from the session.
+	if err := sm.checkExecutionUsage(ctx, execution); err != nil {
+		return nil, err
+	}
 	materialized, err := sm.materializeAttachments(ctx, execution, attachments)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrSteerAttachmentMaterialization, err)
@@ -2240,6 +2246,9 @@ func (sm *SessionManager) preparePrompt(
 			return ctx, "", fmt.Errorf("execution %q is not ready for prompts (status: %s)", execution.ID, execution.Status)
 		}
 	}
+	if err := sm.checkExecutionUsage(ctx, execution); err != nil {
+		return ctx, "", err
+	}
 	effectivePrompt := sm.buildEffectivePrompt(execution, prompt)
 	sm.logger.Info("sending prompt to agent",
 		zap.String("execution_id", execution.ID),
@@ -2417,7 +2426,10 @@ func (sm *SessionManager) callAgentctlPrompt(
 	if client == nil {
 		return fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
-	var err error
+	newClaim, err := sm.admitProviderTurn(ctx, execution, promptGeneration, submissionID)
+	if err != nil {
+		return err
+	}
 	if steer {
 		if submissionID != "" {
 			err = client.PromptSteerWithSubmissionID(ctx, prompt, attachments, promptGeneration, submissionID)
@@ -2435,6 +2447,9 @@ func (sm *SessionManager) callAgentctlPrompt(
 		acknowledgedID := client.LastDeliverySubmissionID()
 		activeID := deliverySubmissionIdentityForPrompt(submissionID, acknowledgedID)
 		execution.setDeliverySubmissionID(activeID)
+	}
+	if newClaim && agentctl.PromptDefinitelyUnsent(err) {
+		sm.finishProviderTurn(execution.ID, promptGeneration, true)
 	}
 	return err
 }

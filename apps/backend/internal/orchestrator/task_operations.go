@@ -774,6 +774,7 @@ func (s *Service) startCreatedSessionWithComposedPromptAndLifecycleOwnership(
 
 type startCreatedSessionOptions struct {
 	lifecycleLockHeld              bool
+	preserveDynamicRoute           bool
 	onQuickChatStartAttemptClaimed func(string)
 	refuseIfAgentRunning           bool
 	initialCreatePrompt            bool
@@ -1167,7 +1168,8 @@ func (s *Service) startCreatedSession(
 			s.bindInitialCreatePromptPassthroughExecution(ctx, sessionID, initialTurnID, executionID)
 		}
 	}
-	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, launchOptions)
+	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, launchOptions,
+		dynamicLaunchOwnsNewTurn(ctx, initialTurnCreated, options.preserveDynamicRoute || options.ceilingEntryBinding != nil))
 	if err != nil {
 		if errors.Is(err, ErrSessionRecoveryRequired) {
 			return nil, err
@@ -2048,7 +2050,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	}
 
 	if route == nil {
-		if agentProfileID, err = s.resolveDynamicLaunchExecution(ctx, launchSession, agentProfileID, false); err != nil {
+		if agentProfileID, err = s.resolveDynamicLaunchExecution(ctx, launchSession, agentProfileID, false, executor.LaunchOptions{ExecutorID: executorID, Env: opts.Env}); err != nil {
 			return nil, failPreparedLaunch(err)
 		}
 	}
@@ -2196,7 +2198,8 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if err := s.configureRetryInitialLaunch(ctx, sessionID, initialTurnID, &launchOptions); err != nil {
 		return nil, failPreparedLaunch(err)
 	}
-	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, launchOptions)
+	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, launchOptions,
+		dynamicLaunchOwnsNewTurn(ctx, initialTurnCreated, opts.ceilingEntryBinding != nil))
 	if err != nil {
 		if initialTurnCreated {
 			s.completeTurnIfCurrent(ctx, sessionID, initialTurnID)
@@ -2541,6 +2544,7 @@ func (s *Service) resolveDynamicLaunchExecution(
 	session *models.TaskSession,
 	profileID string,
 	validate bool,
+	prepared ...executor.LaunchOptions,
 ) (string, error) {
 	if s.profileExecutionResolver == nil {
 		return profileID, nil
@@ -2549,6 +2553,13 @@ func (s *Service) resolveDynamicLaunchExecution(
 		if err := s.profileExecutionResolver.ValidateProfile(ctx, session.AgentProfileID); err != nil {
 			return "", err
 		}
+	}
+	if s.executor != nil {
+		var options executor.LaunchOptions
+		if len(prepared) != 0 {
+			options = prepared[0]
+		}
+		ctx = s.executor.WithCandidateExecutionUsage(ctx, session, options)
 	}
 	resolved, routeClaimed, err := s.resolveExecutionForLaunchSession(ctx, session)
 	if err != nil {
@@ -4979,7 +4990,7 @@ func (s *Service) startAgentOnPreparedWorkspace(
 		AgentProfileID: session.AgentProfileID,
 		ExecutorID:     session.ExecutorID,
 		StartAgent:     true,
-	}); err != nil {
+	}, false); err != nil {
 		if execution != nil && resumeAttempt != nil {
 			resumeAttempt.setExecutionID(execution.AgentExecutionID)
 		}
@@ -6874,6 +6885,7 @@ func (s *Service) promptTaskWithPromptContext(
 	return s.promptTask(
 		ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, launchOriginManual,
 		promptTaskOptions{
+			chatUserTurn:                  true,
 			promptAlreadyComposed:         true,
 			fallbackUsesEffectivePrompt:   true,
 			promptReferenceContext:        promptReferenceContext,
@@ -6886,6 +6898,9 @@ func (s *Service) promptTaskWithPromptContext(
 
 type promptTaskOptions struct {
 	internalContinuation bool
+	// chatUserTurn marks a message the chat delivers without reading the
+	// PromptResult, so the turn may be handed to another dynamic candidate.
+	chatUserTurn bool
 	// recoveryAction is populated only by the explicit context-continuation
 	// path. It allows the already-authorized prompt to cross the recovery block
 	// without reopening the ordinary launch gate.
@@ -7153,6 +7168,13 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		if err := s.checkSessionRecoveryBlock(ctx, sessionID); err != nil {
 			return nil, err
 		}
+	}
+	// A dynamic profile that does not keep its model compares candidates at
+	// every new user turn, including one sent to a warm idle runtime.
+	if switchResult, switched, switchErr := s.switchIdleDynamicCandidateForNewTurn(
+		ctx, taskID, sessionID, prompt, model, planMode, attachments, origin, options,
+	); switched {
+		return switchResult, switchErr
 	}
 
 	session, foregroundClaim, err := s.prepareSessionAndForegroundClaimForPrompt(ctx, taskID, sessionID, options)
@@ -7446,14 +7468,17 @@ func (s *Service) runPromptTurn(
 		}
 		submissionID = normalizeDeliverySubmissionID(options.deliverySubmissionID)
 	}
+	preparedSession := *session
+	var admissionObserved atomic.Bool
 	result, delivery, execErr := s.dispatchPreparedPrompt(
 		promptCtx, taskID, session, activityExecutionID, effectivePrompt, attachments,
 		dispatchOnly, options, submissionID, validateAdmission, onDispatched,
-		rollback.dispatchGuard,
+		rollback.dispatchGuard, &admissionObserved,
 	)
 	return s.finishPromptExecutorDispatch(
 		ctx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments,
 		rollback, options, foregroundDispatch, releaseDispatchGuard, result, execErr, dispatchOutcome, resumeAttempt, delivery,
+		measuredQuotaDispatch{session: &preparedSession, admissionObserved: admissionObserved.Load()},
 	)
 }
 
@@ -7796,8 +7821,14 @@ func (s *Service) finishPromptExecutorDispatch(
 	foregroundDispatch *foregroundDispatch, releaseDispatchGuard func(),
 	result *executor.PromptResult, execErr error, dispatchOutcome *promptDispatchOutcome,
 	resumeAttempt *resumeAttempt, delivery *agentDeliverySubmissionRuntime,
+	measured ...measuredQuotaDispatch,
 ) (*PromptResult, error) {
 	dispatchAccepted, publicationErr := dispatchOutcome.snapshot()
+	if len(measured) > 0 && delivery == nil && !dispatchAccepted && publicationErr == nil {
+		if handled, routeErr := s.routeMeasuredQuotaRefusal(ctx, measured[0], rollback, options, resumeAttempt, foregroundDispatch, releaseDispatchGuard, execErr); handled {
+			return nil, errors.Join(execErr, routeErr)
+		}
+	}
 	if options.retireInitialSubmissionReplay && !dispatchAccepted {
 		restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), promptFailureCleanupTimeout)
 		if err := s.restoreInitialSubmissionReplayAfterRejectedPrompt(

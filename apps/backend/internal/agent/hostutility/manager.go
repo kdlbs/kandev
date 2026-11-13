@@ -48,6 +48,7 @@ import (
 //   - RefreshAgent: re-runs the probe against the existing instance.
 //   - Stop(ctx): deletes each instance from agentctl and removes the tmp parent.
 type Manager struct {
+	providerUsageLimits bool
 	// Installed before the manager starts; policy changes retain this owner.
 	inferenceConsumer agentctlclient.InferenceConsumer
 	registry          *registry.Registry

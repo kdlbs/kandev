@@ -97,6 +97,7 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 	userSecretStore := secrets.NewUserVisibleStore(repos.Secrets)
 	agentSettingsController := agentsettingscontroller.NewController(repos.AgentSettings, discoveryRegistry, agentRegistry, repos.Task, log)
 	agentSettingsController.SetDynamicAgentRoutingEnabled(cfg.Features.DynamicAgentRouting)
+	agentSettingsController.SetDynamicProfileTiersEnabled(cfg.Features.DynamicProfileTiers)
 	agentSettingsController.SetSecretStore(userSecretStore)
 	agentSettingsController.SetManagedRuntimeSelectionStore(managedRuntimeSelections)
 	agentSettingsController.SetRuntimeAutoUpdateStore(managedruntime.NewAutoUpdateStore(repos.SystemSettings))
@@ -377,6 +378,8 @@ func initDynamicRuntimeResolver(
 		dynamicruntime.WithStateLoader(repos.Task),
 		dynamicruntime.WithCircuitRegistry(dynamicCircuits),
 		dynamicruntime.WithEngineLogger(log.Zap()),
+		dynamicruntime.WithOrderedTiers(cfg.Features.DynamicProfileTiers),
+		dynamicruntime.WithTierUsageAvailable(cfg.Features.ProviderUsageLimits),
 	)
 	dynamicBindingResolver, err := dynamicruntime.NewPersistentCredentialBindingResolver(ctx, repos.Task)
 	if err != nil {

@@ -67,6 +67,9 @@ func (c *Client) InferencePrompt(ctx context.Context, req *utility.PromptRequest
 		failure.Attempt, failure.AttemptID = result.Attempt, result.Attempt.AttemptID
 		return &result, failure
 	}
+	if result.Usage != nil {
+		return &result, executionUsageAdmissionError(result.Usage)
+	}
 	return &result, nil
 }
 

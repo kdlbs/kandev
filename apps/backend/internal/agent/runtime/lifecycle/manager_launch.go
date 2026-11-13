@@ -3326,7 +3326,7 @@ func (m *Manager) configureAndStartAgentWithPreparedArgsAndPreparation(
 		// provenance, so keep the private/ordinary path.
 		installContext = nil
 	}
-	if err := client.ConfigureAgentWithProjectDeliveryAndInstallContext(ctx, execution.AgentCommand, agentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, delivery, installContext, execution.LaunchWrapper); err != nil {
+	if err := m.configureAgentUsage(ctx, client, execution, agentArgs, configureEnv, delivery, installContext); err != nil {
 		return "", fmt.Errorf("failed to configure agent: %w", err)
 	}
 

@@ -4560,7 +4560,21 @@ func sessionSettingsEventIsStale(
 	}
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {
-		return false
+		// Without the session the candidate cannot be confirmed, so settings
+		// reported by a concrete dynamic candidate are treated as stale.
+		return identity.ExecutionProfileID != ""
+	}
+	// A dynamic session that switched concrete candidates must not accept
+	// settings reported by the previous candidate's execution.
+	if identity.ExecutionProfileID != "" && session.ExecutionProfileID != "" &&
+		identity.ExecutionProfileID != session.ExecutionProfileID {
+		return true
+	}
+	// Settings reported by an execution whose permission-mode rejection reset
+	// the runtime settings must not restore the discarded observations.
+	if rejected, _ := session.Metadata[rejectedRuntimeSettingsExecution].(string); rejected != "" &&
+		rejected == identity.ExecutionID {
+		return true
 	}
 	// A dynamic session that switched concrete candidates must not accept
 	// settings reported by the previous candidate's execution.
