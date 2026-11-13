@@ -49,7 +49,7 @@ func (r *Repository) lockTaskTransferRelations(
 		tables = append(tables, `"`+strings.ReplaceAll(table, `"`, `""`)+`"`)
 	}
 	sort.Strings(tables)
-	_, err := tx.ExecContext(ctx, `LOCK TABLE `+strings.Join(tables, ", ")+` IN EXCLUSIVE MODE NOWAIT`)
+	_, err := tx.ExecContext(ctx, `LOCK TABLE `+strings.Join(tables, ", ")+` IN SHARE ROW EXCLUSIVE MODE NOWAIT`)
 	var busy *pgconn.PgError
 	if errors.As(err, &busy) && busy.Code == "55P03" {
 		return fmt.Errorf("%w: transfer relations busy", repoerrors.ErrTaskTransferConflict)
