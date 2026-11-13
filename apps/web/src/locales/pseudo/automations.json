@@ -386,9 +386,5 @@
   "mcpInherited": "{{name}} (ĩńĥēŕĩţēď)",
   "mcpNoServers": "Ńō àďďĩţĩōńàĺ ḾĆƤ śēŕvēŕś ƒōũńď.",
   "mcpUnavailable": "{{name}} (ũńàvàĩĺàƀĺē)",
-  "mcpOptionsFailed": "Ćōũĺď ńōţ ĺōàď ḾĆƤ ćĥōĩćēś. Śàvēď ćĥōĩćēś ŕēḿàĩń ũńćĥàńĝēď.",
-  "mcpDesired": "Ďēśĩŕēď ƥàćķàĝēś",
-  "mcpCurrentProcess": "Ćũŕŕēńţ ƥŕōćēśś",
-  "mcpUnknown": "Ũńķńōŵń",
-  "mcpObserved": "Ōƀśēŕvēď ćōńńēćţĩōńś"
+  "mcpOptionsFailed": "Ćōũĺď ńōţ ĺōàď ḾĆƤ ćĥōĩćēś. Śàvēď ćĥōĩćēś ŕēḿàĩń ũńćĥàńĝēď."
 }

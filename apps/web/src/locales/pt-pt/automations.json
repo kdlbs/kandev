@@ -386,9 +386,5 @@
   "mcpInherited": "{{name}} (herdado)",
   "mcpNoServers": "Não foram encontrados servidores MCP adicionais.",
   "mcpUnavailable": "{{name}} (indisponível)",
-  "mcpOptionsFailed": "Não foi possível carregar as opções MCP. As escolhas guardadas mantêm-se.",
-  "mcpDesired": "Pacotes pretendidos",
-  "mcpCurrentProcess": "Processo atual",
-  "mcpUnknown": "Desconhecido",
-  "mcpObserved": "Ligações observadas"
+  "mcpOptionsFailed": "Não foi possível carregar as opções MCP. As escolhas guardadas mantêm-se."
 }

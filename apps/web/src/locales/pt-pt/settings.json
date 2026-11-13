@@ -1227,5 +1227,9 @@
   "builtinMcp.currentUnknown": "Os pacotes do agente atual são desconhecidos. Estas são as opções guardadas para o próximo arranque do agente.",
   "mcpFromAutomation": "Da automatização",
   "mcpFromAutomationDescription": "Servidores selecionados pela automatização que iniciou este processo.",
-  "builtinMcp.surfaces.automation": "Automatização"
+  "builtinMcp.surfaces.automation": "Automatização",
+  "builtinMcp.inheritedValue": "Herdado do espaço de trabalho: {{value}}",
+  "builtinMcp.overrideValue": "Definição da tarefa: {{value}}. Predefinição do espaço de trabalho: {{default}}.",
+  "builtinMcp.useInherited": "Usar valor herdado",
+  "builtinMcp.allowTasks": "Permitir que as tarefas usem este pacote"
 }

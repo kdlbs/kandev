@@ -1227,5 +1227,9 @@
   "builtinMcp.currentUnknown": "无法确定当前智能体的工具包。以下是为下次启动智能体保存的选择。",
   "mcpFromAutomation": "来自自动化",
   "mcpFromAutomationDescription": "启动此进程的自动化所选的服务器。",
-  "builtinMcp.surfaces.automation": "自动化"
+  "builtinMcp.surfaces.automation": "自动化",
+  "builtinMcp.inheritedValue": "继承自工作区：{{value}}",
+  "builtinMcp.overrideValue": "任务覆盖值：{{value}}。工作区默认值：{{default}}。",
+  "builtinMcp.useInherited": "使用继承值",
+  "builtinMcp.allowTasks": "允许任务使用此包"
 }

@@ -78,3 +78,46 @@ it("keeps required Core enabled and rejects an ineligible optional context", () 
     builtinPackageChoice(value, { configuration: "on" }, "tasks", "configuration").enabled,
   ).toBe(false);
 });
+
+// @covers AC-AGENTS-BUILTIN-MCP-005.2
+it("restores inheritance without confusing an equal explicit value with inheritance", () => {
+  const value = view();
+  value.preferences!.packages.diagnostics = "on";
+  expect(
+    builtinPackageChoice(value, { diagnostics: "inherit" }, "tasks", "diagnostics"),
+  ).toMatchObject({ enabled: true, inherited: true, dirty: true, inheritedEnabled: true });
+  value.policy.packages.diagnostics = "available";
+  expect(
+    builtinPackageChoice(value, { diagnostics: "inherit" }, "tasks", "diagnostics"),
+  ).toMatchObject({ enabled: false, inheritedEnabled: false });
+  expect(builtinPackageChoice(value, { diagnostics: "on" }, "tasks", "diagnostics")).toMatchObject({
+    enabled: true,
+    inherited: false,
+  });
+});
+
+// @covers AC-AGENTS-BUILTIN-MCP-005.3
+it("uses the workspace draft when unblocking and changing default inclusion", () => {
+  const value = view();
+  value.policy.packages.diagnostics = "blocked";
+  expect(
+    builtinPackageChoice(value, { diagnostics: "default" }, "workspaces", "diagnostics"),
+  ).toMatchObject({ enabled: true, dirty: true });
+});
+
+// @covers AC-AGENTS-BUILTIN-MCP-005.4
+it("keeps a blocked task override identifiable and removable", () => {
+  const value = view();
+  value.policy.packages.diagnostics = "blocked";
+  value.preferences!.packages.diagnostics = "on";
+  expect(builtinPackageChoice(value, { diagnostics: "on" }, "tasks", "diagnostics")).toMatchObject({
+    choice: "on",
+    enabled: false,
+    inherited: false,
+    dirty: false,
+    inheritedEnabled: false,
+  });
+  expect(
+    builtinPackageChoice(value, { diagnostics: "inherit" }, "tasks", "diagnostics"),
+  ).toMatchObject({ enabled: false, inherited: true, dirty: true });
+});
