@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"github.com/kandev/kandev/internal/clarification/protocol"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/stretchr/testify/require"
 	"testing"
@@ -37,4 +38,22 @@ func TestChoiceImagesParentFieldsRejected(t *testing.T) {
 		require.True(t, result.IsError)
 		require.Nil(t, backend.lastPayload)
 	}
+}
+
+// @covers AC-TASKS-QUESTION-IMAGE-REVIEW-006.4
+func TestQuestionImagesSchemaStatesBundleLimit(t *testing.T) {
+	schema := buildQuestionImageSchema(protocol.MaxQuestionImageReferences)
+	description := schema[descriptionArg].(string)
+	require.Contains(t, description, "A bundle accepts at most 16 distinct image IDs.")
+	require.Contains(t, description, "A question accepts at most 4 references")
+	require.Equal(t, protocol.MaxQuestionImageReferences, schema["maxItems"])
+}
+
+// @covers AC-TASKS-QUESTION-IMAGE-REVIEW-009.1
+func TestQuestionImagesSchemaOffersLabels(t *testing.T) {
+	items := buildQuestionImageSchema(1)["items"].(map[string]any)
+	label, ok := items[propsKey].(map[string]any)["label"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, protocol.ImageLabelPattern, label["pattern"])
+	require.Contains(t, label[descriptionArg], "before")
 }

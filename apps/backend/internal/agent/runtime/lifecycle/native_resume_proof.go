@@ -103,6 +103,21 @@ func (m *Manager) nativeResumeProofRows(ctx context.Context, execution *AgentExe
 }
 
 func nativeResumeProofCursor(ctx context.Context, repository AgentDeliveryRepository, status *agentctl.DeliveryStatus) (*models.AgentDeliveryCursor, error) {
+	cursor, err := authenticatedNativeResumeCursor(ctx, repository, status)
+	if err != nil || cursor == nil {
+		return nil, err
+	}
+	if cursor.ReceivedSequence != cursor.ProjectedSequence ||
+		(status.Stream != nil && uint64(cursor.ProjectedSequence) < status.Stream.HighWater) {
+		return nil, errNativeResumeProjectionLag
+	}
+	return cursor, nil
+}
+
+// authenticatedNativeResumeCursor checks that the SQL cursor belongs to the
+// authenticated stream and is covered by the peer. It does not require the
+// projection to be complete, so adoption can classify history before replay.
+func authenticatedNativeResumeCursor(ctx context.Context, repository AgentDeliveryRepository, status *agentctl.DeliveryStatus) (*models.AgentDeliveryCursor, error) {
 	cursor, err := repository.GetAgentDeliveryCursor(ctx, status.StreamID)
 	if errors.Is(err, sql.ErrNoRows) && (status.Stream == nil || status.Stream.HighWater == 0) {
 		return nil, nil
@@ -115,10 +130,6 @@ func nativeResumeProofCursor(ctx context.Context, repository AgentDeliveryReposi
 	}
 	if _, err := projectedCursorCoveredByPeer(cursor, status); err != nil {
 		return nil, err
-	}
-	if cursor.ReceivedSequence != cursor.ProjectedSequence ||
-		(status.Stream != nil && uint64(cursor.ProjectedSequence) < status.Stream.HighWater) {
-		return nil, errNativeResumeProjectionLag
 	}
 	return cursor, nil
 }

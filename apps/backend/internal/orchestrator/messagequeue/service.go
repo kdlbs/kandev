@@ -3027,6 +3027,17 @@ func (s *Service) ListPendingQueueDispatches(ctx context.Context) ([]PendingQueu
 	return repo.ListPendingQueueDispatches(ctx)
 }
 
+// HasPendingDispatchForSession checks durable claims for the selected session.
+func (s *Service) HasPendingDispatchForSession(ctx context.Context, sessionID string) (bool, error) {
+	repo, ok := s.repo.(interface {
+		HasPendingDispatchForSession(context.Context, string) (bool, error)
+	})
+	if !ok {
+		return false, errors.New("pending queue dispatch persistence unavailable")
+	}
+	return repo.HasPendingDispatchForSession(ctx, sessionID)
+}
+
 func (s *Service) MarkPendingQueueDispatchAccepted(
 	ctx context.Context,
 	msg *QueuedMessage,
@@ -3416,6 +3427,28 @@ func (s *Service) PurgeDeletedSession(ctx context.Context, identity QueueSession
 	return s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
 		return purger.PurgeDeletedSession(admittedCtx, identity)
 	})
+}
+
+// ListEntries returns the current queue entries for a session. Unlike
+// GetStatus, it preserves storage and admission errors so callers can fail
+// closed when queue ownership must be proven.
+func (s *Service) ListEntries(ctx context.Context, sessionID string) ([]QueuedMessage, error) {
+	if s == nil {
+		return nil, errors.New("message queue is unavailable")
+	}
+	var entries []QueuedMessage
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		listed, listErr := s.repo.ListBySession(admittedCtx, sessionID)
+		if listErr != nil {
+			return listErr
+		}
+		entries = listed
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return entries, nil
 }
 
 // GetStatus returns the full pending list and capacity info for a session.

@@ -73,6 +73,7 @@ type UpdateUserSettingsRequest struct {
 	PreferredShell                    *string
 	DefaultEditorID                   *string
 	EnablePreviewOnClick              *bool
+	EscapeCancelsAgent                *bool
 	ChatSubmitKey                     *string
 	ReviewAutoMarkOnScroll            *bool
 	ConfirmTaskArchive                *bool
@@ -739,6 +740,9 @@ func applyStartupPage(settings *models.UserSettings, value *string) error {
 // (archive confirmation, auto-start prevention, transcript display toggles,
 // MCP default profile, release notification) from the patch.
 func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.EscapeCancelsAgent != nil {
+		settings.EscapeCancelsAgent = *req.EscapeCancelsAgent
+	}
 	if req.ReviewAutoMarkOnScroll != nil {
 		settings.ReviewAutoMarkOnScroll = *req.ReviewAutoMarkOnScroll
 	}
@@ -1255,6 +1259,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"preferred_shell":                          settings.PreferredShell,
 		"default_editor_id":                        settings.DefaultEditorID,
 		"enable_preview_on_click":                  settings.EnablePreviewOnClick,
+		"escape_cancels_agent":                     settings.EscapeCancelsAgent,
 		"chat_submit_key":                          settings.ChatSubmitKey,
 		"review_auto_mark_on_scroll":               settings.ReviewAutoMarkOnScroll,
 		"confirm_task_archive":                     settings.ConfirmTaskArchive,

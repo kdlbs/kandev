@@ -1,5 +1,5 @@
 import { test as base, type TestInfo } from "@playwright/test";
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -206,12 +206,50 @@ export function observeLogFile(logFile: LogFileStream): () => Promise<void> {
 }
 
 function removeOwnedTempRoot(tmpDir: string): void {
-  fs.rmSync(tmpDir, {
-    recursive: true,
-    force: true,
-    maxRetries: 3,
-    retryDelay: 100,
-  });
+  const remove = () =>
+    fs.rmSync(tmpDir, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 100,
+    });
+  try {
+    remove();
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "EACCES" && code !== "EPERM") throw error;
+    // Container agents run as root and can leave root-owned 0700 state under
+    // the worker root's bind mounts. Hand it back to this process from a
+    // container image that is already present in container-backed shards.
+    restoreTempRootOwnership(tmpDir);
+    remove();
+  }
+}
+
+function restoreTempRootOwnership(tmpDir: string): void {
+  const uid = process.getuid?.() ?? 0;
+  const gid = process.getgid?.() ?? 0;
+  for (const image of ["kandev-agent:e2e", "kandev-sshd:e2e"]) {
+    if (spawnSync("docker", ["image", "inspect", image], { stdio: "ignore" }).status !== 0) {
+      continue;
+    }
+    const chown = spawnSync(
+      "docker",
+      [
+        "run",
+        "--rm",
+        "-v",
+        `${tmpDir}:/cleanup`,
+        image,
+        "chown",
+        "-R",
+        `${uid}:${gid}`,
+        "/cleanup",
+      ],
+      { stdio: "ignore" },
+    );
+    if (chown.status === 0) return;
+  }
 }
 
 export function reportUnexpectedBackendFailure(

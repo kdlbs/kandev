@@ -34,6 +34,9 @@ const instanceHTTPShutdownGrace = 250 * time.Millisecond
 // has already walked past and will never stop.
 var ErrManagerShuttingDown = errors.New("instance manager is shutting down")
 
+// ErrInstanceBusy means idle reclaim left the instance available.
+var ErrInstanceBusy = errors.New("instance has workspace work")
+
 // Manager manages multiple agent instances.
 // It handles creation, tracking, and removal of agent instances,
 // each with their own HTTP server on a dedicated port.
@@ -379,40 +382,43 @@ func (m *Manager) publishInstance(ctx context.Context, inst *Instance, bundle *p
 func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd string, agentEnv []string) *config.InstanceOverrides {
 	autoStart := req.AutoStart
 	return &config.InstanceOverrides{
-		InstanceID:                 id,
-		Protocol:                   agent.Protocol(req.Protocol),
-		AgentCommand:               agentCmd,
-		WorkDir:                    req.WorkspacePath,
-		AutoStart:                  &autoStart,
-		Env:                        agentEnv,
-		AutoApprovePermissions:     req.AutoApprovePermissions,
-		AgentType:                  req.AgentType,
-		McpServers:                 m.buildMcpServerConfigs(req.McpServers),
-		SessionID:                  req.SessionID,
-		TaskID:                     req.TaskID,
-		DisableAskQuestion:         req.DisableAskQuestion,
-		PromptSuggestions:          req.PromptSuggestions,
-		CopilotNativeSessionEvents: req.CopilotNativeSessionEvents,
-		AssumeMcpSse:               req.AssumeMcpSse,
-		AssumeMcpHttp:              req.AssumeMcpHttp,
-		McpMode:                    req.McpMode,
-		McpProviders:               req.McpProviders,
-		McpProfile:                 req.McpProfile,
-		NamespacesMCPToolsByServer: req.NamespacesMCPToolsByServer,
-		RequiresProcessKill:        req.RequiresProcessKill,
-		StripEnv:                   req.StripEnv,
-		ProviderGatewayAuth:        req.ProviderGatewayAuth,
-		AuthPolicy:                 req.AuthPolicy,
-		BaseBranches:               req.BaseBranches,
-		ComparisonTargets:          req.ComparisonTargets,
-		RemoteContributions:        req.RemoteContributions,
-		ContributionDestinations:   req.ContributionDestinations,
-		WorkspaceSourceRoots:       req.WorkspaceSourceRoots,
-		DurableJournalPath:         req.DurableJournalPath,
-		DeliveryStreamID:           req.DeliveryStreamID,
-		DeliveryIncarnationID:      req.DeliveryIncarnationID,
-		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
-		OpenCodePluginRuntime:      req.OpenCodePluginRuntime,
+		InstanceID:                   id,
+		Protocol:                     agent.Protocol(req.Protocol),
+		AgentCommand:                 agentCmd,
+		WorkDir:                      req.WorkspacePath,
+		AutoStart:                    &autoStart,
+		Env:                          agentEnv,
+		AutoApprovePermissions:       req.AutoApprovePermissions,
+		AgentType:                    req.AgentType,
+		McpServers:                   m.buildMcpServerConfigs(req.McpServers),
+		SessionID:                    req.SessionID,
+		TaskID:                       req.TaskID,
+		DisableAskQuestion:           req.DisableAskQuestion,
+		PromptSuggestions:            req.PromptSuggestions,
+		CopilotNativeSessionEvents:   req.CopilotNativeSessionEvents,
+		AssumeMcpSse:                 req.AssumeMcpSse,
+		AssumeMcpHttp:                req.AssumeMcpHttp,
+		McpMode:                      req.McpMode,
+		McpProviders:                 req.McpProviders,
+		McpProfile:                   req.McpProfile,
+		NamespacesMCPToolsByServer:   req.NamespacesMCPToolsByServer,
+		RequiresProcessKill:          req.RequiresProcessKill,
+		StripEnv:                     req.StripEnv,
+		ProviderGatewayAuth:          req.ProviderGatewayAuth,
+		AuthPolicy:                   req.AuthPolicy,
+		BaseBranches:                 req.BaseBranches,
+		ComparisonTargets:            req.ComparisonTargets,
+		RemoteContributions:          req.RemoteContributions,
+		ContributionDestinations:     req.ContributionDestinations,
+		WorkspaceSourceRoots:         req.WorkspaceSourceRoots,
+		TaskWorkspaceRoot:            req.TaskWorkspaceRoot,
+		WorkspaceExcludedRoots:       req.WorkspaceExcludedRoots,
+		DurableJournalPath:           req.DurableJournalPath,
+		DeliveryStreamID:             req.DeliveryStreamID,
+		DeliveryIncarnationID:        req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:    req.DeliveryHarnessGeneration,
+		OpenCodePluginRuntime:        req.OpenCodePluginRuntime,
+		ManagedRuntimeInstallContext: req.ManagedRuntimeInstallContext,
 	}
 }
 
@@ -657,6 +663,15 @@ func (m *Manager) StopInstance(ctx context.Context, id string) error {
 }
 
 func (m *Manager) stopInstance(ctx context.Context, id string, inst *Instance) error {
+	return m.stopInstanceWithAdmission(ctx, id, inst, false)
+}
+
+// ReclaimIdleInstance stops only the observed instance after closing idle admission.
+func (m *Manager) ReclaimIdleInstance(ctx context.Context, inst *Instance) error {
+	return m.stopInstanceWithAdmission(ctx, inst.ID, inst, true)
+}
+
+func (m *Manager) stopInstanceWithAdmission(ctx context.Context, id string, inst *Instance, idleOnly bool) error {
 	inst.stopMu.Lock()
 	defer inst.stopMu.Unlock()
 
@@ -676,6 +691,16 @@ func (m *Manager) stopInstance(ctx context.Context, id string, inst *Instance) e
 	if current != inst {
 		m.mu.Unlock()
 		return fmt.Errorf("instance %s not found", id)
+	}
+	inst.statusMu.RLock()
+	stopping := inst.Status == "stopping"
+	inst.statusMu.RUnlock()
+	if idleOnly && !stopping {
+		admission, ok := inst.manager.(interface{ CloseAdmissionIfIdle() bool })
+		if !ok || !admission.CloseAdmissionIfIdle() {
+			m.mu.Unlock()
+			return ErrInstanceBusy
+		}
 	}
 	inst.setStatus("stopping")
 	m.mu.Unlock()
@@ -702,8 +727,7 @@ func (m *Manager) stopInstance(ctx context.Context, id string, inst *Instance) e
 		}
 	}
 
-	stopErr := errors.Join(httpStopErr, processStopErr)
-	if httpStopErr != nil || processStopErr != nil {
+	if stopErr := errors.Join(httpStopErr, processStopErr); stopErr != nil {
 		return stopErr
 	}
 
@@ -715,16 +739,14 @@ func (m *Manager) stopInstance(ctx context.Context, id string, inst *Instance) e
 		m.portAlloc.Release(inst.lease)
 		inst.portReleased = true
 	}
-	if stopErr == nil {
-		delete(m.instances, id)
-	}
+	delete(m.instances, id)
 	m.mu.Unlock()
 
 	m.logger.Info("StopInstance completed",
 		zap.String("instance_id", id),
 		zap.Int("port", inst.Port))
 
-	return stopErr
+	return nil
 }
 
 type instanceHTTPServer interface {

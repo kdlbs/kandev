@@ -141,6 +141,7 @@ func (m *Manager) drainAfterDeliveryFailure(
 			if !ok {
 				return false, false, nil
 			}
+			m.recordAdapterStage()
 			update.DeliverySubmissionID = m.deliverySubmissionIDForEvent(update)
 			if !isTerminalDeliveryEvent(update) {
 				if update.DeliverySubmissionID != "" && update.DeliverySubmissionID != failedSubmissionID {

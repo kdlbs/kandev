@@ -1,5 +1,6 @@
 "use client";
 
+import { TaskGraphPanelRequest } from "@/components/task-graph/task-graph-panel-request";
 import { memo, useCallback, useState } from "react";
 import { ClarificationDraftProvider } from "./chat/clarification-draft-context";
 import dynamic from "@/lib/routing/client-dynamic";
@@ -58,6 +59,7 @@ type TaskLayoutProps = {
 };
 
 export const TaskLayout = memo(function TaskLayout(props: TaskLayoutProps) {
+  const { usesDesktopWorkbench } = useResponsiveBreakpoint();
   const [pickerWorkspaceId, setPickerWorkspaceId] = useState(props.workspaceId);
   if (props.workspaceId && props.workspaceId !== pickerWorkspaceId) {
     setPickerWorkspaceId(props.workspaceId);
@@ -67,6 +69,9 @@ export const TaskLayout = memo(function TaskLayout(props: TaskLayoutProps) {
       <ClarificationDraftProvider taskId={props.taskId ?? null}>
         <ResponsiveTaskLayout {...props} />
       </ClarificationDraftProvider>
+      {props.taskId && (
+        <TaskGraphPanelRequest taskId={props.taskId} usesDockview={usesDesktopWorkbench} />
+      )}
       <ResponsiveTaskPicker
         key={pickerWorkspaceId}
         workspaceId={props.workspaceId}

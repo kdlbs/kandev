@@ -110,3 +110,7 @@ Compact observations authorize the task before narrow or fallback repository rea
 ## PR #4404 browser CI remediation
 
 Compact summary observations now retain the selected model ID and matching display name. SQLite and PostgreSQL extract two scalar values. The full-model fallback uses the same bounded projection. Provider-restored model identity remains authoritative over stale local overrides; unrelated configuration growth does not enlarge compact responses. Boot siblings receive one display choice, without configuration options or rich metadata. E2E fixtures request a full session explicitly when inspecting preparation, delivery recovery, or persisted configuration.
+
+## PR #5185 task-list summary read reuse
+
+Task-list and sidebar enrichment now reuse one bounded session-summary observation batch for both DTO construction and summary reconciliation. The SQLite and PostgreSQL queries share one ordered projection, while PostgreSQL keeps its lateral JSON aliases and model selection. Model-label cases distinguish an explicit runtime override from runtime configuration and the observed model. The same case table runs against SQLite and the environment-gated PostgreSQL repository.

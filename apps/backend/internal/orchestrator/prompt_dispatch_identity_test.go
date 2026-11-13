@@ -52,7 +52,7 @@ func TestPromptTaskExpectedIdentityRejectsReplacementAfterClaim(t *testing.T) {
 
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageQueue = newAuthoritativeMemoryQueue(repo, testLogger())
 	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, taskID, sessionID)
 	if err != nil {
@@ -193,7 +193,7 @@ func TestPromptTaskHoldsQueuedDispatchGuardDuringInPlaceModelMutation(t *testing
 		allowSwitch:   make(chan struct{}),
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageQueue = newAuthoritativeMemoryQueue(repo, testLogger())
 	t.Cleanup(func() {
 		select {

@@ -120,6 +120,11 @@ type CreateInstanceRequest struct {
 	// workspace. Agentctl permits file operations through links only beneath
 	// these roots.
 	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
+	// WorkspaceExcludedRoots are detached checkouts that discovery must skip.
+	WorkspaceExcludedRoots []string `json:"workspace_excluded_roots,omitempty"`
+	// TaskWorkspaceRoot is the containment boundary for linked-worktree
+	// discovery. Empty falls back to the agent workspace.
+	TaskWorkspaceRoot string `json:"task_workspace_root,omitempty"`
 	// DurableJournalPath is an owner-scoped path on retained executor storage.
 	// Empty means the instance uses legacy delivery semantics.
 	DurableJournalPath string `json:"durable_journal_path,omitempty"`
@@ -151,7 +156,7 @@ type InstanceInfo struct {
 	Status          string            `json:"status"`
 	WorkspacePath   string            `json:"workspace_path"`
 	AgentCommand    string            `json:"agent_command"`
-	Env             map[string]string `json:"env,omitempty"`
+	Env             map[string]string `json:"env"`
 	CreatedAt       time.Time         `json:"created_at"`
 	// SessionID is the task session ID this instance was created for, if any.
 	SessionID string `json:"session_id,omitempty"`
@@ -160,7 +165,7 @@ type InstanceInfo struct {
 	// WorkspaceSourceRoots is the instance's live, current source-root
 	// allowlist, read back rather than pushed (AC-EXECUTORS-SURVIVAL-002.14's
 	// "workspace source roots" reconstruction row).
-	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
+	WorkspaceSourceRoots []string `json:"workspace_source_roots"`
 	// ProviderSessionID is the live agent CLI's own session identity, read
 	// back from the adopted instance (AC-EXECUTORS-SURVIVAL-002.14's
 	// "provider session identity" reconstruction row).
@@ -382,7 +387,20 @@ func (c *ControlClient) CreateInstance(ctx context.Context, req *CreateInstanceR
 
 // DeleteInstance stops and removes an agent instance.
 func (c *ControlClient) DeleteInstance(ctx context.Context, instanceID string) error {
-	req, err := http.NewRequestWithContext(ctx, "DELETE", c.baseURL+"/api/v1/instances/"+instanceID, nil)
+	return c.stopInstance(ctx, instanceID, false)
+}
+
+// ReclaimIdleInstance requires the peer to refuse when instance work is active.
+func (c *ControlClient) ReclaimIdleInstance(ctx context.Context, instanceID string) error {
+	return c.stopInstance(ctx, instanceID, true)
+}
+
+func (c *ControlClient) stopInstance(ctx context.Context, instanceID string, idleOnly bool) error {
+	method, path := http.MethodDelete, "/api/v1/instances/"+instanceID
+	if idleOnly {
+		method, path = http.MethodPost, path+"/reclaim"
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
 	if err != nil {
 		return err
 	}
@@ -399,7 +417,7 @@ func (c *ControlClient) DeleteInstance(ctx context.Context, instanceID string) e
 	// response was lost. The desired postcondition is already satisfied.
 	if resp.StatusCode != http.StatusOK &&
 		resp.StatusCode != http.StatusNoContent &&
-		resp.StatusCode != http.StatusNotFound {
+		(resp.StatusCode != http.StatusNotFound || idleOnly) {
 		var errResp struct {
 			Error string `json:"error"`
 		}

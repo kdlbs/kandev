@@ -69,6 +69,37 @@ function seedUnprovenCompletion(tmpDir: string, submissionId: string) {
   });
 }
 
+async function expectDeliveryProjectionSettled(tmpDir: string, streamId: string) {
+  await expect
+    .poll(
+      () =>
+        withDatabase(tmpDir, (db) => {
+          const cursor = db
+            .prepare(
+              "SELECT received_sequence, projected_sequence, remote_high_water FROM agent_delivery_cursors WHERE stream_id = ?",
+            )
+            .get(streamId) as
+            | {
+                received_sequence: number;
+                projected_sequence: number;
+                remote_high_water: number;
+              }
+            | undefined;
+          return (
+            !!cursor &&
+            cursor.received_sequence === cursor.projected_sequence &&
+            cursor.received_sequence >= cursor.remote_high_water
+          );
+        }),
+      {
+        timeout: 15_000,
+        message:
+          "delivery cursor must be fully projected before simulating an unproven SQL completion",
+      },
+    )
+    .toBe(true);
+}
+
 type NativeResumeTrigger = {
   page: Page;
   api: ApiClient;
@@ -222,7 +253,10 @@ export async function verifyNativeResumeClearsRecoveryNotice(
   if (legacyFence) {
     seedLegacyFence(tmpDir, active.id, seeded, recoveryBlockId, legacy);
   }
-  if (unproven) seedUnprovenCompletion(tmpDir, seeded.submissionId);
+  if (unproven) {
+    await expectDeliveryProjectionSettled(tmpDir, seeded.submission.stream_id);
+    seedUnprovenCompletion(tmpDir, seeded.submissionId);
+  }
   if (legacy === "readiness") {
     recoveryBlockId = await prepareReadinessFence(api, task.id, active.id, tmpDir, recoveryBlockId);
   }

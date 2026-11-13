@@ -6,6 +6,7 @@ import {
   changeRequestNumbers,
   compareDependencyCandidates,
   dependencyOptionValue,
+  rankCreateDialogCandidates,
 } from "./task-create-dialog-dependency-search";
 
 type Task = KanbanState["tasks"][number];
@@ -132,5 +133,37 @@ describe("compareDependencyCandidates", () => {
     const a = task({ id: "a", title: "Bravo", updatedAt: "not-a-date" });
     const b = task({ id: "b", title: "Alpha", createdAt: "also-not-a-date" });
     expect(compareDependencyCandidates(a, b)).toBeGreaterThan(0);
+  });
+});
+
+describe("rankCreateDialogCandidates", () => {
+  it("puts a candidate from the active column first", () => {
+    const sameColumn = task({ id: "same", workflowStepId: "step-current" });
+    const otherColumn = task({ id: "other", workflowStepId: "step-other" });
+    const compare = (a: Task, b: Task) =>
+      rankCreateDialogCandidates(a, b, { contextStepId: "step-current" });
+    expect(compare(sameColumn, otherColumn)).toBeLessThan(0);
+  });
+
+  it("ranks recently viewed tasks after same-column grouping", () => {
+    const recent = task({ id: "recent", workflowStepId: "step-other" });
+    const ordinary = task({ id: "ordinary", workflowStepId: "step-other" });
+    const compare = (a: Task, b: Task) =>
+      rankCreateDialogCandidates(a, b, { recentTaskIds: new Set(["recent"]) });
+    expect(compare(recent, ordinary)).toBeLessThan(0);
+  });
+
+  it("prefers title matches over identifier-only matches when search is active", () => {
+    const titleMatch = task({ id: "title", title: "Repair billing retry" });
+    const idMatch = task({ id: "billing-retry", title: "Update payments" });
+    const compare = (a: Task, b: Task) =>
+      rankCreateDialogCandidates(a, b, { searchText: "billing retry", titleMatchFirst: true });
+    expect(compare(titleMatch, idMatch)).toBeLessThan(0);
+  });
+
+  it("uses the existing dependency comparator when no new signal distinguishes candidates", () => {
+    const a = task({ id: "a", title: "A", updatedAt: EARLY });
+    const b = task({ id: "b", title: "B", updatedAt: LATE });
+    expect(rankCreateDialogCandidates(a, b)).toBe(compareDependencyCandidates(a, b));
   });
 });

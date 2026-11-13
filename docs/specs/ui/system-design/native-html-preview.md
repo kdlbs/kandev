@@ -3,6 +3,7 @@ status: current
 system: ui
 requirements:
   - REQ-UI-NATIVE-HTML-PREVIEW-001
+  - REQ-UI-NATIVE-HTML-PREVIEW-002
 ---
 
 # Native HTML File Preview System Design
@@ -29,6 +30,7 @@ contract specified by the
 | Requirement                      | Design sections                                                                                                                                                                                                                                                               |
 | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `REQ-UI-NATIVE-HTML-PREVIEW-001` | [Architecture](#architecture), [Contracts](#contracts), [Control flow](#control-flow), [Trust and security](#trust-and-security), [Responsive contract](#responsive-contract), [Failure and recovery](#failure-and-recovery), [Verification strategy](#verification-strategy) |
+| `REQ-UI-NATIVE-HTML-PREVIEW-002` | [Diff entry point](#diff-entry-point), [Verification strategy](#verification-strategy) |
 
 ## Architecture
 
@@ -190,6 +192,101 @@ flow while the iframe is visible.
 4. `Show code` or file identity change restores source without changing its
    buffer. A preview failure keeps source recovery and retry actions available.
 
+## Diff entry point
+
+This extension covers `ReviewDiffList` in `TaskChangesPanel` and the expanded
+`ReviewDialogSurface`. Both already render `ReviewDiffHeader` and
+`FileDiffToolbar` above a replaceable file body. The inner `FileDiffViewer`
+uses `hideHeader`, so adding an action only to `DiffHeaderToolbarButtons`
+would miss these surfaces. Dedicated commit-detail and historical-turn viewers
+remain outside this extension.
+
+### Action and body ownership
+
+- `FileDiffSection` owns transient HTML-preview selection independently of the
+  existing Markdown preview state. Extract the new hook and body wrapper into
+  focused files rather than expanding the existing list component.
+- Derive eligibility from `getFilePreviewKind(file.path)`, `file.status`, and
+  `file.diff_skip_reason`. Exclude deleted files and known binary content.
+  Resolve renamed files with `file.path`, preserving `repository_name`.
+- Pass an optional HTML toggle and selected state through `ReviewDiffHeader`
+  to `FileDiffToolbar`. Desktop shows the eye action next to the existing
+  preview/edit controls. The phone actions menu exposes the same command.
+  A selected preview exposes `Show diff`, including during loading and errors.
+- Reuse `HtmlPreviewContent` for the iframe, trust notice, refresh, and retry.
+  Add an optional return-action label whose default remains `Show code`.
+  Diff callers supply the existing localized `review:showDiff` value.
+  This presentation option does not change the file-editor workflow.
+- Supply the captured session, task, repository, and path context to the
+  preview. Preserve existing preview-feedback ownership. Omit duplicate
+  external-file controls already present in the diff header.
+
+### Source and asynchronous flow
+
+Use a focused `useReviewHtmlPreview` hook beside the Review components. The
+hook owns workspace-file loading and delegates publication to
+`useHtmlPreviewPublisher`; components do not fetch directly.
+
+1. Explicit activation selects preview, suppresses automatic review marking
+   caused by its geometry change, and starts one loading state.
+2. Capture the session, repository, path, review source, and request generation.
+   Read the complete file through `requestFileContent(client, sessionId, path,
+   repo)` using `getWebSocketClient()`.
+3. Reject binary responses. If the captured identity and generation still own
+   the request, publish the returned text with the same repository and path.
+4. Render the resulting versioned URL through `HtmlPreviewContent`. Preserve
+   the existing authenticated proxy and trusted Browser-panel policy.
+5. Refresh and retry repeat the full read and publication. Workspace edits do
+   not automatically republish or execute HTML.
+6. `Show diff`, identity change, and unmount retire both read and publish
+   generations. A late read must not start publication. A late publication
+   must not update the visible row. Reuse the publisher's result guard and
+   reset rather than creating another URL publisher.
+
+The source is the current file on disk. The hook does not reconstruct hunks,
+fetch Git revisions, save a file, or read an unsaved editor buffer. This rule
+also applies to staged, committed, and PR rows within Changes and Review.
+Expose localized source copy before activation and above the iframe because
+those patches can differ from the current workspace file. Reuse
+`task:htmlPreviewTrustedCode` and `editors:previewHtml` for existing copy.
+
+Map file-read failures to localized recovery copy in the same preview body.
+The existing publication error mapping remains authoritative for API failures.
+Retry remains explicit. Neither errors nor unavailable source permit a fallback
+to patch fragments, `srcDoc`, a different repository, or another session.
+
+### Responsive composition and lifecycle
+
+The existing Review phone actions menu is the entry-point exemplar. Its visible
+trigger and menu rows provide touch access without adding another navigation
+layer. The existing mobile HTML viewer supplies the iframe controls, trust
+notice, and source recovery pattern.
+
+Preview replaces the row body within the current diff sheet or Review dialog.
+Keep the sticky file identity, reviewed checkbox, and visible menu in place.
+Use a bounded preview frame of `min(70dvh, 36rem)` within the row; the iframe
+owns page scrolling, while `ReviewDiffList` retains list scrolling. The frame
+must leave room for its controls and source/trust copy at the phone viewport.
+Existing host safe-area clearance remains authoritative. Do not add a full
+desktop workbench or document-level horizontal scrolling.
+
+Desktop keeps compact 24-pixel controls consistent with neighboring file
+actions. Fine pointers use the tooltip help. Coarse pointers above the phone
+breakpoint open a bounded disclosure drawer that states the current workspace
+source and the trusted-code consequence, then requires an explicit confirmation
+before any file read or publication. Returning to the diff stays immediate.
+Phone and coarse-pointer preview, refresh, retry, and return controls need at
+least 44-pixel active dimensions. Scope larger targets to those modes. Use
+`useResponsiveBreakpoint` for phone composition independently of pointer
+precision. Verify a narrow fine-pointer viewport, a coarse-pointer tablet, and
+mobile touch.
+
+Preview selection and URLs remain local to the row. A temporarily removed row
+returns to diff mode when remounted. No HTML mode enters the dialog's Markdown
+`previewedFiles` set, browser storage, or durable review state. Returning from
+preview preserves the row's collapsed, wrap, and expansion choices. Use the
+existing `suppressAutoMark` guard for transitions that change row geometry.
+
 ## Relative assets and browser fidelity
 
 For an entry document at `site/pages/index.html`, `../styles/site.css` resolves
@@ -315,6 +412,23 @@ continue to cover browser routing.
   containment, `Show code`, and source preservation.
 - Existing development-server and Browser-panel tests guard against regressions
   in explicit server workflows and generic port-proxy behavior.
+- Diff-preview hook tests cover complete workspace reads, repository-scoped
+  rename targets, binary rejection, read errors, retry, refresh, and retirement
+  during both reading and publication. No read or publish occurs before an
+  explicit action.
+- Review component tests cover desktop and phone actions, the coarse-pointer
+  source/trust disclosure before activation, `Show diff`, unchanged review
+  status, and the file-editor return-label default.
+- Chromium and mobile-chrome E2E cover native rendering from an HTML diff,
+  relative assets, return to the same diff, failure recovery, and the
+  coarse-pointer tablet disclosure. Phone coverage includes touch dimensions,
+  viewport containment, and a narrow fine-pointer viewport. Existing Markdown
+  and native-editor preview suites remain regression evidence.
+
+## Implementation plans
+
+- [Native HTML preview](../../../plans/native-html-preview/plan.md).
+- [HTML preview from diffs](../../../plans/html-diff-preview/plan.md).
 
 ## Open implementation risks
 

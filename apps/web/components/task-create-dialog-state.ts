@@ -93,7 +93,16 @@ function useWorkflowAgentProfileState() {
  */
 function useTaskDependencyState() {
   const [blockedBy, setBlockedBy] = useState<string[]>([]);
-  return { blockedBy, setBlockedBy };
+  const [selectedParentTaskId, setSelectedParentTaskId] = useState<string | undefined>();
+  const [relatedTaskIds, setRelatedTaskIds] = useState<string[]>([]);
+  return {
+    blockedBy,
+    setBlockedBy,
+    selectedParentTaskId,
+    setSelectedParentTaskId,
+    relatedTaskIds,
+    setRelatedTaskIds,
+  };
 }
 
 function useTaskMCPSelectionState() {
@@ -276,6 +285,8 @@ export function useDialogFormState(
     lockedWorkflow,
     resetters: {
       setBlockedBy: dependencies.setBlockedBy,
+      setSelectedParentTaskId: dependencies.setSelectedParentTaskId,
+      setRelatedTaskIds: dependencies.setRelatedTaskIds,
       setBuiltinMCPPreferences: mcpSelections.setBuiltinMCPPreferences,
       setMcpServerIds: mcpSelections.setMcpServerIds,
       setMcpServerIdsDirty: mcpSelections.setMcpServerIdsDirty,

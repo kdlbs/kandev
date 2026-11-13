@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -51,6 +52,7 @@ func TestCleanupLiveExecutionKeepsInstanceWithWorkspaceProcesses(t *testing.T) {
 				standaloneInstanceID: "live", agentctl: client}
 			require.NoError(t, mgr.executionStore.Add(execution))
 			require.NoError(t, mgr.persistExecutorRunningResult(ctx, execution))
+			require.NoError(t, repo.UpdateResumeToken(ctx, execution.SessionID, execution.ID, "resume-live", ""))
 			row, err := repo.GetExecutorRunningBySessionID(ctx, execution.SessionID)
 			require.NoError(t, err)
 
@@ -61,6 +63,11 @@ func TestCleanupLiveExecutionKeepsInstanceWithWorkspaceProcesses(t *testing.T) {
 			if tc.wantConfirmed {
 				require.Equal(t, "live", backend.stoppedID)
 				require.False(t, retained)
+				persisted, err := repo.GetExecutorRunningBySessionID(ctx, execution.SessionID)
+				require.NoError(t, err)
+				require.Equal(t, models.ExecutorRunningStatusStopped, persisted.Status)
+				require.Equal(t, execution.ID, persisted.AgentExecutionID)
+				require.Equal(t, "resume-live", persisted.ResumeToken)
 				return
 			}
 			require.Empty(t, backend.stoppedID, "active or unknown workspace processes must not be stopped")

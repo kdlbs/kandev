@@ -27,6 +27,7 @@ func TestSwitchSessionForStep_ParkOnEndPreservesSourceWhenPromotionFails(t *test
 	}
 	promotionErr := errors.New("destination promotion failed")
 	fixture.svc.repo = failProfileSwitchPromotionRepo{repoStore: fixture.repo, err: promotionErr}
+	commitProfileSwitchEntry(t, fixture, "step-b")
 
 	_, _, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, &wfmodels.WorkflowStep{
 		ID: "step-b", WorkflowID: "wf1", Position: 1, ProfileSessionStartPolicy: fixture.startPolicy,

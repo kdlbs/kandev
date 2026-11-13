@@ -378,8 +378,13 @@ func TestResolveScriptCommandRejectsMissingAndEmptyCustomScripts(t *testing.T) {
 // the session's lifecycle fence is held, so reclaim either sees it running or
 // runs before it is admitted.
 func TestStartSessionProcessHoldsSessionAdmissionFence(t *testing.T) {
-	var fenceHeld, startedUnderFence atomic.Bool
+	var fenceHeld, readyUnderFence, startedUnderFence atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/health" {
+			readyUnderFence.Store(fenceHeld.Load())
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+			return
+		}
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/processes/start" {
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -397,10 +402,12 @@ func TestStartSessionProcessHoldsSessionAdmissionFence(t *testing.T) {
 	})
 
 	c, rec := processRequestAs(t, "user-b", http.MethodPost, "/api/v1/task-sessions/sess-b/processes/start", "")
-	h.startSessionProcess(c, "sess-b", "repo-1", "custom", "", "sleep 60", "/tmp/workspace", nil)
+	h.startPreparedSessionProcess(c, &models.TaskSession{ID: "sess-b", TaskID: "task-b"}, "sess-b", "repo-1",
+		resolvedScript{kind: "custom", workingDir: "/tmp/workspace"}, "sleep 60", nil)
 
 	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
 	require.Equal(t, "sess-b", fencedSession)
+	require.True(t, readyUnderFence.Load(), "runtime readiness must be checked under the session fence")
 	require.True(t, startedUnderFence.Load(), "process start must be admitted under the session fence")
 	require.False(t, fenceHeld.Load(), "the fence must be released after admission")
 }

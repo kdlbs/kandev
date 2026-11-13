@@ -3,12 +3,15 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 func TestPromotionRejectsExecutionRemovedByCleanup(t *testing.T) {
@@ -94,4 +97,340 @@ func TestWorkspaceLookupWaitsForCleanupThenUsesItsOwnResult(t *testing.T) {
 			require.NoError(t, <-cleaned)
 		})
 	}
+}
+
+// TestWorkspaceLookupDoesNotReturnExecutionOwnedByPendingCleanup
+// verifies cached reads join the cleanup operation.
+func TestWorkspaceLookupDoesNotReturnExecutionOwnedByPendingCleanup(t *testing.T) {
+	for _, lookup := range []string{"session", "task session", "environment"} {
+		t.Run(lookup, func(t *testing.T) {
+			mgr := newTestManager(t)
+			execution := &AgentExecution{ID: "stopping", SessionID: "session", TaskID: "task", TaskEnvironmentID: "environment"}
+			require.NoError(t, mgr.executionStore.Add(execution))
+			entered, release := make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			releaseCleanup := func() { once.Do(func() { close(release) }) }
+			defer releaseCleanup()
+			done := make(chan error, 1)
+			go func() {
+				_, err := mgr.doSerializedExecution(t.Context(), execution.SessionID, func(context.Context) (interface{}, error) {
+					close(entered)
+					<-release
+					mgr.executionStore.Remove(execution.ID)
+					return nil, nil
+				})
+				done <- err
+			}()
+			<-entered
+			ctx := &coalescedRecoveryWaitContext{Context: t.Context(), onWait: releaseCleanup}
+			var got *AgentExecution
+			var err error
+			switch lookup {
+			case "session":
+				got, err = mgr.GetOrEnsureExecution(ctx, execution.SessionID)
+			case "task session":
+				got, err = mgr.EnsureWorkspaceExecutionForSession(ctx, execution.TaskID, execution.SessionID)
+			case "environment":
+				got, err = mgr.GetOrEnsureExecutionForEnvironment(ctx, execution.TaskEnvironmentID)
+			}
+			require.True(t, got == nil, "workspace access must wait for the current cleanup owner")
+			require.ErrorContains(t, err, "workspace info provider not configured")
+			require.NoError(t, <-done)
+		})
+	}
+}
+
+// TestWorkspaceLookupWaitsForRuntimeRetirement
+// verifies lookup blocks until the registered runtime retires.
+func TestWorkspaceLookupWaitsForRuntimeRetirement(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mgr := newTestManager(t)
+		execution := &AgentExecution{ID: "retiring", SessionID: "session", TaskID: "task"}
+		require.NoError(t, mgr.executionStore.Add(execution))
+		execution.remoteInstanceLifecycleMu.Lock()
+		var once sync.Once
+		retire := func() {
+			once.Do(func() {
+				mgr.executionStore.Remove(execution.ID)
+				execution.remoteInstanceLifecycleMu.Unlock()
+			})
+		}
+		defer retire()
+		type result struct {
+			execution *AgentExecution
+			err       error
+		}
+		finished := make(chan result, 1)
+		go func() {
+			got, err := mgr.EnsureWorkspaceExecutionForSession(t.Context(), execution.TaskID, execution.SessionID)
+			finished <- result{execution: got, err: err}
+		}()
+		synctest.Wait()
+		select {
+		case <-finished:
+			t.Fatal("workspace lookup returned while runtime retirement still owns the execution")
+		default:
+		}
+		retire()
+		got := <-finished
+		require.Nil(t, got.execution)
+		require.ErrorContains(t, got.err, "workspace info provider not configured")
+	})
+}
+
+// TestCachedWorkspaceLookupHonorsCancellationDuringRetirement
+// verifies cancelled admission does not wait for retirement.
+func TestCachedWorkspaceLookupHonorsCancellationDuringRetirement(t *testing.T) {
+	mgr := newTestManager(t)
+	execution := &AgentExecution{ID: "retiring", SessionID: "session", TaskID: "task"}
+	require.NoError(t, mgr.executionStore.Add(execution))
+	execution.remoteInstanceLifecycleMu.Lock()
+	var once sync.Once
+	release := func() { once.Do(execution.remoteInstanceLifecycleMu.Unlock) }
+	defer release()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	finished := make(chan error, 1)
+	go func() {
+		_, err := mgr.cachedWorkspaceExecution(ctx, execution.SessionID, "")
+		finished <- err
+	}()
+	select {
+	case err := <-finished:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("cancelled workspace lookup remained blocked on retirement")
+	}
+}
+
+// TestEnvironmentWorkspaceLookupWaitsForRetirementBeforeSharingResult verifies
+// a joined session lookup cannot receive the environment operation's retiring cache entry.
+func TestEnvironmentWorkspaceLookupWaitsForRetirementBeforeSharingResult(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mgr := newTestManager(t)
+		execution := &AgentExecution{ID: "retiring", SessionID: "session", TaskID: "task", TaskEnvironmentID: "environment"}
+		provider := &siblingDuringEnvironmentLookupProvider{mockWorkspaceInfoProvider: &mockWorkspaceInfoProvider{
+			envInfos: map[string]*WorkspaceInfo{"environment": {
+				TaskID: execution.TaskID, SessionID: execution.SessionID, TaskEnvironmentID: execution.TaskEnvironmentID,
+				WorkspacePath: "/workspace/task", AgentID: "auggie",
+			}},
+		}}
+		mgr.workspaceInfoProvider = provider
+		// Publish the execution after the environment fast path has missed it.
+		provider.onEnvironment = func() {
+			require.NoError(t, mgr.executionStore.Add(execution))
+			execution.remoteInstanceLifecycleMu.Lock()
+		}
+		var once sync.Once
+		retire := func() {
+			once.Do(func() {
+				mgr.executionStore.Remove(execution.ID)
+				execution.remoteInstanceLifecycleMu.Unlock()
+			})
+		}
+		defer retire()
+		type result struct {
+			execution *AgentExecution
+			err       error
+		}
+		environmentFinished := make(chan result, 1)
+		go func() {
+			got, err := mgr.GetOrEnsureExecutionForEnvironment(t.Context(), execution.TaskEnvironmentID)
+			environmentFinished <- result{execution: got, err: err}
+		}()
+		synctest.Wait()
+		sessionFinished := make(chan result, 1)
+		go func() {
+			got, err := mgr.GetOrEnsureExecution(t.Context(), execution.SessionID)
+			sessionFinished <- result{execution: got, err: err}
+		}()
+		synctest.Wait()
+		select {
+		case <-environmentFinished:
+			t.Fatal("environment operation returned while its cached runtime was retiring")
+		case <-sessionFinished:
+			t.Fatal("joined session lookup returned while its cached runtime was retiring")
+		default:
+		}
+		retire()
+		for _, finished := range []chan result{environmentFinished, sessionFinished} {
+			got := <-finished
+			require.Nil(t, got.execution)
+			require.Error(t, got.err, "without a runtime, lookup must fail creation instead of sharing the retired execution")
+		}
+	})
+}
+
+// TestWorkspaceRestoreDoesNotBorrowTerminalCacheResult verifies explicit restore
+// performs replacement even when it joins an ordinary cached workspace read.
+func TestWorkspaceRestoreDoesNotBorrowTerminalCacheResult(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mgr := newTestManager(t)
+		retained := &AgentExecution{ID: "retained", SessionID: "session", TaskID: "task", Status: v1.AgentStatusStopped}
+		require.NoError(t, mgr.executionStore.Add(retained))
+		retained.remoteInstanceLifecycleMu.Lock()
+		var once sync.Once
+		release := func() { once.Do(retained.remoteInstanceLifecycleMu.Unlock) }
+		defer release()
+		type result struct {
+			execution *AgentExecution
+			err       error
+		}
+		readFinished, restoreFinished := make(chan result, 1), make(chan result, 1)
+		go func() {
+			got, err := mgr.GetOrEnsureExecution(t.Context(), retained.SessionID)
+			readFinished <- result{execution: got, err: err}
+		}()
+		synctest.Wait()
+		go func() {
+			got, err := mgr.EnsureWorkspaceExecutionForSession(t.Context(), retained.TaskID, retained.SessionID)
+			restoreFinished <- result{execution: got, err: err}
+		}()
+		synctest.Wait()
+		release()
+		read := <-readFinished
+		require.NoError(t, read.err)
+		require.Same(t, retained, read.execution)
+		restore := <-restoreFinished
+		require.Nil(t, restore.execution, "explicit restore must not borrow a terminal cache result")
+		require.ErrorContains(t, restore.err, "workspace info provider not configured")
+	})
+}
+
+// TestEnvironmentCacheLookupWaitsForRetirement verifies an existing environment
+// cache entry is rechecked after removal or rebinding while its runtime retires.
+func TestEnvironmentCacheLookupWaitsForRetirement(t *testing.T) {
+	for _, mutation := range []string{"remove", "rebind"} {
+		t.Run(mutation, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				mgr := newTestManager(t)
+				execution := &AgentExecution{ID: "retiring", SessionID: "session", TaskID: "task", TaskEnvironmentID: "environment"}
+				require.NoError(t, mgr.executionStore.Add(execution))
+				execution.remoteInstanceLifecycleMu.Lock()
+				var once sync.Once
+				release := func() { once.Do(execution.remoteInstanceLifecycleMu.Unlock) }
+				defer release()
+				type result struct {
+					execution *AgentExecution
+					err       error
+				}
+				finished := make(chan result, 1)
+				go func() {
+					got, err := mgr.GetOrEnsureExecutionForEnvironment(t.Context(), "environment")
+					finished <- result{execution: got, err: err}
+				}()
+				synctest.Wait()
+				select {
+				case <-finished:
+					t.Fatal("environment cache lookup returned while runtime retirement held its lock")
+				default:
+				}
+				if mutation == "remove" {
+					mgr.executionStore.Remove(execution.ID)
+				} else {
+					require.NoError(t, mgr.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
+						current.TaskEnvironmentID = "replacement-environment"
+					}))
+				}
+				release()
+				got := <-finished
+				require.True(t, got.execution == nil, "lookup must not return a removed or rebound execution")
+				if mutation == "remove" {
+					require.ErrorContains(t, got.err, "workspace info provider not configured")
+				} else {
+					require.ErrorIs(t, got.err, ErrSessionWorkspaceNotReady)
+				}
+			})
+		})
+	}
+}
+
+// TestEnvironmentSharedLookupRejectsReboundExecution verifies environment
+// resolution cannot publish a different environment's cached session execution.
+func TestEnvironmentSharedLookupRejectsReboundExecution(t *testing.T) {
+	provider := &siblingDuringEnvironmentLookupProvider{mockWorkspaceInfoProvider: &mockWorkspaceInfoProvider{
+		envInfos: map[string]*WorkspaceInfo{"requested": {
+			TaskID: "task", SessionID: "session", TaskEnvironmentID: "requested",
+			WorkspacePath: t.TempDir(), AgentID: "auggie",
+		}},
+	}}
+	mgr, backend := newEnvironmentExecutionTestManager(t, provider)
+	provider.onEnvironment = func() {
+		require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+			ID: "rebound", SessionID: "session", TaskID: "task", TaskEnvironmentID: "other",
+		}))
+	}
+	got, err := mgr.GetOrEnsureExecutionForEnvironment(t.Context(), "requested")
+	require.True(t, got == nil, "environment resolution must not return another environment's cached execution")
+	require.ErrorIs(t, err, ErrSessionWorkspaceNotReady)
+	require.EqualValues(t, 0, backend.createCount.Load(), "conflicting environment must fail before allocation")
+}
+
+// TestEnvironmentCreationRejectsMismatchedWinner covers a conflicting execution
+// registered after allocation starts but before the new runtime is registered.
+func TestEnvironmentCreationRejectsMismatchedWinner(t *testing.T) {
+	provider := &mockWorkspaceInfoProvider{envInfos: map[string]*WorkspaceInfo{"requested": {
+		TaskID: "task", SessionID: "session", TaskEnvironmentID: "requested",
+		WorkspacePath: t.TempDir(), AgentID: "auggie",
+	}}}
+	mgr, backend := newEnvironmentExecutionTestManager(t, provider)
+	backend.entered, backend.barrier = make(chan struct{}, 1), make(chan struct{})
+	var once sync.Once
+	release := func() { once.Do(func() { close(backend.barrier) }) }
+	defer release()
+	type result struct {
+		execution *AgentExecution
+		err       error
+	}
+	finished := make(chan result, 1)
+	go func() {
+		got, err := mgr.GetOrEnsureExecutionForEnvironment(t.Context(), "requested")
+		finished <- result{got, err}
+	}()
+	select {
+	case <-backend.entered:
+	case <-finished:
+		t.Fatal("lookup finished before allocation")
+	case <-time.After(5 * time.Second):
+		t.Fatal("allocation did not start")
+	}
+	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+		ID: "winner", SessionID: "session", TaskID: "task", TaskEnvironmentID: "other",
+	}))
+	release()
+	got := <-finished
+	require.True(t, got.execution == nil, "registration fallback must not return another environment's execution")
+	require.ErrorIs(t, got.err, ErrSessionWorkspaceNotReady)
+	require.EqualValues(t, 1, backend.createCount.Load())
+	require.EqualValues(t, 1, backend.stopCount.Load(), "only the newly allocated runtime is rolled back")
+}
+
+// TestEnvironmentLookupRejectsMismatchedCoalescedResult covers an environment
+// lookup joining a session operation whose result belongs to another environment.
+func TestEnvironmentLookupRejectsMismatchedCoalescedResult(t *testing.T) {
+	provider := &mockWorkspaceInfoProvider{envInfos: map[string]*WorkspaceInfo{"requested": {
+		TaskID: "task", SessionID: "session", TaskEnvironmentID: "requested",
+		WorkspacePath: t.TempDir(), AgentID: "auggie",
+	}}}
+	mgr, backend := newEnvironmentExecutionTestManager(t, provider)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	defer unblock()
+	peer := mgr.ensureExecutionGroup.DoChan("session", func() (interface{}, error) {
+		close(entered)
+		<-release
+		execution := &AgentExecution{ID: "peer", SessionID: "session", TaskID: "task", TaskEnvironmentID: "other"}
+		if err := mgr.executionStore.Add(execution); err != nil {
+			return nil, err
+		}
+		return execution, nil
+	})
+	<-entered
+	ctx := &coalescedRecoveryWaitContext{Context: t.Context(), onWait: unblock}
+	got, err := mgr.GetOrEnsureExecutionForEnvironment(ctx, "requested")
+	require.True(t, got == nil, "a joined result must retain the requested environment constraint")
+	require.ErrorIs(t, err, ErrSessionWorkspaceNotReady)
+	require.NoError(t, (<-peer).Err)
+	require.EqualValues(t, 0, backend.createCount.Load())
 }

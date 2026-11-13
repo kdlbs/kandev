@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { attachAvailableCommandsCapture, attachShellInputCapture } from "../../helpers/ws-capture";
+import { watchWs } from "../../helpers/causal-waits";
 import { waitForSessionState } from "../../helpers/session";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import {
@@ -58,6 +59,33 @@ async function dragQuickChatTab(page: Page, source: Locator, target: Locator) {
 }
 
 test.describe("Quick Chat", () => {
+  test("Escape cancels a running Quick Chat turn without closing the dialog", async ({
+    testPage,
+    apiClient,
+  }) => {
+    test.setTimeout(90_000);
+    const ws = watchWs(testPage);
+    await apiClient.saveUserSettings({ escape_cancels_agent: true });
+
+    const dialog = await openQuickChatSetup(testPage);
+    const started = await startQuickChatFromSetup(dialog, testPage);
+    await sendQuickChatMessage(dialog, testPage, "/slow 8s");
+    await waitForSessionState(apiClient, {
+      taskId: started.task_id,
+      sessionId: started.session_id,
+      expectedState: "RUNNING",
+      message: "Quick Chat did not start the slow turn",
+      timeout: 30_000,
+    });
+
+    const editor = dialog.locator('.tiptap.ProseMirror[contenteditable="true"]:visible').first();
+    const cancelResponse = ws.waitForResponse("agent.cancel");
+    await editor.press("Escape");
+    await cancelResponse;
+
+    await expect(dialog).toBeVisible();
+  });
+
   // @covers AC-UI-TASK-CLEANUP-CONFIRMATION-001.12 AC-UI-TASK-CLEANUP-CONFIRMATION-001.13
   test("deletes dirty repository quick chat with consent", async ({
     testPage,

@@ -45,6 +45,7 @@ function resetSessionActionMocks() {
   mockState = {
     tasks: { activeTaskId: "t1", activeSessionId: null },
     taskRemoval: { navigationRevision: 0 },
+    taskSessions: { items: {} },
     taskSessionsByTask: { itemsByTaskId: { t1: [{ id: "s1", state: "RUNNING" }] } },
     quickChat: { sessions: [] },
     setActiveSession: mockSetActiveSession,

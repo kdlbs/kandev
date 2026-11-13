@@ -34,7 +34,7 @@ func TestDeliveryRetentionSettlesBeforeQueuedSuccessor(t *testing.T) {
 		return &executor.PromptResult{}, nil
 	}
 	f.service.agentManager = mgr
-	f.service.executor = executor.NewExecutor(mgr, f.repo, testLogger(), executor.ExecutorConfig{})
+	f.service.executor = withTestCapabilities(executor.NewExecutor(mgr, f.repo, testLogger(), executor.ExecutorConfig{}))
 	if _, err := f.service.messageQueue.QueueMessage(f.ctx, f.session.ID, f.taskID, "queued successor", "", "user", false, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestDeliveryRetentionQueuedSettlementFailureRetainsInput(t *testing.T) {
 	seedExecutorRunning(t, f.repo, f.session.ID, f.taskID, "queued-execution")
 	mgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: f.repo, promptDone: make(chan struct{})}
 	f.service.agentManager = mgr
-	f.service.executor = executor.NewExecutor(mgr, f.repo, testLogger(), executor.ExecutorConfig{})
+	f.service.executor = withTestCapabilities(executor.NewExecutor(mgr, f.repo, testLogger(), executor.ExecutorConfig{}))
 	queued, err := f.service.messageQueue.QueueMessage(f.ctx, f.session.ID, f.taskID, "retained successor", "", "user", false, nil)
 	if err != nil {
 		t.Fatal(err)

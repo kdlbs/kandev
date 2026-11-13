@@ -164,16 +164,7 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 		return
 	}
 
-	if !h.ensureAgentctlReady(c, session, sessionID) {
-		return
-	}
-
-	workingDir, ok := h.resolveWorkingDirForStart(c, sessionID, target.workingDir)
-	if !ok {
-		return
-	}
-
-	h.startSessionProcess(c, sessionID, repoID, target.kind, target.scriptName, command, workingDir, portEnv)
+	h.startPreparedSessionProcess(c, session, sessionID, repoID, *target, command, portEnv)
 }
 
 // resolvedScript holds the resolved script command and metadata for a process start request.
@@ -327,17 +318,35 @@ func (h *ProcessHandlers) getRunningDevProcess(ctx context.Context, sessionID st
 	return nil
 }
 
-// startLocalProcess handles starting a process on a local/worktree/docker executor.
-// It deduplicates running dev processes and starts the new process via the lifecycle manager.
-func (h *ProcessHandlers) startSessionProcess(
+func (h *ProcessHandlers) startPreparedSessionProcess(
 	c *gin.Context,
-	sessionID, repoID, kind, scriptName, command, workingDir string,
+	session *models.TaskSession,
+	sessionID, repoID string,
+	target resolvedScript,
+	command string,
 	portEnv map[string]string,
 ) {
 	if h.sessionAdmissionFence != nil {
 		release := h.sessionAdmissionFence(sessionID)
 		defer release()
 	}
+	if !h.ensureAgentctlReady(c, session, sessionID) {
+		return
+	}
+	workingDir, ok := h.resolveWorkingDirForStart(c, sessionID, target.workingDir)
+	if !ok {
+		return
+	}
+	h.startSessionProcess(c, sessionID, repoID, target.kind, target.scriptName, command, workingDir, portEnv)
+}
+
+// startSessionProcess handles starting a process on a local/worktree/docker executor.
+// It deduplicates running dev processes and starts the new process via the lifecycle manager.
+func (h *ProcessHandlers) startSessionProcess(
+	c *gin.Context,
+	sessionID, repoID, kind, scriptName, command, workingDir string,
+	portEnv map[string]string,
+) {
 	if streams.ProcessKind(kind) == streams.ProcessKindDev {
 		if proc := h.getRunningDevProcess(c.Request.Context(), sessionID); proc != nil {
 			c.JSON(http.StatusOK, gin.H{"process": proc})

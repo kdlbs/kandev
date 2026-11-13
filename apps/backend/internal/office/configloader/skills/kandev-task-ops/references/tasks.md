@@ -17,4 +17,6 @@ $KANDEV_CLI kandev tasks conversation --id T-1
 
 Use conversation reads sparingly because comments can be long. Prefer the wake payload when it contains the needed context.
 
+For Office task creation, see [`kandev-protocol/SKILL.md`](../../kandev-protocol/SKILL.md) for supported flags, blocker scope, and workspace modes.
+
 Use `kandev task update --status <status>` for signed status changes. Office agents cannot move tasks between workflow steps or archive tasks; ask a human or admin for those actions.

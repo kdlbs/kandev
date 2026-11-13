@@ -79,7 +79,7 @@ func TestResumeTaskSession_RecreatesMissingWorktreeAfterUnarchive(t *testing.T) 
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", Title: "Test Task", State: v1.TaskStateInProgress}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	exec, err := svc.ResumeTaskSession(ctx, "task1", "session1")
 	if err != nil {
@@ -150,7 +150,7 @@ func TestGetTaskSessionStatus_ArchivedSessionResumableWithMissingWorktree(t *tes
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateInProgress}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil {

@@ -589,7 +589,11 @@ func buildWorkspaceIdleCandidate(
 }
 
 func (s *Service) sessionHasKnownIdleWork(ctx context.Context, sessionID string) bool {
-	if s == nil || s.agentManager == nil || sessionID == "" || s.sessionHasActiveTurn(ctx, sessionID) ||
+	return s == nil || s.sessionHasActiveTurn(ctx, sessionID) || s.sessionHasKnownIdleWorkBeyondTurn(ctx, sessionID)
+}
+
+func (s *Service) sessionHasKnownIdleWorkBeyondTurn(ctx context.Context, sessionID string) bool {
+	if s == nil || s.agentManager == nil || sessionID == "" ||
 		(s.lspLeases != nil && s.lspLeases.HasActiveLSPLease(sessionID)) || s.hasKnownBackgroundWork(sessionID) {
 		return true
 	}

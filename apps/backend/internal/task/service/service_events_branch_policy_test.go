@@ -22,7 +22,8 @@ func TestTaskEventsSerializeBranchPolicySnapshot(t *testing.T) {
 				Repositories: []*models.TaskRepository{{
 					ID: "task-repo-policy-event", TaskID: "task-policy-event", RepositoryID: "repo-policy-event",
 					BaseBranch: "main", CheckoutBranch: "feature/policy-event", Position: 0,
-					BranchPolicyID: "policy-event", BranchPolicyName: "Feature branches",
+					WorkspaceRelativePath: ".claude/worktrees/policy-event",
+					BranchPolicyID:        "policy-event", BranchPolicyName: "Feature branches",
 					BranchPolicyBaseBranch: "main", BranchPolicyBranchTemplate: "feature/{title}-{suffix}",
 					BranchPolicyPullRequestTarget: "develop", Metadata: map[string]interface{}{"source": "test"},
 					CreatedAt: createdAt, UpdatedAt: updatedAt,
@@ -45,6 +46,7 @@ func TestTaskEventsSerializeBranchPolicySnapshot(t *testing.T) {
 			}
 			repository := repositories[0]
 			for key, want := range map[string]string{
+				"workspace_relative_path":           ".claude/worktrees/policy-event",
 				"branch_policy_id":                  "policy-event",
 				"branch_policy_name":                "Feature branches",
 				"branch_policy_base_branch":         "main",

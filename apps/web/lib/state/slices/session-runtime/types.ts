@@ -671,6 +671,12 @@ export type SessionRuntimeSliceActions = {
     refresh: GitStatusRefreshState | null,
   ) => void;
   clearGitStatus: (sessionId: string) => void;
+  /** Drops one repository scope after its root leaves the task. */
+  clearGitRepositoryStatus: (
+    sessionId: string,
+    environmentId: string,
+    repositoryName: string,
+  ) => void;
   bumpWorkspaceFilesRefresh: (sessionId: string) => void;
   /** Drops the pre-multi-repo (empty-repo-name) git-status entries so a
    *  freshly-multi-branch session doesn't surface a stale snapshot from the
