@@ -64,6 +64,9 @@ confirmed choices across phases; ask only about material unresolved decisions.
 For large uncertain initiatives, use its optional decision-mapping reference
 before creating detailed work orders. Continue the package once blockers resolve.
 
+Apply the [solution simplicity (KISS) rules](../plan/SKILL.md#solution-simplicity-kiss)
+throughout requirements, system design, and work-order decomposition.
+
 Run the `/spec` ownership gate before you choose paths. Search adjacent systems
 for the same capability. Choose the owner from the durable contract, not from
 backend or frontend implementation layers. If a feature has a UI, include its
