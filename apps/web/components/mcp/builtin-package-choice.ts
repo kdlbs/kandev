@@ -21,9 +21,10 @@ function optionalPackageEnabled(
   scope: Scope,
   choice: Choices[BuiltinMCPPackage],
 ) {
-  if (!view || !item || view.policy.packages[item.id] === "blocked") return false;
+  if (!view || !item) return false;
   if (view.surface && !item.surfaces.some((surface) => surface === view.surface)) return false;
   if (scope === "workspaces") return choice === "default";
+  if (view.policy.packages[item.id] === "blocked") return false;
   return choice === "on" || (choice === "inherit" && view.policy.packages[item.id] === "default");
 }
 
@@ -54,7 +55,21 @@ export function builtinPackageChoice(
     choice,
     dirty: !required && choice !== (baseline[id] ?? "inherit"),
     enabled,
+    inheritedEnabled: required || optionalPackageEnabled(view, item, "tasks", "inherit"),
     labelKey: required ? "settings:builtinMcp.required" : `settings:builtinMcp.choices.${label}`,
     inherited: !required && scope === "tasks" && choice === "inherit",
   };
+}
+
+export function builtinPackageRestriction(
+  view: BuiltinMCPManagementView | null,
+  item: BuiltinMCPDescriptor,
+) {
+  if (item.id === "core") return "settings:builtinMcp.coreRequired";
+  const surface = view?.surface;
+  if (!surface) return null;
+  if (item.required_surfaces?.some((value) => value === surface))
+    return "settings:builtinMcp.configurationFixed";
+  if (!item.surfaces.some((value) => value === surface)) return "settings:builtinMcp.ineligible";
+  return null;
 }

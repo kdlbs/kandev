@@ -1225,5 +1225,9 @@
   "builtinMcp.currentUnknown": "Current agent packages are unknown. These are the saved choices for the next agent start.",
   "mcpFromAutomation": "From automation",
   "mcpFromAutomationDescription": "Servers selected by the automation that started this process.",
-  "builtinMcp.surfaces.automation": "Automation"
+  "builtinMcp.surfaces.automation": "Automation",
+  "builtinMcp.inheritedValue": "Inherited from workspace: {{value}}",
+  "builtinMcp.overrideValue": "Task override: {{value}}. Workspace default: {{default}}.",
+  "builtinMcp.useInherited": "Use inherited value",
+  "builtinMcp.allowTasks": "Allow tasks to use this package"
 }

@@ -1225,5 +1225,9 @@
   "builtinMcp.currentUnknown": "現在のエージェントのパッケージは不明です。次回のエージェント起動時に適用される保存済みの選択を表示しています。",
   "mcpFromAutomation": "自動化から",
   "mcpFromAutomationDescription": "このプロセスを開始した自動化が選択したサーバーです。",
-  "builtinMcp.surfaces.automation": "自動化"
+  "builtinMcp.surfaces.automation": "自動化",
+  "builtinMcp.inheritedValue": "ワークスペースから継承：{{value}}",
+  "builtinMcp.overrideValue": "タスクの設定：{{value}}。ワークスペースの既定値：{{default}}。",
+  "builtinMcp.useInherited": "継承した値を使用",
+  "builtinMcp.allowTasks": "タスクによるこのパッケージの使用を許可"
 }
