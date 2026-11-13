@@ -45,6 +45,7 @@ function AutomationPackageChoice({
             checked={enabled}
             disabled={disabled || (blocked && !enabled)}
             testId={`automation-mcp-choice-${item.id}`}
+            describedBy={blocked ? `automation-mcp-blocked-${item.id}` : undefined}
             onCheckedChange={(checked) =>
               onChange({
                 ...value,
@@ -55,7 +56,9 @@ function AutomationPackageChoice({
             }
           />
           {blocked && !compact && (
-            <p className="text-xs text-muted-foreground">{t("automations:mcpBlocked")}</p>
+            <p id={`automation-mcp-blocked-${item.id}`} className="text-xs text-muted-foreground">
+              {t("automations:mcpBlocked")}
+            </p>
           )}
         </div>
       )}
@@ -142,7 +145,12 @@ export function AutomationBuiltinPackages({
               }}
             >
               {taskMode === "normal_task" && options.task_blocked.includes(pkg.id) && (
-                <p className="text-xs text-muted-foreground">{t("automations:mcpBlocked")}</p>
+                <p
+                  id={`automation-mcp-blocked-${pkg.id}`}
+                  className="text-xs text-muted-foreground"
+                >
+                  {t("automations:mcpBlocked")}
+                </p>
               )}
             </BuiltinPackageRow>
           ))}

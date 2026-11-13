@@ -31,7 +31,9 @@ function PackageRowNotes({ editor, item, scope }: PackageRowProps) {
     <>
       <TaskPackageInheritance editor={editor} item={item} />
       {editor.view?.policy.packages[item.id] === "blocked" && (
-        <p className="text-xs text-muted-foreground">{t("settings:builtinMcp.blocked")}</p>
+        <p id={`builtin-mcp-blocked-${item.id}`} className="text-xs text-muted-foreground">
+          {t("settings:builtinMcp.blocked")}
+        </p>
       )}
       {item.id === "configuration" && (
         <p className="text-xs text-muted-foreground">
@@ -112,6 +114,9 @@ export function BuiltinPackageList({
     <section ref={root} className="min-w-0 space-y-3" data-testid="builtin-mcp-packages">
       <h2 className="text-base font-semibold">{t("settings:builtinMcp.title")}</h2>
       <p className="text-sm text-muted-foreground">{t("settings:builtinMcp.packageSummary")}</p>
+      {scope === "workspaces" && (
+        <p className="text-xs text-muted-foreground">{t("settings:builtinMcp.workspaceTiming")}</p>
+      )}
       <BuiltinMCPError editor={editor} />
       {editor.pending && <p role="status">{t("common:loading")}</p>}
       <div

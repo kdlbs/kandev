@@ -141,3 +141,21 @@ checks initially measured padding on the navigation button. Their selector now m
 container, preserving the original padding assertion. Both reruns passed, as did a taller desktop
 capture of task inheritance. All eight unit tests, typecheck, lint, translations, public docs,
 specification validation, and diff checks passed. The list captures use the list-* filename prefix.
+
+
+## PR review remediation, 2026-11-13
+
+- Link blocked task switches to the visible policy reason for assistive technology.
+- Keep focus on the package switch after restoring inheritance; use the named package group
+  when the switch is disabled. Group workspace controls by package name.
+- Show the existing next-process timing notice in the workspace list.
+- Cover required/ineligible surfaces and inherited effective values in utility tests.
+
+Validation: 43 focused unit/component tests passed, including four blocked-switch descriptions,
+workspace grouping, and four inheritance-focus cases. Desktop and phone workspace-save and
+inheritance browser checks passed. Typecheck and public documentation checks passed.
+Commands: `pnpm --dir apps/web exec vitest run components/mcp/builtin-package-choice.test.ts
+components/mcp/builtin-package-accessibility.test.tsx components/runs/automation-detail-page.test.tsx`;
+the work-order browser commands with the workspace-save/inheritance test filter; and
+`pnpm --dir apps/web run typecheck`. The visual workspace timing change requires refreshed
+PR screenshots. Remote checks remain pending until the remediation head completes CI.

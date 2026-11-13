@@ -26,6 +26,9 @@ function PackageChoice({
   const { dirty } = builtinPackageChoice(view, editor.draft, scope, item.id);
   return (
     <div
+      role="group"
+      aria-label={t(item.label_key)}
+      tabIndex={-1}
       className="space-y-3 rounded-lg border border-border/70 bg-muted/20 p-3"
       data-settings-dirty={dirty}
       data-settings-dirty-level="container"

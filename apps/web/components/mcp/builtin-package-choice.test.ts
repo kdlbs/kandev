@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { BuiltinMCPManagementView } from "@/lib/types/builtin-mcp";
-import { builtinPackageChoice } from "./builtin-package-choice";
+import { builtinPackageChoice, builtinPackageRestriction } from "./builtin-package-choice";
 
 function view(): BuiltinMCPManagementView {
   return {
@@ -120,4 +120,25 @@ it("keeps a blocked task override identifiable and removable", () => {
   expect(
     builtinPackageChoice(value, { diagnostics: "inherit" }, "tasks", "diagnostics"),
   ).toMatchObject({ enabled: false, inherited: true, dirty: true });
+});
+
+it("reports required, unavailable, and unrestricted package surfaces", () => {
+  const value = view();
+  const configuration = value.catalog[0];
+  expect(builtinPackageRestriction(value, { ...configuration, id: "core" })).toBe(
+    "settings:builtinMcp.coreRequired",
+  );
+  expect(builtinPackageRestriction(null, configuration)).toBeNull();
+  expect(builtinPackageRestriction(value, configuration)).toBeNull();
+  value.surface = "configuration";
+  configuration.surfaces.push("configuration");
+  configuration.required_surfaces = ["configuration"];
+  expect(builtinPackageRestriction(value, configuration)).toBe(
+    "settings:builtinMcp.configurationFixed",
+  );
+  expect(builtinPackageChoice(value, {}, "tasks", "configuration").inheritedEnabled).toBe(true);
+  value.surface = "office-task";
+  expect(builtinPackageRestriction(value, configuration)).toBe("settings:builtinMcp.ineligible");
+  expect(builtinPackageChoice(value, {}, "tasks", "configuration").inheritedEnabled).toBe(false);
+  expect(builtinPackageChoice(value, {}, "tasks", "core").inheritedEnabled).toBe(true);
 });

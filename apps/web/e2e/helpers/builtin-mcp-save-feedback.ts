@@ -209,7 +209,13 @@ export async function checkBuiltinInheritance(
   await page.getByTestId(touch ? "mcp-server-explorer" : "builtin-mcp-packages").screenshot({
     path: `../../artifacts/mcp-switches/list-task-override-${touch ? "phone" : "desktop"}.png`,
   });
-  await activate(page.getByTestId("builtin-mcp-inherit-diagnostics"), touch);
+  const inherit = page.getByTestId("builtin-mcp-inherit-diagnostics");
+  if (touch) await inherit.tap();
+  else {
+    await inherit.focus();
+    await page.keyboard.press("Enter");
+  }
+  await expect(toggle).toBeFocused();
   await expect(toggle).toBeChecked();
   await expect(source).toHaveText("Inherited from workspace: On");
   await expect(control).toHaveAttribute("data-settings-dirty", "true");

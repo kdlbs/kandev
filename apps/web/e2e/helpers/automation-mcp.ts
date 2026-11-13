@@ -175,8 +175,14 @@ export async function verifyAutomationMCPRecovery({
     section.getByTestId("automation-mcp-choice-configuration").getByRole("switch"),
   ).toBeChecked();
   await chooseAutomationPackage(testPage, "configuration", false);
+  await expect(
+    section.getByTestId("automation-mcp-choice-configuration").getByRole("switch"),
+  ).toHaveAccessibleDescription("Blocked by workspace policy");
   await configuration.click();
   await expect(section.getByRole("switch")).toBeDisabled();
+  await expect(section.getByRole("switch")).toHaveAccessibleDescription(
+    "Blocked by workspace policy",
+  );
   await section.getByRole("button", { name: "Back to packages", exact: true }).click();
   const direct = section.getByTestId(`automation-mcp-server-${server.id}`).getByRole("checkbox");
   await expect(direct).toBeChecked();

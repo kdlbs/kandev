@@ -40,6 +40,9 @@ export async function checkBuiltinWorkspace(page: Page, api: ApiClient, touch: b
   try {
     await page.goto(`/settings/workspaces/${workspace.id}/mcp-servers`);
     await expect(page.getByTestId("builtin-mcp-packages")).toContainText("Core");
+    await expect(page.getByTestId("builtin-mcp-packages")).toContainText(
+      "Policy changes affect future process starts. Saving does not reconnect or change running agents.",
+    );
     await activate(page.getByTestId("builtin-mcp-package-configuration"), touch);
     const detail = page.getByTestId("builtin-mcp-detail");
     await expect(detail).toContainText("Configuration chats always receive Core and Configuration");

@@ -127,3 +127,15 @@ checks initially measured padding on the navigation button. Their selector now m
 container, preserving the original padding assertion. Both reruns passed, as did a taller desktop
 capture of task inheritance. All eight unit tests, typecheck, lint, translations, public docs,
 specification validation, and diff checks passed. The list captures use the list-* filename prefix.
+
+
+## PR review remediation, 2026-11-13
+
+Link blocked automation switches to the visible policy reason in both list and detail views.
+Update the public package-selection steps to use the list switches. Existing package access
+and save semantics remain unchanged, so no requirement or design contract changes are needed.
+
+Validation: the shared 43-test unit/component run includes both automation surfaces. The
+`removes blocked and inherited direct MCP choices without losing inheritance` browser scenario
+passed in Chromium and mobile-chrome with accessible-description assertions. Typecheck and
+public documentation validation passed. Remote checks remain pending for the remediation head.

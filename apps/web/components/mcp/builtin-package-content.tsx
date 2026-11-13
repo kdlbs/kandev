@@ -29,6 +29,9 @@ export function BuiltinPackageRow({
   const { t } = useTranslation();
   return (
     <div
+      role="group"
+      aria-label={t(item.label_key)}
+      tabIndex={-1}
       data-testid={`${testId}-row`}
       data-settings-dirty={dirty}
       data-settings-dirty-level="container"

@@ -15,20 +15,21 @@ export function TaskPackageSwitch({
 }: Props & { compact?: boolean }) {
   const { t } = useTranslation();
   const state = builtinPackageChoice(editor.view, editor.draft, "tasks", item.id);
+  const blocked = editor.view!.policy.packages[item.id] === "blocked";
   return (
     <BuiltinPackageSwitch
       label={t(compact ? item.label_key : "settings:builtinMcp.taskChoice")}
       hideLabel={compact}
       checked={state.enabled}
-      disabled={
-        !editor.view!.can_edit ||
-        editor.pending ||
-        editor.view!.policy.packages[item.id] === "blocked"
-      }
+      disabled={!editor.view!.can_edit || editor.pending || blocked}
       onCheckedChange={(checked) => editor.setChoice(item.id, checked ? "on" : "off")}
       testId={`builtin-mcp-choice-${item.id}`}
       dirty={state.dirty}
-      describedBy={`builtin-mcp-source-${item.id}`}
+      describedBy={
+        blocked
+          ? `builtin-mcp-source-${item.id} builtin-mcp-blocked-${item.id}`
+          : `builtin-mcp-source-${item.id}`
+      }
     />
   );
 }
@@ -61,7 +62,14 @@ export function TaskPackageInheritance({ editor, item }: Props) {
           className={controlSizingClassName("standard", "px-0 text-xs")}
           data-testid={`builtin-mcp-inherit-${item.id}`}
           disabled={!editor.view!.can_edit || editor.pending}
-          onClick={() => editor.setChoice(item.id, "inherit")}
+          onClick={(event) => {
+            const group = event.currentTarget.closest<HTMLElement>('[role="group"]');
+            const control = group?.querySelector<HTMLButtonElement>(
+              '[role="switch"]:not(:disabled)',
+            );
+            (control ?? group)?.focus({ preventScroll: true });
+            editor.setChoice(item.id, "inherit");
+          }}
         >
           {t("settings:builtinMcp.useInherited")}
         </Button>
@@ -78,7 +86,11 @@ export function TaskPackageControls({ editor, item }: Props) {
     <>
       <TaskPackageSwitch editor={editor} item={item} />
       <TaskPackageInheritance editor={editor} item={item} />
-      <p className="text-xs text-muted-foreground" data-testid="builtin-mcp-effective">
+      <p
+        id={`builtin-mcp-blocked-${item.id}`}
+        className="text-xs text-muted-foreground"
+        data-testid="builtin-mcp-effective"
+      >
         {t(state.enabled ? "settings:builtinMcp.effectiveOn" : "settings:builtinMcp.effectiveOff")}{" "}
         {blocked && t("settings:builtinMcp.blocked")}
       </p>
