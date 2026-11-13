@@ -210,6 +210,8 @@
   "authentication": "認証",
   "authenticationRequiredLogInBeforeResuming": "認証必要。再開前にログイン",
   "authenticationRequiredPleaseLogInVia": "認証必要。ターミナルからログイン",
+  "authenticationRequiredForProvider": "{{provider}} の認証が必要です。実行ホストでサインインしてから再試行してください。",
+  "authenticationRequiredOnExecutionHost": "実行ホストでプロバイダーにサインインしてから再試行してください。",
   "autoMarkReviewedOnScroll": "スクロールで自動レビュー済み",
   "autoStart": "自動開始",
   "automaticColorSource": "自動: {{rule}}。このルール一致中は手動色を非表示。",

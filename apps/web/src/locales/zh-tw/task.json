@@ -179,6 +179,8 @@
   "authentication": "身分驗證",
   "authenticationRequiredLogInBeforeResuming": "需要身分驗證，請先登入再恢復",
   "authenticationRequiredPleaseLogInVia": "需要身分驗證；請通過終端登入",
+  "authenticationRequiredForProvider": "{{provider}} 需要身分驗證。請在執行主機上登入後重試。",
+  "authenticationRequiredOnExecutionHost": "請在執行主機上登入提供者，然後重試。",
   "autoMarkReviewedOnScroll": "滾動時自動標記為已審閱",
   "autoStart": "自動啟動",
   "automaticColorSource": "自動顏色：{{rule}}。此規則匹配時會隱藏手動顏色。",

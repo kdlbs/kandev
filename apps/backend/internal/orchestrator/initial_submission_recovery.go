@@ -152,11 +152,26 @@ func (s *Service) persistLegacyInitialSubmission(
 }
 
 func eligibleInitialSubmissionRecovery(session *models.TaskSession) bool {
-	if session == nil || session.State != models.TaskSessionStateFailed {
+	if session == nil {
 		return false
 	}
 	lastError, found := models.LoadLastAgentError(session.Metadata)
-	return found && !lastError.IsDismissed() && lastError.Phase == models.LaunchErrorPhaseBootstrap
+	if !found || lastError.IsDismissed() || lastError.Phase != models.LaunchErrorPhaseBootstrap {
+		return false
+	}
+	if session.State == models.TaskSessionStateFailed {
+		return true
+	}
+	if session.State != models.TaskSessionStateWaitingForInput || sessionHasProviderSessionToken(session) {
+		return false
+	}
+	for _, cause := range lastError.Causes {
+		if cause.Operation == models.AgentErrorCauseOperationStart &&
+			cause.Code == models.AgentErrorCauseCodeAuthenticationRequired {
+			return true
+		}
+	}
+	return false
 }
 
 func loadInitialPromptPreview(metadata map[string]interface{}) (*models.InitialPromptPreview, bool, error) {

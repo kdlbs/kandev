@@ -97,6 +97,40 @@ func (a *Adapter) emitMCPDecisionEvidence(ctx context.Context, decisions []mcpSe
 	return projectDelivered
 }
 
+func (a *Adapter) emitMCPAttachmentPreflightFailure(
+	ctx context.Context,
+	requested []types.McpServer,
+	selected []types.McpServer,
+	decisions []mcpServerFilterDecision,
+	err error,
+) {
+	a.emitMCPAttachmentStart(ctx)
+	a.emitMCPDecisionEvidence(ctx, decisions)
+	selectedPackages := make(map[string]bool, len(selected))
+	for _, server := range selected {
+		if server.IsInjectedBuiltin() {
+			selectedPackages[string(server.BuiltinPackage)] = true
+		}
+	}
+	projectDelivery := validProjectMCPDelivery(a.projectDeliveryEvidence())
+	failedServers := make(map[string]bool)
+	for _, server := range requested {
+		if !server.IsInjectedBuiltin() || server.BuiltinPackage == "" ||
+			selectedPackages[string(server.BuiltinPackage)] || projectDelivery.Delivers(server.BuiltinPackage) ||
+			failedServers[server.Name] {
+			continue
+		}
+		failedServers[server.Name] = true
+		a.emitMCPAttachmentEvidence(
+			ctx,
+			server,
+			streams.MCPAttachmentEvidenceExplicitError,
+			"builtin_mcp_delivery_failed",
+			err.Error(),
+		)
+	}
+}
+
 // emitProjectMCPSessionAccepted records that a session operation succeeded
 // after project-file materialization. It is acceptance evidence only, not a
 // connection or health observation.
