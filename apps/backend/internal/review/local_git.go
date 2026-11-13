@@ -52,6 +52,7 @@ func localGit(ctx context.Context, path string, limit int, args ...string) (stri
 	cmdErr, ctxErr := subproc.RunGitAfterAcquire(ctx, subproc.GitInteractive, 30*time.Second,
 		func(execCtx context.Context) *exec.Cmd {
 			cmd := subproc.NewGitCommand(execCtx, append([]string{"--literal-pathspecs", "-C", path}, args...)...)
+			cmd.Env = repositoryNeutralGitEnv(os.Environ())
 			cmd.Stdout = &output
 			return cmd
 		})
