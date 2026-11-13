@@ -5,9 +5,8 @@ import (
 	"encoding/json"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
+	"github.com/kandev/kandev/internal/agentruntime"
 )
-
-const closureStandaloneExecutor = "standalone"
 
 type inferenceClosureSettler interface {
 	CaptureInferenceClosureClaims(context.Context, string, string) (json.RawMessage, error)
@@ -20,7 +19,7 @@ func (m *Manager) closureClient(sid, executionID string) (*agentctl.Client, func
 	if !ok || execution.SessionID != sid {
 		return nil, nil, utility.ErrInferenceClosureIncomplete
 	}
-	if execution.ExecutorType != closureStandaloneExecutor {
+	if execution.RuntimeName != agentruntime.RuntimeStandalone {
 		return nil, nil, agentctl.ErrInferenceOwnershipUnsupported
 	}
 	for _, other := range m.ListExecutions() {

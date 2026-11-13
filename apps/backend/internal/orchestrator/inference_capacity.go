@@ -6,6 +6,7 @@ import (
 	"maps"
 
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // SetInferenceCapacityOwner uses the existing admission and settings-row owners.
@@ -74,6 +75,10 @@ func (s *Service) ReserveInferenceCapacity(ctx context.Context, binding sessionc
 }
 
 func (s *Service) reserveInferenceCapacityLocked(ctx context.Context, binding sessioncapacity.InferenceBinding) (bool, string, error) {
+	if s.hasExecutionTeardownOwner(binding.SessionID, binding.InstanceID) ||
+		s.hasExecutionTeardownOwner(binding.SessionID, binding.ParentExecutionID) {
+		return false, "execution_stopping", models.ErrInferenceClosureBlocked
+	}
 	if err := s.checkInferenceClosureBinding(ctx, binding); err != nil {
 		return false, "inference_scope_closure", err
 	}
@@ -94,9 +99,6 @@ func (s *Service) reserveInferenceCapacityLocked(ctx context.Context, binding se
 		c.retirePersistedNativeAliasLocked(held, binding)
 		return true, "", nil
 	}
-	if s.hasExecutionTeardownOwner(binding.SessionID, binding.InstanceID) {
-		return false, "execution_stopping", fmt.Errorf("inference execution is stopping")
-	}
 	if retainedNativeChild(binding, active) {
 		return false, ceilingReasonUnknownPopulation, fmt.Errorf("retained native inference owner is still active")
 	}
@@ -107,6 +109,22 @@ func (s *Service) reserveInferenceCapacityLocked(ctx context.Context, binding se
 		return false, reason, err
 	}
 	return c.persistInferenceBindingLocked(ctx, binding)
+}
+
+// CheckLegacyInferenceAdmission guards session-scoped calls that cannot
+// reserve a durable inference attempt on an older agentctl.
+func (s *Service) CheckLegacyInferenceAdmission(ctx context.Context, sessionID, executionID string) error {
+	if sessionID == "" {
+		return nil
+	}
+	guard, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
+	guard.Lock()
+	defer guard.Unlock()
+	if s.hasExecutionTeardownOwner(sessionID, executionID) {
+		return models.ErrInferenceClosureBlocked
+	}
+	return s.checkInferenceClosureBinding(ctx, sessioncapacity.InferenceBinding{SessionID: sessionID, InstanceID: executionID})
 }
 
 func (c *sessionCeilingController) inspectFreshInferenceCapacityLocked(ctx context.Context, binding sessioncapacity.InferenceBinding) (string, error) {

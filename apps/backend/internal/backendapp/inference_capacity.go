@@ -56,7 +56,7 @@ func (b *sharedInferenceConsumer) Execute(ctx context.Context, client *agentrunt
 	if !all || !finite {
 		// Optional capacity modes keep the native inference path; the shared
 		// binding store must not block a prompt when the policy is off.
-		return client.InferencePrompt(ctx, &request)
+		return b.promptWithoutInferenceReservation(ctx, client, &request, identity)
 	}
 	b.refreshMu.Lock()
 	prepared, err := client.PrepareInferenceCapacityAttempt(ctx, request.CallID)
@@ -91,7 +91,7 @@ func (b *sharedInferenceConsumer) executeSharedInference(ctx context.Context, cl
 		// fresh token instead of validating a shared reservation.
 		b.cancelUnsentPrepared(client, binding)
 		request.AttemptID = ""
-		return client.InferencePrompt(ctx, request)
+		return b.promptWithoutInferenceReservation(ctx, client, request, identity)
 	}
 	if err := b.validateInferenceSettlement(ctx, binding); err != nil {
 		b.cancelAndSettle(client, binding)
@@ -282,9 +282,19 @@ func (b *sharedInferenceConsumer) executeLegacyInference(ctx context.Context, cl
 	}
 	// Optional capacity modes keep the native prompt path without a synthetic
 	// capacity binding, even on an older agentctl.
-	response, err := client.InferencePrompt(ctx, req)
+	response, err := b.promptWithoutInferenceReservation(ctx, client, req, identity)
+	if agentruntime.IsInferenceCapacityError(err) {
+		return nil, err
+	}
 	if inferenceFailureNeedsSettlement(response, err) {
 		return response, unconfirmedInferenceFailure(response, err)
 	}
 	return response, err
+}
+
+func (b *sharedInferenceConsumer) promptWithoutInferenceReservation(ctx context.Context, client *agentruntime.InferenceClient, req *utility.PromptRequest, identity agentruntime.InferenceIdentity) (*utility.PromptResponse, error) {
+	if err := b.capacity.CheckLegacyInferenceAdmission(ctx, identity.SessionID, identity.ParentExecutionID); err != nil {
+		return nil, &agentruntime.InferenceCapacityError{Reason: "inference_scope_closure", Cause: err}
+	}
+	return client.InferencePrompt(ctx, req)
 }

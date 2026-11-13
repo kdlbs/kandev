@@ -178,7 +178,7 @@ func (s *Service) checkClosedInferenceSource(ctx context.Context, binding sessio
 	if json.Unmarshal(raw, &saved) != nil || !saved.Valid() {
 		return models.ErrInferenceClosureBlocked
 	}
-	if saved.SourceExecutionID == binding.InstanceID {
+	if saved.SourceExecutionID == binding.InstanceID || saved.SourceExecutionID == binding.ParentExecutionID {
 		return models.ErrInferenceClosureBlocked
 	}
 	return nil
