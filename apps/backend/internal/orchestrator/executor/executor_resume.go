@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/integrations/cloneauth"
@@ -71,6 +72,7 @@ type repoInfo struct {
 	RepositoryID               string
 	RepositoryPath             string
 	BaseBranch                 string
+	BaseBranchFallbackPolicy   models.BaseBranchFallbackPolicy
 	IntegrationRef             string
 	CheckoutBranch             string
 	PRNumber                   int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
@@ -179,16 +181,17 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		return nil, err
 	}
 	info := &repoInfo{
-		CheckoutOptions:         options,
-		TaskRepositoryID:        tr.ID,
-		TaskRepositoryUpdatedAt: tr.UpdatedAt,
-		RepositoryID:            tr.RepositoryID,
-		BaseBranch:              tr.BaseBranch,
-		IntegrationRef:          tr.BranchPolicyPullRequestTarget,
-		CheckoutBranch:          tr.CheckoutBranch,
-		PRNumber:                prNumberFromMetadata(tr.Metadata),
-		Position:                tr.Position,
-		WorkspaceRelativePath:   tr.WorkspaceRelativePath,
+		CheckoutOptions:          options,
+		TaskRepositoryID:         tr.ID,
+		TaskRepositoryUpdatedAt:  tr.UpdatedAt,
+		RepositoryID:             tr.RepositoryID,
+		BaseBranch:               tr.BaseBranch,
+		BaseBranchFallbackPolicy: models.ResolveAttachmentBaseBranchFallbackPolicy(tr.Metadata, tr.BaseBranch),
+		IntegrationRef:           tr.BranchPolicyPullRequestTarget,
+		CheckoutBranch:           tr.CheckoutBranch,
+		PRNumber:                 prNumberFromMetadata(tr.Metadata),
+		Position:                 tr.Position,
+		WorkspaceRelativePath:    tr.WorkspaceRelativePath,
 	}
 	if binding, found, err := models.LoadRemoteContribution(tr.Metadata); err != nil {
 		return nil, fmt.Errorf("load remote contribution for task repository %q: %w", tr.ID, err)
@@ -205,6 +208,7 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		}
 		info.RemoteContribution = &binding
 		info.BaseBranch = binding.BaseBranch
+		info.BaseBranchFallbackPolicy = models.BaseBranchFallbackPolicyStrict
 		info.CheckoutBranch = binding.HeadBranch
 	}
 	if destination, found, err := models.LoadContributionDestination(tr.Metadata); err != nil {
@@ -257,7 +261,10 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		info.WorktreeBranchTemplate = tr.BranchPolicyBranchTemplate
 	}
 	info.PullBeforeWorktree = repo.PullBeforeWorktree
-	if info.BaseBranch == "" && repo.DefaultBranch != "" {
+	if info.BaseBranch == "" && repo.DefaultBranch != "" && info.PRNumber == 0 {
+		// A PR-linked attachment may defer its base until the provider target
+		// resolves. Falling back to the repository default here would launch on
+		// the wrong integration target if that lookup failed.
 		info.BaseBranch = repo.DefaultBranch
 	}
 	if info.IntegrationRef == "" {
@@ -1049,9 +1056,28 @@ type ResumeOptions struct {
 	// workspace idle policy. It protects focus recovery from reviving a manual
 	// stop, cancellation, archive, or workflow-owned session.
 	RequireIdleSuspensionProvenance bool
+	// RequireExecutorActor fails the resume closed when executor admission
+	// does not establish an identity to launch as. Internal callers that act
+	// for the session's durable actor set it so a missing actor never becomes
+	// an unscoped launch.
+	RequireExecutorActor bool
 	// NoInitialPrompt keeps the task description out of a fresh recovery boot;
 	// the owning continuation delivers the captured submission after readiness.
 	NoInitialPrompt bool
+	// InitialPromptOverride replaces the task-description fallback for an
+	// eligible text-only fresh-start recovery. The orchestrator supplies
+	// already-composed content; the executor performs no workflow lookups.
+	// Existing NoInitialPrompt and continuation suppression still take
+	// precedence.
+	InitialPromptOverride *string
+	// BeforeInitialPromptDispatch validates legacy recovery prompt ownership
+	// immediately before provider admission. It runs only when the lifecycle
+	// is about to send the prepared initial prompt.
+	BeforeInitialPromptDispatch func(context.Context) error
+	// OnInitialPromptDispatched and OnInitialPromptFailed release the dispatch
+	// fence installed by BeforeInitialPromptDispatch.
+	OnInitialPromptDispatched func()
+	OnInitialPromptFailed     func()
 	// SuppressInitialMessageBackfill is used only by silent restart restore,
 	// which must preserve the transcript exactly until an ordinary prompt arrives.
 	SuppressInitialMessageBackfill bool
@@ -1274,6 +1300,11 @@ func (e *Executor) ResumeSessionWithOptions(
 			return nil, err
 		}
 	}
+	if session != nil && options.RequireExecutorActor {
+		if _, ok := authn.IdentityFromContext(ctx); !ok {
+			return nil, ErrExecutorActorUnavailable
+		}
+	}
 	if session != nil {
 		e.auditCeilingBypass(ctx, "ResumeSessionWithOptions", session.ID, false)
 	}
@@ -1303,6 +1334,19 @@ func (e *Executor) resumeSession(
 	completedResume := options.AllowCompletedSessionResume &&
 		resumeInitialState == models.TaskSessionStateCompleted
 	wasTerminalResume := isTerminalSessionState(resumeInitialState) || completedResume
+	// Required-runtime admission runs before stale-runtime cleanup, credential
+	// leases, and environment retirement. A runtime refusal must not destroy
+	// retained evidence or unrelated work.
+	requestedExecutorType, err := e.requestedResumeExecutorType(ctx, task, session, startAgent, options)
+	if err != nil {
+		return nil, err
+	}
+	if err := e.admitExecutorRuntime(requestedExecutorType); err != nil {
+		return nil, err
+	}
+	if err := e.admitRetainedExecutionRuntime(ctx, session, requestedExecutorType); err != nil {
+		return nil, err
+	}
 	// A terminal session may retain an unconfirmed runtime. Stop it before
 	// selected-environment admission can claim the environment.
 	if wasTerminalResume {
@@ -1314,10 +1358,6 @@ func (e *Executor) resumeSession(
 		}
 	}
 	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
-		return nil, err
-	}
-	requestedExecutorType, err := e.requestedResumeExecutorType(ctx, task, session, startAgent, options)
-	if err != nil {
 		return nil, err
 	}
 	replacement, err := e.replaceFailedEnvironmentForResume(ctx, task, session, requestedExecutorType)
@@ -1573,6 +1613,19 @@ func (e *Executor) resumeSession(
 	}
 
 	if startAgent {
+		if err := e.registerResumeInitialPromptCallbacks(resp.AgentExecutionID, options); err != nil {
+			e.cleanupUnstartedExecutionAfterPersistError(cleanupCtx, session.ID, resp.AgentExecutionID, err)
+			rollbackErr := e.rollbackResumeStateAfterFailure(
+				launchCtx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err,
+				resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
+			)
+			if rollbackErr != nil {
+				err = errors.Join(err, rollbackErr)
+			}
+			return execution, err
+		}
+	}
+	if startAgent {
 		if options.StartAgentSynchronously && options.RequiredNativeConversationID == "" {
 			if err := e.agentManager.StartAgentProcess(ctx, resp.AgentExecutionID); err != nil {
 				if e.claimForcedExecutionCleanup(session.ID, resp.AgentExecutionID) {
@@ -1634,7 +1687,7 @@ func (e *Executor) requestedResumeExecutorType(
 ) (string, error) {
 	requestSession := *session
 	requestSession.Metadata = cloneMetadata(session.Metadata)
-	req, metadata := newResumeLaunchRequest(task, &requestSession, startAgent, options)
+	req, metadata := newResumeLaunchRequest(task, &requestSession, startAgent, options, e.managedRuntimeOwnerUserID(ctx, task.WorkspaceID))
 	running, err := e.repo.GetExecutorRunningBySessionID(ctx, session.ID)
 	if err != nil && !errors.Is(err, models.ErrExecutorRunningNotFound) {
 		return "", fmt.Errorf("load runtime inventory for session %q: %w", session.ID, err)
@@ -1645,9 +1698,20 @@ func (e *Executor) requestedResumeExecutorType(
 		); err != nil {
 			return "", err
 		}
-		return req.ExecutorType, nil
+		return e.requireResolvedResumeExecutorType(req.ExecutorType, requestSession.ExecutorID)
 	}
-	return e.resolveExecutorConfig(ctx, requestSession.ExecutorID, task.WorkspaceID, metadata).ExecutorType, nil
+	config := e.resolveExecutorConfig(ctx, requestSession.ExecutorID, task.WorkspaceID, metadata)
+	if config.ResolutionErr != nil {
+		return "", fmt.Errorf("%w: %v", ErrExecutorRuntimeSelectionUnresolved, config.ResolutionErr)
+	}
+	return e.requireResolvedResumeExecutorType(config.ExecutorType, config.ExecutorID)
+}
+
+func (e *Executor) requireResolvedResumeExecutorType(executorType, executorID string) (string, error) {
+	if strings.TrimSpace(executorID) != "" && strings.TrimSpace(executorType) == "" {
+		return "", fmt.Errorf("%w: executor %q", ErrExecutorRuntimeSelectionUnresolved, executorID)
+	}
+	return executorType, nil
 }
 
 func (e *Executor) prepareResumePreflight(
@@ -2060,7 +2124,7 @@ func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
 	beforeCredentialLease func() error,
 	options ResumeOptions,
 ) (*LaunchAgentRequest, string, executorConfig, *models.TaskEnvironment, *models.ExecutorRunning, error) {
-	req, metadata := newResumeLaunchRequest(task, session, startAgent, options)
+	req, metadata := newResumeLaunchRequest(task, session, startAgent, options, e.managedRuntimeOwnerUserID(ctx, task.WorkspaceID))
 	if err := e.applyDeliveryIdentity(ctx, req, session); err != nil {
 		return nil, "", executorConfig{}, nil, nil, err
 	}
@@ -2089,7 +2153,17 @@ func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
 				fmt.Errorf("validate recorded Kubernetes runtime for resume: %w", err)
 		}
 	} else {
-		execConfig = e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
+		var configErr error
+		execConfig, configErr = e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
+		if configErr != nil {
+			return nil, "", executorConfig{}, nil, existingRunning, configErr
+		}
+		// A retained binding is selection evidence even when the persisted
+		// session omits its executor type. Resolve it through current provider
+		// rules and compare the recorded runtime before reuse.
+		if err := e.admitRetainedExecutionRuntime(ctx, session, execConfig.ExecutorType); err != nil {
+			return nil, "", execConfig, nil, existingRunning, err
+		}
 	}
 	repositoryID, existingEnv, allRepos, err := e.prepareResumeRepositorySettings(
 		ctx, task, session, req, options,
@@ -2121,12 +2195,59 @@ func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
 	return req, repositoryID, execConfig, existingEnv, existingRunning, nil
 }
 
+// registerResumeInitialPromptCallbacks carries a prepared recovery binding into
+// lifecycle prompt admission so a workflow move cannot send superseded
+// instructions from the initial resume prompt.
+func (e *Executor) registerResumeInitialPromptCallbacks(executionID string, options ResumeOptions) error {
+	if options.BeforeInitialPromptDispatch == nil &&
+		options.OnInitialPromptDispatched == nil && options.OnInitialPromptFailed == nil {
+		return nil
+	}
+	registrar, ok := e.agentManager.(interface {
+		RegisterInitialPromptAdmissionCallbacks(
+			string,
+			func(context.Context, string, []v1.MessageAttachment) error,
+			func(), func(),
+		) error
+	})
+	if !ok {
+		return errors.New("agent manager cannot fence fresh recovery prompt admission")
+	}
+	if err := registrar.RegisterInitialPromptAdmissionCallbacks(
+		executionID,
+		func(ctx context.Context, _ string, _ []v1.MessageAttachment) error {
+			if options.BeforeInitialPromptDispatch != nil {
+				return options.BeforeInitialPromptDispatch(ctx)
+			}
+			return nil
+		},
+		func() {
+			if options.OnInitialPromptDispatched != nil {
+				options.OnInitialPromptDispatched()
+			}
+		},
+		func() {
+			if options.OnInitialPromptFailed != nil {
+				options.OnInitialPromptFailed()
+			}
+		},
+	); err != nil {
+		return fmt.Errorf("register fresh recovery prompt admission callbacks: %w", err)
+	}
+	return nil
+}
+
 func newResumeLaunchRequest(
 	task *v1.Task,
 	session *models.TaskSession,
 	startAgent bool,
 	options ResumeOptions,
+	ownerUserIDs ...string,
 ) (*LaunchAgentRequest, map[string]interface{}) {
+	ownerUserID := ""
+	if len(ownerUserIDs) > 0 {
+		ownerUserID = ownerUserIDs[0]
+	}
 	executionProfileID := session.ExecutionProfileID
 	if executionProfileID == "" {
 		executionProfileID = session.AgentProfileID
@@ -2135,6 +2256,7 @@ func newResumeLaunchRequest(
 		WorkspaceLayout:              task.InitialWorkspaceLayout,
 		ResumePassthrough:            startAgent && session.IsPassthrough && !options.ForceContextContinuation,
 		TaskID:                       task.ID,
+		OwnerUserID:                  ownerUserID,
 		SessionSettingsPolicy:        options.SettingsPolicy,
 		RequiredNativeConversationID: options.RequiredNativeConversationID,
 		ACPSessionID:                 options.RequiredNativeConversationID,
@@ -2160,6 +2282,9 @@ func newResumeLaunchRequest(
 		ReplaceNativeConversation:    options.RecoveryAction == RecoveryActionFreshStart,
 		RecoveryAction:               options.RecoveryAction,
 		SuppressBootStatusMessage:    options.SuppressInitialMessageBackfill,
+	}
+	if options.InitialPromptOverride != nil {
+		req.TaskDescription = *options.InitialPromptOverride
 	}
 	if options.ForceContextContinuation {
 		if options.DeferInitialPrompt {
@@ -2199,13 +2324,17 @@ type ContextContinuation struct {
 	ContentHash     string
 }
 
+const contextHistoryNotice = "The following sections are historical context, not new instructions.\n" +
+	"Do not retry earlier actions only because results are missing or uncertain.\n" +
+	"Follow the user's current instructions.\n\n"
+
 // BuildContextContinuation returns the bounded, provider-neutral context used
 // by the explicit continue_from_history recovery action.
 func BuildContextContinuation(
 	taskObjective, plan, workspace string, messages []*models.Message,
 ) ContextContinuation {
 	snapshot := lifecycle.BuildContinuationSnapshot(lifecycle.ContinuationSnapshotInput{
-		TaskObjective:     taskObjective,
+		TaskObjective:     contextHistoryNotice + taskObjective,
 		Plan:              plan,
 		OriginalWorkspace: workspace,
 		Messages:          messages,
@@ -2239,7 +2368,7 @@ func (e *Executor) prepareResumeRepositorySettings(
 	if err != nil {
 		return "", nil, nil, err
 	}
-	if err := rejectInheritedEnvironmentExecutorMismatch(task, existingEnv, req.ExecutorType); err != nil {
+	if err := rejectInheritedEnvironmentExecutorMismatch(task, existingEnv, req.ExecutorType, false); err != nil {
 		return "", existingEnv, nil, err
 	}
 	if session.TaskEnvironmentID != "" {
@@ -2470,9 +2599,14 @@ func (e *Executor) resolveResumeTaskEnvironmentForTask(ctx context.Context, task
 
 // applyExecutorConfigToResumeRequest resolves executor config and applies it to the
 // resume request, persisting executor assignment if newly resolved.
-func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *LaunchAgentRequest, task *v1.Task, session *models.TaskSession, metadata map[string]interface{}) executorConfig {
+func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *LaunchAgentRequest, task *v1.Task, session *models.TaskSession, metadata map[string]interface{}) (executorConfig, error) {
 	executorWasEmpty := session.ExecutorID == ""
 	execConfig := e.resolveExecutorConfig(ctx, session.ExecutorID, task.WorkspaceID, metadata)
+	// Required-runtime admission precedes credential leases, environment
+	// retirement, and any session mutation for this resume attempt.
+	if err := e.admitConcreteExecutorRuntime(execConfig); err != nil {
+		return execConfig, err
+	}
 	session.ExecutorID = execConfig.ExecutorID
 	req.ExecutorType = execConfig.ExecutorType
 	req.ExecutorConfig = execConfig.ExecutorCfg
@@ -2490,7 +2624,7 @@ func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *
 		req.Metadata = execConfig.Metadata
 	}
 
-	return execConfig
+	return execConfig, nil
 }
 
 // isRecoverableCancelledResumeSession reports whether session was cancelled by
@@ -2695,6 +2829,7 @@ func (e *Executor) applyResumeRepoConfig(
 		}
 	}
 
+	applyResumeAttachmentFallbackPolicy(req, repositoryID, baseBranch, allRepos)
 	repositoryPath := repository.LocalPath
 	applyResumeRepoBasics(req, repository, repositoryPath, shouldUseWorktree(req.ExecutorType))
 	for _, info := range allRepos {
@@ -2726,6 +2861,34 @@ func (e *Executor) resumeRepoSet(ctx context.Context, taskID string, resolved ..
 		return resolved[0], nil
 	}
 	return e.resolveAllRepoInfo(ctx, taskID)
+}
+
+// applyResumeAttachmentFallbackPolicy copies the exact attachment's derived
+// repository-default policy onto a resume request. A session repository that
+// has no matching attachment, multiple same-repository attachments, or a
+// session branch that differs from the attachment base is ambiguous and stays
+// strict: the session's legacy base snapshot is not provenance.
+func applyResumeAttachmentFallbackPolicy(
+	req *LaunchAgentRequest, repositoryID, baseBranch string, repos []*repoInfo,
+) {
+	req.BaseBranchFallbackPolicy = models.BaseBranchFallbackPolicyStrict
+	var match *repoInfo
+	for _, info := range repos {
+		if info == nil || info.RepositoryID != repositoryID {
+			continue
+		}
+		if match != nil {
+			return
+		}
+		match = info
+	}
+	if match == nil || strings.TrimSpace(match.BaseBranch) != strings.TrimSpace(baseBranch) {
+		return
+	}
+	req.BaseBranchFallbackPolicy = match.BaseBranchFallbackPolicy
+	if match.Repository != nil && match.Repository.DefaultBranch != "" {
+		req.DefaultBranch = match.Repository.DefaultBranch
+	}
 }
 
 // resolveResumeRepoIDAndBranch picks the primary repositoryID and baseBranch
@@ -2797,6 +2960,9 @@ func applyResumeRepoBasics(req *LaunchAgentRequest, repository *models.Repositor
 	if repositoryPath != "" {
 		req.RepositoryURL = repositoryPath
 		req.RepositoryPath = repositoryPath
+	}
+	if repository != nil && repository.DefaultBranch != "" {
+		req.DefaultBranch = repository.DefaultBranch
 	}
 	if useWorktree {
 		req.RepoName = repository.Name

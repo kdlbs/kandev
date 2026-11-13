@@ -59,26 +59,27 @@ type McpServerConfig struct {
 
 // CreateInstanceRequest contains the parameters for creating a new agent instance.
 type CreateInstanceRequest struct {
-	ID                     string              `json:"id,omitempty"`
-	WorkspacePath          string              `json:"workspace_path"`
-	AgentCommand           string              `json:"agent_command,omitempty"`
-	Protocol               string              `json:"protocol,omitempty"` // Protocol adapter to use (currently "acp")
-	CodexAppServerEnabled  bool                `json:"codex_app_server_enabled,omitempty"`
-	AgentType              string              `json:"agent_type,omitempty"`     // Agent type ID for debug file naming (e.g., "codex", "auggie")
-	WorkspaceFlag          string              `json:"workspace_flag,omitempty"` // CLI flag for workspace path (e.g., "--workspace-root")
-	Env                    map[string]string   `json:"env,omitempty"`
-	AutoStart              bool                `json:"auto_start,omitempty"`
-	AutoApprovePermissions *bool               `json:"auto_approve_permissions,omitempty"`
-	McpServers             []McpServerConfig   `json:"mcp_servers,omitempty"`
-	SessionID              string              `json:"session_id,omitempty"`           // Task session ID for MCP tool calls
-	TaskID                 string              `json:"task_id,omitempty"`              // Task ID for MCP plan tool calls (server-side injection)
-	DisableAskQuestion     bool                `json:"disable_ask_question,omitempty"` // Disable ask_user_question MCP tool (TUI agents)
-	PromptSuggestions      bool                `json:"prompt_suggestions,omitempty"`   // Ask native-suggestion agents to emit next-prompt suggestions
-	AssumeMcpSse           bool                `json:"assume_mcp_sse,omitempty"`       // Assume agent supports SSE MCP servers
-	AssumeMcpHttp          bool                `json:"assume_mcp_http,omitempty"`      // Assume agent supports HTTP MCP servers
-	McpMode                string              `json:"mcp_mode,omitempty"`             // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
-	McpProviders           []string            `json:"mcp_providers,omitempty"`        // Supported review-automation providers
-	McpProfile             *mcpprofile.Context `json:"mcp_profile,omitempty"`          // Backend-owned typed MCP tool profile
+	ID                         string              `json:"id,omitempty"`
+	WorkspacePath              string              `json:"workspace_path"`
+	AgentCommand               string              `json:"agent_command,omitempty"`
+	Protocol                   string              `json:"protocol,omitempty"` // Protocol adapter to use (currently "acp")
+	CodexAppServerEnabled      bool                `json:"codex_app_server_enabled,omitempty"`
+	AgentType                  string              `json:"agent_type,omitempty"`     // Agent type ID for debug file naming (e.g., "codex", "auggie")
+	WorkspaceFlag              string              `json:"workspace_flag,omitempty"` // CLI flag for workspace path (e.g., "--workspace-root")
+	Env                        map[string]string   `json:"env,omitempty"`
+	AutoStart                  bool                `json:"auto_start,omitempty"`
+	AutoApprovePermissions     *bool               `json:"auto_approve_permissions,omitempty"`
+	McpServers                 []McpServerConfig   `json:"mcp_servers,omitempty"`
+	SessionID                  string              `json:"session_id,omitempty"`                    // Task session ID for MCP tool calls
+	TaskID                     string              `json:"task_id,omitempty"`                       // Task ID for MCP plan tool calls (server-side injection)
+	DisableAskQuestion         bool                `json:"disable_ask_question,omitempty"`          // Disable ask_user_question MCP tool (TUI agents)
+	PromptSuggestions          bool                `json:"prompt_suggestions,omitempty"`            // Ask native-suggestion agents to emit next-prompt suggestions
+	CopilotNativeSessionEvents bool                `json:"copilot_native_session_events,omitempty"` // Enable Copilot native compaction and attributed usage
+	AssumeMcpSse               bool                `json:"assume_mcp_sse,omitempty"`                // Assume agent supports SSE MCP servers
+	AssumeMcpHttp              bool                `json:"assume_mcp_http,omitempty"`               // Assume agent supports HTTP MCP servers
+	McpMode                    string              `json:"mcp_mode,omitempty"`                      // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
+	McpProviders               []string            `json:"mcp_providers,omitempty"`                 // Supported review-automation providers
+	McpProfile                 *mcpprofile.Context `json:"mcp_profile,omitempty"`                   // Backend-owned typed MCP tool profile
 	// RequiresProcessKill tells agentctl to skip the graceful stdin-close wait
 	// and reap the agent process group immediately. Required for agents whose
 	// runtime keeps child processes (e.g. MCP servers) alive when stdin closes
@@ -119,6 +120,11 @@ type CreateInstanceRequest struct {
 	// workspace. Agentctl permits file operations through links only beneath
 	// these roots.
 	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
+	// WorkspaceExcludedRoots are detached checkouts that discovery must skip.
+	WorkspaceExcludedRoots []string `json:"workspace_excluded_roots,omitempty"`
+	// TaskWorkspaceRoot is the containment boundary for linked-worktree
+	// discovery. Empty falls back to the agent workspace.
+	TaskWorkspaceRoot string `json:"task_workspace_root,omitempty"`
 	// DurableJournalPath is an owner-scoped path on retained executor storage.
 	// Empty means the instance uses legacy delivery semantics.
 	DurableJournalPath string `json:"durable_journal_path,omitempty"`
@@ -150,7 +156,7 @@ type InstanceInfo struct {
 	Status          string            `json:"status"`
 	WorkspacePath   string            `json:"workspace_path"`
 	AgentCommand    string            `json:"agent_command"`
-	Env             map[string]string `json:"env,omitempty"`
+	Env             map[string]string `json:"env"`
 	CreatedAt       time.Time         `json:"created_at"`
 	// SessionID is the task session ID this instance was created for, if any.
 	SessionID string `json:"session_id,omitempty"`
@@ -159,11 +165,15 @@ type InstanceInfo struct {
 	// WorkspaceSourceRoots is the instance's live, current source-root
 	// allowlist, read back rather than pushed (AC-EXECUTORS-SURVIVAL-002.14's
 	// "workspace source roots" reconstruction row).
-	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
+	WorkspaceSourceRoots []string `json:"workspace_source_roots"`
 	// ProviderSessionID is the live agent CLI's own session identity, read
 	// back from the adopted instance (AC-EXECUTORS-SURVIVAL-002.14's
 	// "provider session identity" reconstruction row).
 	ProviderSessionID string `json:"provider_session_id,omitempty"`
+	// CopilotNativeSessionEvents reports whether the adopted adapter actually
+	// subscribed to the vendor's native session-event stream. Older peers omit
+	// it, which remains a truthful "not subscribed".
+	CopilotNativeSessionEvents bool `json:"copilot_native_session_events,omitempty"`
 }
 
 // ControlClientOption configures optional ControlClient settings.

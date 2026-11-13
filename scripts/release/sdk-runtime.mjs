@@ -1,4 +1,15 @@
 import { join } from "node:path";
+
+/** Contains the required setting and value, never the supplied value. */
+export class ReleaseContextError extends Error {
+  constructor(setting, expected) {
+    super(`SDK release requires ${setting}=${expected}`);
+    this.name = "ReleaseContextError";
+    this.setting = setting;
+    this.expected = expected;
+  }
+}
+
 export function assertReleaseContext(env = process.env) {
   const required = {
     GITHUB_ACTIONS: "true",
@@ -11,8 +22,7 @@ export function assertReleaseContext(env = process.env) {
     SDK_SCOPE_OWNERSHIP_CONFIRMED: "true",
   };
   for (const [key, value] of Object.entries(required))
-    if (env[key] !== value)
-      throw new Error(`SDK release requires ${key}=${value}`);
+    if (env[key] !== value) throw new ReleaseContextError(key, value);
 }
 export function publicationEnvironment(root, inherited = process.env) {
   const env = Object.fromEntries(

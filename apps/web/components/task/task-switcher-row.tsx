@@ -237,6 +237,8 @@ function TaskRowItem({
       queuedCount={task.queuedCount}
       wipQueue={task.wipQueue}
       launchQueue={task.launchQueue}
+      quotaWait={task.quotaWait}
+      waitReason={task.waitReason}
       issueInfo={task.issueInfo}
       agentErrorMessage={task.agentErrorMessage}
       hasUnreadMessages={hasUnreadMessages}

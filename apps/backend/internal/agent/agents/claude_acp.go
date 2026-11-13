@@ -185,6 +185,10 @@ JSON
 chmod 600 "$config_dir/.credentials.json"
 chmod 600 "${HOME}/.claude.json"`,
 			},
+			{
+				Type:   "env",
+				EnvVar: "ANTHROPIC_API_KEY",
+			},
 		},
 	}
 }

@@ -37,6 +37,9 @@ test("shows a live 90% advisory above the composer and clears below 85%", async 
 
   await testPage.goto(`/t/${task.id}`);
   await expect(testPage.getByTestId("chat-input-area")).toBeVisible();
+  const editor = testPage.getByTestId("chat-input-editor");
+  await expect(editor).toHaveAttribute("contenteditable", "true");
+  await editor.fill("Keep this draft while storage guidance changes");
   const base = {
     task_id: task.id,
     session_id: sessionId,
@@ -62,10 +65,54 @@ test("shows a live 90% advisory above the composer and clears below 85%", async 
   await prCapture.screenshot(`delivery-storage-advisory-${testInfo.project.name}`, {
     caption: "Live disk advisory above the composer while work continues.",
   });
+  await expect(editor).toHaveText("Keep this draft while storage guidance changes");
 
-  notify?.({ ...base, state: "warning", available_bytes: 120_000_000, revision: 2 });
+  const stalePressure = new Date(Date.now() - 120_000).toISOString();
+  notify?.({
+    ...base,
+    state: "normal",
+    available_bytes: 500_000_000,
+    observed_at: new Date().toISOString(),
+    pressure_observed_at: stalePressure,
+    pressure_age_seconds: 120,
+    write_pressure: true,
+    failure_storage: {
+      reason: "disk_quota_exceeded",
+      location: "local_runtime",
+      observed_at: stalePressure,
+    },
+    revision: 2,
+  });
   await expect(notice).toHaveCount(1);
-  notify?.({ ...base, state: "normal", available_bytes: 200_000_000, revision: 3 });
+  await expect(notice).toContainText("Last reported");
+  await expect(notice).toContainText("Delivery is blocked: storage quota exhausted");
+  await expect(testPage.getByTestId("session-delivery-storage-details-panel")).toContainText(
+    "Pressure observed",
+  );
+  await expect(testPage.getByTestId("session-delivery-storage-details-panel")).toContainText(
+    "Capacity observed",
+  );
+  await expect(editor).toHaveText("Keep this draft while storage guidance changes");
+  await prCapture.screenshot(`delivery-storage-pressure-stale-${testInfo.project.name}`, {
+    caption: "Old pressure stays last reported while capacity is fresh.",
+  });
+
+  notify?.({
+    ...base,
+    state: "warning",
+    available_bytes: 100_000_000,
+    pressure_observed_at: new Date().toISOString(),
+    pressure_age_seconds: 0,
+    revision: 3,
+  });
+  await expect(notice).toHaveCount(1);
+  await expect(notice).toContainText("Disk 90% used");
+  await expect(notice).not.toContainText("Delivery is blocked");
+  await expect(editor).toHaveText("Keep this draft while storage guidance changes");
+
+  notify?.({ ...base, state: "warning", available_bytes: 120_000_000, revision: 4 });
+  await expect(notice).toHaveCount(1);
+  notify?.({ ...base, state: "normal", available_bytes: 200_000_000, revision: 5 });
   await expect(notice).toHaveCount(0);
 
   notify?.({
@@ -80,12 +127,18 @@ test("shows a live 90% advisory above the composer and clears below 85%", async 
       location: "local_runtime",
       observed_at: new Date().toISOString(),
     },
-    revision: 4,
+    revision: 6,
   });
   await expect(notice).toHaveCount(1);
   await expect(notice).toContainText("Delivery is blocked: storage quota exhausted");
   await expect(notice).not.toContainText("Work continues");
-  notify?.({ ...base, state: "normal", available_bytes: 500_000_000, revision: 5 });
+  notify?.({ ...base, state: "normal", available_bytes: 500_000_000, revision: 7 });
   await expect(notice).toHaveCount(0);
   await expect(testPage.getByTestId("chat-input-area")).toBeVisible();
+
+  await testPage.reload();
+  await expect(testPage.getByTestId("chat-input-area")).toBeVisible();
+  await expect(notice).toHaveCount(0);
+  notify?.({ ...base, state: "normal", available_bytes: 500_000_000, revision: 8 });
+  await expect(notice).toHaveCount(0);
 });

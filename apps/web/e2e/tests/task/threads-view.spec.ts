@@ -404,7 +404,9 @@ test.describe("Threads view", () => {
     const row = editor.getByTestId("threads-task-picker-row").filter({
       hasText: "Threads view task details",
     });
-    await expect(row.getByRole("img", { name: "Review" })).toBeVisible();
+    await expect(
+      row.getByRole("img", { name: "Turn finished, awaiting instruction" }),
+    ).toBeVisible();
     await expect(row.getByTestId("threads-task-picker-step")).toHaveText("Review");
 
     await apiClient.updateTaskState(task.id, "WAITING_FOR_INPUT");

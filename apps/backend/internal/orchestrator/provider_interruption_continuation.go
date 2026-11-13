@@ -108,7 +108,7 @@ func (s *Service) continuationPolicyForFailure(
 	data watcher.AgentEventData,
 	previous *transientRetryEntry,
 ) continuationPolicy {
-	classified := classifyKanbanFailure(data)
+	classified := s.classifyKanbanFailure(data)
 	if classified == nil {
 		return ""
 	}
@@ -170,7 +170,7 @@ func (s *Service) agentManagedPendingFailureHasEvidence(
 }
 
 func (s *Service) capacityContinuationFailureHasEvidence(data watcher.AgentEventData) bool {
-	classified := classifyKanbanFailure(data)
+	classified := s.classifyKanbanFailure(data)
 	return classified != nil && classified.Code == routingerr.CodeModelCapacity &&
 		data.PromptFailureDisposition == streams.PromptFailureDispositionRetainRuntime &&
 		data.PromptFailureDisposition.Valid() && data.OwnerKind == queueStatusScopeTask &&
@@ -204,7 +204,7 @@ func (s *Service) capacityContinuationRetryHasEvidence(data watcher.AgentEventDa
 }
 
 func (s *Service) continuationRefusalReason(ctx context.Context, data watcher.AgentEventData) string {
-	classified := classifyKanbanFailure(data)
+	classified := s.classifyKanbanFailure(data)
 	if classified != nil && classified.Code == routingerr.CodeModelCapacity {
 		return s.capacityContinuationRefusalReason(ctx, data)
 	}
@@ -274,14 +274,21 @@ func capacityContinuationEvidenceBound(
 }
 
 func capacityContinuationHasUnsafeWork(snapshot *streams.CapacityContinuationSnapshot) bool {
-	return snapshot.PendingTools || snapshot.FailedTools || snapshot.UnknownOutcomes ||
-		snapshot.PermissionPending || snapshot.UnaccountedBackground
+	if snapshot.PendingTools || snapshot.FailedTools || snapshot.UnknownOutcomes ||
+		snapshot.PermissionPending || snapshot.UnaccountedBackground {
+		return true
+	}
+	// Known failed commands are evidence only for the version that defines
+	// them. An older or unknown support value must fail closed.
+	return snapshot.KnownFailedShellTools > 0 && !snapshot.SupportsKnownFailedShellTools()
 }
 
 func supportsCapacityContinuation(support streams.CapacityContinuationSupport) bool {
 	return support == streams.CapacityContinuationCodexLiveSessionV1 ||
+		support == streams.CapacityContinuationCodexLiveSessionV2 ||
 		support == streams.CapacityContinuationOpenCodeLiveSessionV1 ||
-		support == streams.CapacityContinuationMockLiveSessionV1
+		support == streams.CapacityContinuationMockLiveSessionV1 ||
+		support == streams.CapacityContinuationMockLiveSessionV2
 }
 
 func capacityContinuationAdmissionMatches(

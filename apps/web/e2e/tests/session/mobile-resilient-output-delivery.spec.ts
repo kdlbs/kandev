@@ -110,3 +110,64 @@ test("a phone surfaces a real writer failure with reachable recovery controls", 
     .toBe(1);
   await assertNoDocumentHorizontalOverflow(testPage, "mobile delivery recovery after reload");
 });
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-005.2
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-005.3
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.5
+test("a phone settles a cancellation to idle and accepts one distinct next instruction", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(180_000);
+  const task = await createStartedTask(
+    apiClient,
+    seedData,
+    "Mobile settled cancellation convergence",
+  );
+  await testPage.goto(`/t/${task.id}`);
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
+
+  const acceptedMarker = "mobile-settled-cancellation-marker";
+  await session.sendMessageViaButton(`/e2e:cancel-hold ${acceptedMarker}`);
+  await expect(session.chat.getByText(acceptedMarker, { exact: false })).toBeVisible({
+    timeout: 60_000,
+  });
+  const sessionId = task.session_id!;
+  const sessionBefore = await apiClient.getTaskSession(sessionId);
+
+  await session.cancelAgentButton().tap();
+  await expect
+    .poll(
+      async () =>
+        (await apiClient.listTaskSessions(task.id)).sessions.find((row) => row.id === sessionId)
+          ?.state,
+      { timeout: 30_000 },
+    )
+    .toBe("WAITING_FOR_INPUT");
+  await session.waitForDirectInput(90_000);
+  const sessionAfter = await apiClient.getTaskSession(sessionId);
+  expect(sessionAfter.session.agent_execution_id).toBe(sessionBefore.session.agent_execution_id);
+  expect(sessionAfter.session.downstream_acp_session_id).toBe(
+    sessionBefore.session.downstream_acp_session_id,
+  );
+
+  const userPromptCount = async (prompt: string) => {
+    const { messages } = await apiClient.listSessionMessages(sessionId);
+    return messages.filter(
+      (message) => message.author_type === "user" && message.content?.includes(prompt),
+    ).length;
+  };
+  expect(await userPromptCount("/e2e:cancel-hold")).toBe(1);
+  await expect(testPage.getByTestId("session-recovery-card")).toHaveCount(0);
+  await expect(testPage.getByTestId("failed-session-banner")).toHaveCount(0);
+
+  await session.sendMessageViaButton("/e2e:simple-message");
+  await expect(
+    session.chat.getByText("This is a simple mock response for e2e testing.", { exact: false }),
+  ).toBeVisible({ timeout: 60_000 });
+  expect(await userPromptCount("/e2e:simple-message")).toBe(1);
+  expect(await userPromptCount(acceptedMarker)).toBe(1);
+  await assertNoDocumentHorizontalOverflow(testPage, "mobile settled cancellation convergence");
+});

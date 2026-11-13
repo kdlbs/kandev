@@ -258,6 +258,7 @@ function pendingLabel(action: RecoveryActionKind, t: ReturnType<typeof useTransl
   if (action === "restore") return t("task:restoring");
   if (action === "fresh_start") return t("task:starting");
   if (action === "retry_connection") return t("task:retryingConnection");
+  if (action === "continue_from_history") return t("task:continuingFromHistory");
   if (action === "runtime_retry") return t("task:retrying");
   return t("task:resuming");
 }

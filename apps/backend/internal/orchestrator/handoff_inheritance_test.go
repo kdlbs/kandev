@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -125,6 +126,7 @@ func TestPrepareSessionForStart_PropagatesInheritedEnvironment(t *testing.T) {
 
 func TestPrepareSessionForStart_InheritedWorkspaceMissingCompensatesSession(t *testing.T) {
 	repo := setupTestRepo(t)
+	seedExecutorRow(t, repo, "exec-1", models.ExecutorTypeLocal)
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{repoForExecutionLookup: repo})
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -413,7 +415,10 @@ func TestInheritFromSharedGroupEnvironment_BindsCanonicalEnvironment(t *testing.
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-shared", Name: "WS", CreatedAt: now, UpdatedAt: now})
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-shared", WorkspaceID: "ws-shared", Name: "WF", CreatedAt: now, UpdatedAt: now})
 	_ = repo.CreateTask(ctx, &models.Task{ID: "member", WorkspaceID: "ws-shared", WorkflowID: "wf-shared", Title: "member", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now})
-	_ = repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{ID: "env-group", TaskID: "member", Status: models.TaskEnvironmentStatusReady})
+	_ = repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-group", TaskID: "member", ExecutorType: string(models.ExecutorTypeLocalDocker),
+		Status: models.TaskEnvironmentStatusReady,
+	})
 	_ = repo.CreateTaskSession(ctx, &models.TaskSession{ID: "member-session", TaskID: "member", State: models.TaskSessionStateCreated, StartedAt: now, UpdatedAt: now})
 
 	if err := svc.inheritFromSharedGroup(ctx, &v1.Task{ID: "member"}, "member-session"); err != nil {
@@ -422,6 +427,82 @@ func TestInheritFromSharedGroupEnvironment_BindsCanonicalEnvironment(t *testing.
 	got, err := repo.GetTaskSession(ctx, "member-session")
 	if err != nil || got.TaskEnvironmentID != "env-group" {
 		t.Fatalf("shared environment binding = %+v, %v", got, err)
+	}
+}
+
+func TestInheritedWorkspacePreparationKeepsDetachedChildCanonical(t *testing.T) {
+	for _, mode := range []string{models.WorkspaceModeInheritParent, models.WorkspaceModeSharedGroup} {
+		t.Run(mode, func(t *testing.T) {
+			repo := setupTestRepo(t)
+			svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+			svc.executor = withTestCapabilities(executor.NewExecutor(&mockAgentManager{}, repo, testLogger(), executor.ExecutorConfig{}))
+			ctx := context.Background()
+			now := time.Now().UTC()
+			if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-detached", Name: "Workspace", CreatedAt: now, UpdatedAt: now}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-detached", WorkspaceID: "ws-detached", Name: "Workflow", CreatedAt: now, UpdatedAt: now}); err != nil {
+				t.Fatal(err)
+			}
+			parent := &models.Task{ID: "parent-detached", WorkspaceID: "ws-detached", WorkflowID: "wf-detached", Title: "Parent", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now}
+			child := &models.Task{ID: "child-detached", ParentID: parent.ID, WorkspaceID: "ws-detached", WorkflowID: "wf-detached", Title: "Child", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now}
+			for _, task := range []*models.Task{parent, child} {
+				if err := repo.CreateTask(ctx, task); err != nil {
+					t.Fatalf("create task %s: %v", task.ID, err)
+				}
+			}
+			if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+				ID: "env-parent-detached", TaskID: parent.ID, ExecutorType: string(models.ExecutorTypeLocal),
+				Status: models.TaskEnvironmentStatusReady, WorkspacePath: "/parent/workspace",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+				ID: "env-child-detached", TaskID: child.ID, ExecutorType: string(models.ExecutorTypeLocalDocker),
+				Status: models.TaskEnvironmentStatusReady, WorkspacePath: "/child/workspace",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if mode == models.WorkspaceModeInheritParent {
+				if err := repo.ArchiveTask(ctx, parent.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := repo.CreateExecutor(ctx, &models.Executor{ID: "exec-child-detached", Type: models.ExecutorTypeLocalDocker, Status: models.ExecutorStatusActive}); err != nil {
+				t.Fatal(err)
+			}
+			session := &models.TaskSession{
+				ID: "session-child-detached", TaskID: child.ID, State: models.TaskSessionStateCreated,
+				TaskEnvironmentID: "env-parent-detached", WorkspacePath: "/parent/workspace", StartedAt: now, UpdatedAt: now,
+			}
+			if err := repo.CreateTaskSession(ctx, session); err != nil {
+				t.Fatal(err)
+			}
+			task := &v1.Task{
+				ID: child.ID, ParentID: parent.ID, WorkspaceID: child.WorkspaceID,
+				Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": mode, "group_id": "missing-group"}},
+			}
+			if err := svc.admitInheritedEnvironment(ctx, task, "exec-child-detached", ""); err != nil {
+				t.Fatalf("admit existing child environment after inherited source became unavailable: %v", err)
+			}
+			var err error
+			switch mode {
+			case models.WorkspaceModeInheritParent:
+				err = svc.inheritFromParentEnvironment(ctx, task, session.ID)
+			case models.WorkspaceModeSharedGroup:
+				err = svc.inheritFromSharedGroup(ctx, task, session.ID)
+			}
+			if err != nil {
+				t.Fatalf("bind detached child canonical environment: %v", err)
+			}
+			bound, err := repo.GetTaskSession(ctx, session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bound.TaskEnvironmentID != "env-child-detached" || bound.WorkspacePath != "/child/workspace" {
+				t.Fatalf("later child session binding = env %q path %q, want child canonical environment", bound.TaskEnvironmentID, bound.WorkspacePath)
+			}
+		})
 	}
 }
 

@@ -297,7 +297,7 @@ func (r *PluginRemoteExecutor) newRecoveredPluginExecutorInstance(ctx context.Co
 		RuntimeName: agentruntime.RuntimePluginRemote, Client: client, WorkspacePath: info.WorkspacePath,
 		Metadata: metadata, AuthToken: record.TransientAuthToken, AgentProfileID: record.ExecutionProfileID,
 		Env: clonePluginRecoveredEnvironment(info.Env), WorkspaceSourceRoots: append([]string(nil), info.WorkspaceSourceRoots...),
-		ProviderSessionID: info.ProviderSessionID,
+		ProviderSessionID: info.ProviderSessionID, CopilotNativeSessionEvents: info.CopilotNativeSessionEvents,
 	}, nil
 }
 

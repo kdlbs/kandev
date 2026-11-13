@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-08-19
-updated: 2026-10-12
+updated: 2026-11-08
 owners:
   - cfl12
 ---
@@ -145,11 +145,16 @@ Terms used below:
   environment of the same task or shared workspace group with no owner and no
   physical evidence, the system shall elect that session as the new owner and run
   full workspace preparation.
-- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.5:** A failed environment with physical
-  evidence shall not be re-elected or overwritten. A task-local binding or terminal
-  worktree resume may retain it and reserve a replacement under AC-004.11 below.
-  An inherited owner, live consumer, active materializer, or recovery claim shall
-  keep the existing refusal and reset guidance.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.5:** A `failed` environment with
+  physical evidence, or one inherited from another task through `inherit_parent`
+  or `shared_group`, shall not be re-elected or overwritten. A task-local binding
+  or terminal worktree resume may retain it and reserve a replacement under
+  AC-004.11 below. A new launch that satisfies
+  `AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.5` may instead claim a
+  separate child-owned environment for its different non-Kubernetes executor.
+  An inherited owner, live consumer, active materializer, or recovery claim, and
+  all other starts, shall keep failing with `workspace_reuse_unsafe` and the
+  existing reset guidance.
 - **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.6:** When several starts re-elect the
   same environment at the same time, exactly one shall become the owner. A launch
   that loses the race shall wait for the new owner like any `creating` sibling or

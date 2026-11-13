@@ -104,6 +104,8 @@ The profile picker shows only profiles compatible with the task executor. If non
 
 Prompts support pasted, dropped, or selected attachments. A prompt can contain at most 10 files, with a limit of 10 MiB per file and 20 MiB in total. The prompt itself is required.
 
+When you start a prepared session with an explicit brief, Kandev keeps that brief in the first stored message and in the agent input. A destination step prompt without `{{task_prompt}}` runs before the brief instead of replacing it; a step that uses the placeholder inserts the brief where the placeholder sits. The brief is instruction text, not a permission mode. Use the profile, executor, and workflow controls to restrict what the agent can change.
+
 ## Manage session state
 
 Right-click an agent tab on desktop to manage it. On phones, open **Sessions**, then select the session row's **Session actions** button. Available actions depend on the session's current state.
@@ -122,6 +124,13 @@ Right-click an agent tab on desktop to manage it. On phones, open **Sessions**, 
 
 Restart is available while a session is starting, running, or waiting for input. Stopping the primary session can make another active session primary, as with a normal Stop. If Stop fails, Kandev does not attempt Resume. If Resume fails, the conversation remains available for recovery. A lost connection between the two actions can leave the session stopped.
 
+If Restart's Resume returns a history-continuation action, the selected
+session's recovery card keeps that action available after the menu closes.
+Select **Continue from saved history** to start a new native conversation
+from Kandev history. The interrupted prompt's outcome remains unknown, and
+Restart never starts this continuation automatically. A failed continuation
+keeps the action available for the same recovery incident.
+
 Restart keeps the selected conversation open throughout the attempt. If you select another conversation
 while restart is pending, Kandev keeps your later selection.
 
@@ -139,15 +148,17 @@ has settled.
 
 When a turn, startup, or resume fails:
 
-- When an ACP agent returns a prompt error in an interactive task session with a concrete agent profile, Kandev records a failed turn and keeps the same process, connection, and native conversation available when it can confirm that runtime is still usable. This covers generic internal, database, authentication, quota, and invalid-model errors, not only classified capacity, overload, or rate-limit failures. Kandev does not replay the failed prompt. Automatic retries still apply only to existing supported classifications and only when the prompt produced no assistant output or tool activity; other failures require your next message. You can send another message or choose a supported model in the same session, and retry feedback reports only attempts that started. Office and automation tasks, dynamic routes, utility sessions, and passthrough sessions keep their existing failure handling.
+- When an ACP agent returns a prompt error in an interactive task session with a concrete agent profile, Kandev records a failed turn and keeps the same process, connection, and native conversation available when it can confirm that runtime is still usable. This covers generic internal, database, authentication, quota, and invalid-model errors, not only classified capacity, overload, or rate-limit failures. Kandev does not replay the failed prompt. Automatic retries still apply only to existing supported classifications. For model capacity, confirmed tool results do not stop automatic continuation, but a pending permission, a pending or uncertain tool outcome, or a non-command tool failure does. A confirmed nonzero terminal command exit on a supported Codex conversation stays failed in history and does not stop continuation by itself. Other failures require your next message. You can send another message or choose a supported model in the same session, and retry feedback reports only attempts that started. Office and automation tasks, dynamic routes, utility sessions, and passthrough sessions keep their existing failure handling.
 - When startup or resume fails, or Kandev detects an unusable runtime, it adds one recovery entry to the selected session's chat. Select **Resume** to restore the saved conversation, or expand **Technical details** to inspect the failure.
-- If the first task launch fails before the provider accepts the submitted prompt, select **Start fresh session** to retry that prompt in the same task session. Kandev restores the original text and available file-backed attachments after the provider is ready, and records one user message. It does not replay an accepted prompt or earlier conversation. If an original attachment is unavailable, Kandev leaves the failed session and warning in place; reattach the file in Chat before you continue.
+- After a backend restart, Kandev restores eligible interrupted sessions in the background when it can verify the saved workspace owner, native conversation, and delivery journal. The transcript gets one informational message and the normal composer returns. The interrupted prompt keeps its unknown outcome and is never sent again. If identity or delivery proof is missing, or another recovery block remains open, use the recovery controls shown for that session.
+- When the agent process exits before initialization completes, the recovery card reports the observed exit status. If mise refused the workspace configuration, the card says **Agent startup blocked by mise** and asks you to review the configuration on the execution host. Kandev never trusts a repository or runs `mise trust` for you. If you trust the configuration, run `mise trust` on that host before retrying. Other ordinary exits show the status without guessing a toolchain cause.
+- If the first task launch fails before the provider accepts the submitted prompt, select **Start fresh session** to retry that prompt in the same task session. Kandev restores the original text and available file-backed attachments after the provider is ready, and records one user message. The retry also receives the task's current workflow and step instructions. It does not replay an accepted prompt or earlier conversation. If an original attachment is unavailable, Kandev leaves the failed session and warning in place; reattach the file in Chat before you continue.
 - When **Start fresh session** replaces an existing conversation, it opens a new native conversation and delivery stream. Unresolved work from the previous conversation stays in history and is not sent to the provider again.
 - **Restore read-only workspace** does not send the pending prompt or dismiss its startup warning. The warning is resolved only after the provider confirms readiness for the matching recovery attempt.
 - For failures that require manual startup or runtime recovery, the current unresolved failure replaces the blocked message composer with one recovery card. Automatic resume and workspace-restore failures appear in that card, with separate causes in Technical details, rather than a second session banner. Every error entry keeps its summary and expandable technical details in the chat history, even while the recovery card is visible. Recovery buttons appear only on the current card.
 - In Kanban preview, selecting Plan keeps the recovery card below the Plan content, in the composer area.
 - Repeated delivery of the same failure does not add another entry.
-- A failed interactive turn also adds a durable error badge to the task row. Focusing, reading, or opening the task does not clear it. Select **Dismiss turn error** in the error alert or the task menu, or send a new prompt after the error appears, to acknowledge that exact failure. A newer failure restores the badge. A runtime recovery error shown at the same time keeps its own separate control.
+- A failed interactive turn also adds a durable error badge to the task row. Focusing, reading, or opening the task does not clear it. For the current retained-turn error, when ordinary manual input is available, select **Dismiss and continue** in the error alert to send one visible `continue` message to that same conversation and acknowledge the observed failure after acceptance. The action keeps your composer draft and attachments and is unavailable while another turn or automatic recovery owns the session. Select **Dismiss turn error** to dismiss without sending, use the task menu dismissal, or send a new prompt after the error appears. A newer failure restores the badge. A runtime recovery error shown at the same time keeps its own separate control.
 - History loading and new messages keep the normal chat scroll behavior.
 
 For eligible failed Auggie ACP task sessions, the recovery card explains that
@@ -264,6 +275,14 @@ conversation is restored. This also applies when shutdown interrupted final
 bookkeeping after the result was saved. The old result remains unchanged, and
 no previous prompt is sent again.
 
+Some older sessions saved a completion label before the matching terminal event
+was retained. Kandev can still recover the saved conversation when it verifies
+that the original process stopped and every delivery record stays consistent.
+Resume keeps the historical label and payload, clears only the matching recovery
+notice, and does not resend the instruction. A live owner, a later terminal, or
+an unverified record keeps the session blocked with the cause. Do not edit the
+database to bypass this check.
+
 A resumed runtime checks delivery recovery before enabling new work. If the saved
 evidence needs explicit recovery, the Resume controls appear before you send a
 new instruction. An existing draft is retained while recovery runs; send it once
@@ -349,11 +368,27 @@ continues while the warning is shown. Open **Details** for measurements, or
 **Storage** for a local session. A remote warning names the executor and does
 not link to local cleanup.
 
+Capacity and delivery pressure keep separate observation times. A fresh disk
+measurement does not make an old delivery failure current. If no delivery
+status arrives for 90 seconds, the headline changes to **Last reported** and
+**Details** shows the pressure and capacity observation times separately. A
+healthy delivery status clears the blocked-output headline without another
+prompt. A disk warning can remain after that headline clears. An older backend
+that does not report pressure freshness continues to show **Last reported**
+instead of treating capacity time as pressure time.
+
 A session that stops because storage is full shows **Session interrupted by low
 disk space**. Free space on the executor filesystem, then use **Resume
 session**. Do not delete delivery data or start a fresh conversation to fix
 physical capacity. A journal limit, delivery limit, or oversized output uses its
 own cause and guidance, and technical details stay collapsed.
+
+After a cancelled turn settles, Kandev can also correct a stale running
+indication from the saved terminal record. The conversation, the interruption
+history, and the saved terminal identity remain unchanged. The correction does
+not resend the cancelled instruction or start a replacement turn. An
+independent recovery block, a live successor prompt, or a foreground tool keeps
+the session state unchanged until that work settles.
 
 These controls do not clean up storage automatically. Cleanup policy remains in
 **Settings > System > Storage**.
@@ -542,6 +577,8 @@ If the final attempt fails and no matches were collected, it shows a retryable
 failure instead. Matches already found remain available during retries.
 
 Open **Settings > Preferences > Keyboard Shortcuts** to customize these bindings.
+In **Chat Input**, enable **Escape pauses the agent** to pause a running agent
+by pressing Escape while the chat input has focus. This option is off by default.
 Use **Search shortcuts** to filter core and integration actions by name. Clear
 the search to restore the full list; unsaved shortcut changes remain in the draft.
 
@@ -572,6 +609,8 @@ Each desktop split's **+** menu lists a linked review only while that exact revi
 
 All panels for a task point at the same task environment. In a multi-repository task, check the repository label before editing, committing, or reviewing. A preview also requires the application to listen on a reachable interface and expose a forwarded port.
 
+When an agent creates a linked Git worktree inside the task workspace, Kandev attaches it as a repository root within about 30 seconds, or immediately when the agent reports it with `add_branch_to_task_kandev` and `worktree_path`. Each root gets its own Changes group and Files folder with the existing stage, commit, push, and pull-request actions. Right-click a root group or folder, or long-press it on touch layouts, to open the root menu: open in the editor, open a terminal at that root, jump between Files and Changes, copy the full path, relative path, or branch, push, create or open a pull request, and remove the root from the task. Remove from task is available for every non-primary root. It keeps the folder, branch, and pull requests, and passive detection does not add the same path again until the agent reports it.
+
 When the repository defines a dev script, the desktop header shows a dev server control. Starting it runs the script in the task workspace, opens the browser preview, and opens a read-only **Dev Server** panel with the script's output. While the script runs, the same control becomes **Stop dev server preview** and terminates the process and its children. Kandev also stops a running dev script when its task is archived or deleted, so a preview cannot outlive the task that started it. A script that detaches itself from Kandev, for example by daemonizing or calling `setsid`, escapes that cleanup and must be stopped by hand.
 
 Structured shell-command activity keeps the command, working directory, status, and output size in the chat row. Expand **Output** to fetch the transcript; Kandev continues refreshing an open, running command and stops when it reaches a terminal state. The disclosure separates standard output and errors, reports truncation and the exit code when known, and offers **Retry** when the transcript request fails. Historical command transcripts are loaded only when opened, which keeps long conversations responsive without discarding the stored output.
@@ -601,9 +640,20 @@ upgrade and recovery limits.
 The ring in the chat-input toolbar shows the active session's context-window use
 when the agent reports a trustworthy window size. Open it to see used and total
 tokens; it focuses on the active session's context window. The hover also shows
-a session compaction count inferred from observed drops in used tokens. ACP does
-not report compaction events, so missing samples or provider resets can make the
-count approximate. For account-wide
+a session compaction count inferred from drops in used tokens. Copilot ACP
+sessions, which can mix parent and subagent usage, are excluded from that
+inference. On a supported Copilot runtime, new increments instead use successful
+parent compaction events with an explicit applied outcome. Child and subagent
+events do not add to the parent total. Older runtimes and retained agentctl
+processes without this collection show **Unavailable** and keep their previous
+totals. A zero count on an unavailable runtime does not prove that no compaction
+occurred. If evidence was omitted or lost, the row shows **Partial** for the rest
+of the session. Later events do not repair the missing history. Historical
+estimated increments remain in the total, and Kandev does not relabel them as
+confirmed native events or backfill old compactions. Missing samples or provider
+resets can make eligible inferred counts approximate. Existing sessions keep
+their previously inferred totals because Kandev cannot attribute old increments.
+For account-wide
 provider usage, install the [Provider Usage
 plugin](https://github.com/kdlbs/kandev-plugin-provider-usage), which adds a
 provider pill to the session top bar and can add a compact display to the global

@@ -139,7 +139,7 @@ func (d *dynamicTaskDownstream) Launch(
 	defer releaseDispatchCommit()
 	execution, err := d.service.executor.LaunchPreparedSession(dispatchCtx, d.task, d.sessionID, options)
 	if err != nil {
-		return dynamicruntime.DownstreamExecution{}, classifyDynamicLaunchFailure(err, launch.ExecutionProfileID)
+		return dynamicruntime.DownstreamExecution{}, classifyDynamicLaunchFailure(err, launch.ExecutionProfileID, d.service.config.ProviderKeywordContext)
 	}
 	if startupEvidence != nil {
 		d.service.bindDynamicAttemptExecution(d.sessionID, execution.AgentExecutionID, startupEvidence)
@@ -197,6 +197,11 @@ func (s *Service) persistDynamicLaunchDecision(
 	sessionID string,
 	decision dynamicruntime.RouteDecision,
 ) error {
+	// Hold the settings lock so a mode or model event from the previous
+	// candidate cannot land between this read and the candidate switch write.
+	settingsLock := s.sessionSettingsSnapshotLock(sessionID)
+	settingsLock.Lock()
+	defer settingsLock.Unlock()
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return err
@@ -207,6 +212,7 @@ func (s *Service) persistDynamicLaunchDecision(
 		return nil
 	}
 	previousExecutionProfileID := session.ExecutionProfileID
+	expectedState, expectedUpdatedAt := session.State, session.UpdatedAt
 	session.ExecutionProfileID = decision.ExecutionProfileID
 	session.RouteGeneration = decision.Generation
 	session.RouteState = decision.Status
@@ -224,6 +230,16 @@ func (s *Service) persistDynamicLaunchDecision(
 	}
 	if previousExecutionProfileID != decision.ExecutionProfileID {
 		session.DownstreamACPSessionID = ""
+	}
+	if DynamicCandidateRuntimeResetRequired(previousExecutionProfileID, decision.ExecutionProfileID) {
+		changed, err := s.persistDynamicCandidateRuntimeReset(ctx, session, expectedState, expectedUpdatedAt)
+		if err != nil {
+			return err
+		}
+		if !changed {
+			return dynamicruntime.ErrStaleGeneration
+		}
+		return nil
 	}
 	return s.repo.UpdateTaskSession(ctx, session)
 }
@@ -789,8 +805,12 @@ func (s *Service) dynamicLaunchDecision(
 		session.RouteGeneration == resolved.Generation {
 		return resolved.Decision, true, nil
 	}
+	previousExecutionProfileID := session.ExecutionProfileID
+	expectedState, expectedUpdatedAt := session.State, session.UpdatedAt
 	applyResolvedExecution(session, resolved)
-	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+	if err := s.persistDynamicRouteProjection(
+		ctx, session, previousExecutionProfileID, expectedState, expectedUpdatedAt,
+	); err != nil {
 		return dynamicruntime.RouteDecision{}, false, fmt.Errorf("persist dynamic route attribution: %w", err)
 	}
 	return resolved.Decision, true, nil
@@ -895,6 +915,8 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 		s.recordIneligibleFailureCircuit(ctx, session, classified)
 		return dynamicFailureRouteResult{}
 	}
+	data.ExecutionProfileID = session.ExecutionProfileID
+	classified = s.refineKeywordFailure(ctx, data, classified)
 	conductor := s.profileExecutionResolver.NewConductor(nil)
 	task, err := s.scheduler.GetTask(ctx, data.TaskID)
 	if err != nil {
@@ -1249,7 +1271,13 @@ func (s *Service) runDetachedDynamicSuccessorLaunchWithClaim(
 	}
 	ctx = withUnclassifiedFallbackLaunchClaim(ctx, claim)
 	ctx = withCancelInFlightGuardHeldForSession(ctx, data.SessionID)
-	switch s.relaunchDynamicTaskAfterFailureOutcome(ctx, data, executionProfileID, launchOriginAutomatic) {
+	// Resume-attempt contexts clear general guard ownership, but this worker
+	// keeps the session guard until its synchronous replacement claim completes.
+	ctx = withExecutionReplacementStopOwnerGuardHeldForSession(ctx, data.SessionID)
+	outcome, launchErr := s.relaunchDynamicTaskAfterFailureOutcomeWithBinding(
+		ctx, data, executionProfileID, launchOriginAutomatic, ceilingEntryBindingFromContext(ctx),
+	)
+	switch outcome {
 	case dynamicRelaunchSucceeded:
 		return
 	case dynamicRelaunchDeferred:
@@ -1275,7 +1303,8 @@ func (s *Service) runDetachedDynamicSuccessorLaunchWithClaim(
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
 		zap.String("agent_execution_id", data.AgentExecutionID),
-		zap.String("execution_profile_id", executionProfileID))
+		zap.String("execution_profile_id", executionProfileID),
+		zap.Error(launchErr))
 	s.settleDetachedDynamicSuccessorFailure(context.WithoutCancel(ctx), data, executionProfileID)
 }
 
@@ -1385,7 +1414,8 @@ func (s *Service) stopDynamicSuccessorWorkers() {
 // the backend route-action handler has claimed the successor generation. It
 // owns the predecessor shutdown, continuation persistence, successor launch,
 // and final launch error surface so the UI never has to issue a second launch
-// request.
+// request. An unresolved recovery fence retains the selected generation for
+// explicit session recovery instead of replaying the predecessor prompt.
 func (s *Service) LaunchDynamicRouteAction(ctx context.Context, sessionID string) error {
 	return s.launchDynamicRouteAction(ctx, sessionID, launchOriginManual)
 }
@@ -1420,6 +1450,18 @@ func (s *Service) launchDynamicRouteAction(ctx context.Context, sessionID string
 			s.markDynamicRouteActionRequired(ctx, sessionID, session.RouteGeneration, string(origin)+" dynamic route action failed")
 		}
 	}()
+	if origin == launchOriginManual && isPendingRecoveryRouteClaim(session) {
+		block, err := s.GetOpenSessionRecoveryBlock(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		if block != nil {
+			// Selection is accepted, but the fence still owns prompt admission.
+			// Keep the claim for explicit recovery without replaying old work.
+			succeeded = true
+			return nil
+		}
+	}
 	task, err := s.scheduler.GetTask(ctx, session.TaskID)
 	if err != nil {
 		return err

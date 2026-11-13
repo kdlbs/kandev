@@ -34,6 +34,7 @@ The task carries the outcome through the workflow. The repository and session pr
 **Organize and review work**
 
 - [Task dependencies](#task-dependencies)
+- [See the dependency graph](#see-the-dependency-graph)
 - [Find and organize tasks](#find-and-organize-tasks)
 - [Use the task plan](#use-the-task-plan)
 - [Arrange task panels](#arrange-task-panels)
@@ -750,6 +751,11 @@ session only after it verifies the saved owner and native conversation. If the
 owner, conversation, or delivery evidence is missing or changed, that session
 stays blocked with its available recovery controls. See [Manage session state](sessions-and-review.md#manage-session-state) for those controls and recovery details.
 
+After a verified restore, the same conversation shows one informational
+interruption message and the normal composer. Kandev does not resend the
+interrupted prompt. Existing failed sessions that meet the same identity and
+delivery checks are included in the first startup after an upgrade.
+
 Restart recovery also checks automatic workflow starts that were accepted but
 never delivered their step prompt. It resumes that entry through normal capacity
 and dependency admission. A hold step, deferred start, workflow queue, or Office
@@ -813,9 +819,13 @@ conversation.
 Retention is not a retry. Kandev does not replay the failed prompt and does not
 start automatic recovery for an error class that has no existing policy. The
 task row keeps an error badge until you select **Dismiss turn error**, use the
-task menu dismissal, or send a new prompt after the error appears. A real
-process exit, transport loss, or recovery failure still uses the normal runtime
-recovery controls.
+task menu dismissal, send a new prompt after the error appears, or select
+**Dismiss and continue**. **Dismiss and continue** sends one visible `continue`
+message to the same conversation, then acknowledges the error after the message
+is accepted. It keeps your composer draft and attachments, and it is unavailable
+while another turn or automatic recovery owns the session.
+A real process exit, transport loss, or recovery failure still uses the normal
+runtime recovery controls.
 
 ### Model capacity
 
@@ -826,9 +836,12 @@ budget. When OpenCode ends those retries with a capacity refusal, Kandev keeps
 the same runtime and continues the unfinished turn there.
 
 Kandev retries a model-capacity error when the runtime supports live
-continuation and at least one tool has a confirmed result. Kandev keeps
-confirmed actions in the conversation. It asks the agent to continue without
-repeating those actions. This does not guarantee exactly-once effects.
+continuation and at least one tool has a confirmed result. On a supported Codex
+conversation, a command that ended with a confirmed nonzero terminal exit also
+counts: its real failed result stays in the conversation, but it no longer
+blocks recovery by itself. Kandev keeps confirmed actions in the conversation.
+It asks the agent to continue without repeating those actions. This does not
+guarantee exactly-once effects.
 
 Kandev makes up to 11 additional attempts within 30 minutes. Waits increase
 from 5 seconds to a maximum of 5 minutes. A short provider wait hint can raise
@@ -839,10 +852,12 @@ restart also stops automatic recovery. It does not restore the retry schedule.
 The deadline does not stop a turn that is already running.
 
 Kandev leaves a model-capacity error for you to handle when a tool or permission
-is pending, an outcome is uncertain, background work is unaccounted for, the
-provider does not support live continuation, or the runtime is unavailable.
-The composer stays available for a new message. These limits apply to capacity
-recovery. Connection-loss recovery uses the normal short retry policy.
+is pending, a tool outcome is uncertain, a non-command tool failed, a command
+failed without confirmed terminal evidence, background work is unaccounted for,
+the provider does not support live continuation, or the runtime is unavailable.
+Review those tool results before you choose a manual next step. The composer
+stays available for a new message. These limits apply to capacity recovery.
+Connection-loss recovery uses the normal short retry policy.
 
 ## Answer clarification questions
 
@@ -881,10 +896,9 @@ you can see which link to drop.
 ### Declare dependencies
 
 Dependencies are declared in the **New Task** dialog under **Depends on**, or
-by an agent over MCP. There is deliberately no editor in the open task: a
-dependency records how the work was planned, so the surfaces that display it
-stay read-only. To change one after the fact, use the MCP tools or delete and
-recreate the task.
+by an agent over MCP. To change them later, open the task's **Edit** dialog
+and update its dependencies, or use the MCP tools. The dependency chip and the
+task graph only display dependencies; they do not edit them.
 
 ### What blocked means
 
@@ -935,6 +949,60 @@ unfinished work stays pending. Archiving does not remove the link.
 that was waiting only on it becomes unblocked. That dependent is not started:
 deletion is not success.
 
+### See the dependency graph
+
+The task graph draws tasks as cards and dependencies as arrows, so you can see
+what runs first, what waits, and what can run in parallel. It is read-only:
+change links in the task's **Edit** dialog or over MCP.
+
+There are two graphs:
+
+- **Task graph tab.** Inside a task, select the hierarchy icon at the right of
+  the status row above the chat box, after token stats and Share, or
+  **View graph** in the dependency chip. The icon appears only when the task
+  has a parent, subtasks, dependency links, or related tasks. The tab opens
+  beside the chat and follows the task you are viewing.
+- **Board Graph view.** On Home, select **Graph** in the view switcher, next
+  to **Pipeline**. Each workflow lane shows the tasks the board currently
+  shows, after filters and search, with subtasks framed by their parent.
+
+To jump to one task in the graph, right-click it in the sidebar or on a Kanban
+card and choose **Show in graph**. The board Graph view opens with that task
+selected and in view.
+
+Reading the graph:
+
+- Each card shows a **step** number. Step 1 waits on nothing shown in the
+  graph; every other task sits one step after its last predecessor.
+- Arrows run from a predecessor to the task that waits for it. A solid grey
+  line is done, a dashed line is waiting, and a red line means the predecessor
+  failed.
+- Turn on **Parallel steps** to lay tasks out by step. Each step gets a band
+  that says how many of its tasks can run in parallel.
+- Hover or focus a card to highlight everything it waits on and everything
+  waiting on it.
+
+In the task graph tab, **Subtasks** shows the task's subtasks (or its parent's,
+when the task is itself a subtask), and **Chain** shows everything the task
+waits on and everything waiting on it, across workflows. Select a card to open
+that task. On the board, a click selects a card and **Open task** goes into
+it; double-click opens it directly.
+
+<details>
+<summary>Limits and phones</summary>
+
+- The task graph tab shows at most 200 tasks and says so when it is cut short.
+- On the board, each workflow lane is its own graph. A dependency on a task in
+  another workflow is not drawn there, so the step and parallel counts only
+  reflect links inside the lane. Use the task graph's **Chain** mode to see
+  links across workflows.
+- On a phone, the graph icon and **Show in graph** open a full-screen sheet.
+  Pan with one finger, pinch to zoom, tap a card to open it, and long-press
+  to highlight its chain. The board Graph view, like Pipeline, is shown as
+  Kanban on a phone.
+
+</details>
+
 ## Find and organize tasks
 
 To include tasks without a repository, open the sidebar filters and select
@@ -968,12 +1036,13 @@ workspace lookup fails, select **Retry**. If the workspace no longer exists or
 is unavailable, select **Home** to return to your task overview.
 
 On desktop and tablet, the header switches between **Kanban**, **Pipeline**,
-**Threads**, and **List**. Kanban and Pipeline show the same workflow steps in
-different layouts. Threads shows agent conversations side by side. Kandev
+**Graph**, **Threads**, and **List**. Kanban and Pipeline show the same workflow
+steps in different layouts. Graph shows the board's tasks as a dependency graph;
+see [See the dependency graph](#see-the-dependency-graph). Threads shows agent conversations side by side. Kandev
 remembers the last selected view in that browser on the current device. Phones
 offer **Kanban**, **Threads**, and **List** under **View options**, with a native
-Threads deck showing one conversation at a time. A saved desktop Pipeline
-preference is kept but shown as Kanban on the phone.
+Threads deck showing one conversation at a time. A saved desktop Pipeline or
+Graph preference is kept but shown as Kanban on the phone.
 
 Kanban and List share a compact phone header showing the workspace and current
 mode. Tap the **Kanban**, **Threads**, or **List** title dropdown to open view options and change display settings, or tap the

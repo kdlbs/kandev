@@ -58,24 +58,44 @@ function transportLabel(transport: string, t: (key: string) => string): string {
   return t("settings:mcpTransportStreamable");
 }
 
+/**
+ * Count references from every selection owner, including automations, for deletion confirmation.
+ */
 function selectionImpactTotal(impact?: MCPSelectionImpact): number {
   if (!impact) return 0;
-  return impact.profile + impact.repository + impact.task + impact.task_session;
+  return (
+    impact.profile +
+    impact.repository +
+    impact.task +
+    impact.task_session +
+    (impact.automation ?? 0)
+  );
 }
 
-function SelectionImpact({ impact }: { impact?: MCPSelectionImpact }) {
+/**
+ * Display all referencing owner counts before a server definition is deleted.
+ */
+function SelectionImpact({
+  impact = { profile: 0, repository: 0, task: 0, task_session: 0 },
+}: {
+  impact?: MCPSelectionImpact;
+}) {
   const { t } = useTranslation();
-  const total = selectionImpactTotal(impact);
+  const automation = impact.automation ?? 0;
+  const total = selectionImpactTotal(impact) - automation;
   return (
     <p className="text-xs text-muted-foreground" data-testid="mcp-selection-impact">
       {total > 0
         ? t("settings:mcpSelectionImpact", {
-            profile: t("settings:mcpProfileUsage", { count: impact?.profile ?? 0 }),
-            repository: t("settings:mcpRepositoryUsage", { count: impact?.repository ?? 0 }),
-            task: t("settings:mcpTaskUsage", { count: impact?.task ?? 0 }),
-            taskSession: t("settings:mcpSessionUsage", { count: impact?.task_session ?? 0 }),
+            profile: t("settings:mcpProfileUsage", { count: impact.profile }),
+            repository: t("settings:mcpRepositoryUsage", { count: impact.repository }),
+            task: t("settings:mcpTaskUsage", { count: impact.task }),
+            taskSession: t("settings:mcpSessionUsage", { count: impact.task_session }),
           })
         : t("settings:mcpSelectionImpactNone")}
+      {automation > 0 ? (
+        <span className="block">{t("settings:mcpAutomationUsage", { count: automation })}</span>
+      ) : null}
     </p>
   );
 }
@@ -319,6 +339,10 @@ function MCPViewTabs({
   );
 }
 
+/**
+ * Require deletion confirmation and explain how stored automation references affect later process
+ * starts.
+ */
 function DeleteMCPServerDialog({
   target,
   deleting,
@@ -338,6 +362,11 @@ function DeleteMCPServerDialog({
           <DialogTitle>{t("settings:deleteMcpServer")}</DialogTitle>
           <DialogDescription>
             {t("settings:mcpDeleteDescription", { name: target?.display_name ?? "" })}
+            {(target?.selection_impact?.automation ?? 0) > 0 && (
+              <span className="mt-2 block" data-testid="mcp-automation-delete-impact">
+                {t("settings:mcpAutomationDeleteWarning")}
+              </span>
+            )}
           </DialogDescription>
         </DialogHeader>
         {selectionImpactTotal(target?.selection_impact) > 0 && (

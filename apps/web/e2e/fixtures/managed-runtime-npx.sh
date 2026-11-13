@@ -5,24 +5,79 @@ cache_root=${NPM_CONFIG_CACHE:-${npm_config_cache:-"$HOME/.npm"}}
 package_spec=${3:-}
 preference=${2:-}
 shift_count=3
-real_npx=${KANDEV_E2E_REAL_NPX:-/usr/bin/npx}
+real_npx=${E2E_REAL_NPX:-${KANDEV_E2E_REAL_NPX:-/usr/bin/npx}}
 mock_agent=${E2E_MOCK_AGENT_PATH:-/usr/local/bin/mock-agent}
 failure_mode=${E2E_NPX_MODE:-stale-etarget}
 launch_id=${E2E_NPX_LAUNCH_ID:-default}
+runtime_prefix=
 
-if [ "${3:-}" = "--prefix" ]; then
-	case "${4:-}" in
-		"~/.kandev/managed-npm-runtime"|*/kandev-managed-npm-runtime-????????????????) ;;
-		*)
-			exec "$real_npx" "$@"
+capture_provider_pid() {
+	[ -n "${E2E_NPX_PID_CAPTURE:-}" ] || return 0
+	printf '%s\n' "$$" >> "$E2E_NPX_PID_CAPTURE"
+}
+
+capture_provider_argv() {
+	[ -n "${E2E_NPX_ARGV_CAPTURE:-}" ] || return 0
+	for capture_argument in "$@"; do
+		printf '%s\t' "$capture_argument" >> "$E2E_NPX_ARGV_CAPTURE"
+	done
+	printf '\n' >> "$E2E_NPX_ARGV_CAPTURE"
+}
+
+# Parse npm options before the exact package, keeping agent arguments intact.
+argument_index=0
+expect_value=
+for argument in "$@"; do
+	argument_index=$((argument_index + 1))
+	if [ -n "$expect_value" ]; then
+		case "$expect_value" in
+			prefix) runtime_prefix=$argument ;;
+			cache) : ;;
+		esac
+		expect_value=
+		continue
+	fi
+	case "$argument" in
+		--prefix) expect_value=prefix ;;
+		--cache) expect_value=cache ;;
+		opencode-ai@*|@opencode/cli@*)
+			package_spec=$argument
+			shift_count=$argument_index
+			break
 			;;
 	esac
-	package_spec=${5:-}
-	shift_count=5
-fi
+done
+
+case "$runtime_prefix" in
+	*/kandev-managed-runtime-*/project|*/managed-runtime-repairs/v1/generations/*/project)
+		# Execute the package installed by real npm from its isolated cache.
+		if [ -n "${E2E_PRIVATE_ROOT_MARKER:-}" ]; then
+			mkdir -p "$(dirname "$E2E_PRIVATE_ROOT_MARKER")"
+			printf '%s\n' "$runtime_prefix" >> "$E2E_PRIVATE_ROOT_MARKER"
+		fi
+		capture_provider_pid
+		if [ -n "${E2E_NPX_ARGV_CAPTURE:-}" ]; then
+			capture_index=0
+			for capture_argument in "$@"; do
+				capture_index=$((capture_index + 1))
+				if [ "$capture_index" -gt "$shift_count" ]; then
+					printf '%s\t' "$capture_argument" >> "$E2E_NPX_ARGV_CAPTURE"
+				fi
+			done
+			printf '\n' >> "$E2E_NPX_ARGV_CAPTURE"
+		fi
+		if [ -x "$real_npx" ]; then exec "$real_npx" "$@"; fi
+		if [ -x /usr/local/lib/node_modules/npm/bin/npx-cli.js ]; then
+			exec /usr/local/lib/node_modules/npm/bin/npx-cli.js "$@"
+		fi
+		exec npm exec "$@"
+		;;
+esac
 
 if [ "${KANDEV_E2E_NPX_BYPASS_FAILURE:-false}" = "true" ]; then
 	shift "$shift_count"
+	capture_provider_pid
+	capture_provider_argv "$@"
 	exec "$mock_agent" "$@"
 fi
 
@@ -75,8 +130,43 @@ if [ "$failure_mode" != "stale-etarget" ]; then
 		exit 97
 	fi
 	case "$failure_mode" in
+		missing-root-manifest)
+			package_name=${package_spec%@*}
+			package_version=${package_spec##*@}
+			package_base=${package_name##*/}
+			case "$package_name" in
+				opencode-ai|@opencode/cli) bin_name=opencode ;;
+				@openai/codex) bin_name=codex ;;
+				*) bin_name=$package_base ;;
+			esac
+			package_dir="$startup_tree/node_modules/$package_name"
+			if [ ! -f "$package_dir/package.json" ]; then
+				mkdir -p "$package_dir/bin" "$startup_tree/node_modules/.bin" "$startup_sibling"
+				printf '{"name":"%s","version":"%s","bin":{"%s":"bin/%s.js"}}\n' \
+					"$package_name" "$package_version" "$bin_name" "$bin_name" > "$package_dir/package.json"
+				printf '#!/bin/sh\nexit 1\n' > "$package_dir/bin/$bin_name.js"
+				chmod 755 "$package_dir/bin/$bin_name.js"
+				ln -s "../$package_name/bin/$bin_name.js" "$startup_tree/node_modules/.bin/$bin_name"
+				printf 'preserved\n' > "$startup_tree/retry-sentinel-$safe_launch_id"
+				printf 'preserved\n' > "$sibling_sentinel"
+			fi
+			if [ ! -f "$startup_tree/package.json" ]; then
+				printf 'npm error code ENOENT\n' >&2
+				printf 'npm error syscall open\n' >&2
+				printf 'npm error path %s\n' "$startup_tree/package.json" >&2
+				printf 'npm error errno -2\n' >&2
+				printf "npm error enoent Could not read package.json: Error: ENOENT: no such file or directory, open '%s'\n" "$startup_tree/package.json" >&2
+				exit 1
+			fi
+			shift "$shift_count"
+			capture_provider_pid
+			capture_provider_argv "$@"
+			exec "$mock_agent" "$@"
+			;;
 		success)
 			shift "$shift_count"
+			capture_provider_pid
+			capture_provider_argv "$@"
 			exec "$mock_agent" "$@"
 			;;
 		transient)
@@ -115,6 +205,8 @@ if [ "$failure_mode" != "stale-etarget" ]; then
 		rm -f "$E2E_NPX_RETRY_RELEASE_FILE.waiting"
 	fi
 	shift "$shift_count"
+	capture_provider_pid
+	capture_provider_argv "$@"
 	exec "$mock_agent" "$@"
 fi
 

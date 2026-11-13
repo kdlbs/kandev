@@ -91,8 +91,8 @@ Allow literal filenames only. Require a case-insensitive `.png`, `.jpg`, or
 
 An absent or empty image list means no images. Normalize empty lists to omitted
 storage. Reject null, non-array values, malformed entries, and duplicate image
-IDs within one question. Allow at most four images per question and four distinct
-IDs per bundle. A repeated bundle-wide image ID must carry identical path, repo,
+IDs within one question. Allow at most four images per question and 16 distinct
+IDs per bundle (`protocol.MaxBundleImages`). A repeated bundle-wide image ID must carry identical path, repo,
 and alt values. Repeating a reference in two questions associates both questions
 with that image. Do not merge those questions or alter their navigation order.
 
@@ -107,7 +107,7 @@ Choices can carry the optional field defined in the choice image extension below
 The list accepts zero or one item. This reuses strict image decoding and avoids
 a second reference shape. Question-level `images` remains shared visual context.
 Each question has at most four references across its own list and its options.
-The bundle still has at most four distinct image IDs. Identical references may
+The bundle has at most 16 distinct image IDs. Identical references may
 appear in different placements. Duplicate IDs within one list remain invalid.
 Counting placements bounds simultaneous reads even when an ID repeats.
 
@@ -289,8 +289,11 @@ The active question card mounts one image group. A repeated image stays visible
 for each associated question. The UI does not change option selection or automatic
 single-question completion behavior.
 
-Desktop keeps the current clarification panel and question carousel. Each image
-has a visible description, an uncropped thumbnail bounded to 128px high on desktop
+Desktop keeps the current clarification panel and question carousel. A question's
+thumbnails flow in a wrapping row (`question-images-row`); each caption takes its
+thumbnail's width instead of widening the row. `QuestionImageGallery` collects the
+loaded thumbnails of one question in review order, and the inspector steps
+through them with Previous and Next, arrow keys, and a swipe at Fit. Each image has a visible description, an uncropped thumbnail bounded to 128px high on desktop
 and 96px high below 768px, and an explicit inspection button. Express these bounds
 in rem units so root-font scaling remains available. The image and Inspect label
 form one button. The label does not need a separate control-height row. Keep the

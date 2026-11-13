@@ -8,8 +8,10 @@ import {
   resumeSession,
   recoveryInspectionBusyDetails,
   recoveryInspectionBusyMessage,
+  recoveryFailureCauses,
   resolveRequestErrorMessage,
   runtimeCleanupFailureCauses,
+  sessionRecoveryFailureCauses,
   sessionRecoveryGuardDetails,
   sessionDeliveryRecoveryResponse,
   sessionDeliveryRecoveryMessage,
@@ -22,6 +24,7 @@ vi.mock("@/lib/ws/connection", () => ({
 }));
 
 const CONTINUE_FROM_HISTORY = "continue_from_history";
+const NATIVE_STATE_UNAVAILABLE = "native state is unavailable";
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -41,6 +44,50 @@ it("localizes typed cleanup responses without inspecting transport prose", () =>
     { operation: "resume", code: "runtime_cleanup_failed", prompt_not_sent: true },
   ]);
   expect(runtimeCleanupFailureCauses(failure, "another-session")).toEqual([]);
+});
+
+it("keeps only correlated safe process-exit causes from a recovery response", () => {
+  const failure = new WebSocketRequestError(
+    "Failed to recover session: session failed: generic",
+    "INTERNAL_ERROR",
+    {
+      kind: "session_recovery_failed",
+      session_id: "session-1",
+      error_stamp: "failure-1",
+      causes: [
+        {
+          operation: "resume",
+          code: "process_exited",
+          reason: "mise_config_untrusted",
+          exit_code: 1,
+          detail: "/private/workspace/mise.toml",
+        },
+        {
+          operation: "resume",
+          code: "process_exited",
+          reason: "private_reason",
+          exit_code: "1",
+        },
+      ],
+    },
+  );
+  expect(sessionRecoveryFailureCauses(failure, "session-1")).toEqual([
+    {
+      operation: "resume",
+      code: "process_exited",
+      reason: "mise_config_untrusted",
+      exit_code: 1,
+      detail: "The agent exited before startup completed.",
+    },
+    {
+      operation: "resume",
+      code: "process_exited",
+      reason: "unclassified",
+      detail: "The agent exited before startup completed.",
+    },
+  ]);
+  expect(sessionRecoveryFailureCauses(failure, "another-session")).toEqual([]);
+  expect(recoveryFailureCauses(failure, "session-1")).toHaveLength(2);
 });
 const recoveryAction = "session.recover";
 
@@ -157,16 +204,12 @@ describe("session recovery service", () => {
   });
 
   it("recognizes typed native-state loss without authorizing generic failures", () => {
-    const error = new WebSocketRequestError(
-      "native state is unavailable",
-      "SESSION_RESTORE_REQUIRED",
-      {
-        kind: "session_restore_required",
-        recovery_action: CONTINUE_FROM_HISTORY,
-        reason: "native_state_missing",
-        generation: 3,
-      },
-    );
+    const error = new WebSocketRequestError(NATIVE_STATE_UNAVAILABLE, "SESSION_RESTORE_REQUIRED", {
+      kind: "session_restore_required",
+      recovery_action: CONTINUE_FROM_HISTORY,
+      reason: "native_state_missing",
+      generation: 3,
+    });
     expect(contextContinuationDetails(error)).toMatchObject({
       kind: "session_restore_required",
       recovery_action: CONTINUE_FROM_HISTORY,
@@ -193,6 +236,53 @@ describe("session recovery service", () => {
       30_000,
     );
   });
+});
+
+it("accepts legacy continuation guidance only for the captured target", () => {
+  const expected = {
+    sessionId: "session-1",
+    generation: 3,
+    blockId: "block-1",
+    incarnationId: "incarnation-1",
+  };
+  const legacy = new WebSocketRequestError(NATIVE_STATE_UNAVAILABLE, "CONFLICT", {
+    kind: "session_restore_required",
+    recovery_action: CONTINUE_FROM_HISTORY,
+    reason: "unresolved_durable_work",
+  });
+  const valid = new WebSocketRequestError(NATIVE_STATE_UNAVAILABLE, "CONFLICT", {
+    kind: "session_restore_required",
+    recovery_action: CONTINUE_FROM_HISTORY,
+    session_id: "session-1",
+    generation: 3,
+    block_id: "block-1",
+    incarnation_id: "incarnation-1",
+  });
+
+  expect(contextContinuationDetails(legacy, expected)).not.toBeNull();
+  expect(contextContinuationDetails(valid, expected)).toMatchObject({
+    session_id: "session-1",
+    generation: 3,
+    block_id: "block-1",
+    incarnation_id: "incarnation-1",
+  });
+  for (const identity of [
+    { session_id: "session-2", generation: 3 },
+    { session_id: "", generation: 3 },
+    { session_id: "session-1", generation: 4 },
+    { session_id: "session-1", generation: 0 },
+    { session_id: "session-1", generation: 1.5 },
+    { session_id: "session-1", generation: Number.MAX_SAFE_INTEGER + 1 },
+    { session_id: "session-1", generation: 3, block_id: " " },
+    { session_id: "session-1", generation: 3, incarnation_id: "incarnation-2" },
+  ]) {
+    const error = new WebSocketRequestError(NATIVE_STATE_UNAVAILABLE, "CONFLICT", {
+      kind: "session_restore_required",
+      recovery_action: CONTINUE_FROM_HISTORY,
+      ...identity,
+    });
+    expect(contextContinuationDetails(error, expected)).toBeNull();
+  }
 });
 
 it("sends the current stamp with an explicit managed clone relocation", async () => {

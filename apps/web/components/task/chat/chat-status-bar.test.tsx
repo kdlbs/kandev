@@ -4,6 +4,9 @@ import { useSyncExternalStore, type ComponentProps } from "react";
 import { ChatStatusBar, shouldRenderChatStatusBar } from "./chat-status-bar";
 
 const USAGE_TRIGGER_TEST_ID = "conversation-usage-trigger";
+const GRAPH_BUTTON_TEST_ID = "task-graph-button";
+const RIGHT_CONTROLS_TEST_ID = "chat-status-bar-right-controls";
+const SHARE_BUTTON_TEST_ID = "share-task-button";
 
 const statusStore = vi.hoisted(() => {
   const state = {
@@ -54,6 +57,8 @@ const statusStore = vi.hoisted(() => {
 });
 const usageDisplay = vi.hoisted(() => ({ visible: true }));
 const viewport = vi.hoisted(() => ({ isMobile: false }));
+const shareable = vi.hoisted(() => ({ value: false }));
+const graphAvailable = vi.hoisted(() => ({ value: false }));
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({
@@ -87,6 +92,12 @@ vi.mock("@/components/task/workflow-move-proceed-button", () => ({
 vi.mock("@/components/github/pr-status-chip", () => ({ PRStatusChip: () => null }));
 vi.mock("@/components/gitlab/mr-status-chip", () => ({ MRStatusChip: () => null }));
 vi.mock("@/components/task/task-dependency-chip", () => ({ TaskDependencyChip: () => null }));
+vi.mock("@/components/task-graph/task-graph-button", () => ({
+  TaskGraphButton: ({ taskId }: { taskId: string | null }) =>
+    graphAvailable.value && taskId ? (
+      <button type="button" data-testid={GRAPH_BUTTON_TEST_ID} data-task-id={taskId} />
+    ) : null,
+}));
 vi.mock("@/components/azure-devops/azure-devops-task-pull-request-chip", () => ({
   AzureDevOpsTaskPullRequestChip: () => null,
 }));
@@ -94,11 +105,21 @@ vi.mock("@/components/integrations/registered-change-request-status", () => ({
   RegisteredChangeRequestStatus: () => <span data-testid="registered-review-status" />,
 }));
 vi.mock("@/components/task/share/share-button", () => ({
-  shareableSessionStateClient: () => false,
+  shareableSessionStateClient: () => shareable.value,
 }));
 vi.mock("@/components/task/chat/transcript-nav-group", () => ({
-  TranscriptNavGroup: ({ usageControl }: { usageControl?: React.ReactNode }) =>
-    usageControl ?? null,
+  TranscriptNavGroup: ({
+    usageControl,
+    canShare,
+  }: {
+    usageControl?: React.ReactNode;
+    canShare?: boolean;
+  }) => (
+    <>
+      {usageControl}
+      {canShare ? <button type="button" data-testid={SHARE_BUTTON_TEST_ID} /> : null}
+    </>
+  ),
 }));
 vi.mock("./conversation-usage-display", () => ({
   ConversationUsageDisplay: ({
@@ -144,6 +165,8 @@ afterEach(() => {
   cleanup();
   usageDisplay.visible = true;
   viewport.isMobile = false;
+  shareable.value = false;
+  graphAvailable.value = false;
 });
 
 function renderStatus(overrides: Partial<ComponentProps<typeof ChatStatusBar>> = {}) {
@@ -243,7 +266,7 @@ describe("conversation usage status control", () => {
     usageDisplay.visible = false;
     renderStatus({ taskId: "task-1", sessionId: "session-1" });
 
-    const controls = screen.getByTestId("chat-status-bar-right-controls");
+    const controls = screen.getByTestId(RIGHT_CONTROLS_TEST_ID);
     expect(controls.childElementCount).toBe(0);
     expect(controls.className).toContain("empty:hidden");
   });
@@ -274,6 +297,66 @@ describe("conversation usage status control", () => {
       ).toBe("true");
     } finally {
       session.agent_profile_id = undefined;
+    }
+  });
+});
+
+describe("task graph composer action", () => {
+  // @covers AC-TASKS-TASK-RELATIONSHIP-GRAPH-001.6, .9
+  it("shows one graph control after Share in the right utility group", () => {
+    graphAvailable.value = true;
+    shareable.value = true;
+    renderStatus({ taskId: "task-1", sessionId: "session-1" });
+
+    const controls = screen.getByTestId(RIGHT_CONTROLS_TEST_ID);
+    const graph = screen.getByTestId(GRAPH_BUTTON_TEST_ID);
+    const share = screen.getByTestId(SHARE_BUTTON_TEST_ID);
+    expect(screen.getAllByTestId(GRAPH_BUTTON_TEST_ID)).toHaveLength(1);
+    expect(controls.contains(graph)).toBe(true);
+    expect(graph.getAttribute("data-task-id")).toBe("task-1");
+    expect(share.compareDocumentPosition(graph) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  // @covers AC-TASKS-TASK-RELATIONSHIP-GRAPH-001.9
+  it("keeps the graph action for a qualifying task without a session", () => {
+    graphAvailable.value = true;
+    renderStatus({ taskId: "task-1", sessionId: null, sessionState: null });
+
+    const controls = screen.getByTestId(RIGHT_CONTROLS_TEST_ID);
+    const graph = screen.getByTestId(GRAPH_BUTTON_TEST_ID);
+    expect(controls.contains(graph)).toBe(true);
+    expect(screen.queryByTestId(USAGE_TRIGGER_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(SHARE_BUTTON_TEST_ID)).toBeNull();
+  });
+
+  it("hides the graph action when the task has no relations", () => {
+    renderStatus({ taskId: "task-1", sessionId: "session-1" });
+
+    expect(screen.queryByTestId(GRAPH_BUTTON_TEST_ID)).toBeNull();
+  });
+
+  // @covers AC-TASKS-TASK-RELATIONSHIP-GRAPH-001.6, .8
+  it("keeps one graph instance in the right group across responsive order changes", () => {
+    graphAvailable.value = true;
+    const props: ComponentProps<typeof ChatStatusBar> = {
+      todoItems: [],
+      taskId: "task-1",
+      sessionId: "session-1",
+      sessionState: "IDLE",
+      nextStepName: "Review",
+      onProceed: vi.fn(),
+      isAgentBusy: false,
+      hasPendingClarification: false,
+      isMoving: false,
+    };
+    const { rerender } = render(<ChatStatusBar {...props} />);
+    const graph = screen.getByTestId(GRAPH_BUTTON_TEST_ID);
+    for (const isMobile of [true, false, true]) {
+      viewport.isMobile = isMobile;
+      rerender(<ChatStatusBar {...props} />);
+      expect(screen.getAllByTestId(GRAPH_BUTTON_TEST_ID)).toHaveLength(1);
+      expect(screen.getByTestId(GRAPH_BUTTON_TEST_ID)).toBe(graph);
+      expect(screen.getByTestId(RIGHT_CONTROLS_TEST_ID).contains(graph)).toBe(true);
     }
   });
 });

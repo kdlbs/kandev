@@ -13,17 +13,16 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/appctx"
-	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/events"
-	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
-	"github.com/kandev/kandev/pkg/agent"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -105,18 +104,14 @@ func (m *Manager) GetOrEnsureExecution(ctx context.Context, sessionID string) (*
 		}
 	}
 
-	// Fast path: execution already in memory
-	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
-		if err := m.ensureCachedWorkspaceExecutionAdmitted(ctx, execution); err != nil {
-			return nil, err
-		}
-		return execution, nil
-	}
-
-	// Slow path: create on-demand, deduplicated by sessionID-keyed singleflight.
+	// Join the session operation before reading cached state so cleanup can retire it.
 	// Use ensureWorkspaceExecutionLocked (not EnsureWorkspaceExecutionForSession)
 	// to avoid recursing into the same singleflight slot we already hold.
 	value, err := m.doCoalescedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
+		// Workspace access can reuse retained terminal infrastructure after admission.
+		if execution, err := m.cachedWorkspaceExecution(sharedCtx, sessionID, ""); execution != nil || err != nil {
+			return execution, err
+		}
 		return m.ensureWorkspaceExecutionLocked(sharedCtx, "", sessionID)
 	})
 	if err != nil {
@@ -153,11 +148,8 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 		}
 	}
 
-	if execution, exists := m.executionStore.GetByTaskEnvironmentID(taskEnvironmentID); exists {
-		if err := m.ensureCachedWorkspaceExecutionAdmitted(ctx, execution); err != nil {
-			return nil, err
-		}
-		return execution, nil
+	if execution, err := m.cachedWorkspaceExecutionForEnvironment(ctx, taskEnvironmentID); execution != nil || err != nil {
+		return execution, err
 	}
 
 	if m.workspaceInfoProvider == nil {
@@ -193,31 +185,44 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 	// GetOrEnsureExecution(sessionID) / EnsureWorkspaceExecutionForSession for
 	// the same session.
 	value, err := m.doCoalescedExecution(ctx, info.SessionID, func(sharedCtx context.Context) (interface{}, error) {
-		if execution, exists := m.executionStore.GetBySessionID(info.SessionID); exists {
+		if execution, err := m.cachedWorkspaceExecution(sharedCtx, info.SessionID, taskEnvironmentID); execution != nil || err != nil {
+			if err != nil {
+				return nil, err
+			}
 			if err := m.ensureWorkspaceSessionAdmitted(sharedCtx, info.TaskID, info); err != nil {
+				return nil, err
+			}
+			if err := m.ensureRetainedExecutionSelection(sharedCtx, execution, info); err != nil {
 				return nil, err
 			}
 			return execution, nil
 		}
-		if execution, exists := m.executionStore.GetByTaskEnvironmentID(taskEnvironmentID); exists {
-			if err := m.ensureWorkspaceSessionAdmitted(sharedCtx, info.TaskID, info); err != nil {
-				return nil, err
-			}
-			return execution, nil
-		}
+		// This slot is keyed by info.SessionID, so session-keyed peers receive
+		// its result. A sibling's execution that appeared after the fast path
+		// must not be shared under this session's key.
 		// createExecution publishes AgentctlStarting before spawning the
 		// waitForAgentctlReady goroutine, so frontend gates flip out of
 		// `undefined` even on this lazy-create path.
-		execution, err := m.createExecution(sharedCtx, info.TaskID, info)
+		if _, err := m.createExecution(sharedCtx, info.TaskID, info); err != nil {
+			return nil, err
+		}
+		execution, err := m.cachedWorkspaceExecution(sharedCtx, info.SessionID, taskEnvironmentID)
 		if err != nil {
 			return nil, err
+		}
+		if execution == nil {
+			return nil, fmt.Errorf("%w: workspace execution retired during creation", ErrSessionWorkspaceNotReady)
 		}
 		return execution, nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return value.(*AgentExecution), nil
+	execution := value.(*AgentExecution)
+	if err := m.validateWorkspaceExecutionEnvironment(execution, taskEnvironmentID); err != nil {
+		return nil, err
+	}
+	return execution, nil
 }
 
 // EnsureWorkspaceExecutionForSession ensures an agentctl execution exists for a specific task session.
@@ -225,10 +230,9 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 // If an execution already exists for the session, it returns it. Otherwise, it creates a new execution
 // using the session's workspace configuration from the database.
 //
-// Concurrent calls (including from GetOrEnsureExecution and
-// GetOrEnsureExecutionForEnvironment) are deduplicated via the same
-// sessionID-keyed singleflight bucket so they cannot race past their
-// individual check-then-act guards and create duplicate executions.
+// Concurrent calls share the sessionID-keyed singleflight bucket with workspace
+// access. Restoration runs its own admission and replacement checks so it cannot
+// inherit a terminal execution from a concurrent cache read.
 func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) (*AgentExecution, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
@@ -239,15 +243,7 @@ func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID
 		}
 	}
 
-	// Fast path: execution already in memory
-	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
-		if err := m.ensureCachedWorkspaceExecutionAdmitted(ctx, execution); err != nil {
-			return nil, err
-		}
-		return execution, nil
-	}
-
-	value, err := m.doCoalescedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
+	value, err := m.doSerializedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
 		return m.ensureWorkspaceExecutionLocked(sharedCtx, taskID, sessionID)
 	})
 	if err != nil {
@@ -277,12 +273,27 @@ func (m *Manager) submitExecutionOperation(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	result := m.ensureExecutionGroup.DoChan(key, func() (interface{}, error) {
+	result := m.ensureExecutionGroup.DoChan(coalescedExecutionKey(ctx, key), func() (interface{}, error) {
 		sharedCtx, cancel := m.coalescedExecutionContext(ctx)
 		defer cancel()
 		return operation(sharedCtx)
 	})
 	return awaitCoalescedResult(ctx, result)
+}
+
+// coalescedExecutionKey scopes the session-keyed singleflight bucket by the
+// held recovery claim's operation identity. A launch carrying a held recovery
+// admission must not join a workspace-only ensure peer's slot: the peer owns
+// no recovery authority and its inspection-busy failure would be inherited by
+// the authorized launch through the shared result. Callers without a claim
+// keep the plain session key, preserving the duplicate-execution protection
+// that motivated the shared bucket.
+func coalescedExecutionKey(ctx context.Context, key string) string {
+	claim := worktree.RecoveryClaimFromContext(ctx)
+	if claim == nil || claim.OperationID == "" {
+		return key
+	}
+	return key + "\x00recovery-claim:" + claim.OperationID
 }
 
 func (m *Manager) coalescedExecutionContext(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -324,17 +335,101 @@ func awaitCoalescedResult(
 	}
 }
 
+// cachedWorkspaceExecutionForEnvironment serializes cache access with session cleanup.
+func (m *Manager) cachedWorkspaceExecutionForEnvironment(ctx context.Context, taskEnvironmentID string) (*AgentExecution, error) {
+	candidate, exists := m.executionStore.GetByTaskEnvironmentID(taskEnvironmentID)
+	if !exists {
+		return nil, nil
+	}
+	var sessionID string
+	if err := m.executionStore.WithRLock(candidate.ID, func(current *AgentExecution) {
+		if current == candidate {
+			sessionID = current.SessionID
+		}
+	}); err != nil || sessionID == "" {
+		return nil, nil
+	}
+	value, err := m.doSerializedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
+		return m.cachedWorkspaceExecution(sharedCtx, sessionID, taskEnvironmentID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return value.(*AgentExecution), nil
+}
+
+// cachedWorkspaceExecution waits for retirement and validates the cached owner.
+// An empty environment ID checks only the session registration and admission.
+func (m *Manager) cachedWorkspaceExecution(ctx context.Context, sessionID, taskEnvironmentID string) (*AgentExecution, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return nil, nil
+	}
+	if err := execution.remoteInstanceLifecycleMu.LockContext(ctx); err != nil {
+		return nil, err
+	}
+	defer execution.remoteInstanceLifecycleMu.Unlock()
+	if current, present := m.executionStore.GetBySessionID(sessionID); !present || current != execution {
+		return nil, nil
+	}
+	if taskEnvironmentID != "" {
+		if err := m.validateWorkspaceExecutionEnvironment(execution, taskEnvironmentID); err != nil {
+			return nil, err
+		}
+	}
+	if err := m.ensureCachedWorkspaceExecutionAdmitted(ctx, execution); err != nil {
+		return nil, err
+	}
+	return execution, nil
+}
+
+// validateWorkspaceExecutionEnvironment rejects missing or mismatched registered runtimes.
+func (m *Manager) validateWorkspaceExecutionEnvironment(execution *AgentExecution, taskEnvironmentID string) error {
+	if execution == nil {
+		return fmt.Errorf("%w: workspace execution is unavailable", ErrSessionWorkspaceNotReady)
+	}
+	matches := false
+	if err := m.executionStore.WithRLock(execution.ID, func(current *AgentExecution) {
+		matches = current == execution && current.TaskEnvironmentID == taskEnvironmentID
+	}); err != nil || !matches {
+		return fmt.Errorf("%w: execution does not match the requested task environment", ErrSessionWorkspaceNotReady)
+	}
+	return nil
+}
+
+// workspaceExecutionStatusReusable reports whether a cached execution can host
+// workspace-only work. Terminal executions must be replaced, not reused: their
+// agentctl may already be stopped even though the execution remains in memory.
+func (m *Manager) workspaceExecutionStatusReusable(execution *AgentExecution) bool {
+	if execution == nil {
+		return false
+	}
+	reusable := true
+	if err := m.executionStore.WithRLock(execution.ID, func(current *AgentExecution) {
+		switch current.Status {
+		case v1.AgentStatusFailed, v1.AgentStatusStopped, v1.AgentStatusCompleted:
+			reusable = false
+		}
+	}); err != nil {
+		return false
+	}
+	return reusable
+}
+
 // ensureWorkspaceExecutionLocked is the body of EnsureWorkspaceExecutionForSession
 // run inside the sessionID-keyed singleflight bucket. Callers other than
 // EnsureWorkspaceExecutionForSession must already hold the singleflight slot.
 func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, sessionID string) (*AgentExecution, error) {
-	// Double-check after acquiring the slot — a peer in the same group may have
-	// finished while we were waiting.
-	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
-		if err := m.ensureCachedWorkspaceExecutionAdmitted(ctx, execution); err != nil {
+	if execution, err := m.cachedWorkspaceExecution(ctx, sessionID, ""); execution != nil || err != nil {
+		if err != nil {
 			return nil, err
 		}
-		return execution, nil
+		if m.workspaceExecutionStatusReusable(execution) {
+			return execution, nil
+		}
+		if err := m.cleanupStaleExecution(ctx, execution); err != nil {
+			return nil, fmt.Errorf("replace stale workspace execution: %w", err)
+		}
 	}
 
 	if m.workspaceInfoProvider == nil {
@@ -348,6 +443,9 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 	if info == nil {
 		return nil, fmt.Errorf("session %s not found", sessionID)
 	}
+	if info.SessionID != sessionID {
+		return nil, fmt.Errorf("workspace info does not match the requested session")
+	}
 
 	// Resolve taskID from provider when caller doesn't have it (e.g., GetOrEnsureExecution)
 	if taskID == "" {
@@ -359,19 +457,9 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 		return nil, err
 	}
 
-	if info.TaskEnvironmentID != "" {
-		if execution, exists := m.executionStore.GetByTaskEnvironmentID(info.TaskEnvironmentID); exists {
-			if err := m.ensureWorkspaceSessionAdmitted(ctx, taskID, info); err != nil {
-				return nil, err
-			}
-			m.logger.Info("reusing existing execution for task environment",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.String("task_environment_id", info.TaskEnvironmentID),
-				zap.String("execution_id", execution.ID))
-			return execution, nil
-		}
-	}
+	// Session-scoped access needs a controller owned by this exact session.
+	// Another session may share the environment, but its conversation and
+	// teardown ownership must not be borrowed through the workspace route.
 
 	if info.WorkspacePath == "" {
 		return nil, fmt.Errorf("%w: session %s has no workspace path yet", ErrSessionWorkspaceNotReady, sessionID)
@@ -670,6 +758,9 @@ func (m *Manager) EnsurePassthroughExecution(ctx context.Context, sessionID stri
 	// otherwise a fast-failed resume launch would keep returning the dead ID
 	// and the WS handler's IsProcessReadyOrPending check would 503 forever.
 	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
+		if err := m.requireExecutionSelectionCompatibility(ctx, execution); err != nil {
+			return nil, err
+		}
 		if execution.PassthroughProcessID != "" {
 			if runner := m.passthroughRunnerForExecution(execution); runner != nil && runner.IsProcessReadyOrPending(execution.PassthroughProcessID) {
 				return execution, nil
@@ -868,15 +959,25 @@ func (m *Manager) prepareExecutionCreation(
 	if err := m.ensureExecutionAdmission(ctx, taskID, info, agentLaunch, ""); err != nil {
 		return nil, err
 	}
-	if err := m.reconcileExecutionWorkspace(ctx, taskID, info); err != nil {
+	// A cold ensure (no in-memory execution) still has to satisfy any durable
+	// retained record before workspace reconciliation, preparation secrets, or
+	// backend allocation. A genuinely fresh session has no row and passes.
+	effectiveExecutorType := firstNonEmpty(info.ExecutorType, info.ValidatedExecutorType)
+	retainedEvidence := info.AgentExecutionID != "" || info.RuntimeName != ""
+	if err := m.ensureDurableExecutionSelectionCompatible(
+		ctx, info.SessionID, info.TaskEnvironmentID, effectiveExecutorType, retainedEvidence,
+	); err != nil {
 		return nil, err
 	}
 	rt, err := m.getExecutorBackend(info.ExecutorType)
 	if err != nil {
 		return nil, fmt.Errorf("no runtime configured: %w", err)
 	}
+	if err := m.reconcileExecutionWorkspace(ctx, taskID, info); err != nil {
+		return nil, err
+	}
 	executionID := uuid.New().String()
-	preparation, err := m.prepareExecutionCreateRequest(ctx, taskID, info, executionID)
+	preparation, err := m.prepareExecutionCreateRequestForPurpose(ctx, taskID, info, executionID, agentLaunch)
 	if err != nil {
 		return nil, err
 	}
@@ -924,6 +1025,13 @@ func (m *Manager) createExecutionWithMode(
 	if err != nil {
 		return nil, err
 	}
+	copilotAgentType := ""
+	if inputs.preparation.request.AgentConfig != nil {
+		copilotAgentType = inputs.preparation.request.AgentConfig.ID()
+	}
+	inputs.preparation.request.CopilotNativeSessionEvents = m.copilotNativeLaunchAllowed(
+		inputs.runtime, copilotAgentType, inputs.preparation.request.DeliveryStreamID,
+	)
 	activityLease, err := m.acquireActivity(operationCtx, activity.KindExecutionStarting)
 	if err != nil {
 		return nil, err
@@ -948,12 +1056,18 @@ func (m *Manager) createExecutionWithMode(
 	if err != nil {
 		return nil, fmt.Errorf("failed to create execution: %w", err)
 	}
+	if err := validateCreatedExecutionIdentity(
+		inputs.preparation.request.ExecutorType, inputs.runtime, runtimeInstance,
+	); err != nil {
+		// This attempt created the instance, so an exact rollback is owned.
+		rollbackErr := m.stopLaunchRuntimeOnRollback(operationCtx, inputs.runtime, runtimeInstance, nil)
+		return nil, errors.Join(err, rollbackErr)
+	}
 
 	execution := m.initializeCreatedExecution(
 		operationCtx,
 		taskID,
 		info,
-		inputs.executionID,
 		inputs.runtime,
 		runtimeInstance,
 		inputs.preparation,
@@ -1031,7 +1145,7 @@ func (m *Manager) registerAndPublishCreatedExecution(
 		}
 		return nil, err
 	}
-	if err := m.publishCreatedExecution(ctx, runtimeInstance, execution, inputs.executionID, taskID); err != nil {
+	if err := m.publishCreatedExecution(ctx, runtimeInstance, execution, taskID); err != nil {
 		execution.remoteInstanceLifecycleMu.Unlock()
 		m.rollbackRegisteredLaunch(inputs.runtime, runtimeInstance, execution, "runtime secret persistence failed")
 		return nil, err
@@ -1063,9 +1177,11 @@ type executionCreatePreparation struct {
 }
 
 type executionEnvironmentPreparation struct {
-	env                   map[string]string
-	approvedSecretEnvKeys []string
-	managedGoCachePath    string
+	env                              map[string]string
+	approvedSecretEnvKeys            []string
+	managedGoCachePath               string
+	managedRuntimeInstallerEnvDigest string
+	managedRuntimeOwnerUserID        string
 }
 
 func (m *Manager) reconcileExecutionWorkspace(ctx context.Context, taskID string, info *WorkspaceInfo) error {
@@ -1092,20 +1208,23 @@ func (m *Manager) prepareExecutionCreateRequest(
 	info *WorkspaceInfo,
 	executionID string,
 ) (*executionCreatePreparation, error) {
-	if info.AgentID == "" {
-		return nil, fmt.Errorf("agent ID is required in WorkspaceInfo")
-	}
-	agentConfig, err := m.resolveLaunchableAgent(info.AgentID)
-	if err != nil {
-		return nil, err
-	}
-	managedRuntimeOptions, err := m.resolveManagedRuntimeCommandOptions(ctx, models.ExecutorType(info.ExecutorType).Runtime(), agentConfig)
-	if err != nil {
-		return nil, err
-	}
+	return m.prepareExecutionCreateRequestForPurpose(ctx, taskID, info, executionID, true)
+}
 
+func (m *Manager) prepareExecutionCreateRequestForPurpose(
+	ctx context.Context,
+	taskID string,
+	info *WorkspaceInfo,
+	executionID string,
+	agentLaunch bool,
+) (*executionCreatePreparation, error) {
+	provider, err := m.prepareExecutionProvider(ctx, info, agentLaunch)
+	if err != nil {
+		return nil, err
+	}
+	agentConfig, profileInfo := provider.agentConfig, provider.profileInfo
+	managedRuntimeOptions := provider.commandOptions
 	executionProfileID := workspaceExecutionProfileID(info)
-	profileInfo := m.resolveWorkspaceExecutionProfile(ctx, executionProfileID)
 	envPreparation, err := m.prepareExecutionEnvironment(
 		ctx, taskID, info, executionID, executionProfileID, agentConfig, profileInfo,
 	)
@@ -1113,113 +1232,81 @@ func (m *Manager) prepareExecutionCreateRequest(
 		return nil, err
 	}
 
-	metadata := make(map[string]interface{}, len(info.Metadata)+1)
-	for key, value := range info.Metadata {
-		metadata[key] = value
-	}
-	captureResourceCircuitIdentity(metadata, executionID, profileInfo)
-	delete(metadata, managedGoCacheMetadataKey)
-	// A new workspace helper receives its binding at the next process launch.
-	delete(metadata, mcpprofile.BuiltinBindingMetadataKey)
-	m.seedExecutionBaseBranches(ctx, taskID, executionID, metadata)
-	if envPreparation.managedGoCachePath != "" {
-		metadata[managedGoCacheMetadataKey] = envPreparation.managedGoCachePath
-	}
-	remoteContributions, err := remoteContributionsFromMetadata(metadata)
+	workspace, err := m.prepareExecutionWorkspace(ctx, info, executionCreateWorkspaceInputs{
+		taskID: taskID, executionID: executionID, profileInfo: profileInfo,
+		managedGoCachePath: envPreparation.managedGoCachePath,
+	})
 	if err != nil {
 		return nil, err
-	}
-	contributionDestinations, err := contributionDestinationsFromMetadata(metadata)
-	if err != nil {
-		return nil, err
-	}
-	comparisonTargets, err := comparisonTargetsFromMetadata(metadata)
-	if err != nil {
-		return nil, err
-	}
-	if len(comparisonTargets) == 0 {
-		comparisonTargets, err = comparisonTargetsFromWorkspaceRepositories(info.WorkspaceRepositories, info.ExecutorType)
-		if err != nil {
-			return nil, err
-		}
-	}
-	autoApprove := false
-	var autoApproveOverride *bool
-	if profileInfo != nil {
-		autoApprove = profileInfo.AutoApprove
-		autoApproveOverride = boolPtr(profileInfo.AutoApprove)
-	}
-	// A coordinator session ignores the profile's auto-approve flag and the
-	// agentctl auto-approve environment variable: only the exact six
-	// coordinator tool names are auto-approved, decided by agentctl's own
-	// mode check (docs/specs/coordinator/system-design/copilot.md#permission-policy).
-	if info.McpMode == mcpmode.Coordinator {
-		autoApprove = false
-		autoApproveOverride = boolPtr(false)
-	}
-	authToken := m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret)
-	if isDockerExecutorType(info.ExecutorType) {
-		controlToken, err := m.revealContainerControlAuthToken(ctx, info.Metadata, getMetadataString(info.Metadata, MetadataKeyContainerID) != "")
-		if err != nil {
-			return nil, fmt.Errorf("resolve container control token: %w", err)
-		}
-		if controlToken != "" {
-			authToken = controlToken
-		}
 	}
 
-	officeAgentProfileID := workspaceOfficeAgentProfileID(info)
-	journalOwnerID := info.SessionID
-	if journalOwnerID == "" {
-		journalOwnerID = info.TaskEnvironmentID
-	}
 	preparation := &executionCreatePreparation{
 		request: &ExecutorCreateRequest{
-			InstanceID:                     executionID,
-			ExecutorType:                   info.ExecutorType,
-			TaskID:                         taskID,
-			SessionID:                      info.SessionID,
-			TaskEnvironmentID:              info.TaskEnvironmentID,
-			WorkspaceID:                    info.WorkspaceID,
-			RepositoryIDs:                  repositoryIDsFromWorkspace(info.WorkspaceRepositories),
-			DurableJournalHostRoot:         m.dataDir,
-			DurableJournalOwnerID:          journalOwnerID,
-			DeliveryIncarnationID:          info.DeliveryIncarnationID,
-			DeliveryHarnessGeneration:      info.DeliveryHarnessGeneration,
-			DeliveryStreamID:               info.DeliveryStreamID,
-			WorkspaceReuseRequired:         info.TaskEnvironmentID != "",
-			AgentProfileID:                 executionProfileID,
-			OfficeAgentProfileID:           officeAgentProfileID,
-			WorkspacePath:                  info.WorkspacePath,
-			WorkspaceSourceRoots:           workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories),
-			Protocol:                       string(agentConfig.Runtime().Protocol),
-			CodexAppServerEnabled:          agentConfig.Enabled() && agentConfig.Runtime().Protocol == agent.ProtocolCodexAppServer,
-			Env:                            envPreparation.env,
-			AutoApprovePermissions:         autoApprove,
-			AutoApprovePermissionsOverride: autoApproveOverride,
-			McpMode:                        info.McpMode,
-			PromptSuggestions:              m.promptSuggestionsForLaunch(ctx, info.McpMode),
-			AgentConfig:                    agentConfig,
-			Metadata:                       metadata,
-			ApprovedSecretEnvKeys:          append([]string(nil), envPreparation.approvedSecretEnvKeys...),
-			PreviousExecutionID:            info.AgentExecutionID,
-			AuthToken:                      authToken,
-			BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
-			AgentctlStartupConfig:          agentctlStartupConfigForExecutor(m.agentctlStartupConfig, info.ExecutorType),
-			RemoteContributions:            remoteContributions,
-			ContributionDestinations:       contributionDestinations,
-			ManagedRuntimeVersion:          managedRuntimeOptions.ManagedRuntimeVersion,
-			ManagedRuntimeFamily:           managedRuntimeOptions.ManagedRuntimeFamily,
-			ManagedRuntimeSource:           managedRuntimeOptions.ManagedRuntimeSource,
-			NativeRuntimeVersion:           managedRuntimeOptions.NativeRuntimeVersion,
-			OpenCodePluginRuntime:          openCodePluginRuntimeFor(agentConfig, managedRuntimeOptions, m.agentctlStartupConfig.OpenCodePluginEnabled),
-			ComparisonTargets:              comparisonTargets,
+			InstanceID:                       executionID,
+			ExecutorType:                     info.ExecutorType,
+			TaskID:                           taskID,
+			SessionID:                        info.SessionID,
+			TaskEnvironmentID:                info.TaskEnvironmentID,
+			WorkspaceID:                      info.WorkspaceID,
+			RepositoryIDs:                    repositoryIDsFromWorkspace(info.WorkspaceRepositories),
+			DurableJournalHostRoot:           m.dataDir,
+			DurableJournalOwnerID:            workspaceJournalOwnerID(info),
+			DeliveryIncarnationID:            info.DeliveryIncarnationID,
+			DeliveryHarnessGeneration:        info.DeliveryHarnessGeneration,
+			DeliveryStreamID:                 info.DeliveryStreamID,
+			WorkspaceReuseRequired:           info.TaskEnvironmentID != "",
+			AgentProfileID:                   executionProfileID,
+			OfficeAgentProfileID:             workspaceOfficeAgentProfileID(info),
+			WorkspacePath:                    info.WorkspacePath,
+			WorkspaceSourceRoots:             workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories),
+			WorkspaceExcludedRoots:           append([]string(nil), info.DetachedWorkspaceRoots...),
+			Protocol:                         protocolForAgent(agentConfig),
+			CodexAppServerEnabled:            codexAppServerEnabledForAgent(agentConfig),
+			Env:                              envPreparation.env,
+			ManagedRuntimeInstallerEnvDigest: envPreparation.managedRuntimeInstallerEnvDigest,
+			ManagedRuntimeOwnerUserID:        envPreparation.managedRuntimeOwnerUserID,
+			AutoApprovePermissions:           workspace.AutoApprovePermissions,
+			AutoApprovePermissionsOverride:   workspace.AutoApprovePermissionsOverride,
+			McpMode:                          info.McpMode,
+			PromptSuggestions:                m.promptSuggestionsForLaunch(ctx, info.McpMode),
+			AgentConfig:                      agentConfig,
+			Metadata:                         workspace.Metadata,
+			ApprovedSecretEnvKeys:            append([]string(nil), envPreparation.approvedSecretEnvKeys...),
+			PreviousExecutionID:              info.AgentExecutionID,
+			AuthToken:                        workspace.AuthToken,
+			BootstrapNonce:                   m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
+			AgentctlStartupConfig:            agentctlStartupConfigForExecutor(m.agentctlStartupConfig, info.ExecutorType),
+			RemoteContributions:              workspace.RemoteContributions,
+			ContributionDestinations:         workspace.ContributionDestinations,
+			ManagedRuntimeVersion:            managedRuntimeOptions.ManagedRuntimeVersion,
+			ManagedRuntimeFamily:             managedRuntimeOptions.ManagedRuntimeFamily,
+			ManagedRuntimeSource:             managedRuntimeOptions.ManagedRuntimeSource,
+			NativeRuntimeVersion:             managedRuntimeOptions.NativeRuntimeVersion,
+			OpenCodePluginRuntime:            openCodePluginRuntimeFor(agentConfig, managedRuntimeOptions, m.agentctlStartupConfig.OpenCodePluginEnabled),
+			ComparisonTargets:                workspace.ComparisonTargets,
+			RetainedBuiltinBinding:           workspace.RetainedBuiltinBinding,
+			RetainedResourceCircuitIdentity:  workspace.RetainedResourceCircuitIdentity,
 		},
 		profileInfo: profileInfo,
 	}
 	m.wireKubernetesInventoryPersistence(preparation.request, info.ExecutorType)
 	m.wirePluginExecutorInventoryPersistence(preparation.request, info.ExecutorType)
 	return preparation, nil
+}
+
+func (m *Manager) managedRuntimeWorkspaceOwnerUserID(ctx context.Context, info *WorkspaceInfo) string {
+	input := managedruntime.RepairOwnerInput{}
+	if identity, ok := authn.IdentityFromContext(ctx); ok {
+		input.ActorUserID = identity.UserID
+		input.ActorSynthetic = identity.Synthetic
+	}
+	if info != nil {
+		input.WorkspaceOwnerUserID = info.OwnerUserID
+	}
+	if m.managedRuntimeSingleUserOwner != nil {
+		input.SingleUserFallbackUserID, input.SingleUserFallbackAllowed = m.managedRuntimeSingleUserOwner()
+	}
+	return managedruntime.ResolveRepairOwner(input)
 }
 
 func (m *Manager) resolveWorkspaceExecutionProfile(ctx context.Context, profileID string) *AgentProfileInfo {
@@ -1247,13 +1334,14 @@ func (m *Manager) prepareExecutionEnvironment(
 ) (*executionEnvironmentPreparation, error) {
 	officeAgentProfileID := workspaceOfficeAgentProfileID(info)
 	managedReq := &LaunchRequest{
-		TaskID:             taskID,
-		WorkspaceID:        info.WorkspaceID,
-		SessionID:          info.SessionID,
-		AgentProfileID:     officeAgentProfileID,
-		ExecutionProfileID: executionProfileID,
-		ExecutorType:       info.ExecutorType,
-		Env:                make(map[string]string),
+		TaskID:                    taskID,
+		WorkspaceID:               info.WorkspaceID,
+		ManagedRuntimeOwnerUserID: m.managedRuntimeWorkspaceOwnerUserID(ctx, info),
+		SessionID:                 info.SessionID,
+		AgentProfileID:            officeAgentProfileID,
+		ExecutionProfileID:        executionProfileID,
+		ExecutorType:              info.ExecutorType,
+		Env:                       make(map[string]string),
 	}
 	if err := m.prepareManagedGoCacheEnvironment(ctx, managedReq); err != nil {
 		return nil, err
@@ -1278,9 +1366,11 @@ func (m *Manager) prepareExecutionEnvironment(
 		env = nil
 	}
 	return &executionEnvironmentPreparation{
-		env:                   env,
-		approvedSecretEnvKeys: managedReq.ApprovedSecretEnvKeys,
-		managedGoCachePath:    managedReq.managedGoCachePath,
+		env:                              env,
+		approvedSecretEnvKeys:            managedReq.ApprovedSecretEnvKeys,
+		managedGoCachePath:               managedReq.managedGoCachePath,
+		managedRuntimeInstallerEnvDigest: managedReq.ManagedRuntimeInstallerEnvDigest,
+		managedRuntimeOwnerUserID:        m.managedRuntimeWorkspaceOwnerUserID(ctx, info),
 	}, nil
 }
 
@@ -1288,13 +1378,13 @@ func (m *Manager) initializeCreatedExecution(
 	ctx context.Context,
 	taskID string,
 	info *WorkspaceInfo,
-	executionID string,
 	rt ExecutorBackend,
 	runtimeInstance *ExecutorInstance,
 	preparation *executionCreatePreparation,
 ) *AgentExecution {
 	execution := runtimeInstance.ToAgentExecution(preparation.request)
 	execution.RuntimeName = rt.Name()
+	m.applyCopilotNativeLaunchCapability(execution, rt, preparation.request.DeliveryStreamID)
 	// Set before executionStore.Add: once the execution is registered, a
 	// concurrent EnsurePassthroughExecution can reach it, and it must never
 	// observe a half-initialised resume intent.
@@ -1304,7 +1394,7 @@ func (m *Manager) initializeCreatedExecution(
 		execution.ACPSessionID = info.ACPSessionID
 	}
 	execution.TurnChangeCheckouts = turnChangeCheckoutsFromWorkspaceRepositories(info.WorkspaceRepositories)
-	_, sessionSpan := tracing.TraceSessionStart(context.Background(), taskID, info.SessionID, executionID)
+	_, sessionSpan := tracing.TraceSessionStart(context.Background(), taskID, info.SessionID, execution.ID)
 	execution.SetSessionSpan(sessionSpan)
 	if client, releaseClient := execution.AcquireAgentCtlClient(); client != nil {
 		client.SetTraceContext(execution.SessionTraceContext())
@@ -1317,7 +1407,6 @@ func (m *Manager) publishCreatedExecution(
 	ctx context.Context,
 	runtimeInstance *ExecutorInstance,
 	execution *AgentExecution,
-	executionID string,
 	taskID string,
 ) error {
 	m.setRuntimeInterest(execution.SessionID, true)
@@ -1339,7 +1428,7 @@ func (m *Manager) publishCreatedExecution(
 	go m.waitForAgentctlReady(execution)
 
 	m.logger.Info("execution created",
-		zap.String("execution_id", executionID),
+		zap.String("execution_id", execution.ID),
 		zap.String("task_id", taskID),
 		zap.String("workspace_path", execution.WorkspacePath),
 		zap.Stringer("runtime", execution.RuntimeName))
@@ -1361,8 +1450,9 @@ func (m *Manager) reconcileWorkspaceWorktrees(ctx context.Context, taskID string
 			TaskID: taskID, SessionID: info.SessionID, RepositoryID: repository.RepositoryID,
 			TaskEnvironmentID: info.TaskEnvironmentID, ReuseRequired: info.TaskEnvironmentID != "",
 			RepositoryPath: repository.RepositoryPath, BaseBranch: repository.BaseBranch,
-			IntegrationRef:     repository.IntegrationRef,
-			FallbackBaseBranch: repository.DefaultBranch, CheckoutBranch: repository.CheckoutBranch,
+			BaseBranchFallbackPolicy: repository.BaseBranchFallbackPolicy,
+			IntegrationRef:           repository.IntegrationRef,
+			FallbackBaseBranch:       repository.DefaultBranch, CheckoutBranch: repository.CheckoutBranch,
 			PRNumber: repository.PRNumber, QualifiedPRBase: repository.QualifiedPRBase,
 			WorktreeID: repository.WorktreeID, TaskDirName: info.TaskDirName, WorkspaceID: info.WorkspaceID,
 			RepoName: repository.RepoName, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
@@ -1519,6 +1609,14 @@ func (m *Manager) rollbackRacedExecution(ctx context.Context, rt ExecutorBackend
 	m.logger.Warn("rolling back duplicate execution after session-conflict race",
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID))
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if !adoptionPreservesPeer(runtimeInstance, execution) {
+		if err := m.cleanupProjectMCPFiles(ctx, execution, client); err != nil {
+			m.logger.Warn("failed to release project MCP files during raced launch rollback",
+				zap.String("execution_id", execution.ID), zap.Error(err))
+		}
+	}
+	releaseClient()
 	if rt != nil && runtimeInstance != nil {
 		if stopErr := m.stopLaunchRuntimeOnRollback(ctx, rt, runtimeInstance, execution); stopErr != nil {
 			m.logger.Warn("failed to stop raced runtime instance during rollback",

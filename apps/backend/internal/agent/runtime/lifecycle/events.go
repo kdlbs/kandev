@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -520,6 +521,7 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 		PlanContent:                      event.PlanContent,
 		MCPAttachment:                    event.MCPAttachment,
 		MCPAttachmentAttempt:             event.MCPAttachmentAttempt,
+		ContextCompaction:                event.ContextCompaction,
 		BackgroundWork:                   event.BackgroundWork,
 		BackgroundWorkOutput:             event.BackgroundWorkOutput,
 	}
@@ -550,6 +552,44 @@ func agentStreamSubjectID(ownerKind ExecutionOwnerKind, sessionID, runSessionID 
 		return runSessionID
 	}
 	return sessionID
+}
+
+// PublishWorktreeInventory publishes one filtered linked-worktree snapshot.
+// Identity comes from the execution, never from the agentctl payload.
+func (p *EventPublisher) PublishWorktreeInventory(execution *AgentExecution, inventory *agentctl.WorktreeInventory) {
+	if p.eventBus == nil || execution == nil || inventory == nil {
+		return
+	}
+	entries := make([]WorktreeInventoryEntryData, 0, len(inventory.Entries))
+	for _, entry := range inventory.Entries {
+		entries = append(entries, WorktreeInventoryEntryData{
+			Path:    entry.Path,
+			Branch:  entry.Branch,
+			HeadSHA: entry.HeadSHA,
+		})
+	}
+	observedAt := inventory.ObservedAt
+	if observedAt.IsZero() {
+		observedAt = time.Now().UTC()
+	}
+	payload := &WorktreeInventoryData{
+		TaskID:            execution.TaskID,
+		SessionID:         execution.SessionID,
+		TaskEnvironmentID: execution.TaskEnvironmentID,
+		ExecutorType:      execution.ExecutorType,
+		RepositoryName:    inventory.RepositoryName,
+		CommonDir:         inventory.CommonDir,
+		Entries:           entries,
+		ObservedAt:        observedAt.Format(time.RFC3339Nano),
+	}
+	event := bus.NewEvent(events.WorkspaceWorktreesObserved, "lifecycle", payload)
+	subject := events.BuildWorkspaceWorktreesSubject(execution.SessionID)
+	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
+		p.logger.Error("failed to publish worktree inventory",
+			zap.String("task_id", execution.TaskID),
+			zap.String("session_id", execution.SessionID),
+			zap.Error(err))
+	}
 }
 
 // PublishGitEvent publishes a unified git event to the event bus.
@@ -925,14 +965,16 @@ func (p *EventPublisher) PublishContextWindow(execution *AgentExecution, size, u
 	sessionID := execution.SessionID
 
 	payload := ContextWindowEventPayload{
-		TaskID:                 execution.TaskID,
-		SessionID:              sessionID,
-		AgentID:                execution.ID,
-		ContextWindowSize:      size,
-		ContextWindowUsed:      used,
-		ContextWindowRemaining: remaining,
-		ContextEfficiency:      efficiency,
-		Timestamp:              time.Now().UTC().Format(time.RFC3339Nano),
+		TaskID:                      execution.TaskID,
+		SessionID:                   sessionID,
+		AgentID:                     execution.ID,
+		ContextWindowSize:           size,
+		ContextWindowUsed:           used,
+		ContextWindowRemaining:      remaining,
+		ContextEfficiency:           efficiency,
+		CompactionInferenceDisabled: compactionInferenceDisabledForProvider(execution.AgentID),
+		CopilotNativeSessionEvents:  execution.CopilotNativeSessionEvents,
+		Timestamp:                   time.Now().UTC().Format(time.RFC3339Nano),
 	}
 
 	event := bus.NewEvent(events.ContextWindowUpdated, "agent-manager", payload)
@@ -945,6 +987,13 @@ func (p *EventPublisher) PublishContextWindow(execution *AgentExecution, size, u
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
+}
+
+// compactionInferenceDisabledForProvider reports whether usage drops from this
+// provider cannot distinguish a compaction from a switch between mixed agent
+// contexts.
+func compactionInferenceDisabledForProvider(agentID string) bool {
+	return agentID == agents.CopilotACPAgentID
 }
 
 // PublishAvailableCommands publishes an available commands update event to the event bus.

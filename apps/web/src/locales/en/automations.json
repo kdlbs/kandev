@@ -373,5 +373,18 @@
   "pluginToolsRead": "Read",
   "pluginToolsWrite": "Write",
   "pluginToolsClearedHint": "Save to remove plugin tool access.",
-  "pluginToolsUnavailable": "Plugin unavailable"
+  "pluginToolsUnavailable": "Plugin unavailable",
+  "mcpAccess": "MCP access",
+  "mcpNextStart": "Changes apply at the next agent process start. A reused process keeps its current tools.",
+  "mcpNewTasks": "Applies to newly created tasks. Existing tasks keep their own choices.",
+  "mcpBuiltinPackages": "Built-in packages",
+  "mcpRequired": "Required",
+  "mcpBlocked": "Blocked by workspace policy",
+  "mcpConfigurationAuthority": "Configuration can change authorized workflows, profiles, prompts, executors, and automations. Native tools cannot change MCP access grants. Third-party servers use their own permissions.",
+  "mcpWorkspaceServers": "Workspace MCP servers",
+  "mcpSearch": "Search MCP servers",
+  "mcpInherited": "{{name}} (inherited)",
+  "mcpNoServers": "No additional MCP servers found.",
+  "mcpUnavailable": "{{name}} (unavailable)",
+  "mcpOptionsFailed": "Could not load MCP choices. Saved choices remain unchanged."
 }

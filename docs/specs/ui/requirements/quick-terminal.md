@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-08-03
-updated: 2026-10-09
+updated: 2026-11-12
 owners:
   - kandev
 ---
@@ -35,6 +35,19 @@ Quick Chat and Quick Terminal are both short-lived utilities reached from the sa
 
 - **AC-UI-QUICK-TERMINAL-001.13:** On phones, the selected running Quick Terminal exposes the same shortcut controls as a task terminal, including Ctrl/Shift, interrupt, EOF, Escape, Tab, navigation keys, and symbols. Shortcuts and modified keyboard input target only that terminal. The controls retain terminal focus, remain reachable above the on-screen keyboard, and disappear when selecting a conversation or dismissing the dialog. Modifiers reset when leaving the selected terminal.
 - **AC-UI-QUICK-TERMINAL-001.14:** If a terminal start is active in this client, an earlier resync response shall not replace its connecting state. The client shall continue the host-shell start.
+- **AC-UI-QUICK-TERMINAL-001.15:** When the selected terminal is exited or unavailable, the system shall expose **Start new shell**. Reopening or selecting the tab alone shall not start a shell. A failed recovery shall retain the action for explicit retry.
+- **AC-UI-QUICK-TERMINAL-001.16:** Recovery shall preserve the terminal's tab identity, workspace, label, and saved position. When its previous shell is gone, recovery shall attach a fresh shell to that same tab. If another client already recovered the tab, the system shall reuse its live shell.
+- **AC-UI-QUICK-TERMINAL-001.17:** While recovery is pending, repeated activation shall not create additional shells. The system shall show progress and disable the recovery action. A failed request shall show an error without an automatic retry loop.
+- **AC-UI-QUICK-TERMINAL-001.18:** Late results from this client's previous shell or recovery attempt shall not replace the current state or session association. Recovery shall retain the existing close-during-start and detach-on-dismiss behavior.
+- **AC-UI-QUICK-TERMINAL-001.19:** Desktop and phone users shall reach the same recovery action with a pointer, keyboard, or touch. Phone and coarse-pointer targets shall measure at least 44 CSS pixels in each dimension. The recovery controls shall remain within the dialog and clear the on-screen keyboard.
+- **AC-UI-QUICK-TERMINAL-001.20:** While a terminal close request is pending, the system shall preserve the published lifecycle generation and suppress descriptor creation and PTY startup. A failed delete shall restore the retained tab at that generation; a successful delete shall retire the generation and keep stale mounts fenced.
+- **AC-UI-QUICK-TERMINAL-001.21:** While the same terminal tab remains selected, unrelated application updates and terminal status persistence shall preserve its displayed output, partially typed command, and keyboard focus. These updates shall not reconnect its terminal stream or start another shell. This applies to desktop and phone surfaces.
+- **AC-UI-QUICK-TERMINAL-001.22:** After a terminal connection detaches or is replaced, late events from that connection shall not change terminal status, alter displayed output, or send input. Events from that connection shall not disrupt another terminal.
+
+#### Shell recovery compatibility
+
+Recovery adds an explicit action inside an existing terminal tab. **New Terminal** continues to create a distinct tab and shell.
+Shell processes and output remain ephemeral across a backend restart. Recovery does not restore the previous shell's environment or command history.
 
 ## Out of scope
 
@@ -100,3 +113,7 @@ Cross-device selection synchronization and transcript scroll-position restoratio
 Remembered selection follows the [selection design](../system-design/quick-chat-selection.md).
 
 The migrated technical source is split into [part 1](../system-design/quick-terminal.md).
+
+Explicit shell recovery follows the [recovery design](../system-design/quick-terminal-recovery.md).
+
+Browser continuity follows the [render lifecycle design](../system-design/quick-terminal-render-lifecycle.md).

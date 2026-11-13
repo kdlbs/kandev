@@ -229,7 +229,8 @@ func matchingCanonicalEnvironmentRepoRows(spec RepoSpec, rows []*models.TaskEnvi
 
 func canonicalEnvironmentRepoRowEligible(row *models.TaskEnvironmentRepo, useWorktree bool) bool {
 	return row != nil && row.DeletedAt == nil && row.Status != taskEnvironmentRepoStatusFailed &&
-		row.Status != taskEnvironmentRepoStatusDeleted && (!useWorktree || row.WorktreeID != "")
+		row.Status != taskEnvironmentRepoStatusDeleted && row.Status != models.TaskEnvironmentRepoStatusDetached &&
+		(!useWorktree || row.WorktreeID != "")
 }
 
 // pinDirtyCloneRelocationToSelectedWorktrees keeps an explicitly relocated
@@ -423,7 +424,11 @@ func (e *Executor) reuseExistingEnvironment(ctx context.Context, req *LaunchAgen
 // executor. Clearing it makes local execution fall back to RepositoryPath and
 // makes worktree execution materialize through its normal preparer.
 func prepareExecutorTransition(req *LaunchAgentRequest, env *models.TaskEnvironment) bool {
-	if req == nil || env == nil || env.ExecutorType == "" || env.ExecutorType == req.ExecutorType {
+	if req == nil || env == nil || req.ExecutorType == "" {
+		return false
+	}
+	environmentType, known := env.EffectiveExecutorType()
+	if !known || string(environmentType) == req.ExecutorType {
 		return false
 	}
 	req.WorkspacePath = ""
@@ -584,6 +589,7 @@ func topLevelLaunchRepoSpec(req *LaunchAgentRequest) (RepoSpec, bool) {
 		RepositoryURL:              req.RepositoryURL,
 		RepoName:                   req.RepoName,
 		BaseBranch:                 req.BaseBranch,
+		BaseBranchFallbackPolicy:   req.BaseBranchFallbackPolicy,
 		IntegrationRef:             req.IntegrationRef,
 		DefaultBranch:              req.DefaultBranch,
 		CheckoutBranch:             req.CheckoutBranch,
@@ -780,6 +786,10 @@ func executorRunningMatchesEnvironment(running *models.ExecutorRunning, env *mod
 }
 
 func applyExecutorRunningMetadata(req *LaunchAgentRequest, running *models.ExecutorRunning) {
+	runtimeEnvironmentID, _ := running.Metadata[lifecycle.MetadataKeyTaskEnvironmentID].(string)
+	if req.TaskEnvironmentID != "" && runtimeEnvironmentID != "" && runtimeEnvironmentID != req.TaskEnvironmentID {
+		return
+	}
 	// A workspace can be shared across task sessions, but native execution
 	// identity is valid only for the exact non-empty session that created it.
 	requestIsKubernetes := models.ExecutorType(req.ExecutorType) == models.ExecutorTypeKubernetes

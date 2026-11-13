@@ -12,6 +12,13 @@ import { parseWorkflowStepColor } from "@/lib/task-color-presentation";
 export type ChangeWorkflowState = ReturnType<typeof useChangeWorkflow>;
 type TouchProps = { isTouchSurface: boolean };
 
+const selectorFieldClassName =
+  "border border-input bg-background hover:bg-secondary/50 dark:hover:bg-secondary/50";
+
+function selectorTriggerClassName(isTouchSurface: boolean, className?: string) {
+  return cn(isTouchSurface ? "h-11 w-full" : "h-7 w-full", selectorFieldClassName, className);
+}
+
 function RetryButton({
   onClick,
   label,
@@ -122,8 +129,8 @@ function WorkflowPickerSection({
   workflowSelectId: string;
 }) {
   const { t } = useTranslation();
-  const rowClass = cn("grid gap-1.5", isTouchSurface && "gap-2");
-  const controlClass = isTouchSurface ? "h-11 w-full" : "h-7 w-full";
+  const rowClass = cn("grid min-w-0 grid-cols-1 gap-1.5", isTouchSurface && "gap-2");
+  const controlClass = selectorTriggerClassName(isTouchSurface);
   const workflows: ComboboxOption[] = state.destinations.map((workflow) => ({
     value: workflow.id,
     label: workflow.name,
@@ -180,8 +187,8 @@ function StepPickerSection({
 }) {
   const { t } = useTranslation();
   const steps = state.snapshot?.steps ?? [];
-  const rowClass = cn("grid gap-1.5", isTouchSurface && "gap-2");
-  const controlClass = isTouchSurface ? "h-11 w-full" : "h-7 w-full";
+  const rowClass = cn("grid min-w-0 grid-cols-1 gap-1.5", isTouchSurface && "gap-2");
+  const controlClass = selectorTriggerClassName(isTouchSurface);
   return (
     <>
       {state.selectedWorkflowId && state.snapshotStatus === "loading" && (
@@ -305,10 +312,16 @@ function WorkflowAgentRow({
 }) {
   const { t } = useTranslation();
   const invalid = !row.replacementAvailable || state.sourceProfileErrorId === row.sourceProfileId;
-  const options: ComboboxOption[] = state.profileOptions.map((option) => ({
-    ...option,
-    disabled: false,
-  }));
+  const options: ComboboxOption[] = state.profileOptions.map((option) => {
+    const renderTriggerLabel = option.renderTriggerLabel;
+    return {
+      ...option,
+      disabled: false,
+      renderTriggerLabel: renderTriggerLabel
+        ? () => <span className="flex min-w-0 flex-1 overflow-hidden">{renderTriggerLabel()}</span>
+        : undefined,
+    };
+  });
   if (!options.some((option) => option.value === row.replacementProfileId)) {
     options.unshift({
       value: row.replacementProfileId,
@@ -319,7 +332,10 @@ function WorkflowAgentRow({
   }
   return (
     <div
-      className={cn("grid gap-2 rounded-md border p-3", invalid && "border-destructive/50")}
+      className={cn(
+        "grid min-w-0 grid-cols-1 gap-2 rounded-md border p-3",
+        invalid && "border-destructive/50",
+      )}
       data-testid={`change-workflow-profile-${row.sourceProfileId}`}
     >
       <div className="grid gap-0.5">
@@ -340,7 +356,7 @@ function WorkflowAgentRow({
           dropdownLabel={t("task:agentProfile2")}
           disabled={state.isSubmitting || state.profilesStatus !== "success"}
           touchTarget={isTouchSurface}
-          triggerClassName={cn(isTouchSurface ? "h-11 w-full" : "h-7 w-full", "min-w-0 flex-1")}
+          triggerClassName={selectorTriggerClassName(isTouchSurface, "min-w-0 flex-1")}
           testId={`change-workflow-profile-selector-${row.sourceProfileId}`}
           popoverPortal
         />
@@ -399,7 +415,7 @@ export function ChangeWorkflowAgentSection({
   const steps = state.snapshot?.steps ?? [];
   return (
     <section
-      className="grid gap-3 border-t border-border/70 pt-3"
+      className="grid min-w-0 grid-cols-1 gap-3 border-t border-border/70 pt-3"
       aria-labelledby="change-workflow-agents-heading"
     >
       <div className="grid gap-1">

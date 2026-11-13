@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -356,6 +357,10 @@ type AgentStreamEventData struct {
 	// MCPAttachment is one safe MCP delivery or observation fact.
 	MCPAttachment *streams.MCPAttachmentEvidence `json:"mcp_attachment,omitempty"`
 
+	// ContextCompaction carries validated native compaction evidence for a
+	// context_compaction_observation event.
+	ContextCompaction *streams.ContextCompactionObservation `json:"context_compaction,omitempty"`
+
 	// MCPAttachmentAttempt starts a new backend-owned MCP evidence timeline.
 	MCPAttachmentAttempt *streams.MCPAttachmentAttempt `json:"mcp_attachment_attempt,omitempty"`
 
@@ -434,6 +439,13 @@ type GitEventPayload struct {
 func (p GitEventPayload) GetSessionID() string {
 	return p.SessionID
 }
+
+// WorktreeInventoryData aliases the neutral event payload so lifecycle
+// subscribers and producers share one wire shape.
+type WorktreeInventoryData = events.WorktreeInventoryData
+
+// WorktreeInventoryEntryData aliases the neutral event payload entry.
+type WorktreeInventoryEntryData = events.WorktreeInventoryEntryData
 
 type GitStatusData struct {
 	StatusState         string   `json:"status_state,omitempty"`
@@ -664,7 +676,16 @@ type ContextWindowEventPayload struct {
 	ContextWindowUsed      int64   `json:"context_window_used"`
 	ContextWindowRemaining int64   `json:"context_window_remaining"`
 	ContextEfficiency      float64 `json:"context_efficiency"`
-	Timestamp              string  `json:"timestamp"`
+	// CompactionInferenceDisabled excludes this sample from usage-drop
+	// compaction inference. It is derived from the trusted provider type, not
+	// from the payload's agent_id execution identifier, and is omitted for
+	// eligible providers.
+	CompactionInferenceDisabled bool `json:"compaction_inference_disabled,omitempty"`
+	// CopilotNativeSessionEvents reports whether this launch negotiated the
+	// Copilot native event stream. False on Copilot means native counting is
+	// unavailable, not that zero compactions occurred.
+	CopilotNativeSessionEvents bool   `json:"copilot_native_session_events,omitempty"`
+	Timestamp                  string `json:"timestamp"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).

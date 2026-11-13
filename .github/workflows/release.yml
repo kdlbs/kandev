@@ -103,9 +103,58 @@ permissions:
   contents: read
 
 jobs:
+  npm-auth-preflight:
+    name: Verify npm trusted publishing authentication
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        inputs.backfill_tag == ''
+      }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # Required for package-scoped OIDC token exchange
+    env:
+      GITHUB_WORKFLOW_SHA: ${{ github.workflow_sha }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          # The helper runs from the trusted workflow revision, not the
+          # selected dispatch ref.
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Verify package-scoped npm authentication
+        env:
+          SDK_SCOPE_OWNERSHIP_CONFIRMED: ${{ vars.SDK_SCOPE_OWNERSHIP_CONFIRMED }}
+        run: |
+          set -euo pipefail
+          source scripts/release/npm-packages.sh
+          args=()
+          for package in "${NIGHTLY_PACKAGES[@]}"; do
+            args+=(--package "$package")
+          done
+          node scripts/release/npm-auth-preflight.mjs "${args[@]}" \
+            --sdk-package "@kdlbs/plugin-sdk" \
+            --checkout-sha "$(git rev-parse HEAD)"
+
   prepare:
     name: Prepare release (bump version, PR, tag)
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' }}
+    needs: [npm-auth-preflight]
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        (needs.npm-auth-preflight.result == 'success' ||
+         (needs.npm-auth-preflight.result == 'skipped' &&
+          (inputs.dry_run || inputs.desktop_validation_only || inputs.backfill_tag != '')))
+      }}
     runs-on: ubuntu-latest
     environment: ${{ (!inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '') && 'release' || 'release-validation' }}
     permissions:
@@ -1079,11 +1128,11 @@ jobs:
             platform: linux-arm64
             goos: linux
             goarch: arm64
-          - os: macos-14
+          - os: macos-15-intel
             platform: macos-x64
             goos: darwin
             goarch: amd64
-          - os: macos-14
+          - os: macos-15
             platform: macos-arm64
             goos: darwin
             goarch: arm64
@@ -1097,6 +1146,8 @@ jobs:
       CGO_ENABLED: 1
       GOOS: ${{ matrix.goos }}
       GOARCH: ${{ matrix.goarch }}
+      # Keep the runtime deployment target independent of the runner image.
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.goos == 'darwin' && '14.0' || '' }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
@@ -3430,6 +3481,8 @@ jobs:
         github.run_attempt == 1
       }}
     uses: ./.github/workflows/announce-discord-release.yml
+    secrets:
+      DISCORD_GENERAL_WEBHOOK_URL: ${{ secrets.DISCORD_GENERAL_WEBHOOK_URL }}
     with:
       release_tag: ${{ needs.prepare.outputs.tag }}
       mode: create

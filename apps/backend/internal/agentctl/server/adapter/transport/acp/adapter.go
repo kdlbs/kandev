@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/acp-go-sdk"
@@ -121,6 +122,34 @@ type Adapter struct {
 	// Agent identity (from config, for logging)
 	agentID string
 
+	// copilotNativeSessionEvents enables the opt-in Copilot native session-event
+	// subscription and its normalization path for this launch.
+	copilotNativeSessionEvents bool
+	// copilotNativeActive requires both the launch opt-in and a qualified
+	// Copilot runtime contract. An unqualified runtime keeps the legacy gauge
+	// and reports native collection unavailable. It is written during
+	// Initialize while SDK notifications may already arrive, so it is atomic.
+	copilotNativeActive atomic.Bool
+
+	// pendingCopilotNative buffers bounded vendor events that arrive while the
+	// native conversation is being created, loaded, or replaced. It is drained
+	// in FIFO order after the binding barrier and never re-pointed to another
+	// session.
+	pendingCopilotNative        []decodedCopilotNativeEvent
+	pendingCopilotNativeDropped bool
+
+	// nativeGaugeMaxSize is the sticky native token-limit baseline per session.
+	// It is deliberately separate from usageBySession so native root readings
+	// never alter prompt token/cost accounting.
+	nativeGaugeMaxSize map[string]int64
+
+	// bindingCopilotNative holds vendor events while a session/new response is
+	// establishing the native conversation identity.
+	bindingCopilotNative bool
+	// onNativeBindingInstalled is a test hook that runs on the update worker
+	// after the binding is published and before buffered events drain.
+	onNativeBindingInstalled func()
+
 	// antigravityJournalRoot overrides the host native journal root. Empty
 	// resolves the current user's home; tests and qualification set it.
 	antigravityJournalRoot string
@@ -166,6 +195,9 @@ type Adapter struct {
 
 	// Update channel
 	updatesCh chan AgentEvent
+	// mcpAttachmentEventPersister commits attachment events before they enter
+	// the adapter queue so later observations cannot overtake their attempt.
+	mcpAttachmentEventPersister func(AgentEvent) (AgentEvent, error)
 	// Emission is serialized independently of mu so control events flush pending
 	// shell output without holding the adapter state lock during backpressure.
 	updateEmitMu       sync.Mutex
@@ -544,33 +576,35 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 	l := log.WithFields(zap.String("adapter", "acp"), zap.String("agent_id", cfg.AgentID))
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &Adapter{
-		cfg:                       cfg,
-		logger:                    l,
-		agentID:                   cfg.AgentID,
-		backgroundWorkEnabled:     cfg.AgentBackgroundWorkEnabled,
-		normalizer:                NewNormalizerWithBackgroundWork(cfg.AgentID, cfg.AgentBackgroundWorkEnabled),
-		dialect:                   newACPDialect(cfg.AgentID),
-		updatesCh:                 make(chan AgentEvent, 100),
-		notifQueue:                make(chan notifWork, notifQueueCapacity),
-		activeToolCalls:           make(map[string]*streams.NormalizedPayload),
-		contextCompactions:        make(map[string]*streams.NormalizedPayload),
-		openCodePluginClaims:      make(map[string]opencodeplugin.Claim),
-		cursorTaskMetaBySession:   make(map[string]map[string]cursorTaskMeta),
-		toolCallParents:           make(map[string]string),
-		handoffProtectedToolCalls: make(map[string]struct{}),
-		activeMonitors:            make(map[string]map[string]string),
-		pendingWakeups:            make(map[string]*pendingWakeup),
-		usageBySession:            make(map[string]*usageTracker),
-		contextSamples:            make(map[string]contextWindowSample),
-		attachMgr:                 shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
-		promptGate:                make(chan struct{}, 1),
-		asyncTurnFinalizers:       make(map[string]*asyncTurnFinalizer),
-		cancelJoinTimeout:         cfg.PromptCancelJoinTimeout,
-		asyncTurnEpochs:           make(map[string]uint64),
-		turnStartedAt:             make(map[string]time.Time),
-		lifetimeCtx:               ctx,
-		lifetimeCancel:            cancel,
-		closedCh:                  make(chan struct{}),
+		cfg:                        cfg,
+		logger:                     l,
+		agentID:                    cfg.AgentID,
+		copilotNativeSessionEvents: cfg.CopilotNativeSessionEvents && cfg.AgentID == copilotAgentID,
+		backgroundWorkEnabled:      cfg.AgentBackgroundWorkEnabled,
+		normalizer:                 NewNormalizerWithBackgroundWork(cfg.AgentID, cfg.AgentBackgroundWorkEnabled),
+		dialect:                    newACPDialect(cfg.AgentID),
+		updatesCh:                  make(chan AgentEvent, 100),
+		notifQueue:                 make(chan notifWork, notifQueueCapacity),
+		activeToolCalls:            make(map[string]*streams.NormalizedPayload),
+		contextCompactions:         make(map[string]*streams.NormalizedPayload),
+		openCodePluginClaims:       make(map[string]opencodeplugin.Claim),
+		cursorTaskMetaBySession:    make(map[string]map[string]cursorTaskMeta),
+		toolCallParents:            make(map[string]string),
+		handoffProtectedToolCalls:  make(map[string]struct{}),
+		activeMonitors:             make(map[string]map[string]string),
+		pendingWakeups:             make(map[string]*pendingWakeup),
+		usageBySession:             make(map[string]*usageTracker),
+		contextSamples:             make(map[string]contextWindowSample),
+		nativeGaugeMaxSize:         make(map[string]int64),
+		attachMgr:                  shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
+		promptGate:                 make(chan struct{}, 1),
+		asyncTurnFinalizers:        make(map[string]*asyncTurnFinalizer),
+		cancelJoinTimeout:          cfg.PromptCancelJoinTimeout,
+		asyncTurnEpochs:            make(map[string]uint64),
+		turnStartedAt:              make(map[string]time.Time),
+		lifetimeCtx:                ctx,
+		lifetimeCancel:             cancel,
+		closedCh:                   make(chan struct{}),
 	}
 	a.shellSnapshotTimer = time.NewTimer(shellSnapshotInterval)
 	a.shellSnapshotTimer.Stop()
@@ -633,12 +667,19 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	// queue and is drained by our update worker. Requires a coder/acp-go-sdk
 	// fork with WithMaxQueuedNotifications; see go.mod replace directive.
 	notifQueueCap := acpNotifQueueCapacity(a.cfg.NotificationQueueCapacity)
+	connectionOptions := []acp.ConnectionOption{
+		acp.WithMaxQueuedNotifications(notifQueueCap),
+	}
+	if a.copilotNativeSessionEvents {
+		connectionOptions = append(connectionOptions,
+			acp.WithAllowedExtensionNotifications(copilotSessionEventMethod))
+	}
 	a.acpConn = acpclient.NewClientSideConnectionWithLogger(
 		a.acpClient,
 		a.stdin,
 		a.stdout,
 		slog.Default().With("component", "acp-conn"),
-		acp.WithMaxQueuedNotifications(notifQueueCap),
+		connectionOptions...,
 	)
 	a.logger.Debug("ACP connection notification queue sized",
 		zap.Int("capacity", notifQueueCap))
@@ -649,7 +690,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 
 	resp, err := a.acpConn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion:    acp.ProtocolVersionNumber,
-		ClientCapabilities: clientCapabilitiesForAgent(a.agentID, a.cfg.ProviderGatewayAuth != nil),
+		ClientCapabilities: clientCapabilitiesForAgent(a.agentID, a.cfg.ProviderGatewayAuth != nil, a.copilotNativeSessionEvents),
 		ClientInfo:         clientInfoForAgent(a.agentID),
 	})
 	if err != nil {
@@ -667,6 +708,8 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		a.agentInfo.Version = resp.AgentInfo.Version
 	}
 	a.capabilities = resp.AgentCapabilities
+	a.copilotNativeActive.Store(a.copilotNativeSessionEvents && a.agentInfo != nil &&
+		copilotRuntimeQualified(a.agentInfo.Version))
 	promptQueueing := agentAdvertisesPromptQueueing(resp.AgentCapabilities)
 	promptSuggestionSupport, suggestionEvidence := claudePromptSuggestionSupport(
 		a.agentInfo.Name, a.agentInfo.Version, resp.AgentCapabilities,

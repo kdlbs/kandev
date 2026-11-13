@@ -27,6 +27,47 @@ const configChangePollInterval = 10 * time.Millisecond
 // results for the servers that survive its own capability filtering.
 func (a *Adapter) PublishesMCPAttachmentResults() bool { return true }
 
+func (a *Adapter) TryPublishMCPAttachmentEvent(
+	event AgentEvent,
+	persist func(AgentEvent) (AgentEvent, error),
+) (bool, error) {
+	a.updateEmitMu.Lock()
+	defer a.updateEmitMu.Unlock()
+	if persist != nil {
+		persisted, err := persist(event)
+		if err != nil {
+			return false, err
+		}
+		event = persisted
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.sendUpdateLocked(event), nil
+}
+
+func (a *Adapter) SetMCPAttachmentEventPersister(persist func(AgentEvent) (AgentEvent, error)) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.mcpAttachmentEventPersister = persist
+}
+
+func (a *Adapter) sendMCPAttachmentUpdate(event AgentEvent) {
+	a.mu.RLock()
+	persist := a.mcpAttachmentEventPersister
+	a.mu.RUnlock()
+	if persist == nil {
+		a.sendUpdate(event)
+		return
+	}
+
+	queued, err := a.TryPublishMCPAttachmentEvent(event, persist)
+	if err != nil {
+		a.logger.Error("failed to commit MCP attachment event", zap.Error(err))
+	} else if !queued {
+		a.logger.Warn("adapter updates channel full, dropping MCP attachment event")
+	}
+}
+
 // lockSessionTransition waits for the previous reset's cleanup to finish before
 // allowing another session transition. The reset response remains independent
 // from session/close, while this gate keeps a later load/reset from overtaking
@@ -149,6 +190,8 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	a.mu.Lock()
 	conn := a.acpConn
 	priorSessionID := a.sessionID
+	a.pendingCopilotNative = nil
+	a.pendingCopilotNativeDropped = false
 	a.mu.Unlock()
 
 	if conn == nil {
@@ -180,31 +223,40 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 
 	caps := effectiveMcpCapabilities(a.capabilities.McpCapabilities, a.cfg)
 	filteredServers, decisions := filterMcpServersWithDecisions(mcpServers, caps, a.logger)
-	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers); err != nil {
+	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers, a.projectDeliveryEvidence()); err != nil {
+		a.emitMCPAttachmentPreflightFailure(ctx, mcpServers, filteredServers, decisions, err)
 		return "", err
-	}
-	for _, decision := range decisions {
-		kind := streams.MCPAttachmentEvidenceDelivered
-		if !decision.Included {
-			kind = streams.MCPAttachmentEvidenceFiltered
-		}
-		a.emitMCPAttachmentEvidence(ctx, decision.Server, kind, decision.ReasonCode, "")
 	}
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	a.mu.Lock()
+	// Publish the binding barrier only once every pre-RPC return has been
+	// cleared, so a failed preparation cannot strand the previous session.
+	a.bindingCopilotNative = a.copilotNativeSessionEvents
+	a.mu.Unlock()
 	resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
 		Cwd:        a.cfg.WorkDir,
 		McpServers: toACPMcpServers(filteredServers),
 		Meta:       a.promptSuggestionSessionMeta(),
 	})
 	if err != nil {
-		for _, server := range filteredServers {
-			a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceExplicitError, "session_new_failed", err.Error())
+		authenticationFailure := ProjectSessionOperationFailure(err, nil) != nil
+		if !authenticationFailure {
+			a.emitMCPAttachmentStart(ctx)
+			a.emitMCPDecisionEvidence(ctx, decisions)
+			for _, server := range filteredServers {
+				a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceExplicitError, "session_new_failed", err.Error())
+			}
 		}
 		// An agent may have emitted provisional usage before returning an RPC
 		// error. Clear at the FIFO boundary so an already queued notification
 		// cannot repopulate the tracker after this failure cleanup.
+		a.mu.Lock()
+		a.bindingCopilotNative = false
+		a.pendingCopilotNative = nil
+		a.pendingCopilotNativeDropped = false
+		a.mu.Unlock()
 		if !a.syncNotifQueueThen(a.clearUsageTrackers) {
 			a.clearUsageTrackers()
 		}
@@ -212,11 +264,17 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 		if a.maybeEmitAuthRequired(err) {
 			return "", fmt.Errorf("authentication required: %w", err)
 		}
+		if authenticationFailure {
+			return "", fmt.Errorf("authentication required: %w", err)
+		}
 		return "", fmt.Errorf("failed to create session: %w", err)
 	}
+	a.emitMCPAttachmentStart(ctx)
+	projectAccepted := a.emitMCPDecisionEvidence(ctx, decisions)
 	for _, server := range filteredServers {
 		a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceSessionAccepted, "", "")
 	}
+	a.emitProjectMCPSessionAccepted(ctx, projectAccepted)
 
 	sessionID := string(resp.SessionId)
 	if !a.syncNotifQueueThen(func() {
@@ -234,11 +292,11 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 
 	initialModels, initialConfigOptions := a.initialSessionConfigState(resp.Meta, resp.ConfigOptions, resp.LegacyModels)
 	a.mu.Lock()
-	a.sessionID = sessionID
 	a.advanceNativeGenerationLocked()
 	a.sessionSettingsPolicy = ""
 	a.configGeneration++
 	clear(a.contextSamples)
+	clear(a.nativeGaugeMaxSize)
 	// Reset session-scoped model caches before computing the new session's
 	// state so a session without a model surface can't reuse the previous
 	// session's models / configOptions for validation in SetModel.
@@ -259,6 +317,13 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 		a.resetPromptSuggestionOrigin(priorPromptTurn)
 	}
 	a.invalidatePromptTurnOwnership(priorPromptTurn)
+	if !a.installNativeBindingBarrier(sessionID, false, a.copilotNativeSessionEvents) {
+		barrierErr := context.Cause(a.lifetimeCtx)
+		if barrierErr == nil {
+			barrierErr = context.Canceled
+		}
+		return "", fmt.Errorf("failed to bind new session notifications: %w", barrierErr)
+	}
 	a.attachMgr.SetSessionID(sessionID)
 
 	span.SetAttributes(attribute.String("session_id", sessionID))
@@ -448,6 +513,27 @@ func filterMcpServersWithDecisions(
 	return filtered, decisions
 }
 
+// emitMCPAttachmentStart publishes the backend-owned attempt and configuration
+// snapshot after a session operation has produced an attributable result.
+func (a *Adapter) emitMCPAttachmentStart(ctx context.Context) {
+	attachmentContext, ok := streams.MCPAttachmentContextFromContext(ctx)
+	if !ok {
+		return
+	}
+	attempt := attachmentContext.Attempt
+	a.sendMCPAttachmentUpdate(AgentEvent{
+		Type:                 streams.EventTypeMCPAttachment,
+		MCPAttachmentAttempt: &attempt,
+	})
+	for _, evidence := range attachmentContext.InitialEvidence {
+		observation := evidence
+		a.sendMCPAttachmentUpdate(AgentEvent{
+			Type:          streams.EventTypeMCPAttachment,
+			MCPAttachment: &observation,
+		})
+	}
+}
+
 // emitMCPAttachmentEvidence forwards only safe, backend-attributed attachment
 // facts through the adapter's existing update stream. A missing context means
 // this call was made outside agentctl's lifecycle boundary, so it deliberately
@@ -471,7 +557,7 @@ func (a *Adapter) emitMCPAttachmentEvidence(
 	if server.Name == kandevMCPServerName || server.IsInjectedBuiltin() {
 		source = streams.MCPServerSourceKandev
 	}
-	a.sendUpdate(AgentEvent{
+	a.sendMCPAttachmentUpdate(AgentEvent{
 		Type: streams.EventTypeMCPAttachment,
 		MCPAttachment: &streams.MCPAttachmentEvidence{
 			BuiltinPackage: server.BuiltinPackage,
@@ -578,6 +664,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	conn := a.acpConn
 	capabilities := a.capabilities
 	priorSessionID := a.sessionID
+	a.pendingCopilotNative = nil
 	a.mu.Unlock()
 
 	if conn == nil {
@@ -620,15 +707,9 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	// Filter MCP servers by agent capabilities (same logic as NewSession).
 	caps := effectiveMcpCapabilities(a.capabilities.McpCapabilities, a.cfg)
 	filteredServers, decisions := filterMcpServersWithDecisions(mcpServers, caps, a.logger)
-	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers); err != nil {
+	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers, a.projectDeliveryEvidence()); err != nil {
+		a.emitMCPAttachmentPreflightFailure(ctx, mcpServers, filteredServers, decisions, err)
 		return err
-	}
-	for _, decision := range decisions {
-		kind := streams.MCPAttachmentEvidenceDelivered
-		if !decision.Included {
-			kind = streams.MCPAttachmentEvidenceFiltered
-		}
-		a.emitMCPAttachmentEvidence(ctx, decision.Server, kind, decision.ReasonCode, "")
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -652,8 +733,12 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	})
 
 	if err != nil {
-		for _, server := range filteredServers {
-			a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceExplicitError, "session_load_failed", err.Error())
+		if ProjectSessionOperationFailure(err, nil) == nil {
+			a.emitMCPAttachmentStart(ctx)
+			a.emitMCPDecisionEvidence(ctx, decisions)
+			for _, server := range filteredServers {
+				a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceExplicitError, "session_load_failed", err.Error())
+			}
 		}
 		// Notifications sent before the failed RPC response may still be queued
 		// on the adapter worker. Clear replay suppression only at a FIFO barrier,
@@ -663,6 +748,8 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 			a.mu.Lock()
 			a.isLoadingSession = false
 			a.loadReplayPlan = nil
+			a.pendingCopilotNative = nil
+			a.pendingCopilotNativeDropped = false
 			a.mu.Unlock()
 		}
 		if !a.syncNotifQueueThen(clearFailedLoad) {
@@ -673,9 +760,12 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		span.RecordError(err)
 		return &SessionRestoreError{Reason: sessionRestoreReason(err), Cause: err}
 	}
+	a.emitMCPAttachmentStart(ctx)
+	projectAccepted := a.emitMCPDecisionEvidence(ctx, decisions)
 	for _, server := range filteredServers {
 		a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceSessionAccepted, "", "")
 	}
+	a.emitProjectMCPSessionAccepted(ctx, projectAccepted)
 
 	initialModels, initialConfigOptions := a.initialSessionConfigState(resp.Meta, resp.ConfigOptions, resp.LegacyModels)
 
@@ -686,15 +776,14 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	a.syncNotifQueue()
 
 	a.mu.Lock()
-	a.sessionID = sessionID
 	a.advanceNativeGenerationLocked()
 	a.sessionSettingsPolicy = providerRestoredPolicy(settingsPolicy)
 	a.configGeneration++
 	clear(a.contextSamples)
+	clear(a.nativeGaugeMaxSize)
 	a.consumeUsageBaselineLocked(sessionID)
 	replayPlan := a.loadReplayPlan
 	a.loadReplayPlan = nil
-	a.isLoadingSession = false
 	// Reset session-scoped model caches so a load that lands on a session
 	// without a model surface can't reuse the previous session's data.
 	a.availableModels = nil
@@ -713,6 +802,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		a.resetPromptSuggestionOrigin(priorPromptTurn)
 	}
 	a.invalidatePromptTurnOwnership(priorPromptTurn)
+	a.installNativeBindingBarrier(sessionID, true, a.copilotNativeSessionEvents)
 	a.attachMgr.SetSessionID(sessionID)
 
 	span.SetAttributes(attribute.String("session_id", sessionID))
@@ -777,38 +867,56 @@ func (a *Adapter) ResumeSession(ctx context.Context, sessionID string, mcpServer
 	}
 	caps := effectiveMcpCapabilities(a.capabilities.McpCapabilities, a.cfg)
 	filteredServers, decisions := filterMcpServersWithDecisions(mcpServers, caps, a.logger)
-	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers); err != nil {
+	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers, a.projectDeliveryEvidence()); err != nil {
+		a.emitMCPAttachmentPreflightFailure(ctx, mcpServers, filteredServers, decisions, err)
 		return err
-	}
-	for _, decision := range decisions {
-		kind := streams.MCPAttachmentEvidenceDelivered
-		if !decision.Included {
-			kind = streams.MCPAttachmentEvidenceFiltered
-		}
-		a.emitMCPAttachmentEvidence(ctx, decision.Server, kind, decision.ReasonCode, "")
 	}
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.resume")
 	defer span.End()
+	a.mu.Lock()
+	a.bindingCopilotNative = a.copilotNativeSessionEvents
+	a.pendingCopilotNative = nil
+	a.pendingCopilotNativeDropped = false
+	a.mu.Unlock()
 	_, err := conn.ResumeSession(ctx, acp.ResumeSessionRequest{
 		SessionId: acp.SessionId(sessionID), Cwd: a.cfg.WorkDir,
 		McpServers: toACPMcpServers(filteredServers),
 		Meta:       a.promptSuggestionSessionMeta(),
 	})
 	if err != nil {
-		for _, server := range filteredServers {
-			a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceExplicitError, "session_resume_failed", err.Error())
+		if ProjectSessionOperationFailure(err, nil) == nil {
+			a.emitMCPAttachmentStart(ctx)
+			a.emitMCPDecisionEvidence(ctx, decisions)
+			for _, server := range filteredServers {
+				a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceExplicitError, "session_resume_failed", err.Error())
+			}
 		}
+		a.mu.Lock()
+		a.bindingCopilotNative = false
+		a.pendingCopilotNative = nil
+		a.pendingCopilotNativeDropped = false
+		a.mu.Unlock()
 		span.RecordError(err)
 		return fmt.Errorf("failed to resume session: %w", err)
 	}
+	a.emitMCPAttachmentStart(ctx)
+	projectAccepted := a.emitMCPDecisionEvidence(ctx, decisions)
 	for _, server := range filteredServers {
 		a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceSessionAccepted, "", "")
 	}
+	a.emitProjectMCPSessionAccepted(ctx, projectAccepted)
 	a.mu.Lock()
-	a.sessionID = sessionID
+	currentSessionID := a.sessionID
+	if currentSessionID != "" && currentSessionID != sessionID {
+		a.mu.Unlock()
+		return fmt.Errorf("session was replaced during resume")
+	}
+	clear(a.contextSamples)
+	clear(a.nativeGaugeMaxSize)
 	a.advanceNativeGenerationLocked()
 	a.configGeneration++
 	a.mu.Unlock()
+	a.installNativeBindingBarrier(sessionID, false, a.copilotNativeSessionEvents)
 	a.attachMgr.SetSessionID(sessionID)
 	span.SetAttributes(attribute.String("session_id", sessionID))
 	a.logger.Info("resumed session", zap.String("session_id", sessionID))
@@ -1495,6 +1603,7 @@ func (a *Adapter) finalizeSetModel(
 	if method == sessionmodel.MethodNone {
 		return
 	}
+	a.resetContextWindowMaxSize(sessionID)
 	if len(responseConfig) > 0 {
 		a.emitAuthoritativeConfigOptions(sessionID, configID, responseConfig, available, false, expectedGeneration...)
 		return

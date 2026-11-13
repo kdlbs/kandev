@@ -99,6 +99,26 @@ func (s *Service) AppendReferenceExpansionsWithContext(
 	return prompt + "\n\n" + sysprompt.Wrap(trustedContext), trustedContext
 }
 
+// AppendReferenceExpansionsWithContextStrict resolves references with the same
+// cleanup and formatting rules as AppendReferenceExpansionsWithContext, but
+// returns a failed saved-prompt read to the caller instead of silently
+// returning the unexpanded prompt.
+func (s *Service) AppendReferenceExpansionsWithContextStrict(
+	ctx context.Context,
+	prompt string,
+	log *zap.Logger,
+) (expandedPrompt, trustedContext string, err error) {
+	prompt, expansions, err := s.cleanAndResolvePromptReferencesStrict(ctx, prompt, log)
+	if err != nil {
+		return prompt, "", err
+	}
+	if len(expansions) == 0 {
+		return prompt, "", nil
+	}
+	trustedContext = FormatPromptReferenceExpansions(expansions)
+	return prompt + "\n\n" + sysprompt.Wrap(trustedContext), trustedContext, nil
+}
+
 // AppendSkillReferenceExpansions is the skill-content variant of
 // AppendReferenceExpansions. It applies the same cleaning, resolution, and
 // sanitization, and appends a block whose instruction line refers to the
@@ -120,6 +140,15 @@ func (s *Service) cleanAndResolvePromptReferences(
 	prompt string,
 	log *zap.Logger,
 ) (string, []PromptReferenceExpansion) {
+	prompt, expansions, _ := s.cleanAndResolvePromptReferencesStrict(ctx, prompt, log)
+	return prompt, expansions
+}
+
+func (s *Service) cleanAndResolvePromptReferencesStrict(
+	ctx context.Context,
+	prompt string,
+	log *zap.Logger,
+) (string, []PromptReferenceExpansion, error) {
 	// Browser-provided prompt definitions and expansion-shaped input blocks
 	// carry no provenance. Remove them before resolving so stale or forged
 	// content cannot reach the agent or suppress a real saved-prompt lookup.
@@ -145,16 +174,16 @@ func (s *Service) cleanAndResolvePromptReferences(
 		prompt = strings.TrimSpace(cleanedPrompt)
 	}
 	if !strings.Contains(prompt, "@") {
-		return prompt, nil
+		return prompt, nil, nil
 	}
 	expansions, err := s.ResolvePromptReferences(ctx, prompt)
 	if err != nil {
 		if log != nil {
 			log.Warn("failed to resolve prompt references", zap.Error(err))
 		}
-		return prompt, nil
+		return prompt, nil, err
 	}
-	return prompt, expansions
+	return prompt, expansions, nil
 }
 
 // AppendReferenceExpansionsToTrustedContext adds references from newly

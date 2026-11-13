@@ -18,7 +18,12 @@ import type {
   TaskSessionAgentctlPayload,
 } from "@/lib/types/backend";
 import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
-import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
+import {
+  mergeCompactionCountValue,
+  mergeCompactionReportingValue,
+  reconcileContextWindowMetadata,
+  sameContextWindowEntry,
+} from "@/lib/state/slices/session-runtime/context-window";
 import { ROUTE_SESSION_FIELDS } from "@/lib/ws/handlers/agent-session-route-fields";
 import { t } from "@/lib/i18n";
 import { maybeMarkQuickChatUnseenIdle } from "@/lib/ws/handlers/quick-chat-unseen";
@@ -272,7 +277,10 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
   if (payload.agent_profile_id) update.agent_profile_id = payload.agent_profile_id;
   if (payload.agent_profile_snapshot)
     update.agent_profile_snapshot = payload.agent_profile_snapshot;
-  if (payload.session_metadata !== undefined) update.metadata = payload.session_metadata;
+  const metadataSources = [payload.session_metadata, payload.metadata].filter(
+    (candidate) => candidate && typeof candidate === "object",
+  ) as Array<Record<string, unknown>>;
+  if (metadataSources.length > 0) update.metadata = Object.assign({}, ...metadataSources);
   if (payload.task_environment_id) update.task_environment_id = payload.task_environment_id;
   if (payload.updated_at) update.updated_at = payload.updated_at;
   carryDefinedFields(update, payload);
@@ -333,17 +341,41 @@ function extractContextWindow(store: StoreApi<AppState>, sessionId: string, payl
     (candidate) =>
       candidate &&
       typeof candidate === "object" &&
-      Object.prototype.hasOwnProperty.call(candidate, "context_window"),
+      (Object.prototype.hasOwnProperty.call(candidate, "context_window") ||
+        Object.prototype.hasOwnProperty.call(candidate, "context_compaction_count") ||
+        Object.prototype.hasOwnProperty.call(candidate, "context_compaction_reporting")),
   ) as Record<string, unknown> | undefined;
   if (!metadata) return;
-  const contextWindow = metadata.context_window;
-  const entry = parseContextWindowEntry(
-    contextWindow,
-    new Date().toISOString(),
+  const existing = store.getState().contextWindow?.bySessionId?.[sessionId];
+  const sessionMetadata = store.getState().taskSessions?.items?.[sessionId]?.metadata as
+    | Record<string, unknown>
+    | undefined;
+  const count = mergeCompactionCountValue(
     metadata.context_compaction_count,
+    sessionMetadata?.context_compaction_count,
   );
-  if (entry) store.getState().setContextWindow(sessionId, entry);
-  else store.getState().clearContextWindow(sessionId);
+  const reporting = mergeCompactionReportingValue(
+    metadata.context_compaction_reporting,
+    sessionMetadata?.context_compaction_reporting,
+  );
+  const hasGauge = Object.prototype.hasOwnProperty.call(metadata, "context_window");
+  const next = reconcileContextWindowMetadata({
+    current: existing,
+    gauge: metadata.context_window,
+    hasGauge,
+    count,
+    reporting,
+    timestamp: new Date().toISOString(),
+    allowExplicitClear: true,
+  });
+  if (next === undefined) return;
+  if (next === null) {
+    store.getState().clearContextWindow(sessionId);
+    return;
+  }
+  if (!sameContextWindowEntry(next, existing)) {
+    store.getState().setContextWindow(sessionId, next);
+  }
 }
 
 /** Copy agentctl "ready" status from one session to another (same-task switch). */

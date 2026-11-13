@@ -30,8 +30,11 @@ import {
   isPRQueued,
   isPRWaitingOnBranchProtection,
   pickDefaultPR,
+  hasAnyPRMergeConflict,
 } from "@/components/github/pr-task-icon";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { PRStatusGlyph } from "@/components/github/pr-status-glyph";
+import { aggregatePRCIState } from "@/components/github/pr-ci-state";
 import {
   ChangeRequestStatusChip,
   ChangeRequestStatusChipHoverArea,
@@ -279,7 +282,7 @@ function PRStatusChipHoverCard({ pr, automation, refreshTaskPR, triggerRef }: Si
         <PopoverAnchor asChild>
           <ChangeRequestStatusChip ref={ref} {...chipButtonAttrs(pr, status, automation, t)}>
             <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-            <ChipStatusGlyph status={status} />
+            <ChipStatusGlyph status={status} prs={[pr]} />
             <AutomationFlagBadges automation={automation} />
           </ChangeRequestStatusChip>
         </PopoverAnchor>
@@ -345,7 +348,7 @@ function MultiChipGlyph({
   return (
     <>
       <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-      <ChipStatusGlyph status={status} />
+      <ChipStatusGlyph status={status} prs={prs} />
       <span className="text-[9px] font-semibold leading-none tabular-nums">{prs.length}</span>
       <AutomationFlagBadges automation={automation} />
     </>
@@ -454,7 +457,7 @@ function PRStatusChipDrawer({ pr, automation, refreshTaskPR, triggerRef }: Singl
           {...chipButtonAttrs(pr, status, automation, t)}
         >
           <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-          <ChipStatusGlyph status={status} />
+          <ChipStatusGlyph status={status} prs={[pr]} />
           <AutomationFlagBadges automation={automation} />
         </ChangeRequestStatusChip>
       </DrawerTrigger>
@@ -472,7 +475,16 @@ function PRStatusChipDrawer({ pr, automation, refreshTaskPR, triggerRef }: Singl
   );
 }
 
-function ChipStatusGlyph({ status }: { status: ChipStatus }) {
+function ChipStatusGlyph({ status, prs }: { status: ChipStatus; prs: TaskPR[] }) {
+  if (status === "draft") {
+    return (
+      <PRStatusGlyph
+        colorClassName="text-muted-foreground"
+        ciState={aggregatePRCIState(prs).state}
+        hasMergeConflicts={hasAnyPRMergeConflict(prs)}
+      />
+    );
+  }
   switch (status) {
     case "passed":
       return <IconCircleCheckFilled className="h-3.5 w-3.5 text-green-500" aria-hidden="true" />;
@@ -490,8 +502,6 @@ function ChipStatusGlyph({ status }: { status: ChipStatus }) {
           aria-hidden="true"
         />
       );
-    case "draft":
-      return <IconPointFilled className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />;
     case "blocked":
       return (
         <IconShield

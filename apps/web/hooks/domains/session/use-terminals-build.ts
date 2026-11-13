@@ -54,9 +54,11 @@ export function appendTerminalIfMissing(terminals: Terminal[], terminal: Termina
  * `activeTab` is only honoured when it points at a tab that is still
  * selectable — i.e. present in `terminals` or the synthetic "commands"
  * tab. A stale id (e.g. left over from a terminal that was parked or
- * destroyed in another tab) would otherwise stay active and block the
- * fallback shift to a real shell. The "commands" id is always accepted
- * because it has no corresponding entry in `terminals`.
+ * destroyed in another tab, or from another task that shared the
+ * environment) would otherwise stay active and block the fallback shift
+ * to a real shell. The saved tab is accepted only once the current
+ * scope's terminal list contains it. The "commands" id is always
+ * accepted because it has no corresponding entry in `terminals`.
  */
 export function computeTerminalTabValue(
   activeTab: string | undefined,
@@ -71,9 +73,7 @@ export function computeTerminalTabValue(
     !sessionJustChanged && activeTab && activeTab !== "" && activeTabSelectable ? activeTab : null;
   return (
     effectiveActiveTab ??
-    (savedTabFromStorage && (terminals.length === 0 || savedTabExists)
-      ? savedTabFromStorage
-      : null) ??
+    (savedTabFromStorage && savedTabExists ? savedTabFromStorage : null) ??
     terminals.find((t) => t.type === "shell")?.id ??
     "commands"
   );

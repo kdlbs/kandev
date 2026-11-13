@@ -116,6 +116,8 @@ export type BuildKanbanCardMenuEntriesArgs = {
   onArchive?: () => void;
   onDelete?: () => void;
   onDetach?: () => void;
+  /** Open the task in the task graph; absent for archived or multi-selection. */
+  onShowGraph?: () => void;
   onLinkPullRequest?: () => void;
   onLinkIssue?: () => void;
   onLinkMergeRequest?: () => void;

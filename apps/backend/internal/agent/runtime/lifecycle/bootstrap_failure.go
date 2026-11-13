@@ -3,10 +3,13 @@ package lifecycle
 import (
 	"context"
 	"errors"
-	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"strings"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+
+	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -28,7 +31,10 @@ type BootstrapFailure struct {
 	AttemptedModel string
 	RequestedMode  string
 	EffectiveMode  string
+	RuntimeVersion string
 	PromptNotSent  *bool
+	ExitCode       *int
+	SessionFailure *agentctltypes.SessionOperationFailure
 	Cause          error
 }
 
@@ -70,6 +76,12 @@ func (e *BootstrapFailure) safeDetail() string {
 	if e == nil {
 		return ""
 	}
+	if e.safeCode() == models.AgentErrorCauseCodePluginPreparationFailed {
+		return models.AgentErrorCausePluginPreparationDetail
+	}
+	if e.safeCode() == models.AgentErrorCauseCodeProcessExited {
+		return models.AgentErrorCauseProcessExitedDetail
+	}
 	if e.Detail == "" || isSelectionBootstrapCause(e.safeCode()) || e.safeCode() == models.AgentErrorCauseCodeRuntimeCleanupFailed {
 		return bootstrapFailureDetail(e.safeCode())
 	}
@@ -102,10 +114,15 @@ func (e *BootstrapFailure) SafeAgentErrorCause(operation string) (models.AgentEr
 		AttemptedModel: safeBootstrapSelector(e.AttemptedModel),
 		RequestedMode:  safeBootstrapSelector(e.RequestedMode),
 		EffectiveMode:  safeBootstrapSelector(e.EffectiveMode),
+		RuntimeVersion: e.RuntimeVersion,
 	}
 	if e.PromptNotSent != nil {
 		value := *e.PromptNotSent
 		cause.PromptNotSent = &value
+	}
+	if e.ExitCode != nil {
+		value := *e.ExitCode
+		cause.ExitCode = &value
 	}
 	normalized := models.NormalizeAgentErrorCauses([]models.AgentErrorCause{cause})
 	if len(normalized) == 0 {
@@ -151,6 +168,8 @@ func isKnownBootstrapCauseCode(code string) bool {
 		models.AgentErrorCauseCodePermissionModeFailed,
 		models.AgentErrorCauseCodePermissionModeUnconfirmed,
 		models.AgentErrorCauseCodePermissionModeMismatch,
+		models.AgentErrorCauseCodePluginPreparationFailed,
+		models.AgentErrorCauseCodeProcessExited,
 		models.AgentErrorCauseCodeUnknown:
 		return true
 	default:
@@ -178,6 +197,29 @@ func bootstrapFailureFor(execution *AgentExecution, err error) *BootstrapFailure
 		}
 		return existing
 	}
+	var pluginErr *copilotplugins.Error
+	if execution != nil && execution.AgentID == copilotplugins.ProviderID && errors.As(err, &pluginErr) && pluginErr != nil {
+		runtimeVersion := ""
+		versionCaptured := false
+		var preparationFailure *copilotPluginPreparationFailure
+		if errors.As(err, &preparationFailure) && preparationFailure != nil {
+			runtimeVersion = preparationFailure.RuntimeVersion
+			versionCaptured = true
+		}
+		failure := &BootstrapFailure{
+			Operation:      bootstrapOperation(execution),
+			Code:           models.AgentErrorCauseCodePluginPreparationFailed,
+			Reason:         string(pluginErr.Reason),
+			Detail:         models.AgentErrorCausePluginPreparationDetail,
+			RuntimeVersion: runtimeVersion,
+			Cause:          err,
+		}
+		cause, ok := failure.SafeAgentErrorCause(failure.Operation)
+		if ok && cause.Reason == string(pluginErr.Reason) &&
+			(!versionCaptured || cause.RuntimeVersion == runtimeVersion) {
+			return failure
+		}
+	}
 	code := models.AgentErrorCauseCodeUnknown
 	if errors.Is(err, agentctl.ErrPassthroughCLIUnavailable) {
 		return &BootstrapFailure{Operation: bootstrapOperation(execution), Code: code, Detail: agentctl.ErrPassthroughCLIUnavailable.Error(), Cause: err}
@@ -189,7 +231,30 @@ func bootstrapFailureFor(execution *AgentExecution, err error) *BootstrapFailure
 		return &BootstrapFailure{Operation: bootstrapOperation(execution), Code: models.AgentErrorCauseCodeTransportUnavailable, Detail: agentctl.ErrPassthroughUnsupported.Error(), Cause: err}
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		code = models.AgentErrorCauseCodeTimeout
+		return &BootstrapFailure{
+			Operation: bootstrapOperation(execution),
+			Code:      models.AgentErrorCauseCodeTimeout,
+			Detail:    bootstrapFailureDetail(models.AgentErrorCauseCodeTimeout),
+			Cause:     err,
+		}
+	}
+	if failure := startupProcessBootstrapFailure(execution, err); failure != nil {
+		return failure
+	}
+	var sessionFailureProvider interface {
+		SessionOperationFailure() agentctltypes.SessionOperationFailure
+	}
+	if errors.As(err, &sessionFailureProvider) {
+		projected := sessionFailureProvider.SessionOperationFailure()
+		if safe := agentctltypes.NormalizeSessionOperationFailure(&projected); safe != nil {
+			return &BootstrapFailure{
+				Operation:      bootstrapOperation(execution),
+				Code:           models.AgentErrorCauseCodeAuthenticationRequired,
+				Detail:         bootstrapFailureDetail(models.AgentErrorCauseCodeAuthenticationRequired),
+				SessionFailure: safe,
+				Cause:          err,
+			}
+		}
 	}
 	return &BootstrapFailure{
 		Operation: bootstrapOperation(execution),
@@ -225,6 +290,10 @@ func bootstrapFailureDetail(code string) string {
 		return "The requested permission mode was not confirmed."
 	case models.AgentErrorCauseCodePermissionModeMismatch:
 		return "The applied permission mode did not match the request."
+	case models.AgentErrorCauseCodePluginPreparationFailed:
+		return models.AgentErrorCausePluginPreparationDetail
+	case models.AgentErrorCauseCodeProcessExited:
+		return models.AgentErrorCauseProcessExitedDetail
 	default:
 		return "The bootstrap operation could not be completed."
 	}

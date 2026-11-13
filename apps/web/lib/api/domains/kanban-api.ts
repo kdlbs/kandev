@@ -117,6 +117,8 @@ export async function createTask(
      * recorded as a start-when-unblocked intent rather than launching now.
      */
     blocked_by?: string[];
+    /** Symmetric task relationships to establish after creation. */
+    related_task_ids?: string[];
     mcp_server_ids?: string[];
     builtin_mcp_preferences?: BuiltinMCPInitialPreferences;
     /** Explicitly opt out of (false) or into (true) the auto-start-on-unblock intent. */
@@ -224,6 +226,20 @@ export async function previewTaskWorkspaceSources(
     {
       ...options,
       init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    },
+  );
+}
+
+export async function detachTaskRepository(
+  taskId: string,
+  taskRepositoryId: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ detached: boolean }>(
+    `/api/v1/tasks/${encodeURIComponent(taskId)}/repositories/${encodeURIComponent(taskRepositoryId)}`,
+    {
+      ...options,
+      init: { method: "DELETE", ...(options?.init ?? {}) },
     },
   );
 }

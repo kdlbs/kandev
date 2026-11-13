@@ -1224,7 +1224,7 @@ func TestDispatchAutomationContinuationCommitsAtAcceptanceBeforeCompletionError(
 		promptAcceptedOnError:  true,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.turnService = &repoTurnService{repo: repo}
 	base := &retryAutomationServiceStub{
 		stubAutomationService: &stubAutomationService{automation: &automation.Automation{
@@ -1304,7 +1304,7 @@ func TestDispatchAutomationContinuationMarksAmbiguousOnAcceptanceCommitFailure(t
 		promptAcceptedOnError:  true,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.turnService = &repoTurnService{repo: repo}
 	base := &retryAutomationServiceStub{
 		stubAutomationService: &stubAutomationService{automation: &automation.Automation{

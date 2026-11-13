@@ -3,6 +3,8 @@
 import { IconAlertCircle, IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { useActiveTaskRepositoryRoots } from "@/hooks/domains/session/use-task-repository-roots";
+import { RootContextMenuIfAvailable } from "./root-context-menu";
 import { Button } from "@kandev/ui/button";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
@@ -159,6 +161,13 @@ function HistorySectionRow({
   );
 }
 
+function headerLabelForRoot(
+  root: ReturnType<typeof useActiveTaskRepositoryRoots>["roots"][number] | undefined,
+  fallback: string,
+): string {
+  return root ? root.displayLabel : fallback;
+}
+
 function HistoryRepositoryRow({
   row,
   actions,
@@ -179,24 +188,32 @@ function HistoryRepositoryRow({
     actions.repoDisplayName?.(row.repositoryName) || row.repositoryName || t("common:repository");
   const showCommitActions = sectionCommitActionsEnabled(row);
   const prExists = !!(actions.prByRepo?.[row.repositoryName] ?? actions.prByRepo?.[""]);
+  const roots = useActiveTaskRepositoryRoots();
+  const root = roots.byTrackerName.get(row.repositoryName);
+  const headerLabel = headerLabelForRoot(root, label);
+  const headerButton = (
+    <button
+      type="button"
+      className="flex min-h-6 min-w-0 items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80 cursor-pointer hover:text-foreground/80 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+      data-testid={row.historyKind === "pr" ? "pr-files-repo-header" : "commits-repo-header"}
+      data-changes-row-focus
+      aria-expanded={!row.collapsed}
+      onClick={() => onToggleRepository(row.sectionKey, row.repositoryName)}
+    >
+      {row.collapsed ? (
+        <IconChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/50" />
+      ) : (
+        <IconChevronDown className="h-3 w-3 shrink-0 text-muted-foreground/50" />
+      )}
+      <span className="truncate">{headerLabel}</span>
+      <span className="text-muted-foreground/50 normal-case tracking-normal">{row.count}</span>
+    </button>
+  );
   return (
     <div className="flex items-center justify-between gap-2 px-1 py-0.5">
-      <button
-        type="button"
-        className="flex min-h-6 min-w-0 items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80 cursor-pointer hover:text-foreground/80 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
-        data-testid={row.historyKind === "pr" ? "pr-files-repo-header" : "commits-repo-header"}
-        data-changes-row-focus
-        aria-expanded={!row.collapsed}
-        onClick={() => onToggleRepository(row.sectionKey, row.repositoryName)}
-      >
-        {row.collapsed ? (
-          <IconChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/50" />
-        ) : (
-          <IconChevronDown className="h-3 w-3 shrink-0 text-muted-foreground/50" />
-        )}
-        <span className="truncate">{label}</span>
-        <span className="text-muted-foreground/50 normal-case tracking-normal">{row.count}</span>
-      </button>
+      <RootContextMenuIfAvailable root={root} surface="changes">
+        {headerButton}
+      </RootContextMenuIfAvailable>
       {showCommitActions && (
         <CommitsGroupActions
           repositoryName={row.repositoryName}

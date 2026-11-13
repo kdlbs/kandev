@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -941,6 +942,30 @@ func TestGetWorkspaceInfoForSessionRestoresOfficeAgentIdentityFromRuntimeInvento
 	if info.AgentProfileID != "reviewer" {
 		t.Fatalf("AgentProfileID = %q, want reviewer from runtime inventory", info.AgentProfileID)
 	}
+}
+
+func TestGetWorkspaceInfoForSessionCarriesRetainedBuiltinBinding(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	sessionID := "session-builtin-binding"
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: "task-123", AgentProfileID: "profile",
+		State: models.TaskSessionStateRunning, StartedAt: now, UpdatedAt: now,
+	}))
+	binding := map[string]interface{}{"builtin_packages": map[string]interface{}{"task_id": "task-123"}}
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: sessionID, SessionID: sessionID, TaskID: "task-123",
+		Runtime: agentruntime.RuntimeStandalone, Status: models.ExecutorRunningStatusReady,
+		AgentExecutionID: "execution-builtin",
+		Metadata:         map[string]interface{}{mcpprofile.BuiltinBindingMetadataKey: binding},
+	}))
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", sessionID)
+	require.NoError(t, err)
+	require.Equal(t, binding, info.Metadata[mcpprofile.BuiltinBindingMetadataKey],
+		"workspace restore must carry the persisted binding as retained evidence")
 }
 
 func TestApplyTaskEnvironmentToWorkspaceInfoUsesEnvironmentProfileAsFallback(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db/dialect"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -257,22 +258,33 @@ func (r *Repository) UpsertStepParticipant(ctx context.Context, p *models.Workfl
 		p.CreatedAt = time.Now().UTC()
 	}
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, r.officeCompletionTxOptions())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	exists, err := r.lockOfficeParticipantID(ctx, tx.Tx, p.ID, p.StepID, p.TaskID)
+	if err != nil {
+		return err
+	}
+	conflict := `DO NOTHING`
+	if exists {
+		conflict = `DO UPDATE SET step_id=excluded.step_id,task_id=excluded.task_id,role=excluded.role,agent_profile_id=excluded.agent_profile_id,decision_required=excluded.decision_required,position=excluded.position`
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO workflow_step_participants (id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
-			step_id = excluded.step_id,
-			task_id = excluded.task_id,
-			role = excluded.role,
-			agent_profile_id = excluded.agent_profile_id,
-			decision_required = excluded.decision_required,
-			position = excluded.position
-	`), p.ID, p.StepID, p.TaskID, string(p.Role), p.AgentProfileID,
+ ON CONFLICT(id) `+conflict), p.ID, p.StepID, p.TaskID, string(p.Role), p.AgentProfileID,
 		dialect.BoolToInt(p.DecisionRequired), p.Position, p.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("upsert step participant: %w", err)
 	}
-	return nil
+	if count, err := result.RowsAffected(); err != nil {
+		return err
+	} else if count == 0 {
+		return repoerrors.ErrWorkflowChangeConflict
+	}
+	return tx.Commit()
 }
 
 // UpsertTaskParticipant inserts or updates a per-task participant row.
@@ -288,26 +300,34 @@ func (r *Repository) UpsertTaskParticipant(
 	if !validParticipantRole(models.ParticipantRole(role)) {
 		return "", fmt.Errorf("invalid participant role %q", role)
 	}
+	tx, err := r.db.BeginTxx(ctx, r.officeCompletionTxOptions())
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockOfficeEligibilityScopes(ctx, tx.Tx, []string{taskID}, []string{stepID}, nil); err != nil {
+		return "", err
+	}
 	// Look for existing row by natural key.
 	var existing string
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+	err = tx.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id FROM workflow_step_participants
 		WHERE step_id = ? AND task_id = ? AND role = ? AND agent_profile_id = ?
 	`), stepID, taskID, role, agentProfileID).Scan(&existing)
 	if err == nil {
-		return existing, nil
+		return existing, tx.Commit()
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return "", fmt.Errorf("lookup existing task participant: %w", err)
 	}
 	id := uuid.New().String()
-	if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO workflow_step_participants (id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at)
 		VALUES (?, ?, ?, ?, ?, 1, 0, ?)
 	`), id, stepID, taskID, role, agentProfileID, time.Now().UTC()); err != nil {
 		return "", fmt.Errorf("insert task participant: %w", err)
 	}
-	return id, nil
+	return id, tx.Commit()
 }
 
 // DeleteTaskParticipant removes a per-task participant row by natural key.
@@ -318,13 +338,21 @@ func (r *Repository) DeleteTaskParticipant(
 	if stepID == "" || taskID == "" || role == "" || agentProfileID == "" {
 		return errors.New("step_id, task_id, role, and agent_profile_id are required")
 	}
-	if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, r.officeCompletionTxOptions())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockOfficeEligibilityScopes(ctx, tx.Tx, []string{taskID}, []string{stepID}, nil); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM workflow_step_participants
 		WHERE step_id = ? AND task_id = ? AND role = ? AND agent_profile_id = ?
 	`), stepID, taskID, role, agentProfileID); err != nil {
 		return fmt.Errorf("delete task participant: %w", err)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // ListStepParticipantsForTask returns every participant configured for the
@@ -489,12 +517,24 @@ func (r *Repository) DeleteStepParticipant(ctx context.Context, id string) error
 	if id == "" {
 		return errors.New("participant id is required")
 	}
-	if _, err := r.db.ExecContext(ctx, r.db.Rebind(
+	tx, err := r.db.BeginTxx(ctx, r.officeCompletionTxOptions())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	exists, err := r.lockOfficeParticipantID(ctx, tx.Tx, id, "", "")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return tx.Commit()
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(
 		`DELETE FROM workflow_step_participants WHERE id = ?`,
 	), id); err != nil {
 		return fmt.Errorf("delete step participant: %w", err)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // ListStepParticipants returns every template-level participant configured
@@ -927,11 +967,14 @@ func (r *Repository) EnsureRoleSeat(
 func (r *Repository) ensureRoleSeatTx(
 	ctx context.Context, workflowID, stepID, taskID, role, agentProfileID string,
 ) (*models.WorkflowStepParticipant, bool, error) {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.officeCompletionTxOptions())
 	if err != nil {
 		return nil, false, fmt.Errorf("begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockOfficeEligibilityScopes(ctx, tx.Tx, []string{taskID}, []string{stepID}, []string{workflowID}); err != nil {
+		return nil, false, err
+	}
 
 	if dialect.IsPostgres(r.db.DriverName()) {
 		lockKey := ParticipantRoleSeatLockKey(taskID, role)
@@ -1097,11 +1140,14 @@ func (r *Repository) RecordStepDecision(ctx context.Context, d *models.WorkflowS
 // loop then re-runs this from scratch so the supersede UPDATE sees the
 // winner's now-committed row.
 func (r *Repository) recordStepDecisionTx(ctx context.Context, d *models.WorkflowStepDecision) error {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.officeCompletionTxOptions())
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockOfficeEligibilityScopes(ctx, tx.Tx, []string{d.TaskID}, []string{d.StepID}, nil); err != nil {
+		return err
+	}
 
 	// PostgreSQL's READ COMMITTED isolation does not serialize the initial
 	// supersede UPDATE when no active row exists yet. Lock the identity before
@@ -1242,10 +1288,20 @@ func (r *Repository) ListStepDecisions(ctx context.Context, taskID, stepID strin
 // ListActiveDecisions API so the dashboard can surface pending decisions
 // per task without filtering by step.
 func (r *Repository) ListActiveTaskDecisions(ctx context.Context, taskID string) ([]*models.WorkflowStepDecision, error) {
+	return r.listActiveTaskDecisions(ctx, r.ro, taskID)
+}
+
+func (r *Repository) ListActiveTaskDecisionsTx(ctx context.Context, tx *sql.Tx, taskID string) ([]*models.WorkflowStepDecision, error) {
+	return r.listActiveTaskDecisions(ctx, tx, taskID)
+}
+
+func (r *Repository) listActiveTaskDecisions(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, taskID string) ([]*models.WorkflowStepDecision, error) {
 	if taskID == "" {
 		return nil, errors.New("task_id is required")
 	}
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+	rows, err := q.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, step_id, participant_id, decision, note, decided_at,
 		       superseded_at, decider_type, decider_id, role, comment
 		FROM workflow_step_decisions
@@ -1267,7 +1323,15 @@ func (r *Repository) SupersedeTaskDecisions(ctx context.Context, taskID string) 
 	if taskID == "" {
 		return errors.New("task_id is required")
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, r.officeCompletionTxOptions())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockOfficeEligibilityScopes(ctx, tx.Tx, []string{taskID}, nil, nil); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE workflow_step_decisions
 		SET superseded_at = ?
 		WHERE task_id = ? AND superseded_at IS NULL
@@ -1275,7 +1339,7 @@ func (r *Repository) SupersedeTaskDecisions(ctx context.Context, taskID string) 
 	if err != nil {
 		return fmt.Errorf("supersede task decisions: %w", err)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // scanDecisionRows pulls a workflow_step_decisions row set into the model.
@@ -1332,14 +1396,22 @@ func (r *Repository) ClearStepDecisions(ctx context.Context, taskID, stepID stri
 	if taskID == "" || stepID == "" {
 		return 0, errors.New("task_id and step_id are required")
 	}
-	res, err := r.db.ExecContext(ctx, r.db.Rebind(
+	tx, err := r.db.BeginTxx(ctx, r.officeCompletionTxOptions())
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockOfficeEligibilityScopes(ctx, tx.Tx, []string{taskID}, []string{stepID}, nil); err != nil {
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx, r.db.Rebind(
 		`DELETE FROM workflow_step_decisions WHERE task_id = ? AND step_id = ?`,
 	), taskID, stepID)
 	if err != nil {
 		return 0, fmt.Errorf("clear step decisions: %w", err)
 	}
 	rows, _ := res.RowsAffected()
-	return rows, nil
+	return rows, tx.Commit()
 }
 
 // validParticipantRole mirrors the workflow_step_participants CHECK constraint.
