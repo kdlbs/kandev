@@ -5,9 +5,11 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	officecompletionpolicy "github.com/kandev/kandev/internal/office/completionpolicy"
 	"github.com/kandev/kandev/internal/office/dashboard"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/completion"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -17,6 +19,29 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type completionPolicyHook struct {
+	policy completion.Policy
+	before func(context.Context, completion.Querier, *models.Task, *models.Task, completion.Admission) error
+}
+
+func (h completionPolicyHook) AdmitCompletion(ctx context.Context, q completion.Querier, current, candidate *models.Task, admission completion.Admission) error {
+	if h.before != nil {
+		if err := h.before(ctx, q, current, candidate, admission); err != nil {
+			return err
+		}
+	}
+	return h.policy.AdmitCompletion(ctx, q, current, candidate, admission)
+}
+
+func registerOfficeCompletionPolicyWithHook(
+	repo *tasksqlite.Repository,
+	office *officesqlite.Repository,
+	workflow *workflowrepo.Repository,
+	before func(context.Context, completion.Querier, *models.Task, *models.Task, completion.Admission) error,
+) {
+	repo.SetCompletionPolicies(completionPolicyHook{policy: officecompletionpolicy.New(office, workflow), before: before})
+}
 
 // The decorator places a real committed writer after service preflight and
 // before production admission. It never substitutes an eligibility result.
@@ -28,6 +53,11 @@ type officeAdmissionWindow struct {
 func (r *officeAdmissionWindow) UpdateTaskWithWorkflowStepAdmissionAndState(ctx context.Context, task *models.Task, source, target string, limit int, state *v1.TaskState, exit bool, expected string) (bool, error) {
 	r.before()
 	return r.Repository.UpdateTaskWithWorkflowStepAdmissionAndState(ctx, task, source, target, limit, state, exit, expected)
+}
+
+func (r *officeAdmissionWindow) UpdateTaskWithWorkflowStepAdmissionAndStateWithCompletionAdmission(ctx context.Context, task *models.Task, source, target string, limit int, state *v1.TaskState, exit bool, expected string, admission *completion.Admission) (bool, error) {
+	r.before()
+	return r.Repository.UpdateTaskWithWorkflowStepAdmissionAndStateWithCompletionAdmission(ctx, task, source, target, limit, state, exit, expected, admission)
 }
 
 // @covers AC-OFFICE-HUMAN-DONE-002.5
@@ -42,7 +72,7 @@ func TestOfficeHumanCompletionWriterBeforeAdmission(t *testing.T) {
 	require.NoError(t, err)
 	dash := dashboard.NewDashboardService(office, log, nil, nil, nil)
 	dash.SetDecisionStore(decisions)
-	configureOfficeHumanCompletionGuard(h.repo, office, decisions)
+	registerOfficeCompletionPolicy(h.repo, office, decisions)
 	require.NoError(t, h.workflowSvc.CreateStep(ctx, &wfmodels.WorkflowStep{ID: "atomic-done", WorkflowID: "wf-home", Name: "Done", Position: 10, CompleteTaskOnEnter: true}))
 	h.createTask(t, "atomic-task", false)
 	_, err = h.db.Exec(`UPDATE workspaces SET office_workflow_id='wf-home' WHERE id='ws-1'`)
@@ -56,7 +86,7 @@ func TestOfficeHumanCompletionWriterBeforeAdmission(t *testing.T) {
 	}}
 	svc := taskservice.NewService(taskservice.Repos{Tasks: window, Workspaces: h.repo, Workflows: h.repo, Sessions: h.repo, Reviews: h.repo, Messages: h.repo, Turns: h.repo, TaskRepos: h.repo, GitSnapshots: h.repo, RepoEntities: h.repo, Executors: h.repo, Environments: h.repo, TaskEnvironments: h.repo}, h.eventBus, log, taskservice.RepositoryDiscoveryConfig{})
 	svc.SetWorkflowStepGetter(&workflowStepGetterAdapter{svc: h.workflowSvc})
-	svc.SetOfficeApprovalGuard(officeApprovalGuardAdapter{reader: dash})
+	svc.SetApproverNameResolver(officeApproverNameResolverAdapter{reader: dash})
 	_, err = svc.MoveTaskWithOptions(ctx, "atomic-task", "wf-home", "atomic-done", 0, taskservice.MoveTaskOptions{AllowActivePrimarySession: true, StepHistoryActor: wfmodels.StepTransitionActorHuman})
 	require.ErrorAs(t, err, new(*taskservice.ApprovalsPendingMoveError), "new approver committed after preflight must refuse completion")
 	after, err := h.repo.GetTask(ctx, "atomic-task")
@@ -80,8 +110,8 @@ func TestOfficeHumanCompletionFinalStepRefusalLeavesState(t *testing.T) {
 	dash := dashboard.NewDashboardService(office, log, nil, nil, nil)
 	dash.SetDecisionStore(decisions)
 	dash.SetTaskFinalStepMover(officeFinalStepMoverAdapter{tasks: h.adapter.svc, steps: h.workflowSvc})
-	configureOfficeHumanCompletionGuard(h.repo, office, decisions)
-	h.adapter.svc.(*taskservice.Service).SetOfficeApprovalGuard(officeApprovalGuardAdapter{reader: dash})
+	registerOfficeCompletionPolicy(h.repo, office, decisions)
+	h.adapter.svc.(*taskservice.Service).SetApproverNameResolver(officeApproverNameResolverAdapter{reader: dash})
 	dash.SetTaskHumanDoneCompleter(officeHumanDoneCompleterAdapter{tasks: h.adapter.svc.(*taskservice.Service)})
 	h.createTask(t, "atomic-final-task", false)
 	_, err = h.db.Exec(`UPDATE workspaces SET office_workflow_id='wf-home' WHERE id='ws-1'`)
@@ -110,11 +140,15 @@ func TestOfficeHumanCompletionSameStepStateRefusal(t *testing.T) {
 	dash := dashboard.NewDashboardService(office, log, nil, nil, nil)
 	dash.SetDecisionStore(decisions)
 	svc := h.adapter.svc.(*taskservice.Service)
-	svc.SetOfficeApprovalGuard(officeApprovalGuardAdapter{reader: dash})
-	configureOfficeHumanCompletionGuard(h.repo, office, decisions)
+	svc.SetApproverNameResolver(officeApproverNameResolverAdapter{reader: dash})
+	registerOfficeCompletionPolicy(h.repo, office, decisions)
 	h.createTask(t, "atomic-state-task", false)
 	_, err = h.db.Exec(`UPDATE workspaces SET office_workflow_id='wf-home' WHERE id='ws-1'`)
 	require.NoError(t, err)
+	step, err := h.workflowSvc.GetStep(ctx, "step-home")
+	require.NoError(t, err)
+	step.CompleteTaskOnEnter = true
+	require.NoError(t, h.workflowSvc.UpdateStep(ctx, step))
 	_, err = decisions.UpsertTaskParticipant(ctx, "step-home", "atomic-state-task", "approver", "pending-state")
 	require.NoError(t, err)
 	before, err := h.repo.GetTask(ctx, "atomic-state-task")
@@ -141,7 +175,7 @@ func TestOfficeHumanCompletionFreshPolicyBeforeAdmission(t *testing.T) {
 			require.NoError(t, err)
 			dash := dashboard.NewDashboardService(office, log, nil, nil, nil)
 			dash.SetDecisionStore(workflow)
-			configureOfficeHumanCompletionGuard(h.repo, office, workflow)
+			registerOfficeCompletionPolicy(h.repo, office, workflow)
 			require.NoError(t, h.workflowSvc.CreateStep(ctx, &wfmodels.WorkflowStep{ID: "atomic-done", WorkflowID: "wf-home", Name: "Done", Position: 10, CompleteTaskOnEnter: true}))
 			h.createTask(t, "atomic-policy-task", false)
 			_, err = h.db.Exec(`UPDATE workspaces SET office_workflow_id='wf-home' WHERE id='ws-1'`)
@@ -165,7 +199,7 @@ func TestOfficeHumanCompletionFreshPolicyBeforeAdmission(t *testing.T) {
 			}}
 			svc := taskservice.NewService(taskservice.Repos{Tasks: window, Workspaces: h.repo, Workflows: h.repo, Sessions: h.repo, Reviews: h.repo, Messages: h.repo, Turns: h.repo, TaskRepos: h.repo, GitSnapshots: h.repo, RepoEntities: h.repo, Executors: h.repo, Environments: h.repo, TaskEnvironments: h.repo}, h.eventBus, log, taskservice.RepositoryDiscoveryConfig{})
 			svc.SetWorkflowStepGetter(&workflowStepGetterAdapter{svc: h.workflowSvc})
-			svc.SetOfficeApprovalGuard(officeApprovalGuardAdapter{reader: dash})
+			svc.SetApproverNameResolver(officeApproverNameResolverAdapter{reader: dash})
 			before, err := h.repo.GetTask(ctx, "atomic-policy-task")
 			require.NoError(t, err)
 			result, err := svc.MoveTaskWithOptions(ctx, "atomic-policy-task", "wf-home", "atomic-done", 0, taskservice.MoveTaskOptions{AllowActivePrimarySession: true, StepHistoryActor: wfmodels.StepTransitionActorHuman})
@@ -186,6 +220,11 @@ func TestOfficeHumanCompletionFreshPolicyBeforeAdmission(t *testing.T) {
 func (r *officeAdmissionWindow) UpdateTaskPreservingDeferredLaunch(ctx context.Context, task *models.Task) error {
 	r.before()
 	return r.Repository.UpdateTaskPreservingDeferredLaunch(ctx, task)
+}
+
+func (r *officeAdmissionWindow) UpdateTaskPreservingDeferredLaunchWithCompletionAdmission(ctx context.Context, task *models.Task, admission *completion.Admission) error {
+	r.before()
+	return r.Repository.UpdateTaskPreservingDeferredLaunchWithCompletionAdmission(ctx, task, admission)
 }
 
 func TestOfficeHumanCompletionCanonicalReadFailureClosed(t *testing.T) {

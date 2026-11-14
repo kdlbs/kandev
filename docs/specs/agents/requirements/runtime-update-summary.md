@@ -48,4 +48,9 @@ The window starts with availability discovery, rather than page readiness. This 
 
 ## Design and delivery
 
+The active [runtime update manager](runtime-update-manager.md) replaces the
+expanded-section destination in AC-AGENTS-RUNTIME-NOTIFY-003.3.
+The Review updates action retains its existing URL and opens the manager overview.
+The remaining summary and delivery criteria retain their current meaning.
+
 See the [summary design](../system-design/runtime-update-summary.md) and [implementation plan](../../../plans/agent-runtime-update-summary/plan.md).

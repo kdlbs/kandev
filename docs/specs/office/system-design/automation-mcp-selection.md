@@ -190,7 +190,13 @@ Extend `apps/web/components/automations/automation-editor.tsx` through small dom
 MCP access appears after Then and before Settings, using the existing plugin section as the local exemplar.
 Order: Built-in packages, Workspace MCP servers, Plugin tools.
 Show Core as Required. Reuse the shared bordered package rows, status badges, detail header, and tool information from task/workspace pickers.
-Each row opens an inline detail view with an explicit On/Off choice. Core has a required notice instead.
+Each optional row has an explicit On/Off switch beside a separate button for package details.
+The shared control also remains available in detail. Core shows Required without a switch.
+`AutomationPackageChoice` serves both list and detail and maps checked state to membership in `builtin_packages`.
+It uses the shared Switch primitive, without task inheritance state or reset actions.
+A blocked selected package must remain removable, but a blocked unselected package cannot be enabled.
+Preserve pending/read-only handling and target-mode defaults. Do not rewrite untouched selections.
+AC-OFFICE-AUTOMATION-MCP-004.11 is implemented in [the switch plan](../../../plans/builtin-mcp-switches/plan.md).
 Return focus to the package row when Back to packages closes its detail. Keep the Configuration authority notice visible.
 Workspace servers use the existing searchable checkbox picker and explicit inherited origins.
 Keep plugin approval state and its live application notice intact.
@@ -210,8 +216,8 @@ Retain the settings save surface and safe-area clearance. Use 44px phone/coarse 
 Keep one draft/controller across responsive changes, keyboard focus, visible labels, and wrapped names.
 Reuse tokens and Tabler icons. Avoid new animation. Any press motion uses better-ui's 0.96 scale, 150ms ease-out, and reduced-motion handling.
 
-In run detail, reuse accepted package/setup evidence rather than a new live status service.
-Show desired, accepted, and observed states separately. Unknown historical evidence stays Unknown.
+Use the existing MCP plug viewer for MCP inspection. Do not render a separate MCP access summary above the run conversation.
+Keep accepted package/setup evidence in the shared session APIs. Unknown historical evidence stays Unknown.
 Private changes say Applies at the next agent process start. Reused turns may still use the previous selection.
 Normal-template changes say Applies to newly created tasks.
 All copy uses seven language catalogs and generated Traditional Chinese.

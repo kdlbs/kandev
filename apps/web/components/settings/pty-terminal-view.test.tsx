@@ -21,18 +21,22 @@ const mocks = vi.hoisted(() => {
   class MockWebSocket {
     static readonly OPEN = 1;
     static readonly CLOSED = 3;
+    static autoOpen = true;
     readyState = MockWebSocket.OPEN;
     binaryType = "";
     onmessage: ((event: MessageEvent) => void) | null = null;
     onclose: (() => void) | null = null;
     onerror: (() => void) | null = null;
     send = vi.fn();
+    openListeners: EventListener[] = [];
     close = vi.fn(() => {
       this.readyState = MockWebSocket.CLOSED;
       this.onclose?.();
     });
     addEventListener = vi.fn((type: string, listener: EventListener) => {
-      if (type === "open") queueMicrotask(() => listener(new Event("open")));
+      if (type !== "open") return;
+      this.openListeners.push(listener);
+      if (MockWebSocket.autoOpen) queueMicrotask(() => listener(new Event("open")));
     });
 
     constructor() {
@@ -90,6 +94,7 @@ beforeEach(() => {
   mocks.sockets.length = 0;
   mocks.terminals.length = 0;
   mocks.resizeCallbacks.length = 0;
+  mocks.MockWebSocket.autoOpen = true;
   vi.stubGlobal("WebSocket", mocks.MockWebSocket);
   vi.stubGlobal(
     "ResizeObserver",
@@ -361,6 +366,90 @@ describe("PtyTerminalView resize lifecycle", () => {
     act(() => mocks.resizeCallbacks[0]?.([], {} as ResizeObserver));
 
     expect(mocks.resizeAgentLogin).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
+  it("preserves live stream error handling", async () => {
+    const onStateChange = vi.fn();
+    const view = render(
+      <PtyTerminalView startSession={startSession} onStateChange={onStateChange} />,
+    );
+
+    await waitFor(() => expect(mocks.sockets).toHaveLength(1));
+    act(() => mocks.sockets[0]?.onerror?.());
+
+    expect(onStateChange).toHaveBeenLastCalledWith({
+      status: "error",
+      sessionId: "session-1",
+      exitCode: null,
+      error: expect.any(String),
+    });
+    mocks.resizeAgentLogin.mockClear();
+    act(() => mocks.resizeCallbacks[0]?.([], {} as ResizeObserver));
+    expect(mocks.resizeAgentLogin).not.toHaveBeenCalled();
+    view.unmount();
+  });
+});
+
+describe("PtyTerminalView stream generation", () => {
+  it("ignores disposed stream events after cleanup and replacement", async () => {
+    mocks.MockWebSocket.autoOpen = false;
+    const onStateChange = vi.fn();
+    const firstStart = vi.fn(startSession);
+    const replacementSession = { ...session, session_id: "session-2" };
+    const replacementStart = vi.fn(() => Promise.resolve(replacementSession));
+    const view = render(
+      <PtyTerminalView
+        startSession={firstStart}
+        initialInput="echo stale-input\n"
+        lifecycle="detach-on-unmount"
+        ownerId="tab-old"
+        onStateChange={onStateChange}
+      />,
+    );
+    await waitFor(() => expect(mocks.sockets).toHaveLength(1));
+    await waitFor(() => expect(onStateChange).toHaveBeenCalled());
+    const oldSocket = mocks.sockets[0]!;
+    const oldTerminal = mocks.terminals[0]!;
+    const oldOpenListener = oldSocket.openListeners[0]!;
+    const oldError = oldSocket.onerror;
+    const oldClose = oldSocket.onclose;
+    const oldMessage = oldSocket.onmessage;
+    view.rerender(
+      <PtyTerminalView
+        startSession={replacementStart}
+        initialInput="echo stale-input\n"
+        lifecycle="detach-on-unmount"
+        ownerId="tab-old"
+        onStateChange={onStateChange}
+      />,
+    );
+    await waitFor(() => expect(mocks.sockets).toHaveLength(2));
+    await waitFor(() => expect(replacementStart).toHaveBeenCalled());
+    onStateChange.mockClear();
+    const replacementSocket = mocks.sockets[1]!;
+    const replacementTerminal = mocks.terminals[1]!;
+
+    act(() => {
+      oldError?.();
+      oldClose?.();
+      oldMessage?.({ data: Uint8Array.from([1, 2, 3]).buffer } as MessageEvent);
+      oldMessage?.({ data: JSON.stringify({ type: "exit", exit_code: 7 }) } as MessageEvent);
+      oldOpenListener(new Event("open"));
+    });
+
+    expect(onStateChange).not.toHaveBeenCalled();
+    expect(oldTerminal.write).not.toHaveBeenCalled();
+    expect(replacementTerminal.write).not.toHaveBeenCalled();
+    expect(oldSocket.send).not.toHaveBeenCalled();
+    expect(replacementSocket.send).not.toHaveBeenCalled();
+
+    mocks.resizeAgentLogin.mockClear();
+    act(() => mocks.resizeCallbacks[1]?.([], {} as ResizeObserver));
+    expect(mocks.resizeAgentLogin).toHaveBeenCalledWith("session-2", {
+      cols: 80,
+      rows: 24,
+    });
     view.unmount();
   });
 });

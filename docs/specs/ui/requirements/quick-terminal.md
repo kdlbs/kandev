@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-08-03
-updated: 2026-11-11
+updated: 2026-11-12
 owners:
   - kandev
 ---
@@ -41,6 +41,8 @@ Quick Chat and Quick Terminal are both short-lived utilities reached from the sa
 - **AC-UI-QUICK-TERMINAL-001.18:** Late results from this client's previous shell or recovery attempt shall not replace the current state or session association. Recovery shall retain the existing close-during-start and detach-on-dismiss behavior.
 - **AC-UI-QUICK-TERMINAL-001.19:** Desktop and phone users shall reach the same recovery action with a pointer, keyboard, or touch. Phone and coarse-pointer targets shall measure at least 44 CSS pixels in each dimension. The recovery controls shall remain within the dialog and clear the on-screen keyboard.
 - **AC-UI-QUICK-TERMINAL-001.20:** While a terminal close request is pending, the system shall preserve the published lifecycle generation and suppress descriptor creation and PTY startup. A failed delete shall restore the retained tab at that generation; a successful delete shall retire the generation and keep stale mounts fenced.
+- **AC-UI-QUICK-TERMINAL-001.21:** While the same terminal tab remains selected, unrelated application updates and terminal status persistence shall preserve its displayed output, partially typed command, and keyboard focus. These updates shall not reconnect its terminal stream or start another shell. This applies to desktop and phone surfaces.
+- **AC-UI-QUICK-TERMINAL-001.22:** After a terminal connection detaches or is replaced, late events from that connection shall not change terminal status, alter displayed output, or send input. Events from that connection shall not disrupt another terminal.
 
 #### Shell recovery compatibility
 
@@ -113,3 +115,5 @@ Remembered selection follows the [selection design](../system-design/quick-chat-
 The migrated technical source is split into [part 1](../system-design/quick-terminal.md).
 
 Explicit shell recovery follows the [recovery design](../system-design/quick-terminal-recovery.md).
+
+Browser continuity follows the [render lifecycle design](../system-design/quick-terminal-render-lifecycle.md).

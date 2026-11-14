@@ -105,7 +105,8 @@ consumed tombstone remains durable.
 5. If the start setting is `reuse`, select the newest eligible nonterminal
    matching session. Exclude the source session.
 6. If the start setting is `new`, do not perform a reusable-session lookup.
-7. Preflight managed Git credentials for the selected or new destination.
+7. Preflight executor admission, then managed Git credentials, for the
+   selected or new destination (a new one inherits the source's bindings).
 8. Prepare and promote the destination session before source mutation.
 9. If the end setting is `complete`, mark the source `COMPLETED`. Then stop
    its runtime.
@@ -132,7 +133,8 @@ of the transition.
 [Profile readiness](workflow-profile-readiness.md) defines Dynamic-profile validation and completed-turn recovery after preflight rejection.
 
 Destination preparation and credential validation fail before source mutation.
-The current session remains primary and recoverable.
+The current session remains primary and recoverable; see
+[destination admission](workflow-profile-readiness.md#destination-executor-admission).
 
 If a park intent cannot be persisted, Kandev stops the switch before source
 retirement. It does not change the end setting to `complete`.

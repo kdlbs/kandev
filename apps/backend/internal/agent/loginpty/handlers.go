@@ -20,6 +20,8 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/common/wsinput"
+	"github.com/kandev/kandev/internal/common/wskeepalive"
 )
 
 // LoginCommandLookup returns the agent's LoginCommand or nil. Implemented by
@@ -45,6 +47,7 @@ type Handlers struct {
 	logger          *zap.Logger
 	upgrader        gorillaws.Upgrader
 	hostShellBinder HostShellSessionBinder
+	keepalive       wskeepalive.Timing
 }
 
 // NewHandlers constructs Handlers. If checkOrigin is nil, the upgrader uses
@@ -61,10 +64,11 @@ func NewHandlers(mgr *Manager, reg *registry.Registry, log *zap.Logger, checkOri
 		CheckOrigin:     checkOrigin,
 	}
 	return &Handlers{
-		mgr:      mgr,
-		registry: reg,
-		logger:   log,
-		upgrader: up,
+		mgr:       mgr,
+		registry:  reg,
+		logger:    log,
+		upgrader:  up,
+		keepalive: wskeepalive.DefaultTiming(),
 	}
 }
 
@@ -378,7 +382,16 @@ func (h *Handlers) handleStream(c *gin.Context) {
 		)
 		return
 	}
-	defer func() { _ = conn.Close() }()
+	stopKeepalive, err := wskeepalive.Start(conn, h.keepalive)
+	if err != nil {
+		h.logger.Warn("login pty ws keepalive setup failed", zap.String("session_id", id), zap.Error(err))
+		_ = conn.Close()
+		return
+	}
+	defer func() {
+		_ = conn.Close()
+		stopKeepalive()
+	}()
 
 	// Send buffered output up-front so a late-joining UI catches up.
 	if buf := sess.BufferedOutput(); len(buf) > 0 {
@@ -398,7 +411,10 @@ func (h *Handlers) handleStream(c *gin.Context) {
 
 	// Writer: forward PTY output → client.
 	go func() {
-		defer close(done)
+		defer func() {
+			_ = conn.Close()
+			close(done)
+		}()
 		for {
 			select {
 			case data, ok := <-out:
@@ -422,22 +438,25 @@ func (h *Handlers) handleStream(c *gin.Context) {
 		}
 	}()
 
-	// Reader: forward client → PTY (binary = input, text = JSON control).
-	for {
-		mt, data, err := conn.ReadMessage()
-		if err != nil {
-			break
-		}
-		switch mt {
+	// Keep the socket reader active while a PTY write waits for input capacity.
+	reader := wsinput.New(conn)
+	for message := range reader.Messages() {
+		reader.Consume(message)
+		switch message.Type {
 		case gorillaws.BinaryMessage:
-			if _, err := sess.Write(data); err != nil {
+			if _, err := sess.Write(message.Data); err != nil {
 				h.logger.Debug("pty write error", zap.Error(err))
 			}
 		case gorillaws.TextMessage:
-			h.handleControlMessage(sess, data)
+			h.handleControlMessage(sess, message.Data)
 		}
 	}
+	if err := reader.Err(); err != nil && !gorillaws.IsCloseError(err, gorillaws.CloseNormalClosure, gorillaws.CloseGoingAway) {
+		h.logger.Debug("login pty ws read error", zap.String("session_id", id), zap.Error(err))
+	}
 	close(disconnect)
+	_ = conn.Close()
+	stopKeepalive()
 	<-done
 }
 

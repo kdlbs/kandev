@@ -80,6 +80,10 @@ type PromptContext struct {
 	FailedSessionID   string
 	AgentErrorMessage string
 
+	// Blocker failure fields (task_blocker_failed escalation)
+	BlockerFailure            *BlockerFailurePrompt
+	AdditionalBlockerFailures []BlockerFailurePrompt
+
 	// Stage fields (execution policy)
 	StageID         string   // execution policy stage ID
 	StageType       string   // "work", "review", "approval", "ship"
@@ -149,8 +153,14 @@ func BuildPrompt(pc *PromptContext) string {
 		prompt = buildBudgetAlertPrompt(pc)
 	case RunReasonAgentError:
 		prompt = buildAgentErrorPrompt(pc)
+	case RunReasonTaskBlockerFailed:
+		prompt = buildBlockerFailedPrompt(pc)
 	default:
 		prompt = fmt.Sprintf("You have been woken for reason: %s.", pc.Reason)
+	}
+	if pc.Reason != RunReasonTaskBlockerFailed &&
+		(pc.BlockerFailure != nil || len(pc.AdditionalBlockerFailures) > 0) {
+		prompt += "\n\n" + buildBlockerFailedPrompt(pc)
 	}
 	prompt = appendOneTimeInstructions(prompt, pc.OneTimeInstructions)
 	if pc.RoutineID != "" {

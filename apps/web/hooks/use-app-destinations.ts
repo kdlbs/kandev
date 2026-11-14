@@ -27,7 +27,7 @@ export function useNavContext(): NavContext {
  * that means the integrations groups (see `GATED_SECTIONS`).
  *
  * Subscribes to `useNavAvailability`, and therefore to the per-integration auth
- * probes: Jira, Linear and Azure DevOps each run a fetch plus a 90s
+ * probes: Jira and Linear each run a fetch plus a 90s
  * `setInterval` per mounted consumer
  * (`hooks/domains/integrations/use-integration-availability.ts`). Use
  * `useStaticDestinations` for ungated sections so a nav surface doesn't add

@@ -222,6 +222,26 @@ func (c *Client) RetireDeliverySubmission(ctx context.Context, id string) error 
 	return c.doDeliveryRequest(ctx, http.MethodPost, path, nil, nil)
 }
 
+// RetireMissingUnknownDeliverySubmission records retirement evidence for an
+// interrupted SQL prompt whose peer journal record is absent.
+func (c *Client) RetireMissingUnknownDeliverySubmission(ctx context.Context, submission journal.Submission) error {
+	path := "/api/v1/agent/submissions/" + url.PathEscape(submission.ID) + "/retire"
+	request := struct {
+		SessionID         string `json:"session_id"`
+		IncarnationID     string `json:"incarnation_id"`
+		HarnessGeneration uint64 `json:"harness_generation"`
+		StreamID          string `json:"stream_id"`
+		Hash              string `json:"hash"`
+	}{
+		SessionID:         submission.SessionID,
+		IncarnationID:     submission.IncarnationID,
+		HarnessGeneration: submission.HarnessGeneration,
+		StreamID:          submission.StreamID,
+		Hash:              submission.Hash,
+	}
+	return c.doDeliveryRequest(ctx, http.MethodPost, path, request, nil)
+}
+
 // CancelDeliverySubmission settles a prompt after an explicit user cancel.
 // The agentctl peer keeps the terminal record so reconnects cannot resend it.
 func (c *Client) CancelDeliverySubmission(ctx context.Context, id string) error {

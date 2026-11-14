@@ -12,7 +12,7 @@
   "localRepository": "本地儲存庫",
   "localRepositoryMenuDescription": "使用此機器上已有的 Git 檢出。",
   "remoteRepositoryBranchHint": "所選分支將成為該儲存庫的預設基礎分支。儲存後可以更改。",
-  "remoteRepositoryMenuDescription": "從 GitHub、GitLab、Azure DevOps 或已連線的外掛提供方註冊儲存庫。",
+  "remoteRepositoryMenuDescription": "從 GitHub、GitLab 或已連線的外掛提供方註冊儲存庫。",
   "addScript": "新增指令碼",
   "addWorkspace": "新增工作區",
   "alwaysPullBeforeWorktree": "建立新工作樹前始終拉取",

@@ -3481,6 +3481,8 @@ jobs:
         github.run_attempt == 1
       }}
     uses: ./.github/workflows/announce-discord-release.yml
+    secrets:
+      DISCORD_GENERAL_WEBHOOK_URL: ${{ secrets.DISCORD_GENERAL_WEBHOOK_URL }}
     with:
       release_tag: ${{ needs.prepare.outputs.tag }}
       mode: create

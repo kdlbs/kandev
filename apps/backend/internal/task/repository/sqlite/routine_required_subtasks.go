@@ -9,6 +9,7 @@ import (
 
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -27,11 +28,12 @@ func (r *Repository) guardRequiredSubtaskAssignmentsTx(ctx context.Context, tx *
 		return nil
 	}
 	if next != v1.TaskStateCompleted {
-		var terminal int
-		if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT complete_task_on_enter FROM workflow_steps WHERE id=? AND workflow_id=?`), stepID, workflowID).Scan(&terminal); err != nil {
+		var completes bool
+		query := `SELECT ` + workflowmodels.CompletingStepSQL("s") + ` FROM workflow_steps s WHERE s.id=? AND s.workflow_id=?`
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(query), stepID, workflowID).Scan(&completes); err != nil {
 			return err
 		}
-		if terminal == 0 {
+		if !completes {
 			return nil
 		}
 	}

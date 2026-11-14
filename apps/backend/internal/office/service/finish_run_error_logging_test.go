@@ -20,7 +20,7 @@ import (
 // (wrote=false, err=nil) — silently, with no log line either way. A run
 // stuck 'claimed' because the terminal write itself failed needs to be
 // distinguishable in logs from one that lost a race to another writer, so
-// operators (and ReapStaleCheckouts/RecoverStale, the actual recovery path)
+// operators (and the scheduler's guarded stale-claim recovery path)
 // aren't flying blind on which case occurred.
 func TestSchedulerOutcome_IdleSkipped_FinishRunErrorIsLogged(t *testing.T) {
 	core, logs := observer.New(zapcore.ErrorLevel)

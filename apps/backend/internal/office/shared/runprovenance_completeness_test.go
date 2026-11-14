@@ -60,6 +60,7 @@ var unattendedForTest = map[string]bool{
 	"routine_dispatch":      true,
 	"routine_dispatch_cron": true,
 	"routine_trigger":       true,
+	"task_blocker_failed":   true,
 }
 
 // runReasonBlock names one of AC-OFFICE-BUDGET-007.3's seven enumerated

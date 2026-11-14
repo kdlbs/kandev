@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import type { PRCIState } from "@/lib/types/github";
 import { PRStatusGlyph } from "./pr-status-glyph";
 
@@ -13,6 +13,13 @@ const CI_TEST_IDS: Record<Exclude<PRCIState, "none">, string> = {
 };
 
 const APPROVAL_BUBBLE = "pr-ci-bubble-approval-required";
+const ALL_CI_STATES: PRCIState[] = [
+  "none",
+  "failed",
+  "approval_required",
+  "attention",
+  "in_progress",
+];
 
 describe("PRStatusGlyph", () => {
   it("renders no upper-right element for none", () => {
@@ -47,11 +54,54 @@ describe("PRStatusGlyph", () => {
     expect(ring?.className).toContain("motion-safe:animate-spin");
   });
 
-  it("places the conflict triangle inline instead of in the CI slot", () => {
-    render(<PRStatusGlyph ciState="approval_required" hasMergeConflicts />);
-    const conflict = screen.getByTestId("pr-merge-conflict-warning");
-    expect(conflict.className).not.toContain("absolute");
-    expect(screen.getByTestId(APPROVAL_BUBBLE)).not.toBeNull();
+  it("renders a conflict in the upper-right slot for either glyph size", () => {
+    for (const size of ["task", "topbar"] as const) {
+      const { container, rerender, unmount } = render(
+        <PRStatusGlyph
+          size={size}
+          ciState="failed"
+          hasMergeConflicts
+          autoFixEnabled
+          autoMergeEnabled
+        />,
+      );
+      const glyph = within(container);
+
+      for (const ciState of ALL_CI_STATES) {
+        rerender(
+          <PRStatusGlyph
+            size={size}
+            ciState={ciState}
+            hasMergeConflicts
+            autoFixEnabled
+            autoMergeEnabled
+          />,
+        );
+        const conflict = glyph.getByTestId("pr-merge-conflict-warning");
+        const baseGlyph = container.querySelector("span.relative.inline-flex.shrink-0");
+        expect(conflict.parentElement).toBe(baseGlyph);
+        expect(conflict.className).toContain("absolute");
+        expect(conflict.className).toContain("-right-1");
+        expect(conflict.className).toContain("-top-1");
+        expect(glyph.queryByTestId("pr-ci-bubble-failed")).toBeNull();
+        expect(glyph.queryByTestId(APPROVAL_BUBBLE)).toBeNull();
+        expect(glyph.queryByTestId("pr-ci-bubble-attention")).toBeNull();
+        expect(glyph.queryByTestId("pr-ci-bubble-in-progress")).toBeNull();
+        expect(glyph.getByTestId("pr-task-automation-auto-fix")).not.toBeNull();
+        expect(glyph.getByTestId("pr-task-automation-auto-merge")).not.toBeNull();
+      }
+
+      for (const ciState of ALL_CI_STATES) {
+        rerender(<PRStatusGlyph size={size} ciState={ciState} />);
+        expect(glyph.queryByTestId("pr-merge-conflict-warning")).toBeNull();
+        const expectedBubble = ciState === "none" ? undefined : CI_TEST_IDS[ciState];
+        for (const testId of Object.values(CI_TEST_IDS)) {
+          expect(glyph.queryByTestId(testId) !== null).toBe(testId === expectedBubble);
+        }
+      }
+
+      unmount();
+    }
   });
 
   it("keeps automation dots in their existing corners", () => {

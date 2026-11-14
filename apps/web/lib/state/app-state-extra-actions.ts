@@ -7,7 +7,6 @@ import type {
   AuthSliceActions,
   GitHubSliceActions,
   GitLabSliceActions,
-  AzureDevOpsSliceActions,
   JiraSliceActions,
   LinearSliceActions,
   OfficeSliceActions,
@@ -28,7 +27,6 @@ export type AppStateExtraActions = Pick<UIA, "setThreadActiveView" | "createThre
   LinearSliceActions &
   OfficeSliceActions &
   import("./store-reexports").WorkspaceSourceStoreState &
-  AzureDevOpsSliceActions &
   SystemSliceActions &
   FeaturesSliceActions &
   AuthSliceActions &

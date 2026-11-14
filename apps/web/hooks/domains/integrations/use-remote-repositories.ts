@@ -3,20 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchAccessibleRepos } from "@/lib/api/domains/github-api";
 import { listUserProjects } from "@/lib/api/domains/gitlab-api";
-import {
-  listAzureDevOpsProjects,
-  listAzureDevOpsRepositories,
-} from "@/lib/api/domains/azure-devops-api";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useGitLabStatus } from "@/hooks/domains/gitlab/use-gitlab-status";
-import { useAzureDevOpsConnection } from "@/hooks/domains/azure-devops/use-azure-devops-browse";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { PluginRepositoryProviderRegistration } from "@/lib/plugins/registry";
 import { repositoryProviderMatchesURL } from "@/lib/plugins/repository-provider-url-resolution";
 import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import { looksLikeSupportedRemoteURL } from "@/components/workspace-source-picker/remote-url";
 
-export const REMOTE_REPOSITORY_PROVIDERS = ["github", "gitlab", "azure_devops"] as const;
+export const REMOTE_REPOSITORY_PROVIDERS = ["github", "gitlab"] as const;
 
 export type RemoteRepositoryProvider = (typeof REMOTE_REPOSITORY_PROVIDERS)[number] | (string & {});
 
@@ -46,28 +41,6 @@ export type UseRemoteRepositoriesResult = {
   /** The workspace's GitHub host, for parsing typed repository URLs. */
   githubHost?: string;
 };
-
-async function loadAzureRepositories(workspaceId: string): Promise<RemoteRepository[]> {
-  if (!workspaceId) return [];
-  const { projects = [] } = await listAzureDevOpsProjects(workspaceId);
-  const batches = await Promise.all(
-    projects.map((project) =>
-      listAzureDevOpsRepositories(workspaceId, project.id).then(({ repositories = [] }) =>
-        repositories.map((repo) => ({
-          provider: "azure_devops" as const,
-          id: repo.id,
-          owner: repo.projectId,
-          name: repo.name,
-          fullName: `${repo.projectName}/${repo.name}`,
-          url: repo.webUrl,
-          defaultBranch: (repo.defaultBranch || "").replace(/^refs\/heads\//, ""),
-          private: true,
-        })),
-      ),
-    ),
-  );
-  return batches.flat();
-}
 
 type RemoteRepositoryLoad = {
   repos: RemoteRepository[];
@@ -110,24 +83,15 @@ function useBuiltInRepositoryAccess(
   allowed: ReadonlySet<string> | null,
 ): BuiltInRepositoryAccess {
   const wantsGitLab = !allowed || allowed.has("gitlab");
-  const wantsAzureDevOps = !allowed || allowed.has("azure_devops");
   const githubStatus = useGitHubStatus(workspaceId);
   // An empty workspace disables a status load that the caller did not request.
   const gitlabStatus = useGitLabStatus(wantsGitLab ? workspaceId : "");
-  const azureDevOpsConnection = useAzureDevOpsConnection(
-    wantsAzureDevOps && workspaceId ? workspaceId : undefined,
-  );
   const providers = useMemo(() => {
     const eligible = new Set<RemoteRepositoryProvider>();
     if (hasProviderConnection(githubStatus.status)) eligible.add("github");
     if (hasProviderConnection(gitlabStatus.status)) eligible.add("gitlab");
-    if (azureDevOpsConnection.data?.hasSecret && azureDevOpsConnection.data.lastOk) {
-      eligible.add("azure_devops");
-    }
     return eligible;
   }, [
-    azureDevOpsConnection.data?.hasSecret,
-    azureDevOpsConnection.data?.lastOk,
     githubStatus.status?.authenticated,
     githubStatus.status?.token_configured,
     gitlabStatus.status?.authenticated,
@@ -138,27 +102,21 @@ function useBuiltInRepositoryAccess(
       providers,
       loading:
         Boolean(workspaceId) &&
-        (githubStatus.loading ||
-          !githubStatus.loaded ||
-          (wantsGitLab && gitlabStatus.loading) ||
-          (wantsAzureDevOps && azureDevOpsConnection.loading)),
+        (githubStatus.loading || !githubStatus.loaded || (wantsGitLab && gitlabStatus.loading)),
     }),
     [
-      azureDevOpsConnection.loading,
       gitlabStatus.loading,
       githubStatus.loaded,
       githubStatus.loading,
       providers,
-      wantsAzureDevOps,
       wantsGitLab,
       workspaceId,
     ],
   );
   const refresh = useCallback(() => {
     void githubStatus.refresh();
-    void gitlabStatus.refresh();
-    azureDevOpsConnection.refresh();
-  }, [azureDevOpsConnection.refresh, githubStatus.refresh, gitlabStatus.refresh]);
+    if (wantsGitLab) void gitlabStatus.refresh();
+  }, [githubStatus.refresh, gitlabStatus.refresh, wantsGitLab]);
   return { eligibility, refresh, githubHost: githubStatus.status?.automation?.github_host };
 }
 
@@ -208,9 +166,6 @@ async function loadBuiltInRepositories(
         })),
       ),
     });
-  }
-  if (eligibleProviders.has("azure_devops")) {
-    requests.push({ provider: "azure_devops", load: loadAzureRepositories(workspaceId) });
   }
   return settleRepositoryRequests(requests);
 }

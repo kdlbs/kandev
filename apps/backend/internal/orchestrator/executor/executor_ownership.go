@@ -2,6 +2,9 @@ package executor
 
 import (
 	"context"
+	"errors"
+	"fmt"
+
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -13,6 +16,39 @@ func (e *Executor) SetExecutorAdmission(admit func(context.Context, string, stri
 
 func (e *Executor) SetAutonomousExecutorContext(resolve func(context.Context, string, string) (context.Context, error)) {
 	e.autonomousExecutorContext = resolve
+}
+
+// PreflightSessionExecutorAdmission checks a destination selection without
+// creating or attaching a session. An empty session ID keeps admission
+// side-effect free while validating the inherited executor bindings.
+func (e *Executor) PreflightSessionExecutorAdmission(
+	ctx context.Context,
+	task *v1.Task,
+	executorID, executorProfileID, taskEnvironmentID string,
+) error {
+	if task == nil {
+		return errors.New("task is required for executor admission preflight")
+	}
+	metadata := cloneMetadata(task.Metadata)
+	if executorProfileID != "" {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata["executor_profile_id"] = executorProfileID
+	}
+	config := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
+	session := &models.TaskSession{
+		ExecutorProfileID: executorProfileID,
+		TaskEnvironmentID: taskEnvironmentID,
+	}
+	_, err := e.prepareExecutorAdmission(ctx, task, session, config)
+	if err != nil {
+		return err
+	}
+	if err := e.admitConcreteExecutorRuntime(config); err != nil {
+		return fmt.Errorf("admit destination executor runtime: %w", err)
+	}
+	return nil
 }
 
 func (e *Executor) prepareExecutorAdmission(ctx context.Context, task *v1.Task, session *models.TaskSession, config executorConfig) (context.Context, error) {
