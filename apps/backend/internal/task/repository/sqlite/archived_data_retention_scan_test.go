@@ -99,3 +99,43 @@ func TestHistoryUpperMessageRowIDCapturesPassStart(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 2, upper)
 }
+
+// Message metadata is reduced only for a task archived by the cutoff or a
+// terminal task that is inactive at the cutoff; an active, unarchived or
+// recently touched task keeps its history.
+func TestHistoryTaskEligibleRequiresArchivedOrFinished(t *testing.T) {
+	cutoff := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, tt := range []struct {
+		name, mutation string
+		want           bool
+	}{
+		{"finished and inactive", "", true},
+		{"active task", `UPDATE tasks SET state='IN_PROGRESS'`, false},
+		{"live session", `UPDATE task_sessions SET state='RUNNING'`, false},
+		{"recently touched", `UPDATE tasks SET updated_at='2026-02-01'`, false},
+		{"archived by cutoff", `UPDATE tasks SET state='IN_PROGRESS',archived_at='2025-06-01T00:00:00Z'`, true},
+		{"archived at cutoff", `UPDATE tasks SET state='IN_PROGRESS',archived_at='2026-01-01T00:00:00Z'`, true},
+		{"archived after cutoff", `UPDATE tasks SET state='IN_PROGRESS',archived_at='2026-02-01T00:00:00Z'`, false},
+		{"unreadable archive time", `UPDATE tasks SET state='IN_PROGRESS',archived_at='invalid'`, false},
+		{"missing task", `DELETE FROM tasks`, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			d := payloadScanFixture(t)
+			_, err := d.Exec(`ALTER TABLE tasks ADD COLUMN archived_at TIMESTAMP`)
+			require.NoError(t, err)
+			if tt.mutation != "" {
+				_, err = d.Exec(tt.mutation)
+				require.NoError(t, err)
+			}
+			got, err := HistoryTaskEligible(context.Background(), d, "sqlite3", "task", cutoff)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestHistoryTaskEligibleRejectsOtherDrivers(t *testing.T) {
+	d := payloadScanFixture(t)
+	_, err := HistoryTaskEligible(context.Background(), d, "postgres", "task", time.Now())
+	require.Error(t, err)
+}
