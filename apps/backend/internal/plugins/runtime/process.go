@@ -274,12 +274,13 @@ func (p *process) handleFailureAndRestart(reason error) bool {
 	p.notify(false, reason)
 
 	p.mu.Lock()
-	if p.current != nil {
-		p.current.Kill()
-		p.current = nil
-	}
+	current := p.current
+	p.current = nil
 	p.failures = 0
 	p.mu.Unlock()
+	if current != nil {
+		current.Kill()
+	}
 
 	var lastErr error
 	for attempt := 0; attempt < p.maxRestartAttempts; attempt++ {

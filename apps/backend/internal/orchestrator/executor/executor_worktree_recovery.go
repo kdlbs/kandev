@@ -2,11 +2,13 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -148,21 +150,75 @@ func (e *Executor) captureSelectedWorkspaceRecoverySnapshot(
 
 // PreflightSessionWorktreeRecovery performs selected-environment recovery
 // before a recovery action mutates provider state such as its resume token.
-// The returned admission must remain held through LaunchSession.
+// Hold the admission through LaunchSession. Call the returned replacement release
+// after launch or any earlier exit, including errors and nil admissions.
 func (e *Executor) PreflightSessionWorktreeRecovery(
 	ctx context.Context,
 	taskID string,
 	session *models.TaskSession,
 	allowBranchReplacement bool,
-) (*worktree.RecoveryAdmission, error) {
+) (*worktree.RecoveryAdmission, func(context.Context) error, error) {
 	if e == nil || e.repo == nil || session == nil || taskID == "" || session.TaskID != taskID {
-		return nil, nil
+		return nil, nil, nil
+	}
+	previousEnvironmentID := session.TaskEnvironmentID
+	retiredBinding, selected, err := e.prepareRetiredEnvironmentReplacementForRecovery(ctx, taskID, session, allowBranchReplacement)
+	release := e.recoveryReplacementRelease(selected, session.ID)
+	if err != nil {
+		return nil, release, err
+	}
+	if retiredBinding && session.TaskEnvironmentID == previousEnvironmentID {
+		return nil, release, nil
 	}
 	env, err := e.resolveEnvironmentForAdmission(ctx, taskID, session.TaskEnvironmentID)
 	if err != nil || env == nil {
-		return nil, err
+		return nil, release, err
 	}
-	return e.admitSelectedWorktreeRecovery(ctx, taskID, session, env, env.ExecutorType, allowBranchReplacement, worktree.RecoveryInspectionWaitBudget, true)
+	admission, err := e.admitSelectedWorktreeRecovery(ctx, taskID, session, env, env.ExecutorType, allowBranchReplacement, worktree.RecoveryInspectionWaitBudget, true)
+	return admission, release, err
+}
+
+func (e *Executor) prepareRetiredEnvironmentReplacementForRecovery(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	allowBranchReplacement bool,
+) (bool, *models.TaskEnvironment, error) {
+	if session.TaskEnvironmentID == "" {
+		return false, nil, nil
+	}
+	retained, err := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+	if err != nil {
+		return false, nil, fmt.Errorf("load selected task environment %q: %w", session.TaskEnvironmentID, err)
+	}
+	if !retained.IsRetired() {
+		return false, nil, nil
+	}
+	if !isTerminalSessionState(session.State) && session.State != models.TaskSessionStateCompleted {
+		return true, nil, fmt.Errorf("%w: retired environment is bound to a live session", models.ErrWorkspaceReuseUnsafe)
+	}
+	if _, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID); errors.Is(err, repoerrors.ErrTaskEnvironmentNotFound) {
+		return true, nil, nil
+	} else if err != nil {
+		return true, nil, fmt.Errorf("load active replacement environment: %w", err)
+	}
+	if err := e.cleanupStaleExecutionBeforeResume(ctx, session.ID); err != nil {
+		return true, nil, err
+	}
+	task, err := e.loadResumeTask(ctx, session)
+	if err != nil {
+		return true, nil, err
+	}
+	options := ResumeOptions{
+		AllowCompletedSessionResume: session.State == models.TaskSessionStateCompleted,
+		AllowBranchReplacement:      allowBranchReplacement,
+	}
+	executorType, err := e.requestedResumeExecutorType(ctx, task, session, true, options)
+	if err != nil {
+		return true, nil, err
+	}
+	selected, err := e.replaceFailedEnvironmentForResume(ctx, task, session, executorType)
+	return true, selected, err
 }
 
 type managedClonePathResolver interface {
@@ -199,6 +255,9 @@ func (e *Executor) resolveEnvironmentForAdmission(
 		env, err := e.repo.GetTaskEnvironment(ctx, environmentID)
 		if err != nil {
 			return nil, fmt.Errorf("load selected task environment %q: %w", environmentID, err)
+		}
+		if env.IsRetired() {
+			return nil, fmt.Errorf("%w: task environment is retained as inactive history", models.ErrWorkspaceReuseUnsafe)
 		}
 		return env, nil
 	}

@@ -56,9 +56,11 @@ bounded instance capacity, so that one installation does not overload its host.
 - **AC-AGENTS-SESSION-CEILING-001.1:** When an automatic launch would exceed the
   configured ceiling, the system shall refuse the launch and persist its kind,
   replay payload, origin, reason, and enqueue time on the task.
-- **AC-AGENTS-SESSION-CEILING-001.2:** When a manual launch would exceed the
-  ceiling, the system shall admit it and record that it used a manual override.
-  Ordinary message submission shall follow requirement 003.
+- **AC-AGENTS-SESSION-CEILING-001.2:** Under the automatic-only policy, when a
+  manual launch would exceed the ceiling, the system shall admit it and record
+  that it used a manual override. Under the all-execution policy, manual launches
+  shall follow the configured total and grade limits. Ordinary message
+  submission shall follow requirement 003.
 - **AC-AGENTS-SESSION-CEILING-001.3:** The ceiling shall count sessions in
   `STARTING` and `RUNNING` state together with in-flight reservations, and shall
   release a reservation only after its launch reaches a counted state or fails.
@@ -134,7 +136,8 @@ bounded instance capacity, so that one installation does not overload its host.
 - **AC-AGENTS-SESSION-CEILING-002.3:** Enabling or lowering the ceiling shall
   preserve running sessions and already admitted launches. Later automatic
   launches shall wait until capacity permits them. Manual starts retain their
-  existing override behavior.
+  override only under the automatic-only policy. Under the all-execution policy,
+  they shall follow its configured limits.
 - **AC-AGENTS-SESSION-CEILING-002.4:** An explicit valid environment override
   shall take precedence over the saved setting. Settings shall show the effective
   value and its source and prevent changes while this override applies. Removing
@@ -202,10 +205,38 @@ capacity check or queue.
   execution overrides and accepted-turn continuations shall retain their
   existing admission and audit behavior.
 
+### REQ-AGENTS-SESSION-CEILING-005: Opt into total and execution-grade limits
+
+**Intent:** Administrators can explicitly include manual task launches in a
+shared total and per-grade capacity policy without changing automatic-only defaults.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-SESSION-CEILING-005.1:** The absent setting remains disabled with
+  the automatic-only policy. The optional all-execution policy applies the total
+  and configured grade limits together; the grade-limit map shall contain no
+  more than 64 entries. Saving settings preserves admitted work.
+- **AC-AGENTS-SESSION-CEILING-005.2:** Profiles and tasks accept explicit grade
+  names. An empty value is unconfigured. A task's nonempty grade overrides its
+  selected logical profile's grade. Prepared profiles preserve the value, and
+  admission freezes it on the session rather than rereading later edits.
+  Message turns check both limits before warm dispatch or cold resume and
+  retain that grade on their tickets through nested launches.
+- **AC-AGENTS-SESSION-CEILING-005.3:** Missing configuration and unknown admitted
+  grades remain distinguishable from zero usage. Reservations and persisted
+  active sessions are counted once under the existing admission owner lock.
+- **AC-AGENTS-SESSION-CEILING-005.4:** All-policy deferred launches replay in
+  arrival order. A selected workflow destination retains its identity through
+  admission and rechecks capacity if that selection loses its promotion.
+- **AC-AGENTS-SESSION-CEILING-005.5:** Settings expose total and grade limits;
+  queue status exposes the same admission snapshot, including unavailable and
+  stale observations. This policy does not change workflow WIP limits.
+
 ## Out of scope
 
 - Per-workspace or per-user ceilings.
-- Changing workflow WIP limits or imposing a hard limit on manual launches.
+- Changing workflow WIP limits or changing manual-launch behavior under the
+  default automatic-only policy.
 - A new release toggle, YAML setting, or automatic CPU-based capacity selection.
 - Replacing the orchestrator's existing launch seams or task repository.
 - A separate message-capacity setting or a new release toggle.

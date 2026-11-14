@@ -90,6 +90,7 @@ test("mobile: opening a native session menu owns the completed touch gesture", a
     await expect(pill).toContainText("Secondary conversation");
     await pill.tap();
     await expect(row).toHaveAttribute("aria-current", "true");
+    await waitForFiniteAnimations(sheet);
     expect(mutations()).toEqual([]);
     const trigger = row.getByRole("button", { name: "Session actions", exact: true });
     const menu = testPage.getByRole("menu");

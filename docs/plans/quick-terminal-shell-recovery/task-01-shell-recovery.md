@@ -110,7 +110,8 @@ Before production edits, run the new recovery regressions and record their expec
 
 Use `backend.restart()` from `fixtures/test-base`.
 It preserves the disposable worker database while replacing backend memory.
-One case reloads after restart. Another retains the page and waits for reconnection before recovery.
+One case reloads after restart. Another keeps the browser open, confirms the
+changed backend generation, and uses the required reload action before recovery.
 Do not create a replacement tab or invoke recovery from a wait helper.
 
 For natural exit, send `exit` through the active shell and observe its persisted exit.
@@ -297,6 +298,24 @@ Implemented and validated on 2026-11-11.
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - Local public-document coverage preflight: `covered`, zero errors.
 - `git diff --check`: passed.
+
+### Consolidated PR CI: confirmed backend restart
+
+Shard 11 failed the open-browser restart case in all four attempts. Its saved
+page showed the required reload alert and an old-document request failure.
+The isolated old case passed. It did not wait for the global restart check
+before attempting terminal recovery.
+
+The test now waits for the new backend identity, dismisses the modal, and uses
+the visible reload action. It reopens the terminal through the sidebar without
+another navigation. Existing tab ID, order, new session, and command-output
+assertions remain. This follows the platform restart contract; product code
+and published screenshot surfaces are unchanged.
+
+The corrected case passed, all seven recovery scenarios passed, and the exact
+42-case CI worker group passed. Each run disabled retries. Public documentation,
+catalog validation, specification lint, and diff checks passed. Hosted results
+are recorded on PR #5321 after the correction is published.
 
 Public guidance now explains same-tab recovery, the lack of automatic restart on tab selection, the loss of the old shell state, and when to use **New Terminal**.
 

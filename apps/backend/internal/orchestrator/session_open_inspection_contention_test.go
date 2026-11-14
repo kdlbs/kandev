@@ -107,7 +107,7 @@ func TestSessionOpenResumeWaitsForWorkspaceInspection(t *testing.T) {
 
 	ownerResult := make(chan error, 1)
 	go func() {
-		_, preflightErr := fixture.svc.executor.PreflightSessionWorktreeRecovery(
+		_, _, preflightErr := fixture.svc.executor.PreflightSessionWorktreeRecovery(
 			ctx, fixture.taskID, session, false,
 		)
 		ownerResult <- preflightErr
@@ -226,7 +226,7 @@ func TestSessionOpenResumeHonorsEarlierCallerDeadline(t *testing.T) {
 
 	ownerResult := make(chan error, 1)
 	go func() {
-		_, preflightErr := fixture.svc.executor.PreflightSessionWorktreeRecovery(
+		_, _, preflightErr := fixture.svc.executor.PreflightSessionWorktreeRecovery(
 			ctx, fixture.taskID, session, false,
 		)
 		ownerResult <- preflightErr

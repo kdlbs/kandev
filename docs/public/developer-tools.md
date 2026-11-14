@@ -124,6 +124,9 @@ tabs or close the view.
 
 After a shell exits or the backend restarts, the shell process and its state are gone. This includes environment changes, running commands, command history, and screen output.
 
+If Kandev requests a reload after restart, dismiss the Quick Terminal view.
+Select **Reload page**, then reopen Quick Terminal.
+
 To start a shell in the same tab, select the tab and then select **Start new shell**. Selecting or reopening a tab does not start a shell automatically. To open a separate shell, select **New Terminal**.
 
 ### Start a chat

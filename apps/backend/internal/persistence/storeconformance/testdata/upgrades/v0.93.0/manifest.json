@@ -22,7 +22,14 @@
           "table": "agent_profiles",
           "key_column": "id",
           "key_value": "fixture-v0930-agent-profile",
-          "values": {"sort_order": "0"}
+          "values": {"sort_order": "0", "execution_grade": ""}
+        },
+        {
+          "owner": "task",
+          "table": "tasks",
+          "key_column": "id",
+          "key_value": "fixture-v0930-task",
+          "values": {"execution_grade": ""}
         },
         {
           "owner": "task",
@@ -230,7 +237,14 @@
           "table": "agent_profiles",
           "key_column": "id",
           "key_value": "fixture-v0930-agent-profile",
-          "values": {"sort_order": "0"}
+          "values": {"sort_order": "0", "execution_grade": ""}
+        },
+        {
+          "owner": "task",
+          "table": "tasks",
+          "key_column": "id",
+          "key_value": "fixture-v0930-task",
+          "values": {"execution_grade": ""}
         },
         {
           "owner": "task",
@@ -465,6 +479,7 @@
       "task_environment_checkout_adoptions",
       "task_environment_kubernetes",
       "task_workflow_session_bindings",
+      "task_message_send_operations",
       "task_message_shell_output",
       "task_message_shell_output_chunks",
       "turn_change_content_leases",

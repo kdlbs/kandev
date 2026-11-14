@@ -1,0 +1,119 @@
+---
+id: "01-implementation"
+title: "fix(task): retain failed environments before reserving replacements"
+status: done
+wave: 1
+depends_on: []
+plan: "plan.md"
+requirements:
+  - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004
+acceptance_criteria:
+  - AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.5
+  - AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.8
+  - AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.9
+  - AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.11
+system_design:
+  - ../../specs/tasks/system-design/task-launch-failure-recovery.md
+  - ../../specs/tasks/system-design/session-delete-resource-cleanup.md
+---
+
+# fix(task): retain failed environments before reserving replacements
+
+## Outcome and scope
+
+Retain failed physical environments and historical bindings while atomically reserving a fresh materializer/root for the requesting terminal session; environment-scoped worktree reuse.
+
+Out of scope: Deletion or resetting of old files, broad discovery, live-consumer eviction, and operating data changes.
+
+## Implementation acceptance
+
+1. The affected native entrypoint follows the linked requirement and design while preserving unrelated behavior and history.
+2. Rejected, stale and failed operations retain their existing refusal or rollback semantics.
+3. The focused implementation checks and linked documentation coverage have honest recorded results; unexecuted follow-up checks remain pending.
+
+## Files and dependencies
+
+The source files are the existing PR #4713 diff. This work order adds its delivery record and links existing requirements and system design; it introduces no runtime gate. The review follow-up below adds focused committed tests.
+
+- [System design](../../specs/tasks/system-design/task-launch-failure-recovery.md)
+- [Plan](plan.md)
+
+## Verification and results
+
+The retained-history follow-up rejects a retired environment at the shared
+inventory admission boundary before its early returns. This prevents resume or
+inventory recovery from accepting an inactive historical environment while
+leaving active-environment handling unchanged. It changes
+`apps/backend/internal/orchestrator/executor/executor_environment_reuse.go`.
+The existing admission path was exercised through a temporary overlay: the
+retired case failed before the guard and passed afterward, alongside the
+existing inventory controls. No permanent test was added.
+
+Validation:
+- Existing focused store/executor tests and temporary real-SQLite/ResumeSession checks passed, including binding-before-launch, same-reservation retry, retained inventory, ownership/consumer refusals, and preflight/launch failure release.
+- SQL guard, documentation checks and all normal commit hooks passed.
+- Required race conformance hit only an existing Unix-path storage fixture on Windows. Its failed scenarios and the real previous-stable upgrade passed with a temporary two-path Windows fixture overlay; assertions and product code were unchanged.
+- Live PostgreSQL and full physical provider/worktree E2E were not run. No permanent tests, CI jobs or retirement endpoint were added.
+
+Documentation-only correction: git diff --check and the existing .github/scripts/pr-docs.cjs validateCoverage entrypoint with the candidate changed paths and the linked candidate documents supplied on stdin. No GitHub status is synthesized locally.
+
+The follow-up passed real SQLite binding/election/retention checks with -race (9.427s), actual Git preparation/cache checks with -race (16.539s), existing selected reuse controls (17.158s), and SQL guard. The additional native SQLite-to-cold-manager legacy-input control passed with -race (1.976s), reusing the same persisted checkout and preserving its marker file. Live PostgreSQL and live provider E2E remain unexecuted. Normal commit hooks must pass before publication.
+
+Review follow-up (retained-environment cleanup and reservation): a failed reload
+after the replacement commit now releases the reservation the requesting session
+owns, task cleanup removes a retired environment's checkout whose terminal
+session is still bound to it, and removing a checkout with no bound session
+marks its inventory row deleted. Committed tests cover each case and fail
+without the change: `TestReplacementReloadFailureReleasesOwnedReservation`,
+`TestCleanupDestructiveTaskResourcesRemovesRetiredEnvironmentCheckout`,
+`TestCleanupWorktrees_MarksSessionlessRetainedWorktreeDeleted`. Env-gated
+PostgreSQL tests `TestPostgresReplacementElectsOneReservationAndRetainsInventory`
+and `TestPostgresReplacementRefusesConsumerAfterLockWait` passed with -race on a
+local PostgreSQL 16 container; PostgreSQL 18 was not run locally.
+
+## Maintainer consolidation
+
+Recovered the prepared recovery fixes from `390c6c47c433` and reconciled them
+with current main. Public recovery selects its successor before preflight.
+Historical retries reclaim abandoned successor claims. Unsupported executor
+types retain reset guidance and their cleanup inventory. Both legacy rebuilds
+preserve retirement timestamps, and `runMigrations` owns the additive column.
+
+The recovered tests reproduced all three recovery blockers, the migration gap,
+and the lost reset guidance before the fixes.
+PostgreSQL 18 also exposed a fresh reservation takeover during concurrent
+terminal-session resumes. A recent reservation now retains its terminal owner
+until a later completion or the existing launch budget expires.
+Canonical shared-group and inherited-transition queries now exclude retired
+rows. Regression tests failed on both SQLite and PostgreSQL before that change.
+
+The final focused race run passed in all five packages: orchestrator, executor,
+task repository, task service, and worktree. The selection includes public
+recovery, replacement election, abandoned and live claims, migration replay and
+cutover, canonical binding, inherited transitions, cleanup, and inventory reuse.
+PostgreSQL tests ran against an isolated PostgreSQL 18 container.
+SQL guard and full store conformance remain part of the final combined-branch
+verification.
+
+## Consolidated PR review: unused preflight reservations
+
+PR #5321 exposed creating successors left behind by capacity deferral and
+preflight inspection errors. Both failures reproduced in public recovery tests.
+Preflight now returns an idempotent release handle even without workspace
+admission. Recovery calls it on every exit, after releasing workspace admission.
+It also runs after request cancellation, within a separate cleanup budget.
+
+Release checks the captured environment, materializer, generation, and timestamp.
+It preserves started sessions, live executions, ready environments, and renewed
+claims. PostgreSQL locks the owner row before checking state. A real lock-wait
+regression reproduced release racing an uncommitted start before that guard.
+Release remains available while task cleanup is pending. Post-commit reload
+failure uses the same fenced release on both supported databases.
+
+The final affected race suites passed with real PostgreSQL 18 and SQLite.
+They cover cancellation, capacity deferral, inspection errors, immediate sibling
+retry, ownership fences, and concurrent startup. Existing recovery, executor,
+materialization, and worktree regressions passed. SQL guard and backend MCP/shutdown
+wiring checks passed.
+The final combined branch also passed 10 desktop and 9 phone browser scenarios.
+Normal changed-file hooks passed before the remediation commit.

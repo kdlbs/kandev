@@ -10,10 +10,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/task/models"
@@ -91,6 +93,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	// from the trusted execution owner when it is available.
 	_ = r.migrate.Apply("task_step_transitions.causing_run_id", `ALTER TABLE task_step_transitions ADD COLUMN causing_run_id TEXT`)
 	for _, migration := range []struct{ name, query string }{
+		{"task_sessions.admitted_execution_grade", `ALTER TABLE task_sessions ADD COLUMN admitted_execution_grade TEXT NOT NULL DEFAULT ''`},
+		{"task_sessions.admitted_execution_grade_known", `ALTER TABLE task_sessions ADD COLUMN admitted_execution_grade_known INTEGER NOT NULL DEFAULT 0`},
+		{"tasks.execution_grade", `ALTER TABLE tasks ADD COLUMN execution_grade TEXT NOT NULL DEFAULT ''`},
 		{"control_server_records.process_id", `ALTER TABLE control_server_records ADD COLUMN process_id INTEGER NOT NULL DEFAULT 0`},
 		{"control_server_records.process_group_id", `ALTER TABLE control_server_records ADD COLUMN process_group_id INTEGER NOT NULL DEFAULT 0`},
 		{"control_server_records.process_session_id", `ALTER TABLE control_server_records ADD COLUMN process_session_id INTEGER NOT NULL DEFAULT 0`},
@@ -248,6 +253,7 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	// Must run after the task_environments rebuild above, which copies an
 	// explicit column list and supplies the legacy empty default for this field.
 	_ = r.migrate.Apply("task_environments.workspace_layout", `ALTER TABLE task_environments ADD COLUMN workspace_layout TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("task_environments.retired_at", `ALTER TABLE task_environments ADD COLUMN retired_at TIMESTAMP`)
 	if err := r.migrateTaskEnvironmentReposAllowMultiBranch(); err != nil {
 		return err
 	}
@@ -726,6 +732,56 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	if err := r.migrateTurnChangeHistorySchema(); err != nil {
 		return err
 	}
+
+	// A task message send operation is claimed before the first delivery side
+	// effect so a caller that lost the response can read the outcome back
+	// instead of retrying blind. It carries no foreign key: a retained
+	// operation record must outlive the task it named so a late readback still
+	// resolves, and a caller must not be able to erase its own history by
+	// deleting the target. The delivery-determining request fields are stored
+	// verbatim -- there is deliberately no derived digest column.
+	_ = r.migrate.Apply("task_message_send_operations.table", `
+		CREATE TABLE IF NOT EXISTS task_message_send_operations (
+			id TEXT PRIMARY KEY,
+			operation_id TEXT NOT NULL,
+			sender_task_id TEXT NOT NULL,
+			sender_session_id TEXT NOT NULL,
+			target_task_id TEXT NOT NULL DEFAULT '',
+			target_session_id TEXT NOT NULL DEFAULT '',
+			requested_prompt TEXT NOT NULL DEFAULT '',
+			requested_delivery_mode TEXT NOT NULL DEFAULT '',
+			requested_session_id TEXT NOT NULL DEFAULT '',
+			requested_question_id TEXT NOT NULL DEFAULT '',
+			state TEXT NOT NULL CHECK (state IN ('pending', 'committed', 'failed')),
+			delivery_status TEXT NOT NULL DEFAULT '',
+			message_id TEXT NOT NULL DEFAULT '',
+			queued_entry_id TEXT NOT NULL DEFAULT '',
+			failure_code TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			settled_at TIMESTAMP
+		)`)
+	// Same explicit deterministic collation rationale as tasks.external_id: an
+	// unqualified PostgreSQL TEXT column inherits the database default, which
+	// may be case-insensitive or nondeterministic, and two identities differing
+	// only in case would then collide. This index is what makes claim-before-
+	// delivery authoritative, so a failure to create it must fail startup via
+	// the migrate.Err() check below rather than silently leaving concurrent
+	// claims for one identity. No WHERE clause is needed here (unlike
+	// uniq_tasks_external_id): operation_id is NOT NULL and a send without an
+	// identity writes no row at all.
+	if dialect.IsPostgres(r.db.DriverName()) {
+		_ = r.migrate.Apply("task_message_send_operations.identity", `
+			CREATE UNIQUE INDEX IF NOT EXISTS uniq_task_message_send_operations_identity
+				ON task_message_send_operations(sender_task_id, sender_session_id, operation_id COLLATE "C")`)
+	} else {
+		_ = r.migrate.Apply("task_message_send_operations.identity", `
+			CREATE UNIQUE INDEX IF NOT EXISTS uniq_task_message_send_operations_identity
+				ON task_message_send_operations(sender_task_id, sender_session_id, operation_id COLLATE BINARY)`)
+	}
+	_ = r.migrate.Apply("task_message_send_operations.retention", `
+		CREATE INDEX IF NOT EXISTS idx_task_message_send_operations_retention
+			ON task_message_send_operations(created_at)`)
 
 	// Delivery refresh resolves snapshots through their environment owner or a
 	// task/session binding. Both keys are needed by that correlated lookup, and
@@ -1225,6 +1281,14 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 	if err := r.migrate.Apply("tasks.executor_actor_user_id", "ALTER TABLE tasks ADD COLUMN executor_actor_user_id TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	hasGrade, err := db.ColumnExistsContext(r.migrationContext(), r.db, "tasks", "execution_grade")
+	if err != nil {
+		return fmt.Errorf("probe tasks.execution_grade before rebuild: %w", err)
+	}
+	gradeExpression := "''"
+	if hasGrade {
+		gradeExpression = "execution_grade"
+	}
 	return r.recreateTableNamed("tasks.recreate_drop_workflow_fk", "tasks", "FOREIGN KEY (workflow_id)", []string{
 		`CREATE TABLE tasks_new (
 			id TEXT PRIMARY KEY,
@@ -1237,6 +1301,7 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 			description TEXT DEFAULT '',
 			state TEXT DEFAULT 'TODO',
 			priority INTEGER DEFAULT 0,
+			execution_grade TEXT NOT NULL DEFAULT '',
 			position INTEGER DEFAULT 0,
 			wip_admitted INTEGER NOT NULL DEFAULT 1,
 			queued_for_step_id TEXT NOT NULL DEFAULT '',
@@ -1249,10 +1314,10 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL
 		)`,
-		`INSERT INTO tasks_new SELECT
+		fmt.Sprintf(`INSERT INTO tasks_new SELECT
 			id, executor_actor_user_id, workspace_id, '', workflow_id, workflow_step_id, title, description,
-			state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, archived_at, created_at, updated_at
-		FROM tasks`,
+			state, priority, %s, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, archived_at, created_at, updated_at
+		FROM tasks`, gradeExpression),
 		`DROP TABLE tasks`,
 		`ALTER TABLE tasks_new RENAME TO tasks`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_workflow_id ON tasks(workflow_id)`,
@@ -1484,6 +1549,8 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 			task_id TEXT NOT NULL,
 			agent_profile_id TEXT,
 			execution_profile_id TEXT NOT NULL DEFAULT '',
+			admitted_execution_grade TEXT NOT NULL DEFAULT '',
+			admitted_execution_grade_known INTEGER NOT NULL DEFAULT 0,
 			route_generation INTEGER NOT NULL DEFAULT 0,
 			route_state TEXT NOT NULL DEFAULT '',
 			route_reason TEXT NOT NULL DEFAULT '',
@@ -1516,7 +1583,7 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		)`,
 		`INSERT INTO task_sessions_new SELECT
-			id, task_id, agent_profile_id, execution_profile_id,
+			id, task_id, agent_profile_id, execution_profile_id, admitted_execution_grade, admitted_execution_grade_known,
 			route_generation, route_state, route_reason, downstream_acp_session_id,
 			executor_id, executor_profile_id, environment_id, repository_id, base_branch,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
@@ -1538,6 +1605,14 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 // denormalized copy that drifted from the in-memory store. The orchestrator
 // now reads execution state from executors_running only.
 func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
+	hasRetiredAt, err := db.ColumnExistsContext(r.migrationContext(), r.db, "task_environments", "retired_at")
+	if err != nil {
+		return fmt.Errorf("probe task_environments.retired_at before rebuild: %w", err)
+	}
+	retiredAtExpr := "NULL"
+	if hasRetiredAt {
+		retiredAtExpr = "retired_at"
+	}
 	return r.recreateTableNamed("task_environments.recreate_drop_agent_execution_id", "task_environments", "agent_execution_id", []string{
 		`CREATE TABLE task_environments_new (
 			id TEXT PRIMARY KEY,
@@ -1562,14 +1637,15 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 			task_dir_name TEXT DEFAULT '',
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL,
+			retired_at TIMESTAMP,
 			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		)`,
-		`INSERT INTO task_environments_new SELECT
+		fmt.Sprintf(`INSERT INTO task_environments_new SELECT
 			id, task_id, ownership_generation, repository_id, executor_type, executor_id, executor_profile_id,
 			control_port, status, '', worktree_id, worktree_path, worktree_branch,
 			workspace_path, '', container_id, COALESCE(container_bootstrap_nonce_secret_id, ''), COALESCE(container_control_auth_token_secret_id, ''), sandbox_id,
-			COALESCE(task_dir_name, ''), created_at, updated_at
-		FROM task_environments`,
+			COALESCE(task_dir_name, ''), created_at, updated_at, %s
+		FROM task_environments`, retiredAtExpr),
 		`DROP TABLE task_environments`,
 		`ALTER TABLE task_environments_new RENAME TO task_environments`,
 		`CREATE INDEX IF NOT EXISTS idx_task_environments_task_id ON task_environments(task_id)`,
@@ -1741,6 +1817,8 @@ func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
 			container_id TEXT NOT NULL DEFAULT '',
 			agent_profile_id TEXT,
 			execution_profile_id TEXT NOT NULL DEFAULT '',
+			admitted_execution_grade TEXT NOT NULL DEFAULT '',
+			admitted_execution_grade_known INTEGER NOT NULL DEFAULT 0,
 			route_generation INTEGER NOT NULL DEFAULT 0,
 			route_state TEXT NOT NULL DEFAULT '',
 			route_reason TEXT NOT NULL DEFAULT '',
@@ -1769,7 +1847,7 @@ func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
 			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		)`,
 		`INSERT INTO task_sessions_new SELECT
-			id, task_id, agent_execution_id, container_id, agent_profile_id, execution_profile_id,
+			id, task_id, agent_execution_id, container_id, agent_profile_id, execution_profile_id, admitted_execution_grade, admitted_execution_grade_known,
 			route_generation, route_state, route_reason, downstream_acp_session_id,
 			executor_id, executor_profile_id, environment_id, repository_id, base_branch,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
@@ -1791,21 +1869,26 @@ func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
 // (normalizeTaskWorktreeOwnership in worktree_ownership_migration.go). The
 // legacy tables and columns they read no longer exist at startup.
 // healDuplicateTaskEnvironments collapses rows where a single task has more
-// than one task_environments row (race in lazy create). Keeps the most recently
-// updated row and re-points any sessions still referring to the loser.
+// than one active task_environments row (race in lazy create). Keeps the most
+// recently updated row, preserves proven loser inventory and snapshot history,
+// and re-points any sessions still referring to the loser.
 //
 // Runs before ensureTaskEnvironmentTaskUniqueIndex so the unique constraint
 // can be added cleanly. Idempotent — a no-op once the data is healed.
 func (r *Repository) healDuplicateTaskEnvironments() error {
-	tx, err := r.db.BeginTx(r.migrationContext(), nil)
+	tx, err := r.db.BeginTxx(r.migrationContext(), nil)
 	if err != nil {
 		return fmt.Errorf("heal duplicate envs: begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
+	if err := lockDuplicateEnvironmentHeal(r.migrationContext(), tx); err != nil {
+		return fmt.Errorf("heal duplicate envs: lock: %w", err)
+	}
 
 	rows, err := tx.QueryContext(r.migrationContext(), `
 		SELECT task_id
 		  FROM task_environments
+		 WHERE retired_at IS NULL
 		 GROUP BY task_id
 		HAVING COUNT(*) > 1
 	`)
@@ -1836,47 +1919,68 @@ func (r *Repository) healDuplicateTaskEnvironments() error {
 }
 
 // healDuplicateTaskEnvForTask keeps the most recently updated env for a task,
-// re-points sessions on the loser rows to the winner, then deletes losers.
-func healDuplicateTaskEnvForTask(ctx context.Context, tx *sql.Tx, taskID string) error {
+// preserves proven loser inventory and snapshot history, re-points only the
+// sessions that reference a loser, then deletes the losers.
+func healDuplicateTaskEnvForTask(ctx context.Context, tx *sqlx.Tx, taskID string) error {
 	var winnerID string
-	if err := tx.QueryRowContext(ctx, `
+	if err := tx.QueryRowContext(ctx, tx.Rebind(`
 		SELECT id FROM task_environments
-		 WHERE task_id = ?
+		 WHERE task_id = ? AND retired_at IS NULL
 		 ORDER BY updated_at DESC, created_at DESC
 		 LIMIT 1
-	`, taskID).Scan(&winnerID); err != nil {
+	`), taskID).Scan(&winnerID); err != nil {
 		return fmt.Errorf("heal duplicate envs: find winner for task %s: %w", taskID, err)
 	}
 
-	if _, err := tx.ExecContext(ctx, `
+	if err := preserveDuplicateEnvironmentChildren(ctx, tx, taskID, winnerID); err != nil {
+		return fmt.Errorf("heal duplicate envs: preserve task %s: %w", taskID, err)
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE task_sessions
 		   SET task_environment_id = ?
-		 WHERE task_id = ?
-		   AND task_environment_id != ?
-	`, winnerID, taskID, winnerID); err != nil {
+		 WHERE task_environment_id IN (
+		   SELECT id FROM task_environments WHERE task_id = ? AND retired_at IS NULL AND id != ?
+		 )
+	`), winnerID, taskID, winnerID); err != nil {
 		return fmt.Errorf("heal duplicate envs: relink sessions for task %s: %w", taskID, err)
 	}
 
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		DELETE FROM task_environments
-		 WHERE task_id = ?
+		 WHERE task_id = ? AND retired_at IS NULL
 		   AND id != ?
-	`, taskID, winnerID); err != nil {
+	`), taskID, winnerID); err != nil {
 		return fmt.Errorf("heal duplicate envs: delete losers for task %s: %w", taskID, err)
 	}
 	return nil
 }
 
-// ensureTaskEnvironmentTaskUniqueIndex adds a UNIQUE index on
-// task_environments(task_id) so that a future race in env creation fails loud
-// instead of silently producing two rows for the same task. Must run AFTER
-// healDuplicateTaskEnvironments, which collapses any pre-existing duplicates.
+// ensureTaskEnvironmentTaskUniqueIndex upgrades the legacy full unique index
+// once. Retained history does not occupy the task's canonical owner slot.
+// It runs after active duplicate healing.
 func (r *Repository) ensureTaskEnvironmentTaskUniqueIndex() error {
-	_, err := r.db.ExecContext(r.migrationContext(), `
-		CREATE UNIQUE INDEX IF NOT EXISTS uniq_task_environments_task_id
-		    ON task_environments(task_id)
-	`)
-	return err
+	definition, err := db.IndexDefinitionContext(r.migrationContext(), r.db, "uniq_task_environments_task_id")
+	if err != nil {
+		return err
+	}
+	if strings.Contains(strings.ToLower(definition), "retired_at is null") {
+		return nil
+	}
+	tx, err := r.db.BeginTxx(r.migrationContext(), nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(r.migrationContext(), `DROP INDEX IF EXISTS uniq_task_environments_task_id`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(r.migrationContext(), `
+  CREATE UNIQUE INDEX IF NOT EXISTS uniq_task_environments_task_id
+  ON task_environments(task_id) WHERE retired_at IS NULL
+ `); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // healSessionTaskEnvironmentIDs backfills task_sessions.task_environment_id
@@ -1897,11 +2001,11 @@ func (r *Repository) healSessionTaskEnvironmentIDs() error {
 	if _, err := r.db.ExecContext(r.migrationContext(), `
 		UPDATE task_sessions
 		   SET task_environment_id = (
-		         SELECT te.id FROM task_environments te WHERE te.task_id = task_sessions.task_id LIMIT 1
+		         SELECT te.id FROM task_environments te WHERE te.task_id = task_sessions.task_id AND te.retired_at IS NULL LIMIT 1
 		       )
 		 WHERE (task_environment_id = '' OR task_environment_id IS NULL)
 		   AND EXISTS (
-		         SELECT 1 FROM task_environments te WHERE te.task_id = task_sessions.task_id
+		         SELECT 1 FROM task_environments te WHERE te.task_id = task_sessions.task_id AND te.retired_at IS NULL
 		       )
 	`); err != nil {
 		return fmt.Errorf("heal session env id: update: %w", err)

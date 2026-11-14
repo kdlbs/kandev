@@ -131,6 +131,9 @@ func newKeyedContextRWMutex() *keyedContextRWMutex {
 func (k *keyedContextRWMutex) lockFor(key string) *contextRWMutex {
 	k.mu.Lock()
 	defer k.mu.Unlock()
+	if k.locks == nil {
+		k.locks = make(map[string]*contextRWMutex)
+	}
 	lock, ok := k.locks[key]
 	if !ok {
 		lock = newContextRWMutex()

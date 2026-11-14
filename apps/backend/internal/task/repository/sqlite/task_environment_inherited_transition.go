@@ -153,7 +153,7 @@ func (r *Repository) loadInheritedTransitionCanonicalTx(
 			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''),
 			COALESCE(container_control_auth_token_secret_id, ''), sandbox_id,
 			status, COALESCE(materialization_session_id, ''), updated_at
-		FROM task_environments WHERE task_id = ?
+		FROM task_environments WHERE task_id = ? AND retired_at IS NULL
 	`), taskID).Scan(&canonical.ID, &canonical.TaskID, &canonical.ExecutorType, &canonical.ExecutorID,
 		&canonical.ExecutorProfileID, &canonical.ContainerID, &canonical.ContainerBootstrapNonceSecretID,
 		&canonical.ContainerControlAuthTokenSecretID, &canonical.SandboxID, &canonical.Status,
@@ -172,7 +172,7 @@ func (r *Repository) loadInheritedTransitionCanonicalTx(
 			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''),
 			COALESCE(container_control_auth_token_secret_id, ''), sandbox_id,
 			status, COALESCE(materialization_session_id, ''), updated_at
-		FROM task_environments WHERE task_id = ?
+		FROM task_environments WHERE task_id = ? AND retired_at IS NULL
 	`), taskID).Scan(&canonical.ID, &canonical.TaskID, &canonical.ExecutorType, &canonical.ExecutorID,
 		&canonical.ExecutorProfileID, &canonical.ContainerID, &canonical.ContainerBootstrapNonceSecretID,
 		&canonical.ContainerControlAuthTokenSecretID, &canonical.SandboxID, &canonical.Status,

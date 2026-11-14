@@ -16,10 +16,9 @@ owners:
 
 ## Context and boundaries
 
-The task system owns launch gating, typed launch-error projection, and recovery
-actions for a task repository. GitHub remains the source of pull-request state;
-the workspace system resolves repository branches; the UI renders the
-task-owned projection.
+The task system owns launch gating, typed errors, and recovery for task
+repositories. GitHub owns PR state, workspaces resolve branches, and the UI
+renders task-owned projections.
 
 ## Requirement mapping
 
@@ -32,11 +31,10 @@ task-owned projection.
 
 ## PR gate and launch paths
 
-The auto-start gate selects relevant PRs by explicit repository and PR identity,
-then exact repository/branch identity. It skips only when at least one relevant
-PR exists and every one is merged or closed. An open, empty, unknown, failed
-lookup, or absent PR leaves the normal auto-start path available. Manual launch
-always bypasses this gate.
+Auto-start matches PRs by explicit repository/PR identity, then exact
+repository/branch identity. It skips only when relevant PRs exist and all are
+merged or closed. Open, empty, unknown, failed, or absent results preserve
+normal auto-start. Manual launch bypasses this gate.
 
 The gate stores an informational task error when it suppresses an auto-start.
 The error is stamped from the sorted relevant PR identities and states so the
@@ -509,35 +507,37 @@ failure path, and its partial runtime is stopped by the existing cleanup.
 
 ### Boundary with explicit retry
 
-The failed state stays visible, and the `session.ensure` latch is unchanged.
-Re-election happens only when a binding, start, or launch request arrives:
-the user's Retry, a new session, `spawn_session_kandev`, or a workflow or
-automation start. A `failed` environment with physical evidence still needs the
-environment reset action.
+Failures stay visible and the `session.ensure` latch is unchanged. Only Retry,
+a new session, `spawn_session_kandev`, or a workflow or automation start can
+re-elect. A task-local failed environment without consumers can be replaced.
 
-### Reset guidance
+### Retain and replace an unusable environment
 
-The worktree store writes `task_environment_repos` rows when it creates a
-worktree, before the launch finalizes. A launch that fails after that point, for
-example in a setup script, leaves a `failed` row with physical evidence. That
-row is not re-elected. The binding and the launch refuse it with
-`models.ErrTaskEnvironmentResetRequired`, which wraps `ErrWorkspaceReuseUnsafe`
-so existing `errors.Is` callers and the `workspace_reuse_unsafe` reason are
-unchanged. Its message names the task environment reset action.
-`spawn_session_kandev` keeps the reason and `recoverable: true` and changes its
-retry guidance for this error to resetting the task environment.
+Task-local worktree starts and terminal resumes can retire failed physical
+environments and reserve replacements. Election binds the requester before
+materialization and checks task/materialization locks, generation, session
+state/binding, cleanup, and recovery claims. Materializers, live consumers,
+inherited owners, and other executor types retain reset guidance.
 
-Retaining such an environment while a replacement becomes canonical is not part
-of this amendment. It needs a schema decision on how a task keeps an inactive
-environment next to its active one, and on how that fits the existing
-recovery-claim consumer admission and preserved-checkout inventory recovery.
+Retirement preserves IDs, inventory, files, and historical bindings. Preflight
+inspects only its selected successor. Canonical queries, uniqueness, and startup
+healing exclude retired rows; by-ID reads retain history. Allocation excludes
+recorded roots. Inventory and publication use saved roots and environment IDs.
+Cached and explicit-ID checkouts must match the selected environment.
+
+Retries settle abandoned claims. A fresh terminal owner's claim survives until
+a later completion or launch-budget expiry. Failed successors retain consumer
+guards. Every preflight exit, including errors and capacity deferral, releases
+its captured unused claim after workspace admission. Release fences environment,
+owner, generation, and timestamp, and locks the PostgreSQL owner row against
+startup. Started sessions, live executions, and renewed claims remain untouched.
+Post-commit reload errors use the same release. Cleanup never resets inventory,
+mutates inherited owners, or settles historical outcomes.
 
 ### Interaction with workspace election waits
 
-A binding that loses the initial election can wait for the elected environment
-before retrying. When that environment becomes `failed` through a release point,
-the wait ends with the existing refusal, and the next start re-elects it. A
-second retry inside the same request is not part of this amendment.
+A binding that loses election can wait for the winner. If the winner becomes
+failed, the wait ends with the existing refusal. The next start re-elects.
 
 ### Verification
 
