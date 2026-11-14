@@ -125,21 +125,15 @@ func (s *providerTierLimitService) readBudgetUsage(ctx context.Context, c tierLi
 	return budgetAmount(total, budget.Unit), reset, true, err
 }
 
-// readPercentBudget returns a provider-reported utilization and the reset its
-// owner anchor selects, when one is configured.
+// readPercentBudget returns the highest provider-reported utilization among the
+// shared account window and the windows of the selected model, and the reset
+// its owner anchor selects, when one is configured. When several applicable
+// windows are exhausted, the latest of their resets applies.
 func (s *providerTierLimitService) readPercentBudget(c tierLimitContext, budget agentusage.LimitBudget, now time.Time) (float64, time.Time, bool, error) {
-	window, ok := findProviderBudget(c.observed, budget, c.profile.Model)
-	if !ok {
+	amount, reset, known := readProviderPercentWindows(c, budget, now)
+	if !known {
 		return 0, time.Time{}, false, nil
 	}
-	if !window.ResetAt.IsZero() && !window.ResetAt.After(now) {
-		return 0, time.Time{}, false, nil
-	}
-	amount := window.UtilizationPct
-	if window.LimitReached {
-		amount = math.Max(100, amount)
-	}
-	reset := window.ResetAt
 	if budget.Reset == "anchor" || (budget.Reset == tierResetProvider && budget.ResetAt != nil) {
 		if _, ownerReset, ok := agentusage.LimitWindowBounds(now, budget); ok && ownerReset.After(now) {
 			reset = ownerReset
@@ -148,32 +142,104 @@ func (s *providerTierLimitService) readPercentBudget(c tierLimitContext, budget 
 	return amount, reset, true, nil
 }
 
+func readProviderPercentWindows(c tierLimitContext, budget agentusage.LimitBudget, now time.Time) (float64, time.Time, bool) {
+	if c.observed == nil {
+		return 0, time.Time{}, false
+	}
+	var amount float64
+	var reset, exhaustedUntil time.Time
+	known := false
+	for _, window := range c.observed.Windows {
+		if !providerPercentWindowApplies(window, budget, c.profile.Model, now) {
+			continue
+		}
+		pct := window.UtilizationPct
+		if window.LimitReached {
+			pct = math.Max(100, pct)
+		}
+		if !known || pct > amount || (pct == amount && window.ResetAt.After(reset)) {
+			amount, reset, known = pct, window.ResetAt, true
+		}
+		if c.effective.WindowBudgetExhausted(budget, pct) && window.ResetAt.After(exhaustedUntil) {
+			exhaustedUntil = window.ResetAt
+		}
+	}
+	if !exhaustedUntil.IsZero() {
+		reset = exhaustedUntil
+	}
+	return amount, reset, known
+}
+
+// providerPercentWindowApplies accepts an unexpired window of the budget's
+// period and scope that is shared, or scoped to the selected model or its
+// recognized family.
+func providerPercentWindowApplies(w agentusage.UtilizationWindow, b agentusage.LimitBudget, model string, now time.Time) bool {
+	if providerWindowPeriod(w) != b.Window || string(w.Scope) != b.Scope ||
+		(!w.ResetAt.IsZero() && !w.ResetAt.After(now)) {
+		return false
+	}
+	if w.ModelID != "" {
+		return exactProviderBudgetModel(w.ModelID, model)
+	}
+	return w.Model == "" || exactProviderBudgetModel(w.Model, model) || knownProviderBudgetFamily(w, model)
+}
+
+// findProviderBudget selects one window as a reset anchor: the exact model,
+// then a recognized model family, then the shared account window.
 func findProviderBudget(observed *agentusage.ProviderUsage, b agentusage.LimitBudget, model string) (agentusage.UtilizationWindow, bool) {
 	if observed == nil {
 		return agentusage.UtilizationWindow{}, false
 	}
-	scopeModel := agentusage.ScopeModelID(model)
-	var accountWide *agentusage.UtilizationWindow
-	for index := range observed.Windows {
-		window := observed.Windows[index]
-		if providerWindowPeriod(window) != b.Window || string(window.Scope) != b.Scope {
+	var shared, family agentusage.UtilizationWindow
+	foundShared, foundFamily := false, false
+	for _, w := range observed.Windows {
+		if providerWindowPeriod(w) != b.Window || string(w.Scope) != b.Scope {
 			continue
 		}
-		if window.ModelID != "" {
-			if scopeModel != "" && strings.EqualFold(agentusage.ScopeModelID(window.ModelID), scopeModel) {
-				return window, true
+		if w.ModelID != "" {
+			if exactProviderBudgetModel(w.ModelID, model) {
+				return w, true
 			}
 			continue
 		}
-		if accountWide == nil {
-			windowCopy := window
-			accountWide = &windowCopy
+		if w.Model != "" {
+			if exactProviderBudgetModel(w.Model, model) {
+				return w, true
+			}
+			if !foundFamily && knownProviderBudgetFamily(w, model) {
+				family, foundFamily = w, true
+			}
+			continue
+		}
+		if !foundShared {
+			shared, foundShared = w, true
 		}
 	}
-	if accountWide != nil {
-		return *accountWide, true
+	if foundFamily {
+		return family, true
 	}
-	return agentusage.UtilizationWindow{}, false
+	return shared, foundShared
+}
+
+func knownProviderBudgetFamily(window agentusage.UtilizationWindow, model string) bool {
+	switch strings.ToLower(strings.TrimSpace(window.Model)) {
+	case "opus", "sonnet", "haiku":
+		return model != "" && agentusage.ExecutionUsageWindowApplies(window, model)
+	default:
+		return false
+	}
+}
+
+func exactProviderBudgetModel(recorded, model string) bool {
+	if model == "" {
+		return false
+	}
+	recordedProvider, _, recordedQualified := strings.Cut(recorded, "/")
+	modelProvider, _, modelQualified := strings.Cut(model, "/")
+	if recordedQualified && modelQualified && !strings.EqualFold(recordedProvider, modelProvider) {
+		return false
+	}
+	return strings.EqualFold(agentusage.ScopeModelID(recorded), agentusage.ScopeModelID(model))
 }
 
 func budgetAmount(total sqliterepo.ManualWindowUsage, unit string) float64 {
@@ -196,18 +262,19 @@ func (s *providerTierLimitService) windowReset(ctx context.Context, id, period s
 	if err != nil {
 		return time.Time{}, false
 	}
+	if exhaustedOnly {
+		c.effective.Windows = applicableBudgets(c.effective.Windows, c.profile.Model, c.tier, c.modelClass)
+	}
 	// An attribution failure leaves only that model-scoped usage unknown; the
 	// windows that were read still give their resets.
 	used, err := s.readUsage(ctx, c, "", now)
-	if err != nil && !errors.Is(err, errModelAttributionUnavailable) {
+	unknownModel := errors.Is(err, errModelAttributionUnavailable)
+	if err != nil && !unknownModel {
 		return time.Time{}, false
 	}
 	var latest time.Time
 	for _, budget := range c.effective.Windows {
-		if period != "" && budget.Window != period {
-			continue
-		}
-		if exhaustedOnly && (budget.Value == nil || *budget.Value <= 0 || used.Windows[budget.Key()] < *budget.Value) {
+		if !budgetContributesReset(c.effective, budget, used, period, exhaustedOnly, unknownModel) {
 			continue
 		}
 		reset := used.Resets[budget.Key()]
@@ -219,4 +286,18 @@ func (s *providerTierLimitService) windowReset(ctx context.Context, id, period s
 		}
 	}
 	return latest, latest.After(now)
+}
+
+// budgetContributesReset selects the budgets whose reset bounds a suspension.
+// An exhausted-only reset needs known usage at the budget's threshold; without
+// model attribution a model-scoped budget cannot supply a reset.
+func budgetContributesReset(limits agentusage.TierLimits, budget agentusage.LimitBudget, used agentusage.LimitUsage, period string, exhaustedOnly, unknownModel bool) bool {
+	if period != "" && budget.Window != period {
+		return false
+	}
+	if exhaustedOnly {
+		amount, known := used.Windows[budget.Key()]
+		return known && limits.WindowBudgetExhausted(budget, amount)
+	}
+	return !unknownModel || budget.Scope == ""
 }
