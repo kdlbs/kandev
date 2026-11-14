@@ -398,12 +398,13 @@ func TestHTTPQuerySidebarTasksUsesDefaultsAndAuthenticatedPreferences(t *testing
 	require.Contains(t, rec.Body.String(), `"query_key":"key"`)
 	var result struct {
 		Entries []struct {
-			Task struct{ ID string }
+			Task struct{ ID, Title string }
 		}
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
 	require.Len(t, result.Entries, 1)
 	require.Equal(t, "task-b", result.Entries[0].Task.ID)
+	require.Equal(t, "Mine", result.Entries[0].Task.Title)
 	require.Contains(t, rec.Body.String(), `"wip_queue_position":3`)
 	require.Contains(t, rec.Body.String(), `"wip_queue_total":7`)
 	require.Contains(t, rec.Body.String(), `"subtask_count":4`)

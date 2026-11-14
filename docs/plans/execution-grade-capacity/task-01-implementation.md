@@ -142,3 +142,7 @@ last-slot contenders, retained snapshots, and public cold-resume refusal. Existi
 message-turn, recovery, executor, repository, and worktree regressions also passed.
 The final browser recheck passed all 10 desktop and 9 phone scenarios, including
 the three phone capacity settings cases. Normal changed-file hooks also passed.
+
+The contributor added a sidebar test repair during consolidation. Its history
+is retained, and its title assertion uses the decoded task payload alongside
+the existing ID assertion. The focused race-enabled sidebar handler test passed.
