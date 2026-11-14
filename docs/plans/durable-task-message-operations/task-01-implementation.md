@@ -112,3 +112,17 @@ remains outside this change's validation scope.
 Shared harness and specification test suites, repository-wide harness and
 specification lint, and the targeted harness pre-commit hook passed. The root
 engineering guide remains within its 300-line limit.
+
+## Consolidated PR review: retention lifetime
+
+The review reproduced 32 simultaneous detached retention batches. The handler
+now permits one batch at a time under the backend lifetime. Shutdown cancels
+and drains the batch before closing storage. New claims skip a busy or stopped
+worker. Existing shared maintenance admission and batch limits remain in place.
+
+Deterministic race-enabled tests passed for concurrent claims, cancellation,
+shutdown drain, and rejection of work after shutdown. Backend wiring and the
+existing message-operation regressions passed. The unused row-key argument was
+removed without changing identity or replay behavior.
+The final combined branch passed 10 desktop and 9 phone browser scenarios.
+Normal changed-file hooks passed before the remediation commit.

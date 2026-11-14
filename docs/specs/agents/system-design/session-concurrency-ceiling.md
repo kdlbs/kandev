@@ -60,12 +60,12 @@ maximum is valid. Unknown population and unconfigured grades have distinct
 refusal reasons; neither is treated as zero usage. Existing admitted work survives
 settings changes. Automatic-only policy preserves manual overrides.
 
-Message-turn tickets also contribute to the shared total while dispatch is in
-flight. A ticket already represented by an admitted row or launch reservation
-uses that session's existing grade once. A separate ticket has no grade snapshot,
-so all-policy grade population remains unknown until it is represented by an
-admitted row or launch reservation; existing session ownership is retained.
-Message-turn admission itself keeps its existing total-limit and override rules.
+All-policy message turns check both capacity dimensions before warm dispatch
+or cold resume. Their tickets retain and persist the admitted grade. A nested
+resume uses that snapshot despite later profile or task edits. Count tickets,
+launch reservations, and admitted rows once per session under the same lock.
+A legacy ungraded ticket remains unknown until a counted row supplies its grade.
+Existing ownership survives settings changes; automatic-only overrides remain.
 
 Explicit workflow starts capture their selected destination before grade
 admission. A lost promotion releases only that launch's reservation and readmits

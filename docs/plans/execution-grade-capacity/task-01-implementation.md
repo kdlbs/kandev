@@ -21,12 +21,11 @@ system_design:
 
 ## Main integration: message-turn tickets
 
-The newer shared ceiling also counts in-flight message-turn tickets in its
-total. A ticket already represented by an admitted row or launch reservation
-uses the existing grade once. A separate ticket has no grade snapshot, so the
-all-policy grade population is unknown until it is represented by an admitted
-row or launch reservation. Existing session ownership and automatic-policy
-message-turn behavior remain unchanged.
+All-policy message-turn admission checks total and grade capacity before warm
+dispatch or cold resume. Tickets retain their admitted grade through nested
+launches and later profile/task edits. Count each session once across tickets,
+launch reservations, and active rows. Legacy ungraded tickets remain unknown
+until an admitted row supplies their grade. Automatic-policy overrides remain.
 
 ## Outcome and scope
 
@@ -126,3 +125,20 @@ PostgreSQL 18. All 27 focused frontend tests passed.
 All three phone settings scenarios passed without retries, including the new
 grade-limit Save/Reset/disable/reload flow and 44px input/action targets.
 Test cleanup restores the policy and grade map with the total limit.
+
+## Consolidated PR review: message-turn admission
+
+PR #5321 exposed a cold-resume bypass through a total-only turn ticket.
+Permanent regressions reproduced paused/full grade admission before the fix.
+The public prompt path also reached cold-resume work while its grade was paused.
+
+All-policy turns now use both limits before dispatch and persist their grade.
+The ticket carries that snapshot through nested resume and later profile edits.
+Population counts tickets, launch reservations, and active rows once per session.
+Existing ownership remains admitted; automatic-policy override behavior remains.
+
+Race-enabled checks passed for zero/full grades, explicit intents, simultaneous
+last-slot contenders, retained snapshots, and public cold-resume refusal. Existing
+message-turn, recovery, executor, repository, and worktree regressions also passed.
+The final browser recheck passed all 10 desktop and 9 phone scenarios, including
+the three phone capacity settings cases. Normal changed-file hooks also passed.

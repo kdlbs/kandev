@@ -315,7 +315,17 @@ func TestReplacementForLiveSessionKeepsResetGuidance(t *testing.T) {
 
 // @covers AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.11
 func TestReplacementReloadFailureReleasesOwnedReservation(t *testing.T) {
-	repo := newRepoForEntityTests(t)
+	t.Run("sqlite", func(t *testing.T) {
+		testReplacementReloadFailureReleasesOwnedReservation(t, newRepoForEntityTests(t))
+	})
+	t.Run("postgres", func(t *testing.T) {
+		repo, _, _ := newTaskPostgresRepoPair(t)
+		testReplacementReloadFailureReleasesOwnedReservation(t, repo)
+	})
+}
+
+func testReplacementReloadFailureReleasesOwnedReservation(t *testing.T, repo *Repository) {
+	t.Helper()
 	ctx := context.Background()
 	const taskID = "task-replacement-reload"
 	retained := seedRetainedFailedEnvironment(t, repo, taskID, "session-replacement-owner", "session-replacement-sibling")

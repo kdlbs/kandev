@@ -208,6 +208,12 @@ remains possible for humans debugging an incident, but it is not the contract.
   conflict classification is by constraint name so PostgreSQL's 63-byte name
   truncation does not break it.
 
+### Retention
+
+The handler owns at most one 30-second retention batch. Claims skip cleanup
+while a batch runs. It shares the pool's maintenance lease. The batch uses the
+backend lifetime. Shutdown cancels and drains it before the store closes.
+
 ## Security
 
 - The operation identity is caller-supplied and therefore untrusted input:

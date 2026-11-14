@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
@@ -232,7 +233,9 @@ func (r *Repository) releaseUnpublishedReplacement(ctx context.Context, selected
 	if selected.Status != models.TaskEnvironmentStatusCreating || selected.MaterializationSessionID != sessionID {
 		return nil
 	}
-	if _, err := r.FailTaskEnvironmentMaterialization(context.WithoutCancel(ctx), sessionID); err != nil {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if _, err := r.ReleaseTaskEnvironmentReplacement(cleanupCtx, selected, sessionID); err != nil {
 		return fmt.Errorf("release unpublished replacement %s: %w", selected.ID, err)
 	}
 	return nil

@@ -389,7 +389,7 @@ type Handlers struct {
 	clarificationBundles  ClarificationBundleLister
 
 	sendOperationStore     SendOperationStore
-	sendOperationRetention func(context.Context)
+	sendOperationRetention *sendOperationRetentionWorker
 
 	// Optional list_pending_agent_permissions_kandev / resolve_agent_permission_kandev
 	// dependency (external MCP surface only, set via SetAgentPermissionService).

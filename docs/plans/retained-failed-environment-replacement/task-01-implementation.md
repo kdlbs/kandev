@@ -94,3 +94,26 @@ cutover, canonical binding, inherited transitions, cleanup, and inventory reuse.
 PostgreSQL tests ran against an isolated PostgreSQL 18 container.
 SQL guard and full store conformance remain part of the final combined-branch
 verification.
+
+## Consolidated PR review: unused preflight reservations
+
+PR #5321 exposed creating successors left behind by capacity deferral and
+preflight inspection errors. Both failures reproduced in public recovery tests.
+Preflight now returns an idempotent release handle even without workspace
+admission. Recovery calls it on every exit, after releasing workspace admission.
+It also runs after request cancellation, within a separate cleanup budget.
+
+Release checks the captured environment, materializer, generation, and timestamp.
+It preserves started sessions, live executions, ready environments, and renewed
+claims. PostgreSQL locks the owner row before checking state. A real lock-wait
+regression reproduced release racing an uncommitted start before that guard.
+Release remains available while task cleanup is pending. Post-commit reload
+failure uses the same fenced release on both supported databases.
+
+The final affected race suites passed with real PostgreSQL 18 and SQLite.
+They cover cancellation, capacity deferral, inspection errors, immediate sibling
+retry, ownership fences, and concurrent startup. Existing recovery, executor,
+materialization, and worktree regressions passed. SQL guard and backend MCP/shutdown
+wiring checks passed.
+The final combined branch also passed 10 desktop and 9 phone browser scenarios.
+Normal changed-file hooks passed before the remediation commit.

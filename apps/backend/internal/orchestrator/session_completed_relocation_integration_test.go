@@ -200,7 +200,7 @@ func TestCompletedRelocationSessionRejectsInvalidSibling(t *testing.T) {
 	fixture.rebuildService(starts, nil)
 	session, err := fixture.repo.GetTaskSession(ctx, fixture.sessionID)
 	require.NoError(t, err)
-	if _, err := fixture.svc.executor.PreflightSessionWorktreeRecovery(ctx, fixture.taskID, session, false); err == nil {
+	if _, _, err := fixture.svc.executor.PreflightSessionWorktreeRecovery(ctx, fixture.taskID, session, false); err == nil {
 		t.Fatal("completed first slot hid invalid provider identity in the second selected slot")
 	}
 	resumeResult := make(chan error, 1)
@@ -249,7 +249,7 @@ func TestCompletedRelocationRestoreWorkspaceContinuity(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		admission, err := fixture.svc.executor.PreflightSessionWorktreeRecovery(callCtx, taskID, session, false)
+		admission, _, err := fixture.svc.executor.PreflightSessionWorktreeRecovery(callCtx, taskID, session, false)
 		if err != nil {
 			return err
 		}
@@ -412,7 +412,7 @@ func newCompletedRelocationServiceFixture(t *testing.T, repositoryCount int) *co
 		}
 		return nil
 	})
-	admission, err := fixture.svc.executor.PreflightSessionWorktreeRecovery(relocationCtx, taskID, session, false)
+	admission, _, err := fixture.svc.executor.PreflightSessionWorktreeRecovery(relocationCtx, taskID, session, false)
 	require.NoError(t, err)
 	require.NotNil(t, admission)
 	require.NoError(t, admission.Release(ctx))

@@ -16,10 +16,9 @@ owners:
 
 ## Context and boundaries
 
-The task system owns launch gating, typed launch-error projection, and recovery
-actions for a task repository. GitHub remains the source of pull-request state;
-the workspace system resolves repository branches; the UI renders the
-task-owned projection.
+The task system owns launch gating, typed errors, and recovery for task
+repositories. GitHub owns PR state, workspaces resolve branches, and the UI
+renders task-owned projections.
 
 ## Requirement mapping
 
@@ -32,11 +31,10 @@ task-owned projection.
 
 ## PR gate and launch paths
 
-The auto-start gate selects relevant PRs by explicit repository and PR identity,
-then exact repository/branch identity. It skips only when at least one relevant
-PR exists and every one is merged or closed. An open, empty, unknown, failed
-lookup, or absent PR leaves the normal auto-start path available. Manual launch
-always bypasses this gate.
+Auto-start matches PRs by explicit repository/PR identity, then exact
+repository/branch identity. It skips only when relevant PRs exist and all are
+merged or closed. Open, empty, unknown, failed, or absent results preserve
+normal auto-start. Manual launch bypasses this gate.
 
 The gate stores an informational task error when it suppresses an auto-start.
 The error is stamped from the sorted relevant PR identities and states so the
@@ -515,24 +513,26 @@ re-elect. A task-local failed environment without consumers can be replaced.
 
 ### Retain and replace an unusable environment
 
-Task-local worktree starts or terminal resumes can retire a failed physical
-environment and reserve a creating replacement. The transaction binds the
-requester before materialization. It
-checks task/materialization locks, owner generation, session state/binding,
-cleanup, and recovery claims. Materializers, live consumers, inherited owners,
-and other executor types retain the reset-required refusal.
+Task-local worktree starts and terminal resumes can retire failed physical
+environments and reserve replacements. Election binds the requester before
+materialization and checks task/materialization locks, generation, session
+state/binding, cleanup, and recovery claims. Materializers, live consumers,
+inherited owners, and other executor types retain reset guidance.
 
-`retired_at` preserves IDs, inventory, files, and historical bindings. Public
-recovery binds an eligible successor before preflight and inspects only that
-environment. All canonical binding queries, uniqueness, and startup healing
-exclude retired rows. By-ID reads retain history. Root selection excludes every
-recorded root. Inventory and publication use the saved root and environment ID.
-Cached and explicit-ID checkouts must match the selected environment. Files
-remain. Retries settle abandoned successor claims under the election
-guards. A fresh claim retains its terminal owner until a new completion or expiry
-of the launch budget. Failed successors keep consumer guards. Failure, including
-a post-commit reload error, releases only its reservation. No reset,
-inherited-owner mutation, or historical outcome settlement occurs.
+Retirement preserves IDs, inventory, files, and historical bindings. Preflight
+inspects only its selected successor. Canonical queries, uniqueness, and startup
+healing exclude retired rows; by-ID reads retain history. Allocation excludes
+recorded roots. Inventory and publication use saved roots and environment IDs.
+Cached and explicit-ID checkouts must match the selected environment.
+
+Retries settle abandoned claims. A fresh terminal owner's claim survives until
+a later completion or launch-budget expiry. Failed successors retain consumer
+guards. Every preflight exit, including errors and capacity deferral, releases
+its captured unused claim after workspace admission. Release fences environment,
+owner, generation, and timestamp, and locks the PostgreSQL owner row against
+startup. Started sessions, live executions, and renewed claims remain untouched.
+Post-commit reload errors use the same release. Cleanup never resets inventory,
+mutates inherited owners, or settles historical outcomes.
 
 ### Interaction with workspace election waits
 

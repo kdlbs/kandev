@@ -220,6 +220,8 @@ shared total and per-grade capacity policy without changing automatic-only defau
   names. An empty value is unconfigured. A task's nonempty grade overrides its
   selected logical profile's grade. Prepared profiles preserve the value, and
   admission freezes it on the session rather than rereading later edits.
+  Message turns check both limits before warm dispatch or cold resume and
+  retain that grade on their tickets through nested launches.
 - **AC-AGENTS-SESSION-CEILING-005.3:** Missing configuration and unknown admitted
   grades remain distinguishable from zero usage. Reservations and persisted
   active sessions are counted once under the existing admission owner lock.

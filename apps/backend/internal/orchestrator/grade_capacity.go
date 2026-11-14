@@ -72,27 +72,16 @@ func (c *sessionCeilingController) readGradedPopulationLocked(ctx context.Contex
 		}
 		c.observeGradeLocked(&population, held.grade, held.gradeKnown, grade)
 	}
-	c.markUncountedTurnGradeUnknown(&population)
-	return population, nil
-}
-
-// A turn ticket contributes to the shared total before its session row reaches
-// an admitted state. It has no grade snapshot of its own, so it must not be
-// treated as zero grade usage. Counted rows and launch reservations already
-// supply their session's grade and must not be marked unknown a second time.
-func (c *sessionCeilingController) markUncountedTurnGradeUnknown(population *gradedPopulation) {
-	accounted := maps.Clone(population.counted)
-	for _, held := range c.reservations {
-		if held.sessionID != "" {
-			accounted[held.sessionID] = struct{}{}
-		}
-	}
 	for _, turn := range c.turnReservations {
-		if _, known := accounted[turn.sessionID]; turn.sessionID == "" || !known {
-			population.unknown = true
-			return
+		if turn.sessionID != "" {
+			if _, observed := seenGradeSessions[turn.sessionID]; observed {
+				continue
+			}
+			seenGradeSessions[turn.sessionID] = struct{}{}
 		}
+		c.observeGradeLocked(&population, turn.grade, turn.gradeKnown, grade)
 	}
+	return population, nil
 }
 
 func (c *sessionCeilingController) observeGradeLocked(population *gradedPopulation, value string, known bool, requested string) {
@@ -126,6 +115,16 @@ func (c *sessionCeilingController) admitAllLocked(ctx context.Context, req admis
 		existing.populationKnown = d.populationKnown
 		return c.persistAdmissionGradeLocked(ctx, req, existing)
 	}
+	d = c.gradeCapacityDecisionLocked(req, p, d.populationKnown)
+	if d.admitted {
+		d.reservationKey = c.reserveGradeLocked(req)
+	}
+	c.logDecision(req, req.origin, d)
+	return c.persistAdmissionGradeLocked(ctx, req, d)
+}
+
+func (c *sessionCeilingController) gradeCapacityDecisionLocked(req admissionRequest, p gradedPopulation, populationKnown bool) admissionDecision {
+	d := admissionDecision{ceiling: c.ceiling, population: p.total, populationKnown: populationKnown}
 	maximum, configured := c.requestedGradeLimitLocked(req)
 	if !configured || (req.gradeKnown && p.missing) {
 		d.reasonCode = ceilingReasonNeedsConfiguration
@@ -145,10 +144,8 @@ func (c *sessionCeilingController) admitAllLocked(ctx context.Context, req admis
 		d.reasonCode = ceilingReasonGradeLimit
 	default:
 		d.admitted = true
-		d.reservationKey = c.reserveGradeLocked(req)
 	}
-	c.logDecision(req, req.origin, d)
-	return c.persistAdmissionGradeLocked(ctx, req, d)
+	return d
 }
 
 func (c *sessionCeilingController) existingGradedAdmissionLocked(req admissionRequest, p gradedPopulation, handoff bool) (admissionDecision, bool) {

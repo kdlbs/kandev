@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -107,6 +108,8 @@ type messageTurnReservation struct {
 	population      int
 	populationKnown bool
 	ceiling         int
+	grade           string
+	gradeKnown      bool
 
 	released atomic.Bool
 }
@@ -263,6 +266,9 @@ func (c *sessionCeilingController) admitTurn(
 	intent := req.intent.normalized()
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.policy == sessioncapacity.PolicyAll {
+		return c.admitAllTurnLocked(ctx, req)
+	}
 	if c.ceiling == unlimitedSessionCeiling {
 		return c.reserveTurnLocked(req), nil
 	}

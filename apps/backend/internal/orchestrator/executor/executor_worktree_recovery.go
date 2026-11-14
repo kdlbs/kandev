@@ -150,29 +150,32 @@ func (e *Executor) captureSelectedWorkspaceRecoverySnapshot(
 
 // PreflightSessionWorktreeRecovery performs selected-environment recovery
 // before a recovery action mutates provider state such as its resume token.
-// The returned admission must remain held through LaunchSession.
+// Hold the admission through LaunchSession. Call the returned replacement release
+// after launch or any earlier exit, including errors and nil admissions.
 func (e *Executor) PreflightSessionWorktreeRecovery(
 	ctx context.Context,
 	taskID string,
 	session *models.TaskSession,
 	allowBranchReplacement bool,
-) (*worktree.RecoveryAdmission, error) {
+) (*worktree.RecoveryAdmission, func(context.Context) error, error) {
 	if e == nil || e.repo == nil || session == nil || taskID == "" || session.TaskID != taskID {
-		return nil, nil
+		return nil, nil, nil
 	}
 	previousEnvironmentID := session.TaskEnvironmentID
-	retiredBinding, err := e.prepareRetiredEnvironmentReplacementForRecovery(ctx, taskID, session, allowBranchReplacement)
+	retiredBinding, selected, err := e.prepareRetiredEnvironmentReplacementForRecovery(ctx, taskID, session, allowBranchReplacement)
+	release := e.recoveryReplacementRelease(selected, session.ID)
 	if err != nil {
-		return nil, err
+		return nil, release, err
 	}
 	if retiredBinding && session.TaskEnvironmentID == previousEnvironmentID {
-		return nil, nil
+		return nil, release, nil
 	}
 	env, err := e.resolveEnvironmentForAdmission(ctx, taskID, session.TaskEnvironmentID)
 	if err != nil || env == nil {
-		return nil, err
+		return nil, release, err
 	}
-	return e.admitSelectedWorktreeRecovery(ctx, taskID, session, env, env.ExecutorType, allowBranchReplacement, worktree.RecoveryInspectionWaitBudget, true)
+	admission, err := e.admitSelectedWorktreeRecovery(ctx, taskID, session, env, env.ExecutorType, allowBranchReplacement, worktree.RecoveryInspectionWaitBudget, true)
+	return admission, release, err
 }
 
 func (e *Executor) prepareRetiredEnvironmentReplacementForRecovery(
@@ -180,31 +183,31 @@ func (e *Executor) prepareRetiredEnvironmentReplacementForRecovery(
 	taskID string,
 	session *models.TaskSession,
 	allowBranchReplacement bool,
-) (bool, error) {
+) (bool, *models.TaskEnvironment, error) {
 	if session.TaskEnvironmentID == "" {
-		return false, nil
+		return false, nil, nil
 	}
 	retained, err := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
 	if err != nil {
-		return false, fmt.Errorf("load selected task environment %q: %w", session.TaskEnvironmentID, err)
+		return false, nil, fmt.Errorf("load selected task environment %q: %w", session.TaskEnvironmentID, err)
 	}
 	if !retained.IsRetired() {
-		return false, nil
+		return false, nil, nil
 	}
 	if !isTerminalSessionState(session.State) && session.State != models.TaskSessionStateCompleted {
-		return true, fmt.Errorf("%w: retired environment is bound to a live session", models.ErrWorkspaceReuseUnsafe)
+		return true, nil, fmt.Errorf("%w: retired environment is bound to a live session", models.ErrWorkspaceReuseUnsafe)
 	}
 	if _, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID); errors.Is(err, repoerrors.ErrTaskEnvironmentNotFound) {
-		return true, nil
+		return true, nil, nil
 	} else if err != nil {
-		return true, fmt.Errorf("load active replacement environment: %w", err)
+		return true, nil, fmt.Errorf("load active replacement environment: %w", err)
 	}
 	if err := e.cleanupStaleExecutionBeforeResume(ctx, session.ID); err != nil {
-		return true, err
+		return true, nil, err
 	}
 	task, err := e.loadResumeTask(ctx, session)
 	if err != nil {
-		return true, err
+		return true, nil, err
 	}
 	options := ResumeOptions{
 		AllowCompletedSessionResume: session.State == models.TaskSessionStateCompleted,
@@ -212,10 +215,10 @@ func (e *Executor) prepareRetiredEnvironmentReplacementForRecovery(
 	}
 	executorType, err := e.requestedResumeExecutorType(ctx, task, session, true, options)
 	if err != nil {
-		return true, err
+		return true, nil, err
 	}
-	_, err = e.replaceFailedEnvironmentForResume(ctx, task, session, executorType)
-	return true, err
+	selected, err := e.replaceFailedEnvironmentForResume(ctx, task, session, executorType)
+	return true, selected, err
 }
 
 type managedClonePathResolver interface {

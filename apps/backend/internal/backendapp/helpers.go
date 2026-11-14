@@ -2661,7 +2661,7 @@ func registerMCPAndDebugRoutes(
 	}
 	if p.taskRepo != nil && p.dbPool != nil {
 		taskRepo, pool, log := p.taskRepo, p.dbPool, p.log
-		mcpHandlers.SetSendOperationRetention(func(ctx context.Context) {
+		stopRetention := mcpHandlers.SetSendOperationRetention(p.ctx, func(ctx context.Context) {
 			release, admitted := maintenance.ForPool(pool).TryAcquire()
 			if !admitted {
 				return
@@ -2671,6 +2671,9 @@ func registerMCPAndDebugRoutes(
 				log.Warn("send-operation retention batch failed", zap.Error(err))
 			}
 		})
+		if p.addCleanup != nil {
+			p.addCleanup(func() error { stopRetention(); return nil })
+		}
 	}
 	mcpHandlers.SetPromptReader(p.services.Prompts)
 	mcpHandlers.SetPromptWriter(p.services.Prompts, func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled })
