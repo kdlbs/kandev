@@ -6,6 +6,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { isDynamicErrorPolicyValid } from "@/components/settings/dynamic-agent-policy-editor";
+import { isDynamicUnclassifiedPolicyValid } from "@/components/settings/dynamic-agent-unclassified-policy-editor";
 import { updateAgentProfileAction } from "@/app/actions/agents";
 import { isHandledApiError } from "@/lib/api/client";
 import { useFeature } from "@/hooks/domains/features/use-feature";
@@ -18,6 +19,7 @@ import type {
   DynamicAgentCandidate,
   DynamicErrorClass,
   DynamicErrorPolicy,
+  DynamicUnclassifiedPolicy,
 } from "@/lib/types/agent-profile";
 import {
   dynamicDraftRevision,
@@ -50,6 +52,8 @@ export type DynamicAgentProfileEditorState = {
     errorClass: DynamicErrorClass,
     patch: Partial<DynamicErrorPolicy>,
   ) => void;
+  updateCandidateUnclassified: (index: number, patch: Partial<DynamicUnclassifiedPolicy>) => void;
+  applyUnclassifiedToAllCandidates: () => void;
   candidates: DynamicAgentCandidate[];
   discardDraft: () => void;
 };
@@ -224,13 +228,22 @@ export function useDynamicAgentProfileEditorState({
   const policiesValid = draft.candidates.every(
     (candidate) =>
       isDynamicErrorPolicyValid(candidate.policies.transient) &&
-      isDynamicErrorPolicyValid(candidate.policies.hard),
+      isDynamicErrorPolicyValid(candidate.policies.hard) &&
+      isDynamicUnclassifiedPolicyValid(candidate.policies.unclassified),
   );
   let invalidReason = t("agents:dynamicPolicyValidation");
   if (!draft.name.trim()) invalidReason = t("agents:profileNameRequired");
   else if (draft.candidates.length === 0) invalidReason = t("agents:noDynamicCandidates");
   else if (draft.hasExternalConflict)
     invalidReason = t("agents:profileExternalChangeInvalidReason");
+  else if (
+    !policiesValid &&
+    draft.candidates.some(
+      (candidate) => !isDynamicUnclassifiedPolicyValid(candidate.policies.unclassified),
+    )
+  ) {
+    invalidReason = t("agents:dynamicUnclassifiedThresholdValidation");
+  }
   useSettingsSaveContributor({
     id: `dynamic-profile:${profile.id}`,
     revision: draftRevision,
@@ -266,6 +279,8 @@ export function useDynamicAgentProfileEditorState({
     removeCandidate: draft.removeCandidate,
     updateCandidate: draft.updateCandidate,
     updateCandidatePolicy: draft.updateCandidatePolicy,
+    updateCandidateUnclassified: draft.updateCandidateUnclassified,
+    applyUnclassifiedToAllCandidates: draft.applyUnclassifiedToAllCandidates,
     candidates: draft.candidates,
     discardDraft: draft.reset,
   };

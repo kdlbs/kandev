@@ -5,6 +5,7 @@ import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import { providerConfigInvalidReasonKey } from "@/lib/settings/provider-config-validation";
 import type { Agent } from "@/lib/types/http";
 import type { DraftAgent } from "./agent-save-helpers";
+import { isDynamicUnclassifiedPolicyValid } from "@/components/settings/dynamic-agent-unclassified-policy-editor";
 
 /**
  * First blocking provider-config i18n key across the agent's profiles, or
@@ -75,10 +76,21 @@ export function useAgentSaveContributor(params: {
     params;
   const saveRevision = useAgentSaveRevision(draftAgent);
   const profilesValid = areAgentProfilesValid(draftAgent);
+  const policyBlockKey = draftAgent.profiles.some(
+    (profile) =>
+      profile.kind === "dynamic" &&
+      profile.dynamic?.candidates.some(
+        (candidate) => !isDynamicUnclassifiedPolicyValid(candidate.policies.unclassified),
+      ),
+  )
+    ? "agents:dynamicUnclassifiedThresholdValidation"
+    : undefined;
   const providerBlockKey = providerInvalidKey(
     draftAgent,
     (savedAgent?.profiles ?? []).some((p) => p.providerSupported),
   );
+  const configBlockKey = policyBlockKey ?? providerBlockKey;
+  const configInvalidReason = configBlockKey ? t(configBlockKey) : undefined;
   // Agents and agent profiles are org configuration: every mutating route
   // behind this page requires org.config.manage, which only an administrator
   // holds. Without this the save bar stays live for a member and the write
@@ -91,12 +103,13 @@ export function useAgentSaveContributor(params: {
         profilesValid,
         hasInvalidMcpConfig,
         draftAgent.name === "dynamic",
-      ) ?? (providerBlockKey ? t(providerBlockKey) : undefined));
+      ) ?? configInvalidReason);
   useSettingsSaveContributor({
     id: `agent:${draftAgent.id}`,
     revision: saveRevision.revision,
     isDirty: isCreateMode ? isAgentDirty : saveRevision.revision !== saveRevision.saved,
-    canSave: canManage && profilesValid && !hasInvalidMcpConfig && !providerBlockKey,
+    canSave:
+      canManage && profilesValid && !policyBlockKey && !hasInvalidMcpConfig && !providerBlockKey,
     invalidReason: saveInvalidReason,
     save: async () => {
       const savedDraft = await handleSave();
