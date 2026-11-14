@@ -3,6 +3,7 @@
 package utility
 
 import (
+	"context"
 	"errors"
 	"os/exec"
 	"syscall"
@@ -22,6 +23,14 @@ func installACPCommandLifecycle(_ *exec.Cmd) (acpCommandLifecycleHandle, error) 
 }
 
 func releaseACPCommandLifecycle(_ acpCommandLifecycleHandle) {}
+
+func confirmInferenceTermination(_ context.Context, _ acpCommandLifecycleHandle, pid int) bool {
+	return recoveredInferenceTerminated(pid)
+}
+
+func recoveredInferenceTerminated(pid int) bool {
+	return pid > 0 && errors.Is(syscall.Kill(-pid, 0), syscall.ESRCH)
+}
 
 func terminateACPProcessGroup(pid int) error {
 	return syscall.Kill(-pid, syscall.SIGTERM)

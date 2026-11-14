@@ -271,7 +271,7 @@ func (s *Server) setupRoutes() {
 	}
 
 	// Utility agent routes
-	auxHandler := utility.NewHandler(s.cfg.HomeDir, append([]string{s.cfg.WorkDir}, s.cfg.WorkspaceSourceRoots...), s.logger.Zap())
+	auxHandler := utility.NewOwnedHandler(s.cfg, s.procMgr, s.logger.Zap())
 	if err := s.procMgr.RegisterInstanceCleanupHook(auxHandler.Close); err != nil {
 		s.logger.Error("failed to register utility cleanup hook", zap.Error(err))
 		if closeErr := auxHandler.Close(); closeErr != nil {

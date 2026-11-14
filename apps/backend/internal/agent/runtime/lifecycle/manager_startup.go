@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -127,6 +128,14 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	finishFlow := m.logger.BeginFlow(ctx, logger.ExecutionFlow{Stage: "executor_start", TaskID: execution.TaskID, SessionID: execution.SessionID, ExecutionID: execution.ID, AttemptID: ResumeAttemptIDFromContext(ctx), ProfileID: execution.AgentProfileID})
+	defer func() {
+		if retErr != nil {
+			finishFlow("failed", "bootstrap_failed")
+		} else {
+			finishFlow("ready", "")
+		}
+	}()
 	startupDisposition := execution.startupDispositionSnapshot()
 	defer func() {
 		if retErr != nil {

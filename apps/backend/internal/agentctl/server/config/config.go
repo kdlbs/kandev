@@ -359,6 +359,9 @@ type InstanceConfig struct {
 	// SessionID is the session ID for this agent instance (used in MCP tool calls)
 	SessionID string
 
+	// InferenceOwnerFresh is set only when the instance manager mints a new ID.
+	InferenceOwnerFresh bool `json:"-"`
+
 	// TaskID is the task ID for this agent instance (used in MCP plan tool calls)
 	TaskID string
 

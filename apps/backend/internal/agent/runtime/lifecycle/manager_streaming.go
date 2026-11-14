@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"context"
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
@@ -439,6 +440,9 @@ func (m *Manager) publishStreamingContentNowWithProjection(
 ) {
 	if attemptID == "" {
 		attemptID = execution.currentStartupAttemptID()
+	}
+	if !isAppend {
+		m.logger.Flow(context.Background(), logger.ExecutionFlow{Stage: "output_message", Outcome: "started_message", TaskID: execution.TaskID, SessionID: execution.SessionID, ExecutionID: execution.ID, MessageID: messageID, AttemptID: attemptID, PromptGeneration: promptGeneration, Reason: eventType})
 	}
 	event := AgentStreamEventData{
 		Type:                        eventType,

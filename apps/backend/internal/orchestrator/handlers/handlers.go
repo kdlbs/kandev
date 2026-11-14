@@ -780,9 +780,11 @@ func (h *Handlers) wsGetTaskSessionStatus(ctx context.Context, msg *ws.Message) 
 }
 
 type wsSessionActionRequest struct {
-	SessionID string `json:"session_id"`
-	Reason    string `json:"reason,omitempty"`
-	Force     bool   `json:"force,omitempty"`
+	AwaitTerminal       bool   `json:"await_terminal,omitempty"`
+	ExpectedExecutionID string `json:"expected_execution_id,omitempty"`
+	SessionID           string `json:"session_id"`
+	Reason              string `json:"reason,omitempty"`
+	Force               bool   `json:"force,omitempty"`
 }
 
 // parseSessionAction parses a session-scoped action request, returning an error message on failure.
@@ -808,6 +810,16 @@ func (h *Handlers) wsStopSession(ctx context.Context, msg *ws.Message) (*ws.Mess
 	reason := req.Reason
 	if reason == "" {
 		reason = "stopped via API"
+	}
+	if req.AwaitTerminal {
+		if req.Force || req.ExpectedExecutionID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "awaited stop requires expected_execution_id and force=false", nil)
+		}
+		result, err := h.service.StopSessionAwaited(ctx, req.SessionID, req.ExpectedExecutionID, reason)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Awaited stop incomplete: "+err.Error(), map[string]any{"stop_result": result})
+		}
+		return ws.NewResponse(msg.ID, msg.Action, result)
 	}
 	if err := h.service.StopSession(ctx, req.SessionID, reason, req.Force); err != nil {
 		h.logger.Error("failed to stop session", zap.String("session_id", req.SessionID), zap.Error(err))

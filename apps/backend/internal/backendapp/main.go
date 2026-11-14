@@ -555,6 +555,7 @@ func startServices( //nolint:cyclop
 	// AGENTCTL LAUNCHER (for standalone mode)
 	// ============================================
 	agentRuntimeAvailability := agentctlclient.NewRuntimeOwner(eventBus, log, systeminfo.NewBootID())
+	logger.SetExecutionBootID(agentRuntimeAvailability.BootID())
 	addCleanup(func() error {
 		agentRuntimeAvailability.Stop()
 		return nil
@@ -1231,6 +1232,7 @@ func startGatewayAndServe(
 	hostUtilityMgr.SetProviderGatewayAuthResolver(lifecycleMgr.ResolveProviderGatewayAuth)
 	hostUtilityMgr.SetManagedRuntimeSelectionStore(services.ManagedRuntimeSelections)
 	hostUtilityMgr.SetManagedRuntimeSingleUserOwner(singleUserManagedRuntimeOwner(services.Auth))
+	wireSharedInferenceCapacity(orchestratorSvc, repos.SystemSettings, log.Zap(), lifecycleMgr, hostUtilityMgr)
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)
