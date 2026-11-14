@@ -448,6 +448,7 @@
     "coordinator"
   ],
   "known_missing_required_tables": {
+    "workflow": ["prompt_source_instances", "prompt_source_templates"],
     "task": [
       "agent_delivery_cursors",
       "agent_delivery_cleanup_jobs",
