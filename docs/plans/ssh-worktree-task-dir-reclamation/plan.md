@@ -299,6 +299,12 @@ trailing-space task names, colliding branch/tag names, detached-origin stashes,
 and branch-probe transport failure. The regressions passed with the targeted
 lifecycle race suite and changed-Go lint; details are in task 01 Results.
 
+PR fixup added explicit local Git identities to the primary, standalone-clone,
+and separate-storage repositories used by the real-Git fixtures. This prevents
+commit and stash tests from depending on the runner's inferred author identity.
+The focused lifecycle race tests and changed-Go lint passed; details are in task
+01 Results.
+
 
 ## Risks
 

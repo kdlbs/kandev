@@ -185,3 +185,13 @@ real-Git regressions first failed against the prior implementation, then passed:
 - `(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/runtime/lifecycle -run '^(TestSSHTaskDirReclaimDoesNotFollowTaskDirectorySymlink|TestSSHTaskDirReclaimPreservesTrailingSpaceTaskName|TestSSHTaskDirReclaimGitStashScope|TestSSHTaskDirReclaimGitCheckoutKinds|TestSSHTaskDirReclaimGitFailures)$' -count=1)` — passed.
 - `(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/agent/runtime/lifecycle -run '^Test(SSHTaskDirReclaim|SSHReclaim|WrapLoginShell|SSHStopInstanceRunsTerminalCleanupBeforeControllerTeardown|IsTaskDirectoryCheckout)' -count=1)` — passed.
 - The changed-Go lint command above and `git diff --check` — passed, 0 issues.
+
+PR fixup on 2026-11-14 made the primary, standalone-clone, and separate-storage
+repositories set a local name and email with `user.useConfigOnly=true`. The CI
+artifact confirmed author-identity failures in the standalone-clone commit case
+and the separate-Git-storage case. Requiring explicit identity reproduced both
+failures before the shared fixture configuration supplied it.
+
+- `(cd apps/backend && go test -race ./internal/agent/runtime/lifecycle -run '^TestSSHTaskDirReclaimGit' -count=1)` — passed, 7.850s.
+- `bash scripts/lint-go-changed apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_git_test.go` — passed, 0 issues.
+- `git diff --check` — passed.

@@ -74,8 +74,7 @@ func newSSHReclaimGitFixture(t *testing.T) sshReclaimGitFixture {
 	}
 	fixtureGit(t, base, "init", "--bare", bare)
 	fixtureGit(t, base, "init", "--initial-branch=main", mainRepo)
-	fixtureGit(t, mainRepo, "config", "user.name", "Reclaim Test")
-	fixtureGit(t, mainRepo, "config", "user.email", "reclaim@example.invalid")
+	configureFixtureGitIdentity(t, mainRepo)
 	if err := os.WriteFile(filepath.Join(mainRepo, ".gitignore"), []byte(".env\nnode_modules/\n.kandev/\nnested-child/\nunsafe-child/\n"), 0o600); err != nil {
 		t.Fatalf("write ignore rules: %v", err)
 	}
@@ -106,6 +105,13 @@ func fixtureGit(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %s in %q failed: %v\n%s", strings.Join(args, " "), dir, err, output)
 	}
 	return strings.TrimSpace(string(output))
+}
+
+func configureFixtureGitIdentity(t *testing.T, dir string) {
+	t.Helper()
+	fixtureGit(t, dir, "config", "user.name", "Reclaim Test")
+	fixtureGit(t, dir, "config", "user.email", "reclaim@example.invalid")
+	fixtureGit(t, dir, "config", "user.useConfigOnly", "true")
 }
 
 func reclaimTestEnvironment(home string) []string {
@@ -448,6 +454,7 @@ func TestSSHTaskDirReclaimGitCheckoutKinds(t *testing.T) {
 		}
 		storage := filepath.Join(fixture.taskDir, "git-storage")
 		fixtureGit(t, filepath.Dir(fixture.profileRoot), "init", "--separate-git-dir", storage, "--initial-branch=main", fixture.taskDir)
+		configureFixtureGitIdentity(t, fixture.taskDir)
 		writeFixtureFile(t, filepath.Join(fixture.taskDir, "README.md"), "internal storage")
 		fixtureGit(t, fixture.taskDir, "add", "README.md")
 		fixtureGit(t, fixture.taskDir, "commit", "-m", "internal storage")
@@ -767,6 +774,7 @@ func makeStandaloneClone(t *testing.T, fixture sshReclaimGitFixture, shallow boo
 	}
 	args = append(args, remote, fixture.taskDir)
 	fixtureGit(t, filepath.Dir(fixture.profileRoot), args...)
+	configureFixtureGitIdentity(t, fixture.taskDir)
 }
 
 func stashOnCheckout(t *testing.T, dir, message string) {
