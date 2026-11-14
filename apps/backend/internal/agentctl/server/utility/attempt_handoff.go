@@ -130,7 +130,7 @@ func (o *attemptOwner) adoptRetainedClaim(saved inferenceOwnerState) {
 		return
 	}
 	next := ownershipFor(o.cfg, o.id, prior.Revision, ownerBorn)
-	if !matchingHandoffIdentity(prior, next) {
+	if !matchingHandoffIdentity(prior, next) && !closedSettledPredecessor(prior, next, o.state) {
 		o.admissionFailureReason = "retained_claim_identity_mismatch"
 		o.state.ContinuityKnown = false
 		o.storageUnavailable = true // Preserve the unclaimed predecessor bytes.
@@ -257,6 +257,15 @@ func predecessorInferenceTerminated(pid int) bool {
 		return true
 	}
 	return recoveredInferenceTerminated(pid)
+}
+
+// closedSettledPredecessor reports a predecessor that closed with every attempt
+// settled. It leaves nothing for a successor to observe, so the same session may
+// resume on a new agentctl instance (each launch mints one) without inheriting
+// any continuity.
+func closedSettledPredecessor(prior, next *inferenceOwnership, state inferenceOwnerState) bool {
+	return prior.Phase == ownerClosed && prior.SessionID != "" && prior.SessionID == next.SessionID &&
+		settledCurrentOwnerState(state)
 }
 
 func matchingHandoffIdentity(prior, next *inferenceOwnership) bool {
