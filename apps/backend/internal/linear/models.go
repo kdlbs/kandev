@@ -96,6 +96,28 @@ type LinearIssue struct {
 	ProjectURL         string `json:"projectUrl,omitempty"`
 	ProjectSummary     string `json:"projectSummary,omitempty"`
 	ProjectDescription string `json:"projectDescription,omitempty"`
+	// Blockers lists the issues that block this one through a Linear "blocks"
+	// relation. It is populated only by searches whose filter sets
+	// RequireBlockersDone. BlockersTruncated reports that Linear returned more
+	// relations than were fetched, so the list is incomplete.
+	Blockers          []LinearIssueBlocker `json:"blockers,omitempty"`
+	BlockersTruncated bool                 `json:"blockersTruncated,omitempty"`
+}
+
+// stateTypeCompleted is the Linear workflow state type of finished work.
+const stateTypeCompleted = "completed"
+
+// LinearIssueBlocker is one issue that blocks another, with the Linear state
+// type that decides whether it still blocks.
+type LinearIssueBlocker struct {
+	Identifier string `json:"identifier"`
+	StateType  string `json:"stateType"`
+}
+
+// Done reports whether the blocker no longer holds back the issue it blocks.
+// Only a completed blocker releases it; a canceled blocker keeps it blocked.
+func (b LinearIssueBlocker) Done() bool {
+	return b.StateType == stateTypeCompleted
 }
 
 // ProjectDescriptionPlaceholder is the watch prompt placeholder for the
@@ -191,6 +213,15 @@ type SearchFilter struct {
 	// that bound; the two together act as a closed range.
 	EstimateMin *float64 `json:"estimateMin,omitempty"`
 	EstimateMax *float64 `json:"estimateMax,omitempty"`
+	// RequireBlockersDone makes an issue watch skip issues whose Linear
+	// blockers are not all completed. It is applied after the Linear search,
+	// does not narrow the search itself, and does not count as a filter
+	// condition for the non-empty filter rule.
+	RequireBlockersDone bool `json:"requireBlockersDone,omitempty"`
+	// IssueIDs restricts a search to these Linear issue IDs. Only the watch
+	// service sets it, to re-check held issues; it is never stored or read
+	// from a request.
+	IssueIDs []string `json:"-"`
 }
 
 // SearchResult is a page of issues from a search. Linear uses cursor-based

@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
+import { Switch } from "@kandev/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useTranslation } from "react-i18next";
 import {
@@ -162,6 +163,7 @@ export function FilterFields({ form, setForm }: { form: FormState; setForm: Form
       />
       <EstimateRow form={form} setForm={setForm} />
       <QueryField form={form} setForm={setForm} />
+      <RequireBlockersDoneField form={form} setForm={setForm} />
     </>
   );
 }
@@ -325,6 +327,29 @@ function QueryField({ form, setForm }: { form: FormState; setForm: FormSetter })
         value={form.query}
         onChange={(e) => setForm((p) => ({ ...p, query: e.target.value }))}
         placeholder={t("linear:queryPlaceholder")}
+      />
+    </div>
+  );
+}
+
+// Not a match condition: it holds back matched issues until Linear reports
+// every blocker as completed, so it survives a team change.
+function RequireBlockersDoneField({ form, setForm }: { form: FormState; setForm: FormSetter }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div className="space-y-1.5">
+        <Label htmlFor="linear-watch-require-blockers-done">
+          {t("linear:requireBlockersDone")}
+        </Label>
+        <p className="text-xs text-muted-foreground">{t("linear:requireBlockersDoneHelp")}</p>
+      </div>
+      <Switch
+        id="linear-watch-require-blockers-done"
+        data-testid="linear-watch-require-blockers-done"
+        checked={form.requireBlockersDone}
+        onCheckedChange={(v) => setForm((p) => ({ ...p, requireBlockersDone: v }))}
+        className="shrink-0 cursor-pointer [@media(pointer:coarse)]:after:-inset-y-[15px]"
       />
     </div>
   );

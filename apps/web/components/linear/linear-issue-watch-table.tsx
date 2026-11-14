@@ -61,6 +61,7 @@ function summarizeFilter(filter: LinearSearchFilter | undefined): string {
   }
   if (filter.assigned) parts.push(`assigned:${filter.assigned}`);
   if (filter.query) parts.push(`q:"${filter.query}"`);
+  if (filter.requireBlockersDone) parts.push("blockers:done");
   return parts.length === 0 ? "(any)" : parts.join(" · ");
 }
 

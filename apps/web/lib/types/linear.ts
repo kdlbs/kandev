@@ -113,6 +113,11 @@ export interface LinearSearchFilter {
   estimateMin?: number;
   /** Inclusive upper bound on point estimate. */
   estimateMax?: number;
+  /**
+   * Watch-only: skip issues whose Linear blockers are not all completed. Not a
+   * search condition, so it does not make a filter non-empty on its own.
+   */
+  requireBlockersDone?: boolean;
 }
 
 export type LinearIssueSortBy =

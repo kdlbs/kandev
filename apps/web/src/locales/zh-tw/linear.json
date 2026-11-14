@@ -132,6 +132,8 @@
   "query": "查詢",
   "queryHelp": "在標題和描述中做自由文字匹配（可選）。",
   "queryPlaceholder": "身分驗證缺陷",
+  "requireBlockersDone": "僅啟動阻塞項已完成的議題",
+  "requireBlockersDoneHelp": "每個匹配的議題都會等待，直到阻塞它的所有 Linear 議題都已完成。已取消的阻塞項仍會使其等待。",
   "reEnableItInSettings": "在設定中重新啟用",
   "refresh": "重新整理",
   "removeConfiguration": "移除設定",
