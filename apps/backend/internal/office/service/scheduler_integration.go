@@ -249,7 +249,10 @@ func (si *SchedulerIntegration) liftParkedRoutingRuns(ctx context.Context) {
 }
 
 func (si *SchedulerIntegration) recoverStaleClaimedRuns(ctx context.Context) {
-	count, err := si.svc.repo.RecoverStale(ctx, time.Now().UTC().Add(-staleClaimedRunAge))
+	now := time.Now().UTC()
+	cutoff := now.Add(-staleClaimedRunAge)
+	si.renewLiveStaleClaims(ctx, cutoff, now)
+	count, err := si.svc.repo.RecoverStale(ctx, cutoff)
 	if err != nil {
 		if ctx.Err() != nil {
 			return
