@@ -109,7 +109,7 @@ func (s *Service) ReplayDeferredAssignments(ctx context.Context, workspaceID str
 	for _, da := range pending {
 		s.replayDeferredAssignment(ctx, &da)
 	}
-	return nil
+	return s.replayBlockerFailureWakeups(ctx, workspaceID, 0)
 }
 
 // ReplayPendingDeferredAssignments is the recovery tick's backstop: it
@@ -126,7 +126,7 @@ func (s *Service) ReplayPendingDeferredAssignments(ctx context.Context) error {
 	for _, da := range pending {
 		s.replayDeferredAssignment(ctx, &da)
 	}
-	return nil
+	return s.replayBlockerFailureWakeups(ctx, "", maxRecoveryTickDeferredReplay)
 }
 
 // replayDeferredAssignment re-validates one pending deferred assignment

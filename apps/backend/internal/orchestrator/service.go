@@ -1040,8 +1040,9 @@ type Service struct {
 	// doc comment).
 	agentErrorDeps atomic.Pointer[agentErrorDispatchDeps]
 	// childCompletionLocks serializes duplicate on_children_completed deliveries.
-	childCompletionLocksMu sync.Mutex
-	childCompletionLocks   map[string]*childCompletionOperationLock
+	childCompletionLocksMu               sync.Mutex
+	childCompletionLocks                 map[string]*childCompletionOperationLock
+	parentChildrenCompletionWakeRecorder func(context.Context, string, string, string, string) error
 	// officeTerminalCompletionLocks serializes concurrent
 	// markOfficeTaskCompletedForTerminalStep deliveries for the same task, so
 	// two deliveries racing past the taskRuntimeStateMu check above cannot
@@ -1232,13 +1233,6 @@ type Service struct {
 	gitlabService      GitLabWatchService
 	gitlabReviewSource *GitLabReviewWatcherSource
 	gitlabIssueSource  *GitLabIssueWatcherSource
-	// Azure DevOps watcher service + sources for work-item and pull-request
-	// polling events. The integration publishes provider-native matches; the
-	// shared watcher coordinator owns task creation and throttling.
-	azureDevOpsService     AzureDevOpsWatchService
-	azureWorkItemSource    *AzureDevOpsWorkItemWatcherSource
-	azurePullRequestSource *AzureDevOpsPullRequestWatcherSource
-
 	// gitlabMRLinkService auto-links merge requests opened outside Kandev's
 	// Create-PR action, mirroring what githubService does for PRs. Separate
 	// from gitlabService (the review/issue watch surface) — see
@@ -3573,9 +3567,6 @@ func (s *Service) subscribeStartupEvents() {
 
 	// Subscribe to GitLab integration events
 	s.subscribeGitLabEvents()
-
-	// Subscribe to Azure DevOps watcher events
-	s.subscribeAzureDevOpsEvents()
 
 	// Subscribe to JIRA integration events
 	s.subscribeJiraEvents()

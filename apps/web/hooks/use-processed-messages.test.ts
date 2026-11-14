@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { renderHook } from "@testing-library/react";
 import {
   sessionId as toSessionId,
   taskId as toTaskId,
@@ -17,6 +18,7 @@ import {
   messageListMapsEqual,
   messageMapsEqualByIdentity,
   reconcileRenderItems,
+  useProcessedMessages,
   type RenderItem,
 } from "./use-processed-messages";
 
@@ -102,6 +104,32 @@ describe("isAgentBootResumeMessage", () => {
   it("returns false when metadata is missing", () => {
     const msg = makeMessage("x", "script_execution");
     expect(isAgentBootResumeMessage(msg)).toBe(false);
+  });
+});
+
+describe("useProcessedMessages passthrough mode", () => {
+  it("retracts an earlier empty-turn notice when only session mode hydrates", () => {
+    const notice = makeMessage("empty-turn", "status", { empty_turn: true });
+    notice.turn_id = "turn-empty";
+    const prompt = makeMessage("prompt", "message", undefined, "Please inspect the project.");
+    prompt.author_type = "user";
+    const error = makeMessage("error", "status", { error_terminated: true }, "Command failed.");
+    error.turn_id = "turn-error";
+    const messages = [notice, prompt, error];
+    const render = ({ isPassthrough }: { isPassthrough: boolean }) =>
+      useProcessedMessages(messages, "t1", "s1", "", {
+        isPassthrough,
+      } as unknown as Parameters<typeof useProcessedMessages>[4]);
+    const { result, rerender } = renderHook(render, { initialProps: { isPassthrough: false } });
+
+    expect(result.current.visibleMessages.map((message) => message.id)).toContain("empty-turn");
+
+    rerender({ isPassthrough: true });
+
+    expect(result.current.visibleMessages.map((message) => message.id)).toEqual([
+      "prompt",
+      "error",
+    ]);
   });
 });
 

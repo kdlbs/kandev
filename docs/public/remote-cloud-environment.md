@@ -136,16 +136,7 @@ Adjust the left and right port when the launcher selected another one. `KANDEV_S
 
 Use the cloud provider's encrypted secret mechanism or short-lived CLI authentication for repository and agent credentials. Avoid placing tokens in the repository. The development processes inherit their shell environment, and agents or Git host CLIs may consume credentials from it. Treat `.kandev-dev`, terminal output, and captured test artifacts as potentially sensitive.
 
-For GitHub PR paths, install and authenticate `gh`. Azure Repos PR creation additionally requires `az`, the `azure-devops` extension, and Azure authentication:
-
-```bash
-az extension add --name azure-devops
-az login
-# Headless alternative supported by Azure CLI tooling:
-export AZURE_DEVOPS_EXT_PAT='...'
-```
-
-The Azure tooling is optional and only needed for Azure Repos operations. See [Git operations](git-operations.md#create-a-pull-request-or-merge-request).
+For GitHub PR paths, install and authenticate `gh`. See [Git operations](git-operations.md#create-a-pull-request-or-merge-request).
 
 <details>
 <summary>Development state, E2E, and executor limitations</summary>

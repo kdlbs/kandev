@@ -102,6 +102,13 @@ to register the repository in a separate step.
   one resolution attempt, including a settled error or empty result. Explicit
   retry shall permit a fresh attempt. Results shall remain isolated between
   dialogs and workspaces, including a workspace change with requests pending.
+- **AC-PLUGINS-REPOSITORY-TASK-CREATION-001.13:** When a task names a plugin
+  provider repository whose checkout lies inside a Kandev task worktree, the
+  provider repository Kandev uses instead shall keep the original's clone URL
+  with its provider host, owner, and name, so the owning plugin can verify the
+  Git credential request against it. When Kandev reuses an earlier replacement
+  that has no clone URL, it shall record the original's clone URL on it, and it
+  shall never replace a clone URL the replacement already has.
 
 ## Out of scope
 

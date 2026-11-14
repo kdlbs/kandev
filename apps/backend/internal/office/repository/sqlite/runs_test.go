@@ -433,36 +433,6 @@ func TestScheduleRetry_PreservesRunPayloadForResume(t *testing.T) {
 	}
 }
 
-func TestRecoverStale(t *testing.T) {
-	repo := newTestRepo(t)
-	ctx := context.Background()
-
-	req := &runsmodels.Run{
-		AgentProfileID: "a1",
-		Reason:         "task_assigned",
-		Payload:        "{}",
-		Status:         "queued",
-		CoalescedCount: 1,
-	}
-	if err := repo.CreateRun(ctx, req); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	// Claim it.
-	_, err := repo.ClaimRun(ctx, "a1")
-	if err != nil {
-		t.Fatalf("claim: %v", err)
-	}
-
-	// Recover with a future cutoff should reset it.
-	n, err := repo.RecoverStale(ctx, time.Now().Add(time.Hour))
-	if err != nil {
-		t.Fatalf("recover: %v", err)
-	}
-	if n != 1 {
-		t.Errorf("recovered %d, want 1", n)
-	}
-}
-
 // TestGetRunsByCommentIDs_MapsLatestRunPerComment pins that the
 // per-comment lookup returns one row per comment, picks the most
 // recently requested row when duplicates exist, and surfaces the

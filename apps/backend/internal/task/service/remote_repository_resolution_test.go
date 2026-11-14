@@ -260,7 +260,6 @@ func TestResolveRepositoryRef_RemoteSelectionProviderIdentity(t *testing.T) {
 		{RemoteURL: "git@github.com:acme/widgets.git"},
 		{RemoteURL: "https://gitlab.com/acme/widgets.git"},
 		{RemoteURL: "https://gitlab.example.test/acme/widgets.git", Provider: "gitlab", TrustedRemote: true},
-		{RemoteURL: "https://dev.azure.com/acme/Project/_git/widgets"},
 		{RemoteURL: "https://forge.example.test/scm/acme/widgets.git", Provider: "forge", ProviderHost: "https://forge.example.test", ProviderScope: "instance-a", ProviderRepoID: "42", ProviderOwner: "acme", ProviderName: "widgets", TrustedProviderDescriptor: true},
 	} {
 		t.Run(effectiveRemoteURL(input), func(t *testing.T) {

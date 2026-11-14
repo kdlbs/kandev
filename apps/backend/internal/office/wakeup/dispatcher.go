@@ -453,6 +453,11 @@ func (d *Dispatcher) checkPauseGate(ctx context.Context, req *officesqlite.Wakeu
 		return nil
 	}
 	pause.RecordBlocked("wakeup_dispatch")
+	if req.Source == SourceBlockerFailure {
+		// A blocker failure is a durable alert. Keep it queued so resume or
+		// the recovery tick can retry it after the workspace is available.
+		return shared.ErrWorkspacePaused
+	}
 	if err := d.repo.MarkWakeupRequestSkipped(ctx, req.ID, wakeupPauseSkipReason); err != nil {
 		d.log.Warn("wakeup dispatch: mark skipped (paused) failed",
 			zap.String("wakeup_id", req.ID), zap.Error(err))

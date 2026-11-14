@@ -36,3 +36,33 @@ func TestInterruptedRetirementBindsObservedStreamAndPredecessor(t *testing.T) {
 	require.True(t, stored.Retired)
 	require.Equal(t, journal.SubmissionInterruptedUnknown, stored.State)
 }
+
+func TestNativeResumeCanRetireMissingInterruptedUnknownRecord(t *testing.T) {
+	server, _, retained := newDurableDeliveryTestServer(t)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/agent/submissions/interrupted/retire", bytes.NewBufferString(`{"session_id":"session-1","incarnation_id":"session-1","harness_generation":1,"stream_id":"session-1","hash":"prompt-hash"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set(journal.DeliveryProtocolHeader, "2")
+	response := httptest.NewRecorder()
+	server.Router().ServeHTTP(response, request)
+	require.Equal(t, http.StatusNoContent, response.Code)
+
+	stored, err := retained.GetSubmission(context.Background(), "interrupted")
+	require.NoError(t, err)
+	require.Equal(t, journal.SubmissionInterruptedUnknown, stored.State)
+	require.True(t, stored.Retired)
+	require.Equal(t, "prompt-hash", stored.Hash)
+	require.Empty(t, stored.Payload)
+}
+
+func TestNativeResumeDoesNotCreateMissingRecordForNewerGeneration(t *testing.T) {
+	server, _, retained := newDurableDeliveryTestServer(t)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/agent/submissions/interrupted/retire", bytes.NewBufferString(`{"session_id":"session-1","incarnation_id":"session-1","harness_generation":2,"stream_id":"session-1","hash":"prompt-hash"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set(journal.DeliveryProtocolHeader, "2")
+	response := httptest.NewRecorder()
+	server.Router().ServeHTTP(response, request)
+	require.Equal(t, http.StatusConflict, response.Code)
+
+	_, err := retained.GetSubmission(context.Background(), "interrupted")
+	require.ErrorIs(t, err, journal.ErrSubmissionNotFound)
+}

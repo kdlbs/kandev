@@ -98,9 +98,6 @@ vi.mock("@/components/task-graph/task-graph-button", () => ({
       <button type="button" data-testid={GRAPH_BUTTON_TEST_ID} data-task-id={taskId} />
     ) : null,
 }));
-vi.mock("@/components/azure-devops/azure-devops-task-pull-request-chip", () => ({
-  AzureDevOpsTaskPullRequestChip: () => null,
-}));
 vi.mock("@/components/integrations/registered-change-request-status", () => ({
   RegisteredChangeRequestStatus: () => <span data-testid="registered-review-status" />,
 }));

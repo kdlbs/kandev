@@ -210,21 +210,52 @@ func (r *Repository) DeleteTaskBlockersForTask(ctx context.Context, taskID strin
 
 // Task lifecycle state values as stored in the shared `tasks` table,
 // shared by every office-repo reader of terminal task state
-// (IsTaskInTerminalStep, GetTaskTerminalStatus).
+// (GetBlockerStatus, IsTaskInTerminalState, GetTaskTerminalStatus).
 const (
 	taskStateCompleted = "COMPLETED"
 	taskStateFailed    = "FAILED"
 	taskStateCancelled = "CANCELLED"
 )
 
-func (r *Repository) IsTaskInTerminalStep(ctx context.Context, taskID string) (bool, error) {
-	var state string
-	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
-		`SELECT COALESCE(state, '') FROM tasks WHERE id = ?`), taskID).Scan(&state)
+// GetBlockerStatus classifies taskID as a blocker from its persisted state.
+// Archival does not change the classification. A missing row returns
+// sql.ErrNoRows so callers can apply their unknown-read rule.
+func (r *Repository) GetBlockerStatus(ctx context.Context, taskID string) (models.BlockerStatus, error) {
+	state, err := r.taskLifecycleState(ctx, taskID)
+	if err != nil {
+		return models.BlockerPending, err
+	}
+	return blockerStatusForState(state), nil
+}
+
+// IsTaskInTerminalState reports whether taskID has a terminal lifecycle state.
+func (r *Repository) IsTaskInTerminalState(ctx context.Context, taskID string) (bool, error) {
+	state, err := r.taskLifecycleState(ctx, taskID)
 	if err != nil {
 		return false, err
 	}
 	return state == taskStateCompleted || state == taskStateFailed || state == taskStateCancelled, nil
+}
+
+func (r *Repository) taskLifecycleState(ctx context.Context, taskID string) (string, error) {
+	var state string
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT COALESCE(state, '') FROM tasks WHERE id = ?`), taskID).Scan(&state)
+	if err != nil {
+		return "", err
+	}
+	return state, nil
+}
+
+func blockerStatusForState(state string) models.BlockerStatus {
+	switch state {
+	case taskStateCompleted:
+		return models.BlockerSatisfied
+	case taskStateFailed, taskStateCancelled:
+		return models.BlockerFailed
+	default:
+		return models.BlockerPending
+	}
 }
 
 // GetTaskAssignee returns the agent currently driving a task. Resolves
@@ -238,6 +269,28 @@ func (r *Repository) GetTaskAssignee(ctx context.Context, taskID string) (string
 		return "", err
 	}
 	return assignee, nil
+}
+
+// GetTaskParentID returns the task's parent ID, or "" for a top-level task.
+func (r *Repository) GetTaskParentID(ctx context.Context, taskID string) (string, error) {
+	var parentID string
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT COALESCE(parent_id, '') FROM tasks WHERE id = ?`), taskID).Scan(&parentID)
+	if err != nil {
+		return "", err
+	}
+	return parentID, nil
+}
+
+// GetTaskUpdatedAt returns the task row's last committed update time.
+func (r *Repository) GetTaskUpdatedAt(ctx context.Context, taskID string) (time.Time, error) {
+	var updatedAt time.Time
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT updated_at FROM tasks WHERE id = ?`), taskID).Scan(&updatedAt)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return updatedAt, nil
 }
 
 // GetTaskAssigneeTx is GetTaskAssignee scoped to a caller-owned transaction,

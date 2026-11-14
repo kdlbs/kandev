@@ -126,6 +126,23 @@ type SessionRecoveryBlockLookup interface {
 	GetSessionRecoveryBlock(context.Context, string) (*taskmodels.SessionRecoveryBlock, error)
 }
 
+// RunClaimSessionEvidence describes a task session that may belong to the
+// current run claim. A turn started after the claim is durable launch evidence.
+type RunClaimSessionEvidence struct {
+	SessionID             string
+	TurnStartedAfterClaim bool
+}
+
+// RunClaimSessionProbe finds task sessions relevant to a claimed run and checks
+// runtime liveness without hiding probe errors. Recovery treats errors as
+// uncertain and leaves the claim alone.
+type RunClaimSessionProbe interface {
+	FindTaskSessionsForClaim(
+		ctx context.Context, taskID, agentProfileID, persistedSessionID string, claimedAt time.Time,
+	) ([]RunClaimSessionEvidence, error)
+	ProbeAgentRunningForSession(ctx context.Context, sessionID string) (bool, error)
+}
+
 // LaunchContext mirrors scheduler.LaunchContext so the office.service
 // package can carry the Office-built launch context (prompt, env,
 // workflow step, attachments, plan-mode, profile) into the routing
@@ -423,6 +440,7 @@ type Service struct {
 	projectSkillDirResolver ProjectSkillDirResolver
 	taskStarter             TaskStarter
 	runSessionLauncher      RunSessionLauncher
+	runClaimSessionProbe    RunClaimSessionProbe
 	runStopper              RunExecutionStopper
 	runPermissions          RunPermissionResolver
 	permissionRetryDelays   []time.Duration
@@ -465,7 +483,8 @@ type Service struct {
 	// routineRunSyncer closes out a heavy routine run when its linked
 	// task reaches a terminal step. Wired to the routines.RoutineService
 	// at startup; nil in tests that don't exercise routines.
-	routineRunSyncer RoutineRunSyncer
+	routineRunSyncer      RoutineRunSyncer
+	routineRunStateReader RoutineRunTaskStateReader
 
 	// pauseGate is the workspace-pause read used to block run queuing
 	// (QueueRun) and finalize processing terminally (see
@@ -473,6 +492,7 @@ type Service struct {
 	// gate is not wired (older tests, transitional deployments).
 	pauseGate               shared.PauseGate
 	deferredAssignmentQueue DeferredAssignmentQueue
+	wakeupRequestDispatcher WakeupRequestDispatcher
 
 	// workflowStepGetter resolves a task's current workflow step so
 	// task_assigned wakes (queueTaskAssignedRun, the unstarted-task
@@ -490,11 +510,36 @@ type RoutineRunSyncer interface {
 	SyncRunStatus(ctx context.Context, taskID, terminalStatus string) error
 }
 
+// WakeupRequestDispatcher is the claim-time merge and delivery owner for
+// durable agent wakeup requests. The office service keeps only this narrow
+// seam so it can replay queued blocker alerts without owning run dispatch.
+type WakeupRequestDispatcher interface {
+	Dispatch(ctx context.Context, requestID string) error
+}
+
+// SetWakeupRequestDispatcher wires the shared wakeup dispatcher used for
+// durable blocker failure alerts and their resume/recovery replay.
+func (s *Service) SetWakeupRequestDispatcher(d WakeupRequestDispatcher) {
+	s.wakeupRequestDispatcher = d
+}
+
+// RoutineRunTaskStateReader reads the task's current state before a terminal
+// event is allowed to close its linked routine run.
+type RoutineRunTaskStateReader interface {
+	GetTask(ctx context.Context, taskID string) (*taskmodels.Task, error)
+}
+
 // SetRoutineRunSyncer wires the routines.RoutineService (or a test fake)
 // used to close out a heavy routine run when its linked task reaches a
 // terminal step. Without this wired, a heavy routine's run stays in
 // task_created until routines.activeRunMaxAge lets a later fire through.
 func (s *Service) SetRoutineRunSyncer(r RoutineRunSyncer) { s.routineRunSyncer = r }
+
+// SetRoutineRunTaskStateReader wires the task repository used to verify that
+// a terminal state event still matches the task's current state.
+func (s *Service) SetRoutineRunTaskStateReader(r RoutineRunTaskStateReader) {
+	s.routineRunStateReader = r
+}
 
 // BudgetEvaluator is the surface the office service needs from the
 // costs feature for budget evaluation. Implemented by
@@ -552,6 +597,12 @@ func (s *Service) SetAgentTokenMinter(minter AgentTokenMinter) {
 // scheduler fail-closed when startup composition is incomplete.
 func (s *Service) SetRunSessionLauncher(launcher RunSessionLauncher) {
 	s.runSessionLauncher = launcher
+}
+
+// SetRunClaimSessionProbe wires the task-session/runtime check used by stale
+// claim recovery. Leaving it nil fails closed for task-bound claims.
+func (s *Service) SetRunClaimSessionProbe(probe RunClaimSessionProbe) {
+	s.runClaimSessionProbe = probe
 }
 
 // RunSessionLauncherHandle returns the shared-runtime taskless launch seam so

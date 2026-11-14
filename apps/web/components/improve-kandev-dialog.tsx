@@ -160,7 +160,7 @@ export function ImproveKandevDialog(props: ImproveKandevDialogProps) {
 // contribution never touches: a connection that went bad in an unrelated
 // workspace, or an exhausted rate limit that clears itself. Blocking on the
 // whole category meant a user with GitHub configured in one workspace and
-// Azure DevOps in two others could not open the dialog at all, with no
+// GitLab in two others could not open the dialog at all, with no
 // setting that would clear it.
 const BLOCKING_GITHUB_ISSUE_IDS = new Set(["github_unavailable", "github_not_authenticated"]);
 

@@ -266,7 +266,7 @@ func (r *Repository) ClearStepDecisionsAndCompleteMarker(
 		return 0, fmt.Errorf("begin clear decisions transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := r.lockOfficeCompletionTaskScope(ctx, tx, taskID); err != nil {
+	if err := r.lockTaskScope(ctx, tx, taskID); err != nil {
 		return 0, err
 	}
 

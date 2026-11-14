@@ -33,7 +33,6 @@ import {
   IconSettings,
   IconTicket,
 } from "@tabler/icons-react";
-import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 import { linkToTaskOverview, linkToTasks, linkToThreads } from "@/lib/links";
 import { resolveHomeHref } from "./workspace-home";
 import { EVERYWHERE, MENU_AND_PALETTE, SIDEBAR_AND_MENU } from "./surface-policy";
@@ -143,18 +142,6 @@ export const APP_DESTINATIONS: Destination[] = [
     },
   },
   {
-    id: "azure-devops",
-    label: "Azure DevOps",
-    icon: AzureDevOpsIcon,
-    section: "integrations",
-    href: "/azure-devops",
-    // Integrations other than GitHub have no palette command yet: the palette
-    // needs "Go to <product>" copy, and adding it means new catalog keys. Adding
-    // `palette` here plus an override block is all it takes.
-    surfaces: SIDEBAR_AND_MENU,
-    requires: "azure-devops",
-  },
-  {
     id: "github",
     label: "GitHub",
     icon: IconBrandGithub,
@@ -178,6 +165,9 @@ export const APP_DESTINATIONS: Destination[] = [
     icon: IconBrandGitlab,
     section: "integrations",
     href: "/gitlab",
+    // Integrations other than GitHub have no palette command yet: the palette
+    // needs "Go to <product>" copy, and adding it means new catalog keys. Adding
+    // `palette` here plus an override block is all it takes.
     surfaces: SIDEBAR_AND_MENU,
     requires: "gitlab",
   },

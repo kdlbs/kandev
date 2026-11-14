@@ -21,6 +21,7 @@ This design preserves the existing Dynamic routing decision. It adds no routing 
 | --------------------------------------------------- | ------------------- |
 | AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.1, 001.5     | Profile validation  |
 | AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.11, 001.14   | Completion recovery |
+| AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.11, 001.16   | Destination executor admission |
 | AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.1, 001.3, 001.7 | Profile validation  |
 
 ## Components and responsibilities
@@ -64,6 +65,27 @@ The transition must not commit, retire the source, create a destination prompt, 
 The already-completed turn remains complete. Duplicate READY or complete events must not repeat entry actions or disturb a later turn.
 Complete-stream handling must not depend on a second READY event that will never arrive.
 
+## Destination executor admission
+
+Destination executor admission uses the same `PrepareExecutorAdmission`
+boundary as session preparation, called without a session ID so it writes
+nothing. A binding that admission refuses for every caller, such as a deleted
+executor profile, confers no compute
+([per-user ownership](../../executors/system-design/per-user-ownership.md#autonomous-attribution)).
+The switch therefore never substitutes the executor's default profile or
+another profile. The task service maps the typed
+`workflowmove.ErrDestinationExecutorUnavailable` to HTTP 409 and the WebSocket
+`CONFLICT` code with `task_move_executor_unavailable`. The response carries no
+profile ID or ownership details. Automatic transitions reuse the same
+preflight, so completion recovery above applies to them.
+
+The orchestrator records the task state before it writes `SCHEDULING`. If the
+switch returns an error afterward, it restores that state only when the task
+is still `SCHEDULING` (`UpdateTaskStateIfCurrentIn`), then publishes the task
+update. A concurrent writer that already moved the task wins. Restoring the
+source session to `WAITING_FOR_INPUT` does not restore task state, because
+that helper skips the task write when the session was already waiting.
+
 ## Failure and recovery
 
 The existing error channel reports the validation failure. The source remains primary on its current workflow step.
@@ -98,3 +120,4 @@ Evidence must distinguish a completed turn from an active execution before repor
 ## Implementation plans
 
 - [Dynamic workflow completion](../../../plans/dynamic-workflow-completion/plan.md)
+- [Destination executor admission](../../../plans/workflow-switch-executor-admission/plan.md)

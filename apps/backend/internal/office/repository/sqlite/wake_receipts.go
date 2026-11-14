@@ -353,6 +353,77 @@ func (r *Repository) GetChildSetKeyAndGeneration(ctx context.Context, parentTask
 	return row.ChildSetKey, row.ChildGeneration, nil
 }
 
+// RecordWorkflowChildrenCompletedWake stores a receipt for the state path's
+// committed child-completion operation. It records only the exact child
+// snapshot that the workflow engine evaluated.
+func (r *Repository) RecordWorkflowChildrenCompletedWake(
+	ctx context.Context,
+	parentTaskID, childSetKey, childGeneration, operationID string,
+) error {
+	if parentTaskID == "" || childSetKey == "" || childGeneration == "" || operationID == "" {
+		return errors.New("parent child-completion receipt identity is incomplete")
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var current workflowCompletionWakeIdentityRow
+	if err := tx.GetContext(ctx, &current, tx.Rebind(workflowCompletionWakeIdentityQuery(r.db.DriverName())), parentTaskID); err != nil {
+		return err
+	}
+	if current.WaveSetKey != childSetKey || current.WaveGeneration != childGeneration {
+		return nil
+	}
+	if err := r.UpsertWakeReceiptTx(
+		ctx, tx, parentTaskID, current.ChildSetKey, "", operationID, current.ChildGeneration, time.Now().UTC(),
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+type workflowCompletionWakeIdentityRow struct {
+	WaveSetKey      string `db:"wave_set_key"`
+	WaveGeneration  string `db:"wave_generation"`
+	ChildSetKey     string `db:"child_set_key"`
+	ChildGeneration string `db:"child_generation"`
+}
+
+// workflowCompletionWakeIdentityQuery validates the wave observed by the
+// orchestrator and returns the broader child snapshot ListStuckParents uses
+// for its receipt. Both identities come from one database statement.
+func workflowCompletionWakeIdentityQuery(driver string) string {
+	waveAggregate := `STRING_AGG(CASE
+			WHEN c.is_ephemeral = 0 AND COALESCE(c.origin, '') != 'automation_run'
+			THEN c.id || ':' || c.state
+		END, ',' ORDER BY c.id)`
+	if !dialect.IsPostgres(driver) {
+		waveAggregate = `GROUP_CONCAT(CASE
+			WHEN c.is_ephemeral = 0 AND COALESCE(c.origin, '') != 'automation_run'
+			THEN c.id || ':' || c.state
+		END, ',')`
+	}
+	waveGeneration := dialect.SecondPrecisionText(
+		driver,
+		`MAX(CASE WHEN c.is_ephemeral = 0 AND COALESCE(c.origin, '') != 'automation_run' THEN c.updated_at END)`,
+	)
+	childGeneration := dialect.SecondPrecisionText(driver, "MAX(c.updated_at)")
+	return `
+		SELECT
+			COALESCE(` + waveAggregate + `, '') AS wave_set_key,
+			COALESCE(` + waveGeneration + `, '') AS wave_generation,
+			COALESCE(` + childSetKeyAggregate(driver) + `, '') AS child_set_key,
+			COALESCE(` + childGeneration + `, '') AS child_generation
+		FROM (
+			SELECT id, state, updated_at, is_ephemeral, origin
+			FROM tasks
+			WHERE parent_id = ? AND archived_at IS NULL
+			ORDER BY id
+		) c
+	`
+}
+
 // GetChildSetKeyTx is the transaction-scoped counterpart to GetChildSetKey.
 // Reconciler admission uses it immediately before recording a receipt, so a
 // child-set change does not get hidden by a receipt for the old generation.

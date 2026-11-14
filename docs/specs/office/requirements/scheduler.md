@@ -60,7 +60,8 @@ producer of a `task_assigned` run for an Office task's assignee (reactivity's as
 handler, the event-subscriber path, and unstarted-task recovery) applies the same eligibility
 predicate: the task's current workflow step must have an `auto_start_agent` on_enter action, or the
 task must have no workflow step at all (a task outside any workflow keeps its prior step behaviour). This
-also holds assignment wakes while any blocker remains nonterminal under Office blocker policy.
+also holds assignment wakes while any blocker is unsatisfied under the
+[Office blocker terminal policy](blocker-terminal-policy.md).
 It does not touch Review/Approval's separate reviewer/approver wake path.
 
 #### Acceptance criteria
@@ -81,11 +82,11 @@ It does not touch Review/Approval's separate reviewer/approver wake path.
   is logged at Warn.
 
 - **AC-OFFICE-SCHEDULER-002.5:** When at least one persisted blocker of an Office task is
-  nonterminal, task-created/task-updated assignment events, assignee reactivity, and unstarted-task
+  pending or failed (`REQ-OFFICE-BLOCKER-POLICY-001`), task-created/task-updated assignment events, assignee reactivity, and unstarted-task
   recovery shall admit zero `task_assigned` runs for that task. A mixture of completed and pending
   blockers shall remain held, including when the task has no step or its step cannot be resolved.
-- **AC-OFFICE-SCHEDULER-002.6:** When a task has no blockers or all blockers are terminal under
-  existing Office policy, the blocker condition shall permit the existing assignment admission.
+- **AC-OFFICE-SCHEDULER-002.6:** When a task has no blockers or all blockers are satisfied under
+  `REQ-OFFICE-BLOCKER-POLICY-001`, the blocker condition shall permit the existing assignment admission.
   A refused wake shall not remove the runner, consume its assignment occurrence, or suppress the
   previous assignee's interrupt.
 - **AC-OFFICE-SCHEDULER-002.7:** When the final pending blocker completes successfully, an
@@ -98,12 +99,10 @@ It does not touch Review/Approval's separate reviewer/approver wake path.
   positively known to be pending. An unknown blocker shall not override a known pending blocker,
   regardless of their order. A later recovery pass shall reconsider tasks held by pending blockers
   under its existing candidate and quota rules.
-- **AC-OFFICE-SCHEDULER-002.9:** This repair shall retain Office's existing classification of
-  `COMPLETED`, `FAILED`, and `CANCELLED` as terminal. Archiving shall not itself change that
-  classification; a missing blocker shall follow the unknown-read rule above. Generic Kanban
+- **AC-OFFICE-SCHEDULER-002.9:** Blocker classification, including archived and missing
+  blockers, shall follow `REQ-OFFICE-BLOCKER-POLICY-001`. Generic Kanban
   dependency policy, assignment generation and deduplication, rate limiting, pause/replay, causation,
-  and reviewer/approver wakes shall retain their existing behavior. Failure/cancellation dependency
-  policy reconciliation is separate work.
+  and reviewer/approver wakes shall retain their existing behavior.
 
 ### REQ-OFFICE-SCHEDULER-003: Create-time assignee validation and runner seat
 
