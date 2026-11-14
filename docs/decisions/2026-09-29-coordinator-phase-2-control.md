@@ -110,7 +110,7 @@ because it only adds tools to the next session.
 
 ## Prior art
 
-- **Author's wiki (`wiki-query @henry`).** The configuration resolved to
+- **Author's notes (a private knowledge base, not public).** The configuration resolved to
   `OBSIDIAN_VAULT_PATH=<developer-vault-path>` with QMD collection
   `wiki`. QMD was unavailable: no `qmd` CLI and no QMD MCP tool. The grep
   fallback was refused by the sandbox ("Operation not permitted" on the vault

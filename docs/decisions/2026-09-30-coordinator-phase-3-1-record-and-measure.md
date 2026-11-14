@@ -246,7 +246,7 @@ need condition 1 only and may start when phase 3 merges; work orders 03, 04 and
 ## Prior art
 
 - **Wiki leg.** The vault resolved to
-  `OBSIDIAN_VAULT_PATH=/Users/henry/Documents/henry/wiki` with QMD collection
+  `OBSIDIAN_VAULT_PATH=<path to the author's notes vault>` with QMD collection
   `wiki`; reading it failed with "Operation not permitted", and
   `obsidian-wiki` and `qmd` are not installed. No claim here rests on the wiki.
 - **saas-kb leg.** The saas-kb tool is not available in this environment, so

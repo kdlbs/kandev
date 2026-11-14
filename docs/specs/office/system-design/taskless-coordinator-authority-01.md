@@ -37,10 +37,10 @@ taskless launch refusal. Taskless session creation remains a separate feature.
 
 ## Prior art
 
-**Leg 1, compiled wiki.** Searched: vault `/Users/henry/Documents/henry/wiki` (from
-`~/.obsidian-wiki/config.henry`), QMD collection `wiki`. **The leg did not run.**
-`/Users/henry/Documents` is unreadable from this execution environment (`ls: Operation
-not permitted`, on the vault path and on the parent), and neither `obsidian-wiki` nor
+**Leg 1, compiled wiki.** Searched: the author's private notes vault (local path
+omitted), QMD collection `wiki`. **The leg did not run.** The vault directory is
+unreadable from this execution environment (`ls: Operation not permitted`, on the
+vault path and on its parent), and neither `obsidian-wiki` nor
 `qmd` is on `PATH`, so the GraphRAG pre-pass, the QMD pass and the grep fallback were
 all unavailable. A tool-availability failure, not an empty result: the vault may hold a
 position on unattended-agent authority this spec has not consulted.
