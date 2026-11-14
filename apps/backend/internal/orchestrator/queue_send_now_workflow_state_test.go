@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -68,8 +69,13 @@ func TestSendNowWorkflowTransitionPreservesRunningState(t *testing.T) {
 				require.NotNil(t, queued)
 				svc.executeQueuedMessage("session", queued)
 			}
-			require.Len(t, agent.capturedPrompts, 1)
-			require.Len(t, svc.messageCreator.(*mockMessageCreator).userMessages, 1)
+			// The FIFO path re-dispatches the entry through an asynchronous worker, so
+			// the prompt and the recorded user message arrive after executeQueuedMessage
+			// returns.
+			require.Eventually(t, func() bool {
+				return len(agent.capturedPrompts) == 1 &&
+					len(svc.messageCreator.(*mockMessageCreator).userMessages) == 1
+			}, 5*time.Second, 10*time.Millisecond)
 		})
 	}
 }
