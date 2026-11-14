@@ -407,6 +407,57 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.coordinatorAnswer",
+			EnvVar:      "KANDEV_FEATURES_COORDINATOR_ANSWER",
+			Kind:        KindFeature,
+			Label:       "Coordinator answers",
+			Description: "Lets a coordinator draft the answer to a watched card's pending question or permission request, which a manager approves or edits before it is delivered. Requires Workspace coordinators, Coordinator control and Coordinator autonomy.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskMedium,
+			RiskDescription: "A drafted answer unblocks a card's agent once a manager approves it, so a wrong approval steers that agent. " +
+				"Nothing is delivered without a manager's approval. Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CoordinatorAnswer },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CoordinatorAnswer = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.coordinatorMerge",
+			EnvVar:      "KANDEV_FEATURES_COORDINATOR_MERGE",
+			Kind:        KindFeature,
+			Label:       "Coordinator merge stewardship",
+			Description: "Lets a coordinator watch linked pull requests and merge requests, wake on red pipelines, conflicts and unresolved threads, and propose or automatically execute guarded merges per repository policy. Requires Workspace coordinators, Coordinator control and Coordinator autonomy.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "A merge changes a protected branch and cannot be undone from Kandev. Conditions the provider does not enforce can change between the last check and acceptance. " +
+				"Repository policy defaults to denied; automatic merging is an explicit manager choice per repository.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CoordinatorMerge },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CoordinatorMerge = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.coordinatorPhase35",
+			EnvVar:      "KANDEV_FEATURES_COORDINATOR_PHASE35",
+			Kind:        KindFeature,
+			Label:       "Coordinator project notes",
+			Description: "Lets managers keep versioned, cited project notes that are checked and delivered to every coordinator turn as lower-trust advisory data. Requires Workspace coordinators, Coordinator control, Coordinator autonomy and Coordinator record and measure.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskMedium,
+			RiskDescription: "Managers' notes enter every turn of the coordinator as lower-trust data and can steer its proposals. " +
+				"Notes never grant permissions or change manager instructions. Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CoordinatorPhase35 },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CoordinatorPhase35 = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "debug.devMode",
 			EnvVar:      "KANDEV_DEBUG_DEV_MODE",
 			Kind:        KindDebug,

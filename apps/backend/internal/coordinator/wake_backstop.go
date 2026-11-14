@@ -150,7 +150,8 @@ func (b *WakeBackstop) skip(what string, err error) {
 }
 
 // visitSet is the union of the coordinators with autonomy on, with an open or
-// recently finished turn, and with an automatic claim, ordered by id. A query
+// recently finished turn, with an automatic claim, and with a raised class,
+// ordered by id. A query
 // that fails is counted and the others still contribute.
 func (b *WakeBackstop) visitSet(ctx context.Context, now time.Time) []string {
 	store := b.svc.store
@@ -163,6 +164,13 @@ func (b *WakeBackstop) visitSet(ctx context.Context, now time.Time) []string {
 			return store.CoordinatorIDsWithActiveTurns(ctx, now.Add(-recentTurnWindow))
 		}},
 		{"coordinators with automatic claims", func() ([]string, error) { return store.CoordinatorIDsWithAutomaticClaims(ctx) }},
+		{"coordinators with raised classes", func() ([]string, error) { return store.CoordinatorIDsWithRaisedClasses(ctx) }},
+		{"coordinators with merge work", func() ([]string, error) {
+			if !b.svc.merge {
+				return nil, nil
+			}
+			return store.CoordinatorIDsWithMergeWork(ctx)
+		}},
 	}
 	seen := map[string]struct{}{}
 	for _, src := range sources {
@@ -240,12 +248,17 @@ func (b *WakeBackstop) visit(ctx context.Context, coordinatorID string) {
 	b.runDuty(ctx, "dream", hooks.Dream, coordinatorID)
 	b.runDuty(ctx, "turn duties", hooks.TurnDuties, coordinatorID)
 	b.runDuty(ctx, "lowering", hooks.Lowering, coordinatorID)
+	b.runDuty(ctx, "merge", b.svc.RunMergeDuties, coordinatorID)
 	if !c.AutonomyEnabled {
 		return
 	}
 	if !b.recordWakes(ctx, c) {
 		return
 	}
+	if err := b.svc.ObserveOpenChanges(ctx, c.WorkspaceID); err != nil {
+		b.skip("observe open changes", err)
+	}
+	b.recordMergeWakes(ctx, c)
 	b.runDuty(ctx, "deliver", hooks.Deliver, coordinatorID)
 }
 

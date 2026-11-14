@@ -295,23 +295,6 @@ func (s *Service) MergePRForAutomation(
 	number int,
 	mergeMethod, expectedHeadSHA string,
 ) error {
-	if strings.TrimSpace(expectedHeadSHA) == "" {
-		return fmt.Errorf("automatic merge requires an expected head SHA")
-	}
-	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
-		return err
-	}
-	resolved, err := s.resolveAutomationClient(ctx, workspaceID, owner, repo)
-	if err != nil {
-		return err
-	}
-	if err := requireGitHubCapability(resolved, CapabilityPullRequestWrite); err != nil {
-		return err
-	}
-	_, err = s.mergePRWithClient(
-		ctx, resolved.Client, resolved.CacheScope, owner, repo, number, MergePRRequest{
-			MergeMethod: mergeMethod, ExpectedHeadSHA: expectedHeadSHA,
-		},
-	)
+	_, err := s.MergePRForAutomationOutcome(ctx, workspaceID, "", owner, repo, number, mergeMethod, expectedHeadSHA)
 	return err
 }

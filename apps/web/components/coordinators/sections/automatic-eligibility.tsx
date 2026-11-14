@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
+import type { EligibilitySettings } from "@/lib/api/domains/coordinator-api";
 import type { ClassEligibility } from "@/lib/api/domains/coordinator-automatic-api";
 import type { ClassEligibilityStatus } from "@/hooks/domains/coordinator/use-class-eligibility";
 
@@ -27,6 +28,16 @@ function conditionValue(name: string, value: number | string | null, t: TFunctio
     return t("coordinator:mayDoAutomaticValuePercent", { percent: value });
   if (typeof value === "string") return formatTime(value);
   return t("coordinator:mayDoAutomaticValueCount", { value });
+}
+
+// Falls back to the defaults while a read predates the settings field.
+function conditionParams(settings: EligibilitySettings | undefined) {
+  return {
+    hours: settings?.evidence_window_hours ?? 720,
+    min: settings?.min_decisions ?? 20,
+    percent: settings?.unedited_floor_percent ?? 90,
+    reviewHours: settings?.review_max_age_hours ?? 168,
+  };
 }
 
 export type AutomaticEligibilityProps = {
@@ -76,7 +87,12 @@ export function AutomaticEligibility({
                 ? t("coordinator:mayDoAutomaticMet")
                 : t("coordinator:mayDoAutomaticNotMet")}
             </span>
-            <span>{t(CONDITION_LABEL[condition.name] ?? "coordinator:mayDoAutomaticNotMet")}</span>
+            <span>
+              {t(
+                CONDITION_LABEL[condition.name] ?? "coordinator:mayDoAutomaticNotMet",
+                conditionParams(eligibility.settings),
+              )}
+            </span>
             <span className="text-muted-foreground">
               {conditionValue(condition.name, condition.value, t)}
             </span>

@@ -34,6 +34,10 @@ var errTurnNotStarted = errors.New("coordinator: unattended turn not started")
 
 // The claim checks live project membership in its write snapshot. External
 // project readers can repair coordinator scope and must stay outside this lock.
+// mergeKindList is the SQL list of merge wake kinds, which watched cards the
+// coordinator does not own may carry.
+const mergeKindList = `'change_red', 'change_conflict', 'change_threads'`
+
 const wakeClaimProjectFence = ` AND (
 	(c.include_no_repository = 1 AND NOT EXISTS (
 		SELECT 1 FROM task_repositories tr WHERE tr.task_id = t.id AND tr.repository_id <> ''
@@ -90,9 +94,10 @@ func (s *Store) supersedeWake(ctx context.Context, id string) (bool, error) {
 
 // deliveredWake is one wake of a started turn.
 type deliveredWake struct {
-	ID     string
-	TaskID string
-	Kind   WakeKind
+	ID         string
+	TaskID     string
+	Kind       WakeKind
+	EpisodeKey string
 }
 
 // turnStart names the turn row to insert and the wakes it takes.
@@ -219,8 +224,12 @@ func (s *Store) claimWakes(ctx context.Context, tx coordinatorExec, in turnStart
 	res, err := tx.ExecContext(ctx, s.db.Rebind(`
 		UPDATE coordinator_wakes SET status = ?, turn_id = ?
 		WHERE coordinator_id = ? AND status = ? AND id IN (`+marks+`)
-		AND EXISTS (SELECT 1 `+ownTaskJoins+` WHERE p.coordinator_id = coordinator_wakes.coordinator_id
-		AND t.id = coordinator_wakes.task_id AND `+ownTaskPredicates+workflowFence+projectFence+`)`), args...)
+		AND (EXISTS (SELECT 1 `+ownTaskJoins+` WHERE p.coordinator_id = coordinator_wakes.coordinator_id
+		AND t.id = coordinator_wakes.task_id AND `+ownTaskPredicates+workflowFence+projectFence+`)
+		OR (coordinator_wakes.kind IN (`+mergeKindList+`) AND EXISTS (SELECT 1 FROM tasks t
+		JOIN coordinators c ON c.id = coordinator_wakes.coordinator_id
+		WHERE t.id = coordinator_wakes.task_id AND t.workspace_id = c.workspace_id AND t.archived_at IS NULL
+		AND t.is_ephemeral = 0 AND (c.conversation_task_id IS NULL OR t.id <> c.conversation_task_id)`+workflowFence+projectFence+`)))`), args...)
 	if err != nil {
 		return nil, fmt.Errorf("deliver wakes: %w", err)
 	}
@@ -243,7 +252,7 @@ func notStarted(err error) error {
 
 func readTurnWakes(ctx context.Context, q coordinatorExec, rebind func(string) string, turnID string) ([]deliveredWake, error) {
 	rows, err := q.QueryContext(ctx, rebind(`
-		SELECT id, task_id, kind FROM coordinator_wakes WHERE turn_id = ? ORDER BY created_at, id`), turnID)
+		SELECT id, task_id, kind, episode_key FROM coordinator_wakes WHERE turn_id = ? ORDER BY created_at, id`), turnID)
 	if err != nil {
 		return nil, fmt.Errorf("read turn wakes: %w", err)
 	}
@@ -252,7 +261,7 @@ func readTurnWakes(ctx context.Context, q coordinatorExec, rebind func(string) s
 	for rows.Next() {
 		var w deliveredWake
 		var kind string
-		if err := rows.Scan(&w.ID, &w.TaskID, &kind); err != nil {
+		if err := rows.Scan(&w.ID, &w.TaskID, &kind, &w.EpisodeKey); err != nil {
 			return nil, fmt.Errorf("scan turn wake: %w", err)
 		}
 		w.Kind = WakeKind(kind)

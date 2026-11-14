@@ -6,7 +6,10 @@ import { useCoordinatorSection } from "@/hooks/domains/coordinator/use-coordinat
 import { useControlDraft } from "@/hooks/domains/coordinator/use-control-draft";
 import { useCoordinatorPhase3Effective } from "@/hooks/domains/settings/use-coordinator-phase3-effective";
 import { useCoordinatorPhase31Effective } from "@/hooks/domains/settings/use-coordinator-phase31-effective";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { LearningSection } from "@/components/coordinators/learning/learning-section";
+import { NotesSection } from "@/components/coordinators/notes/notes-section";
+import { useCoordinatorNotesEffective } from "@/hooks/domains/settings/use-coordinator-notes-effective";
 import type { ControlDraft } from "@/lib/coordinators/control-draft";
 import type { WatchSet } from "@/lib/coordinator/watch-filter";
 import { WatchesNoneNotice } from "@/app/coordinator/components/watches-none-notice";
@@ -15,6 +18,7 @@ import { ChangesWaiting } from "./changes-waiting";
 import { GoalSection } from "./goal-section";
 import { ControlError } from "./control-error";
 import { MayDoSection } from "./may-do-section";
+import { MergeSection } from "./merge-section";
 import { WatchesSection } from "./watches-section";
 import { SectionsRow, type CoordinatorSectionEntry } from "./sections-row";
 import { StandingOrdersSection } from "./standing-orders-section";
@@ -80,8 +84,38 @@ function watchSetFromStored(stored: ControlDraft): WatchSet {
   };
 }
 
-function sectionSlugs(phase3: boolean, phase31: boolean): string[] {
-  return [...BASE_SLUGS, ...(phase3 ? ["autonomy"] : []), ...(phase31 ? ["learning"] : [])];
+function sectionSlugs(phase3: boolean, phase31: boolean, merge: boolean, notes: boolean): string[] {
+  return [
+    ...BASE_SLUGS,
+    ...(phase3 ? ["autonomy"] : []),
+    ...(phase31 ? ["learning"] : []),
+    ...(notes ? ["notes"] : []),
+    ...(merge ? ["merge"] : []),
+  ];
+}
+
+function autonomyEntry(
+  t: ReturnType<typeof useTranslation>["t"],
+  props: AutonomyBodyProps,
+): CoordinatorSectionEntry {
+  return {
+    slug: "autonomy",
+    label: t("coordinator:sectionAutonomy"),
+    help: t("coordinator:sectionAutonomyHelp"),
+    render: () => <AutonomyBody {...props} />,
+  };
+}
+
+function mergeEntry(
+  t: ReturnType<typeof useTranslation>["t"],
+  props: { workspaceId: string; coordinatorId: string; canManage: boolean },
+): CoordinatorSectionEntry {
+  return {
+    slug: "merge",
+    label: t("coordinator:sectionMerge"),
+    help: t("coordinator:sectionMergeHelp"),
+    render: () => <MergeSection {...props} />,
+  };
 }
 
 function learningEntry(
@@ -93,6 +127,18 @@ function learningEntry(
     label: t("coordinator:sectionLearning"),
     help: t("coordinator:sectionLearningHelp"),
     render: () => <LearningSection {...props} />,
+  };
+}
+
+function notesEntry(
+  t: ReturnType<typeof useTranslation>["t"],
+  props: { workspaceId: string; coordinatorId: string; canManage: boolean },
+): CoordinatorSectionEntry {
+  return {
+    slug: "notes",
+    label: t("coordinator:sectionNotes"),
+    help: t("coordinator:sectionNotesHelp"),
+    render: () => <NotesSection {...props} />,
   };
 }
 
@@ -108,7 +154,9 @@ export function CoordinatorSections({
   const control = useControlDraft({ workspaceId, coordinatorId, canManage });
   const phase3 = useCoordinatorPhase3Effective();
   const phase31 = useCoordinatorPhase31Effective();
-  const { selectSection } = useCoordinatorSection(sectionSlugs(phase3, phase31));
+  const merge = useFeature("coordinatorMerge") && phase3;
+  const notes = useCoordinatorNotesEffective();
+  const { selectSection } = useCoordinatorSection(sectionSlugs(phase3, phase31, merge, notes));
   const stored = control.stored;
   const entries: CoordinatorSectionEntry[] = [
     {
@@ -167,24 +215,11 @@ export function CoordinatorSections({
       ),
     },
   ];
-  if (phase3) {
-    entries.push({
-      slug: "autonomy",
-      label: t("coordinator:sectionAutonomy"),
-      help: t("coordinator:sectionAutonomyHelp"),
-      render: () => (
-        <AutonomyBody
-          workspaceId={workspaceId}
-          coordinatorId={coordinatorId}
-          canManage={canManage}
-          onContextApplied={onContextApplied}
-        />
-      ),
-    });
-  }
-  if (phase31) {
-    entries.push(learningEntry(t, { workspaceId, coordinatorId, canManage }));
-  }
+  const target = { workspaceId, coordinatorId, canManage };
+  if (phase3) entries.push(autonomyEntry(t, { ...target, onContextApplied }));
+  if (phase31) entries.push(learningEntry(t, target));
+  if (notes) entries.push(notesEntry(t, target));
+  if (merge) entries.push(mergeEntry(t, target));
   return (
     <>
       <WatchesNoneNotice

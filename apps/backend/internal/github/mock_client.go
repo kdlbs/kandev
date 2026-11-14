@@ -824,7 +824,7 @@ func (m *MockClient) MergePR(_ context.Context, owner, repo string, number int, 
 			return "", fmt.Errorf("pull request not found for expected head %s", request.ExpectedHeadSHA)
 		}
 		if pr.HeadSHA != request.ExpectedHeadSHA {
-			return "", fmt.Errorf("pull request head changed: expected %s, current %s", request.ExpectedHeadSHA, pr.HeadSHA)
+			return "", &headMovedError{err: fmt.Errorf("pull request head changed: expected %s, current %s", request.ExpectedHeadSHA, pr.HeadSHA)}
 		}
 	}
 	if message := m.mergeFailures[key]; message != "" {

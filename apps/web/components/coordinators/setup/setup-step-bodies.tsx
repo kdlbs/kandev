@@ -257,9 +257,10 @@ export function MayDoStep({ state, messages, edit }: BodyProps) {
       <MayDoRows
         actions={state.actions}
         canManage
-        onChange={(action, value) =>
-          edit({ actions: { ...state.actions, [action]: value } }, [actionPath(action)])
-        }
+        onChange={(action, value) => {
+          if (action === "answer") return;
+          edit({ actions: { ...state.actions, [action]: value } }, [actionPath(action)]);
+        }}
         rowErrors={rowErrors}
         errorMessage={line ? t(line) : null}
       />

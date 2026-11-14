@@ -1,9 +1,23 @@
 import { ApiError, fetchJson, type ApiRequestOptions } from "@/lib/api/client";
+import type { AnswerDraft, AnswerSpec } from "./coordinator-answer-types";
+import type {
+  AddStandingOrderRequest,
+  Goal,
+  GoalResponse,
+  PutGoalRequest,
+  StandingOrder,
+  StandingOrderListResponse,
+} from "./coordinator-orders-goal-types";
 import type { RunsWith } from "./coordinator-runs-with";
 import type {
   ImprovementSpec,
   PendingChangeStatus,
 } from "@/lib/api/domains/coordinator-changes-api";
+import type {
+  MergeDetail,
+  MergeRepoChange,
+  MergeSettings,
+} from "@/lib/api/domains/coordinator-merge-api";
 
 // Mirrors internal/coordinator/validate.go's ProfileStatus.
 export type ProfileStatus = "ok" | "missing" | "passthrough";
@@ -15,7 +29,8 @@ export type ProposalStatus =
   | "approved"
   | "rejected"
   | "failed"
-  | "returned";
+  | "returned"
+  | "uncertain";
 
 // Mirrors internal/coordinator/models.go's ProposalSpec.
 export type ProposalSpec = {
@@ -74,22 +89,40 @@ export type CoordinatorSummary = {
 
 export type ControlAction = "create_task" | "start_agent" | "message" | "move" | "resume" | "stop";
 export type ControlSetting = "denied" | "requires_approval" | "automatic";
+// The settings-only class: named in the settings read only while the answer flag is effective.
+export type SettingsAction = ControlAction | "answer";
+export type PolicyActions = Record<ControlAction, ControlSetting> & { answer?: ControlSetting };
+
+// Mirrors internal/coordinator/policy.go's EligibilitySettings.
+export type EligibilitySettings = {
+  evidence_window_hours: number;
+  min_decisions: number;
+  unedited_floor_percent: number;
+  review_max_age_hours: number;
+  daily_limit: number;
+};
 
 // Mirrors GET/PUT .../settings (docs/specs/coordinator/system-design/permissions.md#settings-routes).
 export type CoordinatorSettings = {
-  policy: { actions: Record<ControlAction, ControlSetting> };
+  // `eligibility` is present only while features.coordinatorPhase3 is effective.
+  policy: { actions: PolicyActions; eligibility?: EligibilitySettings };
   policy_revision: number;
   watches: { scope: "all" | "selected"; workflow_ids: string[] };
   // Resolved scope for the client filter; present while the stored scope is selected.
   projects?: Projects.SettingsProjects;
   // Present only while features.coordinatorPhase31 is effective.
   projects_config?: Projects.ProjectsConfig;
+  // Present only while features.coordinatorMerge is effective.
+  merge?: MergeSettings;
 };
 
 export type PutSettingsRequest = {
-  policy?: { actions: Record<ControlAction, ControlSetting> };
+  policy?: { actions: PolicyActions; eligibility?: EligibilitySettings };
   watches?: { scope: "all" | "selected"; workflow_ids?: string[] };
   projects?: Projects.ProjectsRequest;
+  // A save naming a repository whose policy changes carries the read policy_revision.
+  policy_revision?: number;
+  merge?: { repositories: MergeRepoChange[] };
 };
 
 export type CoordinatorListResponse = {
@@ -124,7 +157,7 @@ export type PatchCoordinatorRequest = {
 };
 
 // Mirrors internal/coordinator/models.go's ProposalKind* constants.
-export type OtherProposalKind = "message" | "move" | "resume" | "improvement";
+export type OtherProposalKind = "message" | "move" | "resume" | "improvement" | "answer" | "merge";
 
 // Mirrors internal/coordinator/dto.go's ProposalDTO (Build decision 10).
 // claim_token is never serialized by the backend and has no field here.
@@ -147,10 +180,14 @@ type ProposalBase = {
   starts_agent?: boolean;
   // Parsed outcome_json; null until the proposal has an outcome.
   outcome?: unknown;
+  // True for a failed answer a manager may approve again.
+  retryable?: boolean;
   // Present only while features.coordinatorPhase3 is effective.
   reply_text?: string | null;
   reply_delivered_at?: string | null;
   in_reply_to?: string | null;
+  // The class the decision lowered to requires_approval; set on a decision response only.
+  lowered_class?: ControlAction;
   // Present on an improvement proposal only, while phase 3 is effective.
   change_status?: PendingChangeStatus | null;
 };
@@ -186,6 +223,15 @@ export type MoveSpec = {
   rationale: string;
 };
 
+export type {
+  AnswerDraft,
+  AnswerDraftEntry,
+  AnswerSnapshotPermission,
+  AnswerSnapshotQuestion,
+  AnswerSource,
+  AnswerSpec,
+} from "./coordinator-answer-types";
+
 type KindProposalOf<K extends OtherProposalKind, S> = ProposalBase & {
   kind: K;
   spec: S;
@@ -195,15 +241,40 @@ type KindProposalOf<K extends OtherProposalKind, S> = ProposalBase & {
 export type ResumeProposal = KindProposalOf<"resume", ResumeSpec>;
 export type MessageProposal = KindProposalOf<"message", MessageSpec>;
 export type MoveProposal = KindProposalOf<"move", MoveSpec>;
-export type KindProposal = ResumeProposal | MessageProposal | MoveProposal;
+export type AnswerProposal = KindProposalOf<"answer", AnswerSpec>;
+export type KindProposal = ResumeProposal | MessageProposal | MoveProposal | AnswerProposal;
+
+export function isAnswerProposal(p: WireProposal): p is AnswerProposal {
+  return p.kind === "answer";
+}
 export type ImprovementProposal = KindProposalOf<"improvement", ImprovementSpec>;
+
+// Mirrors internal/coordinator/merge_reading.go's mergeSpec. A settled merge that
+// was refused is a rejected row whose reject_reason is the refusal code. `merge`
+// is present on the detail read only.
+export type MergeSpec = {
+  task_id: string;
+  repository_id: string;
+  change_key: string;
+  head_sha: string;
+  method: string;
+};
+export type MergeProposal = KindProposalOf<"merge", MergeSpec> & { merge?: MergeDetail };
+
+export function isMergeProposal(p: WireProposal): p is MergeProposal {
+  return p.kind === "merge";
+}
 
 // Every proposal the client caches and renders: create_task, or a phase-2 kind
 // it knows. A row of any other kind is never stored.
-export type StoredProposal = CreateTaskProposal | KindProposal | ImprovementProposal;
+export type StoredProposal =
+  | CreateTaskProposal
+  | KindProposal
+  | ImprovementProposal
+  | MergeProposal;
 
 export function isKindProposal(p: WireProposal): p is KindProposal {
-  return p.kind === "resume" || p.kind === "message" || p.kind === "move";
+  return p.kind === "resume" || p.kind === "message" || p.kind === "move" || p.kind === "answer";
 }
 
 export function isImprovementProposal(p: WireProposal): p is ImprovementProposal {
@@ -211,7 +282,9 @@ export function isImprovementProposal(p: WireProposal): p is ImprovementProposal
 }
 
 export function isStoredProposal(p: WireProposal): p is StoredProposal {
-  return isCreateTaskProposal(p) || isKindProposal(p) || isImprovementProposal(p);
+  return (
+    isCreateTaskProposal(p) || isKindProposal(p) || isImprovementProposal(p) || isMergeProposal(p)
+  );
 }
 
 // isCreateTaskProposal narrows to the create_task kind; phase-1 rows carry
@@ -251,8 +324,10 @@ export type ApproveProposalEdits = {
   workflow_id?: string;
   step_id?: string;
   repository_id?: string;
-  // A message proposal's text; the only edit a non-create kind accepts.
+  // A message proposal's text.
   text?: string;
+  // An answer proposal's draft; the only edit an answer accepts.
+  draft?: AnswerDraft;
 };
 
 // Mirrors internal/coordinator/dto.go's ProposalConflictResponse (Build
@@ -303,77 +378,7 @@ export type CoordinatorProfileUnavailableResponse = {
   executor_profile_status: ProfileStatus;
 };
 
-// Mirrors internal/coordinator/standing_orders.go's Order wire shape. number
-// is the 1-based active position and null for a retired order; created_by is
-// the creator's user id (empty with auth off).
-export type StandingOrder = {
-  id: string;
-  number: number | null;
-  text: string;
-  created_at: string;
-  created_by: string;
-  retired_at: string | null;
-  last_applied_at: string | null;
-};
-
-export type StandingOrderListResponse = {
-  orders: StandingOrder[];
-};
-
-export type AddStandingOrderRequest = {
-  text: string;
-  source_proposal_id?: string;
-};
-
-export type GoalCriterion = {
-  id: string;
-  text: string;
-  done: boolean;
-};
-
-// Mirrors internal/coordinator/reads_phase2.go's Goal. due_on is a calendar
-// date (YYYY-MM-DD) as stored; set_at and met_at are timestamps.
-export type Goal = {
-  id: string;
-  coordinator_id: string;
-  name: string;
-  due_on: string | null;
-  status: "active" | "met" | (string & {});
-  criteria: GoalCriterion[];
-  baseline: unknown;
-  set_at: string;
-  met_at: string | null;
-  met_by: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-export type MeasureDirection = "up" | "down" | "none_small" | "none_no_baseline";
-
-export type GoalMeasure = {
-  current: number;
-  baseline: number | null;
-  direction: MeasureDirection;
-};
-
-export type GoalMeasures = {
-  open_tasks: GoalMeasure;
-  approved_7d: GoalMeasure;
-  rejected_7d: GoalMeasure;
-};
-
-export type GoalResponse = {
-  active: Goal | null;
-  last_met: Goal | null;
-  measures: GoalMeasures | null;
-};
-
-export type PutGoalRequest = {
-  goal_id?: string;
-  name: string;
-  due_on?: string | null;
-  criteria: { id?: string; text: string }[];
-};
+export type * from "./coordinator-orders-goal-types";
 
 export function workspacePath(workspaceId: string, suffix: string): string {
   return `/api/v1/workspaces/${encodeURIComponent(workspaceId)}${suffix}`;
@@ -542,9 +547,10 @@ export function deliverProposalReply(
 export function getProposalConflict(error: unknown): WireProposal | null {
   if (!(error instanceof ApiError) || error.status !== 409) return null;
   if (!error.body || typeof error.body !== "object") return null;
-  const body = error.body as Partial<ProposalConflictBody>;
+  const body = error.body as Partial<Omit<ProposalConflictBody, "error">> & { error?: string };
+  // A refused answer proposal answers with `error: "refused"` and its reason in `code`.
   if (
-    body.error_code !== "proposal_conflict" ||
+    (body.error_code !== "proposal_conflict" && body.error !== "refused") ||
     typeof body.proposal !== "object" ||
     !body.proposal
   ) {

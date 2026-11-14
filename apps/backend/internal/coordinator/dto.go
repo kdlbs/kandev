@@ -96,6 +96,8 @@ type CoordinatorPhase2 struct {
 	// effective (ProjectsConfig).
 	Projects       *ProjectsDTO       `json:"projects,omitempty"`
 	ProjectsConfig *ProjectsConfigDTO `json:"projects_config,omitempty"`
+	// Merge is the repository merge policies; absent while merge is off.
+	Merge *MergeSettingsDTO `json:"merge,omitempty"`
 }
 
 // SummaryDTO is the list route's per-coordinator card summary, present only
@@ -130,7 +132,8 @@ func (d *CoordinatorDTO) WithSummary(activeOrders int) *CoordinatorDTO {
 
 // CoordinatorPolicyDTO is the effective permission map.
 type CoordinatorPolicyDTO struct {
-	Actions map[Action]Setting `json:"actions"`
+	Actions     map[Action]Setting  `json:"actions"`
+	Eligibility EligibilitySettings `json:"eligibility"`
 }
 
 // CoordinatorWatchDTO is the watch scope; workflow_ids is [] unless selected.
@@ -149,7 +152,7 @@ func (d *CoordinatorDTO) WithPolicyView(v PolicyView) *CoordinatorDTO {
 		ids = []string{}
 	}
 	d.CoordinatorPhase2 = &CoordinatorPhase2{
-		Policy:         CoordinatorPolicyDTO{Actions: v.Actions},
+		Policy:         CoordinatorPolicyDTO{Actions: v.Actions, Eligibility: v.Eligibility},
 		PolicyRevision: v.PolicyRevision,
 		Watches:        CoordinatorWatchDTO{Scope: v.WatchScope, WorkflowIDs: ids},
 	}
@@ -295,6 +298,8 @@ type ProposalDTO struct {
 	CreatedAt     time.Time      `json:"created_at"`
 	UpdatedAt     time.Time      `json:"updated_at"`
 	RunsWith      *RunsWith      `json:"runs_with"`
+	// Merge is present on the detail read of a merge proposal only.
+	Merge *MergeDetail `json:"merge,omitempty"`
 
 	// ProposalPhase2 is nil, and its fields are absent from the body, while
 	// the phase-2 flag is off.
@@ -312,6 +317,9 @@ type ProposalPhase3 struct {
 	InReplyTo        *string    `json:"in_reply_to"`
 	// ChangeStatus is present for improvement proposals only.
 	ChangeStatus *string `json:"change_status,omitempty"`
+	// LoweredClass names the class a manager's decision lowered from
+	// automatic; present on that decision's response only.
+	LoweredClass string `json:"lowered_class,omitempty"`
 }
 
 // ProposalPhase2 holds the proposal wire fields added by phase 2.
@@ -321,6 +329,8 @@ type ProposalPhase2 struct {
 	StandingOrderIDs []string        `json:"standing_order_ids"`
 	StartsAgent      bool            `json:"starts_agent"`
 	Outcome          json.RawMessage `json:"outcome"`
+	// Retryable is true for a failed answer a manager may approve again.
+	Retryable bool `json:"retryable,omitempty"`
 }
 
 // NewProposalDTO builds the phase-1 ProposalDTO from the domain type.
@@ -341,7 +351,7 @@ func NewProposalDTOPhases(p *Proposal, phase2, phase3 bool) *ProposalDTO {
 	dto := newProposalDTO(p, phase2)
 	if phase3 {
 		dto.ProposalPhase3 = &ProposalPhase3{
-			ReplyText: p.ReplyText, ReplyDeliveredAt: p.ReplyDeliveredAt, InReplyTo: p.InReplyTo,
+			ReplyText: p.ReplyText, ReplyDeliveredAt: p.ReplyDeliveredAt, InReplyTo: p.InReplyTo, LoweredClass: p.LoweredClass,
 		}
 		if p.Kind == ProposalKindImprovement && p.ChangeStatus != nil {
 			dto.ChangeStatus = p.ChangeStatus
@@ -372,6 +382,7 @@ func newProposalDTO(p *Proposal, phase2 bool) *ProposalDTO {
 		extra = &ProposalPhase2{
 			Kind: kind, TargetTaskID: p.TargetTaskID, StandingOrderIDs: ids,
 			StartsAgent: p.StartsAgent, Outcome: outcome,
+			Retryable: p.Kind == ProposalKindAnswer && p.Status == ProposalStatusFailed && p.Error != nil && answerRetryable(*p.Error),
 		}
 	}
 	return &ProposalDTO{
@@ -430,6 +441,27 @@ func NewProposalConflictResponsePhases(p *Proposal, phase2, phase3 bool) *Propos
 		ErrorCode: ErrorCodeProposalConflict,
 		Proposal:  *NewProposalDTOPhases(p, phase2, phase3),
 	}
+}
+
+// ErrorCodeRefused is the error of the 409 body for a refused answer proposal.
+const ErrorCodeRefused = "refused"
+
+// RefusedConflictResponse is the 409 body approve, reject and reply return for
+// a refused answer proposal, and approve returns for the one it settles.
+type RefusedConflictResponse struct {
+	Error    string      `json:"error"`
+	Code     string      `json:"code"`
+	Proposal ProposalDTO `json:"proposal"`
+}
+
+// NewRefusedConflictResponse builds the refusal body; code is the refusal
+// reason stored on the row.
+func NewRefusedConflictResponse(p *Proposal, phase2, phase3 bool) *RefusedConflictResponse {
+	code := ""
+	if p.Error != nil {
+		code = *p.Error
+	}
+	return &RefusedConflictResponse{Error: ErrorCodeRefused, Code: code, Proposal: *NewProposalDTOPhases(p, phase2, phase3)}
 }
 
 // ConversationConflictResponse is the 409 body the conversation route

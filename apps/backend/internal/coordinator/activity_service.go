@@ -62,6 +62,7 @@ type OutcomeCounts struct {
 	Rejected          int64 `json:"rejected"`
 	Failed            int64 `json:"failed"`
 	Refused           int64 `json:"refused"`
+	ProposalRefused   int64 `json:"proposal_refused"`
 	Undone            int64 `json:"undone"`
 }
 
@@ -304,6 +305,7 @@ func (s *Service) ActivitySummary(ctx context.Context, coordinatorID string, day
 			oc.Failed += c.Rows
 		case ActivityRefused:
 			oc.Refused += c.Refusal
+			oc.ProposalRefused += c.ProposalRows
 		case ActivityUndone:
 			oc.Undone += c.Rows
 		}

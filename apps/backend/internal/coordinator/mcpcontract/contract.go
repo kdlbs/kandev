@@ -16,6 +16,14 @@ const (
 	ActionProposeMove    = "coordinator.propose_move"
 )
 
+// ActionProposeAnswer is the MCP action the propose_answer_kandev tool
+// dispatches (docs/specs/coordinator/system-design/answer-proposals.md).
+const ActionProposeAnswer = "coordinator.propose_answer"
+
+// ActionProposeMerge is the MCP action the propose_merge_kandev tool
+// dispatches (docs/specs/coordinator/system-design/merge.md).
+const ActionProposeMerge = "coordinator.propose_merge"
+
 // ActionProposeImprovement is the MCP action the propose_improvement_kandev
 // tool dispatches (docs/specs/coordinator/system-design/improvements.md#tool).
 const ActionProposeImprovement = "coordinator.propose_improvement"

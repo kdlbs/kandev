@@ -1,6 +1,7 @@
 import type { ApiRequestOptions } from "@/lib/api/client";
 import {
   coordinatorPath,
+  type EligibilitySettings,
   mutate,
   type ControlAction,
   type ControlSetting,
@@ -22,6 +23,8 @@ export type ClassEligibility = {
     met: boolean;
     value: number | string | null;
   }[];
+  /** The coordinator's configured eligibility settings the conditions were measured against. */
+  settings?: EligibilitySettings;
   setting: ControlSetting;
   changed_by: string;
   changed_at: string | null;

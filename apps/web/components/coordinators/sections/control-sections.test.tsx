@@ -16,6 +16,7 @@ import { MayDoSection } from "./may-do-section";
 import { WatchesSection } from "./watches-section";
 
 const draft = (over: Partial<ControlDraft> = {}): ControlDraft => ({
+  eligibility: null,
   actions: {
     create_task: "denied",
     start_agent: "denied",

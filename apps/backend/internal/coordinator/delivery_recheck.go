@@ -56,6 +56,9 @@ func (s *Service) holdingWakes(ctx context.Context, coord *Coordinator) ([]pendi
 	for _, o := range own {
 		workflows[o.TaskID] = o.WorkflowID
 	}
+	if err := s.addMergeWakeWorkflows(ctx, coord, pending, workflows); err != nil {
+		return nil, err
+	}
 	s.wakeMu.Lock()
 	src := s.wakeSources
 	s.wakeMu.Unlock()
@@ -78,6 +81,9 @@ func (s *Service) partitionWakes(ctx context.Context, src WakeSources, coord *Co
 	for _, w := range pending {
 		if len(keep) >= deliveryWakeLimit {
 			break
+		}
+		if w.Kind.IsMerge() && !s.merge {
+			continue
 		}
 		holds, err := s.wakeHolds(ctx, src, coord, g, repos, workflows, w)
 		if err != nil {
@@ -103,6 +109,30 @@ func (s *Service) partitionWakes(ctx context.Context, src WakeSources, coord *Co
 	return keep, superseded
 }
 
+// addMergeWakeWorkflows adds the workflow of every task that a pending merge
+// wake names, owned or not, so the watch test applies to watched cards.
+func (s *Service) addMergeWakeWorkflows(ctx context.Context, coord *Coordinator, pending []pendingWake, into map[string]string) error {
+	var ids []string
+	for _, w := range pending {
+		if w.Kind.IsMerge() {
+			ids = append(ids, w.TaskID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	found, err := s.store.TaskWorkflows(ctx, coord.WorkspaceID, ids)
+	if err != nil {
+		return err
+	}
+	for id, workflow := range found {
+		if _, own := into[id]; !own {
+			into[id] = workflow
+		}
+	}
+	return nil
+}
+
 // wakeHolds reports whether the wake's task is still owned, still in the watch
 // set, and still shows the wake's exact episode.
 func (s *Service) wakeHolds(ctx context.Context, src WakeSources, coord *Coordinator, g *watchGate, repos wakeRepos, workflows map[string]string, w pendingWake) (bool, error) {
@@ -115,6 +145,10 @@ func (s *Service) wakeHolds(ctx context.Context, src WakeSources, coord *Coordin
 	}
 	if !g.task(workflowID, repos.byTask[w.TaskID]) {
 		return false, nil
+	}
+	if w.Kind.IsMerge() {
+		_, open, err := s.store.ChangeEpisodeOpen(ctx, coord.WorkspaceID, w.Kind, w.EpisodeKey)
+		return open, err
 	}
 	episodes, err := s.readEpisodes(ctx, src, coord.WorkspaceID, w.TaskID, []WakeKind{w.Kind})
 	if err != nil {

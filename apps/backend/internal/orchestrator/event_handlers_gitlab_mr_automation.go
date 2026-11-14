@@ -73,7 +73,7 @@ type taskMRAgentAutomationService interface {
 
 	// The following back auto-fix CI and auto-merge (this task).
 	GetMRAutomationSnapshot(ctx context.Context, workspaceID, host, projectPath string, mrIID int) (*gitlab.MRAutomationSnapshot, error)
-	MergeMRForAutomation(ctx context.Context, workspaceID, host, projectPath string, mrIID int) (*gitlab.MR, error)
+	MergeMRForAutomation(ctx context.Context, workspaceID, host, projectPath string, mrIID int, method, expectedSHA string) (*gitlab.MR, error)
 	RecordTaskMRFixAttempt(ctx context.Context, attempt gitlab.TaskMRFixAttempt) error
 	RefreshTaskMRFixCheckpoint(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, signature, checkpointJSON string) error
 	MarkTaskMRAutoFixExhausted(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, message string) error

@@ -62,7 +62,10 @@ const STEP_NAMES = new Map([
   ["wf-1:b", "Review"],
 ]);
 
-function row(kind: KindProposal["kind"], overrides: Record<string, unknown> = {}): KindProposal {
+function row(
+  kind: Exclude<KindProposal["kind"], "answer">,
+  overrides: Record<string, unknown> = {},
+): KindProposal {
   const specs = {
     resume: { task_id: "t-1", rationale: "Its agent stopped." },
     message: { task_id: "t-1", text: "Please rebase.", rationale: "Behind main." },

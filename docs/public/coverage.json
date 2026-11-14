@@ -1192,6 +1192,14 @@
         "reason": "Workspace coordinator phase-2 tool behind features.coordinatorPhase2, off in prod and dev; documented when the feature is promoted."
       },
       {
+        "tool": "propose_answer_kandev",
+        "reason": "Workspace coordinator tool behind features.coordinatorAnswer (which also needs features.coordinatorPhase3), off in prod and dev; documented when the feature is promoted."
+      },
+      {
+        "tool": "propose_merge_kandev",
+        "reason": "Workspace coordinator tool behind features.coordinatorMerge (which also needs features.coordinatorPhase2 and features.coordinatorPhase3), off in prod and dev; documented when the feature is promoted."
+      },
+      {
         "tool": "propose_improvement_kandev",
         "reason": "Workspace coordinator phase-3 tool behind features.coordinatorPhase3, off in prod and dev; documented when the feature is promoted."
       },

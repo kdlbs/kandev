@@ -608,6 +608,23 @@ type FeaturesConfig struct {
 	// effect together with Coordinator, CoordinatorPhase2 and CoordinatorPhase3.
 	CoordinatorPhase31 bool `mapstructure:"coordinator_phase31" json:"coordinatorPhase31"`
 
+	// CoordinatorAnswer gates answer proposals: the coordinator drafts the
+	// answer to a watched card's pending question or permission request and a
+	// manager approves it. It only takes effect together with Coordinator,
+	// CoordinatorPhase2 and CoordinatorPhase3.
+	CoordinatorAnswer bool `mapstructure:"coordinator_answer" json:"coordinatorAnswer"`
+
+	// CoordinatorMerge gates merge stewardship: change wakes, repository merge
+	// policy and guarded merge proposals. It only takes effect together with
+	// Coordinator, CoordinatorPhase2 and CoordinatorPhase3.
+	CoordinatorMerge bool `mapstructure:"coordinator_merge" json:"coordinatorMerge"`
+
+	// CoordinatorPhase35 gates coordinator agent-tier notes: manager-curated
+	// notes, their per-turn index and proposal note references. It only takes
+	// effect together with Coordinator, CoordinatorPhase2, CoordinatorPhase3
+	// and CoordinatorPhase31.
+	CoordinatorPhase35 bool `mapstructure:"coordinator_phase35" json:"coordinatorPhase35"`
+
 	// CodexAppServer enables the separate native Codex app-server agent. It is
 	// off in every shipped profile and requires a restart because its protocol
 	// adapter and profile catalogue are composed at startup.

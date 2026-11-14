@@ -17,6 +17,9 @@ const detailedMergeStatusDraft = "draft_status"
 var (
 	// ErrMRIsDraft is returned by MergeMR when the MR is still a draft.
 	ErrMRIsDraft = errors.New("gitlab: merge request is a draft")
+	// ErrMergeHeadMoved is matched by a merge refusal that reports the
+	// expected head no longer is the source branch head.
+	ErrMergeHeadMoved = errors.New("gitlab: merge request head moved")
 	// ErrMRNotOpen is returned by MarkMRReady for an MR that is not open.
 	ErrMRNotOpen = errors.New("gitlab: merge request is not open")
 	// ErrDraftMarkerNotFound is returned when a draft MR has no leading draft marker to strip.
@@ -41,6 +44,12 @@ type MergeRefusedError struct {
 
 func (e *MergeRefusedError) Error() string { return e.Err.Error() }
 func (e *MergeRefusedError) Unwrap() error { return e.Err }
+
+// Is reports a 409, GitLab's answer to a `sha` that is not the head, as
+// ErrMergeHeadMoved.
+func (e *MergeRefusedError) Is(target error) bool {
+	return target == ErrMergeHeadMoved && e.Status == http.StatusConflict
+}
 
 func wrapMergeRefusal(err error) error {
 	var apiErr *APIError

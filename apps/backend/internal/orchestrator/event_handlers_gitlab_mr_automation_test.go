@@ -234,7 +234,7 @@ func (m *mockGitLabMRAutomationService) GetMRAutomationSnapshot(context.Context,
 	return m.snapshot, nil
 }
 
-func (m *mockGitLabMRAutomationService) MergeMRForAutomation(context.Context, string, string, string, int) (*gitlab.MR, error) {
+func (m *mockGitLabMRAutomationService) MergeMRForAutomation(context.Context, string, string, string, int, string, string) (*gitlab.MR, error) {
 	m.mergeCalls.Add(1)
 	if m.mergeErr != nil {
 		return nil, m.mergeErr

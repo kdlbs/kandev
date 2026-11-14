@@ -188,6 +188,32 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Coordinator answers: the coordinator drafts the answer to a watched card's
+  # pending question or permission request and a manager approves it. Off in
+  # prod and dev; only effective together with KANDEV_FEATURES_COORDINATOR,
+  # _PHASE2 and _PHASE3.
+  KANDEV_FEATURES_COORDINATOR_ANSWER:
+    prod: "false"
+    dev:  "false"
+    e2e:  "true"
+
+  # Coordinator merge stewardship: change wakes, repository merge policy and
+  # guarded merges. Off in prod and dev; only effective together with
+  # KANDEV_FEATURES_COORDINATOR, _PHASE2 and _PHASE3.
+  KANDEV_FEATURES_COORDINATOR_MERGE:
+    prod: "false"
+    dev:  "false"
+    e2e:  "true"
+
+  # Coordinator project notes: manager-curated, cited notes delivered as an
+  # advisory index on every coordinator turn. Off in every shipped profile;
+  # only effective together with KANDEV_FEATURES_COORDINATOR, _PHASE2, _PHASE3
+  # and _PHASE31.
+  KANDEV_FEATURES_COORDINATOR_PHASE35:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent

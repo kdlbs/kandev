@@ -71,8 +71,10 @@ type CoordinatorWithOpenProposals struct {
 // packages on the same Store.
 type Service struct {
 	// kinds is the registry of non-create proposal kinds; executeTimeout bounds one Execute.
-	kinds          map[string]KindExecutor
-	kindDeps       KindDeps
+	kinds    map[string]KindExecutor
+	kindDeps KindDeps
+	// answerTargets overrides the relay-backed target read of the answer kind.
+	answerTargets  AnswerTargets
 	executeTimeout time.Duration
 	store          *Store
 	validator      *Validator
@@ -161,6 +163,22 @@ type Service struct {
 	// whatever its value.
 	phase31 bool
 
+	// answer is true when answer proposals are effective (phase 3 effective and
+	// features.coordinatorAnswer): the answer tool, proposing and approving.
+	answer bool
+
+	// merge is true when merge stewardship is effective (phase 3 effective and
+	// features.coordinatorMerge): change wakes, repository merge policy and
+	// merge proposals.
+	merge bool
+
+	// notes is true when agent-tier notes are effective (phase 3.1 effective and
+	// features.coordinatorPhase35): the note routes, the per-turn index and
+	// proposal note references.
+	notes bool
+	// noteResolver checks note citations; nil makes every citation unavailable.
+	noteResolver NoteResolver
+
 	// learningHealth computes the Learning section's health line; guarded by observerMu.
 	learningHealth LearningHealthReader
 	// automatic holds the automatic path's injectable seams.
@@ -175,7 +193,17 @@ type Service struct {
 	wakeSources   WakeSources
 	// projects reads sets, repositories and task repositories for the project
 	// scope; guarded by wakeMu.
-	projects     ProjectReader
+	projects ProjectReader
+	// changeLinks resolves the tasks linked to a change; nil disables merge wakes.
+	changeLinks ChangeLinks
+	// changeObserver reads changes through the provider integrations.
+	changeObserver *ChangeObserver
+	// merger is the provider seam of the merge kind; nil refuses every merge.
+	merger ChangeMerger
+	// principals validates execution principals; nil reads every principal as invalid.
+	principals PrincipalValidator
+	// protection reads provider branch protection; nil records unknown.
+	protection   ProtectionReader
 	recorderSubs []bus.Subscription
 	// recorderStopped latches once StopWakeRecorder ran: later hook and event
 	// entries are refused. wakeInFlight counts handlers and hooks in flight.

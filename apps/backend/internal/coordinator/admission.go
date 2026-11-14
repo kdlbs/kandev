@@ -58,23 +58,8 @@ func held(reason, detail string) Admission { return Admission{Reason: reason, De
 // Admit runs the eight ordered admission checks; the first failure wins. It
 // writes nothing. A read error inside a check fails that check.
 func (s *Service) Admit(ctx context.Context, coordinatorID string, mode AdmitMode) Admission {
-	if mode != AdmitCounting && mode != AdmitReadOnly {
-		return held(admitAutonomyOff, admitDetailReadError)
-	}
-	coord, err := s.store.GetCoordinatorByID(ctx, coordinatorID)
-	if errors.Is(err, ErrNotFound) {
-		return held(admitAutonomyOff, admitDetailNotFound)
-	}
-	if err != nil {
-		return held(admitAutonomyOff, admitDetailReadError)
-	}
-	if !coord.AutonomyEnabled {
-		return held(admitAutonomyOff, "")
-	}
-	if a, ok := s.admitContainment(ctx, coord, mode); !ok {
-		return a
-	}
-	if a, ok := s.admitSpend(ctx, coord); !ok {
+	coord, a, ok := s.admitThroughSpend(ctx, coordinatorID, mode)
+	if !ok {
 		return a
 	}
 	conv, ok := s.admitConversation(ctx, coord)
@@ -86,6 +71,42 @@ func (s *Service) Admit(ctx context.Context, coordinatorID string, mode AdmitMod
 		res.TaskID, res.SessionID = conv.TaskID, conv.SessionID
 	}
 	return res
+}
+
+// AdmitAction runs the checks of Admit up to the cost ceiling (autonomy on,
+// containment, spend measured, ceiling not reached) and skips the conversation
+// and cooldown checks: an automatic action happens inside the coordinator's
+// own turn. It starts no turn and writes and counts nothing.
+func (s *Service) AdmitAction(ctx context.Context, coordinatorID string) Admission {
+	_, a, ok := s.admitThroughSpend(ctx, coordinatorID, AdmitReadOnly)
+	if !ok {
+		return a
+	}
+	return Admission{OK: true}
+}
+
+// admitThroughSpend is the shared prefix of Admit and AdmitAction.
+func (s *Service) admitThroughSpend(ctx context.Context, coordinatorID string, mode AdmitMode) (*Coordinator, Admission, bool) {
+	if mode != AdmitCounting && mode != AdmitReadOnly {
+		return nil, held(admitAutonomyOff, admitDetailReadError), false
+	}
+	coord, err := s.store.GetCoordinatorByID(ctx, coordinatorID)
+	if errors.Is(err, ErrNotFound) {
+		return nil, held(admitAutonomyOff, admitDetailNotFound), false
+	}
+	if err != nil {
+		return nil, held(admitAutonomyOff, admitDetailReadError), false
+	}
+	if !coord.AutonomyEnabled {
+		return nil, held(admitAutonomyOff, ""), false
+	}
+	if a, ok := s.admitContainment(ctx, coord, mode); !ok {
+		return nil, a, false
+	}
+	if a, ok := s.admitSpend(ctx, coord); !ok {
+		return nil, a, false
+	}
+	return coord, Admission{}, true
 }
 
 func (s *Service) admitContainment(ctx context.Context, coord *Coordinator, mode AdmitMode) (Admission, bool) {

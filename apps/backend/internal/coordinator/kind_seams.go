@@ -58,6 +58,7 @@ type KindDeps struct {
 	Tasks     KindTaskReader
 	Resumer   TaskResumer
 	Messenger TaskMessenger
+	Answer    AnswerDelivery
 }
 
 // SetKindDeps wires the resume and message kinds' seams.

@@ -24,7 +24,12 @@ type MergeMRRequest struct {
 // MergeMR accepts an MR. GitLab supports three project-level merge methods
 // (merge, rebase_merge, ff); the caller picks one and the project must allow
 // it. Passing squash=true performs a squash merge regardless of method.
-func (c *PATClient) MergeMR(ctx context.Context, projectPath string, iid int, squash bool, squashCommitMessage string) (*MR, error) {
+//
+// A non-empty expectedSHA is sent as the accept-merge `sha` so GitLab rejects
+// the request with ErrMergeHeadMoved when the source head differs; an empty
+// one pins the head read just before the request. The merge is never deferred
+// to a pipeline.
+func (c *PATClient) MergeMR(ctx context.Context, projectPath string, iid int, squash bool, squashCommitMessage, expectedSHA string) (*MR, error) {
 	mrEndpoint := fmt.Sprintf("/projects/%s/merge_requests/%d", projectRef(projectPath), iid)
 	var head struct {
 		SHA                 string `json:"sha"`
@@ -42,8 +47,12 @@ func (c *PATClient) MergeMR(ctx context.Context, projectPath string, iid int, sq
 		return nil, fmt.Errorf("get merge head for MR !%d: source SHA is empty", iid)
 	}
 	endpoint := mrEndpoint + "/merge"
+	sha := head.SHA
+	if strings.TrimSpace(expectedSHA) != "" {
+		sha = strings.TrimSpace(expectedSHA)
+	}
 	body, err := json.Marshal(MergeMRRequest{
-		SHA:                      head.SHA,
+		SHA:                      sha,
 		Squash:                   squash,
 		SquashCommitMessage:      squashCommitMessage,
 		ShouldRemoveSourceBranch: false,

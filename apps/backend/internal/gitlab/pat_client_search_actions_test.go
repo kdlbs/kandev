@@ -149,7 +149,7 @@ func TestPATClientMergeMRRequestAndResponse(t *testing.T) {
 	}))
 	t.Cleanup(stop)
 
-	mr, err := NewPATClient(host, "tok").MergeMR(t.Context(), "acme/widget", 9, true, "squashed changes")
+	mr, err := NewPATClient(host, "tok").MergeMR(t.Context(), "acme/widget", 9, true, "squashed changes", "")
 	if err != nil {
 		t.Fatalf("MergeMR() error = %v", err)
 	}
@@ -226,7 +226,7 @@ func TestPATClientActionErrorsPreserveAPIError(t *testing.T) {
 	}))
 	t.Cleanup(stop)
 
-	_, err := NewPATClient(host, "tok").MergeMR(t.Context(), "acme/widget", 9, false, "")
+	_, err := NewPATClient(host, "tok").MergeMR(t.Context(), "acme/widget", 9, false, "", "")
 	if err == nil {
 		t.Fatal("MergeMR() error = nil, want upstream error")
 	}

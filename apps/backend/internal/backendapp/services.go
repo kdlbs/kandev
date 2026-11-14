@@ -134,6 +134,8 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 	}
 
 	services := assembleServices(managedRuntimeSelections, core, providers, integrations)
+	wireCoordinatorMergeProviders(services.Coordinator, services.Task, services.GitHub, services.GitLab)
+	wireCoordinatorNotes(services.Coordinator, services.Task, services.Task, services.GitHub, services.GitLab)
 	if services.Plugins != nil {
 		services.Plugins.SetSourceIssueController(pluginSourceIssueController{
 			tasks: services.Task, jira: services.Jira, linear: services.Linear,
@@ -488,7 +490,10 @@ func initIntegrationWiring(
 		pluginsSvc.SetManagedConversationSchedules(managedConversationScheduleAdapter{service: automationComponents.Service})
 		pluginsSvc.SetAutomationHistoryDataSource(automationHistoryAdapter{service: automationComponents.Service})
 	}
-	coordinatorSvc, err := initCoordinatorWiring(ctx, dbPool, storeTracker, taskSvc, workflowSvc, repos.AgentSettings, cfg.Features.Coordinator, cfg.Features.CoordinatorPhase2, cfg.Features.CoordinatorPhase3, cfg.Features.CoordinatorPhase31, log)
+	coordinatorSvc, err := initCoordinatorWiring(ctx, dbPool, storeTracker, taskSvc, workflowSvc, repos.AgentSettings, cfg.Features.Coordinator, cfg.Features.CoordinatorPhase2, cfg.Features.CoordinatorPhase3, cfg.Features.CoordinatorPhase31, log,
+		coordinator.WithAnswer(phase3Effective(cfg.Features.Coordinator, cfg.Features.CoordinatorPhase2, cfg.Features.CoordinatorPhase3) && cfg.Features.CoordinatorAnswer),
+		coordinator.WithMerge(phase3Effective(cfg.Features.Coordinator, cfg.Features.CoordinatorPhase2, cfg.Features.CoordinatorPhase3) && cfg.Features.CoordinatorMerge),
+		coordinator.WithNotes(phase31Effective(cfg.Features.Coordinator, cfg.Features.CoordinatorPhase2, cfg.Features.CoordinatorPhase3, cfg.Features.CoordinatorPhase31) && cfg.Features.CoordinatorPhase35))
 	if err != nil {
 		return nil, err
 	}

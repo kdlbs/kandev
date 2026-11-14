@@ -24,6 +24,12 @@ const (
 	ActionProposeMove    = mcpcontract.ActionProposeMove
 )
 
+// ActionProposeAnswer is mcpcontract.ActionProposeAnswer, re-exported.
+const ActionProposeAnswer = mcpcontract.ActionProposeAnswer
+
+// ActionProposeMerge is mcpcontract.ActionProposeMerge, re-exported.
+const ActionProposeMerge = mcpcontract.ActionProposeMerge
+
 // ActionProposeImprovement is mcpcontract.ActionProposeImprovement, re-exported.
 const ActionProposeImprovement = mcpcontract.ActionProposeImprovement
 
@@ -167,6 +173,10 @@ type Proposal struct {
 	DecidedAutomatically bool
 	ClaimedAutomatically bool
 	AutomaticAt          *time.Time
+
+	// LoweredClass is set on the value a manager's decision returns when that
+	// decision lowered a class from automatic; it is never stored.
+	LoweredClass string
 }
 
 // Proposal kinds.
@@ -176,6 +186,7 @@ const (
 	ProposalKindMove        = "move"
 	ProposalKindResume      = "resume"
 	ProposalKindImprovement = "improvement"
+	ProposalKindAnswer      = "answer"
 )
 
 // Stall is a coordinator_stalls row: the most recent task.stalled episode

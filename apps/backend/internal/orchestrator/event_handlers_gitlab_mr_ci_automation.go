@@ -256,7 +256,7 @@ func (s *Service) handleTaskMRCIAutoMerge(ctx context.Context, mr *gitlab.TaskMR
 	} else if state != nil && state.LastMergeSignature == signature {
 		return
 	}
-	if _, err := s.gitlabMRAutomation.MergeMRForAutomation(ctx, workspaceID, mr.Host, mr.ProjectPath, mr.MRIID); err != nil {
+	if _, err := s.gitlabMRAutomation.MergeMRForAutomation(ctx, workspaceID, mr.Host, mr.ProjectPath, mr.MRIID, "", ""); err != nil {
 		s.recordMRAutomationError(ctx, mr, fmt.Errorf("merge MR: %w", err))
 		s.publishTaskMRAutomationState(ctx, mr.TaskID)
 		return

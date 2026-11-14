@@ -112,7 +112,7 @@ func TestService_MergeMRForAutomation_MergesAndReturnsMR(t *testing.T) {
 	svc, mock := newMRAutomationAuthFixture(t)
 	mock.SeedMR("group/project", &MR{IID: 1, HeadBranch: "feature", State: mrStateOpen})
 
-	merged, err := svc.MergeMRForAutomation(context.Background(), "ws-1", "https://gitlab.example.com", "group/project", 1)
+	merged, err := svc.MergeMRForAutomation(context.Background(), "ws-1", "https://gitlab.example.com", "group/project", 1, "", "")
 	if err != nil {
 		t.Fatalf("MergeMRForAutomation() error = %v", err)
 	}
@@ -133,10 +133,10 @@ type squashRecordingClient struct {
 	calls     int
 }
 
-func (c *squashRecordingClient) MergeMR(ctx context.Context, projectPath string, iid int, squash bool, msg string) (*MR, error) {
+func (c *squashRecordingClient) MergeMR(ctx context.Context, projectPath string, iid int, squash bool, msg, expectedSHA string) (*MR, error) {
 	c.gotSquash = squash
 	c.calls++
-	return c.MockClient.MergeMR(ctx, projectPath, iid, squash, msg)
+	return c.MockClient.MergeMR(ctx, projectPath, iid, squash, msg, expectedSHA)
 }
 
 func TestService_MergeMRForAutomation_LeavesSquashChoiceToGitLab(t *testing.T) {
@@ -148,7 +148,7 @@ func TestService_MergeMRForAutomation_LeavesSquashChoiceToGitLab(t *testing.T) {
 	}
 
 	if _, err := svc.MergeMRForAutomation(
-		context.Background(), "ws-1", "https://gitlab.example.com", "group/project", 1,
+		context.Background(), "ws-1", "https://gitlab.example.com", "group/project", 1, "", "",
 	); err != nil {
 		t.Fatalf("MergeMRForAutomation() error = %v", err)
 	}
@@ -164,7 +164,7 @@ func TestService_MergeMRForAutomation_HostMismatchNeverMerges(t *testing.T) {
 	svc, mock := newMRAutomationAuthFixture(t)
 	mock.SeedMR("group/project", &MR{IID: 1, HeadBranch: "feature", State: mrStateOpen})
 
-	_, err := svc.MergeMRForAutomation(context.Background(), "ws-1", "https://gitlab.other.example.com", "group/project", 1)
+	_, err := svc.MergeMRForAutomation(context.Background(), "ws-1", "https://gitlab.other.example.com", "group/project", 1, "", "")
 	if !errors.Is(err, ErrWorkspaceHostMismatch) {
 		t.Fatalf("err = %v, want ErrWorkspaceHostMismatch", err)
 	}

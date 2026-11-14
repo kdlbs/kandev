@@ -33,7 +33,7 @@ var coordinatorToolUniverse = []string{
 	"list_coordinator_activity_kandev",
 	"propose_task_kandev", "propose_message_kandev",
 	"propose_move_kandev", "propose_resume_kandev",
-	"propose_improvement_kandev",
+	"propose_improvement_kandev", "propose_answer_kandev", "propose_merge_kandev",
 	"list_coordinator_turns_kandev",
 }
 
@@ -57,6 +57,9 @@ type CoordinatorToolPolicy struct {
 	PolicyRevision     int                     `json:"policy_revision"`
 	ToolNames          []string                `json:"tool_names"`
 	PluginTools        []CoordinatorPluginTool `json:"plugin_tools,omitempty"`
+	// Notes is true when the coordinator notes feature was on as the
+	// conversation opened; proposal tools advertise note_ids only then.
+	Notes bool `json:"notes,omitempty"`
 }
 
 // Validate refuses a binding that is incomplete or names a tool outside the

@@ -880,6 +880,10 @@ type Service struct {
 	// Nil = no block is attached. See SetCoordinatorStandingInstructionsReader.
 	coordinatorStandingInstructions func(ctx context.Context, coordinatorID, workspaceName, workspaceID string) (string, error)
 
+	// coordinatorNotes prepares and records the per-turn coordinator note
+	// index. The zero value attaches nothing. See SetCoordinatorNotesDelivery.
+	coordinatorNotes CoordinatorNotesDelivery
+
 	// unattendedPermissionHandler denies a permission request of a coordinator's
 	// unattended turn; nil = requests wait for a person. Set once at wiring.
 	unattendedPermissionHandler UnattendedPermissionHandler

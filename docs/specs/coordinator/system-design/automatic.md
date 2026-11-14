@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-29
-last_updated: 2026-09-29
+last_updated: 2026-11-07
 requirements:
   - REQ-COORDINATOR-INTEGRATION-004
   - REQ-COORDINATOR-INTEGRATION-007
@@ -329,7 +329,7 @@ radio group described in [integration](integration.md#settings-layout):
   eligible, and choosing it then saving with the page's Save is the raise;
   choosing Requires approval and saving is the lower. After a raise: "Raised
   to automatic by <you> at <time>" from the class change history.
-- Copy goes through `t()` in six locales.
+- Copy goes through `t()` in seven locales.
 
 ## Security
 
@@ -345,6 +345,21 @@ radio group described in [integration](integration.md#settings-layout):
 `coordinator_automatic_approval_total{outcome}` (`approved`, `failed`,
 `limited`, `raiser_invalid`) and `coordinator_automatic_lowered_total{reason}` counters, and an
 info log for each raise refusal with the unmet condition.
+
+## Amendment 2026-11-07
+
+The classes `resume` and `start_agent`, the per-coordinator eligibility
+settings and the generalised automatic path are designed in
+[automatic-classes](automatic-classes.md). Where it differs from the sections
+above, it governs.
+
+Naming in the sections above, as built: the setting read returns
+`ClassSetting` (not `Setting`, which is the string type of a value), and the
+`OnUndo` function is `Service.afterUndo`, the post-commit call of
+`markUndone`. The conditional claim's `WHERE id = ? AND status IN ('pending',
+'failed')` is that of a manager's claim; the automatic claim matches only
+`status = 'pending' AND decided_automatically = 0`
+([automatic-classes](automatic-classes.md#generalised-automatic-approval)).
 
 ## Related decisions
 

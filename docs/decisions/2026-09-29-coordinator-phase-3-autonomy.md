@@ -396,3 +396,43 @@ Until then no phase 3 work order is built.
   many times a day.
 - **Raise any class from the start.** Rejected: only `create_task` starts no
   agent and is undone by archiving.
+
+## Amendment 2026-11-07: resume and start_agent become raisable
+
+The repository owner approved revisiting D13 and the "raise any class from the start" row
+above. The maintainer wants `resume` and `start_agent` automatic after one to
+two days of approvals, not thirty. Decisions:
+
+- `raisableClasses` becomes `create_task`, `resume`, `start_agent`.
+  `start_agent` is the `starts_agent` modifier on a proposal, so a
+  `starts_agent` `move` still needs `move`, which stays non-raisable.
+- The eligibility gates become per-coordinator settings with today's values
+  as defaults (30 days, 20 decisions, 90%, 7 days, 10 per day) and bounds
+  (window at least 24 hours, at least 3 decisions).
+- The daily limit stays one count per coordinator across classes.
+- These classes are not undoable, since an agent run cannot be un-run. A
+  failed automatic action, a manager's lower, or a manager rejecting,
+  returning or editing a proposal of the class lowers it.
+- Changing a setting never raises a class; tightening one does not lower an
+  automatic class. A class review only records evidence and never lowers;
+  only a lowering trigger does.
+- This revises decision 4's "never starts an agent (D15)": an automatic
+  approval may now start an agent, only when the proposal sets `starts_agent`
+  and `start_agent` is `automatic` too, and only after the admission below.
+  D15 otherwise stands: the default remains no agent start.
+- An automatic action runs an agent unattended and passes the autonomy,
+  containment and cost-ceiling admission first. The coordinator's executor
+  must be isolated and authentication on; that infrastructure is a separate
+  decision and is not changed here.
+
+The requirements are `REQ-COORDINATOR-AUTOMATIC-005` to `-008`.
+
+
+## Amendment 2026-11-08: change conditions wake on watched cards
+
+Decision 1 limits wakes to the coordinator's own tasks. When
+`features.coordinatorMerge` is on, three more conditions wake it for a task
+a Watch covers, each only for that task's linked change: `change_red`,
+`change_conflict` and `change_threads`. Own-task wakes, episode uniqueness,
+the 200-wake cap and delivery rules are unchanged. See
+[Coordinator merge authority](2026-11-08-coordinator-merge-authority.md).

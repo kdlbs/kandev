@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -19,9 +20,9 @@ func countReviews(t *testing.T, store *Store, c *Coordinator) int {
 }
 
 func TestClassReview_ServerComputesEveryField(t *testing.T) {
-	store, c, _, svc, log := automaticFixture(t)
+	store, c, _, svc, _ := automaticFixture(t)
 	mustExec(t, store, `DELETE FROM coordinator_class_reviews`)
-	log.rows = decisions(23, 20)
+	seedDecidedRows(t, store, c, ActionCreateTask, 23)
 	review, err := svc.RecordClassReview(authedContext("mgr-1"), c.WorkspaceID, c.ID, "create_task")
 	if err != nil {
 		t.Fatal(err)
@@ -37,9 +38,9 @@ func TestClassReview_ServerComputesEveryField(t *testing.T) {
 }
 
 func TestClassReview_LogErrorStoresNothing(t *testing.T) {
-	store, c, _, svc, log := automaticFixture(t)
+	store, c, _, svc, _ := automaticFixture(t)
 	before := countReviews(t, store, c)
-	log.err = errors.New("boom")
+	mustExec(t, store, `ALTER TABLE coordinator_activity RENAME TO coordinator_activity_gone`)
 	_, err := svc.RecordClassReview(context.Background(), c.WorkspaceID, c.ID, "create_task")
 	var unavailable *DecisionLogUnavailableError
 	if !errors.As(err, &unavailable) || countReviews(t, store, c) != before {
@@ -82,5 +83,14 @@ func TestGetEligibility_ReaderMayReadAndLogErrorIs503Shape(t *testing.T) {
 	var unavailable *DecisionLogUnavailableError
 	if _, err := svc.GetEligibility(context.Background(), c.WorkspaceID, c.ID, "create_task"); !errors.As(err, &unavailable) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// seedDecidedRows inserts n approved, unedited decided rows of class an hour
+// before the fixture clock.
+func seedDecidedRows(t *testing.T, store *Store, c *Coordinator, class Action, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		seedActivity(t, store, c.ID, fmt.Sprintf("decided-%s-%d", class, i), class, ActivityApproved, automaticNow.Add(-time.Hour))
 	}
 }

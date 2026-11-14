@@ -106,6 +106,9 @@ own tasks exactly once.
   including when autonomy is turned off between the moment the condition was
   read and the moment the wake would be stored; a condition on an own task
   outside the watch set is covered by `AC-COORDINATOR-INTEGRATION-002.1`.
+  With `features.coordinatorMerge` on, the change wake kinds of
+  [merge](merge.md#req-coordinator-merge-001-change-visibility-and-wakes)
+  are stored for watched tasks that are not own tasks.
 - **AC-COORDINATOR-WAKE-001.4:** When a coordinator already holds 200 `pending`
   wakes, the system shall store no further wake for it, count the refusal in
   metrics, and store the episode later through the backstop once the

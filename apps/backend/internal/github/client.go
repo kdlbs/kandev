@@ -54,9 +54,13 @@ func waitForMergePoll(ctx context.Context, delay time.Duration) error {
 
 func newMergeFailureError(details mergeAsyncResponseDetails) error {
 	if details.ExpectedHeadSHA != "" {
-		return fmt.Errorf("GitHub rejected merge for expected head %s: %s", details.ExpectedHeadSHA, details.Message)
+		return &headMovedError{err: fmt.Errorf("GitHub rejected merge for expected head %s: %s", details.ExpectedHeadSHA, details.Message)}
 	}
-	return fmt.Errorf("GitHub rejected merge: %s", details.Message)
+	err := fmt.Errorf("GitHub rejected merge: %s", details.Message)
+	if isHeadMovedMessage(details.Message) {
+		return &headMovedError{err: err}
+	}
+	return &mergeRejectedError{err: err}
 }
 
 func normalizeMergeOutcome(status string) (MergeOutcome, error) {
@@ -66,7 +70,7 @@ func normalizeMergeOutcome(status string) (MergeOutcome, error) {
 	case "enqueued", "queued":
 		return MergeOutcomeQueued, nil
 	case mergeStatusFailed:
-		return "", fmt.Errorf("GitHub rejected merge: %s", status)
+		return "", &mergeRejectedError{err: fmt.Errorf("GitHub rejected merge: %s", status)}
 	default:
 		return "", fmt.Errorf("unexpected GitHub merge status %q", status)
 	}
