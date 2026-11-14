@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -16,38 +17,75 @@ import (
 func (m *Manager) ReconcileLoadedNativeDelivery(ctx context.Context, sessionID string) (*models.NativeResumeDeliveryEvidence, error) {
 	execution, exists := m.GetExecutionBySessionID(sessionID)
 	if !exists || execution == nil {
-		return nil, ErrDurableAdoptionEvidenceUnavailable
+		return nil, withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalExecutionUnavailable, ErrDurableAdoptionEvidenceUnavailable)
 	}
 	if !execution.promptMu.TryLock() {
-		return nil, ErrDeliveryRecoveryBlocked
+		return nil, withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalLiveWork, ErrDeliveryRecoveryBlocked)
 	}
 	defer execution.promptMu.Unlock()
 	if execution.Status != v1.AgentStatusReady || execution.dispatchedPromptPending.Load() {
-		return nil, ErrDeliveryRecoveryBlocked
+		return nil, withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalLiveWork, ErrDeliveryRecoveryBlocked)
 	}
 	if proof, err := m.GetNativeResumeDeliveryEvidence(ctx, sessionID); err == nil && proof != nil {
 		return proof, nil
 	}
 	if settled, err := m.hasProjectedTerminalRetirement(ctx, execution); err == nil && settled {
 		if err := m.AcknowledgeNativeResumeDelivery(ctx, sessionID); err != nil {
-			return nil, err
+			return nil, withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalJournalUnresolved, err)
 		}
-		return m.GetNativeResumeDeliveryEvidence(ctx, sessionID)
+		proof, err := m.GetNativeResumeDeliveryEvidence(ctx, sessionID)
+		return proof, classifyLoadedNativeRefusal(err)
 	}
 	historical, err := m.readLoadedNativeHistoricalOwner(ctx, execution)
 	if err != nil {
-		return nil, err
+		return nil, classifyLoadedNativeRefusal(err)
 	}
-	if historical == nil || historical.ExecutionID == execution.ID || !loadedRecoverySuccessorMatches(execution, *historical) {
-		return nil, ErrDeliveryRecoveryBlocked
+	if historical == nil {
+		return nil, withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalPeerRecordMissing, ErrDeliveryRecoveryBlocked)
+	}
+	if historical.ExecutionID == execution.ID {
+		return nil, withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalLiveWork, ErrDeliveryRecoveryBlocked)
+	}
+	if historical.HarnessGeneration < execution.DeliveryHarnessGeneration {
+		return nil, withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalGenerationSuperseded, ErrDeliveryRecoveryBlocked)
+	}
+	if !loadedRecoverySuccessorMatches(execution, *historical) {
+		return nil, withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalNativeIdentityMismatch, ErrDeliveryOwnerMismatch)
 	}
 	if err := proveHistoricalDeliveryOwnerDead(*historical); err != nil {
-		return nil, err
+		return nil, withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalLiveWork, err)
 	}
 	if err := m.AcknowledgeNativeResumeDelivery(ctx, sessionID); err != nil {
-		return nil, err
+		return nil, withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalJournalUnresolved, err)
 	}
-	return m.GetNativeResumeDeliveryEvidence(ctx, sessionID)
+	proof, err := m.GetNativeResumeDeliveryEvidence(ctx, sessionID)
+	return proof, classifyLoadedNativeRefusal(err)
+}
+
+func classifyLoadedNativeRefusal(err error) error {
+	if err == nil {
+		return nil
+	}
+	var reason string
+	switch {
+	case errors.Is(err, ErrDurableAdoptionIdentityMismatch), errors.Is(err, ErrDeliveryOwnerMismatch):
+		reason = DeliveryRecoveryRefusalNativeIdentityMismatch
+	case errors.Is(err, errNativeResumeProjectionLag):
+		reason = DeliveryRecoveryRefusalProjectionPending
+	case errors.Is(err, ErrDurableAdoptionEvidenceUnavailable):
+		reason = DeliveryRecoveryRefusalEvidenceUnavailable
+	case errors.Is(err, ErrDeliveryRecoveryBlocked):
+		reason = DeliveryRecoveryRefusalJournalUnresolved
+	case errors.Is(err, ErrDurableAdoptionBlocked):
+		reason = DeliveryRecoveryRefusalUnclassified
+	default:
+		reason = DeliveryRecoveryRefusalUnclassified
+	}
+	var existing interface{ DeliveryRecoveryRefusalReason() string }
+	if errors.As(err, &existing) {
+		return err
+	}
+	return withDeliveryRecoveryRefusal(reason, err)
 }
 
 func (m *Manager) readLoadedNativeHistoricalOwner(ctx context.Context, execution *AgentExecution) (*AgentDeliveryRecoveryIdentity, error) {

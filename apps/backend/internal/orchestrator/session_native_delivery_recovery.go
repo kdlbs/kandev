@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -22,26 +23,33 @@ type nativeResumeUnprovenCompletionVerifier interface {
 
 func (s *Service) checkNativeResumeDeliveryBlock(ctx context.Context, taskID, sessionID string) error {
 	block, err := s.GetOpenSessionRecoveryBlock(ctx, sessionID)
-	if err != nil || block == nil || block.Reason != durableDeliveryUnresolvedReason {
-		return err
+	if err != nil {
+		return requiredDeliveryRecoveryError(nil, block, err)
+	}
+	if block == nil || block.Reason != durableDeliveryUnresolvedReason {
+		return nil
 	}
 	// Office recovery releases scheduler admission rather than resuming a
 	// native conversation here, so its existing durable-work gate remains.
 	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
 	if err != nil {
-		return err
+		return requiredDeliveryRecoveryError(nil, block, err)
 	}
 	if isOfficeTask {
-		return &sessionRecoveryRequiredError{Block: block}
+		return &sessionRecoveryRequiredError{Block: block, DeliveryRefusalReason: agentruntime.DeliveryRecoveryRefusalOfficeOwned}
 	}
 	_, canAcknowledge := s.agentManager.(nativeResumeDeliveryAcknowledger)
 	reader, canRead := s.repo.(nativeResumeDeliverySubmissionReader)
-	if !canAcknowledge || !canRead {
-		return &sessionRecoveryRequiredError{Block: block}
+	if !canAcknowledge {
+		return &sessionRecoveryRequiredError{Block: block, DeliveryRefusalReason: agentruntime.DeliveryRecoveryRefusalExecutionUnavailable}
+	}
+	if !canRead {
+		return &sessionRecoveryRequiredError{Block: block, DeliveryRefusalReason: agentruntime.DeliveryRecoveryRefusalEvidenceUnavailable}
 	}
 	submissions, err := reader.ListAgentDeliverySubmissions(ctx, sessionID)
 	if err != nil {
-		return fmt.Errorf("read native resume delivery evidence: %w", err)
+		cause := fmt.Errorf("read native resume delivery evidence: %w", err)
+		return &sessionRecoveryRequiredError{Block: block, DeliveryRefusalReason: agentruntime.DeliveryRecoveryRefusalEvidenceUnavailable, internalCause: cause}
 	}
 	unknown := false
 	for _, submission := range submissions {
@@ -50,13 +58,13 @@ func (s *Service) checkNativeResumeDeliveryBlock(ctx context.Context, taskID, se
 		}
 		switch submission.State {
 		case models.DeliverySubmissionPrepared, models.DeliverySubmissionAccepted:
-			return &sessionRecoveryRequiredError{Block: block}
+			return &sessionRecoveryRequiredError{Block: block, DeliveryRefusalReason: agentruntime.DeliveryRecoveryRefusalLiveWork}
 		case models.DeliverySubmissionDispatching:
 			if block.ConsumerReference == agentDeliveryConsumer && block.DeliverySubmissionID == "" && block.DeliveryStreamID == "" {
 				unknown = true
 				continue
 			}
-			return &sessionRecoveryRequiredError{Block: block}
+			return &sessionRecoveryRequiredError{Block: block, DeliveryRefusalReason: agentruntime.DeliveryRecoveryRefusalLiveWork}
 		case models.DeliverySubmissionInterruptedUnknown:
 			unknown = true
 		case models.DeliverySubmissionCompleted:
@@ -66,7 +74,7 @@ func (s *Service) checkNativeResumeDeliveryBlock(ctx context.Context, taskID, se
 		}
 	}
 	if !unknown && !s.canProveSettledNativeDeliveryBlock(block) {
-		return &sessionRecoveryRequiredError{Block: block}
+		return &sessionRecoveryRequiredError{Block: block, DeliveryRefusalReason: agentruntime.DeliveryRecoveryRefusalEvidenceUnavailable}
 	}
 	return nil
 }

@@ -122,7 +122,9 @@ type recoveryRequiredSignal interface {
 var ErrSessionRecoveryRequired = errors.New("session recovery required")
 
 type sessionRecoveryRequiredError struct {
-	Block *models.SessionRecoveryBlock
+	Block                 *models.SessionRecoveryBlock
+	DeliveryRefusalReason string
+	internalCause         error
 }
 
 func (e *sessionRecoveryRequiredError) Error() string {
@@ -581,10 +583,21 @@ func (s *Service) checkSessionRecoveryBlock(ctx context.Context, sessionID strin
 	if err != nil {
 		return fmt.Errorf("check session recovery block: %w", err)
 	}
-	if resolved, _ := s.finishLoadedNativeDeliveryBlock(ctx, block); resolved {
+	resolved, finishErr := s.finishLoadedNativeDeliveryBlock(ctx, block)
+	if resolved {
 		return nil
 	}
-	return &sessionRecoveryRequiredError{Block: block}
+	required := &sessionRecoveryRequiredError{Block: block}
+	if finishErr != nil {
+		required.DeliveryRefusalReason = deliveryRecoveryRefusalReason(finishErr)
+		required.internalCause = finishErr
+	}
+	if isBootDeliveryReadinessContext(ctx) {
+		s.logBootDeliveryRecoveryRefusal(ctx, sessionID, required, block)
+	} else {
+		s.logDeliveryRecoveryRefusal(ctx, sessionID, required, block)
+	}
+	return required
 }
 
 // GetOpenSessionRecoveryBlock returns the canonical block for an autonomous
@@ -1615,9 +1628,13 @@ func (s *Service) RecoverSessionWithOptions(
 	}
 	if action == recoveryActionResume {
 		if response, handled, err := s.resumePrunedDelivery(ctx, session); handled || err != nil {
+			if err != nil {
+				s.logDeliveryRecoveryRefusal(ctx, sessionID, err, nil)
+			}
 			return response, err
 		}
 		if err := s.checkNativeResumeDeliveryBlock(ctx, taskID, sessionID); err != nil {
+			s.logDeliveryRecoveryRefusal(ctx, sessionID, err, nil)
 			return nil, err
 		}
 	}
@@ -1760,6 +1777,9 @@ func (s *Service) RecoverSessionWithOptions(
 		err = s.acknowledgeNativeResumeDelivery(launchCtx, sessionID)
 	}
 	if err != nil {
+		if action == recoveryActionResume {
+			s.logDeliveryRecoveryRefusal(launchCtx, sessionID, err, nil)
+		}
 		if recoveryAdmission != nil {
 			if persistErr := recoveryAdmission.CompleteRecoveryResume(launchCtx, false, "resume_failed"); persistErr != nil {
 				err = errors.Join(err, persistErr)
@@ -1768,11 +1788,15 @@ func (s *Service) RecoverSessionWithOptions(
 		return s.handleContinuationLaunchError(ctx, checkpoint, err)
 	}
 	if err := completeRecoveryResumeAfterLaunch(launchCtx, recoveryAdmission, resp); err != nil {
+		if action == recoveryActionResume {
+			s.logDeliveryRecoveryRefusal(launchCtx, sessionID, err, nil)
+		}
 		return nil, err
 	}
 	if checkpoint == nil {
 		if action == recoveryActionResume {
 			if err := s.resolveSessionRecoveryBlock(ctx, sessionID, action); err != nil {
+				s.logDeliveryRecoveryRefusal(ctx, sessionID, err, nil)
 				return nil, normalizeRecoverSessionError(err)
 			}
 		}

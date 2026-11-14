@@ -25,6 +25,7 @@ existing controls, recovery actions, and persistence.
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criteria .8, .9, .11 and .12 | Manual resume |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criteria .1 through .6 | Existing delivery and continuity designs |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criteria .25 and .26 | Bounded projection wait |
+| REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criterion .12 (identity-less blocks) | Identity-less incident blocks |
 
 ## Workspace-only access
 
@@ -120,6 +121,32 @@ On backend adoption, unknown SQL history is excluded from active work only when 
 full peer records retain matching retirement, uncertain state, session/incarnation, generation,
 and payload hash. Missing or conflicting proof remains blocked. No recovery summary field,
 new endpoint, migration, native conversation replacement, or generation rotation is needed.
+
+## Identity-less incident blocks
+
+A backend or agentctl crash can open an `agent_delivery` block with reason
+`unresolved_durable_work` and empty `delivery_submission_id`, `delivery_stream_id`
+and sequence. `nativeResumeIncidentBlockMatches` already accepts that shape at the
+SQL boundary. Explicit Resume is the only recovery control for it; no separate
+"keep conversation" action exists, and Resume never starts a new native conversation.
+
+When the current native start succeeds, the native identity matches the current
+harness generation, and every unresolved SQL row for the incarnation at or before
+that generation is `interrupted_unknown`, Resume must retire those rows through the
+existing authenticated retirement proof and resolve the block. A prepared, accepted
+or dispatching row, a newer generation, or a native identity mismatch keeps it open.
+A peer journal record that is absent for such a row is not live work: the owning
+process is gone and agentctl cannot dispatch an ID it does not hold. Retirement
+writes the record as retired-unknown so the ID stays non-replayable.
+
+Every refusal on the boot-ready and explicit Resume paths logs one WARN line with
+session, block ID and a reason from the closed set `live_work`,
+`peer_record_missing`, `peer_record_mismatch`, `generation_superseded`,
+`native_identity_mismatch`, `journal_unresolved`, `projection_pending`,
+`execution_unavailable`, `evidence_unavailable`, `office_owned`, or
+`unclassified`. Unclassified errors include their error text. An active explicit
+Resume owns the refusal warning; the boot-ready observation uses DEBUG while
+that attempt is active. No payload, token or path is logged.
 
 ## Repeated recovery after silent restoration
 

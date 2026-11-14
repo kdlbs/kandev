@@ -170,6 +170,12 @@ func (m *Manager) ValidateExecutionRuntime(
 	var execution *AgentExecution
 	if sessionID != "" && m.executionStore != nil {
 		execution, _ = m.executionStore.GetBySessionID(sessionID)
+		if execution != nil {
+			if err := execution.waitRegistrationSettled(ctx); err != nil {
+				return err
+			}
+			execution, _ = m.executionStore.GetBySessionID(sessionID)
+		}
 	}
 	selected, required := normalizeExecutorSelection(executorType)
 	if !required && execution != nil && strings.TrimSpace(execution.ExecutorType) != "" {
