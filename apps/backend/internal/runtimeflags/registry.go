@@ -426,6 +426,22 @@ var registrations = []runtimeFlagRegistration{
 		read:  func(cfg *config.Config) bool { return cfg.Debug.DevMode || cfg.Debug.PprofEnabled },
 		apply: applyDebugMode,
 	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             "features.childStallAlerts",
+			EnvVar:          "KANDEV_FEATURES_CHILD_STALL_ALERTS",
+			Kind:            KindFeature,
+			Label:           "Child stall alerts",
+			Description:     "Queues an attributed notice to a stalled child task's current parent conversation through the existing message queue.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "A queued parent notice can create model work. Keep it off until the exact child-turn/parent ownership, deduplication, and undeliverable handling have maintainer direction.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ChildStallAlerts },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ChildStallAlerts = value },
+	},
 }
 
 func Definitions() []RuntimeFlagDefinition {

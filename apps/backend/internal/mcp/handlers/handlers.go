@@ -2729,13 +2729,15 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 			"cannot signal completion for a terminal session (state: "+string(session.State)+")", nil)
 	}
 	if launchStepID != task.WorkflowStepID {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, fmt.Sprintf(
+		reason := fmt.Sprintf(
 			"workflow step changed before signal was recorded. This turn started in step %s. "+
 				"The current step is %s. No signal was recorded. Retrying in this turn cannot recover. "+
 				"End this turn and ask the user to resume this session for the current step. "+
 				"After satisfying that step, signal completion from the new turn. "+
 				"Do not move the task solely to bypass this error.",
-			launchStepID, task.WorkflowStepID), nil)
+			launchStepID, task.WorkflowStepID)
+		h.recordStepCompleteRejection(ctx, req.SessionID, task.WorkflowStepID, reason)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, reason, nil)
 	}
 
 	boundedHandoff, handoffTruncated := boundStepCompletionSignalField(strings.TrimSpace(req.Handoff))
@@ -2764,6 +2766,9 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 	if !stored {
 		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, launchStepID, session, signal)
 	}
+	// The current step's signal is now durably recorded, so any earlier refusal
+	// reason recorded for this session is resolved.
+	h.clearStepCompleteRejection(ctx, req.SessionID)
 
 	// Counted here, at the durable bag write, not after publishStepCompletionEvent
 	// below: publish is a delivery concern, and a publish failure sends the agent

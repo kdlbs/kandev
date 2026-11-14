@@ -528,6 +528,8 @@
   "notInstalled": "未インストール",
   "notificationEventClarificationRequested": "エージェントに回答必要",
   "notificationEventClarificationRequestedDescription": "エージェントが明確に質問したとき通知。",
+  "notificationEventChildStallUndeliverable": "子タスクの停止（親が受信不可）",
+  "notificationEventChildStallUndeliverableDescription": "子タスクが停止し、親タスクが通知を受け取れないときに通知。",
   "notificationEventOfficeInboxItem": "Office受信トレイ項目",
   "notificationEventOfficeInboxItemDescription": "新しい受信トレイ項目で対応必要なとき通知。",
   "notificationEventToggle": "{{name}} の {{event}}",

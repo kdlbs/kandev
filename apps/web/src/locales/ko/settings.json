@@ -528,6 +528,8 @@
   "notInstalled": "설치되지 않음",
   "notificationEventClarificationRequested": "에이전트가 답변을 기다림",
   "notificationEventClarificationRequestedDescription": "에이전트가 명시적으로 질문할 때 알립니다.",
+  "notificationEventChildStallUndeliverable": "하위 작업 멈춤 (상위 수신 불가)",
+  "notificationEventChildStallUndeliverableDescription": "하위 작업이 멈췄는데 상위 작업이 알림을 받을 수 없을 때 알립니다.",
   "notificationEventOfficeInboxItem": "오피스 받은 편지함 항목",
   "notificationEventOfficeInboxItemDescription": "새 받은 편지함 항목이 처리를 기다릴 때 알립니다.",
   "notificationEventToggle": "{{name}}의 {{event}}",

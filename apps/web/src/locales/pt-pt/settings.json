@@ -518,6 +518,8 @@
   "notInstalled": "Não instalado",
   "notificationEventClarificationRequested": "O agente precisa de uma resposta",
   "notificationEventClarificationRequestedDescription": "Notificar quando o agente lhe fizer explicitamente uma pergunta.",
+  "notificationEventChildStallUndeliverable": "Subtarefa parada, tarefa principal indisponível",
+  "notificationEventChildStallUndeliverableDescription": "Notificar quando uma subtarefa parar e a tarefa principal não puder receber o alerta.",
   "notificationEventOfficeInboxItem": "Item da caixa de entrada do Office",
   "notificationEventOfficeInboxItemDescription": "Notificar quando um novo item da caixa de entrada precisar da sua atenção.",
   "notificationEventToggle": "{{event}} para {{name}}",

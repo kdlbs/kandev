@@ -188,6 +188,14 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Child-turn stall/reminder notices delivered to the parent conversation.
+  # Off in every shipped profile until the feature has maintainer direction;
+  # when off, the producer never starts and no alert is queued.
+  KANDEV_FEATURES_CHILD_STALL_ALERTS:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent

@@ -531,6 +531,8 @@
   "notInstalled": "未安装",
   "notificationEventClarificationRequested": "智能体需要回答",
   "notificationEventClarificationRequestedDescription": "智能体明确提出问题时通知。",
+  "notificationEventChildStallUndeliverable": "子任务停滞（父任务无法接收）",
+  "notificationEventChildStallUndeliverableDescription": "子任务停滞且父任务无法接收提醒时通知。",
   "notificationEventOfficeInboxItem": "办公室收件箱项目",
   "notificationEventOfficeInboxItemDescription": "有新的收件箱项目需要你处理时通知。",
   "notificationEventToggle": "{{event}}（{{name}}）",

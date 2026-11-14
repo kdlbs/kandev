@@ -531,6 +531,8 @@
   "notInstalled": "未安裝",
   "notificationEventClarificationRequested": "代理程式需要回答",
   "notificationEventClarificationRequestedDescription": "代理程式明確提出問題時通知。",
+  "notificationEventChildStallUndeliverable": "子任務停滯（父任務無法接收）",
+  "notificationEventChildStallUndeliverableDescription": "子任務停滯且父任務無法接收提醒時通知。",
   "notificationEventOfficeInboxItem": "辦公室收件箱項目",
   "notificationEventOfficeInboxItemDescription": "有新的收件箱項目需要你處理時通知。",
   "notificationEventToggle": "{{event}}（{{name}}）",

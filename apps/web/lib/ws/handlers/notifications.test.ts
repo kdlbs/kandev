@@ -3,6 +3,7 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import {
   NOTIFICATION_EVENT_OFFICE_INBOX_ITEM,
+  NOTIFICATION_EVENT_SESSION_CHILD_STALL_UNDELIVERABLE,
   NOTIFICATION_EVENT_SESSION_CLARIFICATION_REQUESTED,
   NOTIFICATION_EVENT_SESSION_FAILED,
   NOTIFICATION_EVENT_SESSION_PERMISSION_REQUESTED,
@@ -58,6 +59,7 @@ const ATTENTION_CASES = [
   },
 ] as const;
 type SemanticNotificationMessage =
+  | BackendMessageMap["session.child_stall_undeliverable"]
   | BackendMessageMap["session.clarification_requested"]
   | BackendMessageMap["session.failed"]
   | BackendMessageMap["session.permission_requested"]
@@ -79,6 +81,7 @@ function makeMessage(
   action:
     | "session.turn_finished"
     | "session.clarification_requested"
+    | "session.child_stall_undeliverable"
     | "session.failed"
     | "session.permission_requested"
     | "office.inbox_item" = "session.clarification_requested",
@@ -86,6 +89,7 @@ function makeMessage(
   body = MESSAGE_BODY,
   occurrenceId = "pending-1",
 ):
+  | BackendMessageMap["session.child_stall_undeliverable"]
   | BackendMessageMap["session.clarification_requested"]
   | BackendMessageMap["session.failed"]
   | BackendMessageMap["session.permission_requested"]
@@ -110,6 +114,7 @@ function getHandler(
   action:
     | "session.turn_finished"
     | "session.clarification_requested"
+    | "session.child_stall_undeliverable"
     | "session.failed"
     | "session.permission_requested"
     | "office.inbox_item" = "session.clarification_requested",
@@ -153,6 +158,9 @@ describe("notification handler registration", () => {
     );
     expect(handlers["office.inbox_item"]).toEqual(expect.any(Function));
     expect(handlers[NOTIFICATION_EVENT_SYSTEM_UPDATE_AVAILABLE]).toEqual(expect.any(Function));
+    expect(handlers[NOTIFICATION_EVENT_SESSION_CHILD_STALL_UNDELIVERABLE]).toEqual(
+      expect.any(Function),
+    );
   });
 
   it("routes a Local update occurrence into the in-app toast bridge", () => {
@@ -305,6 +313,51 @@ describe("semantic session notification handlers", () => {
 
     expect(playWaitingForInputSound).not.toHaveBeenCalled();
     expect(notificationMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("undeliverable child stall notifications", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal(
+      "Notification",
+      Object.assign(notificationMock, { permission: "granted" as NotificationPermission }),
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  });
+
+  it("delivers an undeliverable child stall under its own occurrence identity", () => {
+    const invoke = vi.fn().mockResolvedValue("shown");
+    (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+      invoke,
+      transformCallback: vi.fn(),
+    };
+    const handler = getHandler(makeStore(), NOTIFICATION_EVENT_SESSION_CHILD_STALL_UNDELIVERABLE);
+
+    handler(makeMessage("child-stall-1", NOTIFICATION_EVENT_SESSION_CHILD_STALL_UNDELIVERABLE));
+    handler(makeMessage("child-stall-1", NOTIFICATION_EVENT_SESSION_CHILD_STALL_UNDELIVERABLE));
+
+    expect(invoke.mock.calls).toEqual([
+      expectedNativeNotificationCall("session.child_stall_undeliverable:child-stall-1"),
+      expectedNativeNotificationCall("session.child_stall_undeliverable:child-stall-1"),
+    ]);
+    expect(playWaitingForInputSound).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to the child stall copy when the backend sends no title or body", () => {
+    getHandler(
+      makeStore(),
+      NOTIFICATION_EVENT_SESSION_CHILD_STALL_UNDELIVERABLE,
+    )(makeMessage("child-stall-2", NOTIFICATION_EVENT_SESSION_CHILD_STALL_UNDELIVERABLE, "", ""));
+
+    expect(notificationMock).toHaveBeenCalledWith("Child task needs attention", {
+      body: "A child task stalled and its parent task cannot receive the alert.",
+    });
   });
 });
 

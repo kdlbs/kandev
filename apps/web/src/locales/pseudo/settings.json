@@ -528,6 +528,8 @@
   "notInstalled": "Ńōţ ĩńśţàĺĺēď",
   "notificationEventClarificationRequested": "Àĝēńţ ńēēďś àń àńśŵēŕ",
   "notificationEventClarificationRequestedDescription": "Ńōţĩƒŷ ŵĥēń ţĥē àĝēńţ ēxƥĺĩćĩţĺŷ àśķś ŷōũ à qũēśţĩōń.",
+  "notificationEventChildStallUndeliverable": "Ćĥĩĺď śţàĺĺēď, ƥàŕēńţ ũńàvàĩĺàƀĺē",
+  "notificationEventChildStallUndeliverableDescription": "Ńōţĩƒŷ ŵĥēń à ćĥĩĺď ţàśķ śţàĺĺś àńď ĩţś ƥàŕēńţ ţàśķ ćàńńōţ ŕēćēĩvē ţĥē àĺēŕţ.",
   "notificationEventOfficeInboxItem": "Ōƒƒĩćē ĩńƀōx ĩţēḿ",
   "notificationEventOfficeInboxItemDescription": "Ńōţĩƒŷ ŵĥēń à ńēŵ ĩńƀōx ĩţēḿ ńēēďś ŷōũŕ àţţēńţĩōń.",
   "notificationEventToggle": "{{event}} ƒōŕ {{name}}",

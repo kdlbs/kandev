@@ -528,6 +528,8 @@
   "notInstalled": "Not installed",
   "notificationEventClarificationRequested": "Agent needs an answer",
   "notificationEventClarificationRequestedDescription": "Notify when the agent explicitly asks you a question.",
+  "notificationEventChildStallUndeliverable": "Child stalled, parent unavailable",
+  "notificationEventChildStallUndeliverableDescription": "Notify when a child task stalls and its parent task cannot receive the alert.",
   "notificationEventOfficeInboxItem": "Office inbox item",
   "notificationEventOfficeInboxItemDescription": "Notify when a new inbox item needs your attention.",
   "notificationEventToggle": "{{event}} for {{name}}",

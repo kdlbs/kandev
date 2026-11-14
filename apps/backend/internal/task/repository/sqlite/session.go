@@ -79,6 +79,9 @@ func (r *Repository) CreateTurnWithStepStamp(ctx context.Context, turn *models.T
 		}
 		stamped = true
 	}
+	if found {
+		r.stampChildStallStartInTx(ctx, tx, turn)
+	}
 
 	if err := r.insertTurnRow(ctx, tx, turn); err != nil {
 		return false, err
@@ -456,13 +459,7 @@ func (r *Repository) CompleteTurn(ctx context.Context, id string) error {
 // recording `now` would inflate analytics and the UI's last-turn duration with
 // hours of dead time.
 func (r *Repository) AbandonTurn(ctx context.Context, id string) error {
-	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_session_turns
-		SET completed_at = started_at, updated_at = ?
-		WHERE id = ? AND completed_at IS NULL
-	`), now, id)
-	return err
+	return r.abandonTurnWithChildStallSettlement(ctx, id)
 }
 
 // GetLatestTurnBySessionID returns the last turn ListTurnsBySession would list

@@ -42,6 +42,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionPermissionRespond, h.wsRespondToPermission)
 	d.RegisterFunc(ws.ActionTaskSessionStatus, h.wsGetTaskSessionStatus)
 	d.RegisterFunc(ws.ActionAgentCancel, h.wsCancelAgent)
+	d.RegisterFunc(ws.ActionTaskChildStallRetry, h.wsRetryChildStall)
 	d.RegisterFunc(ws.ActionSessionLaunch, h.wsLaunchSession)
 	d.RegisterFunc(ws.ActionSessionFork, h.wsForkConversation)
 	d.RegisterFunc(ws.ActionSessionEnsure, h.wsEnsureSession)

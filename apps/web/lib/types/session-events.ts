@@ -313,6 +313,10 @@ export type SessionBackendMessageMap = {
     "task_session.runtime_storage_changed",
     SessionRuntimeStorageChangedPayload
   >;
+  "session.child_stall_undeliverable": BackendMessage<
+    "session.child_stall_undeliverable",
+    TaskSessionNotificationPayload
+  >;
   "session.clarification_requested": BackendMessage<
     "session.clarification_requested",
     TaskSessionNotificationPayload

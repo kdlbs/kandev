@@ -1422,7 +1422,12 @@ func queuedMessagePromptContent(queuedMsg *messagequeue.QueuedMessage) string {
 	if queuedMsg == nil {
 		return ""
 	}
-	content := queuedMsg.Content
+	return queuedMessagePromptContentFrom(queuedMsg, queuedMsg.Content)
+}
+
+// queuedMessagePromptContentFrom completes a queued entry's prompt text from
+// its base content.
+func queuedMessagePromptContentFrom(queuedMsg *messagequeue.QueuedMessage, content string) string {
 	// Handler-originated comment sends persist their fully composed transcript
 	// and queue receipt together. Other queue producers store references as
 	// metadata and compose them only when recording/delivering the prompt.
@@ -1984,6 +1989,48 @@ func (s *Service) executeQueuedMessageWithReservation(
 	promptContent := queuedMessagePromptContent(queuedMsg)
 	var promptReferenceContext string
 	var preparedPromptContent *string
+	if messagequeue.IsChildStallAlert(queuedMsg) || messagequeue.IsChildStallNudge(queuedMsg) {
+		// The dispatch boundary rechecks every folded candidate (or the
+		// reminder's source turn), so a candidate that stopped qualifying is
+		// dropped from both the prompt and the recorded history item.
+		plan := s.planChildStallDispatch(promptCtx, queuedMsg)
+		switch plan.verdict {
+		case childStallDispatchDiscard:
+			// No candidate qualifies any more, so the queued entry is discarded
+			// without creating a model turn. Requeueing returns it to the
+			// pending state where the stale-alert prune removes it.
+			s.logger.Info("discarding child stall entry without an eligible candidate",
+				zap.String("session_id", queuedMsg.SessionID),
+				zap.String("task_id", queuedMsg.TaskID),
+				zap.String("queue_id", queuedMsg.ID))
+			s.requeueMessageForReservation(promptCtx, reservation, queuedMsg, "child-stall-alert-without-eligible-candidate")
+			return
+		case childStallDispatchDefer:
+			// A candidate could not be read, so its unchecked text must not be
+			// sent. The entry stays queued in place; the follow-up drain is
+			// skipped so a persistent read failure cannot spin, and the
+			// producer's next pass asks the queue to drain again.
+			allowFollowupDrain = false
+			s.logger.Warn("deferring child stall entry whose candidate could not be rechecked",
+				zap.String("session_id", queuedMsg.SessionID),
+				zap.String("task_id", queuedMsg.TaskID),
+				zap.String("queue_id", queuedMsg.ID))
+			s.requeueMessageForReservation(promptCtx, reservation, queuedMsg, "child-stall-alert-recheck-deferred")
+			return
+		}
+		if plan.metadata != nil {
+			// Record only the candidates that reached the prompt; the stored
+			// queue entry is left untouched.
+			filtered := *queuedMsg
+			filtered.Metadata = plan.metadata
+			queuedMsg = &filtered
+		}
+		if plan.content != queuedMsg.Content {
+			composed := queuedMessagePromptContentFrom(queuedMsg, plan.content)
+			promptContent = composed
+			preparedPromptContent = &composed
+		}
+	}
 	if isQueuedWorkflowAutoStart(queuedMsg) {
 		// Resolve workflow aliases at the drain boundary, before persistence.
 		// Recovery must carry this exact server-generated context because the
