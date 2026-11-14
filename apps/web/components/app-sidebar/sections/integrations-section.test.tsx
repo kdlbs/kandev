@@ -3,7 +3,6 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 import { IconBrandGithub, IconBrandGitlab, IconChartBar, IconHexagon } from "@tabler/icons-react";
 import type { HTMLAttributes, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 import type { ResolvedDestination } from "@/lib/navigation/types";
 
 const navigationMock = vi.hoisted(() => ({
@@ -87,7 +86,6 @@ function pluginDestination(
   };
 }
 
-const AZURE = destination("azure-devops", "Azure DevOps", AzureDevOpsIcon);
 const GITHUB = destination("github", "GitHub", IconBrandGithub);
 const GITLAB = destination("gitlab", "GitLab", IconBrandGitlab);
 const JIRA = destination("jira", "Jira", IconHexagon);
@@ -133,13 +131,12 @@ describe("IntegrationsSection", () => {
 
   it("shows every resolved integration once when expanded", () => {
     storeState.appSidebar.sectionExpanded.integrations = true;
-    destinationsMock.mockReturnValue([AZURE, GITHUB, GITLAB, JIRA, LINEAR]);
+    destinationsMock.mockReturnValue([GITHUB, GITLAB, JIRA, LINEAR]);
     renderSection();
     const body = document.getElementById(INTEGRATIONS_BODY_TEST_ID)!;
-    for (const destination of [AZURE, GITHUB, GITLAB, JIRA, LINEAR]) {
+    for (const destination of [GITHUB, GITLAB, JIRA, LINEAR]) {
       expect(within(body).getAllByRole("link", { name: destination.label })).toHaveLength(1);
     }
-    expect(within(body).getAllByTestId("azure-devops-icon")).toHaveLength(1);
   });
 
   it("renders plugin nav items after the first-party links, with their own test id", () => {
@@ -228,14 +225,14 @@ describe("IntegrationsSection header shortcuts", () => {
   });
 
   it.each([
-    { finePointer: true, expectedIds: ["azure-devops", "github", "gitlab", "jira"] },
-    { finePointer: false, expectedIds: ["azure-devops", "github"] },
+    { finePointer: true, expectedIds: ["github", "gitlab", "jira", "linear"] },
+    { finePointer: false, expectedIds: ["github", "gitlab"] },
   ])(
     "limits header shortcuts by pointer capacity: $finePointer",
     ({ finePointer, expectedIds }) => {
       navigationMock.isFinePointer = finePointer;
       storeState.appSidebar.sectionExpanded.integrations = true;
-      destinationsMock.mockReturnValue([AZURE, GITHUB, GITLAB, JIRA, LINEAR, PLUGIN_PAGE]);
+      destinationsMock.mockReturnValue([GITHUB, GITLAB, JIRA, LINEAR, PLUGIN_PAGE]);
       renderSection();
 
       const shortcuts = Array.from(

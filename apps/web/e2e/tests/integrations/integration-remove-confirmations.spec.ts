@@ -13,36 +13,6 @@ function guardAgainstNativeDialogs(testPage: Page) {
 }
 
 test.describe("integration configuration removal confirmations", () => {
-  test("Azure DevOps removal stays local and confirms once", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const sawNativeDialog = guardAgainstNativeDialogs(testPage);
-    await apiClient.setAzureDevOpsConfig(seedData.workspaceId, {
-      organizationUrl: "https://dev.azure.com/acme",
-      pat: "azure-test-pat",
-    });
-    await testPage.goto(
-      `/settings/workspaces/${encodeURIComponent(seedData.workspaceId)}/integrations/azure-devops`,
-    );
-
-    const removeButton = testPage.getByTestId("azure-devops-delete-button");
-    await expect(removeButton).toBeVisible();
-    await removeButton.click();
-    const popover = testPage.getByTestId("azure-devops-remove-confirm-popover");
-    await expect(popover).toContainText("Azure DevOps");
-    await popover.getByRole("button", { name: "Cancel" }).click();
-    await expect(popover).toHaveCount(0);
-    await expect(removeButton).toBeVisible();
-
-    await removeButton.click();
-    await testPage.getByTestId("azure-devops-remove-confirm").click();
-    await expect(removeButton).toHaveCount(0);
-    await expect(testPage.getByTestId("azure-devops-organization")).toHaveValue("");
-    expect(sawNativeDialog()).toBe(false);
-  });
-
   test("Jira removal stays local and confirms once", async ({ testPage, apiClient, seedData }) => {
     const sawNativeDialog = guardAgainstNativeDialogs(testPage);
     await apiClient.setJiraConfig({

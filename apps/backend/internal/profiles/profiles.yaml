@@ -258,10 +258,6 @@ mocks:
     prod: ""
     dev:  ""
     e2e:  "true"
-  KANDEV_MOCK_AZURE_DEVOPS:
-    prod: ""
-    dev:  ""
-    e2e:  "true"
 
 # ── Debug / observability ─────────────────────────────────────────
 # Production keeps these off so /debug/* endpoints and pprof aren't

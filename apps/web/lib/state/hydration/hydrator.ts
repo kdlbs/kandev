@@ -1142,12 +1142,6 @@ function hydrateGitHub(draft: Draft<AppState>, state: HydrationState): void {
     draft.taskPRs.workspaceContextGeneration =
       state.taskPRs.workspaceContextGeneration ?? draft.workspaceContextGeneration;
   }
-  if (state.azureDevOpsTaskPullRequests) {
-    deepMerge(draft.azureDevOpsTaskPullRequests, state.azureDevOpsTaskPullRequests);
-  }
-  if (state.azureDevOpsTaskWorkItems) {
-    deepMerge(draft.azureDevOpsTaskWorkItems, state.azureDevOpsTaskWorkItems);
-  }
   if (state.prWatches) mergeWithLoading(draft.prWatches, state.prWatches);
   if (state.reviewWatches) mergeWithLoading(draft.reviewWatches, state.reviewWatches);
 }

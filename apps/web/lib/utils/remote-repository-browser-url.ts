@@ -3,7 +3,7 @@
  * pages. Plugin providers need an explicit browser URL contract before their
  * clone URL can be used for navigation.
  */
-const DIRECT_BROWSER_URL_PROVIDERS = new Set(["github", "gitlab", "azure_devops"]);
+const DIRECT_BROWSER_URL_PROVIDERS = new Set(["github", "gitlab"]);
 
 export function remoteRepositoryBrowserUrl(
   remoteUrl: string | undefined,

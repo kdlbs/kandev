@@ -39,6 +39,7 @@ import type {
 import type { ActiveDocument } from "@/lib/state/slices/ui/types";
 import type { BuiltInPreset } from "@/lib/state/layout-manager/presets";
 import { readLastAgentError } from "@/lib/session-last-agent-error";
+import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
 import { clarificationTurnIdForSession } from "@/lib/utils/pending-clarification";
 import { usePlanCommentMigration } from "@/hooks/domains/comments/use-plan-comment-migration";
 import { usePreviewFeedback } from "@/hooks/domains/comments/use-preview-feedback";
@@ -390,6 +391,7 @@ function useSessionData(
     initialPromptPreview: session?.metadata?.initial_prompt_preview,
     historyInitialized,
     hasOlderMessages,
+    isPassthrough: isPassthroughSession(session),
     lastAgentError,
     currentTurnId,
     currentTurnCompleted,

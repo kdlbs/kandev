@@ -48,7 +48,7 @@ export type GatedNavSection = (typeof GATED_SECTIONS)[number];
 export type StaticNavSection = Exclude<NavSection, GatedNavSection>;
 
 /** Keys the availability map may carry. Extend when a gated destination is added. */
-export type AvailabilityKey = "azure-devops" | "github" | "gitlab" | "jira" | "linear";
+export type AvailabilityKey = "github" | "gitlab" | "jira" | "linear";
 
 export type DestinationIcon = ComponentType<{ className?: string }>;
 

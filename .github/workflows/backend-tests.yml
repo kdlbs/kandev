@@ -791,7 +791,6 @@ jobs:
             ./internal/agent/settings/store
             ./internal/analytics/repository/sqlite
             ./internal/automation
-            ./internal/azuredevops
             ./internal/backendapp
             ./internal/coordinator
             ./internal/coordinator/ledger

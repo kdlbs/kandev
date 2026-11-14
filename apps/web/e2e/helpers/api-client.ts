@@ -3638,40 +3638,6 @@ export class ApiClient {
     }
   }
 
-  // --- Azure DevOps Mock Control ---
-
-  async mockAzureDevOpsSeed(state: unknown): Promise<void> {
-    await this.request("POST", "/api/v1/azure-devops/mock/state", state);
-  }
-
-  async mockAzureDevOpsReset(): Promise<void> {
-    await this.request("DELETE", "/api/v1/azure-devops/mock/state");
-  }
-
-  async setAzureDevOpsConfig(
-    workspaceId: string,
-    payload: { organizationUrl: string; pat: string },
-  ): Promise<void> {
-    await this.request(
-      "POST",
-      `/api/v1/azure-devops/config?workspace_id=${encodeURIComponent(workspaceId)}`,
-      { ...payload, authMethod: "pat" },
-    );
-  }
-
-  async associateAzureDevOpsTaskPR(
-    workspaceId: string,
-    taskId: string,
-    repositoryId: string,
-    pullRequestId: number,
-  ): Promise<void> {
-    await this.request(
-      "POST",
-      `/api/v1/azure-devops/tasks/${encodeURIComponent(taskId)}/pull-requests?workspace_id=${encodeURIComponent(workspaceId)}`,
-      { repositoryId, pullRequestId },
-    );
-  }
-
   // --- Jira Mock Control ---
 
   async mockJiraReset(): Promise<void> {
@@ -4427,11 +4393,13 @@ export class ApiClient {
     taskId: string,
     state: string,
     isPrimary = true,
+    options?: { isPassthrough?: boolean },
   ): Promise<{ id: string; task_id: string; status: string }> {
     return this.request("POST", "/api/v1/e2e/task-sessions", {
       task_id: taskId,
       state,
       is_primary: isPrimary,
+      is_passthrough: options?.isPassthrough,
     });
   }
 }

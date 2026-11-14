@@ -28,7 +28,6 @@ import (
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	analyticsservice "github.com/kandev/kandev/internal/analytics/service"
 	"github.com/kandev/kandev/internal/automation"
-	"github.com/kandev/kandev/internal/azuredevops"
 	canvasservice "github.com/kandev/kandev/internal/canvas"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/githubhost"
@@ -179,7 +178,6 @@ func assembleServices(
 		GitHub:                   providers.github,
 		GitLab:                   providers.gitlab,
 		GitLabCleanup:            providers.gitlabCleanup,
-		AzureDevOps:              providers.azureDevOps,
 		Jira:                     providers.jira,
 		Linear:                   providers.linear,
 		Sentry:                   providers.sentry,
@@ -580,7 +578,6 @@ type thirdPartyProviders struct {
 	github        *github.Service
 	gitlab        *gitlab.Service
 	gitlabCleanup func() error
-	azureDevOps   *azuredevops.Service
 	jira          *jira.Service
 	linear        *linear.Service
 	sentry        *sentry.Service
@@ -622,14 +619,6 @@ func initThirdPartyProviders(
 		gitlabSvc.SetPromptResolver(promptSvc)
 		gitlabSvc.SetComparisonTargetObserver(taskSvc)
 	}
-	azureDevOpsSvc, _, azureDevOpsErr := initAzureDevOpsServiceRequired(dbPool, eventBus, repos.Secrets, log)
-	if recordErr := recordRequiredStore(ctx, storeTracker, "azure-devops", azureDevOpsErr); recordErr != nil {
-		return nil, fmt.Errorf("initialize azure devops: %w", recordErr)
-	}
-	if azureDevOpsSvc != nil {
-		azureDevOpsSvc.SetRepositoryLookup(&repositoryLookupAdapter{svc: taskSvc})
-		azureDevOpsSvc.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
-	}
 	jiraSvc, _, jiraErr := initJiraServiceRequired(dbPool, eventBus, repos.Secrets, log)
 	if recordErr := recordRequiredStore(ctx, storeTracker, "jira", jiraErr); recordErr != nil {
 		return nil, fmt.Errorf("initialize jira: %w", recordErr)
@@ -648,7 +637,7 @@ func initThirdPartyProviders(
 	}
 	return &thirdPartyProviders{
 		github: githubSvc, gitlab: gitlabSvc, gitlabCleanup: gitlabCleanup,
-		azureDevOps: azureDevOpsSvc, jira: jiraSvc, linear: linearSvc,
+		jira: jiraSvc, linear: linearSvc,
 		sentry: sentrySvc, workflowSync: workflowSyncSvc,
 	}, nil
 }
@@ -1606,37 +1595,6 @@ func initJiraServiceRequired(dbPool *db.Pool, eventBus bus.EventBus, secretsStor
 	svc, cleanup, err := jira.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
 	if err != nil {
 		return nil, nil, fmt.Errorf("jira store: %w", err)
-	}
-	return svc, cleanup, nil
-}
-
-// initAzureDevOpsService wires the workspace-scoped Azure integration.
-// Failures are non-fatal so unrelated providers and the backend keep working.
-func initAzureDevOpsService(
-	dbPool *db.Pool,
-	eventBus bus.EventBus,
-	secretsStore secrets.SecretStore,
-	log *logger.Logger,
-) *azuredevops.Service {
-	svc, _, err := initAzureDevOpsServiceRequired(dbPool, eventBus, secretsStore, log)
-	if err != nil {
-		log.Warn("Azure DevOps service initialization failed (non-fatal)", zap.Error(err))
-		return nil
-	}
-	return svc
-}
-
-func initAzureDevOpsServiceRequired(
-	dbPool *db.Pool,
-	eventBus bus.EventBus,
-	secretsStore secrets.SecretStore,
-	log *logger.Logger,
-) (*azuredevops.Service, func() error, error) {
-	svc, cleanup, err := azuredevops.Provide(
-		dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log,
-	)
-	if err != nil {
-		return nil, nil, fmt.Errorf("azure-devops store: %w", err)
 	}
 	return svc, cleanup, nil
 }

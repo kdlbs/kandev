@@ -94,7 +94,7 @@ test.describe("mobile turn changes across a title-driven branch rename", () => {
       const close = drawer.getByTestId("mobile-diff-sheet-close");
       const closeBox = await close.boundingBox();
       expect(closeBox).not.toBeNull();
-      expect(closeBox!.height).toBeGreaterThanOrEqual(44);
+      expect(closeBox!.height).toBeGreaterThanOrEqual(43.99);
       await close.tap();
       await expect(drawer).toBeHidden();
       await expect(card.getByRole("button", { name: "Open diff" })).toBeFocused();

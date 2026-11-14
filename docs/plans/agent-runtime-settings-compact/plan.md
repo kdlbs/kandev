@@ -17,6 +17,11 @@ Move runtime policy below installed agents and make it a compact collapsed discl
 
 ## Follow-up contract
 
+The delivered [runtime update manager package](../agent-runtime-update-manager/plan.md)
+replaces this package's bottom disclosure and fragment reveal.
+Its previews and work orders own that composition and scenario coverage.
+The completed statuses and verification results here remain historical delivery evidence.
+
 The [floating indicator removal package](../remove-agent-runtime-update-indicator/plan.md) implements AC-AGENTS-RUNTIME-NOTIFY-001.7 in place of retired 001.4. Indicator previews and positive indicator assertions below describe the earlier implementation, not the current result. The follow-up owns the shared desktop/phone helper changes; historical verification results and completed work-order statuses remain delivery evidence for this package.
 
 ## Scope

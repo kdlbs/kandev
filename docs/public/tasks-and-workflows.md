@@ -263,7 +263,7 @@ use a separate `Cmd/Ctrl+Enter` shortcut or the visible submit action.
    | Source     | Use it for                                        | Notes                                                                                                                                                                                                                                        |
    | ---------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
    | **Repo**   | A configured, discovered, or new local repository | Choose a branch or [branch policy](#branch-policies). Add more rows for a multi-repository task.                                                                                                                                             |
-   | **Remote** | A remote repository                               | Search GitHub, GitLab, or Azure DevOps, or paste a supported URL. Public GitHub reads and public `gitlab.com` branch discovery work without credentials. Private access and authenticated browse/write actions require provider credentials. |
+   | **Remote** | A remote repository                               | Search GitHub, GitLab, or a connected plugin provider, or paste a supported URL. Public GitHub reads and public `gitlab.com` branch discovery work without credentials. Private access and authenticated browse/write actions require provider credentials. |
    | **None**   | Planning, research, or work outside Git           | Use a scratch workspace or an optional folder on the Kandev host. Git worktree and repository-aware Changes, branch, and pull-request features are unavailable.                                                                              |
 
    In-app directory browsers list directories on the Kandev host. By default,
@@ -750,6 +750,11 @@ task, and this preference does not disable that recovery. Kandev restores a
 session only after it verifies the saved owner and native conversation. If the
 owner, conversation, or delivery evidence is missing or changed, that session
 stays blocked with its available recovery controls. See [Manage session state](sessions-and-review.md#manage-session-state) for those controls and recovery details.
+
+After a verified restore, the same conversation shows one informational
+interruption message and the normal composer. Kandev does not resend the
+interrupted prompt. Existing failed sessions that meet the same identity and
+delivery checks are included in the first startup after an upgrade.
 
 Restart recovery also checks automatic workflow starts that were accepted but
 never delivered their step prompt. It resumes that entry through normal capacity

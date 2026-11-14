@@ -56,7 +56,6 @@ export const SETTINGS_DISCOVERY_ROUTE_EXCLUSIONS: Record<string, string> = {
   "/settings/workspace": "Legacy path; redirects to the canonical Workspaces page.",
   "/settings/automations": "Redirects into the active workspace's Automations tab.",
   "/settings/integrations": TO_WORKSPACE_INTEGRATIONS,
-  "/settings/integrations/azure-devops": TO_WORKSPACE_INTEGRATIONS,
   "/settings/integrations/github": TO_WORKSPACE_INTEGRATIONS,
   "/settings/integrations/gitlab": TO_WORKSPACE_INTEGRATIONS,
   "/settings/integrations/jira": TO_WORKSPACE_INTEGRATIONS,
