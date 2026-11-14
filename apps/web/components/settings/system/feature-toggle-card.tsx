@@ -37,14 +37,16 @@ export function FeatureToggleCard({
     <SettingsCard isDirty={isDirty} data-testid={`feature-toggle-${flag.key}`}>
       <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-2">
-          {/* `label`, `description` and `risk_description` are authored in
-              runtimeflags/registry.go and rendered by the backend, so they stay
-              English here — localizing them needs a key/value split in Go. */}
+          {/* `label`, `description` and `risk_description` come from
+              runtimeflags/registry.go as English source text. They resolve
+              through the catalog by flag key so translated locales (ko) read
+              natively, and fall back to the backend string when no entry
+              exists — the backend keeps owning the source copy. */}
           <CardTitle className="flex flex-wrap items-center gap-2 text-base">
-            {flag.label}
+            {flagLabel(flag, t)}
             <FlagBadges flag={flag} />
           </CardTitle>
-          <p className="text-sm text-muted-foreground">{flag.description}</p>
+          <p className="text-sm text-muted-foreground">{flagDescription(flag, t)}</p>
         </div>
         <FeatureToggleSwitch
           flag={flag}
@@ -55,7 +57,7 @@ export function FeatureToggleCard({
       </CardHeader>
       <CardContent className="space-y-3">
         {flag.risk_description && (
-          <p className="text-sm leading-6 text-muted-foreground">{flag.risk_description}</p>
+          <p className="text-sm leading-6 text-muted-foreground">{flagRiskDescription(flag, t)}</p>
         )}
         {unavailable && <UnavailableNotice flag={flag} />}
         <FlagMetadata flag={flag} />
@@ -122,7 +124,7 @@ function FeatureToggleSwitch({
       data-settings-dirty={isDirty}
       disabled={disabled}
       onCheckedChange={onChange}
-      aria-label={t("system:featureToggleSwitchLabel", { label: flag.label })}
+      aria-label={t("system:featureToggleSwitchLabel", { label: flagLabel(flag, t) })}
       className="cursor-pointer disabled:cursor-not-allowed"
     />
   );
@@ -183,4 +185,22 @@ function sourceLabel(flag: RuntimeFlagState, t: TFunction): string {
   if (flag.source === "env") return t("system:featureToggleSourceEnv");
   if (flag.source === "override") return t("system:featureToggleSourceOverride");
   return t("system:featureToggleSourceDefault");
+}
+
+/** The flag's label/description/risk text is authored in Go (registry.go) as
+    English source copy. The catalog is a translation layer keyed by flag key;
+    `defaultValue` keeps the backend string for any locale without an entry, so
+    an untranslated or future flag still renders its English text. */
+function flagLabel(flag: RuntimeFlagState, t: TFunction): string {
+  return t(`system:featureToggleFlag.${flag.key}.label`, { defaultValue: flag.label });
+}
+
+function flagDescription(flag: RuntimeFlagState, t: TFunction): string {
+  return t(`system:featureToggleFlag.${flag.key}.description`, { defaultValue: flag.description });
+}
+
+function flagRiskDescription(flag: RuntimeFlagState, t: TFunction): string {
+  return t(`system:featureToggleFlag.${flag.key}.riskDescription`, {
+    defaultValue: flag.risk_description,
+  });
 }
