@@ -129,7 +129,7 @@ async function waitForWorkflowProfileSession(
   return sessionId;
 }
 
-export function waitForNewWorkflowProfileSession(
+export function waitForWorkflowProfileSessionCreated(
   apiClient: ApiClient,
   taskId: string,
   profileId: string,
@@ -142,7 +142,7 @@ export function waitForNewWorkflowProfileSession(
   });
 }
 
-export function waitForAnswerableWorkflowProfileSession(
+export function waitForNewWorkflowProfileSession(
   apiClient: ApiClient,
   taskId: string,
   profileId: string,

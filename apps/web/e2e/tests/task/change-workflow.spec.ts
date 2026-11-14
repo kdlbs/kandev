@@ -7,8 +7,8 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { seedRemainingStepColors } from "./change-workflow-color-helpers";
 import {
   seedWorkflowAgentOverrideFixture,
-  waitForAnswerableWorkflowProfileSession,
   waitForNewWorkflowProfileSession,
+  waitForWorkflowProfileSessionCreated,
   waitForWorkflowMoveLifecycle,
   waitForWorkflowStep,
 } from "./task-workflow-agent-overrides-helpers";
@@ -165,7 +165,7 @@ test.describe("Change workflow", () => {
         executor_profile_id: seedData.worktreeExecutorProfileId,
       },
     );
-    const existingSessionId = await waitForAnswerableWorkflowProfileSession(
+    const existingSessionId = await waitForNewWorkflowProfileSession(
       apiClient,
       task.id,
       fixture.profileA.id,
@@ -278,7 +278,7 @@ test.describe("Change workflow", () => {
           "Open task page showing the destination workflow and current step after migration.",
       });
     }
-    const destinationSessionId = await waitForNewWorkflowProfileSession(
+    const destinationSessionId = await waitForWorkflowProfileSessionCreated(
       apiClient,
       task.id,
       fixture.profileB.id,
