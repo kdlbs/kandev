@@ -126,3 +126,19 @@ successor delta. Human acceptance remains separate. The prepared Human QA
 runtime retains that implementation revision until a controlled refresh.
 Physical iOS, a second LAN client, and full CI were not verified. No live user
 data or another task's runtime was used.
+
+## Consolidated PR CI: diff-menu sequencing
+
+The phone diff-mode scenario failed in shard 15 and reproduced locally with
+retries disabled. Its second touch reopened a menu during the previous exit.
+The closing layer's deferred outside-click handler then dismissed that menu.
+The event trace captured both state transitions before the menu left the DOM.
+
+The shared test helper now waits for closed menu content and the Review dialog
+to unmount before the next action. It preserves native taps and all assertions.
+The exact phone scenario passed, followed by three consecutive runs without
+retries. Its desktop counterpart also passed. Worker-context validation is
+complete: the same 33-case CI worker partition passed 31 cases and skipped two,
+using one worker with retries disabled. Hosted verification is recorded on
+PR #5321 after publication.
+Product code, UI copy, and the published screenshot surfaces are unchanged.

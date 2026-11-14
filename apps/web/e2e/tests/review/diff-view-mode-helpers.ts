@@ -39,6 +39,7 @@ async function toggleChanges(page: Page, header: Locator, split: boolean, mobile
       page.getByRole("menuitem", { name: split ? "Unified view" : "Split view", exact: true }),
       mobile,
     );
+    await expect(page.locator('[data-slot="dropdown-menu-content"]')).toHaveCount(0);
   }
   await assertStored(page, !split);
 }
@@ -146,7 +147,7 @@ export function diffViewModeScenario(mobile: boolean) {
         await activate(reviewMode, mobile);
         await assertStored(testPage, !initialSplit);
         await activate(dialog.getByRole("button", { name: "Close review", exact: true }), mobile);
-        await expect(dialog).not.toBeVisible();
+        await expect(dialog).toHaveCount(0);
         await toggleChanges(testPage, header, !initialSplit, mobile);
         // Normal Changes toggle establishes the other direction for the next pass.
         await toggleChanges(testPage, header, initialSplit, mobile);
