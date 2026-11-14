@@ -25,6 +25,22 @@ export interface SystemInfo {
   started_at: string;
 }
 
+/** One required store's public diagnostic row. */
+export interface PersistenceStoreDiagnostic {
+  id: string;
+  owner_package: string;
+  state: "healthy" | "initializing" | "unhealthy" | (string & {});
+  last_checked_at?: string;
+  error?: string;
+}
+
+/** GET /api/v1/system/diagnostics/persistence. */
+export interface PersistenceDiagnostics {
+  driver: string;
+  state: "healthy" | "initializing" | "unhealthy" | (string & {});
+  stores: PersistenceStoreDiagnostic[];
+}
+
 export interface DiskBreakdown {
   data_dir: number;
   worktrees: number;
@@ -231,9 +247,12 @@ export interface MessageQueueSettingsResponse {
   effective: MessageQueueEffectiveSettings;
 }
 
+export type SessionCapacityPolicy = "automatic" | "all";
 export interface SessionCapacitySettingsValue {
   enabled: boolean;
   max_sessions: number;
+  policy?: SessionCapacityPolicy;
+  grade_limits?: Record<string, number>;
 }
 
 /** Partial PATCH payload: omitted fields are left unchanged server-side. */
@@ -242,13 +261,29 @@ export type SessionCapacitySettingsPatch = Partial<SessionCapacitySettingsValue>
 export type SessionCapacitySettingsSource = "default" | "setting" | "environment";
 
 export interface SessionCapacityEffectiveSettings {
+  policy?: SessionCapacityPolicy;
+  grade_limits?: Record<string, number>;
   enabled: boolean;
   max_sessions: number;
   source: SessionCapacitySettingsSource;
   locked: boolean;
 }
 
+export interface SessionCapacityObservation {
+  policy: SessionCapacityPolicy;
+  enabled: boolean;
+  known: boolean;
+  in_use: number | null;
+  limit: number;
+  grade_in_use?: Record<string, number>;
+  grade_limits?: Record<string, number>;
+  needs_configuration?: boolean;
+  observed_at: string;
+  waiting: { known: boolean; counts?: Record<string, number> };
+}
+
 export interface SessionCapacitySettingsResponse {
+  observation?: SessionCapacityObservation;
   settings: SessionCapacitySettingsValue;
   effective: SessionCapacityEffectiveSettings;
 }

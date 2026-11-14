@@ -64,6 +64,9 @@ func classifyOfficeRoute(route string, resolvers map[string]officeWorkspaceResol
 	if _, ok := officeWorkspacelessRoute(route); ok {
 		return officeRouteCoverage{how: "workspace-less allowlist"}
 	}
+	if _, ok := officeOwnerAggregateRoutes[route]; ok {
+		return officeRouteCoverage{how: "owner aggregate"}
+	}
 	var (
 		hasWorkspaceParam bool
 		resolved          []string
@@ -164,6 +167,11 @@ func TestOfficeScopeTablesHaveNoDeadEntries(t *testing.T) {
 			t.Errorf("officeWorkspacelessRoutes has %q, which is not a registered Office route", route)
 		}
 	}
+	for route := range officeOwnerAggregateRoutes {
+		if !matches(func(r string) bool { return r == route }) {
+			t.Errorf("officeOwnerAggregateRoutes has %q, which is not a registered Office route", route)
+		}
+	}
 	for prefix := range officeWorkspacelessPrefixes {
 		if !matches(func(r string) bool { return strings.HasPrefix(r, prefix) }) {
 			t.Errorf("officeWorkspacelessPrefixes has %q, which no registered Office route starts with", prefix)
@@ -192,6 +200,11 @@ func TestOfficeWorkspacelessEntriesCarryAReason(t *testing.T) {
 	for route, reason := range officeWorkspacelessRoutes {
 		if len(strings.TrimSpace(reason)) < 20 {
 			t.Errorf("officeWorkspacelessRoutes[%q] reason %q is too thin to review", route, reason)
+		}
+	}
+	for route, reason := range officeOwnerAggregateRoutes {
+		if len(strings.TrimSpace(reason)) < 20 {
+			t.Errorf("officeOwnerAggregateRoutes[%q] reason %q is too thin to review", route, reason)
 		}
 	}
 	for prefix, reason := range officeWorkspacelessPrefixes {

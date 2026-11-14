@@ -34,6 +34,67 @@ function workspaceIdlePolicyUpdate(
   };
 }
 
+function workspaceUnansweredInboxUpdate(
+  item: WorkspaceItem,
+  payload: WorkspacePayload,
+): Pick<
+  WorkspaceItem,
+  "clarification_unanswered_inbox_enabled" | "clarification_unanswered_retention_days"
+> {
+  return {
+    clarification_unanswered_inbox_enabled:
+      "clarification_unanswered_inbox_enabled" in payload
+        ? payload.clarification_unanswered_inbox_enabled
+        : item.clarification_unanswered_inbox_enabled,
+    clarification_unanswered_retention_days:
+      "clarification_unanswered_retention_days" in payload
+        ? payload.clarification_unanswered_retention_days
+        : item.clarification_unanswered_retention_days,
+  };
+}
+
+function workspaceDynamicRoutingUpdate(
+  item: WorkspaceItem,
+  payload: WorkspacePayload,
+): Pick<
+  WorkspaceItem,
+  | "dynamic_midturn_failover_enabled"
+  | "dynamic_failed_route_auto_retry_enabled"
+  | "dynamic_failed_route_auto_retry_max"
+> {
+  return {
+    dynamic_midturn_failover_enabled:
+      "dynamic_midturn_failover_enabled" in payload
+        ? (payload.dynamic_midturn_failover_enabled ?? false)
+        : item.dynamic_midturn_failover_enabled,
+    dynamic_failed_route_auto_retry_enabled:
+      "dynamic_failed_route_auto_retry_enabled" in payload
+        ? (payload.dynamic_failed_route_auto_retry_enabled ?? false)
+        : item.dynamic_failed_route_auto_retry_enabled,
+    dynamic_failed_route_auto_retry_max:
+      "dynamic_failed_route_auto_retry_max" in payload
+        ? (payload.dynamic_failed_route_auto_retry_max ?? 1)
+        : item.dynamic_failed_route_auto_retry_max,
+  };
+}
+
+/** Dynamic routing opt-ins of a newly created workspace; all default off. */
+function newWorkspaceDynamicRouting(
+  payload: WorkspacePayload,
+): Pick<
+  WorkspaceItem,
+  | "dynamic_midturn_failover_enabled"
+  | "dynamic_failed_route_auto_retry_enabled"
+  | "dynamic_failed_route_auto_retry_max"
+> {
+  return {
+    dynamic_midturn_failover_enabled: payload.dynamic_midturn_failover_enabled ?? false,
+    dynamic_failed_route_auto_retry_enabled:
+      payload.dynamic_failed_route_auto_retry_enabled ?? false,
+    dynamic_failed_route_auto_retry_max: payload.dynamic_failed_route_auto_retry_max ?? 1,
+  };
+}
+
 function updateWorkspaceItem(item: WorkspaceItem, payload: WorkspacePayload): WorkspaceItem {
   return {
     ...item,
@@ -44,6 +105,8 @@ function updateWorkspaceItem(item: WorkspaceItem, payload: WorkspacePayload): Wo
     default_agent_profile_id: payload.default_agent_profile_id ?? null,
     ...workspacePlacementUpdate(item, payload),
     ...workspaceIdlePolicyUpdate(item, payload),
+    ...workspaceDynamicRoutingUpdate(item, payload),
+    ...workspaceUnansweredInboxUpdate(item, payload),
     updated_at: payload.updated_at ?? item.updated_at,
   };
 }
@@ -103,6 +166,9 @@ export function registerWorkspacesHandlers(store: StoreApi<AppState>): WsHandler
           unit_id: payload.unit_id ?? "",
           acp_idle_suspension_enabled: payload.acp_idle_suspension_enabled ?? false,
           acp_idle_timeout_minutes: payload.acp_idle_timeout_minutes ?? 120,
+          ...newWorkspaceDynamicRouting(payload),
+          clarification_unanswered_inbox_enabled: payload.clarification_unanswered_inbox_enabled,
+          clarification_unanswered_retention_days: payload.clarification_unanswered_retention_days,
           created_at: payload.created_at ?? new Date().toISOString(),
           updated_at: payload.updated_at ?? new Date().toISOString(),
         };

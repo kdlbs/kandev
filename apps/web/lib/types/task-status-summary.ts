@@ -55,6 +55,8 @@ export type TaskStatusSummaryTurnError = {
 };
 
 export type TaskStatusSummaryLaunchQueue = {
+  /** Last actual admission refusal; independent of the latest population sample. */
+  capacity_reason?: string;
   session_id?: string;
   agent_profile_id?: string;
   workflow_step_id?: string;
@@ -62,6 +64,10 @@ export type TaskStatusSummaryLaunchQueue = {
   reason: "session_capacity" | "ownership_unavailable" | "replay_error";
   retrying: boolean;
   capacity?: {
+    policy?: "automatic" | "all";
+    grade_in_use?: Record<string, number>;
+    grade_limits?: Record<string, number>;
+    needs_configuration?: boolean;
     in_use: number;
     limit: number;
     observed_at: string;

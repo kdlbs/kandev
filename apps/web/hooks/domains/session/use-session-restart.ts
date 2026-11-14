@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { resumeSession } from "@/lib/services/session-recovery-service";
 import {
   getSessionRestartStore,
   isSessionRestartPending,
@@ -46,6 +47,63 @@ function restoreRestartSelection(
     if (wasPinned) current.setActiveSession(taskId, sessionId);
     else current.setActiveSessionAuto(taskId, sessionId);
   }
+}
+
+function closureStopResponse(
+  value: unknown,
+  failureMessage: string,
+): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || !("operation_id" in value || "stage" in value))
+    return null;
+  if (
+    !("stage" in value) ||
+    value.stage !== "committed" ||
+    !("claims_settled" in value) ||
+    value.claims_settled !== true
+  ) {
+    throw new Error(failureMessage);
+  }
+  return value as Record<string, unknown>;
+}
+
+async function restartSession({
+  client,
+  taskId,
+  sessionId,
+  metadata,
+  failureMessage,
+}: {
+  client: NonNullable<ReturnType<typeof getWebSocketClient>>;
+  taskId: string;
+  sessionId: string;
+  metadata: Record<string, unknown> | null | undefined;
+  failureMessage: string;
+}) {
+  const closure = metadata?.inference_scope_closure;
+  const consumed =
+    typeof closure === "object" &&
+    closure !== null &&
+    "stage" in closure &&
+    closure.stage === "consumed";
+  if (closure != null && !consumed) {
+    await resumeSession(taskId, sessionId, failureMessage, metadata);
+    return;
+  }
+  const stopped = await client.request<unknown>(
+    "session.stop",
+    { session_id: sessionId, close_inference_for_restart: true },
+    60000,
+  );
+  const status = closureStopResponse(stopped, failureMessage);
+  if (status) {
+    await resumeSession(taskId, sessionId, failureMessage, { inference_scope_closure: status });
+    return;
+  }
+  await client.request(
+    "session.launch",
+    { task_id: taskId, intent: "resume", session_id: sessionId },
+    30000,
+  );
 }
 
 /**
@@ -98,12 +156,13 @@ export function useSessionRestart(sessionId: string | null | undefined, taskId: 
     try {
       const client = getWebSocketClient();
       if (!client) throw new Error(t("task:sessionRestartConnectionUnavailable"));
-      await client.request("session.stop", { session_id: sessionId }, 15000);
-      await client.request(
-        "session.launch",
-        { task_id: taskId, intent: "resume", session_id: sessionId },
-        30000,
-      );
+      await restartSession({
+        client,
+        taskId,
+        sessionId,
+        metadata: session.metadata,
+        failureMessage: t("task:failedToResumeSession"),
+      });
       clearSessionRecoveryGuidance(
         owner,
         guidanceOperation,

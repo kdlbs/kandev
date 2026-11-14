@@ -34,6 +34,12 @@ func (r *Repository) prepareWorkspace(workspace *models.Workspace) {
 	if workspace.ACPIdleTimeoutMinutes == 0 {
 		workspace.ACPIdleTimeoutMinutes = 120
 	}
+	if workspace.DynamicFailedRouteAutoRetryMax == 0 {
+		workspace.DynamicFailedRouteAutoRetryMax = models.DefaultDynamicFailedRouteAutoRetryMax
+	}
+	if workspace.ClarificationUnansweredRetentionDays == 0 {
+		workspace.ClarificationUnansweredRetentionDays = models.DefaultClarificationUnansweredRetentionDays
+	}
 }
 
 func (r *Repository) insertWorkspace(ctx context.Context, exec sqlx.ExtContext, workspace *models.Workspace) error {
@@ -54,11 +60,16 @@ func (r *Repository) insertWorkspace(ctx context.Context, exec sqlx.ExtContext, 
 			office_workflow_id,
 			acp_idle_suspension_enabled,
 			acp_idle_timeout_minutes,
+			dynamic_midturn_failover_enabled,
+			dynamic_failed_route_auto_retry_enabled,
+			dynamic_failed_route_auto_retry_max,
 			created_at,
-			updated_at
+			updated_at,
+			clarification_unanswered_inbox_enabled,
+			clarification_unanswered_retention_days
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), workspace.ID, workspace.Name, workspace.Description, workspace.OwnerID, workspace.OrgID, workspace.UnitID, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.DefaultConfigAgentProfileID, workspace.TaskPrefix, workspace.TaskSequence, workspace.OfficeWorkflowID, workspace.ACPIdleSuspensionEnabled, workspace.ACPIdleTimeoutMinutes, workspace.CreatedAt, workspace.UpdatedAt)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), workspace.ID, workspace.Name, workspace.Description, workspace.OwnerID, workspace.OrgID, workspace.UnitID, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.DefaultConfigAgentProfileID, workspace.TaskPrefix, workspace.TaskSequence, workspace.OfficeWorkflowID, workspace.ACPIdleSuspensionEnabled, workspace.ACPIdleTimeoutMinutes, workspace.DynamicMidTurnFailoverEnabled, workspace.DynamicFailedRouteAutoRetryEnabled, workspace.DynamicFailedRouteAutoRetryMax, workspace.CreatedAt, workspace.UpdatedAt, workspace.ClarificationUnansweredInboxEnabled, workspace.ClarificationUnansweredRetentionDays)
 
 	return err
 }
@@ -72,7 +83,7 @@ func (r *Repository) GetWorkspace(ctx context.Context, id string) (*models.Works
 	return workspace, err
 }
 
-const workspaceSelectColumns = "id, name, description, owner_id, org_id, unit_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, acp_idle_suspension_enabled, acp_idle_timeout_minutes, created_at, updated_at"
+const workspaceSelectColumns = "id, name, description, owner_id, org_id, unit_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, acp_idle_suspension_enabled, acp_idle_timeout_minutes, dynamic_midturn_failover_enabled, dynamic_failed_route_auto_retry_enabled, dynamic_failed_route_auto_retry_max, created_at, updated_at, clarification_unanswered_inbox_enabled, clarification_unanswered_retention_days"
 
 type workspaceScanner interface {
 	Scan(...any) error
@@ -85,6 +96,7 @@ func scanWorkspaceRow(scanner workspaceScanner) (*models.Workspace, error) {
 	var defaultAgentProfileID sql.NullString
 	var defaultConfigAgentProfileID sql.NullString
 	var acpIdleSuspensionEnabled bool
+	var clarificationUnansweredInboxEnabled bool
 
 	err := scanner.Scan(
 		&workspace.ID,
@@ -102,8 +114,13 @@ func scanWorkspaceRow(scanner workspaceScanner) (*models.Workspace, error) {
 		&workspace.OfficeWorkflowID,
 		&acpIdleSuspensionEnabled,
 		&workspace.ACPIdleTimeoutMinutes,
+		&workspace.DynamicMidTurnFailoverEnabled,
+		&workspace.DynamicFailedRouteAutoRetryEnabled,
+		&workspace.DynamicFailedRouteAutoRetryMax,
 		&workspace.CreatedAt,
 		&workspace.UpdatedAt,
+		&clarificationUnansweredInboxEnabled,
+		&workspace.ClarificationUnansweredRetentionDays,
 	)
 	if defaultExecutorID.Valid && defaultExecutorID.String != "" {
 		workspace.DefaultExecutorID = &defaultExecutorID.String
@@ -118,6 +135,7 @@ func scanWorkspaceRow(scanner workspaceScanner) (*models.Workspace, error) {
 		workspace.DefaultConfigAgentProfileID = &defaultConfigAgentProfileID.String
 	}
 	workspace.ACPIdleSuspensionEnabled = acpIdleSuspensionEnabled
+	workspace.ClarificationUnansweredInboxEnabled = clarificationUnansweredInboxEnabled
 
 	if err != nil {
 		return nil, err
@@ -138,6 +156,12 @@ func (r *Repository) updateWorkspace(ctx context.Context, workspace *models.Work
 	if workspace.ACPIdleTimeoutMinutes == 0 {
 		workspace.ACPIdleTimeoutMinutes = 120
 	}
+	if workspace.DynamicFailedRouteAutoRetryMax == 0 {
+		workspace.DynamicFailedRouteAutoRetryMax = models.DefaultDynamicFailedRouteAutoRetryMax
+	}
+	if workspace.ClarificationUnansweredRetentionDays == 0 {
+		workspace.ClarificationUnansweredRetentionDays = models.DefaultClarificationUnansweredRetentionDays
+	}
 	workspace.UpdatedAt = time.Now().UTC()
 	query := `
 		UPDATE workspaces
@@ -150,13 +174,21 @@ func (r *Repository) updateWorkspace(ctx context.Context, workspace *models.Work
 			default_config_agent_profile_id = ?,
 			acp_idle_suspension_enabled = ?,
 			acp_idle_timeout_minutes = ?,
+			dynamic_midturn_failover_enabled = ?,
+			dynamic_failed_route_auto_retry_enabled = ?,
+			dynamic_failed_route_auto_retry_max = ?,
+			clarification_unanswered_inbox_enabled = ?,
+			clarification_unanswered_retention_days = ?,
 			updated_at = ?
 		WHERE id = ?`
 	args := []interface{}{
 		workspace.Name, workspace.Description, workspace.UnitID,
 		workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID,
 		workspace.DefaultConfigAgentProfileID, workspace.ACPIdleSuspensionEnabled,
-		workspace.ACPIdleTimeoutMinutes, workspace.UpdatedAt, workspace.ID,
+		workspace.ACPIdleTimeoutMinutes, workspace.DynamicMidTurnFailoverEnabled,
+		workspace.DynamicFailedRouteAutoRetryEnabled, workspace.DynamicFailedRouteAutoRetryMax,
+		workspace.ClarificationUnansweredInboxEnabled, workspace.ClarificationUnansweredRetentionDays,
+		workspace.UpdatedAt, workspace.ID,
 	}
 	if expected != nil {
 		query += optimisticUpdatedAtPredicate
@@ -519,10 +551,7 @@ func (r *Repository) ClaimUnownedWorkspaces(ctx context.Context, ownerID string)
 }
 
 func (r *Repository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
-	rows, err := r.ro.QueryContext(ctx, `
-		SELECT id, name, description, owner_id, org_id, unit_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, acp_idle_suspension_enabled, acp_idle_timeout_minutes, created_at, updated_at
-		FROM workspaces ORDER BY created_at DESC
-	`)
+	rows, err := r.ro.QueryContext(ctx, "SELECT "+workspaceSelectColumns+" FROM workspaces ORDER BY created_at DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -530,45 +559,9 @@ func (r *Repository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, e
 
 	var result []*models.Workspace
 	for rows.Next() {
-		workspace := &models.Workspace{}
-		var defaultExecutorID sql.NullString
-		var defaultEnvironmentID sql.NullString
-		var defaultAgentProfileID sql.NullString
-		var defaultConfigAgentProfileID sql.NullString
-		var acpIdleSuspensionEnabled bool
-		if err := rows.Scan(
-			&workspace.ID,
-			&workspace.Name,
-			&workspace.Description,
-			&workspace.OwnerID,
-			&workspace.OrgID,
-			&workspace.UnitID,
-			&defaultExecutorID,
-			&defaultEnvironmentID,
-			&defaultAgentProfileID,
-			&defaultConfigAgentProfileID,
-			&workspace.TaskPrefix,
-			&workspace.TaskSequence,
-			&workspace.OfficeWorkflowID,
-			&acpIdleSuspensionEnabled,
-			&workspace.ACPIdleTimeoutMinutes,
-			&workspace.CreatedAt,
-			&workspace.UpdatedAt,
-		); err != nil {
+		workspace, err := scanWorkspaceRow(rows)
+		if err != nil {
 			return nil, err
-		}
-		workspace.ACPIdleSuspensionEnabled = acpIdleSuspensionEnabled
-		if defaultExecutorID.Valid && defaultExecutorID.String != "" {
-			workspace.DefaultExecutorID = &defaultExecutorID.String
-		}
-		if defaultEnvironmentID.Valid && defaultEnvironmentID.String != "" {
-			workspace.DefaultEnvironmentID = &defaultEnvironmentID.String
-		}
-		if defaultAgentProfileID.Valid && defaultAgentProfileID.String != "" {
-			workspace.DefaultAgentProfileID = &defaultAgentProfileID.String
-		}
-		if defaultConfigAgentProfileID.Valid && defaultConfigAgentProfileID.String != "" {
-			workspace.DefaultConfigAgentProfileID = &defaultConfigAgentProfileID.String
 		}
 		result = append(result, workspace)
 	}

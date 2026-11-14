@@ -231,6 +231,8 @@ func newTestDepsWithLogger(t *testing.T, log *logger.Logger) *testDeps {
 			execution_state TEXT DEFAULT '',
 			workflow_id TEXT NOT NULL DEFAULT '',
 			workflow_step_id TEXT DEFAULT '',
+			wip_admitted INTEGER NOT NULL DEFAULT 1,
+			queued_for_step_id TEXT NOT NULL DEFAULT '',
 			archived_at TIMESTAMP,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -346,6 +348,7 @@ type stubAgentReader struct {
 	names     map[string]string
 	roles     map[string]string
 	instances []*models.AgentInstance
+	listErr   error
 }
 
 func (s *stubAgentReader) GetAgentInstance(_ context.Context, id string) (*models.AgentInstance, error) {
@@ -356,13 +359,44 @@ func (s *stubAgentReader) GetAgentInstance(_ context.Context, id string) (*model
 }
 
 func (s *stubAgentReader) ListAgentInstances(_ context.Context, workspaceID string) ([]*models.AgentInstance, error) {
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
 	var out []*models.AgentInstance
 	for _, instance := range s.instances {
-		if instance != nil && instance.WorkspaceID == workspaceID {
+		if instance != nil && (workspaceID == "" || instance.WorkspaceID == workspaceID) {
 			out = append(out, instance)
 		}
 	}
 	return out, nil
+}
+
+func (s *stubAgentReader) CountAgentInstancesByWorkspaceIDs(
+	_ context.Context, workspaceIDs []string,
+) (map[string]models.AgentWorkspaceCounts, error) {
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+	visible := make(map[string]struct{}, len(workspaceIDs))
+	for _, workspaceID := range workspaceIDs {
+		visible[workspaceID] = struct{}{}
+	}
+	counts := make(map[string]models.AgentWorkspaceCounts, len(workspaceIDs))
+	for _, agent := range s.instances {
+		if agent == nil {
+			continue
+		}
+		if _, ok := visible[agent.WorkspaceID]; !ok {
+			continue
+		}
+		count := counts[agent.WorkspaceID]
+		count.Total++
+		if agent.Status == models.AgentStatusWorking {
+			count.Running++
+		}
+		counts[agent.WorkspaceID] = count
+	}
+	return counts, nil
 }
 
 func (s *stubAgentReader) ListAgentInstancesByIDs(_ context.Context, ids []string) ([]*models.AgentInstance, error) {

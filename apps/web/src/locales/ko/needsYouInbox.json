@@ -35,5 +35,14 @@
   "tabLabel": "처리 필요",
   "failedClauseSome_one": "이 목록은 실패한 작업을 포함하지 않습니다. {{count}}개 작업도 실패했습니다. 실패 탭을 확인하세요.",
   "failedClauseSome_other": "이 목록은 실패한 작업을 포함하지 않습니다. {{count}}개 작업도 실패했습니다. 실패 탭을 확인하세요.",
-  "failedClauseNone": "이 목록은 실패한 작업을 포함하지 않습니다. 현재 이 워크스페이스에서 실패한 작업이 없습니다. 언제든 실패 탭을 확인하세요."
+  "failedClauseNone": "이 목록은 실패한 작업을 포함하지 않습니다. 현재 이 워크스페이스에서 실패한 작업이 없습니다. 언제든 실패 탭을 확인하세요.",
+  "unansweredTitle": "미답 질문 (에이전트 대기 안 함)",
+  "unansweredDescription": "아무도 답하기 전에 에이전트가 다음 작업으로 넘어간 질문입니다. 답하면 작업에 새 메시지로 보내며, 에이전트는 이 질문 때문에 멈춰 있지 않습니다. 워크스페이스 보존 기간이 지나면 자동으로 닫힙니다.",
+  "unansweredLoadFailed": "미답 질문을 불러오지 못했습니다. 다시 시도하세요.",
+  "unansweredClose": "닫기",
+  "unansweredCloseFailed": "이 질문을 닫지 못했습니다. 다시 시도하세요.",
+  "unansweredSendTo": "답을 보낼 곳",
+  "unansweredTargetOriginal": "원래 세션",
+  "unansweredTargetTask": "작업의 현재 세션",
+  "unansweredSessionEnded": "이 질문을 한 세션은 끝났습니다."
 }

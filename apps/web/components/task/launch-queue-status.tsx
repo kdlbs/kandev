@@ -10,6 +10,8 @@ import { formatRelativeTime } from "@/lib/utils";
 import type { TaskStatusSummaryLaunchQueue } from "@/lib/types/task-status-summary";
 import {
   buildLaunchQueueViewModel,
+  LAUNCH_QUEUE_CAPACITY_REASON_LABELS,
+  launchQueueCapacityCause,
   type LaunchQueueViewModel,
 } from "@/lib/tasks/launch-queue-view-model";
 
@@ -17,10 +19,16 @@ function reasonLabel(
   reason: LaunchQueueViewModel["reason"],
   retrying: boolean,
   t: (key: string) => string,
+  all = false,
+  capacityReason?: LaunchQueueViewModel["capacityReason"],
 ): string {
+  if (reason === "session_capacity" && capacityReason)
+    return t(LAUNCH_QUEUE_CAPACITY_REASON_LABELS[capacityReason]);
   switch (reason) {
     case "session_capacity":
-      return t("task:launchQueueWaitingGlobalCapacity");
+      return t(
+        all ? "task:launchQueueWaitingExecutionCapacity" : "task:launchQueueWaitingGlobalCapacity",
+      );
     case "ownership_unavailable":
       return t("task:launchQueueOwnershipUnavailable");
     case "replay_error":
@@ -47,11 +55,14 @@ function capacityLabel(
     );
   }
 
-  let key = "task:launchQueueCapacityStale";
+  const all = view.capacity.policy === "all";
+  let key = all ? "task:launchQueueExecutionCapacityStale" : "task:launchQueueCapacityStale";
   if (view.capacityFreshness === "current") {
-    key = "task:launchQueueCapacity";
+    key = all ? "task:launchQueueExecutionCapacity" : "task:launchQueueCapacity";
   } else if (view.capacityFreshness === "stale" && !isConnected) {
-    key = "task:launchQueueCapacityDisconnected";
+    key = all
+      ? "task:launchQueueExecutionCapacityDisconnected"
+      : "task:launchQueueCapacityDisconnected";
   }
   return t(key, {
     inUse: view.capacity.inUse,
@@ -133,13 +144,15 @@ function LaunchQueueStatusContent({
           <p className="min-w-0 break-words text-foreground">
             {t("task:launchQueueDestination", { destination })}
           </p>
-          <p className="min-w-0 break-words text-muted-foreground">
-            {reasonLabel(view.reason, view.retrying, t)}
-          </p>
+          <LaunchQueueReason view={view} t={t} />
           {view.reason === "session_capacity" && (
             <>
               <p className="min-w-0 break-words text-muted-foreground">
-                {t("task:launchQueueGlobalScope")}
+                {t(
+                  view.capacity?.policy === "all"
+                    ? "task:launchQueueExecutionScope"
+                    : "task:launchQueueGlobalScope",
+                )}
               </p>
               <p className="min-w-0 break-words text-muted-foreground">
                 {t("task:launchQueueGlobalScopeHelp")}
@@ -151,13 +164,18 @@ function LaunchQueueStatusContent({
                   "mt-1 inline-flex max-w-full whitespace-normal text-left leading-tight",
                 )}
               >
-                {t("task:launchQueueConfigureCapacity")}
+                {t(
+                  view.capacity?.policy === "all"
+                    ? "task:launchQueueConfigureExecutionCapacity"
+                    : "task:launchQueueConfigureCapacity",
+                )}
               </Link>
             </>
           )}
           <p className="min-w-0 break-words tabular-nums text-muted-foreground">
             {capacityLabel(view, isConnected, t)}
           </p>
+          <LaunchQueueGradeCapacity view={view} t={t} />
           <p className="min-w-0 break-words text-muted-foreground">
             {t("task:launchQueueSince", { time: formatRelativeTime(view.queuedAt) })}
           </p>
@@ -165,5 +183,75 @@ function LaunchQueueStatusContent({
         </div>
       </div>
     </section>
+  );
+}
+
+/** The holding limit in one line when the payload names it, else the recorded reason. */
+function LaunchQueueReason({
+  view,
+  t,
+}: {
+  view: LaunchQueueViewModel;
+  t: (key: string, values?: Record<string, unknown>) => string;
+}) {
+  const cause = view.reason === "session_capacity" ? launchQueueCapacityCause(view) : null;
+  if (cause)
+    return (
+      <p
+        className="min-w-0 break-words font-medium tabular-nums text-foreground"
+        data-testid="launch-queue-capacity-cause"
+      >
+        {t(cause.key, cause.values)}
+      </p>
+    );
+  return (
+    <p className="min-w-0 break-words text-muted-foreground">
+      {reasonLabel(
+        view.reason,
+        view.retrying,
+        t,
+        view.capacity?.policy === "all",
+        view.capacityReason,
+      )}
+    </p>
+  );
+}
+
+function LaunchQueueGradeCapacity({
+  view,
+  t,
+}: {
+  view: LaunchQueueViewModel;
+  t: (key: string, values?: Record<string, unknown>) => string;
+}) {
+  const capacity = view.capacity;
+  if (capacity?.policy !== "all") return null;
+  const unknown = t("common:unknown");
+  return (
+    <div className="space-y-1">
+      <p className="font-medium">{t("task:launchQueueGradeHeading")}</p>
+      {capacity.grades?.length ? (
+        <dl className="space-y-1">
+          {capacity.grades.map((row) => (
+            <div key={row.grade} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-3">
+              <dt className="min-w-0 break-words">{row.grade}</dt>
+              <dd className="text-right tabular-nums">
+                {t("task:launchQueueGradeUsage", {
+                  inUse: row.inUse ?? unknown,
+                  limit: row.limit ?? unknown,
+                })}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="text-muted-foreground">{t("task:launchQueueGradesUnavailable")}</p>
+      )}
+      {capacity.needsConfiguration && (
+        <p className="text-amber-700 dark:text-amber-300">
+          {t("task:launchQueueGradeNeedsConfiguration")}
+        </p>
+      )}
+    </div>
   );
 }

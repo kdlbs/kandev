@@ -43,6 +43,21 @@ func (r *Repository) UpdateWorkspaceFields(ctx context.Context, id string, updat
 	if update.ACPIdleTimeoutMinutes != nil {
 		appendValue("acp_idle_timeout_minutes", *update.ACPIdleTimeoutMinutes)
 	}
+	if update.DynamicMidTurnFailoverEnabled != nil {
+		appendValue("dynamic_midturn_failover_enabled", *update.DynamicMidTurnFailoverEnabled)
+	}
+	if update.DynamicFailedRouteAutoRetryEnabled != nil {
+		appendValue("dynamic_failed_route_auto_retry_enabled", *update.DynamicFailedRouteAutoRetryEnabled)
+	}
+	if update.DynamicFailedRouteAutoRetryMax != nil {
+		appendValue("dynamic_failed_route_auto_retry_max", *update.DynamicFailedRouteAutoRetryMax)
+	}
+	if update.ClarificationUnansweredInboxEnabled != nil {
+		appendValue("clarification_unanswered_inbox_enabled", *update.ClarificationUnansweredInboxEnabled)
+	}
+	if update.ClarificationUnansweredRetentionDays != nil {
+		appendValue("clarification_unanswered_retention_days", *update.ClarificationUnansweredRetentionDays)
+	}
 	args = append(args, id)
 	query := "UPDATE workspaces SET " + strings.Join(assignments, ", ") + " WHERE id = ?"
 	if expected != nil {

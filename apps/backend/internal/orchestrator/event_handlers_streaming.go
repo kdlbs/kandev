@@ -2975,10 +2975,15 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 		zap.String("task_id", taskID))
 }
 
+func (s *Service) readValidCeilingDeferredLaunch(ctx context.Context, task *models.Task) (models.CeilingDeferral, bool, error) {
+	return s.readCeilingDeferredLaunchSnapshot(ctx, task, s.validateCeilingEntry)
+}
+
 //nolint:cyclop,nestif // Queue reconciliation validates independent task, record, destination, and workflow-entry state.
-func (s *Service) readValidCeilingDeferredLaunch(
+func (s *Service) readCeilingDeferredLaunchSnapshot(
 	ctx context.Context,
 	task *models.Task,
+	validate func(context.Context, *models.Task, models.CeilingDeferral) (ceilingEntryDisposition, string, error),
 ) (models.CeilingDeferral, bool, error) {
 	if task == nil || task.ArchivedAt != nil || task.State == v1.TaskStateCancelled {
 		return models.CeilingDeferral{}, false, nil
@@ -3016,7 +3021,7 @@ func (s *Service) readValidCeilingDeferredLaunch(
 			return models.CeilingDeferral{}, false, nil
 		}
 	}
-	disposition, detail, validationErr := s.validateCeilingEntry(ctx, task, deferral)
+	disposition, detail, validationErr := validate(ctx, task, deferral)
 	if validationErr != nil {
 		return models.CeilingDeferral{}, false, validationErr
 	}
@@ -4555,7 +4560,21 @@ func sessionSettingsEventIsStale(
 	}
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {
-		return false
+		// Without the session the candidate cannot be confirmed, so settings
+		// reported by a concrete dynamic candidate are treated as stale.
+		return identity.ExecutionProfileID != ""
+	}
+	// A dynamic session that switched concrete candidates must not accept
+	// settings reported by the previous candidate's execution.
+	if identity.ExecutionProfileID != "" && session.ExecutionProfileID != "" &&
+		identity.ExecutionProfileID != session.ExecutionProfileID {
+		return true
+	}
+	// Settings reported by an execution whose permission-mode rejection reset
+	// the runtime settings must not restore the discarded observations.
+	if rejected, _ := session.Metadata[rejectedRuntimeSettingsExecution].(string); rejected != "" &&
+		rejected == identity.ExecutionID {
+		return true
 	}
 	// A dynamic session that switched concrete candidates must not accept
 	// settings reported by the previous candidate's execution.

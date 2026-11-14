@@ -111,6 +111,7 @@ type CompletionGateSummary struct {
 }
 
 type LaunchQueueSummary struct {
+	CapacityReason string               `json:"capacity_reason,omitempty"`
 	SessionID      string               `json:"session_id,omitempty"`
 	AgentProfileID string               `json:"agent_profile_id,omitempty"`
 	WorkflowStepID string               `json:"workflow_step_id,omitempty"`
@@ -121,9 +122,13 @@ type LaunchQueueSummary struct {
 }
 
 type LaunchQueueCapacity struct {
-	InUse      int       `json:"in_use"`
-	Limit      int       `json:"limit"`
-	ObservedAt time.Time `json:"observed_at"`
+	Policy             string         `json:"policy,omitempty"`
+	GradeInUse         map[string]int `json:"grade_in_use,omitempty"`
+	GradeLimits        map[string]int `json:"grade_limits,omitempty"`
+	NeedsConfiguration bool           `json:"needs_configuration,omitempty"`
+	InUse              int            `json:"in_use"`
+	Limit              int            `json:"limit"`
+	ObservedAt         time.Time      `json:"observed_at"`
 }
 
 type PrimarySessionSummary struct {
@@ -445,6 +450,7 @@ func validateLaunchQueue(queue *LaunchQueueSummary) error {
 		{"launch queue agent profile id", queue.AgentProfileID, maxLaunchQueueIDBytes},
 		{"launch queue workflow step id", queue.WorkflowStepID, maxLaunchQueueIDBytes},
 		{"launch queue reason", queue.Reason, maxLaunchQueueReasonBytes},
+		{"launch queue capacity reason", queue.CapacityReason, maxLaunchQueueReasonBytes},
 	} {
 		if err := validateUTF8Bytes(field.name, field.value, field.limit); err != nil {
 			return err
@@ -457,6 +463,9 @@ func validateLaunchQueue(queue *LaunchQueueSummary) error {
 		queue.Reason != LaunchQueueReasonOwnershipUnavailable &&
 		queue.Reason != LaunchQueueReasonReplayError {
 		return fmt.Errorf("launch queue has unknown reason")
+	}
+	if queue.CapacityReason != "" && launchQueueCapacityReason(queue.CapacityReason) == "" {
+		return fmt.Errorf("launch queue has unknown capacity reason")
 	}
 	if queue.Capacity == nil {
 		return nil

@@ -1873,6 +1873,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 	reservation *queuedDispatchReservation,
 ) {
 	promptCtx := context.Background() // Use a fresh context for async execution
+	s.logQueuedDispatchFlow(promptCtx, queuedMsg, queuedMsg.SessionID, "started")
 	reservedSessionID := queuedMsg.SessionID
 	allowFollowupDrain := true
 	if reservation == nil {
@@ -2261,6 +2262,11 @@ func (s *Service) finishQueuedMessageExecution(
 	lifecyclePrompt, userMessageRecorded, deliveryAttempted bool,
 	err error,
 ) {
+	outcome := "returned"
+	if err != nil {
+		outcome = agentEventFailed
+	}
+	s.logQueuedDispatchFlow(ctx, queuedMsg, reservedSessionID, outcome)
 	exactReservation := reservation != nil && reservation.identity.SessionIncarnationID != ""
 	if deliveryAttempted && err != nil {
 		if exactReservation {
@@ -2879,6 +2885,8 @@ func (s *Service) finishAgentCompleted(
 	// A successful, still-live completion clears retry state and scheduler
 	// ownership only after the guarded terminal/rotation checks above.
 	s.resetTransientRetry(data.SessionID)
+	s.resetMidTurnFailoverChain(data.SessionID)
+	s.resetFailedRouteAutoRetryChain(ctx, session)
 	if !completionFollowUp {
 		s.scheduler.HandleTaskCompleted(data.TaskID, true)
 		s.scheduler.RemoveTask(data.TaskID)

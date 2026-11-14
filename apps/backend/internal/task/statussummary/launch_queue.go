@@ -1,6 +1,7 @@
 package statussummary
 
 import (
+	"maps"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -10,10 +11,14 @@ import (
 // by the orchestrator. Known is false when the controller or its population
 // store cannot be read; the queue remains visible but its count is omitted.
 type LaunchQueueCapacityObservation struct {
-	InUse      int
-	Limit      int
-	ObservedAt time.Time
-	Known      bool
+	Policy             string
+	GradeInUse         map[string]int
+	GradeLimits        map[string]int
+	NeedsConfiguration bool
+	InUse              int
+	Limit              int
+	ObservedAt         time.Time
+	Known              bool
 }
 
 // LaunchQueueSummaryFromTask maps the durable automatic-launch record to the
@@ -75,6 +80,7 @@ func launchQueueSummaryFromTask(
 			queue.WorkflowStepID = route.DestinationStepID
 		}
 	}
+	queue.CapacityReason = launchQueueCapacityReason(deferral.ReasonCode)
 	queue.Capacity = launchQueueCapacity(deferral, observation, queuedAt)
 	return queue
 }
@@ -144,9 +150,13 @@ func launchQueueCapacity(
 	if observation != nil {
 		if observation.Known && observation.InUse >= 0 && observation.Limit >= 0 && !observation.ObservedAt.IsZero() {
 			return &LaunchQueueCapacity{
-				InUse:      observation.InUse,
-				Limit:      observation.Limit,
-				ObservedAt: observation.ObservedAt.UTC(),
+				Policy:             observation.Policy,
+				GradeInUse:         maps.Clone(observation.GradeInUse),
+				GradeLimits:        maps.Clone(observation.GradeLimits),
+				NeedsConfiguration: observation.NeedsConfiguration || (observation.Policy == "all" && deferral.ReasonCode == "ceiling_needs_configuration"),
+				InUse:              observation.InUse,
+				Limit:              observation.Limit,
+				ObservedAt:         observation.ObservedAt.UTC(),
 			}
 		}
 		return nil
@@ -176,5 +186,17 @@ func launchQueueInt64Field(payload map[string]interface{}, key string) int64 {
 		return int64(value)
 	default:
 		return 0
+	}
+}
+
+// Preserve the last actual admission refusal; current counts do not establish
+// which gate refused this original queue owner. Legacy/future codes stay generic.
+func launchQueueCapacityReason(reason string) string {
+	switch reason {
+	case "ceiling_total_limit", "ceiling_grade_limit", "ceiling_both_limits",
+		"ceiling_needs_configuration", "ceiling_unknown_population":
+		return reason
+	default:
+		return ""
 	}
 }

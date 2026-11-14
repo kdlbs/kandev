@@ -35,5 +35,14 @@
   "tabLabel": "需要你處理",
   "failedClauseSome_one": "此清單不計入失敗的任務。{{count}} 個任務也失敗了,請檢視失敗標籤頁。",
   "failedClauseSome_other": "此清單不計入失敗的任務。{{count}} 個任務也失敗了,請檢視失敗標籤頁。",
-  "failedClauseNone": "此清單不計入失敗的任務。此工作區目前沒有失敗的任務,您可以隨時檢視失敗標籤頁。"
+  "failedClauseNone": "此清單不計入失敗的任務。此工作區目前沒有失敗的任務,您可以隨時檢視失敗標籤頁。",
+  "unansweredTitle": "未回答（代理程式未在等待）",
+  "unansweredDescription": "在有人回答之前代理程式就已繼續工作的問題。回答會作為新訊息傳送到任務；代理程式不會因這些問題而暫停。超過工作區的保留期後會自動關閉。",
+  "unansweredLoadFailed": "無法載入未回答的問題。請重試。",
+  "unansweredClose": "關閉",
+  "unansweredCloseFailed": "無法關閉此問題。請重試。",
+  "unansweredSendTo": "回答傳送到",
+  "unansweredTargetOriginal": "原工作階段",
+  "unansweredTargetTask": "任務的目前工作階段",
+  "unansweredSessionEnded": "提出此問題的工作階段已結束。"
 }

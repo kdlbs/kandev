@@ -6,6 +6,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { deleteTaskAfterUserAction } from "@/lib/api/domains/kanban-api";
 import { resolveSessionDeletionTarget } from "@/lib/session/session-deletion";
+import { resumeSession as requestSessionResume } from "@/lib/services/session-recovery-service";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useSessionRestart } from "./use-session-restart";
 
@@ -89,6 +90,7 @@ function useWsAction(): WsActionFn {
  */
 export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActionsArgs) {
   const wsAction = useWsAction();
+  const { t } = useTranslation("task");
   const removeTaskSession = useAppStore((state) => state.removeTaskSession);
   const removeQuickChatSession = useAppStore((state) => state.removeQuickChatSession);
   const appStoreApi = useAppStoreApi();
@@ -114,19 +116,25 @@ export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActio
     [sessionId, wsAction, isRestartPending],
   );
 
-  const resume = useCallback(
-    () =>
-      sessionId &&
-      taskId &&
-      !isRestartPending() &&
-      wsAction(
-        "session.launch",
-        "task:sessionActionResume",
-        { task_id: taskId, intent: "resume", session_id: sessionId },
-        { timeout: 30000 },
-      ),
-    [sessionId, taskId, wsAction, isRestartPending],
-  );
+  const resume = useCallback(() => {
+    if (!sessionId || !taskId || isRestartPending()) return false;
+    const session = appStoreApi.getState().taskSessions?.items?.[sessionId];
+    const metadata = session?.task_id === taskId ? session.metadata : undefined;
+    return wsAction(
+      "session.launch",
+      "task:sessionActionResume",
+      { task_id: taskId, intent: "resume", session_id: sessionId },
+      {
+        timeout: 30000,
+        ...(metadata?.inference_scope_closure != null
+          ? {
+              requestOverride: () =>
+                requestSessionResume(taskId, sessionId, t("task:failedToResumeSession"), metadata),
+            }
+          : {}),
+      },
+    );
+  }, [appStoreApi, sessionId, taskId, t, wsAction, isRestartPending]);
 
   const remove = useCallback(
     async (options: RemoveSessionOptions = {}) => {

@@ -64,6 +64,8 @@ var (
 )
 
 type Config struct {
+	// InitialInferenceOwner is installed only with a genuinely new journal.
+	InitialInferenceOwner  []byte
 	ReadOnly               bool
 	ExistingOnly           bool
 	Path                   string
@@ -172,6 +174,7 @@ type Submission struct {
 }
 
 type Journal struct {
+	fresh                    bool
 	mu                       sync.RWMutex
 	db                       *bolt.DB
 	pageSize                 int64
@@ -242,7 +245,19 @@ func (j *Journal) initialize() error {
 			if j.config.ExistingOnly {
 				return ErrJournalCorrupt
 			}
-			return initializeFreshJournal(tx, meta)
+			if err := initializeFreshJournal(tx, meta); err != nil {
+				return err
+			}
+			if len(j.config.InitialInferenceOwner) > 0 {
+				if int64(len(j.config.InitialInferenceOwner)) > j.config.MaxEventBytes {
+					return fmt.Errorf("inference birth exceeds journal record limit")
+				}
+				if err := meta.Put(keyInferenceOwner, j.config.InitialInferenceOwner); err != nil {
+					return err
+				}
+			}
+			j.fresh = true
+			return nil
 		}
 		return validateExistingJournal(tx, meta, version)
 	})

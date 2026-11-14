@@ -26,6 +26,7 @@ import { NeedsYouInboxRow } from "@/components/needs-you-inbox/needs-you-inbox-r
 import { NeedsYouInboxEmptyState } from "@/components/needs-you-inbox/needs-you-inbox-empty-state";
 import { NeedsYouInboxErrorState } from "@/components/needs-you-inbox/needs-you-inbox-error-state";
 import { NeedsYouInboxHiddenPanel } from "@/components/needs-you-inbox/needs-you-inbox-hidden-panel";
+import { NeedsYouInboxUnansweredSection } from "@/components/needs-you-inbox/needs-you-inbox-unanswered-section";
 import { InboxTabStrip } from "@/components/needs-you-inbox/inbox-tab-strip";
 import { FailedInboxTabPanel } from "@/components/needs-you-inbox/failed-inbox-tab-panel";
 import { useFailedInboxController } from "@/hooks/domains/failed-inbox/use-failed-inbox-controller";
@@ -180,6 +181,7 @@ function NeedsYouInboxTabContent({
           allocationRef={allocationRef}
         />
       )}
+      {viewMode !== "loading" && <NeedsYouInboxUnansweredSection />}
     </>
   );
 }

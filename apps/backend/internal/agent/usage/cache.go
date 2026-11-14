@@ -31,12 +31,15 @@ const maxStaleUsageAge = 30 * time.Minute
 // a failed refresh never evicts a still-valid success: non-fresh callers keep
 // being served the stale value while fresh callers share the recent error.
 type cachedEntry struct {
-	usage        *ProviderUsage
-	successAt    time.Time
-	err          error
-	errAt        time.Time
-	failures     int
-	backoffUntil time.Time
+	usage *ProviderUsage
+	// sample and previous are private copies of the two latest distinct
+	// successful samples, ordered by FetchedAt, for comparable readers.
+	sample, previous *ProviderUsage
+	successAt        time.Time
+	err              error
+	errAt            time.Time
+	failures         int
+	backoffUntil     time.Time
 }
 
 // UsageCache is a thread-safe in-memory cache for provider usage responses.
@@ -116,6 +119,23 @@ func (c *UsageCache) GetOrFetchWithin(
 	return usage, nil
 }
 
+// Refresh re-reads one account after a classified limit, replacing the cached
+// success so the next admission sees the provider's current counter.
+func (c *UsageCache) Refresh(ctx context.Context, key string, fetch func(context.Context) (*ProviderUsage, error)) (*ProviderUsage, error) {
+	lock := c.keyLock(key)
+	lock.Lock()
+	defer lock.Unlock()
+	usage, err := fetch(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			c.storeFailure(key, err)
+		}
+		return nil, err
+	}
+	c.storeSuccess(key, usage)
+	return usage, nil
+}
+
 func (c *UsageCache) keyLock(key string) *sync.Mutex {
 	c.fetchMu.Lock()
 	defer c.fetchMu.Unlock()
@@ -165,7 +185,17 @@ func (c *UsageCache) lookup(key string, maxAge time.Duration) (*ProviderUsage, b
 func (c *UsageCache) storeSuccess(key string, usage *ProviderUsage) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.entries[key] = &cachedEntry{usage: usage, successAt: time.Now()}
+	entry := &cachedEntry{usage: usage, sample: cloneProviderUsage(usage), successAt: time.Now()}
+	if old := c.entries[key]; old != nil && old.sample != nil && usage != nil {
+		switch {
+		case usage.FetchedAt.After(old.sample.FetchedAt):
+			entry.previous = cloneProviderUsage(old.sample)
+		case usage.FetchedAt.Equal(old.sample.FetchedAt):
+			// A repeated sample keeps the earlier distinct sample.
+			entry.previous = cloneProviderUsage(old.previous)
+		}
+	}
+	c.entries[key] = entry
 }
 
 // storeFailure records the error alongside — not instead of — any previous

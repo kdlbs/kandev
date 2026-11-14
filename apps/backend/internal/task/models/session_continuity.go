@@ -331,3 +331,19 @@ type InterruptedContinuationCommit struct {
 	SnapshotID           string
 	ContentHash          string
 }
+
+// WorkspaceRecoveryBlockSummary is one open session recovery block that is
+// waiting on an operator decision, as listed read-only across a workspace.
+// Only blocks of the session's current incarnation and generation are
+// listed, matching what the task chat card projects.
+type WorkspaceRecoveryBlockSummary struct {
+	BlockID           string
+	SessionID         string
+	SessionState      string
+	TaskID            string
+	TaskTitle         string
+	Reason            string
+	ConsumerReference string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}

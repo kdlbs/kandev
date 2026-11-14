@@ -301,5 +301,20 @@
   "cloneSourceMissing": "源工作區已不可用。",
   "cloneConfigurationUnsupported": "此工作區包含無法複製的受管理設定、不可用的預設設定或工作流程引用。",
   "cloneFailed": "無法複製工作區，請重試。",
-  "workspaceActionsNamed": "{{name}}的操作"
+  "workspaceActionsNamed": "{{name}}的操作",
+  "dynamicRoutingPolicyTitle": "動態路由",
+  "dynamicRoutingPolicyDescription": "選擇當提供方在輪次中途失敗時，此工作區中的動態代理程式設定檔如何恢復。此設定預設關閉。",
+  "midTurnFailoverEnabled": "達到提供方限制後嘗試下一個候選",
+  "midTurnFailoverDescription": "當已產生輸出的輪次因速率限制、配額耗盡或提供方過載而停止時，切換到下一個候選一次，並從已儲存的任務上下文繼續。失敗的請求不會重新傳送。關閉時，工作階段將等待你的操作。",
+  "failedRouteAutoRetryEnabled": "自動重試失敗的路由",
+  "failedRouteAutoRetryDescription": "當速率限制、配額耗盡或提供方過載使路由等待你的操作時，在提供方限制解除後（至少一分鐘後）自動重試。重試會從已儲存的任務上下文繼續，失敗的請求不會重新傳送。如果同一提供方以相同原因再次失敗或達到次數上限，工作階段將等待你的操作。關閉時，工作階段將等待你的操作。",
+  "failedRouteAutoRetryMax": "輪次成功前的自動重試次數",
+  "failedRouteAutoRetryMaxRange": "請輸入 1 至 3 之間的整數。",
+  "unansweredInboxTitle": "未回答的問題",
+  "unansweredInboxDescription": "讓代理程式未得到回答就繼續工作的問題，繼續顯示在 Needs-you 收件箱中，並對列出待處理問題的代理程式可見。此設定預設關閉。",
+  "unansweredInboxEnabled": "顯示未回答的問題",
+  "unansweredInboxEnabledDescription": "回答會作為新訊息傳送到任務，重複提出的問題會替換較早的副本。這些問題不會阻塞代理程式或工作流程步驟。",
+  "unansweredRetentionDays": "自動關閉（天）",
+  "unansweredRetentionDescription": "早於此天數的未回答問題會自動關閉。允許範圍：1 到 90 天。",
+  "unansweredRetentionInvalid": "請輸入 1 到 90 之間的整數。"
 }

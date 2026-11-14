@@ -301,5 +301,20 @@
   "cloneSourceMissing": "원본 워크스페이스를 더 이상 사용할 수 없습니다.",
   "cloneConfigurationUnsupported": "이 워크스페이스에 복제할 수 없는 관리 설정, 사용할 수 없는 기본 구성 또는 워크플로 참조가 있습니다.",
   "cloneFailed": "워크스페이스를 복제할 수 없습니다. 다시 시도하세요.",
-  "workspaceActionsNamed": "{{name}} 작업"
+  "workspaceActionsNamed": "{{name}} 작업",
+  "dynamicRoutingPolicyTitle": "동적 라우팅",
+  "dynamicRoutingPolicyDescription": "턴 도중 공급자에 장애가 생겼을 때 이 워크스페이스의 동적 에이전트 프로필이 어떻게 복구할지 정합니다. 기본적으로 꺼져 있습니다.",
+  "midTurnFailoverEnabled": "공급자 한도에 걸리면 다음 후보로 전환",
+  "midTurnFailoverDescription": "이미 출력이 나온 턴이 사용량 제한, 할당량 소진, 공급자 과부하로 멈추면 다음 후보로 한 번 전환하고 저장된 작업 맥락에서 이어갑니다. 실패한 요청은 다시 보내지 않습니다. 끄면 세션이 사용자를 기다립니다.",
+  "failedRouteAutoRetryEnabled": "실패한 경로를 자동으로 다시 시도",
+  "failedRouteAutoRetryDescription": "사용량 제한, 할당량 소진, 공급자 과부하로 경로가 사용자를 기다리게 되면, 공급자 제한이 풀린 뒤(최소 1분 후) 자동으로 다시 시도합니다. 다시 시도는 저장된 작업 맥락에서 이어가며 실패한 요청은 다시 보내지 않습니다. 같은 공급자가 같은 이유로 다시 실패하거나 횟수 한도에 이르면 세션이 사용자를 기다립니다. 끄면 세션이 사용자를 기다립니다.",
+  "failedRouteAutoRetryMax": "턴이 성공하기 전까지 자동 재시도 횟수",
+  "failedRouteAutoRetryMaxRange": "1에서 3 사이의 정수를 입력하세요.",
+  "unansweredInboxTitle": "미답 질문",
+  "unansweredInboxDescription": "에이전트가 답 없이 넘어간 질문을 Needs-you 수신함과 대기 질문을 조회하는 에이전트에게 계속 보여 줍니다. 기본적으로 꺼져 있습니다.",
+  "unansweredInboxEnabled": "미답 질문 표시",
+  "unansweredInboxEnabledDescription": "답은 작업에 새 메시지로 보내고, 같은 질문을 다시 물으면 이전 질문을 대신합니다. 이 질문들은 에이전트나 워크플로 단계를 막지 않습니다.",
+  "unansweredRetentionDays": "자동 닫기 (일)",
+  "unansweredRetentionDescription": "이보다 오래된 미답 질문은 자동으로 닫힙니다. 허용 범위: 1~90일.",
+  "unansweredRetentionInvalid": "1에서 90 사이의 정수를 입력하세요."
 }

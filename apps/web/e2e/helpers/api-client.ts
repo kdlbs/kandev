@@ -1395,6 +1395,8 @@ export class ApiClient {
       default_executor_id?: string;
       default_agent_profile_id?: string;
       default_config_agent_profile_id?: string;
+      clarification_unanswered_inbox_enabled?: boolean;
+      clarification_unanswered_retention_days?: number;
     },
   ): Promise<void> {
     await this.request("PATCH", `/api/v1/workspaces/${workspaceId}`, updates);

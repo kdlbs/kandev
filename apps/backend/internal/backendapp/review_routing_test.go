@@ -69,19 +69,38 @@ func nativeReviewRoute(t *testing.T, retry bool, options ...dynamic.EngineOption
 	engine := dynamic.NewEngine(options...)
 	return agentruntime.NewProfileExecutionResolver(profiles, engine, true), engine, profiles, tasks
 }
-func nativeReviewIdentity(t *testing.T, resolver *agentruntime.ProfileExecutionResolver, profiles settingsstore.Repository) review.ReviewerIdentity {
+func nativeReviewIdentity(t *testing.T, resolver *agentruntime.ProfileExecutionResolver, profiles settingsstore.Repository, runID string) review.ReviewerIdentity {
 	t.Helper()
-	identity, err := review.NewResolver(reviewProfileLookup{profiles: profiles, execution: resolver}, nil, nil).Resolve(context.Background(), "profile-dynamic")
+	// Native route owners bind the concrete route only once a durable review
+	// run exists, so resolve the identity the way a bound run does.
+	lookup := runBoundReviewLookup{lookup: reviewProfileLookup{profiles: profiles, execution: resolver}, runID: runID}
+	identity, err := review.NewResolver(lookup, nil, nil).Resolve(context.Background(), "profile-dynamic")
 	require.NoError(t, err)
 	require.NotNil(t, identity.Route)
 	require.Equal(t, "claude-acp", identity.Route.AgentID)
 	return identity
 }
 
+// noopReviewCandidateWriter accepts the durable candidate attribution that a
+// native review run records before a changed candidate executes.
+type noopReviewCandidateWriter struct{}
+
+func (noopReviewCandidateWriter) SetRunningRunReviewer(context.Context, string, string, string) error {
+	return nil
+}
+
+// nativeReviewIdentityContext is the verified owner identity the runner
+// attaches to a native review run's inference.
+func nativeReviewIdentityContext(ctx context.Context, reviewRunID string) context.Context {
+	return agentruntime.WithInferenceIdentity(ctx, agentruntime.InferenceIdentity{
+		TaskID: "task", SessionID: "session", LogicalProfileID: "profile-dynamic", ReviewRunID: reviewRunID, OwnerKind: "review",
+	})
+}
+
 // @covers AC-AGENTS-NATIVE-REVIEW-TIMEOUT-001.1
 func TestNativeReviewRouteRetainedAcrossBatchesAndStaleCAS(t *testing.T) {
 	resolver, engine, profiles, _ := nativeReviewRoute(t, false)
-	identity := nativeReviewIdentity(t, resolver, profiles)
+	identity := nativeReviewIdentity(t, resolver, profiles, "run")
 	original := *identity.Route
 	var calls []string
 	session := &reviewRouteSession{run: func(ctx context.Context, id, prompt string) (*utility.PromptResponse, error) {
@@ -95,8 +114,8 @@ func TestNativeReviewRouteRetainedAcrossBatchesAndStaleCAS(t *testing.T) {
 		}
 		return &utility.PromptResponse{Success: true, Response: `{"findings":[]}`, Model: "second"}, nil
 	}}
-	inference := reviewInference{session: session, profiles: resolver}
-	ctx := agentruntime.WithInferenceIdentity(context.Background(), agentruntime.InferenceIdentity{LogicalProfileID: "profile-dynamic", ReviewRunID: "run", OwnerKind: "review"})
+	inference := reviewInference{session: session, profiles: resolver, runs: noopReviewCandidateWriter{}}
+	ctx := nativeReviewIdentityContext(context.Background(), "run")
 	for range 2 {
 		_, err := inference.Run(ctx, identity, "session", "batch")
 		require.NoError(t, err)
@@ -112,16 +131,16 @@ func TestNativeReviewRouteRetainedAcrossBatchesAndStaleCAS(t *testing.T) {
 	require.ErrorIs(t, err, dynamic.ErrStaleGeneration)
 	after, _ := engine.State(original.SessionID)
 	require.Equal(t, state, after)
-	second := nativeReviewIdentity(t, resolver, profiles)
+	second := nativeReviewIdentity(t, resolver, profiles, "run-2")
 	require.NotEqual(t, original.SessionID, second.Route.SessionID)
 }
 func TestNativeReviewAdapterStopsPartialDeadlineCapacityAndParent(t *testing.T) {
 	for _, kind := range []string{"partial", "deadline", "capacity", "parent"} {
 		t.Run(kind, func(t *testing.T) {
 			resolver, engine, profiles, _ := nativeReviewRoute(t, false)
-			identity := nativeReviewIdentity(t, resolver, profiles)
+			identity := nativeReviewIdentity(t, resolver, profiles, "run")
 			initial, _ := engine.State(identity.Route.SessionID)
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(nativeReviewIdentityContext(context.Background(), "run"))
 			defer cancel()
 			cause := errors.New("rate limit exceeded")
 			calls := 0
@@ -139,7 +158,7 @@ func TestNativeReviewAdapterStopsPartialDeadlineCapacityAndParent(t *testing.T) 
 					return nil, context.Canceled
 				}
 			}}
-			_, err := (reviewInference{session: session, host: &hostutility.Manager{}, profiles: resolver}).Run(ctx, identity, "session", "prompt")
+			_, err := (reviewInference{session: session, host: &hostutility.Manager{}, profiles: resolver, runs: noopReviewCandidateWriter{}}).Run(ctx, identity, "session", "prompt")
 			require.Error(t, err)
 			require.Equal(t, 1, calls)
 			after, _ := engine.State(identity.Route.SessionID)
@@ -205,9 +224,10 @@ func TestNativeReviewRunnerUsesVerifiedIdentityAndSameRoute(t *testing.T) {
 	}}
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	require.NoError(t, err)
+	store := taskservice.NewReviewService(tasks, nil, log)
 	runner := review.NewRunner(review.RunnerDeps{
-		Store: taskservice.NewReviewService(tasks, nil, log), Resolver: review.NewResolver(reviewProfileLookup{profiles: profiles, execution: resolver}, nil, nil),
-		Inference: reviewInference{session: session, profiles: resolver}, InferenceContext: reviewInferenceContext(tasks), Changes: reviewRouteChanges{}, Prompts: reviewRoutePrompts{}, Logger: log, BudgetBytes: 35,
+		Store: store, Resolver: review.NewResolver(reviewProfileLookup{profiles: profiles, execution: resolver}, nil, nil),
+		Inference: reviewInference{session: session, profiles: resolver, runs: store}, InferenceContext: reviewInferenceContext(tasks), Changes: reviewRouteChanges{}, Prompts: reviewRoutePrompts{}, Logger: log, BudgetBytes: 35,
 	})
 	runner.Start(context.Background())
 	t.Cleanup(runner.Stop)
@@ -244,7 +264,7 @@ func TestNativeReviewContextRejectsUnverifiedRelationships(t *testing.T) {
 func TestNativeReviewPendingRouteCarriesExactResumeIdentity(t *testing.T) {
 	now := time.Now()
 	resolver, _, profiles, _ := nativeReviewRoute(t, true, dynamic.WithClock(func() time.Time { return now }))
-	identity := nativeReviewIdentity(t, resolver, profiles)
+	identity := nativeReviewIdentity(t, resolver, profiles, "run")
 	route := identity.Route
 	failure := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend, ProviderID: "claude-acp", Stderr: "rate limit exceeded"})
 	next, err := resolver.ResolveExecutionAfterFailure(context.Background(), route.SessionID, "profile-dynamic", route.ExecutionProfileID, route.Generation, failure)
@@ -277,7 +297,7 @@ func TestNativeReviewClassifiedSessionErrorUsesPolicyBeforeHostFallback(t *testi
 	for _, channel := range []string{"transport", "response"} {
 		t.Run(channel, func(t *testing.T) {
 			resolver, _, profiles, _ := nativeReviewRoute(t, false)
-			identity := nativeReviewIdentity(t, resolver, profiles)
+			identity := nativeReviewIdentity(t, resolver, profiles, "run")
 			var calls []string
 			session := &reviewRouteSession{run: func(_ context.Context, id, prompt string) (*utility.PromptResponse, error) {
 				calls = append(calls, id)
@@ -289,7 +309,7 @@ func TestNativeReviewClassifiedSessionErrorUsesPolicyBeforeHostFallback(t *testi
 				}
 				return &utility.PromptResponse{Success: true, Response: `{"findings":[]}`}, nil
 			}}
-			result, err := (reviewInference{session: session, host: &hostutility.Manager{}, profiles: resolver}).Run(context.Background(), identity, "session", "prompt")
+			result, err := (reviewInference{session: session, host: &hostutility.Manager{}, profiles: resolver, runs: noopReviewCandidateWriter{}}).Run(nativeReviewIdentityContext(context.Background(), "run"), identity, "session", "prompt")
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			require.Equal(t, []string{"concrete-profile", "candidate-b"}, calls)
@@ -306,7 +326,7 @@ func TestNativeReviewHostPolicyUsesSuccessorProviderIdentity(t *testing.T) {
 	require.NoError(t, err)
 	candidate.AgentID = "codex-row"
 	require.NoError(t, profiles.UpdateAgentProfile(ctx, candidate))
-	identity := nativeReviewIdentity(t, resolver, profiles)
+	identity := nativeReviewIdentity(t, resolver, profiles, "run")
 	first := errors.New("rate limit exceeded")
 	successor := errors.New("rate_limit_exceeded")
 	var calls []string
@@ -317,7 +337,7 @@ func TestNativeReviewHostPolicyUsesSuccessorProviderIdentity(t *testing.T) {
 		}
 		return nil, successor
 	}}
-	_, err = (reviewInference{session: session, host: &hostutility.Manager{}, profiles: resolver}).Run(ctx, identity, "session", "prompt")
+	_, err = (reviewInference{session: session, host: &hostutility.Manager{}, profiles: resolver, runs: noopReviewCandidateWriter{}}).Run(nativeReviewIdentityContext(ctx, "run"), identity, "session", "prompt")
 	require.ErrorIs(t, err, successor)
 	require.Equal(t, []string{"concrete-profile", "candidate-b"}, calls)
 	require.Equal(t, "codex-acp", identity.Route.AgentID)
@@ -631,4 +651,13 @@ func TestReviewAgentctlUnavailableUsesLocalGit(t *testing.T) {
 			t.Fatalf("multi-repo root key must be the empty scope key: %v", pair)
 		}
 	})
+}
+
+type runBoundReviewLookup struct {
+	lookup reviewProfileLookup
+	runID  string
+}
+
+func (l runBoundReviewLookup) ReviewerProfile(ctx context.Context, profileID string) (review.ReviewerProfile, bool, error) {
+	return l.lookup.ReviewerProfileForRun(ctx, profileID, l.runID)
 }

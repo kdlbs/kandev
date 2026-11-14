@@ -285,6 +285,14 @@ func (r *Runner) launch(ctx context.Context, req RunRequest) (*models.TaskReview
 		return nil, nil, err
 	}
 
+	// The durable run row now exists, so a native route may select and persist
+	// its concrete profile. A capacity wait is handed to the detached worker.
+	var admissionWait nativeAdmissionWaiter
+	run, identity, admissionWait, err = r.prepareRunReviewer(ctx, run, identity)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	runCtx, cancel := context.WithTimeout(r.backgroundContext(), runTimeout)
 	done := r.attach(req.TaskID, run.ID, cancel)
 	launched = true
@@ -294,7 +302,7 @@ func (r *Runner) launch(ctx context.Context, req RunRequest) (*models.TaskReview
 		defer r.wg.Done()
 		defer r.release(req.TaskID)
 		defer cancel()
-		if err := r.execute(runCtx, req, run.ID, identity, files); err != nil {
+		if err := r.executePreparedRun(runCtx, req, run, identity, admissionWait, files); err != nil {
 			r.logger.Warn("review run failed",
 				zap.String("task_id", req.TaskID), zap.String("run_id", run.ID), zap.Error(err))
 		}
@@ -417,8 +425,12 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*models.TaskReviewRun
 // run row before returning, so the UI always has a reason to show.
 func (r *Runner) execute(ctx context.Context, req RunRequest, runID string, identity ReviewerIdentity, files []ChangedFile) error {
 	started := time.Now()
-	if _, err := r.store.MarkRunRunning(ctx, runID); err != nil {
+	claimed, err := r.startInferenceRun(ctx, runID, identity)
+	if err != nil {
 		return err
+	}
+	if !claimed {
+		return nil
 	}
 	if r.inferenceContext != nil {
 		verified, err := r.inferenceContext(ctx, req, runID, identity)
@@ -465,7 +477,7 @@ func (r *Runner) execute(ctx context.Context, req RunRequest, runID string, iden
 		}
 	}
 
-	_, err = r.store.CompleteRun(ctx, taskservice.CompleteRunRequest{
+	completed, err := r.store.CompleteRun(ctx, taskservice.CompleteRunRequest{
 		RunID:           runID,
 		Summary:         summary,
 		FindingCount:    len(inputs),
@@ -475,6 +487,9 @@ func (r *Runner) execute(ctx context.Context, req RunRequest, runID string, iden
 		ResponseTokens:  accumulated.responseTokens,
 		DurationMs:      int(time.Since(started).Milliseconds()),
 	})
+	if err == nil {
+		r.completeVerifiedSelection(ctx, completed, identity)
+	}
 	return err
 }
 
