@@ -23,8 +23,8 @@ The design uses these contracts without changing them:
   and the executor survival designs.
 - Port allocation and leases, owned by the executor system.
 - [Built-in MCP project delivery](builtin-mcp-project-delivery.md), which keeps
-  its record and fingerprint rules. Generated file content now includes one
-  more header.
+  its record and fingerprint rules. Generated file content includes the caller
+  header only when enforcement is enabled.
 - [Passthrough MCP injection strategies](../../../decisions/0014-passthrough-mcp-injection-strategies.md).
 - Session binding of tool calls in `internal/mcp/server`. Identity still comes
   from the server instance. This design only controls who can reach it.
@@ -49,13 +49,14 @@ The design uses these contracts without changing them:
 
 ## Credential lifecycle
 
-`instance.Manager.CreateInstance` generates the credential during startup,
-before the instance's server handler is built. It uses 32 bytes from
-`crypto/rand`, encoded as unpadded base64url. It stores the value on
-`config.InstanceConfig` as `BuiltinMCPCredential`. The value lives only in agentctl
-memory. A new instance always gets a new value, including when it reuses a port.
-Deleting the instance destroys the value. Agent survival keeps the agentctl
-process alive, so the credential survives a backend restart unchanged.
+`instance.Manager.CreateInstance` generates a credential only when its create
+request enables enforcement, before the instance's server handler is built. It
+uses 32 bytes from `crypto/rand`, encoded as unpadded base64url. It stores the
+value on `config.InstanceConfig` as `BuiltinMCPCredential`. The value lives only
+in agentctl memory. An enforced instance gets a new value, including when it
+reuses a port. A disabled instance has no credential. Deleting the instance
+destroys its value. Agent survival keeps the agentctl process alive, so an
+enforced instance's credential survives a backend restart unchanged.
 
 The backend learns the credential through one control-authenticated instance
 read, `GET /api/v1/mcp/builtin-credential`
@@ -64,12 +65,14 @@ no-store`). The route is under `/api/v1`, so `instanceAuth` requires the
 control credential, and the MCP credential never satisfies it. The backend
 reads it on demand (`agentctl.Client.BuiltinMCPCredential`) each time it
 builds a delivery artifact, through the client of the instance that artifact
-targets. Project-file delivery reads through its placement client, so a
+targets. The route returns an empty credential when enforcement is disabled.
+Project-file delivery reads through its placement client, so a
 restart that stages a replacement helper reads the replacement's credential
 before the replacement is published on the execution. Other paths read
 through the execution's own client. It does not cache the value, so a replaced or adopted instance
-always yields its own credential, for every executor, without threading the
-value through create responses or recovery inventories.
+always yields its own credential when enforcement is enabled, for every
+executor, without threading the value through create responses or recovery
+inventories.
 
 Instance create, get, and list responses do not carry the credential. In
 tokenless agentctl startup, the instance routes are reachable only through the
@@ -102,14 +105,15 @@ the instance's own `/mcp` is therefore rejected under enforcement.
 
 ## Built-in entry construction
 
-The credential becomes a header on every built-in entry at its single
-construction point:
+When enforcement is enabled, the credential becomes a header on every built-in
+entry at its single construction point:
 
 - `config.BuiltinMCPServers(manifest, host, port, credential)` and
   `injectKandevMcpServerAtHost(servers, port, host, credential)` add
   `Headers: {"Authorization": "Bearer <credential>"}`. With an empty credential,
-  they produce the current header-less entry. That case only occurs in tests and
-  in older backend/agentctl pairs.
+  they produce the pre-capability header-less entry. This is the normal shape
+  when the feature is disabled, and it also supports older backend/agentctl
+  pairs.
 - `api.Server.injectKandevMcpServers` and `builtinSessionMCPServers` copy
   `Headers` together with `Name`, `Type`, `URL`, and `BuiltinPackage`.
 - `process.Manager.PrepareBuiltinProfile` rebuilds `cfg.McpServers` through the
@@ -151,6 +155,8 @@ entry, including headers:
   headers equal exactly `{"Authorization": "Bearer <own credential>"}`.
 - `builtinPermissionAllowed`/`builtinEndpointOnly` (`builtin_mcp_permission.go`)
   compare `Name`, `Type`, `URL`, and `Headers` against `BuiltinMCPServers` output.
+  This accepts the header-less entry when enforcement is disabled and the exact
+  instance credential header when it is enabled.
 
 A user-defined server with the same URL but different headers stays a
 third-party server.
@@ -166,26 +172,28 @@ contract. The rollout is:
 - Promotion to `prod: "true"` is a separate change. It needs the compatibility
   evidence in the plan.
 
-The flag is restart-required. Backend startup records its effective value once
-(`agentctl.SetBuiltinMCPAuthEnforced`), and `ControlClient.CreateInstance` sends
-it as `builtin_mcp_auth_enforced` on every create request, from every
-executor.
-`instance.Manager` copies that value to `config.InstanceConfig`. Remote
-agentctl processes never read the backend environment. When the flag is
-disabled, credentials are still issued and delivered. Agents therefore have
-the header before enforcement starts.
+The flag is restart-required. Backend startup configures the lifecycle manager
+with its effective value. The manager puts that value on each executor create
+request, and `ControlClient.CreateInstance` sends it as
+`builtin_mcp_auth_enforced`. `instance.Manager` copies that value to
+`config.InstanceConfig`. Remote agentctl processes never read the backend
+environment. When the flag is disabled, no credential is generated or
+delivered. Built-in entries remain header-less, preserving the provider's
+previous configuration and approval fingerprint.
 
-An older agentctl ignores `builtin_mcp_auth_enforced` and returns no
-credential. The backend then builds header-less entries, as today. An older
-backend sends no flag. A newer agentctl then issues a credential but does not
-enforce it.
+An older agentctl ignores `builtin_mcp_auth_enforced`; its credential read route
+returns a plain 404 and the backend builds header-less entries. A 404 response
+that identifies a recycled port is an error, so the backend does not build
+header-less entries for a potentially enforced replacement. An older backend
+sends no flag, so a newer agentctl creates a header-less, unenforced instance.
 
 ## Failure and recovery
 
 - A provider that drops the header gets 401 on every Kandev tool under
   enforcement. Its session then reports a failed MCP server through existing MCP
-  attachment evidence. The operator recovers by disabling the flag. New
-  instances then run without enforcement.
+  attachment evidence. The operator can disable the flag and restart or recreate
+  the affected session. New instances then receive no credential and run with
+  header-less entries. Existing instances keep their original mode.
 - A backend that cannot read the credential from an attached instance shall not
   relaunch passthrough or rewrite project files with header-less entries. It
   reports the existing relaunch or preparation failure instead. An instance

@@ -38,8 +38,7 @@ func TestCreateInstance_CredentialIsRandomAndScoped(t *testing.T) {
 	raw, err := base64.RawURLEncoding.DecodeString(first.BuiltinMCPCredential)
 	require.NoError(t, err)
 	require.Len(t, raw, 32)
-	require.NotEqual(t, first.BuiltinMCPCredential, second.BuiltinMCPCredential)
-	require.NotEmpty(t, second.BuiltinMCPCredential, "credential is issued even without enforcement")
+	require.Empty(t, second.BuiltinMCPCredential, "disabled auth must not issue a credential")
 	require.True(t, first.BuiltinMCPAuthEnforced)
 	require.False(t, second.BuiltinMCPAuthEnforced)
 
@@ -69,7 +68,7 @@ func TestCreateInstance_PortReuseIssuesNewCredential(t *testing.T) {
 func TestCreateInstance_BuiltinEntriesCarryInstanceCredential(t *testing.T) {
 	mgr := newConcurrencyTestManager(t, 1)
 	configs := captureInstanceConfigs(mgr)
-	_, err := mgr.CreateInstance(context.Background(), &CreateRequest{WorkspacePath: t.TempDir()})
+	_, err := mgr.CreateInstance(context.Background(), &CreateRequest{WorkspacePath: t.TempDir(), BuiltinMCPAuthEnforced: true})
 	require.NoError(t, err)
 	require.Len(t, *configs, 1)
 	cfg := (*configs)[0]
@@ -79,6 +78,26 @@ func TestCreateInstance_BuiltinEntriesCarryInstanceCredential(t *testing.T) {
 	for _, server := range cfg.McpServers {
 		if server.Name == "kandev" {
 			require.Equal(t, want, server.Headers)
+			found++
+		}
+	}
+	require.Equal(t, 2, found)
+}
+
+func TestCreateInstance_DisabledBuiltinAuthKeepsEntriesHeaderless(t *testing.T) {
+	mgr := newConcurrencyTestManager(t, 1)
+	configs := captureInstanceConfigs(mgr)
+	_, err := mgr.CreateInstance(context.Background(), &CreateRequest{WorkspacePath: t.TempDir()})
+	require.NoError(t, err)
+	require.Len(t, *configs, 1)
+	cfg := (*configs)[0]
+	require.Empty(t, cfg.BuiltinMCPCredential)
+	require.False(t, cfg.BuiltinMCPAuthEnforced)
+
+	found := 0
+	for _, server := range cfg.McpServers {
+		if server.Name == "kandev" {
+			require.Empty(t, server.Headers)
 			found++
 		}
 	}

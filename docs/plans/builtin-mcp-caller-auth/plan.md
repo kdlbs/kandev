@@ -14,31 +14,37 @@ legacy_specs: []
 
 ## Overview
 
-Each agentctl instance gets its own MCP caller credential. Kandev delivers the
-credential to the agent it launched, and the built-in MCP endpoint rejects any
-other caller when enforcement is on. This stops blind or stale-port calls, like
-the 2026-11-02 and 2026-11-06 incidents, from creating clarifications in another
-session.
+Each agentctl instance created with enforcement enabled gets its own MCP caller
+credential. Kandev delivers it to the agent it launched, and the built-in MCP
+endpoint rejects other callers. When enforcement is disabled, agentctl does not
+issue a credential and Kandev keeps entries header-less. This stops blind or
+stale-port calls, like the 2026-11-02 and 2026-11-06 incidents, from creating
+clarifications in another session while preserving existing provider
+configuration when the feature is off.
 
 Order:
 
-1. agentctl issues the credential and can enforce it.
-2. agentctl builds and recognizes credentialed built-in entries.
-3. The backend sends the enforcement value and delivers the credential on its
-   own delivery paths.
+1. agentctl issues a credential only for an enforced instance and can enforce
+   it.
+2. agentctl builds credentialed entries when a credential exists and preserves
+   header-less entries when it does not.
+3. The backend sends the enforcement value through each lifecycle create path
+   and delivers credentials on its own delivery paths when enforcement is on.
 4. End-to-end and provider compatibility evidence.
 
-Each step is safe to merge alone. Enforcement stays off unless the backend asks
-for it, and the backend asks only after step 3.
+Each step is safe to merge alone. The disabled path keeps the previous
+header-less behavior. Enforcement stays off unless the backend asks for it.
 
 ## Scope
 
 ### In scope
 
-- Credential generation, storage, and authenticated return to the backend.
+- Credential generation for enforced instances, storage, and authenticated
+  return to the backend.
 - Enforcement middleware on the core and package `/mcp`, `/sse`, and `/message`
   routes.
-- Credentialed built-in entries for every delivery path and policy check.
+- Credentialed built-in entries when enforcement is enabled, with header-less
+  entries and policy recognition when it is disabled.
 - The `builtinMcpCallerAuth` runtime release toggle, on in E2E only.
 - Mock-agent support, E2E coverage, provider evidence, and log redaction.
 
@@ -58,8 +64,9 @@ for it, and the backend asks only after step 3.
 
 - `internal/agentctl/server/instance/instance.go`:
   `CreateRequest.BuiltinMCPAuthEnforced` (`builtin_mcp_auth_enforced`).
-- `internal/agentctl/server/instance/manager.go`: generate the credential
-  before `startInstance` builds the handler. Store it, with the enforcement
+- `internal/agentctl/server/instance/manager.go`: generate the credential only
+  when the create request enables enforcement, before `startInstance` builds
+  the handler. Store it, with the enforcement
   value, on `config.InstanceConfig` (`BuiltinMCPCredential`,
   `BuiltinMCPAuthEnforced`).
 - `internal/agentctl/server/api/server.go` and `builtin_mcp_auth.go`: the
@@ -92,10 +99,12 @@ for it, and the backend asks only after step 3.
   dev `"false"`, e2e `"true"`), `internal/common/config/config.go`
   (`FeaturesConfig.BuiltinMCPCallerAuth`), and one registration in
   `internal/runtimeflags/registry.go`.
-- `internal/agent/runtime/agentctl`: `SetBuiltinMCPAuthEnforced`, called once
-  at backend startup, and `ControlClient.CreateInstance` sends the value on
-  every create request from every executor. `Client.BuiltinMCPCredential`
-  reads the credential through the instance route.
+- `internal/agent/runtime/lifecycle`: receive the restart-scoped flag at
+  startup and put it on each executor create request. Each create request
+  builder passes it to agentctl; `ControlClient.CreateInstance` serializes the
+  caller's explicit value. `Client.BuiltinMCPCredential` reads the credential
+  through the instance route. A plain 404 identifies an older agentctl, while a
+  recycled-port 404 is an error.
 - `internal/agent/runtime/lifecycle`: read the credential on demand from the
   execution's agentctl client for each artifact build, so adopted and replaced
   instances need no extra state. Use it in
@@ -129,12 +138,12 @@ evidence count as supported.
 | 001.2 | `internal/agentctl/server/instance/manager_mcp_credential_test.go`: `TestCreateInstance_PortReuseIssuesNewCredential` |
 | 001.3 | `internal/agentctl/server/api/builtin_mcp_auth_test.go`: `TestBuiltinMCPCallerAuth_OwnCredentialServesToolsAndSSE` |
 | 001.4 | `builtin_mcp_auth_test.go`: `TestBuiltinMCPCallerAuth_ControlCredentialRejected`, `TestInstanceAuth_MCPCredentialRejectedOnControlRoutes` |
-| 001.5 | `manager_mcp_credential_test.go`: `TestCreateInstance_CredentialIsRandomAndScoped` |
+| 001.5, 003.1 | `manager_mcp_credential_test.go`: `TestCreateInstance_CredentialIsRandomAndScoped`, `TestCreateInstance_DisabledBuiltinAuthKeepsEntriesHeaderless` |
 | 002.1 | `config/builtin_mcp_test.go`: `TestBuiltinMCPServers_CarryCredentialHeader`; `api/builtin_mcp_session_test.go`; `acp/mcp_test.go`; `codexappserver/builtin_mcp_test.go`; `lifecycle/builtin_mcp_passthrough_test.go`; `lifecycle/builtin_mcp_cursor_test.go` |
 | 002.2 | `acp/mcp_test.go`: `TestLoadAndResumeForwardBuiltinHeaders`; `lifecycle`: `TestAdoptedExecutionReusesInstanceCredential` |
 | 002.3 | `process/manager_permission_policy_test.go`, `process/builtin_mcp_permission_test.go`, `process/managed_tool_policy_test.go`: exact-header acceptance and foreign-header rejection |
 | 002.4 | Web E2E `e2e/tests/chat/clarification*.spec.ts` with the E2E profile |
-| 003.1, 003.2 | `builtin_mcp_auth_test.go`: `TestBuiltinMCPCallerAuth_DisabledPassesThrough`; `lifecycle`: `TestCreateInstanceRequestCarriesEnforcementFlag` |
+| 003.1, 003.2 | `builtin_mcp_auth_test.go`: `TestBuiltinMCPCallerAuth_DisabledPassesThrough`; `runtime/agentctl`: `TestCreateInstanceRequestCarriesExplicitEnforcementFlag`, `TestClientBuiltinMCPCredential`; lifecycle manager and executor request propagation tests |
 | 003.3 | `builtin_mcp_auth_test.go`: `TestBuiltinMCPCallerAuth_RejectionLogIsRateLimited` |
 | 003.4 | `builtin_mcp_auth_test.go` and lifecycle log tests assert the credential is absent from captured logs and responses |
 
@@ -173,24 +182,41 @@ Design changes made during implementation, reflected in the system design:
 - The backend reads the credential on demand through the control-authenticated
   instance route `GET /api/v1/mcp/builtin-credential`. Create, get, and list
   responses and the passthrough and project-file snapshots do not carry it.
-- `ControlClient.CreateInstance` sends the restart-required toggle value set
-  once at startup, so every executor's create path carries it.
+- The lifecycle manager receives the restart-required toggle at startup and
+  explicitly passes it through every executor create request. The control
+  client serializes that request value without process-global state.
 - `acpdbg mcp-probe` now advertises a random header and reports
   `header_observed` and `header_missing`.
+
+2026-11-14, PR #5294 review remediation:
+
+- Credential generation is gated by the create request's enforcement value;
+  disabled instances and their generated entries remain header-less.
+- The backend sends the restart-scoped setting through the lifecycle manager
+  and every executor create-request builder, without process-global state.
+- The backend treats a recycled-port 404 as a credential-read error while
+  preserving plain 404 compatibility with older agentctl versions.
+- Focused instance, process-policy, runtime/agentctl, and lifecycle tests passed.
+  `bash scripts/lint-go-changed <changed Go files>` reported 0 issues.
+- `python3 scripts/list-docs.py validate` and
+  `python3 scripts/lint-spec-files.py --all` passed.
 
 ## Risks
 
 - A provider may drop ACP `headers`. That provider loses Kandev tools under
   enforcement. Task 04 records this, and the toggle stays off in production.
+  With the toggle disabled, the instance gets no credential and entries remain
+  header-less.
 - The credential appears in argv and in workspace files (`.cursor/mcp.json`,
   `.pi/mcp.json`). It expires with the instance but can be committed by
   accident.
-- Cursor fingerprint approval runs again for every new instance. If that needs
-  user action, Cursor sessions regress.
+- Cursor fingerprint approval changes for each new enforced instance. When the
+  toggle is disabled, Kandev preserves the previous header-less fingerprint.
 - Policy recognition with exact headers can disable automatic approval if any
   construction path misses the header. Task 02 tests cover every builder.
 - Mixed versions degrade to unauthenticated behavior, so a stale remote
-  agentctl does not enforce.
+  agentctl does not enforce. A `recycled_port: true` 404 must fail instead of
+  being treated as an older agentctl.
 
 ## Resolved questions
 

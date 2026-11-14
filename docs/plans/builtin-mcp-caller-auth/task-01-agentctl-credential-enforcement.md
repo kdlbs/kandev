@@ -25,18 +25,18 @@ system_design:
 
 ## Summary
 
-Each agentctl instance issues a random MCP caller credential when it is created
-and returns it through authenticated control responses. When the create request
-asks for enforcement, the built-in MCP routes reject requests without that
-credential.
+An agentctl instance issues a random MCP caller credential only when its create
+request enables enforcement, then returns it through authenticated control
+responses. When enforcement is on, the built-in MCP routes reject requests
+without that credential. With enforcement off, no credential is generated.
 
 ## In scope
 
 - `CreateRequest.BuiltinMCPAuthEnforced` and the control-authenticated instance
   read `GET /api/v1/mcp/builtin-credential`. Create, get, and list responses
   never carry the credential.
-- Credential generation in `instance.Manager` and storage on
-  `config.InstanceConfig`.
+- Conditional credential generation in `instance.Manager` and storage on
+  `config.InstanceConfig` only when enforcement is enabled.
 - The `builtinMCPCallerAuth` middleware on the core and package `/mcp`, `/sse`,
   and `/message` routes, with `/health` open.
 - Rate-limited rejection logs without the credential value.
@@ -52,8 +52,7 @@ credential.
   have no credential, the control credential, or another instance's
   credential. This includes a previous instance on the same port. With the own
   credential, `initialize`, `tools/list`, and an SSE session work.
-- With enforcement off, behavior equals today's, and the credential is still
-  issued.
+- With enforcement off, behavior equals today's and no credential is issued.
 - The credential is absent from list responses and captured logs.
 
 ## Verification

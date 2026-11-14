@@ -1269,6 +1269,7 @@ func (m *Manager) prepareExecutionCreateRequestForPurpose(
 			AutoApprovePermissionsOverride:   workspace.AutoApprovePermissionsOverride,
 			McpMode:                          info.McpMode,
 			PromptSuggestions:                m.promptSuggestionsForLaunch(ctx, info.McpMode),
+			BuiltinMCPAuthEnforced:           m.builtinMCPAuthEnforced,
 			AgentConfig:                      agentConfig,
 			Metadata:                         workspace.Metadata,
 			ApprovedSecretEnvKeys:            append([]string(nil), envPreparation.approvedSecretEnvKeys...),

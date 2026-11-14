@@ -714,11 +714,14 @@ type ExecutorCreateRequest struct {
 	// the provider, durable delivery, canonical projector, and authenticated
 	// peer capability. Executors only forward it; they never re-derive it.
 	CopilotNativeSessionEvents bool
-	WorkspaceSourceRoots       []string
-	WorkspaceExcludedRoots     []string
-	TaskWorkspaceRoot          string
-	Protocol                   string
-	CodexAppServerEnabled      bool
+	// BuiltinMCPAuthEnforced is the backend's restart-scoped setting for each
+	// newly created agentctl instance.
+	BuiltinMCPAuthEnforced bool
+	WorkspaceSourceRoots   []string
+	WorkspaceExcludedRoots []string
+	TaskWorkspaceRoot      string
+	Protocol               string
+	CodexAppServerEnabled  bool
 	// Env is the launch request environment. Executors that adopt a retained
 	// process keep the peer's own environment instead (see ExecutorInstance.Env).
 	Env map[string]string

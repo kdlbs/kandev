@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -69,8 +70,38 @@ func TestAgentctlMCPToolNamePresentationCapabilityPropagatesThroughExecutors(t *
 	}
 }
 
+func TestBuiltinMCPAuthEnforcementPropagatesThroughEveryAgentctlCreateRequest(t *testing.T) {
+	for _, enforced := range []bool{true, false} {
+		t.Run(fmt.Sprintf("enforced_%v", enforced), func(t *testing.T) {
+			req := &ExecutorCreateRequest{BuiltinMCPAuthEnforced: enforced}
+			containerConfig, err := buildDockerContainerConfig(req, string(models.ExecutorTypeLocalDocker))
+			if err != nil {
+				t.Fatalf("buildDockerContainerConfig: %v", err)
+			}
+			sprites := agentctlInstanceRequest(req, spritesWorkspacePath)
+			plugin := agentctlInstanceRequest(req, "/workspace")
+			ssh := buildSSHCreateInstanceRequest(req, "/workspace", "/remote/agentctl")
+			requests := map[string]*agentctl.CreateInstanceRequest{
+				"standalone": buildStandaloneCreateInstanceRequest(req, nil, "", false, false, false, false, nil),
+				"container":  buildContainerCreateInstanceRequest(containerConfig, "", false, false, false, false, nil),
+				"docker":     buildReconnectCreateInstanceRequest(req, "previous-execution"),
+				"kubernetes": buildReconnectCreateInstanceRequest(req, "previous-execution"),
+				"sprites":    &sprites,
+				"plugin":     &plugin,
+				"ssh":        &ssh,
+			}
+			for executor, request := range requests {
+				if request.BuiltinMCPAuthEnforced != enforced {
+					t.Errorf("%s enforcement = %v, want %v", executor, request.BuiltinMCPAuthEnforced, enforced)
+				}
+			}
+		})
+	}
+}
+
 func TestManagerLaunchCarriesMCPProvidersToExecutor(t *testing.T) {
 	mgr, backend := newEnvironmentExecutionTestManager(t, nil)
+	mgr.SetBuiltinMCPAuthEnforced(true)
 	want := []string{"github", "gitlab"}
 	_, err := mgr.Launch(context.Background(), &LaunchRequest{
 		TaskID:         "task-provider-launch",
@@ -88,6 +119,9 @@ func TestManagerLaunchCarriesMCPProvidersToExecutor(t *testing.T) {
 	}
 	if !reflect.DeepEqual(backend.lastRequest.McpProviders, want) {
 		t.Fatalf("executor McpProviders = %#v, want %#v", backend.lastRequest.McpProviders, want)
+	}
+	if !backend.lastRequest.BuiltinMCPAuthEnforced {
+		t.Fatal("executor request lost the built-in MCP caller-auth mode")
 	}
 }
 

@@ -28,6 +28,19 @@ func (c *Client) BuiltinMCPCredential(ctx context.Context) (string, error) {
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode == http.StatusNotFound {
+		body, err := io.ReadAll(io.LimitReader(response.Body, builtinMCPCredentialResponseLimit+1))
+		if err != nil {
+			return "", fmt.Errorf("read built-in MCP credential: decode 404 response: %w", err)
+		}
+		if len(body) > builtinMCPCredentialResponseLimit {
+			return "", fmt.Errorf("read built-in MCP credential: 404 response exceeds %d bytes", builtinMCPCredentialResponseLimit)
+		}
+		var result struct {
+			RecycledPort bool `json:"recycled_port"`
+		}
+		if json.Unmarshal(body, &result) == nil && result.RecycledPort {
+			return "", fmt.Errorf("read built-in MCP credential: instance ID changed at a recycled port")
+		}
 		return "", nil
 	}
 	if response.StatusCode != http.StatusOK {

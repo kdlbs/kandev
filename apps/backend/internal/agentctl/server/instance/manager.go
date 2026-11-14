@@ -287,9 +287,13 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 		zap.String("workspace_path", req.WorkspacePath))
 
 	overrides := m.buildInstanceOverrides(id, req, agentCmd, admission.agentEnv)
-	credential, err := config.NewBuiltinMCPCredential()
-	if err != nil {
-		return nil, nil, nil, err
+	var credential string
+	if req.BuiltinMCPAuthEnforced {
+		generated, err := config.NewBuiltinMCPCredential()
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		credential = generated
 	}
 	overrides.BuiltinMCPCredential = credential
 	overrides.BuiltinMCPAuthEnforced = req.BuiltinMCPAuthEnforced

@@ -20,9 +20,9 @@ reuse made a stale port point at a different session without any error.
 
 ## Decision
 
-Each agentctl instance issues its own random MCP caller credential when it is
-created. The built-in MCP routes require it as `Authorization: Bearer` when
-enforcement is enabled for that instance. The credential:
+Each agentctl instance created with caller authentication enabled issues its own
+random MCP caller credential. The built-in MCP routes require it as
+`Authorization: Bearer`. The credential:
 
 - is separate from the control credential and never authorizes another route;
 - is returned to the backend only through a control-authenticated instance
@@ -35,6 +35,10 @@ policies recognize the built-in entry only with its exact expected header.
 Enforcement is a per-instance value derived from a runtime release toggle. Its
 default stays off until provider compatibility evidence exists.
 
+When the toggle is off, agentctl does not generate a credential and Kandev
+does not add authorization headers to built-in entries. This preserves the
+existing provider configuration and approval fingerprint.
+
 This is protection against accidental or blind cross-session access. It is not
 isolation between processes of the same operating-system user.
 
@@ -42,15 +46,18 @@ isolation between processes of the same operating-system user.
 
 - A blind call, a port scan, or a stale port gets 401 instead of acting on an
   unrelated session.
-- Every built-in delivery path must carry the header. Policy code can no longer
-  identify the built-in entry by an empty header set.
-- Some paths expose the credential in argv (Codex passthrough, Claude ACP
-  launches) or in workspace files (`.cursor/mcp.json`, `.pi/mcp.json`). The
-  credential expires with the instance.
+- Every built-in delivery path for an enforced instance carries the header.
+  Policy code recognizes the header-less entry when enforcement is disabled.
+- When enforcement is enabled, some paths expose the credential in argv
+  (Codex passthrough, Claude ACP launches) or in workspace files
+  (`.cursor/mcp.json`, `.pi/mcp.json`). The credential expires with the instance.
 - A provider that ignores configured headers loses Kandev tools under
-  enforcement. The rollout toggle is the recovery path.
+  enforcement. Disabling the toggle and restarting or recreating the session
+  restores header-less configuration for new instances.
 - Mixed backend and agentctl versions degrade to today's unauthenticated
-  behavior rather than failing.
+  behavior rather than failing. A recycled-port 404 is distinguished from a
+  missing route so the backend cannot build header-less entries for an
+  instance that may enforce authentication.
 
 ## Alternatives Considered
 

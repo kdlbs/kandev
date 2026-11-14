@@ -72,6 +72,28 @@ func TestBuiltinPermissionRecognizesCredentialedPackageEntries(t *testing.T) {
 	require.True(t, approveKandevTool(m, "mcp__kandev__step_complete_kandev"))
 }
 
+func TestBuiltinPermissionRecognizesHeaderlessPackageEntriesWhenDisabled(t *testing.T) {
+	ctx := profile.New(profile.SurfaceKanbanTask, nil, nil)
+	ctx.BuiltinPackages = &profile.BuiltinManifest{
+		Version: 1, CatalogVersion: 1, WorkspaceID: "workspace", TaskID: "task", Surface: ctx.Surface,
+		Packages: []profile.PackageID{profile.PackageCore},
+		Origins:  map[profile.PackageID]string{profile.PackageCore: "required"},
+	}
+	cfg, err := (&config.Config{}).NewInstanceConfig(43210, &config.InstanceOverrides{TaskID: "task", McpProfile: &ctx})
+	require.NoError(t, err)
+	for _, server := range cfg.McpServers {
+		if server.Name == "kandev" {
+			require.Empty(t, server.Headers)
+		}
+	}
+	log := newTestLogger(t)
+	server := mcpserver.NewWithProfile(nil, "session", "task", cfg.Port, log, "", true, ctx)
+	t.Cleanup(func() { require.NoError(t, server.Close(context.Background())) })
+	m := &Manager{cfg: cfg, logger: log}
+	m.SetBuiltinToolCatalog(server.BuiltinCatalog)
+	require.True(t, approveKandevTool(m, "mcp__kandev__step_complete_kandev"))
+}
+
 func TestManagedToolPolicyKeepsCredentialHeader(t *testing.T) {
 	policy := profile.ManagedToolPolicy{
 		PluginID: "coordinator.v1", InstallationID: "installation-1", WorkspaceID: "workspace-1",

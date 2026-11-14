@@ -67,9 +67,9 @@ Kandev configured for that session.
 - **AC-AGENTS-BUILTIN-MCP-CALLER-AUTH-001.4:** The MCP caller credential shall
   not authorize any non-MCP instance route or control-server route. The control
   credential shall not authorize a built-in MCP endpoint route.
-- **AC-AGENTS-BUILTIN-MCP-CALLER-AUTH-001.5:** Each new instance shall receive a
-  new, unpredictable credential of at least 256 bits. The credential shall be
-  valid only while that instance exists.
+- **AC-AGENTS-BUILTIN-MCP-CALLER-AUTH-001.5:** Each new instance created with
+  enforcement enabled shall receive a new, unpredictable credential of at least
+  256 bits. The credential shall be valid only while that instance exists.
 - **AC-AGENTS-BUILTIN-MCP-CALLER-AUTH-001.6:** The instance health route shall
   stay reachable without any credential.
 
@@ -80,21 +80,23 @@ enforcement starts.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-BUILTIN-MCP-CALLER-AUTH-002.1:** When Kandev supplies built-in
-  server entries through any delivery path, each entry shall include the
-  instance's credential in the form that the path supports.
-- **AC-AGENTS-BUILTIN-MCP-CALLER-AUTH-002.2:** When an ACP session is restored
-  through load or resume, or when an agent is relaunched against a surviving
-  instance, the supplied entries shall carry the same credential as the
-  original launch. This includes a relaunch after a backend restart.
+- **AC-AGENTS-BUILTIN-MCP-CALLER-AUTH-002.1:** When enforcement is enabled and
+  Kandev supplies built-in server entries through any delivery path, each entry
+  shall include the instance's credential in the form that the path supports.
+- **AC-AGENTS-BUILTIN-MCP-CALLER-AUTH-002.2:** When enforcement is enabled and
+  an ACP session is restored through load or resume, or when an agent is
+  relaunched against a surviving instance, the supplied entries shall carry the
+  same credential as the original launch. This includes a relaunch after a
+  backend restart.
 - **AC-AGENTS-BUILTIN-MCP-CALLER-AUTH-002.3:** When a built-in entry carries the
   credential, automatic approval of injected Kandev tools and managed
   conversation checks shall recognize it exactly as they recognize the current
   built-in entry. An entry with a different URL, credential, or extra header
   shall not receive that treatment.
 - **AC-AGENTS-BUILTIN-MCP-CALLER-AUTH-002.4:** The mock agent used by
-  end-to-end tests, in ACP and TUI modes, shall present the credential.
-  Clarification end-to-end scenarios shall pass with enforcement enabled.
+  end-to-end tests, in ACP and TUI modes, shall present the credential when
+  enforcement is enabled. Clarification end-to-end scenarios shall pass with
+  enforcement enabled.
 
 ### REQ-AGENTS-BUILTIN-MCP-CALLER-AUTH-003: Rollout control and diagnostics
 
@@ -106,7 +108,8 @@ without exposing the credential.
 - **AC-AGENTS-BUILTIN-MCP-CALLER-AUTH-003.1:** When the
   `builtinMcpCallerAuth` runtime feature is disabled, built-in MCP endpoints
   shall accept requests without a credential, as before this capability.
-  Kandev shall still issue and deliver credentials.
+  Kandev shall not issue or deliver a credential. It shall build header-less
+  entries that preserve the pre-capability provider configuration.
 - **AC-AGENTS-BUILTIN-MCP-CALLER-AUTH-003.2:** The enforcement mode of an
   instance shall be fixed when the instance is created. A change to the feature
   value shall apply only to instances created later.

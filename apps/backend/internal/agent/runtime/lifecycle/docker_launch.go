@@ -141,6 +141,7 @@ func buildDockerContainerConfig(req *ExecutorCreateRequest, executorType string)
 		McpProfile:                     req.McpProfile,
 		PromptSuggestions:              req.PromptSuggestions,
 		CopilotNativeSessionEvents:     req.CopilotNativeSessionEvents,
+		BuiltinMCPAuthEnforced:         req.BuiltinMCPAuthEnforced,
 		PrepareScript:                  prepareScript,
 		ImageTagOverride:               getMetadataString(req.Metadata, MetadataKeyImageTagOverride),
 		AllowUserNamespaces:            getMetadataString(req.Metadata, MetadataKeyAllowUserNamespaces) == boolStringTrue,

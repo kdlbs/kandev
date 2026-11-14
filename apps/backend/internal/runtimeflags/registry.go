@@ -287,11 +287,11 @@ var registrations = []runtimeFlagRegistration{
 			EnvVar:      "KANDEV_FEATURES_BUILTIN_MCP_CALLER_AUTH",
 			Kind:        KindFeature,
 			Label:       "Built-in MCP caller authentication",
-			Description: "New agent sessions accept Kandev MCP tool calls only when they carry that session's credential, which Kandev gives to the agent it launches.",
+			Description: "When enabled, new agent sessions accept Kandev MCP tool calls only with their own credential. When disabled, Kandev issues no credential and keeps built-in entries header-less.",
 			Stability:   StabilityExperimental,
 			RiskLevel:   RiskMedium,
-			RiskDescription: "An agent that does not send the MCP headers Kandev configures loses access to Kandev tools in new sessions. " +
-				"Running sessions keep the mode they started with. Disable this toggle and restart if an agent reports unavailable Kandev tools.",
+			RiskDescription: "An agent that does not send the MCP headers Kandev configures loses access to Kandev tools in new sessions when this is enabled. " +
+				"Disable this toggle and restart or recreate the affected session to restore header-less configuration. Running sessions keep the mode they started with.",
 			RestartRequired: true,
 			Mutable:         true,
 		},

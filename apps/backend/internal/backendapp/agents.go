@@ -55,9 +55,6 @@ func provideLifecycleManager(
 	authSvc *auth.Service,
 ) (*lifecycle.Manager, error) {
 	log.Info("Initializing Agent Manager...")
-	// Restart-required: every instance this process creates, through every
-	// executor, carries the same built-in MCP caller-auth decision.
-	agentctl.SetBuiltinMCPAuthEnforced(cfg.Features.BuiltinMCPCallerAuth)
 	secretStores := newLifecycleSecretStores(rawSecretStore)
 	agentctlResolver := lifecycle.NewAgentctlResolverWithOptions(log, lifecycle.AgentctlResolverOptions{
 		Version:   Version,
@@ -135,6 +132,7 @@ func provideLifecycleManager(
 		cfg.ResolvedHomeDir(),
 		log,
 	)
+	lifecycleMgr.SetBuiltinMCPAuthEnforced(cfg.Features.BuiltinMCPCallerAuth)
 	configureMCPResolver(lifecycleMgr, agentSettingsRepo, mcpService, secretStores.runtime)
 	if stateRepo, ok := agentSettingsRepo.(mcpconfig.SessionMCPSelectionStateRepository); ok {
 		lifecycleMgr.SetMCPSelectionStateRepository(stateRepo)

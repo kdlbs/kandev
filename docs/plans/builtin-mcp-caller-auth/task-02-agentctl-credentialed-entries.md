@@ -24,10 +24,12 @@ system_design:
 
 ## Summary
 
-Every built-in server entry that agentctl builds carries
-`Authorization: Bearer <instance credential>`. ACP and Codex app-server deliver
-it on new, load, resume, and reset. Permission and managed-tool policies keep
-recognizing the built-in entry by its exact header.
+When an instance has enforcement enabled, each built-in server entry that
+agentctl builds carries `Authorization: Bearer <instance credential>`. ACP and
+Codex app-server deliver it on new, load, resume, and reset. Without a
+credential, agentctl keeps entries header-less. Permission and managed-tool
+policies recognize the exact credential header or the header-less legacy entry
+as appropriate.
 
 ## In scope
 
@@ -47,8 +49,9 @@ recognizing the built-in entry by its exact header.
 
 ## Acceptance
 
-- ACP session setup and Codex app-server config contain the header for every
-  built-in entry. This holds for new, load, and resume.
+- With enforcement on, ACP session setup and Codex app-server config contain
+  the header for every built-in entry. This holds for new, load, and resume.
+- With enforcement off, generated built-in entries have no headers.
 - Automatic approval and managed-conversation checks pass with the credentialed
   entry. They fail for the same URL with a different or extra header.
 - The mock agent completes an `ask_user_question_kandev` round trip against an

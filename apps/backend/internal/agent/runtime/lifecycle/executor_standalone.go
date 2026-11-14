@@ -297,6 +297,7 @@ func buildStandaloneCreateInstanceRequest(
 		McpMode:                    req.McpMode,
 		PromptSuggestions:          req.PromptSuggestions,
 		CopilotNativeSessionEvents: req.CopilotNativeSessionEvents,
+		BuiltinMCPAuthEnforced:     req.BuiltinMCPAuthEnforced,
 		McpProviders:               req.McpProviders,
 		McpProfile:                 req.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),

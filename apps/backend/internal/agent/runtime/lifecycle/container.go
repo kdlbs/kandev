@@ -44,6 +44,8 @@ const (
 type ContainerConfig struct {
 	// CopilotNativeSessionEvents is the manager-resolved native-event opt-in.
 	CopilotNativeSessionEvents bool
+	// BuiltinMCPAuthEnforced is fixed when the backend creates the instance.
+	BuiltinMCPAuthEnforced bool
 	// ProviderGatewayAuth authenticates the ACP agent against an
 	// OpenAI-compatible gateway right after initialize.
 	ProviderGatewayAuth            *acpprovider.GatewayAuth
@@ -151,6 +153,7 @@ func buildContainerCreateInstanceRequest(
 		McpMode:                    config.McpMode,
 		PromptSuggestions:          config.PromptSuggestions,
 		CopilotNativeSessionEvents: config.CopilotNativeSessionEvents,
+		BuiltinMCPAuthEnforced:     config.BuiltinMCPAuthEnforced,
 		McpProviders:               config.McpProviders,
 		McpProfile:                 config.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromAgent(config.AgentConfig),

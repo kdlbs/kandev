@@ -1524,6 +1524,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		DeliveryIncarnationID:            reqWithWorktree.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:        reqWithWorktree.DeliveryHarnessGeneration,
 		CopilotNativeSessionEvents:       m.copilotNativeLaunchAllowed(rt, agentConfig.ID(), reqWithWorktree.DeliveryStreamID),
+		BuiltinMCPAuthEnforced:           m.builtinMCPAuthEnforced,
 		DurableJournalHostRoot:           m.dataDir,
 		DurableJournalOwnerID:            journalOwnerID,
 		WorkspaceSourceRoots:             workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
