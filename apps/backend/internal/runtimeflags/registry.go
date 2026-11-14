@@ -57,9 +57,26 @@ var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 	{key: retiredOfficeSessionIdentityKey, envVar: retiredOfficeSessionIdentityEnvVar},
 	{key: "features.remoteExecutorPlugins", envVar: "KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS"},
 	{key: retiredProviderInterruptionContinuationKey, envVar: retiredProviderInterruptionContinuationEnvVar},
+	{key: "features.dynamicCircuitBackoffEscalation", envVar: "KANDEV_FEATURES_DYNAMIC_CIRCUIT_BACKOFF_ESCALATION"},
 }
 
 var registrations = []runtimeFlagRegistration{
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             "features.providerKeywordContext",
+			EnvVar:          "KANDEV_FEATURES_PROVIDER_KEYWORD_CONTEXT",
+			Kind:            KindFeature,
+			Label:           "Provider keyword and context classification",
+			Description:     "Classifies unmatched provider diagnostics using structural signals, keyword groups, and invocation context.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "May change recovery classification for new provider diagnostics. Existing candidate policies and invocation safety checks still apply.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ProviderKeywordContext },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ProviderKeywordContext = value },
+	},
 	{
 		definition: RuntimeFlagDefinition{
 			Key:             "features.integratedControl",
@@ -205,11 +222,11 @@ var registrations = []runtimeFlagRegistration{
 			EnvVar:      "KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING",
 			Kind:        KindFeature,
 			Label:       "Dynamic agent routing",
-			Description: "Enables reusable dynamic agent profiles and provider-error routing across task, utility, and Office execution.",
+			Description: "Enables dynamic agent profiles, provider-error routing, and shared circuit admission for fixed profiles, using the default circuit backoff ladder.",
 			Stability:   StabilityExperimental,
 			RiskLevel:   RiskHigh,
 			RiskDescription: "Dynamic routing can change the concrete provider used by a logical session and is still experimental. " +
-				"Enable it only on a controlled installation and review route recovery behavior before using it for unattended work.",
+				"Shared resource circuits use a 1-minute to 4-hour backoff ladder, which can delay fixed profiles and dynamic candidates; a later provider reset time can extend it. Account holds require owner release. Enable on a controlled installation.",
 			RestartRequired: true,
 			Mutable:         true,
 		},

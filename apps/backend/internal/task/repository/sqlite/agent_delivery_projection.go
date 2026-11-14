@@ -271,6 +271,12 @@ func (r *Repository) projectCanonicalDeliveryBatchGroupTx(
 	if group[0].agentEvent.Type == streams.EventTypeToolCall {
 		return r.markCanonicalDeliveryBatchProjectedTx(ctx, tx, group)
 	}
+	if group[0].agentEvent.Type == streams.EventTypeContextCompactionObservation {
+		if err := r.projectContextCompactionGroupTx(ctx, tx, group, results); err != nil {
+			return err
+		}
+		return r.markCanonicalDeliveryBatchProjectedTx(ctx, tx, group)
+	}
 	firstContent, content := canonicalDeliveryBatchContent(group)
 	if firstContent != -1 {
 		aggregate := group[firstContent].agentEvent

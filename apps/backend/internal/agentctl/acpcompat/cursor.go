@@ -44,12 +44,15 @@ const (
 //
 // base is copied, never mutated, so callers can pass a shared literal.
 func ClientCapabilityMeta(agentID string, base map[string]any) map[string]any {
-	meta := make(map[string]any, len(base)+1)
+	meta := make(map[string]any, len(base)+2)
 	for k, v := range base {
 		meta[k] = v
 	}
 	if agentID == CursorAgentID {
 		meta[ParameterizedModelPickerMetaKey] = true
+	}
+	if agentID == DevinAgentID {
+		meta[DevinGroupedSessionConfigOptionsMetaKey] = true
 	}
 	return meta
 }

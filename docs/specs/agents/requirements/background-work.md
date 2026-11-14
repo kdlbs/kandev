@@ -77,11 +77,15 @@ background-liveness requirements remain authoritative in their own scope.
 
 **Intent:** Keep background work accessible without changing how prompts are admitted.
 
-- **AC-AGENTS-BACKGROUND-WORK-005.1:** When running, waiting, or unknown work exists, a small, content-width pill directly above the chat input shall show the total as a localized label such as "2 Background Jobs". Clicking, keyboard-activating, or tapping it shall open a summary with separate running, waiting, and unknown counts. A history entry shall remain reachable when only completed work exists.
+- **AC-AGENTS-BACKGROUND-WORK-005.1:** When running work exists, a compact, content-width composer chip directly above the chat input shall count and summarize only running workloads. Otherwise, the chip shall be absent, including when waiting, unknown, or terminal records remain. Its popover or phone summary shall exclude those records.
 - **AC-AGENTS-BACKGROUND-WORK-005.2:** When background state changes, typing and the user's draft shall be preserved. Send, queue, steering, and root-cancel behavior shall retain existing session-admission rules; background visibility alone shall not enable concurrent turns. Explicit same-turn input is governed separately by the [Platform steering contract](../../platform/requirements/explicit-turn-steering.md).
 - **AC-AGENTS-BACKGROUND-WORK-005.3:** When opening details, selecting a job or agent on desktop shall open its own named detail tab in the central Dockview group. Different workloads shall remain open independently, selecting an already-open workload shall activate its existing tab, and closing a tab shall not stop work. View all shall open a separate Background Work overview; phone shall offer a focused list and full-height detail surface with Back navigation, visible actions, safe-area and keyboard clearance, and no document horizontal overflow.
 - **AC-AGENTS-BACKGROUND-WORK-005.4:** When loading, empty, disconnected, unsupported, or failed states occur, each shall be distinguishable and accessible without color alone. Phone/coarse-pointer actions shall have at least 44px hit targets, and each content view shall have one vertical scroll owner with focus returned on dismissal.
 - **AC-AGENTS-BACKGROUND-WORK-005.5:** When changing locale, new labels, action/error feedback, counts, and accessibility names shall use the existing translation system with all supported catalogs and correct pluralization.
+- **AC-AGENTS-BACKGROUND-WORK-005.6:** When users open the overview, Active and History tabs shall separate running or waiting work from terminal or unknown records. Counts shall describe each tab before search. Search shall filter the selected tab. Unknown records shall retain their status and disclose unavailable activity.
+- **AC-AGENTS-BACKGROUND-WORK-005.7:** When commands exceed the available width, summary and overview titles shall truncate without hiding status or actions. Details shall show the full command with wrapping, including unbroken tokens. Lists, details, and their containers shall require no horizontal scrolling on desktop or phone.
+- **AC-AGENTS-BACKGROUND-WORK-005.8:** When a workload changes state, the chip and tabs shall update without changing the selected tab, search, open detail, or composer draft. An open summary shall dismiss when its last running workload leaves. Focus shall return to a stable chat control if the chip disappears.
+- **AC-AGENTS-BACKGROUND-WORK-005.9:** When the feature is available, users shall be able to open Background Work without a composer chip. Desktop shall provide a panel-menu entry. Phone shall provide a Panels entry and a focused overview with the same tabs. Initial opening shall select Active when running or waiting work exists, and History otherwise. Loading shall finish before this initial selection resolves.
 
 ### REQ-AGENTS-BACKGROUND-WORK-006: Delivery and compatibility evidence
 
@@ -126,6 +130,17 @@ background-liveness requirements remain authoritative in their own scope.
 - **AC-AGENTS-BACKGROUND-WORK-009.5:** When all OpenCode jobs become terminal, the active count shall clear while completed history remains reachable.
 - **AC-AGENTS-BACKGROUND-WORK-009.6:** When a job fails, the viewer shall show its failure independently from any later agent recovery attempt.
 
+### REQ-AGENTS-BACKGROUND-WORK-010: Claude background shells do not stay running
+
+**Intent:** The background jobs count reflects work that is still running.
+
+- **AC-AGENTS-BACKGROUND-WORK-010.1:** When the agent process that owns a workload has ended, including through replacement, idle reclaim, or a backend restart, every non-terminal workload of that session shall become terminal with an unknown outcome. Verified liveness shall still be required before settlement.
+- **AC-AGENTS-BACKGROUND-WORK-010.2:** When the connected Claude bridge advertises background task lifecycle support, a detached shell shall settle from the lifecycle event that names its launch tool, retaining the reported outcome. The launch tool completing shall not settle it. **Not yet delivered:** the capture confirms the bridge frames, but the pinned ACP SDK cannot represent them, and advertising the capability changes transcript and follow-up-turn behavior. Process-end settlement (`010.1`) applies. See the [rejected proposal](../../../decisions/2026-11-01-claude-async-task-lifecycle-capability.md); a new proposal requires SDK support (or a safe raw-frame path) and a product decision on the follow-up turn.
+- **AC-AGENTS-BACKGROUND-WORK-010.3:** When neither task lifecycle support nor attributed shell termination evidence is available, a detached shell shall stay open until process-end evidence applies. An unattributed completion signal shall not settle a specific workload.
+- **AC-AGENTS-BACKGROUND-WORK-010.4:** Task lifecycle support shall add no background job controls, and it shall not change transcript content, turn completion, or prompt admission.
+- **AC-AGENTS-BACKGROUND-WORK-010.5:** When all workloads of a session become terminal, the active count shall clear on desktop and phone and completed history shall remain reachable.
+- **AC-AGENTS-BACKGROUND-WORK-010.6:** When `@agentclientprotocol/claude-agent-acp` version `0.97.0`, identified at initialize, reports a tool-scoped terminal exit for a tracked detached shell, only that workload shall leave the running count. An unavailable outcome shall remain unavailable. Launch completion, malformed evidence, and evidence for another workload shall not imply termination.
+
 The [OpenCode continuity design](../system-design/background-work-opencode.md)
 owns full provider continuity. The
 [Kandev plugin design](../system-design/opencode-kandev-plugin.md) owns the
@@ -143,6 +158,7 @@ Input is part of the shared contract, but Codex background stdin is unsupported
 unless independently proven for thread-owned commands in the pinned version.
 
 - [Design](../system-design/background-work.md)
+- [Stuck turn and queue delivery repair](../../../plans/stuck-turn-queue-delivery/plan.md)
 - [Native Codex requirements](codex-app-server.md)
 - [Subagent invocation history](subagent-context-persistence.md)
 - [Existing subagent presentation](../../ui/requirements/subagent-observability.md)

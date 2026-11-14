@@ -441,7 +441,10 @@ func (c *Controller) ResolveAgentModelConfig(
 	}
 	var profileContext *hostutility.ProfileProbeContext
 	if req.ProfileID != "" || req.LaunchSettings != nil {
-		resolved, err := c.resolveProfileProbeContext(ctx, agentName, req.AuthorizationScope, req.ProfileID, req.LaunchSettings)
+		modeOverride := resolutionModeOverride(req.Mode)
+		resolved, err := c.resolveProfileProbeContext(
+			ctx, agentName, req.AuthorizationScope, req.ProfileID, req.LaunchSettings, modeOverride,
+		)
 		if err != nil {
 			return nil, err
 		}

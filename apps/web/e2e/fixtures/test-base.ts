@@ -537,9 +537,6 @@ export const test = backendFixture.extend<
         .rawRequest("DELETE", `/api/v1/gitlab/config?${scoped}`)
         .catch(() => undefined);
       await apiClient.deleteAllSentryInstances(seedData.workspaceId).catch(() => undefined);
-      await apiClient
-        .rawRequest("DELETE", `/api/v1/azure-devops/config?${scoped}`)
-        .catch(() => undefined);
       await apiClient.rawRequest("DELETE", `/api/v1/jira/config`).catch(() => undefined);
       await apiClient.rawRequest("DELETE", `/api/v1/linear/config`).catch(() => undefined);
       await Promise.all([
@@ -557,7 +554,6 @@ export const test = backendFixture.extend<
         apiClient.mockJiraReset().catch(() => undefined),
         apiClient.mockLinearReset().catch(() => undefined),
         apiClient.mockSentryReset().catch(() => undefined),
-        apiClient.mockAzureDevOpsReset().catch(() => undefined),
         apiClient.mockGitLabReset(seedData.workspaceId).catch(() => undefined),
         apiClient.clearGitLabRepositoryRemote(seedData.repositoryId).catch(() => undefined),
       ]);
@@ -713,7 +709,7 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
 
 export { expect } from "@playwright/test";
 
-async function setupPage(page: Page, backend: BackendContext): Promise<void> {
+export async function setupPage(page: Page, backend: BackendContext): Promise<void> {
   await page.addInitScript(
     ({ backendPort }: { backendPort: string }) => {
       localStorage.setItem("kandev.onboarding.completed", "true");

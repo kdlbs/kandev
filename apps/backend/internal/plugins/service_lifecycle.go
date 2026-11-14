@@ -241,6 +241,8 @@ func (s *Service) setStatus(id string, status Status) error {
 // public SetStatus keeps same-state transitions invalid.
 func (s *Service) setStatusAndDiagnostic(id string, status Status, failure error, allowSame bool) error {
 	s.mu.Lock()
+	s.recordPersistMu.Lock()
+	defer s.recordPersistMu.Unlock()
 
 	rec, ok := s.registry.Get(id)
 	if !ok {
@@ -345,6 +347,8 @@ func (s *Service) recordRestartCount(id string) {
 	// recovery that just cleared LastError.
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.recordPersistMu.Lock()
+	defer s.recordPersistMu.Unlock()
 	updated, ok := s.registry.SetRestartCount(id, s.runtime.RestartCount(id))
 	if !ok {
 		return

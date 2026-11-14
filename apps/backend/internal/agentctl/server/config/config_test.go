@@ -99,7 +99,11 @@ func TestLoadWithStartupPropagatesAgentBackgroundWork(t *testing.T) {
 	if !cfg.AgentBackgroundWorkEnabled {
 		t.Fatal("AgentBackgroundWorkEnabled = false, want true when the startup contract enables it")
 	}
-	if !cfg.NewInstanceConfig(0, nil).AgentBackgroundWorkEnabled {
+	instance, err := cfg.NewInstanceConfig(0, nil)
+	if err != nil {
+		t.Fatalf("NewInstanceConfig: %v", err)
+	}
+	if !instance.AgentBackgroundWorkEnabled {
 		t.Fatal("instance config did not inherit AgentBackgroundWorkEnabled")
 	}
 
@@ -112,7 +116,11 @@ func TestLoadWithStartupPropagatesAgentBackgroundWork(t *testing.T) {
 	if cfg.AgentBackgroundWorkEnabled {
 		t.Fatal("AgentBackgroundWorkEnabled = true, want false when the startup contract disables it")
 	}
-	if cfg.NewInstanceConfig(0, nil).AgentBackgroundWorkEnabled {
+	instance, err = cfg.NewInstanceConfig(0, nil)
+	if err != nil {
+		t.Fatalf("NewInstanceConfig: %v", err)
+	}
+	if instance.AgentBackgroundWorkEnabled {
 		t.Fatal("instance config enabled background work for a disabled launch")
 	}
 }
@@ -136,9 +144,12 @@ func TestLoadWithoutStartupLeavesAgentSurvivalDisabled(t *testing.T) {
 }
 
 func TestNewInstanceConfigNormalizesMcpProviders(t *testing.T) {
-	cfg := (&Config{}).NewInstanceConfig(0, &InstanceOverrides{
+	cfg, err := (&Config{}).NewInstanceConfig(0, &InstanceOverrides{
 		McpProviders: []string{" GITLAB ", "unsupported", "github", "github"},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	want := []string{"github", "gitlab"}
 	if !reflect.DeepEqual(cfg.McpProviders, want) {
@@ -149,9 +160,12 @@ func TestNewInstanceConfigNormalizesMcpProviders(t *testing.T) {
 // TestNewInstanceConfig_PropagatesMCPToolNamePresentationCapability covers
 // AC-TASKS-MCP-TOOL-NAMES-001.5 at the agentctl instance boundary.
 func TestNewInstanceConfig_PropagatesMCPToolNamePresentationCapability(t *testing.T) {
-	cfg := (&Config{}).NewInstanceConfig(0, &InstanceOverrides{
+	cfg, err := (&Config{}).NewInstanceConfig(0, &InstanceOverrides{
 		NamespacesMCPToolsByServer: true,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !cfg.NamespacesMCPToolsByServer {
 		t.Fatal("InstanceConfig did not retain NamespacesMCPToolsByServer")
 	}
@@ -169,10 +183,13 @@ func TestInjectedKandevMCPProvenance(t *testing.T) {
 		{Name: "third-party", Type: "http", URL: "https://mcp.example.test/mcp"},
 	}
 
-	cfg := base.NewInstanceConfig(43210, &InstanceOverrides{
+	cfg, err := base.NewInstanceConfig(43210, &InstanceOverrides{
 		Env:        []string{},
 		McpServers: input,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !cfg.InjectedKandevMCP {
 		t.Fatal("positive-port instance must retain injected Kandev provenance")
 	}
@@ -201,10 +218,13 @@ func TestInjectedKandevMCPProvenance(t *testing.T) {
 		t.Fatalf("provenance marker leaked into serialized config: %s", encoded)
 	}
 
-	withoutPort := base.NewInstanceConfig(0, &InstanceOverrides{
+	withoutPort, err := base.NewInstanceConfig(0, &InstanceOverrides{
 		Env:        []string{},
 		McpServers: input,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if withoutPort.InjectedKandevMCP {
 		t.Fatal("zero-port instance must not claim injected Kandev provenance")
 	}

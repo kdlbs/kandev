@@ -5,7 +5,12 @@ import {
   type TaskState,
 } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
-import { statusSummaryRowErrorPreview, statusSummaryTurnError } from "@/lib/task-status-summary";
+import { resolveWaitReason } from "@/lib/ui/waiting-reason";
+import {
+  statusSummaryRowErrorPreview,
+  statusSummaryTurnError,
+  statusSummaryUnreadSessionIds,
+} from "@/lib/task-status-summary";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { resolveTaskRepositorySlugs } from "@/lib/sidebar/sidebar-task-repositories";
 import { effectiveTaskPendingAction } from "../task-select-helpers";
@@ -67,6 +72,18 @@ function sheetHasRunningSession(task: KanbanState["tasks"][number]) {
   return task.statusSummary?.has_running_session;
 }
 
+function sheetWaitStatus(task: KanbanState["tasks"][number]) {
+  return {
+    quotaWait: task.statusSummary?.quota_wait,
+    waitReason: resolveWaitReason({
+      wipAdmitted: task.wipAdmitted,
+      queuedForStepId: task.queuedForStepId,
+      launchQueue: sheetLaunchQueue(task),
+      quotaWait: task.statusSummary?.quota_wait,
+    }),
+  };
+}
+
 function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
   const summary = task.statusSummary;
   const hasSummary = summary != null;
@@ -94,6 +111,7 @@ function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
       ctx.dismissedAgentErrors,
     ),
     turnError: sheetTurnError(summary),
+    unreadSessionIds: statusSummaryUnreadSessionIds(summary),
   };
 }
 
@@ -150,6 +168,7 @@ export function toSheetItem(
     effectiveColorToken: color.effectiveColorToken,
     queuedCount: task.statusSummary?.queued_prompt_count,
     launchQueue: sheetLaunchQueue(task),
+    ...sheetWaitStatus(task),
     wipQueue: ctx.wipQueueByTaskId?.get(task.id),
   };
 }

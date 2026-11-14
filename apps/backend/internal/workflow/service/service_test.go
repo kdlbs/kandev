@@ -67,6 +67,9 @@ type mockWorkflowProvider struct {
 	workflows        []*taskmodels.Workflow
 	getWorkflowCalls int
 	deleted          []string
+	// db mirrors the production task repository's workflow rows so the real
+	// step repository can lock and validate the owning workflow.
+	db *sqlx.DB
 	// forceUpdateWorkflowErr, when set, makes UpdateWorkflow fail without
 	// mutating state - used to test that a rebind Warn never fires for a
 	// change that was not actually persisted.
@@ -97,7 +100,7 @@ func (m *mockWorkflowProvider) GetWorkflow(_ context.Context, id string) (*taskm
 	return nil, fmt.Errorf("workflow %s not found", id)
 }
 
-func (m *mockWorkflowProvider) CreateWorkflow(_ context.Context, workspaceID, name, description string) (*taskmodels.Workflow, error) {
+func (m *mockWorkflowProvider) CreateWorkflow(ctx context.Context, workspaceID, name, description string) (*taskmodels.Workflow, error) {
 	now := time.Now().UTC()
 	wf := &taskmodels.Workflow{
 		ID:          "imported-" + name,
@@ -107,28 +110,48 @@ func (m *mockWorkflowProvider) CreateWorkflow(_ context.Context, workspaceID, na
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
+	if m.db != nil {
+		if _, err := m.db.ExecContext(ctx, `
+			INSERT INTO workflows (id, workspace_id, name, description, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, wf.ID, wf.WorkspaceID, wf.Name, wf.Description, wf.CreatedAt, wf.UpdatedAt); err != nil {
+			return nil, err
+		}
+	}
 	m.workflows = append(m.workflows, wf)
 	return wf, nil
 }
 
-func (m *mockWorkflowProvider) UpdateWorkflow(_ context.Context, workflow *taskmodels.Workflow) error {
+func (m *mockWorkflowProvider) UpdateWorkflow(ctx context.Context, workflow *taskmodels.Workflow) error {
 	if m.forceUpdateWorkflowErr != nil {
 		return m.forceUpdateWorkflowErr
 	}
 	for i, wf := range m.workflows {
 		if wf.ID == workflow.ID {
 			m.workflows[i] = workflow
+			if m.db != nil {
+				if _, err := m.db.ExecContext(ctx, `
+					UPDATE workflows SET name = ?, description = ?, updated_at = ? WHERE id = ?
+				`, workflow.Name, workflow.Description, workflow.UpdatedAt, workflow.ID); err != nil {
+					return err
+				}
+			}
 			return nil
 		}
 	}
 	return fmt.Errorf("workflow %s not found", workflow.ID)
 }
 
-func (m *mockWorkflowProvider) DeleteWorkflow(_ context.Context, id string) error {
+func (m *mockWorkflowProvider) DeleteWorkflow(ctx context.Context, id string) error {
 	m.deleted = append(m.deleted, id)
 	for i, wf := range m.workflows {
 		if wf.ID == id {
 			m.workflows = append(m.workflows[:i], m.workflows[i+1:]...)
+			if m.db != nil {
+				if _, err := m.db.ExecContext(ctx, `DELETE FROM workflows WHERE id = ?`, id); err != nil {
+					return err
+				}
+			}
 			return nil
 		}
 	}
@@ -144,6 +167,10 @@ func (m *mockWorkflowProvider) addWorkflow(id, workspaceID, name string) {
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	})
+	if m.db != nil {
+		m.db.MustExec(`INSERT INTO workflows (id, workspace_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+			id, workspaceID, name, now, now)
+	}
 }
 
 func createStep(t *testing.T, svc *Service, step *models.WorkflowStep) {
@@ -599,7 +626,7 @@ func startStepNames(steps []*models.WorkflowStep) []string {
 
 func setupTestServiceWithProvider(t *testing.T) (*Service, *sqlx.DB, *mockWorkflowProvider) {
 	svc, db := setupTestService(t)
-	mock := &mockWorkflowProvider{}
+	mock := &mockWorkflowProvider{db: db}
 	svc.SetWorkflowProvider(mock)
 	return svc, db, mock
 }

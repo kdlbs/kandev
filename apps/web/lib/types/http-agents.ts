@@ -19,6 +19,7 @@ export type {
 import type { AgentProfile } from "./agent-profile";
 import type { CLIFlag } from "./agent-profile";
 import type { BackendMessage } from "./backend-message";
+import type { ModelCatalog } from "@kandev/types/model-catalog";
 
 /**
  * How kandev drives a custom agent's command. Absent means terminal
@@ -113,6 +114,7 @@ export type AgentProfileMcpConfig = {
 export type AgentDiscovery = {
   name: string;
   supports_mcp: boolean;
+  supports_local_install?: boolean;
   mcp_config_path?: string | null;
   installation_paths: string[];
   available: boolean;
@@ -169,6 +171,8 @@ export type ConfigOptionEntry = {
   current_value: string;
   category?: string;
   options?: { value: string; name: string; description?: string }[];
+  /** Bounded provider group structure and verified composition bindings. */
+  catalog?: ModelCatalog;
 };
 
 // CapabilityStatus mirrors the host utility probe status. "probing" is the
@@ -187,6 +191,8 @@ export type ProfileLaunchSettingsRequest = {
   env_vars: { key: string; value?: string; secret_id?: string }[];
   cli_flags: CLIFlag[];
   command_prefix: string;
+  /** Draft ACP mode. Omission keeps the saved value for an older client. */
+  mode?: string;
   /** Draft selection for a capability or model probe. Omit to use the saved value. */
   copilot_selected_plugins?: string[];
 };
@@ -335,6 +341,7 @@ export type AvailableAgent = {
   display_name: string;
   description?: string;
   install_script?: string;
+  supports_local_install?: boolean;
   supports_mcp: boolean;
   mcp_config_path?: string | null;
   installation_paths: string[];
@@ -378,6 +385,8 @@ export type QuestionImage = {
   path: string;
   repo?: string;
   alt: string;
+  /** Optional one-word name the agent chose for pickers, such as "before". */
+  label?: string;
 };
 
 export type ClarificationQuestion = {
@@ -388,6 +397,15 @@ export type ClarificationQuestion = {
   options: ClarificationOption[];
   /** Omitted for existing agents, which retain the custom-answer field. */
   allow_custom_text?: boolean;
+};
+
+export type ClarificationAnswerAttachment = {
+  attachment_id: string;
+  type: "image" | "audio" | "resource";
+  name: string;
+  mime_type: string;
+  size_bytes: number;
+  delivery_mode: "prompt" | "path";
 };
 
 // Each per-question chat message carries its own metadata. For multi-question
@@ -405,13 +423,29 @@ export type ClarificationRequestMetadata = {
   context?: string;
   status?: "pending" | "answered" | "rejected" | "expired" | "cancelled";
   response?: ClarificationAnswer;
+  /** Server-retained answer files, present after a retryable delivery failure. */
+  attachments?: ClarificationAnswerAttachment[];
   agent_disconnected?: boolean;
+};
+
+/** A rectangle the operator marked on a question image, in that image's pixels. */
+export type ClarificationAnswerAnnotation = {
+  image_id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  image_width: number;
+  image_height: number;
+  comment: string;
 };
 
 export type ClarificationAnswer = {
   question_id: string;
   selected_options?: string[];
   custom_text?: string;
+  attachments?: ClarificationAnswerAttachment[];
+  annotations?: ClarificationAnswerAnnotation[];
 };
 
 export type ClarificationResponse = {

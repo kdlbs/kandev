@@ -50,6 +50,17 @@ export type AgentUpdateJob = {
   finished_at?: string;
 };
 
+export type AgentRuntimeReview = {
+  runtime_id: string;
+  package: string;
+  current_version?: string;
+  effective_version?: string;
+  active_version?: string;
+  family?: string;
+  source?: string;
+  runtime_revision?: number;
+};
+
 export type AgentUpdatePreview = {
   update_mode: AgentUpdateMode;
   managed_fallback?: boolean;
@@ -70,6 +81,19 @@ export type AgentUpdatePreview = {
   available_versions?: AgentUpdateVersion[];
   command: string[];
   command_string: string;
+  copilot_plugin_compatibility?: CopilotPluginCompatibility;
+  /** Server-issued evidence required for guarded bulk admission. */
+  reviewed_runtime?: AgentRuntimeReview;
+};
+
+export type CopilotPluginCompatibilityState = "not_checked" | "compatible" | "incompatible";
+
+export type CopilotPluginCompatibility = {
+  runtime_version: string;
+  /** Missing state is treated as unchecked for older servers. */
+  state?: CopilotPluginCompatibilityState;
+  /** Null means the saved-profile impact could not be read. */
+  selected_profile_count: number | null;
 };
 
 export async function previewAgentUpdate(
@@ -109,7 +133,7 @@ export async function previewAgentUpdateUseDefault(
 }
 
 type AgentUpdateRequest =
-  | { update_mode: "pinned"; target_version: string }
+  | { update_mode: "pinned"; target_version: string; reviewed_runtime?: AgentRuntimeReview }
   | { update_mode: "self_update" };
 
 export async function updateAgent(
@@ -122,7 +146,12 @@ export async function updateAgent(
     init: {
       method: "POST",
       body: JSON.stringify(
-        request.update_mode === "self_update" ? {} : { target_version: request.target_version },
+        request.update_mode === "self_update"
+          ? {}
+          : {
+              target_version: request.target_version,
+              ...(request.reviewed_runtime ? { reviewed_runtime: request.reviewed_runtime } : {}),
+            },
       ),
       ...(options?.init ?? {}),
     },
@@ -197,6 +226,7 @@ export type AgentUpdateStatus = {
   checked_at?: string;
   check_state: AgentUpdateCheckState;
   family?: "v1" | "v2";
+  runtime_source?: "managed" | "native";
   runtime_revision?: number;
   migration_available?: boolean;
 };

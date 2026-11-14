@@ -71,7 +71,7 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 	if err != nil {
 		return nil, err
 	}
-	command, release, err := m.acquireInferenceCommand(ctx, inst, ia, agents.Command{})
+	command, localEnv, release, err := m.acquireInferenceCommand(ctx, inst, ia, agents.Command{})
 	if err != nil {
 		return nil, err
 	}
@@ -86,6 +86,7 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 	cfg := inferenceConfigForHostUtility(ia)
 	resolved := m.resolveModel(profile.AgentID, profile.Model, ia)
 	autoApprove := profile.AutoApprove
+	env = mergeInferenceEnv(env, localEnv)
 	req := &agentctlutil.PromptRequest{
 		Prompt:                 prompt,
 		AgentID:                profile.AgentID,
@@ -96,7 +97,7 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 			Protocol: cfg.Protocol,
 			Command:  command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: inst.workDir,
 			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: cliFlags, LaunchWrapper: launchwrapper.Profile(prefix),
-			ProviderGatewayAuth: gatewayAuth, OperatorDefined: cfg.OperatorDefined,
+			ProviderGatewayAuth: gatewayAuth, AuthPolicy: hostUtilityAuthPolicy(ia), OperatorDefined: cfg.OperatorDefined,
 		},
 	}
 	resp, err := inst.client.InferencePrompt(ctx, req)
@@ -432,7 +433,7 @@ func (m *Manager) ExecutePromptWithMCP(
 	if err != nil {
 		return nil, err
 	}
-	command, release, err := m.acquireInferenceCommand(ctx, inst, ia, agents.Command{})
+	command, localEnv, release, err := m.acquireInferenceCommand(ctx, inst, ia, agents.Command{})
 	if err != nil {
 		return nil, err
 	}
@@ -451,8 +452,9 @@ func (m *Manager) ExecutePromptWithMCP(
 			Command:         command.Args(),
 			ModelFlag:       cfg.ModelFlag.Args(),
 			WorkDir:         inst.workDir,
-			Env:             agents.RuntimeEnvFor(ia),
+			Env:             mergeInferenceEnv(agents.RuntimeEnvFor(ia), localEnv),
 			StripEnv:        agents.StripEnvFor(ia),
+			AuthPolicy:      hostUtilityAuthPolicy(ia),
 			OperatorDefined: cfg.OperatorDefined,
 		},
 		MCPServers: mcpServers,
@@ -516,6 +518,7 @@ func configOptionsFromProbe(options []agentctlutil.ProbeConfigOption) []ConfigOp
 			CurrentValue: option.CurrentValue,
 			Category:     option.Category,
 			Options:      choices,
+			Catalog:      option.Catalog,
 		})
 	}
 	return out

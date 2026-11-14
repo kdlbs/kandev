@@ -35,11 +35,6 @@ describe("Remote repository identities", () => {
     ["GitHub pull request", "https://github.com/acme/site/pull/42/files", GITHUB_REPOSITORY_URL],
     ["GitHub blob", "https://github.com/acme/site/blob/main/src/index.ts", GITHUB_REPOSITORY_URL],
     ["GitLab SSH", "git@gitlab.com:acme/site.git", "https://gitlab.com/acme/site"],
-    [
-      "Azure DevOps SSH",
-      "git@ssh.dev.azure.com:v3/acme/Platform/api",
-      "https://dev.azure.com/acme/Platform/_git/api",
-    ],
   ])("equates %s fallback URLs with their picker repository", (_label, fallback, picker) => {
     expect(selectedRemoteRepositoryIdentity(row({ url: fallback }))).toBe(
       selectedRemoteRepositoryIdentity(row({ url: picker })),

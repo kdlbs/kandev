@@ -394,6 +394,9 @@ func (s *Service) reclaimIdleSession(ctx context.Context, sessionID string) erro
 	if err := s.repairDeadRowLiveness(ctx, running); err != nil {
 		return fmt.Errorf("repair executor row after idle reclaim: %w", err)
 	}
+	// The released runtime was the only owner of this session's workloads.
+	// The lifecycle lock is already held, so settle without reacquiring it.
+	s.settleBackgroundWorkLocked(ctx, sessionID, running.AgentExecutionID)
 	s.logger.Info("idle reclaim: provider runtime released; row preserved for resume",
 		zap.String("session_id", sessionID),
 		zap.String("task_id", running.TaskID),

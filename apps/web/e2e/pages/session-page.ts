@@ -155,9 +155,6 @@ export class SessionPage {
   prClosedDismissButton() {
     return this.page.getByTestId("pr-closed-dismiss-button");
   }
-  prStatusChip() {
-    return this.activeChat().getByTestId("chat-status-bar").getByTestId("pr-status-chip");
-  }
   todoIndicator() {
     return this.activeChat().getByTestId("todo-indicator");
   }
@@ -556,6 +553,35 @@ export class SessionPage {
   clarificationCustomSubmit(): Locator {
     return this.page.getByTestId("clarification-custom-submit");
   }
+  /** Paperclip trigger for question-answer files (header or custom row). */
+  clarificationAttachmentTrigger(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-attachment-trigger");
+  }
+
+  /** Hidden file input used by the paperclip. */
+  clarificationAttachmentInput(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-attachment-input");
+  }
+
+  /** Paperclip count/progress/failure badge. */
+  clarificationAttachmentBadge(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-attachment-badge");
+  }
+
+  /** On-demand answer-file manager surface. */
+  clarificationAttachmentManager(): Locator {
+    return this.page.getByTestId("clarification-attachment-manager");
+  }
+
+  /** Submits the active single-question or multi-question answer explicitly. */
+  async submitClarification(): Promise<void> {
+    const headerSubmit = this.clarificationSubmit();
+    if ((await headerSubmit.count()) > 0) {
+      await headerSubmit.click();
+      return;
+    }
+    await this.clarificationCustomSubmit().click();
+  }
 
   /** Deferred notice shown when agent has disconnected from clarification. */
   clarificationDeferredNotice(): Locator {
@@ -675,6 +701,11 @@ export class SessionPage {
       .getByTestId("recovery-resume-button")
       .filter({ visible: true })
       .first();
+  }
+
+  /** Retry-connection action shown for uncertain delivery recovery. */
+  recoveryRetryConnectionButton(): Locator {
+    return this.activeChat().getByTestId("recovery-retry-connection-button");
   }
 
   /** Error returned by a manual session recovery action. */
@@ -1409,6 +1440,11 @@ export class SessionPage {
       .waitFor({ state: "hidden", timeout });
   }
 
+  /** Buffer text of the active shell terminal panel. */
+  async readTerminalBuffer(): Promise<string> {
+    return this.readXtermBuffer("terminal-panel");
+  }
+
   /** Wait for the active shell to emit its initial prompt before sending input. */
   async expectTerminalShellReady(timeout = 20_000): Promise<void> {
     await expect
@@ -1735,7 +1771,10 @@ export class SessionPage {
   /** Open the New Agent dialog from the phone session controls. */
   async openMobileNewSessionDialog(): Promise<void> {
     await this.page.getByTestId("mobile-sessions-pill").tap();
-    await this.page.getByTestId("mobile-launch-session").tap();
+    const launchButton = this.page.getByTestId("mobile-launch-session");
+    await expect(launchButton).toBeVisible();
+    await launchButton.tap();
+    await expect(this.page.getByTestId("task-description-input")).toBeVisible();
   }
 
   /** Session tab in dockview by session label (e.g., "Session 1", "Session 2"). */

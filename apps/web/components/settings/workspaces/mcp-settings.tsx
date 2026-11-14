@@ -2,7 +2,7 @@
 import { MCPAssignmentChooser } from "./mcp-assignment-chooser";
 import type { MCPRegistrationReceipt } from "@/hooks/domains/workspace/use-mcp-registration-completion";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
@@ -35,6 +35,11 @@ import type { MCPRegistrationResult } from "@/hooks/domains/workspace/use-mcp-re
 import { MCPDefinitionForm } from "./mcp-definition-form";
 import { MCPMarketplace } from "./mcp-marketplace";
 
+import { BuiltinPackageList } from "@/components/mcp/builtin-package-detail";
+import { BuiltinWorkspaceDetail } from "./builtin-workspace-detail";
+import { useBuiltinMCPPolicy } from "@/hooks/domains/workspace/use-builtin-mcp-policy";
+import type { BuiltinMCPPackage } from "@/lib/types/builtin-mcp";
+
 type MCPSettingsProps = { workspaceId: string };
 
 const STANDARD_ACTION_CLASS = controlSizingClassName("standard", "cursor-pointer");
@@ -53,24 +58,44 @@ function transportLabel(transport: string, t: (key: string) => string): string {
   return t("settings:mcpTransportStreamable");
 }
 
+/**
+ * Count references from every selection owner, including automations, for deletion confirmation.
+ */
 function selectionImpactTotal(impact?: MCPSelectionImpact): number {
   if (!impact) return 0;
-  return impact.profile + impact.repository + impact.task + impact.task_session;
+  return (
+    impact.profile +
+    impact.repository +
+    impact.task +
+    impact.task_session +
+    (impact.automation ?? 0)
+  );
 }
 
-function SelectionImpact({ impact }: { impact?: MCPSelectionImpact }) {
+/**
+ * Display all referencing owner counts before a server definition is deleted.
+ */
+function SelectionImpact({
+  impact = { profile: 0, repository: 0, task: 0, task_session: 0 },
+}: {
+  impact?: MCPSelectionImpact;
+}) {
   const { t } = useTranslation();
-  const total = selectionImpactTotal(impact);
+  const automation = impact.automation ?? 0;
+  const total = selectionImpactTotal(impact) - automation;
   return (
     <p className="text-xs text-muted-foreground" data-testid="mcp-selection-impact">
       {total > 0
         ? t("settings:mcpSelectionImpact", {
-            profile: t("settings:mcpProfileUsage", { count: impact?.profile ?? 0 }),
-            repository: t("settings:mcpRepositoryUsage", { count: impact?.repository ?? 0 }),
-            task: t("settings:mcpTaskUsage", { count: impact?.task ?? 0 }),
-            taskSession: t("settings:mcpSessionUsage", { count: impact?.task_session ?? 0 }),
+            profile: t("settings:mcpProfileUsage", { count: impact.profile }),
+            repository: t("settings:mcpRepositoryUsage", { count: impact.repository }),
+            task: t("settings:mcpTaskUsage", { count: impact.task }),
+            taskSession: t("settings:mcpSessionUsage", { count: impact.task_session }),
           })
         : t("settings:mcpSelectionImpactNone")}
+      {automation > 0 ? (
+        <span className="block">{t("settings:mcpAutomationUsage", { count: automation })}</span>
+      ) : null}
     </p>
   );
 }
@@ -314,6 +339,10 @@ function MCPViewTabs({
   );
 }
 
+/**
+ * Require deletion confirmation and explain how stored automation references affect later process
+ * starts.
+ */
 function DeleteMCPServerDialog({
   target,
   deleting,
@@ -333,6 +362,11 @@ function DeleteMCPServerDialog({
           <DialogTitle>{t("settings:deleteMcpServer")}</DialogTitle>
           <DialogDescription>
             {t("settings:mcpDeleteDescription", { name: target?.display_name ?? "" })}
+            {(target?.selection_impact?.automation ?? 0) > 0 && (
+              <span className="mt-2 block" data-testid="mcp-automation-delete-impact">
+                {t("settings:mcpAutomationDeleteWarning")}
+              </span>
+            )}
           </DialogDescription>
         </DialogHeader>
         {selectionImpactTotal(target?.selection_impact) > 0 && (
@@ -465,12 +499,34 @@ function CatalogLoadError({ error }: { error: unknown }) {
   ) : null;
 }
 
+function useBuiltinWorkspacePages(workspaceId: string) {
+  const builtin = useBuiltinMCPPolicy(workspaceId);
+  const [builtinId, setBuiltinId] = useState<BuiltinMCPPackage | null>(null);
+  const returnFocus = useRef<BuiltinMCPPackage | null>(null);
+  if (builtinId) returnFocus.current = builtinId;
+  const item = builtin.view?.catalog.find((entry) => entry.id === builtinId);
+  return {
+    detail: item ? (
+      <BuiltinWorkspaceDetail editor={builtin} item={item} onBack={() => setBuiltinId(null)} />
+    ) : null,
+    list: (
+      <BuiltinPackageList
+        scope="workspaces"
+        returnFocus={returnFocus.current}
+        editor={builtin}
+        onSelect={setBuiltinId}
+      />
+    ),
+  };
+}
+
 function MCPSettingsContent({ workspaceId }: MCPSettingsProps) {
   const router = useRouter();
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const { toast } = useToast();
   const data = useMCPWorkspaceSettings(workspaceId);
+  const builtinPages = useBuiltinWorkspacePages(workspaceId);
   const [assignment, setAssignment] = useState<MCPRegistrationReceipt | null>(null);
   const [view, setView] = useState<"configured" | "marketplace">("configured");
   const [editor, setEditor] = useState<MCPServerDefinition | null | undefined>(undefined);
@@ -500,6 +556,7 @@ function MCPSettingsContent({ workspaceId }: MCPSettingsProps) {
     if (result.status !== "saved") throw new SettingsSaveCancelledError();
   };
 
+  if (builtinPages.detail) return builtinPages.detail;
   if (editor !== undefined)
     return (
       <MCPDefinitionForm
@@ -525,6 +582,7 @@ function MCPSettingsContent({ workspaceId }: MCPSettingsProps) {
         />
       )}
       <CatalogLoadError error={data.error} />
+      {view === "configured" && builtinPages.list}
       {view === "configured" ? (
         <ConfiguredMCPServers
           servers={data.servers}

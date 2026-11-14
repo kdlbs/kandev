@@ -58,6 +58,7 @@ type ContextChipProps = {
   onRemove?: () => void;
 };
 
+/** Shows a composer context item with a preview and optional pin/remove controls. */
 // eslint-disable-next-line max-lines-per-function -- chip variants coordinate desktop hover and mobile drawer behavior.
 export const ContextChip = memo(function ContextChip({
   kind,
@@ -176,6 +177,7 @@ export const ContextChip = memo(function ContextChip({
 
   return chip;
 });
+/** Keeps desktop previews open across the pointer gap; touch input uses a drawer. */
 function ControlledHoverChip({
   preview,
   label,
@@ -229,7 +231,7 @@ function ControlledHoverChip({
         setOpen(next);
       }}
       openDelay={300}
-      closeDelay={0}
+      closeDelay={300}
     >
       <HoverCardTrigger
         asChild

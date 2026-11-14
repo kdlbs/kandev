@@ -1,7 +1,12 @@
 import type { KanbanState } from "@/lib/state/slices";
 import type { Repository, TaskSessionState, TaskState } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
-import { statusSummaryRowErrorPreview, statusSummaryTurnError } from "@/lib/task-status-summary";
+import { resolveWaitReason } from "@/lib/ui/waiting-reason";
+import {
+  statusSummaryRowErrorPreview,
+  statusSummaryTurnError,
+  statusSummaryUnreadSessionIds,
+} from "@/lib/task-status-summary";
 import { workflowStepTitle } from "./task-session-sidebar-aggregate";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { resolveTaskRepositorySlugs } from "@/lib/sidebar/sidebar-task-repositories";
@@ -120,8 +125,17 @@ function sidebarStatus(
     issueInfo: issueInfoForTask(task),
     queuedCount: summary?.queued_prompt_count,
     launchQueue: summary?.launch_queue,
+    quotaWait: summary?.quota_wait,
+    waitReason: resolveWaitReason({
+      primarySessionState: sessionStatus.sessionState,
+      wipAdmitted: task.wipAdmitted,
+      queuedForStepId: task.queuedForStepId,
+      launchQueue: summary?.launch_queue,
+      quotaWait: summary?.quota_wait,
+    }),
     turnError: sidebarTurnError(summary),
     wipQueue: context.wipQueueByTaskId?.get(task.id),
+    unreadSessionIds: statusSummaryUnreadSessionIds(summary),
   };
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/stretchr/testify/require"
@@ -32,6 +33,20 @@ func TestWorkspaceDeliveryIdentityRetainsCurrentGeneration(t *testing.T) {
 	require.Equal(t, "persisted-owner", info.DeliveryIncarnationID)
 	require.Equal(t, uint64(3), info.DeliveryHarnessGeneration)
 	require.Equal(t, "persisted-owner:g3", info.DeliveryStreamID)
+}
+
+// @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-007.18
+func TestWorkspaceInfoHydratesDurableWorkspaceOwner(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "caller-a"})
+	setupTestTask(t, repo)
+	_, err := repo.DB().ExecContext(ctx, "UPDATE workspaces SET owner_id = ? WHERE id = ?", "workspace-owner", "ws-1")
+	require.NoError(t, err)
+	session := &models.TaskSession{ID: "owner-hydration", TaskID: "task-123", State: models.TaskSessionStateCompleted}
+	require.NoError(t, repo.CreateTaskSession(ctx, session))
+	info, err := svc.GetWorkspaceInfoForSession(ctx, session.TaskID, session.ID)
+	require.NoError(t, err)
+	require.Equal(t, "workspace-owner", info.OwnerUserID)
 }
 
 func TestWorkspaceDeliveryIdentityFailsClosedOnGenerationReadError(t *testing.T) {

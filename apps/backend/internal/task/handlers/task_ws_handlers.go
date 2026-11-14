@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"strings"
 
 	"github.com/kandev/kandev/internal/common/constants"
@@ -89,27 +90,29 @@ func (h *TaskHandlers) wsListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 }
 
 type wsCreateTaskRequest struct {
-	WorkspaceID            string                    `json:"workspace_id"`
-	WorkflowID             string                    `json:"workflow_id"`
-	WorkflowStepID         string                    `json:"workflow_step_id"`
-	WorkflowAgentOverrides map[string]string         `json:"workflow_agent_overrides,omitempty"`
-	Title                  string                    `json:"title"`
-	Description            string                    `json:"description,omitempty"`
-	Autopilot              bool                      `json:"autopilot,omitempty"`
-	Priority               string                    `json:"priority,omitempty"`
-	State                  *v1.TaskState             `json:"state,omitempty"`
-	Repositories           []httpTaskRepositoryInput `json:"repositories,omitempty"`
-	Position               int                       `json:"position,omitempty"`
-	Metadata               map[string]interface{}    `json:"metadata,omitempty"`
-	MCPServerIDs           []string                  `json:"mcp_server_ids,omitempty"`
-	StartAgent             bool                      `json:"start_agent,omitempty"`
-	AgentProfileID         string                    `json:"agent_profile_id,omitempty"`
-	ExecutorID             string                    `json:"executor_id,omitempty"`
-	ExecutorProfileID      string                    `json:"executor_profile_id,omitempty"`
-	PlanMode               bool                      `json:"plan_mode,omitempty"`
-	Attachments            []v1.MessageAttachment    `json:"attachments,omitempty"`
-	ParentID               string                    `json:"parent_id,omitempty"`
-	InitialWorkspaceLayout string                    `json:"initial_workspace_layout,omitempty"`
+	WorkspaceID            string                                `json:"workspace_id"`
+	WorkflowID             string                                `json:"workflow_id"`
+	WorkflowStepID         string                                `json:"workflow_step_id"`
+	WorkflowAgentOverrides map[string]string                     `json:"workflow_agent_overrides,omitempty"`
+	Title                  string                                `json:"title"`
+	Description            string                                `json:"description,omitempty"`
+	Autopilot              bool                                  `json:"autopilot,omitempty"`
+	Priority               string                                `json:"priority,omitempty"`
+	State                  *v1.TaskState                         `json:"state,omitempty"`
+	Repositories           []httpTaskRepositoryInput             `json:"repositories,omitempty"`
+	Position               int                                   `json:"position,omitempty"`
+	Metadata               map[string]interface{}                `json:"metadata,omitempty"`
+	MCPServerIDs           []string                              `json:"mcp_server_ids,omitempty"`
+	BuiltinMCPPreferences  *mcpconfig.BuiltinCreationPreferences `json:"builtin_mcp_preferences,omitempty"`
+	StartAgent             bool                                  `json:"start_agent,omitempty"`
+	AgentProfileID         string                                `json:"agent_profile_id,omitempty"`
+	ExecutorID             string                                `json:"executor_id,omitempty"`
+	ExecutorProfileID      string                                `json:"executor_profile_id,omitempty"`
+	PlanMode               bool                                  `json:"plan_mode,omitempty"`
+	Attachments            []v1.MessageAttachment                `json:"attachments,omitempty"`
+	ParentID               string                                `json:"parent_id,omitempty"`
+	RelatedTaskIDs         []string                              `json:"related_task_ids,omitempty"`
+	InitialWorkspaceLayout string                                `json:"initial_workspace_layout,omitempty"`
 }
 
 func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -202,15 +205,20 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Position:                    req.Position,
 		Metadata:                    req.Metadata,
 		MCPServerIDs:                req.MCPServerIDs,
+		BuiltinMCPPreferences:       req.BuiltinMCPPreferences,
 		DeferredLaunch:              deferredLaunch,
 		RecordAgentProfileRecentUse: true,
 		PlanMode:                    req.PlanMode,
 		StartAgent:                  req.StartAgent,
 		ParentID:                    req.ParentID,
+		RelatedTaskIDs:              req.RelatedTaskIDs,
 		InitialWorkspaceLayout:      req.InitialWorkspaceLayout,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
+		if _, code, detail := builtinCreationError(err); code != "" {
+			return ws.NewError(msg.ID, msg.Action, code, err.Error(), map[string]interface{}{"error_code": detail})
+		}
 		if code, ok := repositorySelectionWSCode(err); ok {
 			return ws.NewError(msg.ID, msg.Action, code, err.Error(), taskErrorDetails(err))
 		}
@@ -365,7 +373,7 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		description = &trimmed
 	}
 
-	task, err := h.service.UpdateTask(ctx, req.ID, &service.UpdateTaskRequest{
+	task, err := h.service.UpdateTaskAsHuman(ctx, req.ID, &service.UpdateTaskRequest{
 		Title:          title,
 		Description:    description,
 		Priority:       req.Priority,
@@ -377,7 +385,13 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		AssigneeUserID: req.AssigneeUserID,
 	})
 	if err != nil {
+		if response, responseErr := humanCompletionWSError(msg, err); response != nil || responseErr != nil {
+			return response, responseErr
+		}
 		h.logger.Error("failed to update task", zap.Error(err))
+		if errors.Is(err, models.ErrExecutorMutationDenied) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, models.ErrExecutorMutationDenied.Error(), nil)
+		}
 		if code, ok := repositorySelectionWSCode(err); ok {
 			return ws.NewError(msg.ID, msg.Action, code, err.Error(), taskErrorDetails(err))
 		}
@@ -540,6 +554,12 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		},
 	)
 	if err != nil {
+		var approvalsErr *service.ApprovalsPendingMoveError
+		if errors.As(err, &approvalsErr) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, approvalsErr.Error(), map[string]interface{}{
+				"error_code": "task_approvals_pending", "pending_approvers": pendingApproversBody(approvalsErr.Pending),
+			})
+		}
 		if errors.Is(err, repoerrors.ErrTaskCompletionGateBlocked) || errors.Is(err, repoerrors.ErrTaskCompletionCriteriaConflict) ||
 			errors.Is(err, repoerrors.ErrTaskCompletionHumanConfirmationRequired) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "Task completion requirements changed or are not satisfied", map[string]interface{}{"error_code": "task_completion_gate_blocked"})
@@ -612,6 +632,36 @@ func (h *TaskHandlers) wsUpdateTaskRepository(ctx context.Context, msg *ws.Messa
 	return ws.NewResponse(msg.ID, msg.Action, taskRepo)
 }
 
+// wsDetachTaskRepository removes a non-primary root from the task. The
+// payload names task_id so the gateway dispatch backstop scopes it.
+func (h *TaskHandlers) wsDetachTaskRepository(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID           string `json:"task_id"`
+		TaskRepositoryID string `json:"task_repository_id"`
+	}
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" || req.TaskRepositoryID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id and task_repository_id are required", nil)
+	}
+	if err := h.service.DetachTaskRepository(ctx, req.TaskID, req.TaskRepositoryID); err != nil {
+		h.logger.Error("failed to detach task repository", zap.Error(err))
+		if errors.Is(err, service.ErrTaskRepositoryNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, err.Error(), nil)
+		}
+		if errors.Is(err, service.ErrPrimaryTaskRepositoryRoot) || isValidationError(err) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to detach task repository", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"detached":           true,
+		"task_id":            req.TaskID,
+		"task_repository_id": req.TaskRepositoryID,
+	})
+}
+
 func (h *TaskHandlers) wsUpdateTaskState(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsUpdateTaskStateRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -624,8 +674,11 @@ func (h *TaskHandlers) wsUpdateTaskState(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "state is required", nil)
 	}
 
-	task, err := h.service.UpdateTaskState(ctx, req.ID, v1.TaskState(req.State))
+	task, err := h.service.UpdateTaskStateAsHuman(ctx, req.ID, v1.TaskState(req.State))
 	if err != nil {
+		if response, responseErr := humanCompletionWSError(msg, err); response != nil || responseErr != nil {
+			return response, responseErr
+		}
 		if errors.Is(err, repoerrors.ErrTaskCompletionGateBlocked) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "Task completion requirements are not satisfied", map[string]interface{}{"error_code": "task_completion_gate_blocked"})
 		}

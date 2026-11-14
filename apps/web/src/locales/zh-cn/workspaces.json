@@ -12,7 +12,7 @@
   "localRepository": "本地仓库",
   "localRepositoryMenuDescription": "使用此机器上已有的 Git 检出。",
   "remoteRepositoryBranchHint": "所选分支将成为该仓库的默认基础分支。保存后可以更改。",
-  "remoteRepositoryMenuDescription": "从 GitHub、GitLab、Azure DevOps 或已连接的插件提供方注册仓库。",
+  "remoteRepositoryMenuDescription": "从 GitHub、GitLab 或已连接的插件提供方注册仓库。",
   "addScript": "添加脚本",
   "addWorkspace": "添加工作区",
   "alwaysPullBeforeWorktree": "创建新工作树前始终拉取",

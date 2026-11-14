@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-08-07
-updated: 2026-08-19
+updated: 2026-11-04
 owners:
   - kandev
 ---
@@ -21,17 +21,15 @@ surfaces therefore show the model but omit valid dependent options.
 Kandev needs one provider-neutral contract that works for OpenCode and future
 providers without maintaining a list of provider-specific option names.
 
+The grouped/composed catalog extension also covers live sessions.
+It preserves provider catalog structure and exact model identity across all existing selection surfaces.
+Agents owns that meaning. The shared UI renders the normalized data.
+
 ## Requirements
 
 ### REQ-AGENTS-DYNAMIC-PROVIDER-OPTIONS-001: Dynamic Provider Model Options
 
-**Intent:** Provider capabilities are not always properties of an agent family alone. Some ACP
-providers change the available configuration options when a model is selected. OpenCode currently
-demonstrates this split: the task chat selector receives model-dependent options such as reasoning
-effort from the live session, while the workflow session override editor and the OpenCode agent
-profile editor only have the agent-level capability snapshot. The settings surfaces therefore show
-the model but omit valid dependent options. Kandev needs one provider-neutral contract that works
-for OpenCode and future providers without maintaining a list of provider-specific option names.
+**Intent:** Settings users can discover the selected model's provider options through one shared contract.
 
 #### Acceptance criteria
 
@@ -40,8 +38,60 @@ for OpenCode and future providers without maintaining a list of provider-specifi
 - **AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-001.3:** In an agent profile editor, the open model selector stays open while Kandev resolves the selected model. The area below the model list shows a localized loading spinner instead of stale dependent options.
 - **AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-001.4:** The probe applies the requested model using generic ACP session-model logic, captures the complete post-model `config_options` response or update, and applies the existing ACP compatibility normalization.
 - **AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-001.5:** The response is a complete snapshot for that resolution context. It may contain zero, one, or many arbitrary ACP `select` options and their choices. The UI does not recognize provider-specific option identifiers.
-- **AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-001.6:** The settings pages share the resolver and its short-lived in-memory cache. The live chat selector remains session-authoritative and is not changed by this feature.
+- **AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-001.6:** The settings pages share the resolver and its short-lived in-memory cache. Live chat remains session-authoritative and never consumes a settings probe as its live state.
 - **AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-001.7:** The initial UI sends the model as the dependency context. The contract also accepts mode and currently selected options so providers with additional dependencies can be supported without changing the endpoint shape.
+
+### REQ-AGENTS-DYNAMIC-PROVIDER-OPTIONS-002: Structured model catalogs
+
+**Intent:** Users can navigate provider groups without losing exact selectable model values.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-002.1:** Settings and live catalogs shall preserve native group identities, labels, ordering, leaf values, and supplied descriptions.
+  Flat catalogs shall retain their existing selection behavior.
+- **AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-002.2:** Subgroups shall reflect supplied or verified catalog relationships.
+  The selector shall support search, Back navigation, selected-state visibility, and distinct paths for repeated labels.
+- **AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-002.3:** Config updates and existing live-session snapshots shall retain the structured catalog through reload, resume, and boot hydration.
+  Settings discovery shall retain its existing transient cache lifetime.
+- **AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-002.4:** The shared catalog shall accept only bounded presentation data.
+  Invalid richer metadata shall retain the ordinary exact-model selection path without executable metadata or inferred billing information.
+- **AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-002.5:** An ordinary group containing one model shall show one model row without a redundant heading.
+  Descriptions, order, distinct occurrences, and useful path context shall remain available.
+  Multi-choice groups and verified compositions shall retain their presentation, including during search.
+
+### REQ-AGENTS-DYNAMIC-PROVIDER-OPTIONS-003: Exact composed-model selection
+
+**Intent:** Users can select a verified combination of model dimensions without searching an expanded list of pairings.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-003.1:** A complete dimension selection shall resolve to exactly one currently advertised model value.
+  Missing, invalid, or ambiguous combinations shall not apply or silently select another pairing.
+- **AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-003.2:** Thinking, Speed, and other provider configuration options shall use the selected model's complete authoritative option snapshot.
+  Model names and IDs shall not determine their effective values.
+- **AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-003.3:** Devin Fusion shall expose Lead and Sidekick only through a verified relationship source or narrowly qualified compatibility mapping.
+  Unrecognized entries shall remain available in the ordinary catalog.
+  Ordinary fallback alone shall not satisfy verified Fusion composition acceptance.
+- **AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-003.4:** A second synthetic provider with different dimension names shall use the same renderer and combination logic.
+  The renderer shall not recognize agent names or vendor-specific dimension identifiers.
+
+### REQ-AGENTS-DYNAMIC-PROVIDER-OPTIONS-004: Shared configuration flow
+
+**Intent:** Users can configure the same advertised model on desktop and phone through each existing owning surface.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-004.1:** Profile drafts, workflow overrides, and live sessions shall share catalog navigation and composition behavior.
+  Apply shall update the owning draft or live session. Existing settings Save shall retain persistence authority.
+- **AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-004.2:** Changing dimensions shall preserve valid choices and visibly require replacements for invalid choices.
+  Loading, failure, retry, cancellation, viewport changes, and stale responses shall preserve the correct draft and context.
+- **AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-004.3:** Live application shall report confirmed provider state after each accepted mutation.
+  A later option failure shall expose partial application and retry without claiming atomic success or resetting the conversation.
+- **AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-004.4:** Reload, resume, reset, and historical turns shall retain existing configuration attribution and baseline semantics.
+  Live changes shall not rewrite profile defaults. Session permission mode shall remain separate from model dimensions.
+- **AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-004.5:** Desktop and phone shall offer equivalent complete configuration outcomes through localized, accessible controls.
+  Phone navigation shall use one sheet with internal Back navigation, retained draft state, and one vertical scroll region.
+  Controls shall meet 44px touch targets and clear safe areas without horizontal document overflow.
 
 ## Migrated source detail
 
@@ -79,8 +129,8 @@ settings surfaces that do not have a live task session:
   contain zero, one, or many arbitrary ACP `select` options and their choices.
   The UI does not recognize provider-specific option identifiers.
 - The settings pages share the resolver and its short-lived in-memory cache.
-  The live chat selector remains session-authoritative and is not changed by
-  this feature.
+  The live chat selector remains session-authoritative and never consumes a
+  settings probe as its live state.
 - The initial UI sends the model as the dependency context. The contract also
   accepts mode and currently selected options so providers with additional
   dependencies can be supported without changing the endpoint shape.
@@ -283,7 +333,8 @@ task session, change an agent profile, or mutate provider configuration.
 
 ## Persistence guarantees
 
-- No resolved capability snapshot is persisted in SQLite or workflow JSON.
+- No settings-probe capability snapshot is persisted in SQLite or workflow JSON.
+  Existing live-session selector snapshots retain their current persistence owner, including the structured catalog under requirement 002.
 - Existing profile and workflow `config_options` persistence remains the source
   of truth for user selections.
 - Runtime cache entries may disappear on process restart without affecting
@@ -294,7 +345,7 @@ task session, change an agent profile, or mutate provider configuration.
 ## Out of scope
 
 - Hard-coding OpenCode, Grok, or any provider's option names in React code.
-- Changing the live task chat selector's session event protocol.
+- Replacing live-session configuration authority. Requirement 002 adds catalog data to the existing projection.
 - Resolving every model eagerly during initial agent discovery.
 - Persisting provider capability snapshots or introducing a database cache.
 - Supporting non-ACP provider-specific configuration controls through this
@@ -317,3 +368,10 @@ task session, change an agent profile, or mutate provider configuration.
   list while model-dependent options load.
 - Desktop and mobile E2E coverage verifies workflow and profile behavior, with
   touch sizing and overflow assertions for the mobile workflow editor.
+
+## Grouped catalog delivery
+
+- [Grouped/composed model design](../system-design/grouped-model-catalog.md)
+- [Combined Devin delivery plan for issues #5023 and #5026](../../../plans/first-draft-profile-discovery/plan.md)
+- [Selector repair for issue #5053](../../../plans/model-catalog-selector-repair/plan.md)
+- [Configuration summary and attribution contract](../../ui/requirements/acp-model-configuration-summary.md)

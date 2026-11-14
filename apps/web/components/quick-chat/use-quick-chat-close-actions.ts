@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useToast } from "@/components/toast-provider";
 import { cancelPtyTerminalStart } from "@/components/settings/pty-terminal-lifecycle";
@@ -58,6 +58,11 @@ type QuickChatTabCloseNavigation = {
   tabOrder: string[];
   activeTabReference: string | undefined;
   onActivateTabReference: (reference: string) => void;
+};
+
+type QuickTerminalCloseLifecycle = {
+  beginClose: (tabId: string) => boolean;
+  finishClose: (tabId: string, deleted: boolean) => void;
 };
 
 function getActiveQuickChatTabReference(
@@ -171,6 +176,7 @@ function useQuickChatSessionClose(
 function useQuickTerminalClose(
   store: QuickChatCloseStore,
   resetPendingStarts: () => void,
+  terminalCloseLifecycle: QuickTerminalCloseLifecycle,
   removeTabReference: (reference: string) => void,
   navigation: QuickChatTabCloseNavigation,
 ) {
@@ -180,10 +186,11 @@ function useQuickTerminalClose(
 
   const handleCloseTerminal = useCallback(
     async (tabId: string) => {
-      resetPendingStarts();
-      cancelPtyTerminalStart(tabId);
       const tab = store.terminalTabs.find((item) => item.tabId === tabId);
       if (!tab) return;
+      if (!terminalCloseLifecycle.beginClose(tabId)) return;
+      resetPendingStarts();
+      cancelPtyTerminalStart(tabId);
       const reference = terminalTabReference(tabId);
       const replacement =
         activeTabReference === reference
@@ -196,10 +203,12 @@ function useQuickTerminalClose(
           store.removeQuickTerminal(tabId);
           removeTabReference(reference);
           if (replacement) onActivateTabReference(replacement);
+          terminalCloseLifecycle.finishClose(tabId, true);
           return;
         }
         const message = error instanceof Error ? error.message : String(error);
         store.updateQuickTerminal(tabId, { status: "error", error: message });
+        terminalCloseLifecycle.finishClose(tabId, false);
         toast({
           title: t("sidebar:quickChatTerminals"),
           description: t("sidebar:quickChatTerminalError", { error: message }),
@@ -210,10 +219,12 @@ function useQuickTerminalClose(
       store.removeQuickTerminal(tabId);
       removeTabReference(reference);
       if (replacement) onActivateTabReference(replacement);
+      terminalCloseLifecycle.finishClose(tabId, true);
     },
     [
       activeTabReference,
       onActivateTabReference,
+      terminalCloseLifecycle,
       removeTabReference,
       resetPendingStarts,
       store,
@@ -230,6 +241,8 @@ type QuickChatCloseActionsOptions = {
   workspaceId: string;
   store: QuickChatCloseStore;
   resetPendingStarts: () => void;
+  beginTerminalClose: (tabId: string) => boolean;
+  finishTerminalClose: (tabId: string, deleted: boolean) => void;
   removeTabReference: (reference: string) => void;
   tabOrder: string[];
 };
@@ -238,6 +251,8 @@ export function useQuickChatCloseActions({
   workspaceId,
   store,
   resetPendingStarts,
+  beginTerminalClose,
+  finishTerminalClose,
   removeTabReference,
   tabOrder,
 }: QuickChatCloseActionsOptions) {
@@ -247,6 +262,10 @@ export function useQuickChatCloseActions({
     [store, workspaceId],
   );
   const navigation = { tabOrder, activeTabReference, onActivateTabReference };
+  const terminalCloseLifecycle = useMemo(
+    () => ({ beginClose: beginTerminalClose, finishClose: finishTerminalClose }),
+    [beginTerminalClose, finishTerminalClose],
+  );
   const sessionClose = useQuickChatSessionClose(
     store,
     resetPendingStarts,
@@ -256,6 +275,7 @@ export function useQuickChatCloseActions({
   const handleCloseTerminal = useQuickTerminalClose(
     store,
     resetPendingStarts,
+    terminalCloseLifecycle,
     removeTabReference,
     navigation,
   );

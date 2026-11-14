@@ -23,6 +23,7 @@ vi.mock("@/components/kanban-external-link-availability", () => ({
 }));
 
 vi.mock("@dnd-kit/core", () => ({
+  useDndMonitor: () => {},
   PointerSensor: function PointerSensor() {},
   TouchSensor: function TouchSensor() {},
   useSensor: () => ({}),

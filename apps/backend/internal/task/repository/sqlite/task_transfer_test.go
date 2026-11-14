@@ -43,6 +43,17 @@ func TestTransferTaskPreservesIdentityAndIsIdempotent(t *testing.T) {
 	repo, task := seedTaskTransferFixture(t)
 	ctx := context.Background()
 	command := taskTransferCommand(task)
+	now := time.Now().UTC()
+	if _, err := repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO task_session_compactions
+			(session_id, provider, native_session_id, compaction_attempt_id,
+			 incarnation_id, harness_generation, delivery_stream_id, delivery_sequence,
+			 observed_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		"session-running", "copilot-acp", "native-transfer", "attempt-transfer",
+		"incarnation-transfer", 1, "stream-transfer", 1, now, now); err != nil {
+		t.Fatalf("seed compaction receipt: %v", err)
+	}
 
 	receipt, err := repo.TransferTask(ctx, command)
 	if err != nil {
@@ -57,7 +68,8 @@ func TestTransferTaskPreservesIdentityAndIsIdempotent(t *testing.T) {
 		t.Fatalf("session census = %+v", receipt.Sessions)
 	}
 	if receipt.PreservationDigest == "" || receipt.PreservationCounts["task_plans"] != 1 ||
-		receipt.PreservationCounts["task_repositories"] != 1 {
+		receipt.PreservationCounts["task_repositories"] != 1 ||
+		receipt.PreservationCounts["task_session_compactions"] != 1 {
 		t.Fatalf("preservation receipt = %+v", receipt)
 	}
 

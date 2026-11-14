@@ -290,3 +290,25 @@ describe("buildSidebarItem activity", () => {
     expect(createdFallback.lastActivityAt).toBe(CREATED_AT);
   });
 });
+
+describe("buildSidebarItem unread projection", () => {
+  const UPDATED_AT = "2026-07-22T00:00:00Z";
+
+  it("carries the summary unread aggregate onto the sidebar row", () => {
+    const item = buildSidebarItem(
+      task({
+        statusSummary: { revision: 1, updated_at: UPDATED_AT, unread_session_ids: ["session-1"] },
+      }),
+      emptyContext(),
+    );
+    expect(item.unreadSessionIds).toEqual(["session-1"]);
+  });
+
+  it("reports no unread sessions without a summary or with an empty list", () => {
+    expect(buildSidebarItem(task(), emptyContext()).unreadSessionIds).toBeUndefined();
+    const cleared = task({
+      statusSummary: { revision: 2, updated_at: UPDATED_AT, unread_session_ids: [] },
+    });
+    expect(buildSidebarItem(cleared, emptyContext()).unreadSessionIds).toBeUndefined();
+  });
+});

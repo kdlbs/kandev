@@ -261,11 +261,14 @@ func (r *Repository) ClearStepDecisionsAndCompleteMarker(
 	if taskID == "" || stepID == "" {
 		return 0, errors.New("task_id and step_id are required")
 	}
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return 0, fmt.Errorf("begin clear decisions transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockOfficeCompletionTaskScope(ctx, tx, taskID); err != nil {
+		return 0, err
+	}
 
 	res, err := tx.ExecContext(ctx, r.db.Rebind(
 		`DELETE FROM workflow_step_decisions WHERE task_id = ? AND step_id = ?`,

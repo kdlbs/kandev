@@ -359,6 +359,8 @@ export type TaskDependencyRef = {
 export type TaskDependencyProjection = {
   blocked?: boolean;
   blocked_reason?: "pending" | "failed" | "unknown";
+  parent_id?: string | null;
+  related?: TaskDependencyRef[];
   depends_on?: TaskDependencyRef[];
   blocks?: TaskDependencyRef[];
 };
@@ -451,6 +453,8 @@ type OptionalAgentTaskOpts = {
   start_when_unblocked?: boolean;
   /** Prepare the task without launching its session so E2E fixtures can bind it first. */
   start_agent?: boolean;
+  /** Create a prepared session without starting its agent (requires start_agent false). */
+  prepare_session?: boolean;
   mcp_server_ids?: string[];
 };
 
@@ -483,6 +487,7 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
     fields.start_when_unblocked = opts.start_when_unblocked;
   }
   if (opts.start_agent !== undefined) fields.start_agent = opts.start_agent;
+  if (opts.prepare_session !== undefined) fields.prepare_session = opts.prepare_session;
   return fields;
 }
 
@@ -1091,6 +1096,8 @@ export class ApiClient {
       start_when_unblocked?: boolean;
       /** Prepare the task without launching its session so E2E fixtures can bind it first. */
       start_agent?: boolean;
+      /** Create a prepared session without starting its agent (requires start_agent false). */
+      prepare_session?: boolean;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", {
@@ -1520,11 +1527,14 @@ export class ApiClient {
   }
 
   async saveUserSettings(settings: {
+    escape_cancels_agent?: boolean;
     enable_preview_on_click?: boolean;
     confirm_task_archive?: boolean;
     prevent_auto_start_agent_on_open?: boolean;
     auto_focus_new_tasks?: boolean;
     unread_divider?: boolean;
+    unread_task_dot?: boolean;
+    unread_task_dot_hide_delay_seconds?: number;
     agent_generated_task_titles?: boolean;
     message_time_display?: "relative" | "absolute_short" | "absolute_long";
     agent_tab_close_behavior?: "delete_session" | "hide_panel";
@@ -2934,6 +2944,31 @@ export class ApiClient {
 
   // --- Session ---
 
+  /** Reads the authoritative background-work projection for a session. */
+  async listBackgroundWorkloads(sessionId: string): Promise<{
+    workloads: Array<{
+      work_id: string;
+      title: string;
+      kind?: string;
+      state: string;
+      exit_code?: number | null;
+      source_call_id?: string;
+      origin_turn_id?: string;
+      revision?: number;
+    }>;
+  }> {
+    const response = await this.rawRequest(
+      "GET",
+      `/api/v1/task-sessions/${encodeURIComponent(sessionId)}/background-work`,
+    );
+    if (!response.ok) {
+      throw new Error(
+        `listBackgroundWorkloads failed (${response.status}): ${await response.text()}`,
+      );
+    }
+    return response.json();
+  }
+
   async listSessionMessages(sessionId: string): Promise<{
     messages: Array<{
       id: string;
@@ -3190,6 +3225,7 @@ export class ApiClient {
       repository_id: string;
       base_branch: string;
       checkout_branch?: string;
+      workspace_relative_path?: string;
       position: number;
     }>;
     workspace_folders?: Array<{
@@ -3545,21 +3581,6 @@ export class ApiClient {
     });
   }
 
-  async createSentryInstance(payload: {
-    name: string;
-    secret: string;
-    url?: string;
-    workspaceId?: string;
-  }): Promise<{ id: string }> {
-    const { workspaceId, ...config } = payload;
-    const path = await this.withActiveWorkspace("/api/v1/sentry/instances", workspaceId);
-    return this.request("POST", path, {
-      authMethod: "auth_token",
-      url: "https://sentry.io",
-      ...config,
-    });
-  }
-
   /**
    * Poll until the integration config reports `lastOk: true`. SetConfig kicks
    * off an async auth-health probe in a goroutine, so the row's `lastOk` flips
@@ -3613,40 +3634,6 @@ export class ApiClient {
       // the bounded poll can observe the recovered backend.
       return false;
     }
-  }
-
-  // --- Azure DevOps Mock Control ---
-
-  async mockAzureDevOpsSeed(state: unknown): Promise<void> {
-    await this.request("POST", "/api/v1/azure-devops/mock/state", state);
-  }
-
-  async mockAzureDevOpsReset(): Promise<void> {
-    await this.request("DELETE", "/api/v1/azure-devops/mock/state");
-  }
-
-  async setAzureDevOpsConfig(
-    workspaceId: string,
-    payload: { organizationUrl: string; pat: string },
-  ): Promise<void> {
-    await this.request(
-      "POST",
-      `/api/v1/azure-devops/config?workspace_id=${encodeURIComponent(workspaceId)}`,
-      { ...payload, authMethod: "pat" },
-    );
-  }
-
-  async associateAzureDevOpsTaskPR(
-    workspaceId: string,
-    taskId: string,
-    repositoryId: string,
-    pullRequestId: number,
-  ): Promise<void> {
-    await this.request(
-      "POST",
-      `/api/v1/azure-devops/tasks/${encodeURIComponent(taskId)}/pull-requests?workspace_id=${encodeURIComponent(workspaceId)}`,
-      { repositoryId, pullRequestId },
-    );
   }
 
   // --- Jira Mock Control ---
@@ -4404,11 +4391,13 @@ export class ApiClient {
     taskId: string,
     state: string,
     isPrimary = true,
+    options?: { isPassthrough?: boolean },
   ): Promise<{ id: string; task_id: string; status: string }> {
     return this.request("POST", "/api/v1/e2e/task-sessions", {
       task_id: taskId,
       state,
       is_primary: isPrimary,
+      is_passthrough: options?.isPassthrough,
     });
   }
 }

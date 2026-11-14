@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,16 +50,23 @@ func (e *Executor) StopSessionSynchronously(ctx context.Context, sessionID, reas
 		if !errors.Is(err, models.ErrTaskSessionNotFound) {
 			return ErrExecutionNotFound
 		}
-		return e.stopMissingSessionSynchronously(ctx, sessionID, reason, force, err)
+		err = e.stopMissingSessionSynchronously(ctx, sessionID, reason, force, err)
+		if runtimeapi.IsNotFound(err) {
+			return nil
+		}
+		return err
 	}
 	result, err := e.StopSessionDetailed(ctx, session, reason, force)
 	if err != nil {
+		if runtimeapi.IsNotFound(err) {
+			return nil
+		}
 		return err
 	}
 	if result.ExecutionID == "" {
 		return nil
 	}
-	return e.StopExecution(ctx, result.ExecutionID, reason, force)
+	return e.stopExecutionIfPresent(ctx, result.ExecutionID, reason, force)
 }
 
 func (e *Executor) stopMissingSessionSynchronously(
@@ -70,12 +78,20 @@ func (e *Executor) stopMissingSessionSynchronously(
 	executionID, lookupErr := e.agentManager.GetExecutionIDForSession(ctx, sessionID)
 	switch {
 	case lookupErr == nil && executionID != "":
-		return e.StopExecution(ctx, executionID, reason, force)
+		return e.stopExecutionIfPresent(ctx, executionID, reason, force)
 	case executionID == "" || errors.Is(lookupErr, lifecycle.ErrNoExecutionForSession):
 		return fmt.Errorf("%w: %w: %w", ErrExecutionNotFound, runtimeapi.ErrNotFound, sessionErr)
 	default:
 		return fmt.Errorf("%w: lookup execution for session %q: %w", ErrExecutionNotFound, sessionID, lookupErr)
 	}
+}
+
+func (e *Executor) stopExecutionIfPresent(ctx context.Context, executionID, reason string, force bool) error {
+	err := e.StopExecution(ctx, executionID, reason, force)
+	if runtimeapi.IsNotFound(err) {
+		return nil
+	}
+	return err
 }
 
 // SessionStopResult describes the synchronous, logical portion of a stop. A
@@ -197,6 +213,11 @@ func (e *Executor) registerStopOwner(sessionID, executionID string, force bool) 
 	if e.onExecutionStopOwnerRegistration != nil {
 		e.onExecutionStopOwnerRegistration(sessionID, executionID, force)
 	}
+}
+
+func (e *Executor) registerReplacementStopOwner(ctx context.Context, sessionID, executionID string) bool {
+	return e.onExecutionReplacementStopOwnerRegistration != nil &&
+		e.onExecutionReplacementStopOwnerRegistration(ctx, sessionID, executionID)
 }
 
 // registryRecoveredSession keeps the database row paired with the exact
@@ -1498,6 +1519,7 @@ func (e *Executor) registerInitialPromptCallbacks(
 func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Task, session *models.TaskSession, sessionID, newModel, prompt, acpSessionID string, execConfig executorConfig, running *models.ExecutorRunning) (*LaunchAgentRequest, error) {
 	req := &LaunchAgentRequest{
 		TaskID:            task.ID,
+		OwnerUserID:       e.managedRuntimeOwnerUserID(ctx, task.WorkspaceID),
 		WorkspaceID:       task.WorkspaceID,
 		SessionID:         sessionID,
 		TaskTitle:         task.Title,
@@ -1522,11 +1544,12 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 		return nil, err
 	}
 	req.McpMode = mcpMode
-	profileContext, err := e.resolveTaskSessionMCPProfile(ctx, task.ID, session, true)
+	profileContext, err := e.PrepareTaskSessionMCPProfile(ctx, task.ID, session, true)
 	if err != nil {
 		return nil, err
 	}
 	req.McpProfile = &profileContext
+	req.TaskDescription = sysprompt.AppendBuiltinBindingGuidance(req.TaskDescription, profileContext.BuiltinPackages)
 
 	repositoryPath, err := e.applyRepositoryToSwitchRequest(ctx, req, session, execConfig)
 	if err != nil {

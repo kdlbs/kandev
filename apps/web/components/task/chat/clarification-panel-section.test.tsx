@@ -15,6 +15,8 @@ import {
   type ComposerDisclosureContextValue,
 } from "./composer-disclosure";
 
+/* eslint-disable max-lines, max-lines-per-function -- one harness shares clarification lifecycle regressions. */
+
 vi.mock("@/lib/config", () => ({
   getBackendConfig: () => ({ apiBaseUrl: "https://api.test" }),
 }));
@@ -76,6 +78,36 @@ function clarMessage(opts: {
 function setTestRect(element: HTMLElement, top: number, height: number) {
   element.getBoundingClientRect = () =>
     ({ top, bottom: top + height, left: 0, right: 800, width: 800, height }) as DOMRect;
+}
+
+class PanelResizeObserverStub {
+  static instances: PanelResizeObserverStub[] = [];
+  readonly observed = new Set<Element>();
+
+  constructor(readonly callback: ResizeObserverCallback) {
+    PanelResizeObserverStub.instances.push(this);
+  }
+
+  observe(element: Element) {
+    this.observed.add(element);
+  }
+
+  unobserve(element: Element) {
+    this.observed.delete(element);
+  }
+
+  disconnect() {
+    this.observed.clear();
+  }
+}
+
+function triggerResize(element: Element) {
+  const observers = PanelResizeObserverStub.instances.filter((observer) =>
+    observer.observed.has(element),
+  );
+  act(() =>
+    observers.forEach((observer) => observer.callback([], observer as unknown as ResizeObserver)),
+  );
 }
 
 function renderSection(
@@ -148,6 +180,17 @@ const OPTION_TESTID = "clarification-option";
 const CONTAINER_TESTID = "clarification-overlay-container";
 const QUESTION_COUNT_TESTID = "clarification-question-count";
 const SUBMITTING_STATUS_TESTID = "clarification-submitting-status";
+const SIZE_TOGGLE_TESTID = "clarification-panel-size-toggle";
+const EXPAND_LABEL = "Expand";
+const RESTORE_LABEL = "Restore";
+const ARIA_LABEL = "aria-label";
+const ARIA_DISABLED = "aria-disabled";
+
+async function submitSinglePanelAnswer() {
+  const button = await screen.findByTestId("clarification-custom-submit");
+  await vi.waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(button);
+}
 
 describe("ClarificationPanelSection — image lifecycle", () => {
   it("cancels hidden question and choice reads while preserving the answer draft", async () => {
@@ -231,6 +274,7 @@ describe("ClarificationPanelSection — collapse affordance", () => {
     expect(header.querySelector('[data-testid="clarification-submit"]')).not.toBeNull();
     expect(header.querySelector('[data-testid="clarification-skip"]')).not.toBeNull();
     expect(header.querySelector('[data-testid="clarification-collapse-toggle"]')).not.toBeNull();
+    expect(screen.getAllByTestId(SIZE_TOGGLE_TESTID)).toHaveLength(1);
     expect(screen.queryByText("Clarification needed")).toBeNull();
   });
 
@@ -262,6 +306,27 @@ describe("ClarificationPanelSection — collapse affordance", () => {
     fireEvent.click(screen.getByTestId("clarification-skip"));
 
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  });
+
+  it("preserves expanded sizing and its Restore target when collapsed and reopened", () => {
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderSection(true, messages);
+    const container = screen.getByTestId(CONTAINER_TESTID) as HTMLDivElement;
+    const sizeToggle = screen.getByTestId(SIZE_TOGGLE_TESTID) as HTMLButtonElement;
+
+    fireEvent.click(sizeToggle);
+    expect(sizeToggle.getAttribute(ARIA_LABEL)).toBe(RESTORE_LABEL);
+    expect(container.style.height).toBe("1000px");
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse clarification" }));
+    expect(screen.getByTestId(SCROLL_REGION_TESTID).className).toContain("hidden");
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand clarification" }));
+    expect(screen.getByTestId(SCROLL_REGION_TESTID).className).not.toContain("hidden");
+    expect(container.style.height).toBe("1000px");
+    expect(screen.getByTestId(SIZE_TOGGLE_TESTID).getAttribute(ARIA_LABEL)).toBe(RESTORE_LABEL);
   });
 
   it("resets to expanded when a new bundle (different pending_id) arrives while collapsed", () => {
@@ -306,9 +371,9 @@ describe("ClarificationPanelSection — submitting feedback", () => {
 
     const status = screen.getByTestId(SUBMITTING_STATUS_TESTID);
     const submit = screen.getByTestId("clarification-submit");
-    expect(status.getAttribute("aria-label")).toBe(i18n.t("task:submitting"));
+    expect(status.getAttribute(ARIA_LABEL)).toBe(i18n.t("task:submitting"));
     expect(status.getAttribute("aria-hidden")).toBeNull();
-    expect(submit.getAttribute("aria-label")).toBe(i18n.t("task:submit"));
+    expect(submit.getAttribute(ARIA_LABEL)).toBe(i18n.t("task:submit"));
   });
 
   it("shows the translated submitting status before Skip while a single answer is in flight", async () => {
@@ -326,10 +391,11 @@ describe("ClarificationPanelSection — submitting feedback", () => {
 
     try {
       fireEvent.click(screen.getByTestId(OPTION_TESTID));
+      await submitSinglePanelAnswer();
 
       const status = await screen.findByTestId(SUBMITTING_STATUS_TESTID);
       const skip = screen.getByTestId("clarification-skip");
-      expect(status.getAttribute("aria-label")).toBe(i18n.t("task:submitting"));
+      expect(status.getAttribute(ARIA_LABEL)).toBe(i18n.t("task:submitting"));
       expect(status.getAttribute("aria-hidden")).toBeNull();
       expect(status.compareDocumentPosition(skip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect((skip as HTMLButtonElement).disabled).toBe(true);
@@ -364,6 +430,7 @@ describe("ClarificationPanelSection — submitting feedback", () => {
 
     try {
       fireEvent.click(screen.getByTestId(OPTION_TESTID));
+      await submitSinglePanelAnswer();
       await screen.findByTestId(SUBMITTING_STATUS_TESTID);
 
       rejectResponse(new Error("network"));
@@ -400,7 +467,7 @@ describe("ClarificationPanelSection — per-surface initial height cap", () => {
     expect(container.style.maxHeight).toBe("350px");
   });
 
-  it("expands to measured host space and resets to content sizing without losing an answer draft", () => {
+  it("expands to measured host space and restores content sizing without losing an answer draft", () => {
     const messages = [
       clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
     ];
@@ -409,21 +476,83 @@ describe("ClarificationPanelSection — per-surface initial height cap", () => {
     const input = screen.getByTestId("clarification-input") as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "Keep this answer." } });
 
-    const expand = screen.getByTestId("clarification-panel-expand") as HTMLButtonElement;
-    expect(expand.disabled).toBe(false);
-    fireEvent.click(expand);
+    const toggle = screen.getByTestId(SIZE_TOGGLE_TESTID) as HTMLButtonElement;
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(EXPAND_LABEL);
+    expect(toggle.getAttribute("aria-controls")).toBe(
+      screen.getByTestId("clarification-scroll-region").id,
+    );
+    expect(toggle.getAttribute(ARIA_DISABLED)).toBeNull();
+    fireEvent.click(toggle);
 
     expect(container.style.height).toBe("1000px");
     expect(container.style.maxHeight).toBe("1000px");
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(RESTORE_LABEL);
+    expect(toggle.getAttribute(ARIA_DISABLED)).toBeNull();
     expect(input.value).toBe("Keep this answer.");
     expect(fetchMock).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByTestId("clarification-panel-reset"));
+    fireEvent.click(toggle);
 
     expect(container.style.height).toBe("");
     expect(container.style.maxHeight).toBe("500px");
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(EXPAND_LABEL);
     expect(input.value).toBe("Keep this answer.");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the size toggle focusable and focused through expansion and restoration", () => {
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderSection(true, messages);
+    const toggle = screen.getByTestId(SIZE_TOGGLE_TESTID) as HTMLButtonElement;
+
+    toggle.focus();
+    fireEvent.click(toggle);
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(RESTORE_LABEL);
+
+    fireEvent.click(toggle);
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(EXPAND_LABEL);
+  });
+
+  it("activates the size toggle without answering or skipping", () => {
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderSection(true, messages);
+    const toggle = screen.getByTestId(SIZE_TOGGLE_TESTID) as HTMLButtonElement;
+
+    toggle.focus();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(RESTORE_LABEL);
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(EXPAND_LABEL);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("restores the expanded panel to its previous manual height", () => {
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderSection(true, messages);
+    const container = screen.getByTestId(CONTAINER_TESTID) as HTMLDivElement;
+
+    const handle = screen.getByRole("button", { name: /resize/i });
+    fireEvent.mouseDown(handle, { clientY: 500 });
+    fireEvent.mouseMove(document, { clientY: 50 });
+    fireEvent.mouseUp(document);
+    expect(container.style.height).toBe("450px");
+
+    const toggle = screen.getByTestId(SIZE_TOGGLE_TESTID) as HTMLButtonElement;
+    fireEvent.click(toggle);
+    expect(container.style.height).toBe("1000px");
+
+    fireEvent.click(toggle);
+    expect(container.style.height).toBe("450px");
+    expect(container.style.maxHeight).toBe("1000px");
   });
 
   it("disables Expand when the host has no unreserved space", () => {
@@ -436,9 +565,12 @@ describe("ClarificationPanelSection — per-surface initial height cap", () => {
     ];
     renderSection(true, messages, 50, { allocationRef, reservedHeightPx: 100 });
 
-    expect((screen.getByTestId("clarification-panel-expand") as HTMLButtonElement).disabled).toBe(
-      true,
-    );
+    const toggle = screen.getByTestId(SIZE_TOGGLE_TESTID) as HTMLButtonElement;
+    expect(toggle.getAttribute(ARIA_DISABLED)).toBe("true");
+    expect(toggle.disabled).toBe(false);
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(EXPAND_LABEL);
+    fireEvent.click(toggle);
+    expect((screen.getByTestId(CONTAINER_TESTID) as HTMLDivElement).style.height).toBe("");
     expect(screen.getByTestId(CONTAINER_TESTID).getAttribute("data-host-max-height")).toBe("0");
     expect((screen.getByTestId(CONTAINER_TESTID) as HTMLDivElement).style.minHeight).toBe("0px");
   });
@@ -482,8 +614,10 @@ describe("ClarificationPanelSection — per-surface initial height cap", () => {
     renderThreadSection(messages, allocation);
 
     const container = screen.getByTestId(CONTAINER_TESTID) as HTMLDivElement;
-    fireEvent.click(screen.getByTestId("clarification-panel-expand"));
+    const toggle = screen.getByTestId(SIZE_TOGGLE_TESTID) as HTMLButtonElement;
+    fireEvent.click(toggle);
     expect(container.style.height).toBe("800px");
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(RESTORE_LABEL);
 
     setTestRect(allocation, 0, 50);
     act(() => window.dispatchEvent(new Event("resize")));
@@ -491,6 +625,71 @@ describe("ClarificationPanelSection — per-surface initial height cap", () => {
 
     expect(container.dataset.scrollOwner).toBe("thread-footer");
     expect(container.style.height).toBe("");
+    expect(toggle.getAttribute(ARIA_DISABLED)).toBeNull();
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(RESTORE_LABEL);
+  });
+});
+
+describe("ClarificationPanelSection — size toggle focus continuity", () => {
+  it("keeps the same focused button through keyboard Expand and Restore while measurements catch up", async () => {
+    PanelResizeObserverStub.instances = [];
+    vi.stubGlobal("ResizeObserver", PanelResizeObserverStub);
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    const allocation = document.createElement("div");
+    document.body.append(allocation);
+    setTestRect(allocation, 0, 800);
+    const allocationRef = { current: allocation } as React.RefObject<HTMLElement | null>;
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderSection(true, messages, 50, { allocationRef });
+    const container = screen.getByTestId(CONTAINER_TESTID) as HTMLDivElement;
+    setTestRect(container, 0, 300);
+    triggerResize(container);
+
+    const toggle = screen.getByTestId(SIZE_TOGGLE_TESTID) as HTMLButtonElement;
+    toggle.focus();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(RESTORE_LABEL);
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.getAttribute(ARIA_DISABLED)).toBeNull();
+
+    // The expanded measurement arrives only after the state change.
+    setTestRect(container, 0, 800);
+    triggerResize(container);
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(EXPAND_LABEL);
+    expect(screen.getByTestId(SIZE_TOGGLE_TESTID)).toBe(toggle);
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.getAttribute(ARIA_DISABLED)).toBe("true");
+
+    setTestRect(container, 0, 300);
+    triggerResize(container);
+    expect(toggle.getAttribute(ARIA_DISABLED)).toBeNull();
+    expect(document.activeElement).toBe(toggle);
+
+    // Host contraction legitimately leaves no headroom for the next Restore.
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(RESTORE_LABEL);
+    setTestRect(container, 0, 800);
+    triggerResize(container);
+    setTestRect(allocation, 0, 300);
+    triggerResize(allocation);
+    await waitFor(() =>
+      expect(screen.getByTestId(CONTAINER_TESTID).getAttribute("data-host-max-height")).toBe("300"),
+    );
+    expect(toggle.getAttribute(ARIA_DISABLED)).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(EXPAND_LABEL);
+    expect(screen.getByTestId(SIZE_TOGGLE_TESTID)).toBe(toggle);
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.getAttribute(ARIA_DISABLED)).toBe("true");
   });
 });
 
@@ -578,6 +777,34 @@ describe("ClarificationPanelSection — dragged height does not survive a bundle
     // Bundle B must not inherit bundle A's dragged pixel height.
     expect(container.style.height).toBe("");
   });
+
+  it("resets an expanded size and Restore target when a new bundle replaces one still pending", () => {
+    const bundleA = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    const bundleB = [
+      clarMessage({ pendingId: "p2", id: "m2", questionId: "q2", index: 0, total: 1 }),
+    ];
+    const { rerender, scopeRef } = renderSection(true, bundleA);
+    const container = screen.getByTestId(CONTAINER_TESTID);
+    fireEvent.click(screen.getByTestId(SIZE_TOGGLE_TESTID));
+    expect(container.style.height).toBe("1000px");
+
+    rerender(
+      <div ref={scopeRef} tabIndex={-1}>
+        <ClarificationPanelSection
+          pending={true}
+          messages={bundleB}
+          onResolved={vi.fn()}
+          shortcutScopeRef={scopeRef}
+          initialMaxHeightVh={50}
+        />
+      </div>,
+    );
+
+    expect(container.style.height).toBe("");
+    expect(screen.getByTestId(SIZE_TOGGLE_TESTID).getAttribute(ARIA_LABEL)).toBe(EXPAND_LABEL);
+  });
 });
 
 // AC .39: onOutcome is additive and forwarded straight through to
@@ -611,6 +838,7 @@ describe("ClarificationPanelSection — onOutcome forwarding (AC .39)", () => {
     );
 
     fireEvent.click(screen.getByTestId(OPTION_TESTID));
+    await submitSinglePanelAnswer();
 
     await vi.waitFor(() =>
       expect(onOutcome).toHaveBeenCalledWith({
@@ -627,6 +855,7 @@ describe("ClarificationPanelSection — onOutcome forwarding (AC .39)", () => {
     ]);
 
     fireEvent.click(screen.getByTestId(OPTION_TESTID));
+    await submitSinglePanelAnswer();
 
     await vi.waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
   });

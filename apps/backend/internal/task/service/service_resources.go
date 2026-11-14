@@ -85,8 +85,8 @@ func validateProviderScope(raw string) (string, error) {
 // requires a paired provider_repo_id, because the scope-isolated clone
 // layout needs both to build a unique path. A bare provider_repo_id with no
 // scope is fine — that's the normal shape for every built-in provider
-// (GitHub, GitLab, Azure DevOps), none of which resolve a provider
-// connection scope — and falls through to the legacy owner/name layout.
+// (GitHub, GitLab), neither of which resolves a provider connection scope —
+// and falls through to the legacy owner/name layout.
 func validateProviderScopeAndRepoIDPair(scope, repoID string) error {
 	if strings.TrimSpace(scope) != "" && strings.TrimSpace(repoID) == "" {
 		return fmt.Errorf("%w: provider_scope requires a paired provider_repo_id", ErrInvalidRepositorySettings)
@@ -431,6 +431,10 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 			s.logger.Error("failed to delete workspace secrets", zap.String("workspace_id", workspace.ID), zap.Error(err))
 			postCommitErr = errors.Join(postCommitErr, err)
 		}
+	}
+	// The edge tables have no foreign key to tasks, so the cascade leaves them behind.
+	for _, task := range deletedTasks {
+		s.deleteDependencyEdgesForTask(ctx, task.ID)
 	}
 	var lateCleanupErr error
 	cleanups, lateCleanupErr = s.appendWorkspaceDeleteMissingTaskCleanups(ctx, cleanups, deletedTasks)
@@ -1433,6 +1437,13 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 		return nil, repoerrors.ErrTaskVersionConflict
 	}
 	updates := *req
+	if req.RemoteURL != nil {
+		if err := s.applyRepositoryRemoteURLUpdate(ctx, repository, &updates); err != nil {
+			return nil, err
+		}
+	} else {
+		updates.ObservedIdentity = nil
+	}
 	if req.LocalPath != nil {
 		localPath, pathErr := canonicalRepositoryLocalPath(*req.LocalPath)
 		if pathErr != nil {
@@ -1464,7 +1475,10 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 			}
 			updateErr = exact.UpdateRepositoryWithSecretBindingsIfUnchanged(ctx, repository, replacement, *req.ExpectedUpdatedAt)
 		} else {
-			updateErr = mutator.UpdateRepositoryWithSecretBindingsAndCheckoutIntent(ctx, repository, replacement, taskrepo.RepositoryCheckoutIntent{DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree})
+			updateErr = mutator.UpdateRepositoryWithSecretBindingsAndCheckoutIntent(ctx, repository, replacement, taskrepo.RepositoryCheckoutIntent{
+				DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree,
+				RemoteURL: updates.RemoteURL, ObservedIdentity: updates.ObservedIdentity,
+			})
 		}
 		if updateErr != nil {
 			s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(updateErr))
@@ -1479,7 +1493,10 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 			s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(err))
 			return nil, err
 		}
-	} else if err := s.repoEntities.UpdateRepositoryWithCheckoutIntent(ctx, repository, taskrepo.RepositoryCheckoutIntent{DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree}); err != nil {
+	} else if err := s.repoEntities.UpdateRepositoryWithCheckoutIntent(ctx, repository, taskrepo.RepositoryCheckoutIntent{
+		DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree,
+		RemoteURL: updates.RemoteURL, ObservedIdentity: updates.ObservedIdentity,
+	}); err != nil {
 		s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(err))
 		return nil, err
 	}

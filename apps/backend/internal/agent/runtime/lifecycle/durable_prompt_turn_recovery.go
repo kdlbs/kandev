@@ -7,22 +7,12 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/common/processidentity"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
-const deliveryPromptTurnBindingMetadataKey = "delivery_prompt_turn_binding"
+const deliveryPromptTurnBindingMetadataKey = models.SessionMetaKeyDeliveryPromptTurnBinding
 
-type deliveryPromptTurnBinding struct {
-	OriginalRuntime   processidentity.Identity `json:"original_runtime"`
-	PromptGeneration  uint64                   `json:"prompt_generation"`
-	TaskID            string                   `json:"task_id"`
-	SessionID         string                   `json:"session_id"`
-	ExecutionID       string                   `json:"execution_id"`
-	IncarnationID     string                   `json:"incarnation_id"`
-	HarnessGeneration uint64                   `json:"harness_generation"`
-	StreamID          string                   `json:"stream_id"`
-	SubmissionID      string                   `json:"submission_id"`
-	TurnID            string                   `json:"turn_id"`
-}
+type deliveryPromptTurnBinding = models.AgentDeliveryPromptTurnBinding
 
 func (sm *SessionManager) persistDurablePromptTurnBinding(ctx context.Context, execution *AgentExecution, submissionID string) error {
 	// Clear a predecessor's binding even when the next prompt is legacy or
@@ -36,7 +26,7 @@ func (sm *SessionManager) persistDurablePromptTurnBinding(ctx context.Context, e
 		var original processidentity.Identity
 		client, release := execution.AcquireAgentCtlClient()
 		if client != nil {
-			original = client.RuntimeProcessIdentity()
+			original = withAgentProcessGroup(ctx, client, execution.DeliveryStreamID, client.RuntimeProcessIdentity())
 		}
 		release()
 		execution.setMetadataValue(deliveryPromptTurnBindingMetadataKey, deliveryPromptTurnBinding{

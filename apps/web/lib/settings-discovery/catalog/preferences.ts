@@ -14,6 +14,7 @@ export const TERMINAL_EDITORS_SETTINGS_HREF = `${PREFERENCES_SETTINGS_HREF}/term
 const NOTIFICATIONS_ID = "preferences-notifications";
 export const NOTIFICATIONS_SETTINGS_HREF = `${PREFERENCES_SETTINGS_HREF}/notifications`;
 export const KEYBOARD_SHORTCUTS_SETTINGS_HREF = `${PREFERENCES_SETTINGS_HREF}/keyboard-shortcuts`;
+const KEYBOARD_SHORTCUTS_ID = "preferences-keyboard-shortcuts";
 const TASK_BEHAVIOR_ID = "preferences-task-behavior";
 export const TASK_BEHAVIOR_SETTINGS_HREF = `${PREFERENCES_SETTINGS_HREF}/task-behavior`;
 export const GENERAL_SETTINGS_TARGETS = {
@@ -39,6 +40,7 @@ export const GENERAL_SETTINGS_TARGETS = {
   notificationEvents: "setting-notification-events",
   fileEditor: "setting-file-editor",
   submitShortcut: "setting-submit-shortcut",
+  escapeCancelsAgent: "setting-escape-cancels-agent",
   keyboardShortcuts: "setting-keyboard-shortcuts",
   agentTaskProfile: "setting-agent-task-profile",
   agentGeneratedTitles: "setting-agent-generated-task-titles",
@@ -48,6 +50,8 @@ export const GENERAL_SETTINGS_TARGETS = {
   creationAutoFocus: "setting-creation-auto-focus",
   preventAutoStartOnOpen: "setting-prevent-auto-start-on-open",
   unreadMessages: "setting-unread-messages",
+  unreadTaskDot: "setting-unread-task-dot",
+  unreadTaskDotHideDelay: "setting-unread-task-dot-hide-delay",
   turnChangedFiles: "setting-turn-changed-files",
   transcriptNavigation: "setting-transcript-navigation",
   messageQueue: "setting-message-queue",
@@ -360,7 +364,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     order: 44,
   },
   {
-    id: "preferences-keyboard-shortcuts",
+    id: KEYBOARD_SHORTCUTS_ID,
     kind: "page",
     labelKey: "settings:keyboardShortcuts",
     groupId: "preferences",
@@ -372,10 +376,21 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     kind: "control",
     labelKey: "settings:submitShortcut",
     aliasesKey: "settings:discoveryAliasesSubmitShortcut",
-    parentId: "preferences-keyboard-shortcuts",
+    parentId: KEYBOARD_SHORTCUTS_ID,
     groupId: "preferences",
     href: KEYBOARD_SHORTCUTS_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.submitShortcut,
+    order: 51,
+  },
+  {
+    id: "keyboard-escape-cancels-agent",
+    kind: "control",
+    labelKey: "settings:escapeCancelsAgent",
+    aliasesKey: "settings:escapeCancelsAgentDescription",
+    parentId: KEYBOARD_SHORTCUTS_ID,
+    groupId: "preferences",
+    href: KEYBOARD_SHORTCUTS_SETTINGS_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.escapeCancelsAgent,
     order: 51,
   },
   {
@@ -383,7 +398,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     kind: "control",
     labelKey: "settings:keyboardShortcuts",
     aliasesKey: "settings:discoveryAliasesKeyboardShortcuts",
-    parentId: "preferences-keyboard-shortcuts",
+    parentId: KEYBOARD_SHORTCUTS_ID,
     groupId: "preferences",
     href: KEYBOARD_SHORTCUTS_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.keyboardShortcuts,
@@ -477,6 +492,26 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: TASK_BEHAVIOR_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.unreadMessages,
+    order: 65,
+  },
+  {
+    id: "task-actions-unread-task-dot",
+    kind: "control",
+    labelKey: "settings:showUnreadDotOnTasks",
+    parentId: TASK_BEHAVIOR_ID,
+    groupId: "preferences",
+    href: TASK_BEHAVIOR_SETTINGS_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.unreadTaskDot,
+    order: 65,
+  },
+  {
+    id: "task-actions-unread-task-dot-hide-delay",
+    kind: "control",
+    labelKey: "settings:unreadTaskDotHideDelay",
+    parentId: TASK_BEHAVIOR_ID,
+    groupId: "preferences",
+    href: TASK_BEHAVIOR_SETTINGS_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.unreadTaskDotHideDelay,
     order: 65,
   },
   {

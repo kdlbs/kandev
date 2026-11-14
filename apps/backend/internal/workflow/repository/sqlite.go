@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -652,6 +653,35 @@ func (r *Repository) CreateStepWithDemotedStartStepsIfWorkflowUnchanged(
 	return r.createStepWithDemotedStartSteps(ctx, step, &expectedWorkflow)
 }
 
+// lockWorkflowRowForStepWrite serializes step creation with workflow deletion
+// on PostgreSQL. The task repository's delete paths take the same row lock
+// before deleting steps, so a step cannot be inserted between the step delete
+// and the workflow delete. SQLite serializes writers at transaction start, so
+// the plain read is enough there.
+func (r *Repository) lockWorkflowRowForStepWrite(
+	ctx context.Context, tx *sqlx.Tx, workflowID string, expectedWorkflow *time.Time,
+) error {
+	query := `SELECT updated_at FROM workflows WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += ` FOR UPDATE`
+	}
+	var updatedAt time.Time
+	err := tx.QueryRowxContext(ctx, tx.Rebind(query), workflowID).Scan(&updatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		if expectedWorkflow != nil {
+			return repoerrors.ErrTaskVersionConflict
+		}
+		return fmt.Errorf("%w: %s", repoerrors.ErrWorkflowNotFound, workflowID)
+	}
+	if err != nil {
+		return err
+	}
+	if expectedWorkflow != nil && !updatedAt.Equal(*expectedWorkflow) {
+		return repoerrors.ErrTaskVersionConflict
+	}
+	return nil
+}
+
 func (r *Repository) createStepWithDemotedStartSteps(
 	ctx context.Context, step *models.WorkflowStep, expectedWorkflow *time.Time,
 ) ([]*models.WorkflowStep, error) {
@@ -673,11 +703,18 @@ func (r *Repository) createStepWithDemotedStartSteps(
 		return nil, fmt.Errorf("failed to marshal events: %w", err)
 	}
 
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.officeCompletionTxOptions())
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockOfficeEligibilityScopes(ctx, tx.Tx, nil, nil, []string{step.WorkflowID}); err != nil {
+		return nil, err
+	}
+
+	if err := r.lockWorkflowRowForStepWrite(ctx, tx, step.WorkflowID, expectedWorkflow); err != nil {
+		return nil, err
+	}
 
 	var demoted []*models.WorkflowStep
 	if step.IsStartStep {
@@ -866,11 +903,14 @@ func (r *Repository) updateStepWithDemotedStartSteps(
 		return nil, fmt.Errorf("failed to marshal events: %w", err)
 	}
 
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.officeCompletionTxOptions())
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockOfficeEligibilityScopes(ctx, tx.Tx, nil, []string{step.ID}, []string{step.WorkflowID}); err != nil {
+		return nil, err
+	}
 
 	var demoted []*models.WorkflowStep
 	if isStartStep != nil && *isStartStep {
@@ -991,11 +1031,14 @@ func (r *Repository) ReorderStepsIfUnchanged(
 		}
 		seen[id] = struct{}{}
 	}
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.officeCompletionTxOptions())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockOfficeEligibilityScopes(ctx, tx.Tx, nil, nil, []string{workflowID}); err != nil {
+		return err
+	}
 	var workflowVersion time.Time
 	if err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT updated_at FROM workflows WHERE id = ?`), workflowID).Scan(&workflowVersion); err != nil {
 		return repoerrors.ErrTaskVersionConflict
@@ -1033,11 +1076,22 @@ func (r *Repository) ReorderStepsIfUnchanged(
 
 // ClearStartStepFlag clears the is_start_step flag for all steps in a workflow except the given step.
 func (r *Repository) ClearStartStepFlag(ctx context.Context, workflowID, exceptStepID string) error {
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, r.officeCompletionTxOptions())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockOfficeEligibilityScopes(ctx, tx.Tx, nil, nil, []string{workflowID}); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE workflow_steps SET is_start_step = 0, updated_at = ?
 		WHERE workflow_id = ? AND id != ? AND is_start_step = 1
 	`), time.Now().UTC(), workflowID, exceptStepID)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *Repository) demoteOtherStartSteps(ctx context.Context, tx *sqlx.Tx, workflowID, exceptStepID string, updatedAt time.Time) ([]*models.WorkflowStep, error) {
@@ -1175,11 +1229,14 @@ func clearGenericStepReferences(events models.StepEvents, stepID string) (models
 
 // DeleteStep deletes a workflow step by ID.
 func (r *Repository) DeleteStep(ctx context.Context, id string) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, r.officeCompletionTxOptions())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockOfficeEligibilityScopes(ctx, tx, nil, []string{id}, nil); err != nil {
+		return err
+	}
 	cleanupQuery := `
 		UPDATE tasks
 		SET queued_for_step_id = '', queued_at = NULL, wip_admitted = 1, metadata = `

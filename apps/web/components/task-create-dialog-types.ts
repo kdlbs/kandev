@@ -1,3 +1,4 @@
+import type { BuiltinMCPCreateDraft } from "@/lib/types/builtin-mcp";
 import type { RepositoryCheckoutOptions } from "@/lib/types/repository-checkout-options";
 import type React from "react";
 import type { RefObject } from "react";
@@ -11,6 +12,7 @@ import type {
   TaskPriority,
   InitialWorkspaceLayout,
   CreateTaskResponse,
+  WorkflowSessionTarget,
 } from "@/lib/types/http";
 import type { createTask } from "@/lib/api";
 import type { UseBranchesByURLResult } from "@/hooks/domains/github/use-branches-by-url";
@@ -189,8 +191,9 @@ export type TaskRemoteRepoRow = {
 export type StepType = {
   id: string;
   title: string;
-  /** Workflow that supplied these fallback-only steps. */
+  /** Workflow that supplied these steps. */
   workflowId?: string;
+  color?: string;
   position?: number;
   is_start_step?: boolean;
   prompt?: string;
@@ -198,6 +201,17 @@ export type StepType = {
     on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
     on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
   };
+  /** Fixed workflow profile that owns this step, when one is configured. */
+  agent_profile_id?: string;
+  /** Session recipient declared by the step, when one is configured. */
+  session_target?: WorkflowSessionTarget | null;
+};
+
+/** Selected-workflow step metadata shared by launch preview and replacement rows. */
+export type TaskCreateWorkflowStepsResult = {
+  status: "idle" | "loading" | "success" | "error";
+  steps: StepType[];
+  retry: () => void;
 };
 
 export type TaskCreateDialogInitialValues = {
@@ -344,7 +358,6 @@ export type DialogComputedArgs = {
 export type TaskCreateEffectsArgs = {
   open: boolean;
   workspaceId: string | null;
-  workflowId: string | null;
   effectiveWorkflowId: string | null;
   repositories: Repository[];
   repositoriesLoading: boolean;
@@ -365,6 +378,8 @@ export type TaskCreateEffectsArgs = {
   lastUsedExecutorProfileId?: string | null;
   /** Backend-owned last-used branch. */
   lastUsedBranch?: string | null;
+  /** Complete selected-workflow steps owned by the task dialog observer. */
+  selectedWorkflowSteps: TaskCreateWorkflowStepsResult;
   /**
    * True when the currently-selected executor is the local-host one (no
    * worktree, no container). Drives the "reset row.branch on local switch"
@@ -402,9 +417,15 @@ export type TaskFormInputsHandle = {
 };
 
 export type DialogFormState = {
+  builtinMCPPreferences?: BuiltinMCPCreateDraft;
+  setBuiltinMCPPreferences?: (value: BuiltinMCPCreateDraft | undefined) => void;
   /** Predecessor task IDs chosen in the dialog's "Depends on" selector. */
   blockedBy: string[];
   setBlockedBy: (v: string[]) => void;
+  selectedParentTaskId?: string;
+  setSelectedParentTaskId?: (v: string | undefined) => void;
+  relatedTaskIds?: string[];
+  setRelatedTaskIds?: (v: string[]) => void;
   /** Task-level MCP additions. Empty means no additions at this scope. */
   mcpServerIds: string[];
   setMcpServerIds: (v: string[]) => void;
@@ -538,6 +559,7 @@ export type DialogFormState = {
 };
 
 export type SubmitHandlersDeps = {
+  builtinMCPPreferences?: BuiltinMCPCreateDraft;
   isSessionMode: boolean;
   isEditMode: boolean;
   /** Create-mode opt-in: derive a provisional title from the prompt. */
@@ -621,6 +643,7 @@ export type SubmitHandlersDeps = {
   noRepository: boolean;
   /** Predecessor task IDs to link at creation time. */
   blockedBy?: string[];
+  relatedTaskIds?: string[];
   /** Edit-mode dependency draft and persistence state. */
   editDependencies?: Pick<TaskEditDialogDependenciesState, "isDirty" | "ready" | "save">;
   /** Task-level MCP additions selected in the Advanced section. */
@@ -666,6 +689,9 @@ export type DialogFormBodyProps = {
   isTaskStarted: boolean;
   initialDescription: string;
   workspaceId: string | null;
+  taskId?: string | null;
+  parentTaskId?: string;
+  defaultStepId?: string | null;
   onJiraImport?: (ticket: JiraTicket) => void;
   onLinearImport?: (issue: LinearIssue) => void;
   agentProfileOptions: ReturnType<typeof useAgentProfileOptions>;

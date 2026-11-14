@@ -37,8 +37,9 @@ func (e *DeletedProfileError) Unwrap() error { return store.ErrAgentProfileDelet
 
 // StoreProfileResolver implements ProfileResolver using the agent settings store
 type StoreProfileResolver struct {
-	store    store.Repository
-	registry *registry.Registry
+	store              store.Repository
+	registry           *registry.Registry
+	resourceCircuitKey func(*models.AgentProfile) string
 }
 
 // NewStoreProfileResolver creates a new profile resolver using the given store and registry.
@@ -79,6 +80,7 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 	model, nativeSessionResume := r.resolveAgentCapabilities(agent.Name, profile.Model)
 
 	return &AgentProfileInfo{
+		ResourceCircuitKey:         r.resolveResourceCircuitKey(profile),
 		ProfileID:                  profile.ID,
 		ProfileName:                profile.Name,
 		AgentID:                    agent.ID,

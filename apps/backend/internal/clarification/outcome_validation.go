@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/kandev/kandev/internal/messageconstraints"
 )
 
 // Outcome is the caller-supplied resolution ResolveBundle is asked to
@@ -103,6 +105,9 @@ func validateAnswers(questions []Question, answers []Answer) error {
 	}
 
 	seen := make(map[string]bool, len(answers))
+	attachmentIDs := make(map[string]bool)
+	attachmentCount := 0
+	var attachmentBytes int64
 	for i, a := range answers {
 		if a.QuestionID == "" {
 			return newValidationError("answer %d is missing question_id", i+1) // N6 condition 2
@@ -122,8 +127,81 @@ func validateAnswers(questions []Question, answers []Answer) error {
 		if utf8.RuneCountInString(a.CustomText) > answerTextRuneCap {
 			return newValidationError("answer %d custom_text exceeds %d characters", i+1, answerTextRuneCap) // N8b
 		}
+		if err := validateAnswerAnnotations(i, a, q); err != nil {
+			return err
+		}
+		count, bytes, err := validateAnswerAttachments(i, a, q, attachmentIDs)
+		if err != nil {
+			return err
+		}
+		attachmentCount += count
+		attachmentBytes += bytes
+		if attachmentCount > messageconstraints.MaxAttachmentCount {
+			return newValidationError("bundle exceeds %d answer attachments", messageconstraints.MaxAttachmentCount)
+		}
+		if attachmentBytes > messageconstraints.MaxAttachmentBytes {
+			return newValidationError("bundle answer attachments exceed %d bytes", messageconstraints.MaxAttachmentBytes)
+		}
 	}
 	return nil
+}
+
+// validateAnswerAttachments applies the structural part of answer-file
+// admission. The authoritative ownership, expiry, state, and byte checks run
+// inside the claim transaction; this pass keeps malformed or oversized
+// payloads from reaching it.
+func validateAnswerAttachments(i int, a Answer, q Question, seen map[string]bool) (int, int64, error) {
+	if len(a.Attachments) == 0 {
+		return 0, 0, nil
+	}
+	if len(a.SelectedOptions) == 0 && strings.TrimSpace(a.CustomText) == "" {
+		return 0, 0, newValidationError("answer %d attachments require an option or custom text", i+1)
+	}
+	if strings.TrimSpace(a.CustomText) != "" && !clarificationAllowsCustomText(q) {
+		return 0, 0, newValidationError("answer %d custom_text is not allowed for question %q", i+1, q.ID)
+	}
+	var total int64
+	for _, attachment := range a.Attachments {
+		size, err := validateAnswerAttachment(i, attachment, seen)
+		if err != nil {
+			return 0, 0, err
+		}
+		total += size
+	}
+	return len(a.Attachments), total, nil
+}
+
+const answerAttachmentDeliveryModePath = "path"
+
+func validateAnswerAttachment(i int, attachment AnswerAttachment, seen map[string]bool) (int64, error) {
+	if strings.TrimSpace(attachment.AttachmentID) == "" {
+		return 0, newValidationError("answer %d contains an attachment without attachment_id", i+1)
+	}
+	if seen[attachment.AttachmentID] {
+		return 0, newValidationError("answer attachments repeat attachment_id %q", attachment.AttachmentID)
+	}
+	seen[attachment.AttachmentID] = true
+	if strings.TrimSpace(attachment.Path) != "" {
+		return 0, newValidationError("answer %d attachment %q must not supply a path", i+1, attachment.AttachmentID)
+	}
+	if attachment.DeliveryMode != answerAttachmentDeliveryModePath {
+		return 0, newValidationError("answer %d attachment %q must use path delivery", i+1, attachment.AttachmentID)
+	}
+	switch attachment.Type {
+	case "image", "audio", "resource":
+	default:
+		return 0, newValidationError("answer %d attachment %q has unsupported type %q", i+1, attachment.AttachmentID, attachment.Type)
+	}
+	if strings.TrimSpace(attachment.Name) == "" || strings.ContainsAny(attachment.Name, "/\\\x00") {
+		return 0, newValidationError("answer %d attachment %q has an invalid name", i+1, attachment.AttachmentID)
+	}
+	if strings.TrimSpace(attachment.MimeType) == "" {
+		return 0, newValidationError("answer %d attachment %q is missing mime_type", i+1, attachment.AttachmentID)
+	}
+	if attachment.SizeBytes < 0 || attachment.SizeBytes > messageconstraints.MaxAttachmentBytes {
+		return 0, newValidationError("answer %d attachment %q exceeds the per-file size limit", i+1, attachment.AttachmentID)
+	}
+	return attachment.SizeBytes, nil
 }
 
 // validateSelectedOptions applies N8: membership only, never cardinality —
@@ -212,5 +290,28 @@ func normalizeAnswer(q Question, a Answer) Answer {
 		QuestionID:      q.ID,
 		SelectedOptions: deduped,
 		CustomText:      strings.TrimSpace(a.CustomText),
+		Attachments:     normalizeAnswerAttachments(a.Attachments),
+		Annotations:     normalizeAnswerAnnotations(a.Annotations),
 	}
+}
+
+// normalizeAnswerAttachments preserves client order and drops the
+// delivery-only path field. Canonical registry metadata replaces these
+// values inside the claim transaction.
+func normalizeAnswerAttachments(attachments []AnswerAttachment) []AnswerAttachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	out := make([]AnswerAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		out = append(out, AnswerAttachment{
+			AttachmentID: attachment.AttachmentID,
+			Type:         attachment.Type,
+			Name:         attachment.Name,
+			MimeType:     attachment.MimeType,
+			SizeBytes:    attachment.SizeBytes,
+			DeliveryMode: attachment.DeliveryMode,
+		})
+	}
+	return out
 }

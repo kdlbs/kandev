@@ -33,7 +33,11 @@ Mattermost-webapp model), not iframes. The full contract lives in
 - **Bundle delivery:** kandev serves the bundle at `GET /api/plugins/{id}/bundle`
   (and any assets under `GET /api/plugins/{id}/ui/*`) directly from the extracted
   package directory on local disk, forcing `Content-Type: text/javascript` and
-  stripping frame-blocking headers. No reverse proxy and no live upstream process are
+  stripping frame-blocking headers. Both routes send `Cache-Control: no-cache`:
+  the URL carries only the plugin version, so without it a browser could reuse
+  a stale copy of a same-version reinstall under heuristic freshness. The file
+  server answers a revalidation with `304 Not Modified` from `Last-Modified`,
+  so an unchanged bundle is not downloaded again. No reverse proxy and no live upstream process are
   involved in serving these assets — the plugin subprocess only needs to be running
   to serve gRPC calls, not the UI bundle.
 - **Boot payload:** the SPA boot payload carries

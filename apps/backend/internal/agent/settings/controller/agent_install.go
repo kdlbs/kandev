@@ -31,6 +31,17 @@ func (c *Controller) EnqueueInstall(name string) (*dto.InstallJobDTO, error) {
 	if !ok {
 		return nil, ErrAgentNotFound
 	}
+	if installer, ok := ag.(agents.LocalInstallAgent); ok && installer.SupportsLocalInstall() {
+		job, err := c.jobStore.EnqueueAction(name, installer.LocalInstall)
+		if err != nil {
+			return nil, err
+		}
+		if snap, ok := c.jobStore.Get(job.ID); ok {
+			return snap, nil
+		}
+		snap := job.snapshot()
+		return &snap, nil
+	}
 	script, err := c.installScriptForExecution(context.Background(), ag)
 	if err != nil {
 		return nil, err

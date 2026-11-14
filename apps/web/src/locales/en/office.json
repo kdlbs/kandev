@@ -896,6 +896,8 @@
   "taskCreated": "Task created",
   "taskDescription": "Task description",
   "taskDescriptionTemplate": "Task Description Template",
+  "taskIdentifierLoadFailed": "Could not load this task. Check your connection, then try again.",
+  "taskIdentifierWorkspaceUnavailable": "No active workspace is selected. Select a workspace, then try this link again.",
   "taskNotFound": "Task not found",
   "taskPrefix": "Task prefix",
   "taskReview": "Task Review",

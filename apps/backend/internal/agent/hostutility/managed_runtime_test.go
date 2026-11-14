@@ -47,7 +47,7 @@ func TestResolveInferenceCommandUsesActiveExactVersion(t *testing.T) {
 	}}
 	agent := agents.NewOpenCodeACP()
 
-	command, err := manager.resolveInferenceCommand(context.Background(), agent.ID(), agent, agents.Command{})
+	command, _, err := manager.resolveInferenceCommand(context.Background(), agent.ID(), agent, agents.Command{})
 	if err != nil {
 		t.Fatalf("resolveInferenceCommand: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestResolveInferenceCommandPreservesLegacyAndReportsSelectionErrors(t *test
 	t.Setenv("PATH", t.TempDir())
 	agent := agents.NewOpenCodeACP()
 	manager := &Manager{managedRuntimeSelections: managedRuntimeSelectionReader{}}
-	command, err := manager.resolveInferenceCommand(context.Background(), agent.ID(), agent, agents.Command{})
+	command, _, err := manager.resolveInferenceCommand(context.Background(), agent.ID(), agent, agents.Command{})
 	if err != nil {
 		t.Fatalf("legacy resolveInferenceCommand: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestResolveInferenceCommandPreservesLegacyAndReportsSelectionErrors(t *test
 
 	wantErr := errors.New("selection read failed")
 	manager.managedRuntimeSelections = managedRuntimeSelectionReader{err: wantErr}
-	if _, err := manager.resolveInferenceCommand(context.Background(), agent.ID(), agent, agents.Command{}); !errors.Is(err, wantErr) {
+	if _, _, err := manager.resolveInferenceCommand(context.Background(), agent.ID(), agent, agents.Command{}); !errors.Is(err, wantErr) {
 		t.Fatalf("selection error = %v, want %v", err, wantErr)
 	}
 }
@@ -84,7 +84,7 @@ func TestResolveInferenceCommandUsesSelectedOpenCodeFamily(t *testing.T) {
 	}}
 	manager := &Manager{managedRuntimeSelections: selectionStore}
 	openCode := agents.NewOpenCodeACP()
-	command, err := manager.resolveInferenceCommand(context.Background(), openCode.ID(), openCode, agents.Command{})
+	command, _, err := manager.resolveInferenceCommand(context.Background(), openCode.ID(), openCode, agents.Command{})
 	if err != nil {
 		t.Fatalf("resolveInferenceCommand: %v", err)
 	}

@@ -1,5 +1,6 @@
 {
   "exemptions": [
+    {"file": "internal/task/repository/sqlite/session_recovery_block_migration.go", "symbol": "suspendSQLiteRecoveryBlockTriggers", "rule": "sqlite-catalog", "reason": "SQLite-only recovery block table rebuild preserves dependent triggers in the same transaction; caller rejects other drivers"},
     {"file": "internal/db/schema_tables.go", "symbol": "ExistingSQLiteTablesContext", "rule": "sqlite-catalog", "reason": "Central SQLite-only table inventory rejects other drivers before querying the catalog"},
     {"file": "internal/launcher/backup_sqlite.go", "symbol": "verifyProductionSnapshot", "rule": "sqlite-catalog", "reason": "Launcher production snapshots open only the sqlite3 driver read-only and require SQLite integrity verification before publication"},
     {"file": "internal/task/inventoryrepair/alias_dependencies.go", "symbol": "inspectAliasSchema", "rule": "sqlite-catalog", "reason": "Explicit SQLite-only offline repair observes the complete schema before allowing dependent-row removal"},
@@ -11,13 +12,6 @@
     {"file": "internal/agent/settings/store/sqlite.go", "symbol": "recreateAgentProfilesWithoutModelCheck", "rule": "sqlite-catalog", "reason": "SQLite-only table-recreation migration"},
     {"file": "internal/automation/store.go", "symbol": "createTablesSQL", "rule": "boolean-integer", "reason": "The provider schema template is rendered by dialect.MustRenderSchema"},
     {"file": "internal/automation/store.go", "symbol": "createTablesSQL", "rule": "datetime-type", "reason": "The provider schema template is rendered by dialect.MustRenderSchema"},
-    {"file": "internal/azuredevops/store.go", "symbol": "createConfigTableSQL", "rule": "boolean-integer", "reason": "The provider schema template is rendered by dialect.MustRenderSchema"},
-    {"file": "internal/azuredevops/store.go", "symbol": "createConfigTableSQL", "rule": "datetime-type", "reason": "The provider schema template is rendered by dialect.MustRenderSchema"},
-    {"file": "internal/azuredevops/store.go", "symbol": "createTaskPRTableSQL", "rule": "boolean-integer", "reason": "The provider schema template is rendered by dialect.MustRenderSchema"},
-    {"file": "internal/azuredevops/store.go", "symbol": "createTaskPRTableSQL", "rule": "datetime-type", "reason": "The provider schema template is rendered by dialect.MustRenderSchema"},
-    {"file": "internal/azuredevops/store.go", "symbol": "createTaskWorkItemTableSQL", "rule": "datetime-type", "reason": "The provider schema template is rendered by dialect.MustRenderSchema"},
-    {"file": "internal/azuredevops/store.go", "symbol": "createWatchTablesSQL", "rule": "boolean-integer", "reason": "The provider schema template is rendered by dialect.MustRenderSchema"},
-    {"file": "internal/azuredevops/store.go", "symbol": "createWatchTablesSQL", "rule": "datetime-type", "reason": "The provider schema template is rendered by dialect.MustRenderSchema"},
     {"file": "internal/backendapp/e2e_reset.go", "symbol": "handleE2EReset", "rule": "raw-placeholder", "reason": "The E2E reset endpoint operates on the SQLite task repository"},
     {"file": "internal/backendapp/e2e_reset.go", "symbol": "listE2ETaskIDs", "rule": "raw-placeholder", "reason": "The E2E reset endpoint operates on the SQLite task repository"},
     {"file": "internal/backendapp/e2e_reset.go", "symbol": "deleteGitHubAuthForReset", "rule": "raw-placeholder", "reason": "The E2E reset endpoint operates on the SQLite task repository"},
@@ -31,7 +25,7 @@
     {"file": "internal/db/schema.go", "symbol": "IndexExistsContext", "rule": "sqlite-catalog", "reason": "This is the central dialect-aware schema inspection helper"},
     {"file": "internal/db/schema.go", "symbol": "IndexDefinitionContext", "rule": "sqlite-catalog", "reason": "This is the central dialect-aware index definition inspection helper"},
     {"file": "internal/db/sqlite.go", "symbol": "applyWriterPragmas", "rule": "sqlite-catalog", "reason": "The SQLite-only writer connection hook bounds the WAL file size"},
-    {"file": "internal/db/durability_barrier.go", "symbol": "commit", "rule": "sqlite-catalog", "reason": "The barrier runs only on the SQLite writer connection; the repository short-circuits PostgreSQL"},
+    {"file": "internal/db/durability_barrier.go", "symbol": "commitAcquired", "rule": "sqlite-catalog", "reason": "The barrier runs only on the SQLite writer connection; the repository short-circuits PostgreSQL"},
     {"file": "internal/db/durability_barrier.go", "symbol": "commitDurabilityBarrierGeneration", "rule": "raw-placeholder", "reason": "The barrier upserts one kandev_meta generation on the SQLite writer connection only"},
     {"file": "internal/delivery/store.go", "symbol": "tableExists", "rule": "sqlite-catalog", "reason": "The SQLite branch is the explicit dialect boundary for the schema probe"},
     {"file": "internal/delivery/store.go", "symbol": "tableExists", "rule": "raw-placeholder", "reason": "The placeholder is in the explicit SQLite branch of the schema probe"},
@@ -143,6 +137,8 @@
     {"file": "internal/utility/store/sqlite.go", "symbol": "NormalizeEmptyBuiltinBinding", "rule": "boolean-integer", "reason": "The utility SQLite schema stores builtin as an INTEGER flag"},
     {"file": "internal/utility/store/sqlite.go", "symbol": "DeleteAgent", "rule": "boolean-integer", "reason": "The utility SQLite schema stores builtin as an INTEGER flag"},
     {"file": "internal/workflowsync/store.go", "symbol": "RecordSyncFailure", "rule": "boolean-integer", "reason": "The workflow-sync schema stores last_ok as an INTEGER flag"},
-    {"file": "internal/workflowsync/store.go", "symbol": "UpsertConfigForWorkspace", "rule": "boolean-integer", "reason": "The workflow-sync schema stores last_ok as an INTEGER flag"}
+    {"file": "internal/workflowsync/store.go", "symbol": "UpsertConfigForWorkspace", "rule": "boolean-integer", "reason": "The workflow-sync schema stores last_ok as an INTEGER flag"},
+    {"file": "internal/agentctl/server/adapter/transport/acp/antigravity_outcome.go", "symbol": "validateAntigravityStepsSchema", "rule": "sqlite-catalog", "reason": "The vendor Antigravity journal is a private read-only SQLite database, not a Kandev dialect path"},
+    {"file": "internal/agentctl/server/adapter/transport/acp/antigravity_outcome.go", "symbol": "queryAntigravityErrorStep", "rule": "raw-placeholder", "reason": "The vendor journal handle is opened with sqlite3 only and is never used for PostgreSQL"}
   ]
 }

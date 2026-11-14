@@ -104,6 +104,7 @@ const FABLE = "claude-fable-5[1m]";
 vi.mock("@/components/state-provider", async () => {
   const { useEffect, useReducer } = await import("react");
   return {
+    useAppStoreApi: () => ({ getState: () => mocks.appState }),
     useAppStore: (selector: (state: typeof mocks.appState) => unknown) => {
       const [, force] = useReducer((count: number) => count + 1, 0);
       useEffect(() => {

@@ -101,7 +101,7 @@ var hostCallCallerRequired = map[string]struct{}{
 	pluginv1.Host_ListChangeRequestEvidenceExact_FullMethodName:  {},
 	pluginv1.Host_ListTaskUsageExact_FullMethodName:              {},
 	pluginv1.Host_ListAutomationDefinitionsExact_FullMethodName:  {},
-	pluginv1.Host_ListAutomationRunsExact_FullMethodName:        {},
+	pluginv1.Host_ListAutomationRunsExact_FullMethodName:         {},
 	pluginv1.Host_GetAutomationRunExact_FullMethodName:           {},
 
 	pluginv1.Host_ListTasks_FullMethodName:                    {},

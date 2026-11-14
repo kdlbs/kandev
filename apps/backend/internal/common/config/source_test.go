@@ -278,6 +278,32 @@ func TestEmptyCredentialsEnvironmentClearsYAML(t *testing.T) {
 	}
 }
 
+func TestWebPushSettingsLoadFromYamlAndEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	contents := "notifications:\n  webPushSubject: mailto:yaml@example.test\n  webPushAllowedHosts: yaml-push.example.test\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(contents), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("KANDEV_WEBPUSH_SUBJECT", "https://ops.example.test/contact")
+	t.Setenv("KANDEV_WEBPUSH_ALLOWED_HOSTS", "push.example.test,eu.push.example.test")
+
+	cfg, err := LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if cfg.Notifications.WebPushSubject != "https://ops.example.test/contact" {
+		t.Fatalf("notifications.webPushSubject = %q", cfg.Notifications.WebPushSubject)
+	}
+	if cfg.Notifications.WebPushAllowedHosts != "push.example.test,eu.push.example.test" {
+		t.Fatalf("notifications.webPushAllowedHosts = %q", cfg.Notifications.WebPushAllowedHosts)
+	}
+	for _, key := range []string{"notifications.webPushSubject", "notifications.webPushAllowedHosts"} {
+		if got := cfg.SourceFor(key); got != SourceEnvironment {
+			t.Errorf("%s source = %q, want environment", key, got)
+		}
+	}
+}
+
 func TestRepositoryDiscoveryRootsEnvironmentUsesCommaSeparatedValues(t *testing.T) {
 	t.Setenv("KANDEV_REPOSITORYDISCOVERY_ROOTS", "/one,/two")
 

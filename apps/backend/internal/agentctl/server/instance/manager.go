@@ -292,7 +292,11 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 		zap.String("override_protocol", string(overrides.Protocol)))
 
 	// Create instance config using the unified method
-	instanceCfg := m.config.NewInstanceConfig(port, overrides)
+	instanceCfg, err := m.config.NewInstanceConfig(port, overrides)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	instanceCfg.AgentCommandConfigured = req.AgentCommand != ""
 
 	m.logger.Info("CreateInstance: instance config created",
 		zap.String("config_protocol", string(instanceCfg.Protocol)))
@@ -375,38 +379,43 @@ func (m *Manager) publishInstance(ctx context.Context, inst *Instance, bundle *p
 func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd string, agentEnv []string) *config.InstanceOverrides {
 	autoStart := req.AutoStart
 	return &config.InstanceOverrides{
-		InstanceID:                 id,
-		Protocol:                   agent.Protocol(req.Protocol),
-		AgentCommand:               agentCmd,
-		WorkDir:                    req.WorkspacePath,
-		AutoStart:                  &autoStart,
-		Env:                        agentEnv,
-		AutoApprovePermissions:     req.AutoApprovePermissions,
-		AgentType:                  req.AgentType,
-		McpServers:                 m.buildMcpServerConfigs(req.McpServers),
-		SessionID:                  req.SessionID,
-		TaskID:                     req.TaskID,
-		DisableAskQuestion:         req.DisableAskQuestion,
-		PromptSuggestions:          req.PromptSuggestions,
-		AssumeMcpSse:               req.AssumeMcpSse,
-		AssumeMcpHttp:              req.AssumeMcpHttp,
-		McpMode:                    req.McpMode,
-		McpProviders:               req.McpProviders,
-		McpProfile:                 req.McpProfile,
-		NamespacesMCPToolsByServer: req.NamespacesMCPToolsByServer,
-		RequiresProcessKill:        req.RequiresProcessKill,
-		StripEnv:                   req.StripEnv,
-		ProviderGatewayAuth:        req.ProviderGatewayAuth,
-		BaseBranches:               req.BaseBranches,
-		ComparisonTargets:          req.ComparisonTargets,
-		RemoteContributions:        req.RemoteContributions,
-		ContributionDestinations:   req.ContributionDestinations,
-		WorkspaceSourceRoots:       req.WorkspaceSourceRoots,
-		DurableJournalPath:         req.DurableJournalPath,
-		DeliveryStreamID:           req.DeliveryStreamID,
-		DeliveryIncarnationID:      req.DeliveryIncarnationID,
-		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
-		OpenCodePluginRuntime:      req.OpenCodePluginRuntime,
+		InstanceID:                   id,
+		Protocol:                     agent.Protocol(req.Protocol),
+		AgentCommand:                 agentCmd,
+		WorkDir:                      req.WorkspacePath,
+		AutoStart:                    &autoStart,
+		Env:                          agentEnv,
+		AutoApprovePermissions:       req.AutoApprovePermissions,
+		AgentType:                    req.AgentType,
+		McpServers:                   m.buildMcpServerConfigs(req.McpServers),
+		SessionID:                    req.SessionID,
+		TaskID:                       req.TaskID,
+		DisableAskQuestion:           req.DisableAskQuestion,
+		PromptSuggestions:            req.PromptSuggestions,
+		CopilotNativeSessionEvents:   req.CopilotNativeSessionEvents,
+		AssumeMcpSse:                 req.AssumeMcpSse,
+		AssumeMcpHttp:                req.AssumeMcpHttp,
+		McpMode:                      req.McpMode,
+		McpProviders:                 req.McpProviders,
+		McpProfile:                   req.McpProfile,
+		NamespacesMCPToolsByServer:   req.NamespacesMCPToolsByServer,
+		RequiresProcessKill:          req.RequiresProcessKill,
+		StripEnv:                     req.StripEnv,
+		ProviderGatewayAuth:          req.ProviderGatewayAuth,
+		AuthPolicy:                   req.AuthPolicy,
+		BaseBranches:                 req.BaseBranches,
+		ComparisonTargets:            req.ComparisonTargets,
+		RemoteContributions:          req.RemoteContributions,
+		ContributionDestinations:     req.ContributionDestinations,
+		WorkspaceSourceRoots:         req.WorkspaceSourceRoots,
+		TaskWorkspaceRoot:            req.TaskWorkspaceRoot,
+		WorkspaceExcludedRoots:       req.WorkspaceExcludedRoots,
+		DurableJournalPath:           req.DurableJournalPath,
+		DeliveryStreamID:             req.DeliveryStreamID,
+		DeliveryIncarnationID:        req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:    req.DeliveryHarnessGeneration,
+		OpenCodePluginRuntime:        req.OpenCodePluginRuntime,
+		ManagedRuntimeInstallContext: req.ManagedRuntimeInstallContext,
 	}
 }
 

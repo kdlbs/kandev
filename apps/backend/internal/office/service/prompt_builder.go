@@ -47,6 +47,11 @@ type PromptContext struct {
 	CommentAuthor     string
 	CommentAuthorType string
 
+	// Handoff completion fields come from the durable delivery-task record.
+	HandoffDeliveryTaskID string
+	HandoffDeliveryTitle  string
+	HandoffDeliveryState  string
+
 	// Blocker fields
 	ResolvedBlockerTitles []string
 
@@ -126,6 +131,8 @@ func BuildPrompt(pc *PromptContext) string {
 		} else {
 			prompt = buildTaskCommentPrompt(pc)
 		}
+	case RunReasonHandoffCompleted:
+		prompt = buildHandoffCompletedPrompt(pc)
 	case RunReasonTaskBlockersResolved:
 		prompt = buildBlockersResolvedPrompt(pc)
 	case legacyRunReasonBlockersResolved:
@@ -417,6 +424,21 @@ func buildTaskCommentPrompt(pc *PromptContext) string {
 	}
 	fmt.Fprintf(&b, "Comment: %s\n", pc.CommentBody)
 	b.WriteString("Address this comment.")
+	return b.String()
+}
+
+func buildHandoffCompletedPrompt(pc *PromptContext) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "The handed-off task %q (%s) reached state %s.\n",
+		pc.HandoffDeliveryTitle, pc.HandoffDeliveryTaskID, pc.HandoffDeliveryState)
+	if pc.CommentBody != "" {
+		fmt.Fprintf(&b, "\nCompletion report:\n%s\n", pc.CommentBody)
+		fmt.Fprintf(&b, "\nReview the completion report for your task %s: %s, then continue if work remains.",
+			taskRef(pc), pc.TaskTitle)
+	} else {
+		fmt.Fprintf(&b, "\nReview this completion status for your task %s: %s, then continue if work remains.",
+			taskRef(pc), pc.TaskTitle)
+	}
 	return b.String()
 }
 

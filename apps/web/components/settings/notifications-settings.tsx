@@ -17,6 +17,7 @@ import {
   useIsDirty,
   type NotificationsState,
 } from "@/components/settings/notifications-settings-actions";
+import { WebPushSection } from "@/components/settings/web-push-section";
 import { ExternalProvidersSection } from "@/components/settings/notifications-settings-external-providers";
 import { WebhookProvidersSection } from "@/components/settings/notifications-settings-webhook-providers";
 import { webhookHeadersError } from "@/components/settings/notifications-settings-webhook-helpers";
@@ -199,13 +200,16 @@ export function NotificationsSettings() {
       contentFrame="none"
     >
       <div className="space-y-6">
-        <DesktopNotificationsSection
-          notificationPermission={notificationPermission}
-          onRequestPermission={actions.handleRequestPermission}
-          onRefreshPermission={actions.handleRefreshPermission}
-          onTestNotification={actions.handleTestNotification}
-        />
-        <NotificationSoundSection onDirtyChange={setSoundIsDirty} />
+        <div className="space-y-3">
+          <DesktopNotificationsSection
+            notificationPermission={notificationPermission}
+            onRequestPermission={actions.handleRequestPermission}
+            onRefreshPermission={actions.handleRefreshPermission}
+            onTestNotification={actions.handleTestNotification}
+          />
+          <NotificationSoundSection onDirtyChange={setSoundIsDirty} />
+        </div>
+        <WebPushSection />
         <ExternalProvidersSection
           appriseAvailable={appriseAvailable}
           appriseProviders={appriseProviders}

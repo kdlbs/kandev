@@ -52,7 +52,6 @@ import (
 	reachabilitypkg "github.com/kandev/kandev/internal/executors/reachability"
 
 	// GitHub integration
-	azuredevopspkg "github.com/kandev/kandev/internal/azuredevops"
 	githubpkg "github.com/kandev/kandev/internal/github"
 	gitlabpkg "github.com/kandev/kandev/internal/gitlab"
 
@@ -489,12 +488,9 @@ func startServices( //nolint:cyclop
 	if services.Org != nil && services.Org.Enabled() {
 		// A suspended organization fails every session and token closed, which
 		// is what makes suspension a real lever rather than a label. An
-		// unreadable status fails closed too: an org we cannot verify does not
-		// get to keep serving requests.
-		services.Auth.SetOrgStatusChecker(func(ctx context.Context, orgID string) bool {
-			record, err := services.Org.Get(ctx, orgID)
-			return err == nil && record.Active()
-		})
+		// unreadable status is unavailable rather than invalid: the credential
+		// may still be valid once the organization store recovers.
+		services.Auth.SetOrgStatusChecker(organizationStatusChecker(services.Org))
 	}
 	hostnameStore := repos.HostnameCache
 	if hostnameStore == nil {
@@ -707,12 +703,16 @@ func startAgentInfrastructure(
 		services.Task,
 		repos.Task,
 		startupRecoveryGuard,
+		services.Auth,
 	)
 	if err != nil {
 		log.Error("Failed to initialize agent manager", zap.Error(err))
 		return false
 	}
 	lifecycleMgr.SetAgentDeliveryRepository(repos.Task)
+	if services.DynamicProfileResolver != nil {
+		lifecycleMgr.SetResourceCircuitKeyResolver(services.DynamicProfileResolver.ResourceCircuitKeyForProfile)
+	}
 
 	// ============================================
 	// WORKTREE MANAGER
@@ -733,7 +733,15 @@ func startAgentInfrastructure(
 	services.Task.SetBranchMaterializer(liveBranchMaterializer)
 	workspaceSourceMaterializer := newWorkspaceSourceMaterializer(repos.Task, worktreeMgr, lifecycleMgr, log)
 	services.Task.SetWorkspaceSourceMaterializer(workspaceSourceMaterializer)
+	services.Task.SetWorkspaceSourceRescanner(lifecycleMgr)
+	services.Task.SetNestedWorkspaceExclusioner(worktreeMgr)
 	services.Task.SetWorkspaceSourceProviderRefresher(newTaskMCPProviderRefresher(repos.Task, lifecycleMgr, log))
+	services.Task.StartWorktreeAdoptionWorker(ctx)
+	addRuntimeCleanup(func() error {
+		services.Task.StopWorktreeAdoptionWorker()
+		return nil
+	})
+	registerWorktreeAdoptionSubscriber(eventBus, services.Task, log)
 	services.Task.SetAgentBaseBranchPusher(lifecycleMgr)
 	services.Task.SetAgentComparisonTargetPusher(lifecycleMgr)
 	services.Task.SetExecutorCapabilityProber(lifecycleMgr)
@@ -767,9 +775,6 @@ func startAgentInfrastructure(
 	}
 	if services.Sentry != nil {
 		services.Sentry.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
-	}
-	if services.AzureDevOps != nil {
-		services.AzureDevOps.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
 	}
 	if services.Automation != nil {
 		services.Automation.Service.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
@@ -846,8 +851,12 @@ func startAgentInfrastructure(
 		repos.Task,
 		repos.AgentSettings,
 		services.DynamicProfileResolver,
+		orchestratorSvc.PersistDynamicCandidateSwitch,
 		orchestratorSvc.LaunchDynamicRouteAction,
 	))
+	if services.DynamicProfileResolver != nil {
+		services.DynamicProfileResolver.SetKeywordCredentialBindingResolver(keywordCredentialBindingResolver(lifecycleMgr, agentRegistry))
+	}
 	orchestratorSvc.SetProfileExecutionResolver(services.DynamicProfileResolver)
 
 	// Wire the soft-deleted-profile pre-flight into the watcher dispatch.
@@ -878,6 +887,7 @@ func startAgentInfrastructure(
 	})
 	if services.DynamicProfileResolver != nil {
 		agentSettingsController.SetAccountBlockReleaser(services.DynamicProfileResolver)
+		agentSettingsController.SetRoutingCircuitReader(newRoutingCircuitReader(services.DynamicProfileResolver))
 	}
 	// An enabled automation is a standing instruction to launch against a
 	// profile. Nothing is running, so it never reaches the active-session list,
@@ -934,23 +944,6 @@ func startAgentInfrastructure(
 	// and workspace-scoped GitLab credential resolver are both configured.
 	workspaceSourceMaterializer.SetHostRepositoryCloner(orchestratorSvc)
 	liveBranchMaterializer.SetHostRepositoryCloner(orchestratorSvc)
-
-	// Azure DevOps owns connection-health and work-item/pull-request watcher
-	// polling. Watch matches flow through the shared orchestrator coordinator.
-	if services.AzureDevOps != nil {
-		orchestratorSvc.SetAzureDevOpsService(services.AzureDevOps)
-		services.AzureDevOps.SetTaskSessionChecker(&taskSessionCheckerAdapter{repo: repos.Task})
-		azureLifecycle, lifecycleErr := azuredevopspkg.RegisterLifecycleCleanup(eventBus, services.AzureDevOps)
-		if lifecycleErr != nil {
-			log.Warn("Azure DevOps lifecycle cleanup unavailable", zap.Error(lifecycleErr))
-		} else {
-			addRuntimeCleanup(azureLifecycle.Close)
-		}
-		azurePoller := azuredevopspkg.NewPoller(services.AzureDevOps, log)
-		startup.AfterReady(ctx, func() { azurePoller.Start(ctx) })
-		addRuntimeCleanup(func() error { azurePoller.Stop(); return nil })
-		log.Info("Azure DevOps auth poller started")
-	}
 
 	// Start JIRA poller. Drives two background loops sharing one service: an
 	// auth-health probe (so the UI can show connect status without polling
@@ -1047,7 +1040,8 @@ func startAgentInfrastructure(
 	// Start the plugin system's event delivery and health monitor
 	// background loops.
 	if services.Plugins != nil {
-		startPluginsSubsystems(ctx, services.Plugins, lifecycleMgr, eventBus, log,
+		services.PluginToolCatalog = newPluginToolCatalogFanout(lifecycleMgr, log)
+		startPluginsSubsystems(ctx, services.Plugins, lifecycleMgr, services.PluginToolCatalog, eventBus, log,
 			func(fn func() error) { addRuntimeCleanup(fn) })
 	}
 
@@ -1186,6 +1180,7 @@ func startGatewayAndServe(
 		// Notifications drop rather than redirect when a task's owner cannot
 		// be resolved while authentication is enforced.
 		services.Auth,
+		cfg.Notifications,
 		cfg.ResolvedHomeDir(),
 		func(fn func() error) { addCleanup(fn) },
 		cfg.Features.LSPBrowserContinuity,
@@ -1235,6 +1230,7 @@ func startGatewayAndServe(
 	hostUtilityMgr.SetProfileEnvironmentResolver(lifecycleMgr.ResolveUtilityProfileEnvironment)
 	hostUtilityMgr.SetProviderGatewayAuthResolver(lifecycleMgr.ResolveProviderGatewayAuth)
 	hostUtilityMgr.SetManagedRuntimeSelectionStore(services.ManagedRuntimeSelections)
+	hostUtilityMgr.SetManagedRuntimeSingleUserOwner(singleUserManagedRuntimeOwner(services.Auth))
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)
@@ -1754,6 +1750,7 @@ func constructOfficeServices(
 	// below. Wiring it after left a Kanban-only install with no dependency store
 	// at all: blocked_by on create failed and list_related_tasks reported nothing.
 	services.Task.SetBlockerRepository(repos.Office)
+	services.Task.SetRelationRepository(repos.Office)
 
 	// office-costs Wave B: lazy models.dev pricing lookup. The Client
 	// allocates no resources at startup — the first non-claude-acp cost
@@ -1852,6 +1849,13 @@ func activateOfficeServices(
 	// block startup and cannot affect its result.
 	startup.AfterReady(ctx, func() { go officeroutines.RunStartupScan(ctx, reconcileSignal, repos.Office, log, time.Now().UTC()) })
 
+	// Handoff completion reports are opt-in behind the same cross-workspace
+	// collaboration flag their report grant belongs to. Wire the policy before
+	// the subscribers so a disabled flag stays the default-off state.
+	services.Office.SetHandoffCompletionPolicy(
+		newOfficeHandoffCompletionPolicy(cfg.Features.WorkspaceCollaboration, repos.Task, repos.Office),
+	)
+
 	// Register Office-only event subscribers. Global scheduling starts after
 	// this initializer returns, regardless of the feature flag.
 	if err := services.Office.RegisterEventSubscribers(eventBus); err != nil {
@@ -1917,6 +1921,11 @@ func wireOfficeSvcsDependencies(
 	// Wire the workflow-domain decisions store so approve/request-changes
 	// route to workflow_step_decisions (ADR 0005 Wave E).
 	services.OfficeSvcs.Dashboard.SetDecisionStore(repos.Workflow)
+	configureOfficeHumanCompletionGuard(repos.Task, repos.Office, repos.Workflow)
+	if !repos.Task.OfficeHumanCompletionGuardConfigured() {
+		panic("Office completion gate not configured")
+	}
+	services.OfficeSvcs.Dashboard.SetTaskHumanDoneCompleter(officeHumanDoneCompleterAdapter{tasks: services.Task})
 	// Wire the event bus into the dashboard service for status-change events.
 	services.OfficeSvcs.Dashboard.SetEventBus(eventBus)
 	services.OfficeSvcs.Channels.SetEventBus(eventBus)
@@ -1940,6 +1949,9 @@ func wireOfficeSvcsDependencies(
 	// Route an Office task's terminal-step completion through Office's own
 	// status pipeline (approval gate included) instead of a raw state write.
 	orchestratorSvc.SetOfficeTaskStatusUpdater(services.OfficeSvcs.Dashboard)
+	// A human move that would complete an Office task is refused while its
+	// approvers are pending.
+	services.Task.SetOfficeApprovalGuard(officeApprovalGuardAdapter{reader: services.OfficeSvcs.Dashboard})
 	// Wire the office service as the retry canceller for task reassignment.
 	services.OfficeSvcs.Dashboard.SetRetryCanceller(services.Office)
 	// Wire the office service as the terminal-shape recorder so a
@@ -1951,6 +1963,11 @@ func wireOfficeSvcsDependencies(
 	// Route the Office "No parent" mutation through the canonical task detach
 	// operation so inherited workspace sharing remains valid.
 	services.OfficeSvcs.Dashboard.SetTaskDetacher(services.Task)
+	// A user's Done request on a task before its final workflow step moves the
+	// task to that step through the human move path.
+	if services.Workflow != nil {
+		services.OfficeSvcs.Dashboard.SetTaskFinalStepMover(officeFinalStepMoverAdapter{tasks: services.Task, steps: services.Workflow})
+	}
 	// Publish task.updated for Office status changes so WS-driven UI outside
 	// the Office board (All-Workflows kanban, task views, task/statussummary)
 	// sees the mutation instead of rendering stale state until a refetch.
@@ -2005,6 +2022,9 @@ func wireOfficeProviderRouting(
 	resolver := routing.NewResolver(&officeRoutingRepoAdapter{repo: repos.Office}, nil)
 	resolver.SetExecutionProfileStore(repos.AgentSettings, agentRegistry)
 	scheduler.SetResolver(resolver)
+	orchestratorSvc.SetOfficeLaunchProfilePreview((&officeLaunchProfilePreview{
+		agents: repos.Office, resolver: resolver,
+	}).Preview)
 	scheduler.SetTaskStarter(&schedulerTaskStarterAdapter{orch: orchestratorSvc})
 	scheduler.SetRunSessionLauncher(services.Office.RunSessionLauncherHandle())
 	scheduler.SetEventBus(eventBus)

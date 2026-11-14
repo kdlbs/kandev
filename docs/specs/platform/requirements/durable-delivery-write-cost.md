@@ -42,6 +42,7 @@ actions to respond promptly while those sessions stream output.
 - **AC-PLATFORM-DELIVERY-WRITE-COST-001.2:** A batch of compatible streamed output events shall become received, projected, and cursor-advanced together or not at all. A crash or failed commit shall leave none of that batch received, and retry shall produce the same canonical messages as an uninterrupted run.
 - **AC-PLATFORM-DELIVERY-WRITE-COST-001.3:** Every request that lets agentctl release journal data, including event acknowledgment and submission retirement, shall be preceded by a successful durability barrier that covers the SQL state the request relies on. A failed barrier shall send no release request and shall retain the pending progress for retry. This preserves AC-PLATFORM-PRUNED-DELIVERY-RECOVERY-001.1.
 - **AC-PLATFORM-DELIVERY-WRITE-COST-001.4:** SQL writes that no journal release depends on shall survive termination of the Kandev process. Compatibility effect: after a host power loss or operating-system crash, the most recent of those writes can be lost, as they could before durable delivery. PostgreSQL deployments shall keep their existing commit durability.
+- **AC-PLATFORM-DELIVERY-WRITE-COST-001.5:** Delivery checks that run inside an interactive write, such as the retired-identity check during session creation, shall read only records indexed by the requested identity. Their cost shall not grow with the total retained delivery history of other sessions. The check shall still reject every identity that retained delivery records reference, directly or through its stream cursor.
 
 ## Out of scope
 
@@ -54,3 +55,4 @@ actions to respond promptly while those sessions stream output.
 
 - [System design](../system-design/durable-delivery-write-cost.md).
 - [Fix package](../../../plans/delivery-writer-contention/plan.md).
+- [Session identity admission fix](../../../plans/session-identity-admission-scan/plan.md).

@@ -37,7 +37,6 @@ import (
 	authhttpapi "github.com/kandev/kandev/internal/auth/httpapi"
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/automation"
-	"github.com/kandev/kandev/internal/azuredevops"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -69,6 +68,7 @@ import (
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
+	"github.com/kandev/kandev/internal/notifications/webpush"
 	officeagents "github.com/kandev/kandev/internal/office/agents"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/retention"
@@ -214,6 +214,11 @@ func refreshGitStatusFromSources(ctx context.Context, taskRepo *sqliterepo.Repos
 	rpcCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	live := false
+	// Every accepted aggregate response must describe one selected source's
+	// complete repository set. Concatenating a failed sibling-source attempt
+	// with a later successful source would mix inventories, so keep the first
+	// failed attempt only as the no-success fallback.
+	var failedSource *gateways.SessionGitRefreshResult
 	for _, sourceSessionID := range sources.sessionIDs {
 		if rpcCtx.Err() != nil {
 			break
@@ -223,10 +228,30 @@ func refreshGitStatusFromSources(ctx context.Context, taskRepo *sqliterepo.Repos
 		if multi == nil {
 			continue
 		}
-		appendGitStatusRefreshSnapshots(&result, sources, sessionID, multi)
-		if result.Success {
-			return result
+		attempt := gateways.SessionGitRefreshResult{
+			SessionID:         result.SessionID,
+			Mode:              result.Mode,
+			TaskEnvironmentID: result.TaskEnvironmentID,
+			StatusState:       "unavailable",
+			Snapshots:         []*ws.Message{},
 		}
+		appendGitStatusRefreshSnapshots(&attempt, sources, sessionID, multi)
+		if attempt.Success {
+			// A sibling execution can retain the pre-attachment tracker graph.
+			// Its aggregate then describes only that checkout, not the whole
+			// environment. Only a source covering every registered repository
+			// may define the complete inventory.
+			if len(multi.Repos) < sources.repositoryCount {
+				continue
+			}
+			return attempt
+		}
+		if failedSource == nil {
+			failedSource = &attempt
+		}
+	}
+	if failedSource != nil {
+		return *failedSource
 	}
 	if live && rpcCtx.Err() != nil {
 		result.ErrorCode = "status_timeout"
@@ -1205,6 +1230,9 @@ func registerRoutes(p routeParams) {
 		p.orchestratorSvc.HandleClarificationPrimaryAnswered,
 		p.log,
 	)
+	clarificationResolver.SetAnswerAttachmentMaterializer(
+		&clarificationAnswerAttachmentMaterializer{runtime: p.lifecycleMgr},
+	)
 
 	// Wire pending clarification requests into the office inbox.
 	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {
@@ -1291,9 +1319,6 @@ func registerRoutes(p routeParams) {
 	if p.services.GitLab != nil {
 		p.services.GitLab.SetCascadeTaskDeleter(handoffSvc)
 	}
-	if p.services.AzureDevOps != nil {
-		p.services.AzureDevOps.SetCascadeTaskDeleter(handoffSvc)
-	}
 	// repoLookup validates a watcher's optional repository binding (workspace
 	// ownership + default-branch fill) on create/update. Shared across the three
 	// repo-less watchers; one concrete adapter satisfies each package's
@@ -1305,12 +1330,6 @@ func registerRoutes(p routeParams) {
 			tasks: p.taskSvc, workflows: p.services.Workflow, agents: p.agentSettingsRepo,
 		})
 		p.services.GitLab.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
-	}
-	if p.services.AzureDevOps != nil {
-		p.services.AzureDevOps.SetWatchRepositoryLookup(repoLookup)
-		p.services.AzureDevOps.SetWatchDependencyValidator(&gitLabWatchDependencyValidator{
-			tasks: p.taskSvc, workflows: p.services.Workflow, agents: p.agentSettingsRepo,
-		})
 	}
 	if p.services.Jira != nil {
 		p.services.Jira.SetTaskDeleter(handoffSvc)
@@ -1803,6 +1822,12 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		&orchestratorWrapper{svc: p.orchestratorSvc}, p.log, referenceValidators...,
 	)
 	processHandlers := taskhandlers.RegisterProcessRoutes(p.router, p.taskSvc, p.lifecycleMgr, p.log)
+	if p.agentSettingsController != nil && p.taskSvc != nil {
+		processHandlers.SetSessionModelConfigResolver(&sessionModelConfigResolver{
+			sessions: p.taskSvc,
+			settings: p.agentSettingsController,
+		})
+	}
 	if p.services != nil && p.services.Terminal != nil {
 		processHandlers.SetTerminalService(p.services.Terminal)
 	}
@@ -1816,9 +1841,12 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	p.log.Debug("Registered Task Service handlers (HTTP + WebSocket)")
 }
 
+// configureMCPServices installs workspace authorization, selection ownership, and automation usage
+// readers.
 func configureMCPServices(
 	p routeParams,
 ) (mcpconfig.CatalogRepository, *mcpconfig.CatalogService, *mcpconfig.SelectionService) {
+	configureBuiltinMCPServices(p)
 	catalogRepo, ok := p.agentSettingsRepo.(mcpconfig.CatalogRepository)
 	if !ok {
 		return nil, nil, nil
@@ -1846,6 +1874,10 @@ func configureMCPServices(
 		})
 	}
 	mcpCatalog.SetSelectionRepository(selectionRepo)
+	if p.services != nil && p.services.Automation != nil {
+		mcpCatalog.SetAutomationUsageReader(p.services.Automation.Service.MCPDefinitionSelectionCounts)
+		mcpSelectionService.SetAutomationUsageReader(p.services.Automation.Service.MCPDefinitionSelectionCounts)
+	}
 	p.taskSvc.SetMCPSelectionWriter(mcpSelectionService)
 	if p.orchestratorSvc != nil {
 		p.orchestratorSvc.SetMCPSelectionWriter(mcpSelectionService)
@@ -1917,6 +1949,11 @@ func registerSecondaryRoutes(
 	p.log.Debug("Registered User handlers (HTTP + WebSocket)")
 
 	notificationhandlers.RegisterRoutes(p.router, p.notificationCtrl, p.log)
+	if p.notificationCtrl != nil {
+		if pushSvc := p.notificationCtrl.WebPush(); pushSvc != nil {
+			webpush.RegisterRoutes(p.router, pushSvc, p.notificationCtrl, notificationcontroller.CallerUserID, p.log)
+		}
+	}
 	p.log.Debug("Registered Notification handlers (HTTP)")
 
 	editorhandlers.RegisterRoutes(p.router, p.editorCtrl, p.log)
@@ -1928,7 +1965,7 @@ func registerSecondaryRoutes(
 	utilityhandlers.RegisterRoutes(p.router, p.utilityCtrl, p.lifecycleMgr, p.hostUtilityMgr, p.services.User, p.log)
 	p.log.Debug("Registered Utility Agents handlers (HTTP)")
 
-	agentcapabilities.RegisterRoutes(p.router, p.hostUtilityMgr, p.log)
+	agentcapabilities.RegisterRoutes(p.router, p.hostUtilityMgr, p.log, p.interimSettingsInterlockToken)
 	p.log.Debug("Registered Agent Capabilities handlers (HTTP)")
 
 	clarification.RegisterRoutes(
@@ -2027,12 +2064,6 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered GitLab handlers (HTTP)")
 	}
 
-	if p.services.AzureDevOps != nil {
-		azuredevops.RegisterRoutes(p.router, p.services.AzureDevOps, p.log)
-		azuredevops.RegisterMockRoutes(p.router, p.services.AzureDevOps, p.log)
-		p.log.Debug("Registered Azure DevOps handlers (HTTP)")
-	}
-
 	if p.services.Jira != nil {
 		jira.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Jira, p.log)
 		jira.RegisterMockRoutes(p.router, p.services.Jira, p.log)
@@ -2057,8 +2088,13 @@ func registerSecondaryRoutes(
 	}
 
 	if p.services.Automation != nil {
+		definitions, _ := p.agentSettingsRepo.(automation.MCPDefinitionReader)
+		policy, _ := p.agentSettingsRepo.(automation.MCPBuiltinPolicyReader)
+		p.services.Automation.Service.SetMCPSelectionReaders(definitions, policy)
 		if p.services.Plugins != nil {
 			p.services.Automation.Service.SetPluginAutomationProvider(p.services.Plugins)
+			p.services.Automation.Service.SetPluginToolOptionsProvider(p.services.Plugins)
+			p.services.Automation.Service.SetPluginToolCatalogNotifier(p.services.Plugins.NotifyAgentToolCatalogChanged)
 			p.services.Plugins.SetAutomationRevoker(p.services.Automation.Service.CancelPluginWebhookDeliveries)
 		}
 		automation.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Automation.Service, p.log)
@@ -2202,7 +2238,7 @@ func newSSHAgentctlResolver(p routeParams) *lifecycle.AgentctlResolver {
 // authorizes ownership for them when auth is enabled.
 var integrationWorkspacePrefixes = []string{
 	"/api/v1/jira/", "/api/v1/linear/", "/api/v1/sentry/",
-	"/api/v1/azure-devops/", "/api/v1/gitlab/", "/api/v1/github/", "/api/v1/workflow-sync/",
+	"/api/v1/gitlab/", "/api/v1/github/", "/api/v1/workflow-sync/",
 }
 
 // integrationWorkspaceScopeMiddleware enforces workspace ownership on the
@@ -2564,6 +2600,7 @@ func registerMCPAndDebugRoutes(
 		clarificationStore, clarificationCanceller, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, walkthroughService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
 	)
 	mcpHandlers.SetPluginService(p.services.Plugins)
+	mcpHandlers.SetPluginToolAuthEnabled(func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled })
 	if p.features.Canvases && p.services != nil && p.services.Canvas != nil && p.services.Plugins != nil {
 		mcpHandlers.SetCanvasAuthoringService(newCanvasAuthoringService(
 			p.services.Canvas, p.services.Plugins, p.taskSvc,
@@ -2578,6 +2615,7 @@ func registerMCPAndDebugRoutes(
 	}
 	if p.services.Automation != nil {
 		mcpHandlers.SetAutomationCreator(p.services.Automation.Service)
+		mcpHandlers.SetAutomationPluginTools(p.services.Automation.Service)
 	}
 	mcpHandlers.SetSettingsBroadcaster(p.gateway.Hub)
 	if settingsRegistry, err := buildSettingsRegistry(); err != nil {
@@ -2611,7 +2649,6 @@ func registerMCPAndDebugRoutes(
 				sentry:        settingsSentryServiceFromPointer(p.services.Sentry),
 				github:        settingsGitHubServiceFromPointer(p.services.GitHub),
 				gitlab:        settingsGitLabServiceFromPointer(p.services.GitLab),
-				azureDevOps:   settingsAzureDevOpsServiceFromPointer(p.services.AzureDevOps),
 			},
 		))
 	}
@@ -2727,6 +2764,7 @@ func registerMCPAndDebugRoutes(
 		mcpScopeResolver.SetCoordinatorLookup(p.services.Coordinator)
 	}
 	p.lifecycleMgr.SetMCPPrincipalScoper(mcpScopeResolver.ScopePrincipal)
+	wireBuiltinMCPActions(p)
 	if p.authSvc != nil {
 		p.lifecycleMgr.SetMCPIdentityScoper(mcpScopeResolver.Scope)
 		p.log.Debug("In-session MCP dispatch scoped to task owner")
@@ -2761,8 +2799,13 @@ func registerExternalMCP(p routeParams) {
 	srv := mcpserver.NewExternal(backendClient, p.log, "")
 	mcpGroup := p.router.Group("", externalMCPAuthMiddleware(p.authSvc))
 	srv.RegisterBackendRoutes(mcpGroup)
+	unsubscribe := func() {}
+	if p.services != nil && p.services.PluginToolCatalog != nil {
+		unsubscribe = p.services.PluginToolCatalog.Subscribe(srv)
+	}
 	if p.addCleanup != nil {
 		p.addCleanup(func() error {
+			unsubscribe()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			return srv.Close(ctx)

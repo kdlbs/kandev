@@ -16,7 +16,7 @@ Open **Projects** or the sidebar's project add action, create a project, and ope
 
 A project can list local repository paths and supported Git URLs. Root tasks created with that project and no explicit repository selection attach the project's sources before their first launch. An explicit repository selection takes precedence, and a child inherits its parent's repository context. Invalid or unreadable project sources can prevent task creation.
 
-Bare remote URLs resolve from the selected workspace. Public GitHub, GitLab, and Azure DevOps URLs use the built-in provider rules. A self-managed GitLab URL resolves when the workspace has a GitLab connection whose host matches the URL origin exactly, including its scheme, host, and port. An installed repository plugin can resolve its own URL when the plugin is active, declares the repository inspection capability, and has a connection configured for that workspace. Kandev does not hold hostname lists for other providers, so install the plugin for the provider you use.
+Bare remote URLs resolve from the selected workspace. Public GitHub and GitLab URLs use the built-in provider rules. A self-managed GitLab URL resolves when the workspace has a GitLab connection whose host matches the URL origin exactly, including its scheme, host, and port. An installed repository plugin can resolve its own URL when the plugin is active, declares the repository inspection capability, and has a connection configured for that workspace. Kandev does not hold hostname lists for other providers, so install the plugin for the provider you use.
 
 An unknown URL, a URL that no connection or plugin recognizes, and a URL that two providers both recognize are rejected before any repository or task is created. Saved repository IDs and explicit provider selections keep their existing resolution rules and never fall back to another provider.
 
@@ -96,6 +96,8 @@ Removing a task association does not delete the workspace label.
 
 Comments are durable task discussion and can wake the relevant agent. In Work they target the primary agent; in Review or Approval the default workflow targets participants who have not yet decided. State what you want the recipient to do, such as “Address the two accessibility findings and request another review.”
 
+To give feedback on an exact passage in an agent comment, select the passage, enter a remark, and choose **Add**. The quote and remark stay in the composer until you send the task comment. On a phone, use **Add** in the selection drawer. Mentions in your remark can route the comment to agents. Mentions copied from the source passage stay quoted and do not start another agent run.
+
 Use **Advanced** mode when you need the task's execution workbench and session conversation. **Simple** mode returns to the Office task view. See [Sessions and review](sessions-and-review.md) and [Developer tools](developer-tools.md) for chat, terminal, editor, changes, and diff behavior.
 
 ## Keep deliverables in documents
@@ -130,7 +132,9 @@ Workflow participants are Office agents; human users have no workflow approval o
 
 The primary assignee, reviewer, and approver are distinct capacities. A team member can hold more than one capacity on a task; removing one does not necessarily end its session while it still holds another.
 
-Task-completion approval is also a workspace setting. Marking a task Done can be rejected or redirected to review when the workflow is not at its terminal step or required approvals are pending. Resolve the named gate instead of repeatedly changing status.
+To finish a task, drop its card on **Done** in the Office board or choose **Done** in its status picker. If the task is before the final workflow step, this moves it to that step. The task completes only if that step is configured to complete tasks; if the step is full, the move waits in its queue.
+
+Pending approvers or unmet completion criteria can refuse the move, leaving the task in its original status and step. Resolve the named gate before trying again. Tasks already on the final step keep their existing approval check, which can redirect a Done request to review.
 
 ## Handle human requests
 

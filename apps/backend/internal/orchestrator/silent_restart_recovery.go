@@ -309,7 +309,7 @@ func (s *Service) startSilentRestoreCandidate(
 		ownedResumeCtx, inputs.task.ID, inputs.session.ID, options, commitWhenReady, reservation,
 	)
 	if err != nil {
-		return errors.Join(err, s.settleFailedSilentRestoreCandidate(ctx, store, attemptID, checkpoint, inputs))
+		return errors.Join(fmt.Errorf("launch silent restart restore candidate: %w", err), s.settleFailedSilentRestoreCandidate(ctx, store, attemptID, checkpoint, inputs))
 	}
 	if execution == nil {
 		return errors.New("silent restart restore was not admitted")
@@ -460,7 +460,8 @@ func (s *Service) proveSilentRestoreSourceDead(
 		state = prober.RowLiveness(running)
 	}
 	dead, err := silentRestoreSourceIsProvenDead(
-		running, recovery, state, processidentity.OwnedSessionTerminated,
+		running, recovery, state,
+		processidentity.OriginalOwnerTerminated, processidentity.OwnedGroupTerminated,
 	)
 	if err != nil {
 		return err
@@ -475,7 +476,8 @@ func silentRestoreSourceIsProvenDead(
 	running *models.ExecutorRunning,
 	recovery models.AgentDeliveryRecovery,
 	liveness models.ProcessLiveness,
-	ownedSessionTerminated func(processidentity.Identity) (bool, error),
+	originalOwnerTerminated func(processidentity.Identity) (bool, error),
+	agentGroupTerminated func(processidentity.Identity) (bool, error),
 ) (bool, error) {
 	if err := validateSilentRestoreSourceIdentity(running, recovery); err != nil {
 		return false, err
@@ -484,12 +486,38 @@ func silentRestoreSourceIsProvenDead(
 	case models.ProcessLivenessDead:
 		return true, nil
 	case models.ProcessLivenessAlive:
-		return false, errors.New("source execution is still alive")
+		return proveLiveStandaloneSilentRestoreSource(running, recovery, agentGroupTerminated)
 	case models.ProcessLivenessUnknown:
-		return proveUnknownStandaloneSilentRestoreSource(running, recovery, ownedSessionTerminated)
+		return proveUnknownStandaloneSilentRestoreSource(running, recovery, originalOwnerTerminated)
 	default:
 		return false, errors.New("source execution liveness is not proven")
 	}
+}
+
+func proveLiveStandaloneSilentRestoreSource(
+	running *models.ExecutorRunning,
+	recovery models.AgentDeliveryRecovery,
+	agentGroupTerminated func(processidentity.Identity) (bool, error),
+) (bool, error) {
+	if running.Runtime != runtimekind.RuntimeStandalone {
+		return false, errors.New("live source execution cannot use local process-group proof")
+	}
+	identity := recovery.OriginalRuntime
+	if identity.Validate() != nil || identity.GroupID != identity.PID || identity.SessionID != identity.PID ||
+		identity.AgentGroupID <= 1 || identity.AgentBirthToken == "" || agentGroupTerminated == nil {
+		return false, processidentity.ErrUnverifiableIdentity
+	}
+	group := processidentity.Identity{
+		PID: identity.AgentGroupID, GroupID: identity.AgentGroupID, BirthToken: identity.AgentBirthToken,
+	}
+	terminated, err := agentGroupTerminated(group)
+	if err != nil {
+		return false, err
+	}
+	if !terminated {
+		return false, errors.New("source agent process group is not terminated")
+	}
+	return true, nil
 }
 
 func validateSilentRestoreSourceIdentity(running *models.ExecutorRunning, recovery models.AgentDeliveryRecovery) error {
@@ -503,7 +531,7 @@ func validateSilentRestoreSourceIdentity(running *models.ExecutorRunning, recove
 func proveUnknownStandaloneSilentRestoreSource(
 	running *models.ExecutorRunning,
 	recovery models.AgentDeliveryRecovery,
-	ownedSessionTerminated func(processidentity.Identity) (bool, error),
+	originalOwnerTerminated func(processidentity.Identity) (bool, error),
 ) (bool, error) {
 	if running.Runtime != runtimekind.RuntimeStandalone {
 		return false, errors.New("remote source execution cannot use local process proof")
@@ -512,10 +540,10 @@ func proveUnknownStandaloneSilentRestoreSource(
 	if identity.Validate() != nil || identity.GroupID != identity.PID || identity.SessionID != identity.PID {
 		return false, processidentity.ErrUnverifiableIdentity
 	}
-	if ownedSessionTerminated == nil {
+	if originalOwnerTerminated == nil {
 		return false, processidentity.ErrUnverifiableIdentity
 	}
-	terminated, err := ownedSessionTerminated(identity)
+	terminated, err := originalOwnerTerminated(identity)
 	if err != nil {
 		return false, err
 	}

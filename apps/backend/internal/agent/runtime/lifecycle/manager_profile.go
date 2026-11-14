@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentruntime"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -36,7 +37,8 @@ func (m *Manager) getAgentConfigForExecution(execution *AgentExecution) (agents.
 
 func (m *Manager) getAgentConfigAndProfileForExecution(ctx context.Context, execution *AgentExecution) (agents.Agent, *AgentProfileInfo, error) {
 	if execution.AgentProfileID == "" {
-		return nil, nil, fmt.Errorf("execution %s has no agent profile ID", execution.ID)
+		return nil, nil, fmt.Errorf("%w: execution %s has no agent profile ID",
+			errRecoveredAgentIdentityAbsent, execution.ID)
 	}
 
 	if m.profileResolver == nil {
@@ -48,7 +50,8 @@ func (m *Manager) getAgentConfigAndProfileForExecution(ctx context.Context, exec
 		return nil, nil, fmt.Errorf("failed to resolve profile: %w", err)
 	}
 	if profileInfo == nil {
-		return nil, nil, errors.New("failed to resolve profile: empty profile")
+		return nil, nil, fmt.Errorf("%w: failed to resolve profile: empty profile",
+			errRecoveredAgentIdentityAbsent)
 	}
 
 	agentTypeName := profileInfo.AgentName
@@ -68,10 +71,12 @@ func (m *Manager) getAgentConfigAndProfileForExecution(ctx context.Context, exec
 func (m *Manager) resolveLaunchableAgent(agentTypeName string) (agents.Agent, error) {
 	agentConfig, ok := m.registry.Get(agentTypeName)
 	if !ok {
-		return nil, fmt.Errorf("agent type %q not found in registry", agentTypeName)
+		return nil, fmt.Errorf("%w: agent type %q not found in registry",
+			errRecoveredAgentIdentityAbsent, agentTypeName)
 	}
 	if agents.IsVirtualAgent(agentConfig) {
-		return nil, fmt.Errorf("agent type %q: %w", agentTypeName, ErrVirtualProfile)
+		return nil, fmt.Errorf("%w: agent type %q: %w",
+			errRecoveredAgentIdentityAbsent, agentTypeName, ErrVirtualProfile)
 	}
 	return agentConfig, nil
 }
@@ -112,6 +117,8 @@ func (m *Manager) resolveEffectiveMcpServers(
 	return mcpconfig.ToACPServers(result.Servers), nil
 }
 
+// resolveEffectiveMCPResolution applies executor policy to the process-bound automation selection.
+// Unavailable template definitions remain visible as resolution decisions.
 func (m *Manager) resolveEffectiveMCPResolution(
 	ctx context.Context,
 	resolutionContext mcpconfig.ResolutionContext,
@@ -131,10 +138,21 @@ func (m *Manager) resolveEffectiveMCPResolution(
 	if err != nil {
 		return nil, err
 	}
+	if raw, ok := metadata[mcpprofile.BuiltinBindingMetadataKey]; ok {
+		binding, err := mcpprofile.ParseBuiltinBindingMetadata(raw)
+		if err != nil {
+			return nil, err
+		}
+		manifest := binding.BuiltinPackages
+		if manifest.AutomationID != "" {
+			resolutionContext.Automation = &mcpconfig.AutomationMCPContribution{AutomationID: manifest.AutomationID, WorkspaceID: manifest.WorkspaceID, TaskID: manifest.TaskID, Revision: manifest.AutomationRevision, DefinitionIDs: append([]string(nil), manifest.AutomationDefinitionIDs...)}
+		}
+	}
 	result, err := m.mcpResolver.Resolve(ctx, resolutionContext, policy)
 	if err != nil {
 		return nil, err
 	}
+	mcpconfig.AddTemplateUnavailableDecisions(result, metadata)
 	for _, decision := range result.Decisions {
 		m.logger.Warn("MCP server was not attached",
 			zap.String("profile_id", profileID), zap.String("executor_id", executorID),

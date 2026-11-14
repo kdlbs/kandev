@@ -317,3 +317,116 @@ func TestCursorPluginCacheWithoutEnabledStateIsNotImported(t *testing.T) {
 		})
 	}
 }
+
+func TestDiscoverCursorPluginMCPServers_ManifestAuthorURLDoesNotHideMCPEndpoints(t *testing.T) {
+	tempHome := t.TempDir()
+	commit := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+	stripeDir := filepath.Join(tempHome, "plugins", "cache", "cursor-public", "stripe", commit)
+	require.NoError(t, os.MkdirAll(filepath.Join(stripeDir, ".cursor-plugin"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(stripeDir, ".cursor-plugin", "plugin.json"), []byte(`{
+		"name": "stripe",
+		"description": "Stripe plugin",
+		"version": "0.9.10",
+		"author": {"name": "Stripe", "url": "https://stripe.com"},
+		"homepage": "https://docs.stripe.com"
+	}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(stripeDir, "mcp.json"), []byte(`{
+		"mcpServers": {
+			"stripe": {"type": "http", "url": "https://mcp.stripe.com"}
+		}
+	}`), 0o644))
+
+	resendDir := filepath.Join(tempHome, "plugins", "cache", "cursor-public", "resend", commit)
+	require.NoError(t, os.MkdirAll(filepath.Join(resendDir, ".cursor-plugin"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(resendDir, ".cursor-plugin", "plugin.json"), []byte(`{
+		"name": "resend",
+		"description": "Resend plugin",
+		"version": "1.0.4",
+		"author": {"name": "Resend", "url": "https://resend.com"}
+	}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(resendDir, "mcp.json"), []byte(`{
+		"mcpServers": {
+			"resend": {"type": "streamable-http", "url": "https://mcp.resend.com/mcp"}
+		}
+	}`), 0o644))
+
+	servers, err := DiscoverCursorPluginMCPServersWithInventory(tempHome, CursorNativeInventory{
+		Plugins: []CursorNativePlugin{
+			{Name: "stripe", Marketplace: "cursor-public", Revision: commit},
+			{Name: "resend", Marketplace: "cursor-public", Revision: commit},
+		},
+	})
+	require.NoError(t, err)
+
+	got := make(map[string]string, len(servers))
+	for _, server := range servers {
+		got[server.Name] = server.URL
+	}
+	require.Equal(t, map[string]string{
+		"stripe": "https://mcp.stripe.com",
+		"resend": "https://mcp.resend.com/mcp",
+	}, got)
+	require.NotContains(t, got, "author")
+}
+
+func TestDiscoverCursorPluginMCPServers_GlobalBareMapWithMetadata(t *testing.T) {
+	tempHome := t.TempDir()
+	userConfig := `{
+		"name": "personal",
+		"version": "1.0",
+		"personal-server": {"url": "https://mcp.example.com/personal"}
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(tempHome, "mcp.json"), []byte(userConfig), 0o644))
+
+	servers, err := DiscoverCursorPluginMCPServers(tempHome)
+	require.NoError(t, err)
+	require.Len(t, servers, 1)
+	require.Equal(t, "personal-server", servers[0].Name)
+	require.Equal(t, "https://mcp.example.com/personal", servers[0].URL)
+}
+
+func TestDiscoverCursorPluginMCPServers_RepositoryMetadataContinuesToMCPFile(t *testing.T) {
+	tempHome := t.TempDir()
+	commit := "ffffffffffffffffffffffffffffffffffffffff"
+	pluginDir := filepath.Join(tempHome, "plugins", "cache", "cursor-public", "repository-only", commit)
+	require.NoError(t, os.MkdirAll(filepath.Join(pluginDir, ".cursor-plugin"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, ".cursor-plugin", "plugin.json"), []byte(`{
+		"name": "repository-only",
+		"repository": {"url": "https://github.com/example/repository-only"}
+	}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "mcp.json"), []byte(`{
+		"mcpServers": {
+			"repository-only": {"type": "http", "url": "https://mcp.example.com/repository-only"}
+		}
+	}`), 0o644))
+
+	servers, err := DiscoverCursorPluginMCPServersWithInventory(tempHome, CursorNativeInventory{
+		Plugins: []CursorNativePlugin{{Name: "repository-only", Marketplace: "cursor-public", Revision: commit}},
+	})
+	require.NoError(t, err)
+	require.Len(t, servers, 1)
+	require.Equal(t, "repository-only", servers[0].Name)
+	require.Equal(t, "https://mcp.example.com/repository-only", servers[0].URL)
+}
+
+func TestDiscoverCursorPluginMCPServers_PluginBareMapKeepsNameServer(t *testing.T) {
+	tempHome := t.TempDir()
+	pluginDir := filepath.Join(tempHome, "plugins", "local", "bare-map")
+	require.NoError(t, os.MkdirAll(pluginDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "mcp.json"), []byte(`{
+		"name": {"url": "https://mcp.example.com/name"},
+		"bare-server": {"url": "https://mcp.example.com/bare-server"}
+	}`), 0o644))
+
+	servers, err := DiscoverCursorPluginMCPServers(tempHome)
+	require.NoError(t, err)
+	got := make(map[string]string, len(servers))
+	for _, server := range servers {
+		got[server.Name] = server.URL
+	}
+	require.Equal(t, map[string]string{
+		"name":        "https://mcp.example.com/name",
+		"bare-server": "https://mcp.example.com/bare-server",
+	}, got)
+}

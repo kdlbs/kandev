@@ -1,4 +1,5 @@
 {
+  "openPr": "開啟 PR",
   "views": "檢視",
   "viewPicker": "檢視：{{view}}",
   "loadingSavedQueries": "正在載入已儲存的查詢...",
@@ -99,6 +100,10 @@
   "checksPendingCount_other": "{{count}} 個進行中",
   "checksRunning": "檢查執行中",
   "checksNotSuccessful": "檢查未成功",
+  "allChecksSkipped": "所有檢查均已跳過",
+  "checksSkippedCount_one": "{{count}} 個檢查已跳過",
+  "checksSkippedCount_other": "{{count}} 個檢查已跳過",
+  "lastDetailedObservation": "上次詳細觀測",
   "chooseAGithubApp": "選擇 GitHub 應用",
   "chooseHowNewlyLaunchedTasksAuthenticate": "選擇新啟動任務向 GitHub 驗證的方式。這不會改變上方的工作區自動化連線。",
   "chooseMergeMethod": "選擇合併方式",
@@ -662,5 +667,6 @@
   "mergeAccessDeniedByActor": "{{actor}} 無法合併到 {{repository}}。",
   "mergeAccessDenied": "此帳戶無法合併到 {{repository}}。",
   "checkMergeAccess": "重新檢查",
-  "mergeAsActor": "以 {{actor}} 的身分"
+  "mergeAsActor": "以 {{actor}} 的身分",
+  "lastDetailedObservationAllSkipped": "上次詳細觀測：所有檢查均已跳過"
 }

@@ -2,6 +2,7 @@ package clarification
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -87,6 +88,7 @@ type Resolver struct {
 	messages                MessageCreator
 	authorizer              taskAccessAuthorizer
 	detachedResumer         DetachedClarificationResumer
+	answerAttachments       AnswerAttachmentMaterializer
 	eventBus                EventBus
 	primaryAnsweredNotifier PrimaryAnsweredNotifier
 	logger                  *logger.Logger
@@ -115,6 +117,12 @@ func NewResolver(
 		logger:                  log.WithFields(zap.String("component", "clarification-resolver")),
 		now:                     time.Now,
 	}
+}
+
+// SetAnswerAttachmentMaterializer wires the trusted runtime seam used to make
+// claimed answer files readable before a live response is released.
+func (r *Resolver) SetAnswerAttachmentMaterializer(materializer AnswerAttachmentMaterializer) {
+	r.answerAttachments = materializer
 }
 
 // AuthorizeBundleAccess resolves a bundle's identity (M5) and authorizes the
@@ -257,11 +265,8 @@ func (r *Resolver) claimAndDeliver(
 	claimCtx, cancel := clarificationClaimContext(ctx)
 	defer cancel()
 	claimStarted := time.Now()
-	completedMessages, claimed, claimErr := r.messages.CompleteActiveClarificationBundle(
-		claimCtx,
-		pendingID,
-		status,
-		responsesFromAnswers(response.Answers),
+	completedMessages, claimed, claimErr := r.claimClarificationResponse(
+		claimCtx, pendingID, status, response,
 	)
 	if claimErr != nil {
 		responseErr := fmt.Errorf("failed to update clarification state: %w", claimErr)
@@ -290,8 +295,23 @@ func (r *Resolver) claimAndDeliver(
 		return r.reconstructLoser(ctx, pendingID, sessionID, taskID) // R2
 	}
 
+	reconcileResponseAttachments(response, completedMessages)
+	deliveryCtx, cancelDelivery := clarificationPostClaimDeliveryContext(ctx)
+	defer cancelDelivery()
+	if err := r.materializeLiveAnswerAttachments(deliveryCtx, sessionID, pendingID, completedMessages, response); err != nil {
+		restored := r.restoreFailedClarificationClaim(ctx, pendingID, status, completedMessages)
+		r.logger.Error("failed to materialize clarification answer attachments",
+			zap.String("pending_id", pendingID),
+			zap.Bool("restored", restored),
+			zap.Error(err))
+		if restored {
+			return nil, true, errors.New("failed to materialize clarification answer attachments; response can be retried")
+		}
+		return nil, true, errors.New("failed to materialize clarification answer attachments and recover pending clarification state")
+	}
+
 	deliveryStarted := time.Now()
-	if err := r.deliverClaimedResolution(ctx, pendingID, status, response, completedMessages); err != nil {
+	if err := r.deliverClaimedResolution(deliveryCtx, pendingID, status, response, completedMessages); err != nil {
 		r.logResponsePhase(pendingID, clarificationResponsePhaseDelivery, deliveryStarted, responsePhaseOutcome(err))
 		return nil, true, err
 	}
@@ -341,6 +361,186 @@ func responsesFromAnswers(answers []Answer) map[string]interface{} {
 		out[a.QuestionID] = a
 	}
 	return out
+}
+
+func (r *Resolver) claimClarificationResponse(
+	ctx context.Context,
+	pendingID, status string,
+	response *Response,
+) ([]*taskmodels.Message, bool, error) {
+	if creator, ok := r.messages.(AttachmentAwareMessageCreator); ok {
+		var claims []taskmodels.ClarificationAttachmentClaim
+		if status != string(StatusRejected) {
+			claims = clarificationAttachmentClaims(response.Answers)
+		}
+		return creator.CompleteActiveClarificationBundleWithAttachments(
+			ctx, pendingID, status, responsesFromAnswers(response.Answers), claims,
+		)
+	}
+	if hasAnswerAttachments(response.Answers) {
+		return nil, false, errors.New("clarification answer attachments are unavailable")
+	}
+	return r.messages.CompleteActiveClarificationBundle(
+		ctx, pendingID, status, responsesFromAnswers(response.Answers),
+	)
+}
+
+func clarificationAttachmentClaims(answers []Answer) []taskmodels.ClarificationAttachmentClaim {
+	if len(answers) == 0 {
+		return nil
+	}
+	claims := make([]taskmodels.ClarificationAttachmentClaim, 0, len(answers))
+	for _, answer := range answers {
+		ids := make([]string, 0, len(answer.Attachments))
+		for _, attachment := range answer.Attachments {
+			ids = append(ids, attachment.AttachmentID)
+		}
+		claims = append(claims, taskmodels.ClarificationAttachmentClaim{
+			QuestionID:    answer.QuestionID,
+			AttachmentIDs: ids,
+		})
+	}
+	return claims
+}
+
+func hasAnswerAttachments(answers []Answer) bool {
+	for _, answer := range answers {
+		if len(answer.Attachments) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func answerAttachmentDescriptors(answers []Answer) []taskmodels.ClarificationAnswerAttachment {
+	if !hasAnswerAttachments(answers) {
+		return nil
+	}
+	var out []taskmodels.ClarificationAnswerAttachment
+	for _, answer := range answers {
+		for _, attachment := range answer.Attachments {
+			out = append(out, taskmodels.ClarificationAnswerAttachment{
+				AttachmentID: attachment.AttachmentID,
+				Type:         attachment.Type,
+				Name:         attachment.Name,
+				MimeType:     attachment.MimeType,
+				SizeBytes:    attachment.SizeBytes,
+				DeliveryMode: attachment.DeliveryMode,
+			})
+		}
+	}
+	return out
+}
+
+// reconcileResponseAttachments replaces the caller's attachment descriptors
+// with the canonical set committed by the repository. File bytes are never
+// part of this projection.
+func reconcileResponseAttachments(response *Response, messages []*taskmodels.Message) {
+	if response == nil || len(messages) == 0 {
+		return
+	}
+	byQuestion := make(map[string]Answer, len(messages))
+	for _, message := range messages {
+		if message == nil {
+			continue
+		}
+		answer, ok := answerFromMessageMetadata(message.ID, message.Metadata, nil)
+		if !ok {
+			continue
+		}
+		byQuestion[answer.QuestionID] = answer
+	}
+	for i := range response.Answers {
+		if canonical, ok := byQuestion[response.Answers[i].QuestionID]; ok {
+			response.Answers[i] = canonical
+		}
+	}
+}
+
+// materializeLiveAnswerAttachments is a no-op when the bundle has no files or
+// no in-memory waiter owns the answer. A detached answer materializes through
+// the resume prompt instead.
+func (r *Resolver) materializeLiveAnswerAttachments(
+	ctx context.Context,
+	sessionID, pendingID string,
+	claimedMessages []*taskmodels.Message,
+	response *Response,
+) error {
+	descriptors := answerAttachmentDescriptors(response.Answers)
+	if len(descriptors) == 0 || !r.store.HasWaiter(pendingID) {
+		return nil
+	}
+	if err := r.MaterializeRecordedAnswerAttachments(ctx, sessionID, response); err != nil {
+		return err
+	}
+	if err := r.verifyClaimedTurnStillCurrent(ctx, claimedMessages); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MaterializeRecordedAnswerAttachments reconstructs delivery paths for an
+// already-answered bundle without dispatching another response. An exact tool
+// retry uses it to return readable files after the original waiter settled.
+func (r *Resolver) MaterializeRecordedAnswerAttachments(
+	ctx context.Context,
+	sessionID string,
+	response *Response,
+) error {
+	descriptors := answerAttachmentDescriptors(response.Answers)
+	if len(descriptors) == 0 {
+		return nil
+	}
+	if answerAttachmentPathsComplete(response.Answers) {
+		return nil
+	}
+	if r.answerAttachments == nil {
+		return errors.New("answer attachment runtime is unavailable")
+	}
+	paths, err := r.answerAttachments.MaterializeAnswerAttachments(ctx, sessionID, descriptors)
+	if err != nil {
+		return err
+	}
+	for i := range response.Answers {
+		for j := range response.Answers[i].Attachments {
+			id := response.Answers[i].Attachments[j].AttachmentID
+			path, ok := paths[id]
+			if !ok || strings.TrimSpace(path) == "" {
+				return fmt.Errorf("attachment %s was not materialized", id)
+			}
+			response.Answers[i].Attachments[j].Path = path
+		}
+	}
+	return nil
+}
+
+func answerAttachmentPathsComplete(answers []Answer) bool {
+	for _, answer := range answers {
+		for _, attachment := range answer.Attachments {
+			if strings.TrimSpace(attachment.Path) == "" {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (r *Resolver) verifyClaimedTurnStillCurrent(ctx context.Context, messages []*taskmodels.Message) error {
+	turnID, err := clarificationClaimTurnIdentity(messages)
+	if err != nil {
+		return err
+	}
+	if turnID == "" || len(messages) == 0 {
+		return errors.New("clarification answer has no claimed turn")
+	}
+	currentTurnID, err := r.repo.CurrentClarificationTurnID(ctx, messages[0].TaskSessionID)
+	if err != nil {
+		return fmt.Errorf("verify clarification turn: %w", err)
+	}
+	if currentTurnID != turnID {
+		return errors.New("clarification answer was superseded by a newer turn")
+	}
+	return nil
 }
 
 // reconstructLoser is R2/R2a/R2b: a lost claim re-reads the bundle's durable
@@ -434,7 +634,24 @@ func answerFromMessageMetadata(messageID string, meta map[string]any, log *logge
 	if s, ok := rawMap["custom_text"].(string); ok {
 		answer.CustomText = s
 	}
+	answer.Attachments = decodeAnswerAttachments(rawMap["attachments"])
+	answer.Annotations = decodeAnswerAnnotations(rawMap["annotations"])
 	return answer, true
+}
+
+func decodeAnswerAttachments(raw interface{}) []AnswerAttachment {
+	if raw == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var attachments []AnswerAttachment
+	if err := json.Unmarshal(encoded, &attachments); err != nil {
+		return nil
+	}
+	return attachments
 }
 
 // deliverClaimedResolution is R7: the winner's delivery and resume path is
@@ -456,12 +673,9 @@ func (r *Resolver) deliverClaimedResolution(
 
 	// Durable current-turn ownership is claimed before touching the live waiter.
 	// This closes the window where a newer turn exists but its canceller has not
-	// yet drained the superseded in-memory request.
-	deliveryCtx, cancelDelivery := context.WithTimeout(
-		context.WithoutCancel(ctx),
-		clarificationPersistenceTimeout+5*time.Second,
-	)
-	defer cancelDelivery()
+	// yet drained the superseded in-memory request. The caller owns the bounded
+	// post-claim delivery context that materialization and this handoff share.
+	deliveryCtx := ctx
 	// The callback may outlive this handler's bounded wait. Keep its result in
 	// callback-owned storage so the immutable claim remains safe for recovery.
 	finalizedMessages := make(chan []*taskmodels.Message, 1)
@@ -695,6 +909,7 @@ func (r *Resolver) notifyPrimaryAnsweredBeforeWaiter(
 		ClarificationTurnID: clarificationTurnID,
 		Question:            clarificationCtx.QuestionSummary,
 		AnswerText:          answerText,
+		Attachments:         answerAttachmentDescriptors(answers),
 		Rejected:            rejected,
 		RejectReason:        rejectReason,
 	}
@@ -718,6 +933,7 @@ func (r *Resolver) publishPrimaryAnsweredEvent(ctx context.Context, answered Pri
 		"clarification_turn_id": answered.ClarificationTurnID,
 		metaQuestionKey:         answered.Question,
 		"answer_text":           answered.AnswerText,
+		"attachments":           answered.Attachments,
 		metaRejectedKey:         answered.Rejected,
 		"reject_reason":         answered.RejectReason,
 		// The orchestrator handled this event synchronously in the resolver's
@@ -850,6 +1066,7 @@ func (r *Resolver) resumeDetachedClarification(
 		ClaimedMessageIDs:   claimedMessageIDs,
 		Question:            clarificationCtx.QuestionSummary,
 		AnswerText:          answerText,
+		Attachments:         answerAttachmentDescriptors(answers),
 		Rejected:            rejected,
 		RejectReason:        rejectReason,
 	}
@@ -1041,20 +1258,36 @@ func buildAnswerSummary(questions []Question, answers []Answer, rejected bool, r
 
 func formatSingleAnswer(a Answer) string {
 	if a.CustomText != "" {
-		return fmt.Sprintf("User answered: %s", a.CustomText)
+		return withAnswerEvidence(fmt.Sprintf("User answered: %s", a.CustomText), a)
 	}
 	if len(a.SelectedOptions) > 0 {
-		return fmt.Sprintf("User selected: %v", a.SelectedOptions)
+		return withAnswerEvidence(fmt.Sprintf("User selected: %v", a.SelectedOptions), a)
 	}
 	return "User provided no specific answer."
 }
 
 func formatAnswerBody(a Answer) string {
+	body := "(no answer)"
 	if a.CustomText != "" {
-		return a.CustomText
+		body = a.CustomText
+	} else if len(a.SelectedOptions) > 0 {
+		body = fmt.Sprintf("%v", a.SelectedOptions)
 	}
-	if len(a.SelectedOptions) > 0 {
-		return fmt.Sprintf("%v", a.SelectedOptions)
+	return withAnswerEvidence(body, a)
+}
+
+// withAnswerEvidence appends attached file names and region annotations.
+func withAnswerEvidence(body string, a Answer) string {
+	lines := []string{body}
+	names := make([]string, 0, len(a.Attachments))
+	for _, attachment := range a.Attachments {
+		if name := strings.Join(strings.Fields(attachment.Name), " "); name != "" {
+			names = append(names, name)
+		}
 	}
-	return "(no answer)"
+	if len(names) > 0 {
+		lines = append(lines, "Attached files: "+strings.Join(names, ", "))
+	}
+	lines = append(lines, formatAnnotationLines(a.Annotations)...)
+	return strings.Join(lines, "\n")
 }

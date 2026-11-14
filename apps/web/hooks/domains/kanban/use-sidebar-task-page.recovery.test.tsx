@@ -186,8 +186,11 @@ describe("useSidebarTaskPage recovery admission", () => {
     expect(querySidebarTasks).toHaveBeenCalledTimes(1);
 
     // The desktop consumer renders first; its callback stays valid across renders.
-    const runForeground = () =>
-      (vi.mocked(useForegroundRefresh).mock.calls[0]?.[0] as () => void)();
+    const runForeground = () => {
+      const foreground = vi.mocked(useForegroundRefresh).mock.calls[0]?.[0];
+      if (!foreground) throw new Error("Expected a registered foreground refresh callback");
+      foreground();
+    };
     act(() => runForeground());
     await act(async () => vi.advanceTimersByTimeAsync(2_000));
     expect(querySidebarTasks).toHaveBeenCalledTimes(2);

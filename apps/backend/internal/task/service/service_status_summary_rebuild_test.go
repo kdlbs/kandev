@@ -850,6 +850,7 @@ func TestReconcileExistingSummaryStopsBeforeRetryWhenContextIsCanceled(t *testin
 		time.Time{},
 		false,
 		runningSessionObservation{},
+		summaryUnreadValue{},
 	)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("reconcileExistingSummary error = %v, want context canceled", err)

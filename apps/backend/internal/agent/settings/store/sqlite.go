@@ -138,6 +138,15 @@ func (r *sqliteRepository) initSchema() error {
 		FOREIGN KEY (profile_id) REFERENCES agent_profiles(id) ON DELETE CASCADE
 	);
 
+	CREATE TABLE IF NOT EXISTS workspace_builtin_mcp_policies (
+		workspace_id TEXT PRIMARY KEY,
+		schema_version INTEGER NOT NULL,
+		revision BIGINT NOT NULL CHECK (revision > 0),
+		packages_json TEXT NOT NULL,
+		updated_by TEXT NOT NULL,
+		updated_at TIMESTAMP NOT NULL
+	);
+
 	CREATE TABLE IF NOT EXISTS mcp_server_definitions (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL,

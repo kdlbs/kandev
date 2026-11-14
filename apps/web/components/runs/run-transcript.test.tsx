@@ -2,9 +2,15 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockFetchTaskSession = vi.hoisted(() => vi.fn());
+const mockListTaskSessions = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/api/domains/session-api", () => ({
   fetchTaskSession: (...args: unknown[]) => mockFetchTaskSession(...args),
+}));
+
+vi.mock("@/lib/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api")>()),
+  listTaskSessions: (...args: unknown[]) => mockListTaskSessions(...args),
 }));
 
 // Prefetching executors and agent settings is orthogonal to session hydration,
@@ -22,13 +28,17 @@ const SESSION_ID = "session-1";
 const TASK_ID = "task-1";
 const OLD_TURN_ID = "turn-old";
 const CURRENT_TURN_ID = "turn-current";
+const CAPTURE_TITLE = "CLI passthrough output is not captured in this run's transcript.";
+const CAPTURE_DESCRIPTION =
+  "Disable CLI passthrough in the automation's agent profile to record output for future sessions. Previous terminal output cannot be recovered here.";
+const CHAT_INPUT_AREA_TEST_ID = "chat-input-area";
 
-function transcript() {
+function transcript(sessionId = SESSION_ID, taskId = TASK_ID) {
   return (
     <StateProvider>
       <ToastProvider>
         <TooltipProvider>
-          <RunTranscript sessionId={SESSION_ID} taskId={TASK_ID} />
+          <RunTranscript sessionId={sessionId} taskId={taskId} />
         </TooltipProvider>
       </ToastProvider>
     </StateProvider>
@@ -41,6 +51,7 @@ function sessionInState(state: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockListTaskSessions.mockResolvedValue({ sessions: [] });
   mockFetchTaskSession.mockResolvedValue({
     session: { id: SESSION_ID, task_id: TASK_ID, state: "WAITING_FOR_INPUT" },
   });
@@ -76,6 +87,48 @@ describe("RunTranscript session hydration", () => {
     rerender(transcript());
 
     expect(mockFetchTaskSession).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["RUNNING", "WAITING_FOR_INPUT"])(
+    "explains uncaptured output for a %s passthrough run",
+    async (state) => {
+      mockFetchTaskSession.mockResolvedValue({
+        session: {
+          id: SESSION_ID,
+          task_id: TASK_ID,
+          state,
+          is_passthrough: true,
+          agent_profile_snapshot: { cli_passthrough: false },
+        },
+      });
+
+      render(transcript());
+
+      expect(await screen.findByText(CAPTURE_TITLE)).toBeTruthy();
+      expect(screen.getByText(CAPTURE_DESCRIPTION)).toBeTruthy();
+      expect(await screen.findByTestId(CHAT_INPUT_AREA_TEST_ID)).toBeTruthy();
+    },
+  );
+
+  it("follows the selected session when moving from passthrough to structured", async () => {
+    const structuredSessionId = "session-structured";
+    mockFetchTaskSession.mockImplementation((sessionId: string) =>
+      Promise.resolve({
+        session: {
+          id: sessionId,
+          task_id: TASK_ID,
+          state: "WAITING_FOR_INPUT",
+          is_passthrough: sessionId === SESSION_ID,
+        },
+      }),
+    );
+    const { rerender } = render(transcript());
+
+    expect(await screen.findByText(CAPTURE_TITLE)).toBeTruthy();
+
+    rerender(transcript(structuredSessionId));
+
+    await waitFor(() => expect(screen.queryByText(CAPTURE_TITLE)).toBeNull());
   });
 });
 
@@ -119,7 +172,7 @@ describe("RunTranscript live-session controls", () => {
 
     render(transcript());
 
-    await waitFor(() => expect(screen.getByTestId("chat-input-area")).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId(CHAT_INPUT_AREA_TEST_ID)).toBeTruthy());
     expect(screen.queryByTestId("toolbar-item-model")).toBeNull();
   });
 
@@ -128,7 +181,7 @@ describe("RunTranscript live-session controls", () => {
 
     render(transcript());
 
-    await waitFor(() => expect(screen.getByTestId("chat-input-area")).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId(CHAT_INPUT_AREA_TEST_ID)).toBeTruthy());
     expect(screen.getByTestId("chat-input-toolbar")).toBeTruthy();
   });
 
@@ -139,7 +192,7 @@ describe("RunTranscript live-session controls", () => {
 
     render(transcript());
 
-    const area = await screen.findByTestId("chat-input-area");
+    const area = await screen.findByTestId(CHAT_INPUT_AREA_TEST_ID);
     expect(area.className).toContain("bg-background");
     expect(area.className).not.toContain("bg-card");
   });

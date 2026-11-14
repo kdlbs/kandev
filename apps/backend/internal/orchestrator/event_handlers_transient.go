@@ -247,7 +247,7 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 			zap.Uint64("prompt_generation", data.PromptGeneration))
 		return false
 	}
-	classified := classifyKanbanFailure(data)
+	classified := s.classifyKanbanFailure(data)
 	if routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) != routingerr.DecisionShortRetry {
 		noticeState.mu.Unlock()
 		releaseNoticeState()
@@ -580,6 +580,7 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 	}
 
 	if _, err := s.promptTask(ctx, taskID, sessionID, cp.text, cp.model, cp.planMode, cp.attachments, false, launchOriginAutomatic, promptTaskOptions{
+		capacityIntent:                 turnCapacityOverride,
 		onAccepted:                     cp.onAccepted,
 		initialCreatePromptPassthrough: initialCreatePromptPassthrough,
 	}); err != nil {

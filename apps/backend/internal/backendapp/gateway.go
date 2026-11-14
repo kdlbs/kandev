@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/auth"
+	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
 	"github.com/kandev/kandev/internal/entityrefs"
@@ -120,6 +121,7 @@ func provideGateway(
 	gitlabSvc *gitlab.Service,
 	referenceValidator entityrefs.SubmissionValidator,
 	authSvc *auth.Service,
+	notificationSettings commonconfig.NotificationsConfig,
 	dataDir string,
 	registerCleanup func(func() error),
 	lspContinuityEnabled bool,
@@ -340,8 +342,10 @@ func provideGateway(
 				return &activityAt, nil
 			},
 			LoadSessionObservations: func(ctx context.Context, taskID string) (statussummary.SessionObservationSnapshot, error) {
-				return loadTaskSessionObservations(ctx, taskRepo, activityProvider, taskID)
+				return loadTaskSessionObservations(ctx, taskRepo, activityProvider, taskID, log)
 			},
+			LoadSessionUnreadState: taskRepo.ListSessionUnreadState,
+			UnreadRiseHold:         statussummary.DefaultUnreadRiseHold,
 			LoadTaskLaunchError: func(ctx context.Context, taskID string) (statussummary.TaskLaunchErrorObservation, error) {
 				return loadTaskLaunchErrorObservation(ctx, taskRepo, taskID)
 			},
@@ -377,6 +381,9 @@ func provideGateway(
 					return nil, err
 				}
 				return statussummary.CompletionGateSummaryFromSnapshot(gate), nil
+			},
+			LoadQuotaWait: func(ctx context.Context, taskID string) (*statussummary.QuotaWaitSummary, error) {
+				return loadTaskQuotaWait(ctx, taskRepo, taskID)
 			},
 			ResolveWorkspace: func(ctx context.Context, taskID string) (string, error) {
 				task, err := taskRepo.GetTask(ctx, taskID)
@@ -440,8 +447,10 @@ func provideGateway(
 	notificationSvc := notificationservice.NewService(
 		notificationRepo, notificationTasks, gateway.Hub, log,
 		notificationAuthEnforced(authSvc), webhookPrivateNetworksAllowed)
+	configureWebPush(notificationSvc, notificationRepo, notificationSettings, log, registerCleanup)
 	notificationCtrl := notificationcontroller.NewController(notificationSvc)
 	if eventBus != nil {
+		subscribeSessionAttentionNotifications(eventBus, notificationSvc, log)
 		_, err = eventBus.Subscribe(events.TurnCompleted, func(ctx context.Context, event *bus.Event) error {
 			data, ok := event.Data.(map[string]interface{})
 			if !ok {
@@ -521,11 +530,30 @@ func taskStatusRuntimeProviders(
 	return orchestratorSvc, queue.CountPendingByTask
 }
 
+// loadTaskQuotaWait projects the task's live limit wait from the durable route
+// rows of its sessions, read in one query. The primary session is consulted
+// first because it is the one whose turn the task is presenting; the remaining
+// sessions follow in the order the repository lists them, so a task with more
+// than one parked session shows a stable one rather than whichever row the query
+// happened to return.
+func loadTaskQuotaWait(
+	ctx context.Context,
+	taskRepo *sqliterepo.Repository,
+	taskID string,
+) (*statussummary.QuotaWaitSummary, error) {
+	waits, err := taskRepo.LoadTaskStatusSummaryQuotaWaits(ctx, []string{taskID})
+	if err != nil {
+		return nil, err
+	}
+	return waits[taskID], nil
+}
+
 func loadTaskSessionObservations(
 	ctx context.Context,
 	taskRepo *sqliterepo.Repository,
 	activityProvider taskStatusActivityProvider,
 	taskID string,
+	log *logger.Logger,
 ) (statussummary.SessionObservationSnapshot, error) {
 	sessions, err := taskRepo.ListTaskSessions(ctx, taskID)
 	if err != nil {
@@ -536,6 +564,8 @@ func loadTaskSessionObservations(
 		ActivityObserved: activityProvider != nil,
 		ErrorsObserved:   true,
 	}
+	unread, unreadObserved := loadTaskSessionUnreadState(ctx, taskRepo, sessions, taskID, log)
+	snapshot.UnreadObserved = unreadObserved
 	for _, session := range sessions {
 		if session == nil || session.ID == "" {
 			continue
@@ -568,6 +598,10 @@ func loadTaskSessionObservations(
 				RecoveryActions:  lastError.RecoveryActions,
 				Causes:           lastError.Causes,
 			}
+		}
+		if state, ok := unread[session.ID]; ok {
+			stateCopy := state
+			input.Unread = &stateCopy
 		}
 		snapshot.Sessions = append(snapshot.Sessions, input)
 	}
@@ -603,6 +637,39 @@ func loadTaskTurnErrorObservation(
 		Observed: true,
 		Error:    statussummary.TurnErrorSummaryFromMetadata(task.Metadata),
 	}, nil
+}
+
+// loadTaskSessionUnreadState reads unread ranks for every session of the task;
+// a cursorless session reads from a zero cursor. A failed read degrades to
+// unobserved unread instead of failing the snapshot, so the stored unread
+// aggregate stays authoritative.
+func loadTaskSessionUnreadState(
+	ctx context.Context,
+	taskRepo *sqliterepo.Repository,
+	sessions []*models.TaskSession,
+	taskID string,
+	log *logger.Logger,
+) (map[string]statussummary.SessionUnreadState, bool) {
+	sessionIDs := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		if session != nil && session.ID != "" {
+			sessionIDs = append(sessionIDs, session.ID)
+		}
+	}
+	if len(sessionIDs) == 0 {
+		return nil, true
+	}
+	unread, err := taskRepo.ListSessionUnreadState(ctx, sessionIDs)
+	if err != nil {
+		statussummary.RecordUnreadLoadFailure()
+		if log != nil {
+			log.Warn("failed to load unread state for task status summary",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		}
+		return nil, false
+	}
+	return unread, true
 }
 
 func loadTaskLaunchErrorObservation(

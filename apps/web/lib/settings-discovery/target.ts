@@ -8,6 +8,11 @@ export type SettingsTargetRequestDetail = { targetId: string };
 
 export type SettingsTargetRegistry = {
   register: (targetId: string, element: HTMLElement) => () => void;
+  /**
+   * Resolves a target with domain activation instead of DOM scrolling. Used
+   * for surfaces such as the runtime manager that are not anchored elements.
+   */
+  registerAction: (targetId: string, activate: () => void) => () => void;
   request: (targetId: string) => boolean;
 };
 
@@ -47,6 +52,7 @@ export function createSettingsTargetRegistry(
   reveal: (element: HTMLElement) => void = revealSettingsTarget,
 ): SettingsTargetRegistry {
   const targets = new Map<string, HTMLElement>();
+  const actions = new Map<string, () => void>();
   let pendingTargetId: string | null = null;
 
   const isHidden = (element: HTMLElement) =>
@@ -69,9 +75,25 @@ export function createSettingsTargetRegistry(
         }
       };
     },
+    registerAction(targetId, activate) {
+      actions.set(targetId, activate);
+      if (pendingTargetId === targetId) {
+        pendingTargetId = null;
+        activate();
+      }
+      return () => {
+        if (actions.get(targetId) === activate) actions.delete(targetId);
+      };
+    },
     request(targetId) {
       const element = targets.get(targetId);
       if (!element) {
+        const action = actions.get(targetId);
+        if (action) {
+          pendingTargetId = null;
+          action();
+          return true;
+        }
         pendingTargetId = targetId;
         return false;
       }

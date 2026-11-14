@@ -58,6 +58,7 @@ session. One replacement changes Implement and the conversation that PR reuses.
 ## Implementation plans
 
 - [Delivery package](../../../plans/task-workflow-agent-overrides/plan.md)
+- [Selected workflow metadata repair](../../../plans/task-create-workflow-agent-metadata/plan.md)
 - [Change workflow extension](change-workflow.md) defines a proposed opt-in
   replacement of the map during a workflow change. General editing of overrides
   within the current workflow remains outside this creation contract.

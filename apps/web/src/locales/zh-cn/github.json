@@ -1,4 +1,5 @@
 {
+  "openPr": "打开 PR",
   "views": "视图",
   "viewPicker": "视图：{{view}}",
   "loadingSavedQueries": "正在加载已保存的查询...",
@@ -99,6 +100,10 @@
   "checksPendingCount_other": "{{count}} 个进行中",
   "checksRunning": "检查运行中",
   "checksNotSuccessful": "检查未成功",
+  "allChecksSkipped": "所有检查均已跳过",
+  "checksSkippedCount_one": "{{count}} 个检查已跳过",
+  "checksSkippedCount_other": "{{count}} 个检查已跳过",
+  "lastDetailedObservation": "上次详细观测",
   "chooseAGithubApp": "选择 GitHub 应用",
   "chooseHowNewlyLaunchedTasksAuthenticate": "选择新启动任务向 GitHub 认证的方式。这不会改变上方的工作区自动化连接。",
   "chooseMergeMethod": "选择合并方式",
@@ -662,5 +667,6 @@
   "mergeAccessDeniedByActor": "{{actor}} 无法合并到 {{repository}}。",
   "mergeAccessDenied": "此账户无法合并到 {{repository}}。",
   "checkMergeAccess": "重新检查",
-  "mergeAsActor": "以 {{actor}} 的身份"
+  "mergeAsActor": "以 {{actor}} 的身份",
+  "lastDetailedObservationAllSkipped": "上次详细观测：所有检查均已跳过"
 }

@@ -20,7 +20,7 @@ func TestSilentRestoreStartupAllowsSlowNativeLoad(t *testing.T) {
 		repo := &retentionBootstrapRepository{firstRead: make(chan struct{})}
 		repo.generation.Store(predecessor)
 		manager := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
-		processor := newStreamEventProcessor(manager, ctx, execution, nil, repo, 0)
+		processor := newStreamEventProcessor(manager, ctx, execution, nil, repo, 0, nil)
 		defer func() { processor.cancel(); _ = processor.close() }()
 		_, event := retentionBootstrapOwner()
 		event.DeliveryHarnessGeneration = 2

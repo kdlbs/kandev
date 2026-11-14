@@ -13,9 +13,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -27,6 +29,8 @@ type captureUpdateTaskRepo struct {
 	mockRepository
 	deleteReposCalled bool
 	replacementRows   []*models.TaskRepository
+	metadata          map[string]interface{}
+	executorProfile   *models.ExecutorProfile
 }
 
 func (m *captureUpdateTaskRepo) GetTask(_ context.Context, id string) (*models.Task, error) {
@@ -36,7 +40,19 @@ func (m *captureUpdateTaskRepo) GetTask(_ context.Context, id string) (*models.T
 		WorkflowID:  "wf-1",
 		Title:       "Old title",
 		State:       v1.TaskStateTODO,
+		Metadata:    m.metadata,
 	}, nil
+}
+
+func (*captureUpdateTaskRepo) GetWorkspace(_ context.Context, id string) (*models.Workspace, error) {
+	return &models.Workspace{ID: id, OwnerID: "alice"}, nil
+}
+
+func (m *captureUpdateTaskRepo) GetExecutorProfile(_ context.Context, id string) (*models.ExecutorProfile, error) {
+	if m.executorProfile == nil || m.executorProfile.ID != id {
+		return nil, repoerrors.ErrExecutorProfileNotFound
+	}
+	return m.executorProfile, nil
 }
 
 // These mapper tests exercise title-only updates or association-only replacement.
@@ -163,6 +179,55 @@ func TestWSUpdateTaskTitleOnlyPreservesRepositories(t *testing.T) {
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
 	assert.False(t, repo.deleteReposCalled, "title-only update must not touch task repositories")
 	assert.Equal(t, []string{"repo-1"}, decodeTaskRepositoryIDs(t, resp.Payload))
+}
+
+func TestHTTPUpdateTaskExecutorMutationDenialIsForbidden(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, repo := newUpdateTaskHandlers(t)
+	repo.metadata = map[string]interface{}{models.MetaKeyExecutorProfileID: "private-profile"}
+	repo.executorProfile = &models.ExecutorProfile{
+		ID: "private-profile", ExecutorID: "private-executor", OwnerUserID: "bob",
+	}
+	repo.executors = map[string]*models.Executor{
+		"private-executor": {ID: "private-executor", OwnerUserID: "bob"},
+	}
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/tasks/task-1", strings.NewReader(`{"title":"Renamed"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request = request.WithContext(authn.WithIdentity(t.Context(), authn.Identity{UserID: "alice", Role: authn.RoleMember}))
+	response := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(response)
+	ctx.Params = gin.Params{{Key: "id", Value: "task-1"}}
+	ctx.Request = request
+
+	h.httpUpdateTask(ctx)
+
+	require.Equal(t, http.StatusForbidden, response.Code)
+	require.JSONEq(t, `{"error":"executor mutation denied"}`, response.Body.String())
+	assert.False(t, repo.deleteReposCalled)
+}
+
+func TestWSUpdateTaskExecutorMutationDenialIsForbidden(t *testing.T) {
+	h, repo := newUpdateTaskHandlers(t)
+	repo.metadata = map[string]interface{}{models.MetaKeyExecutorProfileID: "private-profile"}
+	repo.executorProfile = &models.ExecutorProfile{
+		ID: "private-profile", ExecutorID: "private-executor", OwnerUserID: "bob",
+	}
+	repo.executors = map[string]*models.Executor{
+		"private-executor": {ID: "private-executor", OwnerUserID: "bob"},
+	}
+	ctx := authn.WithIdentity(t.Context(), authn.Identity{UserID: "alice", Role: authn.RoleMember})
+	request, err := ws.NewRequest("update", ws.ActionTaskUpdate, map[string]string{"id": "task-1", "title": "Renamed"})
+	require.NoError(t, err)
+
+	response, err := h.wsUpdateTask(ctx, request)
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, response.Type)
+	var payload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(response.Payload, &payload))
+	require.Equal(t, ws.ErrorCodeForbidden, payload.Code)
+	require.Equal(t, models.ErrExecutorMutationDenied.Error(), payload.Message)
+	assert.False(t, repo.deleteReposCalled)
 }
 
 func TestHTTPUpdateTaskRejectsOverlongTitle(t *testing.T) {

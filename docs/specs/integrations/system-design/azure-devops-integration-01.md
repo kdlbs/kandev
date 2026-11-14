@@ -1,5 +1,5 @@
 ---
-status: draft
+status: superseded
 system: integrations
 requirements:
   - REQ-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001
@@ -9,6 +9,10 @@ owners:
   - tbd
 ---
 # Azure DevOps Integration System Design Part 1
+
+> Superseded on 2026-11-06 by the
+> [Azure DevOps connector plugin design](https://github.com/JnManso/kandev-plugin-azure-devops/blob/main/docs/specs/system-design/azure-devops-plugin.md) and
+> [Azure DevOps leaves core](../../plugins/system-design/azure-devops-extraction.md).
 
 ## Purpose and boundaries
 

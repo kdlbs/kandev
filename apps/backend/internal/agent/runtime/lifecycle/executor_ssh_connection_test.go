@@ -454,6 +454,8 @@ func TestSSHRemoteAgentEnv(t *testing.T) {
 		"HOME":                          nonCredentialHome,
 		"PATH":                          nonCredentialPath,
 		"OPENAI_API_KEY":                openAIKey,
+		"CURSOR_API_KEY":                "cursor-key-from-req",
+		"XAI_API_KEY":                   "xai-key-from-req",
 		envKeyGitHubCredentialBrokerURL: "https://kandev.example/api/v1/github/credentials/resolve",
 		envKeyGitHubCredentialLease:     "opaque-lease",
 		"GIT_CONFIG_COUNT":              "1",
@@ -466,6 +468,9 @@ func TestSSHRemoteAgentEnv(t *testing.T) {
 	}
 	if got["OPENAI_API_KEY"] != openAIKey {
 		t.Fatalf("OPENAI_API_KEY = %q, want %q", got["OPENAI_API_KEY"], openAIKey)
+	}
+	if got["CURSOR_API_KEY"] != "cursor-key-from-req" || got["XAI_API_KEY"] != "xai-key-from-req" {
+		t.Fatalf("catalog credential env vars were not forwarded: %#v", got)
 	}
 	if got["NPM_TOKEN"] != "repository-token" {
 		t.Fatalf("NPM_TOKEN = %q, want repository-token", got["NPM_TOKEN"])
@@ -772,7 +777,7 @@ func TestSSHManagedBrokerResumeForcesFreshAgentctlWithNewLease(t *testing.T) {
 		stoppedPID = pid
 		return nil
 	}
-	if err := sshExec.resetManagedBrokerResume(context.Background(), req, "1234", "/remote/session"); err != nil {
+	if err := sshExec.resetManagedBrokerResume(context.Background(), req, 1234, "/remote/session", nil); err != nil {
 		t.Fatalf("resetManagedBrokerResume() error = %v", err)
 	}
 	if probedLease != "fresh-lease-after-backend-restart" {

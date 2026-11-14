@@ -22,6 +22,7 @@ func (p *importNameMCPProvider) CreateWorkflow(ctx context.Context, workspace, n
 	workflow, err := p.memWorkflowProvider.CreateWorkflow(ctx, workspace, name, description)
 	if err == nil {
 		workflow.ID = uuid.NewString()
+		p.ensureWorkflowRow(workflow.ID, workspace, name)
 	}
 	return workflow, err
 }
@@ -31,8 +32,9 @@ func (p *importNameMCPProvider) CreateWorkflow(ctx context.Context, workspace, n
 func TestHandleImportWorkflow_DocumentNameSelection(t *testing.T) {
 	for _, malformed := range []bool{false, true} {
 		t.Run(map[bool]string{false: "valid", true: "invalid-skipped"}[malformed], func(t *testing.T) {
-			h, _, repo := setupImportHandlers(t)
+			h, baseProvider, repo := setupImportHandlers(t)
 			provider := &importNameMCPProvider{}
+			provider.db = baseProvider.db
 			h.workflowSvc.SetWorkflowProvider(provider)
 			later := wfmodels.StepPortable{Name: "Later", Position: 0}
 			laterSteps := []wfmodels.StepPortable{later}

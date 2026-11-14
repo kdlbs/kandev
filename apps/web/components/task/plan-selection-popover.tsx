@@ -213,7 +213,7 @@ function PlanCommentDrawerHeader({
     <DrawerHeader className="shrink-0 px-4 pb-3 text-left">
       <DrawerTitle>{editingComment ? t("task:editComment") : t("task:comment")}</DrawerTitle>
       <DrawerDescription className="line-clamp-2 text-pretty italic">
-        &ldquo;{selectedText}&rdquo;
+        “{selectedText}”
       </DrawerDescription>
     </DrawerHeader>
   );
@@ -416,7 +416,7 @@ function DesktopPlanSelectionPopover({
       </div>
       <div className="p-3">
         <p className="mb-2 text-xs text-muted-foreground line-clamp-2 leading-relaxed italic">
-          &ldquo;{previewText}&rdquo;
+          “{previewText}”
         </p>
         <Textarea
           ref={textareaRef}

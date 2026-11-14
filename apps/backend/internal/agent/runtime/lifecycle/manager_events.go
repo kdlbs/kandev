@@ -294,6 +294,13 @@ func (m *Manager) claimPromptCompletion(
 		}
 		return claim, true
 	}
+	if deliverySubmissionIdentityMismatch(execution, event.DeliverySubmissionID) {
+		m.logger.Debug("ignoring completion for superseded prompt submission",
+			zap.String("execution_id", execution.ID),
+			zap.String("event_submission_id", event.DeliverySubmissionID),
+			zap.String("current_submission_id", currentDeliverySubmissionID(execution)))
+		return claim, false
+	}
 
 	execution.promptLifecycleMu.Lock()
 	claim.locked = true
@@ -836,6 +843,17 @@ func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
 	}
 }
 
+// isStatuslessToolUpdate reports a tool_update whose ACP wire status was
+// missing. The adapter synthesizes in_progress for an update with a title,
+// input, content, or recognized shell output, so real progress still reaches
+// the finalizer. The lifecycle boundary must use the same evidence as the
+// finalizer, which ignores ToolStatusMissing updates: an empty or missing
+// status may not start a turn the finalizer will never close.
+func isStatuslessToolUpdate(event agentctl.AgentEvent) bool {
+	return event.Type == "tool_update" &&
+		(event.ToolStatus == "" || event.ToolStatusMissing)
+}
+
 // recordActivity updates the last-activity timestamp and, on the very first
 // event from an execution, publishes AgentRunning to transition STARTING → RUNNING.
 //
@@ -850,7 +868,9 @@ func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
 //
 // The flip is gated on `turnContentEventTypes` so post-boot metadata events
 // (available_commands_update arriving 50ms after MarkBootReady, etc.) don't
-// accidentally re-arm a freshly-booted no-prompt session as Running.
+// accidentally re-arm a freshly-booted no-prompt session as Running. A
+// tool_update with no status carries metadata only and is treated like a
+// terminal update here: the finalizer ignores it, so it must not start a turn.
 func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.AgentEvent) {
 	promptLifecycleLocked := false
 	unlockPromptLifecycle := func() {
@@ -913,7 +933,7 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 		unlockPromptLifecycle()
 		return
 	}
-	if isTerminalToolUpdate(event) {
+	if isTerminalToolUpdate(event) || isStatuslessToolUpdate(event) {
 		unlockPromptLifecycle()
 		return
 	}
@@ -1544,6 +1564,7 @@ func (m *Manager) handleMCPAttachmentEvent(
 		attempt.SessionID = execution.SessionID
 		attempt.ExecutionID = execution.ID
 		attempt.AgentID = execution.AgentID
+		attempt.BuiltinPackages = execution.builtinMCPManifestSnapshot()
 		event.MCPAttachmentAttempt = &attempt
 	}
 	// Attachment diagnostics must not count as model activity or alter turn
@@ -1756,6 +1777,15 @@ func (m *Manager) handleFileChangeNotification(execution *AgentExecution, notifi
 		return
 	}
 	m.eventPublisher.PublishFileChange(execution, notification)
+}
+
+// handleWorktreeInventory publishes a linked-worktree snapshot from a live,
+// current execution. Detection never starts, resumes, or prompts an agent.
+func (m *Manager) handleWorktreeInventory(execution *AgentExecution, inventory *agentctl.WorktreeInventory) {
+	if execution == nil || inventory == nil || !m.runtimeExecutionCurrent(execution) {
+		return
+	}
+	m.eventPublisher.PublishWorktreeInventory(execution, inventory)
 }
 
 // handleShellOutput processes shell output from the workspace stream

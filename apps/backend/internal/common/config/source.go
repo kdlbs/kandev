@@ -78,6 +78,8 @@ type configSelection struct {
 var yamlOnlyStartupKeys = map[string]struct{}{
 	"server.trustedProxies":                     {},
 	"notifications.webhookAllowPrivateNetworks": {},
+	"notifications.webPushSubject":              {},
+	"notifications.webPushAllowedHosts":         {},
 	"tasks.preparationTimeout":                  {},
 	"tasks.stallDetectionThreshold":             {},
 	"tasks.deliveryRetention.payloadGrace":      {},
@@ -388,6 +390,8 @@ func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources
 	applyDurationEnv("tasks.preparationTimeout", &cfg.Tasks.PreparationTimeout, 10*time.Minute, envSnapshot, sources)
 	applyDurationEnv("tasks.stallDetectionThreshold", &cfg.Tasks.StallDetectionThreshold, 2*time.Hour, envSnapshot, sources)
 	applyStringEnvAllowEmpty("credentials.file", &cfg.Credentials.File, envSnapshot, sources)
+	applyStringEnvAllowEmpty("notifications.webPushSubject", &cfg.Notifications.WebPushSubject, envSnapshot, sources)
+	applyStringEnvAllowEmpty("notifications.webPushAllowedHosts", &cfg.Notifications.WebPushAllowedHosts, envSnapshot, sources)
 	applyPositiveIntEnv("limits.ghMaxConcurrent", &cfg.Limits.GHMaxConcurrent, 8, envSnapshot, sources)
 	applyPositiveIntEnv("limits.gitMaxConcurrent", &cfg.Limits.GitMaxConcurrent, 12, envSnapshot, sources)
 	applyPositiveIntEnv("limits.lspMaxConnections", &cfg.Limits.LSPMaxConnections, 8, envSnapshot, sources)

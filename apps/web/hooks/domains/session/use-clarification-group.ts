@@ -11,7 +11,7 @@ import { isPendingClarificationMessage } from "@/lib/utils/pending-clarification
 import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 import type { LateClarificationSnapshot } from "@/lib/clarification/late-clarification-message";
 
-type SubmitState = "idle" | "submitting" | "ok" | "error" | "expired";
+export type SubmitState = "idle" | "submitting" | "ok" | "error" | "expired";
 export type LateAnswerDelivery = "sent" | "queued";
 export type LateAnswerState = "idle" | "sending" | "sent" | "queued" | "error";
 
@@ -63,7 +63,25 @@ function isClarificationAnswer(value: unknown): value is ClarificationAnswer {
     return false;
   }
   const customText = value.custom_text;
-  return customText === undefined || typeof customText === "string";
+  if (customText !== undefined && typeof customText !== "string") return false;
+  const attachments = value.attachments;
+  if (attachments === undefined) return true;
+  return (
+    Array.isArray(attachments) &&
+    attachments.every(
+      (attachment) =>
+        isRecord(attachment) &&
+        typeof attachment.attachment_id === "string" &&
+        attachment.attachment_id.length > 0 &&
+        typeof attachment.name === "string" &&
+        typeof attachment.mime_type === "string" &&
+        typeof attachment.size_bytes === "number" &&
+        (attachment.type === "image" ||
+          attachment.type === "audio" ||
+          attachment.type === "resource") &&
+        (attachment.delivery_mode === "path" || attachment.delivery_mode === "prompt"),
+    )
+  );
 }
 
 function parseClarificationAnswers(value: unknown): ClarificationAnswer[] | null | undefined {
@@ -156,8 +174,8 @@ export type ClarificationGroupApi = {
   // Re-attempts whichever of submitCollected/skipAll was last invoked. Submit
   // retries use the current live answers; skip retries keep the original
   // reason. A no-op before either has been called.
-  retry: () => Promise<void>;
-  retryLateAnswer: () => Promise<void>;
+  retry: (override?: Record<string, ClarificationAnswer>) => Promise<void>;
+  retryLateAnswer: (override?: Record<string, ClarificationAnswer>) => Promise<void>;
   // The most recent settled ClarificationRespondResult this submission still
   // owned (see runClarificationRequest's ownsRequest fence), or null before
   // any submission has settled. Callers that need to distinguish "this
@@ -709,15 +727,18 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
     ],
   );
 
-  const retry = useCallback(async () => {
-    const action = lastActionRef.current;
-    if (!action) return;
-    if (action.kind === "submit") {
-      await submitCollected();
-    } else {
-      await skipAll(action.reason);
-    }
-  }, [submitCollected, skipAll]);
+  const retry = useCallback(
+    async (override?: Record<string, ClarificationAnswer>) => {
+      const action = lastActionRef.current;
+      if (!action) return;
+      if (action.kind === "submit") {
+        await submitCollected(override);
+      } else {
+        await skipAll(action.reason);
+      }
+    },
+    [submitCollected, skipAll],
+  );
 
   const resetLastAction = useCallback(() => {
     lastActionRef.current = null;
@@ -834,54 +855,57 @@ export function useClarificationGroup(
     defaultSkipReason: t("task:userSkippedClarification"),
   });
 
-  const retryLateAnswer = useCallback(async () => {
-    const snapshot = lateAnswerSnapshotRef.current;
-    if (!snapshot || !onLateAnswer || !pendingId) return;
-    const currentAnswers = Object.values(answersRef.current);
-    const nextSnapshot = { ...snapshot, answers: currentAnswers };
-    const requestPendingId = pendingId;
-    const requestGeneration = requestGenerationRef.current;
-    const requestBundle = submitBundleRef.current.slice();
-    const requestBundleStateKey = bundleStateKey;
-    lateAnswerSnapshotRef.current = nextSnapshot;
-    setLateAnswerState("sending");
-    const ownsRetry = () =>
-      activePendingIdRef.current === requestPendingId &&
-      requestGenerationRef.current === requestGeneration &&
-      activeBundleStateKeyRef.current === requestBundleStateKey &&
-      lateAnswerSnapshotRef.current === nextSnapshot;
-    try {
-      const delivery = await onLateAnswer(nextSnapshot);
-      if (!ownsRetry()) return;
-      setLateAnswerState(delivery);
-      if (!ownsRetry()) return;
-      safeApplyExpiredStatus({
-        bundle: requestBundle,
-        pendingId: requestPendingId,
-        requestGeneration,
-        activePendingIdRef,
-        requestGenerationRef,
-        getLatestMessage,
-        update: storeApi.getState().updateMessage,
-      });
-      if (!ownsRetry()) return;
-      onOutcome?.({ kind: "late_message_admitted", delivery });
-    } catch {
-      if (ownsRetry()) setLateAnswerState("error");
-    }
-  }, [
-    activePendingIdRef,
-    answersRef,
-    bundleStateKey,
-    getLatestMessage,
-    onLateAnswer,
-    onOutcome,
-    pendingId,
-    requestGenerationRef,
-    setLateAnswerState,
-    storeApi,
-    submitBundleRef,
-  ]);
+  const retryLateAnswer = useCallback(
+    async (override?: Record<string, ClarificationAnswer>) => {
+      const snapshot = lateAnswerSnapshotRef.current;
+      if (!snapshot || !onLateAnswer || !pendingId) return;
+      const currentAnswers = Object.values({ ...answersRef.current, ...(override ?? {}) });
+      const nextSnapshot = { ...snapshot, answers: currentAnswers };
+      const requestPendingId = pendingId;
+      const requestGeneration = requestGenerationRef.current;
+      const requestBundle = submitBundleRef.current.slice();
+      const requestBundleStateKey = bundleStateKey;
+      lateAnswerSnapshotRef.current = nextSnapshot;
+      setLateAnswerState("sending");
+      const ownsRetry = () =>
+        activePendingIdRef.current === requestPendingId &&
+        requestGenerationRef.current === requestGeneration &&
+        activeBundleStateKeyRef.current === requestBundleStateKey &&
+        lateAnswerSnapshotRef.current === nextSnapshot;
+      try {
+        const delivery = await onLateAnswer(nextSnapshot);
+        if (!ownsRetry()) return;
+        setLateAnswerState(delivery);
+        if (!ownsRetry()) return;
+        safeApplyExpiredStatus({
+          bundle: requestBundle,
+          pendingId: requestPendingId,
+          requestGeneration,
+          activePendingIdRef,
+          requestGenerationRef,
+          getLatestMessage,
+          update: storeApi.getState().updateMessage,
+        });
+        if (!ownsRetry()) return;
+        onOutcome?.({ kind: "late_message_admitted", delivery });
+      } catch {
+        if (ownsRetry()) setLateAnswerState("error");
+      }
+    },
+    [
+      activePendingIdRef,
+      answersRef,
+      bundleStateKey,
+      getLatestMessage,
+      onLateAnswer,
+      onOutcome,
+      pendingId,
+      requestGenerationRef,
+      setLateAnswerState,
+      storeApi,
+      submitBundleRef,
+    ],
+  );
 
   // A new bundle (different pendingId) replacing a still-pending one must not
   // inherit the previous bundle's answers, submit/retry banner, or replayable

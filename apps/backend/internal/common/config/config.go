@@ -58,9 +58,11 @@ type Config struct {
 	Source                 ConfigSource                 `mapstructure:"-" json:"-"`
 }
 
-// NotificationsConfig contains process-wide notification delivery policy.
+// NotificationsConfig contains process-wide notification delivery settings.
 type NotificationsConfig struct {
-	WebhookAllowPrivateNetworks bool `mapstructure:"webhookAllowPrivateNetworks"`
+	WebPushSubject              string `mapstructure:"webPushSubject"`
+	WebPushAllowedHosts         string `mapstructure:"webPushAllowedHosts"`
+	WebhookAllowPrivateNetworks bool   `mapstructure:"webhookAllowPrivateNetworks"`
 }
 
 // TasksConfig contains task lifecycle startup limits.
@@ -514,6 +516,7 @@ type OfficeConfig struct {
 //
 // See docs/decisions/0007-runtime-feature-flags.md for the pattern and rollout policy.
 type FeaturesConfig struct {
+	ProviderKeywordContext bool `mapstructure:"provider_keyword_context" json:"providerKeywordContext"`
 	// IntegratedControl gates the cross-workspace navigation and existing-conversation surface.
 	IntegratedControl bool `mapstructure:"integrated_control" json:"integratedControl"`
 
@@ -731,6 +734,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.writeTimeout", 30)
 	v.SetDefault("server.webInternalUrl", "")
 	v.SetDefault("server.webTitlePrefix", "")
+	v.SetDefault("notifications.webPushSubject", "mailto:admin@localhost.invalid")
+	v.SetDefault("notifications.webPushAllowedHosts", "")
 	v.SetDefault("notifications.webhookAllowPrivateNetworks", false)
 
 	// HomeDir default — empty means resolve from KANDEV_HOME_DIR env or ~/.kandev

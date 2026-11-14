@@ -23,8 +23,8 @@ The task system owns clarification bundle authority, turn scoping, response pers
 
 | Requirement | Design source |
 | --- | --- |
-| `REQ-TASKS-CLARIFICATION-LIFECYCLE-001` | Extracted from the legacy design sections below. |
-| `REQ-TASKS-CLARIFICATION-SCENARIOS-001` | Extracted from the legacy design sections below. |
+| `REQ-TASKS-CLARIFICATION-LIFECYCLE-001` | Data model, frontend clarification selection, API surface, and state machine. |
+| `REQ-TASKS-CLARIFICATION-SCENARIOS-001` | Frontend clarification selection, failure modes, and persistence guarantees. |
 
 
 ## Data model
@@ -54,6 +54,49 @@ No schema change.
   the legacy rule that missing status means pending.
 - `TaskSession.pending_action` and `TaskStatusSummary.pending_action` remain bounded derived fields.
   They are reconstructable and never become independent clarification state.
+
+## Frontend clarification selection
+
+`apps/web/lib/utils/pending-clarification.ts` supplies the single-question,
+bundle, and boolean selectors. Chat passes durable conversational-turn authority
+and the session projection through `useProcessedMessages`. Pending-input hooks
+reuse the same selectors.
+
+The selector applies these rules in order:
+
+1. An explicit `pendingAction` other than `clarification`, including null,
+   suppresses active discovery. This signal can account for an attempted
+   successor that visible turn history does not yet contain.
+2. A null `currentTurnId` suppresses active discovery. It represents loaded
+   history without an eligible turn, or a session that cannot accept input.
+3. A string `currentTurnId` limits candidates to that exact turn. Detachment
+   cannot broaden the candidate set, including after newer-turn messages disappear.
+4. With undefined turn authority, an explicit `clarification` projection permits
+   the existing message-based fallback. Other scoped inputs remain inert.
+5. Legacy callers without a scope retain their existing newest-message-turn
+   fallback. Detached metadata cannot cross that inferred boundary either.
+
+Within eligible candidates, missing status retains its legacy pending meaning.
+Bundle selection uses the selected row's exact `pending_id`. Arrival completeness
+counts terminal siblings, but only pending siblings become response controls.
+Resolving one bundle cannot reactivate a superseded bundle. Another pending
+bundle in the same authoritative turn remains eligible when projection permits it.
+
+`agent_disconnected` affects delivery and presentation after ownership is
+established. A current detached bundle with a `clarification` projection remains
+answerable even when its durable turn has completed. Turn completion alone is
+distinct from a terminal session. An explicit clean projection still takes precedence.
+
+Historical questions remain visible through `filterVisibleMessages`. Their
+existing answer-as-new-message action uses ordinary admission, as specified by
+the [late-answer decision](../../../decisions/2026-09-18-late-clarification-messages.md).
+Desktop and phone consume the same selection result within their existing chat
+surfaces. This correction introduces no presentation primitive or localized copy.
+
+Verification covers a detached older bundle beside an answered or rejected
+newer bundle while the newer turn remains open. It also covers empty newer-turn
+message history, clean projection over a visible detached predecessor, hydration
+fallbacks, current detached bundles, and mixed pending/terminal siblings.
 
 ## API surface
 

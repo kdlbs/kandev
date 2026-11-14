@@ -199,12 +199,12 @@ func sidebarWatchFields(driver string, needs sidebarBaseNeeds) []string {
 	fields := make([]string, 0, 2)
 	if needs.reviewWatch {
 		fields = append(fields, sidebarWatchField(driver, "is_pr_review",
-			"review_watch_id", "gitlab_review_watch_id", "azure_devops_pr_watch_id"))
+			"review_watch_id", "gitlab_review_watch_id"))
 	}
 	if needs.issueWatch {
 		fields = append(fields, sidebarWatchField(driver, "is_issue_watch",
 			"issue_watch_id", "gitlab_issue_watch_id", "jira_issue_watch_id",
-			"linear_issue_watch_id", "sentry_issue_watch_id", "azure_devops_work_item_watch_id"))
+			"linear_issue_watch_id", "sentry_issue_watch_id"))
 	}
 	return fields
 }

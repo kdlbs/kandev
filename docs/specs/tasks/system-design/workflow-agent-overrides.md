@@ -123,8 +123,9 @@ applicability. Existing session bindings remain authoritative.
 
 ## Create dialog
 
-Store overrides in task-create form state. Derive rows from the effective
-workflow snapshot in workflow order. Group fixed references by profile ID.
+Store overrides in task-create form state. Derive rows from complete step
+metadata for the effective workflow, independently of board task loading.
+Group fixed references by profile ID.
 Show direct step names and earlier-step recipient consumers where derivable.
 For example, the Luna row shows Implement and PR. Guard traversal against
 cycles and unresolved step references. Do not infer a new profile from a
@@ -141,10 +142,55 @@ new-task forms clear it. Network errors preserve it. Do not add overrides to
 last-used preferences. Carry the map through every normal create submission
 path and retry payload. Session-create and task-edit modes have no new fields.
 
-While the selected snapshot loads, show loading in the region. On failure,
-show retry and block submission until the workflow can be validated. Profiles
-that become invalid remain visible with a row error until reset or replaced.
-No fixed profiles means no region after a successful load.
+### Selected workflow metadata
+
+Use one dialog observer in `hooks/use-task-create-workflow-steps.ts`. Its inputs
+are create-mode dialog visibility, workspace, effective workflow, and eligible
+loaded steps. Its result distinguishes idle, loading, success, and error, and
+exposes Retry. Success includes an ordered step array. An empty successful array
+is authoritative.
+
+The observer uses `readJourneyWorkflowSteps` in
+`hooks/journey-metadata-resources.ts`. This existing owner shares concurrent
+reads within one store and authorized scope. Do not introduce another cache or
+use `requestWorkspaceContextRefresh` for this read. A complete, non-placeholder,
+non-failed snapshot can supply initial steps only when its workflow belongs to
+the current workspace. Missing, placeholder, and failed snapshots establish
+lightweight metadata demand. They do not establish a pending board request.
+
+`useTaskCreateDialogData` exposes the selected result to dialog setup.
+`buildWorkflowAgentOverrideValidation` consumes that result instead of inferring
+request state from snapshot absence or `workspaceContextRead` errors. Retry
+repeats only the selected workflow's step read. Opening Advanced settings never
+requires the destination board's tasks or all workspace snapshots.
+
+Replace the independent `useWorkflowStepsEffect` request with this observer.
+Use `workflowStepToState`, plus the selected `workflowId`, for complete mapping.
+Retain `agent_profile_id`, `session_target`, prompt, events, configured start,
+position, and color. Feed this same result to grouping and the launch preview.
+Keep existing launch precedence and ordinary creation behavior. If the existing
+`fetchedSteps` form bridge remains necessary for default-step resolution, publish
+only current-scope steps through it. It is not a second metadata owner.
+
+Request identity includes store/auth generation, workspace, workflow, dialog
+open cycle, and retry attempt. Before effects run, mask results from an older
+identity. On close, selection change, scope change, or unmount, release the
+observer's interest and reject late results. One observer's release must not
+cancel another consumer's shared read. Reopen obtains current definitions when
+no eligible board data supplies them. Stable rerenders do not repeat requests.
+Explicit Retry forwards refresh demand through the existing shared owner.
+
+Show loading only for admitted selected metadata work. Failure exposes the
+existing translated error and Retry controls. Preserve the task draft and
+replacements on retry. A successful workflow without fixed profiles shows no
+replacement region. Never treat failure as an empty workflow. Preserve the
+current submission distinction: unresolved metadata blocks a selected replacement,
+but ordinary creation without replacements remains available. Unavailable
+replacements retain their row error until reset or replacement.
+
+This consumer correction preserves the
+[shared loading contract](../../platform/system-design/journey-data-loading.md#shared-read-ownership).
+It changes no API, persistence, authorization, or resource-owner boundary.
 
 ## Step previews in task surfaces
 
@@ -193,8 +239,9 @@ Keep the task form footer and safe-area behavior. Use dynamic viewport sizing,
 Do not add a separate settings screen or nested flow. Share state and derivation
 across viewports. Long labels wrap without document-level horizontal scrolling.
 Label each selector with its source profile. Restore focus when the picker
-closes. Localize all copy in English, Portuguese, and the three Chinese catalogs.
-Generate Traditional Chinese values with the existing command.
+closes. Reuse existing translated state labels. Any additional copy must cover
+all seven supported languages and the pseudo-locale. Generate Traditional
+Chinese values with the existing command.
 
 ## Related contracts
 
@@ -219,9 +266,19 @@ unit tests prove grouping, reset, workflow changes, and payload preservation.
 Desktop and mobile E2E reproduce Analysis, Implement, Review, and PR with mock
 agents and prove profile identity plus session reuse.
 
+Selected-metadata hook and dialog tests cover missing, placeholder, and failed
+snapshots, idle board readers, successful empty steps, error/retry, complete
+recipient mapping, and stale responses across workflow/workspace/open cycles. Existing
+loaded-board behavior remains a control. Concurrent dialog and picker consumers
+share the lightweight request. Browser regressions load board A and select
+workflow B only in the dialog, both explicitly and through remembered defaults.
+Assert replacement persistence and the absence of B task-snapshot requests on
+desktop and phone. The fix package owns exact commands and scenario mapping.
+
 ## Implementation plans
 
 - [Delivery package](../../../plans/task-workflow-agent-overrides/plan.md)
+- [Selected workflow metadata repair](../../../plans/task-create-workflow-agent-metadata/plan.md)
 - [Change workflow design](change-workflow.md) proposes explicit destination-map
   replacement during a move. The legacy dormant-map behavior above remains the
   contract for moves that omit that new option.

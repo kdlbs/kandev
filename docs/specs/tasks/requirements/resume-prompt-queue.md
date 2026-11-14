@@ -78,6 +78,21 @@ runtime ran out.
   wait expiry or another existing retryable case shall keep its current
   disposition, so a permanent error cannot block the head of the queue.
 
+### REQ-TASKS-RESUME-PROMPT-QUEUE-003: A restart starts no agent
+
+**Intent:** Restarting Kandev never starts agent work on its own. Queued work
+stays safe until a user returns to the task.
+
+#### Acceptance criteria
+
+- **AC-TASKS-RESUME-PROMPT-QUEUE-003.1:** After a backend restart, pending queued
+  messages shall not start or resume any agent, regardless of Auto-run.
+- **AC-TASKS-RESUME-PROMPT-QUEUE-003.2:** Across the restart, those messages shall
+  stay pending with their identity, payload, order, and Auto-run setting unchanged.
+- **AC-TASKS-RESUME-PROMPT-QUEUE-003.3:** When a user opens the task and the
+  session resumes and becomes ready, Auto-run ON shall deliver eligible queued
+  work under existing queue policy, and each message shall be delivered once.
+
 ## Compatibility and exclusions
 
 This behavior uses the existing startup queue capability. It also applies to

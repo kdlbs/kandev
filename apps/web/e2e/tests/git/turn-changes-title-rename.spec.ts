@@ -1,4 +1,5 @@
 import { resetSeedRepositoryCheckout, test, expect } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { waitForDiffText, waitForDiffTextAbsent } from "./diff-update-helpers";
 import { enableTurnChangedFiles } from "./turn-changed-files-helpers";
 import {
@@ -110,12 +111,15 @@ test.describe("turn changes across a title-driven branch rename", () => {
       ).toBe(true);
       await expectUnavailableRenameSwitch(apiClient, sessionId);
 
+      const historyLoaded = waitForHttp(testPage, "GET", /\/turn-changes$/);
       await testPage.reload();
+      await historyLoaded;
       await session.waitForLoad();
       await session.waitForChatIdle();
-      const cards = session.activeChat().getByTestId("turn-changed-files-card");
-      await expect(cards).toHaveCount(1);
-      await expect(cards.last()).toContainText("This turn's change summary is unavailable.");
+      await assertNoTurnChangesCard(session);
+      expect(
+        await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
     } finally {
       await restorePreference();
     }

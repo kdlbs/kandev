@@ -119,6 +119,12 @@ rewrite the repository input, silently change workspace mode, or alter the
 parent environment. A parent without a materialized environment retains the
 existing launch-time validation path.
 
+This creation-time repository check does not select the runtime workspace. A
+later executor mismatch follows the [additional-session workspace reuse
+transition](additional-session-workspace-reuse.md#executor-transition), which
+can detach a new non-Kubernetes launch without changing the requested
+`workspace_mode` or the parent's environment.
+
 Kanban sessions cannot target Office workspaces, Office parents, or
 project-linked Office tasks, including inconsistent legacy combinations.
 External callers retain both modes; selecting an Office workspace must not

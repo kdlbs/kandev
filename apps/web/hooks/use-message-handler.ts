@@ -292,8 +292,10 @@ async function deliverComposedMessage({
       if (!accepted) {
         return false;
       }
-      await refreshAcceptedPlanComments(taskId, planCommentRefs, storeApi);
-      await refreshAcceptedPreviewFeedback(taskId, previewFeedbackRefs, storeApi);
+      await Promise.all([
+        refreshAcceptedPlanComments(taskId, planCommentRefs, storeApi),
+        refreshAcceptedPreviewFeedback(taskId, previewFeedbackRefs, storeApi),
+      ]);
       return "queued";
     }
 
@@ -314,8 +316,10 @@ async function deliverComposedMessage({
     });
     notifyTurnErrorAcknowledgementFailure(created?.turn_error_acknowledgement_failed);
     if (created?.id && created.session_id) storeApi.getState().addMessage(created);
-    await refreshAcceptedPlanComments(taskId, planCommentRefs, storeApi);
-    await refreshAcceptedPreviewFeedback(taskId, previewFeedbackRefs, storeApi);
+    await Promise.all([
+      refreshAcceptedPlanComments(taskId, planCommentRefs, storeApi),
+      refreshAcceptedPreviewFeedback(taskId, previewFeedbackRefs, storeApi),
+    ]);
     return "sent";
   } catch (error) {
     throw normalizePreviewFeedbackSendError(
@@ -398,8 +402,10 @@ async function recoverPendingMessageAdmission({
     : undefined;
   if (!committed) return false;
   storeApi.getState().addMessage(committed);
-  await refreshAcceptedPlanComments(taskId, refs, storeApi);
-  await refreshAcceptedPreviewFeedback(taskId, previewRefs, storeApi);
+  await Promise.all([
+    refreshAcceptedPlanComments(taskId, refs, storeApi),
+    refreshAcceptedPreviewFeedback(taskId, previewRefs, storeApi),
+  ]);
   return true;
 }
 

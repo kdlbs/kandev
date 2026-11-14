@@ -1,4 +1,5 @@
 {
+  "openPr": "PR を開く",
   "views": "ビュー",
   "viewPicker": "ビュー: {{view}}",
   "loadingSavedQueries": "保存済みクエリを読み込み中...",
@@ -99,6 +100,10 @@
   "checksPendingCount_other": "{{count}} 件保留",
   "checksRunning": "チェック実行中",
   "checksNotSuccessful": "チェックが成功しませんでした",
+  "allChecksSkipped": "すべてのチェックがスキップされました",
+  "checksSkippedCount_one": "{{count}} 件のチェックをスキップ",
+  "checksSkippedCount_other": "{{count}} 件のチェックをスキップ",
+  "lastDetailedObservation": "最後に確認した詳細",
   "chooseAGithubApp": "GitHub App を選択",
   "chooseHowNewlyLaunchedTasksAuthenticate": "新しく起動したタスクが GitHub にどのように認証するかを選択してください。これは上記のワークスペース自動化接続には影響しません。",
   "chooseMergeMethod": "マージ方法を選択",
@@ -662,5 +667,6 @@
   "mergeAccessDeniedByActor": "{{actor}} は {{repository}} にマージできません。",
   "mergeAccessDenied": "このアカウントは {{repository}} にマージできません。",
   "checkMergeAccess": "再確認",
-  "mergeAsActor": "{{actor}} として"
+  "mergeAsActor": "{{actor}} として",
+  "lastDetailedObservationAllSkipped": "最後に確認した詳細: すべてのチェックがスキップされました"
 }

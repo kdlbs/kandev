@@ -5,7 +5,7 @@
     {
       "engine": "sqlite3",
       "file": "sqlite.sql",
-      "sha256": "e802d742bfbac7f19d75f029d606d30454376afb5397438d3196ee6314d0dc3d",
+      "sha256": "f7ded10548899b0a815d0003242b493b1048e7ee351ab2e735a045a0ec933f24",
       "sentinels": {
         "fixture.sentinel": "v0.93.0-sqlite-sentinel"
       },
@@ -15,7 +15,7 @@
           "table": "custom_prompts",
           "key_column": "id",
           "key_value": "fixture-v0930-prompt",
-          "values": {"allow_agent_edits": "0"}
+          "values": {"content": "preserved prompt content"}
         },
         {
           "owner": "agent-settings",
@@ -213,7 +213,7 @@
     {
       "engine": "pgx",
       "file": "postgres.sql",
-      "sha256": "96c1b4f800ed4c2ea359a92234bfa9002b1120c0d91cf0d20be9e4207b4ba3a3",
+      "sha256": "0fb18aaa825a0a8f890cea597f4195e27d768059e0c4defe530b1c69ab4fce71",
       "sentinels": {
         "fixture.sentinel": "v0.93.0-postgres-sentinel"
       },
@@ -223,7 +223,7 @@
           "table": "custom_prompts",
           "key_column": "id",
           "key_value": "fixture-v0930-prompt",
-          "values": {"allow_agent_edits": "0"}
+          "values": {"content": "preserved prompt content"}
         },
         {
           "owner": "agent-settings",
@@ -441,8 +441,8 @@
     "gitlab",
     "jira",
     "linear",
+    "notification",
     "sentry",
-    "azure-devops",
     "workflow-sync",
     "office-config-sync",
     "automation",
@@ -456,10 +456,12 @@
       "agent_delivery_inbox",
       "agent_delivery_retention_state",
       "agent_delivery_submissions",
+      "harness_native_session_rebinds",
       "harness_session_generations",
       "session_continuation_snapshots",
       "session_recovery_blocks",
       "session_restore_attempts",
+      "task_builtin_mcp_preferences",
       "task_creation_authorizations",
       "task_environment_checkout_adoptions",
       "task_environment_kubernetes",

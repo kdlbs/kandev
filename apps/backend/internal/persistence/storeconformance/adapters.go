@@ -12,7 +12,6 @@ import (
 	"github.com/kandev/kandev/internal/auth/hostnames"
 	authstore "github.com/kandev/kandev/internal/auth/store"
 	"github.com/kandev/kandev/internal/automation"
-	"github.com/kandev/kandev/internal/azuredevops"
 	"github.com/kandev/kandev/internal/canvas"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/coordinator"
@@ -122,7 +121,6 @@ var schemaInitializers = map[string]testconformance.Scenario{
 	"jira":                        jiraSchema,
 	"linear":                      linearSchema,
 	"sentry":                      sentrySchema,
-	"azure-devops":                azureDevOpsSchema,
 	"workflow-sync":               workflowSyncSchema,
 	"office-config-sync":          officeConfigSyncSchema,
 	"automation":                  automationSchema,
@@ -463,16 +461,6 @@ func sentrySchema(s testconformance.ScenarioContext) error {
 	}
 	if _, err := sentry.NewStore(s.DB, s.DB); err != nil {
 		return fmt.Errorf("sentry schema: %w", err)
-	}
-	return nil
-}
-
-func azureDevOpsSchema(s testconformance.ScenarioContext) error {
-	if err := providerDependencies(s); err != nil {
-		return err
-	}
-	if _, err := azuredevops.NewStore(s.DB, s.DB); err != nil {
-		return fmt.Errorf("azure devops schema: %w", err)
 	}
 	return nil
 }

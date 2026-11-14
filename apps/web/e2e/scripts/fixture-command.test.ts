@@ -17,7 +17,11 @@ function installFakeDocker(script: string): void {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-fake-docker-"));
   temporaryDirectories.push(directory);
   const executable = path.join(directory, "docker");
-  fs.writeFileSync(executable, `#!/usr/bin/env node\n${script}\n`, { mode: 0o755 });
+  const staged = path.join(directory, "docker.staged");
+  fs.writeFileSync(staged, `#!/usr/bin/env node\n${script}\n`, { mode: 0o755 });
+  // Rename a closed staging file into place. Executing a path that was just
+  // opened for writing can transiently fail with ETXTBSY on Linux.
+  fs.renameSync(staged, executable);
   vi.stubEnv("PATH", `${directory}${path.delimiter}${process.env.PATH ?? ""}`);
   vi.stubEnv("E2E_DEBUG", "");
 }

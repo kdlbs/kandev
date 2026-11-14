@@ -8,10 +8,11 @@ import (
 )
 
 func newMockACPDialect() acpDialect {
-	return acpDialect{responseAttemptReset: mockResponseAttemptResetMeta,
+	return acpDialect{subagentControl: claudeSubagentControl,
+		responseAttemptReset:        mockResponseAttemptResetMeta,
 		continuationSupport:         streams.ContinuationNativeSavedHistoryV2,
 		continuationSupportForError: mockContinuationSupportForError,
-		capacityContinuationSupport: streams.CapacityContinuationMockLiveSessionV1,
+		capacityContinuationSupport: streams.CapacityContinuationMockLiveSessionV2,
 		continuationError:           mockContinuationError}
 }
 

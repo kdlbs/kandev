@@ -91,8 +91,8 @@ Allow literal filenames only. Require a case-insensitive `.png`, `.jpg`, or
 
 An absent or empty image list means no images. Normalize empty lists to omitted
 storage. Reject null, non-array values, malformed entries, and duplicate image
-IDs within one question. Allow at most four images per question and four distinct
-IDs per bundle. A repeated bundle-wide image ID must carry identical path, repo,
+IDs within one question. Allow at most four images per question and 16 distinct
+IDs per bundle (`protocol.MaxBundleImages`). A repeated bundle-wide image ID must carry identical path, repo,
 and alt values. Repeating a reference in two questions associates both questions
 with that image. Do not merge those questions or alter their navigation order.
 
@@ -107,7 +107,7 @@ Choices can carry the optional field defined in the choice image extension below
 The list accepts zero or one item. This reuses strict image decoding and avoids
 a second reference shape. Question-level `images` remains shared visual context.
 Each question has at most four references across its own list and its options.
-The bundle still has at most four distinct image IDs. Identical references may
+The bundle has at most 16 distinct image IDs. Identical references may
 appear in different placements. Duplicate IDs within one list remain invalid.
 Counting placements bounds simultaneous reads even when an ID repeats.
 
@@ -289,8 +289,11 @@ The active question card mounts one image group. A repeated image stays visible
 for each associated question. The UI does not change option selection or automatic
 single-question completion behavior.
 
-Desktop keeps the current clarification panel and question carousel. Each image
-has a visible description, an uncropped thumbnail bounded to 128px high on desktop
+Desktop keeps the current clarification panel and question carousel. A question's
+thumbnails flow in a wrapping row (`question-images-row`); each caption takes its
+thumbnail's width instead of widening the row. `QuestionImageGallery` collects the
+loaded thumbnails of one question in review order, and the inspector steps
+through them with Previous and Next, arrow keys, and a swipe at Fit. Each image has a visible description, an uncropped thumbnail bounded to 128px high on desktop
 and 96px high below 768px, and an explicit inspection button. Express these bounds
 in rem units so root-font scaling remains available. The image and Inspect label
 form one button. The label does not need a separate control-height row. Keep the
@@ -342,16 +345,17 @@ status region per image group. Use a stable accessible name on Retry and Inspect
 
 ### Drafts across responsive layouts
 
-The task page keeps a bounded, memory-only draft context above its responsive
-layout. Image-bearing active bundles use a key composed of source session, pending
-ID, and form mode. The context restores the text, keyed choices, and current
-question when the desktop/phone layout remounts. It holds at most eight bundles
-and removes locally settled bundles. A task change replaces only the draft cache;
-the provider preserves the mounted task layout and its pending panel-focus state.
-A page reload discards the context.
-It contains no image bytes and does not persist unsent answers. Image-free forms
-and late-answer forms keep their existing local state behavior. The answer hook
-and server claim remain authoritative; restoring a draft never submits it.
+The [clarification reliability design](clarification-response-reliability.md#unsubmitted-drafts-across-navigation)
+owns answer retention for active forms with or without images. Its browser-memory
+cache survives task navigation and responsive remounts. Exact task, source-session,
+pending-bundle, and form-mode identity prevents answer reuse by another form.
+The cache contains no image bytes. Reload and auth changes discard it.
+
+The task page retains a local context for panel sizes across responsive remounts.
+A task change replaces that resize cache without remounting the task layout or
+resetting pending panel-focus state. Historical late-answer forms keep their
+existing admission behavior. The answer hook and server claim remain
+authoritative. Restoring a draft never submits it.
 
 ## Loading and memory
 

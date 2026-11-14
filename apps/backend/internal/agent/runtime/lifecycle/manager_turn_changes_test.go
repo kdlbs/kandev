@@ -297,10 +297,9 @@ func TestStopWaitsForRetriedTerminalCaptureBeforeReturning(t *testing.T) {
 	var releaseOnce sync.Once
 	releaseRetry := func() { releaseOnce.Do(func() { close(handler.releaseRetry) }) }
 	t.Cleanup(releaseRetry)
-	stopDone := make(chan struct{})
+	stopDone := make(chan error, 1)
 	go func() {
-		manager.preserveTurnChangesBeforeStop(context.Background(), execution, "")
-		close(stopDone)
+		stopDone <- manager.preserveTurnChangesBeforeStop(context.Background(), execution, "")
 	}()
 	<-handler.firstDeadline
 	select {
@@ -315,7 +314,8 @@ func TestStopWaitsForRetriedTerminalCaptureBeforeReturning(t *testing.T) {
 	}
 	releaseRetry()
 	select {
-	case <-stopDone:
+	case err := <-stopDone:
+		require.NoError(t, err)
 	case <-time.After(time.Second):
 		t.Fatal("executor stop did not continue after terminal capture settled")
 	}
@@ -431,10 +431,9 @@ func TestStopPreservesActiveTurnBeforeExecutorCleanup(t *testing.T) {
 		terminalEntered: make(chan TurnChangeTerminal, 1), releaseTerminal: make(chan struct{}),
 	}
 	manager.SetTurnChangeCaptureHandler(handler)
-	stopDone := make(chan struct{})
+	stopDone := make(chan error, 1)
 	go func() {
-		manager.preserveTurnChangesBeforeStop(context.Background(), execution, "")
-		close(stopDone)
+		stopDone <- manager.preserveTurnChangesBeforeStop(context.Background(), execution, "")
 	}()
 	select {
 	case terminal := <-handler.terminalEntered:
@@ -446,7 +445,8 @@ func TestStopPreservesActiveTurnBeforeExecutorCleanup(t *testing.T) {
 	}
 	close(handler.releaseTerminal)
 	select {
-	case <-stopDone:
+	case err := <-stopDone:
+		require.NoError(t, err)
 	case <-time.After(time.Second):
 		t.Fatal("executor stop remained blocked after terminal capture")
 	}

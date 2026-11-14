@@ -222,6 +222,7 @@ func TestWorkspaceSourceMaterializer_PersistedAttachmentChangedPlacementRetry(t 
 	foreign := &models.TaskEnvironmentRepo{
 		ID: "foreign-inactive", TaskEnvironmentID: "env-1", RepositoryID: "repo-1",
 		BranchSlug: "foreign", WorkspaceRelativePath: "foreign/location", Position: 19, Status: "failed",
+		WorktreeOrigin: models.WorktreeOriginKandev,
 	}
 	require.NoError(t, repo.CreateTaskEnvironmentRepo(ctx, foreign))
 	req := taskservice.AttachWorkspaceSourcesRequest{
