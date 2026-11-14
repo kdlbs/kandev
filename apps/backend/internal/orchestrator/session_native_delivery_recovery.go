@@ -192,6 +192,11 @@ func (s *Service) canProveSettledNativeDeliveryBlock(block *models.SessionRecove
 func (s *Service) joinLiveNativeResume(
 	ctx context.Context, candidate *resumeSessionCandidate, taskID, sessionID string,
 ) (*executor.TaskExecution, bool, error) {
+	if candidate.session != nil && isTerminalSessionState(candidate.session.State) {
+		// A terminal session has no live prompt-ready turn to join. Its resume must
+		// run the launch path that commits the new attempt and STARTING state.
+		return nil, false, nil
+	}
 	options := candidate.options
 	claim, _ := ctx.Value(ceilingDispatchClaimContextKey{}).(*ceilingDeferredLaunchClaim)
 	claimedResume := claim != nil && claim.svc == s && claim.held && claim.taskID == taskID &&
