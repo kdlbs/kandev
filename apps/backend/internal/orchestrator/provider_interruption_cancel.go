@@ -25,7 +25,11 @@ func (s *Service) recordContinuationAcceptance(sessionID string, entry *transien
 	entry.mu.Lock()
 	entry.acceptedExecution = executionID
 	entry.acceptedGeneration = generation
+	taskID := entry.taskID
 	entry.mu.Unlock()
+	// Activity can arrive before the acceptance callback; reconcile the
+	// captured evidence now so the first confirmed prompt publishes once.
+	s.publishContinuationActivity(context.Background(), taskID, sessionID, entry)
 }
 
 func (s *Service) continuationCancellationOwnsTurn(ctx context.Context, sessionID string, entry *transientRetryEntry) bool {

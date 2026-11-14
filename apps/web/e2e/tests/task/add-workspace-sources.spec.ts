@@ -7,7 +7,7 @@ import path from "node:path";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForHttp, watchWs } from "../../helpers/causal-waits";
 import { makeGitEnv } from "../../helpers/git-helper";
-import { waitForSessionDone } from "../../helpers/session";
+import { waitForSessionDone, waitForSessionGitHydration } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import { mockFolderAvailability } from "../../helpers/open-task-folder";
 
@@ -331,7 +331,12 @@ test.describe("Attach local workspace sources", () => {
       fs.renameSync(pendingFiles[index]!, destination);
     }
 
-    const refreshResponse = wsWatcher.waitForResponse("session.git.refresh");
+    const refreshResponse = wsWatcher.waitForResponse("session.git.refresh", {
+      where: (payload) => {
+        const snapshots = (payload as { snapshots?: unknown[] }).snapshots;
+        return Array.isArray(snapshots) && snapshots.length === 2;
+      },
+    });
     await session.clickTab("Changes");
     const refresh = await refreshResponse;
     expect(refresh.payload.mode).toBe("fresh");
@@ -489,10 +494,7 @@ for (const workspaceMode of ["folder", "scratch"] as const) {
     expect(response.ok()).toBe(true);
     const task = (await response.json()) as { id: string; session_id: string };
     await waitForWorkspaceReady(apiClient, task.id, task.session_id);
-    await testPage.goto(`/t/${task.id}`);
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 30_000 });
+    await waitForSessionDone(apiClient, task.id, task.session_id, "Local source fixture settled");
     const before = (await apiClient.listTaskSessions(task.id)).sessions.find(
       ({ id }) => id === task.session_id,
     );
@@ -504,6 +506,11 @@ for (const workspaceMode of ["folder", "scratch"] as const) {
     const { repositoryPath, folderPath } = createSourceDirectories(
       path.join(backend.tmpDir, workspaceMode),
     );
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    if (hadGitMetadata) await waitForSessionGitHydration(testPage, task.session_id);
     await session.clickTab("Files");
     await testPage.getByTestId("files-create-menu").click();
     await testPage.getByRole("menuitem", { name: "Add repositories or folders" }).click();

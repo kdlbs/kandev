@@ -309,6 +309,8 @@ export async function triggerAllReviewWatches(workspaceId: string, options?: Api
 // without a round-trip. `description` is optional because the backend uses
 // `omitempty` — null/empty descriptions are dropped from the JSON.
 export type AccessibleRepo = {
+  github_host?: string;
+  html_url?: string;
   provider: "github" | "gitlab";
   owner: string;
   name: string;
@@ -402,9 +404,10 @@ export async function fetchPRInfo(
   owner: string,
   repo: string,
   number: number,
-  options?: ApiRequestOptions,
+  options?: ApiRequestOptions & { expectedHost?: string },
 ) {
   const query = new URLSearchParams({ workspace_id: workspaceId });
+  if (options?.expectedHost) query.set("expected_host", options.expectedHost);
   return fetchJsonWithRetry<GitHubPR>(
     `/api/v1/github/prs/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/info?${query}`,
     options,
@@ -417,9 +420,10 @@ export async function fetchIssueInfo(
   owner: string,
   repo: string,
   number: number,
-  options?: ApiRequestOptions,
+  options?: ApiRequestOptions & { expectedHost?: string },
 ) {
   const query = new URLSearchParams({ workspace_id: workspaceId });
+  if (options?.expectedHost) query.set("expected_host", options.expectedHost);
   return fetchJsonWithRetry<GitHubIssue>(
     `/api/v1/github/issues/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/info?${query}`,
     options,
@@ -431,9 +435,10 @@ export async function fetchRepoBranches(
   workspaceId: string,
   owner: string,
   repo: string,
-  options?: ApiRequestOptions,
+  options?: ApiRequestOptions & { expectedHost?: string },
 ) {
   const query = new URLSearchParams({ workspace_id: workspaceId });
+  if (options?.expectedHost) query.set("expected_host", options.expectedHost);
   return fetchJsonWithRetry<{ branches: { name: string }[] }>(
     `/api/v1/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches?${query}`,
     options,

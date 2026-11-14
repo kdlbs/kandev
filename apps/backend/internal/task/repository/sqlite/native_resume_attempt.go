@@ -23,14 +23,29 @@ func (r *Repository) finishPreparedNativeAttemptTx(ctx context.Context, tx *sqlx
 	if err != nil {
 		return false, err
 	}
+	superseded := false
+	historicalTerminal := false
 	if !preparedNativeAttemptMatches(attempt, proof, blocks) {
-		return false, nil
+		superseded, err = r.preparedContextContinuationAttemptMatchesTx(ctx, tx, attempt, proof)
+		if err == nil && !superseded {
+			historicalTerminal, err = r.preparedHistoricalTerminalAttemptMatchesTx(ctx, tx, attempt, proof, blocks)
+			superseded = historicalTerminal
+		}
+		if err != nil || !superseded {
+			return false, err
+		}
 	}
 	checkpoint := attempt.Checkpoint
 	var ownerMatches bool
 	err = tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT EXISTS (SELECT 1 FROM task_sessions s JOIN tasks t ON t.id = s.task_id JOIN workspaces w ON w.id = t.workspace_id WHERE s.id = ? AND t.id = ? AND w.id = ? AND w.owner_id = ? AND w.org_id = ?)`), proof.SessionID, checkpoint.TaskID, checkpoint.WorkspaceID, checkpoint.WorkspaceOwnerID, checkpoint.WorkspaceOrgID).Scan(&ownerMatches)
 	if err != nil || !ownerMatches {
 		return false, err
+	}
+	if superseded {
+		if historicalTerminal {
+			return completeSupersededTerminalAttemptTx(ctx, tx, r.db.Rebind, attempt, encoded, completedAt)
+		}
+		return completeSupersededContextAttemptTx(ctx, tx, r.db.Rebind, attempt, encoded, completedAt)
 	}
 	return completeSilentRestoreAttemptTx(ctx, tx, r.db.Rebind, attempt.ID, attempt, encoded, *checkpoint, completedAt)
 }
@@ -56,5 +71,5 @@ func preparedNativeCheckpointMatches(checkpoint *models.SilentRestoreCheckpoint,
 	return checkpoint.Version == 1 && checkpoint.Stage == models.SilentRestoreStagePrepared && checkpoint.CandidateExecutionID == "" &&
 		source.SessionID == proof.SessionID && source.IncarnationID == proof.IncarnationID && source.Generation == proof.HarnessGeneration && source.NativeSessionID == proof.NativeSessionID &&
 		checkpoint.SourceRecovery.SessionID == proof.SessionID && checkpoint.SourceRecovery.IncarnationID == proof.IncarnationID && checkpoint.SourceRecovery.HarnessGeneration == proof.HarnessGeneration &&
-		checkpoint.SourceRecovery.AgentExecutionID != "" && checkpoint.SourceRecovery.AgentExecutionID != proof.ExecutionID && nativeResumeProofCoversNotice(proof, checkpoint.SourceRecovery)
+		checkpoint.SourceRecovery.AgentExecutionID != "" && nativeResumeProofCoversNotice(proof, checkpoint.SourceRecovery)
 }

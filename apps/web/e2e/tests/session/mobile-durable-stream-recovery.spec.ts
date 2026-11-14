@@ -129,6 +129,24 @@ test("legacy empty delivery fence exposes Resume without replaying the old promp
   await verifyNativeResumeClearsRecoveryNotice(testPage, apiClient, seedData, backend.tmpDir, true);
 });
 
+// @covers AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.8
+test("mobile: unproven SQL completion recovers without replay", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await verifyNativeResumeClearsRecoveryNotice(
+    testPage,
+    apiClient,
+    seedData,
+    backend.tmpDir,
+    "unproven",
+  );
+  await assertNoDocumentHorizontalOverflow(testPage, "unproven SQL completion recovery");
+});
+
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-008.5
 test("ordinary native resume surfaces recovery before first send and retains the draft", async ({
   testPage,

@@ -325,40 +325,75 @@ func (r *Repository) CompleteActiveClarificationBundle(
 	pendingID, status string,
 	responses map[string]interface{},
 ) ([]*models.Message, bool, error) {
+	messages, claimed, _, err := r.completeActiveClarificationBundle(ctx, pendingID, status, responses, nil)
+	return messages, claimed, err
+}
+
+// CompleteActiveClarificationBundleWithAttachments claims the response and
+// adopts the complete answer-file set inside the same transaction. Removed
+// retry claims are returned for best-effort byte release after commit.
+func (r *Repository) CompleteActiveClarificationBundleWithAttachments(
+	ctx context.Context,
+	pendingID, status string,
+	responses map[string]interface{},
+	claims []models.ClarificationAttachmentClaim,
+	scope models.ClarificationAttachmentScope,
+) ([]*models.Message, bool, []string, error) {
+	plan := &clarificationAttachmentPlan{scope: scope, claims: claims}
+	return r.completeActiveClarificationBundle(ctx, pendingID, status, responses, plan)
+}
+
+func (r *Repository) completeActiveClarificationBundle(
+	ctx context.Context,
+	pendingID, status string,
+	responses map[string]interface{},
+	plan *clarificationAttachmentPlan,
+) ([]*models.Message, bool, []string, error) {
 	if status != clarificationStatusAnswered && status != clarificationStatusRejected {
-		return nil, false, fmt.Errorf("invalid clarification terminal status %q", status)
+		return nil, false, nil, fmt.Errorf("invalid clarification terminal status %q", status)
+	}
+	queueTablePresent, err := r.clarificationAttachmentQueueTablePresent(ctx, plan)
+	if err != nil {
+		return nil, false, nil, err
 	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	drv := r.db.DriverName()
 	if err := r.lockClarificationBundleTurnWrites(ctx, tx, drv, pendingID); err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
+	if err := r.lockClarificationAnswerTask(ctx, tx, plan); err != nil {
+		return nil, false, nil, err
+	}
+
 	claimedRows, err := r.claimActiveClarificationBundle(ctx, tx, drv, pendingID)
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	if claimedRows == 0 {
-		return nil, false, nil
+		return nil, false, nil, nil
 	}
 	messages, err := r.loadClaimedClarificationBundle(ctx, tx, drv, pendingID)
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	if int64(len(messages)) != claimedRows {
-		return nil, false, fmt.Errorf("claimed %d clarification rows but loaded %d", claimedRows, len(messages))
+		return nil, false, nil, fmt.Errorf("claimed %d clarification rows but loaded %d", claimedRows, len(messages))
 	}
-	if err := r.completeClaimedClarificationMessages(ctx, tx, drv, messages, status, responses); err != nil {
-		return nil, false, err
+	released, err := r.completeClarificationClaim(
+		ctx, tx, drv, messages, status, responses, plan, queueTablePresent,
+	)
+	if err != nil {
+		return nil, false, nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, false, fmt.Errorf("commit clarification bundle completion: %w", err)
+		return nil, false, nil, fmt.Errorf("commit clarification bundle completion: %w", err)
 	}
-	return messages, true, nil
+	return messages, true, released, nil
 }
 
 // RestoreActiveClarificationBundle reopens a current-turn terminal bundle when
@@ -723,6 +758,18 @@ func (r *Repository) completeClaimedClarificationMessages(
 	status string,
 	responses map[string]interface{},
 ) error {
+	return r.completeClaimedClarificationMessagesWithManifests(ctx, tx, drv, messages, status, responses, nil)
+}
+
+func (r *Repository) completeClaimedClarificationMessagesWithManifests(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	drv string,
+	messages []*models.Message,
+	status string,
+	responses map[string]interface{},
+	manifests map[string][]models.ClarificationAnswerAttachment,
+) error {
 	updatedAt := r.nowUTC()
 	claimedStatusExpr := dialect.JSONExtract(drv, "metadata", "status")
 	updateQuery := r.db.Rebind(fmt.Sprintf(`
@@ -739,10 +786,25 @@ func (r *Repository) completeClaimedClarificationMessages(
 		completedMetadata := maps.Clone(message.Metadata)
 		completedMetadata["status"] = status
 		completedMetadata[clarificationResponseDeliveryPendingKey] = true
+		manifest := manifests[questionID]
+		if manifests != nil {
+			if manifest == nil {
+				delete(completedMetadata, "attachments")
+			} else {
+				completedMetadata["attachments"] = manifest
+			}
+		}
 		if status == clarificationStatusAnswered {
 			response, ok := responses[questionID]
 			if !ok {
 				return fmt.Errorf("missing response for clarification question %s", questionID)
+			}
+			if manifests != nil {
+				canonical, canonicalErr := canonicalClarificationResponse(response, questionID, manifest)
+				if canonicalErr != nil {
+					return canonicalErr
+				}
+				response = canonical
 			}
 			completedMetadata["response"] = response
 		}
@@ -772,4 +834,28 @@ func (r *Repository) completeClaimedClarificationMessages(
 		message.UpdatedAt = updatedAt
 	}
 	return nil
+}
+
+// canonicalClarificationResponse rewrites one stored answer so its attachment
+// descriptors exactly match the canonical registry set adopted above.
+func canonicalClarificationResponse(
+	response interface{},
+	questionID string,
+	manifest []models.ClarificationAnswerAttachment,
+) (interface{}, error) {
+	raw, err := json.Marshal(response)
+	if err != nil {
+		return nil, fmt.Errorf("marshal clarification response for %s: %w", questionID, err)
+	}
+	canonical := map[string]interface{}{}
+	if err := json.Unmarshal(raw, &canonical); err != nil {
+		return nil, fmt.Errorf("decode clarification response for %s: %w", questionID, err)
+	}
+	canonical["question_id"] = questionID
+	if len(manifest) == 0 {
+		delete(canonical, "attachments")
+	} else {
+		canonical["attachments"] = manifest
+	}
+	return canonical, nil
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import type { SelectConfigOption } from "@/components/model-config-selector";
 import { Button } from "@kandev/ui/button";
@@ -11,7 +12,10 @@ import { CursorPluginsMCPPreference } from "@/components/settings/cursor-plugins
 import type { MCPSelectionMode } from "@/lib/types/agent-profile";
 import { CursorMCPAuthPreference } from "@/components/settings/cursor-mcp-auth-preference";
 import { ProfileAdvancedOptions } from "@/components/settings/profile-advanced-options";
+import { CopilotPluginProfileSelection } from "@/components/settings/copilot-plugin-profile-selection";
+import { DevinSandboxPreferenceField } from "@/components/settings/devin-sandbox-preference";
 import { useProfileFormCapabilities } from "@/components/settings/profile-capability-helpers";
+import { useCandidateModelOptions } from "@/hooks/domains/settings/use-candidate-model-options";
 import { ProfileCapabilitiesSection } from "@/components/settings/profile-capabilities-row";
 import { ModelFallbackSection } from "@/components/settings/profile-model-fields";
 import { SettingsFieldLabel } from "@/components/settings/settings-typography";
@@ -41,9 +45,59 @@ export type ProfileFormData = {
   provider_kind?: string;
   cursor_mcp_auth_enabled?: boolean;
   cursor_plugins_mcp_enabled?: boolean;
+  /** Request-only explicit inheritance for a new Devin sandbox profile. */
+  devin_sandbox_inherited?: boolean;
   mcp_selection_mode?: MCPSelectionMode;
   mcp_selected_servers?: string[];
+  copilot_selected_plugins?: string[];
 } & Record<PermissionKey, boolean>;
+
+function useProfileCompositionDraft({
+  agentName,
+  profileId,
+  profile,
+  onChange,
+}: {
+  agentName: string;
+  profileId?: string;
+  profile: ProfileFormData;
+  onChange: (patch: Partial<ProfileFormData>) => void;
+}) {
+  const draftLaunchSettings = useMemo<ProfileLaunchSettingsRequest>(
+    () => ({
+      mode: profile.mode,
+      env_vars: profile.env_vars ?? [],
+      cli_flags: profile.cli_flags ?? [],
+      command_prefix: profile.command_prefix ?? "",
+      ...(profile.copilot_selected_plugins !== undefined
+        ? { copilot_selected_plugins: [...profile.copilot_selected_plugins] }
+        : {}),
+    }),
+    [
+      profile.mode,
+      profile.env_vars,
+      profile.cli_flags,
+      profile.command_prefix,
+      profile.copilot_selected_plugins,
+    ],
+  );
+  const resolveConfigurationOptions = useCandidateModelOptions({
+    agentName,
+    profileId,
+    mode: profile.mode,
+    launchSettings: draftLaunchSettings,
+  });
+  const applyConfiguration = useCallback(
+    (selection: { model: string; configOptions: Record<string, string> }) => {
+      onChange({
+        model: selection.model,
+        config_options: { ...(profile.config_options ?? {}), ...selection.configOptions },
+      });
+    },
+    [onChange, profile.config_options],
+  );
+  return { resolveConfigurationOptions, applyConfiguration };
+}
 
 export type ProfileFormFieldsProps = {
   profile: ProfileFormData;
@@ -53,6 +107,8 @@ export type ProfileFormFieldsProps = {
   permissionSettings: Record<string, PermissionSetting>;
   passthroughConfig: PassthroughConfig | null;
   agentName: string;
+  agentId?: string;
+  copilotDiscoveryDisabled?: boolean;
   cursorMcpAuthSupported?: boolean;
   onRemove?: () => void;
   canRemove?: boolean;
@@ -143,9 +199,13 @@ function savedProfileLaunchSettings(
 ): ProfileLaunchSettingsRequest | undefined {
   if (!baselineProfile) return undefined;
   return {
+    mode: baselineProfile.mode ?? "",
     env_vars: baselineProfile.env_vars ?? [],
     cli_flags: baselineProfile.cli_flags ?? [],
     command_prefix: baselineProfile.command_prefix ?? "",
+    ...(baselineProfile.copilot_selected_plugins !== undefined
+      ? { copilot_selected_plugins: [...baselineProfile.copilot_selected_plugins] }
+      : {}),
   };
 }
 
@@ -188,6 +248,8 @@ export function ProfileFormFields({
   permissionSettings,
   passthroughConfig,
   agentName,
+  agentId,
+  copilotDiscoveryDisabled = false,
   cursorMcpAuthSupported = false,
   onRemove,
   canRemove = false,
@@ -203,6 +265,12 @@ export function ProfileFormFields({
     profileId: capabilityProfileId,
     onPendingChange: onModelConfigResolutionPendingChange,
     savedLaunchSettings: savedProfileLaunchSettings(baselineProfile),
+  });
+  const { resolveConfigurationOptions, applyConfiguration } = useProfileCompositionDraft({
+    agentName,
+    profileId: capabilityProfileId,
+    profile,
+    onChange,
   });
 
   return (
@@ -224,6 +292,15 @@ export function ProfileFormFields({
         agentName={agentName}
         isCompact={isCompact}
         result={capabilityResult}
+        resolveConfigurationOptions={resolveConfigurationOptions}
+        onConfigurationApply={applyConfiguration}
+      />
+
+      <DevinSandboxPreferenceField
+        agentName={agentName}
+        profile={profile}
+        smartAvailable={capabilityResult.capabilities.modes.some((mode) => mode.id === "smart")}
+        onChange={onChange}
       />
 
       <PermissionToggles
@@ -244,6 +321,16 @@ export function ProfileFormFields({
         onChange={onChange}
       />
 
+      <CopilotProfilePlugins
+        agentName={agentName}
+        agentId={agentId}
+        profile={profile}
+        baselineProfile={baselineProfile}
+        capabilityProfileId={capabilityProfileId}
+        discoveryDisabled={copilotDiscoveryDisabled}
+        onChange={onChange}
+      />
+
       <ProfileFormFooter
         profile={profile}
         baselineProfile={baselineProfile}
@@ -257,6 +344,40 @@ export function ProfileFormFields({
         disableUnverifiedModels={capabilityResult.discoveryState !== "ready"}
       />
     </div>
+  );
+}
+
+function CopilotProfilePlugins({
+  agentName,
+  agentId,
+  profile,
+  baselineProfile,
+  capabilityProfileId,
+  discoveryDisabled,
+  onChange,
+}: {
+  agentName: string;
+  agentId?: string;
+  profile: ProfileFormData;
+  baselineProfile?: ProfileFormData;
+  capabilityProfileId?: string;
+  discoveryDisabled: boolean;
+  onChange: (patch: Partial<ProfileFormData>) => void;
+}) {
+  if (discoveryDisabled || agentName !== "copilot-acp" || !agentId) return null;
+  return (
+    <CopilotPluginProfileSelection
+      agentId={agentId}
+      profileId={capabilityProfileId ?? ""}
+      launchSettings={{
+        env_vars: profile.env_vars ?? [],
+        cli_flags: profile.cli_flags ?? [],
+        command_prefix: profile.command_prefix ?? "",
+      }}
+      selectedPluginIds={profile.copilot_selected_plugins ?? []}
+      savedSelectedPluginIds={baselineProfile?.copilot_selected_plugins}
+      onSelectedPluginsChange={(copilot_selected_plugins) => onChange({ copilot_selected_plugins })}
+    />
   );
 }
 

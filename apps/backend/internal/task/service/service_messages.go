@@ -405,6 +405,92 @@ func (s *Service) CreateMessageIdempotent(ctx context.Context, id string, req *C
 	return nil, err
 }
 
+// CreateCompletedUserMessageIdempotent persists a caller-owned user message in
+// an already-completed lifecycle-only turn. It never starts or adopts an active
+// conversation turn, so history-only records cannot alter turn timing.
+func (s *Service) CreateCompletedUserMessageIdempotent(
+	ctx context.Context,
+	messageID string,
+	req *CreateMessageRequest,
+) (*models.Message, error) {
+	if messageID == "" {
+		return nil, errors.New("message id is required for idempotent creation")
+	}
+	if err := preparePlanCommentMessageRequest(req); err != nil {
+		return nil, err
+	}
+	if err := s.authorizeMessageCreate(ctx, req); err != nil {
+		return nil, err
+	}
+	admissionCtx, releaseAdmission, err := s.acquireMessageCreateAdmission(ctx, messageID, req)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseAdmission()
+	ctx = admissionCtx
+
+	existing, found, err := s.existingCompletedUserMessage(ctx, messageID, req)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		return existing, nil
+	}
+	session, err := s.getSessionWithRetry(
+		ctx, req.TaskSessionID, messageID, messageCreateMaxRetries, messageCreateRetryDelay,
+	)
+	if err != nil {
+		return nil, err
+	}
+	turn, err := s.createCompletedTurn(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	req.TurnID = turn.ID
+	req.CompletedTurn = true
+	message, err := s.CreateMessageWithID(ctx, messageID, req)
+	if err == nil {
+		return message, nil
+	}
+	// A concurrent writer can still win between the admitted lookup and this
+	// insert. Treat a matching committed row as success.
+	existing, found, lookupErr := s.existingCompletedUserMessage(ctx, messageID, req)
+	if lookupErr == nil && found {
+		return existing, nil
+	}
+	return nil, s.rollbackCompletedUserMessageTurn(ctx, session, turn, err)
+}
+
+func (s *Service) existingCompletedUserMessage(
+	ctx context.Context,
+	messageID string,
+	req *CreateMessageRequest,
+) (*models.Message, bool, error) {
+	existing, err := s.messages.GetMessageWithPromptIndex(ctx, messageID)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && existing == nil) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("check existing completed user message: %w", err)
+	}
+	if err := s.validateMessageReplay(ctx, existing, req); err != nil {
+		return nil, false, err
+	}
+	return existing, true, nil
+}
+
+func (s *Service) rollbackCompletedUserMessageTurn(
+	ctx context.Context,
+	session *models.TaskSession,
+	turn *models.Turn,
+	cause error,
+) error {
+	if _, rollbackErr := s.RollbackReservedTurn(ctx, session.ID, turn.ID); rollbackErr != nil {
+		return errors.Join(cause, rollbackErr)
+	}
+	return cause
+}
+
 type planCommentMessageValidator interface {
 	ValidateMessagePlanComments(
 		context.Context,
@@ -679,7 +765,19 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 // AC-COORDINATOR-COPILOT-002.3): a reader may see the conversation but only a
 // manager may message the coordinator and start a turn.
 func (s *Service) authorizeMessageCreate(ctx context.Context, req *CreateMessageRequest) error {
-	if req == nil || req.AuthorType == createdByAgent {
+	if req == nil {
+		return nil
+	}
+	if report, _ := ctx.Value(collaborationReportContextKey{}).(bool); report {
+		return s.authorizeTaskScopeAction(ctx, req.TaskID, authz.ScopeTaskWrite, models.CollaborationReport)
+	}
+	if s.collaborationApplies(ctx) {
+		if req.TaskID != "" {
+			return s.AuthorizeTaskSessionPromptAccess(ctx, req.TaskID, req.TaskSessionID)
+		}
+		return s.AuthorizeSessionPromptAccess(ctx, req.TaskSessionID)
+	}
+	if req.AuthorType == createdByAgent {
 		return nil
 	}
 	if req.TaskID != "" {
@@ -764,13 +862,19 @@ func (s *Service) buildMessage(ctx context.Context, id string, req *CreateMessag
 	}
 
 	turnID := req.TurnID
+	var err error
 	if turnID == "" {
 		var turn *models.Turn
-		var err error
 		if req.CompletedTurn {
 			turn, err = s.createCompletedTurn(ctx, session)
 		} else {
-			turn, err = s.getOrStartTurnWithRetry(ctx, req.TaskSessionID, id, messageCreateMaxRetries, messageCreateRetryDelay)
+			turn, err = s.getOrStartTurnWithRetry(
+				ctx,
+				req.TaskSessionID,
+				id,
+				messageCreateMaxRetries,
+				messageCreateRetryDelay,
+			)
 		}
 		if err != nil {
 			s.logger.Warn("failed to get or start turn for streaming message",
@@ -1270,6 +1374,43 @@ func (s *Service) updateMessageWithReceipt(ctx context.Context, message *models.
 	return nil, s.messages.UpdateMessage(ctx, message)
 }
 
+// SetUserMessageDeliveryStatus sets the delivery status on an exact
+// session-owned user message. It reports whether such a message exists, so a
+// caller can record the message when it is absent. Reapplying the same status
+// is a no-op and does not publish a duplicate update.
+func (s *Service) SetUserMessageDeliveryStatus(
+	ctx context.Context,
+	messageID, sessionID, status string,
+) (bool, error) {
+	if messageID == "" || sessionID == "" || status == "" {
+		return false, nil
+	}
+	message, err := s.messages.GetMessage(ctx, messageID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if message == nil || message.TaskSessionID != sessionID ||
+		message.AuthorType != models.MessageAuthorUser {
+		return false, nil
+	}
+	if message.Metadata != nil && message.Metadata[models.MessageMetaKeyDeliveryStatus] == status {
+		return true, nil
+	}
+	metadata := make(map[string]interface{}, len(message.Metadata)+1)
+	for key, value := range message.Metadata {
+		metadata[key] = value
+	}
+	metadata[models.MessageMetaKeyDeliveryStatus] = status
+	message.Metadata = metadata
+	if err := s.UpdateMessage(ctx, message); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // AppendMessageContent appends additional content to an existing message.
 // This is used for streaming agent responses where content arrives incrementally.
 func (s *Service) AppendMessageContent(ctx context.Context, messageID, additionalContent string) error {
@@ -1719,6 +1860,27 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, taskID, sessionID
 		zap.String("status", string(status)))
 
 	return nil
+}
+
+// UpdatePermissionPresentation conditionally changes one exact permission
+// row's presentation. Only a matched update publishes a message event, so a
+// concurrent claim or replacement never produces a presentation change.
+func (s *Service) UpdatePermissionPresentation(ctx context.Context, request models.PermissionPresentationUpdate) (*models.Message, bool, error) {
+	message, updated, err := s.messages.UpdatePermissionPresentation(ctx, request)
+	if err != nil {
+		s.logger.Error("failed to update permission presentation",
+			zap.String("task_id", request.TaskID),
+			zap.String("session_id", request.SessionID),
+			zap.String("request_id", request.RequestID),
+			zap.String("pending_id", request.PendingID),
+			zap.String("presentation", string(request.Presentation)),
+			zap.Error(err))
+		return nil, false, err
+	}
+	if updated && message != nil {
+		_ = s.publishMessageEvent(ctx, events.MessageUpdated, message)
+	}
+	return message, updated, nil
 }
 
 // ClaimPermissionResolution durably serializes the first resolver before any

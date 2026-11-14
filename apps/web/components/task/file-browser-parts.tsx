@@ -8,15 +8,7 @@ import {
   IconFolder,
   IconFolderOpen,
   IconRefresh,
-  IconDotsVertical,
-  IconTrash,
 } from "@tabler/icons-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@kandev/ui/dropdown-menu";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { FileIcon } from "@/components/ui/file-icon";
@@ -27,15 +19,19 @@ import type { WorkspaceRestorationAttempt } from "@/lib/state/slices/session-run
 import type { FileBrowserRow } from "./file-browser-hooks";
 import { labelFileBrowserPath } from "./file-browser-repository-labels";
 import { areTreeNodeRowPropsEqual, type TreeNodeRowProps } from "./file-tree-row-props";
+import type { TaskRepositoryRoot } from "@/hooks/domains/session/use-task-repository-roots";
 import { measureFileTreeElement, observeFileTreeRect } from "./file-tree-measurement";
 import { InlineFileInput } from "./inline-file-input";
 import {
   FileContextMenu,
-  useFileDeleteAction,
   useFileRename,
   TreeNodeName,
   getGitStatusTextClass,
 } from "./file-context-menu";
+import { FileTreeNodeTouchActions } from "./file-tree-touch-actions";
+import { FileTreeRootBadge } from "./file-tree-root-badge";
+import { RootContextMenu } from "./root-context-menu";
+export { FileTreeNodeTouchActions };
 
 export {
   compareTreeNodes,
@@ -127,7 +123,7 @@ function getTreeNodeRowClass(
   isDropTarget: boolean,
 ) {
   return cn(
-    "group flex w-full items-center gap-1 border border-transparent px-2 py-0.5 text-left text-sm cursor-pointer",
+    "group flex w-full items-center gap-1 border border-transparent px-2 py-0.5 text-left text-sm cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary",
     isSelected ? "border-primary/50 bg-card text-foreground hover:bg-muted/70" : "hover:bg-muted",
     isActive && !isSelected && "bg-muted",
     isActiveFolder && !isSelected && "bg-muted/50",
@@ -136,78 +132,66 @@ function getTreeNodeRowClass(
   );
 }
 
-export function FileTreeNodeTouchActions({
-  node,
-  showTouchActions,
-  onAddToChatContext,
-}: {
+type TreeNodeMenuProps = {
+  children: React.ReactNode;
   node: FileTreeNode;
-  showTouchActions?: boolean;
+  tree: FileTreeNode | null;
+  treeRef?: React.RefObject<FileTreeNode | null>;
+  setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
+  onDeleteFile?: (path: string) => Promise<boolean>;
+  onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
+  onDownloadFile?: (path: string) => Promise<boolean>;
+  onUploadFilesHere?: (path: string) => void;
+  onStartRename: () => void;
   onAddToChatContext?: (node: FileTreeNode) => void;
-}) {
-  const { t } = useTranslation();
-  const deleteAction = useFileDeleteAction();
-  const deletePendingRef = React.useRef(false);
-  if (!showTouchActions || (!onAddToChatContext && !deleteAction)) return null;
+  selectedCount?: number;
+  selectedPaths?: Set<string>;
+  anchorRef: React.RefObject<HTMLElement | null>;
+  repositoryRoot?: TaskRepositoryRoot;
+};
 
-  const stopRowInteraction = (event: React.SyntheticEvent) => event.stopPropagation();
-
+function TreeNodeMenu({
+  children,
+  node,
+  tree,
+  treeRef,
+  setTree,
+  onDeleteFile,
+  onRenameFile,
+  onDownloadFile,
+  onUploadFilesHere,
+  onStartRename,
+  onAddToChatContext,
+  selectedCount,
+  selectedPaths,
+  anchorRef,
+  repositoryRoot,
+}: TreeNodeMenuProps) {
+  if (repositoryRoot) {
+    return (
+      <RootContextMenu root={repositoryRoot} surface="files">
+        {children}
+      </RootContextMenu>
+    );
+  }
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          ref={deleteAction?.triggerRef}
-          type="button"
-          data-testid="file-tree-node-actions"
-          data-path={node.path}
-          aria-label={t("chat:fileTreeActions")}
-          className="absolute top-1/2 right-0 z-10 flex min-h-11 min-w-11 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"
-          onPointerDown={stopRowInteraction}
-          onMouseDown={stopRowInteraction}
-          onClick={stopRowInteraction}
-          onKeyDown={stopRowInteraction}
-        >
-          <IconDotsVertical className="h-4 w-4" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="end"
-        data-testid="file-tree-touch-menu"
-        onClick={stopRowInteraction}
-        onCloseAutoFocus={(event) => {
-          if (!deletePendingRef.current) return;
-          event.preventDefault();
-          deletePendingRef.current = false;
-          deleteAction?.onDelete();
-        }}
-      >
-        {onAddToChatContext && (
-          <DropdownMenuItem
-            data-testid="file-tree-touch-add-to-chat"
-            className="min-h-11 cursor-pointer"
-            onSelect={() => onAddToChatContext(node)}
-          >
-            {t("chat:addToChatContext")}
-          </DropdownMenuItem>
-        )}
-        {deleteAction && (
-          <DropdownMenuItem
-            data-testid="file-tree-touch-delete"
-            variant="destructive"
-            className="min-h-11 cursor-pointer"
-            onSelect={() => {
-              if (!deleteAction.isBulk) deletePendingRef.current = true;
-              else deleteAction.onDelete();
-            }}
-          >
-            <IconTrash className="h-3.5 w-3.5" />
-            {deleteAction.isBulk
-              ? t("task:deleteItemsLabel", { count: deleteAction.selectedCount })
-              : t("task:delete")}
-          </DropdownMenuItem>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <FileContextMenu
+      node={node}
+      tree={tree}
+      treeRef={treeRef}
+      setTree={setTree}
+      onDeleteFile={onDeleteFile}
+      onRenameFile={onRenameFile}
+      onDownloadFile={onDownloadFile}
+      onUploadFilesHere={onUploadFilesHere}
+      onStartRename={onStartRename}
+      onAddToChatContext={onAddToChatContext}
+      selectedCount={selectedCount}
+      selectedPaths={selectedPaths}
+      anchorRef={anchorRef}
+    >
+      {children}
+    </FileContextMenu>
   );
 }
 
@@ -248,6 +232,7 @@ export const TreeNodeItem = React.memo(function TreeNodeItem(props: TreeNodeRowP
       data-selected={isSelected ? "true" : "false"}
       aria-selected={isSelected}
       role="treeitem"
+      tabIndex={0}
       className={cn(
         getTreeNodeRowClass(isActive, isActiveFolder, isSelected, props.isDragging, isDropTarget),
         showTouchActions &&
@@ -282,16 +267,19 @@ export const TreeNodeItem = React.memo(function TreeNodeItem(props: TreeNodeRowP
         gitStatus={gitStatus}
         rename={rename}
       />
+      {props.repositoryRoot && <FileTreeRootBadge root={props.repositoryRoot} />}
       <FileTreeNodeTouchActions
         node={node}
         showTouchActions={showTouchActions}
         onAddToChatContext={onAddToChatContext}
+        selectedCount={props.selectedCount}
+        isRepositoryRoot={Boolean(props.repositoryRoot)}
       />
     </div>
   );
 
   return (
-    <FileContextMenu
+    <TreeNodeMenu
       node={node}
       tree={tree}
       treeRef={props.treeRef}
@@ -305,9 +293,10 @@ export const TreeNodeItem = React.memo(function TreeNodeItem(props: TreeNodeRowP
       selectedCount={props.selectedCount}
       selectedPaths={props.selectedPaths}
       anchorRef={rowAnchorRef}
+      repositoryRoot={props.repositoryRoot}
     >
       {rowContent}
-    </FileContextMenu>
+    </TreeNodeMenu>
   );
 }, areTreeNodeRowPropsEqual);
 
@@ -358,8 +347,9 @@ export function SearchResultsList({
           <div
             data-testid="file-search-result"
             data-path={path}
+            tabIndex={0}
             className={cn(
-              "group flex w-full items-center gap-1 px-2 py-0.5 text-left text-sm cursor-pointer",
+              "group flex w-full items-center gap-1 px-2 py-0.5 text-left text-sm cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary",
               "hover:bg-muted",
               showTouchActions && "relative min-h-11 pr-11",
             )}
@@ -452,6 +442,7 @@ export type FileBrowserContentAreaProps = {
   selectedPaths?: Set<string>;
   showTouchActions?: boolean;
   onAddToChatContext?: (node: FileTreeNode) => void;
+  rootsByPath?: Map<string, TaskRepositoryRoot>;
 };
 
 function rowToItemProps(
@@ -488,6 +479,7 @@ function rowToItemProps(
     selectedPaths: props.selectedPaths,
     showTouchActions: props.showTouchActions,
     onAddToChatContext: props.onAddToChatContext,
+    repositoryRoot: props.rootsByPath?.get(row.path),
   };
 }
 

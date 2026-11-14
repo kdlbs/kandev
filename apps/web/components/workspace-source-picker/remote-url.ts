@@ -15,12 +15,12 @@ export function looksLikeURL(value: string): boolean {
  * source attachment. SCP Git syntax is valid only for the same providers.
  */
 export function looksLikeSupportedRemoteURL(value: string): boolean {
-  if (/^git@(github\.com|gitlab\.com|ssh\.dev\.azure\.com):\S+$/i.test(value)) return true;
+  if (/^git@(github\.com|gitlab\.com):\S+$/i.test(value)) return true;
   if (!looksLikeURL(value)) return false;
   const candidate = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `https://${value}`;
   try {
     const host = new URL(candidate).hostname.toLowerCase();
-    return host === "github.com" || host === "gitlab.com" || host === "dev.azure.com";
+    return host === "github.com" || host === "gitlab.com";
   } catch {
     return false;
   }

@@ -102,6 +102,11 @@ describe("computeEmptyTurnNotice", () => {
     expect(computeEmptyTurnNotice(baseInput({ isEphemeralSurface: true }))).toBeNull();
   });
 
+  it("returns null for a session known to use CLI passthrough", () => {
+    const input = Object.assign(baseInput(), { isPassthrough: true });
+    expect(computeEmptyTurnNotice(input)).toBeNull();
+  });
+
   it("returns null when a notice already exists for this turn (once per turn)", () => {
     const existing: Message = {
       id: "empty-turn-turn-1",

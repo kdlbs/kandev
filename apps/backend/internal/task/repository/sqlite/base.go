@@ -17,17 +17,18 @@ import (
 
 // Repository provides SQLite-based task storage operations.
 type Repository struct {
-	db                      *sqlx.DB // writer
-	ro                      *sqlx.DB // reader (read-only pool)
-	ownsDB                  bool
-	log                     *logger.Logger
-	migrate                 *db.MigrateLogger
-	queuePurgeMu            sync.RWMutex
-	clarificationAdmission  clarificationReadAdmission
-	queuePurger             func(context.Context, string)
-	queuePurgePrepare       func(context.Context, string)
-	queuePurgeNotify        func(context.Context, string)
-	queueSessionPurgeNotify func(context.Context, string, string)
+	officeHumanCompletionPendingReader func(context.Context, *sql.Tx, string, string) ([]string, error)
+	db                                 *sqlx.DB // writer
+	ro                                 *sqlx.DB // reader (read-only pool)
+	ownsDB                             bool
+	log                                *logger.Logger
+	migrate                            *db.MigrateLogger
+	queuePurgeMu                       sync.RWMutex
+	clarificationAdmission             clarificationReadAdmission
+	queuePurger                        func(context.Context, string)
+	queuePurgePrepare                  func(context.Context, string)
+	queuePurgeNotify                   func(context.Context, string)
+	queueSessionPurgeNotify            func(context.Context, string, string)
 	// stepArrivalLocks holds one *sync.Mutex per workflow step, serializing
 	// this process's own arrival-position writes (assignArrivalPosition)
 	// against each other for the same step. lockWorkflowStepForWrite alone
@@ -57,9 +58,15 @@ type Repository struct {
 	// agentDeliveryRetentionFailpoint injects transaction failures at durable
 	// retention write boundaries for rollback tests.
 	agentDeliveryRetentionFailpoint func(string) error
-	agentDeliveryReloadStatements   agentDeliveryReloadStatementCache
-	agentDeliveryOwnerStatements    agentDeliveryOwnerStatementCache
-	agentDeliveryReceiptStatements  agentDeliveryReceiptStatementCache
+	// agentDeliveryCombinedProjectionFailpoint injects a combined
+	// receipt-and-projection failure after the batch receipts are written, so
+	// tests can prove the whole batch rolls back.
+	agentDeliveryCombinedProjectionFailpoint func(string) error
+	agentDeliveryReloadStatements            agentDeliveryReloadStatementCache
+	agentDeliveryOwnerStatements             agentDeliveryOwnerStatementCache
+	agentDeliveryReceiptStatements           agentDeliveryReceiptStatementCache
+	durabilityBarrierOnce                    sync.Once
+	durabilityBarrier                        *db.DurabilityBarrier
 	// failUsageEventAttempts/failUsageEventErr are a test-only failpoint for
 	// CreateTaskUsageEvent's AC-32 transient-retry loop: while
 	// failUsageEventAttempts > 0, insertUsageEventAndRollup returns

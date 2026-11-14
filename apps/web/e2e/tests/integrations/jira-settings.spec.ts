@@ -1,6 +1,9 @@
 import { test, expect } from "../../fixtures/test-base";
 import { JiraSettingsPage } from "../../pages/jira-settings-page";
 import { assertJiraWatcherQualifiedBranchPersists } from "./jira-watcher-branch-flow";
+import { waitForHttp } from "../../helpers/causal-waits";
+
+test.use({ trace: "retain-on-failure" });
 
 test.describe("Jira settings", () => {
   test("qualified remote branch persists through Jira watcher reload", async ({
@@ -104,20 +107,17 @@ test.describe("Jira settings", () => {
     seedData,
   }) => {
     const settings = new JiraSettingsPage(testPage);
-    // Save first so a config row exists, then simulate the poller writing
-    // a failure status onto it.
+    // Every probe must agree with the persisted failure, including later polls.
+    await apiClient.mockJiraSetAuthResult({ ok: false, error: "session expired" });
     await settings.gotoWorkspace(seedData.workspaceId);
     await settings.fillForm({
       siteUrl: "https://acme.atlassian.net",
       email: "alice@example.com",
       secret: "api-token-value",
     });
+    const saved = waitForHttp(testPage, "POST", /\/api\/v1\/jira\/config$/);
     await settings.saveButton.click();
-    // Wait for the post-save probe to land BEFORE forcing the failure: the
-    // probe goroutine could otherwise overwrite our forced lastOk=false back
-    // to true a few ms after the mockJiraSetAuthHealth call, flipping the
-    // banner to "ok" right when the assertion expects "failed".
-    await apiClient.waitForIntegrationAuthHealthy("jira", { workspaceId: seedData.workspaceId });
+    expect((await saved).ok()).toBe(true);
 
     await apiClient.mockJiraSetAuthHealth({
       workspaceId: seedData.workspaceId,

@@ -30,11 +30,11 @@ the basis for implementation.
 
 ## Requirement mapping
 
-| Requirement                   | Design sections                                                                                                                 |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `REQ-TASKS-PLAN-COMMENTS-001` | [Persistence model](#persistence-model), [Frontend projection](#frontend-projection), [Plan lifecycle](#plan-lifecycle)         |
+| Requirement | Design sections |
+| --- | --- |
+| `REQ-TASKS-PLAN-COMMENTS-001` | [Persistence model](#persistence-model), [Frontend projection](#frontend-projection), [Plan lifecycle](#plan-lifecycle) |
 | `REQ-TASKS-PLAN-COMMENTS-002` | [Composer delivery](#composer-delivery), [Atomic acceptance](#atomic-acceptance), [Failure and recovery](#failure-and-recovery) |
-| `REQ-TASKS-PLAN-COMMENTS-003` | [Run routing](#run-routing), [Atomic acceptance](#atomic-acceptance)                                                            |
+| `REQ-TASKS-PLAN-COMMENTS-003` | [Run routing](#run-routing), [Atomic acceptance](#atomic-acceptance) |
 | `REQ-TASKS-PLAN-COMMENTS-004` | [Legacy migration](#legacy-migration), [Failure and recovery](#failure-and-recovery), [Responsive and accessibility behavior](#responsive-and-accessibility-behavior) |
 
 ## Ownership decision
@@ -245,15 +245,21 @@ enabled because comment ownership is independent of session availability.
 
 ## Atomic acceptance
 
-Direct-message and durable-queue repositories already insert inside database
-transactions. Direct delivery acquires a task-scoped admission lease before
-its exact preflight and keeps it across task-state and turn-start hooks through
-the final transaction. Plan-comment mutations and plan deletion join the same
-lease, so a successful preflight cannot become stale only after irreversible
-hooks run. SQLite uses a process-local task guard. PostgreSQL pairs that guard
-with an advisory lock shared across backend processes; its writer pool must
-allow at least two connections because the lease owns one while hooks and the
-final transaction use another.
+Direct delivery holds a task admission lease from exact preflight through
+task-state and turn-start hooks to the final transaction. Comment mutations
+and plan deletion share the lease. SQLite uses a process-local guard.
+PostgreSQL also takes a cross-process advisory lock. It needs two writer
+connections because the lease holds one while hooks and acceptance use another.
+
+Call `NotifyQueuedUserPrompt` with the caller context after
+`WithInitialTaskBriefAdmission` returns. This releases the per-session admission
+lock before notification takes the cancellation guard. Lifecycle drains take
+the cancellation guard before session admission. Keep commit and brief tracking
+inside admission.
+Rebuild stale briefs from the original submission. Retained comment receipts use
+the [reservation token and delivery-attempt validation](#receipt-dispatch), not
+ordinary queue dispatch claims. Agent admission negotiates the protocol and
+persists durable submissions.
 
 Comment-bearing variants then extend the final transaction boundary in this
 order:
@@ -289,6 +295,8 @@ observable through admission. Reserve/dispatch retains that queue row as a
 replay receipt and writes a deterministic, idempotent transcript before
 external delivery. The transcript metadata retains the caller queue ID, so a
 lost response can still reconcile after the queue receipt is acknowledged.
+
+### Receipt dispatch
 
 Every pre-dispatch reservation has a random ownership token and a short lease.
 Only that token may release, acknowledge, or cross the delivery boundary. A
@@ -581,6 +589,7 @@ correctness boundary.
 
 ## Implementation plans
 
+- [Plan comment Send lock order](../../../plans/plan-comment-send-lock-order/plan.md)
 - [Plan comment foreground preservation](../../../plans/plan-comment-foreground-preservation/plan.md)
 
 - [Task-owned plan comments](../../../plans/task-owned-plan-comments/plan.md)

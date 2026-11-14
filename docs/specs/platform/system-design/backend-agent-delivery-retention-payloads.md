@@ -78,8 +78,23 @@ missing sequence or unsupported event. The existing format-1 readers already und
 compact receipts. No new format, checkpoint reset, generation reset or wire capability
 is required.
 
+Legacy `tool_output_bytes` remains on `streams.AgentEvent` as a nullable unsigned
+field after `tool_status` and before `normalized`. Typed serialization preserves
+explicit zero, nonzero values and field order. New producers leave this
+read-compatibility field unset.
+
+An older backend can store a retained event without this field because its typed
+event did not know the key. Its v1 receipt hash therefore represents the
+field-less JSON. A newer reader must validate a v1 receipt with the exact
+field-bearing form or with the legacy form that clears only `tool_output_bytes`.
+For a replay, the incoming event must reproduce the stored hash under one of
+those forms. This exception applies only to this read-compatibility field. The
+event envelope and all other payload content remain strict. Do not rewrite a
+stored payload or hash to make a replay match.
+
 An authenticated identical duplicate still returns its committed result without
-projection or dispatch. Changed content or envelope fails the existing conflict guard.
+projection or dispatch. Changed content outside this compatibility field or a
+changed envelope fails the existing conflict guard.
 State-only ACK recovery uses the retained projected cursor. Cleanup never admits a
 prompt, resolves a recovery block or certifies that an external action did not occur.
 

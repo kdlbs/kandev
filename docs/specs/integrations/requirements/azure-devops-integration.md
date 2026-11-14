@@ -1,5 +1,5 @@
 ---
-status: active
+status: deprecated
 system: integrations
 created: 2026-07-17
 updated: 2026-10-20
@@ -7,6 +7,11 @@ owners:
   - tbd
 ---
 # Azure DevOps Integration Requirements
+
+> Deprecated on 2026-11-06 by
+> [Azure DevOps Connector Plugin](https://github.com/JnManso/kandev-plugin-azure-devops/blob/main/docs/specs/requirements/azure-devops-plugin.md) and
+> [Azure DevOps Leaves Core](../../plugins/requirements/azure-devops-extraction.md).
+> Azure DevOps is now provided by the `kandev-plugin-azure-devops` runtime plugin.
 
 ## Overview
 
@@ -39,6 +44,8 @@ Teams whose source code and planning work live in Azure DevOps cannot use Kandev
 - **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.16:** When a saved-view action fails, the system shall remove that action's optimistic effect and preserve successful actions. Later pending actions shall use the last confirmed server list, including server normalization, rather than assuming failed actions succeeded. The failed action shall remain retryable.
 - **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.17:** When the initial saved-view read is pending across an admitted action, the system shall preserve the loaded views that action does not change, and shall not publish the initial read over the pending action. If the read fails, the system shall send no saved-view write, reject actions admitted against that read, and reload the server list when the user retries an action.
 - **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.18:** Desktop and phone shall apply the same saved-view ordering and recovery behavior. Save failures shall retain the existing dialog feedback, and delete failures shall show localized feedback without an unhandled rejection.
+
+- **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.19:** Assignment and Move completion shall not reopen closed detail or replace a later work-item selection. Closing, reopening, changing scope, or unmounting shall invalidate the old opening's local completion, error, and busy state. Confirmed board data shall still update while its originating workspace, project, team, and board remain current. Desktop and phone shall preserve the same ownership rules.
 
 ## Exclusions
 

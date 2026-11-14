@@ -138,7 +138,7 @@ Workflow-level settings include the name and default agent profile. Each step ca
 | Control | Behavior |
 |---------|----------|
 | Name and color | Board label and presentation. Color is stored as a CSS utility class. |
-| Prompt | Step-specific agent prompt. `{{task_prompt}}` inserts the task description. Type `@` to reference a saved prompt by name. |
+| Prompt | Step-specific agent prompt. `{{task_prompt}}` inserts the task description for automatic entries and the explicit launch brief for `start_created` launches. A prompt without the placeholder replaces automatic task content, while an explicit launch brief is appended after it. Type `@` to reference a saved prompt by name. |
 | Start step | Where a task is created when no agent starts with it. The editor keeps at most one. If none is set, task creation falls back to the first step by position. Creating a task that starts an agent immediately uses the first Auto-start agent step instead, including in plan mode. Thus, a Start step with no entry actions is a genuine parking column. |
 | Auto-start agent | Adds `auto_start_agent` to `on_enter`. It still needs a valid agent and executor configuration. |
 | Plan mode | Adds `enable_plan_mode` on entry. Add the matching disable behavior on completion or exit when later steps should edit files. |
@@ -146,11 +146,14 @@ Workflow-level settings include the name and default agent profile. Each step ca
 | Allow manual move | Allows board drag/drop into the step. It is a product-UI rule, not a security boundary for API clients. |
 | Show in command panel | Includes tasks in this step in the command panel. |
 | Auto-archive | Archives eligible tasks after the configured number of hours. `0` disables it; the background sweep runs every five minutes and uses task `updated_at`, so timing is approximate. |
-| Wait for agent completion signal | With an `on_turn_complete` transition, waits for the agent to call `step_complete_kandev`. A halt without the signal leaves the task on the current step; retry or reconnect the agent, or move the task through the normal workflow UI. Without this setting, a normal turn end counts as completion. Default is off. |
+| Wait for agent completion signal | With an `on_turn_complete` transition, waits for the agent to call `step_complete_kandev`. A halt without the signal leaves the task on the current step; retry or reconnect the agent, or move the task through the normal workflow UI. The tool result separates signal acceptance from the committed move: a `pending` outcome is not proof that the next step's reviewer received the handoff, and a later turn in the same step can replace an unconsumed signal. Without this setting, a normal turn end counts as completion. Default is off. |
 | Run completion actions when a turn is cancelled | Also runs the step's `on_turn_complete` actions after an explicit user cancellation settles. A pending clarification, silent interruption, parent/task stop, provider failure, crash, or runtime teardown does not qualify. If the destination has `on_enter: auto_start_agent`, another agent turn can begin immediately. Default is off for custom steps; the built-in Kanban workflow enables it on Backlog and In Progress for newly created workflows; existing workflows are not backfilled. |
 | Complete task on entry | On the final step only, marks the task complete when it enters that step. The setting is saved per step, so moving a step changes which saved value is active. A value on a non-final step is retained but inactive. Default is off. |
 | WIP limit | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited; visible overflow is queued. A manual move into a full target succeeds and queues in that target. |
 | Pull from | Optional one-hop feeder step. When capacity opens, Kandev promotes queued destination work first, then feeder work. Direct moves and automatic transitions queue in the destination without using the feeder. A full feeder rejects new overflow creation. |
+
+Use the information button beside **Pull from** to read queue and feeder guidance.
+On a phone, it opens a drawer that stays open while you read.
 
 ### Recover from a context reset failure
 
@@ -180,6 +183,12 @@ conversation available for reuse or manual follow-up. These settings default
 to reuse on start and park on end. An explicitly selected completion policy is
 preserved.
 
+A retry of the same accepted step entry does not create another conversation.
+Kandev keeps the recorded destination; if it failed, ended, or has uncertain
+ownership, the retry stops without creating or restarting a conversation or
+replaying a prompt.
+A later visit is a new entry and applies the start setting again.
+
 ### Continue a completed conversation
 
 Opening or reloading a completed task does not start its agent. If the task has a completed conversation, select **Resume** to continue that same conversation. The previous messages and provider context remain available, and the task keeps its completed state and workflow step. Select **New Agent** when you want a separate conversation. A follow-up does not run the completed step's workflow actions again.
@@ -198,7 +207,7 @@ Pull candidates are selected by board position, then priority, queue time, creat
 
 Workflow and step prompt fields use the inline prompt editor. Type `@` after whitespace to select a saved prompt. In a step prompt, type `{{` to select `{{task_prompt}}` and other tokens supported by that step. The completion menu inserts the reference into the draft; it does not save the workflow. Use **Save changes** when the prompt is ready.
 
-The workflow-level prompt supports saved-prompt references but does not expand step-only variables. `{{task_prompt}}` is available in a step prompt because it is replaced with the task description when that step runs.
+The workflow-level prompt supports saved-prompt references but does not expand step-only variables. `{{task_prompt}}` is available in a step prompt because it is replaced with the automatic task description, or with an explicit `start_created` launch brief, when that step runs. An explicit launch brief is also preserved after a step prompt that does not use the placeholder.
 
 Both step prompts and the workflow-level prompt also accept these single-brace placeholders. Type them directly; the completion menu does not offer them.
 
@@ -223,7 +232,7 @@ The standard Kanban editor exposes these events:
 | `on_turn_start` | A user sends a message, including the first non-empty prompt when a task is created with an explicit workflow step. The transition happens before that message is delivered. Prompts started automatically when a task enters a step do not run this event. | Move next, previous, or to a selected step. |
 | `on_turn_complete` | A normal agent turn finishes when its signal requirements are satisfied. An explicit user cancellation qualifies when the step enables its cancellation policy, even if the completion signal is absent. A pending clarification always blocks completion. | Move next, previous, or to a selected step; disable plan mode. |
 | `on_exit` | A task leaves a step. | Disable plan mode. |
-| `on_children_completed` | Every active direct child task of the task is terminal. | Move next, previous, or to a selected step. |
+| `on_children_completed` | Every counted active direct child task is `COMPLETED`. Failed or cancelled children do not trigger it. | Move next, previous, or to a selected step. |
 | `on_pr_merged` | The PR poller reports that every GitHub pull request linked to the task is merged. Runs once per merged set, without an agent turn. | Move next, previous, or to a selected step. |
 | `on_pr_closed` | The PR poller reports that a linked pull request was closed without merging. Runs once per close, without an agent turn. | Move next, previous, or to a selected step. |
 

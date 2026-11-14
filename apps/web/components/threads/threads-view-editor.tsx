@@ -178,6 +178,7 @@ function TaskPickerEditor({
       <ThreadsViewTaskPicker
         candidates={candidates}
         selectedTaskIds={current.taskScope.mode === "selected" ? current.taskScope.taskIds : []}
+        showSelectionPosition={current.sort.key === "selection"}
         onChange={(taskIds) => onUpdate({ taskScope: { mode: "selected", taskIds } })}
         onBack={onBack}
       />

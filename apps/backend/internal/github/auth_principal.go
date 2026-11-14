@@ -28,6 +28,7 @@ const (
 // AuthPrincipal describes the identity GitHub will attribute an operation to.
 // It deliberately contains no credential material.
 type AuthPrincipal struct {
+	GitHubHost              string            `json:"github_host"`
 	Kind                    AuthPrincipalKind `json:"kind"`
 	Source                  ConnectionSource  `json:"source"`
 	Login                   string            `json:"login,omitempty"`
@@ -47,15 +48,17 @@ type ResolveCredentialRequest struct {
 }
 
 type ResolvedCredential struct {
-	Client                  Client
-	Principal               AuthPrincipal
-	Capabilities            map[GitHubAppCapability]bool
-	CredentialGeneration    int64
-	AppRegistrationID       string
-	AppCredentialGeneration int64
-	ExpiresAt               time.Time
-	RateTracker             *RateTracker
-	credential              string
+	WorkspaceCredentialGeneration int64
+	GitHubHost                    string
+	Client                        Client
+	Principal                     AuthPrincipal
+	Capabilities                  map[GitHubAppCapability]bool
+	CredentialGeneration          int64
+	AppRegistrationID             string
+	AppCredentialGeneration       int64
+	ExpiresAt                     time.Time
+	RateTracker                   *RateTracker
+	credential                    string
 }
 
 var (

@@ -41,7 +41,7 @@ func TestCompleteTask_CompletionGateBlocksBeforeStoppingAgents(t *testing.T) {
 	manager := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), mockRepo, manager)
 	svc.taskRepo = taskRepo
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	lsp := &completionGateLSPTracker{}
 	svc.SetLSPLeaseLifecycle(lsp)
 

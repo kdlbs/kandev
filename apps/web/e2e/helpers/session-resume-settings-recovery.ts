@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page, type TestInfo } from "@playwright/test";
+import { closeModelConfigSheetIfOpen } from "./model-config-sheet";
 import fs from "node:fs";
 import path from "node:path";
 import type { BackendContext } from "../fixtures/backend";
@@ -93,6 +94,67 @@ function capturedRestoreWorkspaceResponse(
     .find(
       (frame) => frame?.id === request.id && (frame.type === "response" || frame.type === "error"),
     );
+}
+
+function pageOpenRecoverySettled(
+  frames: Array<{ direction: "sent" | "received"; payload: string }>,
+  sessionId: string,
+  frameOffset: number,
+): boolean {
+  const requests = frames
+    .slice(frameOffset)
+    .filter((frame) => frame.direction === "sent")
+    .map((frame) => parseRecoveryWireFrame(frame.payload))
+    .filter(
+      (frame): frame is RecoveryWireFrame & { id: string; payload: Record<string, unknown> } =>
+        frame?.type === "request" &&
+        frame.action === "session.launch" &&
+        typeof frame.id === "string" &&
+        typeof frame.payload === "object" &&
+        frame.payload !== null &&
+        !Array.isArray(frame.payload) &&
+        frame.payload.session_id === sessionId,
+    );
+  const responseFor = (requestId: string) =>
+    frames
+      .slice(frameOffset)
+      .filter((frame) => frame.direction === "received")
+      .map((frame) => parseRecoveryWireFrame(frame.payload))
+      .find(
+        (frame) => frame?.id === requestId && (frame.type === "response" || frame.type === "error"),
+      );
+  const openResume = requests.find(
+    (request) =>
+      request.payload.intent === "resume" && request.payload.activation_source === "session_open",
+  );
+  if (!openResume) return false;
+  const resumeResponse = responseFor(openResume.id);
+  if (!resumeResponse) return false;
+  const resumeFailed =
+    resumeResponse.type === "error" ||
+    (typeof resumeResponse.payload === "object" &&
+      resumeResponse.payload !== null &&
+      "success" in resumeResponse.payload &&
+      resumeResponse.payload.success === false);
+  if (!resumeFailed) return true;
+
+  const automaticRestore = requests.find(
+    (request) => request.payload.intent === "restore_workspace",
+  );
+  return automaticRestore ? Boolean(responseFor(automaticRestore.id)) : false;
+}
+
+async function waitForPageOpenRecoveryToSettle(
+  frames: Array<{ direction: "sent" | "received"; payload: string }>,
+  sessionId: string,
+  frameOffset: number,
+) {
+  await expect
+    .poll(() => pageOpenRecoverySettled(frames, sessionId, frameOffset), {
+      timeout: 60_000,
+      message: "page-open recovery should settle before manual recovery",
+    })
+    .toBe(true);
 }
 
 async function attachRecoveryDiagnostics({
@@ -454,6 +516,7 @@ export async function runSessionResumeSettingsRecoveryE2E(options: {
       startupRecoveryCard.getByTestId("session-recovery-fresh-start-warning"),
     ).toContainText("uses your saved selections");
     await expect(session.activeChat()).not.toContainText(EMPTY_TURN_NO_OUTPUT_NOTICE);
+    const reloadFrameOffset = wireFrames.length;
     await page.reload();
     await session.waitForLoad();
     await expect(
@@ -461,7 +524,8 @@ export async function runSessionResumeSettingsRecoveryE2E(options: {
     ).toBeVisible();
     await expect(session.activeChat()).not.toContainText(EMPTY_TURN_NO_OUTPUT_NOTICE);
     await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
-    const disclosure = session.activeChat().getByTestId("provider-restored-resume-disclosure");
+    await waitForPageOpenRecoveryToSettle(wireFrames, sessionId, reloadFrameOffset);
+    const disclosure = startupRecoveryCard.getByTestId("provider-restored-resume-disclosure");
     await expect(disclosure).toBeVisible();
     await expect(disclosure).toContainText("mode/model");
     await assertNoDocumentHorizontalOverflow(page, "provider-restored resume disclosure");
@@ -632,7 +696,7 @@ export async function runSessionResumeSettingsRecoveryE2E(options: {
 
     await sendRecoveryPrompt(session, mobile, "/e2e:simple-message");
     await session.expectChatResponseVisible("simple mock response", 0, { timeout: 60_000 });
-    const modelSelector = page.getByRole("button", { name: "Session model settings" });
+    const modelSelector = page.getByTestId("model-config-trigger");
     await expect(modelSelector).toBeVisible();
     if (mobile) {
       expect((await modelSelector.boundingBox())?.height).toBeGreaterThanOrEqual(44);
@@ -645,6 +709,7 @@ export async function runSessionResumeSettingsRecoveryE2E(options: {
     }
     await activate(modelOption, mobile);
     await expect(modelSelector).toContainText("Mock Smart", { timeout: 15_000 });
+    await closeModelConfigSheetIfOpen(page);
 
     const modeSelector = page.getByTestId("session-mode-selector");
     await expect(modeSelector).toBeVisible();

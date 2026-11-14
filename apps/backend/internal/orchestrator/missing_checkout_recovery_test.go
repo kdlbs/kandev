@@ -28,7 +28,7 @@ func TestMissingCheckoutRecoveryFreshStartPreflightPreservesProviderState(t *tes
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	const taskID = "task-missing-checkout-preflight"
 	const sessionID = "session-missing-checkout-preflight"

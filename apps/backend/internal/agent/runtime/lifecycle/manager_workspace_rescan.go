@@ -44,19 +44,27 @@ func (m *Manager) NotifyWorktreeMaterialized(ctx context.Context, wt Materialize
 	execution, _ := m.GetExecutionBySessionID(wt.SessionID)
 	execID := ""
 	taskEnvID := ""
+	// The launched execution keeps running in its original checkout. Publish
+	// that native workspace rather than the newly materialized sibling's
+	// worktree path so relative chat links keep resolving from the checkout
+	// the agent actually uses.
+	agentWorkspacePath := ""
 	if execution != nil {
 		execID = execution.ID
 		taskEnvID = execution.TaskEnvironmentID
+		agentWorkspacePath = execution.WorkspacePath
 	}
 	payload := AgentctlEventPayload{
-		TaskID:            wt.TaskID,
-		SessionID:         wt.SessionID,
-		TaskEnvironmentID: taskEnvID,
-		AgentExecutionID:  execID,
-		WorktreeID:        wt.WorktreeID,
-		WorktreePath:      wt.WorktreePath,
-		WorktreeBranch:    wt.WorktreeBranch,
-		TaskWorkspacePath: wt.TaskWorkspacePath,
+		TaskID:               wt.TaskID,
+		SessionID:            wt.SessionID,
+		TaskEnvironmentID:    taskEnvID,
+		AgentExecutionID:     execID,
+		WorktreeID:           wt.WorktreeID,
+		WorktreeRepositoryID: wt.RepositoryID,
+		WorktreePath:         wt.WorktreePath,
+		WorktreeBranch:       wt.WorktreeBranch,
+		TaskWorkspacePath:    wt.TaskWorkspacePath,
+		AgentWorkspacePath:   agentWorkspacePath,
 	}
 	if execution != nil {
 		payload.AttemptID = execution.currentStartupAttemptID()
@@ -90,6 +98,16 @@ func (m *Manager) NotifyWorktreeMaterialized(ctx context.Context, wt Materialize
 // The worktree still exists on disk; the next session relaunch will pick
 // it up via prepareMultiRepo regardless of whether this rescan succeeded.
 func (m *Manager) RescanWorkspaceForSession(ctx context.Context, sessionID, workDir string, sourceRoots ...[]string) error {
+	return m.rescanWorkspaceForSession(ctx, sessionID, workDir, optionalWorkspaceSourceRoots(nil, sourceRoots), nil)
+}
+
+// RescanWorkspaceForSessionWithExclusions refreshes source roots while also
+// excluding detached checkouts that remain on disk.
+func (m *Manager) RescanWorkspaceForSessionWithExclusions(ctx context.Context, sessionID, workDir string, sourceRoots, excludedRoots []string) error {
+	return m.rescanWorkspaceForSession(ctx, sessionID, workDir, sourceRoots, excludedRoots)
+}
+
+func (m *Manager) rescanWorkspaceForSession(ctx context.Context, sessionID, workDir string, sourceRoots, excludedRoots []string) error {
 	if sessionID == "" {
 		return fmt.Errorf("session_id is required")
 	}
@@ -111,9 +129,12 @@ func (m *Manager) RescanWorkspaceForSession(ctx context.Context, sessionID, work
 		return nil
 	}
 	oldRoots := append([]string(nil), execution.WorkspaceSourceRoots...)
-	newRoots := optionalWorkspaceSourceRoots(oldRoots, sourceRoots)
+	newRoots := append([]string(nil), execution.WorkspaceSourceRoots...)
+	if sourceRoots != nil {
+		newRoots = append([]string(nil), sourceRoots...)
+	}
 	execution.WorkspaceSourceRoots = newRoots
-	if err := client.RescanWorkspace(ctx, workDir, newRoots); err != nil {
+	if err := client.RescanWorkspaceWithExclusions(ctx, workDir, newRoots, excludedRoots); err != nil {
 		execution.WorkspaceSourceRoots = oldRoots
 		return fmt.Errorf("rescan workspace via agentctl: %w", err)
 	}

@@ -1,4 +1,5 @@
 {
+  "openPr": "Open PR",
   "views": "Views",
   "viewPicker": "Views: {{view}}",
   "loadingSavedQueries": "Loading saved queries...",
@@ -99,6 +100,10 @@
   "checksPendingCount_other": "{{count}} pending",
   "checksRunning": "Checks running",
   "checksNotSuccessful": "Checks not successful",
+  "allChecksSkipped": "All checks skipped",
+  "checksSkippedCount_one": "{{count}} check skipped",
+  "checksSkippedCount_other": "{{count}} checks skipped",
+  "lastDetailedObservation": "Last detailed observation",
   "chooseAGithubApp": "Choose a GitHub App",
   "chooseHowNewlyLaunchedTasksAuthenticate": "Choose how newly launched tasks authenticate to GitHub. This does not change the workspace automation connection above.",
   "chooseMergeMethod": "Choose merge method",
@@ -652,10 +657,16 @@
   "mergeQueueRecoveryStatusRepairRequestedWaiting": "Repair requested. Waiting for a new commit before requeue.",
   "mergeQueueRecoveryStatusWaitingForCommit": "Waiting for a new commit before requeue.",
   "mergeQueueRecoveryStatusWaitingForChecks": "New head detected. Waiting for required checks.",
+  "githubHost": "GitHub host",
+  "invalidGitHubHost": "Enter a GitHub web hostname or HTTPS origin without a path.",
+  "selectedGitHubHost": "Host: {{host}}",
+  "githubHostReplacement": "Changing from {{current}} to {{proposed}} invalidates pending authorization. Existing repositories, linked tasks, watches, and saved filters keep their original host and may require reconnection.",
+  "createPersonalAccessToken": "Create a personal access token",
   "mergeAccessLoading": "Checking merge permissions.",
   "mergeAccessUnavailable": "Merge permissions are unavailable.",
   "mergeAccessDeniedByActor": "{{actor}} cannot merge into {{repository}}.",
   "mergeAccessDenied": "This account cannot merge into {{repository}}.",
   "checkMergeAccess": "Check again",
-  "mergeAsActor": "as {{actor}}"
+  "mergeAsActor": "as {{actor}}",
+  "lastDetailedObservationAllSkipped": "Last detailed observation: all checks skipped"
 }

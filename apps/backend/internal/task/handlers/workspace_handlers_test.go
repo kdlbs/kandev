@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -216,7 +217,7 @@ func TestHTTPDeleteWorkspaceRejectsInvalidPayload(t *testing.T) {
 
 func TestHTTPDeleteWorkspaceReturnsNotFoundWhenWorkspaceMissing(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	repo := &workspaceDeleteRepo{getErr: errors.New("workspace not found")}
+	repo := &workspaceDeleteRepo{getErr: repoerrors.ErrWorkspaceNotFound}
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	svc := service.NewService(service.Repos{
 		Workspaces:       repo,
@@ -368,7 +369,7 @@ func TestWSDeleteWorkspaceRequiresConfirmName(t *testing.T) {
 }
 
 func TestWSDeleteWorkspaceReturnsNotFoundWhenWorkspaceMissing(t *testing.T) {
-	repo := &workspaceDeleteRepo{getErr: errors.New("workspace not found")}
+	repo := &workspaceDeleteRepo{getErr: repoerrors.ErrWorkspaceNotFound}
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	svc := service.NewService(service.Repos{
 		Workspaces:       repo,

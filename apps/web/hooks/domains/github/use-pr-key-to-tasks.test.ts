@@ -157,3 +157,7 @@ describe("usePRKeyToTasks", () => {
     expect(result.current.map.size).toBe(1);
   });
 });
+
+it("isolates equal PR numbers on different GitHub hosts", () => {
+  expect(prKey("acme", "site", 42, "git.company.example")).not.toBe(prKey("acme", "site", 42));
+});

@@ -156,8 +156,8 @@ func TestRegistryLoadRetainsRecordsWhenMigrationSaveFails(t *testing.T) {
 	if len(result.Added) != 0 {
 		t.Fatalf("boot scan registered an existing record as a sideload: %#v", result.Added)
 	}
-	if backend.saves != 1 {
-		t.Fatalf("boot scan performed %d store saves, want only the failed migration save", backend.saves)
+	if backend.saves != 2 {
+		t.Fatalf("boot scan performed %d store saves, want one failed migration save per record", backend.saves)
 	}
 	if _, ok, err := svc.approvalCurrent("stable-installation", "workspace-1"); err != nil || !ok {
 		t.Fatalf("boot scan lost an unrelated approval: ok=%v err=%v", ok, err)

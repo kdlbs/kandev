@@ -79,12 +79,53 @@ target of these commands. Mod means Command on macOS and Control elsewhere.
   clearance, and at least 44px touch targets without document horizontal overflow.
   All new labels, search keywords, hints, and errors shall be localized.
 
+### REQ-TASKS-KEYBOARD-ACTIONS-003: Sidebar row keyboard ownership
+
+#### Acceptance criteria
+
+- **AC-TASKS-KEYBOARD-ACTIONS-003.1:** When a user focuses a sidebar task
+  row's Task actions button and presses Enter or Space, its existing menu shall
+  open for that row without activating or selecting the row. This applies to
+  the desktop sidebar and the phone task picker with an attached keyboard.
+- **AC-TASKS-KEYBOARD-ACTIONS-003.2:** Keyboard activation of an enabled
+  button in the row's inline archive confirmation shall perform that button's
+  existing action without activating or selecting the task row.
+- **AC-TASKS-KEYBOARD-ACTIONS-003.3:** Row-owned Enter and Space shall retain
+  existing navigation, multi-selection and modifier behavior, including pending
+  removal suppression. The existing subtask toggle and pointer actions shall
+  remain usable.
+
+### REQ-TASKS-KEYBOARD-ACTIONS-004: Cancel a running chat turn with Escape
+
+**Intent:** Let users stop the active agent turn without leaving the chat composer.
+
+#### Acceptance criteria
+
+- **AC-TASKS-KEYBOARD-ACTIONS-004.1:** When the chat composer has focus and the
+  agent is running and the user has enabled Escape cancellation, Escape shall invoke the existing cancel-turn action for the
+  composer's resolved session and prevent the browser's default Escape action.
+- **AC-TASKS-KEYBOARD-ACTIONS-004.2:** When the agent is not running, the
+  composer is not focused, the setting is disabled, or Escape is part of IME composition, Escape shall
+  not cancel an agent turn.
+- **AC-TASKS-KEYBOARD-ACTIONS-004.3:** Escape handling shall not cancel a turn
+  from another focused chat control or overlay, and existing Escape behavior
+  outside the composer shall remain available.
+- **AC-TASKS-KEYBOARD-ACTIONS-004.4:** The shortcut shall use the current
+  composer session and the existing cancellation transport; it shall not
+  dispatch more than once for one keydown.
+- **AC-TASKS-KEYBOARD-ACTIONS-004.5:** A user setting in keyboard shortcut
+  preferences shall enable Escape cancellation. It shall default to off and
+  persist across sessions and devices.
+
 ## Out of scope
 
 Bulk-selection commands, a keyboard-shortcut settings system, implementing
 Duplicate, new plugin registration contracts, and changes to backend move,
 authorization, prompt delivery, persistence, or workflow policy.
+Escape does not cancel from transcript focus or other chat controls.
 
 ## Implementation Plans
 
 - [Task keyboard actions](../../../plans/task-keyboard-actions/plan.md)
+- [Sidebar nested-control keyboard ownership](../../../plans/sidebar-nested-keyboard/plan.md)
+- [Chat Escape cancellation](../../../plans/chat-escape-cancel/plan.md)

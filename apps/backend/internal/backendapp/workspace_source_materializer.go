@@ -66,6 +66,10 @@ type workspaceSourceSessionRescanner interface {
 	RescanWorkspaceForSession(context.Context, string, string, ...[]string) error
 }
 
+type workspaceSourceSessionRescanExcluder interface {
+	RescanWorkspaceForSessionWithExclusions(context.Context, string, string, []string, []string) error
+}
+
 type workspaceSourceMaterializationState struct {
 	environment  *models.TaskEnvironment
 	sessions     []*models.TaskSession
@@ -175,6 +179,7 @@ func (m *workspaceSourceMaterializer) materializeHostWorkspaceSources(ctx contex
 	for _, branch := range branchMaterializations {
 		if branch != nil && branch.worktree != nil {
 			materialization.newWorktrees = append(materialization.newWorktrees, branch.worktree)
+			materialization.postRoots = appendWorkspaceRoot(materialization.postRoots, branch.worktree.Path)
 		}
 	}
 	if materializeErr != nil {
@@ -223,12 +228,7 @@ func workspaceSourcePlacementKeepsRoot(batch *models.WorkspaceSourceBatch) bool 
 }
 
 func (m *workspaceSourceMaterializer) materializeNestedHostWorkspaceSources(ctx context.Context, state *workspaceSourceMaterializationState, batch *models.WorkspaceSourceBatch, materialization *hostWorkspaceMaterialization, branches []*branchMaterialization) ([]string, []*models.TaskSession, []*models.TaskEnvironmentRepo, error) {
-	for _, branch := range branches {
-		if branch != nil && branch.worktree != nil {
-			materialization.postRoots = appendWorkspaceRoot(materialization.postRoots, branch.worktree.Path)
-		}
-	}
-	ids, rescanned, err := m.rescanSessionWorkspaces(ctx, state.sessions, materialization.root, materialization.postRoots)
+	ids, rescanned, err := m.rescanSessionWorkspaces(ctx, state.environment.ID, state.sessions, materialization.root, materialization.postRoots)
 	if err != nil {
 		return nil, rescanned, nil, err
 	}
@@ -252,6 +252,38 @@ func (m *workspaceSourceMaterializer) materializeNestedHostWorkspaceSources(ctx 
 	return ids, rescanned, createdInventory, nil
 }
 
+func (m *workspaceSourceMaterializer) detachedEnvironmentWorktreeRoots(ctx context.Context, envID string) []string {
+	rows, err := m.repo.ListTaskEnvironmentRepos(ctx, envID)
+	if err != nil {
+		return nil
+	}
+	return detachedTaskEnvironmentRepoPaths(rows)
+}
+
+func detachedTaskEnvironmentRepoPaths(rows []*models.TaskEnvironmentRepo) []string {
+	paths := make([]string, 0)
+	for _, row := range rows {
+		if row != nil && row.Status == models.TaskEnvironmentRepoStatusDetached && row.WorktreePath != "" {
+			paths = append(paths, row.WorktreePath)
+		}
+	}
+	return paths
+}
+
+func (m *workspaceSourceMaterializer) activeEnvironmentWorktreeRoots(ctx context.Context, envID string) []string {
+	rows, err := m.repo.ListTaskEnvironmentRepos(ctx, envID)
+	if err != nil {
+		return nil
+	}
+	roots := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row != nil && row.Status == models.TaskEnvironmentRepoStatusActive && row.WorktreePath != "" {
+			roots = append(roots, row.WorktreePath)
+		}
+	}
+	return roots
+}
+
 func (m *workspaceSourceMaterializer) prepareHostWorkspaceMaterialization(ctx context.Context, taskID string, state *workspaceSourceMaterializationState, batch *models.WorkspaceSourceBatch) (*hostWorkspaceMaterialization, error) {
 	postRoots, err := canonicalWorkspaceSourceRoots(state, batch, true)
 	if err != nil {
@@ -261,6 +293,9 @@ func (m *workspaceSourceMaterializer) prepareHostWorkspaceMaterialization(ctx co
 	if err != nil {
 		return nil, err
 	}
+	activeWorktrees := m.activeEnvironmentWorktreeRoots(ctx, state.environment.ID)
+	postRoots = append(postRoots, activeWorktrees...)
+	priorRoots = append(priorRoots, activeWorktrees...)
 	root, err := m.resolveHostWorkspaceRoot(state)
 	if err != nil {
 		return nil, err
@@ -443,16 +478,24 @@ func (m *workspaceSourceMaterializer) adoptSessionWorkspaces(ctx context.Context
 	return ids, adopted, nil
 }
 
-func (m *workspaceSourceMaterializer) rescanSessionWorkspaces(ctx context.Context, sessions []*models.TaskSession, root string, sourceRoots []string) ([]string, []*models.TaskSession, error) {
+func (m *workspaceSourceMaterializer) rescanSessionWorkspaces(ctx context.Context, envID string, sessions []*models.TaskSession, root string, sourceRoots []string) ([]string, []*models.TaskSession, error) {
 	ids := make([]string, 0, len(sessions))
 	rescanned := make([]*models.TaskSession, 0, len(sessions))
 	rescanner, supported := m.rescanner.(workspaceSourceSessionRescanner)
 	if len(sessions) > 0 && !supported {
 		return nil, nil, fmt.Errorf("workspace source materialization requires live workspace rescan support")
 	}
+	excluded := m.detachedEnvironmentWorktreeRoots(ctx, envID)
+	excluder, excludes := m.rescanner.(workspaceSourceSessionRescanExcluder)
 	for _, session := range sessions {
 		if supported {
-			if err := rescanner.RescanWorkspaceForSession(ctx, session.ID, root, sourceRoots); err != nil {
+			var err error
+			if excludes {
+				err = excluder.RescanWorkspaceForSessionWithExclusions(ctx, session.ID, root, sourceRoots, excluded)
+			} else {
+				err = rescanner.RescanWorkspaceForSession(ctx, session.ID, root, sourceRoots)
+			}
+			if err != nil {
 				return ids, rescanned, fmt.Errorf("rescan workspace for session %s: %w", session.ID, err)
 			}
 			rescanned = append(rescanned, session)
@@ -474,7 +517,7 @@ func (m *workspaceSourceMaterializer) rollbackHostWorkspaceMaterialization(ctx c
 	if err := rollbackOwnedDirectoryLinks(materialization.linkUndo); err != nil {
 		rollbackErr = errors.Join(rollbackErr, err)
 	}
-	m.cleanupNewWorktrees(ctx, taskID, materialization.knownWorktree, materialization.newWorktrees...)
+	rollbackErr = errors.Join(rollbackErr, m.cleanupNewWorktrees(ctx, taskID, materialization.knownWorktree, materialization.newWorktrees...))
 	if !materialization.linkRootExisted && materialization.linkRoot != materialization.root {
 		_ = os.Remove(materialization.linkRoot)
 	}
@@ -513,10 +556,12 @@ func rollbackOwnedDirectoryLink(undo ownedDirectoryLinkUndo) error {
 	return nil
 }
 
-func (m *workspaceSourceMaterializer) cleanupNewWorktrees(ctx context.Context, taskID string, known map[string]bool, additional ...*worktree.Worktree) {
+func (m *workspaceSourceMaterializer) cleanupNewWorktrees(ctx context.Context, taskID string, known map[string]bool, additional ...*worktree.Worktree) error {
 	worktrees, err := m.worktreeMgr.GetAllByTaskID(context.WithoutCancel(ctx), taskID)
+	var cleanupErr error
 	if err != nil {
 		m.logger.Warn("list worktrees for workspace rollback", zap.String("task_id", taskID), zap.Error(err))
+		cleanupErr = fmt.Errorf("list worktrees for workspace rollback: %w", err)
 		worktrees = nil
 	}
 	worktrees = append(worktrees, additional...)
@@ -534,8 +579,11 @@ func (m *workspaceSourceMaterializer) cleanupNewWorktrees(ctx context.Context, t
 		}
 	}
 	if len(created) > 0 {
-		_ = m.worktreeMgr.CleanupWorktrees(context.WithoutCancel(ctx), created)
+		if err := m.worktreeMgr.CleanupWorktrees(context.WithoutCancel(ctx), created); err != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("cleanup new workspace worktrees: %w", err))
+		}
 	}
+	return cleanupErr
 }
 
 func (m *workspaceSourceMaterializer) restoreSessionWorkspaces(ctx context.Context, sessions []*models.TaskSession, workspacePath string, sourceRoots []string) error {

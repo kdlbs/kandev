@@ -4,6 +4,7 @@ import {
   IconAlertTriangle,
   IconCheck,
   IconCircleDot,
+  IconCircleMinus,
   IconClockHour4,
   IconGitMerge,
   IconGitPullRequest,
@@ -34,6 +35,7 @@ export type ChangeRequestTaskSummaryStatus =
   | "workflow_attention"
   | "workflow_unavailable"
   | "checks_not_successful"
+  | "all_skipped"
   | "passed"
   | "failed"
   | "in_progress"
@@ -112,6 +114,7 @@ const STATUS_LABEL_KEYS: Record<Exclude<ChangeRequestTaskSummaryStatus, "raw">, 
   workflow_attention: "github:workflowNeedsAttention",
   workflow_unavailable: "github:workflowStatusUnavailable",
   checks_not_successful: "github:checksNotSuccessful",
+  all_skipped: "github:allChecksSkipped",
   passed: "github:checkBucketPassed",
   failed: "github:checkBucketFailed",
   in_progress: "github:checkBucketInProgress",
@@ -139,6 +142,7 @@ const STATUS_ICONS: Record<ChangeRequestTaskSummaryStatus, TablerIcon> = {
   workflow_attention: IconAlertTriangle,
   workflow_unavailable: IconCircleDot,
   checks_not_successful: IconAlertTriangle,
+  all_skipped: IconCircleMinus,
   passed: IconCheck,
   failed: IconX,
   in_progress: IconClockHour4,

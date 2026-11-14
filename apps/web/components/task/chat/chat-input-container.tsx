@@ -1,6 +1,9 @@
 "use client";
 
+import { useTaskSessionMCPSelection } from "@/hooks/domains/session/use-task-session-mcp-selection";
+
 import { forwardRef, useCallback } from "react";
+import { useAppStore } from "@/components/state-provider";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { Message } from "@/lib/types/http";
 import type { ReviewComment } from "@/lib/state/slices/comments";
@@ -138,6 +141,9 @@ type ChatInputContainerProps = {
   hideAgentControls?: boolean;
   /** Hide the plan mode toggle button (for ephemeral/quick chat sessions) */
   hidePlanMode?: boolean;
+  /** Next-prompt suggestion for the current turn, rendered as ghost text. */
+  promptSuggestion?: string | null;
+  onPromptSuggestionDismiss?: () => void;
 };
 
 type ContainerState = ReturnType<typeof useChatInputContainer>;
@@ -187,6 +193,7 @@ function buildContextAreaProps(
 }
 
 type EnhancePromptExtras = {
+  mcpSelection?: ChatInputEditorAreaProps["mcpSelection"];
   onEnhancePrompt?: () => void;
   isEnhancingPrompt?: boolean;
   isUtilityConfigured?: boolean;
@@ -211,6 +218,7 @@ function buildEditorAreaProps(
     planModeAvailable: p.planModeAvailable ?? true,
     mcpServers: p.mcpServers ?? [],
     mcpAttachmentHistory: p.mcpAttachmentHistory,
+    mcpSelection: extras.mcpSelection,
     submitKey: p.submitKey,
     setIsInputFocused: s.setIsInputFocused,
     sessionId: p.sessionId,
@@ -228,6 +236,7 @@ function buildEditorAreaProps(
     canCancelAgent:
       p.showCancelAgent !== false &&
       shouldShowCancelAgent(p.isWorking, p.pendingClarification, p.sessionId),
+    hasPendingClarification: Boolean(p.pendingClarification),
     onPlanModeChange: p.onPlanModeChange,
     taskTitle: p.taskTitle,
     taskDescription: p.taskDescription,
@@ -244,6 +253,8 @@ function buildEditorAreaProps(
     hideSessionsDropdown: p.hideSessionsDropdown,
     minimalToolbar: p.minimalToolbar,
     hideAgentControls: p.hideAgentControls,
+    promptSuggestion: p.promptSuggestion ?? null,
+    onPromptSuggestionDismiss: p.onPromptSuggestionDismiss,
     hidePlanMode: p.hidePlanMode,
   };
 }
@@ -341,6 +352,12 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     const { sessionId, taskId, taskTitle, taskDescription, isAgentBusy, isStarting, isSending } =
       props;
     const p = normalizeChatInputProps(props);
+    const escapeCancelsAgent = useAppStore((state) => state.userSettings.escapeCancelsAgent);
+    const mcpSelection = useTaskSessionMCPSelection({
+      taskId,
+      sessionId,
+      workspaceId: props.workspaceId,
+    });
     const isMoving = props.isMoving ?? false;
     const executorUnavailable = props.executorUnavailable ?? false;
     const isBusyVisual = isStarting || isMoving;
@@ -462,7 +479,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
           showRequestChangesTooltip={p.showRequestChangesTooltip}
           hasPendingComments={s.hasPendingComments}
           planModeEnabled={props.planModeEnabled}
-          showFocusHint={s.showFocusHint}
+          showFocusHint={s.showFocusHint && !(p.promptSuggestion && !s.value.trim())}
           needsRecovery={(props.needsRecovery ?? false) || executorUnavailable}
           addFiles={s.addFiles}
           contextAreaProps={buildContextAreaProps(s, p)}
@@ -475,11 +492,15 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
               />
             ) : null
           }
-          editorAreaProps={buildEditorAreaProps(s, p, {
-            onEnhancePrompt: promptEnhancement.handleEnhancePrompt,
-            isEnhancingPrompt: promptEnhancement.isEnhancingPrompt,
-            isUtilityConfigured: promptEnhancement.isUtilityConfigured,
-          })}
+          editorAreaProps={{
+            ...buildEditorAreaProps(s, p, {
+              mcpSelection,
+              onEnhancePrompt: promptEnhancement.handleEnhancePrompt,
+              isEnhancingPrompt: promptEnhancement.isEnhancingPrompt,
+              isUtilityConfigured: promptEnhancement.isUtilityConfigured,
+            }),
+            escapeCancelsAgent,
+          }}
         />
       </>
     );

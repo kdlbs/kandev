@@ -28,6 +28,7 @@ Users inspect and edit code inside Kandev task file tabs, but code navigation an
 - **AC-PLATFORM-LSP-FILE-INTELLIGENCE-001.6:** Kotlin via the official `kotlin-lsp`; Kotlin is marked experimental while its upstream server is alpha
 - **AC-PLATFORM-LSP-FILE-INTELLIGENCE-001.7:** Wired editor capabilities are diagnostics and the server-advertised completion, hover, go-to-definition, references, signature-help, and semantic-token providers.
 - **AC-PLATFORM-LSP-FILE-INTELLIGENCE-001.8:** Global editor settings select languages that auto-start, languages Kandev may auto-install, and per-language configuration returned through `workspace/configuration`. Saving changed configuration updates the existing server through `workspace/didChangeConfiguration` without waiting for an idle disconnect or process restart.
+- **AC-PLATFORM-LSP-FILE-INTELLIGENCE-001.9:** When auto-install is enabled and a missing TypeScript or Python language server is installed successfully with npm, inherited npm global-install or global-location settings shall not prevent Kandev from finding the managed server for startup. Installation shall retain the task environment and its configured registry.
 
 ### REQ-PLATFORM-LSP-FILE-INTELLIGENCE-002: Browser-independent language-server continuity
 

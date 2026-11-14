@@ -59,6 +59,7 @@ func TestDeliveryRetentionIntegration(t *testing.T) {
 			if err != nil || cursor.RetiredSequence != 3 {
 				t.Fatalf("settled multi-turn frontier: %+v %v; want 3", cursor, err)
 			}
+			assertRetentionRowCount(t, repo, "agent_delivery_inbox", "stream_id = ?", terminal.StreamID, 0)
 			if after := retentionCanonicalContent(t, repo, terminal.SessionID); after != before {
 				t.Fatalf("canonical output changed: %q to %q", before, after)
 			}

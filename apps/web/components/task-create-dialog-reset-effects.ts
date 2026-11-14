@@ -205,4 +205,7 @@ function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInit
   // The dialog stays mounted between opens, so without this the previous
   // create's predecessor selection reappears on the next one.
   resetters.setBlockedBy([]);
+  resetters.setSelectedParentTaskId?.(undefined);
+  resetters.setRelatedTaskIds?.([]);
+  resetters.setBuiltinMCPPreferences(undefined);
 }

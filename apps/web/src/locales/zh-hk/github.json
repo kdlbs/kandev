@@ -1,4 +1,5 @@
 {
+  "openPr": "開啟 PR",
   "views": "視圖",
   "viewPicker": "視圖：{{view}}",
   "loadingSavedQueries": "正在載入已儲存的查詢...",
@@ -99,6 +100,10 @@
   "checksPendingCount_other": "{{count}} 個進行中",
   "checksRunning": "檢查執行中",
   "checksNotSuccessful": "檢查未成功",
+  "allChecksSkipped": "所有檢查均已跳過",
+  "checksSkippedCount_one": "{{count}} 個檢查已跳過",
+  "checksSkippedCount_other": "{{count}} 個檢查已跳過",
+  "lastDetailedObservation": "上次詳細觀測",
   "chooseAGithubApp": "選擇 GitHub 應用",
   "chooseHowNewlyLaunchedTasksAuthenticate": "選擇新啓動任務向 GitHub 驗證的方式。這不會改變上方的工作區自動化連接。",
   "chooseMergeMethod": "選擇合併方式",
@@ -652,10 +657,16 @@
   "mergeQueueRecoveryStatusRepairRequestedWaiting": "已請求修復。等待新提交後再重新排隊。",
   "mergeQueueRecoveryStatusWaitingForCommit": "等待新提交後再重新排隊。",
   "mergeQueueRecoveryStatusWaitingForChecks": "檢測到新 head。等待必需的檢查。",
+  "githubHost": "GitHub 主機",
+  "invalidGitHubHost": "請輸入 GitHub 網頁主機名或不含路徑的 HTTPS 源。",
+  "selectedGitHubHost": "主機：{{host}}",
+  "githubHostReplacement": "從 {{current}} 更改為 {{proposed}} 將使待處理的授權失效。現有儲存庫、關聯任務、監視和已儲存的篩選器保留原主機，可能需要重新連接。",
+  "createPersonalAccessToken": "建立個人存取權杖",
   "mergeAccessLoading": "正在檢查合併權限。",
   "mergeAccessUnavailable": "無法擷取合併權限。",
   "mergeAccessDeniedByActor": "{{actor}} 無法合併到 {{repository}}。",
   "mergeAccessDenied": "此帳戶無法合併到 {{repository}}。",
   "checkMergeAccess": "重新檢查",
-  "mergeAsActor": "以 {{actor}} 的身份"
+  "mergeAsActor": "以 {{actor}} 的身份",
+  "lastDetailedObservationAllSkipped": "上次詳細觀測：所有檢查均已跳過"
 }

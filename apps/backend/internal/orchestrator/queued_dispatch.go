@@ -464,6 +464,28 @@ func (s *Service) clearQueuedDispatchInFlightIfCurrent(
 	}
 }
 
+// clearQueuedDispatchInFlightForCapacityRefusal releases the exact dispatch
+// reservation after a pre-dispatch capacity refusal. The accepted-phase guard
+// in clearQueuedDispatchInFlightIfCurrent intentionally retains ownership for
+// an awaiting admission, but a capacity refusal never reached admission and
+// must not block the restored head's retry.
+func (s *Service) clearQueuedDispatchInFlightForCapacityRefusal(
+	sessionID string,
+	reservation *queuedDispatchReservation,
+) {
+	if sessionID == "" || reservation == nil {
+		return
+	}
+	if pending := s.pendingQueuedDispatch(sessionID); pending == reservation {
+		pending.phase.Store(uint32(queuedDispatchSupersededByNewDispatch))
+		s.dispatchingQueued.CompareAndDelete(sessionID, reservation)
+	}
+	if accepted := s.acceptedQueuedDispatchForSession(sessionID); accepted == reservation {
+		accepted.phase.Store(uint32(queuedDispatchSupersededByNewDispatch))
+		s.acceptedQueuedDispatch.CompareAndDelete(sessionID, reservation)
+	}
+}
+
 func (s *Service) markQueuedDispatchDrainPending(sessionID string) {
 	if sessionID != "" {
 		s.queuedDispatchDrainPending.Store(sessionID, struct{}{})

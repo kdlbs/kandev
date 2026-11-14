@@ -74,6 +74,7 @@ Task agents can call `spawn_session_kandev` with a prompt and optional `name`, `
 - A target task must be in the same workspace as the spawning task.
 - Profile selection prefers an explicit profile, then the spawner's profile for the same task, then the target task's primary-session profile.
 - The spawned session receives hidden attribution context identifying the sender and reply route.
+- Spawning does not change the conversation that the current workflow step records for later explicit targets. A step that already has a stored recipient keeps it, and a step with none still uses its fresh-session fallback.
 - A failure to apply the optional name does not fail an otherwise successful launch.
 
 Use the returned task ID, session ID, and state for subsequent targeted messages.
@@ -93,7 +94,7 @@ Choose a workspace mode:
 
 | Mode                         | Default and inheritance                                                                                                                                                                    | Use it when                                                               |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
-| **Inherit parent workspace** | Default when the parent has an active worktree. Reuses the parent's executor, repositories, worktrees, branch, and current uncommitted files. Repository and executor controls are hidden. | The child is a focused collaborator on the same file state.               |
+| **Inherit parent workspace** | Default when the parent has an active worktree. Normally reuses the parent's materialized workspace, repositories, worktrees, branch, and current files. If a new launch selects a different non-Kubernetes executor, Kandev creates a separate child-owned workspace; uncommitted parent changes are not copied. Repository and executor controls are hidden. | The child is a focused collaborator on the same file state.               |
 | **Create new workspace**     | Default when the parent has no active worktree branch. Lets you choose another configured/discovered repository, folder, remote URL, branch, and executor.                                 | The child needs isolation, a different branch, or a different repository. |
 
 The context choices are **Blank**, **Copy initial prompt**, and, when a utility agent is configured, **Summarize session**. Context supplies background; it does not create a shared conversation. Attachments and prompt enhancement are also available.
@@ -123,7 +124,7 @@ For redirected calls, `parent_resolution` contains `requested_parent_id`, `resol
 
 - `start_agent` defaults to `true`. A subtask or redirected sibling needs a detailed `prompt` when it is true. Set it to `false` for a placeholder task.
 - `autopilot` defaults to `false`. Set it to `true` to start an autonomous task. This choice is immutable and is not inherited by subtasks. An autopilot child receives `ask_parent_question_kandev` instead of `ask_user_question_kandev`; an autopilot root receives neither question tool. See [Agent Communication](agent-communication.md#autopilot-parent-questions) for the answer protocol.
-- The tool inherits the parent workspace, workflow, profile, executor, repositories, and base branches unless overridden.
+- The tool inherits the parent workspace, workflow, profile, executor, repositories, and base branches unless overridden. If a new child launch selects a different non-Kubernetes executor from the inherited environment, Kandev creates a separate child-owned workspace; uncommitted parent changes are not copied. A session still bound to the inherited environment must resume with its original executor, and Kubernetes environments cannot be shared across tasks.
 - Inherited repository attachments deliberately do not copy an explicit checkout branch.
 - An explicit same-repository child uses the inherited base branch. An explicit cross-repository child defaults to that repository's default branch unless `base_branch` is supplied.
 - Every created task must resolve an agent profile, even with `start_agent: false`.
@@ -133,6 +134,19 @@ For redirected calls, `parent_resolution` contains `requested_parent_id`, `resol
 - An ephemeral Quick Chat task cannot be a parent; omit `parent_id` and create a top-level task instead.
 
 For predictable top-level creation, pass `repository_url`, `repository_id`, or `local_path`, as the tool contract requests. `repository_url` may be a canonical repository URL, a GitHub pull request URL such as `https://github.com/contributor/widget/pull/123`, or a GitLab merge request URL such as `https://gitlab.example.com/group/widget/-/merge_requests/123` on the configured host. For a pull request or merge request, Kandev validates the open source contribution, keeps the target repository as `origin`, and pushes future commits to the contributor's existing source branch after a write preflight; the existing provider change is reused rather than creating a duplicate. Provider-authored title, description, comments, and diff content are not trusted task context. If collaboration is disabled, enable the provider's edit-from-target setting and retry; if the write preflight reports missing credentials, configure the task's [Git credentials](integrations.md#choose-task-git-credentials) and retry the launch. Kandev never falls back to pushing `origin`. In task mode, the backend currently inherits repositories from the calling source task when no locator is supplied; if that source is repository-free, it can create a repository-free task despite the stricter tool description. The regular UI's **None** source remains the explicit route for intentional repository-free work.
+
+### Set or change task priority from MCP
+
+`create_task_kandev` uses `medium` when `priority` is omitted, even when the
+parent has another priority. Use `update_task_kandev` to change priority
+without changing task state:
+
+```json
+{ "task_id": "task-uuid", "priority": "high" }
+```
+
+See [Set task priority through MCP](automation-and-mcp.md#set-task-priority-through-mcp)
+for accepted values, omission behavior, validation, and retry behavior.
 
 ## Coordinate with targeted messages
 
@@ -191,15 +205,15 @@ Additional messaging boundaries:
 - Sender metadata and content become part of the target conversation. Do not send secrets.
 - Use bounded requests with the repository, branch, expected result, and reply target instead of treating messages as shared memory.
 
-Use `get_task_conversation_kandev` to read a primary or explicit session conversation. It supports limits, before/after cursors, ascending or descending order, and message-type filters. When a task has more than one session, use `list_task_sessions_kandev` to list them (newest first, flagging the primary and your own) and pass the `session_id` you want. Use `list_related_tasks_kandev` for the current or another same-workspace task to list its parent, direct children, siblings, stored blocker relationships, and associated GitHub pull requests.
+Use `get_task_conversation_kandev` to read a primary or explicit session conversation. It supports limits, before/after cursors, ascending or descending order, and message-type filters. When a task has more than one session, use `list_task_sessions_kandev` to list them (newest first, flagging the primary and your own) and pass the `session_id` you want. Use `list_related_tasks_kandev` to list a task's parent, direct children, siblings, stored blocker relationships, and associated GitHub pull requests. `task_id` defaults to the current task; another target is allowed only when it is an ancestor, a descendant, a sibling with a shared non-empty parent, or a blocker of the caller in the same workspace. Unrelated tasks are denied, including in the same workspace. Compact output is a presentation option, not a separate metadata permission: `verbose` adds descriptions and never widens access.
 
 Replies close the loop: the receiving agent calls `message_task_kandev` back with the originating task's ID, turning a one-way notification into a genuine bidirectional conversation. This enables multi-turn negotiations between agents, for example, agreeing on an API contract before both sides implement. See [Agent Communication](agent-communication.md) for delivery semantics, discovery patterns, and a worked negotiation example.
 
 ## Wait for child tasks
 
-On the parent's current workflow step, configure **When Child Tasks Complete** to move next, previous, or to a selected step. It runs once when every active direct child is `COMPLETED`, `FAILED`, or `CANCELLED` and the parent has an active session.
+On the parent's current workflow step, configure **When Child Tasks Complete** to move next, previous, or to a selected step. It runs once only when every active direct child is `COMPLETED` and the parent has an active session. A `FAILED` or `CANCELLED` child keeps the parent waiting until that child completes successfully.
 
-It ignores archived and ephemeral children, ignores grandchildren, and does not run if the parent has no children. The qualifying parent-session states are `CREATED`, `STARTING`, `RUNNING`, and `WAITING_FOR_INPUT`; no session, `IDLE`, or a terminal session prevents the transition. Terminal child state means work stopped; it does not mean every child succeeded. Put a human Review step after the transition when failures, diffs, or pull requests must be inspected.
+It ignores archived and ephemeral children, ignores grandchildren, and does not run if the parent has no children. The qualifying parent-session states are `CREATED`, `STARTING`, `RUNNING`, and `WAITING_FOR_INPUT`; no session, `IDLE`, or a terminal session prevents the transition. Existing workflows follow this rule too. If a workflow previously advanced after a child failed or was cancelled, it now waits until that child completes successfully. Put a human Review step after the transition when completed work, diffs, or pull requests must be inspected.
 
 For a human gate, use **On Turn Complete → Do nothing (wait for user)** and require a person to review before moving the task or sending the next instruction. `step_complete_kandev` proves only that the agent emitted the configured completion signal.
 
@@ -272,7 +286,7 @@ processes after attachment. Local Docker, SSH, and Sprites instead clone the new
 the current remote workspace and rescan it without changing the agent CWD or restarting the agent
 and workspace processes.
 
-Task agents can call `add_workspace_sources_kandev` with the same mixed batch; `task_id` defaults to the current task, and the operation remains idle-only. A direct parent in the same workspace can use it to recover an idle child that is missing a repository or SDK; siblings and other task relationships cannot target that child. Exact retries are safe no-ops. `add_branch_to_task_kandev` remains the current-task-only Worktree legacy one-repository/branch path and may run during an active turn: it creates a sibling worktree under the task directory, promotes the Files root to that parent, and rescans without restarting the agent, terminals, or workspace processes. Its `worktree_path` is the exact new location, `task_workspace_path` is the Files root, and `agent_cwd_changed` is always `false`; the agent's current directory stays unchanged.
+Task agents can call `add_workspace_sources_kandev` with the same mixed batch; `task_id` defaults to the current task, and the operation remains idle-only. A direct parent in the same workspace can use it to recover an idle child that is missing a repository or SDK; siblings and other task relationships cannot target that child. Exact retries are safe no-ops. `add_branch_to_task_kandev` remains the current-task-only Worktree and Local one-repository/branch path and may run during an active turn: it creates a sibling worktree under the task directory, promotes the Files root to that parent, and rescans without restarting the agent, terminals, or workspace processes. Passing `worktree_path` instead attaches an agent-created linked worktree in place without moving or rewriting it. Passive detection also attaches unreported worktrees inside the task workspace root; `Remove from task` in the Changes or Files root menu hides a non-primary root without deleting its directory, branch, or pull requests, and detection does not re-add it until the agent reports it again. Its `worktree_path` is the exact new location, `task_workspace_path` is the Files root, and `agent_cwd_changed` is always `false`; the agent's current directory stays unchanged.
 
 Use `update_repository_base_branch_kandev` with a task-repository ID to change the comparison base. The database update is authoritative. Resetting cached session bases, refreshing Changes, base commit, ahead/behind counts, and cumulative diff in a live tracker are best-effort side effects; a failure is logged without rolling back the new base, and the persisted value is rebuilt on the next session launch. The tool does not rewrite commits, switch the checkout, or change an existing pull request's target branch.
 
@@ -334,7 +348,7 @@ The [Office task guide](office-tasks.md) covers its projects, assignments, deepe
 - **Parallel agents overwrite work:** stop one writer, assign disjoint files, or create an isolated subtask workspace.
 - **Subtask cannot be created:** confirm the prompt (and title unless **Agent-generated task titles** is enabled), compatible profile, workflow, and the one-level Kanban depth limit. From a Kanban child, use `parent_id: "self"` for the supported sibling placement; an explicit child ID still returns the depth error.
 - **Subtask creates but its agent or repositories fail to start:** the dialog does not enforce agent/executor compatibility. Confirm the agent is configured on that executor; multi-repository creation supports Worktree, Local Docker, SSH, and Sprites.
-- **Inherited subtask sees unexpected changes:** it intentionally shares the parent's materialized files and branch.
+- **Inherited subtask sees unexpected changes:** it normally shares the parent's materialized files and branch. A launch on a different non-Kubernetes executor receives a separate child-owned workspace, which does not include uncommitted parent changes.
 - **Message remains queued:** the target is busy and only one queued message drains per turn. Check for `queue_full` before retrying.
 - **Interrupt is rejected:** only the target's direct parent may use interrupt delivery.
 - **Stop is rejected:** `stop_task_kandev` is task-mode only and accepts only a same-workspace direct child of the caller.

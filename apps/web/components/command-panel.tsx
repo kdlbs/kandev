@@ -171,6 +171,7 @@ type CommandPanelEffectsOptions = {
   open: boolean;
   state: ReturnType<typeof useCommandPanelState>;
   workspaceId: string | null;
+  workflowId: string | null;
   activeSessionId: string | null;
   inventoryRevision: string;
   workspaceSearchAvailable: boolean;
@@ -183,6 +184,7 @@ function useCommandPanelEffects(options: CommandPanelEffectsOptions) {
     open,
     state,
     workspaceId,
+    workflowId,
     activeSessionId,
     inventoryRevision,
     workspaceSearchAvailable,
@@ -239,6 +241,7 @@ function useCommandPanelEffects(options: CommandPanelEffectsOptions) {
     search,
     open,
     workspaceId,
+    workflowId,
     steps,
     setTaskResults,
     setIsSearching,
@@ -462,7 +465,7 @@ function useCommandPanelLiveTasks() {
     if (kanbanWorkflowId && activeLastStepId) {
       lastStepIdByWorkflowId.set(kanbanWorkflowId, activeLastStepId);
     }
-    return { tasks, lastStepIdByWorkflowId, steps: kanbanSteps };
+    return { tasks, lastStepIdByWorkflowId, steps: kanbanSteps, workflowId: kanbanWorkflowId };
   }, [kanbanSnapshots, kanbanSteps, kanbanTasks, kanbanWorkflowId]);
 }
 
@@ -480,6 +483,7 @@ export function CommandPanel() {
     tasks: liveTasksById,
     lastStepIdByWorkflowId,
     steps: kanbanSteps,
+    workflowId: kanbanWorkflowId,
   } = useCommandPanelLiveTasks();
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
@@ -525,6 +529,7 @@ export function CommandPanel() {
     open,
     state,
     workspaceId,
+    workflowId: kanbanWorkflowId,
     activeSessionId,
     inventoryRevision,
     workspaceSearchAvailable,

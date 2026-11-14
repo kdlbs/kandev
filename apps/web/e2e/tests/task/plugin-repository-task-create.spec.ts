@@ -53,6 +53,8 @@ async function selectFixtureRepository(page: Page): Promise<void> {
   await expect(repositoryOption).toBeVisible({ timeout: 15_000 });
   await repositoryOption.click();
   await expect(repositoryTrigger).toContainText("TEAM/fixture");
+  await expect(page.getByTestId("remote-repo-popover-content")).toHaveCount(0);
+  await expect(repositoryTrigger).toBeFocused();
 }
 
 async function selectFixtureBranch(page: Page): Promise<void> {

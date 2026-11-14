@@ -12,6 +12,6 @@ conversation; rerun only the affected task-defined check after a fix. When the
 user explicitly asks to wait or monitor PR status, an authorized read-only
 `pr-poller` may collect updates without remediation.
 
-If GitHub access requires approval, surface that gate
-and stop. Do not relaunch after denial, cancellation, or interruption; the
-shared skill distinguishes approval gates from transient fetch failures.
+If runtime network access to GitHub requires approval, surface that gate and stop.
+Do not relaunch after denial, cancellation, or interruption.
+For fork CI authorization, follow the shared skill.

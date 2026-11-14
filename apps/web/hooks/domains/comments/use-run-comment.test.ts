@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import type {
+  Comment,
   AgentMessageComment,
   DiffComment,
   PlanComment,
@@ -55,6 +56,7 @@ const mockSubscribe = vi.fn(
 );
 const mockGetWebSocketClient = vi.fn(() => ({ request: mockRequest }));
 let mockStoreState: Record<string, unknown> = {};
+let mockCommentsById: Record<string, Comment> = {};
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => mockGetWebSocketClient(),
@@ -86,8 +88,11 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/lib/state/slices/comments", () => ({
-  useCommentsStore: (selector: (s: Record<string, unknown>) => unknown) =>
-    selector({ markCommentsSent: mockMarkCommentsSent }),
+  useCommentsStore: Object.assign(
+    (selector: (s: Record<string, unknown>) => unknown) =>
+      selector({ markCommentsSent: mockMarkCommentsSent, byId: mockCommentsById }),
+    { getState: () => ({ markCommentsSent: mockMarkCommentsSent, byId: mockCommentsById }) },
+  ),
 }));
 
 vi.mock("@/lib/state/slices/comments/format", () => ({
@@ -167,6 +172,7 @@ function renderCommentHook(sessionId: string | null = "sess-1") {
 
 function setup() {
   vi.clearAllMocks();
+  mockCommentsById = {};
   const state = makeStoreState("WAITING_FOR_INPUT");
   mockStoreState = state;
   mockListTaskSessions.mockResolvedValue({
@@ -647,4 +653,51 @@ describe("useRunComment — session delivery failures", () => {
     expect(mockRequest).not.toHaveBeenCalled();
     expect(mockMarkCommentsSent).not.toHaveBeenCalled();
   });
+});
+
+it("reads walkthrough acknowledgement at call time without requiring a render", async () => {
+  setup();
+  mockRequest.mockResolvedValue(undefined);
+  const comment = makeWalkthroughComment();
+  mockCommentsById = { [comment.id]: comment };
+  const { result } = renderCommentHook();
+  mockCommentsById = { [comment.id]: { ...comment, status: "sent" } };
+  await result.current.runComment(comment);
+  expect(mockRequest).not.toHaveBeenCalled();
+  expect(mockMarkCommentsSent).not.toHaveBeenCalled();
+  mockCommentsById = { [comment.id]: comment };
+  await result.current.runComment(comment);
+  expect(mockRequest).toHaveBeenCalledOnce();
+});
+
+it("retries rejected walkthrough delivery without acknowledging the failed attempt", async () => {
+  setup();
+  mockGetWebSocketClient.mockReturnValue({ request: mockRequest });
+  mockRequest.mockRejectedValueOnce(new Error("Delivery rejected")).mockResolvedValue(undefined);
+  const { result } = renderCommentHook();
+  const comment = makeWalkthroughComment();
+  await expect(result.current.runComment(comment)).rejects.toThrow("Delivery rejected");
+  expect(mockMarkCommentsSent).not.toHaveBeenCalled();
+  await result.current.runComment(comment);
+  expect(mockRequest).toHaveBeenCalledTimes(2);
+  expect(mockMarkCommentsSent).toHaveBeenCalledExactlyOnceWith([comment.id]);
+});
+
+it("shares an outstanding walkthrough submission instead of sending twice", async () => {
+  setup();
+  mockGetWebSocketClient.mockReturnValue({ request: mockRequest });
+  let accept!: () => void;
+  mockRequest.mockReturnValue(
+    new Promise<void>((resolve) => {
+      accept = resolve;
+    }),
+  );
+  const { result } = renderCommentHook();
+  const comment = makeWalkthroughComment();
+  const first = result.current.runComment(comment);
+  const second = result.current.runComment(comment);
+  expect(mockRequest).toHaveBeenCalledTimes(1);
+  accept();
+  await Promise.all([first, second]);
+  expect(mockMarkCommentsSent).toHaveBeenCalledExactlyOnceWith([comment.id]);
 });

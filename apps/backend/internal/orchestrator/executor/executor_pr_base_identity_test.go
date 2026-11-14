@@ -32,7 +32,7 @@ func TestGitHubComparisonRepositoryFromRepositoryAcceptsCanonicalProviderHost(t 
 }
 
 func TestNormalizeGitHubComparisonRepositoryRejectsOtherHosts(t *testing.T) {
-	for _, host := range []string{"https://github.com.evil", "https://github.com:8443", "https://github.com/api"} {
+	for _, host := range []string{"https://github.com:8443", "https://github.com/api", "https://user@git.example.com", "http://git.example.com"} {
 		t.Run(host, func(t *testing.T) {
 			if _, ok := normalizeGitHubComparisonRepository(models.ComparisonTargetRepository{
 				Host: host, Path: "test-owner/test-repo",
@@ -519,7 +519,7 @@ func TestResolveTaskRepoInfo_ContributionValidatesPRHeadAgainstSourceRepository(
 		Number: 42, State: models.RemoteContributionStateOpen, BaseBranch: "main", HeadBranch: "feature",
 		HeadSHA: "0123456789abcdef0123456789abcdef01234567", CollaborationAllowed: true,
 		SourceRepository: models.RemoteContributionRepository{
-			Host: "github.com", Path: "fork-owner/widgets", RemoteURL: "https://github.com/fork-owner/widgets.git",
+			Host: "github.com", Path: "fork-owner/widgets", ProviderID: "R_verified", RemoteURL: "https://github.com/fork-owner/widgets.git",
 		},
 	}
 	if err := models.PutRemoteContribution(metadata, binding); err != nil {
@@ -527,7 +527,8 @@ func TestResolveTaskRepoInfo_ContributionValidatesPRHeadAgainstSourceRepository(
 	}
 	target := forkPRComparisonTarget()
 	target.TargetBranch = "release"
-	resolver := &recordingPRBaseResolver{result: &models.PRBase{Target: *target}}
+	target.HeadRepository.ProviderID = "42"
+	resolver := &recordingPRBaseResolver{result: &models.PRBase{Target: *target, HeadRepositoryNodeID: "R_verified"}}
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)
 	exec.SetPRBaseResolver(resolver)
 	info, err := exec.resolveTaskRepoInfo(context.Background(), &models.TaskRepository{

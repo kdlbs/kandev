@@ -288,6 +288,11 @@ func (r *sqliteRepository) UpdateAgent(ctx context.Context, agent *models.Utilit
 	agent.Description = strings.TrimSpace(agent.Description)
 	agent.Prompt = strings.TrimSpace(agent.Prompt)
 	agent.UpdatedAt = time.Now().UTC()
+	// Keep persisted updated_at strictly after created_at so startup repair
+	// does not treat an explicit edit as an untouched legacy row.
+	if !agent.UpdatedAt.Truncate(time.Microsecond).After(agent.CreatedAt.Truncate(time.Microsecond)) {
+		agent.UpdatedAt = agent.CreatedAt.Add(time.Microsecond)
+	}
 
 	enabledInt := 0
 	if agent.Enabled {

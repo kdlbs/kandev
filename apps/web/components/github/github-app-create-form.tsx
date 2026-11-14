@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useContext, useEffect } from "react";
 import { IconExternalLink } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -21,26 +21,46 @@ import { GitHubAppVisibilityField } from "./github-app-visibility-field";
 import type { useGitHubAppRegistrations } from "@/hooks/domains/github/use-github-app-registrations";
 import { useTranslation } from "react-i18next";
 
+import {
+  GitHubConnectionDraftContext,
+  useConnectionFormState,
+  useConnectionRequestGuard,
+} from "./github-connection-draft";
+
 type RegistrationHook = ReturnType<typeof useGitHubAppRegistrations>;
 
 export function GitHubAppCreateForm({
   workspaceId,
+  githubHost = "github.com",
   registrations,
 }: {
   workspaceId: string;
+  githubHost?: string;
   registrations: RegistrationHook;
 }) {
   const { t } = useTranslation();
-  const [displayName, setDisplayName] = useState("");
-  const [ownerType, setOwnerType] = useState<"user" | "organization">("organization");
-  const [ownerLogin, setOwnerLogin] = useState("");
-  const [publicBaseUrl, setPublicBaseUrl] = useState("");
-  const [visibility, setVisibility] = useState(defaultVisibility);
-  const [errors, setErrors] = useState<AppSetupErrors>({});
-  const [handoff, setHandoff] = useState<StartGitHubAppManifestResponse | null>(null);
+  const sharedDraft = useContext(GitHubConnectionDraftContext);
+  const captureRequest = useConnectionRequestGuard(`${workspaceId}:${githubHost}`);
+  const [displayName, setDisplayName] = useConnectionFormState("create-display-name", "");
+  const [ownerType, setOwnerType] = useConnectionFormState<"user" | "organization">(
+    "create-owner-type",
+    "organization",
+  );
+  const [ownerLogin, setOwnerLogin] = useConnectionFormState("create-owner-login", "");
+  const [publicBaseUrl, setPublicBaseUrl] = useConnectionFormState("create-public-base-url", "");
+  const [visibility, setVisibility] = useConnectionFormState(
+    "create-visibility",
+    defaultVisibility,
+  );
+  const [errors, setErrors] = useConnectionFormState<AppSetupErrors>("create-errors", {});
+  const [handoff, setHandoff] = useConnectionFormState<StartGitHubAppManifestResponse | null>(
+    "create-handoff",
+    null,
+  );
   const { toast } = useToast();
 
   useEffect(() => {
+    if (sharedDraft) return;
     setDisplayName("");
     setOwnerType("organization");
     setOwnerLogin("");
@@ -48,10 +68,11 @@ export function GitHubAppCreateForm({
     setVisibility(defaultVisibility);
     setErrors({});
     setHandoff(null);
-  }, [workspaceId]);
+  }, [workspaceId, githubHost, sharedDraft]);
 
   async function prepare(event: React.FormEvent) {
     event.preventDefault();
+    const isCurrent = captureRequest();
     const basics = validateRegistrationBasics({
       displayName,
       ownerType,
@@ -61,16 +82,17 @@ export function GitHubAppCreateForm({
     setErrors(basics.errors);
     if (!basics.publicBaseUrl || Object.keys(basics.errors).length) return;
     try {
-      setHandoff(
-        await registrations.startManifest({
-          display_name: basics.displayName,
-          owner_type: ownerType,
-          owner_login: basics.ownerLogin,
-          visibility,
-          public_base_url: basics.publicBaseUrl,
-        }),
-      );
+      const prepared = await registrations.startManifest({
+        github_host: githubHost,
+        display_name: basics.displayName,
+        owner_type: ownerType,
+        owner_login: basics.ownerLogin,
+        visibility,
+        public_base_url: basics.publicBaseUrl,
+      });
+      if (isCurrent()) setHandoff(prepared);
     } catch (error) {
+      if (!isCurrent()) return;
       const detail = appRegistrationError(error);
       toast({
         description: detail?.error ?? t("github:githubAppSetupCouldNotStart"),

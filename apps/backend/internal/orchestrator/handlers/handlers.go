@@ -149,6 +149,9 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 
 	resp, err := h.service.LaunchSession(ctx, &req)
 	if err != nil {
+		if response, responseErr := materializedRouteProfileChangeResponse(msg, err); response != nil || responseErr != nil {
+			return response, responseErr
+		}
 		if response, responseErr := workspaceReuseUnsupportedConflictResponse(msg, err); response != nil || responseErr != nil {
 			return response, responseErr
 		}
@@ -412,7 +415,7 @@ func restoreRequiredRecoveryResponse(msg *ws.Message, err error, sessionID strin
 	}
 	reason := reasoner.RecoveryReason()
 	switch reason {
-	case "native_state_missing", "native_resume_unsupported", "workspace_incompatible", "unresolved_durable_work":
+	case "native_state_missing", "native_resume_unsupported", "workspace_incompatible", "unresolved_durable_work", "unknown_prompt_outcome":
 	default:
 		return nil, nil
 	}
@@ -425,6 +428,17 @@ func restoreRequiredRecoveryResponse(msg *ws.Message, err error, sessionID strin
 	if generationer, ok := reasoner.(interface{ RecoveryGeneration() int64 }); ok {
 		if generation := generationer.RecoveryGeneration(); generation > 0 {
 			details["generation"] = generation
+		}
+	}
+	if identity, ok := reasoner.(interface {
+		RecoveryBlockID() string
+		RecoveryIncarnationID() string
+	}); ok {
+		if blockID := identity.RecoveryBlockID(); blockID != "" {
+			details["block_id"] = blockID
+		}
+		if incarnationID := identity.RecoveryIncarnationID(); incarnationID != "" {
+			details["incarnation_id"] = incarnationID
 		}
 	}
 	return ws.NewError(
@@ -447,6 +461,24 @@ func taskArchivedConflictResponse(msg *ws.Message, err error) (*ws.Message, erro
 		"Task is archived. Unarchive it before recovering this session.",
 		map[string]interface{}{"kind": "task_archived"},
 	)
+}
+
+// sessionRecoveryFailureResponse exposes only safe causes already correlated to
+// the failed recovery attempt. A generic readiness wrapper keeps its message.
+func sessionRecoveryFailureResponse(msg *ws.Message, err error, sessionID string) (*ws.Message, error) {
+	causes, ok := orchestrator.RecoveryFailureCauses(err)
+	if !ok {
+		return nil, nil
+	}
+	details := map[string]interface{}{
+		"kind":       "session_recovery_failed",
+		"session_id": sessionID,
+		"causes":     causes,
+	}
+	if identity, found := orchestrator.RecoveryFailureIdentity(err); found && identity.ErrorStamp != "" {
+		details["error_stamp"] = identity.ErrorStamp
+	}
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to recover session: "+err.Error(), details)
 }
 
 // wsRecoverSession recovers a session by id (resume or fresh start).
@@ -526,6 +558,14 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 			return recoveryResponse, responseErr
 		}
 		if recoveryResponse, responseErr := restoreRequiredRecoveryResponse(msg, err, req.SessionID); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
+		if recoveryResponse, responseErr := sessionRecoveryFailureResponse(msg, err, req.SessionID); recoveryResponse != nil || responseErr != nil {
+			h.logger.Error("failed to recover session",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.SessionID),
+				zap.String("action", req.Action),
+				zap.Error(err))
 			return recoveryResponse, responseErr
 		}
 		h.logger.Error("failed to recover session",

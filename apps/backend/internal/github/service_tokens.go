@@ -20,11 +20,12 @@ type ExhaustedRateLimit struct {
 // Returns an empty slice when none are exhausted, so callers can safely
 // `len()` the result.
 func (s *Service) ExhaustedRateLimits() []ExhaustedRateLimit {
-	if s.rateTracker == nil {
+	tracker := s.RateTracker()
+	if tracker == nil {
 		return nil
 	}
 	out := []ExhaustedRateLimit{}
-	for resource, snap := range s.rateTracker.All() {
+	for resource, snap := range tracker.All() {
 		if snap.Exhausted() {
 			out = append(out, ExhaustedRateLimit{
 				Resource: string(resource),
@@ -39,7 +40,7 @@ func (s *Service) ExhaustedRateLimits() []ExhaustedRateLimit {
 // returned by GetStatus and the rate-limit WS notification. Returns nil
 // when no buckets are known yet so the field stays omitted.
 func (s *Service) rateLimitInfo() *GitHubRateLimitInfo {
-	return rateLimitInfoForTracker(s.rateTracker)
+	return rateLimitInfoForTracker(s.RateTracker())
 }
 
 func rateLimitInfoForTracker(tracker *RateTracker) *GitHubRateLimitInfo {
@@ -147,7 +148,7 @@ func (s *Service) retryClientCreation(ctx context.Context) {
 		s.logger.Debug("GitHub client retry failed", zap.Error(err))
 		return
 	}
-	attachRateTracker(client, s.rateTracker, s.logger)
+	s.coordinateLegacyClient(ctx, client, "")
 	s.client = client
 	s.authMethod = authMethod
 	s.logger.Info("GitHub client recovered after retry",
@@ -176,12 +177,16 @@ func (s *Service) ConfigureToken(ctx context.Context, token string) error {
 	// Validate the token by testing authentication. Wire the rate tracker
 	// onto the test client up front so the validation request seeds the
 	// shared quota and subsequent PAT-backed calls keep feeding it.
-	testClient := s.newPATClient(token)
+	testClient := s.newPATClient(ctx, token)
 	user, err := testClient.GetAuthenticatedUser(ctx)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
 	s.logger.Info("validated GitHub token", zap.String("user", user))
+	s.coordinateLegacyClient(ctx, testClient, user)
+
+	s.legacyCredentialMu.Lock()
+	defer s.legacyCredentialMu.Unlock()
 
 	// Check if a GITHUB_TOKEN secret already exists
 	existingID, exists := s.findGitHubTokenSecret(ctx)
@@ -214,9 +219,7 @@ func (s *Service) ConfigureToken(ctx context.Context, token string) error {
 	s.mu.Lock()
 	s.client = testClient
 	s.authMethod = AuthMethodPAT
-	s.ClearAccessibleReposCaches()
-	s.ClearRepoErrorCache()
-	s.ClearPRCaches()
+	s.clearLegacyCredentialCachesLocked()
 	s.mu.Unlock()
 
 	return nil
@@ -228,12 +231,16 @@ func (s *Service) ClearToken(ctx context.Context) error {
 		return fmt.Errorf("secret manager not configured")
 	}
 
+	s.legacyCredentialMu.Lock()
+
 	existingID, exists := s.findGitHubTokenSecret(ctx)
 	if !exists {
+		s.legacyCredentialMu.Unlock()
 		return nil // No token to clear
 	}
 
 	if err := s.secretManager.Delete(ctx, existingID); err != nil {
+		s.legacyCredentialMu.Unlock()
 		return fmt.Errorf("delete token: %w", err)
 	}
 	s.logger.Info("cleared GitHub token secret", zap.String("id", existingID))
@@ -243,13 +250,24 @@ func (s *Service) ClearToken(ctx context.Context) error {
 	s.mu.Lock()
 	s.client = nil
 	s.authMethod = AuthMethodNone
-	s.ClearAccessibleReposCaches()
-	s.ClearRepoErrorCache()
-	s.ClearPRCaches()
+	s.clearLegacyCredentialCachesLocked()
 	s.mu.Unlock()
+	s.legacyCredentialMu.Unlock()
 
 	// Try to re-establish connection via other methods
 	s.retryClientCreation(ctx)
 
 	return nil
+}
+
+// clearLegacyCredentialCachesLocked requires s.mu. Cache generations reject
+// writes from requests that began before credential replacement.
+func (s *Service) clearLegacyCredentialCachesLocked() {
+	s.ClearAccessibleReposCaches()
+	s.ClearRepoErrorCache()
+	s.ClearPRCaches()
+	s.clearWatchFilterProgress("")
+	if s.resolver != nil {
+		s.resolver.InvalidateAll()
+	}
 }

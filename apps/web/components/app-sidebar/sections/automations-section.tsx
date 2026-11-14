@@ -17,6 +17,7 @@ import { AUTOMATIONS_HREF } from "@/components/runs/runs-view";
 import { usePathname } from "@/lib/routing/client-router";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useNow } from "@/hooks/use-now";
+import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import {
   APP_SIDEBAR_SECTION_IDS,
@@ -137,7 +138,16 @@ export function AutomationsSection({ collapsed }: { collapsed: boolean }) {
   const showing = !collapsed && expanded && !isMobile;
   const listScope = collapsed || isMobile ? undefined : (workspaceId ?? undefined);
   const summaryScope = showing ? (workspaceId ?? undefined) : undefined;
-  const { automations } = useWorkspaceAutomations(listScope, { active: !isMobile });
+  const {
+    automations,
+    loading: definitionsLoading,
+    refresh: refreshDefinitions,
+  } = useWorkspaceAutomations(listScope, {
+    active: !isMobile,
+  });
+  const canRefreshDefinitions = Boolean(listScope) && !definitionsLoading;
+  useLiveRefresh(canRefreshDefinitions, refreshDefinitions);
+  useForegroundRefresh(refreshDefinitions, canRefreshDefinitions, listScope);
   const { summaries, refresh } = useAutomationSummaries(summaryScope);
   useLiveRefresh(showing, refresh);
   const rows = buildAutomationRows(automations, summaries);

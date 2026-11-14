@@ -12,6 +12,8 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	"github.com/kandev/kandev/internal/agent/mcpconfig/registry"
 	"github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/authz"
@@ -30,10 +32,13 @@ var availableAgentsBroadcastTimeout = 10 * time.Second
 var hostCLIWarmupTimeout = 30 * time.Second
 
 type Handlers struct {
-	controller *controller.Controller
-	hub        Broadcaster
-	logger     *logger.Logger
-	interlock  gin.HandlerFunc
+	controller  *controller.Controller
+	hub         Broadcaster
+	logger      *logger.Logger
+	interlock   gin.HandlerFunc
+	catalog     *mcpconfig.CatalogService
+	selections  *mcpconfig.SelectionService
+	marketplace *registry.MarketplaceService
 }
 
 type Broadcaster interface {
@@ -50,10 +55,67 @@ func NewHandlers(ctrl *controller.Controller, hub Broadcaster, log *logger.Logge
 }
 
 func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, hub Broadcaster, log *logger.Logger, interlockToken string) {
+	RegisterRoutesWithMCPCatalog(router, ctrl, hub, log, interlockToken, nil, nil)
+}
+
+// RegisterRoutesWithMCPCatalog registers agent settings and the workspace MCP catalog.
+func RegisterRoutesWithMCPCatalog(
+	router *gin.Engine,
+	ctrl *controller.Controller,
+	hub Broadcaster,
+	log *logger.Logger,
+	interlockToken string,
+	repo mcpconfig.CatalogRepository,
+	authorizer mcpconfig.WorkspaceAuthorizer,
+) {
+	RegisterRoutesWithMCPCatalogAndMarketplace(router, ctrl, hub, log, interlockToken, repo, authorizer, nil)
+}
+
+// RegisterRoutesWithMCPCatalogAndMarketplace registers catalog and discovery dependencies.
+func RegisterRoutesWithMCPCatalogAndMarketplace(
+	router *gin.Engine,
+	ctrl *controller.Controller,
+	hub Broadcaster,
+	log *logger.Logger,
+	interlockToken string,
+	repo mcpconfig.CatalogRepository,
+	authorizer mcpconfig.WorkspaceAuthorizer,
+	marketplace *registry.MarketplaceService,
+) {
+	RegisterRoutesWithMCPCatalogAndMarketplaceAndSelections(
+		router, ctrl, hub, log, interlockToken, repo, authorizer, marketplace, nil,
+	)
+}
+
+// RegisterRoutesWithMCPCatalogAndMarketplaceAndSelections registers the MCP
+// catalog, marketplace, and typed scope-selection APIs.
+func RegisterRoutesWithMCPCatalogAndMarketplaceAndSelections(
+	router *gin.Engine,
+	ctrl *controller.Controller,
+	hub Broadcaster,
+	log *logger.Logger,
+	interlockToken string,
+	repo mcpconfig.CatalogRepository,
+	authorizer mcpconfig.WorkspaceAuthorizer,
+	marketplace *registry.MarketplaceService,
+	selections *mcpconfig.SelectionService,
+) {
 	// Wire the install job store with the same broadcaster used by other
 	// agent-settings notifications so streaming install events reach the UI.
-	ctrl.SetJobBroadcaster(hub)
+	if ctrl != nil {
+		ctrl.SetJobBroadcaster(hub)
+	}
 	handlers := NewHandlers(ctrl, hub, log, interlockToken)
+	if repo != nil {
+		catalog := mcpconfig.NewCatalogService(repo)
+		catalog.SetWorkspaceAuthorizer(authorizer)
+		if selections != nil {
+			selections.ConfigureCatalogUsage(catalog)
+		}
+		handlers.catalog = catalog
+	}
+	handlers.marketplace = marketplace
+	handlers.selections = selections
 	handlers.registerHTTP(router)
 }
 
@@ -69,6 +131,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.GET("/agents/available", h.httpListAvailableAgents)
 	api.GET("/agents", h.httpListAgents)
 	api.GET("/agents/:id/mcp-discovery", h.httpDiscoverAgentMCP)
+	api.POST("/agents/:id/plugin-discovery", cfg, h.httpDiscoverCopilotPlugins)
 	api.POST("/agents", cfg, h.interlock, h.httpCreateAgent)
 	api.POST("/agents/tui", cfg, h.interlock, h.httpCreateCustomTUIAgent)
 	api.GET("/agents/tui/mcp-strategies", h.httpListMCPStrategies)
@@ -97,9 +160,30 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.POST("/agent-profiles/:id/duplicate", cfg, h.interlock, h.httpDuplicateProfile)
 	api.GET("/agent-profiles/:id/mcp-config", h.httpGetProfileMcpConfig)
 	api.POST("/agent-profiles/:id/mcp-config", cfg, h.interlock, h.httpUpdateProfileMcpConfig)
+	api.GET("/agent-profiles/:id/mcp-selections", h.httpListProfileMCPSelections)
+	api.PUT("/agent-profiles/:id/mcp-selections", h.interlock, h.httpReplaceProfileMCPSelections)
+	api.GET("/repositories/:id/mcp-selections", h.httpListRepositoryMCPSelections)
+	api.PUT("/repositories/:id/mcp-selections", h.interlock, h.httpReplaceRepositoryMCPSelections)
+	api.GET("/tasks/:id/mcp-selections", h.httpListTaskMCPSelections)
+	api.PUT("/tasks/:id/mcp-selections", h.interlock, h.httpReplaceTaskMCPSelections)
+	api.GET("/task-sessions/:id/mcp-selections", h.httpListTaskSessionMCPSelections)
+	api.PUT("/task-sessions/:id/mcp-selections", h.interlock, h.httpReplaceTaskSessionMCPSelections)
+	api.GET("/workspaces/:id/mcp-profile-owners", h.httpListMCPProfileOwners)
+	api.GET("/workspaces/:id/mcp-profile-owners/:profileID", h.httpGetMCPProfileOwner)
+	api.GET("/workspaces/:id/mcp-servers", h.httpListMCPCatalog)
+	api.POST("/workspaces/:id/mcp-servers", h.interlock, h.httpCreateMCPCatalog)
+	api.GET("/workspaces/:id/mcp-servers/:serverID", h.httpGetMCPCatalog)
+	api.GET("/workspaces/:id/mcp-servers/:serverID/usage", h.httpMCPCatalogUsage)
+	api.PATCH("/workspaces/:id/mcp-servers/:serverID", h.interlock, h.httpUpdateMCPCatalog)
+	api.DELETE("/workspaces/:id/mcp-servers/:serverID", h.interlock, h.httpDeleteMCPCatalog)
+	api.GET("/mcp-marketplace", h.httpSearchMCPMarketplace)
+	api.GET("/mcp-marketplace/entry", h.httpGetMCPMarketplaceEntry)
+	api.POST("/mcp-marketplace/refresh", h.interlock, h.httpRefreshMCPMarketplace)
+	api.POST("/workspaces/:id/mcp-marketplace/install", h.interlock, h.httpInstallMCPMarketplace)
 	// The owner release is the only way to lift a provider account-block hold;
 	// profile edits and enablement never release it.
 	api.POST("/agent-profiles/:id/account-block/release", cfg, h.interlock, h.httpReleaseAccountBlock)
+	api.GET("/routing/circuits", h.httpListRoutingCircuits)
 }
 
 func (h *Handlers) httpDiscoverAgents(c *gin.Context) {
@@ -182,6 +266,9 @@ func (h *Handlers) httpUpdateAgentRuntime(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target version is required"})
 		return
 	}
+	if request.ReviewedRuntime != nil && !validReviewedRuntimeRequest(c, name, h, request) {
+		return
+	}
 	h.enqueueMaintenance(c, name, "update", func() (any, error) {
 		if request.UseDefault {
 			return h.controller.EnqueueAgentUpdateUseDefault(c.Request.Context(), name)
@@ -197,8 +284,41 @@ func (h *Handlers) httpUpdateAgentRuntime(c *gin.Context) {
 		if request.ExpectedRuntimeRevision != 0 {
 			return nil, controller.ErrRuntimeMigrationUnsupported
 		}
+		if request.ReviewedRuntime != nil {
+			return h.controller.EnqueueReviewedAgentUpdate(
+				c.Request.Context(), name, request.TargetVersion, *request.ReviewedRuntime,
+			)
+		}
 		return h.controller.EnqueueAgentUpdate(c.Request.Context(), name, request.TargetVersion)
 	}, classifyUpdateError)
+}
+
+// validReviewedRuntimeRequest keeps review evidence on the ordinary pinned
+// update form. Migration, return-to-default, harness, and revision-shaped
+// requests keep their legacy wire contracts and reject mixed evidence.
+func validReviewedRuntimeRequest(
+	c *gin.Context,
+	name string,
+	h *Handlers,
+	request dto.AgentUpdateRequest,
+) bool {
+	if h.controller.IsHarnessUpdate(name) ||
+		request.UseDefault ||
+		request.TargetFamily != "" ||
+		request.ExpectedRuntimeRevision != 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "reviewed runtime cannot be combined with this update form"})
+		return false
+	}
+	evidence := request.ReviewedRuntime
+	if evidence == nil ||
+		strings.TrimSpace(evidence.RuntimeID) == "" ||
+		strings.TrimSpace(evidence.Package) == "" ||
+		strings.TrimSpace(evidence.CurrentVersion) == "" ||
+		strings.TrimSpace(evidence.EffectiveVersion) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "reviewed runtime evidence is incomplete"})
+		return false
+	}
+	return true
 }
 
 func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
@@ -303,6 +423,17 @@ func writeMaintenanceConflictIfPresent(c *gin.Context, err error) bool {
 	return true
 }
 
+func writeReviewChangedIfPresent(c *gin.Context, err error) bool {
+	if !errors.Is(err, controller.ErrRuntimeReviewChanged) {
+		return false
+	}
+	c.JSON(http.StatusConflict, gin.H{
+		"error": "runtime changed after review; refresh the preview",
+		"code":  "runtime_review_changed",
+	})
+	return true
+}
+
 type maintenanceErrorClassifier func(error) (int, string, bool)
 
 func (h *Handlers) enqueueMaintenance(
@@ -318,6 +449,9 @@ func (h *Handlers) enqueueMaintenance(
 		return
 	}
 	if writeMaintenanceConflictIfPresent(c, err) {
+		return
+	}
+	if writeReviewChangedIfPresent(c, err) {
 		return
 	}
 	if status, message, matched := classify(err); matched {
@@ -356,6 +490,10 @@ func classifyUpdateError(err error) (int, string, bool) {
 		return http.StatusBadRequest, "target version is invalid", true
 	case errors.Is(err, controller.ErrRuntimeUpdateTargetMissing):
 		return http.StatusBadRequest, "target version is not published", true
+	case errors.Is(err, controller.ErrRuntimeReviewInvalid):
+		return http.StatusBadRequest, "runtime review evidence is invalid", true
+	case errors.Is(err, controller.ErrRuntimeReviewChanged):
+		return http.StatusConflict, "runtime changed after review; refresh the preview", true
 	case errors.Is(err, controller.ErrRuntimeMigrationUnsupported):
 		return http.StatusBadRequest, "OpenCode runtime migration is unavailable", true
 	case errors.Is(err, controller.ErrRuntimeMigrationBlocked):
@@ -477,6 +615,7 @@ type createAgentProfileRequest struct {
 	Mode                    string                 `json:"mode,omitempty"`
 	CLIFlags                []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
 	EnvVars                 []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	DevinSandboxInherited   bool                   `json:"devin_sandbox_inherited,omitempty"`
 	CommandPrefix           string                 `json:"command_prefix,omitempty"`
 }
 
@@ -507,6 +646,7 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 			Mode:                    profile.Mode,
 			CLIFlags:                profile.CLIFlags,
 			EnvVars:                 profile.EnvVars,
+			DevinSandboxInherited:   profile.DevinSandboxInherited,
 			CommandPrefix:           profile.CommandPrefix,
 		})
 	}
@@ -517,7 +657,7 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 	})
 	if err != nil {
 		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
-			errors.Is(err, controller.ErrInvalidProviderConfig) ||
+			errors.Is(err, controller.ErrInvalidProviderConfig) || errors.Is(err, controller.ErrInvalidDevinPermissionIntent) ||
 			errors.Is(err, controller.ErrRequireExactModelNeedsModel) || errors.Is(err, controller.ErrRequireExactModelUnsupported) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -589,11 +729,12 @@ func (h *Handlers) httpDeleteAgent(c *gin.Context) {
 }
 
 type commandPreviewRequest struct {
-	Model              string           `json:"model"`
-	PermissionSettings map[string]bool  `json:"permission_settings"`
-	CLIPassthrough     bool             `json:"cli_passthrough"`
-	CLIFlags           []dto.CLIFlagDTO `json:"cli_flags"`
-	CommandPrefix      string           `json:"command_prefix,omitempty"`
+	Model                  string           `json:"model"`
+	PermissionSettings     map[string]bool  `json:"permission_settings"`
+	CLIPassthrough         bool             `json:"cli_passthrough"`
+	CLIFlags               []dto.CLIFlagDTO `json:"cli_flags"`
+	CommandPrefix          string           `json:"command_prefix,omitempty"`
+	CopilotSelectedPlugins []string         `json:"copilot_selected_plugins,omitempty"`
 }
 
 func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
@@ -610,11 +751,12 @@ func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
 	}
 
 	resp, err := h.controller.PreviewAgentCommand(c.Request.Context(), agentName, controller.CommandPreviewRequest{
-		Model:              body.Model,
-		PermissionSettings: body.PermissionSettings,
-		CLIPassthrough:     body.CLIPassthrough,
-		CLIFlags:           body.CLIFlags,
-		CommandPrefix:      body.CommandPrefix,
+		Model:                  body.Model,
+		PermissionSettings:     body.PermissionSettings,
+		CLIPassthrough:         body.CLIPassthrough,
+		CLIFlags:               body.CLIFlags,
+		CommandPrefix:          body.CommandPrefix,
+		CopilotSelectedPlugins: body.CopilotSelectedPlugins,
 	})
 	if err != nil {
 		h.logger.Error("failed to preview agent command", zap.Error(err))

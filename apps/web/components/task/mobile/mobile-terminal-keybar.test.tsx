@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { MobileTerminalKeybar } from "./mobile-terminal-keybar";
 import { useShellModifiersStore } from "@/lib/terminal/shell-modifiers";
+import { setActiveTerminalSender } from "@/lib/terminal/mobile-active-terminal";
 
 const sendMock = vi.fn();
 
@@ -31,6 +32,7 @@ const KEYBAR_ROOT = "mobile-terminal-keybar";
 const CTRL_KEY = "keybar-key-ctrl";
 const SHIFT_KEY = "keybar-key-shift";
 const ESC_KEY = "keybar-key-esc";
+const UP_KEY = "keybar-key-up";
 const ARIA_PRESSED = "aria-pressed";
 const SESSION_ID = "s1";
 
@@ -46,6 +48,7 @@ function lastData(): string | undefined {
 beforeEach(() => {
   sendMock.mockReset();
   useShellModifiersStore.getState().reset();
+  setActiveTerminalSender(null);
   cleanup();
 });
 
@@ -81,7 +84,7 @@ describe("MobileTerminalKeybar single-key emission", () => {
 
   it("sends arrow escape sequences", () => {
     render(<MobileTerminalKeybar sessionId={SESSION_ID} visible={true} />);
-    tap("keybar-key-up");
+    tap(UP_KEY);
     expect(lastData()).toBe("\x1b[A");
     tap("keybar-key-down");
     expect(lastData()).toBe("\x1b[B");
@@ -89,6 +92,24 @@ describe("MobileTerminalKeybar single-key emission", () => {
     expect(lastData()).toBe("\x1b[D");
     tap("keybar-key-right");
     expect(lastData()).toBe("\x1b[C");
+  });
+
+  it("uses the shell mode only for shell arrows, leaving inline senders unchanged", () => {
+    const shell = vi.fn();
+    const inline = vi.fn();
+    let application = true;
+    setActiveTerminalSender(shell, SESSION_ID, () => application);
+    const view = render(<MobileTerminalKeybar sessionId={SESSION_ID} visible />);
+    tap(UP_KEY);
+    expect(shell).toHaveBeenLastCalledWith("\x1bOA");
+    application = false;
+    tap(UP_KEY);
+    expect(shell).toHaveBeenLastCalledWith("\x1b[A");
+    view.rerender(<MobileTerminalKeybar sessionId={SESSION_ID} visible onSend={inline} />);
+    application = true;
+    tap(UP_KEY);
+    expect(inline).toHaveBeenCalledWith("\x1b[A");
+    expect(shell).toHaveBeenCalledTimes(2);
   });
 
   it("sends literal symbols", () => {

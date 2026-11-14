@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { useRef } from "react";
-import { IconLayoutGrid, IconNetwork, IconChevronRight } from "@tabler/icons-react";
+import { IconLayoutGrid, IconNetwork, IconChevronRight, IconTerminal2 } from "@tabler/icons-react";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 import { pluginPanelId } from "@/lib/state/layout-manager/plugin-panels";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
@@ -25,6 +25,8 @@ type PluginPanelPickerProps = {
   taskId?: string | null;
   sessionId?: string | null;
   sessionKind?: "managed" | "passthrough" | null;
+  /** Built-in Background Work entry, available without any plugin panels. */
+  backgroundWorkAvailable?: boolean;
 };
 
 /** One grouped, scrollable phone picker for all mobile-enabled plugin panels. */
@@ -37,6 +39,7 @@ export function PluginPanelPicker({
   taskId = null,
   sessionId = null,
   sessionKind = null,
+  backgroundWorkAvailable = false,
 }: PluginPanelPickerProps) {
   const { t } = useTranslation();
   const portForwarding = useOptionalPortForwardingVisibility();
@@ -69,6 +72,14 @@ export function PluginPanelPicker({
       }}
     >
       <div className="space-y-1" data-testid="mobile-plugin-panel-options">
+        {backgroundWorkAvailable && (
+          <BackgroundWorkPickerAction
+            onSelect={() => {
+              onSelect("background-work");
+              onOpenChange(false);
+            }}
+          />
+        )}
         {taskId && portForwarding && (
           <PortForwardingPickerAction
             visibility={portForwarding}
@@ -116,6 +127,23 @@ export function PluginPanelPicker({
         })}
       </div>
     </MobilePickerSheet>
+  );
+}
+
+function BackgroundWorkPickerAction({ onSelect }: { onSelect: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <button
+      type="button"
+      data-testid="mobile-background-work-open"
+      className="flex min-h-11 w-full min-w-0 cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      aria-label={t("task:panelBackgroundWork")}
+      onClick={onSelect}
+    >
+      <IconTerminal2 className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate">{t("task:panelBackgroundWork")}</span>
+      <IconChevronRight className="h-4 w-4 shrink-0" aria-hidden="true" />
+    </button>
   );
 }
 

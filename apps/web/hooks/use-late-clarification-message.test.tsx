@@ -180,6 +180,37 @@ describe("useLateClarificationMessage", () => {
     await waitFor(() => expect(transcript.result.current.state.status).toBe("error"));
     expect(transcript.result.current.state.snapshot?.answers).toEqual(snapshot.answers);
   });
+});
+
+describe("useLateClarificationMessage source session refresh", () => {
+  it("refreshes a cached source session before deriving admission mode", async () => {
+    const source = sourceMessage("pending-stale");
+    const state = storeRef.current!;
+    state.taskSessions.items[source.session_id] = sourceSession();
+    state.messages.bySession[source.session_id] = [source];
+    fetchTaskSessionMock.mockResolvedValue({
+      session: { ...sourceSession(), state: "RUNNING" },
+    });
+    let stateAtAdmission: string | undefined;
+    admissionMock.mockImplementation(async () => {
+      stateAtAdmission = storeRef.current!.taskSessions.items[source.session_id]?.state;
+      return "queued";
+    });
+    const snapshot: LateClarificationSnapshot = {
+      messages: [source],
+      answers: [{ question_id: QUESTION_ID, selected_options: ["option-1"] }],
+    };
+
+    const hook = renderHook(() => useLateClarificationMessage(source));
+    await act(async () => {
+      await hook.result.current.send(snapshot);
+    });
+
+    expect(fetchTaskSessionMock).toHaveBeenCalledWith(SESSION_ID, { cache: "no-store" });
+    expect(listTaskSessionMessagesMock).not.toHaveBeenCalled();
+    expect(stateAtAdmission).toBe("RUNNING");
+    expect(hook.result.current.state.status).toBe("queued");
+  });
 
   it("hydrates a source session and transcript before Inbox admission", async () => {
     const source = sourceMessage("pending-inbox");

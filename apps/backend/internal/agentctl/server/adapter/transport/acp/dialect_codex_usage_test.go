@@ -1,11 +1,9 @@
 package acp
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
-	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/types/replayfixtures"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
@@ -25,26 +23,22 @@ func TestCodexUsageLimitNoticeProjectsMatchingGenericPromptError(t *testing.T) {
 		},
 	}
 
-	a, events, _, promptErr := replayFixtureThroughAdapter(t, fixture)
-	if promptErr == nil {
-		t.Fatal("Adapter.Prompt returned nil, want the generic ACP prompt error")
+	_, events, requestErr, promptErr := replayFixtureThroughAdapter(t, fixture)
+	if promptErr != nil {
+		t.Fatalf("Adapter.Prompt error = %v, want a retained turn event", promptErr)
 	}
 	tokens := tokenizeEvents(events)
-	if len(tokens) != 1 || tokens[0] != "message_chunk:diagnostic" {
-		t.Fatalf("events = %v, want the marked Codex diagnostic before the terminal error", tokens)
+	if len(tokens) != 2 || tokens[0] != "message_chunk:diagnostic" || tokens[1] != "error" {
+		t.Fatalf("events = %v, want the marked Codex diagnostic before the retained error", tokens)
 	}
-	var requestErr *acp.RequestError
-	if !errors.As(promptErr, &requestErr) {
-		t.Fatalf("prompt error = %v, want the wrapped ACP request error to remain discoverable", promptErr)
+	if requestErr == nil || requestErr.Code != -32603 {
+		t.Fatalf("request error = %+v, want code -32603", requestErr)
 	}
-	if requestErr.Code != -32603 {
-		t.Fatalf("wrapped request code = %d, want -32603", requestErr.Code)
+	terminal := lastErrorEvent(t, events)
+	if terminal.PromptFailureDisposition != streams.PromptFailureDispositionRetainRuntime {
+		t.Fatalf("disposition = %q, want retain_runtime", terminal.PromptFailureDisposition)
 	}
-	if !strings.Contains(strings.ToLower(promptErr.Error()), "you’ve hit your usage limit") {
-		t.Fatalf("prompt error text = %q, want the notice for queued-prompt recovery", promptErr.Error())
-	}
-	providerID, modelID := a.ProviderErrorContext()
-	providerErr := ProviderErrorFromError(promptErr, providerID, modelID)
+	providerErr := terminal.ProviderError
 	if providerErr == nil {
 		t.Fatal("ProviderErrorFromError() = nil, want the correlated Codex usage-limit notice")
 	}
@@ -63,6 +57,23 @@ func TestCodexUsageLimitNoticeProjectsMatchingGenericPromptError(t *testing.T) {
 	if providerErr.ResetAt != nil {
 		t.Fatalf("provider error ResetAt = %v, want nil for an unzoned time", providerErr.ResetAt)
 	}
+	if terminal.Error != providerErr.Message {
+		t.Fatalf("retained error text = %q, want the correlated quota message %q", terminal.Error, providerErr.Message)
+	}
+}
+
+func lastErrorEvent(t *testing.T, events []AgentEvent) *AgentEvent {
+	t.Helper()
+	var terminal *AgentEvent
+	for i := range events {
+		if events[i].Type == streams.EventTypeError {
+			terminal = &events[i]
+		}
+	}
+	if terminal == nil {
+		t.Fatal("no error event observed")
+	}
+	return terminal
 }
 
 func TestCodexUsageLimitNoticeDoesNotReplaceNonGenericPromptErrors(t *testing.T) {
@@ -88,14 +99,16 @@ func TestCodexUsageLimitNoticeDoesNotReplaceNonGenericPromptErrors(t *testing.T)
 					{Kind: replayfixtures.FramePromptError, Code: tc.code, Message: tc.message},
 				},
 			}
-			a, _, _, promptErr := replayFixtureThroughAdapter(t, fixture)
-			if promptErr == nil {
-				t.Fatal("Adapter.Prompt returned nil, want the prompt error")
+			_, events, _, promptErr := replayFixtureThroughAdapter(t, fixture)
+			if promptErr != nil {
+				t.Fatalf("Adapter.Prompt error = %v, want a retained turn event", promptErr)
 			}
-			providerID, modelID := a.ProviderErrorContext()
-			providerErr := ProviderErrorFromError(promptErr, providerID, modelID)
-			if providerErr == nil || providerErr.Source == streams.ProviderErrorSourceCodexACP {
-				t.Fatalf("ProviderErrorFromError() = %+v, want the ordinary ACP projection", providerErr)
+			terminal := lastErrorEvent(t, events)
+			if terminal.ProviderError == nil || terminal.ProviderError.Source != streams.ProviderErrorSourceACPPrompt {
+				t.Fatalf("retained provider error = %+v, want the ordinary ACP projection", terminal.ProviderError)
+			}
+			if strings.Contains(strings.ToLower(terminal.ProviderError.Message), "usage limit") {
+				t.Fatalf("retained provider message = %q, want the ordinary ACP projection", terminal.ProviderError.Message)
 			}
 		})
 	}

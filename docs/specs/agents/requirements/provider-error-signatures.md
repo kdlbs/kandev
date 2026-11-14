@@ -2,6 +2,7 @@
 status: active
 system: agents
 created: 2026-10-08
+updated: 2026-11-08
 owners:
   - kandev
 ---
@@ -63,9 +64,122 @@ errors does not take its own healthy account out of rotation.
   precedence and the existing provider-specific rules (usage limits, session
   limits, credit exhaustion, payment required, authentication, model, and
   installation rules) shall keep their classification.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.6:** For `opencode-acp`, an
+  opening `free usage limit reached` line without an error-envelope label shall
+  classify as a quota limit. This criterion covers only the unlabelled
+  provider-specific form and shall not match inside a fenced code example. It
+  is an OpenCode-specific exception to the shared quota signature list in
+  criterion 001.3.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.10:** OpenCode diagnostics opening
+  with `Rate limit exceeded: free-models-per-day...` or
+  `Rate limit exceeded: limit_rpd/<model>` shall classify as rate limited even
+  when sanitization masks the cadence token. The recorded excerpt remains
+  sanitized, and these signatures shall not outrank existing typed signals or
+  earlier payment, credit, and quota rules.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.8:** An opening labeled JSON error
+  envelope containing `error_type` with the value `provider_unavailable`
+  shall classify as provider unavailable. Bare JSON examples and quoted
+  mid-sentence prose shall not trigger it.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.9:** OpenCode's opening
+  `Rate limit exceeded. Please try again later` line, optionally wrapped by
+  its provider error label, shall classify as rate limited without inferring a
+  daily reset period.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.11:** For `opencode-acp`, an opening
+  `Upstream request failed: [ttft_admission_refused] the cell is at capacity`
+  diagnostic shall classify as high-confidence, retryable `model_capacity`.
+  Established error labels can precede the diagnostic.
+  Bare capacity prose, quoted examples, other refusal tokens, and unrelated
+  providers shall not match this signature.
+  Existing structured classification and earlier account-limit rules retain precedence.
+  A valid `(after N s)` suffix shall provide a reset hint from the diagnostic's observation time.
+  Only integer delays from 1 through 60 seconds qualify.
+  Missing, malformed, zero, negative, and larger delays shall provide no hint.
+  Classification shall not establish runtime health or authorize another prompt.
+
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.12:** For `opencode-acp`, an
+  opening diagnostic line with one of the established `AI_APICallError:`,
+  `Error:`, `Internal error:`, or `API Error:` labels followed by `free usage
+  limit reached` shall classify as a quota limit. Match this form only at the
+  start of a diagnostic line. Ignore this form inside fenced code examples.
+  Matching shall be case-insensitive and shall accept flexible horizontal
+  whitespace within multiword labels and the phrase, and after the label's
+  colon. Whitespace shall not cross a diagnostic line boundary. Quoted prose,
+  unknown labels, split-line signatures, and other providers shall not match.
+  Existing structured status and earlier account-limit rules shall keep
+  precedence. Do not infer a reset hint when the diagnostic gives no reset
+  time. This criterion and criterion 001.6 are OpenCode-specific exceptions to
+  the shared quota signature list in criterion 001.3.
+
+Criterion 001.11 was added by the October 28
+[OpenCode capacity package](../../../plans/opencode-capacity-retry/plan.md).
+
+Criterion 001.12 is described in the
+[provider error signature plan](../../../plans/provider-error-signatures/plan.md).
 
 ## Out of scope
 
-- Changing rule order, confidence levels, or classification flags.
-- Changing the provider-neutral rules or the runtime-environment rules.
+- Changing rule order, confidence levels, or classification flags beyond the
+  narrow additions in criteria 001.6, 001.8, 001.9, 001.10, 001.11, and 001.12.
+- Changing unrelated provider-neutral rules or any runtime-environment rules.
 - Changing how classified failures suspend candidates or select a successor.
+
+
+## Codex retry-exhaustion signature
+
+### REQ-AGENTS-CODEX-RATE-SIGNATURE-001: Recognize terminal Codex throttling
+
+- **AC-AGENTS-CODEX-RATE-SIGNATURE-001.1:** A Codex error line beginning with
+  `exceeded retry limit, last status: 429 Too Many Requests` shall classify as
+  high-confidence `rate_limited`. Established error-label prefixes may precede it.
+- **AC-AGENTS-CODEX-RATE-SIGNATURE-001.2:** Mid-sentence quotations, other HTTP
+  statuses, unrelated providers, and incomplete signatures shall not match this rule.
+- **AC-AGENTS-CODEX-RATE-SIGNATURE-001.3:** Existing structured classification
+  precedence and explicit quota, authentication, and usage-limit classifications
+  shall remain unchanged. Classification alone shall not authorize prompt replay.
+
+[Design](../system-design/provider-error-signatures.md).
+[Implementation package](../../../plans/quick-chat-draft-and-rate-retry/plan.md).
+
+### REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002: Unmatched diagnostic context
+
+**Intent:** Recognize new provider diagnostics without copying whole-message
+patterns, while preserving existing classification and recovery fences. The
+earlier out-of-scope list describes requirement 001; this extension owns its
+additional behavior.
+
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.1:** The extension shall be off in
+  every shipped profile. OFF shall preserve existing classification and routing.
+  Structured HTTP metadata and known signatures shall retain precedence. Only
+  an unmatched bounded provider diagnostic may enter the new prefilter.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.2:** The prefilter shall evaluate
+  structured status, keyword groups, then invocation context. It shall cover
+  account permission, qualified model/endpoint removal, timeout, limits,
+  overload, context-size rejection and request compatibility. Existing typed
+  mappings, including permission-denied HTTP 403, shall remain unchanged.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.3:** LIMIT, CAPACITY, GONE, ACCOUNT
+  and REQUEST shall normalize case, separators and stems. Two distinct terms
+  shall establish a group; a single term or conflicting groups shall retain
+  low confidence. Repeating a term shall not increase confidence. Quoted,
+  negated and successful assistant text shall not authorize recovery.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.4:** Context shall distinguish
+  startup, prompt-send and mid-turn, empty output, repeated current attempts,
+  reset hints, account/tier/model/path and matching diagnostics observed across
+  paths/models. Missing observations shall stay unknown. A proven free daily
+  limit without another reset shall use the next midnight UTC.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.5:** Account-wide limit scope shall
+  require a known paid-account binding. Other failures shall retain model/path
+  scope; corroborated model failures may span paths. Explicit reset hints shall
+  control suspension expiry. A structured model 404 shall remain unavailable
+  until model change or owner release; prose shall never permanently hold an account.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.6:** Defaults shall prefer next
+  candidate at startup/prompt-send, a same-session retry recommendation at
+  mid-turn before next candidate, and stop only for ACCOUNT. These are
+  classification defaults, not authorization to execute post-output continuation.
+  Generic post-output continuation is outside this extension. Explicit saved policies, existing
+  unclassified admission/thresholds, cancellation, ownership, generation,
+  output/effect and continuation guards shall take precedence over defaults.
+  Existing empty-turn handling shall be reused without changing thresholds.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.7:** Classification, diagnostic
+  correlation and routing shall consume consistent evidence, explain ON/OFF
+  differences and retain model order. No external catalog loader, inference
+  service or periodic learner is introduced.

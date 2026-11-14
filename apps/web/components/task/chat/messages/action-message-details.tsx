@@ -14,6 +14,7 @@ export type ActionMeta = {
   variant?: string;
   recovery_actions?: boolean;
   scope?: "session" | "task";
+  has_resume_token?: boolean;
   error_stamp?: string;
   recovery_stamp?: string;
   is_auth_error?: boolean;
@@ -30,6 +31,7 @@ export type ActionMeta = {
   recovery_phase?: string;
   recovery_disposition?: string;
   recovery_reason?: string;
+  recovery_activity_confirmed?: boolean;
   attempts_started?: number;
   runtime_retained?: boolean;
   failure_scope?: "turn" | "execution";
@@ -70,20 +72,18 @@ export function TechnicalDetails({
 export function ActionMessageDetails({
   metadata,
   technicalDetails,
+  allowGenericTerminal = true,
+  executionHostGuidance = false,
 }: {
   metadata: ActionMeta | undefined;
   technicalDetails?: string;
+  allowGenericTerminal?: boolean;
+  executionHostGuidance?: boolean;
 }) {
   const [hostShellOpen, setHostShellOpen] = useState(false);
-  const [hostShellCommand, setHostShellCommand] = useState<string | undefined>(undefined);
   const { t } = useTranslation();
 
-  const openHostShellWithCommand = useCallback((command: string) => {
-    setHostShellCommand(command + "\n");
-    setHostShellOpen(true);
-  }, []);
   const openHostShell = useCallback(() => {
-    setHostShellCommand(undefined);
     setHostShellOpen(true);
   }, []);
 
@@ -99,17 +99,17 @@ export function ActionMessageDetails({
       {metadata.is_auth_error && metadata.auth_methods && metadata.auth_methods.length > 0 && (
         <AuthMethodsPanel
           methods={metadata.auth_methods}
-          onOpenTerminal={openHostShellWithCommand}
+          executionHostGuidance={executionHostGuidance}
         />
       )}
       {metadata.is_auth_error && (!metadata.auth_methods || metadata.auth_methods.length === 0) && (
-        <GenericAuthPanel onOpenTerminal={openHostShell} />
+        <GenericAuthPanel
+          onOpenTerminal={openHostShell}
+          allowTerminal={allowGenericTerminal}
+          executionHostGuidance={executionHostGuidance}
+        />
       )}
-      <HostShellDialog
-        open={hostShellOpen}
-        onOpenChange={setHostShellOpen}
-        initialInput={hostShellCommand}
-      />
+      <HostShellDialog open={hostShellOpen} onOpenChange={setHostShellOpen} />
     </>
   );
 }

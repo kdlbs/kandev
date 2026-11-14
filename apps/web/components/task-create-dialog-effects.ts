@@ -3,14 +3,15 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { Repository, Executor, ExecutorProfile } from "@/lib/types/http";
 import { DEFAULT_LOCAL_EXECUTOR_TYPE } from "@/lib/utils";
+import { useOptionalAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { getLocalRepositoryStatusAction } from "@/app/actions/workspaces";
-import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
 import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import type {
   DialogFormState,
   StoreSelections,
   TaskCreateEffectsArgs,
+  TaskCreateWorkflowStepsResult,
 } from "@/components/task-create-dialog-types";
 import {
   useAgentProfileAutopickEffect,
@@ -29,42 +30,20 @@ export { decideAgentProfileAutopick } from "@/components/task-create-dialog-auto
 
 const selectionDebug = createDebugLogger("task-create:selection");
 
-export function useWorkflowStepsEffect(
+/**
+ * Publishes selected-workflow steps through the legacy `fetchedSteps` form
+ * field only for default-step resolution. Launch preview and replacement rows
+ * consume the observer result directly, so this is not a second metadata owner.
+ */
+export function useFetchedStepsBridgeEffect(
   fs: DialogFormState,
-  open: boolean,
-  workflowId: string | null,
-  effectiveWorkflowId: string | null,
+  selectedWorkflowSteps: TaskCreateWorkflowStepsResult,
 ) {
   const { setFetchedSteps } = fs;
+  const steps = selectedWorkflowSteps.status === "success" ? selectedWorkflowSteps.steps : null;
   useEffect(() => {
-    void Promise.resolve().then(() => setFetchedSteps(null));
-    if (!open || !effectiveWorkflowId || effectiveWorkflowId === workflowId) {
-      return;
-    }
-    let cancelled = false;
-    listWorkflowSteps(effectiveWorkflowId)
-      .then((response) => {
-        if (cancelled) return;
-        const sorted = [...response.steps].sort((a, b) => a.position - b.position);
-        setFetchedSteps(
-          sorted.map((s) => ({
-            id: s.id,
-            title: s.name,
-            workflowId: effectiveWorkflowId,
-            position: s.position,
-            is_start_step: s.is_start_step,
-            prompt: s.prompt,
-            events: s.events,
-          })),
-        );
-      })
-      .catch(() => {
-        if (!cancelled) setFetchedSteps(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [effectiveWorkflowId, open, workflowId, setFetchedSteps]);
+    setFetchedSteps(steps);
+  }, [setFetchedSteps, steps]);
 }
 
 export function useDiscoverReposEffect(
@@ -544,7 +523,18 @@ export function useDefaultSelectionsEffect(
  * `useRowBranchAutoSelect`; this effect just keeps the surfaced error banner
  * in sync with the first row's URL.
  */
-export function useGitHubUrlErrorEffect(fs: DialogFormState, open: boolean) {
+export function useGitHubUrlErrorEffect(
+  fs: DialogFormState,
+  open: boolean,
+  workspaceId: string | null = null,
+) {
+  const configuredHost = useOptionalAppStore(
+    (state) =>
+      workspaceId
+        ? state.githubStatus.byWorkspaceId[workspaceId]?.status?.automation?.github_host
+        : undefined,
+    undefined,
+  );
   const { useRemote, setGitHubUrlError } = fs;
   const firstUrl = fs.remoteRepos[0]?.url ?? "";
   useEffect(() => {
@@ -564,24 +554,24 @@ export function useGitHubUrlErrorEffect(fs: DialogFormState, open: boolean) {
       setGitHubUrlError(null);
       return;
     }
-    const parsed = parseGitHubAnyUrl(trimmed);
+    const parsed = parseGitHubAnyUrl(trimmed, configuredHost ?? fs.remoteRepos[0]?.providerHost);
     if (!parsed) {
       setGitHubUrlError(t("task:invalidGitHubUrl"));
       return;
     }
     setGitHubUrlError(null);
-  }, [open, useRemote, firstUrl, setGitHubUrlError]);
+  }, [configuredHost, open, useRemote, firstUrl, setGitHubUrlError]);
 }
 
 export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreateEffectsArgs) {
   const {
     open,
     workspaceId,
-    workflowId,
     effectiveWorkflowId,
     repositories,
     repositoriesLoading,
     editingTaskExecutorProfileId,
+    selectedWorkflowSteps,
   } = args;
   const {
     agentProfiles,
@@ -593,7 +583,7 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
     workflows,
     isLocalExecutor,
   } = args;
-  useWorkflowStepsEffect(fs, open, workflowId, effectiveWorkflowId);
+  useFetchedStepsBridgeEffect(fs, selectedWorkflowSteps);
   useWorkflowAgentProfileEffect(fs, workflows, agentProfiles, compatibleAgentProfiles, {
     lastUsedAgentProfileId: args.lastUsedAgentProfileId,
     authLoaded,
@@ -624,7 +614,7 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
     workflows,
     editingTaskExecutorProfileId,
   );
-  useGitHubUrlErrorEffect(fs, open);
+  useGitHubUrlErrorEffect(fs, open, workspaceId);
 }
 
 // Reset row.branch on every "switch to local executor" transition so the

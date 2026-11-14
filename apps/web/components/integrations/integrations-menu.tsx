@@ -18,12 +18,14 @@ import { useAppStore } from "@/components/state-provider";
 import { workspaceSettingsHref } from "@/lib/settings/workspace-settings-tabs";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import type { ResolvedDestination } from "@/lib/navigation/types";
 
 type MobileIntegrationsSectionProps = {
   onNavigate: () => void;
   showSetup?: boolean;
   collapsible?: boolean;
   includePlugins?: boolean;
+  pluginDestinations?: ResolvedDestination[];
   omitDestinations?: string[];
 };
 
@@ -149,10 +151,15 @@ export function MobileIntegrationsSection({
   showSetup = false,
   collapsible = false,
   includePlugins,
+  pluginDestinations,
   omitDestinations,
 }: MobileIntegrationsSectionProps) {
   const { t } = useTranslation();
-  const destinations = useAppDestinations("mobileMenu", "integrations").filter(
+  const resolved = useAppDestinations("mobileMenu", "integrations");
+  const grouped = pluginDestinations
+    ? [...resolved.filter((item) => item.source !== "plugin"), ...pluginDestinations]
+    : resolved;
+  const destinations = grouped.filter(
     (destination) =>
       (includePlugins !== false || destination.source !== "plugin") &&
       !omitDestinations?.includes(destination.id),

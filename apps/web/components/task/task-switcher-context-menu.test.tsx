@@ -210,6 +210,7 @@ describe("TaskItemWithContextMenu — grouped single-task actions", () => {
       "Edit",
       "Rename",
       "Duplicate",
+      "Show in graph",
       "Create Subtask",
       "Nest under",
       "Link",
@@ -703,4 +704,18 @@ describe("TaskItemWithContextMenu — touch drag cancellation identifier lifecyc
       vi.unstubAllGlobals();
     }
   });
+});
+
+describe("TaskItemWithContextMenu — pending archive controls", () => {
+  it.each([false, true])(
+    "derives the archive action's busy boundary from this row (pending=%s)",
+    async (isPendingRemoval) => {
+      renderWithDragHandle({ isPendingRemoval });
+      await openContextMenu();
+
+      const archive = screen.getByRole("menuitem", { name: "Archive" });
+      if (isPendingRemoval) expect(archive.getAttribute("data-disabled")).not.toBeNull();
+      else expect(archive.getAttribute("data-disabled")).toBeNull();
+    },
+  );
 });

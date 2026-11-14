@@ -119,7 +119,7 @@ Add the named tests before implementation using TDD. These commands run after th
 (cd ../kandev-plugin-observer && npm ci && make test && make vet)
 make -C ../kandev-plugin-observer KANDEV_SDK="$(pwd)/apps/backend" verify-package-host
 (cd apps/backend && go test ./internal/plugins/... ./pkg/pluginsdk/...)
-(cd apps && pnpm --filter @kandev/plugin-sdk test && pnpm --filter @kandev/plugin-sdk typecheck)
+(cd apps && pnpm --filter @kdlbs/plugin-sdk test && pnpm --filter @kdlbs/plugin-sdk typecheck)
 (cd apps/web && pnpm e2e:run --project chromium tests/plugins/coordinator-compatibility.spec.ts)
 (cd apps/web && pnpm e2e:run --project mobile-chrome tests/plugins/mobile-coordinator-compatibility.spec.ts)
 node --test scripts/validate-public-docs.test.mjs

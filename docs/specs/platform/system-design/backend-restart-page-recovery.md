@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-BACKEND-RESTART-PAGE-RECOVERY-001
 created: 2026-09-03
-updated: 2026-09-05
+updated: 2026-10-05
 owners:
   - kandev
 ---
@@ -87,7 +87,15 @@ agent settings.
 
 ## Stale-interlock fallback
 
-The middleware response keeps HTTP 403 and adds this stable field:
+The middleware rejects bearer credentials separately from missing or stale
+browser interlock tokens. A bearer rejection remains HTTP 403 with the ordinary
+`forbidden` error code. It must not use the stale-interlock code or suggest a
+backend restart. A matching browser token does not override the bearer
+prohibition. Forwarding services must not inject bearer credentials into
+browser settings requests.
+
+For a missing or stale browser token, the response keeps HTTP 403 and adds this
+stable field:
 
 ```json
 {
@@ -104,6 +112,10 @@ before it rejects the caller promise. It marks that `ApiError` as handled.
 Agent settings presenters use the marker to prevent an internal or duplicate
 error message. Agent profile deletion joins the shared response parser while it
 keeps its typed HTTP 409 conflict result.
+
+MCP selection presenters follow the same handled-error contract. A bearer
+rejection shows an ordinary local save error; a genuine stale-token rejection
+shows only the global reload recovery surface.
 
 ## Recovery coordinator
 

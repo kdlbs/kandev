@@ -79,7 +79,7 @@ func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.Agen
 		actionMetaKeyTestID: stallCancelTurnButtonTestID,
 		"params": map[string]interface{}{
 			"method":  "agent.cancel",
-			"payload": map[string]interface{}{"session_id": payload.SessionID},
+			"payload": map[string]interface{}{metaKeySessionID: payload.SessionID},
 		},
 	}}
 	if err := s.messageCreator.CreateSessionMessage(

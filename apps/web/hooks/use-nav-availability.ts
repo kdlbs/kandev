@@ -1,8 +1,6 @@
 "use client";
 
 import { useAppStore } from "@/components/state-provider";
-import { useAzureDevOpsAvailable } from "@/hooks/domains/azure-devops/use-azure-devops-availability";
-import { useAzureDevOpsEnabled } from "@/hooks/domains/azure-devops/use-azure-devops-enabled";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useGitHubEnabled } from "@/hooks/domains/github/use-github-enabled";
 import { useGitLabAvailable } from "@/hooks/domains/gitlab/use-task-mr";
@@ -63,7 +61,7 @@ export function getGitHubIntegrationStatus(status: GitHubStatus | null, loading:
  * `docs/specs/integrations/requirements/enable-disable-toggle.md`.
  *
  * Availability is **not** deduplicated across consumers. GitHub and GitLab are
- * store-backed, but Jira, Linear and Azure DevOps go through
+ * store-backed, but Jira and Linear go through
  * `useIntegrationAuthed`, which owns a fetch plus a 90s `setInterval` per mounted
  * consumer (`hooks/domains/integrations/use-integration-availability.ts`). So each
  * mounted caller of this hook may add its own polling subscription: keep the
@@ -103,12 +101,10 @@ export function useNavAvailability(): AvailabilityMap {
   const gitlabConfigured = useGitLabAvailable();
   const jiraConfigured = useJiraAuthed(scopedWorkspaceId);
   const linearConfigured = useLinearAuthed(scopedWorkspaceId);
-  const azureDevOpsConfigured = useAzureDevOpsAvailable(scopedWorkspaceId);
   const githubConfigured = getGitHubIntegrationStatus(status, loading).ready;
 
   // The toggles are per-workspace too: a workspace that has GitHub turned off
   // must not hide it from the nav while another workspace is active.
-  const { enabled: azureDevOpsEnabled } = useAzureDevOpsEnabled(toggleWorkspaceId);
   const { enabled: githubEnabled } = useGitHubEnabled(toggleWorkspaceId);
   const { enabled: gitlabEnabled } = useGitLabEnabled(toggleWorkspaceId);
   const { enabled: jiraEnabled } = useJiraEnabled(toggleWorkspaceId);
@@ -119,7 +115,6 @@ export function useNavAvailability(): AvailabilityMap {
     configured && (!hideDisabled || enabled);
 
   return {
-    "azure-devops": visible(!!azureDevOpsConfigured, azureDevOpsEnabled),
     github: visible(githubConfigured, githubEnabled),
     gitlab: visible(gitlabConfigured, gitlabEnabled),
     jira: visible(jiraConfigured, jiraEnabled),

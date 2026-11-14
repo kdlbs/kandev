@@ -7,9 +7,9 @@ description: "Run and verify Kandev's version, runtime, desktop, container, npm,
 
 This how-to guide is for maintainers who run and verify a Stable release. Its
 Stable targets are the Git tag, runtime bundles, desktop app, npm packages,
-GitHub Release, container images, Homebrew formula, and Scoop bucket.
+GitHub Release, container images, Homebrew formula, Scoop bucket, and plugin SDK verification.
 
-Kandev uses one semantic version across the Git tag, native runtime bundles, desktop app, npm packages, GitHub release, container images, Homebrew formula, and Scoop bucket. Publish through the manual **Release** GitHub Actions workflow; do not update channels independently.
+Kandev runtime distribution uses one semantic version across the Git tag, native runtime bundles, desktop app, npm packages, GitHub release, container images, Homebrew formula, and Scoop bucket. Publish through the manual **Release** GitHub Actions workflow; do not update channels independently.
 
 Each platform release contains a native Go `kandev` binary with the compiled
 web frontend embedded. Stable releases publish standard and full runtime
@@ -31,7 +31,7 @@ The workflow has four mutually exclusive operating modes:
 | Normal release     | `bump=patch`, `minor`, or `major` | Creates and merges a release PR, tags its merge, builds, and publishes                                                                                     |
 | Dry run            | `dry_run=true`                    | Computes the next version and exercises CLI package/lock plus changelog generation in the runner; no PR, tag, artifact build, or publication               |
 | Desktop validation | `desktop_validation_only=true`    | Builds web, five runtime bundles, and five desktop targets from the selected commit; no PR, tag, GitHub release, GHCR, npm, Homebrew, or Scoop publication |
-| Backfill           | `backfill_tag=vX.Y.Z`             | Rebuilds and repairs channels for the latest existing release tag without creating a version or tag                                                        |
+| Backfill           | `backfill_tag=vX.Y.Z`             | Rebuilds and repairs channels for the latest existing release tag without creating a host version or host tag; can complete a missing SDK tag                                                        |
 
 `dry_run` and desktop validation are not release candidates. Backfill cannot be combined with either and accepts only the latest exact SemVer tag after version manifests are checked for agreement.
 
@@ -41,7 +41,7 @@ The workflow has four mutually exclusive operating modes:
 2. Confirm required checks are green on `main` and no release or release PR is active.
 3. Confirm merged PR titles/commits use the conventional categories consumed by `cliff.toml`. The workflow generates `CHANGELOG.md` and release notes.
 4. Verify platform-sensitive launcher, agentctl, container, and desktop changes on affected targets.
-5. Check GitHub/GHCR access, npm trusted publishing, `RELEASE_PR_BYPASS_TOKEN`, signing keys, and configured desktop signing or notarization secrets.
+5. Check GitHub/GHCR access, npm trusted publishing, `RELEASE_PR_BYPASS_TOKEN`, signing keys, the Discord webhook secret, and configured desktop signing or notarization secrets. A normal Stable dispatch verifies package-scoped npm authentication before release preparation.
 6. Update public docs for behavior that is about to ship.
 
 ## Configure the release PR bypass
@@ -85,17 +85,80 @@ For release automation changes, run:
 
 ```bash
 python3 .github/scripts/release-workflow-contract_test.py
+node --test scripts/release/npm-auth-preflight.test.mjs scripts/release/sdk-diagnostics.test.mjs
 bash scripts/release-desktop.test.sh
 make test-cli
 ```
 
 Use dry run to validate version/changelog preparation. Use desktop validation to validate packaging from the current commit.
 
+## Configure browser demo delivery
+
+The release workflow sends a repository dispatch to `kdlbs/landing` after the
+browser demo archive is published. Create a fine-grained GitHub personal access
+token with resource owner `kdlbs`, access limited to `landing`, and
+**Contents: Read and write**. Obtain organization approval when required.
+Store it in the protected `release` environment of `kdlbs/kandev`:
+
+```bash
+gh secret set LANDING_REPOSITORY_DISPATCH_TOKEN --repo kdlbs/kandev --env release
+```
+
+Enter the value at the local prompt. Verify the secret name before dispatch:
+
+```bash
+gh secret list --repo kdlbs/kandev --env release
+```
+
+The landing repository deploys that archive to Cloudflare Pages. Configure its
+repository secret `CLOUDFLARE_API_TOKEN` and repository Actions variable
+`CLOUDFLARE_ACCOUNT_ID`. The Cloudflare token needs **Account > Cloudflare Pages
+> Edit**, limited to the hosting account. Follow the
+[Cloudflare CI setup](https://developers.cloudflare.com/pages/how-to/use-direct-upload-with-continuous-integration/).
+A successful dispatch does not prove that the subsequent landing deployment
+succeeded. Inspect the landing workflow separately.
+
+## Early npm authentication
+
+Normal Stable dispatches run a read-only `npm-auth-preflight` job before
+`prepare`. It requests a fresh GitHub OIDC identity token for each package and
+checks its audience and expiry. It exchanges that token for a package-scoped npm
+token at the public registry, then discards both tokens. The gate checks the
+`kandev` launcher, all five `@kdlbs/runtime-*` packages, and
+`@kdlbs/plugin-sdk` when that package exists. Dry runs, desktop validation,
+Nightly releases, and existing-tag backfills skip the job and keep their
+existing validation or repair path.
+
+Each successful HTTP 201 exchange must contain a JSON object with a nonempty
+token string. The preflight ignores `token_type`, `created`, `expires`, and
+unknown response fields. These fields do not prove authentication or token
+lifetime.
+
+A rejected publisher or invalid exchange response stops the run before release
+branch creation, release PR creation, host tagging, or builds. The summary names
+the package, HTTP status, and a fixed failure reason. It does not include
+response bodies or credentials.
+
+For an HTTP authentication rejection, check that package's trusted publisher
+configuration and the protected workflow context. For an invalid HTTP 201
+response, inspect the safe reason.
+
+Setup errors name the required context variable and its expected value. They do not show supplied values.
+
+After a fix is merged, dispatch a new Stable run from `main`. Rerunning the failed run uses its original workflow revision and does not pick up the fix.
+
+A confirmed whole-package SDK absence is deferred to the existing first-package bootstrap. A registry read failure or a missing runtime package is an error, never a bootstrap state.
+
+The exchange proves current package-scoped authentication only. It does not
+prove direct-publish or dist-tag permission, and a trusted publisher can lose
+access before publication. The publishing jobs acquire fresh credentials and
+remain responsible for their own authentication and allowed actions.
+
 ## Normal release flow
 
 Normal mode performs these stages:
 
-1. **Preflight and prepare version.** Compute the next version from packages and tags, then verify that the committed public key matches the `release` environment fingerprint before changing release files. Update the CLI package/lock, desktop package and Tauri/Cargo manifests, and `CHANGELOG.md`.
+1. **Verify npm authentication and prepare version.** Verify package-scoped OIDC authentication for the `kandev` launcher, the five `@kdlbs/runtime-*` packages, and the SDK publisher when it exists. Then compute the next version from packages and tags, and verify that the committed public key matches the `release` environment fingerprint before changing release files. Update the CLI package/lock, desktop package and Tauri/Cargo manifests, and `CHANGELOG.md`.
 2. **Merge and tag.** Open a release branch and PR. Use the protected administrator token to squash-merge the exact head without queue or CI latency. Select GitHub's reported merge commit, then revalidate the public key before importing the protected signing key. Verify the signed `vX.Y.Z` tag locally before the push.
 3. **Build web and runtimes.** Build the SPA and five runtime targets: Linux x64/arm64, macOS x64/arm64, and Windows x64. Stable standard archives contain `kandev`, host `agentctl`, and `remote-helpers.json`. Stable `-full` archives add all four remote helpers. Windows also gets standard and full ZIP archives. The workflow publishes checksums for every archive and helper asset.
 4. **Build desktop.** Embed the matching runtime and package the same five platform/architecture targets into macOS, Linux, and Windows installer formats.
@@ -105,11 +168,188 @@ Normal mode performs these stages:
 8. **Update Homebrew.** Push the formula update to `kdlbs/homebrew-kandev` using release checksums and its deploy key. The generated formula records `X.Y.Z` explicitly; platform archive suffixes such as `x64` are not version identifiers.
 9. **Update Scoop.** Push `bucket/kandev.json` to `kdlbs/scoop-kandev` using the Windows tarball checksum and its separate deploy key. The manifest records the exact Stable version, release URL, and SHA-256 value.
 
+10. **Verify plugin SDKs.** Retain and sign the original SDK candidate, publish or verify its independent Go/npm version, and pass public consumer checks. `stable-complete` requires all publication jobs.
+
 GHCR images are built before the GitHub Release. npm, Homebrew, and Scoop start only after the GitHub Release and may run in parallel. A late failure can therefore leave some channels complete and others missing.
+
+## Plugin SDK publication
+
+The Go module `github.com/kdlbs/kandev/pluginsdk` and npm package
+`@kdlbs/plugin-sdk` share an independent version starting at `0.1.0`. They are
+not runtime platform packages and do not follow the host's version or Nightly
+channel. A Stable release verifies them even when their version is unchanged.
+This implementation has not established their first public availability.
+
+### Prepare ownership and trust
+
+Before the first release, a maintainer must confirm control of npm scope
+`@kdlbs` and package name `@kdlbs/plugin-sdk`. Package absence does not prove
+ownership. Set `SDK_SCOPE_OWNERSHIP_CONFIRMED=true` in the protected `release`
+environment, and expose the same confirmation to the read-only
+`release-validation` environment used for dry-run/backfill preflight.
+
+Configure the package's trusted publisher for GitHub owner `kdlbs`, repository
+`kandev`, workflow `release.yml`, and environment `release`. Use GitHub-hosted
+runners. Enable **direct publication** and **dist-tag changes** for that
+publisher; staged-only permission cannot complete this workflow. Set
+`SDK_FIRST_PUBLISH_OIDC_READY=true` only if first-package OIDC is configured and
+supported. Otherwise leave it unset and use the explicit bootstrap below.
+There is no CI token fallback.
+
+The packaging configuration pins exact Node and npm versions, currently
+Node 24.19.0 and npm 11.21.0. The latter supports the required OIDC dist-tag
+operation. Check current [npm trusted-publisher requirements](https://docs.npmjs.com/trusted-publishers/)
+when changing these pins. The release jobs load the original SDK's pins on a
+retry, rather than using whichever npm version a later host happens to carry.
+
+### Run and verify
+
+1. Dispatch Stable or latest-tag backfill from `main`. Preflight checks shared
+   version intent, contract changes, metadata copies, and registry readability.
+   A new SDK starts with a null originating host; normal release preparation
+   stamps the actual host version and any pending SDK-wide floor into the
+   release PR. Backfill never restamps the signed host record.
+2. After `publish-release`, protected `prepare-plugin-sdk` verifies the signed
+   originating host tag, packs the original source once, and tests those exact
+   bytes with an independent frontend and Go consumer. It retains the archive,
+   JSON receipt, and detached GPG signature on a draft `pluginsdk/vS` release.
+   It then creates the signed `pluginsdk/vS` tag at the original host commit
+   and publishes the SDK release without changing GitHub's latest release.
+   Its signing fingerprint must match `RELEASE_GPG_FINGERPRINT`.
+3. `publish-plugin-sdk` has OIDC permission and read-only Git access, with no
+   signing secret. It requires finalized evidence, verifies retained identities, publishes the exact tarball
+   with provenance, and verifies public Go/npm installations with fresh caches.
+   Both consumers run the same compatibility assertions as local tests. npm
+   dependency signatures and attestations are checked with `npm audit signatures`.
+4. Confirm `stable-complete` succeeds. Bootstrap, mismatched identities, or failed
+   public installation leave the release incomplete and block automatic
+   contributor notices. The other package-manager jobs can finish independently.
+
+The receipt assets are `plugin-sdk-S.tgz`, `plugin-sdk-S.receipt.json`, and
+`plugin-sdk-S.receipt.json.asc` on release `pluginsdk/vS`. Complete legacy
+evidence on host release `vH` remains valid and is reused without copying.
+`H` is the record's `host_release`. The receipt binds the source commit, host/SDK tags, canonical
+record digest, archive SHA-512 integrity, file inventory, exact tools, and
+workflow ref/SHA/run/attempt. It is signed with the approved release key.
+An unchanged SDK reuses these original assets even if a later host changes its
+README. Changed package bytes need a new SDK version if they are to be published.
+
+A maintainer can rerun public verification without publishing, from a checkout
+with full tag history and the approved public key. Supply the actual host tag
+and use the original Node/npm versions from its SDK receipt:
+
+```bash
+RELEASE_GPG_FINGERPRINT=FFB03BCD68F5BCBBD2D1767A84EAB9CE3B8EF52F \
+  node scripts/pluginsdk/consumer-smoke.mjs --mode public --host-tag vH
+```
+
+`vH` is a placeholder, not a release claim. The verifier resolves the signed
+host record and signed SDK tag, checks the receipt and public archive, and
+rejects inherited local registries, Go proxies, and checksum exemptions before
+using isolated caches. A local archive/proxy smoke test proves packaging only.
+
+### Registry propagation and diagnostics
+
+After one SDK upload or dist-tag mutation, the release observes the public registry for up to five minutes. It probes immediately and then waits 10, 20, and at most 30 seconds between reads. It never repeats the write. A version that appears after 30 seconds remains recoverable within that window. A version or channel update that is still absent at the deadline leaves the run incomplete but preserves the signed candidate and version.
+
+Logs and the job summary identify the package, SDK version, phase, observation attempt, elapsed time, and next wait. A visibility timeout after a successful upload or dist-tag command states which write npm accepted. An uncertain command stays uncertain until a registry read confirms the immutable identity. Failures distinguish authentication or authorization, registry read, visibility timeout, identity conflict, and public consumer verification. Captured npm output is sanitized and limited to 64 KiB before it reaches logs or summaries.
+
+If the immutable version is already confirmed, a later dist-tag failure leaves publication confirmed and reports the channel write and promotion state separately. Follow the channel-specific recovery guidance instead of treating the release as an unpublished upload.
+
+If npm accepted the upload but the version is not visible, check the package on npmjs.com and rerun the failed job in the same release. Do not publish again. If the command response was uncertain, inspect the exact public version before any recovery write. An expired or rejected trusted publisher must be reconfigured for that package, then reuse the same release and signed candidate. Never rebuild or replace the SDK bytes to recover a visibility delay.
+
+### First-package bootstrap
+
+`bootstrap_required` is an incomplete release state. It is returned only after
+confirmed whole-package absence and retained, signed first-release evidence.
+An existing package with a missing version, an authentication failure, malformed
+registry response, or network failure does not qualify. The normal Stable early
+authentication gate defers its SDK check only after the same confirmed
+whole-package absence; that deferral does not claim ownership, approve
+bootstrap, or complete SDK publication.
+
+The run summary provides exact asset links, SDK version, and integrity. Use
+these links because SDK tag slashes can be URL-encoded. A
+maintainer must download all three assets, verify the detached receipt signature
+against the approved release fingerprint, and check the archive's SHA-512 against
+`archive_integrity` in that receipt. Do not run `npm pack` again. Then, with
+maintainer npm authentication outside CI, publish those exact retained bytes:
+
+```bash
+# Replace S with the SDK version from the verified receipt.
+npm publish ./plugin-sdk-S.tgz --access public --ignore-scripts \
+  --registry https://registry.npmjs.org --tag sdk-release
+```
+
+Configure the trusted publisher and its direct-publish/dist-tag permissions,
+then retry the failed SDK job or use the existing latest Stable backfill. The
+retry verifies the npm bytes against the signed receipt, repairs `latest`, and
+runs public consumers. It reports `manual_bootstrap` when the first upload has
+no workflow provenance; the signed candidate receipt does not turn a manual
+upload into an OIDC provenance claim. Later automated uploads require provenance.
+
+### Recover partial SDK publication
+
+Inspect both immutable states before changing anything:
+
+| SDK tag | npm version | Recovery |
+| --- | --- | --- |
+| Absent | Absent | Build/test/retain the original candidate, then create the tag and publish or report bootstrap |
+| Present | Absent | Verify the tag and retained signed receipt, then publish those bytes |
+| Absent | Present | Require the retained signed receipt and matching npm integrity/record before creating the missing tag |
+| Present | Present | Verify both identities and public consumers; repair only missing mutable-channel work |
+
+A lost mutation response triggers bounded rereads, not blind repeated writes.
+Existing tag targets, signatures, receipts, and uploaded assets must agree; the
+workflow never force-moves a tag or overwrites an existing release asset. A
+missing archive can be rebuilt only from the original signed source and exact
+tools, and only if its hash matches the authenticated receipt. Missing receipt
+or signature evidence after publication stops recovery. An interrupted initial
+receipt upload can finish its missing signature only before SDK publication,
+after workflow identity and rebuilt bytes are verified.
+
+An immutable host release needs no new assets for SDK recovery. The workflow
+discovers the exact SDK draft, verifies its target and existing bytes, then
+uploads missing evidence to that release ID. It signs the SDK tag only after
+all three assets are retained. It publishes the SDK release before npm runs.
+Published SDK releases must contain complete evidence. Conflicting evidence
+across host and SDK releases stops recovery. GitHub's latest host release and
+desktop updater feed stay unchanged.
+
+`latest` advances only after identity verification. An already newer SDK remains
+`latest` after its own signed mapping and retained archive are verified. Keep
+manual dist-tag changes outside active release runs; npm has no compare-and-swap
+operation for this mutable tag. A dist-tag permission failure remains a failed
+release even if the immutable upload succeeded. Never delete/reuse an npm
+version or SDK tag to repair conflicting bytes. Publish a new SDK version after
+reviewing the conflict.
+
+## Announce a release on Discord
+
+Normal Stable releases automatically post one compact announcement after GitHub Release, npm, Homebrew, Scoop, and public plugin SDK verification succeed and `stable-complete` passes. The message shows whole-release category counts, up to three Features and three Fixes with contributor credits, and the exact GitHub release link. Other populated categories retain their counts. It sends no attachment or full changelog series.
+
+Store the general-channel webhook URL as `DISCORD_GENERAL_WEBHOOK_URL` in **Settings > Environments > release > Environment secrets**. The existing environment must permit `main`. To enter the URL through an interactive prompt:
+
+```bash
+gh secret set DISCORD_GENERAL_WEBHOOK_URL --env release --repo kdlbs/kandev
+```
+
+A missing secret fails the announcement job with a configuration error. A Discord failure does not undo package publication. Nightlies, dry runs, desktop validation, failed publication, and cancellation before delivery send no announcement. Reruns and backfills skip automatic delivery and report that manual recovery is required.
+
+To preview or recover an announcement:
+
+1. Open **Actions > Announce Discord release > Run workflow** and select `main`.
+2. Enter the exact published Stable tag, such as `v1.2.3`.
+3. Use the default `preview` mode to inspect the job summary and preview artifact. Preview needs no webhook secret.
+4. For delivery, first verify all publication channels and inspect the Discord channel for an existing announcement. Use `update` with its message ID if it exists. Otherwise use `create` and select the acknowledgement checkbox.
+
+Successful delivery records the message ID and Discord link in the job summary and a receipt artifact retained for 30 days. Update requires a message from the configured webhook with the same release tag and GitHub link. It stops if the message is missing or does not match.
+
+A timeout or lost response can leave a message in Discord even when the job fails. The helper retries explicit rate limits within a bounded budget, but does not automatically resend uncertain requests. Inspect the channel before recovery; repeating `create` can produce a duplicate. Cancellation during delivery also requires inspection.
 
 ## Notify release contributors
 
-The **Release** workflow has a `notify_contributors` checkbox. It defaults to unchecked. If selected, it posts notices after GitHub Release, npm, Homebrew, and Scoop publication succeed. The release job passes its exact tag, including on a backfill. Nightly, dry-run, desktop-validation, cancellations before the notification job starts, and failed publication paths skip notices. Cancelling after posting starts can leave partial results; rerun the exact tag to finish safely.
+The **Release** workflow has a `notify_contributors` checkbox. It defaults to unchecked. If selected, it posts notices after GitHub Release, npm, Homebrew, Scoop, and plugin SDK verification succeed. The release job passes its exact tag, including on a backfill. Nightly, dry-run, desktop-validation, cancellations before the notification job starts, and failed publication paths skip notices. Cancelling after posting starts can leave partial results; rerun the exact tag to finish safely.
 
 Use the separate workflow to post notices, preview them, or recover after a partial notification run:
 
@@ -176,6 +416,7 @@ After publication, verify:
 - the Git tag points at the generated release merge;
 - GitHub notes, standard and full runtime archives, checksums, helper assets, the runtime size report, expected desktop installers, and conditional `latest.json`;
 - all five runtime npm packages plus `kandev`, including a clean `npx kandev@latest`;
+- the independent plugin SDK tag, signed retained receipt, exact npm archive, public Go/npm consumer checks, and `stable-complete`;
 - Homebrew install/upgrade, a `Cellar/kandev/X.Y.Z` install path, and `kandev --version`;
 - Scoop install/update, the manifest version and hash, and `kandev --version`;
 - GHCR base and universal images on amd64 and arm64, including their immutable version tags;
@@ -209,6 +450,13 @@ npm audit signatures
 ## Repair a partial release
 
 First identify exactly which immutable and mutable channels succeeded. Preserve workflow logs, checksums, package versions, image digests, and signing output.
+
+When the existing GitHub Release is immutable, backfill verifies and reuses its
+published artifact set. It preserves the release notes, tag, installer bytes,
+and updater feed. Verification checks the signed host source, required asset
+inventory, download digests, checksums, runtime manifests, and updater signatures.
+An incomplete or conflicting immutable release fails verification. Do not
+delete it or disable immutability to replace its assets.
 
 Required web, runtime, and desktop artifact uploads make up to three total attempts. The workflow waits 30 seconds before the second attempt and 60 seconds before the third attempt. Each required upload also fails when an expected file is missing. Desktop targets run independently, so one upload failure does not cancel the other matrix targets. Publication remains blocked until every required target succeeds. If all attempts fail, rerun the failed job in the same workflow run. If the signed tag already exists and the run remains partial, use `backfill_tag=vX.Y.Z` after confirming which channels already succeeded.
 

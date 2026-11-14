@@ -180,6 +180,7 @@ func TestRemoteRecoveryRetriesAfterPartialReplayTimeout(t *testing.T) {
 	}
 	row.Metadata = map[string]interface{}{
 		MetadataKeyOriginalWorkspacePath: "/workspace",
+		MetadataKeyTaskEnvironmentID:     "environment-task-replay-retry",
 		metadataKeyPassthroughMCPClaims: []interface{}{map[string]interface{}{
 			"path": mcpPath, "fingerprint": passthroughMCPFingerprint(mcpContent), "owned": true,
 		}},

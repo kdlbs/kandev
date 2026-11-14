@@ -16,7 +16,7 @@ const mockContinuationPrompt = "continue"
 func TestMockInterruptionContinuationRequiresFixturePrefix(t *testing.T) {
 	a := newTransportLostTestAgent()
 	a.conn = newCapturingUpdater()
-	for _, prompt := range []string{mockContinuationReadScenario, mockContinuationOutputScenario, mockContinuationWriteScenario, mockContinuationUnknownScenario, "continue"} {
+	for _, prompt := range []string{mockContinuationReadScenario, mockContinuationOutputScenario, mockContinuationWriteScenario, mockContinuationPendingV3Scenario, mockContinuationUnknownScenario, "continue"} {
 		_, _, handled := a.handleMockInterruptionContinuation(t.Context(), "ordinary", prompt)
 		require.False(t, handled, "ordinary prompts cannot enter an interruption fixture")
 	}
@@ -85,7 +85,7 @@ func TestMockInterruptionContinuationShellOutcome(t *testing.T) {
 }
 
 func TestMockInterruptionContinuationRestoresSameConversation(t *testing.T) {
-	for _, scenario := range []string{mockContinuationOutputScenario, mockContinuationReadScenario, mockContinuationWriteScenario, mockContinuationPendingScenario, mockContinuationUnknownScenario} {
+	for _, scenario := range []string{mockContinuationOutputScenario, mockContinuationReadScenario, mockContinuationWriteScenario, mockContinuationPendingScenario, mockContinuationPendingV3Scenario, mockContinuationUnknownScenario} {
 		t.Run(scenario, func(t *testing.T) {
 			sid := acp.SessionId(t.Name())
 			_ = os.Remove(mockContinuationPath(sid))
@@ -180,7 +180,7 @@ func TestMockInterruptionContinuationRestoreOutcomes(t *testing.T) {
 }
 
 func TestMockInterruptionContinuationConsumesEpisode(t *testing.T) {
-	for _, scenario := range []string{mockContinuationReadScenario, mockContinuationReadHoldScenario} {
+	for _, scenario := range []string{mockContinuationReadScenario, mockContinuationReadHoldScenario, mockContinuationPendingV3HoldScenario} {
 		t.Run(scenario, func(t *testing.T) {
 			sid := acp.SessionId(t.Name())
 			_ = os.Remove(mockContinuationPath(sid))

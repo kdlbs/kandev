@@ -148,7 +148,7 @@
   "managedChatYou": "나",
   "manifest": "매니페스트",
   "manifestApiVersion": "API 버전",
-  "manifestAuthor": "제작자",
+  "manifestAuthor": "선언된 작성자",
   "manifestCapabilities": "기능",
   "manifestId": "ID",
   "manifestInstalled": "설치됨",

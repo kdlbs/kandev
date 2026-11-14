@@ -208,12 +208,12 @@ func TestReplayFixtureTransportLayer(t *testing.T) {
 			if requestErr.Code != promptErrorFrame.Code {
 				t.Fatalf("fixture RequestError code = %d, want %d", requestErr.Code, promptErrorFrame.Code)
 			}
-			wantRetainedFailure := fx.Expect.DiagnosticCode == string(routingerr.CodeProviderOverloaded) ||
-				fx.Expect.DiagnosticCode == string(routingerr.CodeModelCapacity) ||
-				fx.Expect.DiagnosticCode == string(routingerr.CodeRateLimited)
-			if (promptErr == nil) != wantRetainedFailure {
-				t.Fatalf("Adapter.Prompt retained failure = %v, want %v for diagnostic %q",
-					promptErr == nil, wantRetainedFailure, fx.Expect.DiagnosticCode)
+			// Every fixture terminal frame is a remote error response on a live
+			// connection, so the turn is retained regardless of its diagnostic
+			// class. Retention never grants automatic recovery.
+			if promptErr != nil {
+				t.Fatalf("Adapter.Prompt error = %v, want a retained turn event for diagnostic %q",
+					promptErr, fx.Expect.DiagnosticCode)
 			}
 			tokens := tokenizeEvents(observedEvents)
 
@@ -288,12 +288,12 @@ func TestReplayFixtureTransportLayer(t *testing.T) {
 	}
 }
 
-func TestReplayFixtureRetainedCapacityUsesMarkedRequestError(t *testing.T) {
+func TestReplayFixtureRetainsGenericMockPromptError(t *testing.T) {
 	fx := replayfixtures.Fixture{
 		AgentID: mockAgentID,
 		Identity: replayfixtures.Identity{
-			SessionID:        "mock-retained-capacity",
-			ExecutionID:      "mock-retained-capacity-execution",
+			SessionID:        "mock-generic-error",
+			ExecutionID:      "mock-generic-error-execution",
 			PromptGeneration: 7,
 		},
 		Frames: []replayfixtures.Frame{
@@ -301,8 +301,8 @@ func TestReplayFixtureRetainedCapacityUsesMarkedRequestError(t *testing.T) {
 			{
 				Kind:    replayfixtures.FramePromptError,
 				Code:    -32603,
-				Message: "Selected model is at capacity. Please try a different model.",
-				Data:    map[string]any{"kandevMock": map[string]any{"retainedProviderCapacity": true}},
+				Message: "Internal error: Failed to execute statement",
+				Data:    map[string]any{"details": "SQLiteError: database is locked"},
 			},
 		},
 	}
@@ -312,14 +312,6 @@ func TestReplayFixtureRetainedCapacityUsesMarkedRequestError(t *testing.T) {
 	}
 	if requestErr == nil || requestErr.Code != -32603 {
 		t.Fatalf("raw ACP RequestError = %#v, want code -32603", requestErr)
-	}
-	data, ok := requestErr.Data.(map[string]any)
-	if !ok {
-		t.Fatalf("raw ACP RequestError data = %#v, want marker", requestErr.Data)
-	}
-	meta, ok := data["kandevMock"].(map[string]any)
-	if !ok || meta["retainedProviderCapacity"] != true {
-		t.Fatalf("raw ACP RequestError marker = %#v, want retainedProviderCapacity", requestErr.Data)
 	}
 	var terminal *AgentEvent
 	for i := range observedEvents {
@@ -335,9 +327,9 @@ func TestReplayFixtureRetainedCapacityUsesMarkedRequestError(t *testing.T) {
 	}
 	if terminal.ProviderError == nil || terminal.ProviderError.Source != streams.ProviderErrorSourceACPPrompt ||
 		terminal.ProviderError.RPCCode != -32603 {
-		t.Fatalf("terminal provider error = %+v, want the marked ACP prompt error", terminal.ProviderError)
+		t.Fatalf("terminal provider error = %+v, want the generic ACP prompt error", terminal.ProviderError)
 	}
-	if terminal.CapacityContinuation == nil || !terminal.CapacityContinuation.SafeFor(fx.Identity.PromptGeneration) {
-		t.Fatalf("capacity continuation evidence = %+v, want safe generation %d", terminal.CapacityContinuation, fx.Identity.PromptGeneration)
+	if terminal.CapacityContinuation != nil {
+		t.Fatalf("capacity continuation evidence = %+v, want none without capacity evidence", terminal.CapacityContinuation)
 	}
 }

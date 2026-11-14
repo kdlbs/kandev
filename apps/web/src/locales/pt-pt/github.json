@@ -1,4 +1,5 @@
 {
+  "openPr": "Abrir PR",
   "views": "Vistas",
   "viewPicker": "Vistas: {{view}}",
   "loadingSavedQueries": "A carregar consultas guardadas...",
@@ -95,6 +96,10 @@
   "checksPendingCount_other": "{{count}} pendentes",
   "checksRunning": "Verificações em execução",
   "checksNotSuccessful": "Verificações não concluídas com sucesso",
+  "allChecksSkipped": "Todas as verificações ignoradas",
+  "checksSkippedCount_one": "{{count}} verificação ignorada",
+  "checksSkippedCount_other": "{{count}} verificações ignoradas",
+  "lastDetailedObservation": "Última observação detalhada",
   "chooseAGithubApp": "Escolher uma App do GitHub",
   "chooseHowNewlyLaunchedTasksAuthenticate": "Escolha como as tarefas recém-lançadas se autenticam no GitHub. Isto não altera a ligação de automatização da área de trabalho acima.",
   "chooseMergeMethod": "Escolher o método de merge",
@@ -652,10 +657,16 @@
   "mergeQueueRecoveryStatusRepairRequestedWaiting": "Correção pedida. A aguardar um novo commit antes de voltar à fila.",
   "mergeQueueRecoveryStatusWaitingForCommit": "A aguardar um novo commit antes de voltar à fila.",
   "mergeQueueRecoveryStatusWaitingForChecks": "Novo head detetado. A aguardar verificações obrigatórias.",
+  "githubHost": "Anfitrião GitHub",
+  "invalidGitHubHost": "Introduza um nome de anfitrião Web do GitHub ou uma origem HTTPS sem caminho.",
+  "selectedGitHubHost": "Anfitrião: {{host}}",
+  "githubHostReplacement": "A alteração de {{current}} para {{proposed}} invalida autorizações pendentes. Os repositórios existentes, tarefas associadas, monitorizações e filtros guardados mantêm o anfitrião original e podem exigir uma nova ligação.",
+  "createPersonalAccessToken": "Criar um token de acesso pessoal",
   "mergeAccessLoading": "A verificar permissões para integrar.",
   "mergeAccessUnavailable": "As permissões para integrar não estão disponíveis.",
   "mergeAccessDeniedByActor": "{{actor}} não pode integrar em {{repository}}.",
   "mergeAccessDenied": "Esta conta não pode integrar em {{repository}}.",
   "checkMergeAccess": "Verificar novamente",
-  "mergeAsActor": "como {{actor}}"
+  "mergeAsActor": "como {{actor}}",
+  "lastDetailedObservationAllSkipped": "Última observação detalhada: todas as verificações ignoradas"
 }

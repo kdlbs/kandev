@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getActiveTerminalSender, setActiveTerminalSender } from "./mobile-active-terminal";
+import {
+  getActiveTerminalSender,
+  getActiveTerminalTarget,
+  setActiveTerminalSender,
+} from "./mobile-active-terminal";
 
 beforeEach(() => setActiveTerminalSender(null));
 
@@ -12,11 +16,13 @@ describe("mobile terminal ownership", () => {
   });
 
   it("keeps a successor sender when an old terminal releases ownership", () => {
-    const release = setActiveTerminalSender(vi.fn(), "session");
+    const release = setActiveTerminalSender(vi.fn(), "session", () => false);
     const successor = vi.fn();
-    setActiveTerminalSender(successor, "session");
+    setActiveTerminalSender(successor, "session", () => true);
     expect(typeof release).toBe("function");
     release();
     expect(getActiveTerminalSender("session")).toBe(successor);
+    expect(getActiveTerminalTarget("session")?.applicationCursorMode?.()).toBe(true);
+    expect(getActiveTerminalTarget("another-session")).toBeNull();
   });
 });

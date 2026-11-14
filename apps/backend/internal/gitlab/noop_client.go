@@ -147,6 +147,10 @@ func (c *NoopClient) MergeMR(context.Context, string, int, bool, string) (*MR, e
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) MarkMRReady(context.Context, string, int) (*MR, error) {
+	return nil, ErrNoClient
+}
+
 func (c *NoopClient) GetProjectMergeMethods(context.Context, string) (*ProjectMergeMethods, error) {
 	return nil, ErrNoClient
 }

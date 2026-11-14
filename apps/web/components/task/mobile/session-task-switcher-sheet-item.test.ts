@@ -136,3 +136,25 @@ describe("toSheetItem Office identity projection", () => {
     expect(item.isFromOffice).toBe(true);
   });
 });
+
+describe("toSheetItem unread projection", () => {
+  const UPDATED_AT = "2026-07-22T00:00:00Z";
+
+  it("carries the summary unread aggregate onto the phone row", () => {
+    const item = toSheetItem(
+      task({
+        statusSummary: { revision: 1, updated_at: UPDATED_AT, unread_session_ids: ["session-1"] },
+      }),
+      emptyCtx(),
+    );
+    expect(item.unreadSessionIds).toEqual(["session-1"]);
+  });
+
+  it("reports no unread sessions without a summary or with an empty list", () => {
+    expect(toSheetItem(task(), emptyCtx()).unreadSessionIds).toBeUndefined();
+    const cleared = task({
+      statusSummary: { revision: 2, updated_at: UPDATED_AT, unread_session_ids: [] },
+    });
+    expect(toSheetItem(cleared, emptyCtx()).unreadSessionIds).toBeUndefined();
+  });
+});

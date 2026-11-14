@@ -38,6 +38,7 @@ const panelState = {
   historyRefreshPending: false,
   isInitialMessagesLoading: false,
   groupedItems: [{ type: "message", message: agent }] as RenderItem[],
+  messages: [agent] as Message[],
   allMessages: [agent] as Message[],
   footerActionMessages: [] as Message[],
   permissionsByToolCallId: new Map(),
@@ -94,6 +95,7 @@ vi.mock("@/components/state-provider", () => ({
   useOptionalAppStore: (selector: (value: typeof state) => unknown, fallback: unknown) =>
     selector(state) ?? fallback,
   useAppStoreApi: () => storeApi,
+  useOptionalAppStoreApi: () => null,
 }));
 vi.mock("@/hooks/domains/settings/use-settings-data", () => ({ useSettingsData: () => undefined }));
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({

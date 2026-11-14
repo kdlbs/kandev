@@ -82,7 +82,8 @@ func TestAuthorizeHelpersNoOpWhenAuthIsDisabled(t *testing.T) {
 
 func TestAuthorizeStepResolvesItsOwningWorkflow(t *testing.T) {
 	t.Run("a step in a visible workflow is allowed", func(t *testing.T) {
-		svc, _ := setupTestService(t)
+		svc, db := setupTestService(t)
+		insertWorkflow(t, db, "wf-1", "Workflow")
 		recorder := &callRecorder{}
 		svc.SetWorkflowAccessChecker(recorder.check)
 		step := &models.WorkflowStep{WorkflowID: "wf-1", Name: "Backlog", Color: "#111111"}
@@ -93,7 +94,8 @@ func TestAuthorizeStepResolvesItsOwningWorkflow(t *testing.T) {
 	})
 
 	t.Run("a step in a foreign workflow is not found", func(t *testing.T) {
-		svc, _ := setupTestService(t)
+		svc, db := setupTestService(t)
+		insertWorkflow(t, db, "wf-1", "Workflow")
 		svc.SetWorkflowAccessChecker(denyAll)
 		step := &models.WorkflowStep{WorkflowID: "wf-1", Name: "Backlog", Color: "#111111"}
 		require.NoError(t, svc.CreateStep(context.Background(), step))
@@ -199,7 +201,8 @@ func TestServiceEntryPointsAuthorizeThemselves(t *testing.T) {
 	// membership check below cannot stand in for this one: steps that really
 	// do belong to a workflow the caller cannot see would otherwise reorder.
 	t.Run("reorder authorizes the workflow it is asked to reorder", func(t *testing.T) {
-		svc, _ := setupTestService(t)
+		svc, db := setupTestService(t)
+		insertWorkflow(t, db, "wf-a", "Workflow A")
 		step := &models.WorkflowStep{WorkflowID: "wf-a", Name: "Backlog", Color: "#111111", Position: 7}
 		require.NoError(t, svc.CreateStep(context.Background(), step))
 		svc.SetWorkflowAccessChecker(denyAll)
@@ -211,7 +214,8 @@ func TestServiceEntryPointsAuthorizeThemselves(t *testing.T) {
 	})
 
 	t.Run("reorder rejects a step from another workflow", func(t *testing.T) {
-		svc, _ := setupTestService(t)
+		svc, db := setupTestService(t)
+		insertWorkflow(t, db, "wf-a", "Workflow A")
 		// Position 7, so the reorder this test denies would visibly move the
 		// step to 0 if the guard were missing. wf-b is authorized: the step
 		// belonging to wf-a is the only reason to refuse.

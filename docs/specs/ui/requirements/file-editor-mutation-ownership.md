@@ -103,12 +103,50 @@ filesystem actions finish.
   Receipt-before-refresh shall retain the existing clean/dirty reconciliation.
   Reload preparation shall not replace a newer observed snapshot with an older one.
 
+### REQ-UI-FILE-EDITOR-MUTATION-002: Open editor continuity after Files rename
+
+**Intent:** Keep an open editor attached to its file when a user renames or
+moves that file, or an enclosing folder, through Files.
+
+#### Acceptance criteria
+
+- **AC-UI-FILE-EDITOR-MUTATION-002.1:** After a successful Files rename of an
+  open file, the existing editor shall identify the new path and retain its
+  current content, saved baseline, dirty state, active tab and pinned or preview
+  status. Saving a dirty buffer shall write the renamed file. Reopening the new
+  path shall select the existing editor rather than create a duplicate.
+- **AC-UI-FILE-EDITOR-MUTATION-002.2:** A successful folder rename shall apply
+  the same continuity to open descendant files, preserving their relative paths.
+  Unrelated paths, including names sharing only a textual prefix, and files in
+  other repositories or task environments shall remain unchanged.
+- **AC-UI-FILE-EDITOR-MUTATION-002.3:** A rejected or failed rename shall leave
+  editor paths and buffers unchanged. A completion from an earlier task
+  environment or retired editor shall not retarget a different editor.
+- **AC-UI-FILE-EDITOR-MUTATION-002.4:** The shared Files move operation shall
+  preserve the same continuity for each successful move; failed entries in a
+  partial move shall not retarget. Existing desktop and tablet interaction and
+  phone viewer composition shall remain unchanged.
+- **AC-UI-FILE-EDITOR-MUTATION-002.5:** If a different open editor already
+  represents a rename destination, Files shall reject that entry before the
+  filesystem mutation, retain both editors and show existing rename-failure
+  feedback. While an admitted rename is pending, opening its source or
+  destination path (including folder descendants) shall be refused with the
+  existing open-failure feedback; other paths remain available. A partial move shall continue
+  independent entries and report its existing failure feedback. If a distinct
+  destination editor nevertheless appears before an accepted response is
+  published, both buffers shall be retained and the existing open-failure
+  feedback shall be shown; the filesystem rename has already succeeded.
+
 ## Out of scope
 
 - Cancellation or rollback of a filesystem write/delete already accepted by
   the server, and background persistence of inactive editor buffers.
 - New mutation ordering, deduplication, retry or conflict-resolution policy
   within an unchanged editor lifetime.
+- Inferring external filesystem renames, adding phone editing or a new phone
+  rename entry point, and general save/rename transaction ordering.
+- Preserving editor undo history across a Files rename. Current text and its
+  saved baseline are retained, but the editor may start a new undo history.
 - Workspace read races outside background refresh of already-open Dockview
   buffers; general filesystem transaction ordering, transport/authorization
   redesign, backend APIs, new settings, and responsive presentation changes.
@@ -122,3 +160,4 @@ filesystem actions finish.
 - [File editor mutation ownership](../../../plans/file-editor-mutation-ownership/plan.md)
 - [Preserve editor workspace refresh](../../../plans/editor-workspace-refresh-ownership/plan.md)
 - [Save and workspace observation reconciliation](../../../plans/editor-save-workspace-reconciliation/plan.md)
+- [Open editor rename continuity](../../../plans/open-editor-rename-continuity/plan.md)

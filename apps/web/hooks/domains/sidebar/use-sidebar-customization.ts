@@ -90,9 +90,11 @@ export function useSidebarCustomization(catalog: ShortcutCatalogEntry[] = []) {
     (operation: SidebarMutation) => {
       if (!workspaceId || unsupported) return Promise.resolve();
       return run(() =>
-        writerFor(store)(workspaceId, (current) =>
-          operation(materializeSidebarPluginNodes(current, catalog)),
-        ),
+        writerFor(store)(workspaceId, (current) => {
+          const editable = materializeSidebarPluginNodes(current, catalog);
+          const next = operation(editable);
+          return next === editable ? current : next;
+        }),
       );
     },
     [catalog, run, store, unsupported, workspaceId],

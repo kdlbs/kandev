@@ -106,10 +106,13 @@ func hasWorktreeSourceManifest(manifest []ArchiveSourceManifest, id string) bool
 }
 
 func cleanupRetryLimitReached(job *models.TaskResourceCleanupJob) bool {
-	if job.Attempts < taskResourceCleanupMaxAttempts {
-		return false
-	}
-	if !isCascadeCriticalCleanupTrigger(job.Trigger) {
+	return job.Attempts >= taskResourceCleanupMaxAttempts && cleanupRetryIsBounded(job)
+}
+
+// cleanupRetryIsBounded reports whether the attempt limit applies. Cascade
+// cleanup without the explicit unverified-cleanup consent retries indefinitely.
+func cleanupRetryIsBounded(job *models.TaskResourceCleanupJob) bool {
+	if job == nil || !isCascadeCriticalCleanupTrigger(job.Trigger) {
 		return true
 	}
 	var options struct {

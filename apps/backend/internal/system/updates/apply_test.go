@@ -242,6 +242,104 @@ func TestWriteApplyIntentPreservesNativeNoBootStart(t *testing.T) {
 	}
 }
 
+func TestWriteApplyIntentPreservesNativeShell(t *testing.T) {
+	homeDir := t.TempDir()
+	metadataPath := filepath.Join(homeDir, "service", "install.json")
+	if err := os.MkdirAll(filepath.Dir(metadataPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(`{
+		"version": 1,
+		"manager": "launchd",
+		"mode": "user",
+		"kind": "npm",
+		"home_dir": "/Users/alice/.kandev",
+		"log_dir": "/Users/alice/.kandev/logs",
+		"service_path": "/Users/alice/Library/LaunchAgents/com.kdlbs.kandev.plist",
+		"launcher_path": "/opt/homebrew/lib/node_modules/kandev/bin/kandev",
+		"shell": "/bin/zsh",
+		"installed_at": "2026-10-26T00:00:00Z"
+	}`)
+	if err := os.WriteFile(metadataPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := readServiceMetadata(metadataPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(newTestPool(t), "v1.0.0", nil, logger.Default(), WithHomeDir(homeDir))
+	intentPath, _, err := svc.writeApplyIntent(UpdatesResponse{Latest: "v1.2.3"}, metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intentData, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var intent map[string]interface{}
+	if err := json.Unmarshal(intentData, &intent); err != nil {
+		t.Fatal(err)
+	}
+	install, _ := intent["install"].(map[string]interface{})
+	if install["shell"] != "/bin/zsh" {
+		t.Fatalf("intent install.shell = %#v, want /bin/zsh", install["shell"])
+	}
+}
+
+func TestService_ApplyRejectsNativeShellMetadataMismatch(t *testing.T) {
+	homeDir := t.TempDir()
+	servicePath := filepath.Join(homeDir, "Library", "LaunchAgents", "com.kdlbs.kandev.plist")
+	if err := os.MkdirAll(filepath.Dir(servicePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	metadataPath, _ := writeServiceInstallForTest(t, homeDir, serviceInstallMetadata{
+		Manager:      serviceManagerLaunchd,
+		Mode:         installModeUser,
+		Kind:         installKindNPM,
+		HomeDir:      homeDir,
+		LogDir:       filepath.Join(homeDir, "logs"),
+		ServicePath:  servicePath,
+		LauncherPath: "/opt/homebrew/lib/node_modules/kandev/bin/kandev",
+		Shell:        "/bin/bash",
+	})
+	plist := `<!-- managed by kandev -->
+<plist><dict>
+  <key>ProgramArguments</key><array>
+    <string>/opt/homebrew/lib/node_modules/kandev/bin/kandev</string>
+    <string>service</string><string>run</string><string>--shell</string><string>/bin/zsh</string>
+  </array>
+  <key>KANDEV_RUNNING_AS_SERVICE</key><string>true</string>
+  <key>KANDEV_SERVICE_METADATA</key><string>` + metadataPath + `</string>
+</dict></plist>`
+	if err := os.WriteFile(servicePath, []byte(plist), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(envRunningAsService, "true")
+	t.Setenv(envServiceMode, installModeUser)
+	t.Setenv(envServiceManager, serviceManagerLaunchd)
+	t.Setenv(envInstallKind, installKindNPM)
+	t.Setenv(envServiceMetadata, metadataPath)
+
+	pool := newTestPool(t)
+	if err := persistence.WriteLatestVersion(pool.Writer(), "v1.0.1", "https://example/v1.0.1", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(
+		pool,
+		"v1.0.0",
+		nil,
+		logger.Default(),
+		WithHomeDir(homeDir),
+		WithJobs(jobs.NewTracker(nil, logger.Default())),
+	)
+	if _, err := svc.Apply(context.Background(), "UPDATE", "v1.0.1"); !errors.Is(err, ErrApplyUnsupported) {
+		t.Fatalf("Apply error = %v, want ErrApplyUnsupported", err)
+	}
+	if _, err := os.Stat(filepath.Join(homeDir, "service", "update-intents")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("update intent directory exists after mismatch rejection: stat err=%v", err)
+	}
+}
+
 func TestService_ApplyRejectsUnsupportedInstall(t *testing.T) {
 	pool := newTestPool(t)
 	if err := persistence.WriteLatestVersion(pool.Writer(), "v1.0.1", "https://example/v1.0.1", time.Now().UTC()); err != nil {

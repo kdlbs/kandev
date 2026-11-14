@@ -6,6 +6,7 @@ package types
 
 import (
 	"context"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -136,6 +137,11 @@ type PermissionRequest struct {
 	// If empty, the process manager will generate a unique ID.
 	PendingID string `json:"pending_id,omitempty"`
 
+	// HumanInput marks a provider-native question that only a person can
+	// answer. The host classifies it before any automatic permission policy
+	// runs; it is never inferred from question prose or option count.
+	HumanInput bool `json:"human_input,omitempty"`
+
 	// ActionType categorizes the action requiring approval.
 	// Use ActionType* constants: "command", "file_write", "network", "mcp_tool", etc.
 	ActionType string `json:"action_type,omitempty"`
@@ -174,6 +180,20 @@ type McpServer struct {
 	Type    string            `json:"type,omitempty"`    // "stdio", "sse", "http", or "streamable_http"
 	Env     map[string]string `json:"env,omitempty"`     // Environment variables (stdio transport)
 	Headers map[string]string `json:"headers,omitempty"` // HTTP headers (SSE/HTTP transport)
+	// The following fields are backend-only evidence metadata. They are
+	// intentionally omitted from protocol JSON sent to agentctl and providers.
+	BuiltinPackage     mcpprofile.PackageID `json:"-"`
+	DefinitionID       string               `json:"-"`
+	DefinitionRevision int64                `json:"-"`
+	Origins            []McpServerOrigin    `json:"-"`
+}
+
+// McpServerOrigin is backend-owned scope metadata carried alongside an MCP
+// server until attachment evidence is created. It never enters protocol JSON.
+type McpServerOrigin struct {
+	Scope       string
+	WorkspaceID string
+	OwnerID     string
 }
 
 const (
@@ -193,7 +213,26 @@ const (
 	WorkspaceMessageTypeGitCommit     WorkspaceMessageType = "git_commit"
 	WorkspaceMessageTypeGitReset      WorkspaceMessageType = "git_reset"
 	WorkspaceMessageTypeBranchSwitch  WorkspaceMessageType = "branch_switch"
+	// WorkspaceMessageTypeWorktreeInventory reports the linked worktrees of
+	// one tracked repository after filtering by task-workspace containment.
+	WorkspaceMessageTypeWorktreeInventory WorkspaceMessageType = "worktree_inventory"
 )
+
+// WorktreeInventoryEntry describes one linked worktree on a named branch.
+type WorktreeInventoryEntry struct {
+	Path    string `json:"path"`
+	Branch  string `json:"branch"`
+	HeadSHA string `json:"head_sha"`
+}
+
+// WorktreeInventory carries the full filtered linked-worktree list for one
+// repository. Consumers diff snapshots rather than relying on deltas.
+type WorktreeInventory struct {
+	RepositoryName string                   `json:"repository_name"`
+	CommonDir      string                   `json:"common_dir"`
+	Entries        []WorktreeInventoryEntry `json:"entries"`
+	ObservedAt     time.Time                `json:"observed_at"`
+}
 
 // WorkspaceStreamMessage is the unified message format for the workspace stream.
 // It carries all workspace events (shell I/O, git status, file changes) with
@@ -228,6 +267,9 @@ type WorkspaceStreamMessage struct {
 
 	// Branch switch fields (for branch_switch)
 	BranchSwitch *GitBranchSwitchNotification `json:"branch_switch,omitempty"`
+
+	// Worktree inventory fields (for worktree_inventory)
+	WorktreeInventory *WorktreeInventory `json:"worktree_inventory,omitempty"`
 
 	// Error fields (for error)
 	Error string `json:"error,omitempty"`
@@ -284,6 +326,15 @@ func NewWorkspaceBranchSwitch(branchSwitch *GitBranchSwitchNotification) Workspa
 		Type:         WorkspaceMessageTypeBranchSwitch,
 		Timestamp:    timeNowUnixMilli(),
 		BranchSwitch: branchSwitch,
+	}
+}
+
+// NewWorkspaceWorktreeInventory creates a worktree inventory message.
+func NewWorkspaceWorktreeInventory(inventory *WorktreeInventory) WorkspaceStreamMessage {
+	return WorkspaceStreamMessage{
+		Type:              WorkspaceMessageTypeWorktreeInventory,
+		Timestamp:         timeNowUnixMilli(),
+		WorktreeInventory: inventory,
 	}
 }
 
@@ -390,4 +441,10 @@ type VscodeOpenFileRequest struct {
 type VscodeOpenFileResponse struct {
 	Success bool   `json:"success"`
 	Error   string `json:"error,omitempty"`
+}
+
+// IsInjectedBuiltin identifies host-generated package entries. The provenance
+// field is never accepted from agent or provider JSON.
+func (s McpServer) IsInjectedBuiltin() bool {
+	return s.BuiltinPackage != "" && mcpprofile.BuiltinPackageForRuntimeName(s.Name) == s.BuiltinPackage
 }

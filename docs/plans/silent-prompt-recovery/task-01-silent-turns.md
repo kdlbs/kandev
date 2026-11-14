@@ -173,3 +173,30 @@ Design review correction: the verification filter includes
 `TestWaitForPromptDone_AcceptedSilentPromptIsAdvisory`. A direct regex check
 confirmed that match; documentation catalog, specification lint, and whitespace
 checks passed at that checkpoint. The executable regression now passes.
+
+## Browser fixture timing correction (2026-10-27)
+
+A retained SDK integration CI trace proves that the real notice appeared and
+output cleared it before the fixture finished navigation/readiness. The prompt
+was accepted at 02:29:17.944 UTC; the watchdog reported no output at 18.954;
+the notice was visible at 27.951; agent-rendered progress was visible with no
+notice at 28.621; the test began expecting a notice at 28.783. The fixed ten-second
+silent interval was therefore an invalid observation window.
+
+The first browser scenario now uses two release gates. A narrow mockTurnGate
+option omits the initial announcement; existing callers retain it by default.
+The first gate preserves silence until the original notice and touch-target
+checks finish. Releasing it emits progress. The second gate keeps the turn alive
+through the original notice-cleared, RUNNING, reload, and overflow checks.
+Both gates release in finally, including setup failures; the normal path stops
+the session first. Watchdog thresholds, assertion budgets, and product code are
+unchanged. The unextended helper failed the progress assertion because its
+announcements contaminated the required silent/progress text. Desktop recovery
+coverage passes with the silent option; phone and default-caller checks follow.
+
+Validation result: five desktop recovery cases, four phone recovery cases,
+and the existing default-announcement preview-feedback consumer all passed
+with retries disabled. The default consumer explicitly observes its original
+start announcement. Independent review found no actionable issue. The retained
+CI trace proves the fixed-delay race separately from the controlled silent-mode
+RED. Product watchdog and recovery logic are unchanged.

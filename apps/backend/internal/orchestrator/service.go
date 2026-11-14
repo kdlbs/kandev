@@ -62,10 +62,11 @@ const maxStartupTransferReconcileAttempts = 30
 
 // ServiceConfig holds orchestrator service configuration
 type ServiceConfig struct {
-	RetryClock RetryClock
-	Scheduler  scheduler.SchedulerConfig
-	QueueSize  int
-	QueueGroup string
+	ProviderKeywordContext bool
+	RetryClock             RetryClock
+	Scheduler              scheduler.SchedulerConfig
+	QueueSize              int
+	QueueGroup             string
 	// CodexAppServerEnabled controls native-only lifecycle actions such as
 	// conversation forks. It is restart-required, matching agentctl transport
 	// composition and the feature's runtime flag.
@@ -114,10 +115,25 @@ func DefaultServiceConfig() ServiceConfig {
 }
 
 // MessageCreator is an interface for creating messages on tasks
+// SessionMessageTimestampReader returns the immutable creation time of a
+// persisted session message. A message creator that can resolve its own rows
+// implements it so durable attention ordering uses message time, not the time
+// settlement happened to record it.
+type SessionMessageTimestampReader interface {
+	SessionMessageCreatedAt(ctx context.Context, messageID string) (time.Time, bool)
+}
+
 type MessageCreator interface {
 	CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error
 	CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error
 	CreateUserMessageIdempotent(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error
+	// SetUserMessageDeliveryStatus sets the delivery status on an exact
+	// session-owned user message. It reports whether the message exists.
+	SetUserMessageDeliveryStatus(ctx context.Context, messageID, agentSessionID, status string) (bool, error)
+	// CreateCompletedUserMessageIdempotent records a user message in an
+	// already-completed lifecycle-only turn. It never starts or adopts an
+	// active conversation turn.
+	CreateCompletedUserMessageIdempotent(ctx context.Context, messageID, taskID, content, agentSessionID string, metadata map[string]interface{}) error
 	// CreateToolCallMessage creates a message for a tool call.
 	// normalized contains the typed tool payload data.
 	// parentToolCallID is the parent Task tool call ID for subagent nesting (empty for top-level).
@@ -134,8 +150,9 @@ type MessageCreator interface {
 	// already-completed lifecycle-only turn. The turn is never active, so a
 	// later prompt cannot adopt it.
 	CreateLifecycleSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType string, metadata map[string]interface{}) error
-	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, decision *models.PermissionDecision) (string, error)
+	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, messageOptions models.PermissionRequestMessageOptions) (string, error)
 	UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error
+	UpdatePermissionPresentation(ctx context.Context, request models.PermissionPresentationUpdate) (*models.Message, bool, error)
 	ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
 	FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
 	GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error)
@@ -174,12 +191,15 @@ type StreamingMessageRetractionService interface {
 // stale provider event from creating a new retry while terminal cleanup is in
 // flight, then allows the session entry to be reclaimed.
 type transientRetryNoticeState struct {
-	mu           sync.Mutex
-	retired      atomic.Bool
-	owned        atomic.Bool
-	retiredUntil atomic.Int64
-	refs         int
-	fenceTimer   *time.Timer
+	mu sync.Mutex
+	// retirementGeneration is protected by mu and distinguishes a fence
+	// already present when an attempt began from a later cancellation.
+	retirementGeneration uint64
+	retired              atomic.Bool
+	owned                atomic.Bool
+	retiredUntil         atomic.Int64
+	refs                 int
+	fenceTimer           *time.Timer
 }
 
 // SessionAttachmentCleaner removes file-backed prompt attachments after a
@@ -748,6 +768,9 @@ type Service struct {
 	repo                      sessionExecutorStore
 	promptTargets             taskPullRequestTargetStore
 	agentManager              executor.AgentManagerClient
+	// deliverySessionStateTestHook pauses the correction between its pre-guard
+	// proof and guarded recheck in deterministic race tests.
+	deliverySessionStateTestHook func()
 	// ACP mode and model reports mutate one selector snapshot per session.
 	sessionSettingsSnapshotLocks [64]sync.Mutex
 
@@ -791,6 +814,9 @@ type Service struct {
 
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
+	// turnErrorRecorder persists durable task attention for a manual retained
+	// failure. Nil leaves the historical settlement behavior unchanged.
+	turnErrorRecorder TaskTurnErrorRecorder
 
 	// transientRetryMessages owns durable cleanup of persisted retry notices.
 	// It is optional for focused tests and pre-composition callers.
@@ -826,9 +852,15 @@ type Service struct {
 
 	// Task event publisher for emitting task.updated events.
 	// Task service owns the rich payload; orchestrator delegates.
-	taskEvents             TaskEventPublisher
-	feederPulls            FeederPullReconciler
-	backgroundWorkObserver BackgroundWorkObserver
+	taskEvents                  TaskEventPublisher
+	feederPulls                 FeederPullReconciler
+	backgroundWorkObserver      BackgroundWorkObserver
+	backgroundWorkSettleMu      sync.Mutex
+	backgroundWorkSettleCtx     context.Context
+	backgroundWorkSettleCancel  context.CancelFunc
+	backgroundWorkSettleStopped bool
+	backgroundWorkSettleWorkers *sync.WaitGroup
+	backgroundWorkSettleDrain   chan struct{}
 
 	// launchAttachmentClaimer binds staged descriptors before any launch intent
 	// can dispatch them to the runtime. Inline attachments need no claim.
@@ -937,6 +969,11 @@ type Service struct {
 	// boundary used by task and workflow launch paths.
 	profileExecutionResolver *agentruntime.ProfileExecutionResolver
 
+	// mcpSelectionWriter persists task-session MCP selections at the launch
+	// boundary. It is optional so focused orchestrator tests and older callers
+	// retain the legacy runtime path.
+	mcpSelectionWriter MCPSelectionWriter
+
 	// dynamicRecovery owns durable reset/retry deadlines. Only pending states
 	// are scheduled after restart; a retrying state means dispatch may have
 	// crossed the process boundary and remains manual until reconciled.
@@ -952,6 +989,10 @@ type Service struct {
 
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
+
+	// officeLaunchProfilePreview returns the execution profile Office would
+	// launch an agent with, without recording any routing decision.
+	officeLaunchProfilePreview OfficeLaunchProfilePreviewFunc
 
 	// stepHistoryRecorder persists the ADR 0015 audit row for orchestrator
 	// step transitions: auto-advance (StepTransitionTriggerAutoComplete) and
@@ -1191,13 +1232,6 @@ type Service struct {
 	gitlabService      GitLabWatchService
 	gitlabReviewSource *GitLabReviewWatcherSource
 	gitlabIssueSource  *GitLabIssueWatcherSource
-	// Azure DevOps watcher service + sources for work-item and pull-request
-	// polling events. The integration publishes provider-native matches; the
-	// shared watcher coordinator owns task creation and throttling.
-	azureDevOpsService     AzureDevOpsWatchService
-	azureWorkItemSource    *AzureDevOpsWorkItemWatcherSource
-	azurePullRequestSource *AzureDevOpsPullRequestWatcherSource
-
 	// gitlabMRLinkService auto-links merge requests opened outside Kandev's
 	// Create-PR action, mirroring what githubService does for PRs. Separate
 	// from gitlabService (the review/issue watch surface) — see
@@ -1247,6 +1281,10 @@ type Service struct {
 	// session launches. Its initial effective capacity is resolved by the
 	// composition root and can be changed by the install Settings service.
 	sessionCeiling *sessionCeilingController
+	// messageCapacityWaits tracks process-local queue heads blocked only by
+	// the session ceiling. It starts empty after restart by design.
+	messageCapacityWaits     *messageCapacityWaitRegistry
+	messageCapacityWaitsOnce sync.Once
 
 	// ceilingSweeper is the single background goroutine that expires stale
 	// reservations (AC-7) and retries deferred launches (AC-15, AC-17a).
@@ -1259,6 +1297,12 @@ type Service struct {
 	// identity, so the token names the session the launch actually uses.
 	// Nil is the common case; see LaunchCredentialReminter.
 	launchCredentialReminter LaunchCredentialReminter
+
+	// ceilingDeferredLaunchSettler lets the component that queued a
+	// ceiling-deferred launch settle its own durable record once the ceiling
+	// replay admits or terminally drops that launch. Nil is the common case;
+	// see CeilingDeferredLaunchSettler.
+	ceilingDeferredLaunchSettler CeilingDeferredLaunchSettler
 
 	// lifecycleSweepCancel / lifecycleSweepWorkers own the one-shot
 	// background goroutine that runs reconcileTaskLifecycleTokens and
@@ -1561,6 +1605,10 @@ type Service struct {
 	// from a predecessor. Automatic recovery requires an explicit no-output,
 	// no-effect result from this map.
 	dynamicAttemptEvidence sync.Map
+	// keywordFailureHistory survives prompt-evidence retirement so a routed
+	// successor can use bounded failure context without reusing stale auth data.
+	keywordFailureHistoryMu sync.Mutex
+	keywordFailureHistory   map[string][]keywordObservation
 	// pendingDynamicStreakResets coalesces ordinary output/effect observations
 	// until a semantic boundary can persist the reset outside the raw stream
 	// callback. Each entry retains the prompt and route identity that authorized
@@ -1696,6 +1744,9 @@ func (s *Service) SetRouteActionHandler(handler func(context.Context, RouteActio
 // task and workflow launches.
 func (s *Service) SetProfileExecutionResolver(resolver *agentruntime.ProfileExecutionResolver) {
 	s.profileExecutionResolver = resolver
+	if resolver != nil {
+		resolver.SetKeywordContextEnabled(s.config.ProviderKeywordContext)
+	}
 }
 
 func (s *Service) ApplyRouteAction(ctx context.Context, request RouteActionRequest) (*RouteActionResult, error) {
@@ -1836,6 +1887,7 @@ func NewService(
 	ciAutomationCtx, ciAutomationCancel := context.WithCancel(context.Background())
 	dynamicSuccessorCtx, dynamicSuccessorCancel := context.WithCancel(context.Background())
 	parkedLoopCtx, parkedLoopCancel := context.WithCancel(context.Background())
+	backgroundWorkSettleCtx, backgroundWorkSettleCancel := context.WithCancel(context.Background())
 	s := &Service{
 		config:                       cfg,
 		logger:                       svcLogger,
@@ -1864,12 +1916,16 @@ func NewService(
 		idleReaper:                   newIdleSessionReaper(),
 		ceilingSweeper:               newCeilingSweeper(),
 		sessionCeiling:               newSessionCeilingForRepo(repo, cfg.SessionCapacity, svcLogger.Zap()),
+		messageCapacityWaits:         newMessageCapacityWaitRegistry(),
 		backgroundProbeConfig:        LoadBackgroundProbeConfig(svcLogger),
 		parkedStates:                 make(map[string]*parkedSessionState),
 		taskParkedStates:             make(map[string]*taskParkedState),
 		parkedEpoch:                  uint64(time.Now().UnixNano()),
 		parkedLoopCtx:                parkedLoopCtx,
 		parkedLoopCancel:             parkedLoopCancel,
+		backgroundWorkSettleCtx:      backgroundWorkSettleCtx,
+		backgroundWorkSettleCancel:   backgroundWorkSettleCancel,
+		backgroundWorkSettleWorkers:  &sync.WaitGroup{},
 	}
 	if registrar, ok := repo.(interface {
 		SetTaskQueuePurgePreparer(func(context.Context, string))
@@ -1962,8 +2018,12 @@ func NewService(
 	})
 	exec.SetOnLaunchFailed(s.handleLaunchFailed)
 	exec.SetOnExecutionCleanupClaim(s.claimForcedExecutionCleanup)
+	exec.SetOnStaleExecutionCleanup(func(ctx context.Context, sessionID string) {
+		s.settleBackgroundWorkLocked(ctx, sessionID, "")
+	})
 	exec.SetOnCancelledResumeExecutionCleanup(s.cleanupCancelledResumeExecution)
 	exec.SetOnExecutionStopOwnerRegistration(s.RegisterExecutionStopOwner)
+	exec.SetOnExecutionReplacementStopOwnerRegistration(s.RegisterExecutionReplacementStopOwner)
 	exec.SetOnTaskReviewStateReconcile(func(ctx context.Context, taskID, completedSessionID string) {
 		s.writeTaskReviewState(ctx, taskID, completedSessionID)
 	})
@@ -2063,6 +2123,11 @@ func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
 }
 
+// SetTaskTurnErrorRecorder wires the task-owned failed-turn attention store.
+func (s *Service) SetTaskTurnErrorRecorder(recorder TaskTurnErrorRecorder) {
+	s.turnErrorRecorder = recorder
+}
+
 // SetTransientRetryMessageService wires the task service used to write and
 // retire persisted transient-retry status messages.
 func (s *Service) SetTransientRetryMessageService(service TransientRetryMessageService) {
@@ -2094,6 +2159,22 @@ func (s *Service) SetAttachmentReader(reader AttachmentReader) {
 func (s *Service) SetCanvasesEnabled(enabled bool) {
 	if s.executor != nil {
 		s.executor.SetCanvasesEnabled(enabled)
+	}
+}
+
+// SetManagedRuntimeSingleUserOwner wires the live single-user repair-owner
+// fallback. The callback must report allowed only for disabled authentication.
+func (s *Service) SetManagedRuntimeSingleUserOwner(owner func() (string, bool)) {
+	if s.executor != nil {
+		s.executor.SetManagedRuntimeSingleUserOwner(owner)
+	}
+}
+
+// SetWorkspaceCollaborationEnabled applies the collaboration release gate to
+// task MCP profiles before agentctl receives them.
+func (s *Service) SetWorkspaceCollaborationEnabled(enabled bool) {
+	if s.executor != nil {
+		s.executor.SetWorkspaceCollaborationEnabled(enabled)
 	}
 }
 
@@ -2476,6 +2557,7 @@ func (s *Service) publishTaskMoved(ctx context.Context, task *models.Task, fromW
 		"wip_admitted":              task.WIPAdmitted,
 		"queued_for_step_id":        task.QueuedForStepID,
 		"queue_promotion":           queuePromotion,
+		"step_transition_id":        task.WorkflowStepTransitionID,
 	}
 	if task.QueuedAt != nil {
 		data["queued_at"] = task.QueuedAt.Format(time.RFC3339)
@@ -3381,6 +3463,9 @@ func (s *Service) Start(ctx context.Context) (startErr error) {
 
 func (s *Service) reconcileStartupState(ctx context.Context) error {
 	s.resetReservedPromptCallbacks()
+	if err := s.resetBackgroundWorkSettleWorkers(); err != nil {
+		return err
+	}
 	if err := s.resetSendNowWorkers(); err != nil {
 		return err
 	}
@@ -3481,9 +3566,6 @@ func (s *Service) subscribeStartupEvents() {
 
 	// Subscribe to GitLab integration events
 	s.subscribeGitLabEvents()
-
-	// Subscribe to Azure DevOps watcher events
-	s.subscribeAzureDevOpsEvents()
 
 	// Subscribe to JIRA integration events
 	s.subscribeJiraEvents()
@@ -3595,6 +3677,7 @@ func (s *Service) Stop() error {
 	// workers can otherwise observe the shutdown only after those components
 	// have already stopped, and may launch or recover a session during teardown.
 	s.stopDynamicSuccessorWorkers()
+	s.stopBackgroundWorkSettleWorkers()
 	s.stopDynamicPolicyRecovery()
 	s.stopLifecycleSweepAsync()
 	s.stopOrphanReentryWorkers()
@@ -3999,6 +4082,16 @@ func (s *Service) reconcileActiveSessionOnStartup(
 		}
 	}
 
+	// An adopted runtime can still belong to a turn whose terminal settled
+	// before a coarse state write failed. Correct only that exact evidence; a
+	// genuine in-flight turn is rejected by the idle runtime proof.
+	if retracked {
+		if err := s.convergeSettledDeliverySessionState(ctx, sessionID, nil); err != nil {
+			s.logger.Warn("failed to converge settled delivery session state on adoption",
+				zap.String("session_id", sessionID), zap.Error(err))
+		}
+	}
+
 	// PRESERVE the ExecutorRunning record — it holds the resume token and worktree info
 	// needed for lazy recovery when the user opens the session. But make the row
 	// TRUE: after a restart the spawned process is normally gone, so if the local
@@ -4303,7 +4396,7 @@ func (s *Service) withSessionPromptAdmission(
 	if s.messageQueue == nil {
 		return fn(ctx)
 	}
-	return s.messageQueue.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+	return s.messageQueue.WithPromptAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		return fn(context.WithValue(admittedCtx, sessionPromptAdmissionContextKey{}, sessionID))
 	})
 }
@@ -4383,6 +4476,9 @@ func (s *Service) QueueUserPrompt(
 	for key, value := range metadata {
 		queueMetadata[key] = value
 	}
+	if err := retainBuiltinIntent(ctx, taskID, sessionID, queueMetadata); err != nil {
+		return err
+	}
 	if userMessageRecorded {
 		queueMetadata[metaKeyUserMessageRecorded] = true
 	}
@@ -4456,16 +4552,13 @@ func (s *Service) NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID 
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err == nil && session != nil && session.State == models.TaskSessionStateCreated {
-		go func(profileID string) {
-			_, launchErr := s.startCreatedSessionWithComposedPrompt(
-				context.WithoutCancel(ctx), taskID, sessionID, profileID,
-				"", "", "", true, false, false, false, nil, nil, false,
-			)
-			if launchErr != nil && !errors.Is(launchErr, ErrAgentPromptInProgress) {
-				s.logger.Warn("failed to start session for durable queued prompt",
-					zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(launchErr))
-			}
-		}(session.AgentProfileID)
+		// Starting a CREATED session consumes a new slot. Register the accepted
+		// head for bounded startup instead of observing capacity and racing
+		// another start; the sweep acquires the actual ticket. The exported
+		// registration keeps a fallback wait when identity resolution is
+		// transiently unavailable.
+		s.RegisterMessageCapacityWait(ctx, taskID, sessionID, "")
+		s.signalCeilingSweep()
 		return
 	}
 	s.tryFastPathDrainAfterEnqueue(ctx, taskID, sessionID)

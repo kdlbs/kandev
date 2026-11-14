@@ -1,6 +1,13 @@
+import {
+  checkOfficeAvailability,
+  setOfficeAvailability,
+} from "../../helpers/storage-office-availability";
 import { test, expect } from "../../fixtures/test-base";
 
 test.describe("Settings header tabs", () => {
+  test.beforeEach(async ({ testPage }) => {
+    await setOfficeAvailability(testPage, true);
+  });
   test("switches Data & Logs with manual keyboard activation and keeps the panels contained", async ({
     testPage,
     prCapture,
@@ -150,6 +157,7 @@ for (const theme of ["light", "dark"] as const) {
     test(`distinguishes tab visual states on ${surface.path} in ${theme}`, async ({
       testPage,
     }, testInfo) => {
+      await setOfficeAvailability(testPage, true);
       await testPage.setViewportSize({ width: 1440, height: 900 });
       await testPage.addInitScript((value) => localStorage.setItem("theme", value), theme);
       await testPage.goto(`/settings/system/${surface.path}`);
@@ -216,4 +224,18 @@ for (const theme of ["light", "dark"] as const) {
       await testPage.screenshot({ path: testInfo.outputPath(`tabs-${surface.path}-${theme}.png`) });
     });
   }
+}
+
+for (const enabled of [false, true]) {
+  test(`Office ${enabled ? "enabled" : "disabled"} controls retention availability`, async ({
+    testPage,
+  }, testInfo) => {
+    await testPage.setViewportSize({ width: 1440, height: 900 });
+    await checkOfficeAvailability(testPage, enabled, false);
+    if (!enabled)
+      await testPage.screenshot({
+        path: testInfo.outputPath("office-disabled-storage.png"),
+        fullPage: true,
+      });
+  });
 }

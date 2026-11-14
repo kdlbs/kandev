@@ -31,6 +31,8 @@
   "fixComments": "Fix Comments",
   "goToFindings_one": "Go to {{count}} review finding",
   "goToFindings_other": "Go to {{count}} review findings",
+  "htmlPreviewReadFailed": "Could not read the current HTML file. Try again, or show the diff.",
+  "htmlPreviewWorkspaceSource": "Current workspace file. It can differ from this diff.",
   "loadingChangedFiles": "Loading changed files...",
   "loadingPRChanges": "Loading {{repo}} #{{prNumber}} changes…",
   "markdownPreviewPartialNotice": "Showing changed Markdown fragments. Unchanged content is not included in this diff.",

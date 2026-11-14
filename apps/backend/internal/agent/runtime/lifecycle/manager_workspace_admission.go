@@ -19,6 +19,13 @@ func (m *Manager) ensureWorkspaceSessionAdmitted(ctx context.Context, taskID str
 	if info == nil {
 		return fmt.Errorf("workspace info is required")
 	}
+	// Workspace-only creation must not replace a retained remote execution
+	// while its authenticated recovery owner is still pending.
+	if m.recoveryGuard != nil && m.pendingRemoteRecoveryForSession(info.SessionID) != nil {
+		if err := m.recoveryGuard.CheckLaunchAllowed(info.SessionID); err != nil {
+			return err
+		}
+	}
 	if info.TaskArchived || info.WorkspaceOwnerArchived {
 		return fmt.Errorf("%w: task workspace is archived", ErrSessionWorkspaceNotReady)
 	}
@@ -203,6 +210,7 @@ func (m *Manager) ensureCachedWorkspaceExecutionAdmitted(ctx context.Context, ex
 	}
 	info := &WorkspaceInfo{
 		TaskID:            execution.TaskID,
+		OwnerUserID:       m.managedRuntimeWorkspaceOwnerUserID(ctx, nil),
 		SessionID:         execution.SessionID,
 		TaskEnvironmentID: execution.TaskEnvironmentID,
 	}
@@ -219,5 +227,42 @@ func (m *Manager) ensureCachedWorkspaceExecutionAdmitted(ctx context.Context, ex
 		}
 		info = resolved
 	}
-	return m.ensureWorkspaceSessionAdmitted(ctx, execution.TaskID, info)
+	if err := m.ensureWorkspaceSessionAdmitted(ctx, execution.TaskID, info); err != nil {
+		return err
+	}
+	return m.ensureRetainedExecutionSelection(ctx, execution, info)
+}
+
+// ensureRetainedExecutionSelection compares a cached execution with the
+// selection resolved for its session/environment. It is read-only and never
+// removes, rotates, or replaces the retained worker.
+func (m *Manager) ensureRetainedExecutionSelection(
+	ctx context.Context,
+	execution *AgentExecution,
+	info *WorkspaceInfo,
+) error {
+	if execution == nil || info == nil {
+		return nil
+	}
+	executorType := firstNonEmpty(info.ExecutorType, execution.ExecutorType)
+	if executorType == "" {
+		return nil
+	}
+	selected, required := normalizeExecutorSelection(executorType)
+	if !required {
+		return nil
+	}
+	if err := m.validateRetainedExecutionRuntime(ctx, execution, selected, info.TaskEnvironmentID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

@@ -5,7 +5,15 @@ status: done
 wave: 4
 depends_on: ["03-web-descriptor-reconciliation"]
 plan: "plan.md"
-spec: "../../specs/ui/requirements/quick-terminal.md"
+requirements:
+  - REQ-UI-QUICK-TERMINAL-001
+acceptance_criteria:
+  - AC-UI-QUICK-TERMINAL-001.3
+  - AC-UI-QUICK-TERMINAL-001.5
+  - AC-UI-QUICK-TERMINAL-001.8
+  - AC-UI-QUICK-TERMINAL-001.13
+system_design:
+  - ../../specs/ui/system-design/quick-terminal.md
 ---
 
 # Task 04: Prove refresh reattachment
@@ -53,6 +61,9 @@ Report exact Playwright commands, pass counts, browser/viewport evidence, teardo
 any environment-only limitations. Synchronize task/plan status and verification results.
 
 ## Results
+
+The [shell recovery package](../quick-terminal-shell-recovery/plan.md) owns new same-tab recovery scenarios for issue #5260.
+The pass counts below remain this task's historical results.
 
 - `(cd apps/web && pnpm e2e:run --host --project chromium tests/terminal/quick-terminal.spec.ts)` passed (2/2), including reload/reopen and marker replay.
 - `(cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/terminal/mobile-quick-terminal.spec.ts)` passed (1/1) on the Pixel 5 project, including dynamic-viewport containment, touch-safe controls, internal scrolling, focus/dismissal, and zero horizontal overflow.

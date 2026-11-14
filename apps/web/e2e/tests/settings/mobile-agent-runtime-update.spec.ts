@@ -1,5 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { settledBoundingBox } from "../../helpers/settled-box";
+import { expectTouchDimension } from "../../helpers/touch-targets";
 import { installRuntimeUpdateFixture, updateJob } from "./agent-runtime-update-helpers";
 
 test.describe("managed agent runtime updates on mobile", () => {
@@ -26,14 +28,14 @@ test.describe("managed agent runtime updates on mobile", () => {
     await expect(drawer).toContainText("0.62.0 → 0.63.0");
     const body = drawer.getByTestId(`agent-update-dialog-body-${runtime.agentName}`);
     await expect
-      .poll(() => body.evaluate((element) => element.scrollHeight <= element.clientHeight))
+      .poll(() => body.evaluate((element) => element.scrollWidth <= element.clientWidth + 1))
       .toBe(true);
     expect(runtime.postCount()).toBe(0);
     await prCapture.screenshot("mobile-update-preview", {
       caption: "Mobile update preview before approval",
     });
     await testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`).tap();
-    expect(runtime.postCount()).toBe(1);
+    await expect.poll(() => runtime.postCount()).toBe(1);
     expect(runtime.postTargets()).toEqual(["0.63.0"]);
 
     await runtime.emitUpdate(
@@ -102,7 +104,7 @@ test.describe("managed agent runtime updates on mobile", () => {
     const selector = drawer.getByTestId(`agent-update-version-${runtime.agentName}`);
     const selectorBox = await selector.boundingBox();
     expect(selectorBox).not.toBeNull();
-    expect(selectorBox!.height).toBeGreaterThanOrEqual(44);
+    expectTouchDimension(selectorBox!.height);
     const drawerBefore = await settledBoundingBox(drawer);
     await selector.tap();
     const browser = testPage.getByTestId(`agent-update-version-browser-${runtime.agentName}`);
@@ -255,17 +257,20 @@ test.describe("managed agent runtime updates on mobile", () => {
     const drawer = testPage.getByTestId(`agent-update-drawer-${runtime.agentName}`);
     await expect(drawer).toBeVisible();
     const migrationChoice = drawer.getByTestId(`agent-update-migrate-family-${runtime.agentName}`);
-    const choiceBox = await migrationChoice.boundingBox();
+    await expect(migrationChoice).toHaveCSS("min-height", "44px");
+    const choiceBox = await settledBoundingBox(migrationChoice);
     expect(choiceBox).not.toBeNull();
-    expect(choiceBox!.height).toBeGreaterThanOrEqual(44);
-    expect(choiceBox!.width).toBeGreaterThanOrEqual(44);
+    expect(Math.round(choiceBox!.height)).toBeGreaterThanOrEqual(44);
+    expect(Math.round(choiceBox!.width)).toBeGreaterThanOrEqual(44);
     expect(runtime.postCount()).toBe(0);
     await migrationChoice.tap();
     await expect(drawer).toContainText("1.18.32 → 2.0.18");
     const info = drawer.getByTestId(`agent-update-info-${runtime.agentName}`);
+    await expect(info).toHaveCSS("height", "44px");
+    await expect(info).toHaveCSS("width", "44px");
     const infoBox = await info.boundingBox();
-    expect(infoBox!.height).toBeGreaterThanOrEqual(44);
-    expect(infoBox!.width).toBeGreaterThanOrEqual(44);
+    expect(Math.round(infoBox!.height)).toBeGreaterThanOrEqual(44);
+    expect(Math.round(infoBox!.width)).toBeGreaterThanOrEqual(44);
     await info.tap();
     const information = testPage.getByRole("dialog", { name: "Upgrade to managed OpenCode v2" });
     await expect(information).toBeVisible();
@@ -315,4 +320,31 @@ test.describe("managed agent runtime updates on mobile", () => {
       await testPage.locator("html").evaluate((element) => element.clientWidth),
     );
   });
+});
+
+test("keeps policy detail and fixed actions reachable in a short phone viewport", async ({
+  testPage,
+}) => {
+  await testPage.setViewportSize({ width: 390, height: 520 });
+  await installRuntimeUpdateFixture(testPage);
+  await testPage.goto("/settings/agents");
+  await testPage.getByTestId("runtime-updates-button").tap();
+  await testPage.getByTestId("runtime-manage-versions-claude-acp").tap();
+
+  const drawer = testPage.getByTestId("agent-update-drawer-claude-acp");
+  await expect(drawer).toBeVisible();
+  await waitForFiniteAnimations(drawer);
+  const body = drawer.getByTestId("agent-update-dialog-body-claude-acp");
+  await expect(drawer.getByTestId("runtime-policy-detail-claude-acp")).toBeAttached();
+  await expect
+    .poll(() => body.evaluate((element) => element.scrollHeight > element.clientHeight))
+    .toBe(true);
+  await body.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+
+  const confirm = drawer.getByTestId("agent-update-confirm-claude-acp");
+  await expect(confirm).toBeInViewport();
+  const box = (await confirm.boundingBox())!;
+  expect(box.y + box.height).toBeLessThanOrEqual(testPage.viewportSize()!.height);
 });

@@ -139,3 +139,58 @@ without exposing content.
 ## Related decisions
 
 - [Separate runtime permissions and advisory actions](../../decisions/2026-09-07-separate-runtime-permissions-and-advisory-actions.md)
+
+## Workspace-first concurrency boundary
+
+This design amendment was independently reviewed and accepted in V6; a later
+explicit instruction authorized the local implementation. The candidate takes
+workspace-first EXCLUSIVE NOWAIT reservations; the delivered version still uses
+blocking SHARE ROW EXCLUSIVE. Delivery requires independent actual-diff review.
+
+For AC-TASKS-CROSS-WORKSPACE-TRANSFER-001.6, acquire source and destination
+workspace rows in sorted order before any table or task-row lock. Resolve
+non-locking locator snapshots first, then revalidate exact source placement,
+generation, workspace ownership and requested destination after those locks.
+Do not discover and append a workspace under held locks. A changed authoritative
+source predicate returns the existing stable conflict. Preserve only existing
+bounded retries that already repeat authorization and the complete lock set.
+Low-level locator races without an existing authorized retry seam roll back
+and conflict; add no generic retries or reauthorization callbacks.
+
+Next reserve the complete existing discovered relation census in sorted order
+with PostgreSQL `EXCLUSIVE NOWAIT`. Unlike SHARE ROW EXCLUSIVE, this also
+conflicts with pre-existing SELECT FOR UPDATE owners' ROW SHARE locks.55P03
+rolls back the whole transaction, releases partial reservations and workspace
+locks, then records the existing conflict audit and returns the stable conflict.
+Do not wait on an upgrade or hide a retry loop. If the reservation succeeds,
+new row-lock/DML owners wait at the relation boundary until commit. Plain
+readers remain allowed. The successful transfer retains current mapping,
+preservation digest, idempotency, audit and single-event behavior. SQLite
+retains its existing immediate writer and serialization-row reservation.
+
+Add `tasks` and `task_step_transitions` explicitly to the reservation base:
+`tasks` has no task_id column and is missed by discovery; transitions are
+excluded from the before/after preservation comparison and digest because
+transfer appends a ledger row. The receipt separately reports the post-write
+transition count. Keep those semantics. The complete set is the existing
+discovered projection/count union, current core/conditional tables, plus these
+two tables. It covers task/session/workspace/step FK targets; generic projection
+updates change only workspace_id. Never acquire a late table after mutation. Unknown relation ownership
+refusals remain unchanged.
+
+The necessary tradeoff is stronger contention for the already exceptional
+transfer operation: a row-lock owner in another workspace may cause a prompt
+conflict instead of a blocking wait. Ordinary Office completion uses workspace
+exclusion and never acquires these relation locks. This does not introduce a
+global table-lock policy for ordinary writes. Retaining blocking SRE is not a
+safe fallback if this tradeoff is rejected: a per-task preservation protocol
+covering every discovered relation writer would require a broader design.
+
+The [Office completion boundary](../../office/system-design/human-done-final-step.md#one-acquisition-graph-for-runtime-writers)
+owns the eligibility writer order. Minimal real PostgreSQL lock-shape probes
+observed row/table cycles for both table-before-hierarchy SRE and
+workspace-first SRE NOWAIT, and tested rollback/progress for EXCLUSIVE NOWAIT.
+Those probes do not constitute TransferTask product RED/GREEN. Required tests
+include opposite transfers, prior row owners, partial reservation failure,
+cancellation, exact-source races, complete census and unchanged preservation
+receipts/audits. No schema or new lock namespace is proposed.

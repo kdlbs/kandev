@@ -232,8 +232,8 @@ func (c *Cloner) WorkspaceProviderRepoPath(
 // opaque connection scope and immutable repository ID. A non-empty scope
 // selects this isolated layout and requires a paired repository ID (the path
 // segment needs both to stay unique); a bare repository ID with no scope is
-// the normal shape for every built-in provider (GitHub, GitLab, Azure
-// DevOps) — none of them resolve a provider connection scope — so it falls
+// the normal shape for every built-in provider (GitHub, GitLab) — neither
+// resolves a provider connection scope — so it falls
 // through to the legacy origin/owner/name layout below, same as when both
 // are empty.
 func (c *Cloner) WorkspaceProviderRepositoryPath(
@@ -554,6 +554,8 @@ func (c *Cloner) RefreshWorkspaceRepositoryWithBasicAuth(
 	}, 0)
 }
 
+// refreshWorkspaceRepository updates origin and the Kandev-owned PR snapshot refs
+// without changing the checkout HEAD.
 func (c *Cloner) refreshWorkspaceRepository(
 	ctx context.Context, targetPath, cloneURL string, auth *cloneAuth, prNumber int,
 ) error {
@@ -583,7 +585,7 @@ func (c *Cloner) refreshWorkspaceRepository(
 		return err
 	}
 	if prNumber > 0 {
-		prRefspec := fmt.Sprintf("pull/%d/head:refs/kandev/pull/%d/head", prNumber, prNumber)
+		prRefspec := fmt.Sprintf("refs/pull/%d/head:refs/kandev/pull/%d/head", prNumber, prNumber)
 		if err := runFetch(prRefspec); err != nil {
 			return fmt.Errorf("refresh scoped workspace pull request: %w", err)
 		}
@@ -699,7 +701,7 @@ func (c *Cloner) workspaceCloneAuthRequest(
 	if provider == "" {
 		provider = githubProvider
 	}
-	if provider != githubProvider && (provider == gitlabProvider || provider == "azure_devops" || strings.TrimSpace(token) != "") {
+	if provider != githubProvider && (provider == gitlabProvider || strings.TrimSpace(token) != "") {
 		auth, err := credentialAuth(request.CloneURL, credentialOrigin, token)
 		return request.CloneURL, auth, err
 	}
@@ -930,14 +932,14 @@ func configureGitCommand(cmd *exec.Cmd, auth *cloneAuth) (func(), error) {
 	if err := validateCloneAuth(auth); err != nil {
 		return nil, err
 	}
-	helperPath, files, helperEnv, cleanup, err := gitCredentialHelperCommand(auth)
+	helperCommand, files, helperEnv, cleanup, err := gitCredentialHelperCommand(auth)
 	if err != nil {
 		return nil, err
 	}
 	env = append(env,
 		"GIT_CONFIG_COUNT=3",
 		"GIT_CONFIG_KEY_0=credential.helper", "GIT_CONFIG_VALUE_0=",
-		"GIT_CONFIG_KEY_1=credential."+auth.origin+".helper", "GIT_CONFIG_VALUE_1=!"+helperPath,
+		"GIT_CONFIG_KEY_1=credential."+auth.origin+".helper", "GIT_CONFIG_VALUE_1=!"+helperCommand,
 		"GIT_CONFIG_KEY_2=credential.useHttpPath", "GIT_CONFIG_VALUE_2=true",
 	)
 	env = append(env, helperEnv...)
@@ -964,7 +966,7 @@ func validateCloneAuth(auth *cloneAuth) error {
 
 func cleanGitEnvironment() []string {
 	env := withoutEnv(os.Environ(),
-		"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", gitHubCredentialEnv, gitHubCredentialUserEnv,
+		"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", gitHubCredentialEnv, gitHubCredentialUserEnv,
 		gitCredentialUsernameFileEnv, gitCredentialPasswordFileEnv,
 		"GIT_ASKPASS", "SSH_ASKPASS", "GIT_SSH", "GIT_SSH_COMMAND",
 		"GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM",

@@ -1,6 +1,6 @@
 ---
 title: "Integrations"
-description: "Connect Azure DevOps, GitHub, GitLab, Jira, Linear, and Sentry, then browse external work or create watched tasks."
+description: "Connect GitHub, GitLab, Jira, Linear, and Sentry, use plugin-provided integrations, then browse external work or create watched tasks."
 ---
 
 # Integrations
@@ -38,11 +38,10 @@ A task can therefore display a pull or merge request while its worktree cannot p
 
 Select **Settings > Workspaces > _Workspace_ > Integrations**, then choose a provider. The direct routes are:
 
-![Settings > Workspaces > Default > Integrations showing Azure DevOps, GitHub, GitLab, Jira, Linear, and Sentry connections.](../screenshots/settings-integrations.png)
+![Settings > Workspaces > Default > Integrations showing GitHub, GitLab, Jira, Linear, and Sentry connections.](../screenshots/settings-integrations.png)
 
 - `/settings/workspace/{workspaceId}/integrations/github`
 - `/settings/workspace/{workspaceId}/integrations/gitlab`
-- `/settings/workspace/{workspaceId}/integrations/azure-devops`
 - `/settings/workspace/{workspaceId}/integrations/jira`
 - `/settings/workspace/{workspaceId}/integrations/linear`
 - `/settings/workspace/{workspaceId}/integrations/sentry`
@@ -51,7 +50,7 @@ Compatibility routes under **Settings > Integrations** use the active workspace 
 
 The **Enabled** badge in Settings navigation appears only when the integration is connected and its saved workspace toggle is on. After changing a toggle, select **Save changes** to update the badge. With **Hide disabled integrations from left panel navigation** off, a disabled integration stays listed without the badge.
 
-GitHub, GitLab, Azure DevOps, Jira, and Linear configuration are workspace-specific. GitHub supports one automation connection per workspace and, for App-backed workspaces, one personal identity per Kandev user and workspace. The current GitHub integration targets `github.com`; GitLab supports `gitlab.com` and self-managed origins. Sentry supports multiple named instances per workspace. Do not assume that configuring one workspace gives another the same provider scope.
+GitHub, GitLab, Jira, and Linear configuration are workspace-specific. GitHub supports one automation connection per workspace and, for App-backed workspaces, one personal identity per Kandev user and workspace. GitHub supports `github.com`, Enterprise Cloud tenant hosts such as `acme.ghe.com`, and GitHub Enterprise Server hosts; GitLab supports `gitlab.com` and self-managed origins. Sentry supports multiple named instances per workspace. Do not assume that configuring one workspace gives another the same provider scope.
 
 Provider secrets saved by these forms use Kandev's encrypted secret store. The backend must still decrypt them to make API requests. Limit access to settings and the Kandev data directory, and use the narrowest provider scope that works.
 
@@ -76,12 +75,33 @@ Health results are cached and periodically refreshed (normally about every 90 se
 
 Use GitHub for pull requests, issues, reviews, checks, repository discovery, task associations, and provider-triggered work. Browse it at `/github` after connecting an account.
 
+### Choose a GitHub host
+
+Each workspace connects to one GitHub host. Separate workspaces can use different hosts.
+For a PAT or App, enter the web hostname, such as `github.com`, `acme.ghe.com`, or
+`git.company.example`. HTTPS origins and explicit HTTPS ports are accepted for Enterprise
+Server. Do not enter an API URL or `/api/v3` path. The CLI option takes its host from the
+selected authenticated account.
+
+The backend must reach the host with a trusted TLS certificate. Private Enterprise Server
+hosts are supported; install your organization's CA in the backend trust store when needed.
+Remote executors need their own network access and certificate trust. Kandev does not copy
+CA configuration to executors or bypass certificate validation.
+
+Changing hosts clears the workspace's repository selection and saved host-specific searches.
+Select repositories again before using the new connection. Existing tasks, links and watches
+retain their original host and cannot use credentials from the replacement host.
+
+Personal App authorization uses PKCE on GitHub.com and Enterprise Cloud. Enterprise Server
+uses its confidential-client flow with the App client secret and single-use callback state.
+Non-expiring Enterprise Server user tokens remain usable until revoked or disconnected.
+
 ### Authenticate
 
 Open the workspace GitHub settings. **Workspace automation** offers three connection types:
 
 - **Personal access token (PAT):** Kandev validates the token before replacing the current connection and stores it in the encrypted secret store. A classic PAT needs `repo` and `read:org` for full behavior. Scope a fine-grained token to only the repositories and operations the workspace needs.
-- **GitHub CLI:** first run `gh auth login` as the operating-system user that runs the Kandev backend. Kandev lists every authenticated host/login pair and stores the selected `github.com` login, not its token. On current CLI releases it resolves that exact account with `gh auth token --hostname github.com --user <login>` and never changes the host's active account with `gh auth switch`. Older releases without structured status or `--user` remain supported when the selected account is active; make the account active or upgrade `gh` before selecting a different stored login.
+- **GitHub CLI:** first run `gh auth login` as the operating-system user that runs the Kandev backend. Kandev lists every authenticated host/login pair and stores the selected host and login, not its token. For an Enterprise account, run `gh auth login --hostname <host>` before selecting it from the existing account dropdown. On current CLI releases it resolves that exact account with `gh auth token --hostname <host> --user <login>` and never changes the host's active account with `gh auth switch`. Older releases without structured status or `--user` remain supported when the selected account is active; make the account active or upgrade `gh` before selecting a different stored login.
 - **GitHub App:** recommended for organization-managed or unattended automation. From the
   workspace, select a known registration, add an App you already own, or create one through
   GitHub's App Manifest flow, then install it on the intended account. Kandev keeps root App
@@ -123,6 +143,35 @@ pull request opened later on an unchanged branch remains discoverable.
 Passive workspace refreshes follow these intervals. An explicit pull request
 refresh checks immediately, subject to the workspace's authentication and
 GitHub rate limits.
+
+#### Stop and resume pull request watches
+
+Delete a pull request watch to retire its target. A retired target stops future
+watch polling, even when its task remains active. Retirement preserves the task's
+pull request association, CI state, and automation settings.
+
+The default watch list shows active watches. Add `include_retired=true` to the
+workspace-scoped `GET /api/v1/github/watches/pr` request to include retired
+targets. The `workspace_id` parameter is required for list, delete, and resume
+requests.
+
+Resume a retired target with
+`POST /api/v1/github/watches/pr/{id}/resume?workspace_id={workspace_id}`. Kandev
+uses the target stored on the retired watch. The task must exist, remain
+unarchived, and retain the repository attachment. Resumption creates a new watch
+ID. Results from requests tied to the retired ID cannot update the resumed watch.
+Use the same workspace that owns the retired watch.
+
+#### Issue and review watch polling
+
+Issue and review watches share a rotating background polling cycle. When
+GitHub admission defers a repository read, later cycles resume that filter.
+Completed discoveries can create tasks while other filters remain pending.
+A partial cycle does not update the watch's completed-poll timestamp.
+
+Watches use the workspace's current credentials and repository scope on each
+cycle. Different verified human accounts have separate rate state. Rotating a
+token for the same account retains that account's active restrictions.
 
 ### Automation and personal identity
 
@@ -174,7 +223,7 @@ path on desktop hover or focus and in a touch-accessible drawer on mobile.
   visible to the Kandev backend service account. Run `gh auth login` as the OS account that runs
   the backend; a login in another desktop terminal is not enough. The host bridge does not write
   global Git configuration or persist helper or token state. An explicit `GH_TOKEN` or
-  `GITHUB_TOKEN` takes precedence over stored CLI credentials. For GitHub Enterprise hosts,
+  `GITHUB_TOKEN` takes precedence over stored CLI credentials. GitHub.com and Enterprise Cloud `*.ghe.com` use those public token variables. For GitHub Enterprise Server hosts,
   `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` have the same effect. If `gh` is unavailable
   or not authenticated for a host, the task keeps its other inherited Git and SSH credentials.
   Docker, SSH, and cloud tasks use credentials configured in the executor. A CLI login authenticates
@@ -230,8 +279,7 @@ Reuse is appropriate for related workspaces that deliberately share one organiza
 identity. Create separate registrations for work and personal accounts, unrelated organizations,
 or any boundary where rotating or deleting one App must not affect the other.
 
-This feature targets `github.com`, not GitHub Enterprise Server. Before creating or importing an
-App, give Kandev a stable public HTTPS origin. GitHub must reach the callback and webhook routes
+Before creating or importing an App, select its GitHub host and give Kandev a stable public HTTPS origin. The GitHub host and the Kandev callback origin are separate settings. GitHub must reach the callback and webhook routes
 from the public internet. Guided setup rejects private, loopback, split-horizon, and plain HTTP
 origins. A local deployment needs a trusted HTTPS tunnel or reverse proxy whose hostname remains
 stable for the life of the registration.
@@ -240,7 +288,7 @@ stable for the life of the registration.
 
 1. Open the workspace's GitHub integration settings, choose **Change connection**, then choose
    **GitHub App** and **Create new App**.
-2. Choose the GitHub user or organization that will own the App, enter a registration label and
+2. Choose the GitHub host and the user or organization that will own the App, enter a registration label and
    the public Kandev origin, and review the requested permissions.
 3. Keep **Private** unless the same App must be installable outside its owner. **Public** means
    other GitHub accounts can install it. It does not publish the App to Marketplace, reveal its
@@ -261,14 +309,14 @@ Use **Add existing App** when you own a GitHub App that should follow the same c
 a Kandev-created App. The preparation step allocates a registration ID and displays exact,
 copyable settings for that pending import. It is short-lived and single-use.
 
-1. Start **Add existing App** from the workspace GitHub connection flow. Enter its owner, label,
+1. Start **Add existing App** from the workspace GitHub connection flow. Enter its GitHub host, owner, label,
    visibility, and the public Kandev origin.
 2. Open the App under the owning user's or organization's **Settings > Developer settings > GitHub
    Apps**, then apply every URL, permission, and event shown by Kandev. Add the workspace
    installation callback as the first user authorization callback and the personal identity
    callback as the second. Set the App homepage to the public Kandev origin, use JSON webhook
    delivery with SSL verification, request user authorization during installation, leave the setup
-   URL empty, and keep expiring user tokens enabled.
+   URL empty. Use expiring user tokens when the provider supports them; Enterprise Server can use non-expiring user tokens.
 3. Return before the preparation expires and provide the App ID, OAuth client ID and secret, App
    slug, webhook secret, and an RSA private key generated for that App. Treat every secret field as
    a root credential and never put it in workspace environment variables or executor profiles.
@@ -356,7 +404,13 @@ For a task with linked GitHub pull requests, open the PR status control above th
 
 If a current pull-request head has a GitHub Actions workflow that requires maintainer approval, the PR status control shows **Awaiting maintainer approval**, even when GitHub reports no checks. Detailed desktop and mobile views show the workflow name, the reason, and a link to GitHub. Approval-only workflow attention is not a failed check, does not start **Auto-fix CI & address comments**, and does not make the pull request ready for **Auto-merge or requeue when ready**. If GitHub does not provide enough evidence, Kandev keeps the workflow state unavailable or marks the last same-head observation as stale instead of claiming approval.
 
-Task lists, Kanban cards, and the task picker also show an amber lock when the current PR head awaits maintainer approval. Hover the icon on desktop or tap it on a phone to see the PR details. If the PR also has merge conflicts, the icon shows the red conflict warning; the details still show both conditions.
+Task lists, Kanban cards, and the task picker show an amber lock when the current PR head awaits maintainer approval. A failed check's red cross takes priority over the lock, while a merge conflict's red triangle takes priority over both. Hover the icon on desktop or tap it on a phone to see each condition, including the approval reason, in the PR details.
+
+The pull-request icon shows one marker in its upper-right corner. A red triangle means a merge conflict and takes priority over CI and workflow-approval markers. Otherwise, a red cross means a check failed. An amber ring means checks are queued or active. An amber exclamation mark means workflow attention that is not an approval gate. Automation dots keep their existing corners.
+
+The accessible name and PR details retain each condition. After a conflict clears, the current eligible CI or approval marker appears without another refresh. A missing marker does not prove that CI passed.
+
+Successful checks add no marker. An all-skipped result also adds no marker. If every selected check completed as skipped, the details say **All checks skipped** and do not claim that tests passed. Details show the skipped count separately from the passed count.
 
 Kandev refreshes GitHub Actions observations for empty, running, changing, or
 attention-required results within 30 seconds. Nonempty completed results with
@@ -436,12 +490,14 @@ Linked MRs appear in the GitLab results and task toolbar. One MR can be linked t
 Open a linked MR from the task review surface. Kandev fetches and displays its overview, source and target branches, mergeability and conflicts, approvals, pipeline rollup, files, commits, reviewers, assignees, labels, and threaded discussions. From the same panel you can:
 
 - reply to or resolve a discussion and add selected feedback to the active task session's prompt context;
-- approve or unapprove, merge after confirmation, and update labels or assignees;
+- approve or unapprove, merge after confirmation, and update labels or assignees. A draft MR cannot be merged: Merge stays disabled with a hint until you select **Mark as ready**, which removes the leading `Draft:`, `[Draft]` or `(Draft)` title marker (Kandev never clears a draft on its own, including during merge or automation);
 - search active project members and replace or clear the reviewer list using GitLab user IDs;
 - subscribe or unsubscribe the connected GitLab user from that MR's upstream notifications;
 - refresh, open in GitLab, or unlink the association.
 
 These actions use the connected GitLab user's permissions and do not bypass protected branches, approval requirements, merge rules, or reviewer eligibility. The current product UI exposes notification subscription for linked merge requests; issue subscribe/unsubscribe is implemented in the backend integration but has no issue-detail control in `/gitlab`.
+
+Default merges from Kandev, including automatic merges, respect the squash choice saved on the GitLab merge request. GitLab's project policy can require or prohibit squashing.
 
 ### Automate a linked merge request
 
@@ -589,32 +645,22 @@ disconnected connection is denied rather than using cached authority.
 
 ## Azure DevOps
 
-<details>
-<summary>Azure DevOps details</summary>
+Azure DevOps support is provided by the separately installed **Azure DevOps**
+plugin, [`kandev-plugin-azure-devops`](https://github.com/JnManso/kandev-plugin-azure-devops).
+Kandev no longer ships a built-in Azure DevOps integration. Install the plugin
+from **Settings > Plugins**, then open its **Azure DevOps** entry in the
+Integrations section and connect each workspace with a personal access token
+or a Microsoft account.
 
-Azure DevOps configuration is workspace-specific. The current integration supports Azure DevOps Services organizations at `https://dev.azure.com/<organization>`. A trailing slash is accepted and removed when Kandev saves the canonical URL. Azure DevOps Server/TFS and alternate organization URL forms are not supported.
+The plugin adds Azure Boards, work-item, and pull-request browsing, work-item
+and pull-request watches, task links and pull-request status, **Create PR**,
+`#` references, and Git credentials for Azure Repos repositories. Existing
+repositories with the `azure_devops` provider keep working once the plugin is
+connected.
 
-Enter the organization URL on the Azure DevOps settings page, then hover, focus, or tap the info icon beside **Personal Access Token**. Follow its **Create personal access token** link. In Azure DevOps, select **New Token**, choose the organization and an expiration, and select **Custom defined** scopes. Under **Work Items**, check **Read & write**; under **Code**, check **Read**; leave every other scope unchecked. Create the token, copy it while Azure DevOps still displays it, and paste it into Kandev.
-
-Kandev stores the PAT in its encrypted secret store and calls Azure DevOps REST API 7.1 directly. The connection, work-item, and pull-request paths do not require GitHub, `gh`, `az`, or Azure CLI authentication. When editing a saved connection, a blank PAT preserves that workspace's existing credential. Copy configuration transfers the encrypted credential to the target workspace.
-
-Use `/azure-devops` to browse the team board, work items, and pull requests. The board view loads columns and cards for the selected project, team, and board; desktop users can drag cards between columns, while mobile users can move cards from the focused-column editor. Selecting a card opens a responsive detail dialog/drawer with the sanitized description, planning and effort fields, discussion, links, and supported actions. Azure work items are read-only apart from assigning or unassigning yourself and moving the item between board columns (including split-column completion). Kandev runs the default **Recently updated** work-item query after the Work items flow is ready. Raw WIQL remains available under **Advanced** for custom work-item searches. Pull-request feedback includes reviewers and votes, comment threads, linked work items, and branch-policy results.
-
-Work-item and pull-request views include provider-native quick actions such as implementation, review, feedback, and CI triage. These actions open the normal Kandev task flow with the Azure title, URL, and context prefilled, and retain a durable association so linked tasks are visible from the detail view. Browse mode, the selected preset or saved view, project/team/board/column selections, and filters persist per user and workspace. A full page refresh restores the same browse state.
-
-Use **Saved queries** to save the current work-item query or pull-request filters, or to delete a saved query after confirmation. Consecutive changes stay in the order you make them. If a save fails, retry from the save dialog. If a deletion fails, Kandev shows an error and restores that query so you can retry from the menu. If loading saved queries fails, pending changes are rejected without writing to the server. Retrying an action first reloads the saved queries. These actions are available on desktop and phone.
-
-The Azure DevOps settings page orders its automation controls as pull-request watches, work-item watches, quick actions, and default queries after the connection card. Quick actions and default queries are workspace settings: choose the pull-request or work-item tab, edit the provider-native fields, and use the page-wide **Save changes** control. **Reset** removes that workspace's override so it follows future built-in defaults.
-
-Settings > Azure DevOps includes watchers for saved WIQL queries and pull-request filters. A watcher can be enabled or disabled, run immediately, edited, reset, or deleted. Each watcher validates its project, repository, workflow, step, agent, and executor scope before saving; it deduplicates matches, enforces the configured poll interval and in-flight limit, and can clean up linked tasks when the source reaches a terminal state. Watchers use the same workspace PAT and begin polling as soon as a valid connection is saved.
-
-You can launch a task from a work item or pull request. When the selected Kandev repository is configured with matching Azure project and repository identifiers, launching from a pull request also stores a durable task association. Task surfaces show its normalized status, review, and policy summary while Azure-native feedback remains in the Azure DevOps browser. Synchronization uses the backend REST client and does not depend on tools installed in the task environment.
-
-The **Remote** picker in **New Task** searches configured GitHub, GitLab, and Azure DevOps repositories and keeps manual supported URLs available. When more than one repository provider is connected, use the provider tabs at the bottom of the picker to switch the visible results; the tabs stay hidden for a single provider. When all three providers are available, the tabs use compact provider icons with hover labels. For a private Azure repository, the backend uses the workspace PAT only while initially cloning or fetching the managed checkout. The PAT is not written into the remote URL, task metadata, command arguments, or agent environment. Configure executor Git credentials independently for pushes and for repository access outside that backend materialization path.
-
-Azure DevOps currently uses PAT authentication. It does not yet provide an Entra OAuth flow or webhook subscription; watcher polling is performed by Kandev's backend.
-
-</details>
+Upgrading removes the built-in integration's stored configuration, PAT,
+watches, saved views, and task links. Reconnect the workspace and recreate
+watches in the plugin after installing it.
 
 ## Jira
 
@@ -647,6 +693,12 @@ When editing, a blank secret preserves the saved credential only if the URL, acc
 Create a watch with JQL, test the query, then choose a workflow and starting step. A new watch starts with `project = PROJ AND status = "Open" ORDER BY created DESC`; replace `PROJ` before testing. Repository selection is optional: leaving it blank creates repo-less tasks. When a repository is selected, choose its default branch, a local branch such as `main`, or a qualified remote branch such as `origin/main`. Kandev saves the remote name with the selected branch. Before a watcher-created task worktree is made, branch freshness follows the repository's [worktree and branch lifecycle](git-operations.md#managed-worktree-and-branch-lifecycle) policy. **Always pull before creating a new worktree** controls that refresh; selecting `origin/main` does not enable a pull for this watcher. Blank agent and executor profile fields inherit the starting step's defaults. Customize the task prompt and set a poll interval, which defaults to 300 seconds and accepts 60–3,600 seconds.
 
 The maximum in-flight value defaults to 5. Leave it blank for no cap. A cap defers remaining matches rather than importing them all at once. Each poll fetches only the first 50 JQL matches and does not paginate. Already-seen issues still occupy that provider result window, so a stable broad query can leave later matches unseen indefinitely; narrow the JQL enough that every important issue can enter the first page. Pause the watch before changing a broad query. Jira task-preset prompts can use ticket key, URL, title, and description placeholders from the preset editor.
+
+A watch suppresses an issue while its mapped task exists, including an archived task or a task on a completed step. Permanently deleting that task removes the suppression. If the issue still matches a later poll and appears in its first 50 results, the watch can create a new task without resetting the watch or editing the database.
+
+Deduplication is per watch. Deleting a task makes the issue eligible again only for the watch whose mapping pointed to that task. Another watch that maps the same issue to a different task keeps its own suppression.
+
+An unfinished reservation stays protected until you reset the watch or delete it.
 
 Deleting a Jira watch leaves its previously created tasks in place. **Reset** is destructive: after the preview, it permanently deletes every watch-created task, including archived tasks, clears cursor/deduplication state, and makes current matches eligible for the next poll.
 
@@ -702,7 +754,7 @@ An instance cannot be deleted while a watch references it. Because the instance 
 Supported integration pages offer **Copy configuration** with provider-specific behavior:
 
 - GitHub copies repository scope, saved/default searches, and quick-action presets. It does not copy authentication or watches.
-- Azure DevOps, Jira, and Linear copy the workspace configuration and encrypted credential, replacing the target's provider configuration and re-running health checks. They do not copy watches.
+- Jira and Linear copy the workspace configuration and encrypted credential, replacing the target's provider configuration and re-running health checks. They do not copy watches.
 - Sentry adds copies of the source instances with new IDs and copied secrets, preserves target instances, and deduplicates conflicting names. It does not copy watches.
 - GitLab replaces the target workspace's host, authentication method, and stored PAT. It does not copy watches, task-launch action presets, or task-to-MR links.
 

@@ -237,6 +237,10 @@ func TestRestartRecoveryRestoresNativeConversationWithoutPrompt(t *testing.T) {
 	queuedCount := queue.GetStatus(ctx, session.ID).Count
 	require.Equal(t, 1, queuedCount)
 
+	require.Eventually(t, func() bool {
+		_, active := service.resumeAttemptStore().current(session.ID)
+		return !active
+	}, time.Second, time.Millisecond, "startup recovery must release its attempt before a later prompt")
 	_, err = service.PromptTask(ctx, session.TaskID, session.ID, "ordinary follow-up", "", false, nil, false)
 	require.NoError(t, err, "the restored conversation must accept a later ordinary message")
 	manager.mu.Lock()

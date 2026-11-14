@@ -13,7 +13,7 @@ import (
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 type fakePluginTaskWriteService struct {
@@ -25,6 +25,10 @@ type fakePluginTaskWriteService struct {
 	getTaskResult *taskmodels.Task
 	getTaskErr    error
 	lastGetTaskID string
+	externalTask  *taskmodels.Task
+	externalErr   error
+	externalWS    string
+	externalID    string
 	claimResult   *taskmodels.TaskManagementClaim
 	claimErr      error
 
@@ -87,6 +91,18 @@ func (f *fakePluginTaskWriteService) GetTask(_ context.Context, id string) (*tas
 	return &taskmodels.Task{
 		ID: id, WorkspaceID: "ws-1", UpdatedAt: time.Date(2026, 9, 26, 10, 0, 0, 0, time.UTC),
 	}, nil
+}
+
+func (f *fakePluginTaskWriteService) FindTaskByExternalIDForCreate(_ context.Context, workspaceID, externalID string) (*taskmodels.Task, bool, error) {
+	f.externalWS = workspaceID
+	f.externalID = externalID
+	if f.externalErr != nil {
+		return nil, false, f.externalErr
+	}
+	if f.externalTask != nil {
+		return f.externalTask, true, nil
+	}
+	return nil, false, nil
 }
 
 func (f *fakePluginTaskWriteService) GetTaskManagementClaim(context.Context, string) (*taskmodels.TaskManagementClaim, error) {
@@ -213,6 +229,26 @@ func TestPluginsTaskWriter_CreateMapsSourceToMetadata(t *testing.T) {
 	require.Equal(t, "parent-1", svc.lastCreate.ParentID)
 	require.Equal(t, "plugin:acme", svc.lastCreate.Metadata["source"], "provenance is stamped into task metadata")
 	require.Equal(t, "critical", svc.lastCreate.Priority)
+}
+
+func TestPluginsTaskWriter_FindTaskByExternalID(t *testing.T) {
+	svc := &fakePluginTaskWriteService{externalTask: &taskmodels.Task{ID: "task-existing", WorkspaceID: "ws-1"}}
+	task, found, err := (pluginsTaskWriterAdapter{svc: svc}).FindTaskByExternalID(
+		context.Background(), "ws-1", "  issue:42  ",
+	)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "task-existing", task.ID)
+	require.Equal(t, "ws-1", svc.externalWS)
+	require.Equal(t, "  issue:42  ", svc.externalID)
+
+	svc.externalTask = nil
+	task, found, err = (pluginsTaskWriterAdapter{svc: svc}).FindTaskByExternalID(
+		context.Background(), "ws-1", "issue:missing",
+	)
+	require.NoError(t, err)
+	require.False(t, found)
+	require.Nil(t, task)
 }
 
 func TestPluginsTaskWriter_CreateWithoutSourceOmitsMetadata(t *testing.T) {
@@ -441,4 +477,33 @@ func TestPluginsTaskWriter_ExactCreateRejectsLostSourceIdentity(t *testing.T) {
 	require.ErrorContains(t, err, "task source identity was lost before settlement")
 	require.Nil(t, task)
 	require.False(t, alreadyApplied)
+}
+
+func TestPluginsTaskWriter_CreateStoresLaunchProfilesInMetadata(t *testing.T) {
+	svc := &fakePluginTaskWriteService{}
+	a := pluginsTaskWriterAdapter{svc: svc}
+
+	_, err := a.CreateTask(context.Background(), plugins.TaskCreateInput{
+		WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "todo", Title: "Investigate", Source: "plugin:acme",
+		Launch: plugins.TaskLaunchInput{AgentProfileID: "agent-1", ExecutorProfileID: "executor-profile-1"},
+	})
+	require.NoError(t, err)
+	require.False(t, svc.lastCreate.StartAgent)
+	require.Equal(t, "agent-1", svc.lastCreate.Metadata[taskmodels.MetaKeyAgentProfileID],
+		"a task started later by a workflow step launches with the plugin's agent profile")
+	require.Equal(t, "executor-profile-1", svc.lastCreate.Metadata[taskmodels.MetaKeyExecutorProfileID],
+		"a task started later by a workflow step launches with the plugin's executor profile")
+	require.Equal(t, "plugin:acme", svc.lastCreate.Metadata["source"])
+}
+
+func TestPluginsTaskWriter_CreateStoresOnlyTheLaunchProfilesGiven(t *testing.T) {
+	svc := &fakePluginTaskWriteService{}
+	a := pluginsTaskWriterAdapter{svc: svc}
+
+	_, err := a.CreateTask(context.Background(), plugins.TaskCreateInput{
+		WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "x",
+		Launch: plugins.TaskLaunchInput{ExecutorProfileID: "executor-profile-1"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, map[string]interface{}{taskmodels.MetaKeyExecutorProfileID: "executor-profile-1"}, svc.lastCreate.Metadata)
 }

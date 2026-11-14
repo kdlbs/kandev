@@ -10,7 +10,10 @@ import {
   assertRestartRetained,
   assertRestartDataRetained,
   assertRestartSubmissionBlocked,
+  routeRestartContinuationGuidance,
 } from "./session-tab-restart-helpers";
+
+test.use({ trace: "retain-on-failure" });
 
 // @covers AC-TASKS-SESSION-TAB-RESTART-001.6
 test("blocks sending throughout restart while keeping the draft editable", async ({
@@ -34,6 +37,7 @@ test("blocks sending throughout restart while keeping the draft editable", async
         (await apiClient.listTaskSessions(fixture.task.id)).sessions.filter(
           (session) => session.state === "WAITING_FOR_INPUT",
         ).length,
+      { message: "Waiting for the sibling session to become ready", timeout: 30_000 },
     )
     .toBe(2);
   await fixture.session.sessionTabBySessionId(fixture.sessionId).click();
@@ -93,7 +97,7 @@ test("keeps history and recovery available after restarting an interrupted turn"
   expect(before.target.state).toBe("RUNNING");
   const stop = fixture.wire.waitForResponse("session.stop");
   const launch = fixture.wire
-    .waitForResponse("session.launch", { timeoutAfter: stop })
+    .waitForResponse("session.launch", { timeout: 30_000, timeoutAfter: stop })
     .catch((error: unknown) => error);
   const wireStart = fixture.traffic.frames.length;
   await fixture.session.sessionTabBySessionId(fixture.sessionId).click({ button: "right" });
@@ -134,6 +138,62 @@ test("keeps history and recovery available after restarting an interrupted turn"
   ]);
 });
 
+test("shows typed continuation guidance after Restart closes its menu", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(120_000);
+  await testPage.setViewportSize({ width: 1440, height: 900 });
+  let routed: Awaited<ReturnType<typeof routeRestartContinuationGuidance>> | undefined;
+  const fixture = await createRestartScenario(testPage, apiClient, seedData, async (sessionId) => {
+    routed = await routeRestartContinuationGuidance(testPage, sessionId);
+  });
+  const stop = fixture.wire.waitForResponse("session.stop", {
+    requestWhere: (payload) => payload.session_id === fixture.sessionId,
+  });
+  const launch = fixture.wire
+    .waitForResponse("session.launch", {
+      requestWhere: (payload) => payload.session_id === fixture.sessionId,
+      timeoutAfter: stop,
+    })
+    .catch((error: unknown) => error);
+  await fixture.session.sessionTabBySessionId(fixture.sessionId).click({ button: "right" });
+  const menu = testPage.getByRole("menu");
+  await testPage.getByRole("menuitem", { name: "Restart session", exact: true }).click();
+  await stop;
+  expect(await launch).toBeInstanceOf(Error);
+  await expect(menu).not.toBeVisible();
+
+  const card = testPage.getByTestId("session-recovery-card");
+  const continuation = card.getByTestId("recovery-continue-from-history-button");
+  await expect(continuation).toBeVisible();
+  await expect(card.getByText("Saved history starts a new native conversation.")).toBeVisible();
+  expect(routed?.requests.filter((request) => request.action === "session.recover")).toEqual([]);
+
+  const retry = fixture.wire
+    .waitForResponse("session.recover", {
+      requestWhere: (payload) => payload.action === "continue_from_history",
+    })
+    .catch((error: unknown) => error);
+  await continuation.click();
+  expect(await retry).toBeInstanceOf(Error);
+  await expect(continuation).toBeVisible();
+  await expect(continuation).toBeEnabled();
+  const failure = card.getByTestId("session-recovery-error");
+  await expect(failure).toBeVisible();
+  await expect(failure).toHaveText("Failed to resume session");
+  expect(routed?.requests.filter((request) => request.action === "session.recover")).toHaveLength(
+    1,
+  );
+  expect(
+    routed?.requests.filter(
+      (request) =>
+        request.action === "session.recover" && request.payload.action !== "continue_from_history",
+    ),
+  ).toEqual([]);
+});
+
 for (const restartSelected of [false, true]) {
   test(`restarts ${restartSelected ? "the selected" : "a non-active"} tab with a live sibling and preserves the draft`, async ({
     testPage,
@@ -162,8 +222,6 @@ for (const restartSelected of [false, true]) {
     const editor = await fixture.session.fillMessage("Keep this unsent draft");
     const targetId = restartSelected ? sibling.id : fixture.sessionId;
     const before = await captureRestartBaseline(apiClient, fixture.task.id, targetId);
-    const stop = fixture.wire.waitForResponse("session.stop");
-    const launch = fixture.wire.waitForResponse("session.launch", { timeoutAfter: stop });
     await fixture.session.sessionTabBySessionId(targetId).click({ button: "right" });
     const action = testPage.getByRole("menuitem", { name: "Restart session", exact: true });
     await expect(action).toBeVisible();
@@ -173,6 +231,14 @@ for (const restartSelected of [false, true]) {
         caption: "Restart the selected session while a live sibling remains available.",
       });
     }
+    const stop = fixture.wire.waitForResponse("session.stop", {
+      requestWhere: (payload) => payload.session_id === targetId,
+    });
+    const launch = fixture.wire.waitForResponse("session.launch", {
+      timeout: 30_000,
+      timeoutAfter: stop,
+      requestWhere: (payload) => payload.session_id === targetId && payload.intent === "resume",
+    });
     await action.click();
     await Promise.all([stop, launch]);
     await assertRestartRetained(apiClient, fixture.task.id, targetId, before);
@@ -200,7 +266,10 @@ test("offers keyboard restart from the preview tab and preserves phone boundary 
     await expect(tab).toBeVisible();
     const before = await captureRestartBaseline(apiClient, fixture.task.id, fixture.sessionId);
     const stop = fixture.wire.waitForResponse("session.stop");
-    const launch = fixture.wire.waitForResponse("session.launch", { timeoutAfter: stop });
+    const launch = fixture.wire.waitForResponse("session.launch", {
+      timeout: 30_000,
+      timeoutAfter: stop,
+    });
     await tab.click({ button: "right" });
     await testPage.getByRole("menuitem", { name: "Restart session", exact: true }).focus();
     await testPage.keyboard.press("Enter");

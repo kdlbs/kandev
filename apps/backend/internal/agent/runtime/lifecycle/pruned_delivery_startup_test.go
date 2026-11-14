@@ -19,6 +19,7 @@ func TestPrunedDeliveryStartupReportsAuthenticatedGapBeforeWebSocketAndACP(t *te
 	for _, mode := range []DurableDeliveryMode{DurableDeliveryV1, DurableDeliveryLegacy} {
 		t.Run(string(mode), func(t *testing.T) {
 			repo, connection := runOwnerTestRepository(t)
+			// Bound recovery rather than database schema initialization.
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 			require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "task", Title: "Gap diagnosis"}))

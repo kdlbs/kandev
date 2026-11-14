@@ -60,12 +60,14 @@ let workspaceSyncQueue = Promise.resolve();
 function syncWorkspaceDefaultQueryPresets(
   workspaceId: string,
   defaults: StoredDefaults | null,
+  host: string,
 ): Promise<void> {
   workspaceSyncQueue = workspaceSyncQueue
     .catch(() => undefined)
     .then(() =>
       updateGitHubWorkspaceSettings({
         workspace_id: workspaceId,
+        expected_host: host,
         default_query_presets: defaults,
       }).then(() => undefined),
     );
@@ -112,6 +114,7 @@ function useUserDefaultQueryPresetSync(enabled: boolean) {
 }
 
 function useWorkspaceDefaultQueryPresets(workspaceId: string | null) {
+  const [workspaceHost, setWorkspaceHost] = useState("github.com");
   const [workspaceDefaults, setWorkspaceDefaults] = useState<StoredDefaults | null | undefined>(
     undefined,
   );
@@ -128,6 +131,7 @@ function useWorkspaceDefaultQueryPresets(workspaceId: string | null) {
       .then((settings) => {
         if (cancelled || seq !== writeSeq.current) return;
         const defaults = readServerDefaults(settings.default_query_presets);
+        setWorkspaceHost(settings.github_host ?? "github.com");
         setWorkspaceDefaults(defaults === undefined ? null : defaults);
       })
       .catch(() => {
@@ -141,12 +145,13 @@ function useWorkspaceDefaultQueryPresets(workspaceId: string | null) {
     writeSeq.current += 1;
     setWorkspaceDefaults(next);
   }, []);
-  return { workspaceDefaults, setWorkspaceDefaults: setWorkspaceDefaultsFromLocal };
+  return { workspaceHost, workspaceDefaults, setWorkspaceDefaults: setWorkspaceDefaultsFromLocal };
 }
 
 export function useDefaultQueryPresets(workspaceId: string | null = null) {
   const stored = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-  const { workspaceDefaults, setWorkspaceDefaults } = useWorkspaceDefaultQueryPresets(workspaceId);
+  const { workspaceHost, workspaceDefaults, setWorkspaceDefaults } =
+    useWorkspaceDefaultQueryPresets(workspaceId);
   useUserDefaultQueryPresetSync(!workspaceId);
   const effectiveStored = workspaceId ? workspaceDefaults : stored;
   const prPresets = useMemo(
@@ -164,14 +169,14 @@ export function useDefaultQueryPresets(workspaceId: string | null = null) {
         throw new Error("Default queries are still loading");
       }
       if (workspaceId) {
-        await syncWorkspaceDefaultQueryPresets(workspaceId, defaults);
+        await syncWorkspaceDefaultQueryPresets(workspaceId, defaults, workspaceHost);
         setWorkspaceDefaults(defaults);
         return;
       }
       await syncServer(defaults);
       publish(defaults);
     },
-    [workspaceId, workspaceDefaults, setWorkspaceDefaults],
+    [workspaceHost, workspaceId, workspaceDefaults, setWorkspaceDefaults],
   );
 
   const reset = useCallback(async () => {
@@ -179,13 +184,13 @@ export function useDefaultQueryPresets(workspaceId: string | null = null) {
       throw new Error("Default queries are still loading");
     }
     if (workspaceId) {
-      await syncWorkspaceDefaultQueryPresets(workspaceId, null);
+      await syncWorkspaceDefaultQueryPresets(workspaceId, null, workspaceHost);
       setWorkspaceDefaults(null);
       return;
     }
     await syncServer(null);
     publish(null);
-  }, [workspaceId, workspaceDefaults, setWorkspaceDefaults]);
+  }, [workspaceHost, workspaceId, workspaceDefaults, setWorkspaceDefaults]);
 
   const isCustomized = effectiveStored !== null && effectiveStored !== undefined;
   const isReady = !workspaceId || workspaceDefaults !== undefined;

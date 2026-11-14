@@ -13,6 +13,8 @@ import {
   waitForWorkflowStep,
 } from "./task-workflow-agent-overrides-helpers";
 
+test.use({ trace: "retain-on-failure" });
+
 // @covers AC-TASKS-CHANGE-WORKFLOW-001.9
 test("shows step colors when selecting a destination on phone", async ({
   testPage,
@@ -247,3 +249,107 @@ test("changes workflow from phone task actions with task-local agent routing", a
   const { sessions } = await apiClient.listTaskSessions(task.id);
   expect(sessions.some((session) => session.id === originalSessionId)).toBe(true);
 });
+
+// @covers AC-TASKS-CHANGE-WORKFLOW-001.7/.10
+for (const theme of ["light", "dark"] as const) {
+  test(`shows editable selector fields on phone in ${theme}`, async ({
+    testPage,
+    apiClient,
+    seedData,
+  }, testInfo) => {
+    test.setTimeout(180_000);
+    const fixture = await seedWorkflowAgentOverrideFixture(
+      apiClient,
+      seedData,
+      "Selector affordance with a deliberately long workflow name",
+    );
+    expect(
+      (
+        await apiClient.rawRequest("PUT", `/api/v1/workflow/steps/${fixture.analysisStep.id}`, {
+          color: "bg-blue-500",
+        })
+      ).ok,
+    ).toBe(true);
+    const task = await apiClient.createTask(seedData.workspaceId, "Phone selector field task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await testPage.addInitScript((value) => localStorage.setItem("theme", value), theme);
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto(seedData.workflowId);
+    await expect(testPage.locator("html")).toHaveClass(new RegExp(`(^|\\s)${theme}(\\s|$)`));
+    await kanban.taskCard(task.id).getByLabel("More options").tap();
+    await testPage.getByTestId("task-context-change-workflow").tap();
+    const form = new ChangeWorkflowPage(testPage, true);
+    await expect(form.phoneDrawer).toBeVisible();
+    await waitForFiniteAnimations(testPage.locator("body"));
+    await form.chooseWorkflow(fixture.workflow.id);
+
+    const drawerBox = (await form.phoneDrawer.boundingBox())!;
+    const fields = [
+      { id: "change-workflow-destination", label: "destination workflow" },
+      { id: "change-workflow-step", label: "destination step" },
+      {
+        id: `change-workflow-profile-selector-${fixture.profileA.id}`,
+        label: "replacement profile",
+      },
+    ];
+    for (const field of fields) {
+      const trigger = form.selectorField(field.id);
+      await trigger.scrollIntoViewIfNeeded();
+      const style = await form.readSelectorField(field.id);
+      form.expectVisibleSelectorField(style, field.label);
+      expect(style.height, `${field.label} phone target height`).toBeGreaterThanOrEqual(44);
+      expect(style.width, `${field.label} phone target width`).toBeGreaterThanOrEqual(44);
+      expect(style.x, `${field.label} left containment`).toBeGreaterThanOrEqual(drawerBox.x - 1);
+      expect(
+        style.x + style.width,
+        `${field.label} right containment (x=${style.x}, width=${style.width}, drawerRight=${
+          drawerBox.x + drawerBox.width
+        })`,
+      ).toBeLessThanOrEqual(drawerBox.x + drawerBox.width + 1);
+    }
+
+    const destination = form.selectorField("change-workflow-destination");
+    const selectedLabel = destination.locator(".truncate").first();
+    expect(
+      await selectedLabel.evaluate((element) => element.scrollWidth > element.clientWidth),
+      "a long destination name should truncate inside its field",
+    ).toBe(true);
+    const chevron = destination.locator("svg").last();
+    await expect(chevron).toBeVisible();
+    const destinationBox = (await destination.boundingBox())!;
+    const chevronBox = (await chevron.boundingBox())!;
+    expect(chevronBox.x + chevronBox.width).toBeLessThanOrEqual(
+      destinationBox.x + destinationBox.width + 1,
+    );
+
+    await form.chooseStep(fixture.analysisStep.id);
+    await form.expectSelectedStepColor("var(--color-blue-500)");
+    form.expectVisibleSelectorField(
+      await form.readSelectorField("change-workflow-step"),
+      "selected destination step",
+    );
+
+    expect(
+      await form.phoneDrawer.evaluate(
+        (element) =>
+          [element, ...element.querySelectorAll("*")].filter((node) =>
+            /auto|scroll/.test(getComputedStyle(node).overflowY),
+          ).length,
+      ),
+      "the phone form should own one vertical scroller",
+    ).toBe(1);
+    await assertNoDocumentHorizontalOverflow(testPage, "phone selector fields");
+    await form.form
+      .getByTestId("change-workflow-scroll")
+      .evaluate((element) => element.scrollTo({ top: 0 }));
+    await testPage.screenshot({
+      path: testInfo.outputPath(`phone-selector-fields-${theme}.png`),
+      animations: "disabled",
+    });
+    await form.form.getByTestId("change-workflow-cancel").tap();
+    await expect(form.phoneDrawer).toBeHidden();
+  });
+}

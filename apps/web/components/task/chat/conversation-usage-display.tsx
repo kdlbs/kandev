@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IconChartBar, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -22,6 +22,8 @@ type ConversationUsageDisplayProps = {
   taskId?: string | null;
   sessionId: string | null;
   detailActive?: boolean;
+  /** Show subscription cost guidance for the Antigravity personal path. */
+  subscriptionBilling?: boolean;
 };
 
 function UsageValue({ label, value }: { label: string; value: number }) {
@@ -325,7 +327,29 @@ function UsageDisclosureActions({
   );
 }
 
-function UsageDisclosure({ usage, close }: { usage: ConversationUsage; close: () => void }) {
+function SubscriptionCostDisclosure() {
+  const { t } = useTranslation();
+  return (
+    <section className="space-y-1 border-t pt-3" data-testid="usage-subscription-cost-disclosure">
+      <p className="text-xs text-muted-foreground">
+        {t("task:conversationUsage.subscriptionEstimateNotice")}
+      </p>
+      <p className="text-xs text-muted-foreground">
+        {t("task:conversationUsage.subscriptionNativeUsageNotice", { command: "/usage" })}
+      </p>
+    </section>
+  );
+}
+
+function UsageDisclosure({
+  usage,
+  close,
+  subscriptionBilling,
+}: {
+  usage: ConversationUsage;
+  close: () => void;
+  subscriptionBilling: boolean;
+}) {
   const detail = usageDetailForTurn(usage.latestTurn, usage.detail);
   const currentUsage = detail ? usage : { ...usage, detail: null };
   const turn = detail?.turn ?? usage.latestTurn;
@@ -341,8 +365,57 @@ function UsageDisclosure({ usage, close }: { usage: ConversationUsage; close: ()
         <UsageTurnSummary turn={null} />
       )}
       <UsageSessionSummary usage={currentUsage} />
+      {subscriptionBilling && <SubscriptionCostDisclosure />}
       <UsageDisclosureActions usage={currentUsage} turn={turn} close={close} />
     </div>
+  );
+}
+
+function UsageDesktopPopover({
+  open,
+  onOpenChange,
+  trigger,
+  usage,
+  subscriptionBilling,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  trigger: ReactNode;
+  usage: ConversationUsage;
+  subscriptionBilling: boolean;
+}) {
+  const { t } = useTranslation();
+  const close = () => onOpenChange(false);
+  return (
+    <Tooltip open={open ? false : undefined}>
+      <Popover open={open} onOpenChange={onOpenChange}>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">{t("task:conversationUsage.open")}</TooltipContent>
+        <PopoverContent
+          align="end"
+          side="top"
+          className="max-h-[min(75dvh,34rem)] w-[min(24rem,calc(100vw-2rem))] overflow-y-auto p-4"
+          data-testid="conversation-usage-popover"
+        >
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold">{t("task:conversationUsage.title")}</h2>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              aria-label={t("common:close")}
+              onClick={close}
+            >
+              <IconX className="h-4 w-4" />
+            </Button>
+          </div>
+          <UsageDisclosure usage={usage} close={close} subscriptionBilling={subscriptionBilling} />
+        </PopoverContent>
+      </Popover>
+    </Tooltip>
   );
 }
 
@@ -350,6 +423,7 @@ export function ConversationUsageDisplay({
   taskId,
   sessionId,
   detailActive = true,
+  subscriptionBilling = false,
 }: ConversationUsageDisplayProps) {
   const { t } = useTranslation();
   const label = t("task:conversationUsage.open");
@@ -411,41 +485,23 @@ export function ConversationUsageDisplay({
             </DrawerClose>
           }
         >
-          <UsageDisclosure usage={usage} close={() => setOpen(false)} />
+          <UsageDisclosure
+            usage={usage}
+            close={() => setOpen(false)}
+            subscriptionBilling={subscriptionBilling}
+          />
         </MobilePickerSheet>
       </>
     );
   }
 
   return (
-    <Tooltip open={open ? false : undefined}>
-      <Popover open={open} onOpenChange={setOpen}>
-        <TooltipTrigger asChild>
-          <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-        </TooltipTrigger>
-        <TooltipContent side="top">{label}</TooltipContent>
-        <PopoverContent
-          align="end"
-          side="top"
-          className="max-h-[min(75dvh,34rem)] w-[min(24rem,calc(100vw-2rem))] overflow-y-auto p-4"
-          data-testid="conversation-usage-popover"
-        >
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold">{t("task:conversationUsage.title")}</h2>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              aria-label={t("common:close")}
-              onClick={() => setOpen(false)}
-            >
-              <IconX className="h-4 w-4" />
-            </Button>
-          </div>
-          <UsageDisclosure usage={usage} close={() => setOpen(false)} />
-        </PopoverContent>
-      </Popover>
-    </Tooltip>
+    <UsageDesktopPopover
+      open={open}
+      onOpenChange={setOpen}
+      trigger={trigger}
+      usage={usage}
+      subscriptionBilling={subscriptionBilling}
+    />
   );
 }

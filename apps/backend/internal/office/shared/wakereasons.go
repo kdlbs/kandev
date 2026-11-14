@@ -28,6 +28,7 @@ var WakeReasonRegistry = map[string]runsmodels.PriorityClass{
 	// than by falling through the unmapped fallback.
 	RunReasonTaskAssigned:             runsmodels.PriorityClassEvent,
 	RunReasonTaskComment:              runsmodels.PriorityClassEvent,
+	RunReasonHandoffCompleted:         runsmodels.PriorityClassEvent,
 	RunReasonTaskBlockersResolved:     runsmodels.PriorityClassEvent,
 	RunReasonTaskChildrenCompleted:    runsmodels.PriorityClassEvent,
 	RunReasonApprovalResolved:         runsmodels.PriorityClassEvent,

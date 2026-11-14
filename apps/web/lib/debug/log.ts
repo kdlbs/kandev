@@ -75,6 +75,9 @@
  *     [task-create:last-used] manual selector persistence: localStorage writes,
  *                              pending task_create_last_used payloads, DB sync
  *                              success/failure, and pending-sync recovery.
+ *     [task-create:recovery]  native submission receipt transitions and
+ *                              retirement: state, task_id, replayable, and
+ *                              uncertainty; never prompts or payload bodies.
  *     [executor-compat:specs]  remote-auth catalog fetch (count + agent ids)
  *     [executor-compat]        per-agent compat decision: ok + reason
  *                              (no-spec / no-creds / files-match / env-secret / …)

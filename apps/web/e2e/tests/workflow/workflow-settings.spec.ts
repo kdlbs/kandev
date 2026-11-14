@@ -1,6 +1,7 @@
 import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { promptEditorText } from "../../helpers/settings-prompt-editor";
+import { KanbanPage } from "../../pages/kanban-page";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 import { dwell } from "../../helpers/causal-waits";
 
@@ -318,9 +319,19 @@ test.describe("Workflow settings", () => {
     await page.stepNodeByName(card, "Waiting for Children").click();
 
     await card.getByTestId(`${waitStep.id}-children-completed-help`).hover();
-    await expect(
-      testPage.getByText("When every active direct child task is COMPLETED, FAILED, or CANCELLED"),
-    ).toBeVisible();
+    const childrenCompletedTooltip = testPage.getByRole("tooltip");
+    await expect(childrenCompletedTooltip).toContainText(
+      "Runs after every active direct child succeeds.",
+    );
+    await expect(childrenCompletedTooltip).toContainText(
+      "At least one counted active direct child is required.",
+    );
+    await expect(childrenCompletedTooltip).toContainText(
+      "Archived, ephemeral, and automation-run children are ignored; grandchildren do not count.",
+    );
+    await expect(childrenCompletedTooltip).toContainText(
+      "Failed or cancelled children keep the parent waiting.",
+    );
 
     await card.getByTestId(`${waitStep.id}-children-completed-transition-select`).click();
     await testPage.getByRole("option", { name: "Move to specific step" }).click();
@@ -612,6 +623,57 @@ test.describe("Workflow settings", () => {
     expect(persisted?.name).toBe("Unsaved local name");
     expect(persisted?.description).toBe("New description from another tab");
     expect(persisted?.prompt).toBe("New prompt from another tab");
+  });
+
+  test("keeps the workflow prompt when a step is saved after opening settings from the board", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // Regression coverage for kdlbs/kandev#2761: the kanban route hydrated the
+    // workflow store without `prompt`, the settings page read that as a cleared
+    // prompt, and saving any step change then persisted an empty prompt. The bug
+    // needs an in-app navigation from the board, so this test must not page.goto
+    // the settings route.
+    await testPage.setViewportSize({ width: 1280, height: 800 });
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Prompt Hydration Test",
+      "simple",
+    );
+    const sharedPrompt = "Shared step-entry instructions";
+    await apiClient.updateWorkflow(workflow.id, { prompt: sharedPrompt });
+    const { steps } = await apiClient.listWorkflowSteps(workflow.id);
+    const firstStep = steps.sort((a, b) => a.position - b.position)[0];
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto(workflow.id);
+    const sidebar = testPage.getByTestId("app-sidebar");
+    await sidebar.getByTestId("sidebar-settings-gear").click();
+    const settingsMode = testPage.getByTestId("app-sidebar-settings-mode");
+    await settingsMode.getByRole("searchbox", { name: "Search settings" }).fill("Workflows");
+    await settingsMode
+      .getByTestId(`settings-search-result-workspace:${seedData.workspaceId}:workflows`)
+      .click();
+    await expect(testPage).toHaveURL(
+      new RegExp(`/settings/workspaces/${seedData.workspaceId}/workflows$`),
+    );
+
+    const page = new WorkflowSettingsPage(testPage);
+    const card = page.workflowCard(workflow.id);
+    const promptInput = card.getByTestId("workflow-prompt-input");
+    await expect(promptInput).toBeVisible();
+    await expect(promptEditorText(promptInput)).toContainText(sharedPrompt);
+
+    // Any step edit sends the workflow details along with it.
+    const panel = await page.selectStep(card, firstStep.name);
+    await panel.getByRole("checkbox", { name: "Auto-start agent" }).click();
+    await page.saveChanges();
+
+    const persisted = (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
+      (candidate) => candidate.id === workflow.id,
+    );
+    expect(persisted?.prompt).toBe(sharedPrompt);
   });
 });
 

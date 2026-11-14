@@ -103,6 +103,7 @@ apps/backend/.build/
 
 # Local protoc-gen-* tool binaries installed by `make -C apps/backend proto`
 apps/backend/.tools/
+pluginsdk/.tools/
 
 # Go binaries (built locally)
 apps/backend/kandev

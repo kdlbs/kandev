@@ -87,6 +87,7 @@ describe("buildWorkspacesBranch", () => {
       `/settings/workspaces/${WORKSPACE_ID}/integrations`,
       `/settings/workspaces/${WORKSPACE_ID}/automations`,
       `/settings/workspaces/${WORKSPACE_ID}/secrets`,
+      `/settings/workspaces/${WORKSPACE_ID}/mcp-servers`,
     ]);
   });
 
@@ -177,7 +178,6 @@ describe("buildWorkspacesBranch integration visibility", () => {
     const [workspace] = buildWorkspacesBranch(WORKSPACES);
 
     expect(integrationSlugsOf(workspace.children ?? [])).toEqual([
-      "azure-devops",
       "github",
       "gitlab",
       "jira",
@@ -190,10 +190,10 @@ describe("buildWorkspacesBranch integration visibility", () => {
     const [workspace] = buildWorkspacesBranch(
       WORKSPACES,
       null,
-      () => new Set(["azure-devops", "linear"] as const),
+      () => new Set(["gitlab", "linear"] as const),
     );
 
-    expect(integrationSlugsOf(workspace.children ?? [])).toEqual(["azure-devops", "linear"]);
+    expect(integrationSlugsOf(workspace.children ?? [])).toEqual(["gitlab", "linear"]);
   });
 
   it("resolves the visible set per workspace, since the toggles are per workspace", () => {

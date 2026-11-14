@@ -251,6 +251,9 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"source_task_id":      s.taskID,
 			"start_agent":         startAgent,
 		}
+		if priority := req.GetString("priority", ""); priority != "" {
+			payload["priority"] = priority
+		}
 		if s.sessionID != "" && s.taskID != "" {
 			payload["source_session_id"] = s.sessionID
 		}
@@ -269,6 +272,9 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 		// never declared the parameter, so no agent could reach it.
 		if blockedBy := stringArrayArg(req, "blocked_by"); len(blockedBy) > 0 {
 			payload["blocked_by"] = blockedBy
+		}
+		if relatedTaskIDs := stringArrayArg(req, "related_task_ids"); len(relatedTaskIDs) > 0 {
+			payload["related_task_ids"] = relatedTaskIDs
 		}
 		// Omitted means "derive": with blocked_by set, a start request becomes a
 		// start-when-unblocked intent. start_agent defaults to true and agents
@@ -335,6 +341,9 @@ func (s *Server) updateTaskHandler() server.ToolHandlerFunc {
 		}
 		if desc := req.GetString("description", ""); desc != "" {
 			payload["description"] = desc
+		}
+		if priority := req.GetString("priority", ""); priority != "" {
+			payload["priority"] = priority
 		}
 		if state := req.GetString("state", ""); state != "" {
 			payload["state"] = state
@@ -842,6 +851,16 @@ func (s *Server) askParentQuestionHandler() server.ToolHandlerFunc {
 		if errResult != nil {
 			return errResult, nil
 		}
+		for _, q := range questions {
+			if _, ok := q["images"]; ok {
+				return mcp.NewToolResultError("parent questions do not support images"), nil
+			}
+			for _, option := range q[optionsArg].([]map[string]interface{}) {
+				if _, ok := option["images"]; ok {
+					return mcp.NewToolResultError("parent questions do not support images"), nil
+				}
+			}
+		}
 		payload := map[string]interface{}{
 			"task_id":    s.taskID,
 			"session_id": s.sessionID,
@@ -928,6 +947,9 @@ func parseQuestions(req mcp.CallToolRequest) ([]map[string]interface{}, *mcp.Cal
 			return nil, errResult
 		}
 		questions[i] = q
+	}
+	if err := validateQuestionImagePayloads(questions); err != nil {
+		return nil, mcp.NewToolResultError(err.Error())
 	}
 	return questions, nil
 }
@@ -1068,6 +1090,9 @@ func extractQuestionAnswers(result map[string]interface{}, questions []map[strin
 			continue
 		}
 		if entry, ok := answersByID[qid]; ok {
+			if label := selectedAnswerLabel(q, entry); label != "" {
+				entry["selected_label"] = label
+			}
 			out[qid] = entry
 			continue
 		}
@@ -1086,6 +1111,28 @@ func extractQuestionAnswers(result map[string]interface{}, questions []map[strin
 
 	data, _ := json.MarshalIndent(out, "", "  ")
 	return mcp.NewToolResultStructured(out, string(data))
+}
+
+// selectedAnswerLabel returns the offered label only when the selected ID
+// identifies exactly one option. Missing or ambiguous selections return no label.
+func selectedAnswerLabel(question, answer map[string]interface{}) string {
+	selected, _ := answer["selected_option"].(string)
+	if selected == "" {
+		return ""
+	}
+	options, _ := question[optionsArg].([]map[string]interface{})
+	var label string
+	matches := 0
+	for _, option := range options {
+		if option[optionIDFieldName] == selected {
+			matches++
+			label, _ = option[labelArg].(string)
+		}
+	}
+	if matches != 1 {
+		return ""
+	}
+	return label
 }
 
 // simplifyAnswer normalizes the answer map. Single-choice per question, but
@@ -1108,6 +1155,12 @@ func simplifyAnswer(ans map[string]interface{}, rejected bool) map[string]interf
 	}
 	if customText, ok := ans["custom_text"].(string); ok && customText != "" {
 		out["custom_text"] = customText
+	}
+	if attachments, ok := ans["attachments"].([]interface{}); ok && len(attachments) > 0 {
+		out["attachments"] = attachments
+	}
+	if annotations, ok := ans["annotations"].([]interface{}); ok && len(annotations) > 0 {
+		out["annotations"] = annotations
 	}
 	if rejected && len(out) == 0 {
 		return map[string]interface{}{answeredFieldKey: false, rejectedFieldKey: true}

@@ -89,23 +89,6 @@ func TestSidebarTaskColorsDTOContract(t *testing.T) {
 	}
 }
 
-// TestUpdateUserSettingsRequestExposesAzureDevOpsBrowsePreferences verifies the patch request exposes the Azure DevOps browse preferences field.
-func TestUpdateUserSettingsRequestExposesAzureDevOpsBrowsePreferences(t *testing.T) {
-	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("AzureDevOpsBrowsePreferences")
-	if !ok || field.Tag.Get("json") != "azure_devops_browse_preferences,omitempty" {
-		t.Fatalf("Azure DevOps browse preferences patch field = %+v, want JSON preference field", field)
-	}
-}
-
-// TestFromUserSettingsMapsAzureDevOpsBrowsePreferences verifies the DTO passes the Azure DevOps browse preferences through unchanged.
-func TestFromUserSettingsMapsAzureDevOpsBrowsePreferences(t *testing.T) {
-	preferences := json.RawMessage(`{"project-1":{"teamId":"team-1"}}`)
-	settings := FromUserSettings(&models.UserSettings{AzureDevOpsBrowsePreferences: preferences})
-	if string(settings.AzureDevOpsBrowsePreferences) != string(preferences) {
-		t.Fatalf("AzureDevOpsBrowsePreferences = %s, want %s", settings.AzureDevOpsBrowsePreferences, preferences)
-	}
-}
-
 // TestUpdateUserSettingsRequestExposesKanbanHiddenStepIDs verifies the patch request exposes the kanban hidden step IDs field.
 func TestUpdateUserSettingsRequestExposesKanbanHiddenStepIDs(t *testing.T) {
 	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("KanbanHiddenStepIDs")
@@ -714,4 +697,28 @@ func TestNullableRawMessage(t *testing.T) {
 			t.Fatalf("expected JSON value to map to raw message, got set=%v value=%v", req.JiraSavedViews.Set, serviceValue)
 		}
 	})
+}
+
+// TestPromptSuggestionsDTOAndPatchSemantics verifies the prompt suggestion flag maps to the DTO and patches only when present.
+func TestPromptSuggestionsDTOAndPatchSemantics(t *testing.T) {
+	got := FromUserSettings(&models.UserSettings{PromptSuggestions: true})
+	if !got.PromptSuggestions {
+		t.Fatal("DTO PromptSuggestions = false, want true")
+	}
+
+	var omitted UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{}`), &omitted); err != nil {
+		t.Fatalf("decode omitted request: %v", err)
+	}
+	if omitted.PromptSuggestions != nil {
+		t.Fatalf("omitted PromptSuggestions = %#v, want nil", omitted.PromptSuggestions)
+	}
+
+	var explicit UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{"prompt_suggestions":true}`), &explicit); err != nil {
+		t.Fatalf("decode explicit request: %v", err)
+	}
+	if explicit.PromptSuggestions == nil || !*explicit.PromptSuggestions {
+		t.Fatalf("PromptSuggestions = %#v, want true", explicit.PromptSuggestions)
+	}
 }

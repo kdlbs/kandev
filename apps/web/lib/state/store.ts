@@ -10,6 +10,7 @@ import { newerAgentRuntimeSnapshot } from "@/lib/types/agent-runtime";
 import { createTaskOverviewSlice } from "./slices/task-overview";
 import { withTaskOverviewNormalization } from "./slices/task-overview-normalize";
 import { observeSettingsAgentRemovals } from "./settings-agent-removals";
+import { observeAnswerDraftAuthority } from "@/lib/clarification/answer-draft-cache";
 
 import {
   createKanbanSlice,
@@ -20,7 +21,6 @@ import {
   createUISlice,
   createGitHubSlice,
   createGitLabSlice,
-  createAzureDevOpsSlice,
   createJiraSlice,
   createLinearSlice,
   createOfficeSlice,
@@ -58,7 +58,6 @@ export function createAppStore(initialState?: HydrationState) {
         ...createSessionRuntimeSlice(set, get),
         ...createGitHubSlice(set, get),
         ...createGitLabSlice(set, get),
-        ...createAzureDevOpsSlice(set),
         ...createJiraSlice(set, get),
         ...createLinearSlice(set, get),
         ...createOfficeSlice(set, get),
@@ -85,6 +84,7 @@ export function createAppStore(initialState?: HydrationState) {
     ),
   );
   observeSettingsAgentRemovals(store);
+  observeAnswerDraftAuthority(store);
   let previousAuth = store.getState().auth;
   const syncQuickChatSelectionIdentity = (auth: AppState["auth"]) => {
     const identity = getQuickChatSelectionIdentity(auth);

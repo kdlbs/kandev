@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { useToast } from "@/components/toast-provider";
 import { useTaskSessionId, useTaskWorkspaceId } from "@/components/task/task-workspace-context";
@@ -21,6 +22,7 @@ import { PRCIAutomationControls } from "./pr-ci-automation-controls";
 import { PRMergeButton } from "./pr-merge-button";
 import { PRMergeabilityRow } from "./pr-mergeability-row";
 import { PRWorkflowAttentionNotice } from "./pr-workflow-attention-notice";
+import { isAllSkippedCheckSummary } from "./pr-ci-state";
 import {
   ChangeRequestCIPopoverFrame,
   ChangeRequestChecksSection,
@@ -28,7 +30,6 @@ import {
   ChangeRequestPopoverFooter,
   ChangeRequestPopoverHeader,
   ChangeRequestReviewRow,
-  CHANGE_REQUEST_CI_DESKTOP_SCROLL_CLASS,
   type ChangeRequestCheckRow,
 } from "@/components/integrations/change-request-ci-anatomy";
 
@@ -52,7 +53,8 @@ function normalizedReviewState(pr: TaskPR): "approved" | "changes_requested" | "
   return "pending";
 }
 
-export const PR_CI_DESKTOP_POPOVER_SCROLL_CLASS = CHANGE_REQUEST_CI_DESKTOP_SCROLL_CLASS;
+export const PR_CI_DESKTOP_POPOVER_CLASS =
+  "h-[min(28rem,calc(100dvh-2rem))] max-h-[var(--radix-popover-content-available-height)] max-w-[calc(100vw-1rem)] overflow-hidden motion-reduce:animate-none";
 
 export function deriveAggregateCounts(pr: TaskPR): CountsView {
   // Pre-load coarse split from aggregate fields; lazy PRFeedback fetch replaces it.
@@ -105,7 +107,9 @@ function PRCIPopoverHeader({
       url={pr.pr_url}
       onOpenReview={onOpenDetailPanel}
       openDetailsLabel={t("github:openDetails", { title: `#${pr.pr_number} ${title}` })}
-      externalLabel={t("github:viewPullRequestOnGithub")}
+      externalLabel={t("github:openPr")}
+      externalActionLabel={t("github:openPr")}
+      className="h-14 shrink-0 [@media(pointer:coarse)]:h-16 [@media(max-width:767px)]:h-16"
     />
   );
 }
@@ -125,6 +129,83 @@ function buildWorkflowMessage(group: WorkflowGroup): string {
   return lines.join("\n");
 }
 
+function emptyChecksLabel({
+  loadedAllSkipped,
+  persistedAllSkipped,
+  checks,
+  t,
+}: {
+  loadedAllSkipped: boolean;
+  persistedAllSkipped: boolean;
+  checks: CheckRun[] | undefined;
+  t: TFunction;
+}): string {
+  if (loadedAllSkipped || persistedAllSkipped) return t("github:allChecksSkipped");
+  if (checks?.some((check) => check.conclusion === "cancelled")) {
+    return t("github:checksNotSuccessful");
+  }
+  return t("github:noChecksHaveStarted");
+}
+
+type PreciseCheckView = {
+  precise: CountsView | null;
+  byBucket: Record<CheckBucket, WorkflowGroup[]> | null;
+};
+
+function preciseCheckView(feedback: { checks?: CheckRun[] } | null): PreciseCheckView {
+  // A loaded empty list is authoritative. The selected workflow may be active
+  // before its dependent jobs exist, so aggregate counts would invent checks.
+  if (!feedback?.checks) return { precise: null, byBucket: null };
+  const counts = bucketCheckCounts(feedback.checks);
+  const groups = groupChecksByWorkflow(feedback.checks);
+  return {
+    precise: { passed: counts.passed, inProgress: counts.inProgress, failed: counts.failed },
+    byBucket: {
+      passed: groups.filter((g) => g.bucket === "passed"),
+      in_progress: groups.filter((g) => g.bucket === "in_progress"),
+      failed: groups.filter((g) => g.bucket === "failed"),
+    },
+  };
+}
+
+function checkRows(
+  byBucket: Record<CheckBucket, WorkflowGroup[]> | null,
+  onAddAsContext: ((message: string) => void) | null,
+): ChangeRequestCheckRow[] {
+  if (!byBucket) return [];
+  return CHECK_GROUP_ORDER.flatMap((kind) =>
+    byBucket[kind].map((group) => ({
+      id: `${kind}:${group.id}`,
+      label: group.workflow,
+      state: normalizedCheckState(kind),
+      detail:
+        kind === "in_progress"
+          ? `${group.inProgress} running`
+          : `${group.passed}/${group.total} passed`,
+      ...(group.htmlUrl ? { url: group.htmlUrl } : {}),
+      ...(kind === "failed" && onAddAsContext
+        ? { onAddAsContext: () => onAddAsContext(buildWorkflowMessage(group)) }
+        : {}),
+    })),
+  );
+}
+
+function skippedCheckView(pr: TaskPR, feedback: { checks?: CheckRun[] } | null) {
+  const loadedSkipped = feedback?.checks
+    ? feedback.checks.filter(
+        (check) => check.status === "completed" && check.conclusion === "skipped",
+      ).length
+    : 0;
+  return {
+    skippedCount: feedback?.checks ? loadedSkipped : 0,
+    loadedAllSkipped:
+      feedback?.checks != null &&
+      feedback.checks.length > 0 &&
+      loadedSkipped === feedback.checks.length,
+    persistedAllSkipped: feedback?.checks == null && isAllSkippedCheckSummary(pr),
+  };
+}
+
 function PRChecksSection({
   pr,
   feedback,
@@ -138,55 +219,33 @@ function PRChecksSection({
 }) {
   const { t } = useTranslation();
   const aggregateCounts = useMemo(() => deriveAggregateCounts(pr), [pr]);
-
-  const { precise, byBucket } = useMemo(() => {
-    // A loaded empty list is authoritative. The selected workflow may be active
-    // before its dependent jobs exist, so aggregate counts would invent checks.
-    if (!feedback?.checks) {
-      return { precise: null as CountsView | null, byBucket: null };
-    }
-    const counts = bucketCheckCounts(feedback.checks);
-    const precise: CountsView = {
-      passed: counts.passed,
-      inProgress: counts.inProgress,
-      failed: counts.failed,
-    };
-    const groups = groupChecksByWorkflow(feedback.checks);
-    const byBucket: Record<CheckBucket, WorkflowGroup[]> = {
-      passed: groups.filter((g) => g.bucket === "passed"),
-      in_progress: groups.filter((g) => g.bucket === "in_progress"),
-      failed: groups.filter((g) => g.bucket === "failed"),
-    };
-    return { precise, byBucket };
-  }, [feedback]);
-
+  const { precise, byBucket } = useMemo(() => preciseCheckView(feedback), [feedback]);
   const counts = precise ?? aggregateCounts;
-  const rows: ChangeRequestCheckRow[] = byBucket
-    ? CHECK_GROUP_ORDER.flatMap((kind) =>
-        byBucket[kind].map((group) => ({
-          id: `${kind}:${group.id}`,
-          label: group.workflow,
-          state: normalizedCheckState(kind),
-          detail:
-            kind === "in_progress"
-              ? `${group.inProgress} running`
-              : `${group.passed}/${group.total} passed`,
-          ...(group.htmlUrl ? { url: group.htmlUrl } : {}),
-          ...(kind === "failed" && onAddAsContext
-            ? { onAddAsContext: () => onAddAsContext(buildWorkflowMessage(group)) }
-            : {}),
-        })),
-      )
-    : [];
+  const rows = checkRows(byBucket, onAddAsContext);
+  const { skippedCount, loadedAllSkipped, persistedAllSkipped } = skippedCheckView(pr, feedback);
+  if (isFetching && !feedback) {
+    return (
+      <div data-testid="pr-checks-loading" aria-hidden="true" className="space-y-3 p-1">
+        {["w-3/4", "w-full", "w-2/3"].map((width) => (
+          <div key={width} className={`h-4 rounded bg-muted motion-safe:animate-pulse ${width}`} />
+        ))}
+      </div>
+    );
+  }
   return (
     <ChangeRequestChecksSection
       counts={{ passed: counts.passed, pending: counts.inProgress, failed: counts.failed }}
       rows={rows}
       loading={isFetching && !byBucket}
-      emptyLabel={
-        feedback?.checks?.some((check) => check.conclusion === "cancelled")
-          ? t("github:checksNotSuccessful")
-          : t("github:noChecksHaveStarted")
+      emptyLabel={emptyChecksLabel({
+        loadedAllSkipped,
+        persistedAllSkipped,
+        checks: feedback?.checks,
+        t,
+      })}
+      skippedCount={skippedCount}
+      skippedLabel={
+        skippedCount > 0 ? t("github:checksSkippedCount", { count: skippedCount }) : undefined
       }
       passRateLabel={t("github:passRate")}
       groupLabels={{
@@ -280,6 +339,7 @@ export function PRCIPopover({
   onOpenDetailPanel?: () => void;
   refreshTaskPR?: () => void | Promise<void>;
 }) {
+  const { t } = useTranslation();
   const workspaceId = useTaskWorkspaceId(pr.task_id);
   const { status: ghStatus } = useGitHubStatus(workspaceId);
   const authLost = ghStatus !== null && !ghStatus.authenticated;
@@ -292,29 +352,42 @@ export function PRCIPopover({
   const onAddAsContext = useAddCheckToContext(pr);
 
   return (
-    <ChangeRequestCIPopoverFrame>
+    <ChangeRequestCIPopoverFrame className="min-h-0 flex-1">
       <PRCIPopoverHeader pr={pr} onOpenDetailPanel={onOpenDetailPanel} />
-      <PRWorkflowAttentionNotice pr={pr} attention={feedback?.workflow_attention} />
-      {authLost ? (
-        <ReconnectGitHubBlock />
-      ) : (
-        <>
-          <PRChecksSection
-            pr={pr}
-            feedback={feedback}
-            isFetching={isFetching}
-            onAddAsContext={onAddAsContext}
-          />
-          <div className="flex flex-col gap-0">
-            <PRReviewRow pr={pr} />
-            <PRCommentsRow pr={pr} />
-          </div>
-          <PRMergeabilityRow pr={pr} />
-          <PRCIAutomationControls pr={pr} />
-          <PRMergeButton taskPR={pr} onMerged={refetch} compact />
-        </>
-      )}
-      <PRPopoverFooter lastUpdatedAt={lastUpdatedAt} isRefreshing={isRefreshing} />
+      <div
+        key={pr.id}
+        data-testid="pr-popover-scroll-body"
+        role="region"
+        aria-label={t("github:pullRequestCiStatusReviewsAnd")}
+        tabIndex={0}
+        className="-mx-2 min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 [scrollbar-gutter:stable] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+      >
+        <div className="flex flex-col gap-2">
+          <PRWorkflowAttentionNotice pr={pr} attention={feedback?.workflow_attention} />
+          {authLost ? (
+            <ReconnectGitHubBlock />
+          ) : (
+            <>
+              <PRChecksSection
+                pr={pr}
+                feedback={feedback}
+                isFetching={isFetching}
+                onAddAsContext={onAddAsContext}
+              />
+              <div className="flex flex-col gap-0">
+                <PRReviewRow pr={pr} />
+                <PRCommentsRow pr={pr} />
+              </div>
+              <PRMergeabilityRow pr={pr} />
+              <PRCIAutomationControls pr={pr} />
+              <PRMergeButton taskPR={pr} onMerged={refetch} compact />
+            </>
+          )}
+        </div>
+      </div>
+      <div className="h-6 shrink-0 overflow-hidden">
+        <PRPopoverFooter lastUpdatedAt={lastUpdatedAt} isRefreshing={isRefreshing} />
+      </div>
     </ChangeRequestCIPopoverFrame>
   );
 }

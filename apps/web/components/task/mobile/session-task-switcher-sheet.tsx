@@ -327,8 +327,6 @@ function TaskSwitcherSurfaceContent({
               onCreateSubtask={onCreateSubtask}
               onNestTask={actions.handleNestTask}
               deletingTaskId={actions.deletingTaskId}
-              archivingTaskId={actions.archivingTaskId}
-              isArchiving={actions.isArchiving}
               isLoading={
                 data.tasksLoading ||
                 (data.workspaceContextPending && data.tasksWithRepositories.length === 0)

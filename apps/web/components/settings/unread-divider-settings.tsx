@@ -7,15 +7,17 @@ import { Switch } from "@kandev/ui/switch";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import { SettingsCard } from "./settings-card";
+import { UnreadTaskDotSettings } from "./unread-task-dot-settings";
 import { SettingsRow, type SettingsPresentation } from "./settings-group";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 import { useTranslation } from "react-i18next";
 
 /**
- * Edits the per-user preference that controls transcript unread dividers and
- * read-cursor updates. It participates in the shared Settings save/discard
- * lifecycle and commits the persisted preference to the app store on save.
+ * Edits the per-user preference that controls the transcript "New" divider.
+ * The card presentation also hosts the unread task dot row. It participates
+ * in the shared Settings save/discard lifecycle and commits the persisted
+ * preference to the app store on save.
  */
 export function UnreadDividerSettings({
   presentation = "card",
@@ -88,7 +90,10 @@ export function UnreadDividerSettings({
       <CardHeader>
         <CardTitle className="text-base">{t("settings:unreadMessages")}</CardTitle>
       </CardHeader>
-      <CardContent>{row}</CardContent>
+      <CardContent className="space-y-4">
+        {row}
+        <UnreadTaskDotSettings />
+      </CardContent>
     </SettingsCard>
   );
 }

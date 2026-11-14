@@ -12,6 +12,7 @@ var (
 	ErrWorkspacePreparing        = errors.New("workspace is preparing")
 	ErrWorkspaceReuseUnsafe      = errors.New("workspace reuse is unsafe")
 	ErrWorkspaceReuseUnsupported = errors.New("workspace reuse is unsupported")
+	ErrWorkspaceExecutorMismatch = fmt.Errorf("%w: selected executor does not match the canonical task workspace", ErrWorkspaceReuseUnsafe)
 	// ErrTaskEnvironmentResetRequired is the reuse refusal for a failed task
 	// environment that still holds workspace resources. A start cannot
 	// re-materialize it; resetting the task environment clears it.

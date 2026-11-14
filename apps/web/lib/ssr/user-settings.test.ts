@@ -235,6 +235,17 @@ describe("agent-generated task title defaults", () => {
   });
 });
 
+// @covers AC-UI-PROMPT-SUGGEST-001.1
+describe("prompt suggestion preference defaults", () => {
+  it("defaults the switch to disabled", () => {
+    expect(buildCoreFields({}).promptSuggestions).toBe(false);
+  });
+
+  it("maps explicit values", () => {
+    expect(buildCoreFields({ prompt_suggestions: true }).promptSuggestions).toBe(true);
+  });
+});
+
 describe("agent tab close behavior defaults", () => {
   it("defaults unknown and missing values to delete_session", () => {
     expect(buildCoreFields({}).agentTabCloseBehavior).toBe("delete_session");
@@ -457,20 +468,6 @@ describe("buildCoreFields task-create last-used mapping", () => {
   });
 });
 
-describe("Azure DevOps browse preferences", () => {
-  it("maps portable workspace preferences", () => {
-    const preferences = { "workspace-a": { mode: "board", projectId: "project-a" } };
-    const settings = {
-      azure_devops_browse_preferences: preferences,
-    } as unknown as Parameters<typeof buildCoreFields>[0];
-
-    expect(
-      (buildCoreFields(settings) as unknown as { azureDevOpsBrowsePreferences?: unknown })
-        .azureDevOpsBrowsePreferences,
-    ).toEqual(preferences);
-  });
-});
-
 describe("buildTerminalFields via buildCoreFields", () => {
   it("maps terminal_font_size to terminalFontSize", () => {
     const settings = {
@@ -492,25 +489,6 @@ describe("buildTerminalFields via buildCoreFields", () => {
 
     const result = buildCoreFields(settings);
     expect(result.terminalFontSize).toBeNull();
-  });
-});
-
-describe("Azure DevOps browse preference mapping", () => {
-  it("maps saved preferences and leaves them absent without settings", () => {
-    expect(mapUserSettingsResponse(null).azureDevOpsBrowsePreferences).toBeUndefined();
-
-    const preferences = { "project-1": { teamId: "team-1", boardId: "board-1" } };
-    const result = mapUserSettingsResponse({
-      settings: {
-        user_id: DEFAULT_USER_ID,
-        workspace_id: toWorkspaceId(""),
-        repository_ids: [],
-        azure_devops_browse_preferences: preferences,
-        updated_at: UPDATED_AT,
-      },
-    });
-
-    expect(result.azureDevOpsBrowsePreferences).toEqual(preferences);
   });
 });
 

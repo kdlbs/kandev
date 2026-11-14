@@ -4,7 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/testutil"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPostgresStoreSchemaReplay(t *testing.T) {
@@ -32,7 +34,7 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 		t.Fatalf("second GitHub store schema init: %v", err)
 	}
 
-	ctx := t.Context()
+	ctx := authn.WithIdentity(t.Context(), authn.Identity{UserID: "alice", Role: authn.RoleMember})
 	now := time.Now().UTC()
 	registration := newAppRegistration("registration-postgres", 1001, "PostgreSQL", now)
 	if err := store.UpsertDeploymentAppRegistration(ctx, registration); err != nil {
@@ -116,7 +118,9 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 		WorkspaceID: "ws-1", TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget",
 		PRNumber: 42, PRURL: "https://github.com/acme/widget/pull/42", PRTitle: "PostgreSQL parity",
 		HeadBranch: "feature/postgres", BaseBranch: "main", AuthorLogin: "octocat", State: "open",
-		CreatedAt: now,
+		HeadSHA:      "head-postgres",
+		CheckSummary: &CheckSummary{HeadSHA: "head-postgres", Observed: 2, Skipped: 2},
+		CreatedAt:    now,
 	}
 	if err := store.CreateTaskPR(ctx, taskPR); err != nil {
 		t.Fatalf("create task PR: %v", err)
@@ -124,6 +128,9 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 	gotTaskPR, err := store.GetTaskPRByID(ctx, taskPR.ID)
 	if err != nil || gotTaskPR == nil || gotTaskPR.PRNumber != taskPR.PRNumber {
 		t.Fatalf("get task PR = %+v, err %v", gotTaskPR, err)
+	}
+	if gotTaskPR.CheckSummary == nil || gotTaskPR.CheckSummary.Skipped != 2 {
+		t.Fatalf("get task PR check summary = %+v", gotTaskPR.CheckSummary)
 	}
 
 	if err := store.EnsureWorkspaceExecutorDefaults(ctx, "ws-1"); err != nil {
@@ -148,6 +155,7 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 	}
 
 	reviewWatch := &ReviewWatch{
+		GitHubHost:          "git.example.com",
 		WorkspaceID:         "ws-1",
 		WorkflowID:          "workflow-1",
 		WorkflowStepID:      "step-1",
@@ -164,6 +172,8 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 	if err != nil || gotReviewWatch == nil || len(gotReviewWatch.Repos) != 1 {
 		t.Fatalf("get review watch = %+v, err %v", gotReviewWatch, err)
 	}
+	require.Equal(t, "alice", gotReviewWatch.CreatedByUserID)
+	require.Equal(t, reviewWatch.GitHubHost, gotReviewWatch.GitHubHost)
 	reserved, err := store.ReserveReviewPRTask(ctx, reviewWatch.ID, "acme", "widget", 42, "https://github.com/acme/widget/pull/42")
 	if err != nil || !reserved {
 		t.Fatalf("reserve review PR task = %v, err %v", reserved, err)
@@ -177,6 +187,7 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 	}
 
 	issueWatch := &IssueWatch{
+		GitHubHost:          "git.example.com",
 		WorkspaceID:         "ws-1",
 		WorkflowID:          "workflow-1",
 		WorkflowStepID:      "step-1",
@@ -193,6 +204,8 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 	if err != nil || gotIssueWatch == nil || len(gotIssueWatch.Labels) != 1 {
 		t.Fatalf("get issue watch = %+v, err %v", gotIssueWatch, err)
 	}
+	require.Equal(t, "alice", gotIssueWatch.CreatedByUserID)
+	require.Equal(t, issueWatch.GitHubHost, gotIssueWatch.GitHubHost)
 	reserved, err = store.ReserveIssueWatchTask(ctx, issueWatch.ID, "acme", "widget", 7, "https://github.com/acme/widget/issues/7")
 	if err != nil || !reserved {
 		t.Fatalf("reserve issue task = %v, err %v", reserved, err)

@@ -5,6 +5,7 @@ test("phone renders first-time sidebar views from shared homepage state while qu
   testPage,
   apiClient,
   seedData,
+  backend,
 }) => {
-  await exerciseSharedSidebarState(testPage, apiClient, seedData, true);
+  await exerciseSharedSidebarState(testPage, apiClient, seedData, true, backend.tmpDir);
 });

@@ -1,4 +1,8 @@
 import { test, expect } from "../../fixtures/test-base";
+import { callPromptTool } from "../../helpers/shared-prompt-mcp";
+import { promptEditorText, replacePromptEditor } from "../../helpers/settings-prompt-editor";
+
+test.use({ trace: "retain-on-failure" });
 
 test.afterEach(async ({ apiClient }) => {
   const { prompts } = await apiClient.listPrompts();
@@ -60,9 +64,10 @@ test.describe("Prompts settings on a phone", () => {
   });
 });
 
-test("saves shared prompt agent permission on a phone", async ({
+test("edits a custom prompt on a phone and accepts a later MCP update", async ({
   testPage,
   apiClient,
+  backend,
   prCapture,
 }) => {
   await apiClient.createPrompt("mobile-review-policy", "Check correctness and tests.");
@@ -71,22 +76,66 @@ test("saves shared prompt agent permission on a phone", async ({
     '[data-testid="prompt-list-item"][data-prompt-name="mobile-review-policy"]',
   );
   await row.getByTestId("prompt-edit-button").tap();
-  const toggle = row.getByRole("switch", { name: "Allow agent edits" });
-  await expect(toggle).not.toBeChecked();
-  await row.getByText("Allow agent edits", { exact: true }).tap();
-  await expect(toggle).toBeChecked();
-  const target = row.locator('[data-settings-touch-target="true"]');
-  expect((await target.boundingBox())!.height).toBeGreaterThanOrEqual(44);
-  await prCapture.screenshot("shared-prompt-agent-permission-mobile");
+  await expect(row.getByRole("switch", { name: "Allow agent edits" })).toHaveCount(0);
+  await expect(row.getByText("Allow agent edits", { exact: true })).toHaveCount(0);
+  await replacePromptEditor(testPage, row.getByTestId("prompt-content-input"), "Saved from phone");
+  const saveButton = testPage
+    .getByTestId("settings-floating-save")
+    .getByRole("button", { name: "Save changes" });
+  await expect(saveButton).toBeVisible();
+  expect((await saveButton.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await prCapture.screenshot("shared-prompt-editing-mobile");
   await testPage
     .getByTestId("settings-floating-save")
     .getByRole("button", { name: "Save changes" })
     .tap();
-  await expect(toggle).toHaveCount(0);
+  await expect(row).toContainText("Saved from phone");
   await row.getByTestId("prompt-edit-button").tap();
-  await expect(toggle).toBeChecked();
+  await expect(promptEditorText(row.getByTestId("prompt-content-input"))).toContainText(
+    "Saved from phone",
+  );
+  await row.getByRole("button", { name: "Cancel" }).tap();
+  const updated = await callPromptTool(backend.baseUrl, "update_shared_prompt_kandev", {
+    name: "mobile-review-policy",
+    content: "Updated through MCP.",
+  });
+  expect(updated.isError).not.toBe(true);
+  await expect(row).toContainText("Updated through MCP.");
+  await row.getByTestId("prompt-edit-button").tap();
+  await replacePromptEditor(
+    testPage,
+    row.getByTestId("prompt-content-input"),
+    "Unsaved phone draft",
+  );
+  const remoteUpdate = await callPromptTool(backend.baseUrl, "update_shared_prompt_kandev", {
+    name: "mobile-review-policy",
+    content: "Remote phone revision.",
+  });
+  expect(remoteUpdate.isError).not.toBe(true);
+
+  const currentPrompt = (await apiClient.listPrompts()).prompts.find(
+    (prompt) => prompt.name === "mobile-review-policy",
+  )!;
+  const staleSave = testPage.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/api/v1/prompts/${currentPrompt.id}`) &&
+      response.request().method() === "PATCH",
+  );
+  await testPage
+    .getByTestId("settings-floating-save")
+    .getByRole("button", { name: "Save changes" })
+    .tap();
+  expect((await staleSave).status()).toBe(409);
+  expect(
+    (await apiClient.listPrompts()).prompts.find((prompt) => prompt.id === currentPrompt.id)
+      ?.content,
+  ).toBe("Remote phone revision.");
+  await expect(promptEditorText(row.getByTestId("prompt-content-input"))).toContainText(
+    "Unsaved phone draft",
+  );
+  await row.getByRole("button", { name: "Cancel" }).tap();
+  await expect(row).toContainText("Remote phone revision.");
   expect(
     await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
   ).toBe(false);
-  await row.getByRole("button", { name: "Cancel" }).tap();
 });

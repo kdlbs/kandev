@@ -7,12 +7,10 @@ import type { KanbanState } from "@/lib/state/slices";
 import type { Worktree } from "@/lib/state/slices/session/types";
 import type { TaskPR } from "@/lib/types/github";
 import type { TaskMR } from "@/lib/types/gitlab";
-import type { AzureDevOpsTaskPullRequest } from "@/lib/types/azure-devops";
 import type { ExternalVcsFileURL } from "@/lib/utils/external-vcs-file-url";
 import { resolveExternalVcsFileURL } from "@/lib/utils/external-vcs-file-url";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useWorkspaceMRs } from "@/hooks/domains/gitlab/use-task-mr";
-import { useAzureDevOpsTaskPullRequests } from "@/hooks/domains/azure-devops/use-azure-devops-task-pull-requests";
 
 export type UseExternalVcsFileLinkInput = {
   filePath: string;
@@ -31,7 +29,6 @@ type TaskRepositoryLink = NonNullable<KanbanState["tasks"][number]["repositories
 const EMPTY_TASK_REPOSITORIES: TaskRepositoryLink[] = [];
 const EMPTY_GITHUB_PRS: TaskPR[] = [];
 const EMPTY_GITLAB_MRS: TaskMR[] = [];
-const EMPTY_AZURE_PRS: AzureDevOpsTaskPullRequest[] = [];
 
 type LinkSnapshot = {
   repositories: Repository[];
@@ -41,7 +38,6 @@ type LinkSnapshot = {
   sessionWorktrees: Worktree[];
   githubPRs: TaskPR[];
   gitlabMRs: TaskMR[];
-  azurePRs: AzureDevOpsTaskPullRequest[];
 };
 
 function sanitizedRepositoryName(value: string): string {
@@ -200,45 +196,53 @@ function gitlabMRMatches(mr: TaskMR, repository: Repository): boolean {
   );
 }
 
-function publishedBranches(repository: Repository, snapshot: LinkSnapshot): string[] {
+type PublishedRevision = { branch: string; revision: string | null };
+
+function publishedRevisions(repository: Repository, snapshot: LinkSnapshot): PublishedRevision[] {
   if (repository.provider === "github") {
     return snapshot.githubPRs
       .filter((pr) => githubPRMatches(pr, repository))
-      .map((pr) => pr.head_branch)
-      .filter(Boolean);
+      .filter((pr) => Boolean(pr.head_branch))
+      .map((pr) => ({
+        branch: pr.head_branch,
+        revision: pr.state === "merged" ? pr.head_sha?.trim() || null : pr.head_branch,
+      }));
   }
   if (repository.provider === "gitlab") {
     return snapshot.gitlabMRs
       .filter((mr) => gitlabMRMatches(mr, repository))
-      .map((mr) => mr.head_branch)
-      .filter(Boolean);
-  }
-  if (repository.provider === "azure_devops") {
-    return snapshot.azurePRs
-      .filter((pr) => pr.repositoryId === repository.id)
-      .map((pr) => pr.sourceBranch)
-      .filter(Boolean);
+      .filter((mr) => Boolean(mr.head_branch))
+      .map((mr) => ({ branch: mr.head_branch, revision: mr.head_branch }));
   }
   return [];
 }
 
-function resolvePublishedBranch(
+function revisionForBranch(branch: string, candidates: PublishedRevision[]): string | null {
+  const revisions = new Set(
+    candidates
+      .filter((candidate) => candidate.branch === branch)
+      .map((candidate) => candidate.revision),
+  );
+  return revisions.size === 1 ? Array.from(revisions)[0] : null;
+}
+
+function resolvePublishedRevision(
   input: UseExternalVcsFileLinkInput,
   repository: Repository,
   activeBranch: string | null,
   snapshot: LinkSnapshot,
 ): string | null {
-  // TaskPR supplies a branch and PR number, but not the head repository or a
-  // fork discriminator. Preserve the published branch until that provenance is
-  // available instead of guessing a base-repository pull ref.
   if (input.publishedBranch) return input.publishedBranch;
-  const branches = Array.from(new Set(publishedBranches(repository, snapshot)));
-  if (activeBranch && branches.includes(activeBranch)) return activeBranch;
+  const candidates = publishedRevisions(repository, snapshot);
+  // Source branch identity selects the worktree's review before URL revision conversion.
+  const branches = Array.from(new Set(candidates.map((candidate) => candidate.branch)));
+  if (activeBranch && branches.includes(activeBranch))
+    return revisionForBranch(activeBranch, candidates);
   const repositoryLinkCount = snapshot.taskRepositories.filter(
     (link) => link.repository_id === repository.id,
   ).length;
   if (repositoryLinkCount > 1) return null;
-  return branches.length === 1 ? branches[0] : null;
+  return branches.length === 1 ? revisionForBranch(branches[0], candidates) : null;
 }
 
 function resolveLink(
@@ -250,13 +254,13 @@ function resolveLink(
   const activeBranch = resolveActiveBranch(input, repository, snapshot);
   const taskRepository = resolveTaskRepositoryLink(repository, activeBranch, snapshot);
   if (!taskRepository) return null;
-  const publishedBranch = resolvePublishedBranch(input, repository, activeBranch, snapshot);
+  const publishedRevision = resolvePublishedRevision(input, repository, activeBranch, snapshot);
   return resolveExternalVcsFileURL({
     repository,
     path: input.filePath,
     previousPath: input.previousPath,
     status: input.status,
-    publishedBranch,
+    publishedBranch: publishedRevision,
     baseBranch: input.baseBranch || taskRepository.base_branch,
   });
 }
@@ -287,11 +291,6 @@ export function useExternalVcsFileLink(
       : EMPTY_GITHUB_PRS,
   );
   const taskMRsByWorkspace = useAppStore((state) => state.taskMRs.byWorkspaceId);
-  const azurePRs = useAppStore((state) =>
-    resolvedTaskId
-      ? (state.azureDevOpsTaskPullRequests.byTaskId[resolvedTaskId] ?? EMPTY_AZURE_PRS)
-      : EMPTY_AZURE_PRS,
-  );
 
   const apiWorktrees: Worktree[] = session
     ? (session.worktrees ?? []).map((worktree) => ({
@@ -319,7 +318,6 @@ export function useExternalVcsFileLink(
     sessionWorktrees: apiWorktrees.concat(liveWorktrees),
     githubPRs,
     gitlabMRs,
-    azurePRs,
   });
 }
 
@@ -339,8 +337,4 @@ export function useExternalVcsFileLinkHydration(
   const workspaceId = task?.workspace_id ?? null;
   useTaskPR(providers.has("github") ? taskId : null);
   useWorkspaceMRs(providers.has("gitlab") ? workspaceId : null);
-  useAzureDevOpsTaskPullRequests(
-    providers.has("azure_devops") ? workspaceId : null,
-    providers.has("azure_devops") ? taskId : null,
-  );
 }

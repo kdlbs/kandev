@@ -1,6 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
-import { watchWs } from "../../helpers/causal-waits";
+import { waitForHttp, watchWs } from "../../helpers/causal-waits";
 import { waitForSessionDone } from "../../helpers/session";
 import { ChangeWorkflowPage } from "../../pages/change-workflow-page";
 import { KanbanPage } from "../../pages/kanban-page";
@@ -225,7 +225,11 @@ test.describe("Change workflow", () => {
         caption: "Desktop Change workflow form with its predicted destination recipient.",
       });
     }
-    await changeWorkflow.submit();
+    const [moveResponse] = await Promise.all([
+      waitForHttp(testPage, "POST", new RegExp(`/api/v1/tasks/${task.id}/move$`)),
+      changeWorkflow.submit(),
+    ]);
+    expect(moveResponse.ok()).toBe(true);
     await expect(changeWorkflow.desktopDialog).toBeHidden();
 
     await waitForWorkflowStep(apiClient, task.id, fixture.prStep.id);
@@ -342,6 +346,149 @@ test.describe("Change workflow", () => {
     await expect(testPage.getByRole("dialog", { name: "Change workflow..." })).toBeVisible();
     await testPage.getByTestId("change-workflow-cancel").click();
   });
+
+  // @covers AC-TASKS-CHANGE-WORKFLOW-001.10
+  for (const theme of ["light", "dark"] as const) {
+    test(`shows editable selector fields in ${theme}`, async ({
+      testPage,
+      apiClient,
+      seedData,
+    }, testInfo) => {
+      test.setTimeout(180_000);
+      const fixture = await seedWorkflowAgentOverrideFixture(
+        apiClient,
+        seedData,
+        "Selector affordance with a deliberately long workflow name",
+      );
+      expect(
+        (
+          await apiClient.rawRequest("PUT", `/api/v1/workflow/steps/${fixture.analysisStep.id}`, {
+            color: "bg-blue-500",
+          })
+        ).ok,
+      ).toBe(true);
+      const task = await apiClient.createTask(seedData.workspaceId, "Selector field task", {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+      });
+      await testPage.addInitScript((value) => localStorage.setItem("theme", value), theme);
+      await testPage.setViewportSize({ width: 1440, height: 1000 });
+
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto(seedData.workflowId);
+      await expect(testPage.locator("html")).toHaveClass(new RegExp(`(^|\\s)${theme}(\\s|$)`));
+      await kanban.openTaskActionsMenu(task.id);
+      await kanban.openChangeWorkflowForm();
+      const form = new ChangeWorkflowPage(testPage);
+      await expect(form.desktopDialog).toBeVisible();
+      await waitForFiniteAnimations(testPage.locator("body"));
+
+      const unfocused = await form.readSelectorField("change-workflow-destination");
+      form.expectVisibleSelectorField(unfocused, "destination workflow");
+      await form.tabToSelectorField("change-workflow-destination");
+      const destination = form.selectorField("change-workflow-destination");
+      await expect(destination).toBeFocused();
+      const focused = await form.readSelectorField("change-workflow-destination");
+      form.expectVisibleSelectorField(focused, "focused destination workflow");
+      form.expectStableSelectorBounds(unfocused, focused, "focused destination workflow");
+      expect(focused.boxShadow, "keyboard focus should keep a visible ring").not.toBe("none");
+      await destination.evaluate((element) => (element as HTMLElement).blur());
+
+      await form.chooseWorkflow(fixture.workflow.id);
+      const fields = [
+        { id: "change-workflow-destination", label: "destination workflow" },
+        { id: "change-workflow-step", label: "destination step" },
+        {
+          id: `change-workflow-profile-selector-${fixture.profileA.id}`,
+          label: "replacement profile",
+        },
+      ];
+      for (const field of fields) {
+        const trigger = form.selectorField(field.id);
+        await trigger.scrollIntoViewIfNeeded();
+        await testPage.mouse.move(0, 0);
+        await expect
+          .poll(async () => (await form.readSelectorField(field.id)).backgroundAlpha)
+          .toBe(255);
+        const settled = await form.readSelectorField(field.id);
+        form.expectVisibleSelectorField(settled, field.label);
+        expect(settled.height, `${field.label} desktop height`).toBeCloseTo(28, 0);
+
+        await trigger.hover();
+        await expect
+          .poll(async () => (await form.readSelectorField(field.id)).backgroundColor)
+          .not.toBe(settled.backgroundColor);
+        const hovered = await form.readSelectorField(field.id);
+        form.expectVisibleSelectorField(hovered, `${field.label} hovered`, false);
+        form.expectStableSelectorBounds(settled, hovered, `${field.label} hovered`);
+        await testPage.mouse.move(0, 0);
+        await expect
+          .poll(async () => (await form.readSelectorField(field.id)).backgroundColor)
+          .toBe(settled.backgroundColor);
+
+        await trigger.click();
+        await expect(trigger).toHaveAttribute("aria-expanded", "true");
+        const expanded = await form.readSelectorField(field.id);
+        form.expectVisibleSelectorField(expanded, `${field.label} expanded`, false);
+        form.expectStableSelectorBounds(settled, expanded, `${field.label} expanded`);
+        await testPage.keyboard.press("Escape");
+        await expect(trigger).toHaveAttribute("aria-expanded", "false");
+      }
+
+      await form.chooseStep(fixture.analysisStep.id);
+      await form.expectSelectedStepColor("var(--color-blue-500)");
+      form.expectVisibleSelectorField(
+        await form.readSelectorField("change-workflow-step"),
+        "selected destination step",
+      );
+      await form.form
+        .getByTestId("change-workflow-scroll")
+        .evaluate((element) => element.scrollTo({ top: 0 }));
+      await testPage.mouse.move(0, 0);
+      await testPage.screenshot({
+        path: testInfo.outputPath(`desktop-selector-fields-${theme}.png`),
+        animations: "disabled",
+      });
+
+      const beforeSubmit = new Map<string, Awaited<ReturnType<typeof form.readSelectorField>>>();
+      for (const field of fields) {
+        beforeSubmit.set(field.id, await form.readSelectorField(field.id));
+      }
+      let releaseMove!: () => void;
+      const moveHeld = new Promise<void>((resolve) => {
+        releaseMove = resolve;
+      });
+      await testPage.route(`**/api/v1/tasks/${task.id}/move`, async (route) => {
+        await moveHeld;
+        await route.fulfill({
+          status: 400,
+          contentType: "application/json",
+          body: JSON.stringify({ code: "invalid_workflow_change" }),
+        });
+      });
+      await form.submit();
+      await expect(form.form.getByTestId("change-workflow-submit")).toBeDisabled();
+      for (const field of fields) {
+        const trigger = form.selectorField(field.id);
+        expect(await trigger.isDisabled(), `${field.label} should be disabled`).toBe(true);
+        const disabled = await form.readSelectorField(field.id);
+        form.expectVisibleSelectorField(disabled, `${field.label} disabled`, false);
+        form.expectStableSelectorBounds(
+          beforeSubmit.get(field.id)!,
+          disabled,
+          `${field.label} disabled`,
+        );
+        const opacity = await trigger.evaluate((element) =>
+          Number.parseFloat(getComputedStyle(element).opacity),
+        );
+        expect(opacity, `${field.label} disabled feedback`).toBeLessThan(1);
+      }
+      releaseMove();
+      await expect(form.form.getByTestId("change-workflow-submit")).toBeEnabled();
+      await form.form.getByTestId("change-workflow-cancel").click();
+      await expect(form.desktopDialog).toBeHidden();
+    });
+  }
 });
 
 test.describe("coarse-pointer tablet Change workflow", () => {

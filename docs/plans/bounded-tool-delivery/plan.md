@@ -84,3 +84,9 @@ The preview is intentionally incomplete. It must not be interpreted as a
 complete structured tool result or confer control authority. Queue memory is
 bounded after source decoding; upstream provider/decoder memory remains outside
 this change. Genuine storage failures keep their existing recovery behavior.
+
+## Follow-up scope
+
+The [resilient output package](../resilient-agent-output-delivery/plan.md) extends the implemented generic policy.
+It owns typed reports, the 2 MiB event cap, byte-bounded replay, and independent writer-failure recovery.
+The completed work order and verification results here retain their original narrower scope.

@@ -5,13 +5,20 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { waitForSessionDone } from "../../helpers/session";
 import {
+  cleanupColdWorkflowMetadataScenario,
   createOverrideTask,
   deleteFixtureTasks,
+  hasWorkflowSnapshot,
   previewWorkflowMove,
+  recordWorkflowMetadataRequests,
+  saveColdWorkflowMetadataSettings,
+  seedColdWorkflowMetadataScenario,
   seedWorkflowAgentOverrideFixture,
+  waitForLoadedBoardSnapshot,
   waitForNewWorkflowProfileSession,
   waitForWorkflowMoveLifecycle,
   waitForWorkflowStep,
+  workflowMetadataRequests,
 } from "./task-workflow-agent-overrides-helpers";
 
 useRegularMode();
@@ -181,7 +188,7 @@ test.describe("task-specific workflow agent overrides", () => {
       );
       await testPage.mouse.move(0, 0);
 
-      const plannedAboveChatButton = testPage.getByTestId("proceed-next-step");
+      const plannedAboveChatButton = sessionPage.activeChat().getByTestId("proceed-next-step");
       await expect(plannedAboveChatButton).toBeVisible();
       await plannedAboveChatButton.hover();
       const plannedAboveChatOptions = testPage.getByTestId("proceed-next-step-options");
@@ -222,7 +229,7 @@ test.describe("task-specific workflow agent overrides", () => {
       );
       await testPage.mouse.move(0, 0);
 
-      const actualAboveChatButton = testPage.getByTestId("proceed-next-step");
+      const actualAboveChatButton = sessionPage.activeChat().getByTestId("proceed-next-step");
       await expect(actualAboveChatButton).toBeVisible();
       await actualAboveChatButton.hover();
       const actualAboveChatOptions = testPage.getByTestId("proceed-next-step-options");
@@ -423,6 +430,185 @@ test.describe("task-specific workflow agent overrides", () => {
         tasks.map((task) => task.id),
       );
       await apiClient.deleteWorkflow(fixture.workflow.id).catch(() => undefined);
+    }
+  });
+
+  test("cold workflow metadata loads an explicitly selected unopened workflow", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await testPage.setViewportSize({ width: 1440, height: 900 });
+    const scenario = await seedColdWorkflowMetadataScenario(
+      apiClient,
+      seedData,
+      "Cold Explicit Desktop",
+    );
+    const { fixture, boardWorkflow } = scenario;
+    await saveColdWorkflowMetadataSettings(apiClient, seedData, scenario, false);
+    const requests = recordWorkflowMetadataRequests(testPage);
+    const createdTaskIds: string[] = [];
+
+    try {
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto(boardWorkflow.id);
+      await waitForLoadedBoardSnapshot(testPage, boardWorkflow.id);
+      expect(await hasWorkflowSnapshot(testPage, fixture.workflow.id)).toBe(false);
+      expect(workflowMetadataRequests(requests, fixture.workflow.id, "snapshot")).toHaveLength(0);
+
+      await kanban.createTaskButton.first().click();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId("workflow-selector-trigger")).toContainText(
+        boardWorkflow.name,
+      );
+      await selectWorkflow(testPage, dialog, fixture.workflow.name);
+      await dialog.getByTestId("task-title-input").fill("Cold explicit desktop task");
+      await dialog.getByTestId("task-description-input").fill("Cold explicit desktop description");
+      await dialog.getByTestId("task-create-advanced-settings-trigger").click();
+
+      const overrides = dialog.getByTestId("task-create-workflow-agent-overrides");
+      await expect(overrides).toBeVisible({ timeout: 20_000 });
+      const row = overrides.getByTestId(
+        `task-create-workflow-agent-override-${fixture.profileA.id}`,
+      );
+      await expect(row).toContainText("Implement");
+      await expect(row).toContainText("PR");
+      await expect(dialog.getByTestId("task-create-launch-preview-toggle")).toHaveAttribute(
+        "aria-label",
+        /PR/,
+      );
+
+      await row.getByTestId("agent-profile-selector").click();
+      await testPage
+        .getByRole("option", { name: new RegExp(escapeRegExp(fixture.profileB.name)) })
+        .click();
+      await expect(row.getByTestId("agent-profile-selector")).toContainText(fixture.profileB.name);
+
+      await dialog.getByTestId("submit-start-agent-chevron").click();
+      await testPage.getByTestId("submit-create-without-agent").click();
+      await expect(dialog).not.toBeVisible({ timeout: 15_000 });
+
+      const createdTaskId = taskIdFromUrl(testPage.url());
+      createdTaskIds.push(createdTaskId);
+      const stored = await apiClient.getTask(createdTaskId);
+      expect(stored.workflow_agent_overrides).toMatchObject({
+        workflow_id: fixture.workflow.id,
+        steps: [
+          {
+            step_id: fixture.implementStep.id,
+            source_profile_id: fixture.profileA.id,
+            replacement_profile_id: fixture.profileB.id,
+          },
+        ],
+      });
+
+      expect(workflowMetadataRequests(requests, fixture.workflow.id, "snapshot")).toHaveLength(0);
+      expect(
+        workflowMetadataRequests(requests, fixture.workflow.id, "steps").length,
+      ).toBeGreaterThan(0);
+    } finally {
+      await cleanupColdWorkflowMetadataScenario(apiClient, scenario, createdTaskIds);
+    }
+  });
+
+  test("cold workflow metadata recovers a remembered unopened workflow and keeps the draft", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await testPage.setViewportSize({ width: 1440, height: 900 });
+    const scenario = await seedColdWorkflowMetadataScenario(
+      apiClient,
+      seedData,
+      "Cold Remembered Desktop",
+    );
+    const { fixture, boardWorkflow } = scenario;
+    await saveColdWorkflowMetadataSettings(apiClient, seedData, scenario, true);
+    const stepRoute = `**/api/v1/workflows/${fixture.workflow.id}/workflow/steps`;
+    let failedOnce = false;
+    await testPage.route(stepRoute, async (route) => {
+      if (!failedOnce) {
+        failedOnce = true;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "temporarily unavailable" }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+    const requests = recordWorkflowMetadataRequests(testPage);
+    const createdTaskIds: string[] = [];
+
+    try {
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto(boardWorkflow.id);
+      await waitForLoadedBoardSnapshot(testPage, boardWorkflow.id);
+      expect(await hasWorkflowSnapshot(testPage, fixture.workflow.id)).toBe(false);
+
+      await kanban.createTaskButton.first().click();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId("workflow-selector-trigger")).toContainText(
+        fixture.workflow.name,
+      );
+      await dialog.getByTestId("task-title-input").fill("Cold remembered desktop task");
+      await dialog
+        .getByTestId("task-description-input")
+        .fill("Cold remembered desktop description");
+      await dialog.getByTestId("task-create-advanced-settings-trigger").click();
+
+      const overrides = dialog.getByTestId("task-create-workflow-agent-overrides");
+      await expect(overrides.getByTestId("task-create-workflow-agent-overrides-retry")).toBeVisible(
+        {
+          timeout: 20_000,
+        },
+      );
+      await expect(dialog.getByTestId("task-title-input")).toHaveValue(
+        "Cold remembered desktop task",
+      );
+
+      await overrides.getByTestId("task-create-workflow-agent-overrides-retry").click();
+      const row = overrides.getByTestId(
+        `task-create-workflow-agent-override-${fixture.profileA.id}`,
+      );
+      await expect(row).toBeVisible({ timeout: 20_000 });
+      await expect(row).toContainText("Implement");
+      await expect(row).toContainText("PR");
+      await row.getByTestId("agent-profile-selector").click();
+      await testPage
+        .getByRole("option", { name: new RegExp(escapeRegExp(fixture.profileB.name)) })
+        .click();
+
+      await dialog.getByTestId("submit-start-agent-chevron").click();
+      await testPage.getByTestId("submit-create-without-agent").click();
+      await expect(dialog).not.toBeVisible({ timeout: 15_000 });
+
+      const createdTaskId = taskIdFromUrl(testPage.url());
+      createdTaskIds.push(createdTaskId);
+      const stored = await apiClient.getTask(createdTaskId);
+      expect(stored.title).toBe("Cold remembered desktop task");
+      expect(stored.description).toContain("Cold remembered desktop description");
+      expect(stored.workflow_agent_overrides).toMatchObject({
+        workflow_id: fixture.workflow.id,
+        steps: [
+          {
+            step_id: fixture.implementStep.id,
+            replacement_profile_id: fixture.profileB.id,
+          },
+        ],
+      });
+      expect(workflowMetadataRequests(requests, fixture.workflow.id, "snapshot")).toHaveLength(0);
+      expect(
+        workflowMetadataRequests(requests, fixture.workflow.id, "steps").length,
+      ).toBeGreaterThanOrEqual(2);
+    } finally {
+      await testPage.unroute(stepRoute).catch(() => undefined);
+      await cleanupColdWorkflowMetadataScenario(apiClient, scenario, createdTaskIds);
     }
   });
 });

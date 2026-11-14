@@ -127,7 +127,7 @@ export function WorkflowSyncStatusCard({
           size="sm"
           onClick={onSyncNow}
           disabled={syncing}
-          className="cursor-pointer"
+          className="cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
           data-testid="workflow-sync-now"
         >
           {syncing ? (

@@ -3,6 +3,8 @@ import { test, expect } from "../../fixtures/test-base";
 import { settledBoundingBox } from "../../helpers/settled-box";
 import { profileRow, restoreProfileOrder } from "./agent-profile-order-helpers";
 
+test.use({ trace: "retain-on-failure" });
+
 async function getScrollTop(anchor: Locator) {
   return anchor.evaluate((element) => {
     let current = element.parentElement;
@@ -45,7 +47,8 @@ async function touchDragProfile(
   sourceRow: Locator,
   targetRow: Locator,
 ) {
-  await targetRow.scrollIntoViewIfNeeded();
+  // Keep this adjacent-row gesture away from the edge that activates auto-scroll.
+  await sourceRow.evaluate((element) => element.scrollIntoView({ block: "center" }));
   const from = await settledBoundingBox(sourceHandle);
   await expect(sourceHandle).toBeInViewport();
   await expect(targetRow).toBeInViewport();

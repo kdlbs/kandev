@@ -3,7 +3,10 @@ import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { backendFixture, reportUnexpectedBackendFailure, type BackendContext } from "./backend";
-import { restoreSeedRepositoryOrigin } from "./seed-repository-origin";
+import {
+  clearSeedRepositoryRemoteDefault,
+  restoreSeedRepositoryOrigin,
+} from "./seed-repository-origin";
 export { restoreSeedRepositoryOrigin } from "./seed-repository-origin";
 import { ApiClient } from "../helpers/api-client";
 import { dwell } from "../helpers/causal-waits";
@@ -196,7 +199,7 @@ export const test = backendFixture.extend<
   // Worker-scoped API client
   apiClient: [
     async ({ backend }, use) => {
-      const client = new ApiClient(backend.baseUrl);
+      const client = new ApiClient(backend.baseUrl, backend.ensureReady);
       // Confirm the E2E mock routes mounted. They are gated by KANDEV_E2E_MOCK
       // in fixtures/backend.ts; if the env var isn't propagating, /api/v1/_test
       // returns 404 and every session-driven test would fail with a confusing
@@ -367,7 +370,24 @@ export const test = backendFixture.extend<
       // Refresh tracking refs after reset has stopped the previous tasks.
       restoreSeedRepositoryOrigin(seedData);
       await apiClient.updateWorkspace(seedData.workspaceId, { default_agent_profile_id: "" });
-      await apiClient.cleanupTestProfiles([seedData.agentProfileId]);
+      const keepProfileIds = [seedData.agentProfileId];
+      const { agents } = await apiClient.listAgents();
+      const hasDynamicProfilesToClean = agents.some(
+        (agent) =>
+          agent.id === "dynamic" &&
+          agent.profiles?.some((profile) => {
+            const workspaceId = (profile as unknown as { workspace_id?: string }).workspace_id;
+            return !workspaceId && !keepProfileIds.includes(profile.id);
+          }),
+      );
+      const releaseDynamicRouting = hasDynamicProfilesToClean
+        ? await backend.useEnv({ KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING: "true" })
+        : undefined;
+      try {
+        await apiClient.cleanupTestProfiles(keepProfileIds, agents);
+      } finally {
+        await releaseDynamicRouting?.();
+      }
       await restoreSidebarLayout(apiClient, seedData.workspaceId, undefined);
 
       const { settings } = await apiClient.getUserSettings();
@@ -517,9 +537,6 @@ export const test = backendFixture.extend<
         .rawRequest("DELETE", `/api/v1/gitlab/config?${scoped}`)
         .catch(() => undefined);
       await apiClient.deleteAllSentryInstances(seedData.workspaceId).catch(() => undefined);
-      await apiClient
-        .rawRequest("DELETE", `/api/v1/azure-devops/config?${scoped}`)
-        .catch(() => undefined);
       await apiClient.rawRequest("DELETE", `/api/v1/jira/config`).catch(() => undefined);
       await apiClient.rawRequest("DELETE", `/api/v1/linear/config`).catch(() => undefined);
       await Promise.all([
@@ -537,7 +554,6 @@ export const test = backendFixture.extend<
         apiClient.mockJiraReset().catch(() => undefined),
         apiClient.mockLinearReset().catch(() => undefined),
         apiClient.mockSentryReset().catch(() => undefined),
-        apiClient.mockAzureDevOpsReset().catch(() => undefined),
         apiClient.mockGitLabReset(seedData.workspaceId).catch(() => undefined),
         apiClient.clearGitLabRepositoryRemote(seedData.repositoryId).catch(() => undefined),
       ]);
@@ -608,6 +624,7 @@ export function pointSeedRepositoryAtUnresolvedOrigin(seedData: SeedData, tmpDir
       { env: makeGitEnv(tmpDir), stdio: "ignore" },
     );
   }
+  clearSeedRepositoryRemoteDefault(seedData, makeGitEnv(tmpDir));
 }
 
 /** Points the seed repository at a valid cached checkout with an unreachable origin. */
@@ -692,7 +709,7 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
 
 export { expect } from "@playwright/test";
 
-async function setupPage(page: Page, backend: BackendContext): Promise<void> {
+export async function setupPage(page: Page, backend: BackendContext): Promise<void> {
   await page.addInitScript(
     ({ backendPort }: { backendPort: string }) => {
       localStorage.setItem("kandev.onboarding.completed", "true");

@@ -81,11 +81,17 @@ describe("legacy delivery Resume availability", () => {
       ),
     ).toBe("task:deliveryRecoveryMissingSubmission");
   });
-  it("invalidates pending results when a newer block supersedes restored metadata", () => {
+  it("fences retry results by recovery revision and block projection time", () => {
     const before = deliveryRecoveryRequestIdentity(restored, block);
     expect(deliveryRecoveryRequestIdentity(restored, { ...block, id: "new-block" })).not.toBe(
       before,
     );
+    expect(
+      deliveryRecoveryRequestIdentity(
+        { ...restored, revision: 3 },
+        { ...block, updated_at: "2026-10-12T12:05:00Z" },
+      ),
+    ).not.toBe(before);
     expect(deliveryRecoveryRequestIdentity(restored, undefined)).not.toBe(before);
   });
 });

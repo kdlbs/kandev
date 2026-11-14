@@ -8,7 +8,6 @@ import {
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { GitHubPageClient } from "@/app/github/github-page-client";
 import { GitLabPageClient } from "@/app/gitlab/gitlab-page-client";
-import { AzureDevOpsPageClient } from "@/app/azure-devops/azure-devops-page-client";
 import { JiraPageClient } from "@/app/jira/jira-page-client";
 import { LinearPageClient } from "@/app/linear/linear-page-client";
 import { StatsPageClient } from "@/app/stats/stats-page-client";
@@ -45,6 +44,7 @@ import {
 import { PluginPageFrame } from "@/components/plugins/plugin-page";
 import { safeDecodePathSegment } from "@/lib/routing/path";
 import {
+  mapWorkflowItem,
   mapWorkspaceItem,
   promoteLegacyWorkspaceSelection,
   readActiveWorkspaceCookie,
@@ -115,7 +115,6 @@ type SpaRoute =
   | { kind: "threads" }
   | { kind: "github" }
   | { kind: "gitlab" }
-  | { kind: "azure-devops" }
   | { kind: "jira" }
   | { kind: "linear" }
   | { kind: "stats"; range?: RangeKey }
@@ -321,8 +320,6 @@ function resolveTopLevelRoute(normalized: string, searchParams: URLSearchParams)
       return { kind: "github" };
     case "/gitlab":
       return { kind: "gitlab" };
-    case "/azure-devops":
-      return { kind: "azure-devops" };
     case "/jira":
       return { kind: "jira" };
     case "/linear":
@@ -634,15 +631,6 @@ function ExternalDataRoute({
           repositories={data.repositories}
         />
       );
-    case "azure-devops":
-      return (
-        <AzureDevOpsPageClient
-          workspaceId={workspaceId}
-          workflows={data.workflows}
-          steps={data.steps}
-          repositories={data.repositories}
-        />
-      );
     case "jira":
       return (
         <JiraPageClient workspaceId={workspaceId} workflows={data.workflows} steps={data.steps} />
@@ -931,19 +919,6 @@ function firstKnownWorkspaceId(...ids: (string | null | undefined)[]): string | 
     if (value) return value;
   }
   return null;
-}
-
-function mapWorkflowItem(workflow: Workflow) {
-  return {
-    id: workflow.id,
-    workspaceId: workflow.workspace_id,
-    name: workflow.name,
-    description: workflow.description ?? null,
-    sortOrder: workflow.sort_order ?? 0,
-    ...(workflow.agent_profile_id ? { agent_profile_id: workflow.agent_profile_id } : {}),
-    ...(workflow.hidden !== undefined ? { hidden: workflow.hidden } : {}),
-    ...(workflow.style !== undefined ? { style: workflow.style } : {}),
-  };
 }
 
 function normalizePath(pathname: string): string {

@@ -22,6 +22,16 @@ export type ClarificationEscapeGuardRegistry = {
   unregister: (id: string) => void;
 };
 
+const dialogClaimedEscapeEvents = new WeakSet<KeyboardEvent>();
+
+export function markEscapeClaimedByDialog(event: KeyboardEvent) {
+  dialogClaimedEscapeEvents.add(event);
+}
+
+export function wasEscapeClaimedByDialog(event: KeyboardEvent): boolean {
+  return dialogClaimedEscapeEvents.has(event);
+}
+
 const ClarificationEscapeGuardContext = createContext<ClarificationEscapeGuardRegistry | null>(
   null,
 );

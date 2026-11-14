@@ -2,17 +2,22 @@ package backendapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/plugins"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
 type repositoryProviderInspectorStub struct {
-	inspection *plugins.RepositoryProviderInspection
-	err        error
-	request    plugins.RepositoryProviderInspectionRequest
+	inspection       *plugins.RepositoryProviderInspection
+	err              error
+	request          plugins.RepositoryProviderInspectionRequest
+	discovery        *plugins.RepositoryProviderDiscoveryResult
+	discoveryErr     error
+	discoveryRequest plugins.RepositoryProviderDiscoveryRequest
 }
 
 func (s *repositoryProviderInspectorStub) InspectRepositoryProvider(
@@ -20,6 +25,13 @@ func (s *repositoryProviderInspectorStub) InspectRepositoryProvider(
 ) (*plugins.RepositoryProviderInspection, error) {
 	s.request = request
 	return s.inspection, s.err
+}
+
+func (s *repositoryProviderInspectorStub) DiscoverRepositoryProviders(
+	_ context.Context, _ string, request plugins.RepositoryProviderDiscoveryRequest,
+) (*plugins.RepositoryProviderDiscoveryResult, error) {
+	s.discoveryRequest = request
+	return s.discovery, s.discoveryErr
 }
 
 func TestPluginRepositorySelectionResolverUsesAuthoritativeInspection(t *testing.T) {
@@ -73,5 +85,102 @@ func TestPluginRepositorySelectionResolverMapsTypedProviderFailures(t *testing.T
 				t.Fatalf("error = %v, want code %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestPluginRepositorySelectionDiscoveryUsesAuthoritativeDescriptors(t *testing.T) {
+	inspector := &repositoryProviderInspectorStub{discovery: &plugins.RepositoryProviderDiscoveryResult{
+		Candidates: []plugins.RepositoryProviderInspection{
+			{
+				ProviderID: "fixture-source-control", ProviderHost: "https://bitbucket.example.test",
+				ProviderScope: "workspace-a", ProviderRepositoryID: "repo-42", OwnerOrProject: "TEAM",
+				Name: "fixture", CloneURL: "https://bitbucket.example.test/scm/TEAM/fixture.git", DefaultBranch: "main",
+			},
+			{
+				ProviderID: "forgejo", ProviderHost: "https://forgejo.example.test",
+				ProviderScope: "team", ProviderRepositoryID: "77", OwnerOrProject: "team",
+				Name: "widgets", CloneURL: "https://forgejo.example.test/team/widgets.git", DefaultBranch: "trunk",
+			},
+		},
+		Failure: &plugins.RepositoryProviderError{Code: plugins.RepositoryProviderErrorUnavailable},
+	}}
+	resolver := pluginRepositorySelectionResolver{inspector: inspector}
+	input := taskservice.TaskRepositoryInput{
+		RemoteURL:  "https://bitbucket.example.test/projects/TEAM/fixture",
+		BaseBranch: "main", CheckoutBranch: "feature/provider-contract",
+	}
+	result, err := resolver.DiscoverRepositorySelections(context.Background(), "workspace-1", input)
+	if err != nil {
+		t.Fatalf("DiscoverRepositorySelections: %v", err)
+	}
+	if inspector.discoveryRequest.URL != input.RemoteURL {
+		t.Fatalf("discovery request = %+v", inspector.discoveryRequest)
+	}
+	if len(result.Candidates) != 2 {
+		t.Fatalf("candidates = %+v", result.Candidates)
+	}
+	first := result.Candidates[0]
+	if first.Provider != "fixture-source-control" || first.ProviderHost != "https://bitbucket.example.test" ||
+		first.ProviderScope != "workspace-a" || first.ProviderRepoID != "repo-42" ||
+		first.RemoteURL != "https://bitbucket.example.test/scm/TEAM/fixture.git" ||
+		first.DefaultBranch != "main" || first.CheckoutBranch != input.CheckoutBranch ||
+		!first.TrustedProviderDescriptor {
+		t.Fatalf("first candidate = %+v", first)
+	}
+	if second := result.Candidates[1]; second.Provider != "forgejo" || second.RemoteURL != "https://forgejo.example.test/team/widgets.git" {
+		t.Fatalf("second candidate = %+v", second)
+	}
+	if result.Failure == nil || result.Failure.Code != taskservice.RepositorySelectionErrorUnavailable {
+		t.Fatalf("failure = %v, want unavailable", result.Failure)
+	}
+}
+
+func TestPluginRepositorySelectionDiscoveryMapsOperationErrors(t *testing.T) {
+	resolver := pluginRepositorySelectionResolver{inspector: &repositoryProviderInspectorStub{
+		discoveryErr: context.Canceled,
+	}}
+	_, err := resolver.DiscoverRepositorySelections(context.Background(), "workspace-1", taskservice.TaskRepositoryInput{
+		RemoteURL: "https://bitbucket.example.test/TEAM/fixture",
+	})
+	var selectionErr *taskservice.RepositorySelectionError
+	if !errors.As(err, &selectionErr) || selectionErr.Code != taskservice.RepositorySelectionErrorUnavailable {
+		t.Fatalf("error = %v, want unavailable", err)
+	}
+}
+
+// TestBaseBranchSelection_RepositoryAdapters pins two boundaries: the trusted
+// plugin conversion retains server-authored selection intent, and public JSON
+// cannot grant permissive recovery.
+func TestBaseBranchSelection_RepositoryAdapters(t *testing.T) {
+	resolver := pluginRepositorySelectionResolver{inspector: &repositoryProviderInspectorStub{
+		inspection: &plugins.RepositoryProviderInspection{
+			ProviderID: "fixture-source-control", ProviderHost: "https://bitbucket.example.test",
+			ProviderScope: "workspace-a", ProviderRepositoryID: "repo-42", OwnerOrProject: "TEAM",
+			Name: "fixture", CloneURL: "https://bitbucket.example.test/scm/TEAM/fixture.git", DefaultBranch: "main",
+		},
+	}}
+	input := taskservice.TaskRepositoryInput{
+		RemoteURL:                 "https://bitbucket.example.test/projects/TEAM/fixture",
+		BaseBranch:                "release",
+		BaseBranchSelectionSource: taskmodels.BaseBranchSelectionSourceInherited,
+	}
+	resolved, err := resolver.ResolveRepositorySelection(context.Background(), "workspace-1", input)
+	if err != nil {
+		t.Fatalf("ResolveRepositorySelection: %v", err)
+	}
+	if resolved.BaseBranchSelectionSource != taskmodels.BaseBranchSelectionSourceInherited {
+		t.Fatalf("resolved source = %q, want inherited", resolved.BaseBranchSelectionSource)
+	}
+
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+	var decoded taskservice.TaskRepositoryInput
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal input: %v", err)
+	}
+	if decoded.BaseBranchSelectionSource != "" {
+		t.Fatalf("public JSON granted selection source %q", decoded.BaseBranchSelectionSource)
 	}
 }

@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/clarification/protocol"
+	"slices"
 	"sync"
 	"time"
 
@@ -167,6 +169,16 @@ func (s *Store) ClearDeliveryMiss(pendingID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.deliveryMisses, pendingID)
+}
+
+// HasWaiter reports whether an in-memory pending entry exists for pendingID.
+// The entry can outlive a cancelled parent wait, but a detached answer has no
+// entry at all and materializes files through its resume prompt instead.
+func (s *Store) HasWaiter(pendingID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.pending[pendingID]
+	return ok
 }
 
 func (s *Store) createRequestLocked(req *Request, deduplicateQuestions bool) (string, bool) {
@@ -638,7 +650,11 @@ func questionsEqual(a, b []Question) bool {
 	if len(a) != len(b) {
 		return false
 	}
+	imageBearing := protocol.HasQuestionImages(a) || protocol.HasQuestionImages(b)
 	for i := range a {
+		if !slices.Equal(a[i].Images, b[i].Images) || (imageBearing && a[i].ID != b[i].ID) {
+			return false
+		}
 		if a[i].Prompt != b[i].Prompt {
 			return false
 		}
@@ -657,6 +673,9 @@ func optionsEqual(a, b []Option) bool {
 		return false
 	}
 	for i := range a {
+		if !slices.Equal(a[i].Images, b[i].Images) {
+			return false
+		}
 		if a[i].ID != b[i].ID || a[i].Label != b[i].Label || a[i].Description != b[i].Description {
 			return false
 		}

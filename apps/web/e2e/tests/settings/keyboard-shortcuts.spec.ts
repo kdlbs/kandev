@@ -255,7 +255,6 @@ test.describe("Integration navigation hotkeys", () => {
   });
 
   const destinations = [
-    ["azure-devops", "/azure-devops"],
     ["github", "/github"],
     ["gitlab", "/gitlab"],
     ["jira", "/jira"],
@@ -318,7 +317,7 @@ test.describe("Integration navigation hotkeys", () => {
     await expect(testPage.getByTitle("Same shortcut as: Open Jira")).toBeVisible();
     await expect(testPage.getByTitle("Same shortcut as: Open GitHub")).toBeVisible();
     await saveIntegrationShortcuts(testPage);
-    await testPage.goto("/");
+    await navigateHomeWithinApp(testPage);
     await testPage.keyboard.press(INTEGRATION_CHORD);
     await expect(testPage).toHaveURL(/\/github$/);
   });

@@ -75,7 +75,7 @@ test.describe("Agents browse page", () => {
       });
       bootStateSeeded = true;
     });
-    await testPage.route("**/api/v1/agents/available", async (route) => {
+    await testPage.route("**/api/v1/agents/available**", async (route) => {
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify(AVAILABLE_AGENTS),

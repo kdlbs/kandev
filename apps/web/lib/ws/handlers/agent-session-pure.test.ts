@@ -1,7 +1,7 @@
+import { isStaleSessionStateEvent } from "@/lib/session-state";
 import { describe, it, expect } from "vitest";
 import {
   isTerminalSessionState,
-  isStaleSessionStateEvent,
   pickReplacementSessionId,
   shouldAdoptNewSession,
   shouldPreservePinnedSessionForTask,

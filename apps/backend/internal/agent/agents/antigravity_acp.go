@@ -4,13 +4,13 @@ package agents
 import (
 	"context"
 	_ "embed"
-	"os"
-	"os/exec"
-	"path/filepath"
+	"errors"
 	"runtime"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/antigravityruntime"
 	"github.com/kandev/kandev/internal/agent/usage"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -20,11 +20,8 @@ var antigravityACPLogoLight []byte
 //go:embed logos/antigravity_acp_dark.svg
 var antigravityACPLogoDark []byte
 
-// antigravityHarnessPathEnv, when set to a non-empty value, tells the
-// Antigravity ACP server where to find its harness without searching its own
-// executable's directory. A set value satisfies discovery's harness check
-// without inspecting the directory.
-const antigravityHarnessPathEnv = "ANTIGRAVITY_HARNESS_PATH"
+// AntigravityACPAgentID is the registry identity of the Antigravity agent.
+const AntigravityACPAgentID = acpcompat.AntigravityAgentID
 
 // antigravityConfigRelDir is the server's config root, home-relative.
 const antigravityConfigRelDir = ".gemini/antigravity-acp"
@@ -46,14 +43,14 @@ func NewAntigravityACP() *AntigravityACP {
 	return &AntigravityACP{}
 }
 
-func (a *AntigravityACP) ID() string          { return "antigravity-acp" }
+func (a *AntigravityACP) ID() string          { return AntigravityACPAgentID }
 func (a *AntigravityACP) Name() string        { return "Antigravity ACP Agent" }
 func (a *AntigravityACP) DisplayName() string { return "Antigravity" }
 func (a *AntigravityACP) Description() string {
-	return "Google's standalone Antigravity ACP server, distributed separately from the agy CLI. " +
-		"Not auto-installed: download the antigravity-acp entry from the ACP registry, extract both " +
-		"archive entries into one directory, and add that directory to PATH. Kandev looks for " +
-		"agy_acp_server.par (agy_acp_server.exe on Windows)."
+	return "Google's standalone Antigravity ACP server (registry entry antigravity-acp), distributed separately from the agy CLI. " +
+		"Install it from Settings > Agents > Antigravity, then sign in with your personal Google AI subscription. " +
+		"The agy CLI and the ACP server keep separate logins. Kandev launches " +
+		"agy_acp_server.par (agy_acp_server.exe on Windows) from the managed bundle or PATH."
 }
 func (a *AntigravityACP) Enabled() bool     { return true }
 func (a *AntigravityACP) DisplayOrder() int { return 22 }
@@ -87,62 +84,48 @@ func antigravityACPArgv() []string {
 	return []string{antigravityACPBinaryName()}
 }
 
-// antigravityHarnessNames returns the harness executable names to search
-// for, in first-match-wins order, suffixed for the host platform.
-func antigravityHarnessNames() []string {
-	if runtime.GOOS == "windows" {
-		return []string{"localharness_external.exe", "localharness.exe"}
-	}
-	return []string{"localharness_external", "localharness"}
-}
-
-// antigravityHarnessPresent reports whether one of the harness names exists
-// as a usable regular file in dir. A directory, a dangling symlink, or an
-// unstat-able name does not match.
-func antigravityHarnessPresent(dir string) bool {
-	for _, name := range antigravityHarnessNames() {
-		info, err := os.Stat(filepath.Join(dir, name))
-		if err != nil || !info.Mode().IsRegular() {
-			continue
-		}
-		if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
-			continue
-		}
-		return true
-	}
-	return false
-}
-
-// IsInstalled reports the agent available only when the server executable is
-// on PATH and its harness sibling can be found beside it (or
-// ANTIGRAVITY_HARNESS_PATH names one), so a partial install never reads as
-// healthy.
+// IsInstalled reports whether one complete runtime exists. Managed bundles are
+// preferred; a complete manual PATH install is the fallback. Filesystem
+// discovery creates no files and starts no process.
 func (a *AntigravityACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	path, err := exec.LookPath(antigravityACPBinaryName())
+	bundle, err := antigravityruntime.Resolve(ctx, antigravityruntime.ResolveOptions{})
 	if err != nil {
-		return &DiscoveryResult{Available: false}, nil
-	}
-	if err := ctx.Err(); err != nil {
+		if errors.Is(err, antigravityruntime.ErrUnavailable) {
+			return &DiscoveryResult{Available: false}, nil
+		}
 		return nil, err
-	}
-	harnessSatisfied := os.Getenv(antigravityHarnessPathEnv) != "" || antigravityHarnessPresent(filepath.Dir(path))
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if !harnessSatisfied {
-		return &DiscoveryResult{Available: false}, nil
 	}
 	return &DiscoveryResult{
 		Available:   true,
-		MatchedPath: path,
+		MatchedPath: bundle.ServerPath,
 		SupportsMCP: true,
 		Capabilities: DiscoveryCapabilities{
 			SupportsSessionResume: true,
 		},
 	}, nil
+}
+
+// SupportsLocalInstall reports the explicit settings installation capability.
+func (a *AntigravityACP) SupportsLocalInstall() bool { return true }
+
+// LocalInstall installs the reviewed bundle for the host platform.
+func (a *AntigravityACP) LocalInstall(ctx context.Context, progress func(string)) error {
+	_, err := antigravityruntime.Install(ctx, antigravityruntime.InstallOptions{Progress: progress})
+	return err
+}
+
+// ResolveLocalRuntime returns the complete host-local command and the
+// environment entry that pins the validated harness. It is only called for
+// local executions; remote executors keep the base command.
+func (a *AntigravityACP) ResolveLocalRuntime(ctx context.Context) (Command, map[string]string, error) {
+	bundle, err := antigravityruntime.Resolve(ctx, antigravityruntime.ResolveOptions{})
+	if err != nil {
+		return Command{}, nil, err
+	}
+	argv := antigravityACPArgv()
+	argv[0] = bundle.ServerPath
+	env := map[string]string{acpcompat.AntigravityHarnessPathEnv: bundle.HarnessPath}
+	return NewCommand(argv...), env, nil
 }
 
 func (a *AntigravityACP) BuildCommand(opts CommandOptions) Command {
@@ -212,4 +195,4 @@ func (a *AntigravityACP) InferenceConfig() *InferenceConfig {
 	}
 }
 
-func (a *AntigravityACP) BillingType() usage.BillingType { return defaultBillingType() }
+func (a *AntigravityACP) BillingType() usage.BillingType { return usage.BillingTypeSubscription }

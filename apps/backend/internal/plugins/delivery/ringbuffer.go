@@ -4,13 +4,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // Delivery is one queued/buffered event delivery job for a single plugin.
 type Delivery struct {
 	PluginID string
 	Event    *pluginsdk.Event
+	Origin   *bus.PluginEventOrigin
 }
 
 // bufferedDelivery pairs a Delivery with the time it was buffered, for TTL

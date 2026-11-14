@@ -300,7 +300,7 @@ function MobileModeSelector({
           <Button
             variant="ghost"
             size="icon"
-            className="h-11 w-11 shrink-0"
+            className="h-12 w-12 shrink-0"
             aria-label={t("common:close")}
             data-testid="session-mode-mobile-picker-close"
             onClick={() => setOpen(false)}

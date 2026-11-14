@@ -30,6 +30,47 @@ An aborted creation leaves no partially configured provider. If the connection f
 reload the settings to confirm the saved state before retrying, especially when adding a provider.
 Saves for separate providers are independent.
 
+## Configure webhook notifications
+
+Open **Settings > Preferences > Notifications** and select **Add Webhook Provider**.
+Enter an HTTP or HTTPS endpoint. Add request headers or a secret when the endpoint
+needs them. Select the events that the provider must receive, then save the
+settings.
+
+Kandev sends a `POST` request with a versioned JSON body. For example:
+
+```json
+{
+  "version": "1.0",
+  "event": "session.turn_finished",
+  "title": "Agent turn finished",
+  "message": "The agent finished a turn.",
+  "type": "info",
+  "fields": {
+    "task_id": "task-123",
+    "task_session_id": "session-456",
+    "occurrence_id": "turn-789"
+  }
+}
+```
+
+The `fields` object contains the IDs that are available for the event. Kandev
+omits an ID when it is empty. A configured `Authorization` header takes
+precedence over the secret. If there is no such header, Kandev sends a non-empty
+secret as `Authorization: Bearer <secret>`.
+
+Save the settings before you select **Test**. The test sends the saved
+configuration.
+
+By default, Kandev rejects destinations that resolve to loopback, private,
+link-local, multicast, or other reserved addresses. Kandev also refuses
+cross-origin redirects, so credential headers do not reach another origin.
+Private or local destinations need an operator opt-in. Set
+`notifications.webhookAllowPrivateNetworks: true` in `config.yaml`, or set
+`KANDEV_WEBHOOK_ALLOW_PRIVATE_NETWORKS=true` in the backend environment. This
+setting applies to the whole backend process. Kandev reads it at startup, so
+restart the backend after you change it.
+
 ## Use CLI passthrough on a phone
 
 Open a task running in CLI passthrough mode. Its connected terminal shows the
@@ -57,7 +98,7 @@ Inline comments are available only on ordinary settled prose. Streaming replies,
 
 ### Reference tasks and work items
 
-In Task Chat or an ordinary structured Quick Chat, type `#` at the start of a line or after whitespace, then enter part of a title or key. Kandev searches the active workspace's tasks and connected Jira, Linear, GitHub, GitLab, Azure DevOps, and Sentry sources. Results stay grouped by provider and type; a disconnected or slow provider does not hide results from another source.
+In Task Chat or an ordinary structured Quick Chat, type `#` at the start of a line or after whitespace, then enter part of a title or key. Kandev searches the active workspace's tasks and connected Jira, Linear, GitHub, GitLab, and Sentry sources, plus plugin reference sources. Results stay grouped by provider and type; a disconnected or slow provider does not hide results from another source.
 
 Use the arrow keys and **Tab** or **Enter**, or select a row with pointer or touch. Selection inserts a chip without sending. The chip survives draft reloads and becomes a clickable reference after explicit send; messages queued while an agent is busy keep the same reference metadata. CLI-passthrough chat leaves `#` as literal text and does not search.
 
@@ -79,6 +120,12 @@ Shortcuts target the selected terminal and keep the keyboard focused. The row
 stays above the on-screen keyboard. Modifiers reset when you switch terminal
 tabs or close the view.
 
+### Recover a Quick Terminal
+
+After a shell exits or the backend restarts, the shell process and its state are gone. This includes environment changes, running commands, command history, and screen output.
+
+To start a shell in the same tab, select the tab and then select **Start new shell**. Selecting or reopening a tab does not start a shell automatically. To open a separate shell, select **New Terminal**.
+
 ### Start a chat
 
 1. Enter a non-empty opening prompt. Add files when they help explain the request. Wait for each
@@ -95,11 +142,13 @@ tabs or close the view.
 
 Quick Chat keeps the prompt, files, profile, and repositories in the setup after a creation error. Correct the problem and select **Send** again. After a conversation exists, a delivery error keeps the opening prompt in that chat for an explicit retry.
 
+If Kandev recognizes a terminal rate-limit error that it can retry safely, Quick Chat retries the accepted message up to five times. A status card shows progress and lets you cancel.
+
 Configuration Chat does not use repository selections. Its existing workspace permissions and Settings entry point remain in effect.
 
 Each selected repository gets an isolated worktree from the chosen branch. Uncommitted changes in your original checkout are not copied. Without a repository, Kandev creates an ephemeral working directory under `<KANDEV_HOME_DIR>/quick-chat/` (by default `~/.kandev/quick-chat/`).
 
-Quick Chat supports multiple tabs, tab renaming, and **+** to open another ordinary-chat setup. Structured profiles show ACP chat; CLI-passthrough profiles show their PTY interface. The desktop window is resizable, while mobile uses a full-screen view.
+Quick Chat supports multiple tabs, tab renaming, and **+** to open another ordinary-chat setup. When you switch conversations or terminals, the selected tab is brought into view; you can scroll the tab row to browse others. Structured profiles show ACP chat; CLI-passthrough profiles show their PTY interface. The desktop window is resizable, while mobile uses a full-screen view.
 
 Your chats and their names are shared by every browser and device signed in to the same Kandev instance. Starting, renaming, or closing a chat on one device updates the others, and a device that was offline catches up when it reconnects.
 
@@ -110,7 +159,9 @@ instruction through their existing first-turn path. The new title appears on eve
 and survives reload. Configuration Chat and Quick Terminal are excluded. If you disable the setting,
 or rename the chat first, the provisional or user-selected title remains authoritative.
 
-Closing a real chat tab permanently deletes its conversation, hidden backing task data, and associated worktree. There is no undo. Kandev also deletes abandoned chats after seven days; cleanup runs when the backend starts and then once per day. Only chats whose session is `RUNNING` or `IDLE` are protected from age-based cleanup. Old `CREATED`, `STARTING`, or `WAITING_FOR_INPUT` chats can expire, so do not use Quick Chat for durable work.
+Closing a real chat tab permanently deletes its conversation and hidden backing task data. By default, it also removes the associated worktree. If the worktree has local changes, select **Permanently discard tracked and untracked changes** to remove it, or select **Keep workspace files** to retain the files. There is no undo for the conversation or task.
+
+Kandev also deletes abandoned chats after seven days; cleanup runs when the backend starts and then once per day. Only chats whose session is `RUNNING` or `IDLE` are protected from age-based cleanup. Old `CREATED`, `STARTING`, or `WAITING_FOR_INPUT` chats can expire, so do not use Quick Chat for durable work.
 
 If **Send** stays disabled, complete these steps:
 
@@ -155,7 +206,21 @@ Set a global **Default utility agent profile** by choosing an enabled, global, A
 
 You can also create a custom utility. Name, prompt, and profile are required; description is optional. Prompt fields offer autocomplete for supported `{{...}}` template variables. A stale, disabled, deleted, workspace-scoped, passthrough-only, or unconfigured profile fails closed. Repair the binding in Settings before running the utility again.
 
+Disabling a custom utility blocks new calls until it is re-enabled; calls already admitted continue.
+
 Utility calls run as ephemeral processes on the Kandev backend host. Kandev resolves one profile snapshot at call start, records its profile ID with the call, and applies its permissions without asking for interactive approval. If the profile does not auto-approve a permission request, the call is rejected promptly. Profile edits affect the next call; an in-flight call keeps its snapshot.
+
+### Prompt suggestions
+
+Turn on **Suggest next prompt** in **Settings > Task behavior > Conversation** to see the reply you are most likely to send next as dimmed text in the empty chat composer of a task or Quick Chat. Press **Tab** (or tap **Use reply** on a phone) to fill it in for editing, press your submit shortcut to send it as is, or press **Escape** to dismiss it. Typing hides the suggestion; clearing the composer shows it again until the next turn.
+
+Suggestions come only from agents whose adapter establishes native support. Today the only implemented source is Claude Code. Claude Code's suggestion arrives about two seconds after the turn ends and reuses the conversation's prompt cache.
+
+Kandev recognizes the official Claude ACP bridge it pins (`@agentclientprotocol/claude-agent-acp` versions 0.81.2 and 0.100.0) when it reports the expected package identity and metadata shape. This includes a custom Kandev agent definition that launches that bridge. A bridge with any other name or version qualifies only when it explicitly declares the vendor extension `agentCapabilities._meta.claudeCode.promptSuggestions: true` and implements the matching suggestion options and raw-message forwarding. That declaration is a Kandev opt-in contract, not a standard ACP capability, and upstream bridges do not advertise it yet.
+
+The model does not matter: OpenCode or Codex running an Anthropic model have no suggestions. Turning the setting on or off affects a supported session from its next start or resume. Claude stays silent when the next step is not obvious, early in a conversation, after an error, or in plan mode.
+
+Kandev never generates a suggestion of its own. For agents without native support, and for turns where Claude Code stays silent, the composer works as usual.
 
 ### Configuration Chat
 
@@ -163,7 +228,7 @@ The same settings page configures the **Configuration Chat Agent** for each work
 
 Open Configuration Chat from the floating chat button on Settings pages, turn on **Configuration chat** while creating a Quick Chat, or run **Configuration Chat** from the `Cmd/Ctrl+K` command menu. A workspace currently has one configuration conversation. The Settings panel shows that conversation without tabs; **Open in Quick Chat** moves the same setup or session into the larger tabbed dialog without copying it.
 
-Configuration Chat uses a repository-less ephemeral task. Its configuration-mode MCP can inspect and change workflows, agent profiles, and MCP configuration, and can read, create, and update saved prompts by exact name, subject to their agent-edit permission. The selected profile's model, credentials, permissions, and external MCP settings apply. Review requested configuration mutations before approving them.
+Configuration Chat uses a repository-less ephemeral task. Its configuration-mode MCP can inspect and change workflows, agent profiles, and MCP configuration, and can read, create, and update saved prompts by exact name. Every custom prompt is editable through these authorized tools; built-in prompts reject agent writes. The assistant should change a prompt only when the operator explicitly requests or agrees to the change, then read back the saved result. The selected profile's model, credentials, permissions, and external MCP settings apply. Review requested configuration mutations before approving them.
 
 Closing the floating Settings panel preserves the conversation. To delete it, open it in Quick Chat, close its tab, and confirm deletion. Configuration tasks are excluded from the seven-day Quick Chat sweeper and remain available until explicitly deleted or their workspace is deleted.
 
@@ -176,15 +241,15 @@ If the session is broken, choose **Restart session** in the Settings panel heade
 <details>
 <summary>Saved prompt details</summary>
 
-Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusable prompts. A saved prompt needs a unique name and non-empty content.
+Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusable prompts. A saved prompt needs a unique name and non-empty content. Use search to find prompts by name or saved content.
 
 Shared prompt reads and reference use are available to org members. Creating,
 editing, or deleting prompts requires `org.config.manage` permission.
 
-To let the configuration assistant update an existing custom prompt, edit it,
-enable **Allow agent edits**, and choose **Save changes**. The control works on
-desktop and phone. Existing and Settings-created prompts default to human-only;
-MCP-created prompts allow later agent edits until you disable the permission.
+The configuration assistant should update a custom prompt only when you
+explicitly request or agree to the change. The backend does not verify that
+request or agreement. Authorized tools can update any custom prompt. There is no
+per-prompt agent-edit control, including for previously protected prompts.
 Built-in prompts always reject agent writes, while remaining editable by an
 operator. Changes affect every future reference to that prompt. See the
 [MCP write contract](automation-and-mcp.md#create-or-update-a-saved-prompt).
@@ -292,7 +357,9 @@ availability is unknown. The repository picker is also unavailable in that case.
 
 For an idle, non-archived task with a prepared workspace, **Files → + → Add repositories or folders** opens a tab-free source picker. **Add repository** offers a workspace repository, a local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, refresh, and create-repository actions. **Add folder** is available on Local/Local PC or Worktree. Every repository chooses one base branch, and Local/Local PC uses the current checkout without switching it. Local sources stay linked to the established workspace root; remote executors clone repository sources in their executor workspace and require a cloneable origin for local Git rows. Host folders are unavailable remotely, while **Upload folder** remains a separate copy flow when supported. Desktop uses a dialog; phones use a full-height drawer with a touch-sized repository menu. A mixed submission is atomic, and repository additions refresh repository-aware tools while folders remain Files-only. See [Tasks and workflows](tasks-and-workflows.md#add-sources-to-an-existing-task).
 
-The task **Files** panel browses, searches, opens, and edits task-worktree files. In a multi-repository workspace, active checkout roots use their repository names. Search results and chat attachments can show those names while retaining the checkout's canonical file path. Kandev rejects file paths that escape the resolved worktree. A session with one worktree opens that worktree directly in a host editor. When a session has several worktrees, the editor button asks which repository or worktree to open, and each configured editor in the adjacent menu expands to the same repository-and-branch picker. Check that selection before launching an editor from a multi-repository task. Older API clients that omit `worktree_id` retain the first-worktree fallback.
+The task **Files** panel browses, searches, opens, and edits task-worktree files. Directories appear before files, with numbered names in natural order (for example, `step2` before `step10`). In a multi-repository workspace, active checkout roots use their repository names. Search results and chat attachments can show those names while retaining the checkout's canonical file path. Kandev rejects file paths that escape the resolved worktree. A session with one worktree opens that worktree directly in a host editor. When a session has several worktrees, the editor button asks which repository or worktree to open, and each configured editor in the adjacent menu expands to the same repository-and-branch picker. Check that selection before launching an editor from a multi-repository task. Older API clients that omit `worktree_id` retain the first-worktree fallback.
+
+On desktop and tablet, renaming or moving a file or its containing folder in **Files** keeps an open editor's unsaved text attached to the new path. Save writes that text to the renamed file. The editor's undo history may reset after a rename. If the destination is already open in a different editor, close that editor and retry. Renames made outside **Files** are not tracked by this behavior. The phone file viewer is read-only.
 
 In the desktop file editor, an agent change detected while you have local edits
 keeps your text and offers **Reload** to use the detected agent version. If a
@@ -305,6 +372,8 @@ Files and workspace search omit only recovery artifacts that Kandev has register
 ### Preview an HTML file
 
 Open an `.html` or `.htm` file in **Files**, then select **Preview HTML**. Kandev publishes the current editor buffer to an ephemeral static server, so the preview includes unsaved changes while the source file stays dirty and unchanged on disk. On desktop, the preview replaces the editor body. On mobile, it replaces the source in the focused full-height viewer. Select **Show code** to return to the same source buffer. Select **Refresh HTML preview** to publish the latest buffer again, or use the Browser button to open the published page in a separate **Browser** panel.
+
+You can also preview an HTML file from its diff. In **Changes**, or in the expanded **Review** dialog, select **Preview HTML** in the file header. On phones, the same action is in the file actions menu. The preview replaces only that file's diff body, keeps the diff surface open, and provides **Show diff** to return. This preview reads the complete current workspace file rather than the patch, so staged, committed, and pull-request rows can look different from what you see. The preview states that source before you activate it. Deleted files and known binary files do not offer the action, and a file that is binary when read is never published. If the workspace read or publication fails, the preview keeps **Retry HTML preview** and **Show diff** available. Preview starts only when you select the action, so reloading or reopening the review returns to the diff instead of executing HTML.
 
 The preview uses the native browser engine. HTML, CSS, JavaScript, inline event handlers, browser APIs, forms, popups, and normal browser navigation behave as they do in a regular page. A visible warning identifies the preview as trusted workspace code. Preview only HTML you trust because this feature does not claim to isolate hostile content from the browser or task environment.
 
@@ -326,7 +395,7 @@ Open the context menu on any file or folder in the Files tree: right-click on de
 
 **VS Code (Embedded)** runs code-server inside the active task environment and displays it in a workbench panel. Opening it starts code-server independently of the agent process. It launches with `--auth none` and binds `0.0.0.0` on a random port inside that runtime; network/firewall isolation is therefore important, especially for Local, Kubernetes, and SSH environments. If the binary is absent, agentctl attempts to download it into `~/.kandev/tools/code-server`; first use needs a supported execution platform and access to the [code-server release](https://github.com/coder/code-server/releases/tag/v4.130.0). Native Windows Local and Worktree sessions do not support this integration. Linux-backed Local Docker, Kubernetes, Sprites, and supported SSH sessions can offer it even when the Kandev app runs on Windows. The task-detail topbar follows the active session's executor capability, never the visitor's browser platform; other configured editors remain available. Use the panel error and task-environment logs when installation, startup, or proxying fails.
 
-Use the workbench top bar's split-editor action to open the selected session worktree in the default editor. Its menu lets you choose another configured editor. A file's **Open with** menu can also open a specific editor, copy the path, or ask the operating system to show the folder.
+Use the workbench top bar's split-editor action to open the selected session worktree in the default editor. Its menu lets you choose another configured editor. A file's **Open with** menu can also open a specific editor, copy the path, or ask the operating system to show the folder. External-editor file actions use the file's repository worktree when it can be identified. If the repository target is unavailable or ambiguous, those editor actions are disabled until it can be resolved.
 
 Open **Settings > Preferences > Terminal & Editors** (`/settings/preferences/terminal-editors`) to set a default and configure integrations. Kandev discovers these built-in desktop editors when installed:
 
@@ -397,6 +466,10 @@ to the selected executor instead. The environment is fixed when the PTY starts, 
 terminal after a session resume or credential-policy change.
 
 On desktop, select **+ > Terminals > New Terminal**. Parked terminal sessions can appear in the same menu for reopening. The tab context menu offers **Rename** and **Terminate**, not a separate Close action. Selecting the tab's **X** deletes the terminal and asks for confirmation when it is busy. Removing the panel through layout management can instead park it and keep its PTY alive; terminating a live terminal or deleting a parked entry destroys it. On mobile, select **Terminal** in task navigation and use the terminal picker to create another.
+
+When tasks share a workspace or execution environment, each task keeps its own ordinary terminals. Switching tasks opens the selected task's terminal, and panel or layout restoration checks ownership before reconnecting. A terminal from a sibling task never appears in the terminal list and is never renamed, parked, or removed by another task's recovery.
+
+When you scroll up in a task terminal or desktop dev-server output, select **Jump to latest output** to return to the newest output. The action disappears at the bottom. New output does not pull you away from the scrollback you are reading.
 
 Do not confuse a user terminal with a CLI-passthrough agent tab: both use PTYs, but only the agent tab is the agent's native interface. `Cmd/Ctrl+J` toggles the bottom terminal area.
 
