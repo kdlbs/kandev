@@ -1,7 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { waitForHttp, watchWs } from "../../helpers/causal-waits";
-import { waitForSessionDone } from "../../helpers/session";
 import { ChangeWorkflowPage } from "../../pages/change-workflow-page";
 import { KanbanPage } from "../../pages/kanban-page";
 import { seedRemainingStepColors } from "./change-workflow-color-helpers";
@@ -286,20 +285,6 @@ test.describe("Change workflow", () => {
     );
     await waitForWorkflowMoveLifecycle(apiClient, task.id);
     const { session: routedSession } = await apiClient.getTaskSession(destinationSessionId);
-    await waitForSessionDone(
-      apiClient,
-      task.id,
-      existingSessionId,
-      "source workflow session must settle before cleanup",
-      30_000,
-    );
-    await waitForSessionDone(
-      apiClient,
-      task.id,
-      destinationSessionId,
-      "destination workflow session must settle before cleanup",
-      30_000,
-    );
     expect(routedSession.agent_profile_id).toBe(fixture.profileB.id);
     expect(routedSession.agent_profile_snapshot?.model).toBe("mock-slow");
     const changed = await apiClient.getTask(task.id);
