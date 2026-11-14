@@ -5,6 +5,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -416,6 +417,72 @@ func newCompletedRelocationServiceFixture(t *testing.T, repositoryCount int) *co
 	require.NotNil(t, admission)
 	require.NoError(t, admission.Release(ctx))
 	return fixture
+}
+
+func TestRecoverSessionPreflightsSuccessorForRetiredBinding(t *testing.T) {
+	fixture := newCompletedRelocationServiceFixture(t, 1)
+	ctx := context.Background()
+	_, err := fixture.db.ExecContext(ctx, fixture.db.Rebind(`UPDATE task_environments SET status = ? WHERE id = ?`),
+		string(models.TaskEnvironmentStatusFailed), fixture.environmentID)
+	require.NoError(t, err)
+
+	const (
+		reservationSessionID = "session-replacement-reservation"
+		historicalSessionID  = "session-retained-history"
+	)
+	for _, sessionID := range []string{reservationSessionID, historicalSessionID} {
+		require.NoError(t, fixture.repo.CreateTaskSession(ctx, &models.TaskSession{
+			ID: sessionID, TaskID: fixture.taskID, TaskEnvironmentID: fixture.environmentID,
+			State: models.TaskSessionStateCompleted,
+		}))
+	}
+	retained, err := fixture.repo.GetTaskEnvironment(ctx, fixture.environmentID)
+	require.NoError(t, err)
+	successor, err := fixture.repo.ReserveTaskEnvironmentReplacement(ctx, retained, &models.TaskSession{
+		ID: reservationSessionID, TaskID: fixture.taskID, TaskEnvironmentID: fixture.environmentID,
+		State: models.TaskSessionStateCompleted,
+	}, &models.TaskEnvironment{
+		TaskID: fixture.taskID, ExecutorType: string(models.ExecutorTypeWorktree),
+		ExecutorID: models.ExecutorIDWorktree, TaskDirName: "task-replacement-successor",
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, fixture.environmentID, successor.ID)
+	_, err = fixture.db.ExecContext(ctx, fixture.db.Rebind(`UPDATE task_environments
+		SET status = ?, materialization_session_id = '' WHERE id = ?`),
+		string(models.TaskEnvironmentStatusReady), successor.ID)
+	require.NoError(t, err)
+	require.NoError(t, fixture.repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		ID: "environment-repo-replacement-successor", TaskEnvironmentID: successor.ID,
+		RepositoryID: fixture.slots[0].repositoryID, BranchSlug: fixture.slots[0].branchSlug,
+		WorktreeID: "worktree-replacement-successor", WorktreePath: filepath.Join(t.TempDir(), "successor"),
+		WorktreeBranch: fixture.slots[0].branch, Status: "active",
+	}))
+
+	preflightErr := errors.New("selected successor preflight")
+	var selectedEnvironmentID string
+	preflightCalls := 0
+	fixture.svc.executor.SetSelectedWorktreeRecoveryAdmission(func(
+		_ context.Context, request worktree.RecoveryAdmissionRequest,
+	) (*worktree.RecoveryAdmission, error) {
+		preflightCalls++
+		selectedEnvironmentID = request.TaskEnvironmentID
+		return nil, preflightErr
+	})
+	_, err = fixture.svc.RecoverSessionWithOptions(ctx, fixture.taskID, fixture.sessionID, "resume", RecoverSessionOptions{})
+	require.ErrorContains(t, err, preflightErr.Error())
+	require.Equal(t, 1, preflightCalls, "recovery must inspect the selected successor")
+	require.Equal(t, successor.ID, selectedEnvironmentID)
+
+	bound, err := fixture.repo.GetTaskSession(ctx, fixture.sessionID)
+	require.NoError(t, err)
+	require.Equal(t, successor.ID, bound.TaskEnvironmentID)
+	historical, err := fixture.repo.GetTaskSession(ctx, historicalSessionID)
+	require.NoError(t, err)
+	require.Equal(t, fixture.environmentID, historical.TaskEnvironmentID)
+	retainedAfterRecovery, err := fixture.repo.GetTaskEnvironment(ctx, fixture.environmentID)
+	require.NoError(t, err)
+	require.True(t, retainedAfterRecovery.IsRetired())
+	require.Len(t, retainedAfterRecovery.Repos, 1, "retirement must retain the original worktree inventory")
 }
 
 func (f *completedRelocationServiceFixture) rebuildService(

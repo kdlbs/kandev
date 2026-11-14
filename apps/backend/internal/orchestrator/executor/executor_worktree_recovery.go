@@ -2,11 +2,13 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -158,11 +160,62 @@ func (e *Executor) PreflightSessionWorktreeRecovery(
 	if e == nil || e.repo == nil || session == nil || taskID == "" || session.TaskID != taskID {
 		return nil, nil
 	}
+	previousEnvironmentID := session.TaskEnvironmentID
+	retiredBinding, err := e.prepareRetiredEnvironmentReplacementForRecovery(ctx, taskID, session, allowBranchReplacement)
+	if err != nil {
+		return nil, err
+	}
+	if retiredBinding && session.TaskEnvironmentID == previousEnvironmentID {
+		return nil, nil
+	}
 	env, err := e.resolveEnvironmentForAdmission(ctx, taskID, session.TaskEnvironmentID)
 	if err != nil || env == nil {
 		return nil, err
 	}
 	return e.admitSelectedWorktreeRecovery(ctx, taskID, session, env, env.ExecutorType, allowBranchReplacement, worktree.RecoveryInspectionWaitBudget, true)
+}
+
+func (e *Executor) prepareRetiredEnvironmentReplacementForRecovery(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	allowBranchReplacement bool,
+) (bool, error) {
+	if session.TaskEnvironmentID == "" {
+		return false, nil
+	}
+	retained, err := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+	if err != nil {
+		return false, fmt.Errorf("load selected task environment %q: %w", session.TaskEnvironmentID, err)
+	}
+	if !retained.IsRetired() {
+		return false, nil
+	}
+	if !isTerminalSessionState(session.State) && session.State != models.TaskSessionStateCompleted {
+		return true, fmt.Errorf("%w: retired environment is bound to a live session", models.ErrWorkspaceReuseUnsafe)
+	}
+	if _, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID); errors.Is(err, repoerrors.ErrTaskEnvironmentNotFound) {
+		return true, nil
+	} else if err != nil {
+		return true, fmt.Errorf("load active replacement environment: %w", err)
+	}
+	if err := e.cleanupStaleExecutionBeforeResume(ctx, session.ID); err != nil {
+		return true, err
+	}
+	task, err := e.loadResumeTask(ctx, session)
+	if err != nil {
+		return true, err
+	}
+	options := ResumeOptions{
+		AllowCompletedSessionResume: session.State == models.TaskSessionStateCompleted,
+		AllowBranchReplacement:      allowBranchReplacement,
+	}
+	executorType, err := e.requestedResumeExecutorType(ctx, task, session, true, options)
+	if err != nil {
+		return true, err
+	}
+	_, err = e.replaceFailedEnvironmentForResume(ctx, task, session, executorType)
+	return true, err
 }
 
 type managedClonePathResolver interface {
@@ -199,6 +252,9 @@ func (e *Executor) resolveEnvironmentForAdmission(
 		env, err := e.repo.GetTaskEnvironment(ctx, environmentID)
 		if err != nil {
 			return nil, fmt.Errorf("load selected task environment %q: %w", environmentID, err)
+		}
+		if env.IsRetired() {
+			return nil, fmt.Errorf("%w: task environment is retained as inactive history", models.ErrWorkspaceReuseUnsafe)
 		}
 		return env, nil
 	}
