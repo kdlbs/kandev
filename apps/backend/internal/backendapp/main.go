@@ -1905,6 +1905,7 @@ func newRunProcessorService(
 		EventBus:           eventBus,
 	})
 	svc.SetRunSessionLauncher(newOfficeRunSessionLauncher(repos.Office, lifecycleMgr, services.DynamicProfileResolver, log))
+	wireOfficeRunClaimSessionProbe(svc, repos.Task, lifecycleMgr)
 	return svc
 }
 

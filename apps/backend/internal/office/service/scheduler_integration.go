@@ -249,17 +249,121 @@ func (si *SchedulerIntegration) liftParkedRoutingRuns(ctx context.Context) {
 }
 
 func (si *SchedulerIntegration) recoverStaleClaimedRuns(ctx context.Context) {
-	count, err := si.svc.repo.RecoverStale(ctx, time.Now().UTC().Add(-staleClaimedRunAge))
+	cutoff := time.Now().UTC().Add(-staleClaimedRunAge)
+	candidates, err := si.svc.repo.RunsRepository().ListStaleClaimedRuns(ctx, cutoff)
 	if err != nil {
 		if ctx.Err() != nil {
 			return
 		}
-		si.logger.Error("failed to recover stale claimed runs", zap.Error(err))
+		si.logger.Error("failed to list stale claimed runs", zap.Error(err))
 		return
+	}
+	var count int64
+	for _, run := range candidates {
+		if ctx.Err() != nil {
+			return
+		}
+		if !si.canRecoverStaleClaimedRun(ctx, run) {
+			continue
+		}
+		recovered, err := si.svc.repo.RunsRepository().RecoverStaleClaimedRun(ctx, run, cutoff)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			si.logger.Warn("failed to recover stale claimed run",
+				zap.String("run_id", run.ID), zap.Error(err))
+			continue
+		}
+		if recovered {
+			count++
+		}
 	}
 	if count > 0 {
 		si.logger.Info("recovered stale claimed runs", zap.Int64("count", count))
 	}
+}
+
+func (si *SchedulerIntegration) canRecoverStaleClaimedRun(ctx context.Context, run *runsmodels.Run) bool {
+	taskID := si.extractTaskID(run.Payload)
+	if taskID == "" {
+		return si.canRecoverTasklessClaim(ctx, run)
+	}
+
+	return si.canRecoverTaskClaim(ctx, run, taskID)
+}
+
+func (si *SchedulerIntegration) canRecoverTasklessClaim(ctx context.Context, run *runsmodels.Run) bool {
+	sessions, err := si.svc.repo.ListRunSessions(ctx, run.ID)
+	if err != nil {
+		if ctx.Err() == nil {
+			si.logger.Warn("stale taskless run recovery deferred because attempts could not be read",
+				zap.String("run_id", run.ID), zap.Error(err))
+		}
+		return false
+	}
+	// An attempt row means launch began; lifecycle/restart recovery owns
+	// its settlement, including when completion has not finished the run yet.
+	return len(sessions) == 0 && run.SessionID == ""
+}
+
+func (si *SchedulerIntegration) canRecoverTaskClaim(ctx context.Context, run *runsmodels.Run, taskID string) bool {
+	probe := si.svc.runClaimSessionProbe
+	sessionID := run.SessionID
+	if sessionID == "" {
+		resolved, err := si.findActiveTaskSessionForClaim(ctx, run, taskID, probe)
+		if err != nil {
+			si.logClaimSessionLookupFailure(ctx, run.ID, taskID, err)
+			return false
+		}
+		sessionID = resolved
+		if sessionID == "" {
+			return true
+		}
+	}
+	return si.preserveSessionOwnedClaim(ctx, run.ID, sessionID, probe)
+}
+
+func (si *SchedulerIntegration) findActiveTaskSessionForClaim(ctx context.Context, run *runsmodels.Run, taskID string, probe RunClaimSessionProbe) (string, error) {
+	if probe == nil {
+		si.logger.Warn("stale task run recovery deferred because session lookup is unavailable",
+			zap.String("run_id", run.ID), zap.String("task_id", taskID))
+		return "", errors.New("run claim session lookup unavailable")
+	}
+	return probe.FindActiveTaskSession(ctx, taskID, run.AgentProfileID)
+}
+
+func (si *SchedulerIntegration) logClaimSessionLookupFailure(ctx context.Context, runID, taskID string, err error) {
+	if ctx.Err() == nil {
+		si.logger.Warn("stale task run recovery deferred because session lookup failed",
+			zap.String("run_id", runID), zap.String("task_id", taskID), zap.Error(err))
+	}
+}
+
+func (si *SchedulerIntegration) preserveSessionOwnedClaim(ctx context.Context, runID, sessionID string, probe RunClaimSessionProbe) bool {
+	if probe == nil {
+		si.logger.Warn("stale task run recovery deferred because runtime probe is unavailable",
+			zap.String("run_id", runID), zap.String("session_id", sessionID))
+		return false
+	}
+	live, err := probe.ProbeAgentRunningForSession(ctx, sessionID)
+	if err != nil {
+		if ctx.Err() == nil {
+			si.logger.Warn("stale task run recovery deferred because runtime liveness is uncertain",
+				zap.String("run_id", runID), zap.String("session_id", sessionID), zap.Error(err))
+		}
+		return false
+	}
+	if live {
+		si.logger.Debug("stale run recovery deferred for live task session",
+			zap.String("run_id", runID), zap.String("session_id", sessionID))
+		return false
+	}
+	// A session identity means the run launched. A liveness miss alone is not
+	// completion evidence; the existing lifecycle and restart paths own it.
+	si.logger.Debug("stale run recovery deferred for session-owned task run",
+		zap.String("run_id", runID), zap.String("session_id", sessionID))
+	return false
 }
 
 // reapStaleCheckouts is the backstop for task checkouts that never got
