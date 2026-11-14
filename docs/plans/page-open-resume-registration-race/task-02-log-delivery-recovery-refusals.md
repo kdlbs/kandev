@@ -76,7 +76,9 @@ New file `apps/backend/internal/orchestrator/native_resume_refusal_log_test.go`:
   logged server-side; refusal reasons distinguish unavailable executions,
   unavailable evidence, and Office ownership. Bare catch-all sentinels map to
   `unclassified`. An active explicit Resume keeps the single WARN, while its
-  boot-ready refusal is DEBUG. Regression tests cover these cases.
+  boot-ready refusal is DEBUG. Classified direct refusals also retain their
+  cause in server logs, and specific refusal reasons survive loaded-native
+  acknowledgement wrapping. Regression tests cover these cases.
 
 ## Commands
 

@@ -170,11 +170,15 @@ func (m *Manager) ValidateExecutionRuntime(
 	var execution *AgentExecution
 	if sessionID != "" && m.executionStore != nil {
 		execution, _ = m.executionStore.GetBySessionID(sessionID)
-		if execution != nil {
+		for execution != nil {
 			if err := execution.waitRegistrationSettled(ctx); err != nil {
 				return err
 			}
-			execution, _ = m.executionStore.GetBySessionID(sessionID)
+			current, _ := m.executionStore.GetBySessionID(sessionID)
+			if current == execution {
+				break
+			}
+			execution = current
 		}
 	}
 	selected, required := normalizeExecutorSelection(executorType)

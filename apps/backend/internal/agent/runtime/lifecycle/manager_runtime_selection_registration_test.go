@@ -56,6 +56,28 @@ type registrationRaceFixture struct {
 	registrationCtx context.Context
 }
 
+type registrationWaitContext struct {
+	context.Context
+	entered chan struct{}
+}
+
+func (c *registrationWaitContext) Done() <-chan struct{} {
+	select {
+	case c.entered <- struct{}{}:
+	default:
+	}
+	return c.Context.Done()
+}
+
+func waitForRegistrationWait(t *testing.T, entered <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("runtime validation did not enter the registration wait")
+	}
+}
+
 func newRegistrationRaceFixture(t *testing.T, upsertErr error, reattached bool) *registrationRaceFixture {
 	t.Helper()
 
@@ -153,21 +175,20 @@ func TestValidateExecutionRuntimeWaitsForRegistrationSettle(t *testing.T) {
 	registrationDone := fixture.startRegistration(t)
 	<-fixture.writer.upsertEntered
 
-	validationStarted := make(chan struct{})
+	validationContext := &registrationWaitContext{Context: context.Background(), entered: make(chan struct{}, 2)}
 	validationDone := make(chan error, 1)
 	go func() {
-		close(validationStarted)
 		validationDone <- fixture.manager.ValidateExecutionRuntime(
-			context.Background(), registrationRaceSessionID, registrationRaceEnvID, "local_pc",
+			validationContext, registrationRaceSessionID, registrationRaceEnvID, "local_pc",
 		)
 	}()
-	<-validationStarted
+	waitForRegistrationWait(t, validationContext.entered)
 	select {
 	case err := <-validationDone:
 		fixture.writer.release()
 		<-registrationDone
 		t.Fatalf("runtime validation completed before registration settled: %v", err)
-	case <-time.After(100 * time.Millisecond):
+	default:
 	}
 
 	fixture.writer.release()
@@ -194,12 +215,14 @@ func TestValidateExecutionRuntimeAfterRegistrationRollback(t *testing.T) {
 	registrationDone := fixture.startRegistration(t)
 	<-fixture.writer.upsertEntered
 
+	validationContext := &registrationWaitContext{Context: context.Background(), entered: make(chan struct{}, 2)}
 	validationDone := make(chan error, 1)
 	go func() {
 		validationDone <- fixture.manager.ValidateExecutionRuntime(
-			context.Background(), registrationRaceSessionID, registrationRaceEnvID, "local_pc",
+			validationContext, registrationRaceSessionID, registrationRaceEnvID, "local_pc",
 		)
 	}()
+	waitForRegistrationWait(t, validationContext.entered)
 	fixture.writer.release()
 	if err := <-registrationDone; err == nil {
 		t.Fatal("registration error = nil, want persistence failure")
@@ -228,15 +251,14 @@ func TestValidateExecutionRuntimeRegistrationWaitHonorsContext(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	validationStarted := make(chan struct{})
+	validationContext := &registrationWaitContext{Context: ctx, entered: make(chan struct{}, 2)}
 	validationDone := make(chan error, 1)
 	go func() {
-		close(validationStarted)
 		validationDone <- fixture.manager.ValidateExecutionRuntime(
-			ctx, registrationRaceSessionID, registrationRaceEnvID, "local_pc",
+			validationContext, registrationRaceSessionID, registrationRaceEnvID, "local_pc",
 		)
 	}()
-	<-validationStarted
+	waitForRegistrationWait(t, validationContext.entered)
 	cancel()
 	if err := <-validationDone; !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled validation error = %v, want context.Canceled", err)
@@ -245,6 +267,59 @@ func TestValidateExecutionRuntimeRegistrationWaitHonorsContext(t *testing.T) {
 	fixture.writer.release()
 	if err := <-registrationDone; err != nil {
 		t.Fatalf("register execution: %v", err)
+	}
+}
+
+// TestValidateExecutionRuntimeWaitsForSuccessorRegistration covers
+// AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.10. A successor that replaces a
+// settled registration must itself settle before runtime identity is checked.
+func TestValidateExecutionRuntimeWaitsForSuccessorRegistration(t *testing.T) {
+	fixture := newRegistrationRaceFixture(t, nil, false)
+	store := fixture.manager.executionStore
+	if err := store.Add(fixture.execution); err != nil {
+		t.Fatal(err)
+	}
+	successor := &AgentExecution{
+		ID: "exec-successor", SessionID: registrationRaceSessionID,
+		TaskID: registrationRaceTaskID, TaskEnvironmentID: "successor-environment",
+		ExecutorType: fixture.execution.ExecutorType, RuntimeName: fixture.execution.RuntimeName,
+		registrationSettled: make(chan struct{}),
+	}
+
+	validationContext := &registrationWaitContext{Context: context.Background(), entered: make(chan struct{}, 3)}
+	validationDone := make(chan error, 1)
+	go func() {
+		validationDone <- fixture.manager.ValidateExecutionRuntime(
+			validationContext, registrationRaceSessionID, registrationRaceEnvID, "local_pc",
+		)
+	}()
+	waitForRegistrationWait(t, validationContext.entered)
+
+	store.mu.Lock()
+	fixture.execution.settleRegistration()
+	delete(store.executions, fixture.execution.ID)
+	store.executions[successor.ID] = successor
+	store.bySession[registrationRaceSessionID] = successor.ID
+	store.mu.Unlock()
+
+	select {
+	case <-validationContext.entered:
+	case err := <-validationDone:
+		t.Fatalf("runtime validation did not wait for the successor registration: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("runtime validation did not enter the successor registration wait")
+	}
+	select {
+	case err := <-validationDone:
+		t.Fatalf("runtime validation completed before the successor settled: %v", err)
+	default:
+	}
+
+	successor.settleRegistration()
+	err := <-validationDone
+	var runtimeErr *ExecutorRuntimeError
+	if !errors.As(err, &runtimeErr) || !runtimeErr.EnvironmentMismatch {
+		t.Fatalf("settled successor mismatch error = %v, want environment mismatch", err)
 	}
 }
 

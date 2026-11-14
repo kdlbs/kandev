@@ -59,6 +59,12 @@ func TestNativeResumeMissingUnknownRetirementUsesIdleCurrentOwner(t *testing.T) 
 				require.NoError(t, err)
 			} else {
 				require.Error(t, err)
+				if condition == "existing live" {
+					require.ErrorIs(t, err, journal.ErrSubmissionState)
+				}
+				if condition == "existing hash mismatch" {
+					require.ErrorIs(t, err, journal.ErrOwnerMismatch)
+				}
 			}
 			if condition == "busy" {
 				manager.deliverySubmissionMu.Unlock()

@@ -255,8 +255,8 @@ func TestExplicitResumeLogsLifecycleRefusalReason(t *testing.T) {
 		reason string
 	}{
 		{name: "delivery blocked", err: agentruntime.ErrDeliveryRecoveryBlocked, reason: "journal_unresolved"},
-		{name: "peer evidence unavailable", err: lifecycle.ErrDurableAdoptionEvidenceUnavailable, reason: "peer_record_missing"},
-		{name: "durable adoption blocked", err: lifecycle.ErrDurableAdoptionBlocked, reason: "peer_record_mismatch"},
+		{name: "peer evidence unavailable", err: lifecycle.ErrDurableAdoptionEvidenceUnavailable, reason: "unclassified"},
+		{name: "durable adoption blocked", err: lifecycle.ErrDurableAdoptionBlocked, reason: "unclassified"},
 		{name: "unclassified", err: errors.New("journal acknowledgement failed"), reason: "unclassified"},
 	}
 	for _, tt := range tests {
@@ -270,6 +270,22 @@ func TestExplicitResumeLogsLifecycleRefusalReason(t *testing.T) {
 			assertOneDeliveryRefusalWarning(t, logs, submission.SessionID, block.ID, tt.reason)
 		})
 	}
+}
+
+func TestExplicitResumeLogsClassifiedLifecycleRefusalCause(t *testing.T) {
+	service, manager, block, submission, _, _ := nativeResumeFixture(t, durableDeliveryUnresolvedReason, false, false)
+	cause := errors.New("peer journal retirement rejected")
+	manager.acknowledge = func(context.Context, string) error {
+		return reasonedDeliveryRefusal{reason: agentruntime.DeliveryRecoveryRefusalPeerRecordMissing, cause: cause}
+	}
+	logs := observeNativeResumeRefusalLogs(t, service)
+
+	_, err := service.RecoverSession(context.Background(), "task1", submission.SessionID, "resume")
+	require.ErrorIs(t, err, cause)
+	assertOneDeliveryRefusalWarning(t, logs, submission.SessionID, block.ID, "peer_record_missing")
+	entries := logs.FilterMessage("agent_delivery recovery remains required").All()
+	require.Len(t, entries, 1)
+	require.Contains(t, entries[0].ContextMap()["cause"], cause.Error())
 }
 
 func TestSuccessfulBootDeliveryReadinessDoesNotLogRefusal(t *testing.T) {

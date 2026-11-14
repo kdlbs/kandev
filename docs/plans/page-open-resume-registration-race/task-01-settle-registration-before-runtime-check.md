@@ -12,6 +12,7 @@ acceptance_criteria:
   - AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.10
   - AC-EXECUTORS-RUNTIME-SELECTION-002.2
 system_design:
+  - ../../specs/agents/system-design/agent-resume-runtime-recovery.md
   - ../../specs/executors/system-design/runtime-selection.md
 ---
 
@@ -40,6 +41,9 @@ New file `apps/backend/internal/agent/runtime/lifecycle/manager_runtime_selectio
   path for the predecessor, not compare the rolled-back execution.
 - `TestValidateExecutionRuntimeRegistrationWaitHonorsContext`: barrier never
   released; a cancelled context returns the context error, not a mismatch.
+- `TestValidateExecutionRuntimeWaitsForSuccessorRegistration`: replacing the
+  settled execution with an unsettled successor makes validation wait for the
+  successor before checking its runtime identity.
 - `TestValidateExecutionRuntimeSettledMismatchStillRefused`: settled
   registration whose row names another execution still returns the
   identity-unverified error.
@@ -74,7 +78,7 @@ New file `apps/backend/internal/agent/runtime/lifecycle/manager_runtime_selectio
 
 ## Acceptance
 
-- The four tests pass with `-race`; the first fails on current `main` for the
+- The five tests pass with `-race`; the first fails on current `main` for the
   expected reason.
 - Existing lifecycle and orchestrator executor tests pass unchanged.
 
@@ -89,6 +93,10 @@ New file `apps/backend/internal/agent/runtime/lifecycle/manager_runtime_selectio
 - The package command without `-tags fts5` fails in an existing SQLite schema
   migration test with `no such module: fts5`; the documented command uses the
   repository's required tag.
+- Review fixes: runtime validation now waits again if a successor execution
+  replaces the registration it first observed. The regression test synchronizes
+  on each registration wait instead of relying on a timing delay. The successor
+  replacement regression failed with the old one-shot wait.
 
 ## Commands
 

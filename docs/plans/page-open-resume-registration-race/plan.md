@@ -6,6 +6,7 @@ requirements:
   - REQ-EXECUTORS-RUNTIME-SELECTION-002
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006
 system_design:
+  - ../../specs/agents/system-design/agent-resume-runtime-recovery.md
   - ../../specs/executors/system-design/runtime-selection.md
   - ../../specs/platform/system-design/interrupted-prompt-recovery.md
 legacy_specs: []

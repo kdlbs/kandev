@@ -31,7 +31,7 @@ func (m *Manager) ReconcileLoadedNativeDelivery(ctx context.Context, sessionID s
 	}
 	if settled, err := m.hasProjectedTerminalRetirement(ctx, execution); err == nil && settled {
 		if err := m.AcknowledgeNativeResumeDelivery(ctx, sessionID); err != nil {
-			return nil, withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalJournalUnresolved, err)
+			return nil, withJournalUnresolvedRefusal(err)
 		}
 		proof, err := m.GetNativeResumeDeliveryEvidence(ctx, sessionID)
 		return proof, classifyLoadedNativeRefusal(err)
@@ -56,7 +56,7 @@ func (m *Manager) ReconcileLoadedNativeDelivery(ctx context.Context, sessionID s
 		return nil, withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalLiveWork, err)
 	}
 	if err := m.AcknowledgeNativeResumeDelivery(ctx, sessionID); err != nil {
-		return nil, withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalJournalUnresolved, err)
+		return nil, withJournalUnresolvedRefusal(err)
 	}
 	proof, err := m.GetNativeResumeDeliveryEvidence(ctx, sessionID)
 	return proof, classifyLoadedNativeRefusal(err)
@@ -76,8 +76,6 @@ func classifyLoadedNativeRefusal(err error) error {
 		reason = DeliveryRecoveryRefusalEvidenceUnavailable
 	case errors.Is(err, ErrDeliveryRecoveryBlocked):
 		reason = DeliveryRecoveryRefusalJournalUnresolved
-	case errors.Is(err, ErrDurableAdoptionBlocked):
-		reason = DeliveryRecoveryRefusalUnclassified
 	default:
 		reason = DeliveryRecoveryRefusalUnclassified
 	}
@@ -86,6 +84,17 @@ func classifyLoadedNativeRefusal(err error) error {
 		return err
 	}
 	return withDeliveryRecoveryRefusal(reason, err)
+}
+
+func withJournalUnresolvedRefusal(err error) error {
+	if err == nil {
+		return nil
+	}
+	var reasoner interface{ DeliveryRecoveryRefusalReason() string }
+	if errors.As(err, &reasoner) && IsDeliveryRecoveryRefusalReason(reasoner.DeliveryRecoveryRefusalReason()) {
+		return err
+	}
+	return withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalJournalUnresolved, err)
 }
 
 func (m *Manager) readLoadedNativeHistoricalOwner(ctx context.Context, execution *AgentExecution) (*AgentDeliveryRecoveryIdentity, error) {

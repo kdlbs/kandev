@@ -104,17 +104,32 @@ func (s *Service) logDeliveryRecoveryRefusalAtLevel(ctx context.Context, session
 		zap.String("block_id", block.ID),
 		zap.String("reason", reason),
 	}
-	var required *sessionRecoveryRequiredError
-	if errors.As(refusal, &required) && required.internalCause != nil {
-		fields = append(fields, zap.NamedError("cause", required.internalCause))
-	} else if refusal != nil && reason == agentruntime.DeliveryRecoveryRefusalUnclassified {
-		fields = append(fields, zap.Error(refusal))
+	if cause, ok := deliveryRecoveryRefusalCauseField(refusal, reason); ok {
+		fields = append(fields, cause)
 	}
 	if debug {
 		s.logger.Debug("agent_delivery recovery remains required", fields...)
 		return
 	}
 	s.logger.Warn("agent_delivery recovery remains required", fields...)
+}
+
+func deliveryRecoveryRefusalCauseField(refusal error, reason string) (zap.Field, bool) {
+	var required *sessionRecoveryRequiredError
+	switch {
+	case errors.As(refusal, &required) && required.internalCause != nil:
+		return zap.NamedError("cause", required.internalCause), true
+	case refusal == nil:
+		return zap.Field{}, false
+	case reason == agentruntime.DeliveryRecoveryRefusalUnclassified:
+		return zap.Error(refusal), true
+	default:
+		var reasoner agentruntime.DeliveryRecoveryRefusalReasoner
+		if errors.As(refusal, &reasoner) {
+			return zap.NamedError("cause", refusal), true
+		}
+		return zap.Field{}, false
+	}
 }
 
 func deliveryRecoveryRefusalReason(err error) string {

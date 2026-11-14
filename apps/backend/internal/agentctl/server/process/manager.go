@@ -995,7 +995,13 @@ func (m *Manager) createMissingUnknownSubmission(ctx context.Context, deliveryJo
 }
 
 func (m *Manager) retireExistingMissingUnknown(ctx context.Context, deliveryJournal *journal.Journal, existing, requested journal.Submission) error {
-	if !sameMissingUnknownSubmissionIdentity(existing, requested) || existing.State != journal.SubmissionInterruptedUnknown {
+	if !sameMissingUnknownSubmissionIdentity(existing, requested) {
+		return journal.ErrOwnerMismatch
+	}
+	if existing.State != journal.SubmissionInterruptedUnknown {
+		if existing.State == journal.SubmissionPrepared || existing.State == journal.SubmissionDispatching || existing.State == journal.SubmissionAccepted {
+			return journal.ErrSubmissionState
+		}
 		return journal.ErrOwnerMismatch
 	}
 	if existing.Retired {

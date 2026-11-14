@@ -126,12 +126,14 @@ add a recovery policy.
   SQL evidence, and Office-owned recovery; catch-all adoption sentinels no
   longer guess a peer-record reason. SQL generation comparison explicitly
   ignores generation zero. Client errors retain only the recovery-block reason.
+- Review fixes: the work-order test command now selects the identity-less
+  explicit Resume fixture by its exact Go test name.
 
 ## Commands
 
 ```bash
 cd apps/backend
-go test -trimpath -tags fts5 -race ./internal/orchestrator/ -run 'IdentityLess|NativeResume|GenericBlock|Refusal' -count=1
+go test -trimpath -tags fts5 -race ./internal/orchestrator/ -run 'IdentitylessIncidentBlock|IdentityLess|NativeResume|GenericBlock|Refusal' -count=1
 go test -trimpath -tags fts5 -race ./internal/agent/runtime/lifecycle/ -run 'NativeResume|LoadedNative|IdentityLess' -count=1
 go test -trimpath -tags fts5 -race ./internal/agentctl/server/process/ -run 'NativeResume' -count=1
 go test -trimpath -tags fts5 -race ./internal/agentctl/server/api/ -run 'InterruptedRetirement|NativeResumeCanRetireMissing|NativeResumeDoesNotCreateMissing' -count=1

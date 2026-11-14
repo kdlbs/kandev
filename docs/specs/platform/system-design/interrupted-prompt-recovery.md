@@ -135,9 +135,11 @@ harness generation, and every unresolved SQL row for the incarnation at or befor
 that generation is `interrupted_unknown`, Resume must retire those rows through the
 existing authenticated retirement proof and resolve the block. A prepared, accepted
 or dispatching row, a newer generation, or a native identity mismatch keeps it open.
-A peer journal record that is absent for such a row is not live work: the owning
-process is gone and agentctl cannot dispatch an ID it does not hold. Retirement
-writes the record as retired-unknown so the ID stays non-replayable.
+A peer record absent from a successfully validated inventory is eligible only for
+an original SQL `interrupted_unknown` row. Under process-owner dispatch serialization,
+retirement writes a retired-unknown record for that exact ID so it stays non-replayable.
+A present peer record must match ID, session, incarnation, generation, and payload
+hash. Unavailable SQL or journal evidence and present-record mismatches remain blocked.
 
 Every refusal on the boot-ready and explicit Resume paths logs one WARN line with
 session, block ID and a reason from the closed set `live_work`,
