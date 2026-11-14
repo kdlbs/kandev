@@ -1160,7 +1160,7 @@ jobs:
       # every platform.
       - name: Test windows-sensitive packages
         if: matrix.suite == 'native'
-        run: go test -race -v -json -timeout 25m ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/... ./cmd/kandev/... ./cmd/winjob/...
+        run: go test -race -v -json -timeout 25m ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/... ./cmd/kandev/... ./cmd/winjob/... ./internal/common/processidentity/...
 
       - name: Test Windows recovery mode preservation
         if: matrix.suite == 'native'
