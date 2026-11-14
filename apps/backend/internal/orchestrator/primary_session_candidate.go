@@ -8,14 +8,16 @@ import (
 
 // primaryCandidateRank orders sessions for an automatic primary promotion. The
 // ranking prefers a workflow-compatible session, then an unmatched session,
-// then a parked session. Any eligible fallback can retain the primary role.
+// then a parked session. A removal can fall back to a session awaiting recovery;
+// a stop excludes that last rank.
 type primaryCandidateRank int
 
 const (
-	// primaryCandidateParked is a session a profile switch parked. It stays
-	// available for its own conversation, but an automatic promotion reaches
-	// for it last.
-	primaryCandidateParked primaryCandidateRank = iota
+	// primaryCandidateAwaitingRecovery is available only as a removal fallback.
+	primaryCandidateAwaitingRecovery primaryCandidateRank = iota
+	// primaryCandidateParked stays available after workflow parking, ahead of
+	// sessions awaiting recovery but below every other healthy candidate.
+	primaryCandidateParked
 	// primaryCandidateOther is a session whose profile is not the current
 	// step's effective profile.
 	primaryCandidateOther
@@ -66,9 +68,11 @@ func (s *Service) effectiveWorkflowProfileForTask(ctx context.Context, task *mod
 // Terminal sessions are never candidates. activeOnly keeps each caller's
 // eligibility: maybePromotePrimary passes true, so only an active session can
 // inherit the role after a stop; promoteNextPrimaryAfterRemoval passes false,
-// so any nonterminal session can inherit it after a deletion.
+// so any nonterminal session can inherit it after a deletion. Stop promotions
+// exclude sessions awaiting recovery; removal promotions rank them last.
 func (s *Service) bestPrimarySessionCandidate(
-	ctx context.Context, taskID string, sessions []*models.TaskSession, excludeSessionID string, activeOnly bool,
+	ctx context.Context, taskID string, sessions []*models.TaskSession, excludeSessionID string,
+	activeOnly, excludeAwaitingRecovery bool,
 ) string {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
@@ -88,11 +92,9 @@ func (s *Service) bestPrimarySessionCandidate(
 		if activeOnly && !isActiveSessionState(session.State) {
 			continue
 		}
-		rank := primaryCandidateOther
-		if _, parked := models.LoadWorkflowParking(session.Metadata); parked {
-			rank = primaryCandidateParked
-		} else if workflowCompatibleSession(task, session, effectiveProfileID) {
-			rank = primaryCandidateCompatible
+		rank := s.rankPrimarySessionCandidate(ctx, task, session, effectiveProfileID)
+		if excludeAwaitingRecovery && rank == primaryCandidateAwaitingRecovery {
+			continue
 		}
 		state := sessionStatePreference(session.State)
 		if best == nil || rank > bestRank || (rank == bestRank && state > bestState) {
@@ -103,4 +105,21 @@ func (s *Service) bestPrimarySessionCandidate(
 		return ""
 	}
 	return best.ID
+}
+
+// rankPrimarySessionCandidate keeps recovery availability ahead of workflow
+// preference while preserving the existing ordering among healthy sessions.
+func (s *Service) rankPrimarySessionCandidate(
+	ctx context.Context, task *models.Task, session *models.TaskSession, effectiveProfileID string,
+) primaryCandidateRank {
+	if s.sessionAwaitsRecoveryAction(ctx, session) {
+		return primaryCandidateAwaitingRecovery
+	}
+	if _, parked := models.LoadWorkflowParking(session.Metadata); parked {
+		return primaryCandidateParked
+	}
+	if workflowCompatibleSession(task, session, effectiveProfileID) {
+		return primaryCandidateCompatible
+	}
+	return primaryCandidateOther
 }
