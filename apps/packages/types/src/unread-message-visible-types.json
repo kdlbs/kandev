@@ -12,5 +12,6 @@
   "thinking",
   "todo",
   "script_execution",
-  "agent_plan"
+  "agent_plan",
+  "agent_question_request"
 ]

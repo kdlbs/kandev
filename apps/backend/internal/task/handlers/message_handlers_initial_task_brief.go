@@ -52,7 +52,7 @@ func (h *MessageHandlers) prepareInitialTaskBriefCandidate(
 	candidateContent = orchestrator.AppendEntityReferenceContext(candidateContent, req.EntityReferences)
 	candidateContent = h.injectMessageContext(
 		ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner,
-		req.includeCanvasGuidance, candidateContent, candidateTrustedPromptContext,
+		req.includeCanvasGuidance, req.asyncQuestionsSupported, candidateContent, candidateTrustedPromptContext,
 	)
 	return &admission.InitialTaskBriefCandidate{
 		DescriptionSnapshot:      task.Description,

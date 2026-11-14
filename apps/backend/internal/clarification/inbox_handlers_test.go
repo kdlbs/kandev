@@ -103,15 +103,17 @@ type fakeInboxBundleStore struct {
 	page    *taskmodels.ClarificationBundlePage
 	listErr error
 
-	lastOpts taskmodels.ListClarificationBundlesOptions
+	lastOpts      taskmodels.ListClarificationBundlesOptions
+	lastCountOpts taskmodels.ListClarificationBundlesOptions
 
 	upsertErr error
 	deleteErr error
 	upserted  []sidecarUpsertCall
 	deleted   []string
 
-	summary    taskmodels.ClarificationInboxHiddenSummary
-	summaryErr error
+	summary      taskmodels.ClarificationInboxHiddenSummary
+	summaryErr   error
+	visibleCount *int
 
 	states    map[string]taskmodels.ClarificationInboxHiddenBundle
 	statesErr error
@@ -162,6 +164,22 @@ func (f *fakeInboxBundleStore) DeleteClarificationInboxSidecar(_ context.Context
 	}
 	f.deleted = append(f.deleted, pendingID)
 	return nil
+}
+
+func (f *fakeInboxBundleStore) CountVisibleClarificationBundles(
+	_ context.Context, opts taskmodels.ListClarificationBundlesOptions,
+) (int, error) {
+	f.lastCountOpts = opts
+	if f.listErr != nil {
+		return 0, f.listErr
+	}
+	if f.visibleCount != nil {
+		return *f.visibleCount, nil
+	}
+	if f.page == nil {
+		return 0, nil
+	}
+	return len(f.page.Bundles), nil
 }
 
 func (f *fakeInboxBundleStore) CountHiddenClarificationBundles(

@@ -27,18 +27,18 @@ func TestInboxBootSummary_UsesBundleCountAndHiddenSummary(t *testing.T) {
 	if count != 2 {
 		t.Errorf("count = %d, want 2 (len(page.Bundles), not the hidden-filtered view count)", count)
 	}
-	if !hasMore {
-		t.Error("hasMore = false, want true from page.HasMore")
+	if hasMore {
+		t.Error("hasMore = true, want false when the total count fits the page bound")
 	}
 	if nextSnoozeExpiry == nil || !nextSnoozeExpiry.Equal(testInboxNow) {
 		t.Errorf("nextSnoozeExpiry = %v, want %v", nextSnoozeExpiry, testInboxNow)
 	}
 
-	if bundles.lastOpts.WorkspaceID != "workspace-1" || bundles.lastOpts.Limit != defaultInboxLimit {
+	if bundles.lastCountOpts.WorkspaceID != "workspace-1" || bundles.lastCountOpts.Limit != defaultInboxLimit {
 		t.Errorf("list opts = %+v, want workspace-1 at the default limit (AC .40: same bound as the list endpoint)", bundles.lastOpts)
 	}
-	if bundles.lastOpts.Sidecar == nil || bundles.lastOpts.Sidecar.UserID != "user-1" || bundles.lastOpts.Sidecar.Only {
-		t.Errorf("sidecar filter = %+v, want the main-read exclusion filter for user-1", bundles.lastOpts.Sidecar)
+	if bundles.lastCountOpts.Sidecar == nil || bundles.lastCountOpts.Sidecar.UserID != "user-1" || bundles.lastCountOpts.Sidecar.Only {
+		t.Errorf("sidecar filter = %+v, want the main-read exclusion filter for user-1", bundles.lastCountOpts.Sidecar)
 	}
 }
 

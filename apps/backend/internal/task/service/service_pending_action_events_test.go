@@ -97,6 +97,65 @@ func TestPublishMessageEventPublishesCompactPendingActionReplacement(t *testing.
 	}
 }
 
+func TestAsyncQuestionWaitPublishesPendingActionTransitions(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	turnID := setupTestTurn(t, repo, sessionID, "task-123", "turn-async-question")
+	question, _, err := repo.CreateAsyncQuestion(ctx, &models.AsyncQuestion{
+		ID: "question-projection", TaskID: "task-123", WorkspaceID: "ws-1",
+		SessionID: sessionID, TurnID: turnID, Recipient: models.AsyncQuestionRecipientUser,
+		RetryKey: "question-projection", PayloadDigest: "question-projection-digest",
+	}, nil)
+	if err != nil {
+		t.Fatalf("create async question: %v", err)
+	}
+	wait, err := repo.CreateAsyncQuestionWait(ctx, &models.AsyncQuestionWait{
+		WorkspaceID: "ws-1", TaskID: "task-123", SessionID: sessionID, TurnID: turnID,
+		DependencyIDs: []string{question.ID}, Status: models.AsyncQuestionWaitParked,
+	})
+	if err != nil {
+		t.Fatalf("create parked gate: %v", err)
+	}
+	eventBus.ClearEvents()
+	if err := svc.AsyncQuestionWaitChanged(ctx, "task-123", sessionID); err != nil {
+		t.Fatalf("publish parked gate: %v", err)
+	}
+	assertAsyncQuestionPendingActionEvent(t, eventBus.GetPublishedEvents(), "clarification")
+
+	if err := repo.SetAsyncQuestionWaitStatus(ctx, wait.ID, models.AsyncQuestionWaitReleased, "answered"); err != nil {
+		t.Fatalf("release gate: %v", err)
+	}
+	eventBus.ClearEvents()
+	if err := svc.AsyncQuestionWaitChanged(ctx, "task-123", sessionID); err != nil {
+		t.Fatalf("publish released gate: %v", err)
+	}
+	assertAsyncQuestionPendingActionEvent(t, eventBus.GetPublishedEvents(), nil)
+}
+
+func assertAsyncQuestionPendingActionEvent(t *testing.T, published []*bus.Event, expected interface{}) {
+	t.Helper()
+	for _, event := range published {
+		if event.Type != events.SessionPendingActionChanged {
+			continue
+		}
+		data, ok := event.Data.(map[string]interface{})
+		if !ok {
+			t.Fatalf("pending-action event data type = %T", event.Data)
+		}
+		if data["pending_action"] != expected {
+			t.Fatalf("pending_action = %#v, want %#v", data["pending_action"], expected)
+		}
+		revision, ok := data["pending_action_revision"].(models.PendingActionRevision)
+		if !ok || revision.Epoch == "" || revision.Sequence == 0 {
+			t.Fatalf("pending-action revision = %#v", data["pending_action_revision"])
+		}
+		return
+	}
+	t.Fatal("pending-action transition did not publish a compact event")
+}
+
 func TestPublishMessageEventSuppressesUnchangedCompactPendingAction(t *testing.T) {
 	const compactEventType = "session.pending_action_changed"
 	svc, eventBus, repo := createTestService(t)

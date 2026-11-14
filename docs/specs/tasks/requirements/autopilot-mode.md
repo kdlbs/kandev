@@ -68,7 +68,10 @@ autopilot mode and must:
   materially change the requested outcome;
 - never ask the operator directly;
 - when a direct parent exists, call `ask_parent_question_kandev` only as the last
-  action of the turn, then end the turn immediately;
+  action of the turn, then end the turn immediately, unless the call sets
+  `async: true`: then the child keeps working and reads the answer with
+  `list_question_answers_kandev`; an explicit
+  `wait_for_question_answers_kandev` is the only action that parks the turn;
 - when no parent exists, proceed with best judgment and disclose material
   assumptions in its eventual result.
 

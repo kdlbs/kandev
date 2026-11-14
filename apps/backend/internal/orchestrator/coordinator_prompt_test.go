@@ -40,7 +40,7 @@ func TestWrapCreatedSessionPrompt_CoordinatorStandingInstructions(t *testing.T) 
 
 		got := svc.wrapCreatedSessionPrompt(
 			ctx, "hello coordinator", "task", "session", session, dbTask,
-			false, false, false, false, nil, "",
+			false, false, false, false, false, nil, "",
 		)
 
 		assert.Equal(t, "coord-1", gotCoordinatorID)
@@ -58,7 +58,7 @@ func TestWrapCreatedSessionPrompt_CoordinatorStandingInstructions(t *testing.T) 
 		svc := &Service{}
 		got := svc.wrapCreatedSessionPrompt(
 			ctx, "hello coordinator", "task", "session", session, dbTask,
-			false, false, false, false, nil, "",
+			false, false, false, false, false, nil, "",
 		)
 		assert.Equal(t, "hello coordinator", got)
 	})
@@ -76,7 +76,7 @@ func TestWrapCreatedSessionPrompt_CoordinatorStandingInstructions(t *testing.T) 
 		)
 		got := svc.wrapCreatedSessionPrompt(
 			ctx, "hello coordinator", "task", "session", session, dbTask,
-			false, false, false, false, nil, "",
+			false, false, false, false, false, nil, "",
 		)
 		assert.Equal(t, "hello coordinator", got)
 	})
@@ -92,7 +92,7 @@ func TestWrapCreatedSessionPrompt_CoordinatorStandingInstructions(t *testing.T) 
 		)
 		got := svc.wrapCreatedSessionPrompt(
 			ctx, "hello coordinator", "task", "session", session, dbTask,
-			false, false, false, false, nil, "",
+			false, false, false, false, false, nil, "",
 		)
 		assert.Equal(t, "hello coordinator", got)
 	})

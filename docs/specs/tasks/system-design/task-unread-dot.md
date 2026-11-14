@@ -39,7 +39,7 @@ A message qualifies as unread-capable when all of these hold:
   does), is in the transcript-visible set (`VISIBLE_MESSAGE_TYPES` in
   `apps/web/hooks/processed-message-filtering.ts`: message, content, tool
   calls and variants, progress, status, error, thinking, todo,
-  script_execution, agent_plan).
+  script_execution, agent_plan, agent_question_request).
 - It is not a setup-script row (`script_execution` with
   `metadata.script_type == "setup"`).
 - It is not a subagent child (`metadata.parent_tool_call_id` set).

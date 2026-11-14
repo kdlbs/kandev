@@ -299,6 +299,9 @@ func (r *Repository) deleteWorkspaceCascade(
 	if err := r.purgeWorkspaceTaskQueuesInTx(ctx, tx, tasks); err != nil {
 		return nil, nil, err
 	}
+	if err := r.purgeWorkspaceAsyncQuestionRowsTx(ctx, tx, id); err != nil {
+		return nil, nil, fmt.Errorf("purge workspace async questions: %w", err)
+	}
 	if cleanup != nil {
 		if err := cleanup(ctx, tx); err != nil {
 			return nil, nil, fmt.Errorf("workspace secret cleanup: %w", err)
@@ -345,6 +348,44 @@ func (r *Repository) deleteWorkspaceCascade(
 		r.notifyTaskQueuePurged(ctx, task.ID)
 	}
 	return tasks, workflows, nil
+}
+
+func (r *Repository) purgeWorkspaceAsyncQuestionRowsTx(ctx context.Context, tx *sqlx.Tx, workspaceID string) error {
+	taskIDs := `SELECT id FROM tasks WHERE workspace_id = ?`
+	questionIDs := `SELECT id FROM task_async_questions WHERE workspace_id = ? OR task_id IN (` + taskIDs + `)`
+	waitIDs := `SELECT id FROM task_async_question_waits WHERE workspace_id = ? OR task_id IN (` + taskIDs + `)`
+	queries := []struct {
+		query string
+		args  []any
+	}{
+		{
+			query: `DELETE FROM task_async_question_wait_dependencies
+				WHERE wait_id IN (` + waitIDs + `) OR question_id IN (` + questionIDs + `)`,
+			args: []any{workspaceID, workspaceID, workspaceID, workspaceID},
+		},
+		{
+			query: `DELETE FROM task_async_question_waits WHERE workspace_id = ? OR task_id IN (` + taskIDs + `)`,
+			args:  []any{workspaceID, workspaceID},
+		},
+		{
+			query: `DELETE FROM task_async_question_deliveries WHERE question_id IN (` + questionIDs + `)`,
+			args:  []any{workspaceID, workspaceID},
+		},
+		{
+			query: `DELETE FROM task_async_question_forwards WHERE question_id IN (` + questionIDs + `)`,
+			args:  []any{workspaceID, workspaceID},
+		},
+		{
+			query: `DELETE FROM task_async_questions WHERE workspace_id = ? OR task_id IN (` + taskIDs + `)`,
+			args:  []any{workspaceID, workspaceID},
+		},
+	}
+	for _, statement := range queries {
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(statement.query), statement.args...); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *Repository) purgeWorkspaceTaskQueuesInTx(ctx context.Context, tx *sqlx.Tx, tasks []*models.Task) error {

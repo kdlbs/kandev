@@ -1,7 +1,10 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sessionId as toSessionId, taskId as toTaskId } from "@/lib/types/http";
-import type { ClarificationInboxBundle } from "@/lib/types/clarification-inbox";
+import type {
+  ClarificationInboxAsyncQuestion,
+  ClarificationInboxBundle,
+} from "@/lib/types/clarification-inbox";
 import type { FailedInboxRow as FailedInboxRowData } from "@/lib/types/failed-inbox";
 
 const mocks = vi.hoisted(() => ({
@@ -14,10 +17,12 @@ const mocks = vi.hoisted(() => ({
 const EMPTY_TESTID = "needs-you-inbox-empty";
 const ERROR_TESTID = "needs-you-inbox-error";
 const HISTORY_TAB_TESTID = "inbox-tab-history";
+const CHECKOUT_TITLE = "Checkout integration";
 
 let needsYouState: {
   status: "idle" | "loading" | "ready" | "error";
   bundles: ClarificationInboxBundle[];
+  asyncQuestions?: ClarificationInboxAsyncQuestion[];
   hiddenCount: number;
   hasMore: boolean;
   appliedGeneration?: number;
@@ -98,6 +103,12 @@ vi.mock("@/components/needs-you-inbox/needs-you-inbox-row", () => ({
   ),
 }));
 
+vi.mock("@/components/needs-you-inbox/async-question-row", () => ({
+  AsyncQuestionRow: ({ question }: { question: ClarificationInboxAsyncQuestion }) => (
+    <div data-testid="stub-async-row">{question.question_id}</div>
+  ),
+}));
+
 vi.mock("@/components/needs-you-inbox/needs-you-inbox-hidden-panel", () => ({
   NeedsYouInboxHiddenPanel: ({ hiddenCount }: { hiddenCount: number }) => (
     <div data-testid="stub-hidden-panel">{hiddenCount}</div>
@@ -117,6 +128,22 @@ vi.mock("@/hooks/use-late-clarification-message", () => ({
 }));
 
 import { NeedsYouInboxPageClient } from "./needs-you-inbox-page-client";
+
+function asyncQuestion(id: string, taskTitle: string): ClarificationInboxAsyncQuestion {
+  return {
+    question_id: id,
+    task_id: `task-${taskTitle}`,
+    session_id: "s1",
+    session_state: "RUNNING",
+    task_title: taskTitle,
+    forwarded: false,
+    waiting: false,
+    status: "pending",
+    context: "",
+    created_at: new Date().toISOString(),
+    questions: [],
+  };
+}
 
 function bundle(id: string): ClarificationInboxBundle {
   return {
@@ -427,6 +454,42 @@ describe("NeedsYouInboxPageClient — tab strip", () => {
 
     expect(screen.getAllByTestId("stub-row")).toHaveLength(1);
     expect(screen.queryByTestId("stub-history-list")).toBeNull();
+  });
+
+  it("groups async requests by task and keeps a request count", () => {
+    needsYouState = {
+      status: "ready",
+      bundles: [bundle("p1")],
+      asyncQuestions: [
+        asyncQuestion("aq1", CHECKOUT_TITLE),
+        asyncQuestion("aq2", CHECKOUT_TITLE),
+        asyncQuestion("aq3", "Copy update"),
+      ],
+      hiddenCount: 0,
+      hasMore: false,
+    };
+    render(<NeedsYouInboxPageClient />);
+
+    expect(screen.getAllByTestId("stub-row")).toHaveLength(1);
+    expect(screen.getAllByTestId("stub-async-row")).toHaveLength(3);
+    expect(screen.getAllByTestId("async-question-group")).toHaveLength(2);
+    expect(screen.getAllByTestId("async-question-group-title").map((el) => el.textContent)).toEqual(
+      [CHECKOUT_TITLE, "Copy update"],
+    );
+  });
+
+  it("renders the list, not the empty state, when only async requests exist", () => {
+    needsYouState = {
+      status: "ready",
+      bundles: [],
+      asyncQuestions: [asyncQuestion("aq1", CHECKOUT_TITLE)],
+      hiddenCount: 0,
+      hasMore: false,
+    };
+    render(<NeedsYouInboxPageClient />);
+
+    expect(screen.getAllByTestId("stub-async-row")).toHaveLength(1);
+    expect(screen.queryByTestId(EMPTY_TESTID)).toBeNull();
   });
 
   it("renders History as the second tab and switches content on selection", () => {

@@ -23,7 +23,13 @@ it("loads only active images, with two reads, and revokes blobs on owner change"
   expect(mocks.fetch).not.toHaveBeenCalled();
   rerender({ active: true, owner: "source-session:user" });
   await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(2));
-  expect(mocks.fetch).toHaveBeenCalledWith("bundle", "question", "image1", expect.any(AbortSignal));
+  expect(mocks.fetch).toHaveBeenCalledWith(
+    "bundle",
+    "question",
+    "image1",
+    expect.any(AbortSignal),
+    "clarification",
+  );
   await act(async () => pending[0](new Blob(["png"], { type: "image/png" })));
   await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(3));
   expect(result.current.states.image1.kind).toBe("loaded");

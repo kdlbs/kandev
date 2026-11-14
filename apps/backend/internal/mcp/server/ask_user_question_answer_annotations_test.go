@@ -49,7 +49,18 @@ func TestExtractQuestionAnswerAnnotations(t *testing.T) {
 func TestAskUserQuestionOutputSchemaAllowsAnnotations(t *testing.T) {
 	var schema map[string]any
 	require.NoError(t, json.Unmarshal([]byte(askUserQuestionOutputSchema), &schema))
-	answer := schema["additionalProperties"].(map[string]any)
+	branches, ok := schema["oneOf"].([]any)
+	require.True(t, ok, "output schema must distinguish async receipts from blocking answers")
+	var answerBranch map[string]any
+	for _, rawBranch := range branches {
+		branch, ok := rawBranch.(map[string]any)
+		require.True(t, ok)
+		if _, ok := branch["additionalProperties"]; ok {
+			answerBranch = branch
+		}
+	}
+	require.NotNil(t, answerBranch, "blocking answer schema branch must be present")
+	answer := answerBranch["additionalProperties"].(map[string]any)
 	annotations, ok := answer["properties"].(map[string]any)["annotations"].(map[string]any)
 	require.True(t, ok, "annotations must be an allowed answer key")
 	item := annotations["items"].(map[string]any)

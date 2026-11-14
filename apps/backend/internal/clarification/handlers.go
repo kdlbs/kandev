@@ -203,6 +203,7 @@ type Handlers struct {
 	// never read them.
 	inboxTasks   inboxTaskService
 	inboxBundles inboxBundleStore
+	inboxAsync   inboxAsyncQuestionReader
 	// now always returns a UTC instant. The sidecar's snooze_until is
 	// persisted and compared as SQLite TEXT (mattn/go-sqlite3 formats a
 	// time.Time with whatever offset it carries), so a non-UTC value here
@@ -238,6 +239,12 @@ func NewHandlers(
 	}
 }
 
+// SetAsyncQuestionReader wires the additive async population the Needs-you
+// Inbox merges into its bounded read and count.
+func (h *Handlers) SetAsyncQuestionReader(reader inboxAsyncQuestionReader) {
+	h.inboxAsync = reader
+}
+
 // RegisterRoutes registers clarification HTTP routes. needsYouInboxEnabled
 // gates only the /api/v1/clarification-inbox group: the original
 // /api/v1/clarification routes stay unconditional, matching every agent's
@@ -255,7 +262,7 @@ func RegisterRoutes(
 	inboxBundles inboxBundleStore,
 	needsYouInboxEnabled bool,
 	imageReaders ...QuestionImageReader,
-) {
+) *Handlers {
 	h := NewHandlers(store, hub, messageCreator, repo, eventBus, resolver, log, inboxTasks, inboxBundles)
 	if len(imageReaders) > 0 {
 		h.imageReader = imageReaders[0]
@@ -276,6 +283,7 @@ func RegisterRoutes(
 		inbox.PUT("/sidecar/:pendingID", h.httpUpsertInboxSidecar)
 		inbox.DELETE("/sidecar/:pendingID", h.httpDeleteInboxSidecar)
 	}
+	return h
 }
 
 // CreateRequestBody is the request body for creating a clarification request.

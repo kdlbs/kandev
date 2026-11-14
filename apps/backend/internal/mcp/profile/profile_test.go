@@ -15,6 +15,24 @@ func TestLegacyTaskTitleProfile(t *testing.T) {
 	}
 }
 
+func TestLegacyTaskProfileSupportsAsyncQuestions(t *testing.T) {
+	ctx := Legacy("task", false, nil)
+	if !ctx.HasCapability(CapabilityAsyncQuestions) {
+		t.Fatalf("task capabilities = %#v, want async questions", ctx.Capabilities)
+	}
+}
+
+func TestLegacyNonTaskProfilesDoNotSupportAsyncQuestions(t *testing.T) {
+	for _, mode := range []string{"office", "config", "external", "automation"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := Legacy(mode, false, nil)
+			if ctx.HasCapability(CapabilityAsyncQuestions) {
+				t.Fatalf("%s capabilities = %#v, want no async questions", mode, ctx.Capabilities)
+			}
+		})
+	}
+}
+
 func TestAutopilotQuestionCapabilitiesCanBeSwapped(t *testing.T) {
 	ctx := New(SurfaceKanbanTask, []Capability{CapabilityParentQuestion}, nil)
 	if !ctx.HasCapability(CapabilityParentQuestion) {

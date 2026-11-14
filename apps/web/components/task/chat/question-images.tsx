@@ -17,6 +17,7 @@ type Props = {
   images?: QuestionImage[];
   historical?: boolean;
   enabled?: boolean;
+  apiPath?: string;
   onInspectionChange?: (open: boolean) => void;
 };
 
@@ -61,6 +62,7 @@ function QuestionImagesContent(props: Props) {
     images,
     active,
     owner,
+    props.apiPath,
   );
   if (props.images === undefined || (Array.isArray(props.images) && props.images.length === 0))
     return null;

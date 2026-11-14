@@ -214,10 +214,10 @@ func TestBootNeedsYouInbox_FlagOnWithBundles_SeedsRealCounts(t *testing.T) {
 		t.Fatal("needsYouInboxBoot absent, want it present once the flag is on and a workspace resolves")
 	}
 	boot := decoded.NeedsYouInboxBoot
-	// defaultInboxLimit answerable bundles are visible; the snoozed one is
-	// hidden from the count but still owns the earliest snooze expiry.
-	if boot.Count != defaultInboxLimit {
-		t.Errorf("count = %d, want %d (bounded page of the answerable bundles)", boot.Count, defaultInboxLimit)
+	// The count is the total answerable population, not the bounded page; the
+	// snoozed one is hidden from it but still owns the earliest snooze expiry.
+	if boot.Count != defaultInboxLimit+1 {
+		t.Errorf("count = %d, want the total %d", boot.Count, defaultInboxLimit+1)
 	}
 	if !boot.HasMore {
 		t.Error("hasMore = false, want true: more answerable bundles exist beyond the bounded page")

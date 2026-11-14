@@ -2761,6 +2761,9 @@ func (s *Service) ClaimSendNow(ctx context.Context, sessionID string, expected [
 	var claim *SendNowClaim
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		for _, entry := range expected {
+			if entry.IsAsyncQuestionNotification() {
+				return ErrAsyncQuestionNotSendable
+			}
 			if s.editLeaseBlocksEntryLocked(sessionID, entry.ID) {
 				return ErrEditConflict
 			}
@@ -2791,6 +2794,11 @@ func (s *Service) ClaimSendNow(ctx context.Context, sessionID string, expected [
 func (s *Service) ClaimSendNowForSession(ctx context.Context, identity QueueSessionIdentity, expected []QueuedMessage) (*SendNowClaim, error) {
 	var claim *SendNowClaim
 	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		for _, entry := range expected {
+			if entry.IsAsyncQuestionNotification() {
+				return ErrAsyncQuestionNotSendable
+			}
+		}
 		var err error
 		claim, err = s.repo.ClaimSendNowForSession(admittedCtx, identity, expected)
 		return err

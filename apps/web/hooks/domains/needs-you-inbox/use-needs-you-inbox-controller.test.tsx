@@ -158,6 +158,7 @@ describe("useNeedsYouInboxController", () => {
     act(() => {
       emitWsEvent(SESSION_STATE_CHANGED);
       emitWsEvent("session.pending_action_changed");
+      emitWsEvent("task.question.changed");
       result.current.getState().bumpNeedsYouInboxRefreshTick();
       window.dispatchEvent(new Event("focus"));
       window.dispatchEvent(new Event("online"));
@@ -514,6 +515,7 @@ describe("useNeedsYouInboxController WS event coalescing", () => {
     act(() => {
       emitWsEvent(SESSION_STATE_CHANGED);
       emitWsEvent("session.pending_action_changed");
+      emitWsEvent("task.question.changed");
       emitWsEvent(SESSION_STATE_CHANGED);
     });
     await act(async () => {

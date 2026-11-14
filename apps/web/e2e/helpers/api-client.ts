@@ -3209,6 +3209,8 @@ export class ApiClient {
     description?: string;
     autopilot?: boolean;
     primary_session_id?: string | null;
+    primary_session_pending_action?: string | null;
+    task_pending_action?: string | null;
     primary_executor_type?: string | null;
     state?: string;
     workflow_step_id?: string;
