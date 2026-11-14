@@ -1480,7 +1480,19 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		}
 	}
 	stopWatch.advance(stopWaitAgentctl)
-	agentStopFailed := m.stopExecutionAgentctl(stopCtx, executionID, execution, backendForce)
+	agentctlStopCtx := stopCtx
+	stopAgentctlForce := backendForce
+	if reason == StopReasonAgentBootstrapFailed && execution.replacesPredecessorGeneration() &&
+		execution.DeliveryHarnessGeneration >= 2 && m.streamManager != nil {
+		// The bootstrap stream can be abandoned only after its process has
+		// stopped. Bound the stop request so a forced runtime teardown remains
+		// available if the agentctl endpoint does not respond.
+		var cancelAgentctlStop context.CancelFunc
+		agentctlStopCtx, cancelAgentctlStop = context.WithTimeout(stopCtx, 5*time.Second)
+		defer cancelAgentctlStop()
+		stopAgentctlForce = false
+	}
+	agentStopFailed := m.stopExecutionAgentctl(agentctlStopCtx, executionID, execution, stopAgentctlForce)
 	// A preserved runtime must not fall through to the executor's
 	// AgentStopFailed cleanup, which stops the container and can turn a
 	// recoverable failure into loss of the workspace. Keep the execution and

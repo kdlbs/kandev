@@ -11,6 +11,7 @@ requirements:
 acceptance_criteria:
   - AC-AGENTS-HARNESS-SESSION-CONTINUITY-002.1
 system_design:
+  - ../../specs/agents/system-design/harness-session-continuity.md
   - ../../specs/platform/system-design/durable-agent-stream-processing.md
 ---
 

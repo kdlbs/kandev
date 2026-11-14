@@ -5,6 +5,7 @@ requirements:
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006
   - REQ-AGENTS-HARNESS-SESSION-CONTINUITY-002
 system_design:
+  - ../../specs/agents/system-design/harness-session-continuity.md
   - ../../specs/platform/system-design/interrupted-prompt-recovery.md
   - ../../specs/platform/system-design/durable-agent-stream-processing.md
 legacy_specs: []

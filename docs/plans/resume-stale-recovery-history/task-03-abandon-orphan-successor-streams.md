@@ -70,9 +70,8 @@ committed generation, an SQL cursor, or a live owner.
 ## Commands
 
 ```bash
-cd apps/backend
-go test -trimpath -tags fts5 -race ./internal/agent/runtime/lifecycle/ -run 'OrphanStream|NativeResume|Continuation' -count=1
-go test -trimpath -tags fts5 ./internal/agentctl/journal/ ./internal/agentctl/server/process/ ./internal/agentctl/server/api/ -count=1
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/agent/runtime/lifecycle/ -run 'OrphanStream|NativeResume|Continuation' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/agentctl/journal/ ./internal/agentctl/server/process/ ./internal/agentctl/server/api/ -count=1)
 make -C apps/backend build
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
