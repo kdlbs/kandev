@@ -19,6 +19,7 @@ acceptance_criteria:
   - AC-SSH-TASKDIR-RECLAMATION-002.10
   - AC-SSH-TASKDIR-RECLAMATION-002.11
   - AC-SSH-TASKDIR-RECLAMATION-002.12
+  - AC-SSH-TASKDIR-RECLAMATION-002.13
   - AC-SSH-TASKDIR-RECLAMATION-006.1
   - AC-SSH-TASKDIR-RECLAMATION-006.2
 system_design:
@@ -140,6 +141,10 @@ different linked-worktree and standalone-clone checks, preservation limits, the
 Git capability requirement, and the absence of an orphan sweep. The requirements,
 system design, and implementation results match the delivered behavior. The
 historical package remains linked as the earlier record.
+
+CodeRabbit review follow-up also states that nested repositories stay on disk,
+sets Git 2.36 as the minimum for the complete reclamation probe set, and makes
+ignored-file deletion visible in operations guidance.
 
 Checks passed:
 

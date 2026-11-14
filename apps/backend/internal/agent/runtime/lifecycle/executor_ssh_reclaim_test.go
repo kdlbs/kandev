@@ -3,13 +3,13 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// fakeSSHRunner answers recorded command outputs. Every test in this file
-// drives the reclaimer through it, so no test opens an SSH connection and no
-// test can remove anything from the machine running the suite.
+// fakeSSHRunner answers recorded command outputs so unit tests avoid an SSH connection.
 type fakeSSHRunner struct {
 	responses map[string]fakeSSHResponse
 	fallback  *fakeSSHResponse
@@ -289,7 +289,7 @@ func TestSSHTaskDirReclaimProbeInspectsChildRepositories(t *testing.T) {
 	childB := testTaskDir + "/web-main"
 
 	f := newFakeSSHRunner()
-	f.on(sshReclaimChildReposCmd(testTaskDir), childA+"/.git\n"+childB+"/.git\n")
+	f.on(sshReclaimChildReposCmd(testTaskDir), childA+"/.git\x00"+childB+"/.git\x00")
 	cleanCheckout(f, testTaskDir)
 	cleanCheckout(f, childA)
 	cleanCheckout(f, childB)
@@ -315,7 +315,7 @@ func TestSSHTaskDirReclaimProbeInspectsChildRepositories(t *testing.T) {
 
 func TestSSHTaskDirReclaimProbeRejectsUnexpectedChildEntry(t *testing.T) {
 	f := safeSingleRepoRunner()
-	f.on(sshReclaimChildReposCmd(testTaskDir), testTaskDir+"/not-a-git-entry\n")
+	f.on(sshReclaimChildReposCmd(testTaskDir), testTaskDir+"/not-a-git-entry\x00")
 
 	verdict := newTestReclaimer(f).probe(context.Background(), testTaskDir)
 	if verdict.Safe {
@@ -323,6 +323,39 @@ func TestSSHTaskDirReclaimProbeRejectsUnexpectedChildEntry(t *testing.T) {
 	}
 	if verdict.Reason != SSHReclaimSkipProbeFailed {
 		t.Fatalf("probe reason = %q, want %q", verdict.Reason, SSHReclaimSkipProbeFailed)
+	}
+}
+
+func TestSSHTaskDirReclaimGitPreservesIgnoredNestedRepository(t *testing.T) {
+	fixture := newSSHReclaimGitFixture(t)
+	base := filepath.Dir(fixture.profileRoot)
+	ignoreFile := filepath.Join(base, "global-gitignore")
+	if err := os.WriteFile(ignoreFile, []byte("/cache/\n"), 0o600); err != nil {
+		t.Fatalf("write global Git ignore file: %v", err)
+	}
+	fixtureGit(t, fixture.taskDir, "config", "core.excludesFile", ignoreFile)
+
+	nestedRepo := filepath.Join(fixture.taskDir, "cache", "private")
+	fixtureGit(t, base, "init", "--initial-branch=main", nestedRepo)
+	configureFixtureGitIdentity(t, nestedRepo)
+	writeFixtureFile(t, filepath.Join(nestedRepo, "README.md"), "unpublished nested work")
+	fixtureGit(t, nestedRepo, "add", "README.md")
+	fixtureGit(t, nestedRepo, "commit", "-m", "unpublished nested work")
+
+	if got := fixtureGit(t, fixture.taskDir, "status", "--porcelain", "--untracked-files=all", "--ignored=no"); got != "" {
+		t.Fatalf("parent checkout status = %q, want ignored nested repository to be hidden", got)
+	}
+	if got := fixtureGit(t, nestedRepo, "rev-list", "--count", "HEAD", "--branches", "--not", "--remotes"); got != "1" {
+		t.Fatalf("nested unpublished commit count = %q, want 1", got)
+	}
+
+	outcome, verdict, err := newTestReclaimer(fixture.runner).Reclaim(t.Context(), fixture.profileRoot, fixture.taskDir)
+	assertReclaimResult(t, fixture, outcome, verdict, err, SSHReclaimOutcomeSkipped, SSHReclaimSkipProbeFailed)
+	if !strings.Contains(verdict.Detail, "nested repository") {
+		t.Fatalf("skip detail = %q, want nested repository explanation", verdict.Detail)
+	}
+	if commandIndex(fixture.runner.commands, "worktree remove", "") >= 0 || commandIndex(fixture.runner.commands, "rm -rf", "") >= 0 {
+		t.Fatalf("unsupported nested repository issued a removal command: %v", fixture.runner.commands)
 	}
 }
 
@@ -334,7 +367,7 @@ func TestSSHTaskDirReclaimProbeIsReadOnly(t *testing.T) {
 			t.Fatalf("Git probe did not disable optional locks: %q", call)
 		}
 	}
-	for _, forbidden := range []string{"fetch", "push", "prune", " gc", "reset", "clean", "rm ", "checkout"} {
+	for _, forbidden := range []string{"fetch", "push", " prune", " gc", "reset", "clean", "rm ", "checkout"} {
 		if f.ranAny(forbidden) {
 			t.Fatalf("probe ran a mutating command containing %q: %v", forbidden, f.calls)
 		}

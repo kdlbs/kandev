@@ -29,6 +29,7 @@ acceptance_criteria:
   - AC-SSH-TASKDIR-RECLAMATION-002.10
   - AC-SSH-TASKDIR-RECLAMATION-002.11
   - AC-SSH-TASKDIR-RECLAMATION-002.12
+  - AC-SSH-TASKDIR-RECLAMATION-002.13
   - AC-SSH-TASKDIR-RECLAMATION-003.4
   - AC-SSH-TASKDIR-RECLAMATION-004.1
   - AC-SSH-TASKDIR-RECLAMATION-004.2
@@ -68,6 +69,8 @@ with focused regression coverage.
 - Use the design's absolute path-format command and physical path comparisons.
   Cover a symlinked profile root and rejection of unsupported option output.
 - Preserve standalone clones with additional worktrees and unsupported layouts.
+- Find nested repository entries at any depth and preserve the task directory
+  when a checkout is embedded below the supported root or direct-child layout.
 - Read worktree inventory for both checkout kinds. Preserve known locks as
   safety skips with `shared` and a lock-specific detail.
 - Preserve every checkout with registered submodules as an unsupported-layout
@@ -194,4 +197,22 @@ failures before the shared fixture configuration supplied it.
 
 - `(cd apps/backend && go test -race ./internal/agent/runtime/lifecycle -run '^TestSSHTaskDirReclaimGit' -count=1)` — passed, 7.850s.
 - `bash scripts/lint-go-changed apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_git_test.go` — passed, 0 issues.
+- `git diff --check` — passed.
+
+CodeRabbit review follow-up on 2026-11-14 added a real-Git regression for an
+ignored `cache/private` repository with an unpublished commit. It failed before
+the fix because reclamation removed the parent. Discovery now scans `.git`
+entries at any depth and preserves deeper repositories as unsupported. The
+requirements and design record this limit. Public docs now state Git 2.36 as the
+complete reclamation minimum and explain that enabled cleanup can remove ignored
+files, including secrets.
+
+- `(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/agent/runtime/lifecycle -run '^Test(SSHTaskDirReclaim|SSHReclaim|WrapLoginShell|SSHStopInstanceRunsTerminalCleanupBeforeControllerTeardown|IsTaskDirectoryCheckout)' -count=1)` — passed, 14.03s.
+- `python3 scripts/list-docs.py validate` — passed, 451 decisions and 1995 specifications.
+- `python3 scripts/lint-spec-files.test.py` — 36 tests passed; `python3 scripts/lint-spec-files.py --all` — passed.
+- `node --test scripts/validate-public-docs.test.mjs` — 63 tests passed; `node scripts/validate-public-docs.mjs` — 55 pages validated.
+- `(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/agent/runtime/lifecycle -run '^Test(SSHTaskDirReclaim|SSHReclaim|WrapLoginShell|SSHStopInstanceRunsTerminalCleanupBeforeControllerTeardown|IsTaskDirectoryCheckout)' -count=1)` — passed, 8.284s.
+- `bash scripts/lint-go-changed apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim.go apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_test.go apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_git_test.go apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_optin_test.go` — passed, 0 issues.
+- `make -C apps/backend build` — passed for all backend and helper targets. macOS artifacts remain unsigned because codesign/rcodesign are unavailable.
+- The PR-doc coverage preflight against the current PR diff covered both work orders with zero errors.
 - `git diff --check` — passed.

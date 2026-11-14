@@ -32,7 +32,10 @@ preservation. A standalone repository retains checks across all branches and sta
 
 A standalone clone with additional registered worktrees is preserved. Linked
 worktrees need common Git storage outside the entire task directory. Other
-layouts are preserved rather than requiring a general repository-dependency model.
+layouts, including a repository nested below the primary or direct-child
+checkout layout, are preserved rather than requiring a general
+repository-dependency model. Discovery checks `.git` entries at every depth and
+rejects deeper repositories before mutation.
 Narrow checks require Git's linked-worktree identity, not merely a `.git` file.
 Known worktree locks and all registered submodules cause safety skips before
 mutation. No lock override or submodule teardown belongs in this correction.

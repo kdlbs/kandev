@@ -287,25 +287,31 @@ func (r *SSHTaskDirReclaimer) probe(ctx context.Context, taskDir string) SSHRecl
 	return verdict
 }
 
-// discoverCheckouts returns the task directory root plus every direct child
-// holding a .git entry, matching the remote layout the SSH executor creates.
-// An enumeration that cannot run is an error, not an empty list — reporting no
-// children for a directory we could not read would let the root's own verdict
-// speak for repositories we never looked at.
+// discoverCheckouts returns the task directory root plus supported direct-child
+// checkouts. A deeper .git entry makes the layout unsupported. An enumeration
+// that cannot run is an error, not an empty list.
 func (r *SSHTaskDirReclaimer) discoverCheckouts(ctx context.Context, taskDir string) ([]string, error) {
 	out, _, err := r.runner.Run(ctx, sshReclaimChildReposCmd(taskDir))
 	if err != nil {
 		return nil, fmt.Errorf("enumerate child repositories: %w", err)
 	}
 	dirs := []string{taskDir}
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
+	if out != "" && !strings.HasSuffix(out, "\x00") {
+		return nil, errors.New("child repository inventory is unterminated")
+	}
+	for _, entry := range strings.Split(strings.TrimSuffix(out, "\x00"), "\x00") {
+		if entry == "" {
+			if out == "" {
+				continue
+			}
+			return nil, errors.New("child repository inventory contains an empty path")
 		}
-		child, ok := strings.CutSuffix(line, "/.git")
+		child, ok := strings.CutSuffix(entry, "/.git")
 		if !ok {
-			return nil, fmt.Errorf("unexpected child repository entry %q", line)
+			return nil, fmt.Errorf("unexpected child repository entry %q", entry)
+		}
+		if path.Dir(child) != taskDir {
+			return nil, fmt.Errorf("nested repository %q is unsupported", child)
 		}
 		dirs = append(dirs, child)
 	}
@@ -777,7 +783,7 @@ func sshReclaimHomeCmd() string {
 }
 
 func sshReclaimChildReposCmd(taskDir string) string {
-	return "find " + shellQuote(taskDir) + " -mindepth 2 -maxdepth 2 -name .git"
+	return "find " + shellQuote(taskDir) + " -mindepth 2 -name .git -prune -print0"
 }
 
 func sshReclaimIsCheckoutCmd(dir string) string {

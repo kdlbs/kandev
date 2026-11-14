@@ -34,7 +34,9 @@ qualifications on it.
 
 - **Task directory:** the remote directory `<workdir_root>/tasks/<task-dir-name>/`
   that Kandev creates for one task. Its root is the primary repository checkout;
-  additional repositories and branches are direct child directories.
+  the standard SSH layout places additional repositories in direct child
+  directories. Repositories nested below that layout are unsupported for
+  reclamation.
 - **Reclamation:** removing a task directory and everything beneath it from the
   remote host.
 - **Terminal outcome:** a task or session archive, delete, or cascade variant.
@@ -150,6 +152,10 @@ housekeeping can never cost me work.
   registered submodules, initialized or uninitialized, the system shall preserve
   the task directory as an unsupported layout. A clean parent checkout shall
   not override this preservation.
+- **AC-SSH-TASKDIR-RECLAMATION-002.13:** When a Git checkout is nested below
+  the task root or below a supported direct-child checkout, the system shall
+  preserve the task directory as an unsupported layout, even when the parent
+  checkout ignores the nested path.
 
 ### REQ-SSH-TASKDIR-RECLAMATION-003: Remove only task-owned directories
 

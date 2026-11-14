@@ -182,17 +182,22 @@ per AC-SSH-TASKDIR-RECLAMATION-003.3.
 
 ### Safety probe
 
-Run against the task-directory root and every direct child directory that
-contains a `.git` entry, matching the existing remote layout. Every discovered
-checkout must pass before any removal begins. One unsafe or unknown checkout
-vetoes removal of the entire task directory.
+Run against the task-directory root and find `.git` entries at every descendant
+depth. A checkout directly under the task root is a supported child and must
+pass every probe before removal begins. A `.git` entry at a deeper path means a
+nested repository layout; preserve the task directory as unsupported without
+removing any checkout. This catches repositories hidden by their parent
+checkout's ignore rules. Use NUL-delimited discovery output so path bytes are
+not parsed as line boundaries.
 
 Keep the correction in the existing reclaimer, using small command and parsing
 helpers. Obtain the checkout root, Git directory, and common Git directory with:
 `git -C <checkout> rev-parse --path-format=absolute --show-toplevel --git-dir --git-common-dir`.
 Require exactly three absolute path results. The option requires Git 2.31 or
-later. Older Git, unsupported options, malformed output, or failed commands
-produce `probe_failed`; there is no legacy-option fallback.
+later, but the complete probe set requires Git 2.36 or later because
+`worktree list --porcelain -z` requires that version. Older Git, unsupported
+options, malformed output, or failed commands produce `probe_failed`; there is
+no legacy-option fallback.
 
 Resolve the profile root, task directory, and returned directory paths on the
 remote host with `cd <quoted-path> && pwd -P`. Compare physical paths at segment
