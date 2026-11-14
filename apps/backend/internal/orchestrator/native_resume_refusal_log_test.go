@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -169,6 +171,35 @@ type repositoryWithoutNativeResumeSubmissionReader struct {
 	sessionContinuityStore
 }
 
+type refusingNativeResumeEvidenceRepository struct {
+	*sqliterepo.Repository
+}
+
+func (r *refusingNativeResumeEvidenceRepository) ResolveSessionRecoveryBlockWithNativeEvidence(context.Context, string, *models.NativeResumeDeliveryEvidence, time.Time) (bool, error) {
+	return false, nil
+}
+
+func (r *refusingNativeResumeEvidenceRepository) VerifyResolvedSessionRecoveryBlockWithNativeEvidence(context.Context, string, *models.NativeResumeDeliveryEvidence) (bool, error) {
+	return false, nil
+}
+
+func TestExplicitResumeClassifiesNativeSQLResolutionRefusal(t *testing.T) {
+	service, manager, block, _, _, _ := nativeResumeFixture(t, durableDeliveryUnresolvedReason, false, false)
+	repo := service.repo.(*sqliterepo.Repository)
+	service.repo = &refusingNativeResumeEvidenceRepository{Repository: repo}
+	service.agentManager = &nativeProofTestManager{
+		nativeResumeTestManager: manager,
+		proof: func(context.Context, string) (*models.NativeResumeDeliveryEvidence, error) {
+			return &models.NativeResumeDeliveryEvidence{}, nil
+		},
+	}
+
+	err := service.resolveSessionRecoveryBlock(context.Background(), block.SessionID, recoveryActionResume)
+	require.ErrorIs(t, err, ErrSessionRecoveryRequired)
+	require.Equal(t, "session recovery required: unresolved_durable_work", err.Error())
+	require.Equal(t, "sql_resolution_refused", deliveryRecoveryRefusalReason(err))
+}
+
 func TestBootDeliveryRefusalDoesNotDuplicateExplicitResumeWarning(t *testing.T) {
 	service, manager, block, submission, _, _ := nativeResumeFixture(t, durableDeliveryUnresolvedReason, false, false)
 	repo := service.repo.(nativeResumeTestRepository)
@@ -224,6 +255,7 @@ func TestDeliveryRecoveryRefusalReasonSetIsClosed(t *testing.T) {
 		agentruntime.DeliveryRecoveryRefusalExecutionUnavailable,
 		agentruntime.DeliveryRecoveryRefusalEvidenceUnavailable,
 		agentruntime.DeliveryRecoveryRefusalOfficeOwned,
+		agentruntime.DeliveryRecoveryRefusalSQLResolutionRefused,
 		agentruntime.DeliveryRecoveryRefusalUnclassified,
 	}
 	for _, reason := range reasons {

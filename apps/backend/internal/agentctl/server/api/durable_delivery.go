@@ -28,6 +28,11 @@ type deliveryAcknowledgementRequest struct {
 	Sequence uint64 `json:"sequence"`
 }
 
+type failedBootstrapDeliveryAbandonRequest struct {
+	StreamID          string `json:"stream_id"`
+	HarnessGeneration uint64 `json:"harness_generation"`
+}
+
 const deliverySubmissionRequestOverhead int64 = 64 << 10
 
 const deliveryOwnerMismatchCode = "OWNER_MISMATCH"
@@ -73,6 +78,55 @@ func (s *Server) handleDeliveryStatus(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, descriptor)
+}
+
+func (s *Server) handleDeliverySuccessorStreams(c *gin.Context) {
+	if s.procMgr == nil {
+		writeDeliveryError(c, journal.ErrOwnerMismatch)
+		return
+	}
+	streams, err := s.procMgr.SuccessorDeliveryStreams(c.Request.Context())
+	if err != nil {
+		writeDeliveryError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, streams)
+}
+
+func (s *Server) handleDeliverySuccessorAbandon(c *gin.Context) {
+	if s.procMgr == nil {
+		writeDeliveryError(c, journal.ErrOwnerMismatch)
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8<<10)
+	var expected journal.Stream
+	if err := c.ShouldBindJSON(&expected); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_STREAM"})
+		return
+	}
+	if err := s.procMgr.AbandonSuccessorDeliveryStream(c.Request.Context(), expected); err != nil {
+		writeDeliveryError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (s *Server) handleFailedBootstrapDeliveryAbandon(c *gin.Context) {
+	if s.procMgr == nil {
+		writeDeliveryError(c, journal.ErrOwnerMismatch)
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 2<<10)
+	var request failedBootstrapDeliveryAbandonRequest
+	if err := c.ShouldBindJSON(&request); err != nil || request.StreamID == "" || request.HarnessGeneration == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_STREAM"})
+		return
+	}
+	if err := s.procMgr.AbandonFailedBootstrapDeliveryStream(c.Request.Context(), request.StreamID, request.HarnessGeneration); err != nil {
+		writeDeliveryError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (s *Server) handleDeliverySubmission(c *gin.Context) {

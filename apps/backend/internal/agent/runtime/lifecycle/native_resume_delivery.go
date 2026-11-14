@@ -27,6 +27,13 @@ func (m *Manager) AcknowledgeNativeResumeDelivery(ctx context.Context, sessionID
 	if client == nil {
 		return fmt.Errorf("native resume agentctl is unavailable")
 	}
+	if m.streamManager != nil {
+		if repository := m.streamManager.deliveryRepository(); repository != nil {
+			if err := m.abandonOrphanSuccessorStreams(ctx, execution, client, repository); err != nil {
+				return err
+			}
+		}
+	}
 	status, err := m.nativeResumeDeliveryStatus(ctx, execution, client)
 	if err != nil || status == nil {
 		return err

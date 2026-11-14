@@ -1488,6 +1488,16 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	if agentStopFailed && preserveRuntime {
 		return fmt.Errorf("stop agent process for execution %q: %w", executionID, errRecoverableStopUnconfirmed)
 	}
+	if reason == StopReasonAgentBootstrapFailed && !agentStopFailed {
+		cleanupCtx, cancelCleanup := context.WithTimeout(stopCtx, 5*time.Second)
+		if err := m.abandonFailedSuccessorBootstrapStream(cleanupCtx, execution); err != nil {
+			m.logger.Warn("failed to abandon uncommitted successor delivery stream after bootstrap failure",
+				zap.String("execution_id", execution.ID),
+				zap.String("session_id", execution.SessionID),
+				zap.Error(err))
+		}
+		cancelCleanup()
+	}
 	// Backend shutdown retains interrupted delivery outcomes. Its terminal
 	// checkpoint follows confirmed process termination, before runtime cleanup.
 	if reason == StopReasonBackendShutdown && !backendForce && !agentStopFailed {
