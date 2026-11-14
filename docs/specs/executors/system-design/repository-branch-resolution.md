@@ -22,6 +22,7 @@ The existing URL resolver reads `origin`; this correction does not introduce rem
 | AC-EXECUTORS-REPOSITORY-BRANCH-001.3 | Preserved state |
 | AC-EXECUTORS-REPOSITORY-BRANCH-001.4 | Script integration; Template expansion |
 | AC-EXECUTORS-REPOSITORY-BRANCH-001.5 | Failure behavior |
+| AC-EXECUTORS-REPOSITORY-BRANCH-002.6, .7, .8 | Remote materialization request budget |
 
 ## Branch conversion
 
@@ -142,6 +143,7 @@ empty inputs/maps/values, precedence, and opaque script fragments. The complete
 - [Remote clone branch correction](../../../plans/remote-clone-branch/plan.md)
 - [Remote PR review checkout](../../../plans/remote-pr-review-checkout/plan.md)
 - [Literal executor placeholder expansion](../../../plans/executor-literal-placeholder-expansion/plan.md)
+- [Repository materialization timeout](../../../plans/repository-materialization-timeout/plan.md)
 
 ## Selected remote checkout
 
@@ -203,3 +205,42 @@ Execute both current and saved clone-based prepare templates, then assert branch
 Also cover same-repository PRs, plain explicit branches, missing PR refs, conflicting local branch state, shell metacharacters, no selection, and resume.
 Shared resolver tests must cover Docker, SSH, and Kubernetes so selection propagation does not diverge by executor.
 Abbreviated AC references in this section belong to `AC-EXECUTORS-REPOSITORY-BRANCH-002`.
+
+## Remote materialization request budget
+
+The executor system owns this contract because repository preparation must finish before the remote agent starts.
+The [task attachment design](../../tasks/system-design/attach-workspace-sources.md) also consumes the same materialization client for live source attachment.
+
+`lifecycle.reconcileLaunchWorkspace` selects the repository projection before agent startup.
+Plugin remote executors include the primary repository because they have no built-in repository prepare script.
+Other clone-based executors prepare the primary repository separately and materialize additional repositories through agentctl.
+The shared path reaches `client.Client.MaterializeRepository` in `internal/agent/runtime/agentctl/client_workspace_sources.go`.
+
+`MaterializeRepository` must send its existing JSON request through `longRunningHTTPClient`.
+`newClient` initializes that client with a five-minute total timeout.
+The ordinary `httpClient` retains its 60-second timeout for other operations.
+`http.NewRequestWithContext` retains the supplied context, so earlier deadlines and cancellation still stop this request.
+The timeout covers the whole HTTP operation, including the response body.
+This design adds no retry or detached clone request.
+
+Both clients receive authentication, instance identity, and runtime binding transports during construction.
+`NewEndpointClient` also configures both clients with the same provider connection transport and redirect policy.
+The correction must reuse that wiring without a new transport or credential path.
+Request fields, response decoding, and `WorkspaceMaterializationError` retain their existing behavior.
+`RemoveMaterializedRepository`, lifecycle rollback, reconciliation, and rescan retain their current clients and contexts.
+
+The server handler passes the request context to `materializeGitRunner`.
+`materializeGitTimeout` independently limits clone commands to five minutes and fetch commands to 30 seconds after admission.
+Several Git operations and admission waits can consume one HTTP request budget.
+This correction therefore removes the premature one-minute limit without guaranteeing success for every large repository.
+Script-based primary clones and caller launch budgets retain their existing limits.
+
+### Regression coverage for request budgets
+
+Use `testing/synctest` and a context-aware in-memory HTTP transport to advance time without a network clone.
+Exercise the real client constructor and materialization method.
+A response after 61 simulated seconds must succeed, while an earlier caller deadline or cancellation must remain observable through `errors.Is`.
+A response beyond five simulated minutes must produce a timeout error.
+The existing typed-error test must initialize both clients and retain its authentication and checkout-identity assertions.
+Existing loopback HTTP tests cover wire behavior. Lifecycle projection tests cover primary and additional repository selection and batch rollback.
+These checks establish the shared client contract. They do not claim live cloud-provider or multi-gigabyte clone coverage.

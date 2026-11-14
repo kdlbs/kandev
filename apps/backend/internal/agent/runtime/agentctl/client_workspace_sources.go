@@ -67,7 +67,7 @@ func (c *Client) MaterializeRepository(ctx context.Context, materialization Mate
 		return nil, fmt.Errorf("create workspace materialization request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.longRunningHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("send workspace materialization request: %w", err)
 	}

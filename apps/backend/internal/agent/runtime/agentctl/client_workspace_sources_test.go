@@ -45,8 +45,7 @@ func TestMaterializeRepository_ReturnsTypedRemoteError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := &Client{baseURL: server.URL, httpClient: server.Client(), logger: log}
-	c.httpClient.Transport = &authTransport{token: "test-token", base: c.httpClient.Transport}
+	c := newClient(server.URL, log, WithAuthToken("test-token"))
 	_, err = c.MaterializeRepository(context.Background(), MaterializeRepositoryRequest{
 		RepositoryURL:   "https://github.com/kdlbs/kandev.git",
 		Destination:     "kandev",
