@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -115,6 +116,160 @@ func TestFireWebhookTrigger_PauseGateError_Returns503WithoutReason(t *testing.T)
 // manual-fire endpoint (AC-002.4, which imposes no reason requirement of its
 // own) shares writeDispatchError with the webhook endpoint, so the fix
 // applies uniformly rather than forking behavior per caller.
+func patchRoutineTrigger(t *testing.T, router *gin.Engine, triggerID, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/office/routine-triggers/"+triggerID,
+		bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	return rec
+}
+
+func createGatedCronTrigger(
+	t *testing.T, repo *sqlite.Repository, routineID, expression string, next, lastFired *time.Time,
+) *RoutineTrigger {
+	t.Helper()
+	trigger := &RoutineTrigger{
+		RoutineID:      routineID,
+		Kind:           "cron",
+		CronExpression: expression,
+		Timezone:       "UTC",
+		Enabled:        true,
+		NextRunAt:      next,
+		LastFiredAt:    lastFired,
+	}
+	if err := repo.CreateRoutineTrigger(context.Background(), trigger); err != nil {
+		t.Fatalf("create cron trigger: %v", err)
+	}
+	return trigger
+}
+
+// A repeated enable must not re-arm a fire that is due but not yet claimed.
+func TestUpdateRoutineTrigger_NoOpEnableKeepsPendingFire(t *testing.T) {
+	svc, repo := newGatedTestRoutineService(t)
+	routine := createGatedTestRoutine(t, repo, "always_create")
+	due := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)
+	trigger := createGatedCronTrigger(t, repo, routine.ID, "0 9 * * *", &due, nil)
+
+	before, err := repo.GetRoutineTrigger(context.Background(), trigger.ID)
+	if err != nil {
+		t.Fatalf("get trigger: %v", err)
+	}
+
+	rec := patchRoutineTrigger(t, newGatedTestRouter(svc), trigger.ID, `{"enabled":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var resp TriggerResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Trigger.NextRunAt == nil || !resp.Trigger.NextRunAt.Equal(due) {
+		t.Errorf("response next_run_at = %v, want the unchanged %v", resp.Trigger.NextRunAt, due)
+	}
+
+	got, err := repo.GetRoutineTrigger(context.Background(), trigger.ID)
+	if err != nil {
+		t.Fatalf("reload trigger: %v", err)
+	}
+	if got.NextRunAt == nil || !got.NextRunAt.Equal(due) {
+		t.Fatalf("stored next_run_at = %v, want the unchanged %v", got.NextRunAt, due)
+	}
+	if !got.UpdatedAt.Equal(before.UpdatedAt) {
+		t.Errorf("stored updated_at = %v, want the unchanged %v", got.UpdatedAt, before.UpdatedAt)
+	}
+}
+
+// A real schedule edit rewrites next_run_at but leaves identity and history alone.
+func TestUpdateRoutineTrigger_ScheduleEditKeepsIdentityAndHistory(t *testing.T) {
+	svc, repo := newGatedTestRoutineService(t)
+	routine := createGatedTestRoutine(t, repo, "always_create")
+	due := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)
+	lastFired := time.Date(2026, 10, 19, 9, 0, 0, 0, time.UTC)
+	trigger := createGatedCronTrigger(t, repo, routine.ID, "0 9 * * *", &due, &lastFired)
+	nextAfter := time.Now().UTC().Add(-time.Second)
+
+	rec := patchRoutineTrigger(t, newGatedTestRouter(svc), trigger.ID, `{"cron_expression":"0 10 * * *"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var resp TriggerResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Trigger.ID != trigger.ID {
+		t.Errorf("trigger id = %q, want %q", resp.Trigger.ID, trigger.ID)
+	}
+	if !resp.Trigger.CreatedAt.Equal(trigger.CreatedAt) {
+		t.Errorf("created_at = %v, want %v", resp.Trigger.CreatedAt, trigger.CreatedAt)
+	}
+	if resp.Trigger.LastFiredAt == nil || !resp.Trigger.LastFiredAt.Equal(lastFired) {
+		t.Errorf("last_fired_at = %v, want %v", resp.Trigger.LastFiredAt, lastFired)
+	}
+	if resp.Trigger.CronExpression != "0 10 * * *" {
+		t.Errorf("cron_expression = %q, want the edited expression", resp.Trigger.CronExpression)
+	}
+	if resp.Trigger.NextRunAt == nil || !resp.Trigger.NextRunAt.After(nextAfter) {
+		t.Errorf("next_run_at = %v, want a recomputed future fire", resp.Trigger.NextRunAt)
+	}
+}
+
+// An enabled cron trigger with no next fire is owned by a scheduler claim.
+func TestUpdateRoutineTrigger_ClaimedTriggerConflicts(t *testing.T) {
+	svc, repo := newGatedTestRoutineService(t)
+	routine := createGatedTestRoutine(t, repo, "always_create")
+	trigger := createGatedCronTrigger(t, repo, routine.ID, "0 9 * * *", nil, nil)
+
+	rec := patchRoutineTrigger(t, newGatedTestRouter(svc), trigger.ID, `{"cron_expression":"0 10 * * *"}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUpdateRoutineTrigger_InvalidCronReturns400(t *testing.T) {
+	svc, repo := newGatedTestRoutineService(t)
+	routine := createGatedTestRoutine(t, repo, "always_create")
+	due := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)
+	trigger := createGatedCronTrigger(t, repo, routine.ID, "0 9 * * *", &due, nil)
+
+	rec := patchRoutineTrigger(t, newGatedTestRouter(svc), trigger.ID, `{"cron_expression":"0 0 30 2 *"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	got, err := repo.GetRoutineTrigger(context.Background(), trigger.ID)
+	if err != nil {
+		t.Fatalf("reload trigger: %v", err)
+	}
+	if got.CronExpression != "0 9 * * *" {
+		t.Errorf("cron_expression = %q, want the stored expression", got.CronExpression)
+	}
+	if got.NextRunAt == nil || !got.NextRunAt.Equal(due) {
+		t.Errorf("next_run_at = %v, want the stored %v", got.NextRunAt, due)
+	}
+}
+
+func TestUpdateRoutineTrigger_WebhookToggle(t *testing.T) {
+	svc, repo := newGatedTestRoutineService(t)
+	routine := createGatedTestRoutine(t, repo, "always_create")
+	trigger := createGatedWebhookTrigger(t, repo, routine.ID, "wh-update-toggle")
+
+	rec := patchRoutineTrigger(t, newGatedTestRouter(svc), trigger.ID, `{"enabled":false}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	got, err := repo.GetRoutineTrigger(context.Background(), trigger.ID)
+	if err != nil {
+		t.Fatalf("reload trigger: %v", err)
+	}
+	if got.Enabled {
+		t.Error("trigger must be disabled")
+	}
+	if got.NextRunAt != nil {
+		t.Errorf("next_run_at = %v, want nil after disabling", got.NextRunAt)
+	}
+}
+
 func TestRunRoutine_BlockedByPause_IncludesReasonAndWorkspaceID(t *testing.T) {
 	svc, repo := newGatedTestRoutineService(t)
 	routine := createGatedTestRoutine(t, repo, "always_create")
