@@ -1292,6 +1292,7 @@ type Service struct {
 	// Nil-safe like idleReaper: callers that don't need it leave it nil and
 	// startCeilingSweeper / stopCeilingSweeper no-op. See ceiling_sweep.go.
 	ceilingSweeper *ceilingSweeper
+	idleQueueDrain idleQueueDrainBackoff
 
 	// launchCredentialReminter re-mints short-lived Office runtime
 	// credentials immediately before a launch that carries Office run

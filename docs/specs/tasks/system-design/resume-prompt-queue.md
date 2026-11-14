@@ -1,11 +1,12 @@
 ---
 status: current
 system: tasks
-updated: 2026-10-04
+updated: 2026-10-29
 requirements:
   - REQ-TASKS-RESUME-PROMPT-QUEUE-001
   - REQ-TASKS-RESUME-PROMPT-QUEUE-002
   - REQ-TASKS-RESUME-PROMPT-QUEUE-003
+  - REQ-TASKS-RESUME-PROMPT-QUEUE-004
 ---
 
 # Resume Prompt Queue System Design
@@ -22,9 +23,13 @@ the current queue storage, session incarnation, and agent readiness events.
 | `001.7`, `001.8` | Failure and identity |
 | `001.10`, `001.11` | Workflow transitions during resume |
 | `002.1`, `002.2`, `002.3` | Expired runtime waits |
+| `003.1`, `003.2`, `003.3` | Backend restart |
+| `004.1`, `004.2`, `004.3` | Cancelled resume attempts |
 
 Criterion suffixes `001.*` refer to `AC-TASKS-RESUME-PROMPT-QUEUE-001` and
-`002.*` to `AC-TASKS-RESUME-PROMPT-QUEUE-002`.
+`002.*` to `AC-TASKS-RESUME-PROMPT-QUEUE-002`, `003.*` to
+`AC-TASKS-RESUME-PROMPT-QUEUE-003`, and `004.*` to
+`AC-TASKS-RESUME-PROMPT-QUEUE-004`.
 
 ## Current behavior
 
@@ -220,7 +225,42 @@ The predicate joins the existing retryable cases beside
 a reserved entry returns to the head of its own session incarnation and keeps
 its recorded-user-message marker. The next boot-ready or turn-ready trigger
 dispatches it. No timer or resume attempt is added (`002.2`). Other failures,
-including a provider rejection, keep the lost branch (`002.3`).
+including a provider rejection, keep the dropped branch (`002.3`).
+
+## Cancelled resume attempts
+
+`Service.Stop` cancels every in-flight resume attempt before it stops the
+reserved-prompt callback owner. A queued dispatch that was waiting on such an
+attempt fails with `ErrResumeAttemptCancelled`. That error is neither
+`ErrSessionRecoveryRequired` nor one of the retryable shapes in
+`handleQueuedMessageExecutionError`, so the entry used to reach the dropped
+branch, which neither acknowledged nor restored it. Its dispatch claim stayed
+behind, and the next boot parked it as `unknown_queue_dispatch_outcome` for a
+manual `session.recover`.
+
+`finishQueuedMessageExecution` now treats `ErrResumeAttemptCancelled` without
+a delivery attempt like the recovery-required branch: it keeps the
+recorded-user-message marker and restores the entry, through
+`restoreQueuedMessageForSession` for an exact reservation and
+`restoreQueuedMessage` otherwise. The restore settles the claim, so nothing is
+left for the startup reconciler. A delivery attempt still settles through the
+existing acknowledgement first (`004.2`). The dropped branch now says the
+message was dropped rather than lost (`004.3`).
+
+The restore runs on the reservation's recovery owner. If `Stop` reaches
+`stopReservedPromptCallbacks` before the restore is launched, the restore is
+refused and the claim stays for the existing startup reconciliation. That
+reconciliation parks the session for explicit recovery with the
+`unknown_queue_dispatch_outcome` reason instead of making the entry visible
+immediately, and the entry returns to its queue when the operator completes
+that recovery (`restorePendingQueueDispatchesForRecovery`). The entry is not
+lost across the shutdown boundary.
+
+A restored entry is ordinary queued work. The idle-session queue drain uses the
+same Auto-run policy, promptability, recovery-block, clarification, and
+in-flight guards as any other drain, so it may offer the restored entry when
+those conditions hold. The cancelled-resume path adds no timer, retry loop, or
+resume attempt of its own (`004.2`).
 
 ## Backend restart
 
