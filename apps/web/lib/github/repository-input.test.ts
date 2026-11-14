@@ -10,7 +10,7 @@ describe("parseGitHubRepositoryInput", () => {
   });
 
   it("parses a GitHub repository URL", () => {
-    expect(parseGitHubRepositoryInput("https://github.com/kdlbs/kandev.git")).toEqual({
+    expect(parseGitHubRepositoryInput("https://github.com/kdlbs/kandev.git", "github.com")).toEqual({
       owner: "kdlbs",
       name: "kandev",
     });
@@ -42,6 +42,14 @@ describe("parseGitHubLogin", () => {
 });
 
 describe("parseGitHubRepositoryInput host matching", () => {
+  it.each([undefined, ""])("does not infer a public host from %j", (host) => {
+    expect(parseGitHubRepositoryInput("https://github.com/acme/widget", host)).toBeNull();
+    expect(parseGitHubRepositoryInput("acme/widget", host)).toEqual({
+      owner: "acme",
+      name: "widget",
+    });
+  });
+
   it("rejects a repository URL from a host other than the workspace host", () => {
     expect(parseGitHubRepositoryInput("https://acme.ghe.com/kdlbs/kandev")).toBeNull();
     expect(

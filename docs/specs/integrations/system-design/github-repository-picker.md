@@ -110,6 +110,11 @@ today's behavior for every existing caller.
   remote chip's height bound) and uses the existing touch-sized option, add,
   and remove sizes.
 
+Search inputs and action buttons use the shared `controlSizingClassName`
+helper. Ordinary desktop controls are 28px. Phone and coarse-pointer controls
+keep a 44px minimum at every viewport width. Option rows apply the same phone
+and pointer conditions to their minimum height.
+
 ### GitHub organization multi-select
 
 `apps/web/components/github/github-organization-multi-select.tsx` exports
@@ -151,6 +156,8 @@ not cached, so its refresh is a plain refetch.
 multi-select parses GitHub Enterprise repository URLs. Because the stored
 identity has no host, a URL from any other host (including github.com or
 `*.ghe.com` on a different workspace host) is rejected.
+When the workspace host is unknown, the picker accepts only an `owner/name`
+identity. It does not infer github.com while connection status loads or fails.
 `parseGitHubRepositoryInput(value, githubHost?)` in
 `apps/web/lib/github/repository-input.ts` returns `{ owner, name }` for
 `owner/name` (single slash, both segments matching GitHub's allowed

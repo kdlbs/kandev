@@ -1,5 +1,6 @@
 import { test, expect } from "../fixtures/test-base";
 import { AutomationsPage } from "../pages/automations-page";
+import { expectControlHeight } from "../helpers/control-sizing";
 import {
   ACCESSIBLE_REPOSITORIES,
   expandPrTriggerCard,
@@ -29,6 +30,9 @@ test.describe("automations: GitHub repository picker", () => {
     for (const fullName of ACCESSIBLE_REPOSITORIES) {
       await expect(repositoryOptions(picker).filter({ hasText: fullName })).toBeVisible();
     }
+    await expectControlHeight(card.getByTestId("github-repository-add"), 28);
+    await expectControlHeight(picker.getByTestId("remote-repo-input"), 28);
+    await expectControlHeight(picker.getByTestId("remote-repo-refresh"), 28);
 
     await picker.getByTestId("remote-repo-input").fill("beta");
     await expect(repositoryOptions(picker)).toHaveCount(1);

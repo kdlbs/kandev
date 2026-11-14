@@ -170,7 +170,7 @@ function OrganizationPickerPanel({
             data-testid="github-organization-option"
             data-picker-option=""
             className={cn(
-              "flex min-h-11 sm:min-h-8 w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-xs",
+              "flex min-h-8 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11 w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-xs",
               "hover:bg-muted cursor-pointer text-left",
             )}
           >

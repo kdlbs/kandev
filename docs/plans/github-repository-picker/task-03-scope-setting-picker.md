@@ -1,7 +1,7 @@
 ---
 id: "03-scope-setting-picker"
 title: "Repository scope uses the GitHub picker"
-status: done
+status: in_progress
 wave: 3
 depends_on: ["02-watch-filter-picker"]
 plan: "plan.md"
@@ -77,5 +77,13 @@ Task 02.
 
 ## Results
 
-- Repository scope draft is `RepoFilter[]`; `repos` mode renders `GitHubRepositoryMultiSelect` without scope filtering. The comma-separated validation and its locale key are removed.
+- Repository scope draft is `RepoFilter[]`; `repos` mode renders `GitHubRepositoryMultiSelect` without a client-side scope filter. The comma-separated validation and its locale key are removed.
 - Focused tests passed: `github-repo-scope-section.test.tsx` (3).
+
+## Open review blocker
+
+The backend still filters the repository list by the saved scope. The mocked
+picker test does not cover that boundary. Acceptance requires an authorized
+discovery source and a regression that starts with a restricted saved scope,
+then selects and saves an additional accessible repository. The ordinary
+repository endpoint must retain its existing scope enforcement.

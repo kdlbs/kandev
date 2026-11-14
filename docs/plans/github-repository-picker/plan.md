@@ -1,6 +1,6 @@
 ---
 created: 2026-11-11
-status: complete
+status: in_progress
 requirements:
   - REQ-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001
 system_design:
@@ -131,6 +131,18 @@ Mode [Selected repositories v]   Organizations [kdlbs, example-org      ]
 | 05 | [Organization picker and list refresh](task-05-organization-picker-refresh.md) | 04 | .5, .10, .11 |
 
 Sequential. No delegation is authorized by this plan.
+
+### Review status
+
+Task 03 remains blocked: the ordinary repository endpoint applies the saved
+scope, so the scope editor cannot browse additional repositories. It needs an
+authorized discovery source that preserves personal and automation access
+checks without changing the ordinary endpoint's scope enforcement.
+
+Task 05 includes a maintainer correction for unknown-host URL entry and touch
+target sizes. Its new unit and E2E coverage is not executed because the user
+excludes builds, tests, linters, and other validation commands for this review.
+The earlier Results sections record the contributor's previous verification.
 
 ## Verification
 

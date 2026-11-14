@@ -3,6 +3,7 @@
 import { IconPlus, IconX } from "@tabler/icons-react";
 import { forwardRef } from "react";
 import { Badge } from "@kandev/ui/badge";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { cn } from "@/lib/utils";
 
 /** A selected value with a touch-sized remove button. */
@@ -28,7 +29,10 @@ export function SelectionChip({
       <span>{label}</span>
       <button
         type="button"
-        className="inline-flex h-11 w-11 items-center justify-center rounded-sm cursor-pointer hover:text-foreground md:h-5 md:w-5"
+        className={controlSizingClassName(
+          "icon",
+          "inline-flex items-center justify-center rounded-sm cursor-pointer hover:text-foreground",
+        )}
         aria-label={removeLabel}
         onClick={onRemove}
         disabled={disabled}
@@ -54,7 +58,8 @@ export const SelectionAddButton = forwardRef<HTMLButtonElement, SelectionAddButt
         disabled={disabled}
         data-testid={testId}
         className={cn(
-          "inline-flex h-11 items-center justify-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground md:h-7",
+          controlSizingClassName("standard"),
+          "inline-flex items-center justify-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground",
           disabled
             ? "cursor-not-allowed opacity-40"
             : "cursor-pointer hover:bg-muted hover:text-foreground",

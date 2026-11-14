@@ -83,4 +83,52 @@ test.describe("automations: GitHub repository picker on a phone", () => {
     expect(shifted.x).toBeGreaterThanOrEqual(PICKER_EDGE_MARGIN - 1);
     expect(shifted.x + shifted.width).toBeLessThanOrEqual(viewport.width - PICKER_EDGE_MARGIN + 1);
   });
+
+  test("keeps both pickers touch-sized after resizing to a tablet width", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.setViewportSize({ width: 820, height: 1180 });
+    await seedAccessibleRepositories(apiClient, seedData.workspaceId);
+    await apiClient.mockGitHubAddOrgs([{ login: "kdlbs" }]);
+    const card = await openRestrictedPrAutomation(
+      testPage,
+      apiClient,
+      seedData,
+      "Tablet repository picker controls",
+    );
+
+    const addRepository = card.getByTestId("github-repository-add");
+    await expectTouchControl(addRepository);
+    await addRepository.tap();
+    const repositoryPicker = card.getByTestId("github-repository-picker");
+    const repository = repositoryOptions(repositoryPicker).filter({ hasText: "mock-user/alpha" });
+    await expect(repository).toBeVisible();
+    await expectTouchControl(repositoryPicker.getByTestId("remote-repo-input"));
+    await expectTouchSquareControl(repositoryPicker.getByTestId("remote-repo-refresh"));
+    await expectTouchControl(repository);
+    await repository.tap();
+    const removeRepository = card
+      .getByTestId("github-repository-chip")
+      .getByRole("button", { name: /remove mock-user\/alpha/i });
+    await expectTouchSquareControl(removeRepository);
+    await removeRepository.tap();
+
+    const addOrganization = card.getByTestId("github-organization-add");
+    await expectTouchControl(addOrganization);
+    await addOrganization.tap();
+    const organizationPicker = card.getByTestId("github-organization-picker");
+    const organization = organizationPicker
+      .getByTestId("github-organization-option")
+      .filter({ hasText: "kdlbs" });
+    await expect(organization).toBeVisible();
+    await expectTouchControl(organizationPicker.getByTestId("github-organization-input"));
+    await expectTouchSquareControl(organizationPicker.getByTestId("github-organization-refresh"));
+    await expectTouchControl(organization);
+    await organization.tap();
+    await expectTouchSquareControl(
+      card.getByTestId("github-organization-chip").getByRole("button", { name: /remove kdlbs/i }),
+    );
+  });
 });

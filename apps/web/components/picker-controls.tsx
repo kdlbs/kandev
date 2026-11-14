@@ -3,6 +3,7 @@
 import { IconCheck, IconRefresh } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Spinner } from "@kandev/ui/spinner";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { cn } from "@/lib/utils";
 
 /** Plain Enter on a text input: no modifiers, repeat, or IME composition. */
@@ -99,7 +100,8 @@ export function PickerSearchRow({
         data-legacy-testid={legacyTestId}
         data-picker-input=""
         className={cn(
-          "h-11 sm:h-9 min-w-0 flex-1 rounded-md px-2 text-xs bg-muted/30 border border-border/60",
+          controlSizingClassName("standard"),
+          "min-w-0 flex-1 rounded-md px-2 text-xs bg-muted/30 border border-border/60",
           "outline-none focus:bg-muted focus:border-border placeholder:text-muted-foreground",
           invalid && "border-destructive focus:border-destructive",
         )}
@@ -119,7 +121,8 @@ function PickerRefreshButton({ onRefresh, refreshing, label, testId }: PickerRef
       title={label}
       data-testid={testId}
       className={cn(
-        "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted-foreground sm:h-9 sm:w-9",
+        controlSizingClassName("icon"),
+        "inline-flex shrink-0 items-center justify-center rounded-md text-muted-foreground",
         refreshing
           ? "cursor-not-allowed opacity-60"
           : "cursor-pointer hover:bg-muted hover:text-foreground",

@@ -1,7 +1,7 @@
 ---
 id: "05-organization-picker-refresh"
 title: "Organization picker and list refresh"
-status: done
+status: in_progress
 wave: 5
 depends_on: ["04-e2e"]
 plan: "plan.md"
@@ -120,3 +120,16 @@ make fmt && make typecheck test lint
   picker before asserting the orgs request.
 - Organization rows show logins only; the backend's prepended account login is
   listed first without a separate "you" label.
+
+## Maintainer review correction
+
+- Repository URLs require a known workspace host. Exact `owner/name` entry
+  remains available while status loads or fails. Unit coverage includes the
+  unknown-host parser and the picker transition to a known Enterprise host.
+- Inputs and chip actions use the shared control-sizing helper. Repository
+  and organization rows retain touch targets at coarse-pointer tablet widths.
+- Desktop E2E coverage measures 28px controls. Mobile E2E coverage also resizes
+  the configured touch device to a tablet width and measures both pickers.
+- Verification remains pending. The user excludes builds, tests, linters, and
+  other validation commands for this review. The previous Results section
+  describes the contributor's earlier runs.
