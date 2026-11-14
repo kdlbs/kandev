@@ -88,23 +88,39 @@ function transport() {
   }> = [];
   vi.stubGlobal(
     "fetch",
-    vi.fn(
-      (path: string, init?: RequestInit) =>
-        new Promise<Response>((resolve) => {
-          requests.push({
-            path,
-            method: init?.method ?? "GET",
-            body: init?.body ? JSON.parse(String(init.body)) : undefined,
-            respond: (data, status = 200) =>
-              resolve(
-                new Response(JSON.stringify(data), {
-                  status,
-                  headers: { "Content-Type": "application/json" },
-                }),
-              ),
-          });
-        }),
-    ),
+    vi.fn((path: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      const pathname = new URL(path, "http://localhost").pathname;
+      if (
+        method === "GET" &&
+        /^\/api\/v1\/notification-providers\/[^/]+\/formatter$/.test(pathname)
+      ) {
+        return Promise.resolve(
+          Response.json({ binding: null, formatters: [], events: [TURN, ASK, UPDATE] }),
+        );
+      }
+      const providerPath = "/api/v1/notification-providers";
+      const creating = pathname === providerPath && method === "POST";
+      const updating =
+        pathname.startsWith(`${providerPath}/`) &&
+        !pathname.slice(providerPath.length + 1).includes("/") &&
+        (method === "PATCH" || method === "DELETE");
+      if (!creating && !updating) throw new Error(`Unexpected request: ${method} ${pathname}`);
+      return new Promise<Response>((resolve) => {
+        requests.push({
+          path,
+          method,
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+          respond: (data, status = 200) =>
+            resolve(
+              new Response(JSON.stringify(data), {
+                status,
+                headers: { "Content-Type": "application/json" },
+              }),
+            ),
+        });
+      });
+    }),
   );
   return requests;
 }
