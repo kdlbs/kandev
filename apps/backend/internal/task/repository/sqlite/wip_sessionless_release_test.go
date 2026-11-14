@@ -25,7 +25,14 @@ type releaseFixture struct {
 // newReleaseFixture seeds one workspace, one workflow, and one WIP-1 step.
 func newReleaseFixture(t *testing.T, enabled bool) *releaseFixture {
 	t.Helper()
-	f := &releaseFixture{t: t, repo: newRepoForEntityTests(t), ctx: context.Background(), now: time.Now().UTC()}
+	return newReleaseFixtureWithRepo(t, newRepoForEntityTests(t), enabled)
+}
+
+// newReleaseFixtureWithRepo seeds the same step in repo, so the PostgreSQL
+// tests run the scenarios against that dialect.
+func newReleaseFixtureWithRepo(t *testing.T, repo *Repository, enabled bool) *releaseFixture {
+	t.Helper()
+	f := &releaseFixture{t: t, repo: repo, ctx: context.Background(), now: time.Now().UTC()}
 	if err := f.repo.CreateWorkspace(f.ctx, &models.Workspace{
 		ID: releaseWorkspaceID, Name: "Release", WIPSessionlessReleaseEnabled: enabled,
 	}); err != nil {
