@@ -677,6 +677,36 @@ PostgreSQL operators use normal vacuum or autovacuum for reusable space. The wor
 WAL, dead tuples, indexes, backups, and retained copies need separate capacity planning.
 Backups can still contain payload bytes removed from the live database.
 
+## Conversation history retention
+
+Open **Settings > System > Data & Logs > Database** to periodically reduce stored data
+that belongs to finished work. This policy is independent of Office run history retention
+and is disabled by default. Two targets share one periodic pass:
+
+- **Finished or archived conversations**: once a task is finished or archived and its
+  message history is older than the window (14 days by default), Kandev removes tool
+  progress detail from message metadata. Messages, their content, ordering, and
+  timestamps stay, and the conversation shows when details were removed.
+- **Completed cleanup jobs**: the operational snapshot of a `succeeded` resource cleanup
+  job older than its window (7 days by default) is reduced to the archive source evidence
+  that the archive source manifest still reads after a task is deleted.
+
+1. Set the conversation window and the cleanup-job window.
+2. Select **Analyze savings** to estimate each target before enabling cleanup.
+3. Select **Automatic cleanup**.
+4. Choose **Create backup (recommended)** or **Continue without backup**.
+5. Select **Save changes**. A selected backup must finish verification before cleanup starts.
+
+The first cleanup starts after preparation. Later checks run every 24 hours while the
+backend is running. **Run cleanup now** uses the saved policy. Disabling cleanup stops
+later batches but does not restore details already removed.
+
+Active tasks, live or recovering sessions, queued work, pending input, the current plan,
+and the session's selected model remain unchanged. The result is a stored-byte reduction,
+not a file-size reduction: use the separate database compaction action during a quiet
+period to shrink the file. Restoring a backup replaces the whole database and can remove
+newer changes. Other database engines show this feature as unavailable.
+
 ## Database operation
 
 > **Single-owner rule:** SQLite uses one writer connection in WAL mode; only one Kandev backend should own the file. **Factory reset** is destructive and removes managed data after creating a pre-reset backup.

@@ -1,5 +1,9 @@
 import type { ToolPayloadRetentionStatus } from "@/lib/types/tool-payload-retention";
 
+type RetentionPreparationStatus = Pick<ToolPayloadRetentionStatus, "preparation"> & {
+  policy: Pick<ToolPayloadRetentionStatus["policy"], "revision">;
+};
+
 export type BackupPreparationCorrelation = {
   activeRevision: number | null;
   settledRevision: number;
@@ -33,7 +37,7 @@ function settleRevision(
   };
 }
 
-function isObservedAttempt(status: ToolPayloadRetentionStatus, saveCandidateRevision?: number) {
+function isObservedAttempt(status: RetentionPreparationStatus, saveCandidateRevision?: number) {
   const { revision } = status.policy;
   const { state, choice } = status.preparation;
   if (choice !== "backup") return false;
@@ -43,14 +47,14 @@ function isObservedAttempt(status: ToolPayloadRetentionStatus, saveCandidateRevi
   return saveCandidateRevision === undefined && ACTIVE_STATES.has(state);
 }
 
-function isAttemptExit(status: ToolPayloadRetentionStatus) {
+function isAttemptExit(status: RetentionPreparationStatus) {
   const { state, choice } = status.preparation;
   return isTerminal(state) || state === "none" || choice !== "backup";
 }
 
 export function observeBackupPreparation(
   current: BackupPreparationCorrelation,
-  status: ToolPayloadRetentionStatus,
+  status: RetentionPreparationStatus,
   saveCandidateRevision?: number,
 ): BackupPreparationObservation {
   const revision = status.policy.revision;
