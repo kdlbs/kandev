@@ -687,16 +687,29 @@ func TestSettleAbandonedPredecessorAttemptsLeavesStartingUnknown(t *testing.T) {
 	}
 }
 
-func TestRetainedHandoffRejectsDifferentInstance(t *testing.T) {
+func TestRetainedHandoffDifferentInstance(t *testing.T) {
 	j, err := journal.Open(journal.Config{Path: filepath.Join(t.TempDir(), "owner.bbolt")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = j.Close() })
-	prior := &inferenceOwnership{OwnerID: "old", InstanceID: "instance-a", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1, Revision: 1, Phase: ownerClosed}
-	o := &attemptOwner{cfg: &config.InstanceConfig{InstanceID: "instance-b", SessionID: "session", DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 1}, id: "new", journal: j, state: inferenceOwnerState{Ownership: prior, ContinuityKnown: true}}
+	cfg := &config.InstanceConfig{InstanceID: "instance-b", SessionID: "session", DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 1}
+	prior := func(phase string) *inferenceOwnership {
+		return &inferenceOwnership{OwnerID: "old", InstanceID: "instance-a", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1, Revision: 1, Phase: phase}
+	}
+
+	// A closed, fully settled predecessor leaves nothing to observe: a resume on a new instance proceeds.
+	o := &attemptOwner{cfg: cfg, id: "new", journal: j, state: inferenceOwnerState{Ownership: prior(ownerClosed), ContinuityKnown: true, Attempts: map[string]*ownedAttempt{}}}
+	o.adoptRetainedClaim(o.state)
+	if o.storageUnavailable || o.state.ContinuityKnown || o.state.Ownership == nil || o.state.Ownership.OwnerID != "new" {
+		t.Fatalf("closed settled predecessor not adopted: storage=%v reason=%q ownership=%+v", o.storageUnavailable, o.admissionFailureReason, o.state.Ownership)
+	}
+
+	// Retained attempts a different instance cannot observe still fail closed.
+	unknown := &ownedAttempt{Status: AttemptStatus{AttemptID: "a", OwnerID: "old", State: AttemptStarting}}
+	o = &attemptOwner{cfg: cfg, id: "new", journal: j, state: inferenceOwnerState{Ownership: prior(ownerUnproven), ContinuityKnown: true, Attempts: map[string]*ownedAttempt{"a": unknown}}}
 	o.adoptRetainedClaim(o.state)
 	if !o.storageUnavailable || o.admissionFailureReason != "retained_claim_identity_mismatch" {
-		t.Fatalf("different instance adopted: storage=%v reason=%q", o.storageUnavailable, o.admissionFailureReason)
+		t.Fatalf("different instance with retained attempts adopted: storage=%v reason=%q", o.storageUnavailable, o.admissionFailureReason)
 	}
 }
