@@ -14,8 +14,11 @@ import {
 
 async function expectTouchTarget(locator: Locator) {
   const box = await locator.boundingBox();
-  expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
-  expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  // Chromium can report a CSS 44px target a few ten-thousandths below 44
+  // after fractional layout transforms.
+  const minSize = 44 - 0.01;
+  expect(box?.width ?? 0).toBeGreaterThanOrEqual(minSize);
+  expect(box?.height ?? 0).toBeGreaterThanOrEqual(minSize);
 }
 
 async function openSingleFileDiff(testPage: Page, session: SessionPage, filePath: string) {
