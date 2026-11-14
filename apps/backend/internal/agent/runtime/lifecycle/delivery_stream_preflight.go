@@ -75,9 +75,10 @@ func (sm *StreamManager) initialDeliveryReplayCursor(ctx context.Context, execut
 // An explicit fresh-start replacement may also replay the selected stream whose
 // committed SQL predecessor is exactly one positive generation behind it. Any
 // receipt, projection, or acknowledgement still waits for the successor commit.
+// Explicit history continuations retain their prepared-checkpoint admission.
 func canReplayFreshBootstrapEvents(ctx context.Context, execution *AgentExecution, delivery AgentDeliveryRepository, status *agentctl.DeliveryStatus) bool {
 	stream := status.Stream
-	if execution == nil || execution.ACPSessionID != "" || execution.RequiredNativeConversationID != "" ||
+	if execution == nil || execution.ForceContextContinuation || execution.ACPSessionID != "" || execution.RequiredNativeConversationID != "" ||
 		stream == nil || stream.FirstRetained != 1 ||
 		stream.Acknowledged != 0 || status.Unresolved || status.SubmissionCount != 0 || len(status.Submissions) != 0 || status.SubmissionsTruncated {
 		return false
@@ -95,6 +96,44 @@ func canReplayFreshBootstrapEvents(ctx context.Context, execution *AgentExecutio
 	}
 	return err == nil && execution.DeliveryHarnessGeneration > 1 && current != nil && current.Generation > 0 &&
 		replacementGenerationPending(execution, current)
+}
+
+// An authorized context continuation can retain setup events before SQL
+// commits its successor generation. Replay them from zero; event processing
+// still waits for that commit before any receipt. Fresh-start replacements are
+// admitted by canReplayFreshBootstrapEvents with its stricter identity checks.
+func canReplaySuccessorSetupEvents(ctx context.Context, execution *AgentExecution, delivery AgentDeliveryRepository, status *agentctl.DeliveryStatus) bool {
+	stream := status.Stream
+	if !execution.ForceContextContinuation || stream == nil || stream.FirstRetained != 1 || stream.Acknowledged != 0 ||
+		status.Unresolved || status.SubmissionCount != 0 || len(status.Submissions) != 0 || status.SubmissionsTruncated {
+		return false
+	}
+	reader, supported := delivery.(harnessGenerationReader)
+	if !supported {
+		return false
+	}
+	current, err := reader.GetCurrentHarnessSessionGeneration(ctx, execution.SessionID, execution.DeliveryIncarnationID)
+	if execution.ForceContextContinuation && errors.Is(err, models.ErrTaskSessionNotFound) {
+		return canReplayLegacyContinuationSetupEvents(ctx, execution, delivery)
+	}
+	return err == nil && replacementGenerationPending(execution, current)
+}
+
+type legacyContinuationBootstrapReader interface {
+	HasPreparedLegacyContinuationBootstrap(context.Context, string, string, string) (bool, error)
+}
+
+func canReplayLegacyContinuationSetupEvents(ctx context.Context, execution *AgentExecution, delivery AgentDeliveryRepository) bool {
+	if execution.DeliveryHarnessGeneration != 1 || !execution.deliveryBootstrap.Load() ||
+		execution.SessionID == "" || execution.DeliveryIncarnationID == "" || execution.ID == "" {
+		return false
+	}
+	prepared, supported := delivery.(legacyContinuationBootstrapReader)
+	if !supported {
+		return false
+	}
+	valid, err := prepared.HasPreparedLegacyContinuationBootstrap(ctx, execution.SessionID, execution.DeliveryIncarnationID, execution.ID)
+	return err == nil && valid
 }
 
 func canUseLegacyEmptyDelivery(ctx context.Context, execution *AgentExecution, delivery AgentDeliveryRepository, streamID string, err error) bool {

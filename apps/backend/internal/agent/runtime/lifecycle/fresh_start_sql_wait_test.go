@@ -25,18 +25,27 @@ func (r *freshStartSQLReader) GetCurrentHarnessSessionGeneration(ctx context.Con
 	return generation, err
 }
 
+// Fresh start and context continuation share the bounded successor-generation
+// wait, so each outcome is exercised for both kinds of successor.
 func TestFreshStartSQLWaitAdmissionAndCancellation(t *testing.T) {
-	for _, outcome := range []string{"committed", "cancelled", "rejected commit", "failed commit"} {
-		t.Run(outcome, func(t *testing.T) { exerciseFreshStartSQLWait(t, outcome) })
+	for _, continuation := range []bool{false, true} {
+		variant := "fresh start"
+		if continuation {
+			variant = "context continuation"
+		}
+		for _, outcome := range []string{"committed", "cancelled", "rejected commit", "failed commit"} {
+			t.Run(variant+"/"+outcome, func(t *testing.T) { exerciseFreshStartSQLWait(t, outcome, continuation) })
+		}
 	}
 }
 
-func exerciseFreshStartSQLWait(t *testing.T, outcome string) {
+func exerciseFreshStartSQLWait(t *testing.T, outcome string, continuation bool) {
 	t.Helper()
 	repo, _ := openRetentionLifecycleRepository(t, filepath.Join(t.TempDir(), "delivery.db"))
 	execution, event := retentionBootstrapOwner()
 	execution.deliveryBootstrap.Store(false)
-	execution.DeliveryHarnessGeneration, execution.ReplacesNativeConversation = 2, true
+	execution.DeliveryHarnessGeneration = 2
+	execution.ReplacesNativeConversation, execution.ForceContextContinuation = !continuation, continuation
 	event.DeliveryHarnessGeneration = 2
 	require.NoError(t, repo.CreateTask(t.Context(), &models.Task{ID: execution.TaskID, Title: "Fresh SQL wait"}))
 	require.NoError(t, repo.CreateTaskSession(t.Context(), &models.TaskSession{ID: execution.SessionID, TaskID: execution.TaskID, QueueIncarnationID: execution.DeliveryIncarnationID}))
@@ -73,6 +82,9 @@ func exerciseFreshStartSQLWait(t *testing.T, outcome string) {
 	successor := *predecessor
 	successor.Generation, successor.PredecessorGeneration = 2, 1
 	successor.NativeSessionID, successor.CreationReason = "replacement-native", "native_replaced"
+	if continuation {
+		successor.CreationReason = "context_continued"
+	}
 	if outcome != "cancelled" {
 		if outcome == "rejected commit" {
 			successor.NativeSessionID = "obsolete-native"
@@ -110,7 +122,7 @@ func exerciseFreshStartSQLWait(t *testing.T, outcome string) {
 	}
 	require.Equal(t, 1, receipts)
 	execution.DeliveryHarnessGeneration, event.DeliveryHarnessGeneration = 1, 1
-	execution.ReplacesNativeConversation = false
+	execution.ReplacesNativeConversation, execution.ForceContextContinuation = false, false
 	_, err = manager.prepareAgentEvent(t.Context(), execution, nil, reader, event)
 	require.True(t, errors.Is(err, ErrDurableAdoptionIdentityMismatch), "a delayed predecessor event must fail after the successor")
 	require.NoError(t, repo.DB().QueryRow("SELECT count(*) FROM agent_delivery_inbox").Scan(&receipts))
