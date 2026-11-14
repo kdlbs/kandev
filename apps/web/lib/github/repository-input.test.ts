@@ -10,10 +10,12 @@ describe("parseGitHubRepositoryInput", () => {
   });
 
   it("parses a GitHub repository URL", () => {
-    expect(parseGitHubRepositoryInput("https://github.com/kdlbs/kandev.git", "github.com")).toEqual({
-      owner: "kdlbs",
-      name: "kandev",
-    });
+    expect(parseGitHubRepositoryInput("https://github.com/kdlbs/kandev.git", "github.com")).toEqual(
+      {
+        owner: "kdlbs",
+        name: "kandev",
+      },
+    );
   });
 
   it.each(["", "kandev", "kdlbs/", "/kandev", "a/b/c", "kd lbs/kandev", "https://example.com/a/b"])(
