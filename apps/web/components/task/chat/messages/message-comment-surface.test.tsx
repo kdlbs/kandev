@@ -1,15 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useRef, type ReactNode } from "react";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import { createMessageTextAnchor } from "@/lib/chat/agent-message-comments";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
+import { SelectionCommentHostProvider } from "@/components/shared/selection-comment-dock";
 import { MessageCommentSurface } from "./message-comment-surface";
 
 const COMMENT_TEXT = vi.hoisted(() => "Make this concrete.");
 const TOUCH_DRAWER = vi.hoisted(() => ({ enabled: false }));
+const RESPONSIVE = vi.hoisted(() => ({ isMobile: false, isFinePointer: true }));
 
 vi.mock("@/hooks/use-compact-task-chrome", () => ({
   useTouchDrawer: () => TOUCH_DRAWER.enabled,
+}));
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => ({ ...RESPONSIVE }),
 }));
 vi.mock("@/hooks/domains/comments/use-run-comment", () => ({
   useRunComment: () => ({ runComment: vi.fn() }),
@@ -44,12 +50,44 @@ vi.mock("@/components/task/plan-selection-popover", () => ({
 const COMMENT_TRIGGER_TEST_ID = "agent-message-comment-trigger";
 const COMMENT_POPOVER_TEST_ID = "comment-popover";
 const SESSION_ID = "session-1";
+const MESSAGE_ID = "message-1";
 const MESSAGE_TEXT_TEST_ID = "message-text";
 const SELECTED_QUOTE = "settled answer";
+const SETTLED_ANSWER = "A settled answer.";
+
+function SelectionHost({ children }: { children: ReactNode }) {
+  const ownerRef = useRef<HTMLDivElement>(null);
+  const reserveRef = useRef<HTMLDivElement>(null);
+  return (
+    <SelectionCommentHostProvider ownerRef={ownerRef} reserveRef={reserveRef}>
+      <div
+        ref={(element) => {
+          ownerRef.current = element;
+          if (element) {
+            vi.spyOn(element, "getBoundingClientRect").mockReturnValue({
+              left: 20,
+              top: 30,
+              right: 340,
+              bottom: 530,
+              width: 320,
+              height: 500,
+              x: 20,
+              y: 30,
+              toJSON: () => ({}),
+            });
+          }
+        }}
+        data-testid="selection-owner"
+      >
+        <div ref={reserveRef}>{children}</div>
+      </div>
+    </SelectionCommentHostProvider>
+  );
+}
 
 function message(content: string): Message {
   return {
-    id: "message-1",
+    id: MESSAGE_ID,
     session_id: toSessionId(SESSION_ID),
     task_id: toTaskId("task-1"),
     author_type: "agent",
@@ -75,12 +113,12 @@ function addPendingComment(content: string, selectedText: string) {
     id: "comment-1",
     sessionId: SESSION_ID,
     source: "agent-message",
-    messageId: "message-1",
+    messageId: MESSAGE_ID,
     selectedText,
     text: COMMENT_TEXT,
     createdAt: "2026-07-21T00:00:00Z",
     status: "pending",
-    anchor: createMessageTextAnchor("message-1", content, start, start + selectedText.length),
+    anchor: createMessageTextAnchor(MESSAGE_ID, content, start, start + selectedText.length),
   });
 }
 
@@ -88,15 +126,139 @@ afterEach(() => {
   cleanup();
   resetComments();
   TOUCH_DRAWER.enabled = false;
+  RESPONSIVE.isMobile = false;
+  RESPONSIVE.isFinePointer = true;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
 describe("MessageCommentSurface selection capture", () => {
+  it("keeps the touch Comment action independent of the selection rectangle", () => {
+    TOUCH_DRAWER.enabled = true;
+    RESPONSIVE.isMobile = true;
+    const content = SETTLED_ANSWER;
+    let selectionTop = 180;
+    vi.spyOn(Range.prototype, "getBoundingClientRect").mockImplementation(
+      () => new DOMRect(100, selectionTop, 12, 18),
+    );
+    render(
+      <SelectionHost>
+        <MessageCommentSurface
+          message={message(content)}
+          sessionId={SESSION_ID}
+          isTurnActive={false}
+        >
+          <span data-testid={MESSAGE_TEXT_TEST_ID}>{content}</span>
+        </MessageCommentSurface>
+      </SelectionHost>,
+    );
+    const text = screen.getByTestId(MESSAGE_TEXT_TEST_ID).firstChild!;
+    const range = document.createRange();
+    const start = content.indexOf(SELECTED_QUOTE);
+    range.setStart(text, start);
+    range.setEnd(text, start + SELECTED_QUOTE.length);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    fireEvent.touchEnd(screen.getByTestId(MESSAGE_TEXT_TEST_ID).parentElement!);
+    const dockOrTrigger = () =>
+      screen.queryByTestId("selection-comment-dock") ??
+      screen.getByTestId(COMMENT_TRIGGER_TEST_ID).parentElement;
+    const firstPosition = {
+      left: dockOrTrigger()?.getAttribute("style"),
+      top: dockOrTrigger()?.getAttribute("style"),
+    };
+
+    selectionTop = 400;
+    fireEvent.touchEnd(screen.getByTestId(MESSAGE_TEXT_TEST_ID).parentElement!);
+
+    expect(dockOrTrigger()?.getAttribute("style")).toBe(firstPosition.top);
+  });
+});
+
+describe("MessageCommentSurface delayed touch selection", () => {
+  it("updates the touch quote after a delayed native selection change", () => {
+    TOUCH_DRAWER.enabled = true;
+    RESPONSIVE.isMobile = true;
+    const content = "A settled answer and final result.";
+    render(
+      <SelectionHost>
+        <MessageCommentSurface
+          message={message(content)}
+          sessionId={SESSION_ID}
+          isTurnActive={false}
+        >
+          <span data-testid={MESSAGE_TEXT_TEST_ID}>{content}</span>
+        </MessageCommentSurface>
+      </SelectionHost>,
+    );
+    const messageText = screen.getByTestId(MESSAGE_TEXT_TEST_ID);
+    const text = messageText.firstChild!;
+    const selection = window.getSelection()!;
+    const select = (quote: string) => {
+      const start = content.indexOf(quote);
+      const range = document.createRange();
+      range.setStart(text, start);
+      range.setEnd(text, start + quote.length);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    };
+
+    fireEvent.touchStart(messageText);
+    select("settled answer");
+    fireEvent.touchEnd(messageText.parentElement!);
+    expect(screen.getByTestId(COMMENT_TRIGGER_TEST_ID)).not.toBeNull();
+
+    select("final result");
+    fireEvent(document, new Event("selectionchange"));
+    fireEvent.click(screen.getByTestId(COMMENT_TRIGGER_TEST_ID));
+
+    expect(screen.getByTestId("agent-message-comment-drawer").textContent).toContain(
+      "final result",
+    );
+  });
+});
+
+describe("MessageCommentSurface collapsed touch selection", () => {
+  it("clears the touch action when the active selection collapses", () => {
+    TOUCH_DRAWER.enabled = true;
+    RESPONSIVE.isMobile = true;
+    const content = SETTLED_ANSWER;
+    render(
+      <SelectionHost>
+        <MessageCommentSurface
+          message={message(content)}
+          sessionId={SESSION_ID}
+          isTurnActive={false}
+        >
+          <span data-testid={MESSAGE_TEXT_TEST_ID}>{content}</span>
+        </MessageCommentSurface>
+      </SelectionHost>,
+    );
+    const messageText = screen.getByTestId(MESSAGE_TEXT_TEST_ID);
+    const text = messageText.firstChild!;
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, SELECTED_QUOTE.length);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    fireEvent.touchStart(messageText);
+    fireEvent.touchEnd(messageText.parentElement!);
+    expect(screen.getByTestId(COMMENT_TRIGGER_TEST_ID)).not.toBeNull();
+
+    selection.removeAllRanges();
+    fireEvent(document, new Event("selectionchange"));
+
+    expect(screen.queryByTestId(COMMENT_TRIGGER_TEST_ID)).toBeNull();
+  });
+});
+
+describe("MessageCommentSurface eligibility", () => {
   it.each(["outside", "cross-message", "active turn", "missing session"])(
     "does not offer a comment for an invalid selection: %s",
     (scenario) => {
-      const content = "A settled answer.";
+      const content = SETTLED_ANSWER;
       render(
         <>
           <MessageCommentSurface
@@ -163,7 +325,7 @@ describe("MessageCommentSurface selection capture", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
     const saved = Object.values(useCommentsStore.getState().byId)[0];
     expect(saved).toMatchObject({
-      messageId: "message-1",
+      messageId: MESSAGE_ID,
       selectedText: "The settled answer",
       text: COMMENT_TEXT,
     });
@@ -248,7 +410,7 @@ describe("MessageCommentSurface", () => {
   });
 
   it("keeps React-owned text nodes under their rendered parent", () => {
-    const content = "A settled answer.";
+    const content = SETTLED_ANSWER;
     addPendingComment(content, "settled");
 
     render(
@@ -380,7 +542,7 @@ describe("MessageCommentSurface fallback highlights", () => {
   it("renders visible ranges when the CSS Highlight API is unavailable", () => {
     vi.stubGlobal("CSS", {});
     vi.stubGlobal("Highlight", undefined);
-    const content = "A settled answer.";
+    const content = SETTLED_ANSWER;
     addPendingComment(content, "settled");
 
     render(

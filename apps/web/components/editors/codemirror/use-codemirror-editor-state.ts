@@ -13,6 +13,10 @@ import { computeLineDiffStats } from "@/lib/diff";
 import { useToast } from "@/components/toast-provider";
 import { useCommandPanelOpen } from "@/lib/commands/command-registry";
 import { useTranslation } from "react-i18next";
+import {
+  useCodeMirrorTouchSelection,
+  type CodeMirrorCurrentSelection,
+} from "./use-codemirror-touch-selection";
 // Resolved inside `toDOM()`, which is a CodeMirror gutter callback with no hook scope.
 import { t as moduleT } from "@/lib/i18n";
 
@@ -219,11 +223,7 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   const [wrapEnabled, setWrapEnabled] = useState(true);
   const [textSelection, setTextSelection] = useState<TextSelection>(null);
   const [floatingButtonPos, setFloatingButtonPos] = useState<FloatingButtonPosition>(null);
-  const [currentSelection, setCurrentSelection] = useState<{
-    text: string;
-    startLine: number;
-    endLine: number;
-  } | null>(null);
+  const [currentSelection, setCurrentSelection] = useState<CodeMirrorCurrentSelection>(null);
   const [commentView, setCommentView] = useState<CommentViewState>(null);
   const mousePositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const contentRef = useRef(opts.content);
@@ -265,40 +265,64 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
     return () => document.removeEventListener("mousemove", handleMouseMove);
   }, []);
 
-  // Show floating button after selection ends
-  const handleSelectionEnd = useCallback(() => {
-    if (!enableComments || !sessionId) return;
-    const view = editorRef.current?.view;
-    if (!view) return;
+  const readCurrentSelection = useCallback((view: EditorView) => {
     const selection = view.state.selection.main;
-    if (selection.empty) {
-      setFloatingButtonPos(null);
-      setCurrentSelection(null);
-      return;
-    }
+    if (selection.empty) return null;
     const selectedText = view.state.sliceDoc(selection.from, selection.to);
-    if (!selectedText.trim()) {
-      setFloatingButtonPos(null);
-      setCurrentSelection(null);
-      return;
-    }
+    if (!selectedText.trim()) return null;
     const startLine = view.state.doc.lineAt(selection.from).number;
     const endLine = view.state.doc.lineAt(selection.to).number;
-    setCurrentSelection({ text: selectedText, startLine, endLine });
+    return { text: selectedText, startLine, endLine };
+  }, []);
+
+  const { touchSelectionActiveRef, touchSelectionTimerRef } = useCodeMirrorTouchSelection({
+    enabled: enableComments && Boolean(sessionId),
+    wrapperRef,
+    editorRef,
+    readCurrentSelection,
+    setCurrentSelection,
+    setFloatingButtonPos,
+  });
+
+  const getSelectionPopoverPosition = useCallback(
+    (fallback?: FloatingButtonPosition) => {
+      const view = editorRef.current?.view;
+      if (!view) return fallback ?? mousePositionRef.current;
+      const selection = view.state.selection.main;
+      const coords = view.coordsAtPos(selection.to);
+      return coords ? { x: coords.left, y: coords.bottom } : (fallback ?? mousePositionRef.current);
+    },
+    [editorRef],
+  );
+
+  // Show floating button after mouse selection ends.
+  const handleSelectionEnd = useCallback(() => {
+    if (!enableComments || !sessionId || touchSelectionActiveRef.current) return;
+    const view = editorRef.current?.view;
+    if (!view) return;
+    const selection = readCurrentSelection(view);
+    setCurrentSelection(selection);
+    if (!selection) {
+      setFloatingButtonPos(null);
+      return;
+    }
     setFloatingButtonPos({ x: mousePositionRef.current.x, y: mousePositionRef.current.y });
-  }, [enableComments, sessionId, editorRef]);
+  }, [enableComments, sessionId, editorRef, readCurrentSelection]);
 
   // Mouse listeners for selection
   useEffect(() => {
     const wrapper = wrapperRef.current;
     if (!wrapper || !enableComments || !sessionId) return;
     const handleMouseUp = (e: MouseEvent) => {
+      if (touchSelectionActiveRef.current) return;
       if ((e.target as HTMLElement).closest(".floating-comment-btn")) return;
       setTimeout(handleSelectionEnd, 10);
     };
     const handleMouseDown = (e: MouseEvent) => {
+      if (touchSelectionActiveRef.current) return;
       if ((e.target as HTMLElement).closest(".floating-comment-btn")) return;
       setFloatingButtonPos(null);
+      setCurrentSelection(null);
     };
     wrapper.addEventListener("mouseup", handleMouseUp);
     wrapper.addEventListener("mousedown", handleMouseDown);
@@ -316,10 +340,14 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
         if (selection.empty) {
           setFloatingButtonPos(null);
           setCurrentSelection(null);
+          return;
         }
+        if (!enableComments || !sessionId || !touchSelectionActiveRef.current) return;
+        setCurrentSelection(readCurrentSelection(update.view));
+        setFloatingButtonPos(null);
       }
     });
-  }, []);
+  }, [enableComments, sessionId, readCurrentSelection]);
 
   // Extensions
   const extensions: Extension[] = useMemo(() => {
@@ -359,16 +387,28 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
     if (!wrapper || !enableComments || !sessionId) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "i") {
-        if (!currentSelection || !floatingButtonPos) return;
+        if (!currentSelection) return;
         e.preventDefault();
         e.stopPropagation();
-        setTextSelection({ ...currentSelection, position: floatingButtonPos });
+        setTextSelection({
+          ...currentSelection,
+          position: getSelectionPopoverPosition(floatingButtonPos),
+        });
+        setCurrentSelection(null);
         setFloatingButtonPos(null);
+        touchSelectionActiveRef.current = false;
       }
     };
     wrapper.addEventListener("keydown", handleKeyDown, true);
     return () => wrapper.removeEventListener("keydown", handleKeyDown, true);
-  }, [enableComments, sessionId, currentSelection, floatingButtonPos, wrapperRef]);
+  }, [
+    enableComments,
+    sessionId,
+    currentSelection,
+    floatingButtonPos,
+    getSelectionPopoverPosition,
+    wrapperRef,
+  ]);
 
   // Cmd+K for command panel
   useEffect(() => {
@@ -426,15 +466,51 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
     [onChange, computeDiffStats],
   );
 
+  const openComposerAt = useCallback(
+    (position: { x: number; y: number }) => {
+      if (!currentSelection) return;
+      setTextSelection({ ...currentSelection, position });
+      setCurrentSelection(null);
+      setFloatingButtonPos(null);
+      touchSelectionActiveRef.current = false;
+    },
+    [currentSelection],
+  );
+
   const handleFloatingButtonClick = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      if (!currentSelection || !floatingButtonPos) return;
-      setTextSelection({ ...currentSelection, position: floatingButtonPos });
-      setFloatingButtonPos(null);
+      if (!floatingButtonPos) return;
+      openComposerAt(floatingButtonPos);
     },
-    [currentSelection, floatingButtonPos],
+    [floatingButtonPos, openComposerAt],
+  );
+
+  const handleDockButtonClick = useCallback(() => {
+    if (!currentSelection) return;
+    openComposerAt(getSelectionPopoverPosition());
+  }, [currentSelection, getSelectionPopoverPosition, openComposerAt]);
+
+  const identityRef = useRef({ path, repo, sessionId });
+  useEffect(() => {
+    const previous = identityRef.current;
+    if (previous.path === path && previous.repo === repo && previous.sessionId === sessionId)
+      return;
+    identityRef.current = { path, repo, sessionId };
+    touchSelectionActiveRef.current = false;
+    setCurrentSelection(null);
+    setFloatingButtonPos(null);
+    setTextSelection(null);
+    setCommentView(null);
+  }, [path, repo, sessionId]);
+
+  useEffect(
+    () => () => {
+      if (touchSelectionTimerRef.current !== null)
+        window.clearTimeout(touchSelectionTimerRef.current);
+    },
+    [],
   );
 
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
@@ -462,6 +538,8 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
       };
       addComment(comment);
       setTextSelection(null);
+      setCurrentSelection(null);
+      touchSelectionActiveRef.current = false;
       const view = editorRef.current?.view;
       if (view) {
         view.dispatch({ selection: { anchor: view.state.selection.main.head } });
@@ -553,9 +631,11 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
     diffStats,
     textSelection,
     floatingButtonPos,
+    currentSelection,
     commentView,
     handleChange,
     handleFloatingButtonClick,
+    handleDockButtonClick,
     handleCommentSubmit,
     handleCommentSubmitAndRun,
     handlePopoverClose,

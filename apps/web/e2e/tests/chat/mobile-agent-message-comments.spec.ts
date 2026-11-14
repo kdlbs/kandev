@@ -4,7 +4,7 @@ import {
   openSeededWaitingAgentReply,
   openSeededQuickChatReply,
   SELECTED_REPLY_TEXT,
-  selectAgentReplyText,
+  selectAgentReplyTextWithTouch,
 } from "./agent-message-comments-helpers";
 
 async function expectTouchTarget(locator: Locator) {
@@ -12,6 +12,22 @@ async function expectTouchTarget(locator: Locator) {
   expect(box).not.toBeNull();
   if (!box) throw new Error("Expected a visible touch target");
   expect(box.height).toBeGreaterThanOrEqual(44);
+}
+
+async function expectDockWithinOwner(locator: Locator, owner: Locator, lowerBoundary?: Locator) {
+  const [dockBox, ownerBox] = await Promise.all([locator.boundingBox(), owner.boundingBox()]);
+  expect(dockBox).not.toBeNull();
+  expect(ownerBox).not.toBeNull();
+  if (!dockBox || !ownerBox) throw new Error("Expected owner and dock geometry");
+  expect(dockBox.x).toBeGreaterThanOrEqual(ownerBox.x - 1);
+  expect(dockBox.x + dockBox.width).toBeLessThanOrEqual(ownerBox.x + ownerBox.width + 1);
+  expect(dockBox.y).toBeGreaterThanOrEqual(ownerBox.y - 1);
+  expect(dockBox.y + dockBox.height).toBeLessThanOrEqual(ownerBox.y + ownerBox.height + 1);
+  if (lowerBoundary) {
+    const boundaryBox = await lowerBoundary.boundingBox();
+    expect(boundaryBox).not.toBeNull();
+    if (boundaryBox) expect(dockBox.y + dockBox.height).toBeLessThanOrEqual(boundaryBox.y + 1);
+  }
 }
 
 async function expectDrawerContained(page: Page, drawer: Locator) {
@@ -48,11 +64,15 @@ test.describe("Agent message comments on mobile", () => {
 
     // The fixture seeds a completed agent turn in a waiting session, so Run
     // sends directly and does not depend on mock-agent completion timing.
-    await selectAgentReplyText(body, SELECTED_REPLY_TEXT);
+    await selectAgentReplyTextWithTouch(body, SELECTED_REPLY_TEXT);
     const commentTrigger = testPage.getByTestId("agent-message-comment-trigger");
     await expect(commentTrigger).toBeVisible();
     await expectTouchTarget(commentTrigger);
-    await commentTrigger.click();
+    const dock = testPage.getByTestId("selection-comment-dock");
+    const owner = body.locator("xpath=ancestor::*[contains(@class,'chat-message-list')][1]");
+    const composer = testPage.locator(".tiptap.ProseMirror").last();
+    await expectDockWithinOwner(dock, owner, composer);
+    await commentTrigger.tap();
     const drawer = testPage.getByTestId("agent-message-comment-drawer");
     await expect(drawer).toBeVisible();
     await expectDrawerContained(testPage, drawer);
@@ -97,8 +117,13 @@ test.describe("Agent message comments on mobile", () => {
       "Mobile Quick Chat Message Comments",
     );
 
-    await selectAgentReplyText(body, SELECTED_REPLY_TEXT);
-    await testPage.getByTestId("agent-message-comment-trigger").click();
+    await selectAgentReplyTextWithTouch(body, SELECTED_REPLY_TEXT);
+    const commentTrigger = testPage.getByTestId("agent-message-comment-trigger");
+    const dock = testPage.getByTestId("selection-comment-dock");
+    const owner = body.locator("xpath=ancestor::*[contains(@class,'chat-message-list')][1]");
+    const composer = dialog.locator(".tiptap.ProseMirror").last();
+    await expectDockWithinOwner(dock, owner, composer);
+    await commentTrigger.tap();
     const drawer = testPage.getByTestId("agent-message-comment-drawer");
     await expect(drawer).toBeVisible();
     const input = drawer.getByTestId("agent-message-comment-input");

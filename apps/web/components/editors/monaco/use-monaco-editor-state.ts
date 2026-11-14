@@ -321,15 +321,64 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
       e.preventDefault();
       e.stopPropagation();
       if (!currentSelection) return;
+      const endLine = currentSelection.endLine;
       setFormZoneRange({
         startLine: currentSelection.startLine,
         endLine: currentSelection.endLine,
         codeContent: currentSelection.text,
       });
       setFloatingButtonPos(null);
+      requestAnimationFrame(() => editorRef.current?.revealLineInCenter(endLine));
     },
     [currentSelection],
   );
+
+  const handleDockButtonClick = useCallback(() => {
+    if (!currentSelection) return;
+    const endLine = currentSelection.endLine;
+    setFormZoneRange({
+      startLine: currentSelection.startLine,
+      endLine: currentSelection.endLine,
+      codeContent: currentSelection.text,
+    });
+    setCurrentSelection(null);
+    setFloatingButtonPos(null);
+    requestAnimationFrame(() => editorRef.current?.revealLineInCenter(endLine));
+  }, [currentSelection]);
+
+  const identityRef = useRef({ path, repo, sessionId });
+  useEffect(() => {
+    const previous = identityRef.current;
+    if (previous.path === path && previous.repo === repo && previous.sessionId === sessionId)
+      return;
+    identityRef.current = { path, repo, sessionId };
+    setCurrentSelection(null);
+    setFloatingButtonPos(null);
+    setFormZoneRange(null);
+  }, [path, repo, sessionId]);
+
+  useEffect(() => {
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+    const handleOutsidePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest(
+          "[data-selection-comment-dock-action], .floating-comment-btn, [data-comment-zone]",
+        )
+      ) {
+        return;
+      }
+      if (!(target instanceof Node) || !wrapper.contains(target)) {
+        setCurrentSelection(null);
+        setFloatingButtonPos(null);
+      }
+    };
+    wrapper.ownerDocument.addEventListener("pointerdown", handleOutsidePointerDown, true);
+    return () =>
+      wrapper.ownerDocument.removeEventListener("pointerdown", handleOutsidePointerDown, true);
+  }, [wrapperRef]);
 
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const { runComment } = useRunComment({
@@ -472,6 +521,7 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
     formZoneRange,
     setFormZoneRange,
     floatingButtonPos,
+    currentSelection,
     editingCommentId,
     setEditingComment,
     comments,
@@ -479,6 +529,7 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
     handleEditorDidMount,
     handleChange,
     handleFloatingButtonClick,
+    handleDockButtonClick,
     handleCommentSubmitRef,
     handleCommentSubmitAndRunRef,
     handleCommentDeleteRef,

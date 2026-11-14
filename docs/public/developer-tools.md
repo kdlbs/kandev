@@ -92,7 +92,7 @@ Quick Chat is an agent conversation outside the board. Use it for repository ori
 
 ### Comment on an agent reply
 
-In Task Chat or Quick Chat, select text from a settled agent prose reply, then select the comment button that appears beside the selection. The editor works like plan comments: enter feedback and choose **Add** to keep it as pending context, or **Run** to send it immediately. Pending selections use the same inline highlight and comment badge as plans; select either one to update or delete the feedback. Pending message comments are kept for the current browser tab, appear as composer context chips, and are included in the next prompt as Markdown. If the agent is busy, **Run** queues the feedback for its next turn.
+In Task Chat or Quick Chat, select text in a settled agent reply. On phones and touch devices, use **Comment** in the dock at the bottom of the visible chat. Native text-selection actions remain available. Other devices show the action beside the selection. Enter feedback in the editor. Select **Add** to keep it as pending context, or select **Run** to send it now. Pending selections use the same inline highlight and comment badge as plans. Select either one to update or delete the feedback. Pending message comments stay in the current browser tab. They appear as composer context chips and are included in the next prompt as Markdown. If the agent is busy, **Run** queues the feedback for its next turn.
 
 Inline comments are available only on ordinary settled prose. Streaming replies, tool/thinking/status output, plans, rich-block content, raw views, and user messages do not accept inline comments.
 

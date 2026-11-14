@@ -7,6 +7,14 @@ export type VisualViewportOffset = {
   keyboardOpen: boolean;
   /** Y-coordinate of the visual viewport's bottom edge in the layout viewport — `vv.offsetTop + vv.height`. Use with `position: fixed; top:` to pin an element above the keyboard reliably on iOS even during scrolls. */
   viewportBottom: number;
+  /** X-coordinate of the visual viewport's left edge in the layout viewport. */
+  viewportLeft: number;
+  /** Y-coordinate of the visual viewport's top edge in the layout viewport. */
+  viewportTop: number;
+  /** Width of the visible viewport in layout viewport CSS pixels. */
+  viewportWidth: number;
+  /** Height of the visible viewport in layout viewport CSS pixels. */
+  viewportHeight: number;
 };
 
 const KEYBOARD_THRESHOLD_PX = 80;
@@ -34,7 +42,15 @@ export function resolveVisualViewportPosition({
 
 function readOffset(): VisualViewportOffset {
   if (typeof window === "undefined" || !window.visualViewport) {
-    return { bottomOffset: 0, keyboardOpen: false, viewportBottom: 0 };
+    return {
+      bottomOffset: 0,
+      keyboardOpen: false,
+      viewportBottom: 0,
+      viewportLeft: 0,
+      viewportTop: 0,
+      viewportWidth: 0,
+      viewportHeight: 0,
+    };
   }
   const vv = window.visualViewport;
   const bottomOffset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
@@ -42,6 +58,10 @@ function readOffset(): VisualViewportOffset {
     bottomOffset,
     keyboardOpen: bottomOffset > KEYBOARD_THRESHOLD_PX,
     viewportBottom: vv.offsetTop + vv.height,
+    viewportLeft: vv.offsetLeft,
+    viewportTop: vv.offsetTop,
+    viewportWidth: vv.width,
+    viewportHeight: vv.height,
   };
 }
 
@@ -56,6 +76,10 @@ export function useVisualViewportOffset(): VisualViewportOffset {
     bottomOffset: 0,
     keyboardOpen: false,
     viewportBottom: 0,
+    viewportLeft: 0,
+    viewportTop: 0,
+    viewportWidth: 0,
+    viewportHeight: 0,
   }));
 
   useEffect(() => {

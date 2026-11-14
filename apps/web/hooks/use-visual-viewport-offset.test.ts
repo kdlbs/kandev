@@ -72,6 +72,21 @@ describe("useVisualViewportOffset", () => {
     expect(result.current.viewportBottom).toBe(650);
   });
 
+  it("tracks the full visual viewport rectangle when the page is panned", () => {
+    const { result } = renderHook(() => useVisualViewportOffset());
+    act(() => {
+      vv.width = 300;
+      vv.height = 600;
+      vv.offsetLeft = 40;
+      vv.offsetTop = 30;
+      vv.dispatchEvent(new Event("scroll"));
+    });
+    expect(result.current.viewportLeft).toBe(40);
+    expect(result.current.viewportTop).toBe(30);
+    expect(result.current.viewportWidth).toBe(300);
+    expect(result.current.viewportHeight).toBe(600);
+  });
+
   it("accounts for offsetTop", () => {
     const { result } = renderHook(() => useVisualViewportOffset());
 
