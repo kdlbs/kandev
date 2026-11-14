@@ -231,7 +231,7 @@ Add indexes after additive migrations:
 - Sparse terminal frontier `(stream_id, sequence) WHERE terminal <> 0` avoids scanning nonterminal events to find an unresolved terminal.
 - Eligible payload scan `(projected_at, stream_id, sequence)` restricted to `payload_pruned_at IS NULL AND projected_at IS NOT NULL` on both engines.
 - Submission `(fully_settled_at, id)` for unpruned terminal payloads; `(session_id, incarnation_id, id)` for purge.
-- Effects: `(stream_id, sequence, state)` proofs; nonempty-SID `(session_id, incarnation_id)` identity and `(session_id, effect_key)` purge indexes. Probe with `session_id <> ''`.
+- Effects: `(stream_id, sequence, state)` proofs; identity `(session_id, incarnation_id)` and purge `(session_id, effect_key)` (probe `session_id <> ''`); sparse `(effect_key)` for bounded unbound workflow counts.
 - Terminal lookup `(effect_type, submission_id, stream_id, sequence)` for current MAX and exact binding.
 - Cursors `(session_id, stream_id)` for bounded attribution; jobs `(phase, session_id, incarnation_id)` and unique identity.
 

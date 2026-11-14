@@ -372,13 +372,25 @@ func normalizeAgentDeliveryOrphanOptions(limit int, timeout time.Duration) model
 }
 
 func (r *Repository) countUnboundWorkflowRowsTx(ctx context.Context, tx *sqlx.Tx, limit int) (int, error) {
-	var count int
-	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+	query := `
 		SELECT COUNT(*) FROM (
 			SELECT effect_key FROM agent_delivery_effects
 			WHERE effect_type = ? AND (session_id = '' OR incarnation_id = '')
 			ORDER BY effect_key LIMIT ?
-		)`), "workflow.on_turn_complete", limit).Scan(&count)
+		)`
+	args := []any{"workflow.on_turn_complete", limit}
+	if r.db.DriverName() == dialect.SQLite3 {
+		query = `
+			SELECT COUNT(*) FROM (
+				SELECT effect_key FROM agent_delivery_effects
+				INDEXED BY idx_agent_delivery_effects_unbound_workflow
+				WHERE effect_type = 'workflow.on_turn_complete' AND (session_id = '' OR incarnation_id = '')
+				ORDER BY effect_key LIMIT ?
+			)`
+		args = []any{limit}
+	}
+	var count int
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(query), args...).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count bounded unbound workflow receipts: %w", err)
 	}
