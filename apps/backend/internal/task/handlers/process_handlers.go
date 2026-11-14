@@ -50,7 +50,7 @@ type ProcessHandlers struct {
 	cursorMCPRecovery          cursorMCPRecoveryManager
 	terminalSvc                cursorMCPRecoveryTerminalService
 	cursorMCPRecoveryMu        sync.Mutex
-	sessionAdmissionFence      func(string) func()
+	sessionAdmissionFence      func(context.Context, string) (func(), bool)
 	logger                     *logger.Logger
 }
 
@@ -105,7 +105,9 @@ func RegisterProcessRoutes(
 // SetSessionAdmissionFence wires the per-session lifecycle fence that idle
 // runtime reclaim holds. Process start admission takes it so a command cannot
 // start between reclaim's workspace-process check and its instance stop.
-func (h *ProcessHandlers) SetSessionAdmissionFence(acquire func(string) func()) {
+// acquire reports false when the request context ends before the fence is
+// held, so a canceled start stops waiting behind a slow reclaim.
+func (h *ProcessHandlers) SetSessionAdmissionFence(acquire func(context.Context, string) (func(), bool)) {
 	h.sessionAdmissionFence = acquire
 }
 
@@ -327,7 +329,11 @@ func (h *ProcessHandlers) startPreparedSessionProcess(
 	portEnv map[string]string,
 ) {
 	if h.sessionAdmissionFence != nil {
-		release := h.sessionAdmissionFence(sessionID)
+		release, ok := h.sessionAdmissionFence(c.Request.Context(), sessionID)
+		if !ok {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "process start was canceled while waiting for the session runtime"})
+			return
+		}
 		defer release()
 	}
 	if !h.ensureAgentctlReady(c, session, sessionID) {

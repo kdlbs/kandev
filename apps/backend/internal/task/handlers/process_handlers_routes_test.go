@@ -395,10 +395,10 @@ func TestStartSessionProcessHoldsSessionAdmissionFence(t *testing.T) {
 	t.Cleanup(server.Close)
 	h := newForeignProcessHandlers(t, managerWithSessionExecution(t, server.URL, "sess-b"))
 	var fencedSession string
-	h.SetSessionAdmissionFence(func(sessionID string) func() {
+	h.SetSessionAdmissionFence(func(_ context.Context, sessionID string) (func(), bool) {
 		fencedSession = sessionID
 		fenceHeld.Store(true)
-		return func() { fenceHeld.Store(false) }
+		return func() { fenceHeld.Store(false) }, true
 	})
 
 	c, rec := processRequestAs(t, "user-b", http.MethodPost, "/api/v1/task-sessions/sess-b/processes/start", "")

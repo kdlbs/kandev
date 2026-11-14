@@ -1,5 +1,7 @@
 package orchestrator
 
+import "context"
+
 // LSPLeaseLifecycle is the narrow runtime bridge needed to keep retained
 // language servers alive through idle reclaim and stop them with their task.
 type LSPLeaseLifecycle interface {
@@ -21,4 +23,14 @@ func (s *Service) SetLSPLeaseLifecycle(lifecycle LSPLeaseLifecycle) {
 // started command cannot race idle cleanup.
 func (s *Service) AcquireSessionLifecycleFence(sessionID string) func() {
 	return s.acquireSessionLifecycleLock(sessionID)
+}
+
+// AcquireSessionLifecycleFenceContext is AcquireSessionLifecycleFence for a
+// request-scoped caller: it stops waiting and reports false once ctx ends, so a
+// canceled process start does not stay blocked behind a slow reclaim.
+func (s *Service) AcquireSessionLifecycleFenceContext(ctx context.Context, sessionID string) (func(), bool) {
+	if sessionID == "" {
+		return func() {}, true
+	}
+	return s.acquireSessionLifecycleLockWithContext(ctx, sessionID)
 }
