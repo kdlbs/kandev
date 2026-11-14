@@ -5,6 +5,8 @@ package launcher
 import (
 	"syscall"
 
+	"github.com/kandev/kandev/internal/common/winproc"
+
 	"golang.org/x/sys/windows"
 )
 
@@ -14,9 +16,10 @@ import (
 // kill path (design 01's kill-path #3) stays unconditional regardless.
 func buildSysProcAttr(_ bool) *syscall.SysProcAttr {
 	// CREATE_NEW_PROCESS_GROUP so Ctrl+C doesn't propagate directly. HideWindow
-	// hides a newly created console without detaching agentctl from that console.
+	// hides a newly created console without detaching agentctl from that console;
+	// without a console window to share, CREATE_NO_WINDOW keeps it off the desktop.
 	return &syscall.SysProcAttr{
 		HideWindow:    true,
-		CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED,
+		CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED | winproc.NoConsoleWindowFlag(),
 	}
 }

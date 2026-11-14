@@ -14,7 +14,9 @@ import (
 	"testing"
 	"time"
 
+	commonwinproc "github.com/kandev/kandev/internal/common/winproc"
 	"github.com/stretchr/testify/require"
+
 	"golang.org/x/sys/windows"
 )
 
@@ -37,7 +39,7 @@ func TestWindowsACPCommandProcAttrHidesConsoleWindow(t *testing.T) {
 	require.NotZero(t, flags&syscall.CREATE_NEW_PROCESS_GROUP, "CreationFlags = %#x, want CREATE_NEW_PROCESS_GROUP", flags)
 	require.NotZero(t, flags&windows.CREATE_SUSPENDED, "CreationFlags = %#x, want CREATE_SUSPENDED", flags)
 	require.True(t, cmd.SysProcAttr.HideWindow, "HideWindow = false, want true")
-	require.Zero(t, flags&windows.CREATE_NO_WINDOW, "CreationFlags = %#x, must not include CREATE_NO_WINDOW", flags)
+	require.Equal(t, commonwinproc.NoConsoleWindowFlag(), flags&windows.CREATE_NO_WINDOW, "CreationFlags = %#x, conditional CREATE_NO_WINDOW", flags)
 }
 
 func TestWindowsACPCommandLifecycleJobKillsDescendants(t *testing.T) {
