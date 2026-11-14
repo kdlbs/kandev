@@ -2,6 +2,8 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -11,9 +13,16 @@ import (
 type primarySessionWorkspaceProvider struct {
 	*mockWorkspaceInfoProvider
 	primary *models.TaskSession
+	// promoted, when set, is the primary every read after the first returns,
+	// modelling a primary-session change while the owner execution restores.
+	promoted *models.TaskSession
+	reads    atomic.Int32
 }
 
 func (p *primarySessionWorkspaceProvider) GetPrimarySession(context.Context, string) (*models.TaskSession, error) {
+	if p.reads.Add(1) > 1 && p.promoted != nil {
+		return p.promoted, nil
+	}
 	return p.primary, nil
 }
 
@@ -68,5 +77,25 @@ func TestGetOrEnsureExecutionForTaskEnvironmentDoesNotBorrowSiblingExecution(t *
 	}
 	if again.ID != got.ID || backend.createCount.Load() != 1 {
 		t.Fatalf("reopen execution = %s (creates %d), want cached %s", again.ID, backend.createCount.Load(), got.ID)
+	}
+}
+
+// A primary-session change while the owner execution restores must not hand
+// the terminal the previous primary's execution.
+func TestGetOrEnsureExecutionForTaskEnvironmentRejectsPrimaryChangeDuringRestore(t *testing.T) {
+	child := &models.TaskSession{ID: "session-child", TaskID: "task-child", TaskEnvironmentID: "env-shared"}
+	mgr, _ := newSharedEnvironmentOwnerManager(t, child)
+	provider := mgr.workspaceInfoProvider.(*primarySessionWorkspaceProvider)
+	provider.promoted = &models.TaskSession{ID: "session-child-2", TaskID: "task-child", TaskEnvironmentID: "env-shared"}
+
+	got, err := mgr.GetOrEnsureExecutionForTaskEnvironment(context.Background(), "task-child", "env-shared")
+	if !errors.Is(err, ErrSessionWorkspaceNotReady) {
+		t.Fatalf("error = %v (execution returned: %t), want ErrSessionWorkspaceNotReady", err, got != nil)
+	}
+	if got != nil {
+		t.Fatalf("execution = %s/%s, want none after the primary changed", got.TaskID, got.SessionID)
+	}
+	if provider.reads.Load() < 2 {
+		t.Fatalf("primary reads = %d, want the post-restore re-read", provider.reads.Load())
 	}
 }
