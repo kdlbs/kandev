@@ -355,6 +355,7 @@ function MarkdownPreviewCommentOverlays({
           hostRef={hostRef}
           onOpen={commentState.openComposer}
           testId="markdown-preview-comment-button"
+          className="min-h-11 sm:min-h-8"
         />
       )}
       {commentState.textSelection && (

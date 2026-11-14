@@ -69,6 +69,14 @@ describe("MarkdownPreviewContent selection comment trigger", () => {
     expect(screen.queryByRole("toolbar", { name: "Selection actions" })).toBeNull();
   });
 
+  it("keeps the fine-pointer comment button at the phone hit-target size", () => {
+    renderPreview();
+
+    const button = screen.getByTestId("markdown-preview-comment-button");
+    expect(button.classList.contains("min-h-11")).toBe(true);
+    expect(button.classList.contains("sm:min-h-8")).toBe(true);
+  });
+
   it("docks the comment button in a toolbar on touch", () => {
     STATE.touch = true;
     renderPreview();

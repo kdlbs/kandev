@@ -24,6 +24,7 @@ export function EditorSelectionCommentTrigger({
   hostRef,
   onOpen,
   testId = COMMENT_BUTTON_TEST_ID,
+  className,
 }: {
   touch: boolean;
   position: { left: number; top: number };
@@ -31,6 +32,7 @@ export function EditorSelectionCommentTrigger({
   hostRef?: RefObject<HTMLElement | null>;
   onOpen: () => void;
   testId?: string;
+  className?: string;
 }) {
   const { t } = useTranslation();
   if (touch) {
@@ -53,6 +55,7 @@ export function EditorSelectionCommentTrigger({
       className={cn(
         "floating-comment-btn z-50 gap-1.5 shadow-lg animate-in fade-in-0 zoom-in-95 duration-100 cursor-pointer",
         positioning,
+        className,
       )}
       style={position}
       onMouseDown={(event) => event.stopPropagation()}

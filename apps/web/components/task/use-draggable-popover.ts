@@ -32,9 +32,50 @@ export function computePopoverInitialPos(
   return { left, top };
 }
 
-export function useDraggablePopover(position: AnchorPosition, width: number, height: number) {
+function clampPopoverPos(
+  position: PopoverPosition,
+  width: number,
+  height: number,
+  viewportWidth: number,
+  viewportHeight: number,
+): PopoverPosition {
+  const minLeft = 16;
+  const minTop = 16;
+  const maxLeft = Math.max(minLeft, viewportWidth - width - 16);
+  const maxTop = Math.max(minTop, viewportHeight - height - 16);
+  return {
+    left: Math.min(Math.max(position.left, minLeft), maxLeft),
+    top: Math.min(Math.max(position.top, minTop), maxTop),
+  };
+}
+
+export function useDraggablePopover(
+  position: AnchorPosition,
+  width: number,
+  height: number,
+  popoverRef?: RefObject<HTMLElement | null>,
+) {
   const [pos, setPos] = useState(() => computePopoverInitialPos(position, width, height));
   const dragRef = useRef<DragState | null>(null);
+
+  useEffect(() => {
+    const clampToViewport = () => {
+      const bounds = popoverRef?.current?.getBoundingClientRect();
+      const popoverWidth = bounds?.width || Math.min(width, window.innerWidth - 32);
+      const popoverHeight = bounds?.height || height;
+      setPos((current) =>
+        clampPopoverPos(
+          current,
+          popoverWidth,
+          popoverHeight,
+          window.innerWidth,
+          window.innerHeight,
+        ),
+      );
+    };
+    window.addEventListener("resize", clampToViewport);
+    return () => window.removeEventListener("resize", clampToViewport);
+  }, [height, popoverRef, width]);
 
   const onDragStart = useCallback(
     (event: ReactMouseEvent) => {
