@@ -91,9 +91,10 @@ func MCPProbe(ctx context.Context, r *Runner) (*MCPProbeResult, error) {
 	sentinel := NewMCPSentinel(r.rec)
 	defer sentinel.Close()
 	newResp, err := sendSessionNewWithMCP(ctx, r, []any{map[string]any{
-		"name": "acpdbg-sentinel",
-		"type": "http",
-		"url":  sentinel.URL(),
+		"name":    "acpdbg-sentinel",
+		"type":    "http",
+		"url":     sentinel.URL(),
+		"headers": sentinel.Headers(),
 	}})
 	if err != nil {
 		return nil, fmt.Errorf("session/new: %w", err)

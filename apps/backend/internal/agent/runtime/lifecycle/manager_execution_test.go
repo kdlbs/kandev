@@ -62,6 +62,7 @@ func TestPrepareExecutionCreateRequestRetainsSessionJournalOwnership(t *testing.
 	for _, sessionID := range []string{"session-1", ""} {
 		t.Run(sessionID, func(t *testing.T) {
 			mgr := newTestManager(t)
+			mgr.SetBuiltinMCPAuthEnforced(true)
 			mgr.dataDir = t.TempDir()
 			prepared, err := mgr.prepareExecutionCreateRequest(context.Background(), "task-1", &WorkspaceInfo{
 				SessionID: sessionID, TaskEnvironmentID: "environment-1", AgentID: "auggie",
@@ -80,6 +81,9 @@ func TestPrepareExecutionCreateRequestRetainsSessionJournalOwnership(t *testing.
 			}
 			if prepared.request.DeliveryIncarnationID != "incarnation-1" || prepared.request.DeliveryHarnessGeneration != 3 || prepared.request.DeliveryStreamID != "incarnation-1:g3" {
 				t.Fatalf("workspace restore lost durable delivery identity: %+v", prepared.request)
+			}
+			if !prepared.request.BuiltinMCPAuthEnforced {
+				t.Fatal("workspace restore lost built-in MCP caller-auth mode")
 			}
 		})
 	}

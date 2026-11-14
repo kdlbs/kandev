@@ -287,6 +287,16 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 		zap.String("workspace_path", req.WorkspacePath))
 
 	overrides := m.buildInstanceOverrides(id, req, agentCmd, admission.agentEnv)
+	var credential string
+	if req.BuiltinMCPAuthEnforced {
+		generated, err := config.NewBuiltinMCPCredential()
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		credential = generated
+	}
+	overrides.BuiltinMCPCredential = credential
+	overrides.BuiltinMCPAuthEnforced = req.BuiltinMCPAuthEnforced
 
 	m.logger.Info("CreateInstance: applying overrides",
 		zap.String("override_protocol", string(overrides.Protocol)))
@@ -349,7 +359,8 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 		SessionID:     req.SessionID,
 		TaskID:        req.TaskID,
 		manager:       procMgr,
-		listenerDone:  make(chan struct{}),
+
+		listenerDone: make(chan struct{}),
 	}
 	inst.MarkActivity()
 

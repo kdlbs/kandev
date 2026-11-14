@@ -8,6 +8,7 @@ import (
 	"time"
 
 	mcpclient "github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -25,17 +26,18 @@ func callTUIMCPContext() (string, error) {
 	}
 	var config struct {
 		Servers map[string]struct {
-			URL string `json:"url"`
+			URL     string            `json:"url"`
+			Headers map[string]string `json:"headers"`
 		} `json:"mcpServers"`
 	}
 	if err := json.Unmarshal(data, &config); err != nil {
 		return "", err
 	}
-	url := config.Servers["kandev"].URL
-	if url == "" {
+	kandev := config.Servers["kandev"]
+	if kandev.URL == "" {
 		return "", errors.New("missing Kandev MCP URL")
 	}
-	client, err := mcpclient.NewStreamableHttpClient(url)
+	client, err := mcpclient.NewStreamableHttpClient(kandev.URL, transport.WithHTTPHeaders(kandev.Headers))
 	if err != nil {
 		return "", err
 	}

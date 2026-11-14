@@ -362,6 +362,14 @@ type InstanceConfig struct {
 	// TaskID is the task ID for this agent instance (used in MCP plan tool calls)
 	TaskID string
 
+	// BuiltinMCPCredential is this instance's built-in MCP caller credential.
+	// It lives only in agentctl memory and is never serialized.
+	BuiltinMCPCredential string `json:"-"`
+
+	// BuiltinMCPAuthEnforced makes the built-in MCP routes reject callers that
+	// do not present BuiltinMCPCredential. Fixed at instance creation.
+	BuiltinMCPAuthEnforced bool `json:"-"`
+
 	// ContinueCommand is the command template for follow-up prompts in one-shot agents.
 	// When set, the adapter spawns a new process per prompt using this command for
 	// continuation (thread ID appended at runtime). No production adapter is
@@ -755,6 +763,7 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) (*Ins
 	}
 
 	applyOverrides(cfg, overrides)
+	applyBuiltinMCPAuth(cfg, overrides)
 	if cfg.McpProfile != nil && cfg.McpProfile.BuiltinPackages != nil && port <= 0 {
 		return nil, fmt.Errorf("built-in MCP packages require an instance port")
 	}
@@ -951,6 +960,8 @@ type InstanceOverrides struct {
 	DeliveryHarnessGeneration    uint64
 	OpenCodePluginRuntime        *agentctltypes.OpenCodePluginRuntime
 	ManagedRuntimeInstallContext *agentctltypes.ManagedRuntimeInstallContext
+	BuiltinMCPCredential         string
+	BuiltinMCPAuthEnforced       bool
 }
 
 func cloneComparisonTargets(values map[string]models.ComparisonTarget) map[string]models.ComparisonTarget {
@@ -1358,19 +1369,21 @@ const kandevMcpServerName = "kandev"
 // the "first surviving entry wins" dedup keeps the HTTP entry (modern streamable MCP);
 // SSE remains as a fallback for SSE-only agents.
 func injectKandevMcpServer(servers []McpServerConfig, port int) []McpServerConfig {
-	return injectKandevMcpServerAtHost(servers, port, "localhost")
+	return injectKandevMcpServerAtHost(servers, port, "localhost", "")
 }
 
-func injectKandevMcpServerAtHost(servers []McpServerConfig, port int, host string) []McpServerConfig {
+func injectKandevMcpServerAtHost(servers []McpServerConfig, port int, host, credential string) []McpServerConfig {
 	kandevMcpSse := McpServerConfig{
-		Name: kandevMcpServerName,
-		Type: "sse",
-		URL:  MCPServerURL(host, port, "/sse"),
+		Name:    kandevMcpServerName,
+		Type:    "sse",
+		URL:     MCPServerURL(host, port, "/sse"),
+		Headers: BuiltinMCPHeaders(credential),
 	}
 	kandevMcpHttp := McpServerConfig{
-		Name: kandevMcpServerName,
-		Type: "http",
-		URL:  MCPServerURL(host, port, "/mcp"),
+		Name:    kandevMcpServerName,
+		Type:    "http",
+		URL:     MCPServerURL(host, port, "/mcp"),
+		Headers: BuiltinMCPHeaders(credential),
 	}
 
 	// Filter out any existing kandev server and prepend the local ones

@@ -91,16 +91,17 @@ func composeLegacyMCPServers(
 	allowedProfileServers []agentctltypes.McpServer,
 	userOwnedProjectServers map[string]json.RawMessage,
 	allowedImportCandidates map[string]agentctltypes.McpServer,
-	host string,
+	host, credential string,
 ) (map[string]any, map[string]string) {
 	newMCPServers := make(map[string]any)
 	newOwnership := make(map[string]string)
 
 	port := passthroughMCPConfigPort(execution)
 	if port > 0 {
-		newMCPServers[kandevMCPServerName] = map[string]any{
-			"url": agentctlconfig.MCPServerURL(host, port, "/mcp"),
-		}
+		newMCPServers[kandevMCPServerName] = cursorBuiltinMCPEntry(
+			agentctlconfig.MCPServerURL(host, port, "/mcp"),
+			agentctlconfig.BuiltinMCPHeaders(credential),
+		)
 	}
 
 	for _, srv := range allowedProfileServers {

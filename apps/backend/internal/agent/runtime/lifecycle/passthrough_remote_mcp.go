@@ -17,7 +17,11 @@ func (m *Manager) applySSHPassthroughMCP(ctx context.Context, execution *AgentEx
 	if err != nil {
 		return preparedPassthroughMCP{}, err
 	}
-	resolved, err := builtinPassthroughMCPServers(execution, snapshot.MCPURL, operation.servers)
+	credential, err := executionBuiltinMCPCredential(ctx, execution)
+	if err != nil {
+		return preparedPassthroughMCP{}, err
+	}
+	resolved, err := builtinPassthroughMCPServers(execution, snapshot.MCPURL, credential, operation.servers)
 	if err != nil {
 		return preparedPassthroughMCP{}, err
 	}

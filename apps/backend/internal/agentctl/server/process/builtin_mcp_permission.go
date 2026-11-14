@@ -25,12 +25,12 @@ func (m *Manager) builtinPermissionAllowed(name, tool string) bool {
 	if catalog == nil || !slices.Contains(catalog()[id], tool) {
 		return false
 	}
-	expected, err := config.BuiltinMCPServers(m.cfg.McpProfile.BuiltinPackages, m.cfg.MCPHost, m.cfg.Port)
+	expected, err := config.BuiltinMCPServers(m.cfg.McpProfile.BuiltinPackages, m.cfg.MCPHost, m.cfg.Port, m.cfg.BuiltinMCPCredential)
 	if err != nil {
 		return false
 	}
 	for _, candidate := range m.cfg.McpServers {
-		if candidate.Name != name || !builtinEndpointOnly(candidate) {
+		if candidate.Name != name || !builtinEndpointOnly(candidate, m.cfg.BuiltinMCPCredential) {
 			continue
 		}
 		for _, injected := range expected {
@@ -42,6 +42,9 @@ func (m *Manager) builtinPermissionAllowed(name, tool string) bool {
 	return false
 }
 
-func builtinEndpointOnly(server config.McpServerConfig) bool {
-	return server.Command == "" && len(server.Args) == 0 && len(server.Env) == 0 && len(server.Headers) == 0
+// builtinEndpointOnly reports whether server is a bare built-in endpoint whose
+// only headers are exactly the instance's own caller credential.
+func builtinEndpointOnly(server config.McpServerConfig, credential string) bool {
+	return server.Command == "" && len(server.Args) == 0 && len(server.Env) == 0 &&
+		config.BuiltinMCPHeadersMatch(server.Headers, credential)
 }

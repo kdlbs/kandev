@@ -257,6 +257,8 @@ func runMCPProbe(ctx context.Context, args []string) error {
 	fmt.Printf("initialize_observed: %t\n", result.Sentinel.InitializeObserved)
 	fmt.Printf("tools_list_observed: %t (tools: %d)\n", result.Sentinel.ToolsListObserved, result.Sentinel.ToolCount)
 	fmt.Printf("tool_call_observed:  %t\n", result.Sentinel.ToolCallObserved)
+	fmt.Printf("header_observed:     %t\n", result.Sentinel.HeaderObserved)
+	fmt.Printf("header_missing:      %t\n", result.Sentinel.HeaderMissing)
 	if !result.Sentinel.InitializeObserved {
 		fmt.Println("status: unobserved (the agent accepted delivery but did not contact the sentinel during the probe window)")
 	}

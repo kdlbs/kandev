@@ -121,6 +121,15 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Built-in MCP caller authentication: each agentctl instance rejects
+  # built-in MCP calls that lack its own caller credential. Off in prod and
+  # dev until provider compatibility is verified; on in e2e (test-only
+  # exception) so the enforcement path runs in CI.
+  KANDEV_FEATURES_BUILTIN_MCP_CALLER_AUTH:
+    prod: "false"
+    dev:  "false"
+    e2e:  "true"
+
   # High-risk Claude-only background prompt handoff experiment. Off in every
   # profile so it is exercised only by contributors who deliberately opt in.
   KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF:

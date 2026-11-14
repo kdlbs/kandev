@@ -132,6 +132,7 @@ func provideLifecycleManager(
 		cfg.ResolvedHomeDir(),
 		log,
 	)
+	lifecycleMgr.SetBuiltinMCPAuthEnforced(cfg.Features.BuiltinMCPCallerAuth)
 	configureMCPResolver(lifecycleMgr, agentSettingsRepo, mcpService, secretStores.runtime)
 	if stateRepo, ok := agentSettingsRepo.(mcpconfig.SessionMCPSelectionStateRepository); ok {
 		lifecycleMgr.SetMCPSelectionStateRepository(stateRepo)

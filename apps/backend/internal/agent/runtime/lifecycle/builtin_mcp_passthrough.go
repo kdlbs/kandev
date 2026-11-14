@@ -13,7 +13,9 @@ import (
 
 const builtinCoreMCPPath = "/mcp"
 
-func builtinPassthroughMCPServers(execution *AgentExecution, coreURL string, requested []types.McpServer) ([]types.McpServer, error) {
+// builtinPassthroughMCPServers returns the built-in HTTP entries for the
+// execution's agentctl instance, carrying credential, followed by requested.
+func builtinPassthroughMCPServers(execution *AgentExecution, coreURL, credential string, requested []types.McpServer) ([]types.McpServer, error) {
 	var manifest *p.BuiltinManifest
 	if value, bound := execution.metadataValue(p.BuiltinBindingMetadataKey); bound {
 		profile, err := p.ParseBuiltinBindingMetadata(value)
@@ -29,14 +31,14 @@ func builtinPassthroughMCPServers(execution *AgentExecution, coreURL string, req
 	if err != nil {
 		return nil, err
 	}
-	native, err := agentctlconfig.BuiltinMCPServers(manifest, host, port)
+	native, err := agentctlconfig.BuiltinMCPServers(manifest, host, port, credential)
 	if err != nil {
 		return nil, err
 	}
 	servers := make([]types.McpServer, 0, len(native)/2+len(requested))
 	for _, server := range native {
 		if server.Type == urlSchemeHTTP {
-			servers = append(servers, types.McpServer{Name: server.Name, Type: server.Type, URL: server.URL, BuiltinPackage: p.BuiltinPackageForRuntimeName(server.Name)})
+			servers = append(servers, types.McpServer{Name: server.Name, Type: server.Type, URL: server.URL, Headers: server.Headers, BuiltinPackage: p.BuiltinPackageForRuntimeName(server.Name)})
 		}
 	}
 	for _, server := range requested {

@@ -265,7 +265,7 @@ func (a *projectDeliveryACP) wireServers() [][]acpsdk.McpServer {
 
 func projectDeliverySessionServers(t *testing.T, manifest *p.BuiltinManifest) []types.McpServer {
 	t.Helper()
-	configured, err := config.BuiltinMCPServers(manifest, "localhost", 43210)
+	configured, err := config.BuiltinMCPServers(manifest, "localhost", 43210, "")
 	require.NoError(t, err)
 	servers := make([]types.McpServer, 0, len(configured))
 	for _, server := range configured {

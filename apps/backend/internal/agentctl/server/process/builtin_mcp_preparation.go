@@ -22,7 +22,7 @@ func (m *Manager) PrepareBuiltinProfile(profile p.Context, apply func(p.Context)
 	if profile.BuiltinPackages.TaskID != m.cfg.TaskID {
 		return errors.New("built-in MCP binding belongs to another task")
 	}
-	servers, err := config.BuiltinMCPServers(profile.BuiltinPackages, m.cfg.MCPHost, m.cfg.Port)
+	servers, err := config.BuiltinMCPServers(profile.BuiltinPackages, m.cfg.MCPHost, m.cfg.Port, m.cfg.BuiltinMCPCredential)
 	if err != nil {
 		return err
 	}

@@ -284,6 +284,7 @@ type Manager struct {
 
 	// promptSuggestionsPreference reads the user's next-prompt suggestion opt-in at launch.
 	promptSuggestionsPreference PromptSuggestionsPreference
+	builtinMCPAuthEnforced      bool
 
 	// comparisonTargetProvider hydrates task-repository comparison bindings so
 	// every workspace creation path can seed agentctl from durable state.

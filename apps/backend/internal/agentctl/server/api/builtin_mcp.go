@@ -24,19 +24,27 @@ func (s *Server) builtinSessionMCPServers(requested []types.McpServer) ([]types.
 			return nil, fmt.Errorf("reserved built-in MCP name %q must be renamed", server.Name)
 		}
 	}
-	injected, err := config.BuiltinMCPServers(manifest, s.cfg.MCPHost, s.cfg.Port)
+	injected, err := config.BuiltinMCPServers(manifest, s.cfg.MCPHost, s.cfg.Port, s.cfg.BuiltinMCPCredential)
 	if err != nil {
 		return nil, err
 	}
 	servers := make([]types.McpServer, 0, len(injected)+len(requested))
 	for _, server := range injected {
-		servers = append(servers, types.McpServer{Name: server.Name, Type: server.Type, URL: server.URL, BuiltinPackage: p.BuiltinPackageForRuntimeName(server.Name)})
+		servers = append(servers, types.McpServer{Name: server.Name, Type: server.Type, URL: server.URL, Headers: server.Headers, BuiltinPackage: p.BuiltinPackageForRuntimeName(server.Name)})
 	}
 	return append(servers, requested...), nil
 }
 
-func builtinMCPExemptPaths(cfg *config.InstanceConfig) []string {
-	paths := []string{"/health", "/sse", "/message", "/mcp"}
+// builtinMCPExemptPaths lists the routes instanceAuth does not gate: the
+// liveness probe and the built-in MCP routes, which builtinMCPCallerAuth
+// gates with the instance caller credential instead.
+func builtinMCPExemptPaths() []string {
+	return append([]string{"/health"}, builtinMCPRoutePaths()...)
+}
+
+// builtinMCPRoutePaths lists every core and package built-in MCP route.
+func builtinMCPRoutePaths() []string {
+	paths := []string{"/sse", "/message", "/mcp"}
 	for _, descriptor := range p.BuiltinPackageCatalog() {
 		id := descriptor.ID
 		if id == p.PackageCore {

@@ -90,7 +90,8 @@ func (m *Manager) autoApproveInjectedKandevPermission(req *adapter.PermissionReq
 
 // resolveInjectedKandevPermission verifies the request targets the genuine
 // host-injected Kandev MCP entry (internal construction provenance: exact
-// current-port HTTP or SSE server entry, no command/args/env/headers) and
+// current-port HTTP or SSE server entry, no command/args/env, and only the
+// instance's own caller-credential header) and
 // carries a qualified tool name with an offered allow option. Shared by both
 // auto-approval paths so the provenance check can never drift between them.
 func (m *Manager) resolveInjectedKandevPermission(req *adapter.PermissionRequest) (server, tool string, option adapter.PermissionOption, ok bool) {
@@ -123,7 +124,7 @@ func (m *Manager) resolveInjectedKandevPermission(req *adapter.PermissionRequest
 
 func injectedKandevMCPConfigured(cfg *config.InstanceConfig) bool {
 	for _, server := range cfg.McpServers {
-		if server.Name != injectedKandevMCPServerName || server.Command != "" || len(server.Args) != 0 || len(server.Env) != 0 || len(server.Headers) != 0 {
+		if server.Name != injectedKandevMCPServerName || !builtinEndpointOnly(server, cfg.BuiltinMCPCredential) {
 			continue
 		}
 		switch server.Type {
