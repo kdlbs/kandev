@@ -351,14 +351,22 @@ func (r *Resolver) logResponsePhase(pendingID, phase string, started time.Time, 
 
 // responsesFromAnswers builds the map CompleteActiveClarificationBundle
 // requires for an answered outcome, keyed by question_id. Returns nil for a
-// rejection (empty Answers), matching upstream's own claim call.
-func responsesFromAnswers(answers []Answer) map[string]interface{} {
-	if len(answers) == 0 {
+// rejection (empty Answers), matching upstream's own claim call. answeredBy
+// rides in the same map under the reserved bundle-wide key so the claim
+// persists the answer channel onto the durable message rows.
+func responsesFromAnswers(answers []Answer, answeredBy AnsweredBy) map[string]interface{} {
+	if len(answers) == 0 && answeredBy.Channel == "" && answeredBy.Ref == "" {
 		return nil
 	}
-	out := make(map[string]interface{}, len(answers))
+	out := make(map[string]interface{}, len(answers)+1)
 	for _, a := range answers {
 		out[a.QuestionID] = a
+	}
+	if answeredBy.Channel != "" || answeredBy.Ref != "" {
+		out[taskmodels.ClarificationAnsweredByResponseKey] = taskmodels.ClarificationAnsweredBy{
+			Channel: answeredBy.Channel,
+			Ref:     answeredBy.Ref,
+		}
 	}
 	return out
 }
@@ -374,14 +382,14 @@ func (r *Resolver) claimClarificationResponse(
 			claims = clarificationAttachmentClaims(response.Answers)
 		}
 		return creator.CompleteActiveClarificationBundleWithAttachments(
-			ctx, pendingID, status, responsesFromAnswers(response.Answers), claims,
+			ctx, pendingID, status, responsesFromAnswers(response.Answers, response.AnsweredBy), claims,
 		)
 	}
 	if hasAnswerAttachments(response.Answers) {
 		return nil, false, errors.New("clarification answer attachments are unavailable")
 	}
 	return r.messages.CompleteActiveClarificationBundle(
-		ctx, pendingID, status, responsesFromAnswers(response.Answers),
+		ctx, pendingID, status, responsesFromAnswers(response.Answers, response.AnsweredBy),
 	)
 }
 
@@ -602,8 +610,49 @@ func reconstructWinnerResolution(pendingID string, msgs []*taskmodels.Message, l
 		Answers:      answers,
 		Rejected:     status == string(StatusRejected),
 		RejectReason: "",
+		AnsweredBy:   answeredByFromMessages(ordered),
 		RespondedAt:  respondedAt,
 	}, true
+}
+
+// answeredByFromMessages returns the bundle's durable answer-channel marker,
+// recorded by the claim on each message row. A bundle resolved before the
+// marker existed has none, and reports the zero value.
+func answeredByFromMessages(ordered []*taskmodels.Message) AnsweredBy {
+	for _, m := range ordered {
+		if by, ok := answeredByFromMetadata(m.Metadata); ok {
+			return by
+		}
+	}
+	return AnsweredBy{}
+}
+
+// answeredByFromMetadata reads one message's persisted answer-channel marker.
+// Live metadata written in this process holds map[string]string; metadata read
+// back from the database holds map[string]any.
+func answeredByFromMetadata(meta map[string]any) (AnsweredBy, bool) {
+	raw, present := meta[metaAnsweredByKey]
+	if !present {
+		return AnsweredBy{}, false
+	}
+	var by AnsweredBy
+	switch value := raw.(type) {
+	case map[string]any:
+		by.Channel, _ = value["channel"].(string)
+		by.Ref, _ = value["ref"].(string)
+	case map[string]string:
+		by.Channel = value["channel"]
+		by.Ref = value["ref"]
+	case taskmodels.ClarificationAnsweredBy:
+		by.Channel = value.Channel
+		by.Ref = value.Ref
+	default:
+		return AnsweredBy{}, false
+	}
+	if by.Channel == "" && by.Ref == "" {
+		return AnsweredBy{}, false
+	}
+	return by, true
 }
 
 // answerFromMessageMetadata reads one message's stored metadata.response, if

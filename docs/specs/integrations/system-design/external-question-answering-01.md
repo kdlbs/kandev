@@ -161,14 +161,28 @@ were never about the claim.
   and costs nothing that matters: the bundle is still visible to a human in the chat transcript and
   still reachable through `get_task_conversation_kandev`.
 
-### Existing state, unchanged in shape
+### Existing state and optional answer provenance
 
 - **In-memory** `PendingClarification` keeps its role: it is the delivery channel that unblocks a
   still-waiting agent inside its own turn. Upstream already removed its duty as duplicate guard.
-- **Durable per-question messages** (`type = 'clarification_request'`) keep their metadata shape
-  verbatim: `pending_id`, `question_id`, `question`, `question_index`, `question_total`, `context`,
-  `status`, `response` once answered, plus upstream's `agent_disconnected` and
-  `response_delivery_pending`. **This spec adds no metadata key and changes no existing one.**
+- **Durable per-question messages** retain their existing question, status,
+  response and delivery-pending metadata. A supplied answered_by channel/ref is
+  an optional bundle-wide marker stored on every message by the same claim.
+  Historical messages without the marker remain unmarked.
+
+The optional marker flows through RespondBody/Outcome and the native MCP
+request into the same resolver. External answer_question MCP offers it as an
+optional object and forwards it unchanged. It is caller-supplied provenance,
+not verified user identity or authority; existing authorization and task binding
+remain separate. No frontend field becomes required.
+
+The resolver passes a typed bundle-wide marker at the reserved empty response
+map key. Empty question IDs are already invalid, so it cannot collide with a
+per-question answer. RecordedOutcome reconstructs it from durable messages and
+a losing caller receives the winner's marker rather than its own submission.
+Both normal Response JSON and SerializeResponse omit a zero marker. Definite
+rollback clears it along with response metadata when restoring pending status;
+uncertain delivery retains the terminal winner and its provenance.
 
 ## The resolution operation
 
@@ -200,8 +214,9 @@ Steps 1–3 are this spec's addition. Step 4 is upstream's. Step 5 is upstream's
   else; upstream rejects any other value. `responses` SHALL be a map **keyed by `question_id`**, one
   entry per question in the bundle, whose value is that question's answer entry — the shape
   `completeClaimedClarificationMessages` indexes as `responses[questionID]` and writes verbatim to
-  `metadata.response`. For a `rejected` outcome `responses` SHALL be nil, because upstream writes no
-  `response` key on that path.
+  `metadata.response`. For a rejected outcome there are no per-question entries.
+  An unmarked rejection keeps the nil map; a marked rejection carries only the
+  reserved bundle-wide provenance entry and still writes no response key.
 - **P1b. The answers passed to the claim SHALL be the N3a-normalized ones, not the caller's raw
   input.** `metadata.response` is what R2b replays to a losing caller, so normalizing after the claim
   — or not at all — would make N3a's byte-identity guarantee hold for the winner's own response and
