@@ -215,6 +215,9 @@ func run(cfg *config.Config, log *logger.Logger) {
 	acpJanitor := shared.NewACPJanitor()
 	acpJanitor.Start(context.Background())
 
+	stopPprof := startPprofListenerIfEnabled(log)
+	defer stopPprof()
+
 	// Create instance manager
 	instMgr := instance.NewManager(cfg, log)
 
