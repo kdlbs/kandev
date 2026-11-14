@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -13,6 +14,7 @@ func sessionRecoveryBlockResolutionGuidance(
 	sessionID, incarnationID string,
 	generation int64,
 	attempted *models.SessionRecoveryBlock,
+	nativeEvidenceAttempted bool,
 ) error {
 	if attempted == nil || !supportsHistoryContinuationReason(attempted.Reason) {
 		return incompleteSessionRecoveryResolution()
@@ -21,7 +23,11 @@ func sessionRecoveryBlockResolutionGuidance(
 	if err != nil || current == nil || !sameSessionRecoveryBlockIncident(attempted, current) {
 		return incompleteSessionRecoveryResolution()
 	}
-	return &sessionRecoveryRequiredError{Block: current}
+	required := &sessionRecoveryRequiredError{Block: current}
+	if nativeEvidenceAttempted {
+		required.DeliveryRefusalReason = agentruntime.DeliveryRecoveryRefusalSQLResolutionRefused
+	}
+	return required
 }
 
 func supportsHistoryContinuationReason(reason string) bool {

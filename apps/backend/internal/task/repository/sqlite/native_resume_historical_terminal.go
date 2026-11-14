@@ -124,7 +124,7 @@ func (r *Repository) preparedHistoricalTerminalAttemptMatchesTx(
 		return false, err
 	}
 	row, found := nativeResumeSubmissionEvidence(proof, recovery.SubmissionID)
-	if !found || !historicalTerminalEvidenceMatches(row, recovery, settlement) {
+	if found && !historicalTerminalEvidenceMatches(row, recovery, settlement) {
 		return false, nil
 	}
 	return true, nil
@@ -145,7 +145,7 @@ func (r *Repository) historicalTerminalNoticeMatchesTx(
 		return false, err
 	}
 	row, found := nativeResumeSubmissionEvidence(proof, recovery.SubmissionID)
-	if !found || !historicalTerminalEvidenceMatches(row, recovery, settlement) {
+	if found && !historicalTerminalEvidenceMatches(row, recovery, settlement) {
 		return false, nil
 	}
 	return true, nil

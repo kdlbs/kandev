@@ -680,7 +680,7 @@ func (s *Service) resolveSessionRecoveryBlock(ctx context.Context, sessionID, ac
 	}
 	if !resolved {
 		if action == recoveryActionResume {
-			return sessionRecoveryBlockResolutionGuidance(ctx, store, sessionID, incarnationID, generation, block)
+			return sessionRecoveryBlockResolutionGuidance(ctx, store, sessionID, incarnationID, generation, block, handled)
 		}
 		return fmt.Errorf("resolve session recovery block: block changed or recovery evidence is incomplete")
 	}
