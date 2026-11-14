@@ -22,7 +22,14 @@
           "table": "agent_profiles",
           "key_column": "id",
           "key_value": "fixture-v0930-agent-profile",
-          "values": {"sort_order": "0"}
+          "values": {"sort_order": "0", "execution_grade": ""}
+        },
+        {
+          "owner": "task",
+          "table": "tasks",
+          "key_column": "id",
+          "key_value": "fixture-v0930-task",
+          "values": {"execution_grade": ""}
         },
         {
           "owner": "task",
@@ -230,7 +237,14 @@
           "table": "agent_profiles",
           "key_column": "id",
           "key_value": "fixture-v0930-agent-profile",
-          "values": {"sort_order": "0"}
+          "values": {"sort_order": "0", "execution_grade": ""}
+        },
+        {
+          "owner": "task",
+          "table": "tasks",
+          "key_column": "id",
+          "key_value": "fixture-v0930-task",
+          "values": {"execution_grade": ""}
         },
         {
           "owner": "task",
@@ -455,8 +469,13 @@
       "agent_delivery_inbox",
       "agent_delivery_retention_state",
       "agent_delivery_submissions",
+      "dynamic_provider_limits",
       "harness_native_session_rebinds",
       "harness_session_generations",
+      "provider_account_limits",
+      "provider_turn_allowances",
+      "provider_turn_claims",
+      "usage_limit_observations",
       "session_continuation_snapshots",
       "session_recovery_blocks",
       "session_restore_attempts",

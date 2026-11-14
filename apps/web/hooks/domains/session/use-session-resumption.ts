@@ -1000,6 +1000,13 @@ type ManualResumeParams = {
   noticeKind: SessionRecoveryNoticeKind | null;
 };
 
+function requestManualSessionResume(taskId: string, sessionId: string, session: SessionLike) {
+  const message = t("task:failedToResumeSession");
+  return session?.metadata?.inference_scope_closure != null
+    ? requestSessionResume(taskId, sessionId, message, session.metadata)
+    : requestSessionResume(taskId, sessionId, message);
+}
+
 function useManualResumeSession({
   taskId,
   sessionId,
@@ -1021,11 +1028,7 @@ function useManualResumeSession({
     clearResumptionNoticeUnlessInspectionBusy(guardedSetters, noticeKind);
     guardedSetters.setRecoveryFailure?.(null);
     try {
-      const response = await requestSessionResume(
-        taskId,
-        sessionId,
-        t("task:failedToResumeSession"),
-      );
+      const response = await requestManualSessionResume(taskId, sessionId, session);
       if (!canContinue()) {
         startingProjection?.rollback();
         return false;

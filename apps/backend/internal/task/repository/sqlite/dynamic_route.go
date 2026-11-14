@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
@@ -31,16 +30,25 @@ func (r *Repository) SaveRouteState(ctx context.Context, state dynamicruntime.Ro
 	if isTransientRouteSession(state.SessionID) {
 		return nil
 	}
+	tx, ownerErr := r.db.BeginTxx(ctx, nil)
+	if ownerErr != nil {
+		return ownerErr
+	}
+	defer func() { _ = tx.Rollback() }()
+	sessionID, routeID, ownerErr := r.routeOwnerColumns(ctx, tx, state.SessionID)
+	if ownerErr != nil {
+		return ownerErr
+	}
 	updatedAt := state.UpdatedAt
 	if updatedAt.IsZero() {
 		updatedAt = time.Now().UTC()
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO dynamic_route_states (
-			session_id, logical_profile_id, execution_profile_id,
+			session_id, route_id, logical_profile_id, execution_profile_id,
 			route_generation, profile_version, state, continuation_json, policy_state_json, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(session_id) DO UPDATE SET
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT((COALESCE(route_id, session_id))) DO UPDATE SET
 			logical_profile_id = excluded.logical_profile_id,
 			execution_profile_id = excluded.execution_profile_id,
 			route_generation = excluded.route_generation,
@@ -49,9 +57,12 @@ func (r *Repository) SaveRouteState(ctx context.Context, state dynamicruntime.Ro
 			continuation_json = excluded.continuation_json,
 			policy_state_json = excluded.policy_state_json,
 			updated_at = excluded.updated_at
-	`), state.SessionID, state.LogicalProfileID, state.ExecutionProfileID,
+	`), sessionID, routeID, state.LogicalProfileID, state.ExecutionProfileID,
 		state.Generation, state.ProfileVersion, state.Status, state.ContinuationJSON, state.PolicyStateJSON, updatedAt)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ClaimRouteState advances a route generation only when the durable row still
@@ -62,25 +73,34 @@ func (r *Repository) ClaimRouteState(ctx context.Context, expectedGeneration int
 	if isTransientRouteSession(state.SessionID) {
 		return true, nil
 	}
+	tx, ownerErr := r.db.BeginTxx(ctx, nil)
+	if ownerErr != nil {
+		return false, ownerErr
+	}
+	defer func() { _ = tx.Rollback() }()
+	sessionID, routeID, ownerErr := r.routeOwnerColumns(ctx, tx, state.SessionID)
+	if ownerErr != nil {
+		return false, ownerErr
+	}
 	var (
 		result sql.Result
 		err    error
 	)
 	if expectedGeneration == 0 {
-		result, err = r.db.ExecContext(ctx, r.db.Rebind(`
+		result, err = tx.ExecContext(ctx, r.db.Rebind(`
 			INSERT INTO dynamic_route_states (
-				session_id, logical_profile_id, execution_profile_id,
+				session_id, route_id, logical_profile_id, execution_profile_id,
 				route_generation, profile_version, state, continuation_json, policy_state_json, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT(session_id) DO NOTHING
-		`), state.SessionID, state.LogicalProfileID, state.ExecutionProfileID,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT((COALESCE(route_id, session_id))) DO NOTHING
+		`), sessionID, routeID, state.LogicalProfileID, state.ExecutionProfileID,
 			state.Generation, state.ProfileVersion, state.Status, state.ContinuationJSON, state.PolicyStateJSON, state.UpdatedAt)
 	} else {
-		result, err = r.db.ExecContext(ctx, r.db.Rebind(`
+		result, err = tx.ExecContext(ctx, r.db.Rebind(`
 			UPDATE dynamic_route_states
 			SET logical_profile_id = ?, execution_profile_id = ?,
 				route_generation = ?, profile_version = ?, state = ?, continuation_json = ?, policy_state_json = ?, updated_at = ?
-			WHERE session_id = ? AND route_generation = ?
+			WHERE COALESCE(route_id, session_id) = ? AND route_generation = ?
 		`), state.LogicalProfileID, state.ExecutionProfileID, state.Generation,
 			state.ProfileVersion, state.Status, state.ContinuationJSON, state.PolicyStateJSON, state.UpdatedAt, state.SessionID,
 			expectedGeneration)
@@ -89,7 +109,13 @@ func (r *Repository) ClaimRouteState(ctx context.Context, expectedGeneration int
 		return false, err
 	}
 	rows, err := result.RowsAffected()
-	return rows == 1, err
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return rows == 1, nil
 }
 
 // ClaimRouteStateFrom updates a route generation only while both its
@@ -109,7 +135,7 @@ func (r *Repository) ClaimRouteStateFrom(
 		UPDATE dynamic_route_states
 		SET logical_profile_id = ?, execution_profile_id = ?,
 			route_generation = ?, profile_version = ?, state = ?, continuation_json = ?, policy_state_json = ?, updated_at = ?
-		WHERE session_id = ? AND route_generation = ? AND state = ?
+		WHERE COALESCE(route_id, session_id) = ? AND route_generation = ? AND state = ?
 	`), state.LogicalProfileID, state.ExecutionProfileID,
 		state.Generation, state.ProfileVersion, state.Status, state.ContinuationJSON, state.PolicyStateJSON, state.UpdatedAt,
 		state.SessionID, expectedGeneration, expectedStatus)
@@ -138,7 +164,7 @@ func (r *Repository) ClaimRouteStateFromSnapshot(
 		UPDATE dynamic_route_states
 		SET logical_profile_id = ?, execution_profile_id = ?,
 			route_generation = ?, profile_version = ?, state = ?, continuation_json = ?, policy_state_json = ?, updated_at = ?
-		WHERE session_id = ? AND route_generation = ? AND state = ? AND policy_state_json = ?
+		WHERE COALESCE(route_id, session_id) = ? AND route_generation = ? AND state = ? AND policy_state_json = ?
 	`), state.LogicalProfileID, state.ExecutionProfileID,
 		state.Generation, state.ProfileVersion, state.Status, state.ContinuationJSON, state.PolicyStateJSON, state.UpdatedAt,
 		state.SessionID, expectedGeneration, expectedStatus, expectedPolicyState)
@@ -210,7 +236,7 @@ func (r *Repository) ClaimUnclassifiedFallbackLaunch(
 		return err
 	}
 	query := `SELECT logical_profile_id, execution_profile_id, route_generation, profile_version, state
-		FROM dynamic_route_states WHERE session_id = ?`
+		FROM dynamic_route_states WHERE COALESCE(route_id, session_id) = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query += forUpdateClause
 	}
@@ -336,24 +362,31 @@ func recordRouteDecisionTx(
 	decision dynamicruntime.RouteDecision,
 	state dynamicruntime.RouteState,
 ) error {
+	sessionID, routeID, ownerErr := r.routeOwnerColumns(ctx, tx, state.SessionID)
+	if ownerErr != nil {
+		return ownerErr
+	}
+	if decision.SessionID != state.SessionID {
+		return fmt.Errorf("route decision owner mismatch")
+	}
 	expectedGeneration := state.Generation - 1
 	var result sql.Result
 	var err error
 	if expectedGeneration == 0 {
 		result, err = tx.ExecContext(ctx, r.db.Rebind(`
 			INSERT INTO dynamic_route_states (
-				session_id, logical_profile_id, execution_profile_id,
+				session_id, route_id, logical_profile_id, execution_profile_id,
 				route_generation, profile_version, state, continuation_json, policy_state_json, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT(session_id) DO NOTHING
-		`), state.SessionID, state.LogicalProfileID, state.ExecutionProfileID,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT((COALESCE(route_id, session_id))) DO NOTHING
+		`), sessionID, routeID, state.LogicalProfileID, state.ExecutionProfileID,
 			state.Generation, state.ProfileVersion, state.Status, state.ContinuationJSON, state.PolicyStateJSON, state.UpdatedAt)
 	} else {
 		result, err = tx.ExecContext(ctx, r.db.Rebind(`
 			UPDATE dynamic_route_states
 			SET logical_profile_id = ?, execution_profile_id = ?,
 				route_generation = ?, profile_version = ?, state = ?, continuation_json = ?, policy_state_json = ?, updated_at = ?
-			WHERE session_id = ? AND route_generation = ?
+			WHERE COALESCE(route_id, session_id) = ? AND route_generation = ?
 		`), state.LogicalProfileID, state.ExecutionProfileID, state.Generation,
 			state.ProfileVersion, state.Status, state.ContinuationJSON, state.PolicyStateJSON, state.UpdatedAt, state.SessionID,
 			expectedGeneration)
@@ -368,18 +401,12 @@ func recordRouteDecisionTx(
 	if rows != 1 {
 		return dynamicruntime.ErrStaleGeneration
 	}
-	createdAt := decisionReasonTime(decision, state)
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO dynamic_route_attempts (
-			id, session_id, logical_profile_id, execution_profile_id,
-			route_generation, profile_version, reason, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`), uuid.New().String(), decision.SessionID, decision.LogicalProfileID,
-		decision.ExecutionProfileID, decision.Generation, decision.ProfileVersion,
-		decision.Reason, createdAt); err != nil {
-		return err
-	}
-	return nil
+	return r.appendRouteAttemptTx(ctx, tx, dynamicruntime.RouteAttempt{
+		SessionID: decision.SessionID, LogicalProfileID: decision.LogicalProfileID,
+		ExecutionProfileID: decision.ExecutionProfileID, Generation: decision.Generation,
+		ProfileVersion: decision.ProfileVersion, Reason: decision.Reason,
+		CreatedAt: decisionReasonTime(decision, state),
+	})
 }
 
 func decisionReasonTime(_ dynamicruntime.RouteDecision, state dynamicruntime.RouteState) time.Time {
@@ -393,19 +420,18 @@ func (r *Repository) AppendRouteAttempt(ctx context.Context, attempt dynamicrunt
 	if isTransientRouteSession(attempt.SessionID) {
 		return nil
 	}
-	createdAt := attempt.CreatedAt
-	if createdAt.IsZero() {
-		createdAt = time.Now().UTC()
+	if attempt.CreatedAt.IsZero() {
+		attempt.CreatedAt = time.Now().UTC()
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO dynamic_route_attempts (
-			id, session_id, logical_profile_id, execution_profile_id,
-			route_generation, profile_version, reason, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`), uuid.New().String(), attempt.SessionID, attempt.LogicalProfileID,
-		attempt.ExecutionProfileID, attempt.Generation, attempt.ProfileVersion,
-		attempt.Reason, createdAt)
-	return err
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.appendRouteAttemptTx(ctx, tx, attempt); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *Repository) LoadRouteState(ctx context.Context, sessionID string) (*dynamicruntime.RouteState, error) {
@@ -414,9 +440,9 @@ func (r *Repository) LoadRouteState(ctx context.Context, sessionID string) (*dyn
 	}
 	state := &dynamicruntime.RouteState{}
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT session_id, logical_profile_id, execution_profile_id,
+		SELECT COALESCE(route_id, session_id), logical_profile_id, execution_profile_id,
 		route_generation, profile_version, state, continuation_json, policy_state_json, updated_at
-		FROM dynamic_route_states WHERE session_id = ?
+		FROM dynamic_route_states WHERE COALESCE(route_id, session_id) = ?
 	`), sessionID).Scan(
 		&state.SessionID, &state.LogicalProfileID, &state.ExecutionProfileID,
 		&state.Generation, &state.ProfileVersion, &state.Status, &state.ContinuationJSON, &state.PolicyStateJSON, &state.UpdatedAt,
@@ -435,32 +461,7 @@ func (r *Repository) LoadRouteState(ctx context.Context, sessionID string) (*dyn
 // returned after restart because dispatch may already have crossed the
 // process boundary and must remain a manual recovery decision.
 func (r *Repository) ListPendingRouteStates(ctx context.Context) ([]dynamicruntime.RouteState, error) {
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT session_id, logical_profile_id, execution_profile_id,
-			route_generation, profile_version, state, continuation_json, policy_state_json, updated_at
-		FROM dynamic_route_states
-		WHERE state IN (?, ?) ORDER BY updated_at ASC
-	`), string("retry_wait"), string("waiting_for_reset"))
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	states := make([]dynamicruntime.RouteState, 0)
-	for rows.Next() {
-		var state dynamicruntime.RouteState
-		if err := rows.Scan(
-			&state.SessionID, &state.LogicalProfileID, &state.ExecutionProfileID,
-			&state.Generation, &state.ProfileVersion, &state.Status,
-			&state.ContinuationJSON, &state.PolicyStateJSON, &state.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		states = append(states, state)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return states, nil
+	return r.listRouteStatesInStatus(ctx, "retry_wait", "waiting_for_reset")
 }
 
 // ListStartingRouteStates returns every route whose durable status is still
@@ -469,12 +470,29 @@ func (r *Repository) ListPendingRouteStates(ctx context.Context) ([]dynamicrunti
 // only a safe orphan signal once the caller has confirmed there is no live
 // session backing the row (see Service.reconcileOrphanedDynamicStartingRoutes).
 func (r *Repository) ListStartingRouteStates(ctx context.Context) ([]dynamicruntime.RouteState, error) {
+	return r.listRouteStatesInStatus(ctx, unclassifiedRouteStateStarting)
+}
+
+// ListRecoveryRouteStates returns every route left in manual recovery
+// (action_required, or waiting without an eligible candidate). Startup uses it
+// to re-arm opted-in automatic failed-route retries recorded in the policy
+// state; rows without a schedule are ignored by the caller.
+func (r *Repository) ListRecoveryRouteStates(ctx context.Context) ([]dynamicruntime.RouteState, error) {
+	return r.listRouteStatesInStatus(ctx, "action_required", "waiting")
+}
+
+func (r *Repository) listRouteStatesInStatus(ctx context.Context, statuses ...string) ([]dynamicruntime.RouteState, error) {
+	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(statuses)), ", ")
+	args := make([]any, 0, len(statuses))
+	for _, status := range statuses {
+		args = append(args, status)
+	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT session_id, logical_profile_id, execution_profile_id,
+		SELECT COALESCE(route_id, session_id), logical_profile_id, execution_profile_id,
 			route_generation, profile_version, state, continuation_json, policy_state_json, updated_at
 		FROM dynamic_route_states
-		WHERE state = ? ORDER BY updated_at ASC
-	`), unclassifiedRouteStateStarting)
+		WHERE session_id IS NOT NULL AND state IN (`+placeholders+`) ORDER BY updated_at ASC
+	`), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -512,7 +530,7 @@ func (r *Repository) SaveRouteContinuation(ctx context.Context, record dynamicru
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE dynamic_route_states
 		SET continuation_json = ?, updated_at = ?
-		WHERE session_id = ? AND route_generation = ?
+		WHERE COALESCE(route_id, session_id) = ? AND route_generation = ?
 	`), string(payload), updatedAt, record.SessionID, record.Generation)
 	if err != nil {
 		return err
@@ -621,10 +639,10 @@ func (r *Repository) ListRouteAttempts(ctx context.Context, sessionID string) ([
 		return []dynamicruntime.RouteAttempt{}, nil
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT session_id, logical_profile_id, execution_profile_id,
-			route_generation, profile_version, reason, created_at
+		SELECT COALESCE(route_id, session_id), logical_profile_id, execution_profile_id,
+			route_generation, profile_version, reason, created_at, selection_ordinal
 		FROM dynamic_route_attempts
-		WHERE session_id = ? ORDER BY route_generation ASC
+		WHERE COALESCE(route_id, session_id) = ? ORDER BY route_generation ASC
 	`), sessionID)
 	if err != nil {
 		return nil, err
@@ -635,7 +653,7 @@ func (r *Repository) ListRouteAttempts(ctx context.Context, sessionID string) ([
 		var attempt dynamicruntime.RouteAttempt
 		if err := rows.Scan(&attempt.SessionID, &attempt.LogicalProfileID,
 			&attempt.ExecutionProfileID, &attempt.Generation, &attempt.ProfileVersion,
-			&attempt.Reason, &attempt.CreatedAt); err != nil {
+			&attempt.Reason, &attempt.CreatedAt, &attempt.SelectionOrdinal); err != nil {
 			return nil, err
 		}
 		attempts = append(attempts, attempt)

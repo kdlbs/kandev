@@ -58,6 +58,8 @@ import type { UtilityAgentReference } from "@/lib/types/agent-profile-errors";
 import { useAppStore } from "@/components/state-provider";
 import { AgentLogo } from "@/components/agent-logo";
 import { ProfileMcpConfigCard } from "@/app/settings/agents/[agentId]/profile-mcp-config-card";
+import { ProviderLimitsCard } from "@/components/settings/provider-limits-card";
+import { providerOfModel } from "@/lib/settings/provider-limits";
 import { CommandPreviewCard } from "@/app/settings/agents/[agentId]/profiles/[profileId]/command-preview-card";
 import { useAgentProfileSettings } from "@/app/settings/agents/[agentId]/profiles/[profileId]/use-agent-profile-settings";
 import { agentProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
@@ -462,6 +464,10 @@ function ProfileEditor({
       />
 
       <Separator />
+
+      {providerOfModel(savedProfile.model) ? (
+        <ProviderLimitsCard provider={providerOfModel(savedProfile.model)} />
+      ) : null}
 
       <fieldset disabled={nativeCodexUnavailable} className="min-w-0 space-y-8">
         <ProfileEditorBody

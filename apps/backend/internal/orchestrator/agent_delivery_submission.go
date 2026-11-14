@@ -433,7 +433,7 @@ func (s *Service) PromptTaskWithDeliverySubmissionID(
 	submissionID string,
 	accepted ...DirectPromptStartOptions,
 ) (*PromptResult, error) {
-	options := promptTaskOptions{deliverySubmissionID: submissionID}
+	options := promptTaskOptions{deliverySubmissionID: submissionID, chatUserTurn: true}
 	if len(accepted) > 0 {
 		options.promptAlreadyComposed = true
 		options.fallbackUsesEffectivePrompt = true

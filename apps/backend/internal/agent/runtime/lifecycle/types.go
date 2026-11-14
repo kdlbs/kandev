@@ -205,9 +205,10 @@ type AgentExecution struct {
 	// dispatched prompt. It is snapshotted onto terminal AgentEvents before
 	// AgentReady is published, so a queued successor cannot overwrite the
 	// completion's attribution while its stream frame is in flight.
-	promptTurnID      string
-	promptTurnIDs     map[uint64]string
-	promptLifecycleMu ctxmutex.Mutex
+	promptTurnID                    string
+	promptTurnIDs                   map[uint64]string
+	promptLifecycleMu               ctxmutex.Mutex
+	providerTurnUnmeteredGeneration atomic.Uint64
 	// cancelEscalatedPromptGeneration identifies a prompt whose cancellation
 	// released the execution locally before the agentctl stream closed. The
 	// resulting disconnect is expected teardown and must not replace the
@@ -1949,7 +1950,7 @@ type CredentialsManager interface {
 
 // AgentProfileInfo contains resolved profile information
 type AgentProfileInfo struct {
-	ResourceCircuitKey string
+	ExecutionGrade     string
 	ProfileID          string
 	ProfileName        string
 	AgentID            string
@@ -1957,6 +1958,7 @@ type AgentProfileInfo struct {
 	Model              string // applied through ACP model selection at session start
 	Mode               string // applied via ACP session/set_mode at session start (empty = use agent default)
 	ConfigOptions      map[string]string
+	ResourceCircuitKey string
 	// FallbackModel is the optional single ACP model ID to switch to when
 	// Model is unavailable. Ignored when AutoFallback is enabled.
 	FallbackModel string
