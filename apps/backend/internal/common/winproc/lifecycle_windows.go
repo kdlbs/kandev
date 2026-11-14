@@ -244,47 +244,33 @@ func assignProcessToJob(job windows.Handle, pid int) error {
 	return nil
 }
 
-func ResumeSuspendedProcess(pid int) error {
-	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
-	if err != nil {
-		return fmt.Errorf("CreateToolhelp32Snapshot: %w", err)
-	}
-	defer windows.CloseHandle(snapshot)
+var procNtResumeProcess = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtResumeProcess")
 
-	entry := windows.ThreadEntry32{Size: uint32(unsafe.Sizeof(windows.ThreadEntry32{}))}
-	if err := windows.Thread32First(snapshot, &entry); err != nil {
-		return fmt.Errorf("Thread32First: %w", err)
+// ntResumeProcess resumes every thread of the process behind the handle. It is
+// a variable so in-process tests can observe the resume path without starting
+// a child process.
+var ntResumeProcess = func(process windows.Handle) error {
+	if err := procNtResumeProcess.Find(); err != nil {
+		return fmt.Errorf("NtResumeProcess: %w", err)
 	}
-
-	resumed := 0
-	for {
-		if entry.OwnerProcessID == uint32(pid) {
-			if err := resumeThread(entry.ThreadID); err != nil {
-				return err
-			}
-			resumed++
-		}
-		if err := windows.Thread32Next(snapshot, &entry); err != nil {
-			if errors.Is(err, windows.ERROR_NO_MORE_FILES) {
-				break
-			}
-			return fmt.Errorf("Thread32Next: %w", err)
-		}
-	}
-	if resumed == 0 {
-		return fmt.Errorf("no threads found for pid %d", pid)
+	status, _, _ := procNtResumeProcess.Call(uintptr(process))
+	if status != 0 {
+		return fmt.Errorf("NtResumeProcess: %w", windows.NTStatus(status))
 	}
 	return nil
 }
 
-func resumeThread(threadID uint32) error {
-	thread, err := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, threadID)
+// ResumeSuspendedProcess resumes a child that was created with CREATE_SUSPENDED
+// after its caller has assigned it to a Job Object. It works through a handle
+// to the child, so its cost does not depend on threads of other processes.
+func ResumeSuspendedProcess(pid int) error {
+	process, err := windows.OpenProcess(windows.PROCESS_SUSPEND_RESUME, false, uint32(pid))
 	if err != nil {
-		return fmt.Errorf("OpenThread(thread_id=%d): %w", threadID, err)
+		return fmt.Errorf("OpenProcess(pid=%d) for resume: %w", pid, err)
 	}
-	defer windows.CloseHandle(thread)
-	if _, err := windows.ResumeThread(thread); err != nil {
-		return fmt.Errorf("ResumeThread(thread_id=%d): %w", threadID, err)
+	defer func() { _ = windows.CloseHandle(process) }()
+	if err := ntResumeProcess(process); err != nil {
+		return fmt.Errorf("resume pid %d: %w", pid, err)
 	}
 	return nil
 }
