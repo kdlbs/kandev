@@ -389,6 +389,8 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	r.migrate.Apply("workspaces.office_workflow_id", `ALTER TABLE workspaces ADD COLUMN office_workflow_id TEXT DEFAULT ''`)
 	_ = r.migrate.Apply("workspaces.acp_idle_suspension_enabled", `ALTER TABLE workspaces ADD COLUMN acp_idle_suspension_enabled BOOLEAN NOT NULL DEFAULT FALSE`)
 	_ = r.migrate.Apply("workspaces.acp_idle_timeout_minutes", `ALTER TABLE workspaces ADD COLUMN acp_idle_timeout_minutes INTEGER NOT NULL DEFAULT 120 CHECK (acp_idle_timeout_minutes > 0)`)
+	_ = r.migrate.Apply("workspaces.wip_sessionless_release_enabled", `ALTER TABLE workspaces ADD COLUMN wip_sessionless_release_enabled BOOLEAN NOT NULL DEFAULT FALSE`)
+	_ = r.migrate.Apply("workspaces.wip_sessionless_release_grace_minutes", `ALTER TABLE workspaces ADD COLUMN wip_sessionless_release_grace_minutes INTEGER NOT NULL DEFAULT 10 CHECK (wip_sessionless_release_grace_minutes > 0)`)
 	_ = r.migrate.Apply("executors_running.idle_suspension_state", `ALTER TABLE executors_running ADD COLUMN idle_suspension_state TEXT NOT NULL DEFAULT ''`)
 	_ = r.migrate.Apply("executors_running.idle_suspension_policy_updated_at", `ALTER TABLE executors_running ADD COLUMN idle_suspension_policy_updated_at TIMESTAMP`)
 

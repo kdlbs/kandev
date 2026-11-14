@@ -323,6 +323,8 @@ export type Workspace = {
   default_config_agent_profile_id?: AgentProfileId | null;
   acp_idle_suspension_enabled: boolean;
   acp_idle_timeout_minutes: number;
+  wip_sessionless_release_enabled?: boolean;
+  wip_sessionless_release_grace_minutes?: number;
   office_workflow_id?: WorkflowId;
   /** Office task identifier prefix (e.g. "KAN"). */
   task_prefix?: string;

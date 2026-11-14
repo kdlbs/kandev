@@ -174,6 +174,12 @@ queued task; hover or focus gives its position in the destination queue.
 Queued tasks do not start destination entry actions or consume WIP until
 promotion.
 
+An admitted task keeps its slot until it leaves the step, even after its agent
+fails or every session ends. To see who holds a step's slots and why, read
+`GET /api/v1/workflow/steps/<step-id>/wip-occupants`. Workspaces that prefer
+throughput can turn on **Release slots of tasks without a live session** (see
+[Use Kandev](use-kandev.md)).
+
 For a profile change, the destination step's **Reuse an available session**
 setting continues the newest eligible conversation for that profile, or starts
 a new session when none is available. **Start a new session** always creates a

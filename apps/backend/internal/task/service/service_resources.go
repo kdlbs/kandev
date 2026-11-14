@@ -157,6 +157,9 @@ func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceReque
 		OrgID:                    callerOrgID(ctx),
 		ACPIdleSuspensionEnabled: false,
 		ACPIdleTimeoutMinutes:    120,
+
+		WIPSessionlessReleaseEnabled:      false,
+		WIPSessionlessReleaseGraceMinutes: models.DefaultWIPSessionlessReleaseGraceMinutes,
 	}
 	placement, placementErr := s.placementFor(ctx, ownerID, workspace.OrgID)
 	if placementErr != nil {
@@ -224,6 +227,11 @@ func (s *Service) getWorkspaceAction(ctx context.Context, id string, action mode
 func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWorkspaceRequest) (*models.Workspace, error) {
 	if req.ACPIdleTimeoutMinutes != nil && *req.ACPIdleTimeoutMinutes <= 0 {
 		return nil, fmt.Errorf("%w: must be greater than zero", ErrWorkspaceIdleTimeoutInvalid)
+	}
+	if grace := req.WIPSessionlessReleaseGraceMinutes; grace != nil &&
+		(*grace <= 0 || *grace > models.MaxWIPSessionlessReleaseGraceMinutes) {
+		return nil, fmt.Errorf("%w: must be between 1 and %d", ErrWorkspaceWIPReleaseGraceInvalid,
+			models.MaxWIPSessionlessReleaseGraceMinutes)
 	}
 	workspace, err := s.workspaces.GetWorkspace(ctx, id)
 	if err != nil {

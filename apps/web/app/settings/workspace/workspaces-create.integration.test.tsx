@@ -202,6 +202,8 @@ describe("accepted identity and descriptors", () => {
       default_config_agent_profile_id: shape === "complete" ? "config-profile-id" : null,
       acp_idle_suspension_enabled: shape === "complete",
       acp_idle_timeout_minutes: shape === "complete" ? 45 : 120,
+      wip_sessionless_release_enabled: false,
+      wip_sessionless_release_grace_minutes: 10,
       office_workflow_id: shape === "complete" ? "office-workflow" : null,
       created_at: "2026-10-01T00:00:00Z",
       updated_at: "2026-10-02T00:00:00Z",

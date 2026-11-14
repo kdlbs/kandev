@@ -1964,6 +1964,14 @@ func (w *Workspace) IsImproveKandev() bool {
 }
 
 // Workspace represents a workspace
+// DefaultWIPSessionlessReleaseGraceMinutes is the grace a workspace that turns
+// on sessionless WIP slot release gets when it does not choose its own.
+const DefaultWIPSessionlessReleaseGraceMinutes = 10
+
+// MaxWIPSessionlessReleaseGraceMinutes bounds the grace at one year, far below
+// the value whose conversion to time.Duration would overflow.
+const MaxWIPSessionlessReleaseGraceMinutes = 525600
+
 type Workspace struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -1975,15 +1983,23 @@ type Workspace struct {
 	// UnitID places the workspace in the organization unit tree. Reach is
 	// resolved from this placement, so a workspace without one is reachable by
 	// nobody.
-	UnitID                      string    `json:"unit_id,omitempty"`
-	DefaultExecutorID           *string   `json:"default_executor_id,omitempty"`
-	DefaultEnvironmentID        *string   `json:"default_environment_id,omitempty"`
-	DefaultAgentProfileID       *string   `json:"default_agent_profile_id,omitempty"`
-	DefaultConfigAgentProfileID *string   `json:"default_config_agent_profile_id,omitempty"`
-	ACPIdleSuspensionEnabled    bool      `json:"acp_idle_suspension_enabled"`
-	ACPIdleTimeoutMinutes       int       `json:"acp_idle_timeout_minutes"`
-	CreatedAt                   time.Time `json:"created_at"`
-	UpdatedAt                   time.Time `json:"updated_at"`
+	UnitID                      string  `json:"unit_id,omitempty"`
+	DefaultExecutorID           *string `json:"default_executor_id,omitempty"`
+	DefaultEnvironmentID        *string `json:"default_environment_id,omitempty"`
+	DefaultAgentProfileID       *string `json:"default_agent_profile_id,omitempty"`
+	DefaultConfigAgentProfileID *string `json:"default_config_agent_profile_id,omitempty"`
+	ACPIdleSuspensionEnabled    bool    `json:"acp_idle_suspension_enabled"`
+	ACPIdleTimeoutMinutes       int     `json:"acp_idle_timeout_minutes"`
+	// WIPSessionlessReleaseEnabled lets an admitted IN_PROGRESS or FAILED task
+	// whose sessions are all terminal (or that has none) stop counting toward
+	// its workflow step's WIP limit once WIPSessionlessReleaseGraceMinutes have
+	// passed since its last task or session activity. Off by default, so an
+	// admitted task keeps its slot until it leaves the step. The policy never
+	// moves the task or changes its state.
+	WIPSessionlessReleaseEnabled      bool      `json:"wip_sessionless_release_enabled"`
+	WIPSessionlessReleaseGraceMinutes int       `json:"wip_sessionless_release_grace_minutes"`
+	CreatedAt                         time.Time `json:"created_at"`
+	UpdatedAt                         time.Time `json:"updated_at"`
 
 	// Office extensions
 	TaskPrefix       string `json:"task_prefix,omitempty"`        // e.g. "KAN"

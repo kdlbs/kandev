@@ -471,3 +471,88 @@ Auto-start idempotency repair (single agent per review task):
 
 Queued task moves and queue presentation:
 [`../../plans/queued-task-moves/plan.md`](../../../plans/queued-task-moves/plan.md).
+
+Opt-in sessionless slot release and occupancy explanation:
+[`../../plans/wip-sessionless-release/plan.md`](../../../plans/wip-sessionless-release/plan.md).
+
+## Sessionless slot release and occupancy explanation
+
+This section maps AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.12 and .13.
+
+### Default rule
+
+WIP admission counts placement, not liveness. An occupant is any task in the
+step with `wip_admitted = 1`, not archived, not ephemeral, and not an
+automation run. Session state is not part of the count, so a task whose agent
+failed or whose sessions were all cancelled keeps its slot until it moves out,
+is archived, or is deleted. This is intended: a failed or interrupted task
+still needs attention in that column, and releasing its slot silently would
+let the step hold more active work than its limit once the task resumes.
+
+The cost of that rule is that a sessionless task can block a WIP-1 step's whole
+queue until someone moves it. The opt-in policy below trades strict occupancy
+for throughput on workspaces that prefer it.
+
+### Opt-in release
+
+Two workspace columns hold the policy: `wip_sessionless_release_enabled`
+(boolean, default `false`) and `wip_sessionless_release_grace_minutes`
+(integer, default `10`, 1 to 525600 minutes; the one-year cap keeps the
+cutoff duration from overflowing). They travel with the existing
+workspace update path (HTTP `PATCH /api/v1/workspaces/:id`, WebSocket
+`workspace.update`), workspace events, the boot payload, and the workspace
+settings page.
+
+Every admitted-occupant count reads the policy of the step's workspace
+(`workflow_steps -> workflows -> workspaces`) on the same connection or write
+transaction as the count. With the policy off, the count query is unchanged.
+With it on, the count also excludes a row that matches all of:
+
+- `tasks.state` is `IN_PROGRESS` or `FAILED`;
+- `tasks.updated_at` is at or before `now - grace`;
+- no `task_sessions` row of the task is non-terminal (`COMPLETED`, `FAILED`,
+  and `CANCELLED` are terminal), and none changed after `now - grace`.
+
+Every count site uses this one predicate: transactional create admission,
+capacity checks, fenced moves, queue promotion, the read-only occupant counts,
+and the workspace-transfer lane capacity check. A step whose policy cannot be
+read (for example, a step id with no row) counts as before.
+
+The release only changes the count. The task keeps `wip_admitted`, its column,
+its state, and its queue fields. When it gets a live session again, the same
+predicate stops matching and it counts again. Re-entry does not displace work
+that was pulled meanwhile, so the step can briefly hold more admitted tasks
+than its limit; that matches lowering a limit, which also preserves admitted
+work.
+
+Nothing new runs in the background. The idle-session reaper's existing
+30-second tick also asks the repository for WIP-limited steps of enabled
+workspaces that hold an admitted `IN_PROGRESS`/`FAILED` task with no live
+session, and runs the normal `pullNextTaskOnVacate` for each. The pull's own
+policy-aware count decides whether a slot is free, so a step still inside its
+grace is a no-op and concurrent reconcilers still cannot over-admit.
+
+### Occupancy explanation
+
+`GET /api/v1/workflow/steps/:id/wip-occupants` uses the step access rule of
+`/workflow/steps/:id/task-count`. It returns the step's WIP limit, the release
+policy, `counted`, and each admitted task with `holds_slot`, `reason`
+(`live_session`, `no_live_session`, `release_grace_pending`,
+`released_no_live_session`), session counts, last activity, and `release_at`
+for a pending release. The released flag comes from the same SQL predicate as
+admission, so `counted` equals the admission count. This read is always
+available, independent of the policy.
+
+### Scenarios
+
+- **GIVEN** a WIP-1 step whose only occupant is `FAILED` with every session
+  cancelled, **WHEN** the workspace policy is off, **THEN** the slot stays
+  held and queued work waits; the occupancy read reports `no_live_session`.
+- **GIVEN** the same step with the policy on and a 10-minute grace, **WHEN** 10
+  minutes pass after the occupant's last task or session change, **THEN** the
+  next reaper tick promotes the next queued task, and the failed task stays in
+  the column, still `FAILED` and admitted.
+- **GIVEN** a released task, **WHEN** a new session starts for it, **THEN** it
+  counts toward the limit again.
+- **GIVEN** an occupant with a `WAITING_FOR_INPUT` or `IDLE` session, **WHEN**
+  the policy is on, **THEN** it keeps its slot because the session is live.

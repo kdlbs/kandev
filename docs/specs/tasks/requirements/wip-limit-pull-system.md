@@ -42,7 +42,6 @@ integrations, and workflow transitions without exceeding configured WIP capacity
   capacity in tasks and global session capacity in sessions. If WIP promotion
   exposes a global session limit, the displayed reason shall follow the current
   authoritative queue state. Changing one limit shall not bypass the other.
-
 - **AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.10:** Pull-from guidance shall remain
   readable after a tap on phone and coarse-pointer devices, with a dismissible
   drawer and a touch target of at least 44 pixels. Desktop focus and hover shall
@@ -51,3 +50,17 @@ integrations, and workflow transitions without exceeding configured WIP capacity
   a session-lifecycle task at a full WIP-limited destination, the backend shall
   log the deferred entry with the task, session, source and destination steps,
   limit, and `wip_limit_reached` reason. Entry remains deferred until admission.
+- **AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.12:** An admitted task keeps its WIP
+  slot until it leaves the step, is archived, or is deleted, whatever its
+  session state. A workspace may opt in, per workspace and off by default, to
+  stop counting an admitted `IN_PROGRESS` or `FAILED` task whose sessions are
+  all terminal (or that has none) once a configurable grace (default 10
+  minutes, whole minutes from 1 to one year) has passed since its last task or session
+  change. The released task is not moved, re-stated, or un-admitted; it counts
+  again as soon as it has a live session. After the grace, the next queued or
+  feeder task is pulled without another task move or a restart.
+- **AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.13:** For any workflow step the caller
+  can read, Kandev shall list each admitted task with whether it counts toward
+  the step's WIP limit and why (live session, no live session, release grace
+  pending with its release time, or released), and the number counted shall
+  equal the number admission uses.

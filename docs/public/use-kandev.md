@@ -148,6 +148,13 @@ again after a new idle interval. The policy applies to ACP agents and uses activ
 observe; provider-internal work that is not reported to Kandev may not prevent suspension. It does
 not apply to passthrough terminal sessions or manually stopped sessions.
 
+Workspace managers can also enable **Release slots of tasks without a live session** in the same
+page. The policy is off by default and keeps a saved grace of 10 minutes. When enabled, a task that
+is **In progress** or **Failed** and has no live agent session stops counting toward its workflow
+step's WIP limit once the grace has passed since its last task or session activity, so the next
+queued task can start. The task keeps its column and state, and counts again when a session starts,
+which can briefly put the step above its limit.
+
 ## Customize the sidebar
 
 Open **Settings > Layout > Sidebar** to customize the optional navigation for the active

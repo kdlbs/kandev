@@ -781,9 +781,12 @@ func mapWorkspaceItemState(workspace taskdto.WorkspaceDTO) map[string]any {
 		"default_config_agent_profile_id": workspace.DefaultConfigAgentProfileID,
 		"acp_idle_suspension_enabled":     workspace.ACPIdleSuspensionEnabled,
 		"acp_idle_timeout_minutes":        workspace.ACPIdleTimeoutMinutes,
-		"office_workflow_id":              nullString(workspace.OfficeWorkflowID),
-		"created_at":                      workspace.CreatedAt,
-		"updated_at":                      workspace.UpdatedAt,
+
+		"wip_sessionless_release_enabled":       workspace.WIPSessionlessReleaseEnabled,
+		"wip_sessionless_release_grace_minutes": workspace.WIPSessionlessReleaseGraceMinutes,
+		"office_workflow_id":                    nullString(workspace.OfficeWorkflowID),
+		"created_at":                            workspace.CreatedAt,
+		"updated_at":                            workspace.UpdatedAt,
 	}
 }
 

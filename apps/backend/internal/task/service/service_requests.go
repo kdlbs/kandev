@@ -271,6 +271,10 @@ type UpdateWorkspaceRequest struct {
 	DefaultConfigAgentProfileID *string    `json:"default_config_agent_profile_id,omitempty"`
 	ACPIdleSuspensionEnabled    *bool      `json:"acp_idle_suspension_enabled,omitempty"`
 	ACPIdleTimeoutMinutes       *int       `json:"acp_idle_timeout_minutes,omitempty"`
+	// WIPSessionlessReleaseEnabled and WIPSessionlessReleaseGraceMinutes set
+	// the opt-in sessionless WIP slot release policy.
+	WIPSessionlessReleaseEnabled      *bool `json:"wip_sessionless_release_enabled,omitempty"`
+	WIPSessionlessReleaseGraceMinutes *int  `json:"wip_sessionless_release_grace_minutes,omitempty"`
 	// Visibility is "private" or "org". Unknown values normalize to private:
 	// unrecognized input must never widen access.
 	Visibility *string `json:"visibility,omitempty"`
