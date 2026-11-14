@@ -249,17 +249,148 @@ func (si *SchedulerIntegration) liftParkedRoutingRuns(ctx context.Context) {
 }
 
 func (si *SchedulerIntegration) recoverStaleClaimedRuns(ctx context.Context) {
-	count, err := si.svc.repo.RecoverStale(ctx, time.Now().UTC().Add(-staleClaimedRunAge))
+	cutoff := time.Now().UTC().Add(-staleClaimedRunAge)
+	candidates, err := si.svc.repo.RunsRepository().ListStaleClaimedRuns(ctx, cutoff)
 	if err != nil {
 		if ctx.Err() != nil {
 			return
 		}
-		si.logger.Error("failed to recover stale claimed runs", zap.Error(err))
+		si.logger.Error("failed to list stale claimed runs", zap.Error(err))
 		return
+	}
+	var count int64
+	for _, run := range candidates {
+		if ctx.Err() != nil {
+			return
+		}
+		if !si.canRecoverStaleClaimedRun(ctx, run) {
+			continue
+		}
+		recovered, err := si.svc.repo.RunsRepository().RecoverStaleClaimedRun(ctx, run, cutoff)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			si.logger.Warn("failed to recover stale claimed run",
+				zap.String("run_id", run.ID), zap.Error(err))
+			continue
+		}
+		if recovered {
+			count++
+		}
 	}
 	if count > 0 {
 		si.logger.Info("recovered stale claimed runs", zap.Int64("count", count))
 	}
+}
+
+func (si *SchedulerIntegration) canRecoverStaleClaimedRun(ctx context.Context, run *runsmodels.Run) bool {
+	taskID := si.extractTaskID(run.Payload)
+	if taskID == "" {
+		return si.canRecoverTasklessClaim(ctx, run)
+	}
+
+	return si.canRecoverTaskClaim(ctx, run, taskID)
+}
+
+func (si *SchedulerIntegration) canRecoverTasklessClaim(ctx context.Context, run *runsmodels.Run) bool {
+	if run.ClaimedAt == nil {
+		return false
+	}
+	sessions, err := si.svc.repo.ListRunSessions(ctx, run.ID)
+	if err != nil {
+		if ctx.Err() == nil {
+			si.logger.Warn("stale taskless run recovery deferred because attempts could not be read",
+				zap.String("run_id", run.ID), zap.Error(err))
+		}
+		return false
+	}
+	if len(sessions) == 0 {
+		return run.SessionID == ""
+	}
+	for _, session := range sessions {
+		// A reservation created during this claim transfers recovery to the
+		// run-session lifecycle, including its completion-in-flight window.
+		if session.State == models.RunSessionStatePreparing || session.State == models.RunSessionStateRunning ||
+			session.CreatedAt.IsZero() || !session.CreatedAt.Before(*run.ClaimedAt) {
+			return false
+		}
+	}
+	// Terminal attempts from earlier claims do not own this retry. The
+	// scheduler can requeue it if the new claim never reserved an attempt.
+	return true
+}
+
+func (si *SchedulerIntegration) canRecoverTaskClaim(ctx context.Context, run *runsmodels.Run, taskID string) bool {
+	probe := si.svc.runClaimSessionProbe
+	sessions, err := si.findTaskSessionsForClaim(ctx, run, taskID, probe)
+	if err != nil {
+		si.logClaimSessionLookupFailure(ctx, run.ID, taskID, err)
+		return false
+	}
+	if len(sessions) == 0 {
+		return run.SessionID == ""
+	}
+	for _, session := range sessions {
+		if session.SessionID != "" && si.preserveSessionOwnedClaim(ctx, run.ID, session, probe) {
+			return false
+		}
+	}
+	return true
+}
+
+func (si *SchedulerIntegration) findTaskSessionsForClaim(
+	ctx context.Context, run *runsmodels.Run, taskID string, probe RunClaimSessionProbe,
+) ([]RunClaimSessionEvidence, error) {
+	if probe == nil {
+		si.logger.Warn("stale task run recovery deferred because session lookup is unavailable",
+			zap.String("run_id", run.ID), zap.String("task_id", taskID))
+		return nil, errors.New("run claim session lookup unavailable")
+	}
+	if run.ClaimedAt == nil {
+		return nil, errors.New("run claim timestamp is unavailable")
+	}
+	return probe.FindTaskSessionsForClaim(ctx, taskID, run.AgentProfileID, run.SessionID, *run.ClaimedAt)
+}
+
+func (si *SchedulerIntegration) logClaimSessionLookupFailure(ctx context.Context, runID, taskID string, err error) {
+	if ctx.Err() == nil {
+		si.logger.Warn("stale task run recovery deferred because session lookup failed",
+			zap.String("run_id", runID), zap.String("task_id", taskID), zap.Error(err))
+	}
+}
+
+func (si *SchedulerIntegration) preserveSessionOwnedClaim(
+	ctx context.Context, runID string, session RunClaimSessionEvidence, probe RunClaimSessionProbe,
+) bool {
+	if probe == nil {
+		si.logger.Warn("stale task run recovery deferred because runtime probe is unavailable",
+			zap.String("run_id", runID), zap.String("session_id", session.SessionID))
+		return true
+	}
+	live, err := probe.ProbeAgentRunningForSession(ctx, session.SessionID)
+	if err != nil {
+		if ctx.Err() == nil {
+			si.logger.Warn("stale task run recovery deferred because runtime liveness is uncertain",
+				zap.String("run_id", runID), zap.String("session_id", session.SessionID), zap.Error(err))
+		}
+		return true
+	}
+	if live {
+		si.logger.Debug("stale run recovery deferred for live task session",
+			zap.String("run_id", runID), zap.String("session_id", session.SessionID))
+		return true
+	}
+	if session.TurnStartedAfterClaim {
+		// A turn accepted after this claim proves launch even after its process
+		// stopped and before Office completion settles the run.
+		si.logger.Debug("stale run recovery deferred for task turn owned by claim",
+			zap.String("run_id", runID), zap.String("session_id", session.SessionID))
+		return true
+	}
+	si.logger.Debug("stale run recovery found no live or current task turn",
+		zap.String("run_id", runID), zap.String("session_id", session.SessionID))
+	return false
 }
 
 // reapStaleCheckouts is the backstop for task checkouts that never got

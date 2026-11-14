@@ -126,6 +126,23 @@ type SessionRecoveryBlockLookup interface {
 	GetSessionRecoveryBlock(context.Context, string) (*taskmodels.SessionRecoveryBlock, error)
 }
 
+// RunClaimSessionEvidence describes a task session that may belong to the
+// current run claim. A turn started after the claim is durable launch evidence.
+type RunClaimSessionEvidence struct {
+	SessionID             string
+	TurnStartedAfterClaim bool
+}
+
+// RunClaimSessionProbe finds task sessions relevant to a claimed run and checks
+// runtime liveness without hiding probe errors. Recovery treats errors as
+// uncertain and leaves the claim alone.
+type RunClaimSessionProbe interface {
+	FindTaskSessionsForClaim(
+		ctx context.Context, taskID, agentProfileID, persistedSessionID string, claimedAt time.Time,
+	) ([]RunClaimSessionEvidence, error)
+	ProbeAgentRunningForSession(ctx context.Context, sessionID string) (bool, error)
+}
+
 // LaunchContext mirrors scheduler.LaunchContext so the office.service
 // package can carry the Office-built launch context (prompt, env,
 // workflow step, attachments, plan-mode, profile) into the routing
@@ -423,6 +440,7 @@ type Service struct {
 	projectSkillDirResolver ProjectSkillDirResolver
 	taskStarter             TaskStarter
 	runSessionLauncher      RunSessionLauncher
+	runClaimSessionProbe    RunClaimSessionProbe
 	runStopper              RunExecutionStopper
 	runPermissions          RunPermissionResolver
 	permissionRetryDelays   []time.Duration
@@ -579,6 +597,12 @@ func (s *Service) SetAgentTokenMinter(minter AgentTokenMinter) {
 // scheduler fail-closed when startup composition is incomplete.
 func (s *Service) SetRunSessionLauncher(launcher RunSessionLauncher) {
 	s.runSessionLauncher = launcher
+}
+
+// SetRunClaimSessionProbe wires the task-session/runtime check used by stale
+// claim recovery. Leaving it nil fails closed for task-bound claims.
+func (s *Service) SetRunClaimSessionProbe(probe RunClaimSessionProbe) {
+	s.runClaimSessionProbe = probe
 }
 
 // RunSessionLauncherHandle returns the shared-runtime taskless launch seam so

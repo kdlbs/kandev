@@ -46,6 +46,10 @@ func TestReadMethodsPropagateDatabaseErrors(t *testing.T) {
 			_, err := repo.ListPendingRunsForTask(ctx, "t1")
 			return err
 		},
+		"ListStaleClaimedRuns": func() error {
+			_, err := repo.ListStaleClaimedRuns(ctx, time.Now().UTC())
+			return err
+		},
 		"ListRunsForAgentPaged(first page)": func() error {
 			_, err := repo.ListRunsForAgentPaged(ctx, "a1", time.Time{}, "", 10)
 			return err
@@ -95,6 +99,10 @@ func TestWriteMethodsPropagateDatabaseErrors(t *testing.T) {
 	run := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "run-1", AgentProfileID: "a1", Reason: "task_assigned",
 	})
+	claimedAt := time.Now().UTC().Add(-time.Hour)
+	observedClaim := &runsmodels.Run{
+		ID: run.ID, Status: runsmodels.RunStatusClaimed, ClaimedAt: &claimedAt,
+	}
 	if err := writer.Close(); err != nil {
 		t.Fatalf("close writer: %v", err)
 	}
@@ -138,8 +146,8 @@ func TestWriteMethodsPropagateDatabaseErrors(t *testing.T) {
 			_, err := repo.CleanExpired(ctx, time.Now().UTC())
 			return err
 		},
-		"RecoverStale": func() error {
-			_, err := repo.RecoverStale(ctx, time.Now().UTC())
+		"RecoverStaleClaimedRun": func() error {
+			_, err := repo.RecoverStaleClaimedRun(ctx, observedClaim, time.Now().UTC())
 			return err
 		},
 		"CancelRunsWhere": func() error {

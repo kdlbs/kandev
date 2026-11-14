@@ -853,24 +853,6 @@ func (r *Repository) CleanExpired(ctx context.Context, olderThan time.Time) (int
 	return res.RowsAffected()
 }
 
-// RecoverStale resets claimed runs older than the given time back to
-// queued. Re-stamps priority_class to recovery unless it is already
-// human (AC-OFFICE-BACKPRESSURE-001.7), the same rule ScheduleRetry
-// applies, so a run stuck long enough to be swept is not also stuck at
-// its original, possibly lower, claim priority.
-func (r *Repository) RecoverStale(ctx context.Context, claimedOlderThan time.Time) (int64, error) {
-	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE runs
-		SET status = 'queued', claimed_at = NULL,
-		    priority_class = CASE WHEN priority_class = ? THEN priority_class ELSE ? END
-		WHERE status = 'claimed' AND claimed_at < ?
-	`), runmodels.PriorityClassHuman, runmodels.PriorityClassRecovery, claimedOlderThan)
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
-}
-
 // ListPendingRunsForTask returns queued runs in retry state for the given task.
 func (r *Repository) ListPendingRunsForTask(ctx context.Context, taskID string) ([]*runmodels.Run, error) {
 	var reqs []*runmodels.Run
