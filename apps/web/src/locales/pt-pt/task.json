@@ -2204,6 +2204,7 @@
   "taskMoveErrorApprovalsPending": "A tarefa não pode ser concluída até os aprovadores a aprovarem.",
   "taskMoveErrorArchived": "As tarefas arquivadas não podem ser movidas.",
   "taskMoveErrorDifferentWorkspace": "A tarefa e o fluxo de trabalho de destino têm de usar a mesma área de trabalho.",
+  "taskMoveErrorExecutorUnavailable": "O perfil de executor desta tarefa já não está disponível, por isso o agente deste passo não pode iniciar.",
   "taskMoveErrorWorkflowStep": "O passo de destino não pertence ao fluxo de trabalho de destino.",
   "taskMoveErrorWipLimit": "O passo de destino atingiu o limite WIP.",
   "taskMoveErrorCompletionGate": "Os requisitos de conclusão não foram cumpridos.",

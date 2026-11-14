@@ -2288,6 +2288,7 @@
   "taskMoveErrorApprovalsPending": "The task cannot be completed until its approvers approve it.",
   "taskMoveErrorArchived": "Archived tasks cannot be moved.",
   "taskMoveErrorDifferentWorkspace": "The task and target workflow must use the same workspace.",
+  "taskMoveErrorExecutorUnavailable": "This task's executor profile is no longer available, so this step's agent cannot start.",
   "taskMoveErrorWorkflowStep": "The target step does not belong to the target workflow.",
   "taskMoveErrorWipLimit": "The target workflow step is at its WIP limit.",
   "taskMoveErrorCompletionGate": "Completion requirements are not met.",

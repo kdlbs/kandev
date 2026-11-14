@@ -27,6 +27,7 @@ import (
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	workflowadapters "github.com/kandev/kandev/internal/workflow/adapters"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -3364,7 +3365,7 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidateAndRoute(
 	endPolicy models.WorkflowProfileSessionEndPolicy,
 	validatedExisting *models.TaskSession,
 	workflowRoute *models.WorkflowSessionRoute,
-) (*models.TaskSession, error) {
+) (result *models.TaskSession, switchErr error) {
 	startPolicy = models.NormalizeWorkflowProfileSessionStartPolicy(string(startPolicy))
 	endPolicy = models.NormalizeWorkflowProfileSessionEndPolicy(string(endPolicy))
 	s.logger.Info("switching session for workflow step agent profile change",
@@ -3401,10 +3402,19 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidateAndRoute(
 	}
 
 	// Signal to the frontend that the task is preparing a new agent.
+	priorTaskState := dbTask.State
+	schedulingWritten := false
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
 		s.logger.Warn("failed to set task SCHEDULING during agent switch",
 			zap.String("task_id", taskID), zap.Error(err))
+	} else {
+		schedulingWritten = true
 	}
+	defer func() {
+		if switchErr != nil && schedulingWritten {
+			s.restoreTaskStateAfterWorkflowSwitchFailure(ctx, taskID, priorTaskState)
+		}
+	}()
 
 	if existing != nil {
 		var reused *models.TaskSession
@@ -3435,6 +3445,22 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidateAndRoute(
 	return s.createNewSessionForStepWithEndPolicyAndRoute(
 		ctx, taskID, currentSession, newAgentProfileID, endPolicy, workflowRoute,
 	)
+}
+
+func (s *Service) restoreTaskStateAfterWorkflowSwitchFailure(ctx context.Context, taskID string, priorState v1.TaskState) {
+	restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	updated, err := s.taskRepo.UpdateTaskStateIfCurrentIn(
+		restoreCtx, taskID, priorState, []v1.TaskState{v1.TaskStateScheduling},
+	)
+	if err != nil {
+		s.logger.Warn("failed to restore task state after workflow session switch",
+			zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	if updated {
+		s.publishTaskUpdatedByID(restoreCtx, taskID)
+	}
 }
 
 // findReusableSessionForProfile returns the most-recently-updated
@@ -4391,13 +4417,20 @@ func (s *Service) preflightExplicitWorkflowStepCredentials(
 	if err != nil {
 		return err
 	}
+	startPolicy := s.resolveStepProfileSessionStartPolicy(targetStep)
 	targetSession := currentSession
-	if s.resolveStepProfileSessionStartPolicy(targetStep) == models.WorkflowProfileSessionStartPolicyReuse && resolution.session != nil {
+	if startPolicy == models.WorkflowProfileSessionStartPolicyReuse && resolution.session != nil {
 		targetSession = resolution.session
+		if targetSession.ID == currentSession.ID {
+			return nil
+		}
 	}
 	task, err := s.preflightTaskProjection(ctx, taskID, candidate)
 	if err != nil {
 		return fmt.Errorf("get task for explicit credential preflight: %w", err)
+	}
+	if err := s.preflightDestinationExecutorAdmission(ctx, task, targetSession); err != nil {
+		return err
 	}
 	return s.executor.PreflightManagedGitCredentials(
 		ctx, task.WorkspaceID, taskID, targetSession.ExecutorID, targetSession.ExecutorProfileID,
@@ -4439,9 +4472,39 @@ func (s *Service) preflightFixedWorkflowStepCredentials(
 	if err != nil {
 		return fmt.Errorf("get task for credential preflight: %w", err)
 	}
+	if err := s.preflightDestinationExecutorAdmission(ctx, task, targetSession); err != nil {
+		return err
+	}
 	return s.executor.PreflightManagedGitCredentials(
 		ctx, task.WorkspaceID, taskID, targetSession.ExecutorID, targetSession.ExecutorProfileID,
 	)
+}
+
+func (s *Service) preflightDestinationExecutorAdmission(
+	ctx context.Context,
+	task *models.Task,
+	targetSession *models.TaskSession,
+) error {
+	if task == nil || targetSession == nil {
+		return nil
+	}
+	err := s.executor.PreflightSessionExecutorAdmission(
+		ctx,
+		task.ToAPI(),
+		targetSession.ExecutorID,
+		targetSession.ExecutorProfileID,
+		targetSession.TaskEnvironmentID,
+	)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, repoerrors.ErrExecutorProfileNotFound) ||
+		errors.Is(err, models.ErrExecutorNotFound) ||
+		errors.Is(err, models.ErrExecutorMutationDenied) ||
+		errors.Is(err, models.ErrExecutorOwnershipInvalid) {
+		return fmt.Errorf("%w: %w", workflowmove.ErrDestinationExecutorUnavailable, err)
+	}
+	return err
 }
 
 func (s *Service) preflightTaskProjection(ctx context.Context, taskID string, candidate *models.Task) (*models.Task, error) {

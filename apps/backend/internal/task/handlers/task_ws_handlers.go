@@ -564,6 +564,11 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 			errors.Is(err, repoerrors.ErrTaskCompletionHumanConfirmationRequired) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "Task completion requirements changed or are not satisfied", map[string]interface{}{"error_code": "task_completion_gate_blocked"})
 		}
+		if errors.Is(err, workflowmove.ErrDestinationExecutorUnavailable) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, moveExecutorUnavailableMessage, map[string]interface{}{
+				errorDetailKeyErrorCode: moveConflictCodeExecutorUnavailable,
+			})
+		}
 		if code, msgText, ok := moveEntryOptionsWSError(err); ok {
 			return ws.NewError(msg.ID, msg.Action, code, msgText, nil)
 		}

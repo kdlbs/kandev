@@ -2204,6 +2204,7 @@
   "taskMoveErrorApprovalsPending": "审批人批准之前，无法完成此任务。",
   "taskMoveErrorArchived": "已归档的任务无法移动。",
   "taskMoveErrorDifferentWorkspace": "任务和目标工作流必须使用同一工作区。",
+  "taskMoveErrorExecutorUnavailable": "此任务的执行器配置文件已不可用，因此此步骤的智能体无法启动。",
   "taskMoveErrorWorkflowStep": "目标步骤不属于目标工作流。",
   "taskMoveErrorWipLimit": "目标工作流步骤已达到 WIP 限制。",
   "taskMoveErrorCompletionGate": "尚未满足完成要求。",
