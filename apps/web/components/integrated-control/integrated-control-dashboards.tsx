@@ -4,13 +4,27 @@ import Link from "@/components/routing/app-link";
 import { controlHref, type ControlView } from "@/lib/navigation/integrated-control";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { useIntegratedControl } from "./integrated-control-provider";
+import { ControlAggregateOverview } from "./control-aggregate-overview";
+import { ControlGroupedHistory } from "./control-grouped-history";
+import { ControlNativeComparison } from "./control-native-comparison";
 import { ControlProviderCircuits } from "./control-provider-circuits";
 
-export function IntegratedControlDashboard({ view }: { view: ControlView }) {
+function selectWorkspaces<T extends { id: string }>(workspaces: T[], workspaceId?: string) {
+  return workspaceId ? workspaces.filter((workspace) => workspace.id === workspaceId) : workspaces;
+}
+
+export function IntegratedControlDashboard({
+  view,
+  workspaceId,
+}: {
+  view: ControlView;
+  workspaceId?: string;
+}) {
   const { t } = useTranslation();
   const control = useIntegratedControl();
   if (!control?.data) return null;
-  const { workspaces, byWorkspace } = control.data;
+  const workspaces = selectWorkspaces(control.data.workspaces, workspaceId);
+  const { byWorkspace } = control.data;
   const rows = workspaces.flatMap((workspace) =>
     (byWorkspace[workspace.id]?.items ?? []).map((coordinator) => ({ workspace, coordinator })),
   );
@@ -39,34 +53,24 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
           />
         </div>
       )}
-      {view === "workspaces" || view === "overview" ? (
-        <div className="grid gap-3">
-          {workspaces.map((workspace) => (
-            <section key={workspace.id} className="rounded-lg border p-4">
-              <h2 className="font-medium">{workspace.name}</h2>
-              {workspace.description && (
-                <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
-                  {workspace.description}
-                </p>
-              )}
-              <p className="mt-2 text-xs text-muted-foreground">
-                {t(
-                  hasScope(workspace.scopes, SCOPE.workspaceManage)
-                    ? "sidebar:integratedControl.manageAccess"
-                    : "sidebar:integratedControl.readAccess",
-                )}
-              </p>
-              {byWorkspace[workspace.id]?.error && (
-                <p role="alert" className="mt-2 text-sm text-destructive">
-                  {t("sidebar:integratedControl.loadError")}
-                </p>
-              )}
-            </section>
-          ))}
-        </div>
-      ) : (
-        <CoordinatorFacts view={view} rows={rows} />
+      {view === "overview" && control.officeEnabled && (
+        <>
+          <ControlAggregateOverview
+            aggregate={control.aggregate}
+            controlWorkspaceIds={workspaces.map((workspace) => workspace.id)}
+          />
+          <ControlNativeComparison workspaces={workspaces} revision={control.data} />
+        </>
       )}
+      {view === "history" && control.officeEnabled && (
+        <ControlGroupedHistory aggregate={control.aggregate} />
+      )}
+      <WorkspaceOrCoordinatorFacts
+        view={view}
+        workspaces={workspaces}
+        byWorkspace={byWorkspace}
+        rows={rows}
+      />
       {!control.coordinatorEnabled && (
         <p role="status" className="text-sm text-muted-foreground">
           {t("sidebar:integratedControl.coordinatorsOff")}
@@ -93,6 +97,57 @@ function Fact({ label, value }: { label: string; value: number | string }) {
       <p className="mt-2 text-2xl font-semibold">{value}</p>
     </section>
   );
+}
+
+type FactWorkspaces = NonNullable<
+  NonNullable<ReturnType<typeof useIntegratedControl>>["data"]
+>["workspaces"];
+
+type FactByWorkspace = NonNullable<
+  NonNullable<ReturnType<typeof useIntegratedControl>>["data"]
+>["byWorkspace"];
+
+function WorkspaceOrCoordinatorFacts({
+  view,
+  workspaces,
+  byWorkspace,
+  rows,
+}: {
+  view: ControlView;
+  workspaces: FactWorkspaces;
+  byWorkspace: FactByWorkspace;
+  rows: FactRows;
+}) {
+  const { t } = useTranslation();
+  if (view === "workspaces" || view === "overview") {
+    return (
+      <div className="grid gap-3">
+        {workspaces.map((workspace) => (
+          <section key={workspace.id} className="rounded-lg border p-4">
+            <h2 className="font-medium">{workspace.name}</h2>
+            {workspace.description && (
+              <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
+                {workspace.description}
+              </p>
+            )}
+            <p className="mt-2 text-xs text-muted-foreground">
+              {t(
+                hasScope(workspace.scopes, SCOPE.workspaceManage)
+                  ? "sidebar:integratedControl.manageAccess"
+                  : "sidebar:integratedControl.readAccess",
+              )}
+            </p>
+            {byWorkspace[workspace.id]?.error && (
+              <p role="alert" className="mt-2 text-sm text-destructive">
+                {t("sidebar:integratedControl.loadError")}
+              </p>
+            )}
+          </section>
+        ))}
+      </div>
+    );
+  }
+  return <CoordinatorFacts view={view} rows={rows} />;
 }
 
 type FactRows = Array<{
