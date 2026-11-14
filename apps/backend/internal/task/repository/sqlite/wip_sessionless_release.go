@@ -4,9 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strings"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -147,9 +148,20 @@ func (r *Repository) ListSessionlessWIPReleaseSteps(ctx context.Context) ([]stri
 
 // GetWorkflowStepWIPOccupancy explains who holds stepID's WIP slots and why.
 // Each admitted task is listed with whether it counts toward the limit right
-// now; Counted equals the number the admission checks use.
+// now; Counted equals the number the admission checks use. The policy,
+// occupant and session reads share one read transaction, so a session that
+// starts mid-read cannot be reported live on a task marked released.
 func (r *Repository) GetWorkflowStepWIPOccupancy(ctx context.Context, stepID string) (*models.WIPStepOccupancy, error) {
-	policy, err := r.readStepWIPReleasePolicy(ctx, r.ro, stepID)
+	options := &sql.TxOptions{ReadOnly: true}
+	if dialect.IsPostgres(r.ro.DriverName()) {
+		options.Isolation = sql.LevelRepeatableRead
+	}
+	tx, err := r.ro.BeginTxx(ctx, options)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	policy, err := r.readStepWIPReleasePolicy(ctx, tx, stepID)
 	if err != nil {
 		return nil, err
 	}
@@ -162,13 +174,10 @@ func (r *Repository) GetWorkflowStepWIPOccupancy(ctx context.Context, stepID str
 		args = append(args, cutoff, cutoff)
 	}
 	args = append(args, stepID)
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+	rows, err := tx.QueryContext(ctx, r.ro.Rebind(`
 		SELECT tasks.id, tasks.title, tasks.state, tasks.updated_at, `+releasedExpr+`
 		FROM tasks
-		WHERE tasks.workflow_step_id = ?
-		  AND tasks.wip_admitted = 1
-		  AND tasks.archived_at IS NULL
-		  AND tasks.is_ephemeral = 0`+andNotAutomationOrigin+`
+		WHERE `+wipOccupantWhere+`
 		ORDER BY tasks.position, tasks.id
 	`), args...)
 	if err != nil {
@@ -178,7 +187,10 @@ func (r *Repository) GetWorkflowStepWIPOccupancy(ctx context.Context, stepID str
 	if err != nil {
 		return nil, err
 	}
-	if err := r.attachWIPOccupantSessions(ctx, occupants); err != nil {
+	if err := r.attachWIPOccupantSessions(ctx, tx, stepID, occupants); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	result := &models.WIPStepOccupancy{
@@ -220,22 +232,26 @@ func scanWIPOccupants(rows *sql.Rows) ([]*wipOccupantRow, error) {
 	return occupants, rows.Err()
 }
 
-func (r *Repository) attachWIPOccupantSessions(ctx context.Context, occupants []*wipOccupantRow) error {
+// wipOccupantWhere selects stepID's admitted occupants. It takes the step id
+// once and is shared by the occupant and session reads, so the session read
+// selects by step rather than binding one variable per occupant.
+const wipOccupantWhere = `tasks.workflow_step_id = ?
+		  AND tasks.wip_admitted = 1
+		  AND tasks.archived_at IS NULL
+		  AND tasks.is_ephemeral = 0` + andNotAutomationOrigin
+
+func (r *Repository) attachWIPOccupantSessions(ctx context.Context, tx *sqlx.Tx, stepID string, occupants []*wipOccupantRow) error {
 	if len(occupants) == 0 {
 		return nil
 	}
 	byID := make(map[string]*wipOccupantRow, len(occupants))
-	placeholders := make([]string, 0, len(occupants))
-	args := make([]any, 0, len(occupants))
 	for _, occupant := range occupants {
 		byID[occupant.TaskID] = occupant
-		placeholders = append(placeholders, "?")
-		args = append(args, occupant.TaskID)
 	}
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+	rows, err := tx.QueryContext(ctx, r.ro.Rebind(`
 		SELECT task_id, state, updated_at FROM task_sessions
-		WHERE task_id IN (`+strings.Join(placeholders, ", ")+`)
-	`), args...)
+		WHERE task_id IN (SELECT tasks.id FROM tasks WHERE `+wipOccupantWhere+`)
+	`), stepID)
 	if err != nil {
 		return err
 	}
@@ -287,7 +303,8 @@ func classifyWIPOccupant(occupant *models.WIPStepOccupant, released bool, policy
 		occupant.Reason = models.WIPOccupantReasonReleaseGracePending
 		releaseAt := occupant.LastActivityAt.Add(time.Duration(policy.GraceMinutes) * time.Minute)
 		if releaseAt.Before(now) {
-			// The row changed between the two reads; the next read settles it.
+			// Stored and computed timestamps can differ in precision; never
+			// report a pending release time in the past.
 			releaseAt = now
 		}
 		occupant.ReleaseAt = &releaseAt
