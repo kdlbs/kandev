@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { Button } from "@kandev/ui/button";
 import { Switch } from "@kandev/ui/switch";
 import { Label } from "@kandev/ui/label";
@@ -484,58 +484,50 @@ function savingLabel(t: TFunction, saving: boolean, isEdit: boolean): string {
   return isEdit ? t("jira:update") : t("jira:create");
 }
 
-export function JiraIssueWatchDialog({
-  open,
-  onOpenChange,
-  watch,
-  workspaceId,
-  onCreate,
-  onUpdate,
-}: Props) {
-  const { t } = useTranslation();
-  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+export function JiraIssueWatchDialog(props: Props) {
+  if (!props.open) return null;
+  return (
+    <WatchDialogOpening
+      key={JSON.stringify([props.workspaceId, props.watch?.id, props.watch?.workspaceId])}
+      {...props}
+    />
+  );
+}
+
+function useWatchSave({ watch, onCreate, onUpdate, onOpenChange }: Props, form: FormState) {
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState<FormState>(() => makeEmptyForm(workspaceId ?? ""));
-
-  // Re-seed the form whenever the dialog opens or the bound watch changes.
-  // Default the workspace to: editing → the watch's workspace; creating →
-  // the explicit `workspaceId` prop, falling back to the user's currently
-  // active workspace so the picker isn't empty when nothing was preselected.
-  useEffect(() => {
-    if (watch) {
-      setForm(formStateFromWatch(watch));
-    } else {
-      setForm(makeEmptyForm(workspaceId ?? activeWorkspaceId ?? ""));
-    }
-  }, [watch, open, workspaceId, activeWorkspaceId]);
-
-  // Workspace is locked when editing (changing it would orphan the workflow
-  // refs) or when the dialog was opened from a single-workspace surface.
-  const workspaceLocked = !!watch || !!workspaceId;
-
-  const parsedMaxInflight = parseMaxInflightTasks(form.maxInflightTasks);
-  const canSave =
-    !!form.workspaceId &&
-    !!form.jql.trim() &&
-    !!form.workflowId &&
-    !!form.workflowStepId &&
-    !!form.prompt.trim() &&
-    parsedMaxInflight !== "invalid";
-
+  const live = useRef(false);
+  const pending = useRef<object | null>(null);
+  useLayoutEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+  const retireSave = useCallback(() => {
+    pending.current = null;
+    setSaving(false);
+  }, []);
+  const changeOpen = useCallback(
+    (nextOpen: boolean) => {
+      if (!nextOpen) live.current = false;
+      onOpenChange(nextOpen);
+    },
+    [onOpenChange],
+  );
   const handleSave = useCallback(async () => {
+    const maxInflight = parseMaxInflightTasks(form.maxInflightTasks);
+    if (maxInflight === "invalid" || !live.current || pending.current) return;
+    const request = {};
+    pending.current = request;
     setSaving(true);
     try {
-      const maxInflight = parseMaxInflightTasks(form.maxInflightTasks);
-      if (maxInflight === "invalid") {
-        // canSave gates the button but guard the handler too — see Linear dialog.
-        return;
-      }
       const payload = {
         jql: form.jql,
         workflowId: form.workflowId,
         workflowStepId: form.workflowStepId,
-        // Empty repositoryId clears the binding; empty base branch is sent
-        // verbatim so the backend fills the repo's default at save time.
+        // Empty repositoryId clears the binding; empty base branch lets the
+        // backend fill the repository's default branch at save time.
         repositoryId: form.repositoryId,
         baseBranch: form.repositoryId ? form.baseBranch : "",
         agentProfileId: form.agentProfileId,
@@ -550,16 +542,55 @@ export function JiraIssueWatchDialog({
       } else {
         await onCreate({ ...payload, workspaceId: form.workspaceId });
       }
-      onOpenChange(false);
+      if (live.current && pending.current === request) changeOpen(false);
     } catch {
       // Error surfaced by caller's toast.
     } finally {
-      setSaving(false);
+      if (live.current && pending.current === request) retireSave();
     }
-  }, [form, watch, onCreate, onUpdate, onOpenChange]);
+  }, [form, watch, onCreate, onUpdate, changeOpen, retireSave]);
+  return { saving, handleSave, changeOpen, retireSave };
+}
+
+function WatchDialogOpening(props: Props) {
+  const { open, watch, workspaceId } = props;
+  const { t } = useTranslation();
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  const [form, setForm] = useState<FormState>(() =>
+    watch ? formStateFromWatch(watch) : makeEmptyForm(workspaceId ?? activeWorkspaceId ?? ""),
+  );
+  const { saving, handleSave, changeOpen, retireSave } = useWatchSave(props, form);
+
+  // Default hydration can fill an empty workspace without replacing raw input
+  // or a workspace already selected for this opening.
+  useEffect(() => {
+    if (!watch && !workspaceId && activeWorkspaceId) {
+      setForm((previous) =>
+        previous.workspaceId ? previous : clearWorkspaceScopedForm(previous, activeWorkspaceId),
+      );
+    }
+  }, [watch, workspaceId, activeWorkspaceId]);
+  const changeWorkspace = useCallback(
+    (nextWorkspace: string) => {
+      if (nextWorkspace === form.workspaceId) return;
+      retireSave();
+      setForm((previous) => clearWorkspaceScopedForm(previous, nextWorkspace));
+    },
+    [form.workspaceId, retireSave],
+  );
+
+  const workspaceLocked = !!watch || !!workspaceId;
+  const parsedMaxInflight = parseMaxInflightTasks(form.maxInflightTasks);
+  const canSave =
+    !!form.workspaceId &&
+    !!form.jql.trim() &&
+    !!form.workflowId &&
+    !!form.workflowStepId &&
+    !!form.prompt.trim() &&
+    parsedMaxInflight !== "invalid";
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={changeOpen}>
       <DialogContent className="w-full max-w-full sm:w-[800px] sm:max-w-none max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
@@ -570,7 +601,7 @@ export function JiraIssueWatchDialog({
         <div className="space-y-5">
           <WorkspacePicker
             value={form.workspaceId}
-            onChange={(v) => setForm((p) => clearWorkspaceScopedForm(p, v))}
+            onChange={changeWorkspace}
             disabled={workspaceLocked}
           />
           <JQLField
@@ -586,7 +617,7 @@ export function JiraIssueWatchDialog({
           <SettingsFields form={form} setForm={setForm} />
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
+          <Button variant="outline" onClick={() => changeOpen(false)} className="cursor-pointer">
             {t("common:cancel")}
           </Button>
           <Button onClick={handleSave} disabled={saving || !canSave} className="cursor-pointer">
