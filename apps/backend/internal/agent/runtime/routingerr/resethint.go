@@ -21,6 +21,126 @@ var resetClockHintPattern = regexp.MustCompile(
 	`(?i)\bresets\s+(\d{1,2})(?::(\d{2}))?\s*(AM|PM)\s+\(([^()\r\n]+)\)`,
 )
 
+var relativeQuotaResetPattern = regexp.MustCompile(`(?i)\breset\s+in\s+((?:\d+\s*(?:days?|hours?|hrs?|minutes?|mins?|min)\b[,\s]*)+)`)
+var relativeQuotaUnitPattern = regexp.MustCompile(`(?i)(\d+)\s*(days?|hours?|hrs?|minutes?|mins?|min)\b`)
+
+// RelativeQuotaNoticeHasTrailingOutput reports content after the reset sentence.
+// Terminal error envelopes may carry additional diagnostic context. Only the
+// assistant stream uses this check to distinguish that text from output.
+func RelativeQuotaNoticeHasTrailingOutput(text string) bool {
+	indices := relativeQuotaResetPattern.FindStringSubmatchIndex(text)
+	if indices == nil {
+		return false
+	}
+	remainder := strings.TrimSpace(text[indices[1]:])
+	return remainder != "" && (remainder[0] == '.' || remainder[0] == '!') &&
+		strings.TrimSpace(remainder[1:]) != ""
+}
+
+// relativeQuotaDurationPattern captures the whole reset phrase up to its
+// sentence end, including text the duration grammar does not accept.
+var relativeQuotaDurationPattern = regexp.MustCompile(`(?i)\breset\s+in\s+([^\r\n.!?;]*)`)
+
+// relativeQuotaPartialUnit is the last duration term while it is still
+// arriving: a value with an optional, possibly truncated, unit.
+var relativeQuotaPartialUnit = regexp.MustCompile(`^[0-9]{1,3}(?:\s*([a-z]+))?$`)
+
+var relativeQuotaUnitSpellings = []string{"days", "hours", "hrs", "minutes", "mins"}
+
+// IsRelativeQuotaNoticePrefix reports whether the reset phrase in text is a
+// complete duration list or a valid prefix of one. Anything else after the
+// reset phrase, punctuated or not, is assistant output rather than a notice
+// that is still streaming.
+func IsRelativeQuotaNoticePrefix(text string) bool {
+	match := relativeQuotaDurationPattern.FindStringSubmatch(text)
+	if match == nil {
+		return false
+	}
+	duration := strings.ToLower(match[1])
+	position := 0
+	for _, unit := range relativeQuotaUnitPattern.FindAllStringIndex(duration, -1) {
+		separator := strings.Join(strings.Fields(duration[position:unit[0]]), " ")
+		if separator != "" && (position == 0 || separator != ",") {
+			return false
+		}
+		position = unit[1]
+	}
+	suffix := strings.Join(strings.Fields(duration[position:]), " ")
+	if position != 0 {
+		suffix = strings.TrimSpace(strings.TrimPrefix(suffix, ","))
+		if suffix == "" {
+			return true
+		}
+	}
+	partial := relativeQuotaPartialUnit.FindStringSubmatch(suffix)
+	if partial == nil {
+		return false
+	}
+	for _, unit := range relativeQuotaUnitSpellings {
+		if strings.HasPrefix(unit, partial[1]) {
+			return true
+		}
+	}
+	return false
+}
+
+// RelativeQuotaNoticeResetAt parses a relative quota notice whose stream has
+// ended. The final chunk may omit the sentence terminator, but the reset
+// phrase must hold only a supported duration list and no output may follow.
+func RelativeQuotaNoticeResetAt(text string, now time.Time) *time.Time {
+	if RelativeQuotaNoticeHasTrailingOutput(text) {
+		return nil
+	}
+	return relativeQuotaResetAt(text, now, false)
+}
+
+// IsCompleteRelativeQuotaNoticeText reports whether text is a whole relative
+// quota notice: a supported duration list with no assistant output after it.
+func IsCompleteRelativeQuotaNoticeText(text string) bool {
+	return RelativeQuotaNoticeResetAt(text, time.Time{}) != nil
+}
+
+func parseRelativeQuotaResetAt(text string, now time.Time) *time.Time {
+	return relativeQuotaResetAt(text, now, true)
+}
+
+func relativeQuotaResetAt(text string, now time.Time, requireTerminator bool) *time.Time {
+	indices := relativeQuotaResetPattern.FindStringSubmatchIndex(text)
+	if indices == nil {
+		return nil
+	}
+	valueText := text[indices[2]:indices[3]]
+	remainder := strings.TrimSpace(text[indices[1]:])
+	terminated := remainder != "" && (remainder[0] == '.' || remainder[0] == '!')
+	// An ACP chunk can end after a complete unit while more units are still in
+	// flight. Without a sentence terminator the full duration is known only
+	// once the stream has ended with nothing after the duration list.
+	if strings.HasSuffix(strings.TrimSpace(valueText), ",") || !terminated && (requireTerminator || remainder != "") {
+		return nil
+	}
+	units := relativeQuotaUnitPattern.FindAllStringSubmatch(valueText, -1)
+	var duration time.Duration
+	for _, unit := range units {
+		value, ok := parseIntInRange(unit[1], 0, 999)
+		if !ok {
+			return nil
+		}
+		switch strings.ToLower(unit[2][:1]) {
+		case "d":
+			duration += time.Duration(value) * 24 * time.Hour
+		case "h":
+			duration += time.Duration(value) * time.Hour
+		default:
+			duration += time.Duration(value) * time.Minute
+		}
+	}
+	if duration <= 0 {
+		return nil
+	}
+	reset := now.Add(duration)
+	return &reset
+}
+
 // shortResetHintPattern is OpenCode's relative retry suffix, e.g.
 // "retry shortly (after 24 s)". Only the diagnostic's own trailing suffix
 // qualifies; the bounded capture keeps a malformed value out of the duration

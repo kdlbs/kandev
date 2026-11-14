@@ -22,10 +22,17 @@ func classifyDynamicLaunchFailure(err error, executionProfileID string, keywordE
 	if !errors.As(err, &startup) || startup == nil {
 		return err
 	}
+	// Provider rules are keyed by agent type. The startup failure carries the
+	// agent type of the process that failed; the execution profile id is only a
+	// fallback when it is absent.
+	providerID := startup.ProviderID
+	if providerID == "" {
+		providerID = executionProfileID
+	}
 	input := routingerr.Input{
 		KeywordContext: routingerr.KeywordContext{Enabled: len(keywordEnabled) != 0 && keywordEnabled[0], Diagnostic: true, EmptyOutput: true},
 		Phase:          routingerr.PhaseProcessStart,
-		ProviderID:     executionProfileID,
+		ProviderID:     providerID,
 		Stderr:         err.Error(),
 	}
 	classified = routingerr.Classify(input)

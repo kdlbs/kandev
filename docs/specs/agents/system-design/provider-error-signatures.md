@@ -6,6 +6,7 @@ requirements:
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001
   - REQ-AGENTS-CODEX-RATE-SIGNATURE-001
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002
+  - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-003
 ---
 
 # Provider Error Signature Classification System Design
@@ -23,8 +24,9 @@ the established higher-priority signals and sanitized excerpt contract.
 
 | Requirement | Design sections |
 | --- | --- |
-| `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001` | [Rule signatures](#rule-signatures), [Inputs that carry prose](#inputs-that-carry-prose) |
+| `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001` | [Rule signatures](#rule-signatures), [Inputs that carry prose](#inputs-that-carry-prose), [OpenCode period reset](#opencode-period-reset) |
 | `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002` | [Opt-in unmatched diagnostic prefilter](#opt-in-unmatched-diagnostic-prefilter) |
+| `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-003` | [Operator rule catalog](#operator-rule-catalog) |
 
 ## Components and responsibilities
 
@@ -33,10 +35,11 @@ the established higher-priority signals and sanitized excerpt contract.
 - **`internal/agent/runtime/dynamic`** evaluates the classified code with the
   candidate's saved recovery policy and opens resource circuits.
 
-With the extension enabled, the terminal stream consumer selects known rules by
-`AgentType`, retaining the legacy `AgentID` fallback when type is absent. OFF
-preserves the current base attribution. Execution identity, generation,
-output and effect fences are preserved.
+The terminal stream consumer selects known rules by `AgentType`, falling back
+to the stream `AgentID` only when the type is absent. The stream `AgentID` is
+the execution identity and has no provider rules, so classifying by it skipped
+every provider-specific rule. Execution identity, generation, output and effect
+fences are preserved.
 
 ## Inputs that carry prose
 
@@ -45,6 +48,15 @@ in error reports the agent's final message with the error, and assistant
 message chunks are classified to mark provider diagnostic candidates. Agents
 that coordinate other sessions quote those sessions' errors verbatim. The rules
 therefore match error signatures and never a bare topic word.
+
+A relative-reset quota notice that opens the turn's assistant output can stream
+in fragments. A fragment stays diagnostic only while the joined reset phrase is
+a whole or partial duration list; any other text after it, with or without a
+sentence terminator, is output and ends the correlation. The orchestrator
+appends later fragments to the recorded diagnostic while the joined text still
+classifies as that notice. A prompt that returns normally while the notice is
+its last text, complete or ending on a whole duration, settles as the quota
+failure; output after the notice keeps the normal completion and replay fence.
 
 ## Rule signatures
 
@@ -194,16 +206,28 @@ The returned mid-turn action is a classification recommendation only. Existing
 continuation admission is unchanged; generic post-output retry or candidate
 continuation is not implemented by this extension.
 
-The minimal future catalog seam is the existing deterministic classifier:
-known rules stay before `classifyKeywordContext`; loading and export remain
-separate work. No loader or new rule DSL is implemented.
-
 Typed process-start and ACP-initialization failures may separate their own
 matching lifecycle wrapper after the original classification remains unknown.
 Both the complete wrapped diagnostic and the inner diagnostic remain bounded.
 The inner message still needs its error envelope and passes quote/negation
 guards. Untyped workspace/executor failures cannot use this path, and OFF and
 already classified failures keep their previous behavior.
+
+## OpenCode period reset
+
+When `Classify` selects the existing OpenCode period usage-limit rule, a
+relative duration on its sole matching line can supply a missing reset time.
+The diagnostic observation time must be known; the duration is added to it.
+The resulting hint is marked inferred under the existing circuit contract. An
+explicit structured or dated reset keeps precedence. For relative durations,
+unrelated lines, multiple matching period lines or reset expressions,
+incomplete or unsupported units, and overflow leave the hint unknown without
+changing the error classification. OpenCode stderr records whether the original
+diagnostic was one line before sanitization; Office post-start handling carries
+its observation time into the classifier only with that evidence. Older peers
+or records containing escapes or line separators leave the relative reset
+unknown. Existing structured reset hints retain precedence. The result
+does not change candidate order or authorize prompt replay.
 
 ## OpenCode admission refusal
 
@@ -236,3 +260,35 @@ This addition creates no new classification code, public field, or retry owner.
 
 The [implementation package](../../../plans/opencode-capacity-retry/plan.md)
 delivers the positive fixture, collision negatives, and reset-hint bounds.
+
+## Operator rule catalog
+
+Requirement 003 adds `providerErrors.catalogFile` to the typed startup
+catalog (`KANDEV_PROVIDER_ERRORS_CATALOG_FILE`, environment over YAML, empty
+default). Startup resolves a relative path against the selected config file
+directory, loads the file once through `routingerr/externalcatalog`, and
+installs the immutable result with `routingerr.SetExternalCatalog`. A rejected
+file installs nothing and logs one warning with the `LoadError` reason, rule
+index, rule id and field.
+
+`externalcatalog` owns the version 1 document, strict JSON/YAML decoding,
+validation and first-match evaluation. It does not import the classifier;
+`routingerr.ExternalCatalogVocabulary` supplies the accepted codes,
+confidences and phases. The package README is the field reference.
+
+`classifyExternalCatalog` runs after the runtime-environment rules and before
+`classifyKeywordContext`. Patterns read the same sanitized excerpt as built-in
+rules. Terms reuse the requirement 002 diagnostic envelope and normalization,
+so quoted or negated text has no terms. Term and context rules need
+`KeywordContext.Enabled` and `Diagnostic`. For an eligible diagnostic the
+match builds a `KeywordDecision` from the code's group, then applies the
+rule's scope, backoff and `until_model_change`; `applyKeywordReset` keeps the
+observed and free-daily reset handling. Without eligibility only code and
+confidence apply, so dynamic circuits use their legacy behavior. Account and
+tier context is filled during the orchestrator refinement pass, which keeps
+the original code; a rule that depends on them can refine scope but cannot
+admit a new code.
+
+For a structured HTTP status without a built-in mapping, a configured catalog
+may refine the unknown result only after known built-in signatures have been
+checked. With no matching catalog rule the original unknown result is retained.

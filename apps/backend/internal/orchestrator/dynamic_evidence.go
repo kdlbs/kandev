@@ -31,6 +31,8 @@ type promptAttemptEvidence struct {
 	promptGeneration     uint64
 	evidenceKnown        bool
 	output               bool
+	// Only a normal empty completion may exclude reasoning from output.
+	nonReasoningOutput bool
 	// providerDiagnosticCode records an ACP agent-message diagnostic which is
 	// followed by the matching prompt RPC failure. It is not model output, so it
 	// must not make an otherwise pre-result provider failure unsafe to route.
@@ -294,6 +296,7 @@ func (s *Service) observePromptAttempt(
 		return
 	}
 	evidence.output = evidence.output || output
+	evidence.nonReasoningOutput = evidence.nonReasoningOutput || output
 	evidence.effect = evidence.effect || effect
 	if output {
 		// Any ordinary output makes the turn unsafe to replay. A provider
@@ -318,7 +321,15 @@ func (s *Service) observeProviderDiagnostic(
 		ProviderID: providerID,
 		Stderr:     message,
 	})
+	if classified.ClassifierRule == routingerr.RuleRelativeQuotaNotice &&
+		routingerr.RelativeQuotaNoticeHasTrailingOutput(message) {
+		s.observePromptAttempt(sessionID, executionID, promptGeneration, true, false)
+		return
+	}
 	if classified.Confidence != routingerr.ConfHigh || !classified.FallbackAllowed {
+		if s.extendProviderQuotaDiagnostic(sessionID, executionID, promptGeneration, providerID, message) {
+			return
+		}
 		s.observePromptAttempt(sessionID, executionID, promptGeneration, true, false)
 		return
 	}
@@ -338,8 +349,39 @@ func (s *Service) observeProviderDiagnostic(
 		return
 	}
 	evidence.output = true
+	evidence.nonReasoningOutput = true
 	evidence.providerDiagnosticCode = classified.Code
 	evidence.providerDiagnosticText = normalizeDiagnosticText(message)
+}
+
+// extendProviderQuotaDiagnostic appends a later fragment of a relative quota
+// notice to the diagnostic recorded for this prompt. ACP streams the notice in
+// chunks, and only the first one classifies on its own; the rest belong to the
+// same diagnostic as long as the joined text is still that notice.
+func (s *Service) extendProviderQuotaDiagnostic(sessionID, executionID string, promptGeneration uint64, providerID, fragment string) bool {
+	evidence, ok := s.promptAttemptForSession(sessionID)
+	if !ok {
+		return false
+	}
+	evidence.mu.Lock()
+	defer evidence.mu.Unlock()
+	if !evidence.promptIdentityMatchesLocked(executionID, promptGeneration) || evidence.effect ||
+		evidence.providerDiagnosticCode != routingerr.CodeQuotaLimited || evidence.providerDiagnosticText == "" {
+		return false
+	}
+	message := evidence.providerDiagnosticText + fragment
+	if len(message) > 1024 || routingerr.RelativeQuotaNoticeHasTrailingOutput(message) {
+		return false
+	}
+	classified := routingerr.ClassifyAgentNotice(routingerr.Input{
+		Phase: routingerr.PhasePromptSend, ProviderID: providerID, Stderr: message,
+	})
+	if classified == nil || classified.ClassifierRule != routingerr.RuleRelativeQuotaNotice ||
+		classified.Code != routingerr.CodeQuotaLimited || classified.Confidence != routingerr.ConfHigh {
+		return false
+	}
+	evidence.providerDiagnosticText = normalizeDiagnosticText(message)
+	return true
 }
 
 func (s *Service) observeDynamicAttempt(sessionID, executionID string, output, effect bool) {
@@ -754,6 +796,7 @@ func (s *Service) withPromptAttemptEvidenceLocked(data watcher.AgentEventData) w
 // separate subscriptions, so an absent or unclassifiable diagnostic fails
 // closed as ordinary output.
 func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttemptEvidence, providerID, message string, diagnostic *streams.ProviderError) {
+	evidence.nonReasoningOutput = true
 	message = normalizeDiagnosticText(message)
 	if message == "" {
 		evidence.output = true
@@ -796,9 +839,21 @@ func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttem
 // failure can classify identically without being the transport diagnostic
 // itself. Callers must hold e.mu.
 func (e *promptAttemptEvidence) outputObservedLocked(data watcher.AgentEventData) bool {
+	terminalMessage := matchingProviderFailureMessage(data)
+	if e.providerDiagnosticCode == routingerr.CodeQuotaLimited && e.providerDiagnosticText != "" {
+		// A relative quota notice settles the prompt only as a whole notice; a
+		// terminal message that carries more than that includes assistant output.
+		diagnostic := routingerr.ClassifyAgentNotice(routingerr.Input{
+			Phase: routingerr.PhasePromptSend, ProviderID: data.AgentID, Stderr: e.providerDiagnosticText,
+		})
+		if diagnostic != nil && diagnostic.ClassifierRule == routingerr.RuleRelativeQuotaNotice &&
+			!routingerr.IsCompleteRelativeQuotaNoticeText(terminalMessage) {
+			return true
+		}
+	}
 	if e.providerDiagnosticCode != "" && e.providerDiagnosticText != "" &&
 		providerFailureCodeMatches(data, e.providerDiagnosticCode) &&
-		strings.Contains(normalizeDiagnosticText(matchingProviderFailureMessage(data)), e.providerDiagnosticText) {
+		strings.Contains(normalizeDiagnosticText(terminalMessage), e.providerDiagnosticText) {
 		// Claude ACP emits a human-readable agent_message_chunk immediately
 		// before returning the same provider error from session/prompt. The
 		// chunk is diagnostic transport, not generated output.

@@ -95,6 +95,13 @@ errors does not take its own healthy account out of rotation.
   Only integer delays from 1 through 60 seconds qualify.
   Missing, malformed, zero, negative, and larger delays shall provide no hint.
   Classification shall not establish runtime health or authorize another prompt.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.13:** For a classified OpenCode
+  period usage-limit line with a valid relative reset duration and known
+  diagnostic observation time, derive its reset from that observation. An
+  explicit or dated reset retains precedence. Missing observation time,
+  malformed duration, multiple period-limit lines, or a duration on an unrelated
+  line shall not supply a reset. Other classifications and routing policy remain
+  unchanged.
 
 - **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.12:** For `opencode-acp`, an
   opening diagnostic line with one of the established `AI_APICallError:`,
@@ -183,3 +190,32 @@ additional behavior.
   correlation and routing shall consume consistent evidence, explain ON/OFF
   differences and retain model order. No external catalog loader, inference
   service or periodic learner is introduced.
+
+### REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-003: Operator rule catalog
+
+**Intent:** Let an operator add provider-error rules from a local file without
+rebuilding Kandev, while built-in rules and existing recovery fences keep
+precedence.
+
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-003.1:** The optional startup setting
+  `providerErrors.catalogFile` (`KANDEV_PROVIDER_ERRORS_CATALOG_FILE`) shall
+  name a local JSON or YAML catalog. Unset shall perform no file I/O and keep
+  the built-in classification unchanged. The file shall be read once at
+  startup; no reload, watcher or remote source is introduced.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-003.2:** Catalog rules shall run after
+  every built-in typed, managed-runtime, provider, provider-neutral and
+  runtime-environment rule and before the requirement 002 fallback and phase
+  defaults. The first matching catalog rule in file order shall win.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-003.3:** A catalog shall produce only
+  existing provider recovery codes and confidences; codes held until owner
+  release and runtime remediation codes shall be rejected. Class,
+  retryability, fallback and recovery actions shall stay derived by Kandev.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-003.4:** Keyword terms and invocation
+  context predicates shall apply only when requirement 002 is enabled for a
+  provider diagnostic. A catalog shall not enable that feature. Requested
+  scope, backoff and reset shall apply only through the requirement 002
+  decision; widening shall require the account or model identity.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-003.5:** A missing, unreadable or
+  invalid catalog shall be rejected as a whole with one warning carrying a
+  stable reason, rule index, rule id and field. Startup shall continue with
+  built-in rules. Logs shall not contain catalog content or parser messages.
