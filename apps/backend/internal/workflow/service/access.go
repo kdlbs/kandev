@@ -37,8 +37,8 @@ import (
 
 // ErrNotVisible reports that the caller may not see the requested workflow,
 // workspace or step — or that it does not exist. The message carries
-// "not found" because the handler layer classifies mutation errors by that
-// substring (see writeStepMutationError).
+// "not found" to preserve the existing concealed-resource response. Mutation
+// handlers recognize this error by identity.
 var ErrNotVisible = errors.New("workflow resource not found")
 
 // An unwired checker means the workflow service was built without the task
