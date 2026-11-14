@@ -199,6 +199,7 @@ Do not manufacture a prompt submission ID, instruction message, or receiver-acce
 Persist the checkpoint before native load. Revalidate it under the existing session admission and lifecycle locks.
 Before native restore, use the existing durable Auto-run pause when pending queue entries exist. Preserve their IDs, contents, and order.
 Publish the queue status so the pause remains visible and survives another restart. Explicit Auto-run re-enable retains its existing behavior.
+The opt-in [silent restore queue resume](silent-restore-queue-resume.md) may restore that Auto-run after a successful restore.
 The checkpoint moves from `prepared` to `candidate_allocated`, then to `candidate_launching` before launch side effects.
 An allocated candidate with no execution row can start only while the durable launching marker is absent.
 A launching candidate with no execution row has unknown liveness and remains blocked.

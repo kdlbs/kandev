@@ -16,6 +16,7 @@ import (
 	runtimekind "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/processidentity"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 )
@@ -268,7 +269,8 @@ func (s *Service) startSilentRestoreCandidate(
 		return nil
 	}
 	defer reservation.releaseIfNotConsumed()
-	if err := s.pauseSilentRestoreQueue(ownerCtx, inputs.task.ID, inputs.session.ID); err != nil {
+	_, err = s.pauseSilentRestoreQueue(ownerCtx, inputs.task.ID, inputs.session.ID, inputs.block.ID)
+	if err != nil {
 		return err
 	}
 	callback := func(callbackCtx context.Context, executionID string) error {
@@ -293,13 +295,17 @@ func (s *Service) startSilentRestoreCandidate(
 		if getErr != nil {
 			return getErr
 		}
-		if err := s.finishLaunchedSilentRestoreCandidateLocked(
+		committed, err := s.finishLaunchedSilentRestoreCandidateLocked(
 			readyCtx, store, attemptID, checkpoint, inputs, running,
-		); err != nil {
+		)
+		if err != nil {
 			return err
 		}
 		if !s.resumeAttemptStore().markPromptReady(startup) {
 			return ErrResumeAttemptCancelled
+		}
+		if committed {
+			s.resumeSilentRestoreQueueAfterCommit(readyCtx, inputs)
 		}
 		return nil
 	}
@@ -372,22 +378,36 @@ func (s *Service) rotateDeadSilentRestoreCandidate(
 	return s.rotateSilentRestoreCandidate(ctx, store, attemptID, checkpoint, running, inputs)
 }
 
-func (s *Service) pauseSilentRestoreQueue(ctx context.Context, taskID, sessionID string) error {
+// pauseSilentRestoreQueue keeps queued work from racing recovery. The returned
+// callback may restore only this recovery's pause after its durable commit.
+func (s *Service) pauseSilentRestoreQueue(ctx context.Context, taskID, sessionID, ownerID string) (func(), error) {
+	noop := func() {}
 	if s.messageQueue == nil {
-		return nil
+		return noop, nil
 	}
 	identity, err := s.messageQueue.ResolveSessionIdentity(ctx, taskID, sessionID)
 	if err != nil {
-		return fmt.Errorf("resolve queue identity before silent restore: %w", err)
+		return noop, fmt.Errorf("resolve queue identity before silent restore: %w", err)
 	}
-	paused, err := s.messageQueue.PauseAutoRunIfPendingForSession(ctx, identity)
+	var paused bool
+	if s.config.ResumeQueueAfterSilentRestore {
+		paused, err = s.messageQueue.PauseAutoRunForRecovery(ctx, identity, ownerID)
+	} else {
+		paused, err = s.messageQueue.PauseAutoRunIfPendingForSession(ctx, identity)
+	}
 	if err != nil {
-		return fmt.Errorf("pause queued work before silent restore: %w", err)
+		return noop, fmt.Errorf("pause queued work before silent restore: %w", err)
 	}
-	if paused {
-		s.publishTaskQueueStatusEvent(ctx, taskID, sessionID)
+	if !paused {
+		return noop, nil
 	}
-	return nil
+	s.publishTaskQueueStatusEvent(ctx, taskID, sessionID)
+	if !s.config.ResumeQueueAfterSilentRestore {
+		return noop, nil
+	}
+	return func() {
+		s.resumeSilentRestoreQueue(context.WithoutCancel(ctx), identity, ownerID)
+	}, nil
 }
 
 func (s *Service) removeProvenDeadSourceExecution(
@@ -616,7 +636,14 @@ func (s *Service) finishLaunchedSilentRestoreCandidate(
 	defer releaseRoute()
 	releaseLifecycle := s.acquireSessionLifecycleLock(inputs.session.ID)
 	defer releaseLifecycle()
-	return s.finishLaunchedSilentRestoreCandidateLocked(ctx, store, attemptID, checkpoint, inputs, running)
+	committed, err := s.finishLaunchedSilentRestoreCandidateLocked(ctx, store, attemptID, checkpoint, inputs, running)
+	if err != nil {
+		return err
+	}
+	if committed {
+		s.resumeSilentRestoreQueueAfterCommit(ctx, inputs)
+	}
+	return nil
 }
 
 func (s *Service) finishLaunchedSilentRestoreCandidateLocked(
@@ -626,28 +653,28 @@ func (s *Service) finishLaunchedSilentRestoreCandidateLocked(
 	checkpoint models.SilentRestoreCheckpoint,
 	inputs *silentRestoreInputs,
 	running *models.ExecutorRunning,
-) error {
+) (bool, error) {
 	ownerCtx, ready, err := s.silentRestoreCandidateReady(ctx, inputs, checkpoint, running)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !ready {
-		return nil
+		return false, nil
 	}
 	inputs.ownerCtx = ownerCtx
 	attempt, err := store.GetRestoreAttempt(ctx, attemptID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if attempt == nil || attempt.Checkpoint == nil ||
 		attempt.Checkpoint.Stage != models.SilentRestoreStageCandidateLaunching ||
 		attempt.Checkpoint.CandidateExecutionID != checkpoint.CandidateExecutionID {
-		return nil
+		return false, nil
 	}
 	commitCheckpoint := *attempt.Checkpoint
 	ownerCtx, err = s.validateSilentRestoreCommitInputs(ownerCtx, inputs, commitCheckpoint)
 	if err != nil {
-		return err
+		return false, err
 	}
 	now := time.Now().UTC()
 	next := checkpoint.SourceGeneration
@@ -659,14 +686,24 @@ func (s *Service) finishLaunchedSilentRestoreCandidateLocked(
 		AttemptID: attemptID, Checkpoint: commitCheckpoint, Generation: next, CompletedAt: now,
 	})
 	if err == nil && !committed {
-		return errors.New("silent restart recovery checkpoint changed before commit")
+		return false, errors.New("silent restart recovery checkpoint changed before commit")
 	}
 	if err == nil {
 		if session, readErr := s.repo.GetTaskSession(ownerCtx, inputs.session.ID); readErr == nil && session != nil {
 			s.publishTaskSessionStateChanged(ownerCtx, session.TaskID, session.ID, session.State, session.State, session.ErrorMessage, &session.UpdatedAt, session)
 		}
 	}
-	return err
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *Service) resumeSilentRestoreQueueAfterCommit(ctx context.Context, inputs *silentRestoreInputs) {
+	s.resumeSilentRestoreQueue(ctx, messagequeue.QueueSessionIdentity{
+		TaskID: inputs.task.ID, SessionID: inputs.session.ID,
+		SessionIncarnationID: inputs.session.QueueIncarnationID,
+	}, inputs.block.ID)
 }
 
 func (s *Service) silentRestoreCandidateReady(
