@@ -22,28 +22,34 @@ export async function activate(locator: Locator, touch: boolean) {
   else await locator.click();
 }
 export async function chooseBuiltin(page: Page, id: string, label: string, touch: boolean) {
-  await activate(page.getByTestId(`builtin-mcp-choice-${id}`), touch);
-  await activate(
-    page.getByRole("listbox").getByRole("option", { name: label, exact: true }),
-    touch,
-  );
+  if (label === "Inherit workspace policy") {
+    await activate(page.getByTestId(`builtin-mcp-inherit-${id}`), touch);
+    return;
+  }
+  const choice = page.getByTestId(`builtin-mcp-choice-${id}`).getByRole("switch");
+  const enabled = label !== "Off" && label !== "Blocked";
+  if ((await choice.isChecked()) !== enabled) await activate(choice, touch);
+  if (label === "On by default" || label === "Available") {
+    const defaultChoice = page.getByTestId(`builtin-mcp-default-${id}`).getByRole("switch");
+    if ((await defaultChoice.isChecked()) !== (label === "On by default"))
+      await activate(defaultChoice, touch);
+  }
 }
 export async function checkBuiltinWorkspace(page: Page, api: ApiClient, touch: boolean) {
   const workspace = await api.createWorkspace(`Built-in packages ${Date.now()}`);
   try {
     await page.goto(`/settings/workspaces/${workspace.id}/mcp-servers`);
     await expect(page.getByTestId("builtin-mcp-packages")).toContainText("Core");
+    await expect(page.getByTestId("builtin-mcp-packages")).toContainText(
+      "Policy changes affect future process starts. Saving does not reconnect or change running agents.",
+    );
     await activate(page.getByTestId("builtin-mcp-package-configuration"), touch);
     const detail = page.getByTestId("builtin-mcp-detail");
     await expect(detail).toContainText("Configuration chats always receive Core and Configuration");
-    await activate(page.getByTestId("builtin-mcp-choice-configuration"), touch);
-    await expect(
-      page.getByRole("listbox").getByRole("option", { name: "On by default", exact: true }),
-    ).toHaveCount(0);
-    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("builtin-mcp-default-configuration")).toHaveCount(0);
     await activate(detail.getByRole("button", { name: "Back to packages", exact: true }), touch);
     await expect(page.getByTestId("builtin-mcp-package-configuration")).toBeFocused();
-    await activate(page.getByTestId("builtin-mcp-package-diagnostics"), touch);
+    await expect(page.getByTestId("builtin-mcp-detail")).toHaveCount(0);
     await chooseBuiltin(page, "diagnostics", "Blocked", touch);
     await expect(page.getByTestId("builtin-mcp-choice-diagnostics")).toHaveAttribute(
       "data-settings-dirty",
@@ -64,12 +70,29 @@ export async function checkBuiltinWorkspace(page: Page, api: ApiClient, touch: b
       )
       .toBe("blocked");
     await page.reload();
-    await activate(page.getByTestId("builtin-mcp-package-diagnostics"), touch);
-    await expect(page.getByTestId("builtin-mcp-choice-diagnostics")).toContainText("Blocked");
+    await expect(page.getByTestId("builtin-mcp-detail")).toHaveCount(0);
+    await expect(page.getByTestId("builtin-mcp-choice-diagnostics")).toContainText("Off");
     await expect(page.getByTestId("builtin-mcp-choice-diagnostics")).toHaveAttribute(
       "data-settings-dirty",
       "false",
     );
+    const defaultChoice = page.getByTestId("builtin-mcp-default-diagnostics").getByRole("switch");
+    await expect(defaultChoice).toBeDisabled();
+    await chooseBuiltin(page, "diagnostics", "Available", touch);
+    await expect(defaultChoice).toBeEnabled();
+    await expect(defaultChoice).not.toBeChecked();
+    await chooseBuiltin(page, "diagnostics", "On by default", touch);
+    await expect(defaultChoice).toBeChecked();
+    await page.getByTestId("builtin-mcp-packages").screenshot({
+      path: `../../artifacts/mcp-switches/list-workspace-${touch ? "phone" : "desktop"}.png`,
+    });
+    await activate(save, touch);
+    await expect
+      .poll(
+        async () =>
+          (await builtinView(api, "workspaces", workspace.id)).policy.packages.diagnostics,
+      )
+      .toBe("default");
     await assertNoDocumentHorizontalOverflow(page, "built-in package detail");
   } finally {
     await api.deleteWorkspace(workspace.id, workspace.name);
@@ -185,7 +208,9 @@ async function openCreationMCP(page: Page, dialog: Locator, touch: boolean) {
   ).toHaveCount(1);
   await assertNoDocumentHorizontalOverflow(page, "new-task MCP packages");
   await waitForFiniteAnimations(options);
-  for (const row of await packages.locator('[data-testid^="builtin-mcp-package-"]').all()) {
+  for (const row of await packages
+    .locator('[data-testid^="builtin-mcp-package-"][data-testid$="-row"]')
+    .all()) {
     const box = await row.evaluate((element) => {
       const bounds = element.getBoundingClientRect();
       const label = element.firstElementChild!.getBoundingClientRect();
@@ -270,9 +295,14 @@ export async function checkBuiltinCreation(page: Page, api: ApiClient, touch: bo
   await dialog.getByTestId("task-title-input").fill("Creation package consent");
   await dialog.getByTestId("task-description-input").fill("/e2e:simple-message");
   const { packages, options } = await openCreationMCP(page, dialog, touch);
-  await activate(packages.getByTestId("builtin-mcp-package-configuration"), touch);
-  await expect(packages.getByTestId("builtin-mcp-effective")).toContainText("Off");
+  await expect(
+    packages.getByTestId("builtin-mcp-choice-configuration").getByRole("switch"),
+  ).not.toBeChecked();
   await chooseBuiltin(page, "configuration", "On", touch);
+  await expect(packages.getByTestId("builtin-mcp-detail")).toHaveCount(0);
+  await packages.screenshot({
+    path: `../../artifacts/mcp-switches/list-new-task-${touch ? "phone" : "desktop"}.png`,
+  });
   await closeCreationMCP(page, options, touch);
   await activate(dialog.getByTestId("task-create-advanced-settings-trigger"), touch);
   const reopened = await openCreationMCP(page, dialog, touch);

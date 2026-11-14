@@ -24,11 +24,12 @@ func TestHasIntegrationPrefix(t *testing.T) {
 	inside := []string{
 		"/api/v1/jira/config", "/api/v1/gitlab/status", "/api/v1/github/status",
 		"/api/v1/linear/config", "/api/v1/sentry/config",
-		"/api/v1/azure-devops/config", "/api/v1/workflow-sync/status",
+		"/api/v1/workflow-sync/status",
 	}
 	outside := []string{
 		"/api/v1/tasks", "/api/v1/workspaces", "/api/v1/office/tasks/t1",
 		"/health", "/api/v1/jira", // exact prefix without trailing slash is not matched
+		"/api/v1/azure-devops/config",
 	}
 	for _, p := range inside {
 		if !hasIntegrationPrefix(p) {

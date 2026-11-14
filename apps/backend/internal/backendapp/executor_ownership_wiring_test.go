@@ -12,7 +12,7 @@ import (
 // Provider unit tests install their own policy. Pin the production composition
 // so no scheduler silently retains an unwired identity boundary.
 func TestExecutorOwnershipAutonomousPoliciesAreWired(t *testing.T) {
-	want := map[string]bool{"services.GitHub": false, "services.GitLab": false, "services.Jira": false, "services.Linear": false, "services.Sentry": false, "services.AzureDevOps": false, "services.Automation.Service": false}
+	want := map[string]bool{"services.GitHub": false, "services.GitLab": false, "services.Jira": false, "services.Linear": false, "services.Sentry": false, "services.Automation.Service": false}
 	files := token.NewFileSet()
 	file, err := parser.ParseFile(files, "main.go", nil, 0)
 	if err != nil {

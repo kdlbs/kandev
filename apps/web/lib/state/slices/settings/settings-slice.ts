@@ -34,6 +34,7 @@ export const defaultSettingsState: SettingsSliceState = {
   agentProfiles: { items: [], version: 0, orderByAgent: {} },
   installJobs: { byAgent: {} },
   updateJobs: { byAgent: {} },
+  runtimeUpdateBatch: { status: "idle", authority: "", order: [], rows: {} },
   agentRuntimeUpdates: { byAgent: {}, checkedAt: 0, loading: false },
   editors: { items: [], loaded: false, loading: false },
   prompts: { items: [], loaded: false, loading: false },
@@ -143,7 +144,11 @@ function createAgentUpdateJobActions(
   set: ImmerSet,
 ): Pick<
   SettingsSlice,
-  "setAgentUpdateJobs" | "upsertAgentUpdateJob" | "appendAgentUpdateOutput" | "clearAgentUpdateJob"
+  | "setAgentUpdateJobs"
+  | "upsertAgentUpdateJob"
+  | "appendAgentUpdateOutput"
+  | "clearAgentUpdateJob"
+  | "setRuntimeUpdateBatch"
 > {
   return {
     setAgentUpdateJobs: (jobs) =>
@@ -194,6 +199,10 @@ function createAgentUpdateJobActions(
     clearAgentUpdateJob: (agentName) =>
       set((draft) => {
         delete draft.updateJobs.byAgent[agentName];
+      }),
+    setRuntimeUpdateBatch: (state) =>
+      set((draft) => {
+        draft.runtimeUpdateBatch = state;
       }),
   };
 }

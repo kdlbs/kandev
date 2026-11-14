@@ -276,6 +276,9 @@ func (h *Handlers) httpUpdateAgentRuntime(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target version is required"})
 		return
 	}
+	if request.ReviewedRuntime != nil && !validReviewedRuntimeRequest(c, name, h, request) {
+		return
+	}
 	h.enqueueMaintenance(c, name, "update", func() (any, error) {
 		if request.UseDefault {
 			return h.controller.EnqueueAgentUpdateUseDefault(c.Request.Context(), name)
@@ -291,8 +294,41 @@ func (h *Handlers) httpUpdateAgentRuntime(c *gin.Context) {
 		if request.ExpectedRuntimeRevision != 0 {
 			return nil, controller.ErrRuntimeMigrationUnsupported
 		}
+		if request.ReviewedRuntime != nil {
+			return h.controller.EnqueueReviewedAgentUpdate(
+				c.Request.Context(), name, request.TargetVersion, *request.ReviewedRuntime,
+			)
+		}
 		return h.controller.EnqueueAgentUpdate(c.Request.Context(), name, request.TargetVersion)
 	}, classifyUpdateError)
+}
+
+// validReviewedRuntimeRequest keeps review evidence on the ordinary pinned
+// update form. Migration, return-to-default, harness, and revision-shaped
+// requests keep their legacy wire contracts and reject mixed evidence.
+func validReviewedRuntimeRequest(
+	c *gin.Context,
+	name string,
+	h *Handlers,
+	request dto.AgentUpdateRequest,
+) bool {
+	if h.controller.IsHarnessUpdate(name) ||
+		request.UseDefault ||
+		request.TargetFamily != "" ||
+		request.ExpectedRuntimeRevision != 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "reviewed runtime cannot be combined with this update form"})
+		return false
+	}
+	evidence := request.ReviewedRuntime
+	if evidence == nil ||
+		strings.TrimSpace(evidence.RuntimeID) == "" ||
+		strings.TrimSpace(evidence.Package) == "" ||
+		strings.TrimSpace(evidence.CurrentVersion) == "" ||
+		strings.TrimSpace(evidence.EffectiveVersion) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "reviewed runtime evidence is incomplete"})
+		return false
+	}
+	return true
 }
 
 func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
@@ -397,6 +433,17 @@ func writeMaintenanceConflictIfPresent(c *gin.Context, err error) bool {
 	return true
 }
 
+func writeReviewChangedIfPresent(c *gin.Context, err error) bool {
+	if !errors.Is(err, controller.ErrRuntimeReviewChanged) {
+		return false
+	}
+	c.JSON(http.StatusConflict, gin.H{
+		"error": "runtime changed after review; refresh the preview",
+		"code":  "runtime_review_changed",
+	})
+	return true
+}
+
 type maintenanceErrorClassifier func(error) (int, string, bool)
 
 func (h *Handlers) enqueueMaintenance(
@@ -412,6 +459,9 @@ func (h *Handlers) enqueueMaintenance(
 		return
 	}
 	if writeMaintenanceConflictIfPresent(c, err) {
+		return
+	}
+	if writeReviewChangedIfPresent(c, err) {
 		return
 	}
 	if status, message, matched := classify(err); matched {
@@ -450,6 +500,10 @@ func classifyUpdateError(err error) (int, string, bool) {
 		return http.StatusBadRequest, "target version is invalid", true
 	case errors.Is(err, controller.ErrRuntimeUpdateTargetMissing):
 		return http.StatusBadRequest, "target version is not published", true
+	case errors.Is(err, controller.ErrRuntimeReviewInvalid):
+		return http.StatusBadRequest, "runtime review evidence is invalid", true
+	case errors.Is(err, controller.ErrRuntimeReviewChanged):
+		return http.StatusConflict, "runtime changed after review; refresh the preview", true
 	case errors.Is(err, controller.ErrRuntimeMigrationUnsupported):
 		return http.StatusBadRequest, "OpenCode runtime migration is unavailable", true
 	case errors.Is(err, controller.ErrRuntimeMigrationBlocked):

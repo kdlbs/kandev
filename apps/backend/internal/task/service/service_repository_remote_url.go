@@ -16,7 +16,6 @@ import (
 const (
 	repositoryValidationScopeLocatorIdentity    = "locator_identity"
 	repositoryValidationScopeProviderInspection = "provider_inspection"
-	azureGitPathSegment                         = "_git"
 )
 
 // RepositoryRemoteURLPreview is the bounded read-only result of validating a
@@ -126,7 +125,7 @@ func (s *Service) validateRepositoryRemoteURL(
 
 func isBuiltInRepositoryProvider(provider string) bool {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case providerGitHub, providerGitLab, providerAzureDevOps:
+	case providerGitHub, providerGitLab:
 		return true
 	default:
 		return false
@@ -301,17 +300,15 @@ func (s *Service) validateBuiltInRepositoryRemoteURL(
 	if err != nil || !strings.EqualFold(parsedProvider, provider) {
 		return repositoryRemoteURLValidation{}, invalidRemoteURLSetting()
 	}
-	if err := validateBuiltInParsedIdentity(repository, candidate, provider, identityScheme, canonical, owner, name); err != nil {
+	if err := validateBuiltInParsedIdentity(repository, provider, identityScheme, canonical, owner, name); err != nil {
 		return repositoryRemoteURLValidation{}, err
 	}
 	originInput := TaskRepositoryInput{
 		RemoteURL: identitySource, Provider: repository.Provider, ProviderHost: repository.ProviderHost,
 		ProviderOwner: repository.ProviderOwner, ProviderName: repository.ProviderName,
 	}
-	if provider != providerAzureDevOps {
-		if err := s.verifyRemoteRepositoryOrigin(ctx, repository.WorkspaceID, &originInput); err != nil {
-			return repositoryRemoteURLValidation{}, err
-		}
+	if err := s.verifyRemoteRepositoryOrigin(ctx, repository.WorkspaceID, &originInput); err != nil {
+		return repositoryRemoteURLValidation{}, err
 	}
 	effective := canonical
 	if candidate.isSCP || repairURLRequiresRaw(candidate.raw) {
@@ -326,22 +323,12 @@ func (s *Service) validateBuiltInRepositoryRemoteURL(
 }
 
 func validateBuiltInParsedIdentity(
-	repository *models.Repository, candidate repositoryRepairCandidate,
-	provider, scheme, canonical, owner, name string,
+	repository *models.Repository, provider, scheme, canonical, owner, name string,
 ) error {
 	if provider == providerGitHub && scheme == protocolHTTP {
 		return invalidRemoteURLSetting()
 	}
-	if provider == providerAzureDevOps && scheme != protocolHTTPS {
-		return invalidRemoteURLSetting()
-	}
-	if err := validateSavedBuiltInIdentity(repository, provider, canonical, owner, name); err != nil {
-		return err
-	}
-	if provider == providerAzureDevOps {
-		return validateAzureRepairEvidence(repository, candidate, owner, name)
-	}
-	return nil
+	return validateSavedBuiltInIdentity(repository, provider, canonical, owner, name)
 }
 
 func validateBuiltInRepairShape(provider string, candidate repositoryRepairCandidate) error {
@@ -352,10 +339,6 @@ func validateBuiltInRepairShape(provider string, candidate repositoryRepairCandi
 		}
 	case providerGitLab:
 		if len(candidate.segments) < 2 {
-			return invalidRemoteURLSetting()
-		}
-	case providerAzureDevOps:
-		if candidate.isSCP || len(candidate.segments) != 4 || candidate.segments[2] != azureGitPathSegment {
 			return invalidRemoteURLSetting()
 		}
 	default:
@@ -423,63 +406,6 @@ func remoteIdentityOrigin(canonical string) string {
 		return ""
 	}
 	return strings.ToLower(canonical[:schemeEnd+3] + authority)
-}
-
-func validateAzureRepairEvidence(
-	repository *models.Repository, candidate repositoryRepairCandidate, owner, name string,
-) error {
-	if strings.TrimSpace(repository.ProviderHost) == "" {
-		return invalidRemoteURLSetting()
-	}
-	savedHost := normalizeProviderHost(repository.Provider, repository.ProviderHost)
-	if savedHost != "https://dev.azure.com" {
-		return invalidRemoteURLSetting()
-	}
-	organization, legacyValid := azureOrganizationFromRemoteURL(repository.RemoteURL)
-	if repository.RemoteURL != "" && !legacyValid {
-		return invalidRemoteURLSetting()
-	}
-	if repository.ProviderScope != "" {
-		if organization != "" && organization != repository.ProviderScope {
-			return invalidRemoteURLSetting()
-		}
-		organization = repository.ProviderScope
-	}
-	if organization == "" || organization != candidate.segments[0] {
-		return invalidRemoteURLSetting()
-	}
-	if repository.ProviderOwner != owner || repository.ProviderName != name {
-		return invalidRemoteURLSetting()
-	}
-	return nil
-}
-
-func azureOrganizationFromRemoteURL(raw string) (string, bool) {
-	if strings.TrimSpace(raw) == "" {
-		return "", true
-	}
-	parsed, sshStyle, err := normalizeRemoteRepositoryURL(raw)
-	if err != nil {
-		return "", false
-	}
-	host := strings.ToLower(parsed.Hostname())
-	if sshStyle && host != "ssh.dev.azure.com" {
-		return "", false
-	}
-	if !sshStyle && host != "dev.azure.com" {
-		return "", false
-	}
-	parts := strings.Split(strings.Trim(strings.TrimSuffix(parsed.Path, ".git"), "/"), "/")
-	if sshStyle {
-		if len(parts) == 4 && parts[0] == "v3" {
-			return parts[1], true
-		}
-		return "", false
-	}
-	if len(parts) == 4 && parts[2] == azureGitPathSegment {
-		return parts[0], true
-	}
-	return "", false
 }
 
 func (s *Service) validatePluginRepositoryRemoteURL(

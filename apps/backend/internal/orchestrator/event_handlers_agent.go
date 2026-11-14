@@ -14,6 +14,7 @@ import (
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events"
@@ -4190,7 +4191,7 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	if s.messageCreator == nil {
 		return fmt.Errorf("recovery status message creator is unavailable")
 	}
-	authErr := isAuthError(data.ErrorMessage)
+	authErr := isAuthenticationRecoveryFailure(data)
 	resumeCorrupted := routingerr.IsResumeCorrupted(data.ErrorMessage)
 	displayMsg := agentFailureMessage(data)
 	if authErr {
@@ -4283,7 +4284,7 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 
 	// Include cached auth methods so the frontend can show login options.
 	if authErr {
-		if methods := s.agentManager.GetSessionAuthMethods(data.SessionID); len(methods) > 0 {
+		if methods := s.recoveryAuthMethods(ctx, data); len(methods) > 0 {
 			meta["auth_methods"] = methods
 		}
 	}
@@ -4305,6 +4306,20 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	}
 
 	return s.persistRecoveryStatusMessage(ctx, data, statusMsg, meta, turnID)
+}
+
+func (s *Service) recoveryAuthMethods(ctx context.Context, data watcher.AgentEventData) []streams.AuthMethodInfo {
+	if methods := normalizeRecoveryAuthMethods(data.SessionAuthMethods); len(methods) > 0 {
+		return methods
+	}
+	if s.agentManager == nil || data.SessionID == "" || data.AgentExecutionID == "" {
+		return nil
+	}
+	currentExecutionID, err := s.agentManager.GetExecutionIDForSession(ctx, data.SessionID)
+	if err != nil || currentExecutionID != data.AgentExecutionID {
+		return nil
+	}
+	return normalizeRecoveryAuthMethods(s.agentManager.GetSessionAuthMethods(data.SessionID))
 }
 
 func (s *Service) persistRecoveryStatusMessage(
@@ -4438,6 +4453,11 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 		if cause, ok := bootstrapFailure.SafeAgentErrorCause(operation); ok {
 			failureData.Causes = models.NormalizeAgentErrorCauses([]models.AgentErrorCause{cause})
 		}
+		if bootstrapFailure.SessionFailure != nil {
+			if safe := agentctltypes.NormalizeSessionOperationFailure(bootstrapFailure.SessionFailure); safe != nil {
+				failureData.SessionAuthMethods = safe.AuthMethods
+			}
+		}
 	}
 	var structuredStartupFailure *routingerr.ManagedRuntimeStartupError
 	if errors.As(err, &structuredStartupFailure) && structuredStartupFailure != nil {
@@ -4451,13 +4471,10 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 		failureData.FailureCode = string(classified.Code)
 		failureData.FailureDetails = classified.RawExcerpt
 	}
-	authFailure := isAuthError(err.Error())
 	if structuredStartupFailure != nil && structuredStartupFailure.Cause != nil && isAuthError(structuredStartupFailure.Cause.Error()) {
-		authFailure = true
+		failureData.FailureCode = string(routingerr.CodeAuthRequired)
 	}
-	if bootstrapFailure != nil && bootstrapFailure.SafeCode() == models.AgentErrorCauseCodeAuthenticationRequired {
-		authFailure = true
-	}
+	authFailure := isAuthenticationRecoveryFailure(failureData)
 	if authFailure && structuredStartupFailure != nil {
 		failureData.FailureCode = string(routingerr.CodeAuthRequired)
 		if structuredStartupFailure.Cause != nil {

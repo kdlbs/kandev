@@ -123,7 +123,7 @@ function countResponse(path: string): unknown {
   if (path === "/api/v1/secrets") return [];
   if (path === "/api/v1/github/status") return { authenticated: false };
   if (path === "/api/v1/sentry/instances") return { instances: [] };
-  if (/^\/api\/v1\/(azure-devops|gitlab|jira|linear)\/config$/.test(path)) return null;
+  if (/^\/api\/v1\/(gitlab|jira|linear)\/config$/.test(path)) return null;
   return undefined;
 }
 

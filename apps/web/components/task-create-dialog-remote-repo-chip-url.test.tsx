@@ -127,7 +127,9 @@ describe("RemoteRepoChip URL entry", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(input.getAttribute("aria-invalid")).toBe("true");
-    expect(screen.getByRole("alert").textContent).toContain("GitHub, GitLab, or Azure DevOps");
+    expect(screen.getByRole("alert").textContent).toContain(
+      "GitHub, GitLab, or connected plugin provider",
+    );
     expect(onURLChange).not.toHaveBeenCalled();
   });
 });

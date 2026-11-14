@@ -149,36 +149,31 @@ async function triggerNativeResume(input: NativeResumeTrigger) {
   }
 }
 
-async function prepareReadinessFence(
-  api: ApiClient,
-  taskId: string,
-  sessionId: string,
-  tmpDir: string,
-  recoveryBlockId: string,
-) {
-  withDatabase(tmpDir, (db) => {
-    db.prepare("DELETE FROM session_recovery_blocks WHERE id = ?").run(recoveryBlockId);
+function prepareReadinessFence(tmpDir: string, sessionId: string, recoveryBlockId: string) {
+  const message = "The previous agent attempt ended before session readiness was confirmed.";
+  const occurredAt = new Date().toISOString();
+  return withDatabase(tmpDir, (db) => {
+    const row = db.prepare("SELECT metadata FROM task_sessions WHERE id = ?").get(sessionId) as {
+      metadata: string;
+    };
+    const metadata = JSON.parse(row.metadata) as Record<string, unknown>;
+    metadata.last_agent_error = {
+      message,
+      stamp: "native-resume-readiness",
+      scope: "session",
+      phase: "resume",
+      code: "generic_launch_failure",
+      occurred_at: occurredAt,
+    };
+    db.prepare(
+      "UPDATE task_sessions SET metadata = ?, state = 'FAILED', error_message = ? WHERE id = ?",
+    ).run(JSON.stringify(metadata), message, sessionId);
+    const block = db
+      .prepare("SELECT id FROM session_recovery_blocks WHERE id = ? AND state = 'open'")
+      .get(recoveryBlockId) as { id: string } | undefined;
+    if (!block) throw new Error(`readiness recovery block ${recoveryBlockId} is not open`);
+    return block.id;
   });
-  await api.launchSession({ task_id: taskId, session_id: sessionId, intent: "resume" });
-  await expect
-    .poll(() =>
-      withDatabase(tmpDir, (db) => {
-        const block = db
-          .prepare("SELECT id FROM session_recovery_blocks WHERE session_id = ? AND state = 'open'")
-          .get(sessionId) as { id: string } | undefined;
-        return block?.id;
-      }),
-    )
-    .toBeTruthy();
-  return withDatabase(
-    tmpDir,
-    (db) =>
-      (
-        db
-          .prepare("SELECT id FROM session_recovery_blocks WHERE session_id = ? AND state = 'open'")
-          .get(sessionId) as { id: string }
-      ).id,
-  );
 }
 
 async function sendRecoveryInstruction(
@@ -258,7 +253,7 @@ export async function verifyNativeResumeClearsRecoveryNotice(
     seedUnprovenCompletion(tmpDir, seeded.submissionId);
   }
   if (legacy === "readiness") {
-    recoveryBlockId = await prepareReadinessFence(api, task.id, active.id, tmpDir, recoveryBlockId);
+    recoveryBlockId = prepareReadinessFence(tmpDir, active.id, recoveryBlockId);
   }
   await page.reload();
   await session.waitForLoad();

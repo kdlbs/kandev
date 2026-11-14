@@ -45,11 +45,11 @@ func TestClassify_Rule1GitLabMergedAtNonNull(t *testing.T) {
 	}
 }
 
-func TestClassify_AzureUnrecognisedStatusFallsThroughWithoutError(t *testing.T) {
+func TestClassify_UnmergedProviderRequestFallsThroughWithoutError(t *testing.T) {
 	in := delivery.PairInput{
 		DefaultBranch: "main",
 		Providers: []delivery.ProviderRequest{
-			{Provider: delivery.ProviderAzureDevOps, Merged: false, URL: "https://azure/pr/1", BaseBranch: "main"},
+			{Provider: delivery.ProviderGitLab, Merged: false, URL: "https://gitlab/mr/1", BaseBranch: "main"},
 		},
 	}
 	got := delivery.Classify(in)
@@ -462,17 +462,17 @@ func TestClassify_TwoMergedPRsTieBrokenByLowerRequestNumber(t *testing.T) {
 	}
 }
 
-func TestClassify_GitHubAndAzureTieBrokenByProviderOrder(t *testing.T) {
+func TestClassify_GitHubAndGitLabTieBrokenByProviderOrder(t *testing.T) {
 	in := delivery.PairInput{
 		DefaultBranch: "main",
 		Providers: []delivery.ProviderRequest{
+			{Provider: delivery.ProviderGitLab, Merged: true, URL: "https://gl", BaseBranch: "main", MergeInstant: at(0), RequestNumber: 1},
 			{Provider: delivery.ProviderGitHub, Merged: true, URL: "https://gh", BaseBranch: "main", MergeInstant: at(0), RequestNumber: 1},
-			{Provider: delivery.ProviderAzureDevOps, Merged: true, URL: "https://az", BaseBranch: "main", MergeInstant: at(0), RequestNumber: 1},
 		},
 	}
 	got := delivery.Classify(in)
-	if got.Ref == nil || *got.Ref != "https://az" {
-		t.Fatalf("ref = %v, want azure (azure_devops sorts before github on exact tie)", got.Ref)
+	if got.Ref == nil || *got.Ref != "https://gh" {
+		t.Fatalf("ref = %v, want github (github sorts before gitlab on exact tie)", got.Ref)
 	}
 }
 

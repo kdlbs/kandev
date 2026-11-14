@@ -61,9 +61,14 @@ Available updates and terminal outcomes are retried for disconnected local subsc
 
 ## Responsive UI
 
+The current [runtime update manager design](runtime-update-manager.md) owns the
+runtime settings layout and target reveal. The [manager package](../../../plans/agent-runtime-update-manager/plan.md)
+records its delivery. Background refresh, consent, activation, and outcome
+boundaries remain authoritative here.
+
 `UpdateAvailableToastBridge` remains mounted in the app shell to consume structured runtime notifications and refresh the shared status snapshot. It renders no DOM: remove the fixed count/button and its route, translation and icon dependencies. Retain the existing refresh interval, notification-triggered refresh, terminal-job status integration, and timer cleanup. This satisfies AC-AGENTS-RUNTIME-NOTIFY-001.7 without removing background awareness. Settings > Agents and notification links provide runtime management entry points; no replacement floating badge or control is introduced.
 
-The Agents page exposes a runtime update section, showing named package/runtime, ownership, current/latest or unknown state, supported control or vendor guidance, and per-runtime automatic switch for eligible installed runtimes. Use Settings save coordination with contributor identities bound to both agent and runtime for policy drafts; discard and failed save retain authoritative baseline. Direct links focus the requested runtime. The managed version link is shown only when the separate installed-card metadata exposes its supported control; vendor guidance remains reachable when those snapshots disagree. Managed update dialogs/drawers retain their existing version selection and recovery.
+The manager design owns status grouping, source and ownership presentation, per-runtime policy drafts, and direct version actions. Background release checks and notification destinations retain their contracts here. Managed update surfaces retain their existing version selection and recovery.
 
 Phone entry uses the existing Settings navigation or runtime notification link and direct settings route. Settings rows use one column, wrapping copy, full-width touch actions, and page-owned scrolling. The nearest exemplars are InstalledAgentCard, SettingsPageTemplate, and AgentRuntimeUpdateSurface's existing phone drawer. Temporary version selection stays in that drawer; persistent policy belongs on Settings, avoiding a second nested overlay. Desktop keeps 28px actions. All copy uses locale catalogs.
 

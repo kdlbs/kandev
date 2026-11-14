@@ -64,7 +64,7 @@ test.describe("integrations index page enable/disable sliders", () => {
     const indexUrl = testPage.url();
 
     // One slider per integration row.
-    const slugs = ["azure-devops", "github", "gitlab", "jira", "linear", "sentry"];
+    const slugs = ["github", "gitlab", "jira", "linear", "sentry"];
     for (const slug of slugs) {
       await expect(testPage.locator(`#${slug}-enabled`)).toBeVisible();
     }

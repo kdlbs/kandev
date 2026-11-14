@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/kandev/kandev/internal/authz"
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/review"
 	"github.com/kandev/kandev/internal/task/models"
@@ -182,7 +183,10 @@ func (h *Handlers) handleRunTaskReview(ctx context.Context, msg *ws.Message) (*w
 		BaseRef:        req.BaseRef,
 		HeadRef:        req.HeadRef,
 	}
-	if req.WorktreePath != "" || req.BaseRef != "" || req.HeadRef != "" {
+	principal, inSession := mcpscope.PrincipalFromContext(ctx)
+	external := mcporigin.IsTrustedExternalTransport(ctx)
+	explicitSource := req.WorktreePath != "" || req.BaseRef != "" || req.HeadRef != ""
+	if inSession || external || explicitSource {
 		if h.taskSvc == nil || h.taskSvc.AuthorizeTaskScope(ctx, req.TaskID, authz.ScopeTaskWrite) != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "task is not writable", nil)
 		}
@@ -190,10 +194,10 @@ func (h *Handlers) handleRunTaskReview(ctx context.Context, msg *ws.Message) (*w
 	if denied := h.admitAgentReviewSource(ctx, msg, req.TaskID, req.WorktreePath); denied != nil {
 		return denied, nil
 	}
-	if principal, ok := mcpscope.PrincipalFromContext(ctx); ok {
-		if h.taskSvc == nil || h.taskSvc.AuthorizeTaskScope(ctx, req.TaskID, authz.ScopeTaskWrite) != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "task is not writable", nil)
-		}
+	if external && !inSession {
+		launch.SessionID = ""
+	}
+	if inSession {
 		launch.SessionID = ""
 		if req.TaskID == principal.CallerTaskID {
 			launch.SessionID = principal.CallerSessionID
@@ -201,7 +205,7 @@ func (h *Handlers) handleRunTaskReview(ctx context.Context, msg *ws.Message) (*w
 		launch.OriginRequired = true
 		launch.Origin = h.mcpReviewOrigin(ctx, req.TaskID, principal)
 	} else {
-		launch.Origin, launch.OriginRequired = h.manualReviewOrigin(ctx, req.TaskID, req.SessionID)
+		launch.Origin, launch.OriginRequired = h.manualReviewOrigin(ctx, req.TaskID, launch.SessionID)
 	}
 	run, err := h.reviewRunner.Launch(ctx, launch)
 	if err != nil {
