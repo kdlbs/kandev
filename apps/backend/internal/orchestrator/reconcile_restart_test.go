@@ -480,8 +480,10 @@ func TestReconcileSessionsOnStartup_TerminalDeadRowPrunedOnNotFound(t *testing.T
 			_, readErr := repo.GetExecutorRunningBySessionID(ctx, "sT")
 			if state == models.TaskSessionStateCancelled {
 				// A cancelled standalone runtime keeps its inventory row visible to
-				// startup correlation and the reaper, which checks the owner, pending
-				// work, and recovery evidence before reclaiming it.
+				// startup correlation and the terminal reaper, which proves the owner,
+				// pending work, and recovery evidence absent before reclaiming it
+				// (reconcileAbsentTerminalRuntime). Startup reconciliation may repair
+				// the row but never prunes it.
 				if readErr != nil {
 					t.Errorf("cancelled terminal row must be retained for the reaper, got %v", readErr)
 				}
