@@ -37,6 +37,7 @@ var builtinToolPackages = map[string]PackageID{
 	"get_task_plan_revision_kandev":                 PackageCore,
 	"list_executor_profiles_kandev":                 PackageCore,
 	"list_related_tasks_kandev":                     PackageCore,
+	"get_task_visibility_kandev":                    PackageCore,
 	"list_repositories_kandev":                      PackageCore,
 	"list_task_documents_kandev":                    PackageCore,
 	"list_task_plan_revisions_kandev":               PackageCore,

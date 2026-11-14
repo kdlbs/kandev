@@ -254,6 +254,7 @@
         "ask_user_question_kandev",
         "get_task_conversation_kandev",
         "get_task_document_kandev",
+        "get_task_visibility_kandev",
         "list_related_tasks_kandev",
         "list_pending_agent_permissions_kandev",
         "list_pending_questions_kandev",

@@ -736,6 +736,14 @@ func TestPostgresRepositorySecretBindingsSchemaReplay(t *testing.T) {
 // isolated schema, so the pool can be sized for genuine concurrency tests.
 func openIsolatedPostgresMultiConn(t *testing.T, dsn string, maxConns int) *sqlx.DB {
 	t.Helper()
+	return newIsolatedPostgresMultiConnFactory(t, dsn, maxConns)()
+}
+
+// newIsolatedPostgresMultiConnFactory creates one schema and returns a factory
+// for independent pools scoped to it. Reopening a repository through a new pool
+// exercises persistence without ever touching the shared public schema.
+func newIsolatedPostgresMultiConnFactory(t *testing.T, dsn string, maxConns int) func() *sqlx.DB {
+	t.Helper()
 	schema := "kandev_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 
 	setup, err := sqlx.Open("pgx", dsn)
@@ -747,9 +755,6 @@ func openIsolatedPostgresMultiConn(t *testing.T, dsn string, maxConns int) *sqlx
 		t.Fatalf("create postgres schema %s: %v", schema, err)
 	}
 	_ = setup.Close()
-	// Register schema-drop cleanup immediately: any t.Fatalf between here and
-	// the end of this function (e.g. sqlx.Open below failing) must still not
-	// leak the schema on the Postgres test instance.
 	t.Cleanup(func() {
 		if cleanup, cerr := sqlx.Open("pgx", dsn); cerr == nil {
 			_, _ = cleanup.Exec("DROP SCHEMA IF EXISTS " + schema + " CASCADE")
@@ -757,11 +762,6 @@ func openIsolatedPostgresMultiConn(t *testing.T, dsn string, maxConns int) *sqlx
 		}
 	})
 
-	// dsn is either a URL ("postgres://user:pass@host/db?sslmode=...") or a
-	// libpq keyword/value string ("host=... port=... sslmode=disable" —
-	// what CI's KANDEV_TEST_POSTGRES_DSN uses). Appending "?options=..." to
-	// the latter corrupts the last keyword's value instead of adding a new
-	// one, so the two forms need different separators.
 	var scopedDSN string
 	if strings.Contains(dsn, "://") {
 		sep := "?"
@@ -772,14 +772,16 @@ func openIsolatedPostgresMultiConn(t *testing.T, dsn string, maxConns int) *sqlx
 	} else {
 		scopedDSN = dsn + " options='-c search_path=" + schema + "'"
 	}
-	db, err := sqlx.Open("pgx", scopedDSN)
-	if err != nil {
-		t.Fatalf("open postgres (scoped, %d conns): %v", maxConns, err)
+	return func() *sqlx.DB {
+		db, err := sqlx.Open("pgx", scopedDSN)
+		if err != nil {
+			t.Fatalf("open postgres (scoped, %d conns): %v", maxConns, err)
+		}
+		db.SetMaxOpenConns(maxConns)
+		db.SetMaxIdleConns(maxConns)
+		t.Cleanup(func() { _ = db.Close() })
+		return db
 	}
-	db.SetMaxOpenConns(maxConns)
-	db.SetMaxIdleConns(maxConns)
-	t.Cleanup(func() { _ = db.Close() })
-	return db
 }
 
 // TestPostgresSetSessionPrimary_ConcurrentPromotionsLeaveExactlyOnePrimary

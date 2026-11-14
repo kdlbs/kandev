@@ -4817,6 +4817,10 @@ func (r *Repository) deleteEphemeralTaskForProfileTx(
 	if err != nil {
 		return false, err
 	}
+	visibilityTask, err := r.taskLifecycleSnapshotInTx(ctx, tx, taskID)
+	if err != nil {
+		return false, err
+	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM tasks
 		WHERE id = ? AND is_ephemeral = 1
@@ -4831,6 +4835,11 @@ func (r *Repository) deleteEphemeralTaskForProfileTx(
 	rows, err := result.RowsAffected()
 	if err != nil || rows == 0 {
 		return rows > 0, err
+	}
+	if visibilityTask != nil {
+		if err := r.recordTaskLifecycleReceipt(ctx, tx, visibilityTask, "deleted", "delete", time.Now().UTC()); err != nil {
+			return false, err
+		}
 	}
 	if err := r.lockAgentDeliverySessionIdentitiesTx(ctx, tx, identities); err != nil {
 		return false, err
