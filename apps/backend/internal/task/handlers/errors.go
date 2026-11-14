@@ -37,7 +37,10 @@ const (
 // human-readable message.
 const errorDetailKeyErrorCode = "error_code"
 
-func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback string) {
+// handleNotFound maps a service error to an HTTP response. logFields are
+// added to the error log of an unmapped (500) failure so the caller can name
+// the request it was serving.
+func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback string, logFields ...zap.Field) {
 	if handleBuiltinCreationHTTPError(c, err) {
 		return
 	}
@@ -54,20 +57,7 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 		c.JSON(status, taskErrorBody(err))
 		return
 	}
-	if errors.Is(err, taskrepository.ErrTaskHierarchyConflict) {
-		c.JSON(http.StatusConflict, taskErrorBody(err))
-		return
-	}
-	if errors.Is(err, taskrepository.ErrTaskCompletionGateBlocked) {
-		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_gate_blocked"})
-		return
-	}
-	if errors.Is(err, models.ErrWorkspaceDefaultExecutorUnavailable) {
-		c.JSON(http.StatusConflict, taskErrorBody(err))
-		return
-	}
-	if errors.Is(err, models.ErrExecutorMutationDenied) {
-		c.JSON(http.StatusForbidden, gin.H{"error": models.ErrExecutorMutationDenied.Error()})
+	if handleTaskMutationHTTPError(c, err) {
 		return
 	}
 	if isNotFound(err) {
@@ -99,8 +89,34 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 		c.JSON(http.StatusBadRequest, taskErrorBody(err))
 		return
 	}
-	log.Error("request failed", append(cleanupInspectionFields(err), zap.Error(err))...)
+	fields := append(append([]zap.Field{}, logFields...), cleanupInspectionFields(err)...)
+	log.Error("request failed", append(fields, zap.Error(err))...)
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
+}
+
+func handleTaskMutationHTTPError(c *gin.Context, err error) bool {
+	if errors.Is(err, taskrepository.ErrTaskHierarchyConflict) {
+		c.JSON(http.StatusConflict, taskErrorBody(err))
+		return true
+	}
+	if errors.Is(err, taskrepository.ErrTaskCompletionGateBlocked) {
+		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_gate_blocked"})
+		return true
+	}
+	if errors.Is(err, models.ErrWorkspaceDefaultExecutorUnavailable) {
+		c.JSON(http.StatusConflict, taskErrorBody(err))
+		return true
+	}
+	if errors.Is(err, models.ErrExecutorMutationDenied) {
+		c.JSON(http.StatusForbidden, gin.H{"error": models.ErrExecutorMutationDenied.Error()})
+		return true
+	}
+	var childConflictErr *service.TaskDeleteChildWorkspaceConflictError
+	if errors.As(err, &childConflictErr) {
+		c.JSON(http.StatusConflict, taskErrorBody(err))
+		return true
+	}
+	return false
 }
 
 func cleanupInspectionFields(err error) []zap.Field {
@@ -140,7 +156,24 @@ func taskErrorDetails(err error) map[string]interface{} {
 			"dirty_worktrees":       dirtyWorktreeErr.DirtyWorktrees,
 		}
 	}
+	if details, ok := taskDeleteChildConflictDetails(err); ok {
+		return details
+	}
 	return nil
+}
+
+// taskDeleteChildConflictDetails is the machine-readable body shared by the
+// HTTP and WebSocket delete responses for a child that changed concurrently.
+func taskDeleteChildConflictDetails(err error) (map[string]interface{}, bool) {
+	var conflict *service.TaskDeleteChildWorkspaceConflictError
+	if !errors.As(err, &conflict) {
+		return nil, false
+	}
+	return map[string]interface{}{
+		errorDetailKeyErrorCode: service.TaskDeleteChildWorkspaceConflictErrorCode,
+		"child_task_id":         conflict.ChildID,
+		"reason":                string(conflict.Reason),
+	}, true
 }
 
 func repositorySelectionHTTPStatus(err error) (int, bool) {
