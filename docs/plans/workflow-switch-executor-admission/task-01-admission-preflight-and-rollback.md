@@ -84,14 +84,20 @@ guards, and `applyProfile` behavior.
     matches the sentinel.
   - `TestPreflightWorkflowStepMove_KeepCurrentSkipsExecutorAdmission`: the same
     profile with `reuse` makes no admission call.
+  - `TestPreflightExplicitWorkflowStepMoveNewSessionRejectsDeletedExecutorProfile`:
+    an explicit `new` target rejects the deleted profile before the task step
+    or state changes.
   - `TestSwitchSessionForStep_DeletedExecutorProfileRestoresTaskState`: the
     task starts at `REVIEW` with the source session `WAITING_FOR_INPUT`, and
     preparation fails. Asserts the task state is `REVIEW` and was not left at
     `SCHEDULING`. Before the fix this fails with `SCHEDULING`.
+  - `TestSwitchSessionForStepRollbackUsesDetachedContext`: cancellation during
+    deleted-profile admission does not prevent the task-state rollback.
   - `TestSwitchSessionForStep_RollbackDoesNotOverwriteConcurrentState`.
 - `internal/orchestrator/executor/`: a unit test that
   `PreflightSessionExecutorAdmission` passes an empty session ID and the
-  inherited profile to the admission func, and creates no session.
+  inherited profile to the admission func, creates no session, and handles
+  absent task metadata.
 - `internal/task/service/service_workflow_test.go` (or a new sibling file if
   that one is at the size limit): a rejecting `workflowMovePreflight` leaves
   the task's step and state unchanged.
@@ -126,3 +132,4 @@ cd ../.. && bash scripts/lint-go-changed $(git diff --name-only origin/main -- '
 - `make -C apps/backend build` passed.
 - Review follow-up: the rollback regression now refuses through executor admission with `repoerrors.ErrExecutorProfileNotFound` inside `PrepareSessionForExistingEnvironment`; it asserts restoration to `REVIEW`, one task update, and no replacement session row. Explicit-target reuse of the current session also skips admission.
 - `go test -trimpath ./internal/orchestrator/... ./internal/task/handlers/ -count=1` passed after the review fixes. Changed-file Go lint and `make -C apps/backend build` passed again.
+- Follow-up review regressions passed: explicit `new` target admission, rollback after cancellation during deleted-profile admission, and admission with absent task metadata. The complete `go test -trimpath ./internal/orchestrator/... ./internal/task/handlers/ -count=1` passed again; changed-file Go lint reported 0 issues; `make -C apps/backend build` passed.

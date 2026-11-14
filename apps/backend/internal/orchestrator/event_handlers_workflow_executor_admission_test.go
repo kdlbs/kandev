@@ -105,6 +105,35 @@ func TestPreflightExplicitWorkflowStepMoveKeepsCurrentSessionWithoutExecutorAdmi
 	}
 }
 
+func TestPreflightExplicitWorkflowStepMoveNewSessionRejectsDeletedExecutorProfile(t *testing.T) {
+	ctx := context.Background()
+	fixture := newWorkflowExecutorAdmissionFixture(t, v1.TaskStateReview, models.TaskSessionStateWaitingForInput)
+	fixture.executor.SetExecutorAdmission(func(ctx context.Context, _, _, _ string) (context.Context, error) {
+		fixture.admissionCalls++
+		return ctx, repoerrors.ErrExecutorProfileNotFound
+	})
+	target := &wfmodels.WorkflowStep{
+		ID: "step-2", WorkflowID: "wf-1",
+		SessionTarget:             &wfmodels.WorkflowSessionTarget{Kind: wfmodels.WorkflowSessionTargetInitial},
+		ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyNew,
+	}
+
+	err := fixture.service.PreflightWorkflowStepMove(ctx, "task-1", fixture.session, target)
+	if !errors.Is(err, repoerrors.ErrExecutorProfileNotFound) {
+		t.Fatalf("PreflightWorkflowStepMove() error = %v, want deleted-profile refusal", err)
+	}
+	if fixture.admissionCalls != 1 {
+		t.Fatalf("executor admission calls = %d, want 1 for a new explicit-target session", fixture.admissionCalls)
+	}
+	task, getErr := fixture.repo.GetTask(ctx, "task-1")
+	if getErr != nil {
+		t.Fatalf("get task after rejected preflight: %v", getErr)
+	}
+	if task.WorkflowStepID != "step-1" || task.State != v1.TaskStateReview {
+		t.Fatalf("task after rejected preflight = step:%q state:%q, want step-1 REVIEW", task.WorkflowStepID, task.State)
+	}
+}
+
 func TestSwitchSessionForStepDeletedExecutorProfileRestoresTaskState(t *testing.T) {
 	fixture := newWorkflowExecutorAdmissionFixture(t, v1.TaskStateReview, models.TaskSessionStateWaitingForInput)
 	ctx := context.Background()
@@ -164,6 +193,53 @@ func TestSwitchSessionForStepDeletedExecutorProfileRestoresTaskState(t *testing.
 	if len(sessions) != 1 || sessions[0].ID != fixture.session.ID {
 		t.Fatalf("sessions after deleted-profile refusal = %#v, want only source session %q", sessions, fixture.session.ID)
 	}
+}
+
+func TestSwitchSessionForStepRollbackUsesDetachedContext(t *testing.T) {
+	fixture := newWorkflowExecutorAdmissionFixture(t, v1.TaskStateReview, models.TaskSessionStateWaitingForInput)
+	setupCtx := context.Background()
+	if err := fixture.repo.CreateTaskEnvironment(setupCtx, &models.TaskEnvironment{
+		ID: "env-1", TaskID: "task-1", ExecutorType: string(models.ExecutorTypeLocal),
+		ExecutorID: "exec-1", ExecutorProfileID: "deleted-profile",
+		Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("create ready environment: %v", err)
+	}
+	fixture.session.TaskEnvironmentID = "env-1"
+	if err := fixture.repo.UpdateTaskSession(setupCtx, fixture.session); err != nil {
+		t.Fatalf("bind source session environment: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	fixture.service.taskRepo = cancelAwareWorkflowTaskRepo{mockTaskRepo: fixture.taskRepo}
+	fixture.executor.SetExecutorAdmission(func(ctx context.Context, _, _, _ string) (context.Context, error) {
+		cancel()
+		return ctx, repoerrors.ErrExecutorProfileNotFound
+	})
+
+	_, err := fixture.service.switchSessionForStep(ctx, "task-1", fixture.session, "profile-b")
+	if !errors.Is(err, repoerrors.ErrExecutorProfileNotFound) {
+		t.Fatalf("switchSessionForStep() error = %v, want deleted-profile refusal", err)
+	}
+	if got := fixture.taskRepo.tasks["task-1"].State; got != v1.TaskStateReview {
+		t.Fatalf("task state after canceled workflow switch = %q, want REVIEW", got)
+	}
+}
+
+type cancelAwareWorkflowTaskRepo struct {
+	*mockTaskRepo
+}
+
+func (r cancelAwareWorkflowTaskRepo) UpdateTaskStateIfCurrentIn(
+	ctx context.Context,
+	taskID string,
+	state v1.TaskState,
+	allowed []v1.TaskState,
+) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return r.mockTaskRepo.UpdateTaskStateIfCurrentIn(ctx, taskID, state, allowed)
 }
 
 func TestSwitchSessionForStepRollbackDoesNotOverwriteConcurrentState(t *testing.T) {

@@ -67,10 +67,25 @@ Recovery actions in the error (no new buttons), and runner rebinding.
 ## Commands
 
 ```bash
-cd apps/backend && go test -trimpath ./internal/task/handlers/ -run 'Move' -count=1
-cd apps/web && pnpm exec vitest run components/task/task-move-error-message.test.ts
-cd apps/web && pnpm run i18n:check && pnpm run i18n:ratchet && pnpm run typecheck
-cd apps/web && pnpm e2e:run -- <new-spec-path>
+set -euo pipefail
+
+(
+  cd apps
+  pnpm install --frozen-lockfile
+)
+(
+  cd apps/backend
+  go test -trimpath ./internal/task/handlers/ -run 'Move' -count=1
+)
+(
+  cd apps/web
+  pnpm exec vitest run components/task/task-move-error-message.test.ts
+  pnpm run i18n:check
+  pnpm run i18n:ratchet
+  pnpm run typecheck
+  pnpm e2e:run --host --shards 1 --project chromium e2e/tests/task/workflow-switch-executor-unavailable.spec.ts
+  pnpm e2e:run --host --shards 1 --project mobile-chrome e2e/tests/task/mobile-workflow-switch-executor-unavailable.spec.ts
+)
 ```
 
 ## Likely files
@@ -94,3 +109,7 @@ cd apps/web && pnpm e2e:run -- <new-spec-path>
 - `python3 scripts/list-docs.py validate` and `python3 scripts/lint-spec-files.py --all` passed.
 - Review follow-up: executor refusals from whole-step bulk moves now return the same safe 409 mapping as selected bulk moves. The backend fallback message now refers neutrally to the task's executor, and the unreachable duplicate WebSocket classification was removed.
 - Added a whole-step bulk HTTP regression for the safe conflict code and message. `go test -trimpath ./internal/orchestrator/... ./internal/task/handlers/ -count=1`, changed-file Go lint, and `make -C apps/backend build` passed after the review fixes.
+- Fixed explicit-target admission for new conversations while preserving the reuse-current early return. Added a rejected-profile regression that verifies the task remains on its original step and state.
+- Detached task-state rollback from the canceled workflow-switch context with a five-second timeout. A regression cancels the switch during deleted-profile admission and verifies the task returns to REVIEW.
+- Made executor admission handle absent task metadata and covered the deleted-profile selection path with an empty-metadata test.
+- Replaced the placeholder E2E command with exact desktop and mobile spec paths and made the verification block runnable from the repository root with isolated directory changes and frontend dependency installation.

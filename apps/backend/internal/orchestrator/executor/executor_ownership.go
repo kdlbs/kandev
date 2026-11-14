@@ -31,6 +31,9 @@ func (e *Executor) PreflightSessionExecutorAdmission(
 	}
 	metadata := cloneMetadata(task.Metadata)
 	if executorProfileID != "" {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
 		metadata["executor_profile_id"] = executorProfileID
 	}
 	config := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)

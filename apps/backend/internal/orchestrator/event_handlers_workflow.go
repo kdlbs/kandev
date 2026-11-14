@@ -3447,8 +3447,10 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidateAndRoute(
 }
 
 func (s *Service) restoreTaskStateAfterWorkflowSwitchFailure(ctx context.Context, taskID string, priorState v1.TaskState) {
+	restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
 	updated, err := s.taskRepo.UpdateTaskStateIfCurrentIn(
-		ctx, taskID, priorState, []v1.TaskState{v1.TaskStateScheduling},
+		restoreCtx, taskID, priorState, []v1.TaskState{v1.TaskStateScheduling},
 	)
 	if err != nil {
 		s.logger.Warn("failed to restore task state after workflow session switch",
@@ -3456,7 +3458,7 @@ func (s *Service) restoreTaskStateAfterWorkflowSwitchFailure(ctx context.Context
 		return
 	}
 	if updated {
-		s.publishTaskUpdatedByID(ctx, taskID)
+		s.publishTaskUpdatedByID(restoreCtx, taskID)
 	}
 }
 
@@ -4414,12 +4416,13 @@ func (s *Service) preflightExplicitWorkflowStepCredentials(
 	if err != nil {
 		return err
 	}
+	startPolicy := s.resolveStepProfileSessionStartPolicy(targetStep)
 	targetSession := currentSession
-	if s.resolveStepProfileSessionStartPolicy(targetStep) == models.WorkflowProfileSessionStartPolicyReuse && resolution.session != nil {
+	if startPolicy == models.WorkflowProfileSessionStartPolicyReuse && resolution.session != nil {
 		targetSession = resolution.session
-	}
-	if targetSession.ID == currentSession.ID {
-		return nil
+		if targetSession.ID == currentSession.ID {
+			return nil
+		}
 	}
 	task, err := s.preflightTaskProjection(ctx, taskID, candidate)
 	if err != nil {
