@@ -716,6 +716,76 @@ func (m *Manager) DeliveryRecoveryDescriptor(ctx context.Context, streamID strin
 	return descriptor, nil
 }
 
+// SuccessorDeliveryStreams lists streams in this session lifetime that belong
+// to generations newer than the process owner's configured generation.
+func (m *Manager) SuccessorDeliveryStreams(ctx context.Context) ([]journal.Stream, error) {
+	if m == nil || m.cfg == nil {
+		return nil, journal.ErrOwnerMismatch
+	}
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return nil, err
+	}
+	return deliveryJournal.ListSuccessorStreams(
+		ctx, m.cfg.SessionID, m.DeliveryIncarnationID(), m.DeliveryHarnessGeneration(),
+	)
+}
+
+// AbandonSuccessorDeliveryStream removes an uncommitted successor stream while
+// the configured generation owner is idle. This process owns the journal and
+// emits only to its configured stream, so a newer-generation stream has no
+// live writer through this owner.
+func (m *Manager) AbandonSuccessorDeliveryStream(ctx context.Context, expected journal.Stream) error {
+	if m == nil || m.cfg == nil {
+		return journal.ErrOwnerMismatch
+	}
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return err
+	}
+	if !m.deliverySubmissionMu.TryLock() {
+		return journal.ErrSubmissionState
+	}
+	defer m.deliverySubmissionMu.Unlock()
+	sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
+	if expected.SessionID != sessionID || expected.IncarnationID != incarnationID ||
+		expected.HarnessGeneration <= generation || m.activeDeliverySubmissionID() != "" {
+		return journal.ErrOwnerMismatch
+	}
+	return deliveryJournal.AbandonStream(ctx, expected)
+}
+
+// AbandonFailedBootstrapDeliveryStream removes this owner's stream after its
+// agent process has stopped and the lifecycle has confirmed that SQL never
+// committed the successor generation or its cursor.
+func (m *Manager) AbandonFailedBootstrapDeliveryStream(ctx context.Context, streamID string, generation uint64) error {
+	if m == nil || m.cfg == nil || m.Status() != StatusStopped {
+		return journal.ErrSubmissionState
+	}
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return err
+	}
+	if !m.deliverySubmissionMu.TryLock() {
+		return journal.ErrSubmissionState
+	}
+	defer m.deliverySubmissionMu.Unlock()
+	sessionID, incarnationID, configuredGeneration := m.DeliverySubmissionIdentity()
+	if streamID != m.DeliveryStreamID() || generation != configuredGeneration ||
+		m.activeDeliverySubmissionID() != "" {
+		return journal.ErrOwnerMismatch
+	}
+	stream, err := deliveryJournal.GetStream(ctx, streamID)
+	if err != nil {
+		return err
+	}
+	if stream.SessionID != sessionID || stream.IncarnationID != incarnationID ||
+		stream.HarnessGeneration != generation {
+		return journal.ErrOwnerMismatch
+	}
+	return deliveryJournal.AbandonStream(ctx, stream)
+}
+
 // DeliveryStreamID returns the stable transport stream identity. Agentctl
 // instance IDs identify a process incarnation and may change during executor
 // replacement; the Kandev session owns the retained event stream.

@@ -1480,13 +1480,35 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		}
 	}
 	stopWatch.advance(stopWaitAgentctl)
-	agentStopFailed := m.stopExecutionAgentctl(stopCtx, executionID, execution, backendForce)
+	agentctlStopCtx := stopCtx
+	stopAgentctlForce := backendForce
+	if reason == StopReasonAgentBootstrapFailed && execution.replacesPredecessorGeneration() &&
+		execution.DeliveryHarnessGeneration >= 2 && m.streamManager != nil {
+		// The bootstrap stream can be abandoned only after its process has
+		// stopped. Bound the stop request so a forced runtime teardown remains
+		// available if the agentctl endpoint does not respond.
+		var cancelAgentctlStop context.CancelFunc
+		agentctlStopCtx, cancelAgentctlStop = context.WithTimeout(stopCtx, 5*time.Second)
+		defer cancelAgentctlStop()
+		stopAgentctlForce = false
+	}
+	agentStopFailed := m.stopExecutionAgentctl(agentctlStopCtx, executionID, execution, stopAgentctlForce)
 	// A preserved runtime must not fall through to the executor's
 	// AgentStopFailed cleanup, which stops the container and can turn a
 	// recoverable failure into loss of the workspace. Keep the execution and
 	// its cleanup ownership tracked so a later attempt can finish the stop.
 	if agentStopFailed && preserveRuntime {
 		return fmt.Errorf("stop agent process for execution %q: %w", executionID, errRecoverableStopUnconfirmed)
+	}
+	if reason == StopReasonAgentBootstrapFailed && !agentStopFailed {
+		cleanupCtx, cancelCleanup := context.WithTimeout(stopCtx, 5*time.Second)
+		if err := m.abandonFailedSuccessorBootstrapStream(cleanupCtx, execution); err != nil {
+			m.logger.Warn("failed to abandon uncommitted successor delivery stream after bootstrap failure",
+				zap.String("execution_id", execution.ID),
+				zap.String("session_id", execution.SessionID),
+				zap.Error(err))
+		}
+		cancelCleanup()
 	}
 	// Backend shutdown retains interrupted delivery outcomes. Its terminal
 	// checkpoint follows confirmed process termination, before runtime cleanup.

@@ -13,6 +13,7 @@ const (
 	DeliveryRecoveryRefusalExecutionUnavailable   = "execution_unavailable"
 	DeliveryRecoveryRefusalEvidenceUnavailable    = "evidence_unavailable"
 	DeliveryRecoveryRefusalOfficeOwned            = "office_owned"
+	DeliveryRecoveryRefusalSQLResolutionRefused   = "sql_resolution_refused"
 	DeliveryRecoveryRefusalUnclassified           = "unclassified"
 )
 
@@ -27,6 +28,7 @@ var deliveryRecoveryRefusalReasons = map[string]struct{}{
 	DeliveryRecoveryRefusalExecutionUnavailable:   {},
 	DeliveryRecoveryRefusalEvidenceUnavailable:    {},
 	DeliveryRecoveryRefusalOfficeOwned:            {},
+	DeliveryRecoveryRefusalSQLResolutionRefused:   {},
 	DeliveryRecoveryRefusalUnclassified:           {},
 }
 

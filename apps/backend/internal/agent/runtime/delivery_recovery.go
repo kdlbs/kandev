@@ -23,6 +23,7 @@ const (
 	DeliveryRecoveryRefusalExecutionUnavailable   = lifecycle.DeliveryRecoveryRefusalExecutionUnavailable
 	DeliveryRecoveryRefusalEvidenceUnavailable    = lifecycle.DeliveryRecoveryRefusalEvidenceUnavailable
 	DeliveryRecoveryRefusalOfficeOwned            = lifecycle.DeliveryRecoveryRefusalOfficeOwned
+	DeliveryRecoveryRefusalSQLResolutionRefused   = lifecycle.DeliveryRecoveryRefusalSQLResolutionRefused
 	DeliveryRecoveryRefusalUnclassified           = lifecycle.DeliveryRecoveryRefusalUnclassified
 )
 
