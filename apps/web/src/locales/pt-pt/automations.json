@@ -110,6 +110,8 @@
   "openAutomations": "Abrir automatizações",
   "orUseWebhookInstead": "Ou use antes um webhook",
   "outcome": "Resultado",
+  "parentTaskHelp": "A tarefa de cada execução é criada sob esta tarefa. Deixe vazio para mantê-la no nível superior.",
+  "parentTaskLabel": "Tarefa principal (opcional)",
   "pickAWorkflowFirst": "Escolha primeiro um fluxo de trabalho",
   "prEventOpened": "Aberto",
   "prEventOpenedTooltip": "Dispara uma vez quando é detetado um novo PR aberto. Cada número de PR é desduplicado; o mesmo PR não volta a acionar.",

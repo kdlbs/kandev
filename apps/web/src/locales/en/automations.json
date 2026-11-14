@@ -110,6 +110,8 @@
   "openAutomations": "Open automations",
   "orUseWebhookInstead": "Or use a webhook instead",
   "outcome": "Outcome",
+  "parentTaskHelp": "Each run's task is created under this task. Leave empty to keep it top-level.",
+  "parentTaskLabel": "Parent task (optional)",
   "pickAWorkflowFirst": "Pick a workflow first",
   "prMergedDeadConfigWarning": "No repositories selected; this trigger will not fire. Enable 'All repositories' or add at least one repository.",
   "prEventOpened": "Opened",

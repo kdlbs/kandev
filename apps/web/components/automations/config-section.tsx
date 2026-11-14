@@ -22,6 +22,7 @@ import {
 import { getMultiRepoExecutorDisabledReason } from "@/components/task-create-dialog-multi-repo-guard";
 import { useWorkflows } from "@/hooks/use-workflows";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
+import { AutomationParentPicker } from "./automation-parent-picker";
 import {
   pickSelectionFromOptionId,
   resolveExecutorType,
@@ -41,17 +42,20 @@ export function getExecutorItemDisabledReason(
 type ConfigSectionProps = {
   workspaceId: string;
   workflowId: string;
+  parentTaskId: string;
   agentProfileId: string;
   executorProfileId: string;
   taskMode?: TaskMode;
   repositorySelections: RepositorySelection[];
   dirtyFields?: {
     workflowId: boolean;
+    parentTaskId: boolean;
     agentProfileId: boolean;
     executorProfileId: boolean;
     repositorySelections: boolean;
   };
   onWorkflowChange: (id: string) => void;
+  onParentChange: (id: string) => void;
   onAgentProfileChange: (id: string) => void;
   onExecutorProfileChange: (id: string) => void;
   onRepositoriesChange: (selections: RepositorySelection[]) => void;
@@ -59,6 +63,7 @@ type ConfigSectionProps = {
 
 const CLEAN_FIELDS = {
   workflowId: false,
+  parentTaskId: false,
   agentProfileId: false,
   executorProfileId: false,
   repositorySelections: false,
@@ -156,15 +161,38 @@ function RepositoryAccess({
   );
 }
 
+function ParentTaskField({
+  workspaceId,
+  parentTaskId,
+  isDirty,
+  onChange,
+}: {
+  workspaceId: string;
+  parentTaskId: string;
+  isDirty: boolean;
+  onChange: (id: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-1.5 sm:col-span-2" data-settings-dirty={isDirty}>
+      <SettingsFieldLabel>{t("automations:parentTaskLabel")}</SettingsFieldLabel>
+      <AutomationParentPicker workspaceId={workspaceId} value={parentTaskId} onChange={onChange} />
+      <p className="text-xs text-muted-foreground">{t("automations:parentTaskHelp")}</p>
+    </div>
+  );
+}
+
 export function ConfigSection({
   workspaceId,
   workflowId,
+  parentTaskId,
   agentProfileId,
   executorProfileId,
   taskMode = "automation_run",
   repositorySelections,
   dirtyFields = CLEAN_FIELDS,
   onWorkflowChange,
+  onParentChange,
   onAgentProfileChange,
   onExecutorProfileChange,
   onRepositoriesChange,
@@ -215,6 +243,12 @@ export function ConfigSection({
             }
           />
         </div>
+        <ParentTaskField
+          workspaceId={workspaceId}
+          parentTaskId={parentTaskId}
+          isDirty={dirtyFields.parentTaskId}
+          onChange={onParentChange}
+        />
         <div className="space-y-1.5" data-settings-dirty={dirtyFields.agentProfileId}>
           <SettingsFieldLabel>{t("automations:agentProfileLabel")}</SettingsFieldLabel>
           <AgentSelector
