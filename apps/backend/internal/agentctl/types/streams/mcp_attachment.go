@@ -21,14 +21,29 @@ type mcpAttachmentContextKey struct{}
 // reset, or passthrough attempt. It never accepts identity from agent protocol
 // frames.
 type MCPAttachmentContext struct {
-	Attempt MCPAttachmentAttempt
+	Attempt         MCPAttachmentAttempt
+	InitialEvidence []MCPAttachmentEvidence
 }
 
 // WithMCPAttachmentContext carries an attempt through an adapter call so its
 // protocol-level observations can be attributed without creating a side
 // channel.
 func WithMCPAttachmentContext(ctx context.Context, attempt MCPAttachmentAttempt) context.Context {
-	return context.WithValue(ctx, mcpAttachmentContextKey{}, MCPAttachmentContext{Attempt: attempt})
+	return WithMCPAttachmentContextAndEvidence(ctx, attempt, nil)
+}
+
+// WithMCPAttachmentContextAndEvidence carries the attempt preamble through an
+// adapter call. The adapter publishes it only after the session operation is
+// accepted, before publishing operation result evidence.
+func WithMCPAttachmentContextAndEvidence(
+	ctx context.Context,
+	attempt MCPAttachmentAttempt,
+	evidence []MCPAttachmentEvidence,
+) context.Context {
+	return context.WithValue(ctx, mcpAttachmentContextKey{}, MCPAttachmentContext{
+		Attempt:         attempt,
+		InitialEvidence: append([]MCPAttachmentEvidence(nil), evidence...),
+	})
 }
 
 // MCPAttachmentContextFromContext returns backend-owned attachment identity.

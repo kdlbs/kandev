@@ -772,7 +772,6 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"github_saved_presets":                     settings.GitHubSavedPresets,
 		"github_default_query_presets":             settings.GitHubDefaultQueryPresets,
 		"gitlab_saved_presets":                     settings.GitLabSavedPresets,
-		"azure_devops_browse_preferences":          settings.AzureDevOpsBrowsePreferences,
 		"default_utility_agent_id":                 settings.DefaultUtilityAgentID,
 		"default_utility_model":                    settings.DefaultUtilityModel,
 		"default_utility_agent_profile_id":         settings.DefaultUtilityAgentProfileID,
@@ -972,7 +971,6 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		GitHubSavedPresets                json.RawMessage                         `json:"github_saved_presets"`
 		GitHubDefaultQueryPresets         json.RawMessage                         `json:"github_default_query_presets"`
 		GitLabSavedPresets                json.RawMessage                         `json:"gitlab_saved_presets"`
-		AzureDevOpsBrowsePreferences      json.RawMessage                         `json:"azure_devops_browse_preferences"`
 		DefaultUtilityAgentID             string                                  `json:"default_utility_agent_id"`
 		DefaultUtilityModel               string                                  `json:"default_utility_model"`
 		DefaultUtilityAgentProfileID      string                                  `json:"default_utility_agent_profile_id"`
@@ -1159,7 +1157,6 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.GitHubSavedPresets = payload.GitHubSavedPresets
 	settings.GitHubDefaultQueryPresets = payload.GitHubDefaultQueryPresets
 	settings.GitLabSavedPresets = payload.GitLabSavedPresets
-	settings.AzureDevOpsBrowsePreferences = payload.AzureDevOpsBrowsePreferences
 	settings.DefaultUtilityAgentID = payload.DefaultUtilityAgentID
 	settings.DefaultUtilityModel = payload.DefaultUtilityModel
 	settings.DefaultUtilityAgentProfileID = payload.DefaultUtilityAgentProfileID

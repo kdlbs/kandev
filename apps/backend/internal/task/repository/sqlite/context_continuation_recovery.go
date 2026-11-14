@@ -88,10 +88,9 @@ func (r *Repository) hasResolvedContextContinuationNoticeTx(ctx context.Context,
 	return r.hasCompletedContextAncestryTx(ctx, tx, recovery, proof.HarnessGeneration)
 }
 
-// A retained peer record must match the notice exactly. A record the peer no
-// longer retains is absent from the proof; the inventory check has already
-// required such SQL history to have a consumed continuation ancestry, which
-// the SQL checks below verify again for this notice.
+// A retained peer record must match the notice exactly. An absent record can
+// be admitted only after the caller independently validates the SQL evidence
+// that authorizes historical progression.
 func nativeResumeProofAdmitsHistoricalNotice(proof *models.NativeResumeDeliveryEvidence, recovery models.AgentDeliveryRecovery) bool {
 	if nativeResumeProofCoversNotice(proof, recovery) {
 		return true

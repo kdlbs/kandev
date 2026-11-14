@@ -178,7 +178,7 @@ describe("PRTaskIcon workflow approval conflict priority", () => {
 
     const icon = screen.getByTestId(`pr-task-icon-${TASK_ID}`);
     expect(icon.querySelector('[data-testid="pr-merge-conflict-warning"]')).not.toBeNull();
-    expect(icon.querySelector(`[data-testid="${APPROVAL_WARNING_TEST_ID}"]`)).not.toBeNull();
+    expect(icon.querySelector(`[data-testid="${APPROVAL_WARNING_TEST_ID}"]`)).toBeNull();
     expect(icon.getAttribute(ARIA_LABEL_ATTRIBUTE)).toContain("Conflicts");
     expect(icon.getAttribute(ARIA_LABEL_ATTRIBUTE)).toContain(APPROVAL_LABEL);
     const matches = vi.spyOn(icon, "matches").mockReturnValue(true);
@@ -379,7 +379,7 @@ describe("PRTaskIcon current-head workflow approval evidence", () => {
 
     const icon = screen.getByTestId(`pr-task-icon-${TASK_ID}`);
     expect(icon.querySelector('[data-testid="pr-merge-conflict-warning"]')).not.toBeNull();
-    expect(icon.querySelector(`[data-testid="${APPROVAL_WARNING_TEST_ID}"]`)).not.toBeNull();
+    expect(icon.querySelector(`[data-testid="${APPROVAL_WARNING_TEST_ID}"]`)).toBeNull();
     expect(icon.getAttribute(ARIA_LABEL_ATTRIBUTE)).toContain("Conflicts");
     expect(icon.getAttribute(ARIA_LABEL_ATTRIBUTE)).toContain(APPROVAL_LABEL);
     const matches = vi.spyOn(icon, "matches").mockReturnValue(true);

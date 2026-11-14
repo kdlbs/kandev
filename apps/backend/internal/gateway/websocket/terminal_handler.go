@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
+	"github.com/kandev/kandev/internal/common/wskeepalive"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	terminalservice "github.com/kandev/kandev/internal/terminal/service"
 )
@@ -36,6 +37,7 @@ type TerminalHandler struct {
 	scriptService scripts.ScriptService
 	terminalSvc   *terminalservice.Service
 	logger        *logger.Logger
+	keepalive     wskeepalive.Timing
 }
 
 // SetTerminalService enables server-side recovery of persisted ordinary
@@ -51,6 +53,7 @@ func NewTerminalHandler(lifecycleMgr *lifecycle.Manager, userService UserService
 		userService:   userService,
 		scriptService: scriptService,
 		logger:        log.WithFields(zap.String("component", "terminal_handler")),
+		keepalive:     wskeepalive.DefaultTiming(),
 	}
 }
 

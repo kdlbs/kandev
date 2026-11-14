@@ -6,28 +6,66 @@ import type { BuiltinMCPDescriptor, BuiltinMCPPackage } from "@/lib/types/builti
 import type { BuiltinMCPEditor } from "./builtin-package-detail";
 import { ApiError } from "@/lib/api/client";
 import { BuiltinPackageRow } from "./builtin-package-content";
-import { builtinPackageChoice } from "./builtin-package-choice";
+import {
+  TaskPackageSwitch,
+  TaskPackageInheritance,
+  WorkspacePackageControls,
+} from "./builtin-package-controls";
+import { builtinPackageChoice, builtinPackageRestriction } from "./builtin-package-choice";
+
+type PackageRowProps = {
+  editor: BuiltinMCPEditor;
+  item: BuiltinMCPDescriptor;
+  scope: "tasks" | "workspaces";
+};
+
+function PackageRowNotes({ editor, item, scope }: PackageRowProps) {
+  const { t } = useTranslation();
+  const restriction = builtinPackageRestriction(editor.view, item);
+  if (restriction)
+    return item.id === "core" ? null : (
+      <p className="text-xs text-muted-foreground">{t(restriction)}</p>
+    );
+  if (scope === "workspaces") return <WorkspacePackageControls editor={editor} item={item} />;
+  return (
+    <>
+      <TaskPackageInheritance editor={editor} item={item} />
+      {editor.view?.policy.packages[item.id] === "blocked" && (
+        <p id={`builtin-mcp-blocked-${item.id}`} className="text-xs text-muted-foreground">
+          {t("settings:builtinMcp.blocked")}
+        </p>
+      )}
+      {item.id === "configuration" && (
+        <p className="text-xs text-muted-foreground">
+          {t("settings:builtinMcp.configurationAuthority")}
+        </p>
+      )}
+    </>
+  );
+}
 
 function PackageRow({
   editor,
   item,
   scope,
   onSelect,
-}: {
-  editor: BuiltinMCPEditor;
-  item: BuiltinMCPDescriptor;
-  scope: "tasks" | "workspaces";
-  onSelect: (id: BuiltinMCPPackage) => void;
-}) {
+}: PackageRowProps & { onSelect: (id: BuiltinMCPPackage) => void }) {
   const state = builtinPackageChoice(editor.view, editor.draft, scope, item.id);
+  const restriction = builtinPackageRestriction(editor.view, item);
   return (
     <BuiltinPackageRow
       item={item}
       labelKey={state.labelKey}
-      inherited={state.inherited}
       dirty={state.dirty}
+      control={
+        scope === "tasks" && !restriction ? (
+          <TaskPackageSwitch editor={editor} item={item} compact />
+        ) : undefined
+      }
       onSelect={() => onSelect(item.id)}
-    />
+    >
+      <PackageRowNotes editor={editor} item={item} scope={scope} />
+    </BuiltinPackageRow>
   );
 }
 
@@ -76,6 +114,9 @@ export function BuiltinPackageList({
     <section ref={root} className="min-w-0 space-y-3" data-testid="builtin-mcp-packages">
       <h2 className="text-base font-semibold">{t("settings:builtinMcp.title")}</h2>
       <p className="text-sm text-muted-foreground">{t("settings:builtinMcp.packageSummary")}</p>
+      {scope === "workspaces" && (
+        <p className="text-xs text-muted-foreground">{t("settings:builtinMcp.workspaceTiming")}</p>
+      )}
       <BuiltinMCPError editor={editor} />
       {editor.pending && <p role="status">{t("common:loading")}</p>}
       <div

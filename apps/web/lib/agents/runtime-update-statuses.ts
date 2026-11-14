@@ -14,11 +14,14 @@ const CLIENT_STATUS_TTL = 60_000;
 export function refreshRuntimeUpdateStatuses(
   store: RuntimeStatusStore,
   force = false,
+  isCurrent?: () => boolean,
 ): Promise<boolean> {
   const pending = requests.get(store);
   if (pending) {
     if (!force) return pending.promise;
-    pending.queued ??= pending.promise.then(() => refreshRuntimeUpdateStatuses(store, true));
+    pending.queued ??= pending.promise.then(() =>
+      refreshRuntimeUpdateStatuses(store, true, isCurrent),
+    );
     return pending.queued;
   }
   const { checkedAt } = store.getState().agentRuntimeUpdates;
@@ -28,6 +31,7 @@ export function refreshRuntimeUpdateStatuses(
   const request: Request = {
     promise: listAgentUpdateStatuses({ cache: "no-store" })
       .then((response) => {
+        if (isCurrent && !isCurrent()) return false;
         store.getState().setAgentRuntimeUpdateStatuses(response.statuses, Date.now());
         return true;
       })

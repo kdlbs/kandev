@@ -133,7 +133,7 @@ describe("PRTaskIcon CI bubble", () => {
     expect(screen.getByTestId(ATTENTION_BUBBLE)).not.toBeNull();
   });
 
-  it("keeps the conflict triangle separate from the CI bubble", () => {
+  it("prioritizes the conflict triangle over the CI bubble", () => {
     renderPR(
       makePR({
         mergeable_state: "dirty",
@@ -142,10 +142,10 @@ describe("PRTaskIcon CI bubble", () => {
       }),
     );
     expect(screen.getByTestId(CONFLICT)).not.toBeNull();
-    expect(screen.getByTestId(APPROVAL_BUBBLE)).not.toBeNull();
+    expect(screen.queryByTestId(APPROVAL_BUBBLE)).toBeNull();
   });
 
-  it("keeps automation dots visible beside CI and conflicts", () => {
+  it("keeps CI details and automation dots when conflict owns the badge", () => {
     renderWithStore(
       {
         taskPRs: {
@@ -165,10 +165,13 @@ describe("PRTaskIcon CI bubble", () => {
         prInfo={{ number: 42, state: "open", autoFixEnabled: true, autoMergeEnabled: true }}
       />,
     );
-    expect(screen.getByTestId(FAILED_BUBBLE)).not.toBeNull();
+    expect(screen.queryByTestId(FAILED_BUBBLE)).toBeNull();
     expect(screen.getByTestId(CONFLICT)).not.toBeNull();
     expect(screen.getByTestId("pr-task-automation-auto-fix")).not.toBeNull();
     expect(screen.getByTestId("pr-task-automation-auto-merge")).not.toBeNull();
+    const icon = screen.getByTestId(ICON_TEST_ID);
+    expect(icon.getAttribute("aria-label")).toContain("Checks failed");
+    expect(icon.getAttribute("aria-label")).toContain("Conflicts");
   });
 });
 

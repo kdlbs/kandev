@@ -96,14 +96,20 @@ export async function createOverrideTask(
   });
 }
 
-export async function waitForNewWorkflowProfileSession(
+type WorkflowProfileSessionWaitOptions = {
+  excludedSessionIds?: string[];
+  isReady: (session: { state: string }) => boolean;
+  expectation: string;
+  failOnFailure?: boolean;
+};
+
+async function waitForWorkflowProfileSession(
   apiClient: ApiClient,
   taskId: string,
   profileId: string,
-  excludedSessionIds: string[] = [],
-  options: { readiness?: "answerable" | "launched" } = {},
+  options: WorkflowProfileSessionWaitOptions,
 ) {
-  const readiness = options.readiness ?? "answerable";
+  const { excludedSessionIds = [], isReady, expectation, failOnFailure = false } = options;
   let sessionId = "";
   await expect
     .poll(
@@ -111,38 +117,64 @@ export async function waitForNewWorkflowProfileSession(
         const { sessions } = await apiClient.listTaskSessions(taskId);
         const matchesProfile = (candidate: (typeof sessions)[number]) =>
           candidate.agent_profile_id === profileId && !excludedSessionIds.includes(candidate.id);
-        const failedSession = sessions.find(
-          (candidate) =>
-            matchesProfile(candidate) &&
-            (candidate.state === "FAILED" || candidate.state === "CANCELLED"),
-        );
-        if (failedSession) {
-          throw new Error(
-            `profile ${profileId} created a ${failedSession.state} session${failedSession.error_message ? `: ${failedSession.error_message}` : ""}`,
+        if (failOnFailure) {
+          const failedSession = sessions.find(
+            (candidate) =>
+              matchesProfile(candidate) &&
+              (candidate.state === "FAILED" || candidate.state === "CANCELLED"),
           );
+          if (failedSession) {
+            throw new Error(
+              `profile ${profileId} created a ${failedSession.state} session${failedSession.error_message ? `: ${failedSession.error_message}` : ""}`,
+            );
+          }
         }
         const session = sessions.find(
-          (candidate) =>
-            matchesProfile(candidate) &&
-            (readiness === "answerable"
-              ? candidate.state === "WAITING_FOR_INPUT"
-              : ["STARTING", "RUNNING", "WAITING_FOR_INPUT", "COMPLETED"].includes(
-                  candidate.state,
-                )),
+          (candidate) => matchesProfile(candidate) && isReady(candidate),
         );
         sessionId = session?.id ?? "";
         return sessionId;
       },
-      {
-        timeout: 45_000,
-        message:
-          readiness === "answerable"
-            ? `profile ${profileId} did not create a new answerable session`
-            : `profile ${profileId} did not launch a new session`,
-      },
+      { timeout: 45_000, message: `profile ${profileId} ${expectation}` },
     )
     .not.toBe("");
   return sessionId;
+}
+
+export function waitForWorkflowProfileSessionCreated(
+  apiClient: ApiClient,
+  taskId: string,
+  profileId: string,
+  excludedSessionIds: string[] = [],
+) {
+  return waitForWorkflowProfileSession(apiClient, taskId, profileId, {
+    excludedSessionIds,
+    isReady: () => true,
+    expectation: "did not create a new session",
+  });
+}
+
+export function waitForNewWorkflowProfileSession(
+  apiClient: ApiClient,
+  taskId: string,
+  profileId: string,
+  excludedSessionIds: string[] = [],
+  options: { readiness?: "answerable" | "launched" } = {},
+) {
+  const readiness = options.readiness ?? "answerable";
+  return waitForWorkflowProfileSession(apiClient, taskId, profileId, {
+    excludedSessionIds,
+    isReady:
+      readiness === "answerable"
+        ? (session) => session.state === "WAITING_FOR_INPUT"
+        : (session) =>
+            ["STARTING", "RUNNING", "WAITING_FOR_INPUT", "COMPLETED"].includes(session.state),
+    expectation:
+      readiness === "answerable"
+        ? "did not create a new answerable session"
+        : "did not launch a new session",
+    failOnFailure: true,
+  });
 }
 
 export async function waitForWorkflowStep(apiClient: ApiClient, taskId: string, stepId: string) {

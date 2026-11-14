@@ -50,6 +50,7 @@ func testNativeResumeRestoresRecoveredNoticeAfterExecutionLoss(t *testing.T, ope
 				HarnessGeneration: 1, NativeSessionID: fixture.generation.NativeSessionID, StreamID: notice.StreamID,
 				ExecutionID: "current-execution",
 				Submissions: []models.NativeResumeSubmissionEvidence{{ID: submission.ID, HarnessGeneration: 1, PayloadHash: submission.PayloadHash, StreamID: notice.StreamID}}}
+			require.NotEqual(t, notice.AgentExecutionID, proof.ExecutionID, "proof identifies the current replacement execution")
 
 			changed, err := repo.ResolveSessionRecoveryBlockWithNativeEvidence(ctx, fixture.block.ID, proof, time.Now().UTC())
 			require.NoError(t, err)

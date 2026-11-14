@@ -46,6 +46,7 @@ type AgentUpdateJob struct {
 	ExpectedRevision uint64
 	UseDefault       bool
 	NativeRuntime    bool
+	GuardedManaged   bool
 	Output           *ringBuffer
 	StartedAt        time.Time
 	FinishedAt       *time.Time
@@ -123,6 +124,23 @@ func (s *AgentUpdateJobStore) enqueueManual(name string, spec agents.ManagedNPMR
 	return s.enqueue(name, spec, useDefault, &AgentUpdateJob{ManagedFallback: fallback, beforeStart: beforeStart}, target)
 }
 
+// enqueueReviewed admits a guarded managed-only update. The captured candidate
+// can never switch to native preparation, and the guard rechecks the reviewed
+// runtime before preparation and around selection activation.
+func (s *AgentUpdateJobStore) enqueueReviewed(
+	name string,
+	spec agents.ManagedNPMRuntimeSpec,
+	target string,
+	beforeStart func() error,
+	guard runtimeActivationGuard,
+) (*AgentUpdateJob, error) {
+	return s.enqueue(name, spec, false, &AgentUpdateJob{
+		GuardedManaged:  true,
+		beforeStart:     beforeStart,
+		activationGuard: guard,
+	}, target)
+}
+
 func (s *AgentUpdateJobStore) enqueue(
 	agentName string,
 	spec agents.ManagedNPMRuntimeSpec,
@@ -180,6 +198,7 @@ func (s *AgentUpdateJobStore) enqueueConfigured(
 		job.Automatic, job.PreviousVersion = options.Automatic, options.PreviousVersion
 		job.ManagedFallback = options.ManagedFallback
 		job.RuntimeID = options.RuntimeID
+		job.GuardedManaged = options.GuardedManaged
 		job.context, job.activationGuard = options.context, options.activationGuard
 	}
 	requestedTarget := ""
@@ -378,7 +397,7 @@ func (s *AgentUpdateJobStore) run(
 
 	s.setStatus(job, dto.AgentUpdateJobStatusUpdating)
 	flusher := newUpdateOutputFlusher(s, job)
-	useNative, sourceErr := s.useNativeRuntime(ctx, spec)
+	useNative, sourceErr := s.useNativeRuntime(ctx, job, spec)
 	if sourceErr != nil {
 		s.finishFailed(job, ctx, fmt.Errorf("resolve OpenCode runtime source: %w", sourceErr), ref)
 		return
@@ -740,7 +759,7 @@ func (s *AgentUpdateJobStore) runExactCandidate(
 ) {
 	s.setStatus(job, dto.AgentUpdateJobStatusUpdating)
 	flusher := newUpdateOutputFlusher(s, job)
-	useNative, sourceErr := s.useNativeRuntime(ctx, spec)
+	useNative, sourceErr := s.useNativeRuntime(ctx, job, spec)
 	if sourceErr != nil {
 		s.finishFailed(job, ctx, fmt.Errorf("resolve OpenCode runtime source: %w", sourceErr), ref)
 		return
@@ -844,8 +863,14 @@ func (s *AgentUpdateJobStore) recordValidatedFallback(ctx context.Context, agent
 
 func (s *AgentUpdateJobStore) useNativeRuntime(
 	ctx context.Context,
+	job *AgentUpdateJob,
 	spec agents.ManagedNPMRuntimeSpec,
 ) (bool, error) {
+	if job.GuardedManaged {
+		// A reviewed bulk candidate is always the captured managed package.
+		// A later native source switch cannot redirect preparation.
+		return false, nil
+	}
 	if s.openCodeSelectionReader == nil || (spec.Package != managedruntime.OpenCodeV1Package && spec.Package != managedruntime.OpenCodeV2Package) {
 		return spec.NativeBinaryOnPath(), nil
 	}

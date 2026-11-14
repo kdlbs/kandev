@@ -25,6 +25,7 @@ existing controls, recovery actions, and persistence.
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criteria .8, .9, .11 and .12 | Manual resume |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criteria .1 through .6 | Existing delivery and continuity designs |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criteria .25 and .26 | Bounded projection wait |
+| REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criterion .12 (identity-less blocks) | Identity-less incident blocks |
 
 ## Workspace-only access
 
@@ -120,6 +121,76 @@ On backend adoption, unknown SQL history is excluded from active work only when 
 full peer records retain matching retirement, uncertain state, session/incarnation, generation,
 and payload hash. Missing or conflicting proof remains blocked. No recovery summary field,
 new endpoint, migration, native conversation replacement, or generation rotation is needed.
+
+## Identity-less incident blocks
+
+A backend or agentctl crash can open an `agent_delivery` block with reason
+`unresolved_durable_work` and empty `delivery_submission_id`, `delivery_stream_id`
+and sequence. `nativeResumeIncidentBlockMatches` already accepts that shape at the
+SQL boundary. Explicit Resume is the only recovery control for it; no separate
+"keep conversation" action exists, and Resume never starts a new native conversation.
+
+When the current native start succeeds, the native identity matches the current
+harness generation, and every unresolved SQL row for the incarnation at or before
+that generation is `interrupted_unknown`, Resume must retire those rows through the
+existing authenticated retirement proof and resolve the block. A prepared, accepted
+or dispatching row, a newer generation, or a native identity mismatch keeps it open.
+A peer record absent from a successfully validated inventory is eligible only for
+an original SQL `interrupted_unknown` row. Under process-owner dispatch serialization,
+retirement writes a retired-unknown record for that exact ID so it stays non-replayable.
+A present peer record must match ID, session, incarnation, generation, and payload
+hash. Unavailable SQL or journal evidence and present-record mismatches remain blocked.
+
+Every refusal on the boot-ready and explicit Resume paths logs one WARN line with
+session, block ID and a reason from the closed set `live_work`,
+`peer_record_missing`, `peer_record_mismatch`, `generation_superseded`,
+`native_identity_mismatch`, `journal_unresolved`, `projection_pending`,
+`execution_unavailable`, `evidence_unavailable`, `office_owned`, or
+`unclassified`. Unclassified errors include their error text. An active explicit
+Resume owns the refusal warning; the boot-ready observation uses DEBUG while
+that attempt is active. No payload, token or path is logged.
+
+## Repeated recovery after silent restoration
+
+AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.9, .12, .23 and .24 also apply after an earlier silent restore.
+Delivery: [Repeated native Resume](../../../plans/repeated-native-resume/plan.md).
+
+Historical resolution proof accepts `resume` and `models.SilentRestoreAction`.
+The proof retains exact session, incarnation, source generation, submission, stream and resolution-time checks.
+The legacy empty-stream variant retains its interrupted-submission and same-native-conversation checks.
+Unknown actions and incomplete provenance remain invalid.
+`HasResolvedNativeResumeRecovery` remains the strict verifier for a current explicit Resume resolution.
+Historical action compatibility does not grant current admission.
+
+An older `restored` notice is historical only after its resolved source and unchanged native-conversation lineage are verified.
+Every generation crossed must belong to the same incarnation and preserve that native conversation.
+A future, foreign, unresolved or gap-bearing notice remains a refusal.
+Do not route a verified native-restore notice through context-continuation ancestry or relabel it `continued`.
+
+`ResolveSessionRecoveryBlockWithNativeEvidence` remains the authority for a submission-bound block with a missing stream.
+It obtains that binding from authenticated current native evidence.
+The transaction validates the complete SQL/journal inventory, current execution, native identity, cursor and restore-attempt restrictions.
+It preserves the historical restored notice and resolves only proven current incident fences.
+The simpler `restoreNativeResumeMetadataTx` path cannot infer a missing stream from stale metadata.
+Its generic fallback retains the single-open-block guard and requires verified historical resolution.
+An older generation alone never authorizes resolution.
+
+Restart presentation repair creates a fence only when the current generation has no open fence.
+A planned repository operation, `EnsureRestartRecoveryBlock`, performs that decision under the existing session-turn and delivery write locks.
+PostgreSQL acquires those locks before the first inventory read.
+The transaction revalidates current generation ownership and returns one existing eligible delivery fence unchanged.
+Multiple or independent fences prevent insertion and retain their restrictions.
+The operation does not change the general recovery-block upsert contract or add schema constraints.
+
+Existing generic and submission-bound companion fences can represent the same interrupted incident.
+Only the complete authenticated resolver can resolve that set atomically.
+An independent consumer, foreign submission, conflicting stream or known outcome prevents every resolution write.
+Restart repair never erases an existing binding or reopens a resolved predecessor to repair presentation.
+
+Regression evidence covers real silent-restore commits, repeated interruptions, missing bindings, legacy history and already duplicated incident fences.
+Negative cases include changed native identity, forged resolution action, mismatched timestamps, live work, projection lag, pending restore and transactional rollback.
+Desktop and phone use the existing Resume action and recovery feedback.
+There is no new rendered control, localization key, recovery action or dispatch authority.
 
 ## Bounded projection wait
 

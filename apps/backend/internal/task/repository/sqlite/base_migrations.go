@@ -113,7 +113,13 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 			return fmt.Errorf("apply migration %q: %w", migration.name, err)
 		}
 	}
+	if err := r.migrateSessionRecoveryBlockIncidentUniqueness(ctx); err != nil {
+		return fmt.Errorf("migrate session recovery block incident uniqueness: %w", err)
+	}
 	if err := r.migrateWorkspaceProtection(ctx); err != nil {
+		return err
+	}
+	if err := r.dropRetiredAzureDevOpsSchema(); err != nil {
 		return err
 	}
 	if err := r.migrateTaskPriorityToTextPostgres(); err != nil {
@@ -297,6 +303,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		SET provider_host = 'https://github.com'
 		WHERE LOWER(TRIM(provider)) = 'github'
 			AND TRIM(COALESCE(provider_host, '')) = ''`)
+	if err := r.recordRetiredAzureDevOpsProviderHost(); err != nil {
+		return err
+	}
 	r.migrate.Apply("repositories.worktree_branch_template", `ALTER TABLE repositories ADD COLUMN worktree_branch_template TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.worktree_branch_template.backfill", `
 		UPDATE repositories
