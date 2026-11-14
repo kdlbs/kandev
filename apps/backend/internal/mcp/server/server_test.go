@@ -893,7 +893,7 @@ drained:
 	// as in TestServerModeTask_ToolCount and
 	// TestRegisterTools_LoggedCountMatchesRegisteredTools (list_task_sessions_test.go),
 	// which pin the per-mode registration rather than this SetProviders rebuild.
-	require.Len(t, tools, 42, "final registry should contain the complete GitLab-only task tool set")
+	require.Len(t, tools, 43, "final registry should contain the complete GitLab-only task tool set")
 	assert.NotContains(t, tools, "get_github_rate_limit_kandev")
 	assert.Contains(t, tools, "get_task_change_requests_kandev")
 	assert.Contains(t, tools, "manage_task_change_request_kandev")
@@ -1068,8 +1068,8 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask, []string{"github", "gitlab"})
 	tools := getRegisteredToolNames(s)
-	// 20 kanban (incl. delete + archive task + stop_task + spawn_session +
-	// list_task_sessions) + 1 add_branch_to_task +
+	// 21 kanban (incl. delete + archive task + stop_task + spawn_session +
+	// list_task_sessions + reorder_child_tasks) + 1 add_branch_to_task +
 	// 1 add_workspace_sources + 1 update_repository_base_branch +
 	// 1 step_complete (ADR 0015) + 1 interaction + 8 plan + 3 walkthrough +
 	// 1 publish_review_findings + 1 related-tasks + 1 diagnostic bundle
@@ -1081,12 +1081,13 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	assert.Contains(t, tools, "show_walkthrough_kandev", "walkthrough tool must be registered in task mode")
 	assert.Contains(t, tools, "publish_review_findings_kandev", "native code-review publishing must be registered in task mode")
 	assert.Contains(t, tools, "spawn_session_kandev", "spawn_session must be registered in task mode")
+	assert.Contains(t, tools, "reorder_child_tasks_kandev", "direct-parent child ordering must be registered in task mode")
 	assert.Contains(t, tools, "add_workspace_sources_kandev")
 	assert.Contains(t, tools, "list_task_sessions_kandev", "session discovery must be registered in task mode")
 	assert.Contains(t, tools, "add_task_dependency_kandev", "dependency edges must be manageable in task mode")
 	assert.Contains(t, tools, "remove_task_dependency_kandev")
 	assert.Contains(t, tools, "show_rich_output_kandev", "native rich output must be registered in task mode")
-	assert.Equal(t, 43, len(tools))
+	assert.Equal(t, 44, len(tools))
 }
 
 func TestServerStepCompleteTool_TaskAndOfficeOnlyAndDiscoverable(t *testing.T) {

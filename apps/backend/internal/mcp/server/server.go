@@ -1598,6 +1598,11 @@ func (s *Server) registerTaskExecutionTools() {
 		s.wrapHandler("stop_task_kandev", s.stopTaskHandler()),
 	)
 	s.registerSpawnSessionTool()
+	// Child reordering is task-mode only; the automation surface deliberately
+	// omits it (see automationSurfaceActions).
+	if s.profile.Surface == mcpprofile.SurfaceKanbanTask {
+		s.registerReorderChildTasksTool()
+	}
 }
 
 func (s *Server) registerUpdateTaskTool() {

@@ -50,6 +50,7 @@ var builtinToolPackages = map[string]PackageID{
 	"publish_review_findings_kandev":                PackageCore,
 	"read_canvas_authoring_skill_kandev":            PackageCore,
 	"remove_task_dependency_kandev":                 PackageCore,
+	"reorder_child_tasks_kandev":                    PackageCore,
 	"report_change_request_auto_fix_outcome_kandev": PackageCore,
 	"restore_task_plan_revision_kandev":             PackageCore,
 	"set_canvas_state_kandev":                       PackageCore,
