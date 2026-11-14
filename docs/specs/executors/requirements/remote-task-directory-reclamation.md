@@ -2,6 +2,7 @@
 status: active
 system: executors
 created: 2026-08-24
+updated: 2026-11-14
 owners:
   - kandev
 ---
@@ -33,17 +34,22 @@ qualifications on it.
 
 - **Task directory:** the remote directory `<workdir_root>/tasks/<task-dir-name>/`
   that Kandev creates for one task. Its root is the primary repository checkout;
-  additional repositories and branches are direct child directories.
+  the standard SSH layout places additional repositories in direct child
+  directories. Repositories nested below that layout are unsupported for
+  reclamation.
 - **Reclamation:** removing a task directory and everything beneath it from the
   remote host.
 - **Terminal outcome:** a task or session archive, delete, or cascade variant.
   These are the outcomes that produce a durable task-resource cleanup job.
 - **Resumable stop:** any other stop, including an ordinary user stop, a
   rollback, a failed-agent stop, a stale-replacement stop, and backend shutdown.
-- **At-risk content:** anything inside a task directory that a user could not
-  recover from a remote after the directory is gone. Uncommitted changes,
-  untracked files, stash entries, and commits not contained by any
-  remote-tracking ref are all at risk.
+- **At-risk content:** uncommitted changes, non-ignored untracked files, and
+  unpublished commits or stashes within the applicable repository scope.
+  Git-ignored content is disposable under the reclamation opt-in.
+- **Retained repository:** a linked worktree's shared Git storage outside the
+  task directory. Reclamation leaves that storage and its other worktrees intact.
+- **Recorded stash branch:** the branch name that Git records when it creates a
+  stash. This name does not identify a particular worktree or change after branch renames.
 - **Owning task:** the single task whose lifecycle governs a task directory. A
   subtask launched with `workspace_mode: inherit_parent` shares its parent's
   directory and does not own it.
@@ -79,13 +85,16 @@ so that my disk does not fill with work I have finished with.
   an archived task that is later unarchived, the system shall re-materialize the
   checkout through the normal preparation path on the next launch rather than
   failing the launch.
+- **AC-SSH-TASKDIR-RECLAMATION-001.5:** When reclamation removes a linked
+  worktree, the system shall also remove its registration from the shared
+  repository. Worktrees and registrations outside the task directory shall remain
+  intact. Branches and stashes in retained repositories shall also remain intact.
 
 ### REQ-SSH-TASKDIR-RECLAMATION-002: Never destroy work that cannot be recovered
 
-**Intent:** Guarantee that reclamation can only remove a directory whose contents
-are positively established to be recoverable. A clean working tree is not
-evidence: a tree can be clean and still hold commits that were never pushed. An
-inconclusive check must be treated exactly like a positive finding of risk.
+**Intent:** Preserve work within the applicable repository scope, except for
+Git-ignored content that the reclamation opt-in makes disposable. A clean working
+tree alone does not establish safety. An inconclusive check requires preservation.
 
 **User story:** As a developer whose remote checkout holds commits I have not
 pushed, I want Kandev to refuse to delete that checkout and tell me why, so that
@@ -98,16 +107,19 @@ housekeeping can never cost me work.
   directory only when each checkout positively demonstrates that it holds no
   at-risk content.
 - **AC-SSH-TASKDIR-RECLAMATION-002.2:** When a checkout has uncommitted
-  modifications, staged changes, untracked files, or ignored files outside the
-  Kandev-owned `.kandev/` runtime path, the system shall skip reclamation for
-  that task directory and report the reason.
-- **AC-SSH-TASKDIR-RECLAMATION-002.3:** When a checkout holds a commit reachable
-  from any local branch or from `HEAD` that is not contained by any
-  remote-tracking ref, the system shall skip reclamation for that task directory
-  and report the reason. Absence of local modifications shall never on its own
-  satisfy AC-SSH-TASKDIR-RECLAMATION-002.1.
-- **AC-SSH-TASKDIR-RECLAMATION-002.4:** When a checkout holds stash entries, the
-  system shall skip reclamation for that task directory and report the reason.
+  modifications, staged changes, or non-ignored untracked files, the system shall
+  skip reclamation for that task directory and report the reason.
+- **AC-SSH-TASKDIR-RECLAMATION-002.3:** When a linked worktree has a retained
+  repository, the system shall preserve it if `HEAD` contains commits absent
+  from every remote-tracking ref. Unpublished commits solely on other branches
+  shall not block reclamation. When reclamation removes the repository's Git
+  storage, an unpublished commit reachable from any local branch or `HEAD` shall
+  block reclamation. Both rules apply to detached `HEAD` values.
+- **AC-SSH-TASKDIR-RECLAMATION-002.4:** When a linked worktree has a retained
+  repository, a stash whose recorded branch matches the current branch shall
+  block reclamation. Stashes attributed to other named branches shall not block
+  reclamation. When reclamation removes the repository's Git storage, every stash
+  shall block reclamation.
 - **AC-SSH-TASKDIR-RECLAMATION-002.5:** When any safety probe cannot be completed
   — the command fails, times out, returns output the system cannot parse, `git`
   is unavailable on the host, or the task directory root is not a git checkout —
@@ -122,6 +134,28 @@ housekeeping can never cost me work.
   user to discover which directories were preserved and why, and shall report the
   task-resource cleanup job as succeeded rather than failed, because a preserved
   directory is a correct outcome and not an error to retry.
+- **AC-SSH-TASKDIR-RECLAMATION-002.8:** When all other safety conditions pass,
+  ignored files shall not block reclamation. This rule includes build output,
+  ignored `.env` files, and ignored `.kandev/` runtime data. Tracked changes
+  shall still block reclamation, even when their paths match an ignore rule.
+- **AC-SSH-TASKDIR-RECLAMATION-002.9:** When a stash has unknown branch
+  attribution, the system shall preserve the task directory. When `HEAD` is
+  detached and any stash exists, the system shall also preserve the directory.
+- **AC-SSH-TASKDIR-RECLAMATION-002.10:** When reclamation cannot establish
+  a supported repository layout, the system shall preserve the task directory.
+  When Git storage inside the task directory has additional registered
+  worktrees, the system shall preserve the directory as shared.
+- **AC-SSH-TASKDIR-RECLAMATION-002.11:** When a discovered checkout has a
+  worktree lock, the system shall preserve the task directory and record the
+  lock as a safety skip. A known lock shall not cause cleanup retries.
+- **AC-SSH-TASKDIR-RECLAMATION-002.12:** When a discovered checkout contains
+  registered submodules, initialized or uninitialized, the system shall preserve
+  the task directory as an unsupported layout. A clean parent checkout shall
+  not override this preservation.
+- **AC-SSH-TASKDIR-RECLAMATION-002.13:** When a Git checkout is nested below
+  the task root or below a supported direct-child checkout, the system shall
+  preserve the task directory as an unsupported layout, even when the parent
+  checkout ignores the nested path.
 
 ### REQ-SSH-TASKDIR-RECLAMATION-003: Remove only task-owned directories
 
@@ -269,3 +303,25 @@ Kandev removes it, so that my script still does its job.
   management UI for them is not part of this capability.
 - **Reclamation for executors other than SSH.** Docker and Sprites own their own
   teardown.
+
+## Compatibility
+
+Default SSH preparation creates a standalone primary checkout. It can reuse an
+existing checkout. Linked worktrees originate from custom preparation or previously prepared
+repositories. This correction does not convert default SSH workspaces into
+shared worktrees. Both standalone and linked layouts retain the same opt-in.
+
+The policy change for [issue #5295](https://github.com/kdlbs/kandev/issues/5295)
+also affects profiles that already enable reclamation. Ignored content no longer
+protects a directory, including ignored secrets. The per-profile default remains
+disabled. Unclassified probe failures still preserve directories.
+
+Locked worktrees and checkouts with submodules remain on disk as safety skips.
+Unsupported Git command capabilities also preserve the directory. A task root
+without a primary checkout remains unsupported, even when its children contain
+repositories.
+
+## Implementation plans
+
+- [Worktree-aware reclamation correction](../../../plans/ssh-worktree-task-dir-reclamation/plan.md): pending implementation of the revised safety policy.
+- [Original reclamation package](../../../plans/ssh-remote-task-dir-reclamation/plan.md): completed historical delivery record.

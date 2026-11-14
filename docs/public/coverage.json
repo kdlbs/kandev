@@ -490,6 +490,7 @@
         "apps/backend/internal/agent/executor/executor.go",
         "apps/backend/internal/agent/kubernetes/config.go",
         "apps/backend/internal/agent/runtime/lifecycle/executor_backend.go",
+        "apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim.go",
         "apps/backend/internal/agent/runtime/lifecycle/persistence.go",
         "apps/backend/internal/agent/runtime/lifecycle/executor_kubernetes.go",
         "apps/backend/internal/kubernetes/handlers.go",
@@ -511,6 +512,9 @@
         "k8s/executor-rbac.yaml"
       ],
       "tests": [
+        "apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_test.go",
+        "apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_git_test.go",
+        "apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_optin_test.go",
         "apps/backend/internal/agent/runtime/lifecycle/executor_kubernetes_test.go",
         "apps/backend/internal/agent/runtime/lifecycle/persistence_test.go",
         "apps/backend/internal/kubernetes/handlers_test.go",
@@ -526,6 +530,8 @@
         "apps/backend/internal/mcp/handlers/handlers_test.go",
         "apps/backend/internal/mcp/handlers/create_task_self_placement_inheritance_test.go",
         "apps/backend/internal/task/service/service_resources_kubernetes_test.go",
+        "apps/backend/internal/task/service/resource_cleanup_ssh_test.go",
+        "apps/backend/internal/agent/runtime/ssh_reclaim_test.go",
         "apps/backend/internal/task/repository/sqlite/task_environment_inherited_transition_test.go",
         "apps/backend/internal/task/repository/sqlite/task_environment_inherited_transition_postgres_test.go",
         "apps/backend/internal/task/repository/sqlite/task_environment_test.go",
