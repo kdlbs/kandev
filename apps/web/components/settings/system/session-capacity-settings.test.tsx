@@ -78,6 +78,25 @@ function response(
   };
 }
 
+function allPolicyResponse(gradeLimits: Record<string, number>): SessionCapacitySettingsResponse {
+  return {
+    settings: {
+      enabled: true,
+      max_sessions: 5,
+      policy: "all",
+      grade_limits: gradeLimits,
+    },
+    effective: {
+      enabled: true,
+      max_sessions: 5,
+      source: "setting",
+      locked: false,
+      policy: "all",
+      grade_limits: gradeLimits,
+    },
+  };
+}
+
 function requireContributor(): SettingsSaveContributor {
   if (!saveContributor) throw new Error("save contributor was not registered");
   return saveContributor;
@@ -264,5 +283,44 @@ describe("SessionCapacitySettings access and recovery", () => {
 
     expect(screen.getByText("Failed to save session capacity settings.")).toBeTruthy();
     expect(saveContributor?.isDirty).toBe(true);
+  });
+});
+
+describe("SessionCapacitySettings grade drafts", () => {
+  it("saves grade-limit edits as one policy patch", async () => {
+    fetchSettingsMock.mockResolvedValueOnce(allPolicyResponse({ work: 2 }));
+    updateSettingsMock.mockResolvedValueOnce(allPolicyResponse({ work: 3 }));
+    render(<SessionCapacitySettings />);
+
+    const input = await screen.findByLabelText("Limit for grade work");
+    fireEvent.change(input, { target: { value: "3" } });
+    const contributor = requireContributor();
+    expect(contributor.canSave).toBe(true);
+
+    await act(async () => contributor.save(contributor.revision));
+
+    expect(updateSettingsMock).toHaveBeenCalledWith({
+      enabled: true,
+      max_sessions: 5,
+      grade_limits: { work: 3 },
+    });
+    await waitFor(() => expect(saveContributor?.isDirty).toBe(false));
+    expect((input as HTMLInputElement).value).toBe("3");
+  });
+
+  it("discards grade-limit edits back to the saved grade book", async () => {
+    fetchSettingsMock.mockResolvedValueOnce(allPolicyResponse({ work: 2 }));
+    render(<SessionCapacitySettings />);
+
+    const input = await screen.findByLabelText("Limit for grade work");
+    fireEvent.change(input, { target: { value: "9" } });
+    const contributor = requireContributor();
+    expect(contributor.isDirty).toBe(true);
+
+    act(() => contributor.discard());
+
+    expect((input as HTMLInputElement).value).toBe("2");
+    expect(saveContributor?.isDirty).toBe(false);
+    expect(updateSettingsMock).not.toHaveBeenCalled();
   });
 });

@@ -1745,6 +1745,7 @@ func (s *Service) SetRouteActionHandler(handler func(context.Context, RouteActio
 // task and workflow launches.
 func (s *Service) SetProfileExecutionResolver(resolver *agentruntime.ProfileExecutionResolver) {
 	s.profileExecutionResolver = resolver
+	s.wireAdmissionGrade(resolver)
 	if resolver != nil {
 		resolver.SetKeywordContextEnabled(s.config.ProviderKeywordContext)
 	}

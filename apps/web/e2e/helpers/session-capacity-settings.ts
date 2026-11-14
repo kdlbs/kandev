@@ -30,5 +30,8 @@ export async function restoreSessionCapacitySettings(
   await requestSessionCapacitySettings(apiClient, "PATCH", {
     enabled: baseline.enabled,
     max_sessions: baseline.max_sessions,
+    ...(baseline.policy === undefined
+      ? {}
+      : { policy: baseline.policy, grade_limits: baseline.grade_limits ?? {} }),
   });
 }

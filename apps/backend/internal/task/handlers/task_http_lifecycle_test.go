@@ -396,7 +396,14 @@ func TestHTTPQuerySidebarTasksUsesDefaultsAndAuthenticatedPreferences(t *testing
 	require.Equal(t, "none", repo.sidebarQuery.Group)
 	require.Equal(t, []string{"task-b"}, repo.sidebarPrefs.PinnedTaskIDs)
 	require.Contains(t, rec.Body.String(), `"query_key":"key"`)
-	require.Contains(t, rec.Body.String(), `"task":{"id":"task-b"`)
+	var result struct {
+		Entries []struct {
+			Task struct{ ID string }
+		}
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
+	require.Len(t, result.Entries, 1)
+	require.Equal(t, "task-b", result.Entries[0].Task.ID)
 	require.Contains(t, rec.Body.String(), `"wip_queue_position":3`)
 	require.Contains(t, rec.Body.String(), `"wip_queue_total":7`)
 	require.Contains(t, rec.Body.String(), `"subtask_count":4`)
