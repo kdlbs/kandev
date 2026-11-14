@@ -26,7 +26,7 @@ func (e *Executor) claimInventoryEnvironment(ctx context.Context, env *models.Ta
 	}
 	claim, err := store.AcquireTaskEnvironmentRecoveryClaim(ctx, models.TaskEnvironmentRecoveryClaimRequest{
 		TaskEnvironmentID: env.ID, OwnerTaskID: env.TaskID, OwnershipGeneration: env.OwnershipGeneration,
-		SessionID: sessionID, OperationID: uuid.NewString(), ExecutorType: env.ExecutorType, AllowCurrentSessionRuntime: true,
+		SessionID: sessionID, OperationID: uuid.NewString(), ExecutorType: env.ExecutorType, AllowCurrentSessionRuntime: inventoryMetadataFence(ctx) == nil,
 	})
 	if err != nil {
 		return ctx, nil, fmt.Errorf("%w: acquire environment preservation claim: %w", models.ErrWorkspaceInventoryRecoveryConflict, err)

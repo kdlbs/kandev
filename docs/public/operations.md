@@ -981,6 +981,14 @@ The task-scoped `repair_workspace_inventory` session recovery action is safe onl
 
 Stop and investigate manually when the action returns a conflict. Common causes are multiple unmatched rows, duplicate repository/branch attachments, a moved or symlinked path, a detached or unexpected branch, a missing Git worktree registration, a user-owned local repository, a Docker/SSH/Sprites-only checkout, another active session (including a child sharing the environment), configured external Git clean/process filters, or state that changed during inspection. A conflict is intentionally preservation-first: Kandev leaves checkout files and provider resources untouched and does not fall back to rematerialization.
 
+For an existing registered worktree from a local repository, the explicit
+`workspace_only: true` option performs metadata repair without resuming the
+session. It retains checkout preservation and competing-writer checks, including
+the current session, and checks task entry and route generation before writing.
+After a successful `not_started` response, use the ordinary workflow retry as a
+separate step. This does not enable automatic local-source repair or bypass
+external Git filter restrictions.
+
 A fresh or additional-session launch (a brand-new session, `spawn_session_kandev`, or on-entry auto-start) runs this same guarded repair automatically when it hits the identical single-slot mismatch, using a server-derived idempotency key scoped to that session; no manual action is needed. If automatic repair cannot prove a safe single match, the launch fails exactly as it did before this behavior existed, with no orphaned STARTING/RUNNING session and no primary-session change, and the manual `repair_workspace_inventory` action above remains available.
 
 If Kandev commits the inventory row but cannot durably store positive post-repair evidence, the launch or resume remains blocked and retryable. Use the same idempotency key for manual retries; Kandev re-inspects the preserved checkout and proceeds only after it records matching evidence. Once divergent evidence is durably recorded, retries cannot replace it with a match; preserve the checkout and investigate manually.
