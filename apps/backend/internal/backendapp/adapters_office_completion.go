@@ -2,69 +2,38 @@ package backendapp
 
 import (
 	"context"
-	"database/sql"
+	officecompletionpolicy "github.com/kandev/kandev/internal/office/completionpolicy"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
-	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/task/repository/completion"
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 
 	"github.com/kandev/kandev/internal/office/dashboard"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
-type officePendingApproverReader interface {
-	PendingApproversForCompletion(ctx context.Context, taskID, stepID string) ([]dashboard.PendingApproverDTO, error)
+type officeApproverNameReader interface {
+	ResolvePendingApproverNames(context.Context, []string) []dashboard.PendingApproverDTO
 }
 
-// officeApprovalGuardAdapter lets the task service consult Office approvers
-// before a human move completes an Office task.
-type officeApprovalGuardAdapter struct {
-	reader officePendingApproverReader
+// officeApproverNameResolverAdapter resolves stable policy subjects for API
+// errors without participating in admission decisions.
+type officeApproverNameResolverAdapter struct{ reader officeApproverNameReader }
+
+func registerOfficeCompletionPolicy(tasks interface {
+	SetCompletionPolicies(...completion.Policy)
+}, office *sqlite.Repository, workflow *workflowrepo.Repository) {
+	tasks.SetCompletionPolicies(officecompletionpolicy.New(office, workflow))
 }
 
-func (a officeApprovalGuardAdapter) PendingApproversForCompletion(
-	ctx context.Context, taskID, stepID string,
-) ([]taskservice.PendingApprover, error) {
-	pending, err := a.reader.PendingApproversForCompletion(ctx, taskID, stepID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]taskservice.PendingApprover, 0, len(pending))
-	for _, p := range pending {
-		out = append(out, taskservice.PendingApprover{AgentProfileID: p.AgentProfileID, Name: p.Name})
-	}
-	return out, nil
-}
-
-func configureOfficeHumanCompletionGuard(tasks *tasksqlite.Repository, office *sqlite.Repository, workflow *workflowrepo.Repository) {
-	tasks.SetOfficeHumanCompletionPendingReader(officeHumanCompletionPendingReader(office, workflow))
-}
-
-func officeHumanCompletionPendingReader(office *sqlite.Repository, workflow *workflowrepo.Repository) func(context.Context, *sql.Tx, string, string) ([]string, error) {
-	return func(ctx context.Context, tx *sql.Tx, taskID, stepID string) ([]string, error) {
-		approvers, err := office.ListTaskParticipantsAtStepTx(ctx, tx, taskID, stepID, "approver")
-		if err != nil || len(approvers) == 0 {
-			return nil, err
-		}
-		decisions, err := workflow.ListActiveTaskDecisionsTx(ctx, tx, taskID)
-		if err != nil {
-			return nil, err
-		}
-		return dashboard.PendingApproverIDs(approvers, decisions), nil
-	}
-}
-
-func (a officeApprovalGuardAdapter) ResolvePendingApproverNames(ctx context.Context, ids []string) []taskservice.PendingApprover {
+func (a officeApproverNameResolverAdapter) ResolvePendingApproverNames(ctx context.Context, ids []string) []taskservice.PendingApprover {
 	pending := make([]taskservice.PendingApprover, 0, len(ids))
-	resolver, ok := a.reader.(interface {
-		ResolvePendingApproverNames(context.Context, []string) []dashboard.PendingApproverDTO
-	})
-	if !ok {
+	if a.reader == nil {
 		for _, id := range ids {
 			pending = append(pending, taskservice.PendingApprover{AgentProfileID: id, Name: id})
 		}
 		return pending
 	}
-	for _, p := range resolver.ResolvePendingApproverNames(ctx, ids) {
+	for _, p := range a.reader.ResolvePendingApproverNames(ctx, ids) {
 		pending = append(pending, taskservice.PendingApprover{AgentProfileID: p.AgentProfileID, Name: p.Name})
 	}
 	return pending

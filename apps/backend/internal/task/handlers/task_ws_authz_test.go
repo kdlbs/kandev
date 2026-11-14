@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/completion"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -55,6 +56,15 @@ func (r *authzWSRepo) UpdateTaskState(_ context.Context, id string, state v1.Tas
 	defer r.mu.Unlock()
 	r.states = append(r.states, id+"="+string(state))
 	return nil
+}
+
+func (r *authzWSRepo) UpdateTaskStateWithCompletionAdmission(
+	ctx context.Context,
+	id string,
+	state v1.TaskState,
+	_ *completion.Admission,
+) error {
+	return r.UpdateTaskState(ctx, id, state)
 }
 
 func (r *authzWSRepo) UpdateTask(_ context.Context, task *models.Task) error {

@@ -8,8 +8,8 @@ import (
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
-// findFinalWorkflowStep follows the workflow from stepID to its terminal
-// position. A nil result means that the workflow has no valid terminal step.
+// findFinalWorkflowStep follows the workflow from stepID to its completing
+// step. A nil result means that the workflow has no configured completing step.
 func findFinalWorkflowStep(
 	ctx context.Context,
 	getter WorkflowStepGetter,
@@ -28,7 +28,8 @@ func findFinalWorkflowStep(
 			return nil, nextErr
 		}
 		if next == nil {
-			if wfmodels.IsTerminalStep(step, nil) {
+			// Recovery requires a configured completing step, not just a final position.
+			if wfmodels.CompletesTaskOnEnter(step, nil) {
 				return step, nil
 			}
 			return nil, nil

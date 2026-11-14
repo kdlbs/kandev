@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/completion"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -69,6 +70,16 @@ func (m *captureUpdateTaskRepo) UpdateTaskFieldsWithParentAdmission(ctx context.
 		task.Title = *update.Title
 	}
 	return result, nil
+}
+
+func (m *captureUpdateTaskRepo) UpdateTaskFieldsWithParentAdmissionAndCompletionAdmission(
+	ctx context.Context,
+	id string,
+	update models.TaskFieldUpdate,
+	validate repository.TaskParentValidator,
+	_ *completion.Admission,
+) (*models.TaskFieldUpdateResult, error) {
+	return m.UpdateTaskFieldsWithParentAdmission(ctx, id, update, validate)
 }
 
 func (m *captureUpdateTaskRepo) DeleteTaskRepositoriesByTask(_ context.Context, _ string) error {

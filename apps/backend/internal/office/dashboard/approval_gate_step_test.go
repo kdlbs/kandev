@@ -54,7 +54,7 @@ func TestUpdateTaskStatus_RequiredRoutineAssignmentsBlockOfficeCompletion(t *tes
 
 // insertTestTaskAtNonTerminalStep creates a two-step workflow (stepID at
 // position 0, named stepName; a later step at position 1) and a task
-// pointing at stepID, so IsTaskWorkflowStepTerminal reports false for it
+// pointing at stepID, so IsTaskOnFinalStep reports false for it
 // regardless of the step's own name.
 func insertTestTaskAtNonTerminalStep(t *testing.T, db sqlxExecutor, id, wsID, title, state, stepName string) {
 	t.Helper()
@@ -156,7 +156,7 @@ func insertChannelShapedTask(t *testing.T, db sqlxExecutor, id, wsID, title stri
 // TestUpdateTaskStatus_ChannelTaskNoWorkflowStep_ReachesDone is the
 // regression test for Build round 5, Finding 1: a task with no
 // workflow_step_id at all (the channel-task shape) must still be able to
-// reach done. IsTaskWorkflowStepTerminal reporting "not terminal" for a
+// reach done. IsTaskOnFinalStep reporting "not terminal" for a
 // step that does not exist is not the same fact as a task sitting on a
 // genuine non-terminal step, and the gate must not conflate the two.
 func TestUpdateTaskStatus_ChannelTaskNoWorkflowStep_ReachesDone(t *testing.T) {
@@ -176,20 +176,20 @@ func TestUpdateTaskStatus_ChannelTaskNoWorkflowStep_ReachesDone(t *testing.T) {
 }
 
 // erroringTerminalStepRepo wraps a real *sqlite.Repository, replacing
-// IsTaskWorkflowStepTerminal with one that always fails, to test the
+// IsTaskOnFinalStep with one that always fails, to test the
 // gate's behavior on a transient lookup error.
 type erroringTerminalStepRepo struct {
 	*sqlite.Repository
 	err error
 }
 
-func (r *erroringTerminalStepRepo) IsTaskWorkflowStepTerminal(context.Context, string) (bool, bool, error) {
+func (r *erroringTerminalStepRepo) IsTaskOnFinalStep(context.Context, string) (bool, bool, error) {
 	return false, false, r.err
 }
 
 // TestUpdateTaskStatus_TerminalStepLookupError_AbortsWithoutPersistingRedirect
 // is the MAJOR-2 regression test (review round 2): a transient
-// IsTaskWorkflowStepTerminal error must not be folded into "not terminal"
+// IsTaskOnFinalStep error must not be folded into "not terminal"
 // and persisted as a REVIEW redirect, since nothing then re-evaluates the
 // gate and the task is stranded reporting in_review forever with no
 // approver to clear it. A lookup error must abort the whole status update
