@@ -36,7 +36,7 @@ func TestCatalogSweepAssignmentIsCompleteAndNonOverlapping(t *testing.T) {
 	if repositories != 19 {
 		t.Errorf("stores.repositories claims %d catalog entries, want 19", repositories)
 	}
-	if services != 22 {
-		t.Errorf("stores.services claims %d catalog entries, want 22", services)
+	if services != 23 {
+		t.Errorf("stores.services claims %d catalog entries, want 23", services)
 	}
 }

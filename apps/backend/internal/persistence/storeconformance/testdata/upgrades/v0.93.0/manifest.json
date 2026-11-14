@@ -435,6 +435,7 @@
     "plugin-state",
     "plugin-instance-state",
     "plugin-user-state",
+    "plugin-task-change-requests",
     "canvas",
     "github",
     "gitlab",

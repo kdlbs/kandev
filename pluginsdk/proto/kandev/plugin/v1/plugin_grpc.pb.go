@@ -773,6 +773,8 @@ const (
 	Host_SendTaskMessageExact_FullMethodName                       = "/kandev.plugin.v1.Host/SendTaskMessageExact"
 	Host_IssueTaskDirectiveExact_FullMethodName                    = "/kandev.plugin.v1.Host/IssueTaskDirectiveExact"
 	Host_ResolveTaskDirectiveExact_FullMethodName                  = "/kandev.plugin.v1.Host/ResolveTaskDirectiveExact"
+	Host_ReportTaskChangeRequestExact_FullMethodName               = "/kandev.plugin.v1.Host/ReportTaskChangeRequestExact"
+	Host_RemoveTaskChangeRequestExact_FullMethodName               = "/kandev.plugin.v1.Host/RemoveTaskChangeRequestExact"
 	Host_AcquireTaskManagementClaimExact_FullMethodName            = "/kandev.plugin.v1.Host/AcquireTaskManagementClaimExact"
 	Host_ReleaseTaskManagementClaimExact_FullMethodName            = "/kandev.plugin.v1.Host/ReleaseTaskManagementClaimExact"
 	Host_TransferTaskManagementClaimExact_FullMethodName           = "/kandev.plugin.v1.Host/TransferTaskManagementClaimExact"
@@ -907,6 +909,8 @@ type HostClient interface {
 	SendTaskMessageExact(ctx context.Context, in *SendTaskMessageExactRequest, opts ...grpc.CallOption) (*SendTaskMessageExactResponse, error)
 	IssueTaskDirectiveExact(ctx context.Context, in *IssueTaskDirectiveExactRequest, opts ...grpc.CallOption) (*IssueTaskDirectiveExactResponse, error)
 	ResolveTaskDirectiveExact(ctx context.Context, in *ResolveTaskDirectiveExactRequest, opts ...grpc.CallOption) (*ResolveTaskDirectiveExactResponse, error)
+	ReportTaskChangeRequestExact(ctx context.Context, in *ReportTaskChangeRequestExactRequest, opts ...grpc.CallOption) (*ReportTaskChangeRequestExactResponse, error)
+	RemoveTaskChangeRequestExact(ctx context.Context, in *RemoveTaskChangeRequestExactRequest, opts ...grpc.CallOption) (*RemoveTaskChangeRequestExactResponse, error)
 	AcquireTaskManagementClaimExact(ctx context.Context, in *AcquireTaskManagementClaimExactRequest, opts ...grpc.CallOption) (*TaskManagementClaimExactResponse, error)
 	ReleaseTaskManagementClaimExact(ctx context.Context, in *ReleaseTaskManagementClaimExactRequest, opts ...grpc.CallOption) (*TaskManagementClaimExactResponse, error)
 	TransferTaskManagementClaimExact(ctx context.Context, in *TransferTaskManagementClaimExactRequest, opts ...grpc.CallOption) (*TaskManagementClaimExactResponse, error)
@@ -1201,6 +1205,26 @@ func (c *hostClient) ResolveTaskDirectiveExact(ctx context.Context, in *ResolveT
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ResolveTaskDirectiveExactResponse)
 	err := c.cc.Invoke(ctx, Host_ResolveTaskDirectiveExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ReportTaskChangeRequestExact(ctx context.Context, in *ReportTaskChangeRequestExactRequest, opts ...grpc.CallOption) (*ReportTaskChangeRequestExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReportTaskChangeRequestExactResponse)
+	err := c.cc.Invoke(ctx, Host_ReportTaskChangeRequestExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) RemoveTaskChangeRequestExact(ctx context.Context, in *RemoveTaskChangeRequestExactRequest, opts ...grpc.CallOption) (*RemoveTaskChangeRequestExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemoveTaskChangeRequestExactResponse)
+	err := c.cc.Invoke(ctx, Host_RemoveTaskChangeRequestExact_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2194,6 +2218,8 @@ type HostServer interface {
 	SendTaskMessageExact(context.Context, *SendTaskMessageExactRequest) (*SendTaskMessageExactResponse, error)
 	IssueTaskDirectiveExact(context.Context, *IssueTaskDirectiveExactRequest) (*IssueTaskDirectiveExactResponse, error)
 	ResolveTaskDirectiveExact(context.Context, *ResolveTaskDirectiveExactRequest) (*ResolveTaskDirectiveExactResponse, error)
+	ReportTaskChangeRequestExact(context.Context, *ReportTaskChangeRequestExactRequest) (*ReportTaskChangeRequestExactResponse, error)
+	RemoveTaskChangeRequestExact(context.Context, *RemoveTaskChangeRequestExactRequest) (*RemoveTaskChangeRequestExactResponse, error)
 	AcquireTaskManagementClaimExact(context.Context, *AcquireTaskManagementClaimExactRequest) (*TaskManagementClaimExactResponse, error)
 	ReleaseTaskManagementClaimExact(context.Context, *ReleaseTaskManagementClaimExactRequest) (*TaskManagementClaimExactResponse, error)
 	TransferTaskManagementClaimExact(context.Context, *TransferTaskManagementClaimExactRequest) (*TaskManagementClaimExactResponse, error)
@@ -2409,6 +2435,12 @@ func (UnimplementedHostServer) IssueTaskDirectiveExact(context.Context, *IssueTa
 }
 func (UnimplementedHostServer) ResolveTaskDirectiveExact(context.Context, *ResolveTaskDirectiveExactRequest) (*ResolveTaskDirectiveExactResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ResolveTaskDirectiveExact not implemented")
+}
+func (UnimplementedHostServer) ReportTaskChangeRequestExact(context.Context, *ReportTaskChangeRequestExactRequest) (*ReportTaskChangeRequestExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReportTaskChangeRequestExact not implemented")
+}
+func (UnimplementedHostServer) RemoveTaskChangeRequestExact(context.Context, *RemoveTaskChangeRequestExactRequest) (*RemoveTaskChangeRequestExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RemoveTaskChangeRequestExact not implemented")
 }
 func (UnimplementedHostServer) AcquireTaskManagementClaimExact(context.Context, *AcquireTaskManagementClaimExactRequest) (*TaskManagementClaimExactResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AcquireTaskManagementClaimExact not implemented")
@@ -2925,6 +2957,42 @@ func _Host_ResolveTaskDirectiveExact_Handler(srv interface{}, ctx context.Contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(HostServer).ResolveTaskDirectiveExact(ctx, req.(*ResolveTaskDirectiveExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ReportTaskChangeRequestExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportTaskChangeRequestExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ReportTaskChangeRequestExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ReportTaskChangeRequestExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ReportTaskChangeRequestExact(ctx, req.(*ReportTaskChangeRequestExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_RemoveTaskChangeRequestExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveTaskChangeRequestExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).RemoveTaskChangeRequestExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_RemoveTaskChangeRequestExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).RemoveTaskChangeRequestExact(ctx, req.(*RemoveTaskChangeRequestExactRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -4668,6 +4736,14 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ResolveTaskDirectiveExact",
 			Handler:    _Host_ResolveTaskDirectiveExact_Handler,
+		},
+		{
+			MethodName: "ReportTaskChangeRequestExact",
+			Handler:    _Host_ReportTaskChangeRequestExact_Handler,
+		},
+		{
+			MethodName: "RemoveTaskChangeRequestExact",
+			Handler:    _Host_RemoveTaskChangeRequestExact_Handler,
 		},
 		{
 			MethodName: "AcquireTaskManagementClaimExact",

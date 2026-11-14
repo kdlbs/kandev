@@ -217,16 +217,27 @@ func (s *CommandStore) Complete(ctx context.Context, operationID, resultStatus, 
 //
 //nolint:cyclop // The command store completes one durable operation and its typed replay result.
 func (s *CommandStore) CompleteWithResultData(ctx context.Context, operationID, resultStatus, reason, targetID, resourceVersion, resultData string) (CommandRecord, error) {
-	if operationID == "" || resultStatus == "" {
-		return CommandRecord{}, errors.New("plugin command store: operation id and result status are required")
-	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return CommandRecord{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	record, err := completeCommandInTx(ctx, tx, operationID, resultStatus, reason, targetID, resourceVersion, resultData)
+	if err != nil {
+		return CommandRecord{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return CommandRecord{}, err
+	}
+	return record, nil
+}
 
+//nolint:cyclop // The helper completes one durable operation and its typed replay result.
+func completeCommandInTx(ctx context.Context, tx *sqlx.Tx, operationID, resultStatus, reason, targetID, resourceVersion, resultData string) (CommandRecord, error) {
+	if operationID == "" || resultStatus == "" {
+		return CommandRecord{}, errors.New("plugin command store: operation id and result status are required")
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
 	result, err := tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE plugin_host_command_receipts
 		SET state = 'completed', result_status = ?, reason = ?, target_id = ?, resource_version = ?, updated_at = ?
@@ -249,9 +260,6 @@ func (s *CommandStore) CompleteWithResultData(ctx context.Context, operationID, 
 			record.Receipt.ResourceVersion != resourceVersion || record.Receipt.ResultData != resultData {
 			return CommandRecord{}, ErrCommandCompletionConflict
 		}
-		if err := tx.Commit(); err != nil {
-			return CommandRecord{}, err
-		}
 		return record, nil
 	}
 	if resultData != "" {
@@ -262,14 +270,10 @@ func (s *CommandStore) CompleteWithResultData(ctx context.Context, operationID, 
 			return CommandRecord{}, err
 		}
 	}
-	_, err = tx.ExecContext(ctx, tx.Rebind(`UPDATE plugin_host_command_intents SET updated_at = ? WHERE operation_id = ?`), now, operationID)
-	if err != nil {
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE plugin_host_command_intents SET updated_at = ? WHERE operation_id = ?`), now, operationID); err != nil {
 		return CommandRecord{}, err
 	}
-	if err := tx.Commit(); err != nil {
-		return CommandRecord{}, err
-	}
-	return s.Get(ctx, operationID)
+	return getCommandByOperation(ctx, tx, operationID)
 }
 
 // Get returns the durable intent and receipt for operationID.

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	githubsvc "github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/plugins/state"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -774,25 +775,53 @@ func (h *pluginHost) ListChangeRequestEvidence(ctx context.Context, q pluginsdk.
 		if h.taskPRsDep != nil {
 			source = h.taskPRsDep()
 		}
-		if source == nil {
-			out := make([]pluginsdk.ChangeRequestEvidence, 0, len(taskIDs))
-			for _, id := range taskIDs {
-				out = append(out, pluginsdk.ChangeRequestEvidence{TaskID: id, ProviderState: "unsupported", ResourceVersion: byID[id].UpdatedAt.UTC().Format(time.RFC3339Nano), ObservedAt: observed})
-			}
-			return out, nil
+		var prsByTask map[string][]*githubsvc.TaskPR
+		providerAvailable := source != nil
+		providerFailed := false
+		if providerAvailable {
+			prsByTask, err = source.ListTaskPRsByTaskIDs(ctx, taskIDs)
+			providerFailed = err != nil
 		}
-		prsByTask, err := source.ListTaskPRsByTaskIDs(ctx, taskIDs)
-		providerFailed := err != nil
+		pluginByTask := make(map[string][]state.ChangeRequestRecord)
+		if ledger := h.changeRequestLedger(); ledger != nil {
+			for _, id := range taskIDs {
+				reported, listErr := ledger.ListChangeRequestsByTask(ctx, h.installationID, q.WorkspaceID, id)
+				if listErr != nil {
+					return nil, status.Error(codes.Unavailable, "task change request data is unavailable")
+				}
+				if len(reported) > 0 {
+					pluginByTask[id] = reported
+				}
+			}
+		}
 		out := make([]pluginsdk.ChangeRequestEvidence, 0)
 		for _, id := range taskIDs {
-			prs := prsByTask[id]
-			if providerFailed {
-				reason := "provider_read_failed"
-				out = append(out, pluginsdk.ChangeRequestEvidence{TaskID: id, Provider: "github", ProviderState: "unavailable", ProviderError: &reason, ResourceVersion: byID[id].UpdatedAt.UTC().Format(time.RFC3339Nano), ObservedAt: observed})
+			taskVersion := byID[id].UpdatedAt.UTC().Format(time.RFC3339Nano)
+			pluginRows := pluginByTask[id]
+			for _, reported := range pluginRows {
+				var fetchedAt *string
+				if reported.UpdatedAt != "" {
+					if parsed, parseErr := time.Parse(time.RFC3339Nano, reported.UpdatedAt); parseErr == nil {
+						fetchedAt = timePtrToRFC3339(&parsed)
+					}
+				}
+				version := digestPublicValue(map[string]string{"task_id": id, "change_request_id": reported.ID, "updated_at": reported.UpdatedAt})
+				out = append(out, pluginsdk.ChangeRequestEvidence{TaskID: id, Provider: reported.ProviderID, RepositoryID: reported.RepositoryID, Number: reported.Number, URL: reported.URL, ProviderState: "available", FetchedAt: fetchedAt, ResourceVersion: version, ObservedAt: observed})
+			}
+			if !providerAvailable {
+				out = append(out, pluginsdk.ChangeRequestEvidence{TaskID: id, ProviderState: "unsupported", ResourceVersion: taskVersion, ObservedAt: observed})
 				continue
 			}
+			if providerFailed {
+				reason := "provider_read_failed"
+				out = append(out, pluginsdk.ChangeRequestEvidence{TaskID: id, Provider: "github", ProviderState: "unavailable", ProviderError: &reason, ResourceVersion: taskVersion, ObservedAt: observed})
+				continue
+			}
+			prs := prsByTask[id]
 			if len(prs) == 0 {
-				out = append(out, pluginsdk.ChangeRequestEvidence{TaskID: id, Provider: "github", ProviderState: "no_evidence", ResourceVersion: byID[id].UpdatedAt.UTC().Format(time.RFC3339Nano), ObservedAt: observed})
+				if len(pluginRows) == 0 {
+					out = append(out, pluginsdk.ChangeRequestEvidence{TaskID: id, Provider: "github", ProviderState: "no_evidence", ResourceVersion: taskVersion, ObservedAt: observed})
+				}
 				continue
 			}
 			for _, pr := range prs {
