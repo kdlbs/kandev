@@ -7,6 +7,7 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { seedRemainingStepColors } from "./change-workflow-color-helpers";
 import {
   seedWorkflowAgentOverrideFixture,
+  waitForAnswerableWorkflowProfileSession,
   waitForNewWorkflowProfileSession,
   waitForWorkflowMoveLifecycle,
   waitForWorkflowStep,
@@ -164,7 +165,7 @@ test.describe("Change workflow", () => {
         executor_profile_id: seedData.worktreeExecutorProfileId,
       },
     );
-    const existingSessionId = await waitForNewWorkflowProfileSession(
+    const existingSessionId = await waitForAnswerableWorkflowProfileSession(
       apiClient,
       task.id,
       fixture.profileA.id,
