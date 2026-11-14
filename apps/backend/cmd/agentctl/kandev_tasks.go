@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -32,7 +33,7 @@ func (f *repeatableFlag) Set(value string) error {
 // the office runtime needs without breaking older scripts.
 func runTasksCmd(args []string) int {
 	if len(args) == 0 {
-		cliError("usage: agentctl kandev tasks <list|move|archive|message|conversation> [flags]")
+		cliError("usage: agentctl kandev tasks <list|move|archive|message|conversation|sessions|transcript|plan|send> [flags]")
 		return 1
 	}
 	switch args[0] {
@@ -46,6 +47,14 @@ func runTasksCmd(args []string) int {
 		return tasksMessage(args[1:])
 	case "conversation":
 		return tasksConversation(args[1:])
+	case "sessions", subcmdTranscript, "plan":
+		suffix := args[0]
+		if suffix == subcmdTranscript {
+			suffix = "conversation"
+		}
+		return tasksCrossRead(args[0], suffix, args[1:])
+	case "send":
+		return tasksSend(args[1:])
 	default:
 		cliError("unknown tasks subcommand: %s", args[0])
 		return 1
@@ -67,6 +76,8 @@ func tasksList(args []string) int {
 	fs.Var(&priority, "priority", "Filter by priority (repeatable)")
 	assignee := fs.String("assignee", "", "Filter by assignee agent ID")
 	project := fs.String("project", "", "Filter by project ID")
+	workspace := fs.String("workspace", "", "Read tasks in a collaboration-granted workspace")
+	workflow := fs.String("workflow", "", "Workflow ID for --workspace")
 	sortField := fs.String("sort", "", "Sort column: updated_at | created_at | priority")
 	order := fs.String("order", "", "Sort direction: asc | desc (default desc)")
 	limit := fs.String("limit", "", "Page size, up to 500 (default 100)")
@@ -75,6 +86,19 @@ func tasksList(args []string) int {
 	includeSystem := fs.String("include-system", "", "Include kandev-managed system-workflow tasks: true | false")
 	if err := fs.Parse(args); err != nil {
 		cliError("parse flags: %v", err)
+		return 1
+	}
+	if strings.TrimSpace(*workspace) != "" {
+		// The workspace route takes only a workflow; a silently dropped filter
+		// would return a list the caller did not ask for.
+		if unsupported := setFlagsExcept(fs, "workspace", "workflow"); len(unsupported) > 0 {
+			cliError("--workspace supports only --workflow; remove: --%s", strings.Join(unsupported, ", --"))
+			return 1
+		}
+		return listWorkspaceTasks(*workspace, *workflow)
+	}
+	if strings.TrimSpace(*workflow) != "" {
+		cliError("--workflow requires --workspace")
 		return 1
 	}
 	values := url.Values{}
@@ -93,6 +117,17 @@ func tasksList(args []string) int {
 	setQueryIfNonEmpty(values, "cursor_id", *cursorID)
 	setQueryIfNonEmpty(values, "include_system", *includeSystem)
 	return getWithQuery("/api/v1/office/runtime/tasks", values)
+}
+
+// setFlagsExcept names the flags given on the command line, other than allowed.
+func setFlagsExcept(fs *flag.FlagSet, allowed ...string) []string {
+	var names []string
+	fs.Visit(func(f *flag.Flag) {
+		if !slices.Contains(allowed, f.Name) {
+			names = append(names, f.Name)
+		}
+	})
+	return names
 }
 
 func setQueryIfNonEmpty(values url.Values, key, value string) {

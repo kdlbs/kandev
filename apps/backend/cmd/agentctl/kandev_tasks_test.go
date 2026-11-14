@@ -124,3 +124,30 @@ func TestTasksList_PropagatesRuntimeScopeDenial(t *testing.T) {
 		t.Fatalf("tasks list exit = %d, want 1 for HTTP 403", code)
 	}
 }
+
+// The workspace route accepts only a workflow, so board filters, ordering and
+// paging must be refused instead of silently returning an unfiltered list.
+func TestTasksList_WorkspaceRejectsUnsupportedFlags(t *testing.T) {
+	srv, captured := setupMockServer(t, http.StatusOK, `{"tasks":[]}`)
+	setEnvVars(t, srv)
+
+	for _, args := range [][]string{
+		{"tasks", "list", "--workspace", "ws-2", "--status", "TODO"},
+		{"tasks", "list", "--workspace", "ws-2", "--limit", "10"},
+		{"tasks", "list", "--workflow", "wf-2"},
+	} {
+		if code := runKandevCLI(args); code == 0 {
+			t.Fatalf("%v: expected a non-zero exit", args)
+		}
+	}
+	if captured.Path != "" {
+		t.Fatalf("rejected flags must not reach the server, got request %q", captured.Path)
+	}
+
+	if code := runKandevCLI([]string{"tasks", "list", "--workspace", "ws-2", "--workflow", "wf-2"}); code != 0 {
+		t.Fatalf("expected exit 0 for --workspace --workflow, got %d", code)
+	}
+	if captured.Path != "/api/v1/office/runtime/workspaces/ws-2/tasks" || captured.Query != "workflow_id=wf-2" {
+		t.Fatalf("request = %s?%s, want workspace task route with workflow_id", captured.Path, captured.Query)
+	}
+}
