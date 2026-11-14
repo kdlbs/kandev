@@ -202,22 +202,26 @@ func webhookResponseFromProto(p *pluginv1.WebhookResponse) *WebhookResponse {
 // authorizing an action request. Plugins must treat Body as untrusted input
 // and use this context for all authority decisions.
 type VerifiedActionContext struct {
-	ActorID      string
-	WorkspaceID  string
-	TaskID       string
-	RepositoryID string
-	SessionID    string
-	HeadBranch   string
+	ActorID                  string
+	WorkspaceID              string
+	TaskID                   string
+	RepositoryID             string
+	SessionID                string
+	HeadBranch               string
+	NotificationProviderID   string
+	NotificationFormatterKey string
 }
 
 func (c VerifiedActionContext) toProto() *pluginv1.VerifiedActionContext {
 	return &pluginv1.VerifiedActionContext{
-		ActorId:      c.ActorID,
-		WorkspaceId:  c.WorkspaceID,
-		TaskId:       c.TaskID,
-		RepositoryId: c.RepositoryID,
-		SessionId:    c.SessionID,
-		HeadBranch:   c.HeadBranch,
+		ActorId:                  c.ActorID,
+		WorkspaceId:              c.WorkspaceID,
+		TaskId:                   c.TaskID,
+		RepositoryId:             c.RepositoryID,
+		SessionId:                c.SessionID,
+		HeadBranch:               c.HeadBranch,
+		NotificationProviderId:   c.NotificationProviderID,
+		NotificationFormatterKey: c.NotificationFormatterKey,
 	}
 }
 
@@ -226,12 +230,14 @@ func verifiedActionContextFromProto(p *pluginv1.VerifiedActionContext) VerifiedA
 		return VerifiedActionContext{}
 	}
 	return VerifiedActionContext{
-		ActorID:      p.GetActorId(),
-		WorkspaceID:  p.GetWorkspaceId(),
-		TaskID:       p.GetTaskId(),
-		RepositoryID: p.GetRepositoryId(),
-		SessionID:    p.GetSessionId(),
-		HeadBranch:   p.GetHeadBranch(),
+		ActorID:                  p.GetActorId(),
+		WorkspaceID:              p.GetWorkspaceId(),
+		TaskID:                   p.GetTaskId(),
+		RepositoryID:             p.GetRepositoryId(),
+		SessionID:                p.GetSessionId(),
+		HeadBranch:               p.GetHeadBranch(),
+		NotificationProviderID:   p.GetNotificationProviderId(),
+		NotificationFormatterKey: p.GetNotificationFormatterKey(),
 	}
 }
 

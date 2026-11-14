@@ -102,10 +102,10 @@ requested in review. The maintainer PR retains that fix and adds the permanent
 handler and repository tests prepared during the original review task.
 
 Race-enabled checks passed for selected MCP handlers, server catalogs, and task
-repository tests. Coverage includes retained replay without dispatch, conflicting
-retries, sender/session isolation, safe retry readback, SQLite schema replay and
-retention, and two real PostgreSQL 18 concurrency cases: duplicate claim election
-and stale cleanup waiting on a concurrent successful settlement. Both database
+repository tests. Coverage includes retained replay, conflicting retries, sender/session isolation,
+safe retry readback, and SQLite schema replay and retention. Two PostgreSQL 18
+concurrency cases cover duplicate claim election and stale cleanup waiting on
+a concurrent successful settlement. Both database
 cases executed with `KANDEV_TEST_POSTGRES_DSN` configured. Provider/process E2E
 remains outside this change's validation scope.
 

@@ -30,7 +30,7 @@ export async function routeAppriseRescans(
 ): Promise<{ startRescan: () => void }> {
   let rescanStarted = false;
   let outcomeIndex = 0;
-  await page.route("**/api/v1/notification-providers**", async (route) => {
+  await page.route(/\/api\/v1\/notification-providers(?:\?[^#]*)?$/, async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
       return;
