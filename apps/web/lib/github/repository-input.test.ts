@@ -51,7 +51,9 @@ describe("parseGitHubRepositoryInput host matching", () => {
   });
 
   it("rejects a repository URL from a host other than the workspace host", () => {
-    expect(parseGitHubRepositoryInput("https://acme.ghe.com/kdlbs/kandev")).toBeNull();
+    expect(
+      parseGitHubRepositoryInput("https://acme.ghe.com/kdlbs/kandev", "github.com"),
+    ).toBeNull();
     expect(
       parseGitHubRepositoryInput("https://github.com/kdlbs/kandev", "git.company.example"),
     ).toBeNull();
