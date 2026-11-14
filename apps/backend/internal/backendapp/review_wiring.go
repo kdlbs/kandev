@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/agent/usage"
 
 	"github.com/kandev/kandev/internal/agent/handlers"
 	"github.com/kandev/kandev/internal/agent/hostutility"
@@ -12,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/review"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -44,19 +46,28 @@ func buildReviewComponents(p routeParams) reviewComponents {
 	// auth disabled) are unaffected.
 	service.SetTaskAuthorizer(p.taskSvc.AuthorizeTaskAccess)
 
+	var execution reviewExecutionResolver
+	if p.services.DynamicProfileResolver != nil {
+		execution = p.services.DynamicProfileResolver
+	}
+	profileLookup := reviewProfileLookup{profiles: p.agentSettingsRepo, execution: execution}
 	resolver := review.NewResolver(
-		reviewProfileLookup{profiles: p.agentSettingsRepo, execution: p.services.DynamicProfileResolver},
+		profileLookup,
 		reviewUtilityLookup{agents: p.services.Utility},
 		reviewDefaultsLookup{settings: p.services.User},
 	)
+	taskContext := reviewTaskContext{tasks: p.taskSvc}
+	if p.authSvc != nil {
+		taskContext.operatorIdentity = p.authSvc.IdentityForUser
+	}
 	runner := review.NewRunner(review.RunnerDeps{
 		Store:            service,
 		Resolver:         resolver,
-		Changes:          handlers.NewReviewChangeSource(p.lifecycleMgr, reviewSessionReader{repo: p.taskRepo}),
-		Inference:        reviewInference{session: p.lifecycleMgr, host: p.hostUtilityMgr, profiles: p.services.DynamicProfileResolver},
+		Changes:          handlers.NewReviewChangeSource(p.lifecycleMgr, reviewSessionReader{repo: p.taskRepo, workspaces: p.lifecycleMgr}),
+		Inference:        reviewInference{session: p.lifecycleMgr, host: p.hostUtilityMgr, profiles: execution, runs: service, originProfiles: profileLookup},
 		InferenceContext: reviewInferenceContext(p.taskRepo),
 		Prompts:          review.NewTemplatePromptBuilder(reviewTemplateSource{agents: p.services.Utility, engine: utilitytemplate.NewEngine()}),
-		TaskContext:      reviewTaskContext{tasks: p.taskSvc},
+		TaskContext:      taskContext,
 		Sessions:         reviewSessionLookup{sessions: p.taskRepo},
 		Logger:           p.log,
 	})
@@ -66,7 +77,8 @@ func buildReviewComponents(p routeParams) reviewComponents {
 // reviewSessionReader supplies the base commit and branch a cumulative diff is
 // computed against, mirroring sessionReaderAdapter in gateway.go.
 type reviewSessionReader struct {
-	repo reviewSessionGetter
+	repo       reviewSessionGetter
+	workspaces reviewWorkspaceInspector
 }
 
 type reviewSessionGetter interface {
@@ -109,6 +121,14 @@ type agentProfileGetter interface {
 }
 
 func (l reviewProfileLookup) ReviewerProfile(ctx context.Context, profileID string) (review.ReviewerProfile, bool, error) {
+	return l.reviewerProfile(ctx, profileID, "")
+}
+
+func (l reviewProfileLookup) ReviewerProfileForRun(ctx context.Context, profileID, runID string) (review.ReviewerProfile, bool, error) {
+	return l.reviewerProfile(ctx, profileID, runID)
+}
+
+func (l reviewProfileLookup) reviewerProfile(ctx context.Context, profileID, runID string) (review.ReviewerProfile, bool, error) {
 	if l.profiles == nil {
 		return review.ReviewerProfile{}, false, nil
 	}
@@ -127,9 +147,12 @@ func (l reviewProfileLookup) ReviewerProfile(ctx context.Context, profileID stri
 		return review.ReviewerProfile{}, false, nil
 	}
 	var route *review.ReviewerRoute
-	if l.execution != nil {
-		execution, err := l.execution.ResolveExecutionDetails(ctx, "", profileID)
+	if l.execution != nil && (runID != "" || !l.NativeRouteOwnersEnabled() || review.OriginExclusionActive(ctx)) {
+		execution, err := l.resolveReviewerExecution(ctx, profileID, runID)
 		if err != nil {
+			if errors.Is(err, agentruntime.ErrExecutionCandidateExcluded) {
+				return review.ReviewerProfile{}, false, fmt.Errorf("%w: %w", review.ErrNoDistinctReviewer, err)
+			}
 			return review.ReviewerProfile{}, false, err
 		}
 		profile = execution.Profile
@@ -248,9 +271,11 @@ func (s reviewTemplateSource) ResolveTemplate(_ context.Context, template string
 // when that session has no live execution — a review must still work on a task
 // whose agent is not currently running.
 type reviewInference struct {
-	session  sessionInferenceRunner
-	host     *hostutility.Manager
-	profiles reviewExecutionResolver
+	session        sessionInferenceRunner
+	host           *hostutility.Manager
+	profiles       reviewExecutionResolver
+	runs           reviewCandidateWriter
+	originProfiles reviewOriginProfileLookup
 }
 
 type sessionInferenceRunner interface {
@@ -261,9 +286,31 @@ type sessionProfileInferenceRunner interface {
 	ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, profileID, prompt string) (*agentctlutil.PromptResponse, error)
 }
 
+type sessionProfileModelInferenceRunner interface {
+	ExecuteInferenceProfileModelPrompt(ctx context.Context, sessionID, profileID, model, prompt string) (*agentctlutil.PromptResponse, error)
+}
+
 func (r reviewInference) Run(ctx context.Context, identity review.ReviewerIdentity, sessionID, prompt string) (*review.PromptResult, error) {
+	ctx = reviewExecutionContext(ctx)
 	prepared := reviewPromptRoute(identity)
+	recordedProfileID := prepared.ExecutionProfileID
 	response, err := utilityservice.ExecuteProfilePrompt(ctx, r.profiles, prepared, func(attempt context.Context, id string) (*agentctlutil.PromptResponse, error) {
+		if review.OriginExclusionActive(attempt) && prepared.Model == "" {
+			model, known := review.ReviewerEffectiveModel(attempt, prepared.AgentCLI, prepared.Model)
+			if !known {
+				return nil, fmt.Errorf("%w: reviewer model is unavailable", review.ErrAgentUnavailable)
+			}
+			prepared.Model = model
+		}
+		if err := r.validateReviewExecution(attempt, id, prepared.AgentCLI, prepared.Model); err != nil {
+			return nil, err
+		}
+		if id != recordedProfileID {
+			if err := r.recordNativeReviewCandidate(attempt, prepared); err != nil {
+				return nil, err
+			}
+			recordedProfileID = id
+		}
 		concrete := identity
 		concrete.ProfileID = id
 		concrete.AgentID, concrete.Model = prepared.AgentCLI, prepared.Model
@@ -272,6 +319,7 @@ func (r reviewInference) Run(ctx context.Context, identity review.ReviewerIdenti
 	if identity.Route != nil {
 		identity.Route.ExecutionProfileID, identity.Route.Generation = prepared.ExecutionProfileID, prepared.RouteGeneration
 		identity.Route.AgentID, identity.Route.Model = prepared.AgentCLI, prepared.Model
+		identity.Route.UsagePolicy = usage.CloneExecutionUsagePolicy(prepared.UsagePolicy)
 	}
 	if err != nil {
 		return nil, err
@@ -306,10 +354,13 @@ func (r reviewInference) runConcrete(ctx context.Context, identity review.Review
 	if r.host == nil {
 		return nil, fmt.Errorf("no inference executor is configured")
 	}
+	if err := r.validateReviewExecution(ctx, identity.ProfileID, identity.AgentID, identity.Model); err != nil {
+		return nil, err
+	}
 	var result *hostutility.PromptResult
 	var err error
 	if identity.ProfileID != "" {
-		result, err = r.host.ExecuteProfilePrompt(ctx, identity.ProfileID, prompt)
+		result, err = r.host.ExecuteProfileModelPrompt(ctx, identity.ProfileID, reviewDispatchModel(ctx, identity), prompt)
 	} else {
 		result, err = r.host.ExecutePrompt(ctx, identity.AgentID, identity.Model, identity.Mode, prompt)
 	}
@@ -330,11 +381,29 @@ func (r reviewInference) runSession(ctx context.Context, identity review.Reviewe
 	if identity.ProfileID == "" {
 		return r.session.ExecuteInferencePrompt(ctx, sessionID, identity.AgentID, identity.Model, prompt)
 	}
+	if model := reviewDispatchModel(ctx, identity); model != "" {
+		modelRunner, ok := r.session.(sessionProfileModelInferenceRunner)
+		if !ok {
+			return nil, fmt.Errorf("%w: review executor cannot run the checked reviewer model", review.ErrAgentUnavailable)
+		}
+		return modelRunner.ExecuteInferenceProfileModelPrompt(ctx, sessionID, identity.ProfileID, model, prompt)
+	}
 	profileRunner, ok := r.session.(sessionProfileInferenceRunner)
 	if !ok {
 		return nil, fmt.Errorf("profile-aware review executor is unavailable")
 	}
 	return profileRunner.ExecuteInferenceProfilePrompt(ctx, sessionID, identity.ProfileID, prompt)
+}
+
+// reviewDispatchModel is the model a profile dispatch must run. Under writer
+// exclusion it is the model that passed the check, which may be the inherited
+// utility default of a profile with no model; a profile dispatch would
+// otherwise run the profile's empty model or the agent's probed default.
+func reviewDispatchModel(ctx context.Context, identity review.ReviewerIdentity) string {
+	if review.OriginExclusionActive(ctx) {
+		return identity.Model
+	}
+	return ""
 }
 
 func reviewResponseFinal(response *agentctlutil.PromptResponse, err error) bool {
@@ -355,23 +424,30 @@ func reviewSessionErrorFinal(err error, hasHost bool, provider string) bool {
 }
 
 func reviewerRoute(execution agentruntime.ProfileExecution) *review.ReviewerRoute {
-	return &review.ReviewerRoute{ExecutionProfileID: execution.ExecutionProfileID, SessionID: execution.RouteSessionID,
+	return &review.ReviewerRoute{UsagePolicy: usage.CloneExecutionUsagePolicy(execution.Decision.UsagePolicy), ExecutionProfileID: execution.ExecutionProfileID, SessionID: execution.RouteSessionID,
 		Generation: execution.Generation, AgentID: execution.AgentName, Model: execution.Profile.Model}
 }
 
 func reviewPromptRoute(identity review.ReviewerIdentity) *utilityservice.PromptRequest {
 	prepared := &utilityservice.PromptRequest{AgentProfileID: identity.ProfileID, ExecutionProfileID: identity.ProfileID,
-		AgentCLI: identity.AgentID, Model: identity.Model}
+		AgentCLI: identity.AgentID, Model: identity.Model, DeferSelectionCompletion: true}
 	if route := identity.Route; route != nil {
 		prepared.ExecutionProfileID, prepared.RouteSessionID, prepared.RouteGeneration = route.ExecutionProfileID, route.SessionID, route.Generation
 		prepared.AgentCLI, prepared.Model = route.AgentID, route.Model
+		prepared.UsagePolicy = usage.CloneExecutionUsagePolicy(route.UsagePolicy)
 	}
 	return prepared
 }
 
+// CompleteSelection runs after parsing and durable review completion succeed.
+func (r reviewInference) CompleteSelection(ctx context.Context, identity review.ReviewerIdentity) {
+	utilityservice.CompleteVerifiedProfileSelection(ctx, r.profiles, reviewPromptRoute(identity))
+}
+
 // reviewTaskContext supplies the task-level facts the review prompt interpolates.
 type reviewTaskContext struct {
-	tasks reviewTaskGetter
+	tasks            reviewTaskGetter
+	operatorIdentity func(context.Context, string) (authn.Identity, bool)
 }
 
 type reviewTaskGetter interface {

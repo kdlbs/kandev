@@ -77,6 +77,7 @@ function dynamicWire(): AgentProfilePayload {
     ...wireProfile(TARGET, DYNAMIC_OWNER, "Initial routing"),
     dynamic: {
       version: 1,
+      keep_model_while_running: true,
       candidates: [
         {
           position: 0,

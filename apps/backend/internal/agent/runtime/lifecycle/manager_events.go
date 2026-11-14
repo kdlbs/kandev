@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 
@@ -613,6 +614,10 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 // lease is held by the event dispatcher. Direct test and legacy callers use
 // handleCompleteEvent, which acquires that lease before entering here.
 func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *agentctl.AgentEvent) bool {
+	return m.handleCompleteEventWithSettlementLeased(execution, event, true)
+}
+
+func (m *Manager) handleCompleteEventWithSettlementLeased(execution *AgentExecution, event *agentctl.AgentEvent, confirmed bool) bool {
 	if event.TurnID == "" {
 		// Snapshot before publishing AgentReady. A queued successor may bind a
 		// new turn while the complete stream frame is still crossing the bus.
@@ -628,13 +633,11 @@ func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *ag
 		return true
 	}
 	claim, claimed := m.claimPromptCompletion(execution, event, isError)
+	m.settleConfirmedProviderCompletion(execution, event, confirmed, claimed)
 	if !claimed {
 		return false
 	}
-	if event.DeliverySubmissionID != "" {
-		execution.clearDeliverySubmissionID(event.DeliverySubmissionID)
-		clearInitialDeliverySubmissionID(execution, event.DeliverySubmissionID)
-	}
+	clearCompletedPromptSubmission(execution, event)
 	var failureEvidence *PromptAttemptEvidence
 	if isError {
 		evidence := execution.promptAttemptEvidenceSnapshot()
@@ -715,6 +718,13 @@ func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *ag
 	return true
 }
 
+func clearCompletedPromptSubmission(execution *AgentExecution, event *agentctl.AgentEvent) {
+	if event.DeliverySubmissionID != "" {
+		execution.clearDeliverySubmissionID(event.DeliverySubmissionID)
+		clearInitialDeliverySubmissionID(execution, event.DeliverySubmissionID)
+	}
+}
+
 // handleToolCallEvent processes the "tool_call" agent event: flushes the message buffer
 // and stores the tool call in session history.
 // Returns the (possibly updated) event.
@@ -724,6 +734,7 @@ func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *ag
 // buffer — flushing would split the parent's in-flight streaming message into
 // separate DB rows mid-sentence, breaking markdown that spans the boundary.
 func (m *Manager) handleToolCallEvent(execution *AgentExecution, event agentctl.AgentEvent, promptGeneration uint64) agentctl.AgentEvent {
+	m.logger.Flow(context.Background(), logger.ExecutionFlow{Stage: "tool", Outcome: "started", TaskID: execution.TaskID, SessionID: execution.SessionID, ExecutionID: execution.ID, AttemptID: event.AttemptID, TurnID: event.TurnID, MessageID: event.ToolCallID, SubmissionID: event.DeliverySubmissionID, PromptGeneration: promptGeneration})
 	if event.ParentToolCallID == "" {
 		execution.setActiveTool(activeTopLevelTool{
 			ToolCallID: event.ToolCallID,
@@ -770,13 +781,17 @@ func (m *Manager) handleToolUpdateEvent(execution *AgentExecution, event agentct
 // The raw error event is not published to the frontend stream; the agent failure
 // path (handleAgentFailed) sets session FAILED with the error message.
 func (m *Manager) handleErrorEvent(execution *AgentExecution, event agentctl.AgentEvent) bool {
+	return m.handlePromptErrorEvent(execution, event, true)
+}
+
+func (m *Manager) handlePromptErrorEvent(execution *AgentExecution, event agentctl.AgentEvent, confirmed bool) bool {
 	data := make(map[string]any, len(event.Data)+1)
 	for key, value := range event.Data {
 		data[key] = value
 	}
 	data["is_error"] = true
 	event.Data = data
-	return m.handleCompleteEventLeased(execution, &event)
+	return m.handleCompleteEventWithSettlementLeased(execution, &event, confirmed)
 }
 
 // handleContextWindowEvent processes the "context_window" agent event: logs and publishes it.

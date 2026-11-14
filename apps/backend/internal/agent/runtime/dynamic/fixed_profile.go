@@ -28,7 +28,7 @@ func (e *Engine) RecordResourceFailure(profile Profile, candidateID string, fail
 	if e == nil {
 		return
 	}
-	e.openCircuitForFailure(profile, candidateID, failure)
+	e.openCircuitForFailure(profile, candidateID, failure, SuspensionBinding)
 }
 
 // CandidateSuspension reports the circuit refusing a new dispatch for one

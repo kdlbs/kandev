@@ -405,7 +405,65 @@ func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata ma
 		s.logger.Error("failed to update task metadata", zap.String("task_id", id), zap.Error(err))
 		return nil, err
 	}
+	return s.readTaskMetadataUpdate(ctx, id)
+}
 
+// AuthorizeReviewSourceOperator requires a current workspace and its management
+// scope for a checkout outside the task's own repositories.
+func (s *Service) AuthorizeReviewSourceOperator(ctx context.Context, taskID string) error {
+	task, err := s.GetTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil || task.WorkspaceID == "" {
+		return ErrForbidden
+	}
+	decision, err := s.WorkspaceDecisionByID(ctx, task.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	if !decision.CanRead() || !decision.Has(authz.ScopeWorkspaceManage) {
+		return ErrForbidden
+	}
+	return s.authorizeWorkspaceCollaboration(ctx, task.WorkspaceID, models.CollaborationControl)
+}
+
+// SetTaskReviewSource atomically writes the selection and its operator approval.
+func (s *Service) SetTaskReviewSource(ctx context.Context, id string, source interface{}, approval *models.ReviewSourceApproval) (*models.Task, error) {
+	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
+		return nil, err
+	}
+	if approval != nil {
+		if err := s.AuthorizeReviewSourceOperator(ctx, id); err != nil {
+			return nil, err
+		}
+	}
+	writer, ok := s.tasks.(interface {
+		MergeTaskReviewSource(context.Context, string, interface{}, *models.ReviewSourceApproval) error
+	})
+	if !ok {
+		return nil, fmt.Errorf("review source persistence unavailable")
+	}
+	if err := writer.MergeTaskReviewSource(ctx, id, source, approval); err != nil {
+		return nil, err
+	}
+	return s.readTaskMetadataUpdate(ctx, id)
+}
+
+func (s *Service) ReadReviewSourceApproval(ctx context.Context, id string) (*models.ReviewSourceApproval, error) {
+	if err := s.authorizeTaskID(ctx, id); err != nil {
+		return nil, err
+	}
+	reader, ok := s.tasks.(interface {
+		ReadReviewSourceApproval(context.Context, string) (*models.ReviewSourceApproval, error)
+	})
+	if !ok {
+		return nil, nil
+	}
+	return reader.ReadReviewSourceApproval(ctx, id)
+}
+
+func (s *Service) readTaskMetadataUpdate(ctx context.Context, id string) (*models.Task, error) {
 	// Responses and events share this postcommit observation, which may
 	// include a later write. A read failure does not undo the committed merge.
 	current, err := s.tasks.GetTask(ctx, id)
@@ -414,7 +472,7 @@ func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata ma
 	}
 
 	s.PublishTaskUpdated(ctx, current)
-	s.logger.Debug("task metadata updated", zap.String("task_id", id), zap.Any("metadata", metadata))
+	s.logger.Debug("task metadata updated", zap.String("task_id", id))
 	return current, nil
 }
 

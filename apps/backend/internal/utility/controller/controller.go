@@ -115,7 +115,7 @@ func (c *Controller) PreparePromptRequest(ctx context.Context, req dto.ExecutePr
 		UserPrompt:          req.UserPrompt,
 		ConversationHistory: req.ConversationHistory,
 	}
-	return c.svc.PreparePromptRequest(ctx, req.UtilityAgentID, tmplCtx, defaults, sessionless)
+	return c.svc.PreparePromptCall(ctx, req.UtilityAgentID, tmplCtx, defaults, sessionless)
 }
 
 // CreateCall creates a call record for tracking.

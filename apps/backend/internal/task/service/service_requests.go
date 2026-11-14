@@ -80,6 +80,7 @@ type TaskRepositoryInput struct {
 
 // CreateTaskRequest contains the data for creating a new task
 type CreateTaskRequest struct {
+	ExecutionGrade string                `json:"execution_grade,omitempty"`
 	WorkspaceID    string                `json:"workspace_id"`
 	WorkflowID     string                `json:"workflow_id"`
 	WorkflowStepID string                `json:"workflow_step_id"`
@@ -204,6 +205,7 @@ type CreateTaskRequest struct {
 
 // UpdateTaskRequest contains the data for updating a task
 type UpdateTaskRequest struct {
+	ExecutionGrade *string                `json:"execution_grade,omitempty"`
 	Title          *string                `json:"title,omitempty"`
 	Description    *string                `json:"description,omitempty"`
 	Priority       *string                `json:"priority,omitempty"`
@@ -262,15 +264,19 @@ type CreateWorkspaceRequest struct {
 
 // UpdateWorkspaceRequest contains the data for updating a workspace
 type UpdateWorkspaceRequest struct {
-	ExpectedUpdatedAt           *time.Time `json:"-"`
-	Name                        *string    `json:"name,omitempty"`
-	Description                 *string    `json:"description,omitempty"`
-	DefaultExecutorID           *string    `json:"default_executor_id,omitempty"`
-	DefaultEnvironmentID        *string    `json:"default_environment_id,omitempty"`
-	DefaultAgentProfileID       *string    `json:"default_agent_profile_id,omitempty"`
-	DefaultConfigAgentProfileID *string    `json:"default_config_agent_profile_id,omitempty"`
-	ACPIdleSuspensionEnabled    *bool      `json:"acp_idle_suspension_enabled,omitempty"`
-	ACPIdleTimeoutMinutes       *int       `json:"acp_idle_timeout_minutes,omitempty"`
+	ExpectedUpdatedAt             *time.Time `json:"-"`
+	Name                          *string    `json:"name,omitempty"`
+	Description                   *string    `json:"description,omitempty"`
+	DefaultExecutorID             *string    `json:"default_executor_id,omitempty"`
+	DefaultEnvironmentID          *string    `json:"default_environment_id,omitempty"`
+	DefaultAgentProfileID         *string    `json:"default_agent_profile_id,omitempty"`
+	DefaultConfigAgentProfileID   *string    `json:"default_config_agent_profile_id,omitempty"`
+	ACPIdleSuspensionEnabled      *bool      `json:"acp_idle_suspension_enabled,omitempty"`
+	ACPIdleTimeoutMinutes         *int       `json:"acp_idle_timeout_minutes,omitempty"`
+	DynamicMidTurnFailoverEnabled *bool      `json:"dynamic_midturn_failover_enabled,omitempty"`
+	// DynamicFailedRouteAutoRetryMax must be 1-3 when present.
+	DynamicFailedRouteAutoRetryEnabled *bool `json:"dynamic_failed_route_auto_retry_enabled,omitempty"`
+	DynamicFailedRouteAutoRetryMax     *int  `json:"dynamic_failed_route_auto_retry_max,omitempty"`
 	// Visibility is "private" or "org". Unknown values normalize to private:
 	// unrecognized input must never widen access.
 	Visibility *string `json:"visibility,omitempty"`

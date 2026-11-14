@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 func TestBuiltinDescriptorsOwnNamesDefaultsAndActions(t *testing.T) {
@@ -36,6 +38,15 @@ func TestBuiltinDescriptorsOwnNamesDefaultsAndActions(t *testing.T) {
 		}
 	}
 	require.Len(t, seen, len(builtinToolPackages))
+	for name, actions := range map[string][]string{
+		"run_code_review_kandev":   {ws.ActionTaskReviewRun},
+		"set_review_source_kandev": {ws.ActionTaskReviewSourceSet},
+		"get_code_review_kandev":   {ws.ActionTaskReviewGet},
+	} {
+		require.Equal(t, PackageCore, BuiltinToolPackage(name), name)
+		require.True(t, seen[name], name)
+		require.Equal(t, actions, BuiltinToolActions(name), name)
+	}
 	catalog[0].Tools[0].Actions[0] = "corrupt"
 	require.NotEqual(t, catalog[0].Tools, BuiltinPackageCatalog()[0].Tools)
 }

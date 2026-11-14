@@ -301,5 +301,13 @@
   "cloneSourceMissing": "O espaço de trabalho de origem já não está disponível.",
   "cloneConfigurationUnsupported": "Este espaço de trabalho tem definições geridas, predefinições indisponíveis ou referências em fluxos de trabalho que não podem ser clonadas.",
   "cloneFailed": "Não foi possível clonar o espaço de trabalho. Tente novamente.",
-  "workspaceActionsNamed": "Ações de {{name}}"
+  "workspaceActionsNamed": "Ações de {{name}}",
+  "dynamicRoutingPolicyTitle": "Encaminhamento dinâmico",
+  "dynamicRoutingPolicyDescription": "Escolha como os perfis de agente dinâmicos nesta área de trabalho recuperam quando um fornecedor falha durante um turno. Esta opção está desativada por predefinição.",
+  "midTurnFailoverEnabled": "Tentar o candidato seguinte após um limite do fornecedor",
+  "midTurnFailoverDescription": "Quando um limite de pedidos, uma quota esgotada ou um fornecedor sobrecarregado interrompe um turno que já produziu resultados, muda uma vez para o candidato seguinte e continua a partir do contexto guardado da tarefa. O pedido falhado não é reenviado. Quando desativada, a sessão aguarda por si.",
+  "failedRouteAutoRetryEnabled": "Repetir automaticamente uma rota falhada",
+  "failedRouteAutoRetryDescription": "Quando um limite de pedidos, uma quota esgotada ou um fornecedor sobrecarregado deixa a rota à sua espera, repete-a quando o limite do fornecedor tiver passado, e nunca antes de um minuto. A repetição continua a partir do contexto guardado da tarefa; o pedido falhado não é reenviado. Se o mesmo fornecedor falhar novamente da mesma forma, ou o limite for atingido, a sessão aguarda por si. Quando desativada, a sessão aguarda por si.",
+  "failedRouteAutoRetryMax": "Repetições automáticas antes de um turno ter êxito",
+  "failedRouteAutoRetryMaxRange": "Introduza um número inteiro de 1 a 3."
 }

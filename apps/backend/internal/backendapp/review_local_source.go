@@ -46,9 +46,9 @@ func (r reviewSessionReader) LocalReviewFiles(ctx context.Context, sessionID str
 	if err != nil {
 		return nil, err
 	}
-	repos := session.Worktrees
-	if len(repos) == 0 && session.WorkspacePath != "" {
-		repos = []*models.TaskEnvironmentRepo{{WorktreePath: session.WorkspacePath, RepositoryID: session.RepositoryID}}
+	session, repos, err := r.localReviewWorkspace(ctx, session)
+	if err != nil {
+		return nil, err
 	}
 	if len(repos) == 0 {
 		return nil, fmt.Errorf("local review worktree unavailable")

@@ -53,8 +53,12 @@ diff response with an error state also enters the fallback. A remote executor
 still requires agentctl.
 
 The backend reader (`internal/backendapp/review_local_source.go`) admits only
-`local`, `worktree`, and `local_pc` executors. It uses the persisted session
-worktree paths and accepts no caller-supplied filesystem path. The local Git
+`local`, `worktree`, and `local_pc` executors. For a bound environment it reads
+the admitted canonical workspace view, rather than trusting a stale session path.
+The view must retain task and session identity, local executor ownership and
+workspace-relative repository keys. When no inspector is wired, only unbound
+legacy sessions may use their persisted paths. No caller-supplied filesystem
+path is accepted. The local Git
 collector rejects a path that is not absolute and local or that carries a `..`
 segment. Its per-file, output, and total diff limits match agentctl. The
 per-file limit checks the working file, base blob, and index blob before a

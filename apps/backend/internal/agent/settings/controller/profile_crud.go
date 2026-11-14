@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 )
 
 const dynamicProfileKind = "dynamic"
@@ -88,6 +89,7 @@ func (c *Controller) agentNameForProfile(ctx context.Context, profile *models.Ag
 }
 
 type CreateProfileRequest struct {
+	ExecutionGrade    string
 	AgentID           string
 	Name              string
 	Model             string
@@ -143,6 +145,9 @@ func (c *Controller) AgentProfileExists(ctx context.Context, id string) (bool, e
 }
 
 func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest) (*dto.AgentProfileDTO, error) {
+	if err := sessioncapacity.ValidateGrade(req.ExecutionGrade); err != nil {
+		return nil, err
+	}
 	// Model is optional — the profile reconciler fills it from the host
 	// utility probe cache on boot, and session start applies it via
 	// ACP model selection. An empty model means "use the agent's default".
@@ -204,6 +209,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	profile := &models.AgentProfile{
 		AgentID:                 req.AgentID,
 		Name:                    req.Name,
+		ExecutionGrade:          req.ExecutionGrade,
 		AgentDisplayName:        displayName,
 		Model:                   req.Model,
 		FallbackModel:           strings.TrimSpace(req.FallbackModel),
@@ -248,6 +254,9 @@ func (c *Controller) createDynamicProfile(
 	if !c.dynamicAgentRoutingEnabled {
 		return nil, ErrDynamicAgentRoutingDisabled
 	}
+	if err := c.prepareTierSelections(nil, req.Dynamic); err != nil {
+		return nil, err
+	}
 	dynamicRepo, err := c.dynamicProfileRepository()
 	if err != nil {
 		return nil, err
@@ -259,6 +268,7 @@ func (c *Controller) createDynamicProfile(
 		ID:                      uuid.NewString(),
 		AgentID:                 agent.ID,
 		Name:                    strings.TrimSpace(req.Name),
+		ExecutionGrade:          req.ExecutionGrade,
 		AgentDisplayName:        displayName,
 		Enabled:                 true,
 		CursorMCPAuthEnabled:    cursorMCPAuthEnabled(req.CursorMCPAuthEnabled),
@@ -276,7 +286,12 @@ func (c *Controller) createDynamicProfile(
 	if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
 		return nil, err
 	}
-	dynamic := &models.DynamicAgentProfile{ProfileID: profile.ID, Version: 1}
+	keepModel := keepModelWhileRunning(req.Dynamic)
+	dynamic := &models.DynamicAgentProfile{
+		ProfileID:             profile.ID,
+		Version:               1,
+		KeepModelWhileRunning: &keepModel,
+	}
 	if err := dynamicRepo.CreateDynamicAgentProfile(ctx, dynamic, routes); err != nil {
 		if cleanupErr := c.repo.DeleteAgentProfile(ctx, profile.ID); cleanupErr != nil {
 			return nil, fmt.Errorf("%w; cleanup dynamic profile parent: %v", err, cleanupErr)
@@ -392,6 +407,32 @@ const (
 	dynamicRouteActionStop      = "stop"
 )
 
+// keepModelWhileRunning resolves the profile-wide continuity preference. It is
+// not a selection mode: an omitted value keeps the documented default of on, so
+// a create request never has to opt in.
+func keepModelWhileRunning(profile *dto.DynamicAgentProfileDTO) bool {
+	if profile == nil || profile.KeepModelWhileRunning == nil {
+		return true
+	}
+	return *profile.KeepModelWhileRunning
+}
+
+// resolveKeepModelWhileRunning honors an explicit update and otherwise
+// preserves the value already stored for the profile.
+func resolveKeepModelWhileRunning(
+	stored *models.DynamicAgentProfile,
+	request *dto.DynamicAgentProfileDTO,
+) *bool {
+	keep := true
+	if stored != nil && stored.KeepModelWhileRunning != nil {
+		keep = *stored.KeepModelWhileRunning
+	}
+	if request != nil && request.KeepModelWhileRunning != nil {
+		keep = *request.KeepModelWhileRunning
+	}
+	return &keep
+}
+
 func validateDynamicAgentProfile(profile *dto.DynamicAgentProfileDTO) error {
 	if profile == nil || len(profile.Candidates) == 0 {
 		return ErrDynamicProfileCandidatesRequired
@@ -404,6 +445,9 @@ func validateDynamicAgentProfile(profile *dto.DynamicAgentProfileDTO) error {
 			return fmt.Errorf("%w: candidate %d has no execution profile", ErrDynamicProfileCandidate, position)
 		}
 		if err := normalizeDynamicCandidatePolicy(&profile.Candidates[position]); err != nil {
+			return err
+		}
+		if err := validateTierSelection(profile.Candidates[position].Policies.Selection, position); err != nil {
 			return err
 		}
 	}
@@ -438,9 +482,14 @@ func dynamicProfileDTO(profile *models.DynamicAgentProfile, routes []models.Dyna
 	if profile == nil {
 		return nil, nil
 	}
+	keepModel := true
+	if profile.KeepModelWhileRunning != nil {
+		keepModel = *profile.KeepModelWhileRunning
+	}
 	result := &dto.DynamicAgentProfileDTO{
-		Version:    profile.Version,
-		Candidates: make([]dto.DynamicAgentCandidateDTO, 0, len(routes)),
+		Version:               profile.Version,
+		Candidates:            make([]dto.DynamicAgentCandidateDTO, 0, len(routes)),
+		KeepModelWhileRunning: &keepModel,
 	}
 	for _, route := range routes {
 		policy, err := decodeDynamicPolicyDocument(route.RulesJSON, route.Position)
@@ -458,6 +507,7 @@ func dynamicProfileDTO(profile *models.DynamicAgentProfile, routes []models.Dyna
 }
 
 type UpdateProfileRequest struct {
+	ExecutionGrade    *string
 	ID                string
 	Name              *string
 	Model             *string
@@ -499,7 +549,7 @@ func (req UpdateProfileRequest) touchesProvider() bool {
 
 func enabledOnlyUpdate(req UpdateProfileRequest) bool {
 	return req.Enabled != nil && req.Name == nil && req.Model == nil &&
-		req.FallbackModel == nil && req.AutoFallback == nil && req.RequireExactModel == nil && req.Mode == nil &&
+		req.ExecutionGrade == nil && req.FallbackModel == nil && req.AutoFallback == nil && req.RequireExactModel == nil && req.Mode == nil &&
 		req.ConfigOptions == nil && req.AllowIndexing == nil && req.AutoApprove == nil &&
 		req.CLIPassthrough == nil && req.CLIFlags == nil && req.EnvVars == nil &&
 		req.CommandPrefix == nil && !req.touchesProvider() && req.CursorMCPAuthEnabled == nil &&
@@ -508,6 +558,12 @@ func enabledOnlyUpdate(req UpdateProfileRequest) bool {
 }
 
 func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest) (*dto.AgentProfileDTO, error) {
+	ctx = store.WithExecutionGradeUpdate(ctx, req.ExecutionGrade)
+	if req.ExecutionGrade != nil {
+		if err := sessioncapacity.ValidateGrade(*req.ExecutionGrade); err != nil {
+			return nil, err
+		}
+	}
 	if err := dto.ValidateMCPSelection(req.MCPSelectionMode, req.MCPSelectedServers); err != nil {
 		return nil, err
 	}
@@ -539,6 +595,17 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		if req.Dynamic.Version <= 0 {
 			return nil, fmt.Errorf("dynamic profile version is required")
 		}
+		dynamicRepo, err = c.dynamicProfileRepository()
+		if err != nil {
+			return nil, err
+		}
+		existingDynamic, storedRoutes, loadErr := dynamicRepo.GetDynamicAgentProfile(ctx, profile.ID)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if err := c.prepareTierSelections(storedRoutes, req.Dynamic); err != nil {
+			return nil, err
+		}
 		dynamicRoutes, err = c.validateDynamicCandidates(ctx, profile.ID, req.Dynamic)
 		if err != nil {
 			return nil, err
@@ -547,7 +614,10 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		if err != nil {
 			return nil, err
 		}
-		dynamic = &models.DynamicAgentProfile{ProfileID: profile.ID}
+		dynamic = &models.DynamicAgentProfile{
+			ProfileID:             profile.ID,
+			KeepModelWhileRunning: resolveKeepModelWhileRunning(existingDynamic, req.Dynamic),
+		}
 	}
 	if req.Name != nil {
 		profile.Name = *req.Name
@@ -653,6 +723,9 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 			return nil, err
 		}
 		profile.EnvVars = envVarsFromDTO(*req.EnvVars)
+	}
+	if req.ExecutionGrade != nil {
+		profile.ExecutionGrade = *req.ExecutionGrade
 	}
 	if req.CommandPrefix != nil {
 		if err := validateCommandPrefix(*req.CommandPrefix); err != nil {
@@ -916,6 +989,7 @@ func duplicateClone(source *models.AgentProfile) *models.AgentProfile {
 	return &models.AgentProfile{
 		AgentID:                    source.AgentID,
 		Name:                       strings.TrimSpace(source.Name) + " Copy",
+		ExecutionGrade:             source.ExecutionGrade,
 		AgentDisplayName:           source.AgentDisplayName,
 		Model:                      source.Model,
 		FallbackModel:              strings.TrimSpace(source.FallbackModel),
@@ -1493,6 +1567,7 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		AutoApprove:             profile.AutoApprove,
 		CLIFlags:                cliFlagsToDTO(profile.CLIFlags),
 		EnvVars:                 envVarsToDTO(profile.EnvVars),
+		ExecutionGrade:          profile.ExecutionGrade,
 		CLIPassthrough:          profile.CLIPassthrough,
 		Enabled:                 profile.Enabled,
 		CommandPrefix:           profile.CommandPrefix,

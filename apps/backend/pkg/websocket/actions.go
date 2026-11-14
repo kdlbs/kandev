@@ -244,6 +244,7 @@ const (
 	// Native code review. The *.run / *.cancel / *.get / *.finding.update /
 	// *.clear actions are client requests; the rest are server notifications.
 	ActionTaskReviewRun                 = "task.review.run"
+	ActionTaskReviewSourceSet           = "task.review.source.set"
 	ActionTaskReviewCancel              = "task.review.cancel"
 	ActionTaskReviewGet                 = "task.review.get"
 	ActionTaskReviewFindingUpdate       = "task.review.finding.update"

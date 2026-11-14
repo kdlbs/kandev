@@ -208,7 +208,7 @@ func (s *Service) persistDynamicLaunchDecision(
 	}
 	if session.ExecutionProfileID == decision.ExecutionProfileID &&
 		session.RouteGeneration == decision.Generation &&
-		decision.Status == "" {
+		decision.Status == "" && rejectedDynamicRuntimeExecution(session) == "" {
 		return nil
 	}
 	previousExecutionProfileID := session.ExecutionProfileID
@@ -231,7 +231,7 @@ func (s *Service) persistDynamicLaunchDecision(
 	if previousExecutionProfileID != decision.ExecutionProfileID {
 		session.DownstreamACPSessionID = ""
 	}
-	if DynamicCandidateRuntimeResetRequired(previousExecutionProfileID, decision.ExecutionProfileID) {
+	if DynamicCandidateSelectionResetRequired(session, previousExecutionProfileID) {
 		changed, err := s.persistDynamicCandidateRuntimeReset(ctx, session, expectedState, expectedUpdatedAt)
 		if err != nil {
 			return err
@@ -482,6 +482,11 @@ func applyDynamicRouteDecisionProjection(
 	}
 }
 
+// Only a newly owned turn may compare candidates; replays keep their route.
+func dynamicLaunchOwnsNewTurn(ctx context.Context, created, preserveRoute bool) bool {
+	return created && !preserveRoute && retryLaunchInContext(ctx) == nil
+}
+
 // launchPreparedSessionWithDynamicFallback keeps the logical session stable
 // while delegating classified pre-result provider fallback to dynamic.Conductor.
 // Concrete profiles continue through the ordinary executor path.
@@ -490,8 +495,9 @@ func (s *Service) launchPreparedSessionWithDynamicFallback(
 	task *v1.Task,
 	sessionID string,
 	options executor.LaunchOptions,
+	newUserTurn bool,
 ) (*executor.TaskExecution, error) {
-	return s.launchPreparedSessionWithDynamicFallbackWithContinuation(ctx, task, sessionID, options, nil)
+	return s.launchPreparedSessionWithDynamicFallbackWithContinuation(ctx, task, sessionID, options, nil, newUserTurn)
 }
 
 func (s *Service) launchPreparedSessionWithDynamicFallbackWithContinuation(
@@ -500,6 +506,7 @@ func (s *Service) launchPreparedSessionWithDynamicFallbackWithContinuation(
 	sessionID string,
 	options executor.LaunchOptions,
 	continuationInput *dynamicruntime.ContinuationInput,
+	newUserTurn bool,
 ) (*executor.TaskExecution, error) {
 	if task != nil {
 		if err := s.validateContextCeilingEntry(ctx, task.ID); err != nil {
@@ -513,7 +520,7 @@ func (s *Service) launchPreparedSessionWithDynamicFallbackWithContinuation(
 	if err != nil {
 		return nil, err
 	}
-	decision, dynamic, err := s.dynamicLaunchDecision(ctx, session)
+	decision, dynamic, err := s.dynamicLaunchDecision(ctx, session, newUserTurn && continuationInput == nil)
 	if err != nil {
 		return nil, err
 	}
@@ -752,9 +759,13 @@ func dynamicRepositorySummary(task *v1.Task) string {
 	return strings.Join(repositories, "\n")
 }
 
+// dynamicLaunchDecision resolves the durable route for a launch. newUserTurn
+// restricts the keep-off comparison to a launch that owns a new user turn, so a
+// prepared resume or recovery relaunch never moves an admitted context.
 func (s *Service) dynamicLaunchDecision(
 	ctx context.Context,
 	session *models.TaskSession,
+	newUserTurn bool,
 ) (dynamicruntime.RouteDecision, bool, error) {
 	decision := dynamicruntime.RouteDecision{
 		SessionID:          session.ID,
@@ -794,6 +805,9 @@ func (s *Service) dynamicLaunchDecision(
 		}
 		return decision, true, nil
 	}
+	if newUserTurn && !s.profileExecutionResolver.KeepModelWhileRunning(ctx, session.AgentProfileID) {
+		return s.reevaluatedDynamicLaunchDecision(ctx, session, *state)
+	}
 	resolved, err := s.profileExecutionResolver.ResolveExisting(
 		ctx, session.ID, session.AgentProfileID, state.ExecutionProfileID,
 		state.Generation, state.ProfileVersion, "durable_route_state",
@@ -814,6 +828,60 @@ func (s *Service) dynamicLaunchDecision(
 		return dynamicruntime.RouteDecision{}, false, fmt.Errorf("persist dynamic route attribution: %w", err)
 	}
 	return resolved.Decision, true, nil
+}
+
+// reevaluatedDynamicLaunchDecision compares candidates at a new turn's launch
+// boundary. Selection claims a route generation, so a later failure must not
+// launch using the previous generation.
+func (s *Service) reevaluatedDynamicLaunchDecision(
+	ctx context.Context,
+	session *models.TaskSession,
+	state dynamicruntime.RouteState,
+) (dynamicruntime.RouteDecision, bool, error) {
+	reevaluated, err := s.profileExecutionResolver.ReevaluateForNewTurn(
+		ctx, session.ID, session.AgentProfileID, state.Generation,
+	)
+	if errors.Is(err, dynamicruntime.ErrNoEligibleCandidate) {
+		return dynamicruntime.RouteDecision{}, false, err
+	}
+	if err != nil {
+		return dynamicruntime.RouteDecision{}, false, err
+	}
+	resolved, err := s.profileExecutionResolver.ResolveExisting(
+		ctx, session.ID, session.AgentProfileID, reevaluated.ExecutionProfileID,
+		reevaluated.Generation, reevaluated.ProfileVersion, "keep_model_reevaluated",
+	)
+	if err != nil {
+		return dynamicruntime.RouteDecision{}, false, err
+	}
+	if session.ExecutionProfileID == resolved.ExecutionProfileID &&
+		session.RouteGeneration == resolved.Generation {
+		return resolved.Decision, true, nil
+	}
+	observed := *session
+	applyResolvedExecution(session, resolved)
+	changed, err := s.persistReevaluatedDynamicSelection(ctx, &observed, session)
+	if err != nil {
+		return dynamicruntime.RouteDecision{}, false, fmt.Errorf("persist dynamic route attribution: %w", err)
+	}
+	if !changed {
+		return dynamicruntime.RouteDecision{}, false, dynamicruntime.ErrStaleGeneration
+	}
+	return resolved.Decision, true, nil
+}
+
+func (s *Service) persistReevaluatedDynamicSelection(ctx context.Context, observed, selected *models.TaskSession) (bool, error) {
+	if DynamicCandidateSelectionResetRequired(selected, observed.ExecutionProfileID) {
+		return s.PersistDynamicCandidateSwitch(ctx, selected, observed.State, observed.UpdatedAt)
+	}
+	lock := s.sessionSettingsSnapshotLock(selected.ID)
+	lock.Lock()
+	defer lock.Unlock()
+	updater, ok := s.repo.(dynamicCandidateSnapshotUpdater)
+	if !ok {
+		return false, errors.New("dynamic route selection requires guarded metadata updates")
+	}
+	return updater.UpdateTaskSessionIfCurrentSnapshot(ctx, selected, observed.State, observed.UpdatedAt, selected.Metadata)
 }
 
 // routeDynamicAgentFailure applies the configured action for a classified
@@ -901,6 +969,9 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 	// healthy session), and only fires for a route genuinely stranded
 	// mid-launch.
 	generation := session.RouteGeneration
+	// Registered before the action_required guard so it runs after it and
+	// sees the route's final recovery state.
+	defer s.scheduleFailedRouteAutoRetryAfterFailure(ctx, session.ID, session.ExecutionProfileID, classified)
 	handled := false
 	defer func() {
 		if !handled {
@@ -913,6 +984,11 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 	evidence, eligible := s.prepareDynamicFailureEvidence(ctx, data, session, classified, startupEvidence, unclassified)
 	if !eligible {
 		s.recordIneligibleFailureCircuit(ctx, session, classified)
+		if !unclassified {
+			// The decline stands; an opted-in workspace only queues one
+			// automatic Try next for after this turn settles.
+			s.scheduleMidTurnProviderFailover(ctx, data, session, classified)
+		}
 		return dynamicFailureRouteResult{}
 	}
 	data.ExecutionProfileID = session.ExecutionProfileID
@@ -1417,6 +1493,9 @@ func (s *Service) stopDynamicSuccessorWorkers() {
 // request. An unresolved recovery fence retains the selected generation for
 // explicit session recovery instead of replaying the predecessor prompt.
 func (s *Service) LaunchDynamicRouteAction(ctx context.Context, sessionID string) error {
+	if automaticRouteActionFromContext(ctx) {
+		return s.launchDynamicRouteAction(ctx, sessionID, launchOriginAutomatic)
+	}
 	return s.launchDynamicRouteAction(ctx, sessionID, launchOriginManual)
 }
 
@@ -1771,7 +1850,7 @@ func (s *Service) prepareDynamicRelaunchAfterFailure(
 	launchMode := dynamicRelaunchLaunchModeCreated
 	if officeErr != nil || isOfficeTask {
 		launchMode = dynamicRelaunchLaunchModePrepared
-	} else if origin == launchOriginManual {
+	} else if origin == launchOriginManual && s.dynamicRelaunchHasResumeSource(ctx, data.SessionID) {
 		launchMode = dynamicRelaunchLaunchModePrompt
 	}
 	if !s.stopDynamicRelaunchPredecessor(ctx, data.AgentExecutionID) {
@@ -1790,7 +1869,17 @@ func (s *Service) prepareDynamicRelaunchAfterFailure(
 	return task, session, prompt, launchMode, true
 }
 
+// stopDynamicRelaunchPredecessor stops the execution a relaunch replaces and
+// reports whether the successor may launch. An absent predecessor counts as
+// stopped: an empty execution ID (the restart orphan sweep can leave a route
+// with no recorded execution) or a runtime that confirms the execution is gone.
+// Every other stop error keeps the relaunch from launching over an unresolved
+// teardown.
 func (s *Service) stopDynamicRelaunchPredecessor(ctx context.Context, agentExecutionID string) bool {
+	if agentExecutionID == "" {
+		s.logger.Debug("dynamic fallback predecessor has no recorded execution")
+		return true
+	}
 	if s.lspLeases != nil {
 		s.lspLeases.StopLSPLeasesForExecution(agentExecutionID)
 	}
@@ -1886,7 +1975,7 @@ func (s *Service) launchPreparedDynamicRelaunch(
 			Prompt:               prompt.text,
 			StartAgent:           true,
 			McpMode:              executor.McpModeOffice,
-		})
+		}, false)
 		if err != nil {
 			return dynamicRelaunchFailed, err
 		}
@@ -1903,6 +1992,26 @@ func (s *Service) startDynamicRelaunchCreatedSession(
 	session *models.TaskSession,
 	prompt capturedPrompt,
 ) (*executor.TaskExecution, error) {
+	return s.startDynamicSuccessorCreatedSession(ctx, taskID, session, prompt, dynamicSuccessorPrompt{})
+}
+
+// dynamicSuccessorPrompt carries the accepted direct-message context that a
+// new user turn hands to the successor launch. A recovery relaunch leaves it
+// empty and replays only the cached prompt text.
+type dynamicSuccessorPrompt struct {
+	references               []v1.EntityReference
+	promptReferenceContext   string
+	promptReferencesPrepared bool
+	deliverySubmissionID     string
+}
+
+func (s *Service) startDynamicSuccessorCreatedSession(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	prompt capturedPrompt,
+	direct dynamicSuccessorPrompt,
+) (*executor.TaskExecution, error) {
 	attempt, owner, err := s.beginResumeAttempt(ctx, taskID, session.ID)
 	if err != nil {
 		return nil, err
@@ -1916,7 +2025,11 @@ func (s *Service) startDynamicRelaunchCreatedSession(
 	launchCtx := cancellableResumeContext(attempt)
 	execution, err := s.startCreatedSession(
 		launchCtx, taskID, session.ID, session.AgentProfileID,
-		prompt.text, true, prompt.planMode, true, prompt.attachments, nil, "", startCreatedSessionOptions{
+		prompt.text, true, prompt.planMode, true, prompt.attachments,
+		direct.references, direct.promptReferenceContext, startCreatedSessionOptions{
+			preserveDynamicRoute:     true,
+			promptReferencesPrepared: direct.promptReferencesPrepared,
+			deliverySubmissionID:     direct.deliverySubmissionID,
 			beforeInitialPromptDispatch: func() error {
 				if !registry.holdForInitialPrompt(attempt) {
 					return ErrResumeAttemptCancelled

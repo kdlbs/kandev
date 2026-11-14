@@ -35,6 +35,9 @@ func (s *Server) registerCoreTools() {
 		{kanban, (*Server).registerTaskExecutionTools},
 		{kanban, (*Server).registerCoreTaskCapabilities},
 		{kanban, (*Server).registerReviewTools},
+		// Review run, source and readback tools act on a task the caller can
+		// write, so Office task agents and external clients use them too.
+		{[]mcpprofile.Surface{mcpprofile.SurfaceKanbanTask, mcpprofile.SurfaceOfficeTask, mcpprofile.SurfaceExternal}, (*Server).registerTaskReviewTools},
 		{kanban, (*Server).registerAddBranchToTaskTool},
 		{kanban, (*Server).registerAddWorkspaceSourcesTool},
 		{kanban, (*Server).registerUpdateRepositoryBaseBranchTool},
