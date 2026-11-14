@@ -1288,16 +1288,20 @@ func (r *Repository) ListStepDecisions(ctx context.Context, taskID, stepID strin
 // ListActiveDecisions API so the dashboard can surface pending decisions
 // per task without filtering by step.
 func (r *Repository) ListActiveTaskDecisions(ctx context.Context, taskID string) ([]*models.WorkflowStepDecision, error) {
-	return r.listActiveTaskDecisions(ctx, r.ro, taskID)
+	return r.ListActiveTaskDecisionsWithQuery(ctx, r.ro, taskID)
 }
 
 func (r *Repository) ListActiveTaskDecisionsTx(ctx context.Context, tx *sql.Tx, taskID string) ([]*models.WorkflowStepDecision, error) {
-	return r.listActiveTaskDecisions(ctx, tx, taskID)
+	return r.ListActiveTaskDecisionsWithQuery(ctx, tx, taskID)
 }
 
-func (r *Repository) listActiveTaskDecisions(ctx context.Context, q interface {
+type TaskDecisionQuery interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}, taskID string) ([]*models.WorkflowStepDecision, error) {
+}
+
+func (r *Repository) ListActiveTaskDecisionsWithQuery(
+	ctx context.Context, q TaskDecisionQuery, taskID string,
+) ([]*models.WorkflowStepDecision, error) {
 	if taskID == "" {
 		return nil, errors.New("task_id is required")
 	}

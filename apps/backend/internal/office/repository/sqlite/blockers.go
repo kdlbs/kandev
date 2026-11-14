@@ -210,7 +210,7 @@ func (r *Repository) DeleteTaskBlockersForTask(ctx context.Context, taskID strin
 
 // Task lifecycle state values as stored in the shared `tasks` table,
 // shared by every office-repo reader of terminal task state
-// (GetBlockerStatus, GetTaskTerminalStatus).
+// (GetBlockerStatus, IsTaskInTerminalState, GetTaskTerminalStatus).
 const (
 	taskStateCompleted = "COMPLETED"
 	taskStateFailed    = "FAILED"
@@ -221,13 +221,30 @@ const (
 // Archival does not change the classification. A missing row returns
 // sql.ErrNoRows so callers can apply their unknown-read rule.
 func (r *Repository) GetBlockerStatus(ctx context.Context, taskID string) (models.BlockerStatus, error) {
-	var state string
-	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
-		`SELECT COALESCE(state, '') FROM tasks WHERE id = ?`), taskID).Scan(&state)
+	state, err := r.taskLifecycleState(ctx, taskID)
 	if err != nil {
 		return models.BlockerPending, err
 	}
 	return blockerStatusForState(state), nil
+}
+
+// IsTaskInTerminalState reports whether taskID has a terminal lifecycle state.
+func (r *Repository) IsTaskInTerminalState(ctx context.Context, taskID string) (bool, error) {
+	state, err := r.taskLifecycleState(ctx, taskID)
+	if err != nil {
+		return false, err
+	}
+	return state == taskStateCompleted || state == taskStateFailed || state == taskStateCancelled, nil
+}
+
+func (r *Repository) taskLifecycleState(ctx context.Context, taskID string) (string, error) {
+	var state string
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT COALESCE(state, '') FROM tasks WHERE id = ?`), taskID).Scan(&state)
+	if err != nil {
+		return "", err
+	}
+	return state, nil
 }
 
 func blockerStatusForState(state string) models.BlockerStatus {

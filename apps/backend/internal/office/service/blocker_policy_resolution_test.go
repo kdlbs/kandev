@@ -16,8 +16,8 @@ const (
 	policySecond = "dependent-prerequisite-1"
 )
 
-// policyResolutionSource completes or moves one blocker through a real
-// resolution producer after its persisted state has been written.
+// policyResolutionSource completes one blocker through a real resolution
+// producer after its persisted state has been written.
 type policyResolutionSource func(t *testing.T, f *assignmentBlockerFixture, id string)
 
 func policyStateEvent(t *testing.T, f *assignmentBlockerFixture, id string) {
@@ -43,15 +43,12 @@ func policyStepMove(toStep string) policyResolutionSource {
 	}
 }
 
-func newPolicyResolutionFixture(t *testing.T, stepPath bool) *assignmentBlockerFixture {
+func newPolicyResolutionFixture(t *testing.T) *assignmentBlockerFixture {
 	t.Helper()
 	f := newAssignmentBlockerFixture(t)
 	blockerMust(t, f.scheduler.RegisterTaskCompletionSubscriber(f.eb))
 	f.task(t, "dependent", "assignment-work", v1.TaskStateTODO, "assignment-worker")
 	f.blockers(t, "dependent", v1.TaskStateInProgress, v1.TaskStateInProgress)
-	if stepPath {
-		f.wireResolutionEngine(t)
-	}
 	for _, id := range []string{policyFirst, policySecond} {
 		_, err := f.repo.UpdateTaskAssignee(context.Background(), id, "assignment-worker")
 		blockerMust(t, err)
@@ -75,7 +72,6 @@ func (f *assignmentBlockerFixture) resolutionRuns(t *testing.T, want int, when s
 var policyResolutionSources = map[string]policyResolutionSource{
 	"state_event": policyStateEvent,
 	"reactivity":  policyReactivity,
-	"step_move":   policyStepMove("Done"),
 }
 
 // @covers AC-OFFICE-BLOCKER-POLICY-001.2 AC-OFFICE-BLOCKER-POLICY-001.3
@@ -83,7 +79,7 @@ func TestOfficeBlockerPolicyResolutionOrder(t *testing.T) {
 	for name, source := range policyResolutionSources {
 		for _, failure := range []v1.TaskState{v1.TaskStateFailed, v1.TaskStateCancelled} {
 			t.Run(name+"/"+string(failure)+"/fail_then_complete", func(t *testing.T) {
-				f := newPolicyResolutionFixture(t, name == "step_move")
+				f := newPolicyResolutionFixture(t)
 				blockerMust(t, f.tasks.UpdateTaskState(context.Background(), policySecond, failure))
 				f.complete(t, source, policyFirst)
 				f.resolutionRuns(t, 0, "completion beside a failed blocker")
@@ -91,7 +87,7 @@ func TestOfficeBlockerPolicyResolutionOrder(t *testing.T) {
 				f.resolutionRuns(t, 1, "failed blocker retried to completion")
 			})
 			t.Run(name+"/"+string(failure)+"/complete_then_fail", func(t *testing.T) {
-				f := newPolicyResolutionFixture(t, name == "step_move")
+				f := newPolicyResolutionFixture(t)
 				f.complete(t, source, policyFirst)
 				f.resolutionRuns(t, 0, "partial completion")
 				blockerMust(t, f.tasks.UpdateTaskState(context.Background(), policySecond, failure))
@@ -108,21 +104,20 @@ func TestOfficeBlockerPolicyStepNameDoesNotSatisfy(t *testing.T) {
 	cases := []struct {
 		name, step string
 		state      v1.TaskState
-		want       int
 	}{
-		{"cancelled_step_cancelled_state", "Cancelled", v1.TaskStateCancelled, 0},
-		{"cancelled_step_failed_state", "cancelled", v1.TaskStateFailed, 0},
-		{"done_step_in_progress_state", "Done", v1.TaskStateInProgress, 0},
-		{"done_step_completed_state", "Done", v1.TaskStateCompleted, 1},
-		{"cancelled_step_completed_state", "Cancelled", v1.TaskStateCompleted, 1},
+		{"cancelled_step_cancelled_state", "Cancelled", v1.TaskStateCancelled},
+		{"cancelled_step_failed_state", "cancelled", v1.TaskStateFailed},
+		{"done_step_in_progress_state", "Done", v1.TaskStateInProgress},
+		{"done_step_completed_state", "Done", v1.TaskStateCompleted},
+		{"cancelled_step_completed_state", "Cancelled", v1.TaskStateCompleted},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newPolicyResolutionFixture(t, true)
+			f := newPolicyResolutionFixture(t)
 			blockerMust(t, f.tasks.UpdateTaskState(context.Background(), policyFirst, v1.TaskStateCompleted))
 			blockerMust(t, f.tasks.UpdateTaskState(context.Background(), policySecond, tc.state))
 			policyStepMove(tc.step)(t, f, policySecond)
-			f.resolutionRuns(t, tc.want, "step move")
+			f.resolutionRuns(t, 0, "task.moved without task.state_changed")
 		})
 	}
 }

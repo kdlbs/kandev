@@ -36,8 +36,10 @@ Decisions confirmed by the user on 2026-11-11:
 In scope:
 
 - One Office blocker classifier (satisfied, failed, pending) replacing
-  `IsTaskInTerminalStep` in admission, the resolution cascade, and the legacy
-  step-move path.
+  `IsTaskInTerminalStep` in admission and the scheduler success cascade.
+  `IsTaskInTerminalState` remains available for general lifecycle checks. The
+  task-completion consolidation owns committed-state effects and removes the
+  legacy step-move completion path.
 - Confirmation that every runtime `FAILED` writer already publishes
   `task.state_changed` (through `backendapp.taskRepositoryAdapter` and the task
   service). No new publisher is needed.
@@ -53,6 +55,21 @@ Out of scope:
   `agent_error` producer, and the Inbox Failed query.
 - Sweeps for unpublished transitions, automatic retry or rewiring, UI or copy,
   schema, runtime flags, and metrics labels.
+
+## Latest-base integration
+
+The task-completion design now owns committed-state effects and removes the
+step-name finalizer. `handleCommittedTaskCompletion` wakes dependents only for
+`COMPLETED`; the blocker-failure subscriber handles `FAILED` and `CANCELLED`.
+`GetBlockerStatus` owns blocker policy, while `IsTaskInTerminalState` remains a
+general task lifecycle query. A `task.moved` event without a committed state
+event queues no resolution wake.
+
+The focused Office scheduler and service race suites pass. Changed-Go lint
+reports zero issues. Specification validation and lint both pass. The broader
+race run timed out in the unchanged
+`task/repository/sqlite/TestTaskRepositoryReplacementSQLiteSerialization`
+test; the other listed packages passed.
 
 ## Delivery order
 

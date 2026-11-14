@@ -62,7 +62,7 @@ func TestWorkflowChangeAtomicAdmissionPersistsMembershipAndOverridesTogether(t *
 	guard := &models.WorkflowChangeSource{WorkflowID: source.WorkflowID, StepID: source.WorkflowStepID, UpdatedAt: source.UpdatedAt}
 	candidate := workflowChangeCandidate(t, source)
 	if _, err := repo.UpdateTaskWithWorkflowChangeAdmissionAndState(
-		ctx, candidate, source.WorkflowStepID, candidate.WorkflowStepID, 0, nil, true, guard,
+		ctx, candidate, source.WorkflowStepID, candidate.WorkflowStepID, 0, nil, true, guard, nil,
 	); err != nil {
 		t.Fatalf("UpdateTaskWithWorkflowChangeAdmissionAndState: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestWorkflowChangeAtomicAdmissionRejectsConcurrentTaskEdit(t *testing.T) {
 		t.Fatalf("UpdateTask concurrent edit: %v", err)
 	}
 	if _, err := repo.UpdateTaskWithWorkflowChangeAdmissionAndState(
-		ctx, candidate, source.WorkflowStepID, candidate.WorkflowStepID, 0, nil, true, staleGuard,
+		ctx, candidate, source.WorkflowStepID, candidate.WorkflowStepID, 0, nil, true, staleGuard, nil,
 	); !errors.Is(err, repoerrors.ErrWorkflowChangeConflict) {
 		t.Fatalf("stale guarded write error = %v, want ErrWorkflowChangeConflict", err)
 	}
@@ -128,7 +128,7 @@ func TestWorkflowChangeAtomicAdmissionRollsBackOnTaskWriteFailure(t *testing.T) 
 		t.Fatalf("create injected failure trigger: %v", err)
 	}
 	_, err := repo.UpdateTaskWithWorkflowChangeAdmissionAndState(
-		ctx, candidate, source.WorkflowStepID, candidate.WorkflowStepID, 0, nil, true, guard,
+		ctx, candidate, source.WorkflowStepID, candidate.WorkflowStepID, 0, nil, true, guard, nil,
 	)
 	if err == nil {
 		t.Fatal("guarded write succeeded despite injected task update failure")

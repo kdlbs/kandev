@@ -22,23 +22,23 @@ system_design:
 
 ## Summary
 
-Replace `IsTaskInTerminalStep` with `GetBlockerStatus` (satisfied, failed, pending)
-and apply it in admission, the scheduler cascade, and the service step-move path.
-After this change, a failed or cancelled blocker never releases a dependent, in any
-order and on any path.
+Replace blocker uses of `IsTaskInTerminalStep` with `GetBlockerStatus` (satisfied,
+failed, pending) in assignment admission and the scheduler success cascade. Keep
+`IsTaskInTerminalState` for general lifecycle checks. Committed task-state events
+own completion effects; a step name alone never releases a dependent.
 
 ## In scope
 
 - `office/repository/sqlite/blockers.go`: `GetBlockerStatus` and `BlockerStatus`.
-  Remove `IsTaskInTerminalStep`.
+  Keep `IsTaskInTerminalState` for non-blocker lifecycle checks.
 - `office/shared/assignment_eligibility.go`: use the new reader, refuse on any
   readable unsatisfied blocker, and log `blocker_status`.
 - `office/scheduler/reactivity.go` `allBlockersResolvedExcept`, plus the scheduler
   repository interface and fakes.
-- `office/service/event_subscribers.go` `resolveAndWakeIfUnblocked`: check the
-  triggering blocker and require all others to be satisfied.
 - Interface updates in onboarding and other structural lookups that embed
   `AssignmentTaskLookup`.
+- The task-completion consolidation's `task.state_changed` handler validates the
+  committed `COMPLETED` state before it invokes the blocker cascade.
 
 ## Out of scope
 
@@ -53,9 +53,9 @@ order and on any path.
 2. Resolution: both orders of "one blocker fails, one completes" persist zero
    `task_blockers_resolved` runs. Retrying the failed blocker to `COMPLETED` then
    persists exactly one, with the existing digest key.
-3. Step path: a move into a step named Cancelled or Done without `COMPLETED` state
-   persists zero resolution runs. A `COMPLETED` move converges with the success
-   bridge on one run.
+3. State path: a `task.moved` event without a committed `COMPLETED` state persists
+   zero resolution runs. A committed `COMPLETED` event wakes only when every other
+   blocker is also satisfied.
 
 ## Verification
 
@@ -77,8 +77,8 @@ bash scripts/lint-go-changed <changed Go files>
 - `apps/backend/internal/office/repository/sqlite/blockers.go`
 - `apps/backend/internal/office/shared/assignment_eligibility.go` and its test
 - `apps/backend/internal/office/scheduler/reactivity.go`
-- `apps/backend/internal/office/service/event_subscribers.go`
-- New: `apps/backend/internal/office/service/blocker_policy_resolution_test.go`
+- `apps/backend/internal/office/scheduler/task_completion.go`
+- `apps/backend/internal/office/scheduler/reactivity_blockers_resolved_test.go`
 - Existing fakes implementing `IsTaskInTerminalStep` (search the module)
 
 ## Risks
@@ -91,9 +91,14 @@ bash scripts/lint-go-changed <changed Go files>
 
 ## Results
 
-Done. `GetBlockerStatus` replaces `IsTaskInTerminalStep` in admission, the
-scheduler cascade, and `resolveAndWakeIfUnblocked`, which now also checks the
-triggering blocker. Existing admission and recovery tests cover failed and
-cancelled blockers; `blocker_policy_resolution_test.go` covers both resolution
-orders across the state-event, reactivity, and step-move producers, plus step names
-without `COMPLETED`. The verification command passed with `-race`.
+Done. `GetBlockerStatus` replaces blocker uses of `IsTaskInTerminalStep` in
+assignment admission and the scheduler cascade. The task-completion consolidation
+removed `resolveAndWakeIfUnblocked`; the committed-state handler verifies
+`COMPLETED` before it skips the triggering blocker. Existing admission, scheduler,
+and failure-escalation tests cover failed and cancelled blockers. The merge
+regression test confirms that `FAILED` and `CANCELLED` state events do not queue a
+`task_blockers_resolved` run. The latest-base integration also confirms that a
+`task.moved` event without a committed state event does not wake dependents. The
+focused Office scheduler and service race suites passed. Changed-Go lint and both
+specification checks passed. The broader race run timed out in the unchanged task
+repository SQLite serialization test; the integration record lists the result.

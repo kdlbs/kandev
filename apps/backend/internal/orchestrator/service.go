@@ -1040,8 +1040,9 @@ type Service struct {
 	// doc comment).
 	agentErrorDeps atomic.Pointer[agentErrorDispatchDeps]
 	// childCompletionLocks serializes duplicate on_children_completed deliveries.
-	childCompletionLocksMu sync.Mutex
-	childCompletionLocks   map[string]*childCompletionOperationLock
+	childCompletionLocksMu               sync.Mutex
+	childCompletionLocks                 map[string]*childCompletionOperationLock
+	parentChildrenCompletionWakeRecorder func(context.Context, string, string, string, string) error
 	// officeTerminalCompletionLocks serializes concurrent
 	// markOfficeTaskCompletedForTerminalStep deliveries for the same task, so
 	// two deliveries racing past the taskRuntimeStateMu check above cannot

@@ -709,8 +709,8 @@ func (s *DashboardService) logTaskStatusChangeActivity(ctx context.Context, req 
 // through to the approver check exactly like a terminal-step task rather
 // than being redirected forever.
 //
-// The step-position check fails CLOSED, but a lookup error is not the same
-// as a confirmed non-terminal step: it aborts the whole update (a plain,
+// The final-step check fails CLOSED, but a lookup error is not the same
+// as a confirmed non-final step: it aborts the whole update (a plain,
 // non-ApprovalsPendingError error, leaving dbState/apiStatus untouched) so
 // the caller persists nothing rather than writing a redirect it cannot
 // justify. Only a successful read reporting "not terminal" persists the
@@ -726,11 +726,11 @@ func (s *DashboardService) applyApprovalGate(
 		return fmt.Errorf("approval gate: resolve task workflow step: %w", err)
 	}
 	*expectedStepID = currentStepID
-	terminal, hasStep, err := s.repo.IsTaskWorkflowStepTerminal(ctx, taskID)
+	final, hasStep, err := s.repo.IsTaskOnFinalStep(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("approval gate: resolve workflow step: %w", err)
 	}
-	if hasStep && !terminal {
+	if hasStep && !final {
 		*dbState = stateInReview
 		*apiStatus = statusInReviewLowercase
 		return &ApprovalsPendingError{Reason: ApprovalGateReasonWorkflowStep}

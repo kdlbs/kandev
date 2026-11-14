@@ -10,12 +10,13 @@ requirements:
 
 ## Purpose and boundaries
 
-Office reads blocker state through one repository classifier and applies it in three
-places: assignment admission, the resolution cascade, and the legacy step-move
-resolution path. This design replaces "terminal" with "satisfied" in that
-classifier, removes the step-name shortcut, and adds one escalation producer for
-failure transitions. Kanban dependency policy (`task/service/service_dependencies.go`)
-is not changed or imported. Office keeps its own reader, which now agrees with Kanban
+Office reads blocker state through one blocker-specific repository classifier and
+uses it in assignment admission and the resolution cascade. This design replaces
+"terminal" with "satisfied" for blocker decisions, removes the step-name shortcut,
+and adds one escalation producer for failure transitions. The task-completion
+subscriber owns committed-state success wakes; a `task.moved` event only writes
+activity. Kanban dependency policy (`task/service/service_dependencies.go`) is not
+changed or imported. Office keeps its own blocker reader, which agrees with Kanban
 about which states satisfy a blocker.
 
 Generic run admission, claim-time merge, pause and replay, rate limits, and causation
@@ -28,14 +29,14 @@ stay owned by the shared runs service and the
 | --- | --- |
 | AC-OFFICE-BLOCKER-POLICY-001.1, .5 | [Single classifier](#single-classifier); [Admission](#admission) |
 | AC-OFFICE-BLOCKER-POLICY-001.2, .3 | [Resolution cascade](#resolution-cascade) |
-| AC-OFFICE-BLOCKER-POLICY-001.4 | [Legacy step-move path](#legacy-step-move-path) |
+| AC-OFFICE-BLOCKER-POLICY-001.4 | [Committed state transitions](#committed-state-transitions) |
 | AC-OFFICE-BLOCKER-POLICY-001.6 | [Unchanged surfaces](#unchanged-surfaces) |
 | AC-OFFICE-BLOCKER-POLICY-002.1, .2, .5 | [Failure escalation producer](#failure-escalation-producer) |
 | AC-OFFICE-BLOCKER-POLICY-002.3 | [Delivery of runtime state writes](#delivery-of-runtime-state-writes) |
 | AC-OFFICE-BLOCKER-POLICY-002.4, .6 | [Idempotency and coalescing](#idempotency-and-coalescing) |
 | AC-OFFICE-BLOCKER-POLICY-002.7, .8 | [Recipient resolution](#recipient-resolution); [Prompt and registry](#prompt-and-registry) |
 
-## Current behavior (grounding)
+## Baseline before this blocker policy
 
 - `office/repository/sqlite/blockers.go` `IsTaskInTerminalStep` returns true for
   `COMPLETED`, `FAILED` and `CANCELLED`. It has three callers:
@@ -62,7 +63,7 @@ stay owned by the shared runs service and the
 
 ## Single classifier
 
-Replace `IsTaskInTerminalStep` with one reader:
+Replace blocker uses of `IsTaskInTerminalStep` with one blocker reader:
 
 ```go
 type BlockerStatus int // BlockerPending, BlockerSatisfied, BlockerFailed
@@ -71,10 +72,11 @@ func (r *Repository) GetBlockerStatus(ctx, taskID string) (BlockerStatus, error)
 
 `COMPLETED` maps to satisfied, `FAILED`/`CANCELLED` map to failed, and every other
 state maps to pending. A missing row returns `sql.ErrNoRows`, as it does today, so
-callers keep the unknown-read rule. The reader ignores `archived_at`. Remove
-`IsTaskInTerminalStep` and update the `shared.AssignmentTaskLookup` and scheduler
-repository interfaces. No other production caller exists. `GetTaskTerminalStatus`
-and the children helpers are unrelated and stay as they are.
+callers keep the unknown-read rule. The reader ignores `archived_at`. Keep
+`IsTaskInTerminalState` for callers that need general lifecycle terminality; it
+does not classify a blocker as satisfied. Update the assignment and scheduler
+blocker readers to use `GetBlockerStatus`. `GetTaskTerminalStatus` and the children
+helpers are unrelated and stay as they are.
 
 ## Admission
 
@@ -87,23 +89,24 @@ are unchanged. The Info log for a refusal adds the field `blocker_status`
 
 ## Resolution cascade
 
-`allBlockersResolvedExcept` skips the triggering blocker because its caller has
-already committed it as `COMPLETED`. `resolveAndWakeIfUnblocked` checks every
-persisted blocker, including the step-move trigger, because a step name does not
-prove that the task state changed. Keys
+`handleCommittedTaskCompletion` verifies that the task still has the committed
+`COMPLETED` state before it calls the scheduler cascade. The cascade skips this
+triggering blocker, then requires every other blocker to be `COMPLETED` through
+`GetBlockerStatus`. An Office status change to `done` also uses the scheduler
+cascade after the state write. Keys
 (`task_blockers_resolved:<dependent>:<runner>:<BlockerDigest>`), payloads, and the
-Office-dependent isolation in `task_completion.go` are unchanged. A retried blocker
-that reaches `COMPLETED` re-enters the same success bridge, which gives
-AC-001.3 without new code.
+Office-dependent isolation in `task_completion.go` remain unchanged. A retried
+blocker that reaches `COMPLETED` enters the same success path again, which gives
+AC-001.3.
 
-## Legacy step-move path
+## Committed state transitions
 
-`resolveAndWakeIfUnblocked` also reads the triggering blocker through
-`GetBlockerStatus` and returns without waking unless it is satisfied. A move into a
-step named Cancelled therefore wakes nobody unless the task's state is `COMPLETED`.
-This happens when the orchestrator's terminal-step completion wrote `done`, in
-which case the success bridge produces the same digest key and the two paths
-converge. `finalizeDone`'s routine-run sync and parent wake are unchanged.
+A workflow step name does not complete or satisfy a blocker. When a workflow move
+commits the task state as `COMPLETED`, `task.state_changed` reaches the completion
+subscriber and the scheduler checks the persisted blocker states. A move into a
+step named Done or Cancelled without a `COMPLETED` state change queues no success
+wake. The task-completion design owns routine-run sync and parent wakes;
+`handleTaskMoved` keeps only its activity write.
 
 ## Failure escalation producer
 

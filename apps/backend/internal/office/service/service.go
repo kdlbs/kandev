@@ -465,7 +465,8 @@ type Service struct {
 	// routineRunSyncer closes out a heavy routine run when its linked
 	// task reaches a terminal step. Wired to the routines.RoutineService
 	// at startup; nil in tests that don't exercise routines.
-	routineRunSyncer RoutineRunSyncer
+	routineRunSyncer      RoutineRunSyncer
+	routineRunStateReader RoutineRunTaskStateReader
 
 	// pauseGate is the workspace-pause read used to block run queuing
 	// (QueueRun) and finalize processing terminally (see
@@ -504,11 +505,23 @@ func (s *Service) SetWakeupRequestDispatcher(d WakeupRequestDispatcher) {
 	s.wakeupRequestDispatcher = d
 }
 
+// RoutineRunTaskStateReader reads the task's current state before a terminal
+// event is allowed to close its linked routine run.
+type RoutineRunTaskStateReader interface {
+	GetTask(ctx context.Context, taskID string) (*taskmodels.Task, error)
+}
+
 // SetRoutineRunSyncer wires the routines.RoutineService (or a test fake)
 // used to close out a heavy routine run when its linked task reaches a
 // terminal step. Without this wired, a heavy routine's run stays in
 // task_created until routines.activeRunMaxAge lets a later fire through.
 func (s *Service) SetRoutineRunSyncer(r RoutineRunSyncer) { s.routineRunSyncer = r }
+
+// SetRoutineRunTaskStateReader wires the task repository used to verify that
+// a terminal state event still matches the task's current state.
+func (s *Service) SetRoutineRunTaskStateReader(r RoutineRunTaskStateReader) {
+	s.routineRunStateReader = r
+}
 
 // BudgetEvaluator is the surface the office service needs from the
 // costs feature for budget evaluation. Implemented by

@@ -75,9 +75,10 @@ that failed or was abandoned.
   when an earlier failed blocker later reaches `COMPLETED`, for example after a
   retry.
 - **AC-OFFICE-BLOCKER-POLICY-001.4:** When a blocker enters a workflow step named
-  Done or Cancelled, the system shall evaluate resolution against persisted blocker
-  states. It shall wake a dependent only when every blocker is a satisfied blocker.
-  A step name alone shall not satisfy a blocker.
+  Done or Cancelled, the system shall evaluate resolution against persisted task
+  states. It shall wake a dependent only when every blocker is `COMPLETED`. A step
+  name alone shall not satisfy a blocker. A `task.moved` event without a committed
+  `COMPLETED` state change shall not queue a resolution wake.
 - **AC-OFFICE-BLOCKER-POLICY-001.5:** Archiving a blocker shall not change its
   classification. A blocker row that is missing or unreadable shall follow the
   unknown-read rule of `AC-OFFICE-SCHEDULER-002.8`, which preserves admission

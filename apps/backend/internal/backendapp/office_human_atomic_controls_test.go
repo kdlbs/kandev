@@ -114,8 +114,6 @@ func TestOfficeHumanCompletionEngineAndNonOfficeControls(t *testing.T) {
 				actor = wfmodels.StepTransitionActorHuman
 				_, err = f.h.db.Exec(`UPDATE workspaces SET office_workflow_id='' WHERE id='ws-1'`)
 				require.NoError(t, err)
-			} else {
-				ctx = models.WithOfficeHumanCompletionIntent(ctx, models.OfficeHumanCompletionIntent{TaskID: "another-task", Kind: "office_done"})
 			}
 			result, err := f.svc.MoveTaskWithOptions(ctx, "atomic-task", "wf-home", "atomic-done", 0, taskservice.MoveTaskOptions{StepHistoryActor: actor})
 			require.NoError(t, err)
