@@ -66,6 +66,10 @@ The interaction adds no endpoint, schema, runtime flag, or durable history.
    Restore ordinary terminal focus and the phone shortcut controls.
 
 The action remains available after a failed recovery, including after reload.
+A document from an earlier backend generation first follows the
+[required page reload](../../platform/requirements/backend-restart-page-recovery.md).
+Dismiss the Quick Terminal view, use the reload action, and reopen the persisted
+tab before starting its replacement shell.
 An unbound error tab can use the same action when its persisted descriptor still exists.
 A transport error attached to a live shell does not authorize stopping that shell.
 An idempotent start that discovers a live shell reuses it.
