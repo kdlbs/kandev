@@ -209,6 +209,8 @@ func (r *Repository) PruneSendOperations(ctx context.Context, limit int) (settle
 	staleBefore := now.Add(-sendOperationStalePending)
 	retentionBefore := now.Add(-sendOperationRetention)
 
+	// Recheck the pending state after a PostgreSQL row-lock wait so the sweep
+	// preserves any settlement committed while it was waiting.
 	staleResult, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_message_send_operations
 		   SET state = ?, failure_code = ?, settled_at = ?, updated_at = ?
@@ -218,9 +220,11 @@ func (r *Repository) PruneSendOperations(ctx context.Context, limit int) (settle
 			 ORDER BY created_at ASC
 			 LIMIT ?
 		 )
+		   AND state = ?
 	`),
 		models.SendOperationStateFailed, models.SendOperationFailureOutcomeUnknown, now, now,
 		models.SendOperationStatePending, staleBefore, limit,
+		models.SendOperationStatePending,
 	)
 	if err != nil {
 		return 0, 0, err
