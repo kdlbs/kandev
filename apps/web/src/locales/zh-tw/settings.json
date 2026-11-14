@@ -385,7 +385,6 @@
   "inferenceAgentThisAgent": "此代理程式",
   "inferenceAgentUnavailable": "{{name}} 已不可用。",
   "installed": "已安裝",
-  "integrationDescriptionAzureDevops": "Azure Boards 工作項與 Azure Repos 提取要求。",
   "integrationDescriptionGithub": "PR 審閱佇列、議題監控與 OAuth 認證資訊。",
   "integrationDescriptionGitlab": "合併請求建立、討論回覆與自託管主機。",
   "integrationDescriptionJira": "Atlassian Cloud 認證資訊與 JQL 議題監控。",
@@ -493,7 +492,7 @@
   "mergeThisSplitIntoTheSplit": "將此拆分割槽域合併到包含 {{target}} 的拆分割槽域。",
   "mergeWithTarget": "與 {{target}} 合併",
   "escapeCancelsAgent": "按 Escape 暫停代理程式",
-  "escapeCancelsAgentDescription": "在聊天輸入框中按 Escape 可暫停執行中的代理程式。",
+  "escapeCancelsAgentDescription": "在聊天輸入框中按 Escape 可暫停正在執行的代理程式。",
   "messageSubmitKey": "訊息提交快捷鍵",
   "messageTimeDisplay": "訊息時間",
   "messageTimeDisplayDescription": "選擇訊息時間戳的顯示方式。將滑鼠懸停或點選時間戳可檢視另一種格式。",
@@ -1225,5 +1224,9 @@
   "builtinMcp.currentUnknown": "無法確定目前代理程式的工具包。以下是為下次啟動代理程式儲存的選擇。",
   "mcpFromAutomation": "來自自動化",
   "mcpFromAutomationDescription": "啟動此處理程序的自動化所選的伺服器。",
-  "builtinMcp.surfaces.automation": "自動化"
+  "builtinMcp.surfaces.automation": "自動化",
+  "builtinMcp.inheritedValue": "繼承自工作區：{{value}}",
+  "builtinMcp.overrideValue": "任務覆蓋值：{{value}}。工作區預設值：{{default}}。",
+  "builtinMcp.useInherited": "使用繼承值",
+  "builtinMcp.allowTasks": "允許任務使用此包"
 }

@@ -154,6 +154,7 @@ func (c *Controller) ListAgentUpdateStatuses(ctx context.Context) (*dto.ListAgen
 			EffectiveVersion:    comparableRuntimeVersion(target, entry),
 			CheckState:          dto.AgentUpdateCheckStateUnknown,
 			Family:              target.family,
+			RuntimeSource:       target.source,
 			RuntimeRevision:     target.runtimeRevision,
 			MigrationAvailable:  target.migrationAvailable,
 		}

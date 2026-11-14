@@ -66,3 +66,21 @@ export function useSettingsTargetRegistration(targetId?: string) {
     [registry, targetId],
   );
 }
+
+/**
+ * Registers a fragment target that activates a domain surface instead of
+ * scrolling to an element. The pending request is resolved when the action
+ * registers, so fragment navigation that precedes metadata still works.
+ */
+export function useSettingsTargetActionRegistration(
+  targetId: string | undefined,
+  activate: () => void,
+) {
+  const registry = useContext(SettingsTargetContext);
+  const activateRef = useRef(activate);
+  activateRef.current = activate;
+  useEffect(() => {
+    if (!targetId || !registry) return;
+    return registry.registerAction(targetId, () => activateRef.current());
+  }, [registry, targetId]);
+}

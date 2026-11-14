@@ -33,12 +33,25 @@ An automation that produces a report — a nightly drift sweep, a dependency aud
 - **AC-OFFICE-AUTOMATION-RUNS-001.11:** Definition refreshes shall display only the selected workspace's automations. Switching workspaces shall immediately hide previous-workspace rows. An older response shall not replace a newer accepted result, including an empty result.
 - **AC-OFFICE-AUTOMATION-RUNS-001.12:** Refreshes shall preserve saved visibility, order, and expansion. A hidden section shall remain hidden after external changes. Foreground return shall request current definitions without requiring a workspace switch. Phone navigation shall retain its existing drawer and current automation rows while open.
 
+#### Run output capture
+
+- **AC-OFFICE-AUTOMATION-RUNS-001.13:** When the selected run's session uses CLI passthrough, its transcript shall explain that terminal output is not captured there. The explanation shall remain visible for running and finished runs, including after a direct load or reload.
+- **AC-OFFICE-AUTOMATION-RUNS-001.14:** The explanation shall tell users to disable CLI passthrough in the automation's agent profile for recorded output in future sessions. It shall not promise recovery of past output or change the profile.
+- **AC-OFFICE-AUTOMATION-RUNS-001.15:** Once the selected session is identified as passthrough, its transcript shall show no empty-turn warning. Earlier synthetic warnings shall disappear from that view. The shared exclusion follows [the empty-turn notice contract](../../ui/requirements/empty-turn-notice.md).
+- **AC-OFFICE-AUTOMATION-RUNS-001.16:** Capture guidance shall preserve stored prompts, agent messages, error entries, the reply composer, and the run's reported status. Viewing guidance shall not start, resume, resize, or send input to an agent.
+- **AC-OFFICE-AUTOMATION-RUNS-001.17:** Desktop and phone users shall receive the same localized guidance within the selected run's content. Reading it shall require no hover, extra drawer, or horizontal page scrolling.
+- **AC-OFFICE-AUTOMATION-RUNS-001.18:** When selection changes, capture guidance shall follow the selected session. A structured session shall retain its recorded transcript and normal empty-turn feedback. Later profile edits shall not reclassify an existing session's output mode.
+
 ## Exclusions
 
 Definition freshness does not change automation configuration, scheduling, run
 execution, or saved navigation preferences. It does not require a new event
 protocol or shared cache.
 
+Run output guidance does not capture, replay, or reconstruct terminal output.
+Folder-trust prompts and early process-exit settlement have separate repair scopes.
+
 ## System design
 
-The migrated technical source is split into [part 1](../system-design/automation-runs.md).
+See [automation runs](../system-design/automation-runs.md) and
+[run output capture guidance](../system-design/automation-run-output.md).

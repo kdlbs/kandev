@@ -18,7 +18,6 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
-	"github.com/kandev/kandev/internal/integrations/cloneauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
@@ -1333,20 +1332,6 @@ type RepoCloner interface {
 	BuildCloneURLWithHost(ctx context.Context, provider, host, owner, name string) (string, error)
 }
 
-type authenticatedRepoCloner interface {
-	EnsureWorkspaceClonedWithBasicAuth(
-		ctx context.Context, workspaceID, provider, providerHost,
-		cloneURL, owner, name, username, password string,
-	) (string, error)
-}
-
-type strictAuthenticatedRepoCloner interface {
-	RefreshWorkspaceRepositoryWithBasicAuth(
-		ctx context.Context, workspaceID, provider, providerHost,
-		cloneURL, owner, name, repositoryPath, username, password string,
-	) error
-}
-
 type remoteStateRepoCloner interface {
 	EnsureWorkspaceClonedWithCredentialRequestAndState(
 		ctx context.Context, request repoclone.GitCredentialRequest,
@@ -1358,24 +1343,11 @@ type remoteStateRepoCloner interface {
 	) (repoclone.RemoteRefState, error)
 }
 
-type remoteStateAuthenticatedRepoCloner interface {
-	EnsureWorkspaceClonedWithBasicAuthAndState(
-		ctx context.Context, workspaceID, provider, providerHost,
-		cloneURL, owner, name, username, password string,
-	) (string, repoclone.RemoteRefState, error)
-	RefreshWorkspaceRepositoryWithBasicAuthAndState(
-		ctx context.Context, workspaceID, provider, providerHost,
-		cloneURL, owner, name, repositoryPath, username, password string,
-	) (repoclone.RemoteRefState, error)
-}
-
 type localRemoteStateRepoCloner interface {
 	InspectLocalRepositoryRemoteRefState(
 		ctx context.Context, repositoryPath string,
 	) (repoclone.RemoteRefState, error)
 }
-
-const providerAzureDevOps = "azure_devops"
 
 func (e *Executor) ensureClonedWithWorkspaceAuth(
 	ctx context.Context, repo *models.Repository, cloneURL string,
@@ -1398,36 +1370,14 @@ func (e *Executor) ensureClonedWithWorkspaceAuthForSessionAndState(
 	if strings.EqualFold(repo.Provider, "gitlab") && e.gitlabCredentials != nil {
 		credentialHost, token, _ = e.gitlabCredentials.ResolveGitLabExecutionCredentials(ctx, repo.WorkspaceID)
 	}
-	if repo.Provider != providerAzureDevOps || !strings.HasPrefix(cloneURL, "https://") {
-		request := repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL)
-		if stateCloner, ok := e.repoCloner.(remoteStateRepoCloner); ok {
-			return stateCloner.EnsureWorkspaceClonedWithCredentialRequestAndState(
-				ctx, request, credentialHost, token,
-			)
-		}
-		path, err := e.repoCloner.EnsureWorkspaceClonedWithCredentialRequest(
+	request := repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL)
+	if stateCloner, ok := e.repoCloner.(remoteStateRepoCloner); ok {
+		return stateCloner.EnsureWorkspaceClonedWithCredentialRequestAndState(
 			ctx, request, credentialHost, token,
 		)
-		return path, repoclone.RemoteRefStateHasRefs, err
 	}
-	authCloner, ok := e.repoCloner.(authenticatedRepoCloner)
-	if !ok || e.secretStore == nil {
-		return "", repoclone.RemoteRefStateUnknown, fmt.Errorf("azure DevOps repository clone authentication is unavailable")
-	}
-	pat, err := e.secretStore.Reveal(ctx, cloneauth.AzureDevOpsPATKey(repo.WorkspaceID))
-	if err != nil {
-		return "", repoclone.RemoteRefStateUnknown, fmt.Errorf("read Azure DevOps clone credential: %w", err)
-	}
-	// Azure DevOps PAT authentication ignores the username; any non-empty value works.
-	if stateCloner, ok := e.repoCloner.(remoteStateAuthenticatedRepoCloner); ok {
-		return stateCloner.EnsureWorkspaceClonedWithBasicAuthAndState(
-			ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost,
-			cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat,
-		)
-	}
-	path, err := authCloner.EnsureWorkspaceClonedWithBasicAuth(
-		ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost,
-		cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat,
+	path, err := e.repoCloner.EnsureWorkspaceClonedWithCredentialRequest(
+		ctx, request, credentialHost, token,
 	)
 	return path, repoclone.RemoteRefStateHasRefs, err
 }

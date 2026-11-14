@@ -53,7 +53,6 @@ type settingsDomainDependencies struct {
 	sentry        settingsSentryService
 	github        settingsGitHubService
 	gitlab        settingsGitLabService
-	azureDevOps   settingsAzureDevOpsService
 }
 
 func newSettingsOperations(

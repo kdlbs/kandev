@@ -198,6 +198,9 @@ type Adapter struct {
 
 	// Update channel
 	updatesCh chan AgentEvent
+	// mcpAttachmentEventPersister commits attachment events before they enter
+	// the adapter queue so later observations cannot overtake their attempt.
+	mcpAttachmentEventPersister func(AgentEvent) (AgentEvent, error)
 	// Emission is serialized independently of mu so control events flush pending
 	// shell output without holding the adapter state lock during backpressure.
 	updateEmitMu       sync.Mutex

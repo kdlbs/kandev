@@ -265,6 +265,35 @@ func TestCreateMessageWithCompletedTurnRecordsClosedTurn(t *testing.T) {
 	}
 }
 
+func TestCreateMessageIdempotentCanCreateClosedLifecycleTurn(t *testing.T) {
+	svc, _, repo := newMessageTestService(t)
+	ctx := context.Background()
+	req := &CreateMessageRequest{
+		TaskID: "task-msg", TaskSessionID: "sess-msg", AuthorType: "agent",
+		Type: string(models.MessageTypeStatus), Content: "restored after interruption", CompletedTurn: true,
+	}
+
+	message, err := svc.CreateMessageIdempotent(ctx, "recovery-notice", req)
+	if err != nil {
+		t.Fatalf("CreateMessageIdempotent: %v", err)
+	}
+	turn, err := repo.GetTurn(ctx, message.TurnID)
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if turn.CompletedAt == nil || turn.Metadata[models.TurnMetaKeyLifecycleOnly] != true {
+		t.Fatalf("lifecycle turn = %+v, want completed lifecycle-only turn", turn)
+	}
+
+	replayed, err := svc.CreateMessageIdempotent(ctx, "recovery-notice", req)
+	if err != nil {
+		t.Fatalf("replay CreateMessageIdempotent: %v", err)
+	}
+	if replayed.ID != message.ID || replayed.TurnID != message.TurnID {
+		t.Fatalf("replay = %+v, want original message %+v", replayed, message)
+	}
+}
+
 func TestCreateMessageFailsWhenSessionIsUnknown(t *testing.T) {
 	svc, bus, _ := newMessageTestService(t)
 

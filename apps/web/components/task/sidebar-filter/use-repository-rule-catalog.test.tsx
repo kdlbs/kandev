@@ -7,10 +7,7 @@ const mocks = vi.hoisted(() => ({
   fetchAccessibleRepos: vi.fn(),
   fetchGitHubStatus: vi.fn(),
   fetchGitLabStatus: vi.fn(),
-  getAzureDevOpsConfig: vi.fn(),
   listUserProjects: vi.fn(),
-  listAzureDevOpsProjects: vi.fn(),
-  listAzureDevOpsRepositories: vi.fn(),
 }));
 
 vi.mock("@/lib/api/domains/github-api", () => ({
@@ -20,11 +17,6 @@ vi.mock("@/lib/api/domains/github-api", () => ({
 vi.mock("@/lib/api/domains/gitlab-api", () => ({
   fetchGitLabStatus: mocks.fetchGitLabStatus,
   listUserProjects: mocks.listUserProjects,
-}));
-vi.mock("@/lib/api/domains/azure-devops-api", () => ({
-  getAzureDevOpsConfig: mocks.getAzureDevOpsConfig,
-  listAzureDevOpsProjects: mocks.listAzureDevOpsProjects,
-  listAzureDevOpsRepositories: mocks.listAzureDevOpsRepositories,
 }));
 vi.mock("@/components/task/add-workspace-sources/use-workspace-repository-options", () => ({
   useWorkspaceRepositoryOptions: () => ({
@@ -77,9 +69,7 @@ describe("useRepositoryRuleCatalog", () => {
       token_configured: false,
     });
     mocks.fetchGitLabStatus.mockResolvedValue(null);
-    mocks.getAzureDevOpsConfig.mockResolvedValue(null);
     mocks.listUserProjects.mockRejectedValue(new Error("GitLab not configured"));
-    mocks.listAzureDevOpsProjects.mockRejectedValue(new Error("Azure DevOps not configured"));
 
     const { result } = renderHook(() => useRepositoryRuleCatalog(WORKSPACE_ID, true), { wrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));

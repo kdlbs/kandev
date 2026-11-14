@@ -35,7 +35,7 @@ export const noLiteralStringOptions = {
     exclude: [
       "^\\s*$",
       "^[^A-Za-z]*$",
-      "^(Kandev|GitHub|GitLab|Jira|Linear|Slack|Sentry|Azure DevOps|Docker|Codex|OpenCode|Claude|Copilot|Amp|Apprise|Webhook|Sprites\\.dev)$",
+      "^(Kandev|GitHub|GitLab|Jira|Linear|Slack|Sentry|Docker|Codex|OpenCode|Claude|Copilot|Amp|Apprise|Webhook|Sprites\\.dev)$",
       "^(ACP|MCP|SSH|URL|ID|PR|CI|AI|API|JSON|YAML|LSP|TLS|SQL|JQL)$",
       // Units, version prefixes, and keyboard glyphs — not translatable
       // copy; these show up as fragments beside an interpolated value.
@@ -466,35 +466,6 @@ export const i18nGuardFiles = [
   "components/sentry/sentry-issue-watch-throttle-field.tsx",
   "components/sentry/sentry-issue-watchers-section.tsx",
   "components/sentry/sentry-settings.tsx",
-  // Settings → Integrations → Azure DevOps: the page and the settings subtree of
-  // `components/azure-devops` — the connection card with its PAT help tooltip,
-  // the work-item / pull-request watch settings, the quick-action presets and
-  // the default-query editor. The board, work-item and pull-request task
-  // surfaces (`azure-devops-board*`, `azure-devops-results`, `-filters`,
-  // `-scope-bar`, `-task-*`, `-work-item-detail`, `-feedback-dialog`,
-  // `-save-view-dialog`, `-task-launcher`) live in the same directory and are
-  // NOT migrated, which is why this is a file list rather than
-  // `components/azure-devops/**`.
-  //
-  // `azure-devops-workspace-defaults.ts` holds no JSX, so `mode: "jsx-only"`
-  // never inspects it; the entry records that it has been reviewed, and only the
-  // pseudo-locale can prove it stays that way. Everything in it is deliberately
-  // left in English: the WIQL filters are Azure DevOps' query language, and the
-  // preset `label` / `hint` / `promptTemplate` records are PERSISTED to
-  // workspace settings and must keep matching the server-side defaults in
-  // `apps/backend/internal/azuredevops/workspace_settings.go`, which has no
-  // locale.
-  "app/settings/integrations/azure-devops/**/*.{ts,tsx}",
-  "components/azure-devops/azure-devops-default-queries.tsx",
-  "components/azure-devops/azure-devops-quick-actions.tsx",
-  "components/azure-devops/azure-devops-settings.tsx",
-  "components/azure-devops/azure-devops-watch-settings.tsx",
-  "components/azure-devops/azure-devops-workspace-defaults.ts",
-  // Shared preset-icon catalog rendered by the Azure DevOps quick actions. Also
-  // `.ts`-only, so the entry records the review rather than enforcing it; the
-  // icon `key`s are the persisted enum and only the labels are copy, which now
-  // travel as `labelKey` and resolve at render.
-  "components/integrations/action-preset-icons.ts",
   // Settings → Agents: the agents list, the per-agent setup page, the agent
   // profile editor, and the `/settings/agent/:id` redirect. The whole
   // `app/settings/agents` tree is migrated, plus the agent half of
@@ -1452,8 +1423,7 @@ export const i18nGuardFiles = [
   // The shared scope bar the `/github` and `/gitlab` dashboards render through
   // their thin wrappers. Listed because this migration converts it COMPLETELY —
   // all four of its own strings — not because integration chrome belongs to this
-  // PR. `azure-devops-scope-bar.tsx` also wraps it and is untouched; it passes
-  // its own labels in and inherits the base already done. Copy lives in a new
+  // PR. Copy lives in a new
   // `integrations` namespace, the home `NAMESPACE_RULES` in
   // externalize-strings.mjs already designates for `components/integrations/`.
   //
@@ -1467,11 +1437,10 @@ export const i18nGuardFiles = [
   "components/integrations/presets-scope-bar-base.tsx",
   "components/github/my-github/presets-scope-bar.tsx",
   "components/gitlab/my-gitlab/presets-scope-bar.tsx",
-  // Azure DevOps, Jira, Linear and Sentry TASK surfaces: the board / work-item /
-  // PR views, the ticket and issue dialogs and their launchers, the My-Jira and
-  // My-Linear browse pages, and the four `/azure-devops`, `/jira`, `/linear`
-  // page clients. With the settings halves listed far above, this completes all
-  // four directories.
+  // Jira, Linear and Sentry TASK surfaces: the ticket and issue dialogs and
+  // their launchers, the My-Jira and My-Linear browse pages, and the `/jira` and
+  // `/linear` page clients. With the settings halves listed far above, this
+  // completes those directories.
   //
   // Two shared files ride along because each is now converted COMPLETELY, which
   // is the criterion for listing — shared-ness is not:
@@ -1490,19 +1459,11 @@ export const i18nGuardFiles = [
   // visible label are now separate props.
   //
   // Deliberately left in English: JQL and WIQL (query languages, and the bare
-  // acronyms label them), every Azure DevOps / Jira / Linear / Sentry state,
+  // acronyms label them), every Jira / Linear / Sentry state,
   // level, priority and work-item type, all provider ids, keys and names, and
   // the persisted prompt templates the settings halves already recorded.
-  "app/azure-devops/azure-devops-page-client.tsx",
   "app/jira/jira-page-client.tsx",
   "app/linear/linear-page-client.tsx",
-  "components/azure-devops/azure-devops-board.tsx",
-  "components/azure-devops/azure-devops-feedback-dialog.tsx",
-  "components/azure-devops/azure-devops-filters.tsx",
-  "components/azure-devops/azure-devops-pull-request-pagination.tsx",
-  "components/azure-devops/azure-devops-results.tsx",
-  "components/azure-devops/azure-devops-save-view-dialog.tsx",
-  "components/azure-devops/azure-devops-work-item-detail.tsx",
   "components/integrations/auth-error-message.tsx",
   "components/jira/jira-import-bar.tsx",
   "components/jira/jira-ticket-button.tsx",
@@ -1859,7 +1820,6 @@ export const i18nGuardFiles = [
   // lives in the catalog now. `check-inline-plurals.mjs` does not see this
   // form — it is two independent ternaries, not a `+ "s"`.
   "app/tasks/tasks-page-client.tsx",
-  "components/azure-devops/azure-devops-task-launcher.tsx",
   "components/github/use-pr-scoped-review-request.ts",
   "components/task/changes-panel-hooks.ts",
   "components/task/task-center-panel-restoration.ts",
@@ -1923,9 +1883,6 @@ export const i18nGuardFiles = [
   // display records, and developer QA page chrome rather than JSX text.
   "app/demo/agent-messages/page.tsx",
   "app/demo/messages/page.tsx",
-  "components/azure-devops/azure-devops-mode-tabs.tsx",
-  "components/azure-devops/azure-devops-scope-bar.tsx",
-  "components/azure-devops/azure-devops-task-pull-request-chip.tsx",
   "components/gitlab/my-gitlab/quick-task-launcher.tsx",
   "components/shared/mermaid-error-toast.tsx",
   "components/task/task-pr-shortcut.tsx",
@@ -2008,7 +1965,6 @@ export const i18nGuardFiles = [
   "components/task/use-subtask-submit.ts",
   "components/task/use-terminal-search.ts",
   "components/workspace-source-picker/workspace-source-state.ts",
-  "hooks/domains/azure-devops/use-azure-devops-watches.ts",
   "hooks/domains/github/pr-commits-resource.ts",
   "hooks/domains/github/use-github-app-registrations.ts",
   "hooks/domains/github/use-pr-diff.ts",

@@ -20,8 +20,6 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates curl gnupg && \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
         | gpg --dearmor -o /nodesource.gpg && \
-    curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
-        | gpg --dearmor -o /microsoft.gpg && \
     rm -rf /var/lib/apt/lists/*
 
 FROM debian:bookworm-slim
@@ -29,14 +27,11 @@ FROM debian:bookworm-slim
 ARG NODE_MAJOR=24
 
 COPY --from=apt-keys /nodesource.gpg /usr/share/keyrings/nodesource.gpg
-COPY --from=apt-keys /microsoft.gpg /usr/share/keyrings/microsoft.gpg
 
 # Install runtime dependencies. gh is included because the GitHub integration
 # (PR review, webhooks) shells out to it for auth fallback when GITHUB_TOKEN
 # is not set. Node/npm support agent CLI installs and the universal image's
-# pnpm layer. Azure CLI + azure-devops extension support agentctl Azure Repos PR
-# creation (az repos pr create). apprise is installed via pipx for notification
-# fan-out.
+# pnpm layer. apprise is installed via pipx for notification fan-out.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         apt-transport-https \
@@ -52,22 +47,11 @@ RUN apt-get update && \
         pipx && \
     echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" \
         > /etc/apt/sources.list.d/nodesource.list && \
-    arch="$(dpkg --print-architecture)" && \
-    printf "%s\n" \
-        "Types: deb" \
-        "URIs: https://packages.microsoft.com/repos/azure-cli/" \
-        "Suites: bookworm" \
-        "Components: main" \
-        "Architectures: $arch" \
-        "Signed-by: /usr/share/keyrings/microsoft.gpg" \
-        > /etc/apt/sources.list.d/azure-cli.sources && \
     apt-get update && \
-    apt-get install -y --no-install-recommends nodejs azure-cli && \
+    apt-get install -y --no-install-recommends nodejs && \
     rm -f \
         /etc/apt/sources.list.d/nodesource.list \
-        /etc/apt/sources.list.d/azure-cli.sources \
-        /usr/share/keyrings/nodesource.gpg \
-        /usr/share/keyrings/microsoft.gpg && \
+        /usr/share/keyrings/nodesource.gpg && \
     rm -rf /var/lib/apt/lists/* && \
     PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install apprise
 
@@ -75,11 +59,6 @@ RUN apt-get update && \
 # Home is placed under /data so agent CLI auth state (gh, claude, codex, auggie,
 # copilot, amp, ...) lives on the PV and survives pod restarts and image upgrades.
 RUN groupadd -r kandev && useradd -r -g kandev -u 1000 -d /data/home -M kandev
-
-# Install azure-devops extension under the runtime user's Azure config dir on /data.
-RUN mkdir -p /data/home/.azure && \
-    AZURE_CONFIG_DIR=/data/home/.azure az extension add --name azure-devops && \
-    chown -R kandev:kandev /data/home/.azure
 
 # Create app directory structure matching what `kandev start` expects:
 #   /app/apps/backend/bin/kandev

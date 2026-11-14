@@ -12,6 +12,11 @@ legacy_specs: []
 
 ## Overview
 
+The delivered [runtime update manager package](../agent-runtime-update-manager/plan.md)
+replaces the expanded Settings destination with a manager overview.
+It owns the affected browser navigation assertions, while this package retains notification delivery and grouping.
+Existing statuses and verification counts remain historical evidence.
+
 Deliver one delayed availability summary across notification providers, with individual runtime details in Settings.
 One sequential work order covers the collector, delivery, payload, and rendered flow because these contracts must change together.
 The user requested grouping for startup. The fixed 30-second window is the selected implementation detail; it also handles periodic bursts.

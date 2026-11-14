@@ -1,5 +1,5 @@
 ---
-status: current
+status: superseded
 system: integrations
 requirements:
   - REQ-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001
