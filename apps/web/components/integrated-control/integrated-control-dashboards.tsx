@@ -4,13 +4,35 @@ import Link from "@/components/routing/app-link";
 import { controlHref, type ControlView } from "@/lib/navigation/integrated-control";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { useIntegratedControl } from "./integrated-control-provider";
+import { ControlAggregateOverview } from "./control-aggregate-overview";
+import { ControlGroupedHistory } from "./control-grouped-history";
+import { ControlNativeComparison } from "./control-native-comparison";
 import { ControlProviderCircuits } from "./control-provider-circuits";
+import { ControlModelBlocks } from "./control-model-blocks";
+import { ControlModelActivity } from "./control-model-activity";
+import { ControlCachedUsage } from "./control-cached-usage";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import { ControlCapacityLine } from "./control-capacity-bars";
+import { capacityDashboardCounts } from "./control-capacity-waiting";
+import { useNativeDashboards } from "@/hooks/domains/coordinator/use-control-native";
+import type { SessionCapacityObservation } from "@/lib/types/system";
 
-export function IntegratedControlDashboard({ view }: { view: ControlView }) {
+function selectWorkspaces<T extends { id: string }>(workspaces: T[], workspaceId?: string) {
+  return workspaceId ? workspaces.filter((workspace) => workspace.id === workspaceId) : workspaces;
+}
+
+export function IntegratedControlDashboard({
+  view,
+  workspaceId,
+}: {
+  view: ControlView;
+  workspaceId?: string;
+}) {
   const { t } = useTranslation();
   const control = useIntegratedControl();
   if (!control?.data) return null;
-  const { workspaces, byWorkspace } = control.data;
+  const workspaces = selectWorkspaces(control.data.workspaces, workspaceId);
+  const { byWorkspace } = control.data;
   const rows = workspaces.flatMap((workspace) =>
     (byWorkspace[workspace.id]?.items ?? []).map((coordinator) => ({ workspace, coordinator })),
   );
@@ -19,7 +41,15 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
       className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 md:p-6"
       data-testid={`control-dashboard-${view}`}
     >
-      {view === "providers" && workspaces.length > 0 && <ControlProviderCircuits />}
+      <ControlCapacityFallback
+        view={view}
+        officeEnabled={control.officeEnabled}
+        observation={control.data.capacity}
+        lastConfirmed={control.data.lastConfirmedCapacity}
+        workspaces={workspaces}
+        revision={control.data}
+      />
+      {view === "providers" && workspaces.length > 0 && <ProviderDashboards />}
       {view === "overview" && (
         <div className="grid gap-3 sm:grid-cols-3">
           <Fact label={t("sidebar:integratedControl.workspaces")} value={workspaces.length} />
@@ -39,34 +69,25 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
           />
         </div>
       )}
-      {view === "workspaces" || view === "overview" ? (
-        <div className="grid gap-3">
-          {workspaces.map((workspace) => (
-            <section key={workspace.id} className="rounded-lg border p-4">
-              <h2 className="font-medium">{workspace.name}</h2>
-              {workspace.description && (
-                <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
-                  {workspace.description}
-                </p>
-              )}
-              <p className="mt-2 text-xs text-muted-foreground">
-                {t(
-                  hasScope(workspace.scopes, SCOPE.workspaceManage)
-                    ? "sidebar:integratedControl.manageAccess"
-                    : "sidebar:integratedControl.readAccess",
-                )}
-              </p>
-              {byWorkspace[workspace.id]?.error && (
-                <p role="alert" className="mt-2 text-sm text-destructive">
-                  {t("sidebar:integratedControl.loadError")}
-                </p>
-              )}
-            </section>
-          ))}
-        </div>
-      ) : (
-        <CoordinatorFacts view={view} rows={rows} />
+      {view === "overview" && control.officeEnabled && (
+        <>
+          <ControlAggregateOverview
+            aggregate={control.aggregate}
+            controlWorkspaceIds={workspaces.map((workspace) => workspace.id)}
+            workspaceId={workspaceId}
+          />
+          <ControlNativeComparison workspaces={workspaces} revision={control.data} />
+        </>
       )}
+      {view === "history" && control.officeEnabled && (
+        <ControlGroupedHistory aggregate={control.aggregate} />
+      )}
+      <WorkspaceOrCoordinatorFacts
+        view={view}
+        workspaces={workspaces}
+        byWorkspace={byWorkspace}
+        rows={rows}
+      />
       {!control.coordinatorEnabled && (
         <p role="status" className="text-sm text-muted-foreground">
           {t("sidebar:integratedControl.coordinatorsOff")}
@@ -86,6 +107,59 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
   );
 }
 
+function ProviderDashboards() {
+  const { t } = useTranslation();
+  const limitsEnabled = useFeature("providerUsageLimits");
+  return (
+    <>
+      <ControlModelActivity />
+      {limitsEnabled ? (
+        <ControlCachedUsage />
+      ) : (
+        <p
+          role="status"
+          className="rounded-md border p-3 text-sm"
+          data-testid="control-usage-unavailable"
+        >
+          {t("sidebar:controlInspection.usageDisabled")}
+        </p>
+      )}
+      <ControlModelBlocks />
+      <ControlProviderCircuits />
+    </>
+  );
+}
+
+function ControlCapacityFallback({
+  view,
+  officeEnabled,
+  observation,
+  lastConfirmed,
+  workspaces,
+  revision,
+}: {
+  view: ControlView;
+  officeEnabled: boolean;
+  observation?: SessionCapacityObservation;
+  lastConfirmed?: SessionCapacityObservation;
+  workspaces: FactWorkspaces;
+  revision: object;
+}) {
+  const active = view === "activity" && officeEnabled;
+  const ids = active ? workspaces.map((workspace) => workspace.id) : [];
+  const dashboards = useNativeDashboards(ids, active ? revision : undefined);
+  const { wipWaiting, sharedWaiting } = capacityDashboardCounts(ids, dashboards.data);
+  if (view !== "activity" && (view !== "overview" || officeEnabled)) return null;
+  return (
+    <ControlCapacityLine
+      observation={observation}
+      lastConfirmed={lastConfirmed}
+      wipWaiting={active ? wipWaiting : null}
+      sharedWaiting={sharedWaiting}
+    />
+  );
+}
+
 function Fact({ label, value }: { label: string; value: number | string }) {
   return (
     <section className="rounded-lg border p-4">
@@ -93,6 +167,57 @@ function Fact({ label, value }: { label: string; value: number | string }) {
       <p className="mt-2 text-2xl font-semibold">{value}</p>
     </section>
   );
+}
+
+type FactWorkspaces = NonNullable<
+  NonNullable<ReturnType<typeof useIntegratedControl>>["data"]
+>["workspaces"];
+
+type FactByWorkspace = NonNullable<
+  NonNullable<ReturnType<typeof useIntegratedControl>>["data"]
+>["byWorkspace"];
+
+function WorkspaceOrCoordinatorFacts({
+  view,
+  workspaces,
+  byWorkspace,
+  rows,
+}: {
+  view: ControlView;
+  workspaces: FactWorkspaces;
+  byWorkspace: FactByWorkspace;
+  rows: FactRows;
+}) {
+  const { t } = useTranslation();
+  if (view === "workspaces" || view === "overview") {
+    return (
+      <div className="grid gap-3">
+        {workspaces.map((workspace) => (
+          <section key={workspace.id} className="rounded-lg border p-4">
+            <h2 className="font-medium">{workspace.name}</h2>
+            {workspace.description && (
+              <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
+                {workspace.description}
+              </p>
+            )}
+            <p className="mt-2 text-xs text-muted-foreground">
+              {t(
+                hasScope(workspace.scopes, SCOPE.workspaceManage)
+                  ? "sidebar:integratedControl.manageAccess"
+                  : "sidebar:integratedControl.readAccess",
+              )}
+            </p>
+            {byWorkspace[workspace.id]?.error && (
+              <p role="alert" className="mt-2 text-sm text-destructive">
+                {t("sidebar:integratedControl.loadError")}
+              </p>
+            )}
+          </section>
+        ))}
+      </div>
+    );
+  }
+  return <CoordinatorFacts view={view} rows={rows} />;
 }
 
 type FactRows = Array<{

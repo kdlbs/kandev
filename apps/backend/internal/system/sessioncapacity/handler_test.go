@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -29,7 +30,7 @@ func TestHandlerGetAndPatchSessionCapacitySettings(t *testing.T) {
 	if err := json.Unmarshal(getResponse.Body.Bytes(), &initial); err != nil {
 		t.Fatalf("decode GET: %v", err)
 	}
-	if initial.Settings != (Settings{Enabled: false, MaxSessions: DefaultMaxSessions}) {
+	if !reflect.DeepEqual(initial.Settings, (Settings{Enabled: false, MaxSessions: DefaultMaxSessions, Policy: PolicyAutomatic, GradeLimits: map[string]int{}})) {
 		t.Fatalf("initial settings = %+v", initial.Settings)
 	}
 
@@ -47,7 +48,7 @@ func TestHandlerGetAndPatchSessionCapacitySettings(t *testing.T) {
 	if err := json.Unmarshal(patchResponse.Body.Bytes(), &updated); err != nil {
 		t.Fatalf("decode PATCH: %v", err)
 	}
-	if updated.Settings != (Settings{Enabled: true, MaxSessions: 6}) {
+	if !reflect.DeepEqual(updated.Settings, (Settings{Enabled: true, MaxSessions: 6, Policy: PolicyAutomatic, GradeLimits: map[string]int{}})) {
 		t.Fatalf("updated settings = %+v", updated.Settings)
 	}
 }

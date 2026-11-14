@@ -10,6 +10,9 @@ export type SavedState = {
   agentProfileId: string;
   idleSuspensionEnabled: boolean;
   idleTimeoutMinutes: number;
+  midTurnFailoverEnabled: boolean;
+  failedRouteAutoRetryEnabled: boolean;
+  failedRouteAutoRetryMax: number;
 };
 
 export type WorkspaceUpdates = {
@@ -18,6 +21,9 @@ export type WorkspaceUpdates = {
   default_agent_profile_id?: string;
   acp_idle_suspension_enabled?: boolean;
   acp_idle_timeout_minutes?: number;
+  dynamic_midturn_failover_enabled?: boolean;
+  dynamic_failed_route_auto_retry_enabled?: boolean;
+  dynamic_failed_route_auto_retry_max?: number;
 };
 
 export type WorkspaceDraftState = {
@@ -26,6 +32,9 @@ export type WorkspaceDraftState = {
   defaultAgentProfileId: string;
   idleSuspensionEnabled: boolean;
   idleTimeoutMinutes: string;
+  midTurnFailoverEnabled: boolean;
+  failedRouteAutoRetryEnabled: boolean;
+  failedRouteAutoRetryMax: string;
 };
 
 type SaveRequestLike = {
@@ -62,7 +71,34 @@ function buildWorkspaceUpdates(draft: WorkspaceDraftState, saved: SavedState): W
   if (timeoutMinutes !== saved.idleTimeoutMinutes) {
     updates.acp_idle_timeout_minutes = timeoutMinutes;
   }
+  if (draft.midTurnFailoverEnabled !== saved.midTurnFailoverEnabled) {
+    updates.dynamic_midturn_failover_enabled = draft.midTurnFailoverEnabled;
+  }
+  return withFailedRouteAutoRetryUpdates(updates, draft, saved);
+}
+
+function withFailedRouteAutoRetryUpdates(
+  updates: WorkspaceUpdates,
+  draft: WorkspaceDraftState,
+  saved: SavedState,
+): WorkspaceUpdates {
+  if (draft.failedRouteAutoRetryEnabled !== saved.failedRouteAutoRetryEnabled) {
+    updates.dynamic_failed_route_auto_retry_enabled = draft.failedRouteAutoRetryEnabled;
+  }
+  const retryMax = Number(draft.failedRouteAutoRetryMax);
+  if (retryMax !== saved.failedRouteAutoRetryMax) {
+    updates.dynamic_failed_route_auto_retry_max = retryMax;
+  }
   return updates;
+}
+
+function savedFailedRouteAutoRetry(updated: Workspace, draft: WorkspaceDraftState) {
+  return {
+    failedRouteAutoRetryEnabled:
+      updated.dynamic_failed_route_auto_retry_enabled ?? draft.failedRouteAutoRetryEnabled,
+    failedRouteAutoRetryMax:
+      updated.dynamic_failed_route_auto_retry_max ?? Number(draft.failedRouteAutoRetryMax),
+  };
 }
 
 export function buildWorkspaceSaveHandler({
@@ -89,6 +125,9 @@ export function buildWorkspaceSaveHandler({
         agentProfileId: updated.default_agent_profile_id ?? "",
         idleSuspensionEnabled: updated.acp_idle_suspension_enabled ?? draft.idleSuspensionEnabled,
         idleTimeoutMinutes: updated.acp_idle_timeout_minutes ?? Number(draft.idleTimeoutMinutes),
+        midTurnFailoverEnabled:
+          updated.dynamic_midturn_failover_enabled ?? draft.midTurnFailoverEnabled,
+        ...savedFailedRouteAutoRetry(updated, draft),
       });
       const { workspaces, setWorkspaces } = storeApi.getState();
       setWorkspaces(
@@ -102,6 +141,10 @@ export function buildWorkspaceSaveHandler({
                 default_agent_profile_id: updated.default_agent_profile_id ?? null,
                 acp_idle_suspension_enabled: updated.acp_idle_suspension_enabled,
                 acp_idle_timeout_minutes: updated.acp_idle_timeout_minutes,
+                dynamic_midturn_failover_enabled: updated.dynamic_midturn_failover_enabled,
+                dynamic_failed_route_auto_retry_enabled:
+                  updated.dynamic_failed_route_auto_retry_enabled,
+                dynamic_failed_route_auto_retry_max: updated.dynamic_failed_route_auto_retry_max,
               }
             : workspace,
         ),

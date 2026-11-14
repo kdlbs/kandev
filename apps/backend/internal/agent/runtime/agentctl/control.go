@@ -59,27 +59,28 @@ type McpServerConfig struct {
 
 // CreateInstanceRequest contains the parameters for creating a new agent instance.
 type CreateInstanceRequest struct {
-	ID                         string              `json:"id,omitempty"`
-	WorkspacePath              string              `json:"workspace_path"`
-	AgentCommand               string              `json:"agent_command,omitempty"`
-	Protocol                   string              `json:"protocol,omitempty"` // Protocol adapter to use (currently "acp")
-	CodexAppServerEnabled      bool                `json:"codex_app_server_enabled,omitempty"`
-	AgentType                  string              `json:"agent_type,omitempty"`     // Agent type ID for debug file naming (e.g., "codex", "auggie")
-	WorkspaceFlag              string              `json:"workspace_flag,omitempty"` // CLI flag for workspace path (e.g., "--workspace-root")
-	Env                        map[string]string   `json:"env,omitempty"`
-	AutoStart                  bool                `json:"auto_start,omitempty"`
-	AutoApprovePermissions     *bool               `json:"auto_approve_permissions,omitempty"`
-	McpServers                 []McpServerConfig   `json:"mcp_servers,omitempty"`
-	SessionID                  string              `json:"session_id,omitempty"`                    // Task session ID for MCP tool calls
-	TaskID                     string              `json:"task_id,omitempty"`                       // Task ID for MCP plan tool calls (server-side injection)
-	DisableAskQuestion         bool                `json:"disable_ask_question,omitempty"`          // Disable ask_user_question MCP tool (TUI agents)
-	PromptSuggestions          bool                `json:"prompt_suggestions,omitempty"`            // Ask native-suggestion agents to emit next-prompt suggestions
-	CopilotNativeSessionEvents bool                `json:"copilot_native_session_events,omitempty"` // Enable Copilot native compaction and attributed usage
-	AssumeMcpSse               bool                `json:"assume_mcp_sse,omitempty"`                // Assume agent supports SSE MCP servers
-	AssumeMcpHttp              bool                `json:"assume_mcp_http,omitempty"`               // Assume agent supports HTTP MCP servers
-	McpMode                    string              `json:"mcp_mode,omitempty"`                      // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
-	McpProviders               []string            `json:"mcp_providers,omitempty"`                 // Supported review-automation providers
-	McpProfile                 *mcpprofile.Context `json:"mcp_profile,omitempty"`                   // Backend-owned typed MCP tool profile
+	InferenceClosureOperationID string              `json:"inference_closure_operation_id,omitempty"`
+	ID                          string              `json:"id,omitempty"`
+	WorkspacePath               string              `json:"workspace_path"`
+	AgentCommand                string              `json:"agent_command,omitempty"`
+	Protocol                    string              `json:"protocol,omitempty"` // Protocol adapter to use (currently "acp")
+	CodexAppServerEnabled       bool                `json:"codex_app_server_enabled,omitempty"`
+	AgentType                   string              `json:"agent_type,omitempty"`     // Agent type ID for debug file naming (e.g., "codex", "auggie")
+	WorkspaceFlag               string              `json:"workspace_flag,omitempty"` // CLI flag for workspace path (e.g., "--workspace-root")
+	Env                         map[string]string   `json:"env,omitempty"`
+	AutoStart                   bool                `json:"auto_start,omitempty"`
+	AutoApprovePermissions      *bool               `json:"auto_approve_permissions,omitempty"`
+	McpServers                  []McpServerConfig   `json:"mcp_servers,omitempty"`
+	SessionID                   string              `json:"session_id,omitempty"`                    // Task session ID for MCP tool calls
+	TaskID                      string              `json:"task_id,omitempty"`                       // Task ID for MCP plan tool calls (server-side injection)
+	DisableAskQuestion          bool                `json:"disable_ask_question,omitempty"`          // Disable ask_user_question MCP tool (TUI agents)
+	PromptSuggestions           bool                `json:"prompt_suggestions,omitempty"`            // Ask native-suggestion agents to emit next-prompt suggestions
+	CopilotNativeSessionEvents  bool                `json:"copilot_native_session_events,omitempty"` // Enable Copilot native compaction and attributed usage
+	AssumeMcpSse                bool                `json:"assume_mcp_sse,omitempty"`                // Assume agent supports SSE MCP servers
+	AssumeMcpHttp               bool                `json:"assume_mcp_http,omitempty"`               // Assume agent supports HTTP MCP servers
+	McpMode                     string              `json:"mcp_mode,omitempty"`                      // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
+	McpProviders                []string            `json:"mcp_providers,omitempty"`                 // Supported review-automation providers
+	McpProfile                  *mcpprofile.Context `json:"mcp_profile,omitempty"`                   // Backend-owned typed MCP tool profile
 	// RequiresProcessKill tells agentctl to skip the graceful stdin-close wait
 	// and reap the agent process group immediately. Required for agents whose
 	// runtime keeps child processes (e.g. MCP servers) alive when stdin closes
@@ -414,6 +415,11 @@ func (c *ControlClient) DeleteInstance(ctx context.Context, instanceID string) e
 		return fmt.Errorf("failed to delete instance: %s (status %d)", errResp.Error, resp.StatusCode)
 	}
 
+	if resp.StatusCode == http.StatusOK {
+		if err := observeDeletedInference(ctx, instanceID, resp.Body); err != nil {
+			return fmt.Errorf("settle stopped instance inference: %w", err)
+		}
+	}
 	c.logger.Info("deleted agent instance", zap.String("instance_id", instanceID))
 	return nil
 }

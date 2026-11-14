@@ -623,6 +623,7 @@ export function getDashboard(workspaceId: string, options?: ApiRequestOptions) {
   return fetchJson<DashboardData>(`${BASE}/workspaces/${workspaceId}/dashboard`, options);
 }
 
+export * from "./office-aggregate-api";
 export * from "./office-runs-api";
 
 // --- Workspace Settings ---
