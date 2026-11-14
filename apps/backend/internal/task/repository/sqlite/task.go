@@ -5502,6 +5502,11 @@ func (r *Repository) UnarchiveTaskByCascade(ctx context.Context, id, cascadeID s
 		return false, err
 	}
 	rows, _ := result.RowsAffected()
+	if rows > 0 {
+		if err := r.reopenTaskArchivedRecoveryBlocksTx(ctx, tx, id); err != nil {
+			return false, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
@@ -5545,6 +5550,11 @@ func (r *Repository) UnarchiveTask(ctx context.Context, id string) (bool, error)
 		return false, err
 	}
 	rows, _ := result.RowsAffected()
+	if rows > 0 {
+		if err := r.reopenTaskArchivedRecoveryBlocksTx(ctx, tx, id); err != nil {
+			return false, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}

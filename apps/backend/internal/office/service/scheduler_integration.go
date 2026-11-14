@@ -180,9 +180,9 @@ type sessionRecoveryRunStore interface {
 	ClearSessionRecoveryPark(context.Context, string, string) error
 }
 
-// liftResolvedSessionRecoveryRuns releases only runs whose task-owned block is
-// already resolved. Missing or unreadable blocks stay parked, which keeps a
-// projection gap fail closed across restart.
+// liftResolvedSessionRecoveryRuns releases runs after actual session recovery.
+// Archive-only bookkeeping keeps the park and its reference across unarchive;
+// missing or unreadable blocks stay parked across restart.
 func (si *SchedulerIntegration) liftResolvedSessionRecoveryRuns(ctx context.Context) {
 	store, ok := any(si.svc.repo).(sessionRecoveryRunStore)
 	if !ok {
@@ -211,7 +211,7 @@ func (si *SchedulerIntegration) liftResolvedSessionRecoveryRuns(ctx context.Cont
 			}
 			continue
 		}
-		if block == nil || block.State != taskmodels.RecoveryBlockResolved {
+		if block == nil || block.State != taskmodels.RecoveryBlockResolved || block.AuthorizedAction == taskmodels.RecoveryBlockActionTaskArchived {
 			continue
 		}
 		if err := store.ClearSessionRecoveryPark(ctx, run.ID, *run.SessionRecoveryBlockID); err != nil {

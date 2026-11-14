@@ -55,6 +55,7 @@ func (s *Service) StartSessionReconciliationLoop(ctx context.Context) {
 				return
 			case now := <-ticker.C:
 				s.runArchivedSessionReconciliation(ctx)
+				s.runArchivedRecoveryBlockReconciliation(ctx)
 				s.runOrphanedSessionReconciliation(ctx)
 				s.runActiveSessionSweep(ctx, now)
 				s.runTurnChangeRetentionSweep(ctx, now)
@@ -102,6 +103,70 @@ func (s *Service) runArchivedSessionReconciliation(ctx context.Context) {
 			continue
 		}
 		s.finalizeCancelledSessions(reconcileCtx, taskID, activeSessions, deadline, models.SessionArchiveCancelReason)
+	}
+}
+
+const (
+	archivedRecoveryBlockSweepLimit   = 100
+	archivedRecoveryBlockSweepTimeout = 30 * time.Second
+)
+
+// archivedRecoveryBlockRepository is the narrow capability the archived-owner
+// fence sweep needs. The concrete sqlite repository is the production
+// implementer; keeping it optional avoids widening every task-repository test
+// double with methods their paths never exercise.
+type archivedRecoveryBlockRepository interface {
+	ListOpenRecoveryBlocksForArchivedTasks(ctx context.Context, limit int) ([]string, error)
+	ResolveSessionRecoveryBlockForArchivedTask(
+		ctx context.Context, id, action string, resolvedAt time.Time,
+	) (bool, error)
+}
+
+// runArchivedRecoveryBlockReconciliation closes recovery fences that can no
+// longer gate work: the owning task is archived and its session is terminal,
+// so resume and workspace restore are both refused while it stays archived.
+// Closure is bookkeeping: it preserves the delivery outcome and row and uses a
+// distinct authorized action. Unarchiving reopens these blocks.
+//
+// Live tasks, including their terminal non-primary sessions, are deliberately
+// out of scope because a manual resume can still revive them. The sweep is
+// bounded and idempotent; a failed or partial pass is retried on the next tick.
+func (s *Service) runArchivedRecoveryBlockReconciliation(ctx context.Context) {
+	repo, ok := s.tasks.(archivedRecoveryBlockRepository)
+	if !ok {
+		return
+	}
+	sweepCtx, cancel := context.WithTimeout(ctx, archivedRecoveryBlockSweepTimeout)
+	defer cancel()
+	ids, err := repo.ListOpenRecoveryBlocksForArchivedTasks(sweepCtx, archivedRecoveryBlockSweepLimit)
+	if err != nil {
+		s.logger.Error("archived recovery block reconciliation: failed to list candidates", zap.Error(err))
+		return
+	}
+	if len(ids) == 0 {
+		return
+	}
+	now := time.Now().UTC()
+	closed := 0
+	for _, id := range ids {
+		if sweepCtx.Err() != nil {
+			break
+		}
+		changed, err := repo.ResolveSessionRecoveryBlockForArchivedTask(
+			sweepCtx, id, models.RecoveryBlockActionTaskArchived, now,
+		)
+		if err != nil {
+			s.logger.Warn("archived recovery block reconciliation: failed to close block",
+				zap.String("block_id", id), zap.Error(err))
+			continue
+		}
+		if changed {
+			closed++
+		}
+	}
+	if closed > 0 {
+		s.logger.Info("archived recovery block reconciliation: closed fences",
+			zap.Int("closed", closed))
 	}
 }
 
