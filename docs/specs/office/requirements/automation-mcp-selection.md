@@ -95,8 +95,8 @@ Its closing comment identifies a released fix. It is related evidence, not proof
 - **AC-OFFICE-AUTOMATION-MCP-004.2:** The existing Save changes and Discard actions shall own the draft.
   Loading, unavailable options, unrelated saves, failed saves, and stale responses shall not erase or silently approve selections.
   Conflicts shall retain the draft and require explicit reconciliation after reload.
-- **AC-OFFICE-AUTOMATION-MCP-004.3:** Run details shall distinguish desired choices, accepted execution choices, and observed connections.
-  A reused process with changed choices shall show next-process timing. Historical runs shall not display today's choices as their accepted selection.
+- **AC-OFFICE-AUTOMATION-MCP-004.3:** Automation run details shall use the existing MCP plug viewer for MCP inspection and shall not add a separate MCP access summary above the conversation.
+  Historical runs shall not display today's choices as their accepted selection.
 - **AC-OFFICE-AUTOMATION-MCP-004.4:** Phone and desktop shall support the same selection and recovery actions.
 
 - **AC-OFFICE-AUTOMATION-MCP-004.5:** New copy and accessible labels shall use all shipped locale catalogs.
@@ -107,6 +107,8 @@ Its closing comment identifies a released fix. It is related evidence, not proof
 - **AC-OFFICE-AUTOMATION-MCP-004.9:** Keyboard focus shall survive viewport changes.
 - **AC-OFFICE-AUTOMATION-MCP-004.10:** Drafts shall survive viewport changes.
 
+- **AC-OFFICE-AUTOMATION-MCP-004.11:** Optional built-in packages shall show explicit On/Off switches directly in the package list, without an inheritance action. Toggling shall not open details. Existing target-mode defaults and saved selections shall remain unchanged. Core shall remain required. Workspace restrictions shall still prevent enabling blocked packages in normal-task templates.
+
 ## Exclusions
 
 No arbitrary built-in tool allowlists, new package identities, provider integrations, endpoint probes, or automatic process restarts.
@@ -116,3 +118,5 @@ External MCP services retain their own authorization. Package selection does not
 ## Implementation plans
 
 - [Automation MCP selection](../../../plans/automation-mcp-selection/plan.md)
+
+The completed [switch controls plan](../../../plans/builtin-mcp-switches/plan.md) owns AC-OFFICE-AUTOMATION-MCP-004.11.

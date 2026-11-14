@@ -1016,6 +1016,9 @@ type e2eCreateTaskSessionRequest struct {
 	// listRunsWithTaskState/countActiveRunsWithTaskState read). Set to
 	// false to seed a stale, superseded session for resume scenarios.
 	IsPrimary *bool `json:"is_primary"`
+	// IsPassthrough selects the terminal-backed session mode. Omitted values
+	// preserve the default structured session used by existing fixtures.
+	IsPassthrough *bool `json:"is_passthrough"`
 }
 
 // handleE2ECreateTaskSession seeds a task_sessions row directly for E2E
@@ -1038,6 +1041,9 @@ func handleE2ECreateTaskSession(repo *sqliterepo.Repository, log *logger.Logger)
 		session := &taskmodels.TaskSession{
 			TaskID: body.TaskID,
 			State:  taskmodels.TaskSessionState(body.State),
+		}
+		if body.IsPassthrough != nil {
+			session.IsPassthrough = *body.IsPassthrough
 		}
 		if err := repo.CreateTaskSession(c.Request.Context(), session); err != nil {
 			log.Error("e2e: failed to create task session", zap.Error(err))

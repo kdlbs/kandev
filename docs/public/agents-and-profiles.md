@@ -11,6 +11,26 @@ The composer model picker shows the session's agent CLI logo beside the selected
 
 Agent authentication is separate from repository and integration credentials.
 
+## Recover from provider authentication failures
+
+An agent may need to sign in to its model provider before it can create or
+restore a conversation. Complete that sign-in on the host and as the operating
+system user that runs the selected executor. A local agent uses the Kandev
+backend user's environment. A remote agent uses the remote executor's
+environment.
+
+When Kandev confirms a provider authentication failure, the session recovery
+card names the configured provider and shows any login method the agent
+advertises. Some methods are protocol actions, not terminal commands. Follow
+the displayed guidance, then choose the available restart or resume action.
+Kandev keeps the recovery card until the agent confirms that it is ready.
+
+Provider account sign-in does not grant repository access or authenticate an
+MCP server. For those failures, check the repository's Git credentials and
+environment or the MCP server's own authentication settings. See [Scope agent
+profiles and MCP definitions](security.md#scope-agent-profiles-and-mcp-definitions)
+for the separate credential boundaries.
+
 ## Quick path
 
 1. Rescan or install the agent on the host running Kandev.
@@ -272,7 +292,23 @@ reference before the update can start.
 
 ### Update a managed agent runtime
 
-The update icon is available on managed Claude, Codex, OpenCode, Copilot,
+Open **Runtime updates** beside **Install agents** on **Settings > Agents**. The
+button stays visible when no updates are available. Its count includes known
+newer versions that have a supported individual update action; unknown checks,
+external guidance, unavailable runtimes, and active maintenance do not increase
+it. On a phone the same button appears below the page heading.
+
+The manager groups available updates first. Each row shows the agent, current and
+available versions, and the supported actions. Up-to-date, unknown, externally
+managed, and unavailable registrations stay available in separate groups. Source
+and ownership information remain inside each runtime's details.
+
+The update icon on a managed agent card, **Manage versions**, and the manager row
+all open that agent's details in the same desktop dialog or phone drawer. Closing
+the surface returns you to the page. Opening a notification fragment does not
+scroll to another card or open a second overlay.
+
+The update control is available on managed Claude, Codex, OpenCode, Copilot,
 Gemini, Pi, and Muse agent cards when Kandev owns their managed runtime. It
 prepares their pinned npm runtime on the Kandev host. OMP uses the separate
 self-update flow above.
@@ -305,7 +341,7 @@ versions. The dot is only a hint. Opening the control performs a fresh,
 authoritative preview before any update starts. If the check is unavailable,
 the control has no dot but remains usable.
 
-1. Select the update icon.
+1. Select **Runtime updates**, or select the update icon on an agent card.
 2. Review the current version, active version, available stable versions, and command.
 3. Keep the latest version selected for a normal update, or select an older stable version to roll back.
 4. Select **Update runtime**, **Roll back runtime**, or **Repair runtime**.
@@ -471,7 +507,7 @@ store instead of deleting it.
 
 ### Refresh profile models after a runtime update
 
-Manage runtime versions in **Settings > Agents > Agent runtime updates**.
+Manage runtime versions from **Runtime updates** on **Settings > Agents**.
 Profile pages focus on model selection and launch settings.
 
 After a managed runtime update succeeds, an open profile refreshes its model
@@ -521,29 +557,33 @@ applying leaves your saved configuration unchanged.
 Kandev checks enabled, available agent runtimes in the background, including
 native CLIs with a verified release source. Open **Settings > Agents** to review
 runtime versions and update policies. A notice for one runtime names it and links
-directly to its row in **Settings > Agents > Agent runtime updates**. The existing
+directly to its details in the runtime manager. The existing
 update-available notification preferences apply; repeated notices for the same
 runtime and version are suppressed across reloads.
 
 At startup or after reconnect, available runtime updates discovered within the
-same 30-second window appear in one summary. **Review updates** opens the expanded
-runtime section. A notice for one runtime keeps its name and direct link. Update
+same 30-second window appear in one summary. **Review updates** opens the runtime
+manager. A notice for one runtime keeps its name and direct link. Update
 success, failure, and interruption notices remain individual and immediate.
 
-The **Agent runtime updates** section is at the bottom of **Settings > Agents**,
-after your installed agents, and starts collapsed. Expand it to manage runtime
-policies. Notification links open the section automatically and
-reveal their destination. Collapsing the section preserves unsaved policy changes.
+**Runtime updates** stays visible beside **Install agents** on desktop and below
+the page heading on phones. The manager groups available updates first, then
+up-to-date, unknown, externally managed, and unavailable registrations. **Unknown**
+means Kandev could not verify the version or release source. It does not mean the
+runtime is up to date. Unavailable and disabled registrations remain listed
+separately, without background checks. Offline and source failures do not create
+error notifications.
 
-The runtime section shows the selected or observed version, latest known version,
-and who manages the installation. **Unknown** means Kandev could not verify the
-version or release source. It does not mean the runtime is up to date. Unavailable
-and disabled registrations remain listed separately, without background checks.
-Offline and source failures do not create error notifications.
+Runtime source, ownership, retained outcomes, and manual guidance stay in each
+runtime's details. Closing the manager preserves unsaved policy drafts on the
+same settings route. A failed refresh keeps the last known information visible
+without presenting it as a fresh check.
 
 Automatic updates are off by default. An administrator can enable **Automatic
-updates** for each eligible managed runtime, then select the shared **Save changes**
-action. This consent applies to the Kandev installation and survives reloads.
+updates** for each eligible managed runtime, then select the explicit
+**Save changes** action inside the runtime manager. **Reset** discards the draft
+without writing. Closing or reopening the manager preserves the draft. This
+consent applies to the Kandev installation and survives reloads.
 Kandev checks on startup and every 15 minutes; successful release lookups are
 cached for six hours and failed lookups for 15 minutes.
 
@@ -553,6 +593,34 @@ and version. The retained result records the old and target versions. If
 preparation, validation, or activation fails, that attempt preserves the previous
 selection. Kandev reports the failure and does not repeatedly retry that target. An interrupted
 update has an unconfirmed result; review the current selection before retrying.
+
+### Update several managed runtimes at once
+
+The manager reviews exact targets before approval. Select the rows to change, or
+use the select-all control, then choose **Update all** or **Update selected**.
+An empty selection disables approval. Compatibility information returned by the
+preview stays visible before you approve.
+
+Bulk updates cover only enabled, available, Kandev-owned pinned runtimes with a
+known newer version and a supported validated update. External installations,
+harness-owned updaters, managed fallbacks, OpenCode family migrations, rollback,
+repair, and unknown checks keep their individual actions. A runtime with unsaved
+automatic-update changes must Save or Reset that policy before it can join bulk
+approval.
+
+Each approved target is attempted once through the normal per-runtime validation
+path. If the runtime identity, family, source, selection, or target changes after
+review, that row fails and requires a new review. One failed admission does not
+stop other approved rows. The backend can prepare independent runtimes
+concurrently.
+
+The result list shows submission, job progress, success, failure, or an
+unconfirmed result. Queued and accepted states are progress, never success.
+**Retry failed** returns only failed targets to review; successful targets keep
+their result. A lost response stays unconfirmed and is never replayed
+automatically. Use **Refresh status** to recover retained server jobs. Closing
+the manager or changing routes does not cancel approved work, but reload cannot
+reconstruct which unsubmitted requests a lost browser approved.
 
 Use **Manage versions** to retry manually, choose an older stable version, or
 return to the Kandev default. A manual version choice turns off automatic updates,
@@ -598,12 +666,12 @@ This order applies only to Settings. Task creation, in-task agents, handoff, and
 | Mode                                   | Requested through the installed agent's advertised ACP session control before the first prompt. Kandev prefers its mode config option and supports legacy `session/set_mode`. An explicit mode must be confirmed by the agent or startup holds the prompt. Applying a mode does not write Claude settings or redirect its configuration directory. |
 | Configuration options                  | Dynamic ACP values requested with `session/set_config_option`.                                                                                                                                                                                                                                                                                     |
 | CLI flags                              | Enabled entries are tokenized and appended to the ACP launch command.                                                                                                                                                                                                                                                                              |
-| Command prefix                         | Optional launcher argv for structured sessions, ACP probes, and native terminal passthrough. No provider plugin is required.                                                                                                                                                                                                                                                               |
+| Command prefix                         | Optional launcher argv for structured sessions, ACP probes, and native terminal passthrough. No provider plugin is required.                                                                                                                                                                                                                       |
 | Environment                            | Literal values or references to Kandev secrets, resolved when the process starts.                                                                                                                                                                                                                                                                  |
 | Provider                               | Native uses the agent default. OpenAI-compatible sends ACP requests to the configured HTTP(S) router and can use a Kandev global API-key secret.                                                                                                                                                                                                   |
 | CLI passthrough                        | Uses the CLI's native terminal interface instead of a structured ACP conversation.                                                                                                                                                                                                                                                                 |
 | Enabled                                | Keeps the profile available to existing sessions and settings while hiding it from new task, session, handoff, and Quick Chat selectors.                                                                                                                                                                                                           |
-| Auto-approve all permissions           | Answers automatically with an offered `allow_once` or `allow_always` option. Requests without an allow option stay pending for a person to answer. Every automatic decision keeps its option and source in permission history. It is off by default.                                                                                                                                          |
+| Auto-approve all permissions           | Answers automatically with an offered `allow_once` or `allow_always` option. Requests without an allow option stay pending for a person to answer. Every automatic decision keeps its option and source in permission history. It is off by default.                                                                                               |
 | MCP servers                            | Adds profile-specific external MCP servers when the agent supports MCP.                                                                                                                                                                                                                                                                            |
 | Share local Cursor MCP credentials     | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. It applies only to local executions that share the backend home directory.                                                                                                                                                                                                |
 | Import local Cursor plugin MCP servers | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. Imports supported local plugin and user MCP definitions into task worktrees. On supported macOS installations, enabled marketplace plugins are discovered from Cursor’s account service and matched to their exact cached revision.                                       |
@@ -1183,7 +1251,6 @@ SSH native terminal passthrough does not yet carry wrapper settings. Kandev refu
 
 Wrapping alone does not establish a sandbox policy. The wrapper owns its access rules and platform support. Rich sandbox configuration through plugins is not implemented.
 
-
 </details>
 
 ## Environment variables and secrets
@@ -1559,7 +1626,6 @@ checkbox draft remains visible.
 In the existing task editor, a failed MCP save also exposes **Reload choices**.
 Reload keeps your task fields and MCP draft. Submit the task again only after
 you review those choices.
-
 
 For a saved global profile, **Workspace** selects the catalog context without
 changing your active workspace. If settings have unsaved changes, switching

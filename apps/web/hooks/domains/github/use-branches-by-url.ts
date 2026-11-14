@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { fetchRepoBranches } from "@/lib/api/domains/github-api";
 import { listProjectBranches } from "@/lib/api/domains/gitlab-api";
-import { listAzureDevOpsBranches } from "@/lib/api/domains/azure-devops-api";
 import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import type { Branch } from "@/lib/types/http";
 import { usePluginRegistry } from "@/lib/plugins/registry";
@@ -341,10 +340,6 @@ function builtInBranchRequestForURL(
       return githubBranchRequest(parsed, workspaceId);
     case "gitlab.com":
       return gitLabBranchRequest(parsed, workspaceId);
-    case "dev.azure.com":
-      return azureHTTPSBranchRequest(parsed, workspaceId);
-    case "ssh.dev.azure.com":
-      return azureSSHBranchRequest(parsed, workspaceId);
     default:
       return null;
   }
@@ -401,22 +396,6 @@ function gitLabBranchRequest(parsed: URL, workspaceId: string | null): BranchReq
   if (!project.includes("/")) return null;
   return (signal) =>
     listProjectBranches(workspaceId, project, { expectedHost: parsed.origin, init: { signal } });
-}
-
-function azureHTTPSBranchRequest(parsed: URL, workspaceId: string | null): BranchRequest | null {
-  if (!workspaceId) return null;
-  const parts = parsed.pathname.split("/").filter(Boolean);
-  if (parts.length !== 4 || parts[2] !== "_git") return null;
-  return (signal) =>
-    listAzureDevOpsBranches(workspaceId, parts[0], parts[1], parts[3], { init: { signal } });
-}
-
-function azureSSHBranchRequest(parsed: URL, workspaceId: string | null): BranchRequest | null {
-  if (!workspaceId) return null;
-  const parts = parsed.pathname.split("/").filter(Boolean);
-  if (parts.length !== 4 || parts[0] !== "v3") return null;
-  return (signal) =>
-    listAzureDevOpsBranches(workspaceId, parts[1], parts[2], parts[3], { init: { signal } });
 }
 
 function parseRemoteURL(raw: string): URL | null {

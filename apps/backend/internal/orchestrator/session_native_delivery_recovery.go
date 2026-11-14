@@ -171,6 +171,9 @@ func (s *Service) finishLoadedNativeDeliveryBlock(ctx context.Context, block *mo
 	changed, err := resolver.ResolveSessionRecoveryBlockWithNativeEvidence(ctx, block.ID, proof, time.Now().UTC())
 	if err == nil && changed {
 		s.publishAgentDeliveryRecoveryState(ctx, block.SessionID)
+		if err := s.publishPendingRecoveryNotice(ctx, block.SessionID); err != nil {
+			return changed, err
+		}
 	}
 	return changed, err
 }

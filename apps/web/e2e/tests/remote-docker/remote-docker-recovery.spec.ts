@@ -189,6 +189,10 @@ function isResumedAgentBootMessage(message: { type?: string; metadata?: Record<s
   );
 }
 
+function isSessionRestorationNotice(message: { metadata?: Record<string, unknown> }) {
+  return message.metadata?.kind === "session_restored_after_interruption";
+}
+
 async function requestSessionResume(baseUrl: string, taskId: string, sessionId: string) {
   const requestId = `e2e-resume-${randomUUID()}`;
   const socket = new WebSocket(baseUrl.replace(/^http/, "ws") + "/ws");
@@ -254,6 +258,9 @@ async function seedRemoteLossAndRestart(
   const { session } = await apiClient.getTaskSession(sessionId);
   const executionId = session.agent_execution_id;
   expect(executionId, "the remote execution identity is missing").toBeTruthy();
+  await apiClient.addUserMessage(taskId, sessionId, "/slow 30");
+  await waitForAgentMessage(apiClient, sessionId, "Running slow response", 30_000);
+  const beforeMessages = (await apiClient.listSessionMessages(sessionId)).messages;
 
   const pid = backend.pid();
   expect(pid, "the test-owned backend PID is unavailable").toBeTruthy();
@@ -270,7 +277,9 @@ async function seedRemoteLossAndRestart(
   fs.mkdirSync(localJournalDir, { recursive: true });
   const localJournal = path.join(localJournalDir, "delivery.bbolt");
   execFileSync("docker", ["cp", `${containerId}:${journalPath(sessionId)}`, localJournal]);
-  const interrupted = seedInterruptedPrompt(backend.tmpDir, sessionId, executionId);
+  const interrupted = seedInterruptedPrompt(backend.tmpDir, sessionId, executionId, {
+    allowUnverifiableRuntimeIdentity: true,
+  });
   execFileSync("docker", ["cp", localJournal, `${containerId}:${journalPath(sessionId)}`]);
   const queueClaim = seedUncertainQueueClaim(
     backend.tmpDir,
@@ -279,7 +288,7 @@ async function seedRemoteLossAndRestart(
     session.queue_incarnation_id,
   );
   await backend.restart();
-  return { interrupted, queueClaim, executionId };
+  return { interrupted, queueClaim, executionId, beforeMessages };
 }
 
 async function verifyRemoteLossRecoveryUI(
@@ -295,8 +304,7 @@ async function verifyRemoteLossRecoveryUI(
     seedData,
     phone ? "remote docker loss recovery phone" : "remote docker loss recovery desktop",
   );
-  const beforeMessages = (await apiClient.listSessionMessages(sessionId)).messages;
-  const { interrupted, queueClaim, executionId } = await seedRemoteLossAndRestart(
+  const { interrupted, queueClaim, executionId, beforeMessages } = await seedRemoteLossAndRestart(
     backend,
     apiClient,
     task.id,
@@ -339,16 +347,18 @@ async function verifyRemoteLossRecoveryUI(
   expect(readQueueClaim(backend.tmpDir, queueClaim.entry_id)).toEqual(queueClaim);
 
   const resumeOutcome = await requestSessionResume(backend.baseUrl, task.id, sessionId);
-  expect(resumeOutcome.type).toBe("response");
+  expect(resumeOutcome.type, JSON.stringify(resumeOutcome.payload)).toBe("response");
   expect(resumeOutcome.payload).toMatchObject({
     session_id: sessionId,
     agent_execution_id: expect.any(String),
   });
 
   const afterAttempt = (await apiClient.listSessionMessages(sessionId)).messages;
-  expect(afterAttempt.filter((message) => !isResumedAgentBootMessage(message))).toEqual(
-    beforeMessages,
-  );
+  expect(
+    afterAttempt.filter(
+      (message) => !isResumedAgentBootMessage(message) && !isSessionRestorationNotice(message),
+    ),
+  ).toEqual(beforeMessages);
   expect(afterAttempt.filter(isResumedAgentBootMessage)).toHaveLength(1);
   expect((await apiClient.getTaskSession(sessionId)).session.id).toBe(sessionId);
   expectExplicitResumePreservedUncertainty(
@@ -369,9 +379,11 @@ async function verifyRemoteLossRecoveryUI(
   await session.waitForLoad();
   expect((await apiClient.getTaskSession(sessionId)).session.task_id).toBe(task.id);
   const afterReloadMessages = (await apiClient.listSessionMessages(sessionId)).messages;
-  expect(afterReloadMessages.filter((message) => !isResumedAgentBootMessage(message))).toEqual(
-    beforeMessages,
-  );
+  expect(
+    afterReloadMessages.filter(
+      (message) => !isResumedAgentBootMessage(message) && !isSessionRestorationNotice(message),
+    ),
+  ).toEqual(beforeMessages);
   expect(afterReloadMessages.filter(isResumedAgentBootMessage)).toHaveLength(1);
   expectExplicitResumePreservedUncertainty(
     backend.tmpDir,
@@ -448,6 +460,7 @@ async function prepareRecoverableTask(
   const { sessions } = await apiClient.listTaskSessions(task.id);
   const sessionId = sessions[0]?.id;
   expect(sessionId, "the launched session is missing").toBeTruthy();
+  await sendMarkerTurn(apiClient, task.id, sessionId!);
 
   const env = await apiClient.getTaskEnvironment(task.id);
   const containerId = env?.container_id;

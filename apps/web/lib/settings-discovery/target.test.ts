@@ -86,6 +86,42 @@ describe("settings target registry", () => {
     registry.register("backups", target);
     expect(reveal).toHaveBeenCalledWith(target);
   });
+
+  it("activates a registered action without scrolling an element", () => {
+    const reveal = vi.fn();
+    const activate = vi.fn();
+    const registry = createSettingsTargetRegistry(reveal);
+    registry.registerAction("runtime-updates", activate);
+
+    expect(registry.request("runtime-updates")).toBe(true);
+    expect(activate).toHaveBeenCalledOnce();
+    expect(reveal).not.toHaveBeenCalled();
+  });
+
+  it("resolves a pending action request when delayed metadata registers it", () => {
+    const activate = vi.fn();
+    const registry = createSettingsTargetRegistry(vi.fn());
+
+    expect(registry.request("runtime-update-claude-acp")).toBe(false);
+    expect(activate).not.toHaveBeenCalled();
+    registry.registerAction("runtime-update-claude-acp", activate);
+
+    expect(activate).toHaveBeenCalledOnce();
+  });
+
+  it("keeps element targets unchanged when actions share the registry", () => {
+    vi.useFakeTimers();
+    const reveal = vi.fn();
+    const registry = createSettingsTargetRegistry(reveal);
+    const target = document.createElement("div");
+    document.body.appendChild(target);
+    registry.registerAction("runtime-updates", vi.fn());
+    registry.register("backups", target);
+
+    expect(registry.request("backups")).toBe(true);
+    expect(reveal).toHaveBeenCalledWith(target);
+    vi.useRealTimers();
+  });
 });
 
 describe("revealSettingsTarget", () => {
