@@ -23,21 +23,16 @@ export async function chooseAutomationPackage(
   enabled: boolean,
   touch = false,
 ) {
-  const row = page.getByTestId(`automation-mcp-package-${id}`);
-  if (touch) await row.tap();
-  else await row.click();
-  const detail = page.getByTestId("automation-mcp-package-detail");
-  const choice = detail.getByRole("combobox");
-  if (touch) await choice.tap();
-  else await choice.click();
-  const option = page.getByRole("option", { name: enabled ? "On" : "Off", exact: true });
-  if (touch) await option.tap();
-  else await option.click();
-  const back = detail.getByRole("button", { name: "Back to packages", exact: true });
-  if (touch) await back.tap();
-  else await back.click();
-  await expect(row).toBeFocused();
-  await expect(row.locator('[data-slot="badge"]')).toHaveText(enabled ? "On" : "Off");
+  const choice = page.getByTestId(`automation-mcp-choice-${id}`).getByRole("switch");
+  await expect(page.getByTestId("automation-mcp-package-detail")).toHaveCount(0);
+  await expect(choice).toBeVisible();
+  await expect(page.getByRole("button", { name: "Use inherited value" })).toHaveCount(0);
+  if ((await choice.isChecked()) !== enabled) {
+    if (touch) await choice.tap();
+    else await choice.click();
+  }
+  await expect(choice).toBeChecked({ checked: enabled });
+  await expect(page.getByTestId("automation-mcp-package-detail")).toHaveCount(0);
 }
 
 export async function saveAutomationMCP(page: Page, watcher: WsWatcher) {
@@ -176,12 +171,18 @@ export async function verifyAutomationMCPRecovery({
   await testPage.goto(`/settings/workspaces/${recovery.workspaceId}/automations/${automation.id}`);
   const section = testPage.getByTestId("automation-mcp-access");
   const configuration = section.getByTestId("automation-mcp-package-configuration");
-  await expect(configuration.locator('[data-slot="badge"]')).toHaveText("On");
+  await expect(
+    section.getByTestId("automation-mcp-choice-configuration").getByRole("switch"),
+  ).toBeChecked();
   await chooseAutomationPackage(testPage, "configuration", false);
+  await expect(
+    section.getByTestId("automation-mcp-choice-configuration").getByRole("switch"),
+  ).toHaveAccessibleDescription("Blocked by workspace policy");
   await configuration.click();
-  await section.getByRole("combobox").click();
-  await expect(testPage.getByRole("option", { name: "On", exact: true })).toBeDisabled();
-  await testPage.keyboard.press("Escape");
+  await expect(section.getByRole("switch")).toBeDisabled();
+  await expect(section.getByRole("switch")).toHaveAccessibleDescription(
+    "Blocked by workspace policy",
+  );
   await section.getByRole("button", { name: "Back to packages", exact: true }).click();
   const direct = section.getByTestId(`automation-mcp-server-${server.id}`).getByRole("checkbox");
   await expect(direct).toBeChecked();

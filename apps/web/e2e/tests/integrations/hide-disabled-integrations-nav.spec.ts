@@ -86,7 +86,7 @@ test.describe("hide disabled integrations from left panel navigation", () => {
     // called "GitHub", and the row's own name gains a badge once the
     // integration reports connected — neither of which changes its route.
     const githubTreeRow = settingsTree.locator(`a[href="${integrationsPath}/github"]`);
-    const azureTreeRow = settingsTree.locator(`a[href="${integrationsPath}/azure-devops"]`);
+    const gitlabTreeRow = settingsTree.locator(`a[href="${integrationsPath}/gitlab"]`);
     await expect(githubTreeRow).toBeVisible({ timeout: 10_000 });
 
     // Turn "hide disabled" on.
@@ -108,7 +108,7 @@ test.describe("hide disabled integrations from left panel navigation", () => {
 
     // The Settings left-panel Integrations tree hides it as well.
     await testPage.goto(integrationsPath);
-    await expect(azureTreeRow).toBeVisible({ timeout: 10_000 });
+    await expect(gitlabTreeRow).toBeVisible({ timeout: 10_000 });
     await expect(githubTreeRow).toHaveCount(0);
 
     // Re-enabling GitHub reveals it again even with "hide disabled" still on.

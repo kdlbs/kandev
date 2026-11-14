@@ -191,6 +191,9 @@ func (c *Client) createSessionRequest(ctx context.Context, action, cwd string, m
 		if err := resp.ParsePayload(&errPayload); err != nil {
 			return NewSessionResponse{}, fmt.Errorf("%s failed: unable to parse error", action)
 		}
+		if authenticationError := sessionOperationAuthenticationError(action, resp, errPayload); authenticationError != nil {
+			return NewSessionResponse{}, authenticationError
+		}
 		return NewSessionResponse{}, fmt.Errorf("%s failed: %s", action, errPayload.Message)
 	}
 
@@ -221,12 +224,12 @@ func (c *Client) ResetSession(ctx context.Context, cwd string, mcpServers []type
 
 // NewSessionWithResult returns the identity from this exact request.
 func (c *Client) NewSessionWithResult(ctx context.Context, cwd string, servers []types.McpServer) (NewSessionResponse, error) {
-	return c.createSessionRequest(ctx, "agent.session.new", cwd, servers)
+	return c.createSessionRequest(ctx, agentSessionNewAction, cwd, servers)
 }
 
 // ResetSessionWithResult returns the identity from this exact reset.
 func (c *Client) ResetSessionWithResult(ctx context.Context, cwd string, servers []types.McpServer) (NewSessionResponse, error) {
-	return c.createSessionRequest(ctx, "agent.session.reset", cwd, servers)
+	return c.createSessionRequest(ctx, agentSessionResetAction, cwd, servers)
 }
 
 // LoadSession resumes an existing ACP session via the agent WebSocket stream.
@@ -263,7 +266,7 @@ func (c *Client) LoadSessionWithResult(ctx context.Context, sessionID string, mc
 	}
 
 	c.setLastSessionModelState(nil)
-	resp, err := c.sendStreamRequest(ctx, "agent.session.load", payload)
+	resp, err := c.sendStreamRequest(ctx, agentSessionLoadAction, payload)
 	if err != nil {
 		return "", fmt.Errorf("load session request failed: %w", err)
 	}
@@ -279,6 +282,9 @@ func (c *Client) LoadSessionWithResult(ctx context.Context, sessionID string, mc
 				Message: errPayload.Message,
 				Details: errPayload.Details,
 			}
+		}
+		if authenticationError := sessionOperationAuthenticationError(agentSessionLoadAction, resp, errPayload); authenticationError != nil {
+			return "", authenticationError
 		}
 		return "", fmt.Errorf("load session failed: %s", errPayload.Message)
 	}
@@ -317,7 +323,7 @@ func (c *Client) ResumeSessionWithResult(ctx context.Context, sessionID, cwd str
 	}{SessionID: sessionID, Cwd: cwd, McpServers: mcpServers, MCPResolution: streams.MCPResolutionFromContext(ctx)}
 
 	c.setLastSessionModelState(nil)
-	resp, err := c.sendStreamRequest(ctx, "agent.session.resume", payload)
+	resp, err := c.sendStreamRequest(ctx, agentSessionResumeAction, payload)
 	if err != nil {
 		return "", fmt.Errorf("resume session request failed: %w", err)
 	}
@@ -325,6 +331,9 @@ func (c *Client) ResumeSessionWithResult(ctx context.Context, sessionID, cwd str
 		var errPayload ws.ErrorPayload
 		if err := resp.ParsePayload(&errPayload); err != nil {
 			return "", fmt.Errorf("resume session failed: unable to parse error")
+		}
+		if authenticationError := sessionOperationAuthenticationError(agentSessionResumeAction, resp, errPayload); authenticationError != nil {
+			return "", authenticationError
 		}
 		return "", fmt.Errorf("resume session failed: %s", errPayload.Message)
 	}

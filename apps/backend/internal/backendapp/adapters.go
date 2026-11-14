@@ -1884,10 +1884,31 @@ func (a *messageCreatorAdapter) CreateSessionMessageIdempotent(
 	messageID, taskID, content, agentSessionID, messageType, turnID string,
 	metadata map[string]interface{}, requestsInput bool,
 ) error {
+	return a.createSessionMessageIdempotent(
+		ctx, messageID, taskID, content, agentSessionID, messageType, turnID, metadata, requestsInput, false,
+	)
+}
+
+func (a *messageCreatorAdapter) CreateSessionLifecycleMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, agentSessionID, messageType string,
+	metadata map[string]interface{},
+) error {
+	return a.createSessionMessageIdempotent(
+		ctx, messageID, taskID, content, agentSessionID, messageType, "", metadata, false, true,
+	)
+}
+
+func (a *messageCreatorAdapter) createSessionMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, agentSessionID, messageType, turnID string,
+	metadata map[string]interface{}, requestsInput, completedTurn bool,
+) error {
 	_, err := a.svc.CreateMessageIdempotent(ctx, messageID, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
 		TaskID:        taskID,
 		TurnID:        turnID,
+		CompletedTurn: completedTurn,
 		Content:       content,
 		AuthorType:    "agent",
 		Type:          messageType,

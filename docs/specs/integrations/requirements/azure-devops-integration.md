@@ -1,5 +1,5 @@
 ---
-status: active
+status: deprecated
 system: integrations
 created: 2026-07-17
 updated: 2026-10-20
@@ -7,6 +7,11 @@ owners:
   - tbd
 ---
 # Azure DevOps Integration Requirements
+
+> Deprecated on 2026-11-06 by
+> [Azure DevOps Connector Plugin](https://github.com/JnManso/kandev-plugin-azure-devops/blob/main/docs/specs/requirements/azure-devops-plugin.md) and
+> [Azure DevOps Leaves Core](../../plugins/requirements/azure-devops-extraction.md).
+> Azure DevOps is now provided by the `kandev-plugin-azure-devops` runtime plugin.
 
 ## Overview
 

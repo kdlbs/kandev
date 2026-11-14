@@ -13,6 +13,7 @@ import {
   useChatPanelHandlers,
 } from "@/components/task/chat/chat-input-area";
 import { routePanelMouseDown } from "@/components/task/chat/route-panel-mouse-down";
+import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
 
 export function focusRunTranscriptTurn(root: HTMLElement | null, turnId?: string): boolean {
   if (!root || !turnId) return false;
@@ -86,6 +87,7 @@ export function RunTranscript({
   // precisely so the run stays repliable — parked is exactly the state with no
   // agent behind it.
   const agentIsLive = panelState.isWorking;
+  const isPassthrough = isPassthroughSession(panelState.session);
 
   const handleClarificationResolved = useCallback(() => setClarificationKey((k) => k + 1), []);
   const handleScopeMouseDown = useCallback(
@@ -103,6 +105,20 @@ export function RunTranscript({
       data-session-id={sessionId}
       data-turn-id={turnId ?? ""}
     >
+      {isPassthrough ? (
+        <div
+          role="note"
+          data-testid="passthrough-capture-guidance"
+          className="mx-3 mt-3 min-w-0 max-w-full shrink-0 rounded-md border border-border bg-muted/40 px-3 py-2.5 text-sm"
+        >
+          <p className="break-words font-medium text-foreground">
+            {t("automations:passthroughOutputNotCapturedTitle")}
+          </p>
+          <p className="mt-1 break-words text-muted-foreground">
+            {t("automations:passthroughOutputFutureSessionsDescription")}
+          </p>
+        </div>
+      ) : null}
       <div className="min-h-0 flex-1 overflow-hidden">
         <MessageList
           items={panelState.groupedItems}

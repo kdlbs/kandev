@@ -61,6 +61,98 @@ func TestForkSessionPreservesKnownPreProviderRefusal(t *testing.T) {
 	}
 }
 
+func TestSessionOperationAuthenticationError(t *testing.T) {
+	for _, operation := range []struct {
+		name string
+		run  func(*Client) error
+	}{
+		{name: "new", run: func(c *Client) error { _, err := c.NewSession(context.Background(), "/workspace", nil); return err }},
+		{name: "load", run: func(c *Client) error { return c.LoadSession(context.Background(), "native-session", nil) }},
+		{name: "resume", run: func(c *Client) error {
+			return c.ResumeSession(context.Background(), "native-session", "/workspace", nil)
+		}},
+		{name: "reset", run: func(c *Client) error { _, err := c.ResetSession(context.Background(), "/workspace", nil); return err }},
+	} {
+		t.Run(operation.name, func(t *testing.T) {
+			c, _ := captureStreamRequest(t, func(msg ws.Message) *ws.Message {
+				resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "provider diagnostic token=private-token", map[string]interface{}{
+					"session_failure": map[string]interface{}{
+						"code": "authentication_required",
+						"auth_methods": []interface{}{map[string]interface{}{
+							"id": "cursor_login", "name": "Cursor CLI login", "meta": map[string]interface{}{"token": "never-retain-this"},
+						}},
+					},
+				})
+				return resp
+			})
+			err := operation.run(c)
+			if err == nil {
+				t.Fatal("session operation error = nil, want authentication failure")
+			}
+			var projected interface {
+				SessionOperationFailure() types.SessionOperationFailure
+			}
+			if !errors.As(err, &projected) {
+				t.Fatalf("error %T does not expose typed session authentication evidence: %v", err, err)
+			}
+			failure := projected.SessionOperationFailure()
+			if failure.Code != types.SessionOperationFailureCodeAuthenticationRequired || len(failure.AuthMethods) != 1 {
+				t.Fatalf("session failure = %#v", failure)
+			}
+			if failure.AuthMethods[0].ID != "cursor_login" || failure.AuthMethods[0].Meta != nil {
+				t.Fatalf("auth methods = %#v", failure.AuthMethods)
+			}
+			var cause interface{ Unwrap() error }
+			if !errors.As(err, &cause) || cause.Unwrap() == nil || !strings.Contains(cause.Unwrap().Error(), "private-token") {
+				t.Fatalf("typed error did not preserve the original diagnostic through Unwrap: %v", err)
+			}
+		})
+	}
+}
+
+func TestSessionOperationAuthenticationErrorRejectsUntrustedProjection(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		responseAction string
+		projection     map[string]interface{}
+	}{
+		{
+			name:           "different operation",
+			responseAction: "agent.session.resume",
+			projection:     map[string]interface{}{"code": "authentication_required"},
+		},
+		{
+			name:           "unknown field",
+			responseAction: "agent.session.new",
+			projection:     map[string]interface{}{"code": "authentication_required", "provider_payload": map[string]interface{}{"token": "secret"}},
+		},
+		{
+			name:           "unsupported cause",
+			responseAction: "agent.session.new",
+			projection:     map[string]interface{}{"code": "internal_error"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := captureStreamRequest(t, func(msg ws.Message) *ws.Message {
+				resp, _ := ws.NewError(msg.ID, tc.responseAction, ws.ErrorCodeInternalError, "provider failure", map[string]interface{}{
+					"session_failure": tc.projection,
+				})
+				return resp
+			})
+			_, err := c.NewSession(context.Background(), "/workspace", nil)
+			if err == nil {
+				t.Fatal("NewSession() error = nil, want response failure")
+			}
+			var projected interface {
+				SessionOperationFailure() types.SessionOperationFailure
+			}
+			if errors.As(err, &projected) {
+				t.Fatalf("untrusted projection produced typed authentication error: %#v", projected.SessionOperationFailure())
+			}
+		})
+	}
+}
+
 // captureStreamRequest wires a stream client that records the first request the
 // client sends, answers it with `response`, and returns both the client and a
 // getter for the captured frame.

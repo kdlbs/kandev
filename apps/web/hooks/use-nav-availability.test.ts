@@ -14,7 +14,6 @@ const mocks = vi.hoisted(() => {
         items: [{ id: workspaceId }] as Array<{ id: string; created_at?: string }>,
       },
     },
-    azureDevOpsAvailable: vi.fn(() => false),
     githubStatus: vi.fn(() => ({ status: null as GitHubStatus | null, loading: false })),
     gitlabAvailable: vi.fn(() => false),
     jiraAuthed: vi.fn(() => false),
@@ -25,9 +24,6 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof mocks.state) => unknown) => selector(mocks.state),
-}));
-vi.mock("@/hooks/domains/azure-devops/use-azure-devops-availability", () => ({
-  useAzureDevOpsAvailable: mocks.azureDevOpsAvailable,
 }));
 vi.mock("@/hooks/domains/github/use-github-status", () => ({
   useGitHubStatus: mocks.githubStatus,
@@ -52,16 +48,12 @@ vi.mock("@/hooks/domains/integrations/use-hide-disabled-integrations-in-nav", ()
 // the `configured` axis, and defaulting `enabled` off would make every one of
 // them need to opt back in just to stay green.
 const enabledHookMocks = vi.hoisted(() => ({
-  azureDevOps: vi.fn(() => ({ enabled: true, setEnabled: vi.fn(), loaded: true })),
   github: vi.fn(() => ({ enabled: true, setEnabled: vi.fn(), loaded: true })),
   gitlab: vi.fn(() => ({ enabled: true, setEnabled: vi.fn(), loaded: true })),
   jira: vi.fn(() => ({ enabled: true, setEnabled: vi.fn(), loaded: true })),
   linear: vi.fn(() => ({ enabled: true, setEnabled: vi.fn(), loaded: true })),
 }));
 
-vi.mock("@/hooks/domains/azure-devops/use-azure-devops-enabled", () => ({
-  useAzureDevOpsEnabled: enabledHookMocks.azureDevOps,
-}));
 vi.mock("@/hooks/domains/github/use-github-enabled", () => ({
   useGitHubEnabled: enabledHookMocks.github,
 }));
@@ -118,10 +110,9 @@ describe("getGitHubIntegrationStatus", () => {
 /** A workspace that is not the (stale) active one. */
 const SURVIVING_WORKSPACE_ID = "workspace-2";
 
-const NAV_GATED_KEYS: AvailabilityKey[] = ["azure-devops", "github", "gitlab", "jira", "linear"];
+const NAV_GATED_KEYS: AvailabilityKey[] = ["github", "gitlab", "jira", "linear"];
 
 const ENABLED_MOCK_BY_KEY = {
-  "azure-devops": enabledHookMocks.azureDevOps,
   github: enabledHookMocks.github,
   gitlab: enabledHookMocks.gitlab,
   jira: enabledHookMocks.jira,
@@ -130,9 +121,6 @@ const ENABLED_MOCK_BY_KEY = {
 
 function setConfigured(key: AvailabilityKey, configured: boolean) {
   switch (key) {
-    case "azure-devops":
-      mocks.azureDevOpsAvailable.mockReturnValue(configured);
-      return;
     case "github":
       mocks.githubStatus.mockReturnValue({
         status: configured ? status({ authenticated: true }) : status({}),
@@ -170,7 +158,6 @@ describe("useNavAvailability", () => {
 
     expect(mocks.jiraAuthed).toHaveBeenCalledWith(mocks.workspaceId);
     expect(mocks.linearAuthed).toHaveBeenCalledWith(mocks.workspaceId);
-    expect(mocks.azureDevOpsAvailable).toHaveBeenCalledWith(mocks.workspaceId);
   });
 
   it("reads each enable toggle for the active workspace, not install-wide", () => {
@@ -190,7 +177,6 @@ describe("useNavAvailability", () => {
 
     expect(mocks.jiraAuthed).toHaveBeenCalledWith(null);
     expect(mocks.linearAuthed).toHaveBeenCalledWith(null);
-    expect(mocks.azureDevOpsAvailable).toHaveBeenCalledWith(null);
     // The toggles are browser-local, so null would read the unscoped key while
     // the probes above answer for whichever workspace the backend resolved.
     // They follow the backend's tie-breaker (oldest workspace) instead.

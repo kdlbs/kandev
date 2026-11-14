@@ -11,17 +11,16 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// humanDoneBlockerWakeCase describes a blocker that reaches its final step
-// through the task.moved path (a human Done on a task that is not yet on its
-// final step). The blocked task must get a blockers-resolved run.
+// humanDoneBlockerWakeCase describes a blocker completion delivered through
+// task.state_changed and its accompanying task.moved event.
 type humanDoneBlockerWakeCase struct {
 	blockerAssignee string
 	// payload is the task.moved body. It is merged over the blocker ID.
 	payload map[string]any
 }
 
-// runHumanDoneTaskMovedWake drives a blocker through a task.moved event and
-// returns how many blockers-resolved runs were queued for the blocked task.
+// runHumanDoneTaskMovedWake publishes the committed state event when the
+// payload carries a terminal state, then returns the dependent wake count.
 func runHumanDoneTaskMovedWake(t *testing.T, c humanDoneBlockerWakeCase) int {
 	t.Helper()
 	ctx := context.Background()
@@ -121,9 +120,8 @@ func TestHumanDoneFinalStep_WakesBlockedTasks_CustomFinalStepName(t *testing.T) 
 	}
 }
 
-// Control: an assigned blocker moving to a step named "Done" with names in the
-// payload. This passes, so the harness itself can queue a blockers-resolved run.
-func TestHumanDoneFinalStep_WakesBlockedTasks_ControlAssignedDoneStepName(t *testing.T) {
+// A step name alone does not represent a committed completion transition.
+func TestHumanDoneFinalStep_DoesNotWakeOnStepNameAlone(t *testing.T) {
 	got := runHumanDoneTaskMovedWake(t, humanDoneBlockerWakeCase{
 		blockerAssignee: "assignment-worker",
 		payload: map[string]any{
@@ -132,14 +130,12 @@ func TestHumanDoneFinalStep_WakesBlockedTasks_ControlAssignedDoneStepName(t *tes
 			"to_step_name":              "Done",
 		},
 	})
-	if got != 1 {
-		t.Fatalf("control: blockers-resolved runs = %d, want 1", got)
+	if got != 0 {
+		t.Fatalf("step-name-only event queued %d blockers-resolved runs, want 0", got)
 	}
 }
 
-// Control for path A: an unassigned blocker completed through the reactivity
-// pipeline (NewStatus done) wakes the blocked task. This is the behavior the
-// task.moved path should match.
+// The reactivity pipeline also wakes a blocked task when it commits done.
 func TestHumanDoneFinalStep_WakesBlockedTasks_ReactivityDoneControl(t *testing.T) {
 	ctx := context.Background()
 	f := newAssignmentBlockerFixture(t)

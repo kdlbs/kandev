@@ -209,20 +209,20 @@ func TestTaskCreateRepositorySelectionErrorsMapToTransports(t *testing.T) {
 func TestMoveConflictCode(t *testing.T) {
 	cases := []struct {
 		name string
-		err  string
+		err  error
 		want string
 	}{
-		{"active session", "task has an active session (running)", moveConflictCodeActiveSession},
-		{"archived task", "archived tasks cannot be moved", moveConflictCodeArchived},
-		{"different workspace", "target workflow is in a different workspace", moveConflictCodeDifferentWorkspace},
-		{"workflow step", "target workflow step does not belong to target workflow", moveConflictCodeWorkflowStep},
-		{"WIP limit", "WIP limit exceeded for workflow step", moveConflictCodeWIPLimit},
-		{"unrelated", "database is locked", ""},
+		{"active session", fmt.Errorf("move: %w", service.ErrTaskMoveActiveSession), moveConflictCodeActiveSession},
+		{"archived task", service.ErrTaskMoveArchived, moveConflictCodeArchived},
+		{"different workspace", service.ErrTaskMoveDifferentWorkspace, moveConflictCodeDifferentWorkspace},
+		{"workflow step", service.ErrTaskMoveWorkflowStep, moveConflictCodeWorkflowStep},
+		{"WIP limit", errors.New("WIP limit exceeded for workflow step"), moveConflictCodeWIPLimit},
+		{"unrelated", errors.New("database is locked"), ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := moveConflictCode(errors.New(tc.err)); got != tc.want {
-				t.Fatalf("moveConflictCode(%q) = %q, want %q", tc.err, got, tc.want)
+			if got := moveConflictCode(tc.err); got != tc.want {
+				t.Fatalf("moveConflictCode(%v) = %q, want %q", tc.err, got, tc.want)
 			}
 		})
 	}

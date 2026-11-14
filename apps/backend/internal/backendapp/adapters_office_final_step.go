@@ -39,7 +39,6 @@ func (a officeFinalStepMoverAdapter) MoveTaskToFinalStep(
 	if err != nil {
 		return nil, err
 	}
-	ctx = models.WithOfficeHumanCompletionIntent(ctx, models.OfficeHumanCompletionIntent{TaskID: task.ID, ExpectedWorkspaceID: task.WorkspaceID, ExpectedWorkflowID: task.WorkflowID, ExpectedStepID: task.WorkflowStepID, ExpectedTaskState: string(task.State), Kind: "office_done"})
 	steps, err := a.steps.ListStepsByWorkflow(ctx, task.WorkflowID)
 	if err != nil {
 		return nil, fmt.Errorf("list workflow steps: %w", err)

@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
@@ -39,6 +40,8 @@ vi.mock("@/components/settings/custom-tui-mcp-card", () => ({ CustomTUIMcpCard: 
 vi.mock("@/components/settings/dynamic-agents-card", () => ({ DynamicAgentsCard: () => null }));
 vi.mock("@/components/settings/agent-runtime-policies", () => ({
   AgentRuntimePolicies: () => null,
+  RuntimePolicyControllers: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  useRuntimePolicyControllers: () => [],
 }));
 vi.mock("@/app/settings/agents/hide-disabled-agent-profiles-setting", () => ({
   HideDisabledAgentProfilesSetting: () => null,

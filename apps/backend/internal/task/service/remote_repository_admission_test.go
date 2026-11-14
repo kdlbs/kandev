@@ -110,8 +110,6 @@ func TestResolveRepositoryRef_RemoteSelectionEquivalentOrigins(t *testing.T) {
 		{TaskRepositoryInput{RemoteURL: "git@github.com:acme/widgets.git"}, "https://github.com/acme/widgets"},
 		{TaskRepositoryInput{RemoteURL: "https://gitlab.com/acme/sub/widgets.git"}, "git@gitlab.com:acme/sub/widgets.git"},
 		{TaskRepositoryInput{RemoteURL: "https://gitlab.example.test/acme/widgets.git", Provider: "gitlab", TrustedRemote: true}, "git@gitlab.example.test:acme/widgets.git"},
-		{TaskRepositoryInput{RemoteURL: "https://dev.azure.com/acme/Project/_git/widgets"}, "git@ssh.dev.azure.com:v3/acme/Project/widgets"},
-		{TaskRepositoryInput{RemoteURL: "git@ssh.dev.azure.com:v3/acme/Project/widgets"}, "https://dev.azure.com/acme/Project/_git/widgets"},
 		{TaskRepositoryInput{RemoteURL: "https://forge.example.test/scm/acme/widgets.git", Provider: "forge", ProviderHost: "https://forge.example.test", ProviderScope: "instance-a", ProviderRepoID: "42", ProviderOwner: "acme", ProviderName: "widgets", TrustedProviderDescriptor: true}, "git@forge.example.test:scm/acme/widgets.git"},
 	} {
 		t.Run(pair.origin, func(t *testing.T) {

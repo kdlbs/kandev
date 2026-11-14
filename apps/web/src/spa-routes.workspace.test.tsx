@@ -73,9 +73,10 @@ vi.mock("@/lib/api/domains/settings-api", () => ({
   fetchUserSettings: mocks.fetchUserSettings,
 }));
 
-vi.mock("@/lib/api/client", () => ({
-  fetchJson: mocks.fetchJson,
-}));
+vi.mock("@/lib/api/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api/client")>();
+  return { ...actual, fetchJson: mocks.fetchJson };
+});
 
 afterEach(() => {
   cleanup();

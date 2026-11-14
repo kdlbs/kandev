@@ -1,6 +1,6 @@
 ---
 title: "Integrations"
-description: "Connect Azure DevOps, GitHub, GitLab, Jira, Linear, and Sentry, then browse external work or create watched tasks."
+description: "Connect GitHub, GitLab, Jira, Linear, and Sentry, use plugin-provided integrations, then browse external work or create watched tasks."
 ---
 
 # Integrations
@@ -38,11 +38,10 @@ A task can therefore display a pull or merge request while its worktree cannot p
 
 Select **Settings > Workspaces > _Workspace_ > Integrations**, then choose a provider. The direct routes are:
 
-![Settings > Workspaces > Default > Integrations showing Azure DevOps, GitHub, GitLab, Jira, Linear, and Sentry connections.](../screenshots/settings-integrations.png)
+![Settings > Workspaces > Default > Integrations showing GitHub, GitLab, Jira, Linear, and Sentry connections.](../screenshots/settings-integrations.png)
 
 - `/settings/workspace/{workspaceId}/integrations/github`
 - `/settings/workspace/{workspaceId}/integrations/gitlab`
-- `/settings/workspace/{workspaceId}/integrations/azure-devops`
 - `/settings/workspace/{workspaceId}/integrations/jira`
 - `/settings/workspace/{workspaceId}/integrations/linear`
 - `/settings/workspace/{workspaceId}/integrations/sentry`
@@ -51,7 +50,7 @@ Compatibility routes under **Settings > Integrations** use the active workspace 
 
 The **Enabled** badge in Settings navigation appears only when the integration is connected and its saved workspace toggle is on. After changing a toggle, select **Save changes** to update the badge. With **Hide disabled integrations from left panel navigation** off, a disabled integration stays listed without the badge.
 
-GitHub, GitLab, Azure DevOps, Jira, and Linear configuration are workspace-specific. GitHub supports one automation connection per workspace and, for App-backed workspaces, one personal identity per Kandev user and workspace. GitHub supports `github.com`, Enterprise Cloud tenant hosts such as `acme.ghe.com`, and GitHub Enterprise Server hosts; GitLab supports `gitlab.com` and self-managed origins. Sentry supports multiple named instances per workspace. Do not assume that configuring one workspace gives another the same provider scope.
+GitHub, GitLab, Jira, and Linear configuration are workspace-specific. GitHub supports one automation connection per workspace and, for App-backed workspaces, one personal identity per Kandev user and workspace. GitHub supports `github.com`, Enterprise Cloud tenant hosts such as `acme.ghe.com`, and GitHub Enterprise Server hosts; GitLab supports `gitlab.com` and self-managed origins. Sentry supports multiple named instances per workspace. Do not assume that configuring one workspace gives another the same provider scope.
 
 Provider secrets saved by these forms use Kandev's encrypted secret store. The backend must still decrypt them to make API requests. Limit access to settings and the Kandev data directory, and use the narrowest provider scope that works.
 
@@ -646,32 +645,22 @@ disconnected connection is denied rather than using cached authority.
 
 ## Azure DevOps
 
-<details>
-<summary>Azure DevOps details</summary>
+Azure DevOps support is provided by the separately installed **Azure DevOps**
+plugin, [`kandev-plugin-azure-devops`](https://github.com/JnManso/kandev-plugin-azure-devops).
+Kandev no longer ships a built-in Azure DevOps integration. Install the plugin
+from **Settings > Plugins**, then open its **Azure DevOps** entry in the
+Integrations section and connect each workspace with a personal access token
+or a Microsoft account.
 
-Azure DevOps configuration is workspace-specific. The current integration supports Azure DevOps Services organizations at `https://dev.azure.com/<organization>`. A trailing slash is accepted and removed when Kandev saves the canonical URL. Azure DevOps Server/TFS and alternate organization URL forms are not supported.
+The plugin adds Azure Boards, work-item, and pull-request browsing, work-item
+and pull-request watches, task links and pull-request status, **Create PR**,
+`#` references, and Git credentials for Azure Repos repositories. Existing
+repositories with the `azure_devops` provider keep working once the plugin is
+connected.
 
-Enter the organization URL on the Azure DevOps settings page, then hover, focus, or tap the info icon beside **Personal Access Token**. Follow its **Create personal access token** link. In Azure DevOps, select **New Token**, choose the organization and an expiration, and select **Custom defined** scopes. Under **Work Items**, check **Read & write**; under **Code**, check **Read**; leave every other scope unchecked. Create the token, copy it while Azure DevOps still displays it, and paste it into Kandev.
-
-Kandev stores the PAT in its encrypted secret store and calls Azure DevOps REST API 7.1 directly. The connection, work-item, and pull-request paths do not require GitHub, `gh`, `az`, or Azure CLI authentication. When editing a saved connection, a blank PAT preserves that workspace's existing credential. Copy configuration transfers the encrypted credential to the target workspace.
-
-Use `/azure-devops` to browse the team board, work items, and pull requests. The board view loads columns and cards for the selected project, team, and board; desktop users can drag cards between columns, while mobile users can move cards from the focused-column editor. Selecting a card opens a responsive detail dialog/drawer with the sanitized description, planning and effort fields, discussion, links, and supported actions. Azure work items are read-only apart from assigning or unassigning yourself and moving the item between board columns (including split-column completion). Kandev runs the default **Recently updated** work-item query after the Work items flow is ready. Raw WIQL remains available under **Advanced** for custom work-item searches. Pull-request feedback includes reviewers and votes, comment threads, linked work items, and branch-policy results.
-
-Work-item and pull-request views include provider-native quick actions such as implementation, review, feedback, and CI triage. These actions open the normal Kandev task flow with the Azure title, URL, and context prefilled, and retain a durable association so linked tasks are visible from the detail view. Browse mode, the selected preset or saved view, project/team/board/column selections, and filters persist per user and workspace. A full page refresh restores the same browse state.
-
-Use **Saved queries** to save the current work-item query or pull-request filters, or to delete a saved query after confirmation. Consecutive changes stay in the order you make them. If a save fails, retry from the save dialog. If a deletion fails, Kandev shows an error and restores that query so you can retry from the menu. If loading saved queries fails, pending changes are rejected without writing to the server. Retrying an action first reloads the saved queries. These actions are available on desktop and phone.
-
-The Azure DevOps settings page orders its automation controls as pull-request watches, work-item watches, quick actions, and default queries after the connection card. Quick actions and default queries are workspace settings: choose the pull-request or work-item tab, edit the provider-native fields, and use the page-wide **Save changes** control. **Reset** removes that workspace's override so it follows future built-in defaults.
-
-Settings > Azure DevOps includes watchers for saved WIQL queries and pull-request filters. A watcher can be enabled or disabled, run immediately, edited, reset, or deleted. Each watcher validates its project, repository, workflow, step, agent, and executor scope before saving; it deduplicates matches, enforces the configured poll interval and in-flight limit, and can clean up linked tasks when the source reaches a terminal state. Watchers use the same workspace PAT and begin polling as soon as a valid connection is saved.
-
-You can launch a task from a work item or pull request. When the selected Kandev repository is configured with matching Azure project and repository identifiers, launching from a pull request also stores a durable task association. Task surfaces show its normalized status, review, and policy summary while Azure-native feedback remains in the Azure DevOps browser. Synchronization uses the backend REST client and does not depend on tools installed in the task environment.
-
-The **Remote** picker in **New Task** searches configured GitHub, GitLab, and Azure DevOps repositories and keeps manual supported URLs available. When more than one repository provider is connected, use the provider tabs at the bottom of the picker to switch the visible results; the tabs stay hidden for a single provider. When all three providers are available, the tabs use compact provider icons with hover labels. For a private Azure repository, the backend uses the workspace PAT only while initially cloning or fetching the managed checkout. The PAT is not written into the remote URL, task metadata, command arguments, or agent environment. Configure executor Git credentials independently for pushes and for repository access outside that backend materialization path.
-
-Azure DevOps currently uses PAT authentication. It does not yet provide an Entra OAuth flow or webhook subscription; watcher polling is performed by Kandev's backend.
-
-</details>
+Upgrading removes the built-in integration's stored configuration, PAT,
+watches, saved views, and task links. Reconnect the workspace and recreate
+watches in the plugin after installing it.
 
 ## Jira
 
@@ -765,7 +754,7 @@ An instance cannot be deleted while a watch references it. Because the instance 
 Supported integration pages offer **Copy configuration** with provider-specific behavior:
 
 - GitHub copies repository scope, saved/default searches, and quick-action presets. It does not copy authentication or watches.
-- Azure DevOps, Jira, and Linear copy the workspace configuration and encrypted credential, replacing the target's provider configuration and re-running health checks. They do not copy watches.
+- Jira and Linear copy the workspace configuration and encrypted credential, replacing the target's provider configuration and re-running health checks. They do not copy watches.
 - Sentry adds copies of the source instances with new IDs and copied secrets, preserves target instances, and deduplicates conflicting names. It does not copy watches.
 - GitLab replaces the target workspace's host, authentication method, and stored PAT. It does not copy watches, task-launch action presets, or task-to-MR links.
 

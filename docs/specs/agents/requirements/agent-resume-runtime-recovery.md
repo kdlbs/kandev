@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-07-27
-updated: 2026-10-10
+updated: 2026-11-13
 owners:
   - Kandev
 ---
@@ -31,6 +31,7 @@ Preserve the observable behavior documented for Agent Resume and Runtime Recover
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.7:** The explicit managed-runtime update path may invalidate only the deterministic `_npx` execution directory for the selected built-in package after an initial update failure, then retry once and run the normal ACP capability probe.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.8:** **GIVEN** a valid OpenCode resume token, **WHEN** the OpenCode child exits before answering ACP `initialize`, **THEN** Kandev shows the normal recovery action and retains the same token for the next Resume attempt.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.9:** When a resumed session re-enters workspace preparation, Kandev shall publish a terminal preparation result after preparation finishes. A session that has returned to `WAITING_FOR_INPUT` without detached activity shall not remain visibly preparing or appear to have background work.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.10:** Automatic resume on task open shall not fail because workspace views register an execution concurrently; identity is judged once it settles.
 
 ### REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002: Visible resume failure feedback
 
