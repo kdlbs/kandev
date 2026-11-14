@@ -26,12 +26,23 @@ const NO_IDS: string[] = [];
 /**
  * The recorded reads the summary, the task board and the navigation share,
  * and what they derive from them. Pass `tasks`/`history` false to skip reads
- * a surface does not show.
+ * a surface does not show. A `workspaceId` limits every read and figure to
+ * that workspace.
  */
-export function useControlSignals({ tasks = true, history = true } = {}) {
+export function useControlSignals({
+  tasks = true,
+  history = true,
+  workspaceId,
+}: { tasks?: boolean; history?: boolean; workspaceId?: string } = {}) {
   const control = useIntegratedControl();
   const data = control?.data;
-  const ids = useMemo(() => data?.workspaces.map((workspace) => workspace.id) ?? NO_IDS, [data]);
+  const ids = useMemo(
+    () =>
+      data?.workspaces
+        .filter((workspace) => !workspaceId || workspace.id === workspaceId)
+        .map((workspace) => workspace.id) ?? NO_IDS,
+    [data, workspaceId],
+  );
   const dashboards = useNativeDashboards(ids, data);
   const taskReads = useNativeTaskRows(tasks ? ids : NO_IDS, data);
   const historyReads = useNativeHistory(history ? ids : NO_IDS, data);

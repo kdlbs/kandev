@@ -132,7 +132,7 @@ function ControlSignalView({
   if (view === "activity") return <ControlActivityBoard />;
   if (view === "providers")
     return hasWorkspaces ? <ControlProviderUsage workspaceId={workspaceId} /> : null;
-  if (view === "overview") return <ControlOverview />;
+  if (view === "overview") return <ControlOverview workspaceId={workspaceId} />;
   if (view === "history") return <ControlHistory workspaceId={workspaceId} />;
   if (view === "workspaces" && workspaceId) return <ControlWorkspaces workspaceId={workspaceId} />;
   return null;
