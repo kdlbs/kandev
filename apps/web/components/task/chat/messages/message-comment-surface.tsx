@@ -40,6 +40,8 @@ import {
 } from "./message-comment-decorations";
 import { MessageCommentControls, type CommentTarget } from "./message-comment-controls";
 import { useTranslation } from "react-i18next";
+import { useTouchSelectionTracking } from "@/hooks/use-touch-selection-tracking";
+import { useSelectionDockHost } from "@/components/shared/selection-action-dock";
 
 type MessageCommentSurfaceProps = {
   message: Message;
@@ -123,10 +125,45 @@ function usePendingCommentsForMessage(sessionId: string | null | undefined, mess
   );
 }
 
+function sameSelectionTarget(target: CommentTarget | null, selection: MessageSelection) {
+  return (
+    target !== null &&
+    !target.editingCommentId &&
+    target.selection.start === selection.start &&
+    target.selection.end === selection.end
+  );
+}
+
+function useTouchCommentTarget({
+  rootRef,
+  enabled,
+  target,
+  setTarget,
+  setNewSelection,
+}: {
+  rootRef: RefObject<HTMLDivElement | null>;
+  enabled: boolean;
+  target: CommentTarget | null;
+  setTarget: Dispatch<SetStateAction<CommentTarget | null>>;
+  setNewSelection: (selection: MessageSelection, openComposer: boolean) => void;
+}) {
+  const followSelection = useCallback(
+    (domSelection: Selection | null) => {
+      const root = rootRef.current;
+      const selection = root && domSelection ? getMessageSelection(root, domSelection) : null;
+      if (!selection) setTarget(null);
+      else if (!sameSelectionTarget(target, selection)) setNewSelection(selection, false);
+    },
+    [rootRef, setNewSelection, setTarget, target],
+  );
+  useTouchSelectionTracking(rootRef, enabled, followSelection);
+}
+
 function useCommentTargetState(
   rootRef: RefObject<HTMLDivElement | null>,
   isSelectable: boolean,
   messageId: string,
+  touch: boolean,
 ) {
   const [target, setTarget] = useState<CommentTarget | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
@@ -157,6 +194,13 @@ function useCommentTargetState(
   }, [isSelectable, rootRef, setNewSelection]);
 
   useMessageCommentMouseSelection(rootRef, isSelectable && !composerOpen, captureSelection);
+  useTouchCommentTarget({
+    rootRef,
+    enabled: touch && isSelectable && !composerOpen,
+    target,
+    setTarget,
+    setNewSelection,
+  });
 
   const openFromShortcut = useCallback(
     (selection: MessageSelection) => setNewSelection(selection, true),
@@ -165,7 +209,8 @@ function useCommentTargetState(
   useMessageCommentShortcut(rootRef, isSelectable, openFromShortcut);
 
   useEffect(() => {
-    if (!target || composerOpen) return;
+    // Touch selections own visibility through the live selection instead.
+    if (!target || composerOpen || touch) return;
     const dismiss = (event: Event) => {
       const element = event.target as HTMLElement | null;
       if (element?.closest('[data-testid="agent-message-comment-trigger"]')) return;
@@ -178,7 +223,7 @@ function useCommentTargetState(
       document.removeEventListener("pointerdown", dismiss, true);
       document.removeEventListener("scroll", dismissOnScroll, true);
     };
-  }, [composerOpen, target]);
+  }, [composerOpen, target, touch]);
 
   return { target, setTarget, composerOpen, setComposerOpen, close, captureSelection };
 }
@@ -319,7 +364,8 @@ export function MessageCommentSurface({
   const useDrawer = useTouchDrawer();
   const pendingComments = usePendingCommentsForMessage(sessionId, message.id);
   const isSelectable = canSelectMessageText(message, sessionId, isTurnActive, readOnly);
-  const targetState = useCommentTargetState(rootRef, isSelectable, message.id);
+  const targetState = useCommentTargetState(rootRef, isSelectable, message.id, useDrawer);
+  const dockHostRef = useSelectionDockHost(rootRef);
   const { target, composerOpen, setTarget, setComposerOpen, close, captureSelection } = targetState;
   const openExistingComment = useExistingCommentHandlers(
     rootRef,
@@ -377,6 +423,7 @@ export function MessageCommentSurface({
         actions={actions}
         handleRun={handleRun}
         portalContainer={portalContainer}
+        dockHostRef={dockHostRef}
       />
     </>
   );

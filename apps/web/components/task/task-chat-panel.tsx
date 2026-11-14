@@ -2,6 +2,7 @@
 
 /* eslint-disable max-lines -- this component composes the complete transcript surface. */
 
+import { SelectionActionSlotProvider } from "@/components/shared/selection-action-slot";
 import {
   useCallback,
   useEffect,
@@ -1559,151 +1560,153 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       taskId={taskId}
       enabled={!isArchived && !launchErrorOwned}
     >
-      <PanelRoot
-        ref={panelRef}
-        data-testid="session-chat"
-        data-panel-kind="session"
-        data-session-id={resolvedSessionId ?? undefined}
-        data-detail-active={detailActive ? "true" : "false"}
-        tabIndex={-1}
-        onMouseDown={handlePanelMouseDown}
-        className="outline-none"
-      >
-        <div ref={launchQueueStatusRef} className="shrink-0">
-          {!hideLaunchQueueStatus && (
-            <LaunchQueueStatus queue={launchStatusSummary?.launch_queue} />
-          )}
-        </div>
-        <div ref={wipQueueStatusRef} className="shrink-0">
-          {!hideWipQueueStatus && <WipQueueStatus taskId={summaryTaskId} />}
-        </div>
-        <PanelBody
-          padding={false}
-          scroll={false}
-          className="relative flex min-h-0 flex-col overflow-hidden"
+      <SelectionActionSlotProvider>
+        <PanelRoot
+          ref={panelRef}
+          data-testid="session-chat"
+          data-panel-kind="session"
+          data-session-id={resolvedSessionId ?? undefined}
+          data-detail-active={detailActive ? "true" : "false"}
+          tabIndex={-1}
+          onMouseDown={handlePanelMouseDown}
+          className="outline-none"
         >
-          <div className="flex min-h-0 flex-1 flex-col">
-            {resolvedSessionId ? (
-              <div className="shrink-0 px-2">
-                <LaunchWarning sessionId={resolvedSessionId} />
-              </div>
-            ) : null}
-            <div className="min-h-0 flex-1">
-              <TaskMarkdownFileLinkProvider
-                taskId={taskId}
-                sessionId={resolvedSessionId}
-                worktreePath={getSessionWorkspacePath(session)}
-                detailActive={detailActive}
-                onOpenFile={onOpenFile}
-              >
-                <MessageList
-                  ref={messageListRef}
-                  items={groupedItems}
-                  messages={allMessages}
-                  footerActionMessages={footerActionMessages}
-                  permissionsByToolCallId={permissionsByToolCallId}
-                  childrenByParentToolCallId={childrenByParentToolCallId}
-                  taskId={taskId ?? undefined}
+          <div ref={launchQueueStatusRef} className="shrink-0">
+            {!hideLaunchQueueStatus && (
+              <LaunchQueueStatus queue={launchStatusSummary?.launch_queue} />
+            )}
+          </div>
+          <div ref={wipQueueStatusRef} className="shrink-0">
+            {!hideWipQueueStatus && <WipQueueStatus taskId={summaryTaskId} />}
+          </div>
+          <PanelBody
+            padding={false}
+            scroll={false}
+            className="relative flex min-h-0 flex-col overflow-hidden"
+          >
+            <div className="flex min-h-0 flex-1 flex-col">
+              {resolvedSessionId ? (
+                <div className="shrink-0 px-2">
+                  <LaunchWarning sessionId={resolvedSessionId} />
+                </div>
+              ) : null}
+              <div className="min-h-0 flex-1">
+                <TaskMarkdownFileLinkProvider
+                  taskId={taskId}
                   sessionId={resolvedSessionId}
-                  detailActive={detailActive}
-                  messagesLoading={messagesLoading}
-                  historyRefreshPending={historyRefreshPending}
-                  historyStatus={historyStatus}
-                  historyError={historyError}
-                  onRetryHistory={retryHistory}
-                  isWorking={isWorking}
-                  sessionState={session?.state}
                   worktreePath={getSessionWorkspacePath(session)}
+                  detailActive={detailActive}
                   onOpenFile={onOpenFile}
-                  onOpenHistoricalDiff={onOpenHistoricalDiff}
-                  dividerBeforeItemKey={dividerBeforeItemKey}
-                  lastPromptMessageId={lastPromptMessageId}
-                  lastPromptMessage={lastPromptMessage}
-                  lastPromptUnloaded={unloadedLastPrompt}
-                  onLastPromptEdgeChange={setLastPromptEdge}
-                  onLatestVisibilityChange={onLatestVisibilityChange}
-                  firstMessageId={firstMessageId}
-                  onFirstMessageHiddenChange={setIsFirstMessageHidden}
-                  anchoredBarHeight={showAnchoredBar && canMountBar ? anchoredBarHeight : 0}
-                  isVisible={transcriptIsVisible}
-                  launchErrorOwned={launchErrorOwned}
-                  launchErrorStamp={launchErrorOwned ? taskLaunchError?.stamp : undefined}
-                  launchErrorOccurredAt={
-                    launchErrorOwned ? taskLaunchError?.occurred_at : undefined
-                  }
-                  stickyPromptBar={
-                    showAnchoredBar && canMountBar && lastPromptMessage ? (
-                      <AnchoredLastPromptBar
-                        promptText={lastPromptMessage.content}
-                        isVisible={anchoredBarVisible}
-                        onScrollUp={scrollToLastPrompt}
-                        showScrollToLastPrompt={showScrollToLastPrompt}
-                        onHeightChange={setAnchoredBarHeight}
-                      />
-                    ) : undefined
-                  }
-                />
-              </TaskMarkdownFileLinkProvider>
+                >
+                  <MessageList
+                    ref={messageListRef}
+                    items={groupedItems}
+                    messages={allMessages}
+                    footerActionMessages={footerActionMessages}
+                    permissionsByToolCallId={permissionsByToolCallId}
+                    childrenByParentToolCallId={childrenByParentToolCallId}
+                    taskId={taskId ?? undefined}
+                    sessionId={resolvedSessionId}
+                    detailActive={detailActive}
+                    messagesLoading={messagesLoading}
+                    historyRefreshPending={historyRefreshPending}
+                    historyStatus={historyStatus}
+                    historyError={historyError}
+                    onRetryHistory={retryHistory}
+                    isWorking={isWorking}
+                    sessionState={session?.state}
+                    worktreePath={getSessionWorkspacePath(session)}
+                    onOpenFile={onOpenFile}
+                    onOpenHistoricalDiff={onOpenHistoricalDiff}
+                    dividerBeforeItemKey={dividerBeforeItemKey}
+                    lastPromptMessageId={lastPromptMessageId}
+                    lastPromptMessage={lastPromptMessage}
+                    lastPromptUnloaded={unloadedLastPrompt}
+                    onLastPromptEdgeChange={setLastPromptEdge}
+                    onLatestVisibilityChange={onLatestVisibilityChange}
+                    firstMessageId={firstMessageId}
+                    onFirstMessageHiddenChange={setIsFirstMessageHidden}
+                    anchoredBarHeight={showAnchoredBar && canMountBar ? anchoredBarHeight : 0}
+                    isVisible={transcriptIsVisible}
+                    launchErrorOwned={launchErrorOwned}
+                    launchErrorStamp={launchErrorOwned ? taskLaunchError?.stamp : undefined}
+                    launchErrorOccurredAt={
+                      launchErrorOwned ? taskLaunchError?.occurred_at : undefined
+                    }
+                    stickyPromptBar={
+                      showAnchoredBar && canMountBar && lastPromptMessage ? (
+                        <AnchoredLastPromptBar
+                          promptText={lastPromptMessage.content}
+                          isVisible={anchoredBarVisible}
+                          onScrollUp={scrollToLastPrompt}
+                          showScrollToLastPrompt={showScrollToLastPrompt}
+                          onHeightChange={setAnchoredBarHeight}
+                        />
+                      ) : undefined
+                    }
+                  />
+                </TaskMarkdownFileLinkProvider>
+              </div>
             </div>
-          </div>
-          {isJumpLoading && (
-            <div
-              data-testid="transcript-jump-loading"
-              role="status"
-              aria-live="polite"
-              className="absolute right-3 top-3 rounded-md bg-background px-2 py-1 text-xs text-muted-foreground shadow"
-            >
-              {t("task:loading")}
+            {isJumpLoading && (
+              <div
+                data-testid="transcript-jump-loading"
+                role="status"
+                aria-live="polite"
+                className="absolute right-3 top-3 rounded-md bg-background px-2 py-1 text-xs text-muted-foreground shadow"
+              >
+                {t("task:loading")}
+              </div>
+            )}
+            <SessionSearchOverlay search={search} agentLabel={agentLabel} agentName={agentName} />
+          </PanelBody>
+          <ComposerFooterAllocation>
+            {!isArchived && (
+              <ClarificationPanelSection
+                pending={Boolean(pendingClarification)}
+                messages={pendingClarificationGroup}
+                agentDisconnected={session?.pending_action === null}
+                onResolved={handleClarificationResolved}
+                onLateAnswer={lateAnswer.send}
+                lateAnswerState={lateAnswer.state}
+                shortcutScopeRef={panelRef}
+                initialMaxHeightVh={50}
+                allocationRef={panelRef}
+                anchorRef={panelRef}
+                reservedSiblingRefs={clarificationReservations}
+                reservedHeightPx={80}
+              />
+            )}
+            <div ref={chatFooterRef} className="shrink-0">
+              <ChatFooter
+                isArchived={isArchived}
+                chatInputRef={chatInputRef}
+                clarificationKey={clarificationKey}
+                onClarificationResolved={handleClarificationResolved}
+                handleSubmit={handleSubmit}
+                handleCancelTurn={handleCancelTurn}
+                showRequestChangesTooltip={showRequestChangesTooltip}
+                onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
+                panelState={panelState}
+                isSending={isSending}
+                hideSessionsDropdown={hideSessionsDropdown}
+                hidePlanMode={embedded}
+                showScrollToLastPrompt={showScrollButton}
+                onScrollToLastPrompt={scrollToLastPrompt}
+                lastPromptScrollDirection={scrollDirection}
+                showJumpToLatest={showJumpToLatest}
+                onJumpToLatest={jumpToLatest}
+                showScrollToStart={showScrollToStartButton}
+                onScrollToStart={scrollToStart}
+                statusTaskId={statusTaskId ?? taskIdHint}
+                showAgentStartHint={showAgentStartHint}
+                launchErrorOwned={launchErrorOwned}
+                subscriptionUsage={subscriptionUsage}
+              />
             </div>
-          )}
-          <SessionSearchOverlay search={search} agentLabel={agentLabel} agentName={agentName} />
-        </PanelBody>
-        <ComposerFooterAllocation>
-          {!isArchived && (
-            <ClarificationPanelSection
-              pending={Boolean(pendingClarification)}
-              messages={pendingClarificationGroup}
-              agentDisconnected={session?.pending_action === null}
-              onResolved={handleClarificationResolved}
-              onLateAnswer={lateAnswer.send}
-              lateAnswerState={lateAnswer.state}
-              shortcutScopeRef={panelRef}
-              initialMaxHeightVh={50}
-              allocationRef={panelRef}
-              anchorRef={panelRef}
-              reservedSiblingRefs={clarificationReservations}
-              reservedHeightPx={80}
-            />
-          )}
-          <div ref={chatFooterRef} className="shrink-0">
-            <ChatFooter
-              isArchived={isArchived}
-              chatInputRef={chatInputRef}
-              clarificationKey={clarificationKey}
-              onClarificationResolved={handleClarificationResolved}
-              handleSubmit={handleSubmit}
-              handleCancelTurn={handleCancelTurn}
-              showRequestChangesTooltip={showRequestChangesTooltip}
-              onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
-              panelState={panelState}
-              isSending={isSending}
-              hideSessionsDropdown={hideSessionsDropdown}
-              hidePlanMode={embedded}
-              showScrollToLastPrompt={showScrollButton}
-              onScrollToLastPrompt={scrollToLastPrompt}
-              lastPromptScrollDirection={scrollDirection}
-              showJumpToLatest={showJumpToLatest}
-              onJumpToLatest={jumpToLatest}
-              showScrollToStart={showScrollToStartButton}
-              onScrollToStart={scrollToStart}
-              statusTaskId={statusTaskId ?? taskIdHint}
-              showAgentStartHint={showAgentStartHint}
-              launchErrorOwned={launchErrorOwned}
-              subscriptionUsage={subscriptionUsage}
-            />
-          </div>
-        </ComposerFooterAllocation>
-      </PanelRoot>
+          </ComposerFooterAllocation>
+        </PanelRoot>
+      </SelectionActionSlotProvider>
     </SessionRecoveryProvider>
   );
 });

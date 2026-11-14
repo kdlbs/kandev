@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 import Editor from "@monaco-editor/react";
 import { useTheme } from "@/components/theme/app-theme";
-import { Button } from "@kandev/ui/button";
-import { IconMessagePlus } from "@tabler/icons-react";
+import { EditorSelectionCommentTrigger } from "@/components/editors/editor-selection-comment-trigger";
 import { getMonacoLanguage } from "@/lib/editor/language-map";
 import { EDITOR_FONT_FAMILY, EDITOR_FONT_SIZE } from "@/lib/theme/editor-theme";
 import { CommentForm } from "@/components/diff/comment-form";
@@ -196,21 +195,25 @@ function EditorLoading() {
   );
 }
 
-function MonacoFloatingCommentButton({ state }: { state: EditorState }) {
-  const { t } = useTranslation();
-  if (!state.floatingButtonPos || state.formZoneRange) return null;
+function MonacoCommentTrigger({
+  state,
+  hostRef,
+}: {
+  state: EditorState;
+  hostRef: RefObject<HTMLElement | null>;
+}) {
+  if (state.formZoneRange) return null;
+  const visible = state.touch ? state.hasSelection : Boolean(state.floatingButtonPos);
+  if (!visible) return null;
+  const point = state.floatingButtonPos ?? { x: 0, y: 0 };
   return (
-    <Button
-      size="sm"
-      variant="secondary"
-      className="floating-comment-btn absolute z-50 gap-1.5 shadow-lg animate-in fade-in-0 zoom-in-95 duration-100 cursor-pointer"
-      style={{ left: state.floatingButtonPos.x + 4, top: state.floatingButtonPos.y + 2 }}
-      onMouseDown={(e) => e.stopPropagation()}
-      onClick={state.handleFloatingButtonClick}
-    >
-      <IconMessagePlus className="h-3.5 w-3.5" />
-      {t("editors:comment")}
-    </Button>
+    <EditorSelectionCommentTrigger
+      touch={state.touch}
+      position={{ left: point.x + 4, top: point.y + 2 }}
+      positioning="absolute"
+      hostRef={hostRef}
+      onOpen={() => state.handleFloatingButtonClick()}
+    />
   );
 }
 
@@ -315,7 +318,7 @@ function MonacoEditorView({
             }}
           />
         ) : null}
-        <MonacoFloatingCommentButton state={state} />
+        <MonacoCommentTrigger state={state} hostRef={editorAreaRef} />
       </div>
     </div>
   );

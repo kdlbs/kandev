@@ -44,8 +44,9 @@ when all targets fit. Task 03 revises containment, not workflow eligibility.
 
 Compose status items, the workflow action, and utilities under one stable layout
 owner in `ChatStatusBar`. Keep keyed instances across responsive ordering.
-On phones place the workflow action first in its own right-aligned row.
-Place status items and utilities in the next wrapping flow. On wider screens
+On phones place the workflow action first in the same wrapping flow as status
+items and utilities; its wrapper is `display: contents`, so it no longer forces
+a full-width row. On wider screens
 retain status, utilities, and workflow order. Extract a local presentation
 component if needed to keep `ChatStatusBar` within repository size limits.
 
@@ -67,7 +68,7 @@ for phone widths and coarse pointers. This fixes the measured 40px CI target
 without changing standalone Threads chips or fine-pointer desktop density.
 
 Keep `TranscriptNavGroup`'s flattened phone subgroup and utility order.
-The workflow action reserves its own row only when eligible. A moving action
+The workflow action occupies space only when eligible. A moving action
 keeps that row. Terminal banners retain their separate full-width leading
 region. Use DOM order that matches visible order, including keyboard traversal.
 Do not duplicate stateful controls or reparent them on viewport changes.
@@ -83,8 +84,8 @@ Keep contained label wrapping and pointer-specific disclosure behavior.
 - Exemplar: the shipped [mobile task action bar](mobile-task-action-bar.md)
   contributes readable notices, complete-control wrapping, and reachable
   utilities. `PassthroughStatusRow` supplies bounded end justification.
-- Hierarchy: terminal notices, right-aligned next-step row, shared status and
-  utility row, then composer input. Status and utility controls wrap downward
+- Hierarchy: terminal notices, one shared row (next-step action, status, then
+  utilities and any touch selection action), then composer input. Status and utility controls wrap downward
   when their complete touch targets do not fit.
 - Surface: inline tray, because progression and transcript navigation are
   frequent actions. No additional overlay is needed to locate the action.
@@ -100,14 +101,14 @@ Keep contained label wrapping and pointer-specific disclosure behavior.
 
 Revise `expectComposerActionLayout` in
 `apps/web/e2e/tests/workflow/composer-action-layout-helpers.ts`. Below 768px,
-compare the workflow button's bottom with the minimum top of all visible utility
-buttons. Require the entire action to precede every utility; checking one icon
-is insufficient. Compare its right bound with the toolbar content right bound
-within one CSS pixel. Continue measuring actual utility bounds, not just wrapper
-boxes, and verify containment, 44px hit dimensions, center-point reachability,
-and document overflow. Replace the obsolete phone `display: contents` assertion
-with rendered row geometry. Wider wrap cases retain the previous trailing-line
-oracle; wide desktop retains single-line order and 24px height.
+the workflow button leads the shared row: when targets fit (`wrapped: false`),
+its vertical center matches the visible utility buttons and it ends before the
+first utility; when controls wrap, require that it overlaps no visible utility
+button. Keep it inside the toolbar content bounds. Continue measuring actual
+utility bounds, not just wrapper boxes, and verify containment, 44px hit
+dimensions, center-point reachability, and document overflow. Wider wrap cases
+retain the previous trailing-line oracle and right alignment; wide desktop
+retains single-line order and 24px height.
 
 Cover 360px, 393px, 767px, 768px, and wide desktop using the existing mobile and
 fine-pointer workflow move fixtures. Include dense controls, a longer fitting

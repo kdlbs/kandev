@@ -30,7 +30,9 @@ test.describe("Office thread extract comments on mobile", () => {
     const body = testPage.locator("[data-agent-message-body]").filter({ hasText: COMMENT });
     await expect(body).toBeVisible({ timeout: 20_000 });
     await selectAgentReplyText(body, EXTRACT);
-    await testPage.getByTestId("agent-message-comment-trigger").tap();
+    const dock = testPage.getByRole("toolbar", { name: "Selection actions" });
+    await expect(dock).toBeVisible();
+    await dock.getByTestId("agent-message-comment-trigger").tap();
 
     const drawer = testPage.getByTestId("agent-message-comment-drawer");
     await expect(drawer).toBeVisible();

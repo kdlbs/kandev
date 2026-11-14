@@ -424,6 +424,7 @@
   "commentCount_other": "댓글 {{count}}개",
   "commentOnAgentResponse": "에이전트 응답에 댓글",
   "commentOnSelection": "선택 항목에 댓글",
+  "selectionActions": "선택 영역 작업",
   "comments": "댓글",
   "commentsOnFiles_one": "{{files}}에 댓글 {{count}}개",
   "commentsOnFiles_other": "{{files}}에 댓글 {{count}}개",

@@ -23,6 +23,7 @@ import { RegisteredChangeRequestStatus } from "@/components/integrations/registe
 import { shareableSessionStateClient } from "@/components/task/share/share-button";
 import { ConversationUsageDisplay } from "@/components/task/chat/conversation-usage-display";
 import { TranscriptNavGroup } from "@/components/task/chat/transcript-nav-group";
+import { SelectionActionSlot } from "@/components/shared/selection-action-slot";
 import { OpenInThreadsButton } from "@/components/threads/open-in-threads-button";
 import { useIsDeckThread } from "@/hooks/domains/threads/use-deck-thread";
 import { useSessionSubscriptionUsage } from "@/hooks/domains/session/use-session-subscription-usage";
@@ -250,11 +251,12 @@ function ChatStatusBarRightControls({
         }
       />
       <TaskGraphButton taskId={taskId} />
+      <SelectionActionSlot />
     </div>
   );
 }
 
-/** Phones place progression above utilities; each composition follows its DOM order. */
+/** Phones lead with progression and share one wrapping row with status and utilities. */
 function ChatStatusBarActions({
   children,
   taskId,
@@ -291,13 +293,13 @@ function ChatStatusBarActions({
   ) : null;
   const proceed =
     showProceed && nextStepName ? (
-      <div key="proceed" className="contents max-md:flex max-md:w-full max-md:justify-end">
+      <div key="proceed" className="contents">
         <WorkflowMoveProceedButton
           previewTarget={previewTarget}
           nextStepName={nextStepName}
           onProceed={onProceed}
           isMoving={isMoving}
-          className="h-6 max-w-full max-md:ml-auto max-md:h-auto max-md:min-h-11 max-md:min-w-11 max-md:whitespace-normal max-md:break-words [@media(pointer:coarse)]:h-auto [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:whitespace-normal [@media(pointer:coarse)]:break-words"
+          className="h-6 max-w-full max-md:h-auto max-md:min-h-11 max-md:min-w-11 max-md:whitespace-normal max-md:break-words [@media(pointer:coarse)]:h-auto [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:whitespace-normal [@media(pointer:coarse)]:break-words"
           testId="proceed-next-step"
         />
       </div>
