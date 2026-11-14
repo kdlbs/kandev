@@ -509,35 +509,33 @@ failure path, and its partial runtime is stopped by the existing cleanup.
 
 ### Boundary with explicit retry
 
-The failed state stays visible, and the `session.ensure` latch is unchanged.
-Re-election happens only when a binding, start, or launch request arrives:
-the user's Retry, a new session, `spawn_session_kandev`, or a workflow or
-automation start. A `failed` environment with physical evidence still needs the
-environment reset action.
+Failures stay visible and the `session.ensure` latch is unchanged. Only Retry,
+a new session, `spawn_session_kandev`, or a workflow or automation start can
+re-elect. A task-local failed environment without consumers can be replaced.
 
-### Reset guidance
+### Retain and replace an unusable environment
 
-The worktree store writes `task_environment_repos` rows when it creates a
-worktree, before the launch finalizes. A launch that fails after that point, for
-example in a setup script, leaves a `failed` row with physical evidence. That
-row is not re-elected. The binding and the launch refuse it with
-`models.ErrTaskEnvironmentResetRequired`, which wraps `ErrWorkspaceReuseUnsafe`
-so existing `errors.Is` callers and the `workspace_reuse_unsafe` reason are
-unchanged. Its message names the task environment reset action.
-`spawn_session_kandev` keeps the reason and `recoverable: true` and changes its
-retry guidance for this error to resetting the task environment.
+A failed physical environment cannot be re-elected. Task-local binding or
+terminal worktree resume can retire it, reserve a creating replacement, and
+bind the session atomically before materialization. The transaction checks task
+and materialization locks, owner generation, session state and binding, cleanup,
+and recovery claims. Materializers, live sessions or runtimes, recovery claims,
+and inherited owners still require environment reset.
 
-Retaining such an environment while a replacement becomes canonical is not part
-of this amendment. It needs a schema decision on how a task keeps an inactive
-environment next to its active one, and on how that fits the existing
-recovery-claim consumer admission and preserved-checkout inventory recovery.
+`retired_at` preserves IDs, inventory, files, and historical bindings. Canonical
+lookup, uniqueness, and startup healing use active rows; by-ID reads keep history.
+Under the task lock, replacement excludes all recorded roots and uses the saved
+root and environment ID for inventory and ready publication. An already-retired
+retry joins or creates a reservation; failed successors use the consumer guard.
+Retired-only starts use fresh roots. Cached or explicit-ID checkouts must match
+the selected environment and remain on disk.
+Failure, including a failed post-commit reload, releases only its reservation. No reset, inherited-owner mutation,
+or historical outcome settlement occurs.
 
 ### Interaction with workspace election waits
 
-A binding that loses the initial election can wait for the elected environment
-before retrying. When that environment becomes `failed` through a release point,
-the wait ends with the existing refusal, and the next start re-elects it. A
-second retry inside the same request is not part of this amendment.
+A binding that loses election can wait for the winner. If the winner becomes
+failed, the wait ends with the existing refusal. The next start re-elects.
 
 ### Verification
 

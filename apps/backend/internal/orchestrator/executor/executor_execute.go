@@ -1732,7 +1732,14 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 		if bindWorkspace && selectedEnv != nil && selectedEnv.ID != "" && session.TaskEnvironmentID == "" {
 			session.TaskEnvironmentID = selectedEnv.ID
 		}
-		recoveryAdmission, envErr = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, selectedEnv, execConfig.ExecutorType, false, 0, false)
+		// A failed owner is replaced by the binding transaction without touching
+		// its retained checkout. Recovery inspection must not claim that old
+		// owner before the transaction can establish consumer-free retirement.
+		replaceFailed := bindWorkspace && selectedEnv != nil && selectedEnv.TaskID == task.ID &&
+			selectedEnv.Status == models.TaskEnvironmentStatusFailed && !taskUsesInheritedWorkspace(task)
+		if !replaceFailed {
+			recoveryAdmission, envErr = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, selectedEnv, execConfig.ExecutorType, false, 0, false)
+		}
 		if envErr != nil {
 			return "", envErr
 		}
@@ -1961,6 +1968,9 @@ func (e *Executor) validateInheritedEnvironmentOwner(
 	task *v1.Task,
 	env *models.TaskEnvironment,
 ) error {
+	if env.IsRetired() {
+		return fmt.Errorf("%w: task environment is retained as inactive history", models.ErrWorkspaceReuseUnsafe)
+	}
 	if env == nil || env.TaskID == "" || (task != nil && env.TaskID == task.ID) {
 		return nil
 	}
@@ -3008,6 +3018,9 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		req.Metadata = metadata
 	}
 
+	if req.UseWorktree && existingEnv != nil && existingEnv.TaskDirName != "" {
+		req.TaskDirName = existingEnv.TaskDirName
+	}
 	return req, execConfig, nil
 }
 

@@ -10,10 +10,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/task/models"
@@ -1791,21 +1793,26 @@ func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
 // (normalizeTaskWorktreeOwnership in worktree_ownership_migration.go). The
 // legacy tables and columns they read no longer exist at startup.
 // healDuplicateTaskEnvironments collapses rows where a single task has more
-// than one task_environments row (race in lazy create). Keeps the most recently
-// updated row and re-points any sessions still referring to the loser.
+// than one active task_environments row (race in lazy create). Keeps the most
+// recently updated row, preserves proven loser inventory and snapshot history,
+// and re-points any sessions still referring to the loser.
 //
 // Runs before ensureTaskEnvironmentTaskUniqueIndex so the unique constraint
 // can be added cleanly. Idempotent — a no-op once the data is healed.
 func (r *Repository) healDuplicateTaskEnvironments() error {
-	tx, err := r.db.BeginTx(r.migrationContext(), nil)
+	tx, err := r.db.BeginTxx(r.migrationContext(), nil)
 	if err != nil {
 		return fmt.Errorf("heal duplicate envs: begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
+	if err := lockDuplicateEnvironmentHeal(r.migrationContext(), tx); err != nil {
+		return fmt.Errorf("heal duplicate envs: lock: %w", err)
+	}
 
 	rows, err := tx.QueryContext(r.migrationContext(), `
 		SELECT task_id
 		  FROM task_environments
+		 WHERE retired_at IS NULL
 		 GROUP BY task_id
 		HAVING COUNT(*) > 1
 	`)
@@ -1836,47 +1843,68 @@ func (r *Repository) healDuplicateTaskEnvironments() error {
 }
 
 // healDuplicateTaskEnvForTask keeps the most recently updated env for a task,
-// re-points sessions on the loser rows to the winner, then deletes losers.
-func healDuplicateTaskEnvForTask(ctx context.Context, tx *sql.Tx, taskID string) error {
+// preserves proven loser inventory and snapshot history, re-points only the
+// sessions that reference a loser, then deletes the losers.
+func healDuplicateTaskEnvForTask(ctx context.Context, tx *sqlx.Tx, taskID string) error {
 	var winnerID string
-	if err := tx.QueryRowContext(ctx, `
+	if err := tx.QueryRowContext(ctx, tx.Rebind(`
 		SELECT id FROM task_environments
-		 WHERE task_id = ?
+		 WHERE task_id = ? AND retired_at IS NULL
 		 ORDER BY updated_at DESC, created_at DESC
 		 LIMIT 1
-	`, taskID).Scan(&winnerID); err != nil {
+	`), taskID).Scan(&winnerID); err != nil {
 		return fmt.Errorf("heal duplicate envs: find winner for task %s: %w", taskID, err)
 	}
 
-	if _, err := tx.ExecContext(ctx, `
+	if err := preserveDuplicateEnvironmentChildren(ctx, tx, taskID, winnerID); err != nil {
+		return fmt.Errorf("heal duplicate envs: preserve task %s: %w", taskID, err)
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE task_sessions
 		   SET task_environment_id = ?
-		 WHERE task_id = ?
-		   AND task_environment_id != ?
-	`, winnerID, taskID, winnerID); err != nil {
+		 WHERE task_environment_id IN (
+		   SELECT id FROM task_environments WHERE task_id = ? AND retired_at IS NULL AND id != ?
+		 )
+	`), winnerID, taskID, winnerID); err != nil {
 		return fmt.Errorf("heal duplicate envs: relink sessions for task %s: %w", taskID, err)
 	}
 
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		DELETE FROM task_environments
-		 WHERE task_id = ?
+		 WHERE task_id = ? AND retired_at IS NULL
 		   AND id != ?
-	`, taskID, winnerID); err != nil {
+	`), taskID, winnerID); err != nil {
 		return fmt.Errorf("heal duplicate envs: delete losers for task %s: %w", taskID, err)
 	}
 	return nil
 }
 
-// ensureTaskEnvironmentTaskUniqueIndex adds a UNIQUE index on
-// task_environments(task_id) so that a future race in env creation fails loud
-// instead of silently producing two rows for the same task. Must run AFTER
-// healDuplicateTaskEnvironments, which collapses any pre-existing duplicates.
+// ensureTaskEnvironmentTaskUniqueIndex upgrades the legacy full unique index
+// once. Retained history does not occupy the task's canonical owner slot.
+// It runs after active duplicate healing.
 func (r *Repository) ensureTaskEnvironmentTaskUniqueIndex() error {
-	_, err := r.db.ExecContext(r.migrationContext(), `
-		CREATE UNIQUE INDEX IF NOT EXISTS uniq_task_environments_task_id
-		    ON task_environments(task_id)
-	`)
-	return err
+	definition, err := db.IndexDefinitionContext(r.migrationContext(), r.db, "uniq_task_environments_task_id")
+	if err != nil {
+		return err
+	}
+	if strings.Contains(strings.ToLower(definition), "retired_at is null") {
+		return nil
+	}
+	tx, err := r.db.BeginTxx(r.migrationContext(), nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(r.migrationContext(), `DROP INDEX IF EXISTS uniq_task_environments_task_id`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(r.migrationContext(), `
+  CREATE UNIQUE INDEX IF NOT EXISTS uniq_task_environments_task_id
+  ON task_environments(task_id) WHERE retired_at IS NULL
+ `); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // healSessionTaskEnvironmentIDs backfills task_sessions.task_environment_id
@@ -1897,11 +1925,11 @@ func (r *Repository) healSessionTaskEnvironmentIDs() error {
 	if _, err := r.db.ExecContext(r.migrationContext(), `
 		UPDATE task_sessions
 		   SET task_environment_id = (
-		         SELECT te.id FROM task_environments te WHERE te.task_id = task_sessions.task_id LIMIT 1
+		         SELECT te.id FROM task_environments te WHERE te.task_id = task_sessions.task_id AND te.retired_at IS NULL LIMIT 1
 		       )
 		 WHERE (task_environment_id = '' OR task_environment_id IS NULL)
 		   AND EXISTS (
-		         SELECT 1 FROM task_environments te WHERE te.task_id = task_sessions.task_id
+		         SELECT 1 FROM task_environments te WHERE te.task_id = task_sessions.task_id AND te.retired_at IS NULL
 		       )
 	`); err != nil {
 		return fmt.Errorf("heal session env id: update: %w", err)

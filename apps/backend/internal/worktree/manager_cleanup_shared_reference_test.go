@@ -118,6 +118,44 @@ func TestCleanupWorktrees_RemovesLastActiveReference(t *testing.T) {
 	assertWorktreeReferenceStatus(t, store, wt.ID, StatusDeleted)
 }
 
+// @covers AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.11
+func TestCleanupWorktrees_MarksSessionlessRetainedWorktreeDeleted(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-owner", "session-owner", models.TaskSessionStateFailed)
+	created := createReferenceCleanupWorktree(t, mgr, "task-owner", "session-owner")
+	// A replacement retires the environment and moves its only session to a
+	// fresh active reservation; the retained checkout has no bound session.
+	if _, err := store.db.ExecContext(ctx, `UPDATE task_environments SET retired_at = CURRENT_TIMESTAMP WHERE id = 'env-owner'`); err != nil {
+		t.Fatalf("retire environment: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `
+		INSERT INTO task_environments (id, task_id, executor_type, status, created_at, updated_at)
+		VALUES ('env-owner-replacement', 'task-owner', 'worktree', 'creating', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("reserve replacement: %v", err)
+	}
+	if err := store.linkSessionToEnvironment(ctx, "session-owner", "env-owner-replacement"); err != nil {
+		t.Fatalf("bind replacement: %v", err)
+	}
+	retained, err := store.GetWorktreeByID(ctx, created.ID)
+	if err != nil || retained == nil {
+		t.Fatalf("load retained worktree = %v, %v", retained, err)
+	}
+	if retained.SessionID != "" {
+		t.Fatalf("retained worktree session = %q, want none", retained.SessionID)
+	}
+
+	if err := mgr.CleanupWorktrees(ctx, []*Worktree{retained}); err != nil {
+		t.Fatalf("CleanupWorktrees: %v", err)
+	}
+
+	if _, err := os.Stat(retained.Path); !os.IsNotExist(err) {
+		t.Fatalf("retained worktree path should be removed, stat error = %v", err)
+	}
+	assertWorktreeReferenceStatus(t, store, retained.ID, StatusDeleted)
+}
+
 func TestReleaseWorktreeReference_MissingAssociationIsIdempotent(t *testing.T) {
 	mgr, store := newReferenceCleanupTestManager(t)
 	ctx := context.Background()
