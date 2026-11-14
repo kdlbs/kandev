@@ -2288,6 +2288,7 @@
   "taskMoveErrorApprovalsPending": "Ţĥē ţàśķ ćàńńōţ ƀē ćōḿƥĺēţēď ũńţĩĺ ĩţś àƥƥŕōvēŕś àƥƥŕōvē ĩţ.",
   "taskMoveErrorArchived": "Àŕćĥĩvēď ţàśķś ćàńńōţ ƀē ḿōvēď.",
   "taskMoveErrorDifferentWorkspace": "Ţĥē ţàśķ àńď ţàŕĝēţ ŵōŕķƒĺōŵ ḿũśţ ũśē ţĥē śàḿē ŵōŕķśƥàćē.",
+  "taskMoveErrorExecutorUnavailable": "Ţĥĩś ţàśķ'ś ēxēćũţōŕ ƥŕōƒĩĺē ĩś ńō ĺōńĝēŕ àvàĩĺàƀĺē, śō ţĥĩś śţēƥ'ś àĝēńţ ćàńńōţ śţàŕţ.",
   "taskMoveErrorWorkflowStep": "Ţĥē ţàŕĝēţ śţēƥ ďōēś ńōţ ƀēĺōńĝ ţō ţĥē ţàŕĝēţ ŵōŕķƒĺōŵ.",
   "taskMoveErrorWipLimit": "Ţĥē ţàŕĝēţ ŵōŕķƒĺōŵ śţēƥ ĩś àţ ĩţś ŴĨƤ ĺĩḿĩţ.",
   "failedToReorderTasks": "Ƒàĩĺēď ţō ŕēōŕďēŕ ţàśķś",

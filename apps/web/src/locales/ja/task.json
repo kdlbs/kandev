@@ -2324,6 +2324,7 @@
   "taskMoveErrorApprovalsPending": "承認者が承認するまでタスクを完了できない。",
   "taskMoveErrorArchived": "アーカイブ済みタスクは移動不可。",
   "taskMoveErrorDifferentWorkspace": "タスクと対象ワークフローは同じ workspace を使う必要あり。",
+  "taskMoveErrorExecutorUnavailable": "このタスクの実行環境プロファイルは利用できないため、このステップのエージェントを開始できません。",
   "taskMoveErrorWorkflowStep": "対象ステップが対象ワークフローに属していない。",
   "taskMoveErrorWipLimit": "対象ワークフローステップが WIP 上限。",
   "failedToReorderTasks": "タスクの並べ替えに失敗",

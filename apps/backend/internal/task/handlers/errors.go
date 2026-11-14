@@ -23,13 +23,15 @@ import (
 const statusClientClosedRequest = 499
 
 const (
-	moveConflictCodeActiveSession      = "task_move_active_session"
-	moveConflictCodeArchived           = "task_move_archived"
-	moveConflictCodeDifferentWorkspace = "task_move_different_workspace"
-	moveConflictCodeWorkflowStep       = "task_move_workflow_step"
-	moveConflictCodeWIPLimit           = "task_move_wip_limit"
-	moveConflictCodePending            = "task_move_pending"
-	moveConflictCodeWorkflowChange     = "workflow_change_conflict"
+	moveConflictCodeActiveSession       = "task_move_active_session"
+	moveConflictCodeArchived            = "task_move_archived"
+	moveConflictCodeDifferentWorkspace  = "task_move_different_workspace"
+	moveConflictCodeWorkflowStep        = "task_move_workflow_step"
+	moveConflictCodeWIPLimit            = "task_move_wip_limit"
+	moveConflictCodePending             = "task_move_pending"
+	moveConflictCodeExecutorUnavailable = "task_move_executor_unavailable"
+	moveConflictCodeWorkflowChange      = "workflow_change_conflict"
+	moveExecutorUnavailableMessage      = "The task's executor is no longer available for this step."
 )
 
 // errorDetailKeyErrorCode is the JSON key every machine-readable error detail
@@ -210,6 +212,11 @@ func handleSelectedMoveError(c *gin.Context, log *logger.Logger, err error) {
 		})
 	case CompletionGateCode(err) != "":
 		c.JSON(http.StatusConflict, gin.H{"code": CompletionGateCode(err)})
+	case errors.Is(err, workflowmove.ErrDestinationExecutorUnavailable):
+		c.JSON(http.StatusConflict, gin.H{
+			"code":  moveConflictCodeExecutorUnavailable,
+			"error": moveExecutorUnavailableMessage,
+		})
 	case isNotFound(err):
 		c.JSON(http.StatusNotFound, gin.H{"error": "task or workflow not found"})
 	case isMoveConflict(err):
@@ -323,6 +330,9 @@ func moveEntryOptionsWSError(err error) (string, string, bool) {
 func moveConflictCode(err error) string {
 	if err == nil {
 		return ""
+	}
+	if errors.Is(err, workflowmove.ErrDestinationExecutorUnavailable) {
+		return moveConflictCodeExecutorUnavailable
 	}
 	if errors.Is(err, workflowmove.ErrMoveConflict) {
 		return moveConflictCodePending

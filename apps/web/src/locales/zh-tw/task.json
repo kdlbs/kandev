@@ -2204,6 +2204,7 @@
   "taskMoveErrorApprovalsPending": "審批人批准之前，無法完成此任務。",
   "taskMoveErrorArchived": "已歸檔的任務無法移動。",
   "taskMoveErrorDifferentWorkspace": "任務和目標工作流程必須使用同一工作區。",
+  "taskMoveErrorExecutorUnavailable": "此任務的執行器設定檔已無法使用，因此此步驟的代理程式無法啟動。",
   "taskMoveErrorWorkflowStep": "目標步驟不屬於目標工作流程。",
   "taskMoveErrorWipLimit": "目標工作流程步驟已達到 WIP 限制。",
   "failedToReorderTasks": "重新排序任務失敗",
