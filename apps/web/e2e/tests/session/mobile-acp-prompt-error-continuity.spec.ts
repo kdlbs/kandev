@@ -144,7 +144,7 @@ test("phone: visible per-row task actions expose Dismiss turn error", async ({
     await trigger.tap();
     const dismiss = testPage.getByTestId("task-context-dismiss-turn-error");
     await expect(dismiss).toBeVisible();
-    const menu = testPage.locator('[data-slot="context-menu-content"]').filter({ has: dismiss });
+    const menu = dismiss.locator('xpath=ancestor::*[@data-slot="context-menu-content"]');
     await waitForFiniteAnimations(menu);
     const box = await dismiss.boundingBox();
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);

@@ -37,14 +37,27 @@ export function buildPlaywrightArgs(
   shard: Shard,
   extraArgs: string[] = [],
 ): string[] {
+  const selectedProjects = manifest.projects.filter((project) =>
+    shard.units.some((unit) => unit.project === project),
+  );
+  if (selectedProjects.length === 0) {
+    throw new Error(
+      `Planned shard ${shard.index} has no units for a configured Playwright project`,
+    );
+  }
+  if (selectedProjects.length > 1) {
+    throw new Error(
+      `Planned shard ${shard.index} must contain units from one Playwright project per process`,
+    );
+  }
   return [
     "playwright",
     "test",
     "--config",
     "e2e/playwright.config.ts",
     "--workers=1",
-    ...manifest.projects.map((project) => `--project=${project}`),
-    ...shard.files,
+    ...selectedProjects.map((project) => `--project=${project}`),
+    ...new Set(shard.units.map((unit) => unit.file)),
     ...extraArgs,
   ];
 }
@@ -164,16 +177,22 @@ export async function executeSubshards(
   process.on("SIGINT", interrupt);
   process.on("SIGTERM", interrupt);
   try {
-    const exits = await Promise.all(
-      parts.map((part) =>
-        startPartition(manifest, shard, part, { ...execution, cacheRoot }, children),
-      ),
-    );
+    const exits: number[] = [];
+    for (let offset = 0; offset < parts.length && !interrupted; offset += count) {
+      const batch = parts.slice(offset, offset + count);
+      exits.push(
+        ...(await Promise.all(
+          batch.map((part) =>
+            startPartition(manifest, shard, part, { ...execution, cacheRoot }, children),
+          ),
+        )),
+      );
+    }
     const complete = collectReports(manifest, shard, parts, outputDir);
     const exitCode = interrupted || exits.find((code) => code !== 0) || (complete ? 0 : 1);
     writeShardMetadata(manifest, shard, startedAt, exitCode, {
       outputDir,
-      processCount: parts.length,
+      processCount: Math.min(count, parts.length),
     });
     return exitCode;
   } finally {

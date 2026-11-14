@@ -14,6 +14,7 @@ type TaskUsageEvent struct {
 	TaskID             string
 	SessionID          string
 	TurnID             string
+	UsageBindingID     string
 	AgentProfileID     string
 	AgentType          string
 	Model              string

@@ -23,7 +23,6 @@ test.describe("mobile session entry recovery", () => {
     );
 
     proxy.holdResponses("message.list", { sessionId: task.session_id });
-
     const session = await openTaskSession(testPage, task.id);
     const chat = session.activeChat();
     const historyNotice = chat.getByTestId("session-history-unavailable");
@@ -54,9 +53,23 @@ test.describe("mobile session entry recovery", () => {
       seedData,
       `Mobile history failure recovery ${Date.now()}`,
     );
-
-    proxy.failResponses("message.list", "Injected history read failure");
-
+    const sessionId = task.session_id;
+    if (!sessionId) throw new Error("created recovery task has no session");
+    // Opening-turn events can schedule another history read after the server
+    // reports the session as settled. Let all turns complete before injecting drops.
+    await expect
+      .poll(
+        async () => {
+          const { turns } = await apiClient.listSessionTurns(sessionId);
+          return turns.length > 0 && turns.every((turn) => Boolean(turn.completed_at));
+        },
+        { timeout: 30_000, message: "Opening turn did not finish before history recovery" },
+      )
+      .toBe(true);
+    // Keep startup refreshes unavailable until the actual touch Retry gesture.
+    proxy.rejectResponsesUntilReleased("message.list", "History temporarily unavailable", {
+      sessionId,
+    });
     const session = await openTaskSession(testPage, task.id);
     const chat = session.activeChat();
     const historyNotice = chat.getByTestId("session-history-unavailable");
@@ -68,18 +81,21 @@ test.describe("mobile session entry recovery", () => {
     const detailsSummary = historyNotice.getByTestId("session-history-details-summary");
     const detailsBox = await detailsSummary.boundingBox();
     expect(detailsBox?.height).toBeGreaterThanOrEqual(44);
-    await assertNoDocumentHorizontalOverflow(testPage, "mobile session history failure recovery");
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile session history recovery");
 
-    await expect.poll(() => proxy.pendingRequestCount("message.list")).toBe(0);
-    proxy.allowResponses("message.list");
-    const requestsBeforeRetry = proxy.requestCount("message.list");
-    await retry.click();
+    const rejectedBeforeRefresh = proxy.rejectedResponseCount("message.list");
+    expect(rejectedBeforeRefresh).toBeGreaterThan(0);
+    // A foreground refresh must not recover the injected outage before Retry.
+    await testPage.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect
-      .poll(() => proxy.requestCount("message.list"))
-      .toBeGreaterThan(requestsBeforeRetry);
+      .poll(() => proxy.rejectedResponseCount("message.list"))
+      .toBeGreaterThan(rejectedBeforeRefresh);
+    await expect(historyNotice).toBeVisible();
+    const readsBeforeRetry = proxy.requestCount("message.list");
+    await proxy.releaseRejectedResponsesOnClick("message.list", "session-history-retry");
+    await retry.tap();
     await expect(historyNotice).toHaveCount(0);
     await expect(chat).toContainText("simple mock response", { timeout: 30_000 });
-    expect(proxy.requestCount("message.list")).toBeGreaterThanOrEqual(2);
-    expect(proxy.failedResponseCount("message.list")).toBeGreaterThan(0);
+    expect(proxy.requestCount("message.list")).toBeGreaterThan(readsBeforeRetry);
   });
 });

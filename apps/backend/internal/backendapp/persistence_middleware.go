@@ -10,6 +10,7 @@ import (
 )
 
 const persistenceDiagnosticsPath = "/api/v1/system/diagnostics/persistence"
+const e2eUsageHistoryControlPathPrefix = "/api/v1/e2e/usage-history/"
 
 // requiredPersistenceMiddleware prevents stateful requests from reaching
 // handlers while required local persistence is unavailable. Liveness,
@@ -34,6 +35,13 @@ func requiredPersistenceMiddleware(health *requiredstores.Health) gin.HandlerFun
 func persistencePathExcluded(path string) bool {
 	if path == healthRoutePath || path == readyRoutePath || path == persistenceDiagnosticsPath {
 		return true
+	}
+	if remainder, ok := strings.CutPrefix(path, e2eUsageHistoryControlPathPrefix); ok {
+		workspaceID, action, hasAction := strings.Cut(remainder, "/")
+		controlPath := "/" + action
+		if hasAction && workspaceID != "" && (controlPath == e2eUsageHistoryReleaseReaderPath || controlPath == e2eUsageHistoryResumePath) {
+			return true
+		}
 	}
 	return !strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/mcp") && path != websocketRoutePath
 }

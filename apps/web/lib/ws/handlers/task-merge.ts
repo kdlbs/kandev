@@ -1,6 +1,7 @@
 import { mergeTaskRepositoryFields } from "@/lib/ws/handlers/task-repositories";
 import { preserveOmittedDependencyFields } from "@/lib/ws/handlers/task-dependencies";
 import type { KanbanTask, TaskEventPayload } from "@/lib/ws/handlers/task-archive-cache";
+import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 
 export function hasPayloadField(payload: TaskEventPayload, field: keyof TaskEventPayload): boolean {
   return Object.prototype.hasOwnProperty.call(payload, field);
@@ -92,8 +93,9 @@ function mergeTaskParkedFields(
 // ignore one whose updated_at is older than the cached value rather than
 // trust arrival order. Missing timestamps on either side skip the check.
 function isStaleTaskUpdate(existing: KanbanTask, nextTask: KanbanTask): boolean {
-  if (!existing.updatedAt || !nextTask.updatedAt) return false;
-  return new Date(nextTask.updatedAt).getTime() < new Date(existing.updatedAt).getTime();
+  const previous = parseStrictRfc3339Timestamp(existing.updatedAt?.replace(" ", "T"));
+  const incoming = parseStrictRfc3339Timestamp(nextTask.updatedAt?.replace(" ", "T"));
+  return previous !== null && incoming !== null && incoming < previous;
 }
 
 export function mergeTaskUpdate(

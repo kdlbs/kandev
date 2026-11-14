@@ -237,7 +237,7 @@ function DesktopFileRowContent({
           </p>
         </button>
       </div>
-      <div className="grid items-center shrink-0 [&>*]:col-start-1 [&>*]:row-start-1">
+      <div className="grid items-center shrink-0 pointer-events-none [&>*]:col-start-1 [&>*]:row-start-1">
         <FileRowStats file={file} readOnly={readOnly} />
         {!readOnly && (
           <FileRowActions

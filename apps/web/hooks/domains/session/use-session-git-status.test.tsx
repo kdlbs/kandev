@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   state: {} as AppState,
   unsubscribeSession: vi.fn(),
   subscribeSession: vi.fn(() => mocks.unsubscribeSession),
+  client: null as { subscribeSession: (sessionId: string) => () => void } | null,
 }));
 const FIRST_SESSION_ID = "session-1";
 const FIRST_ENVIRONMENT_ID = "environment-1";
@@ -20,7 +21,8 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: AppState) => unknown) => selector(mocks.state),
 }));
 vi.mock("@/lib/ws/connection", () => ({
-  getWebSocketClient: () => ({ subscribeSession: mocks.subscribeSession }),
+  getWebSocketClient: () => mocks.client,
+  useWebSocketClient: () => mocks.client,
 }));
 
 describe("useSessionGitStatus", () => {
@@ -30,6 +32,7 @@ describe("useSessionGitStatus", () => {
   });
 
   it("subscribes only while the session detail is active", () => {
+    mocks.client = { subscribeSession: mocks.subscribeSession };
     mocks.state.environmentIdBySessionId = { [FIRST_SESSION_ID]: FIRST_ENVIRONMENT_ID };
     mocks.state.gitStatus = { byEnvironmentId: {} } as AppState["gitStatus"];
     mocks.state.connection = { status: "connected" } as AppState["connection"];
@@ -50,6 +53,26 @@ describe("useSessionGitStatus", () => {
     hook.rerender({ detailActive: false });
     expect(mocks.subscribeSession).toHaveBeenCalledOnce();
     expect(mocks.unsubscribeSession).toHaveBeenCalledOnce();
+  });
+});
+
+describe("useSessionGitStatus subscription readiness", () => {
+  afterEach(cleanup);
+
+  it("subscribes when the client registers after the connected state", () => {
+    mocks.client = null;
+    mocks.state.environmentIdBySessionId = {};
+    mocks.state.gitStatus = { byEnvironmentId: {} } as AppState["gitStatus"];
+    mocks.state.connection = { status: "connected" } as AppState["connection"];
+    mocks.subscribeSession.mockClear();
+    const hook = renderHook(() => useSessionGitStatus("session-1"));
+    expect(mocks.subscribeSession).not.toHaveBeenCalled();
+
+    mocks.client = { subscribeSession: mocks.subscribeSession };
+    hook.rerender();
+
+    expect(mocks.subscribeSession).toHaveBeenCalledOnce();
+    expect(mocks.subscribeSession).toHaveBeenCalledWith("session-1");
   });
 });
 

@@ -19,7 +19,10 @@ import (
 )
 
 const (
-	contributionHistoryObservationTimeout = 2 * time.Second
+	// Contribution-history inspection runs several bounded Git subprocesses.
+	// Keep enough budget for Windows runners, where process startup is slower,
+	// while still preventing an interactive request from waiting indefinitely.
+	contributionHistoryObservationTimeout = 10 * time.Second
 	contributionHistoryReflogLimit        = 200
 	contributionHistoryCommitLimit        = 2000
 	contributionHistoryOutputLimit        = 1 << 20

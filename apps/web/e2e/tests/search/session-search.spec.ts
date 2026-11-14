@@ -128,8 +128,19 @@ test.describe("@search session chat panel search", () => {
     await expect
       .poll(
         async () => {
-          const { messages } = await apiClient.listSessionMessages(taskB.session_id!);
-          return messages.some((m) => m.content.includes(uniqueB));
+          const response = await apiClient.rawRequest(
+            "GET",
+            `/api/v1/task-sessions/${taskB.session_id!}/messages?limit=100&sort=asc`,
+          );
+          const result = (await response.json()) as {
+            code?: string;
+            messages?: Array<{ content: string }>;
+          };
+          // Required-store health can recover while the opening turn persists.
+          // Retry only that explicit transient read response within this poll.
+          if (response.status === 503 && result.code === "persistence_unavailable") return false;
+          expect(response.ok).toBe(true);
+          return result.messages!.some((message) => message.content.includes(uniqueB));
         },
         { timeout: 60_000, message: "Waiting for task B's agent message to persist" },
       )

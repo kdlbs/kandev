@@ -41,6 +41,7 @@ func (r *Repository) initTaskUsageEventsSchema() error {
 		task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
 		session_id TEXT REFERENCES task_sessions(id) ON DELETE SET NULL,
 		turn_id TEXT,
+		usage_binding_id TEXT NOT NULL DEFAULT '',
 		agent_profile_id TEXT NOT NULL DEFAULT '',
 		agent_type TEXT NOT NULL DEFAULT '',
 		model TEXT NOT NULL DEFAULT '',

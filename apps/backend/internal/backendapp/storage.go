@@ -9,10 +9,12 @@ import (
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
+	analyticsservice "github.com/kandev/kandev/internal/analytics/service"
 	"github.com/kandev/kandev/internal/auth/hostnames"
 	authstore "github.com/kandev/kandev/internal/auth/store"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/usagehistory"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/persistence"
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
@@ -104,6 +106,18 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 	analyticsRepo, cleanup, err := analyticsrepository.Provide(writer, reader)
 	if err := recordRequiredStore(ctx, tracker, "analytics", err); err != nil {
 		return nil, nil, nil, fmt.Errorf("analytics store: %w", err)
+	}
+	retainer, ok := analyticsRepo.(usagehistory.Retainer)
+	if !ok {
+		return nil, nil, nil, fmt.Errorf("analytics store does not provide transactional usage retention")
+	}
+	taskRepoImpl.SetUsageHistoryRetainer(retainer)
+	taskRepoImpl.SetUsageHistoryEnabled(cfg.Features.UsageHistory)
+	if toggler, ok := analyticsRepo.(interface{ SetUsageHistoryEnabled(bool) }); ok {
+		toggler.SetUsageHistoryEnabled(cfg.Features.UsageHistory)
+	}
+	if err := reconcileUsageHistoryToggle(ctx, cfg.Features.UsageHistory, analyticsRepo); err != nil {
+		return nil, nil, nil, err
 	}
 	cleanups = append(cleanups, cleanup)
 	if err := checkStartupContext(ctx, "agent settings repository"); err != nil {
@@ -225,11 +239,43 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 		return nil, nil, nil, err
 	}
 	initialized = true
+	if projector, ok := analyticsRepo.(analyticsservice.UsageProjectionBatchStore); ok && cfg.Features.UsageHistory {
+		control := newUsageHistoryProjection(ctx, projector, log)
+		repos.UsageHistoryStop = control.stop
+		repos.usageHistoryControl = control
+		cleanups = append(cleanups, control.stop)
+	}
 	startup.EndStep(ctx, startup.StepStoresRepositories)
 	startup.SetPhase(ctx, startup.InitializingServices)
 	startup.BeginStep(ctx, startup.StepStoresServices)
 	startup.SetTotal(ctx, startup.StepStoresServices, int64(tracker.SweepTotal(startup.StepStoresServices)))
 	return pool, repos, cleanups, nil
+}
+
+func reconcileUsageHistoryToggle(ctx context.Context, enabled bool, analyticsRepo analyticsrepository.Repository) error {
+	if enabled {
+		resumer, ok := analyticsRepo.(interface {
+			ResumeUsageHistoryAfterDisabledPeriod(context.Context) error
+		})
+		if !ok {
+			return nil
+		}
+		return wrapUsageHistoryToggleError("resume", resumer.ResumeUsageHistoryAfterDisabledPeriod(ctx))
+	}
+	reopener, ok := analyticsRepo.(interface {
+		ReopenUsageHistoryAfterDisabledPeriod(context.Context) error
+	})
+	if !ok {
+		return nil
+	}
+	return wrapUsageHistoryToggleError("reopen", reopener.ReopenUsageHistoryAfterDisabledPeriod(ctx))
+}
+
+func wrapUsageHistoryToggleError(action string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s usage history after disabled period: %w", action, err)
 }
 
 func checkStartupContext(ctx context.Context, stage string) error {

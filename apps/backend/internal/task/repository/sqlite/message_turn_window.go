@@ -227,7 +227,7 @@ func readMessageTurnWindowTurns(
 		args = append(args, activeTurnID)
 	}
 	query := fmt.Sprintf(`
-		SELECT turn_row.id, turn_row.task_session_id, turn_row.task_id, turn_row.execution_profile_id, turn_row.route_generation,
+		SELECT turn_row.id, turn_row.task_session_id, turn_row.task_id, turn_row.execution_profile_id, turn_row.route_generation, turn_row.usage_binding_id,
 		       turn_row.started_at, turn_row.completed_at, turn_row.metadata, turn_row.created_at, turn_row.updated_at
 		FROM task_session_turns turn_row
 		WHERE turn_row.task_session_id = ? AND (%s)

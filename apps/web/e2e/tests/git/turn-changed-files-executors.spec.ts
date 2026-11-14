@@ -4,7 +4,7 @@ import { waitForLatestSessionDone } from "../../helpers/session";
 import {
   enableTurnChangedFiles,
   waitForTurnChangeCount,
-  waitForTurnChangeFileContent,
+  waitForTurnChangeRepositoryContentComplete,
 } from "./turn-changed-files-helpers";
 
 test.describe("Docker executor turn change retention", () => {
@@ -61,11 +61,14 @@ test.describe("Docker executor turn change retention", () => {
       };
       const file = filePage.files.find((entry) => entry.path === "untracked_test.txt");
       expect(file?.id).toBeTruthy();
-      // The card is published before content preservation settles. Wait for the
-      // durable export before destroying the executor source it reads from.
-      expect(
-        await waitForTurnChangeFileContent(apiClient, sessionId, changeSet!.id, file!.id),
-      ).toContain("INITIAL_CONTENT");
+      // The summary/card may be published before content preservation settles.
+      // Wait on the repository completion contract before destroying its source.
+      await waitForTurnChangeRepositoryContentComplete(
+        apiClient,
+        sessionId,
+        changeSet!.id,
+        repository!.id,
+      );
 
       dockerRemove(containerId);
       expect(dockerInspectExists(containerId)).toBe(false);
@@ -76,8 +79,12 @@ test.describe("Docker executor turn change retention", () => {
         "GET",
         `/api/v1/task-sessions/${sessionId}/turn-changes/${changeSet!.id}/files/${file!.id}/content?variant=canonical_patch`,
       );
-      expect(contentResponse.ok).toBe(true);
-      const content = (await contentResponse.json()) as { content: string };
+      const contentResponseBody = await contentResponse.text();
+      expect(
+        contentResponse.ok,
+        `Post-restart turn content request failed with HTTP ${contentResponse.status}: ${contentResponseBody.slice(0, 1000)}`,
+      ).toBe(true);
+      const content = JSON.parse(contentResponseBody) as { content: string };
       expect(Buffer.from(content.content, "base64").toString("utf8")).toContain("INITIAL_CONTENT");
     } finally {
       await restorePreference();

@@ -509,6 +509,11 @@ func handleE2EReset(
 			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
 			return
 		}
+		if err := repo.ResetWorkspaceUsageHistory(ctx, workspaceID); err != nil {
+			log.Error("e2e reset: retained usage cleanup failed", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: "retained usage cleanup failed"})
+			return
+		}
 
 		deletedWorkflows, err := repo.DeleteWorkflowsByWorkspace(ctx, workspaceID, keepWorkflowIDs)
 		if err != nil {

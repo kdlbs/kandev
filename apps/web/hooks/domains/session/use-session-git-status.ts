@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "@/components/state-provider";
-import { getWebSocketClient } from "@/lib/ws/connection";
+import { useWebSocketClient } from "@/lib/ws/connection";
 import { createDebugLogger } from "@/lib/debug/log";
 import type {
   GitStatusEntry,
@@ -31,6 +31,7 @@ export function useSessionGitStatus(
     }),
   );
   const connectionStatus = useAppStore((state) => state.connection.status);
+  const client = useWebSocketClient();
 
   // Subscribe to session updates to receive git status via WebSocket
   // The workspace stream sends current git status immediately on subscription
@@ -49,7 +50,6 @@ export function useSessionGitStatus(
       return;
     }
 
-    const client = getWebSocketClient();
     if (!client) {
       debugSub("skip", { sessionId, reason: "no-client", connectionStatus });
       return;
@@ -61,7 +61,7 @@ export function useSessionGitStatus(
       unsubscribe();
       // Don't clear git status on cleanup - keep it cached for when user switches back
     };
-  }, [detailActive, sessionId, connectionStatus]);
+  }, [detailActive, sessionId, connectionStatus, client]);
 
   return gitStatus;
 }

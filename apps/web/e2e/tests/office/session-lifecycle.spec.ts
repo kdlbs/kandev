@@ -153,6 +153,11 @@ test.describe("Office task session lifecycle", () => {
     officeApi,
     officeSeed,
   }) => {
+    // This API-only test does not request testPage, so its workspace reset
+    // fixture does not run. Clear worker-scoped tasks before pausing the CEO.
+    await apiClient.e2eReset(officeSeed.workspaceId, [officeSeed.workflowId]);
+    await officeApi.updateAgentStatus(officeSeed.agentId, "idle");
+
     const newAssignee = (await officeApi.createAgent(officeSeed.workspaceId, {
       name: "Lifecycle Reassignee",
       role: "worker",

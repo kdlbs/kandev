@@ -1,8 +1,10 @@
 import { expect, type Page } from "@playwright/test";
 import type { AgentUpdateStatus } from "../../../lib/api/domains/agent-update-api";
+import type { AppState } from "../../../lib/state/app-state-types";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { dwell, waitForHttp, watchWs } from "../../helpers/causal-waits";
+import { waitForWebSocketConnected } from "../../helpers/session-store";
 import type { BackendContext } from "../../fixtures/backend";
 
 const SUMMARY_EVENT = "system.update_available";
@@ -17,10 +19,24 @@ export async function backendRuntimeUpdateSummary(
   if (mobile) await page.setViewportSize({ width: 390, height: 844 });
 
   const ws = watchWs(page);
-  const initialSubscription = ws.waitForResponse("user.subscribe");
-  const initialStatus = waitForHttp(page, "GET", /\/agent-update\/status$/);
+  // Cold document loading is not a subscription round trip. Observe the
+  // consumed initial state before arming the restart's correlated RPC wait.
   await page.goto("/");
-  await Promise.all([initialSubscription, initialStatus]);
+  await waitForWebSocketConnected(page);
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const store = (
+            window as Window & {
+              __KANDEV_E2E_STORE__?: { getState: () => AppState };
+            }
+          ).__KANDEV_E2E_STORE__;
+          return (store?.getState().agentRuntimeUpdates.checkedAt ?? 0) > 0;
+        }),
+      { timeout: 15_000, message: "initial runtime status must be consumed before restart" },
+    )
+    .toBe(true);
 
   const summaryReceived = { value: false };
   const summaryEvent = ws
@@ -33,17 +49,28 @@ export async function backendRuntimeUpdateSummary(
       return frame;
     });
   const availabilityWindowCheckStartedAt = Date.now();
-  const restart = Promise.resolve().then(() =>
-    backend.restart({
-      KANDEV_MOCK_AGENT: "true",
-      KANDEV_E2E_RUNTIME_UPDATE_LATEST_VERSION: "99.0.0",
-    }),
-  );
-  const reconnectSubscription = ws.waitForResponse("user.subscribe", {
-    timeout: 30_000,
-    timeoutAfter: restart,
+  const disconnected = page
+    .waitForFunction(
+      () =>
+        (
+          window as Window & { __KANDEV_E2E_STORE__?: { getState: () => AppState } }
+        ).__KANDEV_E2E_STORE__?.getState().connection.status !== "connected",
+      undefined,
+      { timeout: 15_000, message: "backend restart must disconnect the app WebSocket" },
+    )
+    .then(
+      () => undefined,
+      (error: unknown) => (error instanceof Error ? error : new Error(String(error))),
+    );
+  // Let Playwright register the state wait before the backend drops the socket.
+  await page.evaluate(() => undefined);
+  await backend.restart({
+    KANDEV_MOCK_AGENT: "true",
+    KANDEV_E2E_RUNTIME_UPDATE_LATEST_VERSION: "99.0.0",
   });
-  await Promise.all([restart, reconnectSubscription]);
+  const disconnectError = await disconnected;
+  if (disconnectError) throw disconnectError;
+  await waitForWebSocketConnected(page, 30_000);
 
   const outcomeEvent = ws.waitForEvent(SUMMARY_EVENT, {
     timeout: 15_000,

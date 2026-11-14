@@ -2,6 +2,7 @@ import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { watchWs } from "../../helpers/causal-waits";
 import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
@@ -34,7 +35,7 @@ async function seedOverflowingTask(
   testPage: Page,
   apiClient: ApiClient,
   seedData: SeedData,
-): Promise<SessionPage> {
+): Promise<{ session: SessionPage; sessionId: string }> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     "Jump to latest navigation",
@@ -52,7 +53,7 @@ async function seedOverflowingTask(
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
-  return session;
+  return { session, sessionId: task.session_id };
 }
 
 async function scrollUp(testPage: Page, list: ReturnType<SessionPage["activeChat"]>) {
@@ -70,7 +71,8 @@ test("Jump to latest returns to the newest grouped reply and preserves auto-scro
   seedData,
 }) => {
   test.setTimeout(180_000);
-  const session = await seedOverflowingTask(testPage, apiClient, seedData);
+  const ws = watchWs(testPage);
+  const { session, sessionId } = await seedOverflowingTask(testPage, apiClient, seedData);
   const chat = session.activeChat();
   const list = chat.locator(".chat-message-list");
   const statusBar = chat.getByTestId("chat-status-bar");
@@ -115,9 +117,19 @@ test("Jump to latest returns to the newest grouped reply and preserves auto-scro
   await expect(button).toHaveCount(0);
   await expect(autoScrollToggle).toHaveAttribute("aria-pressed", "false");
 
-  await session.sendMessageViaButton(
-    `${messageCommand(STREAM_START_MARKER)}\ne2e:delay(1600)\n${messageCommand(STREAM_END_MARKER)}`,
-  );
+  const streamedStart = ws.waitForEvent("session.message.added", {
+    where: (payload) =>
+      payload.session_id === sessionId &&
+      payload.author_type === "agent" &&
+      typeof payload.content === "string" &&
+      payload.content.includes(STREAM_START_MARKER),
+  });
+  await Promise.all([
+    session.sendMessageViaButton(
+      `${messageCommand(STREAM_START_MARKER)}\ne2e:delay(1600)\n${messageCommand(STREAM_END_MARKER)}`,
+    ),
+    streamedStart,
+  ]);
   await expect(assistantReply(chat, STREAM_START_MARKER)).toBeVisible();
   await scrollUp(testPage, list);
   await expect(button).toBeVisible();

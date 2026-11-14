@@ -16,6 +16,12 @@ export type {
   ProviderUsage,
 } from "./agent-profile";
 
+export type {
+  TokenUsageMetricValue,
+  TokenUsageMetrics,
+  TokenUsageRow,
+  TokenUsageResponse,
+} from "./http-usage-history";
 import type { AgentProfile } from "./agent-profile";
 import type { CLIFlag } from "./agent-profile";
 import type { BackendMessage } from "./backend-message";

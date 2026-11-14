@@ -219,7 +219,7 @@ func (r *Repository) populateConversationTurnReceipt(
 
 func (r *Repository) readConversationTurnTx(ctx context.Context, tx *sqlx.Tx, turnID string) (*models.Turn, error) {
 	return scanTurn(tx.QueryRowxContext(ctx, tx.Rebind(`
-		SELECT id, task_session_id, task_id, execution_profile_id, route_generation,
+		SELECT id, task_session_id, task_id, execution_profile_id, route_generation, usage_binding_id,
 		       started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns WHERE id = ?
 	`), turnID))

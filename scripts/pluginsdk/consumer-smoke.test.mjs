@@ -5,6 +5,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { goEnvironment, startProxy, sdkModule } from "./go-consumer.mjs";
 
+test("local smoke selects the version from the source SDK record", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "sdk-smoke-version-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, "pluginsdk"));
+  await writeFile(
+    join(root, "pluginsdk/sdk-release.json"),
+    JSON.stringify({ sdk_version: "0.2.0" }),
+  );
+  const { localSDKVersion } = await import("./consumer-smoke.mjs");
+  assert.equal(await localSDKVersion(root), "v0.2.0");
+});
+
 // @covers AC-PLUGINS-SDK-DISTRIBUTION-001.3
 for (const mode of ["local", "public"]) {
   test(`${mode} consumers use fresh caches and explicit Go trust`, () => {

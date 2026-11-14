@@ -1,13 +1,13 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { test, expect } from "../../fixtures/test-base";
-import { holdCancellationSettlement } from "../../helpers/cancellation-observation";
 import {
   activeTaskSessionId,
   waitForActiveSessionCancellationPending,
   waitForActiveSessionForegroundActivity,
   waitForActiveSessionSupportsSteering,
 } from "../../helpers/session-store";
+import { holdCancellationSettlement } from "../../helpers/cancellation-observation";
 import { seedIdleSession } from "../../helpers/session";
 import { seedRunningGeneratingSession } from "../../helpers/generating-session";
 
@@ -64,14 +64,14 @@ test.describe.serial("Cancel turn availability", () => {
           timeout: 15_000,
         })
         .toBe(true);
-      await waitForActiveSessionCancellationPending(testPage, true);
+      await waitForActiveSessionCancellationPending(testPage, true, sessionId);
       await expect(cancelButton).toBeDisabled();
     } finally {
       cancellation.release();
     }
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
-    await waitForActiveSessionCancellationPending(testPage, false);
-    await waitForActiveSessionForegroundActivity(testPage, null);
+    await waitForActiveSessionCancellationPending(testPage, false, sessionId);
+    await waitForActiveSessionForegroundActivity(testPage, null, sessionId);
     await expect(activeSessionChat.getByTestId("cancel-agent-button")).not.toBeVisible({
       timeout: 15_000,
     });

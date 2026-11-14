@@ -4,10 +4,12 @@ import { payloadRetentionMarker } from "@/lib/utils/tool-payload-retention";
 
 import type { Draft } from "immer";
 import { original } from "immer";
+import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import type { Message, TaskSession, WorkspaceRecoveryProjection } from "@/lib/types/http";
 import type {
   QueueMeta,
   QueueOperationToken,
+  SessionAgentctlStatus,
   SessionSlice,
   SessionSliceState,
   TaskSessionHydrationEpoch,
@@ -57,6 +59,39 @@ function ensureMessageMeta(
       oldestCursor: null,
     };
   }
+}
+
+// A deleted message stays absent when older transcript data arrives later.
+function isDeletedMessage(
+  state: Draft<SessionSlice>,
+  sessionId: string,
+  messageId: string,
+): boolean {
+  return state.messagePrompts.deletedIdsBySession[sessionId]?.[messageId] === true;
+}
+
+function filterDeletedMessages(
+  state: Draft<SessionSlice>,
+  sessionId: string,
+  messages: Message[],
+): Message[] {
+  const deleted = state.messagePrompts.deletedIdsBySession[sessionId];
+  return deleted ? messages.filter((message) => !deleted[message.id]) : messages;
+}
+
+function applyTranscriptMeta(
+  state: Draft<SessionSlice>,
+  metaBySession: SessionSliceState["messages"]["metaBySession"],
+  sessionId: string,
+  meta: Parameters<SessionSlice["setMessages"]>[2],
+  messages: readonly Pick<Message, "id">[],
+): void {
+  if (!meta) return;
+  const acceptedMeta =
+    meta.oldestCursor && isDeletedMessage(state, sessionId, meta.oldestCursor)
+      ? { ...meta, oldestCursor: messages[0]?.id ?? null }
+      : meta;
+  applyMessageMeta(metaBySession, sessionId, acceptedMeta);
 }
 
 /** Apply partial metadata updates to the session's message metadata. */
@@ -488,6 +523,7 @@ function pruneTurnWindowCoverage(
 function buildUpdateMessage(set: ImmerSet) {
   return (message: Parameters<SessionSlice["updateMessage"]>[0]) =>
     set((draft) => {
+      if (isDeletedMessage(draft, message.session_id, message.id)) return;
       const messages = draft.messages.bySession[message.session_id];
       if (messages) {
         resolveRunningNotices(messages, message);
@@ -510,6 +546,7 @@ function buildUpdateMessages(set: ImmerSet) {
   return (messages: Parameters<SessionSlice["updateMessages"]>[0]) =>
     set((draft) => {
       for (const message of messages) {
+        if (isDeletedMessage(draft, message.session_id, message.id)) continue;
         let sessionMessages = draft.messages.bySession[message.session_id];
         if (!sessionMessages && isTransientRetryNotice(message)) {
           sessionMessages = draft.messages.bySession[message.session_id] = [];
@@ -525,6 +562,29 @@ function buildUpdateMessages(set: ImmerSet) {
     });
 }
 
+function buildAddMessageAction(set: ImmerSet) {
+  return (message: Parameters<SessionSlice["addMessage"]>[0]) =>
+    set((draft) => {
+      const sessionId = message.session_id;
+      if (isDeletedMessage(draft, sessionId, message.id)) return;
+      if (!draft.messages.bySession[sessionId]) draft.messages.bySession[sessionId] = [];
+      resolveRunningNotices(draft.messages.bySession[sessionId], message);
+      const existingIndex = draft.messages.bySession[sessionId].findIndex(
+        (entry) => entry.id === message.id,
+      );
+      if (existingIndex === -1) {
+        draft.messages.bySession[sessionId].push(message);
+      } else {
+        mergeMessageFields(
+          draft.messages.bySession[sessionId][existingIndex] as unknown as Record<string, unknown>,
+          message as unknown as Record<string, unknown>,
+        );
+      }
+      observeLivePrompt(draft, message);
+      fanOutTranscriptPrompts(draft, [message]);
+    });
+}
+
 function buildMessageActions(set: ImmerSet) {
   return {
     setMessages: (
@@ -533,37 +593,23 @@ function buildMessageActions(set: ImmerSet) {
       meta?: Parameters<SessionSlice["setMessages"]>[2],
     ) =>
       set((draft) => {
+        const acceptedMessages = filterDeletedMessages(draft, sessionId, messages);
         draft.messages.bySession[sessionId] = reconcileMessages(
           draft.messages.bySession[sessionId],
-          messages,
+          acceptedMessages,
         );
         pruneTurnWindowCoverage(draft, sessionId, draft.messages.bySession[sessionId]);
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
-        if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
-        fanOutTranscriptPrompts(draft, messages);
-      }),
-    addMessage: (message: Parameters<SessionSlice["addMessage"]>[0]) =>
-      set((draft) => {
-        const sessionId = message.session_id;
-        if (!draft.messages.bySession[sessionId]) draft.messages.bySession[sessionId] = [];
-        resolveRunningNotices(draft.messages.bySession[sessionId], message);
-        const existingIndex = draft.messages.bySession[sessionId].findIndex(
-          (entry) => entry.id === message.id,
+        applyTranscriptMeta(
+          draft,
+          draft.messages.metaBySession,
+          sessionId,
+          meta,
+          draft.messages.bySession[sessionId],
         );
-        if (existingIndex === -1) {
-          draft.messages.bySession[sessionId].push(message);
-        } else {
-          mergeMessageFields(
-            draft.messages.bySession[sessionId][existingIndex] as unknown as Record<
-              string,
-              unknown
-            >,
-            message as unknown as Record<string, unknown>,
-          );
-        }
-        observeLivePrompt(draft, message);
-        fanOutTranscriptPrompts(draft, [message]);
+        fanOutTranscriptPrompts(draft, acceptedMessages);
       }),
+    addMessage: buildAddMessageAction(set),
     updateMessage: buildUpdateMessage(set),
     updateMessages: buildUpdateMessages(set),
     removeMessage: (
@@ -583,11 +629,12 @@ function buildMessageActions(set: ImmerSet) {
       meta?: Parameters<SessionSlice["mergeMessages"]>[2],
     ) =>
       set((draft) => {
+        const acceptedMessages = filterDeletedMessages(draft, sessionId, messages);
         const prevDraft = draft.messages.bySession[sessionId];
         const prev = (prevDraft ? (original(prevDraft) ?? prevDraft) : undefined) as
           | Message[]
           | undefined;
-        const reconciled = reconcileMessages(prev, messages);
+        const reconciled = reconcileMessages(prev, acceptedMessages);
         // Only replace the array when identity actually changed, so a no-op
         // refetch preserves the array reference and triggers no re-render.
         if (reconciled !== prev) {
@@ -595,8 +642,14 @@ function buildMessageActions(set: ImmerSet) {
         }
         pruneTurnWindowCoverage(draft, sessionId, draft.messages.bySession[sessionId] ?? []);
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
-        if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
-        fanOutTranscriptPrompts(draft, messages);
+        applyTranscriptMeta(
+          draft,
+          draft.messages.metaBySession,
+          sessionId,
+          meta,
+          draft.messages.bySession[sessionId] ?? [],
+        );
+        fanOutTranscriptPrompts(draft, acceptedMessages);
       }),
     prependMessages: (
       sessionId: string,
@@ -604,16 +657,23 @@ function buildMessageActions(set: ImmerSet) {
       meta?: Parameters<SessionSlice["prependMessages"]>[2],
     ) =>
       set((draft) => {
+        const acceptedMessages = filterDeletedMessages(draft, sessionId, messages);
         const existing = draft.messages.bySession[sessionId] || [];
         const existingIds = new Set(existing.map((m) => m.id));
         draft.messages.bySession[sessionId] = [
-          ...messages.filter((m) => !existingIds.has(m.id)),
+          ...acceptedMessages.filter((m) => !existingIds.has(m.id)),
           ...existing,
         ];
         pruneTurnWindowCoverage(draft, sessionId, draft.messages.bySession[sessionId]);
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
-        if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
-        fanOutTranscriptPrompts(draft, messages);
+        applyTranscriptMeta(
+          draft,
+          draft.messages.metaBySession,
+          sessionId,
+          meta,
+          draft.messages.bySession[sessionId],
+        );
+        fanOutTranscriptPrompts(draft, acceptedMessages);
       }),
     setMessagesMetadata: buildSetMessagesMetadata(set),
     setMessagesLoading: buildSetMessagesLoading(set),
@@ -970,6 +1030,15 @@ function promoteAgentctlReadyFromSessionSnapshot(
   session: Pick<TaskSession, "id" | "state" | "updated_at" | "agent_execution_id">,
 ): void {
   const current = draft.sessionAgentctl.itemsBySessionId[session.id];
+  const previousObservedAt = parseStrictRfc3339Timestamp(current?.updatedAt);
+  const snapshotObservedAt = parseStrictRfc3339Timestamp(session.updated_at);
+  if (
+    previousObservedAt !== null &&
+    snapshotObservedAt !== null &&
+    snapshotObservedAt < previousObservedAt
+  ) {
+    return;
+  }
   if (
     !sessionStateConfirmsAgentctlExecutionReady(
       session.state,
@@ -1324,9 +1393,14 @@ export const createSessionSlice: SliceCreator<SessionSlice> = (set, get) => ({
           session?.agent_execution_id,
           status.agentExecutionId,
         );
-      draft.sessionAgentctl.itemsBySessionId[sessionId] = sameLiveExecution
+      const nextStatus: SessionAgentctlStatus = sameLiveExecution
         ? { ...status, status: "ready", startingExecutionId: status.agentExecutionId }
         : status;
+      const previous = draft.sessionAgentctl.itemsBySessionId[sessionId];
+      // Recovery may confirm the same status without execution or timestamp
+      // metadata. Keep the observation used to reject delayed snapshots.
+      draft.sessionAgentctl.itemsBySessionId[sessionId] =
+        previous?.status === nextStatus.status ? { ...previous, ...nextStatus } : nextStatus;
     }),
   setWorktree: (worktree) =>
     set((draft) => {

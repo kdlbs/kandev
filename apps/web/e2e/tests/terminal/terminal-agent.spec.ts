@@ -2,7 +2,11 @@ import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForSessionState } from "../../helpers/session";
-import { waitForSessionAgentctlReady } from "../../helpers/session-store";
+import {
+  waitForSessionAgentctlReady,
+  waitForWebSocketConnected,
+} from "../../helpers/session-store";
+import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { errors, type Page } from "@playwright/test";
 
@@ -355,6 +359,13 @@ test.describe("Terminal agent (TUI passthrough)", () => {
 
     const profile = await createTUIProfile(apiClient, "TUI Reset");
 
+    // Connect the app websocket before starting the PTY. Creating a TUI task
+    // after the listener is ready ensures the one-shot agentctl_ready event is
+    // observed before the workflow cascade begins.
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await waitForWebSocketConnected(testPage);
+
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "TUI Reset Task",
@@ -366,13 +377,6 @@ test.describe("Terminal agent (TUI passthrough)", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
-
-    const session = await openTaskSession(testPage, task.id);
-    await session.expectPassthroughHasText("Mock Agent");
-
-    // The terminal header can render before the auto-started boot turn ends.
-    // Wait for the backend lifecycle state before moving the task. Otherwise
-    // the workflow reset can race with that first PTY turn under CI load.
     expect(task.session_id, "task must have a session to await").toBeTruthy();
     await waitForSessionState(apiClient, {
       taskId: task.id,
@@ -381,10 +385,14 @@ test.describe("Terminal agent (TUI passthrough)", () => {
       message: "the initial passthrough turn did not settle before the cascade",
       timeout: 30_000,
     });
-    // The API state can settle before the page has subscribed to the session's
-    // agentctl lifecycle. Establish that subscription before moving the task,
-    // so reset/relaunch events cannot race the terminal's initial handshake.
     await waitForSessionAgentctlReady(testPage, task.session_id as string);
+
+    await kanban.taskCardInColumn("TUI Reset Task", backlogStep.id).click();
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForPassthroughLoad();
+    await session.expectPassthroughHasText("Mock Agent", 30_000);
 
     // Trigger cascade: Analyze → (turn complete) → Implement (reset + auto_start) → Review
     await apiClient.moveTask(task.id, workflow.id, analyzeStep.id);

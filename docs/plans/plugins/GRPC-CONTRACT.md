@@ -31,7 +31,7 @@ Env kandev injects into the subprocess:
 
 - `KANDEV_PLUGIN_DATA_DIR` — per-plugin writable dir (`~/.kandev/plugins/<id>/data`).
 
-## 3. Proto (`apps/backend/proto/kandev/plugin/v1/plugin.proto`)
+## 3. Proto (`pluginsdk/proto/kandev/plugin/v1/plugin.proto`)
 
 ```proto
 syntax = "proto3";
@@ -68,6 +68,8 @@ service Host {
   rpc SetState(SetStateRequest) returns (SetStateResponse);
   rpc DeleteState(DeleteStateRequest) returns (DeleteStateResponse);
   rpc ListState(ListStateRequest) returns (ListStateResponse);
+  // Optional bounded key-only enumeration; capability state.
+  rpc ListStateKeys(ListStateKeysRequest) returns (ListStateKeysResponse);
   rpc RevealSecret(RevealSecretRequest) returns (RevealSecretResponse);
   rpc EmitEvent(EmitEventRequest) returns (EmitEventResponse);
 
@@ -111,12 +113,16 @@ service Host {
   rpc ListRepositories(ListRepositoriesRequest) returns (ListRepositoriesResponse);
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc ListSessionCodeStats(ListSessionCodeStatsRequest) returns (ListSessionCodeStatsResponse);
+  // Retained usage v1 — discovery requires api_read:session_usage.
+  rpc ListUsageCollectionTargetsV1(ListUsageCollectionTargetsV1Request) returns (ListUsageCollectionTargetsV1Response);
 
   // Host data API — writes, capability api_write:<resource>. Route through the
   // first-party service layer so events fire (§3a "Writes"). api_write:tasks
   // gates CreateTask/UpdateTask; api_write:messages gates SendMessage (delivers
   // a prompt to a task session through the orchestrator). Undeclared → gRPC
   // PermissionDenied.
+  // Retained usage v1 — reports require api_write:session_usage.
+  rpc ReportUsageObservationsV1(ReportUsageObservationsV1Request) returns (ReportUsageObservationsV1Response);
   rpc CreateTask(CreateTaskRequest) returns (Task);
   rpc UpdateTask(UpdateTaskRequest) returns (Task);
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
@@ -223,6 +229,16 @@ message DeleteStateRequest { string scope = 1; string scope_id = 2; string key =
 message DeleteStateResponse {}
 message ListStateRequest { string scope = 1; string scope_id = 2; }
 message ListStateResponse { repeated StateEntry entries = 1; }
+message ListStateKeysRequest {
+  string scope = 1;
+  string scope_id = 2;
+  string cursor = 3;
+  int32 limit = 4;
+}
+message ListStateKeysResponse {
+  repeated string keys = 1;
+  string next_cursor = 2;
+}
 message StateEntry { string key = 1; google.protobuf.Struct value = 2; string updated_at = 3; }
 
 message GetConfigRequest {}
@@ -252,6 +268,27 @@ Notes: scope ∈ instance|workspace|task|agent (empty scope_id for instance —
 matches the state store). The plugin never passes its own id; the Host service
 instance is bound to the plugin's record at spawn time.
 
+`ListStateKeys` requires `state: true` and selects one exact scope and scope ID
+for the connected plugin. It returns keys without values or timestamps.
+Limit zero defaults to 200. Explicit limits are 1 through 200.
+The opaque cursor binds plugin identity, scope, scope ID, and normalized limit.
+An invalid limit, malformed cursor, or cursor for another query returns
+`InvalidArgument`.
+
+Keys use stable database ordering with an exclusive cursor. Deleting processed
+keys does not skip later keys. These pages are not a snapshot. Concurrent
+inserts at or before the cursor require a fresh pass. An empty `next_cursor`
+marks completion. Consumers use point state operations for each key and store
+the cursor only after their bounded batch completes. Repeated work after a
+crash must remain idempotent.
+
+`pluginsdk.HostStateKeys(host)` discovers the optional `StateKeyReader` without
+changing `Host`. An older in-process Host returns `ok == false`.
+An older remote Host returns gRPC `Unimplemented` from `ListKeys`.
+If bounded cleanup requires this reader, stop that cleanup until the Host supports it.
+Require a Host upgrade instead of an unbounded `ListState` fallback.
+The existing state methods and wire numbers remain unchanged.
+
 `InvokeUtilityAgent` remains the prompt-only compatibility method. On a revised
 host it uses the platform default profile from Settings > Utility Agents.
 `InvokeUtilityAgentWithOptions` accepts the same prompt plus an optional
@@ -276,16 +313,12 @@ preview, or task provenance as deletion consent.
 
 ### 3a. Host data API (ADR 0043)
 
-Read/write RPCs let plugins read and write kandev's own domain data —
-tasks, sessions, workspaces, workflows, agent profiles, repositories, messages —
-over the same Host gRPC channel used for state/secrets, instead of opening the
-kandev database file directly. Full message definitions (`Page`, `PageInfo`,
-`Task`, `TaskFilter`, `Workspace`, `Workflow`, `WorkflowStep`, `AgentProfile`,
-`Repository`, `Session`, `SessionFilter`, `SessionCodeStats`, and the write
-`CreateTaskRequest`/`UpdateTaskRequest`/`SendMessageRequest`/`SendMessageResponse`) live in
-the real proto — `apps/backend/proto/kandev/plugin/v1/plugin.proto` — and are not
-duplicated here; this section covers the RPC list (added to `service Host` above),
-capability gating, and cross-cutting conventions. See ADR 0043
+Read/write RPCs let plugins read and write kandev's own domain data over the
+same Host gRPC channel used for state and secrets, instead of opening the
+kandev database file directly. Full message definitions for Host data records,
+writes, exact reads, and retained usage live in the real proto at
+`pluginsdk/proto/kandev/plugin/v1/plugin.proto`. This section covers the RPC
+list, capability gating, and cross-cutting conventions. See ADR 0043
 (`docs/decisions/0043-plugin-host-data-api.md`) for the design rationale.
 
 API v1 DTO fields are additive-only. `Task.labels` field 23, shipped in v0.93.0,
@@ -307,6 +340,7 @@ plugin's manifest:
 | `ListRepositories`                           | `api_read:repositories`      | repositories      |
 | `ListSessions`                               | `api_read:sessions`          | sessions          |
 | `ListSessionCodeStats`                       | `api_read:sessions`          | sessions          |
+| `ListUsageCollectionTargetsV1`                | `api_read:session_usage`     | session_usage     |
 | `ListMessages`                               | `api_read:messages`          | messages          |
 | `ListPendingInteractions` / `GetInteraction` | `api_read:interactions`      | interactions      |
 
@@ -316,6 +350,211 @@ identical in shape to the existing state/secrets gating. Declaring the resource
 grants every RPC listed against it; there is no finer-grained gate within a
 resource (e.g. `api_read:workflows` covers both `ListWorkflows` and
 `ListWorkflowSteps`).
+
+**Retained usage observations.** The versioned API adds
+`ListUsageCollectionTargetsV1` and `ReportUsageObservationsV1` to the same Host
+service. Target discovery requires `api_read:session_usage`. Observation writes
+require `api_write:session_usage`.
+
+The Host issues an opaque subject binding for each authorized target. The
+binding carries validated workspace ownership and retained correction
+authority. A report carries no workspace, organization, actor, or collector
+namespace claim. The Host derives scope from retained evidence and collector
+identity from the authenticated plugin connection. Aggregate actor attribution
+uses core evidence for the reported coverage. Discovery actor status does not
+authorize attribution of future aggregates to a stale actor snapshot.
+
+Snapshot import uses an initial request without `current_target`,
+`snapshot_id`, or `cursor`. Preparation advances durable discovery in one
+bounded step per call. A `preparing=true` response has no items, snapshot ID,
+or cursor. Its upper bound is zero and `has_more` is false.
+The collector repeats the initial request
+in a later step. This preparation is separate from canonical projection status.
+
+After preparation, target pages use an immutable snapshot ID, an upper
+sequence bound, and an opaque keyset cursor. A collector resumes with the same
+snapshot ID and cursor. Additions, deletions, and later source updates do not
+shift that scan.
+A deletion does not remove an issued binding's retained correction authority.
+Current authorization and source safety still apply.
+
+Request field 5 adds `current_target` for a bounded current-eligibility lookup.
+`workspace_id` is required. The nested request requires at least one exact
+constraint: `task_id`, `session_id`, `external_session_id`, or `subject_binding`.
+Every nonempty constraint must match. `snapshot_id` and `cursor` are forbidden.
+
+The point response requires `current_target=true`, including for zero items.
+It returns at most one item. `snapshot_id` and `next_cursor` are empty,
+`snapshot_upper_bound` is zero, and `has_more` and `preparing` are false.
+An empty acknowledged result means no matching authorized target.
+The SDK returns `Unimplemented` if the acknowledgement is absent.
+Enumeration state or multiple items produce `FailedPrecondition`.
+Malformed point requests produce `InvalidArgument`.
+
+If a Host lacks point support, current collection requires a compatible Host.
+Consumers must not fall back to an archive scan or cached snapshot eligibility.
+Target field 11 adds `source_scope_status`: `eligible`, `mixed`, or `unknown`.
+Only explicit `eligible` permits aggregate collection. Empty status and a
+missing match do not. A binding alone does not authorize cumulative history
+from another ownership scope. Consumers revalidate before a raw source read
+and before its report.
+
+The additive discovery fields keep the existing wire numbers:
+
+```protobuf
+message UsageCollectionCurrentTargetQueryV1 {
+  string task_id = 1;
+  string session_id = 2;
+  string external_session_id = 3;
+  string subject_binding = 4;
+}
+message ListUsageCollectionTargetsV1Request {
+  string workspace_id = 1;
+  int32 limit = 2;
+  string snapshot_id = 3;
+  string cursor = 4;
+  UsageCollectionCurrentTargetQueryV1 current_target = 5;
+}
+message ListUsageCollectionTargetsV1Response {
+  repeated UsageCollectionTargetV1 items = 1;
+  string snapshot_id = 2;
+  int64 snapshot_upper_bound = 3;
+  string next_cursor = 4;
+  bool has_more = 5;
+  bool preparing = 6;
+  bool current_target = 7;
+}
+```
+
+Target fields 7–10 add nullable `session_started_at`, `session_ended_at`,
+`coverage_start`, and `coverage_end` values from retained core evidence.
+The Host captures available evidence before task or session cleanup.
+Unknown values stay absent. Session bounds do not prove dated consumption.
+Collection time does not establish consumption time. The retained DTO supplies
+no turn count; collector message counts do not establish Kandev turns.
+
+Each observation has an immutable item ID within its authenticated collector.
+Its first revision is 1. Model and provider corrections keep that ID and
+advance its revision. Tombstones use a revision above the active item revision.
+A collector can explicitly supersede or tombstone only its own observations. A
+complete-set revision retires omitted members only when the Host accepts the
+complete set atomically. Each member carries the same source-set ID and
+revision. Set revisions start at 1 and increase. The complete-set digest covers
+the full membership. An ordinary
+partial report never retires omitted items or converts missing values to zero.
+Each report accepts at most 200 total observation and tombstone entries.
+One complete-set revision retires at most 200 previous members.
+
+An identical revision and digest is an idempotent replay. A lower revision
+returns `stale`. A reused revision with a different digest returns `conflict`.
+A higher revision can correct amounts up or down. Stale and conflicting
+results include the current accepted row when one exists. An unsupported token
+semantics version returns the per-item `unsupported_version` status.
+An observation checkpoint requires `operation=observation`, `accepted` or
+`unchanged`, and the exact `current_revision` and `current_digest`.
+Rejected, stale, and conflicting receipts do not establish a canonical selection.
+
+Work identity evidence is separate from collector provenance and model,
+provider, agent client, and serving platform dimensions. Kandev recognizes
+only supported identity schemes. Unsupported identity evidence stays
+unproven or ambiguous. Matching model names do not prove that two records
+describe the same work.
+
+`transcript_binding` matches the issued binding or its retained external
+session ID. Proven shared transcript work within one captured scope contributes
+once across subjects. Distinct proven transcript contexts within one subject
+remain distinct. Unproven or copied lineage does not establish disjoint work.
+Shared work does not invent a task, session, or actor allocation.
+`provider_event` requires an exact core-retained event alias for
+the same subject. Unknown or ambiguous aliases remain unproven.
+Only core-native observations receive native priority.
+Work equivalence precedes provider, model, and semantics dimensions.
+Dimension conflicts alone do not establish additive work.
+
+Schema 1 remains supported for observations without a segment. Schema 2 adds
+`UsageObservationV1.segment` at field 21. A report with any segment must use
+schema 2. An older Host rejects schema 2 with `unsupported_version`.
+A consumer must not downgrade a segmented report to schema 1.
+The report schema is separate from the manifest API version and v1 RPC names.
+
+```protobuf
+message UsageSegmentIdentityV1 {
+  string decomposition_id = 1;
+  string segment_id = 2;
+}
+// Additive field in UsageObservationV1:
+// UsageSegmentIdentityV1 segment = 21;
+```
+
+A decomposition declares disjoint members of one alternative division of
+proven work. Distinct members can contribute together after work and coverage
+checks. Different collectors' decompositions remain alternatives, even with
+matching ID strings. Unsegmented whole-work snapshots remain alternatives to
+decompositions. Segment IDs grant neither native priority nor provider identity
+proof. Model and provider labels alone do not prove independent members.
+
+`decomposition_id` stays fixed across subject bindings and coverage periods.
+`segment_id` names an immutable producer record or a documented immutable group
+series. It stays fixed across supported corrections and lifetime or dated
+views. Both IDs are local to the authenticated collector. A date, refreshed
+binding, or display label does not establish new lineage.
+
+If a group label changes without record evidence, the producer must quarantine
+ambiguous replacement membership. It must not invent lineage or retire missing
+groups. Proven same-record corrections keep the item and segment IDs.
+Segments use the same explicit supersession, tombstone, and complete-set rules.
+Missing members in a partial report remain active. A decomposition declaration
+does not assert complete membership.
+
+Token categories are nullable `int64` values. The contract records whether
+cache and reasoning categories are included in their parent totals. Cost is a
+nullable fixed-point amount with a currency and a `reported`, `estimated`, or
+`unknown` basis. USD uses 10,000 units per dollar. Token and cost completeness
+remain independent. Protobuf JSON encodes `int64` values as decimal strings.
+Absent token semantics are valid unknown evidence. The Host preserves an
+explicit source total without inventing category sums or subset relationships.
+Explicit semantics versions `1` and `v1` describe the supported subset flags.
+
+Retained observations feed the existing canonical usage read API.
+`PageInfo` fields 3–5 add `projection_status`, `projection_generation`, and
+`projection_pending`. These fields remain available on an empty result page.
+The projection and reporting services supply committed generations.
+The contract supplies no fabricated generation before those services publish one.
+
+`SessionUsageMeasurement` fields 35 and 36 add Host-derived canonical read
+applicability:
+
+```protobuf
+// Additive fields in SessionUsageMeasurement:
+// bool token_metric_absent = 35;
+// bool cost_metric_absent = 36;
+```
+
+A true flag excludes only that metric when consumers combine canonical facts.
+A false flag means the metric applies. A nil applicable amount remains
+unknown, and a measured zero remains a nonnil amount. Legacy defaults are
+false and preserve unknown values.
+
+Cost-only rows must not make selected tokens unknown. Token donors without
+applicable cost must not make selected cost unknown. Genuine unknown amounts
+for applicable metrics must remain unknown. The flags describe read-only
+applicability, not quality, identity, or ownership authority. The write path
+ignores both flags.
+
+Observation and tombstone digests use `sha256:<lowercase hex>` over deterministic
+protobuf bytes after the digest field is cleared. The SDK provides
+`ComputePayloadDigestV1` for both types. A complete-set digest uses the same
+format and hashes its binding, set ID, revision, and sorted item IDs.
+
+Schema version 1 or 2 is explicit in every report. An unsupported schema
+returns `unsupported_version` and the supported schema version. Existing
+`SessionUsageMeasurement` RPCs, fields, and wire numbers remain available for
+older plugins. The Host maps legacy task/session DTOs to retained bindings from
+validated task ownership. It does not use collector-supplied scope or actor
+claims. No released SDK version or minimum Kandev version is established by
+this source contract. The current `sdk-release.json` keeps `host_release` and
+`min_kandev_version` null. Plugin maintainers pin an exact Kandev commit until a
+Stable SDK publication and its Host mapping provide release evidence.
 
 ### Host v2 linked issue writeback
 
@@ -486,7 +725,7 @@ derived from.
 - **Ephemeral tasks** (quick-chat) are excluded from `ListTasks` unless the
   request sets `TaskFilter.include_ephemeral`.
 
-## 4. SDK (`apps/backend/pkg/pluginsdk`)
+## 4. SDK (`pluginsdk`)
 
 Public Go module surface (authors import only this):
 
@@ -519,6 +758,29 @@ type ExecutorProfileHost interface {
     ExecutorProfiles() ExecutorProfileReader
 }
 func ExecutorProfiles(host Host) (ExecutorProfileReader, bool)
+// Retained usage remains optional so older Host implementations stay compatible.
+type UsageHistoryHost interface {
+    UsageHistory() UsageHistoryReader
+}
+func HostUsageHistory(host Host) (UsageHistoryReader, bool)
+// Optional bounded enumeration. Older Host implementations remain compatible.
+type StateKeyReader interface {
+    ListKeys(context.Context, StateKeyQuery) (StateKeyPage, error)
+}
+type StateKeysHost interface {
+    StateKeys() StateKeyReader
+}
+type StateKeyQuery struct {
+    Scope string
+    ScopeID string
+    Cursor string
+    Limit int
+}
+type StateKeyPage struct {
+    Keys []string
+    NextCursor string
+}
+func HostStateKeys(host Host) (StateKeyReader, bool)
 func Serve(p Plugin, opts ...Option)     // blocks; wires go-plugin server + broker
 // Optional embeddable no-op base: sdk.UnimplementedPlugin
 // Optional embeddable no-op base for Host data accessors (every method
@@ -1221,7 +1483,7 @@ if err != nil {
 _ = result.Status // APPLIED, ALREADY_APPLIED, or a typed non-success result
 ```
 
-### Host data API accessors (`apps/backend/pkg/pluginsdk/host.go`, `data_types.go`)
+### Host data API accessors (`pluginsdk/host.go`, `data_types.go`)
 
 Each `Host.<Resource>()` call above returns a small reader interface. All
 methods take `context.Context`; list methods take a Go-native `Page{Limit
@@ -1324,12 +1586,15 @@ the API, never the DB.
   failures → status `error` (+ restart attempt with backoff), recovery → `active`
   - delivery flush. Crash (process exit) → immediate restart with backoff
     (max 5 attempts, then `error`).
-- **Capability gating**: each Host RPC checks the plugin's manifest capabilities
-  before doing any work — `state` for `GetState`/`SetState`/`DeleteState`/
-  `ListState`, `secrets` for `RevealSecret`, `api_read:<resource>` for each Host
-  data API read RPC (§3a), `api_write:tasks` for `CreateTask`/`UpdateTask` and
-  `api_write:messages` for `SendMessage` — and returns PermissionDenied with
-  `capability '<name>' not declared` on a miss. `EmitEvent` is ungated. Reads
+- **Capability gating**: Each Host RPC checks the plugin's manifest capabilities
+  before work. `GetState`, `SetState`, `DeleteState`, `ListState`, and
+  `ListStateKeys` require `state`. `RevealSecret` requires `secrets`.
+  Host data reads require `api_read:<resource>` (§3a).
+  `CreateTask` and `UpdateTask` require `api_write:tasks`.
+  `SendMessage` requires `api_write:messages`.
+
+  An undeclared capability returns `PermissionDenied` with
+  `capability '<name>' not declared`. `EmitEvent` is ungated. Reads
   and writes gate independently on the same resource, so a plugin can declare
   `api_read:tasks` without `api_write:tasks` (or vice versa), and likewise for
   `messages`. Exact workspace administration also requires the matching

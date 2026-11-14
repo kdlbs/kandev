@@ -432,11 +432,38 @@ test('reads every page of job history with filter all', async () => {
   }
 });
 
+test('partitions oversized run history and detects a prior review in an older range', async () => {
+  const github = fakeGithub({ jobs: { 204: [startedReviewJob()] } });
+  github.rest.actions.listWorkflowRuns = async ({ created }) => {
+    if (!created.includes('..')) {
+      return { data: { total_count: 1001, workflow_runs: [] } };
+    }
+    const [start, end] = created.split('..');
+    const prior = '2026-11-08T23:00:00Z';
+    const runs = start <= prior && prior <= end ? [associatedRun(204)] : [];
+    return { data: { total_count: runs.length, workflow_runs: runs } };
+  };
+  const result = await decide(github);
+  assert.equal(result.shouldReview, false);
+  assert.equal(result.reason, REASON.PRIOR_ATTEMPT_STARTED);
+});
+
+test('fails closed when a partitioned history range cannot be read', async () => {
+  const github = fakeGithub();
+  github.rest.actions.listWorkflowRuns = async ({ created }) => {
+    if (!created.includes('..')) {
+      return { data: { total_count: 1001, workflow_runs: [] } };
+    }
+    throw new Error('API unavailable');
+  };
+  await expectAdmissionError(decide(github), REASON.HISTORY_UNAVAILABLE);
+});
+
 test('fails closed when run history exceeds the API result limit', async () => {
   const github = fakeGithub({ runs: fillerRuns(1001) });
 
   await expectAdmissionError(decide(github), REASON.HISTORY_INCOMPLETE);
-  assert.equal(github.calls.runs.length, 1);
+  assert.ok(github.calls.runs.length > 1);
 });
 
 test('fails closed when the run page bound is reached without a total', async () => {

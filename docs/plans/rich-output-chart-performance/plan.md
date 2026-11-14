@@ -1,5 +1,10 @@
 ---
-spec: docs/specs/agents/requirements/agent-rich-output.md
+requirements:
+  - REQ-AGENTS-AGENT-RICH-OUTPUT-001
+system_design:
+  - ../../specs/agents/system-design/agent-rich-output.md
+legacy_specs:
+  - ../../specs/agents/requirements/agent-rich-output.md
 created: 2026-08-16
 status: complete
 ---
@@ -211,3 +216,9 @@ workspace lint, both i18n checks, E2E sleep lint, the E2E production build,
 The record review found no ADR is needed: this follows the established
 per-device Appearance preference boundary rather than creating a new ownership
 model.
+
+## CI correction: queued visibility entries
+
+[Task 03](task-03-observer-batches.md) corrects a deferred chart that stayed empty
+after a scroll. The visibility callback now accepts any intersecting entry in
+a batch. Background deferral and mount-once behavior remain intact.

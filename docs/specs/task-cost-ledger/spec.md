@@ -687,8 +687,8 @@ Units and nullability rules:
 Foreign-key rationale (this deviates from the task brief's stated
 `ON DELETE CASCADE from task_sessions`; see *Corrections to the task brief*):
 
-- `task_id` cascades from `tasks`. Deleting a task deletes its spend record, so
-  task deletion remains a complete deletion.
+- `task_id` cascades from `tasks`. Accounting follows
+  [retained usage](../costs/system-design/usage-history.md).
 - `session_id` is `ON DELETE SET NULL`, matching
   `task_step_transitions.session_id` and its stated reason: the historical fact
   must survive deletion of the thing it referred to. A ledger row whose session

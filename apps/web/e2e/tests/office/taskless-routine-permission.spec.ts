@@ -79,6 +79,13 @@ async function runPermissionRoutine(
 // AC-OFFICE-TASKLESS-001.1 / .9: no task or session UI exists to answer a
 // taskless permission request, so Office answers it and the run finishes.
 test.describe("Office taskless routine permissions", () => {
+  test.beforeEach(async ({ apiClient, officeSeed, seedData }) => {
+    // Other Office E2E specs seed claimed runs for runtime-token setup. The
+    // scheduler's instance claim ceiling includes those rows, so clear them
+    // before asserting that this routine can launch.
+    await apiClient.e2eReset(officeSeed.workspaceId, [seedData.workflowId, officeSeed.workflowId]);
+  });
+
   test("rejects the request when the launched profile does not auto-approve", async ({
     officeApi,
     officeSeed,

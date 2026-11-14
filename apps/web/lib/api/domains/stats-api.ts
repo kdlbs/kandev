@@ -1,4 +1,5 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
+import { normalizeTokenUsageResponse } from "./token-usage-amounts";
 import type {
   ModelUsageDTO,
   CompletedTaskActivityDTO,
@@ -7,9 +8,24 @@ import type {
   GlobalStatsDTO,
   RepositoryStatsDTO,
   TaskStatsDTO,
+  TokenUsageResponse,
 } from "@/lib/types/http";
 
 export type StatsRange = "week" | "month" | "all";
+export type TokenUsageGroup = "model" | "day" | "month" | "task" | "session";
+export type TokenUsageSortDirection = "asc" | "desc";
+export type TokenUsageQuery = {
+  start?: string;
+  end?: string;
+  projectionGeneration?: string;
+  provider?: string;
+  timezone?: string;
+  sortBy?: string;
+  sortDirection?: TokenUsageSortDirection;
+  limit?: number;
+  offset?: number;
+  includeUndated?: boolean;
+};
 
 export type TaskStatsResponse = {
   task_stats: TaskStatsDTO[];
@@ -65,6 +81,46 @@ export function fetchModelUsage(
   range?: StatsRange,
 ) {
   return fetchJson<ModelUsageDTO[]>(statsUrl(workspaceId, "model-usage", range), options);
+}
+
+function tokenUsageQueryString(
+  range: StatsRange | undefined,
+  group: TokenUsageGroup | undefined,
+  queryOptions: TokenUsageQuery = {},
+): string {
+  const query = new URLSearchParams();
+  const entries: Array<[string, string | undefined]> = [
+    ["range", range],
+    ["start", queryOptions.start],
+    ["end", queryOptions.end],
+    ["projection_generation", queryOptions.projectionGeneration],
+    ["group", group],
+    ["include_undated", String(queryOptions.includeUndated ?? range === "all")],
+    ["timezone", queryOptions.timezone],
+    ["provider", queryOptions.provider],
+    ["sort", queryOptions.sortBy],
+    ["direction", queryOptions.sortDirection],
+    ["limit", queryOptions.limit === undefined ? undefined : String(queryOptions.limit)],
+    ["offset", queryOptions.offset === undefined ? undefined : String(queryOptions.offset)],
+  ];
+  for (const [key, value] of entries) {
+    if (value !== undefined && value !== "") query.set(key, value);
+  }
+  const suffix = query.toString();
+  return suffix ? `?${suffix}` : "";
+}
+
+export function fetchTokenUsage(
+  workspaceId: string,
+  options?: ApiRequestOptions,
+  range?: StatsRange,
+  group?: TokenUsageGroup,
+  queryOptions?: TokenUsageQuery,
+) {
+  return fetchJson<TokenUsageResponse>(
+    `/api/v1/workspaces/${workspaceId}/stats/token-usage${tokenUsageQueryString(range, group, queryOptions)}`,
+    options,
+  ).then(normalizeTokenUsageResponse);
 }
 
 export function fetchRepositoryStats(

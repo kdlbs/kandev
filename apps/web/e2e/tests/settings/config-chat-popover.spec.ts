@@ -49,6 +49,21 @@ test.describe("Configuration Chat", () => {
     });
   });
   test.beforeEach(async ({ apiClient, seedData }) => {
+    // A saved terminal from another spec keeps Quick Chat open after this
+    // test deletes its last configuration chat. Own an empty terminal fixture.
+    const response = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/quick-terminal-tabs?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+    );
+    expect(response.ok).toBe(true);
+    const { tabs } = (await response.json()) as { tabs: { tabId: string }[] | null };
+    for (const tab of tabs ?? []) {
+      const deleted = await apiClient.rawRequest(
+        "DELETE",
+        `/api/v1/quick-terminal-tabs/${encodeURIComponent(tab.tabId)}`,
+      );
+      expect(deleted.ok).toBe(true);
+    }
     await apiClient.updateWorkspace(seedData.workspaceId, {
       default_config_agent_profile_id: seedData.agentProfileId,
     });
@@ -222,6 +237,7 @@ test.describe("Configuration Chat", () => {
     await popover.getByRole("button", { name: "Open in Quick Chat" }).click();
     const restoredDialog = testPage.getByRole("dialog", { name: "Quick Chat" });
     await expect(restoredDialog).toBeVisible({ timeout: 10_000 });
+    await expect(restoredDialog.getByTestId("quick-chat-tab")).toHaveCount(1);
     await restoredDialog
       .getByTestId("quick-chat-tab")
       .getByRole("button", { name: /^Close / })

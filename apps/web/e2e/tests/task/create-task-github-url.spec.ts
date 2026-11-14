@@ -77,6 +77,15 @@ test.describe("Task creation from GitHub URL", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
+    // The collapsed navigation's resize handle can cover its first action row.
+    const expandNavigation = testPage.getByTestId("sidebar-navigation-expand");
+    if (
+      (await expandNavigation.isVisible()) &&
+      (await expandNavigation.getAttribute("aria-expanded")) === "false"
+    ) {
+      await expandNavigation.click();
+      await expect(expandNavigation).toHaveAttribute("aria-expanded", "true");
+    }
     await kanban.createTaskButton.first().click();
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();

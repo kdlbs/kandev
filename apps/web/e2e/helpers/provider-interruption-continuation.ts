@@ -33,9 +33,16 @@ export async function createContinuationFixture(
   apiClient: ApiClient,
   seedData: SeedData,
   scenario: string,
-  options: { env?: Record<string, string>; executorProfileId?: string; prepareOnly?: boolean } = {},
+  options: {
+    env?: Record<string, string>;
+    executorProfileId?: string;
+    prepareOnly?: boolean;
+    deferInterruption?: boolean;
+  } = {},
 ) {
   const tracePath = path.join(backend.tmpDir, `continuation-${Date.now()}.jsonl`);
+  const gatePath = `${tracePath}.gate`;
+  const releaseInterruption = () => fs.rmSync(gatePath, { force: true });
   let profileId = "";
   let taskId = "";
   const dispose = async () => {
@@ -44,10 +51,12 @@ export async function createContinuationFixture(
       if (profileId) await apiClient.deleteAgentProfile(profileId, true);
     } finally {
       fs.rmSync(tracePath, { force: true });
+      releaseInterruption();
       await backend.restart();
     }
   };
   try {
+    if (options.deferInterruption) fs.writeFileSync(gatePath, "");
     await backend.restart({
       ...options.env,
       KANDEV_DEBUG_PPROF_ENABLED: "true",
@@ -58,7 +67,12 @@ export async function createContinuationFixture(
     const profile = await apiClient.createAgentProfile(agent.id, `Continuation ${Date.now()}`, {
       model: "mock-fast",
       auto_fallback: false,
-      env_vars: [{ key: "E2E_MOCK_AGENT_ACP_TRACE_FILE", value: tracePath }],
+      env_vars: [
+        { key: "E2E_MOCK_AGENT_ACP_TRACE_FILE", value: tracePath },
+        ...(options.deferInterruption
+          ? [{ key: "E2E_MOCK_AGENT_CONTINUATION_GATE_FILE", value: gatePath }]
+          : []),
+      ],
     });
     profileId = profile.id;
     const task = await apiClient.createTaskWithAgent(
@@ -87,7 +101,7 @@ export async function createContinuationFixture(
         ).session_id
       : task.session_id;
     if (!sessionId) throw new Error("created task has no session ID");
-    return { taskId, sessionId, tracePath, dispose };
+    return { taskId, sessionId, tracePath, releaseInterruption, dispose };
   } catch (error) {
     try {
       await dispose();

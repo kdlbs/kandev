@@ -1,5 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
-import { dwell } from "../../helpers/causal-waits";
+import { dwell, watchWs } from "../../helpers/causal-waits";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import {
   checkAdvancedHandoff,
@@ -30,6 +30,7 @@ test.describe("New session Advanced settings", () => {
     apiClient,
     seedData,
   }, testInfo) => {
+    const gateway = watchWs(testPage);
     const { task, session, definitions } = await seedAdvancedSession(testPage, apiClient, seedData);
     await session.openNewSessionDialog();
     const dialog = session.sessionLaunchDialog();
@@ -97,6 +98,9 @@ test.describe("New session Advanced settings", () => {
     );
     expect((await apiClient.listTaskSessions(task.id)).sessions).toHaveLength(1);
     await testPage.screenshot({ path: testInfo.outputPath("desktop-advanced.png") });
+    const launchResponse = gateway.waitForResponse("session.launch", {
+      requestWhere: (payload) => payload.task_id === task.id,
+    });
     await session.newSessionStartButton().click();
     const created = await expectCreatedSelection(
       apiClient,
@@ -105,6 +109,7 @@ test.describe("New session Advanced settings", () => {
       task.session_id!,
       definitions[1].id,
     );
+    await launchResponse;
     await expect(dialog).not.toBeVisible();
     const messages = (await apiClient.listSessionMessages(created.id)).messages;
     expect(

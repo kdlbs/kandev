@@ -210,6 +210,16 @@ func (b *TaskEventBroadcaster) broadcastEvent(ctx context.Context, event *bus.Ev
 		(b.hub.authPolicy.Enforced != nil && b.hub.authPolicy.Enforced())) {
 		return b.hub.broadcastExecutorConfiguration(ctx, event.Data, msg)
 	}
+	// Readiness can arrive through independently scheduled subscriptions, or
+	// race a session-subscription snapshot. Preserve observation time so clients
+	// can reject an older status even when it is delivered later.
+	switch action {
+	case ws.ActionSessionAgentctlStarting, ws.ActionSessionAgentctlReady, ws.ActionSessionAgentctlError:
+		if !event.Timestamp.IsZero() {
+			msg.Timestamp = event.Timestamp
+		}
+	}
+
 	sessionID := extractSessionID(event.Data)
 	b.logSessionStateMetadata(action, sessionID, event.Data)
 	if data, ok := event.Data.(map[string]interface{}); ok {

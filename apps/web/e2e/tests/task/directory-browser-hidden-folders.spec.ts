@@ -66,6 +66,7 @@ async function openFolderSourceDialog(
   await page.goto(`/t/${task.id}`);
   const session = new SessionPage(page);
   await session.waitForLoad();
+  await session.waitForChatIdle();
   await session.waitForDockviewReady();
   const filesTab = page.locator(".dv-tab:visible", {
     has: page.locator(".dv-default-tab-content").filter({ hasText: /^Files$/ }),

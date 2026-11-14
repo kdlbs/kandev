@@ -41,22 +41,25 @@ func pageFromProto(p *pluginv1.Page) Page {
 // PageInfo is the Go-native mirror of kandev.plugin.v1.PageInfo, returned
 // alongside every paginated Host data read.
 type PageInfo struct {
-	NextCursor string
-	HasMore    bool
+	NextCursor           string
+	HasMore              bool
+	ProjectionStatus     string
+	ProjectionGeneration string
+	ProjectionPending    bool
 }
 
 func (p *PageInfo) toProto() *pluginv1.PageInfo {
 	if p == nil {
 		return nil
 	}
-	return &pluginv1.PageInfo{NextCursor: p.NextCursor, HasMore: p.HasMore}
+	return &pluginv1.PageInfo{NextCursor: p.NextCursor, HasMore: p.HasMore, ProjectionStatus: p.ProjectionStatus, ProjectionGeneration: p.ProjectionGeneration, ProjectionPending: p.ProjectionPending}
 }
 
 func pageInfoFromProto(p *pluginv1.PageInfo) *PageInfo {
 	if p == nil {
 		return nil
 	}
-	return &PageInfo{NextCursor: p.GetNextCursor(), HasMore: p.GetHasMore()}
+	return &PageInfo{NextCursor: p.GetNextCursor(), HasMore: p.GetHasMore(), ProjectionStatus: p.GetProjectionStatus(), ProjectionGeneration: p.GetProjectionGeneration(), ProjectionPending: p.GetProjectionPending()}
 }
 
 // TaskRepository is the Go-native mirror of kandev.plugin.v1.TaskRepository.
@@ -854,6 +857,7 @@ type Session struct {
 	StartedAt        string
 	EndedAt          *string
 	AgentProfileName string // profile name from the snapshot at run time
+	UpdatedAt        string
 }
 
 func (s Session) toProto() *pluginv1.Session {
@@ -868,6 +872,7 @@ func (s Session) toProto() *pluginv1.Session {
 		StartedAt:        s.StartedAt,
 		EndedAt:          s.EndedAt,
 		AgentProfileName: s.AgentProfileName,
+		UpdatedAt:        s.UpdatedAt,
 	}
 }
 
@@ -886,6 +891,7 @@ func sessionFromProto(p *pluginv1.Session) Session {
 		StartedAt:        p.GetStartedAt(),
 		EndedAt:          p.EndedAt,
 		AgentProfileName: p.GetAgentProfileName(),
+		UpdatedAt:        p.GetUpdatedAt(),
 	}
 }
 
@@ -916,6 +922,8 @@ type SessionFilter struct {
 	TaskIDs      []string
 	WorkspaceIDs []string
 	States       []string
+	SessionIDs   []string
+	UpdatedSince *string
 }
 
 func (f SessionFilter) toProto() *pluginv1.SessionFilter {
@@ -923,6 +931,8 @@ func (f SessionFilter) toProto() *pluginv1.SessionFilter {
 		TaskIds:      f.TaskIDs,
 		WorkspaceIds: f.WorkspaceIDs,
 		States:       f.States,
+		SessionIds:   f.SessionIDs,
+		UpdatedSince: f.UpdatedSince,
 	}
 }
 
@@ -934,6 +944,8 @@ func sessionFilterFromProto(p *pluginv1.SessionFilter) SessionFilter {
 		TaskIDs:      p.GetTaskIds(),
 		WorkspaceIDs: p.GetWorkspaceIds(),
 		States:       p.GetStates(),
+		SessionIDs:   p.GetSessionIds(),
+		UpdatedSince: p.UpdatedSince,
 	}
 }
 

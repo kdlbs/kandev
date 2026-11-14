@@ -29,7 +29,7 @@ func TestAnalyticsReadAvailability(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	log := authzTestLogger(t)
-	RegisterStatsRoutes(router, fixture.repo, statsReferenceAuthorizer{}, log)
+	RegisterStatsRoutes(router, fixture.repo, statsReferenceAuthorizer{}, log, true)
 
 	operationCtx, cancelOperations := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelOperations()

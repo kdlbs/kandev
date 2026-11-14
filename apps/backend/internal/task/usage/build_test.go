@@ -82,6 +82,18 @@ func TestBuildRow_ContractVersion_IsOne(t *testing.T) {
 	}
 }
 
+func TestBuildRow_CarriesAdmittedUsageBinding(t *testing.T) {
+	w := &Writer{}
+	p := &usageEventPayload{
+		UsageEventID: "evt-bound", TaskID: "task-1", SessionID: "session-1",
+		TurnID: "turn-1", UsageBindingID: "binding-turn-1", Usage: &promptUsagePayload{},
+	}
+	event := w.buildRow(context.Background(), p, fixedOccurredAt)
+	if event.UsageBindingID != "binding-turn-1" {
+		t.Fatalf("UsageBindingID = %q, want admitted binding id", event.UsageBindingID)
+	}
+}
+
 // TestBuildRow_CarriesModelAgentTypeAgentProfileIDVerbatim pins AC-35.
 func TestBuildRow_CarriesModelAgentTypeAgentProfileIDVerbatim(t *testing.T) {
 	w := &Writer{}

@@ -22,6 +22,9 @@ export async function pruneSavedDelivery(
     profileId?: string;
     restartOverrides?: Record<string, string>;
     historicalGap?: boolean;
+    prompt?: string;
+    output?: string;
+    beforePrune?: (taskId: string, sessionId: string) => Promise<void>;
   } = {},
 ) {
   const task = await api.createTaskWithAgent(
@@ -39,12 +42,13 @@ export async function pruneSavedDelivery(
   await page.goto(`/t/${task.id}`);
   const session = new SessionPage(page);
   await session.waitForLoad();
-  await session.sendMessageViaButton("/slow 1s");
-  const output = "Slow response complete after 1s.";
+  await session.sendMessageViaButton(options.prompt ?? "/slow 1s");
+  const output = options.output ?? "Slow response complete after 1s.";
   await expect(session.chat.getByText(output, { exact: false })).toBeVisible({ timeout: 60_000 });
   const primary = (await api.listTaskSessions(task.id)).sessions.find((item) => item.is_primary);
   if (!primary) throw new Error("task has no primary session");
   const canonicalBefore = (await api.listSessionMessages(primary.id)).messages;
+  await options.beforePrune?.(task.id, primary.id);
   const dbPath = path.join(backend.tmpDir, "kandev.db");
   const readCount = (sql: string) => {
     const db = new DatabaseSync(dbPath);

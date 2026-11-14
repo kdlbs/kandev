@@ -85,6 +85,47 @@ describe("running notice resolution", () => {
   );
 });
 
+function testDeletedRetryNoticeStaysAbsent() {
+  const store = makeStore();
+  const notice = makeMessage("retry", "Model at capacity", SESSION, {
+    type: "status",
+    metadata: { retrying: true, attempt: 2 },
+  });
+  const remaining = makeMessage("remaining", "Retained failure");
+  store.getState().setMessages(SESSION, [notice, remaining], {
+    historyInitialized: true,
+    hasMore: true,
+    oldestCursor: notice.id,
+  });
+
+  store.getState().removeMessage(SESSION, notice.id);
+
+  // A message.list response started before the ordered message.deleted event
+  // can still contain the notice when it reaches the store.
+  store.getState().mergeMessages(SESSION, [notice, remaining], {
+    oldestCursor: notice.id,
+  });
+  expect(store.getState().messages.bySession[SESSION].map(({ id }) => id)).toEqual([remaining.id]);
+
+  store.getState().updateMessage(notice);
+  store.getState().updateMessages([notice]);
+  store.getState().addMessage(notice);
+  store.getState().prependMessages(SESSION, [notice], { oldestCursor: notice.id });
+  store.getState().setMessages(SESSION, [notice, remaining], {
+    historyInitialized: true,
+    hasMore: true,
+    oldestCursor: notice.id,
+  });
+
+  expect(store.getState().messages.bySession[SESSION].map(({ id }) => id)).toEqual([remaining.id]);
+  expect(store.getState().messages.metaBySession[SESSION].oldestCursor).toBe(remaining.id);
+  expect(
+    store
+      .getState()
+      .messages.bySession[SESSION].filter((message) => message.metadata?.retrying === true),
+  ).toHaveLength(0);
+}
+
 describe("updateMessages", () => {
   it("notifies subscribers once for one replacement frame", () => {
     const store = makeStore();
@@ -155,6 +196,11 @@ describe("updateMessages", () => {
       }),
     ]);
   });
+
+  it(
+    "does not resurrect a deleted retry notice from stale transcript writes",
+    testDeletedRetryNoticeStaysAbsent,
+  );
 });
 
 it("keeps an acknowledged Git push dismissal when a delayed update replays its original timestamp", () => {

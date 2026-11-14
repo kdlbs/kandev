@@ -121,7 +121,7 @@ export async function createKotlinTask(
   }
   git.stageAll();
   git.commit(`add Kotlin LSP fixture ${suffix}`);
-  if (options.push) git.exec("git push origin main");
+  if (options.push) git.pushMainWithRetry();
 
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
