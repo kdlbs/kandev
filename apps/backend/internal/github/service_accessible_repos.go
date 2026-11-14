@@ -68,13 +68,32 @@ func (s *Service) ListAccessibleRepos(ctx context.Context, query string, limit i
 func (s *Service) ListAccessibleReposForWorkspace(
 	ctx context.Context, workspaceID, userID, query string, limit int, refresh bool,
 ) ([]GitHubRepo, error) {
+	return s.listWorkspaceAccessibleRepos(ctx, workspaceID, userID, query, limit, refresh, true)
+}
+
+// ListScopeEditorReposForWorkspace returns repositories visible to both the
+// personal and automation identities without applying the saved workspace
+// scope. Only scope editing should use this discovery list; workspace
+// consumers must use ListAccessibleReposForWorkspace.
+func (s *Service) ListScopeEditorReposForWorkspace(
+	ctx context.Context, workspaceID, userID, query string, limit int, refresh bool,
+) ([]GitHubRepo, error) {
+	return s.listWorkspaceAccessibleRepos(ctx, workspaceID, userID, query, limit, refresh, false)
+}
+
+func (s *Service) listWorkspaceAccessibleRepos(
+	ctx context.Context, workspaceID, userID, query string, limit int, refresh, enforceScope bool,
+) ([]GitHubRepo, error) {
 	resolved, err := s.resolvePersonalReadClient(ctx, workspaceID, userID, "", "")
 	if err != nil {
 		return nil, err
 	}
-	settings, err := s.GetWorkspaceSettings(ctx, workspaceID)
-	if err != nil {
-		return nil, err
+	var settings *WorkspaceSettings
+	if enforceScope {
+		settings, err = s.GetWorkspaceSettings(ctx, workspaceID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	repos, err := s.listAccessibleReposWithClient(
 		ctx, resolved.Client, resolved.CacheScope, query, maxAccessibleReposLimit, refresh,
@@ -89,7 +108,7 @@ func (s *Service) ListAccessibleReposForWorkspace(
 	automationVisible := repositorySet(automationRepos)
 	filtered := make([]GitHubRepo, 0, len(repos))
 	for _, repo := range repos {
-		if repositoryInWorkspaceScope(settings, repo.Owner, repo.Name) &&
+		if (!enforceScope || repositoryInWorkspaceScope(settings, repo.Owner, repo.Name)) &&
 			repositorySetContains(automationVisible, repo.Owner, repo.Name) {
 			repo.GitHubHost = resolved.host().String()
 			repo.HTMLURL = resolved.host().WebURL() + "/" + repo.Owner + "/" + repo.Name

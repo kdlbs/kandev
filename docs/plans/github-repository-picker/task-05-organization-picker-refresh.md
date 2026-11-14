@@ -130,6 +130,6 @@ make fmt && make typecheck test lint
   and organization rows retain touch targets at coarse-pointer tablet widths.
 - Desktop E2E coverage measures 28px controls. Mobile E2E coverage also resizes
   the configured touch device to a tablet width and measures both pickers.
-- Verification remains pending. The user excludes builds, tests, linters, and
-  other validation commands for this review. The previous Results section
-  describes the contributor's earlier runs.
+- The prior review session did not run validation. This fixup run verified the
+  focused repository picker, API, and settings suites; fresh tablet E2E
+  evidence remains pending on the current PR head.

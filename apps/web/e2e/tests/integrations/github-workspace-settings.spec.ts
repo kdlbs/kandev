@@ -362,6 +362,20 @@ test.describe("GitHub workspace settings", () => {
 
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetUser("test-user");
+    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
+    await apiClient.mockGitHubAddRepos("test-user", [
+      { full_name: "kdlbs/kandev", owner: "kdlbs", name: "kandev", private: false },
+      { full_name: "other/repo", owner: "other", name: "repo", private: false },
+    ]);
+    const initialSettings = await apiClient.rawRequest("PUT", "/api/v1/github/workspace-settings", {
+      workspace_id: seedData.workspaceId,
+      repo_scope_mode: "repos",
+      repo_scope_repos: [{ owner: "kdlbs", name: "kandev" }],
+    });
+    expect(initialSettings.status).toBe(200);
     await apiClient.mockGitHubAddPRs([
       {
         number: 6101,
@@ -376,12 +390,23 @@ test.describe("GitHub workspace settings", () => {
       },
       {
         number: 6102,
-        title: "Out of scope PR",
+        title: "Added repository PR",
         state: "open",
         head_branch: "feature/out-of-scope",
         base_branch: "main",
         author_login: "contributor",
         repo_owner: "other",
+        repo_name: "repo",
+        requested_reviewers: [{ login: "test-user", type: "User" }],
+      },
+      {
+        number: 6103,
+        title: "Out of scope PR",
+        state: "open",
+        head_branch: "feature/not-allowed",
+        base_branch: "main",
+        author_login: "contributor",
+        repo_owner: "blocked",
         repo_name: "repo",
         requested_reviewers: [{ login: "test-user", type: "User" }],
       },
@@ -408,9 +433,8 @@ test.describe("GitHub workspace settings", () => {
       "Limits the GitHub pull requests and issues Kandev discovers for this workspace",
     );
 
-    await testPage.getByTestId("github-scope-mode").click();
-    await testPage.getByRole("option", { name: "Selected repositories" }).click();
-    await addScopeRepository(testPage, "kdlbs/kandev");
+    await expect(testPage.getByTestId("github-scope-repos")).toContainText("kdlbs/kandev");
+    await addListedScopeRepository(testPage, "other/repo");
     await testPage
       .getByTestId("settings-floating-save")
       .getByRole("button", { name: "Save changes" })
@@ -429,7 +453,10 @@ test.describe("GitHub workspace settings", () => {
       repo_scope_repos: Array<{ owner: string; name: string }>;
     };
     expect(settings.repo_scope_mode).toBe("repos");
-    expect(settings.repo_scope_repos).toEqual([{ owner: "kdlbs", name: "kandev" }]);
+    expect(settings.repo_scope_repos).toEqual([
+      { owner: "kdlbs", name: "kandev" },
+      { owner: "other", name: "repo" },
+    ]);
 
     await testPage.goto("/github");
 
@@ -437,8 +464,9 @@ test.describe("GitHub workspace settings", () => {
       timeout: 15_000,
     });
     await expect(testPage.getByText("kdlbs/kandev#6101")).toBeVisible();
+    await expect(testPage.getByText("other/repo#6102")).toBeVisible();
     await expect(testPage.getByText("Out of scope PR")).toHaveCount(0);
-    await expect(testPage.getByText("other/repo#6102")).toHaveCount(0);
+    await expect(testPage.getByText("blocked/repo#6103")).toHaveCount(0);
   });
 
   test("repository scope save only submits fields for the active mode", async ({
@@ -520,6 +548,17 @@ async function addScopeRepository(page: Page, repository: string): Promise<void>
   const input = field.getByTestId("remote-repo-input");
   await input.fill(repository);
   await input.press("Enter");
+  await expect(
+    field.getByTestId("github-repository-chip").filter({ hasText: repository }),
+  ).toBeVisible();
+}
+
+async function addListedScopeRepository(page: Page, repository: string): Promise<void> {
+  const field = page.getByTestId("github-scope-repos");
+  await field.getByRole("button", { name: "Add repository" }).click();
+  const option = field.getByTestId("remote-repo-option").filter({ hasText: repository });
+  await expect(option).toBeVisible();
+  await option.click();
   await expect(
     field.getByTestId("github-repository-chip").filter({ hasText: repository }),
   ).toBeVisible();

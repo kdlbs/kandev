@@ -85,9 +85,9 @@ behavior change.
 `options.providers?: readonly RemoteRepositoryProvider[]`. When it is set, only
 those built-in providers are eligible and plugin repository sources load only
 when their provider id is listed. GitHub selections pass `["github"]`, so they
-issue no GitLab, Azure DevOps, or plugin requests: the GitLab and Azure DevOps
-status hooks receive no workspace, and their loading flags do not gate the
-GitHub list. Omitting the option keeps
+issue no GitLab or plugin requests: the GitLab status hook receives no
+workspace, and plugin sources are filtered by provider id. Its loading flag
+does not gate the GitHub list. Omitting the option keeps
 today's behavior for every existing caller.
 
 ### GitHub multi-select
@@ -96,7 +96,8 @@ today's behavior for every existing caller.
 `GitHubRepositoryMultiSelect`:
 
 - Props: `workspaceId`, `selected: RepoFilter[]`, `onChange(RepoFilter[])`,
-  `scope?: GitHubWorkspaceSettings | null`, `disabled?`, `testIdPrefix`.
+  `scope?: GitHubWorkspaceSettings | null`,
+  `repositorySource?: "workspace" | "scope-editor"`, `disabled?`.
 - Renders the selected repositories as removable entries and an
   `AddRepositoryButton`-styled "Add repository" trigger that opens a popover
   with `RemoteRepositoryPickerPanel`, using
@@ -143,11 +144,10 @@ panel passes `accessible.refresh`; the organization panel passes
 through the shared panel.
 
 `useRemoteRepositories().refresh` already bumped a refresh version. The
-built-in GitHub source now also sends `refresh=true` to
-`GET /api/v1/github/repos` for the first successful load after each refresh.
-The backend's `ListAccessibleReposForWorkspace(..., refresh)` then skips the
-60-second accessible-repository cache read for both the personal and the
-automation list, and stores the fresh result. The organizations endpoint is
+built-in GitHub source now also sends `refresh=true` to the selected
+repository-list endpoint for the first successful load after each refresh.
+The backend skips the 60-second cache read for both the personal and
+automation lists, then stores the fresh result. The organizations endpoint is
 not cached, so its refresh is a plain refetch.
 
 ### Typed entry
@@ -199,10 +199,21 @@ value. The organizations draft is likewise a login list rendered by
 `GitHubOrganizationMultiSelect` without a scope filter, disabled unless the
 mode is `orgs`; the save payload (`repo_scope_orgs`) is unchanged.
 
+The scope editor sets `repositorySource="scope-editor"` on the repository
+multi-select. This selects
+`GET /api/v1/github/workspace-settings/repositories`, which returns the
+intersection of repositories visible to the personal and automation
+identities without applying the saved scope. `GET /api/v1/github/repos`
+continues to apply that scope for ordinary workspace consumers. Choosing a
+repository changes only the local draft; the existing workspace-settings save
+request persists the new `repo_scope_repos` value.
+
 ## Data and contracts
 
-No persistence change. The only API change is the optional `refresh=true`
-query parameter on `GET /api/v1/github/repos` (see [List refresh](#list-refresh)). Watch filters and trigger configs keep
+No persistence change. The API adds a scope-editor discovery route and the
+optional `refresh=true` query parameter on the repository-list routes (see
+[List refresh](#list-refresh)). The ordinary `GET /api/v1/github/repos`
+contract remains scope-filtered. Watch filters and trigger configs keep
 `RepoFilter[]`; repository scope keeps `repo_scope_repos: RepoFilter[]`. The
 frontend `searchOrgRepos` client stays exported but has no caller; the backend
 `/api/v1/github/repos/search` endpoint stays in place. The locale keys used only
@@ -212,10 +223,16 @@ by the removed combobox (`searching`, `noReposFoundFor`,
 ## Control flow
 
 ```text
-Add repository -> popover opens -> useRemoteRepositories(ws, github)
-  -> GET /api/v1/github/repos?workspace_id=..&limit=100 (cached 60s server-side)
-  -> list renders, filtered client-side per keystroke and by scope
-  -> pick or Enter(owner/name) -> onChange([...selected, {owner, name}])
+Watch filter -> useRemoteRepositories(ws, github)
+  -> GET /api/v1/github/repos?workspace_id=..&limit=100
+  -> backend filters by saved scope and automation visibility
+
+Scope editor -> useRemoteRepositories(ws, github, scope-editor)
+  -> GET /api/v1/github/workspace-settings/repositories?workspace_id=..&limit=100
+  -> backend filters by personal and automation visibility, not saved scope
+
+Both lists -> client search -> select -> update local draft
+  -> Save -> PUT /api/v1/github/workspace-settings
 ```
 
 ## Failure and recovery
@@ -231,8 +248,13 @@ None. Drafts live in existing component state until the owning form saves.
 
 ## Security
 
-No new data crosses a boundary. Scope filtering is a client-side authoring
-aid; backend scope enforcement is unchanged.
+The scope-editor route authorizes the workspace and resolves the same personal
+and automation identities as ordinary repository listing. It returns only the
+intersection visible to both identities, and it does not accept a caller flag
+that disables filtering on the ordinary `/repos` route. The saved-scope filter
+and downstream repository-scope checks remain in place for workspace
+operations. Only the scope editor uses the broader discovery result to create
+a new local draft.
 
 ## Observability
 

@@ -105,6 +105,7 @@ test.describe("automations: GitHub repository picker on a phone", () => {
     const repositoryPicker = card.getByTestId("github-repository-picker");
     const repository = repositoryOptions(repositoryPicker).filter({ hasText: "mock-user/alpha" });
     await expect(repository).toBeVisible();
+    await waitForFiniteAnimations(repositoryPicker);
     await expectTouchControl(repositoryPicker.getByTestId("remote-repo-input"));
     await expectTouchSquareControl(repositoryPicker.getByTestId("remote-repo-refresh"));
     await expectTouchControl(repository);
@@ -123,6 +124,7 @@ test.describe("automations: GitHub repository picker on a phone", () => {
       .getByTestId("github-organization-option")
       .filter({ hasText: "kdlbs" });
     await expect(organization).toBeVisible();
+    await waitForFiniteAnimations(organizationPicker);
     await expectTouchControl(organizationPicker.getByTestId("github-organization-input"));
     await expectTouchSquareControl(organizationPicker.getByTestId("github-organization-refresh"));
     await expectTouchControl(organization);

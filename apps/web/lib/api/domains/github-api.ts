@@ -360,12 +360,37 @@ export async function fetchAccessibleRepos(opts: {
   refresh?: boolean;
   signal?: AbortSignal;
 }): Promise<AccessibleRepo[]> {
+  return fetchReposFromEndpoint("/api/v1/github/repos", opts);
+}
+
+/** Lists repos that the settings editor can add to the saved workspace scope. */
+export async function fetchGitHubScopeEditorRepos(opts: {
+  workspaceId: string;
+  q?: string;
+  limit?: number;
+  /** Bypasses the server's short-lived repository-list cache. */
+  refresh?: boolean;
+  signal?: AbortSignal;
+}): Promise<AccessibleRepo[]> {
+  return fetchReposFromEndpoint("/api/v1/github/workspace-settings/repositories", opts);
+}
+
+async function fetchReposFromEndpoint(
+  endpoint: string,
+  opts: {
+    workspaceId: string;
+    q?: string;
+    limit?: number;
+    refresh?: boolean;
+    signal?: AbortSignal;
+  },
+): Promise<AccessibleRepo[]> {
   const params = new URLSearchParams({ workspace_id: opts.workspaceId });
   if (opts.q) params.set("q", opts.q);
   if (typeof opts.limit === "number") params.set("limit", String(opts.limit));
   if (opts.refresh) params.set("refresh", "true");
   const suffix = params.toString();
-  const path = `/api/v1/github/repos${suffix ? `?${suffix}` : ""}`;
+  const path = `${endpoint}${suffix ? `?${suffix}` : ""}`;
   try {
     const res = await fetchJson<AccessibleReposResponse>(path, {
       cache: "no-store",

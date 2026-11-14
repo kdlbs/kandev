@@ -105,6 +105,10 @@ describe("GitHubRepoScopeSection repositories", () => {
     renderSection();
     await waitForLoadedSection();
     fireEvent.click(screen.getByRole("button", { name: /add repository/i }));
+    expect(mocks.useRemoteRepositories).toHaveBeenCalledWith("ws-1", {
+      providers: ["github"],
+      githubRepositorySource: "scope-editor",
+    });
     const options = screen.getAllByTestId("remote-repo-option");
     expect(options).toHaveLength(2);
     fireEvent.click(options[1]!);

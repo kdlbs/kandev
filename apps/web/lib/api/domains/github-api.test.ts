@@ -15,6 +15,7 @@ import {
   disconnectGitHubPersonal,
   disconnectGitHubWorkspace,
   fetchAccessibleRepos,
+  fetchGitHubScopeEditorRepos,
   fetchGitHubCLIAccounts,
   fetchGitHubStatus,
   fetchIssueInfo,
@@ -338,6 +339,26 @@ describe("fetchAccessibleRepos — URL & parsing", () => {
     });
     expect(repos[1].pushed_at).toBeUndefined();
     expect(repos[1].description).toBeUndefined();
+  });
+});
+
+describe("fetchGitHubScopeEditorRepos", () => {
+  it("uses the workspace-settings discovery route", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ repos: [] }));
+
+    await fetchGitHubScopeEditorRepos({
+      workspaceId: workspaceID,
+      q: "next",
+      limit: 25,
+      refresh: true,
+    });
+
+    const url = lastCallUrl();
+    expect(url).toContain("/api/v1/github/workspace-settings/repositories");
+    expect(url).toContain("workspace_id=ws%2F1");
+    expect(url).toContain("q=next");
+    expect(url).toContain("limit=25");
+    expect(url).toContain("refresh=true");
   });
 });
 

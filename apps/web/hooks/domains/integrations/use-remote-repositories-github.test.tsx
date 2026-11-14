@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   fetchAccessibleRepos: vi.fn(),
+  fetchGitHubScopeEditorRepos: vi.fn(),
   listUserProjects: vi.fn(),
   listAzureDevOpsProjects: vi.fn(),
   listAzureDevOpsRepositories: vi.fn(),
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/api/domains/github-api", () => ({
   fetchAccessibleRepos: mocks.fetchAccessibleRepos,
+  fetchGitHubScopeEditorRepos: mocks.fetchGitHubScopeEditorRepos,
 }));
 vi.mock("@/lib/api/domains/gitlab-api", () => ({ listUserProjects: mocks.listUserProjects }));
 vi.mock("@/lib/api/domains/azure-devops-api", () => ({
@@ -112,6 +114,27 @@ describe("useRemoteRepositories provider restriction", () => {
     expect(pluginList).not.toHaveBeenCalled();
     expect(result.current.availableProviders).toEqual(["github"]);
     expect(result.current.repos.map((repo) => repo.fullName)).toEqual(["acme/api"]);
+  });
+});
+
+describe("useRemoteRepositories GitHub scope source", () => {
+  it("uses the scope-editor discovery endpoint only when requested", async () => {
+    mocks.fetchGitHubScopeEditorRepos.mockResolvedValue([githubRepo("addable")]);
+
+    const { result } = renderHook(() =>
+      useRemoteRepositories(WORKSPACE_ID, {
+        providers: ["github"],
+        githubRepositorySource: "scope-editor",
+      }),
+    );
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(mocks.fetchGitHubScopeEditorRepos).toHaveBeenCalledWith({
+      workspaceId: WORKSPACE_ID,
+      limit: 100,
+    });
+    expect(mocks.fetchAccessibleRepos).not.toHaveBeenCalled();
+    expect(result.current.repos.map((repo) => repo.fullName)).toEqual(["acme/addable"]);
   });
 });
 

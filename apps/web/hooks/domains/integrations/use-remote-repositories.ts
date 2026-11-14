@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchAccessibleRepos } from "@/lib/api/domains/github-api";
+import { fetchAccessibleRepos, fetchGitHubScopeEditorRepos } from "@/lib/api/domains/github-api";
 import { listUserProjects } from "@/lib/api/domains/gitlab-api";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useGitLabStatus } from "@/hooks/domains/gitlab/use-gitlab-status";
@@ -74,6 +74,8 @@ type BuiltInRepositoryAccess = {
   githubHost?: string;
 };
 
+export type GitHubRepositorySource = "workspace" | "scope-editor";
+
 function hasProviderConnection(status: ProviderConnectionStatus | null | undefined) {
   return Boolean(status?.authenticated || status?.token_configured);
 }
@@ -124,6 +126,7 @@ async function loadBuiltInRepositories(
   workspaceId: string,
   eligibleProviders: ReadonlySet<RemoteRepositoryProvider>,
   bypassCache: boolean,
+  githubRepositorySource: GitHubRepositorySource,
 ): Promise<RemoteRepositoryLoad> {
   if (!workspaceId) return { repos: [], availableProviders: [], sourceErrors: [] };
   const requests: RepositoryRequest[] = [];
@@ -131,9 +134,13 @@ async function loadBuiltInRepositories(
     const request = bypassCache
       ? { workspaceId, limit: 100, refresh: true }
       : { workspaceId, limit: 100 };
+    const fetchRepos =
+      githubRepositorySource === "scope-editor"
+        ? fetchGitHubScopeEditorRepos
+        : fetchAccessibleRepos;
     requests.push({
       provider: "github",
-      load: fetchAccessibleRepos(request).then((repos) =>
+      load: fetchRepos(request).then((repos) =>
         repos.map((repo) => ({
           provider: "github" as const,
           id: `${repo.github_host ?? "github.com"}/${repo.full_name}`,
@@ -278,6 +285,7 @@ function useBuiltInRepositorySource(
   workspaceId: string,
   refreshVersion: number,
   eligibility: BuiltInRepositoryEligibility,
+  githubRepositorySource: GitHubRepositorySource,
 ): RepositorySourceState {
   const [repos, setRepos] = useState<RemoteRepository[]>([]);
   const [loading, setLoading] = useState(true);
@@ -303,7 +311,7 @@ function useBuiltInRepositorySource(
       };
     }
     const bypassCache = loadedRefreshRef.current !== refreshVersion;
-    loadBuiltInRepositories(workspaceId, eligibility.providers, bypassCache)
+    loadBuiltInRepositories(workspaceId, eligibility.providers, bypassCache, githubRepositorySource)
       .then((result) => {
         if (cancelled) return;
         loadedRefreshRef.current = refreshVersion;
@@ -320,7 +328,13 @@ function useBuiltInRepositorySource(
     return () => {
       cancelled = true;
     };
-  }, [eligibility.loading, eligibility.providers, refreshVersion, workspaceId]);
+  }, [
+    eligibility.loading,
+    eligibility.providers,
+    githubRepositorySource,
+    refreshVersion,
+    workspaceId,
+  ]);
 
   return { repos, availableProviders, sourceErrors, loading };
 }
@@ -371,6 +385,8 @@ function usePluginRepositorySource(
 export type UseRemoteRepositoriesOptions = {
   /** Restricts listing to these providers. Omitted means every connected provider. */
   providers?: readonly RemoteRepositoryProvider[];
+  /** Selects the scope-editing discovery route for GitHub repositories. */
+  githubRepositorySource?: GitHubRepositorySource;
 };
 
 function useProviderRestriction(providers: readonly RemoteRepositoryProvider[] | undefined) {
@@ -412,7 +428,12 @@ export function useRemoteRepositories(
     githubHost,
   } = useBuiltInRepositoryAccess(workspaceId, allowedProviders);
   const eligibility = useRestrictedEligibility(connectedEligibility, allowedProviders);
-  const builtInSource = useBuiltInRepositorySource(workspaceId, refreshVersion, eligibility);
+  const builtInSource = useBuiltInRepositorySource(
+    workspaceId,
+    refreshVersion,
+    eligibility,
+    options?.githubRepositorySource ?? "workspace",
+  );
   const pluginSource = usePluginRepositorySource(
     workspaceId,
     pluginProviders,

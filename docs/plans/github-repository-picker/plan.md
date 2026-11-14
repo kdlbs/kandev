@@ -23,7 +23,9 @@ multi-select; a focused E2E pass proves the desktop and phone flows.
 - System design:
   [github-repository-picker.md](../../specs/integrations/system-design/github-repository-picker.md)
 - No schema or persisted-shape change. Task 05 adds the optional
-  `refresh=true` parameter to `GET /api/v1/github/repos`.
+  `refresh=true` parameter to repository listing. Task 03 adds a separate
+  workspace-settings discovery route so scope editors can find repositories
+  outside the saved scope without changing the ordinary listing contract.
 
 ## Root cause
 
@@ -134,15 +136,21 @@ Sequential. No delegation is authorized by this plan.
 
 ### Review status
 
-Task 03 remains blocked: the ordinary repository endpoint applies the saved
-scope, so the scope editor cannot browse additional repositories. It needs an
-authorized discovery source that preserves personal and automation access
-checks without changing the ordinary endpoint's scope enforcement.
+Task 03 now uses `GET /api/v1/github/workspace-settings/repositories`. The
+backend omits only the saved-scope filter for this settings source. It still
+intersects personal and automation visibility, and the ordinary repository
+endpoint remains scope-filtered. Service, controller, API-client, hook, and
+settings-picker regression tests cover this boundary and the save flow.
+
+The PR branch now includes current `main` at merge commit
+`0aa19afb2e9c60d6491f1a4440187be165e55afd`; its three file conflicts were
+resolved by preserving provider-specific loading and localization entries
+while adopting the base branch's Azure DevOps plugin boundary.
 
 Task 05 includes a maintainer correction for unknown-host URL entry and touch
-target sizes. Its new unit and E2E coverage is not executed because the user
-excludes builds, tests, linters, and other validation commands for this review.
-The earlier Results sections record the contributor's previous verification.
+target sizes. The earlier Results sections record the contributor's previous
+verification. Current focused backend and web tests are recorded in Task 03;
+tablet E2E coverage still needs fresh current-head CI evidence.
 
 ## Verification
 

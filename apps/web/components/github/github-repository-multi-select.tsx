@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import {
   useRemoteRepositories,
+  type GitHubRepositorySource,
   type RemoteRepository,
 } from "@/hooks/domains/integrations/use-remote-repositories";
 import {
@@ -18,6 +19,10 @@ import { SelectionAddButton, SelectionChip } from "./selection-chip";
 
 // Stable module-level reference so the hook's provider restriction is not rebuilt per render.
 const GITHUB_ONLY = { providers: ["github"] } as const;
+const GITHUB_SCOPE_EDITOR = {
+  providers: ["github"],
+  githubRepositorySource: "scope-editor",
+} as const;
 
 export type GitHubRepositoryMultiSelectProps = {
   workspaceId: string | undefined;
@@ -25,6 +30,7 @@ export type GitHubRepositoryMultiSelectProps = {
   onChange: (repos: RepoFilter[]) => void;
   /** When set, only repositories this workspace scope allows can be added. */
   scope?: GitHubWorkspaceSettings | null;
+  repositorySource?: GitHubRepositorySource;
   disabled?: boolean;
 };
 
@@ -41,6 +47,7 @@ export function GitHubRepositoryMultiSelect({
   selected,
   onChange,
   scope,
+  repositorySource = "workspace",
   disabled = false,
 }: GitHubRepositoryMultiSelectProps) {
   const remove = useCallback(
@@ -62,6 +69,7 @@ export function GitHubRepositoryMultiSelect({
         selected={selected}
         onChange={onChange}
         scope={scope}
+        repositorySource={repositorySource}
         disabled={disabled}
       />
     </div>
@@ -95,6 +103,7 @@ function AddGitHubRepository({
   selected,
   onChange,
   scope,
+  repositorySource,
   disabled,
 }: Required<Omit<GitHubRepositoryMultiSelectProps, "scope">> & {
   scope?: GitHubWorkspaceSettings | null;
@@ -126,6 +135,7 @@ function AddGitHubRepository({
         <GitHubRepositoryPickerContent
           workspaceId={workspaceId}
           scope={scope}
+          repositorySource={repositorySource}
           isSelected={isSelected}
           onAdd={add}
         />
@@ -140,16 +150,21 @@ const toFilter = (repo: RemoteRepository): RepoFilter => ({ owner: repo.owner, n
 function GitHubRepositoryPickerContent({
   workspaceId,
   scope,
+  repositorySource,
   isSelected,
   onAdd,
 }: {
   workspaceId: string | undefined;
   scope?: GitHubWorkspaceSettings | null;
+  repositorySource: GitHubRepositorySource;
   isSelected: (filter: RepoFilter) => boolean;
   onAdd: (filter: RepoFilter) => void;
 }) {
   const { t } = useTranslation();
-  const accessible = useRemoteRepositories(workspaceId ?? "", GITHUB_ONLY);
+  const accessible = useRemoteRepositories(
+    workspaceId ?? "",
+    repositorySource === "scope-editor" ? GITHUB_SCOPE_EDITOR : GITHUB_ONLY,
+  );
   const parse = (value: string) => parseGitHubRepositoryInput(value, accessible.githubHost);
   const submitText = (value: string): RemoteRepositoryTextSubmitResult => {
     const parsed = parse(value);

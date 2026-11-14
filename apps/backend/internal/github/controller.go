@@ -125,6 +125,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 
 	api.GET("/orgs", c.httpListUserOrgs)
 	api.GET("/repos", c.httpListAccessibleRepos)
+	api.GET("/workspace-settings/repositories", c.httpListScopeEditorRepos)
 	api.GET("/repos/search", c.httpSearchRepos)
 	api.GET("/repos/:owner/:repo/branches", c.httpListRepoBranches)
 	api.GET("/repos/:owner/:repo/merge-methods", c.httpGetRepoMergeMethods)
@@ -1044,6 +1045,23 @@ func (c *Controller) httpListAccessibleRepos(ctx *gin.Context) {
 	repos, err := c.service.ListAccessibleReposForWorkspace(
 		ctx.Request.Context(), ctx.Query("workspace_id"), currentGitHubUserID(ctx), query, limit, refresh,
 	)
+	writeAccessibleReposResponse(ctx, repos, err)
+}
+
+// httpListScopeEditorRepos provides the settings editor with repositories it
+// may add to the saved scope. The service keeps personal and automation
+// visibility checks and omits only the saved-scope filter.
+func (c *Controller) httpListScopeEditorRepos(ctx *gin.Context) {
+	query := ctx.Query("q")
+	limit, _ := strconv.Atoi(ctx.Query("limit"))
+	refresh := ctx.Query("refresh") == "true"
+	repos, err := c.service.ListScopeEditorReposForWorkspace(
+		ctx.Request.Context(), ctx.Query("workspace_id"), currentGitHubUserID(ctx), query, limit, refresh,
+	)
+	writeAccessibleReposResponse(ctx, repos, err)
+}
+
+func writeAccessibleReposResponse(ctx *gin.Context, repos []GitHubRepo, err error) {
 	if err != nil {
 		if isGitHubNotConfiguredError(err) {
 			ctx.JSON(http.StatusServiceUnavailable, gin.H{

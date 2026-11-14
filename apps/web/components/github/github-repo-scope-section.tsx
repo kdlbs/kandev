@@ -185,6 +185,7 @@ function RepositoryScopeFields({
                 workspaceId={workspaceId}
                 selected={repos}
                 onChange={onReposChange}
+                repositorySource="scope-editor"
                 disabled={loading || mode !== "repos"}
               />
             </div>
