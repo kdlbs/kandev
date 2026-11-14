@@ -57,12 +57,18 @@ func TestNativeResumeRejectsUnmatchedSQLBeforeRetiringJournal(t *testing.T) {
 			err = manager.AcknowledgeNativeResumeDelivery(ctx, execution.SessionID)
 			if condition == "already retired" {
 				require.NoError(t, err)
+			} else if condition == "missing" {
+				require.Error(t, err)
 			} else {
 				require.ErrorIs(t, err, ErrDurableAdoptionBlocked)
 			}
 			retained, err := store.GetSubmission(ctx, peer.ID)
 			require.NoError(t, err)
 			require.Equal(t, peer.Retired, retained.Retired, "validation must precede all retirement writes")
+			if condition == "missing" {
+				_, err := store.GetSubmission(ctx, sql.ID)
+				require.ErrorIs(t, err, journal.ErrSubmissionNotFound, "unmatched peer evidence must be rejected before writing retirement")
+			}
 			require.Equal(t, originalState, repository.submissions[sql.ID].State, "SQL history must remain unchanged")
 		})
 	}

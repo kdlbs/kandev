@@ -25,7 +25,9 @@ const repeatedNativeResumeFixtureMarker = "KANDEV_REPEATED_NATIVE_RESUME_FIXTURE
 func openRepeatedNativeResumeFixtureJournal(ctx context.Context, path string) (*journal.Journal, error) {
 	const attemptTimeout = 50 * time.Millisecond
 	const retryInterval = 50 * time.Millisecond
-	deadline := time.Now().Add(10 * time.Second)
+	// Session stop is asynchronous. Wait for the journal itself to become
+	// available instead of treating the cancelled session state as owner release.
+	deadline := time.Now().Add(35 * time.Second)
 	for {
 		retained, err := journal.Open(journal.Config{Path: path, OpenTimeout: attemptTimeout})
 		if err == nil {

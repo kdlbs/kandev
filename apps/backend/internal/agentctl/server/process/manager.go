@@ -946,6 +946,78 @@ func (m *Manager) RetireDeliverySubmission(ctx context.Context, id string, recov
 	return err
 }
 
+// RetireMissingUnknownDeliverySubmission writes a non-replayable journal record
+// for a SQL-confirmed interrupted prompt while the process dispatcher is idle.
+func (m *Manager) RetireMissingUnknownDeliverySubmission(ctx context.Context, submission journal.Submission) error {
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return err
+	}
+	if !m.deliverySubmissionMu.TryLock() {
+		return journal.ErrSubmissionState
+	}
+	defer m.deliverySubmissionMu.Unlock()
+	if !validMissingUnknownSubmissionShape(submission) || !m.missingUnknownSubmissionOwned(submission) {
+		return journal.ErrOwnerMismatch
+	}
+	existing, err := deliveryJournal.GetSubmission(ctx, submission.ID)
+	if errors.Is(err, journal.ErrSubmissionNotFound) {
+		return m.createMissingUnknownSubmission(ctx, deliveryJournal, submission)
+	}
+	if err != nil {
+		return err
+	}
+	return m.retireExistingMissingUnknown(ctx, deliveryJournal, existing, submission)
+}
+
+func validMissingUnknownSubmissionShape(submission journal.Submission) bool {
+	return submission.ID != "" && submission.Hash != "" && len(submission.Payload) == 0 &&
+		submission.State == journal.SubmissionInterruptedUnknown && !submission.Retired &&
+		submission.HarnessGeneration > 0 && submission.StreamID != ""
+}
+
+func (m *Manager) missingUnknownSubmissionOwned(submission journal.Submission) bool {
+	sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
+	return submission.SessionID == sessionID && submission.IncarnationID == incarnationID &&
+		submission.HarnessGeneration <= generation && submission.StreamID == m.DeliveryStreamID()
+}
+
+func (m *Manager) createMissingUnknownSubmission(ctx context.Context, deliveryJournal *journal.Journal, submission journal.Submission) error {
+	submission.Retired = true
+	created, err := deliveryJournal.PutSubmission(ctx, submission)
+	if err != nil {
+		return err
+	}
+	if !created.Retired || created.State != journal.SubmissionInterruptedUnknown || !sameMissingUnknownSubmissionIdentity(created, submission) {
+		return journal.ErrSubmissionState
+	}
+	return nil
+}
+
+func (m *Manager) retireExistingMissingUnknown(ctx context.Context, deliveryJournal *journal.Journal, existing, requested journal.Submission) error {
+	if !sameMissingUnknownSubmissionIdentity(existing, requested) {
+		return journal.ErrOwnerMismatch
+	}
+	if existing.State != journal.SubmissionInterruptedUnknown {
+		if existing.State == journal.SubmissionPrepared || existing.State == journal.SubmissionDispatching || existing.State == journal.SubmissionAccepted {
+			return journal.ErrSubmissionState
+		}
+		return journal.ErrOwnerMismatch
+	}
+	if existing.Retired {
+		return nil
+	}
+	_, err := deliveryJournal.RetireSubmission(ctx, requested.ID, m.DeliveryHarnessGeneration())
+	return err
+}
+
+func sameMissingUnknownSubmissionIdentity(existing, requested journal.Submission) bool {
+	return existing.ID == requested.ID && existing.SessionID == requested.SessionID &&
+		existing.IncarnationID == requested.IncarnationID &&
+		existing.HarnessGeneration == requested.HarnessGeneration &&
+		existing.StreamID == requested.StreamID && existing.Hash == requested.Hash
+}
+
 // CancelDeliverySubmission settles one prompt after an explicit user cancel.
 // Unlike retirement, cancellation is valid in the current harness generation
 // and preserves the record as an auditable terminal outcome.

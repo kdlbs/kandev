@@ -50,7 +50,25 @@ func nativeResumeJournalPeer(t *testing.T, store *journal.Journal, rejectRetirem
 				http.Error(w, "retirement rejected", http.StatusConflict)
 				return
 			}
-			if _, err := store.RetireSubmission(r.Context(), strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/agent/submissions/"), "/retire"), 2); err != nil {
+			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/agent/submissions/"), "/retire")
+			var missingPeer struct {
+				SessionID         string `json:"session_id"`
+				IncarnationID     string `json:"incarnation_id"`
+				HarnessGeneration uint64 `json:"harness_generation"`
+				StreamID          string `json:"stream_id"`
+				Hash              string `json:"hash"`
+			}
+			var retirementErr error
+			if err := json.NewDecoder(r.Body).Decode(&missingPeer); err == nil && missingPeer.Hash != "" {
+				_, retirementErr = store.PutSubmission(r.Context(), journal.Submission{
+					ID: id, SessionID: missingPeer.SessionID, IncarnationID: missingPeer.IncarnationID,
+					HarnessGeneration: missingPeer.HarnessGeneration, StreamID: missingPeer.StreamID,
+					Hash: missingPeer.Hash, State: journal.SubmissionInterruptedUnknown, Retired: true,
+				})
+			} else {
+				_, retirementErr = store.RetireSubmission(r.Context(), id, 2)
+			}
+			if retirementErr != nil {
 				http.Error(w, "retirement rejected", http.StatusConflict)
 				return
 			}
