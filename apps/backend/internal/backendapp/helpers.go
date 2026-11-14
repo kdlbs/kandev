@@ -1822,6 +1822,9 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		&orchestratorWrapper{svc: p.orchestratorSvc}, p.log, referenceValidators...,
 	)
 	processHandlers := taskhandlers.RegisterProcessRoutes(p.router, p.taskSvc, p.lifecycleMgr, p.log)
+	if p.orchestratorSvc != nil {
+		processHandlers.SetSessionAdmissionFence(p.orchestratorSvc.AcquireSessionLifecycleFenceContext)
+	}
 	if p.agentSettingsController != nil && p.taskSvc != nil {
 		processHandlers.SetSessionModelConfigResolver(&sessionModelConfigResolver{
 			sessions: p.taskSvc,

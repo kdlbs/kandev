@@ -88,7 +88,7 @@ func (s *Server) handleWorkspaceStreamWS(c *gin.Context) {
 	// Handle incoming messages (shell_input, shell_resize, ping) in a goroutine
 	var shellWriter io.Writer
 	if shell != nil {
-		shellWriter = shell
+		shellWriter = workspaceShellWriter(s.procMgr.WriteWorkspaceShellInput)
 	}
 	// A quiet instance cannot reveal a departed client through a write failure.
 	// Ending input must also release this connection's forwarding subscriptions.
@@ -105,6 +105,10 @@ func (s *Server) handleWorkspaceStreamWS(c *gin.Context) {
 	// concurrent rotation.
 	s.forwardWorkspaceStream(stream, sub, shellOutputCh, done, inputDone, credentialInvalidatedFromContext(c))
 }
+
+type workspaceShellWriter func([]byte) (int, error)
+
+func (write workspaceShellWriter) Write(data []byte) (int, error) { return write(data) }
 
 // forwardWorkspaceStream forwards workspace events and shell output to the
 // WebSocket until the client goes away (inputDone closes, or a write fails) or

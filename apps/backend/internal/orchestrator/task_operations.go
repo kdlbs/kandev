@@ -11564,6 +11564,10 @@ func (s *Service) sessionHasCancellableWork(ctx context.Context, sessionID strin
 	if err != nil || turnID != "" {
 		return true
 	}
+	return s.sessionHasCancellableWorkBeyondTurn(ctx, sessionID)
+}
+
+func (s *Service) sessionHasCancellableWorkBeyondTurn(ctx context.Context, sessionID string) bool {
 	if _, active := s.activeTurns.Load(sessionID); active || s.reservedPromptTurnID(sessionID) != "" {
 		return true
 	}

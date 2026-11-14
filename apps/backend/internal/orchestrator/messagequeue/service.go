@@ -3027,6 +3027,17 @@ func (s *Service) ListPendingQueueDispatches(ctx context.Context) ([]PendingQueu
 	return repo.ListPendingQueueDispatches(ctx)
 }
 
+// HasPendingDispatchForSession checks durable claims for the selected session.
+func (s *Service) HasPendingDispatchForSession(ctx context.Context, sessionID string) (bool, error) {
+	repo, ok := s.repo.(interface {
+		HasPendingDispatchForSession(context.Context, string) (bool, error)
+	})
+	if !ok {
+		return false, errors.New("pending queue dispatch persistence unavailable")
+	}
+	return repo.HasPendingDispatchForSession(ctx, sessionID)
+}
+
 func (s *Service) MarkPendingQueueDispatchAccepted(
 	ctx context.Context,
 	msg *QueuedMessage,

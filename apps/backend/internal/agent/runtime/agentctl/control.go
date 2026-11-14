@@ -387,7 +387,20 @@ func (c *ControlClient) CreateInstance(ctx context.Context, req *CreateInstanceR
 
 // DeleteInstance stops and removes an agent instance.
 func (c *ControlClient) DeleteInstance(ctx context.Context, instanceID string) error {
-	req, err := http.NewRequestWithContext(ctx, "DELETE", c.baseURL+"/api/v1/instances/"+instanceID, nil)
+	return c.stopInstance(ctx, instanceID, false)
+}
+
+// ReclaimIdleInstance requires the peer to refuse when instance work is active.
+func (c *ControlClient) ReclaimIdleInstance(ctx context.Context, instanceID string) error {
+	return c.stopInstance(ctx, instanceID, true)
+}
+
+func (c *ControlClient) stopInstance(ctx context.Context, instanceID string, idleOnly bool) error {
+	method, path := http.MethodDelete, "/api/v1/instances/"+instanceID
+	if idleOnly {
+		method, path = http.MethodPost, path+"/reclaim"
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
 	if err != nil {
 		return err
 	}
@@ -404,7 +417,7 @@ func (c *ControlClient) DeleteInstance(ctx context.Context, instanceID string) e
 	// response was lost. The desired postcondition is already satisfied.
 	if resp.StatusCode != http.StatusOK &&
 		resp.StatusCode != http.StatusNoContent &&
-		resp.StatusCode != http.StatusNotFound {
+		(resp.StatusCode != http.StatusNotFound || idleOnly) {
 		var errResp struct {
 			Error string `json:"error"`
 		}

@@ -50,6 +50,7 @@ type ProcessHandlers struct {
 	cursorMCPRecovery          cursorMCPRecoveryManager
 	terminalSvc                cursorMCPRecoveryTerminalService
 	cursorMCPRecoveryMu        sync.Mutex
+	sessionAdmissionFence      func(context.Context, string) (func(), bool)
 	logger                     *logger.Logger
 }
 
@@ -99,6 +100,15 @@ func RegisterProcessRoutes(
 	session.POST("/mcp/retry", handlers.httpRetryCursorMCP)
 	session.POST("/html-previews", handlers.httpPublishWorkspacePreview)
 	return handlers
+}
+
+// SetSessionAdmissionFence wires the per-session lifecycle fence that idle
+// runtime reclaim holds. Process start admission takes it so a command cannot
+// start between reclaim's workspace-process check and its instance stop.
+// acquire reports false when the request context ends before the fence is
+// held, so a canceled start stops waiting behind a slow reclaim.
+func (h *ProcessHandlers) SetSessionAdmissionFence(acquire func(context.Context, string) (func(), bool)) {
+	h.sessionAdmissionFence = acquire
 }
 
 // SetTerminalService wires first-class ordinary task terminals used by native
@@ -156,16 +166,7 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 		return
 	}
 
-	if !h.ensureAgentctlReady(c, session, sessionID) {
-		return
-	}
-
-	workingDir, ok := h.resolveWorkingDirForStart(c, sessionID, target.workingDir)
-	if !ok {
-		return
-	}
-
-	h.startSessionProcess(c, sessionID, repoID, target.kind, target.scriptName, command, workingDir, portEnv)
+	h.startPreparedSessionProcess(c, session, sessionID, repoID, *target, command, portEnv)
 }
 
 // resolvedScript holds the resolved script command and metadata for a process start request.
@@ -319,7 +320,33 @@ func (h *ProcessHandlers) getRunningDevProcess(ctx context.Context, sessionID st
 	return nil
 }
 
-// startLocalProcess handles starting a process on a local/worktree/docker executor.
+func (h *ProcessHandlers) startPreparedSessionProcess(
+	c *gin.Context,
+	session *models.TaskSession,
+	sessionID, repoID string,
+	target resolvedScript,
+	command string,
+	portEnv map[string]string,
+) {
+	if h.sessionAdmissionFence != nil {
+		release, ok := h.sessionAdmissionFence(c.Request.Context(), sessionID)
+		if !ok {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "process start was canceled while waiting for the session runtime"})
+			return
+		}
+		defer release()
+	}
+	if !h.ensureAgentctlReady(c, session, sessionID) {
+		return
+	}
+	workingDir, ok := h.resolveWorkingDirForStart(c, sessionID, target.workingDir)
+	if !ok {
+		return
+	}
+	h.startSessionProcess(c, sessionID, repoID, target.kind, target.scriptName, command, workingDir, portEnv)
+}
+
+// startSessionProcess handles starting a process on a local/worktree/docker executor.
 // It deduplicates running dev processes and starts the new process via the lifecycle manager.
 func (h *ProcessHandlers) startSessionProcess(
 	c *gin.Context,

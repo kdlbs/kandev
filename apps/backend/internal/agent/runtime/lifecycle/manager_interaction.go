@@ -3409,6 +3409,11 @@ func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, e
 		StopReason:           reason,
 		AgentStopFailed:      agentStopFailed,
 	}
+	if execution.RuntimeName == executor.NameStandalone {
+		client, release := execution.AcquireAgentCtlClient()
+		runtimeInstance.Client = client
+		release()
+	}
 	if execution.RuntimeName == executor.NameKubernetes {
 		metadata, resolveErr := m.currentKubernetesConnectionMetadata(ctx, runtimeInstance.Metadata)
 		if resolveErr != nil {

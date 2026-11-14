@@ -471,14 +471,17 @@ func (r *StandaloneExecutor) StopInstance(ctx context.Context, instance *Executo
 		return nil // No standalone instance to stop
 	}
 
-	control, controlCtx, release, _, err := r.acquireControl(ctx)
+	control, controlCtx, release, lease, err := r.acquireControl(ctx)
 	if err != nil {
 		return err
 	}
 	defer release()
 	if instance.Client != nil && instance.Client.RuntimeEpoch() != 0 && r.runtimeOwner != nil &&
-		!r.runtimeOwner.IsEpochCurrent(instance.Client.RuntimeEpoch()) {
+		(lease.Epoch() != instance.Client.RuntimeEpoch() || !r.runtimeOwner.IsEpochCurrent(lease.Epoch())) {
 		return errors.Join(agentctl.ErrRuntimeStopUnconfirmed, agentctl.ErrRuntimeLeaseRetired)
+	}
+	if instance.StopReason == stopReasonTerminalRuntimeReclaim {
+		return control.ReclaimIdleInstance(controlCtx, instance.StandaloneInstanceID)
 	}
 	if err := control.DeleteInstance(controlCtx, instance.StandaloneInstanceID); err != nil {
 		return fmt.Errorf("failed to stop standalone instance: %w", err)

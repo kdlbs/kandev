@@ -79,6 +79,15 @@ func NewWorkspacePreviewManager(log *logger.Logger) *WorkspacePreviewManager {
 	}
 }
 
+func (m *WorkspacePreviewManager) hasOpenRoots() bool {
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.roots) != 0
+}
+
 // Publish stores an entry-document overlay and starts or reuses the static
 // server for its selected workspace root.
 func (m *WorkspacePreviewManager) Publish(root string, req WorkspacePreviewRequest) (WorkspacePreviewResponse, error) {
