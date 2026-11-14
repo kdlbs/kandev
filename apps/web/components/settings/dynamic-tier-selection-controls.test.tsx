@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DynamicAgentCandidate } from "@/lib/types/agent-profile";
+import { agentProfileId } from "@/lib/types/ids";
 import { DynamicTierSelectionControls, withCandidateCost } from "./dynamic-tier-selection-controls";
 
 vi.mock("react-i18next", () => ({
@@ -10,7 +11,7 @@ vi.mock("react-i18next", () => ({
 function candidate(selection: Record<string, unknown>): DynamicAgentCandidate {
   return {
     position: 0,
-    executionProfileId: "profile-1",
+    executionProfileId: agentProfileId("profile-1"),
     enabled: true,
     policies: { selection } as unknown as DynamicAgentCandidate["policies"],
   };
