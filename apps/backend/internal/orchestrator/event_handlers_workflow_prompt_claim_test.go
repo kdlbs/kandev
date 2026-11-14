@@ -192,7 +192,7 @@ func TestWorkflowAutoStartPromptClaimRejectsSessionTerminalizedAfterPromotion(t 
 	requireNoError(t, repo.UpdateTaskSession(ctx, session))
 
 	svc := &Service{repo: repo, logger: testLogger()}
-	promoted, err := svc.setNonterminalSessionPrimary(ctx, session.ID)
+	promoted, err := svc.setNonterminalSessionPrimary(ctx, session.TaskID, session.ID)
 	requireNoError(t, err)
 	if !promoted {
 		t.Fatal("expected nonterminal session to be promoted")

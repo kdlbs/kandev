@@ -3703,7 +3703,7 @@ func (s *Service) reuseSessionForStepWithEndPolicy(
 	if route != nil {
 		promoted, err = s.promoteWorkflowSessionRoute(ctx, taskID, existing, route)
 	} else {
-		promoted, err = s.setNonterminalSessionPrimary(ctx, existing.ID)
+		promoted, err = s.setNonterminalSessionPrimary(ctx, taskID, existing.ID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("conditional primary promotion: %w", err)
@@ -3777,8 +3777,8 @@ func (s *Service) parkAndTransferReusedWorkflowSession(
 
 // setNonterminalSessionPrimary promotes a workflow-reused session only when
 // its persisted state is still nonterminal.
-func (s *Service) setNonterminalSessionPrimary(ctx context.Context, sessionID string) (bool, error) {
-	return s.repo.SetSessionPrimaryIfNonterminal(ctx, sessionID)
+func (s *Service) setNonterminalSessionPrimary(ctx context.Context, taskID, sessionID string) (bool, error) {
+	return s.promotePrimaryWithoutReclaim(ctx, taskID, sessionID, s.repo.SetSessionPrimaryIfNonterminal)
 }
 
 // createNewSessionForStep is the original switch-and-create-fresh-session path,
