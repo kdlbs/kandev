@@ -38,8 +38,8 @@ can use them.
 
 Implement and prove the complete backend path in task 01. Update public
 documentation and delivery evidence in task 02. Both tasks run sequentially.
-The user explicitly authorized implementation on 2026-11-14. The work orders
-remain sequential. No commit, push, or PR is authorized.
+The user explicitly authorized implementation, commit, push, and PR creation on
+2026-11-14. The work orders remain sequential.
 
 ## Evidence and root cause
 
@@ -202,7 +202,7 @@ Task 01 must show the regression fails against the old implementation first.
 | --- | --- |
 | `AC-SSH-TASKDIR-RECLAMATION-002.2`, `.002.8` | `executor_ssh_reclaim_git_test.go`: new `TestSSHTaskDirReclaimGitIgnoredFiles` covers ignored build output and `.env`, plus tracked, staged, and non-ignored untracked changes. |
 | `.002.3` | Same file: new `TestSSHTaskDirReclaimGitCommitScope` covers linked sibling commits, own unpublished HEAD, detached HEAD, standalone side branches, and a pushed shallow standalone clone. |
-| `.002.4`, `.002.9` | Same file: new `TestSSHTaskDirReclaimGitStashScope` covers another branch, the current branch, mixed stashes, default/custom messages, exact delimiters, detached HEAD, and standalone stashes. |
+| `.002.4`, `.002.9` | Same file: new `TestSSHTaskDirReclaimGitStashScope` covers another branch, the current branch, mixed stashes, default/custom messages, exact delimiters, detached HEAD, and standalone stashes. `executor_ssh_reclaim_zsh_test.go` covers the detached-HEAD branch probe through zsh. |
 | `.002.1`, `.002.5`, `.002.10`, `.003.4` | `executor_ssh_reclaim_git_test.go`: `TestSSHTaskDirReclaimGitCheckoutKinds` covers standard clone/link detection, additional worktrees, symlinked roots, internal common storage, unsupported path-format output, and child-repositories-only roots. Retain existing path-guard tests. |
 | `.002.13` | `executor_ssh_reclaim_test.go`: `TestSSHTaskDirReclaimGitPreservesIgnoredNestedRepository` covers an ignored nested checkout with an unpublished commit. |
 | `.001.1`, `.001.2`, `.001.5`, `.002.1`, `.002.2` | `executor_ssh_reclaim_git_test.go`: new `TestSSHTaskDirReclaimGitLinkedRemoval` covers root/child registrations, mixed safe/unsafe children, a dirty root with untracked children, sibling sentinels, and shared refs/stashes. Use the exact common-dir command from an unrelated cwd. |

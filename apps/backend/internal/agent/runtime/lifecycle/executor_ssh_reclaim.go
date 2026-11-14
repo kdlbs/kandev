@@ -827,7 +827,7 @@ func sshReclaimStashCmd(dir string) string {
 }
 
 func sshReclaimBranchCmd(dir string) string {
-	return gitProbeCmd(dir, `symbolic-ref --quiet HEAD || { status=$?; if [ "$status" -eq 1 ]; then printf '%s\n' 'KANDEV_DETACHED_HEAD'; else exit "$status"; fi; }`)
+	return gitProbeCmd(dir, `symbolic-ref --quiet HEAD || { reclaim_branch_rc=$?; if [ "$reclaim_branch_rc" -eq 1 ]; then printf '%s\n' 'KANDEV_DETACHED_HEAD'; else exit "$reclaim_branch_rc"; fi; }`)
 }
 
 func sshReclaimRemoveCmd(taskDir string) string {

@@ -115,7 +115,7 @@ so these commands use the Go runner directly with the repository's build flags.
 (cd apps/backend && go test -trimpath -tags fts5 -race ./internal/agent/runtime/lifecycle -run '^Test(SSHTaskDirReclaim|SSHReclaim|WrapLoginShell|SSHStopInstanceRunsTerminalCleanupBeforeControllerTeardown)' -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 -race ./internal/agent/runtime -run '^TestSSHTaskDirReclaimer' -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 -race ./internal/task/service -run '^(TestSSHReclaim.*|TestCancelIfTaskUnarchivedCancelsPendingJobWithoutClaim)$' -count=1)
-bash scripts/lint-go-changed apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim.go apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_test.go apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_git_test.go apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_optin_test.go
+bash scripts/lint-go-changed apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim.go apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_test.go apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_git_test.go apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_optin_test.go apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_zsh_test.go
 git diff --check
 ```
 
@@ -131,6 +131,7 @@ Owned implementation and test files:
 - `apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_test.go`
 - `apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_git_test.go` (new)
 - `apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_optin_test.go` (only if fixtures need adjustment)
+- `apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_zsh_test.go` (new shell-portability regression)
 
 Read-only regression inputs:
 
@@ -215,4 +216,15 @@ files, including secrets.
 - `bash scripts/lint-go-changed apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim.go apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_test.go apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_git_test.go apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_optin_test.go` — passed, 0 issues.
 - `make -C apps/backend build` — passed for all backend and helper targets. macOS artifacts remain unsigned because codesign/rcodesign are unavailable.
 - The PR-doc coverage preflight against the current PR diff covered both work orders with zero errors.
+- `git diff --check` — passed.
+
+The final shell-portability follow-up on 2026-11-14 renamed the command-local
+status variable because zsh reserves `status`. The focused real-Git regression
+first failed against the old command, then passed after the fix. It executes the
+detached-branch probe through `WrapLoginShell("zsh", ...)` with a detached-origin
+stash, then confirms reclamation skips without removal. The test skips when zsh
+is unavailable.
+
+- `(cd apps/backend && PATH=/tmp/ssh-reclaim-zsh-root/usr/bin:$PATH go test -trimpath -tags fts5 ./internal/agent/runtime/lifecycle -run '^(TestSSHTaskDirReclaimGitDetachedHeadStashUnderZsh|TestSSHTaskDirReclaimGitFailures)$' -count=1)` — passed.
+- `bash scripts/lint-go-changed apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim.go apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_test.go apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_git_test.go apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_optin_test.go apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_zsh_test.go` — passed, 0 issues.
 - `git diff --check` — passed.
