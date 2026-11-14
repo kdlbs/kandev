@@ -181,7 +181,7 @@ function SessionActionsMenu({
     (isSessionStoppable(state) || isSessionResumable(state) || isSessionDeletable(state));
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    <DropdownMenu modal open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <Button
           ref={triggerRef}
