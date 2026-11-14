@@ -2284,6 +2284,9 @@ func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutor
 	if req.ExecutorID == "" {
 		return nil, fmt.Errorf("executor_id is required")
 	}
+	if err := rejectExecutorProfileSecretShares(req.EnvVars); err != nil {
+		return nil, err
+	}
 	if err := s.validateExecutorCreateOwner(ctx, req.OwnerUserID); err != nil {
 		return nil, err
 	}
@@ -2341,6 +2344,9 @@ func (s *Service) GetExecutorProfile(ctx context.Context, id string) (*models.Ex
 }
 
 func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *UpdateExecutorProfileRequest) (*models.ExecutorProfile, error) {
+	if err := rejectExecutorProfileSecretShares(req.EnvVars); err != nil {
+		return nil, err
+	}
 	profile, err := s.GetExecutorProfile(ctx, id)
 	if err != nil {
 		return nil, err
@@ -2413,6 +2419,23 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 	}
 	s.publishExecutorProfileEvent(ctx, events.ExecutorProfileUpdated, profile)
 	return profile, nil
+}
+
+// ErrExecutorProfileSecretShareUnsupported rejects an executor-profile env
+// var that carries an agent-profile shared-secret grant.
+var ErrExecutorProfileSecretShareUnsupported = errors.New(
+	"executor profile env vars cannot share a secret with other users; " +
+		"bind your own secret, or share it through an agent profile instead")
+
+// rejectExecutorProfileSecretShares fails closed on any shared-secret grant:
+// executor profiles resolve secrets only as the launching user.
+func rejectExecutorProfileSecretShares(envVars []models.ProfileEnvVar) error {
+	for _, envVar := range envVars {
+		if envVar.SharedByUserID != "" {
+			return ErrExecutorProfileSecretShareUnsupported
+		}
+	}
+	return nil
 }
 
 func (s *Service) validateGlobalProfileEnvRefs(ctx context.Context, envVars []models.ProfileEnvVar) error {

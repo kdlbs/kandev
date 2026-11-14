@@ -185,7 +185,11 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	if err := validateProfileEnvVarDTOs(req.EnvVars); err != nil {
 		return nil, err
 	}
-	if err := c.validateGlobalSecretRefs(ctx, req.EnvVars); err != nil {
+	grants, err := c.resolveProfileSecretGrants(ctx, nil, req.EnvVars)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.validateGlobalSecretRefs(ctx, req.EnvVars, grants); err != nil {
 		return nil, err
 	}
 	if err := validateCommandPrefix(req.CommandPrefix); err != nil {
@@ -221,7 +225,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		CopilotSelectedPlugins:  copilotPlugins,
 		Enabled:                 true,
 		CLIFlags:                cliFlags,
-		EnvVars:                 envVarsFromDTO(envVars),
+		EnvVars:                 grants.apply(envVarsFromDTO(envVars)),
 		CommandPrefix:           strings.TrimSpace(req.CommandPrefix),
 		ProviderKind:            req.ProviderKind,
 		ProviderBaseURL:         req.ProviderBaseURL,
@@ -649,10 +653,14 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		if err := validateProfileEnvVarDTOs(*req.EnvVars); err != nil {
 			return nil, err
 		}
-		if err := c.validateGlobalSecretRefs(ctx, *req.EnvVars); err != nil {
+		grants, err := c.resolveProfileSecretGrants(ctx, profile.EnvVars, *req.EnvVars)
+		if err != nil {
 			return nil, err
 		}
-		profile.EnvVars = envVarsFromDTO(*req.EnvVars)
+		if err := c.validateGlobalSecretRefs(ctx, *req.EnvVars, grants); err != nil {
+			return nil, err
+		}
+		profile.EnvVars = grants.apply(envVarsFromDTO(*req.EnvVars))
 	}
 	if req.CommandPrefix != nil {
 		if err := validateCommandPrefix(*req.CommandPrefix); err != nil {
@@ -976,10 +984,14 @@ func cloneCLIFlags(in []models.CLIFlag) []models.CLIFlag {
 
 // cloneEnvVars returns a copy of the profile's env-var list (secret
 // references included) so the duplicated profile never shares slice memory
-// with the source.
+// with the source. Owner grants are not copied: a secret's owner shares it
+// with one profile, never with its duplicates.
 func cloneEnvVars(in []models.ProfileEnvVar) []models.ProfileEnvVar {
 	out := make([]models.ProfileEnvVar, len(in))
 	copy(out, in)
+	for i := range out {
+		out[i].SharedByUserID = ""
+	}
 	return out
 }
 
@@ -1019,12 +1031,19 @@ func cloneIntPtr(in *int) *int {
 	return &v
 }
 
-func (c *Controller) validateGlobalSecretRefs(ctx context.Context, envVars []dto.ProfileEnvVarDTO) error {
+// validateGlobalSecretRefs requires every secret binding to name a global
+// secret the caller can see. A binding covered by an owner grant was already
+// verified against its grantor and is skipped.
+func (c *Controller) validateGlobalSecretRefs(
+	ctx context.Context,
+	envVars []dto.ProfileEnvVarDTO,
+	grants profileSecretGrants,
+) error {
 	if c.secretStore == nil {
 		return nil
 	}
 	for i, envVar := range envVars {
-		if strings.TrimSpace(envVar.SecretID) == "" {
+		if strings.TrimSpace(envVar.SecretID) == "" || grants.covers(envVar) {
 			continue
 		}
 		if err := secrets.ValidateGlobalReference(ctx, c.secretStore, envVar.SecretID); err != nil {
@@ -1560,6 +1579,10 @@ func envVarsToDTO(in []models.ProfileEnvVar) []dto.ProfileEnvVarDTO {
 	out := make([]dto.ProfileEnvVarDTO, len(in))
 	for i, ev := range in {
 		out[i] = dto.ProfileEnvVarDTO{Key: ev.Key, Value: ev.Value, SecretID: ev.SecretID}
+		if ev.SharedByUserID != "" {
+			shared := true
+			out[i].Shared = &shared
+		}
 	}
 	return out
 }

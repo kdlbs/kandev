@@ -4957,9 +4957,10 @@ func (s *Service) startAgentOnPreparedWorkspace(
 	}
 	var execution *executor.TaskExecution
 	if execution, err = s.launchPreparedSessionWithDynamicFallback(launchCtx, task, sessionID, executor.LaunchOptions{
-		AgentProfileID: session.AgentProfileID,
-		ExecutorID:     session.ExecutorID,
-		StartAgent:     true,
+		AgentProfileID:       session.AgentProfileID,
+		ExecutorID:           session.ExecutorID,
+		StartAgent:           true,
+		RequireExecutorActor: true,
 	}); err != nil {
 		if execution != nil && resumeAttempt != nil {
 			resumeAttempt.setExecutionID(execution.AgentExecutionID)
