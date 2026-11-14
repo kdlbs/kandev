@@ -15,9 +15,6 @@ import { useIntegrationEnabled } from "./use-integration-enabled";
 
 const connections = vi.hoisted(() => new Map<string, boolean>());
 const connected = (workspaceId?: string | null) => connections.get(workspaceId ?? "ws-1") ?? false;
-vi.mock("@/hooks/domains/azure-devops/use-azure-devops-availability", () => ({
-  useAzureDevOpsAvailable: (id: string) => connected(id),
-}));
 vi.mock("@/hooks/domains/github/use-github-status", () => ({
   useGitHubStatus: (id: string) => ({ status: { token_configured: connected(id) } }),
 }));

@@ -362,8 +362,6 @@ it.each([
   ["jira_issue_watch_id", true, false],
   ["linear_issue_watch_id", true, false],
   ["sentry_issue_watch_id", true, false],
-  ["azure_devops_work_item_watch_id", true, false],
-  ["azure_devops_pr_watch_id", false, true],
 ] as const)("preserves watcher %s in initial task mapping", (key, issue, review) => {
   const snapshot = snapshotWithPendingAction(undefined);
   snapshot.tasks[0].metadata = { [key]: "watch" };

@@ -12,6 +12,11 @@ legacy_specs: []
 
 ## Overview
 
+The delivered [runtime update manager package](../agent-runtime-update-manager/plan.md)
+adds an entry within Settings > Agents and updates shared browser navigation helpers.
+It preserves this package's absence of a floating app-wide indicator.
+Existing statuses and verification counts remain historical evidence.
+
 Remove the app-wide runtime update button shown beside Archive in the user's
 screenshot. Deliver the component removal, desktop/phone regression coverage
 and public guide correction in one sequential work order. Agents owns this

@@ -435,6 +435,7 @@ type AgentUpdateStatusDTO struct {
 	CheckedAt           *time.Time                    `json:"checked_at,omitempty"`
 	CheckState          AgentUpdateCheckState         `json:"check_state"`
 	Family              string                        `json:"family,omitempty"`
+	RuntimeSource       string                        `json:"runtime_source,omitempty"`
 	RuntimeRevision     uint64                        `json:"runtime_revision,omitempty"`
 	MigrationAvailable  bool                          `json:"migration_available,omitempty"`
 }
@@ -523,6 +524,21 @@ type AgentUpdateJobDTO struct {
 	FinishedAt       *time.Time           `json:"finished_at,omitempty"`
 }
 
+// AgentRuntimeReviewDTO is optional, server-issued evidence that a pinned
+// update was previewed against this exact trusted runtime identity. Bulk
+// admission echoes it so a concurrent source or selection change is rejected
+// before policy mutation or candidate activation.
+type AgentRuntimeReviewDTO struct {
+	RuntimeID        string `json:"runtime_id"`
+	Package          string `json:"package"`
+	CurrentVersion   string `json:"current_version,omitempty"`
+	EffectiveVersion string `json:"effective_version,omitempty"`
+	ActiveVersion    string `json:"active_version,omitempty"`
+	Family           string `json:"family,omitempty"`
+	Source           string `json:"source,omitempty"`
+	RuntimeRevision  uint64 `json:"runtime_revision,omitempty"`
+}
+
 // AgentUpdatePreviewDTO is a read-only representation of the next managed
 // runtime update. The command is derived from trusted built-in agent metadata.
 type AgentUpdatePreviewDTO struct {
@@ -546,6 +562,7 @@ type AgentUpdatePreviewDTO struct {
 	RuntimeRevision            uint64                         `json:"runtime_revision,omitempty"`
 	MigrationAvailable         bool                           `json:"migration_available,omitempty"`
 	CopilotPluginCompatibility *CopilotPluginCompatibilityDTO `json:"copilot_plugin_compatibility,omitempty"`
+	ReviewedRuntime            *AgentRuntimeReviewDTO         `json:"reviewed_runtime,omitempty"`
 }
 
 // CopilotPluginCompatibilityDTO is the read-only plugin compatibility
@@ -568,10 +585,11 @@ type AgentUpdateVersionDTO struct {
 // managed-runtime update endpoint. Package identity and command arguments are
 // always resolved from trusted built-in agent metadata.
 type AgentUpdateRequest struct {
-	TargetVersion           string `json:"target_version"`
-	UseDefault              bool   `json:"use_default"`
-	TargetFamily            string `json:"target_family,omitempty"`
-	ExpectedRuntimeRevision uint64 `json:"expected_runtime_revision,omitempty"`
+	TargetVersion           string                 `json:"target_version"`
+	UseDefault              bool                   `json:"use_default"`
+	TargetFamily            string                 `json:"target_family,omitempty"`
+	ExpectedRuntimeRevision uint64                 `json:"expected_runtime_revision,omitempty"`
+	ReviewedRuntime         *AgentRuntimeReviewDTO `json:"reviewed_runtime,omitempty"`
 }
 
 type ListAgentUpdateJobsResponse struct {

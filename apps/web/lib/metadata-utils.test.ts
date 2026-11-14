@@ -89,8 +89,6 @@ const watcherKeys: [string, boolean, boolean][] = [
   ["jira_issue_watch_id", true, false],
   ["linear_issue_watch_id", true, false],
   ["sentry_issue_watch_id", true, false],
-  ["azure_devops_work_item_watch_id", true, false],
-  ["azure_devops_pr_watch_id", false, true],
 ];
 it.each(watcherKeys)("recognizes only usable %s values", (key, issue, review) => {
   expect(isIssueWatchFromMetadata({ [key]: "watch" })).toBe(issue);
@@ -110,7 +108,7 @@ it("does not infer watcher keys or mask a usable ID with an empty one", () => {
   expect(isIssueWatchFromMetadata({ issue_watch_id: "", gitlab_issue_watch_id: "watch" })).toBe(
     true,
   );
-  expect(isPRReviewFromMetadata({ review_watch_id: null, azure_devops_pr_watch_id: "watch" })).toBe(
+  expect(isPRReviewFromMetadata({ review_watch_id: null, gitlab_review_watch_id: "watch" })).toBe(
     true,
   );
   expect(isIssueWatchFromMetadata({ issue_watch_id: " " })).toBe(true);

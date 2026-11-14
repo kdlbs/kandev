@@ -152,6 +152,7 @@ export type ProcessedMessagesOptions = {
   initialPromptPreview?: unknown;
   historyInitialized?: boolean;
   hasOlderMessages?: boolean;
+  isPassthrough?: boolean;
   lastAgentError?: LastAgentError | null;
   currentTurnId?: string | null;
   currentTurnCompleted?: boolean;
@@ -506,10 +507,12 @@ function useVisibleMessages(
   toolCallIds: Set<string>,
   subagentChildIds: Set<string>,
   scope: PendingClarificationScope | undefined,
+  options: Pick<ProcessedMessagesOptions, "isPassthrough">,
 ) {
+  const isPassthrough = options.isPassthrough ?? false;
   return useMemo(
-    () => filterVisibleMessages(messages, toolCallIds, subagentChildIds, scope),
-    [messages, toolCallIds, subagentChildIds, scope],
+    () => filterVisibleMessages(messages, toolCallIds, subagentChildIds, scope, isPassthrough),
+    [messages, toolCallIds, subagentChildIds, scope, isPassthrough],
   );
 }
 
@@ -554,6 +557,19 @@ function buildTaskDescriptionMessage(
   };
 }
 
+function partitionFooterActionMessages(messages: Message[]) {
+  const regularMessages: Message[] = [];
+  const footerActionMessages: Message[] = [];
+  for (const message of messages) {
+    if (isFooterActionMessage(message)) {
+      footerActionMessages.push(message);
+    } else {
+      regularMessages.push(message);
+    }
+  }
+  return { regularMessages, footerActionMessages };
+}
+
 export function useProcessedMessages(
   messages: Message[],
   taskId: string | null,
@@ -579,7 +595,13 @@ export function useProcessedMessages(
     options,
   );
 
-  const visibleMessages = useVisibleMessages(messages, toolCallIds, subagentChildIds, scope);
+  const visibleMessages = useVisibleMessages(
+    messages,
+    toolCallIds,
+    subagentChildIds,
+    scope,
+    options,
+  );
 
   const taskDescriptionMessage = useMemo(() => {
     return buildTaskDescriptionMessage(
@@ -611,18 +633,10 @@ export function useProcessedMessages(
 
   // Separate footer action messages (e.g. missing branch guidance with archive/delete
   // buttons) from regular messages so they render after the env prep error status.
-  const { regularMessages, footerActionMessages } = useMemo(() => {
-    const regular: Message[] = [];
-    const footer: Message[] = [];
-    for (const msg of allMessages) {
-      if (isFooterActionMessage(msg)) {
-        footer.push(msg);
-      } else {
-        regular.push(msg);
-      }
-    }
-    return { regularMessages: regular, footerActionMessages: footer };
-  }, [allMessages]);
+  const { regularMessages, footerActionMessages } = useMemo(
+    () => partitionFooterActionMessages(allMessages),
+    [allMessages],
+  );
 
   const rawGroupedItems = useMemo<RenderItem[]>(() => {
     return buildGroupedItemsForHook({

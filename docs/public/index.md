@@ -29,7 +29,7 @@ Choose the guide that matches the job in front of you:
 - [Agent communication](agent-communication.md): send cross-task prompts, receive replies, and negotiate contracts with built-in Kandev MCP tools.
 - [Agents and profiles](agents-and-profiles.md): configure agent CLIs, models, modes, permissions, environment, passthrough, and credentials.
 - [Executors](executors.md): choose local, worktree, Docker, SSH, or Sprites execution and understand the isolation boundary.
-- [Integrations](integrations.md): configure Azure DevOps, GitHub, GitLab, Jira, Linear, and Sentry for a workspace.
+- [Integrations](integrations.md): configure GitHub, GitLab, Jira, Linear, and Sentry for a workspace, and connect plugin-provided integrations such as Bitbucket and Azure DevOps.
 - [Developer tools](developer-tools.md): use quick chat, prompts, utility agents, editors, terminal, shortcuts, and notifications.
 - [Automation and MCP](automation-and-mcp.md): create scheduled or event-driven work, use task MCP, and connect an external MCP client.
 - [Feature status](feature-status.md): check support boundaries, dependencies, experimental features, and unfinished work.

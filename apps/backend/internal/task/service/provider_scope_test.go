@@ -27,8 +27,8 @@ func TestApplyRepositoryUpdatesRejectsInvalidProviderScopeWithoutClearingIdentit
 // repoclone.Cloner.WorkspaceProviderRepositoryPath's actual invariant: only
 // a non-empty provider_scope requires a paired provider_repo_id. A bare
 // provider_repo_id with no scope is the normal shape for every built-in
-// provider (GitHub, GitLab, Azure DevOps) — none of which resolve a
-// provider connection scope — and must stay accepted.
+// provider (GitHub, GitLab) — neither of which resolves a provider
+// connection scope — and must stay accepted.
 func TestApplyRepositoryUpdatesAcceptsProviderRepoIDWithoutScope(t *testing.T) {
 	repository := &models.Repository{}
 	repoID := "1131388506"

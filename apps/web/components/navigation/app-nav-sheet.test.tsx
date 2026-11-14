@@ -105,7 +105,6 @@ vi.mock("@/lib/plugins/registry", () => ({
 
 vi.mock("@/hooks/use-nav-availability", () => ({
   useNavAvailability: () => ({
-    "azure-devops": false,
     github: false,
     gitlab: false,
     jira: false,

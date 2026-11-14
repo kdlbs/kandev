@@ -134,15 +134,6 @@ func builtinMentionProviders(
 		mentions.NewGitLabMergeRequestProvider(gitlabService),
 	)
 
-	var azureService mentions.AzureMentionService
-	if services.AzureDevOps != nil {
-		azureService = services.AzureDevOps
-	}
-	providers = append(providers,
-		mentions.NewAzureWorkItemProvider(azureService),
-		mentions.NewAzurePullRequestProvider(azureService),
-	)
-
 	var sentryService mentions.SentryMentionService
 	if services.Sentry != nil {
 		sentryService = services.Sentry

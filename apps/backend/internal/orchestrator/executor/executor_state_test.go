@@ -5,10 +5,24 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+func TestGetExecutionBySessionDoesNotTreatStoppedRuntimeAsStarting(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	repo.sessions["sess-1"].State = models.TaskSessionStateRunning
+	repo.sessions["sess-1"].UpdatedAt = time.Now().UTC()
+	repo.executorsRunning["sess-1"].Status = models.ExecutorRunningStatusStopped
+
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	if execution, ok := exec.GetExecutionBySession("sess-1"); ok || execution != nil {
+		t.Fatalf("GetExecutionBySession() = (%#v, %v), want no execution for stopped runtime", execution, ok)
+	}
+}
 
 // TestResolveExecutorConfig_PropagatesSSHShell pins the contract that the
 // shell selection saved on an SSH executor profile lands in launch metadata

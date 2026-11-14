@@ -187,7 +187,8 @@ func (r *Repository) lockAgentDeliveryReconstructionOwnerTx(
 	request *models.AgentDeliveryReconstructionRequest,
 ) (*agentDeliveryReconstructionOwner, bool, error) {
 	query := `SELECT ts.task_id, ts.queue_incarnation_id, ts.state,
-		COALESCE(er.agent_execution_id, ''), COALESCE(NULLIF(te.workspace_path, ''), ts.workspace_path, ''), ts.metadata
+		COALESCE(er.agent_execution_id, ''), COALESCE(NULLIF(te.workspace_path, ''), ts.workspace_path, ''),
+		ts.metadata, COALESCE(er.metadata, '')
 		FROM task_sessions ts JOIN tasks t ON t.id = ts.task_id
 		LEFT JOIN executors_running er ON er.session_id = ts.id
 		LEFT JOIN task_environments te ON te.id = ts.task_environment_id
@@ -198,8 +199,9 @@ func (r *Repository) lockAgentDeliveryReconstructionOwnerTx(
 	owner := &agentDeliveryReconstructionOwner{}
 	var taskID, incarnationID, executionID string
 	var sessionState models.TaskSessionState
+	var executorMetadata sql.NullString
 	if err := tx.QueryRowxContext(ctx, r.db.Rebind(query), request.SessionID).Scan(
-		&taskID, &incarnationID, &sessionState, &executionID, &owner.workspacePath, &owner.metadataValue,
+		&taskID, &incarnationID, &sessionState, &executionID, &owner.workspacePath, &owner.metadataValue, &executorMetadata,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, false, nil
@@ -207,10 +209,11 @@ func (r *Repository) lockAgentDeliveryReconstructionOwnerTx(
 		return nil, false, err
 	}
 	if taskID != request.TaskID || incarnationID != request.IncarnationID || executionID != request.ExpectedExecutionID ||
-		sessionState != request.ExpectedSessionState || (isTerminalReconstructionSession(sessionState) &&
-		(sessionState != models.TaskSessionStateFailed || request.Recovery.HistoryGap == nil)) ||
-		owner.workspacePath != request.ExpectedWorkspacePath {
+		sessionState != request.ExpectedSessionState || owner.workspacePath != request.ExpectedWorkspacePath {
 		return owner, false, nil
+	}
+	if err := validateReconstructionPromptTurnBinding(executorMetadata, request); err != nil {
+		return nil, false, err
 	}
 	if err := validateReconstructionGenerationTx(ctx, tx, r.db, request); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -235,6 +238,20 @@ func (r *Repository) lockAgentDeliveryReconstructionOwnerTx(
 		if err != nil {
 			return nil, false, err
 		}
+	} else if exists && current.Phase == models.AgentDeliveryRecoverySettled &&
+		current.SessionID == request.SessionID && current.IncarnationID == request.IncarnationID &&
+		current.SubmissionID != request.Submission.ID {
+		owner.historical, err = r.hasResolvedHistoricalTerminalRecoveryTx(
+			ctx, tx, current, request.HarnessGeneration, request.NativeSessionID,
+		)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	if isTerminalReconstructionSession(sessionState) &&
+		(sessionState != models.TaskSessionStateFailed ||
+			(request.Recovery.HistoryGap == nil && !owner.historical)) {
+		return owner, false, nil
 	}
 	return owner, true, nil
 }
@@ -265,6 +282,27 @@ func validateReconstructionGenerationTx(
 	return nil
 }
 
+func validateReconstructionPromptTurnBinding(
+	executorMetadata sql.NullString,
+	request *models.AgentDeliveryReconstructionRequest,
+) error {
+	if request.PromptTurnBinding == nil {
+		return nil
+	}
+	if !executorMetadata.Valid || executorMetadata.String == "" || executorMetadata.String == "{}" {
+		return repoerrors.ErrAgentDeliveryReconstructionStale
+	}
+	var metadata map[string]interface{}
+	if err := json.Unmarshal([]byte(executorMetadata.String), &metadata); err != nil {
+		return err
+	}
+	binding, ok := models.LoadAgentDeliveryPromptTurnBinding(metadata)
+	if !ok || binding != *request.PromptTurnBinding {
+		return repoerrors.ErrAgentDeliveryReconstructionStale
+	}
+	return nil
+}
+
 func isTerminalReconstructionSession(state models.TaskSessionState) bool {
 	return state == models.TaskSessionStateCompleted || state == models.TaskSessionStateFailed ||
 		state == models.TaskSessionStateCancelled
@@ -275,22 +313,25 @@ func (r *Repository) validateReconstructionMessageTx(
 	tx *sqlx.Tx,
 	request *models.AgentDeliveryReconstructionRequest,
 ) error {
-	if request.ExistingSubmissionOnly {
+	if request.ExistingSubmissionOnly && request.PromptTurnBinding == nil {
 		return nil
 	}
-	query := `SELECT task_id, task_session_id, author_type FROM task_session_messages WHERE id = ?`
+	query := `SELECT task_id, task_session_id, author_type, turn_id FROM task_session_messages WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query += ` FOR KEY SHARE`
 	}
-	var taskID, sessionID string
+	var taskID, sessionID, turnID string
 	var authorType models.MessageAuthorType
-	if err := tx.QueryRowxContext(ctx, r.db.Rebind(query), request.MessageID).Scan(&taskID, &sessionID, &authorType); err != nil {
+	if err := tx.QueryRowxContext(ctx, r.db.Rebind(query), request.MessageID).Scan(&taskID, &sessionID, &authorType, &turnID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return repoerrors.ErrAgentDeliveryReconstructionStale
 		}
 		return err
 	}
 	if taskID != request.TaskID || sessionID != request.SessionID || authorType != models.MessageAuthorUser {
+		return repoerrors.ErrAgentDeliveryReconstructionConflict
+	}
+	if request.PromptTurnBinding != nil && turnID != request.PromptTurnBinding.TurnID {
 		return repoerrors.ErrAgentDeliveryReconstructionConflict
 	}
 	return nil
