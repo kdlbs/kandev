@@ -378,7 +378,6 @@
   "inferenceAgentThisAgent": "este agente",
   "inferenceAgentUnavailable": "{{name}} já não está disponível.",
   "installed": "Instalado",
-  "integrationDescriptionAzureDevops": "Itens de trabalho do Azure Boards e pull requests do Azure Repos.",
   "integrationDescriptionGithub": "Filas de revisão de PRs, vigilâncias de issues e credenciais OAuth.",
   "integrationDescriptionGitlab": "Criação de merge requests, respostas em discussões e anfitriões autogeridos.",
   "integrationDescriptionJira": "Credenciais do Atlassian Cloud e vigilâncias de issues por JQL.",
@@ -1225,5 +1224,9 @@
   "builtinMcp.currentUnknown": "Os pacotes do agente atual são desconhecidos. Estas são as opções guardadas para o próximo arranque do agente.",
   "mcpFromAutomation": "Da automatização",
   "mcpFromAutomationDescription": "Servidores selecionados pela automatização que iniciou este processo.",
-  "builtinMcp.surfaces.automation": "Automatização"
+  "builtinMcp.surfaces.automation": "Automatização",
+  "builtinMcp.inheritedValue": "Herdado do espaço de trabalho: {{value}}",
+  "builtinMcp.overrideValue": "Definição da tarefa: {{value}}. Predefinição do espaço de trabalho: {{default}}.",
+  "builtinMcp.useInherited": "Usar valor herdado",
+  "builtinMcp.allowTasks": "Permitir que as tarefas usem este pacote"
 }

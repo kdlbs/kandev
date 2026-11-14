@@ -42,18 +42,6 @@ describe("resolveExternalVcsFileURL provider routes", () => {
       expected:
         "https://gitlab.example.com:8443/platform/tools/api/-/blob/feature%2Fshare/src/a%20file.ts",
     },
-    {
-      name: "Azure DevOps",
-      repository: {
-        provider: "azure_devops",
-        provider_host: "",
-        provider_owner: "Platform",
-        provider_name: "api",
-        remote_url: "https://dev.azure.com/acme/Platform/_git/api",
-      },
-      expected:
-        "https://dev.azure.com/acme/Platform/_git/api?path=%2Fsrc%2Fa+file.ts&version=GBfeature%2Fshare",
-    },
   ])("builds the $name URL from credential-free metadata", ({ repository, expected }) => {
     expect(
       resolve({ repository, path: "src/a file.ts", publishedBranch: featureShareBranch }),
@@ -105,18 +93,6 @@ describe("resolveExternalVcsFileURL provider routes", () => {
       expected:
         "https://gitlab.example.com:8443/platform/tools/api/-/blob/feature%2Fshare/src/app.ts",
     },
-    {
-      name: "Azure DevOps SCP clone identity",
-      repository: {
-        provider: "azure_devops",
-        provider_host: "",
-        provider_owner: "Platform",
-        provider_name: "api",
-        remote_url: "git@ssh.dev.azure.com:v3/acme/Platform/api",
-      },
-      expected:
-        "https://dev.azure.com/acme/Platform/_git/api?path=%2Fsrc%2Fapp.ts&version=GBfeature%2Fshare",
-    },
   ])("builds a credential-free HTTPS URL from a $name", ({ repository, expected }) => {
     expect(resolve({ repository, publishedBranch: featureShareBranch })?.url).toBe(expected);
   });
@@ -132,26 +108,6 @@ describe("resolveExternalVcsFileURL review revisions", () => {
       revision: "feature/share",
       url: "https://github.com/acme/web/blob/feature%2Fshare/src/app.ts",
     });
-  });
-});
-
-describe("resolveExternalVcsFileURL Azure DevOps clone normalization", () => {
-  it("strips Azure DevOps's clone-only .git suffix before building a file URL", () => {
-    expect(
-      resolve({
-        repository: {
-          provider: "azure_devops",
-          provider_host: "",
-          provider_owner: "Platform",
-          provider_name: "api",
-          remote_url: "https://dev.azure.com/acme/Platform/_git/api.git",
-        },
-        path: currentPath,
-        publishedBranch: featureShareBranch,
-      })?.url,
-    ).toBe(
-      "https://dev.azure.com/acme/Platform/_git/api?path=%2Fsrc%2Fapp.ts&version=GBfeature%2Fshare",
-    );
   });
 });
 
@@ -324,15 +280,15 @@ describe("resolveExternalVcsFileURL SSH identity validation", () => {
     ).toBeNull();
   });
 
-  it("rejects an Azure DevOps SSH identity with mismatched provider metadata", () => {
+  it("does not build links for plugin-owned providers such as Azure DevOps", () => {
     expect(
       resolve({
         repository: {
           provider: "azure_devops",
           provider_host: "",
-          provider_owner: "OtherProject",
+          provider_owner: "Platform",
           provider_name: "api",
-          remote_url: "git@ssh.dev.azure.com:v3/acme/Platform/api",
+          remote_url: "https://dev.azure.com/acme/Platform/_git/api",
         },
       }),
     ).toBeNull();

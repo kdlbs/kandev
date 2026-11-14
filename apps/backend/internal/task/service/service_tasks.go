@@ -51,11 +51,10 @@ func ValidateTaskPriority(priority string) error {
 }
 
 const (
-	providerAzureDevOps = "azure_devops"
-	providerGitHub      = "github"
-	providerGitLab      = "gitlab"
-	protocolHTTP        = "http"
-	protocolHTTPS       = "https"
+	providerGitHub = "github"
+	providerGitLab = "gitlab"
+	protocolHTTP   = "http"
+	protocolHTTPS  = "https"
 )
 
 const defaultKandevTaskWorktreePathSegment = "/.kandev/tasks/"
@@ -1543,6 +1542,7 @@ func (s *Service) safeRepositoryIDForTaskWorktree(ctx context.Context, workspace
 		return "", false, err
 	}
 	if existing != nil {
+		s.backfillReplacementRemoteURL(ctx, existing, repo)
 		return existing.ID, false, nil
 	}
 	created, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
@@ -1555,12 +1555,31 @@ func (s *Service) safeRepositoryIDForTaskWorktree(ctx context.Context, workspace
 		ProviderScope:  repo.ProviderScope,
 		ProviderOwner:  repo.ProviderOwner,
 		ProviderName:   repo.ProviderName,
+		RemoteURL:      repo.RemoteURL,
 		DefaultBranch:  repo.DefaultBranch,
 	})
 	if createErr != nil {
 		return "", false, fmt.Errorf("create provider repository for task worktree %q: %w", repo.ID, createErr)
 	}
 	return created.ID, true, nil
+}
+
+// backfillReplacementRemoteURL records the source's clone URL on a reused
+// provider replacement that has none; a recorded URL is never replaced.
+func (s *Service) backfillReplacementRemoteURL(ctx context.Context, replacement, source *models.Repository) {
+	if replacement.SourceType != sourceTypeProvider || replacement.RemoteURL != "" ||
+		strings.TrimSpace(source.RemoteURL) == "" {
+		return
+	}
+	filled, err := s.repoEntities.FillRepositoryRemoteURL(ctx, replacement.ID, strings.TrimSpace(source.RemoteURL))
+	if err != nil {
+		s.logger.Warn("failed to backfill the replacement repository clone URL",
+			zap.String("repository_id", replacement.ID), zap.Error(err))
+		return
+	}
+	if filled {
+		replacement.RemoteURL = strings.TrimSpace(source.RemoteURL)
+	}
 }
 
 func (s *Service) replaceTaskWorktreeRepositoryMatch(ctx context.Context, workspaceID string, repo *models.Repository) (*models.Repository, bool, error) {
@@ -1860,7 +1879,7 @@ func validateTrustedRemoteRepository(input TaskRepositoryInput) error {
 func validateRemoteRepositoryMetadata(
 	input TaskRepositoryInput, provider, owner, name string,
 ) (string, error) {
-	if input.ProviderOwner != "" && provider != providerAzureDevOps && input.ProviderOwner != owner {
+	if input.ProviderOwner != "" && input.ProviderOwner != owner {
 		return "", fmt.Errorf("remote_url owner %q does not match provider_owner %q", owner, input.ProviderOwner)
 	}
 	if input.ProviderName != "" && input.ProviderName != name {
@@ -1901,10 +1920,6 @@ func parseRemoteRepositoryURL(raw, providerHint string) (provider, owner, name, 
 		return parseGitHubRemote(host, parts, sshStyle)
 	case "gitlab.com", "www.gitlab.com":
 		return parseGitLabRemote(parsed.Scheme, strings.TrimPrefix(originHost, "www."), parts, sshStyle)
-	case "dev.azure.com":
-		return parseAzureHTTPSRemote(parts)
-	case "ssh.dev.azure.com":
-		return parseAzureSSHRemote(parts)
 	default:
 		if strings.EqualFold(providerHint, providerGitHub) {
 			return parseEnterpriseGitHubRemote(parsed, parts, sshStyle)
@@ -1992,24 +2007,6 @@ func remoteProviderHost(provider, remoteURL string) string {
 		return protocolHTTPS + "://" + sshHost
 	}
 	return ""
-}
-
-func parseAzureHTTPSRemote(parts []string) (string, string, string, string, error) {
-	if len(parts) != 4 || parts[2] != "_git" || parts[0] == "" || parts[1] == "" || parts[3] == "" {
-		return "", "", "", "", fmt.Errorf("invalid Azure DevOps repository URL: expected dev.azure.com/org/project/_git/repo")
-	}
-	owner, name := parts[1], parts[3]
-	canonical := fmt.Sprintf("https://dev.azure.com/%s/%s/_git/%s", parts[0], owner, name)
-	return providerAzureDevOps, owner, name, canonical, nil
-}
-
-func parseAzureSSHRemote(parts []string) (string, string, string, string, error) {
-	if len(parts) != 4 || parts[0] != "v3" || parts[1] == "" || parts[2] == "" || parts[3] == "" {
-		return "", "", "", "", fmt.Errorf("invalid Azure DevOps SSH URL: expected git@ssh.dev.azure.com:v3/org/project/repo")
-	}
-	owner, name := parts[2], parts[3]
-	canonical := fmt.Sprintf("git@ssh.dev.azure.com:v3/%s/%s/%s", parts[1], owner, name)
-	return providerAzureDevOps, owner, name, canonical, nil
 }
 
 // probeProviderDefaultBranchIfMissing returns a default_branch resolved via

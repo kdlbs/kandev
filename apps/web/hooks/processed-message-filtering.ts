@@ -465,9 +465,11 @@ export function filterVisibleMessages(
   toolCallIds: Set<string>,
   subagentChildIds: Set<string>,
   scope?: PendingClarificationScope,
+  isPassthrough = false,
 ): Message[] {
   const activeClarification = findActiveClarification(messages, scope);
   const filtered = messages.filter((message) => {
+    if (isPassthrough && isEmptyTurnNotice(message)) return false;
     if (isDismissedGitPushErrorMessage(message)) return false;
     if (subagentChildIds.has(message.id) || isSetupScriptMessage(message)) return false;
     if (message.type === "clarification_request") {

@@ -9,9 +9,6 @@ import * as externalVcsFileURL from "@/lib/utils/external-vcs-file-url";
 
 vi.mock("@/hooks/domains/github/use-task-pr", () => ({ useTaskPR: vi.fn() }));
 vi.mock("@/hooks/domains/gitlab/use-task-mr", () => ({ useWorkspaceMRs: vi.fn() }));
-vi.mock("@/hooks/domains/azure-devops/use-azure-devops-task-pull-requests", () => ({
-  useAzureDevOpsTaskPullRequests: vi.fn(),
-}));
 
 import { useExternalVcsFileLink } from "./use-external-vcs-file-link";
 

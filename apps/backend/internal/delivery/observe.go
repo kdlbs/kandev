@@ -38,7 +38,6 @@ var candidateSourceQueries = []string{
 	`SELECT task_id, repository_id FROM task_sessions WHERE repository_id != ''`,
 	`SELECT task_id, repository_id FROM github_task_prs WHERE repository_id != ''`,
 	`SELECT task_id, repository_id FROM gitlab_task_mrs WHERE repository_id != ''`,
-	`SELECT task_id, repository_id FROM azure_devops_task_prs WHERE repository_id != ''`,
 }
 
 // Candidates computes candidacy per spec "Candidate pairs": a pair is a
@@ -240,12 +239,12 @@ func (r *Repository) SnapshotsForPair(ctx context.Context, taskID, repositoryID 
 }
 
 // ProvidersForPair reads every provider pull/merge request row for the
-// pair across all three provider tables, normalized to the "Provider
+// pair across both provider tables, normalized to the "Provider
 // predicates" table. Tolerant of a missing provider table.
 func (r *Repository) ProvidersForPair(ctx context.Context, taskID, repositoryID string) ([]ProviderRequest, error) {
 	var all []ProviderRequest
 	for _, fetch := range []func(context.Context, string, string) ([]ProviderRequest, error){
-		r.githubPRs, r.gitlabMRs, r.azureDevOpsPRs,
+		r.githubPRs, r.gitlabMRs,
 	} {
 		rows, err := fetch(ctx, taskID, repositoryID)
 		if err != nil {
@@ -313,46 +312,4 @@ func (r *Repository) gitlabMRs(ctx context.Context, taskID, repositoryID string)
 		}
 	}
 	return out, nil
-}
-
-func (r *Repository) azureDevOpsPRs(ctx context.Context, taskID, repositoryID string) ([]ProviderRequest, error) {
-	var rows []struct {
-		Status            string    `db:"status"`
-		PullRequestID     int       `db:"pull_request_id"`
-		PullRequestURL    string    `db:"pull_request_url"`
-		TargetBranch      string    `db:"target_branch"`
-		AzureRepositoryID string    `db:"azure_repository_id"`
-		UpdatedAt         time.Time `db:"updated_at"`
-	}
-	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
-		SELECT status, pull_request_id, pull_request_url, target_branch, azure_repository_id, updated_at
-		FROM azure_devops_task_prs WHERE task_id = ? AND repository_id = ?
-	`), taskID, repositoryID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]ProviderRequest, len(rows))
-	for i, row := range rows {
-		out[i] = ProviderRequest{
-			// azure_devops_task_prs has no merged_at: updated_at is the
-			// merge instant used for ordering only, per spec "Provider
-			// predicates" — it is never written to reached_default_at.
-			Provider: ProviderAzureDevOps, Merged: isAzureMergedStatus(row.Status), Detached: false,
-			MergeInstant: row.UpdatedAt, RequestNumber: row.PullRequestID, URL: row.PullRequestURL,
-			BaseBranch: row.TargetBranch, ScopeValue: row.AzureRepositoryID,
-		}
-	}
-	return out, nil
-}
-
-// isAzureMergedStatus implements spec "Provider predicates": "completed"
-// and "merged" are the merged states; every other value — including an
-// unrecognised one — is not-merged, and is never guessed at.
-func isAzureMergedStatus(status string) bool {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "completed", "merged":
-		return true
-	default:
-		return false
-	}
 }

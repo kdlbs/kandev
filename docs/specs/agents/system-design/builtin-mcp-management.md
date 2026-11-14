@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: agents
 created: 2026-10-22
 requirements:
@@ -7,6 +7,7 @@ requirements:
   - REQ-AGENTS-BUILTIN-MCP-002
   - REQ-AGENTS-BUILTIN-MCP-003
   - REQ-AGENTS-BUILTIN-MCP-004
+  - REQ-AGENTS-BUILTIN-MCP-005
 owners:
   - kandev
 ---
@@ -19,7 +20,7 @@ Agents owns package membership, selection, and delivery. Platform's
 [session observability](../../platform/system-design/mcp-session-observability.md)
 continues to own connection/tool observations. The
 [proposed decision](../../../decisions/2026-10-22-builtin-mcp-tool-policy.md)
-records alternatives. This revised draft replaces workspace-only group pruning
+records alternatives. This design replaces workspace-only group pruning
 with the selectable native packages requested on 2026-10-24.
 
 The historical source baseline is parent #3293 merge
@@ -45,6 +46,7 @@ Backend paths are relative to `apps/backend`; web paths are relative to `apps/we
 | REQ-AGENTS-BUILTIN-MCP-002 | Membership; Selection; Dispatch; Guidance |
 | REQ-AGENTS-BUILTIN-MCP-003 | Persistence; Binding; Compatibility |
 | REQ-AGENTS-BUILTIN-MCP-004 | Evidence; Desktop and phone |
+| REQ-AGENTS-BUILTIN-MCP-005 | Desktop and phone composition |
 
 [Automation extension](../../office/system-design/automation-mcp-selection.md).
 
@@ -456,54 +458,52 @@ Third-party pending-change acknowledgments cannot clear package pending state.
 
 ## Desktop and phone composition
 
-UI-01 workspace: Configured > Built-in package row > detail. Desktop uses the
-existing settings editor replacement and shared Save/Discard contributor. Detail
-order is purpose/ownership, tools and eligible contexts, task policy, fixed
-required context, then application timing. Core shows reasons rather than a
-misleading disabled toggle. Package defaults use explicit labelled choices.
+REQ-AGENTS-BUILTIN-MCP-005 extends the existing management controls. Delivery is
+tracked in [the switch plan](../../../plans/builtin-mcp-switches/plan.md).
+`BuiltinPackageDetail` serves workspace settings, `TaskCreateBuiltinPackages`,
+and task `BuiltinPackageSelector`. Preserve list/detail navigation and tool help.
 
-UI-02 task: MCP plug > Customize > Built-in packages. Each optional row shows
-Inherit/On/Off, effective value, and workspace limit. Core shows Required.
-Configuration starts Inherit (Off); details explain authority before save.
-New Task saves choices before first start through Advanced settings > MCP servers.
-Desktop popover and phone drawer use one scroller and package heading with
-additional servers. Form-owned choices survive picker/Advanced closure and reset
-on a new task/workspace.
-Session Connections lists actual package entries; selecting one shows desired,
-bound, and observed state with an authorized Manage action.
+Task rows and details share `@kandev/ui/switch`, checked from desired state in
+`builtinPackageChoice`. A change writes `on` or `off` through `editor.setChoice`.
+Show Inherited from workspace: On/Off when the choice is `inherit`. Otherwise
+show Set for this task and Workspace default: On/Off. A separate visible button
+writes `inherit`. Equal effective values do not erase explicit overrides.
+Rows place switches beside a separate detail button, with source/reset below.
+Never nest controls inside navigation buttons. Keep discard and reset-all separate.
 
-Connections also shows a separate next-process-start change list for desired
-packages that differ from a valid accepted manifest. Each addition or removal
-names the package and opens its existing Customize detail. A pending addition
-does not create an attachment row, health state, or observed tool count. Unknown
-or foreign acceptance cannot produce a claimed comparison. Show owned saved
-selections with current-agent Unknown, without attachment rows or health.
-Customize shows effective choices and inheritance. Detail uses Built-in package,
-Back to packages, a compact choice card, one timing notice, and collapsed tools
-and ownership. Show exclusion help only for inherited servers or saved exclusions;
-keep dormant restore controls. Exclusion policy does not change.
+Workspace lists and details share permission and On by default switches.
+Map blocked to false/false, available to true/false, and default to true/true.
+Disallow writes blocked. Allow writes available, without restoring an earlier
+hidden default. Default changes map to default/available only while allowed.
+Derive workspace state from the draft, not the saved policy, so unblocking works
+before Save. Configuration has only the permission switch and explicit-opt-in help.
+Core shows Required. Workspace has no inheritance source.
 
-Task package editing reuses the settings change-aware treatment: changed fields
-and their framed group carry the shared dirty attributes, and one compact save
-surface appears only while edits remain unsaved. Its Reset discards local edits;
-reset-to-default stages a separate draft. Successful saves clear dirty styling
-and refresh next-start feedback, while failed saves retain the draft. In an
-explorer the save surface belongs to that panel, outside its content scroller,
-and never portals into an unrelated configuration-chat save host.
+Task eligibility and blocks still constrain effective state. A blocked saved On
+shows Off with the block reason and retained override note. Permit restoration
+of inheritance but disable enabling. Missing data remains loading/error.
+Read-only and pending editors disable mutations. Configuration authority help
+remains visible before opt-in. No API, grant, persistence, or runtime change.
 
-Phone uses the existing full-height settings shell or explorer drawer for
-list > package detail > tool detail. Back returns one level. Close restores
-invoker focus. Fixed navigation/save controls
-surround one `min-h-0` scrolling body with safe-area clearance; no nested drawer.
-Use the shipped touch-tablet drawer. Maintain one domain controller and draft
-across responsive branches and viewport changes.
+New Task keeps Advanced settings > MCP servers, one package heading, and one
+scroller. Form-owned drafts survive closure and reset on new task/workspace.
+Task Customize retains dirty attributes and its panel-owned Save/Discard outside
+the scroller. Failed saves retain drafts; conflicts offer reload. Reset discards
+local edits, while reset-to-default stages a distinct draft. Saves never restart.
 
-Use `controlSizingClassName`: 44px minimum phone/coarse targets, nominal 48px
-header Close, 28px desktop controls. Reasons/errors never depend on hover.
-Conflict keeps drafts and offers reload; denied saves stay unsaved. Reuse API
-stale-page handling, seven locales, generated Traditional Chinese, neutral
-surfaces, Tabler icons, headings, spacing, and focus rings. No new toggle motion.
-Press feedback uses better-ui 0.96/150ms with reduced-motion support.
+Connections retains desired/bound/observed evidence and next-process changes.
+Only a valid accepted manifest supports comparison. Pending additions create no
+attachment row or health claim. Unknown acceptance stays Unknown. Package links
+open Customize. Existing server exclusions and dormant restore controls remain.
+
+Phone uses existing full-height settings or explorer/creation drawers. Keep one
+level, one scroll owner, fixed Back/Close/save controls, safe areas, focus return,
+and shared draft/controller across viewport changes. Source and reset appear
+below the switch on phones. Never nest another drawer or require hover.
+Use existing tokens and focus rings, 44px phone/coarse action targets, 48px nominal
+header Close, and 28px desktop action controls. Switch tracks retain library
+geometry with sufficient hit areas. Use seven locales and generated Traditional
+Chinese. No new motion; preserve reduced-motion support.
 
 ## Observability and validation
 

@@ -1,13 +1,12 @@
 import type { Task } from "@/lib/types/http";
 
-const REVIEW_WATCH_KEYS = ["review_watch_id", "gitlab_review_watch_id", "azure_devops_pr_watch_id"];
+const REVIEW_WATCH_KEYS = ["review_watch_id", "gitlab_review_watch_id"];
 const ISSUE_WATCH_KEYS = [
   "issue_watch_id",
   "gitlab_issue_watch_id",
   "jira_issue_watch_id",
   "linear_issue_watch_id",
   "sentry_issue_watch_id",
-  "azure_devops_work_item_watch_id",
 ];
 
 /** Check whether a metadata key holds a non-empty watch ID string. */

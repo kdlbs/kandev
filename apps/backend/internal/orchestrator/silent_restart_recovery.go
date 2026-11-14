@@ -315,7 +315,7 @@ func (s *Service) startSilentRestoreCandidate(
 		ownedResumeCtx, inputs.task.ID, inputs.session.ID, options, commitWhenReady, reservation,
 	)
 	if err != nil {
-		return errors.Join(err, s.settleFailedSilentRestoreCandidate(ctx, store, attemptID, checkpoint, inputs))
+		return errors.Join(fmt.Errorf("launch silent restart restore candidate: %w", err), s.settleFailedSilentRestoreCandidate(ctx, store, attemptID, checkpoint, inputs))
 	}
 	if execution == nil {
 		return errors.New("silent restart restore was not admitted")
