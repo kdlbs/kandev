@@ -2754,6 +2754,9 @@ type officeOrchestratorTaskStarter struct {
 // recorded unconditionally, whether or not the launch also carries skills.
 var _ officeservice.TaskStarterWithLaunchContextSession = (*officeOrchestratorTaskStarter)(nil)
 
+// Stale-claim recovery keeps a claimed run whose execution is still alive.
+var _ officeservice.TaskRunExecutionProbe = (*officeOrchestratorTaskStarter)(nil)
+
 // StartTask implements officeservice.TaskStarter.
 func (a *officeOrchestratorTaskStarter) StartTask(
 	ctx context.Context, taskID, agentProfileID, executorID,
@@ -2839,6 +2842,13 @@ func (a *officeOrchestratorTaskStarter) GetSessionRecoveryBlock(
 	ctx context.Context, blockID string,
 ) (*taskmodels.SessionRecoveryBlock, error) {
 	return a.orch.GetSessionRecoveryBlock(ctx, blockID)
+}
+
+// TaskRunExecutionLive implements officeservice.TaskRunExecutionProbe.
+func (a *officeOrchestratorTaskStarter) TaskRunExecutionLive(
+	ctx context.Context, taskID, agentProfileID, sessionID string,
+) (bool, error) {
+	return a.orch.OfficeTaskRunExecutionLive(ctx, taskID, agentProfileID, sessionID)
 }
 
 // newAgentAuth wraps officeagents.NewAgentAuth with a dev-mode warning when
