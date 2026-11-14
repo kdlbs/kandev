@@ -9094,11 +9094,12 @@ func (s *Service) rollbackPromptClaim(
 			return
 		}
 	}
-	if quietRestore {
+	switch {
+	case quietRestore:
 		s.restoreLifecycleClaimForRedispatch(ctx, taskID, sessionID, rollback)
-	} else if rollback.sessionIdentity.SessionIncarnationID != "" {
+	case rollback.sessionIdentity.SessionIncarnationID != "":
 		s.restoreLifecycleClaimForIdentity(ctx, rollback.sessionIdentity, rollback.previousSessionState)
-	} else {
+	default:
 		s.restoreLifecycleClaim(ctx, taskID, sessionID, rollback.previousSessionState)
 	}
 	if rollback.taskStateClaimed {
