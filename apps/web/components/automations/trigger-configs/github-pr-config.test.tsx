@@ -3,8 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { GitHubPRConfig } from "./github-pr-config";
 
+const repoFilterSelector = vi.hoisted(() => vi.fn((_props: { workspaceId?: string }) => null));
+
 vi.mock("@/components/github/repo-filter-selector", () => ({
-  RepoFilterSelector: () => null,
+  RepoFilterSelector: repoFilterSelector,
 }));
 
 const checkedAttribute = "aria-checked";
@@ -18,7 +20,7 @@ describe("GitHub PR event selection", () => {
     const config = { events: ["opened"], repos: [{ owner: "acme", name: "widget" }] };
     const view = (current: Record<string, unknown>) => (
       <TooltipProvider>
-        <GitHubPRConfig config={current} onUpdate={onUpdate} />
+        <GitHubPRConfig config={current} workspaceId="ws-1" onUpdate={onUpdate} />
       </TooltipProvider>
     );
     const { rerender } = render(view(config));
@@ -46,11 +48,25 @@ describe("GitHub PR event selection", () => {
   ])("renders %s saved events", (_name, config, checked) => {
     render(
       <TooltipProvider>
-        <GitHubPRConfig config={config} onUpdate={vi.fn()} />
+        <GitHubPRConfig config={config} workspaceId="ws-1" onUpdate={vi.fn()} />
       </TooltipProvider>,
     );
     expect(screen.getByRole("checkbox", { name: "Opened" }).getAttribute(checkedAttribute)).toBe(
       checked,
+    );
+  });
+});
+
+// @covers AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.1
+describe("GitHub PR repository filter", () => {
+  it("passes the workspace to the repository picker", () => {
+    render(
+      <TooltipProvider>
+        <GitHubPRConfig config={{ all_repos: false }} workspaceId="ws-1" onUpdate={vi.fn()} />
+      </TooltipProvider>,
+    );
+    expect(repoFilterSelector.mock.lastCall![0]).toEqual(
+      expect.objectContaining({ workspaceId: "ws-1" }),
     );
   });
 });

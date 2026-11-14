@@ -322,13 +322,59 @@ func TestPersonalAccessibleReposIntersectAutomationVisibility(t *testing.T) {
 	)
 
 	repos, err := service.ListAccessibleReposForWorkspace(
-		context.Background(), "workspace-1", "user-1", "", 50,
+		context.Background(), "workspace-1", "user-1", "", 50, false,
 	)
 	if err != nil {
 		t.Fatalf("ListAccessibleReposForWorkspace() error = %v", err)
 	}
 	if len(repos) != 1 || repos[0].FullName != "acme/allowed" {
 		t.Fatalf("accessible repositories = %+v, want only automation-visible repository", repos)
+	}
+}
+
+func TestScopeEditorReposIgnoreSavedScopeAndKeepAutomationVisibility(t *testing.T) {
+	service := personalBoundaryTestService(t,
+		map[string]GitHubRepo{
+			"acme/allowed": testGitHubRepo("acme", "allowed"),
+			"acme/addable": testGitHubRepo("acme", "addable"),
+		},
+		map[string]GitHubRepo{
+			"acme/allowed":       testGitHubRepo("acme", "allowed"),
+			"acme/addable":       testGitHubRepo("acme", "addable"),
+			"personal-only/repo": testGitHubRepo("personal-only", "repo"),
+		},
+	)
+	ctx := context.Background()
+	if err := service.store.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
+		WorkspaceID:   "workspace-1",
+		RepoScopeMode: RepoScopeModeRepos,
+		RepoScopeRepos: []RepoFilter{
+			{Owner: "acme", Name: "allowed"},
+		},
+	}); err != nil {
+		t.Fatalf("set restricted workspace scope: %v", err)
+	}
+
+	ordinary, err := service.ListAccessibleReposForWorkspace(ctx, "workspace-1", "user-1", "", 50, false)
+	if err != nil {
+		t.Fatalf("ListAccessibleReposForWorkspace() error = %v", err)
+	}
+	if len(ordinary) != 1 || ordinary[0].FullName != "acme/allowed" {
+		t.Fatalf("ordinary repositories = %+v, want only saved-scope repository", ordinary)
+	}
+
+	scopeOptions, err := service.ListScopeEditorReposForWorkspace(ctx, "workspace-1", "user-1", "", 50, false)
+	if err != nil {
+		t.Fatalf("ListScopeEditorReposForWorkspace() error = %v", err)
+	}
+	got := repositorySet(scopeOptions)
+	for _, want := range []string{"acme/allowed", "acme/addable"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("scope-editor repositories = %+v, missing %q", scopeOptions, want)
+		}
+	}
+	if _, ok := got["personal-only/repo"]; ok {
+		t.Errorf("scope-editor repositories include a repository outside automation visibility: %+v", scopeOptions)
 	}
 }
 

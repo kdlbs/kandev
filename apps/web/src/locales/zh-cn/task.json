@@ -3293,5 +3293,6 @@
   "removeRootBody": "文件夹、分支和拉取请求都会保留。Kandev 将不再在更改和文件中显示它们。",
   "removeRootFailed": "无法从此任务中移除该根目录",
   "removeFromTask": "从任务中移除",
-  "rootDisabledNoTracker": "此根目录还没有 Git 跟踪器"
+  "rootDisabledNoTracker": "此根目录还没有 Git 跟踪器",
+  "refreshRepositories": "刷新仓库"
 }

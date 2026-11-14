@@ -229,7 +229,9 @@ function TriggerConfigForm({
     case "scheduled":
       return <ScheduledConfig config={trigger.config} onUpdate={onUpdate} />;
     case "github_pr":
-      return <GitHubPRConfig config={trigger.config} onUpdate={onUpdate} />;
+      return (
+        <GitHubPRConfig config={trigger.config} workspaceId={workspaceId} onUpdate={onUpdate} />
+      );
     case "github_pr_merged":
       return (
         <GitHubPRMergedConfig

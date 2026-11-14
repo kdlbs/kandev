@@ -406,3 +406,31 @@ func TestListAccessibleRepos_ClearDuringFetchDropsStaleWrite(t *testing.T) {
 		t.Fatalf("expected cache to miss after clear() during in-flight fetch; got %v", v)
 	}
 }
+
+func TestListAccessibleRepos_RefreshBypassesAndReplacesCache(t *testing.T) {
+	sc := &accessibleReposStubClient{
+		repos: []GitHubRepo{{FullName: "u/own", Owner: "u", Name: "own"}},
+	}
+	svc := newAccessibleReposTestService(sc)
+	ctx := context.Background()
+	if _, err := svc.listAccessibleReposWithClient(ctx, sc, "legacy", "", 50, false); err != nil {
+		t.Fatal(err)
+	}
+	sc.repos = append(sc.repos, GitHubRepo{FullName: "u/new", Owner: "u", Name: "new"})
+
+	refreshed, err := svc.listAccessibleReposWithClient(ctx, sc, "legacy", "", 50, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sc.calls.Load(); got != 2 || len(refreshed) != 2 {
+		t.Fatalf("refresh fetched %d times and returned %d repos, want 2 and 2", got, len(refreshed))
+	}
+
+	cached, err := svc.listAccessibleReposWithClient(ctx, sc, "legacy", "", 50, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sc.calls.Load(); got != 2 || len(cached) != 2 {
+		t.Fatalf("after refresh: fetched %d times and returned %d repos, want the refreshed cache", got, len(cached))
+	}
+}

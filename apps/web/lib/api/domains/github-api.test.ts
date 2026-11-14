@@ -15,6 +15,7 @@ import {
   disconnectGitHubPersonal,
   disconnectGitHubWorkspace,
   fetchAccessibleRepos,
+  fetchGitHubScopeEditorRepos,
   fetchGitHubCLIAccounts,
   fetchGitHubStatus,
   fetchIssueInfo,
@@ -271,6 +272,14 @@ describe("fetchAccessibleRepos — URL & parsing", () => {
     expect(url).toContain("workspace_id=ws%2F1");
   });
 
+  it("asks the server to bypass its cache on refresh", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ repos: [] }));
+
+    await fetchAccessibleRepos({ workspaceId: workspaceID, refresh: true });
+
+    expect(lastCallUrl()).toContain("refresh=true");
+  });
+
   it("omits empty query and missing limit from the URL", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ repos: [] }));
 
@@ -280,6 +289,7 @@ describe("fetchAccessibleRepos — URL & parsing", () => {
     expect(url).toContain("/api/v1/github/repos");
     expect(url).not.toContain("q=");
     expect(url).not.toContain("limit=");
+    expect(url).not.toContain("refresh=");
   });
 
   it("parses the 200 response and injects provider: 'github' on each entry", async () => {
@@ -329,6 +339,26 @@ describe("fetchAccessibleRepos — URL & parsing", () => {
     });
     expect(repos[1].pushed_at).toBeUndefined();
     expect(repos[1].description).toBeUndefined();
+  });
+});
+
+describe("fetchGitHubScopeEditorRepos", () => {
+  it("uses the workspace-settings discovery route", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ repos: [] }));
+
+    await fetchGitHubScopeEditorRepos({
+      workspaceId: workspaceID,
+      q: "next",
+      limit: 25,
+      refresh: true,
+    });
+
+    const url = lastCallUrl();
+    expect(url).toContain("/api/v1/github/workspace-settings/repositories");
+    expect(url).toContain("workspace_id=ws%2F1");
+    expect(url).toContain("q=next");
+    expect(url).toContain("limit=25");
+    expect(url).toContain("refresh=true");
   });
 });
 
