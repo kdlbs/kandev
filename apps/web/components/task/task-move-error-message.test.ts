@@ -36,6 +36,18 @@ describe("getTaskMoveErrorMessage", () => {
     );
   });
 
+  it("translates a deleted destination executor profile conflict", () => {
+    const translate = (key: string) => `translated:${key}`;
+    const error = new ApiError("destination executor unavailable", 409, {
+      error: "destination executor unavailable",
+      code: "task_move_executor_unavailable",
+    });
+
+    expect(getTaskMoveErrorMessage(error, fallback, translate)).toBe(
+      "translated:task:taskMoveErrorExecutorUnavailable",
+    );
+  });
+
   // @covers AC-OFFICE-HUMAN-DONE-002.4
   it("maps task_approvals_pending to the approvals-pending message", () => {
     const translate = (key: string) => `translated:${key}`;

@@ -191,3 +191,109 @@ func TestReconstructAgentDeliverySubmission(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, enriched.Recovery.Revision, repeated.Recovery.Revision)
 }
+
+func TestReconstructAgentDeliverySubmissionRequiresCurrentPromptTurnBinding(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForSessionTests(t)
+	const taskID = "task-reconstruct-bound-turn"
+	const sessionID = "session-reconstruct-bound-turn"
+	const incarnationID = "incarnation-reconstruct-bound-turn"
+	const messageID = "message-reconstruct-bound-turn"
+	const turnID = "turn-reconstruct-bound-turn"
+	const streamID = "stream-reconstruct-bound-turn"
+	const currentExecutionID = "successor-execution"
+	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, Title: taskID}))
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: taskID, QueueIncarnationID: incarnationID,
+		State: models.TaskSessionStateWaitingForInput,
+	}))
+	require.NoError(t, repo.CreateHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{
+		SessionID: sessionID, IncarnationID: incarnationID, Generation: 4,
+		NativeSessionID: "native-bound-turn", CreationReason: "test",
+	}))
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: turnID, TaskID: taskID, TaskSessionID: sessionID, StartedAt: now}))
+	require.NoError(t, repo.CreateMessage(ctx, &models.Message{
+		ID: messageID, TaskID: taskID, TaskSessionID: sessionID, TurnID: turnID,
+		AuthorType: models.MessageAuthorUser, Content: "continue the review",
+	}))
+	block := &models.SessionRecoveryBlock{
+		ID: "block-bound-turn", SessionID: sessionID, IncarnationID: incarnationID,
+		ExpectedGeneration: 4, Reason: "unknown_prompt_outcome", State: models.RecoveryBlockOpen,
+		ConsumerReference: reconstructionDeliveryConsumer,
+	}
+	require.NoError(t, repo.UpsertSessionRecoveryBlock(ctx, block))
+	payload := []byte(`{"text":"continue the review"}`)
+	hash := sha256.Sum256(payload)
+	binding := models.AgentDeliveryPromptTurnBinding{
+		OriginalRuntime:  processidentity.Identity{PID: 42, BirthToken: "runtime-birth"},
+		PromptGeneration: 9, TaskID: taskID, SessionID: sessionID, ExecutionID: "original-execution",
+		IncarnationID: incarnationID, HarnessGeneration: 4, StreamID: streamID,
+		SubmissionID: "prompt:" + messageID, TurnID: turnID,
+	}
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: sessionID, SessionID: sessionID, TaskID: taskID, ExecutorID: "executor",
+		AgentExecutionID: currentExecutionID, Status: "running",
+		Metadata: map[string]interface{}{models.SessionMetaKeyDeliveryPromptTurnBinding: binding},
+	}))
+	terminated := true
+	request := &models.AgentDeliveryReconstructionRequest{
+		TaskID: taskID, SessionID: sessionID, IncarnationID: incarnationID,
+		HarnessGeneration: 4, ExpectedExecutionID: currentExecutionID,
+		ExpectedSessionState: models.TaskSessionStateWaitingForInput, NativeSessionID: "native-bound-turn",
+		MessageID: messageID, PromptTurnBinding: &binding, ExpectedBlock: *block,
+		SourceStreamFirstRetained: 1,
+		Submission: models.AgentDeliverySubmission{
+			ID: binding.SubmissionID, SessionID: sessionID, IncarnationID: incarnationID,
+			HarnessGeneration: 4, OwnerGeneration: 4, DispatchAttemptID: messageID,
+			PayloadHash: hex.EncodeToString(hash[:]), Payload: payload,
+			State: models.DeliverySubmissionInterruptedUnknown, Outcome: "reconstructed_unknown",
+			CreatedAt: now, UpdatedAt: now,
+		},
+		Recovery: models.AgentDeliveryRecovery{
+			Phase: models.AgentDeliveryRecoveryUncertain, SessionID: sessionID,
+			AgentExecutionID: binding.ExecutionID, PromptGeneration: binding.PromptGeneration,
+			OriginalRuntime: binding.OriginalRuntime, SubmissionID: binding.SubmissionID,
+			StreamID: streamID, IncarnationID: incarnationID, HarnessGeneration: 4,
+			Reconstruction: &models.AgentDeliveryReconstructionProvenance{
+				SourceSessionID: sessionID, SourceIncarnationID: incarnationID,
+				SourceHarnessGeneration: 4, SourceStreamID: streamID,
+				PayloadHash: hex.EncodeToString(hash[:]), ObservedState: "dispatching",
+				SourceStreamFirstRetained: 1, ProcessIdentityKnown: true, ProcessTerminated: &terminated,
+			},
+		},
+	}
+
+	store, ok := any(repo).(agentDeliveryReconstructionStore)
+	require.True(t, ok)
+	changedBinding := binding
+	changedBinding.ExecutionID = "newer-prompt-owner"
+	running, err := repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	require.NoError(t, err)
+	running.Metadata[models.SessionMetaKeyDeliveryPromptTurnBinding] = changedBinding
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, running))
+	_, err = store.ReconstructAgentDeliverySubmission(ctx, request)
+	require.ErrorIs(t, err, repoerrors.ErrAgentDeliveryReconstructionStale,
+		"a binding changed after evidence inspection must not authorize reconstruction")
+
+	running, err = repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	require.NoError(t, err)
+	running.Metadata[models.SessionMetaKeyDeliveryPromptTurnBinding] = binding
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, running))
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "other-turn", TaskID: taskID, TaskSessionID: sessionID, StartedAt: now.Add(time.Second)}))
+	_, err = repo.db.ExecContext(ctx, `UPDATE task_session_messages SET turn_id = ? WHERE id = ?`, "other-turn", messageID)
+	require.NoError(t, err)
+	_, err = store.ReconstructAgentDeliverySubmission(ctx, request)
+	require.ErrorIs(t, err, repoerrors.ErrAgentDeliveryReconstructionConflict,
+		"the canonical prompt message must still belong to the bound turn")
+
+	_, err = repo.db.ExecContext(ctx, `UPDATE task_session_messages SET turn_id = ? WHERE id = ?`, turnID, messageID)
+	require.NoError(t, err)
+	result, err := store.ReconstructAgentDeliverySubmission(ctx, request)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Inserted)
+	require.Equal(t, binding.ExecutionID, result.Recovery.AgentExecutionID)
+	require.Equal(t, binding.PromptGeneration, result.Recovery.PromptGeneration)
+}

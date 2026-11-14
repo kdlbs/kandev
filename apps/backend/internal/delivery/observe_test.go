@@ -323,7 +323,7 @@ func TestSnapshotsForPairDoesNotDuplicateAcrossEnvironmentBranches(t *testing.T)
 }
 
 func TestProvidersForPair_MissingTablesTolerated(t *testing.T) {
-	// A database with only the task schema (no github/gitlab/azuredevops
+	// A database with only the task schema (no github/gitlab
 	// store initialized) must not error; it simply contributes no rows.
 	repo, db := newTestRepo(t)
 	seedWorkspace(t, db, "ws-1")
@@ -404,36 +404,5 @@ func TestGitLabMRs_MergedFromColumnAndScopeIsProjectPath(t *testing.T) {
 	}
 	if unmerged := byURL["https://gitlab/mr/8"]; unmerged.Merged {
 		t.Fatalf("mr-2 = %+v, want not merged (NULL merged_at)", unmerged)
-	}
-}
-
-func TestAzureDevOpsPRs_StatusCaseInsensitiveAndUnrecognisedIsNotMerged(t *testing.T) {
-	repo, db := newTestRepo(t)
-	seedWorkspace(t, db, "ws-1")
-	seedRepository(t, db, "repo-1", "ws-1")
-	seedTask(t, db, "task-1", "ws-1")
-	seedAzureDevOpsStore(t, db)
-
-	seedAzurePR(t, db, "az-1", "task-1", "repo-1", "azrepo-1", 1, "https://az/1", "main", "Completed")
-	seedAzurePR(t, db, "az-2", "task-1", "repo-1", "azrepo-1", 2, "https://az/2", "main", "abandoned")
-	seedAzurePR(t, db, "az-3", "task-1", "repo-1", "azrepo-1", 3, "https://az/3", "main", "some-future-status")
-
-	ctx := context.Background()
-	prs, err := repo.ProvidersForPair(ctx, "task-1", "repo-1")
-	if err != nil {
-		t.Fatalf("ProvidersForPair: %v", err)
-	}
-	byURL := map[string]delivery.ProviderRequest{}
-	for _, p := range prs {
-		byURL[p.URL] = p
-	}
-	if !byURL["https://az/1"].Merged {
-		t.Fatal("Completed (case-insensitive) must be merged")
-	}
-	if byURL["https://az/2"].Merged {
-		t.Fatal("abandoned must not be merged")
-	}
-	if byURL["https://az/3"].Merged {
-		t.Fatal("an unrecognised status must not be merged and must not error")
 	}
 }

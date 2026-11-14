@@ -2,7 +2,6 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ComponentType } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
-import { AzureDevOpsEnabledControl } from "@/components/azure-devops/azure-devops-enabled-control";
 import { GitHubEnabledControl } from "@/components/github/github-enabled-control";
 import { GitLabEnabledControl } from "@/components/gitlab/gitlab-enabled-control";
 import { JiraEnabledControl } from "@/components/jira/jira-enabled-control";
@@ -29,7 +28,6 @@ const WORKSPACE_B = "ws-b";
 const CONTROLS: ReadonlyArray<
   [keyof typeof INTEGRATION_ENABLED_KEYS, string, ComponentType<IntegrationEnabledControlProps>]
 > = [
-  ["azure-devops", "Azure DevOps", AzureDevOpsEnabledControl],
   ["github", "GitHub", GitHubEnabledControl],
   ["gitlab", "GitLab", GitLabEnabledControl],
   ["jira", "Jira", JiraEnabledControl],

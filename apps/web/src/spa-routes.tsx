@@ -8,7 +8,6 @@ import {
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { GitHubPageClient } from "@/app/github/github-page-client";
 import { GitLabPageClient } from "@/app/gitlab/gitlab-page-client";
-import { AzureDevOpsPageClient } from "@/app/azure-devops/azure-devops-page-client";
 import { JiraPageClient } from "@/app/jira/jira-page-client";
 import { LinearPageClient } from "@/app/linear/linear-page-client";
 import { StatsPageClient } from "@/app/stats/stats-page-client";
@@ -116,7 +115,6 @@ type SpaRoute =
   | { kind: "threads" }
   | { kind: "github" }
   | { kind: "gitlab" }
-  | { kind: "azure-devops" }
   | { kind: "jira" }
   | { kind: "linear" }
   | { kind: "stats"; range?: RangeKey }
@@ -322,8 +320,6 @@ function resolveTopLevelRoute(normalized: string, searchParams: URLSearchParams)
       return { kind: "github" };
     case "/gitlab":
       return { kind: "gitlab" };
-    case "/azure-devops":
-      return { kind: "azure-devops" };
     case "/jira":
       return { kind: "jira" };
     case "/linear":
@@ -629,15 +625,6 @@ function ExternalDataRoute({
     case "gitlab":
       return (
         <GitLabPageClient
-          workspaceId={workspaceId}
-          workflows={data.workflows}
-          steps={data.steps}
-          repositories={data.repositories}
-        />
-      );
-    case "azure-devops":
-      return (
-        <AzureDevOpsPageClient
           workspaceId={workspaceId}
           workflows={data.workflows}
           steps={data.steps}

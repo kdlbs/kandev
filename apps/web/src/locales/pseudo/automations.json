@@ -387,8 +387,6 @@
   "mcpNoServers": "Ńō àďďĩţĩōńàĺ ḾĆƤ śēŕvēŕś ƒōũńď.",
   "mcpUnavailable": "{{name}} (ũńàvàĩĺàƀĺē)",
   "mcpOptionsFailed": "Ćōũĺď ńōţ ĺōàď ḾĆƤ ćĥōĩćēś. Śàvēď ćĥōĩćēś ŕēḿàĩń ũńćĥàńĝēď.",
-  "mcpDesired": "Ďēśĩŕēď ƥàćķàĝēś",
-  "mcpCurrentProcess": "Ćũŕŕēńţ ƥŕōćēśś",
-  "mcpUnknown": "Ũńķńōŵń",
-  "mcpObserved": "Ōƀśēŕvēď ćōńńēćţĩōńś"
+  "passthroughOutputNotCapturedTitle": "ĆĹĨ ƥàśśţĥŕōũĝĥ ōũţƥũţ ĩś ńōţ ćàƥţũŕēď ĩń ţĥĩś ŕũń'ś ţŕàńśćŕĩƥţ.",
+  "passthroughOutputFutureSessionsDescription": "Ďĩśàƀĺē ĆĹĨ ƥàśśţĥŕōũĝĥ ĩń ţĥē àũţōḿàţĩōń'ś àĝēńţ ƥŕōƒĩĺē ţō ŕēćōŕď ōũţƥũţ ƒōŕ ƒũţũŕē śēśśĩōńś. Ƥŕēvĩōũś ţēŕḿĩńàĺ ōũţƥũţ ćàńńōţ ƀē ŕēćōvēŕēď ĥēŕē."
 }
