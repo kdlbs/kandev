@@ -294,6 +294,9 @@ func (si *SchedulerIntegration) canRecoverStaleClaimedRun(ctx context.Context, r
 }
 
 func (si *SchedulerIntegration) canRecoverTasklessClaim(ctx context.Context, run *runsmodels.Run) bool {
+	if run.ClaimedAt == nil {
+		return false
+	}
 	sessions, err := si.svc.repo.ListRunSessions(ctx, run.ID)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -302,35 +305,52 @@ func (si *SchedulerIntegration) canRecoverTasklessClaim(ctx context.Context, run
 		}
 		return false
 	}
-	// An attempt row means launch began; lifecycle/restart recovery owns
-	// its settlement, including when completion has not finished the run yet.
-	return len(sessions) == 0 && run.SessionID == ""
+	if len(sessions) == 0 {
+		return run.SessionID == ""
+	}
+	for _, session := range sessions {
+		// A reservation created during this claim transfers recovery to the
+		// run-session lifecycle, including its completion-in-flight window.
+		if session.State == models.RunSessionStatePreparing || session.State == models.RunSessionStateRunning ||
+			session.CreatedAt.IsZero() || !session.CreatedAt.Before(*run.ClaimedAt) {
+			return false
+		}
+	}
+	// Terminal attempts from earlier claims do not own this retry. The
+	// scheduler can requeue it if the new claim never reserved an attempt.
+	return true
 }
 
 func (si *SchedulerIntegration) canRecoverTaskClaim(ctx context.Context, run *runsmodels.Run, taskID string) bool {
 	probe := si.svc.runClaimSessionProbe
-	sessionID := run.SessionID
-	if sessionID == "" {
-		resolved, err := si.findActiveTaskSessionForClaim(ctx, run, taskID, probe)
-		if err != nil {
-			si.logClaimSessionLookupFailure(ctx, run.ID, taskID, err)
+	sessions, err := si.findTaskSessionsForClaim(ctx, run, taskID, probe)
+	if err != nil {
+		si.logClaimSessionLookupFailure(ctx, run.ID, taskID, err)
+		return false
+	}
+	if len(sessions) == 0 {
+		return run.SessionID == ""
+	}
+	for _, session := range sessions {
+		if session.SessionID != "" && si.preserveSessionOwnedClaim(ctx, run.ID, session, probe) {
 			return false
 		}
-		sessionID = resolved
-		if sessionID == "" {
-			return true
-		}
 	}
-	return si.preserveSessionOwnedClaim(ctx, run.ID, sessionID, probe)
+	return true
 }
 
-func (si *SchedulerIntegration) findActiveTaskSessionForClaim(ctx context.Context, run *runsmodels.Run, taskID string, probe RunClaimSessionProbe) (string, error) {
+func (si *SchedulerIntegration) findTaskSessionsForClaim(
+	ctx context.Context, run *runsmodels.Run, taskID string, probe RunClaimSessionProbe,
+) ([]RunClaimSessionEvidence, error) {
 	if probe == nil {
 		si.logger.Warn("stale task run recovery deferred because session lookup is unavailable",
 			zap.String("run_id", run.ID), zap.String("task_id", taskID))
-		return "", errors.New("run claim session lookup unavailable")
+		return nil, errors.New("run claim session lookup unavailable")
 	}
-	return probe.FindActiveTaskSession(ctx, taskID, run.AgentProfileID)
+	if run.ClaimedAt == nil {
+		return nil, errors.New("run claim timestamp is unavailable")
+	}
+	return probe.FindTaskSessionsForClaim(ctx, taskID, run.AgentProfileID, run.SessionID, *run.ClaimedAt)
 }
 
 func (si *SchedulerIntegration) logClaimSessionLookupFailure(ctx context.Context, runID, taskID string, err error) {
@@ -340,29 +360,36 @@ func (si *SchedulerIntegration) logClaimSessionLookupFailure(ctx context.Context
 	}
 }
 
-func (si *SchedulerIntegration) preserveSessionOwnedClaim(ctx context.Context, runID, sessionID string, probe RunClaimSessionProbe) bool {
+func (si *SchedulerIntegration) preserveSessionOwnedClaim(
+	ctx context.Context, runID string, session RunClaimSessionEvidence, probe RunClaimSessionProbe,
+) bool {
 	if probe == nil {
 		si.logger.Warn("stale task run recovery deferred because runtime probe is unavailable",
-			zap.String("run_id", runID), zap.String("session_id", sessionID))
-		return false
+			zap.String("run_id", runID), zap.String("session_id", session.SessionID))
+		return true
 	}
-	live, err := probe.ProbeAgentRunningForSession(ctx, sessionID)
+	live, err := probe.ProbeAgentRunningForSession(ctx, session.SessionID)
 	if err != nil {
 		if ctx.Err() == nil {
 			si.logger.Warn("stale task run recovery deferred because runtime liveness is uncertain",
-				zap.String("run_id", runID), zap.String("session_id", sessionID), zap.Error(err))
+				zap.String("run_id", runID), zap.String("session_id", session.SessionID), zap.Error(err))
 		}
-		return false
+		return true
 	}
 	if live {
 		si.logger.Debug("stale run recovery deferred for live task session",
-			zap.String("run_id", runID), zap.String("session_id", sessionID))
-		return false
+			zap.String("run_id", runID), zap.String("session_id", session.SessionID))
+		return true
 	}
-	// A session identity means the run launched. A liveness miss alone is not
-	// completion evidence; the existing lifecycle and restart paths own it.
-	si.logger.Debug("stale run recovery deferred for session-owned task run",
-		zap.String("run_id", runID), zap.String("session_id", sessionID))
+	if session.TurnStartedAfterClaim {
+		// A turn accepted after this claim proves launch even after its process
+		// stopped and before Office completion settles the run.
+		si.logger.Debug("stale run recovery deferred for task turn owned by claim",
+			zap.String("run_id", runID), zap.String("session_id", session.SessionID))
+		return true
+	}
+	si.logger.Debug("stale run recovery found no live or current task turn",
+		zap.String("run_id", runID), zap.String("session_id", session.SessionID))
 	return false
 }
 

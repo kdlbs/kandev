@@ -29,7 +29,8 @@ with a conditional update and retain normal completion for live work.
 ## In scope
 
 - Add a small local runtime/session check to the existing processor dependency wiring.
-- Reuse recorded session identity, the existing task/agent fallback, and taskless attempt records.
+- Reuse recorded session identity, current task-turn evidence, runtime liveness,
+  and taskless attempt timestamps.
 - Replace the age-only bulk reset with candidate reads and guarded per-run recovery.
 - Add the focused tests named in the plan.
 - Cover the completion/cancellation race and the production guard wiring.
@@ -42,20 +43,22 @@ completion handlers, provider-classifier changes, schema changes, and live clean
 ## Acceptance
 
 1. A live run aged 35 minutes launches once, retains its original claim, and finishes normally after repeated scheduler ticks.
-2. Uncertain execution remains untouched; an abandoned unlaunched claim recovers. Taskless active attempts remain protected.
+2. Uncertain execution and a post-claim turn remain untouched; a dead prior
+   session or terminal predecessor does not block recovery of an unlaunched retry.
+   Taskless preparing/running attempts remain protected.
 3. Recovery preserves concurrent completion, cancellation, and successor claims on SQLite and PostgreSQL.
 
 ## TDD and verification
 
-First add `TestRunClaimRecoveryPreservesLiveExecution` and observe the current
-sweep requeue the live run. Then implement the guard and make the test pass.
-Use fake age or stored timestamps instead of a 30-minute wait.
-Add a wiring test so the guard must exist in production, not only in a test double.
+Add a failing regression for each missed claim-ownership case before changing
+production code. Use stored timestamps instead of a 30-minute wait. Add a
+constructor wiring test so the guard must exist in production, not only in a
+test double.
 
 Run from the repository root:
 
 ```bash
-(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/runs/repository/sqlite ./internal/office/service ./internal/backendapp -run 'Test(RunClaimRecovery|PostgresRunClaimRecovery)' -count=1)
+(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/runs/repository/sqlite ./internal/office/service ./internal/backendapp -run 'Test(RunClaimRecovery|PostgresRunClaimRecovery|SchedulerTick_RecoversStaleClaimedRun|RunLifecycle_StepCompleteEventsEmitted|NewRunProcessorServiceWiresClaimSessionProbe|OfficeRunClaimSessionProbeFindsIdleSessionDuringCompletion)' -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/runs/repository/sqlite -run '^TestRunClaimRecovery' -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/office/service -run '^(TestSchedulerTick_RecoversStaleClaimedRun|TestRunLifecycle_StepCompleteEventsEmitted)$' -count=1)
 python3 scripts/list-docs.py validate
@@ -108,16 +111,18 @@ while completion is in flight. Do not broaden `FinishRun` to queued rows.
 
 ## Results
 
-The new live-execution regression first failed against the old sweep: the stale
-claim was requeued while its original session remained active. The guarded
-recovery made the test pass. The production-wiring regression now covers the
-missing `runs.session_id` fallback to a matching `WAITING_FOR_INPUT` task
-session with an execution identity. Repeated stale sweeps preserve the claim,
-do not relaunch, and allow delayed completion to finish the run.
+The original live-execution regression first failed against the age-only sweep.
+The review regressions then confirmed that a prior ready task session and a
+terminal predecessor attempt could block recovery, while completion passing
+through `IDLE` could be requeued. Recovery now ties task execution to a turn
+started after the current claim, uses runtime liveness for sessions without
+that turn evidence, and compares taskless attempt creation to the claim time.
+The production constructor test verifies the session probe is wired. Task-bound
+tests cover both `WAITING_FOR_INPUT` and the delayed `IDLE` completion window.
 
 Passed checks:
 
-- `(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/runs/repository/sqlite ./internal/office/service ./internal/backendapp -run 'Test(RunClaimRecovery|PostgresRunClaimRecovery|SchedulerTick_RecoversStaleClaimedRun|RunLifecycle_StepCompleteEventsEmitted)' -count=1)`
+- `(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/runs/repository/sqlite ./internal/office/service ./internal/backendapp -run 'Test(RunClaimRecovery|PostgresRunClaimRecovery|SchedulerTick_RecoversStaleClaimedRun|RunLifecycle_StepCompleteEventsEmitted|NewRunProcessorServiceWiresClaimSessionProbe|OfficeRunClaimSessionProbeFindsIdleSessionDuringCompletion)' -count=1)`
 - `(cd apps/backend && go test -trimpath -tags fts5 ./internal/runs/repository/sqlite -run '^TestRunClaimRecovery' -count=1)`
 - `(cd apps/backend && go test -trimpath -tags fts5 ./internal/office/service -run '^(TestSchedulerTick_RecoversStaleClaimedRun|TestRunLifecycle_StepCompleteEventsEmitted)$' -count=1)`
 - `(cd apps/backend && go test -trimpath -tags fts5 ./internal/runs/repository/sqlite -run 'Test(ReadMethodsPropagateDatabaseErrors|WriteMethodsPropagateDatabaseErrors)' -count=1)`
@@ -148,4 +153,5 @@ configured; it is not counted as passed. The SQLite CAS tests ran. The
 closed-reader test now checks `ListStaleClaimedRuns`, and the closed-writer test
 checks `RecoverStaleClaimedRun` with a non-nil observed claim. The PostgreSQL
 CAS assertion compares against the persisted terminal timestamp. No historical
-parked-row cleanup was performed. Changes remain unstaged and uncommitted.
+parked-row cleanup was performed. The implementation is tracked in PR #5317;
+the review follow-up is being validated in that PR.

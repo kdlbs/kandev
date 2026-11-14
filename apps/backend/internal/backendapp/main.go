@@ -1882,7 +1882,7 @@ func newRunProcessorService(
 	agentctlBinaryPath string,
 	cfgLoader *configloader.ConfigLoader,
 	cfgWriter *configloader.FileWriter,
-	lifecycleMgr *lifecycle.Manager,
+	runtimeBackend officeRunProcessorRuntime,
 	log *logger.Logger,
 ) *officeservice.Service {
 	apiPort := cfg.Server.Port
@@ -1904,8 +1904,8 @@ func newRunProcessorService(
 		AgentctlBinaryPath: agentctlBinaryPath,
 		EventBus:           eventBus,
 	})
-	svc.SetRunSessionLauncher(newOfficeRunSessionLauncher(repos.Office, lifecycleMgr, services.DynamicProfileResolver, log))
-	wireOfficeRunClaimSessionProbe(svc, repos.Task, lifecycleMgr)
+	svc.SetRunSessionLauncher(newOfficeRunSessionLauncher(repos.Office, runtimeBackend, services.DynamicProfileResolver, log))
+	wireOfficeRunClaimSessionProbe(svc, repos.Task, runtimeBackend)
 	return svc
 }
 

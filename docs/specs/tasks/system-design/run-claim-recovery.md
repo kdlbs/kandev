@@ -40,16 +40,22 @@ A small callback or local interface in Office service options is sufficient
 for the runtime check. Reuse the existing backend dependency wiring.
 Do not add evidence types to `runs/models` or enumerate unrelated workspace executions.
 
-For a task-bound run, use its recorded session. When that ID is missing,
-use the existing task/agent session lookup. An unresolved launched session
-must not become evidence that no execution exists.
-The existing runtime lookup and error-preserving liveness probe provide the check.
-Protect startup and a ready execution whose completion is still being processed.
-An unavailable lookup defers recovery for that row.
+For a task-bound run, inspect its recorded session when available. When that ID
+is missing, use the existing task/agent session lookup. Associate a task session
+with this claim when its latest turn started at or after `claimed_at`. A prior
+ready session with no turn for this claim is not launch evidence. For a matching
+session without a current turn, use the runtime liveness probe: live or unknown
+execution defers recovery, while a confirmed non-live session permits requeue.
+A matching post-claim turn remains protected when its runtime has stopped and
+completion is still being processed, including the task session's `IDLE` window.
+An unavailable session or turn lookup defers recovery for that row.
 
-For a taskless run, use `ListRunSessions` and its existing attempt ownership.
-A `preparing` or `running` attempt protects the run from the generic sweep.
-Leave abandoned taskless-attempt settlement to its existing lifecycle/restart path.
+For a taskless run, use `ListRunSessions` and compare attempt creation with the
+current claim. A preparing or running attempt always protects the run. A
+terminal attempt created during the current claim also protects its completion
+window. Terminal attempts from earlier claims do not block recovery of a retry
+that crashed before reserving its next attempt. An unreadable or timestamp-less
+attempt defers recovery.
 
 A preserved claim keeps its original `claimed_at` value. Its normal completion
 continues to use `FinishRun`; that method needs no broader status guard.
@@ -80,15 +86,17 @@ Cleanup is outside implementation scope and does not authorize a live database w
 
 | Criteria | Evidence |
 | --- | --- |
-| 001.1 and 001.4 | Age a live run by 35 minutes. Tick twice, then complete it. Assert one launch and normal finish. |
+| 001.1 and 001.4 | Age a live run by 35 minutes. Tick twice, then complete it from `WAITING_FOR_INPUT` and `IDLE`; assert one launch and normal finish. |
 | 001.2 | Failed or uncertain session check leaves the claim unchanged. |
-| 001.3 | An abandoned unlaunched claim still returns to queued. |
+| 001.3 | An abandoned claim, including one with only a prior ready session or terminal predecessor attempt, returns to queued. |
 | 001.6 | Completion, cancellation, or a newer claim wins over the stale observation. |
-| 001.7 | Taskless preparing/running attempt guard and dialect-compatible conditional writes. |
+| 001.7 | Taskless current-attempt guard and dialect-compatible conditional writes. |
 
 Criterion prefixes are `AC-TASKS-RUN-CLAIM-RECOVERY-`.
 Use the existing backend service harness and a controlled runtime.
 Add a production-wiring assertion so tests cannot pass with an unwired guard.
+Use the latest task turn and attempt timestamps to distinguish this claim from
+prior sessions and terminal attempts.
 No rendered UI changes or browser test is required.
 
 ## Related documents

@@ -14,15 +14,30 @@ import (
 )
 
 type runClaimSessionProbeStub struct {
-	sessionID string
-	findErr   error
-	live      bool
-	probeErr  error
-	probed    []string
+	sessionID   string
+	evidence    []service.RunClaimSessionEvidence
+	currentTurn bool
+	findErr     error
+	live        bool
+	probeErr    error
+	probed      []string
 }
 
-func (p *runClaimSessionProbeStub) FindActiveTaskSession(context.Context, string, string) (string, error) {
-	return p.sessionID, p.findErr
+func (p *runClaimSessionProbeStub) FindTaskSessionsForClaim(
+	context.Context, string, string, string, time.Time,
+) ([]service.RunClaimSessionEvidence, error) {
+	if p.findErr != nil {
+		return nil, p.findErr
+	}
+	if p.evidence != nil {
+		return p.evidence, nil
+	}
+	if p.sessionID == "" {
+		return nil, nil
+	}
+	return []service.RunClaimSessionEvidence{{
+		SessionID: p.sessionID, TurnStartedAfterClaim: p.currentTurn,
+	}}, nil
 }
 
 func (p *runClaimSessionProbeStub) ProbeAgentRunningForSession(_ context.Context, sessionID string) (bool, error) {
@@ -128,15 +143,83 @@ func TestRunClaimRecoveryRequeuesAbandonedClaim(t *testing.T) {
 	}
 }
 
+func TestRunClaimRecoveryRequeuesClaimWithPriorReadySession(t *testing.T) {
+	svc := newTestService(t, service.ServiceOptions{})
+	ctx := context.Background()
+	svc.SetRunClaimSessionProbe(&runClaimSessionProbeStub{sessionID: "prior-ready-session"})
+	agent := &models.AgentInstance{
+		ID: "claim-recovery-prior-session-agent", WorkspaceID: "ws-1", Name: "claim-recovery-prior-session-agent",
+		Role: models.AgentRoleWorker, Status: models.AgentStatusIdle,
+		ExecutorPreference: `{"type":"worktree"}`,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-prior-session"}`, ""); err != nil {
+		t.Fatalf("queue run: %v", err)
+	}
+	run, err := svc.ClaimNextRun(ctx)
+	if err != nil || run == nil {
+		t.Fatalf("claim run: run=%#v err=%v", run, err)
+	}
+	svc.ExecSQL(t, `UPDATE runs SET claimed_at = ?, session_id = '' WHERE id = ?`,
+		time.Now().UTC().Add(-35*time.Minute), run.ID)
+
+	service.RunSchedulerTick(svc, ctx)
+
+	got, err := svc.GetRun(ctx, run.ID)
+	if err != nil || got.Status != service.RunStatusQueued {
+		t.Fatalf("run with a prior ready session = status %q err=%v, want queued", got.Status, err)
+	}
+}
+
+func TestRunClaimRecoveryPreservesLiveTaskSessionWithoutCurrentTurn(t *testing.T) {
+	svc := newTestService(t, service.ServiceOptions{})
+	ctx := context.Background()
+	probe := &runClaimSessionProbeStub{sessionID: "live-task-session", live: true}
+	svc.SetRunClaimSessionProbe(probe)
+	agent := &models.AgentInstance{
+		ID: "claim-recovery-live-task-agent", WorkspaceID: "ws-1", Name: "claim-recovery-live-task-agent",
+		Role: models.AgentRoleWorker, Status: models.AgentStatusIdle,
+		ExecutorPreference: `{"type":"worktree"}`,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-live-session"}`, ""); err != nil {
+		t.Fatalf("queue run: %v", err)
+	}
+	run, err := svc.ClaimNextRun(ctx)
+	if err != nil || run == nil {
+		t.Fatalf("claim run: run=%#v err=%v", run, err)
+	}
+	svc.ExecSQL(t, `UPDATE runs SET claimed_at = ?, session_id = '' WHERE id = ?`,
+		time.Now().UTC().Add(-35*time.Minute), run.ID)
+
+	service.RunSchedulerTick(svc, ctx)
+
+	got, err := svc.GetRun(ctx, run.ID)
+	if err != nil || got.Status != service.RunStatusClaimed {
+		t.Fatalf("run with a live task session = status %q err=%v, want claimed", got.Status, err)
+	}
+	if len(probe.probed) != 1 || probe.probed[0] != "live-task-session" {
+		t.Fatalf("runtime probes = %#v, want live-task-session", probe.probed)
+	}
+}
+
 func TestRunClaimRecoveryUnknownSession(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		probe     *runClaimSessionProbeStub
 		persistID bool
 	}{
-		{name: "runtime probe error", probe: &runClaimSessionProbeStub{probeErr: errors.New("runtime unavailable")}, persistID: true},
+		{name: "runtime probe error", probe: &runClaimSessionProbeStub{
+			sessionID: "session-unknown", probeErr: errors.New("runtime unavailable"),
+		}, persistID: true},
 		{name: "fallback lookup error", probe: &runClaimSessionProbeStub{findErr: errors.New("task session store unavailable")}},
-		{name: "resolved session without runtime", probe: &runClaimSessionProbeStub{sessionID: "session-from-fallback"}},
+		{name: "resolved current turn with stopped runtime", probe: &runClaimSessionProbeStub{
+			sessionID: "session-from-fallback", currentTurn: true,
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := newTestService(t, service.ServiceOptions{})
@@ -222,5 +305,54 @@ func TestRunClaimRecoveryTasklessAttempt(t *testing.T) {
 				t.Fatalf("run with %s attempt = status %q err=%v, want claimed", state, got.Status, err)
 			}
 		})
+	}
+}
+
+func TestRunClaimRecoveryTasklessRetryIgnoresPriorInterruptedAttempt(t *testing.T) {
+	svc := newTestService(t, service.ServiceOptions{})
+	ctx := context.Background()
+	agent := &models.AgentInstance{
+		ID: "claim-recovery-taskless-retry-agent", WorkspaceID: "ws-1", Name: "claim-recovery-taskless-retry-agent",
+		Role: models.AgentRoleCEO, Status: models.AgentStatusIdle,
+		ExecutorPreference: `{"type":"local_pc"}`,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		t.Fatalf("queue run: %v", err)
+	}
+	run, err := svc.ClaimNextRun(ctx)
+	if err != nil || run == nil {
+		t.Fatalf("claim first attempt: run=%#v err=%v", run, err)
+	}
+	priorAttempt := &models.RunSession{
+		ID: "claim-recovery-prior-attempt", WorkspaceID: agent.WorkspaceID,
+		AgentProfileID: agent.ID, RunID: run.ID, Attempt: 1,
+		State: models.RunSessionStatePreparing, CreatedAt: time.Now().UTC().Add(-time.Hour), Version: 1,
+	}
+	reserved, err := svc.RepoForTest().ReserveRunSession(ctx, priorAttempt)
+	if err != nil || !reserved {
+		t.Fatalf("reserve prior attempt: reserved=%v err=%v", reserved, err)
+	}
+	finished, err := svc.RepoForTest().FinishRunSession(ctx, priorAttempt.ID, models.RunSessionStateInterrupted, "previous attempt interrupted")
+	if err != nil || !finished {
+		t.Fatalf("interrupt prior attempt: finished=%v err=%v", finished, err)
+	}
+	requeued, err := svc.RepoForTest().RequeueClaimedRun(ctx, run.ID)
+	if err != nil || !requeued {
+		t.Fatalf("requeue prior attempt: requeued=%v err=%v", requeued, err)
+	}
+	run, err = svc.ClaimNextRun(ctx)
+	if err != nil || run == nil {
+		t.Fatalf("claim retry: run=%#v err=%v", run, err)
+	}
+	svc.ExecSQL(t, `UPDATE runs SET claimed_at = ? WHERE id = ?`, time.Now().UTC().Add(-35*time.Minute), run.ID)
+
+	service.RunSchedulerTick(svc, ctx)
+
+	got, err := svc.GetRun(ctx, run.ID)
+	if err != nil || got.Status != service.RunStatusQueued {
+		t.Fatalf("retry claim after prior interrupted attempt = status %q err=%v, want queued", got.Status, err)
 	}
 }

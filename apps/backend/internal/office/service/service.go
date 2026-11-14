@@ -126,11 +126,20 @@ type SessionRecoveryBlockLookup interface {
 	GetSessionRecoveryBlock(context.Context, string) (*taskmodels.SessionRecoveryBlock, error)
 }
 
-// RunClaimSessionProbe resolves an active task session when a run has not yet
-// persisted its session identity and checks runtime liveness without hiding
-// probe errors. Recovery treats errors as uncertain and leaves the claim alone.
+// RunClaimSessionEvidence describes a task session that may belong to the
+// current run claim. A turn started after the claim is durable launch evidence.
+type RunClaimSessionEvidence struct {
+	SessionID             string
+	TurnStartedAfterClaim bool
+}
+
+// RunClaimSessionProbe finds task sessions relevant to a claimed run and checks
+// runtime liveness without hiding probe errors. Recovery treats errors as
+// uncertain and leaves the claim alone.
 type RunClaimSessionProbe interface {
-	FindActiveTaskSession(ctx context.Context, taskID, agentProfileID string) (string, error)
+	FindTaskSessionsForClaim(
+		ctx context.Context, taskID, agentProfileID, persistedSessionID string, claimedAt time.Time,
+	) ([]RunClaimSessionEvidence, error)
 	ProbeAgentRunningForSession(ctx context.Context, sessionID string) (bool, error)
 }
 

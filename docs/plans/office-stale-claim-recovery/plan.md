@@ -31,15 +31,16 @@ it queues the record again while the original agent keeps working.
 The second launch is rejected. Routing can park the record as a provider error.
 The original completion then misses it because the record is no longer claimed.
 
-The repair checks the associated session before reclaiming the record.
-Active or uncertain execution means leave the claim alone.
-Abandoned claims that never launched remain recoverable.
+The repair checks whether session or attempt evidence belongs to this claim
+before reclaiming the record. A live or uncertain execution and a turn started
+for this claim keep it claimed through completion. Prior idle sessions and
+terminal attempts do not block a retry that never launched.
 
 ## Scope
 
 ### In scope
 
-- One local session-in-use check using existing runtime/session information.
+- One local session-in-use check using existing runtime, task-turn, and attempt information.
 - A guarded per-run recovery write instead of an unconditional bulk reset.
 - Protection for task-bound execution and unfinished taskless attempts.
 - Focused regressions and production dependency-wiring coverage.
@@ -59,9 +60,9 @@ That is separate from preventing new occurrences and is not authorized here.
 ## Technical approach
 
 Follow the [small repair design](../../specs/tasks/system-design/run-claim-recovery.md).
-Keep the check local to Office's existing processor and backend wiring.
-Use a boolean plus an error rather than a new execution-evidence state machine.
-An error means skip this row, not assume its execution stopped.
+Keep the check local to Office's existing processor and backend wiring. Use the
+latest task turn and taskless attempt creation time to tie evidence to the
+current claim. Errors mean skip this row, not assume execution stopped.
 
 Keep `FinishRun`, provider routing, and launch accounting unchanged.
 A live run that retains its claim follows its existing completion path.
@@ -72,10 +73,17 @@ Use conditional SQL to preserve cancellation, completion, and a newer claim.
 - `TestRunClaimRecoveryPreservesLiveExecution`: launch once, age the claim by
   35 minutes, run two ticks, then complete. Assert one launch and a finished run.
 - `TestRunClaimRecoveryRequeuesAbandonedClaim`: an unlaunched abandoned claim recovers.
+- `TestRunClaimRecoveryRequeuesClaimWithPriorReadySession`: a dead prior session
+  does not make a new unlaunched task claim live.
+- `TestRunClaimRecoveryCompletionAfterIdleWrite`: a post-claim turn preserves
+  the claim through `IDLE` until delayed completion finishes it.
 - `TestRunClaimRecoveryUnknownSession`: a failed or uncertain lookup preserves the claim.
 - `TestRunClaimRecoveryTasklessAttempt`: preparing/running taskless attempts remain protected.
+- `TestRunClaimRecoveryTasklessRetryIgnoresPriorInterruptedAttempt`: a terminal
+  predecessor does not block recovery before the retry reserves an attempt.
 - `TestRunClaimRecoveryCAS` and `TestPostgresRunClaimRecoveryCAS`: stale observations cannot overwrite another writer.
-- `TestRunClaimRecoveryProductionWiring`: exercise the real processor with the production dependency adapter and a controlled runtime.
+- `TestNewRunProcessorServiceWiresClaimSessionProbe`: exercise the real
+  processor constructor with the production dependency adapter and a controlled runtime.
 
 The first test covers the changed backend lifecycle end to end.
 No new browser flow or UI exists to test.
@@ -105,17 +113,15 @@ The previous baseline commands passed:
 Current claim admission counts claimed rows only. The issue's reported queued-row
 capacity loss was not independently reproduced. Preserve the existing count.
 
-The revised package passed catalog validation, specification lint, all 36
-specification-linter tests, planned-source documentation coverage, and its
-initial whitespace checks. Implementation adds guarded per-run recovery and
-session checks. Review follow-up also protects a matching ready task session
-when `runs.session_id` is empty, fixes the reader/writer error-test ownership,
-and makes the PostgreSQL timestamp assertion compare persisted values. The
-race-enabled recovery tests, repository error tests, backend build, changed-file
-Go lint, current catalog validation, specification lint, and whitespace check
+The package passed catalog validation, specification lint, specification-linter
+tests, planned-source documentation coverage, and whitespace checks before
+implementation. Implementation adds guarded per-run recovery and session
+checks. Review follow-up ties task sessions to a turn started during the current
+claim, preserves delayed completion through `IDLE`, and allows retry recovery
+after terminal predecessor attempts. The original SQLite and backend checks
 passed. PostgreSQL CAS execution was explicitly skipped because
-`KANDEV_TEST_POSTGRES_DSN` was not configured. The design package and
-implementation remain unstaged and uncommitted.
+`KANDEV_TEST_POSTGRES_DSN` was not configured. Implementation and design are
+tracked in PR #5317; review follow-up is being validated there.
 
 ## Risks
 
@@ -127,4 +133,5 @@ implementation remain unstaged and uncommitted.
 
 ## Handoff
 
-The design package and implementation remain unstaged and uncommitted.
+The design package and implementation are in PR #5317. Historical parked-row
+cleanup remains a separate, unauthorized follow-up.
