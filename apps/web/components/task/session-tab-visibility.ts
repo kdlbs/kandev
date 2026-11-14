@@ -16,10 +16,18 @@ export function countVisibleSessionPanels(
 export function shouldShowSessionTabCloseAction(
   behavior: "delete_session" | "hide_panel",
   sessionState: TaskSessionState | null,
-  state: { sessionCount: number; visibleSessionCount: number; isRestarting: boolean },
+  state: {
+    sessionCount: number;
+    visibleSessionCount: number;
+    isRestarting: boolean;
+    isPrimary?: boolean;
+    isArchived?: boolean;
+  },
 ): boolean {
   if (behavior === "hide_panel") return state.visibleSessionCount > 1;
   return (
+    !state.isPrimary &&
+    !state.isArchived &&
     !state.isRestarting &&
     state.sessionCount > 1 &&
     !!sessionState &&

@@ -386,5 +386,8 @@ func (r *sqliteRepository) DeletePendingQueueDispatch(
 	if err := r.deletePendingQueueDispatchTx(ctx, tx, msg); err != nil {
 		return err
 	}
+	if err := redactRecoveryReceiptsIfEmptyTx(ctx, tx, r.db, msg.SessionID); err != nil {
+		return err
+	}
 	return tx.Commit()
 }

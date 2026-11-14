@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -823,10 +824,27 @@ func (h *Handlers) wsDeleteSession(ctx context.Context, msg *ws.Message) (*ws.Me
 		return errResp, nil
 	}
 	if err := h.service.DeleteSession(ctx, req.SessionID); err != nil {
-		h.logger.Error("failed to delete session", zap.String("session_id", req.SessionID), zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete session: "+err.Error(), nil)
+		code := sessionDeleteErrorCode(err)
+		if code == ws.ErrorCodeInternalError {
+			h.logger.Error("failed to delete session", zap.String("session_id", req.SessionID), zap.Error(err))
+		}
+		return ws.NewError(msg.ID, msg.Action, code, sessionDeleteErrorMessage(err), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
+}
+
+func sessionDeleteErrorCode(err error) string {
+	if errors.Is(err, messagequeue.ErrSessionQueueNotEmpty) {
+		return ws.ErrorCodeValidation
+	}
+	return ws.ErrorCodeInternalError
+}
+
+func sessionDeleteErrorMessage(err error) string {
+	if errors.Is(err, messagequeue.ErrSessionQueueNotEmpty) {
+		return "Session has pending queued work; resolve it before deleting."
+	}
+	return "Failed to delete session."
 }
 
 // wsSetPrimarySession marks a session as the task's primary session.

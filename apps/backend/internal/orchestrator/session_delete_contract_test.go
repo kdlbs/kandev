@@ -107,3 +107,46 @@ func TestDeleteSessionPublishesTerminalOrderedEvent(t *testing.T) {
 		t.Fatalf("terminal event payload = %#v", received)
 	}
 }
+
+func TestDeleteSessionPublishesArchiveStateWithoutTerminalRemoval(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-archive-event", "session-archive-event", models.TaskSessionStateCompleted)
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID: "turn-archive-event", TaskID: "task-archive-event", TaskSessionID: "session-archive-event",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID: "message-archive-event", TaskID: "task-archive-event", TaskSessionID: "session-archive-event",
+		TurnID: "turn-archive-event", AuthorType: models.MessageAuthorAgent,
+		Type: models.MessageTypeMessage, Content: "retained evidence",
+	}); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	eventBus := bus.NewMemoryEventBus(testLogger())
+	t.Cleanup(func() { eventBus.Close() })
+	svc.eventBus = eventBus
+	removed := false
+	var changed map[string]interface{}
+	if _, err := eventBus.Subscribe(events.SessionRemoved, func(_ context.Context, _ *bus.Event) error {
+		removed = true
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe removal: %v", err)
+	}
+	if _, err := eventBus.Subscribe(events.TaskSessionStateChanged, func(_ context.Context, event *bus.Event) error {
+		changed, _ = event.Data.(map[string]interface{})
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe state: %v", err)
+	}
+	if err := svc.DeleteSession(ctx, "session-archive-event"); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+	if removed || changed["session_id"] != "session-archive-event" || changed["archived_at"] == nil {
+		t.Fatalf("archive events: removed=%v changed=%#v", removed, changed)
+	}
+}

@@ -231,6 +231,10 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	if err := r.migrateSessionsRemoveAgentExecutionID(); err != nil {
 		return err
 	}
+	// Legacy session rebuilds above copy explicit columns, so add archive state afterwards.
+	if err := r.migrate.Apply("task_sessions.archived_at", `ALTER TABLE task_sessions ADD COLUMN archived_at TIMESTAMP`); err != nil {
+		return err
+	}
 	// Repair runtime identities on legacy inventory rows so fail-closed
 	// selection admission does not permanently block upgraded sessions.
 	if err := r.backfillExecutorRunningRuntime(); err != nil {

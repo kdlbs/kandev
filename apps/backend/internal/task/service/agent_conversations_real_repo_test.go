@@ -73,9 +73,7 @@ func TestEnsureWaitsForDeliveryRetirementBeforePrimaryRepairOverRealRepository(t
 	if err != nil {
 		t.Fatalf("load conversation session: %v", err)
 	}
-	if err := repo.DeleteTaskSession(ctx, session); err != nil {
-		t.Fatalf("delete conversation session: %v", err)
-	}
+	retireLegacyConversationPrimaryForTest(t, ctx, repo, session)
 
 	_, _, err = svc.Ensure(ctx, "plugin-coordinator", pluginsdk.AgentConversationSpec{
 		WorkspaceID: "ws-one", ConversationKey: "coordinator",

@@ -8,7 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-func TestGitSnapshotEnvironmentPreservesStatusAfterSessionDelete(t *testing.T) {
+func TestGitSnapshotEnvironmentPreservesStatusAfterSessionArchive(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 	const (
@@ -51,8 +51,8 @@ func TestGitSnapshotEnvironmentPreservesStatusAfterSessionDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetLatestGitStatusSnapshotsByTaskEnvironmentIDs: %v", err)
 	}
-	if len(current) != 1 || current[0].SessionID != "" {
-		t.Fatalf("current snapshot after session delete = %+v, want one row with null provenance", current)
+	if len(current) != 1 || current[0].SessionID != sessionID {
+		t.Fatalf("current snapshot after session archive = %+v, want retained session provenance", current)
 	}
 
 	if err := repo.DeleteTaskEnvironment(ctx, envID); err != nil {

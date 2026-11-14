@@ -63,7 +63,7 @@ func TestManagedConversationAdmissionControls(t *testing.T) {
 		require.NoError(t, err)
 		primary, err := repos[1].GetTaskSession(ctx, first.SessionID)
 		require.NoError(t, err)
-		require.NoError(t, repos[1].DeleteTaskSession(ctx, primary))
+		retireLegacyConversationPrimaryForTest(t, ctx, repos[1], primary)
 		_, err = services[0].SetManagedPaused(ctx, "installation", spec.WorkspaceID, spec.InstanceKey, first.Revision, true, "pause", "pause-digest")
 		require.Error(t, err)
 		stored, err := repos[1].GetTask(ctx, first.TaskID)
@@ -91,7 +91,7 @@ func TestManagedConversationAdmissionControls(t *testing.T) {
 			case "replay_repair":
 				primary, err := repos[1].GetTaskSession(ctx, first.SessionID)
 				require.NoError(t, err)
-				require.NoError(t, repos[1].DeleteTaskSession(ctx, primary))
+				retireLegacyConversationPrimaryForTest(t, ctx, repos[1], primary)
 				operation, digest = "create", "create-digest"
 				spec.ExpectedRevision, spec.BasePrompt = 0, "untrusted replay settings"
 				_, _, err = services[0].EnsureManaged(ctx, "plugin", "installation", spec, operation, digest)

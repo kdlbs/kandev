@@ -43,6 +43,7 @@ export function PreviewSessionTabMenu({
     <SessionContextMenuItems
       sessionState={session.state}
       isPrimary={isPrimary}
+      isArchived={!!session.archived_at}
       canShare={shareableSessionStateClient(session.state)}
       taskId={taskId}
       sessionId={session.id}

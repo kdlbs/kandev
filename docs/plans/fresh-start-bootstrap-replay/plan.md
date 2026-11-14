@@ -247,5 +247,3 @@ Internal docs are updated. Public recovery actions, terminology, and operator pr
 The public-doc search found no guidance specific to this missing-checkpoint bootstrap window.
 The package restores the existing fresh-start behavior and adds no manual journal-editing procedure.
 Broader launch-error presentation belongs to the separate issue #5128 investigation.
-
-

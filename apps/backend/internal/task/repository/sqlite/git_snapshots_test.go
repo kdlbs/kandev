@@ -728,7 +728,7 @@ func TestGetLatestGitSnapshotsBySessionIDsChunksBeyondHostParamLimit(t *testing.
 	}
 }
 
-func TestGitSnapshotsAndCommitsCascadeOnSessionDelete(t *testing.T) {
+func TestGitSnapshotsAndCommitsSurviveSessionArchive(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 	seedSessionForGit(t, repo, "task-cascade", "session-cascade")
@@ -750,18 +750,22 @@ func TestGitSnapshotsAndCommitsCascadeOnSessionDelete(t *testing.T) {
 	if err := deleteTaskSessionForTest(t, repo, ctx, "session-cascade"); err != nil {
 		t.Fatalf("DeleteTaskSession: %v", err)
 	}
+	archived, err := repo.GetTaskSession(ctx, "session-cascade")
+	if err != nil || archived.ArchivedAt == nil {
+		t.Fatalf("archived session = %+v, err %v", archived, err)
+	}
 
 	if got := countRows(t, repo,
 		`SELECT COUNT(1) FROM task_session_git_snapshots WHERE task_environment_id = ?`, "env-task-cascade"); got != 1 {
 		t.Errorf("git snapshot rows after session delete = %d, want 1 (environment ownership)", got)
 	}
 	if got := countRows(t, repo,
-		`SELECT COUNT(1) FROM task_session_git_snapshots WHERE session_id IS NULL`); got != 1 {
-		t.Errorf("session provenance rows after session delete = %d, want 1", got)
+		`SELECT COUNT(1) FROM task_session_git_snapshots WHERE session_id = ?`, "session-cascade"); got != 1 {
+		t.Errorf("session provenance rows after session archive = %d, want 1", got)
 	}
 	if got := countRows(t, repo,
-		`SELECT COUNT(1) FROM task_session_commits WHERE session_id = ?`, "session-cascade"); got != 0 {
-		t.Errorf("commit rows after session delete = %d, want 0 (FK cascade)", got)
+		`SELECT COUNT(1) FROM task_session_commits WHERE session_id = ?`, "session-cascade"); got != 1 {
+		t.Errorf("commit rows after session archive = %d, want 1", got)
 	}
 }
 

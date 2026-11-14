@@ -53,6 +53,7 @@ function renderHookWithHydratedSessions() {
 
 afterEach(() => {
   cleanup();
+  useDockviewStore.getState().setSessionHistoryVisible(TASK_ID, false);
   useDockviewStore.setState({
     api: null,
     currentLayoutEnvId: null,
@@ -62,6 +63,40 @@ afterEach(() => {
 });
 
 describe("useAutoSessionTab", () => {
+  it("hides a completed helper until session history is revealed", () => {
+    const { api } = makeReorderingAutoSessionApi();
+    useDockviewStore.setState({ api: api as DockviewApi });
+    render(
+      <StateProvider
+        initialState={{
+          ...defaultState,
+          tasks: {
+            ...defaultState.tasks,
+            activeTaskId: TASK_ID,
+            activeSessionId: ACTIVE_SESSION_ID,
+          },
+          taskSessionsByTask: {
+            ...defaultState.taskSessionsByTask,
+            loadedByTaskId: { [TASK_ID]: true },
+            itemsByTaskId: {
+              [TASK_ID]: [
+                { id: ACTIVE_SESSION_ID, is_primary: true, state: "WAITING_FOR_INPUT" },
+                { id: SIBLING_SESSION_ID, is_primary: false, state: "COMPLETED" },
+              ] as TaskSession[],
+            },
+          },
+        }}
+      >
+        <Harness />
+      </StateProvider>,
+    );
+
+    expect(api.panels.map((panel) => panel.id)).not.toContain(`session:${SIBLING_SESSION_ID}`);
+    act(() => useDockviewStore.getState().setSessionHistoryVisible(TASK_ID, true));
+    expect(api.panels.map((panel) => panel.id)).toContain(`session:${SIBLING_SESSION_ID}`);
+    act(() => useDockviewStore.getState().setSessionHistoryVisible(TASK_ID, false));
+    expect(api.panels.map((panel) => panel.id)).not.toContain(`session:${SIBLING_SESSION_ID}`);
+  });
   it("reconciles every hydrated session when Dockview becomes ready later", () => {
     // @covers AC-UI-TASK-AGENT-TAB-RECONCILIATION-001.1
     useDockviewStore.setState({ api: null });

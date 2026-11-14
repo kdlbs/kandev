@@ -7,8 +7,10 @@ const mockSetTaskSession = vi.fn();
 const mockSetSessionAgentctlStatus = vi.fn();
 const mockSetResumeSkipped = vi.fn();
 let mockPreventAutoStart = false;
-let mockSessionItems: Record<string, { started_at?: string; updated_at?: string; state?: string }> =
-  {};
+let mockSessionItems: Record<
+  string,
+  { started_at?: string; updated_at?: string; state?: string; archived_at?: string | null }
+> = {};
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ request: mockRequest }),
@@ -74,6 +76,43 @@ function createSetters(): { setters: ResumeStateSetter; errors: (string | null)[
 }
 
 describe("useSessionResumption archive lifecycle", () => {
+  it("waits for the session row before automatic or manual recovery", async () => {
+    delete mockSessionItems[SESSION_ID];
+    mockRequest.mockResolvedValue(status());
+    const { result, rerender } = renderHook(() => useSessionResumption(TASK_ID, SESSION_ID, false));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await expect(result.current.resumeSession()).resolves.toBe(false);
+    expect(mockRequest).not.toHaveBeenCalled();
+
+    mockSessionItems[SESSION_ID] = { started_at: "2026-09-08T17:00:00.000Z" };
+    rerender();
+    await waitFor(() =>
+      expect(mockRequest).toHaveBeenCalledWith(
+        "task.session.status",
+        { task_id: TASK_ID, session_id: SESSION_ID },
+        10000,
+      ),
+    );
+  });
+
+  it("does not inspect or manually resume an archived session", async () => {
+    mockSessionItems[SESSION_ID] = {
+      ...mockSessionItems[SESSION_ID],
+      archived_at: "2026-09-08T18:00:00.000Z",
+    };
+    const { result } = renderHook(() => useSessionResumption(TASK_ID, SESSION_ID, false));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await expect(result.current.resumeSession()).resolves.toBe(false);
+
+    expect(mockRequest).not.toHaveBeenCalled();
+  });
+
   it("defers all automatic operations while archive state is unknown or archived", async () => {
     const { rerender } = renderHook(
       ({ archived }: { archived: boolean | null }) =>

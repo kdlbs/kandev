@@ -17,7 +17,7 @@ export function SessionDeleteDescription({
   if (structured) {
     return (
       <>
-        <p>{t("task:thisWillPermanentlyDeleteTheConversation")}</p>
+        <p>{t("task:sessionRemovalKeepsWorkspaceAndMayRetainHistory")}</p>
         {primaryNotice && <p className="font-medium">{t("task:thisIsThePrimarySessionAnother")}</p>}
         {isOnlySession && <p className="font-medium">{t("task:thisIsTheOnlySessionFor")}</p>}
       </>
@@ -26,7 +26,7 @@ export function SessionDeleteDescription({
 
   return (
     <>
-      <span>{t("task:thisWillPermanentlyDeleteTheConversation")}</span>
+      <span>{t("task:sessionRemovalKeepsWorkspaceAndMayRetainHistory")}</span>
       {primaryNotice && (
         <span className="mt-2 block font-medium">{t("task:thisIsThePrimarySessionAnother")}</span>
       )}

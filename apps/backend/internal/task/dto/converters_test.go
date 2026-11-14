@@ -226,6 +226,26 @@ func TestTaskSessionDTOsProjectQueueIncarnation(t *testing.T) {
 	}
 }
 
+func TestTaskSessionDTOsProjectArchiveTimestamp(t *testing.T) {
+	archivedAt := time.Date(2026, time.October, 25, 0, 0, 0, 0, time.UTC)
+	session := &models.TaskSession{ID: "session-archived", TaskID: "task-1", ArchivedAt: &archivedAt}
+	for name, projection := range map[string]interface{}{
+		"full": FromTaskSession(session), "summary": FromTaskSessionSummary(session),
+	} {
+		encoded, err := json.Marshal(projection)
+		if err != nil {
+			t.Fatalf("marshal %s: %v", name, err)
+		}
+		var payload map[string]interface{}
+		if err := json.Unmarshal(encoded, &payload); err != nil {
+			t.Fatalf("unmarshal %s: %v", name, err)
+		}
+		if payload["archived_at"] != archivedAt.Format(time.RFC3339) {
+			t.Fatalf("%s archived_at = %v", name, payload["archived_at"])
+		}
+	}
+}
+
 func TestFromTaskSessionDTOPreservesSelectionCauseMetadata(t *testing.T) {
 	promptNotSent := true
 	session := &models.TaskSession{
