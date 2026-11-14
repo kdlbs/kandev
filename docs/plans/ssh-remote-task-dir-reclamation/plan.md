@@ -7,6 +7,14 @@ status: done
 
 # Implementation Plan: SSH Remote Task-Directory Reclamation
 
+## Follow-up policy correction
+
+The [issue #5295 package](../ssh-worktree-task-dir-reclamation/plan.md) supersedes
+task 01's ignored-file, branch/stash scope, and recursive worktree-removal policy.
+It also updates task 05's public safety wording after implementation.
+This completed package remains the original delivery record. Its other task
+scopes and completion states do not change.
+
 ## Overview
 
 Build the v2 housekeeper bottom-up, so that the safety machinery exists and is
