@@ -1,5 +1,9 @@
 package routingerr
 
+// RuleRelativeQuotaNotice identifies the anchored provider notice whose reset
+// is stated as a relative duration.
+const RuleRelativeQuotaNotice = "provider.quota_notice.v1"
+
 // providerNeutralRules contain stable evidence that can be emitted by more
 // than one adapter. Keep these rules independent from provider IDs so adding a
 // new ACP provider does not require copying the same transient fingerprints.
@@ -7,7 +11,7 @@ var providerNeutralRules = []rule{
 	// A full provider notice can be the only signal when an ACP prompt never
 	// finishes. The complete opening wording is required for high confidence.
 	mustRule(
-		"provider.quota_notice.v1",
+		RuleRelativeQuotaNotice,
 		`(?is)^\s*(?:usage\s+limit\s+reached[.!]?\s*)?you have reached your current quota for this period\.\s*your limit will reset in\s+\d+\s*(?:days?|hours?|hrs?|minutes?|mins?|min)\b`,
 		CodeQuotaLimited,
 		ConfHigh,

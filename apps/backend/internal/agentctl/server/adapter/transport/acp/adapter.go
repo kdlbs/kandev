@@ -449,6 +449,9 @@ type promptTurnState struct {
 	quotaNoticeText              string
 	quotaNoticeClassified        string
 	quotaNoticeClass             *routingerr.Error
+	quotaNoticeOccurredAt        time.Time
+	pendingQuotaNotice           *openCodeStderrDiagnostic
+	completedQuotaNotice         *openCodeStderrDiagnostic
 	quotaNoticeOwnerAmbiguous    bool
 	quotaNoticeDelivered         bool
 	codexSystemError             bool

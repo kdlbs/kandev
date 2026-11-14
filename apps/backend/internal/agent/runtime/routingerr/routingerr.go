@@ -221,7 +221,7 @@ func Classify(in Input) *Error {
 			}
 		}
 		hint := parseResetHintAt(text, observedAt)
-		if hint == nil && e.ClassifierRule == "provider.quota_notice.v1" {
+		if hint == nil && e.ClassifierRule == RuleRelativeQuotaNotice {
 			hint = parseRelativeQuotaResetAt(text, observedAt)
 		}
 		if hint == nil && (e.ClassifierRule == ruleClaudeSessionLimit ||

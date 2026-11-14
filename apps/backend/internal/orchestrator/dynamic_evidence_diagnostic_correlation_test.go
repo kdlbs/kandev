@@ -4,9 +4,48 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 )
+
+func TestDynamicAttemptEvidenceCorrelatesFragmentedQuotaNotice(t *testing.T) {
+	const first = "You have reached your current quota for this period. Your limit will reset in 1 hour"
+	const last = ", 30 minutes."
+	var service Service
+	service.beginPromptAttempt("session-1", "execution-1", 1, false)
+	service.observeProviderDiagnostic("session-1", "execution-1", 1, "codex-acp", first)
+	service.observeProviderDiagnostic("session-1", "execution-1", 1, "codex-acp", last)
+	data := watcher.AgentEventData{
+		SessionID: "session-1", AgentExecutionID: "execution-1", AgentID: "codex-acp", PromptGeneration: 1,
+		FailureCode:   string(routingerr.CodeQuotaLimited),
+		ProviderError: &streams.ProviderError{Source: streams.ProviderErrorSourceAgentMessage, ProviderID: "codex-acp", Message: first + last},
+	}
+	if got := service.withPromptAttemptEvidence(data); got.OutputObserved {
+		t.Fatal("the correlated quota fragments were treated as generated output")
+	}
+	service.observePromptAttempt("session-1", "execution-1", 1, true, false)
+	if got := service.withPromptAttemptEvidence(data); !got.OutputObserved {
+		t.Fatal("ordinary output lost the replay fence")
+	}
+
+	service.beginPromptAttempt("session-1", "execution-1", 2, false)
+	service.observeProviderDiagnostic("session-1", "execution-1", 2, "codex-acp", first)
+	mixed := last + " Here is the requested answer."
+	service.observeProviderDiagnostic("session-1", "execution-1", 2, "codex-acp", mixed)
+	data.PromptGeneration = 2
+	data.ProviderError.Message = first + mixed
+	if got := service.withPromptAttemptEvidence(data); !got.OutputObserved {
+		t.Fatal("ordinary output in the quota continuation lost the replay fence")
+	}
+
+	service.beginPromptAttempt("session-1", "execution-1", 3, false)
+	service.observeProviderDiagnostic("session-1", "execution-1", 3, "codex-acp", first+mixed)
+	data.PromptGeneration = 3
+	if got := service.withPromptAttemptEvidence(data); !got.OutputObserved {
+		t.Fatal("ordinary output bundled with a quota notice lost the replay fence")
+	}
+}
 
 func TestDynamicAttemptEvidenceMatchesCodexUsageLimitDiagnostic(t *testing.T) {
 	var service Service

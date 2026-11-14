@@ -49,6 +49,15 @@ message chunks are classified to mark provider diagnostic candidates. Agents
 that coordinate other sessions quote those sessions' errors verbatim. The rules
 therefore match error signatures and never a bare topic word.
 
+A relative-reset quota notice that opens the turn's assistant output can stream
+in fragments. A fragment stays diagnostic only while the joined reset phrase is
+a whole or partial duration list; any other text after it, with or without a
+sentence terminator, is output and ends the correlation. The orchestrator
+appends later fragments to the recorded diagnostic while the joined text still
+classifies as that notice. A prompt that returns normally while the notice is
+its last text, complete or ending on a whole duration, settles as the quota
+failure; output after the notice keeps the normal completion and replay fence.
+
 ## Rule signatures
 
 Shared rate-limit signature (`opencode-acp`, `copilot-acp`, `amp-acp`):

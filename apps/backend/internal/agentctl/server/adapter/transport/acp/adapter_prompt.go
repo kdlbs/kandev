@@ -408,6 +408,15 @@ func (a *Adapter) sendPrompt(
 		return nil
 	}
 
+	if notificationsDrained && stopReason != string(acp.StopReasonCancelled) && context.Cause(traceCtx) == nil {
+		// The final drained chunk can complete a relative quota notice after
+		// the RPC returned, so the notice never reached the wait loop.
+		if noticeErr := turn.quotaNoticeOnNormalPromptReturn(sessionID); noticeErr != nil {
+			a.cancelAsyncTurnComplete(sessionID)
+			return noticeErr
+		}
+	}
+
 	// Emit complete event via the stream, including the StopReason from the agent.
 	a.logger.Debug("emitting complete event after prompt",
 		zap.String("session_id", sessionID),
