@@ -284,9 +284,30 @@ test.describe("Change workflow", () => {
       [existingSessionId],
     );
     await waitForWorkflowMoveLifecycle(apiClient, task.id);
+    await expect
+      .poll(
+        async () => {
+          const { session } = await apiClient.getTaskSession(destinationSessionId);
+          if (session.state === "FAILED" || session.state === "CANCELLED") {
+            throw new Error(`routed session entered ${session.state}`);
+          }
+          return (
+            session.agent_profile_snapshot?.model === "mock-slow" &&
+            ["STARTING", "RUNNING", "WAITING_FOR_INPUT", "COMPLETED"].includes(session.state)
+          );
+        },
+        {
+          timeout: 30_000,
+          message: "routed session did not launch with the replacement profile model",
+        },
+      )
+      .toBe(true);
     const { session: routedSession } = await apiClient.getTaskSession(destinationSessionId);
     expect(routedSession.agent_profile_id).toBe(fixture.profileB.id);
     expect(routedSession.agent_profile_snapshot?.model).toBe("mock-slow");
+    expect(["STARTING", "RUNNING", "WAITING_FOR_INPUT", "COMPLETED"]).toContain(
+      routedSession.state,
+    );
     const changed = await apiClient.getTask(task.id);
     expect(changed).toMatchObject({
       id: before.id,

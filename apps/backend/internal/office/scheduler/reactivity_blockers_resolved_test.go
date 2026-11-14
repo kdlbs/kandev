@@ -117,7 +117,7 @@ func TestCascadeBlockersResolved_StillBlocked_DoesNotQueue(t *testing.T) {
 	}
 }
 
-func TestCommittedTaskCompletionWakesForFailedAndCancelledBlockersOnce(t *testing.T) {
+func TestCommittedTaskCompletionDoesNotResolveFailedOrCancelledBlockers(t *testing.T) {
 	for _, state := range []string{"FAILED", "CANCELLED"} {
 		t.Run(state, func(t *testing.T) {
 			repo := newReactivityTestRepo(t)
@@ -156,8 +156,8 @@ func TestCommittedTaskCompletionWakesForFailedAndCancelledBlockersOnce(t *testin
 					t.Fatalf("delivery %d: %v", i+1, err)
 				}
 			}
-			if got := runsCountForReason(t, ss, RunReasonTaskBlockersResolved); got != 1 {
-				t.Fatalf("blocker runs = %d, want one after duplicate %s delivery", got, state)
+			if got := runsCountForReason(t, ss, RunReasonTaskBlockersResolved); got != 0 {
+				t.Fatalf("blocker runs = %d, want none for %s", got, state)
 			}
 		})
 	}

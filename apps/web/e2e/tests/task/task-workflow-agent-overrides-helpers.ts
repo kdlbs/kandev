@@ -100,6 +100,7 @@ type WorkflowProfileSessionWaitOptions = {
   excludedSessionIds?: string[];
   isReady: (session: { state: string }) => boolean;
   expectation: string;
+  failOnFailure?: boolean;
 };
 
 async function waitForWorkflowProfileSession(
@@ -108,17 +109,28 @@ async function waitForWorkflowProfileSession(
   profileId: string,
   options: WorkflowProfileSessionWaitOptions,
 ) {
-  const { excludedSessionIds = [], isReady, expectation } = options;
+  const { excludedSessionIds = [], isReady, expectation, failOnFailure = false } = options;
   let sessionId = "";
   await expect
     .poll(
       async () => {
         const { sessions } = await apiClient.listTaskSessions(taskId);
+        const matchesProfile = (candidate: (typeof sessions)[number]) =>
+          candidate.agent_profile_id === profileId && !excludedSessionIds.includes(candidate.id);
+        if (failOnFailure) {
+          const failedSession = sessions.find(
+            (candidate) =>
+              matchesProfile(candidate) &&
+              (candidate.state === "FAILED" || candidate.state === "CANCELLED"),
+          );
+          if (failedSession) {
+            throw new Error(
+              `profile ${profileId} created a ${failedSession.state} session${failedSession.error_message ? `: ${failedSession.error_message}` : ""}`,
+            );
+          }
+        }
         const session = sessions.find(
-          (candidate) =>
-            candidate.agent_profile_id === profileId &&
-            !excludedSessionIds.includes(candidate.id) &&
-            isReady(candidate),
+          (candidate) => matchesProfile(candidate) && isReady(candidate),
         );
         sessionId = session?.id ?? "";
         return sessionId;
@@ -147,11 +159,21 @@ export function waitForNewWorkflowProfileSession(
   taskId: string,
   profileId: string,
   excludedSessionIds: string[] = [],
+  options: { readiness?: "answerable" | "launched" } = {},
 ) {
+  const readiness = options.readiness ?? "answerable";
   return waitForWorkflowProfileSession(apiClient, taskId, profileId, {
     excludedSessionIds,
-    isReady: (session) => session.state === "WAITING_FOR_INPUT",
-    expectation: "did not create a new answerable session",
+    isReady:
+      readiness === "answerable"
+        ? (session) => session.state === "WAITING_FOR_INPUT"
+        : (session) =>
+            ["STARTING", "RUNNING", "WAITING_FOR_INPUT", "COMPLETED"].includes(session.state),
+    expectation:
+      readiness === "answerable"
+        ? "did not create a new answerable session"
+        : "did not launch a new session",
+    failOnFailure: true,
   });
 }
 

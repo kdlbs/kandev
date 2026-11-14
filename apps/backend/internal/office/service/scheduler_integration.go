@@ -1342,6 +1342,12 @@ func (si *SchedulerIntegration) buildPromptContext(
 		si.enrichCommentContext(ctx, pc, parsed["comment_id"])
 	}
 
+	if reason == RunReasonTaskBlockerFailed ||
+		strings.Contains(payload, `"blocker_failure_alerts"`) ||
+		strings.Contains(contextSnapshot, `"blocker_failure_alerts"`) {
+		si.enrichBlockerFailedContext(ctx, pc, payload, contextSnapshot)
+	}
+
 	if reason == RunReasonAgentError {
 		pc.FailedAgentID = parsed["failed_agent_id"]
 		pc.FailedSessionID = parsed["failed_session_id"]

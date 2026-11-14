@@ -10,8 +10,8 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// RegisterTaskCompletionSubscriber connects committed prerequisite completion to
-// Office dependent wakes, including tasks that have never had an agent session.
+// RegisterTaskCompletionSubscriber connects committed successful prerequisite
+// completion to Office dependent wakes, including tasks without an agent session.
 func (ss *SchedulerService) RegisterTaskCompletionSubscriber(eb bus.EventBus) error {
 	_, err := eb.Subscribe(events.TaskStateChanged, ss.handleCommittedTaskCompletion)
 	return err
@@ -31,16 +31,14 @@ func (ss *SchedulerService) handleCommittedTaskCompletion(ctx context.Context, e
 		return fmt.Errorf("decode task completion: %w", err)
 	}
 	if data.TaskID == "" || data.OldState == "" || data.OldState == data.NewState ||
-		(data.NewState != string(v1.TaskStateCompleted) &&
-			data.NewState != string(v1.TaskStateFailed) &&
-			data.NewState != string(v1.TaskStateCancelled)) {
+		data.NewState != string(v1.TaskStateCompleted) {
 		return nil
 	}
 	fields, err := ss.repo.GetTaskExecutionFields(ctx, data.TaskID)
 	if err != nil {
-		return fmt.Errorf("read terminal prerequisite: %w", err)
+		return fmt.Errorf("read completed prerequisite: %w", err)
 	}
-	if fields.State != data.NewState {
+	if fields.State != string(v1.TaskStateCompleted) {
 		return nil
 	}
 	var queueErr error

@@ -31,8 +31,9 @@ assignee. Resolves #5253. This work order does not depend on PR #4642.
 - New `task.state_changed` subscriber in `internal/office/service` that maps
   `COMPLETED` to `done`, `CANCELLED` to `cancelled`, and `FAILED` to `failed`,
   then calls `routineRunSyncer.SyncRunStatus`.
-- The state-keyed blocker cascade handles `COMPLETED`, `FAILED`, and
-  `CANCELLED`, with duplicate delivery waking dependents at most once.
+- The state-keyed blocker cascade wakes dependents only when every blocker is
+  `COMPLETED`. `FAILED` and `CANCELLED` keep dependents held and use the
+  durable failure alert in `REQ-OFFICE-BLOCKER-POLICY-002`.
 - Characterize a real child-completion event followed by a reconciler tick;
   prove an orchestrator run or receipt prevents a duplicate children-completed
   run.
@@ -54,8 +55,9 @@ assignee. Resolves #5253. This work order does not depend on PR #4642.
   `cancelled`.
 - A duplicate `task.state_changed` delivery leaves the routine run's
   `completed_at` unchanged and queues no second parent or blocker run.
-- `FAILED` and `CANCELLED` blockers wake eligible Office dependents once, even
-  when the state event is delivered twice.
+- `FAILED` and `CANCELLED` blockers queue no `task_blockers_resolved` run.
+  The blocker-failure subscriber queues at most one `task_blocker_failed` run
+  for each committed failure occurrence that has held dependents.
 - A completed Office child followed by a reconciler tick creates one
   children-completed run for its parent.
 - Existing `routine_run_sync_test.go`, `children_completed_wave_identity_test.go`,
@@ -104,9 +106,11 @@ None.
 Moved routine-run close-out to committed `task.state_changed` events and removed
 the step-name finalization path. Routine-run, Office scheduler, and orchestrator
 completion tests passed.
-Follow-up review widened blocker resolution to COMPLETED, FAILED, and
-CANCELLED, retaining duplicate-delivery deduplication. The step-name-only test
-now confirms that a task.moved event does not trigger completion effects. The
+The base implementation widened blocker resolution to COMPLETED, FAILED, and
+CANCELLED. The Office blocker policy now limits successful dependency wakes to
+COMPLETED. FAILED and CANCELLED keep dependents held and use the durable
+`task_blocker_failed` path. The step-name-only test confirms that a task.moved
+event does not trigger completion effects. The
 orchestrator records the evaluated child-wave identity in the Office wake
 receipt only after destination `on_enter` reports successful delivery. A
 failed entry leaves the parent eligible for reconciliation, covered by

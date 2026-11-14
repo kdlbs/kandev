@@ -140,6 +140,7 @@ func (f *assignmentBlockerFixture) taskRuns(t *testing.T, taskID, reason string)
 }
 
 // @covers AC-OFFICE-SCHEDULER-002.1 AC-OFFICE-SCHEDULER-002.2 AC-OFFICE-SCHEDULER-002.5 AC-OFFICE-SCHEDULER-002.6
+// @covers AC-OFFICE-BLOCKER-POLICY-001.1 AC-OFFICE-BLOCKER-POLICY-001.5
 func TestOfficeAssignmentBlockerAdmission(t *testing.T) {
 	cases := []struct {
 		name, step string
@@ -151,8 +152,10 @@ func TestOfficeAssignmentBlockerAdmission(t *testing.T) {
 		{"no_blocker", "assignment-work", nil, 1},
 		{"completed", "assignment-work", []v1.TaskState{v1.TaskStateCompleted}, 1},
 		{"backlog", "assignment-backlog", nil, 0},
-		{"failed", "assignment-work", []v1.TaskState{v1.TaskStateFailed}, 1},
-		{"cancelled", "assignment-work", []v1.TaskState{v1.TaskStateCancelled}, 1},
+		{"failed", "assignment-work", []v1.TaskState{v1.TaskStateFailed}, 0},
+		{"cancelled", "assignment-work", []v1.TaskState{v1.TaskStateCancelled}, 0},
+		{"completed_and_failed", "assignment-work", []v1.TaskState{v1.TaskStateCompleted, v1.TaskStateFailed}, 0},
+		{"archived_failed", "assignment-work", []v1.TaskState{v1.TaskStateFailed}, 0},
 		{"archived_pending", "assignment-work", []v1.TaskState{v1.TaskStateInProgress}, 0},
 		{"archived_completed", "assignment-work", []v1.TaskState{v1.TaskStateCompleted}, 1},
 		{"missing_blocker", "assignment-work", nil, 1},
@@ -167,7 +170,7 @@ func TestOfficeAssignmentBlockerAdmission(t *testing.T) {
 					f := newAssignmentBlockerFixture(t)
 					f.task(t, "dependent", tc.step, v1.TaskStateTODO, "assignment-worker")
 					f.blockers(t, "dependent", tc.states...)
-					if tc.name == "archived_pending" || tc.name == "archived_completed" {
+					if tc.name == "archived_pending" || tc.name == "archived_completed" || tc.name == "archived_failed" {
 						blockerMust(t, f.tasks.ArchiveTask(context.Background(), "dependent-prerequisite-0"))
 					}
 					if tc.name == "missing_blocker" {
@@ -200,11 +203,12 @@ func TestOfficeAssignmentBlockerAdmission(t *testing.T) {
 	}
 }
 
-// @covers AC-OFFICE-SCHEDULER-002.5 AC-OFFICE-SCHEDULER-002.6
+// @covers AC-OFFICE-SCHEDULER-002.5 AC-OFFICE-SCHEDULER-002.6 AC-OFFICE-BLOCKER-POLICY-001.1
 func TestOfficeAssignmentBlockerMutation(t *testing.T) {
-	for _, blocked := range []bool{true, false} {
+	for _, blocker := range []v1.TaskState{v1.TaskStateInProgress, v1.TaskStateFailed, v1.TaskStateCancelled, ""} {
+		blocked := blocker != ""
 		for _, same := range []bool{false, true} {
-			t.Run(fmt.Sprintf("blocked_%t/same_%t", blocked, same), func(t *testing.T) {
+			t.Run(fmt.Sprintf("blocker_%s/same_%t", blocker, same), func(t *testing.T) {
 				f := newAssignmentBlockerFixture(t)
 				previous := "assignment-old"
 				if same {
@@ -212,7 +216,7 @@ func TestOfficeAssignmentBlockerMutation(t *testing.T) {
 				}
 				f.task(t, "dependent", "assignment-work", v1.TaskStateTODO, previous)
 				if blocked {
-					f.blockers(t, "dependent", v1.TaskStateInProgress)
+					f.blockers(t, "dependent", blocker)
 				}
 				generation, err := f.repo.UpdateTaskAssignee(context.Background(), "dependent", "assignment-worker")
 				blockerMust(t, err)

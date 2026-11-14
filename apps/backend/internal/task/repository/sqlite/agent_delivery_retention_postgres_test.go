@@ -45,6 +45,12 @@ func TestDeliveryRetentionPostgresMVCCAndMonotonicCheckpoint(t *testing.T) {
 	event := seedRetentionCrashEventInRepo(t, writerRepo)
 	fixtureCtx, cancel := context.WithCancel(t.Context())
 	defer cancel()
+	// The public 250 ms work budget has separate coverage. Give the snapshot
+	// read a generous deadline so this test checks MVCC visibility, not host speed.
+	options := normalizeAgentDeliveryRetentionOptions(models.AgentDeliveryRetentionBatchOptions{})
+	options.WorkTimeout = 5 * time.Second
+	workCtx, cancelWork := context.WithTimeout(fixtureCtx, options.WorkTimeout)
+	defer cancelWork()
 	reachedCursor := make(chan struct{})
 	var visiblePayload []byte
 	var visibleCursor int64
@@ -65,7 +71,7 @@ func TestDeliveryRetentionPostgresMVCCAndMonotonicCheckpoint(t *testing.T) {
 	}
 	writerDone := make(chan error, 1)
 	go func() {
-		_, err := writerRepo.RunAgentDeliveryRetentionBatch(fixtureCtx, models.AgentDeliveryRetentionBatchOptions{})
+		_, err := writerRepo.runAgentDeliveryRetentionBatch(workCtx, options)
 		writerDone <- err
 	}()
 	select {

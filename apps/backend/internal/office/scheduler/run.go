@@ -58,6 +58,7 @@ const (
 	RunReasonTaskComment           = shared.RunReasonTaskComment
 	RunReasonTaskBlockersResolved  = shared.RunReasonTaskBlockersResolved
 	RunReasonTaskChildrenCompleted = shared.RunReasonTaskChildrenCompleted
+	RunReasonTaskBlockerFailed     = shared.RunReasonTaskBlockerFailed
 	RunReasonApprovalResolved      = shared.RunReasonApprovalResolved
 	RunReasonRoutineTrigger        = shared.RunReasonRoutineTrigger
 	RunReasonHeartbeat             = shared.RunReasonHeartbeat
@@ -395,6 +396,10 @@ func (ss *SchedulerService) queueRunAsActor(
 	return ss.runsService.QueueRun(ctx, runsservice.QueueRunRequest{
 		Reason:         reason,
 		IdempotencyKey: idempotencyKey,
+		// Each blocker failure is a distinct occurrence keyed for dedup;
+		// queue-time coalescing would replace one blocker's payload with
+		// another's for the same recipient.
+		SkipCoalesce:   reason == RunReasonTaskBlockerFailed,
 		Payload:        service.PayloadWithAgent(payload, agentInstanceID),
 		ActorKind:      actorKind,
 		ActorID:        actorID,

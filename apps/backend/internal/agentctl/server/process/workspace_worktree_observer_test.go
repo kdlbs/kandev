@@ -27,7 +27,10 @@ func TestWorktreeObserverPublishesOnlyInRootLinkedWorktrees(t *testing.T) {
 	wt := NewWorkspaceTrackerForRepo(primary, "primary", newTestLogger(t))
 	wt.SetWorkspaceRoot(taskRoot)
 	sub := wt.SubscribeWorkspaceStream()
-	defer func() { wt.UnsubscribeWorkspaceStream(sub) }()
+	t.Cleanup(func() {
+		wt.Stop()
+		wt.UnsubscribeWorkspaceStream(sub)
+	})
 
 	wt.observeWorktreeInventory(context.Background())
 	inventory := nextWorktreeInventory(t, sub)
@@ -92,7 +95,10 @@ func TestWorktreeObserverIgnoresNonRepositoryTracker(t *testing.T) {
 	wt := NewWorkspaceTrackerForRepo(taskRoot, "", newTestLogger(t))
 	wt.SetWorkspaceRoot(taskRoot)
 	sub := wt.SubscribeWorkspaceStream()
-	defer func() { wt.UnsubscribeWorkspaceStream(sub) }()
+	t.Cleanup(func() {
+		wt.Stop()
+		wt.UnsubscribeWorkspaceStream(sub)
+	})
 	wt.observeWorktreeInventory(context.Background())
 	select {
 	case message := <-sub:
@@ -165,7 +171,10 @@ func TestWorktreeObserverReplaysLatestInventoryToNewSubscriber(t *testing.T) {
 	wt.observeWorktreeInventory(context.Background())
 
 	sub := wt.SubscribeWorkspaceStream()
-	defer func() { wt.UnsubscribeWorkspaceStream(sub) }()
+	t.Cleanup(func() {
+		wt.Stop()
+		wt.UnsubscribeWorkspaceStream(sub)
+	})
 	inventory := nextWorktreeInventory(t, sub)
 	if len(inventory.Entries) != 1 || !sameTestPath(t, inventory.Entries[0].Path, linked) {
 		t.Fatalf("replayed inventory = %+v, want entry %q", inventory, linked)

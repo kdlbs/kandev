@@ -249,7 +249,10 @@ contract, not a special case inside the task system.
   `COMPLETED`, `FAILED`, or `CANCELLED`, dependents, the parent, and a linked
   routine run shall observe that transition regardless of the destination
   step's name and regardless of whether the task has an assignee. Repeated
-  delivery shall not repeat these effects.
+  delivery shall not repeat these effects. For Office dependencies, only
+  `COMPLETED` satisfies a blocker. `FAILED` and `CANCELLED` keep dependents
+  held and use the failure escalation in
+  `REQ-OFFICE-BLOCKER-POLICY-002`.
 - **AC-TASKS-COMPLETION-005.5:** A bulk move shall check every task's move
   admission, including completion policies and completion gates, before it
   moves any task. When any task is refused at that check, no task shall move
