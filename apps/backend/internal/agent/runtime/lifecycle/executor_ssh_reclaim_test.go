@@ -79,9 +79,16 @@ const (
 	testTaskDir     = "/home/dev/.kandev/tasks/task-abc123"
 )
 
-// cleanCheckout registers the four probe answers that make one checkout safe.
+// cleanCheckout registers the Git topology and content answers for a standalone clone.
 func cleanCheckout(f *fakeSSHRunner, dir string) *fakeSSHRunner {
+	gitDir := dir + "/.git"
+	inventory := "worktree " + dir + "\x00HEAD abc123\x00branch refs/heads/main\x00\x00"
+	f.on(sshReclaimPhysicalPathCmd(dir), dir+"\n")
+	f.on(sshReclaimPhysicalPathCmd(gitDir), gitDir+"\n")
 	f.on(sshReclaimIsCheckoutCmd(dir), "true")
+	f.on(sshReclaimCheckoutPathsCmd(dir), dir+"\n"+gitDir+"\n"+gitDir+"\n")
+	f.on(sshReclaimWorktreeListCmd(gitDir), inventory)
+	f.on(sshReclaimSubmoduleStatusCmd(dir), "")
 	f.on(sshReclaimStatusCmd(dir), "")
 	f.on(sshReclaimUnpushedCmd(dir), "0")
 	f.on(sshReclaimStashCmd(dir), "")
@@ -93,6 +100,7 @@ func cleanCheckout(f *fakeSSHRunner, dir string) *fakeSSHRunner {
 func safeSingleRepoRunner() *fakeSSHRunner {
 	f := newFakeSSHRunner()
 	f.on(sshReclaimChildReposCmd(testTaskDir), "")
+	f.on(sshReclaimPhysicalPathCmd(testWorkdirRoot), testWorkdirRoot+"\n")
 	cleanCheckout(f, testTaskDir)
 	return f
 }
@@ -173,18 +181,37 @@ func TestSSHTaskDirReclaimProbeSkipReasons(t *testing.T) {
 			wantReason: SSHReclaimSkipStashPresent,
 		},
 		{
-			name:       "task dir is not a checkout",
+			name:       "checkout probe errors",
+			mutate:     func(f *fakeSSHRunner) { f.onErr(sshReclaimCheckoutPathsCmd(testTaskDir), errors.New("git: not found")) },
+			wantReason: SSHReclaimSkipProbeFailed,
+		},
+		{
+			name:       "checkout probe output is malformed",
+			mutate:     func(f *fakeSSHRunner) { f.on(sshReclaimCheckoutPathsCmd(testTaskDir), "not a checkout") },
+			wantReason: SSHReclaimSkipProbeFailed,
+		},
+		{
+			name:       "bare repository is not a checkout",
 			mutate:     func(f *fakeSSHRunner) { f.on(sshReclaimIsCheckoutCmd(testTaskDir), "false") },
 			wantReason: SSHReclaimSkipNotACheckout,
 		},
 		{
-			name:       "checkout probe errors",
-			mutate:     func(f *fakeSSHRunner) { f.onErr(sshReclaimIsCheckoutCmd(testTaskDir), errors.New("git: not found")) },
+			name:       "status probe errors",
+			mutate:     func(f *fakeSSHRunner) { f.onErr(sshReclaimStatusCmd(testTaskDir), errors.New("connection lost")) },
 			wantReason: SSHReclaimSkipProbeFailed,
 		},
 		{
-			name:       "status probe errors",
-			mutate:     func(f *fakeSSHRunner) { f.onErr(sshReclaimStatusCmd(testTaskDir), errors.New("connection lost")) },
+			name: "submodule probe errors",
+			mutate: func(f *fakeSSHRunner) {
+				f.onErr(sshReclaimSubmoduleStatusCmd(testTaskDir), errors.New("git submodule failed"))
+			},
+			wantReason: SSHReclaimSkipProbeFailed,
+		},
+		{
+			name: "worktree inventory errors",
+			mutate: func(f *fakeSSHRunner) {
+				f.onErr(sshReclaimWorktreeListCmd(testTaskDir+"/.git"), errors.New("inventory unavailable"))
+			},
 			wantReason: SSHReclaimSkipProbeFailed,
 		},
 		{
@@ -200,6 +227,11 @@ func TestSSHTaskDirReclaimProbeSkipReasons(t *testing.T) {
 		{
 			name:       "unpushed probe returns empty output",
 			mutate:     func(f *fakeSSHRunner) { f.on(sshReclaimUnpushedCmd(testTaskDir), "") },
+			wantReason: SSHReclaimSkipProbeFailed,
+		},
+		{
+			name:       "unpushed probe returns negative output",
+			mutate:     func(f *fakeSSHRunner) { f.on(sshReclaimUnpushedCmd(testTaskDir), "-1") },
 			wantReason: SSHReclaimSkipProbeFailed,
 		},
 		{
@@ -232,24 +264,23 @@ func TestSSHTaskDirReclaimProbeSkipReasons(t *testing.T) {
 
 func TestSSHTaskDirReclaimProbePreservesIgnoredFiles(t *testing.T) {
 	f := safeSingleRepoRunner()
-	f.on(sshReclaimStatusCmd(testTaskDir), "!! .env\n")
-
-	verdict := newTestReclaimer(f).probe(context.Background(), testTaskDir)
-	if verdict.Safe {
-		t.Fatal("probe verdict = safe, want ignored file to preserve the directory")
-	}
-	if verdict.Reason != SSHReclaimSkipDirtyWorktree {
-		t.Fatalf("probe reason = %q, want %q", verdict.Reason, SSHReclaimSkipDirtyWorktree)
-	}
-}
-
-func TestSSHTaskDirReclaimProbeIgnoresKandevRuntimeFiles(t *testing.T) {
-	f := safeSingleRepoRunner()
-	f.on(sshReclaimStatusCmd(testTaskDir), "!! .kandev/\n")
 
 	verdict := newTestReclaimer(f).probe(context.Background(), testTaskDir)
 	if !verdict.Safe {
-		t.Fatalf("probe verdict = %+v, want safe for Kandev-owned runtime files", verdict)
+		t.Fatalf("probe verdict = %+v, want ignored files outside the Git status output", verdict)
+	}
+	if strings.Contains(sshReclaimStatusCmd(testTaskDir), " --ignored ") || !strings.Contains(sshReclaimStatusCmd(testTaskDir), "--ignored=no") {
+		t.Fatalf("status command = %q, want ignored entries excluded", sshReclaimStatusCmd(testTaskDir))
+	}
+}
+
+func TestSSHTaskDirReclaimProbePreservesNonIgnoredKandevFiles(t *testing.T) {
+	f := safeSingleRepoRunner()
+	f.on(sshReclaimStatusCmd(testTaskDir), "?? .kandev/notes.txt\n")
+
+	verdict := newTestReclaimer(f).probe(context.Background(), testTaskDir)
+	if verdict.Safe || verdict.Reason != SSHReclaimSkipDirtyWorktree {
+		t.Fatalf("probe verdict = %+v, want non-ignored Kandev path to be dirty", verdict)
 	}
 }
 
@@ -298,6 +329,11 @@ func TestSSHTaskDirReclaimProbeRejectsUnexpectedChildEntry(t *testing.T) {
 func TestSSHTaskDirReclaimProbeIsReadOnly(t *testing.T) {
 	f := safeSingleRepoRunner()
 	newTestReclaimer(f).probe(context.Background(), testTaskDir)
+	for _, call := range f.calls {
+		if strings.HasPrefix(call, "git ") && !strings.HasPrefix(call, "GIT_OPTIONAL_LOCKS=0 git ") {
+			t.Fatalf("Git probe did not disable optional locks: %q", call)
+		}
+	}
 	for _, forbidden := range []string{"fetch", "push", "prune", " gc", "reset", "clean", "rm ", "checkout"} {
 		if f.ranAny(forbidden) {
 			t.Fatalf("probe ran a mutating command containing %q: %v", forbidden, f.calls)
@@ -468,6 +504,8 @@ func TestSSHTaskDirReclaimExpandsRemoteHomeInWorkspaceRoot(t *testing.T) {
 			}
 			f := newFakeSSHRunner()
 			f.on(sshReclaimHomeCmd(), "/home/dev\n")
+			f.on(sshReclaimPhysicalPathCmd("/home/dev"), "/home/dev\n")
+			f.on(sshReclaimPhysicalPathCmd(testWorkdirRoot), testWorkdirRoot+"\n")
 			f.on(sshReclaimChildReposCmd(taskDir), "")
 			cleanCheckout(f, taskDir)
 			f.on(sshReclaimRemoveCmd(taskDir), "")

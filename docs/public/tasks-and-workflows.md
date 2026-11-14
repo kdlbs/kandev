@@ -1346,7 +1346,7 @@ worktree keeps that task folder until reclamation can finish.
 | Kubernetes    | Deletes only the recorded Pod and Kandev-managed PVC after exact UID and ownership checks. An existing claim is retained.                                                                                             |
 | Remote Docker | Runtime create and stop are not implemented. This executor is in progress and cannot currently start a task, so it has no supported archive-cleanup flow.                                                             |
 | Sprites       | Attempts to destroy the sandbox; if cleanup succeeds, uncommitted sandbox work is lost.                                                                                                                               |
-| SSH           | Attempts to stop the remote session runtime, but the remote task directory remains. Audit and remove retained task directories manually after confirming that no session needs them.                                  |
+| SSH           | Attempts to stop the remote session runtime. The task directory stays by default; an enabled profile can reclaim it after terminal archive or delete. Reclamation can remove ignored files, including secrets. See [SSH cleanup](executors.md#repository-sources-and-cleanup). |
 
 The archive confirmation is on by default in **Settings → Preferences → Task Behavior → Tasks → Archiving**.
 
