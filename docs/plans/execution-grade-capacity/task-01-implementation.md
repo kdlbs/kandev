@@ -143,6 +143,6 @@ message-turn, recovery, executor, repository, and worktree regressions also pass
 The final browser recheck passed all 10 desktop and 9 phone scenarios, including
 the three phone capacity settings cases. Normal changed-file hooks also passed.
 
-The contributor added a sidebar test repair during consolidation. Its history
-is retained, and its title assertion uses the decoded task payload alongside
-the existing ID assertion. The focused race-enabled sidebar handler test passed.
+Contributor sidebar test follow-ups are retained. The assertions decode the
+payload, require a task object, and check its ID and title together without
+depending on field order. The focused race-enabled sidebar handler test passed.
