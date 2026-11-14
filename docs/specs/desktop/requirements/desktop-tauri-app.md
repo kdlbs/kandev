@@ -2,7 +2,7 @@
 status: active
 system: desktop
 created: 2026-06-23
-updated: 2026-10-14
+updated: 2026-10-20
 owners:
   - tbd
 ---
@@ -69,7 +69,14 @@ Kandev's installed desktop app should behave like a native application without d
   shall be a distinct app-scoped test occurrence, so a previous successful test
   does not suppress a later activation. Testing shall not represent an agent
   session or release event, change provider configuration, or require a task.
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.18:** On Windows, when the desktop app
+  stops its owned backend for quit, startup failure, or update restart, the
+  console-less launcher and backend shall receive the stop as their normal
+  first shutdown signal and run their ordered teardown before any forced
+  process-tree cleanup. A child that cannot receive this request shall keep
+  the existing tree-wide request, grace deadline, and forced fallback.
 
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/desktop-tauri-app.md).
+Windows cooperative shutdown is described in [its own design](../system-design/windows-cooperative-shutdown.md).
