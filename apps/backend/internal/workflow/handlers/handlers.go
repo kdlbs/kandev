@@ -258,6 +258,8 @@ func (h *Handlers) writeStepMutationError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
 	case errors.Is(err, repoerrors.ErrWorkspaceNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "Workspace not found"})
+	case errors.Is(err, repoerrors.ErrExecutorProfileNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "Executor profile not found"})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save step"})
 	}

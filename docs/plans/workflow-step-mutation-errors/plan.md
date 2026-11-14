@@ -86,7 +86,7 @@ The design preserves the rationale and existing authentication decision.
 
 ### In scope
 
-- Explicit identities for missing steps, templates, workflows, and workspaces in the shared HTTP mapper.
+- Explicit identities for missing steps, templates, workflows, workspaces, and executor profiles in the shared HTTP mapper.
 - A typed missing-template error from the existing repository lookup.
 - Existing policy/validation precedence, safe response bodies, and rejected-write behavior.
 - A corrected `ErrNotVisible` comment that describes identity-based classification.
@@ -101,7 +101,7 @@ The design preserves the rationale and existing authentication decision.
 
 ## Technical approach
 
-Use `errors.Is` for the step, visibility, workflow, and workspace identities.
+Use `errors.Is` for the step, visibility, workflow, workspace, and executor-profile identities.
 Introduce `models.ErrWorkflowTemplateNotFound` and wrap it only for `sql.ErrNoRows` in `Repository.GetTemplate`.
 Ordinary `Repository.UpdateStep` and `Repository.DeleteStep` writes wrap `models.ErrWorkflowStepNotFound` when zero rows are affected; version-fenced updates keep their conflict identity.
 Keep unknown dependency errors on the existing generic 500 branch.
@@ -117,7 +117,7 @@ The [work order](task-01-classify-step-mutation-errors.md) owns the exact file l
 | --- | --- |
 | `.1`, `.5` | Classifier table plus repository ordinary-write misses and the update/delete race test preserve genuine missing-step identity without matching text |
 | `.2`, `.5` | `TestStepMutationDependencyFailureHTTP`: raw, wrapped, and mixed-case non-step failures produce 500 |
-| `.3` | `TestGetMissingWorkflowTemplateReturnsTypedNotFound`, `TestStepMutationResourceMissHTTP`, corrected HTTP missing-template assertion |
+| `.3` | `TestGetMissingWorkflowTemplateReturnsTypedNotFound`, `TestStepMutationResourceMissHTTP`, corrected HTTP missing-template assertion, and the safe executor-profile miss response |
 | `.4` | Classifier table plus existing executor, default-executor, read-only, validation, and scope tests |
 | `.6` | HTTP rejection matrix for all five mapper callers, stored-row assertions, event recording, and deterministic update/delete races |
 
@@ -166,10 +166,13 @@ No rendered UI changes, so no Playwright scenario or mobile preview is required.
 - `make -C apps/backend build` passed for the backend and its helper binaries. macOS helper builds emitted the existing no-codesign-tool warning and left Go-signed outputs as-is.
 - Final `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check` passed.
 - The documentation coverage preflight passed with status `covered` and no reference errors.
-- Refreshed `origin/main` to `3a96eba9c7220efc0dc35f769f1b17223e9285f6`; it contains no changes to the affected workflow or task error packages.
+- The initial implementation baseline used `origin/main` at `3a96eba9c7220efc0dc35f769f1b17223e9285f6`.
 - Follow-up review regression tests confirmed the ordinary update/delete zero-row paths returned untyped errors and HTTP 500 after a step disappeared between read and write.
 - Wrapping `models.ErrWorkflowStepNotFound` in those two ordinary write branches fixed both repository identity tests and deterministic HTTP races. The version-fenced `ErrTaskVersionConflict` branch remains unchanged.
 - Re-ran the full targeted workflow package command, changed-file Go lint, and `make -C apps/backend build`; all passed.
+- PR review found that a direct `repoerrors.ErrExecutorProfileNotFound` still used the generic 500 branch. The mapper now returns the safe `Executor profile not found` 404; a wrapped executor-mutation denial keeps 403 precedence, and unknown dependency failures remain generic 500 responses.
+- The new HTTP profile-miss regression failed with the prior 500, then passed with the typed mapping and verified that the response omits the profile ID, stored steps remain unchanged, and no success event is published.
+- Rebased onto `origin/main` at `723e237ef749ef7791ec7eb54ec4e4cd32ea8c32`. After the review correction, the full targeted workflow package command, `make -C apps/backend build`, changed-file Go lint (0 issues), documentation catalog validation, all 36 spec-linter tests, full spec lint, documentation coverage preflight, and `git diff --check` passed.
 
 ## Documentation impact
 
@@ -189,5 +192,4 @@ The work order includes a documentation coverage preflight, which passed.
 
 ## Handoff
 
-Task 01 is complete. Its implementation and tests, including the follow-up write-race correction, are ready for review alongside the updated requirement, system design, plan, and work order.
-The changes remain uncommitted. No push or PR was requested.
+Task 01 and its review correction are complete in [PR #5316](https://github.com/kdlbs/kandev/pull/5316), alongside the updated requirement, system design, plan, and work order.

@@ -24,7 +24,7 @@ func TestStepMutationDependencyFailureHTTP(t *testing.T) {
 		err  error
 	}{
 		{name: "plain missing dependency", err: errors.New("artifact manifest not found")},
-		{name: "wrapped missing dependency", err: fmt.Errorf("nested lookup: %w: private-profile", repoerrors.ErrExecutorProfileNotFound)},
+		{name: "wrapped missing dependency", err: fmt.Errorf("nested lookup: %w", errors.New("artifact manifest not found: private-profile"))},
 		{name: "mixed-case missing dependency", err: errors.New("Private ARTIFACT Not Found: secret")},
 		{name: "untyped step sentinel text", err: errors.New("workflow step not found")},
 	}
@@ -178,6 +178,7 @@ func TestStepMutationErrorClassification(t *testing.T) {
 		{name: "wrapped template miss", err: fmt.Errorf("template lookup: %w", models.ErrWorkflowTemplateNotFound), wantStatus: http.StatusNotFound, wantBody: `{"error":"Template not found"}`},
 		{name: "workflow miss", err: fmt.Errorf("private workflow: %w", repoerrors.ErrWorkflowNotFound), wantStatus: http.StatusNotFound, wantBody: `{"error":"Workflow not found"}`},
 		{name: "workspace miss", err: fmt.Errorf("private workspace: %w", repoerrors.ErrWorkspaceNotFound), wantStatus: http.StatusNotFound, wantBody: `{"error":"Workspace not found"}`},
+		{name: "executor profile miss", err: fmt.Errorf("private profile: %w", repoerrors.ErrExecutorProfileNotFound), wantStatus: http.StatusNotFound, wantBody: `{"error":"Executor profile not found"}`},
 		{name: "concealed access takes precedence", err: fmt.Errorf("%w: %w", service.ErrNotVisible, repoerrors.ErrWorkflowNotFound), wantStatus: http.StatusNotFound, wantBody: `{"error":"Step not found"}`},
 		{name: "workflow readonly", err: service.ErrWorkflowReadOnly, wantStatus: http.StatusConflict, wantBody: `{"error":"workflow is managed by GitHub sync and is read-only; edit its definition in the synced repository"}`},
 		{name: "workspace readonly", err: service.ErrWorkflowWorkspaceReadOnly, wantStatus: http.StatusConflict, wantBody: `{"error":"this workspace is managed by Improve Kandev and is read-only"}`},
@@ -229,6 +230,35 @@ func TestStepMutationResourceMissHTTP(t *testing.T) {
 		requireJSONError(t, resp, http.StatusNotFound, "Template not found")
 		if names := listStepNames(t, h, "workflow-1"); len(names) != 0 {
 			t.Fatalf("missing template wrote steps %v", names)
+		}
+	})
+
+	t.Run("missing executor profile", func(t *testing.T) {
+		h := setupStepRouter(t)
+		step := createStepViaHTTP(t, h.router, map[string]any{
+			"workflow_id": "workflow-1", "name": "Ready", "position": 0,
+		})
+		before, err := h.repo.ListStepsByWorkflow(context.Background(), "workflow-1")
+		if err != nil {
+			t.Fatalf("list steps before mutation: %v", err)
+		}
+		recorder := recordStepEvents(t, h.eventBus)
+		h.service.SetExecutorMutationChecker(func(context.Context, string) error {
+			return fmt.Errorf("executor profile lookup: %w: private-profile", repoerrors.ErrExecutorProfileNotFound)
+		})
+
+		resp := doJSON(t, h.router, http.MethodPut, "/api/v1/workflow/steps/"+step.ID, map[string]any{"name": "Renamed"})
+		requireJSONError(t, resp, http.StatusNotFound, "Executor profile not found")
+
+		after, err := h.repo.ListStepsByWorkflow(context.Background(), "workflow-1")
+		if err != nil {
+			t.Fatalf("list steps after rejection: %v", err)
+		}
+		if !reflect.DeepEqual(after, before) {
+			t.Fatalf("rejected mutation changed stored steps:\nbefore: %#v\nafter: %#v", before, after)
+		}
+		if len(recorder.events) != 0 {
+			t.Fatalf("rejected mutation published successful step events %v", recorder.subjects())
 		}
 	})
 

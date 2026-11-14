@@ -43,6 +43,9 @@ No SQL, schema, or repository interface change is required.
 The task repository already supplies `repoerrors.ErrWorkflowNotFound` and `repoerrors.ErrWorkspaceNotFound`.
 The workflow mutation policy can propagate these identities.
 Use them without converting arbitrary error text into a resource miss.
+`repoerrors.ErrExecutorProfileNotFound` identifies a missing executor profile.
+Map a direct profile miss to a safe resource-specific 404 without exposing its ID.
+The existing executor-mutation-denial check takes precedence when it wraps this profile error.
 
 Update the `ErrNotVisible` comment in `service/access.go` to describe its identity-based handler contract.
 Leave `IsNotFound`, `isNotFoundError`, and access normalization behavior outside this correction.
@@ -66,10 +69,11 @@ Do not replace it with `service.IsNotFound`, which also accepts arbitrary error 
 | `models.ErrWorkflowTemplateNotFound` | 404 | `Template not found` |
 | `repoerrors.ErrWorkflowNotFound` | 404 | `Workflow not found` |
 | `repoerrors.ErrWorkspaceNotFound` | 404 | `Workspace not found` |
+| `repoerrors.ErrExecutorProfileNotFound` | 404 | `Executor profile not found` |
 | Any remaining error | 500 | `Failed to save step` |
 
 The table defines precedence from top to bottom.
-An executor denial can wrap a missing-profile error without losing its 403 classification.
+An executor denial can wrap a missing-profile error without losing its 403 classification. A direct profile miss uses the resource-specific 404; neither response exposes a profile ID.
 A concealed resource rejection can wrap another error without disclosing its resource type.
 Unknown errors have no independent HTTP status to forward.
 They use the existing server-error response and retain the cause in existing logs.
@@ -105,7 +109,7 @@ after the handler's successful read and before the repository write. Assert a
 sanitized 404 and no successful mutation event. Repository tests cover both
 ordinary zero-row writes; version-fenced updates must keep returning
 `ErrTaskVersionConflict`.
-Also cover actual missing steps, missing templates, and typed workflow/workspace policy misses through HTTP.
+Also cover actual missing steps, missing templates, typed workflow/workspace policy misses, and direct executor-profile misses through HTTP.
 
 This provides end-to-end evidence at the affected HTTP boundary without a browser fixture or a live developer instance.
 Existing workflow scope tests preserve the foreign/missing response equivalence.

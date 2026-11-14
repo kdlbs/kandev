@@ -23,7 +23,7 @@ system_design:
 ## Summary
 
 Correct the shared workflow HTTP mapper so unrelated missing dependencies cannot masquerade as missing steps.
-Preserve recognized policy responses and distinguish missing templates, workflows, and workspaces.
+Preserve recognized policy responses and distinguish missing templates, workflows, workspaces, and executor profiles.
 Deliver the error-source change, mapper correction, and tests together.
 
 ## In scope
@@ -62,7 +62,7 @@ The criterion prefix is `AC-TASKS-WORKFLOW-STEP-MUTATION-ERRORS-001`.
    Include mixed-case text and an untyped copy of `ErrWorkflowStepNotFound.Error()`.
    Run the red command and record the expected false-404 failures.
 4. Add `TestStepMutationErrorClassification` for every row and precedence rule in the design table.
-   Add `TestStepMutationResourceMissHTTP` for actual misses and typed workflow/workspace policy errors.
+   Add `TestStepMutationResourceMissHTTP` for actual misses and typed workflow/workspace/profile policy errors.
 5. Add `TestGetMissingWorkflowTemplateReturnsTypedNotFound` and `TestGetWorkflowTemplateStorageFailureIsNotNotFound` in a new repository test file.
    Reuse `setupTestRepoWithDB` and the existing missing-step sentinel test pattern.
 6. Add repository tests for ordinary update/delete misses and HTTP update/delete race tests that delete the target through `SetExecutorMutationChecker` after the read.
@@ -174,8 +174,10 @@ Implemented and verified, including the follow-up repository miss correction.
 - Added identity-based HTTP classification and a typed missing-template repository error. The specific step-missing, template-missing, workflow-missing, workspace-missing, policy, and validation responses are covered.
 - The route regressions verify successful preflight GET for update, unchanged stored steps after rejection, no successful mutation events, and safe generic responses.
 - Follow-up RED tests reproduced untyped ordinary update/delete misses and HTTP 500 responses when a step disappeared after the handler read it. Typed repository errors and HTTP update/delete race tests now preserve the sanitized 404 and publish no successful mutation event.
+- PR review reconciliation: a direct `repoerrors.ErrExecutorProfileNotFound` maps to `Executor profile not found`; the existing wrapped executor-mutation denial remains 403, and untyped dependency failures remain generic 500 responses without raw details.
+- The profile-miss HTTP regression failed with 500 before the mapper change, then passed with 404 while proving the profile ID is not returned and no write or success event occurs.
 - `go test -trimpath -tags fts5 ./internal/workflow/models ./internal/workflow/repository ./internal/workflow/service ./internal/workflow/controller ./internal/workflow/handlers -count=1` passed.
-- Changed-file Go lint, including `repository/step_errors_test.go`, passed with 0 issues; `make -C apps/backend build` passed.
-- Documentation catalog/spec validation, the package coverage preflight, and `git diff --check` passed.
+- After the review correction, changed-file Go lint passed with 0 issues; `make -C apps/backend build` passed.
+- Documentation catalog validation, all 36 spec-linter tests, full spec lint, the package coverage preflight, and `git diff --check` passed after the spec and plan updates.
 
-The work order is complete. The implementation is ready for PR review.
+The work order is complete. The implementation and review correction are recorded in [PR #5316](https://github.com/kdlbs/kandev/pull/5316).

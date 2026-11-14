@@ -28,11 +28,12 @@ The task system owns this contract because it owns workflow definitions and thei
 - **AC-TASKS-WORKFLOW-STEP-MUTATION-ERRORS-001.2:** An unexpected dependency or storage failure shall produce HTTP 500 with `{"error":"Failed to save step"}`.
   The words `not found` in an error message shall not establish that a step is missing.
   This rule shall also apply to nested errors and differently capitalized messages.
-- **AC-TASKS-WORKFLOW-STEP-MUTATION-ERRORS-001.3:** A recognized missing template, workflow, or workspace shall retain HTTP 404 with a resource-specific message.
-  The messages shall be `Template not found`, `Workflow not found`, and `Workspace not found`, respectively.
-  Concealed access rejections shall retain criterion `.1` instead.
+- **AC-TASKS-WORKFLOW-STEP-MUTATION-ERRORS-001.3:** A recognized missing template, workflow, workspace, or executor profile shall produce HTTP 404 with a resource-specific message.
+  The messages shall be `Template not found`, `Workflow not found`, `Workspace not found`, and `Executor profile not found`, respectively.
+  Concealed access rejections shall retain criterion `.1`; an executor-profile miss wrapped in an executor mutation denial shall retain criterion `.4`.
 - **AC-TASKS-WORKFLOW-STEP-MUTATION-ERRORS-001.4:** Existing policy and validation rejections shall retain their status and safe response fields.
   These responses include read-only conflicts (409), executor mutation denial (403), workspace default executor unavailability (409), and recognized validation errors (400).
+  Executor mutation denial shall take precedence when it wraps an executor-profile miss.
   Workspace default executor unavailability shall retain its `workspace_default_executor_unavailable` error code.
 - **AC-TASKS-WORKFLOW-STEP-MUTATION-ERRORS-001.5:** Additional error context shall preserve a recognized error classification.
   Unexpected errors shall retain a generic response, while backend diagnostic logs shall retain their cause.
@@ -45,6 +46,7 @@ The task system owns this contract because it owns workflow definitions and thei
 Unexpected dependency errors that previously matched `not found` change from a misleading 404 to the existing generic 500 response.
 Missing templates retain 404, but their message changes from `Step not found` to `Template not found`.
 Recognized workflow and workspace misses also receive messages that name the correct resource.
+Recognized executor-profile misses receive `Executor profile not found` unless an existing executor-mutation denial takes precedence.
 
 ## Related contracts
 
