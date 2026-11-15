@@ -2451,12 +2451,7 @@ func (r *sqliteRepository) Snapshot(
 	`), identity.SessionID, identity.SessionIncarnationID).Scan(&enabled, &revision)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		snapshot.AutoMergeError = fmt.Errorf("get queue snapshot Auto-merge override: %w", err)
-		if commitErr := tx.Commit(); commitErr != nil {
-			return RepositorySnapshot{}, commitErr
-		}
-		return snapshot, nil
-	}
-	if err == nil && enabled.Valid {
+	} else if err == nil && enabled.Valid {
 		snapshot.AutoMergeOverride = &AutoMergeOverride{
 			Enabled: enabled.Int64 != 0, Revision: revision,
 		}

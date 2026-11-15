@@ -8,10 +8,12 @@ import (
 // AdmissionPolicy binds both policy decisions to one settings read.
 // A nil sort policy means its override could not be read.
 type AdmissionPolicy struct {
-	AutoMerge       AutoMergePolicy
-	AutoSortMerge   *AutoSortMergePolicy
-	editLeaseBlocks func(string, string) bool
-	log             *logger.Logger
+	AutoMerge     AutoMergePolicy
+	AutoSortMerge *AutoSortMergePolicy
+	// leased is the session's in-process edit-lease set, captured under the
+	// session admission gate before any repository lock is taken.
+	leased map[string]struct{}
+	log    *logger.Logger
 }
 
 func (p *AdmissionPolicy) sortedEnabled() bool {
@@ -86,8 +88,10 @@ func autoFoldTarget[T QueuedMessage | *QueuedMessage](rows []T, source *QueuedMe
 }
 
 func autoFoldValues(target, source *QueuedMessage, policy *AdmissionPolicy, blocked func(*QueuedMessage) (bool, error)) (*autoMergedValues, error) {
-	if policy != nil && policy.editLeaseBlocks != nil && policy.editLeaseBlocks(target.SessionID, target.ID) {
-		return nil, nil
+	if policy != nil {
+		if _, leased := policy.leased[target.ID]; leased {
+			return nil, nil
+		}
 	}
 	if blocked != nil {
 		leased, err := blocked(target)

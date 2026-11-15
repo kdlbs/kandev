@@ -1380,26 +1380,37 @@ func (s *Service) resolveAdmissionAutoMergePolicy(
 	identity *QueueSessionIdentity,
 	sessionID string,
 ) *AdmissionPolicy {
-	global, err := s.loadGlobalQueuePolicy(ctx)
-	if err != nil {
-		s.logger.Warn("queue policy unavailable; admitting separate message", zap.String("session_id", sessionID), zap.Error(err))
-		return nil
-	}
-	policy := &AdmissionPolicy{AutoMerge: global.AutoMerge, AutoSortMerge: &global.AutoSortMerge, editLeaseBlocks: s.editLeaseBlocksEntryLocked, log: s.logger}
+	global, globalErr := s.loadGlobalQueuePolicy(ctx)
 	if identity == nil {
-		return policy
+		if globalErr != nil {
+			s.logger.Warn("queue policy unavailable; admitting separate message", zap.String("session_id", sessionID), zap.Error(globalErr))
+			return nil
+		}
+		return &AdmissionPolicy{
+			AutoMerge: global.AutoMerge, AutoSortMerge: &global.AutoSortMerge,
+			leased: s.sessionEditLeases(sessionID), log: s.logger,
+		}
 	}
 	mergeOverride, err := s.repo.GetAutoMergeOverride(ctx, *identity)
 	if err != nil {
 		s.logger.Warn("automatic merge policy unavailable; admitting separate message", zap.String("session_id", sessionID), zap.Error(err))
 		return nil
 	}
-	policy.AutoMerge = resolveAutoMergeOverride(mergeOverride, global.AutoMerge)
+	if mergeOverride == nil && globalErr != nil {
+		s.logger.Warn("queue policy unavailable; admitting separate message", zap.String("session_id", sessionID), zap.Error(globalErr))
+		return nil
+	}
+	policy := &AdmissionPolicy{
+		AutoMerge: resolveAutoMergeOverride(mergeOverride, global.AutoMerge),
+		leased:    s.sessionEditLeases(sessionID), log: s.logger,
+	}
 	sortOverride, err := s.repo.GetAutoSortMergeOverride(ctx, *identity)
-	if err != nil {
+	switch {
+	case err != nil:
 		s.logger.Warn("automatic sort-merge policy unavailable; preserving adjacent automatic merge", zap.String("session_id", sessionID), zap.Error(err))
-		policy.AutoSortMerge = nil
-	} else {
+	case sortOverride == nil && globalErr != nil:
+		s.logger.Warn("global sort-merge policy unavailable; preserving adjacent automatic merge", zap.String("session_id", sessionID), zap.Error(globalErr))
+	default:
 		resolved := resolveAutoSortMergeOverride(sortOverride, global.AutoSortMerge)
 		policy.AutoSortMerge = &resolved
 	}

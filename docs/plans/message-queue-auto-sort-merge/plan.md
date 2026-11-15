@@ -345,6 +345,27 @@ Public docs and specification validation passed. PostgreSQL is unverified:
   `/home/clem/.cache/tmp/asm-final.wgrLi1/docs-validate.log` and
   `/home/clem/.cache/tmp/asm-final.wgrLi1/docs-lint.log`.
 
+### Implementation review round 1 remediation
+
+- Fold target lease checks no longer call back into `Service` while a
+  repository lock or SQL transaction is held. Admission captures the
+  session's in-process lease set under the admission gate
+  (`AdmissionPolicy.leased`); durable SQL lease checks stay in the
+  transaction.
+- `sqliteRepository.Snapshot` reads both overrides before its single commit,
+  so an unreadable Auto-merge override no longer fabricates an inherited
+  Auto-sort-merge tuple.
+- A failing global settings loader no longer discards explicit session
+  overrides at admission; only a policy that needs the inherited value fails
+  closed.
+- RED on the prior code, GREEN after: `go test -tags fts5
+  ./internal/orchestrator/messagequeue/ -run
+  'TestAutoFoldInsideRepositoryDoesNotAcquireEditLeaseMutex|TestSnapshotResolvesSortPolicyWhenAutoMergeOverrideIsUnreadable|TestAdmissionUsesExplicitSessionPoliciesWhenGlobalLoaderFails'`
+  (memory and SQLite).
+- `go test -race -tags fts5 ./internal/orchestrator/messagequeue/...`,
+  `go test -tags fts5 ./internal/orchestrator/handlers/...
+  ./internal/system/queuesettings/...`, and `scripts/lint-go-changed`: passed.
+
 Final repository gates, run from the repository root after all work orders:
 
 ```bash
