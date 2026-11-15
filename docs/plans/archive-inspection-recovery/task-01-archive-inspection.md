@@ -112,5 +112,33 @@ No inspection-error classification may swallow a database error.
 Exact lint command:
 
 ```bash
-PATH=/tmp/kandev-archive-tools:$PATH GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=kandev.lintBaseRef GIT_CONFIG_VALUE_0=origin/main bash scripts/lint-go-changed apps/backend/internal/task/service/resource_cleanup_archive_inspection.go apps/backend/internal/task/service/resource_cleanup_archive_inspection_test.go apps/backend/internal/task/service/handoff_cascade_archive_inspection_test.go apps/backend/internal/task/service/resource_cleanup_jobs.go apps/backend/internal/task/service/resource_cleanup_preparation.go apps/backend/internal/task/service/service_tasks.go apps/backend/internal/task/handlers/task_archive_inspection_test.go apps/backend/internal/worktree/manager_cleanup_preparation_inspection_test.go
+PATH=/tmp/kandev-archive-tools:$PATH GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=kandev.lintBaseRef GIT_CONFIG_VALUE_0=origin/main bash scripts/lint-go-changed apps/backend/internal/task/service/resource_cleanup_archive_inspection.go apps/backend/internal/task/service/resource_cleanup_archive_inspection_test.go apps/backend/internal/task/service/resource_cleanup_archive_progress_test.go apps/backend/internal/task/service/resource_cleanup_archive_reclaim_test.go apps/backend/internal/task/service/resource_cleanup_archive_runtime_test.go apps/backend/internal/task/service/handoff_cascade_archive_inspection_test.go apps/backend/internal/task/service/resource_cleanup_jobs.go apps/backend/internal/task/service/resource_cleanup_preparation.go apps/backend/internal/task/service/service_tasks.go apps/backend/internal/task/handlers/task_archive_inspection_test.go apps/backend/internal/worktree/manager_cleanup_preparation_inspection_test.go
 ```
+
+### PR review remediation
+
+- Added regressions for retained orphan-reaper roots after partial cleanup,
+  stopped runtime-row removal with mixed stop outcomes, nil worktree manifest
+  accounting, and the reclaim source-manifest guard with legacy compatibility.
+- The first regression runs reproduced lost path evidence, retained stopped
+  rows, and incomplete manifest accounting. Production repository wiring uses
+  `sqlite.Repository`, which implements `ListTaskResourceCleanupJobs` for both
+  supported database dialects.
+- Source-manifest enforcement uses an additive snapshot marker. Existing
+  snapshots keep their previous reclamation behavior.
+
+Post-review validation:
+
+```bash
+(cd apps/backend && go test -trimpath -race ./internal/task/service -run 'Archive|Cleanup|RetainDeletion|TaskDelete' -count=1)
+(cd apps/backend && go test -trimpath ./internal/task/handlers -run TestArchiveInspectionFailureHTTPCommitsTree -count=1)
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+```
+
+All passed. The race suite completed in 27.996s and the HTTP regression in
+0.247s. The reclaim regression reproduced removal without manifest evidence
+before the guard was added. Updated two existing reclaim fixtures to supply
+manifest evidence or retry the original archive after a successful stop.
+
+Changed-file Go lint also passed with zero issues after review remediation.

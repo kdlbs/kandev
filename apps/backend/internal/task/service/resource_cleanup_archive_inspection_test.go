@@ -40,6 +40,7 @@ func TestArchiveInspectionFailureCommitsTree(t *testing.T) {
 			require.NotEmpty(t, jobs)
 			var snapshot taskResourceCleanupSnapshot
 			require.NoError(t, json.Unmarshal([]byte(jobs[0].ResourceSnapshot), &snapshot))
+			require.True(t, snapshot.ArchiveSourceManifestRequired)
 			require.Contains(t, snapshot.CleanupPreparationErrors, "broken")
 			require.NotEmpty(t, snapshot.WorktreeHeadOIDs["healthy"])
 			require.False(t, snapshot.AllowUnverifiedWorkspaceChanges)

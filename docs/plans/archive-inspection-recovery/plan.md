@@ -116,3 +116,11 @@ Unknown original identity can require operator recovery and retain disk usage.
 An enclosing-directory cleaner could bypass a per-worktree block. Tests must
 prove that no alternate removal path can do this. Snapshot persistence errors
 must remain fatal. A partial manifest cannot mark the whole job captured.
+
+## PR review validation
+
+Review remediation preserves removed-path evidence and removes stopped runtime
+rows after partial cleanup. New archive snapshots require saved source manifests
+before background reclaim. Legacy snapshots retain their previous behavior.
+The archive/cleanup race suite and HTTP archive regression passed. See the work
+order for exact commands and regression results.

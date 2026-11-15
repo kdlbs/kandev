@@ -149,7 +149,16 @@ Before manifest capture or physical removal, archive execution partitions
 verified and blocked resources. Persist source manifests and completion per
 verified resource using the existing snapshot fields. A partial manifest must
 not imply that all worktrees have evidence. Manifest failure also preserves
-that resource while allowing independent resources to progress.
+that resource while allowing independent resources to progress. New archive
+snapshots set `archive_source_manifest_required`. Reclaim must find a source
+manifest for each worktree owned by such a snapshot before removal. Legacy
+snapshots without this marker and legacy tasks without archive jobs retain the
+existing reclaim policy. Explicit failed identity evidence always blocks reclaim.
+
+Capture orphan-reaper path candidates before the first worktree removal. Record
+confirmed removed paths on every exit so partial cleanup preserves evidence for
+later attempts. Remove executor rows for successfully stopped sessions even when
+workspace cleanup is blocked; preserve rows required by stop or resume guards.
 
 No environment teardown, session-directory removal, remote-directory reclaim,
 or orphan reaper may bypass a blocked worktree. Guard enclosing paths and

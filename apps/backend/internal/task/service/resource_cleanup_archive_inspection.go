@@ -71,7 +71,7 @@ func (s *Service) cleanupArchiveWorktrees(ctx context.Context, job *models.TaskR
 			errs = append(errs, err)
 			continue
 		}
-		cleanupErr := errors.Join(s.cleanupDestructiveTaskResources(ctx, job.TaskID, snapshot.Sessions, []*worktree.Worktree{wt}, taskEnvironmentCleanup{env: snapshot.TaskEnvironment, deferEnvironment: true, preserveBranches: true, discardWorktreeChanges: snapshot.DiscardWorktreeChanges}, taskCleanupPreserveRows(stop))...)
+		cleanupErr := errors.Join(s.cleanupDestructiveTaskResources(ctx, job.TaskID, snapshot.Sessions, []*worktree.Worktree{wt}, taskEnvironmentCleanup{env: snapshot.TaskEnvironment, deferEnvironment: true, deferInUseWorktrees: true, preserveBranches: true, discardWorktreeChanges: snapshot.DiscardWorktreeChanges}, taskCleanupPreserveRows(stop))...)
 		if cleanupErr != nil {
 			errs = append(errs, cleanupErr)
 			continue
@@ -95,7 +95,13 @@ func (s *Service) prepareArchiveWorktreeManifest(ctx context.Context, job *model
 		return fmt.Errorf("capture archive source manifest for %s: %w", wt.ID, err)
 	}
 	snapshot.ArchiveSourceManifest = append(snapshot.ArchiveSourceManifest, manifests...)
-	snapshot.ArchiveSourceManifestCaptured = len(snapshot.ArchiveSourceManifest) == len(snapshot.Worktrees)
+	snapshot.ArchiveSourceManifestCaptured = true
+	for _, candidate := range snapshot.Worktrees {
+		if candidate != nil && !hasWorktreeSourceManifest(snapshot.ArchiveSourceManifest, candidate.ID) {
+			snapshot.ArchiveSourceManifestCaptured = false
+			break
+		}
+	}
 	if err := s.persistTaskDirectorySnapshot(ctx, job, snapshot); err != nil {
 		return &archiveManifestPersistenceError{err}
 	}
@@ -121,6 +127,10 @@ func (s *Service) checkArchiveReclaimInspection(ctx context.Context, taskID, wor
 		}
 		if snapshot.CleanupPreparationErrors[worktreeID] != "" {
 			return errors.New("original workspace identity is unavailable")
+		}
+		if snapshot.ArchiveSourceManifestRequired && findWorktreeByID(snapshot.Worktrees, worktreeID) != nil &&
+			!hasWorktreeSourceManifest(snapshot.ArchiveSourceManifest, worktreeID) {
+			return errors.New("archive source manifest is unavailable")
 		}
 	}
 	return nil

@@ -40,6 +40,7 @@ func (s *Service) capturePreparedTaskCleanup(ctx context.Context, job *models.Ta
 		return fmt.Errorf("list remote task directories for cleanup snapshot: %w", err)
 	}
 	snapshot := taskResourceCleanupSnapshot{
+		ArchiveSourceManifestRequired:   job.IsArchive(),
 		AllowUnverifiedWorkspaceChanges: options.AllowUnverifiedWorkspaceChanges,
 		CleanupPreparationErrors:        preparationErrors,
 		Sessions:                        sessions,
