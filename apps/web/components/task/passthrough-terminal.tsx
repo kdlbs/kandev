@@ -24,7 +24,6 @@ import {
   useFitAndResize,
 } from "./use-passthrough-terminal";
 import { useTouchScroll } from "./use-touch-scroll";
-import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useTerminalSearch } from "./use-terminal-search";
 import { TerminalSearchBar } from "./terminal-search-bar";
 import { usePanelSearch } from "@/hooks/use-panel-search";
@@ -194,12 +193,10 @@ export function shouldGuardPassthroughEscape(
 /**
  * Whether every session sharing this environment has ended.
  *
- * Shell terminals are environment-scoped, but the session handle this component
- * holds is not a proxy for one: `useEnvironmentSessionId` deliberately caches
- * the first session seen for an environment, so once session A ends and session
- * B reuses that environment, the handle still resolves to A. Gating on A's
- * state alone would refuse a shell on a live environment — worse than the loop
- * this exists to stop.
+ * Shell terminals are environment-scoped. The selected conversation is not a
+ * proxy for the whole environment: an ended session can share it with a live
+ * sibling. Gating on the selected session alone would refuse a shell on that
+ * live environment.
  *
  * So refuse only on positive knowledge: sessions for this environment are
  * known, and every one of them is terminal. Anything unknown connects.
@@ -445,7 +442,7 @@ function usePassthroughEffects({
   useTouchScroll({ terminalRef, xtermRef, enabled: !!enableTouchScroll, isTerminalReady });
   useWebSocketConnection({
     taskId,
-    sessionId,
+    sessionId: mode === "agent" ? sessionId : null,
     environmentId,
     canConnect: canConnect && !connection.isUnavailable,
     isTerminalReady,
@@ -476,8 +473,9 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const refs = useTerminalRefs();
   const { terminalRef, xtermRef, wsRef, attachAddonRef } = refs;
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const environmentSessionId = useEnvironmentSessionId();
-  const sessionId = mode === "agent" ? (props.sessionId ?? storeSessionId) : environmentSessionId;
+  // The shell connection remains environment-scoped, but restoration must
+  // inspect and repair the conversation the user currently selected.
+  const sessionId = mode === "agent" ? (props.sessionId ?? storeSessionId) : storeSessionId;
   const { session } = useSession(sessionId);
   const taskId = session?.task_id ?? null;
   const workspaceRestoration = useWorkspaceRestoration(

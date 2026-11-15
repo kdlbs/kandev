@@ -308,7 +308,12 @@ func (s *Service) GetPRForAutomation(
 	if err := s.requireCurrentHost(ctx, workspaceID, resolved); err != nil {
 		return nil, err
 	}
-	return pr, nil
+	if pr == nil {
+		return nil, nil
+	}
+	stamped := *pr
+	stamped.GitHubHost = resolved.host().String()
+	return &stamped, nil
 }
 
 // GetIssue fetches basic issue details from GitHub. The create-task dialog is

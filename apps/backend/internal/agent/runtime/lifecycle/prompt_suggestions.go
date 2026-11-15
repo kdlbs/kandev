@@ -17,8 +17,9 @@ func (m *Manager) SetPromptSuggestionsPreference(fn PromptSuggestionsPreference)
 
 // promptSuggestionsForLaunch decides whether a launch asks its agent for native
 // next-prompt suggestions: interactive task sessions only, and only when the
-// user opted in. agentctl sends the request only to agents that advertise
-// Claude Code on initialize, so other agents never see it.
+// user opted in. This is a request, not provider support: agentctl sends the
+// configuration only to integrations whose adapter established the generic
+// native-suggestion capability, so other agents never see it.
 func (m *Manager) promptSuggestionsForLaunch(ctx context.Context, mode string) bool {
 	if m.promptSuggestionsPreference == nil {
 		return false

@@ -15,6 +15,12 @@ legacy_specs: []
 
 ## Overview
 
+The feature landed in PR #4306 on 2026-10-28. The
+[native capability follow-up](../native-prompt-suggestion-capability/plan.md)
+replaces its namespace-only detection contract through a separate draft package.
+The original work orders and verification results below remain historical evidence.
+The follow-up's Agents design owns its proposed evidence and compatibility rules.
+
 The feature shows the user's likely next prompt as ghost text in the empty
 composer. Tab fills it in for editing, Enter sends it, and Escape dismisses it.
 

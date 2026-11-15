@@ -63,6 +63,7 @@ func RegisterSessionStreamNotifications(ctx context.Context, eventBus bus.EventB
 	b.subscribe(eventBus, events.BuildBackgroundWorkUpdatedWildcardSubject(), ws.ActionSessionBackgroundWorkUpdated)
 	b.subscribe(eventBus, events.BuildBackgroundWorkOutputWildcardSubject(), ws.ActionSessionBackgroundWorkOutput)
 	b.subscribeSessionWorkspaceRecovery(eventBus)
+	b.subscribe(eventBus, events.BuildSessionRuntimeStorageWildcardSubject(), ws.ActionSessionRuntimeStorageChanged)
 
 	go func() {
 		<-ctx.Done()

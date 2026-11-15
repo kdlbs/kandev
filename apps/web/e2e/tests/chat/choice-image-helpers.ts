@@ -117,10 +117,14 @@ export async function exerciseChoiceImageQuestion(
     await inspect.focus();
     await page.keyboard.press("Enter");
   }
-  const viewer = page.getByRole("dialog", { name: "Proposed layout" });
-  await expect(viewer).toBeVisible();
+  const viewer = page.getByRole("dialog");
+  await expect(viewer).toHaveAccessibleName("Proposed layout");
   await viewer.press("2");
+  // Arrows step through the question's images; they never select or advance.
   await viewer.press("ArrowRight");
+  await expect(viewer).not.toHaveAccessibleName("Proposed layout");
+  await viewer.press("ArrowLeft");
+  await expect(viewer).toHaveAccessibleName("Proposed layout");
   if (mobile) await viewer.getByRole("button", { name: "Close", exact: true }).tap();
   else await viewer.press("Escape");
   await expect(inspect).toBeFocused();
@@ -133,6 +137,7 @@ export async function exerciseChoiceImageQuestion(
   await expect(missing).toContainText("Image file not found.");
   await expect(missing.getByTestId("clarification-option")).toBeEnabled();
   await session.clarificationOption("Compact layout").click();
+  await session.submitClarification();
   await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   const { messages } = await api.listSessionMessages(task.session_id!);
   const question = messages.find((message) => message.type === "clarification_request")!;
@@ -158,6 +163,7 @@ export async function exerciseChoiceImageQuestion(
     mixed.session.clarificationOverlay().getByRole("img", { name: "Proposed layout", exact: true }),
   ).toHaveCount(2);
   await mixed.session.clarificationOption("Missing alternative").click();
+  await mixed.session.submitClarification();
   await expect(mixed.session.idleInput()).toBeVisible({ timeout: 30_000 });
   const mixedMessages = await api.listSessionMessages(mixed.task.session_id!);
   expect(

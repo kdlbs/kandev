@@ -9,7 +9,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 const maxPluginExecutorArtifactBytes = 128 << 20

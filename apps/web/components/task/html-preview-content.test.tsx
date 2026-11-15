@@ -99,6 +99,31 @@ describe("HtmlPreviewContent", () => {
     expect(onTogglePreview).toHaveBeenCalledOnce();
   });
 
+  it("uses a caller-provided return label for a diff preview", () => {
+    const { onTogglePreview } = renderPreview(vi.fn(), { toggleLabel: "Show diff" });
+
+    screen.getByRole("button", { name: "Show diff" }).click();
+    expect(onTogglePreview).toHaveBeenCalledOnce();
+  });
+
+  it("shows source read failures with retry and the return action", () => {
+    const onRetry = vi.fn();
+    const { onTogglePreview } = renderPreview(vi.fn(), {
+      previewUrl: undefined,
+      errorMessage: "Could not read the current HTML file.",
+      onRetry,
+      toggleLabel: "Show diff",
+    });
+
+    expect(screen.getByTestId("html-preview-error").textContent).toContain(
+      "Could not read the current HTML file.",
+    );
+    screen.getByRole("button", { name: "Retry HTML preview" }).click();
+    expect(onRetry).toHaveBeenCalledOnce();
+    screen.getByRole("button", { name: "Show diff" }).click();
+    expect(onTogglePreview).toHaveBeenCalledOnce();
+  });
+
   it("offers refresh and an explicit Browser-panel action", () => {
     const onRefresh = vi.fn();
     const onOpenInBrowser = vi.fn();

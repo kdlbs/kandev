@@ -115,3 +115,44 @@ from the fresh parity evidence.
 The cancellation test passes three consecutive isolated reruns (`-count=3`, 38.373 seconds).
 The initial sharded run remains recorded as failed; the reruns do not erase its setup timeout.
 All scoped acceptance checks are complete. Remote CI and review remain delivery gates.
+
+## Current-main integration (2026-11-15)
+
+Pre-merge QA found that main now combines inbox admission and projection in one
+transaction and routes live output through that path. The earlier receipt transport
+covered the projection-only path. Main also moved delivery processing into
+`streams_events.go`. The integration preserves the current owners, compaction
+metadata, duplicate suppression, and acknowledgement scheduling.
+
+The combined writer now offers the same optional receipt capability as the
+projection-only writer. It captures final snapshots inside the transaction and
+returns them only after commit. The lifecycle forwards the receipt through the
+existing coalescer and notification path. Legacy receiver implementations retain
+the source-recovery fallback. No UI layout or control behavior changes.
+
+RED: The combined-writer regression failed because the repository lacked the
+receipt capability. The processor regression failed because the notification
+contained no receipt. New coverage checks new and existing turns, a mixed
+replay/fresh batch, unchanged earlier snapshots, empty input, duplicate replay,
+rollback, and retry after rollback.
+
+GREEN: Focused race tests pass in the SQLite, lifecycle, orchestrator, and gateway
+packages. A disposable PostgreSQL 17 cluster passes combined-writer receipt,
+projection-only receipt, atomic admission/projection, and canonical-turn cases.
+SQL guard passes, and the cluster stops after validation. The focused frontend
+suite passes all 48 tests; current web typecheck and changed-file oxlint pass.
+Documentation catalog and specification checks pass. Changed-package Go lint
+passes with zero issues. Its first run exceeded the time limit during cold
+compilation/analysis; the unchanged retry passes, and both logs are retained.
+
+A fresh managed build passes five desktop and four phone browser tests for
+canonical delivery, core/plugin recovery, and auto-scroll. Temporary QA probes
+verify all 20 chunks exactly once in order, zero conversation resets, and no
+horizontal overflow. Frame sampling records no blank or backward-moving text
+across 294 desktop and 292 phone frames. Before/during/after screenshots show no
+actionable layout regression. The temporary probes are removed after capture.
+These checks use disposable data, loopback binding, and process-local browser
+libraries. They do not establish performance improvements under dense workloads.
+
+Earlier results above remain historical. Current-head CI and review remain
+required before merge.

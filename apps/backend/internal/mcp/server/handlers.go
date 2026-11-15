@@ -273,6 +273,9 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 		if blockedBy := stringArrayArg(req, "blocked_by"); len(blockedBy) > 0 {
 			payload["blocked_by"] = blockedBy
 		}
+		if relatedTaskIDs := stringArrayArg(req, "related_task_ids"); len(relatedTaskIDs) > 0 {
+			payload["related_task_ids"] = relatedTaskIDs
+		}
 		// Omitted means "derive": with blocked_by set, a start request becomes a
 		// start-when-unblocked intent. start_agent defaults to true and agents
 		// pass it by habit, so deriving is what makes an agent-built chain run in
@@ -1152,6 +1155,12 @@ func simplifyAnswer(ans map[string]interface{}, rejected bool) map[string]interf
 	}
 	if customText, ok := ans["custom_text"].(string); ok && customText != "" {
 		out["custom_text"] = customText
+	}
+	if attachments, ok := ans["attachments"].([]interface{}); ok && len(attachments) > 0 {
+		out["attachments"] = attachments
+	}
+	if annotations, ok := ans["annotations"].([]interface{}); ok && len(annotations) > 0 {
+		out["annotations"] = annotations
 	}
 	if rejected && len(out) == 0 {
 		return map[string]interface{}{answeredFieldKey: false, rejectedFieldKey: true}

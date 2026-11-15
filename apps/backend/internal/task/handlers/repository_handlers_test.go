@@ -191,21 +191,19 @@ func TestHTTPCreateRepositoryIgnoresRemoteURL(t *testing.T) {
 	}
 }
 
-func TestHTTPUpdateRepositoryIgnoresRemoteURL(t *testing.T) {
+func TestHTTPUpdateRepositoryValidatesRemoteURL(t *testing.T) {
 	router, repo := newRepositoryHTTPTestRouter(t)
 	if err := repo.CreateRepository(context.Background(), &models.Repository{
-		ID:          "provider-repo",
-		WorkspaceID: "ws-1",
-		Name:        "owner/repo",
-		SourceType:  "provider",
-		RemoteURL:   "https://github.com/owner/old.git",
+		ID: "provider-repo", WorkspaceID: "ws-1", Name: "owner/repo", SourceType: "provider",
+		Provider: "github", ProviderHost: "https://github.com", ProviderOwner: "owner", ProviderName: "repo",
+		RemoteURL: "https://github.com/owner/old.git",
 	}); err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}
 	request := httptest.NewRequest(
 		http.MethodPatch,
 		"/api/v1/repositories/provider-repo",
-		strings.NewReader(`{"remote_url":"https://github.com/owner/repo.git"}`),
+		strings.NewReader(`{"remote_url":"git@github.com:owner/repo.git"}`),
 	)
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
@@ -219,8 +217,8 @@ func TestHTTPUpdateRepositoryIgnoresRemoteURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRepository: %v", err)
 	}
-	if repository.RemoteURL != "https://github.com/owner/old.git" {
-		t.Errorf("RemoteURL = %q, want original value %q", repository.RemoteURL, "https://github.com/owner/old.git")
+	if repository.RemoteURL != "git@github.com:owner/repo.git" {
+		t.Errorf("RemoteURL = %q, want validated replacement", repository.RemoteURL)
 	}
 }
 

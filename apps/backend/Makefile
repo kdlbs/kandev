@@ -161,7 +161,7 @@ else
   BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' $(NULL_REDIR) || echo unknown)
 endif
 
-VERSION ?= $(shell git describe --tags --always --dirty $(NULL_REDIR) || echo dev)
+VERSION ?= $(shell git describe --tags --match "v[0-9]*" --exclude "*/*" --always --dirty $(NULL_REDIR) || echo dev)
 COMMIT := $(shell git rev-parse HEAD $(NULL_REDIR) || echo unknown)
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
@@ -186,7 +186,7 @@ endif
 DEADCODE_VERSION ?= v0.48.0
 DEADCODE_GO_TOOLCHAIN ?= go1.26.0
 
-.PHONY: all build build-dev build-runtime build-kandev build-all build-agentctl build-agentctl-dev build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-codexdbg codexdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-ui e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet sqlguard check-make-shells help
+.PHONY: all build build-dev build-runtime build-kandev build-kandev-linux build-all build-agentctl build-agentctl-dev build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-codexdbg codexdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-ui e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet sqlguard check-make-shells help
 
 ## Default target
 all: build
@@ -245,6 +245,11 @@ build: build-runtime build-mock-agent build-acpdbg build-codexdbg build-winjob
 build-e2e-delivery-fixture:
 	@$(call MKDIR,$(BUILD_DIR))
 	$(CGO_LOCALE) $(GO) test -c -trimpath -tags fts5 -o $(BUILD_DIR)/e2e-delivery-fixture$(EXE) ./internal/agent/runtime/lifecycle
+
+.PHONY: build-e2e-send-now-fixture
+build-e2e-send-now-fixture:
+	@$(call MKDIR,$(BUILD_DIR))
+	$(CGO_LOCALE) $(GO) test -c -trimpath -tags fts5 -o $(BUILD_DIR)/e2e-send-now-fixture$(EXE) ./internal/orchestrator
 
 ## Build the lean development binary set. Unlike `build`, this does not build
 ## every cross-platform remote helper; dev needs the host helper and, for a
@@ -314,6 +319,14 @@ build-mock-agent-linux:
 	@echo "Building mock-agent for linux/amd64..."
 	@$(call MKDIR,$(BUILD_DIR))
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mock-agent-linux-amd64 ./cmd/mock-agent
+
+## Build the backend for linux/amd64 when the host binary cannot run in the
+## disposable containerized E2E backend. The backend imports the cgo SQLite
+## driver, so this target requires a Linux host with a working C compiler.
+build-kandev-linux:
+	@echo "Building kandev for linux/amd64..."
+	@$(call MKDIR,$(BUILD_DIR))
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 $(GO) build -trimpath $(GOFLAGS) -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/kandev-linux-amd64 ./cmd/kandev
 
 
 ## Package the plugin-fixture SDK plugin (cmd/plugin-fixture) as a kandev
@@ -451,24 +464,9 @@ test-coverage:
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v -coverprofile=coverage.out ./...
 	$(GO) tool cover -html=coverage.out -o coverage.html
 
-## Regenerate Go stubs from proto/kandev/plugin/v1/plugin.proto (§3 of
-## docs/plans/plugins/GRPC-CONTRACT.md). Installs protoc-gen-go and
-## protoc-gen-go-grpc into a local .tools/bin (not committed) and drives them
-## via `go run` buf — no system protoc required. Requires network access for
-## the first run (tool + buf module downloads); output is committed so
-## `go build` never needs this target.
-PROTO_TOOLS_BIN := $(CURDIR)/.tools/bin
-BUF_VERSION := v1.47.2
-PROTOC_GEN_GO_VERSION := v1.36.11
-PROTOC_GEN_GO_GRPC_VERSION := v1.5.1
-
 .PHONY: proto
 proto:
-	@echo "Generating proto stubs..."
-	@$(call MKDIR,$(PROTO_TOOLS_BIN))
-	GOBIN=$(PROTO_TOOLS_BIN) $(GO) install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
-	GOBIN=$(PROTO_TOOLS_BIN) $(GO) install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION)
-	cd proto && PATH="$(PROTO_TOOLS_BIN):$$PATH" $(GO) run github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION) generate
+	$(MAKE) -C ../../pluginsdk proto
 
 ## Run linter (requires golangci-lint)
 lint:

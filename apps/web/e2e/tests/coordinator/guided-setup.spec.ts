@@ -32,6 +32,8 @@ async function reachReview(page: Page, seedData: SeedData) {
   await expect(page.getByTestId("setup-review")).toBeVisible();
 }
 
+test.use({ trace: "retain-on-failure" });
+
 test.describe("Guided setup", () => {
   test("completes six steps with two boards and a goal, Change from Review, then Finish", async ({
     testPage,

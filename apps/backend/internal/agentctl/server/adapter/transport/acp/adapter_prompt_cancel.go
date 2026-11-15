@@ -107,6 +107,12 @@ func (a *Adapter) claimPromptTurnCompletion(turn *promptTurnState) bool {
 	return true
 }
 
+func (a *Adapter) promptTurnWasHandedOff(turn *promptTurnState) bool {
+	a.promptTurnMu.Lock()
+	defer a.promptTurnMu.Unlock()
+	return turn != nil && turn.handedOff
+}
+
 // finishPromptTurn releases whichever turn still owns the physical gate token.
 // Transferred predecessors are harmless no-ops.
 func (a *Adapter) finishPromptTurn(turn *promptTurnState) {

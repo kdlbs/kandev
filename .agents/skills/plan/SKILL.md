@@ -41,6 +41,19 @@ docs/plans/<initiative>/task-<NN>-<short-slug>.md
 
 `plan.md` is the work-package manifest. Each `task-*.md` file is one work order.
 
+## Solution simplicity (KISS)
+
+Choose the simplest solution that fully satisfies current requirements and solves
+the stated problem. Keep the design and work orders proportional to that problem.
+
+- Reuse existing patterns, components, and dependencies.
+- Avoid speculative abstractions, extra layers, configuration, and dependencies
+  for hypothetical future needs.
+- Preserve required correctness, security, compatibility, and failure handling.
+- If added complexity is necessary, identify the current requirement or concrete
+  constraint that needs it. Explain why a simpler approach is insufficient.
+- Before handoff, remove unnecessary scope, indirection, and work-order splits.
+
 ## Workflow
 
 ### 1. Map the change
@@ -96,6 +109,7 @@ State the result, the implementation order, and the reason for that order.
 
 Name exact files, symbols, schema changes, contracts, and integration points.
 Organize this section by implementation boundary or vertical slice.
+Explain why the approach is the simplest sufficient solution.
 
 For a shared provider or adapter path, include a compact compatibility matrix
 covering the provider, transport, identity or capability shape, intended
@@ -253,6 +267,12 @@ each command independently with `(cd <dir> && ...)` or an explicit root reset;
 never rely on a preceding `cd`. Confirm each referenced path exists and stays
 inside the tool or package scope, and that every changed test suite is covered
 before marking Results complete. Record actual results, not planned or stale counts.
+
+When an acceptance criterion defines a benchmark bound, keep the plan and work
+order `in_progress` until the criterion's benchmark procedure satisfies every
+bound. Record measured values and environment caveats; a missed or unmeasured
+bound is not acceptance, and an earlier or different benchmark run cannot
+substitute for it.
 
 Before marking a new plan package complete, run `git diff --check --
 docs/plans/<initiative>` and `git status --short -- docs/plans/<initiative>`;

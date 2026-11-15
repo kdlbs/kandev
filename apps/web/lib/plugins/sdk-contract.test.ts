@@ -31,7 +31,7 @@ import type {
   TaskMenuActionRegistration as PublicTaskMenuActionRegistration,
   TaskMenuSubItemRegistration as PublicTaskMenuSubItemRegistration,
   TaskPanelRegistration as PublicTaskPanelRegistration,
-} from "@kandev/plugin-sdk";
+} from "@kdlbs/plugin-sdk";
 import type {
   ChatTopBarSlotProps as HostChatTopBarSlotProps,
   ChatSubmitDecorationSlotProps as HostChatSubmitDecorationSlotProps,
@@ -169,7 +169,7 @@ describe("public plugin SDK", () => {
     const associationIsCanonical: SameType<ReviewTaskAssociation, PublicReviewTaskAssociation> =
       true;
     // Named-import equality, not just structural: a plugin author writes
-    // `import type { PluginNavSection } from "@kandev/plugin-sdk"` verbatim, and
+    // `import type { PluginNavSection } from "@kdlbs/plugin-sdk"` verbatim, and
     // TS's structural typing can't otherwise tell an inline union from a named export.
     const navSectionIsCanonical: SameType<PluginNavSection, PublicPluginNavSection> = true;
     const mainTopBarSlotPropsAreCanonical: SameType<

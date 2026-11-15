@@ -84,8 +84,10 @@ artifact, and each shard validates that immutable identity after download.
 `KANDEV_E2E_BIN` selects a custom backend binary. The setup still checks the
 local mock agent and other required artifacts.
 
-Recovery tests also require `bin/e2e-delivery-fixture`. The managed runner builds
-it with `make build-e2e-delivery-fixture`. CI and Docker runs use the compiled
+Recovery tests also require `bin/e2e-delivery-fixture`, and Send Now claim-loss
+tests require `bin/e2e-send-now-fixture`. The managed runner builds both with
+`make build-e2e-delivery-fixture build-e2e-send-now-fixture`. CI and Docker runs
+use the compiled
 fixture, so test execution does not require Go. Its test-only source has its own
 freshness check. The fixture fills an isolated, stopped session's retained
 journal to the shipped 256 MiB limit and checks pruning after Retry.
@@ -432,7 +434,7 @@ storage reporting are filtered by the process-scoped ownership label.
 
 ## Mocked vs real
 
-- **Mocked**: Azure DevOps (`KANDEV_MOCK_AZURE_DEVOPS=true`), Jira (`KANDEV_MOCK_JIRA=true`), Linear (`KANDEV_MOCK_LINEAR=true`), GitHub (`KANDEV_MOCK_GITHUB=true`), and the agent process itself (`KANDEV_MOCK_AGENT=only`). These are third-party services or external processes we don't want CI to depend on.
+- **Mocked**: Jira (`KANDEV_MOCK_JIRA=true`), Linear (`KANDEV_MOCK_LINEAR=true`), GitHub (`KANDEV_MOCK_GITHUB=true`), and the agent process itself (`KANDEV_MOCK_AGENT=only`). These are third-party services or external processes we don't want CI to depend on.
 - **Real**: Everything inside the kandev backend — orchestrator, lifecycle manager, agentctl, SSH/SFTP, Docker SDK, Kubernetes API/exec/port-forward, git, and worktree manager. The point of e2e is to exercise the real code paths.
 
 The SSH and Kubernetes executors have no mock controller. SSH tests use a real Docker-hosted sshd target. Kubernetes tests use a real Kind API server, node, scheduler, storage provisioner, Pod exec, and port-forward; fault injection operates on those resources directly.

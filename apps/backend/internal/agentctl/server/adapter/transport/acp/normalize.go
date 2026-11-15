@@ -146,6 +146,11 @@ func (n *Normalizer) NormalizeToolCall(toolName string, args map[string]any) *st
 	default:
 		payload = n.normalizeGeneric(toolName, args)
 	}
+	if generic := payload.Generic(); generic != nil {
+		title, _ := args[argKeyTitle].(string)
+		meta, _ := args[argKeyMeta].(map[string]any)
+		generic.SubagentControl = n.dialect.parseSubagentControl(title, meta, args["raw_input"])
+	}
 	applyAgentEnrichment(n.agentID, payload, enrichFrameFromArgs(args))
 	stampBackgroundShellWork(n.agentID, payload)
 	return payload
@@ -403,6 +408,12 @@ func updateCodeSearchInput(cs *streams.CodeSearchPayload, supplemental, inputMap
 }
 
 func updateSubagentTaskInput(sa *streams.SubagentTaskPayload, inputMap map[string]any) {
+	if v := shared.GetString(inputMap, "name"); v != "" && sa.Name == "" {
+		sa.Name = v
+	}
+	if v := shared.GetString(inputMap, "provider"); v != "" && sa.Provider == "" {
+		sa.Provider = v
+	}
 	if v := shared.GetString(inputMap, subagentKeyDescription); v != "" && sa.Description == "" {
 		sa.Description = v
 	}
@@ -424,23 +435,30 @@ func (n *Normalizer) EnrichFromToolCallUpdate(
 	rawInput any,
 	supplemental map[string]any,
 ) {
-	n.enrichDialectSubagent(payload, meta, rawInput)
+	n.enrichDialectSubagent(payload, title, meta, rawInput)
 	applyAgentEnrichment(n.agentID, payload, enrichFrameFromUpdate(title, meta, rawInput, supplemental))
 }
 
 func (n *Normalizer) enrichDialectSubagent(
 	payload *streams.NormalizedPayload,
+	title *string,
 	meta map[string]any,
 	rawInput any,
 ) {
 	if payload == nil || payload.Kind() != streams.ToolKindSubagentTask {
 		return
 	}
-	frame, ok := n.dialect.parseSubagentFrame(meta, "", rawInput)
+	updateTitle := ""
+	if title != nil {
+		updateTitle = *title
+	}
+	frame, ok := n.dialect.parseSubagentFrame(meta, updateTitle, rawInput)
 	if !ok {
 		return
 	}
 	updateSubagentTaskInput(payload.SubagentTask(), map[string]any{
+		"name":                  frame.name,
+		"provider":              frame.provider,
 		subagentKeyDescription:  frame.description,
 		subagentKeyPrompt:       frame.prompt,
 		subagentKeySubagentType: frame.subagentType,
@@ -630,6 +648,8 @@ func (n *Normalizer) normalizeSubagent(args map[string]any) (*streams.Normalized
 	rawInput := args["raw_input"]
 	if frame, ok := n.dialect.parseSubagentFrame(meta, title, rawInput); ok {
 		payload := streams.NewSubagentTask(frame.description, frame.prompt, frame.subagentType)
+		payload.SubagentTask().Name = frame.name
+		payload.SubagentTask().Provider = frame.provider
 		applySubagentResult(payload.SubagentTask(), frame.result)
 		stampSubagentBackgroundWork(payload, n.agentID)
 		return payload, true
@@ -639,6 +659,9 @@ func (n *Normalizer) normalizeSubagent(args map[string]any) (*streams.Normalized
 		return nil, false
 	}
 	payload := streams.NewSubagentTask(desc, prompt, subagentType)
+	if input, ok := rawInput.(map[string]any); ok {
+		payload.SubagentTask().Name = shared.GetString(input, "name")
+	}
 	if (n.agentID == claudeAgentID || n.agentID == mockAgentID) && isClaudeAgentMeta(meta) {
 		stampSubagentBackgroundWork(payload, n.agentID)
 	}
@@ -662,6 +685,9 @@ func (n *Normalizer) EnrichSubagentResult(payload *streams.NormalizedPayload, me
 	}
 	sa := payload.SubagentTask()
 	res, ok := extractSubagentResult(meta, rawOutput)
+	if copilotResult, copilotOK := n.dialect.parseSubagentResult(rawOutput); copilotOK {
+		res, ok = copilotResult, true
+	}
 	if sa.IsAuggie() {
 		if out, isMap := rawOutput.(map[string]any); isMap {
 			if auggieSubagentResult(out, &res) {

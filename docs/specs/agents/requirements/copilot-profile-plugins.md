@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: agents
 created: 2026-10-27
 owners:
@@ -15,11 +15,24 @@ New Copilot processes load those plugins through the CLI's native plugin support
 The Agents system owns this contract because it owns profile state and provider process configuration.
 Cursor supplies the interaction reference. Its MCP import and credential bridge remain separate capabilities.
 
-Discovery, profile state, and the settings interaction are implemented. Native
-mount permission remains fail-closed until the policy evidence in WO-00 exists.
+Discovery, profile state, settings, and supported native process loading are
+implemented. Copilot owns native policy decisions; Kandev retains version,
+root, executor, and profile-identity validation.
 Implementation was authorized on 2026-10-27. The [system design](../system-design/copilot-profile-plugins.md),
 [implementation plan](../../../plans/copilot-profile-plugins/plan.md), and
 [compatibility evidence](../../../plans/copilot-profile-plugins/compatibility-evidence.md) record delivered behavior and remaining native limitations.
+
+The [completion plan](../../../plans/copilot-profile-plugin-completion/plan.md)
+addresses review findings from PR #4882 and the remaining native-loading work.
+On 2026-10-28 the user confirmed that this follow-up includes native
+qualification and loading, not only the test and recovery-message fixes.
+The user subsequently chose native Copilot policy authority without requiring an
+enterprise-policy fixture as a Kandev release gate, and prohibited administrator
+or system-policy changes. The [decision](../../../decisions/2026-10-28-copilot-native-policy-authority.md)
+records that assurance trade-off. Native policy and credential boundaries remain.
+The same follow-up includes the reported blocked-selection warning and generic
+model-probe failure: users must see the plugin restriction and recovery before
+native loading itself is integrated.
 
 ## Confirmation and design boundaries
 
@@ -42,7 +55,9 @@ Implementation was authorized on 2026-10-27. The [system design](../system-desig
 
 Acceptance criteria below describe the delivered design, including these recommendations.
 They do not claim that the user approved each recommendation.
-Runtime qualification and policy evidence remain open in the paired design.
+The user confirmed contract-based admission on 2026-11-05. The
+[decision](../../../decisions/2026-11-05-copilot-plugin-contract-admission.md)
+supersedes version/platform certification. Native policy evidence remains diagnostic.
 
 ## Terminology
 
@@ -106,6 +121,7 @@ Runtime qualification and policy evidence remain open in the paired design.
 - **AC-AGENTS-COPILOT-PLUGINS-004.5:** Manual plugin-directory flags shall retain their existing meaning. Equal roots shall avoid an extra typed mount. Conflicting roots for the same selected plugin shall fail visibly.
 - **AC-AGENTS-COPILOT-PLUGINS-004.6:** Command preview shall identify deferred plugin mounts without exposing resolved host directories or presenting placeholders as an executable command.
 - **AC-AGENTS-COPILOT-PLUGINS-004.7:** Copilot shall load plugin components and use its native authentication. Existing native user MCP configuration and Kandev ACP-injected servers shall remain usable together.
+- **AC-AGENTS-COPILOT-PLUGINS-004.8:** When plugin preparation rejects a replacement before process handoff, the existing live process shall remain running with its current identity and configuration.
 
 ### REQ-AGENTS-COPILOT-PLUGINS-005: Executor and compatibility boundaries
 
@@ -118,6 +134,15 @@ Runtime qualification and policy evidence remain open in the paired design.
 - **AC-AGENTS-COPILOT-PLUGINS-005.3:** Empty selections shall preserve current executor behavior and require no new plugin command or metadata read.
 - **AC-AGENTS-COPILOT-PLUGINS-005.4:** Inventory and process launch shall preserve Kandev's runtime selection. Unsupported runtimes shall report a reason without switching to a global executable or changing the runtime pin.
 - **AC-AGENTS-COPILOT-PLUGINS-005.5:** Unsupported or identity-changing launch wrappers shall fail clearly for nonempty selections. They shall not trigger a default-home fallback.
+- **AC-AGENTS-COPILOT-PLUGINS-005.6:** Superseded by AC-AGENTS-COPILOT-PLUGINS-005.8 and the native-policy-authority decision; this identifier is not reused. Historical criterion: mount-policy admission was scoped to the exact selected package version, operating system, and architecture. Qualification on another platform did not admit the current host.
+- **AC-AGENTS-COPILOT-PLUGINS-005.7:** Legacy policy-unqualified start responses shall explain an available recovery action. When no qualified runtime exists for that legacy backend, guidance shall explain how to clear the profile selection rather than promise that switching versions will fix the failure. This compatibility behavior does not establish a policy-qualification gate for new loading.
+- **AC-AGENTS-COPILOT-PLUGINS-005.8:** Superseded by AC-AGENTS-COPILOT-PLUGINS-005.11. Historical criterion: supported inventory adapters could attempt loading without enterprise/platform certification, but unknown runtime versions still failed.
+- **AC-AGENTS-COPILOT-PLUGINS-005.9:** Superseded by AC-AGENTS-COPILOT-PLUGINS-005.12. Historical criterion: runtime preview reported exact-version qualification, qualified alternatives, and the count or unknown impact of saved profiles with selections.
+- **AC-AGENTS-COPILOT-PLUGINS-005.10:** The compatibility notice shall remain advisory within the existing runtime approval flow. It shall not alter selections, choose another runtime, or stop a retained process. Successful ACP validation shall not imply compatibility with explicit profile plugins.
+
+- **AC-AGENTS-COPILOT-PLUGINS-005.11:** Compatible selected runtimes shall discover and prepare saved plugins through bounded capability and format checks. An unfamiliar version or an unrecorded operating-system/architecture tuple shall not independently cause rejection. Invalid launch contexts and native incompatibilities shall still fail; native policy remains authoritative.
+- **AC-AGENTS-COPILOT-PLUGINS-005.12:** Runtime preview shall distinguish unchecked compatibility from a demonstrated success or failure. It shall identify the target and saved-profile count, including disabled non-deleted profiles with selections; a failed read means unknown count. Preview shall remain read-only and advisory. Successful ACP validation alone shall not establish plugin compatibility.
+- **AC-AGENTS-COPILOT-PLUGINS-005.13:** Every selected plugin shall pass the supported inventory, installation, identity, and manifest/root checks before preparation succeeds. One invalid selection shall reject a mixed valid/invalid selection without silently omitting any plugin. An invalid unselected row shall not independently reject a valid selected set. A genuine incompatibility shall expose its specific safe reason.
 
 ### REQ-AGENTS-COPILOT-PLUGINS-006: Copilot settings interaction
 
@@ -132,6 +157,12 @@ Runtime qualification and policy evidence remain open in the paired design.
 - **AC-AGENTS-COPILOT-PLUGINS-006.5:** Phone users shall use the same settings route and save flow. Labels shall wrap, targets shall measure at least 44px, and the page shall have no horizontal overflow.
 - **AC-AGENTS-COPILOT-PLUGINS-006.6:** Controls shall support keyboard operation, accessible names, visible unavailable reasons, and status announcements. Desktop controls shall retain standard density.
 - **AC-AGENTS-COPILOT-PLUGINS-006.7:** New UI copy shall use the seven shipped language catalogs, generated Traditional Chinese, and the pseudo-locale.
+- **AC-AGENTS-COPILOT-PLUGINS-006.8:** When a legacy native-plugin policy-qualification response blocks a profile capability or model-option probe, settings shall explain that the plugin selection blocked discovery and how to clear the selection, save, and refresh. The same recovery shall be visible inline on desktop and phone, without requiring logs or hover. The UI shall not attribute this preflight rejection to an unavailable model, failed authentication, or the native enabled status, and shall preserve the configured model and unrelated drafts.
+- **AC-AGENTS-COPILOT-PLUGINS-006.9:** A legacy exact-version unsupported-runtime warning shall identify the selected runtime version and explain the compatibility reason. It shall identify qualified versions when that information is available. Recovery shall explain runtime selection or explicit removal and Save, without promising that Refresh qualifies a runtime. Missing compatibility metadata and stale observations shall use accurate fallback guidance.
+- **AC-AGENTS-COPILOT-PLUGINS-006.10:** Native status shall be unknown for a saved identity absent from the current inventory or without a current successful observation. A fresh native enabled or disabled observation shall retain its actual value. Unavailable roots shall remain distinct from native activation status. Status and recovery shall remain readable inline on desktop and phone.
+
+- **AC-AGENTS-COPILOT-PLUGINS-006.11:** Current capability, inventory, or installation failures shall explain their reason and repair action for the selected runtime. Feedback shall preserve selections and drafts. It shall not recommend removal or downgrade solely because a version is unfamiliar. Stale or unchecked observations shall not claim a current incompatibility.
+- **AC-AGENTS-COPILOT-PLUGINS-006.12:** A plugin preparation failure shall preserve its bounded reason and runtime identity in durable task/session startup feedback. Ordinary and MCP-created starts shall show actionable recovery on desktop and phone, including after reload. The specific cause shall not become only a generic start failure. Private plugin identities, paths, native output, and credentials shall remain excluded.
 
 ### REQ-AGENTS-COPILOT-PLUGINS-007: Native authority and privacy
 
@@ -140,10 +171,11 @@ Runtime qualification and policy evidence remain open in the paired design.
 #### Acceptance criteria
 
 - **AC-AGENTS-COPILOT-PLUGINS-007.1:** Discovery and profile saves shall not run native plugin enable, disable, install, or update commands or edit Copilot configuration.
-- **AC-AGENTS-COPILOT-PLUGINS-007.2:** Plugin loading shall preserve native MCP disables and managed prohibitions. Runtime support shall require evidence that explicit mounts respect these boundaries.
+- **AC-AGENTS-COPILOT-PLUGINS-007.2:** Superseded by AC-AGENTS-COPILOT-PLUGINS-007.6 and the native-policy-authority decision; this identifier is not reused. Historical criterion: "Plugin loading shall preserve native MCP disables and managed prohibitions. Runtime support shall require evidence that explicit mounts respect these boundaries."
 - **AC-AGENTS-COPILOT-PLUGINS-007.3:** Kandev shall not copy credentials, initiate login, reconstruct plugin MCP definitions, or add permission-bypass flags for this feature.
 - **AC-AGENTS-COPILOT-PLUGINS-007.4:** Inventory, errors, logs, caches, and browser contracts shall exclude secret values, raw native output, full configuration files, hook bodies, and MCP definitions.
 - **AC-AGENTS-COPILOT-PLUGINS-007.5:** UI and documentation shall describe explicit additions without promising an exclusive whitelist or guaranteed authentication.
+- **AC-AGENTS-COPILOT-PLUGINS-007.6:** Copilot shall remain the authority for native MCP disables, managed prohibitions, and tool consent. Kandev shall use native plugin loading without changing those controls, adding bypass permissions, or retrying a native rejection through another runtime, transport, or identity. Missing enterprise-policy test evidence shall not independently block a supported native launch, and shall not be represented as verified enforcement.
 
 ## Out of scope
 

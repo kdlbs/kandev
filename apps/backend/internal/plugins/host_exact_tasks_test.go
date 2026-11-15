@@ -14,7 +14,7 @@ import (
 	pluginstore "github.com/kandev/kandev/internal/plugins/store"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	_ "github.com/mattn/go-sqlite3"
 )
 

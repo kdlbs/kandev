@@ -92,9 +92,9 @@ Unknown versions, invalid ownership, hash conflicts, expired cursors, and lost j
 
 ## Agentctl journal
 
-A new package under `internal/agentctl/journal` owns one bbolt database per agentctl owner.
-bbolt provides pure-Go transactions without breaking CGO-disabled remote agentctl builds.
-The implementation pins a compatible maintained version in go.mod and go.sum.
+`internal/agentctl/journal` owns each bbolt database.
+[Journal ownership](durable-agent-journal-ownership.md) defines safe reopening and diagnostics.
+bbolt supports CGO-disabled remote builds. The version is pinned in go.mod.
 
 Buckets contain schema metadata, stream records, normalized events, submissions, acknowledgment cursors, and retired incarnations.
 Each write transaction allocates sequence numbers and persists its records atomically.

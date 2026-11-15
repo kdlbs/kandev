@@ -1,0 +1,18 @@
+{
+  "jsonrpc": "2.0",
+  "method": "github.com/copilot/sessionEvent",
+  "params": {
+    "sessionId": "258e12a9-9e5a-4820-9f20-ee43e895e958",
+    "timestamp": "2026-11-05T23:24:30.657Z",
+    "type": "session.usage_info",
+    "data": {
+      "conversationTokens": 13310,
+      "currentTokens": 13210,
+      "isInitial": true,
+      "messagesLength": 4,
+      "systemTokens": 3833,
+      "tokenLimit": 272000,
+      "toolDefinitionsTokens": 0
+    }
+  }
+}

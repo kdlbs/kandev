@@ -134,26 +134,44 @@ func settleTurnChangeContentReceipt(
 	`), repositoryChangeID, true, repositoryChangeID); err != nil {
 		return receipt, err
 	}
+	var pending int
+	if err := tx.GetContext(ctx, &pending, db.Rebind(`
+		SELECT COUNT(*) FROM turn_file_changes
+		WHERE repository_change_id = ? AND content_availability = ?
+	`), repositoryChangeID, models.TurnChangeAvailabilityPending); err != nil {
+		return receipt, err
+	}
+	receipt.Pending = pending > 0
 	if _, err := tx.ExecContext(ctx, db.Rebind(`UPDATE turn_change_sets SET content_bytes = content_bytes + ?, updated_at = ? WHERE id = ?`), storedPayloadBytes, now, changeSetID); err != nil {
 		return receipt, err
 	}
-	var incomplete int
-	if err := tx.GetContext(ctx, &incomplete, db.Rebind(`
+	var failed int
+	if err := tx.GetContext(ctx, &failed, db.Rebind(`
 		SELECT COUNT(*) FROM turn_file_changes
-		WHERE repository_change_id = ? AND (content_availability <> 'ready' OR content_truncated = ?)
+		WHERE repository_change_id = ? AND content_availability <> ? AND content_availability <> ?
+	`), repositoryChangeID, models.TurnChangeAvailabilityReady, models.TurnChangeAvailabilityPending); err != nil {
+		return receipt, err
+	}
+	var truncated int
+	if err := tx.GetContext(ctx, &truncated, db.Rebind(`
+		SELECT COUNT(*) FROM turn_file_changes
+		WHERE repository_change_id = ? AND content_truncated = ?
 	`), repositoryChangeID, true); err != nil {
 		return receipt, err
 	}
-	receipt.Complete = incomplete == 0
-	if incomplete == 0 {
+	receipt.Complete = pending == 0 && failed == 0 && truncated == 0
+	if receipt.Complete {
+		return receipt, nil
+	}
+	if pending > 0 {
 		return receipt, nil
 	}
 	var reason string
 	if err := tx.GetContext(ctx, &reason, db.Rebind(`
 		SELECT content_reason FROM turn_file_changes
-		WHERE repository_change_id = ? AND (content_availability <> 'ready' OR content_truncated = ?)
+		WHERE repository_change_id = ? AND (content_availability <> ? OR content_truncated = ?)
 		ORDER BY id LIMIT 1
-	`), repositoryChangeID, true); err != nil {
+	`), repositoryChangeID, models.TurnChangeAvailabilityReady, true); err != nil {
 		return receipt, err
 	}
 	receipt.Reason = models.TurnChangeReason(reason)

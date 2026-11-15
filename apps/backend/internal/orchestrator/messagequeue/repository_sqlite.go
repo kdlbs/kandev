@@ -687,6 +687,16 @@ func (r *sqliteRepository) initSchema() error {
 		status_generation     BIGINT NOT NULL DEFAULT 0,
 		next_position         BIGINT NOT NULL DEFAULT 0
 	);
+
+	-- One durable handoff per session. reserveHeadTx decodes claim_json to
+	-- keep FIFO from taking a row an open Send Now claim still owns.
+	CREATE TABLE IF NOT EXISTS queue_send_now_claims (
+		session_id  TEXT PRIMARY KEY,
+		claim_id    TEXT NOT NULL,
+		claim_json  TEXT NOT NULL,
+		accepted    INTEGER NOT NULL DEFAULT 0,
+		created_at  TIMESTAMP NOT NULL
+	);
 	`)
 	if err != nil {
 		return err
@@ -3278,6 +3288,13 @@ func (r *sqliteRepository) reserveHeadTx(
 			continue
 		}
 		if hasLivePlanCommentReservation(msg, identity, time.Now()) {
+			return nil, true, commitReservationDiscardIfNeeded(tx, discardedStaleReservation)
+		}
+		claimOwned, err := r.sendNowClaimOwnsEntryTx(ctx, tx, sessionID, msg.ID)
+		if err != nil {
+			return nil, true, err
+		}
+		if claimOwned {
 			return nil, true, commitReservationDiscardIfNeeded(tx, discardedStaleReservation)
 		}
 		discarded, err := r.discardStaleReservationHead(

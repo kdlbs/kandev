@@ -28,10 +28,19 @@ func (s *Service) handleTaskStateChanged(ctx context.Context, data watcher.TaskE
 	}
 
 	s.processParentChildrenCompletedForTaskState(ctx, data.TaskID, *data.NewState)
-	// Peer dependencies react to the same terminal transitions, but with a
-	// stricter definition of "done": on_children_completed counts FAILED as
-	// terminal, dependency resolution requires success. Keep the two separate.
+	// Both paths observe terminal transitions, then apply their own readiness
+	// rules. Parent workflow completion requires every counted child to succeed;
+	// dependency resolution keeps its separate contract.
 	s.handleTaskDependenciesForTerminalState(ctx, data.TaskID, *data.NewState)
+}
+
+// SetParentChildrenCompletionWakeRecorder records a child wave handled by a
+// committed parent workflow transition, so the Office reconciler does not
+// dispatch the same wake again.
+func (s *Service) SetParentChildrenCompletionWakeRecorder(
+	recorder func(context.Context, string, string, string, string) error,
+) {
+	s.parentChildrenCompletionWakeRecorder = recorder
 }
 
 func (s *Service) processParentChildrenCompletedForTaskState(ctx context.Context, taskID string, state v1.TaskState) {
@@ -150,7 +159,7 @@ func (s *Service) markOfficeTaskCompletedForTerminalStep(ctx context.Context, ta
 			zap.Error(err))
 		return
 	}
-	if models.IsTerminalTaskState(task.State) {
+	if models.IsTerminalTaskState(task.State) || task.State == v1.TaskStateBlocked {
 		unlock()
 		return
 	}
@@ -164,11 +173,13 @@ func (s *Service) markOfficeTaskCompletedForTerminalStep(ctx context.Context, ta
 		TaskID:                 task.ID,
 		NewStatus:              "done",
 		SuppressStatusActivity: true,
+		ExpectedCurrentState:   string(oldState),
+		ExpectedWorkflowStepID: task.WorkflowStepID,
 	})
 	var pending *dashboard.ApprovalsPendingError
 	if err != nil {
 		unlock()
-		if !errors.As(err, &pending) {
+		if !errors.As(err, &pending) && !errors.Is(err, dashboard.ErrAutomaticCompletionStale) {
 			s.logger.Warn("terminal step completion: office status update failed",
 				zap.String("task_id", task.ID),
 				zap.Error(err))
@@ -232,7 +243,15 @@ func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID strin
 	unlock := s.lockChildCompletionOperation(operationID)
 	defer unlock()
 
-	if s.childCompletionAlreadyApplied(ctx, parentID, operationID) {
+	alreadyApplied, err := s.childCompletionAlreadyApplied(ctx, operationID)
+	if err != nil {
+		s.logger.Warn("on_children_completed: failed to check operation idempotency",
+			zap.String("parent_task_id", parentID),
+			zap.String("operation_id", operationID),
+			zap.Error(err))
+		return false
+	}
+	if alreadyApplied {
 		return false
 	}
 
@@ -246,7 +265,15 @@ func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID strin
 		return false
 	}
 
-	appliedTransition := s.applyEngineTransitionWithMode(
+	var onEnterComplete func(bool)
+	if s.parentChildrenCompletionWakeRecorder != nil {
+		onEnterComplete = func(delivered bool) {
+			if delivered {
+				s.recordParentChildrenCompletionWake(context.WithoutCancel(ctx), parentID, rows, operationID)
+			}
+		}
+	}
+	appliedTransition := s.applyEngineTransitionWithModeAndOnEnterCompletion(
 		ctx,
 		parentID,
 		session,
@@ -254,12 +281,52 @@ func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID strin
 		engine.TriggerOnChildrenCompleted,
 		parent.Description,
 		transitionLifecycleWithOnEnter,
+		onEnterComplete,
 	)
 	if !appliedTransition {
 		return false
 	}
 	s.markChildCompletionApplied(ctx, parentID, operationID, "transition")
 	return true
+}
+
+func (s *Service) recordParentChildrenCompletionWake(
+	ctx context.Context,
+	parentID string,
+	rows []models.ChildCompletionRow,
+	operationID string,
+) {
+	if s.parentChildrenCompletionWakeRecorder == nil {
+		return
+	}
+	childSetKey, generation := childCompletionReceiptIdentity(rows)
+	if err := s.parentChildrenCompletionWakeRecorder(ctx, parentID, childSetKey, generation, operationID); err != nil {
+		s.logger.Warn("on_children_completed: failed to record parent wake receipt",
+			zap.String("parent_task_id", parentID), zap.String("operation_id", operationID), zap.Error(err))
+	}
+}
+
+func childCompletionReceiptIdentity(rows []models.ChildCompletionRow) (string, string) {
+	ordered := append([]models.ChildCompletionRow(nil), rows...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
+	var key strings.Builder
+	var newest time.Time
+	for i, row := range ordered {
+		if i > 0 {
+			key.WriteByte(',')
+		}
+		key.WriteString(row.ID)
+		key.WriteByte(':')
+		key.WriteString(string(row.State))
+		if row.UpdatedAt.After(newest) {
+			newest = row.UpdatedAt
+		}
+	}
+	generation := ""
+	if !newest.IsZero() {
+		generation = newest.UTC().Format("2006-01-02 15:04:05")
+	}
+	return key.String(), generation
 }
 
 func (s *Service) readyChildCompletionRows(ctx context.Context, parentID string) ([]models.ChildCompletionRow, bool) {
@@ -270,7 +337,7 @@ func (s *Service) readyChildCompletionRows(ctx context.Context, parentID string)
 			zap.Error(err))
 		return nil, false
 	}
-	if len(rows) == 0 || !allChildrenTerminal(rows) {
+	if len(rows) == 0 || !allChildrenCompleted(rows) {
 		return nil, false
 	}
 	return rows, true
@@ -298,16 +365,8 @@ func (s *Service) parentCompletionContext(ctx context.Context, parentID string) 
 	return parent, session, true
 }
 
-func (s *Service) childCompletionAlreadyApplied(ctx context.Context, parentID, operationID string) bool {
-	applied, err := s.workflowStore.IsOperationApplied(ctx, operationID)
-	if err != nil {
-		s.logger.Warn("on_children_completed: failed to check operation idempotency",
-			zap.String("parent_task_id", parentID),
-			zap.String("operation_id", operationID),
-			zap.Error(err))
-		return true
-	}
-	return applied
+func (s *Service) childCompletionAlreadyApplied(ctx context.Context, operationID string) (bool, error) {
+	return s.workflowStore.IsOperationApplied(ctx, operationID)
 }
 
 type childCompletionOperationLock struct {
@@ -380,15 +439,17 @@ func (s *Service) markChildCompletionApplied(ctx context.Context, parentID, oper
 	}
 }
 
-func allChildrenTerminal(rows []models.ChildCompletionRow) bool {
+func allChildrenCompleted(rows []models.ChildCompletionRow) bool {
 	for _, row := range rows {
-		if !models.IsTerminalTaskState(row.State) {
+		if row.State != v1.TaskStateCompleted {
 			return false
 		}
 	}
 	return true
 }
 
+// workflowStepIsTerminal answers the completing-step question used for task
+// lifecycle decisions, not whether the step has the greatest position.
 func (s *Service) workflowStepIsTerminal(ctx context.Context, workflowStepID string) bool {
 	if s.workflowStepGetter == nil || workflowStepID == "" {
 		return false
@@ -404,12 +465,13 @@ func (s *Service) workflowStepIsTerminal(ctx context.Context, workflowStepID str
 			zap.Error(err))
 		return false
 	}
-	return wfmodels.IsTerminalStep(step, nextStep)
+	// Child completion can advance a parent only from a completing step.
+	return wfmodels.CompletesTaskOnEnter(step, nextStep)
 }
 
 // childCompletionPayload builds the engine payload for an
 // on_children_completed dispatch. rows arrive ordered by created_at (see
-// ListChildCompletionRows) with terminality already confirmed by the
+// ListChildCompletionRows) with successful completion already confirmed by the
 // caller's single read (readyChildCompletionRows) — that same read is
 // what the wave identity is derived from, so this function only re-sorts
 // a copy of rows ascending by id before deriving it; it performs no read

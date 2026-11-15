@@ -82,7 +82,7 @@ type DiscardWorktreeChangesOptionProps = {
   onCheckedChange: (checked: boolean) => void;
 };
 
-function DiscardWorktreeChangesOption({
+export function DiscardWorktreeChangesOption({
   unknown,
   enabled,
   checked,
@@ -231,7 +231,7 @@ function useResetDiscardWorktreeChanges(resetKey: string, reset: (checked: boole
   }, [resetKey, reset]);
 }
 
-function PreflightStatusBanner({
+export function PreflightStatusBanner({
   status,
   onRetry,
 }: {
@@ -484,7 +484,7 @@ export function TaskDeleteConfirmDialog({
   );
 }
 
-function canConfirmDeletion(
+export function canConfirmDeletion(
   isDeleting: boolean | undefined,
   ready: boolean,
   ticket: string,

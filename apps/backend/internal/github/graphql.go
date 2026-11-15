@@ -274,11 +274,41 @@ type batchedBranchPRNode struct {
 	batchedPRResult
 }
 
+// graphQLPath is one error path. GraphQL mixes field aliases (strings) with
+// list indices (numbers), so decode either form into a string segment.
+type graphQLPath []string
+
+func (p *graphQLPath) UnmarshalJSON(data []byte) error {
+	if string(data) == jsonNullLiteral {
+		*p = nil
+		return nil
+	}
+	var raw []json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	segments := make([]string, 0, len(raw))
+	for _, segment := range raw {
+		var text string
+		if err := json.Unmarshal(segment, &text); err == nil {
+			segments = append(segments, text)
+			continue
+		}
+		var number json.Number
+		if err := json.Unmarshal(segment, &number); err != nil {
+			return fmt.Errorf("decode graphql path segment: %w", err)
+		}
+		segments = append(segments, number.String())
+	}
+	*p = segments
+	return nil
+}
+
 // graphQLError mirrors a single entry in a GraphQL response's "errors" array.
 type graphQLError struct {
-	Message string   `json:"message"`
-	Type    string   `json:"type"`
-	Path    []string `json:"path"`
+	Message string      `json:"message"`
+	Type    string      `json:"type"`
+	Path    graphQLPath `json:"path"`
 }
 
 // graphQLPayloadRateLimited detects GitHub's application-level throttling

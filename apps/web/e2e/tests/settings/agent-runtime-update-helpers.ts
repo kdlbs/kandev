@@ -56,17 +56,54 @@ type UpdatePreview = {
   available_versions?: Array<{ version: string; latest: boolean }>;
   command: string[];
   command_string: string;
+  reviewed_runtime?: {
+    runtime_id: string;
+    package: string;
+    current_version?: string;
+    effective_version?: string;
+    active_version?: string;
+    family?: string;
+    source?: string;
+    runtime_revision?: number;
+  };
+  copilot_plugin_compatibility?: {
+    runtime_version: string;
+    state?: "not_checked" | "compatible" | "incompatible";
+    selected_profile_count: number | null;
+  };
 };
 
 export type RuntimeUpdateStatus = {
   update_mode: UpdateMode;
   agent_name: string;
+  display_name?: string;
+  runtime_id?: string;
+  owner?: "kandev" | "external" | "none";
+  mechanism?: string;
+  management?: "managed" | "manual" | "unsupported";
+  source?: string;
+  guidance_url?: string;
+  available?: boolean;
+  enabled?: boolean;
+  auto_update_supported?: boolean;
+  auto_update?: boolean;
   package: string;
   default_version: string;
   active_version?: string;
   effective_version: string;
   latest_version?: string;
   checked_at?: string;
+  last_outcome?: {
+    id: string;
+    status: "running" | "succeeded" | "failed" | "interrupted";
+    previous_version: string;
+    target_version: string;
+    finished_at: string;
+  };
+  family?: "v1" | "v2";
+  runtime_source?: "managed" | "native";
+  runtime_revision?: number;
+  migration_available?: boolean;
   check_state: "update_available" | "up_to_date" | "unknown";
 };
 
@@ -189,17 +226,34 @@ function previewForRequest(
 ): UpdatePreview {
   if (useDefault) {
     const defaultVersion = previewResponse.default_version ?? "0.64.0";
-    return {
-      ...previewResponse,
-      target_version: defaultVersion,
-      operation: "use_default",
-    };
+    return withTarget(previewResponse, defaultVersion, "use_default");
   }
   if (!requestedTarget) return previewResponse;
+  return withTarget(
+    previewResponse,
+    requestedTarget,
+    operationForTarget(previewResponse.current_version, requestedTarget),
+  );
+}
+
+function withTarget(
+  previewResponse: UpdatePreview,
+  targetVersion: string,
+  operation: UpdateOperation,
+): UpdatePreview {
+  const compatibility = previewResponse.copilot_plugin_compatibility;
   return {
     ...previewResponse,
-    target_version: requestedTarget,
-    operation: operationForTarget(previewResponse.current_version, requestedTarget),
+    target_version: targetVersion,
+    operation,
+    ...(compatibility
+      ? {
+          copilot_plugin_compatibility: {
+            ...compatibility,
+            runtime_version: targetVersion,
+          },
+        }
+      : {}),
   };
 }
 
@@ -353,6 +407,14 @@ function defaultRuntimeUpdatePreview(config: RuntimeUpdateFixtureConfig): Update
       "",
     ],
     command_string: `npm exec --yes --prefer-online --package=${packageName} -- node -e ""`,
+    reviewed_runtime: {
+      runtime_id: `npm:${packageName}`,
+      package: packageName,
+      current_version: currentVersion,
+      effective_version: currentVersion,
+      active_version: currentVersion,
+      source: "managed",
+    },
   };
 }
 
@@ -390,6 +452,17 @@ function initialRuntimeUpdateState(
         {
           update_mode: config.mode,
           agent_name: config.agentName,
+          display_name: config.displayName,
+          runtime_id:
+            config.mode === "self_update" ? config.agentName : `npm:${config.packageName}`,
+          owner: config.mode === "self_update" ? "external" : "kandev",
+          mechanism: config.mode === "self_update" ? "native" : "npm_candidate",
+          management: config.mode === "self_update" ? "manual" : "managed",
+          source: config.packageName,
+          available: true,
+          enabled: true,
+          auto_update_supported: config.mode !== "self_update",
+          auto_update: false,
           package: config.packageName,
           default_version: config.defaultVersion,
           active_version: config.currentVersion,

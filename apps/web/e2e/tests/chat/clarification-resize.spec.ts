@@ -38,6 +38,7 @@ test.describe("Mock agent clarification slash commands", () => {
 
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
     await session.clarificationOption("PostgreSQL").click();
+    await session.submitClarification();
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 
@@ -92,9 +93,9 @@ test.describe("Clarification overlay resizable layout", () => {
     const container = testPage.getByTestId("clarification-overlay-container");
     await expect(container).toBeVisible();
 
-    // The container now also carries the persistent header row (collapse
-    // toggle + waiting count), so it no longer scrolls itself — the nested
-    // scroll region below the header does.
+    // The container also carries the persistent header row (size toggle,
+    // collapse toggle + waiting count), so it does not scroll itself — the
+    // nested scroll region below the header does.
     const scrollRegion = container.getByTestId("clarification-scroll-region");
     const initial = await container.evaluate((el) => {
       return {
@@ -107,9 +108,34 @@ test.describe("Clarification overlay resizable layout", () => {
     // Default state: no inline height → container sizes to its content.
     expect(initial.inlineHeight).toBe("");
     // Sanity check: content-sized overlay is at least tall enough for the
-    // question card but well under the 35vh safety cap.
+    // question card but well under the 50vh safety cap.
     expect(initial.height).toBeGreaterThan(200);
     expect(initial.height).toBeLessThan(3000 * 0.5);
+
+    const toggle = testPage.getByTestId("clarification-panel-size-toggle");
+    await expect(toggle).toHaveCount(1);
+    await expect(toggle).toHaveAttribute("aria-label", "Expand");
+    await expect(toggle).toBeEnabled();
+
+    // The tooltip explains the same action as the accessible name.
+    await testPage.mouse.move(0, 0);
+    await toggle.hover();
+    await expect(testPage.getByRole("tooltip").first()).toContainText("Expand");
+    await testPage.mouse.move(0, 0);
+
+    // Keyboard activation expands to the measured host and keeps focus on the
+    // same control while its next action becomes Restore.
+    await toggle.focus();
+    await testPage.keyboard.press("Enter");
+    const hostMax = Number(await container.getAttribute("data-host-max-height"));
+    await expect(container).toHaveCSS("height", `${hostMax}px`);
+    await expect(toggle).toHaveAttribute("aria-label", "Restore");
+    await expect(toggle).toBeFocused();
+
+    await toggle.focus();
+    await testPage.keyboard.press("Space");
+    await expect.poll(() => container.evaluate((el) => (el as HTMLElement).style.height)).toBe("");
+    await expect(toggle).toHaveAttribute("aria-label", "Expand");
 
     const handle = container.locator("xpath=..").locator("button[aria-label='Resize']");
     await expect(handle).toBeVisible();
@@ -134,12 +160,18 @@ test.describe("Clarification overlay resizable layout", () => {
     // Allow ±10px tolerance for rounding / mouse event coalescing.
     expect(afterDrag.height).toBeGreaterThan(initial.height + dragDistance - 10);
 
-    const hostMax = Number(await container.getAttribute("data-host-max-height"));
     expect(hostMax).toBeGreaterThan(afterDrag.height);
-    const expand = testPage.getByTestId("clarification-panel-expand");
-    await expect(expand).toBeEnabled();
-    await expand.click();
+    await expect(toggle).toBeEnabled();
+    await toggle.click();
     await expect(container).toHaveCSS("height", `${hostMax}px`);
+    await expect(toggle).toHaveAttribute("aria-label", "Restore");
+
+    // Restore returns to the manual height the user selected, not the cap.
+    await toggle.click();
+    await expect
+      .poll(() => container.evaluate((el) => (el as HTMLElement).style.height))
+      .toBe(afterDrag.inlineHeight);
+    await expect(toggle).toHaveAttribute("aria-label", "Expand");
 
     // Double-click the handle → back to auto-sized.
     await handle.dblclick();
@@ -149,6 +181,86 @@ test.describe("Clarification overlay resizable layout", () => {
     }));
     expect(afterReset.inlineHeight).toBe("");
     expect(Math.abs(afterReset.height - initial.height)).toBeLessThanOrEqual(2);
+  });
+
+  test("follows host contraction while expanded and keeps Restore usable", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.setViewportSize({ width: 1280, height: 1100 });
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Resize Host Changes",
+    );
+
+    await session.sendMessage("/e2e:clarification-markdown");
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    const container = session.clarificationBar();
+    const toggle = container.getByTestId("clarification-panel-size-toggle");
+    await expect(toggle).toHaveAttribute("aria-label", "Expand");
+    await expect(toggle).toBeEnabled();
+    await toggle.click();
+    const hostBefore = Number(await container.getAttribute("data-host-max-height"));
+    await expect(container).toHaveCSS("height", `${hostBefore}px`);
+
+    await testPage.setViewportSize({ width: 1280, height: 700 });
+    await expect
+      .poll(async () => Number(await container.getAttribute("data-host-max-height")))
+      .toBeLessThan(hostBefore);
+    await expect
+      .poll(() =>
+        container.evaluate((element) => {
+          const host = Number((element as HTMLElement).dataset.hostMaxHeight);
+          return Math.abs(element.getBoundingClientRect().height - host) <= 1;
+        }),
+      )
+      .toBe(true);
+    await expect(toggle).toHaveAttribute("aria-label", "Restore");
+    await expect(toggle).toBeEnabled();
+
+    await toggle.focus();
+    await testPage.keyboard.press("Enter");
+    await expect.poll(() => container.evaluate((el) => (el as HTMLElement).style.height)).toBe("");
+    await expect(toggle).toHaveAttribute("aria-label", "Expand");
+    await expect(toggle).toBeFocused();
+  });
+
+  test("keeps Expand visible but disabled when the host has no spare space", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.setViewportSize({ width: 1280, height: 420 });
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Resize No Headroom",
+    );
+
+    await session.sendMessage("/e2e:clarification-markdown");
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    const container = session.clarificationBar();
+    const toggle = container.getByTestId("clarification-panel-size-toggle");
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-label", "Expand");
+    await expect(toggle).toBeDisabled();
+
+    const geometry = await container.evaluate((element) => ({
+      hostMax: Number((element as HTMLElement).dataset.hostMaxHeight),
+      height: element.getBoundingClientRect().height,
+      inlineHeight: (element as HTMLElement).style.height,
+    }));
+    expect(geometry.inlineHeight).toBe("");
+    expect(geometry.hostMax).toBeGreaterThan(0);
+    expect(geometry.height).toBeGreaterThanOrEqual(geometry.hostMax - 1);
   });
 
   // The initial 50vh cap remains the default. Manual resizing can use only

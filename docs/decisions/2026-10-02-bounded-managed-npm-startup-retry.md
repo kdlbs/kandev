@@ -51,6 +51,11 @@ It also adds that verified condition to host capability-probe eligibility;
 other probe failures remain strict ETARGET-only.
 It does not authorize mutation or deletion of a shared runtime tree.
 
+The [incomplete-cache extension](2026-11-07-isolated-managed-npm-cache-recovery.md)
+also permits private preparation for an independently verified missing
+execution-tree root manifest. It includes managed ACP and native Codex app-server paths.
+Its implementation is delivered; shared-tree protection remains mandatory.
+
 ## Alternatives considered
 
 - A global launch mutex: delays healthy sessions and does not establish the reported cause.

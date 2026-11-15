@@ -28,6 +28,14 @@ func (r *summaryTurnChangesRepository) GetTurnChangeSet(context.Context, string,
 	return &models.TurnChangeSet{TerminalAt: &at}, nil
 }
 
+func (*summaryTurnChangesRepository) ListTurnRepositoryChanges(context.Context, string) ([]*models.TurnRepositoryChangeSet, error) {
+	return nil, nil
+}
+
+func (*summaryTurnChangesRepository) SettleTurnChangeContentProgress(context.Context, string) error {
+	return nil
+}
+
 type runtimeSummaryPublisher struct {
 	err error
 	ids []string
@@ -49,9 +57,9 @@ func TestRuntimeTurnChangeSummaryProcessing(t *testing.T) {
 		readErr, publishErr, wantErr error
 		wantPublications             int
 	}{
-		{name: "missing set", readErr: missing, publishErr: missing, wantPublications: 1},
-		{name: "set removed before publication", publishErr: missing, wantPublications: 1},
-		{name: "present set", wantPublications: 1},
+		{name: "missing set", readErr: missing, publishErr: missing, wantPublications: 2},
+		{name: "set removed before publication", publishErr: missing, wantPublications: 2},
+		{name: "present set", wantPublications: 2},
 		{name: "publication retry", publishErr: publicationErr, wantErr: publicationErr, wantPublications: 1},
 		{name: "processing retry", readErr: storageErr, wantErr: storageErr},
 	} {
@@ -68,7 +76,7 @@ func TestRuntimeTurnChangeSummaryProcessing(t *testing.T) {
 			if tc.publishErr == publicationErr {
 				publisher.err = nil
 				require.NoError(t, handler.ProcessTurnChanges(t.Context(), terminal, nil))
-				require.Len(t, publisher.ids, 2)
+				require.Len(t, publisher.ids, 3)
 			}
 		})
 	}

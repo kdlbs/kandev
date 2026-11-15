@@ -1,6 +1,7 @@
 import { expect, test } from "../../fixtures/docker-test-base";
 import { E2E_IMAGE_TAG } from "../../fixtures/docker-probe";
 import { dockerFileContent } from "../../helpers/docker";
+import { managedRuntimePackageSpec } from "../../helpers/managed-runtime-catalogue";
 import {
   disableNativeCodexAppServer,
   createNativeCodexExecutorProbe,
@@ -45,8 +46,8 @@ test("native Codex profile is gated and launches through the Docker executor", a
     const environment = await apiClient.getTaskEnvironment(taskId);
     expect(environment?.executor_type).toBe("local_docker");
     expect(environment?.container_id).toBeTruthy();
-    expect(dockerFileContent(environment!.container_id!, probe.markerPath)).toMatch(
-      /@openai\/codex@0\.154\.0 app-server/,
+    expect(dockerFileContent(environment!.container_id!, probe.markerPath)).toContain(
+      `${managedRuntimePackageSpec("@openai/codex")} app-server`,
     );
 
     await disableNativeCodexAppServer(backend, apiClient, probe.profile.id);

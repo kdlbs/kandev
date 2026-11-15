@@ -17,31 +17,9 @@ import (
 	authstore "github.com/kandev/kandev/internal/auth/store"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/gitcredentials"
+	"github.com/kandev/kandev/internal/githubauth"
 	userstore "github.com/kandev/kandev/internal/user/store"
 )
-
-// resolveCredentialLeaseBody mirrors the JSON shape httpResolveCredentialLease
-// binds against (controller_auth.go); BrokerCredentialRequest itself carries
-// no json tags, so it cannot be marshaled directly for this HTTP-level test.
-type resolveCredentialLeaseBody struct {
-	Lease        string `json:"lease"`
-	TaskID       string `json:"task_id"`
-	SessionID    string `json:"session_id"`
-	RepositoryID string `json:"repository_id"`
-	Owner        string `json:"owner"`
-	Repo         string `json:"repo"`
-	Host         string `json:"host"`
-}
-
-type reissueCredentialLeaseBody struct {
-	Capability   string `json:"capability"`
-	TaskID       string `json:"task_id"`
-	SessionID    string `json:"session_id"`
-	RepositoryID string `json:"repository_id"`
-	Owner        string `json:"owner"`
-	Repo         string `json:"repo"`
-	Host         string `json:"host"`
-}
 
 // newEnabledAuthService builds a real auth.Service in enabled mode (flag on,
 // admin provisioned) so the broker HTTP test below exercises the production
@@ -116,7 +94,7 @@ func TestCredentialBrokerRoutesPassRealAuthMiddleware(t *testing.T) {
 	})
 
 	t.Run("POST with a valid lease redeems a credential", func(t *testing.T) {
-		body, err := json.Marshal(resolveCredentialLeaseBody{
+		body, err := json.Marshal(githubauth.CredentialBrokerRequest{
 			Lease: lease.Token, TaskID: "task-1", SessionID: "session-1",
 			RepositoryID: "repository-1", Owner: "kdlbs", Repo: "kandev", Host: "github.com",
 		})
@@ -143,7 +121,7 @@ func TestCredentialBrokerRoutesPassRealAuthMiddleware(t *testing.T) {
 	})
 
 	t.Run("POST with an invalid lease is denied by the broker, not the middleware", func(t *testing.T) {
-		body, err := json.Marshal(resolveCredentialLeaseBody{
+		body, err := json.Marshal(githubauth.CredentialBrokerRequest{
 			Lease: "not-a-real-lease", TaskID: "task-1", SessionID: "session-1",
 			RepositoryID: "repository-1", Owner: "kdlbs", Repo: "kandev", Host: "github.com",
 		})
@@ -178,7 +156,7 @@ func TestGenericCredentialBrokerRoutesUseProviderNeutralContract(t *testing.T) {
 		t.Fatalf("generic readiness status = %d body=%s, want %d", readyRec.Code, readyRec.Body.String(), http.StatusNoContent)
 	}
 
-	body, err := json.Marshal(resolveCredentialLeaseBody{
+	body, err := json.Marshal(githubauth.CredentialBrokerRequest{
 		Lease: lease.Token, TaskID: "task-1", SessionID: "session-1",
 		RepositoryID: "repository-1", Owner: "kdlbs", Repo: "kandev", Host: "github.com",
 	})
@@ -193,7 +171,7 @@ func TestGenericCredentialBrokerRoutesUseProviderNeutralContract(t *testing.T) {
 		t.Fatalf("generic resolve status = %d body=%s, want %d", record.Code, record.Body.String(), http.StatusOK)
 	}
 
-	invalidBody, err := json.Marshal(resolveCredentialLeaseBody{
+	invalidBody, err := json.Marshal(githubauth.CredentialBrokerRequest{
 		Lease: "invalid", TaskID: "task-1", SessionID: "session-1",
 		RepositoryID: "repository-1", Owner: "kdlbs", Repo: "kandev", Host: "github.com",
 	})
@@ -225,7 +203,7 @@ func TestCredentialBrokerReissueRouteAcceptsOnlyScopedCapability(t *testing.T) {
 		t.Fatalf("IssueWithReissueCapability() error = %v", err)
 	}
 	router := newBrokerHTTPTestRouter(t, broker)
-	post := func(body reissueCredentialLeaseBody) *httptest.ResponseRecorder {
+	post := func(body githubauth.CredentialBrokerRequest) *httptest.ResponseRecorder {
 		raw, marshalErr := json.Marshal(body)
 		if marshalErr != nil {
 			t.Fatalf("marshal reissue request: %v", marshalErr)
@@ -236,11 +214,11 @@ func TestCredentialBrokerReissueRouteAcceptsOnlyScopedCapability(t *testing.T) {
 		router.ServeHTTP(rec, req)
 		return rec
 	}
-	request := reissueCredentialLeaseBody{Capability: capability.Token, TaskID: "task-1", SessionID: "session-1", RepositoryID: "repository-1", Owner: "kdlbs", Repo: "kandev", Host: "github.com"}
+	request := githubauth.CredentialBrokerRequest{ReissueCapability: capability.Token, TaskID: "task-1", SessionID: "session-1", RepositoryID: "repository-1", Owner: "kdlbs", Repo: "kandev", Host: "github.com"}
 	if rec := post(request); rec.Code != http.StatusOK {
 		t.Fatalf("valid reissue status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	request.Capability += "forged"
+	request.ReissueCapability += "forged"
 	if rec := post(request); rec.Code != http.StatusUnauthorized || !bytes.Contains(rec.Body.Bytes(), []byte("github_credential_reissue_denied")) {
 		t.Fatalf("forged reissue status/body = %d/%s", rec.Code, rec.Body.String())
 	}

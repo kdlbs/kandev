@@ -248,7 +248,10 @@ func TestInjectedKandevPermissionPolicyRejectsUntrustedRequests(t *testing.T) {
 }
 
 func TestInjectedKandevPermissionPolicyUsesConfiguredMCPHost(t *testing.T) {
-	cfg := (&config.Config{AuthToken: "test-token", ListenHostOverride: "192.0.2.10"}).NewInstanceConfig(43210, nil)
+	cfg, err := (&config.Config{AuthToken: "test-token", ListenHostOverride: "192.0.2.10"}).NewInstanceConfig(43210, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !injectedKandevMCPConfigured(cfg) {
 		t.Fatal("generated configured-host MCP endpoints were not recognized as injected")
 	}

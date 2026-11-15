@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TaskDetailRoute } from "./task-detail-route";
@@ -287,7 +287,8 @@ describe("TaskDetailRoute session selection", () => {
       })
       .mockResolvedValueOnce(identity);
     renderTaskRoute(<TaskDetailRoute taskId={TASK_ONE_ID} sessionId="session-1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    const unavailable = await screen.findByTestId("task-session-unavailable");
+    fireEvent.click(within(unavailable).getByRole("button", { name: "Retry" }));
     await waitFor(() =>
       expect(
         screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute(SESSION_DATA_ATTRIBUTE),

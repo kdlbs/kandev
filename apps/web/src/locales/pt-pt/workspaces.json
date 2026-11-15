@@ -12,7 +12,7 @@
   "localRepository": "Repositório local",
   "localRepositoryMenuDescription": "Use um checkout Git que já existe nesta máquina.",
   "remoteRepositoryBranchHint": "O ramo selecionado passa a ser o ramo base predefinido do repositório. Pode alterá-lo depois de guardar.",
-  "remoteRepositoryMenuDescription": "Registe um repositório do GitHub, GitLab, Azure DevOps ou de um fornecedor de plugin ligado.",
+  "remoteRepositoryMenuDescription": "Registe um repositório do GitHub, GitLab ou de um fornecedor de plugin ligado.",
   "addScript": "Adicionar script",
   "addWorkspace": "Adicionar área de trabalho",
   "alwaysPullBeforeWorktree": "Fazer sempre pull antes de criar um novo worktree",

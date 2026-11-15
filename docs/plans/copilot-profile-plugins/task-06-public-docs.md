@@ -1,7 +1,7 @@
 ---
 id: "06-public-docs"
 title: "Document Copilot profile plugin behavior and limits"
-status: pending
+status: done
 wave: 7
 depends_on: ["03-acp-process-loading", "04-profile-process-parity", "05-profile-ui"]
 plan: "plan.md"
@@ -15,10 +15,11 @@ acceptance_criteria:
   - AC-AGENTS-COPILOT-PLUGINS-004.6
   - AC-AGENTS-COPILOT-PLUGINS-005.2
   - AC-AGENTS-COPILOT-PLUGINS-005.4
+  - AC-AGENTS-COPILOT-PLUGINS-005.8
   - AC-AGENTS-COPILOT-PLUGINS-006.4
   - AC-AGENTS-COPILOT-PLUGINS-007.1
-  - AC-AGENTS-COPILOT-PLUGINS-007.2
   - AC-AGENTS-COPILOT-PLUGINS-007.5
+  - AC-AGENTS-COPILOT-PLUGINS-007.6
 system_design:
   - ../../specs/agents/system-design/copilot-profile-plugins.md
 ---
@@ -27,7 +28,8 @@ system_design:
 
 ## Summary
 
-Document the delivered feature using the actual qualified runtime/source matrix and tested UI labels.
+Document the delivered feature using supported adapter/source mappings, actual
+native diagnostics, native policy authority, and tested UI labels.
 Keep current public behavior separate from unsupported or untested native combinations.
 
 ## In scope
@@ -100,7 +102,23 @@ An observed version on another machine is not proof for the current managed pack
 
 ## Results
 
-Pending 2026-10-28. Public docs now describe the policy gate and do not claim native mounting support.
+Follow-up execution is mapped to
+[completion task 05](../copilot-profile-plugin-completion/task-05-settings-and-support-docs.md).
+Support claims and final counts must be reconciled with native diagnostics
+and process-boundary results, not just the earlier UI acceptance. Missing
+enterprise-policy certification is a disclosed limitation, not a launch gate.
+The independent completion WO-02 owns the earlier recovery-only documentation
+update; that does not complete this native-support publication work order.
+
+Completed through completion WO-05 after WO-04 delivered native loading.
+The existing how-to now matches supported native-authority preparation,
+version bounds, next-process scope, native ownership, unsupported/legacy repair,
+and actual diagnostic limitations. Final desktop 7/7 and phone 5/5 settings
+checks passed with fresh host builds; public validators passed 63 tests and
+54 pages. Completion WO-05 records exact commands and final checks; its plan
+records the primary's final catalog/spec/coverage reconciliation.
+
+### Historical recovery-only documentation results
 
 - Added a Copilot plugin how-to section to `docs/public/agents-and-profiles.md` covering selection, Refresh, Save/Reset, missing-plugin repair, whole-plugin execution, additive semantics, local/worktree scope, next-process timing, runtime qualification, and the deferred command preview.
 - Documented native authentication/MCP policy ownership and the absence of credential copying or plugin management.

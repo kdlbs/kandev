@@ -38,18 +38,64 @@ const (
 	CleanupInspectionReasonCommitMismatch        = "commit_mismatch"
 )
 
+// Cleanup conflict comparisons describe the immutable recorded identity and
+// the current Git evidence that disagreed.
+const (
+	CleanupComparisonRecordedRegistration = "recorded_registration_vs_current_registration"
+	CleanupComparisonRecordedCommit       = "recorded_commit_vs_current_ref"
+	CleanupComparisonRecordedCommitAbsent = "recorded_commit_unavailable"
+)
+
+// Cleanup inspection actions tell an operator how to inspect the conflict
+// without implying that deletion is authorized.
+const (
+	CleanupInspectionActionInspectRegistration = "inspect_registration_ownership"
+	CleanupInspectionActionCompareCommit       = "compare_recorded_commit"
+	CleanupInspectionActionInspectMissing      = "inspect_missing_recorded_evidence"
+)
+
 // CleanupInspectionError classifies a failure encountered during worktree cleanup inspection.
 type CleanupInspectionError struct {
-	Stage  string
-	Reason string
-	Err    error
+	Stage            string
+	Reason           string
+	WorktreeID       string
+	Comparison       string
+	Action           string
+	RecordedEvidence bool
+	ObservedEvidence bool
+	Err              error
 }
 
 func (e *CleanupInspectionError) Error() string {
 	if e == nil {
 		return ""
 	}
-	return fmt.Sprintf("worktree cleanup inspection failed at %s (%s)", e.Stage, e.Reason)
+	message := fmt.Sprintf("worktree cleanup inspection failed at %s (%s)",
+		boundedCleanupInspectionField(e.Stage), boundedCleanupInspectionField(e.Reason))
+	if e.WorktreeID != "" {
+		message += fmt.Sprintf("; worktree_id=%s", boundedCleanupInspectionField(e.WorktreeID))
+	}
+	if e.Comparison != "" {
+		message += fmt.Sprintf(" comparison=%s", boundedCleanupInspectionField(e.Comparison))
+	}
+	if e.Action != "" {
+		message += fmt.Sprintf(" action=%s", boundedCleanupInspectionField(e.Action))
+	}
+	return message
+}
+
+func boundedCleanupInspectionField(value string) string {
+	const limit = 64
+	value = strings.TrimSpace(value)
+	if len(value) > limit {
+		value = value[:limit]
+	}
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, value)
 }
 
 func (e *CleanupInspectionError) Unwrap() error {
@@ -57,6 +103,30 @@ func (e *CleanupInspectionError) Unwrap() error {
 		return nil
 	}
 	return e.Err
+}
+
+// IsCleanupConflictReason reports whether a refusal proves an identity
+// conflict that needs operator reconciliation rather than a transient retry.
+func IsCleanupConflictReason(reason string) bool {
+	switch reason {
+	case CleanupInspectionReasonCompetingRegistration, CleanupInspectionReasonCommitMismatch:
+		return true
+	default:
+		return false
+	}
+}
+
+// AnnotateCleanupInspectionWorktreeID supplies the exact input worktree ID at
+// the batch boundary. It never parses an ID from human-readable error text.
+func AnnotateCleanupInspectionWorktreeID(err error, worktreeID string) error {
+	if err == nil || worktreeID == "" {
+		return err
+	}
+	var inspection *CleanupInspectionError
+	if errors.As(err, &inspection) && inspection.WorktreeID == "" {
+		inspection.WorktreeID = worktreeID
+	}
+	return err
 }
 
 func classifyCleanupInspectionError(stage string, err error, repoPath ...string) error {
@@ -213,9 +283,13 @@ func (m *Manager) auditWorktreeCleanup(
 	}
 	if registration == worktreeRegistrationCompeting {
 		return worktreeCleanupAudit{}, &CleanupInspectionError{
-			Stage:  CleanupInspectionStageRegistration,
-			Reason: CleanupInspectionReasonCompetingRegistration,
-			Err:    fmt.Errorf("worktree cleanup target is claimed by unrelated Git metadata: %s", wt.Path),
+			Stage:            CleanupInspectionStageRegistration,
+			Reason:           CleanupInspectionReasonCompetingRegistration,
+			Comparison:       CleanupComparisonRecordedRegistration,
+			Action:           CleanupInspectionActionInspectRegistration,
+			RecordedEvidence: true,
+			ObservedEvidence: true,
+			Err:              fmt.Errorf("worktree cleanup target is claimed by unrelated Git metadata: %s", wt.Path),
 		}
 	}
 	if pathPresent && registration != worktreeRegistrationOwned {
@@ -323,11 +397,15 @@ func (m *Manager) cleanupBranchIdentity(
 		branchRef = "refs/heads/" + wt.Branch
 	}
 	expectedOID := strings.TrimSpace(wt.CleanupHeadOID)
+	savedOID := expectedOID != ""
 	if wt.CleanupHeadOIDUnavailable && pathPresent {
 		return "", "", &CleanupInspectionError{
-			Stage:  CleanupInspectionStageCommit,
-			Reason: CleanupInspectionReasonCommitMismatch,
-			Err:    fmt.Errorf("cleanup worktree path %q reappeared without immutable expected commit", wt.Path),
+			Stage:            CleanupInspectionStageCommit,
+			Reason:           CleanupInspectionReasonCommitMismatch,
+			Comparison:       CleanupComparisonRecordedCommitAbsent,
+			Action:           CleanupInspectionActionInspectMissing,
+			ObservedEvidence: true,
+			Err:              fmt.Errorf("cleanup worktree path %q reappeared without immutable expected commit", wt.Path),
 		}
 	}
 	if expectedOID == "" && pathPresent {
@@ -338,9 +416,11 @@ func (m *Manager) cleanupBranchIdentity(
 		expectedOID = strings.TrimSpace(output)
 		if expectedOID == "" {
 			return "", "", &CleanupInspectionError{
-				Stage:  CleanupInspectionStageCommit,
-				Reason: CleanupInspectionReasonCommitMismatch,
-				Err:    errors.New("capture cleanup worktree HEAD returned an empty commit"),
+				Stage:      CleanupInspectionStageCommit,
+				Reason:     CleanupInspectionReasonCommitMismatch,
+				Comparison: CleanupComparisonRecordedCommitAbsent,
+				Action:     CleanupInspectionActionInspectMissing,
+				Err:        errors.New("capture cleanup worktree HEAD returned an empty commit"),
 			}
 		}
 	}
@@ -359,9 +439,12 @@ func (m *Manager) cleanupBranchIdentity(
 	}
 	if expectedOID == "" && requireImmutableIdentity {
 		return "", "", &CleanupInspectionError{
-			Stage:  CleanupInspectionStageCommit,
-			Reason: CleanupInspectionReasonCommitMismatch,
-			Err:    fmt.Errorf("cleanup branch %q has no immutable expected commit", wt.Branch),
+			Stage:            CleanupInspectionStageCommit,
+			Reason:           CleanupInspectionReasonCommitMismatch,
+			Comparison:       CleanupComparisonRecordedCommitAbsent,
+			Action:           CleanupInspectionActionInspectMissing,
+			ObservedEvidence: true,
+			Err:              fmt.Errorf("cleanup branch %q has no immutable expected commit", wt.Branch),
 		}
 	}
 	output, err := m.runBoundedGitInspect(ctx, wt.RepositoryPath, "rev-parse", "--verify", branchRef+"^{commit}")
@@ -370,10 +453,20 @@ func (m *Manager) cleanupBranchIdentity(
 	}
 	branchOID := strings.TrimSpace(output)
 	if expectedOID != "" && branchOID != expectedOID {
+		comparison := CleanupComparisonRecordedCommitAbsent
+		action := CleanupInspectionActionInspectMissing
+		if savedOID {
+			comparison = CleanupComparisonRecordedCommit
+			action = CleanupInspectionActionCompareCommit
+		}
 		return branchRef, "", &CleanupInspectionError{
-			Stage:  CleanupInspectionStageCommit,
-			Reason: CleanupInspectionReasonCommitMismatch,
-			Err:    fmt.Errorf("cleanup branch %q advanced from audited commit %s to %s", wt.Branch, expectedOID, branchOID),
+			Stage:            CleanupInspectionStageCommit,
+			Reason:           CleanupInspectionReasonCommitMismatch,
+			Comparison:       comparison,
+			Action:           action,
+			RecordedEvidence: savedOID,
+			ObservedEvidence: true,
+			Err:              fmt.Errorf("cleanup branch %q advanced from audited commit %s to %s", wt.Branch, expectedOID, branchOID),
 		}
 	}
 	return branchRef, branchOID, nil

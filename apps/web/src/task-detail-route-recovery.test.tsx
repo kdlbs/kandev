@@ -40,6 +40,7 @@ const mocks = vi.hoisted(() => ({
     phase: "idle" as TaskNavigationReadSnapshot["phase"],
     attempt: 0,
     temporary: false,
+    exhausted: false,
     revision: 0,
     cycle: 0,
     identity: undefined as TaskNavigationIdentity | undefined,
@@ -275,6 +276,7 @@ beforeEach(() => {
     phase: "idle",
     attempt: 0,
     temporary: false,
+    exhausted: false,
     revision: 0,
     cycle: 0,
     identity: undefined,
@@ -469,8 +471,8 @@ describe("task-detail route permanent shared failure", () => {
 });
 
 describe("task-detail route cold recovery surface", () => {
-  // @covers AC-PLATFORM-INTERACTIVE-READS-005.1
-  it("shows recovery progress with a disabled Retry and overview access", async () => {
+  // @covers AC-PLATFORM-INTERACTIVE-READS-005.1, AC-PLATFORM-INTERACTIVE-READS-007.8
+  it("shows quiet progress with a disabled Retry and overview access until recovery succeeds", async () => {
     vi.useFakeTimers();
     let attempts = 0;
     const reads = createNavigationHarness(async () => {
@@ -490,8 +492,10 @@ describe("task-detail route cold recovery surface", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect(screen.getByTestId(LOAD_ERROR_TEST_ID)).toBeTruthy();
-    expect(screen.getByText("Task temporarily unavailable")).toBeTruthy();
+    expect(screen.queryByTestId(LOAD_ERROR_TEST_ID)).toBeNull();
+    expect(screen.queryByText("Task temporarily unavailable")).toBeNull();
+    expect(screen.getByTestId("task-read-progress-state")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("Loading task");
     const retry = screen.getByRole("button", { name: "Retry" });
     expect(retry.hasAttribute("disabled")).toBe(true);
     expect(screen.getByTestId("task-unavailable-overview-link")).toBeTruthy();

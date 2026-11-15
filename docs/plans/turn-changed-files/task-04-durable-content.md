@@ -69,6 +69,14 @@ Record payload and backup growth. Ref deletion requires export acknowledgement; 
 
 ## Results
 
+The completed [Git history package](../turn-change-preservation-retry/plan.md) replaces new SQL rendering exports with retained Git sources and unified compaction.
+The results below record the original implementation; the follow-up package records preservation, restart, and compaction evidence.
+The fixed 30-day sweep described below is removed by that package and replaced by the shared history-compaction policy.
+
+The [history integrity export work order](../turn-change-history-integrity/task-04-resumable-export.md)
+implements resumable preservation on top of this work order's durable content
+foundation. It does not change this work order's recorded status or results.
+
 Implemented bounded per-file exports from immutable Git endpoints, durable content-addressed compressed storage, integrity-checked historical reads, retention leases, and age/task/installation expiry. Export loss is persisted as partial or unavailable while summaries remain intact. The existing one-minute session reconciliation sweep applies the reviewed 30-day, 128 MiB task, and 1 GiB installation defaults.
 
 Focused validation passed:

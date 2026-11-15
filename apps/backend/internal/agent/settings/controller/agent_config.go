@@ -441,7 +441,10 @@ func (c *Controller) ResolveAgentModelConfig(
 	}
 	var profileContext *hostutility.ProfileProbeContext
 	if req.ProfileID != "" || req.LaunchSettings != nil {
-		resolved, err := c.resolveProfileProbeContext(ctx, agentName, req.AuthorizationScope, req.ProfileID, req.LaunchSettings)
+		modeOverride := resolutionModeOverride(req.Mode)
+		resolved, err := c.resolveProfileProbeContext(
+			ctx, agentName, req.AuthorizationScope, req.ProfileID, req.LaunchSettings, modeOverride,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -462,6 +465,7 @@ func (c *Controller) ResolveAgentModelConfig(
 	}
 	resp.Status = string(resolution.Status)
 	resp.ContextRevision = resolution.ContextRevision
+	resp.ReasonCode = profileProbeReasonCode(agentName, profileContext, resolution.Status, resolution.ReasonCode)
 	resp.ConfigOptions = configOptionDTOs(resolution.ConfigOptions)
 	if resolution.Error != "" {
 		message := "model option resolution failed"

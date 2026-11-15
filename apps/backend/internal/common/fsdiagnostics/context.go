@@ -3,8 +3,10 @@
 package fsdiagnostics
 
 import (
+	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -38,7 +40,7 @@ type Context struct {
 // resolver completes still produce a useful, stable diagnostic.
 func (c Context) Fields(err error) []zap.Field {
 	fields := []zap.Field{
-		zap.String("operation", c.Operation),
+		zap.String("operation", NormalizeOperation(c.Operation)),
 		zap.String("target", CanonicalPath(c.Target)),
 		zap.String("trigger", c.Trigger),
 		zap.String("runtime", c.Runtime),
@@ -56,9 +58,78 @@ func (c Context) Fields(err error) []zap.Field {
 		fields = append(fields, zap.String("poll_mode", c.PollMode))
 	}
 	if err != nil {
-		fields = append(fields, zap.Error(err))
+		fields = append(fields, zap.String("error_class", ErrorClass(err)), zap.Error(err))
 	}
 	return fields
+}
+
+// NormalizeOperation maps internal operation names onto the closed vocabulary
+// the parent launcher forwards. Unknown names remain unchanged for local
+// diagnostics.
+func NormalizeOperation(operation string) string {
+	switch operation {
+	case "workspace.git_status", "workspace.git_poll", "git_inspection":
+		return "git_inspection"
+	case "workspace.file_monitor", "stat":
+		return "stat"
+	case "workspace.file_tree", "read_directory":
+		return "read_directory"
+	default:
+		return operation
+	}
+}
+
+// ErrorClass classifies an operation failure without exposing its text. The
+// closed vocabulary matches the parent launcher's forwarding allowlist.
+func ErrorClass(err error) string {
+	if err == nil {
+		return ""
+	}
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "context_canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline_exceeded"
+	}
+	var execErr *exec.Error
+	if errors.As(err, &execErr) {
+		return "git_start_failed"
+	}
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) && pathErr.Op == "fork/exec" {
+		return "git_start_failed"
+	}
+	if errors.Is(err, os.ErrPermission) || IsAccessDenied(err) {
+		return "permission_denied"
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return "not_found"
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if isRepositoryContextUnavailableText(strings.ToLower(string(exitErr.Stderr))) {
+			return "repository_context_unavailable"
+		}
+		return "git_command_failed"
+	}
+	if errors.As(err, &pathErr) {
+		return "io_error"
+	}
+	if isRepositoryContextUnavailable(err) {
+		return "repository_context_unavailable"
+	}
+	return "unknown"
+}
+
+func isRepositoryContextUnavailable(err error) bool {
+	return isRepositoryContextUnavailableText(strings.ToLower(err.Error()))
+}
+
+func isRepositoryContextUnavailableText(message string) bool {
+	return strings.Contains(message, "not a git repository") ||
+		strings.Contains(message, "cannot change to") ||
+		strings.Contains(message, "no such file or directory") ||
+		strings.Contains(message, "not a directory")
 }
 
 // CanonicalPath returns an absolute, cleaned path and resolves symlinks when

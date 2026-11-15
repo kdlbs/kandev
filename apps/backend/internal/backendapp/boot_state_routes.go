@@ -687,11 +687,14 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"shellOptions":                    response.ShellOptions,
 		"defaultEditorId":                 nullString(settings.DefaultEditorID),
 		"enablePreviewOnClick":            settings.EnablePreviewOnClick,
+		"escapeCancelsAgent":              settings.EscapeCancelsAgent,
 		"chatSubmitKey":                   defaultString(settings.ChatSubmitKey, "cmd_enter"),
 		"reviewAutoMarkOnScroll":          settings.ReviewAutoMarkOnScroll,
 		"confirmTaskArchive":              settings.ConfirmTaskArchive,
 		"preventAutoStartAgentOnOpen":     settings.PreventAutoStartAgentOnOpen,
 		"unreadDivider":                   settings.UnreadDivider,
+		"unreadTaskDot":                   settings.UnreadTaskDot,
+		"unreadTaskDotHideDelaySeconds":   settings.UnreadTaskDotHideDelaySeconds,
 		"agentGeneratedTaskTitles":        settings.AgentGeneratedTaskTitles,
 		"promptSuggestions":               settings.PromptSuggestions,
 		"autoFocusNewTasks":               settings.AutoFocusNewTasks,
@@ -734,7 +737,6 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"lastSeenDisplay":                   lastSeenDisplay(settings.LastSeenDisplay),
 		"messageTimeDisplay":                usermodels.NormalizeMessageTimeDisplay(settings.MessageTimeDisplay),
 		"agentTabCloseBehavior":             usermodels.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
-		"azureDevOpsBrowsePreferences":      settings.AzureDevOpsBrowsePreferences,
 		"systemMetricsDisplay": map[string]any{
 			"showInTopbar": settings.SystemMetricsDisplay.ShowInTopbar,
 			"simplified":   settings.SystemMetricsDisplay.Simplified,
@@ -890,6 +892,7 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"blockedReason":      nullString(task.BlockedReason),
 		"dependsOn":          dependencyRefStates(task.DependsOn),
 		"blocks":             dependencyRefStates(task.Blocks),
+		"related":            dependencyRefStates(task.Related),
 		"startWhenUnblocked": task.StartWhenUnblocked,
 		// Parked-on-background-work projection, stamped by
 		// EnrichTaskParkedProjection before this mapper runs — omitting it here

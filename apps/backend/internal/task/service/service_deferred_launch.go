@@ -28,7 +28,52 @@ var (
 	// the prompt would make the eventual launch fall back to the description,
 	// which is a different operation and never what an edit meant.
 	ErrDeferredLaunchPromptEmpty = errors.New("deferred launch prompt must not be empty")
+	// ErrDeferredLaunchDiscardUnavailable means the durable settlement for an
+	// explicit discard is not wired. It is an error rather than a fabricated
+	// outcome: the caller must never be told a launch was discarded when
+	// nothing could have removed it.
+	ErrDeferredLaunchDiscardUnavailable = errors.New("deferred launch discard is unavailable")
 )
+
+// DeferredLaunchDiscardSettler performs the durable settlement and clear for an
+// explicit discard of a pending deferred launch. The task service owns the
+// task-write authorization and delegates the record work, so the automatic
+// replay drop and the explicit path share one implementation.
+type DeferredLaunchDiscardSettler interface {
+	DiscardDeferredCeilingLaunch(ctx context.Context, taskID string) (models.DeferredLaunchDiscardResult, error)
+}
+
+// SetDeferredLaunchDiscarder wires the optional durable settler for explicit
+// deferred-launch discards.
+func (s *Service) SetDeferredLaunchDiscarder(settler DeferredLaunchDiscardSettler) {
+	if s != nil {
+		s.deferredLaunchDiscard = settler
+	}
+}
+
+// DiscardDeferredLaunch removes a pending deferred launch at an explicit user's
+// request, using the same task-write and executor-mutation ownership checks as
+// every other task mutation. It never starts or stops a session; the answer is
+// the durable outcome, including the case where the record could not be removed
+// and therefore remains owned.
+func (s *Service) DiscardDeferredLaunch(
+	ctx context.Context, taskID string,
+) (models.DeferredLaunchDiscardResult, error) {
+	if err := s.authorizeTaskScope(ctx, taskID, authz.ScopeTaskWrite); err != nil {
+		return models.DeferredLaunchDiscardResult{}, err
+	}
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		return models.DeferredLaunchDiscardResult{}, err
+	}
+	if err := s.authorizeTaskExecutorMutation(ctx, task); err != nil {
+		return models.DeferredLaunchDiscardResult{}, err
+	}
+	if s.deferredLaunchDiscard == nil {
+		return models.DeferredLaunchDiscardResult{}, ErrDeferredLaunchDiscardUnavailable
+	}
+	return s.deferredLaunchDiscard.DiscardDeferredCeilingLaunch(ctx, taskID)
+}
 
 // ReadCeilingDeferredLaunch returns the authoritative ceiling record used by
 // message admission and task-state reconciliation. An absent record is a

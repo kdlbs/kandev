@@ -12,10 +12,11 @@ import (
 )
 
 type gitStatusSources struct {
-	environmentID  string
-	workspacePath  string
-	workspacePaths map[string]struct{}
-	sessionIDs     []string
+	environmentID   string
+	workspacePath   string
+	workspacePaths  map[string]struct{}
+	repositoryCount int
+	sessionIDs      []string
 }
 
 func resolveGitStatusSources(
@@ -65,17 +66,29 @@ func resolveGitStatusSources(
 		zap.String("task_environment_id", env.ID),
 		zap.Int("sources", len(ordered)))
 	return &gitStatusSources{
-		environmentID:  env.ID,
-		workspacePath:  env.WorkspacePath,
-		workspacePaths: gitStatusWorkspacePaths(env),
-		sessionIDs:     ordered,
+		environmentID:   env.ID,
+		workspacePath:   env.WorkspacePath,
+		workspacePaths:  gitStatusWorkspacePaths(env),
+		repositoryCount: gitStatusRepositoryCount(env),
+		sessionIDs:      ordered,
 	}, true
+}
+
+func gitStatusRepositoryCount(env *models.TaskEnvironment) int {
+	count := 0
+	for _, repo := range env.Repos {
+		if repo == nil || repo.WorktreePath == "" || repo.DeletedAt != nil || repo.Status == "failed" || repo.Status == deletedFieldKey {
+			continue
+		}
+		count++
+	}
+	return count
 }
 
 func gitStatusWorkspacePaths(env *models.TaskEnvironment) map[string]struct{} {
 	paths := map[string]struct{}{env.WorkspacePath: {}}
 	for _, repo := range env.Repos {
-		if repo == nil || repo.WorktreePath == "" || repo.DeletedAt != nil || repo.Status == "failed" || repo.Status == "deleted" {
+		if repo == nil || repo.WorktreePath == "" || repo.DeletedAt != nil || repo.Status == "failed" || repo.Status == deletedFieldKey {
 			continue
 		}
 		paths[repo.WorktreePath] = struct{}{}

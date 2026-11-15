@@ -20,8 +20,8 @@ Quick Chat. The suggestion must appear while the user is still reading the
 reply, because a late suggestion is worse than none.
 
 Suggestions are native only. The session's own agent runtime produces them, and
-Kandev shows one only when that agent advertised native support during the ACP
-handshake and then delivered a suggestion. Claude Code forks the finished
+Kandev shows one only when its adapter establishes native support from handshake
+evidence and then receives a suggestion. Claude Code forks the finished
 conversation, with the prompt cache warm, and asks the same model for the
 user's likely next message. In local measurements it arrived about 1.7 seconds
 after the turn result, at almost no token cost. Kandev never generates a
@@ -29,8 +29,8 @@ replacement suggestion: an agent without native support, or a turn for which
 the agent sent none, leaves the composer exactly as it is today.
 
 UI owns this contract because the observable outcome is a composer presentation
-and interaction. Agents keeps ownership of ACP transport and capability
-negotiation. Tasks keeps ownership of turn and session lifecycle. A suggestion
+and interaction. Agents owns [native capability normalization](../../agents/requirements/native-prompt-suggestion-capability.md).
+Tasks keeps ownership of turn and session lifecycle. A suggestion
 never changes the session, turn, or prompt lifecycle until the user submits it.
 
 ## Terminology
@@ -39,9 +39,11 @@ never changes the session, turn, or prompt lifecycle until the user submits it.
   the agent turn that produced it.
 - **Suggestion turn:** The latest completed agent turn of a session. A prompt
   suggestion is valid only for its suggestion turn.
-- **Native support:** A session whose agent advertised a native suggestion
-  source during the ACP handshake, and which Kandev asked to use it. Today the
-  only native source is Claude Code's `prompt_suggestion` message.
+- **Native support:** Provider support established by the adapter. It is separate
+  from user preference and effective session enablement. Agents owns the evidence
+  rules. Today the only implemented native source is Claude Code.
+- **Native session:** A session with provider support that Kandev requested for
+  this launch or resume. Only an effectively enabled session can show suggestions.
 - **Stale suggestion:** A prompt suggestion whose suggestion turn is no longer
   the latest turn of its session.
 - **Ghost text:** The dimmed, non-editable rendering of a prompt suggestion in
@@ -76,7 +78,7 @@ that I control their cost and visual noise.
   shall say so, and shall say that only agents with native support, such as
   Claude Code, produce suggestions.
 
-### REQ-UI-PROMPT-SUGGEST-002: Native suggestions from agents that advertise support
+### REQ-UI-PROMPT-SUGGEST-002: Native suggestions from agents with established support
 
 **Intent:** Deliver the agent's own suggestion with no extra model call and
 within about two seconds of the turn ending.
@@ -87,10 +89,11 @@ suggestions that Claude Code shows, so that I can continue with one key.
 #### Acceptance criteria
 
 - **AC-UI-PROMPT-SUGGEST-002.1:** When the preference is on and Kandev launches
-  or resumes an interactive task or Quick Chat session whose agent advertises
-  Claude Code during the ACP handshake, the session shall request native prompt
-  suggestions. This includes custom ACP agents that run Claude Code. Agents that
-  do not advertise Claude Code shall not be asked, whatever model they use.
+  or resumes an interactive task or Quick Chat session with established native
+  support, the session shall request native prompt suggestions. Agents owns the
+  support evidence contract. Custom ACP bridges with sufficient evidence shall
+  qualify regardless of their name. A vendor namespace or selected model alone
+  shall not establish support.
 - **AC-UI-PROMPT-SUGGEST-002.2:** The session shall record whether it
   negotiated native suggestions. A session that did not negotiate them shall
   never show a suggestion, even if a suggestion payload reaches it.
@@ -178,8 +181,8 @@ typing.
 
 - Model-generated or utility-agent suggestions, for any agent. Kandev shows only
   what the agent's own runtime delivers.
-- Native sources other than Claude Code. Each needs its own capability
-  negotiation when an agent exposes one.
+- Native sources other than Claude Code. Each needs an adapter integration that
+  supplies the generic capability and event, without provider-specific composer logic.
 - Pausing native generation when no browser shows the session. Claude Code
   offers `set_prompt_suggestions_paused`, but the ACP adapter does not expose it.
 - Back-off after unused suggestions in Kandev. Claude Code already applies its
@@ -188,3 +191,8 @@ typing.
   typing.
 - Passthrough, run-transcript, and task-creation composers.
 - A runtime feature flag. The per-user opt-in preference is the control.
+
+## Implementation plans
+
+- [Original composer delivery](../../../plans/composer-prompt-suggestions/plan.md)
+- [Native capability follow-up](../../../plans/native-prompt-suggestion-capability/plan.md)

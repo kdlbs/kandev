@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	"os"
 	"strings"
 	"time"
@@ -18,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -49,6 +52,7 @@ func provideLifecycleManager(
 	passthroughSessionProvider lifecycle.PassthroughSessionProvider,
 	runningWriter lifecycle.ExecutorRunningWriter,
 	startupRecoveryGuard *lifecycle.RecoveryGuard,
+	authSvc *auth.Service,
 ) (*lifecycle.Manager, error) {
 	log.Info("Initializing Agent Manager...")
 	secretStores := newLifecycleSecretStores(rawSecretStore)
@@ -124,7 +128,7 @@ func provideLifecycleManager(
 		credsMgr,
 		profileResolver,
 		mcpService,
-		lifecycle.ExecutorFallbackWarn,
+		lifecycle.ExecutorFallbackDeny,
 		cfg.ResolvedHomeDir(),
 		log,
 	)
@@ -193,6 +197,7 @@ func provideLifecycleManager(
 	// but the reader still lets future Wave-B/C consumers light up.
 	lifecycleMgr.SetAgentProfileReader(agentSettingsRepo)
 	lifecycleMgr.SetManagedRuntimeSelectionStore(managedRuntimeSelections)
+	lifecycleMgr.SetManagedRuntimeSingleUserOwner(singleUserManagedRuntimeOwner(authSvc))
 
 	// MCP handler is set later in main.go after MCP handlers are registered
 	// via lifecycleMgr.SetMCPHandler(gateway.Dispatcher)
@@ -212,6 +217,9 @@ func provideLifecycleManager(
 	if mcpPrincipalScoper != nil {
 		lifecycleMgr.SetMCPPrincipalScoper(mcpPrincipalScoper)
 	}
+	lifecycleMgr.SetBuiltinActionResolver(func(profile mcpprofile.Context) ([]string, error) {
+		return mcpserver.ResolveBuiltinActions(profile, log)
+	})
 	// AC-EXECUTORS-SURVIVAL-002.14: wire the workspace info provider before
 	// Start so a recovered execution's task-environment identity is
 	// reconstructed from the durable store during this same startup pass,
@@ -294,6 +302,7 @@ func registerMCPDeletionCleanup(eventBus bus.EventBus, repo interface{}, log *lo
 	if eventBus == nil || repo == nil {
 		return
 	}
+	registerMCPSessionDeletionCleanup(eventBus, repo, log)
 	if cleaner, ok := repo.(mcpTaskDataCleaner); ok {
 		if _, err := eventBus.Subscribe(events.TaskDeleted, func(ctx context.Context, event *bus.Event) error {
 			taskID, sessionIDs := mcpTaskDeletionData(event)

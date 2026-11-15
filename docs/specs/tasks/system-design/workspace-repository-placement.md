@@ -117,6 +117,12 @@ real-store persistence, compensation, and retry regressions after manager recons
 AC-001.2/001.4/003.6/003.7. The independent live multi-session cache-eviction defect is deferred
 by that package; it does not weaken canonical inventory admission.
 
+If rollback cannot list or clean a newly created worktree, include that compensation error in the
+materialization error returned to the attachment caller. A failed list does not skip cleanup of
+batch-created worktrees already known to the materializer. Known-worktree exclusion, ID
+deduplication, and the worktree manager's cleanup authority remain unchanged; reporting an error
+does not claim the resource was removed or change inventory authority.
+
 ## Preview contract
 
 Add an owner-authorized `POST /api/v1/tasks/:id/workspace-sources/preview` beside the existing mutation endpoint.

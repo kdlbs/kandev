@@ -19,6 +19,7 @@ import {
   isTaskInFlight,
   shouldShowTaskRunningSpinner,
 } from "./state-icons";
+import { WaitingReasonTaskIcon } from "./waiting-reason";
 
 const WILL_CHANGE_TRANSFORM = "will-change-transform";
 const SPIN_CLASS = "animate-spin";
@@ -93,6 +94,44 @@ describe("getTaskStateIcon", () => {
 
   it("keeps review task state as the review check without pending clarification", () => {
     expect(iconType(getTaskStateIcon("REVIEW", undefined))).toBe(IconCheck);
+  });
+
+  it("keeps pending input and live activity ahead of a recorded wait", () => {
+    const wait = getTaskStateIcon("WAITING_FOR_INPUT", undefined, { waitReason: "quota" });
+    expect(isValidElement(wait) ? wait.type : null).toBe(WaitingReasonTaskIcon);
+
+    expect(
+      iconType(
+        getTaskStateIcon("WAITING_FOR_INPUT", undefined, {
+          waitReason: "quota",
+          hasPendingPermission: true,
+        }),
+      ),
+    ).toBe(IconShieldQuestion);
+    expect(
+      iconType(
+        getTaskStateIcon("WAITING_FOR_INPUT", undefined, {
+          waitReason: "quota",
+          hasPendingClarification: true,
+        }),
+      ),
+    ).toBe(IconMessageQuestion);
+    expect(
+      iconType(
+        getTaskStateIcon("WAITING_FOR_INPUT", undefined, {
+          waitReason: "quota",
+          foregroundActivity: "generating",
+        }),
+      ),
+    ).toBe(IconLoader2);
+    expect(
+      iconType(
+        getTaskStateIcon("WAITING_FOR_INPUT", undefined, {
+          waitReason: "quota",
+          foregroundActivity: "background",
+        }),
+      ),
+    ).toBe(IconLoader);
   });
 });
 

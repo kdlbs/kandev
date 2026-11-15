@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/remoteauth"
 )
 
@@ -39,19 +40,90 @@ func TestRemoteExecutorsResolveExplicitGitHubTokenSecret(t *testing.T) {
 	metadata := map[string]interface{}{"remote_auth_secrets": `{"gh_cli_env":"secret-1"}`}
 	tests := []struct {
 		name    string
-		resolve func(context.Context, *ExecutorCreateRequest, remoteauth.Catalog)
+		resolve func(context.Context, *ExecutorCreateRequest, remoteauth.Catalog) error
 	}{
 		{name: executorTypeSSH, resolve: (&SSHExecutor{secretStore: store, logger: newTestLogger()}).resolveAuthSecrets},
-		{name: "sprites", resolve: (&SpritesExecutor{secretStore: store, logger: newTestLogger()}).resolveAuthSecrets},
+		{name: "sprites", resolve: func(ctx context.Context, req *ExecutorCreateRequest, catalog remoteauth.Catalog) error {
+			(&SpritesExecutor{secretStore: store, logger: newTestLogger()}).resolveAuthSecrets(ctx, req, catalog)
+			return nil
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := &ExecutorCreateRequest{Metadata: metadata, Env: map[string]string{}}
-			tt.resolve(context.Background(), req, remoteauth.BuildCatalogForHost(nil, "linux", ""))
+			if err := tt.resolve(context.Background(), req, remoteauth.BuildCatalogForHost(nil, "linux", "")); err != nil {
+				t.Fatalf("resolveAuthSecrets: %v", err)
+			}
 			if got := req.Env["GITHUB_TOKEN"]; got != "workspace-token" {
 				t.Fatalf("GITHUB_TOKEN = %q, want selected stored secret", got)
 			}
 		})
+	}
+}
+
+func TestSSHSelectedAuthSecretFailsClosed(t *testing.T) {
+	store := &mockSecretStore{store: map[string]string{}}
+	req := &ExecutorCreateRequest{
+		Metadata: map[string]interface{}{"remote_auth_secrets": `{"gh_cli_env":"missing-secret"}`},
+		Env:      map[string]string{},
+	}
+	err := (&SSHExecutor{secretStore: store, logger: newTestLogger()}).resolveAuthSecrets(
+		context.Background(), req, remoteauth.BuildCatalogForHost(nil, "linux", ""),
+	)
+	if err == nil {
+		t.Fatal("expected a missing selected auth secret to abort SSH provisioning")
+	}
+	if _, ok := req.Env["GITHUB_TOKEN"]; ok {
+		t.Fatal("missing selected auth secret must not leave a partial credential binding")
+	}
+}
+
+func TestClaudeAPIKeySSHProvisioning(t *testing.T) {
+	const (
+		anthropicKey = "sk-ant-ssh-synthetic"
+		secretID     = "secret-claude-api-key"
+	)
+	store := &mockSecretStore{store: map[string]string{secretID: anthropicKey}}
+	catalog := remoteauth.BuildCatalogForHost([]agents.Agent{agents.NewClaudeACP()}, "linux", "")
+	methodID := "agent:claude-acp:env:ANTHROPIC_API_KEY"
+
+	req := &ExecutorCreateRequest{
+		Metadata: map[string]interface{}{
+			"remote_auth_secrets": `{"` + methodID + `":"` + secretID + `"}`,
+		},
+		Env: map[string]string{},
+	}
+	if err := (&SSHExecutor{secretStore: store, logger: newTestLogger()}).resolveAuthSecrets(context.Background(), req, catalog); err != nil {
+		t.Fatalf("resolveAuthSecrets: %v", err)
+	}
+
+	if got := req.Env["ANTHROPIC_API_KEY"]; got != anthropicKey {
+		t.Fatalf("ANTHROPIC_API_KEY = %q, want selected API-key secret", got)
+	}
+	if _, ok := req.Env["CLAUDE_CODE_OAUTH_TOKEN"]; ok {
+		t.Fatal("API-key provisioning must not create an OAuth token variable")
+	}
+	childEnv := sshRemoteAgentEnv(req)
+	if got := childEnv["ANTHROPIC_API_KEY"]; got != anthropicKey {
+		t.Fatalf("SSH child ANTHROPIC_API_KEY = %q, want selected API-key secret", got)
+	}
+	if _, ok := childEnv["CLAUDE_CODE_OAUTH_TOKEN"]; ok {
+		t.Fatal("API-key SSH child must not receive an OAuth token")
+	}
+	for _, spec := range catalog.Specs {
+		if spec.ID != "claude-acp" {
+			continue
+		}
+		for _, method := range spec.Methods {
+			if method.MethodID == methodID && method.SetupScript != "" {
+				t.Fatal("Claude API-key method must not run the OAuth setup script")
+			}
+		}
+	}
+
+	profileReq := &ExecutorCreateRequest{Env: map[string]string{"ANTHROPIC_API_KEY": anthropicKey}}
+	if got := sshRemoteAgentEnv(profileReq)["ANTHROPIC_API_KEY"]; got != anthropicKey {
+		t.Fatalf("agent-profile API key was not forwarded to the SSH child: %q", got)
 	}
 }
 

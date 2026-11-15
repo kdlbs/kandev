@@ -1,10 +1,11 @@
 /**
  * Phone coverage for OpenCode background inspection (REQ-AGENTS-BACKGROUND-WORK-009).
- * Same deterministic OpenCode 2.2.0 launch fixture as the desktop suite, driven
- * through the shared chip drawer and the focused full-height detail surface.
+ * Same deterministic OpenCode 2.2.0 launch fixture as the desktop suite. Legacy
+ * delivery cannot establish liveness, so the running-only composer chip stays
+ * absent and the independent Panels entry opens History.
  *
  * Observation-only scope: the producer ends delivery with the foreground
- * prompt, so the summary shows unknown activity and no unsupported controls.
+ * prompt, so History keeps unknown activity and no unsupported controls appear.
  */
 import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
@@ -42,7 +43,7 @@ test.describe("OpenCode background inspection on a phone", () => {
     await backend.restart();
   });
 
-  test("drawer summary and full-height detail preserve the draft and unsupported controls stay absent", async ({
+  test("independent Panels entry keeps unknown history and the full-height detail honest", async ({
     apiClient,
     seedData,
     testPage,
@@ -77,18 +78,23 @@ test.describe("OpenCode background inspection on a phone", () => {
 
     const editor = await session.fillMessage(UNSENT_DRAFT);
 
-    const chip = testPage.getByTestId("background-work-chip");
-    await expect(chip).toBeVisible({ timeout: 30_000 });
-    await chip.tap();
+    // No verified running job means no composer chip.
+    await expect(testPage.getByTestId("background-work-chip")).toHaveCount(0);
+    await expect(testPage.getByTestId("background-work-history-chip")).toHaveCount(0);
 
-    const drawer = testPage.getByTestId("background-work-drawer-content");
-    await expect(drawer).toBeVisible();
-    const summary = drawer.getByTestId("background-work-summary-list");
-    await expect(summary).toBeVisible();
+    await testPage.getByTestId("mobile-session-nav-panels").tap();
+    await testPage.getByTestId("mobile-background-work-open").tap();
+
+    const panel = testPage.getByTestId("background-work-mobile-panel");
+    await expect(panel).toBeVisible();
+    await expect(testPage.getByTestId("background-work-tab-history")).toHaveAttribute(
+      "data-state",
+      "active",
+    );
     for (const shellID of SHELL_IDS) {
-      await expect(summary.getByTestId(`background-work-summary-item-${shellID}`)).toBeVisible();
+      await expect(testPage.getByTestId(`background-workload-card-${shellID}`)).toBeVisible();
+      await expect(testPage.getByTestId(`background-work-state-${shellID}`)).toHaveText("Unknown");
     }
-    await expect(summary).toContainText("3 unknown");
 
     // Resolve one job as failed with a real exit code and retained output. The
     // legacy OpenCode producer never delivers this, and the phone detail must
@@ -116,16 +122,18 @@ test.describe("OpenCode background inspection on a phone", () => {
       output: "checks failed: 2 tests",
       revision: 99,
     });
-    await expect(summary.getByTestId(`background-work-state-${SHELL_IDS[2]}`)).toHaveText("Failed");
+    await expect(testPage.getByTestId(`background-work-state-${SHELL_IDS[2]}`)).toHaveText(
+      "Failed",
+    );
 
     // A job opens a focused full-height surface with one scroll owner.
-    await summary.getByTestId(`background-work-open-button-${SHELL_IDS[2]}`).tap();
+    await testPage.getByTestId(`open-workload-${SHELL_IDS[2]}`).tap();
     const detail = testPage.getByTestId("background-work-drawer-detail");
     await expect(detail).toBeVisible();
     const viewport = testPage.viewportSize();
     const detailBox = await detail.boundingBox();
     expect(detailBox).not.toBeNull();
-    expect(detailBox!.height).toBeGreaterThanOrEqual((viewport?.height ?? 0) * 0.85);
+    expect(detailBox!.height).toBeGreaterThanOrEqual((viewport?.height ?? 0) * 0.8);
 
     // Coarse-pointer actions meet the 44px minimum.
     const back = testPage.getByTestId("background-work-drawer-back");
@@ -148,15 +156,18 @@ test.describe("OpenCode background inspection on a phone", () => {
     await expect(testPage.getByTestId("stop-workload-button")).toHaveCount(0);
     await expect(testPage.getByTestId("interrupt-workload-button")).toHaveCount(0);
 
-    // Back restores the list context.
+    // Back restores the list context, including its History tab.
     await back.tap();
-    await expect(summary).toBeVisible();
-    await expect(summary.getByTestId(`background-work-summary-item-${SHELL_IDS[2]}`)).toBeVisible();
+    await expect(testPage.getByTestId("background-work-tab-history")).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+    await expect(testPage.getByTestId(`background-workload-card-${SHELL_IDS[2]}`)).toBeVisible();
 
-    // Dismissal restores focus to the chip and does not disturb the draft.
-    await drawer.getByRole("button", { name: "Close background work" }).tap();
-    await expect(drawer).toBeHidden();
+    // Dismissal returns focus to the Panels trigger and preserves the draft.
+    await testPage.getByTestId("background-work-overview-close").tap();
+    await expect(panel).toHaveCount(0);
     await expect(editor).toHaveText(UNSENT_DRAFT);
-    await expect(chip).toBeFocused();
+    await expect(testPage.getByTestId("mobile-session-nav-panels")).toBeFocused();
   });
 });

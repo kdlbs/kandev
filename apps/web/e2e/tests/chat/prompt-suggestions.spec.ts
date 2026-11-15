@@ -3,7 +3,11 @@ import { test } from "../../fixtures/test-base";
 import { seedIdleSession } from "../../helpers/session";
 import { dwell } from "../../helpers/causal-waits";
 import { openQuickChatWithAgent } from "./quick-chat-helpers";
-import { NATIVE_SUGGESTION, setPromptSuggestions } from "./prompt-suggestion-helpers";
+import {
+  NATIVE_SUGGESTION,
+  observeGatewayRequests,
+  setPromptSuggestions,
+} from "./prompt-suggestion-helpers";
 
 // The mock agent skips the native suggestion for a prompt containing this directive.
 const NO_SUGGESTION_DIRECTIVE = "/no-suggestion";
@@ -163,9 +167,9 @@ test("Quick Chat: Escape dismisses the suggestion and keeps the dialog open", as
 
 test.describe("agent without native suggestions", () => {
   test.beforeAll(async ({ backend }) => {
-    // Without the claudeCode advertisement the session never negotiates native
-    // suggestions, like any agent that is not a Claude Code bridge.
-    await backend.restart({ KANDEV_MOCK_AGENT_PROMPT_QUEUEING: "false" });
+    // Prompt queueing stays advertised so this fixture proves the suggestion
+    // gate uses its own explicit denial, not the unrelated queueing namespace.
+    await backend.restart({ KANDEV_MOCK_AGENT_PROMPT_SUGGESTIONS: "false" });
   });
 
   test.afterAll(async ({ backend }) => {
@@ -179,6 +183,8 @@ test.describe("agent without native suggestions", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
+    // Arm before the first navigation so the collector sees the gateway socket.
+    const gatewayRequests = observeGatewayRequests(testPage);
     await setPromptSuggestions(apiClient, true);
     const utilityCalls: string[] = [];
     testPage.on("request", (request) => {
@@ -196,11 +202,34 @@ test.describe("agent without native suggestions", () => {
       );
       await expect(chat.locator("p.has-prompt-suggestion")).toHaveCount(0);
       await expect(chat.getByTestId("prompt-suggestion-accept")).toHaveCount(0);
+      // No replacement generation may start automatically after the turn,
+      // before the typing observation window below.
+      expect(utilityCalls).toHaveLength(0);
 
+      // Typing must not request generation or a replacement suggestion. The
+      // fixture's own prompt predates this interval, so only new requests count.
+      const requestsBeforeTyping = gatewayRequests.length;
+      const utilityCallsBeforeTyping = utilityCalls.length;
+      const typed = "plain text with <angle> & entities";
       await editor.click();
+      await testPage.keyboard.type(typed);
+      await expect(editor).toHaveText(typed);
+      await dwell(
+        testPage,
+        1_500,
+        "negative-assertion",
+        "typing must not cause a prompt or utility request; no event exists for an absence",
+      );
+      expect(gatewayRequests.slice(requestsBeforeTyping)).not.toContain("message.add");
+      expect(utilityCalls.slice(utilityCallsBeforeTyping)).toHaveLength(0);
+
+      await testPage.keyboard.press("ControlOrMeta+A");
+      await testPage.keyboard.press("Backspace");
       await testPage.keyboard.press("Tab");
       await expect(editor).toHaveText("");
       await expect(chat.locator("p.has-prompt-suggestion")).toHaveCount(0);
+      // Whole-observation assertion: neither the automatic post-turn path nor
+      // typing may call a utility agent for a replacement suggestion.
       expect(utilityCalls).toHaveLength(0);
     } finally {
       await setPromptSuggestions(apiClient, false);

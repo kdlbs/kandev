@@ -4,7 +4,10 @@ import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 
 export type TaskNavigationReadRecovery = {
-  temporaryError: boolean;
+  /** Temporary recovery ended without a successful read; the warning is latched until success. */
+  exhausted: boolean;
+  /** A temporary failure is being retried inside the bounded cycle. */
+  temporary: boolean;
   retrying: boolean;
   onRetry: () => void;
 };
@@ -15,7 +18,14 @@ export function TaskNavigationReadFeedback({
   recovery?: TaskNavigationReadRecovery;
 }) {
   const { t } = useTranslation();
-  if (!recovery?.temporaryError) return null;
+  if (!recovery?.exhausted) {
+    if (!recovery?.temporary || !recovery.retrying) return null;
+    return (
+      <div role="status" aria-live="polite" className="sr-only">
+        {t("task:retrying")}
+      </div>
+    );
+  }
   return (
     <div
       role="status"

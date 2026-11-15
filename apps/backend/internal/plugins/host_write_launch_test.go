@@ -10,7 +10,7 @@ import (
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 func TestPluginHost_Tasks_CreateOnlyRejectsUnknownLaunchProfiles(t *testing.T) {

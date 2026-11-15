@@ -11,6 +11,7 @@ package sysprompt
 
 import (
 	"fmt"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"regexp"
 	"strconv"
 	"strings"
@@ -159,7 +160,7 @@ func contextKindForBlock(block string, trustedContents []string) contextKind {
 
 // OfficeContext returns the restricted first-turn prompt used by Office runs.
 // Its tool inventory must stay exactly aligned with MCP ModeOffice.
-func OfficeContext() string { return prompts.Get("office-context") }
+func OfficeContext() string { return FormatOfficeContext("{task_id}", "{session_id}") }
 
 // FormatOfficeContext injects the active task and session IDs into the Office context.
 func FormatOfficeContext(taskID, sessionID string) string {
@@ -168,7 +169,8 @@ func FormatOfficeContext(taskID, sessionID string) string {
 
 const stepCompleteRecoveryInstruction = "If it reports that the workflow step changed, retries in this turn cannot recover. " +
 	"End the turn and have the user resume the session for the current step, then complete it in the new turn. " +
-	"already_signaled means the signal was accepted. " +
+	"already_signaled returns the retained outcome; pending means only that the signal was recorded, not that a transition committed or a reviewer received the handoff. " +
+	"A later turn in the same step can replace an unconsumed signal, so end the turn after an accepted signal. " +
 	"Do not move the task solely to bypass a stale-turn error.\n"
 
 const officeStepCompleteInstruction = "This workflow step requires an explicit completion signal. " +
@@ -181,15 +183,7 @@ const officeStepCompleteInstruction = "This workflow step requires an explicit c
 // workflow step. The imperative completion instruction is present only when
 // the step's auto-advance policy requires the signal.
 func FormatOfficeContextWithOptions(taskID, sessionID string, requiresSignal bool) string {
-	instruction := ""
-	if requiresSignal {
-		instruction = officeStepCompleteInstruction
-	}
-	return Resolve("office-context", map[string]string{
-		"task_id":                   taskID,
-		"session_id":                sessionID,
-		"step_complete_instruction": instruction,
-	})
+	return FormatOfficeContextWithPackages(taskID, sessionID, requiresSignal, nil)
 }
 
 // InjectOfficeContext ensures a first-turn prompt has the restricted Office context.
@@ -221,14 +215,14 @@ func PlanMode() string { return prompts.Get("plan-mode") }
 // task, session, capability, and question placeholders — use
 // [FormatKandevContext] to inject values.
 func KandevContext() string {
-	return Resolve("kandev-context", map[string]string{
+	return resolveBuiltinPrompt("kandev-context", map[string]string{
 		"coordinator_task_control_section": coordinatorTaskControlSection,
 		"canvas_guidance_section":          "",
 		"rich_output_section":              richOutputSection,
 		"task_title_section":               "",
 		"autopilot_section":                "",
 		"question_tool_section":            userQuestionSection,
-	})
+	}, nil)
 }
 
 const userQuestionSection = `- ask_user_question_kandev: Ask the user 1-4 related questions and wait for all answers. Keep shared context to 1-3 short sentences or brief bullets (about 100 words or fewer); put full reports, logs, and repeated conversation outside this call, before it. Keep each question and its options self-contained. Treat this as a hard user-input barrier: do no more work, make no tool calls, or send a final response until completed answers or structured rejection. On validation error before question creation, correct and retry. If an accepted call returns incomplete (including timeout, disconnect, or pending wait), end the turn without inferring an answer or continuing work.
@@ -243,6 +237,10 @@ This task runs in autopilot mode. Continue independently and make reasonable dec
 
 const canvasGuidanceSection = `CANVAS AUTHORING:
 Use these tools only when the user explicitly asks for a Kandev canvas: create_canvas_kandev, read_canvas_authoring_skill_kandev, and publish_canvas_kandev. Create it in Kandev before writing app files. Read the skill once, edit only in its returned source directory, then publish through MCP. Report publication status, including failures. Local files or a successful build do not publish a canvas.
+`
+
+const worktreeAdoptionSection = `WORKTREE ADOPTION:
+If you create a Git worktree, create it inside the task workspace, then call add_branch_to_task_kandev with worktree_path so Kandev tracks it. Or call add_branch_to_task_kandev without worktree_path and Kandev creates the worktree.
 `
 
 const richOutputSection = `- show_rich_output_kandev: For structured comparisons, recorded checks, charts/graphs/plots, file previews or KPI/metrics with data, call now. Table compares; StatusList checks; Callout notes. Use version=2,catalog_version=1,spec; discover schema/examples. Workspace-relative paths. Kandev owns layout/styling. Label series with units. No ASCII/SVG/HTML/separate app. Otherwise prose or small Markdown tables.
@@ -305,6 +303,7 @@ func PendingTaskTitlePassthroughInstruction() string {
 // KandevContextOptions controls capability-dependent sections in the first-turn
 // Kandev context.
 type KandevContextOptions struct {
+	BuiltinPackages                *mcpprofile.BuiltinManifest
 	RequiresCompletionSignal       bool
 	IncludeCoordinatorTaskControls bool
 	IncludeTaskTitleTool           bool
@@ -312,6 +311,10 @@ type KandevContextOptions struct {
 	Autopilot                      bool
 	IncludeUserQuestionTool        bool
 	IncludeParentQuestionTool      bool
+	// IncludeWorktreeAdoption tells the agent to create any new Git worktree
+	// inside the task workspace and report it. Only host Worktree and Local
+	// executors set this.
+	IncludeWorktreeAdoption bool
 }
 
 // FormatKandevContext returns the Kandev context prompt with task and session IDs injected.
@@ -356,17 +359,22 @@ func FormatKandevContextWithOptions(taskID, sessionID string, options KandevCont
 	if options.IncludeCanvasGuidance {
 		canvasGuidance = canvasGuidanceSection
 	}
-	return Resolve("kandev-context", map[string]string{
+	worktreeAdoption := ""
+	if options.IncludeWorktreeAdoption {
+		worktreeAdoption = worktreeAdoptionSection
+	}
+	return resolveBuiltinPrompt("kandev-context", map[string]string{
 		"task_id":                          taskID,
 		"session_id":                       sessionID,
 		"step_complete_section":            section,
 		"task_title_section":               taskTitle,
 		"coordinator_task_control_section": coordinatorControls,
 		"canvas_guidance_section":          canvasGuidance,
+		"worktree_adoption_section":        worktreeAdoption,
 		"rich_output_section":              richOutputSection,
 		"autopilot_section":                autopilot,
 		"question_tool_section":            questionTool,
-	})
+	}, options.BuiltinPackages)
 }
 
 // ConfigContext returns the system prompt for config-mode MCP sessions.

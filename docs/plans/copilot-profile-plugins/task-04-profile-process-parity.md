@@ -1,7 +1,7 @@
 ---
 id: "04-profile-process-parity"
 title: "Apply plugin selections to other profile process paths"
-status: pending
+status: done
 wave: 5
 depends_on: ["03-acp-process-loading"]
 plan: "plan.md"
@@ -18,8 +18,10 @@ acceptance_criteria:
   - AC-AGENTS-COPILOT-PLUGINS-004.6
   - AC-AGENTS-COPILOT-PLUGINS-005.3
   - AC-AGENTS-COPILOT-PLUGINS-005.4
+  - AC-AGENTS-COPILOT-PLUGINS-005.8
   - AC-AGENTS-COPILOT-PLUGINS-007.3
   - AC-AGENTS-COPILOT-PLUGINS-007.4
+  - AC-AGENTS-COPILOT-PLUGINS-007.6
 system_design:
   - ../../specs/agents/system-design/copilot-profile-plugins.md
 ---
@@ -102,7 +104,23 @@ Do not pass unresolved secrets or selection state into agent-wide probes.
 
 ## Results
 
-Pending 2026-10-28. The code paths are implemented but fail closed with `policy_unverified` until WO-00 supplies native policy evidence.
+Follow-up execution is mapped to
+[completion task 04](../copilot-profile-plugin-completion/task-04-qualified-process-loading.md).
+It also verifies that a rejected Copilot replacement preflight preserves the
+live process. Keep the existing results as historical rejection-path evidence.
+
+Completed by completion WO-04 under native Copilot authority. Positive
+passthrough and real utility/capability/model-option probe requests now verify
+selected-version mounts, final cwd/environment, and coherent snapshots.
+Rejected replacement preflight preserves the current process before local or
+isolated SSH stop; retained and agent-wide paths add no plugin work.
+Completion WO-04 records exact commands/counts and the demonstrated pre-existing
+SSH teardown race exception. No administrator or enterprise-policy fixture was
+required, and native-policy certification is not claimed.
+
+### Historical pre-ADR results
+
+These baseline results describe the earlier rejection-only implementation.
 
 - `go test -trimpath ./internal/agent/runtime/lifecycle -run 'TestCopilotPluginPassthrough|TestCopilotPluginInitialPassthrough|TestCopilotPluginEffectiveEnvironment' -count=1`: passed.
 - Initial, resume, reset, and fallback passthrough starts all apply plugin preparation after final environment composition and before process creation. The initial boundary rejects a nonempty policy-unqualified selection, an unsupported executor, and a wrapper without creating a PTY.

@@ -13,10 +13,12 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/task/repository/completion"
 )
 
 // Repository provides SQLite-based task storage operations.
 type Repository struct {
+	completionPolicies      []completion.Policy
 	db                      *sqlx.DB // writer
 	ro                      *sqlx.DB // reader (read-only pool)
 	ownsDB                  bool
@@ -57,9 +59,15 @@ type Repository struct {
 	// agentDeliveryRetentionFailpoint injects transaction failures at durable
 	// retention write boundaries for rollback tests.
 	agentDeliveryRetentionFailpoint func(string) error
-	agentDeliveryReloadStatements   agentDeliveryReloadStatementCache
-	agentDeliveryOwnerStatements    agentDeliveryOwnerStatementCache
-	agentDeliveryReceiptStatements  agentDeliveryReceiptStatementCache
+	// agentDeliveryCombinedProjectionFailpoint injects a combined
+	// receipt-and-projection failure after the batch receipts are written, so
+	// tests can prove the whole batch rolls back.
+	agentDeliveryCombinedProjectionFailpoint func(string) error
+	agentDeliveryReloadStatements            agentDeliveryReloadStatementCache
+	agentDeliveryOwnerStatements             agentDeliveryOwnerStatementCache
+	agentDeliveryReceiptStatements           agentDeliveryReceiptStatementCache
+	durabilityBarrierOnce                    sync.Once
+	durabilityBarrier                        *db.DurabilityBarrier
 	// failUsageEventAttempts/failUsageEventErr are a test-only failpoint for
 	// CreateTaskUsageEvent's AC-32 transient-retry loop: while
 	// failUsageEventAttempts > 0, insertUsageEventAndRollup returns

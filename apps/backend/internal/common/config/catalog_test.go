@@ -17,6 +17,7 @@ func TestConfigurationCatalogIsComplete(t *testing.T) {
 	}
 	for _, key := range []string{
 		"server.trustedProxies",
+		"notifications.webhookAllowPrivateNetworks",
 		"tasks.preparationTimeout",
 		"credentials.file",
 		"limits.ghMaxConcurrent",
@@ -91,6 +92,7 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_WEB_INTERNAL_URL", class: "catalog"},
 		{envVar: "KANDEV_WEB_TITLE_PREFIX", class: "catalog"},
 		{envVar: "KANDEV_TRUSTED_PROXIES", class: "catalog"},
+		{envVar: "KANDEV_WEBHOOK_ALLOW_PRIVATE_NETWORKS", class: "catalog"},
 		{envVar: "KANDEV_DATABASE_DRIVER", class: "catalog"},
 		{envVar: "KANDEV_DATABASE_PATH", class: "catalog"},
 		{envVar: "KANDEV_DATABASE_HOST", class: "catalog"},
@@ -101,6 +103,7 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_DATABASE_SSLMODE", class: "catalog"},
 		{envVar: "KANDEV_DATABASE_MAXCONNS", class: "catalog"},
 		{envVar: "KANDEV_DATABASE_MINCONNS", class: "catalog"},
+		{envVar: "KANDEV_SQLITE_READER_CONNS", class: "catalog"},
 		{envVar: "KANDEV_NATS_URL", class: "catalog"},
 		{envVar: "KANDEV_NATS_CLUSTERID", class: "catalog"},
 		{envVar: "KANDEV_NATS_CLIENTID", class: "catalog"},
@@ -119,6 +122,8 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_AUTH_TOKENDURATION", class: "catalog"},
 		{envVar: "KANDEV_AUTH_SESSIONTTLHOURS", class: "catalog"},
 		{envVar: "KANDEV_AUTH_COOKIE_NAME", class: "catalog"},
+		{envVar: "KANDEV_WEBPUSH_SUBJECT", class: "catalog"},
+		{envVar: "KANDEV_WEBPUSH_ALLOWED_HOSTS", class: "catalog"},
 		{envVar: "KANDEV_LOG_LEVEL", class: "catalog"},
 		{envVar: "KANDEV_LOGGING_FORMAT", class: "catalog"},
 		{envVar: "KANDEV_REPOSITORYDISCOVERY_ROOTS", class: "catalog"},

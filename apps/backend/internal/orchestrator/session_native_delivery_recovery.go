@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -16,28 +17,39 @@ type nativeResumeDeliverySubmissionReader interface {
 	ListAgentDeliverySubmissions(context.Context, string) ([]*models.AgentDeliverySubmission, error)
 }
 
+type nativeResumeUnprovenCompletionVerifier interface {
+	VerifyUnprovenNativeResumeCompletion(context.Context, string, string, models.NativeResumeSubmissionEvidence) (bool, error)
+}
+
 func (s *Service) checkNativeResumeDeliveryBlock(ctx context.Context, taskID, sessionID string) error {
 	block, err := s.GetOpenSessionRecoveryBlock(ctx, sessionID)
-	if err != nil || block == nil || block.Reason != durableDeliveryUnresolvedReason {
-		return err
+	if err != nil {
+		return requiredDeliveryRecoveryError(nil, block, err)
+	}
+	if block == nil || block.Reason != durableDeliveryUnresolvedReason {
+		return nil
 	}
 	// Office recovery releases scheduler admission rather than resuming a
 	// native conversation here, so its existing durable-work gate remains.
 	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
 	if err != nil {
-		return err
+		return requiredDeliveryRecoveryError(nil, block, err)
 	}
 	if isOfficeTask {
-		return &sessionRecoveryRequiredError{Block: block}
+		return &sessionRecoveryRequiredError{Block: block, DeliveryRefusalReason: agentruntime.DeliveryRecoveryRefusalOfficeOwned}
 	}
 	_, canAcknowledge := s.agentManager.(nativeResumeDeliveryAcknowledger)
 	reader, canRead := s.repo.(nativeResumeDeliverySubmissionReader)
-	if !canAcknowledge || !canRead {
-		return &sessionRecoveryRequiredError{Block: block}
+	if !canAcknowledge {
+		return &sessionRecoveryRequiredError{Block: block, DeliveryRefusalReason: agentruntime.DeliveryRecoveryRefusalExecutionUnavailable}
+	}
+	if !canRead {
+		return &sessionRecoveryRequiredError{Block: block, DeliveryRefusalReason: agentruntime.DeliveryRecoveryRefusalEvidenceUnavailable}
 	}
 	submissions, err := reader.ListAgentDeliverySubmissions(ctx, sessionID)
 	if err != nil {
-		return fmt.Errorf("read native resume delivery evidence: %w", err)
+		cause := fmt.Errorf("read native resume delivery evidence: %w", err)
+		return &sessionRecoveryRequiredError{Block: block, DeliveryRefusalReason: agentruntime.DeliveryRecoveryRefusalEvidenceUnavailable, internalCause: cause}
 	}
 	unknown := false
 	for _, submission := range submissions {
@@ -46,21 +58,48 @@ func (s *Service) checkNativeResumeDeliveryBlock(ctx context.Context, taskID, se
 		}
 		switch submission.State {
 		case models.DeliverySubmissionPrepared, models.DeliverySubmissionAccepted:
-			return &sessionRecoveryRequiredError{Block: block}
+			return &sessionRecoveryRequiredError{Block: block, DeliveryRefusalReason: agentruntime.DeliveryRecoveryRefusalLiveWork}
 		case models.DeliverySubmissionDispatching:
 			if block.ConsumerReference == agentDeliveryConsumer && block.DeliverySubmissionID == "" && block.DeliveryStreamID == "" {
 				unknown = true
 				continue
 			}
-			return &sessionRecoveryRequiredError{Block: block}
+			return &sessionRecoveryRequiredError{Block: block, DeliveryRefusalReason: agentruntime.DeliveryRecoveryRefusalLiveWork}
 		case models.DeliverySubmissionInterruptedUnknown:
 			unknown = true
+		case models.DeliverySubmissionCompleted:
+			if nativeResumeUnprovenCompletion(ctx, s.repo, block, submission) {
+				unknown = true
+			}
 		}
 	}
 	if !unknown && !s.canProveSettledNativeDeliveryBlock(block) {
-		return &sessionRecoveryRequiredError{Block: block}
+		return &sessionRecoveryRequiredError{Block: block, DeliveryRefusalReason: agentruntime.DeliveryRecoveryRefusalEvidenceUnavailable}
 	}
 	return nil
+}
+
+// nativeResumeUnprovenCompletion gates explicit Resume before launch. The
+// transactional native proof still owns the actual fence resolution.
+func nativeResumeUnprovenCompletion(
+	ctx context.Context,
+	repository any,
+	block *models.SessionRecoveryBlock,
+	submission *models.AgentDeliverySubmission,
+) bool {
+	verifier, supported := repository.(nativeResumeUnprovenCompletionVerifier)
+	if !supported {
+		return false
+	}
+	verified, err := verifier.VerifyUnprovenNativeResumeCompletion(
+		ctx, block.SessionID, block.IncarnationID,
+		models.NativeResumeSubmissionEvidence{
+			ID: submission.ID, HarnessGeneration: submission.HarnessGeneration,
+			PayloadHash: submission.PayloadHash, State: submission.State,
+			Outcome: submission.Outcome, StreamID: block.DeliveryStreamID,
+		},
+	)
+	return err == nil && verified
 }
 
 func (s *Service) acknowledgeNativeResumeDelivery(ctx context.Context, sessionID string) error {
@@ -140,6 +179,9 @@ func (s *Service) finishLoadedNativeDeliveryBlock(ctx context.Context, block *mo
 	changed, err := resolver.ResolveSessionRecoveryBlockWithNativeEvidence(ctx, block.ID, proof, time.Now().UTC())
 	if err == nil && changed {
 		s.publishAgentDeliveryRecoveryState(ctx, block.SessionID)
+		if err := s.publishPendingRecoveryNotice(ctx, block.SessionID); err != nil {
+			return changed, err
+		}
 	}
 	return changed, err
 }

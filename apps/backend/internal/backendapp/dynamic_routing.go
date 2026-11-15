@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
@@ -20,10 +21,17 @@ import (
 // state when launch fails. The optional launcher keeps focused handler tests
 // able to exercise the durable selection boundary without constructing the
 // full orchestrator.
+// dynamicCandidateSwitchPersister persists a selection that moves the session
+// to a different concrete candidate together with its runtime settings reset.
+type dynamicCandidateSwitchPersister func(
+	context.Context, *models.TaskSession, models.TaskSessionState, time.Time,
+) (bool, error)
+
 func dynamicRouteActionHandler(
 	repo *sqliterepo.Repository,
 	profileRepo settingsstore.Repository,
 	resolver *agentruntime.ProfileExecutionResolver,
+	persistCandidateSwitch dynamicCandidateSwitchPersister,
 	launchers ...func(context.Context, string) error,
 ) func(context.Context, orchestrator.RouteActionRequest) (*orchestrator.RouteActionResult, error) {
 	var launchSuccessor func(context.Context, string) error
@@ -31,7 +39,7 @@ func dynamicRouteActionHandler(
 		launchSuccessor = launchers[0]
 	}
 	return func(ctx context.Context, request orchestrator.RouteActionRequest) (*orchestrator.RouteActionResult, error) {
-		return applyDynamicRouteAction(ctx, repo, profileRepo, resolver, launchSuccessor, request)
+		return applyDynamicRouteAction(ctx, repo, profileRepo, resolver, persistCandidateSwitch, launchSuccessor, request)
 	}
 }
 
@@ -40,6 +48,7 @@ func applyDynamicRouteAction(
 	repo *sqliterepo.Repository,
 	profileRepo settingsstore.Repository,
 	resolver *agentruntime.ProfileExecutionResolver,
+	persistCandidateSwitch dynamicCandidateSwitchPersister,
 	launchSuccessor func(context.Context, string) error,
 	request orchestrator.RouteActionRequest,
 ) (*orchestrator.RouteActionResult, error) {
@@ -65,11 +74,25 @@ func applyDynamicRouteAction(
 	if err != nil {
 		return handleDynamicRouteActionError(ctx, repo, session, expectedState, err)
 	}
-	changed, err := persistDynamicRouteSelection(ctx, repo, session, expectedState, decision)
+	candidateSwitch := orchestrator.DynamicCandidateRuntimeResetRequired(
+		session.ExecutionProfileID, decision.ExecutionProfileID,
+	)
+	changed, err := persistDynamicRouteSelection(ctx, repo, session, expectedState, decision, persistCandidateSwitch)
 	if err != nil {
 		return nil, err
 	}
 	if !changed {
+		if candidateSwitch {
+			// The route claim is already durable, so a failed projection must
+			// return that generation to manual recovery before reporting conflict.
+			if _, err := resolver.MarkRouteActionRequired(
+				ctx, session.ID, decision.Generation, session.RouteReason,
+			); err != nil {
+				wrappedErr := fmt.Errorf("settle unpersisted dynamic route selection: %w", err)
+				return nil, routeActionPersistenceError(ctx, repo, session, wrappedErr)
+			}
+			return nil, routeActionError(ctx, repo, session, dynamicruntime.ErrStaleGeneration)
+		}
 		return reloadRouteActionResult(ctx, repo, session.ID)
 	}
 	if request.Action == orchestrator.RouteActionCancelWait || request.Action == orchestrator.RouteActionStop {
@@ -153,7 +176,9 @@ func persistDynamicRouteSelection(
 	session *models.TaskSession,
 	expectedState models.TaskSessionState,
 	decision agentruntime.ProfileExecution,
+	persistCandidateSwitch dynamicCandidateSwitchPersister,
 ) (bool, error) {
+	previousExecutionProfileID, expectedUpdatedAt := session.ExecutionProfileID, session.UpdatedAt
 	session.ExecutionProfileID = decision.ExecutionProfileID
 	session.RouteGeneration = decision.Generation
 	session.RouteState = decision.Decision.Status
@@ -170,7 +195,17 @@ func persistDynamicRouteSelection(
 	// A candidate change never carries a provider-native ACP identity across
 	// profiles. The conductor will populate this after a fresh launch.
 	session.DownstreamACPSessionID = ""
-	changed, err := repo.UpdateTaskSessionIfCurrentState(ctx, session, expectedState)
+	var changed bool
+	var err error
+	if orchestrator.DynamicCandidateRuntimeResetRequired(previousExecutionProfileID, session.ExecutionProfileID) {
+		// The previous provider's model and mode must not reach the new candidate.
+		if persistCandidateSwitch == nil {
+			return false, errors.New("dynamic candidate switch persister unavailable")
+		}
+		changed, err = persistCandidateSwitch(ctx, session, expectedState, expectedUpdatedAt)
+	} else {
+		changed, err = repo.UpdateTaskSessionIfCurrentState(ctx, session, expectedState)
+	}
 	if err != nil {
 		return false, routeActionPersistenceError(ctx, repo, session, err)
 	}

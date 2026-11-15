@@ -230,7 +230,7 @@ func codexServerArgs(srv types.McpServer) ([]string, error) {
 			pairs = append(pairs, pair{"http_headers", srv.Headers})
 		}
 	}
-	if srv.Name == codexKandevServerName {
+	if srv.Name == codexKandevServerName || srv.IsInjectedBuiltin() {
 		pairs = append(pairs, pair{"default_tools_approval_mode", codexKandevApprovalMode})
 	}
 	// NOTE: env vars and headers are JSON-encoded into `-c` overrides, which

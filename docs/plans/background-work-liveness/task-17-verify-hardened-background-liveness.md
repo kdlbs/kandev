@@ -8,7 +8,20 @@ depends_on:
   - "15-publish-active-subagent-counts"
   - "16-sidebar-background-spinner"
 plan: "plan.md"
-spec: "../../specs/platform/requirements/background-work-liveness.md"
+requirements:
+  - REQ-PLATFORM-BACKGROUND-WORK-LIVENESS-001
+acceptance_criteria:
+  - AC-PLATFORM-BACKGROUND-WORK-LIVENESS-001.1
+  - AC-PLATFORM-BACKGROUND-WORK-LIVENESS-001.2
+  - AC-PLATFORM-BACKGROUND-WORK-LIVENESS-001.3
+  - AC-PLATFORM-BACKGROUND-WORK-LIVENESS-001.4
+  - AC-PLATFORM-BACKGROUND-WORK-LIVENESS-001.5
+  - AC-PLATFORM-BACKGROUND-WORK-LIVENESS-001.6
+  - AC-PLATFORM-BACKGROUND-WORK-LIVENESS-001.7
+  - AC-PLATFORM-BACKGROUND-WORK-LIVENESS-001.8
+  - AC-PLATFORM-BACKGROUND-WORK-LIVENESS-001.9
+system_design:
+  - ../../specs/platform/system-design/background-work-liveness.md
 ---
 
 # Task 17: Verify hardened background liveness
@@ -34,3 +47,24 @@ e2e/tests/chat/mobile-busy-signal.spec.ts`.
 - **Output contract:** Report the agent capability matrix, lifecycle/count/UI
   evidence, exact full verification results, residual provider limitations, and
   update only this task status.
+
+## Restart fixture authority isolation (2026-10-27)
+
+Both failed attempts at PR #4534 head `0bbebdcf6afa` retain traces. An exact
+session GET overlaps installation of the synthetic background state while the
+fixture holds only the task-session list. The full session response correctly
+clears omitted runtime activity. This is competing authoritative recovery, not
+a product failure to preserve background activity. Route errors during cleanup
+are secondary to the failed synthetic-state assertion.
+
+Hold both reads independently. Release the list to prove it clears the stale
+projection while the individual read remains held. Release both gates in
+`finally` and drain the test-owned routes with `unrouteAll({ behavior: "wait" })`.
+A controlled individual-read release reproduces the original background UI
+assertion failure. The corrected probe keeps it held while the list clears
+activity. Existing session-slice and reconciler tests independently verify
+full-snapshot omission and revision ownership. No product logic changes.
+
+The three affected ACP restart scenarios pass three repetitions: nine cases,
+retries disabled, including message preservation and the worktree Files path.
+The related list/reconciler unit suites pass all 47 tests.

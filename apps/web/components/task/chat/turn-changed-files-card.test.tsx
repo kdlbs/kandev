@@ -75,6 +75,9 @@ const summary: TurnChangeSetSummary = {
 function translateCardTestCopy(key: string, options?: Record<string, unknown>): string {
   const translations: Record<string, () => string> = {
     "task:turnChangesFileCount": () => `${options?.count ?? 0} changed files`,
+    "task:turnChangesRepositoryChangeCount": () => `${options?.count ?? 0} repository changes`,
+    "task:turnChangesAvailableChangeCount": () => `${options?.count ?? 0} available changes`,
+    "task:turnChangesUnavailable": () => "This turn's change summary is unavailable.",
     "task:turnChangesLoadedFileCount": () => `${options?.count ?? 0} loaded files`,
     "task:turnChangesBinaryCount": () => `${options?.count ?? 0} binary files`,
     "task:turnChangesUnknownCount": () => `${options?.count ?? 0} unknown files`,
@@ -332,4 +335,112 @@ it("exposes mode-only changes in the file's accessible name", () => {
   expect(
     screen.getByRole("button", { name: /bin\/tool.*Mode changed 100644 to 100755/ }),
   ).toBeTruthy();
+});
+
+it("uses repository wording in the existing count slot for legacy captures", () => {
+  render(
+    <TurnChangedFilesCard
+      sessionId={sessionId}
+      summary={{ ...summary, legacy_counts: true, file_count: 320 }}
+      onOpenDiff={vi.fn()}
+    />,
+  );
+
+  expect(screen.getByText("320 repository changes")).toBeTruthy();
+  expect(screen.queryByText("320 changed files")).toBeNull();
+});
+
+it("shows exactly one unavailable message for an uncomparable turn", () => {
+  render(
+    <TurnChangedFilesCard
+      sessionId={sessionId}
+      summary={{
+        ...summary,
+        availability: "unavailable",
+        counts_available: false,
+        complete: false,
+        summary_complete: false,
+        content_complete: false,
+        file_count: 0,
+        repositories: [
+          {
+            ...summary.repositories[0],
+            availability: "unavailable",
+            comparison_basis: "history_unavailable",
+            comparison_complete: false,
+            content_complete: false,
+          },
+        ],
+      }}
+      onOpenDiff={vi.fn()}
+    />,
+  );
+
+  expect(screen.getAllByText("This turn's change summary is unavailable.")).toHaveLength(1);
+  expect(screen.queryByText("task:turnChangesPartial")).toBeNull();
+});
+
+it("keeps pending content quiet instead of showing a partial warning", () => {
+  render(
+    <TurnChangedFilesCard
+      sessionId={sessionId}
+      summary={{
+        ...summary,
+        complete: false,
+        content_complete: false,
+        repositories: [
+          {
+            ...summary.repositories[0],
+            content_complete: false,
+            export_state: "queued",
+          },
+        ],
+      }}
+      onOpenDiff={vi.fn()}
+    />,
+  );
+
+  expect(screen.queryByText("task:turnChangesPartial")).toBeNull();
+  expect(screen.queryByText(/task:turnChangesStatus_content_unavailable/)).toBeNull();
+});
+
+it("uses available-change wording for a partially comparable summary", () => {
+  render(
+    <TurnChangedFilesCard
+      sessionId={sessionId}
+      summary={{ ...summary, summary_complete: false, file_count: 2 }}
+      onOpenDiff={vi.fn()}
+    />,
+  );
+
+  expect(screen.getByText("2 available changes")).toBeTruthy();
+  expect(screen.getByText("task:turnChangesPartial")).toBeTruthy();
+});
+
+it("omits the numeric repository count for an unavailable root", () => {
+  mockFiles.byRepository = {};
+  mockFiles.totalsByRepository = { [repositoryChangeId]: 0 };
+  render(
+    <TurnChangedFilesCard
+      sessionId={sessionId}
+      summary={{
+        ...summary,
+        summary_complete: false,
+        repositories: [
+          {
+            ...summary.repositories[0],
+            availability: "unavailable",
+            enumeration_complete: false,
+            comparison_complete: false,
+            content_complete: false,
+            comparison_basis: "history_unavailable",
+          },
+        ],
+      }}
+      onOpenDiff={vi.fn()}
+    />,
+  );
+
+  expect(screen.queryByText("0 loaded files")).toBeNull();
+  expect(screen.getByText(/task:turnChangesStatus_unavailable/)).toBeTruthy();
 });

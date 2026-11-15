@@ -94,6 +94,10 @@ jobs:
             apps/backend/go.sum
             .github/workflows/frontend-tests.yml
             .github/scripts/frontend-timings.*
+            .github/scripts/web-toolchain-evidence.py
+            .github/scripts/web-toolchain-evidence_test.py
+            .github/scripts/upgrade-regression-workflow-contract_test.py
+            scripts/web-native-toolchain.test.mjs
             .github/scripts/changed-paths.py
             .github/scripts/runner-plan.py
             .github/actions/plan-external-runners/**
@@ -321,6 +325,10 @@ jobs:
       - name: Run lint
         run: pnpm --filter @kandev/web lint
 
+      - name: Test native web toolchain routing
+        working-directory: ${{ github.workspace }}
+        run: node --test scripts/web-native-toolchain.test.mjs
+
       # `build` below is Vite, which strips types with esbuild and never checks
       # them, so nothing in this job used to fail on a type error. Runs before
       # the tests to fail fast on the cheaper check.
@@ -331,7 +339,7 @@ jobs:
         run: pnpm --filter @kandev/web typecheck
 
       - name: Verify standalone plugin SDK contract
-        run: pnpm --filter @kandev/plugin-sdk test && pnpm --filter @kandev/plugin-sdk typecheck
+        run: pnpm --filter @kdlbs/plugin-sdk test && pnpm --filter @kdlbs/plugin-sdk typecheck
 
       # Unlike the eslint literal-string guard (scoped to already-migrated paths
       # via i18nGuardFiles), these five checks scan components/app/hooks/lib

@@ -127,6 +127,8 @@ test.describe("File tree inline rename", () => {
       .toBe(true);
     expect(fs.existsSync(path.join(repoDir, "rename-me.ts"))).toBe(false);
 
+    // Wait for the Git update that activates Changes before selecting Files.
+    await expect(session.changesFileRow("renamed.ts")).toBeVisible();
     // Old node disappears from the tree, new node appears.
     await session.clickTab("Files");
     await session.fileTree.waitForFileTreeNode("renamed.ts");
@@ -219,6 +221,8 @@ test.describe("File tree inline rename", () => {
       .poll(() => fs.existsSync(path.join(repoDir, "blur-final.ts")), { timeout: 10_000 })
       .toBe(true);
     expect(fs.existsSync(path.join(repoDir, "blur-original.ts"))).toBe(false);
+    // The disk write can precede the Git update that activates Changes.
+    await expect(session.changesFileRow("blur-final.ts")).toBeVisible();
     await session.clickTab("Files");
     await session.fileTree.waitForFileTreeNode("blur-final.ts");
     await expect(session.fileTreeNode("blur-original.ts")).toHaveCount(0);

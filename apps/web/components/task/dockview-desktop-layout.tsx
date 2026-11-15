@@ -51,6 +51,7 @@ import { useSyncTodoPanel } from "./dockview-todo-panel-sync";
 import {
   useCompactDockviewDefault,
   useDockviewUnmountCleanup,
+  useOwnedDockviewSessionId,
 } from "./dockview-desktop-layout-hooks";
 import { renderPanel } from "./dockview-panel-content";
 import { PreviewController } from "./preview-controller";
@@ -304,6 +305,7 @@ export function useEnvSwitchCleanup(
 // ---------------------------------------------------------------------------
 
 type DockviewDesktopLayoutProps = {
+  taskId?: string | null;
   workspaceId: string | null;
   workflowId: string | null;
   sessionId?: string | null;
@@ -426,7 +428,22 @@ function DockviewMainArea({ effectiveSessionId, hasDevScript, onReady }: Dockvie
   );
 }
 
+function useDockviewSidebarSizeSync(
+  api: DockviewReadyEvent["api"] | null,
+  layoutRootRef: React.RefObject<HTMLDivElement | null>,
+) {
+  const appSidebarCollapsed = useAppStore((state) => state.appSidebar.collapsed);
+  const appSidebarWidth = useAppStore((state) => state.appSidebar.width);
+  useLayoutEffect(() => {
+    if (!api) return;
+    const dockview = layoutRootRef.current?.querySelector<HTMLElement>(".dv-dockview");
+    const container = dockview?.parentElement;
+    if (container) syncDockviewContainerSize(api, container);
+  }, [api, appSidebarCollapsed, appSidebarWidth]);
+}
+
 export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
+  taskId = null,
   workspaceId,
   sessionId,
   repository,
@@ -439,13 +456,11 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   const layoutRootRef = useRef<HTMLDivElement>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const readyDisposersRef = useRef<Array<() => void>>([]);
+  const ownedApiRef = useRef<DockviewReadyEvent["api"] | null>(null);
   const appStore = useAppStoreApi();
 
-  const effectiveSessionId =
-    useAppStore((state) => state.tasks.activeSessionId) ?? sessionId ?? null;
+  const effectiveSessionId = useOwnedDockviewSessionId(taskId, sessionId);
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const appSidebarCollapsed = useAppStore((state) => state.appSidebar.collapsed);
-  const appSidebarWidth = useAppStore((state) => state.appSidebar.width);
   const effectiveEnvId = useAppStore((state) =>
     effectiveSessionId ? (state.environmentIdBySessionId[effectiveSessionId] ?? null) : null,
   );
@@ -465,15 +480,11 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
     envIdRef.current = effectiveEnvId;
   }, [effectiveEnvId]);
 
-  useLayoutEffect(() => {
-    if (!api) return;
-    const dockview = layoutRootRef.current?.querySelector<HTMLElement>(".dv-dockview");
-    const container = dockview?.parentElement;
-    if (container) syncDockviewContainerSize(api, container);
-  }, [api, appSidebarCollapsed, appSidebarWidth]);
+  useDockviewSidebarSizeSync(api, layoutRootRef);
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
+      ownedApiRef.current = event.api;
       setupReadyDockview({
         api: event.api,
         appStore,
@@ -509,7 +520,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
   useSyncReviewPanel();
   useSyncTodoPanel();
-  useDockviewUnmountCleanup(saveTimerRef, readyDisposersRef);
+  useDockviewUnmountCleanup(saveTimerRef, readyDisposersRef, ownedApiRef);
 
   // Visual masking: hide the dockview container during slow-path layout
   // switches (full fromJSON rebuild) to prevent the old layout from flashing.

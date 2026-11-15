@@ -101,32 +101,64 @@ func TestPromptSuggestionEventPayloadRoutesToSession(t *testing.T) {
 }
 
 // TestHandleAgentCapabilitiesEvent_RecordsNativePromptSuggestions verifies the
-// negotiated native-suggestion capability is persisted on the session and
-// broadcast, and that a later session without it clears the marker.
+// effective native-suggestion value is persisted on the session and broadcast,
+// while the support-only value is forwarded without changing source semantics.
+// A later session without effective support clears the marker.
 func TestHandleAgentCapabilitiesEvent_RecordsNativePromptSuggestions(t *testing.T) {
 	ctx := context.Background()
 	svc, eb := seedPromptSuggestionSession(t, models.TaskSessionStateStarting)
-	capabilities := func(native bool) *lifecycle.AgentStreamEventPayload {
+	trueValue, falseValue := true, false
+	capabilities := func(effective bool, raw *bool) *lifecycle.AgentStreamEventPayload {
 		return &lifecycle.AgentStreamEventPayload{
 			TaskID:    "t1",
 			SessionID: "s1",
-			Data:      &lifecycle.AgentStreamEventData{SupportsPromptSuggestions: native},
+			Data: &lifecycle.AgentStreamEventData{
+				SupportsPromptSuggestions:        effective,
+				NativePromptSuggestionsSupported: raw,
+			},
 		}
 	}
+	requireSource := func(want string) {
+		t.Helper()
+		session, err := svc.repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		require.Equal(t, want, session.Metadata[promptSuggestionSourceMetadataKey])
+	}
+	requirePublished := func(wantEffective bool, wantRaw *bool) {
+		t.Helper()
+		require.NotEmpty(t, eb.events)
+		published, ok := eb.events[len(eb.events)-1].event.Data.(lifecycle.AgentCapabilitiesEventPayload)
+		require.True(t, ok)
+		require.Equal(t, wantEffective, published.SupportsPromptSuggestions)
+		require.Equal(t, wantRaw, published.NativePromptSuggestionsSupported)
+	}
 
-	svc.handleAgentCapabilitiesEvent(ctx, capabilities(true))
-	session, err := svc.repo.GetTaskSession(ctx, "s1")
-	require.NoError(t, err)
-	require.Equal(t, promptSuggestionSourceNative, session.Metadata[promptSuggestionSourceMetadataKey])
-	require.Len(t, eb.events, 1)
-	published, ok := eb.events[0].event.Data.(lifecycle.AgentCapabilitiesEventPayload)
-	require.True(t, ok)
-	require.True(t, published.SupportsPromptSuggestions)
+	svc.handleAgentCapabilitiesEvent(ctx, capabilities(true, &trueValue))
+	requireSource(promptSuggestionSourceNative)
+	requirePublished(true, &trueValue)
 
-	svc.handleAgentCapabilitiesEvent(ctx, capabilities(false))
-	session, err = svc.repo.GetTaskSession(ctx, "s1")
-	require.NoError(t, err)
-	require.Equal(t, promptSuggestionSourceNone, session.Metadata[promptSuggestionSourceMetadataKey])
+	// Supported but not requested: support stays true, effective is false, and
+	// the session must stop being native.
+	svc.handleAgentCapabilitiesEvent(ctx, capabilities(false, &trueValue))
+	requireSource(promptSuggestionSourceNone)
+	requirePublished(false, &trueValue)
+
+	// An older producer can still send effective true with unknown raw support.
+	svc.handleAgentCapabilitiesEvent(ctx, capabilities(true, nil))
+	requireSource(promptSuggestionSourceNative)
+	requirePublished(true, nil)
+
+	// Effective false with the raw field absent still clears the source.
+	svc.handleAgentCapabilitiesEvent(ctx, capabilities(false, nil))
+	requireSource(promptSuggestionSourceNone)
+	requirePublished(false, nil)
+
+	// A new explicit denial clears the source and is forwarded as false.
+	svc.handleAgentCapabilitiesEvent(ctx, capabilities(true, nil))
+	requireSource(promptSuggestionSourceNative)
+	svc.handleAgentCapabilitiesEvent(ctx, capabilities(false, &falseValue))
+	requireSource(promptSuggestionSourceNone)
+	requirePublished(false, &falseValue)
 }
 
 // TestHandlePromptSuggestionEvent_RejectsSuggestionWithoutLatestOrigin verifies

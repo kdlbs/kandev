@@ -7,14 +7,17 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 const completionGateSummaryBatchSize = 100
 
 type completionGateSummaryTask struct {
-	updatedAt time.Time
-	revision  int64
-	criteria  []models.TaskCompletionCriterion
+	updatedAt           time.Time
+	revision            int64
+	criteria            []models.TaskCompletionCriterion
+	requiredAssignments int
+	assignedChildren    int
 }
 
 type completionGateEvidenceKey struct {
@@ -69,14 +72,25 @@ func (r *Repository) readTaskCompletionGateSummaryChunk(
 
 	idsPlaceholder, idArgs := buildInPlaceholders(taskIDs)
 	tasks := make(map[string]*completionGateSummaryTask, len(taskIDs))
-	identityQuery := `SELECT id, updated_at FROM tasks WHERE id IN (` + idsPlaceholder + `)`
+	identityQuery := `SELECT parent.id, parent.updated_at, parent.state, COALESCE(parent.metadata, '{}'), ` + assignedRoutineChildrenSQL("parent") + ` FROM tasks parent WHERE parent.id IN (` + idsPlaceholder + `)`
 	if err := readCompletionGateSummaryRows(ctx, tx, r.ro.Rebind(identityQuery), idArgs, func(rows *sql.Rows) error {
 		var taskID string
 		var updatedAt time.Time
-		if err := rows.Scan(&taskID, &updatedAt); err != nil {
+		var state v1.TaskState
+		var raw string
+		var assigned int
+		if err := rows.Scan(&taskID, &updatedAt, &state, &raw, &assigned); err != nil {
 			return err
 		}
-		tasks[taskID] = &completionGateSummaryTask{updatedAt: updatedAt}
+		required := 0
+		if state != v1.TaskStateCompleted {
+			var err error
+			required, err = requiredSubtaskCount(raw)
+			if err != nil {
+				return err
+			}
+		}
+		tasks[taskID] = &completionGateSummaryTask{updatedAt: updatedAt, requiredAssignments: required, assignedChildren: assigned}
 		return nil
 	}); err != nil {
 		return nil, nil, fmt.Errorf("load completion-gate task identities: %w", err)
@@ -262,7 +276,7 @@ func completionGateBatchEvidenceCurrent(
 func completionGateBatchObservations(tasks map[string]*completionGateSummaryTask, prHeads map[completionGateEvidenceKey]string, executions map[completionGateEvidenceKey]struct{}) map[string]*models.TaskCompletionGateSummaryObservation {
 	observations := make(map[string]*models.TaskCompletionGateSummaryObservation, len(tasks))
 	for taskID, task := range tasks {
-		if task.revision == 0 && len(task.criteria) == 0 {
+		if task.revision == 0 && len(task.criteria) == 0 && task.requiredAssignments == 0 {
 			observations[taskID] = nil
 			continue
 		}
@@ -277,6 +291,9 @@ func completionGateBatchObservations(tasks map[string]*completionGateSummaryTask
 			} else {
 				observation.VerifiedCount++
 			}
+		}
+		if task.requiredAssignments > task.assignedChildren {
+			observation.BlockerCount++
 		}
 		observation.Blocked = observation.BlockerCount > 0
 		observations[taskID] = observation

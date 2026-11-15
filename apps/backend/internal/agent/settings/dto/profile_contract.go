@@ -13,19 +13,22 @@ import (
 // creation. Value fields retain the existing create defaults; omitted optional
 // fields are left at their domain defaults.
 type ProfileCreateRequest struct {
-	AgentID                 string                  `json:"agent_id"`
-	Name                    string                  `json:"name"`
-	Model                   string                  `json:"model,omitempty"`
-	FallbackModel           string                  `json:"fallback_model,omitempty"`
-	AutoFallback            bool                    `json:"auto_fallback,omitempty"`
-	RequireExactModel       bool                    `json:"require_exact_model,omitempty"`
-	Mode                    string                  `json:"mode,omitempty"`
-	ConfigOptions           map[string]string       `json:"config_options,omitempty"`
-	AllowIndexing           bool                    `json:"allow_indexing,omitempty"`
-	AutoApprove             bool                    `json:"auto_approve,omitempty"`
-	CLIPassthrough          bool                    `json:"cli_passthrough,omitempty"`
-	CLIFlags                []CLIFlagDTO            `json:"cli_flags,omitempty"`
-	EnvVars                 []ProfileEnvVarDTO      `json:"env_vars,omitempty"`
+	AgentID           string             `json:"agent_id"`
+	Name              string             `json:"name"`
+	Model             string             `json:"model,omitempty"`
+	FallbackModel     string             `json:"fallback_model,omitempty"`
+	AutoFallback      bool               `json:"auto_fallback,omitempty"`
+	RequireExactModel bool               `json:"require_exact_model,omitempty"`
+	Mode              string             `json:"mode,omitempty"`
+	ConfigOptions     map[string]string  `json:"config_options,omitempty"`
+	AllowIndexing     bool               `json:"allow_indexing,omitempty"`
+	AutoApprove       bool               `json:"auto_approve,omitempty"`
+	CLIPassthrough    bool               `json:"cli_passthrough,omitempty"`
+	CLIFlags          []CLIFlagDTO       `json:"cli_flags,omitempty"`
+	EnvVars           []ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	// DevinSandboxInherited marks an explicit "Use CLI settings" choice on a
+	// new Devin profile. It is request-only and never persisted.
+	DevinSandboxInherited   bool                    `json:"devin_sandbox_inherited,omitempty"`
 	CommandPrefix           string                  `json:"command_prefix,omitempty"`
 	ProviderKind            string                  `json:"provider_kind,omitempty"`
 	ProviderBaseURL         string                  `json:"provider_base_url,omitempty"`

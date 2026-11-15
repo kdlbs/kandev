@@ -50,6 +50,18 @@ func (e *Executor) EnsureSessionForAgent(
 func (e *Executor) EnsureSessionForAgentWithCreation(
 	ctx context.Context, task *v1.Task, agentInstanceID, agentProfileID, executorID, executorProfileID string,
 ) (*models.TaskSession, bool, error) {
+	return e.EnsureSessionForAgentWithCreationAndSeed(
+		ctx, task, agentInstanceID, agentProfileID, executorID, executorProfileID, nil,
+	)
+}
+
+// EnsureSessionForAgentWithCreationAndSeed applies the initial prompt seed
+// only when this call inserts a fresh Office session. A reused row keeps its
+// existing metadata and primary ownership.
+func (e *Executor) EnsureSessionForAgentWithCreationAndSeed(
+	ctx context.Context, task *v1.Task, agentInstanceID, agentProfileID, executorID, executorProfileID string,
+	seed *models.PreparedSessionSeed,
+) (*models.TaskSession, bool, error) {
 	if task == nil || task.ID == "" {
 		return nil, false, errors.New("EnsureSessionForAgent: task is required")
 	}
@@ -81,7 +93,7 @@ func (e *Executor) EnsureSessionForAgentWithCreation(
 		}
 	}
 
-	return e.createOfficeSessionWithBoundedRecovery(ctx, task, agentInstanceID, agentProfileID, executorID, executorProfileID)
+	return e.createOfficeSessionWithBoundedRecovery(ctx, task, agentInstanceID, agentProfileID, executorID, executorProfileID, seed)
 }
 
 // maxOfficeSessionCreateAttempts bounds EnsureSessionForAgentWithCreation's
@@ -100,11 +112,12 @@ const maxOfficeSessionCreateAttempts = 2
 // laundered into the sentinel and never as a nil session with a nil error.
 func (e *Executor) createOfficeSessionWithBoundedRecovery(
 	ctx context.Context, task *v1.Task, agentInstanceID, agentProfileID, executorID, executorProfileID string,
+	seed *models.PreparedSessionSeed,
 ) (*models.TaskSession, bool, error) {
 	var lastErr error
 	runnerProfileExplicit := taskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != "")
 	for attempt := 0; attempt < maxOfficeSessionCreateAttempts; attempt++ {
-		created, err := e.createOfficeSession(ctx, task, agentInstanceID, agentProfileID, executorID, executorProfileID)
+		created, err := e.createOfficeSession(ctx, task, agentInstanceID, agentProfileID, executorID, executorProfileID, seed)
 		if err == nil {
 			return created, true, nil
 		}
@@ -301,8 +314,13 @@ func (e *Executor) tryFlipIdleSessionToRunning(
 // it stays for kanban / quick-chat advanced-mode resume.
 func (e *Executor) createOfficeSession(
 	ctx context.Context, task *v1.Task, agentInstanceID, agentProfileID, executorID, executorProfileID string,
+	seed *models.PreparedSessionSeed,
 ) (*models.TaskSession, error) {
+	if err := seed.Validate(); err != nil {
+		return nil, fmt.Errorf("validate prepared session seed: %w", err)
+	}
 	metadata := cloneMetadata(task.Metadata)
+	metadata = seed.ApplyToMetadata(metadata)
 	runnerResolvedFromTask, taskRunnerProfileID := taskRunnerResolution(
 		task, executorProfileID, taskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != ""),
 	)

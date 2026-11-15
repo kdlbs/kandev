@@ -53,7 +53,7 @@ export function TaskItemTrailing({
       <div className="mobile-task-actions-with-stats group/actions relative flex shrink-0 items-center self-center">
         <DiffStatsRight diffStats={diffStats} menuOpen={effectiveMenuOpen} />
         <div className="mobile-task-actions-slot absolute inset-0 flex items-center justify-end">
-          <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} />
+          <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} alwaysVisibleOnTouch />
         </div>
       </div>
     );
@@ -82,7 +82,7 @@ export function TaskItemTrailing({
           <span className="sr-only">{accessibleRelativeTime}</span>
         </span>
         <div className="mobile-task-actions-slot absolute inset-0 flex items-center justify-end">
-          <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} />
+          <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} alwaysVisibleOnTouch />
         </div>
       </div>
     );
@@ -102,13 +102,21 @@ export function TaskItemTrailing({
             effectiveMenuOpen && "w-6",
             "[@media(hover:hover)]:group-hover:w-6 group-focus-within:w-6",
             "[@media(max-width:639px)]:w-auto",
+            "[@media(hover:none)]:w-11",
           )}
         >
-          <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} rowFocus />
+          <TaskMenuButton
+            visible={effectiveMenuOpen}
+            expanded={menuOpen}
+            rowFocus
+            alwaysVisibleOnTouch
+          />
         </div>
       </div>
     );
   }
 
-  return <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} rowFocus />;
+  return (
+    <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} rowFocus alwaysVisibleOnTouch />
+  );
 }

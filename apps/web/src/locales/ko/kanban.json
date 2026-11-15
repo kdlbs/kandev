@@ -133,5 +133,6 @@
   "bulkSelected_other": "{{count}}개 선택됨",
   "bulkActions": "작업",
   "selectTasks": "작업 선택",
-  "cancelTaskSelection": "선택 취소"
+  "cancelTaskSelection": "선택 취소",
+  "graph": "그래프"
 }

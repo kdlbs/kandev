@@ -202,7 +202,7 @@ export function buildRemoteHelperArtifact({
   }
 }
 
-function parseManifest(manifest, expectedVariant, expectedIdentity) {
+export function parseManifest(manifest, expectedVariant, expectedIdentity) {
   assertExactKeys(
     manifest,
     ["schema_version", "version", "commit", "variant", "helpers"],

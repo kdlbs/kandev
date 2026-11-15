@@ -6,7 +6,7 @@ import { IconCheck, IconClipboard, IconDownload, IconExternalLink } from "@table
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { useAppStore } from "@/components/state-provider";
-import { InstallAgentCard } from "@/components/settings/install-agent-card";
+import { InstallAgentCard, canInstallAgent } from "@/components/settings/install-agent-card";
 import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import { useAgentDiscovery } from "@/hooks/domains/settings/use-agent-discovery";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
@@ -55,6 +55,30 @@ function CopyButton({
   );
 }
 
+function InstallGuidance({
+  agent,
+  copiedValue,
+  onCopy,
+}: {
+  agent: AvailableAgent;
+  copiedValue: string | null;
+  onCopy: (text: string) => void;
+}) {
+  const { t } = useTranslation();
+  if (agent.install_script) {
+    return (
+      <div className="flex items-center gap-1 rounded-md bg-muted px-2 py-1.5 font-mono text-xs">
+        <code className="flex-1 truncate">{agent.install_script}</code>
+        <CopyButton text={agent.install_script} copiedValue={copiedValue} onCopy={onCopy} />
+      </div>
+    );
+  }
+  if (agent.supports_local_install) {
+    return <p className="text-xs text-muted-foreground">{t("agents:localInstallHint")}</p>;
+  }
+  return null;
+}
+
 function InstallCard({
   agent,
   copiedValue,
@@ -73,14 +97,7 @@ function InstallCard({
       agent={agent}
       job={job}
       onInstall={onInstall}
-      scriptSlot={
-        agent.install_script ? (
-          <div className="flex items-center gap-1 rounded-md bg-muted px-2 py-1.5 font-mono text-xs">
-            <code className="flex-1 truncate">{agent.install_script}</code>
-            <CopyButton text={agent.install_script} copiedValue={copiedValue} onCopy={onCopy} />
-          </div>
-        ) : null
-      }
+      scriptSlot={<InstallGuidance agent={agent} copiedValue={copiedValue} onCopy={onCopy} />}
     />
   );
 }
@@ -227,7 +244,7 @@ export function AgentInstallCatalog() {
   const canManage = useIsAdmin();
 
   const notInstalledAgents = useMemo(
-    () => availableAgents.filter((a: AvailableAgent) => !a.available && a.install_script),
+    () => availableAgents.filter((a: AvailableAgent) => !a.available && canInstallAgent(a)),
     [availableAgents],
   );
   const notInstalledTools = tools.filter((tool: ToolStatus) => !tool.available);

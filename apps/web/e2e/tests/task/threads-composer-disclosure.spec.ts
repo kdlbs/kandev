@@ -55,18 +55,19 @@ for (const layout of ["grid", "columns"] as const) {
     const initialCap = Math.round(geometry.viewportHeight * 0.5);
     expect(geometry.hostMax).toBeGreaterThan(0);
     expect(geometry.maxHeight).toBe(Math.min(initialCap, geometry.hostMax));
-    const expand = tile.getByTestId("clarification-panel-expand");
-    const reset = tile.getByTestId("clarification-panel-reset");
+    const sizeToggle = tile.getByTestId("clarification-panel-size-toggle");
+    await expect(sizeToggle).toHaveCount(1);
+    await expect(sizeToggle).toHaveAttribute("aria-label", "Expand");
     if (geometry.hostMax > initialCap) {
-      await expect(expand).toBeEnabled();
-      await expand.click();
+      await expect(sizeToggle).toBeEnabled();
+      await sizeToggle.click();
       await expect(container).toHaveCSS("height", `${geometry.hostMax}px`);
       await expect(container).toHaveCSS("max-height", `${geometry.hostMax}px`);
-      await expect(reset).toBeEnabled();
+      await expect(sizeToggle).toHaveAttribute("aria-label", "Restore");
+      await expect(sizeToggle).toBeEnabled();
     } else {
-      await expect(expand).toBeDisabled();
+      await expect(sizeToggle).toBeDisabled();
       await expect(container).toHaveCSS("max-height", `${geometry.hostMax}px`);
-      await expect(reset).toBeDisabled();
     }
     await expect
       .poll(() => transcript.evaluate((el) => el.getBoundingClientRect().height))
@@ -78,10 +79,11 @@ for (const layout of ["grid", "columns"] as const) {
     });
 
     if (geometry.hostMax > initialCap) {
-      await reset.click();
+      await sizeToggle.click();
       await expect
         .poll(() => container.evaluate((el) => (el as HTMLElement).style.height))
         .toBe("");
+      await expect(sizeToggle).toHaveAttribute("aria-label", "Expand");
     }
     await expect
       .poll(() => transcript.evaluate((el) => el.getBoundingClientRect().height))

@@ -29,15 +29,22 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
-// ExecutorFallbackPolicy controls behavior when a requested runtime is unavailable.
+// ExecutorFallbackPolicy is retained for internal source compatibility only.
+// A concrete executor selection is always required: an unavailable mapped
+// backend is refused instead of replaced, regardless of this value. The
+// constants remain so existing wiring and tests can migrate independently of
+// the required-runtime correction.
 type ExecutorFallbackPolicy string
 
 const (
-	// ExecutorFallbackAllow silently falls back to the default runtime (current behavior).
+	// ExecutorFallbackAllow is retained for compatibility; it no longer
+	// authorizes replacing a concrete selection with the default runtime.
 	ExecutorFallbackAllow ExecutorFallbackPolicy = "allow"
-	// ExecutorFallbackWarn falls back but logs a warning (current behavior, explicit).
+	// ExecutorFallbackWarn is retained for compatibility; it no longer
+	// authorizes replacing a concrete selection with the default runtime.
 	ExecutorFallbackWarn ExecutorFallbackPolicy = "warn"
-	// ExecutorFallbackDeny returns an error if the requested runtime is unavailable.
+	// ExecutorFallbackDeny expresses the required-runtime intent. Production
+	// wiring uses it, although selection admission no longer depends on it.
 	ExecutorFallbackDeny ExecutorFallbackPolicy = "deny"
 )
 
@@ -109,6 +116,10 @@ type Manager struct {
 	// startupRecoveryDelay overrides the managed-runtime retry delay in tests.
 	startupRecoveryDelay func() time.Duration
 
+	// managedRuntimeSingleUserOwner supplies the disabled-authentication
+	// single-user repair owner. Backend composition owns the live auth mode.
+	managedRuntimeSingleUserOwner func() (string, bool)
+
 	// preparerRegistry maps executor types to environment preparers.
 	preparerRegistry *PreparerRegistry
 
@@ -129,6 +140,13 @@ type Manager struct {
 	// is contacted, and consulted by Launch to refuse a concurrent request
 	// for a session that might still be re-tracking. Always non-nil.
 	recoveryGuard *RecoveryGuard
+
+	// runtimeStorage holds the latest owner-verified advisory capacity per
+	// session. It is runtime-only and never persisted.
+	runtimeStorage *runtimeStorageProbeState
+	// runtimeStorageClock is a test seam for independent capacity and pressure
+	// receipt ages.
+	runtimeStorageClock func() time.Time
 
 	// retrackedSessionsMu guards retrackedSessions.
 	retrackedSessionsMu sync.RWMutex
@@ -377,6 +395,13 @@ func (m *Manager) SetManagedGoCacheEnvironmentProvider(provider ManagedGoCacheEn
 	m.managedGoCache = provider
 }
 
+// SetManagedRuntimeSingleUserOwner wires the live authentication mode and the
+// established single-user identity. The callback must return allowed=false for
+// setup, enabled, unknown, or unavailable authentication.
+func (m *Manager) SetManagedRuntimeSingleUserOwner(owner func() (string, bool)) {
+	m.managedRuntimeSingleUserOwner = owner
+}
+
 // SetManagedRuntimeSelectionStore wires the install-wide exact-version
 // resolver used by standalone managed-agent launches.
 func (m *Manager) SetManagedRuntimeSelectionStore(store managedruntime.SelectionReader) {
@@ -541,6 +566,7 @@ func NewManager(
 		skillDeployer:                  NoopSkillDeployer(),
 		remediateNpxCache:              routingerr.RemediateNpxCache,
 		recoveryGuard:                  NewRecoveryGuard(),
+		runtimeStorage:                 newRuntimeStorageProbeState(),
 		retrackedSessions:              make(map[string]struct{}),
 		standaloneOwnSessions:          make(map[string]struct{}),
 		passthroughMCPActiveClaims:     make(map[string]map[string]passthroughMCPFileClaim),
@@ -559,6 +585,7 @@ func NewManager(
 		OnGitReset:                       mgr.handleGitResetDetected,
 		OnBranchSwitch:                   mgr.handleBranchSwitch,
 		OnFileChange:                     mgr.handleFileChangeNotification,
+		OnWorktreeInventory:              mgr.handleWorktreeInventory,
 		OnShellOutput:                    mgr.handleShellOutput,
 		OnShellExit:                      mgr.handleShellExit,
 		OnProcessOutput:                  mgr.handleProcessOutput,
@@ -569,6 +596,9 @@ func NewManager(
 		return exists && current == execution && mgr.runtimeExecutionCurrent(execution)
 	}
 	mgr.streamManager.onDeliveryReconciliationPhase = mgr.recordDeliveryReconciliationPhase
+	mgr.streamManager.onRuntimeStorageProbe = mgr.applyRuntimeStorageProbe
+	mgr.streamManager.onRuntimeStoragePressure = mgr.applyRuntimeStoragePressure
+	mgr.streamManager.onRuntimeStorageDetached = mgr.retireRuntimeStorageObservation
 
 	// Set session manager dependencies for full orchestration
 	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore, historyManager)
@@ -601,6 +631,7 @@ func (m *Manager) handleInitialPromptFailure(failure InitialPromptFailure) {
 			zap.Uint64("prompt_generation", failure.PromptGeneration))
 		return
 	}
+	storage, _ := agentctl.StorageDiagnosticFromError(failure.Err)
 	settled := m.handleErrorEvent(execution, agentctl.AgentEvent{
 		Type: toolStatusError,
 		// Preserve the ACP prompt failure. Dynamic profiles classify this exact
@@ -608,6 +639,7 @@ func (m *Manager) handleInitialPromptFailure(failure InitialPromptFailure) {
 		// fallback is permitted; replacing it with a generic label makes a 529
 		// indistinguishable from a local delivery failure.
 		Error:            routingerr.Sanitize(failure.Err.Error()),
+		Storage:          storage,
 		SessionID:        failure.SessionID,
 		PromptGeneration: failure.PromptGeneration,
 		TurnID:           failure.TurnID,

@@ -7,7 +7,7 @@ import (
 
 	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 func (r *PluginRemoteExecutor) attachRetainedPluginExecutor(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {

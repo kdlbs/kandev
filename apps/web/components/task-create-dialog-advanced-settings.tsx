@@ -1,12 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { IconChevronDown, IconInfoCircle } from "@tabler/icons-react";
+import { useState, type ReactNode } from "react";
+import { IconChevronDown } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
-import { TaskCreateDependencies } from "@/components/task-create-dialog-dependencies";
+import { TaskCreateRelationshipSettings } from "@/components/task-create-dialog-relationship-settings";
 import { TaskCreateParentWorkspaceSetting } from "@/components/task-create-dialog-parent-workspace-setting";
 import { TaskCreatePrioritySelect } from "@/components/task-create-dialog-priority-select";
 import { AgentSelector } from "@/components/task-create-dialog-selectors";
@@ -27,6 +26,13 @@ type TaskCreateAdvancedSettingsProps = TaskCreateParentWorkspaceSettingProps & {
   isTaskStarted: boolean;
   blockedBy: string[];
   onBlockedByChange: (next: string[]) => void;
+  parentTaskId?: string;
+  selectedParentTaskId?: string;
+  onSelectedParentTaskIdChange?: (next: string | undefined) => void;
+  relatedTaskIds?: string[];
+  onRelatedTaskIdsChange?: (next: string[]) => void;
+  contextStepId?: string | null;
+  taskId?: string | null;
   priority: TaskPriority;
   onPriorityChange: (next: TaskPriority) => void;
   dependenciesDisabled?: boolean;
@@ -38,6 +44,7 @@ type TaskCreateAdvancedSettingsProps = TaskCreateParentWorkspaceSettingProps & {
   onWorkflowAgentOverrideChange?: (sourceProfileId: string, replacementProfileId: string) => void;
   onResetWorkflowAgentOverrides?: () => void;
   onRetryWorkflowAgentOverrides?: () => void;
+  builtinPackages?: ReactNode;
   mcpDefinitions?: MCPServerDefinition[];
   mcpDefinitionsLoading?: boolean;
   mcpSelectionIds?: string[];
@@ -178,55 +185,6 @@ function TaskCreateWorkflowAgentOverridesBody({
   );
 }
 
-function TaskCreateDependencySettingRow({
-  blockedBy,
-  onBlockedByChange,
-  dependenciesDisabled,
-}: {
-  blockedBy: string[];
-  onBlockedByChange: (next: string[]) => void;
-  dependenciesDisabled?: boolean;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div
-      className="flex min-w-0 items-center gap-3"
-      data-testid="task-create-dependency-setting-row"
-    >
-      <div
-        className="flex min-h-11 shrink-0 items-center gap-1 text-[11px] text-muted-foreground/70 md:min-h-6"
-        data-testid="task-create-dependency-setting-label"
-      >
-        <span>{t("task:dependsOn")}</span>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-11 min-h-11 w-11 min-w-11 cursor-pointer p-0 text-muted-foreground/70 hover:bg-transparent hover:text-muted-foreground md:h-6 md:min-h-6 md:w-6 md:min-w-6"
-              aria-label={t("task:dependencyInfoLabel")}
-              data-testid="task-create-dependency-setting-info"
-            >
-              <IconInfoCircle className="h-3.5 w-3.5" aria-hidden="true" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="top" className="z-[60] max-w-xs">
-            {t("task:dependencyInfo")}
-          </TooltipContent>
-        </Tooltip>
-      </div>
-      <div className="min-w-0 flex-1" data-testid="task-create-dependency-selector-container">
-        <TaskCreateDependencies
-          value={blockedBy}
-          onChange={onBlockedByChange}
-          disabled={dependenciesDisabled}
-        />
-      </div>
-    </div>
-  );
-}
-
 function TaskCreateWorkflowAgentOverridesSection({
   rows,
   options,
@@ -286,7 +244,19 @@ function TaskCreateWorkflowAgentOverridesSection({
   );
 }
 
-type NormalizedAdvancedSettingsProps = Required<TaskCreateAdvancedSettingsProps>;
+type OptionalRelationshipKeys =
+  | "parentTaskId"
+  | "selectedParentTaskId"
+  | "onSelectedParentTaskIdChange"
+  | "relatedTaskIds"
+  | "onRelatedTaskIdsChange"
+  | "contextStepId"
+  | "taskId";
+
+type NormalizedAdvancedSettingsProps = Required<
+  Omit<TaskCreateAdvancedSettingsProps, OptionalRelationshipKeys>
+> &
+  Pick<TaskCreateAdvancedSettingsProps, OptionalRelationshipKeys>;
 
 function valueOrDefault<T>(value: T | undefined, fallback: T): T {
   return value ?? fallback;
@@ -316,6 +286,7 @@ function normalizeAdvancedSettingsProps(
       props.onRetryWorkflowAgentOverrides,
       () => undefined,
     ),
+    builtinPackages: props.builtinPackages ?? null,
     mcpDefinitions: valueOrDefault(props.mcpDefinitions, []),
     mcpDefinitionsLoading: valueOrDefault(props.mcpDefinitionsLoading, false),
     mcpSelectionIds: valueOrDefault(props.mcpSelectionIds, []),
@@ -326,12 +297,20 @@ function normalizeAdvancedSettingsProps(
 
 type AdvancedSettingsContentProps = Omit<
   NormalizedAdvancedSettingsProps,
-  "isCreateMode" | "isEditMode" | "isTaskStarted" | keyof TaskCreateParentWorkspaceSettingProps
+  "isEditMode" | "isTaskStarted" | keyof TaskCreateParentWorkspaceSettingProps
 >;
 
 function TaskCreateAdvancedSettingsContent({
+  isCreateMode,
   blockedBy,
   onBlockedByChange,
+  parentTaskId,
+  selectedParentTaskId,
+  onSelectedParentTaskIdChange,
+  relatedTaskIds = [],
+  onRelatedTaskIdsChange,
+  contextStepId,
+  taskId,
   priority,
   onPriorityChange,
   dependenciesDisabled,
@@ -343,6 +322,7 @@ function TaskCreateAdvancedSettingsContent({
   onWorkflowAgentOverrideChange,
   onResetWorkflowAgentOverrides,
   onRetryWorkflowAgentOverrides,
+  builtinPackages,
   mcpDefinitions,
   mcpDefinitionsLoading,
   mcpSelectionIds,
@@ -359,10 +339,18 @@ function TaskCreateAdvancedSettingsContent({
         className="grid min-w-0 grid-cols-1 gap-4 px-1 md:grid-cols-2"
         data-testid="task-create-advanced-settings-grid"
       >
-        <TaskCreateDependencySettingRow
+        <TaskCreateRelationshipSettings
           blockedBy={blockedBy}
           onBlockedByChange={onBlockedByChange}
-          dependenciesDisabled={dependenciesDisabled}
+          parentTaskId={parentTaskId}
+          selectedParentTaskId={selectedParentTaskId}
+          onSelectedParentTaskIdChange={onSelectedParentTaskIdChange}
+          relatedTaskIds={relatedTaskIds}
+          onRelatedTaskIdsChange={onRelatedTaskIdsChange}
+          showCreateRelationships={isCreateMode}
+          taskId={taskId}
+          contextStepId={contextStepId}
+          disabled={dependenciesDisabled}
         />
         <div
           className="md:col-start-2 md:justify-self-start"
@@ -371,6 +359,7 @@ function TaskCreateAdvancedSettingsContent({
           <TaskCreatePrioritySelect value={priority} onChange={onPriorityChange} />
         </div>
         <TaskCreateMCPSettingRow
+          builtinPackages={builtinPackages}
           definitions={mcpDefinitions}
           loading={mcpDefinitionsLoading}
           selectedIds={mcpSelectionIds}
@@ -397,32 +386,15 @@ function TaskCreateAdvancedSettingsContent({
 }
 
 export function TaskCreateAdvancedSettings(props: TaskCreateAdvancedSettingsProps) {
+  const settings = normalizeAdvancedSettingsProps(props);
   const {
     isCreateMode,
     isEditMode,
     isTaskStarted,
-    blockedBy,
-    onBlockedByChange,
-    priority,
-    onPriorityChange,
     initialWorkspaceLayout,
     onInitialWorkspaceLayoutChange,
     initialWorkspaceLayoutMode,
-    dependenciesDisabled,
-    workflowAgentOverrideRows,
-    workflowAgentOverrideOptions,
-    workflowAgentOverridesLoading,
-    workflowAgentOverridesInvalid,
-    workflowAgentOverridesError,
-    onWorkflowAgentOverrideChange,
-    onResetWorkflowAgentOverrides,
-    onRetryWorkflowAgentOverrides,
-    mcpDefinitions,
-    mcpDefinitionsLoading,
-    mcpSelectionIds,
-    onMcpSelectionIdsChange,
-    mcpInheritedSelections,
-  } = normalizeAdvancedSettingsProps(props);
+  } = settings;
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
@@ -453,26 +425,7 @@ export function TaskCreateAdvancedSettings(props: TaskCreateAdvancedSettingsProp
         className="min-w-0 pt-1"
         data-testid="task-create-advanced-settings-content"
       >
-        <TaskCreateAdvancedSettingsContent
-          blockedBy={blockedBy}
-          onBlockedByChange={onBlockedByChange}
-          priority={priority}
-          onPriorityChange={onPriorityChange}
-          dependenciesDisabled={dependenciesDisabled}
-          workflowAgentOverrideRows={workflowAgentOverrideRows}
-          workflowAgentOverrideOptions={workflowAgentOverrideOptions}
-          workflowAgentOverridesLoading={workflowAgentOverridesLoading}
-          workflowAgentOverridesInvalid={workflowAgentOverridesInvalid}
-          workflowAgentOverridesError={workflowAgentOverridesError}
-          onWorkflowAgentOverrideChange={onWorkflowAgentOverrideChange}
-          onResetWorkflowAgentOverrides={onResetWorkflowAgentOverrides}
-          onRetryWorkflowAgentOverrides={onRetryWorkflowAgentOverrides}
-          mcpDefinitions={mcpDefinitions}
-          mcpDefinitionsLoading={mcpDefinitionsLoading}
-          mcpSelectionIds={mcpSelectionIds}
-          onMcpSelectionIdsChange={onMcpSelectionIdsChange}
-          mcpInheritedSelections={mcpInheritedSelections}
-        />
+        <TaskCreateAdvancedSettingsContent {...settings} />
         <TaskCreateParentWorkspaceSetting
           initialWorkspaceLayout={initialWorkspaceLayout}
           onInitialWorkspaceLayoutChange={onInitialWorkspaceLayoutChange}

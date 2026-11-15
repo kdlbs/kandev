@@ -14,7 +14,6 @@ import (
 	"github.com/kandev/kandev/internal/auth/hostnames"
 	authstore "github.com/kandev/kandev/internal/auth/store"
 	"github.com/kandev/kandev/internal/automation"
-	"github.com/kandev/kandev/internal/azuredevops"
 	canvasservice "github.com/kandev/kandev/internal/canvas"
 	"github.com/kandev/kandev/internal/coordinator"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
@@ -41,6 +40,7 @@ import (
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
+	taskchanges "github.com/kandev/kandev/internal/task/changes"
 	"github.com/kandev/kandev/internal/task/deliveryretention"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -84,6 +84,8 @@ type Repositories struct {
 
 type Services struct {
 	capacityRetryClock       *e2eCapacityRetryClock
+	TurnHistoryStore         *taskchanges.GitHistoryStore
+	TurnHistory              *taskchanges.HistoryService
 	DeliveryRetention        *deliveryretention.Worker
 	ManagedRuntimeSelections managedruntime.SelectionStore
 	DynamicProfileResolver   *agentruntime.ProfileExecutionResolver
@@ -102,7 +104,6 @@ type Services struct {
 	GitHub        *github.Service
 	GitLab        *gitlab.Service
 	GitLabCleanup func() error
-	AzureDevOps   *azuredevops.Service
 	Jira          *jira.Service
 	Linear        *linear.Service
 	Sentry        *sentry.Service
@@ -138,6 +139,9 @@ type Services struct {
 	// registry, event delivery, health monitoring). Always constructed
 	// (non-nil) when initialization succeeds.
 	Plugins *plugins.Service
+	// PluginToolCatalog fans lifecycle catalog changes out to agentctl
+	// executions and in-process MCP servers. Nil until main starts plugins.
+	PluginToolCatalog *pluginToolCatalogFanout
 	// AgentConversations is the managed workspace agent conversation
 	// service behind the agent_conversation Host capability. Nil when the
 	// plugins service itself is unavailable.

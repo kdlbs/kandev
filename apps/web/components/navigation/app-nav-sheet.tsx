@@ -33,6 +33,8 @@ type AppNavSheetProps = {
   pageNav?: ReactNode | ((close: () => void) => ReactNode);
   /** Page-scoped plugin controls grouped with plugin navigation on phones. */
   pluginActions?: ReactNode;
+  /** Task-scoped controls grouped with task navigation on phones. */
+  taskActions?: ReactNode;
   omitDestinations?: string[];
   /** Reuse a workbench's existing task picker and selection controller. */
   onOpenTaskViews?: () => void;
@@ -40,7 +42,7 @@ type AppNavSheetProps = {
 
 /** Shared phone app navigation; wider page shells retain their side sheet. */
 export function AppNavSheet(props: AppNavSheetProps) {
-  const { pageNav, pluginActions, omitDestinations, onOpenTaskViews } = props;
+  const { pageNav, pluginActions, taskActions, omitDestinations, onOpenTaskViews } = props;
   const { isMobile } = useResponsiveBreakpoint();
   const pathname = usePathname();
   const inOffice = useInOffice();
@@ -102,6 +104,7 @@ export function AppNavSheet(props: AppNavSheetProps) {
                 isMobile ? (
                   <MobileNavigationExtras
                     localNav={renderedPageNav}
+                    taskActions={taskActions}
                     workspaceId={workspace?.id}
                     showTasks={open && !inOffice}
                     close={close}
@@ -205,11 +208,13 @@ function NavigationQuickActions({
 
 function MobileNavigationExtras({
   localNav,
+  taskActions,
   workspaceId,
   showTasks,
   close,
 }: {
   localNav: ReactNode;
+  taskActions?: ReactNode;
   workspaceId?: string;
   showTasks: boolean;
   close: () => void;
@@ -221,6 +226,12 @@ function MobileNavigationExtras({
         <section className="flex flex-col gap-3" aria-label={t("common:pageNavigation")}>
           <h3 className="text-sm font-medium">{t("common:pageNavigation")}</h3>
           {localNav}
+        </section>
+      )}
+      {taskActions && (
+        <section className="flex flex-col gap-3" aria-label={t("task:taskActions")}>
+          <h3 className="text-sm font-medium">{t("task:taskActions")}</h3>
+          {taskActions}
         </section>
       )}
       {showTasks && workspaceId && <MobileTaskOutlet key={workspaceId} close={close} />}

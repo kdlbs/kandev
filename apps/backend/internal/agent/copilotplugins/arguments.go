@@ -29,10 +29,10 @@ func (e *Error) Error() string {
 }
 
 // IsUnsupported reports whether the failure is a configuration limitation that
-// the user can repair by changing the executor or runtime.
+// the user can repair by changing the profile selection, executor, or runtime.
 func (e *Error) IsUnsupported() bool {
 	switch e.Reason {
-	case ReasonRuntimeUnsupported, ReasonUnsupportedLaunch, ReasonUnsupportedSource,
+	case ReasonRuntimeUnsupported, ReasonPluginLoadingUnsupported, ReasonUnsupportedLaunch, ReasonUnsupportedSource,
 		ReasonBuiltinNotMountable, ReasonExternalNotMountable, ReasonPluginMountConflict, ReasonPolicyUnverified:
 		return true
 	default:
@@ -42,8 +42,12 @@ func (e *Error) IsUnsupported() bool {
 
 func repairAction(reason ReasonCode) string {
 	switch reason {
-	case ReasonRuntimeUnsupported, ReasonPolicyUnverified:
+	case ReasonRuntimeUnsupported:
 		return "Select a supported Copilot runtime in the profile's runtime settings."
+	case ReasonPluginLoadingUnsupported:
+		return "Select a runtime that supports plugin directory loading, or uncheck the selected plugins."
+	case ReasonPolicyUnverified:
+		return "Uncheck the selected plugins and save the profile to start without them."
 	case ReasonUnsupportedLaunch:
 		return "Use a local or worktree executor with a verified configuration directory."
 	case ReasonBuiltinNotMountable:
@@ -78,20 +82,14 @@ type Prepared struct {
 }
 
 // ResolveLaunchSelection is the production admission boundary. It validates
-// the final context, preserves empty-selection behavior, rejects unqualified
-// runtimes, and refuses nonempty mounts until native policy evidence exists.
+// the final context, preserves empty-selection behavior, and observes the
+// selected runtime's native plugin-loading contract before resolving roots.
 func ResolveLaunchSelection(ctx context.Context, runner Runner, launch LaunchContext, selection []string) (Prepared, error) {
 	if len(selection) == 0 {
 		return Prepared{}, nil
 	}
 	if err := launch.validate(); err != nil {
 		return Prepared{}, &Error{Reason: reasonForContextError(err)}
-	}
-	if !RuntimeSupported(launch.RuntimeVersion) {
-		return Prepared{}, &Error{Reason: ReasonRuntimeUnsupported}
-	}
-	if err := RequireMountPolicy(launch.RuntimeVersion); err != nil {
-		return Prepared{}, err
 	}
 	return ResolveSelection(ctx, runner, launch, selection)
 }

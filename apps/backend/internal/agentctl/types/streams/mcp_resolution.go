@@ -51,7 +51,7 @@ func NormalizeMCPResolution(entries []MCPResolutionEntry) []MCPResolutionEntry {
 			continue
 		}
 		switch entry.ReasonCode {
-		case "", "definition_missing", "definition_disabled", "secret_resolution_failed", "transport_policy", "server_policy", "invalid_transport", "filtered":
+		case "", "definition_missing", "definition_disabled", "session_excluded", "secret_resolution_failed", "transport_policy", "server_policy", "invalid_transport", "filtered":
 		default:
 			continue
 		}
@@ -77,10 +77,14 @@ func boundedMCPIdentity(value string) string {
 	return value
 }
 
+const automationMCPOrigin = "automation"
+
+// normalizeMCPOrigins retains known origin scopes with bounded identities and at most 64 entries.
 func normalizeMCPOrigins(origins []MCPSelectionOrigin) []MCPSelectionOrigin {
 	result := make([]MCPSelectionOrigin, 0, min(len(origins), 64))
 	for _, origin := range origins {
 		switch origin.Scope {
+		case automationMCPOrigin:
 		case "profile", "repository", "task", "task_session":
 		default:
 			continue

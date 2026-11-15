@@ -160,6 +160,22 @@ export async function verifyAutomaticRestartReconciliation(
       ),
     ).toHaveLength(1);
     await expect(session.chat.getByText("Slow response complete", { exact: false })).toHaveCount(0);
+  } catch (error) {
+    await test
+      .info()
+      .attach("restart-reconciliation-backend-log", {
+        path: backend.logPath,
+        contentType: "text/plain",
+      })
+      .catch(() => undefined);
+    await test
+      .info()
+      .attach("restart-reconciliation-file-log", {
+        path: path.join(backend.tmpDir, ".kandev/logs/backend-logs.log"),
+        contentType: "text/plain",
+      })
+      .catch(() => undefined);
+    throw error;
   } finally {
     try {
       if (siblingTask) await api.deleteTask(siblingTask);
@@ -187,11 +203,22 @@ async function createRecoverySibling(api: ApiClient, seed: SeedData) {
     },
   );
   if (!task.session_id) throw new Error("healthy sibling has no session");
-  await expect
-    .poll(async () => (await api.getTaskSession(task.session_id!)).session.state, {
-      timeout: 30_000,
-    })
-    .toBe("WAITING_FOR_INPUT");
+  try {
+    await expect
+      .poll(async () => (await api.getTaskSession(task.session_id!)).session.state, {
+        timeout: 30_000,
+      })
+      .toBe("WAITING_FOR_INPUT");
+  } catch (error) {
+    await test
+      .info()
+      .attach("recovery-sibling-session", {
+        body: JSON.stringify(await api.getTaskSession(task.session_id).catch(() => null)),
+        contentType: "application/json",
+      })
+      .catch(() => undefined);
+    throw error;
+  }
   return {
     taskId: task.id,
     snapshot: await captureSilentRestartSnapshot(api, task.id, task.session_id),

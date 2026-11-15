@@ -1,3 +1,10 @@
+import type { ModelCatalog } from "@kandev/types/model-catalog";
+import type {
+  BuiltinMCPPackage,
+  BuiltinMCPManifest,
+  BuiltinMCPAcceptedBinding,
+} from "@/lib/types/builtin-mcp";
+
 export type AuthMethodInfoPayload = {
   id: string;
   name: string;
@@ -17,8 +24,18 @@ export type AgentCapabilitiesPayload = {
   supports_image: boolean;
   supports_audio: boolean;
   supports_embedded_context: boolean;
-  /** True when the session asked its Claude Code agent for native next-prompt suggestions. */
+  /**
+   * Effective session enablement: the provider supports native next-prompt
+   * suggestions and this launch or resume asked for them. Only such sessions
+   * show suggestions.
+   */
   supports_prompt_suggestions?: boolean;
+  /**
+   * Provider support only, independent of the user preference. Absent when an
+   * older producer or another transport did not report it. Never use this to
+   * decide whether suggestions are enabled.
+   */
+  native_prompt_suggestions_supported?: boolean;
   auth_methods: AuthMethodInfoPayload[];
   timestamp: string;
 };
@@ -39,6 +56,7 @@ export type ConfigOptionPayload = {
   current_value: string;
   category?: string;
   options?: { value: string; name: string; description?: string }[];
+  catalog?: ModelCatalog;
 };
 
 export type SessionModelsPayload = {
@@ -75,6 +93,8 @@ export type SessionModelSelectionWarningPayload = {
 };
 
 export type MCPAttachmentServerPayload = {
+  builtin_package?: BuiltinMCPPackage;
+  accepted_at?: string;
   name: string;
   source?: "kandev" | "profile";
   transport?: string;
@@ -97,6 +117,10 @@ export type MCPAttachmentServerPayload = {
 };
 
 export type MCPAttachmentAttemptPayload = {
+  task_id?: string;
+  session_id?: string;
+  execution_id?: string;
+  builtin_packages?: BuiltinMCPManifest;
   attachment_attempt_id: string;
   started_at: string;
   updated_at?: string;
@@ -104,6 +128,7 @@ export type MCPAttachmentAttemptPayload = {
 };
 
 export type MCPAttachmentHistoryPayload = {
+  builtin_binding?: BuiltinMCPAcceptedBinding;
   version: number;
   current: MCPAttachmentAttemptPayload;
   previous?: MCPAttachmentAttemptPayload[];

@@ -12,44 +12,6 @@ var errUnsupportedLaunchContext = errors.New("unsupported copilot plugin launch 
 
 const windowsOS = "windows"
 
-// inventoryQualifiedVersions lists the managed Copilot packages whose inventory
-// format, installation metadata, and repeated mount syntax were reproduced.
-// An unlisted version returns a typed unsupported result instead of falling
-// back to a globally installed CLI.
-var inventoryQualifiedVersions = map[string]struct{}{
-	"1.0.88":  {},
-	"1.0.104": {},
-}
-
-// policyVerifiedVersions lists runtimes for which native fixtures established
-// that an explicit --plugin-dir mount preserves native MCP disables and managed
-// prohibitions. No runtime has that evidence yet, so nonempty starts stay
-// fail-closed while discovery remains available.
-var policyVerifiedVersions = map[string]struct{}{}
-
-// RuntimeSupported reports whether safe inventory discovery is qualified for
-// the selected managed runtime version.
-func RuntimeSupported(version string) bool {
-	_, ok := inventoryQualifiedVersions[strings.TrimSpace(version)]
-	return ok
-}
-
-// MountsPermitted reports whether explicit plugin mounts are permitted for the
-// selected runtime. Inventory qualification is deliberately separate.
-func MountsPermitted(version string) bool {
-	_, ok := policyVerifiedVersions[strings.TrimSpace(version)]
-	return ok
-}
-
-// RequireMountPolicy returns a typed policy_unverified error until native
-// evidence proves that explicit mounts preserve the runtime's vetoes.
-func RequireMountPolicy(version string) error {
-	if MountsPermitted(version) {
-		return nil
-	}
-	return &Error{Reason: ReasonPolicyUnverified}
-}
-
 // RuntimeVersionFromCommand extracts the exact @github/copilot package version
 // from an already-prepared argv. Binding discovery to this command prevents a
 // runtime activation between command construction and plugin resolution.

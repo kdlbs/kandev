@@ -20,7 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/pkgtar"
 	"github.com/kandev/kandev/internal/plugins/store"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // maxWebhookBodyBytes caps the request body the webhook relay
@@ -433,8 +433,12 @@ func (c *Controller) ui(ctx *gin.Context) {
 // this is the "path-traversal safe via http.FileServer on a rooted FS"
 // requirement. contentType, if non-empty, is set before serving so
 // FileServer's extension-based sniffing is skipped (net/http only
-// auto-detects when the header is unset).
+// auto-detects when the header is unset). The URLs carry only the plugin
+// version, so a reinstall of the same version keeps the same URL; no-cache
+// makes the browser revalidate (FileServer answers 304 from Last-Modified)
+// instead of reusing a stale copy under heuristic freshness.
 func serveInstalledFile(ctx *gin.Context, root, relPath, contentType string) {
+	ctx.Writer.Header().Set("Cache-Control", "no-cache")
 	if contentType != "" {
 		ctx.Writer.Header().Set(contentTypeHeader, contentType)
 	}
@@ -483,7 +487,7 @@ func (c *Controller) webhook(ctx *gin.Context) {
 		Body:       body,
 	}
 
-	leasedRecord, release, err := c.svc.beginPluginDispatch(id, dispatchGeneration(record))
+	leasedRecord, release, err := c.svc.beginPluginDispatchContext(ctx.Request.Context(), id, dispatchGeneration(record))
 	if err != nil {
 		c.logWebhookFailure(id, http.StatusServiceUnavailable, webhookOriginHostLifecycle, err)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})

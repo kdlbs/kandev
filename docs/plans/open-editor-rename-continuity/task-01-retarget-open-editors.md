@@ -185,3 +185,30 @@ Five affected Vitest suites passed 51 tests, changed-file ESLint and the 8 GiB
 typecheck passed, and a fresh managed Chromium run passed the rename/save flow
 with tracing enabled. The unrelated hosted executor-selector failure passed one
 isolated local attempt with retries disabled; the hosted result remains failed.
+
+## Save completion observation in CI (2026-10-27)
+
+PR #4534 head `3e4a5a3aff7f` has one failing browser attempt: the final disk
+read after Save throws ENOENT. The failed result has screenshot/context only.
+The retained trace belongs to its successful retry. The rename response and
+pre-save destination content checks passed, so that path was valid before Save.
+The final Save omitted the response wait already used for the first Save.
+
+Arm an ID-correlated `workspace.file.update` wait for the renamed path and
+session before clicking Save. Require success before reading exact disk bytes.
+Keep the previous five-second observation budget, source-absence checks, dirty
+content, tab identity, and reopen assertions. Retain first-failure traces.
+No production file-write or rename behavior changes.
+
+A disposable per-worker Git wrapper pauses real Git after unlink for 500 ms.
+The original test reproduces ENOENT during that gap. With the same pause, the
+receipt-based check passes and all original assertions complete. The wrapper is
+restored before cleanup and no instrumentation enters the committed fixture.
+This controlled proof does not establish the historical CI syscall timing,
+which is unavailable without the failed attempt's trace. Normal repeated
+rename/save cases, lint, typecheck, hooks, and fresh CI remain required.
+
+Normal rename and save-refresh scenarios pass three repetitions: six cases,
+retries disabled. Formatting, zero-warning scoped lint, full typecheck, and
+documentation/specification checks pass. Independent review finds no actionable
+issue. Normal hooks, delivery, and fresh CI remain required.

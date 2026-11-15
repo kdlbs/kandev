@@ -4,7 +4,6 @@ import { useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
-import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useToast } from "@/components/toast-provider";
 import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
 import type { PRChangedFile } from "./changes-panel-timeline";
@@ -70,7 +69,7 @@ import {
 function useChangesPanelStoreData() {
   const { t } = useTranslation();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const activeSessionId = useEnvironmentSessionId();
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const hasCommitData = useAppStore((state) => {
     if (!activeSessionId) return false;
     const envKey = state.environmentIdBySessionId[activeSessionId] ?? activeSessionId;

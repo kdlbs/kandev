@@ -37,6 +37,8 @@ func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service, log *logger.Log
 	dispatcher.RegisterFunc(ws.ActionAutomationTriggerUpdate, wsUpdateTrigger(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationTriggerDelete, wsDeleteTrigger(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationTriggerTypes, wsTriggerTypes(svc))
+	dispatcher.RegisterFunc(ws.ActionAutomationPluginToolOptions, wsPluginToolOptions(svc))
+	dispatcher.RegisterFunc("automation.mcp_options", wsMCPOptions(svc))
 	dispatcher.RegisterFunc(ws.ActionAutomationWebhookRevealSecret, wsRevealWebhookSecret(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationRunDelete, wsDeleteRun(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationRunStop, wsStopRun(svc, log))
@@ -96,13 +98,21 @@ func wsGet(svc *Service, log *logger.Logger) func(ctx context.Context, msg *ws.M
 	}
 }
 
+// wsCreate admits native editor selections and rejects automation-authored configuration changes.
 func wsCreate(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		if isMCPAutomationContext(ctx) {
+			return automationMCPMutationDenied(msg)
+		}
+		payload, _ := parseMap(msg)
+		if raw, present := payload["mcp_selection"]; present && raw == nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "mcp_selection cannot be null", nil)
+		}
 		var req CreateAutomationRequest
 		if err := msg.ParsePayload(&req); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload: "+err.Error(), nil)
 		}
-		a, err := svc.CreateAutomation(ctx, &req)
+		a, err := svc.CreateAutomation(WithNativePluginToolIntent(ctx), &req)
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
@@ -123,23 +133,38 @@ func wsCreate(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.
 	}
 }
 
+// wsUpdate preserves omitted selections and admits explicit changes only through the native editor.
 func wsUpdate(svc *Service, log *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		if isMCPAutomationContext(ctx) {
+			return automationMCPMutationDenied(msg)
+		}
 		payload, _ := parseMap(msg)
 		id, _ := payload["id"].(string)
 		if id == "" {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "id required", nil)
 		}
+		if raw, present := payload["plugin_tools"]; present && raw == nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "plugin_tools cannot be null", nil)
+		}
+		if raw, present := payload["mcp_selection"]; present && raw == nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "mcp_selection cannot be null", nil)
+		}
 		var req UpdateAutomationRequest
 		if err := msg.ParsePayload(&req); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload: "+err.Error(), nil)
 		}
-		a, err := svc.UpdateAutomation(ctx, id, &req)
+		a, err := svc.UpdateAutomation(WithNativePluginToolIntent(ctx), id, &req)
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
 		return ws.NewResponse(msg.ID, msg.Action, a)
 	}
+}
+
+func automationMCPMutationDenied(msg *ws.Message) (*ws.Message, error) {
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
+		"automation configuration is not available from an MCP session", nil)
 }
 
 func wsDelete(svc *Service, log *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -390,6 +415,27 @@ func wsTriggerTypes(svc *Service) func(ctx context.Context, msg *ws.Message) (*w
 			}
 		}
 		return ws.NewResponse(msg.ID, msg.Action, types)
+	}
+}
+
+func wsPluginToolOptions(svc *Service) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		if isMCPAutomationContext(ctx) {
+			return automationMCPMutationDenied(msg)
+		}
+		payload, _ := parseMap(msg)
+		workspaceID, _ := payload["workspace_id"].(string)
+		if workspaceID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspace_id required", nil)
+		}
+		groups, err := svc.PluginToolOptions(ctx, workspaceID)
+		if err != nil {
+			if errors.Is(err, ErrAutomationNotFound) {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "workspace unavailable", nil)
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to load plugin tool options", nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, map[string]any{"groups": groups})
 	}
 }
 

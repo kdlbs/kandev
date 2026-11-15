@@ -60,6 +60,14 @@ owns that external dependency and protocol proof. Existing 2.2.0 support remains
 observation-only. No Kandev implementation or mock fixture can satisfy that
 producer gate by itself.
 
+The [Kandev integration plugin](opencode-kandev-plugin.md) adds a separate,
+bounded compatibility path for supported v2 shell outcomes. It uses the new
+[integration decision](../../../decisions/2026-10-28-opencode-integration-plugin.md).
+That path can settle a known job after foreground completion. It does not
+satisfy automatic-response delivery, active-background liveness, or this
+design's upstream producer gate. Without the plugin, the legacy behavior below
+remains authoritative.
+
 ## Existing launch observations
 
 Add an OpenCode-specific recognizer beside
@@ -257,12 +265,13 @@ job as complete. It also must not move a task into or out of a workflow column.
 
 Reuse BackgroundWorkChip in chat-status-bar.tsx, useBackgroundWork, and the
 existing normalized list/output subscriptions. No OpenCode branches belong in
-React. The summary distinguishes running, waiting, and unknown counts.
+React. The shared design owns running-only summaries and Active/History tabs.
 
 Desktop uses the compact chip, its summary popover, and named central detail
 tabs. Phone uses the existing chip drawer with a focused list and a full-height
-detail surface. Back returns to the selected job; dismissal returns focus to
-the chip. Keep one scroll owner and respect keyboard and safe-area clearance.
+detail surface. Back restores the originating list; dismissal returns focus
+to the invoker, or the composer when its chip disappears. Keep one scroll owner
+and respect keyboard and safe-area clearance.
 Phone action targets are at least 44px.
 
 For observation-only OpenCode, hide unsupported Stop, Interrupt, and stdin
@@ -270,10 +279,11 @@ controls. The command banner is not live command output. Show unavailable output
 when the producer has no output capability. When final output arrives, show its
 retained result with failure or exit status.
 
-When the active count reaches zero, retain a history entry near the composer.
-Do not change the preserved behavior for an empty session that never had jobs.
-Reuse the shared viewer for completed history. Localize every new status,
-accessibility name, count, and unavailable-state message in all catalogs.
+When the running count reaches zero, hide the composer chip. Keep history
+reachable through the independent panel entry defined by the
+[shared UX design](background-work.md#shared-client-and-responsive-ui).
+Unknown launches remain unknown in History, without implying completion.
+Localize status, accessibility names, counts, and unavailable-state messages.
 
 ## Recovery, security, and observability
 
@@ -330,5 +340,8 @@ or steering. Remove this shared flag only through a later retirement change.
 - [Coarse prompt admission](../../../decisions/2026-07-28-coarse-running-busy-signal.md).
 - [Implementation package](../../../plans/opencode-background-continuity/plan.md).
 
-The existing ownership decisions cover this extension. The upstream producer
-proposal is an explicit dependency, not a new unproven capability in shipped code.
+The existing ownership decisions cover full continuity. The separate
+[plugin package](../../../plans/opencode-kandev-plugin/plan.md) owns the v2
+compatibility module and its automatic launch integration. The upstream
+producer proposal remains a dependency for automatic responses and verified
+activity. Plugin conformance does not satisfy that producer gate.

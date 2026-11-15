@@ -2,7 +2,7 @@
 
 import type { GitHubAppRegistration } from "./github-app";
 import type { GitHubPRDiscoveryHealth } from "./github-pr-discovery";
-import type { CheckRun, WorkflowAttention } from "./github-checks";
+import type { CheckRun, CheckSummary, WorkflowAttention } from "./github-checks";
 
 export * from "./github-app";
 export * from "./github-pr-discovery";
@@ -195,6 +195,7 @@ export type GitHubPRStatus = {
   checks_total: number;
   checks_passing: number;
   workflow_attention?: WorkflowAttention | null;
+  check_summary?: CheckSummary | null;
 };
 
 export type MergeMethod = "merge" | "squash" | "rebase";
@@ -275,6 +276,8 @@ export type TaskPR = {
   head_sha?: string;
   /** Head-scoped GitHub Actions evidence that needs human attention. */
   workflow_attention?: WorkflowAttention | null;
+  /** Last selected detailed check snapshot. Null when never observed. */
+  check_summary?: CheckSummary | null;
   /** Empty when GitHub did not return an active merge-queue entry. */
   merge_queue_state?: MergeQueueState;
   merge_queue_entry_id?: string;

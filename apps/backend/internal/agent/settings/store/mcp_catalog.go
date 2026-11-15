@@ -115,18 +115,7 @@ func (r *sqliteRepository) UpdateMCPServerDefinition(ctx context.Context, defini
 }
 
 func (r *sqliteRepository) DeleteMCPServerDefinition(ctx context.Context, workspaceID, id string, expectedRevision int64) error {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM mcp_server_definitions WHERE workspace_id = ? AND id = ? AND revision = ?`), workspaceID, id, expectedRevision)
-	if err != nil {
-		return err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows > 0 {
-		return nil
-	}
-	return r.mcpRevisionOrNotFound(ctx, workspaceID, id)
+	return r.DeleteMCPServerDefinitionWithSelections(ctx, workspaceID, id, expectedRevision)
 }
 
 func (r *sqliteRepository) mcpRevisionOrNotFound(ctx context.Context, workspaceID, id string) error {

@@ -3,6 +3,8 @@ import { waitForActiveTaskSession } from "../../helpers/session-store";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
+test.use({ trace: "retain-on-failure" });
+
 test.describe("Workflow automation", () => {
   /**
    * Seeds a 4-step workflow (Todo → In Progress → Review → Done) and validates

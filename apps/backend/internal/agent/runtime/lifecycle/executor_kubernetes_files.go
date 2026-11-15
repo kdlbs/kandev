@@ -1,9 +1,13 @@
 package lifecycle
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path"
 	"regexp"
@@ -20,6 +24,11 @@ import (
 )
 
 var kubernetesSafePathComponent = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+const (
+	kubernetesRemoteFileMissingMarker = "\x00KANDEV_FILE_V1:missing\x00"
+	kubernetesRemoteFilePresentMarker = "\x00KANDEV_FILE_V1:present\x00"
+)
 
 type kubernetesPodFileUploader struct {
 	streams   *kubeexecutor.StreamOperations
@@ -40,6 +49,64 @@ func (u kubernetesPodFileUploader) WriteFile(
 	return kubernetesWriteFile(ctx, u.streams, u.pod, u.container, destination, data, mode)
 }
 
+func (u kubernetesPodFileUploader) ReadFile(ctx context.Context, source string) ([]byte, error) {
+	source = strings.ReplaceAll(source, "\\", "/")
+	if !kubernetesSafeAbsolutePath(source) {
+		return nil, fmt.Errorf("unsafe Kubernetes read source %q", source)
+	}
+	var output bytes.Buffer
+	if err := u.streams.Exec(ctx, kubeexecutor.ExecRequest{
+		Namespace: u.pod.Namespace, Pod: u.pod.Name, Container: u.container,
+		Command: []string{"sh", "-c", kubernetesReadFileCommand(source)},
+		Stdout:  &output, Stderr: io.Discard,
+	}); err != nil {
+		return nil, fmt.Errorf("read Kubernetes remote file: %w", err)
+	}
+	data := output.Bytes()
+	switch {
+	case bytes.HasPrefix(data, []byte(kubernetesRemoteFileMissingMarker)):
+		if len(data) != len(kubernetesRemoteFileMissingMarker) {
+			return nil, errors.New("kubernetes file reader returned data for a missing file")
+		}
+		return nil, fs.ErrNotExist
+	case bytes.HasPrefix(data, []byte(kubernetesRemoteFilePresentMarker)):
+		return append([]byte(nil), data[len(kubernetesRemoteFilePresentMarker):]...), nil
+	default:
+		return nil, errors.New("kubernetes file reader returned an invalid response")
+	}
+}
+
+func kubernetesReadFileCommand(source string) string {
+	directory := path.Dir(source)
+	return fmt.Sprintf(`set -efu
+directory=%s
+source=%s
+current=
+old_ifs=$IFS
+IFS=/
+set -- $directory
+IFS=$old_ifs
+for component in "$@"; do
+  [ -n "$component" ] || continue
+  current="$current/$component"
+  [ ! -L "$current" ] || exit 73
+  if [ -e "$current" ]; then
+    [ -d "$current" ] || exit 73
+  else
+    printf '\000KANDEV_FILE_V1:missing\000'
+    exit 0
+  fi
+done
+[ ! -L "$source" ] || exit 73
+if [ ! -e "$source" ]; then
+  printf '\000KANDEV_FILE_V1:missing\000'
+  exit 0
+fi
+[ -f "$source" ] || exit 73
+printf '\000KANDEV_FILE_V1:present\000'
+cat -- "$source"`, shellQuote(directory), shellQuote(source))
+}
+
 func (r *KubernetesExecutor) materializeKubernetesRemoteFiles(
 	ctx context.Context,
 	runtimeClient *kubernetesRuntimeClient,
@@ -50,6 +117,12 @@ func (r *KubernetesExecutor) materializeKubernetesRemoteFiles(
 	uploader := kubernetesPodFileUploader{streams: runtimeClient.streams, pod: pod, container: container}
 	if err := r.materializeKubernetesCredentials(ctx, uploader, runtimeClient, req, pod, container); err != nil {
 		return fmt.Errorf("kubernetes lifecycle: materialize agent configuration: %w", err)
+	}
+	if req.AgentConfig != nil {
+		warnings := UploadPortableConfigBundles(
+			ctx, uploader, req.AgentConfig, selectedPortableConfigBundleIDs(req.Metadata), kubernetesSessionHome(req), r.logger,
+		)
+		reportPortableConfigWarnings(req.OnProgress, warnings)
 	}
 	if err := materializeKubernetesSkillManifest(ctx, uploader, req.Metadata); err != nil {
 		return fmt.Errorf("kubernetes lifecycle: materialize skill manifest: %w", err)
@@ -77,10 +150,6 @@ func (r *KubernetesExecutor) materializeKubernetesCredentials(
 	if err := UploadCredentialFiles(ctx, uploader, selectedMethods, home, r.logger); err != nil {
 		return err
 	}
-	warnings := UploadPortableConfigBundles(
-		ctx, uploader, req.AgentConfig, selectedPortableConfigBundleIDs(req.Metadata), home, r.logger,
-	)
-	reportPortableConfigWarnings(req.OnProgress, warnings)
 	for _, spec := range catalog.Specs {
 		for _, method := range spec.Methods {
 			if method.Type != authMethodTypeEnv || method.EnvVar == "" || method.SetupScript == "" || req.Env[method.EnvVar] == "" {

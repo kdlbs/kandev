@@ -31,6 +31,100 @@ async function openGitLabSyncTab(testPage: import("@playwright/test").Page) {
 }
 
 test.describe("GitLab workflow sync", () => {
+  test("matches profile options and reports an ambiguous sync", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const seed = await apiClient.getAgentProfile(seedData.agentProfileId);
+    const model = `portable-match-${Date.now()}`;
+    const profileIds: string[] = [];
+    const create = async (effort: string) => {
+      const profile = await apiClient.createAgentProfile(
+        seed.agentId,
+        `Portable ${effort} ${profileIds.length}`,
+        {
+          model,
+          mode: seed.mode,
+          config_options: { reasoning_effort: effort },
+        },
+      );
+      profileIds.push(profile.id);
+      return profile;
+    };
+    try {
+      const low = await create("low");
+      await create("high");
+      const yaml = `version: 3
+type: kandev_workflow
+workflows:
+  - name: Option-aware sync
+    steps:
+      - name: Work
+        position: 0
+        color: bg-blue-500
+        complete_task_on_enter: false
+        agent_profile:
+          agent_name: ${JSON.stringify(seed.agentDisplayName)}
+          model: ${JSON.stringify(model)}
+          mode: ${JSON.stringify(seed.mode ?? "")}
+          config_options:
+            reasoning_effort: low`;
+      await apiClient.configureGitLab(seedData.workspaceId);
+      await apiClient.mockGitLabAddRepoFiles(seedData.workspaceId, GITLAB_PROJECT, "main", [
+        { path: ".kandev/workflows/options.yaml", content: yaml },
+      ]);
+      const configured = await apiClient.rawRequest(
+        "POST",
+        `/api/v1/workflow-sync/config?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+        {
+          provider: "gitlab",
+          project_path: GITLAB_PROJECT,
+          branch: "main",
+          path: ".kandev/workflows",
+          interval_seconds: 300,
+          poll_enabled: false,
+        },
+      );
+      expect(configured.ok).toBe(true);
+      const page = new WorkflowSettingsPage(testPage);
+      await page.goto(seedData.workspaceId);
+      const status = testPage.getByTestId("workflow-sync-status");
+      const sync = async () => {
+        const response = waitForHttp(testPage, "POST", /^\/api\/v1\/workflow-sync\/sync$/);
+        await status.getByTestId("workflow-sync-now").click();
+        expect((await response).ok()).toBe(true);
+      };
+      await sync();
+      const card = await page.findWorkflowCard("Option-aware sync", { waitForName: true });
+      await expect(card).toBeVisible();
+      const { workflows } = await apiClient.listWorkflows(seedData.workspaceId);
+      const workflow = workflows.find((item) => item.name === "Option-aware sync");
+      expect(workflow).toBeDefined();
+      expect((await apiClient.listWorkflowSteps(workflow!.id)).steps[0].agent_profile_id).toBe(
+        low.id,
+      );
+
+      const duplicate = await create("low");
+      await sync();
+      await expect(status.getByTestId("workflow-sync-warnings")).toContainText(
+        "multiple matching profiles",
+      );
+      expect((await apiClient.listWorkflowSteps(workflow!.id)).steps[0].agent_profile_id).toBe(
+        low.id,
+      );
+      await apiClient.updateAgentProfile(duplicate.id, { enabled: false });
+      await sync();
+      await expect(status.getByTestId("workflow-sync-warnings")).toHaveCount(0);
+      await testPage.reload();
+      await expect(
+        await page.findWorkflowCard("Option-aware sync", { waitForName: true }),
+      ).toBeVisible();
+    } finally {
+      for (const id of profileIds) await apiClient.deleteAgentProfile(id, true);
+    }
+  });
+
   test("syncs a workflow from a seeded GitLab repo file", async ({
     testPage,
     apiClient,

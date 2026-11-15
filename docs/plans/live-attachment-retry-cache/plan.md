@@ -31,6 +31,13 @@ existing task-owned lifetime decision and the design preserve the boundary and
 rationale. Small reductions of duplicate prose keep both owning files below
 their existing size limits without changing other guarantees.
 
+Task 01 completed the cache-alias repair. Task 02 records a separate, narrow
+error-aggregation follow-up: include worktree-list and cleanup failures in the
+materialization error returned to the attachment caller, while preserving
+existing compensation selection and manager cleanup authority. The initial
+active inventory row observed in the current integration investigation remains
+unexplained; Task 02 does not claim to fix it.
+
 ## Confirmed root cause and evidence
 
 The defect remains after merged PR #4807: force the second canonical
@@ -59,6 +66,9 @@ helpers are available patterns for independently authored regression tests.
 
 - Successful full physical-removal finalization in
   `apps/backend/internal/worktree/manager_cleanup.go`.
+- Reporting failures while listing or cleaning only newly-created worktrees
+  during attachment rollback in
+  `apps/backend/internal/backendapp/workspace_source_materializer.go`.
 - New focused manager cache tests and public-service real SQLite/Git rollback
   and live-retry regression in separate files.
 - Owning requirement/design updates, this manifest, and exactly one work order.
@@ -71,6 +81,8 @@ helpers are available patterns for independently authored regression tests.
 - Resume/reuse guard relaxation, canonical placement/SQL/schema/migrations,
   physical branch policy, reference authority, ownership locks, retained-checkout
   preparation, archive lifecycle redesign, and generic cache/lifecycle hardening.
+- Diagnosing or claiming a fix for the separately observed active inventory row
+  after `inventory/live shared`; do not change the exact rollback assertion.
 
 ## Technical approach
 
@@ -180,9 +192,10 @@ claimed without an actual configured DSN and executed tests.
 ## Work orders
 
 - [x] [Task 01: Finalize cache aliases after physical cleanup](task-01-finalize-cache-aliases.md)
+- [x] [Task 02: Report attachment rollback cleanup errors](task-02-report-attachment-rollback-errors.md)
 
-The single sequential work order is complete following an explicit
-implementation request.
+Task 01 and Task 02 are complete. Task 02 passed local validation and normal
+commit hooks and was submitted in #4842. Hosted CI remains a separate result.
 
 ## Related packages and overlap
 
@@ -243,6 +256,20 @@ The owning cleanup pair retains its pre-existing draft lifecycle because this
 order verifies only its focused acceptance criteria, not the entire broad
 cleanup requirement. Implementation matches the new cache-finalization section
 and the unchanged active attachment contract.
+
+## Task 02 verification status
+
+Disposable baseline overlay: the two cleanup-error propagation cases failed as
+expected (`1.073s`), each returning nil instead of the injected list/cleanup
+errors. Candidate overlay passed (`0.485s`). The public `-race` fixture overlay
+also passed (`1.258s`). These runs verify error reporting and existing public
+fixture behavior; they do not explain or resolve the separately observed active
+inventory row. Overlay files and logs remain outside the repository. Three
+regression cases now extend the existing host-materialization test file and
+passed directly with fts5 and the race detector (2.278s). Normal commit hooks
+passed, and Task 02 was submitted in #4842. Hosted CI is tracked separately;
+a completed implementation and PR submission do not imply all hosted checks
+have finished.
 
 ## Risks
 

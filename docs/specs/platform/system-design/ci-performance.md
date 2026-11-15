@@ -24,6 +24,9 @@ remain authoritative. Frontend adoption retains its three-sample and 10% occupan
 
 ## Purpose and boundaries
 
+The [native web verification design](web-native-verification.md) owns the draft Oxlint and fast-compiler continuation under requirements 009–011.
+Its [plan](../../../plans/native-web-verification/plan.md) preserves this design's capacity and evidence boundaries.
+
 This design changes repository CI execution and test infrastructure. It does not change application behavior.
 The [external-runner design](external-e2e-runner-capacity.md) remains authoritative for provider allocation and protected jobs.
 The [CI automation system](../../ci/README.md) retains contributor trust ownership.

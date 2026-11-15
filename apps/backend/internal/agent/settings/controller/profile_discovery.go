@@ -33,7 +33,7 @@ func (c *Controller) FetchProfileDynamicModels(
 	if _, ok := c.agentRegistry.Get(agentName); !ok {
 		return nil, ErrAgentNotFound
 	}
-	profileContext, err := c.resolveProfileProbeContext(ctx, agentName, req.AuthorizationScope, req.ProfileID, req.LaunchSettings)
+	profileContext, err := c.resolveProfileProbeContext(ctx, agentName, req.AuthorizationScope, req.ProfileID, req.LaunchSettings, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -61,6 +61,7 @@ func (c *Controller) FetchProfileDynamicModels(
 	resp.Status = string(caps.Status)
 	resp.ContextRevision = result.ContextRevision
 	resp.RuntimeInfo = caps.RuntimeInfo
+	resp.ReasonCode = profileProbeReasonCode(agentName, &profileContext, caps.Status, result.ReasonCode)
 	if caps.Error != "" {
 		message := profileFailureMessage(caps.Status)
 		resp.Error = &message
@@ -82,15 +83,30 @@ func (c *Controller) FetchProfileDynamicModels(
 	return c.finishDynamicModels(ctx, agentName, resp, req.Refresh), nil
 }
 
+func profileProbeReasonCode(
+	agentName string,
+	profileContext *hostutility.ProfileProbeContext,
+	status hostutility.Status,
+	reasonCode string,
+) string {
+	if agentName != agents.CopilotACPAgentID || profileContext == nil ||
+		len(profileContext.CopilotSelectedPlugins) == 0 || status != hostutility.StatusUnsupported ||
+		reasonCode != string(copilotplugins.ReasonPolicyUnverified) {
+		return ""
+	}
+	return reasonCode
+}
+
 func (c *Controller) resolveProfileProbeContext(
 	ctx context.Context,
 	agentName, authorizationScope, profileID string,
 	launchSettings *dto.ProfileLaunchSettingsRequest,
+	modeOverride *string,
 ) (hostutility.ProfileProbeContext, error) {
 	if c.repo == nil || c.agentRegistry == nil || authorizationScope == "" {
 		return hostutility.ProfileProbeContext{}, ErrInvalidProfileDiscovery
 	}
-	agentID, registered, inference, err := c.resolveProfileProbeAgent(ctx, agentName)
+	agentID, registered, inference, err := c.resolveProfileProbeAgent(ctx, agentName, profileID != "")
 	if err != nil {
 		return hostutility.ProfileProbeContext{}, err
 	}
@@ -100,6 +116,13 @@ func (c *Controller) resolveProfileProbeContext(
 	}
 	launch, err := c.resolveProfileProbeLaunchSettings(ctx, registered, profile, launchSettings)
 	if err != nil {
+		return hostutility.ProfileProbeContext{}, err
+	}
+	if err := validateDevinProfilePermissionIntent(
+		agentName,
+		profilePermissionIntentMode(profile, launchSettings, modeOverride),
+		launch.envVars,
+	); err != nil {
 		return hostutility.ProfileProbeContext{}, err
 	}
 	if len(launch.copilotPlugins) > 0 && registered.ID() != agents.CopilotACPAgentID {
@@ -120,17 +143,45 @@ func (c *Controller) resolveProfileProbeContext(
 	return profileContext, nil
 }
 
+// profilePermissionIntentMode chooses the mode that belongs to the request's
+// permission intent. A draft snapshot or an explicit resolution mode overrides
+// the saved mode; a saved-only request keeps the persisted value. When a draft
+// omits its mode, no saved conflict is invented.
+func profilePermissionIntentMode(
+	profile *models.AgentProfile,
+	launchSettings *dto.ProfileLaunchSettingsRequest,
+	modeOverride *string,
+) string {
+	if modeOverride != nil {
+		return *modeOverride
+	}
+	if launchSettings != nil {
+		if launchSettings.Mode != nil {
+			return *launchSettings.Mode
+		}
+		// An older client can send a launch snapshot without a mode. Fall back
+		// to the saved profile so a genuine sandbox/mode conflict still fails.
+		if profile != nil {
+			return profile.Mode
+		}
+		return ""
+	}
+	if profile != nil {
+		return profile.Mode
+	}
+	return ""
+}
+
+// resolveProfileProbeAgent resolves the registered provider identity for one
+// discovery request. A supplied profile ID always requires the saved parent
+// row; an omitted profile ID is a new draft that may be configured before its
+// first save, so only the registry entry is required. The draft scope uses the
+// canonical registry ID, which keeps it stable when the parent row is created.
 func (c *Controller) resolveProfileProbeAgent(
 	ctx context.Context,
 	agentName string,
+	requireSavedParent bool,
 ) (string, agents.Agent, agents.InferenceAgent, error) {
-	agent, err := c.repo.GetAgentByName(ctx, agentName)
-	if errors.Is(err, sql.ErrNoRows) || agent == nil {
-		return "", nil, nil, ErrAgentNotFound
-	}
-	if err != nil {
-		return "", nil, nil, err
-	}
 	registered, ok := c.agentRegistry.Get(agentName)
 	if !ok || isDisabledOptionalAgent(registered) {
 		return "", nil, nil, ErrAgentNotFound
@@ -138,6 +189,16 @@ func (c *Controller) resolveProfileProbeAgent(
 	inference, ok := c.agentRegistry.GetInferenceAgent(agentName)
 	if !ok {
 		return "", nil, nil, ErrInvalidProfileDiscovery
+	}
+	if !requireSavedParent {
+		return registered.ID(), registered, inference, nil
+	}
+	agent, err := c.repo.GetAgentByName(ctx, agentName)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && agent == nil) {
+		return "", nil, nil, ErrAgentNotFound
+	}
+	if err != nil {
+		return "", nil, nil, err
 	}
 	return agent.ID, registered, inference, nil
 }

@@ -40,6 +40,7 @@ import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profil
 import type { TaskColor } from "@/lib/task-colors";
 import type { SSHReachabilityRecord } from "@/lib/types/http-ssh";
 import type { AgentUpdateJob } from "@/lib/api";
+import type { RuntimeUpdateBatchState } from "@/lib/agents/runtime-update-batch";
 
 export type {
   AgentProfileRecentUseRecord,
@@ -434,11 +435,14 @@ export type UserSettingsState = {
   shellOptions: Array<{ value: string; label: string }>;
   defaultEditorId: string | null;
   enablePreviewOnClick: boolean;
+  escapeCancelsAgent: boolean;
   chatSubmitKey: "enter" | "cmd_enter";
   reviewAutoMarkOnScroll: boolean;
   confirmTaskArchive: boolean;
   preventAutoStartAgentOnOpen: boolean;
   unreadDivider: boolean;
+  unreadTaskDot: boolean;
+  unreadTaskDotHideDelaySeconds: number;
   agentGeneratedTaskTitles: boolean;
   /** Show next-prompt suggestions in the chat composer. */
   promptSuggestions: boolean;
@@ -476,7 +480,6 @@ export type UserSettingsState = {
   githubSavedPresets: unknown;
   githubDefaultQueryPresets: unknown;
   gitlabSavedPresets: unknown;
-  azureDevOpsBrowsePreferences: unknown;
   defaultUtilityAgentId: string | null;
   defaultUtilityAgentProfileId: string | null;
   keyboardShortcuts: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
@@ -529,6 +532,7 @@ export type SettingsSliceState = {
   agentProfiles: AgentProfilesState;
   installJobs: InstallJobsState;
   updateJobs: AgentUpdateJobsState;
+  runtimeUpdateBatch: RuntimeUpdateBatchState;
   editors: EditorsState;
   prompts: PromptsState;
   secrets: SecretsState;
@@ -576,6 +580,7 @@ export type SettingsSliceActions = {
   upsertAgentUpdateJob: (job: AgentUpdateJob) => void;
   appendAgentUpdateOutput: (agentName: string, jobId: string, chunk: string) => void;
   clearAgentUpdateJob: (agentName: string) => void;
+  setRuntimeUpdateBatch: (state: RuntimeUpdateBatchState) => void;
   setEditors: (editors: EditorsState["items"], folderOpeningAvailable?: boolean) => void;
   setEditorsLoading: (loading: boolean) => void;
   setPrompts: (prompts: PromptsState["items"]) => void;

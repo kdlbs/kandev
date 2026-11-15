@@ -7,11 +7,12 @@ import (
 )
 
 // TestClassifyRunProvenance_AttendedAllowlist pins AC-OFFICE-BUDGET-007.2's
-// exact 20-literal attended allowlist (16 current + 4 legacy).
+// exact 21-literal attended allowlist (17 current + 4 legacy).
 func TestClassifyRunProvenance_AttendedAllowlist(t *testing.T) {
 	attended := []string{
 		"task_assigned",
 		"task_comment",
+		"handoff_completed",
 		"task_review_requested",
 		"task_changes_requested",
 		"task_blockers_resolved",
@@ -31,8 +32,8 @@ func TestClassifyRunProvenance_AttendedAllowlist(t *testing.T) {
 		"blockers_resolved",
 		"children_completed",
 	}
-	if len(attended) != 20 {
-		t.Fatalf("test fixture drift: want 20 attended literals, got %d", len(attended))
+	if len(attended) != 21 {
+		t.Fatalf("test fixture drift: want 21 attended literals, got %d", len(attended))
 	}
 	for _, reason := range attended {
 		if got := shared.ClassifyRunProvenance(reason); got != shared.RunProvenanceAttended {

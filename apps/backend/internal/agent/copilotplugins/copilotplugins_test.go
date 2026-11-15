@@ -12,20 +12,28 @@ import (
 )
 
 type fakeRunner struct {
-	result CommandResult
-	err    error
-	calls  [][]string
-	envs   []map[string]string
-	dirs   []string
-	run    func(context.Context) (CommandResult, error)
+	result    CommandResult
+	err       error
+	calls     [][]string
+	helpCalls [][]string
+	envs      []map[string]string
+	dirs      []string
+	run       func(context.Context, []string) (CommandResult, error)
 }
 
 func (f *fakeRunner) Run(ctx context.Context, argv []string, env map[string]string, workDir string) (CommandResult, error) {
+	if containsSequence(argv, "--help") {
+		f.helpCalls = append(f.helpCalls, append([]string{}, argv...))
+		if f.run != nil {
+			return f.run(ctx, argv)
+		}
+		return CommandResult{Stdout: []byte("Options:\n  --plugin-dir <path>  Load plugin directories\n")}, nil
+	}
 	f.calls = append(f.calls, append([]string{}, argv...))
 	f.envs = append(f.envs, env)
 	f.dirs = append(f.dirs, workDir)
 	if f.run != nil {
-		return f.run(ctx)
+		return f.run(ctx, argv)
 	}
 	return f.result, f.err
 }
@@ -153,6 +161,10 @@ func TestInventoryRejectsInvalidOutput(t *testing.T) {
 func TestInstallationMetadata(t *testing.T) {
 	root := t.TempDir()
 	writePlugin(t, root, "plugin.json", "spark", "1.0.0")
+	wantRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	configDir := t.TempDir()
 	writeFile(t, filepath.Join(configDir, "config.json"), `// User settings belong in settings.json.
 {
@@ -166,8 +178,8 @@ func TestInstallationMetadata(t *testing.T) {
 	if len(snapshot.Rows) != 1 || snapshot.Rows[0].Availability != AvailabilityAvailable {
 		t.Fatalf("installed snapshot = %#v", snapshot)
 	}
-	if snapshot.Rows[0].root != root {
-		t.Fatalf("root = %q, want %q", snapshot.Rows[0].root, root)
+	if snapshot.Rows[0].root != wantRoot {
+		t.Fatalf("root = %q, want %q", snapshot.Rows[0].root, wantRoot)
 	}
 
 	launch104 := launchFor(t, configDir)
@@ -189,6 +201,10 @@ func TestPluginRootValidation(t *testing.T) {
 	configDir := t.TempDir()
 	root := t.TempDir()
 	writePlugin(t, root, "plugin.json", "spark", "1.0.0")
+	wantRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	writeConfig := func(cachePath string) {
 		t.Helper()
@@ -222,8 +238,8 @@ func TestPluginRootValidation(t *testing.T) {
 	if snapshot.Rows[0].Availability != AvailabilityAvailable {
 		t.Fatalf("symlink root = %#v", snapshot.Rows[0])
 	}
-	if snapshot.Rows[0].root != root {
-		t.Fatalf("symlink root canonical = %q, want %q", snapshot.Rows[0].root, root)
+	if snapshot.Rows[0].root != wantRoot {
+		t.Fatalf("symlink root canonical = %q, want %q", snapshot.Rows[0].root, wantRoot)
 	}
 
 	writePlugin(t, root, "plugin.json", "other", "1.0.0")
@@ -255,13 +271,17 @@ func TestLivePluginRoot(t *testing.T) {
 }`)
 	root := filepath.Join(marketplaceRoot, "plugins", "harness")
 	writePlugin(t, root, ".github/plugin/plugin.json", "harness", "1.2.0")
+	wantRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	encoded := []byte(`[{"name":"harness","marketplace":"fixture-market","version":"1.2.0","enabled":true,"source":"live","installedFrom":` + quote(marketplaceRoot) + `}]`)
 	snapshot := Discover(context.Background(), &fakeRunner{result: CommandResult{Stdout: encoded}}, launchFor(t, t.TempDir()))
 	if len(snapshot.Rows) != 1 || snapshot.Rows[0].Availability != AvailabilityAvailable {
 		t.Fatalf("live snapshot = %#v", snapshot)
 	}
-	if snapshot.Rows[0].root != root {
-		t.Fatalf("live root = %q, want %q", snapshot.Rows[0].root, root)
+	if snapshot.Rows[0].root != wantRoot {
+		t.Fatalf("live root = %q, want %q", snapshot.Rows[0].root, wantRoot)
 	}
 
 	// A relative marketplace source that escapes the marketplace root is not
@@ -365,9 +385,15 @@ func TestPluginLaunchContext(t *testing.T) {
 	}
 	launch = launchFor(t, t.TempDir())
 	launch.RuntimeVersion = "9.9.9"
-	_, err = ResolveSelection(context.Background(), &fakeRunner{}, launch, []string{"installed:m/p"})
-	if !errors.As(err, &pluginErr) || pluginErr.Reason != ReasonRuntimeUnsupported {
-		t.Fatalf("runtime error = %#v", err)
+	noCapability := &fakeRunner{run: func(_ context.Context, argv []string) (CommandResult, error) {
+		if containsSequence(argv, "--help") {
+			return CommandResult{Stdout: []byte("Usage: copilot [options]")}, nil
+		}
+		return CommandResult{Stdout: []byte(`[]`)}, nil
+	}}
+	_, err = ResolveSelection(context.Background(), noCapability, launch, []string{"installed:m/p"})
+	if !errors.As(err, &pluginErr) || pluginErr.Reason != ReasonPluginLoadingUnsupported {
+		t.Fatalf("runtime capability error = %#v", err)
 	}
 }
 
@@ -391,12 +417,12 @@ func TestInventoryCommandFailures(t *testing.T) {
 		})
 	}
 
-	timeoutRunner := &fakeRunner{run: func(ctx context.Context) (CommandResult, error) {
+	timeoutRunner := &fakeRunner{run: func(ctx context.Context, _ []string) (CommandResult, error) {
 		<-ctx.Done()
 		return CommandResult{ExitCode: -1}, ctx.Err()
 	}}
 	launch := launchFor(t, t.TempDir())
-	launch.InventoryTimeout = 20 * time.Millisecond
+	launch.ProbeTimeout = 20 * time.Millisecond
 	snapshot := Discover(context.Background(), timeoutRunner, launch)
 	if snapshot.Reason != ReasonTimeout {
 		t.Fatalf("timeout reason = %q", snapshot.Reason)
@@ -404,7 +430,7 @@ func TestInventoryCommandFailures(t *testing.T) {
 
 	cancelledCtx, cancel := context.WithCancel(context.Background())
 	cancel()
-	snapshot = Discover(cancelledCtx, &fakeRunner{run: func(ctx context.Context) (CommandResult, error) {
+	snapshot = Discover(cancelledCtx, &fakeRunner{run: func(ctx context.Context, _ []string) (CommandResult, error) {
 		return CommandResult{ExitCode: -1}, ctx.Err()
 	}}, launchFor(t, t.TempDir()))
 	if snapshot.Reason != ReasonCancelled {
@@ -496,17 +522,6 @@ func TestConfigDirPrecedence(t *testing.T) {
 	}
 }
 
-func TestRuntimeSupportedVersions(t *testing.T) {
-	for _, version := range []string{"1.0.88", "1.0.104"} {
-		if !RuntimeSupported(version) {
-			t.Fatalf("%s should be qualified", version)
-		}
-	}
-	if RuntimeSupported("1.0.103") || RuntimeSupported("") {
-		t.Fatal("unqualified runtime was accepted")
-	}
-}
-
 func TestPluginSelectionValidation(t *testing.T) {
 	valid := []string{"installed:gst-agentic-platform/harness", "live:fixture-market/other"}
 	if err := ValidateSelection(valid); err != nil {
@@ -542,32 +557,87 @@ func TestPluginSelectionValidation(t *testing.T) {
 }
 
 func TestSelectionTimeoutUsesRequestDeadline(t *testing.T) {
-	runner := &fakeRunner{run: func(ctx context.Context) (CommandResult, error) {
+	var sharedDeadline time.Time
+	var calls int
+	launch := launchFor(t, t.TempDir())
+	launch.ProbeTimeout = 2 * pluginProbeTimeout
+	runner := &fakeRunner{run: func(ctx context.Context, argv []string) (CommandResult, error) {
 		deadline, ok := ctx.Deadline()
-		if !ok || time.Until(deadline) > inventoryTimeout+time.Second {
-			t.Fatalf("inventory deadline = %v, ok=%v", deadline, ok)
+		if !ok || time.Until(deadline) > pluginProbeTimeout+time.Second {
+			t.Fatalf("probe deadline = %v, ok=%v", deadline, ok)
+		}
+		if calls == 0 {
+			sharedDeadline = deadline
+		} else if !deadline.Equal(sharedDeadline) {
+			t.Fatalf("help and inventory used different deadlines: %v / %v", sharedDeadline, deadline)
+		}
+		calls++
+		if containsSequence(argv, "--help") {
+			return CommandResult{Stdout: []byte("Options:\n  --plugin-dir <path>  Load plugin directories\n")}, nil
 		}
 		return CommandResult{Stdout: []byte(`[]`)}, nil
 	}}
-	Discover(context.Background(), runner, launchFor(t, t.TempDir()))
+	snapshot := Discover(context.Background(), runner, launch)
+	if snapshot.Status != StatusReady || calls != 2 {
+		t.Fatalf("snapshot = %#v calls = %d, want ready with help and inventory", snapshot, calls)
+	}
 }
 
-func TestPolicyUnverifiedBlocksLaunchSelection(t *testing.T) {
-	runner := &fakeRunner{result: CommandResult{Stdout: []byte(`[]`)}}
-	launch := launchFor(t, t.TempDir())
-	_, err := ResolveLaunchSelection(context.Background(), runner, launch, []string{"installed:m/p"})
-	var pluginErr *Error
-	if !errors.As(err, &pluginErr) || pluginErr.Reason != ReasonPolicyUnverified {
-		t.Fatalf("launch policy error = %#v", err)
+// TestCopilotPluginRuntime105Admission is the offline production-path
+// regression for the native-observed 1.0.105 flat inventory and cached-install
+// config shape. Native-written agreement is covered separately by
+// TestCopilotPluginNativeAdapterAcceptance under the copilot_native tag.
+func TestCopilotPluginRuntime105Admission(t *testing.T) {
+	const version = "1.0.105"
+	root := t.TempDir()
+	writePlugin(t, root, "plugin.json", "spark", "1.0.0")
+	wantRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(runner.calls) != 0 {
-		t.Fatalf("policy-unqualified launch ran %d native inventory commands", len(runner.calls))
+	configDir := t.TempDir()
+	writeFile(t, filepath.Join(configDir, "config.json"),
+		`{"installedPlugins":[{"name":"spark","marketplace":"m","version":"1.0.0","cache_path":`+quote(root)+`}]}`)
+	runner := &fakeRunner{result: CommandResult{Stdout: []byte(
+		`[{"name":"spark","marketplace":"m","version":"1.0.0","enabled":true,"source":"installed"}]`,
+	)}}
+	launch := launchFor(t, configDir)
+	launch.RuntimeVersion = version
+	launch.RuntimeCommand = []string{"npx", "--yes", "--prefer-offline", "@github/copilot@" + version}
+
+	snapshot := Discover(context.Background(), runner, launch)
+	if snapshot.Status != StatusReady || len(snapshot.Rows) != 1 {
+		t.Fatalf("discovery = %#v, want one ready 1.0.105 row", snapshot)
 	}
-	if !RuntimeSupported("1.0.88") {
-		t.Fatal("inventory qualification was lost")
+	prepared, err := ResolveLaunchSelection(
+		context.Background(), runner, launch, []string{"installed:m/spark"},
+	)
+	if err != nil {
+		t.Fatalf("ResolveLaunchSelection: %v", err)
 	}
-	if MountsPermitted("1.0.88") {
-		t.Fatal("mounts must remain unqualified without native veto evidence")
+	if len(prepared.Plugins) != 1 || prepared.Plugins[0].Root != wantRoot {
+		t.Fatalf("prepared plugins = %#v, want verified root %q", prepared.Plugins, wantRoot)
+	}
+	args, err := ApplyToArgs(
+		[]string{"npx", "--yes", "--prefer-offline", "@github/copilot@" + version, "--acp"},
+		prepared.Plugins,
+	)
+	if err != nil {
+		t.Fatalf("ApplyToArgs: %v", err)
+	}
+	if !containsSequence(args, "--plugin-dir", wantRoot) {
+		t.Fatalf("prepared argv = %#v, want selected plugin mount", args)
+	}
+	if !snapshot.PluginLoadingSupported {
+		t.Fatal("selected runtime did not advertise plugin directory loading")
+	}
+	if len(runner.calls) != 2 {
+		t.Fatalf("inventory calls = %d, want discovery and admission", len(runner.calls))
+	}
+	for _, call := range runner.calls {
+		if !containsSequence(call, "@github/copilot@"+version, "plugin", "list") {
+			t.Fatalf("inventory argv = %#v, want selected runtime %s", call, version)
+		}
 	}
 }
 

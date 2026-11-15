@@ -10,11 +10,13 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/acp-go-sdk"
 	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
+	"github.com/kandev/kandev/internal/agentctl/server/opencodeplugin"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -120,6 +122,38 @@ type Adapter struct {
 	// Agent identity (from config, for logging)
 	agentID string
 
+	// copilotNativeSessionEvents enables the opt-in Copilot native session-event
+	// subscription and its normalization path for this launch.
+	copilotNativeSessionEvents bool
+	// copilotNativeActive requires both the launch opt-in and a qualified
+	// Copilot runtime contract. An unqualified runtime keeps the legacy gauge
+	// and reports native collection unavailable. It is written during
+	// Initialize while SDK notifications may already arrive, so it is atomic.
+	copilotNativeActive atomic.Bool
+
+	// pendingCopilotNative buffers bounded vendor events that arrive while the
+	// native conversation is being created, loaded, or replaced. It is drained
+	// in FIFO order after the binding barrier and never re-pointed to another
+	// session.
+	pendingCopilotNative        []decodedCopilotNativeEvent
+	pendingCopilotNativeDropped bool
+
+	// nativeGaugeMaxSize is the sticky native token-limit baseline per session.
+	// It is deliberately separate from usageBySession so native root readings
+	// never alter prompt token/cost accounting.
+	nativeGaugeMaxSize map[string]int64
+
+	// bindingCopilotNative holds vendor events while a session/new response is
+	// establishing the native conversation identity.
+	bindingCopilotNative bool
+	// onNativeBindingInstalled is a test hook that runs on the update worker
+	// after the binding is published and before buffered events drain.
+	onNativeBindingInstalled func()
+
+	// antigravityJournalRoot overrides the host native journal root. Empty
+	// resolves the current user's home; tests and qualification set it.
+	antigravityJournalRoot string
+
 	// backgroundWorkEnabled is the effective shared background-work feature
 	// value resolved by the backend for this launch.
 	backgroundWorkEnabled bool
@@ -140,6 +174,11 @@ type Adapter struct {
 	agentInfo    *AgentInfo
 	capabilities acp.AgentCapabilities
 
+	// authStatus is the transient provider authentication snapshot used by the
+	// dedicated operator sign-in instance. It never contains durable state.
+	authStatus    streams.AuthStatus
+	authConsentCh chan string
+
 	// promptQueueing caches the negotiated prompt-queueing advertisement from the
 	// initialize response. It is derived once under `mu` rather than re-read from
 	// `capabilities` on each prompt because the prompt path reads it concurrently
@@ -147,14 +186,18 @@ type Adapter struct {
 	// `capabilities.Meta` map would race.
 	promptQueueing bool
 
-	// claudeCodeAgent records that the initialize response advertised the
-	// `_meta.claudeCode` namespace, i.e. a Claude Code bridge that can emit
-	// native prompt suggestions. Negotiated, not named: custom ACP agents
-	// wrapping Claude Code qualify; other harnesses never do.
-	claudeCodeAgent bool
+	// promptSuggestionSupport caches the generic native-suggestion support
+	// resolved from the initialize response. It is support only: effective
+	// enablement also requires the launch request. Derived once under `mu`
+	// rather than re-read from `capabilities` because the untyped metadata map
+	// would race with concurrent readers.
+	promptSuggestionSupport bool
 
 	// Update channel
 	updatesCh chan AgentEvent
+	// mcpAttachmentEventPersister commits attachment events before they enter
+	// the adapter queue so later observations cannot overtake their attempt.
+	mcpAttachmentEventPersister func(AgentEvent) (AgentEvent, error)
 	// Emission is serialized independently of mu so control events flush pending
 	// shell output without holding the adapter state lock during backpressure.
 	updateEmitMu       sync.Mutex
@@ -197,9 +240,18 @@ type Adapter struct {
 	isLoadingSession bool
 	loadReplayPlan   *acp.SessionUpdatePlan
 
+	// nativeGeneration identifies the current native conversation within this
+	// process. A reset, new, load, or resume advances it so stale plugin claims
+	// and callbacks cannot select a successor session.
+	nativeGeneration uint64
+	// openCodePluginClaims retains immutable launch bindings after the active
+	// tool-call map drops the foreground launch at prompt end.
+	openCodePluginClaims map[string]opencodeplugin.Claim
+
 	// Tool call tracking for result normalization
 	// Maps toolCallId -> NormalizedPayload so we can update with results
-	activeToolCalls map[string]*streams.NormalizedPayload
+	activeToolCalls    map[string]*streams.NormalizedPayload
+	contextCompactions map[string]*streams.NormalizedPayload
 	// cursorTaskMetaBySession stores Cursor's non-standard `cursor/task`
 	// metadata until the matching subagent tool_call appears, keyed by session
 	// then wire tool-call ID. An entry is drained either when its tool_call
@@ -223,6 +275,13 @@ type Adapter struct {
 	codexSubagentCorrelations map[codexSubagentCorrelationKey]*codexSubagentCorrelation
 	codexEmittedToolCallIDs   map[string]map[string]*codexSubagentCorrelation
 	codexSubagentSequence     uint64
+	// codexControlToolCalls correlates title-less wait/close updates with their
+	// validated initial tool calls, scoped to the ACP session.
+	codexControlToolCalls map[string]map[string]streams.SubagentControl
+	// copilotSubagents correlates Copilot child tool calls with safe parent cards.
+	copilotSubagents map[string]*copilotSubagentSessionState
+	// claudeSubagents tracks Claude background cards across prompt completion and resume.
+	claudeSubagents map[string]*claudeSubagentSessionState
 
 	// Active Monitor tools, keyed by sessionID -> taskID -> toolCallID.
 	// Claude-acp's Monitor tool runs a background script that streams events
@@ -517,31 +576,35 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 	l := log.WithFields(zap.String("adapter", "acp"), zap.String("agent_id", cfg.AgentID))
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &Adapter{
-		cfg:                       cfg,
-		logger:                    l,
-		agentID:                   cfg.AgentID,
-		backgroundWorkEnabled:     cfg.AgentBackgroundWorkEnabled,
-		normalizer:                NewNormalizerWithBackgroundWork(cfg.AgentID, cfg.AgentBackgroundWorkEnabled),
-		dialect:                   newACPDialect(cfg.AgentID),
-		updatesCh:                 make(chan AgentEvent, 100),
-		notifQueue:                make(chan notifWork, notifQueueCapacity),
-		activeToolCalls:           make(map[string]*streams.NormalizedPayload),
-		cursorTaskMetaBySession:   make(map[string]map[string]cursorTaskMeta),
-		toolCallParents:           make(map[string]string),
-		handoffProtectedToolCalls: make(map[string]struct{}),
-		activeMonitors:            make(map[string]map[string]string),
-		pendingWakeups:            make(map[string]*pendingWakeup),
-		usageBySession:            make(map[string]*usageTracker),
-		contextSamples:            make(map[string]contextWindowSample),
-		attachMgr:                 shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
-		promptGate:                make(chan struct{}, 1),
-		asyncTurnFinalizers:       make(map[string]*asyncTurnFinalizer),
-		cancelJoinTimeout:         cfg.PromptCancelJoinTimeout,
-		asyncTurnEpochs:           make(map[string]uint64),
-		turnStartedAt:             make(map[string]time.Time),
-		lifetimeCtx:               ctx,
-		lifetimeCancel:            cancel,
-		closedCh:                  make(chan struct{}),
+		cfg:                        cfg,
+		logger:                     l,
+		agentID:                    cfg.AgentID,
+		copilotNativeSessionEvents: cfg.CopilotNativeSessionEvents && cfg.AgentID == copilotAgentID,
+		backgroundWorkEnabled:      cfg.AgentBackgroundWorkEnabled,
+		normalizer:                 NewNormalizerWithBackgroundWork(cfg.AgentID, cfg.AgentBackgroundWorkEnabled),
+		dialect:                    newACPDialect(cfg.AgentID),
+		updatesCh:                  make(chan AgentEvent, 100),
+		notifQueue:                 make(chan notifWork, notifQueueCapacity),
+		activeToolCalls:            make(map[string]*streams.NormalizedPayload),
+		contextCompactions:         make(map[string]*streams.NormalizedPayload),
+		openCodePluginClaims:       make(map[string]opencodeplugin.Claim),
+		cursorTaskMetaBySession:    make(map[string]map[string]cursorTaskMeta),
+		toolCallParents:            make(map[string]string),
+		handoffProtectedToolCalls:  make(map[string]struct{}),
+		activeMonitors:             make(map[string]map[string]string),
+		pendingWakeups:             make(map[string]*pendingWakeup),
+		usageBySession:             make(map[string]*usageTracker),
+		contextSamples:             make(map[string]contextWindowSample),
+		nativeGaugeMaxSize:         make(map[string]int64),
+		attachMgr:                  shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
+		promptGate:                 make(chan struct{}, 1),
+		asyncTurnFinalizers:        make(map[string]*asyncTurnFinalizer),
+		cancelJoinTimeout:          cfg.PromptCancelJoinTimeout,
+		asyncTurnEpochs:            make(map[string]uint64),
+		turnStartedAt:              make(map[string]time.Time),
+		lifetimeCtx:                ctx,
+		lifetimeCancel:             cancel,
+		closedCh:                   make(chan struct{}),
 	}
 	a.shellSnapshotTimer = time.NewTimer(shellSnapshotInterval)
 	a.shellSnapshotTimer.Stop()
@@ -604,12 +667,19 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	// queue and is drained by our update worker. Requires a coder/acp-go-sdk
 	// fork with WithMaxQueuedNotifications; see go.mod replace directive.
 	notifQueueCap := acpNotifQueueCapacity(a.cfg.NotificationQueueCapacity)
+	connectionOptions := []acp.ConnectionOption{
+		acp.WithMaxQueuedNotifications(notifQueueCap),
+	}
+	if a.copilotNativeSessionEvents {
+		connectionOptions = append(connectionOptions,
+			acp.WithAllowedExtensionNotifications(copilotSessionEventMethod))
+	}
 	a.acpConn = acpclient.NewClientSideConnectionWithLogger(
 		a.acpClient,
 		a.stdin,
 		a.stdout,
 		slog.Default().With("component", "acp-conn"),
-		acp.WithMaxQueuedNotifications(notifQueueCap),
+		connectionOptions...,
 	)
 	a.logger.Debug("ACP connection notification queue sized",
 		zap.Int("capacity", notifQueueCap))
@@ -620,11 +690,8 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 
 	resp, err := a.acpConn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion:    acp.ProtocolVersionNumber,
-		ClientCapabilities: clientCapabilitiesForAgent(a.agentID, a.cfg.ProviderGatewayAuth != nil),
-		ClientInfo: &acp.Implementation{
-			Name:    "kandev-agentctl",
-			Version: "1.0.0",
-		},
+		ClientCapabilities: clientCapabilitiesForAgent(a.agentID, a.cfg.ProviderGatewayAuth != nil, a.copilotNativeSessionEvents),
+		ClientInfo:         clientInfoForAgent(a.agentID),
 	})
 	if err != nil {
 		span.RecordError(err)
@@ -641,42 +708,58 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		a.agentInfo.Version = resp.AgentInfo.Version
 	}
 	a.capabilities = resp.AgentCapabilities
+	a.copilotNativeActive.Store(a.copilotNativeSessionEvents && a.agentInfo != nil &&
+		copilotRuntimeQualified(a.agentInfo.Version))
 	promptQueueing := agentAdvertisesPromptQueueing(resp.AgentCapabilities)
-	claudeCodeAgent := agentAdvertisesClaudeCode(resp.AgentCapabilities)
+	promptSuggestionSupport, suggestionEvidence := claudePromptSuggestionSupport(
+		a.agentInfo.Name, a.agentInfo.Version, resp.AgentCapabilities,
+	)
 
 	span.SetAttributes(
 		attribute.String("agent_name", a.agentInfo.Name),
 		attribute.String("agent_version", a.agentInfo.Version),
 		attribute.Bool("supports_load_session", a.capabilities.LoadSession),
 		attribute.Bool("supports_prompt_queueing", promptQueueing),
+		attribute.Bool("supports_prompt_suggestions", promptSuggestionSupport),
+		attribute.String("prompt_suggestion_evidence", string(suggestionEvidence)),
 	)
 
 	a.logger.Info("ACP adapter initialized",
 		zap.String("agent_name", a.agentInfo.Name),
 		zap.String("agent_version", a.agentInfo.Version),
 		zap.Bool("supports_load_session", a.capabilities.LoadSession),
-		zap.Bool("supports_prompt_queueing", promptQueueing))
+		zap.Bool("supports_prompt_queueing", promptQueueing),
+		zap.Bool("supports_prompt_suggestions", promptSuggestionSupport),
+		zap.String("prompt_suggestion_evidence", string(suggestionEvidence)))
 
 	// Cache auth methods so we can re-emit them on auth_required without re-running initialize.
 	authMethods := convertAuthMethods(resp.AuthMethods)
 	a.mu.Lock()
 	a.availableAuthMethods = authMethods
 	a.promptQueueing = promptQueueing
-	a.claudeCodeAgent = claudeCodeAgent
+	a.promptSuggestionSupport = promptSuggestionSupport
 	a.mu.Unlock()
 
-	// Emit agent capabilities event with prompt capabilities and auth methods
+	// Emit agent capabilities event with prompt capabilities and auth methods.
+	// Raw support is provider evidence; the legacy field keeps its effective
+	// launch-enablement meaning.
+	nativePromptSuggestionsSupported := promptSuggestionSupport
 	a.sendUpdate(AgentEvent{
-		Type:                      streams.EventTypeAgentCapabilities,
-		SupportsImage:             a.capabilities.PromptCapabilities.Image,
-		SupportsAudio:             a.capabilities.PromptCapabilities.Audio,
-		SupportsEmbeddedContext:   a.capabilities.PromptCapabilities.EmbeddedContext,
-		SupportsPromptQueueing:    promptQueueing,
-		SupportsPromptSuggestions: a.cfg.PromptSuggestions && claudeCodeAgent,
-		AuthMethods:               authMethods,
+		Type:                             streams.EventTypeAgentCapabilities,
+		SupportsImage:                    a.capabilities.PromptCapabilities.Image,
+		SupportsAudio:                    a.capabilities.PromptCapabilities.Audio,
+		SupportsEmbeddedContext:          a.capabilities.PromptCapabilities.EmbeddedContext,
+		SupportsPromptQueueing:           promptQueueing,
+		SupportsPromptSuggestions:        a.cfg.PromptSuggestions && promptSuggestionSupport,
+		NativePromptSuggestionsSupported: &nativePromptSuggestionsSupported,
+		AuthMethods:                      authMethods,
 	})
 
 	if err := a.applyProviderGatewayAuth(ctx); err != nil {
+		span.RecordError(err)
+		return err
+	}
+	if err := a.applyAntigravityPersonalAuth(ctx, resp); err != nil {
 		span.RecordError(err)
 		return err
 	}
@@ -917,6 +1000,7 @@ func (a *Adapter) Close() error {
 	a.updateSendWg.Wait()
 	a.mu.Lock()
 	a.clearCodexSubagentCorrelationsLocked("")
+	a.clearClaudeSubagentsLocked("")
 	a.clearCursorTaskMetaLocked("")
 	a.clearPromptHandoffToolTrackingLocked()
 	clear(a.usageBySession)

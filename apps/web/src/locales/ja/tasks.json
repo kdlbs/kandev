@@ -76,5 +76,20 @@
   "filtersButton_one": "フィルター（{{count}}）",
   "filtersButton_other": "フィルター（{{count}}）",
   "appliedWorkflow": "ワークフロー：{{name}}",
-  "appliedRepository": "リポジトリ：{{name}}"
+  "appliedRepository": "リポジトリ：{{name}}",
+  "ungrouped": "グループなし",
+  "collaborationTitle": "ワークスペースの連携",
+  "collaborationDescription": "{{workspace}} の {{task}}。この会話が他のワークスペースにアクセスできる範囲を管理します。",
+  "collaborationNativePermissions": "閲覧、報告、プロンプト、制御は独立しています。既存のユーザー権限も適用されます。すべて解除するとアクセスを取り消します。",
+  "collaborationRead": "閲覧",
+  "collaborationReport": "報告",
+  "collaborationPrompt": "プロンプト",
+  "collaborationControl": "制御",
+  "collaborationTargetUnavailable": "現在、この対象への閲覧権限がありません。保存済みの許可は表示されますが編集できません。",
+  "collaborationLoadDenied": "この会話のワークスペースへのアクセスを管理する権限がありません。",
+  "collaborationLoadFailed": "アクセス設定を読み込めませんでした。編集内容は保持されています。保存前に再読み込みしてください。",
+  "collaborationSaveDenied": "権限が拒否されたため、この行を保存できませんでした。編集内容は保持されています。",
+  "collaborationSaveFailed": "この行を保存できませんでした。編集内容は保持されています。",
+  "collaborationNoTargets": "利用できる他のワークスペースがありません。",
+  "collaborationRetry": "再読み込み"
 }

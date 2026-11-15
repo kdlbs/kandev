@@ -201,17 +201,25 @@ test("deletes a damaged task and keeps files from the phone dialog", async ({
   test.setTimeout(120_000);
   await testPage.setViewportSize({ width: 393, height: 700 });
   const title = "Mobile damaged task keep files";
-  const { task, assertRetained } = await createDamagedDeleteTask(apiClient, seedData, title);
-  await testPage.goto(`/t/${task.id}`);
-  await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
-  const dialog = await openDeleteDialog(testPage, title);
-  await assertContainedTouchDialog(dialog);
-  await deleteDamagedTaskKeepingFiles(testPage, dialog, task.id);
-  expect((await apiClient.rawRequest("GET", `/api/v1/tasks/${task.id}`)).status).toBe(404);
-  assertRetained();
-  await backend.restart();
-  expect((await apiClient.rawRequest("GET", `/api/v1/tasks/${task.id}`)).status).toBe(404);
-  assertRetained();
+  const { task, assertRetained, restore } = await createDamagedDeleteTask(
+    apiClient,
+    seedData,
+    title,
+  );
+  try {
+    await testPage.goto(`/t/${task.id}`);
+    await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
+    const dialog = await openDeleteDialog(testPage, title);
+    await assertContainedTouchDialog(dialog);
+    await deleteDamagedTaskKeepingFiles(testPage, dialog, task.id);
+    expect((await apiClient.rawRequest("GET", `/api/v1/tasks/${task.id}`)).status).toBe(404);
+    assertRetained();
+    await backend.restart();
+    expect((await apiClient.rawRequest("GET", `/api/v1/tasks/${task.id}`)).status).toBe(404);
+    assertRetained();
+  } finally {
+    restore();
+  }
 });
 
 test("deletes a damaged task with cleanup pending from the phone dialog", async ({
@@ -224,15 +232,23 @@ test("deletes a damaged task with cleanup pending from the phone dialog", async 
   test.setTimeout(120_000);
   await testPage.setViewportSize({ width: 320, height: 700 });
   const title = "Mobile damaged task pending cleanup";
-  const { task, assertRetained } = await createDamagedDeleteTask(apiClient, seedData, title);
-  await testPage.goto(`/t/${task.id}`);
-  await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
-  const dialog = await openDeleteDialog(testPage, title);
-  await assertContainedTouchDialog(dialog);
-  await deleteDamagedTaskWithPendingCleanup(testPage, dialog, task.id, prCapture);
-  expect((await apiClient.rawRequest("GET", `/api/v1/tasks/${task.id}`)).status).toBe(404);
-  assertRetained();
-  await backend.restart();
-  expect((await apiClient.rawRequest("GET", `/api/v1/tasks/${task.id}`)).status).toBe(404);
-  assertRetained();
+  const { task, assertRetained, restore } = await createDamagedDeleteTask(
+    apiClient,
+    seedData,
+    title,
+  );
+  try {
+    await testPage.goto(`/t/${task.id}`);
+    await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
+    const dialog = await openDeleteDialog(testPage, title);
+    await assertContainedTouchDialog(dialog);
+    await deleteDamagedTaskWithPendingCleanup(testPage, dialog, task.id, prCapture);
+    expect((await apiClient.rawRequest("GET", `/api/v1/tasks/${task.id}`)).status).toBe(404);
+    assertRetained();
+    await backend.restart();
+    expect((await apiClient.rawRequest("GET", `/api/v1/tasks/${task.id}`)).status).toBe(404);
+    assertRetained();
+  } finally {
+    restore();
+  }
 });

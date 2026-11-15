@@ -94,7 +94,7 @@ describe("TaskLoadErrorState", () => {
   it("keeps the Retry name stable and announces refresh progress", () => {
     render(
       <TaskNavigationReadFeedback
-        recovery={{ temporaryError: true, retrying: true, onRetry: vi.fn() }}
+        recovery={{ exhausted: true, temporary: true, retrying: true, onRetry: vi.fn() }}
       />,
     );
 
@@ -107,14 +107,41 @@ describe("TaskLoadErrorState", () => {
     expect(retry.className).toContain("max-md:h-11");
   });
 
+  it("keeps the exhausted notice and enables Retry after explicit recovery settles", () => {
+    const onRetry = vi.fn();
+    render(
+      <TaskNavigationReadFeedback
+        recovery={{ exhausted: true, temporary: true, retrying: false, onRetry }}
+      />,
+    );
+
+    expect(screen.getByTestId("task-read-recovery-notice")).toBeTruthy();
+    const retry = screen.getByRole("button", { name: "Retry" });
+    expect(retry.hasAttribute("disabled")).toBe(false);
+    retry.click();
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+
   it("keeps routine background refreshes silent when task details are available", () => {
     render(
       <TaskNavigationReadFeedback
-        recovery={{ temporaryError: false, retrying: true, onRetry: vi.fn() }}
+        recovery={{ exhausted: false, temporary: false, retrying: true, onRetry: vi.fn() }}
       />,
     );
 
     expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("announces automatic recovery with only a screen-reader status", () => {
+    render(
+      <TaskNavigationReadFeedback
+        recovery={{ exhausted: false, temporary: true, retrying: true, onRetry: vi.fn() }}
+      />,
+    );
+
+    expect(screen.getByRole("status").textContent).toBe("Retrying...");
+    expect(screen.getByRole("status").className).toContain("sr-only");
+    expect(screen.queryByTestId("task-read-recovery-notice")).toBeNull();
   });
 });
 
@@ -152,9 +179,11 @@ describe("useTaskDetails temporary refresh failure", () => {
     expect(result.current.taskLoadError).toBeNull();
     expect(fetchTask).toHaveBeenCalledTimes(6);
   });
+});
 
-  // @covers AC-PLATFORM-INTERACTIVE-READS-005.7
-  it("reports a temporary read while the shared cycle is still retrying", async () => {
+describe("useTaskDetails quiet temporary recovery", () => {
+  // @covers AC-PLATFORM-INTERACTIVE-READS-005.7, AC-PLATFORM-INTERACTIVE-READS-007.1
+  it("keeps a temporary read quiet while the shared cycle is still retrying", async () => {
     vi.useFakeTimers();
     const initialTask = { id: taskId(TASK_A), title: CURRENT_TASK_TITLE } as Task;
     const refreshedTask = { ...initialTask, title: REFRESHED_TASK_TITLE };
@@ -170,13 +199,57 @@ describe("useTaskDetails temporary refresh failure", () => {
       const refresh = result.current.refreshTask();
       await vi.advanceTimersByTimeAsync(0);
       expect(result.current.navigationReadState.phase).toBe("retrying");
-      expect(result.current.isTemporaryTaskReadError).toBe(true);
+      expect(result.current.navigationReadState.exhausted).toBe(false);
+      expect(result.current.isTemporaryTaskReadError).toBe(false);
       expect(result.current.task?.title).toBe(CURRENT_TASK_TITLE);
       await vi.advanceTimersByTimeAsync(2_000);
       await refresh;
     });
     expect(result.current.task?.title).toBe(REFRESHED_TASK_TITLE);
     expect(result.current.isTemporaryTaskReadError).toBe(false);
+  });
+});
+
+describe("useTaskDetails exhausted refresh recovery", () => {
+  // @covers AC-PLATFORM-INTERACTIVE-READS-007.4
+  it("latches the refresh notice after exhaustion and keeps it through manual recovery", async () => {
+    vi.useFakeTimers();
+    const initialTask = { id: taskId(TASK_A), title: CURRENT_TASK_TITLE } as Task;
+    const recoveredTask = { ...initialTask, title: RECOVERED_TASK_TITLE };
+    vi.spyOn(api, "fetchTask").mockRejectedValue(temporaryPersistenceFailure());
+    vi.spyOn(api, "listTaskSessions").mockResolvedValue({ sessions: [], total: 0 });
+    const { result } = renderHook(() => useTaskDetails(TASK_A, initialTask), {
+      wrapper: createStateWrapper({ tasks: { activeTaskId: TASK_A } }),
+    });
+
+    await act(async () => {
+      const refresh = result.current.refreshTask();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(result.current.isTemporaryTaskReadError).toBe(false);
+      await advanceAutomaticRetryCycle();
+      await refresh;
+    });
+    expect(result.current.taskLoadError).toMatchObject({ status: 503 });
+    expect(result.current.navigationReadState.exhausted).toBe(true);
+    expect(result.current.isTemporaryTaskReadError).toBe(true);
+
+    let resolveRetry!: (task: Task) => void;
+    vi.mocked(api.fetchTask).mockReturnValue(
+      new Promise<Task>((resolve) => {
+        resolveRetry = resolve;
+      }),
+    );
+    await act(async () => {
+      const retry = result.current.retryTaskRead();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(result.current.isTemporaryTaskReadError).toBe(true);
+      expect(result.current.navigationReadState.phase).toBe("loading");
+      resolveRetry(recoveredTask);
+      await retry;
+    });
+    expect(result.current.isTemporaryTaskReadError).toBe(false);
+    expect(result.current.navigationReadState.exhausted).toBe(false);
+    expect(result.current.task?.title).toBe(RECOVERED_TASK_TITLE);
   });
 
   it("retries one shared recovery cycle on a foreground burst after exhaustion", async () => {

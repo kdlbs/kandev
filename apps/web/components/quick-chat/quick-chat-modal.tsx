@@ -14,6 +14,7 @@ import { useQuickChatModal } from "./use-quick-chat-modal";
 import { useQuickChatWidth } from "@/hooks/use-quick-chat-width";
 import {
   ClarificationEscapeGuardProvider,
+  markEscapeClaimedByDialog,
   type ClarificationEscapePredicate,
   type ClarificationEscapeGuardRegistry,
 } from "@/hooks/use-clarification-escape-guard";
@@ -25,6 +26,7 @@ import {
 import type { QuickChatInitialPrompt } from "@/lib/state/slices/ui/types";
 import { useQuickChatSetupDraft } from "./use-quick-chat-setup-draft";
 import { useQuickChatCreation, type QuickChatCreationActions } from "./use-quick-chat-creation";
+import type { DeleteTaskParams } from "@/lib/api/domains/kanban-api";
 
 const QuickTerminalTabView = dynamic(
   () => import("./quick-terminal-tab-view").then((module) => module.QuickTerminalTabView),
@@ -60,7 +62,7 @@ type QuickChatModalShellProps = QuickChatContentProps & {
   onOpenChange: (open: boolean) => void;
   sessionToDelete: ReturnType<typeof useQuickChatModal>["sessionToClose"];
   onDeleteDialogOpenChange: (open: boolean) => void;
-  onConfirmDelete: () => void;
+  onConfirmDelete: (options: DeleteTaskParams) => void;
 };
 
 function QuickChatContent({
@@ -177,13 +179,20 @@ function QuickChatTerminalContent({
 }) {
   if (quickChat.activeKind !== "terminal" || !quickChat.activeTerminalTab) return null;
   const tab = quickChat.activeTerminalTab;
+  const recovery = quickChat.terminalRecoveryByTab[tab.tabId];
   return (
     <QuickTerminalTabView
       key={tab.tabId}
       tab={tab}
-      onStateChange={(state) => quickChat.handleTerminalStateChange(tab.tabId, state)}
+      recoveryGeneration={recovery?.generation ?? 0}
+      recoveryPhase={recovery?.phase}
+      recoveryClosing={recovery?.closing}
+      onRecover={() => quickChat.handleRecoverTerminal(tab.tabId)}
+      onStateChange={(state) =>
+        quickChat.handleTerminalStateChange(tab.tabId, state, recovery?.generation ?? 0)
+      }
       onDescriptorReady={(descriptor) =>
-        quickChat.handleTerminalDescriptorReady(tab.tabId, descriptor)
+        quickChat.handleTerminalDescriptorReady(tab.tabId, descriptor, recovery?.generation ?? 0)
       }
     />
   );
@@ -239,7 +248,7 @@ function QuickChatConversationContent({
         checkingCreation={creationActions.checking}
         onCheckCreation={() => creationActions.check()}
         onRetryCreation={() => creationActions.retry()}
-        onDeleteCreation={() => creationActions.remove()}
+        onDeleteCreation={(options) => creationActions.remove(options)}
         draft={setupDraft.draft}
         onDraftChange={setupDraft.update}
         onStartQuickChat={creationActions.start}
@@ -356,6 +365,7 @@ function QuickChatModalShell({
       </MobileConfirmationHost>
       <QuickChatDeleteDialog
         sessionToDelete={sessionToDelete}
+        taskId={quickChat.taskIdToClose}
         onOpenChange={onDeleteDialogOpenChange}
         onConfirm={onConfirmDelete}
       />
@@ -374,6 +384,7 @@ function handleQuickChatEscape(
   }
   for (const test of guards.values()) {
     if (test(event)) {
+      markEscapeClaimedByDialog(event);
       event.preventDefault();
       break;
     }

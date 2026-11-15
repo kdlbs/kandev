@@ -37,6 +37,12 @@ type canonicalAgentDeliveryBatchProjector interface {
 	ProjectCanonicalAgentDeliveryEvents(ctx context.Context, events []*models.AgentDeliveryEvent, effects []*models.AgentDeliveryEffect) ([]models.CanonicalAgentDeliveryProjectionResult, error)
 }
 
+// canonicalAgentDeliveryBatchReceiver is implemented by the repository that
+// can admit and project one compatible output batch in one writer transaction.
+type canonicalAgentDeliveryBatchReceiver interface {
+	ReceiveAndProjectCanonicalAgentDeliveryEvents(ctx context.Context, events []*models.AgentDeliveryEvent, effects []*models.AgentDeliveryEffect, remoteHighWater int64) ([]models.CanonicalAgentDeliveryProjectionResult, error)
+}
+
 type agentDeliveryAcknowledger interface {
 	AcknowledgeDelivery(ctx context.Context, streamID string, sequence uint64) error
 }
@@ -461,6 +467,7 @@ func deliveryEventIsStale(
 	execution *AgentExecution,
 	event *models.AgentDeliveryEvent,
 	repository AgentDeliveryRepository,
+	attempt *deliveryStartupAttempt,
 ) (bool, error) {
 	if event == nil || event.HarnessGeneration == 0 || event.IncarnationID == "" {
 		return false, nil
@@ -474,7 +481,7 @@ func deliveryEventIsStale(
 	if execution != nil && execution.SessionID != "" {
 		sessionID = execution.SessionID
 	}
-	current, err := deliveryHarnessGeneration(ctx, execution, reader, sessionID, event.IncarnationID)
+	current, err := deliveryHarnessGeneration(ctx, execution, attempt, reader, sessionID, event.IncarnationID)
 	if errors.Is(err, models.ErrTaskSessionNotFound) {
 		if authenticated {
 			return false, ErrDurableAdoptionIdentityMismatch
@@ -493,40 +500,120 @@ func deliveryEventIsStale(
 }
 
 func deliveryHarnessGeneration(
-	ctx context.Context, execution *AgentExecution, reader harnessGenerationReader, sessionID, incarnationID string,
+	ctx context.Context,
+	execution *AgentExecution,
+	attempt *deliveryStartupAttempt,
+	reader harnessGenerationReader,
+	sessionID, incarnationID string,
 ) (*models.HarnessSessionGeneration, error) {
 	if execution == nil || !execution.deliveryBootstrap.Load() {
 		return awaitSilentRestoreGeneration(ctx, execution, reader, sessionID, incarnationID)
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	if attempt == nil {
+		attempt = execution.deliveryStartupSnapshot()
+	}
+	if attempt == nil {
+		return awaitBootstrapGeneration(ctx, execution, nil, reader, sessionID, incarnationID, time.Time{})
+	}
+	// Native initialization must finish before a missing SQL generation means
+	// anything. Its result owns the wait; no event timer can expire first.
+	if err := attempt.awaitNative(ctx); err != nil {
+		return nil, err
+	}
+	return awaitBootstrapGeneration(ctx, execution, attempt, reader, sessionID, incarnationID, attempt.nativeCompletedAt())
+}
+
+// bootstrapAuthorityContext bounds one authority query. Within the remaining
+// native-anchored budget the query shares that deadline; an already-expired
+// attempt gets a separate short probe so a late event can observe a commit
+// without restarting the budget.
+func bootstrapAuthorityContext(ctx context.Context, deadline time.Time) (context.Context, context.CancelFunc) {
+	if time.Now().Before(deadline) {
+		return context.WithDeadline(ctx, deadline)
+	}
+	return context.WithTimeout(ctx, deliveryStartupAuthorityProbe)
+}
+
+// awaitBootstrapGeneration waits for the generation-one SQL authority after
+// native success. A captured attempt anchors the single budget at its native
+// completion; later events cannot restart it. The connected stream owns the
+// wait, so routine startup-context cleanup cannot cancel a commit.
+func awaitBootstrapGeneration(
+	ctx context.Context,
+	execution *AgentExecution,
+	attempt *deliveryStartupAttempt,
+	reader harnessGenerationReader,
+	sessionID, incarnationID string,
+	anchoredAt time.Time,
+) (*models.HarnessSessionGeneration, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	deadline := time.Now().Add(deliveryStartupAuthorityBudget)
+	if !anchoredAt.IsZero() {
+		deadline = anchoredAt.Add(deliveryStartupAuthorityBudget)
+	}
+	// An event can arrive after the budget ended with authority already
+	// committed. Probe once with its own short bound instead of the stream
+	// lifetime, and never restart the native-anchored budget.
+	readCtx, cancelRead := bootstrapAuthorityContext(ctx, deadline)
+	current, err := reader.GetCurrentHarnessSessionGeneration(readCtx, sessionID, incarnationID)
+	cancelRead()
+	if err == nil {
+		execution.clearDeliveryBootstrapForAttempt(attempt)
+		return current, nil
+	}
+	if !errors.Is(err, models.ErrTaskSessionNotFound) {
+		// A transient read failure does not prove that authority is absent.
+		// Keep bootstrap admission so a reattached stream can retry the wait.
+		return nil, err
+	}
+	waitCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	for {
-		current, err := reader.GetCurrentHarnessSessionGeneration(ctx, sessionID, incarnationID)
-		if !errors.Is(err, models.ErrTaskSessionNotFound) {
-			execution.deliveryBootstrap.Store(false)
-			return current, err
-		}
-		timer := time.NewTimer(25 * time.Millisecond)
+		timer := time.NewTimer(deliveryStartupPollInterval)
 		select {
-		case <-ctx.Done():
+		case <-waitCtx.Done():
 			timer.Stop()
-			return nil, ctx.Err()
+			return finalBootstrapAuthorityRead(ctx, execution, attempt, reader, sessionID, incarnationID, waitCtx.Err())
 		case <-timer.C:
+		}
+		if waitCtx.Err() != nil {
+			return finalBootstrapAuthorityRead(ctx, execution, attempt, reader, sessionID, incarnationID, waitCtx.Err())
+		}
+		current, err = reader.GetCurrentHarnessSessionGeneration(waitCtx, sessionID, incarnationID)
+		if err == nil {
+			execution.clearDeliveryBootstrapForAttempt(attempt)
+			return current, nil
+		}
+		if !errors.Is(err, models.ErrTaskSessionNotFound) {
+			if waitCtx.Err() != nil {
+				return finalBootstrapAuthorityRead(ctx, execution, attempt, reader, sessionID, incarnationID, waitCtx.Err())
+			}
+			return nil, err
 		}
 	}
 }
 
-func acknowledgeDurableAgentEvent(ctx context.Context, event agentctl.AgentEvent, acknowledger agentDeliveryAcknowledger) error {
-	if event.DeliveryStreamID == "" || event.DeliverySequence == 0 {
-		return nil
+// finalBootstrapAuthorityRead gives a commit that landed in the last poll
+// interval one bounded chance before the expired wait is reported. The
+// connected stream still owns the read; stream cancellation ends it promptly.
+func finalBootstrapAuthorityRead(
+	ctx context.Context,
+	execution *AgentExecution,
+	attempt *deliveryStartupAttempt,
+	reader harnessGenerationReader,
+	sessionID, incarnationID string,
+	waitErr error,
+) (*models.HarnessSessionGeneration, error) {
+	readCtx, cancel := context.WithTimeout(ctx, deliveryStartupAuthorityProbe)
+	defer cancel()
+	current, err := reader.GetCurrentHarnessSessionGeneration(readCtx, sessionID, incarnationID)
+	if err != nil {
+		return nil, waitErr
 	}
-	if acknowledger == nil {
-		return errors.New("agent delivery acknowledger is unavailable")
-	}
-	if err := acknowledger.AcknowledgeDelivery(ctx, event.DeliveryStreamID, event.DeliverySequence); err != nil {
-		return fmt.Errorf("acknowledge durable agent event: %w", err)
-	}
-	return nil
+	execution.clearDeliveryBootstrapForAttempt(attempt)
+	return current, nil
 }
 
 func durableAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) *models.AgentDeliveryEvent {
@@ -611,7 +698,7 @@ func durableEventExpectedStreamID(execution *AgentExecution) string {
 }
 
 func canonicalAgentDeliveryEvent(event agentctl.AgentEvent) bool {
-	return event.Type == streams.EventTypeMessageChunk || event.Type == streams.EventTypeReasoning || event.Type == streams.EventTypeShellOutputUpdate || canonicalShellStartEvent(event)
+	return event.Type == streams.EventTypeMessageChunk || event.Type == streams.EventTypeReasoning || event.Type == streams.EventTypeShellOutputUpdate || canonicalShellStartEvent(event) || event.Type == streams.EventTypeContextCompactionObservation
 }
 
 func canonicalMessageType(event agentctl.AgentEvent) string {

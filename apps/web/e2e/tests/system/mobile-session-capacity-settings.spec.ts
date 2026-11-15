@@ -47,6 +47,11 @@ test("reaches Task Behavior and keeps the form touch-safe", async ({ testPage })
 
   await toggle.tap();
   const maximum = card.getByTestId("session-capacity-maximum");
+  await card.getByRole("button", { name: "About Enable the instance session limit" }).tap();
+  const help = testPage.getByRole("dialog");
+  await expect(help).toContainText("new message turns in all workspaces");
+  await expect(help).toContainText("Start, Resume, and Send Now can exceed the limit");
+  await help.getByRole("button", { name: "Close" }).tap();
   const maximumBox = await maximum.boundingBox();
   expect(maximumBox).not.toBeNull();
   expect(maximumBox!.height).toBeGreaterThanOrEqual(44);

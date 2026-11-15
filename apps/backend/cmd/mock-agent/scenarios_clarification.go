@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -19,6 +23,79 @@ func scenarioClarification(e *emitter) {
 
 	fixedDelay(50)
 	e.text(fmt.Sprintf("You answered: %s", result))
+}
+
+// scenarioClarificationAttachments proves answer files reached the agent as
+// readable bytes, not merely as echoed filenames. It is the browser-level
+// counterpart to the backend materialization tests.
+func scenarioClarificationAttachments(e *emitter) {
+	fixedDelay(100)
+	e.text("Let me ask a question and inspect any attached evidence.")
+
+	result, err := e.callMCPTool("kandev", "ask_user_question_kandev", clarificationQuestionArgs())
+	if err != nil {
+		e.text(fmt.Sprintf("Question failed: %s", err))
+		return
+	}
+	e.text("Attachment proof: " + clarificationAttachmentProof(result))
+}
+
+func scenarioClarificationAttachmentsChoiceOnly(e *emitter) {
+	fixedDelay(100)
+	e.text("Let me ask a choice-only question and inspect any attached evidence.")
+	result, err := e.callMCPTool("kandev", "ask_user_question_kandev", clarificationNoOtherQuestionArgs())
+	if err != nil {
+		e.text(fmt.Sprintf("Question failed: %s", err))
+		return
+	}
+	e.text("Attachment proof: " + clarificationAttachmentProof(result))
+}
+
+type clarificationAttachmentProofItem struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+func clarificationAttachmentProof(result string) string {
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(result), &payload); err != nil {
+		return "invalid-result"
+	}
+	var attachments []clarificationAttachmentProofItem
+	collect := func(value any) {
+		entry, ok := value.(map[string]any)
+		if !ok {
+			return
+		}
+		raw, ok := entry["attachments"].([]any)
+		if !ok {
+			return
+		}
+		for _, item := range raw {
+			encoded, _ := json.Marshal(item)
+			var attachment clarificationAttachmentProofItem
+			if json.Unmarshal(encoded, &attachment) == nil && attachment.Path != "" {
+				attachments = append(attachments, attachment)
+			}
+		}
+	}
+	for _, value := range payload {
+		collect(value)
+	}
+	if len(attachments) == 0 {
+		return "none"
+	}
+	parts := make([]string, 0, len(attachments))
+	for _, attachment := range attachments {
+		data, err := os.ReadFile(attachment.Path)
+		if err != nil {
+			parts = append(parts, fmt.Sprintf("%s unreadable", attachment.Name))
+			continue
+		}
+		sum := sha256.Sum256(data)
+		parts = append(parts, fmt.Sprintf("%s %d %s", attachment.Name, len(data), hex.EncodeToString(sum[:])))
+	}
+	return strings.Join(parts, "; ")
 }
 
 func scenarioClarificationNoOther(e *emitter) {

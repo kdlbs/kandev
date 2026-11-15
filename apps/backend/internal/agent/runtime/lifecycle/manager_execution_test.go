@@ -996,7 +996,7 @@ func TestEnsureWorkspaceExecutionForSession_EmptyTaskID(t *testing.T) {
 	})
 }
 
-func TestEnsureWorkspaceExecutionForSession_ReusesExistingTaskEnvironmentExecution(t *testing.T) {
+func TestEnsureWorkspaceExecutionForSession_CreatesOwnExecutionInSharedTaskEnvironment(t *testing.T) {
 	mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
 		infos: map[string]*WorkspaceInfo{
 			"session-1": {
@@ -1031,14 +1031,63 @@ func TestEnsureWorkspaceExecutionForSession_ReusesExistingTaskEnvironmentExecuti
 	if err != nil {
 		t.Fatalf("EnsureWorkspaceExecutionForSession returned error: %v", err)
 	}
-	if got.ID != existing.ID {
-		t.Fatalf("execution ID = %q, want existing environment execution %q", got.ID, existing.ID)
+	// A sibling session shares the environment, not the conversation owner.
+	if got.ID == existing.ID {
+		t.Fatalf("execution ID = %q, want a separate execution for session-2", got.ID)
 	}
-	if got.SessionID != "session-1" {
-		t.Fatalf("execution session ID = %q, want original owner session", got.SessionID)
+	if got.SessionID != "session-2" {
+		t.Fatalf("execution session ID = %q, want session-2", got.SessionID)
 	}
-	if backend.createCount.Load() != 0 {
-		t.Fatalf("CreateInstance calls = %d, want 0", backend.createCount.Load())
+	if backend.createCount.Load() != 1 {
+		t.Fatalf("CreateInstance calls = %d, want 1", backend.createCount.Load())
+	}
+	if existing.SessionID != "session-1" {
+		t.Fatalf("existing execution owner = %q, want session-1", existing.SessionID)
+	}
+}
+
+type siblingDuringEnvironmentLookupProvider struct {
+	*mockWorkspaceInfoProvider
+	onEnvironment func()
+}
+
+func (p *siblingDuringEnvironmentLookupProvider) GetWorkspaceInfoForEnvironment(ctx context.Context, taskEnvironmentID string) (*WorkspaceInfo, error) {
+	if p.onEnvironment != nil {
+		p.onEnvironment()
+		p.onEnvironment = nil
+	}
+	return p.mockWorkspaceInfoProvider.GetWorkspaceInfoForEnvironment(ctx, taskEnvironmentID)
+}
+
+func TestGetOrEnsureExecutionForEnvironmentDoesNotShareSiblingUnderSessionKey(t *testing.T) {
+	provider := &siblingDuringEnvironmentLookupProvider{mockWorkspaceInfoProvider: &mockWorkspaceInfoProvider{
+		envInfos: map[string]*WorkspaceInfo{"env-1": {
+			TaskID: "task-1", SessionID: "session-1", TaskEnvironmentID: "env-1",
+			WorkspacePath: "/workspace/task-1", AgentID: "auggie",
+		}},
+	}}
+	mgr, backend := newEnvironmentExecutionTestManager(t, provider)
+	sibling := &AgentExecution{
+		ID: "exec-sibling", SessionID: "session-2", TaskID: "task-1", TaskEnvironmentID: "env-1",
+		Status: v1.AgentStatusRunning, agentctl: newReadyAgentctlClient(t, newTestLogger()),
+	}
+	// The sibling appears after the environment fast path but before the
+	// session-keyed slot runs, whose result session-1 peers would receive.
+	provider.onEnvironment = func() {
+		if err := mgr.executionStore.Add(sibling); err != nil {
+			t.Errorf("add sibling execution: %v", err)
+		}
+	}
+
+	got, err := mgr.GetOrEnsureExecutionForEnvironment(context.Background(), "env-1")
+	if err != nil {
+		t.Fatalf("GetOrEnsureExecutionForEnvironment returned error: %v", err)
+	}
+	if got.ID == sibling.ID || got.SessionID != "session-1" {
+		t.Fatalf("shared result = %q owned by %q, want session-1's own execution", got.ID, got.SessionID)
+	}
+	if backend.createCount.Load() != 1 {
+		t.Fatalf("CreateInstance calls = %d, want 1", backend.createCount.Load())
 	}
 }
 
@@ -1177,6 +1226,10 @@ func TestCreateExecutionRunsRemoteResumePreflightBeforeCreatingWorkspaceExecutio
 	)
 	cleanupManagerStopCh(t, mgr)
 
+	mgr.SetExecutorRunningWriter(&captureExecutorRunningWriter{prior: &models.ExecutorRunning{
+		ID: "running-session-1", SessionID: "session-1", TaskID: "task-1",
+		AgentExecutionID: "previous-execution", Runtime: agentruntime.RuntimeStandalone,
+	}})
 	metadata := map[string]interface{}{"ssh_host": "recovery.example", "ssh_port": 2222}
 	_, err := mgr.createExecution(context.Background(), "task-1", &WorkspaceInfo{
 		SessionID:        "session-1",
@@ -1294,6 +1347,7 @@ type createInstanceExecutor struct {
 	client       *agentctl.Client
 	createCount  atomic.Int32
 	stopCount    atomic.Int32
+	stopErr      error
 	forceStopped atomic.Bool
 	lastRequest  *ExecutorCreateRequest
 	authToken    string
@@ -1344,6 +1398,7 @@ func (e *createInstanceExecutor) CreateInstance(ctx context.Context, req *Execut
 		TaskID:         req.TaskID,
 		SessionID:      req.SessionID,
 		RuntimeName:    e.Name(),
+		ContainerID:    dockerTestContainerID(e.Name(), req.InstanceID),
 		Client:         e.client,
 		WorkspacePath:  req.WorkspacePath,
 		AuthToken:      e.authToken,
@@ -1351,10 +1406,19 @@ func (e *createInstanceExecutor) CreateInstance(ctx context.Context, req *Execut
 	}, nil
 }
 
+// dockerTestContainerID models the separately identified runner a real Docker
+// backend returns. Non-Docker backends have no container identity.
+func dockerTestContainerID(name executor.Name, instanceID string) string {
+	if name != executor.NameDocker {
+		return ""
+	}
+	return "container-" + instanceID
+}
+
 func (e *createInstanceExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {
 	e.stopCount.Add(1)
 	e.forceStopped.Store(force)
-	return nil
+	return e.stopErr
 }
 
 func newEnvironmentExecutionTestManager(t *testing.T, provider WorkspaceInfoProvider) (*Manager, *createInstanceExecutor) {

@@ -13,7 +13,7 @@ import (
 	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"go.uber.org/zap"
 )
 
@@ -297,7 +297,7 @@ func (r *PluginRemoteExecutor) newRecoveredPluginExecutorInstance(ctx context.Co
 		RuntimeName: agentruntime.RuntimePluginRemote, Client: client, WorkspacePath: info.WorkspacePath,
 		Metadata: metadata, AuthToken: record.TransientAuthToken, AgentProfileID: record.ExecutionProfileID,
 		Env: clonePluginRecoveredEnvironment(info.Env), WorkspaceSourceRoots: append([]string(nil), info.WorkspaceSourceRoots...),
-		ProviderSessionID: info.ProviderSessionID,
+		ProviderSessionID: info.ProviderSessionID, CopilotNativeSessionEvents: info.CopilotNativeSessionEvents,
 	}, nil
 }
 

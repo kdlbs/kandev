@@ -10,6 +10,8 @@ import (
 
 func (s *Service) rebuildInput(
 	taskError *statussummary.ActiveErrorSummary,
+	turnError *statussummary.TurnErrorSummary,
+	turnErrorObserved bool,
 	sessions []*models.TaskSession,
 	taskEnvironmentIDs []string,
 	pendingBySession map[string]models.TaskPendingAction,
@@ -30,6 +32,8 @@ func (s *Service) rebuildInput(
 		Sessions:               make([]statussummary.RebuildSession, 0, len(sessions)),
 		SessionsObserved:       sessionsObserved,
 		TaskError:              taskError,
+		TurnError:              turnError,
+		TurnErrorObserved:      turnErrorObserved,
 		PendingActions:         make(map[string]string),
 		ActivityObserved:       s.foregroundActivity != nil,
 		LastActivityAt:         nil,

@@ -37,3 +37,9 @@ Desktop and phone use the existing chat surfaces and share this normalization.
 This extraction removes redundant recovery caused by lost receipts. It does not establish
 smoother rendering, a heap-leak fix, a task-switch speed target, or Firefox performance gains.
 Historical research timings do not measure this branch. The work order records current checks.
+
+## Current-main integration
+
+The 2026-11-15 update carries receipts through main's combined admission/projection
+writer and the relocated lifecycle event processor. Targeted database and browser integration checks
+pass; remote delivery gates remain pending. See the work order for current results.

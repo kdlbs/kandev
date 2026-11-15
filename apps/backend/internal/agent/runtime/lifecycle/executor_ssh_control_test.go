@@ -33,12 +33,15 @@ func TestRemoteControlHandshake(t *testing.T) {
 		server := newFakeSSHServer(t, nil)
 		server.forwardTo(strings.TrimPrefix(httpServer.URL, "http://"))
 
-		token, err := remoteControlHandshake(context.Background(), server.dial(t), 39429, "nonce-abc")
+		result, err := remoteControlHandshake(context.Background(), server.dial(t), 39429, "nonce-abc")
 		if err != nil {
 			t.Fatalf("remoteControlHandshake: %v", err)
 		}
-		if token != "handshake-token" {
-			t.Fatalf("token = %q", token)
+		if result.Token != "handshake-token" {
+			t.Fatalf("token = %q", result.Token)
+		}
+		if result.Launch != nil {
+			t.Fatalf("launch receipt = %#v, want nil for a launch that did not request proof", result.Launch)
 		}
 		if gotPath != "/auth/handshake" {
 			t.Fatalf("path = %q", gotPath)

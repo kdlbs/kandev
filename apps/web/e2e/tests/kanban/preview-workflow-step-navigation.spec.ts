@@ -5,6 +5,8 @@ import type { Locator, Page } from "@playwright/test";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { expectTouchControl } from "../../helpers/control-sizing";
 
+test.use({ trace: "retain-on-failure" });
+
 const LONG_STEP_NAME = `Awaiting review from the platform team ${"x".repeat(60)}`;
 
 // The header layout budget's ceiling is a two-digit step count on both sides

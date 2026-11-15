@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-09-01
-updated: 2026-10-19
+updated: 2026-10-23
 owners:
   - kandev
 ---
@@ -27,8 +27,8 @@ repositories, tasks and sessions. Agents owns composition and runtime delivery.
   task executor when an effective MCP set first uses that package.
 - **Scope selection:** MCP definition identifiers for a repository, a profile
   in one workspace, a task, or one task agent session.
-- **Effective MCP set:** The additive union of applicable scope selections for
-  one attachment attempt, after duplicate definitions are collapsed.
+- **Effective MCP set:** The union of applicable scope selections for one
+  attachment, deduplicated and reduced by saved session exclusions.
 - **Desired revision:** The latest saved selection state for a task agent
   session.
 - **Applied revision:** The selection state used by the current successful MCP
@@ -115,7 +115,8 @@ silently removing capabilities selected by another context.
   not affect the same profile in another workspace.
 - **AC-AGENTS-WORKSPACE-MCP-CONFIGURATION-003.3:** The effective MCP set is the
   union of repository, workspace-profile, task, and task-session selections. It
-  includes every repository in the task.
+  includes every repository in the task, minus saved session-only exclusions
+  defined by [session MCP exclusions](session-mcp-exclusions.md).
 - **AC-AGENTS-WORKSPACE-MCP-CONFIGURATION-003.4:** Selecting the same MCP
   definition in multiple scopes creates one effective server. The effective
   result reports every contributing scope.
@@ -123,9 +124,10 @@ silently removing capabilities selected by another context.
   reference a definition from another workspace or a disabled definition.
 - **AC-AGENTS-WORKSPACE-MCP-CONFIGURATION-003.6:** A task keeps its saved task
   selection when agents are added, profiles change, or the task is resumed.
-- **AC-AGENTS-WORKSPACE-MCP-CONFIGURATION-003.7:** The selection UI distinguishes
-  inherited MCP servers from additions at the current scope without providing
-  subtraction or per-scope overrides.
+- **AC-AGENTS-WORKSPACE-MCP-CONFIGURATION-003.7:** The UI separates inherited
+  servers from additions. Only existing sessions offer exclude/restore; upstream
+  and creation editors remain additive.
+
 - **AC-AGENTS-WORKSPACE-MCP-CONFIGURATION-003.8:** Inherited-origin summaries
   show the profile, repository, task, or session name when available. Missing
   names use a localized scope label without exposing an internal identifier.
@@ -256,13 +258,11 @@ and mobile.
   ordinary errors stay within customization and shared reload recovery remains
   visible outside the closed overlay.
 
-- **AC-AGENTS-WORKSPACE-MCP-CONFIGURATION-006.13:** Session customization shall
-  identify additions as belonging to this session and distinguish inherited
-  choices without implying they can be removed here. Application timing shall
-  agree with the saved provider state: no unconditional idle promise when changes
-  require the next agent start. Primary customization shall not expose internal
-  revision counters; a forbidden save shall explain that this connection cannot
-  save and that previous choices remain unchanged, without a false reload.
+- **AC-AGENTS-WORKSPACE-MCP-CONFIGURATION-006.13:** Customize identifies session
+  additions and inherited exclude/restore actions. Timing follows provider state,
+  including next-start requirements. Hide internal revisions. A forbidden save
+  explains that this connection cannot save and previous choices are unchanged;
+  do not falsely request reload.
 
 - **AC-AGENTS-WORKSPACE-MCP-CONFIGURATION-006.14:** Customize shall separate
   application status, inherited selections and session choices with semantic
@@ -279,10 +279,10 @@ and mobile.
   Changes waiting to apply, with idle, next-start or failed timing distinct from
   connection health. Unchecked/deleted servers and search filtering shall not
   hide pending actions.
-- **AC-AGENTS-WORKSPACE-MCP-CONFIGURATION-006.16:** Affected rows shall identify
-  their pending action. Unchecking shall not imply immediate removal from the
-  agent. Servers retained by another scope shall not show removal; inherited
-  entries remain read-only.
+- **AC-AGENTS-WORKSPACE-MCP-CONFIGURATION-006.16:** Rows identify pending actions
+  without implying immediate removal. Another scope can retain an unchecked
+  positive selection; a session exclusion subtracts every contribution.
+
 - **AC-AGENTS-WORKSPACE-MCP-CONFIGURATION-006.17:** Reloading/reopening shall
   restore session-specific comparison of latest saved choices and last accepted
   setup. Rejected saves/failed applications shall preserve that baseline; older
@@ -299,19 +299,18 @@ and mobile.
 
 #### Origin sections
 
-- **AC-AGENTS-WORKSPACE-MCP-CONFIGURATION-006.20:** Customize shall show only
-  populated task, repository and profile sections. Each inherited definition
-  appears once, grouped by task first, repository second, profile third without
-  runtime precedence. All contributors and available names remain explicit,
-  including multiple repositories. Unknown names use scope labels; unattributed
-  inherited selections remain visible without an invented source.
-- **AC-AGENTS-WORKSPACE-MCP-CONFIGURATION-006.21:** All selection lists,
-  including repository settings and task creation, shall show each choice's
-  name, runtime alias, nonblank description, mode, transport and known catalog
-  source. Metadata stays readable and passive, separate from origins, disabled
-  state and pending actions. Details wrap; the final choice is reachable on
-  phones. Inherited rows stay read-only and outside choices; disabled entries
-  cannot be newly selected.
+- **AC-AGENTS-WORKSPACE-MCP-CONFIGURATION-006.20:** Customize groups each inherited
+  definition once: task, repository, then profile, without runtime precedence.
+  Omit empty groups. Show all contributors, including multiple repositories;
+  missing names use scope labels, and unattributed entries stay visible.
+  Saved exclusions without contributors have a separate restore section.
+
+- **AC-AGENTS-WORKSPACE-MCP-CONFIGURATION-006.21:** All pickers show name,
+  alias, nonblank description, mode, transport and known source. Passive metadata
+  stays separate from origins, disabled state and pending actions; details wrap
+  and final choices remain reachable on phones. Inherited rows stay outside
+  positive choices. Only existing sessions expose exclude/restore. Disabled
+  definitions cannot be newly selected, and restore does not enable them.
 
 ### REQ-AGENTS-WORKSPACE-MCP-CONFIGURATION-007: Legacy profile compatibility
 

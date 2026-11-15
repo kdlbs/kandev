@@ -32,8 +32,8 @@ type CopilotPluginDiscoveryResponse struct {
 	Reason          string `json:"reason,omitempty"`
 	ContextRevision string `json:"context_revision,omitempty"`
 	RuntimeVersion  string `json:"runtime_version,omitempty"`
-	// MountPermitted reports whether a nonempty selection can start a new
-	// local/worktree process on the qualified runtime.
+	// MountPermitted reports whether this runtime's help output advertised the
+	// native plugin-directory option. Inventory and root checks remain separate.
 	MountPermitted bool                           `json:"mount_permitted"`
 	Plugins        []CopilotPluginDiscoveryPlugin `json:"plugins"`
 }

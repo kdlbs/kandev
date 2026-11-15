@@ -12,6 +12,7 @@ import (
 	"strconv"
 
 	"github.com/kandev/kandev/internal/agentctl/journal"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 // DeliveryStatus is the authenticated recovery descriptor returned by an
@@ -25,6 +26,8 @@ type DeliveryStatus = journal.RecoveryDescriptor
 type DeliveryHTTPError struct {
 	StatusCode int
 	Body       string
+	// Storage carries validated source evidence when the peer supplied it.
+	Storage *streams.DeliveryStorageDiagnostic
 }
 
 func (e *DeliveryHTTPError) Error() string {
@@ -69,6 +72,10 @@ func (c *Client) setDeliveryStatus(status *DeliveryStatus) {
 	if status.Stream != nil {
 		stream := *status.Stream
 		copy.Stream = &stream
+	}
+	if status.AgentProcess != nil {
+		identity := *status.AgentProcess
+		copy.AgentProcess = &identity
 	}
 	copy.Submissions = append([]journal.SubmissionSummary(nil), status.Submissions...)
 	c.deliveryStatus = &copy
@@ -126,8 +133,24 @@ func (c *Client) DeliveryRecoveryDescriptor() (*DeliveryStatus, bool) {
 		stream := *c.deliveryStatus.Stream
 		copy.Stream = &stream
 	}
+	if c.deliveryStatus.AgentProcess != nil {
+		identity := *c.deliveryStatus.AgentProcess
+		copy.AgentProcess = &identity
+	}
 	copy.Submissions = append([]journal.SubmissionSummary(nil), c.deliveryStatus.Submissions...)
 	return &copy, true
+}
+
+// ProcessManagerID returns the producer lifetime reported by the most recent
+// authenticated delivery descriptor. It is distinct from process_generation,
+// which restarts when agentctl creates a new process manager.
+func (c *Client) ProcessManagerID() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.deliveryStatus == nil {
+		return ""
+	}
+	return c.deliveryStatus.ProcessManagerID
 }
 
 func (c *Client) setLastDeliverySubmissionID(id string) {
@@ -159,6 +182,37 @@ func (c *Client) GetDeliveryStatus(ctx context.Context, streamID string) (*Deliv
 	}
 	c.setDeliveryStatus(&result)
 	return &result, nil
+}
+
+// ListSuccessorDeliveryStreams returns retained streams from later harness
+// generations owned by the same session lifetime.
+func (c *Client) ListSuccessorDeliveryStreams(ctx context.Context) ([]journal.Stream, error) {
+	var result []journal.Stream
+	if err := c.doDeliveryRequest(ctx, http.MethodGet, "/api/v1/agent/delivery/successors", nil, &result); err != nil {
+		var response *DeliveryHTTPError
+		if errors.As(err, &response) && response.StatusCode == http.StatusNotFound {
+			return []journal.Stream{}, nil
+		}
+		return nil, err
+	}
+	return result, nil
+}
+
+// AbandonSuccessorDeliveryStream removes one exact stream snapshot returned by
+// ListSuccessorDeliveryStreams.
+func (c *Client) AbandonSuccessorDeliveryStream(ctx context.Context, stream journal.Stream) error {
+	return c.doDeliveryRequest(ctx, http.MethodPost, "/api/v1/agent/delivery/stream/abandon", stream, nil)
+}
+
+// AbandonFailedBootstrapDeliveryStream removes this owner's stream after its
+// agent process has stopped and lifecycle SQL checks proved no successor row
+// or cursor was committed.
+func (c *Client) AbandonFailedBootstrapDeliveryStream(ctx context.Context, streamID string, generation uint64) error {
+	request := struct {
+		StreamID          string `json:"stream_id"`
+		HarnessGeneration uint64 `json:"harness_generation"`
+	}{StreamID: streamID, HarnessGeneration: generation}
+	return c.doDeliveryRequest(ctx, http.MethodPost, "/api/v1/agent/delivery/stream/abandon-bootstrap", request, nil)
 }
 
 // SubmitDelivery records and accepts one immutable submission. The caller
@@ -197,6 +251,26 @@ func (c *Client) ListDeliverySubmissions(ctx context.Context, sessionID string) 
 func (c *Client) RetireDeliverySubmission(ctx context.Context, id string) error {
 	path := "/api/v1/agent/submissions/" + url.PathEscape(id) + "/retire"
 	return c.doDeliveryRequest(ctx, http.MethodPost, path, nil, nil)
+}
+
+// RetireMissingUnknownDeliverySubmission records retirement evidence for an
+// interrupted SQL prompt whose peer journal record is absent.
+func (c *Client) RetireMissingUnknownDeliverySubmission(ctx context.Context, submission journal.Submission) error {
+	path := "/api/v1/agent/submissions/" + url.PathEscape(submission.ID) + "/retire"
+	request := struct {
+		SessionID         string `json:"session_id"`
+		IncarnationID     string `json:"incarnation_id"`
+		HarnessGeneration uint64 `json:"harness_generation"`
+		StreamID          string `json:"stream_id"`
+		Hash              string `json:"hash"`
+	}{
+		SessionID:         submission.SessionID,
+		IncarnationID:     submission.IncarnationID,
+		HarnessGeneration: submission.HarnessGeneration,
+		StreamID:          submission.StreamID,
+		Hash:              submission.Hash,
+	}
+	return c.doDeliveryRequest(ctx, http.MethodPost, path, request, nil)
 }
 
 // CancelDeliverySubmission settles a prompt after an explicit user cancel.
@@ -282,7 +356,9 @@ func (c *Client) doDeliveryRequestLimited(
 		return fmt.Errorf("read durable delivery response: %w", err)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return &DeliveryHTTPError{StatusCode: resp.StatusCode, Body: truncateBody(responseBody)}
+		httpErr := &DeliveryHTTPError{StatusCode: resp.StatusCode, Body: truncateBody(responseBody)}
+		httpErr.Storage = deliveryResponseStorage(responseBody)
+		return httpErr
 	}
 	if output == nil || len(responseBody) == 0 {
 		return nil
@@ -314,4 +390,16 @@ func (c *Client) RetireInterruptedDeliverySubmission(ctx context.Context, id, st
 		StreamID   string `json:"stream_id"`
 		Generation uint64 `json:"harness_generation"`
 	}{StreamID: streamID, Generation: generation}, nil)
+}
+
+// deliveryResponseStorage accepts only the closed storage diagnostic from an
+// authenticated error body. Other fields and malformed values stay absent.
+func deliveryResponseStorage(body []byte) *streams.DeliveryStorageDiagnostic {
+	var response struct {
+		Storage *streams.DeliveryStorageDiagnostic `json:"storage"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil || response.Storage == nil {
+		return nil
+	}
+	return response.Storage.Normalize()
 }

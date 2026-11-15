@@ -55,7 +55,7 @@ Release bundles also include `agentctl` helpers for task environments.
 - **Multi-repository tasks** - Span a single task across multiple repositories, with one worktree per repo, per-repo branches, per-repo PRs, and per-repo grouping in the Changes panel and review dialog
 - **Flexible runtimes** - Run agents as local processes, in isolated Docker containers, on remote servers via SSH, or in cloud executors like sprites.dev
 - **Runtime settings** - Executor profiles, secrets, custom prompts, utility agents, and resource metrics are configurable from Settings
-- **Task-agent MCP** - Agents can create subtasks, target sibling repos, attach extra branches for multiple PRs, message other tasks, read conversations, and inspect related tasks
+- **Task-agent MCP** - Agents can create subtasks, target sibling repos, attach extra branches for multiple PRs, message other tasks, read conversations, and inspect related tasks. Choose [native tool packages](docs/public/builtin-mcp-packages.md), including explicit Configuration access for a task.
 - **External MCP** - Manage Kandev from outside coding agents over streamable HTTP or SSE, with copyable config snippets for popular agent CLIs
 - **Plugin marketplace and management** - Browse, install, update, enable, disable, and configure plugins from Settings, including MCP Explorer and the [Bitbucket plugin](https://github.com/kdlbs/kandev-plugin-bitbucket)
 - **Workflow portability** - Export and import workflows as portable YAML across workspaces or Kandev installs
@@ -81,7 +81,7 @@ See [docs/features.md](docs/features.md) for the full feature inventory, includi
   <a href="https://slack.com/"><img src="https://img.shields.io/badge/Slack-4A154B?style=for-the-badge&logo=slack&logoColor=white" alt="Slack"></a>
 </p>
 
-Connect Kandev to GitHub, GitLab, Jira, Linear, Sentry, and Azure DevOps to pull issues into the kanban, link tasks to PRs, and surface review activity inline. Bitbucket support is available through the [Bitbucket plugin](https://github.com/kdlbs/kandev-plugin-bitbucket).
+Connect Kandev to GitHub, GitLab, Jira, Linear, and Sentry to pull issues into the kanban, link tasks to PRs, and surface review activity inline. Bitbucket and Azure DevOps support is available through the [Bitbucket plugin](https://github.com/kdlbs/kandev-plugin-bitbucket) and the [Azure DevOps plugin](https://github.com/JnManso/kandev-plugin-azure-devops).
 
 ## Supported Agent CLIs
 

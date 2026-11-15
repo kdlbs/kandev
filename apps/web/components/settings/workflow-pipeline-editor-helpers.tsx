@@ -271,6 +271,22 @@ export function hasOnEnterAction(step: WorkflowStep, type: string): boolean {
   return step.events?.on_enter?.some((a) => a.type === type) ?? false;
 }
 
+/**
+ * The next stage_type when the hold checkbox changes. Ticking always sets
+ * `hold`. Unticking restores the value the step carried before it was marked a
+ * hold, so an accidental toggle does not turn a review or approval step into
+ * custom; a step with no prior non-hold nature falls back to `custom`.
+ */
+export function stageTypeOnHoldToggle(
+  checked: boolean,
+  savedStageType: WorkflowStep["stage_type"],
+): WorkflowStep["stage_type"] {
+  if (checked) {
+    return "hold";
+  }
+  return savedStageType && savedStageType !== "hold" ? savedStageType : "custom";
+}
+
 export function getTransitionType(step: WorkflowStep): string {
   const action = step.events?.on_turn_complete?.find((a) =>
     ["move_to_next", "move_to_previous", "move_to_step"].includes(a.type),

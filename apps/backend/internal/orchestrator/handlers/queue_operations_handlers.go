@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"github.com/kandev/kandev/internal/authz"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -171,6 +172,11 @@ func (h *QueueHandlers) wsSetAutoRun(ctx context.Context, msg *ws.Message) (*ws.
 	}
 	if denied := h.authorizeQueueIdentity(ctx, msg, req.TaskID, req.SessionID, req.SessionIncarnationID); denied != nil {
 		return denied, nil
+	}
+	if *req.Enabled {
+		if denied := h.authorizeQueueScope(ctx, msg, req.SessionID, authz.ScopeSessionPrompt); denied != nil {
+			return denied, nil
+		}
 	}
 	if h.queueAutoRun == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queue Auto-run is unavailable", nil)

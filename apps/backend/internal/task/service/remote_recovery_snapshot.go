@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
@@ -42,6 +43,69 @@ func (s *Service) GetRemoteRecoverySnapshot(ctx context.Context, sessionID strin
 	}
 	delivery := remoteRecoveryDeliveryStatus(inputs.session, inputs.running)
 	return assembleRemoteRecoverySnapshot(inputs, ownerArchived, ownerCleanupRunning, cleanupRunning, delivery), nil
+}
+
+// GetRemoteRecoveryAbsenceSnapshot validates the task/session/environment
+// owner after executors_running has disappeared. The caller must hold the
+// matching repository owner locks for the duration of this read.
+func (s *Service) GetRemoteRecoveryAbsenceSnapshot(
+	ctx context.Context,
+	record *models.ExecutorRunning,
+) (*agentruntime.RemoteRecoverySnapshot, error) {
+	if record == nil || record.SessionID == "" || record.TaskID == "" || record.AgentExecutionID == "" || record.Runtime == "" {
+		return nil, errors.New("remote recovery absence identity is incomplete")
+	}
+	if err := s.validateRemoteRecoverySnapshotRequest(record.SessionID); err != nil {
+		return nil, err
+	}
+	session, err := s.loadRemoteRecoverySession(ctx, record.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.validateRemoteRecoveryAbsenceSession(ctx, session, record); err != nil {
+		return nil, err
+	}
+	task, err := s.loadRemoteRecoveryTask(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	workspace, err := s.loadRemoteRecoveryWorkspace(ctx, task)
+	if err != nil {
+		return nil, err
+	}
+	environment, err := s.loadRemoteRecoveryEnvironment(ctx, session.TaskEnvironmentID)
+	if err != nil {
+		return nil, err
+	}
+	inputs := &remoteRecoverySnapshotInputs{
+		session: session, task: task, workspace: workspace, running: record, environment: environment,
+	}
+	ownerArchived, ownerCleanupRunning, err := s.remoteRecoveryEnvironmentOwnerStatus(ctx, task, environment)
+	if err != nil {
+		return nil, err
+	}
+	cleanupRunning, err := s.resourceCleanups.HasActiveTaskResourceCleanupJob(ctx, task.ID)
+	if err != nil {
+		return nil, fmt.Errorf("read remote recovery cleanup state for task %q: %w", task.ID, err)
+	}
+	delivery := remoteRecoveryDeliveryStatus(session, record)
+	return assembleRemoteRecoverySnapshot(inputs, ownerArchived, ownerCleanupRunning, cleanupRunning, delivery), nil
+}
+
+func (s *Service) validateRemoteRecoveryAbsenceSession(
+	ctx context.Context,
+	session *models.TaskSession,
+	record *models.ExecutorRunning,
+) error {
+	if session.TaskID != record.TaskID || session.AgentExecutionID != "" {
+		return errors.New("remote recovery session owner changed after executor row removal")
+	}
+	if _, err := s.executors.GetExecutorRunningBySessionID(ctx, record.SessionID); err == nil {
+		return errors.New("remote recovery executor row reappeared")
+	} else if !errors.Is(err, models.ErrExecutorRunningNotFound) {
+		return fmt.Errorf("recheck remote recovery executor absence: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) validateRemoteRecoverySnapshotRequest(sessionID string) error {

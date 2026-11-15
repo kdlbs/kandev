@@ -450,12 +450,14 @@ export async function fetchTaskNavigationEnrichment(
       store: options.store,
     });
   }
-  // The task shell owns selection and an already-resolved session collection.
+  // Only recovery of an unavailable identity list owns new selection/membership.
   return {
     ...data,
     initialState: {
       ...data.initialState,
-      tasks: undefined,
+      tasks: identity.sessionListUnavailable ? data.initialState.tasks : undefined,
+      taskSessions:
+        !sessionId && !identity.sessionListUnavailable ? undefined : data.initialState.taskSessions,
       taskSessionsByTask: identity.sessionListUnavailable
         ? data.initialState.taskSessionsByTask
         : undefined,

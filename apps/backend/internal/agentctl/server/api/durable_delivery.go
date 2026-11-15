@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 type deliverySubmissionRequest struct {
@@ -25,6 +26,11 @@ type deliverySubmissionRequest struct {
 type deliveryAcknowledgementRequest struct {
 	StreamID string `json:"stream_id"`
 	Sequence uint64 `json:"sequence"`
+}
+
+type failedBootstrapDeliveryAbandonRequest struct {
+	StreamID          string `json:"stream_id"`
+	HarnessGeneration uint64 `json:"harness_generation"`
 }
 
 const deliverySubmissionRequestOverhead int64 = 64 << 10
@@ -74,6 +80,55 @@ func (s *Server) handleDeliveryStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, descriptor)
 }
 
+func (s *Server) handleDeliverySuccessorStreams(c *gin.Context) {
+	if s.procMgr == nil {
+		writeDeliveryError(c, journal.ErrOwnerMismatch)
+		return
+	}
+	streams, err := s.procMgr.SuccessorDeliveryStreams(c.Request.Context())
+	if err != nil {
+		writeDeliveryError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, streams)
+}
+
+func (s *Server) handleDeliverySuccessorAbandon(c *gin.Context) {
+	if s.procMgr == nil {
+		writeDeliveryError(c, journal.ErrOwnerMismatch)
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8<<10)
+	var expected journal.Stream
+	if err := c.ShouldBindJSON(&expected); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_STREAM"})
+		return
+	}
+	if err := s.procMgr.AbandonSuccessorDeliveryStream(c.Request.Context(), expected); err != nil {
+		writeDeliveryError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (s *Server) handleFailedBootstrapDeliveryAbandon(c *gin.Context) {
+	if s.procMgr == nil {
+		writeDeliveryError(c, journal.ErrOwnerMismatch)
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 2<<10)
+	var request failedBootstrapDeliveryAbandonRequest
+	if err := c.ShouldBindJSON(&request); err != nil || request.StreamID == "" || request.HarnessGeneration == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_STREAM"})
+		return
+	}
+	if err := s.procMgr.AbandonFailedBootstrapDeliveryStream(c.Request.Context(), request.StreamID, request.HarnessGeneration); err != nil {
+		writeDeliveryError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func (s *Server) handleDeliverySubmission(c *gin.Context) {
 	deliveryJournal, ok := s.getDeliveryJournal(c)
 	if !ok {
@@ -112,8 +167,11 @@ func (s *Server) handleDeliverySubmission(c *gin.Context) {
 		case errors.Is(err, journal.ErrStreamFull):
 			status = http.StatusRequestEntityTooLarge
 			code = "SUBMISSION_TOO_LARGE"
+		case errors.Is(err, journal.ErrJournalFull):
+			status = http.StatusInsufficientStorage
+			code = "STORAGE_FULL"
 		}
-		c.JSON(status, gin.H{"code": code, "message": code})
+		c.JSON(status, deliveryErrorBody(code, err))
 		return
 	}
 	c.JSON(http.StatusOK, submission)
@@ -169,7 +227,7 @@ func (s *Server) handleDeliverySubmissionRetire(c *gin.Context) {
 		writeDeliveryError(c, journal.ErrOwnerMismatch)
 		return
 	}
-	if c.Request.ContentLength != 0 && !s.validateInterruptedRetirement(c) {
+	if !s.prepareDeliverySubmissionRetirement(c) {
 		return
 	}
 	if err := s.procMgr.RetireDeliverySubmission(
@@ -484,6 +542,18 @@ func writeDeliveryError(c *gin.Context, err error) {
 		status, code = http.StatusRequestEntityTooLarge, "REPLAY_PAGE_TOO_LARGE"
 	case errors.Is(err, journal.ErrStreamFull):
 		status, code = http.StatusRequestEntityTooLarge, "SUBMISSION_TOO_LARGE"
+	case errors.Is(err, journal.ErrJournalFull):
+		status, code = http.StatusInsufficientStorage, "STORAGE_FULL"
 	}
-	c.JSON(status, gin.H{"code": code, "message": code})
+	c.JSON(status, deliveryErrorBody(code, err))
+}
+
+// deliveryErrorBody keeps the legacy code/message shape and adds validated
+// storage evidence only when the source produced it.
+func deliveryErrorBody(code string, err error) gin.H {
+	body := gin.H{"code": code, "message": code}
+	if diagnostic := streams.DeliveryStorageDiagnosticFromError(err); diagnostic != nil {
+		body["storage"] = diagnostic
+	}
+	return body
 }

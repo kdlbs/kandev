@@ -411,6 +411,7 @@ function setupFetch(unexpected: string[], serverPlanMode: Map<string, boolean>) 
           last_event_at: null,
         });
       if (url.endsWith("/environment/live")) return Response.json({ environment: null });
+      if (url.endsWith("/subtask-count")) return Response.json({ count: 0 });
       if (url.includes("frontend")) return new Response(null, { status: 204 });
       unexpected.push(`HTTP ${url}`);
       throw new Error(`Unexpected fixture fetch: ${url}`);
@@ -474,7 +475,8 @@ export function setupTransport() {
     onConnectionStatus: subscribe,
     onRawSessionEvent: subscribe,
     registerCoreSessionRecovery: subscribe,
-    subscribeUser: subscribe,
+    subscribeUser: noop,
+    unsubscribeUser: noop,
   } as unknown as WebSocketClient);
   setupFetch(unexpected, serverPlanMode);
   return {

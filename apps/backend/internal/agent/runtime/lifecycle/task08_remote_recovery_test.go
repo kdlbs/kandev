@@ -57,6 +57,16 @@ func (p *task08RemoteSnapshotProvider) GetRemoteRecoverySnapshot(_ context.Conte
 	return &copySnapshot, nil
 }
 
+func (p *task08RemoteSnapshotProvider) GetRemoteRecoveryAbsenceSnapshot(
+	ctx context.Context,
+	record *models.ExecutorRunning,
+) (*RemoteRecoverySnapshot, error) {
+	if record == nil {
+		return nil, errors.New("remote recovery absence record is unavailable")
+	}
+	return p.GetRemoteRecoverySnapshot(ctx, record.SessionID)
+}
+
 func (p *task08BlockingSnapshotProvider) GetRemoteRecoverySnapshot(ctx context.Context, sessionID string) (*RemoteRecoverySnapshot, error) {
 	p.mu.Lock()
 	p.calls++

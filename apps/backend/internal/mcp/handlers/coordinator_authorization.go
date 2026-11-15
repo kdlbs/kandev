@@ -17,11 +17,9 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
-// coordinatorSurfaceActions is the execution-time mirror of the fixed
-// seven-tool coordinator catalog (docs/specs/coordinator/system-design/
-// copilot-tools.md#tool-surface, AC-COORDINATOR-COPILOT-003.1). Discovery
-// alone is not an authorization boundary because an agent can still send a
-// raw WebSocket action.
+// coordinatorSurfaceActions is the execution-time mirror of the coordinator
+// catalog: the fixed core tools plus the plugin discovery and invocation
+// actions that the handler authorizes against the exact version-2 binding.
 var coordinatorSurfaceActions = map[string]struct{}{
 	ws.ActionMCPListTasks:            {},
 	ws.ActionMCPGetTaskConversation:  {},
@@ -37,6 +35,11 @@ var coordinatorSurfaceActions = map[string]struct{}{
 
 	coordinator.ActionProposeImprovement: {},
 	coordinator.ActionListTurns:          {},
+	// Instance-read plugin discovery and invocation are allowed on this
+	// surface only; the handler additionally requires an exact version-2
+	// binding before either reaches the plugin.
+	ws.ActionMCPListPluginTools:  {},
+	ws.ActionMCPInvokePluginTool: {},
 }
 
 // coordinatorPrincipalOnlyActions are registered coordinator-surface actions
@@ -161,6 +164,13 @@ func actionClass(action string) coordinator.Action {
 	return coordinator.ActionUnknown
 }
 
+// isCoordinatorPluginAction reports whether the action is the instance-read
+// plugin discovery or invocation path that the plugin handler authorizes
+// against the exact binding.
+func isCoordinatorPluginAction(action string) bool {
+	return action == ws.ActionMCPListPluginTools || action == ws.ActionMCPInvokePluginTool
+}
+
 // authorizeCoordinatorPolicy runs the phase-2 checks that precede payload
 // validation: the bound tool list is resolved and valid, names the requested
 // tool, and, for a propose tool, the coordinator's live policy still allows
@@ -173,6 +183,11 @@ func (h *Handlers) authorizeCoordinatorPolicy(
 	names, valid := coordinatorBoundNames(ctx, principal)
 	if !valid {
 		return h.refuseCoordinator(ctx, principal, msg, class, "binding_invalid")
+	}
+	if isCoordinatorPluginAction(msg.Action) {
+		// Plugin actions have no core tool mapping; the plugin handler
+		// revalidates the exact version-2 binding before dispatch.
+		return false, nil, nil
 	}
 	tool, hasTool := coordinator.ToolForAction(msg.Action)
 	if !hasTool || !slices.Contains(names, tool) {

@@ -14,6 +14,14 @@ const (
 	defaultDeliveryHealthProbeInterval = 2 * time.Second
 	defaultDeliveryHealthProbeTimeout  = 2 * time.Second
 	defaultDeliveryHealthCooldown      = 10 * time.Second
+	defaultRuntimeStorageProbeInterval = 30 * time.Second
+	defaultRuntimeStorageConcurrency   = 4
+	deliveryHealthyHealthState         = "healthy"
+	deliveryPressureHealthState        = "pressure"
+	deliveryGuardedHealthState         = "guarded"
+	deliveryStorageErrorHealthState    = "storage_error"
+	deliveryCancellingHealthState      = "cancelling"
+	deliveryCancellationFailedState    = "cancellation_failed"
 )
 
 // deliveryStreamAttachment fences one attached updates-stream connection. A
@@ -43,11 +51,14 @@ func (a *deliveryStreamAttachment) isClosed() bool {
 // manager locks across the probe request.
 type deliveryHealthOwner struct {
 	execution        *AgentExecution
+	client           *agentctl.Client
 	probe            func(context.Context) (*agentctl.StatusResponse, error)
+	applyPressure    func(context.Context, RuntimeStoragePressure)
 	current          func() bool
 	reconcile        func(context.Context) DeliveryReconciliationResult
 	submission       func() string
 	promptGeneration func() uint64
+	attachment       *deliveryStreamAttachment
 }
 
 // monitorDeliveryHealth observes authenticated delivery health independently
@@ -136,9 +147,7 @@ func (sm *StreamManager) probeDeliveryHealth(
 ) {
 	submissionID := owner.submission()
 	promptGeneration := owner.promptGeneration()
-	if submissionID == "" {
-		return
-	}
+	harnessGeneration := owner.execution.DeliveryHarnessGeneration
 	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	status, err := owner.probe(probeCtx)
 	cancel()
@@ -147,8 +156,27 @@ func (sm *StreamManager) probeDeliveryHealth(
 			zap.String("execution_id", owner.execution.ID), zap.Error(err))
 		return
 	}
+	if !owner.current() || owner.submission() != submissionID ||
+		owner.promptGeneration() != promptGeneration ||
+		owner.execution.DeliveryHarnessGeneration != harnessGeneration {
+		return
+	}
+	supportedState := deliveryHealthStateSupported(status.DeliveryHealth.State)
+	if !supportedState && status.DeliveryHealth.Failure == nil {
+		// A missing or unknown state cannot clear live pressure because it is
+		// not evidence of a usable writer.
+		return
+	}
+	if owner.applyPressure != nil && supportedState {
+		owner.applyPressure(ctx, runtimeStoragePressureFromStatus(owner, status, submissionID, promptGeneration))
+	}
 	reason := deliveryPressureRecoveryReason(status)
 	if reason == "" {
+		if submissionID == "" {
+			// An idle observation updates pressure only. It cannot settle a
+			// turn or resolve a recovery block without a bound submission.
+			return
+		}
 		if state.hadUnhealthy {
 			// A prior failure is no longer reported, either because the actual
 			// terminal committed or the producer recovered. Re-run the existing
@@ -160,6 +188,11 @@ func (sm *StreamManager) probeDeliveryHealth(
 				zap.String("execution_id", owner.execution.ID),
 				zap.String("outcome", string(result.Outcome)))
 		}
+		return
+	}
+	if submissionID == "" {
+		// Idle pressure stays observational. Reconcile needs the exact active
+		// submission that produced the failure.
 		return
 	}
 	failure := status.DeliveryHealth.Failure
@@ -207,6 +240,33 @@ func (sm *StreamManager) probeDeliveryHealth(
 		zap.String("outcome", string(result.Outcome)))
 }
 
+// deliveryFailureMatchesPressureScope keeps the specific failure cause on idle
+// pressure observations, where the active submission is intentionally empty.
+// Execution identity remains mandatory; a recorded submission or prompt
+// generation must still match the captured scope when both sides know it.
+func deliveryFailureMatchesPressureScope(
+	owner deliveryHealthOwner,
+	failure *types.DeliveryFailureSnapshot,
+	submissionID string,
+	promptGeneration uint64,
+) bool {
+	execution := owner.execution
+	if execution == nil || failure == nil {
+		return false
+	}
+	if failure.SessionID != execution.SessionID || failure.IncarnationID != execution.DeliveryIncarnationID ||
+		failure.HarnessGeneration != execution.DeliveryHarnessGeneration || failure.StreamID != execution.DeliveryStreamID {
+		return false
+	}
+	if submissionID != "" && failure.SubmissionID != "" && failure.SubmissionID != submissionID {
+		return false
+	}
+	if promptGeneration != 0 && failure.PromptGeneration != 0 && failure.PromptGeneration != promptGeneration {
+		return false
+	}
+	return true
+}
+
 func deliveryFailureCorrelates(
 	owner deliveryHealthOwner,
 	failure *types.DeliveryFailureSnapshot,
@@ -237,7 +297,13 @@ func (sm *StreamManager) deliveryHealthOwnerFor(
 ) deliveryHealthOwner {
 	return deliveryHealthOwner{
 		execution: execution,
+		client:    client,
 		probe:     client.GetStatus,
+		applyPressure: func(ctx context.Context, pressure RuntimeStoragePressure) {
+			if sm.onRuntimeStoragePressure != nil {
+				sm.onRuntimeStoragePressure(ctx, execution, pressure)
+			}
+		},
 		current: func() bool {
 			if execution == nil || attachment.isClosed() {
 				return false
@@ -258,6 +324,7 @@ func (sm *StreamManager) deliveryHealthOwnerFor(
 		},
 		submission:       func() string { return currentDeliverySubmissionID(execution) },
 		promptGeneration: execution.promptGenerationSnapshot,
+		attachment:       attachment,
 	}
 }
 
@@ -286,4 +353,57 @@ func (sm *StreamManager) waitDeliveryHealth(ctx context.Context, interval time.D
 	case <-sm.stopCh:
 		return false
 	}
+}
+
+// deliveryHealthStateSupported reports whether a status response carries a
+// recognized delivery-health state. Missing or future states stay
+// observational and cannot clear live pressure.
+func deliveryHealthStateSupported(state string) bool {
+	switch state {
+	case deliveryHealthyHealthState, deliveryPressureHealthState,
+		deliveryGuardedHealthState, deliveryFailedHealthState, deliveryStorageErrorHealthState,
+		deliveryInterruptedHealthState, deliveryCancellingHealthState, deliveryCancellationFailedState:
+		return true
+	default:
+		return false
+	}
+}
+
+func deliveryStateIndicatesStoragePressure(state string) bool {
+	switch state {
+	case deliveryGuardedHealthState, deliveryFailedHealthState, deliveryStorageErrorHealthState,
+		deliveryInterruptedHealthState, deliveryCancellingHealthState, deliveryCancellationFailedState:
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimeStoragePressureFromStatus(
+	owner deliveryHealthOwner,
+	status *agentctl.StatusResponse,
+	submissionID string,
+	promptGeneration uint64,
+) RuntimeStoragePressure {
+	capacity := status.DeliveryHealth.Capacity
+	failure := status.DeliveryHealth.Failure
+	pressure := RuntimeStoragePressure{
+		WritePressure: status.DeliveryHealth.ProducerPaused ||
+			capacity.Guarded ||
+			failure != nil ||
+			deliveryStateIndicatesStoragePressure(status.DeliveryHealth.State),
+		ProducerPaused:     status.DeliveryHealth.ProducerPaused,
+		DeliveryState:      status.DeliveryHealth.State,
+		Generation:         owner.execution.DeliveryHarnessGeneration,
+		SubmissionID:       submissionID,
+		PromptGeneration:   promptGeneration,
+		SubmissionCaptured: true,
+		Client:             owner.client,
+		attachment:         owner.attachment,
+	}
+	if failure != nil && failure.Storage != nil &&
+		deliveryFailureMatchesPressureScope(owner, failure, submissionID, promptGeneration) {
+		pressure.FailureStorage = modelStorageDiagnostic(failure.Storage)
+	}
+	return pressure
 }

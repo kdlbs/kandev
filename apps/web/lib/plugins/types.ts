@@ -1,5 +1,5 @@
 /**
- * Host-runtime bindings for the public `@kandev/plugin-sdk` contract.
+ * Host-runtime bindings for the public `@kdlbs/plugin-sdk` contract.
  * Provider-facing shapes come from the standalone SDK; this module adds only
  * concrete React/Zustand compatibility needed inside the Kandev web app.
  */
@@ -7,8 +7,8 @@ import type * as ReactType from "react";
 import type { StoreApi } from "zustand";
 import type { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { AppState } from "@/lib/state/store";
-import type * as PluginSDK from "@kandev/plugin-sdk";
-import type { PluginUIApi } from "@kandev/plugin-sdk";
+import type * as PluginSDK from "@kdlbs/plugin-sdk";
+import type { PluginUIApi } from "@kdlbs/plugin-sdk";
 export type {
   PluginActionElement,
   PluginActionEvent,
@@ -35,8 +35,8 @@ export type {
   PluginTaskCreatedIdentity,
   PluginUIApi,
   RegisterPluginTaskCreatedHandler,
-} from "@kandev/plugin-sdk";
-export type { PluginIcon } from "@kandev/plugin-sdk";
+} from "@kdlbs/plugin-sdk";
+export type { PluginIcon } from "@kdlbs/plugin-sdk";
 
 /** Entry in the boot payload's `plugins` array (backend `ActivePlugin`). */
 export interface ActivePlugin {
@@ -306,7 +306,7 @@ export type PluginPresentation = "desktop" | "mobile";
 /**
  * Props forwarded to every plugin component registered for the
  * `chat-submit-decoration` slot. Canonical host counterpart of the
- * `@kandev/plugin-sdk` export of the same name; the two are pinned together by
+ * `@kdlbs/plugin-sdk` export of the same name; the two are pinned together by
  * `sdk-contract.test.ts`.
  *
  * These are kandev session ids. Resolving them to an agent/ACP transcript id

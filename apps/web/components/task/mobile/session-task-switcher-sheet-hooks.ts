@@ -16,7 +16,11 @@ import {
 } from "@/hooks/use-task-actions";
 import { useTaskDetachDialog } from "@/hooks/use-detach-task";
 import { useNestTaskByDrag } from "@/hooks/use-nest-task";
-import { useTaskRemoval, useTaskRemovalSuccessNotifier } from "@/hooks/use-task-removal";
+import {
+  usePendingTaskRemovalIds,
+  useTaskRemoval,
+  useTaskRemovalSuccessNotifier,
+} from "@/hooks/use-task-removal";
 import { workspaceModeFromMetadata } from "@/lib/kanban/map-task";
 import { type Repository, type SidebarTaskPageResponse, type Task } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
@@ -633,6 +637,7 @@ function useSheetNestTask(pageTasks: readonly TaskSwitcherItem[]) {
 export function useSheetArchiveActions(
   store: ReturnType<typeof useAppStoreApi>,
   archiveAndSwitch: ReturnType<typeof useArchiveAndSwitchTask>,
+  workspaceId: string | null,
 ) {
   const { t } = useTranslation();
   const [archivingTask, setArchivingTask] = useState<{
@@ -640,20 +645,18 @@ export function useSheetArchiveActions(
     title: string;
     executorType?: string | null;
   } | null>(null);
-  const [isArchiving, setIsArchiving] = useState(false);
-  const [archivingTaskId, setArchivingTaskId] = useState<string | null>(null);
+  const pendingRemovalTaskIds = usePendingTaskRemovalIds(store, workspaceId);
+  // Each confirmation target reads its own accepted operation, so finishing
+  // another archive cannot clear this dialog's busy state.
+  const isArchiving = archivingTask !== null && pendingRemovalTaskIds.has(archivingTask.id);
 
   const runArchive = useCallback(
     async (taskId: string, opts?: TaskActionOptions) => {
-      setIsArchiving(true);
-      setArchivingTaskId(taskId);
       try {
         await archiveAndSwitch(taskId, opts);
       } catch (error) {
         console.error("Failed to archive task:", error);
       } finally {
-        setIsArchiving(false);
-        setArchivingTaskId((current) => (current === taskId ? null : current));
         setArchivingTask((current) => (current?.id === taskId ? null : current));
       }
     },
@@ -687,7 +690,6 @@ export function useSheetArchiveActions(
   return {
     handleArchiveTask,
     archivingTask,
-    archivingTaskId,
     setArchivingTask,
     isArchiving,
     handleArchiveConfirm,
@@ -716,7 +718,7 @@ export function useSheetActions(
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const store = useAppStoreApi();
   const archiveAndSwitch = useArchiveAndSwitchTask();
-  const archiveActions = useSheetArchiveActions(store, archiveAndSwitch);
+  const archiveActions = useSheetArchiveActions(store, archiveAndSwitch, workspaceId);
   const notifySuccess = useTaskRemovalSuccessNotifier();
   const { runTaskRemoval, loadTaskSessionsForTask } = useTaskRemoval({
     store,

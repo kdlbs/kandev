@@ -136,11 +136,14 @@ async function fetchExpansionContent(
 ) {
   const client = getWebSocketClient();
   if (!client) throw new Error("WebSocket client not available");
-  const newContent = await fetchNewContent(client, sessionId, filePath, repo);
-  const oldContent = baseRef
-    ? await fetchOldContent(client, sessionId, filePath, baseRef, repo)
-    : "";
-  return { oldContent, newContent };
+  const [current, base] = await Promise.allSettled([
+    fetchNewContent(client, sessionId, filePath, repo),
+    baseRef ? fetchOldContent(client, sessionId, filePath, baseRef, repo) : Promise.resolve(""),
+  ]);
+  // Settle both reads before retrying and retain current-file error precedence.
+  if (current.status === "rejected") throw current.reason;
+  if (base.status === "rejected") throw base.reason;
+  return { oldContent: base.value, newContent: current.value };
 }
 
 /**

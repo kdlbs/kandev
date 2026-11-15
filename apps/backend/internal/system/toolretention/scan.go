@@ -37,6 +37,9 @@ func (s *Service) stepScan(ctx context.Context) error {
 }
 
 func (s *Service) stepAnalysis(ctx context.Context, r record) error {
+	if err := s.stepHistoryAnalysis(ctx, &r); err != nil {
+		return err
+	}
 	_, err := s.scanBatch(ctx, s.pool.Reader(), &r, false)
 	if err != nil {
 		return err
@@ -92,8 +95,16 @@ func (s *Service) scanBatch(ctx context.Context, q sqlx.QueryerContext, r *recor
 			return nil, err
 		}
 		if done {
+			if !r.Progress.HistoryDone {
+				break
+			}
 			state, code := stateSucceeded, ""
-			if r.Operation.Skipped["eligibility_budget"] > 0 {
+			switch {
+			case r.Operation.HistoryTruncated:
+				state, code = statePartial, "history_limit"
+			case r.Progress.HistoryArchiveFailures >= historyArchiveFailureLimit:
+				state, code = statePartial, "history_archive_failures"
+			case r.Operation.Skipped["eligibility_budget"] > 0:
 				state, code = statePartial, "eligibility_budget"
 			}
 			finishOperation(r, state, code, s.opts.Now())

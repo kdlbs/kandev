@@ -14,6 +14,8 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { Page, Route } from "@playwright/test";
 
+test.use({ trace: "retain-on-failure" });
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

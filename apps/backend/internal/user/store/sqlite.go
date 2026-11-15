@@ -377,14 +377,53 @@ func (r *sqliteRepository) upsertUserSettingsPreservingTaskCreateLastUsedPostgre
 }
 
 // UpdateTaskCreateLastUsed merges the last task-creation choices into the
-// stored settings JSON and bumps the revision.
-func (r *sqliteRepository) UpdateTaskCreateLastUsed(ctx context.Context, userID string, patch models.TaskCreateLastUsed) (*models.UserSettings, error) {
-	if dialect.IsPostgres(r.db.DriverName()) {
-		return r.updateTaskCreateLastUsedPostgres(ctx, userID, patch)
+// stored settings JSON, bumps the revision only when a supplied choice differs
+// from the stored value, and reports whether the row changed. An equal patch
+// leaves the settings, timestamp, and revision untouched.
+func (r *sqliteRepository) UpdateTaskCreateLastUsed(ctx context.Context, userID string, patch models.TaskCreateLastUsed) (*models.UserSettings, bool, error) {
+	query, setArgs, diffArgs, hasPatch := buildTaskCreateLastUsedUpdate(r.db.DriverName(), patch)
+	if !hasPatch {
+		settings, err := r.getUserSettings(ctx, r.db, userID)
+		return settings, false, err
 	}
+	args := append([]any{}, setArgs...)
+	args = append(args, time.Now().UTC(), userID)
+	args = append(args, diffArgs...)
+	settings, err := scanUserSettings(
+		r.db.QueryRowContext(ctx, r.db.Rebind(query), args...),
+		userID,
+	)
+	if err == nil {
+		return settings, true, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, false, err
+	}
+	current, getErr := r.getUserSettings(ctx, r.db, userID)
+	if getErr != nil {
+		if errors.Is(getErr, sql.ErrNoRows) {
+			return nil, false, fmt.Errorf("user not found: %s", userID)
+		}
+		return nil, false, getErr
+	}
+	return current, false, nil
+}
+
+// buildTaskCreateLastUsedUpdate builds a conditional update that only writes
+// when at least one supplied choice differs from the stored JSON. The
+// comparison runs in the same statement so a reader precheck cannot miss a
+// concurrent color or choice write.
+func buildTaskCreateLastUsedUpdate(driver string, patch models.TaskCreateLastUsed) (string, []any, []any, bool) {
+	if dialect.IsPostgres(driver) {
+		return buildPostgresTaskCreateLastUsedUpdate(patch)
+	}
+	return buildSQLiteTaskCreateLastUsedUpdate(patch)
+}
+
+func buildSQLiteTaskCreateLastUsedUpdate(patch models.TaskCreateLastUsed) (string, []any, []any, bool) {
 	patchArgs := makeTaskCreateLastUsedJSONSetArgs(patch)
 	if len(patchArgs) == 0 {
-		return r.getUserSettings(ctx, r.db, userID)
+		return "", nil, nil, false
 	}
 	base := "CASE WHEN settings IS NULL OR settings = 'null' OR settings = '' THEN '{}' ELSE settings END"
 	settingsExpr := fmt.Sprintf(
@@ -394,34 +433,43 @@ func (r *sqliteRepository) UpdateTaskCreateLastUsed(ctx context.Context, userID 
 	)
 	placeholders := strings.TrimSuffix(strings.Repeat("?, ?, ", len(patchArgs)/2), ", ")
 	settingsExpr = fmt.Sprintf("json_set(%s, %s)", settingsExpr, placeholders)
-	query := `
+	diffExpr, diffArgs := makeTaskCreateLastUsedDifferenceSQLite(patch)
+	query := fmt.Sprintf(`
 		UPDATE users
 		SET settings = %s, updated_at = ?, settings_revision = settings_revision + 1
-		WHERE id = ?
+		WHERE id = ? AND (%s)
 		RETURNING settings, updated_at, settings_revision
-	`
-	now := time.Now().UTC()
-	args := append([]any{}, patchArgs...)
-	args = append(args, now, userID)
-	return scanUpdatedUserSettings(
-		r.db.QueryRowContext(ctx, r.db.Rebind(fmt.Sprintf(query, settingsExpr)), args...),
-		userID,
-	)
+	`, settingsExpr, diffExpr)
+	return query, patchArgs, diffArgs, true
 }
 
-// updateTaskCreateLastUsedPostgres merges the patch via a Postgres jsonb_set
-// expression.
-func (r *sqliteRepository) updateTaskCreateLastUsedPostgres(ctx context.Context, userID string, patch models.TaskCreateLastUsed) (*models.UserSettings, error) {
-	query, args := buildPostgresTaskCreateLastUsedUpdate(patch)
-	if len(args) == 0 {
-		return r.getUserSettings(ctx, r.db, userID)
+// makeTaskCreateLastUsedDifferenceSQLite compares every supplied field against
+// the current stored value. COALESCE treats an absent field and an empty string
+// as the same choice.
+func makeTaskCreateLastUsedDifferenceSQLite(patch models.TaskCreateLastUsed) (string, []any) {
+	base := "CASE WHEN settings IS NULL OR settings = 'null' OR settings = '' THEN '{}' ELSE settings END"
+	clauses := []string{}
+	args := []any{}
+	add := func(path, value string) {
+		clauses = append(clauses, fmt.Sprintf("COALESCE(json_extract(%s, '%s'), '') IS NOT ?", base, path))
+		args = append(args, value)
 	}
-	now := time.Now().UTC()
-	args = append(args, now, userID)
-	return scanUpdatedUserSettings(
-		r.db.QueryRowContext(ctx, r.db.Rebind(query), args...),
-		userID,
-	)
+	if patch.RepositoryID != "" {
+		add("$.task_create_last_used.repository_id", patch.RepositoryID)
+	}
+	if patch.Branch != "" || patch.RepositoryID != "" {
+		add("$.task_create_last_used.branch", patch.Branch)
+	}
+	if patch.AgentProfileID != "" {
+		add("$.task_create_last_used.agent_profile_id", patch.AgentProfileID)
+	}
+	if patch.ExecutorProfileID != "" {
+		add("$.task_create_last_used.executor_profile_id", patch.ExecutorProfileID)
+	}
+	for _, workspaceID := range safeTaskCreateWorkspaceKeys(patch) {
+		add("$.task_create_last_used.workflow_ids_by_workspace."+workspaceID, patch.WorkflowIDsByWorkspace[workspaceID])
+	}
+	return strings.Join(clauses, " OR "), args
 }
 
 // makeTaskCreateLastUsedJSONSetArgs flattens the patch into JSON1 json_set
@@ -480,9 +528,9 @@ func isSafeTaskCreateWorkspacePathKey(value string) bool {
 	return true
 }
 
-// buildPostgresTaskCreateLastUsedUpdate builds the jsonb_set UPDATE statement
-// and its arguments for a task_create_last_used patch.
-func buildPostgresTaskCreateLastUsedUpdate(patch models.TaskCreateLastUsed) (string, []any) {
+// buildPostgresTaskCreateLastUsedUpdate builds the conditional jsonb_set
+// UPDATE statement and its arguments for a task_create_last_used patch.
+func buildPostgresTaskCreateLastUsedUpdate(patch models.TaskCreateLastUsed) (string, []any, []any, bool) {
 	base := "(CASE WHEN settings IS NULL OR settings = 'null' OR settings = '' THEN '{}'::jsonb ELSE settings::jsonb END)"
 	expr := fmt.Sprintf(
 		"jsonb_set(%s, '{task_create_last_used}', %s, true)",
@@ -491,13 +539,66 @@ func buildPostgresTaskCreateLastUsedUpdate(patch models.TaskCreateLastUsed) (str
 	)
 	args := []any{}
 	expr, args = applyPostgresTaskCreateLastUsedPatch(expr, patch, args)
+	if len(args) == 0 {
+		return "", nil, nil, false
+	}
+	diffExpr, diffArgs := makeTaskCreateLastUsedDifferencePostgres(patch)
 	query := fmt.Sprintf(`
 		UPDATE users
 		SET settings = %s::text, updated_at = ?, settings_revision = settings_revision + 1
-		WHERE id = ?
+		WHERE id = ? AND (%s)
 		RETURNING settings, updated_at, settings_revision
-	`, expr)
-	return query, args
+	`, expr, diffExpr)
+	return query, args, diffArgs, true
+}
+
+// makeTaskCreateLastUsedDifferencePostgres mirrors the SQLite predicate with
+// JSONB operators. A missing key and an empty string compare as equal.
+func makeTaskCreateLastUsedDifferencePostgres(patch models.TaskCreateLastUsed) (string, []any) {
+	base := "(CASE WHEN settings IS NULL OR settings = 'null' OR settings = '' THEN '{}'::jsonb ELSE settings::jsonb END)"
+	clauses := []string{}
+	args := []any{}
+	add := func(path, value string) {
+		clauses = append(clauses, fmt.Sprintf("COALESCE(%s #>> '%s', '') IS DISTINCT FROM ?", base, path))
+		args = append(args, value)
+	}
+	addWorkspace := func(workspaceID, value string) {
+		clauses = append(clauses, fmt.Sprintf(
+			"COALESCE(%s #>> ARRAY['task_create_last_used','workflow_ids_by_workspace',?]::text[], '') IS DISTINCT FROM ?",
+			base,
+		))
+		args = append(args, workspaceID, value)
+	}
+	if patch.RepositoryID != "" {
+		add("{task_create_last_used,repository_id}", patch.RepositoryID)
+	}
+	if patch.Branch != "" || patch.RepositoryID != "" {
+		add("{task_create_last_used,branch}", patch.Branch)
+	}
+	if patch.AgentProfileID != "" {
+		add("{task_create_last_used,agent_profile_id}", patch.AgentProfileID)
+	}
+	if patch.ExecutorProfileID != "" {
+		add("{task_create_last_used,executor_profile_id}", patch.ExecutorProfileID)
+	}
+	for _, workspaceID := range safeTaskCreateWorkspaceKeys(patch) {
+		addWorkspace(workspaceID, patch.WorkflowIDsByWorkspace[workspaceID])
+	}
+	return strings.Join(clauses, " OR "), args
+}
+
+// safeTaskCreateWorkspaceKeys returns the sorted workspace IDs eligible for a
+// workflow history update.
+func safeTaskCreateWorkspaceKeys(patch models.TaskCreateLastUsed) []string {
+	keys := make([]string, 0, len(patch.WorkflowIDsByWorkspace))
+	for workspaceID, workflowID := range patch.WorkflowIDsByWorkspace {
+		if !isSafeTaskCreateWorkspacePathKey(workspaceID) || workflowID == "" {
+			continue
+		}
+		keys = append(keys, workspaceID)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // buildPostgresUserSettingsPreservingTaskCreateLastUsedUpdate builds the
@@ -563,7 +664,7 @@ func applyPostgresTaskCreateLastUsedPatch(expr string, patch models.TaskCreateLa
 	sort.Strings(workflowIDs)
 	for _, workspaceID := range workflowIDs {
 		workflowID := patch.WorkflowIDsByWorkspace[workspaceID]
-		if workspaceID == "" || workflowID == "" {
+		if !isSafeTaskCreateWorkspacePathKey(workspaceID) || workflowID == "" {
 			continue
 		}
 		expr = fmt.Sprintf(
@@ -626,11 +727,14 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"preferred_shell":                          settings.PreferredShell,
 		"default_editor_id":                        settings.DefaultEditorID,
 		"enable_preview_on_click":                  settings.EnablePreviewOnClick,
+		"escape_cancels_agent":                     settings.EscapeCancelsAgent,
 		"chat_submit_key":                          settings.ChatSubmitKey,
 		"review_auto_mark_on_scroll":               settings.ReviewAutoMarkOnScroll,
 		"confirm_task_archive":                     settings.ConfirmTaskArchive,
 		"prevent_auto_start_agent_on_open":         settings.PreventAutoStartAgentOnOpen,
 		"unread_divider":                           settings.UnreadDivider,
+		"unread_task_dot":                          settings.UnreadTaskDot,
+		"unread_task_dot_hide_delay_seconds":       settings.UnreadTaskDotHideDelaySeconds,
 		"agent_generated_task_titles":              settings.AgentGeneratedTaskTitles,
 		"prompt_suggestions":                       settings.PromptSuggestions,
 		"auto_focus_new_tasks":                     settings.AutoFocusNewTasks,
@@ -668,7 +772,6 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"github_saved_presets":                     settings.GitHubSavedPresets,
 		"github_default_query_presets":             settings.GitHubDefaultQueryPresets,
 		"gitlab_saved_presets":                     settings.GitLabSavedPresets,
-		"azure_devops_browse_preferences":          settings.AzureDevOpsBrowsePreferences,
 		"default_utility_agent_id":                 settings.DefaultUtilityAgentID,
 		"default_utility_model":                    settings.DefaultUtilityModel,
 		"default_utility_agent_profile_id":         settings.DefaultUtilityAgentProfileID,
@@ -694,16 +797,6 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"kanban_sort":                              models.NormalizeKanbanSort(settings.KanbanSort),
 		"kanban_priority_filter_tokens":            settings.KanbanPriorityFilterTokens,
 	})
-}
-
-// scanUpdatedUserSettings scans a settings row after an UPDATE, mapping a
-// missing row to a user-not-found error.
-func scanUpdatedUserSettings(scanner interface{ Scan(dest ...any) error }, userID string) (*models.UserSettings, error) {
-	settings, err := scanUserSettings(scanner, userID)
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("user not found: %s", userID)
-	}
-	return settings, err
 }
 
 // scanConditionalSettingsUpdate scans a revision-conditional settings UPDATE,
@@ -747,6 +840,8 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		ReviewAutoMarkOnScroll:            true,
 		ConfirmTaskArchive:                true,
 		UnreadDivider:                     false,
+		UnreadTaskDot:                     false,
+		UnreadTaskDotHideDelaySeconds:     models.UnreadTaskDotHideDelayDefaultSeconds,
 		AgentGeneratedTaskTitles:          true,
 		AutoFocusNewTasks:                 true,
 		MCPTaskAgentProfileDefault:        models.MCPTaskAgentProfileDefaultCurrentTask,
@@ -831,11 +926,14 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		PreferredShell                    string                                  `json:"preferred_shell"`
 		DefaultEditorID                   string                                  `json:"default_editor_id"`
 		EnablePreviewOnClick              bool                                    `json:"enable_preview_on_click"`
+		EscapeCancelsAgent                bool                                    `json:"escape_cancels_agent"`
 		ChatSubmitKey                     string                                  `json:"chat_submit_key"`
 		ReviewAutoMarkOnScroll            *bool                                   `json:"review_auto_mark_on_scroll"`
 		ConfirmTaskArchive                *bool                                   `json:"confirm_task_archive"`
 		PreventAutoStartAgentOnOpen       *bool                                   `json:"prevent_auto_start_agent_on_open"`
 		UnreadDivider                     *bool                                   `json:"unread_divider"`
+		UnreadTaskDot                     *bool                                   `json:"unread_task_dot"`
+		UnreadTaskDotHideDelaySeconds     json.RawMessage                         `json:"unread_task_dot_hide_delay_seconds"`
 		AgentGeneratedTaskTitles          *bool                                   `json:"agent_generated_task_titles"`
 		PromptSuggestions                 *bool                                   `json:"prompt_suggestions"`
 		AutoFocusNewTasks                 *bool                                   `json:"auto_focus_new_tasks"`
@@ -873,7 +971,6 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		GitHubSavedPresets                json.RawMessage                         `json:"github_saved_presets"`
 		GitHubDefaultQueryPresets         json.RawMessage                         `json:"github_default_query_presets"`
 		GitLabSavedPresets                json.RawMessage                         `json:"gitlab_saved_presets"`
-		AzureDevOpsBrowsePreferences      json.RawMessage                         `json:"azure_devops_browse_preferences"`
 		DefaultUtilityAgentID             string                                  `json:"default_utility_agent_id"`
 		DefaultUtilityModel               string                                  `json:"default_utility_model"`
 		DefaultUtilityAgentProfileID      string                                  `json:"default_utility_agent_profile_id"`
@@ -917,6 +1014,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.PreferredShell = payload.PreferredShell
 	settings.DefaultEditorID = payload.DefaultEditorID
 	settings.EnablePreviewOnClick = payload.EnablePreviewOnClick
+	settings.EscapeCancelsAgent = payload.EscapeCancelsAgent
 	if payload.ChatSubmitKey != "" {
 		settings.ChatSubmitKey = payload.ChatSubmitKey
 	}
@@ -931,6 +1029,14 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	if payload.UnreadDivider != nil {
 		settings.UnreadDivider = *payload.UnreadDivider
+	}
+	if payload.UnreadTaskDot != nil {
+		settings.UnreadTaskDot = *payload.UnreadTaskDot
+	}
+	var dotHideDelay *int
+	if json.Unmarshal(payload.UnreadTaskDotHideDelaySeconds, &dotHideDelay) == nil && dotHideDelay != nil &&
+		models.ValidUnreadTaskDotHideDelaySeconds(*dotHideDelay) {
+		settings.UnreadTaskDotHideDelaySeconds = *dotHideDelay
 	}
 	if payload.AgentGeneratedTaskTitles != nil {
 		settings.AgentGeneratedTaskTitles = *payload.AgentGeneratedTaskTitles
@@ -1051,7 +1157,6 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.GitHubSavedPresets = payload.GitHubSavedPresets
 	settings.GitHubDefaultQueryPresets = payload.GitHubDefaultQueryPresets
 	settings.GitLabSavedPresets = payload.GitLabSavedPresets
-	settings.AzureDevOpsBrowsePreferences = payload.AzureDevOpsBrowsePreferences
 	settings.DefaultUtilityAgentID = payload.DefaultUtilityAgentID
 	settings.DefaultUtilityModel = payload.DefaultUtilityModel
 	settings.DefaultUtilityAgentProfileID = payload.DefaultUtilityAgentProfileID

@@ -5,11 +5,13 @@ import { settingsActionClassName } from "./settings-control";
 
 export function ModelConfigResolutionStatus({
   status,
+  reasonCode,
   error,
   isLoading,
   onRetry,
 }: {
   status: CapabilityStatus | undefined;
+  reasonCode?: string;
   error: string | null;
   isLoading: boolean;
   onRetry: () => Promise<void>;
@@ -23,8 +25,16 @@ export function ModelConfigResolutionStatus({
     );
   }
 
-  if (status !== "failed" && status !== "auth_required" && !error) {
+  const hasPolicyRecovery = status === "unsupported" && reasonCode === "policy_unverified";
+  if (status !== "failed" && status !== "auth_required" && !error && !hasPolicyRecovery) {
     return null;
+  }
+
+  let message = t("agents:modelOptionsResolutionFailed");
+  if (status === "auth_required") {
+    message = t("agents:modelOptionsAuthenticationRequired");
+  } else if (hasPolicyRecovery) {
+    message = t("agents:copilotPluginModelOptionsRecovery");
   }
 
   return (
@@ -33,11 +43,7 @@ export function ModelConfigResolutionStatus({
       aria-live="polite"
       data-testid="model-config-resolution-error"
     >
-      <span className="min-w-0 flex-1">
-        {status === "auth_required"
-          ? t("agents:modelOptionsAuthenticationRequired")
-          : t("agents:modelOptionsResolutionFailed")}
-      </span>
+      <span className="min-w-0 flex-1">{message}</span>
       <Button
         type="button"
         variant="ghost"

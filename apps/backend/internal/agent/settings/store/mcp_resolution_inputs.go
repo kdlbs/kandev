@@ -44,6 +44,9 @@ func (r *sqliteRepository) ReadMCPResolutionInputs(ctx context.Context, rc mcpco
 			inputs.Origins[id] = append(inputs.Origins[id], scope)
 		}
 	}
+	if err := mcpconfig.AddAutomationMCPOrigins(rc, inputs.Origins); err != nil {
+		return nil, err
+	}
 	for id := range inputs.Origins {
 		d, err := scanMCPServerDefinition(tx.QueryRowxContext(ctx, tx.Rebind(`SELECT `+mcpDefinitionColumns+` FROM mcp_server_definitions WHERE workspace_id = ? AND id = ?`), rc.WorkspaceID, id))
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -51,12 +54,10 @@ func (r *sqliteRepository) ReadMCPResolutionInputs(ctx context.Context, rc mcpco
 		}
 		inputs.Definitions[id] = d
 	}
-	if rc.SessionID != "" {
-		err = tx.QueryRowxContext(ctx, tx.Rebind(`SELECT desired_revision FROM mcp_task_session_apply_state WHERE task_session_id = ?`), rc.SessionID).Scan(&inputs.DesiredRevision)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return nil, err
-		}
+	if err := readMCPSessionResolutionInputs(ctx, tx, rc, inputs); err != nil {
+		return nil, err
 	}
+
 	return inputs, tx.Commit()
 }
 
@@ -83,4 +84,20 @@ func mcpResolutionReadOptions(driver string) *sql.TxOptions {
 		options.Isolation = sql.LevelRepeatableRead
 	}
 	return options
+}
+
+func readMCPSessionResolutionInputs(ctx context.Context, tx *sqlx.Tx, rc mcpconfig.ResolutionContext, inputs *mcpconfig.ResolutionInputs) error {
+	if rc.SessionID == "" {
+		return nil
+	}
+	var err error
+	inputs.ExcludedDefinitionIDs, err = readMCPSessionExclusionsTx(ctx, tx, rc.WorkspaceID, rc.SessionID)
+	if err != nil {
+		return err
+	}
+	err = tx.QueryRowxContext(ctx, tx.Rebind(`SELECT desired_revision FROM mcp_task_session_apply_state WHERE task_session_id = ?`), rc.SessionID).Scan(&inputs.DesiredRevision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	return err
 }

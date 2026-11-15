@@ -1,16 +1,22 @@
 import { expect, test } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
+import {
+  armWorkspaceContextRetry,
+  workspaceContextRetryRequested,
+} from "../../helpers/workspace-context-retry";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { seedIdleSession } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import { expectTouchControl } from "../../helpers/control-sizing";
+
+test.use({ trace: "retain-on-failure" });
 
 test("mobile task drawer retains rows while workspace context refresh recovers", async ({
   testPage,
   apiClient,
   seedData,
 }) => {
-  let readPhase: "healthy" | "unavailable" | "recovering" = "healthy";
+  let readsUnavailable = false;
   const recovery = Promise.withResolvers<void>();
   await testPage.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
@@ -24,8 +30,12 @@ test("mobile task drawer retains rows while workspace context refresh recovers",
       await route.continue();
       return;
     }
-    if (readPhase !== "unavailable") {
-      if (readPhase === "recovering") await recovery.promise;
+    if (!readsUnavailable) {
+      await route.continue();
+      return;
+    }
+    if (await workspaceContextRetryRequested(testPage)) {
+      await recovery.promise;
       await route.continue();
       return;
     }
@@ -40,7 +50,7 @@ test("mobile task drawer retains rows while workspace context refresh recovers",
   const session = await seedIdleSession(testPage, apiClient, seedData, "Mobile retained task");
   await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
 
-  readPhase = "unavailable";
+  readsUnavailable = true;
   const failedWorkflowRead = waitForHttp(testPage, "GET", /^\/api\/v1\/workflows$/, {
     predicate: (response) => response.status() === 503,
   });
@@ -59,7 +69,7 @@ test("mobile task drawer retains rows while workspace context refresh recovers",
   await expect(retry).toBeVisible();
   await expectTouchControl(retry, "mobile sidebar retry");
 
-  readPhase = "recovering";
+  await armWorkspaceContextRetry(drawer);
   const recoveredWorkflowRead = waitForHttp(testPage, "GET", /^\/api\/v1\/workflows$/, {
     predicate: (response) => response.ok(),
   });
@@ -79,6 +89,7 @@ test("mobile task drawer surfaces a failed sidebar page and recovers", async ({
   apiClient,
   seedData,
 }, testInfo) => {
+  test.setTimeout(120_000);
   const task = await apiClient.createTask(seedData.workspaceId, "Mobile page retained task", {
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
@@ -102,6 +113,11 @@ test("mobile task drawer surfaces a failed sidebar page and recovers", async ({
     },
   });
   let sidebarPageUnavailable = true;
+  let failedSidebarPageReads = 0;
+  let markExhausted: () => void = () => {};
+  const sidebarPageExhausted = new Promise<void>((resolve) => {
+    markExhausted = resolve;
+  });
   await testPage.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
     if (
@@ -109,6 +125,8 @@ test("mobile task drawer surfaces a failed sidebar page and recovers", async ({
       route.request().method() === "POST" &&
       url.pathname === `/api/v1/workspaces/${seedData.workspaceId}/sidebar/query`
     ) {
+      failedSidebarPageReads++;
+      if (failedSidebarPageReads === 5) markExhausted();
       await route.fulfill({
         status: 503,
         contentType: "application/json",
@@ -138,6 +156,8 @@ test("mobile task drawer surfaces a failed sidebar page and recovers", async ({
   await testPage.getByTestId("mobile-task-picker-trigger").tap();
   await expect(drawer).toBeVisible();
   await failedSidebarPageRead;
+  await expect(drawer.getByTestId("sidebar-task-page-load-error")).toHaveCount(0);
+  await sidebarPageExhausted;
   await expect(drawer.getByTestId("sidebar-task-page-load-error")).toBeVisible();
   await expect(drawer.getByText("No tasks yet.", { exact: true })).toHaveCount(0);
 

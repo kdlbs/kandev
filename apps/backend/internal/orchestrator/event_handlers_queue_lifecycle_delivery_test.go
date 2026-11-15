@@ -94,7 +94,7 @@ func newLifecycleDeliveryFixture(t *testing.T, durable bool) *lifecycleDeliveryF
 	f.logs = logs
 	f.service.logger, err = logger.NewFromZap(zap.New(core))
 	require.NoError(t, err)
-	f.service.executor = executor.NewExecutor(f.manager, repo, testLogger(), executor.ExecutorConfig{})
+	f.service.executor = withTestCapabilities(executor.NewExecutor(f.manager, repo, testLogger(), executor.ExecutorConfig{}))
 	t.Cleanup(f.service.cancelAllTransientRetries)
 	return f
 }
@@ -240,10 +240,12 @@ func TestQueuedDeliveryUpdaterEligibility(t *testing.T) {
 			require.True(t, queued.IsDurableDelivery())
 			require.False(t, queued.IsDurableLifecycle())
 			require.Zero(t, f.count(t, "queue_dispatch_claims"))
-			// These receipt kinds keep their existing ordinary updater rejection. A
-			// broad retained-row bypass would reach transport and violate this scope.
 			f.execute(t, queued)
-			require.Zero(t, f.calls)
+			if kind == "plan_comment" {
+				require.Equal(t, 1, f.calls)
+			} else {
+				require.Zero(t, f.calls)
+			}
 			require.Equal(t, 1, f.logs.FilterMessage("preparing direct agent delivery submission").Len(), "receipt must reach protocol preparation: %v", f.logs.All())
 		})
 	}

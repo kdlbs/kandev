@@ -87,3 +87,19 @@ func mergeCanonicalConversationReceipts(previous, next *models.ConversationMutat
 	merged.Operations = append(merged.Operations, next.Operations...)
 	return &merged
 }
+
+type canonicalAgentDeliveryReceiptReceiver interface {
+	ReceiveAndProjectCanonicalAgentDeliveryEventsWithReceipt(context.Context, []*models.AgentDeliveryEvent, []*models.AgentDeliveryEffect, int64) ([]models.CanonicalAgentDeliveryProjectionResult, *models.ConversationMutationReceipt, error)
+}
+
+func receiveCanonicalBatchWithReceipt(ctx context.Context, receiver canonicalAgentDeliveryBatchReceiver, events []*models.AgentDeliveryEvent, effects []*models.AgentDeliveryEffect) ([]models.CanonicalAgentDeliveryProjectionResult, json.RawMessage, error) {
+	if withReceipt, ok := receiver.(canonicalAgentDeliveryReceiptReceiver); ok {
+		results, receipt, err := withReceipt.ReceiveAndProjectCanonicalAgentDeliveryEventsWithReceipt(ctx, events, effects, 0)
+		if err != nil {
+			return nil, nil, err
+		}
+		return results, encodeCanonicalConversationReceipt(receipt), nil
+	}
+	results, err := receiver.ReceiveAndProjectCanonicalAgentDeliveryEvents(ctx, events, effects, 0)
+	return results, nil, err
+}

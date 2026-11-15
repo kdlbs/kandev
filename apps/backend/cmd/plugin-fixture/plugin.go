@@ -14,15 +14,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 const (
-	deliveriesFileName     = "deliveries.jsonl"
-	webhooksFileName       = "webhooks.jsonl"
-	configSnapshotFileName = "config.json"
-	secretProbeFileName    = "secret-probe.json"
-	writeProbeFileName     = "write-probe.json"
+	deliveriesFileName           = "deliveries.jsonl"
+	webhooksFileName             = "webhooks.jsonl"
+	configSnapshotFileName       = "config.json"
+	secretProbeFileName          = "secret-probe.json"
+	writeProbeFileName           = "write-probe.json"
+	automationReportsFileName    = "automation-reports.jsonl"
+	automationFindingsFileName   = "automation-findings.jsonl"
+	automationListFindingsTool   = "list_findings"
+	automationCompleteReportTool = "complete_report"
 
 	// writeProbeWebhookKey triggers the Host data API write round-trip
 	// (CreateTask + CreateComment). Gated on this key so unrelated webhook
@@ -65,6 +69,21 @@ type deliveryRecord struct {
 	EventID   string `json:"event_id"`
 }
 
+type automationReportRecord struct {
+	Report      string `json:"report"`
+	TaskID      string `json:"task_id"`
+	SessionID   string `json:"session_id"`
+	WorkspaceID string `json:"workspace_id"`
+	Surface     string `json:"surface"`
+}
+
+type automationFindingsRecord struct {
+	TaskID      string `json:"task_id"`
+	SessionID   string `json:"session_id"`
+	WorkspaceID string `json:"workspace_id"`
+	Surface     string `json:"surface"`
+}
+
 // webhookRecord is one recorded HandleWebhook delivery, appended as a JSON
 // line to webhooks.jsonl.
 type webhookRecord struct {
@@ -96,6 +115,38 @@ var _ pluginsdk.AgentToolPlugin = (*fixturePlugin)(nil)
 
 func (p *fixturePlugin) InvokeAgentTool(_ context.Context, req *pluginsdk.AgentToolRequest) (*pluginsdk.AgentToolResult, error) {
 	value, _ := req.Arguments["value"].(string)
+	switch req.Name {
+	case automationListFindingsTool:
+		findings := []any{}
+		findingRecord := automationFindingsRecord{
+			TaskID: req.Context.TaskID, SessionID: req.Context.SessionID,
+			WorkspaceID: req.Context.WorkspaceID, Surface: req.Context.Surface,
+		}
+		if err := appendJSONLine(filepath.Join(p.dataDir, automationFindingsFileName), findingRecord); err != nil {
+			return nil, err
+		}
+		return &pluginsdk.AgentToolResult{
+			Text: "fixture findings: no open findings",
+			StructuredContent: map[string]any{
+				"findings": findings, fixtureTaskIDKey: req.Context.TaskID, "surface": req.Context.Surface,
+			},
+		}, nil
+	case automationCompleteReportTool:
+		report, _ := req.Arguments["report"].(string)
+		record := automationReportRecord{
+			Report: report, TaskID: req.Context.TaskID, SessionID: req.Context.SessionID,
+			WorkspaceID: req.Context.WorkspaceID, Surface: req.Context.Surface,
+		}
+		if err := appendJSONLine(filepath.Join(p.dataDir, automationReportsFileName), record); err != nil {
+			return nil, err
+		}
+		return &pluginsdk.AgentToolResult{
+			Text: fmt.Sprintf("report received: %s", report),
+			StructuredContent: map[string]any{
+				"accepted": true, "report": report, fixtureTaskIDKey: req.Context.TaskID,
+			},
+		}, nil
+	}
 	return &pluginsdk.AgentToolResult{
 		Text: fmt.Sprintf("fixture echo: %s", value),
 		StructuredContent: map[string]any{

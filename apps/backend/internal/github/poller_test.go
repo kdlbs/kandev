@@ -778,6 +778,9 @@ func (m *graphQLMockClient) ExecuteGraphQL(_ context.Context, query string, _ ma
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if strings.Contains(query, "query WorkflowSuites") || strings.Contains(query, "query WorkflowSuiteJobs") {
+		return json.Unmarshal([]byte(`{"data":{}}`), out)
+	}
 	if strings.Contains(query, "query Branches") {
 		m.branchQueries = append(m.branchQueries, query)
 		if m.branchErr != nil {
@@ -1797,8 +1800,11 @@ func TestSyncWatchesBatched_NumberedQueryError_ReturnsError(t *testing.T) {
 	}
 	numbered := []*PRWatch{numberedWatch}
 	got, err := svc.SyncWatchesBatched(ctx, numbered)
-	if err == nil || got != nil {
-		t.Errorf("expected (nil, err) on numbered query error, got (%v, %v)", got, err)
+	if err == nil {
+		t.Fatalf("expected an error on numbered query error, got results %v", got)
+	}
+	if len(got) != 1 || got[0].Applied || got[0].Found {
+		t.Fatalf("failed numbered phase results = %+v, want one unapplied entry", got)
 	}
 }
 
@@ -1820,8 +1826,11 @@ func TestSyncWatchesBatched_BranchQueryError_ReturnsError(t *testing.T) {
 	}
 	searching := []*PRWatch{searchingWatch}
 	got, err := svc.SyncWatchesBatched(ctx, searching)
-	if err == nil || got != nil {
-		t.Errorf("expected (nil, err) on branch query error, got (%v, %v)", got, err)
+	if err == nil {
+		t.Fatalf("expected an error on branch query error, got results %v", got)
+	}
+	if len(got) != 1 || got[0].Applied || got[0].Found {
+		t.Fatalf("failed branch phase results = %+v, want one unapplied entry", got)
 	}
 }
 

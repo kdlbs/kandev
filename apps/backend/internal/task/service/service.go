@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/task/changes"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -409,6 +410,7 @@ var (
 	ErrActiveTaskSessions        = errors.New("active agent sessions exist")
 	ErrWIPLimitExceeded          = wfmodels.ErrWIPLimitExceeded
 	ErrInvalidRepositorySettings = errors.New("invalid repository settings")
+	ErrRepositoryReadOnly        = errors.New("repository workspace is read-only")
 	ErrInvalidExecutorConfig     = errors.New("invalid executor config")
 	ErrExecutorProfileInUse      = errors.New("executor profile is referenced by a retained environment")
 	// Workspace-source sentinels are the service boundary consumed by the HTTP
@@ -475,6 +477,8 @@ type Repos struct {
 
 // Service provides task business logic
 type Service struct {
+	workspaceCollaboration          WorkspaceCollaborationBoundary
+	workspaceCollaborationStore     WorkspaceCollaborationStore
 	executorIdentityResolver        func(context.Context, string) (authn.Identity, bool)
 	workspaces                      repository.WorkspaceRepository
 	userDirectory                   UserDirectory
@@ -489,6 +493,9 @@ type Service struct {
 	attachments                     repository.AttachmentRepository
 	turns                           repository.TurnRepository
 	turnChanges                     repository.TurnChangesRepository
+	turnChangeContent               *changes.ContentService
+	turnChangePreservationRetrier   TurnChangePreservationRetrier
+	turnHistoryCleanup              TurnHistoryCleanup
 	sessions                        repository.SessionRepository
 	gitSnapshots                    repository.GitSnapshotRepository
 	repoEntities                    repository.RepositoryEntityRepository
@@ -541,6 +548,7 @@ type Service struct {
 	clarificationCanceller          TerminalClarificationCanceller
 	parkedProjectionCanceller       ParkedProjectionCanceller
 	sessionCeilingReleaser          SessionCeilingReleaser
+	deferredLaunchDiscard           DeferredLaunchDiscardSettler
 	rowLivenessProber               TaskRowLivenessProber
 	executionLivenessChecker        TaskExecutionLivenessChecker
 	pendingRemoteRecoveryChecker    func(sessionID, executionID string) bool
@@ -548,6 +556,10 @@ type Service struct {
 	cleanupActivity                 TaskResourceCleanupActivityGate
 	branchMaterializer              BranchMaterializer
 	workspaceSourceMaterializer     WorkspaceSourceMaterializer
+	workspaceSourceRescanner        WorkspaceSourceRescanner
+	nestedWorkspaceExclusioner      NestedWorkspaceExclusioner
+	worktreeObservationMu           sync.Mutex
+	worktreeObservations            *worktreeObservationWorker
 	workspaceSourceLocksMu          sync.Mutex
 	workspaceSourceLocks            map[string]*sync.Mutex
 	taskDeletePreviewMu             sync.Mutex
@@ -595,6 +607,7 @@ type Service struct {
 	gitHubRepositoryOriginVerifier GitHubRepositoryOriginVerifier
 	repoCloneLocation              RepoCloneLocation
 	blockers                       BlockerRepository
+	relations                      RelationRepository
 	comments                       CommentRepository
 	taskStateActivity              TaskStateActivityLogger
 	secretStore                    secrets.SecretStore
@@ -604,6 +617,7 @@ type Service struct {
 	backgroundWorkActionDispatcher BackgroundWorkActionDispatcher
 	runtimeOverridesMu             sync.Mutex
 	mcpSelectionWriter             MCPSelectionWriter
+	builtinCreationWriter          BuiltinCreationWriter
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
 
@@ -618,6 +632,9 @@ type Service struct {
 	// task.updated events. Optional — unset omits the field's live update path
 	// and task.updated payloads read false/0/0, matching D9's defaults.
 	taskParkedProvider TaskParkedProvider
+	// approverNameResolver adds display names when a completion policy refuses
+	// a human action. Policy enforcement remains in the repository transaction.
+	approverNameResolver ApproverNameResolver
 	// taskActivityMu guards lastTaskActivity, the last task-level activity aggregate
 	// emitted per task. It bounds live-propagation task.updated emissions to an
 	// actual change of the aggregated three-state value.
@@ -907,6 +924,19 @@ func (s *Service) SetWorkspaceSourceMaterializer(m WorkspaceSourceMaterializer) 
 	s.workspaceSourceMaterializer = m
 }
 
+// SetWorkspaceSourceRescanner wires live tracker updates for adoption and
+// detach. Optional — without it, attachment rows persist and the next session
+// launch builds the tracker graph from the inventory.
+func (s *Service) SetWorkspaceSourceRescanner(r WorkspaceSourceRescanner) {
+	s.workspaceSourceRescanner = r
+}
+
+// SetNestedWorkspaceExclusioner wires the managed Git exclude used when a
+// task root is nested inside another attached checkout.
+func (s *Service) SetNestedWorkspaceExclusioner(e NestedWorkspaceExclusioner) {
+	s.nestedWorkspaceExclusioner = e
+}
+
 // SetWorkspaceSourceProviderRefresher wires the best-effort live MCP provider
 // reconciliation used after workspace-source and legacy branch attachments.
 func (s *Service) SetWorkspaceSourceProviderRefresher(r WorkspaceSourceProviderRefresher) {
@@ -1085,6 +1115,31 @@ func (s *Service) SetContributionDestinationPreparer(preparer ContributionDestin
 
 // SetPRTaskResolver wires the GitHub PR→task resolver for PR-number search.
 // Optional — when unset, search by PR number is a no-op.
+// SetTurnChangeContentService installs the source-aware historical reader so
+// Git-backed turns and legacy SQL rows share one read path.
+func (s *Service) SetTurnChangeContentService(content *changes.ContentService) {
+	s.turnChangeContent = content
+}
+
+// TurnChangePreservationRetrier owns bounded retries of pending terminal
+// preservation without extending the agent-running indicator.
+type TurnChangePreservationRetrier interface {
+	RetryPending(context.Context) (changes.PreservationRetryResult, error)
+}
+
+func (s *Service) SetTurnChangePreservationRetrier(retrier TurnChangePreservationRetrier) {
+	s.turnChangePreservationRetrier = retrier
+}
+
+// TurnHistoryCleanup drains task/session deletion ref receipts without policy.
+type TurnHistoryCleanup interface {
+	CleanupDeletionIntents(context.Context) (int64, error)
+}
+
+func (s *Service) SetTurnHistoryCleanup(cleanup TurnHistoryCleanup) {
+	s.turnHistoryCleanup = cleanup
+}
+
 func (s *Service) SetPRTaskResolver(resolver PRTaskResolver) {
 	s.prTaskResolver = resolver
 }

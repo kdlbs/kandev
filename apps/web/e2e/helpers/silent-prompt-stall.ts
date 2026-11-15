@@ -4,6 +4,7 @@ import { test, expect } from "../fixtures/test-base";
 import { seedRunningGeneratingSession } from "./generating-session";
 import { assertNoDocumentHorizontalOverflow } from "./layout-assertions";
 import { waitForActiveSessionCancellationPending } from "./session-store";
+import { mockTurnGate } from "./mock-turn-gate";
 import { readMockACPTrace } from "./transient-turn-runtime-continuity";
 
 function cancellationEnvironment(uncertain: boolean) {
@@ -56,9 +57,12 @@ export function registerSilentPromptStallTests() {
       test.setTimeout(120_000);
       releaseEnvironment = await backend.useEnv({ KANDEV_E2E_PROMPT_STALL_TIMEOUT: "1s" });
       if (!isMobile) await testPage.setViewportSize({ width: 600, height: 850 });
-      const gateDirectory = fs.mkdtempSync(path.join(backend.tmpDir, "silent-output-"));
-      const outputRelease = path.join(gateDirectory, "output.release");
-      const finishRelease = path.join(gateDirectory, "finish.release");
+      const outputGate = mockTurnGate(backend.tmpDir, "silent-turn-progress", {
+        announceStart: false,
+      });
+      const completionGate = mockTurnGate(backend.tmpDir, "silent-turn-fixture-finished", {
+        announceStart: false,
+      });
       try {
         const { session, sessionId } = await seedRunningGeneratingSession(
           testPage,
@@ -66,11 +70,7 @@ export function registerSilentPromptStallTests() {
           seedData,
           "Silent turn resumes output",
           {
-            predecessorPrompt: [
-              `e2e:await_file(${JSON.stringify(outputRelease)})`,
-              'e2e:message("silent-turn-progress")',
-              `e2e:await_file(${JSON.stringify(finishRelease)})`,
-            ].join("\n"),
+            predecessorPrompt: [outputGate.prompt, completionGate.prompt].join("\n"),
             startWithGeneratingTurn: true,
           },
         );
@@ -79,7 +79,7 @@ export function registerSilentPromptStallTests() {
         const cancel = notice.getByTestId("stall-cancel-turn-button");
         const box = await cancel.boundingBox();
         expect(box!.height).toBeGreaterThanOrEqual(44);
-        fs.writeFileSync(outputRelease, "release");
+        await outputGate.release();
         await expect(
           session.activeChat().getByText("silent-turn-progress", { exact: true }),
         ).toBeVisible({ timeout: 20_000 });
@@ -91,8 +91,7 @@ export function registerSilentPromptStallTests() {
         await assertNoDocumentHorizontalOverflow(testPage);
         await apiClient.stopSession({ session_id: sessionId, force: true });
       } finally {
-        fs.writeFileSync(outputRelease, "release");
-        fs.writeFileSync(finishRelease, "release");
+        await Promise.all([outputGate.release(), completionGate.release()]);
       }
     });
 

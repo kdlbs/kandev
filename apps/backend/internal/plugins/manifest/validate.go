@@ -203,12 +203,100 @@ func validateAgentTool(prefix string, tool AgentTool, seen map[string]struct{}) 
 		errs = append(errs, fmt.Errorf("%s.description must be 1-1024 bytes", prefix))
 	}
 	errs = append(errs, validateAgentToolSurfaces(prefix, tool.Surfaces)...)
+	errs = append(errs, validateAgentToolInvocationScope(prefix, tool)...)
 	errs = append(errs, validateAgentToolSchemas(prefix, tool)...)
 	if tool.Annotations.ReadOnlyHint != nil && tool.Annotations.DestructiveHint != nil &&
 		*tool.Annotations.ReadOnlyHint && *tool.Annotations.DestructiveHint {
 		errs = append(errs, fmt.Errorf("%s.annotations cannot set both read_only_hint and destructive_hint", prefix))
 	}
 	return errs
+}
+
+func validateAgentToolInvocationScope(prefix string, tool AgentTool) []error {
+	scope := tool.NormalizedInvocationScope()
+	if scope != AgentToolInvocationScopeTask && scope != AgentToolInvocationScopeInstance &&
+		scope != AgentToolInvocationScopeWorkspace {
+		return []error{fmt.Errorf("%s.invocation_scope must be %q, %q, or %q",
+			prefix, AgentToolInvocationScopeTask, AgentToolInvocationScopeInstance, AgentToolInvocationScopeWorkspace)}
+	}
+	switch scope {
+	case AgentToolInvocationScopeTask:
+		return validateTaskScopeSurfaces(prefix, tool.Surfaces)
+	case AgentToolInvocationScopeInstance:
+		return validateInstanceScopeReadOnly(prefix, tool)
+	default:
+		return validateWorkspaceScopeDeclaration(prefix, tool)
+	}
+}
+
+// validateTaskScopeSurfaces rejects surfaces that can never bind a task.
+func validateTaskScopeSurfaces(prefix string, surfaces []string) []error {
+	if declaresCoordinatorSurface(surfaces) {
+		return []error{fmt.Errorf("%s.surfaces requires invocation_scope: %s", prefix, AgentToolInvocationScopeInstance)}
+	}
+	if declaresExternalSurface(surfaces) {
+		return []error{fmt.Errorf("%s.surfaces requires invocation_scope: %s or %s",
+			prefix, AgentToolInvocationScopeInstance, AgentToolInvocationScopeWorkspace)}
+	}
+	return nil
+}
+
+// validateInstanceScopeReadOnly applies the read-only rule shared by the
+// instance-only contexts.
+func validateInstanceScopeReadOnly(prefix string, tool AgentTool) []error {
+	if !declaresCoordinatorSurface(tool.Surfaces) && !declaresExternalSurface(tool.Surfaces) {
+		return nil
+	}
+	if tool.Annotations.ReadOnlyHint == nil || !*tool.Annotations.ReadOnlyHint {
+		return []error{fmt.Errorf("%s.surfaces requires annotations.read_only_hint: true", prefix)}
+	}
+	return nil
+}
+
+// validateWorkspaceScopeDeclaration restricts workspace reads to the surfaces
+// that can supply a workspace and reserves the injected argument name.
+func validateWorkspaceScopeDeclaration(prefix string, tool AgentTool) []error {
+	var errs []error
+	for _, surface := range tool.Surfaces {
+		if surface == AgentToolSurfaceAutomation || surface == AgentToolSurfaceCoordinator ||
+			surface == AgentToolSurfaceManaged {
+			errs = append(errs, fmt.Errorf("%s.surfaces contains %q, which is not supported with invocation_scope: %s",
+				prefix, surface, AgentToolInvocationScopeWorkspace))
+		}
+	}
+	if declaresExternalSurface(tool.Surfaces) &&
+		(tool.Annotations.ReadOnlyHint == nil || !*tool.Annotations.ReadOnlyHint) {
+		errs = append(errs, fmt.Errorf("%s.surfaces requires annotations.read_only_hint: true", prefix))
+	}
+	if tool.InputSchema["type"] != executorSchemaTypeObject {
+		errs = append(errs, fmt.Errorf("%s.input_schema must declare top-level type: object with invocation_scope: %s",
+			prefix, AgentToolInvocationScopeWorkspace))
+	}
+	if properties, ok := tool.InputSchema["properties"].(map[string]any); ok {
+		if _, reserved := properties[AgentToolWorkspaceArgument]; reserved {
+			errs = append(errs, fmt.Errorf("%s.input_schema must not declare the reserved property %q",
+				prefix, AgentToolWorkspaceArgument))
+		}
+	}
+	return errs
+}
+
+func declaresCoordinatorSurface(surfaces []string) bool {
+	for _, surface := range surfaces {
+		if surface == AgentToolSurfaceCoordinator {
+			return true
+		}
+	}
+	return false
+}
+
+func declaresExternalSurface(surfaces []string) bool {
+	for _, surface := range surfaces {
+		if surface == AgentToolSurfaceExternal {
+			return true
+		}
+	}
+	return false
 }
 
 func validateAgentToolIdentity(prefix, name string, seen map[string]struct{}) []error {
@@ -230,7 +318,9 @@ func validateAgentToolSurfaces(prefix string, surfaces []string) []error {
 	var errs []error
 	seen := map[string]struct{}{}
 	for _, surface := range surfaces {
-		if surface != AgentToolSurfaceKanban && surface != AgentToolSurfaceOffice && surface != AgentToolSurfaceManaged {
+		if surface != AgentToolSurfaceKanban && surface != AgentToolSurfaceOffice &&
+			surface != AgentToolSurfaceManaged && surface != AgentToolSurfaceAutomation &&
+			surface != AgentToolSurfaceCoordinator && surface != AgentToolSurfaceExternal {
 			errs = append(errs, fmt.Errorf("%s.surfaces contains unsupported surface %q", prefix, surface))
 		}
 		if _, ok := seen[surface]; ok {

@@ -12,6 +12,10 @@ legacy_specs: []
 
 ## Overview
 
+This is the historical delivery record for per-prompt permission. The
+[custom-prompt simplification package](../custom-prompt-agent-editing/plan.md)
+plans its removal. Results below describe the original implementation.
+
 Deliver issue #3993 with per-prompt operator control. The user requested full-AFK
 implementation, PR delivery, remediation, and merge in this session. Work remains
 sequential in the primary session.

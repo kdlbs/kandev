@@ -50,7 +50,11 @@ test.describe("ssh executor — persistence + UI sweep", () => {
       );
       await page.floatingSaveButton.click();
       expect((await saved).ok()).toBe(true);
-      await expect(page.floatingSaveButton).not.toBeVisible({ timeout: 15_000 });
+      await expect(testPage.getByTestId("settings-floating-save")).toHaveAttribute(
+        "data-status",
+        "saved",
+        { timeout: 15_000 },
+      );
 
       const afterSave = (await apiClient.listExecutors()).executors.find(
         (executor) => executor.id === seedData.sshExecutorId,

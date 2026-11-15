@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import type { ApiClient } from "./api-client";
 import type { SeedData } from "../fixtures/test-base";
 import type {
@@ -9,6 +9,22 @@ import type {
 import { SessionPage } from "../pages/session-page";
 import { openMCPComposerCustomization } from "./mcp-composer";
 import { expectMCPCustomizationScrolling } from "./mcp-customization-scrolling";
+import { PrAssetCapture } from "./pr-asset-capture";
+
+async function captureRetryRecovery(page: Page, surface: Locator, mobile: boolean) {
+  const capture = new PrAssetCapture(page, "mcp-retry-recovery.spec.ts", {
+    captureKey: mobile ? "phone" : "desktop",
+  });
+  if (capture.capturing) {
+    const reloadChoices = surface.getByRole("button", { name: "Reload choices", exact: true });
+    await reloadChoices.scrollIntoViewIfNeeded();
+    await expect(reloadChoices).toBeInViewport();
+  }
+  await capture.screenshot(mobile ? "phone" : "desktop", {
+    caption: "Reload saved MCP choices before retrying application",
+  });
+  capture.flush();
+}
 
 export async function checkMCPPendingChanges(
   page: Page,
@@ -167,9 +183,24 @@ export async function checkMCPPendingChanges(
       "Changes could not be applied",
     );
     await expect(pending.getByRole("listitem")).toHaveCount(3);
+    await search.fill("Pending added");
+    rejectSave = true;
+    await surface.getByRole("checkbox").click();
+    await expect(surface.getByRole("alert")).toBeVisible();
+    await expect(body.getByRole("button", { name: "Retry MCP application" })).toHaveCount(0);
+    await captureRetryRecovery(page, surface, mobile);
+    rejectSave = false;
+    await surface.getByRole("button", { name: "Reload choices", exact: true }).click();
+    await expect(surface.getByRole("checkbox")).toBeEnabled();
+    await expect(surface.getByRole("checkbox")).not.toBeChecked();
     const previousWrites = writes;
     await body.getByRole("button", { name: "Retry MCP application" }).click();
     await expect.poll(() => writes).toBe(previousWrites + 1);
+    await expect(surface.getByRole("checkbox")).toBeEnabled();
+    await expect(surface.getByRole("checkbox")).not.toBeChecked();
+    expect(
+      (await api.getMCPSelections("task_session", sessionId, seed.workspaceId)).definition_ids,
+    ).toEqual([added.id]);
     await expect(pending.getByRole("listitem")).toHaveCount(3);
 
     timing = "pending_idle";

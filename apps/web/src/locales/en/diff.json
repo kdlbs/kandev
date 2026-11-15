@@ -44,6 +44,7 @@
   "undo": "Undo",
   "update": "Update",
   "walkthrough": "Walkthrough",
+  "walkthroughGeneratedAt": "Generated {{date}}",
   "walkthroughNoteAdded": "Walkthrough note added",
   "walkthroughNoteQueued": "Walkthrough note queued",
   "walkthroughNoteSent": "Walkthrough note sent",

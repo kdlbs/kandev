@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types/deliverylimits"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -12,7 +13,7 @@ import (
 )
 
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-007.1
-func TestDeliveryEventLimitRetentionBudget(t *testing.T) {
+func TestDeliveryEventLimitRetention(t *testing.T) {
 	for _, engine := range []string{"SQLite", "Postgres"} {
 		t.Run(engine, func(t *testing.T) {
 			repo, events := seedRetentionBoundsStream(t, engine, "event-limit", 3, 2)
@@ -34,9 +35,14 @@ func TestDeliveryEventLimitRetentionBudget(t *testing.T) {
 			); err != nil {
 				t.Fatal(err)
 			}
-			result, err := repo.RunAgentDeliveryRetentionBatch(
-				context.Background(), models.AgentDeliveryRetentionBatchOptions{},
-			)
+			// The public 250 ms work budget has separate coverage. Give the
+			// maximum-payload case a generous deadline so it tests retention
+			// behavior without depending on database and CI host speed.
+			options := normalizeAgentDeliveryRetentionOptions(models.AgentDeliveryRetentionBatchOptions{})
+			options.WorkTimeout = 5 * time.Second
+			ctx, cancel := context.WithTimeout(context.Background(), options.WorkTimeout)
+			defer cancel()
+			result, err := repo.runAgentDeliveryRetentionBatch(ctx, options)
 			if err != nil {
 				t.Fatalf("run retention batch: %v", err)
 			}
