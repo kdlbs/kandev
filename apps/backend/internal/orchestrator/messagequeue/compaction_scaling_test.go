@@ -143,3 +143,28 @@ func TestSortedAdmissionFindsTargetAcrossTiedBatchBoundary(t *testing.T) {
 	require.NoError(t, repo.db.Select(&contents, `SELECT content FROM queued_messages WHERE session_id = ? AND position = 1 ORDER BY content`, identity.SessionID))
 	require.Equal(t, []string{"row-0\n\nsender-0-again", "row-1\n\nsender-1-again"}, contents)
 }
+
+// An incompatible pair must be rejected before the target's attachment
+// payload is decoded, for single admissions and for compaction alike.
+func TestIncompatibleAutoMergeDoesNotDecodeTargetAttachment(t *testing.T) {
+	const attachmentBytes = 4 << 20
+	target := sortTestEntry("A1", "A")
+	target.Attachments = []MessageAttachment{{
+		Type: "image", MimeType: "image/png", Data: base64.StdEncoding.EncodeToString(make([]byte, attachmentBytes)),
+	}}
+	source := sortTestEntry("B1", "B")
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	for range 4 {
+		_, merged := buildAutoMergedEntry(target, source)
+		require.False(t, merged)
+	}
+	result := compactQueueRows([]*QueuedMessage{target, source}, nil, nil)
+	runtime.ReadMemStats(&after)
+
+	require.Len(t, result.kept, 2)
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(attachmentBytes/2),
+		"rejecting an incompatible pair must not decode the target attachment")
+}

@@ -90,6 +90,9 @@ func (c *queueCompaction) foldInto(index int, source *QueuedMessage, leased map[
 		return false
 	}
 	if row.merge == nil {
+		if !autoMergeCompatible(target, source) {
+			return false
+		}
 		merge, ok := newAutoMergeAccumulator(target)
 		if !ok {
 			row.unmergeable = true

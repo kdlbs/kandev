@@ -19,6 +19,9 @@ type autoMergedValues struct {
 }
 
 func buildAutoMergedEntry(target, source *QueuedMessage) (*autoMergedValues, bool) {
+	if !autoMergeCompatible(target, source) {
+		return nil, false
+	}
 	merge, ok := newAutoMergeAccumulator(target)
 	if !ok || !merge.add(source) {
 		return nil, false
@@ -58,6 +61,20 @@ func newAutoMergeAccumulator(target *QueuedMessage) (*autoMergeAccumulator, bool
 		referenceSeen: map[string]struct{}{}, contextSeen: map[string]struct{}{}, admissionSeen: map[string]struct{}{},
 	}
 	return merge, merge.absorb(target)
+}
+
+// autoMergeCompatible checks identity and non-additive metadata only, so an
+// incompatible pair is rejected before any attachment payload is decoded.
+func autoMergeCompatible(target, source *QueuedMessage) bool {
+	if !autoMergeAllowed(target, source) {
+		return false
+	}
+	targetComparable, ok := comparableAutoMetadata(target.Metadata)
+	if !ok {
+		return false
+	}
+	sourceComparable, ok := comparableAutoMetadata(source.Metadata)
+	return ok && bytes.Equal(targetComparable, sourceComparable)
 }
 
 // add folds source into the accumulator when it is compatible and every

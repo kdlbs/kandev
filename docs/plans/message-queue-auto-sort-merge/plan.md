@@ -506,6 +506,19 @@ Public docs and specification validation passed. PostgreSQL is unverified:
   `system/queuesettings`; `go test -tags fts5` for `internal/orchestrator` and
   `internal/mcp/handlers`; and `scripts/lint-go-changed`: passed.
 
+### Implementation review round 18 remediation
+
+- `autoMergeCompatible` checks sender, task, model, plan mode, and
+  non-additive metadata before an accumulator absorbs the target, both in
+  `buildAutoMergedEntry` and before compaction creates a survivor's
+  accumulator. An incompatible pair no longer decodes the target's attachment
+  payload, restoring the pre-branch cost of a rejected ordinary Auto-merge.
+- RED on the prior code (21 MB for four rejected folds against a 4 MiB
+  attachment), GREEN after:
+  `TestIncompatibleAutoMergeDoesNotDecodeTargetAttachment`.
+- `go test -race -tags fts5` for `messagequeue` and `orchestrator/handlers`,
+  and `scripts/lint-go-changed`: passed.
+
 Final repository gates, run from the repository root after all work orders:
 
 ```bash
