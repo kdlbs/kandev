@@ -2,7 +2,7 @@
 
 **Status:** accepted
 **Date:** 2026-11-12
-**Updated:** 2026-11-14
+**Updated:** 2026-11-15
 **Area:** backend
 
 ## Context
@@ -17,6 +17,11 @@ Use typed local control-flow evidence to settle a request as failed only when no
 write was attempted and no acceptance callback was observed. Never retry after a
 lost response merely because the connection closed. Preserve current-owner SQL
 conditions and block new admission while an unknown outcome remains unresolved.
+
+Initial and follow-up dispatch use the same conditional SQL settlement. A failed
+submission with a settlement timestamp and no terminal identifiers is the local
+non-delivery receipt. Retention uses that receipt after its existing grace and
+protection checks; it does not fabricate terminal or workflow effects.
 
 Reuse the existing Resume contract for historical uncertainty. Keep its unknown
 outcome and non-replayable retirement record. Do not add the previously proposed

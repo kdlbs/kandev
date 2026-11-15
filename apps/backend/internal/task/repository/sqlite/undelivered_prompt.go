@@ -24,7 +24,8 @@ func (r *Repository) FailUnsentAgentDeliverySubmission(ctx context.Context, expe
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE agent_delivery_submissions
  SET state = ?, outcome = ?, fully_settled_at = ?, updated_at = ?
  WHERE id = ? AND session_id = ? AND incarnation_id = ? AND harness_generation = ?
- AND owner_generation = ? AND payload_hash = ? AND state = ? AND terminal_sequence = 0`),
+ AND owner_generation = ? AND payload_hash = ? AND state = ?
+ AND terminal_stream_id = '' AND terminal_sequence = 0 AND terminal_turn_id = ''`),
 		models.DeliverySubmissionFailed, "failed", at, at, expected.ID, expected.SessionID,
 		expected.IncarnationID, expected.HarnessGeneration, expected.OwnerGeneration, expected.PayloadHash, models.DeliverySubmissionDispatching)
 	if err != nil {

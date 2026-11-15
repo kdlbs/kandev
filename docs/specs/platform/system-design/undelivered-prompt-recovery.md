@@ -3,6 +3,7 @@ status: current
 system: platform
 requirements:
   - REQ-PLATFORM-UNDELIVERED-PROMPT-001
+  - REQ-PLATFORM-DELIVERY-RETENTION-001
 ---
 
 # Undelivered prompt recovery
@@ -23,6 +24,11 @@ proof. The lifecycle retry path may reconnect only after a typed unsent error.
 If every retry stays local, reconnect failure retains that evidence. Once a write
 was attempted, its error is returned without the earlier unsent classification.
 
+The runtime captures the initial submission returned by durable admission and
+settles a typed unsent dispatch failure before invoking the initial failure handler.
+It keeps the same captured owner for both caller-admitted and runtime-admitted
+initial prompts. A missing client before the RPC retains the unsent error type.
+
 The orchestrator checks both the typed error and the acceptance callback. Only an
 unaccepted, proven unsent request can settle as failed. The repository pins the
 captured submission ID, session, incarnation, harness and owner generations, hash,
@@ -30,6 +36,14 @@ dispatching state, and absence of terminal sequence under the existing SQL locks
 It sets `failed`, the failed outcome, and a settlement timestamp without a terminal
 event. A failed conditional write preserves recovery protection. No journal
 capability, new journal state, or new agentctl endpoint is introduced.
+
+A failed row with a settlement timestamp and no terminal identifiers is a local
+non-delivery receipt. The existing bounded retention sweep can prune its redundant
+payload after the grace period, without inventing terminal or workflow events.
+Candidate selection and the conditional update both reject conflicting terminal
+evidence and open delivery recovery blocks. Identity, hash, outcome, and claim
+association remain. Ordinary failed rows without settlement proof remain protected.
+This extends the [retention design](backend-agent-delivery-retention.md).
 
 ## Existing historical recovery
 

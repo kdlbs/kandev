@@ -3,6 +3,7 @@ created: 2026-11-12
 status: completed
 requirements:
   - REQ-PLATFORM-UNDELIVERED-PROMPT-001
+  - REQ-PLATFORM-DELIVERY-RETENTION-001
 system_design:
   - ../../specs/platform/system-design/undelivered-prompt-recovery.md
 legacy_specs: []
@@ -74,8 +75,15 @@ Some host checks lacked `/bin/sleep`; these earlier runs do not certify this bas
 The commit checks required two structural corrections: expose the error through
 the runtime package and move the new browser assertions into focused helpers.
 Architecture and web lint passed after these corrections. Affected orchestrator
-race tests passed again. CI and review evidence remain external to this local
-implementation record.
+race tests passed again. The first published head passed all CI checks. Review
+then found missing initial settlement, a missing-client proof gap, and payload cleanup without terminal events.
+The follow-up adds regressions for those cases and clarifies Resume eligibility.
+Focused race tests passed for runtime, SQLite, and orchestrator, including initial
+admission from both owners, disappearance of the client, changed ownership,
+uncertain peer errors, and protected retention. SQL guard, store conformance, and
+documentation checks passed. Changed-package lint and normal commit hooks remain
+publication gates. The earlier CI result is historical; CI and review must run
+again for the follow-up head.
 
 ## Risks
 

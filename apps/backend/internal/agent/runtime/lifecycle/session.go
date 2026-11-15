@@ -2063,7 +2063,8 @@ func (sm *SessionManager) sendPrompt(
 			return nil, err
 		}
 	}
-	if err := sm.persistInitialDeliveryBeforeDispatch(preparedCtx, execution, effectivePrompt, materializedAttachments, callbacks.deliverySubmissionID); err != nil {
+	initialDelivery, err := sm.persistInitialDeliveryBeforeDispatch(preparedCtx, execution, effectivePrompt, materializedAttachments, callbacks.deliverySubmissionID)
+	if err != nil {
 		sm.reportPromptFailure(execution, 0, err, callbacks.onFailure)
 		return nil, err
 	}
@@ -2092,6 +2093,7 @@ func (sm *SessionManager) sendPrompt(
 		preparedCtx, execution, effectivePrompt, materializedAttachments,
 		promptGeneration, steer, callbacks.deliverySubmissionID,
 	); err != nil {
+		err = sm.settleUnsentInitialDelivery(preparedCtx, initialDelivery, err)
 		if sm.turnChangeFailed != nil {
 			sm.turnChangeFailed(preparedCtx, execution, promptGeneration, err)
 		}
@@ -2403,7 +2405,7 @@ func (sm *SessionManager) callAgentctlPrompt(
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
-		return fmt.Errorf("execution %q has no agentctl client", execution.ID)
+		return &agentctl.RequestNotSentError{Err: fmt.Errorf("execution %q has no agentctl client", execution.ID)}
 	}
 	var err error
 	if steer {

@@ -7,9 +7,11 @@ depends_on: []
 plan: "plan.md"
 requirements:
   - REQ-PLATFORM-UNDELIVERED-PROMPT-001
+  - REQ-PLATFORM-DELIVERY-RETENTION-001
 acceptance_criteria:
   - AC-PLATFORM-UNDELIVERED-PROMPT-001.1
   - AC-PLATFORM-UNDELIVERED-PROMPT-001.3
+  - AC-PLATFORM-DELIVERY-RETENTION-001.3
 system_design:
   - ../../specs/platform/system-design/undelivered-prompt-recovery.md
 ---
@@ -20,7 +22,8 @@ system_design:
 
 Carry typed non-admission evidence through the executor and runtime. Settle only
 proven rejection. Fence all prompt sources before preparation and dispatch.
-Cover ordinary sends, queue dispatch, automatic retry, and steering.
+Cover initial prompts, ordinary sends, queue dispatch, automatic retry, and steering.
+Include settled unsent payloads in the existing bounded retention sweep.
 
 ## Out of scope
 
@@ -82,3 +85,18 @@ and capability-refresh regressions. Runtime regressions include both a lost repl
 that must not retry and a reconnect failure that retains non-delivery evidence.
 Client stream regressions, SQL guard, and store conformance passed. Final runtime
 checks are recorded in the plan.
+
+PR review exposed initial-prompt settlement and payload-retention gaps. New RED
+regressions reproduced both before the follow-up implementation. Runtime now keeps
+the initial reservation through dispatch, settles before the failure callback, and
+preserves proof when the client disappears. Retention recognizes the local
+non-delivery receipt while keeping grace, budget, identity, terminal-evidence, and
+recovery-block guards. Focused race tests passed for the runtime, SQLite, and
+orchestrator. SQL guard and store conformance passed. PostgreSQL was unavailable
+locally; its cases remain enabled for an environment with a disposable database.
+
+The follow-up command was:
+
+```bash
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/agent/runtime/lifecycle ./internal/task/repository/sqlite ./internal/orchestrator -run 'Test(Undelivered|InitialPrompt|InitialAdmissionPersistence|PreparedDeliveryAdmission|UnsentPromptRetention|DeliveryRetention(Prompt|PartialTerminal|WorkflowOutcome|IndependentBlocks|Integration|ProtectedSweepRepository)|BlockedPromptAdmission)' -count=1)
+```
