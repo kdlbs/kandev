@@ -32,11 +32,15 @@ func (s *Service) PromotePrimarySession(ctx context.Context, sessionID string) e
 	if err := s.authorizeSession(ctx, sessionID); err != nil {
 		return err
 	}
+	previous := s.terminalPrimaryBeforeSwitch(ctx, sessionID)
 	_, _, err := s.setSessionPrimaryRecordingPrevious(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to set session as primary: %w", err)
 	}
 	s.publishPrimarySessionUpdate(ctx, "", sessionID)
+	if previous != nil {
+		s.scheduleTerminalSessionQueueHandOff(previous.TaskID, previous.ID)
+	}
 	return nil
 }
 
@@ -245,7 +249,7 @@ func (s *Service) setSessionPrimaryRecordingPrevious(ctx context.Context, sessio
 	defer unlock()
 	taskID, previousPrimaryID := s.previousPrimaryForReplacement(ctx, sessionID)
 	claim := s.captureReplacedSessionReclaim(ctx, taskID, previousPrimaryID, sessionID)
-	if err := s.repo.SetSessionPrimary(ctx, sessionID); err != nil {
+	if err := s.writeSessionPrimary(ctx, sessionID); err != nil {
 		return taskID, previousPrimaryID, err
 	}
 	s.replacedSessionReclaims.Delete(sessionID)
@@ -260,7 +264,7 @@ func (s *Service) setSessionPrimaryRecordingPrevious(ctx context.Context, sessio
 // stop of the session it promotes.
 func (s *Service) setSessionPrimary(ctx context.Context, sessionID string) error {
 	if !s.config.ReplacedSessionReclaim {
-		return s.repo.SetSessionPrimary(ctx, sessionID)
+		return s.writeSessionPrimary(ctx, sessionID)
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -276,10 +280,18 @@ func (s *Service) setSessionPrimary(ctx context.Context, sessionID string) error
 // without recording a replacement or publishing an intermediate update.
 func (s *Service) RestorePrimarySessionAfterTaskMessage(ctx context.Context, taskID, sessionID string) error {
 	_, err := s.promotePrimaryWithoutReclaim(ctx, taskID, sessionID, func(ctx context.Context, sessionID string) (bool, error) {
-		err := s.repo.SetSessionPrimary(ctx, sessionID)
+		err := s.writeSessionPrimary(ctx, sessionID)
 		return err == nil, err
 	})
 	return err
+}
+
+// writeSessionPrimary runs only the repository role write under the write side
+// of primarySwitchMu, so a terminal queue hand-off's commit cannot interleave.
+func (s *Service) writeSessionPrimary(ctx context.Context, sessionID string) error {
+	s.primarySwitchMu.Lock()
+	defer s.primarySwitchMu.Unlock()
+	return s.repo.SetSessionPrimary(ctx, sessionID)
 }
 
 // Like session lifecycle locks, these locks live for the service lifetime.

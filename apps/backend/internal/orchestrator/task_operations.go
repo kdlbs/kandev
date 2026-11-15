@@ -6273,10 +6273,33 @@ func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error
 		return err
 	}
 
+	previous := s.terminalPrimaryBeforeSwitch(ctx, sessionID)
 	if err := s.setSessionPrimary(ctx, sessionID); err != nil {
 		return fmt.Errorf("failed to set session as primary: %w", err)
 	}
 	s.publishPrimarySessionUpdate(ctx, "", sessionID)
+	if previous != nil {
+		s.scheduleTerminalSessionQueueHandOff(previous.TaskID, previous.ID)
+	}
+	return nil
+}
+
+// terminalPrimaryBeforeSwitch returns the current primary when the role is
+// about to move off a session that can no longer accept prompts.
+func (s *Service) terminalPrimaryBeforeSwitch(ctx context.Context, sessionID string) *models.TaskSession {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return nil
+	}
+	sessions, err := s.repo.ListTaskSessions(ctx, session.TaskID)
+	if err != nil {
+		return nil
+	}
+	for _, previous := range sessions {
+		if previous.IsPrimary && previous.ID != sessionID && isTerminalSessionState(previous.State) && !s.resumeAttemptInFlight(previous.ID) {
+			return previous
+		}
+	}
 	return nil
 }
 

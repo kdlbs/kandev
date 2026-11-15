@@ -844,5 +844,8 @@
   "toolPayload.historyRefsDeleted_one": "已刪除 {{count}} 個檢查點引用",
   "toolPayload.historyRefsDeleted_other": "已刪除 {{count}} 個檢查點引用",
   "toolPayload.historyRetry_one": "{{count}} 個檢查點清理等待重試",
-  "toolPayload.historyRetry_other": "{{count}} 個檢查點清理等待重試"
+  "toolPayload.historyRetry_other": "{{count}} 個檢查點清理等待重試",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.label": "移交已結束主工作階段的佇列",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.description": "任務的主工作階段失敗、取消或完成時，將其排隊訊息移交給新的主工作階段。",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.riskDescription": "排隊訊息可能會被投遞到與最初目標不同的工作階段。若要讓每條排隊訊息保留在原工作階段中，請保持關閉。"
 }
