@@ -488,6 +488,24 @@ Public docs and specification validation passed. PostgreSQL is unverified:
   `internal/orchestrator` and `internal/backendapp/...`; and
   `scripts/lint-go-changed`: passed.
 
+### Implementation review round 16 remediation
+
+- Predecessor reads now use the full `(position, id)` source key:
+  `readMergeTarget` and the first sorted-walk batch select
+  `position < p OR (position = p AND id < sourceID)`, so a row tied with the
+  source is its predecessor. The service's tail and manual-merge lease checks
+  walk `ListBySession` order instead of comparing positions.
+- The memory repository uses the same order (`queueOrderLess`) for restore
+  insertion, listing, head selection, Send Now restore, reorder, merge target,
+  and replacement.
+- RED on the prior code, GREEN after:
+  `TestFoldsTreatTiedRowAboveSourceAsPredecessor` (a tied barrier above the
+  source blocks the fold; manual merge uses the tied row above), and the
+  tied-barrier regressions now run on memory and SQLite.
+- `go test -race -tags fts5` for `messagequeue`, `orchestrator/handlers`, and
+  `system/queuesettings`; `go test -tags fts5` for `internal/orchestrator` and
+  `internal/mcp/handlers`; and `scripts/lint-go-changed`: passed.
+
 Final repository gates, run from the repository root after all work orders:
 
 ```bash

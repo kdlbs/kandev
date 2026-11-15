@@ -21,7 +21,7 @@ func (r *sqliteRepository) readAutoFoldTargetTx(ctx context.Context, tx *sqlx.Tx
 		sender = sortedFoldSender(source)
 	}
 	if sender == "" {
-		target, err := readMergeTarget(ctx, r, tx, source.SessionID, sourcePositionBound(source))
+		target, err := readMergeTarget(ctx, r, tx, source.SessionID, sourcePositionBound(source), source.ID)
 		if errors.Is(err, ErrNoMergeTarget) {
 			return nil, nil, nil
 		}
@@ -69,8 +69,8 @@ func (r *sqliteRepository) readSortedFoldTargetTx(
 	return adjacent, values, err
 }
 
-// sourcePositionBound is the exclusive upper position for rows above source.
-// A full-queue candidate has no persisted position, so every row is above it.
+// sourcePositionBound is the upper position for rows above source. A
+// full-queue candidate has no persisted position, so every row is above it.
 func sourcePositionBound(source *QueuedMessage) int64 {
 	if source.Position > 0 {
 		return source.Position
@@ -127,17 +127,14 @@ func (r *sqliteRepository) sortedFoldCandidateIDsTx(ctx context.Context, tx *sql
 }
 
 func (r *sqliteRepository) sortedFoldScanBatchTx(ctx context.Context, tx *sqlx.Tx, source *QueuedMessage, last *sortedFoldScanRow) ([]sortedFoldScanRow, error) {
-	var batch []sortedFoldScanRow
-	var err error
-	if last == nil {
-		err = tx.SelectContext(ctx, &batch, tx.Rebind(`SELECT id, position, queued_by, metadata_json FROM queued_messages
- WHERE session_id = ? AND position < ? ORDER BY position DESC, id DESC LIMIT ?`), source.SessionID, sourcePositionBound(source), sortedFoldScanBatch)
-	} else {
-		err = tx.SelectContext(ctx, &batch, tx.Rebind(`SELECT id, position, queued_by, metadata_json FROM queued_messages
- WHERE session_id = ? AND (position < ? OR (position = ? AND id < ?)) ORDER BY position DESC, id DESC LIMIT ?`),
-			source.SessionID, last.Position, last.Position, last.ID, sortedFoldScanBatch)
+	position, id := sourcePositionBound(source), source.ID
+	if last != nil {
+		position, id = last.Position, last.ID
 	}
-	if err != nil {
+	var batch []sortedFoldScanRow
+	if err := tx.SelectContext(ctx, &batch, tx.Rebind(`SELECT id, position, queued_by, metadata_json FROM queued_messages
+ WHERE session_id = ? AND (position < ? OR (position = ? AND id < ?)) ORDER BY position DESC, id DESC LIMIT ?`),
+		source.SessionID, position, position, id, sortedFoldScanBatch); err != nil {
 		return nil, fmt.Errorf("scan sorted fold candidates: %w", err)
 	}
 	return batch, nil

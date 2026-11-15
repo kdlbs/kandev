@@ -988,14 +988,12 @@ func (s *Service) editLeaseBlocksTail(ctx context.Context, sessionID, excludedEn
 	if err != nil {
 		return false, err
 	}
+	// ListBySession returns the repository's total FIFO order, so the tail is
+	// the last listed entry; positions alone can tie.
 	var tail *QueuedMessage
 	for i := range entries {
-		entry := &entries[i]
-		if entry.ID == excludedEntryID {
-			continue
-		}
-		if tail == nil || entry.Position >= tail.Position {
-			tail = entry
+		if entries[i].ID != excludedEntryID {
+			tail = &entries[i]
 		}
 	}
 	if tail == nil {
@@ -1013,24 +1011,20 @@ func (s *Service) editLeaseBlocksMerge(ctx context.Context, sessionID, sourceID 
 	if err != nil {
 		return false, err
 	}
+	// The merge target is the last non-reserved entry listed before source.
 	var source, target *QueuedMessage
 	for i := range entries {
-		if entries[i].ID == sourceID {
-			source = &entries[i]
+		entry := &entries[i]
+		if entry.ID == sourceID {
+			source = entry
 			break
+		}
+		if !entry.IsReservedInFlight() {
+			target = entry
 		}
 	}
 	if source == nil {
 		return false, nil
-	}
-	for i := range entries {
-		entry := &entries[i]
-		if entry.IsReservedInFlight() || entry.Position >= source.Position {
-			continue
-		}
-		if target == nil || entry.Position >= target.Position {
-			target = entry
-		}
 	}
 	s.editLeaseMu.Lock()
 	defer s.editLeaseMu.Unlock()

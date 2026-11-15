@@ -4949,7 +4949,7 @@ func (r *sqliteRepository) mergeIntoAbove(ctx context.Context, identity *QueueSe
 		return nil, err
 	}
 
-	target, err := readMergeTarget(ctx, r, tx, sessionID, source.Position)
+	target, err := readMergeTarget(ctx, r, tx, sessionID, source.Position, source.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -5387,15 +5387,17 @@ func readMergeSource(ctx context.Context, r *sqliteRepository, tx *sqlx.Tx, sess
 
 // readMergeTarget loads the entry with the greatest position strictly below
 // the source, mapping a missing row to ErrNoMergeTarget.
-func readMergeTarget(ctx context.Context, r *sqliteRepository, tx *sqlx.Tx, sessionID string, sourcePosition int64) (*QueuedMessage, error) {
+// readMergeTarget reads the row directly above (sourcePosition, sourceID) in
+// the queue's total (position, id) order; positions alone can tie.
+func readMergeTarget(ctx context.Context, r *sqliteRepository, tx *sqlx.Tx, sessionID string, sourcePosition int64, sourceID string) (*QueuedMessage, error) {
 	row := tx.QueryRowxContext(ctx, r.db.Rebind(`
 		SELECT id, session_id, task_id, position, content, model, plan_mode,
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
-		WHERE session_id = ? AND position < ?
+		WHERE session_id = ? AND (position < ? OR (position = ? AND id < ?))
 		ORDER BY position DESC, id DESC
 		LIMIT 1
-	`), sessionID, sourcePosition)
+	`), sessionID, sourcePosition, sourcePosition, sourceID)
 	target, err := scanQueuedRow(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

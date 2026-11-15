@@ -400,7 +400,7 @@ func (r *memoryRepository) restoreLocked(msg *QueuedMessage, maxPerSession int) 
 		msg.QueuedAt = time.Now().UTC()
 	}
 	clone := cloneQueuedMessage(msg)
-	index := sort.Search(len(list), func(i int) bool { return list[i].Position > clone.Position })
+	index := sort.Search(len(list), func(i int) bool { return queueOrderLess(clone, list[i]) })
 	list = append(list, nil)
 	copy(list[index+1:], list[index:])
 	list[index] = clone
@@ -875,7 +875,7 @@ func (r *memoryRepository) ListBySession(_ context.Context, sessionID string) ([
 	for i, m := range list {
 		out[i] = *cloneQueuedMessage(m)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Position < out[j].Position })
+	sort.Slice(out, func(i, j int) bool { return queueOrderLess(&out[i], &out[j]) })
 	return out, nil
 }
 
@@ -895,7 +895,7 @@ func (r *memoryRepository) ListDurableLifecycleEntries(_ context.Context) ([]Que
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].SessionID == out[j].SessionID {
-			return out[i].Position < out[j].Position
+			return queueOrderLess(&out[i], &out[j])
 		}
 		return out[i].SessionID < out[j].SessionID
 	})
@@ -932,7 +932,7 @@ func (r *memoryRepository) ListDurableDeliveryEntries(_ context.Context) ([]Queu
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].SessionID == out[j].SessionID {
-			return out[i].Position < out[j].Position
+			return queueOrderLess(&out[i], &out[j])
 		}
 		return out[i].SessionID < out[j].SessionID
 	})
@@ -949,7 +949,7 @@ func (r *memoryRepository) CountBySession(_ context.Context, sessionID string) (
 func lowestPositionIndex(list []*QueuedMessage) int {
 	index := 0
 	for i := 1; i < len(list); i++ {
-		if list[i].Position < list[index].Position {
+		if queueOrderLess(list[i], list[index]) {
 			index = i
 		}
 	}
@@ -1618,7 +1618,7 @@ func (r *memoryRepository) RestoreSendNowClaim(ctx context.Context, claim *SendN
 			r.nextPosition[sessionID] = clone.Position
 		}
 	}
-	sort.Slice(list, func(i, j int) bool { return list[i].Position < list[j].Position })
+	sort.Slice(list, func(i, j int) bool { return queueOrderLess(list[i], list[j]) })
 	r.entries[sessionID] = list
 	r.removeSendNowClaimOwnershipLocked(sessionID, claim.Sources)
 	return nil
@@ -1996,10 +1996,10 @@ func (r *memoryRepository) mergeIntoAboveLocked(sessionID, sourceID, queuedBy st
 
 	var target *QueuedMessage
 	for _, m := range list {
-		if m.Position >= source.Position {
+		if !queueOrderLess(m, source) {
 			continue
 		}
-		if target == nil || m.Position > target.Position {
+		if target == nil || queueOrderLess(target, m) {
 			target = m
 		}
 	}
@@ -2205,7 +2205,7 @@ func (r *memoryRepository) reorderEntriesLocked(sessionID string, orderedIDs []s
 	// sort a copy so reserved rows interleave at their persisted places.
 	sorted := make([]*QueuedMessage, len(stored))
 	copy(sorted, stored)
-	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Position < sorted[j].Position })
+	sort.SliceStable(sorted, func(i, j int) bool { return queueOrderLess(sorted[i], sorted[j]) })
 
 	visible, _ := splitVisibleAndReserved(sorted)
 	ordered, err := validateReorderSet(visible, orderedIDs)
@@ -2520,7 +2520,7 @@ func (r *memoryRepository) replaceSessionLocked(sessionID string, entries []Queu
 			replaced = append(replaced, clone)
 		}
 		sort.Slice(replaced, func(i, j int) bool {
-			return replaced[i].Position < replaced[j].Position
+			return queueOrderLess(replaced[i], replaced[j])
 		})
 		r.entries[sessionID] = replaced
 		if maxPos > r.nextPosition[sessionID] {

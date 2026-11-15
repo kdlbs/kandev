@@ -422,6 +422,16 @@ func (m *QueuedMessage) IsDurablePlanComment() bool {
 	return messageID != "" && messageFingerprint != ""
 }
 
+// queueOrderLess is the total FIFO order of a session's queued rows. Positions
+// can tie (a restored reservation keeps its old slot), so ID breaks ties; every
+// SQL query orders by the same (position, id) key.
+func queueOrderLess(a, b *QueuedMessage) bool {
+	if a.Position != b.Position {
+		return a.Position < b.Position
+	}
+	return a.ID < b.ID
+}
+
 // IsDurableDelivery reports whether the row must survive dequeue until its
 // owner records the exact accepted turn or explicitly acknowledges delivery.
 func (m *QueuedMessage) IsDurableDelivery() bool {
