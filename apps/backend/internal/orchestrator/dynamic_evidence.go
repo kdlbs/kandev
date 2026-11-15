@@ -351,6 +351,7 @@ func (s *Service) observeProviderDiagnostic(
 	evidence.output = true
 	evidence.nonReasoningOutput = true
 	evidence.providerDiagnosticCode = classified.Code
+	evidence.nonReasoningOutput = true
 	evidence.providerDiagnosticText = normalizeDiagnosticText(message)
 }
 

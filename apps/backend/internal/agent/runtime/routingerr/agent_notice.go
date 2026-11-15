@@ -13,7 +13,7 @@ func ClassifyAgentNotice(in Input) *Error {
 	if text == "" {
 		return nil
 	}
-	r, ok := leadingNoticeRule(in.ProviderID, text)
+	r, ok := leadingNoticeRule(in.ProviderID, text, in.Phase)
 	if !ok {
 		return nil
 	}
@@ -26,13 +26,17 @@ func ClassifyAgentNotice(in Input) *Error {
 
 var noticeErrorLabel = regexp.MustCompile(`(?i)^[a-z0-9_]*error:\s*`)
 
-func leadingNoticeRule(providerID, text string) (rule, bool) {
+func leadingNoticeRule(providerID, text string, phase Phase) (rule, bool) {
 	starts := []int{0}
 	if label := noticeErrorLabel.FindStringIndex(text); label != nil {
 		starts = append(starts, label[1])
 	}
-	for _, rules := range [][]rule{providerRules[providerID], providerNeutralRules} {
+	for index, rules := range [][]rule{providerRules[providerID], providerNeutralRules} {
 		for _, r := range rules {
+			// Neutral rules honor the same phase gate as classification.
+			if index == 1 && !providerNeutralRuleAllowed(r.id, phase) {
+				continue
+			}
 			for _, start := range starts {
 				if loc := r.pattern.FindStringIndex(text[start:]); loc != nil && loc[0] == 0 {
 					return r, true

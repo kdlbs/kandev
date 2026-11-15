@@ -24,7 +24,7 @@ func unknownHTTPMayBeRefined(in Input, excerpt, rawText string) bool {
 	if _, ok := matchProviderRules(in.ProviderID, excerpt, rawText); ok {
 		return false
 	}
-	if _, ok := matchProviderNeutralRules(excerpt); ok {
+	if _, ok := matchProviderNeutralRules(excerpt, in.Phase); ok {
 		return false
 	}
 	if _, ok := matchRuntimeEnvironmentRulesForProvider(in.ProviderID, excerpt, rawText); ok {

@@ -1503,3 +1503,17 @@ Only custom TUI agents can be deleted from the agent list. Built-in definitions 
 - **Automation cannot select a profile:** passthrough agent profiles and Local executor profiles are intentionally omitted from the automation selectors.
 
 Related: [Executors](executors.md), [Automation and MCP](automation-and-mcp.md), and the contributor guide [Adding a new agent CLI](add-agent-cli.md).
+
+### Provider error signatures
+
+Kandev recognizes provider diagnostic envelopes for exhausted usage, missing
+models or endpoints, host capacity, connection failures and upstream timeouts.
+OpenCode Free and Go usage-limit notices use the existing quota action of the
+selected candidate. Quoted errors in an agent's explanation do not activate the
+new catalog signatures. A classified quota notice does not itself establish
+an account's remaining allowance or reset time.
+
+Request compatibility failures keep their normal recovery behavior. Only a
+complete provider diagnostic received before any answer or tool effect can
+enter the existing repeated-failure policy; an incomplete diagnostic or a turn
+that already produced work cannot authorize automatic replay.
