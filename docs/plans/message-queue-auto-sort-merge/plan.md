@@ -450,6 +450,26 @@ Public docs and specification validation passed. PostgreSQL is unverified:
 - `go test -race -tags fts5 ./internal/orchestrator/messagequeue/...
   ./internal/orchestrator/handlers/...` and `scripts/lint-go-changed`: passed.
 
+### Implementation review round 14 remediation
+
+- `buildAutoMergedEntry` is now one fold of an `autoMergeAccumulator` that
+  validates each input once and keeps attachments, entity references, context
+  files, and queue admission IDs as ordered sets. Compaction keeps one
+  accumulator per survivor and materializes it once, so provenance IDs and a
+  large kept attachment are no longer re-copied or re-decoded on every fold.
+  Single admissions use the same code path and limits.
+- The sorted metadata walk orders and continues on `(position, id)`, because a
+  restored reservation can share a position with another row.
+- RED on the prior code, GREEN after:
+  `TestCompactionAdmissionProvenanceIsLinear`,
+  `TestCompactionValidatesKeptAttachmentOnce`, and
+  `TestSortedAdmissionFindsTargetAcrossTiedBatchBoundary` (reserve, reorder,
+  restore, then a full-queue sorted fold into each tied row).
+- `go test -race -tags fts5 ./internal/orchestrator/messagequeue/...
+  ./internal/orchestrator/handlers/... ./internal/system/queuesettings/...`,
+  backendapp `AutoSortMerge|AutoMerge|QueueSettings`, and
+  `scripts/lint-go-changed`: passed.
+
 Final repository gates, run from the repository root after all work orders:
 
 ```bash

@@ -92,13 +92,14 @@ type sortedFoldScanRow struct {
 // sortedFoldCandidateIDsTx walks the persisted rows above source newest-first
 // in keyset batches, decoding only identity and metadata, and stops at the
 // first barrier or same-sender row. Payloads of backlog rows are never read.
+// Positions are not unique (a restored reservation keeps its old slot), so the
+// keyset continues on (position, id).
 func (r *sqliteRepository) sortedFoldCandidateIDsTx(ctx context.Context, tx *sqlx.Tx, source *QueuedMessage, sender string) (adjacentID, sortedID string, crossed int, err error) {
-	bound := sourcePositionBound(source)
+	var last *sortedFoldScanRow
 	for index := 0; ; {
-		var batch []sortedFoldScanRow
-		if err := tx.SelectContext(ctx, &batch, tx.Rebind(`SELECT id, position, queued_by, metadata_json FROM queued_messages
- WHERE session_id = ? AND position < ? ORDER BY position DESC LIMIT ?`), source.SessionID, bound, sortedFoldScanBatch); err != nil {
-			return "", "", 0, fmt.Errorf("scan sorted fold candidates: %w", err)
+		batch, err := r.sortedFoldScanBatchTx(ctx, tx, source, last)
+		if err != nil {
+			return "", "", 0, err
 		}
 		for _, scanned := range batch {
 			row := QueuedMessage{ID: scanned.ID, QueuedBy: scanned.QueuedBy}
@@ -121,8 +122,25 @@ func (r *sqliteRepository) sortedFoldCandidateIDsTx(ctx context.Context, tx *sql
 		if len(batch) < sortedFoldScanBatch {
 			return adjacentID, "", 0, nil
 		}
-		bound = batch[len(batch)-1].Position
+		last = &batch[len(batch)-1]
 	}
+}
+
+func (r *sqliteRepository) sortedFoldScanBatchTx(ctx context.Context, tx *sqlx.Tx, source *QueuedMessage, last *sortedFoldScanRow) ([]sortedFoldScanRow, error) {
+	var batch []sortedFoldScanRow
+	var err error
+	if last == nil {
+		err = tx.SelectContext(ctx, &batch, tx.Rebind(`SELECT id, position, queued_by, metadata_json FROM queued_messages
+ WHERE session_id = ? AND position < ? ORDER BY position DESC, id DESC LIMIT ?`), source.SessionID, sourcePositionBound(source), sortedFoldScanBatch)
+	} else {
+		err = tx.SelectContext(ctx, &batch, tx.Rebind(`SELECT id, position, queued_by, metadata_json FROM queued_messages
+ WHERE session_id = ? AND (position < ? OR (position = ? AND id < ?)) ORDER BY position DESC, id DESC LIMIT ?`),
+			source.SessionID, last.Position, last.Position, last.ID, sortedFoldScanBatch)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("scan sorted fold candidates: %w", err)
+	}
+	return batch, nil
 }
 
 func readQueuedRowByIDTx(ctx context.Context, tx *sqlx.Tx, sessionID, id string) (*QueuedMessage, error) {

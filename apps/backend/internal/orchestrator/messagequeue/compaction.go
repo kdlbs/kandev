@@ -1,7 +1,5 @@
 package messagequeue
 
-import "strings"
-
 // SessionPolicyChange changes exactly one session preference.
 type SessionPolicyChange struct {
 	AutoSortMerge bool
@@ -14,16 +12,11 @@ type compactionRow struct {
 	originalIndex int
 	merged        QueuedMessage
 	dirty         bool
-	// bodies holds the non-empty contents folded so far; the merged body is
-	// joined once at the end so N folds copy each body once, not N times.
-	bodies []string
-}
-
-func (r *compactionRow) message() *QueuedMessage {
-	if r.dirty {
-		return &r.merged
-	}
-	return r.original
+	// merge accumulates every fold into this row; the merged entry is
+	// materialized once after the pass so each input is copied and validated
+	// once rather than on every later fold.
+	merge       *autoMergeAccumulator
+	unmergeable bool
 }
 
 type queueCompaction struct {
@@ -67,7 +60,12 @@ func compactQueueRows[T QueuedMessage | *QueuedMessage](rows []T, leased map[str
 	}
 	for i := range result.kept {
 		if row := &result.kept[i]; row.dirty {
-			row.merged.Content = strings.Join(row.bodies, "\n\n")
+			values := row.merge.values()
+			row.merged = *row.original
+			row.merged.Content = values.content
+			row.merged.Attachments = values.attachments
+			row.merged.Metadata = values.metadata
+			row.merged.QueuedAt = values.queuedAt
 		}
 	}
 	return result
@@ -87,30 +85,21 @@ func (c *queueCompaction) fold(source *QueuedMessage, sender string, latest map[
 
 func (c *queueCompaction) foldInto(index int, source *QueuedMessage, leased map[string]struct{}) bool {
 	row := &c.kept[index]
-	target := row.message()
-	if _, blocked := leased[target.ID]; blocked || isFoldBarrier(target) || c.fences[target.ID] != c.fences[source.ID] {
+	target := row.original
+	if _, blocked := leased[target.ID]; blocked || row.unmergeable || isFoldBarrier(target) || c.fences[target.ID] != c.fences[source.ID] {
 		return false
 	}
-	// Content does not affect compatibility; leaving it out of the probe avoids
-	// re-copying the growing merged body on every fold.
-	probe := *target
-	probe.Content = ""
-	values, compatible := buildAutoMergedEntry(&probe, source)
-	if !compatible {
-		return false
-	}
-	if !row.dirty {
-		row.merged = *target
-		row.dirty = true
-		if target.Content != "" {
-			row.bodies = append(row.bodies, target.Content)
+	if row.merge == nil {
+		merge, ok := newAutoMergeAccumulator(target)
+		if !ok {
+			row.unmergeable = true
+			return false
 		}
+		row.merge = merge
 	}
-	if source.Content != "" {
-		row.bodies = append(row.bodies, source.Content)
+	if !row.merge.add(source) {
+		return false
 	}
-	row.merged.Attachments = values.attachments
-	row.merged.Metadata = values.metadata
-	row.merged.QueuedAt = values.queuedAt
+	row.dirty = true
 	return true
 }
