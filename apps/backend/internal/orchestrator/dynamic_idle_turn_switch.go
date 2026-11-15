@@ -216,7 +216,7 @@ func (s *Service) handOverIdleDynamicTurn(
 	if !s.stopDynamicRelaunchPredecessor(ctx, predecessorExecutionID) {
 		return nil, true, fmt.Errorf("stop idle dynamic predecessor %q before candidate switch", predecessorExecutionID)
 	}
-	if !s.resetDynamicRelaunchSession(ctx, sessionID, models.TaskSessionStateCreated) {
+	if !s.resetDynamicRelaunchSessionForRecovery(ctx, sessionID, models.TaskSessionStateCreated, 0, false) {
 		return nil, true, fmt.Errorf("reset idle dynamic session %q before candidate switch", sessionID)
 	}
 	s.retireExecutionActivityAndPublish(ctx, taskID, sessionID, predecessorExecutionID)
