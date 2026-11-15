@@ -83,11 +83,11 @@ func (h *Handlers) handleGetTaskMessageOperation(ctx context.Context, msg *ws.Me
 }
 
 // A caller cannot widen the server-injected sender pair through a raw action.
-// Readback uses the existing kanban task principal; payload sender fields never
-// establish authority.
+// Office's signed runtime gateway may supply the same exact sender authority;
+// ordinary Office MCP discovery and raw actions remain unchanged.
 func (h *Handlers) validateSendOperationSender(ctx context.Context, msg *ws.Message, taskID, sessionID string) *ws.Message {
 	principal, ok := mcpscope.PrincipalFromContext(ctx)
-	if !ok || principal.Surface != mcpprofile.SurfaceKanbanTask ||
+	if !ok || (principal.Surface != mcpprofile.SurfaceKanbanTask && !officeRuntimeMessageAuthorized(ctx, principal)) ||
 		principal.CallerTaskID != taskID || principal.CallerSessionID != sessionID {
 		return wsError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
 			"send-operation records belong to the authorized calling task session")
@@ -142,19 +142,6 @@ func claimedSendOperationPayload(operation *models.TaskMessageSendOperation) map
 	if operation.SettledAt != nil {
 		payload["settled_at"] = operation.SettledAt.UTC().Format(time.RFC3339)
 	}
-	switch operation.State {
-	case models.SendOperationStatePending:
-		payload["instruction"] = "the first attempt may still commit; do not resend, wait and read again"
-	case models.SendOperationStateCommitted:
-		payload["instruction"] = "delivered; do not resend"
-	case models.SendOperationStateFailed:
-		if operation.RetrySafe() {
-			payload["instruction"] = "definitively not delivered; a fresh operation_id may be used"
-		} else {
-			payload["instruction"] = "delivery outcome is unknown; do not resend"
-		}
-	default:
-		payload["instruction"] = "delivery outcome is unknown; do not resend"
-	}
+	payload["instruction"] = sendOperationInstruction(operation)
 	return payload
 }
