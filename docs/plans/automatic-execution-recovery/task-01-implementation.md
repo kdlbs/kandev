@@ -12,7 +12,8 @@ acceptance_criteria:
   - AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.3
   - AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.5
 system_design:
-  - ../../specs/platform/system-design/automatic-execution-options.md
+  - ../../specs/platform/system-design/session-recovery-convergence.md
+  - ../../specs/platform/system-design/automatic-session-recovery-options.md
 ---
 
 # feat(runtime): add opt-in automatic execution recovery policies
@@ -33,7 +34,7 @@ Out of scope: Unknown-outcome replay, model or capacity changes, installation ac
 
 The source files are the existing PR #4712 diff. This work order adds its delivery record and links existing requirements and system design; it introduces no runtime gate or permanent test.
 
-- [System design](../../specs/platform/system-design/automatic-execution-options.md)
+- [System design](../../specs/platform/system-design/session-recovery-convergence.md)
 - [Plan](plan.md)
 
 ## Verification and results

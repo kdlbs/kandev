@@ -11,8 +11,8 @@ requirements:
 
 # Session recovery convergence
 
-Installation-level automatic execution options are described in
-[Automatic execution options](automatic-execution-options.md).
+See [automatic session recovery options](automatic-session-recovery-options.md)
+for installation-level settings and admission conditions.
 
 ## Boundaries
 
