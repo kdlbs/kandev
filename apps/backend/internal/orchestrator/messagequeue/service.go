@@ -994,7 +994,7 @@ func (s *Service) editLeaseBlocksTail(ctx context.Context, sessionID, excludedEn
 		if entry.ID == excludedEntryID {
 			continue
 		}
-		if tail == nil || entry.Position > tail.Position {
+		if tail == nil || entry.Position >= tail.Position {
 			tail = entry
 		}
 	}
@@ -1028,7 +1028,7 @@ func (s *Service) editLeaseBlocksMerge(ctx context.Context, sessionID, sourceID 
 		if entry.IsReservedInFlight() || entry.Position >= source.Position {
 			continue
 		}
-		if target == nil || entry.Position > target.Position {
+		if target == nil || entry.Position >= target.Position {
 			target = entry
 		}
 	}

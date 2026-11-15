@@ -57,7 +57,7 @@ func (r *sqliteRepository) compactSessionQueueTx(ctx context.Context, tx *sqlx.T
 func (r *sqliteRepository) readCompactionRowsTx(ctx context.Context, tx *sqlx.Tx, sessionID string) ([]QueuedMessage, []compactionRawPayload, error) {
 	rows, err := tx.QueryxContext(ctx, tx.Rebind(`SELECT id,session_id,task_id,position,content,model,plan_mode,
  attachments_json,metadata_json,queued_at,queued_by,content,attachments_json,metadata_json
- FROM queued_messages WHERE session_id = ? ORDER BY position ASC`), sessionID)
+ FROM queued_messages WHERE session_id = ? ORDER BY position ASC, id ASC`), sessionID)
 	if err != nil {
 		return nil, nil, err
 	}

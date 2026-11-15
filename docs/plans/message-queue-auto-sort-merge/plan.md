@@ -470,6 +470,24 @@ Public docs and specification validation passed. PostgreSQL is unverified:
   backendapp `AutoSortMerge|AutoMerge|QueueSettings`, and
   `scripts/lint-go-changed`: passed.
 
+### Implementation review round 15 remediation
+
+- Every SQL query that orders a session's queued rows now uses one total FIFO
+  order, `(position, id)` (reverse `(position DESC, id DESC)`): listing,
+  reserve/drain, predecessor and tail reads, reorder reads, compaction, the
+  sorted metadata walk, managed-input head and coalesce reads, and
+  cross-session durable listings. The in-process tail and merge-target picks
+  keep the last tied row in that order. A restored reservation can share a
+  position, so sorted folds and compaction now see exactly the order the
+  queue lists and drains and cannot cross a tied barrier.
+- RED on the prior ordering, GREEN after:
+  `TestSortedFoldsFollowListedOrderAcrossTiedBarrier` (both ID orders, for
+  admission at capacity and for compaction).
+- `go test -race -tags fts5` for `messagequeue`, `orchestrator/handlers`,
+  `system/queuesettings`, and `internal/mcp/...`; `go test -tags fts5` for
+  `internal/orchestrator` and `internal/backendapp/...`; and
+  `scripts/lint-go-changed`: passed.
+
 Final repository gates, run from the repository root after all work orders:
 
 ```bash

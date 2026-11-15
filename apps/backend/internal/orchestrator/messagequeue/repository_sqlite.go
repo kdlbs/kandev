@@ -2382,7 +2382,7 @@ func (r *sqliteRepository) ListBySession(ctx context.Context, sessionID string) 
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 	`), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("list queued: %w", err)
@@ -2557,7 +2557,7 @@ func (r *sqliteRepository) listBySessionTx(
 		       attachments_json, metadata_json, queued_at, queued_by
 		  FROM queued_messages
 		 WHERE session_id = ?
-		 ORDER BY position ASC
+		 ORDER BY position ASC, id ASC
 	`), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("list queued snapshot: %w", err)
@@ -2582,7 +2582,7 @@ func (r *sqliteRepository) ListDurableLifecycleEntries(ctx context.Context) ([]Q
 		SELECT id, session_id, task_id, position, content, model, plan_mode,
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
-		ORDER BY session_id ASC, position ASC
+		ORDER BY session_id ASC, position ASC, id ASC
 	`))
 	if err != nil {
 		return nil, fmt.Errorf("list durable lifecycle queued: %w", err)
@@ -2629,7 +2629,7 @@ func (r *sqliteRepository) ListDurableDeliveryEntries(ctx context.Context) ([]Qu
 		SELECT id, session_id, task_id, position, content, model, plan_mode,
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
-		ORDER BY session_id ASC, position ASC
+		ORDER BY session_id ASC, position ASC, id ASC
 	`))
 	if err != nil {
 		return nil, fmt.Errorf("list durable delivery queued: %w", err)
@@ -2777,7 +2777,7 @@ func (r *sqliteRepository) TakeHead(ctx context.Context, sessionID string) (*Que
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 		LIMIT 1
 		`), sessionID)
 		msg, err = scanQueuedRow(row)
@@ -3267,7 +3267,7 @@ func (r *sqliteRepository) reserveHeadTx(
 			       attachments_json, metadata_json, queued_at, queued_by
 			FROM queued_messages
 			WHERE session_id = ?
-			ORDER BY position ASC
+			ORDER BY position ASC, id ASC
 			LIMIT 1
 		`), sessionID)
 		msg, storedMetadataJSON, err := scanQueuedRowWithMetadataJSON(row)
@@ -4400,7 +4400,7 @@ func (r *sqliteRepository) listOrderedStoredSessionEntries(ctx context.Context, 
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 	`), sessionID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list stored send-now entries: %w", err)
@@ -5244,7 +5244,7 @@ func (r *sqliteRepository) readReorderEntriesTx(
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 	`), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("read reorder rows: %w", err)
@@ -5393,7 +5393,7 @@ func readMergeTarget(ctx context.Context, r *sqliteRepository, tx *sqlx.Tx, sess
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ? AND position < ?
-		ORDER BY position DESC
+		ORDER BY position DESC, id DESC
 		LIMIT 1
 	`), sessionID, sourcePosition)
 	target, err := scanQueuedRow(row)
@@ -5563,7 +5563,7 @@ func listQueuedMessagesBySessionTx(
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 	`), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("list retained queue entries: %w", err)
@@ -5754,7 +5754,7 @@ func cancellationCandidates(
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 	`), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("list queued cancellation candidates: %w", err)
@@ -6696,7 +6696,7 @@ func (r *sqliteRepository) scanTail(ctx context.Context, tx *sqlx.Tx, sessionID 
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position DESC
+		ORDER BY position DESC, id DESC
 		LIMIT 1
 	`), sessionID)
 	msg, err := scanQueuedRow(row)
@@ -6721,7 +6721,7 @@ func (r *sqliteRepository) scanTailWithRawJSON(ctx context.Context, tx *sqlx.Tx,
 		       content, attachments_json, metadata_json
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position DESC
+		ORDER BY position DESC, id DESC
 		LIMIT 1
 	`), sessionID)
 	msg, rawContent, rawAttachments, rawMetadata, err := scanQueuedRowWithRawJSON(row)
@@ -6760,7 +6760,7 @@ func (r *sqliteRepository) findCoalesced(
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ? AND queued_by = ?
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 	`), sessionID, queuedBy)
 	if err != nil {
 		return nil, false, fmt.Errorf("scan coalesced queued: %w", err)
