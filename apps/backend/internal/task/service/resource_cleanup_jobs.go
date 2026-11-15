@@ -228,7 +228,7 @@ func (s *Service) persistTaskResourceCleanupWithManagedClaim(
 		operationID = newTaskResourceCleanupOperationID(trigger, taskID)
 	}
 	jobID := uuid.NewString()
-	worktreeHeadOIDs, preparationErrors, err := s.captureCleanupHeadOIDsForMode(ctx, worktrees, DeleteTaskOptions{WorkspaceCleanup: envCleanup.workspaceCleanup, AllowUnverifiedWorkspaceChanges: envCleanup.allowUnverifiedWorkspaceChanges, DiscardWorktreeChanges: envCleanup.discardWorktreeChanges})
+	worktreeHeadOIDs, preparationErrors, err := s.captureCleanupIdentities(ctx, worktrees, trigger, DeleteTaskOptions{WorkspaceCleanup: envCleanup.workspaceCleanup, AllowUnverifiedWorkspaceChanges: envCleanup.allowUnverifiedWorkspaceChanges, DiscardWorktreeChanges: envCleanup.discardWorktreeChanges})
 	if err != nil {
 		return nil, err
 	}
@@ -1038,6 +1038,9 @@ func (s *Service) prepareArchiveReclaimWorktree(
 		}
 		return nil, taskArchiveReclaimOutcomeStale, nil
 	}
+	if err := s.checkArchiveReclaimInspection(ctx, job.TaskID, snapshot.WorktreeID); err != nil {
+		return nil, "", err
+	}
 	wt, err := s.loadArchiveReclaimWorktree(ctx, job, snapshot)
 	if err != nil || wt == nil {
 		if err != nil {
@@ -1325,7 +1328,13 @@ func (s *Service) executeTaskResourceCleanupJob(
 	cleanupWorktrees := snapshot.Worktrees
 	cleanupEnvironment := snapshot.TaskEnvironment
 	var errs []error
-	if snapshot.AllowUnverifiedWorkspaceChanges {
+	if job.IsArchive() {
+		if err := s.cleanupArchiveWorktrees(ctx, job, snapshot, stopOutcome); err != nil {
+			return err
+		}
+		cleanupWorktrees = nil
+		cleanupEnvironment = taskEnvironmentWithoutSnapshotWorktrees(snapshot.TaskEnvironment, snapshot.Worktrees)
+	} else if snapshot.AllowUnverifiedWorkspaceChanges {
 		resourceErrs, err := s.cleanupUnverifiedWorktrees(ctx, job, snapshot, stopOutcome)
 		if err != nil {
 			return errors.Join(append(resourceErrs, err)...)

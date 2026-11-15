@@ -1330,6 +1330,13 @@ to review an action and return to your list.
 - Several archives can be pending at once. Each row keeps its own spinner and ignores repeated archive requests until its own request settles, and Kandev does not switch you to a task that is also being archived.
 - Runtime stop and cleanup run in the background with a 60-second timeout. Cleanup failure does not undo the archive. Kandev preserves a runtime or environment when it cannot stop a nonterminal session, or while another active task uses a shared environment or worktree.
 
+A damaged Git checkout or a timed-out workspace inspection does not block
+archiving the task or its selected subtasks. Kandev records the cleanup failure
+and preserves the affected workspace and enclosing task folder. Independently
+verified workspaces can still be cleaned up. Missing original identity evidence
+can require manual repair before cleanup is safe. Access checks and database
+writes must still succeed.
+
 For Git worktrees, archive deletes Kandev-owned checkouts and their local
 changes during background cleanup, including staged, unstaged, untracked, and
 ignored files. Commit and push work you need before archiving. Kandev does not

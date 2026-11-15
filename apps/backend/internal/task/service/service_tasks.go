@@ -4250,7 +4250,7 @@ func (s *Service) cleanupDestructiveTaskResources(
 			zap.String("env_id", taskEnvironmentID(envCleanup.env)))
 	}
 	if !currentOwnership {
-		if envCleanup.allowUnverifiedWorkspaceChanges {
+		if envCleanup.allowUnverifiedWorkspaceChanges || (envCleanup.preserveBranches && envCleanup.deferEnvironment) {
 			errs = append(errs, errors.New("workspace ownership changed; cleanup deferred"))
 		}
 		return errs
@@ -4274,7 +4274,7 @@ func (s *Service) cleanupDestructiveTaskResources(
 	var referenceErrs []error
 	worktrees, referenceErrs = s.filterSharedWorktreesForTaskCleanup(ctx, taskID, sessions, worktrees)
 	errs = append(errs, referenceErrs...)
-	if envCleanup.allowUnverifiedWorkspaceChanges && len(worktrees) != originalWorktreeCount {
+	if (envCleanup.allowUnverifiedWorkspaceChanges || (envCleanup.preserveBranches && envCleanup.deferEnvironment)) && len(worktrees) != originalWorktreeCount {
 		errs = append(errs, errors.New("workspace remains in use; cleanup deferred"))
 	}
 	if len(worktrees) == 0 {
