@@ -9,7 +9,7 @@ requirements:
   - REQ-TASKS-WORKFLOW-PROFILE-SESSIONS-001
 acceptance_criteria:
   - AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.4
-  - AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.16
+  - AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.17
 system_design:
   - ../../specs/tasks/system-design/workflow-profile-session-lifecycle.md
 ---

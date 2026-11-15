@@ -405,7 +405,7 @@ func insertTestTask(t *testing.T, db *sqlx.DB, id, wsID, title, state string, pr
 
 // seedTerminalWorkflowStep backs stepID with a single-step workflow whose
 // step is last-by-position and named "Done" — the shape
-// IsTaskWorkflowStepTerminal treats as terminal.
+// IsTaskOnFinalStep treats as terminal.
 func seedTerminalWorkflowStep(t *testing.T, db *sqlx.DB, stepID string) {
 	t.Helper()
 	workflowID := "wf-" + stepID

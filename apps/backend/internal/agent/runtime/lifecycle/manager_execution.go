@@ -1098,6 +1098,8 @@ func (m *Manager) registerAndPublishCreatedExecution(
 	runtimeInstance *ExecutorInstance,
 	execution *AgentExecution,
 ) (*AgentExecution, error) {
+	defer execution.settleRegistration()
+
 	// Cleanup can stop and remove an execution as soon as it is registered.
 	// Keep the final admission, registration, persistence, and publication as
 	// one lifecycle transition so cleanup cannot observe a half-created
@@ -1383,6 +1385,7 @@ func (m *Manager) initializeCreatedExecution(
 	preparation *executionCreatePreparation,
 ) *AgentExecution {
 	execution := runtimeInstance.ToAgentExecution(preparation.request)
+	execution.registrationSettled = make(chan struct{})
 	execution.RuntimeName = rt.Name()
 	m.applyCopilotNativeLaunchCapability(execution, rt, preparation.request.DeliveryStreamID)
 	// Set before executionStore.Add: once the execution is registered, a

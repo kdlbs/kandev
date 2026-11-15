@@ -105,7 +105,6 @@ function makeUnloadedSettings(): UserSettingsState {
     githubSavedPresets: undefined,
     githubDefaultQueryPresets: undefined,
     gitlabSavedPresets: undefined,
-    azureDevOpsBrowsePreferences: undefined,
     defaultUtilityAgentId: null,
     defaultUtilityAgentProfileId: null,
     keyboardShortcuts: {},

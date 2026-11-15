@@ -234,7 +234,7 @@ func TestCreateStepsFromTemplate(t *testing.T) {
 
 		unknown := doJSON(t, h.router, http.MethodPost, "/api/v1/workflows/workflow-1/workflow/steps",
 			map[string]interface{}{"template_id": "nope"})
-		requireJSONError(t, unknown, http.StatusNotFound, "Step not found")
+		requireJSONError(t, unknown, http.StatusNotFound, "Template not found")
 		if names := listStepNames(t, h, "workflow-1"); len(names) != 0 {
 			t.Fatalf("rejected apply wrote %v", names)
 		}

@@ -105,17 +105,17 @@ consumed tombstone remains durable.
 5. If the start setting is `reuse`, select the newest eligible nonterminal
    matching session. Exclude the source session.
 6. If the start setting is `new`, do not perform a reusable-session lookup.
-7. Preflight managed Git credentials for the selected or new destination.
+7. Preflight executor admission, then managed Git credentials, for the
+   selected or new destination (a new one inherits the source's bindings).
 8. Prepare and promote the destination session before source mutation.
 9. If the end setting is `complete`, mark the source `COMPLETED`, then stop
    its runtime.
 10. If the end setting is `park`, persist the execution-stamped stop intent.
     Set the source to `WAITING_FOR_INPUT` and clear `CompletedAt`.
 11. Release the source lifecycle guard before runtime stop. If the caller owns
-    the guard (a queued prompt's `on_turn_start`), stop after the operation
-    returns. That prompt is first requeued with `turn_start_already_processed`,
-    so a switch moves it and the new primary prompts it once; on failure it
-    stays queued.
+    it during queued `on_turn_start`, stop after the operation. Requeue with
+    `turn_start_already_processed` so the new primary prompts once. On switch
+    failure, the prompt stays queued on the source.
 12. Consume only the old execution's stamped intent; treat its stream close as
     teardown acknowledgement and skip normal terminal processing.
 
@@ -135,7 +135,8 @@ of the transition.
 [Profile readiness](workflow-profile-readiness.md) defines Dynamic-profile validation and completed-turn recovery after preflight rejection.
 
 Destination preparation and credential validation fail before source mutation.
-The current session remains primary and recoverable.
+The current session remains primary and recoverable; see
+[destination admission](workflow-profile-readiness.md#destination-executor-admission).
 
 If a park intent cannot be persisted, Kandev stops the switch before source
 retirement. It does not change the end setting to `complete`.

@@ -325,6 +325,23 @@ func (m *serviceBackedMessageCreator) CreateSessionMessageIdempotent(
 	return err
 }
 
+func (m *serviceBackedMessageCreator) CreateSessionLifecycleMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, sessionID, messageType string,
+	metadata map[string]interface{},
+) error {
+	_, err := m.svc.CreateMessageIdempotent(ctx, messageID, &taskservice.CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		CompletedTurn: true,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          messageType,
+		Metadata:      metadata,
+	})
+	return err
+}
+
 func (m *serviceBackedMessageCreator) CreateLifecycleSessionMessage(
 	ctx context.Context,
 	taskID, content, sessionID, messageType string,

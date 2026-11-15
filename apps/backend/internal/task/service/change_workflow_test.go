@@ -10,6 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/completion"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/workflow/repository"
@@ -82,6 +83,7 @@ type workflowChangeAdmissionWriter func(
 	*v1.TaskState,
 	bool,
 	*models.WorkflowChangeSource,
+	*completion.Admission,
 ) (bool, error)
 
 func (r *workflowChangeCleanupRaceRepository) UpdateTaskWithWorkflowChangeAdmissionAndState(
@@ -93,6 +95,7 @@ func (r *workflowChangeCleanupRaceRepository) UpdateTaskWithWorkflowChangeAdmiss
 	admittedState *v1.TaskState,
 	queueExitPending bool,
 	source *models.WorkflowChangeSource,
+	admission *completion.Admission,
 ) (bool, error) {
 	r.t.Helper()
 	cleared, err := r.ClearManualMoveLifecycleMarkersIfCompleted(ctx, task.ID, source.UpdatedAt)
@@ -102,7 +105,7 @@ func (r *workflowChangeCleanupRaceRepository) UpdateTaskWithWorkflowChangeAdmiss
 	if !cleared {
 		r.t.Fatal("expected concurrent recovery cleanup to clear the old markers")
 	}
-	return r.update(ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, source)
+	return r.update(ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, source, admission)
 }
 
 func newWorkflowChangeFixture(t *testing.T) workflowChangeFixture {
@@ -245,6 +248,25 @@ func TestMoveTaskWithWorkflowChangeReplacesOverridesAndPreservesTaskContext(t *t
 	}
 	if len(fixture.validator.profiles) != 1 || fixture.validator.profiles[0] != "replacement-profile" {
 		t.Fatalf("validated profiles = %v, want replacement on task executor", fixture.validator.profiles)
+	}
+}
+
+func TestMoveTaskWithWorkflowChangeAllowsHumanAdmissionForNonOfficeTask(t *testing.T) {
+	fixture := newWorkflowChangeFixture(t)
+
+	result, err := fixture.svc.MoveTaskWithOptions(
+		context.Background(), fixture.task.ID, "workflow-target", "target-analysis", 0,
+		MoveTaskOptions{
+			AllowActivePrimarySession: true,
+			WorkflowChange:            fixture.request,
+			StepHistoryActor:          wfmodels.StepTransitionActorHuman,
+		},
+	)
+	if err != nil {
+		t.Fatalf("human workflow change: %v", err)
+	}
+	if result.Task.WorkflowID != "workflow-target" || result.Task.WorkflowStepID != "target-analysis" {
+		t.Fatalf("task placement = %s/%s, want workflow-target/target-analysis", result.Task.WorkflowID, result.Task.WorkflowStepID)
 	}
 }
 

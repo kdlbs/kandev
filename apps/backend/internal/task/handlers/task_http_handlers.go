@@ -993,8 +993,12 @@ func (h *TaskHandlers) httpBulkMoveTasks(c *gin.Context) {
 		wfmodels.StepTransitionActorHuman,
 	)
 	if err != nil {
+		if handleBulkMoveError(c, err) {
+			return
+		}
 		var approvals *service.ApprovalsPendingMoveError
-		if errors.As(err, &approvals) || errors.Is(err, service.ErrWorkflowChangeConflict) {
+		if errors.As(err, &approvals) || errors.Is(err, service.ErrWorkflowChangeConflict) ||
+			errors.Is(err, workflowmove.ErrDestinationExecutorUnavailable) {
 			handleSelectedMoveError(c, h.logger, err)
 			return
 		}
@@ -1002,7 +1006,7 @@ func (h *TaskHandlers) httpBulkMoveTasks(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to bulk move tasks"})
 		return
 	}
-	c.JSON(http.StatusOK, dto.BulkMoveTasksResponse{MovedCount: result.MovedCount})
+	c.JSON(http.StatusOK, dto.BulkMoveTasksResponse{MovedCount: result.MovedCount, MovedTaskIDs: result.MovedTaskIDs})
 }
 
 func (h *TaskHandlers) httpBulkMoveSelectedTasks(c *gin.Context, body httpBulkMoveTasksRequest) {
@@ -1014,10 +1018,13 @@ func (h *TaskHandlers) httpBulkMoveSelectedTasks(c *gin.Context, body httpBulkMo
 		wfmodels.StepTransitionActorHuman,
 	)
 	if err != nil {
+		if handleBulkMoveError(c, err) {
+			return
+		}
 		handleSelectedMoveError(c, h.logger, err)
 		return
 	}
-	c.JSON(http.StatusOK, dto.BulkMoveTasksResponse{MovedCount: result.MovedCount})
+	c.JSON(http.StatusOK, dto.BulkMoveTasksResponse{MovedCount: result.MovedCount, MovedTaskIDs: result.MovedTaskIDs})
 }
 
 type httpTaskRepositoryInput struct {

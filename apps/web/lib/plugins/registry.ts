@@ -108,7 +108,6 @@ type PluginRegistryStateSnapshot = {
 };
 
 const CORE_INTEGRATION_SETTINGS_IDS = new Set([
-  "azure-devops",
   "github",
   "gitlab",
   "jira",
