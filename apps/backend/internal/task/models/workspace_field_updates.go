@@ -17,7 +17,11 @@ type WorkspaceFieldUpdate struct {
 	// change the failed-route automatic retry policy.
 	DynamicFailedRouteAutoRetryEnabled *bool
 	DynamicFailedRouteAutoRetryMax     *int
-	UnitID                             *string
+	// WIPSessionlessReleaseEnabled and WIPSessionlessReleaseGraceMinutes
+	// carry the opt-in sessionless WIP slot release policy.
+	WIPSessionlessReleaseEnabled      *bool
+	WIPSessionlessReleaseGraceMinutes *int
+	UnitID                            *string
 
 	ClarificationUnansweredInboxEnabled  *bool
 	ClarificationUnansweredRetentionDays *int

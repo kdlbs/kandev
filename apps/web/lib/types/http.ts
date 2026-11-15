@@ -333,6 +333,8 @@ export type Workspace = {
   clarification_unanswered_inbox_enabled?: boolean;
   /** Days before an unanswered question closes on its own (1 to 90, default 14). */
   clarification_unanswered_retention_days?: number;
+  wip_sessionless_release_enabled?: boolean;
+  wip_sessionless_release_grace_minutes?: number;
   office_workflow_id?: WorkflowId;
   /** Office task identifier prefix (e.g. "KAN"). */
   task_prefix?: string;

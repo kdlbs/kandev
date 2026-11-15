@@ -1965,6 +1965,14 @@ func (w *Workspace) IsImproveKandev() bool {
 }
 
 // Workspace represents a workspace
+// DefaultWIPSessionlessReleaseGraceMinutes is the grace a workspace that turns
+// on sessionless WIP slot release gets when it does not choose its own.
+const DefaultWIPSessionlessReleaseGraceMinutes = 10
+
+// MaxWIPSessionlessReleaseGraceMinutes bounds the grace at one year, far below
+// the value whose conversion to time.Duration would overflow.
+const MaxWIPSessionlessReleaseGraceMinutes = 525600
+
 type Workspace struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -1992,10 +2000,18 @@ type Workspace struct {
 	// after its candidates' circuits recover. Off by default; see
 	// dynamic_failed_route_retry.go. DynamicFailedRouteAutoRetryMax caps the
 	// automatic retries between successful turns (1-3, default 1).
-	DynamicFailedRouteAutoRetryEnabled bool      `json:"dynamic_failed_route_auto_retry_enabled"`
-	DynamicFailedRouteAutoRetryMax     int       `json:"dynamic_failed_route_auto_retry_max"`
-	CreatedAt                          time.Time `json:"created_at"`
-	UpdatedAt                          time.Time `json:"updated_at"`
+	DynamicFailedRouteAutoRetryEnabled bool `json:"dynamic_failed_route_auto_retry_enabled"`
+	DynamicFailedRouteAutoRetryMax     int  `json:"dynamic_failed_route_auto_retry_max"`
+	// WIPSessionlessReleaseEnabled lets an admitted IN_PROGRESS or FAILED task
+	// whose sessions are all terminal (or that has none) stop counting toward
+	// its workflow step's WIP limit once WIPSessionlessReleaseGraceMinutes have
+	// passed since its last task or session activity. Off by default, so an
+	// admitted task keeps its slot until it leaves the step. The policy never
+	// moves the task or changes its state.
+	WIPSessionlessReleaseEnabled      bool      `json:"wip_sessionless_release_enabled"`
+	WIPSessionlessReleaseGraceMinutes int       `json:"wip_sessionless_release_grace_minutes"`
+	CreatedAt                         time.Time `json:"created_at"`
+	UpdatedAt                         time.Time `json:"updated_at"`
 
 	// Office extensions
 	TaskPrefix       string `json:"task_prefix,omitempty"`        // e.g. "KAN"

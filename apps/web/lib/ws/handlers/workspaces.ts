@@ -95,6 +95,37 @@ function newWorkspaceDynamicRouting(
   };
 }
 
+function workspaceWipReleaseUpdate(
+  item: WorkspaceItem,
+  payload: WorkspacePayload,
+): Pick<
+  WorkspaceItem,
+  "wip_sessionless_release_enabled" | "wip_sessionless_release_grace_minutes"
+> {
+  return {
+    wip_sessionless_release_enabled:
+      "wip_sessionless_release_enabled" in payload
+        ? (payload.wip_sessionless_release_enabled ?? false)
+        : item.wip_sessionless_release_enabled,
+    wip_sessionless_release_grace_minutes:
+      "wip_sessionless_release_grace_minutes" in payload
+        ? payload.wip_sessionless_release_grace_minutes
+        : item.wip_sessionless_release_grace_minutes,
+  };
+}
+
+function createdWorkspaceWipRelease(
+  payload: WorkspacePayload,
+): Pick<
+  WorkspaceItem,
+  "wip_sessionless_release_enabled" | "wip_sessionless_release_grace_minutes"
+> {
+  return {
+    wip_sessionless_release_enabled: payload.wip_sessionless_release_enabled ?? false,
+    wip_sessionless_release_grace_minutes: payload.wip_sessionless_release_grace_minutes ?? 10,
+  };
+}
+
 function updateWorkspaceItem(item: WorkspaceItem, payload: WorkspacePayload): WorkspaceItem {
   return {
     ...item,
@@ -107,6 +138,7 @@ function updateWorkspaceItem(item: WorkspaceItem, payload: WorkspacePayload): Wo
     ...workspaceIdlePolicyUpdate(item, payload),
     ...workspaceDynamicRoutingUpdate(item, payload),
     ...workspaceUnansweredInboxUpdate(item, payload),
+    ...workspaceWipReleaseUpdate(item, payload),
     updated_at: payload.updated_at ?? item.updated_at,
   };
 }
@@ -169,6 +201,7 @@ export function registerWorkspacesHandlers(store: StoreApi<AppState>): WsHandler
           ...newWorkspaceDynamicRouting(payload),
           clarification_unanswered_inbox_enabled: payload.clarification_unanswered_inbox_enabled,
           clarification_unanswered_retention_days: payload.clarification_unanswered_retention_days,
+          ...createdWorkspaceWipRelease(payload),
           created_at: payload.created_at ?? new Date().toISOString(),
           updated_at: payload.updated_at ?? new Date().toISOString(),
         };

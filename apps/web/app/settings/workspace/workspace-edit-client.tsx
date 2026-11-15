@@ -41,6 +41,7 @@ import { WorkspacePlacementCard } from "@/components/settings/workspaces/workspa
 import { WorkspaceTeamAccessCard } from "@/components/settings/workspaces/workspace-team-access-card";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { WorkspaceIdlePolicyFormSection } from "./workspace-idle-policy-form-section";
+import { WorkspaceWipReleaseSection } from "./workspace-wip-release-section";
 import {
   failedRouteAutoRetryControls,
   savedFailedRouteAutoRetryState,
@@ -580,6 +581,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
         onEnabledChange={setMidTurnFailoverEnabled}
         autoRetry={failedRouteAutoRetryControls(autoRetry, savedState)}
       />
+      <WorkspaceWipReleaseSection workspace={currentWorkspace} canManage={canManage} />
       <WorkspaceUnansweredInboxSettings workspace={workspace} canManage={canManage} />
       {/*
         Reads the live store item rather than the form's captured snapshot:

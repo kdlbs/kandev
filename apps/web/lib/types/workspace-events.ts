@@ -20,6 +20,9 @@ export type WorkspacePayload = {
   dynamic_midturn_failover_enabled?: boolean;
   dynamic_failed_route_auto_retry_enabled?: boolean;
   dynamic_failed_route_auto_retry_max?: number;
+  /** Sessionless WIP release policy; absent from older backends like the idle policy. */
+  wip_sessionless_release_enabled?: boolean;
+  wip_sessionless_release_grace_minutes?: number;
   /** Unanswered-question inbox settings; absent from older backends. */
   clarification_unanswered_inbox_enabled?: boolean;
   clarification_unanswered_retention_days?: number;

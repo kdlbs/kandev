@@ -208,6 +208,8 @@ describe("accepted identity and descriptors", () => {
       dynamic_midturn_failover_enabled: shape === "complete",
       dynamic_failed_route_auto_retry_enabled: shape === "complete",
       dynamic_failed_route_auto_retry_max: shape === "complete" ? 2 : 1,
+      wip_sessionless_release_enabled: false,
+      wip_sessionless_release_grace_minutes: 10,
       office_workflow_id: shape === "complete" ? "office-workflow" : null,
       created_at: "2026-10-01T00:00:00Z",
       updated_at: "2026-10-02T00:00:00Z",

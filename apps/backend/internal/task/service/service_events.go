@@ -970,6 +970,8 @@ func (s *Service) publishWorkspaceEvent(ctx context.Context, eventType string, w
 
 		"clarification_unanswered_inbox_enabled":  workspace.ClarificationUnansweredInboxEnabled,
 		"clarification_unanswered_retention_days": workspace.ClarificationUnansweredRetentionDays,
+		"wip_sessionless_release_enabled":         workspace.WIPSessionlessReleaseEnabled,
+		"wip_sessionless_release_grace_minutes":   workspace.WIPSessionlessReleaseGraceMinutes,
 		// Placement is reach: moving a workspace between units is what grants
 		// and withdraws access now, so an access-changed event that omitted it
 		// would tell clients something changed without telling them what.

@@ -71,6 +71,8 @@ describe("mapWorkspaceItem", () => {
       dynamic_midturn_failover_enabled: false,
       dynamic_failed_route_auto_retry_enabled: false,
       dynamic_failed_route_auto_retry_max: 1,
+      wip_sessionless_release_enabled: false,
+      wip_sessionless_release_grace_minutes: 10,
       office_workflow_id: null,
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-02T00:00:00Z",

@@ -135,6 +135,9 @@ type httpUpdateWorkspaceRequest struct {
 	DynamicMidTurnFailoverEnabled      *bool   `json:"dynamic_midturn_failover_enabled,omitempty"`
 	DynamicFailedRouteAutoRetryEnabled *bool   `json:"dynamic_failed_route_auto_retry_enabled,omitempty"`
 	DynamicFailedRouteAutoRetryMax     *int    `json:"dynamic_failed_route_auto_retry_max,omitempty"`
+	// WIP sessionless release policy (opt-in, off by default).
+	WIPSessionlessReleaseEnabled      *bool `json:"wip_sessionless_release_enabled,omitempty"`
+	WIPSessionlessReleaseGraceMinutes *int  `json:"wip_sessionless_release_grace_minutes,omitempty"`
 	// UnitID moves the workspace to another unit, changing who reaches it.
 	UnitID *string `json:"unit_id,omitempty"`
 
@@ -164,6 +167,8 @@ func (h *WorkspaceHandlers) httpUpdateWorkspace(c *gin.Context) {
 
 		ClarificationUnansweredInboxEnabled:  body.ClarificationUnansweredInboxEnabled,
 		ClarificationUnansweredRetentionDays: body.ClarificationUnansweredRetentionDays,
+		WIPSessionlessReleaseEnabled:         body.WIPSessionlessReleaseEnabled,
+		WIPSessionlessReleaseGraceMinutes:    body.WIPSessionlessReleaseGraceMinutes,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "workspace not updated")
@@ -292,6 +297,9 @@ type wsUpdateWorkspaceRequest struct {
 
 	ClarificationUnansweredInboxEnabled  *bool `json:"clarification_unanswered_inbox_enabled,omitempty"`
 	ClarificationUnansweredRetentionDays *int  `json:"clarification_unanswered_retention_days,omitempty"`
+	// WIP sessionless release policy (opt-in, off by default).
+	WIPSessionlessReleaseEnabled      *bool `json:"wip_sessionless_release_enabled,omitempty"`
+	WIPSessionlessReleaseGraceMinutes *int  `json:"wip_sessionless_release_grace_minutes,omitempty"`
 }
 
 func (h *WorkspaceHandlers) wsUpdateWorkspace(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -318,12 +326,15 @@ func (h *WorkspaceHandlers) wsUpdateWorkspace(ctx context.Context, msg *ws.Messa
 
 		ClarificationUnansweredInboxEnabled:  req.ClarificationUnansweredInboxEnabled,
 		ClarificationUnansweredRetentionDays: req.ClarificationUnansweredRetentionDays,
+		WIPSessionlessReleaseEnabled:         req.WIPSessionlessReleaseEnabled,
+		WIPSessionlessReleaseGraceMinutes:    req.WIPSessionlessReleaseGraceMinutes,
 	})
 	if err != nil {
 		h.logger.Error("failed to update workspace", zap.Error(err))
 		if errors.Is(err, service.ErrWorkspaceIdleTimeoutInvalid) ||
 			errors.Is(err, service.ErrWorkspaceFailedRouteAutoRetryMaxInvalid) ||
-			errors.Is(err, service.ErrWorkspaceClarificationRetentionInvalid) {
+			errors.Is(err, service.ErrWorkspaceClarificationRetentionInvalid) ||
+			errors.Is(err, service.ErrWorkspaceWIPReleaseGraceInvalid) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update workspace", nil)

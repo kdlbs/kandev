@@ -30,6 +30,9 @@ export type WorkspaceState = {
     dynamic_failed_route_auto_retry_max?: number;
     clarification_unanswered_inbox_enabled?: boolean;
     clarification_unanswered_retention_days?: number;
+    /** Opt-in release of WIP slots held by tasks with no live session. */
+    wip_sessionless_release_enabled?: boolean;
+    wip_sessionless_release_grace_minutes?: number;
     office_workflow_id?: string | null;
     /** Office task identifier prefix (e.g. "KAN"). */
     task_prefix?: string;

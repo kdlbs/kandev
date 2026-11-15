@@ -158,6 +158,8 @@ func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceReque
 		ACPIdleSuspensionEnabled: false,
 		ACPIdleTimeoutMinutes:    120,
 
+		WIPSessionlessReleaseEnabled:         false,
+		WIPSessionlessReleaseGraceMinutes:    models.DefaultWIPSessionlessReleaseGraceMinutes,
 		DynamicFailedRouteAutoRetryMax:       models.DefaultDynamicFailedRouteAutoRetryMax,
 		ClarificationUnansweredRetentionDays: models.DefaultClarificationUnansweredRetentionDays,
 	}
@@ -227,6 +229,11 @@ func (s *Service) getWorkspaceAction(ctx context.Context, id string, action mode
 func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWorkspaceRequest) (*models.Workspace, error) {
 	if req.ACPIdleTimeoutMinutes != nil && *req.ACPIdleTimeoutMinutes <= 0 {
 		return nil, fmt.Errorf("%w: must be greater than zero", ErrWorkspaceIdleTimeoutInvalid)
+	}
+	if grace := req.WIPSessionlessReleaseGraceMinutes; grace != nil &&
+		(*grace <= 0 || *grace > models.MaxWIPSessionlessReleaseGraceMinutes) {
+		return nil, fmt.Errorf("%w: must be between 1 and %d", ErrWorkspaceWIPReleaseGraceInvalid,
+			models.MaxWIPSessionlessReleaseGraceMinutes)
 	}
 	if limit := req.DynamicFailedRouteAutoRetryMax; limit != nil && !models.ValidDynamicFailedRouteAutoRetryMax(*limit) {
 		return nil, ErrWorkspaceFailedRouteAutoRetryMaxInvalid

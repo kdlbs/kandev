@@ -59,6 +59,8 @@ type WorkspaceDTO struct {
 
 	ClarificationUnansweredInboxEnabled  bool `json:"clarification_unanswered_inbox_enabled"`
 	ClarificationUnansweredRetentionDays int  `json:"clarification_unanswered_retention_days"`
+	WIPSessionlessReleaseEnabled         bool `json:"wip_sessionless_release_enabled"`
+	WIPSessionlessReleaseGraceMinutes    int  `json:"wip_sessionless_release_grace_minutes"`
 
 	// ViewerRole and Scopes describe what the *requesting* user may do here.
 	// The frontend gates every control on Scopes rather than comparing the
@@ -959,6 +961,8 @@ func FromWorkspace(workspace *models.Workspace) WorkspaceDTO {
 
 		ClarificationUnansweredInboxEnabled:  workspace.ClarificationUnansweredInboxEnabled,
 		ClarificationUnansweredRetentionDays: workspace.ClarificationUnansweredRetentionDays,
+		WIPSessionlessReleaseEnabled:         workspace.WIPSessionlessReleaseEnabled,
+		WIPSessionlessReleaseGraceMinutes:    workspace.WIPSessionlessReleaseGraceMinutes,
 	}
 }
 

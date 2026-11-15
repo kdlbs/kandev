@@ -84,6 +84,8 @@ export function mapWorkspaceItem(ws: WorkspaceItem): WorkspaceState["items"][num
     // Passed through as sent: consumers default an absent value (off, 14 days).
     clarification_unanswered_inbox_enabled: ws.clarification_unanswered_inbox_enabled,
     clarification_unanswered_retention_days: ws.clarification_unanswered_retention_days,
+    wip_sessionless_release_enabled: ws.wip_sessionless_release_enabled ?? false,
+    wip_sessionless_release_grace_minutes: ws.wip_sessionless_release_grace_minutes ?? 10,
     office_workflow_id: ws.office_workflow_id ?? null,
     task_prefix: ws.task_prefix,
     created_at: ws.created_at,

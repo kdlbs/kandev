@@ -17,6 +17,8 @@ func workspaceFieldUpdate(req *UpdateWorkspaceRequest) models.WorkspaceFieldUpda
 
 		ClarificationUnansweredInboxEnabled:  req.ClarificationUnansweredInboxEnabled,
 		ClarificationUnansweredRetentionDays: req.ClarificationUnansweredRetentionDays,
+		WIPSessionlessReleaseEnabled:         req.WIPSessionlessReleaseEnabled,
+		WIPSessionlessReleaseGraceMinutes:    req.WIPSessionlessReleaseGraceMinutes,
 	}
 	update.DefaultExecutorID = workspaceDefaultUpdate(req.DefaultExecutorID)
 	update.DefaultEnvironmentID = workspaceDefaultUpdate(req.DefaultEnvironmentID)

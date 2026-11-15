@@ -790,6 +790,8 @@ func mapWorkspaceItemState(workspace taskdto.WorkspaceDTO) map[string]any {
 
 		"clarification_unanswered_inbox_enabled":  workspace.ClarificationUnansweredInboxEnabled,
 		"clarification_unanswered_retention_days": workspace.ClarificationUnansweredRetentionDays,
+		"wip_sessionless_release_enabled":         workspace.WIPSessionlessReleaseEnabled,
+		"wip_sessionless_release_grace_minutes":   workspace.WIPSessionlessReleaseGraceMinutes,
 	}
 }
 

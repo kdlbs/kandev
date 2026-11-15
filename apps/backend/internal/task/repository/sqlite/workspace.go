@@ -40,6 +40,9 @@ func (r *Repository) prepareWorkspace(workspace *models.Workspace) {
 	if workspace.ClarificationUnansweredRetentionDays == 0 {
 		workspace.ClarificationUnansweredRetentionDays = models.DefaultClarificationUnansweredRetentionDays
 	}
+	if workspace.WIPSessionlessReleaseGraceMinutes <= 0 {
+		workspace.WIPSessionlessReleaseGraceMinutes = models.DefaultWIPSessionlessReleaseGraceMinutes
+	}
 }
 
 func (r *Repository) insertWorkspace(ctx context.Context, exec sqlx.ExtContext, workspace *models.Workspace) error {
@@ -63,13 +66,15 @@ func (r *Repository) insertWorkspace(ctx context.Context, exec sqlx.ExtContext, 
 			dynamic_midturn_failover_enabled,
 			dynamic_failed_route_auto_retry_enabled,
 			dynamic_failed_route_auto_retry_max,
+			wip_sessionless_release_enabled,
+			wip_sessionless_release_grace_minutes,
 			created_at,
 			updated_at,
 			clarification_unanswered_inbox_enabled,
 			clarification_unanswered_retention_days
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), workspace.ID, workspace.Name, workspace.Description, workspace.OwnerID, workspace.OrgID, workspace.UnitID, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.DefaultConfigAgentProfileID, workspace.TaskPrefix, workspace.TaskSequence, workspace.OfficeWorkflowID, workspace.ACPIdleSuspensionEnabled, workspace.ACPIdleTimeoutMinutes, workspace.DynamicMidTurnFailoverEnabled, workspace.DynamicFailedRouteAutoRetryEnabled, workspace.DynamicFailedRouteAutoRetryMax, workspace.CreatedAt, workspace.UpdatedAt, workspace.ClarificationUnansweredInboxEnabled, workspace.ClarificationUnansweredRetentionDays)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), workspace.ID, workspace.Name, workspace.Description, workspace.OwnerID, workspace.OrgID, workspace.UnitID, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.DefaultConfigAgentProfileID, workspace.TaskPrefix, workspace.TaskSequence, workspace.OfficeWorkflowID, workspace.ACPIdleSuspensionEnabled, workspace.ACPIdleTimeoutMinutes, workspace.DynamicMidTurnFailoverEnabled, workspace.DynamicFailedRouteAutoRetryEnabled, workspace.DynamicFailedRouteAutoRetryMax, workspace.WIPSessionlessReleaseEnabled, workspace.WIPSessionlessReleaseGraceMinutes, workspace.CreatedAt, workspace.UpdatedAt, workspace.ClarificationUnansweredInboxEnabled, workspace.ClarificationUnansweredRetentionDays)
 
 	return err
 }
@@ -83,7 +88,7 @@ func (r *Repository) GetWorkspace(ctx context.Context, id string) (*models.Works
 	return workspace, err
 }
 
-const workspaceSelectColumns = "id, name, description, owner_id, org_id, unit_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, acp_idle_suspension_enabled, acp_idle_timeout_minutes, dynamic_midturn_failover_enabled, dynamic_failed_route_auto_retry_enabled, dynamic_failed_route_auto_retry_max, created_at, updated_at, clarification_unanswered_inbox_enabled, clarification_unanswered_retention_days"
+const workspaceSelectColumns = "id, name, description, owner_id, org_id, unit_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, acp_idle_suspension_enabled, acp_idle_timeout_minutes, dynamic_midturn_failover_enabled, dynamic_failed_route_auto_retry_enabled, dynamic_failed_route_auto_retry_max, wip_sessionless_release_enabled, wip_sessionless_release_grace_minutes, created_at, updated_at, clarification_unanswered_inbox_enabled, clarification_unanswered_retention_days"
 
 type workspaceScanner interface {
 	Scan(...any) error
@@ -117,6 +122,8 @@ func scanWorkspaceRow(scanner workspaceScanner) (*models.Workspace, error) {
 		&workspace.DynamicMidTurnFailoverEnabled,
 		&workspace.DynamicFailedRouteAutoRetryEnabled,
 		&workspace.DynamicFailedRouteAutoRetryMax,
+		&workspace.WIPSessionlessReleaseEnabled,
+		&workspace.WIPSessionlessReleaseGraceMinutes,
 		&workspace.CreatedAt,
 		&workspace.UpdatedAt,
 		&clarificationUnansweredInboxEnabled,
@@ -162,6 +169,9 @@ func (r *Repository) updateWorkspace(ctx context.Context, workspace *models.Work
 	if workspace.ClarificationUnansweredRetentionDays == 0 {
 		workspace.ClarificationUnansweredRetentionDays = models.DefaultClarificationUnansweredRetentionDays
 	}
+	if workspace.WIPSessionlessReleaseGraceMinutes <= 0 {
+		workspace.WIPSessionlessReleaseGraceMinutes = models.DefaultWIPSessionlessReleaseGraceMinutes
+	}
 	workspace.UpdatedAt = time.Now().UTC()
 	query := `
 		UPDATE workspaces
@@ -179,6 +189,8 @@ func (r *Repository) updateWorkspace(ctx context.Context, workspace *models.Work
 			dynamic_failed_route_auto_retry_max = ?,
 			clarification_unanswered_inbox_enabled = ?,
 			clarification_unanswered_retention_days = ?,
+			wip_sessionless_release_enabled = ?,
+			wip_sessionless_release_grace_minutes = ?,
 			updated_at = ?
 		WHERE id = ?`
 	args := []interface{}{
@@ -188,6 +200,7 @@ func (r *Repository) updateWorkspace(ctx context.Context, workspace *models.Work
 		workspace.ACPIdleTimeoutMinutes, workspace.DynamicMidTurnFailoverEnabled,
 		workspace.DynamicFailedRouteAutoRetryEnabled, workspace.DynamicFailedRouteAutoRetryMax,
 		workspace.ClarificationUnansweredInboxEnabled, workspace.ClarificationUnansweredRetentionDays,
+		workspace.WIPSessionlessReleaseEnabled, workspace.WIPSessionlessReleaseGraceMinutes,
 		workspace.UpdatedAt, workspace.ID,
 	}
 	if expected != nil {
