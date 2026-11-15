@@ -2,6 +2,8 @@ package messagequeue
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -18,7 +20,11 @@ func (r *sqliteRepository) compactSessionQueueTx(ctx context.Context, tx *sqlx.T
 	if err != nil {
 		return 0, err
 	}
-	compacted := compactQueueRows(rows, leased)
+	fences, err := r.compactionFencesTx(ctx, tx, identity.SessionID)
+	if err != nil {
+		return 0, err
+	}
+	compacted := compactQueueRows(rows, leased, fences)
 	for i := range compacted.kept {
 		entry := &compacted.kept[i]
 		if !entry.dirty {
@@ -88,4 +94,29 @@ func (r *sqliteRepository) compactionLeasesTx(ctx context.Context, tx *sqlx.Tx, 
 		leased[id] = struct{}{}
 	}
 	return leased, nil
+}
+
+func (r *sqliteRepository) compactionFencesTx(ctx context.Context, tx *sqlx.Tx, sessionID string) (map[string]string, error) {
+	var claims []struct {
+		QueueID        string `db:"queue_id"`
+		TaskID         string `db:"task_id"`
+		InstallationID string `db:"installation_id"`
+		InstanceKey    string `db:"instance_key"`
+		Generation     int64  `db:"generation"`
+	}
+	if err := tx.SelectContext(ctx, &claims, tx.Rebind(`SELECT f.queue_id, f.task_id, f.installation_id, f.instance_key, f.generation
+ FROM queue_task_management_fences f JOIN queued_messages m ON m.id = f.queue_id
+ WHERE m.session_id = ?`), sessionID); err != nil {
+		return nil, err
+	}
+	if len(claims) == 0 {
+		return nil, nil
+	}
+	fences := make(map[string]string, len(claims))
+	for _, claim := range claims {
+		fences[claim.QueueID] = strings.Join([]string{
+			claim.TaskID, claim.InstallationID, claim.InstanceKey, strconv.FormatInt(claim.Generation, 10),
+		}, "\x00")
+	}
+	return fences, nil
 }

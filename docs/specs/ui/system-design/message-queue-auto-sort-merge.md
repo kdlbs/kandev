@@ -257,10 +257,16 @@ not fold, and other senders' folds may cross it. When the leased row is a
 target this matches admission, which checks the lease only on its chosen
 target: for A1, leased U1, A2 both produce A1+A2, U1 with U1 unchanged. A
 leased row is also never consumed as a source, which in-order admission would
-do (for U1, leased U2 admission yields U1+U2; compaction keeps U1, U2). With
-that lease exception, each step uses the target's already-merged state, so
-the result equals in-order admission with the policy ON (`.11`). Target
-lookup is O(1) per row through the per-segment index; the
+do (for U1, leased U2 admission yields U1+U2; compaction keeps U1, U2).
+SQL compaction also loads `queue_task_management_fences` for the session and
+folds two rows only when their task, installation, instance, and generation
+are identical (or neither row is fenced). The survivor therefore keeps a fence
+that matches all its content, so a later stale-claim check at reservation can
+never discard an instruction admitted under the current claim. The memory
+repository stores no fences. With those lease and claim exceptions, each step
+uses the target's already-merged state, so the result equals in-order
+admission with the policy ON (`.11`). Target lookup is O(1) per row through
+the per-segment index; the
 pass is O(N) lookups plus one compatibility check per row, one update per
 dirty target, and one delete per folded row. N is the session's current
 persisted row count, which is not bounded by the current capacity: capacity

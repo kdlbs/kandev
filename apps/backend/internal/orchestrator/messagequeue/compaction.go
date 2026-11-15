@@ -24,10 +24,14 @@ func (r *compactionRow) message() *QueuedMessage {
 type queueCompaction struct {
 	kept    []compactionRow
 	removed []int
+	fences  map[string]string
 }
 
-func compactQueueRows[T QueuedMessage | *QueuedMessage](rows []T, leased map[string]struct{}) queueCompaction {
-	result := queueCompaction{kept: make([]compactionRow, 0, len(rows))}
+// fences maps a row ID to its task-management claim; rows fold only when
+// their claims are identical, so a survivor never carries content admitted
+// under a different claim generation.
+func compactQueueRows[T QueuedMessage | *QueuedMessage](rows []T, leased map[string]struct{}, fences map[string]string) queueCompaction {
+	result := queueCompaction{kept: make([]compactionRow, 0, len(rows)), fences: fences}
 	latest := make(map[string]int)
 	for i := range rows {
 		var source *QueuedMessage
@@ -74,7 +78,7 @@ func (c *queueCompaction) fold(source *QueuedMessage, sender string, latest map[
 func (c *queueCompaction) foldInto(index int, source *QueuedMessage, leased map[string]struct{}) bool {
 	row := &c.kept[index]
 	target := row.message()
-	if _, blocked := leased[target.ID]; blocked || isFoldBarrier(target) {
+	if _, blocked := leased[target.ID]; blocked || isFoldBarrier(target) || c.fences[target.ID] != c.fences[source.ID] {
 		return false
 	}
 	values, compatible := buildAutoMergedEntry(target, source)

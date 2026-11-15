@@ -408,6 +408,17 @@ Public docs and specification validation passed. PostgreSQL is unverified:
   mobile-chrome tests/chat/mobile-message-queue-auto-sort-merge.spec.ts --
   --retries=0`: 1 passed. Web typecheck and Oxlint on changed files: passed.
 
+### Implementation review round 8 remediation
+
+- SQL compaction loads each row's `queue_task_management_fences` claim and
+  folds two rows only when their claims are identical (or both unfenced). A
+  new-generation plugin instruction can no longer be folded into an obsolete
+  generation's row and then discarded with it at reservation. AC `.11` and the
+  design's compaction section record this exception.
+- RED on the prior code, GREEN after:
+  `TestCompactionKeepsMessagesFromDifferentManagementClaimsSeparate`, for both
+  session-switch compaction triggers.
+
 Final repository gates, run from the repository root after all work orders:
 
 ```bash

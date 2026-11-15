@@ -42,7 +42,7 @@ func (r *memoryRepository) SetSessionPolicyAndCompact(_ context.Context, identit
 
 func (r *memoryRepository) compactSessionQueueLocked(sessionID string, leased map[string]struct{}) int {
 	rows := r.entries[sessionID]
-	compacted := compactQueueRows(rows, leased)
+	compacted := compactQueueRows(rows, leased, nil)
 	if len(compacted.removed) == 0 {
 		return 0
 	}

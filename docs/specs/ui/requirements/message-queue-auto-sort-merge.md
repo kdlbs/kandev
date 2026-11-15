@@ -128,10 +128,12 @@ handles fewer turns.
   the entries already kept. Any other visited entry shall fold into the kept
   entry directly above it when that pair is compatible under Auto-merge. An
   entry being edited shall never be folded into another entry or receive a
-  fold. Apart from that exception, the result shall equal the queue that
-  admitting the same entries in order would produce with effective
-  Auto-sort-merge ON. Entries that were not merged shall keep their relative
-  order.
+  fold, and two entries admitted under different task-management claims (a
+  different managing plugin installation, instance, or claim generation, or
+  one managed and one not) shall never fold together. Apart from those
+  exceptions, the result shall equal the queue that admitting the same
+  entries in order would produce with effective Auto-sort-merge ON. Entries
+  that were not merged shall keep their relative order.
 - **AC-UI-MESSAGE-QUEUE-AUTO-SORT-MERGE-001.12:** A compaction pass shall not
   modify reserved or in-flight entries or entries that are being edited. It
   shall not change Auto-run or start delivery. Clients shall receive one final
