@@ -358,6 +358,21 @@ func (s *Service) probeNewInferenceClosure(ctx context.Context, store inferenceC
 }
 
 func (s *Service) beginInferenceClosure(ctx context.Context, store inferenceClosureStore, sid, executionID, operation string) (json.RawMessage, error) {
+	if s.messageQueue == nil {
+		return s.beginInferenceClosureUnderAdmission(ctx, store, sid, executionID, operation)
+	}
+	// Queue hand-off takes admission before reading either session's recovery
+	// state. Use the same order so its transfer cannot cross a new fence.
+	var raw json.RawMessage
+	err := s.messageQueue.WithSessionAdmission(ctx, sid, func(admittedCtx context.Context) error {
+		var beginErr error
+		raw, beginErr = s.beginInferenceClosureUnderAdmission(admittedCtx, store, sid, executionID, operation)
+		return beginErr
+	})
+	return raw, err
+}
+
+func (s *Service) beginInferenceClosureUnderAdmission(ctx context.Context, store inferenceClosureStore, sid, executionID, operation string) (json.RawMessage, error) {
 	release, err := s.acquireInferenceRestartAdmission(ctx, sid)
 	if err != nil {
 		return nil, err

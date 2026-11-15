@@ -478,7 +478,9 @@ func (s *Service) terminalReclaimHasNoOtherWork(ctx context.Context, running *mo
 	}
 	sessionID := running.SessionID
 	block, err := s.GetOpenSessionRecoveryBlock(ctx, sessionID)
-	if err != nil || block != nil || s.sessionHasKnownIdleWorkBeyondTurn(ctx, sessionID) || s.sessionHasCancellableWorkBeyondTurn(ctx, sessionID) {
+	// A pending restart closure still owns the session's runtime.
+	if err != nil || block != nil || s.checkInferenceClosureAdmission(ctx, sessionID, false) != nil ||
+		s.sessionHasKnownIdleWorkBeyondTurn(ctx, sessionID) || s.sessionHasCancellableWorkBeyondTurn(ctx, sessionID) {
 		return false
 	}
 	pending, err := s.messageQueue.HasPendingDispatchForSession(ctx, sessionID)

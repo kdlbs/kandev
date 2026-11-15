@@ -2172,6 +2172,10 @@ func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID str
 	if !isTerminalSessionState(newState) {
 		return
 	}
+	// A restart closure still owns this session while its successor is pending.
+	if err := s.checkInferenceClosureAdmission(ctx, sessionID, false); err != nil {
+		return
+	}
 
 	// Check whether the stopped session is actually the primary
 	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
@@ -2368,7 +2372,8 @@ func (s *Service) currentPrimarySessionID(ctx context.Context, taskID string) st
 
 func (s *Service) terminalQueueSourceRetired(ctx context.Context, sessionID string) bool {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	return err == nil && session != nil && isTerminalSessionState(session.State) && !s.resumeAttemptInFlight(sessionID)
+	return err == nil && session != nil && isTerminalSessionState(session.State) && !s.resumeAttemptInFlight(sessionID) &&
+		s.checkInferenceClosureAdmission(ctx, sessionID, false) == nil
 }
 
 func (s *Service) terminalQueueReceiverAwaitsRecovery(ctx context.Context, sessionID string) bool {

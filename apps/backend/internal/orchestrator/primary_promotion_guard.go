@@ -17,6 +17,9 @@ func (s *Service) sessionAwaitsRecoveryAction(ctx context.Context, session *mode
 	if session.RouteState == dynamicRouteStatusActionRequired {
 		return true
 	}
+	if err := s.checkInferenceClosureAdmission(ctx, session.ID, false); err != nil {
+		return true
+	}
 	block, err := s.GetOpenSessionRecoveryBlock(ctx, session.ID)
 	if err != nil {
 		s.logger.Debug("cannot read session recovery block for primary selection",
