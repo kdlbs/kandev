@@ -931,6 +931,7 @@
   "queueMaximumShort": "Limit pending messages per session. Use 0 for unlimited.",
   "queueMergeShort": "Combine related queued messages before the agent reads them.",
   "queueAutoMergeShort": "Merge compatible consecutive messages automatically.",
+  "queueAutoSortMergeShort": "Requires automatic merge. Combine interleaved messages from the same sender task.",
   "sleepShort": "Prevent the computer running Kandev from sleeping during tasks.",
   "sidebarPresentation": "Sidebar appearance",
   "sidebarFastActions": "Show fast action icons",

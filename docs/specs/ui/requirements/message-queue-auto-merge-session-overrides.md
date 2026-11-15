@@ -57,18 +57,25 @@ default.
 - **AC-UI-MESSAGE-QUEUE-AUTO-MERGE-OVERRIDE-001.4:** The expanded queue header
   shall expose the effective value through the labeled Auto-merge switch pill
   defined by `REQ-UI-MESSAGE-QUEUE-AUTOMATION-CONTROLS-001`.
-- **AC-UI-MESSAGE-QUEUE-AUTO-MERGE-OVERRIDE-001.5:** The effective value shall
-  apply only to messages admitted after it is resolved. Changing it shall not
-  compact or split entries already pending.
+- **AC-UI-MESSAGE-QUEUE-AUTO-MERGE-OVERRIDE-001.5:** With Auto-sort-merge OFF,
+  the effective value shall apply only to messages admitted after it is
+  resolved; changing it shall not compact or split entries already pending.
+  Global changes shall never compact. A session change that enables effective
+  Auto-sort-merge shall compact pending entries as defined by
+  `AC-UI-MESSAGE-QUEUE-AUTO-SORT-MERGE-001.10`; disabling shall never split.
 - **AC-UI-MESSAGE-QUEUE-AUTO-MERGE-OVERRIDE-001.6:** When effective Auto-merge
-  is ON, a newly admitted message shall fold into the pending tail only when the
-  entries are consecutive and compatible under
-  `REQ-UI-MESSAGE-QUEUE-AUTO-MERGE-001`.
+  is ON and Auto-sort-merge is OFF, a newly admitted message shall fold into
+  the pending tail only when consecutive and compatible under
+  `REQ-UI-MESSAGE-QUEUE-AUTO-MERGE-001`. Effective Auto-sort-merge adds the
+  target selection defined by `REQ-UI-MESSAGE-QUEUE-AUTO-SORT-MERGE-001`
+  without changing that compatibility predicate.
 - **AC-UI-MESSAGE-QUEUE-AUTO-MERGE-OVERRIDE-001.7:** At or above a positive
   persisted-row limit, a compatible admission that does not require a staged
-  attachment claim shall fold directly into the tail without increasing the
-  row count. An incompatible admission or an admission with effective
-  Auto-merge OFF shall fail with `queue_full` and leave the queue unchanged.
+  attachment claim shall fold directly without increasing the row count.
+  Its target is the tail by default, or an eligible sorted target when
+  Auto-sort-merge applies; ordinary adjacent folding remains the fallback.
+  An admission with no compatible target or effective Auto-merge OFF shall
+  fail with `queue_full` and leave the queue unchanged.
 - **AC-UI-MESSAGE-QUEUE-AUTO-MERGE-OVERRIDE-001.8:** At or above a positive
   persisted-row limit, a staged-attachment admission shall fail with
   `queue_full` before claiming the attachment or changing the prior tail. It
@@ -181,8 +188,13 @@ default.
 - No workspace-level, task-level, or user-level override.
 - No Follow global or reset-to-global control.
 - No inherited-versus-explicit badge in the queue header.
-- No retroactive compaction or reconstruction of pending messages.
+- No retroactive compaction except the session effective-rise pass defined by
+  `REQ-UI-MESSAGE-QUEUE-AUTO-SORT-MERGE-001`; no reconstruction of pending messages.
 - No transfer of an override from one task session to another.
+
+## Related requirements
+
+- [Message Queue Auto-sort-merge](message-queue-auto-sort-merge.md)
 
 ## Related decision
 

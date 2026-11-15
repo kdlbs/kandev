@@ -25,14 +25,14 @@ func NewStore(raw RawStore) *Store {
 	return &Store{raw: raw}
 }
 
-// storedSettings mirrors Settings for JSON decoding but keeps both merge
-// settings as pointers. Missing keys in records written by older versions
-// therefore default on, while explicit false values remain false.
+// storedSettings preserves omission for legacy merge defaults.
 type storedSettings struct {
-	MaxPerSession     int   `json:"max_per_session"`
-	MergeEnabled      *bool `json:"merge_enabled"`
-	AutoMergeEnabled  *bool `json:"auto_merge_enabled"`
-	AutoMergeRevision int64 `json:"auto_merge_revision"`
+	MaxPerSession         int   `json:"max_per_session"`
+	MergeEnabled          *bool `json:"merge_enabled"`
+	AutoMergeEnabled      *bool `json:"auto_merge_enabled"`
+	AutoMergeRevision     int64 `json:"auto_merge_revision"`
+	AutoSortMergeEnabled  *bool `json:"auto_sort_merge_enabled"`
+	AutoSortMergeRevision int64 `json:"auto_sort_merge_revision"`
 }
 
 // toSettings normalizes a decoded record, defaulting omitted merge settings on.
@@ -45,9 +45,11 @@ func (s storedSettings) toSettings() Settings {
 	if s.AutoMergeEnabled != nil {
 		autoMergeEnabled = *s.AutoMergeEnabled
 	}
+	autoSortMergeEnabled := s.AutoSortMergeEnabled != nil && *s.AutoSortMergeEnabled
 	return Settings{
 		MaxPerSession: s.MaxPerSession, MergeEnabled: mergeEnabled,
 		AutoMergeEnabled: autoMergeEnabled, AutoMergeRevision: s.AutoMergeRevision,
+		AutoSortMergeEnabled: autoSortMergeEnabled, AutoSortMergeRevision: s.AutoSortMergeRevision,
 	}
 }
 
@@ -104,6 +106,7 @@ func encodeSettings(settings Settings) ([]byte, error) {
 	raw, err := json.Marshal(storedSettings{
 		MaxPerSession: settings.MaxPerSession, MergeEnabled: &settings.MergeEnabled,
 		AutoMergeEnabled: &settings.AutoMergeEnabled, AutoMergeRevision: settings.AutoMergeRevision,
+		AutoSortMergeEnabled: &settings.AutoSortMergeEnabled, AutoSortMergeRevision: settings.AutoSortMergeRevision,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("encode message queue settings: %w", err)

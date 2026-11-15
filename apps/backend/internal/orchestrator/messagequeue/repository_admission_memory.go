@@ -38,7 +38,7 @@ func (r *memoryRepository) AdmitQueueMessage(
 	candidate *QueuedMessage,
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 	workflowEntry *WorkflowEntryIdentity,
 ) (*QueuedMessage, bool, error) {
 	if workflowEntry != nil {
@@ -105,8 +105,13 @@ func (r *memoryRepository) admitNewAdmissionLocked(
 	message *QueuedMessage,
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
+	if policy != nil {
+		if err := r.validateAutoMergePolicyLocked(identity, *policy); err != nil {
+			return nil, false, err
+		}
+	}
 	if message.QueuedAt.IsZero() {
 		message.QueuedAt = time.Now().UTC()
 	}
@@ -133,12 +138,12 @@ func (r *memoryRepository) admitFullAdmissionLocked(
 	key queueAdmissionKey,
 	fingerprint string,
 	message *QueuedMessage,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
-	if policy == nil || !policy.Enabled {
+	if policy == nil || !policy.AutoMerge.Enabled {
 		return nil, false, ErrQueueFull
 	}
-	merged, didMerge, err := r.autoMergeCandidateIntoAboveLocked(message)
+	merged, didMerge, err := r.autoMergeCandidateIntoAboveLocked(message, policy)
 	if err != nil {
 		return nil, false, err
 	}
@@ -151,12 +156,12 @@ func (r *memoryRepository) admitFullAdmissionLocked(
 func (r *memoryRepository) mergeInsertedAdmissionLocked(
 	sessionID string,
 	message *QueuedMessage,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) (*QueuedMessage, error) {
-	if policy == nil || !policy.Enabled {
+	if policy == nil || !policy.AutoMerge.Enabled {
 		return message, nil
 	}
-	merged, didMerge, err := r.autoMergeIntoAboveLocked(sessionID, message.ID)
+	merged, didMerge, err := r.autoMergeIntoAboveLocked(sessionID, message.ID, policy)
 	if err != nil {
 		return nil, err
 	}

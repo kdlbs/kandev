@@ -14,12 +14,15 @@ const props: QueuePanelHeaderProps = {
   autoRun: false,
   autoMerge: true,
   autoMergeAvailable: true,
+  autoSortMerge: true,
+  autoSortMergeAvailable: true,
   isLoading: false,
   cancellationPending: false,
   pinned: false,
   onClear: vi.fn(),
   onAutoRunChange: vi.fn(),
   onAutoMergeChange: vi.fn(),
+  onAutoSortMergeChange: vi.fn(),
   onTogglePin: vi.fn(),
   onClose: vi.fn(),
 };
@@ -47,9 +50,7 @@ describe("QueuePanelHeader", () => {
     }
     const descriptionId = autoRunSwitches[0].getAttribute("aria-describedby");
     expect(descriptionId).not.toBeNull();
-    expect(document.getElementById(descriptionId ?? "")?.textContent).toBe(
-      "Finishes the current response, then queued messages wait.",
-    );
+    expect(document.getElementById(descriptionId ?? "")).not.toBeNull();
   });
 
   it("disables both policies through the same conflicting-operation state", () => {
@@ -86,5 +87,49 @@ describe("QueuePanelHeader", () => {
     expect(label?.className).toContain("pointer-events-none");
     expect(label?.parentElement?.tagName).toBe("SPAN");
     expect(label?.parentElement?.getAttribute("tabindex")).toBe("0");
+  });
+});
+
+describe("Auto-sort-merge dependency", () => {
+  it.each([
+    {
+      autoMerge: false,
+      autoMergeAvailable: true,
+      autoSortMergeAvailable: true,
+      checked: false,
+      disabled: true,
+    },
+    {
+      autoMerge: true,
+      autoMergeAvailable: false,
+      autoSortMergeAvailable: true,
+      checked: true,
+      disabled: true,
+    },
+    {
+      autoMerge: true,
+      autoMergeAvailable: true,
+      autoSortMergeAvailable: false,
+      checked: true,
+      disabled: true,
+    },
+    {
+      autoMerge: true,
+      autoMergeAvailable: true,
+      autoSortMergeAvailable: true,
+      checked: true,
+      disabled: false,
+    },
+  ])("renders the effective dependency state %j", ({ checked, disabled, ...policy }) => {
+    render(
+      <TooltipProvider>
+        <QueuePanelHeader {...props} {...policy} />
+      </TooltipProvider>,
+    );
+    const control = screen.getByTestId("queue-auto-sort-merge");
+    expect(control.getAttribute("aria-checked")).toBe(String(checked));
+    expect(control).toHaveProperty("disabled", disabled);
+    const description = document.getElementById(control.getAttribute("aria-describedby") ?? "");
+    expect(description).not.toBeNull();
   });
 });

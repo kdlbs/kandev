@@ -683,6 +683,8 @@ func (r *sqliteRepository) initSchema() error {
 		auto_run              INTEGER NOT NULL DEFAULT 1,
 		auto_merge_override   INTEGER,
 		auto_merge_revision   BIGINT NOT NULL DEFAULT 0,
+		auto_sort_merge_override INTEGER,
+		auto_sort_merge_revision BIGINT NOT NULL DEFAULT 0,
 		send_now_generation   BIGINT NOT NULL DEFAULT 0,
 		status_generation     BIGINT NOT NULL DEFAULT 0,
 		next_position         BIGINT NOT NULL DEFAULT 0
@@ -738,6 +740,8 @@ func (r *sqliteRepository) initSchema() error {
 		{"session incarnation", `ALTER TABLE queue_session_state ADD COLUMN session_incarnation_id TEXT NOT NULL DEFAULT ''`},
 		{"Auto-merge override", `ALTER TABLE queue_session_state ADD COLUMN auto_merge_override INTEGER`},
 		{"Auto-merge revision", `ALTER TABLE queue_session_state ADD COLUMN auto_merge_revision BIGINT NOT NULL DEFAULT 0`},
+		{"Auto-sort-merge override", `ALTER TABLE queue_session_state ADD COLUMN auto_sort_merge_override INTEGER`},
+		{"Auto-sort-merge revision", `ALTER TABLE queue_session_state ADD COLUMN auto_sort_merge_revision BIGINT NOT NULL DEFAULT 0`},
 		{"Send Now generation", `ALTER TABLE queue_session_state ADD COLUMN send_now_generation BIGINT NOT NULL DEFAULT 0`},
 		{"Status generation", `ALTER TABLE queue_session_state ADD COLUMN status_generation BIGINT NOT NULL DEFAULT 0`},
 		{"Queue position", `ALTER TABLE queue_session_state ADD COLUMN next_position BIGINT NOT NULL DEFAULT 0`},
@@ -829,7 +833,7 @@ func (r *sqliteRepository) InsertForSessionWithPolicy(
 	msg *QueuedMessage,
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
-	policy AutoMergePolicy,
+	policy AdmissionPolicy,
 ) error {
 	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
 		return ErrSessionIdentityMismatch
@@ -844,7 +848,7 @@ func (r *sqliteRepository) InsertForSessionWithWorkflowEntry(
 	msg *QueuedMessage,
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) error {
 	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
 		return ErrSessionIdentityMismatch
@@ -858,7 +862,7 @@ func (r *sqliteRepository) insert(
 	msg *QueuedMessage,
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 	workflowEntry *WorkflowEntryIdentity,
 ) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
@@ -935,10 +939,13 @@ func (r *sqliteRepository) validateAutoMergePolicyTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	identity *QueueSessionIdentity,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) error {
 	if identity == nil || policy == nil {
 		return nil
+	}
+	if err := r.validateAutoSortMergePolicyTx(ctx, tx, identity, policy.AutoSortMerge); err != nil {
+		return err
 	}
 	var enabled sql.NullInt64
 	var revision int64
@@ -948,7 +955,7 @@ func (r *sqliteRepository) validateAutoMergePolicyTx(
 		WHERE session_id = ? AND session_incarnation_id = ?
 	`), identity.SessionID, identity.SessionIncarnationID).Scan(&enabled, &revision)
 	if errors.Is(err, sql.ErrNoRows) {
-		if policy.Source == AutoMergeSourceGlobal {
+		if policy.AutoMerge.Source == AutoMergeSourceGlobal {
 			return nil
 		}
 		return ErrAutoMergePolicyChanged
@@ -956,13 +963,13 @@ func (r *sqliteRepository) validateAutoMergePolicyTx(
 	if err != nil {
 		return fmt.Errorf("validate queue Auto-merge policy: %w", err)
 	}
-	switch policy.Source {
+	switch policy.AutoMerge.Source {
 	case AutoMergeSourceGlobal:
 		if enabled.Valid {
 			return ErrAutoMergePolicyChanged
 		}
 	case AutoMergeSourceSession:
-		if !enabled.Valid || enabled.Int64 != int64(boolToInt(policy.Enabled)) || revision != policy.Revision {
+		if !enabled.Valid || enabled.Int64 != int64(boolToInt(policy.AutoMerge.Enabled)) || revision != policy.AutoMerge.Revision {
 			return ErrAutoMergePolicyChanged
 		}
 	default:
@@ -2454,6 +2461,7 @@ func (r *sqliteRepository) Snapshot(
 			Enabled: enabled.Int64 != 0, Revision: revision,
 		}
 	}
+	snapshot.AutoSortMergeOverride, snapshot.AutoSortMergeError = r.getAutoSortMergeOverrideTx(ctx, tx, identity)
 	if err := tx.Commit(); err != nil {
 		return RepositorySnapshot{}, err
 	}
@@ -2486,6 +2494,12 @@ func (r *sqliteRepository) nextStatusGenerationTx(
 				THEN queue_session_state.auto_merge_revision
 				ELSE 0
 			END,
+			auto_sort_merge_override = CASE
+				WHEN queue_session_state.session_incarnation_id = excluded.session_incarnation_id
+				THEN queue_session_state.auto_sort_merge_override ELSE NULL END,
+			auto_sort_merge_revision = CASE
+				WHEN queue_session_state.session_incarnation_id = excluded.session_incarnation_id
+				THEN queue_session_state.auto_sort_merge_revision ELSE 0 END,
 			send_now_generation = CASE
 				WHEN queue_session_state.session_incarnation_id = excluded.session_incarnation_id
 				THEN queue_session_state.send_now_generation
@@ -3082,6 +3096,12 @@ func (r *sqliteRepository) setAutoRunTx(
 				THEN queue_session_state.auto_merge_revision
 				ELSE 0
 			END,
+			auto_sort_merge_override = CASE
+				WHEN queue_session_state.session_incarnation_id = excluded.session_incarnation_id
+				THEN queue_session_state.auto_sort_merge_override ELSE NULL END,
+			auto_sort_merge_revision = CASE
+				WHEN queue_session_state.session_incarnation_id = excluded.session_incarnation_id
+				THEN queue_session_state.auto_sort_merge_revision ELSE 0 END,
 			send_now_generation = CASE
 				WHEN queue_session_state.session_incarnation_id = excluded.session_incarnation_id
 				THEN queue_session_state.send_now_generation
@@ -4989,7 +5009,7 @@ func (r *sqliteRepository) AutoMergeIntoAboveForSessionWithPolicy(
 	ctx context.Context,
 	identity QueueSessionIdentity,
 	sourceID string,
-	policy AutoMergePolicy,
+	policy AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
 	return r.autoMergeIntoAbove(ctx, &identity, identity.SessionID, sourceID, &policy)
 }
@@ -4998,7 +5018,7 @@ func (r *sqliteRepository) autoMergeIntoAbove(
 	ctx context.Context,
 	identity *QueueSessionIdentity,
 	sessionID, sourceID string,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
 	unlock := r.withSessionLock(sessionID)
 	defer unlock()
@@ -5028,25 +5048,19 @@ func (r *sqliteRepository) autoMergeIntoAbove(
 	if err != nil {
 		return nil, false, err
 	}
-	target, err := readMergeTarget(ctx, r, tx, sessionID, source.Position)
-	if errors.Is(err, ErrNoMergeTarget) {
-		return source, false, nil
-	}
+	target, values, err := r.readAutoFoldTargetTx(ctx, tx, source, policy)
 	if err != nil {
 		return nil, false, err
 	}
-	values, compatible := buildAutoMergedEntry(target, source)
-	if !compatible {
+	if values == nil {
 		return source, false, nil
 	}
-	for _, entryID := range []string{source.ID, target.ID} {
-		blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, sessionID, entryID)
-		if err != nil {
-			return nil, false, err
-		}
-		if blocked {
-			return nil, false, ErrEditConflict
-		}
+	blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, sessionID, source.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	if blocked {
+		return nil, false, ErrEditConflict
 	}
 	if err := applyMergeWrites(ctx, r, tx, target, source, values.content, values.attachments, values.metadata, sessionID); err != nil {
 		if errors.Is(err, ErrEntryNotFound) {
@@ -5095,7 +5109,7 @@ func (r *sqliteRepository) AutoMergeCandidateIntoAboveForSessionWithPolicy(
 	identity QueueSessionIdentity,
 	candidate *QueuedMessage,
 	claim *QueueAttachmentClaim,
-	policy AutoMergePolicy,
+	policy AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
 	if candidate == nil || candidate.SessionID != identity.SessionID || candidate.TaskID != identity.TaskID {
 		return nil, false, ErrSessionIdentityMismatch
@@ -5109,7 +5123,7 @@ func (r *sqliteRepository) AutoMergeCandidateIntoAboveForSessionWithWorkflowEntr
 	entry WorkflowEntryIdentity,
 	candidate *QueuedMessage,
 	claim *QueueAttachmentClaim,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
 	if candidate == nil || candidate.SessionID != identity.SessionID || candidate.TaskID != identity.TaskID {
 		return nil, false, ErrSessionIdentityMismatch
@@ -5123,7 +5137,7 @@ func (r *sqliteRepository) autoMergeCandidateIntoAbove(
 	identity *QueueSessionIdentity,
 	candidate *QueuedMessage,
 	claim *QueueAttachmentClaim,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 	workflowEntry *WorkflowEntryIdentity,
 ) (*QueuedMessage, bool, error) {
 	unlock := r.withSessionLock(candidate.SessionID)
@@ -5158,30 +5172,15 @@ func (r *sqliteRepository) autoMergeCandidateIntoAbove(
 		return nil, false, err
 	}
 
-	target, storedContent, storedAttachmentsJSON, storedMetadataJSON, err := r.scanTailWithRawJSON(ctx, tx, candidate.SessionID)
+	fold, err := r.readCandidateFoldTx(ctx, tx, candidate, policy)
 	if err != nil {
 		return nil, false, err
 	}
-	if target == nil {
+	if fold == nil {
 		return nil, false, nil
 	}
-	// The tail scan already captured the exact stored bytes for the
-	// compare-and-swap below. The CAS compares raw storage bytes, not
-	// re-marshalled structs: metadata values round-trip through JSON as maps
-	// whose key order differs from the struct field order used at write time,
-	// so re-marshalling would never match. Comparing the raw strings keeps the
-	// guard exact.
-	values, compatible := buildAutoMergedEntry(target, candidate)
-	if !compatible {
-		return nil, false, nil
-	}
-	blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, candidate.SessionID, target.ID)
-	if err != nil {
-		return nil, false, err
-	}
-	if blocked {
-		return nil, false, ErrEditConflict
-	}
+	target, values := fold.target, fold.values
+	storedContent, storedAttachmentsJSON, storedMetadataJSON := fold.rawContent, fold.rawAttachments, fold.rawMetadata
 	if err := claimOptionalMessageAttachmentsTx(
 		ctx, tx, identity, claim, candidate.TaskID, candidate.SessionID,
 	); err != nil {

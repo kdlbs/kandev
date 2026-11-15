@@ -3510,11 +3510,17 @@ export class ApiClient {
   async getQueueStatus(identity: QueueSessionIdentityInput): Promise<{
     count: number;
     entries: Array<{
+      id: string;
+      position: number;
       content: string;
       queued_by: string;
       metadata?: Record<string, unknown>;
     }>;
     auto_run: boolean;
+    auto_sort_merge_enabled: boolean;
+    auto_sort_merge_available: boolean;
+    auto_sort_merge_source: "global" | "session";
+    auto_sort_merge_revision: number;
     auto_merge_enabled: boolean;
   }> {
     return this.wsRequest("message.queue.get", {
@@ -3541,6 +3547,18 @@ export class ApiClient {
     enabled: boolean,
   ): Promise<{ session_id: string; auto_merge_enabled: boolean }> {
     return this.wsRequest("message.queue.auto_merge.set", {
+      task_id: identity.taskId,
+      session_id: identity.sessionId,
+      session_incarnation_id: identity.sessionIncarnationId,
+      enabled,
+    });
+  }
+
+  async setQueueAutoSortMerge(
+    identity: QueueSessionIdentityInput,
+    enabled: boolean,
+  ): Promise<{ session_id: string; auto_sort_merge_enabled: boolean; compacted_count: number }> {
+    return this.wsRequest("message.queue.auto_sort_merge.set", {
       task_id: identity.taskId,
       session_id: identity.sessionId,
       session_incarnation_id: identity.sessionIncarnationId,

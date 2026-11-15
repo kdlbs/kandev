@@ -10,7 +10,9 @@ import path from "node:path";
 test("uses a trusted GitLab URL with isolated executor and backend Git rewrites", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-http-git-test-"));
   try {
-    const fixture = await startHTTPGitFixture(root, "rewrite-source");
+    const fixture = await startHTTPGitFixture(root, "rewrite-source", {
+      bridgeGateway: "127.0.0.1",
+    });
     try {
       expect(fixture.remoteURL).toBe("https://gitlab.com/fixture/rewrite-source.git");
       expect(fixture.checkoutPath).toBe(path.join(root, "rewrite-source-checkout"));
@@ -54,6 +56,7 @@ test("closes its listener when backend config setup fails after listening", asyn
   try {
     await expect(
       startHTTPGitFixture(root, "config-write-failure", {
+        bridgeGateway: "127.0.0.1",
         onListening: (listeningServer) => {
           server = listeningServer;
         },
@@ -77,6 +80,7 @@ test("aggregates setup and listener-close failures", async () => {
   try {
     await expect(
       startHTTPGitFixture(root, "close-failure", {
+        bridgeGateway: "127.0.0.1",
         writeBackendGitConfig: () => {
           throw setupError;
         },

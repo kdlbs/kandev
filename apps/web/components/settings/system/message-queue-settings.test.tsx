@@ -61,6 +61,7 @@ type ResponseOverrides = {
   locked?: boolean;
   mergeEnabled?: boolean;
   autoMergeEnabled?: boolean;
+  autoSortMergeEnabled?: boolean;
 };
 
 function response(overrides: ResponseOverrides = {}): MessageQueueSettingsResponse {
@@ -75,6 +76,7 @@ function response(overrides: ResponseOverrides = {}): MessageQueueSettingsRespon
       max_per_session: configured,
       merge_enabled: mergeEnabled,
       auto_merge_enabled: autoMergeEnabled,
+      auto_sort_merge_enabled: overrides.autoSortMergeEnabled ?? false,
     },
     effective: {
       max_per_session: effective,
@@ -82,6 +84,7 @@ function response(overrides: ResponseOverrides = {}): MessageQueueSettingsRespon
       locked,
       merge_enabled: mergeEnabled,
       auto_merge_enabled: autoMergeEnabled,
+      auto_sort_merge_enabled: overrides.autoSortMergeEnabled ?? false,
     },
   };
 }
@@ -480,5 +483,70 @@ describe("MessageQueueSettings — automatic merge permissions and recovery", ()
 
     expect(screen.getByText("Failed to save message queue settings.")).toBeTruthy();
     expect(saveContributor?.isDirty).toBe(true);
+  });
+});
+
+const SORT_LABEL = "Automatically sort and merge messages from the same sender task";
+const sortToggle = () => screen.getByRole("button", { name: SORT_LABEL });
+
+describe("Auto-sort-merge dependent drafts", () => {
+  it("discards an unsaved sort change when Auto-merge is turned off and omits it from Save", async () => {
+    updateSettingsMock.mockResolvedValue(response({ autoMergeEnabled: false }));
+    render(<MessageQueueSettings />);
+    await screen.findByLabelText(MAXIMUM_LABEL);
+    fireEvent.click(sortToggle());
+    fireEvent.click(autoMergeToggle());
+    expect(sortToggle()).toHaveProperty("disabled", true);
+    expect(sortToggle().getAttribute(ARIA_PRESSED)).toBe("false");
+    const contributor = requireContributor();
+    await act(async () => contributor.save(contributor.revision));
+    expect(updateSettingsMock).toHaveBeenCalledWith({ auto_merge_enabled: false });
+    fireEvent.click(autoMergeToggle());
+    expect(sortToggle().getAttribute(ARIA_PRESSED)).toBe("false");
+  });
+
+  it("restores the saved ON preference after the dependency is turned off and on", async () => {
+    fetchSettingsMock.mockResolvedValue(response({ autoSortMergeEnabled: true }));
+    render(<MessageQueueSettings />);
+    await screen.findByLabelText(MAXIMUM_LABEL);
+    fireEvent.click(autoMergeToggle());
+    expect(sortToggle().getAttribute(ARIA_PRESSED)).toBe("false");
+    fireEvent.click(autoMergeToggle());
+    expect(sortToggle().getAttribute(ARIA_PRESSED)).toBe("true");
+    expect(requireContributor().isDirty).toBe(false);
+    expect(updateSettingsMock).not.toHaveBeenCalled();
+  });
+
+  it("saves a changed sort preference and discards its next edit through the shared contributor", async () => {
+    updateSettingsMock.mockResolvedValue(response({ autoSortMergeEnabled: true }));
+    render(<MessageQueueSettings />);
+    await screen.findByLabelText(MAXIMUM_LABEL);
+    fireEvent.click(sortToggle());
+    const contributor = requireContributor();
+    await act(async () => contributor.save(contributor.revision));
+    expect(updateSettingsMock).toHaveBeenCalledWith({ auto_sort_merge_enabled: true });
+    expect(requireContributor().isDirty).toBe(false);
+    fireEvent.click(sortToggle());
+    act(() => requireContributor().discard());
+    expect(sortToggle().getAttribute(ARIA_PRESSED)).toBe("true");
+    expect(requireContributor().isDirty).toBe(false);
+  });
+
+  it("keeps a newer sort edit dirty when an older save response arrives", async () => {
+    const { promise, resolve: resolveSave } = Promise.withResolvers<MessageQueueSettingsResponse>();
+    updateSettingsMock.mockReturnValue(promise);
+    render(<MessageQueueSettings />);
+    await screen.findByLabelText(MAXIMUM_LABEL);
+    fireEvent.click(sortToggle());
+    const contributor = requireContributor();
+    let saving!: void | Promise<void>;
+    act(() => {
+      saving = contributor.save(contributor.revision);
+    });
+    fireEvent.click(sortToggle());
+    resolveSave(response({ autoSortMergeEnabled: true }));
+    await act(async () => saving);
+    expect(sortToggle().getAttribute(ARIA_PRESSED)).toBe("false");
+    expect(requireContributor().isDirty).toBe(true);
   });
 });

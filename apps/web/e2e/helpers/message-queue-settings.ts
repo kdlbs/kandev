@@ -31,6 +31,7 @@ export async function restoreMessageQueueSettings(
   const patch: MessageQueueSettingsPatch = {
     merge_enabled: baseline.merge_enabled,
     auto_merge_enabled: baseline.auto_merge_enabled,
+    auto_sort_merge_enabled: baseline.auto_sort_merge_enabled,
   };
   if (!current.effective.locked) {
     patch.max_per_session = baseline.max_per_session;

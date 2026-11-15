@@ -270,6 +270,31 @@ type AutoMergeOverride struct {
 	Revision int64
 }
 
+// AutoSortMergePolicy is the resolved preference, gated by Auto-merge at use.
+type AutoSortMergePolicy struct {
+	Enabled  bool
+	Source   AutoMergeSource
+	Revision int64
+}
+
+type AutoSortMergeOverride struct {
+	Enabled  bool
+	Revision int64
+}
+
+// GlobalQueuePolicy publishes both settings from one committed envelope.
+type GlobalQueuePolicy struct {
+	AutoMerge     AutoMergePolicy
+	AutoSortMerge AutoSortMergePolicy
+}
+
+type SessionPolicyResult struct {
+	AutoMerge      AutoMergePolicy
+	AutoSortMerge  AutoSortMergePolicy
+	CompactedCount int
+	compactionRan  bool
+}
+
 // QueuedMessage represents a single FIFO entry queued for a session.
 type QueuedMessage struct {
 	ID          string                 `json:"id"`
@@ -582,20 +607,24 @@ type SessionTransferCompensation struct {
 // QueueStatus is the per-session view returned to clients: full ordered list of
 // pending entries plus capacity info.
 type QueueStatus struct {
-	Entries              []QueuedMessage `json:"entries"`
-	Count                int             `json:"count"`
-	Max                  int             `json:"max"`
-	TaskID               string          `json:"task_id,omitempty"`
-	SessionID            string          `json:"session_id,omitempty"`
-	SessionIncarnationID string          `json:"session_incarnation_id,omitempty"`
-	StatusEpoch          string          `json:"status_epoch,omitempty"`
-	StatusGeneration     int64           `json:"status_generation,omitempty"`
-	AutoRun              bool            `json:"auto_run"`
-	MergeEnabled         bool            `json:"merge_enabled"`
-	AutoMergeAvailable   bool            `json:"auto_merge_available"`
-	AutoMergeEnabled     *bool           `json:"auto_merge_enabled,omitempty"`
-	AutoMergeSource      AutoMergeSource `json:"auto_merge_source,omitempty"`
-	AutoMergeRevision    *int64          `json:"auto_merge_revision,omitempty"`
+	Entries                []QueuedMessage `json:"entries"`
+	Count                  int             `json:"count"`
+	Max                    int             `json:"max"`
+	TaskID                 string          `json:"task_id,omitempty"`
+	SessionID              string          `json:"session_id,omitempty"`
+	SessionIncarnationID   string          `json:"session_incarnation_id,omitempty"`
+	StatusEpoch            string          `json:"status_epoch,omitempty"`
+	StatusGeneration       int64           `json:"status_generation,omitempty"`
+	AutoRun                bool            `json:"auto_run"`
+	MergeEnabled           bool            `json:"merge_enabled"`
+	AutoMergeAvailable     bool            `json:"auto_merge_available"`
+	AutoMergeEnabled       *bool           `json:"auto_merge_enabled,omitempty"`
+	AutoMergeSource        AutoMergeSource `json:"auto_merge_source,omitempty"`
+	AutoMergeRevision      *int64          `json:"auto_merge_revision,omitempty"`
+	AutoSortMergeAvailable bool            `json:"auto_sort_merge_available"`
+	AutoSortMergeEnabled   *bool           `json:"auto_sort_merge_enabled,omitempty"`
+	AutoSortMergeSource    AutoMergeSource `json:"auto_sort_merge_source,omitempty"`
+	AutoSortMergeRevision  *int64          `json:"auto_sort_merge_revision,omitempty"`
 }
 
 // PendingMove represents a workflow step move requested by an agent (via

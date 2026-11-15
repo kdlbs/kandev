@@ -25,19 +25,19 @@ import (
 	"go.uber.org/zap"
 )
 
-type autoMergePolicyLoader struct {
-	load func(context.Context) (bool, int64, error)
+type globalQueuePolicyLoader struct {
+	load func(context.Context) (GlobalQueuePolicy, error)
 }
 
 // Service manages queued messages for sessions, backed by Repository.
 type Service struct {
-	repo            Repository
-	maxPerSession   atomic.Int64
-	mergeEnabled    atomic.Bool
-	autoMergePolicy atomic.Pointer[AutoMergePolicy]
-	autoMergeLoader atomic.Pointer[autoMergePolicyLoader]
-	statusEpoch     string
-	logger          *logger.Logger
+	repo          Repository
+	maxPerSession atomic.Int64
+	mergeEnabled  atomic.Bool
+	globalPolicy  atomic.Pointer[GlobalQueuePolicy]
+	globalLoader  atomic.Pointer[globalQueuePolicyLoader]
+	statusEpoch   string
+	logger        *logger.Logger
 	// lifecycleMu fences task-wide purges against every session-scoped queue
 	// admission. A task purge cannot enumerate every possibly empty session,
 	// so the barrier must cover admissions before they reach the repository.
@@ -82,21 +82,26 @@ type autoMergeAdmissionRepository interface {
 		*QueuedMessage,
 		*QueueAttachmentClaim,
 		int,
-		AutoMergePolicy,
+		AdmissionPolicy,
 	) error
 	AutoMergeCandidateIntoAboveForSessionWithPolicy(
 		context.Context,
 		QueueSessionIdentity,
 		*QueuedMessage,
 		*QueueAttachmentClaim,
-		AutoMergePolicy,
+		AdmissionPolicy,
 	) (*QueuedMessage, bool, error)
 	AutoMergeIntoAboveForSessionWithPolicy(
 		context.Context,
 		QueueSessionIdentity,
 		string,
-		AutoMergePolicy,
+		AdmissionPolicy,
 	) (*QueuedMessage, bool, error)
+}
+
+type legacyAutoMergePolicyRepository interface {
+	autoMergeIntoAbove(context.Context, *QueueSessionIdentity, string, string, *AdmissionPolicy) (*QueuedMessage, bool, error)
+	autoMergeCandidateIntoAbove(context.Context, *QueueSessionIdentity, *QueuedMessage, *QueueAttachmentClaim, *AdmissionPolicy, *WorkflowEntryIdentity) (*QueuedMessage, bool, error)
 }
 
 // workflowEntryAdmissionRepository validates a captured workflow entry inside
@@ -111,7 +116,7 @@ type workflowEntryAdmissionRepository interface {
 		*QueuedMessage,
 		*QueueAttachmentClaim,
 		int,
-		*AutoMergePolicy,
+		*AdmissionPolicy,
 	) error
 	AutoMergeCandidateIntoAboveForSessionWithWorkflowEntry(
 		context.Context,
@@ -119,7 +124,7 @@ type workflowEntryAdmissionRepository interface {
 		WorkflowEntryIdentity,
 		*QueuedMessage,
 		*QueueAttachmentClaim,
-		*AutoMergePolicy,
+		*AdmissionPolicy,
 	) (*QueuedMessage, bool, error)
 }
 
@@ -138,7 +143,7 @@ func NewService(repo Repository, maxPerSession int, log *logger.Logger) *Service
 	}
 	service.SetMaxPerSession(maxPerSession)
 	service.mergeEnabled.Store(true)
-	service.SetAutoMergePolicy(true, 0)
+	service.SetGlobalQueuePolicy(GlobalQueuePolicy{AutoMerge: AutoMergePolicy{Enabled: true}})
 	if provider, ok := repo.(queueDepthCounter); ok {
 		registerQueueDepthProvider(provider)
 	}
@@ -234,43 +239,42 @@ func (s *Service) AutoMergeEnabled() bool {
 // SetAutoMergeEnabled updates the global policy while preserving the legacy
 // boolean target used by callers that do not own the persisted revision.
 func (s *Service) SetAutoMergeEnabled(enabled bool) {
-	current := s.globalAutoMergePolicy()
-	revision := current.Revision
-	if current.Enabled != enabled {
-		revision++
+	current := s.globalQueuePolicy()
+	if current.AutoMerge.Enabled != enabled {
+		current.AutoMerge.Revision++
 	}
-	s.SetAutoMergePolicy(enabled, revision)
+	current.AutoMerge.Enabled = enabled
+	s.SetGlobalQueuePolicy(current)
 }
 
-// SetAutoMergePolicy atomically publishes a complete global policy snapshot.
-func (s *Service) SetAutoMergePolicy(enabled bool, revision int64) {
-	policy := &AutoMergePolicy{
-		Enabled:  enabled,
-		Source:   AutoMergeSourceGlobal,
-		Revision: revision,
-	}
-	s.autoMergePolicy.Store(policy)
+// SetGlobalQueuePolicy atomically publishes both global policy pairs.
+func (s *Service) SetGlobalQueuePolicy(policy GlobalQueuePolicy) {
+	policy.AutoMerge.Source = AutoMergeSourceGlobal
+	policy.AutoSortMerge.Source = AutoMergeSourceGlobal
+	s.globalPolicy.Store(&policy)
 }
 
-// SetAutoMergePolicyLoader installs the shared persisted-policy reader used by
-// identity-bound admissions and snapshots. The atomic cache remains available
-// to legacy callers that cannot carry a context.
-func (s *Service) SetAutoMergePolicyLoader(
-	load func(context.Context) (bool, int64, error),
-) {
+// SetGlobalQueuePolicyLoader installs the shared persisted-settings reader.
+func (s *Service) SetGlobalQueuePolicyLoader(load func(context.Context) (GlobalQueuePolicy, error)) {
 	if load == nil {
-		s.autoMergeLoader.Store(nil)
+		s.globalLoader.Store(nil)
 		return
 	}
-	s.autoMergeLoader.Store(&autoMergePolicyLoader{load: load})
+	s.globalLoader.Store(&globalQueuePolicyLoader{load: load})
+}
+
+func (s *Service) globalQueuePolicy() GlobalQueuePolicy {
+	if policy := s.globalPolicy.Load(); policy != nil {
+		return *policy
+	}
+	return GlobalQueuePolicy{
+		AutoMerge:     AutoMergePolicy{Enabled: true, Source: AutoMergeSourceGlobal},
+		AutoSortMerge: AutoSortMergePolicy{Source: AutoMergeSourceGlobal},
+	}
 }
 
 func (s *Service) globalAutoMergePolicy() AutoMergePolicy {
-	policy := s.autoMergePolicy.Load()
-	if policy == nil {
-		return AutoMergePolicy{Enabled: true, Source: AutoMergeSourceGlobal}
-	}
-	return *policy
+	return s.globalQueuePolicy().AutoMerge
 }
 
 // ResolveAutoMergePolicy returns the session override when present, otherwise
@@ -294,14 +298,8 @@ func (s *Service) ResolveAutoMergePolicy(
 }
 
 func (s *Service) loadGlobalAutoMergePolicy(ctx context.Context) (AutoMergePolicy, error) {
-	if loader := s.autoMergeLoader.Load(); loader != nil {
-		enabled, revision, err := loader.load(ctx)
-		if err != nil {
-			return AutoMergePolicy{}, err
-		}
-		s.SetAutoMergePolicy(enabled, revision)
-	}
-	return s.globalAutoMergePolicy(), nil
+	policy, err := s.loadGlobalQueuePolicy(ctx)
+	return policy.AutoMerge, err
 }
 
 // SetSessionAutoMerge persists and returns an explicit per-session policy.
@@ -309,21 +307,8 @@ func (s *Service) SetSessionAutoMerge(
 	ctx context.Context,
 	identity QueueSessionIdentity,
 	enabled bool,
-) (AutoMergePolicy, error) {
-	var override AutoMergeOverride
-	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
-		var setErr error
-		override, setErr = s.repo.SetAutoMergeOverride(admittedCtx, identity, enabled)
-		return setErr
-	})
-	if err != nil {
-		return AutoMergePolicy{}, err
-	}
-	return AutoMergePolicy{
-		Enabled:  override.Enabled,
-		Source:   AutoMergeSourceSession,
-		Revision: override.Revision,
-	}, nil
+) (SessionPolicyResult, error) {
+	return s.setSessionPolicy(ctx, identity, enabled, false)
 }
 
 // WithSessionAdmission runs fn under the per-session queue admission lock.
@@ -1356,7 +1341,7 @@ func (s *Service) queueMessageWithMetadataAdmissionAtWorkflowEntry(ctx context.C
 			if errors.Is(insertErr, ErrAutoMergePolicyChanged) {
 				continue
 			}
-			autoMergeEnabled := policy != nil && policy.Enabled
+			autoMergeEnabled := policy != nil && policy.AutoMerge.Enabled
 			if insertErr != nil {
 				hasStagedAttachments := claim != nil && len(claim.IDs) > 0
 				if !errors.Is(insertErr, ErrQueueFull) || !autoMergeEnabled || hasStagedAttachments || afterInsert != nil {
@@ -1394,19 +1379,31 @@ func (s *Service) resolveAdmissionAutoMergePolicy(
 	ctx context.Context,
 	identity *QueueSessionIdentity,
 	sessionID string,
-) *AutoMergePolicy {
+) *AdmissionPolicy {
+	global, err := s.loadGlobalQueuePolicy(ctx)
+	if err != nil {
+		s.logger.Warn("queue policy unavailable; admitting separate message", zap.String("session_id", sessionID), zap.Error(err))
+		return nil
+	}
+	policy := &AdmissionPolicy{AutoMerge: global.AutoMerge, AutoSortMerge: &global.AutoSortMerge, editLeaseBlocks: s.editLeaseBlocksEntryLocked, log: s.logger}
 	if identity == nil {
-		policy := s.globalAutoMergePolicy()
-		return &policy
+		return policy
 	}
-	policy, err := s.ResolveAutoMergePolicy(ctx, *identity)
-	if err == nil {
-		return &policy
+	mergeOverride, err := s.repo.GetAutoMergeOverride(ctx, *identity)
+	if err != nil {
+		s.logger.Warn("automatic merge policy unavailable; admitting separate message", zap.String("session_id", sessionID), zap.Error(err))
+		return nil
 	}
-	s.logger.Warn("automatic merge policy unavailable; admitting separate message",
-		zap.String("session_id", sessionID),
-		zap.Error(err))
-	return nil
+	policy.AutoMerge = resolveAutoMergeOverride(mergeOverride, global.AutoMerge)
+	sortOverride, err := s.repo.GetAutoSortMergeOverride(ctx, *identity)
+	if err != nil {
+		s.logger.Warn("automatic sort-merge policy unavailable; preserving adjacent automatic merge", zap.String("session_id", sessionID), zap.Error(err))
+		policy.AutoSortMerge = nil
+	} else {
+		resolved := resolveAutoSortMergeOverride(sortOverride, global.AutoSortMerge)
+		policy.AutoSortMerge = &resolved
+	}
+	return policy
 }
 
 func (s *Service) autoMergeCandidateAtWorkflowEntry(
@@ -1415,12 +1412,15 @@ func (s *Service) autoMergeCandidateAtWorkflowEntry(
 	workflowEntry *WorkflowEntryIdentity,
 	candidate *QueuedMessage,
 	claim *QueueAttachmentClaim,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
 	if workflowEntry != nil && identity == nil {
 		return nil, false, ErrQueueAdmissionUnavailable
 	}
 	if identity == nil {
+		if repo, ok := s.repo.(legacyAutoMergePolicyRepository); ok {
+			return repo.autoMergeCandidateIntoAbove(ctx, nil, candidate, claim, policy, nil)
+		}
 		return s.repo.AutoMergeCandidateIntoAbove(ctx, candidate)
 	}
 	if workflowEntry != nil {
@@ -1457,7 +1457,7 @@ func (s *Service) admitQueueFullMessage(
 	metadata map[string]interface{},
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) (*QueuedMessage, *QueuedMessage, error) {
 	return s.admitQueueFullMessageAtWorkflowEntry(
 		ctx, identity, queueFullErr, sessionID, taskID, content, model, userID, planMode,
@@ -1475,7 +1475,7 @@ func (s *Service) admitQueueFullMessageAtWorkflowEntry(
 	metadata map[string]interface{},
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 	workflowEntry *WorkflowEntryIdentity,
 ) (*QueuedMessage, *QueuedMessage, error) {
 	candidate := &QueuedMessage{
@@ -1536,25 +1536,18 @@ func (s *Service) finalizeAutoMerge(
 	ctx context.Context,
 	identity *QueueSessionIdentity,
 	source *QueuedMessage,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) *QueuedMessage {
-	for policy != nil && policy.Enabled {
-		blocked, leaseErr := s.editLeaseBlocksTail(ctx, source.SessionID, source.ID, source.QueuedBy)
-		if leaseErr != nil {
-			s.logger.Error("automatic queue merge lease check failed; preserving separate admission",
-				zap.String("session_id", source.SessionID),
-				zap.String("source_entry_id", source.ID),
-				zap.Error(leaseErr))
-			return source
-		}
-		if blocked {
-			return source
-		}
+	for policy != nil && policy.AutoMerge.Enabled {
 		var merged *QueuedMessage
 		var didMerge bool
 		var err error
 		if identity == nil {
-			merged, didMerge, err = s.repo.AutoMergeIntoAbove(ctx, source.SessionID, source.ID)
+			if repo, ok := s.repo.(legacyAutoMergePolicyRepository); ok {
+				merged, didMerge, err = repo.autoMergeIntoAbove(ctx, nil, source.SessionID, source.ID, policy)
+			} else {
+				merged, didMerge, err = s.repo.AutoMergeIntoAbove(ctx, source.SessionID, source.ID)
+			}
 		} else if policyRepo, ok := s.repo.(autoMergeAdmissionRepository); ok {
 			merged, didMerge, err = policyRepo.AutoMergeIntoAboveForSessionWithPolicy(ctx, *identity, source.ID, *policy)
 		} else {
@@ -1590,7 +1583,7 @@ func (s *Service) insertQueueMessageAtWorkflowEntry(
 	msg *QueuedMessage,
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) error {
 	if workflowEntry != nil && identity == nil {
 		return ErrQueueAdmissionUnavailable
@@ -1621,14 +1614,14 @@ func (s *Service) insertQueueMessageAtWorkflowEntry(
 }
 
 // insertQueueMessageWithMetadata inserts a message with metadata under the per-session admission lock.
-func (s *Service) insertQueueMessageWithMetadata(ctx context.Context, identity *QueueSessionIdentity, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, claim *QueueAttachmentClaim, maxPerSession int, policy *AutoMergePolicy) (*QueuedMessage, error) {
+func (s *Service) insertQueueMessageWithMetadata(ctx context.Context, identity *QueueSessionIdentity, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, claim *QueueAttachmentClaim, maxPerSession int, policy *AdmissionPolicy) (*QueuedMessage, error) {
 	return s.insertQueueMessageWithMetadataAtWorkflowEntry(
 		ctx, identity, sessionID, taskID, content, model, userID, planMode, attachments,
 		metadata, claim, maxPerSession, policy, nil,
 	)
 }
 
-func (s *Service) insertQueueMessageWithMetadataAtWorkflowEntry(ctx context.Context, identity *QueueSessionIdentity, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, claim *QueueAttachmentClaim, maxPerSession int, policy *AutoMergePolicy, workflowEntry *WorkflowEntryIdentity) (*QueuedMessage, error) {
+func (s *Service) insertQueueMessageWithMetadataAtWorkflowEntry(ctx context.Context, identity *QueueSessionIdentity, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, claim *QueueAttachmentClaim, maxPerSession int, policy *AdmissionPolicy, workflowEntry *WorkflowEntryIdentity) (*QueuedMessage, error) {
 	metadataCopy := copyMessageMetadata(metadata, 0)
 	msg := &QueuedMessage{
 		SessionID:   sessionID,
@@ -3537,31 +3530,21 @@ func (s *Service) Snapshot(ctx context.Context, identity QueueSessionIdentity) (
 		AutoRun:              snapshot.AutoRun,
 		MergeEnabled:         s.MergeEnabled(),
 	}
-	if snapshot.AutoMergeError != nil {
-		s.logger.Warn("automatic merge policy unavailable while reading queue status",
-			zap.String("session_id", identity.SessionID),
-			zap.Error(snapshot.AutoMergeError))
-		return status, nil
+	global, globalErr := s.loadGlobalQueuePolicy(ctx)
+	if snapshot.AutoMergeError == nil && (snapshot.AutoMergeOverride != nil || globalErr == nil) {
+		policy := resolveAutoMergeOverride(snapshot.AutoMergeOverride, global.AutoMerge)
+		status.AutoMergeAvailable = true
+		status.AutoMergeEnabled = &policy.Enabled
+		status.AutoMergeSource = policy.Source
+		status.AutoMergeRevision = &policy.Revision
 	}
-	var policy AutoMergePolicy
-	if snapshot.AutoMergeOverride != nil {
-		policy = AutoMergePolicy{
-			Enabled: snapshot.AutoMergeOverride.Enabled, Source: AutoMergeSourceSession,
-			Revision: snapshot.AutoMergeOverride.Revision,
-		}
-	} else {
-		policy, err = s.loadGlobalAutoMergePolicy(ctx)
-		if err != nil {
-			s.logger.Warn("global automatic merge policy unavailable while reading queue status",
-				zap.String("session_id", identity.SessionID),
-				zap.Error(err))
-			return status, nil
-		}
+	if snapshot.AutoSortMergeError == nil && (snapshot.AutoSortMergeOverride != nil || globalErr == nil) {
+		policy := resolveAutoSortMergeOverride(snapshot.AutoSortMergeOverride, global.AutoSortMerge)
+		status.AutoSortMergeAvailable = true
+		status.AutoSortMergeEnabled = &policy.Enabled
+		status.AutoSortMergeSource = policy.Source
+		status.AutoSortMergeRevision = &policy.Revision
 	}
-	status.AutoMergeAvailable = true
-	status.AutoMergeEnabled = &policy.Enabled
-	status.AutoMergeSource = policy.Source
-	status.AutoMergeRevision = &policy.Revision
 	return status, nil
 }
 

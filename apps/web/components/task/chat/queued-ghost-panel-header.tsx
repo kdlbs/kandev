@@ -1,11 +1,9 @@
 import { IconLayoutList, IconPin, IconPinned, IconTrash, IconX } from "@tabler/icons-react";
-import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui";
-import { Switch } from "@kandev/ui/switch";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { QueueAutomationPills } from "./queue-automation-pills";
 
 export type QueuePanelHeaderProps = {
   count: number;
@@ -14,98 +12,18 @@ export type QueuePanelHeaderProps = {
   autoRun: boolean;
   autoMerge: boolean;
   autoMergeAvailable: boolean;
+  autoSortMerge: boolean;
+  autoSortMergeAvailable: boolean;
   isLoading: boolean;
   cancellationPending: boolean;
   pinned: boolean;
   onClear: () => void;
   onAutoRunChange: (enabled: boolean) => void;
   onAutoMergeChange: (enabled: boolean) => void;
+  onAutoSortMergeChange: (enabled: boolean) => void;
   onTogglePin: () => void;
   onClose: () => void;
 };
-
-type QueueAutomationPillsProps = Pick<
-  QueuePanelHeaderProps,
-  | "autoRun"
-  | "autoMerge"
-  | "autoMergeAvailable"
-  | "isLoading"
-  | "cancellationPending"
-  | "onAutoRunChange"
-  | "onAutoMergeChange"
->;
-
-function QueueAutomationPills({
-  autoRun,
-  autoMerge,
-  autoMergeAvailable,
-  isLoading,
-  cancellationPending,
-  onAutoRunChange,
-  onAutoMergeChange,
-}: QueueAutomationPillsProps) {
-  const { t } = useTranslation();
-  const autoRunId = useId();
-  const autoRunDescriptionId = useId();
-  const autoMergeId = useId();
-  const controlsDisabled = isLoading || cancellationPending;
-  const pillClassName =
-    "flex min-h-7 items-center gap-1.5 rounded-full border border-border/70 bg-muted/40 px-2 text-xs font-medium text-foreground [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:px-3";
-  return (
-    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <label htmlFor={autoRunId} className={cn(pillClassName, "cursor-pointer")}>
-            <span>{t("chat:queueAutoRun")}</span>
-            <Switch
-              id={autoRunId}
-              data-testid="queue-auto-run"
-              checked={autoRun}
-              disabled={controlsDisabled}
-              onCheckedChange={onAutoRunChange}
-              aria-label={t("chat:queueAutoRun")}
-              aria-describedby={autoRunDescriptionId}
-              className="[@media(pointer:coarse)]:after:-inset-y-3.5"
-            />
-          </label>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-[280px]">
-          {t(autoRun ? "chat:queueAutoRunOnHelp" : "chat:queueAutoRunOffHelp")}
-        </TooltipContent>
-      </Tooltip>
-      <span id={autoRunDescriptionId} className="sr-only">
-        {t(autoRun ? "chat:queueAutoRunOnHelp" : "chat:queueAutoRunOffHelp")}
-      </span>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span tabIndex={autoMergeAvailable ? -1 : 0} className="inline-flex">
-            <label
-              htmlFor={autoMergeId}
-              className={cn(
-                pillClassName,
-                autoMergeAvailable ? "cursor-pointer" : "opacity-50 pointer-events-none",
-              )}
-            >
-              <span>{t("chat:queueAutoMerge")}</span>
-              <Switch
-                id={autoMergeId}
-                data-testid="queue-auto-merge"
-                checked={autoMerge}
-                disabled={controlsDisabled || !autoMergeAvailable}
-                onCheckedChange={onAutoMergeChange}
-                aria-label={t("chat:queueAutoMerge")}
-                className="[@media(pointer:coarse)]:after:-inset-y-3.5"
-              />
-            </label>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-[280px]">
-          {t("system:messageQueueAutoMergeNotice")}
-        </TooltipContent>
-      </Tooltip>
-    </div>
-  );
-}
 
 export function QueuePanelHeader({
   count,
@@ -114,12 +32,15 @@ export function QueuePanelHeader({
   autoRun,
   autoMerge,
   autoMergeAvailable,
+  autoSortMerge,
+  autoSortMergeAvailable,
   isLoading,
   cancellationPending,
   pinned,
   onClear,
   onAutoRunChange,
   onAutoMergeChange,
+  onAutoSortMergeChange,
   onTogglePin,
   onClose,
 }: QueuePanelHeaderProps) {
@@ -143,10 +64,13 @@ export function QueuePanelHeader({
         autoRun={autoRun}
         autoMerge={autoMerge}
         autoMergeAvailable={autoMergeAvailable}
+        autoSortMerge={autoSortMerge}
+        autoSortMergeAvailable={autoSortMergeAvailable}
         isLoading={isLoading}
         cancellationPending={cancellationPending}
         onAutoRunChange={onAutoRunChange}
         onAutoMergeChange={onAutoMergeChange}
+        onAutoSortMergeChange={onAutoSortMergeChange}
       />
       <div className="ml-auto flex shrink-0 items-center justify-end gap-1">
         <Button
