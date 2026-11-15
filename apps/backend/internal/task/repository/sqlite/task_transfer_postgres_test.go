@@ -82,17 +82,34 @@ func TestPostgresTransferTaskRoundTrip(t *testing.T) {
 	}
 	close(start)
 	writers.Wait()
+	var receipt *models.TaskTransferReceipt
+	conflicted := 0
 	for index, transferErr := range errs {
-		if transferErr != nil {
+		switch {
+		case transferErr == nil:
+			if receipt == nil {
+				receipt = receipts[index]
+			} else if receipt.OperationID != receipts[index].OperationID {
+				t.Fatalf("concurrent operation IDs differ: %q != %q", receipt.OperationID, receipts[index].OperationID)
+			}
+		case errors.Is(transferErr, repoerrors.ErrTaskTransferConflict):
+			conflicted++
+		default:
 			t.Fatalf("TransferTask writer %d: %v", index, transferErr)
 		}
 	}
-	receipt := receipts[0]
+	if receipt == nil || conflicted > 1 {
+		t.Fatalf("successful receipt=%+v conflicted=%d errors=%v", receipt, conflicted, errs)
+	}
 	if receipt.TaskID != task.ID || receipt.DestinationWorkspaceID != "pg-transfer-destination" {
 		t.Fatalf("receipt = %+v", receipt)
 	}
-	if receipts[0].OperationID != receipts[1].OperationID {
-		t.Fatalf("concurrent operation IDs differ: %q != %q", receipts[0].OperationID, receipts[1].OperationID)
+	retried, err := repo.TransferTask(ctx, command)
+	if err != nil {
+		t.Fatalf("TransferTask exact retry: %v", err)
+	}
+	if retried.OperationID != receipt.OperationID {
+		t.Fatalf("retry operation ID = %q, want %q", retried.OperationID, receipt.OperationID)
 	}
 }
 
@@ -177,7 +194,7 @@ func TestPostgresTransferTaskConcurrentCapacityAndChangedKey(t *testing.T) {
 	}
 }
 
-func TestPostgresTransferTaskWaitsForDestinationLaneCapacityDecision(t *testing.T) {
+func TestPostgresTransferTaskConflictsWhenDestinationLaneIsLocked(t *testing.T) {
 	repo, tasks := seedPostgresConcurrentTransferTasks(t, 1)
 	db := repo.db
 	holder, err := db.BeginTxx(context.Background(), nil)
@@ -204,27 +221,17 @@ func TestPostgresTransferTaskWaitsForDestinationLaneCapacityDecision(t *testing.
 		Actor:             models.TaskTransferActor{Kind: models.TaskTransferActorHuman, ID: "owner-1"},
 		AuthorizedOwnerID: "owner-1", OwnerPredicateSet: true,
 	}
-	done := make(chan error, 1)
-	go func() {
-		_, transferErr := repo.TransferTask(context.Background(), command)
-		done <- transferErr
-	}()
-	select {
-	case transferErr := <-done:
-		t.Fatalf("transfer bypassed destination lane lock: %v", transferErr)
-	case <-time.After(100 * time.Millisecond):
+	if _, err := repo.TransferTask(context.Background(), command); !errors.Is(err, repoerrors.ErrTaskTransferConflict) {
+		t.Fatalf("TransferTask error = %v, want immediate lane-lock conflict", err)
 	}
+	assertPostgresTransferSourceUnchanged(t, repo, tasks[0])
 	if err := holder.Commit(); err != nil {
 		t.Fatalf("commit destination occupant: %v", err)
 	}
-	select {
-	case transferErr := <-done:
-		if !errors.Is(transferErr, repoerrors.ErrTaskTransferConflict) {
-			t.Fatalf("TransferTask error = %v, want capacity conflict", transferErr)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("transfer remained blocked after destination lane commit")
+	if _, err := repo.TransferTask(context.Background(), command); !errors.Is(err, repoerrors.ErrTaskTransferConflict) {
+		t.Fatalf("TransferTask retry error = %v, want capacity conflict", err)
 	}
+	assertPostgresTransferSourceUnchanged(t, repo, tasks[0])
 }
 
 func TestPostgresTransferTaskSerializesTreeHoldCreation(t *testing.T) {
@@ -256,26 +263,29 @@ func TestPostgresTransferTaskSerializesTreeHoldCreation(t *testing.T) {
 		Actor:             models.TaskTransferActor{Kind: models.TaskTransferActorHuman, ID: "owner-1"},
 		AuthorizedOwnerID: "owner-1", OwnerPredicateSet: true,
 	}
-	done := make(chan error, 1)
-	go func() {
-		_, transferErr := repo.TransferTask(context.Background(), command)
-		done <- transferErr
-	}()
-	select {
-	case transferErr := <-done:
-		t.Fatalf("transfer bypassed tree-hold serialization: %v", transferErr)
-	case <-time.After(100 * time.Millisecond):
+	if _, err := repo.TransferTask(context.Background(), command); !errors.Is(err, repoerrors.ErrTaskTransferConflict) {
+		t.Fatalf("TransferTask error = %v, want immediate tree-hold lock conflict", err)
 	}
+	assertPostgresTransferSourceUnchanged(t, repo, tasks[0])
 	if err := holder.Commit(); err != nil {
 		t.Fatalf("commit tree hold: %v", err)
 	}
-	select {
-	case transferErr := <-done:
-		if !errors.Is(transferErr, repoerrors.ErrTaskTransferConflict) {
-			t.Fatalf("TransferTask error = %v, want tree-hold conflict", transferErr)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("transfer remained blocked after tree-hold commit")
+	if _, err := repo.TransferTask(context.Background(), command); !errors.Is(err, repoerrors.ErrTaskTransferConflict) {
+		t.Fatalf("TransferTask retry error = %v, want tree-hold conflict", err)
+	}
+	assertPostgresTransferSourceUnchanged(t, repo, tasks[0])
+}
+
+func assertPostgresTransferSourceUnchanged(t *testing.T, repo *Repository, source *models.Task) {
+	t.Helper()
+	current, err := repo.GetTask(context.Background(), source.ID)
+	if err != nil {
+		t.Fatalf("read transfer source: %v", err)
+	}
+	if current.WorkspaceID != source.WorkspaceID || current.WorkflowID != source.WorkflowID || current.WorkflowStepID != source.WorkflowStepID {
+		t.Fatalf("transfer changed source placement: got workspace=%q workflow=%q step=%q, want workspace=%q workflow=%q step=%q",
+			current.WorkspaceID, current.WorkflowID, current.WorkflowStepID,
+			source.WorkspaceID, source.WorkflowID, source.WorkflowStepID)
 	}
 }
 
@@ -303,7 +313,7 @@ func TestPostgresTransferTaskBindsAuthorizedOwnerAtSerializationPoint(t *testing
 	assertPostgresTransferConflict(t, done, "ownership revocation")
 }
 
-func TestPostgresTransferTaskSerializesCoordinatorSessionRevocation(t *testing.T) {
+func TestPostgresTransferTaskConflictsWhenCoordinatorSessionIsRevoked(t *testing.T) {
 	repo, tasks := seedPostgresConcurrentTransferTasks(t, 0)
 	if _, err := repo.db.Exec(`UPDATE workspaces SET office_workflow_id = 'pg-race-wf-source'
 		WHERE id = 'pg-race-source'`); err != nil {
@@ -343,16 +353,17 @@ func TestPostgresTransferTaskSerializesCoordinatorSessionRevocation(t *testing.T
 		Kind: models.TaskTransferActorCoordinator, ID: "pg-ceo-source", SessionID: "pg-ceo-session",
 		CallerTaskID: tasks[0].ID,
 	}
-	done := make(chan error, 1)
-	go func() {
-		_, transferErr := repo.TransferTask(context.Background(), command)
-		done <- transferErr
-	}()
-	assertPostgresTransferBlocked(t, done, "coordinator session serialization")
+	if _, err := repo.TransferTask(context.Background(), command); !errors.Is(err, repoerrors.ErrTaskTransferConflict) {
+		t.Fatalf("TransferTask error = %v, want immediate session-table lock conflict", err)
+	}
+	assertPostgresTransferSourceUnchanged(t, repo, tasks[0])
 	if err := holder.Commit(); err != nil {
 		t.Fatalf("commit session revocation: %v", err)
 	}
-	assertPostgresTransferConflict(t, done, "session revocation")
+	if _, err := repo.TransferTask(context.Background(), command); !errors.Is(err, repoerrors.ErrTaskTransferConflict) {
+		t.Fatalf("TransferTask retry error = %v, want revoked-session conflict", err)
+	}
+	assertPostgresTransferSourceUnchanged(t, repo, tasks[0])
 }
 
 func postgresRaceTransferCommand(task *models.Task, key string) models.TaskTransferCommand {

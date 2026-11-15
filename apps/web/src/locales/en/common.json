@@ -126,7 +126,7 @@
   "confirm": "Confirm",
   "contents": "Contents",
   "contentSearchNeedsAnActiveTask": "Content search needs an active task session.",
-  "contextCompactionCountHelp": "Kandev infers this count from context usage drops. Copilot ACP usage is excluded because it can mix parent and subagent contexts. Missing samples or provider resets can affect accuracy.",
+  "contextCompactionCountHelp": "Kandev infers this count from context usage drops. Missing samples or provider resets can affect accuracy.",
   "contextCompactionStatusPartial": "Partial",
   "contextCompactionStatusUnavailable": "Unavailable",
   "contextCompactionCountHelpNative": "New increments use successful parent compaction events from Copilot. Historical estimates remain in the total. Provider-dropped or omitted events can be missed, so this is not a complete history.",

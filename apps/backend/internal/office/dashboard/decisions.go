@@ -606,10 +606,31 @@ func (s *DashboardService) allApproversApproved(ctx context.Context, taskID stri
 	return true
 }
 
+// PendingApproversForCompletion returns the approvers, with display names,
+// whose missing approval blocks the task from completing on stepID (empty
+// means its current step). Consulted by the task service before a human move
+// completes an Office task, so the destination step's template approvers
+// count.
+func (s *DashboardService) PendingApproversForCompletion(
+	ctx context.Context, taskID, stepID string,
+) ([]PendingApproverDTO, error) {
+	pending, err := s.pendingApproversAtStep(ctx, taskID, stepID)
+	if err != nil || len(pending) == 0 {
+		return nil, err
+	}
+	return s.resolvePendingApprovers(ctx, pending), nil
+}
+
 // pendingApprovers returns the agent IDs of approvers without a
 // current approved decision. An empty result means the gate is clear.
 func (s *DashboardService) pendingApprovers(ctx context.Context, taskID string) ([]string, error) {
-	approvers, err := s.repo.ListTaskParticipants(ctx, taskID, models.ParticipantRoleApprover)
+	return s.pendingApproversAtStep(ctx, taskID, "")
+}
+
+// pendingApproversAtStep is pendingApprovers with the task's seats read as if
+// it stood at stepID; an empty stepID reads the current step.
+func (s *DashboardService) pendingApproversAtStep(ctx context.Context, taskID, stepID string) ([]string, error) {
+	approvers, err := s.repo.ListTaskParticipantsAtStep(ctx, taskID, stepID, models.ParticipantRoleApprover)
 	if err != nil {
 		return nil, err
 	}
@@ -623,19 +644,7 @@ func (s *DashboardService) pendingApprovers(ctx context.Context, taskID string) 
 	if err != nil {
 		return nil, err
 	}
-	approvedBy := make(map[string]struct{}, len(decisions))
-	for _, dec := range decisions {
-		if dec.Decision == models.DecisionApproved {
-			approvedBy[dec.DeciderID] = struct{}{}
-		}
-	}
-	pending := make([]string, 0, len(approvers))
-	for _, ap := range approvers {
-		if _, ok := approvedBy[ap.AgentProfileID]; !ok {
-			pending = append(pending, ap.AgentProfileID)
-		}
-	}
-	return pending, nil
+	return PendingApproverIDs(approvers, decisions), nil
 }
 
 // supersedeAndLog clears all active decisions for a task and emits an
@@ -689,4 +698,26 @@ func (s *DashboardService) resolveDeciderName(
 		return ""
 	}
 	return agent.Name
+}
+
+// PendingApproverIDs compares the canonical slate with active approvals.
+func PendingApproverIDs(approvers []sqlite.Participant, decisions []*workflowmodels.WorkflowStepDecision) []string {
+	approvedBy := make(map[string]struct{}, len(decisions))
+	for _, dec := range decisions {
+		if dec.Decision == models.DecisionApproved {
+			approvedBy[dec.DeciderID] = struct{}{}
+		}
+	}
+	pending := make([]string, 0, len(approvers))
+	for _, ap := range approvers {
+		if _, ok := approvedBy[ap.AgentProfileID]; !ok {
+			pending = append(pending, ap.AgentProfileID)
+		}
+	}
+	return pending
+}
+
+// ResolvePendingApproverNames resolves only display data after admission rollback.
+func (s *DashboardService) ResolvePendingApproverNames(ctx context.Context, ids []string) []PendingApproverDTO {
+	return s.resolvePendingApprovers(ctx, ids)
 }

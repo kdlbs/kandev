@@ -5,6 +5,7 @@ import {
   type TaskState,
 } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
+import { resolveWaitReason } from "@/lib/ui/waiting-reason";
 import {
   statusSummaryRowErrorPreview,
   statusSummaryTurnError,
@@ -69,6 +70,18 @@ function sheetLastActivity(task: KanbanState["tasks"][number]) {
 
 function sheetHasRunningSession(task: KanbanState["tasks"][number]) {
   return task.statusSummary?.has_running_session;
+}
+
+function sheetWaitStatus(task: KanbanState["tasks"][number]) {
+  return {
+    quotaWait: task.statusSummary?.quota_wait,
+    waitReason: resolveWaitReason({
+      wipAdmitted: task.wipAdmitted,
+      queuedForStepId: task.queuedForStepId,
+      launchQueue: sheetLaunchQueue(task),
+      quotaWait: task.statusSummary?.quota_wait,
+    }),
+  };
 }
 
 function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
@@ -155,6 +168,7 @@ export function toSheetItem(
     effectiveColorToken: color.effectiveColorToken,
     queuedCount: task.statusSummary?.queued_prompt_count,
     launchQueue: sheetLaunchQueue(task),
+    ...sheetWaitStatus(task),
     wipQueue: ctx.wipQueueByTaskId?.get(task.id),
   };
 }

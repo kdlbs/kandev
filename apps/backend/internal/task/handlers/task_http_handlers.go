@@ -284,14 +284,26 @@ func buildTaskDTOsWithSessionInfo(
 	for i, t := range tasks {
 		taskIDs[i] = t.ID
 	}
+	// The summary revision fences repairs, so the bounded summaries are read
+	// first and the session-summary projection is captured once, after that
+	// revision. The single batch then backs both DTO construction and lazy
+	// repair, matching the boot payload builder's ordering.
+	statusSummaries, summaryErr := svc.GetTaskStatusSummaries(ctx, taskIDs)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+	if summaryErr != nil {
+		log.Warn("failed to load task status summaries, using coarse task fields", zap.Error(summaryErr))
+		statusSummaries = map[string]*statussummary.TaskStatusSummary{}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	sessionObservationsByTask, err := svc.BatchGetTaskSessionSummaryObservations(ctx, taskIDs)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, ctxErr
 	}
 	if err != nil {
-		return nil, err
-	}
-	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	sessionsByTask := taskSessionModelsFromSummaryObservations(sessionObservationsByTask)
@@ -304,21 +316,13 @@ func buildTaskDTOsWithSessionInfo(
 		log.Warn("failed to load pending actions for task list, using empty map", zap.Error(pendingErr))
 		pendingActionsBySession = map[string]models.TaskPendingAction{}
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	statusSummaries, summaryErr := svc.GetTaskStatusSummaries(ctx, taskIDs)
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, ctxErr
-	}
-	if summaryErr != nil {
-		log.Warn("failed to load task status summaries, using coarse task fields", zap.Error(summaryErr))
-		statusSummaries = map[string]*statussummary.TaskStatusSummary{}
-	}
-	if summaryErr == nil {
+	// The empty pending-action fallback is display-only: repairing from it would
+	// persist a cleared pending action (or rebuild a missing summary without
+	// one), so a pending-action read failure skips repair like the boot builder.
+	if summaryErr == nil && pendingErr == nil {
 		var reconcileErr error
 		statusSummaries, reconcileErr = reconcileTaskStatusSummariesAfterRevision(
-			ctx, svc, log, tasks, taskIDs, statusSummaries,
+			ctx, svc, log, tasks, statusSummaries, sessionsByTask, pendingActionsBySession,
 		)
 		if reconcileErr != nil {
 			return nil, reconcileErr
@@ -423,32 +427,19 @@ func reconcileTaskStatusSummariesAfterRevision(
 	svc *service.Service,
 	log *logger.Logger,
 	tasks []*models.Task,
-	taskIDs []string,
 	statusSummaries map[string]*statussummary.TaskStatusSummary,
+	sessionsByTask map[string][]*models.TaskSession,
+	pendingBySession map[string]models.TaskPendingAction,
 ) (map[string]*statussummary.TaskStatusSummary, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	// The summary revision fences repairs, so observations used for a repair
-	// must be captured after that revision.
-	sessionObservations, err := svc.BatchGetTaskSessionSummaryObservations(ctx, taskIDs)
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, ctxErr
-	}
-	if err != nil {
-		log.Warn("failed to refresh task sessions for status summary reconciliation", zap.Error(err))
-		return statusSummaries, nil
-	}
-	sessions := taskSessionModelsFromSummaryObservations(sessionObservations)
-	pendingActions, err := pendingActionsForInputCapableSessions(ctx, svc, sessions)
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, ctxErr
-	}
-	if err != nil {
-		log.Warn("failed to refresh pending actions for status summary reconciliation", zap.Error(err))
-		return statusSummaries, nil
-	}
-	reconciled, err := svc.ReconcileTaskStatusSummaries(ctx, tasks, sessions, pendingActions, statusSummaries)
+	// The observation batch was captured after the summary revision read (see
+	// the ordering in buildTaskDTOsWithSessionInfo), so the fence that requires
+	// repair observations to postdate the revision holds without a second
+	// projection read. A revision that advances after the fence is still
+	// protected by the revision-gated summary write.
+	reconciled, err := svc.ReconcileTaskStatusSummaries(ctx, tasks, sessionsByTask, pendingBySession, statusSummaries)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, ctxErr
 	}
@@ -999,8 +990,14 @@ func (h *TaskHandlers) httpBulkMoveTasks(c *gin.Context) {
 		c.Request.Context(),
 		body.SourceWorkflowID, body.SourceStepID,
 		body.TargetWorkflowID, body.TargetStepID,
+		wfmodels.StepTransitionActorHuman,
 	)
 	if err != nil {
+		var approvals *service.ApprovalsPendingMoveError
+		if errors.As(err, &approvals) || errors.Is(err, service.ErrWorkflowChangeConflict) {
+			handleSelectedMoveError(c, h.logger, err)
+			return
+		}
 		h.logger.Error("failed to bulk move tasks", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to bulk move tasks"})
 		return
@@ -1014,6 +1011,7 @@ func (h *TaskHandlers) httpBulkMoveSelectedTasks(c *gin.Context, body httpBulkMo
 		body.TaskIDs,
 		body.TargetWorkflowID,
 		body.TargetStepID,
+		wfmodels.StepTransitionActorHuman,
 	)
 	if err != nil {
 		handleSelectedMoveError(c, h.logger, err)
@@ -1086,6 +1084,7 @@ type httpCreateTaskRequest struct {
 	ParentID               string                 `json:"parent_id,omitempty"`
 	WorkspacePath          string                 `json:"workspace_path,omitempty"`
 	BlockedBy              []string               `json:"blocked_by,omitempty"`
+	RelatedTaskIDs         []string               `json:"related_task_ids,omitempty"`
 	InitialWorkspaceLayout string                 `json:"initial_workspace_layout,omitempty"`
 	// StartWhenUnblocked records the agent start as an intent consumed by
 	// dependency resolution. nil derives it from StartAgent when BlockedBy is set.
@@ -1318,6 +1317,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		ParentID:                              body.ParentID,
 		WorkspacePath:                         body.WorkspacePath,
 		BlockedBy:                             body.BlockedBy,
+		RelatedTaskIDs:                        body.RelatedTaskIDs,
 		StartWhenUnblocked:                    body.StartWhenUnblocked,
 		ProjectID:                             body.ProjectID,
 		Labels:                                labels,
@@ -1909,17 +1909,21 @@ func (h *TaskHandlers) dispatchTaskSession(
 		startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.AgentLaunchTimeout)
 		defer cancel()
 		launchResp, err := h.orchestrator.LaunchSession(startCtx, &orchestrator.LaunchSessionRequest{
-			TaskID:                taskID,
-			Intent:                orchestrator.IntentStartCreated,
-			SessionID:             sessionID,
-			AgentProfileID:        body.AgentProfileID,
-			Prompt:                description,
-			SkipMessageRecord:     false,
-			PlanMode:              body.PlanMode,
-			Attachments:           body.Attachments,
-			InitialCreatePrompt:   dispatch.initialCreatePrompt,
-			NoInitialPrompt:       dispatch.noInitialPrompt,
-			QuickChatInitialStart: dispatch.quickChatInitialStart,
+			TaskID:            taskID,
+			Intent:            orchestrator.IntentStartCreated,
+			SessionID:         sessionID,
+			AgentProfileID:    body.AgentProfileID,
+			Prompt:            description,
+			SkipMessageRecord: false,
+			PlanMode:          body.PlanMode,
+			Attachments:       body.Attachments,
+			// Normal creation transports the task description here and keeps
+			// the workflow template's replacement semantics. Quick Chat sends
+			// the user's explicit opening prompt through the same dispatcher.
+			PromptIsTaskDescription: !dispatch.quickChatInitialStart,
+			InitialCreatePrompt:     dispatch.initialCreatePrompt,
+			NoInitialPrompt:         dispatch.noInitialPrompt,
+			QuickChatInitialStart:   dispatch.quickChatInitialStart,
 		})
 		if err != nil {
 			h.logger.Error("failed to start agent for task (async)", zap.Error(err), zap.String("task_id", taskID), zap.String("session_id", sessionID))
@@ -2038,7 +2042,7 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 		description = &trimmed
 	}
 
-	task, err := h.service.UpdateTask(c.Request.Context(), c.Param("id"), &service.UpdateTaskRequest{
+	task, err := h.service.UpdateTaskAsHuman(c.Request.Context(), c.Param("id"), &service.UpdateTaskRequest{
 		Title:          title,
 		Description:    description,
 		Priority:       body.Priority,
@@ -2109,6 +2113,29 @@ func (h *TaskHandlers) httpUpdateTaskRepository(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, taskRepo)
+}
+
+// httpDetachTaskRepository handles DELETE /tasks/:id/repositories/:repo_id.
+// It removes only the task attachment; files, branch, and pull requests stay.
+func (h *TaskHandlers) httpDetachTaskRepository(c *gin.Context) {
+	err := h.service.DetachTaskRepository(c.Request.Context(), c.Param("id"), c.Param("repo_id"))
+	if err == nil {
+		c.JSON(http.StatusOK, gin.H{"detached": true})
+		return
+	}
+	if errors.Is(err, service.ErrTaskRepositoryNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, service.ErrPrimaryTaskRepositoryRoot) || isValidationError(err) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	h.logger.Error("detach task repository failed",
+		zap.String("task_id", c.Param("id")),
+		zap.String("repo_id", c.Param("repo_id")),
+		zap.Error(err))
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to detach task repository"})
 }
 
 type httpMoveTaskRequest struct {

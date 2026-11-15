@@ -437,6 +437,7 @@ type UserShellCreateRequest struct {
 	ScriptID          string `json:"script_id,omitempty"`
 	Command           string `json:"command,omitempty"`
 	Label             string `json:"label,omitempty"`
+	WorkingDir        string `json:"working_dir,omitempty"`
 }
 
 // wsUserShellCreate creates a new user shell terminal and returns the assigned ID and label.
@@ -480,7 +481,7 @@ func (h *ShellHandlers) wsUserShellCreate(ctx context.Context, msg *ws.Message) 
 
 	// Plain ordinary shell — DB-backed when the terminal service is wired.
 	if h.terminalSvc != nil && req.TaskID != "" {
-		term, err := h.terminalSvc.Create(ctx, req.TaskID, scopeID, "")
+		term, err := h.terminalSvc.CreateWithWorkingDir(ctx, req.TaskID, scopeID, "", req.WorkingDir)
 		if err != nil {
 			return nil, fmt.Errorf("create ordinary terminal: %w", err)
 		}

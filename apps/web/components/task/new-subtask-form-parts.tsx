@@ -28,6 +28,7 @@ import {
 import { ContextZone } from "./chat/context-items/context-zone";
 import { useTaskTitleSelectionRestore } from "@/hooks/use-task-title-selection-restore";
 import { TaskAutopilotToggle } from "@/components/task-autopilot-toggle";
+import { TaskCreateRelatedSelector } from "@/components/task-create-dialog-relationship-selectors";
 import { useRepositorySets } from "@/hooks/domains/workspace/use-repository-sets";
 import { useApplyRepositorySet } from "@/components/task-create-dialog-repository-sets-apply";
 
@@ -291,6 +292,9 @@ type SubtaskFormBodyProps = {
   agentProfileId: string;
   /** Office task-handoffs phase 5 — workspace mode toggle. */
   workspaceMode: SubtaskWorkspaceMode;
+  relatedTaskIds: string[];
+  onRelatedTaskIdsChange: (value: string[]) => void;
+  parentTaskId: string;
   onWorkspaceModeChange: (m: SubtaskWorkspaceMode) => void;
   contextValue: string;
   onContextChange: (value: string) => void | Promise<void>;
@@ -423,6 +427,9 @@ export function SubtaskFormBody({
   executorProfileOptions,
   agentProfileId,
   workspaceMode,
+  relatedTaskIds,
+  onRelatedTaskIdsChange,
+  parentTaskId,
   onWorkspaceModeChange,
   contextValue,
   onContextChange,
@@ -486,6 +493,20 @@ export function SubtaskFormBody({
         disabled={isCreating}
         hideExecutor={inheritParent}
       />
+      <div className="flex min-w-0 items-center gap-3" data-testid="subtask-related-setting-row">
+        <span className="min-h-6 shrink-0 text-[11px] text-muted-foreground/70">
+          {t("task:relatedTo")}
+        </span>
+        <div className="min-w-0 flex-1">
+          <TaskCreateRelatedSelector
+            value={relatedTaskIds}
+            onChange={onRelatedTaskIdsChange}
+            blockedBy={[]}
+            parentTaskId={parentTaskId}
+            disabled={isCreating}
+          />
+        </div>
+      </div>
       <div
         className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-end gap-2"
         data-testid="subtask-context-autopilot-row"

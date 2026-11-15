@@ -81,6 +81,8 @@ Reject caller-supplied task, session, workspace, execution, or surface identity.
 Derive surface `external` from trusted transport context.
 Leave task, session, execution, and workspace empty for these instance calls.
 Do not create synthetic tasks or sessions.
+[Workspace-scoped plugin tools](agent-tool-workspace-scope.md) adds the
+`workspace` scope, whose external calls carry a host-verified workspace.
 
 Task-backed calls keep host-resolved task/session/workspace identity, including
 automation and coordinator calls to instance tools.
@@ -118,7 +120,10 @@ Consumers inspect `partial`, `stale`, `availability_state`, and individual
 window `utilization_percentage` / `remaining_percentage` before choosing a
 provider. A cached percentage cannot guarantee admission to a future request.
 Keep scoped windows distinct from the provider-wide quota.
-For external calls, `scope.invocation_workspace_id` is the empty string.
+For external instance calls such as `get_provider_usage`,
+`scope.invocation_workspace_id` is the empty string. External workspace reads
+carry the host-verified workspace ID described by
+[workspace-scoped plugin tools](agent-tool-workspace-scope.md).
 
 ## Verification
 

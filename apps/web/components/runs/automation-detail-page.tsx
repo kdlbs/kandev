@@ -15,6 +15,7 @@ import type { Automation, AutomationRun } from "@/lib/types/automation";
 import { nextFiring } from "./automation-rows";
 import { RunsDrawer } from "./runs-drawer";
 import { RunsRail } from "./runs-rail";
+import { AutomationMCPEvidence } from "./automation-mcp-evidence";
 import { RunTranscript } from "./run-transcript";
 import { isOpenRun } from "./run-status";
 import { AUTOMATIONS_HREF, runHref, type AutomationDetailTab } from "./runs-view";
@@ -182,6 +183,7 @@ function ConfigureView({ automation }: { automation: Automation }) {
  * for every time.
  */
 function ActivityView({
+  automation,
   automationId,
   selected,
   hasRuns,
@@ -189,6 +191,7 @@ function ActivityView({
   refresh,
 }: {
   automationId: string;
+  automation: Automation;
   selected: AutomationRun | null;
   hasRuns: boolean;
   loading: boolean;
@@ -258,6 +261,7 @@ function ActivityView({
       )}
       {/* Keyed on the exact session turn so selecting two runs in one shared
           session remounts the conversation for the requested firing. */}
+      <AutomationMCPEvidence automation={automation} run={selected} />
       <RunTranscript
         key={`${selected.session_id}:${selected.turn_id ?? ""}:${selected.id}`}
         sessionId={selected.session_id ?? ""}
@@ -336,6 +340,7 @@ function DetailBody({
           <ConfigureView automation={automation} />
         ) : (
           <ActivityView
+            automation={automation}
             automationId={automation.id}
             selected={selected}
             hasRuns={runs.length > 0}

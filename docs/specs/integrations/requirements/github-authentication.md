@@ -40,6 +40,10 @@ Host families and host-specific authentication policy are defined by the
 - **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.16:** During App installation and personal authorization, Kandev shall verify access to the exact selected installation through the authorizing user's credentials. An accessible installation on a later results page shall remain eligible. Other accessible installations shall not authorize the selected installation.
 - **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.17:** When GitHub cannot complete installation-access verification, Kandev shall report an error instead of treating that error as confirmed absence. A failed callback shall preserve the previous connection. Existing bounded installation retries shall remain available for confirmed absence immediately after installation.
 - **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.18:** When personal tokens refresh, verified access to the selected installation shall permit the existing atomic token rotation. Confirmed loss of access or a definitive authentication error shall invalidate the personal connection. Other verification errors shall preserve its stored status and tokens, and shall fail the current request.
+- **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.19:** On Linux, Kandev-managed GitHub CLI requests shall not create a D-Bus session through automatic discovery. This applies when the bus address is absent, empty, or requests autolaunch, including repeated credential and authentication checks.
+- **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.20:** Without an accessible user bus, credential lookup shall still resolve a valid file-stored token for the selected host and login. It shall not change the active account or substitute another identity.
+- **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.21:** Credential lookup shall preserve access through an explicit concrete bus address or an existing discoverable user bus. Later requests shall recognize a user bus that appears after service startup, without a Kandev restart.
+- **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.22:** The bus policy shall affect only Kandev-managed GitHub CLI command environments on Linux. It shall preserve each caller's credential-selection environment, leave the parent environment unchanged, and preserve behavior on other operating systems.
 
 ### REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-002: Executor HTTPS access through host GitHub CLI
 
@@ -64,6 +68,8 @@ It does not change managed repository materialization, credential snapshots, UI 
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/github-authentication-01.md), [part 2](../system-design/github-authentication-02.md), [part 3](../system-design/github-authentication-03.md).
+The [GitHub CLI session bus design](../system-design/github-cli-session-bus.md)
+defines the command environment for criteria 001.19 through 001.22.
 
 ## Implementation plans
 
@@ -71,3 +77,5 @@ The [installation access repair](../../../plans/github-installation-access-check
 clarifies criteria 001.16 through 001.18 and corrects the provider verification path.
 The [original authentication package](../../../plans/github-authentication/plan.md)
 records the earlier delivery. Its completed work remains historical evidence.
+The [CLI D-Bus autolaunch repair](../../../plans/github-cli-dbus-autolaunch/plan.md)
+implements criteria 001.19 through 001.22.

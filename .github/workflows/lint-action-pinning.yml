@@ -53,6 +53,9 @@ jobs:
       - name: Test Claude Code review workflow contract
         run: python3 .github/scripts/claude-code-review-workflow-contract_test.py
 
+      - name: Test Claude initial review admission
+        run: node --test .github/scripts/claude-initial-review.test.cjs
+
       - name: Test PR walkthrough workflow contract
         run: |
           python3 .github/scripts/pr-walkthrough-workflow-contract_test.py
@@ -145,6 +148,9 @@ jobs:
 
       - name: Test managed runtime pin update workflow contract
         run: python3 .github/scripts/update-agent-runtime-pins-workflow-contract_test.py
+
+      - name: Test managed runtime pin delivery record generator
+        run: node --test .github/scripts/record-agent-runtime-pin-refresh.test.mjs
 
       - name: Test backend tests workflow contract
         run: python3 .github/scripts/backend-tests-workflow-contract_test.py

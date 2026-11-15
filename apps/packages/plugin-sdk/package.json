@@ -1,6 +1,6 @@
 {
   "name": "@kdlbs/plugin-sdk",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "description": "Versioned frontend contracts for Kandev runtime plugins",
   "type": "module",
   "main": "./src/index.ts",

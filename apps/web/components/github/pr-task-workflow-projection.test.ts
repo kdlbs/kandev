@@ -3,6 +3,8 @@ import type { TaskPR } from "@/lib/types/github";
 import type { TaskPRInfo } from "./pr-task-automation";
 import { derivePRTaskStatusSummary } from "./pr-task-status-summary";
 import {
+  applyCompactCIDisclosure,
+  compactCIIsNewerThanFullPRs,
   compactWorkflowApprovalIsNewerThanFullPRs,
   getNegativeWorkflowApprovalDisclosure,
 } from "./pr-task-workflow-projection";
@@ -425,3 +427,138 @@ describe("negative terminal lifecycle reconciliation", () => {
     expect(siblingSummary.rows.some((row) => row.status === "mergeable")).toBe(true);
   });
 });
+
+describe("compact task CI projection freshness", () => {
+  it("accepts a newer explicit CI state", () => {
+    expect(compactCIIsNewerThanFullPRs([makePR()], makePRInfo({ ciState: "failed" }))).toBe(true);
+  });
+
+  it.each([
+    { label: "missing CI value", info: { ciState: undefined } },
+    { label: "equal timestamp", info: { statusSummaryUpdatedAt: FULL_SYNCED_AT } },
+    { label: "older timestamp", info: { statusSummaryUpdatedAt: "2026-09-30T10:00:00Z" } },
+    { label: "malformed timestamp", info: { statusSummaryUpdatedAt: "tomorrow" } },
+  ])("keeps full authority for $label", ({ info }) => {
+    expect(compactCIIsNewerThanFullPRs([makePR()], makePRInfo(info))).toBe(false);
+  });
+
+  it("keeps full authority when a full sync timestamp is missing", () => {
+    expect(
+      compactCIIsNewerThanFullPRs(
+        [makePR({ last_synced_at: null })],
+        makePRInfo({ ciState: "failed" }),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("compact task CI disclosure", () => {
+  const failedRow = { kind: "ci", status: "failed", tone: "danger" } as const;
+  const compactFailedRow = {
+    kind: "ci",
+    id: "ci-state",
+    status: "failed",
+    tone: "danger",
+  } as const;
+  const compactInProgressRow = {
+    kind: "ci",
+    id: "ci-state",
+    status: "in_progress",
+    tone: "warning",
+  } as const;
+  const approvalRow = {
+    kind: "ci",
+    id: "workflow-attention",
+    status: "awaiting_approval",
+    tone: "warning",
+  } as const;
+
+  it("removes an obsolete full failure when the newer compact state is none", () => {
+    const prs = [makePR({ checks_state: "failure" })];
+    const result = applyCompactCIDisclosure(
+      summariesFor(prs),
+      prs,
+      makePRInfo({ ciState: "none" }),
+      true,
+    );
+    expect(result[0].rows).not.toContainEqual(failedRow);
+  });
+
+  it("adds the compact failure with its selected identity", () => {
+    const prs = [makePR()];
+    const result = applyCompactCIDisclosure(
+      summariesFor(prs),
+      prs,
+      makePRInfo({
+        ciState: "failed",
+        ciPRNumber: 43,
+        ciRepository: "contributor/fork",
+      }),
+      true,
+    );
+    expect(result).toContainEqual(
+      expect.objectContaining({
+        number: 43,
+        rows: [expect.objectContaining({ status: "failed" })],
+      }),
+    );
+  });
+
+  it("keeps an independent approval row beside a newer failure", () => {
+    const prs = [makePR({ head_sha: "head-a", workflow_attention: approvalAttention() })];
+    const result = applyCompactCIDisclosure(
+      summariesFor(prs),
+      prs,
+      makePRInfo({ ciState: "failed" }),
+      true,
+    );
+    expect(result[0].rows).toContainEqual(approvalRow);
+    expect(result[0].rows).toContainEqual(compactFailedRow);
+  });
+
+  it("removes a stale failure ruled out by a newer approval aggregate", () => {
+    const prs = [makePR({ checks_state: "failure" })];
+    const result = applyCompactCIDisclosure(
+      summariesFor(prs),
+      prs,
+      makePRInfo({ ciState: "approval_required" }),
+      true,
+    );
+    expect(result[0].rows).not.toContainEqual(failedRow);
+    expect(result[0].rows).toContainEqual(approvalRow);
+  });
+
+  it("removes a stale passed row when a newer aggregate is in progress", () => {
+    const prs = [makePR({ checks_state: "success" })];
+    const result = applyCompactCIDisclosure(
+      summariesFor(prs),
+      prs,
+      makePRInfo({ ciState: "in_progress" }),
+      true,
+    );
+    expect(result[0].rows).not.toContainEqual(expect.objectContaining({ status: "passed" }));
+    expect(result[0].rows).toContainEqual(compactInProgressRow);
+  });
+
+  it("removes a stale passed row when a newer aggregate is failed", () => {
+    const prs = [makePR({ checks_state: "success" })];
+    const result = applyCompactCIDisclosure(
+      summariesFor(prs),
+      prs,
+      makePRInfo({ ciState: "failed" }),
+      true,
+    );
+    expect(result[0].rows).not.toContainEqual(expect.objectContaining({ status: "passed" }));
+    expect(result[0].rows).toContainEqual(compactFailedRow);
+  });
+});
+
+function approvalAttention() {
+  return {
+    state: "approval_required" as const,
+    head_sha: "head-a",
+    observed_at: "2026-09-30T11:30:00Z",
+    stale: false,
+    runs: [],
+  };
+}

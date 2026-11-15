@@ -44,12 +44,15 @@ func (h *Handlers) handleSpawnSession(ctx context.Context, msg *ws.Message) (*ws
 	profileID := h.resolveSpawnAgentProfile(ctx, &req, spawner)
 
 	resp, err := h.sessionLauncher.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
-		TaskID:                        req.TaskID,
-		Intent:                        orchestrator.IntentStart,
-		AgentProfileID:                profileID,
+		TaskID:         req.TaskID,
+		Intent:         orchestrator.IntentStart,
+		AgentProfileID: profileID,
+		// An explicit spawn must add a session even when profile resolution
+		// falls back to launch defaults. Never route it to a workflow session.
+		ProfileExplicit:               true,
+		PreserveWorkflowSourceBinding: true,
 		Prompt:                        req.Prompt,
 		SpawnOrigin:                   spawnOriginFromSession(spawner),
-		PreserveWorkflowSourceBinding: true,
 	})
 	if err != nil {
 		if errors.Is(err, models.ErrWorkspaceReuseUnsupported) {

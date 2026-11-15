@@ -158,3 +158,20 @@ func TaskCompletionMoveOverrideFromContext(ctx context.Context) (TaskCompletionM
 	value, ok := ctx.Value(completionMoveOverrideContextKey{}).(TaskCompletionMoveOverride)
 	return value, ok
 }
+
+// OfficeHumanCompletionIntent carries authorized scope from a human entry point.
+// It is internal provenance and is never decoded from request data.
+type OfficeHumanCompletionIntent struct {
+	ExpectedTaskState                                               string
+	TaskID, ExpectedWorkspaceID, ExpectedWorkflowID, ExpectedStepID string
+	Kind                                                            string
+}
+type officeHumanCompletionKey struct{}
+
+func WithOfficeHumanCompletionIntent(ctx context.Context, intent OfficeHumanCompletionIntent) context.Context {
+	return context.WithValue(ctx, officeHumanCompletionKey{}, intent)
+}
+func OfficeHumanCompletionIntentFromContext(ctx context.Context) (OfficeHumanCompletionIntent, bool) {
+	intent, ok := ctx.Value(officeHumanCompletionKey{}).(OfficeHumanCompletionIntent)
+	return intent, ok && intent.TaskID != ""
+}

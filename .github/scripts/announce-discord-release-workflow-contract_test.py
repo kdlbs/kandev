@@ -45,6 +45,23 @@ class DiscordWorkflowTest(unittest.TestCase):
         self.assertIn('acknowledge_create: true', block)
         self.assertNotIn('inputs.notify_contributors', block)
 
+    # @covers AC-RELEASE-DISCORD-001.1, AC-RELEASE-DISCORD-003.1
+    def test_reusable_delivery_passes_only_the_discord_secret(self):
+        caller = job(RELEASE, 'announce-discord')
+        self.assertIn(
+            '    secrets:\n'
+            '      DISCORD_GENERAL_WEBHOOK_URL: ${{ secrets.DISCORD_GENERAL_WEBHOOK_URL }}\n',
+            caller,
+        )
+        self.assertNotIn('secrets: inherit', caller)
+        declaration = WORKFLOW.split('  workflow_call:\n', 1)[1].split('\npermissions:', 1)[0]
+        self.assertIn(
+            '    secrets:\n'
+            '      DISCORD_GENERAL_WEBHOOK_URL:\n'
+            '        required: false\n',
+            declaration,
+        )
+
     # @covers AC-RELEASE-DISCORD-003.1, AC-RELEASE-DISCORD-003.4
     def test_manual_recovery_defaults_to_preview(self):
         self.assertIn('workflow_dispatch:', WORKFLOW)

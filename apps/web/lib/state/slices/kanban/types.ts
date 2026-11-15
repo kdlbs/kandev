@@ -208,6 +208,8 @@ export type KanbanState = {
     dependsOn?: TaskDependencyRef[];
     /** Direct dependents — the tasks waiting on this one. Not transitive. */
     blocks?: TaskDependencyRef[];
+    /** Symmetric non-blocking relationships. */
+    related?: TaskDependencyRef[];
     /** A launch intent is waiting on dependency resolution. */
     startWhenUnblocked?: boolean;
     isPRReview?: boolean;

@@ -26,6 +26,7 @@ func deriveSummary(state *projectionState) TaskStatusSummary {
 		LaunchQueue:         cloneLaunchQueue(state.launchQueue),
 		CompletionGate:      cloneCompletionGate(state.completionGate),
 		UnreadSessionIDs:    deriveUnreadSessionIDs(state),
+		QuotaWait:           cloneQuotaWait(state.quotaWait),
 	}
 }
 
@@ -59,6 +60,21 @@ func cloneBoolPtr(value *bool) *bool {
 	}
 	copy := *value
 	return &copy
+}
+
+func cloneQuotaWait(wait *QuotaWaitSummary) *QuotaWaitSummary {
+	if wait == nil {
+		return nil
+	}
+	copy := *wait
+	return &copy
+}
+
+func equalQuotaWait(left, right *QuotaWaitSummary) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
 }
 
 func cloneCompletionGate(gate *CompletionGateSummary) *CompletionGateSummary {

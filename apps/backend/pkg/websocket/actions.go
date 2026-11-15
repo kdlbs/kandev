@@ -21,11 +21,12 @@ const (
 	ActionWorkspaceDelete = "workspace.delete"
 
 	// Repository actions
-	ActionRepositoryList   = "repository.list"
-	ActionRepositoryCreate = "repository.create"
-	ActionRepositoryGet    = "repository.get"
-	ActionRepositoryUpdate = "repository.update"
-	ActionRepositoryDelete = "repository.delete"
+	ActionRepositoryList              = "repository.list"
+	ActionRepositoryCreate            = "repository.create"
+	ActionRepositoryGet               = "repository.get"
+	ActionRepositoryUpdate            = "repository.update"
+	ActionRepositoryDelete            = "repository.delete"
+	ActionRepositoryValidateRemoteURL = "repository.remote_url.validate"
 
 	// Repository Set actions
 	ActionRepositorySetList   = "repository_set.list"
@@ -77,6 +78,7 @@ const (
 	ActionTaskGet                   = "task.get"
 	ActionTaskUpdate                = "task.update"
 	ActionTaskRepoUpdate            = "task.repository.update"
+	ActionTaskRepoDetach            = "task.repository.detach"
 	ActionTaskDelete                = "task.delete"
 	ActionTaskMove                  = "task.move"
 	ActionTaskState                 = "task.state"

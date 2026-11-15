@@ -3,12 +3,25 @@ import { seededAgentProfile } from "../../helpers/seeded-agent-profile";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 
 function longProfileDeleteConflict() {
+  const workspaces = [
+    { id: "workspace-mobile-alpha", name: "E2E Workspace Alpha" },
+    {
+      id: "workspace-mobile-long",
+      name: "E2E Workspace With a Very Long Name That Must Wrap on Mobile",
+    },
+  ];
+
   return {
-    active_sessions: Array.from({ length: 40 }, (_, index) => ({
-      task_id: `overflow-task-${index}`,
-      task_title: `Overflow task ${index}`,
-      is_ephemeral: false,
-    })),
+    active_sessions: Array.from({ length: 40 }, (_, index) => {
+      const workspace = workspaces[index % workspaces.length];
+      return {
+        task_id: `overflow-task-${index}`,
+        task_title: `Overflow task ${index}`,
+        is_ephemeral: false,
+        workspace_id: workspace.id,
+        workspace_name: workspace.name,
+      };
+    }),
     watchers: [],
     routing_tiers: [],
     automations: [],
@@ -175,7 +188,22 @@ test.describe("Agent profile deletion on mobile", () => {
     const body = conflictDialog.getByTestId("agent-profile-delete-conflict-body");
     const footer = conflictDialog.getByTestId("agent-profile-delete-conflict-footer");
     const title = conflictDialog.locator('[data-slot="alert-dialog-title"]');
+    const workspaceGroups = body.getByTestId("profile-conflict-workspace-group");
     const finalTask = body.getByText("Overflow task 39", { exact: true });
+
+    await expect(workspaceGroups).toHaveCount(2);
+    const alphaWorkspace = workspaceGroups.nth(0);
+    await expect(alphaWorkspace.getByTestId("profile-conflict-workspace-name")).toHaveText(
+      "E2E Workspace Alpha",
+    );
+    await expect(alphaWorkspace.getByText("Overflow task 0", { exact: true })).toBeVisible();
+
+    const longNameWorkspace = workspaceGroups.nth(1);
+    const longWorkspaceName = longNameWorkspace.getByTestId("profile-conflict-workspace-name");
+    await expect(longWorkspaceName).toHaveText(
+      "E2E Workspace With a Very Long Name That Must Wrap on Mobile",
+    );
+    await expect(longNameWorkspace.getByText("Overflow task 1", { exact: true })).toBeVisible();
 
     const scrollable = await body.evaluate((element) => ({
       scrollHeight: element.scrollHeight,
@@ -188,6 +216,9 @@ test.describe("Agent profile deletion on mobile", () => {
     const dialogBox = await conflictDialog.boundingBox();
     const titleBox = await title.boundingBox();
     const footerBox = await footer.boundingBox();
+    const longWorkspaceNameFits = await longWorkspaceName.evaluate(
+      (element) => element.scrollWidth <= element.clientWidth,
+    );
     expect(dialogBox).not.toBeNull();
     expect(titleBox).not.toBeNull();
     expect(footerBox).not.toBeNull();
@@ -199,6 +230,7 @@ test.describe("Agent profile deletion on mobile", () => {
     expect(titleBox!.y + titleBox!.height).toBeLessThanOrEqual(dialogBox!.y + dialogBox!.height);
     expect(footerBox!.y).toBeGreaterThanOrEqual(dialogBox!.y);
     expect(footerBox!.y + footerBox!.height).toBeLessThanOrEqual(dialogBox!.y + dialogBox!.height);
+    expect(longWorkspaceNameFits).toBe(true);
 
     await body.evaluate((element) => {
       element.scrollTop = element.scrollHeight;

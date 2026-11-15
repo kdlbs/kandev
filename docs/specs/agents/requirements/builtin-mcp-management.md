@@ -24,6 +24,12 @@ selection and delivery. Platform retains ownership of session observations.
 Names, package boundaries, and defaults below are recommendations for review,
 not previously approved behavior. Implementation needs a later explicit request.
 
+## Automation extension
+
+[Automation MCP selection](../../office/requirements/automation-mcp-selection.md) owns the extension to the Automation surface.
+It permits every optional package after an explicit native save. Core remains required.
+Other restricted surfaces retain this document's existing boundaries. The extension has separate implementation work orders.
+
 ## Terms
 
 - **Operator:** A human caller authorized to manage the affected workspace or task.

@@ -43,7 +43,7 @@ func TestSendNowClaimOwnsDurableSourceDuringReadinessDrain(t *testing.T) {
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	workerDone := make(chan struct{})
 	svc.onQueuedMessageExecutionComplete = func() { close(workerDone) }
 	messages := &mockMessageCreator{}

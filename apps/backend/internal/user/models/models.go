@@ -155,6 +155,7 @@ type UserSettings struct {
 	PreferredShell                    string                            `json:"preferred_shell"`
 	DefaultEditorID                   string                            `json:"default_editor_id"`
 	EnablePreviewOnClick              bool                              `json:"enable_preview_on_click"`
+	EscapeCancelsAgent                bool                              `json:"escape_cancels_agent"`
 	ChatSubmitKey                     string                            `json:"chat_submit_key"` // "enter" | "cmd_enter"
 	ReviewAutoMarkOnScroll            bool                              `json:"review_auto_mark_on_scroll"`
 	ConfirmTaskArchive                bool                              `json:"confirm_task_archive"`

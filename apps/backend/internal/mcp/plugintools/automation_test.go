@@ -79,6 +79,36 @@ func TestProjectLegacySafeDropsEveryNewContext(t *testing.T) {
 	}
 }
 
+func TestProjectLegacySafeProjectsWorkspaceScopeToTask(t *testing.T) {
+	snapshot := Snapshot{Tools: []Definition{
+		{PluginID: "p", LocalName: "kanban", InvocationScope: InvocationScopeWorkspace,
+			Surfaces: []string{SurfaceKanban, SurfaceExternal}},
+		{PluginID: "p", LocalName: "office", InvocationScope: InvocationScopeWorkspace,
+			Surfaces: []string{SurfaceOffice}},
+		{PluginID: "p", LocalName: "external_only", InvocationScope: InvocationScopeWorkspace,
+			Surfaces: []string{SurfaceExternal}},
+		{PluginID: "p", LocalName: "instance", InvocationScope: InvocationScopeInstance,
+			Surfaces: []string{SurfaceKanban, SurfaceExternal}},
+	}}
+	projected := ProjectLegacySafe(snapshot)
+	if len(projected.Tools) != 3 {
+		t.Fatalf("projected tools = %#v", projected.Tools)
+	}
+	if got := projected.Tools[0]; got.LocalName != "kanban" || got.InvocationScope != InvocationScopeTask ||
+		len(got.Surfaces) != 1 || got.Surfaces[0] != SurfaceKanban {
+		t.Fatalf("workspace kanban projection = %#v", got)
+	}
+	if got := projected.Tools[1]; got.LocalName != "office" || got.InvocationScope != InvocationScopeTask {
+		t.Fatalf("workspace office projection = %#v", got)
+	}
+	if got := projected.Tools[2]; got.LocalName != "instance" || got.InvocationScope != InvocationScopeInstance {
+		t.Fatalf("instance projection = %#v", got)
+	}
+	if got := snapshot.Tools[0].InvocationScope; got != InvocationScopeWorkspace {
+		t.Fatalf("projection mutated the source scope to %q", got)
+	}
+}
+
 func TestAutomationAuthorizationAllowsOnlyExactPluginAndTool(t *testing.T) {
 	authorization := AutomationAuthorization{
 		AutomationID: "a", WorkspaceID: "w", PluginID: "p",

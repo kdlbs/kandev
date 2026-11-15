@@ -36,7 +36,7 @@ func TestCancelAgentFinalizesSessionAfterStartupStopOutlivesOperationContext(t *
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 
 	attempt, owner, err := svc.beginResumeAttempt(context.Background(), taskID, sessionID)
 	if err != nil || !owner {

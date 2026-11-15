@@ -10,11 +10,15 @@ export type TaskLinkProps = Omit<AppLinkProps, "href"> &
   };
 
 const TaskLink = forwardRef<HTMLAnchorElement, TaskLinkProps>(function TaskLink(
-  { taskId, layout, sessionId, searchParams, ...props },
+  { taskId, layout, sessionId, panel, searchParams, ...props },
   ref,
 ) {
   return (
-    <Link {...props} ref={ref} href={linkToTask(taskId, { layout, sessionId, searchParams })} />
+    <Link
+      {...props}
+      ref={ref}
+      href={linkToTask(taskId, { layout, sessionId, panel, searchParams })}
+    />
   );
 });
 

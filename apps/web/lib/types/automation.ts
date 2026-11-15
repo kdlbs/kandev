@@ -1,3 +1,15 @@
+import type { BuiltinMCPPackage, BuiltinMCPDescriptor } from "./builtin-mcp";
+export type AutomationMCPSelection = {
+  builtin_packages: BuiltinMCPPackage[];
+  definition_ids: string[];
+};
+export type AutomationMCPOptions = {
+  packages: BuiltinMCPDescriptor[];
+  definitions: { id: string; name: string; enabled: boolean }[];
+  inherited: { id: string; name: string; origins: string[] }[];
+  task_defaults: BuiltinMCPPackage[];
+  task_blocked: BuiltinMCPPackage[];
+};
 // Automation types matching backend models in internal/automation/models.go
 
 export type TriggerType =
@@ -100,6 +112,8 @@ export type AutomationPluginToolOptionsResponse = {
 };
 
 export type Automation = {
+  mcp_selection?: AutomationMCPSelection | null;
+  mcp_selection_revision?: number;
   id: string;
   workspace_id: string;
   name: string;
@@ -333,6 +347,7 @@ export type TriggerTypeInfo = {
 // --- Request/response DTOs ---
 
 export type CreateAutomationRequest = {
+  mcp_selection?: AutomationMCPSelection;
   workspace_id: string;
   name: string;
   description?: string;
@@ -360,6 +375,8 @@ export type CreateAutomationRequest = {
 };
 
 export type UpdateAutomationRequest = {
+  mcp_selection?: AutomationMCPSelection;
+  expected_mcp_selection_revision?: number;
   name?: string;
   description?: string;
   workflow_id?: string;

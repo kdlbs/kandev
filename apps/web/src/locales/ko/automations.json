@@ -373,5 +373,22 @@
   "pluginToolsRead": "읽기",
   "pluginToolsWrite": "쓰기",
   "pluginToolsClearedHint": "저장하면 플러그인 도구 액세스가 제거됩니다.",
-  "pluginToolsUnavailable": "플러그인을 사용할 수 없음"
+  "pluginToolsUnavailable": "플러그인을 사용할 수 없음",
+  "mcpAccess": "MCP 접근",
+  "mcpNextStart": "변경 사항은 에이전트 프로세스가 다음에 시작될 때 적용됩니다. 재사용하는 프로세스는 현재 도구를 유지합니다.",
+  "mcpNewTasks": "새로 생성하는 작업에 적용됩니다. 기존 작업은 자체 선택을 유지합니다.",
+  "mcpBuiltinPackages": "기본 제공 패키지",
+  "mcpRequired": "필수",
+  "mcpBlocked": "워크스페이스 정책에 의해 차단됨",
+  "mcpConfigurationAuthority": "Configuration은 권한이 있는 워크플로, 프로필, 프롬프트, 실행기 및 자동화를 변경할 수 있습니다. 네이티브 도구는 MCP 접근 권한을 변경할 수 없습니다. 타사 서버는 자체 권한을 사용합니다.",
+  "mcpWorkspaceServers": "워크스페이스 MCP 서버",
+  "mcpSearch": "MCP 서버 검색",
+  "mcpInherited": "{{name}} (상속됨)",
+  "mcpNoServers": "추가 MCP 서버를 찾을 수 없습니다.",
+  "mcpUnavailable": "{{name}} (사용 불가)",
+  "mcpOptionsFailed": "MCP 선택 항목을 불러올 수 없습니다. 저장된 선택은 변경되지 않습니다.",
+  "mcpDesired": "원하는 패키지",
+  "mcpCurrentProcess": "현재 프로세스",
+  "mcpUnknown": "알 수 없음",
+  "mcpObserved": "관측된 연결"
 }

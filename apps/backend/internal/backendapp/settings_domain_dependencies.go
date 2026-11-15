@@ -38,6 +38,7 @@ type settingsTaskService interface {
 	ListWorkspaces(context.Context) ([]*taskmodels.Workspace, error)
 	GetRepository(context.Context, string) (*taskmodels.Repository, error)
 	UpdateRepository(context.Context, string, *taskservice.UpdateRepositoryRequest) (*taskmodels.Repository, error)
+	ValidateRepositoryRemoteURLUpdate(context.Context, string, string) (*taskservice.RepositoryRemoteURLPreview, error)
 	ListRepositories(context.Context, string) ([]*taskmodels.Repository, error)
 	GetRepositoryScript(context.Context, string) (*taskmodels.RepositoryScript, error)
 	UpdateRepositoryScript(context.Context, string, *taskservice.UpdateRepositoryScriptRequest) (*taskmodels.RepositoryScript, error)

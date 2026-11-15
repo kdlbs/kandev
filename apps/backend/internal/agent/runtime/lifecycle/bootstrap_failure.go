@@ -32,6 +32,7 @@ type BootstrapFailure struct {
 	EffectiveMode  string
 	RuntimeVersion string
 	PromptNotSent  *bool
+	ExitCode       *int
 	Cause          error
 }
 
@@ -76,6 +77,9 @@ func (e *BootstrapFailure) safeDetail() string {
 	if e.safeCode() == models.AgentErrorCauseCodePluginPreparationFailed {
 		return models.AgentErrorCausePluginPreparationDetail
 	}
+	if e.safeCode() == models.AgentErrorCauseCodeProcessExited {
+		return models.AgentErrorCauseProcessExitedDetail
+	}
 	if e.Detail == "" || isSelectionBootstrapCause(e.safeCode()) || e.safeCode() == models.AgentErrorCauseCodeRuntimeCleanupFailed {
 		return bootstrapFailureDetail(e.safeCode())
 	}
@@ -113,6 +117,10 @@ func (e *BootstrapFailure) SafeAgentErrorCause(operation string) (models.AgentEr
 	if e.PromptNotSent != nil {
 		value := *e.PromptNotSent
 		cause.PromptNotSent = &value
+	}
+	if e.ExitCode != nil {
+		value := *e.ExitCode
+		cause.ExitCode = &value
 	}
 	normalized := models.NormalizeAgentErrorCauses([]models.AgentErrorCause{cause})
 	if len(normalized) == 0 {
@@ -159,6 +167,7 @@ func isKnownBootstrapCauseCode(code string) bool {
 		models.AgentErrorCauseCodePermissionModeUnconfirmed,
 		models.AgentErrorCauseCodePermissionModeMismatch,
 		models.AgentErrorCauseCodePluginPreparationFailed,
+		models.AgentErrorCauseCodeProcessExited,
 		models.AgentErrorCauseCodeUnknown:
 		return true
 	default:
@@ -220,7 +229,15 @@ func bootstrapFailureFor(execution *AgentExecution, err error) *BootstrapFailure
 		return &BootstrapFailure{Operation: bootstrapOperation(execution), Code: models.AgentErrorCauseCodeTransportUnavailable, Detail: agentctl.ErrPassthroughUnsupported.Error(), Cause: err}
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		code = models.AgentErrorCauseCodeTimeout
+		return &BootstrapFailure{
+			Operation: bootstrapOperation(execution),
+			Code:      models.AgentErrorCauseCodeTimeout,
+			Detail:    bootstrapFailureDetail(models.AgentErrorCauseCodeTimeout),
+			Cause:     err,
+		}
+	}
+	if failure := startupProcessBootstrapFailure(execution, err); failure != nil {
+		return failure
 	}
 	return &BootstrapFailure{
 		Operation: bootstrapOperation(execution),
@@ -258,6 +275,8 @@ func bootstrapFailureDetail(code string) string {
 		return "The applied permission mode did not match the request."
 	case models.AgentErrorCauseCodePluginPreparationFailed:
 		return models.AgentErrorCausePluginPreparationDetail
+	case models.AgentErrorCauseCodeProcessExited:
+		return models.AgentErrorCauseProcessExitedDetail
 	default:
 		return "The bootstrap operation could not be completed."
 	}

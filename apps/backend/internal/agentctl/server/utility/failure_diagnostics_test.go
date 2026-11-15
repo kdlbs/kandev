@@ -63,7 +63,7 @@ func TestProbeFailureSummaryDiagnostic(t *testing.T) {
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	core, observed := observer.New(zapcore.WarnLevel)
-	handler := NewHandler("", zap.New(core))
+	handler := NewHandler("", nil, zap.New(core))
 	handler.SetInstanceID(probeDiagnosticTestInstanceID)
 	router := newProbeDiagnosticRouter(t, handler)
 
@@ -96,7 +96,7 @@ func TestProbeFailureSummaryDiagnostic(t *testing.T) {
 // @covers AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.9
 func TestProbeExecutionFailureHandlerDiagnostic(t *testing.T) {
 	core, observed := observer.New(zapcore.ErrorLevel)
-	handler := NewHandler("", zap.New(core))
+	handler := NewHandler("", nil, zap.New(core))
 	handler.SetInstanceID(probeDiagnosticTestInstanceID)
 	handler.acpExecutor = failingProbeExecutor{err: context.DeadlineExceeded}
 	router := newProbeDiagnosticRouter(t, handler)
@@ -118,7 +118,7 @@ func TestProbeExecutionFailureHandlerDiagnostic(t *testing.T) {
 
 // @covers AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.9
 func TestSetInstanceIDRejectsInvalidIdentity(t *testing.T) {
-	handler := NewHandler("", zap.NewNop())
+	handler := NewHandler("", nil, zap.NewNop())
 	for _, invalid := range []string{"", "not-a-uuid", "33333333-3333-4333-8333-33333333333A"} {
 		handler.SetInstanceID(invalid)
 		require.Empty(t, handler.instanceID)
@@ -144,7 +144,7 @@ func TestProbeFailureCodeClass(t *testing.T) {
 
 // @covers AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.9
 func TestProbeExecutionFailureDiagnostic(t *testing.T) {
-	handler := NewHandler("", zap.NewNop())
+	handler := NewHandler("", nil, zap.NewNop())
 	for _, test := range []struct {
 		name string
 		err  error

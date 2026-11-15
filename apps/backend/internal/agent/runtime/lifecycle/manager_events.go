@@ -294,6 +294,13 @@ func (m *Manager) claimPromptCompletion(
 		}
 		return claim, true
 	}
+	if deliverySubmissionIdentityMismatch(execution, event.DeliverySubmissionID) {
+		m.logger.Debug("ignoring completion for superseded prompt submission",
+			zap.String("execution_id", execution.ID),
+			zap.String("event_submission_id", event.DeliverySubmissionID),
+			zap.String("current_submission_id", currentDeliverySubmissionID(execution)))
+		return claim, false
+	}
 
 	execution.promptLifecycleMu.Lock()
 	claim.locked = true
@@ -1770,6 +1777,15 @@ func (m *Manager) handleFileChangeNotification(execution *AgentExecution, notifi
 		return
 	}
 	m.eventPublisher.PublishFileChange(execution, notification)
+}
+
+// handleWorktreeInventory publishes a linked-worktree snapshot from a live,
+// current execution. Detection never starts, resumes, or prompts an agent.
+func (m *Manager) handleWorktreeInventory(execution *AgentExecution, inventory *agentctl.WorktreeInventory) {
+	if execution == nil || inventory == nil || !m.runtimeExecutionCurrent(execution) {
+		return
+	}
+	m.eventPublisher.PublishWorktreeInventory(execution, inventory)
 }
 
 // handleShellOutput processes shell output from the workspace stream

@@ -7,6 +7,7 @@ import (
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 )
 
 func (s *Service) repairRestartRecoveryPresentation(ctx context.Context, session *models.TaskSession) (*models.TaskSession, error) {
@@ -53,11 +54,12 @@ func (s *Service) repairRestartRecoveryPresentation(ctx context.Context, session
 		return session, nil
 	}
 	if block == nil {
-		block, err = s.recreateRestartRecoveryBlock(ctx, blocks, session, generation, recovery, exists)
+		var created bool
+		block, created, err = s.recreateRestartRecoveryBlock(ctx, session, generation, recovery, exists)
 		if err != nil {
 			return nil, err
 		}
-		if block == nil {
+		if block == nil || !created {
 			return session, nil
 		}
 	}
@@ -65,7 +67,7 @@ func (s *Service) repairRestartRecoveryPresentation(ctx context.Context, session
 }
 
 func (s *Service) finishRestartPresentationRepair(ctx context.Context, session *models.TaskSession, generation *models.HarnessSessionGeneration, recovery models.AgentDeliveryRecovery, exists bool, block *models.SessionRecoveryBlock) (*models.TaskSession, error) {
-	if exists && !incompleteReconstructedRecovery(recovery) && !silentRestoreBlockMatches(block, recovery) {
+	if exists && recovery.HarnessGeneration == generation.Generation && !incompleteReconstructedRecovery(recovery) && !silentRestoreBlockMatches(block, recovery) {
 		if err := s.repairKnownRestartBlock(ctx, session, recovery, block); err != nil {
 			return nil, err
 		}
@@ -116,10 +118,10 @@ func (s *Service) restartRecoveryNativeGeneration(ctx context.Context, session *
 	return generation, nil
 }
 
-func (s *Service) recreateRestartRecoveryBlock(ctx context.Context, blocks sessionRecoveryBlockStore, session *models.TaskSession, generation *models.HarnessSessionGeneration, recovery models.AgentDeliveryRecovery, exists bool) (*models.SessionRecoveryBlock, error) {
+func (s *Service) recreateRestartRecoveryBlock(ctx context.Context, session *models.TaskSession, generation *models.HarnessSessionGeneration, recovery models.AgentDeliveryRecovery, exists bool) (*models.SessionRecoveryBlock, bool, error) {
 	eligible, err := s.hasRestartSubmission(ctx, session, generation.Generation)
 	if err != nil || !eligible {
-		return nil, err
+		return nil, false, err
 	}
 	block := &models.SessionRecoveryBlock{SessionID: session.ID, IncarnationID: session.QueueIncarnationID,
 		ExpectedGeneration: generation.Generation, ConsumerReference: agentDeliveryConsumer,
@@ -128,10 +130,11 @@ func (s *Service) recreateRestartRecoveryBlock(ctx context.Context, blocks sessi
 		block.DeliverySubmissionID, block.DeliveryStreamID = recovery.SubmissionID, recovery.StreamID
 		block.Reason = unknownPromptOutcome
 	}
-	if err := blocks.UpsertSessionRecoveryBlock(ctx, block); err != nil {
-		return nil, err
+	store, ok := s.repo.(repository.RestartRecoveryBlockRepository)
+	if !ok {
+		return nil, false, nil
 	}
-	return block, nil
+	return store.EnsureRestartRecoveryBlock(ctx, block)
 }
 
 func (s *Service) restartMissingOwnerProvenDead(ctx context.Context, session *models.TaskSession, generation *models.HarnessSessionGeneration) bool {

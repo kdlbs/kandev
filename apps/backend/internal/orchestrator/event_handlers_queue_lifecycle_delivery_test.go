@@ -94,7 +94,7 @@ func newLifecycleDeliveryFixture(t *testing.T, durable bool) *lifecycleDeliveryF
 	f.logs = logs
 	f.service.logger, err = logger.NewFromZap(zap.New(core))
 	require.NoError(t, err)
-	f.service.executor = executor.NewExecutor(f.manager, repo, testLogger(), executor.ExecutorConfig{})
+	f.service.executor = withTestCapabilities(executor.NewExecutor(f.manager, repo, testLogger(), executor.ExecutorConfig{}))
 	t.Cleanup(f.service.cancelAllTransientRetries)
 	return f
 }

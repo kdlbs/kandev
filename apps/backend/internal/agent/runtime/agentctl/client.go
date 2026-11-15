@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -29,8 +30,9 @@ import (
 
 // Client communicates with agentctl via HTTP and WebSocket
 type Client struct {
-	baseURL    string
-	httpClient *http.Client
+	updateStage atomic.Pointer[updateStreamStage]
+	baseURL     string
+	httpClient  *http.Client
 	// longRunningHTTPClient is used for long-running operations like inference prompts.
 	// It has a much longer timeout (5 minutes) to accommodate LLM API calls.
 	longRunningHTTPClient *http.Client
@@ -105,6 +107,7 @@ type Client struct {
 
 type updatesStreamDial struct {
 	sequence     uint64
+	ownerID      uint64
 	ctx          context.Context
 	streamCtx    context.Context
 	cancel       context.CancelFunc
@@ -482,6 +485,7 @@ func (c *Client) completeUpdatesStreamDial(
 	attempt.retired = true
 	c.updatesDial = nil
 	c.agentStreamConn = conn
+	attempt.ownerID = updateStreamStageOwnerSequence.Add(1)
 	streamCancel := attempt.streamCancel
 	dialCancel := attempt.cancel
 	c.mu.Unlock()
@@ -674,7 +678,7 @@ func (c *Client) InstanceID() string {
 // ConfigureAgent configures the agent command. Must be called before Start().
 // continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
 func (c *Client) ConfigureAgent(ctx context.Context, command string, agentArgs []string, env map[string]string, continueCommand string, continueArgs []string, wrapper ...launchwrapper.Spec) error {
-	return c.configureAgent(ctx, command, agentArgs, env, continueCommand, continueArgs, false, nil, wrapper...)
+	return c.configureAgent(ctx, command, agentArgs, env, continueCommand, continueArgs, false, nil, nil, wrapper...)
 }
 
 // ConfigureAgentWithEnvironment configures the agent with a complete effective
@@ -682,7 +686,7 @@ func (c *Client) ConfigureAgent(ctx context.Context, command string, agentArgs [
 // block while preserving ordinary instance variables. Use this when the
 // caller has already composed inherited and generated environment sources.
 func (c *Client) ConfigureAgentWithEnvironment(ctx context.Context, command string, agentArgs []string, env map[string]string, continueCommand string, continueArgs []string, wrapper ...launchwrapper.Spec) error {
-	return c.configureAgent(ctx, command, agentArgs, env, continueCommand, continueArgs, true, nil, wrapper...)
+	return c.configureAgent(ctx, command, agentArgs, env, continueCommand, continueArgs, true, nil, nil, wrapper...)
 }
 
 // ConfigureAgentWithProjectDelivery configures the agent command together with
@@ -690,10 +694,32 @@ func (c *Client) ConfigureAgentWithEnvironment(ctx context.Context, command stri
 // project configuration file. A helper must advertise
 // types.ProjectMCPDeliveryCapability before a caller sends dependent evidence.
 func (c *Client) ConfigureAgentWithProjectDelivery(ctx context.Context, command string, agentArgs []string, env map[string]string, continueCommand string, continueArgs []string, delivery *types.ProjectMCPDelivery, wrapper ...launchwrapper.Spec) error {
-	return c.configureAgent(ctx, command, agentArgs, env, continueCommand, continueArgs, false, delivery, wrapper...)
+	return c.configureAgent(ctx, command, agentArgs, env, continueCommand, continueArgs, false, delivery, nil, wrapper...)
 }
 
-func (c *Client) configureAgent(ctx context.Context, command string, agentArgs []string, env map[string]string, continueCommand string, continueArgs []string, replaceEnv bool, delivery *types.ProjectMCPDelivery, wrapper ...launchwrapper.Spec) error {
+// ConfigureAgentWithProjectDeliveryAndInstallContext sends optional
+// authenticated installer provenance for reusable managed npm repairs. Older
+// peers ignore the unknown field and keep their private recovery path.
+func (c *Client) ConfigureAgentWithProjectDeliveryAndInstallContext(
+	ctx context.Context,
+	command string,
+	agentArgs []string,
+	env map[string]string,
+	continueCommand string,
+	continueArgs []string,
+	delivery *types.ProjectMCPDelivery,
+	installContext *types.ManagedRuntimeInstallContext,
+	wrapper ...launchwrapper.Spec,
+) error {
+	if installContext != nil {
+		if err := c.RequireCapability(ctx, types.ManagedRuntimeRepairReuseCapability); err != nil {
+			installContext = nil
+		}
+	}
+	return c.configureAgent(ctx, command, agentArgs, env, continueCommand, continueArgs, false, delivery, installContext, wrapper...)
+}
+
+func (c *Client) configureAgent(ctx context.Context, command string, agentArgs []string, env map[string]string, continueCommand string, continueArgs []string, replaceEnv bool, delivery *types.ProjectMCPDelivery, installContext *types.ManagedRuntimeInstallContext, wrapper ...launchwrapper.Spec) error {
 	ctx, span := tracing.TraceHTTPRequest(ctx, "POST", "/api/v1/agent/configure", c.executionID)
 	defer span.End()
 
@@ -705,14 +731,15 @@ func (c *Client) configureAgent(ctx context.Context, command string, agentArgs [
 		return err
 	}
 	payload := struct {
-		LaunchWrapper      launchwrapper.Spec        `json:"launch_wrapper,omitzero"`
-		Command            string                    `json:"command"`
-		AgentArgs          *[]string                 `json:"agent_args,omitempty"`
-		ContinueCommand    string                    `json:"continue_command,omitempty"`
-		ContinueArgs       *[]string                 `json:"continue_args,omitempty"`
-		Env                map[string]string         `json:"env,omitempty"`
-		ReplaceEnv         bool                      `json:"replace_env,omitempty"`
-		ProjectMCPDelivery *types.ProjectMCPDelivery `json:"project_mcp_delivery,omitempty"`
+		LaunchWrapper      launchwrapper.Spec                  `json:"launch_wrapper,omitzero"`
+		Command            string                              `json:"command"`
+		AgentArgs          *[]string                           `json:"agent_args,omitempty"`
+		ContinueCommand    string                              `json:"continue_command,omitempty"`
+		ContinueArgs       *[]string                           `json:"continue_args,omitempty"`
+		Env                map[string]string                   `json:"env,omitempty"`
+		ReplaceEnv         bool                                `json:"replace_env,omitempty"`
+		ProjectMCPDelivery *types.ProjectMCPDelivery           `json:"project_mcp_delivery,omitempty"`
+		InstallContext     *types.ManagedRuntimeInstallContext `json:"install_context,omitempty"`
 	}{
 		LaunchWrapper:      spec,
 		Command:            command,
@@ -720,6 +747,7 @@ func (c *Client) configureAgent(ctx context.Context, command string, agentArgs [
 		Env:                env,
 		ReplaceEnv:         replaceEnv,
 		ProjectMCPDelivery: delivery.Clone(),
+		InstallContext:     installContext.Clone(),
 	}
 	if agentArgs != nil {
 		payload.AgentArgs = &agentArgs
@@ -926,19 +954,50 @@ func (c *Client) StreamCanvasSource(ctx context.Context, root string) (io.ReadCl
 
 // Start starts the agent process and returns the full command that was executed.
 func (c *Client) Start(ctx context.Context) (string, error) {
+	return c.start(ctx, nil)
+}
+
+// StartWithManagedRuntimePreparation sends a generation-bound private
+// preparation directive only after the agentctl advertises support for it.
+func (c *Client) StartWithManagedRuntimePreparation(
+	ctx context.Context,
+	directive types.ManagedRuntimePreparationDirective,
+) (string, error) {
+	if err := c.RequireCapability(ctx, types.ManagedRuntimePrivatePreparationCapability); err != nil {
+		return "", err
+	}
+	return c.start(ctx, &directive)
+}
+
+func (c *Client) start(ctx context.Context, preparation *types.ManagedRuntimePreparationDirective) (string, error) {
 	c.mu.Lock()
 	c.processGeneration = 0
 	c.mu.Unlock()
 	ctx, span := tracing.TraceHTTPRequest(ctx, "POST", "/api/v1/start", c.executionID)
 	defer span.End()
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/start", nil)
+	var body io.Reader
+	if preparation != nil {
+		encoded, err := json.Marshal(struct {
+			Preparation *types.ManagedRuntimePreparationDirective `json:"preparation"`
+		}{Preparation: preparation})
+		if err != nil {
+			tracing.TraceHTTPResponse(span, 0, err)
+			return "", fmt.Errorf("encode managed runtime preparation directive: %w", err)
+		}
+		body = bytes.NewReader(encoded)
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/start", body)
 	if err != nil {
 		tracing.TraceHTTPResponse(span, 0, err)
 		return "", err
 	}
 
-	resp, err := c.httpClient.Do(req)
+	httpClient := c.httpClient
+	if preparation != nil {
+		httpClient = c.longRunningHTTPClient
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		tracing.TraceHTTPResponse(span, 0, err)
 		return "", err
@@ -1221,6 +1280,8 @@ type (
 	GitCommitNotification       = types.GitCommitNotification
 	GitResetNotification        = types.GitResetNotification
 	GitBranchSwitchNotification = types.GitBranchSwitchNotification
+	WorktreeInventory           = types.WorktreeInventory
+	WorktreeInventoryEntry      = types.WorktreeInventoryEntry
 	FileInfo                    = types.FileInfo
 	FileEntry                   = types.FileEntry
 	FileTreeNode                = types.FileTreeNode

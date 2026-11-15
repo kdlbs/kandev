@@ -70,6 +70,8 @@ const STARTED_AT = "2026-01-01T00:00:00.000Z";
 const LATER_AT = "2026-01-02T00:00:00.000Z";
 const RESUME_TRANSPORT_ERROR = "Resume transport failed";
 const WORKSPACE_RESTORE_ERROR = "Workspace restore failed";
+// A successful restore_workspace response names the execution it activated.
+const RESTORE_EXECUTION_ID = "exec-restore";
 
 afterEach(() => {
   cleanup();
@@ -320,6 +322,7 @@ describe("resumeWithSilentFallback", () => {
         task_id: TASK_ID,
         session_id: SESSION_ID,
         state: FAILED_STATE,
+        agent_execution_id: RESTORE_EXECUTION_ID,
         worktree_path: "/wt/foo",
       });
     const { setters, calls } = createSetters();
@@ -355,6 +358,7 @@ describe("resumeWithSilentFallback", () => {
       task_id: TASK_ID,
       session_id: SESSION_ID,
       state: FAILED_STATE,
+      agent_execution_id: RESTORE_EXECUTION_ID,
     });
     const { setters, calls } = createSetters();
 
@@ -385,7 +389,9 @@ describe("resumeWithSilentFallback", () => {
           task_id: TASK_ID,
           session_id: SESSION_ID,
           state: FAILED_STATE,
-          ...(restored ? {} : { error: WORKSPACE_RESTORE_ERROR }),
+          ...(restored
+            ? { agent_execution_id: RESTORE_EXECUTION_ID }
+            : { error: WORKSPACE_RESTORE_ERROR }),
         });
       const { setters, calls } = createSetters();
       await resumeWithSilentFallback(TASK_ID, SESSION_ID, null, setters);

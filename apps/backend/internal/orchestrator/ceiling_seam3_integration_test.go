@@ -24,7 +24,7 @@ func TestPromptTask_AutomaticOverCeilingDefersPromptEnsure(t *testing.T) {
 
 	agentMgr := &mockAgentManager{isAgentRunning: false}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
 	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "filler"})
 
@@ -65,7 +65,7 @@ func TestPromptTask_OrdinaryOverCeilingIsRefused(t *testing.T) {
 
 	agentMgr := &mockAgentManager{isAgentRunning: false}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
 	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "filler"})
 
@@ -98,7 +98,7 @@ func TestPromptTask_ManualOverrideIsAuditedEvenWhenTheResumeFails(t *testing.T) 
 
 	agentMgr := &mockAgentManager{isAgentRunning: false}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
 	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "filler"})
 
@@ -183,7 +183,7 @@ func TestStartSessionForWorkflowStep_PreConsultReservationReleasedWhenResumeFail
 	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{ID: "step2", WorkflowID: "wf1"}
 	agentMgr := &mockAgentManager{isAgentRunning: false}
 	svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
 
 	err := svc.StartSessionForWorkflowStep(ctx, "wfstep-fail-task", "wfstep-fail-session", "step2")
@@ -207,7 +207,7 @@ func TestTryEnsureExecution_ViewingShapeSwallowsRefusal(t *testing.T) {
 
 	agentMgr := &mockAgentManager{isAgentRunning: false}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
 	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "filler"})
 
@@ -229,7 +229,7 @@ func TestTryEnsureExecution_QueueDrainShapeDefersRefusal(t *testing.T) {
 
 	agentMgr := &mockAgentManager{isAgentRunning: false}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
 	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "filler"})
 
@@ -258,7 +258,7 @@ func TestTryEnsureExecution_UnrecognizedShapeDefaultsToDeferring(t *testing.T) {
 
 	agentMgr := &mockAgentManager{isAgentRunning: false}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
 	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "filler"})
 
@@ -282,7 +282,7 @@ func TestQueueAutoStartPrompt_ThreadsQueuedMessageIDToDeferral(t *testing.T) {
 
 	agentMgr := &mockAgentManager{isAgentRunning: false}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
 	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "filler"})
 

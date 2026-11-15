@@ -481,6 +481,7 @@
       "default_utility_agent_profile_id",
       "default_utility_model",
       "enable_preview_on_click",
+      "escape_cancels_agent",
       "github_default_query_presets",
       "github_saved_presets",
       "gitlab_saved_presets",

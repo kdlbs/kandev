@@ -207,6 +207,7 @@ export type UserSettings = {
   preferred_shell?: string;
   default_editor_id?: string;
   enable_preview_on_click?: boolean;
+  escape_cancels_agent?: boolean;
   chat_submit_key?: "enter" | "cmd_enter";
   show_anchored_prompt_bar?: boolean;
   show_scroll_to_last_prompt?: boolean;
@@ -296,6 +297,7 @@ export type UserSettingsUpdatePayload = {
   preferred_shell?: string;
   default_editor_id?: string;
   enable_preview_on_click?: boolean;
+  escape_cancels_agent?: boolean;
   chat_submit_key?: "enter" | "cmd_enter";
   show_anchored_prompt_bar?: boolean;
   show_scroll_to_last_prompt?: boolean;

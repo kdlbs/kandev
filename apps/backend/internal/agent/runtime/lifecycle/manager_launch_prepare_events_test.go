@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
@@ -129,7 +130,8 @@ func TestLaunch_PromotionPublishesPrepareCompletedAfterCursorMCPPreparation(t *t
 	execution := &AgentExecution{
 		ID: "workspace-only-mcp", TaskID: "task-promotion-mcp", SessionID: "session-promotion-mcp",
 		AgentProfileID: profile.ProfileID, WorkspacePath: workspace, ExecutorType: "local",
-		metadata: map[string]interface{}{MetadataKeyRepositoryConfigured: false},
+		RuntimeName: agentruntime.RuntimeStandalone,
+		metadata:    map[string]interface{}{MetadataKeyRepositoryConfigured: false},
 	}
 	execution.setRuntimeEnvironment(map[string]string{"HOME": home})
 	execution.setMetadataValue("executor_mcp_policy", mcpconfig.Policy{AllowHTTP: true})

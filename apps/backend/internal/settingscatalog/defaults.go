@@ -442,12 +442,26 @@ func repositoryDomain() DomainDescriptor {
 	fields := make([]FieldDescriptor, 0, len(paths))
 	for _, item := range paths {
 		field := domainWritable("repository", item.path, item.label, "Repository setting.", item.typ, owner, "workspace.manage")
+		if item.path == "remote_url" {
+			field.Description = "Credential-free clone locator. A replacement must preserve the saved provider identity, host, namespace, and name."
+		}
 		if item.path == "secret_bindings" {
 			field.Sensitive = true
 		}
 		fields = append(fields, field)
 	}
-	return supportedDomain("workspaces", "repository", "Repositories", "Workspace repository settings.", owner, ScopeResource, targetRulesResourceWorkspace(), fields...)
+	domain := supportedDomain("workspaces", "repository", "Repositories", "Workspace repository settings.", owner, ScopeResource, targetRulesResourceWorkspace(), fields...)
+	domain.Operations[0].Options = map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"validate_only": map[string]any{
+				"type":        "boolean",
+				"description": "Validate a single remote_url replacement without writing.",
+			},
+		},
+	}
+	return domain
 }
 
 func repositoryScriptDomain() DomainDescriptor {
@@ -629,7 +643,7 @@ func userSettingsDomain() DomainDescriptor {
 		"workflow_filter_id", "workflow filter", "string", "repository_ids", "repository selection", "array", "tasks_list_sort", "task sort", "string",
 		"tasks_list_group", "task grouping", "string", "tasks_list_show_details", "task details", "boolean", "initial_setup_complete", "setup complete", "boolean",
 		"preferred_shell", "preferred shell", "string", "default_editor_id", "default editor", "string", "enable_preview_on_click", "preview on click", "boolean",
-		"chat_submit_key", "chat submit key", "string", "review_auto_mark_on_scroll", "review auto mark", "boolean", "confirm_task_archive", "confirm task archive", "boolean",
+		"chat_submit_key", "chat submit key", "string", "escape_cancels_agent", "Escape pauses the agent", "boolean", "review_auto_mark_on_scroll", "review auto mark", "boolean", "confirm_task_archive", "confirm task archive", "boolean",
 		"prevent_auto_start_agent_on_open", "prevent auto start", "boolean", "unread_divider", "unread divider", "boolean", "unread_task_dot", "unread task dot", "boolean",
 		"unread_task_dot_hide_delay_seconds", "unread task dot hide delay", "integer",
 		"agent_generated_task_titles", "generated titles", "boolean", "prompt_suggestions", "prompt suggestions", "boolean", "auto_focus_new_tasks", "auto focus new tasks", "boolean",

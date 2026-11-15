@@ -30,6 +30,7 @@ type UserSettingsDTO struct {
 	PreferredShell                    string                                  `json:"preferred_shell"`
 	DefaultEditorID                   string                                  `json:"default_editor_id"`
 	EnablePreviewOnClick              bool                                    `json:"enable_preview_on_click"`
+	EscapeCancelsAgent                bool                                    `json:"escape_cancels_agent"`
 	ChatSubmitKey                     string                                  `json:"chat_submit_key"`
 	ReviewAutoMarkOnScroll            bool                                    `json:"review_auto_mark_on_scroll"`
 	ConfirmTaskArchive                bool                                    `json:"confirm_task_archive"`
@@ -155,6 +156,7 @@ type UpdateUserSettingsRequest struct {
 	PreferredShell                    *string                            `json:"preferred_shell,omitempty"`
 	DefaultEditorID                   *string                            `json:"default_editor_id,omitempty"`
 	EnablePreviewOnClick              *bool                              `json:"enable_preview_on_click,omitempty"`
+	EscapeCancelsAgent                *bool                              `json:"escape_cancels_agent,omitempty"`
 	ChatSubmitKey                     *string                            `json:"chat_submit_key,omitempty"`
 	ReviewAutoMarkOnScroll            *bool                              `json:"review_auto_mark_on_scroll,omitempty"`
 	ConfirmTaskArchive                *bool                              `json:"confirm_task_archive,omitempty"`
@@ -363,6 +365,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		PreferredShell:                    settings.PreferredShell,
 		DefaultEditorID:                   settings.DefaultEditorID,
 		EnablePreviewOnClick:              settings.EnablePreviewOnClick,
+		EscapeCancelsAgent:                settings.EscapeCancelsAgent,
 		ChatSubmitKey:                     settings.ChatSubmitKey,
 		ReviewAutoMarkOnScroll:            settings.ReviewAutoMarkOnScroll,
 		ConfirmTaskArchive:                settings.ConfirmTaskArchive,

@@ -107,9 +107,9 @@ parallel ones. The reuse is part of the contract because the guarantees below
 Two existing behaviors are intentionally *not* changed:
 
 - **Parent/child completion signalling** ([`tasks/subtask-completion-trigger`](../requirements/subtask-completion-trigger.md))
-  fires `on_children_completed` when all children reach any terminal state,
-  including `FAILED`. Dependency resolution uses a stricter definition
-  (success only). The two must not be unified.
+  fires `on_children_completed` only when all counted direct children are
+  `COMPLETED`; failures and cancellations keep the parent waiting. Dependency
+  resolution has separate membership and wake semantics.
 - **Office's blocker reaction** (`office/scheduler.cascadeBlockersResolved`)
   queues an Office run to the blocked task's *assignee* when a blocker's status
   becomes done. It stays as-is. For a task that qualifies for both reactions,

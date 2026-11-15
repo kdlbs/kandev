@@ -1340,7 +1340,7 @@ func TestDeleteSession_StopsLiveExecutionAndDropsLateFrames(t *testing.T) {
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.registerBackgroundWork(sessionID, "background-live", executionID, "work-live")
 
 	if err := svc.DeleteSession(t.Context(), sessionID); err != nil {
@@ -1385,7 +1385,7 @@ func TestDeleteSession_StopFailurePreservesSessionAndActivity(t *testing.T) {
 		stopAgentWithReasonErr: errors.New("runtime still active"),
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.registerBackgroundWork(sessionID, "background-live", executionID, "work-live")
 
 	if err := svc.DeleteSession(t.Context(), sessionID); err == nil {
@@ -1417,7 +1417,7 @@ func TestDeleteSession_AlreadyMissingRuntimeStillDeletesSession(t *testing.T) {
 		stopAgentWithReasonErr: lifecycle.ErrExecutionNotFound,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.registerBackgroundWork(sessionID, "background-stale", executionID, "work-stale")
 
 	if err := svc.DeleteSession(t.Context(), sessionID); err != nil {

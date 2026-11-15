@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -30,6 +31,7 @@ type fakeAgentctlProcessServer struct {
 	sessionProcs  []agentctl.ProcessInfo
 	stopShouldErr bool
 	healthy       bool
+	healthStarted chan struct{}
 }
 
 func newFakeAgentctlProcessServer(t *testing.T) (*fakeAgentctlProcessServer, *agentctl.Client) {
@@ -41,6 +43,12 @@ func newFakeAgentctlProcessServer(t *testing.T) (*fakeAgentctlProcessServer, *ag
 		defer f.mu.Unlock()
 		switch {
 		case r.URL.Path == "/health":
+			if f.healthStarted != nil {
+				select {
+				case f.healthStarted <- struct{}{}:
+				default:
+				}
+			}
 			if !f.healthy {
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
@@ -222,6 +230,46 @@ func TestWaitForAgentctlReadyForSessionProbesHealth(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	require.Error(t, mgr.WaitForAgentctlReadyForSession(ctx, "session-1"))
+}
+
+func TestWaitForAgentctlReadyForSessionDoesNotBlockClientDetach(t *testing.T) {
+	fake, client := newFakeAgentctlProcessServer(t)
+	fake.healthy = false
+	fake.healthStarted = make(chan struct{}, 1)
+	mgr, execution := newProcessRunnerManager(t, client)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	readyDone := make(chan error, 1)
+	go func() {
+		readyDone <- mgr.WaitForAgentctlReadyForSession(ctx, "session-1")
+	}()
+
+	select {
+	case <-fake.healthStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("readiness wait did not probe agentctl")
+	}
+
+	detachDone := make(chan struct{})
+	go func() {
+		execution.agentctlLifecycleMu.Lock()
+		execution.detachAgentctlClient()
+		execution.agentctlLifecycleMu.Unlock()
+		close(detachDone)
+	}()
+
+	select {
+	case <-detachDone:
+	case <-time.After(3 * time.Second):
+		cancel()
+		<-readyDone
+		<-detachDone
+		t.Fatal("readiness wait held the agentctl client lease and blocked detach")
+	}
+
+	err := <-readyDone
+	require.ErrorContains(t, err, "agentctl client not available for session session-1")
 }
 
 func TestStopProcessForSessionForwardsProcessID(t *testing.T) {

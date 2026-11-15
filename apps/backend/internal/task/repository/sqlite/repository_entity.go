@@ -205,6 +205,7 @@ func (r *Repository) updateRepository(ctx context.Context, tx *sqlx.Tx, reposito
 	repository.UpdatedAt = nextRepositoryUpdatedAt(stored)
 
 	query, args := repositoryUpdateQuery(repository, models.RepositoryCheckoutIntent{
+		RemoteURL:     &repository.RemoteURL,
 		DefaultBranch: &repository.DefaultBranch, PullBeforeWorktree: &repository.PullBeforeWorktree,
 	})
 	if expected != nil {

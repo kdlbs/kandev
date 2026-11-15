@@ -14,6 +14,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/sshlaunch"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -94,6 +95,28 @@ func (r *SSHExecutor) prepareSSHRecovery(
 		_ = r.closeSSHClient(client)
 	}()
 
+	if identity.launchReceipt != nil {
+		// The legacy verifier checks the command and pidfile only. A recycled
+		// PID with the same task command and a recreated pidfile must not be
+		// adopted, so re-prove the live birth identity and generation first.
+		result := r.reconcileRecordedController(recoveryCtx, client, sshReconcileVerifyRequest(*identity.launchReceipt))
+		if err := result.Validate(); err != nil {
+			r.logger.Debug("ssh recovery rejected controller launch proof",
+				zap.String("session_id", record.SessionID), zap.Error(err))
+			return nil, nil, RecoveryOutcomeUnknown
+		}
+		switch result.Outcome {
+		case sshlaunch.OutcomeVerified:
+		case sshlaunch.OutcomeAbsent:
+			// The recorded controller and its session children are gone; a
+			// resumable session may start a fresh controller.
+			return nil, nil, RecoveryOutcomeNoMatchingInstance
+		default:
+			r.logger.Debug("ssh recovery could not verify controller launch proof",
+				zap.String("session_id", record.SessionID), zap.String("reason", string(result.Reason)))
+			return nil, nil, RecoveryOutcomeUnknown
+		}
+	}
 	instanceInfo, controlPort, outcome := r.inspectSSHRecoveryInstance(recoveryCtx, client, record, identity)
 	if outcome != "" {
 		return nil, nil, outcome
@@ -146,14 +169,15 @@ func (r *SSHExecutor) inspectSSHRecoveryInstance(
 }
 
 type sshRecoveryProcessIdentity struct {
-	pid         int
-	port        int
-	controlPort int
-	sessionDir  string
-	taskDir     string
-	nativeID    string
-	backendID   string
-	authToken   string
+	pid           int
+	port          int
+	controlPort   int
+	sessionDir    string
+	taskDir       string
+	nativeID      string
+	backendID     string
+	authToken     string
+	launchReceipt *sshlaunch.Receipt
 }
 
 func sshRecoveryIdentity(record *models.ExecutorRunning) (sshRecoveryProcessIdentity, bool) {
@@ -181,6 +205,19 @@ func sshRecoveryIdentity(record *models.ExecutorRunning) (sshRecoveryProcessIden
 	if !hasCompleteSSHRecoveryCredentials(identity) {
 		return sshRecoveryProcessIdentity{}, false
 	}
+	// Recovery may only reattach to a record whose own launch proof still
+	// describes it. A present but foreign or malformed receipt fails closed;
+	// a legacy record without one keeps the existing guarded path.
+	receipt, ok := sshLaunchReceiptForRecord(record.Metadata, record.TaskID, record.SessionID)
+	if !ok {
+		return sshRecoveryProcessIdentity{}, false
+	}
+	if receipt != nil && receipt.Process.PID != identity.pid {
+		// Durable proof names a different process than the record. Recovery
+		// must not adopt either one on this contradiction.
+		return sshRecoveryProcessIdentity{}, false
+	}
+	identity.launchReceipt = receipt
 	return identity, true
 }
 
@@ -353,6 +390,7 @@ func (r *SSHExecutor) preparedSSHRecoveryState(
 		remoteTaskDir:    identity.taskDir,
 		authToken:        identity.authToken,
 		reusingProcess:   true,
+		launchReceipt:    identity.launchReceipt,
 		metadata:         metadata,
 		prepareEnv:       make(map[string]string),
 		runtimeAPITunnel: runtimeTunnel,

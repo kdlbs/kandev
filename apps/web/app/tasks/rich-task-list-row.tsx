@@ -10,6 +10,7 @@ import { TaskPriorityIndicator } from "@/components/task/task-priority-indicator
 import { taskPRInfoFromSummary } from "@/lib/task-pr-info";
 import { useTaskPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
+import { resolveApiTaskWaitReason } from "@/lib/ui/waiting-reason";
 import type { Repository, Task } from "@/lib/types/http";
 import { resolveRichTaskRowDetails } from "./rich-task-row-details";
 import { useTranslation } from "react-i18next";
@@ -49,6 +50,12 @@ function PrimaryTaskLine({
         // (lib/types/http.ts), not the camelCase store shape kanban-card-content.tsx
         // reads. Wrong casing here silently unparks the row (round-5 F19).
         parkedOnBackgroundWork: task.parked_on_background_work,
+        // Why the task is waiting rather than working: a queued step slot, a
+        // deferred session launch, or a session waiting for an answer. Without
+        // it all three read as the finished-turn icon.
+        waitReason: resolveApiTaskWaitReason(task),
+        launchQueue: task.status_summary?.launch_queue,
+        quotaWait: task.status_summary?.quota_wait,
       })}
       <span className="min-w-0 truncate font-medium" data-testid="tasks-list-row-title">
         {task.title}

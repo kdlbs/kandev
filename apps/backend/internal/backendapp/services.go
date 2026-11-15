@@ -283,6 +283,7 @@ func initCoreTaskServices(
 				profiles:        repos.AgentSettings,
 				agentRegistry:   agentRegistry,
 				dynamicResolver: dynamicResolver,
+				secrets:         secrets.NewUserVisibleStore(repos.Secrets),
 			},
 		},
 		eventBus,

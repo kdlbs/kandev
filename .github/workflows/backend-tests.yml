@@ -92,6 +92,7 @@ jobs:
             pluginsdk/**
             scripts/pluginsdk/**
             scripts/release/*plugin-sdk*
+            scripts/release/npm-auth-preflight*
             scripts/release/sdk-*
             .github/scripts/plugin-sdk-ci-contract_test.py
             apps/web/lib/settings-discovery/contract.generated.json
@@ -217,7 +218,7 @@ jobs:
         run: |
           node scripts/pluginsdk/sync-record.mjs --check
           node scripts/release/plugin-sdk.mjs --check
-          node --test scripts/pluginsdk/sync-record.test.mjs scripts/pluginsdk/pack-candidate.test.mjs scripts/pluginsdk/npm-workspace.test.mjs scripts/pluginsdk/public-trust.test.mjs scripts/release/plugin-sdk.test.mjs scripts/release/publish-plugin-sdk.test.mjs scripts/release/sdk-*.test.mjs
+          node --test scripts/pluginsdk/sync-record.test.mjs scripts/pluginsdk/pack-candidate.test.mjs scripts/pluginsdk/npm-workspace.test.mjs scripts/pluginsdk/public-trust.test.mjs scripts/release/plugin-sdk.test.mjs scripts/release/publish-plugin-sdk.test.mjs scripts/release/npm-auth-preflight.test.mjs scripts/release/sdk-*.test.mjs
           node scripts/pluginsdk/consumer-smoke.mjs --mode local
 
   static_checks:
@@ -1177,6 +1178,16 @@ jobs:
           GOMAXPROCS: '2'
           GOMEMLIMIT: 2GiB
         run: go test -trimpath -tags fts5 -race -p=1 -count=1 -v -timeout 5m ./internal/agent/agents -run '^Test(HermesACP|RunCommandCheck)'
+
+      - name: Test Windows provider quota classification
+        if: matrix.suite == 'native'
+        timeout-minutes: 10
+        env:
+          GOMAXPROCS: '2'
+          GOMEMLIMIT: 2GiB
+        run: |
+          go test -trimpath -tags fts5 -race -p=1 -count=1 -timeout=5m ./internal/agent/runtime/routingerr ./internal/agentctl/server/adapter/transport/acp -run '^(TestClassifyClaudeFiveHourLimit.*|TestClassifyClaudeUsageLimit|TestClassifyCodexWorkspaceCredits|TestProviderQuotaNoticeCollisionsAndPrecedence|TestCodexWorkspaceCreditsProjectsMatchingGenericPromptError|TestCodexWorkspaceCreditsPreservesPromptIsolation)$'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # Keep this targeted: these packages have broader tests, while these
       # native tests verify hidden consoles retain handles for descendants.

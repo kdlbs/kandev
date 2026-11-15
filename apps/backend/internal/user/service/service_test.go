@@ -307,6 +307,19 @@ func TestApplyBasicSettings_ConfirmTaskArchive(t *testing.T) {
 	})
 }
 
+func TestApplyEscapeCancelsAgentPreference(t *testing.T) {
+	settings := &models.UserSettings{EscapeCancelsAgent: true}
+	if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil || !settings.EscapeCancelsAgent {
+		t.Fatal("omitted preference should remain enabled")
+	}
+	if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{EscapeCancelsAgent: ptr(false)}); err != nil || settings.EscapeCancelsAgent {
+		t.Fatal("explicit false should disable the preference")
+	}
+	if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{EscapeCancelsAgent: ptr(true)}); err != nil || !settings.EscapeCancelsAgent {
+		t.Fatal("explicit true should enable the preference")
+	}
+}
+
 // TestApplyBasicSettings_PreventAutoStartAgentOnOpen verifies the auto-start setting is preserved when omitted and toggled by explicit values.
 func TestApplyBasicSettings_PreventAutoStartAgentOnOpen(t *testing.T) {
 	t.Run("omitted value leaves the setting unchanged", func(t *testing.T) {

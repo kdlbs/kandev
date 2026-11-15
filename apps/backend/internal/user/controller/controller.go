@@ -97,6 +97,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		PreferredShell:                    req.PreferredShell,
 		DefaultEditorID:                   req.DefaultEditorID,
 		EnablePreviewOnClick:              req.EnablePreviewOnClick,
+		EscapeCancelsAgent:                req.EscapeCancelsAgent,
 		ChatSubmitKey:                     req.ChatSubmitKey,
 		ReviewAutoMarkOnScroll:            req.ReviewAutoMarkOnScroll,
 		ConfirmTaskArchive:                req.ConfirmTaskArchive,

@@ -59,6 +59,7 @@ function makeUnloadedSettings(): UserSettingsState {
     shellOptions: [],
     defaultEditorId: null,
     enablePreviewOnClick: false,
+    escapeCancelsAgent: false,
     chatSubmitKey: "cmd_enter",
     reviewAutoMarkOnScroll: true,
     confirmTaskArchive: true,

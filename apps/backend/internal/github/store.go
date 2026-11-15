@@ -175,6 +175,7 @@ const createTablesSQL = `
 		auto_merge_observed_at DATETIME,
 		source TEXT NOT NULL DEFAULT '',
 		workflow_attention TEXT NOT NULL DEFAULT '',
+		check_summary TEXT NOT NULL DEFAULT '',
 		UNIQUE(task_id, repository_id, pr_number)
 	);
 
@@ -700,6 +701,9 @@ func (s *Store) initSchemaUpgrades() error {
 	if err := s.addTaskPRWorkflowAttentionColumn(); err != nil {
 		return err
 	}
+	if err := s.addTaskPRCheckSummaryColumn(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -778,6 +782,25 @@ func (s *Store) addTaskPRWorkflowAttentionColumn() error {
 		`ALTER TABLE github_task_prs ADD COLUMN workflow_attention TEXT NOT NULL DEFAULT ''`, s.db.DriverName(),
 	)); err != nil && !dbutil.IsDuplicateColumnError(err) {
 		return fmt.Errorf("add github_task_prs.workflow_attention: %w", err)
+	}
+	return nil
+}
+
+// addTaskPRCheckSummaryColumn adds the bounded, head-scoped selected check
+// snapshot. Empty is the legacy/unobserved value and is not an assertion that
+// the snapshot was empty.
+func (s *Store) addTaskPRCheckSummaryColumn() error {
+	cols, err := s.tableColumns("github_task_prs")
+	if err != nil {
+		return fmt.Errorf("read github_task_prs columns: %w", err)
+	}
+	if _, ok := cols["check_summary"]; ok {
+		return nil
+	}
+	if _, err := s.db.Exec(schemaSQLForDriver(
+		`ALTER TABLE github_task_prs ADD COLUMN check_summary TEXT NOT NULL DEFAULT ''`, s.db.DriverName(),
+	)); err != nil && !dbutil.IsDuplicateColumnError(err) {
+		return fmt.Errorf("add github_task_prs.check_summary: %w", err)
 	}
 	return nil
 }
@@ -1725,6 +1748,7 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			auto_merge_observed_at DATETIME,
 			source TEXT NOT NULL DEFAULT '',
 			workflow_attention TEXT NOT NULL DEFAULT '',
+			check_summary TEXT NOT NULL DEFAULT '',
 			UNIQUE(task_id, repository_id, pr_number)
 		)`,
 		// The five outcome-attribution columns and source are selected
@@ -1742,7 +1766,7 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			merge_queue_last_removal_reason, merge_queue_last_removal_before_sha,
 			review_count, pending_review_count, comment_count,
 			additions, deletions, created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
-			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at, source, workflow_attention
+			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at, source, workflow_attention, check_summary
 		) SELECT
  github_host,
 			id, COALESCE(workspace_id, ''), task_id, COALESCE(repository_id, ''), owner, repo, pr_number, pr_url, pr_title,
@@ -1752,7 +1776,7 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			COALESCE(merge_queue_last_removal_reason, ''), COALESCE(merge_queue_last_removal_before_sha, ''),
 			review_count, pending_review_count, comment_count,
 			additions, deletions, created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
-			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at, source, workflow_attention
+			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at, source, workflow_attention, check_summary
 		FROM github_task_prs`,
 	)
 }
@@ -2888,6 +2912,7 @@ func (s *Store) CreateTaskPR(ctx context.Context, tp *TaskPR) error {
 	now := time.Now().UTC()
 	tp.UpdatedAt = now
 	tp.WorkflowAttentionJSON = marshalWorkflowAttention(tp.WorkflowAttention)
+	tp.CheckSummaryJSON = marshalCheckSummary(tp.CheckSummary)
 	return insertTaskPR(ctx, s.db, tp)
 }
 
@@ -2908,7 +2933,7 @@ const taskPRColumns = `github_host, id, workspace_id, task_id, repository_id, ow
 	is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at,
 	head_sha, merge_queue_entry_id, merge_queue_entry_head_sha, merge_queue_last_removal_id,
 	merge_queue_last_removed_at, merge_queue_last_removal_reason, merge_queue_last_removal_before_sha,
-	source, workflow_attention`
+	source, workflow_attention, check_summary`
 
 // taskPRColumnsQualified is taskPRColumns with each column qualified by the
 // `gtp` alias, for queries that join github_task_prs against another table.
@@ -2921,7 +2946,7 @@ const taskPRColumnsQualified = `gtp.github_host, gtp.id, gtp.workspace_id, gtp.t
 	gtp.is_draft, gtp.changed_files, gtp.merged_by_login, gtp.closed_by_login, gtp.auto_merge_observed_at,
 	gtp.head_sha, gtp.merge_queue_entry_id, gtp.merge_queue_entry_head_sha, gtp.merge_queue_last_removal_id,
 	gtp.merge_queue_last_removed_at, gtp.merge_queue_last_removal_reason, gtp.merge_queue_last_removal_before_sha,
-	gtp.source, gtp.workflow_attention`
+	gtp.source, gtp.workflow_attention, gtp.check_summary`
 
 type taskPRWriter interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
@@ -2964,8 +2989,19 @@ func taskPRValues(tp *TaskPR) []any {
 		tp.MergedByLogin, tp.ClosedByLogin, tp.AutoMergeObservedAt, tp.HeadSHA,
 		tp.MergeQueueEntryID, tp.MergeQueueEntryHeadSHA, tp.MergeQueueLastRemovalID,
 		tp.MergeQueueLastRemovedAt, tp.MergeQueueLastRemovalReason, tp.MergeQueueLastRemovalBeforeSHA,
-		tp.Source, marshalWorkflowAttention(tp.WorkflowAttention),
+		tp.Source, marshalWorkflowAttention(tp.WorkflowAttention), marshalCheckSummary(tp.CheckSummary),
 	}
+}
+
+func marshalCheckSummary(summary *CheckSummary) string {
+	if summary == nil {
+		return ""
+	}
+	encoded, err := json.Marshal(summary)
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
 }
 
 func marshalWorkflowAttention(attention *WorkflowAttention) string {
@@ -2977,6 +3013,15 @@ func marshalWorkflowAttention(attention *WorkflowAttention) string {
 		return ""
 	}
 	return string(encoded)
+}
+
+// hydrateTaskPRMetadata decodes every persisted JSON metadata column after a
+// read.
+func hydrateTaskPRMetadata(tp *TaskPR) error {
+	if err := hydrateTaskPRWorkflowAttention(tp); err != nil {
+		return err
+	}
+	return hydrateTaskPRCheckSummary(tp)
 }
 
 func hydrateTaskPRWorkflowAttention(tp *TaskPR) error {
@@ -2999,10 +3044,29 @@ func hydrateTaskPRWorkflowAttention(tp *TaskPR) error {
 
 func hydrateTaskPRsWorkflowAttention(prs []TaskPR) error {
 	for i := range prs {
-		if err := hydrateTaskPRWorkflowAttention(&prs[i]); err != nil {
+		if err := hydrateTaskPRMetadata(&prs[i]); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+// hydrateTaskPRCheckSummary decodes the bounded selected check snapshot.
+// Malformed persisted metadata is treated as unknown rather than failing the
+// read, because it is display-only evidence.
+func hydrateTaskPRCheckSummary(tp *TaskPR) error {
+	if tp == nil || strings.TrimSpace(tp.CheckSummaryJSON) == "" {
+		if tp != nil {
+			tp.CheckSummary = nil
+		}
+		return nil
+	}
+	var summary CheckSummary
+	if err := json.Unmarshal([]byte(tp.CheckSummaryJSON), &summary); err != nil {
+		tp.CheckSummary = nil
+		return nil
+	}
+	tp.CheckSummary = validCheckSummary(&summary, tp.HeadSHA)
 	return nil
 }
 
@@ -3016,7 +3080,7 @@ func (s *Store) GetTaskPR(ctx context.Context, taskID string) (*TaskPR, error) {
 		return nil, nil
 	}
 	if err == nil {
-		err = hydrateTaskPRWorkflowAttention(&tp)
+		err = hydrateTaskPRMetadata(&tp)
 	}
 	return &tp, err
 }
@@ -3032,7 +3096,7 @@ func (s *Store) GetTaskPRByID(ctx context.Context, associationID string) (*TaskP
 		return nil, nil
 	}
 	if err == nil {
-		err = hydrateTaskPRWorkflowAttention(&tp)
+		err = hydrateTaskPRMetadata(&tp)
 	}
 	return &tp, err
 }
@@ -3045,7 +3109,7 @@ func getTaskPRByIDTx(ctx context.Context, tx *sqlx.Tx, associationID string) (*T
 		return nil, nil
 	}
 	if err == nil {
-		err = hydrateTaskPRWorkflowAttention(&tp)
+		err = hydrateTaskPRMetadata(&tp)
 	}
 	return &tp, err
 }
@@ -3062,7 +3126,7 @@ func getTaskPRByRepoAndNumberTx(
 		return nil, nil
 	}
 	if err == nil {
-		err = hydrateTaskPRWorkflowAttention(&tp)
+		err = hydrateTaskPRMetadata(&tp)
 	}
 	return &tp, err
 }
@@ -3084,7 +3148,7 @@ func (s *Store) GetTaskPRByRepository(ctx context.Context, taskID, repositoryID 
 		return nil, nil
 	}
 	if err == nil {
-		err = hydrateTaskPRWorkflowAttention(&tp)
+		err = hydrateTaskPRMetadata(&tp)
 	}
 	return &tp, err
 }
@@ -3104,7 +3168,7 @@ func (s *Store) GetTaskPRByRepoAndNumber(ctx context.Context, taskID, repository
 		return nil, nil
 	}
 	if err == nil {
-		err = hydrateTaskPRWorkflowAttention(&tp)
+		err = hydrateTaskPRMetadata(&tp)
 	}
 	return &tp, err
 }
@@ -3122,7 +3186,7 @@ func (s *Store) GetTaskPRByRepoAndNumberIncludingDetached(ctx context.Context, t
 		return nil, nil
 	}
 	if err == nil {
-		err = hydrateTaskPRWorkflowAttention(&tp)
+		err = hydrateTaskPRMetadata(&tp)
 	}
 	return &tp, err
 }
@@ -3246,7 +3310,7 @@ func (s *Store) RestoreTaskPR(ctx context.Context, taskID, repositoryID string, 
 		return nil, err
 	}
 	if err == nil {
-		if err := hydrateTaskPRWorkflowAttention(&outgoing); err != nil {
+		if err := hydrateTaskPRMetadata(&outgoing); err != nil {
 			return nil, err
 		}
 	}
@@ -3259,6 +3323,7 @@ func (s *Store) RestoreTaskPR(ctx context.Context, taskID, repositoryID string, 
 		headSHA = pr.HeadSHA
 	}
 	workflowAttention := resolveTaskPRWorkflowAttention(&outgoing, status, headSHA)
+	checkSummary := resolveTaskPRCheckSummary(&outgoing, status, headSHA)
 
 	if _, err := tx.ExecContext(ctx, tx.Rebind(
 		`UPDATE github_task_prs SET owner = ?, repo = ?, pr_url = ?, pr_title = ?,
@@ -3267,7 +3332,7 @@ func (s *Store) RestoreTaskPR(ctx context.Context, taskID, repositoryID string, 
 			merge_queue_last_removal_id = ?, merge_queue_last_removed_at = ?, merge_queue_last_removal_reason = ?, merge_queue_last_removal_before_sha = ?,
 			additions = ?, deletions = ?, merged_at = ?, closed_at = ?, detached_at = NULL, updated_at = ?,
 			is_draft = ?, changed_files = ?, merged_by_login = ?, closed_by_login = ?,
-			auto_merge_observed_at = COALESCE(auto_merge_observed_at, ?), workflow_attention = ?
+			auto_merge_observed_at = COALESCE(auto_merge_observed_at, ?), workflow_attention = ?, check_summary = ?
 		 WHERE task_id = ? AND repository_id = ? AND pr_number = ?`),
 		pr.RepoOwner, pr.RepoName, pr.HTMLURL, pr.Title, pr.HeadBranch, pr.BaseBranch, headSHA, pr.AuthorLogin,
 		pr.State, effectivePRMergeableState(pr), observedTaskPRMergeConflict(outgoing.HasMergeConflicts, pr, pr.MergeableState), queue.state, queue.position, queue.entryID, queue.entryHeadSHA, queue.estimate,
@@ -3275,6 +3340,7 @@ func (s *Store) RestoreTaskPR(ctx context.Context, taskID, repositoryID string, 
 		pr.Additions, pr.Deletions, pr.MergedAt, pr.ClosedAt, time.Now().UTC(),
 		isDraft, changedFiles, mergedByLogin, closedByLogin, autoMergeObservedAt,
 		marshalWorkflowAttention(workflowAttention),
+		marshalCheckSummary(checkSummary),
 		taskID, repositoryID, pr.Number); err != nil {
 		return nil, err
 	}
@@ -3518,7 +3584,7 @@ func replaceTaskPROutgoingRow(ctx context.Context, tx *sqlx.Tx, tp *TaskPR) (*Ta
 	if err != nil {
 		return nil, err
 	}
-	if err := hydrateTaskPRWorkflowAttention(&outgoing); err != nil {
+	if err := hydrateTaskPRMetadata(&outgoing); err != nil {
 		return nil, err
 	}
 	return &outgoing, nil
@@ -3556,7 +3622,7 @@ func (s *Store) UpdateTaskPRWorkflowAttention(
 	if err != nil {
 		return nil, false, err
 	}
-	if err := hydrateTaskPRWorkflowAttention(&outgoing); err != nil {
+	if err := hydrateTaskPRMetadata(&outgoing); err != nil {
 		return nil, false, err
 	}
 	if expectedHeadSHA != "" && outgoing.HeadSHA != expectedHeadSHA {
@@ -3631,7 +3697,7 @@ func (s *Store) UpdateTaskPRTx(ctx context.Context, tx *sqlx.Tx, tp *TaskPR) err
 			additions = ?, deletions = ?, pr_title = ?, base_branch = ?,
 			merged_at = ?, closed_at = ?, last_synced_at = ?, updated_at = ?,
 			is_draft = ?, changed_files = ?, merged_by_login = ?, closed_by_login = ?,
-			auto_merge_observed_at = COALESCE(auto_merge_observed_at, ?), workflow_attention = ?
+			auto_merge_observed_at = COALESCE(auto_merge_observed_at, ?), workflow_attention = ?, check_summary = ?
 		WHERE id = ?`),
 		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.HasMergeConflicts, tp.HeadSHA, tp.MergeQueueState, tp.MergeQueuePosition, tp.MergeQueueEntryID, tp.MergeQueueEntryHeadSHA, tp.MergeQueueEstimatedTimeToMergeSeconds,
 		tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
@@ -3639,7 +3705,7 @@ func (s *Store) UpdateTaskPRTx(ctx context.Context, tx *sqlx.Tx, tp *TaskPR) err
 		tp.Additions, tp.Deletions, tp.PRTitle, tp.BaseBranch,
 		tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt,
 		tp.IsDraft, tp.ChangedFiles, tp.MergedByLogin, tp.ClosedByLogin,
-		tp.AutoMergeObservedAt, marshalWorkflowAttention(tp.WorkflowAttention), tp.ID); err != nil {
+		tp.AutoMergeObservedAt, marshalWorkflowAttention(tp.WorkflowAttention), marshalCheckSummary(tp.CheckSummary), tp.ID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`

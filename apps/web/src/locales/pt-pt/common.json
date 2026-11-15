@@ -125,7 +125,7 @@
   "confirm": "Confirmar",
   "contents": "Conteúdos",
   "contentSearchNeedsAnActiveTask": "A pesquisa de conteúdos precisa de uma sessão de tarefa ativa.",
-  "contextCompactionCountHelp": "O Kandev infere esta contagem a partir das quedas de utilização do contexto. A utilização do Copilot ACP é excluída porque pode misturar contextos do agente principal e dos subagentes. Amostras em falta ou reinícios do fornecedor podem afetar a precisão.",
+  "contextCompactionCountHelp": "O Kandev infere esta contagem a partir das quedas de utilização do contexto. Amostras em falta ou reinícios do fornecedor podem afetar a precisão.",
   "contextCompactionStatusPartial": "Parcial",
   "contextCompactionStatusUnavailable": "Indisponível",
   "contextCompactionCountHelpNative": "Os novos incrementos usam eventos de compactação do agente principal do Copilot concluídos com sucesso. As estimativas históricas permanecem no total. Eventos omitidos ou perdidos pelo fornecedor podem faltar, pelo que este total não representa um histórico completo.",

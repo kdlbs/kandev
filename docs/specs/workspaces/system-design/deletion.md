@@ -1,7 +1,9 @@
 ---
 status: current
 system: workspaces
+updated: 2026-11-08
 requirements:
+  - REQ-WORKSPACES-DELETION-001
   - REQ-WORKSPACES-DELETION-002
 ---
 
@@ -9,11 +11,12 @@ requirements:
 
 ## Purpose and boundaries
 
-This design specifies the shared Settings deletion acknowledgement publication
-owned by [workspace deletion](../requirements/deletion.md). Requirement 001's
-complete-deletion contract remains unchanged. Its Office/native-home destination
-does not describe the shared Settings editor, which already returns to
-`/settings/workspaces`. The correction preserves that distinction.
+This design covers generic deletion error responses and shared Settings
+deletion acknowledgement publication, owned by
+[workspace deletion](../requirements/deletion.md). Requirement 001 retains its
+complete-deletion contract. Its Office/native-home destination does not describe
+the shared Settings editor, which already returns to `/settings/workspaces`.
+The two boundaries retain their existing routing and lifecycle behavior.
 
 The existing [settings update design](workspace-settings-updates.md) owns Save
 and Add Workspace publication. Its earlier delete-draft inventory was read-only
@@ -24,7 +27,84 @@ selection remain separate consumers and unchanged contracts.
 
 | Requirement | Design sections |
 | --- | --- |
+| `REQ-WORKSPACES-DELETION-001` | Generic deletion error projection (AC 001.9 through 001.11); existing confirmation and cascade compatibility |
 | `REQ-WORKSPACES-DELETION-002` | Accepted publication; compatibility; failure behavior; verification and mobile |
+
+## Generic deletion error projection
+
+### Authorization and validation order
+
+`WorkspaceHandlers` registers `DELETE /api/v1/workspaces/:id` and
+`workspace.delete` in `apps/backend/internal/task/handlers/workspace_handlers.go`.
+Both reject malformed payloads and empty `confirm_name` before service access.
+WebSocket also validates the payload's `id` first. These checks reveal no row
+data and retain their current validation responses for every identity.
+
+`Service.DeleteWorkspaceWithConfirmName` loads the workspace, calls
+`requireWorkspaceManage`, compares the supplied name, then enters
+`deleteWorkspace`. `service_errors_authz.go` owns the reach-before-permission
+check. Unreadable callers receive `repoerrors.ErrWorkspaceNotFound`; readable
+callers without management scope receive `service.ErrForbidden`. An org admin
+does not bypass workspace reach or management scope. Internal and synthetic
+callers retain the existing unscoped behavior.
+
+Keep this service sequence intact. Wrong nonempty names from readable
+non-managers still receive a permission denial. Wrong nonempty names from
+unreadable callers still receive not-found. An authorized caller with a wrong
+name retains the existing confirmation error. No denial reaches cleanup
+admission, task inventory, cascade storage, or lifecycle publication.
+
+### Transport classification
+
+The two deletion mappers classify wrapped errors with typed predicates, in this
+order: confirmation mismatch, workspace absence, permission denial, internal
+failure. Use `errors.Is(err, repoerrors.ErrWorkspaceNotFound)` for workspace
+absence and `service.IsForbidden(err)` for permission denial.
+
+The shared `isNotFound` helper retains a legacy substring fallback for other
+handlers. These deletion mappers must not use that fallback: both
+`GetWorkspace` and confirmed cascade deletion already return typed workspace
+absence. A storage error containing `not found` is not evidence of workspace
+absence. This local qualification changes no shared classifier or access policy.
+
+| Service result | HTTP response | WebSocket response |
+| --- | --- | --- |
+| Successful confirmed deletion | `200`, `{"success":true}` | Existing response envelope with `{"success":true}` |
+| `ErrWorkspaceConfirmNameMismatch` | Existing `400` error | Existing `VALIDATION_ERROR` |
+| Typed workspace absence, including hidden reach | Existing `404`, `workspace not found` | Existing `NOT_FOUND`, `Workspace not found` |
+| `ErrForbidden` | `403`, `{"error":"insufficient permissions for this action"}` | `FORBIDDEN`, `insufficient permissions for this action` |
+| Other read, storage, or cascade error | Existing `500`, `workspace not deleted` | Existing `INTERNAL_ERROR`, `failed to delete workspace` |
+
+Use `service.ErrForbidden.Error()` as the permission message on both transports.
+Do not serialize the wrapped error, workspace name, membership, or storage detail.
+Reuse `ws.ErrorCodeForbidden`; no new error code or response field is needed.
+The not-found responses also retain their fixed messages.
+
+### Compatibility and verification
+
+Authorization policy stays with the
+[auth system](../../auth/README.md), including
+[roles and scopes](../../auth/requirements/roles-and-scopes.md) and the
+[accepted scoping decision](../../../decisions/2026-07-24-opt-in-authentication.md).
+No credential, role, scope registry, schema, cascade, event, side-table subscriber,
+or cleanup worker changes accompany this repair. The separate draft
+[cascade boundary design](../../tasks/system-design/archive-cascade-boundary-contracts.md)
+does not require its future Store API migration for this response correction.
+
+The [permission error repair plan](../../../plans/workspace-delete-permission-errors/plan.md)
+owns targeted transport integration and error-projection tests. Real SQLite
+membership and resolver decisions must produce the denials before handler
+assertions. Denied requests preserve dependent rows and emit no deletion events.
+A disposable database trigger exercises genuine cascade rollback. Error text
+decoys and wrapped sentinels exercise classification without widening access.
+
+The web action and `fetchJson` already reject non-success responses. The
+existing Settings catch path retains the confirmation and shows failure feedback.
+The manage-scope control gate remains unchanged on desktop and phone. This
+package changes no rendered surface, client behavior, navigation, or locale copy;
+API integration evidence is sufficient without a new browser or mobile suite.
+Public `team-access.md` and `websocket-api.md` already describe the relevant
+permission boundary and standard error codes.
 
 ## Components and verified diagnostic baseline
 

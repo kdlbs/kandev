@@ -115,17 +115,34 @@ Native reporting availability and coverage select the explanation and any partia
 The native provider design defines those states and keeps old inferred totals intact.
 The existing count row and accessible info control retain their composition.
 
-Update `common:contextCompactionCountHelp` to explain excluded streams and approximate counts.
-Suggested English: "Kandev infers this count from context usage drops. Copilot ACP usage is excluded because it can mix parent and subagent contexts. Missing samples or provider resets can affect accuracy."
+### Generic help and provider details
 
-Update all seven supported languages, generate Traditional Chinese catalogs, and regenerate pseudo.
-The component continues to call `t()` at render time.
-Desktop pointer/keyboard access and the current phone tap-pinned surface retain their existing behavior.
-The closest mobile exemplar is `mobile-context-window-source.spec.ts`; this repair changes content and data only.
+The generic explanation satisfies criteria `.14` and `.15` under `REQ-UI-CONTEXT-COMPACTION-COUNT-001`.
+`compactionHelpKey` in `apps/web/components/task/chat/token-usage-display.tsx` already separates inferred and native reporting.
+Missing reporting metadata and `source: "usage_drop"` select `common:contextCompactionCountHelp`.
+Keep that dispatch and its render-time `t()` call.
+The shared explanation requires no agent-profile lookup or new provider check in React.
 
-During implementation, update the context-window paragraph of `docs/public/sessions-and-review.md`.
-Explain missed genuine Copilot compactions and retained historical counts.
-Replace its blanket claim that ACP has no compaction events with the narrower statement that this counter uses usage inference.
+The generic key explains inference and accuracy without the Copilot exclusion sentence.
+Its English text is: "Kandev infers this count from context usage drops. Missing samples or provider resets can affect accuracy."
+The exclusion remains counting policy, documented in this design and the public session guide.
+
+Native Copilot reporting retains the existing `contextCompactionCountHelpNative`, `contextCompactionCountHelpPartial`, and `contextCompactionCountHelpUnavailable` keys.
+Their source, coverage, and retained-history explanations remain unchanged.
+The existing status selection and count row also remain unchanged.
+
+Update the generic key in `en`, `pt-pt`, `zh-cn`, `ja`, and `ko`.
+Generate `zh-tw` and `zh-hk` with `i18n:zh-hant`, then regenerate `pseudo` with `i18n:pseudo`.
+Only the equivalent Copilot sentence leaves each catalog value.
+Review generator output for unrelated changes.
+
+Desktop pointer/keyboard access and the phone tap-pinned surface retain their existing behavior.
+The closest mobile exemplar is `mobile-context-window-source.spec.ts`.
+This content-only correction uses the same count row and help region on both viewports.
+It introduces no new control, overlay, scroll owner, or responsive branch.
+
+The context-window paragraph in `docs/public/sessions-and-review.md` already explains the provider policies and retained history accurately.
+It does not quote the generic help, so this copy correction needs no public documentation change.
 
 ## Verification boundaries
 
@@ -135,7 +152,14 @@ Repository tests separately cover eligibility transitions, persisted restart bas
 
 Browser tests use the established context-window fixture to prove zero/non-zero count display and the revised explanation.
 Those fixture tests prove presentation, not backend inference.
-Both the real backend regression and desktop/mobile presentation checks are required.
+The inference-policy correction requires both the real backend regression and desktop/mobile presentation checks.
+
+For the generic-help correction, update the existing component assertions before changing the catalogs.
+Cover missing reporting metadata and explicit `usage_drop` reporting without Copilot text.
+Retain the inference disclosure, accuracy limits, zero/non-zero totals, and all native coverage-state assertions.
+The desktop and mobile source-help scenarios assert the revised translated explanation after hover or tap.
+The phone scenario retains its second-tap dismissal and horizontal-overflow assertions.
+Existing backend inference tests remain authoritative; this copy-only package does not change or rerun those unrelated paths.
 
 ## Related decisions and plans
 
@@ -143,6 +167,7 @@ Both the real backend regression and desktop/mobile presentation checks are requ
 - [Executor and session ownership](../../../decisions/0003-executors-running-as-execution-id-source-of-truth.md).
 - [Original implementation](../../../plans/context-compaction-count/plan.md).
 - [Copilot inference correction](../../../plans/copilot-compaction-inference/plan.md).
+- [Generic compaction help](../../../plans/generic-compaction-help/plan.md).
 
 ## Native-event follow-up
 

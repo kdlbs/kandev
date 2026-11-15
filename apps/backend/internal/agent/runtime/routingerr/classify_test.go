@@ -2,6 +2,8 @@ package routingerr
 
 import (
 	"net/http"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -578,4 +580,138 @@ func containsSubstring(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+func TestClassifyKeywordMixedSeverity(t *testing.T) {
+	for _, text := range []string{
+		"Error: account suspended, usage limit exceeded",
+		"Error: forbidden access suspended, usage quota limit exceeded",
+		"Error: model retired, usage limit exceeded",
+	} {
+		t.Run(text, func(t *testing.T) {
+			got := Classify(Input{Phase: PhasePromptSend, ProviderID: "unknown-provider", Stderr: text,
+				KeywordContext: KeywordContext{Enabled: true, Diagnostic: true}})
+			if got.Confidence != ConfLow || got.Keyword != nil || got.FallbackAllowed || got.AutoRetryable {
+				t.Fatalf("mixed unresolved severity enabled automatic recovery: %+v", got)
+			}
+		})
+	}
+}
+
+func TestClassifyKeywordEnvelopeAndEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		text, group string
+	}{
+		{"Error: CAPACITY, busy!", "capacity"},
+		{"Error: credits balances", "limit"},
+		{"Error: unauthorized invalid-api-key", "account"},
+		{"Error: retired deprecated", "gone"},
+		{"Error: invalid_tools schema", "request"},
+		{"Error: " + strings.Repeat("busy ", 3), ""},
+		{"Error: suspended", ""},
+		{"Error: capacity busy quota renewal", ""},
+		{"Error: not overloaded or busy", ""},
+		{"Error: without capacity or busy", ""},
+		{`Error: "capacity busy"`, ""},
+		{"An example says capacity busy", ""},
+		{"Error: capacity\nbusy", ""},
+		{"Error: capacity busy " + strings.Repeat("x", 1024), ""},
+	} {
+		t.Run(tc.text, func(t *testing.T) {
+			got := Classify(Input{Phase: PhasePromptSend, Stderr: tc.text,
+				KeywordContext: KeywordContext{Enabled: true, Diagnostic: true}})
+			if tc.group == "" {
+				if got.Keyword != nil || got.Confidence != ConfLow || got.AutoRetryable || got.FallbackAllowed {
+					t.Fatalf("unsafe evidence admitted: %+v", got)
+				}
+			} else if got.Keyword == nil || got.Keyword.Group != tc.group || got.Confidence != ConfHigh {
+				t.Fatalf("keyword evidence = %+v, want group %s", got, tc.group)
+			}
+		})
+	}
+}
+
+func TestClassifyKeywordDisabledAndKnownPriority(t *testing.T) {
+	for _, in := range []Input{
+		{Phase: PhasePromptSend, Stderr: "Error: capacity busy"},
+		{Phase: PhasePromptSend, Stderr: "Selected model is at capacity. Please try a different model."},
+		{Phase: PhasePromptSend, HTTPStatus: 403, Stderr: "Error: capacity busy"},
+		{Phase: PhasePromptSend, Stderr: `Error from provider gateway: 403 Forbidden {"code":"user_blocked"} usage limit exceeded`},
+	} {
+		legacy := Classify(in)
+		in.KeywordContext.Diagnostic = true
+		if got := Classify(in); !reflect.DeepEqual(got, legacy) {
+			t.Fatalf("disabled classifier changed legacy result: %+v versus %+v", got, legacy)
+		}
+		if legacy.Confidence == ConfLow {
+			continue
+		}
+		in.KeywordContext.Enabled, in.KeywordContext.HTTPStatus = true, 429
+		if got := Classify(in); !reflect.DeepEqual(got, legacy) {
+			t.Fatalf("keyword fallback displaced existing rule: %+v versus %+v", got, legacy)
+		}
+	}
+}
+
+func TestClassifyKeywordStructuralStatus(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		text   string
+		code   Code
+	}{
+		{401, "", CodeAuthRequired}, {403, "", CodePermissionDeniedByUser},
+		{404, "Error: model retired", CodeModelUnavailable},
+		{408, "", CodeProviderUnavailable}, {504, "", CodeProviderUnavailable},
+		{429, "", CodeRateLimited}, {500, "", CodeProviderUnavailable},
+		{502, "", CodeProviderUnavailable}, {503, "", CodeProviderUnavailable},
+		{529, "", CodeProviderOverloaded},
+		{400, "Error: context tokens length", CodeAgentRuntime},
+		{400, "Error: tools schema", CodeAgentRuntime},
+	} {
+		got := Classify(Input{Phase: PhasePromptSend, Stderr: tc.text,
+			KeywordContext: KeywordContext{Enabled: true, Diagnostic: true, HTTPStatus: tc.status}})
+		if got.Code != tc.code || got.Keyword == nil || got.Confidence != ConfHigh {
+			t.Fatalf("status %d: %+v, want %s", tc.status, got, tc.code)
+		}
+	}
+	got := Classify(Input{Phase: PhasePromptSend,
+		KeywordContext: KeywordContext{Enabled: true, Diagnostic: true, HTTPStatus: 404}})
+	if got.Keyword != nil || got.Confidence != ConfLow {
+		t.Fatalf("unrelated 404 inferred model removal: %+v", got)
+	}
+}
+
+func TestClassifyKeywordScopeTimingAndAction(t *testing.T) {
+	now := time.Date(2030, 1, 1, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		text, scope, action string
+		context             KeywordContext
+		phase               Phase
+		backoff             time.Duration
+	}{
+		{"Error: capacity busy", "path_model", "try_next", KeywordContext{}, PhaseProcessStart, 5 * time.Minute},
+		{"Error: capacity busy", "model", "retry_same", KeywordContext{ModelID: "m", OtherPaths: 1}, PhaseStreaming, 5 * time.Minute},
+		{"Error: capacity busy", "path_model", "try_next", KeywordContext{ConsecutiveFailures: 2, OtherModels: 1}, PhaseStreaming, 15 * time.Minute},
+		{"Error: renewal balance", "account", "try_next", KeywordContext{AccountID: "known", Tier: "subscription", ConsecutiveFailures: 99}, PhasePromptSend, 30 * time.Minute},
+		{"Error: renewal balance", "path_model", "try_next", KeywordContext{Tier: "subscription"}, PhasePromptSend, 5 * time.Minute},
+		{"Error: forbidden suspended", "path_model", "stop", KeywordContext{}, PhasePromptSend, 0},
+	} {
+		c := tc.context
+		c.Enabled, c.Diagnostic = true, true
+		got := Classify(Input{Phase: tc.phase, Stderr: tc.text, OccurredAt: now, KeywordContext: c})
+		if got.Keyword == nil || got.Keyword.Scope != tc.scope || got.Keyword.Action != tc.action || got.Keyword.Backoff != tc.backoff || HoldsUntilRelease(got.Code) {
+			t.Fatalf("scope/timing/action violated: %+v / %+v", got, got.Keyword)
+		}
+	}
+	reset := now.Add(2 * time.Minute)
+	got := Classify(Input{Phase: PhasePromptSend, Stderr: "Error: renewal balance", OccurredAt: now, ResetHint: &reset,
+		KeywordContext: KeywordContext{Enabled: true, Diagnostic: true, FreeDaily: true}})
+	if got.ResetHint == nil || !got.ResetHint.Equal(reset) {
+		t.Fatalf("explicit reset lost: %+v", got)
+	}
+	got = Classify(Input{Phase: PhasePromptSend, Stderr: "Error: renewal balance", OccurredAt: now,
+		KeywordContext: KeywordContext{Enabled: true, Diagnostic: true, FreeDaily: true}})
+	if got.ResetHint == nil || !got.ResetHint.Equal(time.Date(2030, 1, 2, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("explicit free-daily context lost UTC reset: %+v", got)
+	}
 }

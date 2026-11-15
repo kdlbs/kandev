@@ -19,6 +19,8 @@ const THIS_TAB_STAMP = "stamp-this";
 const MANAGED_RUNTIME_NPM_FAILURE = "managed_runtime_npm_resolution";
 const NPM_ERROR_CODE_ETARGET = "npm error code ETARGET";
 const BOOTSTRAP_ERROR_MESSAGE = "The agent could not start.";
+const PROCESS_EXIT_MESSAGE = "The agent exited before startup completed.";
+const PROCESS_EXIT_CODE = "process_exited";
 
 describe("readLastAgentError", () => {
   it("reads structured failure fields in snake_case", () => {
@@ -360,6 +362,85 @@ describe("readLastAgentError optional metadata", () => {
         },
       }),
     ).toBeNull();
+  });
+});
+
+describe("process exit agent error causes", () => {
+  it("keeps the recognized reason and numeric exit status", () => {
+    const error = readLastAgentError({
+      last_agent_error: {
+        message: PROCESS_EXIT_MESSAGE,
+        phase: "bootstrap",
+        causes: [
+          {
+            operation: "resume",
+            code: PROCESS_EXIT_CODE,
+            reason: "mise_config_untrusted",
+            exit_code: 1,
+            detail: "raw /private/workspace/mise.toml",
+          },
+        ],
+      },
+    });
+    expect(error?.causes).toEqual([
+      {
+        operation: "resume",
+        code: PROCESS_EXIT_CODE,
+        reason: "mise_config_untrusted",
+        exit_code: 1,
+        detail: PROCESS_EXIT_MESSAGE,
+      },
+    ]);
+  });
+
+  it("degrades unknown reasons, malformed statuses, and hostile detail", () => {
+    const error = readLastAgentError({
+      last_agent_error: {
+        message: PROCESS_EXIT_MESSAGE,
+        causes: [
+          {
+            operation: "start",
+            code: PROCESS_EXIT_CODE,
+            reason: "private_reason",
+            exit_code: 1.5,
+            detail: "/Users/alice/.config/mise.toml",
+          },
+          {
+            operation: "start",
+            code: PROCESS_EXIT_CODE,
+            reason: "mise_config_untrusted",
+            exit_code: 4294967296,
+          },
+        ],
+      },
+    });
+    expect(error?.causes).toHaveLength(2);
+    expect(error?.causes?.[0]).toMatchObject({
+      code: PROCESS_EXIT_CODE,
+      reason: "unclassified",
+      detail: PROCESS_EXIT_MESSAGE,
+    });
+    expect(error?.causes?.[0]?.exit_code).toBeUndefined();
+    expect(error?.causes?.[1]).toMatchObject({
+      code: PROCESS_EXIT_CODE,
+      reason: "mise_config_untrusted",
+      detail: PROCESS_EXIT_MESSAGE,
+    });
+    expect(error?.causes?.[1]?.exit_code).toBeUndefined();
+    expect(JSON.stringify(error)).not.toContain("/Users/alice");
+    expect(JSON.stringify(error)).not.toContain("private_reason");
+  });
+
+  it("keeps exit status zero distinct from a missing status", () => {
+    const error = readLastAgentError({
+      last_agent_error: {
+        message: PROCESS_EXIT_MESSAGE,
+        causes: [
+          { operation: "start", code: PROCESS_EXIT_CODE, reason: "unclassified", exit_code: 0 },
+        ],
+      },
+    });
+    expect(error?.causes?.[0]?.exit_code).toBe(0);
   });
 });
 

@@ -249,6 +249,8 @@ type CreateRequest struct {
 	RemoteContributions       map[string]models.RemoteContribution      `json:"remote_contributions,omitempty"`
 	ContributionDestinations  map[string]models.ContributionDestination `json:"contribution_destinations,omitempty"`
 	WorkspaceSourceRoots      []string                                  `json:"workspace_source_roots,omitempty"`
+	WorkspaceExcludedRoots    []string                                  `json:"workspace_excluded_roots,omitempty"`
+	TaskWorkspaceRoot         string                                    `json:"task_workspace_root,omitempty"`
 	DurableJournalPath        string                                    `json:"durable_journal_path,omitempty"`
 	DeliveryStreamID          string                                    `json:"delivery_stream_id,omitempty"`
 	DeliveryIncarnationID     string                                    `json:"delivery_incarnation_id,omitempty"`
@@ -257,6 +259,10 @@ type CreateRequest struct {
 	// OpenCodePluginRuntime is the resolved OpenCode family/source/version for
 	// this launch. Nil keeps the integration off for non-OpenCode launches.
 	OpenCodePluginRuntime *agentctltypes.OpenCodePluginRuntime `json:"opencode_plugin_runtime,omitempty"`
+
+	// ManagedRuntimeInstallContext carries authenticated installer provenance
+	// for reusable managed npm repairs. Nil keeps the legacy private path.
+	ManagedRuntimeInstallContext *agentctltypes.ManagedRuntimeInstallContext `json:"managed_runtime_install_context,omitempty"`
 }
 
 // CreateResponse contains the result of creating a new agent instance.
@@ -293,7 +299,7 @@ type InstanceInfo struct {
 	AgentCommand string `json:"agent_command"`
 
 	// Env contains environment variables passed to the agent process
-	Env map[string]string `json:"env,omitempty"`
+	Env map[string]string `json:"env"`
 
 	// CreatedAt is the timestamp when this instance was created
 	CreatedAt time.Time `json:"created_at"`
@@ -304,12 +310,14 @@ type InstanceInfo struct {
 	// TaskID is the task ID this instance was created for, if any.
 	TaskID string `json:"task_id,omitempty"`
 
+	WorkspaceExcludedRoots []string `json:"workspace_excluded_roots,omitempty"`
+
 	// WorkspaceSourceRoots is the live, current source-root allowlist this
 	// instance is enforcing right now -- a rescan or rebind can change it
 	// after creation, so this always reflects that, not a creation-time
 	// snapshot (AC-EXECUTORS-SURVIVAL-002.14's "workspace source roots"
 	// reconstruction row: read back, never pushed).
-	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
+	WorkspaceSourceRoots []string `json:"workspace_source_roots"`
 
 	// ProviderSessionID is the live agent CLI's own session identity, held by
 	// the adapter (AC-EXECUTORS-SURVIVAL-002.14's "provider session identity"

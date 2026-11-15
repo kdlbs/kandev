@@ -62,3 +62,14 @@ it("does not display another task's response", async () => {
   await act(async () => {});
   expect(result.current.view).toBeUndefined();
 });
+
+it("refreshes open evidence when activity polling returns a new snapshot", async () => {
+  const { result, rerender } = renderHook(
+    ({ activity }) => useBuiltinMCPSession("task", "session", "ws", true, activity),
+    { initialProps: { activity: {} } },
+  );
+  await waitFor(() => expect(result.current.view).toEqual(view()));
+  fixture.read.mockResolvedValue({ ...view(), execution_id: "replacement" });
+  rerender({ activity: {} });
+  await waitFor(() => expect(result.current.view?.execution_id).toBe("replacement"));
+});

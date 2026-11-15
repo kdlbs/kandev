@@ -1,7 +1,7 @@
 ---
 status: draft
 system: platform
-updated: 2026-10-28
+updated: 2026-11-09
 requirements:
   - REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-001
   - REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002
@@ -223,6 +223,76 @@ They can therefore show pressure while the database filesystem rejects writes.
 After backend restart, resample current owners instead of treating an old observation as current.
 Historical terminal diagnostics retain the ordinary persistence guarantee when storage permits their commit.
 Do not fabricate an acknowledgment when storage cannot commit that record.
+
+## Post-turn observation and freshness
+
+This extension implements criteria 002.15 through 002.17 and restores the existing independent observation contract.
+The [fix package](../../../plans/delivery-storage-recovery/plan.md) owns delivery and regression evidence.
+Session settlement remains with [durable failure recovery](durable-delivery-failure.md#settled-session-state-convergence).
+
+`Manager.handleCompleteEventLeased` clears the active delivery submission before the next health probe.
+`StreamManager.probeDeliveryHealth` currently returns when that identity is empty.
+Capacity sampling continues and preserves the previous pressure fields in `buildRuntimeStorageObservation`.
+It also refreshes their shared receipt age. This combination can keep an old pressure headline apparently current indefinitely.
+
+### Observer lifetime and authority
+
+Keep `monitorDeliveryHealth` attached to the existing `deliveryStreamAttachment`, including between prompts.
+Retain its two-second interval, two-second request deadline, one in-flight request, and owned shutdown context.
+Do not add an observer, source registry, native launch, or per-browser request loop.
+
+Capture the execution, client lease, attachment, harness generation, and active submission before each status request.
+Revalidate every captured identity before applying its result. An empty submission is a valid idle observation scope.
+An idle response that overlaps a new submission is obsolete and cannot clear that submission's pressure.
+Stop, reattachment, client replacement, native-generation replacement, and shutdown reject delayed results.
+No lifecycle or stream lock spans status I/O or event publication.
+
+A supported `delivery_health` state permits an owner-scoped pressure observation.
+A missing object, empty state, unknown state, or malformed status supplies no recovery evidence.
+Older peers with recognized health states retain supported observation behavior without a new capability requirement.
+Fresh `healthy` or nonblocking `pressure` reports clear the live blocking fields only when guard, pause, and failure evidence also permit it.
+An active sticky writer failure remains blocking until agentctl itself releases it through the existing commit rules.
+
+With an active submission, retain the existing correlated failure and reconciliation path.
+Without one, update live pressure only. Do not invoke submission reconciliation with an empty or remembered submission identity.
+Idle observation cannot settle a turn, resolve a recovery block, drain a queue, or dispatch an instruction.
+Preserve persisted failure snapshots and their original timestamps when live pressure clears.
+
+### Independent receipt ages
+
+Keep `ObservedAt`, `ReceivedAt`, and `age_seconds` for capacity evidence.
+Add a separate backend receipt time for accepted delivery-health reports.
+Expose optional `pressure_observed_at` and `pressure_age_seconds` in `RuntimeStorageHealthDTO` and `RuntimeStorageHealth`.
+The pressure timestamp identifies the backend's accepted status observation, not the original failure time.
+Use pointer or optional fields so unknown pressure age remains distinct from zero.
+Both ages use backend receipt time plus monotonic elapsed time after browser receipt.
+Source timestamps remain display-only. Historical `FailureStorage.ObservedAt` retains its original meaning.
+
+Every accepted status response refreshes the pressure receipt, including unchanged health values.
+An unchanged value does not require a new event every two seconds.
+Publish semantic changes immediately and refresh sustained nonhealthy evidence at most once per 30 seconds.
+Existing capacity events can carry the latest independently computed pressure age.
+A capacity success or failure never changes the pressure receipt.
+Failed status requests never change it either. Backend restart resamples current owners instead of persisting these clocks.
+
+Carry both ages through runtime copies, DTO enrichment, boot, detail reads, and `task_session.runtime_storage_changed`.
+Keep the existing backend epoch and monotonic revision ordering at the shared session merge boundary.
+An old HTTP or boot snapshot cannot replace a newer healthy live event.
+Rejected responses cannot renew either clock.
+
+### Presentation compatibility
+
+Use pressure age for a blocked-output headline and capacity age for disk measurements.
+Use the existing localized last-reported label after 90 seconds or when pressure age is unknown.
+An older backend's capacity age cannot substitute for missing pressure age.
+Keep the pressure visible as last reported until a supported status proves recovery.
+Expanded Details distinguishes the pressure observation time from the capacity observation time.
+Preserve historical failure time separately in the existing recovery card.
+
+Reuse the current compact notice, disclosure, Storage link, and desktop/phone controls.
+No additional action, overlay, scroll owner, or automatic recovery request is required.
+New time labels require the seven real locale catalogs and generated Traditional Chinese catalogs.
+The fix package owns UI-01 and UI-02 and their rendered checks.
 
 ## Shared presentation
 

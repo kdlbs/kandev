@@ -28,9 +28,9 @@ func (s *Service) handleTaskStateChanged(ctx context.Context, data watcher.TaskE
 	}
 
 	s.processParentChildrenCompletedForTaskState(ctx, data.TaskID, *data.NewState)
-	// Peer dependencies react to the same terminal transitions, but with a
-	// stricter definition of "done": on_children_completed counts FAILED as
-	// terminal, dependency resolution requires success. Keep the two separate.
+	// Both paths observe terminal transitions, then apply their own readiness
+	// rules. Parent workflow completion requires every counted child to succeed;
+	// dependency resolution keeps its separate contract.
 	s.handleTaskDependenciesForTerminalState(ctx, data.TaskID, *data.NewState)
 }
 
@@ -272,7 +272,7 @@ func (s *Service) readyChildCompletionRows(ctx context.Context, parentID string)
 			zap.Error(err))
 		return nil, false
 	}
-	if len(rows) == 0 || !allChildrenTerminal(rows) {
+	if len(rows) == 0 || !allChildrenCompleted(rows) {
 		return nil, false
 	}
 	return rows, true
@@ -382,9 +382,9 @@ func (s *Service) markChildCompletionApplied(ctx context.Context, parentID, oper
 	}
 }
 
-func allChildrenTerminal(rows []models.ChildCompletionRow) bool {
+func allChildrenCompleted(rows []models.ChildCompletionRow) bool {
 	for _, row := range rows {
-		if !models.IsTerminalTaskState(row.State) {
+		if row.State != v1.TaskStateCompleted {
 			return false
 		}
 	}
@@ -411,7 +411,7 @@ func (s *Service) workflowStepIsTerminal(ctx context.Context, workflowStepID str
 
 // childCompletionPayload builds the engine payload for an
 // on_children_completed dispatch. rows arrive ordered by created_at (see
-// ListChildCompletionRows) with terminality already confirmed by the
+// ListChildCompletionRows) with successful completion already confirmed by the
 // caller's single read (readyChildCompletionRows) — that same read is
 // what the wave identity is derived from, so this function only re-sorts
 // a copy of rows ascending by id before deriving it; it performs no read

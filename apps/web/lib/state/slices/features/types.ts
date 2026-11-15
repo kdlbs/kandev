@@ -5,6 +5,7 @@
 // See docs/decisions/0007-runtime-feature-flags.md.
 
 export const defaultFeatureFlags = {
+  providerKeywordContext: false,
   // New release toggles start disabled in every frontend state. The SSR layer
   // overwrites this with the backend's effective values after startup.
   lspBrowserContinuity: false,
