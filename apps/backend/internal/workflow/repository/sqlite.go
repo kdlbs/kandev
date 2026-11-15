@@ -42,6 +42,11 @@ func NewWithDB(writer, reader *sqlx.DB, log *logger.Logger) (*Repository, error)
 	return repo, nil
 }
 
+// Rebind converts question-mark parameters to the repository driver's syntax.
+func (r *Repository) Rebind(query string) string {
+	return r.db.Rebind(query)
+}
+
 // initSchema creates the database tables if they don't exist.
 func (r *Repository) initSchema() error {
 	// Create workflow_templates table

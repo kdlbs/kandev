@@ -25,7 +25,7 @@ func (f assignmentEligibilityTestStepIDs) ListTaskBlockers(context.Context, stri
 	return nil, nil
 }
 
-func (f assignmentEligibilityTestStepIDs) IsTaskInTerminalStep(context.Context, string) (bool, error) {
+func (f assignmentEligibilityTestStepIDs) IsTaskInTerminalState(context.Context, string) (bool, error) {
 	return true, nil
 }
 

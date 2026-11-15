@@ -645,7 +645,7 @@ func TestHTTPBulkMoveSelectedTasksWithEmptySelectionIsANoOp(t *testing.T) {
 	})
 
 	require.Equal(t, http.StatusOK, rec.Code)
-	require.JSONEq(t, `{"moved_count":0}`, rec.Body.String())
+	require.JSONEq(t, `{"moved_count":0,"moved_task_ids":[]}`, rec.Body.String())
 }
 
 // @covers REQ-PLUGINS-TASKLIST-FACETS-002

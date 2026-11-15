@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -37,11 +38,22 @@ func (m *Manager) AcknowledgeNativeResumeDelivery(ctx context.Context, sessionID
 	if m.streamManager == nil || m.streamManager.deliveryRepository() == nil {
 		return fmt.Errorf("%w: %w: SQL submission repository is unavailable", ErrDurableAdoptionBlocked, ErrDurableAdoptionEvidenceUnavailable)
 	}
-	if err := m.reconcileNativeResumeSQLDispatch(ctx, execution, status, submissions); err != nil {
+	missingPeerRows, err := m.reconcileNativeResumeSQLDispatch(ctx, execution, status, submissions)
+	if err != nil {
 		return err
 	}
 	if _, err := authenticatedDeliveryReplayCursor(ctx, execution, m.streamManager.deliveryRepository(), status); err != nil {
 		return err
+	}
+	missingPeerByID := make(map[string]journal.Submission, len(missingPeerRows))
+	for _, row := range missingPeerRows {
+		missingPeer := journal.Submission{
+			ID: row.ID, StreamID: status.StreamID, SessionID: row.SessionID,
+			IncarnationID: row.IncarnationID, HarnessGeneration: uint64(row.HarnessGeneration),
+			Hash: row.PayloadHash, State: journal.SubmissionInterruptedUnknown,
+		}
+		missingPeerByID[row.ID] = missingPeer
+		submissions = append(submissions, missingPeer)
 	}
 	// Dispatch reconciliation can change SQL state; pin one fresh inventory for validation and retirement selection.
 	rows, unproven, err := nativeResumeSQLRows(ctx, execution, status, submissions, m.streamManager.deliveryRepository())
@@ -56,8 +68,17 @@ func (m *Manager) AcknowledgeNativeResumeDelivery(ctx context.Context, sessionID
 		return err
 	}
 	for _, id := range ids {
-		if err := m.deliveryJournalReleaser().retire(ctx, client, id); err != nil {
-			return fmt.Errorf("acknowledge native resume delivery: %w", err)
+		if missingPeer, missing := missingPeerByID[id]; missing {
+			err = m.deliveryJournalReleaser().retireMissingUnknown(ctx, client, missingPeer)
+			if err != nil {
+				return withDeliveryRecoveryRefusal(nativeResumeMissingPeerRefusalReason(err),
+					fmt.Errorf("write native resume missing-peer retirement: %w", err))
+			}
+		} else {
+			err = m.deliveryJournalReleaser().retire(ctx, client, id)
+			if err != nil {
+				return fmt.Errorf("acknowledge native resume delivery: %w", err)
+			}
 		}
 	}
 	status, err = client.GetDeliveryStatus(ctx, execution.DeliveryStreamID)
@@ -75,6 +96,34 @@ func (m *Manager) AcknowledgeNativeResumeDelivery(ctx context.Context, sessionID
 		return fmt.Errorf("confirm native resume retirement evidence: %w", err)
 	}
 	return m.validateNativeResumeSQLHistory(ctx, execution, status, submissions, true)
+}
+
+func nativeResumeMissingPeerRefusalReason(err error) string {
+	switch {
+	case errors.Is(err, journal.ErrOwnerMismatch):
+		return DeliveryRecoveryRefusalNativeIdentityMismatch
+	case errors.Is(err, journal.ErrSubmissionState):
+		return DeliveryRecoveryRefusalLiveWork
+	case errors.Is(err, journal.ErrSubmissionConflict):
+		return DeliveryRecoveryRefusalPeerRecordMismatch
+	}
+	var response *agentctl.DeliveryHTTPError
+	if errors.As(err, &response) {
+		var body struct {
+			Code string `json:"code"`
+		}
+		if json.Unmarshal([]byte(response.Body), &body) == nil {
+			switch body.Code {
+			case "OWNER_MISMATCH":
+				return DeliveryRecoveryRefusalNativeIdentityMismatch
+			case "SUBMISSION_STATE":
+				return DeliveryRecoveryRefusalLiveWork
+			case "SUBMISSION_CONFLICT":
+				return DeliveryRecoveryRefusalPeerRecordMismatch
+			}
+		}
+	}
+	return DeliveryRecoveryRefusalPeerRecordMissing
 }
 
 func validateNativeResumeDeliveryOwner(execution *AgentExecution, status *agentctl.DeliveryStatus) error {

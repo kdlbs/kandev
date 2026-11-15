@@ -7,6 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // RegisterTaskCompletionSubscriber connects committed prerequisite completion to
@@ -29,14 +30,17 @@ func (ss *SchedulerService) handleCommittedTaskCompletion(ctx context.Context, e
 	if err := json.Unmarshal(encoded, &data); err != nil {
 		return fmt.Errorf("decode task completion: %w", err)
 	}
-	if data.TaskID == "" || data.OldState == "" || data.OldState == "COMPLETED" || data.NewState != "COMPLETED" {
+	if data.TaskID == "" || data.OldState == "" || data.OldState == data.NewState ||
+		(data.NewState != string(v1.TaskStateCompleted) &&
+			data.NewState != string(v1.TaskStateFailed) &&
+			data.NewState != string(v1.TaskStateCancelled)) {
 		return nil
 	}
 	fields, err := ss.repo.GetTaskExecutionFields(ctx, data.TaskID)
 	if err != nil {
-		return fmt.Errorf("read completed prerequisite: %w", err)
+		return fmt.Errorf("read terminal prerequisite: %w", err)
 	}
-	if fields.State != "COMPLETED" {
+	if fields.State != data.NewState {
 		return nil
 	}
 	var queueErr error

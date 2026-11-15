@@ -28,7 +28,7 @@ type AssignmentStepIDLookup interface {
 type AssignmentTaskLookup interface {
 	AssignmentStepIDLookup
 	ListTaskBlockers(ctx context.Context, taskID string) ([]*models.TaskBlocker, error)
-	IsTaskInTerminalStep(ctx context.Context, taskID string) (bool, error)
+	IsTaskInTerminalState(ctx context.Context, taskID string) (bool, error)
 }
 
 // IsAssignmentWakeEligible permits assignment wakes only on eligible steps
@@ -52,7 +52,7 @@ func IsAssignmentWakeEligible(
 		return true
 	}
 	for _, blocker := range blockers {
-		terminal, err := tasks.IsTaskInTerminalStep(ctx, blocker.BlockerTaskID)
+		terminal, err := tasks.IsTaskInTerminalState(ctx, blocker.BlockerTaskID)
 		if err != nil {
 			log.Warn("office.assignment_wake.blocker_lookup_failed",
 				zap.String("task_id", taskID), zap.String("blocker_task_id", blocker.BlockerTaskID),

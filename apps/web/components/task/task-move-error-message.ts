@@ -16,6 +16,10 @@ const MOVE_ERROR_TRANSLATIONS: Record<string, string> = {
   task_move_different_workspace: "task:taskMoveErrorDifferentWorkspace",
   task_move_workflow_step: "task:taskMoveErrorWorkflowStep",
   task_move_wip_limit: "task:taskMoveErrorWipLimit",
+  task_completion_gate_blocked: "task:taskMoveErrorCompletionGate",
+  task_completion_criteria_conflict: "task:taskMoveErrorCompletionCriteriaConflict",
+  task_completion_human_confirmation_required: "task:taskMoveErrorHumanConfirmationRequired",
+  task_move_workflow_conflict: "task:taskMoveErrorWorkflowConflict",
 };
 
 const GENERIC_MOVE_ERROR_TRANSLATION = "task:taskMoveErrorGeneric";

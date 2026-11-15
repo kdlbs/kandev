@@ -585,6 +585,7 @@ const (
 	ActionMCPReorderChildTasks           = "mcp.reorder_child_tasks"
 	ActionMCPSpawnSession                = "mcp.spawn_session"
 	ActionMCPGetTaskConversation         = "mcp.get_task_conversation"
+	ActionMCPGetTaskMessageOperation     = "mcp.get_task_message_operation"
 	ActionMCPListTaskSessions            = "mcp.list_task_sessions"
 	ActionMCPListPendingAgentPermissions = "mcp.list_pending_agent_permissions"
 	ActionMCPResolveAgentPermission      = "mcp.resolve_agent_permission"

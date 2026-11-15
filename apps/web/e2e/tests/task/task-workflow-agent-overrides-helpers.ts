@@ -96,12 +96,19 @@ export async function createOverrideTask(
   });
 }
 
-export async function waitForNewWorkflowProfileSession(
+type WorkflowProfileSessionWaitOptions = {
+  excludedSessionIds?: string[];
+  isReady: (session: { state: string }) => boolean;
+  expectation: string;
+};
+
+async function waitForWorkflowProfileSession(
   apiClient: ApiClient,
   taskId: string,
   profileId: string,
-  excludedSessionIds: string[] = [],
+  options: WorkflowProfileSessionWaitOptions,
 ) {
+  const { excludedSessionIds = [], isReady, expectation } = options;
   let sessionId = "";
   await expect
     .poll(
@@ -111,15 +118,41 @@ export async function waitForNewWorkflowProfileSession(
           (candidate) =>
             candidate.agent_profile_id === profileId &&
             !excludedSessionIds.includes(candidate.id) &&
-            candidate.state === "WAITING_FOR_INPUT",
+            isReady(candidate),
         );
         sessionId = session?.id ?? "";
         return sessionId;
       },
-      { timeout: 45_000, message: `profile ${profileId} did not create a new answerable session` },
+      { timeout: 45_000, message: `profile ${profileId} ${expectation}` },
     )
     .not.toBe("");
   return sessionId;
+}
+
+export function waitForWorkflowProfileSessionCreated(
+  apiClient: ApiClient,
+  taskId: string,
+  profileId: string,
+  excludedSessionIds: string[] = [],
+) {
+  return waitForWorkflowProfileSession(apiClient, taskId, profileId, {
+    excludedSessionIds,
+    isReady: () => true,
+    expectation: "did not create a new session",
+  });
+}
+
+export function waitForNewWorkflowProfileSession(
+  apiClient: ApiClient,
+  taskId: string,
+  profileId: string,
+  excludedSessionIds: string[] = [],
+) {
+  return waitForWorkflowProfileSession(apiClient, taskId, profileId, {
+    excludedSessionIds,
+    isReady: (session) => session.state === "WAITING_FOR_INPUT",
+    expectation: "did not create a new answerable session",
+  });
 }
 
 export async function waitForWorkflowStep(apiClient: ApiClient, taskId: string, stepId: string) {

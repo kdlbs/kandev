@@ -1829,7 +1829,8 @@ func (s *Service) syncTaskStateForQueuePromotion(ctx context.Context, task *mode
 		return fmt.Errorf("load next step after promoted step %s: %w", targetStep.ID, err)
 	}
 	oldState := task.State
-	if wfmodels.IsTerminalStep(targetStep, next) {
+	// Queue promotion derives lifecycle state from the completing-step policy.
+	if wfmodels.CompletesTaskOnEnter(targetStep, next) {
 		if !models.IsTerminalTaskState(task.State) {
 			task.State = v1.TaskStateCompleted
 		}
@@ -4587,7 +4588,23 @@ func (s *Service) dispatchOnEnterActions(ctx context.Context, taskID string, ses
 // engine.DispatchStepEntry (Repository.dispatchStepEntry's call chain),
 // entirely outside processOnEnter. See
 // docs/specs/office/system-design/step-entry-dispatch-convergence.md.
-func (s *Service) processOnEnter(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, taskDescription string, transitionID int64, sourceStep *wfmodels.WorkflowStep) {
+func (s *Service) processOnEnter(
+	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
+	taskDescription string, transitionID int64, sourceStep *wfmodels.WorkflowStep,
+) {
+	s.processOnEnterWithCompletion(ctx, taskID, session, step, taskDescription, transitionID, sourceStep, nil)
+}
+
+func (s *Service) processOnEnterWithCompletion(
+	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
+	taskDescription string, transitionID int64, sourceStep *wfmodels.WorkflowStep,
+	onComplete func(bool),
+) {
+	complete := func(delivered bool) {
+		if onComplete != nil {
+			onComplete(delivered)
+		}
+	}
 	// The step transition is already durable before on_enter runs. Its effects
 	// must finish even if the request or agent-event context that triggered the
 	// transition is cancelled.
@@ -4595,12 +4612,14 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
 	ctx = withWorkflowMetaCache(ctx)
 	if !s.workflowEntryDispatchIsCurrentForSession(ctx, taskID, session.ID, step, transitionID) {
+		complete(false)
 		return
 	}
 	// Switch session if this step requires a different agent profile.
 	var ok bool
 	prevSessionID := session.ID
 	if session, ok = s.maybySwitchSessionForProfile(ctx, taskID, session, step, sourceStep, transitionID); !ok {
+		complete(false)
 		return
 	}
 	sessionSwitched := session.ID != prevSessionID
@@ -4629,6 +4648,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		// silence the event and orphan the queue. handleAgentReady runs
 		// on_turn_complete against the new step and drains the queue itself.
 		if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
+			complete(true)
 			return
 		}
 		s.queueMoveInstructionsForSession(ctx, taskID, sessionID, step)
@@ -4638,6 +4658,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		// launchAfterOnEnterDispatch (no on_enter actions, no profile switch),
 		// so a single-use claim helper covers it.
 		s.drainQueuedMessageForPromptableSessionWithHandoff(ctx, taskID, sessionID, step.ID, newStepHandoffOnce())
+		complete(true)
 		return
 	}
 
@@ -4652,6 +4673,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 			s.persistWorkflowResetFailure(ctx, taskID, sessionID, step.ID, step.Name, executionID, err)
 		})
 		if resetErr != nil {
+			complete(false)
 			return
 		}
 		s.markIdleAfterReset(ctx, taskID, sessionID, session, step, isPassthrough)
@@ -4670,20 +4692,45 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 
 	dispatchResult := s.dispatchOnEnterActions(ctx, taskID, session, step, isPassthrough, hasPlanMode)
 
-	s.launchAfterOnEnterDispatch(ctx, taskID, session, step, taskDescription, hasPlanMode, dispatchResult.hasAutoStart, sessionSwitched, transitionID)
+	s.launchAfterOnEnterDispatchWithCompletion(
+		ctx, taskID, session, step, taskDescription, hasPlanMode, dispatchResult.hasAutoStart,
+		sessionSwitched, complete, transitionID,
+	)
 }
 
-// launchAfterOnEnterDispatch runs the auto-start decision that follows
-// on_enter action dispatch: passthrough vs. ACP auto-start, the
-// profile-switch fallback launch, and the plain wait-for-input path.
-// Extracted from processOnEnter to keep that function's complexity within
-// the repo's lint thresholds.
-//
-//nolint:cyclop,funlen,gocognit // profile-switch recovery has independent terminal and retry branches.
 func (s *Service) launchAfterOnEnterDispatch(
 	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
 	taskDescription string, hasPlanMode, hasAutoStart, sessionSwitched bool, entryIDs ...int64,
 ) {
+	s.launchAfterOnEnterDispatchWithCompletion(
+		ctx, taskID, session, step, taskDescription, hasPlanMode, hasAutoStart, sessionSwitched, nil, entryIDs...,
+	)
+}
+
+// launchAfterOnEnterDispatchWithCompletion runs the auto-start decision that
+// follows on_enter action dispatch: passthrough vs. ACP auto-start, the
+// profile-switch fallback launch, and the plain wait-for-input path. Extracted
+// from processOnEnter to keep that function's complexity within the repo's
+// lint thresholds.
+//
+//nolint:cyclop,funlen,gocognit // profile-switch recovery has independent terminal and retry branches.
+func (s *Service) launchAfterOnEnterDispatchWithCompletion(
+	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
+	taskDescription string, hasPlanMode, hasAutoStart, sessionSwitched bool,
+	onComplete func(bool), entryIDs ...int64,
+) {
+	completed := false
+	deferred := false
+	complete := func(delivered bool) {
+		if onComplete != nil {
+			onComplete(delivered)
+		}
+	}
+	defer func() {
+		if !deferred {
+			complete(completed)
+		}
+	}()
 	if !s.workflowEntryDispatchIsCurrentForSession(ctx, taskID, session.ID, step, entryIDs...) {
 		return
 	}
@@ -4716,6 +4763,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 			// that prompt once; the destination's automatic prompt must not
 			// create a competing passthrough turn.
 			s.drainQueuedMessageForPromptableSessionWithHandoff(ctx, taskID, sessionID, step.ID, handoffOnce)
+			completed = true
 			return
 		}
 		// Started passthrough path: write prompt directly to PTY stdin.
@@ -4728,6 +4776,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 			// are materialized and the handoff is not stranded in the queue. This
 			// branch still DISPATCHES, so it carries the completion handoff too.
 			s.drainQueuedMessageForPromptableSessionWithHandoff(ctx, taskID, sessionID, step.ID, handoffOnce)
+			completed = true
 			return
 		}
 		// Claimed after the actionability decision above (effectivePrompt was
@@ -4743,6 +4792,8 @@ func (s *Service) launchAfterOnEnterDispatch(
 				zap.Error(err))
 			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
+		} else {
+			completed = true
 		}
 
 	case hasAutoStart:
@@ -4754,7 +4805,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 			ctx, taskID, session, step, effectivePrompt, hasPlanMode, true, handoffOnce, promptReferenceContext,
 		); err != nil {
 			if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
-				s.replaceTerminalizedAutoStartSession(
+				completed = s.replaceTerminalizedAutoStartSession(
 					ctx, taskID, taskDescription, session, step, isPassthrough, hasPlanMode, handoffOnce, err,
 				)
 				return
@@ -4766,6 +4817,8 @@ func (s *Service) launchAfterOnEnterDispatch(
 				zap.Error(err))
 			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
+		} else {
+			completed = true
 		}
 
 	default:
@@ -4787,7 +4840,10 @@ func (s *Service) launchAfterOnEnterDispatch(
 			// to atomically detect concurrent terminalization. If the session is
 			// already terminal, create a replacement directly for automatic recovery states instead of attempting
 			// an auto-start that will fail and lose the hand-off. An explicit cancellation remains terminal.
+			deferred = true
 			go func() {
+				asyncCompleted := false
+				defer func() { complete(asyncCompleted) }()
 				asyncCtx := context.WithoutCancel(ctx)
 				lock, release := s.acquireCancelInFlightGuard(sessionID)
 				lock.Lock()
@@ -4833,6 +4889,8 @@ func (s *Service) launchAfterOnEnterDispatch(
 							zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
 						s.setSessionWaitingForInput(asyncCtx, taskID, replacement.ID, replacement)
 						s.publishSessionWaitingEvent(asyncCtx, taskID, replacement.ID, stepID, replacement)
+					} else {
+						asyncCompleted = true
 					}
 					return
 				}
@@ -4877,6 +4935,8 @@ func (s *Service) launchAfterOnEnterDispatch(
 								zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
 							s.setSessionWaitingForInput(asyncCtx, taskID, replacement.ID, replacement)
 							s.publishSessionWaitingEvent(asyncCtx, taskID, replacement.ID, stepID, replacement)
+						} else {
+							asyncCompleted = true
 						}
 						return
 					}
@@ -4887,11 +4947,14 @@ func (s *Service) launchAfterOnEnterDispatch(
 					s.setSessionWaitingForInput(asyncCtx, taskID, sessionID, fresh)
 					s.publishSessionWaitingEvent(asyncCtx, taskID, sessionID, stepID, fresh)
 					s.drainQueuedMessageForPromptableSessionWithHandoff(asyncCtx, taskID, sessionID, stepID, handoffOnce)
+					return
 				}
+				asyncCompleted = true
 			}()
 			return
 		}
 		if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
+			completed = true
 			return
 		}
 		// An existing session that neither auto-starts nor switches profile would
@@ -4907,6 +4970,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 		// from inline processOnEnter. This is the ordinary no-on_enter-actions
 		// step shape, so it carries the completion handoff too.
 		s.drainQueuedMessageForPromptableSessionWithHandoff(ctx, taskID, sessionID, step.ID, handoffOnce)
+		completed = true
 	}
 
 }
@@ -4919,12 +4983,12 @@ func (s *Service) launchAfterOnEnterDispatch(
 func (s *Service) replaceTerminalizedAutoStartSession(
 	ctx context.Context, taskID, taskDescription string, session *models.TaskSession, step *wfmodels.WorkflowStep,
 	isPassthrough, hasPlanMode bool, handoffOnce *stepHandoffOnce, err error,
-) {
+) bool {
 	sessionID := session.ID
 	if workflowAutoStartWasCancelled(err) {
 		s.logger.Info("workflow auto-start cancelled before dispatch; not creating replacement",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID))
-		return
+		return false
 	}
 	s.logger.Info("creating fresh workflow session after reused session terminalized",
 		zap.String("task_id", taskID), zap.String("session_id", sessionID))
@@ -4936,7 +5000,7 @@ func (s *Service) replaceTerminalizedAutoStartSession(
 	if replacementErr != nil {
 		s.logger.Error("failed to create replacement after reused session terminalized",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(replacementErr))
-		return
+		return false
 	}
 	replacementCtx := withCeilingEntryBindingForSession(ctx, replacement.ID)
 	replacementPrompt, replacementReferenceContext, promptErr := s.buildWorkflowEntryPrompt(
@@ -4944,7 +5008,7 @@ func (s *Service) replaceTerminalizedAutoStartSession(
 	)
 	if promptErr != nil {
 		s.handleWorkflowEntryPromptError(replacementCtx, taskID, replacement, step, promptErr)
-		return
+		return false
 	}
 	if replacementErr = s.autoStartStepPromptWithPromptContext(
 		replacementCtx, taskID, replacement, step, replacementPrompt, hasPlanMode, true, handoffOnce,
@@ -4954,7 +5018,9 @@ func (s *Service) replaceTerminalizedAutoStartSession(
 			zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
 		s.setSessionWaitingForInput(ctx, taskID, replacement.ID, replacement)
 		s.publishSessionWaitingEvent(ctx, taskID, replacement.ID, step.ID, replacement)
+		return false
 	}
+	return true
 }
 
 func (s *Service) handleWorkflowEntryPromptError(
@@ -8320,6 +8386,7 @@ func (s *Service) applyGuardedTransitionLifecycle(
 				WIPLimit:       wipLimit,
 			}, nil
 		},
+		nil,
 	)
 	if commitErr != nil {
 		return false, fmt.Errorf("commit guarded transition: %w", commitErr)
@@ -8372,10 +8439,20 @@ func (s *Service) applyEngineTransitionWithMode(
 	result engine.HandleResult, trigger engine.Trigger, taskDescription string,
 	mode transitionLifecycleMode,
 ) bool {
+	return s.applyEngineTransitionWithModeAndOnEnterCompletion(
+		ctx, taskID, session, result, trigger, taskDescription, mode, nil,
+	)
+}
+
+func (s *Service) applyEngineTransitionWithModeAndOnEnterCompletion(
+	ctx context.Context, taskID string, session *models.TaskSession,
+	result engine.HandleResult, trigger engine.Trigger, taskDescription string,
+	mode transitionLifecycleMode, onEnterComplete func(bool),
+) bool {
 	return s.applyEngineTransitionWithCommitResultMode(ctx, taskID, session, result, trigger, taskDescription, mode,
 		func(commitCtx context.Context) (workflowTransitionCommitResult, error) {
 			return s.workflowStore.applyTransitionReportingApplied(commitCtx, taskID, session.ID, result.FromStepID, result.ToStepID, trigger)
-		})
+		}, onEnterComplete)
 }
 
 func (s *Service) recoverCompletedTurnAfterWorkflowPreflightFailure(
@@ -8440,7 +8517,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		func(commitCtx context.Context) (workflowTransitionCommitResult, error) {
 			applied, err := commit(commitCtx)
 			return workflowTransitionCommitResult{Applied: applied}, err
-		})
+		}, nil)
 }
 
 // applyEngineTransitionWithCommitResultMode gates destination lifecycle work
@@ -8451,6 +8528,7 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 	ctx context.Context, taskID string, session *models.TaskSession,
 	result engine.HandleResult, trigger engine.Trigger, taskDescription string,
 	mode transitionLifecycleMode, commit func(context.Context) (workflowTransitionCommitResult, error),
+	onEnterComplete func(bool),
 ) bool {
 	ctx = withWorkflowMetaCache(ctx)
 	sessionLifecycle := mode != transitionLifecycleGuardedDecision
@@ -8660,7 +8738,10 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 	// The caller may still hold the source session guard, but this work runs
 	// asynchronously after that guard is released. Clear the synchronous
 	// ownership marker so profile-switch parking acquires its own guard.
-	s.launchProcessOnEnter(withoutWorkflowProfileSwitchGuard(context.WithoutCancel(ctx)), taskID, session, targetStep, taskDescription, transitionID, fromStep)
+	s.launchProcessOnEnter(
+		withoutWorkflowProfileSwitchGuard(context.WithoutCancel(ctx)), taskID, session, targetStep,
+		taskDescription, transitionID, fromStep, onEnterComplete,
+	)
 	return true
 }
 
@@ -8738,6 +8819,7 @@ func (s *Service) launchProcessOnEnter(
 	taskDescription string,
 	transitionID int64,
 	sourceStep *wfmodels.WorkflowStep,
+	onComplete func(bool),
 ) {
 	go func() {
 		defer func() {
@@ -8745,7 +8827,7 @@ func (s *Service) launchProcessOnEnter(
 				s.onProcessOnEnterComplete()
 			}
 		}()
-		s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, transitionID, sourceStep)
+		s.processOnEnterWithCompletion(ctx, taskID, session, targetStep, taskDescription, transitionID, sourceStep, onComplete)
 	}()
 }
 

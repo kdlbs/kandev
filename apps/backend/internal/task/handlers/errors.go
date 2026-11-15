@@ -330,16 +330,18 @@ func moveConflictCode(err error) string {
 	if errors.Is(err, service.ErrWorkflowChangeConflict) || errors.Is(err, service.ErrWorkflowResolutionConflict) {
 		return moveConflictCodeWorkflowChange
 	}
+	switch {
+	case errors.Is(err, service.ErrTaskMoveActiveSession):
+		return moveConflictCodeActiveSession
+	case errors.Is(err, service.ErrTaskMoveArchived):
+		return moveConflictCodeArchived
+	case errors.Is(err, service.ErrTaskMoveDifferentWorkspace):
+		return moveConflictCodeDifferentWorkspace
+	case errors.Is(err, service.ErrTaskMoveWorkflowStep):
+		return moveConflictCodeWorkflowStep
+	}
 	msg := strings.ToLower(err.Error())
 	switch {
-	case strings.Contains(msg, "active session"):
-		return moveConflictCodeActiveSession
-	case strings.Contains(msg, "archived tasks cannot be moved"):
-		return moveConflictCodeArchived
-	case strings.Contains(msg, "different workspace"):
-		return moveConflictCodeDifferentWorkspace
-	case strings.Contains(msg, "does not belong to target workflow"):
-		return moveConflictCodeWorkflowStep
 	case strings.Contains(msg, "wip limit exceeded"):
 		return moveConflictCodeWIPLimit
 	default:

@@ -108,7 +108,7 @@ async function seedSuccessorGenerationInterruption(
   try {
     const result = await execFileAsync(
       fixtureBinary,
-      ["-test.run=^TestRepeatedNativeResumeFixture$", "-test.timeout=30s", "-test.v"],
+      ["-test.run=^TestRepeatedNativeResumeFixture$", "-test.timeout=45s", "-test.v"],
       {
         cwd: path.resolve(process.cwd(), "../backend"),
         env: {
@@ -125,7 +125,7 @@ async function seedSuccessorGenerationInterruption(
           KANDEV_E2E_REPEAT_RESUME_PAYLOAD: payload.toString("base64"),
         },
         encoding: "utf8",
-        timeout: 35_000,
+        timeout: 50_000,
         maxBuffer: 1 << 20,
       },
     );

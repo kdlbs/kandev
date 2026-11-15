@@ -775,7 +775,7 @@ func (ss *SchedulerService) allBlockersResolvedExcept(
 		if b.BlockerTaskID == excludeBlockerID {
 			continue
 		}
-		done, err := ss.repo.IsTaskInTerminalStep(ctx, b.BlockerTaskID)
+		done, err := ss.repo.IsTaskInTerminalState(ctx, b.BlockerTaskID)
 		if err != nil {
 			return false, nil, err
 		}

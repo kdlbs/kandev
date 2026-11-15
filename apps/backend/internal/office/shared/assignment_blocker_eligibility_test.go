@@ -30,7 +30,7 @@ func (l assignmentBlockerLookup) ListTaskBlockers(context.Context, string) ([]*m
 	}
 	return out, l.listErr
 }
-func (l assignmentBlockerLookup) IsTaskInTerminalStep(_ context.Context, id string) (bool, error) {
+func (l assignmentBlockerLookup) IsTaskInTerminalState(_ context.Context, id string) (bool, error) {
 	if id == "unknown" {
 		return false, errors.New("blocker unavailable")
 	}
