@@ -256,8 +256,9 @@ func (e *Executor) buildLastAgentError(
 }
 
 // buildBootstrapLastAgentError creates the durable projection for an
-// asynchronous process-start failure. The wrapped error is useful for logs and
-// errors.Is callers, but it is deliberately absent from every persisted field.
+// asynchronous process-start failure. The wrapped error stays out of the
+// persisted fields; an unknown cause is recorded as a bounded class plus the
+// sanitized cause detail so the session explains the failure without the log.
 func (e *Executor) buildBootstrapLastAgentError(
 	ctx context.Context,
 	taskID, sessionID, agentExecutionID string,
@@ -341,16 +342,19 @@ func bootstrapFailureCause(launchErr error, fromResume bool) ([]models.AgentErro
 		if !ok {
 			return nil, ""
 		}
-		return models.NormalizeAgentErrorCauses([]models.AgentErrorCause{cause}), cause.Code
+		reason := cause.Code
+		if class := failure.SafeClass(); class != "" {
+			reason = class
+		}
+		return models.NormalizeAgentErrorCauses([]models.AgentErrorCause{cause}), reason
 	}
 	if !fromResume {
 		return nil, ""
 	}
-	code := models.AgentErrorCauseCodeUnknown
 	return []models.AgentErrorCause{{
 		Operation: models.AgentErrorCauseOperationResume,
-		Code:      code,
-	}}, code
+		Code:      models.AgentErrorCauseCodeUnknown,
+	}}, agentruntime.ClassifyUnknownBootstrapError(launchErr)
 }
 
 func (e *Executor) persistLastAgentError(
