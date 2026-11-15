@@ -254,6 +254,13 @@ func (s *Service) refreshInferenceCapacity(ctx context.Context) {
 	if !all {
 		bindings, err := s.InferenceCapacityBindings(ctx)
 		if err == nil && len(bindings) == 0 {
+			// Nothing is held outside the all-mode gate, so the inference
+			// population is the empty set. Record that as known instead of
+			// returning early: the owner starts unknown on boot and a past
+			// unreadable snapshot also leaves it unknown, and skipping here
+			// would keep every queued message and automatic start refused
+			// with ceiling_unknown_population indefinitely.
+			_ = s.SyncInferenceCapacity(ctx, true, func(map[string]sessioncapacity.InferenceBinding) error { return nil })
 			return
 		}
 	}
