@@ -245,6 +245,11 @@ the instance stopped, so Kandev keeps that owner protected. Missing native
 conversation or delivery evidence can still block Resume. Kandev does not resend
 an instruction whose outcome is uncertain.
 
+If Kandev can prove that a request failed before it was sent, it records a failed
+submission without creating an uncertain-delivery block. A lost reply does not
+prove non-delivery. Resolve any unknown-outcome recovery notice before sending
+new work; blocked messages do not create another delivery submission.
+
 If delivery is interrupted and the prompt outcome is uncertain, the recovery
 card shows **Retry connection** and **Stop**. Retry connection reconnects the
 original stream and replays committed output from its durable cursor. It does
