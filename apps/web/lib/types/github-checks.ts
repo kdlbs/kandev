@@ -39,3 +39,17 @@ export type WorkflowAttention = {
   stale: boolean;
   runs: WorkflowAttentionRun[];
 };
+
+/** Display-only CI classification for a task's pull-request indicator. */
+export type PRCIState = "none" | "failed" | "approval_required" | "attention" | "in_progress";
+
+/**
+ * Bounded, head-scoped description of the last selected detailed check
+ * snapshot. `observed` counts every selected record; `skipped` counts only
+ * completed skipped records. Null metadata is unknown, not empty.
+ */
+export type CheckSummary = {
+  head_sha: string;
+  observed: number;
+  skipped: number;
+};

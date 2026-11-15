@@ -52,6 +52,35 @@ func TestManagedRuntimeCacheEvidence(t *testing.T) {
 	}
 }
 
+func TestManagedRuntimeCacheEvidenceWithCLIArgs(t *testing.T) {
+	cacheRoot := t.TempDir()
+	packageSpec := "@agentclientprotocol/claude-agent-acp@0.100.0"
+	executionRoot := filepath.Join(cacheRoot, "_npx", managedruntime.NpxExecutionCacheKey(packageSpec))
+	packageManifest := filepath.Join(executionRoot, "node_modules", "@agentclientprotocol", "claude-agent-acp", "package.json")
+	if err := os.MkdirAll(filepath.Dir(packageManifest), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(packageManifest, []byte(`{"name":"@agentclientprotocol/claude-agent-acp","version":"0.100.0","bin":{"claude-agent-acp":"bin/cli.js"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stderr := "npm error code ENOENT\nnpm error syscall open\nnpm error path " + filepath.Join(executionRoot, "package.json")
+	failure := &types.ManagedStartupEvidence{
+		ProcessGeneration: 17, ExitDisposition: types.ManagedStartupExitOrdinary, ExitCode: ptrInt(254),
+		CollectionComplete: true, NPMDiagnosticPresent: true, NPMDiagnosticComplete: true,
+	}
+	command := agents.NewClaudeACP().ManagedNPMRuntime().RuntimeCommand("0.100.0").Args()
+	command = append(command, "--dangerously-skip-permissions")
+	got := managedRuntimeCacheEvidenceForFailure(cacheRoot, "claude-acp", command, failure, stderr)
+	if got == nil || got.ProcessGeneration != failure.ProcessGeneration ||
+		got.PackageSpec != packageSpec || got.Condition != types.ManagedRuntimeCacheRootManifestMissing {
+		t.Fatalf("flagged command evidence = %#v, want exact generation/package and root manifest condition", got)
+	}
+	opaque := append(append([]string(nil), command[:5]...), packageSpec+":agent-value")
+	if evidence := managedRuntimeCacheEvidenceForFailure(cacheRoot, "claude-acp", opaque, failure, stderr); evidence != nil {
+		t.Fatalf("package-like agent value produced installation authority: %#v", evidence)
+	}
+}
+
 func ptrInt(value int) *int { return &value }
 
 func TestManagedRuntimeCacheOpenCodeV2Command(t *testing.T) {

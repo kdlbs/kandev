@@ -357,7 +357,8 @@ type BulkMoveTasksRequest struct {
 }
 
 type BulkMoveTasksResponse struct {
-	MovedCount int `json:"moved_count"`
+	MovedCount   int      `json:"moved_count"`
+	MovedTaskIDs []string `json:"moved_task_ids"`
 }
 
 type TaskCountResponse struct {

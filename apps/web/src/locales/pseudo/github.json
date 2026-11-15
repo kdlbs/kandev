@@ -100,6 +100,10 @@
   "checksPendingCount_other": "{{count}} ƥēńďĩńĝ",
   "checksRunning": "Ćĥēćķś ŕũńńĩńĝ",
   "checksNotSuccessful": "Ćĥēćķś ńōţ śũććēśśƒũĺ",
+  "allChecksSkipped": "Àĺĺ ćĥēćķś śķĩƥƥēď",
+  "checksSkippedCount_one": "{{count}} ćĥēćķ śķĩƥƥēď",
+  "checksSkippedCount_other": "{{count}} ćĥēćķś śķĩƥƥēď",
+  "lastDetailedObservation": "Ĺàśţ ďēţàĩĺēď ōƀśēŕvàţĩōń",
   "chooseAGithubApp": "Ćĥōōśē à ĜĩţĤũƀ Àƥƥ",
   "chooseHowNewlyLaunchedTasksAuthenticate": "Ćĥōōśē ĥōŵ ńēŵĺŷ ĺàũńćĥēď ţàśķś àũţĥēńţĩćàţē ţō ĜĩţĤũƀ. Ţĥĩś ďōēś ńōţ ćĥàńĝē ţĥē ŵōŕķśƥàćē àũţōḿàţĩōń ćōńńēćţĩōń àƀōvē.",
   "chooseMergeMethod": "Ćĥōōśē ḿēŕĝē ḿēţĥōď",
@@ -663,5 +667,6 @@
   "mergeAccessDeniedByActor": "{{actor}} ćàńńōţ ḿēŕĝē ĩńţō {{repository}}.",
   "mergeAccessDenied": "Ţĥĩś àććōũńţ ćàńńōţ ḿēŕĝē ĩńţō {{repository}}.",
   "checkMergeAccess": "Ćĥēćķ àĝàĩń",
-  "mergeAsActor": "àś {{actor}}"
+  "mergeAsActor": "àś {{actor}}",
+  "lastDetailedObservationAllSkipped": "Ĺàśţ ďēţàĩĺēď ōƀśēŕvàţĩōń: àĺĺ ćĥēćķś śķĩƥƥēď"
 }

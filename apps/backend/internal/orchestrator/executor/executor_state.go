@@ -2,12 +2,15 @@ package executor
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"maps"
 	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
@@ -35,7 +38,17 @@ func (e *Executor) GetExecutionBySession(sessionID string) (*TaskExecution, bool
 	if !e.agentManager.IsAgentRunningForSession(ctx, sessionID) {
 		if (session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning) &&
 			time.Since(session.UpdatedAt) < startupGracePeriod {
-			return FromTaskSession(session), true
+			running, runningErr := e.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+			if runningErr != nil && !errors.Is(runningErr, models.ErrExecutorRunningNotFound) {
+				return FromTaskSession(session), true
+			}
+			if runningErr == nil && running != nil &&
+				running.Status != models.ExecutorRunningStatusStopped &&
+				running.Status != models.ExecutorRunningStatusFailed &&
+				running.Status != models.ExecutorRunningStatusComplete &&
+				running.Status != models.ExecutorRunningStatusPrepared {
+				return FromTaskSession(session), true
+			}
 		}
 		return nil, false
 	}
@@ -90,39 +103,41 @@ func (e *Executor) MarkCompletedBySession(ctx context.Context, sessionID string,
 	}
 }
 
-func (e *Executor) defaultExecutorID(ctx context.Context, workspaceID string) string {
+func (e *Executor) defaultExecutorID(ctx context.Context, workspaceID string) (string, error) {
 	if workspaceID == "" {
-		return ""
+		return "", nil
 	}
 	workspace, err := e.repo.GetWorkspace(ctx, workspaceID)
-	if err != nil || workspace == nil || workspace.DefaultExecutorID == nil {
-		return ""
+	if err != nil {
+		return "", err
 	}
-	return strings.TrimSpace(*workspace.DefaultExecutorID)
+	if workspace == nil || workspace.DefaultExecutorID == nil {
+		return "", nil
+	}
+	return strings.TrimSpace(*workspace.DefaultExecutorID), nil
 }
 
 // executorConfig holds resolved executor configuration.
 type executorConfig struct {
-	ExecutorID     string
-	ExecutorType   string
-	ExecutorCfg    map[string]string // The executor record's Config map (docker_host, etc.)
-	Metadata       map[string]interface{}
-	SetupScript    string                 // Setup script from profile
-	CleanupScript  string                 // Cleanup script from profile (terminal teardown)
-	ProfileEnvVars []models.ProfileEnvVar // Source definitions resolved at launch checkpoint.
-	Resumable      bool                   // Whether the executor supports session resume
-	RuntimeName    string                 // Runtime name from the executor type (e.g. "local_pc")
+	ExecutorID        string
+	ExecutorType      string
+	ImplicitSelection bool
+	ExecutorCfg       map[string]string // The executor record's Config map (docker_host, etc.)
+	Metadata          map[string]interface{}
+	SetupScript       string                 // Setup script from profile
+	CleanupScript     string                 // Cleanup script from profile (terminal teardown)
+	ProfileEnvVars    []models.ProfileEnvVar // Source definitions resolved at launch checkpoint.
+	Resumable         bool                   // Whether the executor supports session resume
+	RuntimeName       string                 // Runtime name from the executor type (e.g. "local_pc")
+	// ResolutionErr records a failed concrete executor/profile lookup. The
+	// resulting config must never be treated as an unspecified selection.
+	ResolutionErr error
 }
 
 // resolveExecutorConfig resolves executor configuration from an executor ID.
 // If executorID is empty, it falls back to the workspace default.
 // Returns the resolved config with executor ID, type, and metadata.
 func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, workspaceID string, existingMetadata map[string]interface{}) executorConfig {
-	resolved := executorID
-	if resolved == "" {
-		resolved = e.defaultExecutorID(ctx, workspaceID)
-	}
-
 	metadata := existingMetadata
 	if metadata == nil {
 		metadata = make(map[string]interface{})
@@ -137,6 +152,23 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 	// task.update, none of which filter keys.
 	clearAuthoritativeMetadataKeys(metadata)
 
+	resolved := executorID
+	profileFound := false
+	var defaultExecutorErr error
+	if resolved == "" {
+		// The selected profile's parent executor is the strongest available
+		// selection. Resolve it before the workspace default so a missing or
+		// deleted default cannot turn a profile-only launch into an unresolved
+		// selection.
+		cfg, handled, found, err := e.profileParentExecutorConfig(ctx, metadata)
+		profileFound = found
+		if handled {
+			cfg.ResolutionErr = err
+			return cfg
+		}
+		resolved, defaultExecutorErr = e.defaultExecutorID(ctx, workspaceID)
+	}
+
 	// When no executor ID is resolved, check if the metadata carries an
 	// executor profile. The profile references a specific executor, so we
 	// can derive the full config from it (critical for review-watch tasks
@@ -144,10 +176,25 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 	if resolved == "" {
 		profileID, _ := metadata["executor_profile_id"].(string)
 		if profileID == "" {
-			return executorConfig{Metadata: metadata}
+			cfg := executorConfig{Metadata: metadata}
+			if defaultExecutorErr == nil && !metadataHasExecutorSelection(metadata) {
+				cfg.ImplicitSelection = true
+			}
+			return cfg
+		}
+		if !profileFound {
+			// A concrete profile that no longer exists cannot become the
+			// unspecified standalone selection. An existing default executor is
+			// handled above; reaching this branch means nothing else selected one.
+			return executorConfig{
+				Metadata:      metadata,
+				ResolutionErr: fmt.Errorf("executor profile %q was not found", profileID),
+			}
 		}
 		cfg := executorConfig{Metadata: metadata}
-		e.applyProfile(ctx, profileID, &cfg, metadata)
+		if err := e.applyProfile(ctx, profileID, &cfg, metadata); err != nil {
+			cfg.ResolutionErr = err
+		}
 		return cfg
 	}
 
@@ -155,9 +202,20 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 
 	executor, err := e.repo.GetExecutor(ctx, resolved)
 	if err != nil || executor == nil {
+		if legacyType, ok := legacyStandaloneExecutorType(resolved); ok {
+			// Legacy task and Office preferences may carry a standalone type
+			// alias in the executor-ID field. The mapped runtime is known and
+			// needs no saved executor row.
+			return executorConfig{
+				ExecutorType: string(legacyType),
+				Metadata:     metadata,
+				RuntimeName:  string(legacyType),
+			}
+		}
 		return executorConfig{
-			ExecutorID: resolved,
-			Metadata:   metadata,
+			ExecutorID:    resolved,
+			Metadata:      metadata,
+			ResolutionErr: fmt.Errorf("executor %q was not found", resolved),
 		}
 	}
 
@@ -173,23 +231,109 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 	// Load profile by ID if specified in metadata, otherwise skip
 	profileID, _ := metadata["executor_profile_id"].(string)
 	if profileID != "" {
-		e.applyProfile(ctx, profileID, &cfg, metadata)
+		if err := e.applyProfile(ctx, profileID, &cfg, metadata); err != nil {
+			cfg.ResolutionErr = err
+		}
 	}
 
 	return cfg
 }
 
+// legacyStandaloneExecutorType recognizes standalone type aliases used as
+// executor IDs by legacy task and Office preferences. Only the unmapped
+// standalone aliases are accepted; arbitrary or container runtime IDs still
+// require a concrete executor row.
+func legacyStandaloneExecutorType(id string) (models.ExecutorType, bool) {
+	switch models.ExecutorType(strings.TrimSpace(id)) {
+	case models.ExecutorTypeLocal, models.ExecutorType("local_pc"),
+		models.ExecutorTypeWorktree, models.ExecutorTypeMockRemote:
+		return models.ExecutorType(strings.TrimSpace(id)), true
+	default:
+		return "", false
+	}
+}
+
+// profileParentExecutorConfig resolves the executor a selected profile belongs
+// to. handled=false means the metadata has no resolvable profile parent and
+// the caller must continue with the workspace default; found reports whether
+// the profile row exists at all so a deleted profile cannot silently become an
+// unspecified selection.
+func (e *Executor) profileParentExecutorConfig(
+	ctx context.Context,
+	metadata map[string]interface{},
+) (executorConfig, bool, bool, error) {
+	profileID, _ := metadata["executor_profile_id"].(string)
+	profileID = strings.TrimSpace(profileID)
+	if profileID == "" {
+		return executorConfig{}, false, false, nil
+	}
+	profile, err := e.repo.GetExecutorProfile(ctx, profileID)
+	if err != nil {
+		if errors.Is(err, repoerrors.ErrExecutorProfileNotFound) {
+			return executorConfig{}, false, false, nil
+		}
+		return executorConfig{Metadata: metadata}, true, true,
+			fmt.Errorf("executor profile %q could not be loaded", profileID)
+	}
+	if profile == nil {
+		return executorConfig{}, false, false, nil
+	}
+	if strings.TrimSpace(profile.ExecutorID) == "" {
+		return executorConfig{}, false, true, nil
+	}
+	executor, err := e.repo.GetExecutor(ctx, profile.ExecutorID)
+	if err != nil || executor == nil {
+		return executorConfig{Metadata: metadata}, true, true,
+			fmt.Errorf("executor profile %q parent executor %q could not be loaded", profileID, profile.ExecutorID)
+	}
+	cfg := executorConfig{
+		ExecutorID:   profile.ExecutorID,
+		ExecutorType: string(executor.Type),
+		ExecutorCfg:  executor.Config,
+		Metadata:     metadata,
+		Resumable:    executor.Resumable,
+		RuntimeName:  string(executor.Type),
+	}
+	if err := e.applyProfile(ctx, profileID, &cfg, metadata); err != nil {
+		return cfg, true, true, err
+	}
+	return cfg, true, true, nil
+}
+
+func metadataHasExecutorSelection(metadata map[string]interface{}) bool {
+	for _, key := range []string{"executor_id", "executor_profile_id"} {
+		value, ok := metadata[key]
+		if !ok || value == nil {
+			continue
+		}
+		if text, ok := value.(string); ok {
+			if strings.TrimSpace(text) != "" {
+				return true
+			}
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 // applyProfile loads an executor profile and applies its settings to the config.
-func (e *Executor) applyProfile(ctx context.Context, profileID string, cfg *executorConfig, metadata map[string]interface{}) {
+func (e *Executor) applyProfile(ctx context.Context, profileID string, cfg *executorConfig, metadata map[string]interface{}) error {
 	profile, err := e.repo.GetExecutorProfile(ctx, profileID)
 	if err != nil {
 		e.logger.Warn("failed to load executor profile",
 			zap.String("profile_id", profileID),
 			zap.Error(err))
-		return
+		if errors.Is(err, repoerrors.ErrExecutorProfileNotFound) {
+			// A deleted profile is legacy selection metadata. When an executor
+			// row is still resolved, its required runtime remains authoritative;
+			// an unresolved executor is refused separately.
+			return nil
+		}
+		return fmt.Errorf("executor profile %q could not be loaded", profileID)
 	}
 	if profile == nil {
-		return
+		return nil
 	}
 
 	// The profile is tied to a specific executor. If it differs from the
@@ -198,14 +342,18 @@ func (e *Executor) applyProfile(ctx context.Context, profileID string, cfg *exec
 	// worktree executors selected via review watches or executor profiles.
 	if profile.ExecutorID != "" && profile.ExecutorID != cfg.ExecutorID {
 		exec, execErr := e.repo.GetExecutor(ctx, profile.ExecutorID)
-		if execErr == nil && exec != nil {
-			cfg.ExecutorID = profile.ExecutorID
-			cfg.ExecutorType = string(exec.Type)
-			cfg.ExecutorCfg = exec.Config
-			cfg.Resumable = exec.Resumable
-			cfg.RuntimeName = string(exec.Type)
-			metadata["executor_id"] = profile.ExecutorID
+		if execErr != nil {
+			return fmt.Errorf("executor profile %q parent executor %q could not be loaded", profileID, profile.ExecutorID)
 		}
+		if exec == nil {
+			return fmt.Errorf("executor profile %q parent executor %q was not found", profileID, profile.ExecutorID)
+		}
+		cfg.ExecutorID = profile.ExecutorID
+		cfg.ExecutorType = string(exec.Type)
+		cfg.ExecutorCfg = exec.Config
+		cfg.Resumable = exec.Resumable
+		cfg.RuntimeName = string(exec.Type)
+		metadata["executor_id"] = profile.ExecutorID
 	}
 
 	cfg.SetupScript = profile.PrepareScript
@@ -225,6 +373,7 @@ func (e *Executor) applyProfile(ctx context.Context, profileID string, cfg *exec
 		metadata["executor_mcp_policy"] = policyJSON
 	}
 	applyProfileConfigToMetadata(cfg.ExecutorType, profile.Config, metadata)
+	return nil
 }
 
 // Profile.Config / metadata keys shared with executor_credentials.go.
@@ -338,4 +487,34 @@ func cloneMetadata(src map[string]interface{}) map[string]interface{} {
 	out := make(map[string]interface{}, len(src))
 	maps.Copy(out, src)
 	return out
+}
+
+// isExecutorRuntimeUnavailable reports a concrete selection whose mapped
+// runtime backend is not registered.
+func isExecutorRuntimeUnavailable(err error) bool {
+	return errors.Is(err, lifecycle.ErrExecutorRuntimeUnavailable)
+}
+
+// isExecutorRuntimeMismatch reports a retained execution whose recorded
+// runtime cannot satisfy the selected runtime.
+func isExecutorRuntimeMismatch(err error) bool {
+	return errors.Is(err, lifecycle.ErrExecutorRuntimeMismatch)
+}
+
+// isExecutorIdentityUnverified reports a Docker selection without verifiable
+// container identity.
+func isExecutorIdentityUnverified(err error) bool {
+	return errors.Is(err, lifecycle.ErrExecutorIdentityUnverified)
+}
+
+type executorEnvironmentMismatch interface {
+	IsEnvironmentMismatch() bool
+}
+
+// isExecutorEnvironmentMismatch reports a retained execution bound to a
+// different task environment. It stays a runtime-mismatch refusal but gets its
+// own actionable message.
+func isExecutorEnvironmentMismatch(err error) bool {
+	var mismatch executorEnvironmentMismatch
+	return errors.As(err, &mismatch) && mismatch.IsEnvironmentMismatch()
 }

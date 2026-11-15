@@ -24,6 +24,7 @@ vi.mock("@dnd-kit/core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@dnd-kit/core")>();
   return {
     ...actual,
+    useDndMonitor: () => {},
     DndContext: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     DragOverlay: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     useSensor: () => null,

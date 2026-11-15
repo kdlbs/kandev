@@ -73,6 +73,7 @@ type UpdateUserSettingsRequest struct {
 	PreferredShell                    *string
 	DefaultEditorID                   *string
 	EnablePreviewOnClick              *bool
+	EscapeCancelsAgent                *bool
 	ChatSubmitKey                     *string
 	ReviewAutoMarkOnScroll            *bool
 	ConfirmTaskArchive                *bool
@@ -114,7 +115,6 @@ type UpdateUserSettingsRequest struct {
 	GitHubSavedPresets                **json.RawMessage
 	GitHubDefaultQueryPresets         **json.RawMessage
 	GitLabSavedPresets                **json.RawMessage
-	AzureDevOpsBrowsePreferences      **json.RawMessage
 	DefaultUtilityAgentID             *string
 	DefaultUtilityModel               *string
 	DefaultUtilityAgentProfileID      *string
@@ -739,6 +739,9 @@ func applyStartupPage(settings *models.UserSettings, value *string) error {
 // (archive confirmation, auto-start prevention, transcript display toggles,
 // MCP default profile, release notification) from the patch.
 func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.EscapeCancelsAgent != nil {
+		settings.EscapeCancelsAgent = *req.EscapeCancelsAgent
+	}
 	if req.ReviewAutoMarkOnScroll != nil {
 		settings.ReviewAutoMarkOnScroll = *req.ReviewAutoMarkOnScroll
 	}
@@ -1148,7 +1151,7 @@ func sidebarViewIDExists(views []models.SidebarView, id string) bool {
 const maxUserPreferenceBlobBytes = 64 * 1024
 
 // applyUserPreferenceBlobs applies each free-form preference blob (sidebar
-// task prefs, Jira/GitHub/GitLab/Azure saved views and presets), validating
+// task prefs, Jira/GitHub/GitLab saved views and presets), validating
 // size and shape via applyUserPreferenceBlob.
 func applyUserPreferenceBlobs(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.SidebarTaskPrefs != nil {
@@ -1167,9 +1170,6 @@ func applyUserPreferenceBlobs(settings *models.UserSettings, req *UpdateUserSett
 		return err
 	}
 	if err := applyUserPreferenceBlob("gitlab_saved_presets", req.GitLabSavedPresets, &settings.GitLabSavedPresets); err != nil {
-		return err
-	}
-	if err := applyUserPreferenceBlob("azure_devops_browse_preferences", req.AzureDevOpsBrowsePreferences, &settings.AzureDevOpsBrowsePreferences); err != nil {
 		return err
 	}
 	return nil
@@ -1255,6 +1255,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"preferred_shell":                          settings.PreferredShell,
 		"default_editor_id":                        settings.DefaultEditorID,
 		"enable_preview_on_click":                  settings.EnablePreviewOnClick,
+		"escape_cancels_agent":                     settings.EscapeCancelsAgent,
 		"chat_submit_key":                          settings.ChatSubmitKey,
 		"review_auto_mark_on_scroll":               settings.ReviewAutoMarkOnScroll,
 		"confirm_task_archive":                     settings.ConfirmTaskArchive,
@@ -1296,7 +1297,6 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"github_saved_presets":                     settings.GitHubSavedPresets,
 		"github_default_query_presets":             settings.GitHubDefaultQueryPresets,
 		"gitlab_saved_presets":                     settings.GitLabSavedPresets,
-		"azure_devops_browse_preferences":          settings.AzureDevOpsBrowsePreferences,
 		"default_utility_agent_id":                 settings.DefaultUtilityAgentID,
 		"default_utility_model":                    settings.DefaultUtilityModel,
 		"default_utility_agent_profile_id":         settings.DefaultUtilityAgentProfileID,

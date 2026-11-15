@@ -58,7 +58,7 @@ function ChangeWorkflowForm({
   const workflowSelectId = useId();
   const stepSelectId = useId();
   const state = useChangeWorkflow({ open, taskId, workspaceId, onOpenChange, onSuccess });
-  const sectionClass = cn("grid gap-3", isTouchSurface && "gap-4");
+  const sectionClass = cn("grid min-w-0 grid-cols-1 gap-3", isTouchSurface && "gap-4");
 
   return (
     <form

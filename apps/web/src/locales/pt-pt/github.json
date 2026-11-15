@@ -96,6 +96,10 @@
   "checksPendingCount_other": "{{count}} pendentes",
   "checksRunning": "Verificações em execução",
   "checksNotSuccessful": "Verificações não concluídas com sucesso",
+  "allChecksSkipped": "Todas as verificações ignoradas",
+  "checksSkippedCount_one": "{{count}} verificação ignorada",
+  "checksSkippedCount_other": "{{count}} verificações ignoradas",
+  "lastDetailedObservation": "Última observação detalhada",
   "chooseAGithubApp": "Escolher uma App do GitHub",
   "chooseHowNewlyLaunchedTasksAuthenticate": "Escolha como as tarefas recém-lançadas se autenticam no GitHub. Isto não altera a ligação de automatização da área de trabalho acima.",
   "chooseMergeMethod": "Escolher o método de merge",
@@ -663,5 +667,6 @@
   "mergeAccessDeniedByActor": "{{actor}} não pode integrar em {{repository}}.",
   "mergeAccessDenied": "Esta conta não pode integrar em {{repository}}.",
   "checkMergeAccess": "Verificar novamente",
-  "mergeAsActor": "como {{actor}}"
+  "mergeAsActor": "como {{actor}}",
+  "lastDetailedObservationAllSkipped": "Última observação detalhada: todas as verificações ignoradas"
 }

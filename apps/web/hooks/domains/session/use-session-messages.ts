@@ -1010,6 +1010,10 @@ function useSessionHistoryRecoveryGeneration({
     previousConnectionStatusRef.current = connectionStatus;
     if (sessionChanged || connectionChanged) cancelRetry();
     if (sessionChanged || connectionChanged) fetchRefs.setIsLoading(false);
+    // A connection change invalidates any in-flight cached refresh. Release
+    // its provisional placement instead of waiting on a request whose
+    // generation can no longer commit.
+    if (connectionChanged) setIsCachedHistoryRefreshPending(false);
     if (!detailActive) {
       fetchRefs.setIsLoading(false);
       setIsCachedHistoryRefreshPending(false);

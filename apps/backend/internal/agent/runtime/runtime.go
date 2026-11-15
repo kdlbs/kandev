@@ -65,6 +65,9 @@ const (
 	BackgroundWorkloadProbeResultUnknown = client.ProbeResultUnknown
 )
 
+// MetadataKeyTaskEnvironmentID identifies the environment bound to an executor runtime.
+const MetadataKeyTaskEnvironmentID = lifecycle.MetadataKeyTaskEnvironmentID
+
 type CursorMCPAuthenticationSpec = lifecycle.CursorMCPAuthenticationSpec
 type CursorMCPRetryResult = lifecycle.CursorMCPRetryResult
 

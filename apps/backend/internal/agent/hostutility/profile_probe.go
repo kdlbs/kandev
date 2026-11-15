@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 )
@@ -192,6 +193,10 @@ func (m *Manager) probeProfileCapabilitiesFlight(
 	probeReq := buildProbeRequest(inst, ia, req.Refresh, command)
 	probeReq.ProfileContext = true
 	probeReq.InferenceConfig.Env = mergeInferenceEnv(cloneStringMap(req.Context.Env), localEnv)
+	probeReq.InstallContext = managedRuntimeProbeInstallContext(
+		probeReq.InferenceConfig,
+		managedruntime.RepairOwnerScopeProfile(req.Context.Scope),
+	)
 	cliFlags := req.Context.CLIFlags
 	if pluginFlags != nil {
 		cliFlags = pluginFlags
@@ -370,6 +375,10 @@ func (m *Manager) resolveProfileModelConfigFlight(
 	probeReq.Mode = req.Mode
 	probeReq.ConfigOptions = cloneStringMap(req.ConfigOptions)
 	probeReq.InferenceConfig.Env = mergeInferenceEnv(cloneStringMap(req.ProfileContext.Env), localEnv)
+	probeReq.InstallContext = managedRuntimeProbeInstallContext(
+		probeReq.InferenceConfig,
+		managedruntime.RepairOwnerScopeProfile(req.ProfileContext.Scope),
+	)
 	cliFlags := req.ProfileContext.CLIFlags
 	if pluginFlags != nil {
 		cliFlags = pluginFlags

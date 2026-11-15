@@ -63,7 +63,7 @@ ACP startup with disposable fixtures, without authentication.
 Confirmed in this checkout:
 
 - `CopilotACP.ID()` is `copilot-acp`. `BuildCommand` uses the selected managed npm package.
-- `managed_npm_runtime_versions.json` pins `@github/copilot` to `1.0.105`.
+- `managed_npm_runtime_versions.json` pins `@github/copilot` to `1.0.106`.
 - `ManagedNPMRuntimeSpec.InteractiveCommand(version)` provides the same package without `--acp`.
 - `resolveProfileProbeContext` resolves authorized profile settings and secrets.
 - `requireProfileDiscoveryScope` requires `org.config.manage`.
@@ -95,7 +95,7 @@ Official references, checked 2026-10-27:
 - The [ACP reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/acp-server) describes `--acp`, stdio, and process-owned session options.
   ACP remains a changing upstream interface.
 
-These references do not establish the private installation schema or explicit-mount policy enforcement for Kandev's current `1.0.105` pin.
+These references do not establish the private installation schema or explicit-mount policy enforcement for Kandev's current `1.0.106` pin.
 
 ## Design choices and alternatives
 

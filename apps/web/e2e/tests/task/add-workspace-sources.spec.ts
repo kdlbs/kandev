@@ -331,7 +331,12 @@ test.describe("Attach local workspace sources", () => {
       fs.renameSync(pendingFiles[index]!, destination);
     }
 
-    const refreshResponse = wsWatcher.waitForResponse("session.git.refresh");
+    const refreshResponse = wsWatcher.waitForResponse("session.git.refresh", {
+      where: (payload) => {
+        const snapshots = (payload as { snapshots?: unknown[] }).snapshots;
+        return Array.isArray(snapshots) && snapshots.length === 2;
+      },
+    });
     await session.clickTab("Changes");
     const refresh = await refreshResponse;
     expect(refresh.payload.mode).toBe("fresh");

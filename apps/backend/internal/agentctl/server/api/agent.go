@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/constants"
+	"github.com/kandev/kandev/internal/common/logger"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	protocol "github.com/kandev/kandev/pkg/codexappserver"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -282,7 +283,7 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	wg.Add(1)
 	go s.runAgentStreamReader(ctx, conn, writeMessage, cancel, &wg)
 	wg.Add(1)
-	go s.runAgentStreamWriterWithJournalReplay(ctx, conn, streamID, after, s.procMgr.DeliveryStreamID(), updatesCh, mcpRequestCh, writeMessage, &wg)
+	go s.runAgentStreamWriterWithJournalReplay(ctx, conn, streamID, after, s.procMgr.DeliveryStreamID(), updatesCh, mcpRequestCh, writeMessage, &wg, c.Query("stage") == "1")
 	wg.Wait()
 	if s.mcpBackendClient != nil {
 		s.mcpBackendClient.FailStreamRequests(streamID, errors.New("agent stream disconnected"))
@@ -346,8 +347,10 @@ func (s *Server) runAgentStreamWriter(ctx context.Context, conn *websocket.Conn,
 // before selecting the live channel. The replay helper keeps only one journal
 // page in memory and performs a final high-water check so the live channel is
 // not the sole bridge for events committed during reconnect.
-func (s *Server) runAgentStreamWriterWithJournalReplay(ctx context.Context, conn *websocket.Conn, streamID string, after uint64, deliveryStreamID string, updatesCh <-chan adapter.AgentEvent, mcpRequestCh <-chan *ws.Message, writeMessage func([]byte) error, wg *sync.WaitGroup) {
+func (s *Server) runAgentStreamWriterWithJournalReplay(ctx context.Context, conn *websocket.Conn, streamID string, after uint64, deliveryStreamID string, updatesCh <-chan adapter.AgentEvent, mcpRequestCh <-chan *ws.Message, writeMessage func([]byte) error, wg *sync.WaitGroup, stageEnabled bool) {
 	defer wg.Done()
+	stage := s.newStreamStageWriter(writeMessage, stageEnabled)
+	defer stage.stop()
 	defer func() {
 		if err := conn.Close(); err != nil {
 			s.logger.Debug("failed to close agent stream websocket", zap.Error(err))
@@ -358,7 +361,7 @@ func (s *Server) runAgentStreamWriterWithJournalReplay(ctx context.Context, conn
 			writer := durableAgentStreamWriter{
 				server: s, streamID: streamID, deliveryStreamID: deliveryStreamID,
 				updatesCh: updatesCh, mcpRequestCh: mcpRequestCh,
-				wakeups: wakeups, writeMessage: writeMessage,
+				wakeups: wakeups, writeMessage: writeMessage, stage: stage,
 			}
 			writer.run(ctx, after, true)
 			return
@@ -366,7 +369,7 @@ func (s *Server) runAgentStreamWriterWithJournalReplay(ctx context.Context, conn
 	}
 
 	after, err := s.replayAgentStream(ctx, after, func(notification adapter.AgentEvent) error {
-		if !s.writeAgentStreamNotification(notification, writeMessage, true) {
+		if !s.writeAgentStreamNotification(notification, stage.writeEvent, true) {
 			return errAgentStreamReplayStopped
 		}
 		return nil
@@ -380,7 +383,7 @@ func (s *Server) runAgentStreamWriterWithJournalReplay(ctx context.Context, conn
 		}
 		return
 	}
-	s.runAgentStreamWriterLoop(ctx, conn, streamID, after, deliveryStreamID, updatesCh, mcpRequestCh, writeMessage)
+	s.runAgentStreamWriterLoop(ctx, conn, streamID, after, deliveryStreamID, updatesCh, mcpRequestCh, writeMessage, stage)
 }
 
 // runAgentStreamWriterWithReplay sends committed replay events before it
@@ -388,13 +391,15 @@ func (s *Server) runAgentStreamWriterWithJournalReplay(ctx context.Context, conn
 // embedders on the original writer contract.
 func (s *Server) runAgentStreamWriterWithReplay(ctx context.Context, conn *websocket.Conn, streamID string, replay []adapter.AgentEvent, after uint64, deliveryStreamID string, updatesCh <-chan adapter.AgentEvent, mcpRequestCh <-chan *ws.Message, writeMessage func([]byte) error, wg *sync.WaitGroup) {
 	defer wg.Done()
+	stage := s.newStreamStageWriter(writeMessage, false)
+	defer stage.stop()
 	defer func() {
 		if err := conn.Close(); err != nil {
 			s.logger.Debug("failed to close agent stream websocket", zap.Error(err))
 		}
 	}()
 	for _, notification := range replay {
-		if !s.writeAgentStreamNotification(notification, writeMessage, true) {
+		if !s.writeAgentStreamNotification(notification, stage.writeEvent, true) {
 			return
 		}
 	}
@@ -403,27 +408,32 @@ func (s *Server) runAgentStreamWriterWithReplay(ctx context.Context, conn *webso
 			after = notification.DeliverySequence
 		}
 	}
-	s.runAgentStreamWriterLoop(ctx, conn, streamID, after, deliveryStreamID, updatesCh, mcpRequestCh, writeMessage)
+	s.runAgentStreamWriterLoop(ctx, conn, streamID, after, deliveryStreamID, updatesCh, mcpRequestCh, writeMessage, stage)
 }
 
-func (s *Server) runAgentStreamWriterLoop(ctx context.Context, conn *websocket.Conn, streamID string, after uint64, deliveryStreamID string, updatesCh <-chan adapter.AgentEvent, mcpRequestCh <-chan *ws.Message, writeMessage func([]byte) error) {
+func (s *Server) runAgentStreamWriterLoop(ctx context.Context, conn *websocket.Conn, streamID string, after uint64, deliveryStreamID string, updatesCh <-chan adapter.AgentEvent, mcpRequestCh <-chan *ws.Message, writeMessage func([]byte) error, stages ...*streamStageWriter) {
+	stage, heartbeat, eventWrite := streamStageInputs(writeMessage, stages)
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-heartbeat:
+			if !stage.heartbeat() {
+				return
+			}
 		case notification, ok := <-updatesCh:
 			if !ok {
 				return
 			}
 			if deliveryStreamID != "" && notification.DeliveryStreamID == deliveryStreamID && notification.DeliverySequence > 0 {
 				var stop bool
-				after, stop = s.writeDurableAgentStreamEvent(ctx, after, deliveryStreamID, notification, writeMessage)
+				after, stop = s.writeDurableAgentStreamEvent(ctx, after, deliveryStreamID, notification, eventWrite)
 				if stop {
 					return
 				}
 				continue
 			}
-			if !s.writeAgentStreamNotification(notification, writeMessage, false) {
+			if !s.writeAgentStreamNotification(notification, eventWrite, false) {
 				return
 			}
 		case mcpReq, ok := <-mcpRequestCh:
@@ -446,6 +456,26 @@ type durableAgentStreamWriter struct {
 	mcpRequestCh     <-chan *ws.Message
 	wakeups          <-chan struct{}
 	writeMessage     func([]byte) error
+	stage            *streamStageWriter
+}
+
+func (w *durableAgentStreamWriter) writeEvent(data []byte) error {
+	if w.stage != nil {
+		return w.stage.writeEvent(data)
+	}
+	return w.writeMessage(data)
+}
+
+func (w *durableAgentStreamWriter) serviceHeartbeat() bool {
+	if w.stage == nil {
+		return true
+	}
+	select {
+	case <-w.stage.ticks():
+		return w.stage.heartbeat()
+	default:
+		return true
+	}
 }
 
 // run treats the journal as truth. The bounded wake remains buffered while a
@@ -457,6 +487,9 @@ func (w *durableAgentStreamWriter) run(ctx context.Context, after uint64, draini
 		return
 	}
 	for ctx.Err() == nil {
+		if !w.serviceHeartbeat() {
+			return
+		}
 		if !draining {
 			if !w.waitForInput(ctx, &draining) {
 				return
@@ -479,9 +512,15 @@ func (w *durableAgentStreamWriter) run(ctx context.Context, after uint64, draini
 }
 
 func (w *durableAgentStreamWriter) waitForInput(ctx context.Context, draining *bool) bool {
+	var heartbeat <-chan time.Time
+	if w.stage != nil {
+		heartbeat = w.stage.ticks()
+	}
 	select {
 	case <-ctx.Done():
 		return false
+	case <-heartbeat:
+		return w.stage.heartbeat()
 	case _, ok := <-w.wakeups:
 		if !ok {
 			return false
@@ -495,7 +534,7 @@ func (w *durableAgentStreamWriter) waitForInput(ctx context.Context, draining *b
 			*draining = true
 			return true
 		}
-		return w.server.writeAgentStreamNotification(notification, w.writeMessage, false)
+		return w.server.writeAgentStreamNotification(notification, w.writeEvent, false)
 	case mcpReq, ok := <-w.mcpRequestCh:
 		if !ok {
 			w.mcpRequestCh = nil
@@ -534,7 +573,7 @@ func (w *durableAgentStreamWriter) serviceUpdate() bool {
 		if notification.DeliveryStreamID == w.deliveryStreamID && notification.DeliverySequence > 0 {
 			return true
 		}
-		return w.server.writeAgentStreamNotification(notification, w.writeMessage, false)
+		return w.server.writeAgentStreamNotification(notification, w.writeEvent, false)
 	default:
 		return true
 	}
@@ -548,7 +587,7 @@ func (w *durableAgentStreamWriter) drainPage(
 	next, highWater, eventCount, err := w.server.replayAgentStreamPage(
 		ctx, deliveryJournal, w.deliveryStreamID, after,
 		func(notification adapter.AgentEvent) error {
-			if !w.server.writeAgentStreamNotification(notification, w.writeMessage, true) {
+			if !w.server.writeAgentStreamNotification(notification, w.writeEvent, true) {
 				return errAgentStreamReplayStopped
 			}
 			return nil
@@ -862,6 +901,8 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 		return resp
 	}
 
+	s.procMgr.ManagedRuntimeInitialized(ctx, req.ProcessGeneration)
+
 	// Get agent info after successful initialization
 	var agentInfoResp *AgentInfoResponse
 	if info := adapter.GetAgentInfo(); info != nil {
@@ -959,10 +1000,10 @@ func (s *Server) startMCPAttachmentAttempt(ctx context.Context, servers []types.
 	if s.cfg.McpProfile != nil {
 		attempt.BuiltinPackages = s.cfg.McpProfile.BuiltinPackages.Clone()
 	}
-	s.procMgr.PublishMCPAttachmentAttempt(attempt)
 	if s.mcpServer != nil {
-		s.mcpServer.SetAttachmentAttempt(attempt)
+		s.mcpServer.BeginAttachmentAttempt(attempt)
 	}
+	var initialEvidence []streams.MCPAttachmentEvidence
 	var entries []streams.MCPResolutionEntry
 	if len(resolution) > 0 {
 		entries = streams.NormalizeMCPResolution(resolution[0])
@@ -980,7 +1021,7 @@ func (s *Server) startMCPAttachmentAttempt(ctx context.Context, servers []types.
 			evidence.DefinitionRevision = entry.DefinitionRevision
 			evidence.Origins = entry.Origins
 		}
-		s.procMgr.PublishMCPAttachment(evidence)
+		initialEvidence = append(initialEvidence, evidence)
 	}
 	for index := range entries {
 		if entries[index].ReasonCode == "" && !delivered[entries[index].RuntimeName] {
@@ -989,14 +1030,42 @@ func (s *Server) startMCPAttachmentAttempt(ctx context.Context, servers []types.
 	}
 	for _, evidence := range streams.MCPResolutionEvidence(attempt.AttemptID, entries, attempt.StartedAt) {
 		if !delivered[evidence.ServerName] {
-			s.procMgr.PublishMCPAttachment(evidence)
+			initialEvidence = append(initialEvidence, evidence)
 		}
 	}
-	return streams.WithMCPAttachmentContext(ctx, attempt)
+	return streams.WithMCPAttachmentContextAndEvidence(ctx, attempt, initialEvidence)
+}
+
+func (s *Server) publishMCPAttachmentStart(ctx context.Context) {
+	attachmentContext, ok := streams.MCPAttachmentContextFromContext(ctx)
+	if !ok {
+		return
+	}
+	s.procMgr.PublishMCPAttachmentAttempt(attachmentContext.Attempt)
+	for _, evidence := range attachmentContext.InitialEvidence {
+		s.procMgr.PublishMCPAttachment(evidence)
+	}
+}
+
+func (s *Server) finishMCPAttachmentAttempt(
+	ctx context.Context,
+	adapter adapter.AgentAdapter,
+	attemptID string,
+	servers []types.McpServer,
+	err error,
+) {
+	authenticationFailure := acptransport.ProjectSessionOperationFailure(err, nil) != nil
+	if !authenticationFailure && !adapterPublishesMCPAttachmentResults(adapter) {
+		s.publishMCPAttachmentStart(ctx)
+		s.publishMCPAttachmentResult(attemptID, servers, err)
+	}
+	if s.mcpServer != nil {
+		s.mcpServer.CompleteAttachmentAttempt(attemptID, !authenticationFailure)
+	}
 }
 
 func (s *Server) publishMCPAttachmentResult(attemptID string, servers []types.McpServer, err error) {
-	if adapter, ok := s.procMgr.GetAdapter().(mcpAttachmentResultPublisher); ok && adapter.PublishesMCPAttachmentResults() {
+	if adapterPublishesMCPAttachmentResults(s.procMgr.GetAdapter()) {
 		return
 	}
 	kind := streams.MCPAttachmentEvidenceSessionAccepted
@@ -1010,6 +1079,11 @@ func (s *Server) publishMCPAttachmentResult(attemptID string, servers []types.Mc
 	for _, mcpServer := range servers {
 		s.procMgr.PublishMCPAttachment(mcpAttachmentEvidence(attemptID, mcpServer, kind, reasonCode, summary))
 	}
+}
+
+func adapterPublishesMCPAttachmentResults(agentAdapter adapter.AgentAdapter) bool {
+	publisher, ok := agentAdapter.(mcpAttachmentResultPublisher)
+	return ok && publisher.PublishesMCPAttachmentResults()
 }
 
 // mcpAttachmentResultPublisher identifies adapters that emit per-server
@@ -1080,10 +1154,17 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 	ctx = s.startMCPAttachmentAttempt(ctx, mcpServers, req.MCPResolution)
 	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
 	sessionID, err := adapter.NewSession(ctx, mcpServers)
-	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
+	s.finishMCPAttachmentAttempt(ctx, adapter, attachmentContext.Attempt.AttemptID, mcpServers, err)
 	if err != nil {
-		s.logger.Error("new session failed", zap.Error(err))
-		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		logSessionOperationFailure(s.logger, "new session failed", "new", adapter, err)
+		details := sessionOperationErrorDetails(adapter, err, nil)
+		resp, _ := ws.NewError(
+			msg.ID,
+			msg.Action,
+			ws.ErrorCodeInternalError,
+			sessionOperationErrorMessage(adapter, err, err.Error()),
+			details,
+		)
 		return resp
 	}
 
@@ -1137,8 +1218,8 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
 	ctx = streams.WithSessionSettingsPolicy(ctx, req.SessionSettingsPolicy)
 	if err := adapter.LoadSession(ctx, req.SessionID, mcpServers); err != nil {
-		s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
-		s.logger.Error("load session failed", zap.Error(err))
+		s.finishMCPAttachmentAttempt(ctx, adapter, attachmentContext.Attempt.AttemptID, mcpServers, err)
+		logSessionOperationFailure(s.logger, "load session failed", "load", adapter, err)
 		code := ws.ErrorCodeInternalError
 		details := map[string]interface{}(nil)
 		var restoreErr *acptransport.SessionRestoreError
@@ -1155,11 +1236,22 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 				details["kind"] = "session_restore_required"
 				details["recovery_action"] = "continue_from_history"
 			}
+			if code == ws.ErrorCodeInternalError {
+				details = sessionOperationErrorDetails(adapter, err, details)
+			}
+		} else {
+			details = sessionOperationErrorDetails(adapter, err, details)
 		}
-		resp, _ := ws.NewError(msg.ID, msg.Action, code, err.Error(), details)
+		resp, _ := ws.NewError(
+			msg.ID,
+			msg.Action,
+			code,
+			sessionOperationErrorMessage(adapter, err, err.Error()),
+			details,
+		)
 		return resp
 	}
-	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, nil)
+	s.finishMCPAttachmentAttempt(ctx, adapter, attachmentContext.Attempt.AttemptID, mcpServers, nil)
 
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, LoadSessionResponse{
 		Success:             true,
@@ -1213,13 +1305,20 @@ func (s *Server) handleWSResumeSession(ctx context.Context, msg *ws.Message) *ws
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "agent adapter does not support session resume", nil)
 		return resp
 	}
-	if err := resumer.ResumeSession(ctx, req.SessionID, mcpServers); err != nil {
-		s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
-		s.logger.Error("resume session failed", zap.Error(err))
-		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "session resume failed", nil)
+	err = resumer.ResumeSession(ctx, req.SessionID, mcpServers)
+	s.finishMCPAttachmentAttempt(ctx, adapter, attachmentContext.Attempt.AttemptID, mcpServers, err)
+	if err != nil {
+		logSessionOperationFailure(s.logger, "resume session failed", "resume", adapter, err)
+		details := sessionOperationErrorDetails(adapter, err, nil)
+		resp, _ := ws.NewError(
+			msg.ID,
+			msg.Action,
+			ws.ErrorCodeInternalError,
+			sessionOperationErrorMessage(adapter, err, "session resume failed"),
+			details,
+		)
 		return resp
 	}
-	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, nil)
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, ResumeSessionResponse{
 		Success: true, SessionID: req.SessionID, ModelState: sessionModelState(adapter),
 		AttachmentAttemptID: attachmentContext.Attempt.AttemptID,
@@ -1705,10 +1804,17 @@ func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.
 	ctx = s.startMCPAttachmentAttempt(ctx, mcpServers, req.MCPResolution)
 	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
 	sessionID, err := sr.ResetSession(ctx, mcpServers)
-	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
+	s.finishMCPAttachmentAttempt(ctx, agentAdapter, attachmentContext.Attempt.AttemptID, mcpServers, err)
 	if err != nil {
-		s.logger.Error("session reset failed", zap.Error(err))
-		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		logSessionOperationFailure(s.logger, "session reset failed", "reset", agentAdapter, err)
+		details := sessionOperationErrorDetails(agentAdapter, err, nil)
+		resp, _ := ws.NewError(
+			msg.ID,
+			msg.Action,
+			ws.ErrorCodeInternalError,
+			sessionOperationErrorMessage(agentAdapter, err, err.Error()),
+			details,
+		)
 		return resp
 	}
 
@@ -1719,6 +1825,61 @@ func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.
 		AttachmentAttemptID: attachmentContext.Attempt.AttemptID,
 	})
 	return resp
+}
+
+func sessionOperationErrorDetails(
+	agentAdapter adapter.AgentAdapter,
+	err error,
+	details map[string]interface{},
+) map[string]interface{} {
+	failure := acptransport.ProjectSessionOperationFailure(err, sessionOperationAuthMethods(agentAdapter))
+	if failure == nil {
+		return details
+	}
+	if details == nil {
+		details = make(map[string]interface{})
+	}
+	details["session_failure"] = failure
+	return details
+}
+
+func sessionOperationAuthMethods(agentAdapter adapter.AgentAdapter) []streams.AuthMethodInfo {
+	provider, ok := agentAdapter.(adapter.SessionOperationAuthMethodsProvider)
+	if !ok {
+		return nil
+	}
+	return provider.GetSessionOperationAuthMethods()
+}
+
+func sessionOperationAuthenticationFailure(agentAdapter adapter.AgentAdapter, err error) bool {
+	return acptransport.ProjectSessionOperationFailure(err, sessionOperationAuthMethods(agentAdapter)) != nil
+}
+
+func sessionOperationErrorMessage(agentAdapter adapter.AgentAdapter, err error, fallback string) string {
+	if sessionOperationAuthenticationFailure(agentAdapter, err) {
+		return "authentication required"
+	}
+	if fallback != "" {
+		return fallback
+	}
+	return err.Error()
+}
+
+func logSessionOperationFailure(
+	log *logger.Logger,
+	message string,
+	operation string,
+	agentAdapter adapter.AgentAdapter,
+	err error,
+) {
+	if sessionOperationAuthenticationFailure(agentAdapter, err) {
+		log.Error(message,
+			zap.String("operation", operation),
+			zap.String("error_class", "authentication_required"),
+		)
+		return
+	}
+	log.Error(message, zap.Error(err))
 }
 
 func sessionModelState(agentAdapter adapter.AgentAdapter) *streams.SessionModelState {

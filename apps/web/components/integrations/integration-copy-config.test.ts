@@ -1,16 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { copySentryInstances } from "@/lib/api/domains/sentry-api";
-import { copyAzureDevOpsConfig } from "@/lib/api/domains/azure-devops-api";
 import { copyGitLabConfig } from "@/lib/api/domains/gitlab-api";
 import { copyIntegrationConfig, integrationFromPathname } from "./integration-copy-config";
 
 vi.mock("@/lib/api/domains/sentry-api", () => ({
   copySentryInstances: vi.fn(),
-}));
-
-vi.mock("@/lib/api/domains/azure-devops-api", () => ({
-  copyAzureDevOpsConfig: vi.fn(),
 }));
 
 vi.mock("@/lib/api/domains/gitlab-api", () => ({
@@ -25,7 +20,7 @@ describe("integrationFromPathname", () => {
   it("recognizes global integration settings routes", () => {
     expect(integrationFromPathname("/settings/integrations/github")).toBe("github");
     expect(integrationFromPathname("/settings/integrations/linear")).toBe("linear");
-    expect(integrationFromPathname("/settings/integrations/azure-devops")).toBe("azure-devops");
+    expect(integrationFromPathname("/settings/integrations/azure-devops")).toBeNull();
   });
 
   it("recognizes workspace-scoped integration settings routes", () => {
@@ -50,11 +45,5 @@ describe("copyIntegrationConfig", () => {
     await copyIntegrationConfig("sentry", "ws-source", "ws-target");
 
     expect(copySentryInstances).toHaveBeenCalledWith("ws-target", { workspaceId: "ws-source" });
-  });
-
-  it("copies Azure DevOps credentials between workspaces", async () => {
-    await copyIntegrationConfig("azure-devops", "ws-source", "ws-target");
-
-    expect(copyAzureDevOpsConfig).toHaveBeenCalledWith("ws-source", "ws-target");
   });
 });

@@ -2,6 +2,7 @@
 status: active
 system: workspaces
 created: 2026-05-02
+updated: 2026-11-08
 owners:
   - cfl
 ---
@@ -27,6 +28,13 @@ Users who create a workspace by mistake, finish an experiment, or consolidate wo
 - **AC-WORKSPACES-DELETION-001.6:** The filesystem config directory (`~/.kandev/workspaces/<slug>/`) and any quick-chat workspace directories created for the workspace's sessions are removed.
 - **AC-WORKSPACES-DELETION-001.7:** After deletion the user is redirected to `/office/setup?mode=new` if no other workspaces remain. If workspaces remain, another Office workspace is preferred; otherwise the first remaining workspace is selected and the user is redirected to that workspace's native home route (`/office?workspaceId=<id>` for Office, `/?workspaceId=<id>` for Kanban).
 - **AC-WORKSPACES-DELETION-001.8:** The operation is irreversible. There is no soft-delete or undo.
+- **AC-WORKSPACES-DELETION-001.9:** When a caller holds `workspace.read` but lacks `workspace.manage`, workspace deletion shall return HTTP `403` or WebSocket `FORBIDDEN`. The request shall preserve the workspace and its dependents, schedule no destructive cleanup, and publish no deletion events.
+- **AC-WORKSPACES-DELETION-001.10:** For a valid deletion payload with a nonempty confirmation name, unreadable and missing workspaces shall return indistinguishable not-found responses. HTTP shall return `404`, and WebSocket shall return `NOT_FOUND`. Neither response shall disclose the workspace name or other workspace data.
+- **AC-WORKSPACES-DELETION-001.11:** A genuine storage or cascade failure shall return HTTP `500` or WebSocket `INTERNAL_ERROR`, rather than a permission or not-found response. Error message wording shall not change the response category. Existing success and rollback behavior shall remain unchanged.
+
+The [authorization requirements](../../auth/requirements/auth.md) and
+[roles and scopes](../../auth/requirements/roles-and-scopes.md) own access policy.
+Criteria 001.9 through 001.11 specify its projection at the deletion boundary.
 
 ### REQ-WORKSPACES-DELETION-002: Preserve current catalogue during Settings deletion
 
@@ -117,3 +125,4 @@ excluded.
 - [Settings save and creation publication](workspace-settings-updates.md).
 - [Per-tab Settings context](per-tab-settings-context.md).
 - [Settings deletion catalogue plan](../../../plans/workspace-delete-catalogue-preservation/plan.md).
+- [Deletion permission error repair plan](../../../plans/workspace-delete-permission-errors/plan.md).

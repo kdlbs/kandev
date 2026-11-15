@@ -41,11 +41,14 @@ var (
 )
 
 type Candidate struct {
-	ID         string
-	Enabled    bool
-	BindingKey string
-	Rules      map[string]Action
-	Policies   routingpolicy.Document
+	KeywordContextEnabled bool
+	KeywordAccountID      string
+	ModelID               string
+	ID                    string
+	Enabled               bool
+	BindingKey            string
+	Rules                 map[string]Action
+	Policies              routingpolicy.Document
 }
 
 type Profile struct {

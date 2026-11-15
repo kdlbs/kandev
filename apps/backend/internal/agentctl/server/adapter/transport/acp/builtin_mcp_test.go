@@ -121,6 +121,40 @@ func TestBuiltinSessionRequestsRejectPartialProjectDelivery(t *testing.T) {
 	}
 }
 
+func TestBuiltinSessionPreflightFailurePublishesMCPAttempt(t *testing.T) {
+	servers := builtinProjectDeliveryServers(p.PackageCore, p.PackageDiagnostics)
+	delivery := projectDeliveryRecord(p.PackageCore)
+	for _, action := range []string{"new", "load", "resume"} {
+		t.Run(action, func(t *testing.T) {
+			a, _ := newProjectDeliveryAdapter(t, delivery)
+			ctx := streams.WithMCPAttachmentContext(context.Background(), streams.MCPAttachmentAttempt{
+				AttemptID: "preflight-" + action,
+			})
+			var err error
+			switch action {
+			case "new":
+				_, err = a.NewSession(ctx, servers)
+			case "load":
+				err = a.LoadSession(ctx, "saved", servers)
+			case "resume":
+				err = a.ResumeSession(ctx, "saved", servers)
+			}
+			require.ErrorContains(t, err, "built-in MCP")
+			events := drainEvents(a)
+			require.NotEmpty(t, events)
+			require.NotNil(t, events[0].MCPAttachmentAttempt)
+			require.Equal(t, "preflight-"+action, events[0].MCPAttachmentAttempt.AttemptID)
+			var failed bool
+			for _, event := range events {
+				if event.MCPAttachment != nil && event.MCPAttachment.Kind == streams.MCPAttachmentEvidenceExplicitError {
+					failed = true
+				}
+			}
+			require.True(t, failed, "missing package failure must be attached to the attempt")
+		})
+	}
+}
+
 // @covers AC-AGENTS-BUILTIN-MCP-004.1
 func TestBuiltinProjectDeliveryEvidenceIsNotConnectionHealth(t *testing.T) {
 	a, _ := newProjectDeliveryAdapter(t, projectDeliveryRecord(p.PackageCore))

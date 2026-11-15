@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -438,6 +439,13 @@ type GitEventPayload struct {
 func (p GitEventPayload) GetSessionID() string {
 	return p.SessionID
 }
+
+// WorktreeInventoryData aliases the neutral event payload so lifecycle
+// subscribers and producers share one wire shape.
+type WorktreeInventoryData = events.WorktreeInventoryData
+
+// WorktreeInventoryEntryData aliases the neutral event payload entry.
+type WorktreeInventoryEntryData = events.WorktreeInventoryEntryData
 
 type GitStatusData struct {
 	StatusState         string   `json:"status_state,omitempty"`

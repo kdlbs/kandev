@@ -52,7 +52,7 @@ beforeEach(() => {
   resetStore();
   deleteTaskById.mockReset().mockResolvedValue(undefined);
   archiveTaskById.mockReset().mockResolvedValue(undefined);
-  moveTasks.mockReset().mockResolvedValue(undefined);
+  moveTasks.mockReset().mockResolvedValue({ moved_count: 2, moved_task_ids: ["a", "b"] });
 });
 
 describe("useTaskMultiSelect — bulk move", () => {
@@ -79,6 +79,22 @@ describe("useTaskMultiSelect — bulk move", () => {
       await result.current.bulkMove("step-2");
     });
     expect(moveTasks).not.toHaveBeenCalled();
+  });
+
+  it("reconciles only the task IDs returned by the batch endpoint", async () => {
+    moveTasks.mockResolvedValueOnce({ moved_count: 1, moved_task_ids: ["a"] });
+    const { result } = renderHook(() => useTaskMultiSelect("wf1"));
+    act(() => result.current.toggleSelect("a"));
+    act(() => result.current.toggleSelect("b"));
+
+    await act(async () => {
+      await result.current.bulkMove("step-2");
+    });
+
+    expect(storeState.kanban.tasks.map((item) => item.workflowStepId)).toEqual([
+      "step-2",
+      "step-1",
+    ]);
   });
 
   it("uses matching board evidence without a workflow argument", async () => {

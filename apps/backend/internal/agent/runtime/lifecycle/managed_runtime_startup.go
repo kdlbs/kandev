@@ -15,6 +15,7 @@ import (
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/npmresolution"
+	"github.com/kandev/kandev/internal/common/startupdiag"
 	"github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
@@ -299,6 +300,11 @@ func managedRuntimeStartupRetryForEvidence(
 
 func managedStartupEvidenceAllowsClassification(evidence *agentctltypes.ManagedStartupEvidence) bool {
 	if evidence == nil || !evidence.CollectionComplete || !evidence.NPMDiagnosticComplete || evidence.UnclassifiedNPMCode {
+		return false
+	}
+	if evidence.DiagnosticComplete && evidence.DiagnosticReason == startupdiag.ReasonMiseConfigUntrusted {
+		// A configuration prerequisite must remain visible and cannot authorize
+		// an automatic replacement, even when unrelated npm output is present.
 		return false
 	}
 	if evidence.NPMCode != "" && !evidence.NPMDiagnosticPresent {

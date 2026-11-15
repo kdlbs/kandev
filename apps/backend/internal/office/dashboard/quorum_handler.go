@@ -23,11 +23,11 @@ func (h *Handler) getTaskQuorum(c *gin.Context) {
 		return
 	}
 	if task == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": errTaskNotFound})
 		return
 	}
 	if task.WorkspaceID != workspaceID {
-		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": errTaskNotFound})
 		return
 	}
 	resp, err := h.svc.GetTaskQuorum(ctx, taskID)

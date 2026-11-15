@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"encoding/pem"
 	"io"
 	"net/http"
@@ -19,6 +20,8 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	commonconfig "github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/sshlaunch"
 	"github.com/kandev/kandev/internal/githubauth"
 )
 
@@ -263,6 +266,7 @@ type sshLaunchHarness struct {
 	// createRequests captures each create-instance body the control server saw.
 	createRequests []string
 	handshakes     int
+	launchBinding  sshlaunch.Binding
 	mu             sync.Mutex
 }
 
@@ -276,7 +280,13 @@ func newSSHLaunchHarness(t *testing.T, pid string) *sshLaunchHarness {
 		switch r.URL.Path {
 		case "/auth/handshake":
 			h.handshakes++
-			_, _ = io.WriteString(w, `{"token":"launch-token"}`)
+			response := map[string]interface{}{"token": "launch-token"}
+			if h.launchBinding.Owner.TaskID != "" {
+				receipt := newTestSSHLaunchReceipt(h.launchBinding.Owner, 4242)
+				receipt.Generation = h.launchBinding.Generation
+				response["launch"] = receipt
+			}
+			_ = json.NewEncoder(w).Encode(response)
 		case "/api/v1/instances":
 			body, _ := io.ReadAll(r.Body)
 			h.createRequests = append(h.createRequests, string(body))
@@ -295,7 +305,7 @@ func newSSHLaunchHarness(t *testing.T, pid string) *sshLaunchHarness {
 		t.Fatalf("seed remote bin dir: %v", err)
 	}
 
-	h.server = newFakeSSHServer(t, func(command, _ string) sshExecResult {
+	h.server = newFakeSSHServer(t, func(command, stdin string) sshExecResult {
 		switch {
 		case command == "uname -a":
 			return sshOut("Linux remote 6.1.0\n")
@@ -312,6 +322,11 @@ func newSSHLaunchHarness(t *testing.T, pid string) *sshLaunchHarness {
 		case strings.Contains(command, "test -x"):
 			return sshOK
 		case strings.Contains(command, "nohup"):
+			if binding, ok := sshLaunchBindingFromEnvScript(stdin); ok {
+				h.mu.Lock()
+				h.launchBinding = binding
+				h.mu.Unlock()
+			}
 			return sshOut(pid + "\n")
 		case strings.Contains(command, "agentctl.log"):
 			return sshOut("HTTP server bound successfully\n")
@@ -325,6 +340,23 @@ func newSSHLaunchHarness(t *testing.T, pid string) *sshLaunchHarness {
 	h.server.enableSFTP()
 	h.server.forwardTo(strings.TrimPrefix(control.URL, "http://"))
 	return h
+}
+
+// sshLaunchBindingFromEnvScript reads the managed startup contract out of the
+// launch environment the executor feeds to the remote shell.
+func sshLaunchBindingFromEnvScript(stdin string) (sshlaunch.Binding, bool) {
+	for _, line := range strings.Split(stdin, "\n") {
+		raw, ok := strings.CutPrefix(line, commonconfig.InternalAgentctlStartupConfigEnv+"=")
+		if !ok {
+			continue
+		}
+		decoded, err := commonconfig.DecodeAgentctlStartupConfig(strings.Trim(strings.TrimSpace(raw), "'"))
+		if err != nil || decoded.SSHLaunch == nil {
+			return sshlaunch.Binding{}, false
+		}
+		return *decoded.SSHLaunch, true
+	}
+	return sshlaunch.Binding{}, false
 }
 
 func (h *sshLaunchHarness) createInstanceBodies() []string {

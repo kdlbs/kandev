@@ -63,8 +63,8 @@ func (g *GitOperator) RenameGeneratedBranch(
 	g.logger.Info("generated branch renamed",
 		zap.String("from", expectedBranch),
 		zap.String("to", newName))
-	if g.workspaceTracker != nil {
-		g.workspaceTracker.RefreshGitStatus(ctx)
+	if tracker := g.currentWorkspaceTracker(); tracker != nil {
+		tracker.RefreshGitStatus(ctx)
 	}
 	return result, nil
 }

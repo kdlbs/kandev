@@ -2,9 +2,13 @@
 status: draft
 system: platform
 created: 2026-10-29
+updated: 2026-11-08
 requirements:
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-001
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-002
+  - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-003
+  - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-004
+  - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-007
 owners:
   - kandev
@@ -23,9 +27,13 @@ Executor retention follows the
 | --- | --- |
 | `REQ-PLATFORM-DURABLE-AGENT-DELIVERY-001` | Exclusive ownership. Open diagnostics |
 | `REQ-PLATFORM-DURABLE-AGENT-DELIVERY-002` | Retained storage and failed attempts |
+| `REQ-PLATFORM-DURABLE-AGENT-DELIVERY-003` | Standalone ownership resolution. Admission and uncertainty |
+| `REQ-PLATFORM-DURABLE-AGENT-DELIVERY-004` | Standalone ownership resolution. Live adoption |
+| `REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006` | Standalone ownership resolution. Restart and repeatability |
 | `REQ-PLATFORM-DURABLE-AGENT-DELIVERY-007` | Surviving instances and compatibility |
 
-This design implements existing criteria 001.2, 001.3, 002.1, 007.4, and 007.6.
+This design implements existing criteria 001.2, 001.3, 002.1, 003.2, 004.3,
+006.1 through 006.3, 006.20, 006.21, 006.23, 006.24, 007.4, and 007.6.
 It introduces no public endpoint, storage format, configuration switch, or
 conversation-replacement policy. The existing
 [durable session decision](../../../decisions/2026-09-10-durable-harness-session-boundaries.md)
@@ -82,6 +90,113 @@ new while adopting a surviving initialized process.
 The [instance stop design](agentctl-instance-stop.md) governs failed cleanup,
 pointer fencing, provisional ownership, and port release. Reuse its mechanisms.
 Do not add another journal-handle cache or a process-wide recovery scanner.
+
+## Standalone ownership resolution
+
+### Admission and uncertainty
+
+The standalone control server can retain several session managers across a
+backend restart. Each manager owns its journal until exact instance teardown
+finishes. A stopped agent does not imply that its manager released the journal.
+
+Before `StandaloneExecutor.CreateInstance` opens a configured session journal,
+resolve its existing owners through the current authenticated control binding.
+Use one `RuntimeLease` for inventory, status, disposal, and the resulting
+instance client. Check that lease before each mutation and after each response.
+A retired lease blocks further work. Static embedded callers retain their
+existing authenticated control-client contract.
+
+Inspect the requested instance, the recorded predecessor, and every other
+same-session candidate in the control inventory. This includes the original
+owner when a failed intermediate execution replaced the recorded predecessor.
+Use the existing eight-candidate recovery bound. An incomplete inventory,
+duplicate identifier, identity conflict, or excess candidate count blocks
+recovery before disposal or creation.
+
+For each relevant candidate, verify task, session, recorded workspace, instance
+identity, and available delivery ownership. Authenticated status must distinguish
+a live agent from a stopped manager. Missing status or a failed request is
+unknown. A successful listener check alone does not prove agent liveness.
+Resolve all relevant candidates before mutating any candidate. One valid owner
+cannot override another relevant candidate with unknown ownership or liveness.
+Different sessions retain their independent journals and instances.
+
+Existing session admission, recovery guards, and lifecycle serialization own
+the whole resolution-to-registration transition. An executor helper does not
+grant permission to bypass those guards. Ordinary launch, workspace inspection,
+and restore-only recovery retain their separate admission rules.
+
+### Live adoption
+
+If exactly one compatible initialized agent owns the session, retain its
+instance, process, journal handle, native conversation, and delivery stream.
+Return the actual retained identifier in both `ExecutorInstance.InstanceID`
+and `StandaloneInstanceID`. Bind the client to that identifier and its verified
+port. Set `MetadataKeyReuseExistingProcess` so startup selects
+`AgentStartupReattachedExisting`.
+
+Carry the selected execution identity through execution construction,
+registration, persistence, callbacks, tracing, and Stop. Do not keep the unused
+requested execution identity in those owners. The manager must reject a
+different returned identity when a restore checkpoint pins a candidate.
+An existing live owner must enter ordinary adoption before any native restore
+can proceed. Do not substitute it into a separately allocated restore candidate.
+
+For adoption, `ToAgentExecution` uses the retained runtime environment and
+source roots from `ExecutorInstance`, rather than request overrides.
+Keep the saved native identity as an expected value until association validation
+succeeds. An observed different native identity cannot replace that expectation.
+
+Reuse `adoptExistingAgentSession` and its authenticated association, SQL
+generation, cursor, submission, and ordered replay checks. Executor selection
+does not establish prompt readiness. Adoption performs no ACP initialize,
+load, resume, new, or prompt request. It does not overwrite the retained
+environment, MCP ownership, or provider configuration with a launch request.
+
+Mark adoption provenance before the first fallible post-selection operation.
+Every launch rollback path must preserve the selected peer and its durable
+inventory. This includes failures before execution construction, registration
+failures, and workspace-only creation races. Failed adoption closes only
+attempt-owned host resources. It cannot revoke the peer's MCP claims or dispose
+of its process manager. Explicit authorized Stop remains separate.
+
+### Stopped owners and repeated attempts
+
+If every relevant candidate is proven stopped and replacement admission passes,
+dispose of those exact managers through the existing DELETE contract.
+Verify successful teardown before POST creates the requested instance.
+Keep the session journal path, owner marker, retained records, and native state.
+Journal acquisition failure still uses the existing typed admission error.
+
+If deletion fails or its response is lost, reconcile that exact identifier
+through the same authenticated binding. Only confirmed teardown or authenticated
+absence permits another journal open. A timeout cannot establish either result.
+Recheck inventory after partial progress before a later attempt proceeds.
+Delayed predecessor cleanup cannot dispose of a successor.
+
+Disposal releases a journal handle. It does not resolve an interrupted
+submission, retire its uncertainty, or admit a prompt. Native restoration and
+new instructions still require the existing delivery and conversation guards.
+If delivery evidence remains unavailable, preserve the blocked session and Stop.
+
+### Restart and repeatability
+
+Startup recovery remains the primary path for compatible surviving standalone
+instances. This pre-creation check also protects later Resume and workspace
+creation when no execution is currently tracked. It does not replace control
+server adoption, infer ownership from the journal path, or inspect another
+backend's server.
+
+Repeat the same ownership rules after another restart or interrupted recovery.
+Concurrent session callers must converge on one tracked execution and one
+journal owner. A cancelled waiter must not cancel another admitted caller or
+permit a concurrent replacement. If the shared operation itself loses ownership,
+preserve uncertain outcomes for the next authenticated attempt.
+
+Local process survival retains its existing optional policy. This repair does
+not enable it by default or change supported platforms. Existing session-local
+recovery controls serve desktop and phone. No rendered UI or new action is
+introduced.
 
 ## Retained storage and failed attempts
 
@@ -147,3 +262,7 @@ The [recoverable resume package](../../../plans/remote-docker-recoverable-resume
 owns regression delivery. Its disposable upstream reproduction proves the
 failure mechanisms. Real remote-Docker recovery remains a separate acceptance
 gate. Existing desktop and phone controls remain in use.
+
+The [standalone recovery package](../../../plans/standalone-retained-journal-recovery/plan.md)
+owns the standalone pre-creation guard, actual retained identity, rollback
+protection, and restart evidence. It supplements the completed Docker repair.

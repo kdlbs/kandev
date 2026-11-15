@@ -14,6 +14,8 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/completion"
 	"github.com/kandev/kandev/internal/task/service"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -116,6 +118,28 @@ func (r *wsTaskRepo) ArchiveTaskIfActiveWithVacatedStep(_ context.Context, id, _
 func (r *wsTaskRepo) UpdateTaskState(_ context.Context, id string, _ v1.TaskState) error {
 	r.stateUpdates = append(r.stateUpdates, id)
 	return nil
+}
+
+func (r *wsTaskRepo) UpdateTaskStateWithCompletionAdmission(ctx context.Context, id string, state v1.TaskState, _ *completion.Admission) error {
+	return r.UpdateTaskState(ctx, id, state)
+}
+
+func (r *wsTaskRepo) UpdateTaskFieldsWithParentAdmissionAndCompletionAdmission(
+	ctx context.Context,
+	id string,
+	update models.TaskFieldUpdate,
+	validate repository.TaskParentValidator,
+	_ *completion.Admission,
+) (*models.TaskFieldUpdateResult, error) {
+	return r.UpdateTaskFieldsWithParentAdmission(ctx, id, update, validate)
+}
+
+func (r *wsTaskRepo) UpdateTaskPreservingDeferredLaunchWithCompletionAdmission(
+	ctx context.Context,
+	task *models.Task,
+	_ *completion.Admission,
+) error {
+	return r.UpdateTaskPreservingDeferredLaunch(ctx, task)
 }
 
 func (r *wsTaskRepo) CreateTask(_ context.Context, task *models.Task) error {

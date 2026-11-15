@@ -40,8 +40,10 @@ not yet describe a released version.
 #### Acceptance criteria
 
 - **AC-TASKS-QUESTION-IMAGES-001.1:** An agent shall be able to attach zero to four
-  image references to each question. A bundle shall contain at most four distinct
-  image IDs. Several questions can reference the same image with identical metadata.
+  image references to each question. A bundle shall contain at most 16 distinct
+  image IDs, as raised by
+  [AC-TASKS-QUESTION-IMAGE-REVIEW-006.1](question-image-review.md). Several
+  questions can reference the same image with identical metadata.
 - **AC-TASKS-QUESTION-IMAGES-001.2:** Each image shall appear above its associated
   prompt and choices. Multiple questions about one image shall remain independent
   questions, each with its own options and permitted text.
@@ -88,7 +90,8 @@ not yet describe a released version.
 #### Acceptance criteria
 
 - **AC-TASKS-QUESTION-IMAGES-003.1:** Thumbnails shall preserve the full image aspect
-  ratio without cropping. Thumbnail height shall not exceed 128px on desktop or
+  ratio without cropping. A question's thumbnails shall flow side by side and wrap
+  to a new row only when the width runs out. Thumbnail height shall not exceed 128px on desktop or
   96px below the 768px phone breakpoint, at the standard root font size. A short
   prompt with one image shall remain visible on entry in the standard desktop and
   phone test viewports. Larger bundles and long content can require panel scrolling.
@@ -108,6 +111,13 @@ not yet describe a released version.
   states shall have accessible labels. Application copy shall be localized.
   Image descriptions shall remain agent-authored content. Reduced-motion and
   forced-colors preferences shall remain usable.
+
+- **AC-TASKS-QUESTION-IMAGES-003.6:** When a question has two or more loaded images,
+  the image inspector shall offer Previous and Next handles over the image's left
+  and right edges, the left and right arrow keys,
+  and a horizontal swipe at Fit to step through them in review order (question
+  images, then choice images), with a counter and without wrapping. Closing shall
+  return focus to the thumbnail of the image that was showing.
 
 ### REQ-TASKS-QUESTION-IMAGES-004: Durable references and lifecycle compatibility
 
@@ -139,8 +149,8 @@ not yet describe a released version.
 
 - **AC-TASKS-QUESTION-IMAGES-005.1:** An operator question shall accept zero or one
   image reference per choice. Question and choice images can coexist. Each question
-  shall contain at most four references in total. The bundle limit remains four
-  distinct image IDs. Repeated IDs shall have identical metadata across placements.
+  shall contain at most four references in total. The bundle limit is 16 distinct
+  image IDs. Repeated IDs shall have identical metadata across placements.
 - **AC-TASKS-QUESTION-IMAGES-005.2:** Each preview shall remain visibly associated
   with its choice label. The selection action and inspection action shall be separate
   accessible controls. Clicking, tapping, or keyboard-activating inspection shall not
@@ -163,9 +173,10 @@ not yet describe a released version.
 
 ## Out of scope
 
-Multiple images on one choice, image uploads in answers, annotations, image editing,
-HTML/SVG rendering, external image URLs, image archives, interactive rich-output
-forms, and larger question bundles are excluded. PNG and JPEG cover the screenshot
+Multiple images on one choice, image uploads in answers, image editing,
+HTML/SVG rendering, external image URLs, image archives, and interactive rich-output
+forms are excluded. The large review view, comparison, region annotations, and the
+16-image bundle limit belong to [question image review](question-image-review.md). PNG and JPEG cover the screenshot
 workflow. Additional formats require a later scoped extension.
 
 This feature does not redesign the answer envelope or independently fix

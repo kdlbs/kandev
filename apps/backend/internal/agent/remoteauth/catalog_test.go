@@ -38,6 +38,34 @@ func TestBuildCatalog_MockSpecSerializesEmptyMethodsAsArray(t *testing.T) {
 	}
 }
 
+func TestBuildCatalogClaudeAPIKeyAndOAuth(t *testing.T) {
+	cat := BuildCatalogForHost([]agents.Agent{agents.NewClaudeACP()}, "linux", "")
+
+	apiKeyID := "agent:claude-acp:env:ANTHROPIC_API_KEY"
+	apiKey, ok := cat.FindMethod(apiKeyID)
+	if !ok {
+		t.Fatalf("Claude API-key method %q missing from catalog", apiKeyID)
+	}
+	if apiKey.Type != "env" || apiKey.EnvVar != "ANTHROPIC_API_KEY" {
+		t.Fatalf("Claude API-key method = %+v, want env ANTHROPIC_API_KEY", apiKey)
+	}
+	if apiKey.SetupScript != "" || apiKey.SetupHint != "" || apiKey.Label != "" {
+		t.Fatalf("Claude API-key method must not carry setup script, hint, or label: %+v", apiKey)
+	}
+
+	oauthID := "agent:claude-acp:env:CLAUDE_CODE_OAUTH_TOKEN"
+	oauth, ok := cat.FindMethod(oauthID)
+	if !ok {
+		t.Fatalf("Claude OAuth method %q missing from catalog", oauthID)
+	}
+	if oauth.SetupScript == "" {
+		t.Fatal("Claude OAuth method lost its setup script")
+	}
+	if apiKey.MethodID == oauth.MethodID {
+		t.Fatal("Claude API-key and OAuth methods must keep distinct identities")
+	}
+}
+
 func TestBuildCatalog_GitHubCLIOnlyOffersExplicitSecret(t *testing.T) {
 	cat := BuildCatalogForHost(nil, "linux", "")
 

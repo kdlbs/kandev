@@ -11,9 +11,9 @@ import (
 
 func (s *Server) registerConfigPromptWriteTools() {
 	create := mcp.NewTool("create_shared_prompt_kandev", sharedPromptWriteOptions(
-		"Create a saved prompt by name and content. Fails if the name exists. The new prompt allows subsequent agent edits; an operator can disable them in Settings > Prompts. Create shared prompts before saving workflow steps that reference them.", false)...)
+		"Create a saved prompt by name and content. Fails if the exact name exists. Use only when the operator explicitly requested or agreed to create the prompt, then read back the saved result. Create shared prompts before saving workflow steps that reference them.", false)...)
 	update := mcp.NewTool("update_shared_prompt_kandev", sharedPromptWriteOptions(
-		"Replace a saved prompt's content by exact, case-sensitive name. Built-in prompts and prompts without Allow agent edits reject writes. This changes every future @name reference; apply only the operator's agreed changes and read back the result.", true)...)
+		"Replace a saved prompt's content by exact, case-sensitive name. Any custom prompt can be updated; built-in prompts reject agent writes. This changes every future @name reference. Apply only changes explicitly requested or agreed by the operator, then read back the saved result.", true)...)
 	s.mcpServer.AddTool(create, s.wrapHandler(create.Name, s.writeSharedPromptHandler(ws.ActionMCPCreateSharedPrompt)))
 	s.mcpServer.AddTool(update, s.wrapHandler(update.Name, s.writeSharedPromptHandler(ws.ActionMCPUpdateSharedPrompt)))
 }

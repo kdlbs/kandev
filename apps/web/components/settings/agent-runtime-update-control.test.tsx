@@ -46,7 +46,9 @@ const ACTIVE_VERSION = "0.70.0";
 const OMP_PACKAGE = "@oh-my-pi/pi-coding-agent";
 const RUNTIME_STATUS_META = {
   display_name: "Claude",
+  agent_name: AGENT_NAME,
   runtime_id: "npm:" + PACKAGE_NAME,
+  package: PACKAGE_NAME,
   owner: "kandev",
   mechanism: "npm_candidate",
   management: "managed",
@@ -582,5 +584,36 @@ describe("AgentRuntimeUpdateControl self-update results", () => {
       "already up to date",
     );
     expect(screen.queryByTestId("agent-update-confirm-omp-acp")).toBeNull();
+  });
+});
+
+describe("AgentRuntimeUpdateControl external opening", () => {
+  it("delegates to the page-owned manager instead of mounting a second overlay", () => {
+    const onOpen = vi.fn();
+    render(
+      <AgentRuntimeUpdateControl
+        agentName={AGENT_NAME}
+        displayName="Claude"
+        runtimeUpdate={{
+          supported: true,
+          update_mode: "pinned",
+          package: PACKAGE_NAME,
+        }}
+        runtimeUpdateStatus={{
+          ...RUNTIME_STATUS_META,
+          check_state: "update_available",
+          effective_version: ACTIVE_VERSION,
+          default_version: ACTIVE_VERSION,
+          latest_version: "0.71.0",
+        }}
+        onPreview={vi.fn()}
+        onUpdate={vi.fn()}
+        onOpen={onOpen}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(`agent-update-trigger-${AGENT_NAME}`));
+    expect(onOpen).toHaveBeenCalledOnce();
+    expect(onOpen.mock.calls[0]?.[0]).toBeInstanceOf(HTMLElement);
+    expect(screen.queryByTestId(`agent-update-dialog-${AGENT_NAME}`)).toBeNull();
   });
 });

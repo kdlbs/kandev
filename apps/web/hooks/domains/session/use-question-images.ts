@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import type { QuestionImage } from "@/lib/types/http";
 import { fetchQuestionImage, questionImageErrorCode } from "@/lib/api/domains/question-image-api";
+import { useAppStore } from "@/components/state-provider";
+import { getBackendConfig } from "@/lib/config";
 
 import { scheduleQuestionImage } from "./question-image-scheduler";
 
 export type QuestionImageState =
   | { kind: "loading" }
-  | { kind: "loaded"; url: string }
+  | { kind: "loaded"; url: string; blob: Blob }
   | { kind: "error"; code: string };
 
 type Snapshot = { key: string; states: Record<string, QuestionImageState> };
@@ -48,7 +50,7 @@ export function useQuestionImages(
           if (controller.signal.aborted) return;
           const url = URL.createObjectURL(blob);
           urls.push(url);
-          update(image.id, { kind: "loaded", url });
+          update(image.id, { kind: "loaded", url, blob });
         } catch (error) {
           update(image.id, { kind: "error", code: questionImageErrorCode(error) });
         }
@@ -64,4 +66,17 @@ export function useQuestionImages(
   }, [active, pendingId, questionId, imageKey, key, owner]);
   const retry = useCallback(() => setAttempt((value) => value + 1), []);
   return { states: snapshot.key === key ? snapshot.states : {}, retry };
+}
+
+/** Scopes image reads to the backend origin, source session, and signed-in identity. */
+export function useQuestionImageOwner(sessionId: string) {
+  const auth = useAppStore((state) => state.auth);
+  const owner = JSON.stringify([
+    getBackendConfig().apiBaseUrl,
+    sessionId,
+    auth.mode,
+    auth.authenticated,
+    auth.user?.id,
+  ]);
+  return { owner, authenticated: auth.authenticated };
 }

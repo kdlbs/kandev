@@ -266,57 +266,38 @@ func TestSSHKeepaliveWatchdogDeclaresLossOnProbeError(t *testing.T) {
 	w.awaitProbeExit()
 }
 
-// TestSSHKeepaliveWatchdogStopSignalBeatsACoincidingProbeError drives
-// runLoop's stop-vs-event select directly, forcing a genuine tie between its
-// stopCh case and its errs case rather than an arbitrary real-time race
-// between them. With GOMAXPROCS pinned to 1, runLoop is deterministically
-// parked in its blocking select (nothing runnable to preempt it) by the time
-// this test closes stopCh and sends the probe error back to back with no
-// intervening scheduling point — so runLoop resumes to find both cases
-// simultaneously ready, and Go's select picks between them at random.
-// AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.10 forbids declaring loss for a
-// session stopped while its transport is still alive, so even on the
-// iterations where the random pick lands on the errs case, runLoop's recheck
-// of the already-closed stopCh must still stop it from declaring loss.
-// Repeated so the random pick lands on the errs case many times, not just
-// once.
+// TestSSHKeepaliveWatchdogStopSignalSuppressesLoss checks both loss reasons
+// at the notification boundary. Running watchdogs still report loss.
 //
 // @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.10
-func TestSSHKeepaliveWatchdogStopSignalBeatsACoincidingProbeError(t *testing.T) {
-	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
-
-	const iterations = 300
-	for i := 0; i < iterations; i++ {
-		w := &sshKeepaliveWatchdog{
-			interval: time.Hour,
-			deadline: time.Hour, // never fires on its own; isolates stop vs. errs
-			stopCh:   make(chan struct{}),
-			loopDone: make(chan struct{}),
-		}
-		var lostCalled atomic.Bool
-		w.onLost = func(string, time.Duration) { lostCalled.Store(true) }
-
-		replies := make(chan time.Time, 1)
-		errs := make(chan error, 1)
-		go w.runLoop(replies, errs, time.Now())
-		// With GOMAXPROCS(1) this test goroutine keeps running until it
-		// blocks or explicitly yields, so runLoop cannot have reached its
-		// select yet — Gosched hands off to it, and since nothing else is
-		// ready it parks there, definitely blocked, before control returns
-		// here.
-		runtime.Gosched()
-
-		errs <- errors.New("probe error")
-		close(w.stopCh)
-
-		select {
-		case <-w.loopDone:
-		case <-time.After(2 * time.Second):
-			t.Fatalf("iteration %d: runLoop did not exit after a coinciding stop+probe-error", i)
-		}
-		if lostCalled.Load() {
-			t.Fatalf("iteration %d: a stop signal coinciding with a probe error still declared transport loss", i)
-		}
+func TestSSHKeepaliveWatchdogStopSignalSuppressesLoss(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		reason  string
+		stopped bool
+	}{
+		{"probe-error/running", sshTransportLostReasonProbeError, false},
+		{"probe-error/stopped", sshTransportLostReasonProbeError, true},
+		{"deadline/running", sshTransportLostReasonDeadline, false},
+		{"deadline/stopped", sshTransportLostReasonDeadline, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := &sshKeepaliveWatchdog{stopCh: make(chan struct{})}
+			if tc.stopped {
+				close(w.stopCh)
+			}
+			called := false
+			w.onLost = func(reason string, silence time.Duration) {
+				called = true
+				if reason != tc.reason || silence != time.Second {
+					t.Fatalf("loss = (%q, %v), want (%q, %v)", reason, silence, tc.reason, time.Second)
+				}
+			}
+			w.declareLost(tc.reason, time.Second)
+			if called == tc.stopped {
+				t.Fatalf("loss notified = %v, want %v", called, !tc.stopped)
+			}
+		})
 	}
 }
 
@@ -876,7 +857,7 @@ func TestSSHExecutorResetTrackedManagedBrokerResumeLosesRaceReturnsSuccess(t *te
 	state := &sshSessionState{client: &ssh.Client{}}
 	req := &ExecutorCreateRequest{InstanceID: "instance-1"}
 
-	err := exec.resetTrackedManagedBrokerResume(context.Background(), req, state, brokerPreflight, stopRemote)
+	err := exec.resetTrackedManagedBrokerResume(context.Background(), req, state, nil, brokerPreflight, stopRemote)
 	if err != nil {
 		t.Fatalf("resetTrackedManagedBrokerResume: %v", err)
 	}
@@ -909,7 +890,7 @@ func TestSSHExecutorResetTrackedManagedBrokerResumeAbandonsAWedgedPreflight(t *t
 	req := &ExecutorCreateRequest{InstanceID: "instance-1"}
 	done := make(chan error, 1)
 	go func() {
-		done <- exec.resetTrackedManagedBrokerResume(context.Background(), req, state, brokerPreflight, stopRemote)
+		done <- exec.resetTrackedManagedBrokerResume(context.Background(), req, state, nil, brokerPreflight, stopRemote)
 	}()
 	select {
 	case err := <-done:

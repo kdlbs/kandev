@@ -15,6 +15,7 @@ func (m *Manager) stopPendingRemoteRecovery(
 	entry *remoteRecoveryRetry,
 	reason string,
 	force bool,
+	stopWatch *stopWaitWatch,
 ) (bool, error) {
 	if entry == nil || entry.record == nil || entry.record.AgentExecutionID == "" || entry.record.SessionID == "" {
 		return false, errors.New("pending remote recovery identity is incomplete")
@@ -23,9 +24,9 @@ func (m *Manager) stopPendingRemoteRecovery(
 		return false, nil
 	}
 	if entry.stopRuntimeCompleted {
-		return m.settlePendingRemoteStop(ctx, entry, reason, force)
+		return m.settlePendingRemoteStop(ctx, entry, reason, force, stopWatch)
 	}
-	if handled, err := m.stopPersistedPendingRemoteOwner(ctx, entry, reason, force); handled || err != nil {
+	if handled, err := m.stopPersistedPendingRemoteOwner(ctx, entry, reason, force, stopWatch); handled || err != nil {
 		return handled, err
 	}
 	if m.executorRegistry == nil {
@@ -38,14 +39,15 @@ func (m *Manager) stopPendingRemoteRecovery(
 	if err != nil {
 		return false, fmt.Errorf("get persisted remote runtime %s: %w", entry.record.Runtime, err)
 	}
+	stopWatch.advance(stopWaitRemoteRecovery)
 	ri, outcome, err := m.recoverPendingRemoteStopInstance(ctx, backend, entry)
 	if err != nil {
 		return false, fmt.Errorf("attach exact remote execution for stop: %w", err)
 	}
 	if ri == nil {
-		return m.stopAbsentRemoteOwner(ctx, backend, entry, reason, force, outcome)
+		return m.stopAbsentRemoteOwner(ctx, backend, entry, reason, force, outcome, stopWatch)
 	}
-	return m.stopAttachedRemoteOwner(ctx, backend, entry, ri, reason, force)
+	return m.stopAttachedRemoteOwner(ctx, backend, entry, ri, reason, force, stopWatch)
 }
 
 func (m *Manager) recoverPendingRemoteStopInstance(
@@ -85,6 +87,7 @@ func (m *Manager) stopAbsentRemoteOwner(
 	reason string,
 	force bool,
 	outcome RecoveryCandidateOutcome,
+	stopWatch *stopWaitWatch,
 ) (bool, error) {
 	if outcome != RecoveryOutcomeNoMatchingInstance {
 		return false, fmt.Errorf("remote stop could not prove the persisted agent instance is absent: %s", outcome)
@@ -98,12 +101,13 @@ func (m *Manager) stopAbsentRemoteOwner(
 	if force || shouldRunExecutorCleanup(reason) {
 		instance := persistedRemoteStopInstance(ctx, m, entry.record, reason)
 		instance.AgentStopFailed = true
+		stopWatch.advance(stopWaitRuntime)
 		if err := m.stopWorkspaceRuntime(ctx, backend, instance, force); err != nil {
 			return false, fmt.Errorf("clean up exact absent remote agent resource: %w", err)
 		}
 	}
 	entry.stopRuntimeCompleted = true
-	return m.settlePendingRemoteStop(ctx, entry, reason, force)
+	return m.settlePendingRemoteStop(ctx, entry, reason, force, stopWatch)
 }
 
 func (m *Manager) stopAttachedRemoteOwner(
@@ -113,6 +117,7 @@ func (m *Manager) stopAttachedRemoteOwner(
 	ri *ExecutorInstance,
 	reason string,
 	force bool,
+	stopWatch *stopWaitWatch,
 ) (bool, error) {
 	if ri.RuntimeName != entry.record.Runtime || ri.SessionID != entry.record.SessionID ||
 		ri.InstanceID != entry.record.AgentExecutionID || ri.TaskID != entry.record.TaskID || ri.Client == nil {
@@ -132,6 +137,7 @@ func (m *Manager) stopAttachedRemoteOwner(
 		return false, err
 	}
 	ri.StopReason = reason
+	stopWatch.advance(stopWaitAgentctl)
 	stopErr := ri.Client.Stop(ctx)
 	if stopErr != nil {
 		if !shouldRunExecutorCleanup(reason) && !remoteRuntimeForceStopsAgent(entry.record.Runtime, force) {
@@ -150,6 +156,7 @@ func (m *Manager) stopAttachedRemoteOwner(
 		}
 		ri.Metadata = metadata
 	}
+	stopWatch.advance(stopWaitRuntime)
 	if err := m.stopWorkspaceRuntime(ctx, backend, ri, force); err != nil {
 		m.discardRemoteRecoveryInstance(ri)
 		return false, fmt.Errorf("stop exact remote runtime execution %q: %w", entry.record.AgentExecutionID, err)
@@ -158,7 +165,7 @@ func (m *Manager) stopAttachedRemoteOwner(
 	// client was already closed after agentctl accepted the exact stop.
 	ri.DiscardRecovery = nil
 	entry.stopRuntimeCompleted = true
-	return m.settlePendingRemoteStop(ctx, entry, reason, force)
+	return m.settlePendingRemoteStop(ctx, entry, reason, force, stopWatch)
 }
 
 func (m *Manager) stopPersistedPendingRemoteOwner(
@@ -166,17 +173,18 @@ func (m *Manager) stopPersistedPendingRemoteOwner(
 	entry *remoteRecoveryRetry,
 	reason string,
 	force bool,
+	stopWatch *stopWaitWatch,
 ) (bool, error) {
 	var handled bool
 	var err error
 	switch entry.record.Runtime {
 	case agentruntime.RuntimeSSH:
 		handled, err = m.stopPersistedRemoteOwnerForRuntime(
-			ctx, entry, reason, force, m.stopPersistedSSHExecution, m.stopPersistedSSHRecord,
+			ctx, entry, reason, force, stopWatch, m.stopPersistedSSHExecution, m.stopPersistedSSHRecord,
 		)
 	case agentruntime.RuntimeKubernetes:
 		handled, err = m.stopPersistedRemoteOwnerForRuntime(
-			ctx, entry, reason, force, m.stopPersistedKubernetesExecution, m.stopPersistedKubernetesRecord,
+			ctx, entry, reason, force, stopWatch, m.stopPersistedKubernetesExecution, m.stopPersistedKubernetesRecord,
 		)
 	default:
 		return false, nil
@@ -185,6 +193,7 @@ func (m *Manager) stopPersistedPendingRemoteOwner(
 		return handled, err
 	}
 	entry.stopRuntimeCompleted = true
+	stopWatch.advance(stopWaitPersistence)
 	m.deleteExecutorRunning(ctx, entry.record.SessionID, entry.record.AgentExecutionID)
 	return true, nil
 }
@@ -194,12 +203,27 @@ func (m *Manager) stopPersistedRemoteOwnerForRuntime(
 	entry *remoteRecoveryRetry,
 	reason string,
 	force bool,
-	stopExecution func(context.Context, string, string, bool) (bool, error),
-	stopRecord func(context.Context, *models.ExecutorRunning, string, bool) (bool, error),
+	stopWatch *stopWaitWatch,
+	stopExecution func(context.Context, string, string, bool, *stopWaitWatch) (bool, error),
+	stopRecord func(context.Context, *models.ExecutorRunning, string, bool, *stopWaitWatch) (bool, error),
 ) (bool, error) {
+	// An SSH cleanup can change the owning session's state (archive marks it
+	// cancelled) after the recovery snapshot was pinned. Only that exact
+	// terminal delta, under the running cleanup claim and an otherwise
+	// unchanged snapshot, may use the persisted exact owner. Check it before
+	// the generic owner validation: that validator removes the pending entry
+	// on a snapshot fence, and a failed teardown must stay retryable.
+	if entry.record.Runtime == agentruntime.RuntimeSSH && stopReasonIssuesExternalCleanup(reason) {
+		current, snapshotErr := m.remoteRecoverySnapshot(ctx, entry.record.SessionID)
+		if snapshotErr == nil && archiveStopSnapshotDeltaOnly(entry.snapshot, current) {
+			if persisted, loadErr := m.loadPersistedRemoteStopOwner(ctx, entry); loadErr == nil {
+				return stopRecord(ctx, persisted, reason, force, stopWatch)
+			}
+		}
+	}
 	err := m.validatePendingRemoteStopOwner(ctx, entry)
 	if err == nil {
-		return stopExecution(ctx, entry.record.AgentExecutionID, reason, force)
+		return stopExecution(ctx, entry.record.AgentExecutionID, reason, force, stopWatch)
 	}
 	if reason != StopReasonTaskDeleted || !errors.Is(err, models.ErrTaskSessionNotFound) {
 		return false, err
@@ -208,7 +232,39 @@ func (m *Manager) stopPersistedRemoteOwnerForRuntime(
 	if loadErr != nil {
 		return true, loadErr
 	}
-	return stopRecord(ctx, persisted, reason, force)
+	return stopRecord(ctx, persisted, reason, force, stopWatch)
+}
+
+// stopReasonIssuesExternalCleanup reports whether a stop reason is an explicit
+// teardown.
+func stopReasonIssuesExternalCleanup(reason string) bool {
+	return shouldRunExecutorCleanup(reason)
+}
+
+// archiveStopSnapshotDeltaOnly reports whether the only difference between the
+// pinned recovery snapshot and the current snapshot is the authorized archive
+// transition: the same owner, workspace, environment, route, and delivery,
+// with the session cancelled under a running task cleanup claim. Every other
+// ownership fact must remain identical.
+func archiveStopSnapshotDeltaOnly(initial, current *RemoteRecoverySnapshot) bool {
+	if !sameArchiveStopOwner(initial, current) {
+		return false
+	}
+	return current.TaskArchived && current.TaskResourceCleanupRunning &&
+		current.SessionState == models.TaskSessionStateCancelled
+}
+
+// sameArchiveStopOwner compares every ownership fact outside the authorized
+// archive transition. A nil snapshot, a successor execution, or any workspace,
+// environment, route, or delivery change fails it.
+func sameArchiveStopOwner(initial, current *RemoteRecoverySnapshot) bool {
+	return initial != nil && current != nil &&
+		initial.TaskID == current.TaskID && initial.SessionID == current.SessionID &&
+		initial.AgentExecutionID == current.AgentExecutionID && initial.Runtime == current.Runtime &&
+		sameRemoteRecoveryWorkspace(initial, current) &&
+		sameRemoteRecoveryEnvironment(initial, current) &&
+		sameRemoteRecoveryRoute(initial, current) &&
+		sameRemoteRecoveryDelivery(initial, current)
 }
 
 func (m *Manager) loadPersistedRemoteStopOwner(
@@ -233,10 +289,17 @@ func (m *Manager) loadPersistedRemoteStopOwner(
 		}
 		found = row
 	}
-	if !samePersistedRemoteStopOwner(entry.record, found) {
+	if !samePersistedRemoteStopOwnerForRuntime(entry.record, found) {
 		return nil, fmt.Errorf("persisted remote runtime owner changed before task-deletion stop: %w", errRemoteRecoveryFenced)
 	}
 	return cloneRemoteRecoveryRecord(found), nil
+}
+
+func samePersistedRemoteStopOwnerForRuntime(expected, current *models.ExecutorRunning) bool {
+	if expected != nil && expected.Runtime == agentruntime.RuntimeSSH {
+		return samePersistedSSHStopOwner(expected, current)
+	}
+	return samePersistedRemoteStopOwner(expected, current)
 }
 
 func samePersistedRemoteStopOwner(expected, current *models.ExecutorRunning) bool {
@@ -249,13 +312,52 @@ func samePersistedRemoteStopOwner(expected, current *models.ExecutorRunning) boo
 		reflect.DeepEqual(expected.Metadata, current.Metadata)
 }
 
+// sshStopOwnerMetadataKeys are the metadata values that identify the SSH
+// controller a stop is authorized to tear down. Volatile runtime metadata
+// (idle activity, prepare results, rewritten status markers) is deliberately
+// excluded: the runtime may rewrite it between two reads of the same owner,
+// and treating that as a successor would strand a live controller forever.
+var sshStopOwnerMetadataKeys = []string{
+	MetadataKeySSHAgentctlInstanceID,
+	MetadataKeySSHRemoteAgentctlPID,
+	MetadataKeySSHRemoteSessionDir,
+	MetadataKeySSHRemoteTaskDir,
+	MetadataKeySSHHost,
+	MetadataKeySSHPort,
+	MetadataKeySSHUser,
+	MetadataKeySSHHostFingerprint,
+	MetadataKeySSHLaunchReceipt,
+}
+
+// samePersistedSSHStopOwner compares the identity that authorizes an SSH
+// runtime stop. A successor execution, replaced controller, changed launch
+// receipt, changed target, or changed session path all fail it.
+func samePersistedSSHStopOwner(expected, current *models.ExecutorRunning) bool {
+	if expected == nil || current == nil ||
+		expected.AgentExecutionID != current.AgentExecutionID ||
+		expected.TaskID != current.TaskID ||
+		expected.SessionID != current.SessionID ||
+		expected.ExecutorID != current.ExecutorID ||
+		expected.Runtime != current.Runtime || current.Runtime != agentruntime.RuntimeSSH {
+		return false
+	}
+	for _, key := range sshStopOwnerMetadataKeys {
+		if !reflect.DeepEqual(expected.Metadata[key], current.Metadata[key]) {
+			return false
+		}
+	}
+	return true
+}
+
 func (m *Manager) settlePendingRemoteStop(
 	ctx context.Context,
 	entry *remoteRecoveryRetry,
 	reason string,
 	force bool,
+	stopWatch *stopWaitWatch,
 ) (bool, error) {
 	if entry.record.Runtime == agentruntime.RuntimeKubernetes && (force || shouldRunExecutorCleanup(reason)) {
+		stopWatch.advance(stopWaitRuntimeCleanup)
 		metadata, err := m.currentKubernetesConnectionMetadata(ctx, entry.record.Metadata)
 		if err != nil {
 			return false, fmt.Errorf("resolve current Kubernetes cleanup connection: %w", err)
@@ -267,6 +369,7 @@ func (m *Manager) settlePendingRemoteStop(
 			return false, fmt.Errorf("delete Kubernetes runtime secrets: %w", cleanupErr)
 		}
 	}
+	stopWatch.advance(stopWaitPersistence)
 	m.deleteExecutorRunning(ctx, entry.record.SessionID, entry.record.AgentExecutionID)
 	return true, nil
 }

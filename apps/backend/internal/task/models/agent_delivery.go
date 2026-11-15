@@ -209,3 +209,39 @@ type AgentDeliveryEffect struct {
 	WorkflowStepID          string     `json:"-"`
 	WorkflowPolicyUpdatedAt *time.Time `json:"-"`
 }
+
+// AgentDeliverySessionStateOutcome is the closed result of one conditional
+// coarse session-state correction. Only changed represents a committed write.
+type AgentDeliverySessionStateOutcome string
+
+const (
+	AgentDeliverySessionStateChanged           AgentDeliverySessionStateOutcome = "changed"
+	AgentDeliverySessionStateAlreadyConsistent AgentDeliverySessionStateOutcome = "already_consistent"
+	AgentDeliverySessionStateSuperseded        AgentDeliverySessionStateOutcome = "superseded"
+	AgentDeliverySessionStateUnavailable       AgentDeliverySessionStateOutcome = "unavailable"
+)
+
+// AgentDeliverySessionStateRequest identifies the exact settled terminal whose
+// stale STARTING or RUNNING session state may be corrected. Every identity is
+// revalidated inside the writer transaction.
+type AgentDeliverySessionStateRequest struct {
+	SessionID         string
+	TaskID            string
+	ExecutionID       string
+	IncarnationID     string
+	HarnessGeneration int64
+	StreamID          string
+	Sequence          int64
+	SubmissionID      string
+	TurnID            string
+	Outcome           string
+}
+
+// AgentDeliverySessionStateResult reports the conditional correction result and
+// the committed state identity. UpdatedAt is set only for changed.
+type AgentDeliverySessionStateResult struct {
+	Outcome   AgentDeliverySessionStateOutcome
+	OldState  TaskSessionState
+	NewState  TaskSessionState
+	UpdatedAt time.Time
+}

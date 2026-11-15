@@ -66,6 +66,10 @@ An old agentctl peer cannot perform the new repair without capability support.
 
 ## References
 
+The follow-on [reusable repair decision](2026-11-08-reusable-managed-npm-repairs.md)
+extends successful installation lifetime. Its implementation is pending.
+The original shared-tree protection and single replacement budget remain effective.
+
 - [Incomplete-cache requirements](../specs/agents/requirements/managed-npm-cache-recovery.md)
 - [Shared runtime recovery contract](../specs/agents/requirements/managed-npm-runtime-recovery.md)
 - [Cache recovery design](../specs/agents/system-design/managed-npm-cache-recovery.md)

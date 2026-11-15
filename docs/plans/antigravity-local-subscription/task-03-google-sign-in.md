@@ -157,3 +157,16 @@ Linux therefore sends only `--uid=` and fails before native startup.
 The [focused repair package](../antigravity-sign-in-launch/plan.md) owns the correction and real HTTP-boundary regression.
 That repair is implemented: the sign-in caller passes the complete argv and `TestAntigravityLoginConfigurePreservesCommand` reaches the controlled start marker through the real configure handler.
 Keep this work order `in_progress`; the browser setup specs and full native qualification remain open.
+
+### Sign-in stream startup regression, November 8
+
+[Issue #5193](https://github.com/kdlbs/kandev/issues/5193) confirms a later caller
+defect: `Client.StreamUpdates` returns nil after establishing its WebSocket, but
+the login wait helper interprets that success as a closed stream and deletes
+the instance before initialization/authentication. A temporary diagnostic
+reproduced 20/20 false failures with the real client and a healthy local socket.
+The [stream-startup repair](../antigravity-login-stream/plan.md) is implemented.
+The caller opens the stream synchronously and its real-client WebSocket tests
+cover successful initialization/authentication, handshake rejection, disconnect,
+and cancellation. Focused regressions and the full hostutility race suite pass.
+This work order's existing browser and native qualification gates remain open.

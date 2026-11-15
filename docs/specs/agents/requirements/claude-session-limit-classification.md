@@ -2,6 +2,7 @@
 status: draft
 system: agents
 created: 2026-10-01
+updated: 2026-11-10
 owners:
   - kandev
 ---
@@ -18,6 +19,8 @@ Recognizing this notice lets existing policies distinguish exhausted quota from 
 
 - **Session-limit notice:** Claude's statement that the account has hit its session limit.
 - **Weekly-limit notice:** Claude's statement that the account has hit its weekly limit.
+- **Five-hour notice:** Claude's statement that the account has hit its `5-hour` or `five-hour` limit.
+- **Usage-limit notice:** Claude's statement that the account has hit its usage limit without naming a renewal period.
 - **Reset clock:** A twelve-hour time after `resets`, with an explicit timezone in parentheses.
 - **Reset hint:** An absolute timestamp available to existing recovery consumers.
 
@@ -53,6 +56,20 @@ Recognizing this notice lets existing policies distinguish exhausted quota from 
 - **AC-AGENTS-CLAUDE-SESSION-LIMIT-001.8:** Claude weekly-limit notices shall classify like session-limit notices under AC-AGENTS-CLAUDE-SESSION-LIMIT-001.1.
   Their reset clock names no date, so they shall produce no text-derived reset hint; a structured hint still applies.
   Unrelated weekly-limit text and other providers shall not acquire this classification.
+- **AC-AGENTS-CLAUDE-SESSION-LIMIT-001.9:** Claude five-hour and usage-limit notices shall receive the classification and flags in criterion .1.
+  Matching shall accept straight or typographic apostrophes, `you have`, case differences, and horizontal whitespace differences.
+  Five-hour notices shall also accept a space instead of the hyphen.
+  The notice shall start a diagnostic line, optionally after `Error:`, `Internal error:`, or `API Error:`.
+  Mid-sentence quotations, fenced examples, split-line phrases, incomplete phrases, and unrelated providers shall not match these additions.
+  Rate-limit notices shall retain their existing classification.
+- **AC-AGENTS-CLAUDE-SESSION-LIMIT-001.10:** Five-hour notices shall use the reset-clock rules in criteria .2 through .5.
+  A usage-limit notice without a renewal period shall not acquire a deadline from a clock alone.
+  Structured hints and valid dated hints with an explicit timezone shall retain precedence.
+  Without a usable hint, the quota classification shall remain available to existing recovery policies.
+- **AC-AGENTS-CLAUDE-SESSION-LIMIT-001.11:** Explicit five-hour and usage exhaustion shall remain hard quota failures alongside HTTP 429 metadata.
+  Other structured HTTP statuses shall retain their existing precedence.
+  These additions shall preserve criterion .6 and existing Office routing and failure-accounting boundaries.
+  A quota failure handled by configured Office routing shall not increase the agent's consecutive-failure count or cause an automatic pause.
 
 ## Out of scope
 
@@ -64,3 +81,4 @@ Recognizing this notice lets existing policies distinguish exhausted quota from 
 ## Implementation plans
 
 - [Claude session-limit fix](../../../plans/claude-session-limit-classification/plan.md).
+- [Office mid-run quota notices](../../../plans/office-midrun-quota-classification/plan.md) extends the notice catalogue for issue #5222.

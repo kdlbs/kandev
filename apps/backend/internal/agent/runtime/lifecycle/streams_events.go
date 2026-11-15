@@ -64,6 +64,9 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 	deferReceipt bool,
 	attempt *deliveryStartupAttempt,
 ) (preparedAgentEvent, error) {
+	if connectionScopedStartupControlEvent(event) {
+		return preparedLegacyAgentEvent(execution, event), nil
+	}
 	if err := attempt.awaitNegotiation(ctx); err != nil {
 		return preparedAgentEvent{}, err
 	}
@@ -93,7 +96,7 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 		ctx, execution, durableEvent, delivery, client, deferReceipt, attempt,
 	)
 	if err != nil {
-		return preparedAgentEvent{}, fmt.Errorf("durable agent event ownership check: %w", err)
+		return preparedAgentEvent{}, fmt.Errorf("durable agent event ownership check for %q: %w", event.Type, err)
 	}
 	if event.DeliverySubmissionID != "" && !staleSubmission {
 		execution.setDeliverySubmissionID(event.DeliverySubmissionID)
@@ -546,6 +549,18 @@ func durableAgentEventIdentityPartial(event agentctl.AgentEvent) bool {
 		event.DeliveryIncarnationID != "" ||
 		event.DeliveryHarnessGeneration != 0 ||
 		event.DeliverySequence != 0
+}
+
+func connectionScopedStartupControlEvent(event agentctl.AgentEvent) bool {
+	if event.SessionID != "" || durableAgentEventIdentityPartial(event) {
+		return false
+	}
+	switch event.Type {
+	case streams.EventTypeAgentCapabilities, streams.EventTypeAuthRequired:
+		return true
+	default:
+		return false
+	}
 }
 
 func durableDeliveryExpected(execution *AgentExecution) bool {

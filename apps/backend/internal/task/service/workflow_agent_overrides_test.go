@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
@@ -87,7 +88,9 @@ func (v *rejectingWorkflowAgentExecutorValidator) ValidateAgentProfileForExecuto
 
 func TestCreateTaskRejectsIncompatibleWorkflowOverrideBeforePersistence(t *testing.T) {
 	svc, _, repo := createTestService(t)
-	ctx := context.Background()
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{
+		UserID: "test-user", Role: authn.RoleAdmin, Synthetic: true,
+	})
 	workspaceID := "workspace-override-compat"
 	workflowID := "workflow-override-compat"
 	executorID := "executor-override-compat"

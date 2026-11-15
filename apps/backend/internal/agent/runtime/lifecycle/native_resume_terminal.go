@@ -24,6 +24,10 @@ func nativeResumeSQLRows(
 	if err != nil {
 		return nil, nil, err
 	}
+	rows, err = contextContinuedNativeResumeHistory(ctx, execution, status, repository, peer, rows)
+	if err != nil {
+		return nil, nil, err
+	}
 	unproven := make(map[string]*models.AgentDeliveryCursor)
 	seen := make(map[string]bool, len(rows))
 	for _, row := range rows {

@@ -727,6 +727,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"preferred_shell":                          settings.PreferredShell,
 		"default_editor_id":                        settings.DefaultEditorID,
 		"enable_preview_on_click":                  settings.EnablePreviewOnClick,
+		"escape_cancels_agent":                     settings.EscapeCancelsAgent,
 		"chat_submit_key":                          settings.ChatSubmitKey,
 		"review_auto_mark_on_scroll":               settings.ReviewAutoMarkOnScroll,
 		"confirm_task_archive":                     settings.ConfirmTaskArchive,
@@ -771,7 +772,6 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"github_saved_presets":                     settings.GitHubSavedPresets,
 		"github_default_query_presets":             settings.GitHubDefaultQueryPresets,
 		"gitlab_saved_presets":                     settings.GitLabSavedPresets,
-		"azure_devops_browse_preferences":          settings.AzureDevOpsBrowsePreferences,
 		"default_utility_agent_id":                 settings.DefaultUtilityAgentID,
 		"default_utility_model":                    settings.DefaultUtilityModel,
 		"default_utility_agent_profile_id":         settings.DefaultUtilityAgentProfileID,
@@ -926,6 +926,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		PreferredShell                    string                                  `json:"preferred_shell"`
 		DefaultEditorID                   string                                  `json:"default_editor_id"`
 		EnablePreviewOnClick              bool                                    `json:"enable_preview_on_click"`
+		EscapeCancelsAgent                bool                                    `json:"escape_cancels_agent"`
 		ChatSubmitKey                     string                                  `json:"chat_submit_key"`
 		ReviewAutoMarkOnScroll            *bool                                   `json:"review_auto_mark_on_scroll"`
 		ConfirmTaskArchive                *bool                                   `json:"confirm_task_archive"`
@@ -970,7 +971,6 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		GitHubSavedPresets                json.RawMessage                         `json:"github_saved_presets"`
 		GitHubDefaultQueryPresets         json.RawMessage                         `json:"github_default_query_presets"`
 		GitLabSavedPresets                json.RawMessage                         `json:"gitlab_saved_presets"`
-		AzureDevOpsBrowsePreferences      json.RawMessage                         `json:"azure_devops_browse_preferences"`
 		DefaultUtilityAgentID             string                                  `json:"default_utility_agent_id"`
 		DefaultUtilityModel               string                                  `json:"default_utility_model"`
 		DefaultUtilityAgentProfileID      string                                  `json:"default_utility_agent_profile_id"`
@@ -1014,6 +1014,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.PreferredShell = payload.PreferredShell
 	settings.DefaultEditorID = payload.DefaultEditorID
 	settings.EnablePreviewOnClick = payload.EnablePreviewOnClick
+	settings.EscapeCancelsAgent = payload.EscapeCancelsAgent
 	if payload.ChatSubmitKey != "" {
 		settings.ChatSubmitKey = payload.ChatSubmitKey
 	}
@@ -1156,7 +1157,6 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.GitHubSavedPresets = payload.GitHubSavedPresets
 	settings.GitHubDefaultQueryPresets = payload.GitHubDefaultQueryPresets
 	settings.GitLabSavedPresets = payload.GitLabSavedPresets
-	settings.AzureDevOpsBrowsePreferences = payload.AzureDevOpsBrowsePreferences
 	settings.DefaultUtilityAgentID = payload.DefaultUtilityAgentID
 	settings.DefaultUtilityModel = payload.DefaultUtilityModel
 	settings.DefaultUtilityAgentProfileID = payload.DefaultUtilityAgentProfileID

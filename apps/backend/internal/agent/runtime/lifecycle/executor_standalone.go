@@ -312,12 +312,30 @@ func buildStandaloneCreateInstanceRequest(
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
 		WorkspaceSourceRoots:       req.WorkspaceSourceRoots,
+		WorkspaceExcludedRoots:     req.WorkspaceExcludedRoots,
+		TaskWorkspaceRoot:          req.TaskWorkspaceRoot,
 		OpenCodePluginRuntime:      req.OpenCodePluginRuntime,
 	}
 }
 
 func effectiveEnv(overrides map[string]string) []string {
 	return acpcompat.MergeEnvMap(os.Environ(), overrides)
+}
+
+func buildStandaloneInstanceMetadata(req *ExecutorCreateRequest, port int) map[string]interface{} {
+	metadata := make(map[string]interface{})
+	metadata["standalone_port"] = port
+	worktreeID := getMetadataString(req.Metadata, MetadataKeyWorktreeID)
+	if worktreeID != "" {
+		metadata["worktree_id"] = worktreeID
+		worktreePath := getMetadataString(req.Metadata, MetadataKeyWorktreePath)
+		if worktreePath == "" {
+			worktreePath = req.WorkspacePath
+		}
+		metadata[MetadataKeyWorktreePath] = worktreePath
+		metadata["worktree_branch"] = getMetadataString(req.Metadata, MetadataKeyWorktreeBranch)
+	}
+	return metadata
 }
 
 func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
@@ -389,6 +407,22 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 		return nil, err
 	}
 	defer releaseControl()
+	if createReq.DurableJournalPath != "" {
+		adopted, resolveErr := r.reconcileRetainedStandaloneOwner(controlCtx, control, lease, req)
+		if resolveErr != nil {
+			return nil, fmt.Errorf("reconcile retained standalone journal owner: %w", resolveErr)
+		}
+		if adopted != nil {
+			r.logger.Info("adopted retained standalone agent instance",
+				zap.String("requested_instance_id", req.InstanceID),
+				zap.String("retained_instance_id", adopted.StandaloneInstanceID),
+				zap.Int("port", adopted.StandalonePort))
+			return adopted, nil
+		}
+	}
+	if err := checkStandaloneOwnerLease(lease); err != nil {
+		return nil, fmt.Errorf("standalone instance creation blocked before journal open: %w", err)
+	}
 	resp, err := control.CreateInstance(controlCtx, createReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create standalone instance: %w", err)
@@ -403,30 +437,16 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	var client *agentctl.Client
 	if lease != nil {
 		client = lease.NewBoundInstanceClient(resp.Port, r.logger,
-			agentctl.WithExecutionID(req.InstanceID), agentctl.WithSessionID(req.SessionID))
+			agentctl.WithExecutionID(resp.ID), agentctl.WithSessionID(req.SessionID))
 	} else {
 		client = agentctl.NewClient(r.host, resp.Port, r.logger,
-			agentctl.WithExecutionID(req.InstanceID),
+			agentctl.WithExecutionID(resp.ID),
 			agentctl.WithSessionID(req.SessionID),
 			agentctl.WithAuthToken(r.authToken))
 	}
 
-	// Extract runtime-specific values from metadata
-	worktreeID := getMetadataString(req.Metadata, MetadataKeyWorktreeID)
-	worktreeBranch := getMetadataString(req.Metadata, MetadataKeyWorktreeBranch)
-
 	// Build metadata
-	metadata := make(map[string]interface{})
-	metadata["standalone_port"] = resp.Port
-	if worktreeID != "" {
-		metadata["worktree_id"] = worktreeID
-		worktreePath := getMetadataString(req.Metadata, MetadataKeyWorktreePath)
-		if worktreePath == "" {
-			worktreePath = req.WorkspacePath
-		}
-		metadata[MetadataKeyWorktreePath] = worktreePath
-		metadata["worktree_branch"] = worktreeBranch
-	}
+	metadata := buildStandaloneInstanceMetadata(req, resp.Port)
 
 	r.logger.Debug("standalone instance created",
 		zap.String("instance_id", req.InstanceID),
@@ -434,7 +454,7 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 		zap.String("workspace", req.WorkspacePath))
 
 	return &ExecutorInstance{
-		InstanceID:           req.InstanceID,
+		InstanceID:           resp.ID,
 		TaskID:               req.TaskID,
 		SessionID:            req.SessionID,
 		RuntimeName:          r.Name(),
