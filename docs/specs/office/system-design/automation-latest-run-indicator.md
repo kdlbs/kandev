@@ -34,8 +34,8 @@ age-only. No new architecture decision is needed.
 | --- | --- |
 | AC-OFFICE-AUTOMATION-RUNS-001.1, .19, .20 | Data authority and presentation |
 | AC-OFFICE-AUTOMATION-RUNS-001.9 | Refresh and failure boundaries |
-| AC-OFFICE-AUTOMATION-RUNS-001.15 | Desktop composition and localization |
-| AC-OFFICE-AUTOMATION-RUNS-001.16 | Phone composition and accessibility |
+| AC-OFFICE-AUTOMATION-RUNS-001.21 | Desktop composition and localization |
+| AC-OFFICE-AUTOMATION-RUNS-001.22 | Phone composition and accessibility |
 
 ## Data authority and presentation
 

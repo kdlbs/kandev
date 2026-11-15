@@ -10,10 +10,10 @@ requirements:
 acceptance_criteria:
   - AC-OFFICE-AUTOMATION-RUNS-001.1
   - AC-OFFICE-AUTOMATION-RUNS-001.9
-  - AC-OFFICE-AUTOMATION-RUNS-001.13
-  - AC-OFFICE-AUTOMATION-RUNS-001.14
-  - AC-OFFICE-AUTOMATION-RUNS-001.15
-  - AC-OFFICE-AUTOMATION-RUNS-001.16
+  - AC-OFFICE-AUTOMATION-RUNS-001.19
+  - AC-OFFICE-AUTOMATION-RUNS-001.20
+  - AC-OFFICE-AUTOMATION-RUNS-001.21
+  - AC-OFFICE-AUTOMATION-RUNS-001.22
 system_design:
   - ../../specs/office/system-design/automation-latest-run-indicator.md
 ---
@@ -120,7 +120,7 @@ Set up an automation
 Open automations
 ```
 
-UI-01/UI-02 cover AC-001.13-.21; UI-03 covers .20-.22. Preserve the existing
+UI-01/UI-02 cover AC-001.19-.21; UI-03 covers .20-.22. Preserve the existing
 phone inset drawer and its nav scroller. No age on phone; ordinary short labels
 remain compact and long status metadata wraps without horizontal overflow.
 
@@ -255,13 +255,13 @@ were created; source and documents remain unstaged and uncommitted.
 - **AC-001.9:** The mounted desktop sidebar recovers from failure without reload
   or row remount. The phone accepts the exact newer run while its existing drawer
   remains mounted and open; the page's `performance.timeOrigin` is unchanged.
-- **AC-001.14:** Running wins over a newer skipped firing. Paused automation and
+- **AC-001.20:** Running wins over a newer skipped firing. Paused automation and
   paused schedule retain gray, with newest failure metadata still available.
   Never-run behavior and generic pinned-shortcut activity semantics are unchanged.
-- **AC-001.15:** Desktop non-success text precedes the same run's age; success is
+- **AC-001.21:** Desktop non-success text precedes the same run's age; success is
   age-only. Agenda keeps its next-firing datum and gets no last-run age. Seven
   complete locales and generated pseudo/Traditional Chinese catalogs are included.
-- **AC-001.16:** The real saved-layout phone route exposes status with separate
+- **AC-001.22:** The real saved-layout phone route exposes status with separate
   accessible link names/descriptions, preserves row-tap navigation and dismissal,
   wraps Portuguese retry-failure copy, and passes actual >=44px hit-target and
   document-overflow checks. The inactive fallback shares the domain row without

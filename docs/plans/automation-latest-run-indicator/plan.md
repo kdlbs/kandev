@@ -18,7 +18,7 @@ outcome, then consume one presentation derivation in desktop navigation, the
 agenda, and the active phone navigation path. No backend changes are required.
 
 The [requirement](../../specs/office/requirements/automation-runs.md) remains
-REQ-OFFICE-AUTOMATION-RUNS-001; the new scope is AC-001.13 through .22, with
+REQ-OFFICE-AUTOMATION-RUNS-001; the new scope is AC-001.19 through .22, with
 .1/.9 preserving consistency and live transitions. The
 [scoped design](../../specs/office/system-design/automation-latest-run-indicator.md)
 is authoritative for this extension.
@@ -147,7 +147,7 @@ mobile menu and MobileAutomationsSection are the content-only exemplar.
 Structural requirements: activity/outcome separation, metadata order, same-run
 status/age, preserved primary navigation, readable failure status and no
 horizontal page overflow. Exact spacing, names and relative ages are illustrative.
-Map UI-01/UI-02 to AC-001.13 through .21; UI-03 to AC-001.14 through .22.
+Map UI-01/UI-02 to AC-001.19 through .21; UI-03 to AC-001.20 through .22.
 The focused Chromium and mobile-chrome checks below prove these views.
 
 ## Tests

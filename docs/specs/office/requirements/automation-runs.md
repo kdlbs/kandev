@@ -52,15 +52,8 @@ Definition freshness does not change automation configuration, scheduling, run
 execution, or saved navigation preferences. It does not require a new event
 protocol or shared cache.
 
-<<<<<<< HEAD
 Run output guidance does not capture, replay, or reconstruct terminal output.
 Folder-trust prompts and early process-exit settlement have separate repair scopes.
-
-## System design
-
-See [automation runs](../system-design/automation-runs.md) and
-[run output capture guidance](../system-design/automation-run-output.md).
-=======
 Latest-outcome presentation does not change run selection, status derivation,
 scheduling, retries, retention, transport, or saved navigation preferences.
 Custom pinned-shortcut activity semantics are outside this capability.
@@ -68,5 +61,5 @@ Custom pinned-shortcut activity semantics are outside this capability.
 ## System design
 
 - [Automation runs](../system-design/automation-runs.md) owns the existing history and refresh contracts.
+- [Run output capture guidance](../system-design/automation-run-output.md) owns the passthrough output guidance.
 - [Latest-run indicator](../system-design/automation-latest-run-indicator.md) owns the presentation extension for issue [#5081](https://github.com/kdlbs/kandev/issues/5081).
->>>>>>> a6245864b1 (fix(web): show latest run outcome on automation rows)
