@@ -1,5 +1,7 @@
 package messagequeue
 
+import "strings"
+
 // SessionPolicyChange changes exactly one session preference.
 type SessionPolicyChange struct {
 	AutoSortMerge bool
@@ -12,6 +14,9 @@ type compactionRow struct {
 	originalIndex int
 	merged        QueuedMessage
 	dirty         bool
+	// bodies holds the non-empty contents folded so far; the merged body is
+	// joined once at the end so N folds copy each body once, not N times.
+	bodies []string
 }
 
 func (r *compactionRow) message() *QueuedMessage {
@@ -60,6 +65,11 @@ func compactQueueRows[T QueuedMessage | *QueuedMessage](rows []T, leased map[str
 		}
 		result.kept = append(result.kept, compactionRow{original: source, originalIndex: i})
 	}
+	for i := range result.kept {
+		if row := &result.kept[i]; row.dirty {
+			row.merged.Content = strings.Join(row.bodies, "\n\n")
+		}
+	}
 	return result
 }
 
@@ -81,15 +91,24 @@ func (c *queueCompaction) foldInto(index int, source *QueuedMessage, leased map[
 	if _, blocked := leased[target.ID]; blocked || isFoldBarrier(target) || c.fences[target.ID] != c.fences[source.ID] {
 		return false
 	}
-	values, compatible := buildAutoMergedEntry(target, source)
+	// Content does not affect compatibility; leaving it out of the probe avoids
+	// re-copying the growing merged body on every fold.
+	probe := *target
+	probe.Content = ""
+	values, compatible := buildAutoMergedEntry(&probe, source)
 	if !compatible {
 		return false
 	}
 	if !row.dirty {
 		row.merged = *target
 		row.dirty = true
+		if target.Content != "" {
+			row.bodies = append(row.bodies, target.Content)
+		}
 	}
-	row.merged.Content = values.content
+	if source.Content != "" {
+		row.bodies = append(row.bodies, source.Content)
+	}
 	row.merged.Attachments = values.attachments
 	row.merged.Metadata = values.metadata
 	row.merged.QueuedAt = values.queuedAt

@@ -435,6 +435,21 @@ Public docs and specification validation passed. PostgreSQL is unverified:
   ./internal/orchestrator/handlers/...`, backendapp `AutoSortMerge`, and
   `scripts/lint-go-changed`: passed.
 
+### Implementation review round 13 remediation
+
+- Compaction collects each survivor's non-empty bodies and joins them once
+  after the pass, instead of re-copying the growing merged body on every
+  fold. Compatibility is still evaluated per fold against the current logical
+  target. RED on the prior code (542 MB allocated for 512 x 4 KiB rows), GREEN
+  after: `TestCompactionAllocationIsLinearInBacklogBytes`.
+- The sorted-admission metadata walk reads in keyset batches of
+  `sortedFoldScanBatch` (64) rows, so a match near the tail no longer makes
+  PostgreSQL stream and drain the rest of the backlog.
+  `TestSortedAdmissionScansPastOneMetadataBatch` covers a match beyond three
+  batches on SQLite. PostgreSQL remains unverified (no DSN).
+- `go test -race -tags fts5 ./internal/orchestrator/messagequeue/...
+  ./internal/orchestrator/handlers/...` and `scripts/lint-go-changed`: passed.
+
 Final repository gates, run from the repository root after all work orders:
 
 ```bash

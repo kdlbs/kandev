@@ -78,38 +78,51 @@ func sourcePositionBound(source *QueuedMessage) int64 {
 	return math.MaxInt64
 }
 
-// sortedFoldCandidateIDsTx walks the persisted rows above source newest-first,
-// decoding only identity and metadata, and stops at the first barrier or
-// same-sender row. Payloads of unrelated backlog rows are never read.
+// sortedFoldScanBatch bounds each metadata read so a match near the tail never
+// streams the rest of the backlog (PostgreSQL drains unread rows on close).
+const sortedFoldScanBatch = 64
+
+type sortedFoldScanRow struct {
+	ID           string `db:"id"`
+	Position     int64  `db:"position"`
+	QueuedBy     string `db:"queued_by"`
+	MetadataJSON string `db:"metadata_json"`
+}
+
+// sortedFoldCandidateIDsTx walks the persisted rows above source newest-first
+// in keyset batches, decoding only identity and metadata, and stops at the
+// first barrier or same-sender row. Payloads of backlog rows are never read.
 func (r *sqliteRepository) sortedFoldCandidateIDsTx(ctx context.Context, tx *sqlx.Tx, source *QueuedMessage, sender string) (adjacentID, sortedID string, crossed int, err error) {
-	rows, err := tx.QueryxContext(ctx, tx.Rebind(`SELECT id, queued_by, metadata_json FROM queued_messages
- WHERE session_id = ? AND position < ? ORDER BY position DESC`), source.SessionID, sourcePositionBound(source))
-	if err != nil {
-		return "", "", 0, fmt.Errorf("scan sorted fold candidates: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	for index := 0; rows.Next(); index++ {
-		var row QueuedMessage
-		var metadataJSON string
-		if err := rows.Scan(&row.ID, &row.QueuedBy, &metadataJSON); err != nil {
-			return "", "", 0, err
+	bound := sourcePositionBound(source)
+	for index := 0; ; {
+		var batch []sortedFoldScanRow
+		if err := tx.SelectContext(ctx, &batch, tx.Rebind(`SELECT id, position, queued_by, metadata_json FROM queued_messages
+ WHERE session_id = ? AND position < ? ORDER BY position DESC LIMIT ?`), source.SessionID, bound, sortedFoldScanBatch); err != nil {
+			return "", "", 0, fmt.Errorf("scan sorted fold candidates: %w", err)
 		}
-		if metadataJSON != "" && metadataJSON != "{}" {
-			if err := json.Unmarshal([]byte(metadataJSON), &row.Metadata); err != nil {
-				return "", "", 0, fmt.Errorf("unmarshal metadata: %w", err)
+		for _, scanned := range batch {
+			row := QueuedMessage{ID: scanned.ID, QueuedBy: scanned.QueuedBy}
+			if scanned.MetadataJSON != "" && scanned.MetadataJSON != "{}" {
+				if err := json.Unmarshal([]byte(scanned.MetadataJSON), &row.Metadata); err != nil {
+					return "", "", 0, fmt.Errorf("unmarshal metadata: %w", err)
+				}
 			}
+			if index == 0 {
+				adjacentID = row.ID
+			}
+			if isFoldBarrier(&row) {
+				return adjacentID, "", 0, nil
+			}
+			if isSameFoldSender(&row, sender) {
+				return adjacentID, row.ID, index, nil
+			}
+			index++
 		}
-		if index == 0 {
-			adjacentID = row.ID
-		}
-		if isFoldBarrier(&row) {
+		if len(batch) < sortedFoldScanBatch {
 			return adjacentID, "", 0, nil
 		}
-		if isSameFoldSender(&row, sender) {
-			return adjacentID, row.ID, index, nil
-		}
+		bound = batch[len(batch)-1].Position
 	}
-	return adjacentID, "", 0, rows.Err()
 }
 
 func readQueuedRowByIDTx(ctx context.Context, tx *sqlx.Tx, sessionID, id string) (*QueuedMessage, error) {
