@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
+	runtimekind "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
@@ -277,30 +278,32 @@ const (
 
 // classifyIdleReclaim is the single decision matrix for the idle-session
 // reclaim primitive. Reclaim is fail-closed: only sessions in an idle-yet-
-// resumable OR terminal shape AND without a live runtime AND without an
-// active turn proceed. Any uncertain signal falls into a skipped
+// resumable shape without a live runtime, or a failed/cancelled session, and
+// without an active turn proceed. Any uncertain signal falls into a skipped
 // disposition and the caller leaves the row untouched.
 //
 // Why include Completed in the allowed set: the subtask terminal collapse
 // in setSessionWaitingForInputIfRequested writes session.state=Completed
 // when the agent's last turn did not request input, and the parent task
-// has no further use for the provider-runtime reservation. Failed and
-// Cancelled are deliberately excluded — those have separate cancellation
-// cleanup paths (handleTerminalSessionOnStartup and the cancel pipelines)
-// that already reconcile executor rows.
+// has no further use for the provider-runtime reservation. A failed or
+// cancelled session can retain its live runtime after the transition; the
+// existing cleanup path releases that owner while preserving the session row.
 func classifyIdleReclaim(
 	sessionState models.TaskSessionState,
 	agentRunning, hasActiveTurn, hasResumeToken bool,
 	rowStatus string,
 ) idleReclaimDisposition {
+	terminal := false
 	switch sessionState {
 	case models.TaskSessionStateWaitingForInput,
 		models.TaskSessionStateIdle,
 		models.TaskSessionStateCompleted:
+	case models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
+		terminal = true
 	default:
 		return idleReclaimDispositionSkippedState
 	}
-	if agentRunning {
+	if agentRunning && !terminal {
 		return idleReclaimDispositionSkippedLive
 	}
 	if hasActiveTurn {
@@ -338,6 +341,15 @@ func (s *Service) reclaimIdleSession(ctx context.Context, sessionID string) erro
 	if sessionID == "" {
 		return nil
 	}
+	if s.messageQueue == nil {
+		return s.reclaimIdleSessionAdmitted(ctx, sessionID)
+	}
+	return s.messageQueue.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return s.reclaimIdleSessionAdmitted(admittedCtx, sessionID)
+	})
+}
+
+func (s *Service) reclaimIdleSessionAdmitted(ctx context.Context, sessionID string) error {
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 	defer releaseLifecycleLock()
 	if s.lspLeases != nil && s.lspLeases.HasActiveLSPLease(sessionID) {
@@ -374,6 +386,29 @@ func (s *Service) reclaimIdleSession(ctx context.Context, sessionID string) erro
 	if decision != idleReclaimDispositionReclaimed {
 		return nil
 	}
+	if session.State == models.TaskSessionStateFailed || session.State == models.TaskSessionStateCancelled {
+		return s.releaseSettledTerminalRuntime(ctx, running)
+	}
+	return s.releaseIdleRuntime(ctx, running)
+}
+
+func (s *Service) releaseSettledTerminalRuntime(ctx context.Context, running *models.ExecutorRunning) error {
+	if s.sessionHasActiveTurn(ctx, running.SessionID) || !s.terminalReclaimHasNoOtherWork(ctx, running) {
+		return nil
+	}
+	if running.Runtime == runtimekind.RuntimeStandalone {
+		// The agent can exit while its instance still owns workspace work.
+		return s.releaseTerminalStandalone(ctx, running)
+	}
+	if s.rowLiveness(running) == models.ProcessLivenessDead {
+		return s.repairDeadRowLiveness(ctx, running)
+	}
+	return nil
+}
+
+// releaseIdleRuntime runs while queue admission and the lifecycle lock are held.
+func (s *Service) releaseIdleRuntime(ctx context.Context, running *models.ExecutorRunning) error {
+	sessionID := running.SessionID
 	var cleanupErr error
 	if cleaner, ok := s.agentManager.(executionIdentityCleaner); ok {
 		cleanupErr = cleaner.CleanupStaleExecutionBySessionIDIfCurrent(
@@ -394,6 +429,12 @@ func (s *Service) reclaimIdleSession(ctx context.Context, sessionID string) erro
 	if err := s.repairDeadRowLiveness(ctx, running); err != nil {
 		return fmt.Errorf("repair executor row after idle reclaim: %w", err)
 	}
+	s.noteIdleRuntimeReleased(ctx, running)
+	return nil
+}
+
+func (s *Service) noteIdleRuntimeReleased(ctx context.Context, running *models.ExecutorRunning) {
+	sessionID := running.SessionID
 	// The released runtime was the only owner of this session's workloads.
 	// The lifecycle lock is already held, so settle without reacquiring it.
 	s.settleBackgroundWorkLocked(ctx, sessionID, running.AgentExecutionID)
@@ -402,7 +443,78 @@ func (s *Service) reclaimIdleSession(ctx context.Context, sessionID string) erro
 		zap.String("task_id", running.TaskID),
 		zap.Bool("has_resume_token", running.ResumeToken != ""),
 		zap.Bool("has_worktree", running.WorktreePath != ""))
+}
+
+func (s *Service) releaseTerminalStandalone(ctx context.Context, running *models.ExecutorRunning) error {
+	cleaner, ok := s.agentManager.(interface {
+		CleanupLiveExecutionIfCurrent(context.Context, string, string, time.Time) (bool, error)
+	})
+	if !ok {
+		return nil
+	}
+	confirmed, err := cleaner.CleanupLiveExecutionIfCurrent(ctx, running.SessionID, running.AgentExecutionID, running.UpdatedAt)
+	if err != nil {
+		s.logger.Warn("idle reclaim: cleanup failed; row preserved",
+			zap.String("session_id", running.SessionID), zap.Error(err))
+		return nil
+	}
+	if confirmed {
+		// Live cleanup already checkpointed the exact stopped row.
+		s.noteIdleRuntimeReleased(ctx, running)
+		return nil
+	}
+	if s.rowLiveness(running) == models.ProcessLivenessDead {
+		return s.repairDeadRowLiveness(ctx, running)
+	}
 	return nil
+}
+
+func (s *Service) terminalReclaimHasNoOtherWork(ctx context.Context, running *models.ExecutorRunning) bool {
+	if running.AgentExecutionID == "" || running.UpdatedAt.IsZero() || s.messageQueue == nil {
+		return false
+	}
+	if _, ok := s.repo.(executionIdentityRepairer); !ok {
+		return false
+	}
+	sessionID := running.SessionID
+	block, err := s.GetOpenSessionRecoveryBlock(ctx, sessionID)
+	if err != nil || block != nil || s.sessionHasKnownIdleWorkBeyondTurn(ctx, sessionID) || s.sessionHasCancellableWorkBeyondTurn(ctx, sessionID) {
+		return false
+	}
+	pending, err := s.messageQueue.HasPendingDispatchForSession(ctx, sessionID)
+	return err == nil && !pending
+}
+
+func (s *Service) reconcileAbsentTerminalRuntime(ctx context.Context, running *models.ExecutorRunning, scope interface{}) {
+	if s.rowLivenessScoped(running, scope) != models.ProcessLivenessDead || s.messageQueue == nil {
+		return
+	}
+	err := s.messageQueue.WithSessionAdmission(ctx, running.SessionID, func(admittedCtx context.Context) error {
+		release := s.acquireSessionLifecycleLock(running.SessionID)
+		defer release()
+		current, err := s.repo.GetExecutorRunningBySessionID(admittedCtx, running.SessionID)
+		if err != nil {
+			return err
+		}
+		if current == nil || current.AgentExecutionID != running.AgentExecutionID || !current.UpdatedAt.Equal(running.UpdatedAt) {
+			return nil
+		}
+		if !s.terminalReclaimHasNoOtherWork(admittedCtx, current) || s.turnService == nil {
+			return nil
+		}
+		// The runtime is proved absent and no dispatch or recovery owns the
+		// previous turn. Close the orphan before recording the exact stop.
+		if err := s.turnService.AbandonOpenTurns(admittedCtx, running.SessionID); err != nil {
+			return fmt.Errorf("abandon orphan turn before terminal repair: %w", err)
+		}
+		if s.sessionHasActiveTurn(admittedCtx, running.SessionID) {
+			return nil
+		}
+		return s.repairDeadRowLiveness(admittedCtx, running)
+	})
+	if err != nil {
+		s.logger.Warn("startup terminal runtime repair failed", zap.String("session_id", running.SessionID), zap.Error(err))
+	}
 }
 
 // sessionHasActiveTurn reports whether the orchestrator has any in-flight
