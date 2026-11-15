@@ -419,6 +419,22 @@ Public docs and specification validation passed. PostgreSQL is unverified:
   `TestCompactionKeepsMessagesFromDifferentManagementClaimsSeparate`, for both
   session-switch compaction triggers.
 
+### Implementation review round 12 remediation
+
+- SQL sorted admission no longer loads and decodes every persisted row. User,
+  sender-less, and barrier sources use the existing one-row predecessor read.
+  Eligible agent sources walk rows newest-first reading only `id`,
+  `queued_by`, and `metadata_json`, stop at the first barrier or same-sender
+  row, then load only the chosen target (or adjacent row) in the same
+  transaction.
+- RED on the prior code, GREEN after:
+  `TestSortedAdmissionDoesNotDecodeBacklogPayloads` (an undecodable backlog
+  payload above the stop point no longer fails admission), with space and at
+  capacity.
+- `go test -race -tags fts5 ./internal/orchestrator/messagequeue/...
+  ./internal/orchestrator/handlers/...`, backendapp `AutoSortMerge`, and
+  `scripts/lint-go-changed`: passed.
+
 Final repository gates, run from the repository root after all work orders:
 
 ```bash

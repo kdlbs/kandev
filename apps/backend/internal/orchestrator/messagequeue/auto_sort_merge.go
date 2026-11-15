@@ -26,11 +26,21 @@ func isFoldBarrier(row *QueuedMessage) bool {
 }
 
 // Both repository row representations are scanned without copying the backlog.
-func sortedFoldTarget[T QueuedMessage | *QueuedMessage](rows []T, source *QueuedMessage) (*QueuedMessage, int) {
+// sortedFoldSender returns the sender task of a source that may move to its
+// latest same-sender entry, or "" when the source keeps FIFO adjacency only.
+func sortedFoldSender(source *QueuedMessage) string {
 	if source.QueuedBy != QueuedByAgent || isFoldBarrier(source) {
-		return nil, 0
+		return ""
 	}
-	sender := metadataString(source.Metadata, MetadataSenderTaskID)
+	return metadataString(source.Metadata, MetadataSenderTaskID)
+}
+
+func isSameFoldSender(row *QueuedMessage, sender string) bool {
+	return row.QueuedBy == QueuedByAgent && metadataString(row.Metadata, MetadataSenderTaskID) == sender
+}
+
+func sortedFoldTarget[T QueuedMessage | *QueuedMessage](rows []T, source *QueuedMessage) (*QueuedMessage, int) {
+	sender := sortedFoldSender(source)
 	if sender == "" {
 		return nil, 0
 	}
@@ -45,7 +55,7 @@ func sortedFoldTarget[T QueuedMessage | *QueuedMessage](rows []T, source *Queued
 		if isFoldBarrier(row) {
 			return nil, 0
 		}
-		if row.QueuedBy == QueuedByAgent && metadataString(row.Metadata, MetadataSenderTaskID) == sender {
+		if isSameFoldSender(row, sender) {
 			return row, len(rows) - 1 - i
 		}
 	}
