@@ -5,6 +5,7 @@ import { Button } from "@kandev/ui/button";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import {
   Drawer,
+  DrawerClose,
   DrawerContent,
   DrawerDescription,
   DrawerHeader,
@@ -180,7 +181,7 @@ function AutoSortMergeTouchHelp({ description }: { description: string }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   return (
-    <Drawer open={open} onOpenChange={setOpen}>
+    <Drawer open={open} onOpenChange={setOpen} autoFocus>
       <DrawerTrigger asChild>
         <Button
           type="button"
@@ -199,10 +200,21 @@ function AutoSortMergeTouchHelp({ description }: { description: string }) {
         </Button>
       </DrawerTrigger>
       <DrawerContent>
-        <DrawerHeader className="pb-[calc(1rem+env(safe-area-inset-bottom))]">
+        <DrawerHeader>
           <DrawerTitle>{t("chat:queueAutoSortMerge")}</DrawerTitle>
           <DrawerDescription>{description}</DrawerDescription>
         </DrawerHeader>
+        <div className="p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <DrawerClose asChild>
+            <Button
+              variant="outline"
+              data-testid="queue-auto-sort-merge-help-close"
+              className="h-11 w-full cursor-pointer"
+            >
+              {t("common:close")}
+            </Button>
+          </DrawerClose>
+        </div>
       </DrawerContent>
     </Drawer>
   );

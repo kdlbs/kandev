@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { QueuePanelHeader, type QueuePanelHeaderProps } from "./queued-ghost-panel-header";
@@ -140,7 +140,7 @@ describe("Auto-sort-merge dependency", () => {
     expect(description).not.toBeNull();
   });
 
-  it("explains a disabled Auto-sort-merge pill through a touch drawer", () => {
+  it("explains a disabled Auto-sort-merge pill through a focused touch drawer", async () => {
     touchMocks.usesTouchDrawer = true;
     render(
       <TooltipProvider>
@@ -150,9 +150,15 @@ describe("Auto-sort-merge dependency", () => {
     expect(screen.getByTestId("queue-auto-sort-merge")).toHaveProperty("disabled", true);
     expect(screen.queryByRole("dialog")).toBeNull();
 
-    fireEvent.click(screen.getByTestId("queue-auto-sort-merge-help"));
+    const trigger = screen.getByTestId("queue-auto-sort-merge-help");
+    trigger.focus();
+    fireEvent.click(trigger);
 
     const dialog = screen.getByRole("dialog");
     expect(dialog.textContent).toContain("Requires Auto-merge.");
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+
+    fireEvent.click(screen.getByTestId("queue-auto-sort-merge-help-close"));
+    await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("false"));
   });
 });

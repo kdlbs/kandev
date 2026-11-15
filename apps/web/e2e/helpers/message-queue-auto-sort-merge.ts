@@ -244,6 +244,19 @@ async function expectTouchDependencyHelp(page: Page, panel: Locator) {
     position: { x: 16, y: 16 },
   });
   await expect(drawer).toBeHidden();
+  await help.focus();
+  await page.keyboard.press("Enter");
+  await expect(drawer).toBeVisible();
+  await expect
+    .poll(() => drawer.evaluate((node) => node.contains(document.activeElement)))
+    .toBe(true);
+  for (const key of ["Tab", "Shift+Tab", "Tab"]) {
+    await page.keyboard.press(key);
+    expect(await drawer.evaluate((node) => node.contains(document.activeElement))).toBe(true);
+  }
+  await drawer.getByTestId("queue-auto-sort-merge-help-close").tap();
+  await expect(drawer).toBeHidden();
+  await expect(help).toBeFocused();
   await expect(panel.getByTestId("queue-auto-merge")).toBeVisible();
 }
 

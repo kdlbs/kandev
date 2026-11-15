@@ -394,6 +394,20 @@ Public docs and specification validation passed. PostgreSQL is unverified:
   with `--retries=0`: 16 passed. Web typecheck, `i18n:check`, Prettier, and
   Oxlint on changed files: passed.
 
+### Implementation review round 6 remediation
+
+- The touch help drawer now opens with `autoFocus` and has a localized 44px
+  Close button (`queue-auto-sort-merge-help-close`), matching `SettingsInfo`,
+  so keyboard focus enters the dialog instead of staying on the hidden
+  background.
+- RED on the prior code, GREEN after: the focused-drawer case in
+  `queued-ghost-panel-header.test.tsx` (focus inside the dialog on open).
+- Mobile E2E now opens the drawer from the keyboard, checks that Tab and
+  Shift+Tab stay inside it, closes it, and checks focus returns to the info
+  button: `pnpm --dir apps/web e2e:run --host --shards 1 --project
+  mobile-chrome tests/chat/mobile-message-queue-auto-sort-merge.spec.ts --
+  --retries=0`: 1 passed. Web typecheck and Oxlint on changed files: passed.
+
 Final repository gates, run from the repository root after all work orders:
 
 ```bash
