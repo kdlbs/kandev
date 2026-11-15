@@ -74,6 +74,12 @@ func (e *BootstrapFailure) SafeClass() string {
 // ClassifyUnknownBootstrapError maps an error without an allowlisted cause
 // code to a bounded class from its typed boundary.
 func ClassifyUnknownBootstrapError(err error) string {
+	if errors.Is(err, agentctl.ErrPassthroughCLIUnavailable) {
+		return BootstrapClassPassthroughCLIUnavailable
+	}
+	if errors.Is(err, errRemoteInitialPromptUncertain) {
+		return BootstrapClassRemoteInitialPromptUncertain
+	}
 	var rejected *agentctl.StartRejectedError
 	if errors.As(err, &rejected) {
 		return BootstrapClassAgentctlStartRejected
@@ -284,10 +290,10 @@ func bootstrapFailureFor(execution *AgentExecution, err error) *BootstrapFailure
 	}
 	code := models.AgentErrorCauseCodeUnknown
 	if errors.Is(err, agentctl.ErrPassthroughCLIUnavailable) {
-		return &BootstrapFailure{Operation: bootstrapOperation(execution), Code: code, Class: BootstrapClassPassthroughCLIUnavailable, Detail: agentctl.ErrPassthroughCLIUnavailable.Error(), Cause: err}
+		return &BootstrapFailure{Operation: bootstrapOperation(execution), Code: code, Class: ClassifyUnknownBootstrapError(err), Detail: agentctl.ErrPassthroughCLIUnavailable.Error(), Cause: err}
 	}
 	if errors.Is(err, errRemoteInitialPromptUncertain) {
-		return &BootstrapFailure{Operation: bootstrapOperation(execution), Code: code, Class: BootstrapClassRemoteInitialPromptUncertain, Detail: errRemoteInitialPromptUncertain.Error(), Cause: err}
+		return &BootstrapFailure{Operation: bootstrapOperation(execution), Code: code, Class: ClassifyUnknownBootstrapError(err), Detail: errRemoteInitialPromptUncertain.Error(), Cause: err}
 	}
 	if errors.Is(err, agentctl.ErrPassthroughUnsupported) {
 		return &BootstrapFailure{Operation: bootstrapOperation(execution), Code: models.AgentErrorCauseCodeTransportUnavailable, Detail: agentctl.ErrPassthroughUnsupported.Error(), Cause: err}
