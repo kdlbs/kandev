@@ -681,6 +681,44 @@ func TestClassifyKeywordStructuralStatus(t *testing.T) {
 	}
 }
 
+// Production input carries the structured status in Input.HTTPStatus. An
+// unmapped status the prefilter owns structurally must still reach its rule,
+// while a disabled prefilter or any other unmapped status stays unknown.
+func TestClassifyKeywordStructuralStatusFromStructuredInput(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		text   string
+		code   Code
+	}{
+		{404, "Error: model retired", CodeModelUnavailable},
+		{408, "Error: request timed out", CodeProviderUnavailable},
+		{400, "Error: context tokens length", CodeAgentRuntime},
+	} {
+		in := Input{Phase: PhasePromptSend, Stderr: tc.text, HTTPStatus: tc.status,
+			KeywordContext: KeywordContext{Enabled: true, Diagnostic: true}}
+		got := Classify(in)
+		if got.Code != tc.code || got.Keyword == nil || got.Confidence != ConfHigh {
+			t.Fatalf("status %d: %+v, want %s", tc.status, got, tc.code)
+		}
+		if tc.status == 404 && !got.Keyword.UntilModelChange {
+			t.Fatalf("structured model 404 lost its model hold: %+v", got.Keyword)
+		}
+		in.KeywordContext.Enabled = false
+		if got := Classify(in); got.Code != CodeUnknownProvider || got.Keyword != nil {
+			t.Fatalf("disabled prefilter changed status %d: %+v", tc.status, got)
+		}
+	}
+	for _, in := range []Input{
+		{Phase: PhasePromptSend, Stderr: "Error: page missing", HTTPStatus: 404},
+		{Phase: PhasePromptSend, Stderr: "Error: capacity busy overloaded", HTTPStatus: 418},
+	} {
+		in.KeywordContext = KeywordContext{Enabled: true, Diagnostic: true}
+		if got := Classify(in); got.Code != CodeUnknownProvider || got.Keyword != nil {
+			t.Fatalf("unmapped status %d without structural evidence was reclassified: %+v", in.HTTPStatus, got)
+		}
+	}
+}
+
 func TestClassifyKeywordScopeTimingAndAction(t *testing.T) {
 	now := time.Date(2030, 1, 1, 12, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {

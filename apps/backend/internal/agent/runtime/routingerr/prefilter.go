@@ -70,6 +70,27 @@ func classifyKeywordContext(in Input, excerpt string) *Error {
 	return result
 }
 
+// keywordStructuralRulePrefix names the prefilter's structural status rules.
+const keywordStructuralRulePrefix = "keyword_context.http."
+
+// classifyUnmappedHTTPKeyword lets a structured status the built-in classifier
+// does not map, but the opt-in prefilter owns structurally (a qualified model
+// 404, a 408 timeout, a 400 request or context rejection), reach that
+// structural rule. Keyword group matching is not applied here, so any other
+// unmapped status, or one without the structural evidence, stays unknown.
+func classifyUnmappedHTTPKeyword(in Input, excerpt string) *Error {
+	switch in.HTTPStatus {
+	case 400, 404, 408:
+	default:
+		return nil
+	}
+	result := classifyKeywordContext(in, excerpt)
+	if result == nil || !strings.HasPrefix(result.ClassifierRule, keywordStructuralRulePrefix) {
+		return nil
+	}
+	return result
+}
+
 func keywordStructuralCode(in Input, text string) (Code, keywordGroup, string) {
 	text = normalizeKeywords(text)
 	code, group := Code(""), keywordGroup("")
@@ -98,7 +119,7 @@ func keywordStructuralCode(in Input, text string) (Code, keywordGroup, string) {
 	if code == "" {
 		return "", "", ""
 	}
-	return code, group, fmt.Sprintf("keyword_context.http.%d.%s.v1", status, group)
+	return code, group, fmt.Sprintf(keywordStructuralRulePrefix+"%d.%s.v1", status, group)
 }
 
 func keywordRequestRule(text string) string {

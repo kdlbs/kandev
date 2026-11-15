@@ -160,13 +160,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		}
 	case streams.EventTypeReasoning:
 		observedOutput = strings.TrimSpace(payload.Data.Text) != ""
-		s.observePromptAttempt(
-			payload.SessionID,
-			eventExecutionID,
-			payload.Data.PromptGeneration,
-			observedOutput,
-			false,
-		)
+		if observedOutput {
+			s.observePromptReasoning(payload.SessionID, eventExecutionID, payload.Data.PromptGeneration)
+		}
 	case agentEventToolCall, agentEventToolUpdate:
 		observedEffect = true
 		s.observePromptAttempt(
@@ -180,7 +176,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	if eventType != agentEventToolCall {
 		s.observeContinuationActivity(ctx, taskID, sessionID, eventExecutionID, continuationActivityEventFrom(payload.Data))
 	}
-	if observedOutput || observedEffect {
+	if (observedOutput && eventType != streams.EventTypeReasoning) || observedEffect {
 		resetEvent := watcher.AgentEventData{
 			TaskID: taskID, SessionID: sessionID, OwnerKind: string(payload.OwnerKind),
 			AgentExecutionID: eventExecutionID, PromptGeneration: payload.Data.PromptGeneration,
@@ -541,6 +537,16 @@ func (s *Service) completeTurnForStreamEvent(
 	)
 }
 
+// streamFailureAgentType returns the transport type used to classify a stream
+// failure. The stream AgentID is the execution identity, which has no
+// provider rules; it is used only by events that carry no transport type.
+func streamFailureAgentType(payload *lifecycle.AgentStreamEventPayload) string {
+	if payload.AgentType != "" {
+		return payload.AgentType
+	}
+	return payload.AgentID
+}
+
 // handleAgentErrorEvent handles agentEventError events by creating an error message and completing the turn.
 func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	taskID := payload.TaskID
@@ -550,11 +556,7 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 		executionID = payload.AgentID
 	}
 	if sessionID != "" {
-		// Opt-in diagnostics use the transport type; OFF retains legacy attribution.
-		agentType := payload.AgentID
-		if s.config.ProviderKeywordContext && payload.AgentType != "" {
-			agentType = payload.AgentType
-		}
+		agentType := streamFailureAgentType(payload)
 		failure := watcher.AgentEventData{
 			TaskID:             taskID,
 			SessionID:          sessionID,

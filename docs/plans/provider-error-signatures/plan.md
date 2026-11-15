@@ -5,6 +5,7 @@ updated: 2026-11-08
 requirements:
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002
+  - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-003
 system_design:
   - ../../specs/agents/system-design/provider-error-signatures.md
 legacy_specs: []
@@ -38,19 +39,27 @@ provider scope, prose boundary, precedence, and reset-hint behavior.
 ### In scope
 
 - The provider rule patterns in `apps/backend/internal/agent/runtime/routingerr/rules.go`.
+- Table tests for prose that must not classify and signatures that must.
 - The sanitized provider-message projection in `apps/backend/internal/agentctl/types/streams/provider_error.go`.
 - Narrow coverage of the remaining signatures, using existing tests and
   disposable overlays outside the repository's automatic test collection.
-- The `provider-neutral` labeled JSON signature in
+- The shared provider catalogue in
+  `apps/backend/internal/agent/runtime/routingerr/provider_catalog_rules.go` and
+  the `provider-neutral` labeled JSON signature in
   `apps/backend/internal/agent/runtime/routingerr/provider_neutral_rules.go`.
+- The narrow context-length follow-up in `provider_neutral_rules.go`, its
+  phase-aware call in `routingerr.go`, and the existing exact consumer in
+  `orchestrator/event_handlers_transient_messages.go`.
 - Passing raw diagnostic text to the provider matcher only for explicitly
   marked signatures; the stored `RawExcerpt` remains sanitized.
 
 ### Out of scope
 
-- Changes to prior rule order, confidence, or classification flags; new rules
-  retain established higher-priority matches.
-- Unrelated provider-neutral and all runtime-environment rules.
+- Changes to prior rule order, confidence, or classification flags; existing
+  rules keep their order, confidence, and flags, and new rules retain
+  established higher-priority matches.
+- Unrelated or other provider-neutral rules and all runtime-environment rules;
+  the named prompt-send context-length signature (criterion 001.7) is in scope.
 - How classified failures are attributed or acted on by dynamic routing.
 
 ## Verification
@@ -65,23 +74,48 @@ provider scope, prose boundary, precedence, and reset-hint behavior.
 
 ## Opt-in keyword/context follow-up
 
-[Task 02](task-02-keyword-context.md) implements requirement 002 as a separate
+[Task 02, keyword context](task-02-keyword-context.md) implements requirement 002 as a separate
 default-off unmatched diagnostic classifier on the current base. Existing typed
 and known rules retain priority. It includes trusted context and existing
 consumer/circuit integration; it does not import the pending literal catalog.
 Verification uses disposable overlays, focused checks, normal hooks and exact
 delta review. No permanent suite, external loader or operator activation is added.
+## Context-length producer/consumer follow-up
+
+The original work above remains implemented. Criterion 001.7 adds only a named
+prompt-send context-length producer and its existing exact pre-result consumer.
+A producer without the consumer fix would leave the formerly anonymous failure
+outside the accepted route; a consumer without the producer absent from main
+would be unused compatibility code. Both pieces are prepared together.
+
+Startup classification, typed-limit priority, false global retry/fallback
+flags and diagnostic/output/effect fences stay intact. The separate structured-
+envelope criterion 001.6 and remaining catalogue/quota/notice work arrive from
+current upstream main's bounded catalogue follow-up (below) and stay a distinct
+rule set rather than being folded into this shared catalogue. Both rule sets
+coexist in the neutral table, and the context-length rule stays prompt-send only.
+Disposable baseline and producer-only entrypoint checks failed as expected:
+the former had no named producer (0.023s), and the latter returned the named
+runtime error outside the accepted exact consumer (0.062s). The complete
+candidate and selected existing controls passed once under `-race`:
+`routingerr` 1.285s, `dynamic` 1.048s and `orchestrator` 3.003s. This includes
+startup/later-phase preservation, typed-limit priority, diagnostic/output/effect
+fences, repeat-result stability, ordinary manual recovery and workflow-claim
+fences. Temporary overlays are removed after delivery. No standing test,
+whole-build requirement or operating mutation is added.
 
 ## Bounded catalogue follow-up
 
-Add only the remaining OpenCode signatures: unlabelled `free usage limit
+[Task 02, provider catalogue follow-up](task-02-provider-catalogue-followup.md)
+adds only the remaining OpenCode signatures: unlabelled `free usage limit
 reached`, raw-text daily reasons `free-models-per-day` and `limit_rpd/<model>`,
 and the generic Zen retry-later rate-limit wording. Add the shared labeled JSON
 `error_type=provider_unavailable` opening signature. Keep provider-specific
 scope, line-opening evidence, sanitized excerpts, typed/normalized precedence,
 and existing credit/payment/quota ordering. Do not duplicate the already
 submitted shared catalogue or context-length work. The original-source reproduction and focused candidate race result are recorded
-in task 02; hosted CI and combined unmerged-source validation remain separate.
+in task 02; hosted CI and combined-source validation after the merge are separate.
+in the [provider catalogue follow-up](task-02-provider-catalogue-followup.md); hosted CI and combined unmerged-source validation remain separate.
 
 ### Prefixed free-usage follow-up
 
@@ -90,6 +124,24 @@ reached`. Keep the signature limited to OpenCode, outside fenced examples, and
 to one diagnostic line. Preserve line boundaries in the sanitized ACP message
 so a later diagnostic line remains classifiable. Preserve structured and
 earlier account-limit precedence, and do not infer a reset time. The production
-rule was already present in the PR; task 03 adds regression tests for accepted
+rule was already present in the PR; the
+[prefixed free-usage task 03](task-03-prefixed-free-usage-followup.md) adds regression tests for accepted
 labels, rejected prose and provider cases, sanitized ACP projection, and
 precedence.
+
+## Catalog consolidation follow-up
+
+Status: in progress. Task 01 now carries the literal provider catalog and
+bounded request-rejection consumer follow-up. Existing completed work and
+verification remain valid for their original scope. The signature disposition
+and changed-source boundaries are recorded in Task 01. The prepared
+thinking-only empty-completion change is integrated with the upstream
+diagnostic signature preserved. Review and publisher acceptance remain pending;
+local implementation is not evidence of publication or account-limit recovery.
+After the current-main synchronization both rule sets are present: this branch's
+shared catalogue (task 01) and upstream main's bounded catalogue (task 02).
+## Operator rule catalog follow-up
+
+[Task 03](task-03-operator-rule-catalog.md) implements requirement 003 on top of
+the [keyword context task 02](task-02-keyword-context.md): a startup-loaded local JSON/YAML catalog evaluated after built-in rules
+and before the keyword/context fallback. Unset keeps the built-in behavior.

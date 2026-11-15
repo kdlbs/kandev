@@ -10,17 +10,25 @@ import (
 
 // MayClassify reports whether Classify could return anything other than its
 // default, unmatched classification for this input, without running the rule
-// engine. A false result guarantees that Classify returns its phase default;
-// a true result only means the rules still have to run.
+// engine. It is a conservative pre-check: a false result guarantees Classify
+// would have produced its default Low-confidence error, and a true result only
+// means the rules still have to run.
 //
-// Structured evidence is never gated: a structured error, an HTTP or ACP
-// status, an error kind or provider code, an exit code, a managed runtime
-// package, enabled keyword context, or an injected provider failure makes the
-// answer true regardless of text.
+// Callers on a per-frame hot path use it to skip classification for text that
+// cannot carry any rule evidence. The ACP adapter classifies the text of every
+// assistant message chunk, so the classifier has to stay off the per-chunk
+// path for ordinary prose.
+//
+// The guarantee covers Stderr and Stdout only. Structured evidence is never
+// gated: an injected provider failure, an HTTP status, or an exit code
+// classifies from the Input alone, so any of them makes the answer true
+// regardless of text. A loaded operator catalog and the opt-in keyword
+// context also match free text, so either one makes the answer true.
 func MayClassify(in Input) bool {
-	if in.StructuredErr != nil || in.HTTPStatus != 0 || in.ACPCode != 0 ||
-		in.ErrorKind != "" || in.ProviderCode != "" || in.ExitCode != nil ||
-		in.ManagedRuntimePackageSpec != "" || in.KeywordContext.Enabled {
+	if in.KeywordContext.Enabled && in.KeywordContext.Diagnostic {
+		return true
+	}
+	if hasStructuredClassificationEvidence(in) {
 		return true
 	}
 	if inj := getInjection(); inj != nil {
@@ -28,14 +36,41 @@ func MayClassify(in Input) bool {
 			return true
 		}
 	}
-	return mayMatchText(in.Stderr) || mayMatchText(in.Stdout)
+	if externalCatalog.Load() != nil {
+		return true
+	}
+	if !gateEnabled {
+		return true
+	}
+	if _, ok := gateCustomMatcherProviders[in.ProviderID]; ok {
+		return true
+	}
+	text := in.Stderr + "\n" + in.Stdout
+	// Go regexp's Unicode case folds include non-ASCII variants of ASCII
+	// letters. Do not reject those through an ASCII literal comparison.
+	for _, r := range text {
+		if r > unicode.MaxASCII {
+			return true
+		}
+	}
+	// Classify reads both raw and sanitized evidence; redaction can introduce
+	// placeholder literals, so the prefilter must cover both representations.
+	return mayMatchText(text) || mayMatchText(Sanitize(text))
+}
+
+func hasStructuredClassificationEvidence(in Input) bool {
+	return in.HTTPStatus != 0 || in.ExitCode != nil || in.StructuredErr != nil ||
+		in.ACPCode != 0 || in.ErrorKind != "" || in.ProviderCode != "" ||
+		in.ManagedRuntimePackageSpec != "" || in.ResetHint != nil
 }
 
 // mayMatchText reports whether text contains at least one literal that some
-// rule requires. gateTokens is the union of those literals over the whole
-// catalogue, so a rule can never match text the gate rejects. When the
-// catalogue holds a rule without a provable literal, the gate accepts every
-// text.
+// matching rule requires. gateTokens is the union of those literals over the
+// whole catalogue, so a rule can never match text the gate rejects.
+//
+// The union is derived from the rule patterns themselves (see patternGateTokens)
+// rather than hand-listed, because a hand-listed token set rots silently. A
+// pattern without a derivable cover disables the gate instead.
 func mayMatchText(text string) bool {
 	if !gateEnabled {
 		return true
@@ -44,10 +79,6 @@ func mayMatchText(text string) bool {
 		return false
 	}
 	lower := strings.ToLower(text)
-	if strings.ContainsRune(lower, 'ſ') {
-		// Case-insensitive patterns fold U+017F onto "s"; ToLower does not.
-		lower = strings.ReplaceAll(lower, "ſ", "s")
-	}
 	for _, token := range gateTokens {
 		if strings.Contains(lower, token) {
 			return true
@@ -57,31 +88,23 @@ func mayMatchText(text string) bool {
 }
 
 // gateTokenMinLen is the shortest literal run that may act as a gate token.
-// Shorter runs appear in ordinary prose too often to filter anything.
+// Shorter runs appear in ordinary prose often enough to make the gate useless,
+// so they are dropped; a pattern left without a usable run disables the gate.
 const gateTokenMinLen = 4
 
 // gateTokens is the sorted, de-duplicated union of every rule's required
-// literals. gateEnabled is false when some rule has neither a derivable nor a
-// declared token, and then the gate rejects nothing.
-var gateTokens, gateEnabled = buildGateTokens()
+// literals. gateEnabled is false when the catalogue holds a rule the derivation
+// cannot cover, in which case the gate stops rejecting anything.
+// gateCustomMatcherProviders lists providers whose runtime rules use a custom
+// matcher; their text is always classified.
+var gateTokens, gateCustomMatcherProviders, gateEnabled = buildGateTokens()
 
-// gateTokensByRuleID supplies tokens for rules that match through a custom
-// matcher instead of a pattern, or whose pattern has a match path without a
-// usable literal. Each entry lists one token per match path.
-var gateTokensByRuleID = map[string][]string{
-	// A bare line-leading "429" is one of its match paths; every other path
-	// carries "limit".
-	"claude.stderr.rate.v1":                {"429", "limit"},
-	cursorRetriableResourceExhaustedRuleID: {"retriableerror"},
-	cursorRetriableUnavailableRuleID:       {"retriableerror"},
-	cursorRetriableConnectionStalledRuleID: {"retriableerror"},
-	cursorRetriableStreamResetRuleID:       {"retriableerror"},
-}
-
-// buildGateTokens collects the catalogue's required literals and reports
-// whether every rule is covered.
-func buildGateTokens() ([]string, bool) {
+// buildGateTokens collects the catalogue's required literals. It reports false
+// when some rule has no derivable token and is not scoped to one provider,
+// because the union would then not cover that rule.
+func buildGateTokens() ([]string, map[string]struct{}, bool) {
 	seen := make(map[string]struct{})
+	customProviders := make(map[string]struct{})
 	covered := true
 	collect := func(ruleID string, pattern *regexp.Regexp) {
 		if !collectRuleTokens(seen, ruleID, pattern) {
@@ -97,18 +120,28 @@ func buildGateTokens() ([]string, bool) {
 		collect(r.id, r.pattern)
 	}
 	for _, r := range runtimeEnvironmentRules {
-		pattern := r.pattern
-		if r.match != nil {
-			pattern = nil
+		if r.pattern == nil && r.match != nil && r.providerID != "" {
+			// A provider-scoped custom matcher keeps that provider ungated
+			// instead of disabling the gate for every provider.
+			customProviders[r.providerID] = struct{}{}
+			continue
 		}
-		collect(r.id, pattern)
+		collect(r.id, r.pattern)
 	}
 	tokens := make([]string, 0, len(seen))
 	for token := range seen {
 		tokens = append(tokens, token)
 	}
 	sort.Strings(tokens)
-	return tokens, covered
+	return tokens, customProviders, covered
+}
+
+// gateTokensByRuleID supplies tokens for rules whose pattern has a match path
+// without a usable literal. Each entry lists one token per match path.
+var gateTokensByRuleID = map[string][]string{
+	// A bare line-leading "429" is one of its match paths; every other path
+	// carries "limit".
+	"claude.stderr.rate.v1": {"429", "limit"},
 }
 
 func collectRuleTokens(seen map[string]struct{}, ruleID string, pattern *regexp.Regexp) bool {
@@ -126,11 +159,9 @@ func collectRuleTokens(seen map[string]struct{}, ruleID string, pattern *regexp.
 	return true
 }
 
-// patternGateTokens returns the literals the gate looks for on behalf of
-// pattern, one per required term, or nil when some match path of pattern
-// requires no usable literal. Every literal in a pattern is not enough: for
-// `x(?:longtoken)?y` or `ab|longtoken` the text "xy" or "ab" matches without
-// "longtoken".
+// patternGateTokens returns every literal the gate may look for on behalf of
+// pattern, or nil when no such cover exists: a missing pattern, or a pattern
+// with a match path that requires no usable literal.
 func patternGateTokens(pattern *regexp.Regexp) []string {
 	terms := patternRequiredTerms(pattern)
 	if len(terms) == 0 {
@@ -138,8 +169,8 @@ func patternGateTokens(pattern *regexp.Regexp) []string {
 	}
 	seen := make(map[string]struct{})
 	for _, term := range terms {
-		// Every token of a term is present together, so the longest one alone
-		// still covers the term.
+		// Every token of a term is guaranteed present together, so keeping the
+		// longest is still a cover and keeps the global token set small.
 		seen[longestToken(term)] = struct{}{}
 	}
 	tokens := make([]string, 0, len(seen))
@@ -161,9 +192,8 @@ func patternRequiredTerms(pattern *regexp.Regexp) [][]string {
 	return requiredTerms(mergeAdjacentLiterals(re))
 }
 
-// mergeAdjacentLiterals joins literal siblings of a concatenation. The parser
-// factors alternations around shared prefixes, so `invalid|incorrect` becomes
-// "i" followed by two branches; merging keeps tokens whole.
+// mergeAdjacentLiterals joins literal siblings of a concatenation so derived
+// tokens stay whole words instead of parser-factored fragments.
 func mergeAdjacentLiterals(re *syntax.Regexp) *syntax.Regexp {
 	if re.Op != syntax.OpConcat || len(re.Sub) == 0 {
 		for i, sub := range re.Sub {
@@ -174,31 +204,31 @@ func mergeAdjacentLiterals(re *syntax.Regexp) *syntax.Regexp {
 		return re
 	}
 	merged := &syntax.Regexp{Op: re.Op, Flags: re.Flags, Min: re.Min, Max: re.Max}
-	for _, sub := range re.Sub {
-		sub = mergeAdjacentLiterals(sub)
-		last := len(merged.Sub) - 1
-		if sub.Op == syntax.OpLiteral && last >= 0 && merged.Sub[last].Op == syntax.OpLiteral {
-			prev := merged.Sub[last]
-			merged.Sub[last] = &syntax.Regexp{
+	appendMerged := func(sub *syntax.Regexp) {
+		if sub.Op == syntax.OpLiteral && len(merged.Sub) > 0 && merged.Sub[len(merged.Sub)-1].Op == syntax.OpLiteral {
+			last := merged.Sub[len(merged.Sub)-1]
+			merged.Sub[len(merged.Sub)-1] = &syntax.Regexp{
 				Op:    syntax.OpLiteral,
-				Flags: prev.Flags | sub.Flags,
-				Rune:  append(append([]rune{}, prev.Rune...), sub.Rune...),
+				Flags: last.Flags | sub.Flags,
+				Rune:  append(append([]rune{}, last.Rune...), sub.Rune...),
 			}
-			continue
+			return
 		}
 		merged.Sub = append(merged.Sub, sub)
+	}
+	for _, sub := range re.Sub {
+		appendMerged(mergeAdjacentLiterals(sub))
 	}
 	return merged
 }
 
-// maxRequiredTerms bounds the disjunctive form. Crossing several alternations
-// grows exponentially; past this bound the pattern counts as underivable.
+// maxRequiredTerms bounds the disjunctive form; a wider rule reports no cover
+// and turns the gate off rather than rejecting text it may match.
 const maxRequiredTerms = 64
 
 // requiredTerms returns the literals every match of re is guaranteed to carry,
-// as a disjunction of conjunctions: a match contains every token of at least
-// one returned term. An empty result means some match path requires no usable
-// literal.
+// as a disjunction of conjunctions. An empty result means no match path
+// requires a usable literal.
 func requiredTerms(re *syntax.Regexp) [][]string {
 	switch re.Op {
 	case syntax.OpLiteral:
@@ -212,7 +242,8 @@ func requiredTerms(re *syntax.Regexp) [][]string {
 	case syntax.OpConcat:
 		return concatTerms(re.Sub)
 	case syntax.OpAlternate:
-		// A match takes exactly one branch, so every branch must be covered.
+		// A match takes exactly one branch, so an unguarded branch would let a
+		// match through with no token at all.
 		var terms [][]string
 		for _, sub := range re.Sub {
 			branch := requiredTerms(sub)
@@ -223,7 +254,6 @@ func requiredTerms(re *syntax.Regexp) [][]string {
 		}
 		return terms
 	case syntax.OpPlus, syntax.OpRepeat:
-		// An element with a minimum of zero is optional.
 		if re.Op == syntax.OpPlus || re.Min >= 1 {
 			return requiredTerms(re.Sub[0])
 		}
@@ -231,8 +261,8 @@ func requiredTerms(re *syntax.Regexp) [][]string {
 	return nil
 }
 
-// concatTerms crosses the requirements of a concatenation's elements, since a
-// match carries all of them at once.
+// concatTerms crosses the requirements of a concatenation's elements and
+// reports an unrepresentable product as an absence rather than approximating.
 func concatTerms(subs []*syntax.Regexp) [][]string {
 	terms := [][]string{{}}
 	required := false
@@ -291,7 +321,7 @@ func mergeTokens(term, element []string) []string {
 	return merged
 }
 
-// longestLiteralRun returns the longest ASCII alphanumeric run of at least
+// longestLiteralRun returns the longest alphanumeric run of at least
 // gateTokenMinLen characters in runes, lowercased.
 func longestLiteralRun(runes []rune) string {
 	best := ""

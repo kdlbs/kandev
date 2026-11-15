@@ -33,29 +33,35 @@ literals each match must contain, as a disjunction over alternation paths:
   derived tokens;
 - an optional element contributes nothing.
 
-Adjacent literals are merged before the walk so that tokens stay whole. A rule
-with a custom matcher, or a pattern with an uncovered path, uses
-`gateTokensByRuleID`, one token per match path. If any rule has neither, the
-gate is off and `MayClassify` accepts every text.
+Adjacent literals are merged before the walk so that tokens stay whole. A
+pattern with an uncovered path uses `gateTokensByRuleID`, one token per match
+path. A provider-scoped runtime rule with a custom matcher leaves that provider
+ungated, so every text from it is classified. If any other rule has no tokens,
+the gate is off and `MayClassify` accepts every text.
 
-Text is lowercased before the token search, and U+017F is folded to `s`, so
-case-insensitive patterns cannot match text the gate rejects. Stderr and Stdout
-are checked separately; tokens contain no newline, so the joined text used by
-`Classify` adds no match.
+Stderr and Stdout are joined as `Classify` joins them. Text containing any
+non-ASCII character is accepted, because Go's case-insensitive matching folds
+non-ASCII letters onto ASCII ones. Otherwise the text is lowercased and searched
+for a token, both as given and after `Sanitize`, since `Classify` reads the
+redacted form too and redaction can introduce placeholder literals.
+
+A loaded operator catalog adds rules the gate does not know, so while one is
+loaded `MayClassify` accepts every text.
 
 ## Structured evidence
 
 Any non-text classifier input returns true: `StructuredErr`, `HTTPStatus`,
 `ACPCode`, `ErrorKind`, `ProviderCode`, `ExitCode`,
-`ManagedRuntimePackageSpec`, `KeywordContext.Enabled`, or an injected failure
-for the provider.
+`ManagedRuntimePackageSpec`, `ResetHint`, diagnostic keyword context, or an
+injected failure for the provider.
 
 ## Call site
 
-`convertMessageChunkWithProtocolID` sets `ProviderDiagnosticCandidate` through
-`isProviderDiagnosticCandidate`, which returns false when `MayClassify` is
-false and otherwise applies the existing high-confidence, fallback-allowed test
-to `Classify`.
+`convertMessageChunkWithProtocolID` classifies a message chunk only when
+`MayClassify` is true; a skipped chunk has no classification and is not a
+diagnostic candidate unless it continues a recognized usage-limit notice. The
+agent quota-notice buffer is classified through `ClassifyAgentNotice` under the
+same check.
 
 ## Verification obligations
 

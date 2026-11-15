@@ -45,8 +45,9 @@ without losing any classification.
   turn the gate off so that every input is classified.
 - **AC-AGENTS-PROVIDER-ERROR-PREFILTER-001.3:** Structured evidence shall never
   be gated: a structured error, an HTTP or ACP status, an error kind, a provider
-  code, an exit code, a managed runtime package, enabled keyword context, or an
-  injected provider failure shall make `MayClassify` return true.
+  code, an exit code, a managed runtime package, a reset hint, diagnostic keyword
+  context, an injected provider failure, or a loaded operator catalog shall make
+  `MayClassify` return true.
 - **AC-AGENTS-PROVIDER-ERROR-PREFILTER-001.4:** The ACP adapter shall skip
   `Classify` for a message chunk only when `MayClassify` is false, and the
   diagnostic-candidate marker shall stay the same as when every chunk is

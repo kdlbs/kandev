@@ -276,6 +276,17 @@ func TestSanitize_RedactionsGolden(t *testing.T) {
 			mustHave:    []string{"https://endpoint.example.test"},
 		},
 		{
+			name:     "adjacent slash dates are not a path",
+			in:       "renewal window 1/2/2025-3/4/2025 closed",
+			mustHave: []string{"1/2/2025-3/4/2025"},
+		},
+		{
+			name:        "date inside a path is still redacted",
+			in:          "cannot open /tmp/1/2/2025/report.txt now",
+			mustNotHave: []string{"/tmp/1/2/2025/report.txt", "report.txt"},
+			mustHave:    []string{"[path-redacted]"},
+		},
+		{
 			name:        "windows workspace path",
 			in:          `checkout failed in C:\Users\alice\workspace\repo\main.go`,
 			mustNotHave: []string{`C:\Users\alice\workspace\repo\main.go`},

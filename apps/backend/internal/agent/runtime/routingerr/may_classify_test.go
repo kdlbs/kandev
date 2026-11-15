@@ -17,25 +17,28 @@ const defaultPromptRule = "phase.poststart.unknown"
 
 func TestMayClassifyGateCoversEveryRule(t *testing.T) {
 	var uncovered []string
-	check := func(id string, tokens []string) {
-		if len(tokens) == 0 {
+	check := func(id string, pattern *regexp.Regexp) {
+		if len(ruleGateTokens(id, pattern)) == 0 {
 			uncovered = append(uncovered, id)
 		}
 	}
 	for _, rules := range providerRules {
 		for _, r := range rules {
-			check(r.id, ruleGateTokens(r.id, r.pattern))
+			check(r.id, r.pattern)
 		}
 	}
 	for _, r := range providerNeutralRules {
-		check(r.id, ruleGateTokens(r.id, r.pattern))
+		check(r.id, r.pattern)
 	}
 	for _, r := range runtimeEnvironmentRules {
-		pattern := r.pattern
-		if r.match != nil {
-			pattern = nil
+		if r.pattern == nil && r.match != nil && r.providerID != "" {
+			// A provider-scoped custom matcher leaves only that provider ungated.
+			if _, ok := gateCustomMatcherProviders[r.providerID]; !ok {
+				t.Errorf("custom matcher rule %s does not leave provider %q ungated", r.id, r.providerID)
+			}
+			continue
 		}
-		check(r.id, ruleGateTokens(r.id, pattern))
+		check(r.id, r.pattern)
 	}
 	sort.Strings(uncovered)
 	if len(uncovered) > 0 || !gateEnabled {
@@ -120,6 +123,8 @@ var extraGateSamples = []string{
 	AntigravityProviderOverloadedMessage,
 	AntigravityUnknownMessage,
 	AntigravityOutcomeUnverifiedMessage,
+	"You have reached your current quota for this period. Your limit will reset in 3 hours.",
+	"It looks like you reached your current quota for this period, sorry.",
 	"bash: claude: command not found",
 	"error: model_not_found",
 	"npm error code ENOTEMPTY\nnpm error path /tmp/x/.npm/_npx/0a1b2c3d/node_modules",
