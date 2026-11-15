@@ -18,6 +18,9 @@ func (s *Service) resumeLegacyNativeRestart(ctx context.Context, session *models
 	if session == nil || session.State != models.TaskSessionStateWaitingForInput || !silentRestoreSessionRouteEligible(session) {
 		return false, nil
 	}
+	if _, exists := models.LoadAgentDeliveryRecovery(session.Metadata); exists {
+		return false, nil
+	}
 	source, err := s.legacyNativeRestartSource(ctx, session)
 	if err != nil || source == nil {
 		return false, err

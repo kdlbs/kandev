@@ -2,7 +2,7 @@
 status: draft
 system: tasks
 created: 2026-09-09
-updated: 2026-09-28
+updated: 2026-11-11
 owners:
   - kandev
 ---
@@ -222,6 +222,47 @@ promise an equivalent plugin UI already exists. Existing authorized human APIs
 continue to satisfy the recovery contracts in criteria 001.16 and 003.13.
 Plugin presentation and any future native recovery entry require separate scope.
 
+### REQ-TASKS-COMPLETION-005: One completion rule and atomic completion admission
+
+**Intent:** Every path that completes a task uses the same definition of a
+completing step, the same admission checks, and the same completion effects.
+Office human Done (`REQ-OFFICE-HUMAN-DONE-002`) is one consumer of this
+contract, not a special case inside the task system.
+
+#### Acceptance criteria
+
+- **AC-TASKS-COMPLETION-005.1:** "Final step" (no successor by position) and
+  "completing step" (final step with completion enabled) shall each have one
+  definition. Every check that decides either fact, in Go or in SQL, shall
+  produce the same answer for the same committed workflow, including tied
+  maximum positions.
+- **AC-TASKS-COMPLETION-005.2:** A completion policy contributed by another
+  system shall be evaluated inside the same transaction as the task write it
+  admits. A refused completion shall leave the task's step, state, decisions,
+  and step-entry actions unchanged and shall publish no task event.
+- **AC-TASKS-COMPLETION-005.3:** Human authority for a completion shall apply
+  only to the write that the human request named. Step-entry actions, event
+  handlers, and any later write caused by that request shall be evaluated with
+  their own actor, and shall neither inherit human authority nor be refused
+  because of the earlier request's scope.
+- **AC-TASKS-COMPLETION-005.4:** When a task's committed state becomes
+  `COMPLETED`, `FAILED`, or `CANCELLED`, dependents, the parent, and a linked
+  routine run shall observe that transition regardless of the destination
+  step's name and regardless of whether the task has an assignee. Repeated
+  delivery shall not repeat these effects. For Office dependencies, only
+  `COMPLETED` satisfies a blocker. `FAILED` and `CANCELLED` keep dependents
+  held and use the failure escalation in
+  `REQ-OFFICE-BLOCKER-POLICY-002`.
+- **AC-TASKS-COMPLETION-005.5:** A bulk move shall check every task's move
+  admission, including completion policies and completion gates, before it
+  moves any task. When any task is refused at that check, no task shall move
+  and the response shall identify each refused task and its reason.
+- **AC-TASKS-COMPLETION-005.6:** When a task is refused after the batch check
+  passed (a concurrent change), the response shall report which tasks moved
+  and which task was refused, with its reason. The user shall see that result
+  as visible text on desktop and phone, and the board shall show the actual
+  placement of every task.
+
 ## Compatibility and exclusions
 
 This contract replaces name-based workflow completion and the permanent
@@ -245,6 +286,7 @@ executor, or change physical workspace ownership.
 - [Task completion and follow-ups](../../../plans/task-completion/plan.md)
 - [Workspace restoration after completion](../../../plans/completed-workspace-restoration/plan.md)
 - [Remove native coordination controls](../../../plans/remove-native-coordination-ui/plan.md)
+- [Completion policy consolidation](../../../plans/completion-policy-consolidation/plan.md)
 
 ## Coordination controls
 

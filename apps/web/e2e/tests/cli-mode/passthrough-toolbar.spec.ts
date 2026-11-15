@@ -193,70 +193,13 @@ test.describe("CLI mode: passthrough toolbar", () => {
     await expect(testPage.getByTestId("passthrough-composer")).toBeHidden({ timeout: 5_000 });
   });
 
-  test("narrow toolbar wraps complete PR and provider controls without overflow", async ({
+  test("narrow toolbar wraps complete PR controls without overflow", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
     test.setTimeout(120_000);
     await testPage.setViewportSize({ width: 320, height: 800 });
-    await apiClient.mockAzureDevOpsSeed({
-      authenticated: true,
-      user: { ok: true, id: "user-1", displayName: "Ada Reviewer" },
-      pullRequests: [
-        {
-          id: 42,
-          title: "Azure companion PR",
-          status: "active",
-          isDraft: false,
-          sourceBranch: "refs/heads/feature/narrow-toolbar",
-          targetBranch: "refs/heads/main",
-          author: { id: "user-1", displayName: "Ada Reviewer" },
-          projectId: "project-1",
-          projectName: "Platform",
-          repositoryId: "azure-repo-1",
-          repositoryName: "api",
-          webUrl: "https://dev.azure.com/acme/Platform/_git/api/pullrequest/42",
-          apiUrl: "https://dev.azure.com/acme/Platform/_apis/git/pullrequests/42",
-        },
-      ],
-      feedback: {
-        "42": {
-          pullRequest: {
-            id: 42,
-            title: "Azure companion PR",
-            status: "active",
-            isDraft: false,
-            sourceBranch: "refs/heads/feature/narrow-toolbar",
-            targetBranch: "refs/heads/main",
-            author: { id: "user-1", displayName: "Ada Reviewer" },
-            projectId: "project-1",
-            projectName: "Platform",
-            repositoryId: "azure-repo-1",
-            repositoryName: "api",
-            webUrl: "https://dev.azure.com/acme/Platform/_git/api/pullrequest/42",
-            apiUrl: "https://dev.azure.com/acme/Platform/_apis/git/pullrequests/42",
-          },
-          reviewers: [],
-          threads: [],
-          linkedWorkItems: [],
-          policies: [],
-          reviewState: "pending",
-          policyState: "pending",
-        },
-      },
-    });
-    await apiClient.setAzureDevOpsConfig(seedData.workspaceId, {
-      organizationUrl: "https://dev.azure.com/acme",
-      pat: "azure-test-pat",
-    });
-    await apiClient.updateRepository(seedData.repositoryId, {
-      provider: "azure_devops",
-      provider_repo_id: "azure-repo-1",
-      provider_host: "dev.azure.com/acme",
-      provider_owner: "project-1",
-      provider_name: "azure-repo-1",
-    });
     const profileId = await createPassthroughProfile(apiClient, "CLI Narrow Toolbar");
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -268,12 +211,6 @@ test.describe("CLI mode: passthrough toolbar", () => {
         workflow_step_id: seedData.startStepId,
         repository_ids: [seedData.repositoryId],
       },
-    );
-    await apiClient.associateAzureDevOpsTaskPR(
-      seedData.workspaceId,
-      task.id,
-      seedData.repositoryId,
-      42,
     );
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetUser("test-user");
@@ -313,7 +250,6 @@ test.describe("CLI mode: passthrough toolbar", () => {
     await expect(chip.getByTestId("pr-status-auto-fix-chip")).toBeVisible();
     await expect(chip.getByTestId("pr-status-auto-merge-chip")).toBeVisible();
     await expect(chip.getByTestId("pr-status-pr-events-chip")).toHaveText("PR events 3/3");
-    await expect(row.getByRole("link", { name: /Azure PR 42/ })).toBeVisible();
 
     for (const width of [320, 280]) {
       await testPage.setViewportSize({ width, height: 800 });

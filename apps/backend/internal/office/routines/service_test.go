@@ -163,8 +163,7 @@ func TestDispatch_CoalesceIfActive(t *testing.T) {
 // (the office-routine-runs symptom: 323 consecutive coalesces after one
 // fire). Each cycle fires, expects a fresh task_created run (not
 // skipped/coalesced against a prior cycle), then simulates the linked
-// task reaching Done via SyncRunStatus — the seam finalizeDone calls in
-// production.
+// task reaching a committed terminal state via SyncRunStatus.
 func TestDispatch_HeavyRoutine_SyncRunStatusUnblocksNextFire(t *testing.T) {
 	svc := newTestRoutineService(t)
 	ctx := context.Background()
@@ -582,10 +581,8 @@ func TestDispatch_LightweightRoutine_SubsequentFiresMaterialise(t *testing.T) {
 }
 
 // TestDispatch_HeavyRoutine_GateSelfHealsWhenTaskTerminatesWithoutEvent is
-// the R1 regression test: no production publisher of events.TaskMoved
-// ever sets to_step_name (office-routine-runs review round 1), so
-// SyncRunStatus is never reached by that event in production and cannot
-// be the only way a heavy run's gate clears. This drives the actual
+// the R1 regression test: a dropped task.state_changed event must not
+// leave a heavy run's gate active forever. This drives the actual
 // production seam — FireManual -> dispatchRoutineRun ->
 // applyConcurrencyPolicy — with no call to SyncRunStatus at all: the
 // linked task's row is updated directly (as the real `tasks` table would
@@ -613,7 +610,7 @@ func TestDispatch_HeavyRoutine_GateSelfHealsWhenTaskTerminatesWithoutEvent(t *te
 			}
 
 			// Mirror the shared `tasks` table's shape and mark the linked
-			// task COMPLETED directly — no TaskMoved event, no
+			// task COMPLETED directly — no task.state_changed event, no
 			// SyncRunStatus call. This is what the row looks like after a
 			// real task-service move in production.
 			if _, err := db.ExecContext(ctx,

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -24,26 +25,33 @@ type nativeResumeUnprovenCompletionVerifier interface {
 
 func (s *Service) checkNativeResumeDeliveryBlock(ctx context.Context, taskID, sessionID string) error {
 	block, err := s.GetOpenSessionRecoveryBlock(ctx, sessionID)
-	if err != nil || block == nil || block.Reason != durableDeliveryUnresolvedReason {
-		return err
+	if err != nil {
+		return requiredDeliveryRecoveryError(nil, block, err)
+	}
+	if block == nil || block.Reason != durableDeliveryUnresolvedReason {
+		return nil
 	}
 	// Office recovery releases scheduler admission rather than resuming a
 	// native conversation here, so its existing durable-work gate remains.
 	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
 	if err != nil {
-		return err
+		return requiredDeliveryRecoveryError(nil, block, err)
 	}
 	if isOfficeTask {
-		return &sessionRecoveryRequiredError{Block: block}
+		return &sessionRecoveryRequiredError{Block: block, DeliveryRefusalReason: agentruntime.DeliveryRecoveryRefusalOfficeOwned}
 	}
 	_, canAcknowledge := s.agentManager.(nativeResumeDeliveryAcknowledger)
 	reader, canRead := s.repo.(nativeResumeDeliverySubmissionReader)
-	if !canAcknowledge || !canRead {
-		return &sessionRecoveryRequiredError{Block: block}
+	if !canAcknowledge {
+		return &sessionRecoveryRequiredError{Block: block, DeliveryRefusalReason: agentruntime.DeliveryRecoveryRefusalExecutionUnavailable}
+	}
+	if !canRead {
+		return &sessionRecoveryRequiredError{Block: block, DeliveryRefusalReason: agentruntime.DeliveryRecoveryRefusalEvidenceUnavailable}
 	}
 	submissions, err := reader.ListAgentDeliverySubmissions(ctx, sessionID)
 	if err != nil {
-		return fmt.Errorf("read native resume delivery evidence: %w", err)
+		cause := fmt.Errorf("read native resume delivery evidence: %w", err)
+		return &sessionRecoveryRequiredError{Block: block, DeliveryRefusalReason: agentruntime.DeliveryRecoveryRefusalEvidenceUnavailable, internalCause: cause}
 	}
 	unknown := false
 	for _, submission := range submissions {
@@ -52,13 +60,13 @@ func (s *Service) checkNativeResumeDeliveryBlock(ctx context.Context, taskID, se
 		}
 		switch submission.State {
 		case models.DeliverySubmissionPrepared, models.DeliverySubmissionAccepted:
-			return &sessionRecoveryRequiredError{Block: block}
+			return &sessionRecoveryRequiredError{Block: block, DeliveryRefusalReason: agentruntime.DeliveryRecoveryRefusalLiveWork}
 		case models.DeliverySubmissionDispatching:
 			if block.ConsumerReference == agentDeliveryConsumer && block.DeliverySubmissionID == "" && block.DeliveryStreamID == "" {
 				unknown = true
 				continue
 			}
-			return &sessionRecoveryRequiredError{Block: block}
+			return &sessionRecoveryRequiredError{Block: block, DeliveryRefusalReason: agentruntime.DeliveryRecoveryRefusalLiveWork}
 		case models.DeliverySubmissionInterruptedUnknown:
 			unknown = true
 		case models.DeliverySubmissionCompleted:
@@ -68,7 +76,7 @@ func (s *Service) checkNativeResumeDeliveryBlock(ctx context.Context, taskID, se
 		}
 	}
 	if !unknown && !s.canProveSettledNativeDeliveryBlock(block) {
-		return &sessionRecoveryRequiredError{Block: block}
+		return &sessionRecoveryRequiredError{Block: block, DeliveryRefusalReason: agentruntime.DeliveryRecoveryRefusalEvidenceUnavailable}
 	}
 	return nil
 }
@@ -173,6 +181,9 @@ func (s *Service) finishLoadedNativeDeliveryBlock(ctx context.Context, block *mo
 	changed, err := resolver.ResolveSessionRecoveryBlockWithNativeEvidence(ctx, block.ID, proof, time.Now().UTC())
 	if err == nil && changed {
 		s.publishAgentDeliveryRecoveryState(ctx, block.SessionID)
+		if err := s.publishPendingRecoveryNotice(ctx, block.SessionID); err != nil {
+			return changed, err
+		}
 	}
 	return changed, err
 }
@@ -192,16 +203,10 @@ func (s *Service) canProveSettledNativeDeliveryBlock(block *models.SessionRecove
 func (s *Service) joinLiveNativeResume(
 	ctx context.Context, candidate *resumeSessionCandidate, taskID, sessionID string,
 ) (*executor.TaskExecution, bool, error) {
-	if candidate.session != nil && isTerminalSessionState(candidate.session.State) {
-		// A terminal session has no live prompt-ready turn to join. Its resume must
-		// run the launch path that commits the new attempt and STARTING state.
-		return nil, false, nil
-	}
-	options := candidate.options
 	claim, _ := ctx.Value(ceilingDispatchClaimContextKey{}).(*ceilingDeferredLaunchClaim)
 	claimedResume := claim != nil && claim.svc == s && claim.held && claim.taskID == taskID &&
 		claim.deferral.Kind == models.CeilingLaunchResume && stringField(claim.deferral.Payload, metaKeySessionID) == sessionID
-	if !liveNativeResumeMayJoin(options, claimedResume) || !s.agentManager.IsAgentRunningForSession(ctx, sessionID) {
+	if !liveNativeResumeMayJoin(candidate, claimedResume) || !s.agentManager.IsAgentRunningForSession(ctx, sessionID) {
 		return nil, false, nil
 	}
 	existing, found := s.executor.GetExecutionBySession(sessionID)
@@ -219,7 +224,12 @@ func (s *Service) joinLiveNativeResume(
 	return existing, true, nil
 }
 
-func liveNativeResumeMayJoin(options executor.ResumeOptions, claimedResume bool) bool {
+func liveNativeResumeMayJoin(candidate *resumeSessionCandidate, claimedResume bool) bool {
+	// A terminal session must launch a new attempt and enter STARTING.
+	if candidate.session != nil && isTerminalSessionState(candidate.session.State) {
+		return false
+	}
+	options := candidate.options
 	return (options.RecoveryAction == recoveryActionResume || claimedResume) &&
 		!options.RequireIdleSuspensionProvenance && !options.AllowBranchReplacement &&
 		!options.RepairWorkspaceInventory && !options.ForceContextContinuation &&

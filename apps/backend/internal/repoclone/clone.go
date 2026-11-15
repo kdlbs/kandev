@@ -232,8 +232,8 @@ func (c *Cloner) WorkspaceProviderRepoPath(
 // opaque connection scope and immutable repository ID. A non-empty scope
 // selects this isolated layout and requires a paired repository ID (the path
 // segment needs both to stay unique); a bare repository ID with no scope is
-// the normal shape for every built-in provider (GitHub, GitLab, Azure
-// DevOps) — none of them resolve a provider connection scope — so it falls
+// the normal shape for every built-in provider (GitHub, GitLab) — neither
+// resolves a provider connection scope — so it falls
 // through to the legacy origin/owner/name layout below, same as when both
 // are empty.
 func (c *Cloner) WorkspaceProviderRepositoryPath(
@@ -701,7 +701,7 @@ func (c *Cloner) workspaceCloneAuthRequest(
 	if provider == "" {
 		provider = githubProvider
 	}
-	if provider != githubProvider && (provider == gitlabProvider || provider == "azure_devops" || strings.TrimSpace(token) != "") {
+	if provider != githubProvider && (provider == gitlabProvider || strings.TrimSpace(token) != "") {
 		auth, err := credentialAuth(request.CloneURL, credentialOrigin, token)
 		return request.CloneURL, auth, err
 	}

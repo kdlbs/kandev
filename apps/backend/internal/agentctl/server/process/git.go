@@ -1540,12 +1540,6 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 	provider := g.detectPRProvider(remoteURL)
 	var gitLabInfo *gitLabRepoInfo
 	switch provider {
-	case prProviderAzureRepos:
-		result.Provider = string(prProviderAzureRepos)
-		if _, parseErr := parseAzureRepoInfo(remoteURL); parseErr != nil {
-			result.Error = parseErr.Error()
-			return result, nil
-		}
 	case prProviderGitHub:
 		result.Provider = string(prProviderGitHub)
 	case prProviderGitLab:
@@ -1557,7 +1551,7 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 		}
 	default:
 		result.Error = fmt.Sprintf(
-			"unsupported git remote for PR creation: %s (GitHub, GitLab, and Azure Repos are supported)",
+			"unsupported git remote for PR creation: %s (GitHub and GitLab are supported)",
 			redactRemoteURL(remoteURL),
 		)
 		return result, nil
@@ -1586,11 +1580,6 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 	g.logger.Debug("pushed branch to remote", zap.String("output", g.sanitizeGitPushOutput(pushOutput)))
 
 	switch provider {
-	case prProviderAzureRepos:
-		return g.createPRWithRetryAfterPush(ctx, result, title, body,
-			func() (*PRCreateResult, error) {
-				return g.createAzureReposPR(ctx, result, remoteURL, branch, title, body, baseBranch, draft)
-			})
 	case prProviderGitHub:
 		return g.createPRWithRetryAfterPush(ctx, result, title, body,
 			func() (*PRCreateResult, error) {
@@ -1727,7 +1716,7 @@ func isRetryablePRCreationFailure(err error, result *PRCreateResult) bool {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(result.Provider)) {
-	case string(prProviderGitHub), string(prProviderGitLab), string(prProviderAzureRepos):
+	case string(prProviderGitHub), string(prProviderGitLab):
 		return true
 	default:
 		return false

@@ -4,7 +4,7 @@ import { waitForFiniteAnimations } from "../../helpers/animations";
 import { waitForHttp } from "../../helpers/causal-waits";
 import type { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import { installRuntimeUpdateFixture } from "./agent-runtime-update-helpers";
-import { compactRuntimeSettings, retainRuntimePolicyDraft } from "./agent-runtime-settings-helpers";
+import { compactRuntimeSettings } from "./agent-runtime-settings-helpers";
 
 export async function localizedReleaseNotice(
   page: Page,
@@ -35,6 +35,82 @@ export async function localizedReleaseNotice(
   await capture?.screenshot("localized-release-notice", {
     caption: "Application update notices use the active language and retain the release version.",
   });
+}
+
+async function runtimeAwarenessDetails(
+  page: Page,
+  {
+    mobile,
+    capture,
+    runtime,
+    statuses,
+    setStatuses,
+    policyWrites,
+  }: {
+    mobile: boolean;
+    capture: PrAssetCapture | undefined;
+    runtime: Awaited<ReturnType<typeof installRuntimeUpdateFixture>>;
+    statuses: AgentUpdateStatus[];
+    setStatuses: (statuses: AgentUpdateStatus[]) => void;
+    policyWrites: () => number;
+  },
+) {
+  await page.goto("/settings/agents#runtime-update-kimi-acp");
+  const native = page.getByTestId(`runtime-guidance-${mobile ? "drawer" : "dialog"}-kimi-acp`);
+  await expect(native).toContainText("Managed externally");
+  await expect(native.getByRole("switch")).toHaveCount(0);
+  await expect(native.getByRole("link", { name: "Manual update guidance" })).toHaveAttribute(
+    "href",
+    /kimi/,
+  );
+  await page.goto("/settings/agents#runtime-update-cursor-acp");
+  const unknown = page.getByTestId(`runtime-guidance-${mobile ? "drawer" : "dialog"}-cursor-acp`);
+  await expect(unknown).toContainText("Latest: Unknown");
+  await expect(unknown).not.toContainText("Up to date");
+
+  statuses = statuses.map((status) =>
+    status.agent_name === "claude-acp"
+      ? {
+          ...status,
+          last_outcome: {
+            id: "failed-validation",
+            status: "failed",
+            previous_version: "0.62.0",
+            target_version: "0.64.0",
+            finished_at: "2026-07-26T12:05:00.000Z",
+          },
+        }
+      : status,
+  );
+  runtime.setStatusResponse(statuses);
+  setStatuses(statuses);
+
+  const detail = page.getByTestId(`agent-update-${mobile ? "drawer" : "dialog"}-claude-acp`);
+  await page.goto("/settings/agents#runtime-update-claude-acp");
+  await page.reload();
+  const automatic = detail.getByRole("switch", { name: "Automatic updates" });
+  await expect(automatic).not.toBeChecked();
+  await automatic.click();
+  await expect(page.getByTestId("runtime-policy-dirty-footer")).toBeVisible();
+  expect(policyWrites()).toBe(0);
+  await page.getByTestId("runtime-policy-save").click();
+  await expect.poll(policyWrites).toBe(1);
+  await expect(automatic).toBeChecked();
+  await page.reload();
+  await expect(detail).toContainText("could not activate");
+  await expect(automatic).toBeChecked();
+  await capture?.screenshot("runtime-settings", {
+    caption: "Saved consent, version ownership and retained failure recovery in Agents settings.",
+  });
+  await expect(detail).toBeVisible();
+  await waitForFiniteAnimations(detail);
+  await expect(detail).toContainText("0.62.0 → 0.64.0");
+  await expect(detail).toContainText("claude-agent-acp@0.64.0");
+  await capture?.screenshot("runtime-version-control", {
+    caption: "Managed version selection retains the existing desktop dialog and phone drawer.",
+  });
+  expect(runtime.postCount()).toBe(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
 }
 
 export async function runtimeAwareness(page: Page, mobile = false, capture?: PrAssetCapture) {
@@ -165,7 +241,9 @@ export async function runtimeAwareness(page: Page, mobile = false, capture?: PrA
   });
   await page.goto("/settings/agents#runtime-updates");
   await expect(page).toHaveURL(/settings\/agents#runtime-updates$/);
-  await expect(page.locator("#runtime-updates > details")).toHaveAttribute("open");
+  await expect(
+    page.getByTestId(mobile ? "runtime-manager-drawer" : "runtime-manager-dialog"),
+  ).toBeVisible();
   await page.goto("/");
   await runtime.emit("system.update_available", {
     agent_name: "kimi-acp",
@@ -194,6 +272,15 @@ export async function runtimeAwareness(page: Page, mobile = false, capture?: PrA
   await review.click();
   await expect(page).toHaveURL(/settings\/agents#runtime-update-kimi-acp$/);
   await expect(toast).toHaveCount(0);
+  const nativeDetails = page.getByTestId(
+    `runtime-guidance-${mobile ? "drawer" : "dialog"}-kimi-acp`,
+  );
+  await expect(nativeDetails).toBeVisible();
+  await expect(nativeDetails).toContainText("Managed externally");
+  await expect(nativeDetails.getByRole("link", { name: "Manual update guidance" })).toHaveAttribute(
+    "href",
+    /kimi/,
+  );
   const statusAfterNotice = waitForHttp(page, "GET", /\/agent-update\/status$/);
   await page.goto("/");
   await statusAfterNotice;
@@ -244,65 +331,19 @@ export async function runtimeAwareness(page: Page, mobile = false, capture?: PrA
   });
   await reviewSummary.click();
   await expect(page).toHaveURL(/settings\/agents#runtime-updates$/);
-  await expect(page.locator("#runtime-updates > details")).toHaveAttribute("open");
+  await expect(
+    page.getByTestId(mobile ? "runtime-manager-drawer" : "runtime-manager-dialog"),
+  ).toBeVisible();
   await expect(summaryToast).toHaveCount(0);
   await page.goto("/");
-
-  await page.goto("/settings/agents#runtime-update-kimi-acp");
-  const managed = page.getByTestId("runtime-policy-claude-acp");
-  const automatic = managed.getByRole("switch", { name: "Automatic updates" });
-  await expect(automatic).not.toBeChecked();
-  await automatic.click();
-  await retainRuntimePolicyDraft(page);
-  expect(policyWrites).toBe(0);
-  await page.getByTestId("settings-floating-save").getByRole("button", { name: /Save/i }).click();
-  await expect.poll(() => policyWrites).toBe(1);
-  await expect(automatic).toBeChecked();
-  await page.reload();
-  await expect(automatic).toBeChecked();
-  const native = page.getByTestId("runtime-policy-kimi-acp");
-  await expect(native).toContainText("Managed externally");
-  await expect(native.getByRole("switch")).toHaveCount(0);
-  await expect(native.getByRole("link", { name: "Manual update guidance" })).toHaveAttribute(
-    "href",
-    /kimi/,
-  );
-  const unknown = page.getByTestId("runtime-policy-cursor-acp");
-  await expect(unknown).toContainText("Latest: Unknown");
-  await expect(unknown).not.toContainText("Up to date");
-  statuses = statuses.map((status) =>
-    status.agent_name === "claude-acp"
-      ? {
-          ...status,
-          last_outcome: {
-            id: "failed-validation",
-            status: "failed",
-            previous_version: "0.62.0",
-            target_version: "0.64.0",
-            finished_at: "2026-07-26T12:05:00.000Z",
-          },
-        }
-      : status,
-  );
-  runtime.setStatusResponse(statuses);
-  await page.reload();
-  await expect(managed).toContainText("could not activate");
-  await managed.scrollIntoViewIfNeeded();
-  await capture?.screenshot("runtime-settings", {
-    caption: "Saved consent, version ownership and retained failure recovery in Agents settings.",
+  await runtimeAwarenessDetails(page, {
+    mobile,
+    capture,
+    runtime,
+    statuses,
+    setStatuses: (next) => {
+      statuses = next;
+    },
+    policyWrites: () => policyWrites,
   });
-  await managed.getByRole("link", { name: "Manage versions" }).click();
-  await page.getByTestId("agent-update-trigger-claude-acp").click();
-  const versionControl = page.getByTestId(
-    `agent-update-${mobile ? "drawer" : "dialog"}-claude-acp`,
-  );
-  await expect(versionControl).toBeVisible();
-  await waitForFiniteAnimations(versionControl);
-  await expect(versionControl).toContainText("0.62.0 → 0.64.0");
-  await expect(versionControl).toContainText("claude-agent-acp@0.64.0");
-  await capture?.screenshot("runtime-version-control", {
-    caption: "Managed version selection retains the existing desktop dialog and phone drawer.",
-  });
-  expect(runtime.postCount()).toBe(0);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
 }

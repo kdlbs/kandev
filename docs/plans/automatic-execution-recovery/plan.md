@@ -5,6 +5,7 @@ requirements:
   - REQ-PLATFORM-DURABLE-RESTART-RECONCILIATION-001
 system_design:
   - ../../specs/platform/system-design/session-recovery-convergence.md
+  - ../../specs/platform/system-design/automatic-session-recovery-options.md
 ---
 
 # feat(runtime): add opt-in automatic execution recovery policies

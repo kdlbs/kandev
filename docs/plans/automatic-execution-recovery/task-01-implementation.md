@@ -13,6 +13,7 @@ acceptance_criteria:
   - AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.5
 system_design:
   - ../../specs/platform/system-design/session-recovery-convergence.md
+  - ../../specs/platform/system-design/automatic-session-recovery-options.md
 ---
 
 # feat(runtime): add opt-in automatic execution recovery policies
