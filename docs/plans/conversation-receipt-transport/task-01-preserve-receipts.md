@@ -176,3 +176,17 @@ with retries disabled. All 38 tests in the failed CI partition also pass locally
 order, with `CI=1`, one worker, and retries disabled. The lifecycle race checks
 pass after the base update. The CI failure remains unreproduced locally; these
 prior-head results are historical, and fresh remote CI and review remain required.
+
+## CI resource follow-up
+
+The next head passes remote E2E, including the previously failing phone case.
+Backend Static Checks instead fails twice when the Go compiler is killed during
+orchestrator package compilation. The aggregate backend gate fails with it.
+Both attempt logs are retained; neither reports a source lint violation.
+
+The CI lint step now uses the local runner's resource limits: two analysis workers,
+two child Go build workers, and a 3 GiB per-process Go memory target. It preserves
+existing `GOFLAGS`, full backend coverage, and the 15-minute lint deadline. This
+is a validation-only configuration change. The existing 26 workflow contract tests
+and actionlint pass. The equivalent full backend lint passes with zero issues.
+A fresh remote check remains required after commit and push.
