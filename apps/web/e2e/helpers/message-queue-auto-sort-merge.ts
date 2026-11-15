@@ -222,6 +222,7 @@ async function checkCompaction(
   const sort = panel.getByTestId("queue-auto-sort-merge");
   await expect(sort).toBeDisabled();
   await expect(sort).not.toBeChecked();
+  if (mobile) await expectTouchDependencyHelp(page, panel);
   await togglePolicy(panel, watcher, mobile, "merge", true);
   await expect(sort).toBeChecked();
   panel = await openQueue(page, identity);
@@ -229,6 +230,21 @@ async function checkCompaction(
   await expectRows(panel, admitted);
   expect((await apiClient.getQueueStatus(identity)).auto_run).toBe(false);
   return { panel, admitted };
+}
+
+async function expectTouchDependencyHelp(page: Page, panel: Locator) {
+  const help = panel.getByTestId("queue-auto-sort-merge-help");
+  const box = await help.boundingBox();
+  expect(box?.width).toBeGreaterThanOrEqual(44);
+  expect(box?.height).toBeGreaterThanOrEqual(44);
+  await help.tap();
+  const drawer = page.getByRole("dialog");
+  await expect(drawer).toContainText("Requires Auto-merge.");
+  await page.locator('[data-slot="drawer-overlay"][data-state="open"]').tap({
+    position: { x: 16, y: 16 },
+  });
+  await expect(drawer).toBeHidden();
+  await expect(panel.getByTestId("queue-auto-merge")).toBeVisible();
 }
 
 async function checkMobileTargets(page: Page, panel: Locator) {

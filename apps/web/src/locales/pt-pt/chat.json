@@ -119,6 +119,7 @@
   "queueAutoSortMerge": "Ordenar e fundir",
   "queueAutoSortMergeHelp": "Requer fusão automática. Funde mensagens da mesma tarefa de origem, mesmo com outras mensagens pelo meio. Ativar compacta imediatamente a fila pendente.",
   "queueAutoSortMergeRequires": "Requer fusão automática.",
+  "queueAutoSortMergeAbout": "Sobre ordenar e fundir",
   "queuePolicyUnavailable": "A automatização da fila está temporariamente indisponível.",
   "queueAutoRun": "Execução automática",
   "queueAutoRunOffHelp": "Termina a resposta atual e depois as mensagens em fila aguardam.",

@@ -119,6 +119,7 @@
   "queueAutoSortMerge": "自動並べ替え・マージ",
   "queueAutoSortMergeHelp": "自動マージが必要です。ほかのメッセージが間にあっても、同じ送信元タスクのメッセージをマージします。オンにすると保留キューが即座にまとめられます。",
   "queueAutoSortMergeRequires": "自動マージが必要です。",
+  "queueAutoSortMergeAbout": "自動並べ替え・マージについて",
   "queuePolicyUnavailable": "キューの自動処理は一時的に利用できません。",
   "queueAutoRun": "自動実行",
   "queueAutoRunOffHelp": "現在の応答を終了すると、キュー内のメッセージは待機します。",

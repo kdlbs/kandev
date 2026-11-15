@@ -1,11 +1,18 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { QueuePanelHeader, type QueuePanelHeaderProps } from "./queued-ghost-panel-header";
+const touchMocks = vi.hoisted(() => ({ usesTouchDrawer: false }));
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile: false }),
 }));
-afterEach(cleanup);
+vi.mock("@/hooks/use-compact-task-chrome", () => ({
+  useTouchDrawer: () => touchMocks.usesTouchDrawer,
+}));
+afterEach(() => {
+  cleanup();
+  touchMocks.usesTouchDrawer = false;
+});
 
 const props: QueuePanelHeaderProps = {
   count: 1,
@@ -131,5 +138,21 @@ describe("Auto-sort-merge dependency", () => {
     expect(control).toHaveProperty("disabled", disabled);
     const description = document.getElementById(control.getAttribute("aria-describedby") ?? "");
     expect(description).not.toBeNull();
+  });
+
+  it("explains a disabled Auto-sort-merge pill through a touch drawer", () => {
+    touchMocks.usesTouchDrawer = true;
+    render(
+      <TooltipProvider>
+        <QueuePanelHeader {...props} autoMerge={false} />
+      </TooltipProvider>,
+    );
+    expect(screen.getByTestId("queue-auto-sort-merge")).toHaveProperty("disabled", true);
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("queue-auto-sort-merge-help"));
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toContain("Requires Auto-merge.");
   });
 });

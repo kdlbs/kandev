@@ -1,7 +1,19 @@
-import { useId } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { IconInfoCircle } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
 import { Switch } from "@kandev/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { cn } from "@/lib/utils";
 import type { QueuePanelHeaderProps } from "./queued-ghost-panel-header";
 type QueueAutomationPillsProps = Pick<
@@ -120,35 +132,78 @@ function AutoSortMergePill({
   const { t } = useTranslation();
   const id = useId();
   const descriptionId = useId();
+  const usesTouchDrawer = useTouchDrawer();
+  const pill = (
+    <span tabIndex={disabled && !usesTouchDrawer ? 0 : -1} className="inline-flex">
+      <label
+        htmlFor={id}
+        className={cn(
+          pillClassName,
+          disabled ? "opacity-50 pointer-events-none" : "cursor-pointer",
+        )}
+      >
+        <span>{t("chat:queueAutoSortMerge")}</span>
+        <Switch
+          id={id}
+          data-testid="queue-auto-sort-merge"
+          checked={checked}
+          disabled={disabled}
+          onCheckedChange={onChange}
+          aria-label={t("chat:queueAutoSortMerge")}
+          aria-describedby={descriptionId}
+          className="[@media(pointer:coarse)]:after:-inset-y-3.5"
+        />
+      </label>
+    </span>
+  );
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span tabIndex={disabled ? 0 : -1} className="inline-flex">
-          <label
-            htmlFor={id}
-            className={cn(
-              pillClassName,
-              disabled ? "opacity-50 pointer-events-none" : "cursor-pointer",
-            )}
-          >
-            <span>{t("chat:queueAutoSortMerge")}</span>
-            <Switch
-              id={id}
-              data-testid="queue-auto-sort-merge"
-              checked={checked}
-              disabled={disabled}
-              onCheckedChange={onChange}
-              aria-label={t("chat:queueAutoSortMerge")}
-              aria-describedby={descriptionId}
-              className="[@media(pointer:coarse)]:after:-inset-y-3.5"
-            />
-          </label>
+    <>
+      {usesTouchDrawer ? (
+        <span className="inline-flex items-center">
+          {pill}
+          <AutoSortMergeTouchHelp description={t(descriptionKey)} />
         </span>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-[280px]">{t(descriptionKey)}</TooltipContent>
+      ) : (
+        <Tooltip>
+          <TooltipTrigger asChild>{pill}</TooltipTrigger>
+          <TooltipContent className="max-w-[280px]">{t(descriptionKey)}</TooltipContent>
+        </Tooltip>
+      )}
       <span id={descriptionId} className="sr-only">
-        {t("chat:queueAutoSortMergeHelp")}
+        {t(descriptionKey)}
       </span>
-    </Tooltip>
+    </>
+  );
+}
+
+function AutoSortMergeTouchHelp({ description }: { description: string }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  return (
+    <Drawer open={open} onOpenChange={setOpen}>
+      <DrawerTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          data-testid="queue-auto-sort-merge-help"
+          className={controlSizingClassName(
+            "icon",
+            "shrink-0 cursor-pointer text-muted-foreground",
+          )}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-label={t("chat:queueAutoSortMergeAbout")}
+        >
+          <IconInfoCircle className="h-4 w-4" />
+        </Button>
+      </DrawerTrigger>
+      <DrawerContent>
+        <DrawerHeader className="pb-[calc(1rem+env(safe-area-inset-bottom))]">
+          <DrawerTitle>{t("chat:queueAutoSortMerge")}</DrawerTitle>
+          <DrawerDescription>{description}</DrawerDescription>
+        </DrawerHeader>
+      </DrawerContent>
+    </Drawer>
   );
 }

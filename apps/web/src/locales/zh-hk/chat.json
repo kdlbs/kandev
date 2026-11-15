@@ -119,6 +119,7 @@
   "queueAutoSortMerge": "自動排序合併",
   "queueAutoSortMergeHelp": "需要開啓自動合併。即使中間夾有其他訊息，也會合並同一傳送方任務的訊息。開啓後會立即壓縮待處理佇列。",
   "queueAutoSortMergeRequires": "需要開啓自動合併。",
+  "queueAutoSortMergeAbout": "關於自動排序合併",
   "queuePolicyUnavailable": "佇列自動化暫時不可用。",
   "queueAutoRun": "自動執行",
   "queueAutoRunOffHelp": "完成目前回覆後，排隊中的訊息將等待。",

@@ -378,6 +378,22 @@ Public docs and specification validation passed. PostgreSQL is unverified:
 - `go test -race -tags fts5 ./internal/orchestrator/messagequeue/...
   ./internal/orchestrator/handlers/...` and `scripts/lint-go-changed`: passed.
 
+### Implementation review round 5 remediation
+
+- On touch devices the Auto-sort-merge pill adds a 44px info button
+  (`queue-auto-sort-merge-help`) that opens a drawer with the current help,
+  dependency, or unavailable text; desktop keeps the tooltip. The pill's
+  accessible description now follows the same state-specific text. New
+  `chat:queueAutoSortMergeAbout` label in every shipped locale.
+- RED on the prior code, GREEN after: `queued-ghost-panel-header.test.tsx`
+  ("explains a disabled Auto-sort-merge pill through a touch drawer").
+- `pnpm --dir apps/web e2e:run --host --shards 1 --project mobile-chrome
+  tests/chat/mobile-message-queue-auto-sort-merge.spec.ts -- --retries=0`:
+  1 passed (now taps the help with Auto-merge OFF and dismisses the drawer).
+  Chromium `message-queue-auto-sort-merge.spec.ts` and `message-queue.spec.ts`
+  with `--retries=0`: 16 passed. Web typecheck, `i18n:check`, Prettier, and
+  Oxlint on changed files: passed.
+
 Final repository gates, run from the repository root after all work orders:
 
 ```bash

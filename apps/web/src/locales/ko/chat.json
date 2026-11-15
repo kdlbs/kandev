@@ -119,6 +119,7 @@
   "queueAutoSortMerge": "자동 정렬 및 병합",
   "queueAutoSortMergeHelp": "자동 병합이 필요합니다. 다른 메시지가 사이에 있어도 동일한 발신 작업의 메시지를 병합합니다. 켜면 대기열이 즉시 정리됩니다.",
   "queueAutoSortMergeRequires": "자동 병합이 필요합니다.",
+  "queueAutoSortMergeAbout": "자동 정렬 및 병합 정보",
   "queuePolicyUnavailable": "대기열 자동화를 일시적으로 사용할 수 없습니다.",
   "queueAutoRun": "자동 실행",
   "queueAutoRunOffHelp": "현재 응답을 마치면 대기 중인 메시지가 대기합니다.",

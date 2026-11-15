@@ -119,6 +119,7 @@
   "queueAutoSortMerge": "Auto-sort-merge",
   "queueAutoSortMergeHelp": "Requires Auto-merge. Merges messages from the same sender task across interleaved messages. Turning this on compacts the pending queue immediately.",
   "queueAutoSortMergeRequires": "Requires Auto-merge.",
+  "queueAutoSortMergeAbout": "About Auto-sort-merge",
   "queuePolicyUnavailable": "Queue automation is temporarily unavailable.",
   "queueAutoRun": "Auto-run",
   "queueAutoRunOffHelp": "Finishes the current response, then queued messages wait.",

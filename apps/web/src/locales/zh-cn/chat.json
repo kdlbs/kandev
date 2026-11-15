@@ -119,6 +119,7 @@
   "queueAutoSortMerge": "自动排序合并",
   "queueAutoSortMergeHelp": "需要开启自动合并。即使中间夹有其他消息，也会合并同一发送方任务的消息。开启后会立即压缩待处理队列。",
   "queueAutoSortMergeRequires": "需要开启自动合并。",
+  "queueAutoSortMergeAbout": "关于自动排序合并",
   "queuePolicyUnavailable": "队列自动化暂时不可用。",
   "queueAutoRun": "自动运行",
   "queueAutoRunOffHelp": "完成当前回复后，排队中的消息将等待。",
