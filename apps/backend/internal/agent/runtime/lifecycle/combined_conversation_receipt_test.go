@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"testing"
+	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/task/models"
@@ -37,4 +38,24 @@ func TestCombinedConversationReceiptReachesNotification(t *testing.T) {
 	require.Equal(t, int64(1), receipt.BaseRevision)
 	require.Equal(t, int64(3), receipt.Revision)
 	require.Equal(t, "snapshot-3", receipt.Operations[0].Message.Content)
+}
+
+func TestDeliveryProjectionFixtureCancelsUnreadAcknowledgement(t *testing.T) {
+	arrived := make(chan struct{}, 2)
+	ack := &recordingAgentDeliveryAcknowledger{onAcknowledge: func() { arrived <- struct{}{} }}
+	event := combinedProcessorEvents()[1]
+	_, client, _ := deliveryProjectionFixture(t, event, ack)
+	require.NoError(t, client.AcknowledgeDelivery(t.Context(), event.DeliveryStreamID, 1))
+	<-arrived
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { result <- client.AcknowledgeDelivery(ctx, event.DeliveryStreamID, 2) }()
+	select {
+	case <-arrived:
+		cancel()
+	case <-ctx.Done():
+		t.Fatal("second acknowledgement did not reach the fixture")
+	}
+	require.Error(t, <-result)
 }

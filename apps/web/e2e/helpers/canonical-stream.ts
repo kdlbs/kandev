@@ -123,4 +123,21 @@ export async function verifyCanonicalStream(
     fs.writeFileSync(finish, "finish");
     await new SessionPage(page).waitForChatIdle({ timeout: 30_000 });
   }
+  await page.reload();
+  const reloaded = new SessionPage(page);
+  await reloaded.waitForLoad();
+  await expect(
+    reloaded
+      .activeChat()
+      .locator("[data-agent-message-body]")
+      .filter({ hasText: "Canonical live tick 19" }),
+  ).toBeVisible();
+  const persisted = await api.listSessionMessages(task.session_id!);
+  expect(
+    persisted.messages.some(
+      (message) =>
+        message.metadata?.durable_delivery === true &&
+        message.content.includes("Canonical live tick 19"),
+    ),
+  ).toBe(true);
 }

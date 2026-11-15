@@ -156,3 +156,23 @@ libraries. They do not establish performance improvements under dense workloads.
 
 Earlier results above remain historical. Current-head CI and review remain
 required before merge.
+
+## Review follow-up
+
+Review found that the acknowledgement test fixture could block its second HTTP
+handler on an unread signal. A deterministic regression reproduced the blocked
+`httptest.Server.Close`. The fixture now lets request cancellation release the
+signal send. The receipt-notification and cancellation tests pass 20 race-test
+repetitions. This change affects test infrastructure only.
+
+The canonical browser helper now reloads after the stream becomes idle and checks
+both displayed and persisted final content. The added reload checks pass on
+desktop and phone.
+
+The first integration CI run passed 86 checks and skipped 14. One mobile
+background-work scenario failed to display its initial active chip, which also
+failed the aggregate E2E gate. Its focused local reproduction passes three times
+with retries disabled. All 38 tests in the failed CI partition also pass locally in their original
+order, with `CI=1`, one worker, and retries disabled. The lifecycle race checks
+pass after the base update. The CI failure remains unreproduced locally; these
+prior-head results are historical, and fresh remote CI and review remain required.
