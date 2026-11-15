@@ -581,6 +581,17 @@ func (s *Service) GetEditLease(_ context.Context, sessionID, entryID string) (*Q
 	return cloneEditLease(lease), nil
 }
 
+// withEditLeaseTransferFence orders editLeaseMu before the repository session
+// fence, matching lease-guarded saves that hold editLeaseMu across their
+// repository write. fn runs with editLeaseMu held.
+func (s *Service) withEditLeaseTransferFence(ctx context.Context, sessionID string, fn func() error) error {
+	s.editLeaseMu.Lock()
+	defer s.editLeaseMu.Unlock()
+	return s.withRepositorySessionTransferFence(ctx, sessionID, func(context.Context) error {
+		return fn()
+	})
+}
+
 // RenewEdit extends a live lease owned by connectionID.
 func (s *Service) RenewEdit(ctx context.Context, sessionID, entryID, leaseID, connectionID string) (*QueueEditLease, error) {
 	var renewed *QueueEditLease
@@ -588,11 +599,9 @@ func (s *Service) RenewEdit(ctx context.Context, sessionID, entryID, leaseID, co
 		if _, err := s.editableEntry(admittedCtx, sessionID, entryID); err != nil {
 			return err
 		}
-		return s.withRepositorySessionTransferFence(admittedCtx, sessionID, func(context.Context) error {
+		return s.withEditLeaseTransferFence(admittedCtx, sessionID, func() error {
 			key := s.editLeaseKey(sessionID, entryID)
 			now := time.Now().UTC()
-			s.editLeaseMu.Lock()
-			defer s.editLeaseMu.Unlock()
 			s.expireEditLeaseLocked(key, now)
 			lease := s.editLeases[key]
 			if lease == nil || lease.LeaseID != leaseID || leaseConnection(lease) != connectionID {
@@ -622,10 +631,8 @@ func (s *Service) RenewEdit(ctx context.Context, sessionID, entryID, leaseID, co
 
 func (s *Service) EndEdit(ctx context.Context, sessionID, entryID, leaseID, connectionID string) error {
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
-		return s.withRepositorySessionTransferFence(admittedCtx, sessionID, func(context.Context) error {
+		return s.withEditLeaseTransferFence(admittedCtx, sessionID, func() error {
 			key := s.editLeaseKey(sessionID, entryID)
-			s.editLeaseMu.Lock()
-			defer s.editLeaseMu.Unlock()
 			s.expireEditLeaseLocked(key, time.Now().UTC())
 			lease := s.editLeases[key]
 			if lease == nil || lease.LeaseID != leaseID || leaseConnection(lease) != connectionID {
@@ -650,10 +657,8 @@ func (s *Service) EndEdit(ctx context.Context, sessionID, entryID, leaseID, conn
 func (s *Service) EndEditAfterSave(ctx context.Context, sessionID, entryID, leaseID, connectionID string) (bool, error) {
 	saved := false
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
-		return s.withRepositorySessionTransferFence(admittedCtx, sessionID, func(context.Context) error {
+		return s.withEditLeaseTransferFence(admittedCtx, sessionID, func() error {
 			key := s.editLeaseKey(sessionID, entryID)
-			s.editLeaseMu.Lock()
-			defer s.editLeaseMu.Unlock()
 			s.expireEditLeaseLocked(key, time.Now().UTC())
 			lease := s.editLeases[key]
 			if lease == nil || lease.LeaseID != leaseID || leaseConnection(lease) != connectionID {

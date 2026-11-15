@@ -366,6 +366,18 @@ Public docs and specification validation passed. PostgreSQL is unverified:
   `go test -tags fts5 ./internal/orchestrator/handlers/...
   ./internal/system/queuesettings/...`, and `scripts/lint-go-changed`: passed.
 
+### Implementation review round 2 remediation
+
+- `RenewEdit`, `EndEdit`, and `EndEditAfterSave` acquire `editLeaseMu` before
+  the repository session fence (`withEditLeaseTransferFence`), matching
+  lease-guarded saves that hold it across their repository write. This
+  inversion predates the feature; it is fixed here because admissions now read
+  the lease set under the same mutex.
+- RED on the prior code, GREEN after:
+  `TestEditLeaseFencedOperationsHoldLeaseMutexBeforeRepositoryFence`.
+- `go test -race -tags fts5 ./internal/orchestrator/messagequeue/...
+  ./internal/orchestrator/handlers/...` and `scripts/lint-go-changed`: passed.
+
 Final repository gates, run from the repository root after all work orders:
 
 ```bash
