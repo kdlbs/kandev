@@ -148,7 +148,7 @@ func (s *profileUsageSnapshot) bindWithProviderSelection(profile *settingsmodels
 			b.client, b.key = client, agentusage.CacheKey("openai", path)
 			b.entry.ModelClass = snapshotModelClassSubscription
 		}
-	case "opencode-acp":
+	case openCodeAgentID:
 		return s.openCodeBinding(b)
 	default:
 		return b

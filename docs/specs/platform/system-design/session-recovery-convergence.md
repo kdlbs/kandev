@@ -11,6 +11,9 @@ requirements:
 
 # Session recovery convergence
 
+Installation-level automatic execution options are described in
+[Automatic execution options](automatic-execution-options.md).
+
 ## Boundaries
 
 Platform owns the contract. Lifecycle authenticates the runtime and assesses the

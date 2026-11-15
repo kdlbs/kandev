@@ -548,7 +548,7 @@ func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, 
 func (m *Manager) executionEnvironmentSnapshot(ctx context.Context, executionID string, req *LaunchRequest, agentConfig agents.Agent, profileInfo *AgentProfileInfo, recordOverrides bool) (map[string]string, error) {
 	if req.EnvironmentFinalized {
 		env := cloneStringMap(req.Env)
-		return env, nil
+		return m.automaticHistoryEnvironment(env), nil
 	}
 	if req.EnvironmentResolutionRequired {
 		env, records, err := m.resolveStrictEnvironmentSnapshot(ctx, executionID, req, agentConfig, profileInfo)
@@ -558,7 +558,7 @@ func (m *Manager) executionEnvironmentSnapshot(ctx context.Context, executionID 
 		if err != nil {
 			return nil, err
 		}
-		return env, nil
+		return m.automaticHistoryEnvironment(env), nil
 	}
 
 	return m.legacyExecutionEnvironmentSnapshot(ctx, executionID, req, agentConfig, profileInfo)
@@ -616,7 +616,7 @@ func (m *Manager) legacyExecutionEnvironmentSnapshot(ctx context.Context, execut
 		env["GOCACHE"] = req.managedGoCachePath
 	}
 
-	return env, nil
+	return m.automaticHistoryEnvironment(env), nil
 }
 
 func (m *Manager) prepareManagedGoCacheEnvironment(ctx context.Context, req *LaunchRequest) error {
