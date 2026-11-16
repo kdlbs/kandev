@@ -36,6 +36,7 @@ session-activity authority remain with Tasks and Platform.
 ### Requirements
 
 - [Agent Resume and Runtime Recovery](requirements/agent-resume-runtime-recovery.md)
+- [Agent Resume Archive Recovery](requirements/agent-resume-archive-recovery.md)
 - [Agent Rich Output](requirements/agent-rich-output.md)
 - [Agent Stall Recovery](requirements/agent-stall-recovery.md)
 - [Google Antigravity ACP Agent](requirements/antigravity-acp-agent.md)
