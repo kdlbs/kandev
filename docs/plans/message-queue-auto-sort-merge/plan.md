@@ -568,6 +568,16 @@ Public docs and specification validation passed. PostgreSQL is unverified:
   1 passed. The reviewer's component probe showed the parent collapse on the
   prior code; the browser RED run was not repeated.
 
+### Implementation review round 23 remediation
+
+- The three automation-pill tooltips carry `data-queue-escape-boundary`, and
+  `useQueuePanelEscape` also yields to boundaries in Radix tooltip states
+  `instant-open` and `delayed-open`. The first Escape on a shown tooltip
+  dismisses only the tooltip; a later Escape collapses the queue.
+- RED on the prior hook, GREEN after: the tooltip-state cases in
+  `use-queue-panel-escape.test.tsx`. Header tests, Oxlint, and web typecheck
+  passed.
+
 Final repository gates, run from the repository root after all work orders:
 
 ```bash

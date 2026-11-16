@@ -72,7 +72,7 @@ export function QueueAutomationPills({
             />
           </label>
         </TooltipTrigger>
-        <TooltipContent className="max-w-[280px]">
+        <TooltipContent data-queue-escape-boundary className="max-w-[280px]">
           {t(autoRun ? "chat:queueAutoRunOnHelp" : "chat:queueAutoRunOffHelp")}
         </TooltipContent>
       </Tooltip>
@@ -102,7 +102,7 @@ export function QueueAutomationPills({
             </label>
           </span>
         </TooltipTrigger>
-        <TooltipContent className="max-w-[280px]">
+        <TooltipContent data-queue-escape-boundary className="max-w-[280px]">
           {t("system:messageQueueAutoMergeSessionNotice")}
         </TooltipContent>
       </Tooltip>
@@ -167,7 +167,9 @@ function AutoSortMergePill({
       ) : (
         <Tooltip>
           <TooltipTrigger asChild>{pill}</TooltipTrigger>
-          <TooltipContent className="max-w-[280px]">{t(descriptionKey)}</TooltipContent>
+          <TooltipContent data-queue-escape-boundary className="max-w-[280px]">
+            {t(descriptionKey)}
+          </TooltipContent>
         </Tooltip>
       )}
       <span id={descriptionId} className="sr-only">
