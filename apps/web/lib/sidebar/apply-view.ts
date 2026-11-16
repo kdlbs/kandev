@@ -35,6 +35,9 @@ export type SidebarGroup = {
   tasks: TaskSwitcherItem[];
   matchingCount?: number;
   isContinuation?: boolean;
+  color?: string;
+  /** Each repeated plugin tree owns its bounded child occurrences. */
+  subTasksByParentId?: Map<string, TaskSwitcherItem[]>;
 };
 
 export type GroupedSidebarList = {
@@ -585,15 +588,18 @@ export function flattenVisibleTaskIds(
   const collapsedGroups = new Set(collapsedGroupKeys);
   const collapsedSubs = new Set(collapsedSubtaskParentIds);
   const out: string[] = [];
-  const visit = (task: TaskSwitcherItem) => {
-    out.push(task.id);
+  const emitted = new Set<string>();
+  const visit = (task: TaskSwitcherItem, children: Map<string, TaskSwitcherItem[]>) => {
+    if (!emitted.has(task.id)) out.push(task.id);
+    emitted.add(task.id);
     if (collapsedSubs.has(task.id)) return;
-    const subs = grouped.subTasksByParentId.get(task.id);
-    if (subs) for (const sub of subs) visit(sub);
+    const subs = children.get(task.id);
+    if (subs) for (const sub of subs) visit(sub, children);
   };
   for (const group of grouped.groups) {
     if (collapsedGroups.has(group.key)) continue;
-    for (const task of group.tasks) visit(task);
+    for (const task of group.tasks)
+      visit(task, group.subTasksByParentId ?? grouped.subTasksByParentId);
   }
   return out;
 }

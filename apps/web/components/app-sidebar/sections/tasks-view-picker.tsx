@@ -19,6 +19,7 @@ import { SidebarFilterPopover } from "@/components/task/sidebar-filter/sidebar-f
 import { useSidebarViewPopover } from "@/components/task/sidebar-filter/use-sidebar-view-popover";
 import { cn } from "@/lib/utils";
 import { sidebarViewName } from "@/lib/state/slices/ui/sidebar-view-builtins";
+import { SidebarPluginGroupingMenu } from "@/components/task/sidebar-filter/sidebar-plugin-grouping-menu";
 
 const TRIGGER_BUTTON_CLASS = cn(
   "flex h-7 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11 items-center justify-center rounded-md border border-border/60 px-1.5 cursor-pointer",
@@ -63,7 +64,7 @@ export function TasksViewPicker() {
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"
-          className="w-52"
+          className="w-52 max-w-[calc(100vw-2rem)] max-h-[min(var(--radix-dropdown-menu-content-available-height),calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem))] overflow-y-auto"
           onCloseAutoFocus={(event) => {
             if (!openPopoverAfterPickerCloseRef.current) return;
             event.preventDefault();
@@ -88,6 +89,7 @@ export function TasksViewPicker() {
               </DropdownMenuItem>
             );
           })}
+          <SidebarPluginGroupingMenu />
           <DropdownMenuSeparator />
           <NewViewMenuItem
             disabledReason={newViewDisabledReason}

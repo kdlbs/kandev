@@ -17,6 +17,7 @@ import { SidebarFilterPopover } from "./sidebar-filter-popover";
 import { useSidebarViewPopover } from "./use-sidebar-view-popover";
 import { useTranslation } from "react-i18next";
 import { sidebarViewName } from "@/lib/state/slices/ui/sidebar-view-builtins";
+import { SidebarPluginGroupingPicker } from "./sidebar-plugin-grouping-picker";
 
 // `group` is the command-palette bucket shared with `components/session-commands.tsx`;
 // it is grouping taxonomy rather than this surface's copy, so it migrates with
@@ -50,7 +51,9 @@ function useSidebarCommands(
   }, [t, onOpenChange, views, setActiveView]);
 }
 
-export function SidebarFilterBar() {
+export function SidebarFilterBar({
+  groupingSurface,
+}: { groupingSurface?: "inline" | "sheet" | "drawer" } = {}) {
   const { t } = useTranslation();
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
@@ -111,6 +114,7 @@ export function SidebarFilterBar() {
         <IconPlus className="h-3.5 w-3.5" />
         {t("task:newView")}
       </Button>
+      <SidebarPluginGroupingPicker parentSurface={groupingSurface} />
       <SidebarFilterPopover
         key={workspaceId}
         open={open}

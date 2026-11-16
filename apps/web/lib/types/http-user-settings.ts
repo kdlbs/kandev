@@ -28,6 +28,7 @@ export type SidebarViewApi = {
   group_indent?: boolean;
   collapsed_groups: string[];
   task_row?: SidebarTaskRowPresentationApi | null;
+  generated_plugin_grouping?: { reference: `plugin:${string}:${string}`; name: string };
 };
 
 export type SidebarViewDraftApi = {

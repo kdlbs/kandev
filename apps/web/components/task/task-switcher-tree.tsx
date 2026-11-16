@@ -27,6 +27,7 @@ export type TaskRowBaseProps = Omit<
 >;
 
 type TaskTreeContext = {
+  occurrenceScope: string;
   subTasksByParentId: Map<string, TaskSwitcherItem[]>;
   collapsedSubs: Set<string>;
   onToggleSubtasks?: (parentTaskId: string) => void;
@@ -83,6 +84,7 @@ function taskTreeNodeEqual(previous: TaskTreeNodeProps, next: TaskTreeNodeProps)
   if (
     previous.task !== next.task ||
     previous.depth !== next.depth ||
+    previous.ctx.occurrenceScope !== next.ctx.occurrenceScope ||
     previous.isDraggable !== next.isDraggable ||
     previous.ctx.rowProps !== next.ctx.rowProps ||
     previous.ctx.getNestCandidateTasks !== next.ctx.getNestCandidateTasks ||
@@ -132,7 +134,10 @@ const TaskTreeNode = memo(function TaskTreeNode({
   const handle = (
     // The relative wrapper keeps the nest drop zone pinned to this row's
     // left edge rather than spanning the nested subtree below it.
-    <div className="relative">
+    <div
+      className="relative"
+      data-sidebar-occurrence={JSON.stringify([ctx.occurrenceScope, task.id])}
+    >
       {task.continuationParentTitle && (
         <div className="truncate pl-3 pt-1 text-xs text-muted-foreground">
           {t("sidebar:continuedFrom", { title: task.continuationParentTitle })}
@@ -346,6 +351,7 @@ export const GroupSection = memo(function GroupSection({
   const renderTree = (nestTargetIds: Set<string>) => {
     if (isCollapsed) return null;
     const ctx: TaskTreeContext = {
+      occurrenceScope: group.key,
       subTasksByParentId,
       collapsedSubs: new Set(collapsedSubtaskParentIds ?? []),
       onToggleSubtasks,
@@ -382,6 +388,7 @@ export const GroupSection = memo(function GroupSection({
           id={headerId}
           controlsId={bodyId}
           label={group.label}
+          color={group.color}
           groupKey={group.key}
           count={totalCount}
           isCollapsed={isCollapsed}

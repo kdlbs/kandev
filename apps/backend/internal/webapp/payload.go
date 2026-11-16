@@ -3,6 +3,7 @@ package webapp
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"sort"
 )
 
@@ -25,7 +26,8 @@ type BootPayload struct {
 	// docs/plans/plugins/PLUGIN-API.md ("Loading model"). Empty when the
 	// plugin service failed to initialize or nothing active declares a
 	// bundle; the frontend boots whatever it finds here unconditionally.
-	Plugins []ActivePluginPayload `json:"plugins,omitempty"`
+	Plugins          []ActivePluginPayload               `json:"plugins,omitempty"`
+	SidebarGroupings []pluginsdk.SidebarGroupingProvider `json:"sidebarGroupings"`
 }
 
 // BootEntityGraph stores each task and session once. State and route data use

@@ -92,6 +92,7 @@ func (b bootStateBuilder) taskDetailSidebarTaskPage(
 		Task             *taskdto.TaskDTO `json:"task,omitempty"`
 		GroupKey         string           `json:"group_key,omitempty"`
 		GroupLabel       string           `json:"group_label,omitempty"`
+		GroupColor       string           `json:"group_color,omitempty"`
 		WorkflowName     string           `json:"workflow_name,omitempty"`
 		StepName         string           `json:"workflow_step_name,omitempty"`
 		StepColor        string           `json:"workflow_step_color,omitempty"`
@@ -105,21 +106,24 @@ func (b bootStateBuilder) taskDetailSidebarTaskPage(
 		SubtaskCount     int              `json:"subtask_count,omitempty"`
 	}
 	type sidebarPageResponse struct {
-		QueryKey          string             `json:"query_key"`
-		Page              int                `json:"page"`
-		PageSize          int                `json:"page_size"`
-		TotalEntries      int                `json:"total_entries"`
-		TotalTasks        int                `json:"total_tasks"`
-		TotalVisibleTasks int                `json:"total_visible_tasks"`
-		HasPrevious       bool               `json:"has_previous"`
-		HasNext           bool               `json:"has_next"`
-		Entries           []sidebarPageEntry `json:"entries"`
+		QueryKey           string             `json:"query_key"`
+		Page               int                `json:"page"`
+		PageSize           int                `json:"page_size"`
+		TotalEntries       int                `json:"total_entries"`
+		TotalTasks         int                `json:"total_tasks"`
+		TotalVisibleTasks  int                `json:"total_visible_tasks"`
+		HasPrevious        bool               `json:"has_previous"`
+		HasNext            bool               `json:"has_next"`
+		GroupingRevision   string             `json:"grouping_revision,omitempty"`
+		GroupingGeneration string             `json:"grouping_generation,omitempty"`
+		Entries            []sidebarPageEntry `json:"entries"`
 	}
 	entries := make([]sidebarPageEntry, 0, len(page.Entries))
 	for _, entry := range page.Entries {
 		entries = append(entries, sidebarPageEntry{
 			Kind: entry.Kind, TaskID: entry.TaskID, Task: tasksByID[entry.TaskID],
 			GroupKey: entry.GroupKey, GroupLabel: entry.GroupLabel, Depth: entry.Depth,
+			GroupColor:   entry.GroupColor,
 			WorkflowName: entry.WorkflowName, StepName: entry.StepName, StepColor: entry.StepColor,
 			ParentID: entry.ParentID, ParentTitle: entry.ParentTitle,
 			Continuation: entry.Continuation, MatchingCount: entry.MatchingCount,
@@ -132,6 +136,7 @@ func (b bootStateBuilder) taskDetailSidebarTaskPage(
 		TotalEntries: page.TotalEntries, TotalTasks: page.TotalTasks,
 		TotalVisibleTasks: page.TotalVisibleTasks, HasPrevious: page.HasPrevious,
 		HasNext: page.HasNext, Entries: entries,
+		GroupingRevision: page.GroupingRevision, GroupingGeneration: page.GroupingGeneration,
 	}
 }
 

@@ -24,6 +24,7 @@ export type { BackendMessage } from "./backend-message";
 import type { BackendMessage } from "./backend-message";
 import type { OfficeBackendMessageMap } from "./office-events";
 import type { SessionBackendMessageMap } from "./session-events";
+import type { PluginBackendMessageMap } from "./plugins";
 export type { SessionBackendMessageMap } from "./session-events";
 export type { OfficeEventType, OfficeEventPayload } from "./office-events";
 import type { RunEventAppendedPayload } from "./run-events";
@@ -473,7 +474,8 @@ export type CanvasLifecyclePayload = {
 export type BackendMessageMap = SessionBackendMessageMap &
   OfficeBackendMessageMap &
   import("@/lib/types/http").WalkthroughBackendMessageMap &
-  import("@/lib/types/review").ReviewBackendMessageMap & {
+  import("@/lib/types/review").ReviewBackendMessageMap &
+  PluginBackendMessageMap & {
     "prompts.changed": BackendMessage<"prompts.changed", Record<string, never>>;
     "kanban.update": BackendMessage<"kanban.update", KanbanUpdatePayload>;
     "task.reordered": BackendMessage<"task.reordered", TaskReorderedPayload>;

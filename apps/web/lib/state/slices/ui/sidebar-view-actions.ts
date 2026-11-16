@@ -8,6 +8,12 @@ import { cloneSidebarTaskRowPresentation } from "./sidebar-task-row-presentation
 import { toApiSidebarDraft, toApiSidebarView } from "./sidebar-view-wire";
 import { createDefaultSidebarView, MAX_SIDEBAR_VIEWS } from "./sidebar-view-builtins";
 import { t } from "@/lib/i18n";
+import {
+  createSidebarPluginView,
+  findGeneratedSidebarPluginView,
+  isSidebarPluginGrouping,
+  type SidebarPluginGroupingChoice,
+} from "@/lib/sidebar/sidebar-plugin-grouping";
 
 type SidebarViewPatch = Omit<
   NonNullable<UserSettingsUpdatePayload["sidebar_view_state"]>,
@@ -347,21 +353,37 @@ function buildSidebarLocalActions(set: ImmerSet, get: () => SidebarActionState) 
   };
 }
 
+function createSidebarView(
+  set: ImmerSet,
+  get: () => SidebarActionState,
+  grouping?: SidebarPluginGroupingChoice,
+) {
+  let createdViewId: string | null = null;
+  mutateViews(set, get, (s) => {
+    if (s.draft || (grouping && !isSidebarPluginGrouping(grouping.reference))) return false;
+    const existing = grouping ? findGeneratedSidebarPluginView(s.views, grouping) : undefined;
+    if (existing) {
+      s.activeViewId = existing.id;
+      createdViewId = existing.id;
+      return;
+    }
+    if (s.views.length >= MAX_SIDEBAR_VIEWS) return false;
+    const view = grouping
+      ? createSidebarPluginView(s.views, grouping, makeId("view"))
+      : createDefaultSidebarView(makeId("view"), nextNewViewName(s.views));
+    s.views.push(view);
+    s.activeViewId = view.id;
+    createdViewId = view.id;
+  });
+  return createdViewId;
+}
+
 function buildSidebarBackendActions(set: ImmerSet, get: () => SidebarActionState) {
   const mv = (mutate: (s: UISliceState["sidebarViews"]) => boolean | void) =>
     mutateViews(set, get, mutate);
   return {
-    createSidebarView: () => {
-      let createdViewId: string | null = null;
-      mv((s) => {
-        if (s.draft || s.views.length >= MAX_SIDEBAR_VIEWS) return false;
-        const view = createDefaultSidebarView(makeId("view"), nextNewViewName(s.views));
-        s.views.push(view);
-        s.activeViewId = view.id;
-        createdViewId = view.id;
-      });
-      return createdViewId;
-    },
+    createSidebarView: (grouping?: SidebarPluginGroupingChoice) =>
+      createSidebarView(set, get, grouping),
     toggleSidebarGroupCollapsed: (viewId: string, groupKey: string) =>
       mv((s) => {
         const view = s.views.find((v) => v.id === viewId);
@@ -513,6 +535,9 @@ function cloneView(v: SidebarView): SidebarView {
     group: v.group,
     collapsedGroups: [...v.collapsedGroups],
     taskRow: v.taskRow ? cloneSidebarTaskRowPresentation(v.taskRow) : undefined,
+    ...(v.generatedPluginGrouping
+      ? { generatedPluginGrouping: { ...v.generatedPluginGrouping } }
+      : {}),
   };
 }
 

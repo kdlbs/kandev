@@ -114,6 +114,9 @@ func RegisterRoutes(
 	api.GET("/settings", ctrl.getSettings)
 	api.PUT("/settings", authn.RequireAdmin(), ctrl.updateSettings)
 	api.POST("/host/interactions/response-receipts", ctrl.issueHumanInteractionResponseReceipt)
+	api.GET("/sidebar-groupings", func(ctx *gin.Context) {
+		ctx.JSON(http.StatusOK, gin.H{"groupings": svc.SidebarGroupingCatalog()})
+	})
 	api.GET("", ctrl.list)
 	api.GET("/:id", ctrl.get)
 	api.GET("/:id/config", ctrl.getConfig)

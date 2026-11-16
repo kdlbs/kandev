@@ -12,6 +12,7 @@ func (m Manifest) Clone() Manifest {
 		clone.NotificationFormatters[index].ProviderTypes = cloneStrings(m.NotificationFormatters[index].ProviderTypes)
 		clone.NotificationFormatters[index].ManagementActions = cloneStrings(m.NotificationFormatters[index].ManagementActions)
 	}
+	clone.SidebarGroupings = append([]SidebarGrouping(nil), m.SidebarGroupings...)
 	clone.RepositoryProviders = cloneStrings(m.RepositoryProviders)
 	clone.ExecutorProviders = cloneExecutorProviders(m.ExecutorProviders)
 	clone.ReferenceSources = cloneReferenceSources(m.ReferenceSources)

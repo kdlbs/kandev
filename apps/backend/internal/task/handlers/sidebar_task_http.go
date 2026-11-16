@@ -18,15 +18,17 @@ import (
 const sidebarTaskRequestLimit = 256 * 1024
 
 type sidebarTaskPageResponse struct {
-	QueryKey          string                         `json:"query_key"`
-	Page              int                            `json:"page"`
-	PageSize          int                            `json:"page_size"`
-	TotalEntries      int                            `json:"total_entries"`
-	TotalTasks        int                            `json:"total_tasks"`
-	TotalVisibleTasks int                            `json:"total_visible_tasks"`
-	HasPrevious       bool                           `json:"has_previous"`
-	HasNext           bool                           `json:"has_next"`
-	Entries           []sidebarTaskPageEntryResponse `json:"entries"`
+	QueryKey           string                         `json:"query_key"`
+	Page               int                            `json:"page"`
+	PageSize           int                            `json:"page_size"`
+	TotalEntries       int                            `json:"total_entries"`
+	TotalTasks         int                            `json:"total_tasks"`
+	TotalVisibleTasks  int                            `json:"total_visible_tasks"`
+	HasPrevious        bool                           `json:"has_previous"`
+	HasNext            bool                           `json:"has_next"`
+	GroupingRevision   string                         `json:"grouping_revision,omitempty"`
+	GroupingGeneration string                         `json:"grouping_generation,omitempty"`
+	Entries            []sidebarTaskPageEntryResponse `json:"entries"`
 }
 
 type sidebarTaskPageEntryResponse struct {
@@ -35,6 +37,7 @@ type sidebarTaskPageEntryResponse struct {
 	Task             *dto.TaskDTO `json:"task,omitempty"`
 	GroupKey         string       `json:"group_key,omitempty"`
 	GroupLabel       string       `json:"group_label,omitempty"`
+	GroupColor       string       `json:"group_color,omitempty"`
 	WorkflowName     string       `json:"workflow_name,omitempty"`
 	StepName         string       `json:"workflow_step_name,omitempty"`
 	StepColor        string       `json:"workflow_step_color,omitempty"`
@@ -106,6 +109,10 @@ func (h *TaskHandlers) httpQuerySidebarTasks(c *gin.Context) {
 		return
 	}
 	if err != nil {
+		if errors.Is(err, models.ErrSidebarGroupingUnavailable) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "sidebar grouping unavailable", "error_code": "sidebar_grouping_unavailable"})
+			return
+		}
 		if errors.Is(err, service.ErrSidebarTaskViewUnavailable) {
 			h.logger.Error("sidebar task query repository unavailable", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
@@ -199,6 +206,7 @@ func (h *TaskHandlers) sidebarTaskPageResponse(c *gin.Context, page *models.Side
 		entries = append(entries, sidebarTaskPageEntryResponse{
 			Kind: entry.Kind, TaskID: entry.TaskID, Task: tasksByID[entry.TaskID],
 			GroupKey: entry.GroupKey, GroupLabel: entry.GroupLabel, Depth: entry.Depth,
+			GroupColor:   entry.GroupColor,
 			WorkflowName: entry.WorkflowName, StepName: entry.StepName, StepColor: entry.StepColor,
 			ParentID: entry.ParentID, ParentTitle: entry.ParentTitle,
 			Continuation: entry.Continuation, MatchingCount: entry.MatchingCount,
@@ -211,5 +219,6 @@ func (h *TaskHandlers) sidebarTaskPageResponse(c *gin.Context, page *models.Side
 		TotalEntries: page.TotalEntries, TotalTasks: page.TotalTasks,
 		TotalVisibleTasks: page.TotalVisibleTasks, HasPrevious: page.HasPrevious,
 		HasNext: page.HasNext, Entries: entries,
+		GroupingRevision: page.GroupingRevision, GroupingGeneration: page.GroupingGeneration,
 	}, nil
 }

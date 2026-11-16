@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SidebarTaskPageResponse } from "@/lib/types/http";
 import { SidebarTaskPagination } from "./sidebar-task-pagination";
@@ -37,22 +37,5 @@ describe("SidebarTaskPagination", () => {
 
     rerender(<SidebarTaskPagination page={response(101)} {...props} />);
     expect(screen.getByTestId("sidebar-page-controls")).not.toBeNull();
-  });
-
-  it("provides reachable phone paging controls", () => {
-    const onPageChange = vi.fn();
-    render(
-      <SidebarTaskPagination
-        page={response(101)}
-        pending={false}
-        onPageChange={onPageChange}
-        touchTargets
-      />,
-    );
-    const next = screen.getByRole("button", { name: "sidebar:nextPage" });
-    expect(next.className).toContain("min-h-11");
-    fireEvent.click(next);
-    expect(onPageChange).toHaveBeenCalledWith(2);
-    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

@@ -992,6 +992,8 @@ export type SidebarTaskQuery = {
   page: number;
   page_size: number;
   locale: string;
+  grouping_revision?: string;
+  grouping_generation?: string;
 };
 
 export type SidebarTaskPageEntry = {
@@ -1000,6 +1002,7 @@ export type SidebarTaskPageEntry = {
   task?: Task;
   group_key?: string;
   group_label?: string;
+  group_color?: string;
   workflow_name?: string;
   workflow_id?: string;
   workflow_step_id?: string;
@@ -1026,6 +1029,8 @@ export type SidebarTaskPageResponse = {
   total_visible_tasks: number;
   has_previous: boolean;
   has_next: boolean;
+  grouping_revision?: string;
+  grouping_generation?: string;
   entries: SidebarTaskPageEntry[];
 };
 

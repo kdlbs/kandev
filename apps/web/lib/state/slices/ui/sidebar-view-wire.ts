@@ -63,6 +63,9 @@ export function toApiSidebarView(view: SidebarView): SidebarViewApi {
     group_indent: view.groupIndent,
     collapsed_groups: view.collapsedGroups,
     task_row: toApiTaskRow(view.taskRow),
+    ...(view.generatedPluginGrouping
+      ? { generated_plugin_grouping: { ...view.generatedPluginGrouping } }
+      : {}),
   };
 }
 
@@ -76,6 +79,9 @@ export function fromApiSidebarView(api: SidebarViewApi): SidebarView {
     groupIndent: typeof api.group_indent === "boolean" ? api.group_indent : true,
     collapsedGroups: api.collapsed_groups ?? [],
     taskRow: fromApiTaskRow(api.task_row),
+    ...(api.generated_plugin_grouping
+      ? { generatedPluginGrouping: { ...api.generated_plugin_grouping } }
+      : {}),
   };
 }
 

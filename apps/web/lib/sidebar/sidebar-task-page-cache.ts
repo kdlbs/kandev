@@ -11,6 +11,7 @@ import {
   type SidebarPageRecoveryCycle,
 } from "./sidebar-task-page-recovery";
 
+import { pluginRegistry } from "@/lib/plugins/registry";
 const MAX_PAGES = 5;
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_AGE_MS = 5 * 60 * 1000;
@@ -26,7 +27,13 @@ type SidebarRankingInputs = {
 
 let cachedRanking: { inputs: SidebarRankingInputs; key: string } | undefined;
 
-type PageSnapshot = { page: SidebarTaskPageResponse; owner: string; fetchedAt: number };
+type PageSnapshot = {
+  page: SidebarTaskPageResponse;
+  owner: string;
+  fetchedAt: number;
+  groupingReference: string;
+  groupingIdentity: string;
+};
 type ReadAttempt = {
   controller: AbortController;
   owner: string;
@@ -53,7 +60,7 @@ type SidebarPageRead = {
   workspaceId: string;
   query: SidebarTaskQuery;
   requestKey: string;
-  identity: { key: string; epoch: number; scope: string };
+  identity: { key: string; epoch: number; scope: string; groupingIdentity: string };
 };
 type PageStore = {
   getState: () => AppState;
@@ -258,6 +265,11 @@ export class SidebarTaskPageCache {
     const workspaceId = state.workspaces.activeId ?? "";
     if (
       !entry ||
+      entry.groupingIdentity !==
+        pluginRegistry.sidebarGroupingIdentity(
+          entry.groupingReference,
+          state.workspaces.activeId,
+        ) ||
       sidebarTaskPageScope(state) !== this.scope ||
       sidebarTaskPageRankingKey(state) !== this.rankingKey ||
       (state.sidebarArchivedTasks?.revisionByWorkspaceId?.[workspaceId] ?? 0) !== this.revision ||
@@ -272,7 +284,7 @@ export class SidebarTaskPageCache {
       : entry.page;
   }
 
-  private retain(key: string, page: SidebarTaskPageResponse) {
+  private retain(key: string, page: SidebarTaskPageResponse, query: SidebarTaskQuery) {
     if (page.page !== 1 || page.provisional) return;
     this.remove(key);
     const owner = `sidebar:cache:${generateUUID()}`;
@@ -282,7 +294,16 @@ export class SidebarTaskPageCache {
       return task ? [task] : [];
     });
     state.retainTaskOverviews?.(owner, tasks);
-    this.pages.set(key, { page, owner, fetchedAt: Date.now() });
+    this.pages.set(key, {
+      page,
+      owner,
+      fetchedAt: Date.now(),
+      groupingReference: query.group,
+      groupingIdentity: pluginRegistry.sidebarGroupingIdentity(
+        query.group,
+        state.workspaces.activeId,
+      ),
+    });
     this.enforceBudget();
     this.scheduleExpiry();
   }
@@ -291,13 +312,18 @@ export class SidebarTaskPageCache {
     request: ReadAttempt,
     raw: SidebarTaskPageResponse,
     query: SidebarTaskQuery,
-    identity: { key: string; epoch: number; scope: string },
+    identity: SidebarPageRead["identity"],
   ) {
     const { key, epoch, scope } = identity;
     this.synchronize();
     if (request.controller.signal.aborted || scope !== this.scope)
       return sidebarPageMembership(raw);
     const state = this.store.getState();
+    if (
+      identity.groupingIdentity !==
+      pluginRegistry.sidebarGroupingIdentity(query.group, state.workspaces.activeId)
+    )
+      throw new DOMException("", "AbortError");
     let page = sidebarPageMembership(raw);
     if (request.readId) {
       const reconciled = reconcileSidebarPage(state, raw, query, request.readId);
@@ -312,7 +338,7 @@ export class SidebarTaskPageCache {
       );
       page = { ...reconciled.page, provisional: reconciled.provisional || epoch !== this.epoch };
     } else if (epoch !== this.epoch) page = { ...page, provisional: true };
-    if (!page.provisional && epoch === this.epoch) this.retain(key, page);
+    if (!page.provisional && epoch === this.epoch) this.retain(key, page, query);
     return page;
   }
 
@@ -334,7 +360,17 @@ export class SidebarTaskPageCache {
     record.consumers++;
     const promise = this.admit(
       record,
-      { workspaceId, query, requestKey, identity: { key: cacheKey, epoch, scope } },
+      {
+        workspaceId,
+        query,
+        requestKey,
+        identity: {
+          key: cacheKey,
+          epoch,
+          scope,
+          groupingIdentity: pluginRegistry.sidebarGroupingIdentity(query.group, workspaceId),
+        },
+      },
       options,
     );
     let released = false;

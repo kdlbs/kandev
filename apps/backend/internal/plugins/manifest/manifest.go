@@ -57,8 +57,9 @@ type Manifest struct {
 	AutomationConditions   []AutomationCondition   `yaml:"automation_conditions,omitempty" json:"automation_conditions,omitempty"`
 	NotificationFormatters []NotificationFormatter `yaml:"notification_formatters,omitempty" json:"notification_formatters,omitempty"`
 
-	Webhooks []Webhook `yaml:"webhooks,omitempty" json:"webhooks,omitempty"`
-	Actions  []Action  `yaml:"actions,omitempty" json:"actions,omitempty"`
+	Webhooks         []Webhook         `yaml:"webhooks,omitempty" json:"webhooks,omitempty"`
+	Actions          []Action          `yaml:"actions,omitempty" json:"actions,omitempty"`
+	SidebarGroupings []SidebarGrouping `yaml:"sidebar_groupings,omitempty" json:"sidebar_groupings,omitempty"`
 	// RepositoryProviders declares provider IDs this plugin owns while active.
 	// Ownership is checked across active plugins by the runtime registry.
 	RepositoryProviders []string `yaml:"repository_providers,omitempty" json:"repository_providers,omitempty"`

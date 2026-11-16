@@ -11,6 +11,7 @@ import { normalizeLocale } from "@/lib/i18n";
 import type { SidebarTaskQuery } from "@/lib/types/http";
 import { sidebarSortToWire } from "@/lib/sidebar/sidebar-sort-chain";
 
+import { usePluginRegistry } from "@/lib/plugins/registry";
 const PAGE_SIZE = 100;
 function buildSidebarQuery(
   view: ReturnType<typeof useEffectiveSidebarView>,
@@ -31,15 +32,19 @@ function buildSidebarQuery(
 }
 
 function useSidebarViewKey(
-  workspaceId: string | null,
-  workspaceGeneration: number,
-  contextScope: string,
+  context: {
+    workspaceId: string | null;
+    workspaceGeneration: number;
+    contextScope: string;
+    groupingIdentity: string;
+  },
   queryView: SidebarTaskQuery,
   prefs: Pick<
     ReturnType<typeof useSidebarTaskPrefs>,
     "pinnedTaskIds" | "orderedTaskIds" | "subtaskOrderByParentId"
   >,
 ) {
+  const { workspaceId, workspaceGeneration, contextScope, groupingIdentity } = context;
   const { pinnedTaskIds, orderedTaskIds, subtaskOrderByParentId } = prefs;
   return useMemo(
     () =>
@@ -48,6 +53,7 @@ function useSidebarViewKey(
         workspaceGeneration,
         contextScope,
         ...queryView,
+        groupingIdentity,
         pinnedTaskIds,
         orderedTaskIds,
         subtaskOrderByParentId,
@@ -60,6 +66,7 @@ function useSidebarViewKey(
       workspaceId,
       workspaceGeneration,
       contextScope,
+      groupingIdentity,
     ],
   );
 }
@@ -75,6 +82,8 @@ export function sidebarContentKey(viewKey: string): string {
 
 export function useSidebarPageContext(workspaceId: string | null) {
   const view = useEffectiveSidebarView(workspaceId);
+  const registry = usePluginRegistry();
+  const groupingIdentity = registry.sidebarGroupingIdentity(view.group, workspaceId);
   const { i18n } = useTranslation();
   const contextScope = useAppStore(sidebarTaskPageScope);
   const collapsedTaskIDs = useAppStore((state) => state.collapsedSubtaskParents);
@@ -97,9 +106,7 @@ export function useSidebarPageContext(workspaceId: string | null) {
     [view, locale, collapsedTaskIDs],
   );
   const viewKey = useSidebarViewKey(
-    workspaceId,
-    workspaceGeneration,
-    contextScope,
+    { workspaceId, workspaceGeneration, contextScope, groupingIdentity },
     queryView,
     prefs,
   );

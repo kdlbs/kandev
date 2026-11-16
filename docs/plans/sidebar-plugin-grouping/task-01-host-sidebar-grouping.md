@@ -1,0 +1,200 @@
+---
+id: 01-host-sidebar-grouping
+title: Generic complete sidebar grouping
+status: in_progress
+wave: 1
+depends_on: []
+plan: plan.md
+requirements:
+  - REQ-UI-SIDEBAR-PLUGIN-GROUPING-001
+acceptance_criteria:
+  - AC-UI-SIDEBAR-PLUGIN-GROUPING-001.1
+  - AC-UI-SIDEBAR-PLUGIN-GROUPING-001.2
+  - AC-UI-SIDEBAR-PLUGIN-GROUPING-001.3
+  - AC-UI-SIDEBAR-PLUGIN-GROUPING-001.4
+  - AC-UI-SIDEBAR-PLUGIN-GROUPING-001.5
+  - AC-UI-SIDEBAR-PLUGIN-GROUPING-001.6
+system_design:
+  - ../../specs/ui/system-design/sidebar-plugin-grouping.md
+---
+
+# Task 01: Generic Complete Sidebar Grouping
+
+## Summary
+
+Deliver the generic contract, bounded authorized query and saved-view UI as one
+vertical host slice, verified with an installed fixture. Do not add a Tag-specific
+host branch or treat the existing page-local facet as complete.
+
+## In scope
+
+- Manifest declarations, SDK DTOs, boot metadata, action resolver and complete
+  response validation with authorization before plugin execution.
+- Registry-independent saved group identity through backend and TS settings,
+  boot, HTTP, WS, workspace journals and normal view selection/editing.
+- Parameterized repository grouping before pagination, source/lifecycle query
+  identity, unique task versus occurrence counts and colored group entries.
+- Both desktop and phone entry points, unavailable-provider/error/retry states,
+  draft/name/limit protections, duplicate-safe selector creation and row keys.
+- Generic fixture and regression/browser coverage; public API/sidebar docs.
+
+## Out of scope
+
+Real Tags implementation, plugin publication, layout-panel changes, direct
+plugin-state reads, whole-task browser fetches and /tasks facet redesign.
+
+## Acceptance
+
+1. An installed generic complete provider is directly selectable and becomes a
+   normal saved workspace view on desktop and phone, surviving reload and view
+   editing without changing other workspaces or dirty drafts.
+2. Real backend queries group 101+ tasks and repeated trees before page slicing;
+   counts, collapse, pins, parent context and authorization remain correct.
+3. Unsupported/incomplete/failed providers retain saved identity and show explicit
+   recovery; stale replies cannot cross user/workspace/provider generations.
+   Existing built-in sidebar and /tasks facet controls remain green.
+
+## ASCII UI preview
+
+UI-01/UI-02 from [the plan](plan.md#ascii-ui-preview), AC-001.1/.2/.3/.6:
+
+```text
+Desktop TASKS [Tag v] [Filters]   Phone Task views drawer
+  Plugin views > Tag             [Tag v] [Filters] [Close]
+  Layout testing (4)               Layout testing (4)
+    task rows                       task rows (scroll)
+  Untagged (2)                    Untagged (2)
+  [Previous] [Next]              [Previous] [Next] + safe area
+```
+
+Existing saved entries stay in the selector. Plugin views are a separate section;
+once created, the view is ordinary editable saved state. Reuse mobile picker
+and task-switcher composition, not a compressed desktop workbench.
+
+## Verification
+
+Run from the cache-drive build mirror with TMPDIR, GOTMPDIR, GOCACHE,
+GOMODCACHE, Vite caches and build outputs on findmnt-verified cache paths.
+Fresh worktrees need workspace dependencies first; check all UI package links
+before reuse. The focused desktop/phone files and fixture are implemented.
+
+```bash
+make fmt
+make -C apps/backend build-dev build-e2e-delivery-fixture build-e2e-send-now-fixture e2e-plugin-package
+pnpm --dir apps/web run build:e2e
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/plugins/... ./internal/user/... ./internal/task/models/... ./internal/task/service/... ./internal/task/repository/sqlite/... -run 'Sidebar|PluginGrouping|Manifest|Action')
+(cd pluginsdk && go test -trimpath ./... && go vet ./...)
+pnpm --dir apps/web exec vitest run components/task/sidebar-filter lib/sidebar/sidebar-plugin-grouping.test.ts lib/state/slices/ui/sidebar-workspace-views.test.ts lib/state/slices/ui/sidebar-view-wire.test.ts
+pnpm --dir apps/web run typecheck
+pnpm --dir apps/web run lint
+pnpm --dir apps/web e2e:run --host --no-build --project chromium tests/plugins/sidebar-plugin-grouping.spec.ts tests/plugins/task-list-facet.spec.ts tests/task/workspace-sidebar-views.spec.ts --retries=0
+pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome tests/plugins/mobile-sidebar-plugin-grouping.spec.ts tests/plugins/mobile-task-list-facet.spec.ts tests/task/mobile-workspace-sidebar-views.spec.ts --retries=0
+make -k typecheck test lint GOFLAGS=-p=2
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
+```
+
+Changed-package coverage and Oxlint must include any additional actual touched
+paths. Managed E2E must build final source before runtime proof; don't reuse
+old artifacts. Record any requested full `make typecheck test lint` environment
+limits separately; never substitute a narrow pass for a full-gate claim.
+
+## Files likely touched
+
+- `apps/packages/plugin-sdk/src/index.ts`
+- `apps/backend/internal/plugins/manifest/` and `store/` metadata projection
+- `apps/backend/internal/plugins/action_handlers.go` and new internal resolver
+- `pluginsdk/` typed response helpers
+- `apps/backend/internal/task/models/sidebar_task_view.go`
+- `apps/backend/internal/task/service/sidebar_task.go`
+- `apps/backend/internal/task/repository/sqlite/sidebar_task_query*.go`
+- `apps/backend/internal/user/models/` and `service/sidebar_workspace_views.go`
+- `apps/backend/internal/backendapp/` resolver wiring and boot projection
+- `apps/web/lib/plugins/registry.ts`, `types.ts`, `lib/types/http.ts`
+- `apps/web/lib/state/slices/ui/sidebar-view-{types,wire,actions}.ts`
+- `apps/web/components/app-sidebar/sections/tasks-view-picker.tsx`
+- `apps/web/components/task/sidebar-filter/group-picker.tsx`
+- `apps/web/components/task/task-session-sidebar-grouped-view.ts`
+- `apps/web/components/task/mobile/mobile-task-list.tsx`
+- New `apps/web/hooks/use-sidebar-groupings.ts` and grouping projection tests
+- `apps/backend/cmd/plugin-fixture/` and the new desktop/mobile E2E files
+- `docs/public/plugins-authoring.md`, `plugins-manifest.md`, and sidebar user guide
+
+## Dependencies
+
+None. Query existing symbol references/LSP before exported contract changes.
+
+## Risks
+
+Complete data must not be inferred from a partial facet. No database transaction
+may enclose plugin RPC. A repeated task occurrence is not another domain task;
+action, navigation and ownership must remain canonical task-ID based.
+
+## Parallelism
+
+sequential
+
+## Inputs
+
+- [Requirement](../../specs/ui/requirements/sidebar-plugin-grouping.md)
+- [Design](../../specs/ui/system-design/sidebar-plugin-grouping.md)
+- Existing workspace views, pagination and page-local facet consumer suites.
+
+## Results
+
+Implemented in the independent transferred task after the user's explicit
+implementation request. The initial main baseline was
+`b4c6a197129b5b4a5e99c3e1dab132ada9fb433f`; no origin-task feature commits were
+cherry-picked. The current Go SDK owner is standalone `pluginsdk/`, not the
+removed backend package. No language servers are configured, so exported
+contracts were reconciled through targeted reference searches.
+
+The generic contract resolves authenticated workspace actions before opening
+the repository read transaction. Complete snapshots classify authorized,
+filtered roots before the 100-row window. Canonical task hydration, repeated
+tree occurrences, group counts, source identity, pin ordering and continuation
+context remain separate. Saved references and generated-view markers use the
+existing workspace journals. Declarations require minimum host `0.102.0`;
+no release or SDK publication occurred.
+
+Observed failing-before/passing-after regressions include invalid UTF-8,
+disable/enable ABA, per-occurrence continuation context, repeated descendant
+counts, stale metadata/page hydration, unavailable summaries, wide-touch paging,
+long labels, reduced-root-font targets, and nested phone drawer geometry after
+selection or provider removal. Drawer closure goes through the existing close
+primitive so the parent restores its geometry.
+
+Final exercised checks:
+
+- Full affected SQLite repository package passed: `945.907s`, with
+  `go test -trimpath -tags fts5 -timeout 30m`. The earlier default 10-minute
+  package deadline was insufficient; it is not recorded as a passing run.
+- All four complete-grouping conformance cases passed on both SQLite and a
+  real isolated PostgreSQL 18.6 server. The verified-snapshot guard also passed;
+  the PostgreSQL cases were not skipped.
+- Plugin/manifest/action and gateway selections passed after the lint-driven
+  helper extractions. Standalone SDK tests and vet passed.
+- 559 focused Vitest tests in 49 files, native web typecheck and final classic
+  typecheck across all five TypeScript workspaces passed.
+- Current-artifact Playwright: 7 desktop and 6 phone tests passed with one
+  worker and retries disabled. These include 3 desktop grouping cases,
+  4 phone grouping cases, and existing facet/workspace controls.
+- Rendered coverage includes 103 unique tasks, repeated trees and two
+  occurrence pages, live changes, saved workspace journals, unavailable/recovery,
+  320px containment, full long labels, keyboard focus and 44px targets with a
+  12px root font.
+- Required `make fmt`, complete `make lint`, SQL guard and final backend/UI
+  artifact builds passed. CLI and complete script tests also passed.
+  The plan records the non-green broad backend/web outcomes separately.
+
+Pure picker markup is exercised through real browser controls. The old
+pagination CSS-class/mock-forwarding test and plugin manifest-copy assertions
+were removed rather than re-pinned; boundary and native geometry coverage remain.
+Managed logs and PNGs are retained under the cache-drive build mirror's
+`verification-logs` / `evidence`, and the owned smoke root's `final-logs`.
+A first normal-hook attempt surfaced a duplicated cleanup failure token in
+existing task-service code. Archive and delete paths now share the unchanged
+private string constant; literal persisted-token fixtures remain independent.
+The existing inspection/retained cleanup regression selection passed (`2.398s`).
+Normal-hook commits remain the delivery checkpoint.

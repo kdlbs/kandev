@@ -66,7 +66,8 @@ export type GroupKey =
   | "workflow"
   | "workflowStep"
   | "executorType"
-  | "state";
+  | "state"
+  | `plugin:${string}:${string}`;
 
 export type SidebarView = {
   id: string;
@@ -78,6 +79,7 @@ export type SidebarView = {
   groupIndent: boolean;
   collapsedGroups: string[];
   taskRow?: SidebarTaskRowPresentation;
+  generatedPluginGrouping?: { reference: `plugin:${string}:${string}`; name: string };
 };
 
 export type SidebarSliceState = {

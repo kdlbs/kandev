@@ -14,6 +14,7 @@ vi.mock("./host", () => ({
 }));
 
 import { bootPlugins } from "./boot";
+import { pluginRegistry } from "./registry";
 
 function fakeStore(): StoreApi<AppState> {
   return {} as StoreApi<AppState>;
@@ -68,4 +69,19 @@ describe("bootPlugins", () => {
 
     expect(hostMocks.loadPlugins).toHaveBeenCalledTimes(2);
   });
+});
+
+it("does not restore revoked providers from stale boot metadata on a repeated bridge effect", () => {
+  const store = fakeStore();
+  const provider = {
+    reference: "plugin:acme:labels" as const,
+    label: "Tag",
+    generation: "install-1",
+  };
+  const payload = { sidebarGroupings: [provider] };
+  bootPlugins(payload, store);
+  expect(pluginRegistry.getSidebarGroupings()).toEqual([provider]);
+  pluginRegistry.setSidebarGroupings([]);
+  bootPlugins(payload, store);
+  expect(pluginRegistry.getSidebarGroupings()).toEqual([]);
 });

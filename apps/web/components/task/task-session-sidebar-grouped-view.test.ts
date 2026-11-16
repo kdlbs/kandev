@@ -33,6 +33,7 @@ vi.mock("@/hooks/domains/sidebar/use-sidebar-task-prefs", () => ({
 }));
 
 import { groupSidebarTaskPage, useGroupedSidebarView } from "./task-session-sidebar-grouped-view";
+import { flattenVisibleTaskIds } from "@/lib/sidebar/apply-view";
 
 const WORKFLOW_A = "Workflow A";
 const WORKFLOW_A_ID = "wf-a";
@@ -197,4 +198,62 @@ describe("groupSidebarTaskPage child state", () => {
     expect(grouped.groups[0].tasks[0].subtaskCount).toBe(2);
     expect(grouped.subTasksByParentId.size).toBe(0);
   });
+});
+
+// @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.3
+it("keeps repeated plugin trees independent while selecting canonical tasks once", () => {
+  const reference = "plugin:acme:labels";
+  const parent = task(PARENT_ID, WORKFLOW_A);
+  const child = { ...task(CHILD_ID, WORKFLOW_A), parentTaskId: PARENT_ID };
+  const grouped = groupSidebarTaskPage(
+    [parent, child],
+    ["a", "b"].flatMap((value) => [
+      { kind: "group" as const, group_key: `${reference}:value:${value}`, group_label: value },
+      {
+        kind: "task" as const,
+        task_id: PARENT_ID,
+        group_key: `${reference}:value:${value}`,
+        subtask_count: 1,
+      },
+      {
+        kind: "task" as const,
+        task_id: CHILD_ID,
+        group_key: `${reference}:value:${value}`,
+        parent_id: PARENT_ID,
+        depth: 1,
+      },
+    ]),
+    reference,
+  );
+  for (const group of grouped.groups) {
+    expect(group.tasks.map((task) => task.id)).toEqual([PARENT_ID]);
+    expect(group.subTasksByParentId?.get(PARENT_ID)?.map((task) => task.id)).toEqual([CHILD_ID]);
+  }
+  expect(flattenVisibleTaskIds(grouped, [], [])).toEqual([PARENT_ID, CHILD_ID]);
+  expect(flattenVisibleTaskIds(grouped, [], [PARENT_ID])).toEqual([PARENT_ID]);
+  expect(parent.subtaskCount).toBeUndefined();
+});
+
+it("does not attach a continuation child to another plugin group's on-page parent", () => {
+  const reference = "plugin:acme:labels";
+  const grouped = groupSidebarTaskPage(
+    [task(PARENT_ID, WORKFLOW_A), task(CHILD_ID, WORKFLOW_A)],
+    [
+      { kind: "group", group_key: `${reference}:value:a`, group_label: "A" },
+      { kind: "task", task_id: PARENT_ID, group_key: `${reference}:value:a` },
+      { kind: "group", group_key: `${reference}:value:b`, group_label: "B" },
+      {
+        kind: "task",
+        task_id: CHILD_ID,
+        group_key: `${reference}:value:b`,
+        parent_id: PARENT_ID,
+        parent_title: "Parent",
+        depth: 1,
+      },
+    ],
+    reference,
+  );
+  expect(grouped.groups[1].tasks).toMatchObject([
+    { id: CHILD_ID, continuationParentTitle: "Parent" },
+  ]);
 });

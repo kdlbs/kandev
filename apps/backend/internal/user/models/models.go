@@ -253,14 +253,20 @@ type SavedLayout struct {
 // The payload is stored and returned as-is; the server does not interpret
 // clause values beyond passing them through.
 type SidebarView struct {
-	ID              string                      `json:"id"`
-	Name            string                      `json:"name"`
-	Filters         []SidebarViewClause         `json:"filters"`
-	Sort            SidebarViewSort             `json:"sort"`
-	Group           string                      `json:"group"`
-	GroupIndent     *bool                       `json:"group_indent,omitempty"`
-	CollapsedGroups []string                    `json:"collapsed_groups"`
-	TaskRow         *SidebarTaskRowPresentation `json:"task_row,omitempty"`
+	ID                      string                          `json:"id"`
+	Name                    string                          `json:"name"`
+	Filters                 []SidebarViewClause             `json:"filters"`
+	Sort                    SidebarViewSort                 `json:"sort"`
+	Group                   string                          `json:"group"`
+	GroupIndent             *bool                           `json:"group_indent,omitempty"`
+	CollapsedGroups         []string                        `json:"collapsed_groups"`
+	TaskRow                 *SidebarTaskRowPresentation     `json:"task_row,omitempty"`
+	GeneratedPluginGrouping *SidebarGeneratedPluginGrouping `json:"generated_plugin_grouping,omitempty"`
+}
+
+type SidebarGeneratedPluginGrouping struct {
+	Reference string `json:"reference"`
+	Name      string `json:"name"`
 }
 
 type SidebarViewClause struct {

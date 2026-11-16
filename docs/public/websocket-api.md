@@ -363,6 +363,33 @@ When a view is not covered by current workspace data, the web sidebar reads one 
 
 The route is read-only. It rejects unknown request fields and limits the request body to 256 KiB. Clients must not send pin, manual ordering, or subtask-order preferences in the query; the server reads those from the authenticated user's settings. The existing workspace task-list route remains available for its other callers.
 
+Complete plugin groupings use `group: "plugin:<plugin-id>:<grouping-id>"`.
+These always use the server query, even when the browser has complete resident
+task coverage. The server authorizes the workspace before invoking the provider;
+classification is joined to filtered roots before pagination and never grants
+access to another workspace's tasks.
+
+Successful plugin pages add `grouping_revision` and `grouping_generation`;
+clients can send their previous values on a later-page request. A changed source
+resets that request to page one. `query_key` includes both source identities.
+Entries can add `group_color`. `total_tasks` counts unique matching tasks;
+`total_visible_tasks` and page bounds count visible occurrences, including roots
+and descendants repeated across groups.
+
+A missing, disabled, failed, timed-out, malformed, oversized, or incomplete
+provider returns HTTP 503 with `error_code: "sidebar_grouping_unavailable"`.
+This is not a successful empty snapshot. Workspace authorization failures remain
+separate and clear previously retained results.
+
+`GET /api/plugins/sidebar-groupings` returns active compatible provider metadata,
+also supplied as boot `sidebarGroupings`. The
+`plugin.sidebar-grouping.updated` WebSocket notification carries either
+`{plugin_id, workspace_id}`, install-wide `{plugin_id}`, or `{catalog: true}`.
+Workspace notifications use workspace authorization; global notifications
+contain identity only. They never contain classification/state values.
+Clients invalidate scoped results and refresh catalog metadata on catalog events
+or reconnect, fencing old provider, workspace, and account generations.
+
 A query accepts up to 20 filter clauses. Each `in` or `not_in` membership filter
 accepts up to 1,000 values, including an empty list. Each decoded string is
 limited to 256 UTF-8 bytes; JSON escaping does not consume that decoded limit.

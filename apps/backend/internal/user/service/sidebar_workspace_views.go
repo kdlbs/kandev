@@ -11,7 +11,31 @@ import (
 
 	"github.com/kandev/kandev/internal/user/models"
 	"github.com/kandev/kandev/internal/user/store"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
+
+func validateSidebarPluginGrouping(group string) error {
+	if !strings.HasPrefix(group, "plugin:") {
+		return nil
+	}
+	if _, _, valid := pluginsdk.ParseSidebarGroupingReference(group); !valid {
+		return fmt.Errorf("invalid sidebar plugin grouping reference")
+	}
+	return nil
+}
+
+func validateSidebarPluginView(view models.SidebarView) error {
+	if err := validateSidebarPluginGrouping(view.Group); err != nil {
+		return err
+	}
+	if origin := view.GeneratedPluginGrouping; origin != nil {
+		_, _, valid := pluginsdk.ParseSidebarGroupingReference(origin.Reference)
+		if !valid || strings.TrimSpace(origin.Name) == "" {
+			return fmt.Errorf("invalid generated sidebar plugin grouping")
+		}
+	}
+	return nil
+}
 
 // SetSidebarWorkspaceAccess supplies the caller-authorized workspace snapshot.
 func (s *Service) SetSidebarWorkspaceAccess(list func(context.Context) ([]string, error)) {
@@ -203,6 +227,11 @@ func applySidebarWorkspacePatch(settings *models.UserSettings, req *UpdateUserSe
 	if len(patch.Draft) > 0 {
 		if err := json.Unmarshal(patch.Draft, &state.Draft); err != nil {
 			return fmt.Errorf("%w: invalid sidebar draft", ErrValidation)
+		}
+		if state.Draft != nil {
+			if err := validateSidebarPluginGrouping(state.Draft.Group); err != nil {
+				return fmt.Errorf("%w: %s", ErrValidation, err)
+			}
 		}
 		if state.Draft != nil && state.Draft.BaseViewID != state.ActiveViewID {
 			return fmt.Errorf("%w: draft does not match active workspace view", ErrValidation)

@@ -17,6 +17,7 @@ export function GroupHeader({
   id,
   controlsId,
   label,
+  color,
   groupKey,
   count,
   isCollapsed,
@@ -26,6 +27,7 @@ export function GroupHeader({
   id?: string;
   controlsId?: string;
   label: string;
+  color?: string;
   groupKey: string;
   count: number;
   isCollapsed: boolean;
@@ -52,6 +54,14 @@ export function GroupHeader({
           isCollapsed && "-rotate-90",
         )}
       />
+      {color && (
+        <span
+          aria-hidden="true"
+          data-testid="sidebar-group-color"
+          className="h-2.5 w-2.5 shrink-0 rounded-full"
+          style={{ backgroundColor: color }}
+        />
+      )}
       <span className="flex-1 truncate text-left text-[12px] font-semibold text-foreground/90">
         {label}
       </span>
