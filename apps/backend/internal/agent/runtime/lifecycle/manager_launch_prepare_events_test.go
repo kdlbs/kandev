@@ -133,6 +133,7 @@ func TestLaunch_PromotionPublishesPrepareCompletedAfterCursorMCPPreparation(t *t
 		RuntimeName: agentruntime.RuntimeStandalone,
 		metadata:    map[string]interface{}{MetadataKeyRepositoryConfigured: false},
 	}
+	attachLegacyMCPRouteClient(execution)
 	execution.setRuntimeEnvironment(map[string]string{"HOME": home})
 	execution.setMetadataValue("executor_mcp_policy", mcpconfig.Policy{AllowHTTP: true})
 	require.NoError(t, manager.executionStore.Add(execution))

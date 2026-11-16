@@ -3,6 +3,8 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -247,9 +249,18 @@ func TestKubernetesCreateInstanceRehandshakesAfterMainContainerRestart(t *testin
 	created, err := initial.CreateInstance(context.Background(), validKubernetesCreateRequest())
 	require.NoError(t, err)
 	require.Equal(t, "initial-token", created.AuthToken)
+	resources.mu.Lock()
+	resources.pod.Status.ContainerStatuses[0].RestartCount = 1
+	resources.mu.Unlock()
 
 	staleInstancePort := startKubernetesUnhealthyServer(t)
-	restartedControlPort := startKubernetesAgentctlServerWithToken(t, true, 41002, "rotated-token")
+	restartedControl := &builtinMCPInstanceRecoveryControl{
+		expectedToken: "initial-token", replacementToken: "rotated-token",
+		createPort: 41002, getStatusCode: http.StatusUnauthorized,
+	}
+	restartedControlServer := httptest.NewServer(restartedControl)
+	t.Cleanup(restartedControlServer.Close)
+	restartedControlPort := testHTTPPort(t, restartedControlServer)
 	restartedInstancePort := startKubernetesAgentctlServer(t, false, 0)
 	forwards := &recordingKubernetesForwarder{localPorts: map[uint16]uint16{
 		41001:                                    staleInstancePort,
@@ -265,10 +276,12 @@ func TestKubernetesCreateInstanceRehandshakesAfterMainContainerRestart(t *testin
 	require.Equal(t, "rotated-token", reconnected.AuthToken)
 	require.Equal(t, "41002", reconnected.Metadata[MetadataKeyKubernetesAgentctlRemotePort])
 	require.Equal(t, created.InstanceID, reconnected.Metadata[MetadataKeyKubernetesAgentctlInstanceID])
-	require.Equal(t, []uint16{41001, uint16(kubeexecutor.DefaultAgentctlPort), 41002}, forwards.remotePorts())
-	require.True(t, forwards.sessions[0].isClosed(), "the stale instance forward must close")
-	require.True(t, forwards.sessions[1].isClosed(), "the temporary control forward must close")
-	require.False(t, forwards.sessions[2].isClosed(), "the rotated instance forward must remain live")
+	require.Equal(t, 0, restartedControl.getRequests, "a restarted main container should bypass stale InstanceInfo auth")
+	require.Equal(t, 1, restartedControl.handshakes)
+	require.Equal(t, 1, restartedControl.creates)
+	require.Equal(t, []uint16{uint16(kubeexecutor.DefaultAgentctlPort), 41002}, forwards.remotePorts())
+	require.True(t, forwards.sessions[0].isClosed(), "the temporary control forward must close")
+	require.False(t, forwards.sessions[1].isClosed(), "the rotated instance forward must remain live")
 	require.Empty(t, execs.requests, "a container restart reuses Pod-scoped bootstrap files")
 }
 

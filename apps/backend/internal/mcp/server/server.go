@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/common/mcpurl"
 	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -127,6 +128,7 @@ type Server struct {
 	mode                       string // "task" (default), "task-title-pending", "config", "external", "office", or "automation"
 	mcpProviders               []string
 	sseBaseURL                 string
+	nativeRoutePrefix          string
 	profile                    mcpprofile.Context
 	legacyModeCapabilities     []mcpprofile.Capability
 	namespacesMCPToolsByServer bool
@@ -175,6 +177,22 @@ func WithSSEBaseURL(baseURL string) ServerOption {
 	}
 }
 
+// WithNativeRoutePrefix scopes the instance-owned MCP transports under one
+// helper path. External backend routes do not use this option.
+func WithNativeRoutePrefix(prefix string) ServerOption {
+	return func(s *Server) {
+		s.nativeRoutePrefix = prefix
+	}
+}
+
+func (s *Server) nativeRoutePath(endpoint string) string {
+	path, err := mcpurl.RoutePath(s.nativeRoutePrefix, endpoint)
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
 type mcpAttachmentAttemptContextKey struct{}
 
 // New creates a new MCP server for agentctl.
@@ -212,11 +230,13 @@ func NewWithProfile(backend BackendClient, sessionID, taskID string, port int, l
 		profileContext = profileContext.WithoutCapability(mcpprofile.CapabilityUserQuestion)
 	}
 	s := newServerWithProfile(backend, sessionID, taskID, log, mcpLogFile, profileContext, options...)
-	s.sseServer = server.NewSSEServer(s.mcpServer,
-		server.WithBaseURL(s.sseBaseURLForPort(port)),
-	)
+	sseOptions := []server.SSEOption{server.WithBaseURL(s.sseBaseURLForPort(port))}
+	if s.nativeRoutePrefix != "" {
+		sseOptions = append(sseOptions, server.WithStaticBasePath(s.nativeRoutePrefix))
+	}
+	s.sseServer = server.NewSSEServer(s.mcpServer, sseOptions...)
 	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
-		server.WithEndpointPath("/mcp"),
+		server.WithEndpointPath(s.nativeRoutePath("/mcp")),
 		server.WithStateful(s.profile.BuiltinPackages != nil),
 		server.WithHTTPContextFunc(s.mcpHTTPContext),
 	)

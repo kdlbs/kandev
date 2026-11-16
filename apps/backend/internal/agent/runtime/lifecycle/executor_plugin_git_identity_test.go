@@ -158,7 +158,7 @@ func testPluginExecutorGitIdentityLifecycle(t *testing.T, retained, failSetup bo
 		MetadataKeyRemoteAuthHome: remoteAuthHome,
 	}
 	var agentInstanceRequest *agentctl.CreateInstanceRequest
-	runtime.newAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
+	runtime.newAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string, scopedMCPRoutes bool) (*agentctl.Client, error) {
 		if _, err := resolver(ctx); err != nil {
 			return nil, err
 		}
@@ -171,7 +171,7 @@ func testPluginExecutorGitIdentityLifecycle(t *testing.T, retained, failSetup bo
 			return nil, err
 		}
 		return agentctl.NewClient(endpoint.Hostname(), port, log,
-			agentctl.WithExecutionID(executionID), agentctl.WithAuthToken(token)), nil
+			agentctl.WithExecutionID(executionID), agentctl.WithAuthToken(token), agentctl.WithBuiltinMCPScopedRoutes(scopedMCPRoutes)), nil
 	}
 	var instance *ExecutorInstance
 	if retained {
