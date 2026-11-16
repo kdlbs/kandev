@@ -2,9 +2,10 @@
 status: current
 system: agents
 created: 2026-09-30
-updated: 2026-10-21
+updated: 2026-11-16
 requirements:
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006
+  - REQ-AGENTS-UNKNOWN-BOOTSTRAP-CLASS-001
 owners:
   - Kandev
 ---
@@ -26,6 +27,7 @@ and contribution admission. There is one recovery system and one active owner.
 | .30-.31 | Empty-turn feedback |
 | .32-.33 | Recovery success and history |
 | .34 | Desktop and phone composition |
+| UNKNOWN-BOOTSTRAP-CLASS-001.1-.2 | Unknown bootstrap classes |
 
 The [implementation package](../../../plans/session-startup-failure-explanations/plan.md)
 records the implementation sequence and verification results. This design
@@ -197,6 +199,28 @@ must retain all optional fields. Extend frontend `AgentErrorCause`,
 `readAgentErrorCauses`, active-error adapters, history metadata parsing, and
 hydration/store merges. A partial event omitting cause fields cannot erase a
 newer accepted snapshot. Unknown fields are ignored, not trusted.
+
+## Unknown bootstrap classes
+
+A failure that reaches `bootstrapFailureFor` without an allowlisted code used to
+persist `cause=unknown` with the generic detail, so a failed session never said
+why the agent did not start. `ClassifyUnknownBootstrapError` in
+`lifecycle/bootstrap_failure.go` now derives a bounded `Class` for every unknown
+path, including resume failures that never produced a `BootstrapFailure`:
+
+| Class | Evidence |
+| --- | --- |
+| `agentctl_start_rejected` | `agentctl.StartRejectedError` from a non-success start response |
+| `agentctl_unreachable` | A `net.Error` on the way to agentctl |
+| `passthrough_cli_unavailable` | The passthrough CLI sentinel |
+| `remote_initial_prompt_uncertain` | The remote initial prompt sentinel |
+| `unclassified` | Anything else |
+
+The executor projection writes `cause=<class>`. Only `agentctl_start_rejected`
+adds a summary: the HTTP status and agentctl's own `error` field after
+`routingerr.Sanitize`. Provider, plugin, and other wrapped errors keep the
+generic detail, so arbitrary error text is never stored. The cause code, message,
+recovery actions, and log text are unchanged.
 
 ## Correlation and visible explanations
 
