@@ -20,9 +20,11 @@ signal unapplied.
 
 ## Technical approach
 
-Bind the successor prompt to a turn, bind a turn-less delivery terminal to the
-turn its handler closes, and report any completion that is still deferred. The
-report never advances an Office step.
+Bind the successor prompt to a turn. Bind a turn-less delivery terminal to the
+turn its handler closes only after its prompt generation still owns the
+session. Save that binding with the exact workflow receipt after the repository
+checks the delivery identity and cursor. Report any completion that is still
+deferred. The report never advances an Office step.
 
 ## Waves
 

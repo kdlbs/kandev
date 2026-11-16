@@ -228,8 +228,19 @@ and no turn ID; `processOnTurnCompleteViaEngineWithCause` then deferred
   This cleanup uses a bounded context independent from launch cancellation.
 - `workflowEffectForCompletion` binds a turn-less terminal with delivery identity
   to the turn its handler closes: `turnAtEventFire` for `agent.ready`, and the
-  session's active turn (`completedEventClosingTurn`) for `agent.completed`. An
-  unresolved turn leaves the effect unbound, so the deferral stays fail-closed.
+  session's active turn (`completedEventClosingTurn`) for `agent.completed`.
+  Before the latter closes a turn, the handler requires a non-zero prompt
+  generation that `OwnsPromptGeneration` confirms for the same session and
+  execution. It closes only the captured turn. A stale or unverified event
+  cannot close a successor turn or write a workflow receipt.
+- The repository binds the saved terminal's empty turn ID in the same
+  transaction as its exact workflow receipt. The write requires a matching
+  stream, sequence, session, incarnation, harness generation, submission, and
+  projected cursor. A conflicting saved turn or an unprojected terminal stays
+  pending. Settlement copies the bound turn into the submission's terminal
+  identity, so retention and resume keep their existing exact-match checks.
+- An unresolved closing turn leaves the effect unbound, so the deferral stays
+  fail-closed.
 - A deferral that remains calls `surfaceDeferredOfficeCompletion`, which reports
   a stranded Office signal through `surfaceOfficeStalledSignal` with gate
   `deferred_completion`. Like the watchdog gates, it reports only
@@ -241,7 +252,8 @@ The existing recovery gates continue to exclude `IDLE` sessions.
 
 ## Persistence
 
-No schema change. No migration. No new table.
+No schema change. No migration. No new table. The guarded terminal-turn binding
+uses the existing terminal effect row.
 
 The stranded-signal dedupe key is in-memory on `orchestrator.Service`, keyed by
 session ID, step ID, and the signal's `SignaledAt`, and dropped when the signal

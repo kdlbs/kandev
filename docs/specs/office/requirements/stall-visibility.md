@@ -148,10 +148,16 @@ does not strand the task.
   for the successor prompt and launch the prompt bound to it.
 - **AC-OFFICE-STALL-VISIBILITY-004.2:** When a delivery terminal event carries
   its delivery identity but no turn ID, the system shall bind its workflow
-  completion to the turn its handler closes. Events without delivery identity
-  shall keep their existing behavior.
+  completion to the turn its handler closes only when the event's immutable
+  prompt generation still owns the session. The repository shall bind the
+  saved terminal to that turn in the same transaction as its exact workflow
+  receipt, after it verifies the full delivery identity and projected cursor.
+  A stale owner or conflicting saved turn shall leave the terminal pending and
+  shall not close a successor turn. Events without delivery identity shall
+  keep their existing behavior.
 - **AC-OFFICE-STALL-VISIBILITY-004.3:** When the closing turn cannot be
-  resolved, the system shall keep deferring the completion rather than guess.
+  resolved or prompt ownership cannot be verified, the system shall keep
+  deferring the completion rather than guess.
 
 ## Out of scope
 

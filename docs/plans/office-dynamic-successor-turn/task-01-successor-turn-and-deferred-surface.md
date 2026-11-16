@@ -21,9 +21,10 @@ system_design:
 
 ## Summary
 
-Start a turn for the Office prepared relaunch, bind a turn-less delivery
-terminal to the turn its handler closes, and surface a completion that is still
-deferred.
+Start a turn for the Office prepared relaunch. Bind a turn-less delivery
+terminal only when its prompt generation still owns the session. Persist the
+terminal turn with its exact workflow receipt, then surface a completion that
+is still deferred.
 
 ## In scope
 
@@ -31,6 +32,10 @@ deferred.
 - `workflowEffectForCompletion` and `completedEventClosingTurn` in
   `agent_delivery_effect.go`, used by both completion handlers (AC-004.2,
   AC-004.3).
+- `handleAgentCompletedLocked` verifies prompt-generation ownership before
+  closing a turn-less delivery completion. The SQLite repository binds the
+  persisted terminal and workflow receipt in one guarded transaction
+  (AC-004.2, AC-004.3).
 - `surfaceDeferredOfficeCompletion` and the `deferred_completion` gate in
   `stuck_signal_watchdog.go` (AC-001.6).
 
@@ -42,3 +47,11 @@ deferred.
   `TestCompletedEventClosingTurnUsesActiveTurn` (AC-004.2, AC-004.3).
 - `TestDeferredOfficeCompletionSurfacesPendingSignal` (AC-001.6, AC-003.1
   through AC-003.4).
+- `TestAgentCompletedTurnlessDeliveryIgnoresSupersededPrompt` and
+  `TestDeliveryRetentionTurnlessTerminalBindsWorkflowTurn` cover stale-owner
+  rejection and durable receipt plus settlement.
+
+## Fixup verification
+
+- `go test ./internal/orchestrator -run TestAgentCompletedTurnlessDeliveryIgnoresSupersededPrompt -count=1` passed.
+- `go test ./internal/task/repository/sqlite -run TestDeliveryRetentionTurnlessTerminalBindsWorkflowTurn -count=1` passed.

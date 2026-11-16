@@ -1916,7 +1916,7 @@ func (s *Service) officeDynamicRelaunchOptions(
 		return executor.LaunchOptions{}, false, fmt.Errorf("start Office successor turn: %w", err)
 	}
 	if turnID == "" {
-		return executor.LaunchOptions{}, false, errors.New("Office successor launch requires a durable turn")
+		return executor.LaunchOptions{}, false, errors.New("office successor launch requires a durable turn")
 	}
 	return executor.LaunchOptions{
 		AgentProfileID:       executionProfileID,
