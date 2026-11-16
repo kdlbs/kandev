@@ -147,3 +147,10 @@ The backend build, web typecheck, targeted Oxlint, Prettier, public-doc
 validation, docs catalog validation, specification lint, and `git diff --check`
 passed. No physical host reboot is claimed; reboot coverage uses a synthetic
 previous-boot receipt.
+
+The review follow-up also makes process-liveness checks propagate Docker
+execution failures and restores the SSH worker's prior system Git settings
+after broker-fixture cleanup. The latest managed run passed the liveness error
+assertion and again discovered 10 cases: 6 passed, 4 broker cases skipped, and
+0 failed. The broker cleanup path remains unexercised locally because the
+isolated HTTPS broker URL is not configured. Task 02 remains `in_progress`.

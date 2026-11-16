@@ -438,8 +438,9 @@ function nativeSessionID(metadata: Record<string, unknown> | null | undefined): 
 /**
  * Backend-restart recovery. Persisted ExecutorRunning metadata
  * (ssh_host, ssh_remote_agentctl_pid, ssh_remote_agentctl_port, etc.) drives
- * ResumeRemoteInstance — re-dial the SSH connection, re-forward the recorded
- * remote port, verify `kill -0 pid`, and reattach the stream manager.
+ * ResumeRemoteInstance. It verifies receipt-backed controller identity before
+ * adoption, uses `kill -0` for legacy rows, re-forwards the remote port, and
+ * reattaches the stream manager.
  *
  * Covers e2e-plan.md group J (J1–J4).
  */
@@ -451,6 +452,12 @@ test.describe("ssh executor — recovery after restart", () => {
     backend,
   }) => {
     test.setTimeout(300_000);
+    const unavailableTarget = {
+      ...seedData.sshTarget,
+      containerName: `${seedData.sshTarget.containerName}-missing`,
+    };
+    expect(() => isRemoteProcessAlive(unavailableTarget, 4242)).toThrow(/docker exec .* failed/);
+
     const traffic = attachGatewayTrafficCapture(testPage);
     const messageAdds = attachMessageAddCapture(testPage);
     const releaseFeature = await backend.useEnv({

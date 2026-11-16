@@ -46,53 +46,63 @@ export async function setupBrokerBackedSSH(
   });
   let fixture: BrokerGitFixture | undefined;
   let pluginInstalled = false;
-  let gitConfigInstalled = false;
+  let proxyConfigInstalled = false;
+  let sslVerifyConfigInstalled = false;
+  let originalProxyConfig: string[] | undefined;
+  let originalSSLVerifyConfig: string[] | undefined;
   const fixtureRoot = path.join(backend.tmpDir, "ssh-broker-recovery", randomUUID());
   const cleanup = async () => {
-    try {
-      if (gitConfigInstalled) {
-        execInContainer(seedData.sshTarget, [
-          "git",
-          "config",
-          "--system",
-          "--unset-all",
-          "http.proxy",
-        ]);
-        execInContainer(seedData.sshTarget, [
-          "git",
-          "config",
-          "--system",
-          "--unset-all",
-          "http.sslVerify",
-        ]);
-      }
-    } finally {
+    const errors: unknown[] = [];
+    const runCleanup = async (action: () => void | Promise<void>) => {
       try {
-        if (pluginInstalled) await uninstallFixturePlugin(backend.baseUrl);
-      } finally {
-        try {
-          await fixture?.close();
-        } finally {
-          try {
-            fs.rmSync(fixtureRoot, { recursive: true, force: true });
-          } finally {
-            await releaseBrokerEnv();
-          }
-        }
+        await action();
+      } catch (error) {
+        errors.push(error);
       }
+    };
+    if (proxyConfigInstalled) {
+      await runCleanup(() =>
+        restoreSystemGitConfig(seedData.sshTarget, "http.proxy", originalProxyConfig),
+      );
+    }
+    if (sslVerifyConfigInstalled) {
+      await runCleanup(() =>
+        restoreSystemGitConfig(seedData.sshTarget, "http.sslVerify", originalSSLVerifyConfig),
+      );
+    }
+    if (pluginInstalled) await runCleanup(() => uninstallFixturePlugin(backend.baseUrl));
+    await runCleanup(async () => {
+      await fixture?.close();
+    });
+    await runCleanup(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
+    await runCleanup(releaseBrokerEnv);
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) {
+      throw new AggregateError(errors, "failed to clean up broker-backed SSH fixture");
     }
   };
   try {
     fixture = await startPluginGitFixture(fixtureRoot);
+    originalProxyConfig = readSystemGitConfig(seedData.sshTarget, "http.proxy");
+    originalSSLVerifyConfig = readSystemGitConfig(seedData.sshTarget, "http.sslVerify");
     execInContainer(seedData.sshTarget, [
       "git",
       "config",
       "--system",
+      "--replace-all",
       "http.proxy",
       fixture.proxyURL,
     ]);
-    gitConfigInstalled = true;
-    execInContainer(seedData.sshTarget, ["git", "config", "--system", "http.sslVerify", "false"]);
+    proxyConfigInstalled = true;
+    execInContainer(seedData.sshTarget, [
+      "git",
+      "config",
+      "--system",
+      "--replace-all",
+      "http.sslVerify",
+      "false",
+    ]);
+    sslVerifyConfigInstalled = true;
 
     await installFixturePlugin(backend.baseUrl);
     pluginInstalled = true;
@@ -180,12 +190,46 @@ export function remoteProcessTree(target: SSHServerHandle, rootPID: number): num
 }
 
 export function isRemoteProcessAlive(target: SSHServerHandle, pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    throw new Error(`invalid remote process PID: ${pid}`);
+  }
+  const state = execInContainer(target, [
+    "sh",
+    "-c",
+    `if kill -0 "$1" 2>/dev/null; then printf alive; elif [ -d "/proc/$1" ]; then printf alive; else printf gone; fi`,
+    "sh",
+    String(pid),
+  ]).trim();
+  if (state === "alive") return true;
+  if (state === "gone") return false;
+  throw new Error(`unexpected remote process state for PID ${pid}: ${state}`);
+}
+
+function readSystemGitConfig(target: SSHServerHandle, key: string): string[] | undefined {
   const result = spawnSync(
     "docker",
-    ["exec", target.containerName, "sh", "-c", `kill -0 ${pid} 2>/dev/null`],
-    { stdio: "ignore" },
+    ["exec", target.containerName, "git", "config", "--system", "--get-all", key],
+    { encoding: "utf8" },
   );
-  return result.status === 0;
+  if (result.error) throw result.error;
+  if (result.status === 1 && !result.stdout && !result.stderr) return undefined;
+  if (result.status !== 0) {
+    throw new Error(
+      `reading system Git config ${key} failed (status=${result.status}): ${result.stderr}`,
+    );
+  }
+  return result.stdout.replace(/\r?\n$/, "").split(/\r?\n/);
+}
+
+function restoreSystemGitConfig(
+  target: SSHServerHandle,
+  key: string,
+  values: string[] | undefined,
+): void {
+  execInContainer(target, ["git", "config", "--system", "--unset-all", key]);
+  for (const value of values ?? []) {
+    execInContainer(target, ["git", "config", "--system", "--add", key, value]);
+  }
 }
 
 export function writeRemoteWorkspaceSentinel(
