@@ -3293,5 +3293,6 @@
   "removeRootBody": "폴더, 브랜치, 풀 리퀘스트는 유지됩니다. Kandev는 변경 사항과 파일에서 더 이상 표시하지 않습니다.",
   "removeRootFailed": "이 작업에서 루트를 제거할 수 없음",
   "removeFromTask": "작업에서 제거",
-  "rootDisabledNoTracker": "이 루트에는 아직 Git 추적기가 없습니다"
+  "rootDisabledNoTracker": "이 루트에는 아직 Git 추적기가 없습니다",
+  "refreshRepositories": "리포지토리 새로 고침"
 }

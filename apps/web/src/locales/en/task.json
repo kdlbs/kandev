@@ -3293,5 +3293,6 @@
   "removeRootBody": "The folder, its branch, and any pull requests stay. Kandev stops showing it in Changes and Files.",
   "removeRootFailed": "Could not remove the root from this task",
   "removeFromTask": "Remove from task",
-  "rootDisabledNoTracker": "This root has no Git tracker yet"
+  "rootDisabledNoTracker": "This root has no Git tracker yet",
+  "refreshRepositories": "Refresh repositories"
 }
