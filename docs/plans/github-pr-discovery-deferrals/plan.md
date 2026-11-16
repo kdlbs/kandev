@@ -191,6 +191,11 @@ expired deadline does not clear an unresolved warning.
 Implementation, review corrections, and verification are complete. Follow-up
 regressions cover duplicate fork-parent promotion and strict retry timestamp parsing.
 
+PR review follow-up aligned branch-result keys with GitHub's case-insensitive
+owner and repository identity while preserving case-sensitive branch names.
+Sibling fan-out now carries at most one shared PR status, and singleton groups
+skip the shared status map.
+
 - `python3 scripts/list-docs.py validate`: passed, 453 decisions and 2,018 specifications.
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - `(cd apps/backend && go test -tags fts5 -race ./internal/github -run 'Test(SyncWatchesBatched_|PRMonitorContinuation_|PRDiscovery|PRStatusProgress_)' -count=1 -timeout=8m)`: passed.
@@ -200,6 +205,9 @@ regressions cover duplicate fork-parent promotion and strict retry timestamp par
 - `(cd apps/web && pnpm e2e:run --project chromium tests/integrations/github-workspace-settings.spec.ts -- --grep 'PR discovery')`: 1 desktop test passed; the managed runner built the backend and web app.
 - `(cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/integrations/mobile-github-workspace-settings.spec.ts -- --grep 'PR discovery')`: 1 phone test passed using that fresh build.
 - `bash scripts/lint-go-changed apps/backend/internal/github/service_pr_watch_batched.go apps/backend/internal/github/service_pr_watch_batched_budget_test.go apps/backend/internal/github/poller_pr_continuation_test.go`: passed with 0 issues. The first run found two QF1008 suggestions in the continuation test; the selectors were simplified and lint passed on rerun.
+- `(cd apps/backend && go test -tags fts5 -run '^TestSyncWatchesBatched_ForkParentPRPromotesSharedConsumers$' ./internal/github)`: the case-variant `Fork/r` sibling failed before key normalization and passed after the fix.
+- `(cd apps/backend && go test -tags fts5 -race -trimpath ./internal/github -run 'Test(SyncWatchesBatched_|PRMonitorContinuation_|PRDiscovery|PRStatusProgress_)' -count=1 -timeout=8m)`: passed after the PR review follow-up.
+- `bash scripts/lint-go-changed apps/backend/internal/github/graphql.go apps/backend/internal/github/service_pr_watch_batched.go apps/backend/internal/github/service_pr_watch_batched_budget_test.go`: passed with 0 issues after the PR review follow-up.
 - `(cd apps/backend && go test -tags fts5 ./internal/github -run '^TestSyncWatchesBatched_ForkParentPRPromotesSharedConsumers$' -count=1 -v)`: failed before the shared-target-key correction because the second watch stayed searching without a task association; passed after correction.
 - `(cd apps/backend && go test -tags fts5 -race ./internal/github -run 'Test(SyncWatchesBatched_|PRMonitorContinuation_|PRDiscovery|PRStatusProgress_)' -count=1 -timeout=8m)`: passed after the backend correction.
 - `(cd apps/web && pnpm exec vitest run components/github/github-rate-limit.test.tsx)`: failed before strict parsing because a normalized-invalid future deadline displayed retry text; 3 tests passed after correction, including partial and timezone-less timestamps.
@@ -213,7 +221,8 @@ regressions cover duplicate fork-parent promotion and strict retry timestamp par
 
 The required regression tests were first run before the fix and failed on the
 lost deferral, missing continuation, and expired retry line. They passed after
-the implementation. The plan package remains unstaged and uncommitted.
+the implementation. The implementation and plan package are committed on the
+PR branch.
 
 No instance settings or live data changed.
 

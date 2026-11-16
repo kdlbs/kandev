@@ -151,8 +151,11 @@ Completed. The typed fork-parent deferral now reaches the existing pending-work
 continuation with all duplicate consumers. The prior health and check timestamp
 remain intact, successful siblings still publish, and genuine provider failures
 keep their existing failed-health path. Successful fork-parent results use the
-original batch target when shared with other consumers. The shared warning uses
-the strict RFC3339 parser and shows its retry line only for valid future deadlines.
+original batch target when shared with other consumers. The batched-branch key
+folds owner and repository case to match GitHub identity while preserving branch
+case. Sibling fan-out uses a one-entry PR status map; singleton groups skip that
+map. The shared warning uses the strict RFC3339 parser and shows its retry line
+only for valid future deadlines.
 
 The required backend service, continuation, component, desktop, and phone
 regressions failed before the production changes and passed afterward. Two
@@ -163,6 +166,9 @@ passed afterward. Verification:
 - `cd apps/web && pnpm exec vitest run components/github/github-rate-limit.test.tsx`: failed before the parser change because a normalized-invalid future deadline displayed retry text; 3 tests passed after the correction.
 - `(cd apps/backend && go test -tags fts5 -race ./internal/github -run 'Test(SyncWatchesBatched_|PRMonitorContinuation_|PRDiscovery|PRStatusProgress_)' -count=1 -timeout=8m)`: passed.
 - `cd apps/backend && go test -tags fts5 -run '^TestSyncWatchesBatched_ForkParentPRPromotesSharedConsumers$' ./internal/github -count=1`: passed; both watches and task associations resolved after one fork-parent lookup.
+- `cd apps/backend && go test -tags fts5 -run '^TestSyncWatchesBatched_ForkParentPRPromotesSharedConsumers$' ./internal/github`: the `Fork/r` case-variant sibling failed before key normalization and passed after the fix.
+- `(cd apps/backend && go test -tags fts5 -race -trimpath ./internal/github -run 'Test(SyncWatchesBatched_|PRMonitorContinuation_|PRDiscovery|PRStatusProgress_)' -count=1 -timeout=8m)`: passed after the PR review follow-up.
+- `bash scripts/lint-go-changed apps/backend/internal/github/graphql.go apps/backend/internal/github/service_pr_watch_batched.go apps/backend/internal/github/service_pr_watch_batched_budget_test.go`: passed with 0 issues after the PR review follow-up.
 - `(cd apps/web && pnpm run typecheck)`: passed after comparing the parser's nanoseconds to the current millisecond time without unsupported BigInt literal syntax.
 - `(cd apps/web && pnpm exec oxlint -c oxlint.config.mjs --deny-warnings components/github/github-pr-discovery-health.tsx)`: passed.
 - `(cd apps/web && pnpm e2e:run --project chromium tests/integrations/github-workspace-settings.spec.ts -- --grep 'PR discovery')`: 1 desktop test passed; managed runner built backend and web app.
@@ -174,5 +180,5 @@ passed afterward. Verification:
 - Documentation coverage preflight: passed for all changed files after this results update.
 
 The regression command recorded in this work order was also run before the
-implementation and reproduced the failure. The package remains unstaged and
-uncommitted.
+implementation and reproduced the failure. This work order and implementation
+are committed on the PR branch.

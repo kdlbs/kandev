@@ -578,9 +578,13 @@ func TestSyncWatchesBatched_ForkParentPRPromotesSharedConsumers(t *testing.T) {
 	watches := make([]*PRWatch, 0, 2)
 	for i, taskID := range []string{"task-shared-fork-a", "task-shared-fork-b"} {
 		seedTask(t, store, taskID, false)
+		owner := "fork"
+		if i == 1 {
+			owner = "Fork"
+		}
 		watch := withTestWorkspace(&PRWatch{
 			SessionID: fmt.Sprintf("session-shared-fork-%d", i),
-			TaskID:    taskID, Owner: "fork", Repo: "r", Branch: branch,
+			TaskID:    taskID, Owner: owner, Repo: "r", Branch: branch,
 		})
 		if err := store.CreatePRWatch(ctx, watch); err != nil {
 			t.Fatalf("create shared fork watch %d: %v", i, err)

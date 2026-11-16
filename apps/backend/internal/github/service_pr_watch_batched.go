@@ -753,13 +753,13 @@ func (s *Service) applySearchingBatchGroup(
 		}
 		return representative
 	}
+	if len(group.watches) == 1 {
+		return representative
+	}
 
 	sharedStatuses := &batchedWatchStatuses{
-		byKey:               make(map[string]*PRStatus, len(statuses.byKey)+1),
+		byKey:               make(map[string]*PRStatus, 1),
 		branchResolvedEmpty: statuses.branchResolvedEmpty,
-	}
-	for key, status := range statuses.byKey {
-		sharedStatuses.byKey[key] = status
 	}
 	if representative.Status != nil && representative.Status.PR != nil {
 		sharedStatuses.byKey[sharedBranchKey] = representative.Status
