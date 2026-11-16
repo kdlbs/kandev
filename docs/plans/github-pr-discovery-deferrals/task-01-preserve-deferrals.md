@@ -162,6 +162,22 @@ regressions failed before the production changes and passed afterward. Two
 additional regressions reproduced the review findings before their fixes and
 passed afterward. Verification:
 
+The latest review correction also retains per-target retry boundaries when
+several fork-parent lookups defer during one workspace batch. The added
+continuation regression failed when the second target inherited the first
+target's five-minute deadline, then passed after each group's deferral was
+carried into pending work. Joined attempts retain their group's boundary too.
+Desktop and phone assertions now require exactly one inline warning before
+inspecting its contents.
+
+- `(cd apps/backend && go test -tags fts5 ./internal/github -run '^TestPRMonitorContinuation_KeepsForkParentBoundariesPerTarget$' -count=1)`: failed before the correction because the second target inherited the first target's five-minute boundary; passed after, retaining its 20-minute boundary.
+- `(cd apps/backend && go test -tags fts5 -race -trimpath ./internal/github -run 'Test(SyncWatchesBatched_|PRMonitorContinuation_|PRDiscovery|PRStatusProgress_)' -count=1 -timeout=8m)`: passed.
+- `bash scripts/lint-go-changed apps/backend/internal/github/poller.go apps/backend/internal/github/poller_pr_continuation.go apps/backend/internal/github/service_pr_watch_batched.go apps/backend/internal/github/service_pr_watch_batched_budget_test.go apps/backend/internal/github/poller_pr_continuation_test.go`: passed with 0 issues.
+- `(cd apps/web && pnpm run typecheck)`: passed; Oxlint passed for both changed E2E files.
+- `(cd apps/web && pnpm e2e:run --no-build --project chromium tests/integrations/github-workspace-settings.spec.ts -- --grep 'PR discovery')`: 1 desktop test passed against refreshed backend, fixture, plugin, and Vite assets.
+- `(cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/integrations/mobile-github-workspace-settings.spec.ts -- --grep 'PR discovery')`: 1 phone test passed against that build.
+- `make -C apps/backend build build-e2e-delivery-fixture build-e2e-send-now-fixture` and `make -C apps/backend e2e-plugin-package`: passed.
+
 - `cd apps/backend && go test -tags fts5 ./internal/github -run '^TestSyncWatchesBatched_ForkParentPRPromotesSharedConsumers$' -count=1 -v`: failed before the fix because the second watch remained searching and lacked a task association; passed after the fix.
 - `cd apps/web && pnpm exec vitest run components/github/github-rate-limit.test.tsx`: failed before the parser change because a normalized-invalid future deadline displayed retry text; 3 tests passed after the correction.
 - `(cd apps/backend && go test -tags fts5 -race ./internal/github -run 'Test(SyncWatchesBatched_|PRMonitorContinuation_|PRDiscovery|PRStatusProgress_)' -count=1 -timeout=8m)`: passed.
@@ -173,7 +189,7 @@ passed afterward. Verification:
 - `(cd apps/web && pnpm exec oxlint -c oxlint.config.mjs --deny-warnings components/github/github-pr-discovery-health.tsx)`: passed.
 - `(cd apps/web && pnpm e2e:run --project chromium tests/integrations/github-workspace-settings.spec.ts -- --grep 'PR discovery')`: 1 desktop test passed; managed runner built backend and web app.
 - `(cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/integrations/mobile-github-workspace-settings.spec.ts -- --grep 'PR discovery')`: 1 phone test passed on the fresh build above.
-- `python3 scripts/list-docs.py validate`: passed, 453 decisions and 2,018 specifications.
+- `python3 scripts/list-docs.py validate`: passed, 454 decisions and 2,021 specifications after the requirement and design update.
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - `bash scripts/lint-go-changed apps/backend/internal/github/service_pr_watch_batched.go apps/backend/internal/github/service_pr_watch_batched_budget_test.go`: passed with 0 issues after a concurrent shared pre-commit lint finished.
 - `git diff --check`: passed after this results update.

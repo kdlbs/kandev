@@ -364,6 +364,9 @@ Do not add one goroutine per watch or wait for admission inside a workspace pass
 
 A pending entry records workspace, unfinished phase, watch IDs and target
 identities, credential scope/generation, and the original retry boundary.
+When one workspace pass defers multiple targets, retain each target's boundary
+independently, including resource-specific retry times. Coalesce consumers of
+the same target only; one target's first error must not set sibling deadlines.
 Unfinished phases include the workflow-attention phase described in the
 [workflow attention design](github-workflow-attention.md#monitored-workflow-phase).
 A wake for workflow-only work resumes that phase alone.

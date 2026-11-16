@@ -19,7 +19,8 @@ test.describe("GitHub workspace settings on mobile", () => {
     await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations/github`);
 
     const automation = testPage.getByTestId("github-workspace-automation");
-    const warning = automation.getByTestId("github-pr-discovery-health").first();
+    const warning = automation.getByTestId("github-pr-discovery-health");
+    await expect(warning).toHaveCount(1);
     await expect(warning).toContainText("PR discovery failed");
     await expect(warning).toContainText(/Retry after/);
     await testPage.clock.setFixedTime(new Date("2030-01-01T00:02:00Z"));

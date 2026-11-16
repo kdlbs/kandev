@@ -66,8 +66,14 @@ type forkParentProbeClient struct {
 	deferredBranch     string
 	deferralsRemaining int
 	deferredErr        error
+	deferredBranches   map[string]*forkParentProbeDeferral
 	probeCalls         int
 	onProbe            func()
+}
+
+type forkParentProbeDeferral struct {
+	remaining int
+	err       error
 }
 
 func (c *forkParentProbeClient) ExecuteGraphQL(
@@ -93,6 +99,26 @@ func (c *forkParentProbeClient) FindPRByHead(
 	ctx context.Context, owner, repo, headOwner, headRepo, branch string,
 ) (*PR, error) {
 	if branch != c.deferredBranch {
+		c.mu.Lock()
+		deferred, matched := c.deferredBranches[branch]
+		if !matched {
+			c.mu.Unlock()
+			return c.findPRByHead(ctx, owner, repo, headOwner, headRepo, branch)
+		}
+		c.probeCalls++
+		deferProbe := deferred.remaining > 0
+		if deferProbe {
+			deferred.remaining--
+		}
+		probeErr := deferred.err
+		onProbe := c.onProbe
+		c.mu.Unlock()
+		if onProbe != nil {
+			onProbe()
+		}
+		if deferProbe {
+			return nil, probeErr
+		}
 		return c.findPRByHead(ctx, owner, repo, headOwner, headRepo, branch)
 	}
 	c.mu.Lock()

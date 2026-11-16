@@ -42,6 +42,7 @@ type prWatchSyncPending struct {
 	// a completed status phase.
 	WorkflowOnly bool
 	Watches      []*PRWatch
+	Deferred     *AdmissionDeferredError
 }
 
 // prWatchSyncOutcome is the internal result of one batched sync pass.
@@ -292,12 +293,27 @@ func prWatchWorkflowPendingWatches(pending []prWatchSyncPending) []*PRWatch {
 	return watches
 }
 
-// appendPRWatchSyncPending merges one phase's unfinished watches, so an
-// outcome holds at most one entry per phase.
+// appendPRWatchSyncPending merges unfinished watches without target-specific
+// admission boundaries into their shared phase entry.
 func appendPRWatchSyncPending(
 	pending []prWatchSyncPending, numbered bool, watches []*PRWatch,
 ) []prWatchSyncPending {
 	return appendPRWatchSyncPendingForPhase(pending, numbered, false, watches)
+}
+
+func appendPRWatchSyncPendingWithDeferral(
+	pending []prWatchSyncPending, numbered bool, watches []*PRWatch,
+	deferred *AdmissionDeferredError,
+) []prWatchSyncPending {
+	if deferred == nil {
+		return appendPRWatchSyncPending(pending, numbered, watches)
+	}
+	if len(watches) == 0 {
+		return pending
+	}
+	return append(pending, prWatchSyncPending{
+		Numbered: numbered, Watches: watches, Deferred: deferred,
+	})
 }
 
 // appendPRWatchWorkflowPending records unfinished Actions-attention work
@@ -315,7 +331,8 @@ func appendPRWatchSyncPendingForPhase(
 		return pending
 	}
 	for i := range pending {
-		if pending[i].Numbered == numbered && pending[i].WorkflowOnly == workflowOnly {
+		if pending[i].Numbered == numbered && pending[i].WorkflowOnly == workflowOnly &&
+			pending[i].Deferred == nil {
 			pending[i].Watches = append(pending[i].Watches, watches...)
 			return pending
 		}
@@ -713,7 +730,9 @@ func (s *Service) applySearchingBatchGroups(
 			s.forgetPRDiscoveryWatchAttempt(
 				req.workspaceID, req.cacheScope, req.credentialGeneration, group.attempt,
 			)
-			outcome.Pending = appendPRWatchSyncPending(outcome.Pending, false, group.watches)
+			outcome.Pending = appendPRWatchSyncPendingWithDeferral(
+				outcome.Pending, false, group.watches, admissionDeferralOf(representative.deferredErr),
+			)
 			outcome.Err = firstPRWatchSyncError(outcome.Err, representative.deferredErr)
 			if outcome.Deferred == nil {
 				outcome.Deferred = admissionDeferralOf(representative.deferredErr)
@@ -865,7 +884,9 @@ func (s *Service) applyJoinedBatchGroups(
 				continue
 			}
 			sharedFailure = firstPRWatchSyncError(sharedFailure, sharedErr)
-			pending = appendPRWatchSyncPending(pending, group.numbered, group.watches)
+			pending = appendPRWatchSyncPendingWithDeferral(
+				pending, group.numbered, group.watches, admissionDeferralOf(sharedErr),
+			)
 			continue
 		}
 		if status == nil && !resolved && syncFailed {

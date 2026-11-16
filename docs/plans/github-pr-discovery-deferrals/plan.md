@@ -153,6 +153,8 @@ Spacing and example times are illustrative. This package changes one text condit
 - `poller_pr_continuation_test.go`:
   `TestPRMonitorContinuation_ForkParentDeferralResumes` uses virtual time and an idle watch.
   Assert the parent lookup succeeds at its admission boundary, before the next tick.
+  `TestPRMonitorContinuation_KeepsForkParentBoundariesPerTarget` verifies two
+  fork-parent deferrals on different resources retain their own retry deadlines.
   Reuse existing retirement and credential-change tests for POLLING-002.6-.7.
 - `components/github/github-rate-limit.test.tsx`:
   freeze time and cover future, equal, expired, invalid, and missing deadlines.
@@ -194,9 +196,11 @@ regressions cover duplicate fork-parent promotion and strict retry timestamp par
 PR review follow-up aligned branch-result keys with GitHub's case-insensitive
 owner and repository identity while preserving case-sensitive branch names.
 Sibling fan-out now carries at most one shared PR status, and singleton groups
-skip the shared status map.
+skip the shared status map. A later review correction carries each searching
+and joined group's typed deferral through poller continuation so different
+fork-parent targets keep their own retry deadlines.
 
-- `python3 scripts/list-docs.py validate`: passed, 453 decisions and 2,018 specifications.
+- `python3 scripts/list-docs.py validate`: passed, 454 decisions and 2,021 specifications.
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - `(cd apps/backend && go test -tags fts5 -race ./internal/github -run 'Test(SyncWatchesBatched_|PRMonitorContinuation_|PRDiscovery|PRStatusProgress_)' -count=1 -timeout=8m)`: passed.
 - `(cd apps/web && pnpm exec vitest run components/github/github-rate-limit.test.tsx)`: 3 tests passed.
@@ -218,6 +222,13 @@ skip the shared status map.
 - `bash scripts/lint-go-changed apps/backend/internal/github/service_pr_watch_batched.go apps/backend/internal/github/service_pr_watch_batched_budget_test.go`: passed with 0 issues after a prior concurrent pre-commit lint finished.
 - `git diff --check`: passed after final status and results updates.
 - `.github/scripts/pr-docs.cjs` `validateCoverage`: passed for the implementation, specs, public docs, plan, and work order. This local preflight did not contact GitHub.
+- `(cd apps/backend && go test -tags fts5 ./internal/github -run '^TestPRMonitorContinuation_KeepsForkParentBoundariesPerTarget$' -count=1)`: reproduced the second target inheriting the first five-minute deadline before the correction; passed afterward with its 20-minute boundary preserved.
+- `(cd apps/backend && go test -tags fts5 -race -trimpath ./internal/github -run 'Test(SyncWatchesBatched_|PRMonitorContinuation_|PRDiscovery|PRStatusProgress_)' -count=1 -timeout=8m)`: passed with per-target deferrals included.
+- `bash scripts/lint-go-changed apps/backend/internal/github/poller.go apps/backend/internal/github/poller_pr_continuation.go apps/backend/internal/github/service_pr_watch_batched.go apps/backend/internal/github/service_pr_watch_batched_budget_test.go apps/backend/internal/github/poller_pr_continuation_test.go`: passed with 0 issues.
+- `(cd apps/web && pnpm run typecheck)`: passed; focused Oxlint checks on both changed E2E files also passed.
+- `(cd apps/web && pnpm e2e:run --no-build --project chromium tests/integrations/github-workspace-settings.spec.ts -- --grep 'PR discovery')`: 1 desktop test passed against refreshed backend, fixture, plugin, and Vite assets.
+- `(cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/integrations/mobile-github-workspace-settings.spec.ts -- --grep 'PR discovery')`: 1 phone test passed against that build.
+- `make -C apps/backend build build-e2e-delivery-fixture build-e2e-send-now-fixture` and `make -C apps/backend e2e-plugin-package`: passed.
 
 The required regression tests were first run before the fix and failed on the
 lost deferral, missing continuation, and expired retry line. They passed after

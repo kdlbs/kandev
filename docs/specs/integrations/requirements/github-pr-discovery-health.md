@@ -119,9 +119,10 @@ Idle discovery and explicit refresh do not override retirement.
   preserve pending work without immediate REST fallback or a provider-failure
   diagnosis. Completed updates shall not consume another fallback opportunity.
 - **AC-INTEGRATIONS-GITHUB-PR-POLLING-002.6:** When local admission supplies a
-  retry boundary, automatic PR monitoring shall resume eligible pending work
-  at that boundary without an additional one-minute delay. Resumption shall
-  obey current admission and shall not block an independently eligible workspace.
+  retry boundary, automatic PR monitoring shall resume each pending target at
+  its own boundary without an additional one-minute delay. One target's
+  deferral shall not replace another target's boundary. Resumption shall obey
+  current admission and shall not block an independently eligible workspace.
 - **AC-INTEGRATIONS-GITHUB-PR-POLLING-002.7:** Resumed work shall use current
   workspace authorization and active watch lifetimes. Removed, retired,
   detached, or superseded targets shall not receive delayed writes or events.
