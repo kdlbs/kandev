@@ -164,9 +164,13 @@ successful fetch does not establish remote absence.
 In `resolveBaseRefWithFallback`, let this eligible error reach the existing
 configured-candidate and `ResolveRemoteDefaultBranch` sequence.
 Keep that sequence's current ordering and failure behavior.
+For this recovery, discover the remote default from the origin-advertised HEAD
+instead of trusting cached `origin/HEAD`. Refresh the fallback through its
+explicit `refs/heads/<branch>:refs/remotes/origin/<branch>` refspec so a narrow
+`remote.origin.fetch` mapping cannot leave a stale tracking ref in place.
 Use the existing `resolveFallbackRef` helper to require successful refresh and
-verification for a replacement after this required-fetch failure.
-A cached replacement alone cannot satisfy that refresh.
+verification for a replacement after this required-fetch failure. A cached
+replacement alone cannot satisfy that refresh.
 Then use the existing base update and warning finishers.
 A successful recovery ends sync progress with completion.
 

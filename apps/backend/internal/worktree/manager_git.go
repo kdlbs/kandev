@@ -517,7 +517,13 @@ func (m *Manager) pullBaseBranchWithPolicy(
 	// got one (70s-lock-held trace under contention).
 	fetchArgs := []string{"fetch", gitNoTags, "origin"}
 	if localBranch != "" {
-		fetchArgs = append(fetchArgs, localBranch)
+		if isRemoteRef {
+			// Update the exact tracking ref even when remote.origin.fetch is narrow.
+			refspec := "+refs/heads/" + localBranch + ":refs/remotes/origin/" + localBranch
+			fetchArgs = append(fetchArgs, refspec)
+		} else {
+			fetchArgs = append(fetchArgs, localBranch)
+		}
 	}
 	fetchResult := m.runRefreshGitWithLockRetry(
 		ctx, "fetch", repoPath, baseBranch, m.fetchTimeout, fetchArgs...,

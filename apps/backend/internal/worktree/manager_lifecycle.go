@@ -51,6 +51,26 @@ func (m *Manager) ResolveRemoteDefaultBranch(ctx context.Context, repoPath strin
 	return branch, nil
 }
 
+func (m *Manager) resolveFreshRemoteDefaultBranch(ctx context.Context, repoPath string) (string, error) {
+	output, runErr := m.runBoundedGitInspect(ctx, repoPath, "ls-remote", "--symref", "origin", "HEAD")
+	if runErr != nil {
+		return "", classifyRemoteDefaultError(output, runErr)
+	}
+
+	const headPrefix = "ref: refs/heads/"
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		fields := strings.SplitN(line, "\t", 2)
+		if len(fields) != 2 || fields[1] != "HEAD" || !strings.HasPrefix(fields[0], headPrefix) {
+			continue
+		}
+		branch := strings.TrimPrefix(fields[0], headPrefix)
+		if branch != "" {
+			return branch, nil
+		}
+	}
+	return "", ErrRemoteDefaultUnresolved
+}
+
 func readRemoteDefaultBranch(repoPath string) (string, error) {
 	gitDir, err := gitref.ResolveGitDir(repoPath)
 	if err != nil {
@@ -744,7 +764,13 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 	// The persisted repository default can be stale or absent. Resolve the
 	// live remote default only after the requested branch and stored fallback
 	// have both failed.
-	liveFallback, liveErr := m.ResolveRemoteDefaultBranch(ctx, req.RepositoryPath)
+	var liveFallback string
+	var liveErr error
+	if requiredFallbackRefresh {
+		liveFallback, liveErr = m.resolveFreshRemoteDefaultBranch(ctx, req.RepositoryPath)
+	} else {
+		liveFallback, liveErr = m.ResolveRemoteDefaultBranch(ctx, req.RepositoryPath)
+	}
 	if liveErr != nil {
 		if errors.Is(liveErr, ErrRemoteDefaultUnresolved) {
 			return "", "", "", fmt.Errorf("%w: %s (fallback %q also not found)", ErrInvalidBaseBranch, baseRef, fallback)
@@ -814,7 +840,8 @@ func (m *Manager) resolveFallbackRef(ctx context.Context, req *CreateRequest, fa
 	}
 	if req.PullBeforeWorktree {
 		if requiredRefresh {
-			resolved, _, err := m.pullBaseBranchWithPolicy(ctx, req.RepositoryPath, fallback, "", true, req.OnSyncProgress)
+			remoteFallback := "origin/" + normalizeOriginBranchName(fallback)
+			resolved, _, err := m.pullBaseBranchWithPolicy(ctx, req.RepositoryPath, remoteFallback, "", true, req.OnSyncProgress)
 			return resolved, err
 		}
 		return m.pullBaseBranch(ctx, req.RepositoryPath, fallback, nil)

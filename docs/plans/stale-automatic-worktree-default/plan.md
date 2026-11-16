@@ -142,6 +142,13 @@ Let `resolveFallbackRef` distinguish this required recovery from its existing
 callers through a local boolean argument. For this path, call the existing
 `pullBaseBranchWithPolicy` with required refresh and no recursive substitute.
 Its ref and ancestry checks already verify the replacement.
+When the persisted candidate is absent or equals the missing request, discover
+the origin's current HEAD from `git ls-remote --symref origin HEAD`; cached
+`origin/HEAD` may still name the deleted branch, and `remote set-head --auto`
+cannot resolve a default branch without its local tracking ref. Refresh the
+replacement through its explicit remote-tracking destination refspec so a
+narrow `remote.origin.fetch` mapping cannot make a stale cached commit look
+refreshed.
 Refresh-disabled and provider-handled calls retain their current behavior.
 
 On success, reuse the existing fallback finishers and warning fields.
@@ -175,6 +182,8 @@ New test identifiers are planned additions. Criteria suffixes refer to
 | .27 | `TestCreateWorktree_AutomaticDefaultMissingRemoteRecovers`: automatic/inherited permission, refresh on/off, stale saved default equal to the selected base |
 | .6, .19, .27 | `TestCreateWorktree_AutomaticDefaultFallbackRequiresVerifiedRefresh`: publish a newer sentinel commit after cloning, require refreshed replacement and matching worktree `HEAD` |
 | .6, .19, .27 | `TestCreateWorktree_AutomaticDefaultDeletedRemoteTrackingRefUsesRefreshedFallback`: delete the requested remote branch while retaining its cached tracking ref; require the refreshed default commit and completion warning/progress |
+| .6, .19, .27 | `TestCreateWorktree_AutomaticDefaultDiscoversCurrentRemoteDefault`: recover from a stale cached `origin/HEAD` and an absent symref with an uncached current default |
+| .6, .19, .27 | `TestCreateWorktree_AutomaticDefaultFallbackUsesFetchedCommitWithNarrowRefspec`: require the fetched commit when `remote.origin.fetch` excludes the fallback branch |
 | .10, .14, .27 | `TestCreateWorktree_AutomaticDefaultRecoveryRejectsUnprovenFailure`: auth, network, timeout, cancellation, lock, generic failure, and verification uncertainty on original or candidate |
 | .25, .26, .27 | `TestCreateWorktree_AutomaticDefaultRecoveryKeepsStrictSelection`: explicit selection, including a same-name saved default, still fails |
 | .6, .8, .28 | Existing `TestBaseBranchSelection_*` launch and mixed-attachment controls |
@@ -293,6 +302,8 @@ Implementation verification:
 - GREEN: `go test -trimpath -tags fts5 ./internal/worktree -run '^TestCreateWorktree_AutomaticDefault' -count=1 -v` passed the new recovery tests. The primary regression also passed with the work-order command.
 - Review correction RED: the new deleted-remote-tracking-ref regression selected the stale `origin/retired-base` sentinel commit after the remote branch was deleted.
 - Review correction GREEN: after cached requested refs were disallowed as success during required-fallback recovery, `(cd apps/backend && go test -trimpath -tags fts5 ./internal/worktree -run '^TestCreateWorktree_AutomaticDefault' -count=1 -v)` passed, verifying refreshed `main`, the warning, the default commit, and completed final progress.
+- PR review RED: regressions reproduced a cached `origin/HEAD` pointing to the deleted base, an absent symref with an uncached new default, and a stale fallback tracking ref left by a narrow fetch mapping.
+- PR review GREEN: after discovering the default from the origin symref and fetching to an explicit tracking ref, the same targeted command passed all cases, including the three review regressions.
 - `go test -trimpath -race -tags fts5 ./internal/worktree -count=1`: passed.
 - `go test -trimpath -race -tags fts5 ./internal/backendapp -run '^TestBaseBranchSelection_' -count=1`: passed.
 - Changed-file Go lint reported zero issues for `manager_git.go`,

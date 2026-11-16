@@ -118,6 +118,132 @@ func TestCreateWorktree_AutomaticDefaultDeletedRemoteTrackingRefUsesRefreshedFal
 	}
 }
 
+// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.27
+func TestCreateWorktree_AutomaticDefaultDiscoversCurrentRemoteDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		uncachedDefault     bool
+		remoteDefaultBranch string
+	}{
+		{name: "stale origin head points to deleted base", remoteDefaultBranch: "main"},
+		{name: "origin head absent and default uncached", uncachedDefault: true, remoteDefaultBranch: "new-default"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			remotePath, sourcePath := newExplicitBaseRemoteFixture(t)
+			runGit(t, sourcePath, "checkout", "-b", "retired-base")
+			writeRepoFile(t, sourcePath, "retired-sentinel.txt", "retired branch sentinel\n")
+			runGit(t, sourcePath, "add", "retired-sentinel.txt")
+			runGit(t, sourcePath, "commit", "-m", "publish retired base")
+			runGit(t, sourcePath, "push", "origin", "retired-base")
+
+			cachePath := filepath.Join(t.TempDir(), "cache")
+			runGit(t, filepath.Dir(cachePath), "clone", remotePath, cachePath)
+			var wantHead string
+			if tc.uncachedDefault {
+				runGit(t, sourcePath, "checkout", "main")
+				runGit(t, sourcePath, "checkout", "-b", tc.remoteDefaultBranch)
+				writeRepoFile(t, sourcePath, "new-default.txt", "new remote default\n")
+				runGit(t, sourcePath, "add", "new-default.txt")
+				runGit(t, sourcePath, "commit", "-m", "publish new remote default")
+				wantHead = strings.TrimSpace(runGit(t, sourcePath, "rev-parse", "HEAD"))
+				runGit(t, sourcePath, "push", "origin", tc.remoteDefaultBranch)
+				runGit(t, remotePath, "symbolic-ref", "HEAD", "refs/heads/"+tc.remoteDefaultBranch)
+				runGit(t, cachePath, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
+			} else {
+				wantHead = strings.TrimSpace(runGit(t, cachePath, "rev-parse", "refs/remotes/origin/main"))
+				runGit(t, cachePath, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/retired-base")
+			}
+			runGit(t, sourcePath, "push", "origin", "--delete", "retired-base")
+
+			store := newMockStore()
+			mgr, err := NewManager(newTestConfig(t), store, newTestLogger())
+			if err != nil {
+				t.Fatalf("NewManager failed: %v", err)
+			}
+			var events []SyncProgressEvent
+			request := automaticBaseRecoveryRequest(cachePath, "task-live-default-"+strings.ReplaceAll(tc.name, " ", "-"))
+			request.FallbackBaseBranch = "retired-base"
+			request.OnSyncProgress = captureSyncProgress(&events)
+
+			wt, err := mgr.Create(context.Background(), request)
+			if err != nil {
+				t.Fatalf("Create() failed to discover and refresh remote default: %v", err)
+			}
+			if wt.BaseBranch != tc.remoteDefaultBranch {
+				t.Fatalf("worktree base = %q, want current remote default %q", wt.BaseBranch, tc.remoteDefaultBranch)
+			}
+			if !strings.Contains(wt.BaseBranchFallbackWarning, "retired-base") ||
+				!strings.Contains(wt.BaseBranchFallbackWarning, tc.remoteDefaultBranch) {
+				t.Fatalf("fallback warning = %q, want both branch names", wt.BaseBranchFallbackWarning)
+			}
+			if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != wantHead {
+				t.Fatalf("worktree HEAD = %s, want current remote default %s", got, wantHead)
+			}
+			if len(events) == 0 || events[len(events)-1].Status != SyncProgressCompleted {
+				t.Fatalf("final sync progress = %#v, want completed", events)
+			}
+		})
+	}
+}
+
+// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.6
+// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.19
+// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.27
+func TestCreateWorktree_AutomaticDefaultFallbackUsesFetchedCommitWithNarrowRefspec(t *testing.T) {
+	remotePath, sourcePath := newExplicitBaseRemoteFixture(t)
+	runGit(t, sourcePath, "checkout", "-b", "retired-base")
+	writeRepoFile(t, sourcePath, "retired-sentinel.txt", "retired branch sentinel\n")
+	runGit(t, sourcePath, "add", "retired-sentinel.txt")
+	runGit(t, sourcePath, "commit", "-m", "publish retired base")
+	runGit(t, sourcePath, "push", "origin", "retired-base")
+
+	cachePath := filepath.Join(t.TempDir(), "cache")
+	runGit(t, filepath.Dir(cachePath), "clone", remotePath, cachePath)
+	oldDefaultHead := strings.TrimSpace(runGit(t, cachePath, "rev-parse", "refs/remotes/origin/main"))
+	runGit(t, sourcePath, "checkout", "main")
+	writeRepoFile(t, sourcePath, "updated-default.txt", "updated remote default\n")
+	runGit(t, sourcePath, "add", "updated-default.txt")
+	runGit(t, sourcePath, "commit", "-m", "advance remote default")
+	wantHead := strings.TrimSpace(runGit(t, sourcePath, "rev-parse", "HEAD"))
+	runGit(t, sourcePath, "push", "origin", "main")
+	runGit(t, sourcePath, "push", "origin", "--delete", "retired-base")
+	runGit(t, cachePath, "checkout", "-b", "topic", "refs/remotes/origin/main")
+	runGit(t, cachePath, "branch", "-D", "main")
+	runGit(t, cachePath, "config", "--unset-all", "remote.origin.fetch")
+	runGit(t, cachePath, "config", "--add", "remote.origin.fetch", "+refs/heads/topic:refs/remotes/origin/topic")
+	if got := strings.TrimSpace(runGit(t, cachePath, "rev-parse", "refs/remotes/origin/main")); got != oldDefaultHead {
+		t.Fatalf("cached origin/main = %s, want stale commit %s", got, oldDefaultHead)
+	}
+
+	store := newMockStore()
+	mgr, err := NewManager(newTestConfig(t), store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	var events []SyncProgressEvent
+	request := automaticBaseRecoveryRequest(cachePath, "task-narrow-fallback-refspec")
+	request.FallbackBaseBranch = "main"
+	request.OnSyncProgress = captureSyncProgress(&events)
+
+	wt, err := mgr.Create(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Create() failed to refresh default with a narrow fetch refspec: %v", err)
+	}
+	if wt.BaseBranch != "main" {
+		t.Fatalf("worktree base = %q, want main", wt.BaseBranch)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != wantHead {
+		t.Fatalf("worktree HEAD = %s, want fetched default commit %s", got, wantHead)
+	}
+	if !strings.Contains(wt.BaseBranchFallbackWarning, "retired-base") ||
+		!strings.Contains(wt.BaseBranchFallbackWarning, "main") {
+		t.Fatalf("fallback warning = %q, want both branch names", wt.BaseBranchFallbackWarning)
+	}
+	if len(events) == 0 || events[len(events)-1].Status != SyncProgressCompleted {
+		t.Fatalf("final sync progress = %#v, want completed", events)
+	}
+}
+
 func cloneAutomaticBaseRecoveryRepository(t *testing.T) string {
 	t.Helper()
 	remotePath, _ := newExplicitBaseRemoteFixture(t)

@@ -91,6 +91,10 @@ sequence in place. Do not extract a new resolver module or add candidate iterati
 Give the existing `resolveFallbackRef` a local argument for required refresh on
 this recovery path. Reuse `pullBaseBranchWithPolicy` and its verification checks.
 Keep existing candidate ordering and failure behavior.
+When recovery reaches the remote default, discover its currently advertised
+branch independently of cached `origin/HEAD`. Refresh the replacement into its
+explicit remote-tracking ref so a narrow fetch mapping cannot leave an older
+candidate commit selected.
 Verify the resulting ref and containing commit before using existing finishers.
 Do not rebind a base or record success before that verification.
 Keep other failure causes credential-safe, including live-default lookup errors.
@@ -103,6 +107,10 @@ Cover the following cases with the test names mapped in the plan:
   matching the branch label. Include a replacement absent locally.
 - A deleted `origin/<base>` whose stale remote-tracking ref remains cached must
   not satisfy a recovery path that requires a refreshed fallback.
+- A stale cached `origin/HEAD`, or an absent `origin/HEAD` with an uncached new
+  default, must not block discovery of the origin-advertised default.
+- A narrow `remote.origin.fetch` mapping must not let a required fallback use
+  an older cached tracking-ref commit.
 - A local replacement whose fetch fails. It must not bypass required refresh.
 - Auth, network, generic error, timeout, cancellation, lock exhaustion, and
   ref/ancestry uncertainty on the requested branch or replacement as applicable.
@@ -196,6 +204,12 @@ RED/GREEN:
   that cached-ref success during required-fallback recovery, the requested
   targeted command passed, including refreshed `main`, the substitution warning,
   the default commit, and completed final sync progress.
+- PR review regressions were red before correction: stale `origin/HEAD` returned
+  the deleted request, an absent symref could not name an uncached default, and
+  a narrow fetch mapping left the selected fallback at its older commit.
+- After adding authoritative origin-default discovery and an explicit tracking
+  refspec for remote-only refresh, the targeted `TestCreateWorktree_AutomaticDefault`
+  command passed all three review cases and the existing recovery controls.
 
 Required validation:
 
