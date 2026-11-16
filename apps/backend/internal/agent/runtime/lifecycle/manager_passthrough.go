@@ -535,7 +535,16 @@ func (m *Manager) passthroughMCPServers(
 			return nil, err
 		}
 	}
-	return builtinPassthroughMCPServers(execution, m.agentMCPURL(execution, port, builtinCoreMCPPath), operation.servers)
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if client == nil {
+		return nil, fmt.Errorf("agent helper is unavailable for passthrough MCP delivery")
+	}
+	coreURL, err := m.agentMCPURL(execution, client, port, builtinCoreMCPPath)
+	if err != nil {
+		return nil, fmt.Errorf("build passthrough MCP endpoint: %w", err)
+	}
+	return builtinPassthroughMCPServers(execution, client, coreURL, operation.servers)
 }
 
 // passthroughMCPPaths computes the filesystem locations a strategy may use: a

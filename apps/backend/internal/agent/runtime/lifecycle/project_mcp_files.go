@@ -55,9 +55,16 @@ func (m *Manager) resolveProjectMCPPlacement(
 		if port <= 0 {
 			return projectMCPPlacement{}, false, nil
 		}
+		if client == nil {
+			return projectMCPPlacement{}, false, errors.New("agent helper is unavailable for local project MCP delivery")
+		}
+		coreURL, err := m.agentMCPURL(execution, client, port, builtinCoreMCPPath)
+		if err != nil {
+			return projectMCPPlacement{}, false, fmt.Errorf("build project MCP endpoint: %w", err)
+		}
 		return projectMCPPlacement{
 			workspace: execution.WorkspacePath,
-			coreURL:   m.agentMCPURL(execution, port, builtinCoreMCPPath),
+			coreURL:   coreURL,
 			client:    client,
 		}, true, nil
 	}
@@ -74,6 +81,9 @@ func (m *Manager) resolveProjectMCPPlacement(
 	if target.InstanceID != client.InstanceID() || target.SessionID != execution.SessionID ||
 		target.WorkspacePath == "" || target.MCPURL == "" {
 		return projectMCPPlacement{}, false, errors.New("agent helper returned a mismatched project MCP target")
+	}
+	if _, _, err := validateBuiltinMCPURL(target.MCPURL, client); err != nil {
+		return projectMCPPlacement{}, false, fmt.Errorf("agent helper returned an invalid project MCP endpoint: %w", err)
 	}
 	return projectMCPPlacement{
 		remote:     true,

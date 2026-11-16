@@ -19,7 +19,7 @@ This design preserves the technical source detail for `REQ-OFFICE-AUTOMATION-RUN
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-OFFICE-AUTOMATION-RUNS-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-OFFICE-AUTOMATION-RUNS-001` | [Migrated source detail](#migrated-source-detail), [latest-run indicator](automation-latest-run-indicator.md) |
 | `REQ-OFFICE-AUTOMATION-RUNS-001` (AC .13 through .18) | [Run output capture guidance](automation-run-output.md) |
 | `REQ-OFFICE-AUTOMATION-CONTINUITY-003` | [Data model](#data-model), [API surface](#api-surface), [Failure modes](#failure-modes) |
 | `REQ-OFFICE-AUTOMATION-TARGETS-002` | [Data model](#data-model), [API surface](#api-surface), [Failure modes](#failure-modes) |
@@ -61,11 +61,10 @@ The automation is the object; its runs are its history. The surface is a list an
   guard, so a slower earlier response cannot overwrite a later refresh. Folding
   the section, collapsing the rail, or unmounting the desktop-only rail disables
   the cadence.
-- `buildAutomationRows` remains the single health-state derivation. An idle or
-  paused row keeps its existing health dot; a running row renders an animated
-  loader in the same compact slot. The loader is decorative and the existing
-  localized state label remains the screen-reader contract, so animation does
-  not replace the semantic Running state.
+- `buildAutomationRows` retains activity and newest-run data as separate facts.
+  [Latest-run indicator](automation-latest-run-indicator.md) owns presentation
+  precedence and outcome metadata across sidebar, agenda, and phone rows.
+  Running keeps the compact animated sidebar loader; paused remains muted.
 
 **`/automations` — the agenda, not an index**
 
