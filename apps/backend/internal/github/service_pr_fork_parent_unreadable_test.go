@@ -68,6 +68,9 @@ func TestFindPRForWatch_UnreadableForkParentIsHealthyEmpty(t *testing.T) {
 	notFoundErrors := map[string]error{
 		"rest 404":   parentNotFoundError(),
 		"gh cli 404": errors.New(`find PR by branch "x": gh: Not Found (HTTP 404)`),
+		"gh cli GraphQL missing repository": errors.New(
+			`find PR by branch "x": gh pr: exit status 1: GraphQL: Could not resolve to a Repository with the name 'kdlbs/kandev'. (repository)`,
+		),
 	}
 	for name, parentErr := range notFoundErrors {
 		t.Run(name, func(t *testing.T) {
@@ -138,16 +141,39 @@ func TestFindPRForWatch_ForkParentReadableAgainAfterCacheExpiry(t *testing.T) {
 }
 
 // AC-INTEGRATIONS-GITHUB-PR-DISCOVERY-001.6: only not-found is absorbed.
-func TestFindPRForWatch_ForkParentServerErrorStaysUnavailable(t *testing.T) {
-	service, _, _, watch := setupParentErrorWatch(t, &GitHubAPIError{StatusCode: 502, Endpoint: "/pulls"})
-	scope := testAutomationScope(t, service, testWorkspaceID)
-
-	if _, err := service.findPRByBranchForWatch(context.Background(), watch); err == nil {
-		t.Fatal("lookup error = nil, want the parent 502")
+func TestFindPRForWatch_ForkParentOtherErrorsKeepFailure(t *testing.T) {
+	cases := []struct {
+		name     string
+		err      error
+		category PRDiscoveryHealthCategory
+	}{
+		{"server error", &GitHubAPIError{StatusCode: 502, Endpoint: "/pulls"}, PRDiscoveryHealthUnavailable},
+		{"invalid credentials", &GitHubAPIError{StatusCode: 401, Endpoint: "/pulls"}, PRDiscoveryHealthUnavailable},
+		{
+			"forbidden with missing-repository text",
+			&GitHubAPIError{StatusCode: 403, Endpoint: "/pulls", Body: "Could not resolve to a Repository"},
+			PRDiscoveryHealthUnavailable,
+		},
+		{
+			"integration permission error",
+			errors.New("GraphQL: Resource not accessible by integration (repository.pullRequests)"),
+			PRDiscoveryHealthUnavailable,
+		},
+		{"rate limit", &GitHubAPIError{StatusCode: 429, Endpoint: "/pulls"}, PRDiscoveryHealthRateLimited},
 	}
-	health := service.prDiscoveryHealth.snapshot(testWorkspaceID, scope, 0)
-	if health.State != PRDiscoveryHealthDegraded || health.Category != PRDiscoveryHealthUnavailable {
-		t.Fatalf("health = %+v, want degraded unavailable", health)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			service, _, _, watch := setupParentErrorWatch(t, tc.err)
+			scope := testAutomationScope(t, service, testWorkspaceID)
+
+			if _, err := service.findPRByBranchForWatch(context.Background(), watch); !errors.Is(err, tc.err) {
+				t.Fatalf("lookup error = %v, want %v", err, tc.err)
+			}
+			health := service.prDiscoveryHealth.snapshot(testWorkspaceID, scope, 0)
+			if health.State != PRDiscoveryHealthDegraded || health.Category != tc.category {
+				t.Fatalf("health = %+v, want degraded %s", health, tc.category)
+			}
+		})
 	}
 }
 

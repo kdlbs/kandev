@@ -24,7 +24,8 @@ parent is not queried again until the entry expires.
 ## In scope
 
 - Not-found detection for the parent `FindPRByHead` error: `GitHubAPIError`
-  with `StatusCode == 404` (REST client) or `isNotFoundErr` (GH CLI client).
+  with `StatusCode == 404` (REST client), `isNotFoundErr`, or the GraphQL
+  missing-repository response from `gh pr list` (GH CLI client).
 - On not-found: replace the `forkParentCache` entry for the fork's scoped key
   (`scopedCacheKey(cacheScope, repoErrorCacheKey(owner, repo))`) with
   `forkParent{}` using the cache's default lifetime, then return `nil, nil`.
@@ -88,3 +89,16 @@ bash scripts/lint-go-changed apps/backend/internal/github/service_automation_aut
   watch completed with discovery health `healthy`; the unpatched v0.101.0
   instance reports `degraded`/`unavailable` for the same target. The
   integration settings page shows no discovery warning.
+
+### Maintainer review follow-up (2026-11-16)
+
+- Added the GraphQL missing-repository response from `gh pr list` to the
+  parent-only not-found handling. The service still returns other parent
+  errors, including typed non-404 errors with missing-repository text.
+- Extended the service regression cases for the GraphQL response, invalid
+  credentials, forbidden access, integration permission errors, and rate limits.
+- Added the unreadable-parent outcome and recovery timing to the public
+  integration troubleshooting guide.
+- Tests, builds, linters, and commit validation hooks were not run for this
+  follow-up, as requested. The earlier validation results describe the
+  original contribution.

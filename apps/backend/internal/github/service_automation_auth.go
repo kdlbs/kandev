@@ -191,11 +191,17 @@ func (s *Service) findPRInForkParent(
 }
 
 func isParentNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
 	var apiErr *GitHubAPIError
 	if errors.As(err, &apiErr) {
 		return apiErr.StatusCode == 404
 	}
-	return isNotFoundErr(err)
+	// The CLI searches PRs through GraphQL, which reports a missing repository
+	// without an HTTP 404 status.
+	return isNotFoundErr(err) ||
+		strings.Contains(strings.ToLower(err.Error()), "could not resolve to a repository")
 }
 
 // forkParent is the cached outcome of one fork-parent resolution.

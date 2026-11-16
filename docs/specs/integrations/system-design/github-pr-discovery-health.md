@@ -54,7 +54,9 @@ the parent PR query with 404.
 `findPRInForkParent` treats a not-found answer from that parent query as "no
 visible PR in the parent" and returns no PR and no error. Not-found means a
 `GitHubAPIError` with status 404 from the REST client, or the existing
-`isNotFoundErr` shape from the GH CLI client. Other errors return unchanged,
+`isNotFoundErr` shape or GraphQL "Could not resolve to a Repository" response
+from the GH CLI client. A typed non-404 error remains a failure even if its
+body contains missing-repository text. Other errors return unchanged,
 so `classifyPRDiscoveryError` keeps the rate-limit, invalid-query, and
 unavailable categories, and the authentication circuit still sees credential
 failures. A raw 404 is not a repository-not-resolvable signal, so the fork's
