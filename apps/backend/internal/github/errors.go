@@ -2,7 +2,11 @@ package github
 
 import (
 	"errors"
+<<<<<<< HEAD
 	"net/http"
+=======
+	"fmt"
+>>>>>>> 616ae7c453c (fix(github): make out-of-scope repositories actionable without leaking scope)
 	"strings"
 
 	"github.com/kandev/kandev/internal/common/authcircuit"
@@ -73,6 +77,41 @@ var ErrPRWatchRetired = errors.New("GitHub PR watch target is retired")
 
 // ErrPRWatchTargetIneligible reports a retired target that cannot be resumed.
 var ErrPRWatchTargetIneligible = errors.New("GitHub PR watch target is not eligible for resumption")
+
+// ErrRepoOutsideWorkspaceScope signals that the requested repository was
+// rejected by Kandev's local repository-scope policy (repo_scope_mode /
+// repo_scope_orgs / repo_scope_repos) before any GitHub call was made. Unlike
+// ErrRepoNotResolvable this is a policy decision, not a GitHub outcome: the
+// repository may exist and be fully readable by the workspace credential, it
+// is simply not in the workspace's allowlist. HTTP boundaries surface it with
+// the same 404 status used for genuinely unresolvable repositories — the
+// no-leak contract is preserved — but with an actionable message and the
+// github_repository_out_of_scope code so operators are told the fix is the
+// workspace scope, not the credential or the App installation.
+var ErrRepoOutsideWorkspaceScope = errors.New("github: repository is outside this workspace's scope")
+
+// repoOutsideScopeErr is the concrete error ensureRepositoryInWorkspaceScope
+// returns. It reports BOTH ErrRepoOutsideWorkspaceScope (so HTTP boundaries can
+// render an actionable message instead of a misleading "repository not
+// resolvable") and ErrRepoNotResolvable (so the existing "stop hammering a
+// dead repo" classification and the 10-minute negative cache keep behaving
+// exactly as before). Without the second identity, callers that only check
+// ErrRepoNotResolvable — including isRepoNotResolvableErr and wsSyncTaskPR —
+// would start treating a pure policy rejection as a transient failure and
+// retry it on every poll.
+type repoOutsideScopeErr struct{ owner, repo string }
+
+func (e *repoOutsideScopeErr) Error() string {
+	return fmt.Sprintf("%s: %s/%s", ErrRepoOutsideWorkspaceScope, e.owner, e.repo)
+}
+
+func (e *repoOutsideScopeErr) Is(target error) bool {
+	return target == ErrRepoOutsideWorkspaceScope || target == ErrRepoNotResolvable
+}
+
+func newRepoOutsideScopeErr(owner, repo string) error {
+	return &repoOutsideScopeErr{owner: owner, repo: repo}
+}
 
 // errStoreUnavailable is returned from service methods when no Store is
 // wired (Provide can return a Service with store == nil when the SQLite

@@ -286,6 +286,12 @@ func repositoryIdentityKey(owner, repo string) string {
 // ensureRepositoryInWorkspaceScope enforces Kandev's configured repository
 // boundary before a provider call. GitHub App installation visibility is
 // enforced by GitHub itself, so the two checks form an intersection.
+//
+// A rejection here returns an error that is BOTH ErrRepoOutsideWorkspaceScope
+// (so HTTP handlers can answer with an actionable message, still under the 404
+// used for every unresolvable repository) and ErrRepoNotResolvable
+// (so callers that only know the "stop retrying this repo" contract keep
+// working unchanged) — see repoOutsideScopeErr.
 func (s *Service) ensureRepositoryInWorkspaceScope(ctx context.Context, workspaceID, owner, repo string) error {
 	if strings.TrimSpace(owner) == "" || strings.TrimSpace(repo) == "" {
 		return nil
@@ -297,7 +303,7 @@ func (s *Service) ensureRepositoryInWorkspaceScope(ctx context.Context, workspac
 	if repositoryInWorkspaceScope(settings, owner, repo) {
 		return nil
 	}
-	return ErrRepoNotResolvable
+	return newRepoOutsideScopeErr(owner, repo)
 }
 
 func repositoryInWorkspaceScope(settings *WorkspaceSettings, owner, repo string) bool {

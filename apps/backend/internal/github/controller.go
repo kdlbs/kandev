@@ -1119,6 +1119,14 @@ func (c *Controller) httpListRepoBranches(ctx *gin.Context) {
 			})
 			return
 		}
+		// Repository-scope and auth failures used to fall through to a bare 500
+		// carrying the raw sentinel ("github: repository not resolvable"), which
+		// is indistinguishable from a server bug. Route them through the shared
+		// mapping: an actionable message under 404 for a local scope rejection or an
+		// unresolvable repository alike, and the typed auth statuses in between.
+		if writeGitHubOperationalAuthError(ctx, err) {
+			return
+		}
 		status := http.StatusInternalServerError
 		var apiErr *GitHubAPIError
 		if errors.As(err, &apiErr) {
@@ -1149,6 +1157,14 @@ func (c *Controller) httpGetRepoMergeMethods(ctx *gin.Context) {
 				"error": "GitHub is not configured. Install the gh CLI and run 'gh auth login', or add a GITHUB_TOKEN secret.",
 				"code":  "github_not_configured",
 			})
+			return
+		}
+		// Repository-scope and auth failures used to fall through to a bare 500
+		// carrying the raw sentinel ("github: repository not resolvable"), which
+		// is indistinguishable from a server bug. Route them through the shared
+		// mapping: an actionable message under 404 for a local scope rejection or an
+		// unresolvable repository alike, and the typed auth statuses in between.
+		if writeGitHubOperationalAuthError(ctx, err) {
 			return
 		}
 		status := http.StatusInternalServerError
