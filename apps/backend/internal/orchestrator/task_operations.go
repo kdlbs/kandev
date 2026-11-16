@@ -7788,18 +7788,7 @@ func (s *Service) finishPromptExecutorDispatch(
 	}
 	if execErr != nil {
 		execErr = s.persistRuntimeReplacementRecoveryBlock(ctx, sessionID, delivery, execErr)
-		if delivery != nil {
-			unknownErr := delivery.markInterrupted(
-				context.WithoutCancel(ctx), "prompt_dispatch_failed",
-			)
-			recoveryErr := s.deliveryRecoveryError(
-				context.WithoutCancel(ctx), sessionID, "unknown_prompt_outcome", delivery,
-			)
-			if unknownErr != nil {
-				execErr = errors.Join(execErr, unknownErr)
-			}
-			execErr = errors.Join(execErr, recoveryErr)
-		}
+		execErr = s.settlePromptDispatchError(context.WithoutCancel(ctx), sessionID, delivery, dispatchAccepted, execErr)
 		// Missing-execution recovery reacquires the cancel guard while it resets
 		// the session. Release dispatch admission before entering that path.
 		if releaseDispatchGuard != nil {

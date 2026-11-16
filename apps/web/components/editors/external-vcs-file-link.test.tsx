@@ -50,7 +50,6 @@ describe("ExternalVcsFileLink", () => {
   it.each([
     ["github", "GitHub", "github-provider-icon"],
     ["gitlab", "GitLab", "gitlab-provider-icon"],
-    ["azure_devops", "Azure DevOps", "azure-devops-icon"],
   ] as const)("renders a branded, safe new-tab action for %s", (provider, label, iconTestId) => {
     mocks.link = {
       provider,

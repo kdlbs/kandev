@@ -252,7 +252,6 @@ export type UserSettings = {
   github_saved_presets?: unknown;
   github_default_query_presets?: unknown;
   gitlab_saved_presets?: unknown;
-  azure_devops_browse_preferences?: unknown;
   default_utility_agent_id?: string;
   default_utility_model?: string;
   default_utility_agent_profile_id?: string;
@@ -351,7 +350,6 @@ export type UserSettingsUpdatePayload = {
   github_saved_presets?: unknown[] | null;
   github_default_query_presets?: object | null;
   gitlab_saved_presets?: unknown[] | null;
-  azure_devops_browse_preferences?: object | null;
   default_utility_agent_id?: string;
   default_utility_model?: string;
   default_utility_agent_profile_id?: string;

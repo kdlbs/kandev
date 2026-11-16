@@ -382,7 +382,6 @@
   "inferenceAgentThisAgent": "ţĥĩś àĝēńţ",
   "inferenceAgentUnavailable": "{{name}} ĩś ńō ĺōńĝēŕ àvàĩĺàƀĺē.",
   "installed": "Ĩńśţàĺĺēď",
-  "integrationDescriptionAzureDevops": "Àźũŕē Ɓōàŕďś ŵōŕķ ĩţēḿś àńď Àźũŕē Ŕēƥōś ƥũĺĺ ŕēqũēśţś.",
   "integrationDescriptionGithub": "ƤŔ ŕēvĩēŵ qũēũēś, ĩśśũē ŵàţćĥēŕś, àńď ŌÀũţĥ ćŕēďēńţĩàĺś.",
   "integrationDescriptionGitlab": "Ḿēŕĝē ŕēqũēśţ ćŕēàţĩōń, ďĩśćũśśĩōń ŕēƥĺĩēś, àńď śēĺƒ-ḿàńàĝēď ĥōśţś.",
   "integrationDescriptionJira": "Àţĺàśśĩàń Ćĺōũď ćŕēďēńţĩàĺś àńď ĴQĹ ĩśśũē ŵàţćĥēŕś.",
@@ -489,8 +488,8 @@
   "memory": "Ḿēḿōŕŷ %",
   "mergeThisSplitIntoTheSplit": "Ḿēŕĝē ţĥĩś śƥĺĩţ ĩńţō ţĥē śƥĺĩţ ćōńţàĩńĩńĝ {{target}}.",
   "mergeWithTarget": "Ḿēŕĝē ŵĩţĥ {{target}}",
-  "escapeCancelsAgent": "Ĕśçàþē þàũśēś ţĥē àĝēñţ",
-  "escapeCancelsAgentDescription": "Þŕēśś Ĕśçàþē ĩñ ţĥē çĥàţ ĩñþũţ ţō þàũśē ţĥē ŕũññĩñĝ àĝēñţ.",
+  "escapeCancelsAgent": "Ēśćàƥē ƥàũśēś ţĥē àĝēńţ",
+  "escapeCancelsAgentDescription": "Ƥŕēśś Ēśćàƥē ĩń ţĥē ćĥàţ ĩńƥũţ ţō ƥàũśē ţĥē ŕũńńĩńĝ àĝēńţ.",
   "messageSubmitKey": "Ḿēśśàĝē Śũƀḿĩţ Ķēŷ",
   "messageTimeDisplay": "Ḿēśśàĝē ţĩḿē",
   "messageTimeDisplayDescription": "Ćĥōōśē ĥōŵ ḿēśśàĝē ţĩḿēśţàḿƥś àŕē śĥōŵń. Ţĥē ōţĥēŕ ƒōŕḿ ĩś àvàĩĺàƀĺē ŵĥēń ŷōũ ĥōvēŕ ōvēŕ ōŕ ţàƥ ţĥē ţĩḿēśţàḿƥ.",
@@ -1225,5 +1224,9 @@
   "builtinMcp.currentUnknown": "Ćũŕŕēńţ àĝēńţ ƥàćķàĝēś àŕē ũńķńōŵń. Ţĥēśē àŕē ţĥē śàvēď ćĥōĩćēś ƒōŕ ţĥē ńēxţ àĝēńţ śţàŕţ.",
   "mcpFromAutomation": "Ƒŕōḿ àũţōḿàţĩōń",
   "mcpFromAutomationDescription": "Śēŕvēŕś śēĺēćţēď ƀŷ ţĥē àũţōḿàţĩōń ţĥàţ śţàŕţēď ţĥĩś ƥŕōćēśś.",
-  "builtinMcp.surfaces.automation": "Àũţōḿàţĩōń"
+  "builtinMcp.surfaces.automation": "Àũţōḿàţĩōń",
+  "builtinMcp.inheritedValue": "Ĩńĥēŕĩţēď ƒŕōḿ ŵōŕķśƥàćē: {{value}}",
+  "builtinMcp.overrideValue": "Ţàśķ ōvēŕŕĩďē: {{value}}. Ŵōŕķśƥàćē ďēƒàũĺţ: {{default}}.",
+  "builtinMcp.useInherited": "Ũśē ĩńĥēŕĩţēď vàĺũē",
+  "builtinMcp.allowTasks": "Àĺĺōŵ ţàśķś ţō ũśē ţĥĩś ƥàćķàĝē"
 }

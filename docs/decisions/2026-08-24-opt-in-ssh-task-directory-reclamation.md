@@ -3,6 +3,7 @@
 **Status:** accepted
 **Date:** 2026-08-24
 **Area:** backend, frontend, operations
+**Amended by:** [Storage-scoped SSH reclamation](2026-11-12-scope-ssh-reclamation-to-deleted-storage.md) for ignored-file policy and linked-worktree safety scope.
 
 ## Context
 
@@ -75,3 +76,7 @@ install sharing the host, is indistinguishable from an orphan.
 Treating a clean `git status --porcelain --untracked-files=all --ignored` as sufficient evidence of safety was rejected. It reports
 nothing about commits that exist only locally, and nothing about stashes. The probe checks all
 three.
+
+The amendment changes ignored-file eligibility and linked-worktree scope.
+Clean status alone remains insufficient: publication and stash checks still apply.
+The opt-in default and cleanup-job placement in this decision remain applicable.

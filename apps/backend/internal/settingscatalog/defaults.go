@@ -26,7 +26,7 @@ func DefaultDomainDescriptors() []DomainDescriptor {
 		editorDomain(),
 		notificationProviderDomain(),
 		compatibilityIntegrationDomain("issue_integrations", "issue_integration", "Issue integrations", "Use provider-specific Jira, Linear, and Sentry resource types for settings updates."),
-		compatibilityIntegrationDomain("code_host_integrations", "code_host_integration", "Code host integrations", "Use provider-specific GitHub, GitLab, and Azure DevOps resource types for settings updates."),
+		compatibilityIntegrationDomain("code_host_integrations", "code_host_integration", "Code host integrations", "Use provider-specific GitHub and GitLab resource types for settings updates."),
 		jiraSettingsDomain(),
 		linearSettingsDomain(),
 		sentryInstanceDomain(),
@@ -35,13 +35,10 @@ func DefaultDomainDescriptors() []DomainDescriptor {
 		sentryIssueWatchDomain(),
 		githubSettingsDomain(),
 		gitlabSettingsDomain(),
-		azureDevOpsSettingsDomain(),
 		githubReviewWatchDomain(),
 		githubIssueWatchDomain(),
 		gitlabReviewWatchDomain(),
 		gitlabIssueWatchDomain(),
-		azureDevOpsWorkItemWatchDomain(),
-		azureDevOpsPullRequestWatchDomain(),
 		automationDomain(),
 		automationTriggerDomain(),
 		runtimeFlagDomain(),
@@ -175,16 +172,6 @@ func gitlabSettingsDomain() DomainDescriptor {
 	)
 }
 
-func azureDevOpsSettingsDomain() DomainDescriptor {
-	owner := "azuredevops"
-	return integrationDomain("code_host_integrations", "azure_devops_settings", "Azure DevOps settings", "Noncredential Azure DevOps query and action presets for one workspace.", owner, workspaceIntegrationTarget(),
-		domainWritable("azure_devops_settings", "workItemQueries", "Work item queries", "Saved work item query presets.", "array", owner, "workspace.manage"),
-		domainWritable("azure_devops_settings", "pullRequestQueries", "Pull request queries", "Saved pull request query presets.", "array", owner, "workspace.manage"),
-		domainWritable("azure_devops_settings", "workItemActions", "Work item actions", "Saved work item action presets.", "array", owner, "workspace.manage"),
-		domainWritable("azure_devops_settings", "pullRequestActions", "Pull request actions", "Saved pull request action presets.", "array", owner, "workspace.manage"),
-	)
-}
-
 func codeHostWatchFields(resourceType, owner string, projects bool, issue, camelCase bool) []FieldDescriptor {
 	fields := []FieldDescriptor{
 		domainWritable(resourceType, codeHostWatchPath("workflow_id", camelCase), "Workflow", "Workflow that receives matching items.", "string", owner, "workspace.manage"),
@@ -242,31 +229,6 @@ func gitlabReviewWatchDomain() DomainDescriptor {
 
 func gitlabIssueWatchDomain() DomainDescriptor {
 	return integrationDomain("code_host_integrations", "gitlab_issue_watch", "GitLab issue watches", "GitLab issue watch schedules and task bindings.", "gitlab", watchTarget(), codeHostWatchFields("gitlab_issue_watch", "gitlab", true, true, false)...)
-}
-
-func azureDevOpsWorkItemWatchDomain() DomainDescriptor {
-	fields := withoutIntegrationFields(codeHostWatchFields("azure_devops_work_item_watch", "azuredevops", false, true, true), "repos", "labels", "custom_query")
-	fields = append(fields,
-		domainWritable("azure_devops_work_item_watch", "projectId", "Project", "Azure DevOps project filter.", "string", "azuredevops", "workspace.manage"),
-		domainWritable("azure_devops_work_item_watch", "wiql", "WIQL", "Azure Boards query.", "string", "azuredevops", "workspace.manage"),
-		domainWritable("azure_devops_work_item_watch", "repositoryId", "Repository", "Optional repository binding.", "string", "azuredevops", "workspace.manage"),
-		domainWritable("azure_devops_work_item_watch", "baseBranch", "Base branch", "Base branch for the optional repository binding.", "string", "azuredevops", "workspace.manage"),
-	)
-	return integrationDomain("code_host_integrations", "azure_devops_work_item_watch", "Azure work item watches", "Azure work item watch schedules and task bindings.", "azuredevops", watchTarget(), fields...)
-}
-
-func azureDevOpsPullRequestWatchDomain() DomainDescriptor {
-	fields := withoutIntegrationFields(codeHostWatchFields("azure_devops_pull_request_watch", "azuredevops", false, false, true), "repos", "review_scope", "custom_query")
-	fields = append(fields,
-		domainWritable("azure_devops_pull_request_watch", "projectId", "Project", "Azure DevOps project filter.", "string", "azuredevops", "workspace.manage"),
-		domainWritable("azure_devops_pull_request_watch", "azureRepositoryId", "Azure repository", "Azure Repos repository filter.", "string", "azuredevops", "workspace.manage"),
-		domainWritable("azure_devops_pull_request_watch", "status", "Status", "Pull request status filter.", "string", "azuredevops", "workspace.manage"),
-		domainWritable("azure_devops_pull_request_watch", "creatorId", "Creator", "Pull request creator filter.", "string", "azuredevops", "workspace.manage"),
-		domainWritable("azure_devops_pull_request_watch", "reviewerId", "Reviewer", "Pull request reviewer filter.", "string", "azuredevops", "workspace.manage"),
-		domainWritable("azure_devops_pull_request_watch", "repositoryId", "Repository", "Optional repository binding.", "string", "azuredevops", "workspace.manage"),
-		domainWritable("azure_devops_pull_request_watch", "baseBranch", "Base branch", "Base branch for the optional repository binding.", "string", "azuredevops", "workspace.manage"),
-	)
-	return integrationDomain("code_host_integrations", "azure_devops_pull_request_watch", "Azure pull request watches", "Azure pull request watch schedules and task bindings.", "azuredevops", watchTarget(), fields...)
 }
 
 func withoutIntegrationFields(fields []FieldDescriptor, paths ...string) []FieldDescriptor {
@@ -657,7 +619,7 @@ func userSettingsDomain() DomainDescriptor {
 		"thread_active_view_id", "active thread view", "string", "thread_view_draft", "thread draft", "object", "sidebar_task_prefs", "sidebar task preferences", "object",
 		"sidebar_task_color_automation", "sidebar color automation", "object", "sidebar_task_colors", "sidebar task colors", "object", "sidebar_task_color_patch", "sidebar task color patch", "object", "task_create_last_used", "last task create values", "object",
 		"jira_saved_views", "Jira saved views", "object", "jira_default_view_id", "Jira default view", "string", "jira_task_presets", "Jira task presets", "object", "github_saved_presets", "GitHub saved presets", "object",
-		"github_default_query_presets", "GitHub query presets", "object", "gitlab_saved_presets", "GitLab saved presets", "object", "azure_devops_browse_preferences", "Azure DevOps browse preferences", "object",
+		"github_default_query_presets", "GitHub query presets", "object", "gitlab_saved_presets", "GitLab saved presets", "object",
 		"default_utility_agent_id", "default utility agent", "string", "default_utility_model", "default utility model", "string", "default_utility_agent_profile_id", "default utility profile", "string",
 		"keyboard_shortcuts", "keyboard shortcuts", "object", "terminal_link_behavior", "terminal link behavior", "string", "terminal_font_family", "terminal font family", "string",
 		"terminal_font_size", "terminal font size", "integer", "changes_panel_layout", "changes panel layout", "string", "last_seen_display", "last seen display", "string", "message_time_display", "message time display", "string", "agent_tab_close_behavior", "agent tab close behavior", "string",
@@ -697,7 +659,7 @@ func userSettingsDomain() DomainDescriptor {
 			}}
 		}
 		switch values[index] {
-		case "sidebar_draft", "thread_view_draft", "jira_saved_views", "jira_task_presets", "github_saved_presets", "github_default_query_presets", "gitlab_saved_presets", "azure_devops_browse_preferences":
+		case "sidebar_draft", "thread_view_draft", "jira_saved_views", "jira_task_presets", "github_saved_presets", "github_default_query_presets", "gitlab_saved_presets":
 			field.Nullable = true
 		}
 		fields = append(fields, field)

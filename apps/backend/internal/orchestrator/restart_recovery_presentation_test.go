@@ -2,11 +2,14 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/stretchr/testify/require"
 )
 
@@ -53,6 +56,74 @@ func TestRestartRecoveryRecreateDoesNotAddCompanionFence(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, blocks, 1)
 	require.Equal(t, currentBlock.ID, blocks[0].ID)
+}
+
+func TestSettledRestartSnapshotDoesNotHideMissingCanonicalSubmission(t *testing.T) {
+	ctx := context.Background()
+	service, repo, manager, session, _ := newSilentRestoreEligibilityFixture(t, "native", "missing-after-settlement")
+	session, err := repo.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	recovery, exists := models.LoadAgentDeliveryRecovery(session.Metadata)
+	require.True(t, exists)
+	recovery.Phase = models.AgentDeliveryRecoverySettled
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, session.ID, models.SessionMetaKeyAgentDeliveryRecovery, recovery))
+
+	root := t.TempDir()
+	store, err := journal.Open(journal.Config{Path: journal.CheckStorage(root, session.ID).Path})
+	require.NoError(t, err)
+	_, err = store.PutSubmission(ctx, journal.Submission{
+		ID: "newer-journal-only-submission", SessionID: session.ID,
+		IncarnationID: session.QueueIncarnationID, HarnessGeneration: 1,
+		StreamID: "newer-journal-only-stream", Hash: "newer-journal-only-hash",
+		Payload: []byte("interrupted instruction"), State: journal.SubmissionInterruptedUnknown,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	service.agentManager = &retainedJournalRecoveryManager{mockAgentManager: manager, root: root, terminated: true}
+	current, err := repo.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	generation, err := repo.GetCurrentHarnessSessionGeneration(ctx, session.ID, session.QueueIncarnationID)
+	require.NoError(t, err)
+	evidence, err := service.agentManager.(deliveryRecordEvidenceClient).InspectDeliveryRecordEvidence(ctx, agentruntime.DeliveryRecordEvidenceRequest{
+		TaskID: current.TaskID, SessionID: current.ID, IncarnationID: current.QueueIncarnationID,
+		HarnessGeneration: uint64(generation.Generation),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, evidence)
+	require.NotEmpty(t, evidence.Descriptor.Submissions)
+	require.True(t, service.hasNewRestartJournalSubmission(ctx, current, generation, recovery.SubmissionID))
+	require.True(t, service.hasMissingCanonicalNewRestartJournalSubmission(ctx, current, generation, recovery.SubmissionID))
+
+	_, exists, err = service.currentRestartRecoverySnapshot(ctx, current, generation)
+
+	require.NoError(t, err)
+	require.False(t, exists, "the settled history must not hide a journal prompt without its SQL row")
+}
+
+// @covers AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.11
+func TestRestartPresentationDefersLoadedProofWithoutExecution(t *testing.T) {
+	ctx := context.Background()
+	service, manager, block, submission, _, _ := nativeResumeFixture(t, "unknown_prompt_outcome", false, false)
+	repo := service.repo.(*sqliterepo.Repository)
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, submission.SessionID, models.TaskSessionStateWaitingForInput, ""))
+
+	var reconcileCalls int
+	service.agentManager = &loadedNativeProofTestManager{&nativeProofTestManager{
+		nativeResumeTestManager: manager,
+		proof: func(context.Context, string) (*models.NativeResumeDeliveryEvidence, error) {
+			reconcileCalls++
+			return nil, errors.New("durable adoption evidence unavailable")
+		},
+	}}
+	session, err := repo.GetTaskSession(ctx, submission.SessionID)
+	require.NoError(t, err)
+
+	_, err = service.repairRestartRecoveryPresentation(ctx, session)
+	require.NoError(t, err)
+	require.Zero(t, reconcileCalls, "restart recovery must not require a loaded runtime")
+	open, err := repo.GetSessionRecoveryBlock(ctx, block.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.RecoveryBlockOpen, open.State)
 }
 
 func TestRestartRecoveryRecreateReusesCurrentFenceControl(t *testing.T) {

@@ -2,42 +2,33 @@ package backendapp
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/dashboard"
 )
 
-type fakePendingApproverReader struct {
-	pending []dashboard.PendingApproverDTO
-	err     error
-}
+type fakeApproverNameReader struct{ names map[string]string }
 
-func (f fakePendingApproverReader) PendingApproversForCompletion(
-	context.Context, string, string,
-) ([]dashboard.PendingApproverDTO, error) {
-	return f.pending, f.err
-}
-
-func TestOfficeApprovalGuardAdapter_MapsPendingApprovers(t *testing.T) {
-	adapter := officeApprovalGuardAdapter{reader: fakePendingApproverReader{
-		pending: []dashboard.PendingApproverDTO{{AgentProfileID: "agent-ceo", Name: "CEO"}},
-	}}
-
-	got, err := adapter.PendingApproversForCompletion(context.Background(), "task-1", "step-done")
-	if err != nil {
-		t.Fatalf("PendingApproversForCompletion: %v", err)
+func (f fakeApproverNameReader) ResolvePendingApproverNames(_ context.Context, ids []string) []dashboard.PendingApproverDTO {
+	resolved := make([]dashboard.PendingApproverDTO, 0, len(ids))
+	for _, id := range ids {
+		resolved = append(resolved, dashboard.PendingApproverDTO{AgentProfileID: id, Name: f.names[id]})
 	}
+	return resolved
+}
+
+func TestOfficeApproverNameResolverAdapterMapsNames(t *testing.T) {
+	adapter := officeApproverNameResolverAdapter{reader: fakeApproverNameReader{names: map[string]string{"agent-ceo": "CEO"}}}
+	got := adapter.ResolvePendingApproverNames(context.Background(), []string{"agent-ceo"})
 	if len(got) != 1 || got[0].AgentProfileID != "agent-ceo" || got[0].Name != "CEO" {
 		t.Fatalf("got = %+v, want CEO", got)
 	}
 }
 
-func TestOfficeApprovalGuardAdapter_PropagatesReadError(t *testing.T) {
-	readErr := errors.New("read failed")
-	adapter := officeApprovalGuardAdapter{reader: fakePendingApproverReader{err: readErr}}
-
-	if _, err := adapter.PendingApproversForCompletion(context.Background(), "task-1", "step-done"); !errors.Is(err, readErr) {
-		t.Fatalf("err = %v, want read error", err)
+func TestOfficeApproverNameResolverAdapterFallsBackToStableIDs(t *testing.T) {
+	adapter := officeApproverNameResolverAdapter{}
+	got := adapter.ResolvePendingApproverNames(context.Background(), []string{"agent-cto"})
+	if len(got) != 1 || got[0].AgentProfileID != "agent-cto" || got[0].Name != "agent-cto" {
+		t.Fatalf("got = %+v, want stable ID fallback", got)
 	}
 }

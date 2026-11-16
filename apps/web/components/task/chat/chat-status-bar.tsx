@@ -19,7 +19,6 @@ import { PRStatusChip } from "@/components/github/pr-status-chip";
 import { MRStatusChip } from "@/components/gitlab/mr-status-chip";
 import { TaskDependencyChip } from "@/components/task/task-dependency-chip";
 import { TaskGraphButton } from "@/components/task-graph/task-graph-button";
-import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-devops-task-pull-request-chip";
 import { RegisteredChangeRequestStatus } from "@/components/integrations/registered-change-request-status";
 import { shareableSessionStateClient } from "@/components/task/share/share-button";
 import { ConversationUsageDisplay } from "@/components/task/chat/conversation-usage-display";
@@ -169,7 +168,6 @@ export function ComposerCIStatus({
     >
       <PRStatusChip taskId={taskId} />
       <MRStatusChip taskId={taskId} />
-      <AzureDevOpsTaskPullRequestChip taskId={taskId} />
       <RegisteredChangeRequestStatus taskId={taskId} sessionId={sessionId} surface="composer" />
     </div>
   );
