@@ -35,6 +35,20 @@ func TestQuestionImageSelfRepositoryScope(t *testing.T) {
 		})
 	}
 
+	t.Run("relative dot workspace folder compatibility alias", func(t *testing.T) {
+		relativeRoot := filepath.Join(t.TempDir(), "relative-repository")
+		require.NoError(t, os.Mkdir(relativeRoot, 0o755))
+		initGitRepoAt(t, relativeRoot)
+		want := writeQuestionImageFixture(t, relativeRoot, 2)
+		t.Chdir(relativeRoot)
+
+		manager := NewManager(&config.InstanceConfig{WorkDir: "."}, logger.Default())
+		t.Cleanup(manager.stopWorkspaceTrackers)
+		content, err := manager.ReadQuestionImage(t.Context(), "screen.png", filepath.Base(relativeRoot))
+		require.NoError(t, err)
+		require.Equal(t, want, content.Bytes)
+	})
+
 	t.Run("configured workspace name stays visible through symlink", func(t *testing.T) {
 		actualRoot := filepath.Join(t.TempDir(), "actual-repository")
 		require.NoError(t, os.Mkdir(actualRoot, 0o755))
