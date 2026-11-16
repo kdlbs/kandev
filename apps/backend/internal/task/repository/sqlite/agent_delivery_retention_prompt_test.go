@@ -225,6 +225,10 @@ func TestDeliveryRetentionTurnlessTerminalBindsWorkflowTurn(t *testing.T) {
 	if err != nil || !completed {
 		t.Fatalf("complete bound terminal settlement: completed=%v, err=%v", completed, err)
 	}
+	terminal, err = repo.GetAgentDeliveryEffect(ctx, terminalKey)
+	if err != nil || terminal.State != models.DeliveryEffectCompleted {
+		t.Fatalf("settled terminal = %+v, err=%v; want completed", terminal, err)
+	}
 	submission, err := repo.GetAgentDeliverySubmissionMetadata(ctx, event.SubmissionID)
 	if err != nil || submission.FullySettledAt == nil || submission.TerminalTurnID != turnID {
 		t.Fatalf("settled submission = %+v, err=%v", submission, err)
