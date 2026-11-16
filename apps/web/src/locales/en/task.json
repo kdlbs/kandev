@@ -444,6 +444,7 @@
   "commentCount_other": "{{count}} comments",
   "commentOnAgentResponse": "Comment on agent response",
   "commentOnSelection": "Comment on selection",
+  "selectionActions": "Selection actions",
   "comments": "Comments",
   "commentsOnFiles_one": "{{count}} comment on {{files}}",
   "commentsOnFiles_other": "{{count}} comments on {{files}}",

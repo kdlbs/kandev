@@ -5148,6 +5148,14 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 		resp.NeedsResume = false
 		return resp, nil
 	}
+	if session.State == models.TaskSessionStateStarting && running != nil &&
+		running.Status == models.ExecutorRunningStatusPrepared &&
+		time.Since(session.UpdatedAt) < executor.AgentStartupGracePeriod {
+		// A prepared runtime is normally workspace-only. STARTING records that
+		// agent launch has claimed it, so passive recovery must wait for startup.
+		resp.NeedsResume = false
+		return resp, nil
+	}
 	if running != nil && running.IdleSuspensionState == models.ExecutorIdleSuspensionSuspended &&
 		idleTaskSessionState(session.State) {
 		resp.IsIdleSuspended = true
