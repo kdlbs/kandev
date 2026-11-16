@@ -1,4 +1,8 @@
 {
+  "notificationFormatterLabel": "Ńōţĩƒĩćàţĩōń ćōńţēńţ",
+  "notificationFormatterDefault": "Ũśē ţĥē ōŕĩĝĩńàĺ ńōţĩƒĩćàţĩōń ćōńţēńţ",
+  "notificationFormatterUnavailable": "Ţĥē ƒōŕḿàţţēŕ ĩś ũńàvàĩĺàƀĺē. Ńōţĩƒĩćàţĩōńś ũśē ţĥēĩŕ ōŕĩĝĩńàĺ ćōńţēńţ.",
+  "notificationFormatterDescription": "Ćĥōōśē àń ōƥţĩōńàĺ ƒōŕḿàţţēŕ ƒōŕ ēàćĥ ƥŕōvĩďēŕ. Ƒōŕḿàţţĩńĝ ďōēś ńōţ ćĥàńĝē śũƀśćŕĩƥţĩōńś ōŕ ďēĺĩvēŕŷ ďēśţĩńàţĩōńś.",
   "notificationEventPermissionRequested": "Àĝēńţ ńēēďś ƥēŕḿĩśśĩōń",
   "notificationEventPermissionRequestedDescription": "Ńōţĩƒŷ ŵĥēń ţĥē àĝēńţ ĩś ŵàĩţĩńĝ ƒōŕ ŷōũ ţō àƥƥŕōvē àń àćţĩōń.",
   "notificationEventSessionFailed": "Àĝēńţ śēśśĩōń ƒàĩĺēď",

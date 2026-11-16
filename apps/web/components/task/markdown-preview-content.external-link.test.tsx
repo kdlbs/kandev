@@ -16,6 +16,7 @@ vi.mock("@/hooks/domains/comments/use-markdown-preview-comments", () => ({
     currentSelection: null,
     textSelection: null,
     dismissOverlays: vi.fn(),
+    dismissForResize: vi.fn(),
     showCommentsForRange: vi.fn(),
     closeCommentView: vi.fn(),
     closeComposer: vi.fn(),

@@ -1,4 +1,8 @@
 {
+  "notificationFormatterLabel": "通知の内容",
+  "notificationFormatterDefault": "元の通知内容を使用",
+  "notificationFormatterUnavailable": "フォーマッターを利用できません。元の内容で通知を送信します。",
+  "notificationFormatterDescription": "プロバイダーごとにフォーマッターを選択します。購読設定と送信先は変更されません。",
   "notificationEventPermissionRequested": "エージェントが許可を求めています",
   "notificationEventPermissionRequestedDescription": "エージェントが操作の承認を待っているときに通知します。",
   "notificationEventSessionFailed": "エージェントセッションが失敗",

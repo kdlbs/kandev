@@ -11,6 +11,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type RefObject,
   type HTMLAttributes,
   type ReactNode,
   type Ref,
@@ -33,6 +34,7 @@ import { cn, toRelativePath } from "@/lib/utils";
 import { PanelHeaderBarSplit } from "@/components/task/panel-primitives";
 import { FileViewerDownloadButton } from "@/components/task/file-viewer-header";
 import { EditorCommentPopover } from "@/components/task/editor-comment-popover";
+import { EditorSelectionCommentTrigger } from "@/components/editors/editor-selection-comment-trigger";
 import { CommentViewPopover } from "@/components/task/comment-view-popover";
 import { useMarkdownPreviewComments } from "@/hooks/domains/comments/use-markdown-preview-comments";
 import {
@@ -331,32 +333,30 @@ function MarkdownPreviewCommentOverlays({
   commentsEnabled,
   overlayRoot,
   commentState,
+  hostRef,
 }: {
   commentsEnabled: boolean;
   overlayRoot: HTMLElement | null;
   commentState: MarkdownPreviewCommentState;
+  hostRef: RefObject<HTMLElement | null>;
 }) {
-  const { t } = useTranslation();
   if (!commentsEnabled || !overlayRoot) return null;
 
   return createPortal(
     <>
       {commentState.currentSelection && !commentState.textSelection && (
-        <Button
-          size="sm"
-          variant="secondary"
-          className="floating-comment-btn fixed z-50 min-h-11 gap-1.5 shadow-lg animate-in fade-in-0 zoom-in-95 duration-100 cursor-pointer sm:min-h-8"
-          style={{
+        <EditorSelectionCommentTrigger
+          touch={commentState.touch}
+          position={{
             left: commentState.currentSelection.position.x + 8,
             top: commentState.currentSelection.position.y + 8,
           }}
-          data-testid="markdown-preview-comment-button"
-          onMouseDown={(event) => event.stopPropagation()}
-          onClick={commentState.openComposer}
-        >
-          <IconMessagePlus className="h-3.5 w-3.5" />
-          {t("task:comment")}
-        </Button>
+          positioning="fixed"
+          hostRef={hostRef}
+          onOpen={commentState.openComposer}
+          testId="markdown-preview-comment-button"
+          className="min-h-11 sm:min-h-8"
+        />
       )}
       {commentState.textSelection && (
         <div data-markdown-comment-popover>
@@ -448,6 +448,7 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
     [commentState.comments, commentState.showCommentsForRange],
   );
   const dismissCommentOverlays = commentState.dismissOverlays;
+  const dismissCommentOverlaysForResize = commentState.dismissForResize;
 
   useEffect(() => {
     setOverlayRoot(document.body);
@@ -457,13 +458,14 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
     if (!commentsEnabled) return;
     const scrollElement = scrollRef.current;
     const dismissOverlays = () => dismissCommentOverlays();
+    const dismissForResize = () => dismissCommentOverlaysForResize();
     scrollElement?.addEventListener("scroll", dismissOverlays, { passive: true });
-    window.addEventListener("resize", dismissOverlays);
+    window.addEventListener("resize", dismissForResize);
     return () => {
       scrollElement?.removeEventListener("scroll", dismissOverlays);
-      window.removeEventListener("resize", dismissOverlays);
+      window.removeEventListener("resize", dismissForResize);
     };
-  }, [commentsEnabled, dismissCommentOverlays]);
+  }, [commentsEnabled, dismissCommentOverlays, dismissCommentOverlaysForResize]);
 
   return (
     <div className="relative flex h-full flex-col" data-testid="markdown-preview">
@@ -492,6 +494,7 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
         commentsEnabled={commentsEnabled}
         overlayRoot={overlayRoot}
         commentState={commentState}
+        hostRef={scrollRef}
       />
     </div>
   );

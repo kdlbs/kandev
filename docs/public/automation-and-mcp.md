@@ -319,6 +319,8 @@ Trigger payloads are untrusted input. Do not let a PR body or webhook field sile
 
 **Automations** in the sidebar lists the workspace's automations with a health dot. Picking one opens it. **`/automations`** is the agenda across all of them, what fires next, and the recent runs of every automation in one feed. **`/automations/<id>`** is one automation's conversation: it opens on the newest run's transcript, carries the run's title snapshot and a reply box, and groups runs as Running / Completed in a rail or mobile drawer. A selected open run exposes **Stop current run**, which cancels its exact task, session, and turn without touching another run in a shared session. Configuration is behind **Details**, because an automation is configured once and read continuously.
 
+The Automations section, agenda, and phone navigation prioritize running work (blue), then a paused automation or disabled schedule (gray); otherwise the indicator follows the newest run: red for failure or a retry that could not be scheduled, green for success, amber for cancellation or a scheduled retry, and gray for skipped or archived runs. Non-success outcomes remain visible even when paused: the desktop sidebar shows the outcome before its age, such as **Failed, 4m ago**, while the agenda keeps its next-firing information and phone rows show status without adding an age. A newer success clears an earlier failure after refresh; an automation that has never run retains its idle or paused indication without an outcome label or last-run age.
+
 ![Kandev sidebar showing the Automations section with workspace automation shortcuts.](../screenshots/automation-sidebar.png)
 
 `/runs` still resolves to the same places, so older links keep working.

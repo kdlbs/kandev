@@ -21,6 +21,8 @@ import {
   useSessionCapacitySettings,
 } from "./use-session-capacity-settings";
 
+import { SessionCapacityGradeEditor } from "./session-capacity-grade-editor";
+
 const ENVIRONMENT_VARIABLE = "KANDEV_MAX_CONCURRENT_SESSIONS";
 
 function SessionCapacityLoadError({
@@ -58,7 +60,9 @@ function SessionCapacitySwitch({
   checked,
   disabled,
   onChange,
+  all = false,
 }: {
+  all?: boolean;
   checked: boolean;
   disabled: boolean;
   onChange: (value: boolean) => void;
@@ -68,14 +72,16 @@ function SessionCapacitySwitch({
   return (
     <SettingsRow
       label={label}
-      description={t("settings:sessionLimitShort")}
+      description={t(all ? "system:sessionCapacityAllHelp" : "settings:sessionLimitShort")}
       controlId="session-capacity-enabled"
       touchTarget="switch"
       controlWrapperTestId="session-capacity-enabled-touch-target"
       info={
         <SettingsInfo label={label}>
-          <p>{t("system:sessionCapacityEnabledDescription")}</p>
-          <p>{t("system:sessionCapacityBehaviorHelp")}</p>
+          <p>
+            {t(all ? "system:sessionCapacityAllHelp" : "system:sessionCapacityEnabledDescription")}
+          </p>
+          <p>{t(all ? "system:sessionCapacityTotalHelp" : "system:sessionCapacityBehaviorHelp")}</p>
         </SettingsInfo>
       }
       control={
@@ -98,23 +104,26 @@ function MaximumField({
   disabled,
   error,
   onChange,
+  all = false,
 }: {
   value: string;
+  all?: boolean;
   disabled: boolean;
   error?: string;
   onChange: (value: string) => void;
 }) {
   const { t } = useTranslation();
+  const label = t(all ? "system:sessionCapacityTotalLabel" : "system:sessionCapacityMaximumLabel");
   return (
     <div className="space-y-2">
       <SettingsRow
-        label={t("system:sessionCapacityMaximumLabel")}
-        description={t("settings:sessionMaximumShort")}
+        label={label}
+        description={t(all ? "system:sessionCapacityTotalHelp" : "settings:sessionMaximumShort")}
         descriptionId="session-capacity-maximum-help"
         controlId="session-capacity-maximum"
         info={
-          <SettingsInfo label={t("system:sessionCapacityMaximumLabel")}>
-            {t("system:sessionCapacityMaximumHelp")}
+          <SettingsInfo label={label}>
+            {t(all ? "system:sessionCapacityTotalHelp" : "system:sessionCapacityMaximumHelp")}
           </SettingsInfo>
         }
         control={
@@ -243,6 +252,8 @@ function SessionCapacitySettingsReady({
   const { t } = useTranslation();
   const { effective, settings } = state.snapshot!;
   const controlsDisabled = !state.isAdmin || state.isLocked;
+  const all = (state.isLocked ? effective.policy : state.policyDraft) === "all";
+  const title = t(all ? "system:sessionCapacityAllTitle" : "system:sessionCapacityLimitTitle");
   const effectiveEnabled = state.isLocked ? effective.enabled : state.enabledDraft;
   const effectiveMaximum = state.isLocked ? effective.max_sessions : settings.max_sessions;
   const maximumError = sessionCapacityMaximumError({
@@ -257,27 +268,30 @@ function SessionCapacitySettingsReady({
     <>
       {withinGroup ? (
         <div className="space-y-1 pb-3">
-          <h4 className="text-sm font-semibold">{t("system:sessionCapacityLimitTitle")}</h4>
+          <h4 className="text-sm font-semibold">{title}</h4>
         </div>
       ) : (
         <CardHeader>
-          <CardTitle className="text-base">{t("system:sessionCapacityLimitTitle")}</CardTitle>
+          <CardTitle className="text-base">{title}</CardTitle>
         </CardHeader>
       )}
       <CardContent className={withinGroup ? "min-w-0 space-y-5 px-0" : "min-w-0 space-y-5"}>
         <SessionCapacitySwitch
+          all={all}
           checked={effectiveEnabled}
           disabled={controlsDisabled}
           onChange={state.setEnabledDraft}
         />
         {effectiveEnabled && (
           <MaximumField
+            all={all}
             value={state.isLocked ? String(effective.max_sessions) : state.maxDraft}
             disabled={controlsDisabled}
             error={maximumError}
             onChange={state.setMaxDraft}
           />
         )}
+        <SessionCapacityGradeEditor state={state} />
         <EffectiveCapacity
           enabled={effective.enabled}
           maximum={effectiveMaximum}

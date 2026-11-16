@@ -1,4 +1,8 @@
 {
+  "notificationFormatterLabel": "Conteúdo das notificações",
+  "notificationFormatterDefault": "Usar o conteúdo original da notificação",
+  "notificationFormatterUnavailable": "O formatador está indisponível. As notificações usam o conteúdo original.",
+  "notificationFormatterDescription": "Escolha um formatador opcional para cada fornecedor. A formatação não altera as subscrições nem os destinos de envio.",
   "notificationEventPermissionRequested": "O agente precisa de permissão",
   "notificationEventPermissionRequestedDescription": "Notificar quando o agente estiver à espera que aprove uma ação.",
   "notificationEventSessionFailed": "A sessão do agente falhou",

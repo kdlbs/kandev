@@ -15,6 +15,10 @@ import (
 	"go.uber.org/zap"
 )
 
+// AgentStartupGracePeriod keeps a newly claimed launch from being mistaken
+// for a stale runtime while its process is starting.
+const AgentStartupGracePeriod = 30 * time.Second
+
 // GetExecutionBySession returns the execution state for a specific session.
 // "Has been launched" is determined by whether an executors_running row exists
 // (the lifecycle manager creates it in lockstep with executionStore.Add); the
@@ -22,7 +26,6 @@ import (
 // drifted from the in-memory store and produced the divergence bug.
 func (e *Executor) GetExecutionBySession(sessionID string) (*TaskExecution, bool) {
 	ctx := context.Background()
-	const startupGracePeriod = 30 * time.Second
 
 	// Load from database
 	session, err := e.repo.GetTaskSession(ctx, sessionID)
@@ -37,7 +40,7 @@ func (e *Executor) GetExecutionBySession(sessionID string) (*TaskExecution, bool
 	// Verify the agent is actually running
 	if !e.agentManager.IsAgentRunningForSession(ctx, sessionID) {
 		if (session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning) &&
-			time.Since(session.UpdatedAt) < startupGracePeriod {
+			time.Since(session.UpdatedAt) < AgentStartupGracePeriod {
 			running, runningErr := e.repo.GetExecutorRunningBySessionID(ctx, sessionID)
 			if runningErr != nil && !errors.Is(runningErr, models.ErrExecutorRunningNotFound) {
 				return FromTaskSession(session), true
