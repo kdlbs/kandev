@@ -7,7 +7,7 @@ requirements:
   - REQ-INTEGRATIONS-GITHUB-PR-DISCOVERY-001
   - REQ-INTEGRATIONS-GITHUB-PR-DISCOVERY-HEALTH-001
 created: 2026-09-11
-updated: 2026-10-28
+updated: 2026-11-15
 owners:
   - kandev
 ---
@@ -40,6 +40,42 @@ Tests must inspect generated selections against a checked, minimal Repository
 field contract, in addition to exercising response conversion and persistence.
 Record the upstream schema reference in the fixture. A canned response that
 accepts any query cannot detect this defect.
+
+## Unreadable fork parent
+
+Discovery AC .6 belongs to the fork-network lookup in
+`internal/github/service_automation_auth.go`. After the fork query is a
+definitive negative, `findPRInForkParent` resolves the parent through
+`forkParentRepositoryForLookup` and calls `FindPRByHead` on it. The fork's
+repository details expose the parent's name even when the credential cannot
+read the parent, so a private parent outside a GitHub App installation answers
+the parent PR query with 404.
+
+`findPRInForkParent` treats a not-found answer from that parent query as "no
+visible PR in the parent" and returns no PR and no error. Not-found means a
+`GitHubAPIError` with status 404 from the REST client, or the existing
+`isNotFoundErr` shape or GraphQL "Could not resolve to a Repository" response
+from the GH CLI client. A typed non-404 error remains a failure even if its
+body contains missing-repository text. Other errors return unchanged,
+so `classifyPRDiscoveryError` keeps the rate-limit, invalid-query, and
+unavailable categories, and the authentication circuit still sees credential
+failures. A raw 404 is not a repository-not-resolvable signal, so the fork's
+own repository is never marked missing because its parent is unreadable.
+
+To avoid one failing parent request per searching watch per cycle, the
+not-found result replaces the scoped `forkParentCache` entry for the fork with
+a non-fork value. That entry expires with the cache's existing 10-minute
+lifetime. Expiry does not schedule work: the next attempt admitted by the
+existing polling schedule or an explicit refresh resolves and queries the
+parent again, so granting the credential access later restores parent
+discovery without a restart. The
+entry stays keyed by credential scope, so another credential is unaffected.
+
+Verification: a fork whose parent query returns 404 finishes discovery as a
+healthy empty search on both the per-watch and batched paths; a second cycle
+inside the cache lifetime issues no parent query; the first attempt after
+expiry finds a parent PR once the parent is readable; a parent 5xx or
+rate-limit error still records its existing category.
 
 ## Watch target reconciliation
 

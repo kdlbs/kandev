@@ -172,6 +172,15 @@ func (s *Service) findPRInForkParent(
 		return nil, nil
 	}
 	pr, err := finder.FindPRByHead(ctx, parentOwner, parentRepo, owner, repo, branch)
+	if isParentNotFound(err) {
+		// The fork exposes its parent's name even when this credential cannot
+		// read the parent, so not-found means no visible parent PR. Caching the
+		// fork as parentless skips the parent until the entry expires.
+		if s != nil && s.forkParentCache != nil {
+			s.forkParentCache.set(scopedCacheKey(cacheScope, repoErrorCacheKey(owner, repo)), forkParent{})
+		}
+		return nil, nil
+	}
 	if err != nil || pr == nil {
 		return pr, err
 	}
@@ -179,6 +188,20 @@ func (s *Service) findPRInForkParent(
 		return nil, nil
 	}
 	return pr, nil
+}
+
+func isParentNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *GitHubAPIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == 404
+	}
+	// The CLI searches PRs through GraphQL, which reports a missing repository
+	// without an HTTP 404 status.
+	return isNotFoundErr(err) ||
+		strings.Contains(strings.ToLower(err.Error()), "could not resolve to a repository")
 }
 
 // forkParent is the cached outcome of one fork-parent resolution.

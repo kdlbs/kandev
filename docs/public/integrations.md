@@ -131,6 +131,10 @@ The **PR discovery failed** warning is separate from the quota values:
 
 When discovery succeeds, the warning clears and the status revision advances. If the warning remains after a quota refresh, wait for the retry time or verify the selected connection and repository scope.
 
+When the workspace credential cannot read the private parent repository of a fork, GitHub can report that parent as missing. This response does not cause a discovery warning. Discovery still searches for pull requests in the fork.
+
+The parent result stays cached for 10 minutes. After expiry, the next eligible discovery attempt searches the parent again. Expiry does not trigger an immediate search.
+
 #### Pull request watch freshness
 
 Background checks for a known pull request run at least once per minute. A
