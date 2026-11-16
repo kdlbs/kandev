@@ -54,6 +54,13 @@ steps:
       - Read AGENTS.md for repo-specific conventions.
 
       STEP 3: IMPLEMENT WITH TDD
+      For changes to scheduling, background delivery, or task/session lifecycle,
+      use .agents/skills/tdd/references/lifecycle-evidence.md. Record each
+      applicable scenario's acceptance criterion, observable invariant, test,
+      exact command, and result in the current work order. Give concrete reasons
+      for exclusions. Report missing or blocked evidence and do not claim full
+      lifecycle verification while a required scenario lacks proof.
+
       For each behavior:
       1. Write a failing test that asserts the expected behavior.
       2. Run the test — confirm it fails with the expected assertion.
@@ -63,7 +70,8 @@ steps:
       Add an E2E test (Playwright) when the change touches a user-facing flow.
 
       STEP 4: VERIFY
-      Run `make fmt` first, then `make typecheck test lint` per AGENTS.md.
+      Run the current work order's exact checks. Do not replace scenario proof
+      with a broad passing suite.
 
       STEP 5: COMMIT
       Stage and commit your changes with a Conventional Commits message
@@ -99,6 +107,9 @@ steps:
       - Which URL to open to test the change.
       - What to look for / how to reproduce the bug or exercise the feature.
       - Any login or setup steps needed.
+      For lifecycle changes, include the relevant reproduction steps from the
+      lifecycle evidence checklist. Use the existing `scripts/dev-isolated`
+      procedure for the secondary instance.
 
       Wait for the user to confirm the change works. If the user reports
       issues, take notes and ask the user to move the task back to Improve.
