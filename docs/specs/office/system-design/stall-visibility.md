@@ -221,8 +221,11 @@ and no turn ID; `processOnTurnCompleteViaEngineWithCause` then deferred
 `IDLE`, which neither watchdog gate scans.
 
 - `officeDynamicRelaunchOptions` starts a turn with
-  `startTurnForSessionWithOwnership` and passes its ID in `LaunchOptions`, as the
-  first Office launch does. A failed launch completes the turn it created.
+  `startTurnForSessionWithOwnershipChecked` and passes its ID in `LaunchOptions`.
+  A turn lookup or write error prevents dispatch.
+  An absent durable turn also prevents dispatch.
+  A failed launch completes only the turn it created.
+  This cleanup uses a bounded context independent from launch cancellation.
 - `workflowEffectForCompletion` binds a turn-less terminal with delivery identity
   to the turn its handler closes: `turnAtEventFire` for `agent.ready`, and the
   session's active turn (`completedEventClosingTurn`) for `agent.completed`. An
@@ -231,6 +234,10 @@ and no turn ID; `processOnTurnCompleteViaEngineWithCause` then deferred
   a stranded Office signal through `surfaceOfficeStalledSignal` with gate
   `deferred_completion`. Like the watchdog gates, it reports only
   (REQ-OFFICE-STALL-VISIBILITY-003).
+
+The narrow watchdog query includes `IDLE` sessions with a pending signal.
+This observation preserves the report key during deduplication cleanup.
+The existing recovery gates continue to exclude `IDLE` sessions.
 
 ## Persistence
 
@@ -257,8 +264,7 @@ prompt text, agent output, or decision notes.
 Structured logs, at `Warn`, on the existing watchdog logger:
 
 - `office stall watchdog: Office task holds a stranded completion signal` with
-  `task_id`, `session_id`, `step_id`, `signal_age`, and `gate` (which of the two
-  sites observed it).
+  `task_id`, `session_id`, `step_id`, `signal_age`, and `gate` (the report path).
 - `office stall watchdog: Office task is waiting on a decision that has not
   been recorded` with `task_id`, `step_id`, `task_updated_at`, `quiet_for`, and
   `threshold`.

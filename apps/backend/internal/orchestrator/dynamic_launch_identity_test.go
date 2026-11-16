@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	officeRelaunchTaskID      = "task-dynamic-identity"
+	officeRelaunchTaskID      = "task1"
 	officeRelaunchSessionID   = "session-dynamic-identity"
 	officeRelaunchExecutionID = "execution-dynamic-identity"
 )
@@ -81,6 +81,7 @@ func newOfficeRelaunchFixture(t *testing.T) (*Service, *sqliterepo.Repository, *
 		},
 	}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentManager)
+	svc.turnService = &repoTurnService{repo: repo}
 	svc.lastTurnPrompt.Store(sessionID, capturedPrompt{text: "retry the task"})
 	return svc, repo, &launchRequest
 }
@@ -110,7 +111,6 @@ func TestRelaunchDynamicTaskAfterFailurePreservesActingOfficeIdentity(t *testing
 // has no key and on_turn_complete is deferred with nothing to retry it.
 func TestRelaunchDynamicOfficeTaskBindsSuccessorTurn(t *testing.T) {
 	svc, repo, captured := newOfficeRelaunchFixture(t)
-	svc.turnService = &repoTurnService{repo: repo}
 	relaunchOfficeAfterFailure(t, svc)
 	launchRequest := *captured
 	require.NotNil(t, launchRequest)

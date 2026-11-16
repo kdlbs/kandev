@@ -82,3 +82,24 @@ func TestDeferredOfficeCompletionSurfacesPendingSignal(t *testing.T) {
 	require.Equal(t, int64(1), officeStrandedCount(stuckSignalGateDeferredCompletion)-before)
 	assertOfficeStallNotActedOn(t, repo, "t1", "s1", "step1")
 }
+
+func TestDeferredOfficeCompletionStaysDeduplicatedWhileIdle(t *testing.T) {
+	ctx := t.Context()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	svc := createTestService(repo, officeStallStepGetter(), newMockTaskRepo())
+	seedOfficeStrandedSignal(t, svc, repo, "t1", "s1", "step1", models.TaskSessionStateIdle)
+
+	before := officeStrandedCount(stuckSignalGateDeferredCompletion)
+	svc.surfaceDeferredOfficeCompletion(ctx, "t1", "s1")
+	for range 3 {
+		svc.reclaimStuckSignalSessionsOnce(ctx)
+		svc.surfaceDeferredOfficeCompletion(ctx, "t1", "s1")
+	}
+
+	require.Equal(t, int64(1), officeStrandedCount(stuckSignalGateDeferredCompletion)-before)
+	assertOfficeStallNotActedOn(t, repo, "t1", "s1", "step1")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateIdle, session.State)
+}
