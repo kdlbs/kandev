@@ -106,7 +106,10 @@ one Sentry deployment from the same workspace.
   `sentry_configs(id)` with `ON DELETE RESTRICT`. NULL marks a migrated legacy
   watch; the poller resolves it to the workspace's sole instance at poll time,
   or disables it with a recorded error when zero/many instances exist. The
-  bound instance is **immutable** — changing it means creating a new watch.
+  bound instance was originally **immutable**;
+  [ADR-2026-10-24-sentry-watch-instance-rebinding](2026-10-24-sentry-watch-instance-rebinding.md)
+  makes it mutable within the workspace and clears the watch's import history
+  on change.
 - The HTTP surface is instance CRUD under `/api/v1/sentry/instances` with an
   authoritative `?workspace_id=`; the instance must belong to that workspace or
   the request 404s. Browse endpoints require `workspace_id` + `instanceId`.
