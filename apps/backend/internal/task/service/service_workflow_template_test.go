@@ -29,11 +29,34 @@ func TestCreateWorkflowTemplateInitialization(t *testing.T) {
 			WorkspaceID:        "ws-template-no-creator",
 			Name:               "Improve Kandev",
 			WorkflowTemplateID: &templateID,
+			Hidden:             true,
 		})
 
 		require.ErrorContains(t, err, "workflow step creator is not configured")
 		require.Nil(t, created)
 		require.Empty(t, eventBus.GetPublishedEvents())
+		workflows, listErr := svc.ListWorkflows(ctx, "ws-template-no-creator", true)
+		require.NoError(t, listErr)
+		require.Len(t, workflows, 1, "a hidden bootstrap workflow remains available for retry")
+	})
+
+	t.Run("removes a visible workflow when the creator is missing", func(t *testing.T) {
+		svc, _, repo := createTestService(t)
+		ctx := context.Background()
+		require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-visible-template-no-creator", Name: "Workspace"}))
+		templateID := "simple"
+
+		created, err := svc.CreateWorkflow(ctx, &CreateWorkflowRequest{
+			WorkspaceID:        "ws-visible-template-no-creator",
+			Name:               "From template",
+			WorkflowTemplateID: &templateID,
+		})
+
+		require.ErrorContains(t, err, "workflow step creator is not configured")
+		require.Nil(t, created)
+		workflows, listErr := svc.ListWorkflows(ctx, "ws-visible-template-no-creator", true)
+		require.NoError(t, listErr)
+		require.Empty(t, workflows)
 	})
 
 	t.Run("reports template errors without publishing workflow success", func(t *testing.T) {
@@ -50,6 +73,7 @@ func TestCreateWorkflowTemplateInitialization(t *testing.T) {
 			WorkspaceID:        "ws-template-error",
 			Name:               "Improve Kandev",
 			WorkflowTemplateID: &templateID,
+			Hidden:             true,
 		})
 
 		require.ErrorIs(t, err, wantErr)
@@ -58,6 +82,32 @@ func TestCreateWorkflowTemplateInitialization(t *testing.T) {
 		require.NoError(t, listErr)
 		require.Len(t, workflows, 1, "the empty workflow row remains available for bootstrap retry")
 		require.Equal(t, templateID, *workflows[0].WorkflowTemplateID)
+		for _, event := range eventBus.GetPublishedEvents() {
+			require.NotEqual(t, events.WorkflowCreated, event.Type)
+		}
+	})
+
+	t.Run("removes a visible workflow after template failure", func(t *testing.T) {
+		svc, eventBus, repo := createTestService(t)
+		ctx := context.Background()
+		require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-visible-template-error", Name: "Workspace"}))
+		wantErr := errors.New("template storage unavailable")
+		svc.SetWorkflowStepCreator(workflowTemplateCreatorFunc(func(context.Context, string, string) error {
+			return wantErr
+		}))
+		templateID := "simple"
+
+		created, err := svc.CreateWorkflow(ctx, &CreateWorkflowRequest{
+			WorkspaceID:        "ws-visible-template-error",
+			Name:               "From template",
+			WorkflowTemplateID: &templateID,
+		})
+
+		require.ErrorIs(t, err, wantErr)
+		require.Nil(t, created)
+		workflows, listErr := svc.ListWorkflows(ctx, "ws-visible-template-error", true)
+		require.NoError(t, listErr)
+		require.Empty(t, workflows, "failed visible creations must not leave an undisclosed empty workflow")
 		for _, event := range eventBus.GetPublishedEvents() {
 			require.NotEqual(t, events.WorkflowCreated, event.Type)
 		}

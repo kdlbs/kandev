@@ -56,7 +56,8 @@ Task 02 owns list compatibility. There are no rendered UI changes in this task.
    Empty repair retains workflow IDs. Populated siblings keep their steps and
    settings. Repeated or overlapping bootstrap creates no duplicate steps.
 2. Template and repair errors reach the caller and keep bootstrap from reporting
-   readiness. A later request can repair an empty row left by failed setup.
+   readiness. A later request can repair an empty hidden bootstrap row left by
+   failed setup. Failed visible workflow creation removes its new row.
 3. Public managed/synced workflow mutations and foreign-scope requests remain
    denied. Normal template creation, template remapping, and executor checks work.
 
@@ -130,3 +131,19 @@ The focused race-enabled workflow, task-service, Improve Kandev, and integration
 suite passed. `bash scripts/lint-go-changed` reported zero issues. Documentation
 catalog validation and specification lint passed, and `git diff --check` passed.
 The temporary investigation reproduction remains removed.
+
+PR fixup moved the new template authorization tests into
+`service_template_authorization_test.go`. Regression tests prove visible
+workflow rows are removed when the template creator is missing or fails, while
+hidden bootstrap rows remain available for retry. The read-only service test
+documents the controller/service boundary; controller tests still reject
+public read-only mutations. The red test failed on the visible orphan before
+the cleanup change. The focused race suite passed:
+
+```bash
+go test -trimpath -tags fts5 -race ./internal/workflow/service ./internal/workflow/controller ./internal/task/service ./internal/improvekandev ./internal/integration -run 'Test(CreateStepsFromTemplate|EnsureWorkflowMutable|CreateWorkflowTemplateInitialization|EnsureWorkflowTemplateSteps|ImproveKandevBootstrap)' -count=1
+```
+
+`bash scripts/lint-go-changed` reported zero issues for the four changed Go
+files. Documentation catalog validation and specification lint passed after
+the review follow-up.

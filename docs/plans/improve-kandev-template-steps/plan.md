@@ -67,8 +67,10 @@ Issue assignment to `carlosflorencio` was verified on 2026-11-16.
    Use it from the existing bootstrap find/heal path and retain workflow IDs.
    Publish repair inserts through the existing step-event publisher.
 3. **Stop reporting failed setup as success.**
-   Return template errors from `CreateWorkflow` and bootstrap. Keep an empty row
-   available for a later retry. Do not let the existing fallback swallow these errors.
+   Return template errors from `CreateWorkflow` and bootstrap. Keep a hidden
+   bootstrap workflow row available for retry; remove a newly created visible
+   workflow if its template initialization fails. Do not let the existing
+   fallback swallow these errors.
 4. **Prevent overlapping bootstrap repairs.**
    Serialize only the handler's workflow list/find/create/repair section with one
    mutex. Read the list inside that section. Cloning and GitHub calls stay outside.
@@ -189,5 +191,8 @@ label, screenshot, or user procedure changes, so no public-doc edit is planned.
   Otherwise concurrent requests can act on the same stale empty state.
 - Existing partial workflows stay untouched. This repair keeps current step-write
   semantics and reports errors without introducing batch rollback.
+- A hidden bootstrap workflow stays available for retry after template failure.
+  Failed visible template creations are deleted to avoid leaving a workflow the
+  caller was told had failed.
 - Returning template errors exposes failures that ordinary workflow creation
   previously logged. Cover a normal successful creation and its error path.

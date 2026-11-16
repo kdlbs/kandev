@@ -460,8 +460,12 @@ There is no new repository API, template builder, or provisioning interface.
 `Handler.ensureWorkflow` and `findAndHealWorkflow` use this helper for existing
 rows. The hidden-flag repair remains. New workflow creation continues through
 `CreateWorkflow`, which returns template errors instead of swallowing them.
-A failed creation can leave an empty workflow row for the next bootstrap to repair.
-A fallback re-read must not convert a provisioning error into success.
+A failed hidden bootstrap workflow can leave an empty row for the next bootstrap
+to repair. Failed visible workflow creation removes its new row so a caller that
+receives an error does not later see an undisclosed empty workflow. Cleanup
+errors are returned with the template initialization error. Neither path
+publishes a workflow-created event on failure, and a fallback re-read must not
+convert a provisioning error into success.
 
 A single mutex on the existing handler serializes the workflow portion of
 bootstrap: list, find/create, and empty-step repair. The list must be read after
