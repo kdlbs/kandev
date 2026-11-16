@@ -82,6 +82,12 @@ func sourcePositionBound(source *QueuedMessage) int64 {
 // streams the rest of the backlog (PostgreSQL drains unread rows on close).
 const sortedFoldScanBatch = 64
 
+// sortedFoldScanQuery reads one batch below a (position, id) boundary. The
+// row-value bound seeks idx_queued_messages_session_order directly, so each
+// batch continues where the previous one ended instead of rescanning.
+const sortedFoldScanQuery = `SELECT id, position, queued_by, metadata_json FROM queued_messages
+ WHERE session_id = ? AND (position, id) < (?, ?) ORDER BY position DESC, id DESC LIMIT ?`
+
 type sortedFoldScanRow struct {
 	ID           string `db:"id"`
 	Position     int64  `db:"position"`
@@ -132,9 +138,8 @@ func (r *sqliteRepository) sortedFoldScanBatchTx(ctx context.Context, tx *sqlx.T
 		position, id = last.Position, last.ID
 	}
 	var batch []sortedFoldScanRow
-	if err := tx.SelectContext(ctx, &batch, tx.Rebind(`SELECT id, position, queued_by, metadata_json FROM queued_messages
- WHERE session_id = ? AND (position < ? OR (position = ? AND id < ?)) ORDER BY position DESC, id DESC LIMIT ?`),
-		source.SessionID, position, position, id, sortedFoldScanBatch); err != nil {
+	if err := tx.SelectContext(ctx, &batch, tx.Rebind(sortedFoldScanQuery),
+		source.SessionID, position, id, sortedFoldScanBatch); err != nil {
 		return nil, fmt.Errorf("scan sorted fold candidates: %w", err)
 	}
 	return batch, nil

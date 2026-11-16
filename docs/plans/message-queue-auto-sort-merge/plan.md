@@ -538,6 +538,24 @@ Public docs and specification validation passed. PostgreSQL is unverified:
 - `go test -race -tags fts5` for `messagequeue` and `orchestrator/handlers`,
   and `scripts/lint-go-changed`: passed.
 
+### Implementation review round 20 remediation
+
+- The `(session_id, position)` index is replaced (replay-safe `DROP INDEX IF
+  EXISTS` plus `CREATE INDEX IF NOT EXISTS`) by
+  `idx_queued_messages_session_order` on `(session_id, position, id)`, and the
+  sorted walk and `readMergeTarget` use the row-value bound
+  `(position, id) < (?, ?)`. Each batch seeks the index from the previous
+  boundary instead of rescanning and re-sorting from the session tail, which
+  had made a distant or missing target quadratic.
+- Compaction allocates a fresh sender map at each barrier instead of clearing
+  the largest earlier one, keeping reset cost per segment.
+- RED on the prior schema, GREEN after:
+  `TestSortedWalkBatchSeeksSessionOrderIndex` (SQLite query plan seeks the new
+  index with the row-value bound and no temporary sort).
+- `go test -race -tags fts5` for `messagequeue`, `orchestrator/handlers`, and
+  `internal/persistence/...`; `go test -tags fts5` for `internal/backendapp/...`
+  and `internal/orchestrator`; and `scripts/lint-go-changed`: passed.
+
 Final repository gates, run from the repository root after all work orders:
 
 ```bash

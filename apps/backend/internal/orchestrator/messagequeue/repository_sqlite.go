@@ -643,7 +643,8 @@ func (r *sqliteRepository) initSchema() error {
 		instance_key TEXT NOT NULL DEFAULT '',
 		generation BIGINT NOT NULL DEFAULT 0
 	);
-	CREATE INDEX IF NOT EXISTS idx_queued_messages_session_position ON queued_messages(session_id, position);
+	DROP INDEX IF EXISTS idx_queued_messages_session_position;
+	CREATE INDEX IF NOT EXISTS idx_queued_messages_session_order ON queued_messages(session_id, position, id);
 	CREATE INDEX IF NOT EXISTS idx_queued_messages_task_activity ON queued_messages(task_id, queued_by, queued_at);
 
 	CREATE TABLE IF NOT EXISTS lifecycle_queue_generations (
@@ -5394,10 +5395,10 @@ func readMergeTarget(ctx context.Context, r *sqliteRepository, tx *sqlx.Tx, sess
 		SELECT id, session_id, task_id, position, content, model, plan_mode,
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
-		WHERE session_id = ? AND (position < ? OR (position = ? AND id < ?))
+		WHERE session_id = ? AND (position, id) < (?, ?)
 		ORDER BY position DESC, id DESC
 		LIMIT 1
-	`), sessionID, sourcePosition, sourcePosition, sourceID)
+	`), sessionID, sourcePosition, sourceID)
 	target, err := scanQueuedRow(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

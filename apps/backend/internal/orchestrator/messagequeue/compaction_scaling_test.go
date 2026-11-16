@@ -232,3 +232,25 @@ func TestCompactionFoldMatchesSingleAutoMerge(t *testing.T) {
 		})
 	}
 }
+
+// Each sorted-walk batch must seek the (session_id, position, id) index from
+// the previous boundary rather than rescan and re-sort the session from its
+// tail, or a distant or missing target costs quadratic work per admission.
+func TestSortedWalkBatchSeeksSessionOrderIndex(t *testing.T) {
+	repo := newTestSQLiteRepo(t).(*sqliteRepository)
+	var plan []struct {
+		ID      int    `db:"id"`
+		Parent  int    `db:"parent"`
+		NotUsed int    `db:"notused"`
+		Detail  string `db:"detail"`
+	}
+	require.NoError(t, repo.db.Select(&plan, "EXPLAIN QUERY PLAN "+sortedFoldScanQuery, "session", 10, "id", sortedFoldScanBatch))
+	details := make([]string, len(plan))
+	for i, step := range plan {
+		details[i] = step.Detail
+	}
+	joined := strings.Join(details, "; ")
+	require.Contains(t, joined, "idx_queued_messages_session_order")
+	require.Contains(t, joined, "(position,id)<")
+	require.NotContains(t, joined, "TEMP B-TREE")
+}

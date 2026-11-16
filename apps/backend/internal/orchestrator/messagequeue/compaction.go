@@ -39,7 +39,9 @@ func compactQueueRows[T QueuedMessage | *QueuedMessage](rows []T, leased map[str
 			source = *value
 		}
 		if isFoldBarrier(source) {
-			clear(latest)
+			// A fresh map keeps reset cost proportional to this segment; clear
+			// would keep walking the largest earlier segment's buckets.
+			latest = make(map[string]int)
 			result.kept = append(result.kept, compactionRow{original: source, originalIndex: i})
 			continue
 		}
