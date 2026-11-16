@@ -257,6 +257,11 @@ async function expectTouchDependencyHelp(page: Page, panel: Locator) {
   await drawer.getByTestId("queue-auto-sort-merge-help-close").tap();
   await expect(drawer).toBeHidden();
   await expect(help).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(drawer).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(drawer).toBeHidden();
+  await expect(help).toBeFocused();
   await expect(panel.getByTestId("queue-auto-merge")).toBeVisible();
 }
 

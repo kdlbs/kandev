@@ -556,6 +556,18 @@ Public docs and specification validation passed. PostgreSQL is unverified:
   `internal/persistence/...`; `go test -tags fts5` for `internal/backendapp/...`
   and `internal/orchestrator`; and `scripts/lint-go-changed`: passed.
 
+### Implementation review round 22 remediation
+
+- The touch help `DrawerContent` carries `data-queue-escape-boundary`, like the
+  timestamp drawer, so Escape closes only the help drawer instead of also
+  collapsing the queue panel through `useQueuePanelEscape`.
+- The mobile E2E helper now presses Escape in the open drawer and asserts the
+  drawer closes, focus returns to the help button, and the queue stays open:
+  `pnpm --dir apps/web e2e:run --host --shards 1 --project mobile-chrome
+  tests/chat/mobile-message-queue-auto-sort-merge.spec.ts -- --retries=0`:
+  1 passed. The reviewer's component probe showed the parent collapse on the
+  prior code; the browser RED run was not repeated.
+
 Final repository gates, run from the repository root after all work orders:
 
 ```bash

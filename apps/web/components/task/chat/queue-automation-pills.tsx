@@ -199,7 +199,7 @@ function AutoSortMergeTouchHelp({ description }: { description: string }) {
           <IconInfoCircle className="h-4 w-4" />
         </Button>
       </DrawerTrigger>
-      <DrawerContent>
+      <DrawerContent data-queue-escape-boundary>
         <DrawerHeader>
           <DrawerTitle>{t("chat:queueAutoSortMerge")}</DrawerTitle>
           <DrawerDescription>{description}</DrawerDescription>
