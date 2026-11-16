@@ -346,7 +346,7 @@ func parseEstimateBound(raw, name string) (*float64, error) {
 
 func (c *Controller) httpGetIssue(ctx *gin.Context) {
 	id := ctx.Param("id")
-	issue, err := c.service.GetIssue(ctx.Request.Context(), id)
+	issue, err := c.service.GetIssueForWorkspace(ctx.Request.Context(), c.workspaceID(ctx), id)
 	if err != nil {
 		c.writeClientError(ctx, err)
 		return
@@ -363,7 +363,7 @@ func (c *Controller) httpSetIssueState(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "stateId required"})
 		return
 	}
-	if err := c.service.SetIssueState(ctx.Request.Context(), id, req.StateID); err != nil {
+	if err := c.service.SetIssueStateForWorkspace(ctx.Request.Context(), c.workspaceID(ctx), id, req.StateID); err != nil {
 		c.writeClientError(ctx, err)
 		return
 	}
