@@ -15,6 +15,7 @@ acceptance_criteria:
   - AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007.5
   - AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007.6
   - AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007.7
+  - AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007.8
 system_design:
   - ../../specs/tasks/system-design/workflow-task-start-context.md
 ---
@@ -35,7 +36,7 @@ Office/helper prompt contracts and explicit `start_created` input preservation r
 ## Acceptance
 
 1. The omitted-ID regression fails before the correction, then passes with the explicit-current-step control and matching launch configuration.
-2. All referenced criteria have behavior assertions, including explicit-step precedence and separate Office/helper negative controls.
+2. All referenced criteria have behavior assertions, including explicit-step precedence, separate Office/helper negative controls, and the accepted degraded path when the fallback task read fails.
 3. Exact checks pass, the API reference describes the resulting behavior, and both delivery records contain actual results.
 
 ## Implementation sequence
@@ -71,8 +72,8 @@ Assert content sentinels and context-block counts without snapshots of the full 
 Run from the repository root. The first command is the required red/green regression command.
 
 ```bash
-(cd apps/backend && go test -trimpath ./internal/orchestrator -run '^TestStartTask_CurrentStepPrompt$' -count=1 -v)
-(cd apps/backend && go test -trimpath -race ./internal/orchestrator -run '^TestStartTask_CurrentStepPrompt$' -count=1)
+(cd apps/backend && go test -trimpath ./internal/orchestrator -run '^TestStartTask_CurrentStepPrompt' -count=1 -v)
+(cd apps/backend && go test -trimpath -race ./internal/orchestrator -run '^TestStartTask_CurrentStepPrompt' -count=1)
 (cd apps/backend && go test -trimpath ./internal/orchestrator -run '^(TestApplyWorkflowAndPlanMode_|TestLaunchSession_ProfileExplicit|TestStartTask_PreservesOnlyResolvedWorkflowPromptExpansion|TestLaunchSpawnPreservesWorkflowSourceBinding|TestStartTask_Office)' -count=1)
 bash scripts/lint-go-changed apps/backend/internal/orchestrator/task_operations.go apps/backend/internal/orchestrator/task_start_workflow_prompt_test.go
 python3 scripts/list-docs.py validate
@@ -138,12 +139,12 @@ None. `sequential`. No subagent delegation is authorized.
 
 ## Results
 
-Completed. The permanent 14-case `TestStartTask_CurrentStepPrompt` regression reproduced the omitted-ID omission before the production change and passes after a prompt-only fallback to the resolved current step. The stored task step remains unchanged when the caller omits an ID. Explicit steps, explicit profiles, skip overrides, template semantics, plan mode, saved references, and Office/helper/ephemeral/unbound controls pass.
+Completed. The permanent 14-case `TestStartTask_CurrentStepPrompt` regression reproduced the omitted-ID omission before the production change and passes after a prompt-only fallback to the resolved current step. The stored task step remains unchanged when the caller omits an ID. Explicit steps, explicit profiles, skip overrides, template semantics, plan mode, saved references, and Office/helper/ephemeral/unbound controls pass. A separate lookup-failure regression records the accepted degraded behavior for a later failed task read: log the failure and continue with the caller prompt without step-template composition.
 
 Verification passed:
 
-- `(cd apps/backend && go test -trimpath ./internal/orchestrator -run '^TestStartTask_CurrentStepPrompt$' -count=1 -v)`
-- `(cd apps/backend && go test -trimpath -race ./internal/orchestrator -run '^TestStartTask_CurrentStepPrompt$' -count=1)`
+- `(cd apps/backend && go test -trimpath ./internal/orchestrator -run '^TestStartTask_CurrentStepPrompt' -count=1 -v)`
+- `(cd apps/backend && go test -trimpath -race ./internal/orchestrator -run '^TestStartTask_CurrentStepPrompt' -count=1)`
 - `(cd apps/backend && go test -trimpath ./internal/orchestrator -run '^(TestApplyWorkflowAndPlanMode_|TestLaunchSession_ProfileExplicit|TestStartTask_PreservesOnlyResolvedWorkflowPromptExpansion|TestLaunchSpawnPreservesWorkflowSourceBinding|TestStartTask_Office)' -count=1)`
 - `bash scripts/lint-go-changed apps/backend/internal/orchestrator/task_operations.go apps/backend/internal/orchestrator/task_start_workflow_prompt_test.go`
 - `make -C apps/backend build`
@@ -153,5 +154,7 @@ Verification passed:
 - `node --test scripts/validate-public-docs.test.mjs`
 - `node scripts/validate-public-docs.mjs`
 - PR-docs coverage preflight and `git diff --check`
+
+The PR review follow-up also verified criterion `007.8`: when the later omitted-step task read fails after classification succeeds, the start logs the warning and preserves the direct prompt in both stored and dispatched content without step-template text.
 
 The public API reference now describes `workflow_step_id` fallback for ordinary starts.

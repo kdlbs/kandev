@@ -154,7 +154,7 @@ This extension covers ordinary, non-ephemeral tasks. Office runs and explicitly 
 
 #### Acceptance criteria
 
-- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007.1:** When an ordinary task start omits the step ID, its first prompt shall use the task's current step.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007.1:** When an ordinary task start omits the step ID and the task's current step is successfully read, its first prompt shall use that step.
   An otherwise identical start with that step ID shall receive equivalent workflow guidance, profile selection, and applicable session configuration.
 - **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007.2:** When a start supplies a step ID, that selection shall remain authoritative for prompt composition.
   A different stored step shall not replace the explicit selection.
@@ -169,6 +169,8 @@ This extension covers ordinary, non-ephemeral tasks. Office runs and explicitly 
   Office runs and explicitly spawned helper sessions without a step argument shall retain their caller-owned prompts.
 - **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007.7:** Resolving an omitted step ID for prompt composition shall not initiate another workflow transition or repeat entry actions.
   Explicit profile selections shall retain their existing precedence.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007.8:** If the task read used to resolve an omitted step ID fails after task classification succeeds, the start shall retain its existing direct-prompt behavior and log the lookup failure.
+  The start continues without workflow-step template composition.
 
 The [start-context design](../system-design/workflow-task-start-context.md) defines this extension.
 The [current-step prompt package](../../../plans/task-start-current-step-prompt/plan.md) owns delivery.

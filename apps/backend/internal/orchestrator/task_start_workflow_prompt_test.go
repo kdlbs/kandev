@@ -2,11 +2,13 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -217,6 +219,58 @@ func TestStartTask_CurrentStepPrompt(t *testing.T) {
 	}
 }
 
+// @covers AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007.8
+func TestStartTask_CurrentStepPromptRetainsDirectPromptWhenStoredStepLookupFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskWithoutSession(t, repo, "task1", currentStepPromptTestID)
+	stepGetter := newMockStepGetter()
+	stepGetter.steps[currentStepPromptTestID] = currentStepPromptTestStep(
+		currentStepPromptTestID,
+		currentStepPromptTestMarker+": {{task_prompt}}",
+		"",
+		true,
+		false,
+	)
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID: "task1", WorkspaceID: "ws1", WorkflowID: "wf1", Title: "Test task",
+		Description: currentTaskPromptTestDesc, State: v1.TaskStateInProgress,
+	}
+	agentManager := &mockAgentManager{resolveProfileInfo: &executor.AgentProfileInfo{
+		ProfileID: "caller-profile", AgentID: "codex", AgentName: "codex", SupportsMCP: true,
+	}}
+	launchCalls := 0
+	launchPrompt := ""
+	agentManager.launchAgentFunc = func(_ context.Context, request *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		launchCalls++
+		launchPrompt = request.TaskDescription
+		return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1", Status: v1.AgentStatusStarting}, nil
+	}
+	service := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentManager)
+	messages := &mockMessageCreator{}
+	service.messageCreator = messages
+	lookupErr := errors.New("temporary workflow step lookup failure")
+	failingRepo := &currentStepPromptLookupFailureRepository{
+		Repository: repo, failOnRead: 4, err: lookupErr,
+	}
+	service.repo = failingRepo
+
+	_, err := service.startTask(ctx, "task1", "caller-profile", "", "", "", currentTaskPromptTestInput, "", false, false, nil, startTaskOptions{})
+
+	require.NoError(t, err, "the existing start behavior tolerates a failed omitted-step lookup")
+	require.Equal(t, 4, failingRepo.failedAtRead, "the current-step lookup fails after prior task reads succeed")
+	require.True(t, failingRepo.failedRead)
+	require.Equal(t, 1, launchCalls, "the failed lookup retains existing direct-prompt launch behavior")
+	require.Len(t, messages.userMessages, 1)
+	assert.Contains(t, messages.userMessages[0].content, currentTaskPromptTestInput)
+	assert.NotContains(t, messages.userMessages[0].content, currentStepPromptTestMarker)
+	assert.Equal(t, messages.userMessages[0].content, launchPrompt, "stored and dispatched direct prompts must match")
+	sessions, listErr := repo.ListTaskSessions(ctx, "task1")
+	require.NoError(t, listErr)
+	assert.Len(t, sessions, 1)
+}
+
 func runCurrentStepPromptCase(t *testing.T, tc currentStepPromptCase) {
 	t.Helper()
 	ctx := context.Background()
@@ -343,6 +397,25 @@ func currentStepPromptTestStep(id, prompt, profileID string, configure bool, pla
 		step.Events.OnEnter = append(step.Events.OnEnter, wfmodels.OnEnterAction{Type: wfmodels.OnEnterEnablePlanMode})
 	}
 	return step
+}
+
+type currentStepPromptLookupFailureRepository struct {
+	*sqliterepo.Repository
+	taskReads    int
+	failOnRead   int
+	failedAtRead int
+	failedRead   bool
+	err          error
+}
+
+func (r *currentStepPromptLookupFailureRepository) GetTask(ctx context.Context, taskID string) (*models.Task, error) {
+	r.taskReads++
+	if r.taskReads == r.failOnRead {
+		r.failedRead = true
+		r.failedAtRead = r.taskReads
+		return nil, r.err
+	}
+	return r.Repository.GetTask(ctx, taskID)
 }
 
 type currentStepPromptLaunchCapture struct {

@@ -64,7 +64,9 @@ In particular, explicit `start_created` input preservation remains a separate co
 
 ## Failure, persistence, and security
 
-Task and step read failures retain their existing handling, including source-binding failure before launch.
+If the task read used to resolve an omitted step ID fails after task classification succeeds, the ordinary start logs the failure and continues with the caller prompt, or the task description when the caller prompt is empty. It does not compose a workflow-step template in this degraded path. This preserves the existing launch behavior and is covered by acceptance criterion `AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007.8`.
+
+A step read failure during source binding still fails before launch.
 The correction adds no retry, fallback step, or successful dispatch after an existing launch failure.
 The task row remains the stored-step source. Existing metadata and message persistence retain configuration and composed prompt content.
 No schema migration, backfill, metric, or additional logging is required.

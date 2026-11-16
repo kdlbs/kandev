@@ -112,6 +112,7 @@ The abbreviated criterion labels below use prefix `AC-TASKS-WORKFLOW-STEP-AGENT-
 | `007.4` | Skip for both step forms. Workflow instructions, one-time instructions, and configuration remain. |
 | `007.5` | Step plan mode and saved references appear once in stored and dispatched content. |
 | `007.6` | Office, helper, ephemeral, and unbound-task controls retain caller text. |
+| `007.8` | A later omitted-step lookup error retains direct-prompt launch behavior and omits the step template. |
 
 Existing composition, direct-prompt fallback, explicit-profile, and helper-binding tests provide adjacent checks.
 
@@ -132,7 +133,7 @@ Task 01 owns the [exact commands](task-01-compose-current-step.md#verification) 
 The primary command is:
 
 ```bash
-(cd apps/backend && go test -trimpath -race ./internal/orchestrator -run '^TestStartTask_CurrentStepPrompt$' -count=1)
+(cd apps/backend && go test -trimpath -race ./internal/orchestrator -run '^TestStartTask_CurrentStepPrompt' -count=1)
 ```
 
 ## Verification results
@@ -148,12 +149,19 @@ The primary command is:
 - Relative file links and document diff checks passed. Temporary overlays were removed after evidence capture.
 - The permanent `TestStartTask_CurrentStepPrompt` regression failed before the production change because omitted-ID ordinary starts omitted the step sentinel and bypassed skip suppression. Explicit-step and caller-owned prompt controls passed.
 - The new 14-case `TestStartTask_CurrentStepPrompt` passes after the local prompt-step fallback. It covers stored and explicit steps, profile precedence, template variants, skip overrides, plan mode, saved references, and Office/helper/ephemeral/unbound controls.
-- Focused regression passed: `(cd apps/backend && go test -trimpath ./internal/orchestrator -run '^TestStartTask_CurrentStepPrompt$' -count=1 -v)`.
-- Race regression passed: `(cd apps/backend && go test -trimpath -race ./internal/orchestrator -run '^TestStartTask_CurrentStepPrompt$' -count=1)`.
+- A separate regression injects a failure in the later omitted-step lookup after task classification succeeds. It confirms the accepted degraded behavior: the start logs the failure and launches the matching caller prompt without step-template text.
+- Focused regression passed: `(cd apps/backend && go test -trimpath ./internal/orchestrator -run '^TestStartTask_CurrentStepPrompt' -count=1 -v)`.
+- Race regression passed: `(cd apps/backend && go test -trimpath -race ./internal/orchestrator -run '^TestStartTask_CurrentStepPrompt' -count=1)`.
 - Compatibility tests passed: `(cd apps/backend && go test -trimpath ./internal/orchestrator -run '^(TestApplyWorkflowAndPlanMode_|TestLaunchSession_ProfileExplicit|TestStartTask_PreservesOnlyResolvedWorkflowPromptExpansion|TestLaunchSpawnPreservesWorkflowSourceBinding|TestStartTask_Office)' -count=1)`.
 - Focused Go lint passed with `bash scripts/lint-go-changed apps/backend/internal/orchestrator/task_operations.go apps/backend/internal/orchestrator/task_start_workflow_prompt_test.go`.
 - `make -C apps/backend build` passed.
 - Specification catalog validation, all 36 specification-linter tests, full specification lint, all 63 public-doc validator tests, live public-doc validation, PR documentation coverage preflight, and `git diff --check` passed.
+
+## PR review follow-up
+
+A current-head review raised the later omitted-step lookup failure path. The package keeps the existing warning-and-direct-prompt behavior in that degraded case to preserve launch compatibility; requirement criterion `007.8`, the focused design, and `TestStartTask_CurrentStepPromptRetainsDirectPromptWhenStoredStepLookupFails` now state and verify the exception. The regression confirms that stored and dispatched prompt text still match and that the step template is absent when the fallback read fails.
+
+The fixup reran the focused and race-enabled prompt tests, adjacent workflow/profile/Office tests, changed-package Go lint, specification catalog validation, all specification-linter tests and full lint, all 63 public-doc validator tests, live public-doc validation, PR documentation coverage preflight, and `git diff --check`. All passed.
 
 ## Risks
 
