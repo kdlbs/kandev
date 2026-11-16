@@ -41,6 +41,19 @@ docs/plans/<initiative>/task-<NN>-<short-slug>.md
 
 `plan.md` is the work-package manifest. Each `task-*.md` file is one work order.
 
+## Solution simplicity (KISS)
+
+Choose the simplest solution that fully satisfies current requirements and solves
+the stated problem. Keep the design and work orders proportional to that problem.
+
+- Reuse existing patterns, components, and dependencies.
+- Avoid speculative abstractions, extra layers, configuration, and dependencies
+  for hypothetical future needs.
+- Preserve required correctness, security, compatibility, and failure handling.
+- If added complexity is necessary, identify the current requirement or concrete
+  constraint that needs it. Explain why a simpler approach is insufficient.
+- Before handoff, remove unnecessary scope, indirection, and work-order splits.
+
 ## Workflow
 
 ### 1. Map the change
@@ -96,6 +109,7 @@ State the result, the implementation order, and the reason for that order.
 
 Name exact files, symbols, schema changes, contracts, and integration points.
 Organize this section by implementation boundary or vertical slice.
+Explain why the approach is the simplest sufficient solution.
 
 For a shared provider or adapter path, include a compact compatibility matrix
 covering the provider, transport, identity or capability shape, intended

@@ -266,6 +266,7 @@
         "dispose_message_queue_entries_kandev",
         "get_message_queue_census_kandev",
         "get_task_conversation_kandev",
+        "get_task_message_operation_kandev",
         "get_task_document_kandev",
         "list_related_tasks_kandev",
         "list_pending_agent_permissions_kandev",
@@ -503,6 +504,7 @@
         "apps/backend/internal/agent/executor/executor.go",
         "apps/backend/internal/agent/kubernetes/config.go",
         "apps/backend/internal/agent/runtime/lifecycle/executor_backend.go",
+        "apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim.go",
         "apps/backend/internal/agent/runtime/lifecycle/persistence.go",
         "apps/backend/internal/agent/runtime/lifecycle/executor_kubernetes.go",
         "apps/backend/internal/kubernetes/handlers.go",
@@ -524,6 +526,9 @@
         "k8s/executor-rbac.yaml"
       ],
       "tests": [
+        "apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_test.go",
+        "apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_git_test.go",
+        "apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_optin_test.go",
         "apps/backend/internal/agent/runtime/lifecycle/executor_kubernetes_test.go",
         "apps/backend/internal/agent/runtime/lifecycle/persistence_test.go",
         "apps/backend/internal/kubernetes/handlers_test.go",
@@ -539,6 +544,8 @@
         "apps/backend/internal/mcp/handlers/handlers_test.go",
         "apps/backend/internal/mcp/handlers/create_task_self_placement_inheritance_test.go",
         "apps/backend/internal/task/service/service_resources_kubernetes_test.go",
+        "apps/backend/internal/task/service/resource_cleanup_ssh_test.go",
+        "apps/backend/internal/agent/runtime/ssh_reclaim_test.go",
         "apps/backend/internal/task/repository/sqlite/task_environment_inherited_transition_test.go",
         "apps/backend/internal/task/repository/sqlite/task_environment_inherited_transition_postgres_test.go",
         "apps/backend/internal/task/repository/sqlite/task_environment_test.go",
@@ -575,8 +582,6 @@
       "sources": [
         "apps/web/components/app-sidebar/sections/integrations-section.tsx",
         "apps/backend/internal/integrations/workspacescope/workspacescope.go",
-        "apps/backend/internal/azuredevops/service.go",
-        "apps/web/app/azure-devops/azure-devops-page-client.tsx",
         "apps/backend/internal/github/app_registration_lifecycle_service.go",
         "apps/backend/internal/github/app_registration_import.go",
         "apps/web/lib/api/domains/github-auth-api.ts",
@@ -587,8 +592,6 @@
       "tests": [
         "apps/web/components/app-sidebar/sections/integrations-section.test.tsx",
         "apps/backend/internal/integrations/workspacescope/workspacescope_test.go",
-        "apps/backend/internal/azuredevops/service_test.go",
-        "apps/web/e2e/tests/integrations/azure-devops.spec.ts",
         "apps/backend/internal/github/controller_app_registration_test.go",
         "apps/backend/internal/github/app_registration_import_test.go",
         "apps/web/e2e/tests/settings/github-app-registration.spec.ts",
@@ -598,7 +601,6 @@
       ],
       "settingsRoutes": [
         "/settings/integrations",
-        "/settings/integrations/azure-devops",
         "/settings/integrations/github",
         "/settings/integrations/gitlab",
         "/settings/integrations/jira",
@@ -939,7 +941,11 @@
         "apps/web/app/office/workspace/costs/create-budget-form.tsx",
         "apps/web/app/office/components/workspace-pause-banner.tsx",
         "apps/backend/internal/office/shared/assignment_eligibility.go",
-        "apps/backend/internal/office/costs/range.go"
+        "apps/backend/internal/office/costs/range.go",
+        "apps/web/components/task/simple/comment-extract-surface.tsx",
+        "apps/web/components/task/simple/task-chat.tsx",
+        "apps/web/hooks/domains/comments/use-thread-extracts.ts",
+        "apps/web/lib/state/slices/comments/format.ts"
       ],
       "tests": [
         "apps/backend/internal/office/onboarding/service_test.go",
@@ -956,7 +962,15 @@
         "apps/web/e2e/tests/office/workspace-kill-switch.spec.ts",
         "apps/backend/internal/office/shared/assignment_eligibility_test.go",
         "apps/backend/internal/office/costs/range_test.go",
-        "apps/web/app/office/workspace/costs/budget-policy-card.test.tsx"
+        "apps/web/app/office/workspace/costs/budget-policy-card.test.tsx",
+        "apps/web/components/task/chat/messages/message-comment-surface.test.tsx",
+        "apps/web/components/task/simple/task-chat.extracts.test.tsx",
+        "apps/backend/internal/office/scheduler/mentions_test.go",
+        "apps/web/hooks/domains/comments/use-thread-extracts.test.ts",
+        "apps/web/lib/state/slices/comments/format.test.ts",
+        "apps/web/lib/state/slices/comments/message-comments.test.ts",
+        "apps/web/e2e/tests/office/thread-extract-comments.spec.ts",
+        "apps/web/e2e/tests/office/mobile-thread-extract-comments.spec.ts"
       ]
     },
     {

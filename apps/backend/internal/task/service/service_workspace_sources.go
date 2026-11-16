@@ -80,6 +80,28 @@ type WorkspaceSourceProviderRefresher interface {
 	RefreshTaskMCPProviders(context.Context, string) error
 }
 
+// WorkspaceSourceRescanner updates one live session's tracked workspace roots.
+// Adoption and detach use it to add or retire a repository tracker without
+// touching the agent process. Failures are best-effort: the attachment stays
+// authoritative and the next observer snapshot retries.
+type WorkspaceSourceRescanner interface {
+	RescanWorkspaceForSession(ctx context.Context, sessionID, workDir string, sourceRoots ...[]string) error
+}
+
+// WorkspaceSourceRescanExcluder keeps detached checkouts out of discovery
+// while a live session rescans its remaining roots.
+type WorkspaceSourceRescanExcluder interface {
+	RescanWorkspaceForSessionWithExclusions(ctx context.Context, sessionID, workDir string, sourceRoots, excludedRoots []string) error
+}
+
+// NestedWorkspaceExclusioner manages the outer checkout's Git excludes for a
+// worktree nested inside it. It keeps outer status and staging from exposing
+// the nested repository.
+type NestedWorkspaceExclusioner interface {
+	AddNestedWorkspaceExclusion(ctx context.Context, outerRoot, nestedPath string) (bool, error)
+	RemoveNestedWorkspaceExclusion(ctx context.Context, outerRoot, nestedPath string) error
+}
+
 // workspaceSourceProviderRefreshTimeout bounds the best-effort live update
 // after a source batch is committed. The attachment remains authoritative when
 // a database or agentctl dependency does not finish within this window.

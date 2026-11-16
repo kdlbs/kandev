@@ -7,6 +7,32 @@ import (
 	"github.com/kandev/kandev/internal/office/waveidentity"
 )
 
+// TestListStuckParents_CancelledWaveMembersDoNotConsumeLimit ensures parents
+// that cannot dispatch do not occupy the recovery query's bounded candidate
+// slots ahead of a parent whose counted children all succeeded.
+func TestListStuckParents_CancelledWaveMembersDoNotConsumeLimit(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	for _, parentID := range []string{"parent-1", "parent-2", "parent-3", "parent-4", "parent-5"} {
+		seedWakeCandidate(t, repo, ctx, "ws-1", parentID)
+		if _, err := repo.ExecRaw(ctx,
+			`UPDATE tasks SET state = 'CANCELLED' WHERE parent_id = ?`, parentID,
+		); err != nil {
+			t.Fatalf("cancel %s wave member: %v", parentID, err)
+		}
+	}
+	seedWakeCandidate(t, repo, ctx, "ws-1", "parent-healthy")
+
+	candidates, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+	if err != nil {
+		t.Fatalf("ListStuckParents: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].ParentTaskID != "parent-healthy" {
+		t.Fatalf("candidates = %#v, want only [parent-healthy]", candidates)
+	}
+}
+
 // TestListStuckParents_WaveMatchBlocksAcrossNonMemberChildEdit_UnblockedOnWaveMemberChange
 // is Task 06's core wave-comparison regression test
 // (AC-OFFICE-WAKE-WAVE-IDENTITY-003): a delivered wave keeps blocking across

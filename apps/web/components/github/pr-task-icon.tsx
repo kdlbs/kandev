@@ -13,7 +13,7 @@ import {
   getTaskPRsForCurrentWorkspace,
   useTaskPRTooltipHydration,
 } from "@/hooks/domains/github/use-task-pr-tooltip-hydration";
-import type { TaskPR } from "@/lib/types/github";
+import type { PRCIState, TaskPR } from "@/lib/types/github";
 import type { TaskCIAutomationOptions } from "@/lib/types/github";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { derivePRTaskStatusSummary } from "./pr-task-status-summary";
@@ -29,10 +29,11 @@ import {
   compactWorkflowApprovalIsNewerThanFullPRs,
   getCompactPRStatusAccessibleLabels,
   getCompactStaleWorkflowPRs,
-  getCompactWorkflowStatusSummaries,
-  getNegativeWorkflowApprovalDisclosure,
-  getProjectedPRRepository,
+  getTaskPRIconCIState,
+  getTaskPRIconDisclosureProjection,
+  isCompactCIAuthoritative,
 } from "./pr-task-workflow-projection";
+import { getPRCIState } from "./pr-ci-state";
 
 export type { TaskPRInfo } from "./pr-task-automation";
 export { getTaskPRAutomationSummary } from "./pr-task-automation";
@@ -129,10 +130,29 @@ function getPRWorkflowAccessibleLabel(
   t: ReturnType<typeof useTranslation>["t"],
 ): string | null {
   const workflowAttention = getTaskPRWorkflowAttention(pr);
-  if (workflowAttention && isWorkflowApprovalRequired(workflowAttention)) {
+  if (!workflowAttention) return null;
+  if (isWorkflowApprovalRequired(workflowAttention)) {
     return t("github:workflowAwaitingApproval");
   }
-  return null;
+  return t("github:workflowNeedsAttention");
+}
+
+function getPRCIBubbleAccessibleLabel(
+  pr: TaskPR,
+  t: ReturnType<typeof useTranslation>["t"],
+): string | null {
+  switch (getPRCIState(pr)) {
+    case "failed":
+      return t("github:checksFailed");
+    case "approval_required":
+      return t("github:workflowAwaitingApproval");
+    case "attention":
+      return t("github:workflowNeedsAttention");
+    case "in_progress":
+      return t("github:checksRunning");
+    default:
+      return null;
+  }
 }
 
 function getPRChecksAccessibleLabel(
@@ -179,13 +199,15 @@ export function getPRStatusAccessibleLabels(
   const lifecycleLabel = getPRLifecycleAccessibleLabel(pr, t);
   if (pr.state !== "open") return lifecycleLabel ? [lifecycleLabel] : [];
 
-  return [
+  const labels = [
     lifecycleLabel,
     getPRWorkflowAccessibleLabel(pr, t),
     getPRChecksAccessibleLabel(pr, t),
+    getPRCIBubbleAccessibleLabel(pr, t),
     getPRMergeabilityAccessibleLabel(pr, t),
     getPRReviewAccessibleLabel(pr, t),
   ].filter((label): label is string => label !== null);
+  return [...new Set(labels)];
 }
 
 function getTaskPRStatusAccessibleLabels(
@@ -394,43 +416,9 @@ type TaskPRIconPresentation = {
   iconColor: string;
   displayState: string | undefined;
   displayCount: number;
+  ciState: PRCIState;
   hasWorkflowApprovalRequired: boolean;
 };
-
-function getTaskPRIconPresentation(
-  prs: TaskPR[],
-  prInfo?: TaskPRInfo,
-  compactWorkflowApprovalAuthoritative = false,
-): TaskPRIconPresentation {
-  const hasFullData = prs.length > 0;
-  const singlePR = prs.length === 1 ? prs[0] : null;
-  const readyToMerge = singlePR ? isPRReadyToMerge(singlePR) : false;
-  return {
-    hasFullData,
-    singlePR,
-    readyToMerge,
-    allReadyToMerge: areAllOpenPRsReadyToMerge(prs),
-    summaries: prs.map((pr) => derivePRTaskStatusSummary(pr, isPRReadyToMerge(pr))),
-    iconColor: getTaskPRIconStatusColor(prs, prInfo, compactWorkflowApprovalAuthoritative),
-    displayState: getTaskPRIconDisplayState(
-      hasFullData,
-      singlePR,
-      prInfo,
-      compactWorkflowApprovalAuthoritative,
-    ),
-    displayCount: getTaskPRIconDisplayCount(
-      prs,
-      prInfo,
-      hasFullData,
-      compactWorkflowApprovalAuthoritative,
-    ),
-    hasWorkflowApprovalRequired: hasTaskWorkflowApproval(
-      prs,
-      prInfo,
-      compactWorkflowApprovalAuthoritative,
-    ),
-  };
-}
 
 function getTaskPRIconStatusColor(
   prs: TaskPR[],
@@ -489,39 +477,40 @@ function getStaleWorkflowPRs(prs: TaskPR[]) {
   });
 }
 
-function getTaskPRIconDisclosureProjection(
+function getTaskPRIconPresentation(
   prs: TaskPR[],
-  presentation: TaskPRIconPresentation,
-  prInfo: TaskPRInfo | undefined,
-  compactWorkflowApprovalAuthoritative: boolean,
-) {
-  if (!compactWorkflowApprovalAuthoritative || !prInfo) {
-    return { summaries: presentation.summaries };
-  }
-
-  const compactSummaries = getCompactWorkflowStatusSummaries(prInfo);
-  if (prInfo.workflowApprovalRequired === false) {
-    const negativeDisclosure = getNegativeWorkflowApprovalDisclosure(
-      prs,
-      presentation.summaries,
+  prInfo?: TaskPRInfo,
+  compactWorkflowApprovalAuthoritative = false,
+): TaskPRIconPresentation {
+  const hasFullData = prs.length > 0;
+  const singlePR = prs.length === 1 ? prs[0] : null;
+  const readyToMerge = singlePR ? isPRReadyToMerge(singlePR) : false;
+  return {
+    hasFullData,
+    singlePR,
+    readyToMerge,
+    allReadyToMerge: areAllOpenPRsReadyToMerge(prs),
+    summaries: prs.map((pr) => derivePRTaskStatusSummary(pr, isPRReadyToMerge(pr))),
+    iconColor: getTaskPRIconStatusColor(prs, prInfo, compactWorkflowApprovalAuthoritative),
+    displayState: getTaskPRIconDisplayState(
+      hasFullData,
+      singlePR,
       prInfo,
-      compactSummaries,
-    );
-    return {
-      summaries: negativeDisclosure.summaries,
-      count: negativeDisclosure.count,
-      identity: negativeDisclosure.identity,
-    };
-  }
-
-  const identity =
-    compactSummaries.length === 1
-      ? {
-          number: compactSummaries[0].number,
-          repository: getProjectedPRRepository(prInfo, compactSummaries[0].number),
-        }
-      : undefined;
-  return { summaries: compactSummaries, count: compactSummaries.length, identity };
+      compactWorkflowApprovalAuthoritative,
+    ),
+    displayCount: getTaskPRIconDisplayCount(
+      prs,
+      prInfo,
+      hasFullData,
+      compactWorkflowApprovalAuthoritative,
+    ),
+    ciState: getTaskPRIconCIState(prs, prInfo, compactWorkflowApprovalAuthoritative),
+    hasWorkflowApprovalRequired: hasTaskWorkflowApproval(
+      prs,
+      prInfo,
+      compactWorkflowApprovalAuthoritative,
+    ),
+  };
 }
 
 function getTaskPRIconViewModel(
@@ -534,6 +523,7 @@ function getTaskPRIconViewModel(
     prs,
     prInfo,
   );
+  const compactCIAuthoritative = isCompactCIAuthoritative(prs, prInfo);
   const presentation = getTaskPRIconPresentation(prs, prInfo, compactWorkflowApprovalAuthoritative);
   const staleWorkflowPRs =
     compactWorkflowApprovalAuthoritative && prInfo
@@ -541,20 +531,21 @@ function getTaskPRIconViewModel(
       : getStaleWorkflowPRs(prs);
   const disclosure = getTaskPRIconDisclosureProjection(
     prs,
-    presentation,
+    presentation.summaries,
     prInfo,
     compactWorkflowApprovalAuthoritative,
+    compactCIAuthoritative,
   );
   const statusLabels = getTaskPRIconStatusLabels(
     prs,
     prInfo,
     t,
-    compactWorkflowApprovalAuthoritative,
+    compactWorkflowApprovalAuthoritative || compactCIAuthoritative,
   );
   const statusNumber = getTaskPRIconStatusNumber(
     presentation.singlePR,
     prInfo,
-    compactWorkflowApprovalAuthoritative,
+    compactWorkflowApprovalAuthoritative || compactCIAuthoritative,
   );
   const hasMergeConflicts = compactWorkflowApprovalAuthoritative
     ? prInfo?.hasMergeConflicts === true
@@ -571,6 +562,7 @@ function getTaskPRIconViewModel(
   return {
     ...presentation,
     compactWorkflowApprovalAuthoritative,
+    compactCIAuthoritative,
     staleWorkflowPRs,
     disclosureSummaries: disclosure.summaries,
     disclosurePRNumber: disclosure.identity?.number,
@@ -596,10 +588,10 @@ function getTaskPRIconStatusLabels(
 function getTaskPRIconStatusNumber(
   singlePR: TaskPR | null,
   prInfo: TaskPRInfo | undefined,
-  compactWorkflowApprovalAuthoritative: boolean,
+  compactSummaryAuthoritative: boolean,
 ): number | undefined {
-  if (compactWorkflowApprovalAuthoritative && prInfo) {
-    return prInfo.workflowApprovalPRNumber ?? prInfo.number;
+  if (compactSummaryAuthoritative && prInfo) {
+    return prInfo.workflowApprovalPRNumber ?? prInfo.ciPRNumber ?? prInfo.number;
   }
   return singlePR?.pr_number ?? prInfo?.number;
 }
@@ -654,6 +646,7 @@ function PRTaskIconView({
     disclosurePRRepository,
     disclosurePRCount,
     hasMergeConflicts,
+    ciState,
     ariaLabel,
   } = viewModel;
   const disclosureProps = createPRTaskIconDisclosureProps({
@@ -673,6 +666,7 @@ function PRTaskIconView({
     ariaLabel,
     automation,
     hasMergeConflicts,
+    ciState,
     hasWorkflowApprovalRequired,
     summaries: disclosureSummaries,
     staleWorkflowPRs,

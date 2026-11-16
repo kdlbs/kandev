@@ -677,6 +677,46 @@ func TestAddBranchToTask_ForwardsRepositoryURL(t *testing.T) {
 	assert.Contains(t, text.Text, `"agent_cwd_changed": false`)
 }
 
+func TestAddBranchToTask_ForwardsWorktreePath(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{
+			"id": "tr-1", "task_id": "task-current", "worktree_path": "/task/.claude/worktrees/fix-b",
+			"adopted": true, "already_attached": false,
+		},
+	}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "add_branch_to_task_kandev", map[string]interface{}{
+		"worktree_path": "/task/.claude/worktrees/fix-b",
+		"base_branch":   "main",
+	})
+
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPAddBranchToTask, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "/task/.claude/worktrees/fix-b", payload["worktree_path"])
+	assert.Equal(t, "main", payload["base_branch"])
+	text, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, text.Text, `"adopted": true`)
+}
+
+func TestAddBranchToTask_RejectsWorktreePathWithLocator(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+	result := callTool(t, s, "add_branch_to_task_kandev", map[string]interface{}{
+		"worktree_path": "/task/.claude/worktrees/fix-b",
+		"repository_id": "repo-1",
+	})
+	assert.True(t, result.IsError)
+	require.NotEmpty(t, result.Content)
+	text, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, text.Text, "worktree_path cannot be combined")
+	assert.Nil(t, backend.lastPayload)
+}
+
 func TestAddBranchToTask_RejectsAnotherTask(t *testing.T) {
 	backend := &testBackend{}
 	s := newTaskModeServer(t, backend, "task-current")

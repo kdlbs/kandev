@@ -121,9 +121,13 @@ type LaunchQueueSummary struct {
 }
 
 type LaunchQueueCapacity struct {
-	InUse      int       `json:"in_use"`
-	Limit      int       `json:"limit"`
-	ObservedAt time.Time `json:"observed_at"`
+	Policy             string         `json:"policy,omitempty"`
+	GradeInUse         map[string]int `json:"grade_in_use,omitempty"`
+	GradeLimits        map[string]int `json:"grade_limits,omitempty"`
+	NeedsConfiguration bool           `json:"needs_configuration,omitempty"`
+	InUse              int            `json:"in_use"`
+	Limit              int            `json:"limit"`
+	ObservedAt         time.Time      `json:"observed_at"`
 }
 
 type PrimarySessionSummary struct {
@@ -185,10 +189,17 @@ type PullRequestSummary struct {
 	HasMergeConflicts          bool   `json:"has_merge_conflicts,omitempty"`
 	MergeConflictPRNumber      int    `json:"merge_conflict_pr_number,omitempty"`
 	MergeConflictRepository    string `json:"merge_conflict_repository,omitempty"`
-	AggregateState             string `json:"aggregate_state,omitempty"`
-	State                      string `json:"state,omitempty"`
-	Number                     int    `json:"number,omitempty"`
-	URL                        string `json:"url,omitempty"`
+	// CIState is the display-only CI classification for the highest-priority
+	// open pull request. "none" is an explicit clear; an omitted field in a
+	// legacy payload means unknown.
+	CIState        string `json:"ci_state"`
+	CIPRNumber     int    `json:"ci_pr_number,omitempty"`
+	CIRepository   string `json:"ci_repository,omitempty"`
+	CIStale        bool   `json:"ci_stale,omitempty"`
+	AggregateState string `json:"aggregate_state,omitempty"`
+	State          string `json:"state,omitempty"`
+	Number         int    `json:"number,omitempty"`
+	URL            string `json:"url,omitempty"`
 }
 
 // StoredTaskStatusSummary is the persistence boundary for one task. The
@@ -401,7 +412,7 @@ func validatePullRequest(pr *PullRequestSummary) error {
 		return nil
 	}
 	if pr.Count < 0 || pr.OpenCount < 0 || pr.Number < 0 || pr.WorkflowApprovalPRNumber < 0 ||
-		pr.MergeConflictPRNumber < 0 {
+		pr.MergeConflictPRNumber < 0 || pr.CIPRNumber < 0 {
 		return fmt.Errorf("pull request counts and number cannot be negative")
 	}
 	fields := []struct {
@@ -411,9 +422,11 @@ func validatePullRequest(pr *PullRequestSummary) error {
 	}{
 		{"pull request state", pr.State, maxPullRequestStateBytes},
 		{"pull request aggregate state", pr.AggregateState, maxPullRequestStateBytes},
+		{"pull request CI state", pr.CIState, maxPullRequestStateBytes},
 		{"pull request URL", pr.URL, maxPullRequestURLBytes},
 		{"workflow approval repository", pr.WorkflowApprovalRepository, maxPullRequestRepositoryBytes},
 		{"merge conflict repository", pr.MergeConflictRepository, maxPullRequestRepositoryBytes},
+		{"CI repository", pr.CIRepository, maxPullRequestRepositoryBytes},
 	}
 	for _, field := range fields {
 		if err := validateUTF8Bytes(field.name, field.value, field.limit); err != nil {

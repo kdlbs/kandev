@@ -91,6 +91,7 @@
   "quickChatTerminalConnecting": "ターミナルに接続中…",
   "quickChatTerminalExited": "ターミナル終了。",
   "quickChatTerminalExitedWithCode": "ターミナルはコード {{code}} で終了した。",
+  "quickChatTerminalStartNewShell": "新しいシェルを起動",
   "quickChatAdd": "タブを追加または切り替え",
   "reconnecting": "再接続中",
   "reconnectingToKandev": "Kandev に再接続中",

@@ -637,6 +637,29 @@ type TaskBlocker struct {
 	CreatedAt     time.Time `json:"created_at" db:"created_at"`
 }
 
+// BlockerStatus classifies a blocker task for its Office dependents. Only a
+// successfully completed blocker satisfies a dependent; a failed or cancelled
+// blocker keeps it held.
+type BlockerStatus int
+
+const (
+	BlockerPending BlockerStatus = iota
+	BlockerSatisfied
+	BlockerFailed
+)
+
+// String returns the log label for the status.
+func (s BlockerStatus) String() string {
+	switch s {
+	case BlockerSatisfied:
+		return "satisfied"
+	case BlockerFailed:
+		return "failed"
+	default:
+		return "pending"
+	}
+}
+
 // RelationModel represents a symmetric, non-blocking task relationship.
 type RelationModel struct {
 	TaskIDLow  string    `json:"task_id_low" db:"task_id_low"`

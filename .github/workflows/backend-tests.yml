@@ -371,13 +371,14 @@ jobs:
           fi
 
       - name: Run golangci-lint
-        # golangci-lint is preinstalled in the kandev-ci image; invoke it
-        # directly instead of going through `golangci/golangci-lint-action`,
-        # which would re-download its own binary on every run. `--timeout=5m`
-        # was too short for a cold cache; keep the explicit budget finite while
-        # allowing the full repository analysis to finish reliably.
+        # Bound analysis and child Go compilation; the memory target is per process.
         shell: bash
-        run: golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=15m
+        env:
+          GOMAXPROCS: '2'
+          GOMEMLIMIT: 3GiB
+        run: |
+          export GOFLAGS="${GOFLAGS:+$GOFLAGS }-p=${GOMAXPROCS}"
+          golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=15m --concurrency="${GOMAXPROCS}"
 
   test_shards:
     name: Backend Tests (${{ matrix.shard }}/4)
@@ -791,7 +792,6 @@ jobs:
             ./internal/agent/settings/store
             ./internal/analytics/repository/sqlite
             ./internal/automation
-            ./internal/azuredevops
             ./internal/backendapp
             ./internal/coordinator
             ./internal/coordinator/ledger
@@ -1178,6 +1178,16 @@ jobs:
           GOMAXPROCS: '2'
           GOMEMLIMIT: 2GiB
         run: go test -trimpath -tags fts5 -race -p=1 -count=1 -v -timeout 5m ./internal/agent/agents -run '^Test(HermesACP|RunCommandCheck)'
+
+      - name: Test Windows provider quota classification
+        if: matrix.suite == 'native'
+        timeout-minutes: 10
+        env:
+          GOMAXPROCS: '2'
+          GOMEMLIMIT: 2GiB
+        run: |
+          go test -trimpath -tags fts5 -race -p=1 -count=1 -timeout=5m ./internal/agent/runtime/routingerr ./internal/agentctl/server/adapter/transport/acp -run '^(TestClassifyClaudeFiveHourLimit.*|TestClassifyClaudeUsageLimit|TestClassifyCodexWorkspaceCredits|TestProviderQuotaNoticeCollisionsAndPrecedence|TestCodexWorkspaceCreditsProjectsMatchingGenericPromptError|TestCodexWorkspaceCreditsPreservesPromptIsolation)$'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # Keep this targeted: these packages have broader tests, while these
       # native tests verify hidden consoles retain handles for descendants.

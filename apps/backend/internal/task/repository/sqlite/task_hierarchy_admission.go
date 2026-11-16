@@ -47,7 +47,10 @@ func (r *Repository) lockTaskHierarchy(ctx context.Context, tx internaldb.TaskHi
 	if errors.Is(err, internaldb.ErrTaskHierarchyWorkspaceNotFound) {
 		return repoerrors.ErrWorkspaceNotFound
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	return nil
 }
 func (r *Repository) ValidateTaskParent(ctx context.Context, id, parent string, validate hierarchy.TaskParentValidator) error {
 	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
@@ -132,7 +135,7 @@ func (r *Repository) UpdateTaskWithParentAdmission(ctx context.Context, task *mo
 	if err := r.lockTaskUpdateSteps(ctx, tx, task); err != nil {
 		return false, err
 	}
-	entry, marker, err := r.updateTaskTx(ctx, tx, task, "", !explicitPosition, !explicitPosition, nil)
+	entry, marker, err := r.updateTaskTx(ctx, tx, task, "", !explicitPosition, !explicitPosition, nil, nil)
 	if err != nil {
 		return false, err
 	}

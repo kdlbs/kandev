@@ -1,9 +1,11 @@
 "use client";
 
-import { IconGitMerge, IconGitPullRequest } from "@tabler/icons-react";
+import { IconGitMerge } from "@tabler/icons-react";
 import Link from "@/components/routing/app-link";
 import { useAppStore } from "@/components/state-provider";
-import { aggregatePRStatusColor } from "@/components/github/pr-task-icon";
+import { aggregatePRStatusColor, hasAnyPRMergeConflict } from "@/components/github/pr-task-icon";
+import { PRStatusGlyph } from "@/components/github/pr-status-glyph";
+import { aggregatePRCIState } from "@/components/github/pr-ci-state";
 import { aggregateMRStatusColor } from "@/components/gitlab/mr-task-icon";
 import { useTaskMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { linkToTask } from "@/lib/links";
@@ -23,9 +25,10 @@ function SubtaskCIGlyph({ taskId }: { taskId: string }) {
   const mrs = useTaskMRs(taskId);
   if (prs.length > 0) {
     return (
-      <IconGitPullRequest
-        aria-hidden="true"
-        className={cn("size-3.5 shrink-0", aggregatePRStatusColor(prs))}
+      <PRStatusGlyph
+        colorClassName={aggregatePRStatusColor(prs)}
+        ciState={aggregatePRCIState(prs).state}
+        hasMergeConflicts={hasAnyPRMergeConflict(prs)}
       />
     );
   }

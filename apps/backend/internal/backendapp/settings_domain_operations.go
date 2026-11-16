@@ -295,7 +295,7 @@ func (s *settingsOperations) readPrompt(ctx context.Context, id string) (map[str
 			return map[string]any{
 				"id": prompt.ID, "name": prompt.Name, "content": prompt.Content, "builtin": prompt.Builtin,
 				"created_at": prompt.CreatedAt, "updated_at": prompt.UpdatedAt,
-				"allow_agent_edits": prompt.AllowAgentEdits && !prompt.Builtin,
+				"allow_agent_edits": !prompt.Builtin,
 			}, nil
 		}
 	}
@@ -303,6 +303,9 @@ func (s *settingsOperations) readPrompt(ctx context.Context, id string) (map[str
 }
 
 func (s *settingsOperations) updatePrompt(ctx context.Context, id string, changes map[string]json.RawMessage) (any, error) {
+	if _, exists := changes["allow_agent_edits"]; exists {
+		return nil, fmt.Errorf("allow_agent_edits is not a writable prompt field")
+	}
 	var name, content *string
 	if err := decodeOptionalChange(changes, "name", &name); err != nil {
 		return nil, err

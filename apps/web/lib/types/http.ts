@@ -324,6 +324,8 @@ export type Workspace = {
   acp_idle_suspension_enabled: boolean;
   acp_idle_timeout_minutes: number;
   office_workflow_id?: WorkflowId;
+  /** Office task identifier prefix (e.g. "KAN"). */
+  task_prefix?: string;
   created_at: string;
   updated_at: string;
 };
@@ -650,9 +652,11 @@ export type TaskSessionWorktree = {
   worktree_id: string;
   repository_id?: RepositoryId;
   branch_slug?: string;
+  workspace_relative_path?: string;
   position: number;
   worktree_path?: string;
   worktree_branch?: string;
+  worktree_origin?: "kandev" | "adopted";
   created_at?: string;
 };
 

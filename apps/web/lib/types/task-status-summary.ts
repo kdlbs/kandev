@@ -62,6 +62,10 @@ export type TaskStatusSummaryLaunchQueue = {
   reason: "session_capacity" | "ownership_unavailable" | "replay_error";
   retrying: boolean;
   capacity?: {
+    policy?: "automatic" | "all";
+    grade_in_use?: Record<string, number>;
+    grade_limits?: Record<string, number>;
+    needs_configuration?: boolean;
     in_use: number;
     limit: number;
     observed_at: string;
@@ -132,6 +136,10 @@ export type TaskStatusSummary = {
     workflow_approval_repository?: string;
     merge_conflict_pr_number?: number;
     merge_conflict_repository?: string;
+    ci_state?: string;
+    ci_pr_number?: number;
+    ci_repository?: string;
+    ci_stale?: boolean;
     aggregate_state?: string;
     state?: string;
     number?: number;

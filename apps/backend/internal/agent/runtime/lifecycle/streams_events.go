@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -64,6 +65,9 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 	deferReceipt bool,
 	attempt *deliveryStartupAttempt,
 ) (preparedAgentEvent, error) {
+	if connectionScopedStartupControlEvent(event) {
+		return preparedLegacyAgentEvent(execution, event), nil
+	}
 	if err := attempt.awaitNegotiation(ctx); err != nil {
 		return preparedAgentEvent{}, err
 	}
@@ -93,7 +97,7 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 		ctx, execution, durableEvent, delivery, client, deferReceipt, attempt,
 	)
 	if err != nil {
-		return preparedAgentEvent{}, fmt.Errorf("durable agent event ownership check: %w", err)
+		return preparedAgentEvent{}, fmt.Errorf("durable agent event ownership check for %q: %w", event.Type, err)
 	}
 	if event.DeliverySubmissionID != "" && !staleSubmission {
 		execution.setDeliverySubmissionID(event.DeliverySubmissionID)
@@ -224,8 +228,8 @@ func (sm *StreamManager) projectCanonicalAgentEvent(
 			zap.String("event_type", event.Type))
 		return event, false, true, nil
 	}
-	projectionResult, err := projector.ProjectCanonicalAgentDeliveryEvent(
-		ctx, durableEvent, deliveryEffectForEvent(event),
+	projectionResult, receipt, err := projectCanonicalSingleWithReceipt(
+		ctx, projector, durableEvent, deliveryEffectForEvent(event),
 	)
 	if err != nil {
 		sm.logger.Error("canonical agent event projection failed",
@@ -250,6 +254,7 @@ func (sm *StreamManager) projectCanonicalAgentEvent(
 		notify = canonicalProjectionShouldNotify(event, projectionResult)
 	}
 	event.CanonicalProjection = true
+	event.CanonicalConversationReceipt = receipt
 	applyCanonicalCompactionResult(&event, projectionResult)
 	// Projection is the canonical commit boundary. ACK transport is scheduled
 	// independently so a lost ACK cannot hide output that is already durable.
@@ -288,7 +293,7 @@ func (sm *StreamManager) commitPreparedAgentEvents(
 	if err != nil {
 		return err
 	}
-	results, err := receiver.ReceiveAndProjectCanonicalAgentDeliveryEvents(ctx, events, effects, 0)
+	results, receipt, err := receiveCanonicalBatchWithReceipt(ctx, receiver, events, effects)
 	if err != nil {
 		if !isCombinedDeliveryAdmissionError(err) {
 			return err
@@ -309,7 +314,7 @@ func (sm *StreamManager) commitPreparedAgentEvents(
 			prepared[index].skipCallback = true
 		}
 	}
-	sm.notifyCanonicalAgentEventBatch(execution, prepared, results, client, startupGeneration)
+	sm.notifyCanonicalAgentEventBatch(execution, prepared, results, client, startupGeneration, receipt)
 	return nil
 }
 
@@ -403,14 +408,14 @@ func (sm *StreamManager) projectCanonicalAgentEvents(
 	if err != nil {
 		return err
 	}
-	projectionResults, err := projector.ProjectCanonicalAgentDeliveryEvents(ctx, events, effects)
+	projectionResults, receipt, err := projectCanonicalBatchWithReceipt(ctx, projector, events, effects)
 	if err != nil {
 		return err
 	}
 	if len(projectionResults) != len(prepared) {
 		return fmt.Errorf("canonical delivery projector returned %d results for %d events", len(projectionResults), len(prepared))
 	}
-	sm.notifyCanonicalAgentEventBatch(execution, prepared, projectionResults, client, startupGeneration)
+	sm.notifyCanonicalAgentEventBatch(execution, prepared, projectionResults, client, startupGeneration, receipt)
 	return nil
 }
 
@@ -457,6 +462,7 @@ func (sm *StreamManager) notifyCanonicalAgentEventBatch(
 	projectionResults []models.CanonicalAgentDeliveryProjectionResult,
 	client *agentctl.Client,
 	startupGeneration uint64,
+	receipts ...json.RawMessage,
 ) {
 	var notification agentctl.AgentEvent
 	var notify bool
@@ -493,6 +499,9 @@ func (sm *StreamManager) notifyCanonicalAgentEventBatch(
 		}
 	}
 	if notify {
+		if len(receipts) > 0 {
+			notification.CanonicalConversationReceipt = receipts[0]
+		}
 		applyCanonicalCompactionMetadata(&notification, compactionCount, compactionReporting)
 		if notification.Type == streams.EventTypeReasoning {
 			notification.ReasoningText = content.String()
@@ -546,6 +555,18 @@ func durableAgentEventIdentityPartial(event agentctl.AgentEvent) bool {
 		event.DeliveryIncarnationID != "" ||
 		event.DeliveryHarnessGeneration != 0 ||
 		event.DeliverySequence != 0
+}
+
+func connectionScopedStartupControlEvent(event agentctl.AgentEvent) bool {
+	if event.SessionID != "" || durableAgentEventIdentityPartial(event) {
+		return false
+	}
+	switch event.Type {
+	case streams.EventTypeAgentCapabilities, streams.EventTypeAuthRequired:
+		return true
+	default:
+		return false
+	}
 }
 
 func durableDeliveryExpected(execution *AgentExecution) bool {

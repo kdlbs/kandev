@@ -51,6 +51,7 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 			event.Text,
 			event.CanonicalMessageAppend,
 			false,
+			decodeCanonicalConversationReceipt(event.CanonicalConversationReceipt),
 		)
 		return
 	}
@@ -96,6 +97,7 @@ func (m *Manager) publishStreamEvidence(execution *AgentExecution, event agentct
 		event.Text = event.ReasoningText
 	}
 	event.CanonicalProjection = false
+	event.CanonicalConversationReceipt = nil
 	event.CanonicalMessageID = ""
 	event.CanonicalMessageAppend = false
 	m.eventPublisher.PublishAgentStreamEvent(execution, event)
@@ -119,6 +121,7 @@ func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl
 			event.ReasoningText,
 			event.CanonicalMessageAppend,
 			false,
+			decodeCanonicalConversationReceipt(event.CanonicalConversationReceipt),
 		)
 		return
 	}
@@ -1777,6 +1780,15 @@ func (m *Manager) handleFileChangeNotification(execution *AgentExecution, notifi
 		return
 	}
 	m.eventPublisher.PublishFileChange(execution, notification)
+}
+
+// handleWorktreeInventory publishes a linked-worktree snapshot from a live,
+// current execution. Detection never starts, resumes, or prompts an agent.
+func (m *Manager) handleWorktreeInventory(execution *AgentExecution, inventory *agentctl.WorktreeInventory) {
+	if execution == nil || inventory == nil || !m.runtimeExecutionCurrent(execution) {
+		return
+	}
+	m.eventPublisher.PublishWorktreeInventory(execution, inventory)
 }
 
 // handleShellOutput processes shell output from the workspace stream

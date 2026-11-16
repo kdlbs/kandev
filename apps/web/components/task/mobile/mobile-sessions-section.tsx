@@ -158,7 +158,7 @@ function SessionActionsMenu({
   const available = sessionMenuAvailability(state, isPrimary, isArchived, isRestarting);
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    <DropdownMenu modal open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <Button
           ref={triggerRef}

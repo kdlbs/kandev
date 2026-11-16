@@ -7,6 +7,10 @@ func BuiltinToolPackage(name string) PackageID {
 }
 
 var builtinToolPackages = map[string]PackageID{
+	"answer_question_kandev":                        PackageCore,
+	"list_pending_questions_kandev":                 PackageCore,
+	"list_pending_agent_permissions_kandev":         PackageCore,
+	"resolve_agent_permission_kandev":               PackageCore,
 	"list_canvases_kandev":                          PackageCore,
 	"list_workspaces_kandev":                        PackageCore,
 	"list_agents_kandev":                            PackageCore,
@@ -32,6 +36,7 @@ var builtinToolPackages = map[string]PackageID{
 	"get_message_queue_census_kandev":               PackageCore,
 	"get_task_conversation_kandev":                  PackageCore,
 	"get_task_document_kandev":                      PackageCore,
+	"get_task_message_operation_kandev":             PackageCore,
 	"get_task_plan_kandev":                          PackageCore,
 	"get_task_plan_revision_kandev":                 PackageCore,
 	"list_executor_profiles_kandev":                 PackageCore,

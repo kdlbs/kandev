@@ -27,9 +27,6 @@ const { makeEnabledMock, enabledCalls } = vi.hoisted(() => {
   };
 });
 
-vi.mock("@/hooks/domains/azure-devops/use-azure-devops-enabled", () => ({
-  useAzureDevOpsEnabled: makeEnabledMock(true),
-}));
 vi.mock("@/hooks/domains/github/use-github-enabled", () => ({
   useGitHubEnabled: makeEnabledMock(false),
 }));
@@ -110,9 +107,9 @@ describe("IntegrationsIndexPage", () => {
     renderPage();
 
     const switches = screen.getAllByRole("switch");
-    expect(switches).toHaveLength(7);
+    expect(switches).toHaveLength(6);
 
-    expect(ariaChecked(document.getElementById("azure-devops-enabled"))).toBe(ARIA_CHECKED_TRUE);
+    expect(ariaChecked(document.getElementById("gitlab-enabled"))).toBe(ARIA_CHECKED_TRUE);
     expect(ariaChecked(document.getElementById("github-enabled"))).toBe(ARIA_CHECKED_FALSE);
   });
 
@@ -121,7 +118,7 @@ describe("IntegrationsIndexPage", () => {
     // workspace would silently edit (and read) the wrong one.
     renderPage("ws-42");
 
-    expect(enabledCalls).toHaveLength(6);
+    expect(enabledCalls).toHaveLength(5);
     expect(new Set(enabledCalls)).toEqual(new Set(["ws-42"]));
   });
 
@@ -141,19 +138,19 @@ describe("IntegrationsIndexPage", () => {
   it("exposes one full-card navigation target for a native integration", () => {
     renderPage();
 
-    const card = screen.getByTestId("integration-card-azure-devops");
+    const card = screen.getByTestId("integration-card-github");
     const links = within(card).getAllByRole("link");
 
     expect(links).toHaveLength(1);
-    expect(links[0].getAttribute("aria-label")).toBe("Azure DevOps");
-    expect(links[0].getAttribute("href")).toBe("/settings/integrations/azure-devops");
+    expect(links[0].getAttribute("aria-label")).toBe("GitHub");
+    expect(links[0].getAttribute("href")).toBe("/settings/integrations/github");
 
     fireEvent.click(links[0]);
 
     expect(pushNavigationStateSpy).toHaveBeenCalledWith(
       {},
       "",
-      "/settings/integrations/azure-devops",
+      "/settings/integrations/github",
       expect.any(Function),
     );
   });
@@ -163,8 +160,8 @@ describe("IntegrationsIndexPage", () => {
 
     // Plural: the restructure serves workspace settings from
     // /settings/workspaces/<id>, with the singular path kept as a redirect.
-    expect(screen.getByRole("link", { name: "Azure DevOps" }).getAttribute("href")).toBe(
-      "/settings/workspaces/ws-1/integrations/azure-devops",
+    expect(screen.getByRole("link", { name: "GitHub" }).getAttribute("href")).toBe(
+      "/settings/workspaces/ws-1/integrations/github",
     );
   });
 

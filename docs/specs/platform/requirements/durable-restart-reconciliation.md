@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-10-11
-updated: 2026-11-06
+updated: 2026-11-12
 owners:
   - kandev
 ---
@@ -49,9 +49,12 @@ owner is safely recoverable, even when recovery bookkeeping is inconsistent.
 - **AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.3:** Restart, runtime replacement, ordinary resume launch, explicit Resume, and new prompt/queue admission shall consume one consistent recovery disposition. Complete authenticated inventory and source-owner proof are required; live or unknown independent ownership remains protected.
 - **AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.4:** Missing stream associations, absent notices and stale already-restored earlier notices shall converge through guarded exact proof and atomic resolution. Repeated restart and interruption during recovery shall reuse retained progress and admit a distinct new instruction when all independent gates pass.
 - **AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.5:** Every supported reachable cross-store state shall have a tested safe disposition at dispatch, terminal, acknowledgement, teardown, restoration and publication boundaries. Incomplete/conflicting evidence shall surface the actual cause and supported recovery action without fabricating certainty.
-- **AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.6:** A delivery notice already marked recovered whose execution was later lost shall not strand the session. Explicit Resume on the current ready native execution shall restore that notice through the same authenticated retirement transaction, preserving its historical execution, submission, payload, and unknown outcome. A settled notice, foreign generation or stream, or missing retirement evidence shall keep recovery blocked.
+- **AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.6:** A delivery notice already marked recovered whose execution was later lost shall not strand the session. Explicit Resume on the current ready native execution shall restore that notice through the same authenticated retirement transaction, preserving its historical execution, submission, payload, and unknown outcome. A settled notice for that unresolved submission, foreign generation or stream, or missing retirement evidence shall keep recovery blocked. A separate, proven terminal incident follows criterion .9.
 - **AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.7:** A foreground handoff without terminal evidence shall not establish successful durable completion. After restart, the submission shall remain eligible for reconciliation. A later terminal event shall settle only its original submission, including after a successor starts.
 - **AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.8:** An older completion label without terminal proof shall not permanently block the saved conversation. After verified owner termination and native restoration, authenticated matching uncertainty shall permit recovery. Recovery shall preserve historical labels and payloads without asserting a successful outcome or repeating the instruction. Every unresolved record must pass validation. Live work, conflicting evidence, unavailable proof, and independent recovery restrictions shall remain protected.
+- **AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.9:** A proven terminal incident shall not prevent automatic recovery of a later interrupted prompt in the same saved conversation. Obsolete recovery bookkeeping for that incident shall become historical without changing its outcome. Recovery shall validate every unresolved record and preserve independent restrictions. A terminal label alone, an active recovery candidate, or conflicting ownership shall not establish eligibility.
+- **AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.10:** After automatic recovery or explicit native Resume of an eligible interrupted session, desktop and phone shall show the normal chat input and one informational chat message about the interruption. This includes ordinary interrupted restarts without an earlier terminal incident. Resume and Retry connection shall not appear as required steps for that recovered incident. Repeated restoration of the same incident and reload shall retain one message. A user can submit a distinct new instruction through normal admission. Recovery shall preserve an unsent draft and shall not resend the interrupted instruction.
+- **AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.11:** The first startup after an upgrade shall recover existing restart-interrupted sessions through the same automatic path, including sessions already shown as failed. Recovery shall reuse the saved native conversation when the provider can resume it and ownership permits recovery. It shall not require a new interruption, a new instruction, task focus, or a manual recovery action. Obsolete bookkeeping shall not exclude an otherwise eligible session because it predates the upgrade.
 
 ## Technical design and delivery records
 
@@ -64,3 +67,4 @@ owner is safely recoverable, even when recovery bookkeeping is inconsistent.
 - [Convergence design](../system-design/session-recovery-convergence.md).
 - [Convergence implementation](../../../plans/session-recovery-convergence/plan.md).
 - [Foreground handoff recovery fix package](../../../plans/foreground-handoff-durable-recovery/plan.md).
+- [Automatic restart recovery repair](../../../plans/automatic-restart-session-recovery/plan.md).

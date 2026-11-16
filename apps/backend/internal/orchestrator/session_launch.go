@@ -122,7 +122,9 @@ type recoveryRequiredSignal interface {
 var ErrSessionRecoveryRequired = errors.New("session recovery required")
 
 type sessionRecoveryRequiredError struct {
-	Block *models.SessionRecoveryBlock
+	Block                 *models.SessionRecoveryBlock
+	DeliveryRefusalReason string
+	internalCause         error
 }
 
 func (e *sessionRecoveryRequiredError) Error() string {
@@ -151,6 +153,20 @@ func (e *sessionRecoveryRequiredError) RecoveryGeneration() int64 {
 		return 0
 	}
 	return e.Block.ExpectedGeneration
+}
+
+func (e *sessionRecoveryRequiredError) RecoveryBlockID() string {
+	if e == nil || e.Block == nil {
+		return ""
+	}
+	return e.Block.ID
+}
+
+func (e *sessionRecoveryRequiredError) RecoveryIncarnationID() string {
+	if e == nil || e.Block == nil {
+		return ""
+	}
+	return e.Block.IncarnationID
 }
 
 // DispatchDeferred leaves an automation run admitted but open until the
@@ -567,10 +583,21 @@ func (s *Service) checkSessionRecoveryBlock(ctx context.Context, sessionID strin
 	if err != nil {
 		return fmt.Errorf("check session recovery block: %w", err)
 	}
-	if resolved, _ := s.finishLoadedNativeDeliveryBlock(ctx, block); resolved {
+	resolved, finishErr := s.finishLoadedNativeDeliveryBlock(ctx, block)
+	if resolved {
 		return nil
 	}
-	return &sessionRecoveryRequiredError{Block: block}
+	required := &sessionRecoveryRequiredError{Block: block}
+	if finishErr != nil {
+		required.DeliveryRefusalReason = deliveryRecoveryRefusalReason(finishErr)
+		required.internalCause = finishErr
+	}
+	if isBootDeliveryReadinessContext(ctx) {
+		s.logBootDeliveryRecoveryRefusal(ctx, sessionID, required, block)
+	} else {
+		s.logDeliveryRecoveryRefusal(ctx, sessionID, required, block)
+	}
+	return required
 }
 
 // GetOpenSessionRecoveryBlock returns the canonical block for an autonomous
@@ -632,6 +659,9 @@ func (s *Service) resolveSessionRecoveryBlock(ctx context.Context, sessionID, ac
 	}
 	block, err := store.GetOpenSessionRecoveryBlock(ctx, sessionID, incarnationID, generation)
 	if errors.Is(err, sql.ErrNoRows) {
+		if action == recoveryActionResume {
+			return s.finishSessionRecovery(ctx, sessionID)
+		}
 		return nil
 	}
 	if err != nil {
@@ -649,11 +679,21 @@ func (s *Service) resolveSessionRecoveryBlock(ctx context.Context, sessionID, ac
 		return fmt.Errorf("resolve session recovery block: %w", err)
 	}
 	if !resolved {
+		if action == recoveryActionResume {
+			return sessionRecoveryBlockResolutionGuidance(ctx, store, sessionID, incarnationID, generation, block, handled)
+		}
 		return fmt.Errorf("resolve session recovery block: block changed or recovery evidence is incomplete")
 	}
+	return s.finishSessionRecovery(ctx, sessionID)
+}
+
+func (s *Service) finishSessionRecovery(ctx context.Context, sessionID string) error {
 	s.publishAgentDeliveryRecoveryState(ctx, sessionID)
 	if err := s.restorePendingQueueDispatchesForRecovery(ctx, sessionID); err != nil {
 		return fmt.Errorf("release parked queue work after session recovery: %w", err)
+	}
+	if err := s.publishPendingRecoveryNotice(ctx, sessionID); err != nil {
+		return fmt.Errorf("persist session recovery notice: %w", err)
 	}
 	return nil
 }
@@ -1588,9 +1628,13 @@ func (s *Service) RecoverSessionWithOptions(
 	}
 	if action == recoveryActionResume {
 		if response, handled, err := s.resumePrunedDelivery(ctx, session); handled || err != nil {
+			if err != nil {
+				s.logDeliveryRecoveryRefusal(ctx, sessionID, err, nil)
+			}
 			return response, err
 		}
 		if err := s.checkNativeResumeDeliveryBlock(ctx, taskID, sessionID); err != nil {
+			s.logDeliveryRecoveryRefusal(ctx, sessionID, err, nil)
 			return nil, err
 		}
 	}
@@ -1642,7 +1686,10 @@ func (s *Service) RecoverSessionWithOptions(
 		}
 	}
 
-	recoveryAdmission, err := s.preflightSessionRecovery(launchCtx, taskID, session, action)
+	recoveryAdmission, releaseReplacement, err := s.preflightSessionRecovery(launchCtx, taskID, session, action)
+	if releaseReplacement != nil {
+		defer s.releaseRecoveryReplacement(context.WithoutCancel(ctx), releaseReplacement, taskID, sessionID)
+	}
 	if err != nil {
 		if checkpoint != nil {
 			if settleErr := s.finishContinuationCheckpoint(context.WithoutCancel(ctx), checkpoint, models.ContinuitySnapshotUncertain); settleErr != nil {
@@ -1733,6 +1780,9 @@ func (s *Service) RecoverSessionWithOptions(
 		err = s.acknowledgeNativeResumeDelivery(launchCtx, sessionID)
 	}
 	if err != nil {
+		if action == recoveryActionResume {
+			s.logDeliveryRecoveryRefusal(launchCtx, sessionID, err, nil)
+		}
 		if recoveryAdmission != nil {
 			if persistErr := recoveryAdmission.CompleteRecoveryResume(launchCtx, false, "resume_failed"); persistErr != nil {
 				err = errors.Join(err, persistErr)
@@ -1741,11 +1791,15 @@ func (s *Service) RecoverSessionWithOptions(
 		return s.handleContinuationLaunchError(ctx, checkpoint, err)
 	}
 	if err := completeRecoveryResumeAfterLaunch(launchCtx, recoveryAdmission, resp); err != nil {
+		if action == recoveryActionResume {
+			s.logDeliveryRecoveryRefusal(launchCtx, sessionID, err, nil)
+		}
 		return nil, err
 	}
 	if checkpoint == nil {
 		if action == recoveryActionResume {
 			if err := s.resolveSessionRecoveryBlock(ctx, sessionID, action); err != nil {
+				s.logDeliveryRecoveryRefusal(ctx, sessionID, err, nil)
 				return nil, normalizeRecoverSessionError(err)
 			}
 		}
@@ -1872,19 +1926,22 @@ func (s *Service) preflightSessionRecovery(
 	taskID string,
 	session *models.TaskSession,
 	action string,
-) (*worktree.RecoveryAdmission, error) {
+) (*worktree.RecoveryAdmission, func(context.Context) error, error) {
 	// Inventory repair must attest the original checkout before any filesystem
 	// recovery can modify it. Its executor path validates inventory first.
 	if action == recoveryActionRepairWorkspaceInventory {
-		return nil, nil
+		return nil, nil, nil
 	}
-	admission, err := s.executor.PreflightSessionWorktreeRecovery(
+	return s.executor.PreflightSessionWorktreeRecovery(
 		ctx, taskID, session, action == recoveryActionResumeNewBranch,
 	)
-	if err != nil {
-		return nil, err
+}
+
+func (s *Service) releaseRecoveryReplacement(ctx context.Context, release func(context.Context) error, taskID, sessionID string) {
+	if err := release(ctx); err != nil {
+		s.logger.Warn("failed to release unused recovery replacement",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
 	}
-	return admission, nil
 }
 
 func (s *Service) loadSessionForRecovery(

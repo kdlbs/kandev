@@ -408,6 +408,8 @@ func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd
 		RemoteContributions:          req.RemoteContributions,
 		ContributionDestinations:     req.ContributionDestinations,
 		WorkspaceSourceRoots:         req.WorkspaceSourceRoots,
+		TaskWorkspaceRoot:            req.TaskWorkspaceRoot,
+		WorkspaceExcludedRoots:       req.WorkspaceExcludedRoots,
 		DurableJournalPath:           req.DurableJournalPath,
 		DeliveryStreamID:             req.DeliveryStreamID,
 		DeliveryIncarnationID:        req.DeliveryIncarnationID,

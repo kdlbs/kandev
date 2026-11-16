@@ -39,6 +39,8 @@ type ClarificationOverlayTopBarProps = {
   onSubmit: () => void;
   onSkip: () => void;
   attachmentActions?: ReactNode;
+  /** Opens the large image review view; omitted for image-free bundles. */
+  reviewAction?: ReactNode;
   showSingleQuestionSubmit?: boolean;
   lateMode?: boolean;
   onLateClose?: () => void;
@@ -64,6 +66,7 @@ export function ClarificationOverlayTopBar({
   onSubmit,
   onSkip,
   attachmentActions,
+  reviewAction,
   showSingleQuestionSubmit = false,
   lateMode = false,
   onLateClose,
@@ -110,6 +113,7 @@ export function ClarificationOverlayTopBar({
         canExpandPanel={canExpandPanel}
         collapseContentId={collapseContentId}
         attachmentActions={attachmentActions}
+        reviewAction={reviewAction}
         showSingleQuestionSubmit={showSingleQuestionSubmit}
       />
     </div>
@@ -123,6 +127,8 @@ type ClarificationHeaderActionsProps = {
   onSubmit: () => void;
   onSkip: () => void;
   attachmentActions?: ReactNode;
+  /** Opens the large image review view; omitted for image-free bundles. */
+  reviewAction?: ReactNode;
   showSingleQuestionSubmit?: boolean;
   lateMode?: boolean;
   onLateClose?: () => void;
@@ -219,6 +225,7 @@ export function ClarificationHeaderActions({
   onSubmit,
   onSkip,
   attachmentActions,
+  reviewAction,
   showSingleQuestionSubmit = false,
   lateMode = false,
   onLateClose,
@@ -273,6 +280,7 @@ export function ClarificationHeaderActions({
           ariaControls={collapseContentId}
         />
       )}
+      {reviewAction}
       {attachmentActions}
       {(total > 1 || showSingleQuestionSubmit) && (
         <KeyboardShortcutTooltip

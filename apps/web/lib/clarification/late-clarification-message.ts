@@ -43,6 +43,15 @@ function answerText(
   return selectedLabels.join(", ");
 }
 
+function annotationEvidenceLines(answer: ClarificationAnswer | undefined): string[] {
+  if (!answer?.annotations?.length) return [];
+  const evidence = JSON.stringify({
+    question_id: answer.question_id,
+    annotations: answer.annotations,
+  });
+  return [`Answer annotations (JSON): ${sanitizeOrdinaryMessageText(evidence)}`];
+}
+
 // orderedLateClarificationAnswers returns answers in question order. The flat
 // attachment list sent with a late answer must use this same order so the
 // numbered file labels in the fallback text match the delivered attachments.
@@ -86,7 +95,9 @@ export function formatLateClarificationMessage(
     });
     const answer = sanitizeOrdinaryMessageText(answerText(message, storedAnswer, fileLabels));
     const questionHeading = `${labels.questionLabel} ${index + 1}${title ? `: ${title}` : ""}`;
-    sections.push([questionHeading, prompt, `${labels.answerLabel}: ${answer || ""}`].join("\n"));
+    const section = [questionHeading, prompt, `${labels.answerLabel}: ${answer || ""}`];
+    section.push(...annotationEvidenceLines(storedAnswer));
+    sections.push(section.join("\n"));
   }
 
   return sections.join("\n\n");

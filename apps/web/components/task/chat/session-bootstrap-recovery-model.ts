@@ -440,8 +440,13 @@ function readOnlyWorkspaceOutcome(
 function anyRecoveryFailure(
   automaticRecovery: SessionRecoveryOwner | null | undefined,
   manualFailureExists: boolean,
+  manualReadOnlyRecovery: boolean,
 ): boolean {
-  return automaticRecovery?.recoveryFailure?.outcome === "recovery_failed" || manualFailureExists;
+  return (
+    (!manualReadOnlyRecovery &&
+      automaticRecovery?.recoveryFailure?.outcome === "recovery_failed") ||
+    manualFailureExists
+  );
 }
 
 function displayReadOnlyWorkspace(
@@ -478,6 +483,7 @@ function recoveryCardStatus({
   const hasRecoveryFailure = anyRecoveryFailure(
     automaticRecovery,
     currentManualRecoveryFailure(error, manualFailure),
+    recoveryNoticeKind === "workspace_read_only",
   );
   const isReadOnly = displayReadOnlyWorkspace(
     automaticRecovery,

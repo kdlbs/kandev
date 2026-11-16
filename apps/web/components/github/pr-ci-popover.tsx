@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { useToast } from "@/components/toast-provider";
 import { useTaskSessionId, useTaskWorkspaceId } from "@/components/task/task-workspace-context";
@@ -21,6 +22,7 @@ import { PRCIAutomationControls } from "./pr-ci-automation-controls";
 import { PRMergeButton } from "./pr-merge-button";
 import { PRMergeabilityRow } from "./pr-mergeability-row";
 import { PRWorkflowAttentionNotice } from "./pr-workflow-attention-notice";
+import { isAllSkippedCheckSummary } from "./pr-ci-state";
 import {
   ChangeRequestCIPopoverFrame,
   ChangeRequestChecksSection,
@@ -127,6 +129,83 @@ function buildWorkflowMessage(group: WorkflowGroup): string {
   return lines.join("\n");
 }
 
+function emptyChecksLabel({
+  loadedAllSkipped,
+  persistedAllSkipped,
+  checks,
+  t,
+}: {
+  loadedAllSkipped: boolean;
+  persistedAllSkipped: boolean;
+  checks: CheckRun[] | undefined;
+  t: TFunction;
+}): string {
+  if (loadedAllSkipped || persistedAllSkipped) return t("github:allChecksSkipped");
+  if (checks?.some((check) => check.conclusion === "cancelled")) {
+    return t("github:checksNotSuccessful");
+  }
+  return t("github:noChecksHaveStarted");
+}
+
+type PreciseCheckView = {
+  precise: CountsView | null;
+  byBucket: Record<CheckBucket, WorkflowGroup[]> | null;
+};
+
+function preciseCheckView(feedback: { checks?: CheckRun[] } | null): PreciseCheckView {
+  // A loaded empty list is authoritative. The selected workflow may be active
+  // before its dependent jobs exist, so aggregate counts would invent checks.
+  if (!feedback?.checks) return { precise: null, byBucket: null };
+  const counts = bucketCheckCounts(feedback.checks);
+  const groups = groupChecksByWorkflow(feedback.checks);
+  return {
+    precise: { passed: counts.passed, inProgress: counts.inProgress, failed: counts.failed },
+    byBucket: {
+      passed: groups.filter((g) => g.bucket === "passed"),
+      in_progress: groups.filter((g) => g.bucket === "in_progress"),
+      failed: groups.filter((g) => g.bucket === "failed"),
+    },
+  };
+}
+
+function checkRows(
+  byBucket: Record<CheckBucket, WorkflowGroup[]> | null,
+  onAddAsContext: ((message: string) => void) | null,
+): ChangeRequestCheckRow[] {
+  if (!byBucket) return [];
+  return CHECK_GROUP_ORDER.flatMap((kind) =>
+    byBucket[kind].map((group) => ({
+      id: `${kind}:${group.id}`,
+      label: group.workflow,
+      state: normalizedCheckState(kind),
+      detail:
+        kind === "in_progress"
+          ? `${group.inProgress} running`
+          : `${group.passed}/${group.total} passed`,
+      ...(group.htmlUrl ? { url: group.htmlUrl } : {}),
+      ...(kind === "failed" && onAddAsContext
+        ? { onAddAsContext: () => onAddAsContext(buildWorkflowMessage(group)) }
+        : {}),
+    })),
+  );
+}
+
+function skippedCheckView(pr: TaskPR, feedback: { checks?: CheckRun[] } | null) {
+  const loadedSkipped = feedback?.checks
+    ? feedback.checks.filter(
+        (check) => check.status === "completed" && check.conclusion === "skipped",
+      ).length
+    : 0;
+  return {
+    skippedCount: feedback?.checks ? loadedSkipped : 0,
+    loadedAllSkipped:
+      feedback?.checks != null &&
+      feedback.checks.length > 0 &&
+      loadedSkipped === feedback.checks.length,
+    persistedAllSkipped: feedback?.checks == null && isAllSkippedCheckSummary(pr),
+  };
+}
+
 function PRChecksSection({
   pr,
   feedback,
@@ -140,46 +219,10 @@ function PRChecksSection({
 }) {
   const { t } = useTranslation();
   const aggregateCounts = useMemo(() => deriveAggregateCounts(pr), [pr]);
-
-  const { precise, byBucket } = useMemo(() => {
-    // A loaded empty list is authoritative. The selected workflow may be active
-    // before its dependent jobs exist, so aggregate counts would invent checks.
-    if (!feedback?.checks) {
-      return { precise: null as CountsView | null, byBucket: null };
-    }
-    const counts = bucketCheckCounts(feedback.checks);
-    const precise: CountsView = {
-      passed: counts.passed,
-      inProgress: counts.inProgress,
-      failed: counts.failed,
-    };
-    const groups = groupChecksByWorkflow(feedback.checks);
-    const byBucket: Record<CheckBucket, WorkflowGroup[]> = {
-      passed: groups.filter((g) => g.bucket === "passed"),
-      in_progress: groups.filter((g) => g.bucket === "in_progress"),
-      failed: groups.filter((g) => g.bucket === "failed"),
-    };
-    return { precise, byBucket };
-  }, [feedback]);
-
+  const { precise, byBucket } = useMemo(() => preciseCheckView(feedback), [feedback]);
   const counts = precise ?? aggregateCounts;
-  const rows: ChangeRequestCheckRow[] = byBucket
-    ? CHECK_GROUP_ORDER.flatMap((kind) =>
-        byBucket[kind].map((group) => ({
-          id: `${kind}:${group.id}`,
-          label: group.workflow,
-          state: normalizedCheckState(kind),
-          detail:
-            kind === "in_progress"
-              ? `${group.inProgress} running`
-              : `${group.passed}/${group.total} passed`,
-          ...(group.htmlUrl ? { url: group.htmlUrl } : {}),
-          ...(kind === "failed" && onAddAsContext
-            ? { onAddAsContext: () => onAddAsContext(buildWorkflowMessage(group)) }
-            : {}),
-        })),
-      )
-    : [];
+  const rows = checkRows(byBucket, onAddAsContext);
+  const { skippedCount, loadedAllSkipped, persistedAllSkipped } = skippedCheckView(pr, feedback);
   if (isFetching && !feedback) {
     return (
       <div data-testid="pr-checks-loading" aria-hidden="true" className="space-y-3 p-1">
@@ -194,10 +237,15 @@ function PRChecksSection({
       counts={{ passed: counts.passed, pending: counts.inProgress, failed: counts.failed }}
       rows={rows}
       loading={isFetching && !byBucket}
-      emptyLabel={
-        feedback?.checks?.some((check) => check.conclusion === "cancelled")
-          ? t("github:checksNotSuccessful")
-          : t("github:noChecksHaveStarted")
+      emptyLabel={emptyChecksLabel({
+        loadedAllSkipped,
+        persistedAllSkipped,
+        checks: feedback?.checks,
+        t,
+      })}
+      skippedCount={skippedCount}
+      skippedLabel={
+        skippedCount > 0 ? t("github:checksSkippedCount", { count: skippedCount }) : undefined
       }
       passRateLabel={t("github:passRate")}
       groupLabels={{

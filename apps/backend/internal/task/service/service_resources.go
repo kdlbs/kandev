@@ -85,8 +85,8 @@ func validateProviderScope(raw string) (string, error) {
 // requires a paired provider_repo_id, because the scope-isolated clone
 // layout needs both to build a unique path. A bare provider_repo_id with no
 // scope is fine — that's the normal shape for every built-in provider
-// (GitHub, GitLab, Azure DevOps), none of which resolve a provider
-// connection scope — and falls through to the legacy owner/name layout.
+// (GitHub, GitLab), neither of which resolves a provider connection scope —
+// and falls through to the legacy owner/name layout.
 func validateProviderScopeAndRepoIDPair(scope, repoID string) error {
 	if strings.TrimSpace(scope) != "" && strings.TrimSpace(repoID) == "" {
 		return fmt.Errorf("%w: provider_scope requires a paired provider_repo_id", ErrInvalidRepositorySettings)

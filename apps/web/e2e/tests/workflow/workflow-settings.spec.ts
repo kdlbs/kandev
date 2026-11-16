@@ -319,9 +319,19 @@ test.describe("Workflow settings", () => {
     await page.stepNodeByName(card, "Waiting for Children").click();
 
     await card.getByTestId(`${waitStep.id}-children-completed-help`).hover();
-    await expect(
-      testPage.getByText("When every active direct child task is COMPLETED, FAILED, or CANCELLED"),
-    ).toBeVisible();
+    const childrenCompletedTooltip = testPage.getByRole("tooltip");
+    await expect(childrenCompletedTooltip).toContainText(
+      "Runs after every active direct child succeeds.",
+    );
+    await expect(childrenCompletedTooltip).toContainText(
+      "At least one counted active direct child is required.",
+    );
+    await expect(childrenCompletedTooltip).toContainText(
+      "Archived, ephemeral, and automation-run children are ignored; grandchildren do not count.",
+    );
+    await expect(childrenCompletedTooltip).toContainText(
+      "Failed or cancelled children keep the parent waiting.",
+    );
 
     await card.getByTestId(`${waitStep.id}-children-completed-transition-select`).click();
     await testPage.getByRole("option", { name: "Move to specific step" }).click();

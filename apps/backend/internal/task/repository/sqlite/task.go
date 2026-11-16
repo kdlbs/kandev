@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
+	"github.com/kandev/kandev/internal/task/repository/completion"
 	"github.com/kandev/kandev/internal/task/repository/hierarchy"
 	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -73,6 +74,7 @@ var taskScanColumns = []taskScanColumn{
 	{name: "description"},
 	{name: "state"},
 	{name: "priority"},
+	{name: "execution_grade"},
 	{name: "position"},
 	{name: "wip_admitted"},
 	{name: "queued_for_step_id"},
@@ -444,9 +446,9 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		workflowAgentOverridesValue = workflowAgentOverrides
 	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO tasks (executor_actor_user_id, id, workspace_id, initial_workspace_layout, workflow_id, workflow_step_id, workflow_agent_overrides, title, description, state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, created_at, updated_at, origin, project_id, labels, identifier, external_id, assignee_user_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), workflowCreator(ctx), task.ID, task.WorkspaceID, task.InitialWorkspaceLayout, task.WorkflowID, task.WorkflowStepID, workflowAgentOverridesValue, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), dialect.BoolToInt(task.IsEphemeral), task.ParentID, dialect.BoolToInt(task.Autopilot), task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, externalID, task.AssigneeUserID)
+		INSERT INTO tasks (executor_actor_user_id, id, workspace_id, initial_workspace_layout, workflow_id, workflow_step_id, workflow_agent_overrides, title, description, state, priority, execution_grade, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, created_at, updated_at, origin, project_id, labels, identifier, external_id, assignee_user_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), workflowCreator(ctx), task.ID, task.WorkspaceID, task.InitialWorkspaceLayout, task.WorkflowID, task.WorkflowStepID, workflowAgentOverridesValue, task.Title, task.Description, task.State, task.Priority, task.ExecutionGrade, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), dialect.BoolToInt(task.IsEphemeral), task.ParentID, dialect.BoolToInt(task.Autopilot), task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, externalID, task.AssigneeUserID)
 	if err != nil {
 		if isExternalIDUniqueViolation(err) {
 			return "", fmt.Errorf("%w: %w", ErrExternalIDConflict, err)
@@ -1043,7 +1045,11 @@ func (r *Repository) UpdateTaskPriority(ctx context.Context, taskID, priority st
 // upsert/clear on workflow_step_participants inside the same tx as the
 // task UPDATE.
 func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
-	return r.updateTaskCommit(ctx, task, "", true, false)
+	return r.updateTaskCommit(ctx, task, "", true, false, nil)
+}
+
+func (r *Repository) UpdateTaskWithCompletionAdmission(ctx context.Context, task *models.Task, admission *completion.Admission) error {
+	return r.updateTaskCommit(ctx, task, "", true, false, admission)
 }
 
 // UpdateTaskPreservingDeferredLaunch is UpdateTask for callers that hold a
@@ -1056,10 +1062,14 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 // clobber whatever those writers did to it in the meantime. Every other key
 // keeps ordinary replace semantics, including deletion by omission.
 func (r *Repository) UpdateTaskPreservingDeferredLaunch(ctx context.Context, task *models.Task) error {
-	return r.updateTaskCommit(ctx, task, "", true, true)
+	return r.updateTaskCommit(ctx, task, "", true, true, nil)
 }
 
-func (r *Repository) updateTaskCommit(ctx context.Context, task *models.Task, expectedWorkflowID string, preservePosition, protectDeferredLaunch bool) error {
+func (r *Repository) UpdateTaskPreservingDeferredLaunchWithCompletionAdmission(ctx context.Context, task *models.Task, admission *completion.Admission) error {
+	return r.updateTaskCommit(ctx, task, "", true, true, admission)
+}
+
+func (r *Repository) updateTaskCommit(ctx context.Context, task *models.Task, expectedWorkflowID string, preservePosition, protectDeferredLaunch bool, admission *completion.Admission) error {
 
 	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
 	if err != nil {
@@ -1073,7 +1083,7 @@ func (r *Repository) updateTaskCommit(ctx context.Context, task *models.Task, ex
 		return err
 	}
 
-	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, expectedWorkflowID, preservePosition, protectDeferredLaunch, nil)
+	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, expectedWorkflowID, preservePosition, protectDeferredLaunch, nil, admission)
 	if err != nil {
 		return err
 	}
@@ -1185,7 +1195,7 @@ func (r *Repository) UpdateTaskExactOperation(
 		return false, err
 	}
 
-	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, "", true, false, nil)
+	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, "", true, false, nil, nil)
 	if err != nil {
 		return false, err
 	}
@@ -1217,7 +1227,11 @@ func (r *Repository) UpdateTaskExactOperation(
 // write. A mismatch returns repoerrors.ErrWorkflowResolutionConflict and the
 // transaction rolls back untouched.
 func (r *Repository) UpdateTaskIfWorkflowMatches(ctx context.Context, task *models.Task, expectedWorkflowID string) error {
-	return r.updateTaskCommit(ctx, task, expectedWorkflowID, true, false)
+	return r.updateTaskCommit(ctx, task, expectedWorkflowID, true, false, nil)
+}
+
+func (r *Repository) UpdateTaskIfWorkflowMatchesWithCompletionAdmission(ctx context.Context, task *models.Task, expectedWorkflowID string, admission *completion.Admission) error {
+	return r.updateTaskCommit(ctx, task, expectedWorkflowID, true, false, admission)
 }
 
 // UpdateTaskWithExplicitPosition performs the same write as UpdateTask
@@ -1227,7 +1241,7 @@ func (r *Repository) UpdateTaskIfWorkflowMatches(ctx context.Context, task *mode
 // (REQ-TASKS-KANBAN-TASK-REORDERING-001.28/.31): the generic task-update
 // API's explicit position field, which predates that contract.
 func (r *Repository) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
-	return r.updateTaskCommit(ctx, task, "", false, false)
+	return r.updateTaskCommit(ctx, task, "", false, false, nil)
 }
 
 // readTaskPositionInTx reads a task's currently-persisted position inside
@@ -1338,7 +1352,7 @@ func (r *Repository) buildTaskUpdateQuery(
 		}
 	}
 	updateQuery := fmt.Sprintf(`
-		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = %s, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
+		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?, title = ?, description = ?, state = ?, priority = ?, execution_grade = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = %s, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
 		WHERE id = ?
 	`, metadataExpr)
 	if models.IsAgentTitlePending(task.Metadata) {
@@ -1352,7 +1366,7 @@ func (r *Repository) buildTaskUpdateQuery(
 		updateQuery = fmt.Sprintf(`
 			UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?,
 				title = CASE WHEN %s THEN ? ELSE title END,
-				description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?,
+				description = ?, state = ?, priority = ?, execution_grade = ?, position = ?, wip_admitted = ?,
 				queued_for_step_id = ?, queued_at = ?,
 				metadata = %s,
 				parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
@@ -1391,6 +1405,7 @@ func (r *Repository) updateTaskTx(
 	expectedWorkflowID string,
 	preservePosition, protectDeferredLaunch bool,
 	workflowChangeSource *models.WorkflowChangeSource,
+	admission *completion.Admission,
 ) (entryID string, markerEntryID int64, err error) {
 	if err := r.managedDeletionBarrierTx(ctx, tx, task.ID); err != nil {
 		return "", 0, err
@@ -1402,12 +1417,19 @@ func (r *Repository) updateTaskTx(
 		return "", 0, err
 	}
 	var currentState v1.TaskState
-	stateQuery := taskStateSelectQuery
+	var storedExecutionGrade string
+	stateQuery := `SELECT state, execution_grade FROM tasks WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		stateQuery += forUpdateClause
 	}
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(stateQuery), task.ID).Scan(&currentState); err != nil {
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(stateQuery), task.ID).Scan(&currentState, &storedExecutionGrade); err != nil {
 		return "", 0, err
+	}
+	if err := r.admitCompletionTx(ctx, tx, admission, task); err != nil {
+		return "", 0, err
+	}
+	if supplied, _ := ctx.Value(taskFieldExecutionGradeSuppliedKey{}).(bool); !supplied {
+		task.ExecutionGrade = storedExecutionGrade
 	}
 	if err := r.guardTaskCompletionTransitionTx(ctx, tx, task.ID, currentState, task.State,
 		fromWorkflowID, fromStepID, task.WorkflowID, task.WorkflowStepID); err != nil {
@@ -1436,7 +1458,7 @@ func (r *Repository) updateTaskTx(
 	if err != nil {
 		return "", 0, err
 	}
-	args := []interface{}{task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverrides, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.AssigneeUserID, task.ID}
+	args := []interface{}{task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverrides, task.Title, task.Description, task.State, task.Priority, task.ExecutionGrade, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.AssigneeUserID, task.ID}
 	if workflowChangeSource != nil {
 		updateQuery += ` AND workflow_id = ? AND workflow_step_id = ? AND updated_at = ?`
 		args = append(args, workflowChangeSource.WorkflowID, workflowChangeSource.StepID, workflowChangeSource.UpdatedAt)
@@ -1533,7 +1555,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmission(
 	targetStepID string,
 	limit int,
 ) (bool, error) {
-	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, nil, false)
+	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, nil, false, nil)
 	return admitted, err
 }
 
@@ -1553,7 +1575,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionReportingApplied(
 	targetStepID string,
 	limit int,
 ) (admitted, applied bool, err error) {
-	return r.updateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, nil, true)
+	return r.updateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, nil, true, nil)
 }
 
 // UpdateTaskWithWorkflowStepAdmissionAndEffect atomically moves a task into a
@@ -1574,7 +1596,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndEffect(
 		effect.CreatedAt = r.nowUTC()
 	}
 	return r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, effect, true,
+		ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, effect, true, nil,
 	)
 }
 
@@ -1599,7 +1621,27 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndState(
 	expectedWorkflowID string,
 ) (bool, error) {
 	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", expectedWorkflowID, nil, nil, nil, false,
+		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", expectedWorkflowID, nil, nil, nil, false, nil,
+	)
+	return admitted, err
+}
+
+// UpdateTaskWithWorkflowStepAdmissionAndStateWithCompletionAdmission applies
+// one trusted human admission to a manually initiated cross-step move.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndStateWithCompletionAdmission(
+	ctx context.Context,
+	task *models.Task,
+	sourceStepID string,
+	targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+	queueExitPending bool,
+	expectedWorkflowID string,
+	admission *completion.Admission,
+) (bool, error) {
+	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(
+		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending,
+		"", expectedWorkflowID, nil, nil, nil, false, admission,
 	)
 	return admitted, err
 }
@@ -1647,6 +1689,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionExact(
 			&alreadyApplied,
 			nil,
 			false,
+			nil,
 		)
 		unlock()
 		var changed *admissionSourceChangedError
@@ -1669,12 +1712,13 @@ func (r *Repository) UpdateTaskWithWorkflowChangeAdmissionAndState(
 	admittedState *v1.TaskState,
 	queueExitPending bool,
 	source *models.WorkflowChangeSource,
+	admission *completion.Admission,
 ) (bool, error) {
 	if source == nil {
 		return false, fmt.Errorf("workflow change source guard is required")
 	}
 	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", "", nil, source, nil, false,
+		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", "", nil, source, nil, false, admission,
 	)
 	return admitted, err
 }
@@ -1697,7 +1741,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionIfAtStep(
 ) (applied bool, err error) {
 	// expectedStepID doubles as the source step to lock: it is, by
 	// construction, the step this task is expected to currently occupy.
-	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil, nil, true)
+	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil, nil, true, nil)
 	return applied, err
 }
 
@@ -1718,7 +1762,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionIfAtStepAndEffect(
 		effect.CreatedAt = r.nowUTC()
 	}
 	_, applied, err = r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil, effect, true,
+		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil, effect, true, nil,
 	)
 	return applied, err
 }
@@ -1733,7 +1777,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionForDeferredMove(
 	// expectedStepID doubles as the source step to lock: it is, by
 	// construction, the step this task is expected to currently occupy.
 	return r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", &record, nil, nil, false,
+		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", &record, nil, nil, false, nil,
 	)
 }
 
@@ -1783,7 +1827,7 @@ func (r *Repository) MarkDeferredMoveAppliedForSession(
 	if err != nil {
 		return false, err
 	}
-	if _, _, err := r.updateTaskTx(ctx, tx, task, "", true, false, nil); err != nil {
+	if _, _, err := r.updateTaskTx(ctx, tx, task, "", true, false, nil, nil); err != nil {
 		return false, err
 	}
 	if err := r.deleteDeferredMoveGuardTx(ctx, tx, record); err != nil {
@@ -2000,9 +2044,10 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	workflowChangeSource *models.WorkflowChangeSource,
 	effect *models.AgentDeliveryEffect,
 	guardBusinessState bool,
+	admission *completion.Admission,
 ) (admitted bool, applied bool, err error) {
 	return r.updateTaskWithWorkflowStepAdmissionExactInner(ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending,
-		expectedStepID, expectedWorkflowID, deferredMove, workflowChangeSource, nil, nil, effect, guardBusinessState)
+		expectedStepID, expectedWorkflowID, deferredMove, workflowChangeSource, nil, nil, effect, guardBusinessState, admission)
 }
 
 type exactTaskMoveOperation struct {
@@ -2029,6 +2074,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionExactInner(
 	alreadyApplied *bool,
 	effect *models.AgentDeliveryEffect,
 	guardBusinessState bool,
+	admission *completion.Admission,
 ) (admitted bool, applied bool, err error) {
 	currentSourceStepID := sourceStepID
 	for attempt := 0; attempt < admissionSourceRetryLimit; attempt++ {
@@ -2049,6 +2095,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionExactInner(
 			alreadyApplied,
 			effect,
 			guardBusinessState,
+			admission,
 		)
 		unlock()
 
@@ -2087,6 +2134,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 	alreadyApplied *bool,
 	effect *models.AgentDeliveryEffect,
 	guardBusinessState bool,
+	admission *completion.Admission,
 ) (admitted bool, applied bool, err error) {
 	now := time.Now().UTC()
 	task.UpdatedAt = now
@@ -2175,6 +2223,14 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 			return false, false, repoerrors.ErrWorkflowChangeConflict
 		}
 		return false, false, &admissionSourceChangedError{stepID: actualSourceStepID}
+	}
+	// A completion-owned move may commit only while the accepted signal still
+	// owns the pending bag for this exact entry. The bag is read under the task
+	// lock that also serializes signal replacement.
+	if matches, err := r.stepCompletionSignalMatchesGuardTx(ctx, tx, task.ID, actualSourceStepID); err != nil {
+		return false, false, err
+	} else if !matches {
+		return false, false, nil
 	}
 	// A later move may have left and returned to the same source step: the step
 	// id still matches, but the transition ledger advanced. Compare the ledger id
@@ -2302,6 +2358,10 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 	if err := r.assignArrivalPosition(ctx, tx, task, targetStepID); err != nil {
 		return false, false, err
 	}
+	limit, err = r.refreshHumanAdmissionLimitTx(ctx, tx, task, limit, admission)
+	if err != nil {
+		return false, false, err
+	}
 	occupants, err := r.countAdmittedInTx(ctx, tx, targetStepID, task.ID)
 	if err != nil {
 		return false, false, err
@@ -2353,8 +2413,14 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 	} else {
 		delete(task.Metadata, models.MetaKeyTaskManagementDeferredFence)
 	}
-	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, expectedWorkflowID, false, false, workflowChangeSource)
+	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, expectedWorkflowID, false, false, workflowChangeSource, admission)
 	if err != nil {
+		return false, false, err
+	}
+	// Commit proof for the exact accepted signal with the move. A missing
+	// receipt rolls the move back so the signal stays retryable instead of
+	// leaving an untraceable transition.
+	if err := r.recordStepCompletionProofTx(ctx, tx, task.ID, actualSourceStepID, task, admitted); err != nil {
 		return false, false, err
 	}
 	if exactOperation != nil {
@@ -3427,6 +3493,9 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 	if err := r.lockTaskUpdateSteps(ctx, tx, task); err != nil {
 		return err
 	}
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT execution_grade FROM tasks WHERE id = ?`), task.ID).Scan(&task.ExecutionGrade); err != nil {
+		return err
+	}
 
 	// Always an arrival into targetStepID (the fallback promotion path used
 	// when the atomic PromoteQueuedTaskIfWorkflowStepHasCapacity is
@@ -3603,11 +3672,11 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 		return false, err
 	}
 	var currentState v1.TaskState
-	stateQuery := taskStateSelectQuery
+	stateQuery := `SELECT state, execution_grade FROM tasks WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		stateQuery += forUpdateClause
 	}
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(stateQuery), task.ID).Scan(&currentState); err != nil {
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(stateQuery), task.ID).Scan(&currentState, &task.ExecutionGrade); err != nil {
 		return false, err
 	}
 	if err := r.guardTaskCompletionTransitionTx(ctx, tx, task.ID, currentState, task.State,
@@ -4835,7 +4904,7 @@ func (r *Repository) scanSingleTask(row *sql.Row) (*models.Task, error) {
 	var externalIDSettledAt sql.NullTime
 	err := row.Scan(
 		&task.ID, &task.WorkspaceID, &task.InitialWorkspaceLayout, &task.WorkflowID, &task.WorkflowStepID, &workflowAgentOverrides,
-		&task.Title, &task.Description, &task.State, &task.Priority, &task.Position,
+		&task.Title, &task.Description, &task.State, &task.Priority, &task.ExecutionGrade, &task.Position,
 		&task.WIPAdmitted, &task.QueuedForStepID, &queuedAt,
 		&metadata, &task.IsEphemeral, &task.ParentID, &task.Autopilot, &archivedAt, &task.ArchivedByCascadeID,
 		&task.CreatedAt, &task.UpdatedAt,
@@ -4888,7 +4957,7 @@ func (r *Repository) scanTaskRows(rows *sql.Rows, includeEntryIdentity bool) ([]
 		var externalIDSettledAt sql.NullTime
 		destinations := []interface{}{
 			&task.ID, &task.WorkspaceID, &task.InitialWorkspaceLayout, &task.WorkflowID, &task.WorkflowStepID, &workflowAgentOverrides,
-			&task.Title, &task.Description, &task.State, &task.Priority, &task.Position,
+			&task.Title, &task.Description, &task.State, &task.Priority, &task.ExecutionGrade, &task.Position,
 			&task.WIPAdmitted, &task.QueuedForStepID, &queuedAt,
 			&metadata, &task.IsEphemeral, &task.ParentID, &task.Autopilot, &archivedAt, &task.ArchivedByCascadeID,
 			&task.CreatedAt, &task.UpdatedAt,
@@ -5834,6 +5903,18 @@ func (r *Repository) CountOpenWatcherCreatedTasks(ctx context.Context, metadataK
 
 // UpdateTaskState updates the state of a task
 func (r *Repository) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error {
+	return r.updateTaskState(ctx, id, state, nil)
+}
+
+func (r *Repository) UpdateTaskStateWithCompletionAdmission(ctx context.Context, id string, state v1.TaskState, admission *completion.Admission) error {
+	return r.updateTaskState(ctx, id, state, admission)
+}
+
+func (r *Repository) updateTaskState(ctx context.Context, id string, state v1.TaskState, admission *completion.Admission) error {
+	if admission != nil {
+		_, _, _, err := r.updateHumanTaskState(ctx, id, state, admission)
+		return err
+	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err

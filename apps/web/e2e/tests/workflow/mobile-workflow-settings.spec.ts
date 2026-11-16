@@ -186,6 +186,27 @@ test.describe("Workflow settings on mobile", () => {
     await expect(card).toBeVisible();
     await page.stepNodeByName(card, "Waiting").click();
 
+    const childrenCompletedHelp = card.getByTestId(`${waitStep.id}-children-completed-help`);
+    await expect(childrenCompletedHelp).toBeVisible();
+    await childrenCompletedHelp.tap();
+    const childrenCompletedDrawer = testPage.getByRole("dialog", {
+      name: "How child task completion transitions work",
+    });
+    await expect(childrenCompletedDrawer).toContainText(
+      "Runs after every active direct child succeeds.",
+    );
+    await expect(childrenCompletedDrawer).toContainText(
+      "At least one counted active direct child is required.",
+    );
+    await expect(childrenCompletedDrawer).toContainText(
+      "Archived, ephemeral, and automation-run children are ignored; grandchildren do not count.",
+    );
+    await expect(childrenCompletedDrawer).toContainText(
+      "Failed or cancelled children keep the parent waiting.",
+    );
+    await testPage.keyboard.press("Escape");
+    await expect(childrenCompletedDrawer).toHaveCount(0);
+
     const childCompletionSelect = card.getByTestId(
       `${waitStep.id}-children-completed-transition-select`,
     );

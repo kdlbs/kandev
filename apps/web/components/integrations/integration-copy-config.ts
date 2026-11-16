@@ -2,16 +2,14 @@ import { copyJiraConfig } from "@/lib/api/domains/jira-api";
 import { copyLinearConfig } from "@/lib/api/domains/linear-api";
 import { copySentryInstances } from "@/lib/api/domains/sentry-api";
 import { copyGitHubWorkspaceSettings } from "@/lib/api/domains/github-api";
-import { copyAzureDevOpsConfig } from "@/lib/api/domains/azure-devops-api";
 import { copyGitLabConfig } from "@/lib/api/domains/gitlab-api";
 
 // IntegrationSlug is the set of integration settings pages that support copying
 // their per-workspace config to another workspace.
-export type IntegrationSlug = "azure-devops" | "jira" | "linear" | "sentry" | "github" | "gitlab";
+export type IntegrationSlug = "jira" | "linear" | "sentry" | "github" | "gitlab";
 
 // integrationLabels maps each slug to how the rest of the app spells it.
 const integrationLabels: Record<IntegrationSlug, string> = {
-  "azure-devops": "Azure DevOps",
   jira: "Jira",
   linear: "Linear",
   sentry: "Sentry",
@@ -47,9 +45,6 @@ export async function copyIntegrationConfig(
 ): Promise<void> {
   const options = { workspaceId: sourceWorkspaceId };
   switch (slug) {
-    case "azure-devops":
-      await copyAzureDevOpsConfig(sourceWorkspaceId, targetWorkspaceId);
-      return;
     case "jira":
       await copyJiraConfig(targetWorkspaceId, options);
       return;

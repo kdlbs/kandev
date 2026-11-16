@@ -95,27 +95,20 @@ export async function managedFallbackAwareness(
     }),
   );
   await page.goto("/settings/agents#runtime-update-opencode-acp");
-  const native = page.getByTestId("runtime-policy-opencode-acp");
-  await expect(native).toContainText("Observed: 1.0.0");
-  await expect(native.getByRole("switch")).toHaveCount(0);
-  await expect(native.getByRole("link", { name: "Manual update guidance" })).toHaveAttribute(
-    "href",
-    "https://opencode.ai/docs/cli/",
-  );
-  const selection = native.getByRole("link", { name: "Manage fallback versions" });
-  await selection.scrollIntoViewIfNeeded();
-  if (mobile) expect((await selection.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  const surface = page.getByTestId(`agent-update-${mobile ? "drawer" : "dialog"}-opencode-acp`);
+  await expect(surface).toContainText("Observed: 1.0.0");
+  await expect(surface.getByRole("switch")).toHaveCount(0);
+  const guidance = surface.getByRole("link", { name: "Manual update guidance" });
+  await expect(guidance).toHaveAttribute("href", "https://opencode.ai/docs/cli/");
+  if (mobile) expect((await guidance.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   expect(
-    await selection.evaluate((element) => {
+    await guidance.evaluate((element) => {
       const box = element.getBoundingClientRect();
       return element.contains(
         document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2),
       );
     }),
   ).toBe(true);
-  await selection.click();
-  await page.getByTestId("agent-update-trigger-opencode-acp").click();
-  const surface = page.getByTestId(`agent-update-${mobile ? "drawer" : "dialog"}-opencode-acp`);
   await expect(surface).toContainText("Unknown → 9.0.0");
   await expect(surface).toContainText("Active version: 8.0.0");
   await expect(surface).toContainText("Effective version: 8.0.0");

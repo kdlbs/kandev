@@ -30,6 +30,7 @@ type UserSettingsDTO struct {
 	PreferredShell                    string                                  `json:"preferred_shell"`
 	DefaultEditorID                   string                                  `json:"default_editor_id"`
 	EnablePreviewOnClick              bool                                    `json:"enable_preview_on_click"`
+	EscapeCancelsAgent                bool                                    `json:"escape_cancels_agent"`
 	ChatSubmitKey                     string                                  `json:"chat_submit_key"`
 	ReviewAutoMarkOnScroll            bool                                    `json:"review_auto_mark_on_scroll"`
 	ConfirmTaskArchive                bool                                    `json:"confirm_task_archive"`
@@ -71,7 +72,6 @@ type UserSettingsDTO struct {
 	GitHubSavedPresets                json.RawMessage                         `json:"github_saved_presets,omitempty"`
 	GitHubDefaultQueryPresets         json.RawMessage                         `json:"github_default_query_presets,omitempty"`
 	GitLabSavedPresets                json.RawMessage                         `json:"gitlab_saved_presets,omitempty"`
-	AzureDevOpsBrowsePreferences      json.RawMessage                         `json:"azure_devops_browse_preferences,omitempty"`
 	DefaultUtilityAgentID             string                                  `json:"default_utility_agent_id"`
 	DefaultUtilityModel               string                                  `json:"default_utility_model"`
 	DefaultUtilityAgentProfileID      string                                  `json:"default_utility_agent_profile_id"`
@@ -155,6 +155,7 @@ type UpdateUserSettingsRequest struct {
 	PreferredShell                    *string                            `json:"preferred_shell,omitempty"`
 	DefaultEditorID                   *string                            `json:"default_editor_id,omitempty"`
 	EnablePreviewOnClick              *bool                              `json:"enable_preview_on_click,omitempty"`
+	EscapeCancelsAgent                *bool                              `json:"escape_cancels_agent,omitempty"`
 	ChatSubmitKey                     *string                            `json:"chat_submit_key,omitempty"`
 	ReviewAutoMarkOnScroll            *bool                              `json:"review_auto_mark_on_scroll,omitempty"`
 	ConfirmTaskArchive                *bool                              `json:"confirm_task_archive,omitempty"`
@@ -196,7 +197,6 @@ type UpdateUserSettingsRequest struct {
 	GitHubSavedPresets                NullableRawMessage                 `json:"github_saved_presets,omitempty"`
 	GitHubDefaultQueryPresets         NullableRawMessage                 `json:"github_default_query_presets,omitempty"`
 	GitLabSavedPresets                NullableRawMessage                 `json:"gitlab_saved_presets,omitempty"`
-	AzureDevOpsBrowsePreferences      NullableRawMessage                 `json:"azure_devops_browse_preferences,omitempty"`
 	DefaultUtilityAgentID             *string                            `json:"default_utility_agent_id,omitempty"`
 	DefaultUtilityModel               *string                            `json:"default_utility_model,omitempty"`
 	DefaultUtilityAgentProfileID      *string                            `json:"default_utility_agent_profile_id,omitempty"`
@@ -363,6 +363,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		PreferredShell:                    settings.PreferredShell,
 		DefaultEditorID:                   settings.DefaultEditorID,
 		EnablePreviewOnClick:              settings.EnablePreviewOnClick,
+		EscapeCancelsAgent:                settings.EscapeCancelsAgent,
 		ChatSubmitKey:                     settings.ChatSubmitKey,
 		ReviewAutoMarkOnScroll:            settings.ReviewAutoMarkOnScroll,
 		ConfirmTaskArchive:                settings.ConfirmTaskArchive,
@@ -405,7 +406,6 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		GitHubSavedPresets:                settings.GitHubSavedPresets,
 		GitHubDefaultQueryPresets:         settings.GitHubDefaultQueryPresets,
 		GitLabSavedPresets:                settings.GitLabSavedPresets,
-		AzureDevOpsBrowsePreferences:      settings.AzureDevOpsBrowsePreferences,
 		DefaultUtilityAgentID:             settings.DefaultUtilityAgentID,
 		DefaultUtilityModel:               settings.DefaultUtilityModel,
 		DefaultUtilityAgentProfileID:      settings.DefaultUtilityAgentProfileID,
