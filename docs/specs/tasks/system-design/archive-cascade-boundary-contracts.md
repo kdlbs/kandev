@@ -420,7 +420,8 @@ context or persisted claim rows, never request-body authority:
   WorkspaceID, ProfileID string, Cutoff, SelectedActivityAt time.Time,
   OriginatingUser UserActor}` is built by the trusted selector. Profile cleanup
   reloads the user binding, locks every workspace, and rechecks profile,
-  ephemeral state, and session binding.
+  ephemeral state, `config_mode`, and session binding; only configuration chats
+  are selected.
 - `LegacyOperatorActor{UserID, CredentialID, AuthMode, Scope string,
   WorkspaceID string}` derives only after raw-peer/PAT checks and reloads current
   instance-admin role, auth mode, diagnostic scope, and workspace ownership.

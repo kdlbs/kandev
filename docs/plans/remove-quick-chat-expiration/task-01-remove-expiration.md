@@ -17,6 +17,7 @@ acceptance_criteria:
   - AC-TASKS-QUICK-CHAT-EXPIRATION-003.7
   - AC-TASKS-QUICK-CHAT-EXPIRATION-003.8
   - AC-TASKS-QUICK-CHAT-EXPIRATION-003.9
+  - AC-TASKS-QUICK-CHAT-EXPIRATION-003.10
 system_design:
   - ../../specs/tasks/system-design/quick-chat-expiration-policy.md
 ---
@@ -36,6 +37,7 @@ Retain compatibility with durable resource-cleanup jobs created before this remo
 - Remove obsolete expiry assertions and preserve independent manual-delete coverage.
 - Add a behavioral startup/restart regression for an aged ordinary Quick Chat.
 - Exercise committed and uncommitted legacy cleanup intents.
+- Preserve ordinary Quick Chat data during agent-profile cleanup while continuing configuration-chat cleanup.
 - Reconcile affected specifications and public documentation.
 
 ## Out of scope
@@ -49,7 +51,8 @@ Retain compatibility with durable resource-cleanup jobs created before this remo
 
 1. An aged Quick Chat survives isolated startup, maintenance, and backend restart with its conversation and owned resources.
 2. Manual stop preserves history. Confirmed deletion still removes only the selected chat and its owned resources.
-3. Legacy committed cleanup can finish, while an undeleted chat's uncommitted intent cannot cause resource removal.
+3. Agent-profile cleanup preserves ordinary Quick Chats and deletes configuration chats using the `config_mode` discriminator.
+4. Legacy committed cleanup can finish, while an undeleted chat's uncommitted intent cannot cause resource removal.
 
 ## Verification
 
@@ -63,12 +66,15 @@ Add `TestQuickChatLegacyCleanupCompatibility` cases under the task service.
 Preserve the stored trigger format and existing preparation reconciliation.
 Retain manual-delete assertions when expiry-specific test callers disappear.
 
+Add a repository regression proving profile cleanup preserves ordinary Quick Chat task/session data
+while continuing to delete a configuration chat.
+
 From `apps/backend`:
 
 ```bash
 go test ./internal/backendapp -run 'TestQuickChatManualLifetime'
 go test ./internal/task/service -run 'Test(QuickChatManualLifetime|QuickChatLegacyCleanup|DeleteQuickChat|DeleteRepositoryQuickChat)'
-go test ./internal/task/repository/sqlite -run 'Test(DeleteTask|DeleteEphemeralTask|DeliveryRetentionDeletionRetirement|TaskMetadataWatcher)'
+go test ./internal/task/repository/sqlite -run 'Test(DeleteTask|DeleteEphemeralTask|DeleteEphemeralTasksByAgentProfile|DeliveryRetentionDeletionRetirement|TaskMetadataWatcher)'
 ```
 
 From `apps/web`:
@@ -99,7 +105,7 @@ git diff --check
 - Remove `apps/backend/internal/task/service/quick_chat_expiration.go`.
 - `apps/backend/internal/task/service/service_tasks.go`, `service_test.go`, and `quick_chat_agent_history_test.go`.
 - Existing task-resource preparation/recovery tests for legacy job compatibility.
-- `apps/backend/internal/task/repository/interface.go` and `sqlite/task.go`.
+- `apps/backend/internal/task/repository/interface.go`, `sqlite/task.go`, and `sqlite/session.go`.
 - `sqlite/task_selection_coverage_test.go`, `prompt_history_test.go`, `prompt_history_cleanup_test.go`, and `agent_delivery_retirement_test.go`.
 - Keep `task/models/resource_cleanup.go` and the worker's stored-trigger handling compatible.
 - `docs/specs/tasks/requirements/quick-chat-expiration.md` and the manual lifetime pair.
@@ -136,6 +142,10 @@ and preserves the task, session, message, workspace resource, and Claude history
 The legacy cleanup tests pass for both a committed deletion and an undeleted chat with a prepared
 legacy intent. The committed cleanup completes; the live chat and its resource remain intact.
 
+PR review follow-up keeps ordinary Quick Chats out of agent-profile cleanup while preserving
+configuration-chat cleanup. Existing Quick Chat recovery documentation now distinguishes failures
+before and after session allocation and describes reconciliation of superseded starts.
+
 Checks passed:
 
 - `go test -trimpath ./internal/backendapp -run 'TestQuickChatManualLifetime' -count=1`
@@ -148,3 +158,6 @@ Checks passed:
 - Specification catalog and full specification lint passed.
 - Public-doc tests: 63 passed; public-doc validator accepted 55 pages.
 - `git diff --check` passed.
+- `go test -trimpath ./internal/task/repository/sqlite -run 'Test(DeleteTask|DeleteEphemeralTask|DeleteEphemeralTasksByAgentProfile|DeliveryRetentionDeletionRetirement|TaskMetadataWatcher)' -count=1` passed.
+- `make build` passed after the profile-cleanup selector change.
+- Changed Go package lint reported 0 issues; specification catalog and full specification lint passed again.

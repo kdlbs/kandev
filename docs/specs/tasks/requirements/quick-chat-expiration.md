@@ -70,8 +70,9 @@ while retaining the elevated tools that distinguish them from ordinary quick cha
 - Closing the modal or switching tabs preserves every real session. Closing a persisted tab asks
   for confirmation and deletes its backing ephemeral task through the existing task deletion path.
   Closing a blank setup tab only removes that client-side placeholder.
-- When a setup start is superseded before its backend response arrives, the returned ephemeral task
-  is deleted instead of reopening the abandoned tab.
+- When a setup start is superseded before its backend response arrives, the returned task and
+  session identity are reconciled into persisted Quick Chat state without changing the user's
+  newer selection or reopening a dismissed surface. Explicit deletion remains separate.
 - Restorable utility sessions are reconstructed from backend task/session state for the active
   workspace after a reload. They are available as tabs while the modal itself starts closed.
 - Hydration resolves the workspace represented by the current route. On `/t/:id` and
@@ -188,8 +189,11 @@ deletion.
 
 ## Failure modes
 
-- A failed ordinary or configuration start leaves its setup visible with an error. Any task that
-  was created before launch failed is deleted through the existing rollback path.
+- A failed start before session allocation leaves its setup visible with an error. A created task is
+  rolled back when no session exists and attachment restoration completed safely. If a session
+  exists, retain its task and conversation with the safe failure details as specified by
+  [Quick Chat launch-failure recovery](task-launch-failure-recovery.md). Uncertain cleanup remains
+  available to the existing creation-recovery path.
 - A non-passthrough configuration prompt is held only until its created session is available to
   `QuickChatContent`; it is sent once after subscription and is not replayed by tab switches or
   rerenders. A passthrough prompt is included in the config-chat start request because that session

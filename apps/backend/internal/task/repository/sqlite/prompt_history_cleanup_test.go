@@ -54,8 +54,13 @@ func TestDeleteEphemeralTasksByAgentProfileDoesNotDeleteNewlyMatchingTask(t *tes
 	seedForMsgTest(t, repo, "selected-ephemeral-task", "selected-ephemeral-session", "selected-ephemeral-turn")
 	seedForMsgTest(t, repo, "new-ephemeral-task", "new-ephemeral-session", "new-ephemeral-turn")
 	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
-		UPDATE tasks SET is_ephemeral = 1 WHERE id = ?
-	`), "selected-ephemeral-task"); err != nil {
+		UPDATE tasks SET is_ephemeral = 1, metadata = ? WHERE id = ?
+	`), `{"config_mode":true}`, "selected-ephemeral-task"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		UPDATE tasks SET metadata = ? WHERE id = ?
+	`), `{"config_mode":true}`, "new-ephemeral-task"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`

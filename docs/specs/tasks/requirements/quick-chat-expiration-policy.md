@@ -34,7 +34,8 @@ The [implementation plan](../../../plans/remove-quick-chat-expiration/plan.md) r
 - **AC-TASKS-QUICK-CHAT-EXPIRATION-003.6:** The removal shall add no expiration setting, opt-in switch, duration control, or expiration API.
 - **AC-TASKS-QUICK-CHAT-EXPIRATION-003.7:** Upgrades shall preserve undeleted chats. Cleanup already committed for a previously deleted chat shall remain recoverable.
 - **AC-TASKS-QUICK-CHAT-EXPIRATION-003.8:** Desktop and phone shall retain their existing manual stop, close-confirmation, and restoration behavior.
-- **AC-TASKS-QUICK-CHAT-EXPIRATION-003.9:** Tracked-task, task-session, Office, automation, integration, workspace-deletion, and host storage policies shall retain their separate behavior.
+- **AC-TASKS-QUICK-CHAT-EXPIRATION-003.9:** Tracked-task, task-session, Office, automation, integration, workspace-deletion, host storage, and agent-profile cleanup policies shall retain their separate behavior.
+- **AC-TASKS-QUICK-CHAT-EXPIRATION-003.10:** Deleting an agent profile shall preserve ordinary Quick Chat tasks, sessions, messages, and owned resources. Profile cleanup shall continue deleting configuration chats identified by `config_mode` metadata.
 
 ## Out of scope
 

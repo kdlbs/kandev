@@ -20,7 +20,7 @@ No settings package, preference, HTTP endpoint, frontend control, or feature fla
 
 | Requirement | Design sections |
 | --- | --- |
-| `REQ-TASKS-QUICK-CHAT-EXPIRATION-003` | Automatic producer removal; Manual lifecycle; Upgrade compatibility; Verification |
+| `REQ-TASKS-QUICK-CHAT-EXPIRATION-003` | Automatic producer removal; Manual lifecycle; Agent-profile cleanup; Upgrade compatibility; Verification |
 
 ## Automatic producer removal
 
@@ -45,6 +45,10 @@ No frontend production change is required.
 Stop ends or cancels agent execution and retains conversation identity and history.
 Opening a preserved chat follows the existing resumption preference.
 A user can stop the agent and keep the chat, or confirm tab closure to delete it.
+
+Agent-profile cleanup uses the task's `config_mode` metadata to select configuration chats.
+It preserves ordinary Quick Chat tasks, sessions, messages, and owned resources so profile removal
+does not act as an implicit conversation deletion path.
 
 Confirmed deletion still captures the task-owned resource inventory and native agent-history identities.
 Its durable worker retains existing ownership, runtime-stop, source-manifest, and retry protections.

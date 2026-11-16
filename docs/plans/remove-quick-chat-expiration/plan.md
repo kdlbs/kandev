@@ -28,6 +28,7 @@ One sequential work order delivers removal, regression coverage, and documentati
 - Remove automatic expiration for ordinary Quick Chats.
 - Preserve existing manual stop, tab closure confirmation, and conversation restoration.
 - Preserve canonical deletion and supported local agent-history cleanup.
+- Preserve ordinary Quick Chat task data during agent-profile cleanup while retaining configuration-chat cleanup.
 - Retain compatibility with already committed cleanup jobs from older versions.
 - Leave all other cleanup policies separate.
 
@@ -71,6 +72,9 @@ The existing Quick Chat close actions already perform confirmed task deletion.
 Stop and modal dismissal preserve the conversation. No frontend implementation change is required.
 Desktop and phone use the existing chat surfaces and manual actions.
 
+Agent-profile cleanup uses `config_mode` metadata to retain ordinary Quick Chat data while
+continuing to remove configuration chats.
+
 Reconciled the native-history, coordinator, startup, cleanup, and cascade specifications.
 Retired the sweep-specific criterion without reusing its identifier.
 Updated public Quick Chat lifetime wording in `docs/public/developer-tools.md`,
@@ -88,7 +92,8 @@ All criterion suffixes refer to `AC-TASKS-QUICK-CHAT-EXPIRATION-003`.
 | `.5` | Existing manual deletion tests for native history, prompt-sequence cleanup, resource ownership, and delivery retirement. |
 | `.6` | Changes remove the expiration producer and API rather than introduce settings machinery. No new UI or endpoints are present. |
 | `.7` | Legacy cleanup worker tests cover committed deletion and an uncommitted intent for a still-live task. |
-| `.9` | Existing task/host cleanup remains untouched except for retained legacy trigger interpretation. |
+| `.9` | Existing separate cleanup policies remain intact. `.10` is covered by the repository regression that preserves ordinary Quick Chats while deleting configuration chats during profile cleanup. |
+| `.10` | Repository regression proves profile cleanup preserves an ordinary Quick Chat task, session, and message while continuing to delete a configuration chat. |
 
 ## E2E tests
 
@@ -122,6 +127,12 @@ Implementation and documentation checks passed:
 
 The persisted `quick_chat_expire` trigger remains only for committed legacy cleanup-job recovery.
 No frontend controls, settings, or new API were added.
+
+PR review follow-up verification passed:
+
+- Focused SQLite deletion, profile-cleanup, and delivery-retirement tests.
+- Backend build and changed-package Go lint.
+- Specification catalog validation and full specification lint.
 
 ## Risks
 

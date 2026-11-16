@@ -281,8 +281,8 @@ func TestDeleteEphemeralTaskClearsPromptSequence(t *testing.T) {
 	taskID, sessionID, turnID := "ephemeral-prompt-task", "ephemeral-prompt-session", "ephemeral-prompt-turn"
 	seedForMsgTest(t, repo, taskID, sessionID, turnID)
 	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
-		UPDATE tasks SET is_ephemeral = 1 WHERE id = ?
-	`), taskID); err != nil {
+		UPDATE tasks SET is_ephemeral = 1, metadata = ? WHERE id = ?
+	`), `{"config_mode":true}`, taskID); err != nil {
 		t.Fatalf("mark task ephemeral: %v", err)
 	}
 	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
