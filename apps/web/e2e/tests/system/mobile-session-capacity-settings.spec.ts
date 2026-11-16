@@ -22,6 +22,57 @@ test.afterEach(async ({ apiClient }) => {
   baseline = undefined;
 });
 
+// @covers AC-AGENTS-SESSION-CEILING-005.5
+test("saves, resets, and disables execution-grade limits on a phone", async ({
+  testPage,
+  apiClient,
+}) => {
+  if (!baseline) throw new Error("session capacity settings baseline was not captured");
+  await testPage.goto("/settings/preferences/task-behavior");
+  await openTaskBehaviorRuntime(testPage);
+  const card = testPage.getByTestId("session-capacity-settings");
+  await card.getByTestId("session-capacity-enabled").tap();
+  await card.getByRole("switch", { name: "Apply limits to all executions" }).tap();
+  await card.getByRole("button", { name: "Add execution grade" }).tap();
+  const grade = card.getByLabel("Execution grade", { exact: true });
+  await grade.fill("work");
+  const maximum = card.getByLabel("Limit for grade work", { exact: true });
+  await maximum.fill("0");
+  for (const control of [grade, maximum, card.getByRole("button", { name: "Remove work" })]) {
+    const box = await control.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
+  const saveBar = testPage.getByTestId("settings-floating-save");
+  await saveBar.getByRole("button", { name: "Save changes" }).tap();
+  await expect(saveBar).not.toBeVisible();
+  expect((await requestSessionCapacitySettings(apiClient, "GET")).settings).toMatchObject({
+    enabled: true,
+    policy: "all",
+    grade_limits: { work: 0 },
+  });
+  await testPage.reload();
+  await openTaskBehaviorRuntime(testPage);
+  await expect(maximum).toHaveValue("0");
+  await maximum.fill("3");
+  await saveBar.getByRole("button", { name: "Reset" }).tap();
+  await expect(maximum).toHaveValue("0");
+  await expect(saveBar).not.toBeVisible();
+  await card.getByTestId("session-capacity-enabled").tap();
+  await saveBar.getByRole("button", { name: "Save changes" }).tap();
+  await expect(saveBar).not.toBeVisible();
+  expect((await requestSessionCapacitySettings(apiClient, "GET")).settings).toMatchObject({
+    enabled: false,
+    policy: "all",
+    grade_limits: { work: 0 },
+  });
+  expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
+    await testPage.evaluate(() => document.documentElement.clientWidth),
+  );
+  await restoreSessionCapacitySettings(apiClient, baseline);
+  expect((await requestSessionCapacitySettings(apiClient, "GET")).settings).toEqual(baseline);
+});
+
 test("reaches Task Behavior and keeps the form touch-safe", async ({ testPage }) => {
   if (!baseline) throw new Error("session capacity settings baseline was not captured");
   await testPage.setViewportSize({ width: 390, height: 844 });
