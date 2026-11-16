@@ -417,3 +417,11 @@ fixed and verified:
 Commands prefixed with `pnpm` above ran from `apps/web` using the same Node 24
 PATH as the managed commands. The existing broad-suite limitations remain;
 no unrelated failing suite was rerun or claimed green.
+
+### Contributor PR review correction (2026-11-16)
+
+Removed the remaining reference from AC .22 to the unrelated AC .14.
+AC .22 still specifies the existing activity indicators and accessible state text.
+This documentation correction changes no runtime behavior or architectural boundary.
+The review used source inspection only, as requested.
+No builds, tests, linters, or commit hooks ran for this correction.
