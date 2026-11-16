@@ -25,7 +25,7 @@ func (s *Service) capturePreparedTaskCleanup(ctx context.Context, job *models.Ta
 	if err != nil {
 		return fmt.Errorf("list worktrees for cleanup snapshot: %w", err)
 	}
-	worktreeHeadOIDs, preparationErrors, err := s.captureCleanupHeadOIDsForMode(ctx, worktrees, options)
+	worktreeHeadOIDs, preparationErrors, err := s.captureCleanupIdentities(ctx, worktrees, job.Trigger, options)
 	if err != nil {
 		return err
 	}
@@ -40,6 +40,7 @@ func (s *Service) capturePreparedTaskCleanup(ctx context.Context, job *models.Ta
 		return fmt.Errorf("list remote task directories for cleanup snapshot: %w", err)
 	}
 	snapshot := taskResourceCleanupSnapshot{
+		ArchiveSourceManifestRequired:   job.IsArchive(),
 		AllowUnverifiedWorkspaceChanges: options.AllowUnverifiedWorkspaceChanges,
 		CleanupPreparationErrors:        preparationErrors,
 		Sessions:                        sessions,

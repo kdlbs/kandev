@@ -111,7 +111,7 @@ export function CommentViewPopover({
   const { t } = useTranslation();
   const popoverRef = useRef<HTMLDivElement>(null);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
-  const { pos, onDragStart } = useDraggablePopover(position, 350, 200);
+  const { pos, onDragStart } = useDraggablePopover(position, 350, 200, popoverRef);
   usePopoverDismiss(onClose, popoverRef);
 
   return (

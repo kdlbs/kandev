@@ -239,8 +239,7 @@ post-remediation browser results are recorded by the primary conversation.
 The first repeated desktop run passed five cases and timed out in one v2 resume
 case. An isolated v2 rerun passed, then all six repeated cases passed with pprof
 enabled for diagnosis. These runs do not establish the timeout's cause. The
-primary conversation keeps this observation open while checking the remaining
-executors and fresh CI.
+later CI capture and targeted readiness regression are recorded below.
 
 Final affected browser selections pass with retries disabled: repeated desktop
 6/6 (temporary parent contains spaces), phone 3/3, Docker/SSH 4/4, and existing
@@ -248,3 +247,22 @@ startup/profile regressions 7/7. These are 17 distinct cases and 20 passing
 executions in the final selections. The earlier isolated timeout remains
 recorded above; fresh exact-head CI and review evidence remain externally
 pending until the primary conversation completes delivery checks.
+
+## Consolidated PR CI: readiness during automatic recovery
+
+The managed v2 recovery case timed out while the chat was already editable.
+Its captured stack was blocked in `isEnabled()` after the recovery action
+disappeared between visibility and interaction. The isolated runtime case passed.
+A focused browser regression reproduces that same missing-action wait.
+
+The readiness helper now uses normal click actionability within its existing
+polling interval. A disappearing or disabled action can time out within that
+interval, then readiness is checked again. Other errors still propagate.
+The existing idle check and requested editability check remain in place.
+
+The regression failed at the unbounded `isEnabled()` call before the change,
+then passed once and in three consecutive runs with retries disabled. The
+two actual managed-runtime recovery cases also passed. CI worker context
+validation passed 35 cases and skipped one, with retries disabled. Catalog,
+specification lint, and delivery coverage for all 11 work orders passed.
+Product code and published screenshot surfaces are unchanged.

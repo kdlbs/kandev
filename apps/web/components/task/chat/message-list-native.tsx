@@ -1067,6 +1067,7 @@ export const NativeMessageList = memo(
         ref={scrollRef}
         sessionId={sessionId ?? undefined}
         tabIndex={-1}
+        selectionDockHost
         className={`relative chat-message-list p-0 ${
           autoScrollEnabled &&
           (!motionEnabled || messagesLoading || historyRefreshPending || isLoadingMore)

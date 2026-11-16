@@ -15,6 +15,7 @@ import (
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/worktree"
+	"github.com/stretchr/testify/require"
 )
 
 // @covers AC-TASKS-DIRTY-WORKTREE-ARCHIVE-004.5
@@ -347,6 +348,18 @@ func TestCascadeUnarchiveRefusesRunningArchiveReclaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("archive task tree: %v", err)
 	}
+	// Reclaim starts only after the owning archive has persisted source evidence.
+	archiveJob := latestCleanupJob(t, repo, childID, models.TaskResourceCleanupTriggerCascadeArchive)
+	var archiveSnapshot taskResourceCleanupSnapshot
+	require.NoError(t, json.Unmarshal([]byte(archiveJob.ResourceSnapshot), &archiveSnapshot))
+	archiveSnapshot.ArchiveSourceManifest = []ArchiveSourceManifest{{
+		TaskID: childID, CleanupJobID: archiveJob.ID, WorktreeID: wt.ID, RepositoryID: wt.RepositoryID,
+	}}
+	archivePayload, err := json.Marshal(archiveSnapshot)
+	require.NoError(t, err)
+	require.NoError(t, repo.CompleteTaskResourceCleanupJob(ctx, archiveJob.ID, models.TaskResourceCleanupStatePrepared, "", nil))
+	require.NoError(t, repo.UpdateTaskResourceCleanupSnapshot(ctx, archiveJob.OperationID, string(archivePayload)))
+	require.NoError(t, repo.CompleteTaskResourceCleanupJob(ctx, archiveJob.ID, archiveJob.State, "", nil))
 	child, err := repo.GetTask(ctx, childID)
 	if err != nil || child == nil || child.ArchivedAt == nil {
 		t.Fatalf("load archived child: task=%+v err=%v", child, err)

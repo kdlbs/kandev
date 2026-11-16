@@ -1,4 +1,8 @@
 {
+  "notificationFormatterLabel": "通知内容",
+  "notificationFormatterDefault": "使用原始通知内容",
+  "notificationFormatterUnavailable": "格式化程序不可用。通知将使用原始内容。",
+  "notificationFormatterDescription": "为每个提供商选择可选的格式化程序。格式化不会更改订阅或发送目标。",
   "notificationEventPermissionRequested": "智能体需要权限",
   "notificationEventPermissionRequestedDescription": "当智能体正在等待您批准某项操作时通知。",
   "notificationEventSessionFailed": "智能体会话失败",

@@ -880,6 +880,15 @@ Adapt the source for a custom `--home-dir`. This archive still does not include 
 <details>
 <summary>Restore details</summary>
 
+### Duplicate environment preservation during upgrade
+
+Startup keeps one active environment per task while preserving proven
+repository inventory and Git snapshot history before it removes duplicate
+rows. Only exact compatible worktree ownership is transferred. Conflicting
+slots, resource handles or recovery records stop initialization and roll back
+the healing transaction. Keep the original database and its matching runtime;
+do not remove rows or recovery claims to force startup.
+
 ### Restore a System snapshot
 
 The UI flow applies to the configured SQLite path:
