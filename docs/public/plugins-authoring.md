@@ -558,6 +558,13 @@ app does not receive that API. Use the canvas state protocol instead.
 
 ## Authoritative contracts
 
+For the additive notification formatter extension, see the
+[notification content formatter contract](../plans/plugins/PLUGIN-API.md#notification-content-formatters).
+It covers the optional Go interface, provider-scoped management envelope,
+owner-isolated editor slot, immutable snapshots, activation CAS, cancellation,
+and default fallback. This extension is not provided by published SDK `0.1.0`;
+its SDK-wide minimum host version is not a formatter capability declaration.
+
 The guide summarizes the contract for discovery. These files remain the source
 of truth and must be updated together when the contract changes:
 
