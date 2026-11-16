@@ -785,13 +785,16 @@ func (s *Service) CreateWorkflow(ctx context.Context, req *CreateWorkflowRequest
 	}
 
 	// Create workflow steps from template if specified
-	if req.WorkflowTemplateID != nil && *req.WorkflowTemplateID != "" && s.workflowStepCreator != nil {
+	if req.WorkflowTemplateID != nil && *req.WorkflowTemplateID != "" {
+		if s.workflowStepCreator == nil {
+			return nil, errors.New("workflow step creator is not configured")
+		}
 		if err := s.workflowStepCreator.CreateStepsFromTemplate(ctx, workflow.ID, *req.WorkflowTemplateID); err != nil {
 			s.logger.Error("failed to create workflow steps from template",
 				zap.String("workflow_id", workflow.ID),
 				zap.String("template_id", *req.WorkflowTemplateID),
 				zap.Error(err))
-			// Don't fail workflow creation, just log the error
+			return nil, fmt.Errorf("failed to create workflow steps from template: %w", err)
 		}
 	}
 
