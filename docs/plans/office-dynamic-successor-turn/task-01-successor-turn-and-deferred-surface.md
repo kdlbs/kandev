@@ -27,7 +27,7 @@ deferred.
 
 ## In scope
 
-- `launchOfficeDynamicRelaunch` in `dynamic_launch.go` (AC-004.1).
+- `officeDynamicRelaunchOptions` in `dynamic_launch.go` (AC-004.1).
 - `workflowEffectForCompletion` and `completedEventClosingTurn` in
   `agent_delivery_effect.go`, used by both completion handlers (AC-004.2,
   AC-004.3).

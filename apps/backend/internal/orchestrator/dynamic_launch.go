@@ -1875,8 +1875,16 @@ func (s *Service) launchPreparedDynamicRelaunch(
 		seam5Res.consume()
 		return dynamicRelaunchSucceeded, nil
 	case dynamicRelaunchLaunchModePrepared:
-		if err := s.launchOfficeDynamicRelaunch(ctx, data, task, session, prompt, executionProfileID); err != nil {
+		options, turnCreated := s.officeDynamicRelaunchOptions(ctx, data, session, prompt, executionProfileID)
+		execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, data.SessionID, options)
+		if err != nil {
+			if turnCreated {
+				s.completeTurnIfCurrent(ctx, data.SessionID, options.TurnID)
+			}
 			return dynamicRelaunchFailed, err
+		}
+		if execution != nil {
+			execution.TurnID = options.TurnID
 		}
 		seam5Res.consume()
 		return dynamicRelaunchSucceeded, nil
@@ -1885,24 +1893,25 @@ func (s *Service) launchPreparedDynamicRelaunch(
 	}
 }
 
-// launchOfficeDynamicRelaunch starts the Office successor on the prepared
-// session. Like the first Office launch, the successor prompt owns a durable
-// turn: without one, its events and completion carry no turn ID, so the
-// completion's workflow effect has no key and on_turn_complete cannot run.
-func (s *Service) launchOfficeDynamicRelaunch(
+// officeDynamicRelaunchOptions builds the Office successor launch on the
+// prepared session. Like the first Office launch, the successor prompt owns a
+// durable turn: without one, its events and completion carry no turn ID, so the
+// completion's workflow effect has no key and on_turn_complete cannot run. The
+// returned flag reports whether the turn was created here, so a failed launch
+// can close it.
+func (s *Service) officeDynamicRelaunchOptions(
 	ctx context.Context,
 	data watcher.AgentEventData,
-	task *v1.Task,
 	session *models.TaskSession,
 	prompt capturedPrompt,
 	executionProfileID string,
-) error {
+) (executor.LaunchOptions, bool) {
 	officeAgentProfileID := data.AgentProfileID
 	if officeAgentProfileID == "" {
 		officeAgentProfileID = session.AgentProfileID
 	}
 	turnID, turnCreated := s.startTurnForSessionWithOwnership(ctx, data.SessionID)
-	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, data.SessionID, executor.LaunchOptions{
+	return executor.LaunchOptions{
 		AgentProfileID:       executionProfileID,
 		OfficeAgentProfileID: officeAgentProfileID,
 		ExecutorID:           "",
@@ -1910,17 +1919,7 @@ func (s *Service) launchOfficeDynamicRelaunch(
 		Prompt:               prompt.text,
 		StartAgent:           true,
 		McpMode:              executor.McpModeOffice,
-	})
-	if err != nil {
-		if turnCreated {
-			s.completeTurnIfCurrent(ctx, data.SessionID, turnID)
-		}
-		return err
-	}
-	if execution != nil {
-		execution.TurnID = turnID
-	}
-	return nil
+	}, turnCreated
 }
 
 func (s *Service) startDynamicRelaunchCreatedSession(

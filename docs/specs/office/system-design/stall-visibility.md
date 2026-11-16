@@ -220,7 +220,7 @@ and no turn ID; `processOnTurnCompleteViaEngineWithCause` then deferred
 `on_turn_complete` with an empty effect key, and the Office session parked
 `IDLE`, which neither watchdog gate scans.
 
-- `launchOfficeDynamicRelaunch` starts a turn with
+- `officeDynamicRelaunchOptions` starts a turn with
   `startTurnForSessionWithOwnership` and passes its ID in `LaunchOptions`, as the
   first Office launch does. A failed launch completes the turn it created.
 - `workflowEffectForCompletion` binds a turn-less terminal with delivery identity
