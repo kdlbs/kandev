@@ -20,6 +20,7 @@ This design preserves the technical source detail for `REQ-OFFICE-AUTOMATION-RUN
 | Requirement | Design section |
 | --- | --- |
 | `REQ-OFFICE-AUTOMATION-RUNS-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-OFFICE-AUTOMATION-RUNS-001` (AC .13 through .18) | [Run output capture guidance](automation-run-output.md) |
 | `REQ-OFFICE-AUTOMATION-CONTINUITY-003` | [Data model](#data-model), [API surface](#api-surface), [Failure modes](#failure-modes) |
 | `REQ-OFFICE-AUTOMATION-TARGETS-002` | [Data model](#data-model), [API surface](#api-surface), [Failure modes](#failure-modes) |
 
@@ -119,7 +120,8 @@ conversation, not a log about it.
 - **Configuration is behind a `Details` link in the rail**, not a tab beside the
   transcript. A tab pair claims the two are done about equally; an automation is
   configured once and read continuously.
-- A run in flight shows its live output as it happens, not a placeholder.
+- A structured run in flight shows its live output as it arrives. CLI
+  passthrough uses the [capture explanation](automation-run-output.md).
 - A run displayed as Running moves into Completed without a manual page reload
   once its terminal result is available, including when the health summary
   temporarily reports no open runs.
@@ -305,7 +307,7 @@ The action is workspace-scoped: the caller must be authorized for `workspace_id`
   parameter, **THEN** the transcript still moves to the newly selected turn.
 - **GIVEN** a human reply occurs after a scheduled run completed, **WHEN** that reply turn ends,
   **THEN** the scheduled run remains unchanged and no new automation run appears.
-- **GIVEN** a run is in flight, **WHEN** the user opens it, **THEN** they see the agent's output as it arrives rather than a placeholder.
+- **GIVEN** a structured run is in flight, **WHEN** the user opens it, **THEN** they see the agent's output as it arrives rather than a placeholder.
 - **GIVEN** a run is in flight on desktop, **WHEN** the user selects Stop current run, **THEN** the exact run becomes failed and the next firing is no longer blocked by its slot.
 - **GIVEN** a run is in flight on a phone, **WHEN** the user opens its run drawer/content and taps Stop current run, **THEN** the same cancellation outcome is available without hover or horizontal scrolling.
 - **GIVEN** two runs share a task but render different title-template values, **WHEN** their rows are listed, **THEN** each row shows its own persisted `display_title`.

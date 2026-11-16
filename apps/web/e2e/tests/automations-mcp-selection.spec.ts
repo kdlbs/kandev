@@ -71,11 +71,15 @@ test("saves all native packages and workspace servers, then invokes native tools
   await prCapture.screenshot("automation-mcp-desktop", {
     caption: "Automation MCP selection on desktop",
   });
+  await section.screenshot({ path: "../../artifacts/mcp-switches/list-automation-desktop.png" });
   await section.getByTestId("automation-mcp-package-configuration").click();
   const detail = section.getByTestId("automation-mcp-package-detail");
-  expect((await detail.getByRole("combobox").boundingBox())!.height).toBeCloseTo(28, 0);
+  expect(
+    (await detail.getByTestId("automation-mcp-choice-configuration").boundingBox())!.height,
+  ).toBeCloseTo(28, 0);
   await detail.evaluate((element) => element.scrollIntoView({ block: "start" }));
   if (prCapture.capturing) await waitForFiniteAnimations(testPage.locator("body"));
+  await detail.screenshot({ path: "../../artifacts/mcp-switches/automation-desktop.png" });
   await prCapture.screenshot("automation-mcp-package-detail-desktop", {
     caption: "Automation package detail uses the shared MCP package presentation",
   });
@@ -88,8 +92,8 @@ test("saves all native packages and workspace servers, then invokes native tools
   await expect(serverRow.getByRole("checkbox")).toBeChecked();
   for (const id of OPTIONAL_AUTOMATION_PACKAGES)
     await expect(
-      section.getByTestId(`automation-mcp-package-${id}`).locator('[data-slot="badge"]'),
-    ).toHaveText("On");
+      section.getByTestId(`automation-mcp-choice-${id}`).getByRole("switch"),
+    ).toBeChecked();
   // The external endpoint is only a saved-definition fixture. Native execution uses no external service.
   await serverRow.click();
   await saveAutomationMCP(testPage, watcher);
@@ -126,10 +130,8 @@ test("saves all native packages and workspace servers, then invokes native tools
     )
     .toEqual(["configuration", "core", "diagnostics", "rich-output", "walkthroughs"]);
   await testPage.goto(`/automations/${automation.id}?run=${run!.id}`);
-  const evidence = testPage.getByTestId("automation-mcp-evidence");
-  await evidence.locator("summary").click();
-  await expect(evidence).toContainText("Current process");
-  await expect(evidence).toContainText("Configuration");
+  await expect(testPage.getByTestId("run-transcript")).toBeVisible();
+  await expect(testPage.getByTestId("automation-mcp-evidence")).toHaveCount(0);
   saved = await apiClient.wsRequest<Automation>("automation.get", { id: automation.id });
   await apiClient.wsRequest("automation.update", {
     id: automation.id,
@@ -151,7 +153,15 @@ test("saves all native packages and workspace servers, then invokes native tools
   const retained = (await retainedResponse.json()) as BuiltinMCPSessionView;
   expect(retained.history?.current).toBeTruthy();
   await testPage.reload();
-  await expect(testPage.getByTestId("automation-mcp-evidence")).toBeVisible();
+  await expect(testPage.getByTestId("run-transcript")).toBeVisible();
+  await expect(testPage.getByTestId("automation-mcp-evidence")).toHaveCount(0);
+  await testPage.screenshot({
+    path: "../../artifacts/mcp-switches/automation-run-without-summary.png",
+  });
+  await testPage.setViewportSize({ width: 393, height: 851 });
+  await expect(testPage.getByTestId("runs-drawer-trigger")).toBeVisible();
+  await expect(testPage.getByTestId("run-transcript")).toBeVisible();
+  await expect(testPage.getByTestId("automation-mcp-evidence")).toHaveCount(0);
   await apiClient.deleteMCPServer(seedData.workspaceId, server.id, server.revision);
 });
 
@@ -167,7 +177,6 @@ test("retains an MCP draft after a stale save and reconciles only after reload",
   });
   const watcher = watchWs(testPage);
   await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/automations/${a.id}`);
-  const row = testPage.getByTestId("automation-mcp-package-configuration");
   await chooseAutomationPackage(testPage, "configuration", true);
   await apiClient.wsRequest("automation.update", {
     id: a.id,
@@ -180,10 +189,14 @@ test("retains an MCP draft after a stale save and reconciles only after reload",
     .click();
   const section = testPage.getByTestId("automation-mcp-access");
   await expect(section.getByRole("alert")).toContainText("Choices changed");
-  await expect(row.locator('[data-slot="badge"]')).toHaveText("On");
+  await expect(
+    testPage.getByTestId("automation-mcp-choice-configuration").getByRole("switch"),
+  ).toBeChecked();
   await section.getByRole("button", { name: "Reload choices", exact: true }).click();
   await expect(section.getByRole("alert")).toHaveCount(0);
-  await expect(row.locator('[data-slot="badge"]')).toHaveText("On");
+  await expect(
+    testPage.getByTestId("automation-mcp-choice-configuration").getByRole("switch"),
+  ).toBeChecked();
   await saveAutomationMCP(testPage, watcher);
   const saved = await apiClient.wsRequest<Automation>("automation.get", { id: a.id });
   expect(saved.mcp_selection?.builtin_packages).toEqual(["core", "configuration"]);

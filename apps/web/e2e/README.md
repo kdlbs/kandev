@@ -434,7 +434,7 @@ storage reporting are filtered by the process-scoped ownership label.
 
 ## Mocked vs real
 
-- **Mocked**: Azure DevOps (`KANDEV_MOCK_AZURE_DEVOPS=true`), Jira (`KANDEV_MOCK_JIRA=true`), Linear (`KANDEV_MOCK_LINEAR=true`), GitHub (`KANDEV_MOCK_GITHUB=true`), and the agent process itself (`KANDEV_MOCK_AGENT=only`). These are third-party services or external processes we don't want CI to depend on.
+- **Mocked**: Jira (`KANDEV_MOCK_JIRA=true`), Linear (`KANDEV_MOCK_LINEAR=true`), GitHub (`KANDEV_MOCK_GITHUB=true`), and the agent process itself (`KANDEV_MOCK_AGENT=only`). These are third-party services or external processes we don't want CI to depend on.
 - **Real**: Everything inside the kandev backend — orchestrator, lifecycle manager, agentctl, SSH/SFTP, Docker SDK, Kubernetes API/exec/port-forward, git, and worktree manager. The point of e2e is to exercise the real code paths.
 
 The SSH and Kubernetes executors have no mock controller. SSH tests use a real Docker-hosted sshd target. Kubernetes tests use a real Kind API server, node, scheduler, storage provisioner, Pod exec, and port-forward; fault injection operates on those resources directly.

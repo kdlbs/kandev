@@ -702,11 +702,10 @@ It then selects a provider from the `origin` hostname:
 |----------|------------------------|-------------------|
 | GitHub | Authenticated `gh` CLI | `gh pr create` with title, body, current head, optional base, and optional `--draft`. Managed Improve Kandev uses `--repo kdlbs/kandev` and an explicit `<fork-owner>:<branch>` head. |
 | GitLab | Authenticated `glab` CLI or the active workspace's matching GitLab PAT | Reuses an existing open MR for the same source/target or creates one with title, description, current source, explicit or project-default target, and optional draft state. The configured GitLab origin must match the HTTPS or SSH `origin`. |
-| Azure Repos | Authenticated `az` CLI plus the `azure-devops` extension | `az repos pr create` with parsed organization, project, repository, source, optional target, and optional draft. |
 
-Other remote providers are rejected by this action. A normal Git push can still work with another provider. A returned GitHub PR or GitLab MR is asynchronously associated with the originating task repository. Azure creation returns a URL but does not create a provider review association.
+Other remote providers are rejected by this action; plugin-owned providers, such as Bitbucket and Azure DevOps, create pull requests through their plugin instead. A normal Git push can still work with another provider. A returned GitHub PR or GitLab MR is asynchronously associated with the originating task repository.
 
-Title is required. Body and base branch may be empty. GitHub and Azure delegate an empty base to their provider CLI; GitLab resolves the project default branch before creation. The web UI defaults new change requests to draft and waits up to 120 seconds. Provider credentials and remote push permission must exist in the executor, and Git hooks or branch policies can still reject the push or change request.
+Title is required. Body and base branch may be empty. GitHub delegates an empty base to its provider CLI; GitLab resolves the project default branch before creation. The web UI defaults new change requests to draft and waits up to 120 seconds. Provider credentials and remote push permission must exist in the executor, and Git hooks or branch policies can still reject the push or change request.
 
 For GitLab, Kandev preserves a self-managed connection's scheme and never retries against another host. It prefers `glab` when installed and uses the workspace-injected `GITLAB_TOKEN` REST path when the CLI is absent or its create command fails. The successful WebSocket payload keeps the compatibility field name `pr_url` and adds `provider:"gitlab"`. Association runs after that response; use **Link GitLab merge request** if the MR was created but the link is missing.
 

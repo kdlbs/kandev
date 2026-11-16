@@ -136,6 +136,10 @@ func (c *Controller) previewAgentUpdate(
 	if err != nil {
 		return nil, err
 	}
+	var reviewed *dto.AgentRuntimeReviewDTO
+	if !fallback && operation == managedruntime.OperationUpdate {
+		reviewed = reviewedEvidence(spec.Package, current, active, effective, family, source, revision)
+	}
 	return &dto.AgentUpdatePreviewDTO{
 		UpdateMode:                 dto.AgentUpdateModePinned,
 		ManagedFallback:            fallback,
@@ -156,6 +160,7 @@ func (c *Controller) previewAgentUpdate(
 		Command:                    command,
 		CommandString:              buildCommandString(command),
 		CopilotPluginCompatibility: compatibility,
+		ReviewedRuntime:            reviewed,
 	}, nil
 }
 

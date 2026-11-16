@@ -200,7 +200,6 @@ type UserSettings struct {
 	GitHubSavedPresets                json.RawMessage                   `json:"github_saved_presets"`
 	GitHubDefaultQueryPresets         json.RawMessage                   `json:"github_default_query_presets"`
 	GitLabSavedPresets                json.RawMessage                   `json:"gitlab_saved_presets"`
-	AzureDevOpsBrowsePreferences      json.RawMessage                   `json:"azure_devops_browse_preferences"`
 	DefaultUtilityAgentID             string                            `json:"default_utility_agent_id"` // Default inference agent for utility agents
 	DefaultUtilityModel               string                            `json:"default_utility_model"`    // Default model for utility agents
 	DefaultUtilityAgentProfileID      string                            `json:"default_utility_agent_profile_id"`

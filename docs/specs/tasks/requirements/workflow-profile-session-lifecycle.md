@@ -110,6 +110,7 @@ starts and ends, so repeated stages use the intended context.
 
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.14:** If destination validation rejects an automatic transition after a turn completes, the current conversation shall accept another message without cancellation. The workflow step and primary session shall remain unchanged. This recovery shall not stop a newer turn or reopen a terminal session. Desktop and phone shall receive the recovered session state through the existing update channel.
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.15:** A replay of one accepted profile-switch entry shall not allocate another destination session after that entry has recorded an allocation, including when the recorded destination is failed, terminal, or has uncertain ownership. A distinct accepted entry may select a fresh destination according to its start setting. This requirement concerns destination allocation; it does not authorize startup or prompt replay.
+- **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.16:** When executor admission refuses the destination conversation's executor selection, a manual step move shall fail before the workflow step changes and shall return an error that names the unavailable executor profile as the reason. A deleted executor profile is one such refusal. A switch that fails after it has started shall return the task to its state from before the switch. The task shall never remain in a preparing state without a destination session.
 
 ### REQ-TASKS-WORKFLOW-PROFILE-SESSIONS-002: Explicit workflow session recipients
 
@@ -195,6 +196,8 @@ requiring its profile to be known when the workflow is authored.
 - [Dynamic workflow completion repair](../../../plans/dynamic-workflow-completion/plan.md)
 
 - [Manual workflow session focus](../../../plans/workflow-session-focus/plan.md)
+
+- [Destination executor admission](../../../plans/workflow-switch-executor-admission/plan.md)
 
 ## Example
 

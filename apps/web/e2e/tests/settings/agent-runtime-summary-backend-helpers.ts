@@ -121,7 +121,9 @@ export async function backendRuntimeUpdateSummary(
   expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
   await review.click();
   await expect(page).toHaveURL(/settings\/agents#runtime-updates$/);
-  await expect(page.locator("#runtime-updates > details")).toHaveAttribute("open");
+  await expect(
+    page.getByTestId(mobile ? "runtime-manager-drawer" : "runtime-manager-dialog"),
+  ).toBeVisible();
 
   const reloadSubscription = ws.waitForResponse("user.subscribe", { timeout: 15_000 });
   const reloadStatus = waitForHttp(page, "GET", /\/agent-update\/status$/);
