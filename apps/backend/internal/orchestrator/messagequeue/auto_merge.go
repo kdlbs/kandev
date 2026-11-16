@@ -3,7 +3,6 @@ package messagequeue
 import (
 	"bytes"
 	"encoding/json"
-	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/entityrefs"
@@ -19,175 +18,23 @@ type autoMergedValues struct {
 }
 
 func buildAutoMergedEntry(target, source *QueuedMessage) (*autoMergedValues, bool) {
-	if !autoMergeCompatible(target, source) {
+	if !autoMergeAllowed(target, source) || !autoMetadataEquivalent(target.Metadata, source.Metadata) {
 		return nil, false
 	}
-	merge, ok := newAutoMergeAccumulator(target)
-	if !ok || !merge.add(source) {
-		return nil, false
-	}
-	return merge.values(), true
-}
-
-// autoMergeAccumulator folds compatible sources into one target. Every input
-// is validated once and its additive lists are kept as ordered sets, so a
-// chain of N folds costs time linear in its inputs rather than re-copying and
-// re-validating the growing survivor on each fold.
-type autoMergeAccumulator struct {
-	target          *QueuedMessage
-	comparable      []byte
-	bodies          []string
-	attachments     []MessageAttachment
-	attachmentBytes int64
-	references      []apiv1.EntityReference
-	referenceSeen   map[string]struct{}
-	contexts        []apiv1.ContextFileMeta
-	contextSeen     map[string]struct{}
-	admissionIDs    []string
-	admissionSeen   map[string]struct{}
-	queuedAt        time.Time
-}
-
-func newAutoMergeAccumulator(target *QueuedMessage) (*autoMergeAccumulator, bool) {
-	if target == nil {
-		return nil, false
-	}
-	comparable, ok := comparableAutoMetadata(target.Metadata)
+	attachments, ok := combineAutoMergeAttachments(target.Attachments, source.Attachments)
 	if !ok {
 		return nil, false
 	}
-	merge := &autoMergeAccumulator{
-		target: target, comparable: comparable, queuedAt: target.QueuedAt,
-		referenceSeen: map[string]struct{}{}, contextSeen: map[string]struct{}{}, admissionSeen: map[string]struct{}{},
-	}
-	return merge, merge.absorb(target)
-}
-
-// autoMergeCompatible checks identity and non-additive metadata only, so an
-// incompatible pair is rejected before any attachment payload is decoded.
-func autoMergeCompatible(target, source *QueuedMessage) bool {
-	if !autoMergeAllowed(target, source) {
-		return false
-	}
-	targetComparable, ok := comparableAutoMetadata(target.Metadata)
+	metadata, ok := mergeAutoMetadata(target.Metadata, source.Metadata)
 	if !ok {
-		return false
+		return nil, false
 	}
-	sourceComparable, ok := comparableAutoMetadata(source.Metadata)
-	return ok && bytes.Equal(targetComparable, sourceComparable)
-}
-
-// add folds source into the accumulator when it is compatible and every
-// combined limit still holds. A rejected source leaves the state unchanged.
-func (a *autoMergeAccumulator) add(source *QueuedMessage) bool {
-	if !autoMergeAllowed(a.target, source) {
-		return false
-	}
-	comparable, ok := comparableAutoMetadata(source.Metadata)
-	if !ok || !bytes.Equal(a.comparable, comparable) {
-		return false
-	}
-	return a.absorb(source)
-}
-
-func (a *autoMergeAccumulator) absorb(message *QueuedMessage) bool {
-	attachmentBytes, ok := a.incomingAttachmentBytes(message.Attachments)
-	if !ok {
-		return false
-	}
-	references, ok := normalizeAutoEntityReferences(message.Metadata[MetadataEntityReferences])
-	if !ok {
-		return false
-	}
-	references = newOrderedItems(references, a.referenceSeen, func(reference apiv1.EntityReference) string { return reference.Ref })
-	if len(a.references)+len(references) > entityrefs.MaxReferencesPerMessage {
-		return false
-	}
-	contexts, ok := normalizeAutoContextFiles(message.Metadata[MetadataContextFiles])
-	if !ok {
-		return false
-	}
-	contexts = newOrderedItems(contexts, a.contextSeen, contextFileKey)
-	if len(a.contexts)+len(contexts) > messageconstraints.MaxContextFilesPerMessage {
-		return false
-	}
-	admissionIDs, ok := normalizeQueueAdmissionIDs(message.Metadata[MetadataQueueAdmissionIDs])
-	if !ok {
-		return false
-	}
-	admissionIDs = newOrderedItems(admissionIDs, a.admissionSeen, func(id string) string { return id })
-
-	a.attachments = append(a.attachments, message.Attachments...)
-	a.attachmentBytes += attachmentBytes
-	a.references = appendOrderedItems(a.references, references, a.referenceSeen, func(reference apiv1.EntityReference) string { return reference.Ref })
-	a.contexts = appendOrderedItems(a.contexts, contexts, a.contextSeen, contextFileKey)
-	a.admissionIDs = appendOrderedItems(a.admissionIDs, admissionIDs, a.admissionSeen, func(id string) string { return id })
-	if message.Content != "" {
-		a.bodies = append(a.bodies, message.Content)
-	}
-	a.queuedAt = latestQueuedAt(a.queuedAt, message.QueuedAt)
-	return true
-}
-
-func (a *autoMergeAccumulator) incomingAttachmentBytes(attachments []MessageAttachment) (int64, bool) {
-	if len(a.attachments)+len(attachments) > messageconstraints.MaxAttachmentCount {
-		return 0, false
-	}
-	var incoming int64
-	for _, attachment := range attachments {
-		payloadBytes, err := attachmentPayloadBytes(attachment)
-		if err != nil || payloadBytes > messageconstraints.MaxAttachmentBytes-a.attachmentBytes-incoming {
-			return 0, false
-		}
-		incoming += payloadBytes
-	}
-	return incoming, true
-}
-
-// values materializes the merged entry once; the target's other metadata is
-// copied and the additive lists are replaced by their ordered unions.
-func (a *autoMergeAccumulator) values() *autoMergedValues {
-	metadata := copyMessageMetadata(a.target.Metadata, 0)
-	metadata = setAutoMetadataList(metadata, MetadataEntityReferences, a.references)
-	metadata = setAutoMetadataList(metadata, MetadataContextFiles, a.contexts)
-	metadata = setAutoMetadataList(metadata, MetadataQueueAdmissionIDs, a.admissionIDs)
 	return &autoMergedValues{
-		content:     strings.Join(a.bodies, "\n\n"),
-		attachments: append([]MessageAttachment(nil), a.attachments...),
+		content:     joinAutoMergeContent(target.Content, source.Content),
+		attachments: attachments,
 		metadata:    metadata,
-		queuedAt:    a.queuedAt,
-	}
-}
-
-// newOrderedItems returns the items of incoming not yet in seen, deduplicated
-// among themselves, in their original order. seen is not modified.
-func newOrderedItems[T any](incoming []T, seen map[string]struct{}, key func(T) string) []T {
-	var fresh []T
-	local := map[string]struct{}{}
-	for _, item := range incoming {
-		itemKey := key(item)
-		if _, duplicate := seen[itemKey]; duplicate {
-			continue
-		}
-		if _, duplicate := local[itemKey]; duplicate {
-			continue
-		}
-		local[itemKey] = struct{}{}
-		fresh = append(fresh, item)
-	}
-	return fresh
-}
-
-func appendOrderedItems[T any](items, fresh []T, seen map[string]struct{}, key func(T) string) []T {
-	for _, item := range fresh {
-		seen[key(item)] = struct{}{}
-	}
-	return append(items, fresh...)
-}
-
-func contextFileKey(contextFile apiv1.ContextFileMeta) string {
-	encoded, _ := json.Marshal(contextFile)
-	return string(encoded)
+		queuedAt:    latestQueuedAt(target.QueuedAt, source.QueuedAt),
+	}, true
 }
 
 func latestQueuedAt(first, second time.Time) time.Time {
@@ -222,6 +69,22 @@ func isManagedInputQueueEntry(message *QueuedMessage) bool {
 	return managed
 }
 
+func joinAutoMergeContent(target, source string) string {
+	if target == "" {
+		return source
+	}
+	if source == "" {
+		return target
+	}
+	return target + "\n\n" + source
+}
+
+func autoMetadataEquivalent(target, source map[string]interface{}) bool {
+	targetJSON, targetOK := comparableAutoMetadata(target)
+	sourceJSON, sourceOK := comparableAutoMetadata(source)
+	return targetOK && sourceOK && bytes.Equal(targetJSON, sourceJSON)
+}
+
 func comparableAutoMetadata(metadata map[string]interface{}) ([]byte, bool) {
 	comparable := make(map[string]interface{}, len(metadata))
 	for key, value := range metadata {
@@ -232,6 +95,42 @@ func comparableAutoMetadata(metadata map[string]interface{}) ([]byte, bool) {
 	}
 	encoded, err := json.Marshal(comparable)
 	return encoded, err == nil
+}
+
+func combineAutoMergeAttachments(target, source []MessageAttachment) ([]MessageAttachment, bool) {
+	if len(target)+len(source) > messageconstraints.MaxAttachmentCount {
+		return nil, false
+	}
+	combined := append(append([]MessageAttachment(nil), target...), source...)
+	var total int64
+	for _, attachment := range combined {
+		payloadBytes, err := attachmentPayloadBytes(attachment)
+		if err != nil || payloadBytes > messageconstraints.MaxAttachmentBytes-total {
+			return nil, false
+		}
+		total += payloadBytes
+	}
+	return combined, true
+}
+
+func mergeAutoMetadata(target, source map[string]interface{}) (map[string]interface{}, bool) {
+	merged := copyMessageMetadata(target, 0)
+	references, ok := unionAutoEntityReferences(target, source)
+	if !ok {
+		return nil, false
+	}
+	contexts, ok := unionAutoContextFiles(target, source)
+	if !ok {
+		return nil, false
+	}
+	admissionIDs, ok := unionQueueAdmissionIDs(target, source)
+	if !ok {
+		return nil, false
+	}
+	merged = setAutoMetadataList(merged, MetadataEntityReferences, references)
+	merged = setAutoMetadataList(merged, MetadataContextFiles, contexts)
+	merged = setAutoMetadataList(merged, MetadataQueueAdmissionIDs, admissionIDs)
+	return merged, true
 }
 
 func setAutoMetadataList(metadata map[string]interface{}, key string, value interface{}) map[string]interface{} {
@@ -245,6 +144,25 @@ func setAutoMetadataList(metadata map[string]interface{}, key string, value inte
 		metadata[key] = value
 	}
 	return metadata
+}
+
+func unionAutoEntityReferences(target, source map[string]interface{}) ([]apiv1.EntityReference, bool) {
+	var union []apiv1.EntityReference
+	seen := make(map[string]struct{})
+	for _, metadata := range []map[string]interface{}{target, source} {
+		references, ok := normalizeAutoEntityReferences(metadata[MetadataEntityReferences])
+		if !ok {
+			return nil, false
+		}
+		for _, reference := range references {
+			if _, duplicate := seen[reference.Ref]; duplicate {
+				continue
+			}
+			seen[reference.Ref] = struct{}{}
+			union = append(union, reference)
+		}
+	}
+	return union, len(union) <= entityrefs.MaxReferencesPerMessage
 }
 
 func normalizeAutoEntityReferences(raw interface{}) ([]apiv1.EntityReference, bool) {
@@ -261,6 +179,27 @@ func normalizeAutoEntityReferences(raw interface{}) ([]apiv1.EntityReference, bo
 	}
 	normalized, err := entityrefs.NormalizeForSubmission(references)
 	return normalized, err == nil
+}
+
+func unionAutoContextFiles(target, source map[string]interface{}) ([]apiv1.ContextFileMeta, bool) {
+	var union []apiv1.ContextFileMeta
+	seen := make(map[string]struct{})
+	for _, metadata := range []map[string]interface{}{target, source} {
+		contexts, ok := normalizeAutoContextFiles(metadata[MetadataContextFiles])
+		if !ok {
+			return nil, false
+		}
+		for _, contextFile := range contexts {
+			encoded, _ := json.Marshal(contextFile)
+			key := string(encoded)
+			if _, duplicate := seen[key]; duplicate {
+				continue
+			}
+			seen[key] = struct{}{}
+			union = append(union, contextFile)
+		}
+	}
+	return union, len(union) <= messageconstraints.MaxContextFilesPerMessage
 }
 
 func normalizeAutoContextFiles(raw interface{}) ([]apiv1.ContextFileMeta, bool) {

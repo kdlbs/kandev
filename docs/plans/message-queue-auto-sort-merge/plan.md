@@ -519,6 +519,25 @@ Public docs and specification validation passed. PostgreSQL is unverified:
 - `go test -race -tags fts5` for `messagequeue` and `orchestrator/handlers`,
   and `scripts/lint-go-changed`: passed.
 
+### Implementation review round 19 remediation
+
+- `auto_merge.go` is restored byte-for-byte to `origin/main`, so ordinary
+  single admissions (`buildAutoMergedEntry`) have exactly their pre-branch
+  checks, order, results, and cost. `autoFoldValues` now rejects an
+  incompatible pair before the durable edit-lease query.
+- The chain accumulator moved to `compaction_accumulator.go` and is used only
+  by compaction. `startCompactionMerge` checks identity, metadata, and the
+  combined attachment count before decoding any payload; later folds use the
+  accumulated count.
+- RED on the prior code, GREEN after:
+  `TestCompactionAttachmentCountOverflowDoesNotDecodeTarget`.
+  `TestCompactionFoldMatchesSingleAutoMerge` pins that a compaction fold and
+  `buildAutoMergedEntry` produce the same entry across text, empty bodies,
+  attachments, admission IDs, context files, entity references, and rejected
+  pairs.
+- `go test -race -tags fts5` for `messagequeue` and `orchestrator/handlers`,
+  and `scripts/lint-go-changed`: passed.
+
 Final repository gates, run from the repository root after all work orders:
 
 ```bash

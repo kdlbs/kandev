@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/messageconstraints"
 	"github.com/stretchr/testify/require"
 )
 
@@ -167,4 +168,67 @@ func TestIncompatibleAutoMergeDoesNotDecodeTargetAttachment(t *testing.T) {
 	require.Len(t, result.kept, 2)
 	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(attachmentBytes/2),
 		"rejecting an incompatible pair must not decode the target attachment")
+}
+
+// A compatible pair that exceeds the attachment count is rejected before the
+// target's payload is decoded, in compaction as in a single admission.
+func TestCompactionAttachmentCountOverflowDoesNotDecodeTarget(t *testing.T) {
+	const attachmentBytes = 4 << 20
+	target := sortTestEntry("A1", "A")
+	target.Attachments = []MessageAttachment{{
+		Type: "image", MimeType: "image/png", Data: base64.StdEncoding.EncodeToString(make([]byte, attachmentBytes)),
+	}}
+	for i := 1; i < messageconstraints.MaxAttachmentCount; i++ {
+		target.Attachments = append(target.Attachments, MessageAttachment{AttachmentID: fmt.Sprintf("durable-%d", i), SizeBytes: 1})
+	}
+	source := sortTestEntry("A2", "A")
+	source.Attachments = []MessageAttachment{{AttachmentID: "overflow", SizeBytes: 1}}
+
+	result, allocated := measureCompaction([]*QueuedMessage{target, source})
+	require.Len(t, result.kept, 2)
+	require.Less(t, allocated, uint64(attachmentBytes/2), "a count overflow must not decode the target attachment")
+}
+
+// Compaction folds through the chain accumulator while single admissions use
+// buildAutoMergedEntry; both must produce the same merged entry.
+func TestCompactionFoldMatchesSingleAutoMerge(t *testing.T) {
+	inline := MessageAttachment{Type: "image", MimeType: "image/png", Data: base64.StdEncoding.EncodeToString([]byte("png"))}
+	ref := func(id string) map[string]interface{} {
+		return map[string]interface{}{"type": "task", "id": id, "ref": "task:" + id}
+	}
+	cases := map[string][2]*QueuedMessage{
+		"text":           {{Content: "one"}, {Content: "two"}},
+		"empty target":   {{Content: ""}, {Content: "two"}},
+		"empty source":   {{Content: "one"}, {Content: ""}},
+		"attachments":    {{Content: "one", Attachments: []MessageAttachment{inline}}, {Content: "two", Attachments: []MessageAttachment{inline}}},
+		"admission ids":  {{Metadata: map[string]interface{}{MetadataQueueAdmissionIDs: []interface{}{"a", "b"}}}, {Metadata: map[string]interface{}{MetadataQueueAdmissionIDs: []interface{}{"b", "c", "c"}}}},
+		"context files":  {{Metadata: map[string]interface{}{MetadataContextFiles: []interface{}{map[string]interface{}{"path": "a.go"}}}}, {Metadata: map[string]interface{}{MetadataContextFiles: []interface{}{map[string]interface{}{"path": "a.go"}, map[string]interface{}{"path": "b.go"}}}}},
+		"entity refs":    {{Metadata: map[string]interface{}{MetadataEntityReferences: []interface{}{ref("1")}}}, {Metadata: map[string]interface{}{MetadataEntityReferences: []interface{}{ref("1"), ref("2")}}}},
+		"bad admission":  {{Content: "one"}, {Content: "two", Metadata: map[string]interface{}{MetadataQueueAdmissionIDs: []interface{}{""}}}},
+		"different text": {{Content: "one", Model: "a"}, {Content: "two", Model: "b"}},
+	}
+	for name, pair := range cases {
+		t.Run(name, func(t *testing.T) {
+			rows := make([]*QueuedMessage, 2)
+			for i, row := range pair {
+				clone := *row
+				clone.ID, clone.TaskID, clone.SessionID, clone.QueuedBy = fmt.Sprintf("row-%d", i), "task", "session", QueuedByUser
+				clone.Position = int64(i + 1)
+				rows[i] = &clone
+			}
+			values, merged := buildAutoMergedEntry(rows[0], rows[1])
+			require.Equal(t, name != "bad admission" && name != "different text", merged)
+			result := compactQueueRows(rows, nil, nil)
+			if !merged {
+				require.Len(t, result.kept, 2)
+				return
+			}
+			require.Len(t, result.kept, 1)
+			survivor := result.kept[0].merged
+			require.Equal(t, values.content, survivor.Content)
+			require.Equal(t, values.attachments, survivor.Attachments)
+			require.Equal(t, values.metadata, survivor.Metadata)
+			require.Equal(t, values.queuedAt, survivor.QueuedAt)
+		})
+	}
 }

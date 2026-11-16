@@ -15,8 +15,7 @@ type compactionRow struct {
 	// merge accumulates every fold into this row; the merged entry is
 	// materialized once after the pass so each input is copied and validated
 	// once rather than on every later fold.
-	merge       *autoMergeAccumulator
-	unmergeable bool
+	merge *autoMergeAccumulator
 }
 
 type queueCompaction struct {
@@ -86,21 +85,16 @@ func (c *queueCompaction) fold(source *QueuedMessage, sender string, latest map[
 func (c *queueCompaction) foldInto(index int, source *QueuedMessage, leased map[string]struct{}) bool {
 	row := &c.kept[index]
 	target := row.original
-	if _, blocked := leased[target.ID]; blocked || row.unmergeable || isFoldBarrier(target) || c.fences[target.ID] != c.fences[source.ID] {
+	if _, blocked := leased[target.ID]; blocked || isFoldBarrier(target) || c.fences[target.ID] != c.fences[source.ID] {
 		return false
 	}
 	if row.merge == nil {
-		if !autoMergeCompatible(target, source) {
-			return false
-		}
-		merge, ok := newAutoMergeAccumulator(target)
+		merge, ok := startCompactionMerge(target, source)
 		if !ok {
-			row.unmergeable = true
 			return false
 		}
 		row.merge = merge
-	}
-	if !row.merge.add(source) {
+	} else if !row.merge.add(source) {
 		return false
 	}
 	row.dirty = true

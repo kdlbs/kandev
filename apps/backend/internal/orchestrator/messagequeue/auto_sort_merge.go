@@ -98,6 +98,10 @@ func autoFoldTarget[T QueuedMessage | *QueuedMessage](rows []T, source *QueuedMe
 }
 
 func autoFoldValues(target, source *QueuedMessage, policy *AdmissionPolicy, blocked func(*QueuedMessage) (bool, error)) (*autoMergedValues, error) {
+	values, compatible := buildAutoMergedEntry(target, source)
+	if !compatible {
+		return nil, nil
+	}
 	if policy != nil {
 		if _, leased := policy.leased[target.ID]; leased {
 			return nil, nil
@@ -105,16 +109,9 @@ func autoFoldValues(target, source *QueuedMessage, policy *AdmissionPolicy, bloc
 	}
 	if blocked != nil {
 		leased, err := blocked(target)
-		if err != nil {
+		if err != nil || leased {
 			return nil, err
 		}
-		if leased {
-			return nil, nil
-		}
-	}
-	values, compatible := buildAutoMergedEntry(target, source)
-	if !compatible {
-		return nil, nil
 	}
 	return values, nil
 }
