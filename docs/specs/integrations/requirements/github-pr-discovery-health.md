@@ -2,7 +2,7 @@
 status: draft
 system: integrations
 created: 2026-09-11
-updated: 2026-10-28
+updated: 2026-11-16
 owners:
   - kandev
 ---
@@ -78,6 +78,10 @@ Idle discovery and explicit refresh do not override retirement.
   be identified separately from a quota failure. It shall not trigger an
   immediate fallback using the same invalid query or an automatic retry more
   often than once per minute for that discovery target.
+- **AC-INTEGRATIONS-GITHUB-PR-DISCOVERY-HEALTH-001.8:** Whenever the warning
+  renders, it shall show a retry time only for a valid deadline in the future.
+  Missing, invalid, or expired deadlines shall not remove an unresolved failure
+  or imply recovery. Desktop and phone shall apply the same rule.
 
 ### REQ-INTEGRATIONS-GITHUB-PR-POLLING-001: Adaptive background discovery
 
@@ -128,6 +132,7 @@ runtime status, not a permanent incident archive.
 - [System design](../system-design/github-pr-discovery-health.md)
 - [Implementation package](../../../plans/github-pr-discovery-health/plan.md)
 - [Watch reconciliation repair](../../../plans/github-pr-watch-reconciliation/plan.md)
+- [Discovery deferral repair](../../../plans/github-pr-discovery-deferrals/plan.md)
 
 ## Polling efficiency package
 

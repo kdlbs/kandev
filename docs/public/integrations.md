@@ -126,10 +126,11 @@ The **PR discovery failed** warning is separate from the quota values:
 
 - A full quota report does not prove that PR discovery works. Check the warning's reason and last failure time.
 - **Invalid query** means Kandev rejected the provider request. The warning remains until a newer discovery attempt succeeds.
-- **Rate limited** means the provider delayed discovery. Kandev waits for the reported or calculated retry time instead of repeating the same request.
+- **Rate limited** means the provider delayed discovery. Kandev waits until the reported or calculated retry time before another attempt.
+- A retry time shows when another attempt can start. When that time passes, the warning stays until discovery succeeds.
 - A warning for one workspace or repository does not mark another workspace healthy or unhealthy. Replacing the workspace connection starts a new credential-scoped health state.
 
-When discovery succeeds, the warning clears and the status revision advances. If the warning remains after a quota refresh, wait for the retry time or verify the selected connection and repository scope.
+When discovery succeeds, the warning clears and the status revision advances. A quota refresh does not clear the warning. If it remains, verify the selected connection and repository scope.
 
 #### Pull request watch freshness
 
