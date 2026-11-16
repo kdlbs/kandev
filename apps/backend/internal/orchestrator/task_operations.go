@@ -2051,8 +2051,12 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	isPassthrough = launchSession.IsPassthrough
 
 	skipStepPrompt := opts.EntryOptions != nil && opts.EntryOptions.SkipStepPrompt
+	promptWorkflowStepID := workflowStepID
+	if promptWorkflowStepID == "" && !isOfficeTask && !opts.PreserveWorkflowSourceBinding {
+		promptWorkflowStepID = workflowSessionConfigStepID
+	}
 	effectivePrompt, planModeActive, promptReferenceContext := s.applyWorkflowAndPlanMode(
-		ctx, effectivePrompt, task.ID, sessionID, workflowStepID,
+		ctx, effectivePrompt, task.ID, sessionID, promptWorkflowStepID,
 		planMode, task.IsEphemeral, isPassthrough, skipStepPrompt,
 	)
 
