@@ -1135,10 +1135,6 @@ func (r *fakeDeleteRepo) DeleteTaskWithVacatedStep(_ context.Context, id string)
 	return task.WorkflowStepID, nil
 }
 
-func (r *fakeDeleteRepo) DeleteExpiredQuickChatTask(context.Context, string, time.Time) (bool, error) {
-	panic("DeleteExpiredQuickChatTask should not be used by delete cascade tests")
-}
-
 type deleteErrorCascadeRepo struct {
 	*fakeDeleteRepo
 	err error

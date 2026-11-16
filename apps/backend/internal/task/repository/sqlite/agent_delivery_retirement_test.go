@@ -134,24 +134,18 @@ func TestDeliveryRetentionDeletionRetirement(t *testing.T) {
 				assertDeliveryRetirementEvidencePurged(t, repo, session.ID)
 			})
 
-			t.Run("expired_quick_chat", func(t *testing.T) {
+			t.Run("quick_chat_manual_delete", func(t *testing.T) {
 				repo := newDeliveryRetentionDeletionRepo(t, engine)
 				ctx := context.Background()
 				const taskID, sessionID = "retention-delete-quick-chat", "retention-delete-quick-chat-session"
-				old := time.Now().UTC().Add(-48 * time.Hour)
-				if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Quick chat", IsEphemeral: true, CreatedAt: old, UpdatedAt: old}); err != nil {
+				if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Quick chat", IsEphemeral: true}); err != nil {
 					t.Fatalf("create quick chat: %v", err)
 				}
 				session := createRetentionSessionForExistingTask(t, repo, ctx, taskID, sessionID, false, "")
-				session.UpdatedAt = old
-				if _, err := repo.db.Exec(repo.db.Rebind(`UPDATE task_sessions SET updated_at = ? WHERE id = ?`), old, sessionID); err != nil {
-					t.Fatalf("age quick-chat session: %v", err)
-				}
 				seedRetentionDeliveryEvidence(t, repo, ctx, session)
 
-				deleted, err := repo.DeleteExpiredQuickChatTask(ctx, taskID, time.Now().UTC())
-				if err != nil || !deleted {
-					t.Fatalf("delete expired quick chat = %v, err %v; want true", deleted, err)
+				if err := repo.DeleteTask(ctx, taskID); err != nil {
+					t.Fatalf("delete Quick Chat: %v", err)
 				}
 				assertDeliveryRetirementJob(t, repo, session.ID, session.QueueIncarnationID)
 				assertRetentionDeliveryEvidence(t, repo, session.ID)
