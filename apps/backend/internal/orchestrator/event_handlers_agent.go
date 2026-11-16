@@ -1144,7 +1144,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 
 	// Complete the current turn
 	s.reconcileCompletedCIAutoFixTurn(ctx, data.TaskID, data.SessionID, turnAtEventFire)
-	completionCtx := withWorkflowEffect(ctx, workflowEffectForEvent(data))
+	completionCtx := withWorkflowEffect(ctx, workflowEffectForCompletion(data, turnAtEventFire))
 	if turnAtEventFire != "" {
 		fixedResourceKey := s.fixedResourceForCleanCompletion(completionCtx, data, turnAtEventFire)
 		if err := s.completeTurnForTaskSessionCheckedOwned(
@@ -2891,7 +2891,7 @@ func (s *Service) finishAgentCompleted(
 	if !completionFollowUp {
 		s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
 	}
-	completionCtx := withWorkflowEffect(context.WithoutCancel(ctx), workflowEffectForEvent(data))
+	completionCtx := withWorkflowEffect(context.WithoutCancel(ctx), workflowEffectForCompletion(data, s.completedEventClosingTurn(ctx, data)))
 	if data.TurnID != "" {
 		fixedResourceKey := s.fixedResourceForCleanCompletion(completionCtx, data, data.TurnID)
 		if err := s.completeTurnForTaskSessionCheckedOwned(

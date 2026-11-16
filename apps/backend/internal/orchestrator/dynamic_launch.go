@@ -1875,19 +1875,7 @@ func (s *Service) launchPreparedDynamicRelaunch(
 		seam5Res.consume()
 		return dynamicRelaunchSucceeded, nil
 	case dynamicRelaunchLaunchModePrepared:
-		officeAgentProfileID := data.AgentProfileID
-		if officeAgentProfileID == "" {
-			officeAgentProfileID = session.AgentProfileID
-		}
-		_, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, data.SessionID, executor.LaunchOptions{
-			AgentProfileID:       executionProfileID,
-			OfficeAgentProfileID: officeAgentProfileID,
-			ExecutorID:           "",
-			Prompt:               prompt.text,
-			StartAgent:           true,
-			McpMode:              executor.McpModeOffice,
-		})
-		if err != nil {
+		if err := s.launchOfficeDynamicRelaunch(ctx, data, task, session, prompt, executionProfileID); err != nil {
 			return dynamicRelaunchFailed, err
 		}
 		seam5Res.consume()
@@ -1895,6 +1883,44 @@ func (s *Service) launchPreparedDynamicRelaunch(
 	default:
 		return dynamicRelaunchFailed, nil
 	}
+}
+
+// launchOfficeDynamicRelaunch starts the Office successor on the prepared
+// session. Like the first Office launch, the successor prompt owns a durable
+// turn: without one, its events and completion carry no turn ID, so the
+// completion's workflow effect has no key and on_turn_complete cannot run.
+func (s *Service) launchOfficeDynamicRelaunch(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	task *v1.Task,
+	session *models.TaskSession,
+	prompt capturedPrompt,
+	executionProfileID string,
+) error {
+	officeAgentProfileID := data.AgentProfileID
+	if officeAgentProfileID == "" {
+		officeAgentProfileID = session.AgentProfileID
+	}
+	turnID, turnCreated := s.startTurnForSessionWithOwnership(ctx, data.SessionID)
+	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, data.SessionID, executor.LaunchOptions{
+		AgentProfileID:       executionProfileID,
+		OfficeAgentProfileID: officeAgentProfileID,
+		ExecutorID:           "",
+		TurnID:               turnID,
+		Prompt:               prompt.text,
+		StartAgent:           true,
+		McpMode:              executor.McpModeOffice,
+	})
+	if err != nil {
+		if turnCreated {
+			s.completeTurnIfCurrent(ctx, data.SessionID, turnID)
+		}
+		return err
+	}
+	if execution != nil {
+		execution.TurnID = turnID
+	}
+	return nil
 }
 
 func (s *Service) startDynamicRelaunchCreatedSession(
