@@ -9,8 +9,9 @@ requirements:
 
 ## Purpose and boundaries
 
-The integration dispatch adapter supplies a usable agent profile before entering the existing task launch flow.
-It also records genuine launch failures through the existing task marker.
+The integration dispatch adapter supplies omitted watcher profiles through existing task-owned resolution and launch policy.
+Explicit session targets retain authority to resolve their source-step profile.
+The adapter also records genuine launch failures through the existing task marker.
 This design reuses task-owned services. It introduces no new resolution policy or persistence boundary.
 
 ## Requirement mapping
@@ -37,7 +38,7 @@ The adapter must not mark watch inputs as `ProfileExplicit` selector intent.
 
 When that input is empty, the adapter loads the persisted task and calls `resolveTaskAgentProfile`.
 This reuses step replacements, explicit-target exclusions, workflow defaults, task metadata, assignee, and workspace fallback.
-Missing tasks and repository errors return contextual errors. If this fallback returns no profile, the adapter passes an empty profile to `StartTask` so explicit `SessionTarget` routing can resolve its source profile first. If the existing launch path still cannot resolve a profile, it returns `executor.ErrNoAgentProfileID` before creating a session.
+Missing tasks and repository errors return contextual errors. When the effective step has an explicit `SessionTarget`, the adapter passes an empty profile to `StartTask`, even if task or workspace fallback selected one. This lets target routing resolve and validate its source profile before profile validation. If that route cannot resolve a profile, the existing launch path returns `executor.ErrNoAgentProfileID` before creating a session.
 An unavailable nonempty profile remains subject to existing validation and deleted-profile handling.
 
 The adapter passes `ExecutorProfileID` unchanged. `StartTask` already reads saved executor metadata.
@@ -92,7 +93,7 @@ Omitted watch profiles resolve at dispatch time. Existing failed tasks require a
 
 Drive the production adapter with the SQLite test repository and real scheduler/executor preparation.
 Include a Sentry source event through the coordinator. A test of `agentprofile.Resolve` alone cannot prove adapter wiring.
-Add focused adapter cases for default selection, configured profiles, and failure marking.
+Add focused adapter cases for default selection, configured profiles, and failure marking. Cover an explicit target to an earlier fixed-profile step with no existing session and an unusable workspace fallback; the source profile must launch and the task must remain unmarked.
 Reuse existing resolver, coordinator, and marker lifecycle tests for unchanged behavior. Include capacity deferral and a mixed-session marker guard.
 
 Use the existing Sentry mock endpoints and watch trigger for browser coverage.

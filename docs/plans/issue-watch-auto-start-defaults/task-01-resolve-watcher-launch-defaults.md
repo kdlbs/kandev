@@ -133,10 +133,20 @@ The three focused Go regression functions, shared desktop/phone watcher flows, a
 Verification on 2026-11-16:
 
 - The focused Go tests failed before the production change for the expected fallback and missing-marker behavior, then passed after the change. The race-enabled watcher, coordinator, resolver, task-creation, and marker-clear contract set passed.
-- The scoped `scripts/lint-go-changed` command reported zero issues but exceeded its fixed five-minute timeout. The equivalent direct package lint with a ten-minute timeout passed with `0 issues`.
+- In initial implementation validation, the scoped lint wrapper reported zero issues but exceeded its fixed five-minute timeout. The equivalent direct package lint passed with `0 issues`; the review follow-up scoped wrapper also completed with `0 issues`.
 - Desktop Chromium passed 4 tests, including the new watcher flows and existing task-marker checks. Mobile Chrome passed 2 watcher-flow tests. Both managed runs built the backend and Vite E2E assets.
 - Public-doc validation tests passed (63 tests), and all 55 public pages validated. The PR-documentation preflight returned `covered` with no reference errors.
-- The specification catalog validated 452 decisions and 2,016 specifications; all 36 spec-linter tests and the full spec lint passed.
+- The specification catalog validated 454 decisions and 2,023 specifications; all 36 spec-linter tests and the full spec lint passed.
 - `git diff --check` passed.
 
-Review follow-up: added a regression for a watcher with no watch, workspace, or workflow profile whose destination targets an earlier fixed-profile step with no existing session. It asserts the source profile launches and the task remains unmarked. The existing unresolved-profile case continues to assert no session and a failure marker. `(cd apps/backend && go test -trimpath -tags fts5 ./internal/orchestrator -run '^TestWatcherAutoStart_' -count=1)` passed. The public integration reference now states that explicit workflow targets keep routing authority.
+Review follow-up: an explicit target owns profile selection even when an unusable workspace default is available. The adapter clears the fallback for effective steps with a `SessionTarget`, allowing `StartTask` to resolve and validate the earlier source step before validating a fallback. The regression uses no watch, workflow, or existing session profile, an unusable workspace default, and an earlier fixed-profile target; it asserts the source profile launches with no failure marker. The existing unresolved-profile case still asserts no session and a failure marker. The shared browser flow now requires the launched session to reach `STARTING` or `RUNNING` while preserving its profile assertion.
+
+Review follow-up verification on 2026-11-16:
+
+- `(cd apps/backend && go test -trimpath -tags fts5 ./internal/orchestrator -run '^TestWatcherAutoStart_' -count=1)`: passed.
+- `(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/orchestrator -run 'TestWatcherAutoStart_|TestCoordinator_|TestWatcherDispatchCoordinator_|TestResolveTaskAgentProfile_|TestCreateIssueTask_|TestSessionStartClearsAutoStartFailedMarker' -count=1)`: passed.
+- `(cd apps/web && pnpm e2e:run --project chromium tests/integrations/watcher-auto-start-defaults.spec.ts tests/task/task-auto-start-failed-icon.spec.ts)`: 4 passed.
+- `(cd apps/web && pnpm e2e:run --project mobile-chrome tests/integrations/mobile-watcher-auto-start-defaults.spec.ts)`: 2 passed.
+- `bash scripts/lint-go-changed apps/backend/internal/orchestrator/watcher_dispatch_wiring.go apps/backend/internal/orchestrator/watcher_auto_start_defaults_test.go`: `0 issues`.
+- `python3 scripts/list-docs.py validate`: 454 decisions and 2,023 specifications validated; `python3 scripts/lint-spec-files.test.py`: 36 tests passed; `python3 scripts/lint-spec-files.py --all`: passed.
+- Both managed E2E runs built the backend and Vite assets. `gofmt -l` and Prettier checks passed.

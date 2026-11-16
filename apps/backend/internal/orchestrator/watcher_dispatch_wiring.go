@@ -33,7 +33,12 @@ func (s serviceTaskStarter) Start(ctx context.Context, taskID, workflowStepID, p
 			return err
 		}
 
-		agentProfileID, _ = s.svc.resolveTaskAgentProfile(ctx, task)
+		fallbackProfileID, step := s.svc.resolveTaskAgentProfile(ctx, task)
+		agentProfileID = fallbackProfileID
+		if step != nil && step.SessionTarget != nil {
+			// The target owns profile selection, so let StartTask resolve it before validation.
+			agentProfileID = ""
+		}
 	}
 
 	_, err := s.svc.StartTask(

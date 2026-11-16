@@ -53,7 +53,7 @@ Out of scope: retries, old-task repair, required watch fields, watch `last_error
 
 Change `serviceTaskStarter.Start` in `apps/backend/internal/orchestrator/watcher_dispatch_wiring.go`.
 For an empty agent input, load the task and reuse `resolveTaskAgentProfile`.
-Return missing-task and repository errors before preparation. If task profile resolution is empty, pass that result to `StartTask` so explicit session-target routing can select its source profile before the existing launch path reports a genuinely unresolved profile.
+Return missing-task and repository errors before preparation. When the effective step has an explicit `SessionTarget`, pass an empty profile to `StartTask`, even if task or workspace fallback returned a profile, so target routing selects and validates its source profile first. Without an explicit target, pass the resolved fallback as usual; the existing launch path reports a genuinely unresolved profile.
 Preserve nonempty inputs, executor selection, workflow targets, `autoStart=true`, and existing validation.
 
 For each genuine error, reuse `setTaskAutoStartFailedMarker`. Exclude `ErrCeilingLaunchDeferred`.
@@ -81,7 +81,7 @@ Added `apps/backend/internal/orchestrator/watcher_auto_start_defaults_test.go` w
 | Criteria | Tests and assertions |
 | --- | --- |
 | `.1`, `.3` | `TestWatcherAutoStart_UsesWorkspaceDefault`: real Sentry source, no selected profiles, one launched session, expected agent and executor |
-| `.2`, `.3` | `TestWatcherAutoStart_PreservesConfiguredProfiles`: table cases for explicit watch inputs and step/workflow overrides |
+| `.2`, `.3` | `TestWatcherAutoStart_PreservesConfiguredProfiles`: explicit watch inputs, step/workflow overrides, and explicit targets to an earlier fixed-profile step despite an unusable workspace fallback |
 | `.4`, `.5`, `.6`, `.8` | `TestWatcherAutoStart_ReportsFailure`: table cases for no final profile, task lookup failure, launch error, capacity deferral, and an active sibling |
 
 The failure cases assert the persisted marker and task event. The capacity case asserts the marker remains absent.
@@ -125,17 +125,27 @@ Implementation completed on 2026-11-16. The three diagnostic results appear in E
 
 Verification passed on 2026-11-16:
 
-- `python3 scripts/list-docs.py validate`: 452 decisions and 2,016 specifications validated.
+- `python3 scripts/list-docs.py validate`: 454 decisions and 2,023 specifications validated.
 - `python3 scripts/lint-spec-files.test.py`: 36 tests passed.
 - `python3 scripts/lint-spec-files.py --all`: all specification files passed.
 - The work order's local PR-documentation preflight returned `covered`, with no reference errors.
 - `git diff --check` passed.
 - `python3 scripts/list-docs.py specs --system integrations --text issue-watch-auto-start --format paths` found both new specification files.
 - Focused watcher regression tests passed after the expected pre-fix failures. The race-enabled watcher, coordinator, resolver, task-creation, and marker-clear contract set passed.
-- The scoped Go lint wrapper reached its fixed five-minute timeout after reporting zero issues. Its equivalent direct package lint with a ten-minute timeout passed with `0 issues`.
+- The scoped Go lint wrapper passed with `0 issues` in the review follow-up.
 - Desktop Chromium passed 4 tests, including the two watcher flows and existing task-marker checks. Mobile Chrome passed 2 watcher-flow tests. Both managed runs built the backend and Vite E2E assets.
 - `node --test scripts/validate-public-docs.test.mjs`: 63 tests passed; `node scripts/validate-public-docs.mjs`: 55 pages validated.
 - The local PR-documentation preflight returned `covered`, with no reference errors.
+
+Review follow-up verification on 2026-11-16:
+
+- `(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/orchestrator -run 'TestWatcherAutoStart_|TestCoordinator_|TestWatcherDispatchCoordinator_|TestResolveTaskAgentProfile_|TestCreateIssueTask_|TestSessionStartClearsAutoStartFailedMarker' -count=1)`: passed.
+- `(cd apps/web && pnpm e2e:run --project chromium tests/integrations/watcher-auto-start-defaults.spec.ts tests/task/task-auto-start-failed-icon.spec.ts)`: 4 passed.
+- `(cd apps/web && pnpm e2e:run --project mobile-chrome tests/integrations/mobile-watcher-auto-start-defaults.spec.ts)`: 2 passed.
+- `(cd apps/backend && go test -trimpath -tags fts5 ./internal/orchestrator -run '^TestWatcherAutoStart_' -count=1)`: passed after the adapter correction.
+- `bash scripts/lint-go-changed apps/backend/internal/orchestrator/watcher_dispatch_wiring.go apps/backend/internal/orchestrator/watcher_auto_start_defaults_test.go`: `0 issues`.
+- `python3 scripts/list-docs.py validate`: 454 decisions and 2,023 specifications validated; `python3 scripts/lint-spec-files.test.py`: 36 tests passed; `python3 scripts/lint-spec-files.py --all`: passed.
+- Both managed E2E runs built the backend and Vite assets. `gofmt -l` and Prettier checks passed.
 
 ## Risks
 

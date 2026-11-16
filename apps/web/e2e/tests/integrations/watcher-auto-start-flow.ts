@@ -165,7 +165,9 @@ export async function exerciseWatcherAutoStartFlow({
     await expect
       .poll(async () => {
         const { sessions } = await api.listTaskSessions(taskId);
-        return sessions.length === 1 && sessions[0].agent_profile_id === seedData.agentProfileId
+        return sessions.length === 1 &&
+          sessions[0].agent_profile_id === seedData.agentProfileId &&
+          (sessions[0].state === "STARTING" || sessions[0].state === "RUNNING")
           ? sessions[0]
           : null;
       })

@@ -219,10 +219,12 @@ func TestWatcherAutoStart_PreservesConfiguredProfiles(t *testing.T) {
 	const executorProfileID = "watch-executor-profile"
 	cases := []struct {
 		name                         string
+		workspaceAgentProfileID      string
 		watchAgentProfileID          string
 		stepAgentProfileID           string
 		workflowAgentProfileID       string
 		sessionTargetSourceProfileID string
+		validProfileID               string
 		wantAgentProfileID           string
 	}{
 		{
@@ -241,17 +243,24 @@ func TestWatcherAutoStart_PreservesConfiguredProfiles(t *testing.T) {
 		},
 		{
 			name:                         "session target resolves earlier fixed source profile",
-			sessionTargetSourceProfileID: "source-agent", wantAgentProfileID: "source-agent",
+			workspaceAgentProfileID:      "unavailable-workspace-agent",
+			sessionTargetSourceProfileID: "source-agent",
+			validProfileID:               "source-agent",
+			wantAgentProfileID:           "source-agent",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newWatcherAutoStartFixture(t, watcherAutoStartOptions{
+				workspaceAgentProfileID:      tc.workspaceAgentProfileID,
 				executorProfileID:            executorProfileID,
 				stepAgentProfileID:           tc.stepAgentProfileID,
 				workflowAgentProfileID:       tc.workflowAgentProfileID,
 				sessionTargetSourceProfileID: tc.sessionTargetSourceProfileID,
 			})
+			if tc.validProfileID != "" {
+				f.svc.SetProfileExecutionResolver(newExplicitOnlyProfileExecutionResolver(t, tc.validProfileID))
+			}
 			f.event.AgentProfileID = tc.watchAgentProfileID
 			f.dispatch()
 
