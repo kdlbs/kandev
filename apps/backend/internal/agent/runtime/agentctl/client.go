@@ -35,13 +35,14 @@ type Client struct {
 	httpClient  *http.Client
 	// longRunningHTTPClient is used for long-running operations like inference prompts.
 	// It has a much longer timeout (5 minutes) to accommodate LLM API calls.
-	longRunningHTTPClient *http.Client
-	logger                *logger.Logger
-	executionID           string
-	sessionID             string
-	authToken             string // shared secret for Bearer auth
-	processGeneration     uint64
-	runtimeGuard          *runtimeBindingGuard
+	longRunningHTTPClient  *http.Client
+	logger                 *logger.Logger
+	executionID            string
+	sessionID              string
+	authToken              string // shared secret for Bearer auth
+	builtinMCPScopedRoutes bool
+	processGeneration      uint64
+	runtimeGuard           *runtimeBindingGuard
 
 	// Optional trace context for session-scoped spans in background goroutines.
 	// When set, stream read loops use this as parent context for tracing instead of context.Background().
@@ -217,6 +218,14 @@ func WithExecutionID(id string) ClientOption {
 func WithSessionID(id string) ClientOption {
 	return func(c *Client) {
 		c.sessionID = id
+	}
+}
+
+// WithBuiltinMCPScopedRoutes records the effective route mode accepted by
+// this helper instance's create response or authenticated InstanceInfo.
+func WithBuiltinMCPScopedRoutes(enabled bool) ClientOption {
+	return func(c *Client) {
+		c.builtinMCPScopedRoutes = enabled
 	}
 }
 
@@ -673,6 +682,15 @@ func (c *Client) InstanceID() string {
 		return ""
 	}
 	return c.executionID
+}
+
+// BuiltinMCPScopedRoutes reports the effective native MCP route mode accepted
+// for this helper instance. It never derives the mode from its identity.
+func (c *Client) BuiltinMCPScopedRoutes() bool {
+	if c == nil {
+		return false
+	}
+	return c.builtinMCPScopedRoutes
 }
 
 // ConfigureAgent configures the agent command. Must be called before Start().

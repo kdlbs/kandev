@@ -83,6 +83,14 @@ func TestProjectMCPFilesOwnerPrepareMergeAndCleanup(t *testing.T) {
 	require.Greater(t, owner.Target().Generation, uint64(2), "cleanup advances the generation fence")
 }
 
+func TestBuiltinMCPInstanceProjectAndPassthroughTargetsUseScopedURL(t *testing.T) {
+	manager, _ := newProjectMCPFilesTestManager(t)
+	manager.cfg.ScopedMCPRoutes = true
+	target := manager.ProjectMCPFiles().Target()
+	require.Equal(t, "http://127.0.0.1:43210/i/instance-1/mcp", target.MCPURL)
+	require.Equal(t, target.MCPURL, manager.Passthrough().Snapshot().MCPURL)
+}
+
 func TestProjectMCPFilesOwnerPreservesUserFile(t *testing.T) {
 	manager, workspace := newProjectMCPFilesTestManager(t)
 	path := filepath.Join(workspace, ".pi", "mcp.json")

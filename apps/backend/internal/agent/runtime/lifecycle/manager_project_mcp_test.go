@@ -30,6 +30,7 @@ func TestMaterializeRuntimeProjectMCPForPiWritesProjectFile(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 45678,
 	}
+	attachLegacyMCPRouteClient(execution)
 	agentConfig, ok := mgr.registry.Get("pi-acp")
 	if !ok {
 		t.Fatal("pi-acp agent missing from test registry")
@@ -73,6 +74,7 @@ func TestMaterializeRuntimeProjectMCPForCursorWritesProjectFile(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 45678,
 	}
+	attachLegacyMCPRouteClient(execution)
 	agentConfig, ok := mgr.registry.Get("cursor-acp")
 	if !ok {
 		t.Fatal("cursor-acp agent missing from test registry")
@@ -142,6 +144,7 @@ func TestPromoteWorkspaceExecutionResetsCommandWhenProjectMCPFails(t *testing.T)
 		metadata:             map[string]interface{}{},
 		standalonePort:       45678,
 	}
+	attachLegacyMCPRouteClient(execution)
 	writer := &captureExecutorRunningWriter{}
 	mgr.SetExecutorRunningWriter(writer)
 	req := &LaunchRequest{
@@ -227,6 +230,7 @@ func TestPromoteWorkspaceExecutionUsesResolvedExecutionProfileForCursorAuth(t *t
 		metadata:             map[string]interface{}{},
 		standalonePort:       45678,
 	}
+	attachLegacyMCPRouteClient(execution)
 	execution.setMetadataValue("executor_mcp_policy", mcpconfig.Policy{AllowHTTP: true})
 	req := &LaunchRequest{
 		TaskID:             "task-1",
@@ -293,6 +297,7 @@ func TestMaterializeRuntimeProjectMCP_DiscoversPluginServers(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 45678,
 	}
+	attachLegacyMCPRouteClient(execution)
 	agentConfig, ok := mgr.registry.Get("cursor-acp")
 	if !ok {
 		t.Fatal("cursor-acp agent missing from test registry")

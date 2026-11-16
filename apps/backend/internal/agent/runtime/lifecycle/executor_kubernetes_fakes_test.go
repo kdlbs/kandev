@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 )
 
 func setManagedKubernetesWorkspace(req *ExecutorCreateRequest) {
@@ -454,17 +455,96 @@ func startKubernetesAgentctlServerWithToken(
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	if control {
+		var requestMu sync.Mutex
+		var instanceRequest agentctl.CreateInstanceRequest
 		mux.HandleFunc("/auth/handshake", func(w http.ResponseWriter, request *http.Request) {
 			var body map[string]string
 			require.NoError(t, json.NewDecoder(request.Body).Decode(&body))
 			require.NotEmpty(t, body["nonce"])
 			_ = json.NewEncoder(w).Encode(map[string]string{"token": token})
 		})
-		mux.HandleFunc("/api/v1/instances", func(w http.ResponseWriter, _ *http.Request) {
+		mux.HandleFunc("/api/v1/instances", func(w http.ResponseWriter, request *http.Request) {
+			if request.Method != http.MethodPost {
+				http.NotFound(w, request)
+				return
+			}
+			var createdRequest agentctl.CreateInstanceRequest
+			if err := json.NewDecoder(request.Body).Decode(&createdRequest); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			requestMu.Lock()
+			instanceRequest = createdRequest
+			requestMu.Unlock()
 			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "instance-1", "port": instanceRemotePort})
+			_ = json.NewEncoder(w).Encode(agentctl.CreateInstanceResponse{
+				ID: "instance-1", Port: instanceRemotePort, ScopedMCPRoutes: createdRequest.ScopedMCPRoutes,
+			})
+		})
+		mux.HandleFunc("/api/v1/instances/", func(w http.ResponseWriter, request *http.Request) {
+			if request.Method != http.MethodGet {
+				http.NotFound(w, request)
+				return
+			}
+			if request.Header.Get("Authorization") != "Bearer "+token {
+				http.Error(w, "missing control authentication", http.StatusUnauthorized)
+				return
+			}
+			instanceID := strings.TrimPrefix(request.URL.Path, "/api/v1/instances/")
+			requestMu.Lock()
+			createdRequest := instanceRequest
+			requestMu.Unlock()
+			if instanceID != "instance-1" {
+				http.NotFound(w, request)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(agentctl.InstanceInfo{
+				ID: instanceID, Port: instanceRemotePort, Status: "running", WorkspacePath: createdRequest.WorkspacePath,
+				SessionID: createdRequest.SessionID, TaskID: createdRequest.TaskID,
+				ScopedMCPRoutes: createdRequest.ScopedMCPRoutes,
+			})
 		})
 	}
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	_, rawPort, err := net.SplitHostPort(server.Listener.Addr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(rawPort)
+	require.NoError(t, err)
+	return uint16(port)
+}
+
+func startKubernetesAgentctlServerWithInstanceInfo(t *testing.T, token, handshakeToken string, info agentctl.InstanceInfo) uint16 {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("/auth/handshake", func(w http.ResponseWriter, request *http.Request) {
+		var body map[string]string
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&body))
+		require.NotEmpty(t, body["nonce"])
+		_ = json.NewEncoder(w).Encode(map[string]string{"token": handshakeToken})
+	})
+	mux.HandleFunc("/api/v1/instances", func(w http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost {
+			http.NotFound(w, request)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"id": info.ID, "port": info.Port, "scoped_mcp_routes": info.ScopedMCPRoutes,
+		})
+	})
+	mux.HandleFunc("/api/v1/instances/"+info.ID, func(w http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet {
+			http.NotFound(w, request)
+			return
+		}
+		if request.Header.Get("Authorization") != "Bearer "+token {
+			http.Error(w, "missing control authentication", http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(info)
+	})
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	_, rawPort, err := net.SplitHostPort(server.Listener.Addr().String())

@@ -268,16 +268,11 @@ func (r *SSHExecutor) readSSHRecoveryInstanceInfo(
 ) (*agentctl.InstanceInfo, int, error) {
 	controlPort := identity.controlPort
 	if controlPort == 0 {
-		logPath := shellQuote(identity.sessionDir + "/agentctl.log")
-		command := "head -c 32768 " + logPath + " 2>/dev/null; printf '\\n'; tail -c 32768 " + logPath + " 2>/dev/null"
-		output, _, err := runSSHCommand(ctx, client, command)
-		if err != nil {
-			return nil, 0, fmt.Errorf("read exact agentctl session log: %w", err)
-		}
-		controlPort, err = latestSSHAgentctlControlPort(output)
+		discoveredPort, err := r.readSSHRecoveryControlPortFromLog(ctx, client, identity.sessionDir)
 		if err != nil {
 			return nil, 0, err
 		}
+		controlPort = discoveredPort
 	}
 	forwarder, err := StartPortForward(client, controlPort, r.logger)
 	if err != nil {
@@ -296,6 +291,24 @@ func (r *SSHExecutor) readSSHRecoveryInstanceInfo(
 		return nil, 0, errors.New("live agentctl metadata does not match the persisted SSH instance")
 	}
 	return info, controlPort, nil
+}
+
+func (r *SSHExecutor) readSSHRecoveryControlPortFromLog(ctx context.Context, client *ssh.Client, sessionDir string) (int, error) {
+	sessionDir = strings.TrimSpace(sessionDir)
+	if sessionDir == "" {
+		return 0, errors.New("persisted agentctl session directory is unavailable")
+	}
+	logPath := shellQuote(sessionDir + "/agentctl.log")
+	command := "head -c 32768 " + logPath + " 2>/dev/null; printf '\\n'; tail -c 32768 " + logPath + " 2>/dev/null"
+	output, _, err := runSSHCommand(ctx, client, command)
+	if err != nil {
+		return 0, fmt.Errorf("read exact agentctl session log: %w", err)
+	}
+	controlPort, err := latestSSHAgentctlControlPort(output)
+	if err != nil {
+		return 0, err
+	}
+	return controlPort, nil
 }
 
 func latestSSHAgentctlControlPort(output string) (int, error) {
@@ -382,9 +395,10 @@ func (r *SSHExecutor) preparedSSHRecoveryState(
 		client:    client,
 		forwarder: forwarder,
 		agentctlClient: agentctl.NewClient(sshAgentctlLoopbackHost, forwarder.LocalPort(), r.logger,
-			agentctl.WithExecutionID(identity.nativeID),
+			agentctl.WithExecutionID(instanceInfo.ID),
 			agentctl.WithSessionID(record.SessionID),
-			agentctl.WithAuthToken(identity.authToken)),
+			agentctl.WithAuthToken(identity.authToken),
+			agentctl.WithBuiltinMCPScopedRoutes(instanceInfo.ScopedMCPRoutes)),
 		pid:              identity.pid,
 		remoteDir:        identity.sessionDir,
 		remoteTaskDir:    identity.taskDir,

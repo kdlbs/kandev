@@ -5,25 +5,38 @@ import (
 	"fmt"
 	"strings"
 
-	config "github.com/kandev/kandev/internal/agentctl/server/config"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	agentctlconfig "github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	p "github.com/kandev/kandev/internal/mcp/profile"
 )
 
-func composeEffectiveMCPServers(execution *AgentExecution, profile []types.McpServer, user map[string]json.RawMessage, imported map[string]types.McpServer, host string) (map[string]any, map[string]string, error) {
+func composeEffectiveMCPServers(execution *AgentExecution, client *agentctl.Client, profile []types.McpServer, user map[string]json.RawMessage, imported map[string]types.McpServer, host string) (map[string]any, map[string]string, error) {
+	port := passthroughMCPConfigPort(execution)
+	coreURL := ""
+	if port > 0 {
+		if client == nil {
+			return nil, nil, fmt.Errorf("agent helper is unavailable for Cursor MCP delivery")
+		}
+		instanceID, scoped := builtinMCPRouteMode(client)
+		var err error
+		coreURL, err = agentctlconfig.MCPServerURLForInstance(host, port, instanceID, scoped, builtinCoreMCPPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("build Cursor MCP endpoint: %w", err)
+		}
+	}
 	if _, bound := execution.metadataValue(p.BuiltinBindingMetadataKey); !bound {
-		servers, ownership := composeLegacyMCPServers(execution, profile, user, imported, host)
+		servers, ownership := composeLegacyMCPServers(execution, profile, user, imported, coreURL)
 		return servers, ownership, nil
 	}
 	if err := validateBuiltinCursorNames(profile, user, imported); err != nil {
 		return nil, nil, err
 	}
-	coreURL := config.MCPServerURL(host, passthroughMCPConfigPort(execution), builtinCoreMCPPath)
-	native, err := builtinPassthroughMCPServers(execution, coreURL, nil)
+	native, err := builtinPassthroughMCPServers(execution, client, coreURL, nil)
 	if err != nil {
 		return nil, nil, err
 	}
-	servers, ownership := composeLegacyMCPServers(execution, profile, user, imported, host)
+	servers, ownership := composeLegacyMCPServers(execution, profile, user, imported, coreURL)
 	for _, server := range native {
 		entry := map[string]any{"url": server.URL}
 		servers[server.Name] = entry
