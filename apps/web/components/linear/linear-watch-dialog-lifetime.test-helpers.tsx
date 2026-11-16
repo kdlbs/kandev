@@ -250,7 +250,9 @@ export async function choose(label: string, option: string) {
     .parentElement!.querySelector('button[role="combobox"]')!;
   await waitFor(() => expect(trigger).toHaveProperty("disabled", false));
   fireEvent.click(trigger);
-  fireEvent.click(await screen.findByRole("option", { name: option }));
+  const options = document.querySelector('[role="listbox"]');
+  if (!options) throw new Error("Select listbox did not open");
+  fireEvent.click(await within(options as HTMLElement).findByText(option, { exact: true }));
   await waitFor(() => expect(document.activeElement).toBe(trigger));
 }
 export async function openCreate() {

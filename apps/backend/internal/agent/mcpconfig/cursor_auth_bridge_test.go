@@ -322,7 +322,7 @@ func TestAggregateCursorMCPAuthExcludesLegacyConfiguredTaskRootSlug(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacyTaskSlug := DeriveCursorProjectSlug(canonicalTaskStorage) + "--tasks-dir-task-123-repository"
+	legacyTaskSlug := deriveLegacyCursorProjectSlug(filepath.Join(canonicalTaskStorage, ".tasks_dir", "task-123", "repository"))
 	writeCursorAuth(t, projects, legacyTaskSlug, `{"legacy-task":{"token":"excluded"}}`, time.Now())
 	writeCursorAuth(t, projects, "ordinary-project", `{"ordinary":{"token":"included"}}`, time.Now())
 

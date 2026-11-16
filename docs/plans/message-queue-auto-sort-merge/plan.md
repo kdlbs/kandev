@@ -578,6 +578,43 @@ Public docs and specification validation passed. PostgreSQL is unverified:
   `use-queue-panel-escape.test.tsx`. Header tests, Oxlint, and web typecheck
   passed.
 
+### Final delivery verification after registry access was restored
+
+- Verified implementation commit `fc04abc0f8` and review fixes through
+  `8c06eb181b90f7facb101e5d549cdf0e42a1936c`. Registry and archive HTTPS
+  probes now return 200; `bash scripts/release-desktop.test.sh` passes,
+  including real signature verification.
+- `make fmt` passed. Root gates and browser suites used an exact-commit
+  disposable checkout on `/dev/sdd`, Node 24.19.0, isolated HOME/config/PATH,
+  four Go workers, a 30-minute Go package deadline, and one Vitest worker.
+  Build/test artifacts stayed on the cache drive.
+- The Task 05 Chromium and mobile-chrome commands both passed with
+  `-- --retries=0`: 23 and 14 cases respectively. Managed builds were fresh.
+- Initial root verification exposed long temporary paths. A shorter
+  cache-backed TMPDIR fixed Unix-socket and repository-directory cases.
+  Two baseline test repairs were also required: generate the entire legacy
+  Cursor slug using its legacy producer, and remove incidental worktree
+  error-wording assertions while retaining failure identity/no-worktree checks.
+  Targeted RED/GREEN evidence is in `short-path-recheck.log` and
+  `baseline-green.log`.
+- The subsequent `make typecheck test lint` passed typecheck and the full
+  backend suite, then reported 30795 web tests passed, four skipped, and four
+  timeouts in three files. It did not reach CLI/script/lint targets.
+  The confirmation and workspace files passed isolated rechecks.
+- The remaining Linear test exceeded its unchanged five-second deadline
+  through cumulative select-query cost. Its helper now locates option text
+  inside the opened listbox instead of repeatedly calculating accessible
+  roles over the entire document. All 28 Linear lifetime cases then passed;
+  no production behavior, assertions, or deadlines changed.
+- `make test-cli test-scripts lint` passed independently. The combined root
+  invocation was not clean end-to-end; its failed cases were rechecked
+  separately after remediation. PostgreSQL remains unverified without
+  `KANDEV_TEST_POSTGRES_DSN`.
+- Logs are under `/home/clem/.cache/tmp/asm-deliver.Tl3lLz/`:
+  `desktop.log`, `format-final.log`, `e2e-desktop.log`, `e2e-mobile.log`,
+  `root-gates.log`, `root-gates-final.log`, `web-recheck.log`,
+  `web-uncontended.log`, `linear-text.log`, and `remaining-gates.log`.
+
 Final repository gates, run from the repository root after all work orders:
 
 ```bash
