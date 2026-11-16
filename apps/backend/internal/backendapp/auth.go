@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/auth/authn"
 	authhttpapi "github.com/kandev/kandev/internal/auth/httpapi"
@@ -242,4 +243,13 @@ func wireExecutorAdmission(authSvc *auth.Service, taskSvc *taskservice.Service, 
 		return authSvc.IdentityForUser(ctx, userID)
 	})
 	manager.SetExecutorAdmission(taskSvc.PrepareExecutorAdmission)
+}
+
+// wireSharedProfileSecretGrantor lets the lifecycle manager confirm that the
+// user who shared an agent-profile secret is still an active account in a
+// usable organization. It never resolves a grantor while auth is disabled.
+func wireSharedProfileSecretGrantor(authSvc *auth.Service, manager interface {
+	SetSharedProfileSecretGrantorResolver(lifecycle.SharedProfileSecretGrantorResolver)
+}) {
+	manager.SetSharedProfileSecretGrantorResolver(authSvc.IdentityForUser)
 }
