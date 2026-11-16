@@ -1374,10 +1374,9 @@ func (r *SSHExecutor) readResumedSSHInstanceInfo(
 	connection *ssh.Client,
 	req *ExecutorCreateRequest,
 ) (*agentctl.InstanceInfo, error) {
-	controlPort := parseSSHControlPortMetadata(req.Metadata)
-	instancePort, err := strconv.Atoi(getMetadataString(req.Metadata, MetadataKeySSHRemoteAgentctlPort))
-	if controlPort <= 0 || err != nil || instancePort <= 0 {
-		return nil, errors.New("persisted agentctl control or instance port is unavailable")
+	controlPort, instancePort, err := r.resumedSSHAgentctlPorts(ctx, connection, req.Metadata)
+	if err != nil {
+		return nil, err
 	}
 	forward, err := StartPortForward(connection, controlPort, r.logger)
 	if err != nil {
@@ -1398,6 +1397,27 @@ func (r *SSHExecutor) readResumedSSHInstanceInfo(
 		return nil, errors.New("authenticated agentctl instance does not match the persisted owner")
 	}
 	return info, nil
+}
+
+func (r *SSHExecutor) resumedSSHAgentctlPorts(
+	ctx context.Context,
+	connection *ssh.Client,
+	metadata map[string]interface{},
+) (int, int, error) {
+	controlPort, controlPortValid := sshRecoveryControlPort(metadata)
+	instancePort, err := strconv.Atoi(getMetadataString(metadata, MetadataKeySSHRemoteAgentctlPort))
+	if !controlPortValid || err != nil || instancePort <= 0 {
+		return 0, 0, errors.New("persisted agentctl control or instance port is unavailable")
+	}
+	if controlPort == 0 {
+		controlPort, err = r.readSSHRecoveryControlPortFromLog(
+			ctx, connection, getMetadataString(metadata, MetadataKeySSHRemoteSessionDir),
+		)
+		if err != nil {
+			return 0, 0, err
+		}
+	}
+	return controlPort, instancePort, nil
 }
 
 func resumedSSHAgentctlInstanceID(req *ExecutorCreateRequest) string {

@@ -248,6 +248,13 @@ Implementation and verification results on 2026-11-16:
 - Task 02 focused lifecycle and API race tests, including retained plugin
   reopen, Kubernetes container restart/absence, and stale-route warning burst:
   passed. Helper/process package tests passed; changed-Go lint reported 0 issues.
+- Review follow-up lifecycle/process race tests passed for plugin recovery
+  identity, SSH resume control-port discovery, Kubernetes retained metadata,
+  and helper-scoped profile preparation. The updated Kubernetes fixture confirms
+  the retained route-mode read does not start a nonce handshake.
+- Complete lifecycle and helper-process race suites passed after updating
+  retained-instance fixtures, and `make -C apps/backend build` passed across
+  backend, agentctl, mock-agent, and debug binaries.
 - Task 03 mock-agent test passed; Chromium clarification/TUI suite: 36 passed;
   mobile clarification suite: 16 passed; SSH TUI MCP case: 1 passed with a
   real SSH fixture through the `containers` project in host-runner mode.

@@ -274,7 +274,8 @@ func (r *PluginRemoteExecutor) newRecoveredPluginExecutorInstance(ctx context.Co
 	if state.inventory.InstancePort == 0 {
 		return nil, errors.New("plugin executor inventory has no agentctl instance port")
 	}
-	info, err := r.readRecoveredAgentctlInstance(ctx, record, state, record.AgentExecutionID, record.TransientAuthToken)
+	runtimeIdentity := pluginExecutorRuntimeIdentity(state.inventory, record.AgentExecutionID)
+	info, err := r.readRecoveredAgentctlInstance(ctx, record, state, runtimeIdentity, record.TransientAuthToken)
 	if err != nil {
 		return nil, err
 	}

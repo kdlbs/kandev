@@ -552,6 +552,7 @@ func TestSSHPassthroughObserverReleasesTargetWhenClientIsAbsent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		mgr, _, execution := newPassthroughRunnerManager(t)
 		execution.ExecutorType = "ssh"
+		execution.agentctl = nil
 		execution.remotePassthrough.snapshot.PassthroughTarget = agentctltypes.PassthroughTarget{ProcessID: "process", Generation: 1}
 		mgr.observeRemotePassthrough(execution)
 		synctest.Wait()

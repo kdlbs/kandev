@@ -390,12 +390,11 @@ func newKubernetesAgentctlClient(
 	req *ExecutorCreateRequest,
 	remoteInstanceID, token string,
 	localPort uint16,
-	scopedMCPRoutes ...bool,
+	scopedMCPRoutes bool,
 ) *agentctl.Client {
-	scoped := len(scopedMCPRoutes) > 0 && scopedMCPRoutes[0]
 	return agentctl.NewClient(kubernetesControlHost, int(localPort), log,
 		agentctl.WithExecutionID(remoteInstanceID), agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(token),
-		agentctl.WithBuiltinMCPScopedRoutes(scoped))
+		agentctl.WithBuiltinMCPScopedRoutes(scopedMCPRoutes))
 }
 
 func cloneKubernetesMetadata(metadata map[string]interface{}) map[string]interface{} {

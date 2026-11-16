@@ -201,5 +201,19 @@ the nonce handshake for an absent helper, and still fails closed on 500 or
 malformed InstanceInfo. Stale native MCP requests remain 404/no-dispatch while
 their warning log is capped at five per minute per server.
 
+Review follow-up passed on 2026-11-16. Plugin startup recovery now reads
+InstanceInfo with the inventory's selected runtime identity. SSH resume
+discovers an omitted control port from the bounded session log before its
+authenticated InstanceInfo read and retains the returned route mode. Kubernetes
+client construction requires an explicit route-mode value, and profile
+preparation materializes package URLs for the selected helper identity.
+
+- `(cd apps/backend && go test -trimpath -race ./internal/agent/runtime/lifecycle -run '^(TestPluginExecutorRestartRecovery|TestSSHResumeReadsMissingControlPortFromExactSessionLog|TestSSHRecoveryReadsLegacyControlPortFromExactSessionLog|TestKubernetesRefreshRemoteInstanceReattachesDeadLocalClientWithoutHandshake|TestKubernetesCreateInstanceRehandshakesAfterMainContainerRestart|TestManagerReopensStoppedPluginExecutorByAttachingRetainedEnvironment)$' -count=1)`: passed.
+- `(cd apps/backend && go test -trimpath -race ./internal/agentctl/server/process -run '^(TestBuiltinPreparationUsesScopedHelperInstanceURLs|TestBuiltinPreparationAllowsUnusedHelperWithDefaultCommand)$' -count=1)`: passed.
+- `(cd apps/backend && go test -trimpath -race -timeout=15m ./internal/agent/runtime/lifecycle ./internal/agentctl/server/process)`: passed.
+- `make -C apps/backend build`: passed for backend, agentctl, mock-agent, and debug binaries.
+- `git diff --name-only -z -- '*.go' | xargs -0 -r bash scripts/lint-go-changed`: passed, 0 issues.
+- `git diff --check`: passed.
+
 The remaining installed-provider question/approval release gates are recorded
 under Task 03 and do not change this backend delivery order's completion.

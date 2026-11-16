@@ -205,7 +205,10 @@ func TestKubernetesCreateInstanceReconnectsExactPodWithFreshForward(t *testing.T
 	require.NoError(t, err)
 
 	reconnectExecs := &recordingKubernetesExec{}
-	reconnectForwards := &recordingKubernetesForwarder{localPorts: map[uint16]uint16{41001: instancePort}}
+	reconnectForwards := &recordingKubernetesForwarder{localPorts: map[uint16]uint16{
+		uint16(kubeexecutor.DefaultAgentctlPort): controlPort,
+		41001:                                    instancePort,
+	}}
 	restartedBackend := NewKubernetesExecutor(nil, newTestLogger())
 	restartedBackend.clientFactory = func(kubeexecutor.ExecutorConfig) (*kubernetesRuntimeClient, error) {
 		return &kubernetesRuntimeClient{
@@ -235,7 +238,7 @@ func TestKubernetesCreateInstanceReconnectsExactPodWithFreshForward(t *testing.T
 	require.Empty(t, reconnectExecs.requests)
 	require.Len(t, resources.createdPods, 1)
 	require.Len(t, resources.createdPVCs, 0)
-	require.Equal(t, []uint16{41001}, reconnectForwards.remotePorts())
+	require.Equal(t, []uint16{uint16(kubeexecutor.DefaultAgentctlPort), 41001}, reconnectForwards.remotePorts())
 }
 
 func TestKubernetesCreateInstanceRehandshakesAfterMainContainerRestart(t *testing.T) {
@@ -296,7 +299,10 @@ func TestKubernetesCreateInstanceUsesCurrentConnectionConfigOnReconnect(t *testi
 	created, err := initial.CreateInstance(context.Background(), validKubernetesCreateRequest())
 	require.NoError(t, err)
 
-	forwards := &recordingKubernetesForwarder{localPorts: map[uint16]uint16{41001: instancePort}}
+	forwards := &recordingKubernetesForwarder{localPorts: map[uint16]uint16{
+		uint16(kubeexecutor.DefaultAgentctlPort): controlPort,
+		41001:                                    instancePort,
+	}}
 	restarted := newFakeKubernetesExecutorWithForwarder(resources, &recordingKubernetesExec{}, forwards)
 	reconnectRequest := kubernetesReconnectRequest(created)
 	reconnectRequest.Metadata[MetadataKeyKubernetesAuthMode] = "kubeconfig"
@@ -325,7 +331,10 @@ func TestKubernetesCreateInstanceUsesRecordedNamespaceAfterConnectionNamespaceCh
 	})
 	created, err := initial.CreateInstance(context.Background(), validKubernetesCreateRequest())
 	require.NoError(t, err)
-	restarted := newFakeKubernetesExecutor(t, resources, &recordingKubernetesExec{}, map[uint16]uint16{41001: instancePort})
+	restarted := newFakeKubernetesExecutor(t, resources, &recordingKubernetesExec{}, map[uint16]uint16{
+		uint16(kubeexecutor.DefaultAgentctlPort): controlPort,
+		41001:                                    instancePort,
+	})
 	reconnectRequest := kubernetesReconnectRequest(created)
 	reconnectRequest.Metadata[MetadataKeyKubernetesConfigNamespace] = "other-agents"
 

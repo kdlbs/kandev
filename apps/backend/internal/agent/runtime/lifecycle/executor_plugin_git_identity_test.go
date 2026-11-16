@@ -176,13 +176,25 @@ func testPluginExecutorGitIdentityLifecycle(t *testing.T, retained, failSetup bo
 	var instance *ExecutorInstance
 	if retained {
 		operations.provisionResponse = nil
-		operations.connectionResponse.Lease.BaseUrl = processServer.server.URL
+		operations.connectionResponse.Lease.BaseUrl = "https://plugin.example.test"
 		operations.attachResponse.Resource = resource
 		loader := &pluginExecutorRecoveryProfileLoaderFake{profile: models.ExecutorProviderLaunchProfile{
 			Provider: provider, ProfileID: "profile-plugin-recovery",
 		}}
 		store := &pluginExecutorInventoryStoreFake{record: pluginExecutorRecoveryRecord(t, pluginExecutorPhaseReady, resource)}
 		runtime.SetRecoveryDependencies(loader, store)
+		runtime.recoveredAgentctlInfoReader = func(ctx context.Context, resolve agentctl.ConnectionLeaseResolver, _ *logger.Logger, executionID, token string) (*agentctl.InstanceInfo, error) {
+			if executionID != "execution-plugin-recovery" || token != "agentctl-secret" {
+				t.Fatalf("retained metadata identity=%q token=%q", executionID, token)
+			}
+			if _, err := resolve(ctx); err != nil {
+				return nil, err
+			}
+			return &agentctl.InstanceInfo{
+				ID: executionID, Port: testPluginExecutorInstancePort, Status: "running",
+				WorkspacePath: "/remote/workspace", SessionID: "session-plugin-recovery", TaskID: "task-plugin-recovery",
+			}, nil
+		}
 		request := &ExecutorCreateRequest{
 			InstanceID: "execution-plugin-recovery", TaskID: "task-plugin-recovery", SessionID: "session-plugin-recovery",
 			TaskEnvironmentID: "environment-plugin-recovery", PreviousExecutionID: "execution-plugin-recovery",
