@@ -5,6 +5,7 @@ requirements:
   - REQ-OFFICE-STALL-VISIBILITY-001
   - REQ-OFFICE-STALL-VISIBILITY-002
   - REQ-OFFICE-STALL-VISIBILITY-003
+  - REQ-OFFICE-STALL-VISIBILITY-004
 ---
 
 # Office Stall Visibility System Design
@@ -42,6 +43,7 @@ steps), and co-locating keeps one place to look for stall detection.
 | `REQ-OFFICE-STALL-VISIBILITY-001` | [Splitting detection from recovery](#splitting-detection-from-recovery) |
 | `REQ-OFFICE-STALL-VISIBILITY-002` | [Decision-waiting detector](#decision-waiting-detector) |
 | `REQ-OFFICE-STALL-VISIBILITY-003` | [Failure and recovery](#failure-and-recovery) |
+| `REQ-OFFICE-STALL-VISIBILITY-004` | [Dynamic successor completion](#dynamic-successor-completion) |
 
 ## Components and responsibilities
 
@@ -208,6 +210,27 @@ Every failure mode resolves to "do not surface, record the skip":
 The asymmetry with the existing watchdog is deliberate. The reclaim path fails
 closed because a wrong reclaim corrupts a live session; these passes fail closed
 because a wrong alert trains operators to ignore the signal.
+
+## Dynamic successor completion
+
+A durable delivery terminal is bound to a workflow effect keyed by its turn ID.
+An Office dynamic successor launched through `launchPreparedDynamicRelaunch`
+used to start without a turn, so its terminal carried full delivery identity
+and no turn ID; `processOnTurnCompleteViaEngineWithCause` then deferred
+`on_turn_complete` with an empty effect key, and the Office session parked
+`IDLE`, which neither watchdog gate scans.
+
+- `launchOfficeDynamicRelaunch` starts a turn with
+  `startTurnForSessionWithOwnership` and passes its ID in `LaunchOptions`, as the
+  first Office launch does. A failed launch completes the turn it created.
+- `workflowEffectForCompletion` binds a turn-less terminal with delivery identity
+  to the turn its handler closes: `turnAtEventFire` for `agent.ready`, and the
+  session's active turn (`completedEventClosingTurn`) for `agent.completed`. An
+  unresolved turn leaves the effect unbound, so the deferral stays fail-closed.
+- A deferral that remains calls `surfaceDeferredOfficeCompletion`, which reports
+  a stranded Office signal through `surfaceOfficeStalledSignal` with gate
+  `deferred_completion`. Like the watchdog gates, it reports only
+  (REQ-OFFICE-STALL-VISIBILITY-003).
 
 ## Persistence
 
