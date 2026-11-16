@@ -1208,34 +1208,6 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 		return fmt.Errorf("ssh resume: resolve agentctl path: %w", err)
 	}
 
-	// SSH liveness is judged on the REMOTE host: MetadataKeySSHRemoteAgentctlPID
-	// (mirrored into executors_running.pid) is a pid on the remote box, so it is
-	// probed with a remote `kill -0` over this SSH client — never with a local
-	// os.FindProcess. The runtime-aware row predicate (RowProcessLiveness in
-	// liveness.go) deliberately returns Unknown for SSH rows so nothing applies a
-	// host-local check here (#1597 runtime-aware liveness).
-	alive, err := probeRemoteAgentctlLiveness(ctx, client, pid)
-	if err != nil {
-		_ = client.Close()
-		return fmt.Errorf("ssh resume: probe agentctl pid %d: %w", pid, err)
-	}
-	if !alive {
-		if receipt != nil {
-			result := r.reconcileRecordedController(ctx, client, sshReconcileVerifyRequest(*receipt))
-			if err := result.Validate(); err != nil {
-				_ = client.Close()
-				return fmt.Errorf("ssh resume: verify absent controller: %w", err)
-			}
-			if result.Outcome != sshlaunch.OutcomeAbsent {
-				_ = client.Close()
-				return fmt.Errorf("%w: outcome=%s reason=%s (%s)",
-					errSSHLaunchReconciliationUnresolved, result.Outcome, result.Reason, result.Detail)
-			}
-		}
-		_ = client.Close()
-		clearSSHResumeRuntimeMetadata(req.Metadata)
-		return nil
-	}
 	if receipt != nil {
 		absent, err := r.verifySSHResumeController(ctx, client, *receipt)
 		if err != nil {
@@ -1243,6 +1215,20 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 			return fmt.Errorf("ssh resume: verify controller launch proof: %w", err)
 		}
 		if absent {
+			_ = client.Close()
+			clearSSHResumeRuntimeMetadata(req.Metadata)
+			return nil
+		}
+	} else {
+		// Legacy records have no launch receipt, so remote kill -0 remains their
+		// only liveness evidence. Never use it to classify a receipt-backed PID:
+		// another user's process can reuse that number after a host reboot.
+		alive, err := probeRemoteAgentctlLiveness(ctx, client, pid)
+		if err != nil {
+			_ = client.Close()
+			return fmt.Errorf("ssh resume: probe agentctl pid %d: %w", pid, err)
+		}
+		if !alive {
 			_ = client.Close()
 			clearSSHResumeRuntimeMetadata(req.Metadata)
 			return nil

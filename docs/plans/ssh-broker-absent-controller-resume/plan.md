@@ -20,8 +20,7 @@ The user approved the expanded scope on 2026-11-16 and requested a simple fix.
 
 Keep two sequential work orders. Task 01 corrects the existing helper and
 resume callers. Task 02 proves recovery over real SSH and updates public guidance.
-The user explicitly authorized implementation on 2026-11-16. The package
-remains uncommitted.
+Task 01 is implemented. Task 02 remains in progress until its full E2E gate passes.
 
 ## Requirement and decision alignment
 
@@ -115,8 +114,9 @@ Every unexpected, unresolved, or malformed response preserves metadata and fails
 Include the actual outcome in errors and preserve `errors.Is` behavior.
 
 Ordinary receipt-bearing SSH resume applies the same live/absent distinction.
-A numeric liveness probe can find a reused current PID after reboot.
-That must not force adoption or prevent the helper's confirmed-absence reset.
+It verifies the receipt before any numeric PID probe, so a reused current PID
+after reboot cannot block the helper's confirmed-absence reset. Keep the
+numeric liveness probe for legacy records only.
 
 Keep `verifyRecordedControllerIdentity` live-only for adoption and stop callers.
 Reuse the existing result type and, where duplicated, a small local resume helper.
@@ -155,7 +155,7 @@ Missing authentication and unrelated ownership conflicts remain errors.
 | --- | --- | --- |
 | Broker SSH, absent controller, tracked or untracked | Skip stop and launch a replacement | Lifecycle unit tests and SSH E2E |
 | Receipt from an earlier verified boot, PID absent or reused | Return `absent` without inspecting/signalling that PID | Real helper tests |
-| Ordinary receipt-bearing SSH after reboot | Reset before forwarder/adoption | Lifecycle unit tests |
+| Ordinary receipt-bearing SSH after reboot | Verify receipt before numeric PID checks; reset before forwarder/adoption | Lifecycle tests with absent, reused, and permission-denied PIDs |
 | Same-boot matching live controller | Existing stop/adoption policy | Existing and new focused tests |
 | Same-boot PID/generation conflict or unknown evidence | Preserve proof and fail | Existing guard tests |
 | Receipt-bearing persisted stop, controller already absent | Preserve session directory | Lifecycle regression |

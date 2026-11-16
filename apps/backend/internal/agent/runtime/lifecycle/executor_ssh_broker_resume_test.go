@@ -143,6 +143,46 @@ func TestSSHResumePreviousBootController(t *testing.T) {
 	}
 }
 
+// @covers AC-EXECUTORS-SSH-EXECUTOR-001.9
+// @covers AC-EXECUTORS-SSH-EXECUTOR-001.20
+func TestSSHResumePreviousBootSkipsPermissionDeniedPIDProbe(t *testing.T) {
+	owner := testSSHLaunchOwner()
+	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
+		sshScriptRule{match: `printf %s "$HOME"`, result: sshOut("/home/kandev")},
+		sshScriptRule{match: "kill -0 4242", result: sshFail("kill: 4242: Operation not permitted")},
+	).handle)
+	receipt := testSSHLaunchReceiptForServer(t, server, 4242)
+	birthToken := strings.Split(receipt.Process.BirthToken, ":")
+	require.Len(t, birthToken, 3)
+	birthToken[1] = "previous-" + birthToken[1]
+	receipt.Process.BirthToken = strings.Join(birthToken, ":")
+	metadata := resumeMetadataForTest(t, server, receipt)
+	metadata[MetadataKeySSHRemoteAgentctlPort] = "43123"
+	metadata[MetadataKeySSHWorkdirRoot] = "/home/kandev/.kandev"
+	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	verifyCalls := 0
+	exec.reconcileRemote = func(_ context.Context, _ *ssh.Client, request sshlaunch.ReconcileRequest) sshlaunch.ReconcileResult {
+		verifyCalls++
+		require.Equal(t, sshlaunch.ReconcileModeVerify, request.Mode)
+		require.Equal(t, receipt.Process.BirthToken, request.Receipt.Process.BirthToken)
+		return sshlaunch.ReconcileResult{Outcome: sshlaunch.OutcomeAbsent}
+	}
+
+	err := exec.ResumeRemoteInstance(context.Background(), &ExecutorCreateRequest{
+		InstanceID: owner.ControllerInstanceID,
+		TaskID:     owner.TaskID,
+		SessionID:  owner.SessionID,
+		AuthToken:  "persisted-token",
+		Metadata:   metadata,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, verifyCalls, "the previous-boot receipt proves absence before numeric PID access")
+	require.Empty(t, exec.sessions, "the reused PID holder must not be adopted")
+	for _, command := range server.commands() {
+		require.NotContains(t, command, "kill -0 4242", "receipt-backed recovery must not probe a reused PID")
+	}
+}
+
 // @covers AC-EXECUTORS-SSH-EXECUTOR-001.10
 // @covers AC-EXECUTORS-SSH-EXECUTOR-001.23
 func TestSSHBrokerResumeAbsentDiagnosticContainsOutcome(t *testing.T) {

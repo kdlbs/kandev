@@ -41,7 +41,9 @@ current PID holder. Reuse the normal runtime reset and launch path.
   Absence skips stop and clears only existing runtime keys.
   A verified live result keeps stop followed by independent absence proof.
 - Let ordinary receipt-bearing SSH resume accept confirmed absence.
-  Cover a reused current PID after reboot.
+  Verify receipt-backed identity before numeric PID checks, and cover a reused
+  current PID after reboot when `kill -0` returns permission denied. Keep the
+  numeric liveness probe for legacy records.
 - Keep `verifyRecordedControllerIdentity` strict for stop and adoption callers.
   Preserve the existing receipt/target, authentication, preflight, and owner checks.
 - In the receipt-bearing already-absent persisted-stop branch, preserve the
@@ -67,6 +69,8 @@ new recovery services, runtime-secret repair, and rendered UI.
 2. `TestSSHBrokerResumeConfirmedAbsentController` covers both broker paths.
    Each absence reset performs one verify and zero stop calls.
    `TestSSHResumePreviousBootController` covers ordinary SSH with a reused PID.
+   `TestSSHResumePreviousBootSkipsPermissionDeniedPIDProbe` proves a previous-boot
+   receipt is checked before a reused PID can fail numeric liveness with permission denied.
    Workspace/target metadata survives, stale runtime keys clear, and no old process is adopted.
 3. Verified-live, failed-stop, unresolved, malformed, and child-survival cases
    preserve their existing result and resource-lifecycle rules.
@@ -136,7 +140,11 @@ Completed on 2026-11-16.
   reused PIDs with the expected previous-boot conflict. The lifecycle RED run
   failed for tracked and untracked broker resume and ordinary resume after the
   PID probe reported a live reused holder.
-- GREEN: both focused regressions pass. Invalid boot evidence and terminate-mode
+- The PR review found that a different-user reused PID could return permission
+  denied before receipt verification. `TestSSHResumePreviousBootSkipsPermissionDeniedPIDProbe`
+  reproduces that ordering failure.
+- GREEN: `TestSSHResumePreviousBootSkipsPermissionDeniedPIDProbe` passes, along
+  with both focused regressions. Invalid boot evidence and terminate-mode
   previous-boot refusal also pass. Verified absence skips broker stop, clears
   only runtime metadata, and preserves workspace and target metadata.
 - `go test -trimpath -race ./internal/agentctl/sshreconcile -count=1`: passed.

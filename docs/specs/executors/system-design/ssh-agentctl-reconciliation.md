@@ -244,9 +244,10 @@ contract or accept every `Terminal()` result. Verify mode cannot authorize
 replacement from an unexpected `stopped` response.
 
 Ordinary receipt-bearing SSH resume also accepts a verified absence result.
-This includes a reboot after which the old PID has a new holder.
-It clears stale runtime metadata before any forwarder or authenticated adoption.
-Legacy resume keeps its existing liveness probe.
+It verifies the receipt before a numeric PID probe, so a reused PID that the
+login user cannot signal does not block reboot recovery. It clears stale
+runtime metadata before any forwarder or authenticated adoption. Only legacy
+resume uses the numeric liveness probe.
 
 Broker reachability preflight remains before any stop or metadata reset.
 Its failure, a lost tracked transport, invalid receipt, conflicting identity,
