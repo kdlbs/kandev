@@ -65,8 +65,9 @@ copy of a real installation is recorded in the work order results.
 
 - A 404 that means "parent deleted" is handled the same way. Both mean no
   readable parent PR, so the outcome is correct.
-- The parent is hidden for at most the cache lifetime (10 minutes) after the
-  credential gains access.
+- After the credential gains access, the parent stays skipped until the cache
+  entry expires (10 minutes), then the next eligible attempt searches it. An
+  idle watch can therefore wait for its next scheduled poll.
 
 ## References
 

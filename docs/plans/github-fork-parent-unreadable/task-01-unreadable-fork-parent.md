@@ -49,6 +49,8 @@ parent is not queried again until the entry expires.
    no parent query (assert the call count).
 3. A parent 5xx (or rate-limit) error still records the existing category,
    and a PR later opened in the fork is still discovered.
+4. After the cache entry expires, the next lookup finds a PR in a parent that
+   has become readable.
 
 ## Verification
 
@@ -79,6 +81,8 @@ bash scripts/lint-go-changed apps/backend/internal/github/service_automation_aut
   scope.
 - `go test -trimpath -tags fts5 -race -count=1 ./internal/github/`: pass.
 - `scripts/lint-go-changed` (golangci-lint v2.9.0): 0 issues.
+- Review fixup: added the post-expiry recovery test (acceptance 4) and aligned
+  the recovery wording with the polling schedule.
 - Manual check on a copy of a real installation (GitHub App connection,
   private fork parent): an explicit `github.task_pr.sync` on the searching
   watch completed with discovery health `healthy`; the unpatched v0.101.0

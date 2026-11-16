@@ -54,8 +54,9 @@ Idle discovery and explicit refresh do not override retirement.
   It shall not report a discovery failure for that target, and a later PR
   opened in the fork shall still be discovered. Rate-limit, authentication,
   and transient parent errors shall keep their existing failure categories.
-  A parent that becomes readable to the credential shall be searched again
-  within the fork-parent cache lifetime.
+  After the cached unreadable-parent result expires, the next eligible
+  discovery attempt shall search a parent that has become readable to the
+  credential. Expiry does not schedule an extra attempt.
 
 ### REQ-INTEGRATIONS-GITHUB-PR-DISCOVERY-HEALTH-001: Explain discovery failures
 

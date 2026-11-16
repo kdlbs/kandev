@@ -63,14 +63,17 @@ own repository is never marked missing because its parent is unreadable.
 To avoid one failing parent request per searching watch per cycle, the
 not-found result replaces the scoped `forkParentCache` entry for the fork with
 a non-fork value. That entry expires with the cache's existing 10-minute
-lifetime, after which the parent is resolved and queried again, so granting
-the credential access later restores parent discovery without a restart. The
+lifetime. Expiry does not schedule work: the next attempt admitted by the
+existing polling schedule or an explicit refresh resolves and queries the
+parent again, so granting the credential access later restores parent
+discovery without a restart. The
 entry stays keyed by credential scope, so another credential is unaffected.
 
 Verification: a fork whose parent query returns 404 finishes discovery as a
 healthy empty search on both the per-watch and batched paths; a second cycle
-inside the cache lifetime issues no parent query; a parent 5xx or rate-limit
-error still records its existing category.
+inside the cache lifetime issues no parent query; the first attempt after
+expiry finds a parent PR once the parent is readable; a parent 5xx or
+rate-limit error still records its existing category.
 
 ## Watch target reconciliation
 

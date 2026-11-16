@@ -14,8 +14,17 @@ import (
 type parentErrorClient struct {
 	*graphQLMockClient
 	parentOwner, parentRepo string
-	err                     error
+	err                     atomic.Pointer[error]
 	parentCalls             atomic.Int32
+}
+
+func (c *parentErrorClient) setParentErr(err error) { c.err.Store(&err) }
+
+func (c *parentErrorClient) parentErr() error {
+	if err := c.err.Load(); err != nil {
+		return *err
+	}
+	return nil
 }
 
 func (c *parentErrorClient) FindPRByHead(
@@ -23,7 +32,9 @@ func (c *parentErrorClient) FindPRByHead(
 ) (*PR, error) {
 	if strings.EqualFold(owner, c.parentOwner) && strings.EqualFold(repo, c.parentRepo) {
 		c.parentCalls.Add(1)
-		return nil, c.err
+		if err := c.parentErr(); err != nil {
+			return nil, err
+		}
 	}
 	return c.graphQLMockClient.FindPRByHead(ctx, owner, repo, headOwner, headRepo, branch)
 }
@@ -36,7 +47,8 @@ func setupParentErrorWatch(t *testing.T, parentErr error) (*Service, *MockClient
 	t.Helper()
 	_, service, mock, store := setupPollerTest(t)
 	seedForkNetwork(mock)
-	client := &parentErrorClient{graphQLMockClient: &graphQLMockClient{MockClient: mock}, parentOwner: parentOwner, parentRepo: parentRepo, err: parentErr}
+	client := &parentErrorClient{graphQLMockClient: &graphQLMockClient{MockClient: mock}, parentOwner: parentOwner, parentRepo: parentRepo}
+	client.setParentErr(parentErr)
 	service.client = client
 	configureTestWorkspaceAuth(t, service, client, testWorkspaceID, "ws-1", "ws1")
 
@@ -96,6 +108,35 @@ func TestFindPRForWatch_UnreadableForkParentIsHealthyEmpty(t *testing.T) {
 	}
 }
 
+// AC-INTEGRATIONS-GITHUB-PR-DISCOVERY-001.6: once the cached unreadable-parent
+// entry expires, the next lookup searches a parent that became readable.
+func TestFindPRForWatch_ForkParentReadableAgainAfterCacheExpiry(t *testing.T) {
+	service, mock, client, watch := setupParentErrorWatch(t, parentNotFoundError())
+	ctx := context.Background()
+	now := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	service.forkParentCache.now = func() time.Time { return now }
+
+	if pr, err := service.findPRByBranchForWatch(ctx, watch); err != nil || pr != nil {
+		t.Fatalf("lookup with unreadable parent = (%v, %v), want no PR and no error", pr, err)
+	}
+
+	// Access is granted and the parent already has the fork's PR open.
+	client.setParentErr(nil)
+	mock.AddPR(forkNetworkPR())
+	if pr, err := service.findPRByBranchForWatch(ctx, watch); err != nil || pr != nil {
+		t.Fatalf("lookup inside cache lifetime = (%v, %v), want no PR (parent still cached)", pr, err)
+	}
+
+	now = now.Add(newForkParentCache().ttl + time.Second)
+	pr, err := service.findPRByBranchForWatch(ctx, watch)
+	if err != nil || pr == nil || pr.Number != forkPRNumber {
+		t.Fatalf("lookup after cache expiry = (%v, %v), want parent PR #%d", pr, err, forkPRNumber)
+	}
+	if got := client.parentCalls.Load(); got != 2 {
+		t.Fatalf("parent lookups = %d, want 2 (initial 404 and post-expiry search)", got)
+	}
+}
+
 // AC-INTEGRATIONS-GITHUB-PR-DISCOVERY-001.6: only not-found is absorbed.
 func TestFindPRForWatch_ForkParentServerErrorStaysUnavailable(t *testing.T) {
 	service, _, _, watch := setupParentErrorWatch(t, &GitHubAPIError{StatusCode: 502, Endpoint: "/pulls"})
@@ -116,7 +157,8 @@ func TestSyncWatchesBatched_UnreadableForkParentIsHealthyEmpty(t *testing.T) {
 	_, service, mock, store := setupPollerTest(t)
 	ctx := context.Background()
 	graphQL := &graphQLMockClient{MockClient: mock}
-	client := &parentErrorClient{graphQLMockClient: graphQL, parentOwner: "upstream", parentRepo: "r", err: parentNotFoundError()}
+	client := &parentErrorClient{graphQLMockClient: graphQL, parentOwner: "upstream", parentRepo: "r"}
+	client.setParentErr(parentNotFoundError())
 	service.client = client
 	configureTestWorkspaceAuth(t, service, client, testWorkspaceID, "ws-1", "ws1")
 	scope := testAutomationScope(t, service, testWorkspaceID)
