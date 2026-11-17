@@ -396,7 +396,7 @@ Screenshot mode rasterizes the selected part of the rendered document and shows 
 
 Previewed pages keep their WebGL drawing buffers, so screenshots of WebGL content drawn on the page's main thread contain the rendered pixels. This includes Flutter web builds made with `flutter build web` and with `--wasm`. Content the rasterizer cannot read still comes out blank or different:
 
-- Canvases rendered inside a worker, such as Flutter's multi-threaded renderer on a cross-origin-isolated page. Kandev previews are not cross-origin isolated, so Flutter uses its single-threaded renderer there.
+- Canvases rendered inside a worker, which browsers allow only on cross-origin-isolated pages. Kandev previews are not cross-origin isolated, so Flutter renders on the page's main thread there.
 - Some video, font, and cross-origin resources.
 
 When a capture over a canvas comes out as a single solid color, the comment form shows a warning under the thumbnail. Check the image before adding it: a genuinely solid area is fine to keep.

@@ -116,5 +116,9 @@ Done.
 - `pixelLimitFactor` is shared with `fitAnnotationToPixelLimit`.
 - Chromium E2E `captures WebGL pixels that the page does not preserve` passes
   (two-colour WebGL fixture drawn without `preserveDrawingBuffer`).
-- The Flutter spike was not run (no Flutter SDK installed in this
-  environment); `skwasm_st` coverage remains expected but unverified.
+- Flutter spike (Flutter 3.50 via mise, counter app from the issue, served
+  through the Browser panel in Chromium): `flutter build web` loads
+  `canvaskit.wasm` and `--wasm` loads `skwasm.wasm` on a non-isolated page;
+  both captures contained the UI (about 550 distinct colours, no warning).
+  The spike showed that Flutter keeps its canvas in an open shadow root, so
+  canvas detection now walks open shadow roots.

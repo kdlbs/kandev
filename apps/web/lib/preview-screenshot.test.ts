@@ -158,6 +158,26 @@ describe("uniform canvas capture detection", () => {
     expect(regionOverlapsCanvas({} as HTMLElement, rect)).toBe(false);
   });
 
+  it("finds canvases inside open shadow roots, as Flutter web renders them", () => {
+    const doc = document.implementation.createHTMLDocument("preview");
+    const host = doc.createElement("flutter-view");
+    doc.body.appendChild(host);
+    const canvas = doc.createElement("canvas");
+    canvas.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        right: 500,
+        bottom: 500,
+        width: 500,
+        height: 500,
+        x: 0,
+        y: 0,
+      }) as DOMRect;
+    host.attachShadow({ mode: "open" }).appendChild(canvas);
+    expect(regionOverlapsCanvas(doc.documentElement, rect)).toBe(true);
+  });
+
   it("flags a uniform capture over a canvas but still returns the image", async () => {
     const result = await rasterizePreviewRegion(
       frameWithCanvas({ left: 0, top: 0, right: 500, bottom: 500 }),

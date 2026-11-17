@@ -48,17 +48,15 @@ attribute must be set when the context is created.
 
 Flutter web renderers in a Kandev preview:
 
-| Renderer | When it is used | Where it draws | Covered |
-| --- | --- | --- | --- |
-| CanvasKit | Default `flutter build web` | Main-thread WebGL | Yes |
-| `skwasm_st` (single-threaded) | `--wasm` build on a page that is not cross-origin isolated | Main thread | Yes, to be confirmed by the task 02 spike |
-| `skwasm` (multi-threaded) | `--wasm` build on a cross-origin-isolated page (COOP and COEP) | Worker `OffscreenCanvas` | No |
+| Build | Renderer loaded in a Kandev preview | Captured |
+| --- | --- | --- |
+| `flutter build web` | CanvasKit (`canvaskit.wasm`) | Yes, verified with Flutter 3.50 |
+| `flutter build web --wasm` | `skwasm.wasm`, page not cross-origin isolated | Yes, verified with Flutter 3.50 |
+| Any build on a cross-origin-isolated page that renders in a worker `OffscreenCanvas` | Worker renderer | No |
 
-Flutter's loader picks multi-threaded `skwasm` only when
-`crossOriginIsolated` is true. A framed document is isolated only if every
-ancestor is too, and Kandev serves no COOP or COEP headers. Previews therefore
-always get the single-threaded build, even after Flutter makes Wasm the
-default. If Kandev ever enables cross-origin isolation, that decision must
+A worker renderer needs `crossOriginIsolated`. A framed document is isolated
+only if every ancestor is too, and Kandev serves no COOP or COEP headers, so
+previews never get one, even after Flutter makes Wasm the default. If Kandev ever enables cross-origin isolation, that decision must
 first add a capture path that does not rely on reading the DOM.
 
 The shim cannot reach contexts created inside a worker. Those regions, and
@@ -66,7 +64,8 @@ cross-origin media, can still rasterize blank. A uniform color alone does not
 prove failure, because the user may have selected a genuinely solid area. So
 the check produces a warning, not an error. After rasterization,
 `rasterizePreviewRegion` checks whether the capture rectangle intersects any
-`<canvas>` bounding box in the iframe document. When it does, it samples the
+`<canvas>` bounding box in the iframe document, including canvases inside open
+shadow roots, where Flutter web renders. When it does, it samples the
 output on a canvas of at most 64 × 64 pixels and returns
 `uniformOverCanvas: true` when every sampled pixel has the same RGBA value.
 The flag travels on the screenshot draft (`draft.screenshot.uniformOverCanvas`).

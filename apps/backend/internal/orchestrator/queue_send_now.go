@@ -571,7 +571,14 @@ func (s *Service) executeSendNowClaimWithContext(
 	}
 	if err != nil {
 		var acceptedDispatch *acceptedPromptDispatchError
-		if deliveryAttempted || errors.As(err, &acceptedDispatch) {
+		accepted := errors.As(err, &acceptedDispatch)
+		if deliveryAttempted && !accepted && s.revokeUndispatchedSendNow(ctx, claim, err) {
+			// A persistent failure waits for the next ready signal instead of spinning.
+			allowFollowupDrain = false
+			restore()
+			return
+		}
+		if deliveryAttempted || accepted {
 			s.settleAttemptedSendNowClaim(ctx, claim, err)
 			return
 		}

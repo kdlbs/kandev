@@ -96,13 +96,22 @@ export function isUniformPixels(data: Uint8ClampedArray): boolean {
   return true;
 }
 
+/** Canvases in the document and in open shadow roots, where Flutter web renders. */
+function collectCanvases(root: ParentNode, found: HTMLCanvasElement[] = []) {
+  root.querySelectorAll("canvas").forEach((canvas) => found.push(canvas));
+  root.querySelectorAll("*").forEach((element) => {
+    if (element.shadowRoot) collectCanvases(element.shadowRoot, found);
+  });
+  return found;
+}
+
 /** True when the capture rectangle (iframe viewport pixels) intersects any canvas. */
 export function regionOverlapsCanvas(documentElement: HTMLElement, rect: PreviewCaptureRect) {
-  const canvases = documentElement.ownerDocument?.querySelectorAll?.("canvas");
-  if (!canvases) return false;
+  const doc = documentElement.ownerDocument;
+  if (!doc?.querySelectorAll) return false;
   const right = rect.x + rect.width;
   const bottom = rect.y + rect.height;
-  return Array.from(canvases).some((canvas) => {
+  return collectCanvases(doc).some((canvas) => {
     const bounds = canvas.getBoundingClientRect();
     return (
       bounds.left < right && bounds.right > rect.x && bounds.top < bottom && bounds.bottom > rect.y

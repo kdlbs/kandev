@@ -20,7 +20,7 @@ change.
 
 | Criterion | Section |
 | --- | --- |
-| `AC-TASKS-PLAN-COMMENTS-002.9` | [Failures after the marker but before transport](#failures-after-the-marker-but-before-transport) |
+| `AC-TASKS-PLAN-COMMENTS-002.9` | [Failures after the marker but before transport](#failures-after-the-marker-but-before-transport), [Send Now claims](#send-now-claims) |
 
 ## Failures after the marker but before transport
 
@@ -77,10 +77,20 @@ If the backend crashes between clearing the marker and the release, the entry
 is left as an expired pre-attempt reservation. Startup reconciliation already
 resumes those, which is correct because nothing was sent.
 
-Send Now is not covered yet. It marks a combined claim's sources in
-`sendNowDeliveryBoundary` and restores claims through a separate contract, so
-a pre-transport failure there still settles at most once (now with the Warn
-log). Extending the revocation to Send Now claims is a follow-up.
+## Send Now claims
+
+Send Now marks every comment-bearing source of its combined claim in
+`sendNowDeliveryBoundary`. When its prompt fails with a not-dispatched error,
+`executeSendNowClaimWithContext` calls `revokeUndispatchedSendNow`. That
+method clears all of the claim's comment-bearing receipts in one
+`ClearDeliveryAttemptForSession` call, which takes a list and clears every
+receipt or none. It then uses the existing `restore` path
+(`RestoreSendNowClaim`), the same path a failure before the marker already
+takes, and disables the follow-up drain. The combined transcript was written
+before the marker, and the restored sources keep their recorded-transcript
+markers, so a later delivery adds no second chat message. Possibly delivered
+and accepted-dispatch failures still settle through
+`settleAttemptedSendNowClaim`.
 
 ## Verification
 
@@ -93,6 +103,8 @@ log). Extending the revocation to Send Now claims is a follow-up.
 - Orchestrator: an injected pre-transport failure leaves the entry queued
   with its client queue ID, fingerprint, and single transcript. A later drain
   delivers it once. A possibly-delivered failure is acknowledged and logged.
+  A not-dispatched Send Now restores every source with one transcript; a
+  possibly delivered one settles.
 
 ## Implementation plans
 

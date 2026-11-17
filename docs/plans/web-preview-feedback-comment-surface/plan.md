@@ -26,7 +26,7 @@ comment popovers across Kandev:
    plan comments) are no longer silently dropped when dispatch fails before
    agentctl.
 2. **Issue #3992:** screenshot feedback over WebGL canvases (Flutter web's
-   CanvasKit and single-threaded `skwasm` renderers included) contains the
+   CanvasKit and `--wasm` renderers included) contains the
    rendered pixels. A capture over a canvas that comes out one uniform color
    shows a warning, and the user decides whether to keep it.
 3. **DRY:** one `SelectionCommentSurface` replaces `PlanSelectionPopover`,
@@ -185,8 +185,8 @@ Each work order lists its exact commands. Across the package:
   running twice on retry.
 - **02:** forcing `preserveDrawingBuffer` can lower frame rate on some GPUs
   for heavy WebGL pages in previews. It applies only to proxied preview pages.
-  Coverage of `skwasm_st` is expected but unverified. The task 02 spike
-  confirms it. Worker renderers stay unsupported and show the warning.
+  The task 02 spike confirmed CanvasKit and `--wasm` (`skwasm`) captures with
+  Flutter 3.50. Worker renderers stay unsupported and show the warning.
 - **03:** moving the editor popovers onto the shared surface changes their
   touch presentation from floating to Drawer. This is the intended change and
   is covered by `mobile-file-viewer`. Removing translation keys must not break

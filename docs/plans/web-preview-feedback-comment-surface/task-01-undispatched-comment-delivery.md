@@ -102,8 +102,9 @@ Done.
   `ReleaseQueuedDeliveryForSession`. The ordinary requeue path rejects comment
   receipts because they have no dispatch-claim row, so the design was updated.
 - Capacity refusal detection now uses `errors.As`.
-- Not covered: Send Now claims (separate restore contract). Recorded as a
-  follow-up in `plan-comments-02.md`; AC-002.9 is scoped to queued dispatch.
+- Send Now: `revokeUndispatchedSendNow` clears all comment-bearing sources in
+  one `ClearDeliveryAttemptForSession` list call and uses the existing claim
+  restore path (`queue_send_now_undispatched_test.go`, red before the fix).
 
 Commands: the three targeted `go test` commands pass; full
 `go test -tags fts5 -race ./internal/orchestrator/...` and

@@ -11,22 +11,33 @@ import (
 )
 
 // ClearDeliveryAttemptForSession reverses MarkDeliveryAttemptedForSession for
-// one token-owned receipt whose prompt provably never reached transport.
+// token-owned receipts whose prompt provably never reached transport. Every
+// receipt is cleared, or none is.
 func (s *Service) ClearDeliveryAttemptForSession(
 	ctx context.Context,
 	identity QueueSessionIdentity,
-	reserved *QueuedMessage,
+	reserved []QueuedMessage,
 ) error {
 	return s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
 		return s.repo.ClearDeliveryAttemptForSession(admittedCtx, identity, reserved)
 	})
 }
 
-func validateDeliveryAttemptClear(reserved *QueuedMessage, identity QueueSessionIdentity) error {
-	if reserved == nil {
+func validateDeliveryAttemptClear(reserved []QueuedMessage, identity QueueSessionIdentity) error {
+	if len(reserved) == 0 {
 		return ErrEntryNotFound
 	}
-	return validateDeliveryAttemptCandidate(reserved, identity)
+	seen := make(map[string]struct{}, len(reserved))
+	for index := range reserved {
+		if err := validateDeliveryAttemptCandidate(&reserved[index], identity); err != nil {
+			return err
+		}
+		if _, duplicate := seen[reserved[index].ID]; duplicate {
+			return ErrQueueChanged
+		}
+		seen[reserved[index].ID] = struct{}{}
+	}
+	return nil
 }
 
 // attemptedReservationOwned reports whether stored metadata still belongs to
@@ -46,7 +57,7 @@ func attemptedReservationOwned(
 func (r *sqliteRepository) ClearDeliveryAttemptForSession(
 	ctx context.Context,
 	identity QueueSessionIdentity,
-	reserved *QueuedMessage,
+	reserved []QueuedMessage,
 ) error {
 	if err := validateDeliveryAttemptClear(reserved, identity); err != nil {
 		return err
@@ -67,8 +78,10 @@ func (r *sqliteRepository) ClearDeliveryAttemptForSession(
 	if err := r.validateSessionIdentityTx(ctx, tx, identity); err != nil {
 		return err
 	}
-	if err := r.clearDeliveryAttemptTx(ctx, tx, identity, reserved); err != nil {
-		return err
+	for index := range reserved {
+		if err := r.clearDeliveryAttemptTx(ctx, tx, identity, &reserved[index]); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -122,7 +135,7 @@ func (r *sqliteRepository) clearDeliveryAttemptTx(
 func (r *memoryRepository) ClearDeliveryAttemptForSession(
 	_ context.Context,
 	identity QueueSessionIdentity,
-	reserved *QueuedMessage,
+	reserved []QueuedMessage,
 ) error {
 	if err := validateDeliveryAttemptClear(reserved, identity); err != nil {
 		return err
@@ -132,15 +145,20 @@ func (r *memoryRepository) ClearDeliveryAttemptForSession(
 	if err := r.bindIdentityLocked(identity); err != nil {
 		return err
 	}
+	byID := make(map[string]*QueuedMessage, len(r.entries[identity.SessionID]))
 	for _, msg := range r.entries[identity.SessionID] {
-		if msg.ID != reserved.ID {
-			continue
-		}
-		if !attemptedReservationOwned(msg.Metadata, identity, reserved) {
+		byID[msg.ID] = msg
+	}
+	stored := make([]*QueuedMessage, 0, len(reserved))
+	for index := range reserved {
+		found := byID[reserved[index].ID]
+		if found == nil || !attemptedReservationOwned(found.Metadata, identity, &reserved[index]) {
 			return ErrEntryNotFound
 		}
-		delete(msg.Metadata, MetadataDeliveryAttempted)
-		return nil
+		stored = append(stored, found)
 	}
-	return ErrEntryNotFound
+	for _, msg := range stored {
+		delete(msg.Metadata, MetadataDeliveryAttempted)
+	}
+	return nil
 }

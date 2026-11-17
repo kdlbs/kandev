@@ -34,7 +34,7 @@ func TestClearDeliveryAttemptRevokesOnlyTheMarker(t *testing.T) {
 			}
 			reserved := reserveAttemptedPlanComment(t, repository, identity)
 
-			require.NoError(t, repository.ClearDeliveryAttemptForSession(ctx, identity, reserved))
+			require.NoError(t, repository.ClearDeliveryAttemptForSession(ctx, identity, []QueuedMessage{*reserved}))
 
 			stored, err := repository.ListBySession(ctx, identity.SessionID)
 			require.NoError(t, err)
@@ -60,11 +60,11 @@ func TestClearDeliveryAttemptRejectsStaleOrForeignEntries(t *testing.T) {
 
 			stale := identity
 			stale.SessionIncarnationID = "replaced-incarnation"
-			require.Error(t, repository.ClearDeliveryAttemptForSession(ctx, stale, reserved))
+			require.Error(t, repository.ClearDeliveryAttemptForSession(ctx, stale, []QueuedMessage{*reserved}))
 
 			ordinary := *reserved
 			ordinary.Metadata = map[string]interface{}{}
-			require.ErrorIs(t, repository.ClearDeliveryAttemptForSession(ctx, identity, &ordinary), ErrEntryNotFound)
+			require.ErrorIs(t, repository.ClearDeliveryAttemptForSession(ctx, identity, []QueuedMessage{ordinary}), ErrEntryNotFound)
 			require.ErrorIs(t, repository.ClearDeliveryAttemptForSession(ctx, identity, nil), ErrEntryNotFound)
 
 			stored, err := repository.ListBySession(ctx, identity.SessionID)
@@ -73,12 +73,38 @@ func TestClearDeliveryAttemptRejectsStaleOrForeignEntries(t *testing.T) {
 
 			foreignOwner := *reserved
 			foreignOwner.reservationToken = "another-owner"
-			require.ErrorIs(t, repository.ClearDeliveryAttemptForSession(ctx, identity, &foreignOwner), ErrEntryNotFound,
+			require.ErrorIs(t, repository.ClearDeliveryAttemptForSession(ctx, identity, []QueuedMessage{foreignOwner}), ErrEntryNotFound,
 				"only the reservation owner can clear the marker")
 
-			require.NoError(t, repository.ClearDeliveryAttemptForSession(ctx, identity, reserved))
-			require.ErrorIs(t, repository.ClearDeliveryAttemptForSession(ctx, identity, reserved), ErrEntryNotFound,
+			require.NoError(t, repository.ClearDeliveryAttemptForSession(ctx, identity, []QueuedMessage{*reserved}))
+			require.ErrorIs(t, repository.ClearDeliveryAttemptForSession(ctx, identity, []QueuedMessage{*reserved}), ErrEntryNotFound,
 				"an entry without the marker cannot be cleared twice")
+		})
+	}
+}
+
+func TestClearDeliveryAttemptIsAllOrNothing(t *testing.T) {
+	for _, factory := range autoRunRepositoryFactories {
+		t.Run(factory.name, func(t *testing.T) {
+			ctx := context.Background()
+			repository := factory.new(t)
+			identity := QueueSessionIdentity{
+				TaskID: "task-atomic", SessionID: "session-atomic", SessionIncarnationID: "incarnation-atomic",
+			}
+			reserved := reserveAttemptedPlanComment(t, repository, identity)
+			foreignOwner := *reserved
+			foreignOwner.ID = "missing-entry"
+
+			require.ErrorIs(t, repository.ClearDeliveryAttemptForSession(
+				ctx, identity, []QueuedMessage{*reserved, foreignOwner},
+			), ErrEntryNotFound)
+			require.ErrorIs(t, repository.ClearDeliveryAttemptForSession(
+				ctx, identity, []QueuedMessage{*reserved, *reserved},
+			), ErrQueueChanged)
+
+			stored, err := repository.ListBySession(ctx, identity.SessionID)
+			require.NoError(t, err)
+			require.True(t, stored[0].IsDeliveryAttempted(), "a failed batch clears nothing")
 		})
 	}
 }
@@ -90,7 +116,7 @@ func TestPostgresClearDeliveryAttemptRevokesOnlyTheMarker(t *testing.T) {
 		TaskID: "task-pg-clear", SessionID: "session-pg-clear", SessionIncarnationID: "incarnation-pg-clear",
 	}
 	reserved := reserveAttemptedPlanComment(t, repository, identity)
-	require.NoError(t, repository.ClearDeliveryAttemptForSession(ctx, identity, reserved))
+	require.NoError(t, repository.ClearDeliveryAttemptForSession(ctx, identity, []QueuedMessage{*reserved}))
 	stored, err := repository.ListBySession(ctx, identity.SessionID)
 	require.NoError(t, err)
 	require.Len(t, stored, 1)

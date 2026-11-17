@@ -32,7 +32,7 @@ func (s *Service) requeueUndispatchedDelivery(
 		}
 		identity = resolved
 	}
-	if err := s.messageQueue.ClearDeliveryAttemptForSession(ctx, identity, queuedMsg); err != nil {
+	if err := s.messageQueue.ClearDeliveryAttemptForSession(ctx, identity, []messagequeue.QueuedMessage{*queuedMsg}); err != nil {
 		s.logUndispatchedRevokeFailure(queuedMsg, dispatchErr, err)
 		return false
 	}
@@ -70,4 +70,35 @@ func (s *Service) logPossiblyDeliveredAcknowledgement(queuedMsg *messagequeue.Qu
 		zap.String("session_id", queuedMsg.SessionID),
 		zap.String("queue_id", queuedMsg.ID),
 		zap.Error(err))
+}
+
+// revokeUndispatchedSendNow clears the at-most-once markers of a Send Now
+// claim's comment-bearing sources when its dispatch failed before prompt
+// transport, so the caller can restore the claim. It reports whether the
+// markers were revoked.
+func (s *Service) revokeUndispatchedSendNow(
+	ctx context.Context,
+	claim *messagequeue.SendNowClaim,
+	dispatchErr error,
+) bool {
+	if !errors.Is(dispatchErr, agentruntime.ErrPromptNotDispatched) || s.messageQueue == nil {
+		return false
+	}
+	receipts := planCommentSendNowReceipts(claim)
+	if len(receipts) == 0 {
+		return false
+	}
+	if err := s.messageQueue.ClearDeliveryAttemptForSession(ctx, claim.Identity, receipts); err != nil {
+		s.logUndispatchedRevokeFailure(&claim.Dispatch, dispatchErr, err)
+		return false
+	}
+	for i := range claim.Sources {
+		delete(claim.Sources[i].Metadata, messagequeue.MetadataDeliveryAttempted)
+	}
+	s.logger.Warn("send-now comment message failed before dispatch; restoring its queue claim",
+		zap.String("task_id", claim.Dispatch.TaskID),
+		zap.String("session_id", claim.Dispatch.SessionID),
+		zap.String("claim_id", claim.ClaimID),
+		zap.Error(dispatchErr))
+	return true
 }
