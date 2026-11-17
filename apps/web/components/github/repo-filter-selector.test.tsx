@@ -21,6 +21,7 @@ vi.mock("@/hooks/domains/integrations/use-remote-repositories", () => ({
 import { RepoFilterSelector } from "./repo-filter-selector";
 
 const REPO_INPUT = "remote-repo-input";
+const ORG_ADD = "github-organization-add";
 
 function repo(owner: string, name: string): RemoteRepository {
   return {
@@ -109,15 +110,39 @@ describe("RepoFilterSelector repository picker", () => {
     openPicker();
     expect(mocks.useRemoteRepositories).toHaveBeenCalledWith("ws-1", { providers: ["github"] });
   });
+});
 
-  it("offers only repositories allowed by a repos-mode workspace scope", async () => {
+describe("RepoFilterSelector scope membership", () => {
+  it("offers only repositories allowed by selected scope", async () => {
     mocks.fetchGitHubWorkspaceSettings.mockResolvedValue(
-      scope({ repo_scope_mode: "repos", repo_scope_repos: [{ owner: "acme", name: "api" }] }),
+      scope({
+        repo_scope_mode: "selected",
+        repo_scope_repos: [{ owner: "acme", name: "api" }],
+      }),
     );
     renderSelector();
     await waitFor(() => expect(mocks.fetchGitHubWorkspaceSettings).toHaveBeenCalled());
     openPicker();
     await waitFor(() => expect(optionTexts()).toEqual([expect.stringContaining("acme/api")]));
+  });
+
+  it("offers repositories from either selected owners or exact selections", async () => {
+    mocks.fetchGitHubWorkspaceSettings.mockResolvedValue(
+      scope({
+        repo_scope_mode: "selected",
+        repo_scope_orgs: ["acme"],
+        repo_scope_repos: [{ owner: "outside", name: "tool" }],
+      }),
+    );
+    const onChange = renderSelector();
+    await waitFor(() => expect(mocks.fetchGitHubWorkspaceSettings).toHaveBeenCalled());
+    openPicker();
+    await waitFor(() => expect(optionTexts()).toEqual([expect.stringContaining("acme/api")]));
+
+    const input = screen.getByTestId(REPO_INPUT);
+    fireEvent.change(input, { target: { value: "outside/tool" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith([{ owner: "outside", name: "tool" }]);
   });
 
   it("adds a typed owner/name that is not listed", () => {
@@ -145,7 +170,10 @@ describe("RepoFilterSelector repository picker", () => {
 
   it("rejects a typed repository outside the workspace scope", async () => {
     mocks.fetchGitHubWorkspaceSettings.mockResolvedValue(
-      scope({ repo_scope_mode: "orgs", repo_scope_orgs: ["kdlbs"] }),
+      scope({
+        repo_scope_mode: "selected",
+        repo_scope_orgs: ["kdlbs"],
+      }),
     );
     const onChange = renderSelector();
     await waitFor(() => expect(mocks.fetchGitHubWorkspaceSettings).toHaveBeenCalled());
@@ -156,7 +184,9 @@ describe("RepoFilterSelector repository picker", () => {
     expect(onChange).not.toHaveBeenCalled();
     expect(screen.getByRole("alert")).toBeTruthy();
   });
+});
 
+describe("RepoFilterSelector saved wildcard entries", () => {
   it("marks a selected repository and does not add it twice", () => {
     const onChange = renderSelector([{ owner: "kdlbs", name: "kandev" }]);
     openPicker();
@@ -165,16 +195,21 @@ describe("RepoFilterSelector repository picker", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("hides the organization picker in repos mode and keeps saved organization entries removable", async () => {
+  it("keeps saved owner wildcards removable when the owner is not fully selected", async () => {
     mocks.fetchGitHubWorkspaceSettings.mockResolvedValue(
-      scope({ repo_scope_mode: "repos", repo_scope_repos: [{ owner: "acme", name: "api" }] }),
+      scope({
+        repo_scope_mode: "selected",
+        repo_scope_repos: [{ owner: "acme", name: "api" }],
+      }),
     );
     const onChange = renderSelector([
       { owner: "kdlbs", name: "kandev" },
       { owner: "acme", name: "" },
     ]);
-    await waitFor(() => expect(screen.queryByTestId("github-organization-add")).toBeNull());
-    fireEvent.click(screen.getByRole("button", { name: /remove acme\/\*/i }));
+    await waitFor(() => expect(screen.getByTestId(ORG_ADD)).toBeTruthy());
+    fireEvent.click(screen.getByTestId(ORG_ADD));
+    await waitFor(() => expect(orgOptionTexts()).toEqual([]));
+    fireEvent.click(screen.getByRole("button", { name: /remove acme/i }));
     expect(onChange).toHaveBeenCalledWith([{ owner: "kdlbs", name: "kandev" }]);
   });
 });
@@ -189,7 +224,7 @@ describe("RepoFilterSelector organization picker", () => {
   it("adds an organization as an owner-wide filter", async () => {
     mocks.listUserOrgs.mockResolvedValue({ orgs: [org("octocat"), org("kdlbs")] });
     const onChange = renderSelector([{ owner: "acme", name: "api" }]);
-    fireEvent.click(screen.getByTestId("github-organization-add"));
+    fireEvent.click(screen.getByTestId(ORG_ADD));
     await waitFor(() => expect(orgOptionTexts()).toEqual(["octocat", "kdlbs"]));
     fireEvent.click(screen.getAllByTestId("github-organization-option")[1]!);
     expect(onChange).toHaveBeenCalledWith([
@@ -213,14 +248,18 @@ describe("RepoFilterSelector organization picker", () => {
     expect(onChange).toHaveBeenCalledWith([{ owner: "kdlbs", name: "kandev" }]);
   });
 
-  it("offers only organizations allowed by an orgs-mode workspace scope", async () => {
+  it("offers owner wildcards only for selected owners", async () => {
     mocks.listUserOrgs.mockResolvedValue({ orgs: [org("octocat"), org("kdlbs"), org("acme")] });
     mocks.fetchGitHubWorkspaceSettings.mockResolvedValue(
-      scope({ repo_scope_mode: "orgs", repo_scope_orgs: ["kdlbs"] }),
+      scope({
+        repo_scope_mode: "selected",
+        repo_scope_orgs: ["kdlbs"],
+        repo_scope_repos: [{ owner: "outside", name: "tool" }],
+      }),
     );
     renderSelector();
     await waitFor(() => expect(mocks.fetchGitHubWorkspaceSettings).toHaveBeenCalled());
-    fireEvent.click(screen.getByTestId("github-organization-add"));
+    fireEvent.click(screen.getByTestId(ORG_ADD));
     await waitFor(() => expect(orgOptionTexts()).toEqual(["kdlbs"]));
   });
 });

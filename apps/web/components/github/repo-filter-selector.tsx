@@ -70,7 +70,6 @@ export function RepoFilterSelector({
 }: RepoFilterSelectorProps) {
   const { t } = useTranslation();
   const scope = useWorkspaceRepoScope(workspaceId);
-  const showOrgs = !scope || scope.repo_scope_mode !== "repos";
   const split = useSplitSelection(selectedRepos, onSelectedReposChange);
   const isOrgAllowed = useCallback((login: string) => orgAllowedByScope(scope, login), [scope]);
 
@@ -97,30 +96,26 @@ export function RepoFilterSelector({
 
       {!allRepos && (
         <>
-          {showOrgs && (
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground font-normal">
-                {t("github:organizations")}
-              </Label>
-              <GitHubOrganizationMultiSelect
-                workspaceId={workspaceId}
-                selected={split.orgLogins}
-                onChange={split.setOrgs}
-                isOrgAllowed={isOrgAllowed}
-              />
-            </div>
-          )}
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground font-normal">
+              {t("github:organizations")}
+            </Label>
+            <GitHubOrganizationMultiSelect
+              workspaceId={workspaceId}
+              selected={split.orgLogins}
+              onChange={split.setOrgs}
+              isOrgAllowed={isOrgAllowed}
+            />
+          </div>
 
           <div className="space-y-1.5">
-            {showOrgs && (
-              <Label className="text-xs text-muted-foreground font-normal">
-                {t("github:repositories")}
-              </Label>
-            )}
+            <Label className="text-xs text-muted-foreground font-normal">
+              {t("github:repositories")}
+            </Label>
             <GitHubRepositoryMultiSelect
               workspaceId={workspaceId}
-              selected={showOrgs ? split.repoEntries : selectedRepos}
-              onChange={showOrgs ? split.setRepos : onSelectedReposChange}
+              selected={split.repoEntries}
+              onChange={split.setRepos}
               scope={scope}
             />
           </div>

@@ -11,11 +11,13 @@ owners:
 ## Overview
 
 GitHub watch filters and the workspace GitHub repository scope identify
-repositories by their GitHub `owner/name`. Today the watch filter picker only
-queries GitHub after the user types an `owner/` prefix, and the scope setting is
-a comma-separated text field. Both demand an exact slug from memory, while the
-task-creation dialog's remote repository picker lists accessible repositories
-as soon as it opens and filters them by any substring.
+repositories by their GitHub `owner/name`. The task-creation dialog's remote
+repository picker lists accessible repositories as soon as it opens and filters
+them by any substring. This requirement applies that picker to GitHub selections.
+
+Workspace scope uses **All repositories** or the union of selected owners and
+exact repositories. See [GitHub repository scope](github-repository-scope.md)
+for the policy and migration contract.
 
 The integration system owns these GitHub repository selections because their
 values are provider identities consumed by GitHub polling and scope
@@ -33,7 +35,7 @@ user finds them.
   issue watch. Stored as `RepoFilter` values (`owner` and `name`; an empty
   `name` selects every repository of that owner).
 - **Repository scope:** The workspace GitHub setting that limits which
-  repositories GitHub features may use (`all`, `orgs`, or `repos` mode).
+  repositories GitHub features may use (`all` or `selected` mode).
 
 ## Requirements
 
@@ -61,8 +63,8 @@ I type, so that I do not have to recall and type an exact `owner/repo` path.
 - **AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.3:** A GitHub watch filter
   shall offer only GitHub repositories. It shall not offer local-only,
   filesystem-discovered, GitLab, Azure DevOps, or plugin-provided repositories.
-  When the workspace repository scope is `orgs` or `repos`, the watch filter
-  shall offer only repositories that scope allows.
+  When the workspace repository scope is `selected`, the watch filter shall
+  offer only repositories allowed by a selected owner or exact repository.
 - **AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.4:** When the typed value is a
   well-formed `owner/name` or a GitHub repository URL, pressing Enter shall add
   that repository even if it is absent from the loaded list. A GitHub watch
@@ -75,11 +77,10 @@ I type, so that I do not have to recall and type an exact `owner/repo` path.
   selection, through the organization picker of
   AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.10, and the "All repositories
   allowed by this workspace" toggle.
-- **AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.6:** In `repos` mode, the
-  repository scope setting shall use the same picker and selected-entry list
-  instead of a comma-separated text field. Its picker shall not be filtered by
-  the saved scope. Saving, discarding, dirty-state, and the saved
-  `repo_scope_repos` values shall keep their current behavior.
+- **AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.6:** In `selected` mode, the
+  repository scope setting shall use the same picker and selected-entry list.
+  The picker shall not be filtered by the saved scope. Saving, discarding,
+  dirty-state, and the `repo_scope_repos` list shape shall remain unchanged.
 - **AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.7:** When GitHub is not
   connected or the repository list fails to load, the picker shall show the
   same unavailable or error state as task creation and shall still accept a
@@ -88,21 +89,24 @@ I type, so that I do not have to recall and type an exact `owner/repo` path.
   picker shall stay inside the viewport, keep its search input visible, and
   give options, the add control, and remove controls touch-sized hit areas,
   with the same selection outcome as desktop.
-- **AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.9:** Persisted watch filters,
-  trigger configs, and repository scope values, and their API payloads, shall
-  keep their existing shape. Previously saved selections shall load and display
-  unchanged.
+- **AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.9:** Persisted watch filters
+  and trigger configs shall keep their existing shape. The `repo_scope_orgs`
+  and `repo_scope_repos` lists and API fields shall keep their existing shapes;
+  canonical mode values shall follow the linked scope contract. Previously
+  saved selections shall load and display unchanged.
 - **AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.10:** The repository scope
-  setting's organizations (in `orgs` mode) and GitHub watch filters'
+  setting's selected owners and GitHub watch filters'
   organizations shall use one organization picker instead of a comma-separated
   text field or a row of toggle badges. Selected organizations shall render as
   removable entries; "Add organization" shall list the authenticated account
   first, then the user's GitHub organizations, filter them by a
   case-insensitive substring as the user types, mark already-selected ones,
   and add a typed well-formed login on Enter even if it is not listed. A watch
-  filter shall offer and accept only organizations the workspace scope allows,
-  rejecting a typed one with a visible message, and shall hide the
-  organization picker when the scope is in `repos` mode. Saved
+  filter shall offer and accept an owner wildcard only when the workspace
+  scope selects that owner, rejecting a typed one with a visible message.
+  Exact repository scope shall not authorize an owner wildcard. The scope editor
+  shall keep its owner picker unfiltered so users can add an owner from an
+  exact-only scope. Saved
   `repo_scope_orgs` values and `owner/*` watch filters shall keep their shape.
 - **AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.11:** The repository picker
   and the organization picker shall each offer a refresh control that reloads
