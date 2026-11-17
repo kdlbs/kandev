@@ -70,9 +70,7 @@ export async function checkMarkdownOpening({
         await preview.getByTestId("markdown-preview-toggle").click();
       }
       await expect(preview).not.toBeVisible();
-      await expect(
-        testPage.locator(mobile ? ".cm-editor:visible" : ".monaco-editor:visible"),
-      ).toBeVisible();
+      await expect(testPage.locator(".cm-editor:visible, .monaco-editor:visible")).toBeVisible();
       await testPage.getByTestId("markdown-preview-toggle").click();
       await expect(preview).toBeVisible();
     }

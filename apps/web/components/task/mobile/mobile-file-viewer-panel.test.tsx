@@ -59,6 +59,22 @@ vi.mock("@/components/editors/external-vcs-file-link", () => ({
 vi.mock("../file-viewer-content", () => ({
   FileViewerContent: () => <span data-testid={FILE_CONTENT_TEST_ID} />,
 }));
+vi.mock("../file-editor-content", () => ({
+  FileEditorContent: (props: {
+    path: string;
+    readOnly?: boolean;
+    showToolbar?: boolean;
+    enableComments?: boolean;
+  }) => (
+    <span
+      data-testid={FILE_EDITOR_CONTENT_TEST_ID}
+      data-path={props.path}
+      data-read-only={props.readOnly}
+      data-show-toolbar={props.showToolbar}
+      data-comments-enabled={props.enableComments}
+    />
+  ),
+}));
 vi.mock("../markdown-preview-content", () => ({
   MarkdownPreviewContent: ({ onTogglePreview }: { onTogglePreview: () => void }) => (
     <div data-testid="markdown-preview">
@@ -81,7 +97,15 @@ vi.mock("../file-binary-viewer", () => ({
 
 import { MobileFileViewerPanel } from "./mobile-file-viewer-panel";
 
-afterEach(cleanup);
+const MOBILE_CODE_FILE_PATH = "src/new.ts";
+const MOBILE_CODE_FILE_CONTENT = "export const value = 1;";
+const FILE_HASH = "hash";
+const FILE_EDITOR_CONTENT_TEST_ID = "file-editor-content";
+
+afterEach(() => {
+  cleanup();
+  state.userSettings.markdownPreviewByDefault = true;
+});
 
 describe("MobileFileViewerPanel workspace path", () => {
   it("uses the effective workspace path for binary file viewers", () => {
@@ -93,7 +117,7 @@ describe("MobileFileViewerPanel workspace path", () => {
             name: "archive.zip",
             content: "",
             originalContent: "",
-            originalHash: "hash",
+            originalHash: FILE_HASH,
             isDirty: false,
             isBinary: true,
           }}
@@ -110,17 +134,42 @@ describe("MobileFileViewerPanel workspace path", () => {
 });
 
 describe("MobileFileViewerPanel external file action", () => {
+  it("uses the selected editor provider in read-only mode with comments enabled", () => {
+    render(
+      <TooltipProvider>
+        <MobileFileViewerPanel
+          file={{
+            path: MOBILE_CODE_FILE_PATH,
+            name: "new.ts",
+            content: MOBILE_CODE_FILE_CONTENT,
+            originalContent: MOBILE_CODE_FILE_CONTENT,
+            originalHash: FILE_HASH,
+            isDirty: false,
+          }}
+          sessionId="session-1"
+          onClose={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    const editor = screen.getByTestId(FILE_EDITOR_CONTENT_TEST_ID);
+    expect(editor.getAttribute("data-path")).toBe(MOBILE_CODE_FILE_PATH);
+    expect(editor.getAttribute("data-read-only")).toBe("true");
+    expect(editor.getAttribute("data-show-toolbar")).toBe("false");
+    expect(editor.getAttribute("data-comments-enabled")).toBe("true");
+  });
+
   it("renders a touch-sized action scoped to the open file's repository", () => {
     render(
       <TooltipProvider>
         <MobileFileViewerPanel
           file={{
-            path: "src/new.ts",
+            path: MOBILE_CODE_FILE_PATH,
             name: "new.ts",
             repo: "frontend",
             content: "",
             originalContent: "",
-            originalHash: "hash",
+            originalHash: FILE_HASH,
             isDirty: false,
           }}
           sessionId="session-1"
@@ -133,7 +182,7 @@ describe("MobileFileViewerPanel external file action", () => {
       screen.getByTestId("external-vcs-file-link-props").dataset.props ?? "{}",
     );
     expect(props).toEqual({
-      filePath: "src/new.ts",
+      filePath: MOBILE_CODE_FILE_PATH,
       status: "untracked",
       taskId: "task-1",
       sessionId: "session-1",
@@ -164,11 +213,12 @@ describe("MobileFileViewerPanel Markdown preview mode", () => {
     );
 
     expect(screen.queryByTestId("markdown-preview") !== null).toBe(enabled);
-    expect(screen.queryByTestId(FILE_CONTENT_TEST_ID) !== null).toBe(!enabled);
+    expect(screen.queryByTestId(FILE_EDITOR_CONTENT_TEST_ID) !== null).toBe(!enabled);
     state.userSettings.markdownPreviewByDefault = true;
   });
 
   it("opens a Markdown file directly in preview mode when requested", () => {
+    state.userSettings.markdownPreviewByDefault = false;
     render(
       <TooltipProvider>
         <MobileFileViewerPanel
@@ -177,7 +227,7 @@ describe("MobileFileViewerPanel Markdown preview mode", () => {
             name: README_PATH,
             content: README_CONTENT,
             originalContent: README_CONTENT,
-            originalHash: "hash",
+            originalHash: FILE_HASH,
             isDirty: false,
           }}
           sessionId="session-1"
@@ -188,7 +238,7 @@ describe("MobileFileViewerPanel Markdown preview mode", () => {
     );
 
     expect(screen.getByTestId("markdown-preview")).toBeTruthy();
-    expect(screen.queryByTestId(FILE_CONTENT_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(FILE_EDITOR_CONTENT_TEST_ID)).toBeNull();
   });
 
   it("resets preview mode when the same path is opened from another repository", () => {
@@ -201,7 +251,7 @@ describe("MobileFileViewerPanel Markdown preview mode", () => {
             repo: "frontend",
             content: README_CONTENT,
             originalContent: README_CONTENT,
-            originalHash: "hash",
+            originalHash: FILE_HASH,
             isDirty: false,
           }}
           sessionId="session-1"
@@ -211,7 +261,7 @@ describe("MobileFileViewerPanel Markdown preview mode", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Show code" }));
-    expect(screen.getByTestId(FILE_CONTENT_TEST_ID)).toBeTruthy();
+    expect(screen.getByTestId(FILE_EDITOR_CONTENT_TEST_ID)).toBeTruthy();
 
     rerender(
       <TooltipProvider>
@@ -222,7 +272,7 @@ describe("MobileFileViewerPanel Markdown preview mode", () => {
             repo: "backend",
             content: README_CONTENT,
             originalContent: README_CONTENT,
-            originalHash: "hash",
+            originalHash: FILE_HASH,
             isDirty: false,
           }}
           sessionId="session-1"
@@ -245,7 +295,7 @@ describe("MobileFileViewerPanel HTML preview mode", () => {
             name: "index.html",
             content: REPORT_CONTENT,
             originalContent: REPORT_CONTENT,
-            originalHash: "hash",
+            originalHash: FILE_HASH,
             isDirty: false,
           }}
           sessionId="session-1"
@@ -265,7 +315,7 @@ describe("MobileFileViewerPanel HTML preview mode", () => {
     });
     expect(screen.getByTestId("html-preview-frame")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Show code" }));
-    expect(screen.getByTestId(FILE_CONTENT_TEST_ID)).toBeTruthy();
+    expect(screen.getByTestId(FILE_EDITOR_CONTENT_TEST_ID)).toBeTruthy();
   });
 
   it("does not restore persisted in-place preview state for HTML", () => {
@@ -287,7 +337,7 @@ describe("MobileFileViewerPanel HTML preview mode", () => {
       </TooltipProvider>,
     );
 
-    expect(screen.getByTestId(FILE_CONTENT_TEST_ID)).toBeTruthy();
+    expect(screen.getByTestId(FILE_EDITOR_CONTENT_TEST_ID)).toBeTruthy();
     expect(screen.queryByTestId("html-preview-frame")).toBeNull();
   });
 });

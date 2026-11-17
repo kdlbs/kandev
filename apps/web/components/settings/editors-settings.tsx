@@ -8,7 +8,7 @@ import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { Textarea } from "@kandev/ui/textarea";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
-import { SettingsGroup } from "@/components/settings/settings-group";
+import { SettingsGroup, SettingsRow } from "@/components/settings/settings-group";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { EditableCard } from "@/components/settings/editable-card";
@@ -42,6 +42,7 @@ import { LSP_LANGUAGE_OPTIONS } from "./lsp-language-options";
 import { Trans, useTranslation } from "react-i18next";
 import { settingsActionClassName } from "@/components/settings/settings-control";
 import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
+import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 
 /**
  * Code identifiers rendered inside `<Trans>` copy. They are passed as
@@ -186,12 +187,15 @@ function CustomEditorRow({
   deleteRequest,
 }: CustomEditorRowProps) {
   const { t } = useTranslation();
+  const canManage = useIsAdmin();
   return (
     <EditableCard
       key={editor.id}
-      isEditing={editingId === editor.id}
+      isEditing={canManage && editingId === editor.id}
       historyId={`editor-${editor.id}`}
-      onOpen={() => setEditingId(editor.id)}
+      onOpen={() => {
+        if (canManage) setEditingId(editor.id);
+      }}
       onClose={() => setEditingId(null)}
       renderEdit={({ close }) => (
         <EditorForm
@@ -207,8 +211,8 @@ function CustomEditorRow({
       )}
       renderPreview={({ open }) => (
         <div
-          className="rounded-lg border border-border/70 bg-background p-4 flex flex-col gap-3 cursor-pointer md:flex-row md:items-center md:justify-between"
-          onClick={open}
+          className={`rounded-lg border border-border/70 bg-background p-4 flex flex-col gap-3 ${canManage ? "cursor-pointer" : ""} md:flex-row md:items-center md:justify-between`}
+          onClick={canManage ? open : undefined}
         >
           <div className="min-w-0">
             <div className="break-words font-medium text-sm text-foreground">{editor.name}</div>
@@ -217,32 +221,36 @@ function CustomEditorRow({
             </div>
           </div>
           <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className={settingsActionClassName("cursor-pointer")}
-              onClick={(event) => {
-                event.stopPropagation();
-                open();
-              }}
-            >
-              <IconEdit className="h-4 w-4" />
-              {t("settings:edit")}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className={settingsActionClassName("cursor-pointer")}
-              onClick={(event) => {
-                event.stopPropagation();
-                void deleteRequest.run(editor.id);
-              }}
-            >
-              <IconTrash className="h-4 w-4" />
-              {t("settings:remove")}
-            </Button>
+            {canManage && (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className={settingsActionClassName("cursor-pointer")}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    open();
+                  }}
+                >
+                  <IconEdit className="h-4 w-4" />
+                  {t("settings:edit")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className={settingsActionClassName("cursor-pointer")}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void deleteRequest.run(editor.id);
+                  }}
+                >
+                  <IconTrash className="h-4 w-4" />
+                  {t("settings:remove")}
+                </Button>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -261,20 +269,23 @@ function CustomEditorsList({
   deleteRequest,
 }: CustomEditorsListProps) {
   const { t } = useTranslation();
+  const canManage = useIsAdmin();
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div className="text-sm font-medium text-foreground">{t("settings:customEditors")}</div>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => setIsAdding(true)}
-          className={settingsActionClassName()}
-        >
-          {t("settings:addCustomEditor")}
-        </Button>
+        {canManage && (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setIsAdding(true)}
+            className={settingsActionClassName()}
+          >
+            {t("settings:addCustomEditor")}
+          </Button>
+        )}
       </div>
-      {isAdding && (
+      {canManage && isAdding && (
         <EditorForm
           title={t("settings:newCustomEditor")}
           initialState={defaultFormState()}
@@ -288,7 +299,7 @@ function CustomEditorsList({
         />
       )}
       <div className="space-y-3">
-        {customEditors.length === 0 && !isAdding && (
+        {customEditors.length === 0 && (!canManage || !isAdding) && (
           <div className="rounded-lg border border-dashed border-border/70 bg-muted/30 p-4 text-sm text-muted-foreground">
             {t("settings:noCustomEditorsYet")}
           </div>
@@ -413,25 +424,23 @@ function EditorsSection({
 function MarkdownPreviewSetting({ state }: { state: EditorsSettingsState }) {
   const { t } = useTranslation();
   return (
-    <label
+    <SettingsRow
       id="setting-markdown-preview"
-      className="flex min-h-11 cursor-pointer items-center justify-between gap-4 md:min-h-0 [@media(pointer:coarse)]:min-h-11"
-      data-settings-dirty={
-        state.markdownPreviewByDefault !== state.baselineMarkdownPreviewByDefault
+      label={t("settings:markdownPreviewByDefault")}
+      description={t("settings:markdownPreviewByDefaultDescription")}
+      controlId="markdown-preview-default"
+      touchTarget="switch"
+      controlWrapperTestId="markdown-preview-control"
+      discoveryTargetId="setting-markdown-preview"
+      isDirty={state.markdownPreviewByDefault !== state.baselineMarkdownPreviewByDefault}
+      control={
+        <Switch
+          id="markdown-preview-default"
+          checked={state.markdownPreviewByDefault}
+          onCheckedChange={state.setMarkdownPreviewByDefault}
+        />
       }
-    >
-      <span className="min-w-0">
-        <span className="block text-sm font-medium">{t("settings:markdownPreviewByDefault")}</span>
-        <span className="block text-xs text-muted-foreground">
-          {t("settings:markdownPreviewByDefaultDescription")}
-        </span>
-      </span>
-      <Switch
-        checked={state.markdownPreviewByDefault}
-        onCheckedChange={state.setMarkdownPreviewByDefault}
-        aria-label={t("settings:markdownPreviewByDefault")}
-      />
-    </label>
+    />
   );
 }
 

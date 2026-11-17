@@ -4,6 +4,22 @@
 **Date:** 2026-11-07
 **Area:** backend, protocol
 
+## Amendment: boot-aware verification (2026-11-16)
+
+For verify mode, a validated receipt from a different confirmed kernel boot
+identifies a launch that cannot survive. The helper returns the existing
+`absent` outcome before inspecting the old PID. It sends no signal and
+removes no path. Terminate mode retains its previous-boot refusal.
+
+Resume uses the existing reset and launch path. Other identity conflicts and
+unreadable evidence remain unresolved. Persisted stops preserve session directories
+after receipt-backed absence because a numeric pidfile match cannot prove
+ownership across boots. Normal verified-live stops keep their existing cleanup.
+
+This corrects [issue #5287](https://github.com/kdlbs/kandev/issues/5287)
+without a new wire outcome, registry, or recovery service. Some disposable
+runtime files can remain until task-owned cleanup.
+
 ## Context
 
 [Issue #5145](https://github.com/kdlbs/kandev/issues/5145) describes a live SSH

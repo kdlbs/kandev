@@ -401,9 +401,19 @@ func writeGitHubOperationalAuthError(ctx *gin.Context, err error) bool {
 		})
 		return true
 	}
+	if errors.Is(err, ErrRepoOutsideWorkspaceScope) {
+		// The public code and message identify the local policy rejection.
+		// Neither the requested repository identity nor the allowlist is returned.
+		ctx.JSON(http.StatusNotFound, gin.H{
+			"code":  "github_repository_out_of_scope",
+			"error": "This repository is outside the workspace's GitHub repository scope. Update the workspace repository scope in Settings to include it.",
+		})
+		return true
+	}
 	if errors.Is(err, ErrRepoNotResolvable) {
-		// A repository outside the workspace scope is indistinguishable from a
-		// missing repository. Do not leak the workspace's authorization details.
+		// Genuinely unresolvable upstream (missing, deleted, or not visible to
+		// the automation identity). Don't leak the workspace's authorization
+		// details.
 		ctx.JSON(http.StatusNotFound, gin.H{
 			"code":  "github_repository_not_found",
 			"error": "GitHub repository is not available in this workspace.",

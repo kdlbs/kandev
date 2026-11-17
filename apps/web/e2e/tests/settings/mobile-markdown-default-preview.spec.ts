@@ -17,9 +17,12 @@ test("persists and resets the Markdown initial-mode preference", async ({
       exact: true,
     });
     await expect(toggle).toBeChecked();
+    await expect(toggle).toHaveAccessibleDescription(
+      "Choose the initial mode for newly opened Markdown files. You can switch modes at any time.",
+    );
     await toggle.scrollIntoViewIfNeeded();
     await testPage.screenshot({ path: testInfo.outputPath("markdown-preview-setting.png") });
-    const row = testPage.locator("#setting-markdown-preview");
+    const row = testPage.getByTestId("markdown-preview-control");
     expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await toggle.click();
     const save = testPage.getByTestId("settings-floating-save");

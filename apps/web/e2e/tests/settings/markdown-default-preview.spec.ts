@@ -17,6 +17,9 @@ test("persists and resets the Markdown initial-mode preference", async ({
       exact: true,
     });
     await expect(toggle).toBeChecked();
+    await expect(toggle).toHaveAccessibleDescription(
+      "Choose the initial mode for newly opened Markdown files. You can switch modes at any time.",
+    );
     await toggle.click();
     const save = testPage.getByTestId("settings-floating-save");
     await save.getByRole("button", { name: "Reset", exact: true }).click();

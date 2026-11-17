@@ -4,6 +4,7 @@ system: workspaces
 requirements:
   - REQ-WORKSPACES-IMPROVE-KANDEV-001
 created: 2026-04-29
+updated: 2026-11-16
 owners:
   - Carlos Florencio
 ---
@@ -17,7 +18,7 @@ This design preserves the technical source detail for `REQ-WORKSPACES-IMPROVE-KA
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-WORKSPACES-IMPROVE-KANDEV-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-WORKSPACES-IMPROVE-KANDEV-001` | [Migrated source detail](#migrated-source-detail), [Template initialization and recovery](#template-initialization-and-recovery) |
 
 ## Migrated source detail
 
@@ -355,8 +356,8 @@ the user's own agent picks up immediately — turning every report into a contri
   starts without a GitHub connection.
 
 - **GIVEN** the `Improve Kandev` workspace already exists, **WHEN** bootstrap
-  is called again, **THEN** the workspace's configuration (including its
-  GitHub connection) is untouched — nothing is re-copied.
+  is called again, **THEN** its connections and populated workflows remain
+  unchanged. Bootstrap restores missing steps only in an empty managed workflow.
 
 - **GIVEN** the dedicated workspace does not exist, **WHEN** the user opens
   the Improve Kandev dialog, **THEN** the dialog offers a "Create a dedicated
@@ -387,6 +388,8 @@ the user's own agent picks up immediately — turning every report into a contri
   the state is visible up front.
 - Task creation, agent runs, step advancement, and the kanban board are
   unaffected — only configuration mutations are restricted.
+- Internal template initialization follows the narrow recovery path below.
+  User-facing mutations retain the same restriction.
 
 ## Workspace creation semantics
 
@@ -411,12 +414,94 @@ the user's own agent picks up immediately — turning every report into a contri
   (`create_workspace: false`), bootstrap falls back to the request's
   `workspace_id` (the user's active workspace) and scopes the repo and hidden
   workflows there — the legacy behavior.
-- Reuse path (workspace already exists): bootstrap makes no further changes —
-  the GitHub connection and configuration are never re-copied or synced, and
-  new improve tasks land in the dedicated workspace systematically.
+- Reuse path (workspace already exists): bootstrap does not re-copy connections
+  or replace populated workflow configuration. It validates the managed
+  workflows and initializes either workflow that has zero steps.
 
 The locked task form preserves its draft when bootstrap resolves both its workspace and workflow.
 It resets the draft on other workspace changes, including changes while the workflow remains unresolved.
+
+## Template initialization and recovery
+
+This section maps `AC-WORKSPACES-IMPROVE-KANDEV-001.9` through
+`AC-WORKSPACES-IMPROVE-KANDEV-001.13`.
+Workspaces owns this bootstrap lifecycle. The repair reuses the existing template
+creation path and the shared desktop/phone client.
+
+### Existing authorization boundary
+
+`Controller.CreateStepsFromTemplate` already calls `AuthorizeWorkflow` and
+`EnsureWorkflowMutable` before it calls the workflow service. REST and WebSocket
+requests use this controller. Other user-facing step mutations keep their guards.
+
+`workflow.Service.CreateStepsFromTemplate` also serves the authorized task service
+when it creates a workflow. Its call to `authorizeExecutorMutation` repeats the
+read-only check and incorrectly blocks this internal setup.
+For this method only, retain workflow access and the executor eligibility check
+without repeating the user-facing read-only restriction. Keep the shared
+`authorizeExecutorMutation` helper unchanged for other operations.
+The controller remains responsible for authorizing public template application.
+The task service remains responsible for authorizing internal creation and repair.
+No caller loses its original identity or request context.
+
+### Bootstrap repair
+
+The planned `task.Service.EnsureWorkflowTemplateSteps` helper uses existing
+`WorkflowStepCreator` and `workflowStepLister` capabilities. It authorizes workflow
+management, reads the persisted template binding, and accepts only the two
+bootstrap-owned templates. It rejects synced workflows and policy lookup errors.
+
+If a selected workflow has zero steps, the helper calls the existing
+`CreateStepsFromTemplate` method. If it has any steps, the helper leaves them alone.
+The helper publishes newly created repair steps through `stepevents.NewPublisher`.
+A missing dependency or failed read/write produces an error.
+There is no new repository API, template builder, or provisioning interface.
+
+`Handler.ensureWorkflow` and `findAndHealWorkflow` use this helper for existing
+rows. The hidden-flag repair remains. New workflow creation continues through
+`CreateWorkflow`, which returns template errors instead of swallowing them.
+A failed hidden bootstrap workflow can leave an empty row for the next bootstrap
+to repair. Failed visible workflow creation removes its new row so a caller that
+receives an error does not later see an undisclosed empty workflow. Cleanup
+errors are returned with the template initialization error. Neither path
+publishes a workflow-created event on failure, and a fallback re-read must not
+convert a provisioning error into success.
+
+A single mutex on the existing handler serializes the workflow portion of
+bootstrap: list, find/create, and empty-step repair. The list must be read after
+acquiring the lock. GitHub probes and cloning stay outside this critical section.
+This prevents two overlapping bootstrap requests from both filling the same empty
+workflow. It adds no database coordination protocol or lock registry.
+A waiting request checks cancellation after acquiring the lock. The active
+request keeps its own context. The next request reads the current state afresh.
+
+The existing template validation, ID remapping, and step persistence remain.
+No SQL, migration, or template-content change is required.
+Partially populated workflows remain outside automatic repair.
+The repair does not promise a new transaction spanning the complete template.
+
+### List contract and shared client
+
+`Controller.ListStepsByWorkflow` converts a successful nil result to an empty
+slice before JSON serialization. Authorization and storage errors still propagate.
+`workflow-api.ts` maps `(response.steps ?? [])` and returns an array.
+Populated-step defaults and lifecycle-policy normalization remain unchanged.
+
+The existing dialog opens its form after successful bootstrap and keeps submission
+blocked after an error. The desktop footer and phone Utilities action use the
+same client. Layout, copy, scrolling, focus, and touch behavior remain unchanged.
+
+### Verification and delivery
+
+The real-service bootstrap regression uses production policy callbacks from
+`wireTaskWorkflowCrossReferences`. It covers first creation, empty-state repair,
+a populated sibling, repeated and overlapping requests, and error propagation.
+Controller tests preserve the user-facing read-only boundary. Client and HTTP
+tests cover the null-list failure. Existing desktop/mobile E2E suites cover the
+shared form. No new database behavior test matrix is needed because SQL is unchanged.
+
+Delivery package:
+[Improve Kandev template-step repair](../../../plans/improve-kandev-template-steps/plan.md).
 
 ## Out of scope
 

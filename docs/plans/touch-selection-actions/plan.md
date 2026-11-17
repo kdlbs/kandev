@@ -23,9 +23,15 @@ plan applies that pattern to every text-selection comment surface on coarse
 pointers: chat agent replies (Task Chat and Quick Chat), Office thread comment
 extracts, the Markdown file preview, and the code file editors.
 
-Delivery runs in two waves. Wave 1 builds the shared geometry hook, selection
+Office thread extracts use the existing comment composer footer action slot so
+the transcript tail can scroll clear of the composer. Other surfaces without a
+persistent action row use the dock.
+
+Delivery runs in four waves. Wave 1 builds the shared geometry hook, selection
 tracker, and dock component, and fixes the reported chat surface end to end.
-Wave 2 adopts the dock in the Markdown preview and code editors.
+Wave 2 adopts the dock in the Markdown preview and code editors. Wave 3 makes
+the dock a compact square action. Wave 4 places Comment in existing composer
+action rows, including the Office thread extract footer.
 
 ## Scope
 
@@ -35,8 +41,9 @@ Wave 2 adopts the dock in the Markdown preview and code editors.
   Plan dock as a regression consumer.
 - Add `useTouchSelectionTracking` (`selectionchange`-driven) and
   `SelectionActionDock`.
-- Replace floating triggers with the dock on coarse pointers in the four
-  surfaces above, preserving fine-pointer behavior.
+- Replace floating triggers with the dock on coarse pointers in surfaces
+  without a persistent action row; put Office extracts in the composer slot.
+  Preserve fine-pointer behavior.
 - Add one localized toolbar name in seven catalogs.
 - Unit, component, and `mobile-chrome` E2E coverage.
 
@@ -114,15 +121,20 @@ Maps to `AC-UI-TOUCH-SELECTION-ACTIONS-001.2`, `.3`, `.4`, `.6`, `.8`.
 
 | Order | Wave | Depends on | Result |
 | --- | --- | --- | --- |
-| [01](task-01-shared-dock-and-chat-messages.md) | 1 | none | Shared dock primitives; chat and Office thread comments docked on touch |
+| [01](task-01-shared-dock-and-chat-messages.md) | 1 | none | Shared dock primitives; chat comments dock on touch, Office extracts use the composer slot |
 | [02](task-02-preview-and-editor-dock.md) | 2 | 01 | Markdown preview and code editors docked on touch |
 | [03](task-03-compact-square-dock.md) | 3 | 01, 02 | Dock shrinks to a Plan-style square icon after phone review |
 | [04](task-04-inline-composer-row.md) | 4 | 03 | Chat Comment action and workflow action join the composer utility row |
 
 ## Verification summary
 
-See each work order. Both finish with `pnpm run typecheck`, changed-file
-lint, `pnpm run i18n:check` (01 only), and their `mobile-chrome` E2E specs.
+See each work order. The PR fixup also adds viewport-clipped final-line checks
+for Markdown, CodeMirror, and Monaco, CodeMirror touch-to-mouse ownership
+coverage, and pending Markdown selection-capture cancellation coverage. The
+managed mobile E2E runner builds the web assets and backend before its focused
+specs. Follow-up CI remediation keeps mobile editor selection coverage valid
+for both providers, prevents read-only mobile viewers from acquiring LSP
+connections, and measures popover geometry after finite opening animations.
 
 ## Risks
 

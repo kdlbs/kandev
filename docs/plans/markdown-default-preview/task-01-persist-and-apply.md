@@ -48,7 +48,7 @@ Use current shipped switch and settings-row primitives. Do not redesign the sett
 
 ## ASCII UI preview
 
-UI-01: Editors section, saved On state, shared desktop and phone structure.
+UI-01: Editors section, saved On state, desktop structure.
 
 ```text
 Editors
@@ -60,8 +60,17 @@ Markdown files. You can switch modes at any time.
 ```
 
 The row belongs to the scrolling settings content. Existing Save/Reset stays fixed and appears for a dirty draft.
-On phones, copy wraps beside the switch and its activation area measures at least 44px.
-The same hierarchy serves both viewports. Spacing is illustrative. Localized copy, control order, and Save/Reset behavior are required.
+UI-02: Phone SettingsRow composition:
+
+```text
+Open Markdown files in Preview
+Choose the initial mode for newly opened
+Markdown files. You can switch modes at any time.
+                                  [ On ]
+```
+
+On phones, the shared row places the control below the wrapping label/help, in an activation area of at least 44px.
+Both views use the shared SettingsRow label, help association, and discovery registration. Spacing is illustrative. Localized copy, control order, and Save/Reset behavior are required.
 Maps to AC-UI-MARKDOWN-DEFAULT-PREVIEW-001.1, .2, and .6. Both targeted browser specs verify this region.
 
 ## Verification
@@ -104,3 +113,13 @@ Completed on 2026-11-17 in the isolated workspace.
 Environment notes: Browser subprocesses removed inherited `KANDEV_*` variables to avoid the host service's tailnet configuration. Chromium used `LD_LIBRARY_PATH` assembled from existing Nix store libraries. Initial readiness/library failures occurred before feature assertions. The test helper now tolerates restoration of an active file tab rather than requiring chat on its second navigation.
 
 The existing renderer is unchanged. No parent feature changes, PR3113 changes, or new dependencies were imported. The user confirmed manual testing passed and authorized commit, push, and a ready PR. The isolated user-test instance on port 48731 was shut down. The main instance on port 9998 retained PID 1165. Desktop and phone setting screenshots were captured in a fresh disposable run (two tests passed).
+
+## PR remediation
+
+Merged the current main boundary while preserving the Markdown default contract. Updated the phone source-view assertions for main's read-only editor and selection-comment support. The opening browser helper now accepts either supported source editor.
+
+Addressed Greptile's shared-row finding with `SettingsRow`: linked label/help, `aria-describedby`, dirty state, discovery registration, and the shared phone switch target. Updated the desktop/phone browser assertions and UI previews.
+
+Post-merge validation passed: the ten targeted frontend suites (191 tests), web typecheck, web lint, localization check, backend user/settings-catalog suites and boot projections, two desktop browser tests, 14 phone browser tests, public docs, catalog, spec lint, and diff checks. These results supersede the original 190-test frontend count. Desktop managed E2E rebuilt the runtime and assets; phone raw E2E reused that fresh build.
+
+Fresh CI and review evidence for the pushed remediation remains externally pending. Screenshots will be refreshed after the remediation commit.

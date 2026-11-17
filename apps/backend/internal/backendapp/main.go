@@ -388,6 +388,12 @@ func initializeApplication(ctx context.Context, cfg *config.Config, log *logger.
 	return startServices(ctx, cfg, log, addCleanup, eventBus, runCleanups, workerCancelFromContext(ctx))
 }
 
+func startTaskBackgroundWorkers(ctx context.Context, taskSvc *taskservice.Service, stallDetectionThreshold time.Duration) {
+	startup.AfterReady(ctx, func() { taskSvc.StartAutoArchiveLoop(ctx) })
+	taskSvc.SetStallDetectionThreshold(stallDetectionThreshold)
+	startup.AfterReady(ctx, func() { taskSvc.StartSessionReconciliationLoop(ctx) })
+}
+
 // applyStartupRuntimeFlags resolves persisted runtime-flag overrides and
 // applies them to the config, returning false if resolution fails. It is a
 // no-op when no runtime-flag repository is configured.
@@ -1549,10 +1555,7 @@ func startGatewayAndServe(
 		services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
 	}
 
-	startup.AfterReady(ctx, func() { services.Task.StartAutoArchiveLoop(ctx) })
-	services.Task.SetStallDetectionThreshold(cfg.Tasks.StallDetectionThreshold)
-	startup.AfterReady(ctx, func() { services.Task.StartSessionReconciliationLoop(ctx) })
-	startup.AfterReady(ctx, func() { services.Task.StartQuickChatExpirationLoop(ctx) })
+	startTaskBackgroundWorkers(ctx, services.Task, cfg.Tasks.StallDetectionThreshold)
 	hostUtilityCtx, hostUtilityCancel := context.WithCancel(ctx)
 	hostUtilityReady := make(chan struct{})
 	var hostUtilityWG sync.WaitGroup
@@ -1990,6 +1993,7 @@ func wireOfficeSvcsDependencies(
 	// the Office board (All-Workflows kanban, task views, task/statussummary)
 	// sees the mutation instead of rendering stale state until a refetch.
 	services.OfficeSvcs.Dashboard.SetTaskLifecyclePublisher(services.Task)
+	services.OfficeSvcs.Dashboard.SetTaskStateChangePublisher(services.Task)
 	// Human assignee writes from the office PATCH surface go through the task
 	// service, which authorizes the caller and validates the assignee. That
 	// route carries no :wsId, so it is not covered by the office
@@ -2890,6 +2894,8 @@ func buildOfficeFeatureServices(
 	activity := officeshared.NewActivityLogger(repo, log)
 	if services.Office != nil {
 		services.Office.SetTaskStateWriter(taskRepo)
+		services.Office.SetTaskStateBatchWriter(taskRepo)
+		services.Office.SetTaskStateChangePublisher(services.Task)
 	}
 
 	agentSvc := officeagents.NewAgentService(repo, log, activity)

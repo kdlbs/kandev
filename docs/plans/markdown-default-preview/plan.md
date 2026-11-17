@@ -34,7 +34,7 @@ See the paired design for exact integration points. No engine, schema migration,
 
 ## ASCII UI preview
 
-UI-01: Editors section, saved On state, shared desktop and phone structure.
+UI-01: Editors section, saved On state, desktop structure.
 
 ```text
 Editors
@@ -46,8 +46,17 @@ Markdown files. You can switch modes at any time.
 ```
 
 The row belongs to the scrolling settings content. Existing Save/Reset stays fixed and appears for a dirty draft.
-On phones, copy wraps beside the switch and its activation area measures at least 44px.
-The same hierarchy serves both viewports. Spacing is illustrative. Localized copy, control order, and Save/Reset behavior are required.
+UI-02: Phone SettingsRow composition:
+
+```text
+Open Markdown files in Preview
+Choose the initial mode for newly opened
+Markdown files. You can switch modes at any time.
+                                  [ On ]
+```
+
+On phones, the shared row places the control below the wrapping label/help, in an activation area of at least 44px.
+Both views use the shared SettingsRow label, help association, and discovery registration. Spacing is illustrative. Localized copy, control order, and Save/Reset behavior are required.
 Maps to AC-UI-MARKDOWN-DEFAULT-PREVIEW-001.1, .2, and .6. Both targeted browser specs verify this region.
 
 ## Verification
@@ -77,6 +86,6 @@ No delegated implementation, parent branch imports, PR3113 dependency, or render
 
 Implemented on 2026-11-17. The work order is done. See its [verification results](task-01-persist-and-apply.md#results) for exact commands, environment setup, and evidence.
 
-Backend suites, 190 focused frontend tests, two desktop browser tests, and 14 phone browser tests passed.
+Backend suites, 191 focused frontend tests, two desktop browser tests, and 14 phone browser tests passed after PR remediation.
 Type checking, Go/web lint, localization, generated settings contracts, public docs, specification validation, documentation coverage, and diff checks passed.
 The phone setting screenshot was inspected. The user confirmed the isolated test worked and authorized a ready PR on `feat/markdown-preview-default`.

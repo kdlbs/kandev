@@ -43,7 +43,8 @@ Generate the Traditional Chinese pair with the existing script.
 
 The closest surface is the existing Editors preference group and its LSP setting rows.
 Desktop retains the settings layout. Phone retains direct settings navigation and its single scrolling content region.
-The switch remains inline with a wrapping label. Save/Reset remain in the existing safe-area-aware fixed action surface.
+Use `SettingsRow` with `touchTarget="switch"` and a linked control ID. It connects help with `aria-describedby` and registers the discovery target.
+Phone layout places the touch control below the wrapping label and description. Save/Reset remain in the existing safe-area-aware fixed action surface.
 Use at least 44px for the phone/coarse-pointer activation area without enlarging fine-pointer desktop controls.
 Reuse existing focus, disabled, and pressed states. Add no new animation or overlay.
 

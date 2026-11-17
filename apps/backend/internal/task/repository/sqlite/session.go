@@ -4721,9 +4721,9 @@ func (r *Repository) CountActiveTaskSessionsByRepository(ctx context.Context, re
 	return count, nil
 }
 
-// DeleteEphemeralTasksByAgentProfile deletes all ephemeral tasks (and their sessions)
-// that are using the specified agent profile. This is used during profile deletion
-// to clean up transient quick chat / config chat tasks.
+// DeleteEphemeralTasksByAgentProfile deletes configuration chats (and their
+// sessions) that use the specified agent profile. Ordinary Quick Chats remain
+// available after profile deletion.
 func (r *Repository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, agentProfileID string) (int64, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -4731,12 +4731,14 @@ func (r *Repository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, age
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	configChatPredicate := "NOT (" + excludeConfigModePredicate(r.db.DriverName(), "t.metadata") + ")"
 	var taskIDs []string
 	if err := tx.SelectContext(ctx, &taskIDs, r.db.Rebind(`
 		SELECT DISTINCT t.id
 		FROM tasks t
 		INNER JOIN task_sessions s ON s.task_id = t.id
 		WHERE t.is_ephemeral = 1
+		  AND `+configChatPredicate+`
 		  AND s.agent_profile_id = ?
 		ORDER BY t.id
 	`), agentProfileID); err != nil {
@@ -4764,7 +4766,7 @@ func (r *Repository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, age
 				SELECT 1
 				FROM tasks t
 				INNER JOIN task_sessions s ON s.task_id = t.id
-				WHERE t.id = ? AND t.is_ephemeral = 1 AND s.agent_profile_id = ?
+				WHERE t.id = ? AND t.is_ephemeral = 1 AND `+configChatPredicate+` AND s.agent_profile_id = ?
 			)
 		`), taskID, agentProfileID); err != nil {
 			return 0, err
@@ -4813,7 +4815,7 @@ func (r *Repository) deleteEphemeralTaskForProfileTx(
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM tasks
-		WHERE id = ? AND is_ephemeral = 1
+		WHERE id = ? AND is_ephemeral = 1 AND NOT (`+excludeConfigModePredicate(r.db.DriverName(), "metadata")+`)
 		  AND EXISTS (
 			SELECT 1 FROM task_sessions
 			WHERE task_id = ? AND agent_profile_id = ?
