@@ -128,4 +128,8 @@ All specified checks passed. The focused unit command passed 64 tests.
 Both complete browser specs passed three tests. The final dismissal scenario passed in each project with captures enabled.
 The shared browser scenario lives in `apps/web/e2e/helpers/storage-notice-dismissal.ts` and covers task chat plus Quick Chat.
 See [plan verification results](plan.md#verification-results) for commands, host environment corrections, and rendered evidence.
-No backend or locale changes were required. No commit or push was requested.
+No backend or locale changes were required.
+
+PR review follow-up: reload and return-to-task assertions now wait for the active session's warning in the app store.
+The desktop scenario reaches Dismiss with Tab from the visible Details control and asserts focus before Enter.
+Both focused browser scenarios passed again. Targeted ESLint and formatting checks passed.

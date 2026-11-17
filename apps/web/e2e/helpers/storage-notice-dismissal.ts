@@ -1,4 +1,18 @@
 import { expect, test } from "../fixtures/test-base";
+import type { Page } from "@playwright/test";
+import type { AppState } from "../../lib/state/store";
+
+async function waitForStorageWarning(page: Page, sessionId: string) {
+  await page.waitForFunction((id) => {
+    const state = (
+      window as Window & { __KANDEV_E2E_STORE__?: { getState: () => AppState } }
+    ).__KANDEV_E2E_STORE__?.getState();
+    return (
+      state?.tasks.activeSessionId === id &&
+      state.taskSessions.items[id]?.runtime_storage_health?.state === "warning"
+    );
+  }, sessionId);
+}
 
 // @covers AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-004.1 through 004.4
 export function storageNoticeDismissalScenario() {
@@ -81,17 +95,21 @@ export function storageNoticeDismissalScenario() {
     });
     if (mobile) await dismiss.tap();
     else {
-      await dismiss.focus();
+      await notice.getByTestId("session-delivery-storage-details").click();
+      await page.keyboard.press("Tab");
+      await expect(dismiss).toBeFocused();
       await page.keyboard.press("Enter");
     }
     await expect(notice).toBeHidden();
     await expect(editor).toHaveText("Preserve my draft");
     await page.reload();
+    await waitForStorageWarning(page, tasks[0].session.session_id);
     await expect(editor).toBeVisible();
     await expect(notice).toBeHidden();
     await page.goto(`/t/${tasks[1].task.id}`);
     await expect(notice).toBeVisible();
     await page.goto(`/t/${tasks[0].task.id}`);
+    await waitForStorageWarning(page, tasks[0].session.session_id);
     await expect(editor).toBeVisible();
     await expect(notice).toBeHidden();
 
