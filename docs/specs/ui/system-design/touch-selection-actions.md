@@ -119,13 +119,14 @@ New component in `components/shared/selection-action-dock.tsx`:
 `components/shared/selection-action-slot.tsx` provides
 `SelectionActionSlotProvider`, `SelectionActionSlot`, and
 `useSelectionActionSlot`. `TaskChatPanel` and `QuickChatContent` wrap their
-transcript and composer in the provider; `ChatStatusBar` renders the slot as
-the last child of its utility controls. The slot is a `display: contents` span
+transcript and composer in the provider; `TaskChat` provides the same slot in
+its comment composer footer. `ChatStatusBar` renders its slot as the last child
+of its utility controls. The slot is a `display: contents` span
 carrying `data-selection-action-dock`, so pressing a slotted action keeps the
 tracked selection. When a slot is mounted, `MessageCommentControls` portals the
 icon-only Comment button into it instead of rendering `SelectionActionDock`.
-Without a provider (Office threads, Markdown preview, code editors, minimal
-Quick Chat toolbars) the slot renders nothing and surfaces use the dock.
+Without a provider (Markdown preview, code editors, and minimal Quick Chat
+toolbars) the slot renders nothing and surfaces use the dock.
 
 On phones the composer status row's workflow action no longer forces its own
 row (see `REQ-UI-COMPOSER-ACTION-WRAP-001`), so the workflow action, status
@@ -185,10 +186,13 @@ visibility. Fine-pointer dismissal is unchanged.
 - `MessageCommentSurface` passes `useDrawer` to `useCommentTargetState`. In
   touch presentation it enables `useTouchSelectionTracking` instead of the
   `onTouchEnd` capture and scroll/pointer dismissal.
-- `MessageCommentControls` renders `SelectionActionDock` instead of
-  `SelectionCommentTrigger` when `useDrawer && target && !composerOpen`.
+- `MessageCommentControls` portals the touch Comment action into a mounted
+  `SelectionActionSlot`; when no slot exists it renders `SelectionActionDock`.
   Activating Comment calls `setComposerOpen(true)` with the captured target and
   the existing `MessageCommentDrawer` opens unchanged.
+- `TaskChat` provides an action slot in its comment composer footer. Office
+  thread extracts use this row, keeping the transcript content above the
+  composer and avoiding an overlay across the transcript tail.
 - Eligibility stays `canSelectMessageText`; streaming, read-only, and
   sessionless messages never enable tracking.
 
@@ -247,5 +251,6 @@ container coordinates exactly as `SelectionCommentTrigger` does today.
   extraction.
 - E2E (`mobile-chrome`): chat and Markdown preview docks are at most 56 px
   wide and sit in their host's bottom-right corner, keep the DOM selection, and
-  open the existing composer;
-  the Quick Chat dock is interactive; Office extracts use the dock.
+  open the existing composer; the Quick Chat dock is interactive; Office
+  extracts use the existing composer footer action slot and keep the final
+  transcript text clear.

@@ -1,7 +1,12 @@
 import { test, expect } from "../../fixtures/office-fixture";
 import { selectAgentReplyText } from "../chat/agent-message-comments-helpers";
 
-const COMMENT = "The plan asks QA to review the release path.";
+const FINAL_TRANSCRIPT_LINE = "Final transcript paragraph remains above the composer.";
+const COMMENT = [
+  "The plan asks QA to review the release path.",
+  ...Array.from({ length: 16 }, (_, index) => `Office transcript paragraph ${index + 1}.`),
+  FINAL_TRANSCRIPT_LINE,
+].join("\n\n");
 const EXTRACT = "review the release path";
 
 test.describe("Office thread extract comments on mobile", () => {
@@ -30,9 +35,40 @@ test.describe("Office thread extract comments on mobile", () => {
     const body = testPage.locator("[data-agent-message-body]").filter({ hasText: COMMENT });
     await expect(body).toBeVisible({ timeout: 20_000 });
     await selectAgentReplyText(body, EXTRACT);
-    const dock = testPage.getByRole("toolbar", { name: "Selection actions" });
-    await expect(dock).toBeVisible();
-    await dock.getByTestId("agent-message-comment-trigger").tap();
+    const trigger = testPage.getByTestId("agent-message-comment-trigger");
+    await expect(trigger).toBeVisible();
+    const triggerBox = await trigger.boundingBox();
+    expect(triggerBox).not.toBeNull();
+    if (!triggerBox) throw new Error("Expected the Office extract action hit area");
+    expect(triggerBox.height).toBeGreaterThanOrEqual(44);
+    expect(triggerBox.width).toBeGreaterThanOrEqual(44);
+    await expect(testPage.getByTestId("agent-message-comment-dock")).toHaveCount(0);
+    await expect(testPage.getByRole("toolbar", { name: "Selection actions" })).toHaveCount(0);
+    expect(
+      await trigger.evaluate((element) =>
+        Boolean(element.closest('[data-testid="selection-action-slot"]')),
+      ),
+    ).toBe(true);
+
+    const owner = body.locator("xpath=ancestor::*[@data-selection-dock-host][1]");
+    const composer = body
+      .locator("xpath=ancestor::*[@data-testid='task-chat-root'][1]")
+      .locator("textarea");
+    const finalLine = body.getByText(FINAL_TRANSCRIPT_LINE, { exact: true });
+    await owner.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await finalLine.scrollIntoViewIfNeeded();
+    const [finalLineBox, composerBox] = await Promise.all([
+      finalLine.boundingBox(),
+      composer.boundingBox(),
+    ]);
+    expect(finalLineBox).not.toBeNull();
+    expect(composerBox).not.toBeNull();
+    if (!finalLineBox || !composerBox) throw new Error("Expected transcript and composer geometry");
+    expect(finalLineBox.y + finalLineBox.height).toBeLessThanOrEqual(composerBox.y + 1);
+
+    await trigger.tap();
 
     const drawer = testPage.getByTestId("agent-message-comment-drawer");
     await expect(drawer).toBeVisible();

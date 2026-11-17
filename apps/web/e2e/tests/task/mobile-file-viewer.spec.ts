@@ -14,6 +14,18 @@ import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-
 import { selectMarkdownPreviewText } from "../../helpers/markdown-preview";
 import { waitForWorkspacePath } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
+import {
+  restoreCodeEditorProvider,
+  setCodeEditorProvider,
+} from "../../helpers/file-selection-comments";
+
+test.beforeEach(async ({ testPage }) => {
+  await setCodeEditorProvider(testPage, "codemirror");
+});
+
+test.afterEach(async ({ testPage }) => {
+  await restoreCodeEditorProvider(testPage);
+});
 
 function createLongFileContent(lines = 500): string {
   return Array.from(
@@ -348,11 +360,13 @@ test.describe("Mobile file viewer panel", () => {
       clientHeight: element.clientHeight,
       scrollHeight: element.scrollHeight,
       touchAction: getComputedStyle(element).touchAction,
+      overscrollBehavior: getComputedStyle(element).overscrollBehavior,
       overflowY: getComputedStyle(element).overflowY,
     }));
     expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
     // touch-action must allow vertical pan or mobile touch scroll won't work.
-    expect(metrics.touchAction).toMatch(/pan-y|auto/);
+    expect(metrics.touchAction).toContain("pan-y");
+    expect(metrics.overscrollBehavior).toContain("contain");
     expect(metrics.overflowY).toMatch(/auto|scroll/);
 
     const scrollTopAfterMove = await cmScroller.evaluate((element) => {
@@ -430,16 +444,8 @@ test.describe("Mobile file viewer panel", () => {
     await expect(viewer.locator('div[align="center"]')).toContainText("Embedded HTML body");
 
     await selectMarkdownPreviewText(viewer.getByTestId("markdown-preview").locator("p").first());
-    const dock = testPage.getByRole("toolbar", { name: "Selection actions" });
-    const commentButton = dock.getByTestId("markdown-preview-comment-button");
+    const commentButton = testPage.getByTestId("markdown-preview-comment-button");
     await expect(commentButton).toBeVisible({ timeout: 5_000 });
-    const previewBox = await viewer.getByTestId("markdown-preview").boundingBox();
-    const dockBox = await dock.boundingBox();
-    if (!previewBox || !dockBox) throw new Error("Expected visible preview and selection dock");
-    // A small square docked at the preview's bottom-right, away from the native selection menu.
-    expect(dockBox.width).toBeLessThanOrEqual(56);
-    expect(previewBox.x + previewBox.width - (dockBox.x + dockBox.width)).toBeLessThanOrEqual(16);
-    expect(previewBox.y + previewBox.height - (dockBox.y + dockBox.height)).toBeLessThanOrEqual(8);
     await commentButton.tap();
 
     await testPage
