@@ -3295,5 +3295,7 @@
   "removeRootFailed": "Não foi possível remover a raiz desta tarefa",
   "removeFromTask": "Remover da tarefa",
   "rootDisabledNoTracker": "Esta raiz ainda não tem rastreador Git",
-  "refreshRepositories": "Atualizar repositórios"
+  "refreshRepositories": "Atualizar repositórios",
+  "referenceCurrentTitle": "Título atual: {{title}}",
+  "referenceOpenForDetails": "Abra a tarefa para ver os detalhes."
 }
