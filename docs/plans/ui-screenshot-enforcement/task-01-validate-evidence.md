@@ -115,7 +115,7 @@ of freshness, visibility, relevance, and viewport coverage.
 
 Verification passed:
 
-- `node --test .github/scripts/pr-ui-evidence.test.cjs` (9 tests)
+- `node --test .github/scripts/pr-ui-evidence.test.cjs` (13 tests)
 - `python3 .github/scripts/pr-ui-evidence-workflow-contract_test.py` (7 tests)
 - `python3 .github/scripts/lint-action-pinning_test.py`
 - `python3 .github/scripts/lint-action-pinning.py`
