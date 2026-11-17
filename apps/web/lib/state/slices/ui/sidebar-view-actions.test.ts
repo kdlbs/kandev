@@ -162,6 +162,65 @@ describe("createSidebarView semantics", () => {
   });
 });
 
+// @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.2
+describe("copied sidebar view disclosure", () => {
+  it.each(["save as", "duplicate"])(
+    "preserves independent plugin-group disclosure through %s and its journal",
+    async (operation) => {
+      const store = makeStore();
+      const source = makeView("tag-source", "Tag");
+      const group = "plugin:acme:labels";
+      const collapsed = `${group}:value:ready`;
+      source.group = group;
+      source.collapsedGroups = [collapsed];
+      seedSidebar(store, [source]);
+      if (operation === "save as") {
+        store.getState().updateSidebarDraft({ groupIndent: false });
+        store.getState().saveSidebarDraftAs("Copy");
+      } else {
+        store.getState().duplicateSidebarView(source.id, "Copy");
+      }
+      const state = store.getState().sidebarViewsByWorkspace.ws;
+      const copied = state.views.find((view) => view.id === state.activeViewId)!;
+      expect(copied.group).toBe(group);
+      expect(copied.collapsedGroups).toEqual([collapsed]);
+      expect(copied.collapsedGroups).not.toBe(state.views[0].collapsedGroups);
+      await waitFor(() =>
+        expect(updateUserSettings).toHaveBeenCalledWith(
+          expect.objectContaining({
+            sidebar_view_state: expect.objectContaining({
+              workspace_id: "ws",
+              active_view_id: copied.id,
+              views: expect.arrayContaining([
+                expect.objectContaining({ id: copied.id, group, collapsed_groups: [collapsed] }),
+              ]),
+            }),
+          }),
+        ),
+      );
+      store.getState().toggleSidebarGroupCollapsed(copied.id, collapsed);
+      const expanded = store.getState().sidebarViewsByWorkspace.ws;
+      expect(expanded.views.find((view) => view.id === copied.id)?.collapsedGroups).toEqual([]);
+      expect(expanded.views.find((view) => view.id === source.id)?.collapsedGroups).toEqual([
+        collapsed,
+      ]);
+    },
+  );
+
+  it("does not carry disclosure keys into a different draft grouping", () => {
+    const store = makeStore();
+    const source = makeView("tag-source", "Tag");
+    source.group = "plugin:acme:labels";
+    source.collapsedGroups = ["plugin:acme:labels:value:ready"];
+    seedSidebar(store, [source]);
+    store.getState().updateSidebarDraft({ group: "state" });
+    store.getState().saveSidebarDraftAs("State copy");
+    const state = store.getState().sidebarViewsByWorkspace.ws;
+    expect(state.views.find((view) => view.id === state.activeViewId)?.collapsedGroups).toEqual([]);
+    expect(state.views[0].collapsedGroups).toEqual(["plugin:acme:labels:value:ready"]);
+  });
+});
+
 describe("sidebar group indentation preference", () => {
   it("persists explicit false in drafts, saves, and duplicate views", async () => {
     const store = makeStore();

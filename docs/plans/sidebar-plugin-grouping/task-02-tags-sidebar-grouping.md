@@ -208,9 +208,30 @@ switcher, not agent startup: this repository-less fixture rejects automatic
 session creation, and the canonical task's workflow step stayed unchanged.
 Owned runtime, browser tab and PostgreSQL server were stopped after proof.
 The originating port 59390 instance and every primary instance were untouched.
-No publication, release, deployment or push occurred. Dedicated signed commit:
+At the initial checkpoint no publication, release, deployment or push occurred.
+Original dedicated signed commit:
 `2a122af6b5eb617b9e313c34b591cb2c15ef73da`.
 This repository has no active commit hooks; tests, vet, module-layout tidy and
-real package proof above were run separately. All three workflows pin matching
+real package proof above were run separately. Initial workflows pinned
 host commit `c42775f671cef7532065c054669c62dbd5970275`.
-These commits remain local, so remote CI and publication were not exercised.
+
+### Post-review corrected package smoke
+
+The three workflow pins now use rebased host SDK commit
+`d61508aa28568cc3a68ccc079004fe9b2f1b65c2`; Tags source is
+`b10662aa551dcd37d7186385cc378869a06c2149`. Both branches were pushed to
+the contributor forks, without release, publication, deployment or remote CI proof.
+The rebuilt local 0.19.0 archive SHA-256 is:
+`5eb61b13e85806054de6bbc1d5b8cf442213025f8a98b998c2bab8a9e4c664b2`.
+
+A fresh isolated runtime accepted this archive through native file upload
+with HTTP 201 and active status. Public tag actions produced three memberships;
+the complete sidebar returned three canonical tasks and four tree occurrences.
+The real provider's native Save as retained collapsed disclosure through reload,
+and expanding the copy did not expand its source.
+True-touch emulation at 320px and 393px exposed the real Tag choice at 44px,
+with in-viewport bounds, persisted selection after reload and no document overflow.
+The desktop collapsed-copy and both phone chooser PNGs were visually inspected.
+Evidence is under the cache-drive `sidebar-grouping-review2-rvznjn03` smoke root.
+This is fresh corrected-package proof, not a relabeling of the earlier 103/106
+scenario. It is phone emulation, not physical-device verification.

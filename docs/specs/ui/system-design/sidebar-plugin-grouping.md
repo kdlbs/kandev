@@ -103,6 +103,9 @@ No Tags-specific constant is added to the host. Plugin group captions use their
 localized metadata at render time; saved names follow normal user view-name
 semantics. Collapsed group identity includes the complete provider reference
 and value ID, not labels, so rename/recolor does not reset disclosure.
+Save as retains independent collapsed-group keys when its draft keeps the
+base view's grouping; a different grouping starts expanded. Duplicate clones
+the source disclosure so expanding a copy never expands its source.
 
 ## Repository projection and pagination
 

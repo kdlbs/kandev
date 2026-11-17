@@ -395,6 +395,7 @@ function buildSidebarBackendActions(set: ImmerSet, get: () => SidebarActionState
     saveSidebarDraftAs: (name: string) =>
       mv((s) => {
         if (!s.draft) return false;
+        const base = s.views.find((view) => view.id === s.draft!.baseViewId);
         s.views.push({
           id: makeId("view"),
           name: name.trim() || t("sidebar:untitledView"),
@@ -405,7 +406,7 @@ function buildSidebarBackendActions(set: ImmerSet, get: () => SidebarActionState
             : {}),
           group: s.draft.group,
           groupIndent: s.draft.groupIndent,
-          collapsedGroups: [],
+          collapsedGroups: base?.group === s.draft.group ? [...base.collapsedGroups] : [],
           taskRow: cloneSidebarTaskRowPresentation(s.draft.taskRow),
         });
         s.activeViewId = s.views[s.views.length - 1].id;
@@ -438,7 +439,7 @@ function buildSidebarBackendActions(set: ImmerSet, get: () => SidebarActionState
             : {}),
           group: source.group,
           groupIndent: source.groupIndent,
-          collapsedGroups: [],
+          collapsedGroups: [...source.collapsedGroups],
           taskRow: source.taskRow ? cloneSidebarTaskRowPresentation(source.taskRow) : undefined,
         });
         s.activeViewId = s.views[s.views.length - 1].id;

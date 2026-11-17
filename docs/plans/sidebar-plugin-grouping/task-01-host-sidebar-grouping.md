@@ -200,4 +200,21 @@ The existing inspection/retained cleanup regression selection passed (`2.398s`).
 Host implementation commit:
 `c42775f671cef7532065c054669c62dbd5970275`.
 Normal signed commit passed every applicable pre-commit and commit-message hook.
-The plan records the remaining documentation-only delivery checkpoint.
+The plan and task-plan appendices record the continuing adversarial review loop.
+
+### Round 2 disclosure correction
+
+Save as and duplicate discarded collapsed plugin groups in an inherited shared
+saved-view path, contrary to AC-001.2. Both state/journal regressions failed
+before correction; all 27 action/workspace tests passed afterward. A draft
+keeping its grouping clones the base disclosure, while a changed grouping starts
+expanded. Duplicate clones source disclosure, and later expansion is independent.
+Native Save as also reproduced the defect against the published pre-fix build:
+the copied Alpha heading was expanded rather than collapsed. This is a shared
+state correction with no desktop/phone composition or touch geometry change.
+
+Final focused verification passed: 36 action/workspace/wire/sync tests, native
+typecheck and document validation. Native browser suites passed with one worker
+and no retries: six desktop and five phone scenarios. The new Save as regression
+keeps the copied heading collapsed after save/reload and proves source independence.
+Fresh real Tags package proof is recorded in Task 02.

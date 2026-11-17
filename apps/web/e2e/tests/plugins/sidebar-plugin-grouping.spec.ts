@@ -1,6 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import { installFixturePlugin, uninstallFixturePlugin } from "../../helpers/plugin-fixture";
 import { PLUGIN_ID } from "../../helpers/plugin-fixture";
+import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
 import {
   SIDEBAR_GROUPING,
   seedCompleteGrouping,
@@ -110,6 +111,51 @@ test("retains boot groupings through a failed catalog read and recovers without 
     releaseRetry.resolve();
     await testPage.unroute(catalogPath);
   }
+});
+
+// @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.2
+test("Save as preserves collapsed plugin groups through reload independently of its source", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(120_000);
+  await installFixturePlugin(testPage);
+  await seedCompleteGrouping(apiClient, seedData);
+  await saveGroupingView(apiClient, seedData.workspaceId);
+  await testPage.goto(`/?workspaceId=${seedData.workspaceId}`);
+  const header = testPage
+    .getByTestId("task-sidebar")
+    .locator(
+      `[data-testid="sidebar-group-header"][data-group-key="${SIDEBAR_GROUPING}:value:late"]`,
+    );
+  await expect(header).toHaveAttribute("aria-expanded", "true");
+  await header.click();
+  await expect(header).toHaveAttribute("aria-expanded", "false");
+  const editor = new SidebarFilterPopoverPage(testPage);
+  await editor.open();
+  await editor.popover.getByTestId("sidebar-group-settings-toggle").click();
+  await editor.popover.getByRole("switch", { name: "Indent grouped tasks", exact: true }).uncheck();
+  await editor.popover.getByTestId("view-save-as-button").click();
+  await editor.popover.getByTestId("view-save-as-name-input").fill("Collapsed Tag copy");
+  await editor.popover.getByTestId("view-save-as-confirm").click();
+  await editor.close();
+  await expect(testPage.getByTestId("tasks-view-picker")).toContainText("Collapsed Tag copy");
+  await expect(header).toHaveAttribute("aria-expanded", "false");
+  await expect
+    .poll(async () => {
+      const state = (await apiClient.getUserSettings()).settings.sidebar_views_by_workspace[
+        seedData.workspaceId
+      ];
+      return state.views.find((view) => view.id === state.active_view_id)?.collapsed_groups;
+    })
+    .toEqual([`${SIDEBAR_GROUPING}:value:late`]);
+  await testPage.reload();
+  await expect(header).toHaveAttribute("aria-expanded", "false");
+  await header.click();
+  await expect(header).toHaveAttribute("aria-expanded", "true");
+  await editor.selectViewByName("Complete view");
+  await expect(header).toHaveAttribute("aria-expanded", "false");
 });
 
 // @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.3
