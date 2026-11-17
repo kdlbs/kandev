@@ -157,8 +157,8 @@ Host workspace state mutations emit identity-only
 `plugin.sidebar-grouping.updated` only to authorized workspace subscribers;
 global catalog changes contain no workspace classification data. Catalog
 generation binds installation identity, config policy and a monotonic service
-epoch. Every admitted config rotation invalidates the catalog at completion,
-including write/restart failure. Old lifecycle replies cannot cross this fence.
+epoch. Committed status changes invalidate even if cleanup fails; failed commits
+do not. Admitted config rotations invalidate at completion, including failures.
 The browser also fences registry epochs, stores, scope and metadata requests.
 Boot metadata is owned by its concrete store and scope. Context reconciliation
 clears it even while disconnected. Failed catalog transport reads do not publish

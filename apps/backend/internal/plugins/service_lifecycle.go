@@ -282,6 +282,7 @@ func (s *Service) setStatusAndDiagnostic(id string, status Status, failure error
 		return err
 	}
 	s.mu.Unlock()
+	defer s.notifySidebarGroupingCatalog()
 	if status != StatusActive {
 		s.closeExecutorProviderAdmission(id)
 		if err := s.cancelAutomationDeliveries(id); err != nil {

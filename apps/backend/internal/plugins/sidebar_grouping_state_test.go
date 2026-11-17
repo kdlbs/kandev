@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"testing/synctest"
@@ -115,5 +116,69 @@ func TestSidebarGroupingCatalogRefreshesAfterConfigRotation(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+// @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.4
+// @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.5
+func TestSidebarGroupingCatalogTracksCommittedStatusOnCleanupFailure(t *testing.T) {
+	for _, operation := range []string{"disable", "unhealthy"} {
+		for _, failSave := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/save-failure=%t", operation, failSave), func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					svc, _, fsStore, _ := newTestServiceWithDir(t)
+					record := installTestPlugin(t, svc, "kandev-plugin-slack")
+					record.SidebarGroupings = []manifest.SidebarGrouping{{ID: "labels", Label: "Labels", Action: "labels.snapshot"}}
+					record.Actions = []manifest.Action{{Key: "labels.snapshot", ResourceScope: manifest.ActionScopeWorkspace}}
+					require.NoError(t, fsStore.Save(record))
+					svc.registry.Add(record)
+					before := svc.SidebarGroupingCatalog()
+					require.Len(t, before, 1)
+					if failSave {
+						failing := &failMatchingSaveStore{Store: fsStore, match: func(r *store.Record) bool { return r.Status != StatusActive }, failErr: errors.New("status commit refused")}
+						failing.arm()
+						svc.store = failing
+					}
+					svc.SetAutomationRevoker(func(string) error { return errors.New("cancel refused") })
+					events := bus.NewMemoryEventBus(testLogger(t))
+					t.Cleanup(events.Close)
+					svc.eventBus = events
+					received := make(chan any, 4)
+					sub, err := events.Subscribe("plugins.sidebar-grouping.updated", func(_ context.Context, e *bus.Event) error {
+						received <- e.Data
+						return nil
+					})
+					require.NoError(t, err)
+					t.Cleanup(func() { _ = sub.Unsubscribe() })
+					want := StatusDisabled
+					if operation == "disable" {
+						require.Error(t, svc.Disable(record.ID))
+					} else {
+						want = StatusError
+						svc.handleStatusChange(record.ID, false, errors.New("health failed"))
+					}
+					synctest.Wait()
+					current, err := svc.Get(record.ID)
+					require.NoError(t, err)
+					persisted, err := fsStore.Get(record.ID)
+					require.NoError(t, err)
+					if failSave {
+						require.Equal(t, StatusActive, current.Status)
+						require.Equal(t, StatusActive, persisted.Status)
+						require.Equal(t, before, svc.SidebarGroupingCatalog())
+						require.Empty(t, received, "a rolled-back status must not invalidate the catalog")
+					} else {
+						require.Equal(t, want, current.Status)
+						require.Equal(t, want, persisted.Status)
+						require.Empty(t, svc.SidebarGroupingCatalog(), "committed inactive provider is unavailable")
+						select {
+						case <-received:
+						default:
+							t.Fatal("committed inactive status left connected sidebar consumers on the old catalog")
+						}
+					}
+				})
+			})
+		}
 	}
 }

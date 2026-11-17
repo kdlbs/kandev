@@ -245,3 +245,22 @@ also passed separately after its observer explicitly waited for completed
 responses and rejected canceled stale reads. Its page-two PNG and the current
 phone pager/chooser PNGs were visually inspected. Evidence is retained under
 the cache-drive `sidebar-grouping-review4-4v7ftoo0` root.
+
+### Round 6 committed lifecycle cleanup correction
+
+Disable and unhealthy-runtime regressions reproduced committed Disabled/Error
+status with no catalog event when automation cleanup failed. Both real FSStore
+rows and the registry retained the inactive state. Their failed-status-write
+controls preserved Active, the existing provider generation and no event.
+Catalog invalidation is now deferred only after successful status persistence,
+so subsequent cleanup errors cannot hide a committed provider transition.
+Existing cleanup errors, fail-closed state, dispatch locks and MCP behavior remain.
+The complete owning plugin package passed `-race` (`29.562s`); the final four-case
+regression was rerun after removing redundant payload-shape coverage.
+The existing config regression owns catalog payload privacy; this regression
+owns committed-state notification and unavailable-provider behavior.
+Final changed-package lint, required `make fmt` and catalog/spec validation passed.
+Rebuilt all guarded runtime/helper/fixture artifacts. Native acceptance passed
+seven desktop and five phone scenarios with one worker and no retries, including
+the existing unavailable/recovery and generation/pagination consumers.
+Evidence is under the cache-drive `sidebar-grouping-review6-5cq96b32` root.
