@@ -10,7 +10,8 @@ requirements:
   - REQ-AUTH-ROLES-AND-SCOPES-001
 acceptance_criteria:
   - AC-AUTH-ROLES-AND-SCOPES-001.7
-system_design: []
+system_design:
+  - ../../specs/auth/system-design/editor-authorization-boundary.md
 ---
 
 # Task 04: Hide custom editor management from non-admins

@@ -10,7 +10,8 @@ requirements:
 acceptance_criteria:
   - AC-AUTH-ROLES-AND-SCOPES-001.1
   - AC-AUTH-ROLES-AND-SCOPES-001.7
-system_design: []
+system_design:
+  - ../../specs/auth/system-design/editor-authorization-boundary.md
 ---
 
 # Task 01: Editor management requires org.config.manage

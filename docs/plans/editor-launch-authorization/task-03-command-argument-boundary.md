@@ -59,7 +59,7 @@ Authorization (tasks 01, 02), target containment, built-in editor arguments
 ## Verification
 
 ```bash
-(cd apps/backend && go test -count=1 ./internal/editors/service/...)
+(cd apps/backend && go test -count=1 ./internal/common/securityutil/... ./internal/editors/service/...)
 git ls-files --modified --others --exclude-standard -z -- 'apps/backend/**/*.go' | xargs -0 -r bash scripts/lint-go-changed
 ```
 
@@ -76,9 +76,11 @@ fail.
 Command templates are tokenized before placeholder substitution. Tests cover
 the requested templates and hostile file names, preserve the argument count,
 verify relative and ordinary paths, and reject empty or malformed templates
-without starting a process.
+without starting a process. The tokenizer checks quote state after processing
+the complete input, including an unclosed quote ending in a multibyte rune or
+an escaped final quote.
 
 Verification passed:
 
-- `go test -count=1 ./internal/editors/service/...`
-- `git ls-files --modified --others --exclude-standard -z -- 'apps/backend/**/*.go' | xargs -0 -r bash scripts/lint-go-changed`
+- `go test -count=1 ./internal/common/securityutil/... ./internal/editors/service/...`
+- `git ls-files --modified --others --exclude-standard -z -- 'apps/backend/**/*.go' | xargs -0 -r bash scripts/lint-go-changed` (0 issues)

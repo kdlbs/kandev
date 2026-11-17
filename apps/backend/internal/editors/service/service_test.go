@@ -579,7 +579,7 @@ func TestBuildCommandArgsWorktreeAndRelativePlaceholders(t *testing.T) {
 }
 
 func TestBuildCommandArgsRejectsInvalidTemplate(t *testing.T) {
-	for _, template := range []string{`code "{file}`, "", "   "} {
+	for _, template := range []string{`code "{file}`, `code "é`, `code "escaped\"`, "", "   "} {
 		t.Run(template, func(t *testing.T) {
 			got, err := buildCommandArgs(template, "/workspace", "/workspace/main.go", 0, 0)
 			if !errors.Is(err, ErrEditorConfigInvalid) {
@@ -592,6 +592,7 @@ func TestBuildCommandArgsRejectsInvalidTemplate(t *testing.T) {
 	}
 }
 
+// @covers AC-WORKSPACES-EDITOR-COMMAND-001.4
 func TestLaunchCommandRejectsInvalidTemplateWithoutStarting(t *testing.T) {
 	previous := startProcess
 	defer func() { startProcess = previous }()
@@ -600,7 +601,7 @@ func TestLaunchCommandRejectsInvalidTemplateWithoutStarting(t *testing.T) {
 		starts++
 		return nil
 	}
-	for _, template := range []string{`code "{file}`, ""} {
+	for _, template := range []string{`code "{file}`, `code "é`, `code "escaped\"`, ""} {
 		t.Run(template, func(t *testing.T) {
 			_, err := launchCommand(template, "/workspace", "/workspace/main.go", 0, 0)
 			if !errors.Is(err, ErrEditorConfigInvalid) {

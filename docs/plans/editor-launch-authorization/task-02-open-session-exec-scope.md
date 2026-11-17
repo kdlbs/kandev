@@ -11,7 +11,7 @@ acceptance_criteria:
   - AC-AUTH-ROLES-AND-SCOPES-001.1
   - AC-AUTH-ROLES-AND-SCOPES-001.7
 system_design:
-  - ../../specs/workspaces/system-design/editor-file-containment.md
+  - ../../specs/auth/system-design/editor-authorization-boundary.md
 ---
 
 # Task 02: Opening editors and folders requires session.exec

@@ -5,8 +5,8 @@ requirements:
   - REQ-AUTH-ROLES-AND-SCOPES-001
   - REQ-WORKSPACES-EDITOR-COMMAND-001
 system_design:
+  - ../../specs/auth/system-design/editor-authorization-boundary.md
   - ../../specs/workspaces/system-design/editor-command-arguments.md
-  - ../../specs/workspaces/system-design/editor-file-containment.md
 legacy_specs: []
 ---
 
@@ -73,8 +73,8 @@ as the backend user.
 
 | Defect | Classification | Source |
 | --- | --- | --- |
-| 1 | Implementation violates an active criterion | `AC-AUTH-ROLES-AND-SCOPES-001.1`, `.7` in [roles and scopes](../../specs/auth/requirements/roles-and-scopes.md) (registry table: `org.config.manage` includes editors) |
-| 2 | Implementation violates an active criterion | `AC-AUTH-ROLES-AND-SCOPES-001.1`, `.7` (registry table: `session.exec` includes VS Code); backend scoping rules in `apps/backend/AGENTS.md` |
+| 1 | Implementation violates an active criterion | `AC-AUTH-ROLES-AND-SCOPES-001.1`, `.7` in [roles and scopes](../../specs/auth/requirements/roles-and-scopes.md) (registry table: `org.config.manage` includes editors); see the [auth design](../../specs/auth/system-design/editor-authorization-boundary.md) |
+| 2 | Implementation violates an active criterion | `AC-AUTH-ROLES-AND-SCOPES-001.1`, `.7` (registry table: `session.exec` includes VS Code); see the [auth design](../../specs/auth/system-design/editor-authorization-boundary.md) and backend scoping rules in `apps/backend/AGENTS.md` |
 | 3 | Intended behavior missing from requirements | New [`REQ-WORKSPACES-EDITOR-COMMAND-001`](../../specs/workspaces/requirements/editor-command-arguments.md) and its [system design](../../specs/workspaces/system-design/editor-command-arguments.md) |
 
 No ADR is needed: the scopes and the service-boundary access-checker pattern
