@@ -1403,8 +1403,7 @@ Unarchiving a task cancels a pending worktree recheck. If the recheck is already
 - If normal verified deletion cannot confirm that the agent stopped, the task remains available and deletion reports an error. Retry after resolving the reported problem.
 - When a task has a `RUNNING` agent, the dialog warns that deletion discards in-progress work. Delete always shows this warning. Archive shows it only when confirmation is on.
 
-Deleting or expiring an ordinary Quick Chat also attempts to remove its Claude Code or Codex
-session files for agents that ran on the Kandev host. Archiving keeps those files. Cleanup
+Deleting an ordinary Quick Chat also attempts to remove its Claude Code or Codex session files for agents that ran on the Kandev host. Archiving keeps those files. Cleanup
 leaves other conversations and the agent's shared indexes and history databases in place.
 It uses the host's home and config-directory settings; overrides set only in an agent or
 executor profile are outside this cleanup.
