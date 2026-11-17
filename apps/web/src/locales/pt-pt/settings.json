@@ -1232,5 +1232,7 @@
   "builtinMcp.inheritedValue": "Herdado do espaço de trabalho: {{value}}",
   "builtinMcp.overrideValue": "Definição da tarefa: {{value}}. Predefinição do espaço de trabalho: {{default}}.",
   "builtinMcp.useInherited": "Usar valor herdado",
-  "builtinMcp.allowTasks": "Permitir que as tarefas usem este pacote"
+  "builtinMcp.allowTasks": "Permitir que as tarefas usem este pacote",
+  "markdownPreviewByDefault": "Abrir ficheiros Markdown na Pré-visualização",
+  "markdownPreviewByDefaultDescription": "Escolha o modo inicial dos ficheiros Markdown que abrir. Pode mudar de modo a qualquer momento."
 }

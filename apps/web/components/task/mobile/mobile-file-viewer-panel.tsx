@@ -239,7 +239,9 @@ export function MobileFileViewerPanel({
     [file.path, file.content, file.isBinary],
   );
 
-  const initialMarkdownPreview = initialRenderedPreview && previewKind === "markdown";
+  const defaultPreview = useAppStore((s) => s.userSettings?.markdownPreviewByDefault ?? true);
+  const initialMarkdownPreview =
+    (initialRenderedPreview || defaultPreview) && previewKind === "markdown";
   const [renderedPreview, setRenderedPreview] = useState(initialMarkdownPreview);
   const fileIdentity = `${file.repo ?? ""}\u0000${file.path}`;
   const [lastFileIdentity, setLastFileIdentity] = useState(fileIdentity);

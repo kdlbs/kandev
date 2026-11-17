@@ -461,6 +461,7 @@ export type UserSettingsState = {
   lspAutoStartLanguages: string[];
   lspAutoInstallLanguages: string[];
   lspServerConfigs: Record<string, Record<string, unknown>>;
+  markdownPreviewByDefault: boolean;
   lspStatusLocation: LspStatusLocation;
   savedLayouts: SavedLayout[];
   sidebarViews: SidebarView[];

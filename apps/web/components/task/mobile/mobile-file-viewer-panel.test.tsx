@@ -13,6 +13,7 @@ const htmlPreview = vi.hoisted(() => ({
 }));
 
 const state = {
+  userSettings: { markdownPreviewByDefault: true },
   taskSessions: {
     items: {
       "session-1": {
@@ -143,6 +144,30 @@ describe("MobileFileViewerPanel external file action", () => {
 });
 
 describe("MobileFileViewerPanel Markdown preview mode", () => {
+  it.each([true, false])("opens Markdown with saved default %s", (enabled) => {
+    state.userSettings.markdownPreviewByDefault = enabled;
+    render(
+      <TooltipProvider>
+        <MobileFileViewerPanel
+          file={{
+            path: README_PATH,
+            name: README_PATH,
+            content: README_CONTENT,
+            originalContent: README_CONTENT,
+            originalHash: "hash",
+            isDirty: false,
+          }}
+          sessionId="session-1"
+          onClose={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(screen.queryByTestId("markdown-preview") !== null).toBe(enabled);
+    expect(screen.queryByTestId(FILE_CONTENT_TEST_ID) !== null).toBe(!enabled);
+    state.userSettings.markdownPreviewByDefault = true;
+  });
+
   it("opens a Markdown file directly in preview mode when requested", () => {
     render(
       <TooltipProvider>
@@ -185,8 +210,8 @@ describe("MobileFileViewerPanel Markdown preview mode", () => {
       </TooltipProvider>,
     );
 
-    fireEvent.click(screen.getByTestId("markdown-preview-toggle"));
-    expect(screen.getByTestId("markdown-preview")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show code" }));
+    expect(screen.getByTestId(FILE_CONTENT_TEST_ID)).toBeTruthy();
 
     rerender(
       <TooltipProvider>
@@ -206,8 +231,7 @@ describe("MobileFileViewerPanel Markdown preview mode", () => {
       </TooltipProvider>,
     );
 
-    expect(screen.getByTestId(FILE_CONTENT_TEST_ID)).toBeTruthy();
-    expect(screen.queryByTestId("markdown-preview")).toBeNull();
+    expect(screen.getByTestId("markdown-preview")).toBeTruthy();
   });
 });
 

@@ -218,6 +218,9 @@ function useFileLoader({
   // a fetch is running, the new effect run starts a fresh fetch (rather than
   // being silently blocked) and the stale response is dropped on arrival — so
   // content from the wrong session/repo can never land in the buffer.
+  const markdownPreviewByDefault = useAppStore(
+    (s) => s.userSettings?.markdownPreviewByDefault ?? true,
+  );
   const inFlightKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (hasFile || !activeSessionId) return;
@@ -245,7 +248,13 @@ function useFileLoader({
           isBinary: response.is_binary,
           resolvedPath: response.resolved_path,
         };
-        setFileState(fileKey, state);
+        const existing = useDockviewStore.getState().openFiles.get(fileKey);
+        if (existing) return;
+        setFileState(fileKey, {
+          ...state,
+          renderedPreview:
+            getFilePreviewKind(path, response.is_binary) === "markdown" && markdownPreviewByDefault,
+        });
       })
       .catch(() => {
         /* stays on loading state */
@@ -253,7 +262,7 @@ function useFileLoader({
       .finally(() => {
         if (inFlightKeyRef.current === key) inFlightKeyRef.current = null;
       });
-  }, [hasFile, activeSessionId, fileKey, path, setFileState, repo]);
+  }, [hasFile, activeSessionId, fileKey, path, setFileState, repo, markdownPreviewByDefault]);
 }
 
 /**

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo } from "react";
 import { IconEdit, IconTrash, IconChevronDown, IconExternalLink } from "@tabler/icons-react";
+import { Switch } from "@kandev/ui/switch";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
@@ -409,8 +410,44 @@ function EditorsSection({
   );
 }
 
+function MarkdownPreviewSetting({ state }: { state: EditorsSettingsState }) {
+  const { t } = useTranslation();
+  return (
+    <label
+      id="setting-markdown-preview"
+      className="flex min-h-11 cursor-pointer items-center justify-between gap-4 md:min-h-0 [@media(pointer:coarse)]:min-h-11"
+      data-settings-dirty={
+        state.markdownPreviewByDefault !== state.baselineMarkdownPreviewByDefault
+      }
+    >
+      <span className="min-w-0">
+        <span className="block text-sm font-medium">{t("settings:markdownPreviewByDefault")}</span>
+        <span className="block text-xs text-muted-foreground">
+          {t("settings:markdownPreviewByDefaultDescription")}
+        </span>
+      </span>
+      <Switch
+        checked={state.markdownPreviewByDefault}
+        onCheckedChange={state.setMarkdownPreviewByDefault}
+        aria-label={t("settings:markdownPreviewByDefault")}
+      />
+    </label>
+  );
+}
+
+function discardEditorsDraft(state: EditorsSettingsState) {
+  state.setMarkdownPreviewByDefault(state.baselineMarkdownPreviewByDefault);
+  state.setDefaultEditorId(state.baselineDefaultId);
+  state.setLspAutoStartLanguages([...state.baselineLspAutoStart]);
+  state.setLspAutoInstallLanguages([...state.baselineLspAutoInstall]);
+  state.setLspStatusLocation(state.baselineLspStatusLocation);
+  state.setLspConfigStrings({ ...state.baselineLspConfigStrings });
+  state.setLspConfigErrors({});
+}
+
 function getEditorsSaveRevision(state: EditorsSettingsState): string {
   return JSON.stringify({
+    markdownPreviewByDefault: state.markdownPreviewByDefault,
     defaultEditorId: state.defaultEditorId,
     lspAutoStartLanguages: state.lspAutoStartLanguages,
     lspAutoInstallLanguages: state.lspAutoInstallLanguages,
@@ -463,6 +500,7 @@ export function EditorsSettings({ embedded = false }: { embedded?: boolean }) {
       invalidReason={
         hasInvalidConfig ? t("settings:fixInvalidLspServerConfigurationBefore") : undefined
       }
+      onDiscard={() => discardEditorsDraft(state)}
       onSave={() => saveDefaultRequest.run()}
       showPageChrome={!embedded}
       contentFrame="none"
@@ -497,6 +535,7 @@ export function EditorsSettings({ embedded = false }: { embedded?: boolean }) {
         </SettingsGroup>
         <Separator />
         <SettingsGroup title={t(EDITORS_TITLE_KEY)} contentClassName="space-y-4 divide-y-0">
+          <MarkdownPreviewSetting state={state} />
           <EditorsSection
             embedded={embedded}
             showHeading={false}
