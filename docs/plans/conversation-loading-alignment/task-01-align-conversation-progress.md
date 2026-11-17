@@ -162,3 +162,4 @@ Passed:
 - `python3 scripts/lint-spec-files.py --all`.
 - Documentation coverage preflight: covered, no errors.
 - `git diff --check`.
+- PR CI fixup: the alignment test now drops the first history reply and holds later replies before opening the session, keeping loading and retrying states stable during geometry checks. The focused desktop and phone cases passed (one each); the phone case passed three consecutive repeats.

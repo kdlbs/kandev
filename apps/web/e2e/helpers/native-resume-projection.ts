@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import { test } from "../fixtures/test-base";
+import { dwell } from "./causal-waits";
 import { assertVerticalCentersAligned } from "./layout-assertions";
 import { assertDeliveryRecoveryGeometry } from "./delivery-recovery-controls";
 import { verifyNativeResumeClearsRecoveryNotice } from "./native-resume-notice";
@@ -89,6 +90,12 @@ export function registerNativeResumeProjectionTests() {
             await assertPendingResumeGeometry(testPage, !timeout);
             await retryConnection.evaluate((button) => (button as HTMLButtonElement).click());
             await resume.evaluate((button) => (button as HTMLButtonElement).click());
+            await dwell(
+              testPage,
+              300,
+              "negative-assertion",
+              "Disabled duplicate recovery actions must not send another session.recover request",
+            );
             expect(gate.count()).toBe(1);
             await prCapture.screenshot(`${test.info().project.name}-resume-waiting`, {
               caption: "Resume remains busy while recovery evidence is checked.",

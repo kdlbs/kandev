@@ -167,5 +167,6 @@ Passed:
 - `pnpm run i18n:ratchet` (0 added or modified hardcoded-copy violations; guard allowlist intact).
 - Desktop `pnpm e2e:run --project chromium tests/session/native-resume-projection.spec.ts` (2 passed).
 - Phone `pnpm e2e:run --project mobile-chrome tests/session/mobile-native-resume-projection.spec.ts` (2 passed).
+- PR CI fixup: desktop and phone contention checks now assert the shared "Resuming session" status. The pending Resume test keeps its request gate armed through a 300 ms negative assertion window before checking that disabled duplicate actions sent no second request. The focused desktop and phone E2E slices passed (4 each).
 - Both managed E2E runs rebuilt the Vite assets successfully. Pending-state screenshots were inspected against UI-02 and UI-03.
 - Documentation validators and coverage preflight, plus `git diff --check`.

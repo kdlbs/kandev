@@ -136,6 +136,7 @@ test.describe("session entry recovery", () => {
     );
 
     proxy.dropNextResponses("message.list", 1, { sessionId: task.session_id });
+    proxy.holdResponses("message.list", { sessionId: task.session_id });
     const session = await openTaskSession(testPage, task.id);
     const chat = session.activeChat();
     const loading = chat.getByTestId("session-history-loading");
@@ -147,7 +148,6 @@ test.describe("session entry recovery", () => {
       "loading conversation",
     );
 
-    proxy.holdResponses("message.list", { sessionId: task.session_id });
     try {
       await expect
         .poll(() => proxy.heldResponseCount("message.list"), {
