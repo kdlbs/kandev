@@ -27,6 +27,7 @@ type Repository struct {
 	db      *sqlx.DB // writer
 	ro      *sqlx.DB // reader
 	migrate *db.MigrateLogger
+	log     *logger.Logger
 }
 
 // NewWithDB creates a new SQLite repository with existing database connections.
@@ -35,6 +36,7 @@ func NewWithDB(writer, reader *sqlx.DB, log *logger.Logger) (*Repository, error)
 		db:      writer,
 		ro:      reader,
 		migrate: db.NewRequiredMigrateLogger(writer, log),
+		log:     log,
 	}
 	if err := repo.initSchema(); err != nil {
 		return nil, fmt.Errorf("failed to initialize workflow schema: %w", err)
@@ -176,6 +178,9 @@ func (r *Repository) initSchema() error {
 	// Seed system templates
 	if err := r.seedSystemTemplates(); err != nil {
 		return fmt.Errorf("failed to seed system templates: %w", err)
+	}
+	if err := r.upgradeImproveKandevPrompts(); err != nil {
+		return fmt.Errorf("failed to upgrade Improve Kandev prompts: %w", err)
 	}
 
 	// Seed default workflow steps for workflows that don't have any
