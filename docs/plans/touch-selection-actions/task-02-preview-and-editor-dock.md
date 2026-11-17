@@ -157,7 +157,8 @@ Verification:
 
 ### CI follow-up (2026-11-17)
 
-The mobile viewer assertions now accept both CodeMirror and Monaco markup.
+The mobile viewer assertions, including the natural-order file-tree case, now
+accept both CodeMirror and Monaco markup.
 Read-only mobile viewers do not acquire LSP connections. Monaco lays out a
 newly mounted editor before revealing a pending cursor, including requests
 without a line flash. CodeMirror receives read-only mode through the editor
@@ -176,4 +177,7 @@ Verification:
 - After the final Monaco session-identity adjustment, the focused Vitest set
   passed again (15 tests) and the mobile LSP suppression/requested-line E2Es
   passed again (2 tests).
+- Current-head CI follow-up: the focused `use-file-editors` and CodeMirror
+  selection tests passed (23 tests across two files), and the
+  exact mobile file-tree natural-order E2E passed (1 test, retries disabled).
 - Native Android Chrome and iOS Safari remain untested.

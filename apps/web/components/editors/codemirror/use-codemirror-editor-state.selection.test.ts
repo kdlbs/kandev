@@ -140,7 +140,10 @@ it("dismisses the desktop Comment action when a pointer presses outside the edit
 it("keeps read-only CodeMirror content selectable", () => {
   const { view } = setupEditor(true);
 
-  expect(view.state.readOnly).toBe(true);
   expect(view.contentDOM.getAttribute("contenteditable")).toBe("false");
+  view.dispatch({ selection: { anchor: 0, head: 5 } });
+  expect(
+    view.state.doc.sliceString(view.state.selection.main.from, view.state.selection.main.to),
+  ).toBe("first");
   view.destroy();
 });
