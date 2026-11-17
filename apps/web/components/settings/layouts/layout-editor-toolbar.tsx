@@ -94,12 +94,14 @@ const directions = [
 ];
 
 function ActionTooltip({
+  testId,
   label,
   help,
   disabled,
   onClick,
   children,
 }: {
+  testId?: string;
   label: string;
   help: string;
   disabled: boolean;
@@ -117,6 +119,7 @@ function ActionTooltip({
             className={touchButtonClass}
             disabled={disabled}
             aria-label={label}
+            data-testid={testId}
             onClick={onClick}
           >
             {children}
@@ -418,6 +421,7 @@ function SelectedPanelActions({ state }: { state: ActionState }) {
         <IconArrowLeft className="h-4 w-4" />
       </ActionTooltip>
       <ActionTooltip
+        testId="layout-editor-action-move-right"
         label={t("settings:moveTabRight")}
         help={t("settings:moveThisTabOnePositionRight")}
         disabled={state.disabled || last}

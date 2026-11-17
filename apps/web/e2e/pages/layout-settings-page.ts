@@ -71,7 +71,7 @@ export class LayoutSettingsPage {
   }
 
   async moveSelectedTabRight(): Promise<void> {
-    const button = this.actions.getByRole("button", { name: "Move tab right" });
+    const button = this.actions.getByTestId("layout-editor-action-move-right");
     await expect(button).toBeEnabled();
     await button.click();
   }

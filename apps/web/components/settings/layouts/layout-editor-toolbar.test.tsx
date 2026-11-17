@@ -51,7 +51,7 @@ function renderActions(
     <TooltipProvider>
       <LayoutEditorActions
         api={dockview}
-        anchor={null}
+        anchor={selectedPanelId ? { left: 0, top: 0, width: 100 } : null}
         editable
         selectedPanelId={selectedPanelId}
         onCommand={onCommand}
@@ -128,6 +128,17 @@ describe("Add panel menu with plugin task panels", () => {
 
 /** @covers AC-UI-TASK-LAYOUT-PROFILES-002.3, AC-UI-TASK-LAYOUT-PROFILES-002.7 */
 describe("selecting a plugin option", () => {
+  it("exposes a stable selector for moving the selected tab right", () => {
+    const dockview = editorWithAllBuiltIns();
+    const { onCommand } = renderActions(dockview, vi.fn(), "files");
+
+    const moveRight = screen.getByTestId("layout-editor-action-move-right");
+    expect((moveRight as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(moveRight);
+
+    expect(onCommand).toHaveBeenCalledTimes(1);
+  });
+
   it("adds one generic panel in the selected split and reports one command", () => {
     registerPluginPanel(PLUGIN_ID, PROMPT_KEY, PROMPT_HISTORY);
     const dockview = editorWithAllBuiltIns();

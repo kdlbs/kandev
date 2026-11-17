@@ -19,10 +19,7 @@ import {
   resolveEnvRightWidth,
   resolveResponsiveRightWidth,
 } from "@/lib/state/layout-manager/right-width";
-import {
-  getReusableRightWidth,
-  clearReusableRootGeometry,
-} from "@/lib/state/layout-manager/pinned-targets";
+import { clearReusableRootGeometry } from "@/lib/state/layout-manager/pinned-targets";
 import {
   restoreReusableRootGeometry,
   validateLiveRootGeometry,
@@ -396,11 +393,10 @@ export function syncDockviewContainerSize(
   const width = container.clientWidth;
   const height = container.clientHeight;
   if (width <= 0 || height <= 0) return;
-  // Only the active reusable owner scales with a container-only change.
-  // Non-owned saved targets retain their existing pixel policy.
-  if (getReusableRightWidth(useDockviewStore.getState().currentLayoutEnvId, width) !== null) {
-    refreshAutomaticRightTarget(api, width);
-  }
+  // Refresh automatic widths for both stock and reusable layouts. The resolver
+  // retains each layout's saved sizing policy, while explicit manual widths
+  // remain fixed in `refreshAutomaticRightTarget`.
+  refreshAutomaticRightTarget(api, width);
   if (width === api.width && height === api.height) {
     // Environment switches can replace pinned targets without changing the
     // container dimensions, so enforce even when Dockview's layout is a no-op.
