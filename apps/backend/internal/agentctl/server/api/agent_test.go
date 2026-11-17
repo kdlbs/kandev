@@ -1204,7 +1204,10 @@ func TestAgentStreamWS_MalformedMessage(t *testing.T) {
 func TestInjectKandevMcpServers_HttpFirst(t *testing.T) {
 	srv := newTestServer(t)
 
-	got := srv.injectKandevMcpServers(nil)
+	got, err := srv.injectKandevMcpServers(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 2 {
 		t.Fatalf("expected 2 kandev entries, got %d: %+v", len(got), got)
 	}
@@ -1223,7 +1226,10 @@ func TestInjectKandevMcpServers_HttpFirst(t *testing.T) {
 		{Name: "other", Type: "stdio", Command: "x"},
 		{Name: kandevMcpServerName, Type: mcpTransportSSE, URL: "http://stale/sse"},
 	}
-	got = srv.injectKandevMcpServers(upstream)
+	got, err = srv.injectKandevMcpServers(upstream)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 3 {
 		t.Fatalf("expected 3 entries (http+sse+other), got %d: %+v", len(got), got)
 	}

@@ -43,7 +43,17 @@ coverage.
    unrelated cleanup, refactoring, and feature work. Smaller PRs reduce the
    risk surface, make review easier, and reduce maintainer burden.
 3. **Update public docs when behavior changes.** User-facing docs live in `docs/public/**`. If your change affects CLI commands, config keys, install/deploy flows, workflows, executors, APIs, screenshots, or user-facing terminology, update the relevant public docs in the same PR. See the [public docs contribution guide](docs/public/README.md) when editing navigation or adding a page.
-4. **Test your changes.** Run `make fmt` first, then `make typecheck test lint` before submitting. Manually verify that your feature works end-to-end, and add screenshots or recordings to the PR if it has a UI component. **If your change touches any UI files (anything under `apps/web/`), you must add or update Playwright e2e tests in `apps/web/e2e/` to prevent regressions.** Run them with `make test-e2e`. See [docs/test_e2e_web.md](docs/test_e2e_web.md) for patterns and fixtures.
+4. **Test your changes.** Run `make fmt` first, then `make typecheck test lint`
+   before submitting. Manually verify your feature end-to-end. UI candidate PRs
+   must include a fresh screenshot as an HTTPS Markdown image with descriptive
+   alt text under `## Screenshots`; this rule also applies to fork PRs. The
+   check verifies presence. Reviewers assess freshness, visibility, relevance,
+   and viewport coverage. Ask a maintainer to apply `no-screenshots-allow` only
+   for a nonvisual path match or an explained capture limitation. **If your
+   change touches any UI files (anything under `apps/web/`), you must add or
+   update Playwright e2e tests in `apps/web/e2e/` to prevent regressions.** Run
+   them with `make test-e2e`. See [docs/test_e2e_web.md](docs/test_e2e_web.md) for
+   patterns and fixtures.
 
 ## Bug Reports
 

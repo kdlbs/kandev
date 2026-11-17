@@ -114,3 +114,37 @@ func TestBuiltinSessionEvidenceUsesInjectedProvenance(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, s.cfg.McpProfile.BuiltinPackages, attachment.Attempt.BuiltinPackages)
 }
+
+func TestBuiltinMCPInstanceScopedSessionDeliveryAndRoute(t *testing.T) {
+	profile := p.New(p.SurfaceKanbanTask, nil, nil)
+	profile.BuiltinPackages = &p.BuiltinManifest{Version: 1, CatalogVersion: 1, WorkspaceID: "workspace", TaskID: "task", Surface: profile.Surface,
+		Packages: []p.PackageID{p.PackageCore, p.PackageConfiguration}, Origins: map[p.PackageID]string{p.PackageCore: "required", p.PackageConfiguration: "task"}}
+	cfg, err := (&config.Config{AuthToken: "control-secret", ListenHostOverride: "localhost"}).NewInstanceConfig(12345, &config.InstanceOverrides{
+		InstanceID: "exec-1", ScopedMCPRoutes: true, WorkDir: t.TempDir(), TaskID: "task", SessionID: "session", McpProfile: &profile,
+	})
+	require.NoError(t, err)
+	log := newTestLogger()
+	manager := process.NewManager(cfg, log)
+	backend := mcpserver.NewChannelBackendClient(log)
+	t.Cleanup(backend.Close)
+	boundMCP := mcpserver.NewWithProfile(backend, "session", "task", cfg.Port, log, "", false, profile,
+		mcpserver.WithNativeRoutePrefix(cfg.NativeMCPRoutePrefix),
+	)
+	t.Cleanup(func() { require.NoError(t, boundMCP.Close(context.Background())) })
+	s := NewServer(cfg, manager, boundMCP, nil, log)
+
+	servers, err := s.sessionMCPServers(nil)
+	require.NoError(t, err)
+	require.Equal(t, "http://localhost:12345/i/exec-1/mcp", servers[0].URL)
+	require.Equal(t, "http://localhost:12345/i/exec-1/mcp/packages/configuration", servers[2].URL)
+
+	request := httptest.NewRequest(http.MethodPost, "/i/exec-1/mcp/packages/configuration", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json, text/event-stream")
+	response := httptest.NewRecorder()
+	s.router.ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	stale := httptest.NewRecorder()
+	s.router.ServeHTTP(stale, httptest.NewRequest(http.MethodPost, "/mcp/packages/configuration", nil))
+	require.Equal(t, http.StatusNotFound, stale.Code, stale.Body.String())
+}

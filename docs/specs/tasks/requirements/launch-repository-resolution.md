@@ -52,14 +52,12 @@ from.
 
 ## Prior art
 
-**Our own prior reasoning (wiki).** Receipt: config resolved through
-`~/.obsidian-wiki/config` -> `config.henry`, giving
-`OBSIDIAN_VAULT_PATH=/Users/henry/Documents/henry/wiki` and
-`QMD_WIKI_COLLECTION="wiki"`. The leg could not then run: no QMD transport, no
-`qmd` or `obsidian-wiki` CLI, and the vault unreadable from this worktree
-(`EPERM`, macOS privacy on `~/Documents`), which rules out the grep fallback too.
-It returned nothing useful — through tool unavailability, not an empty vault, so
-this is no evidence the wiki lacks a position.
+**Our own prior reasoning (wiki).** Receipt: the author's private notes vault
+(local path omitted), with collection `wiki`. The leg could not then run: no QMD
+transport, no `qmd` or `obsidian-wiki` CLI, and the vault was unreadable from this
+worktree (`EPERM`, macOS privacy on `~/Documents`), which rules out the grep
+fallback too. It returned nothing useful through tool unavailability, not an
+empty vault, so this is no evidence the wiki lacks a position.
 
 **What other products shipped (saas-kb).** Receipt: the `saas-kb` MCP server and
 its `search_fsm_docs` tool are absent from this session's tool list and cannot be

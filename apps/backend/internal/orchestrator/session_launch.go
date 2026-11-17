@@ -1686,7 +1686,10 @@ func (s *Service) RecoverSessionWithOptions(
 		}
 	}
 
-	recoveryAdmission, err := s.preflightSessionRecovery(launchCtx, taskID, session, action)
+	recoveryAdmission, releaseReplacement, err := s.preflightSessionRecovery(launchCtx, taskID, session, action)
+	if releaseReplacement != nil {
+		defer s.releaseRecoveryReplacement(context.WithoutCancel(ctx), releaseReplacement, taskID, sessionID)
+	}
 	if err != nil {
 		if checkpoint != nil {
 			if settleErr := s.finishContinuationCheckpoint(context.WithoutCancel(ctx), checkpoint, models.ContinuitySnapshotUncertain); settleErr != nil {
@@ -1923,19 +1926,22 @@ func (s *Service) preflightSessionRecovery(
 	taskID string,
 	session *models.TaskSession,
 	action string,
-) (*worktree.RecoveryAdmission, error) {
+) (*worktree.RecoveryAdmission, func(context.Context) error, error) {
 	// Inventory repair must attest the original checkout before any filesystem
 	// recovery can modify it. Its executor path validates inventory first.
 	if action == recoveryActionRepairWorkspaceInventory {
-		return nil, nil
+		return nil, nil, nil
 	}
-	admission, err := s.executor.PreflightSessionWorktreeRecovery(
+	return s.executor.PreflightSessionWorktreeRecovery(
 		ctx, taskID, session, action == recoveryActionResumeNewBranch,
 	)
-	if err != nil {
-		return nil, err
+}
+
+func (s *Service) releaseRecoveryReplacement(ctx context.Context, release func(context.Context) error, taskID, sessionID string) {
+	if err := release(ctx); err != nil {
+		s.logger.Warn("failed to release unused recovery replacement",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
 	}
-	return admission, nil
 }
 
 func (s *Service) loadSessionForRecovery(

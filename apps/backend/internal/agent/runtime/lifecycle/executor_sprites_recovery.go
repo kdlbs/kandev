@@ -185,8 +185,9 @@ func (r *SpritesExecutor) buildRecoveredSpriteInstance(
 		Env:                  cloneStringMap(instanceInfo.Env),
 		WorkspaceSourceRoots: append([]string(nil), instanceInfo.WorkspaceSourceRoots...),
 		Client: agentctl.NewClient("127.0.0.1", localPort, r.logger,
-			agentctl.WithExecutionID(record.AgentExecutionID),
-			agentctl.WithSessionID(record.SessionID)),
+			agentctl.WithExecutionID(instanceInfo.ID),
+			agentctl.WithSessionID(record.SessionID),
+			agentctl.WithBuiltinMCPScopedRoutes(instanceInfo.ScopedMCPRoutes)),
 	}
 }
 

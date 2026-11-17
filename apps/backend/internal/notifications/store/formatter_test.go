@@ -4,13 +4,18 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/notifications/models"
 	"github.com/stretchr/testify/require"
 )
 
 func TestFormatterBindingRevisionAndOwnership(t *testing.T) {
+	testFormatterBindingRevisionAndOwnership(t, openNotificationTestDB(t))
+}
+
+func testFormatterBindingRevisionAndOwnership(t *testing.T, database *sqlx.DB) {
+	t.Helper()
 	ctx := context.Background()
-	database := openNotificationTestDB(t)
 	repo, err := newSQLiteRepositoryWithDB(ctx, database, database)
 	require.NoError(t, err)
 	provider := &models.Provider{UserID: "alice", Name: "Mail", Type: models.ProviderTypeApprise, Enabled: true}
@@ -41,8 +46,12 @@ func TestFormatterBindingRevisionAndOwnership(t *testing.T) {
 }
 
 func TestFormatterBindingDoesNotReviveAfterProviderTypeChange(t *testing.T) {
+	testFormatterBindingDoesNotReviveAfterProviderTypeChange(t, openNotificationTestDB(t))
+}
+
+func testFormatterBindingDoesNotReviveAfterProviderTypeChange(t *testing.T, database *sqlx.DB) {
+	t.Helper()
 	ctx := context.Background()
-	database := openNotificationTestDB(t)
 	repo, err := newSQLiteRepositoryWithDB(ctx, database, database)
 	require.NoError(t, err)
 	provider := &models.Provider{UserID: "alice", Name: "Mail", Type: models.ProviderTypeApprise}

@@ -85,6 +85,7 @@
   "instructionsLabel": "说明",
   "interpretedAsUtcSetTimezone": "按 UTC 解释，请设置时区",
   "lastRan": "上次运行 {{when}}",
+  "runStatusWithAge": "{{status}}，{{age}}",
   "listDescription": "创建自动触发智能体任务的规则。",
   "loading": "正在加载…",
   "loadingActivity": "正在加载活动…",

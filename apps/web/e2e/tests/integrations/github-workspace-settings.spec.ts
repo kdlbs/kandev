@@ -14,18 +14,27 @@ test.describe("GitHub workspace settings", () => {
     apiClient,
     seedData,
   }) => {
+    await testPage.clock.install({ time: new Date("2030-01-01T00:00:00Z") });
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
       source: "legacy_shared",
       status: "active",
     });
-    const fixture = await stubGitHubRateLimits(testPage, seedData.workspaceId);
+    const fixture = await stubGitHubRateLimits(testPage, seedData.workspaceId, {
+      retryAt: "2030-01-01T00:01:00Z",
+    });
     await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations/github`);
 
     const automation = testPage.getByTestId("github-workspace-automation");
-    await expect(automation.getByTestId("github-pr-discovery-health").first()).toContainText(
-      "PR discovery failed",
-    );
+    const warning = automation.getByTestId("github-pr-discovery-health");
+    await expect(warning).toHaveCount(1);
+    await expect(warning).toContainText("PR discovery failed");
+    await expect(warning).toContainText(/Retry after/);
+    await testPage.clock.setFixedTime(new Date("2030-01-01T00:02:00Z"));
+    await automation.getByRole("button", { name: "Refresh GitHub connection" }).click();
+    await expect(warning).toContainText("PR discovery failed");
+    await expect(warning).not.toContainText(/Retry after/);
+
     const rateLimitHelp = automation.getByRole("button", { name: "Show GitHub API limits" });
     await rateLimitHelp.hover();
     const rateLimitTooltip = testPage
@@ -36,6 +45,7 @@ test.describe("GitHub workspace settings", () => {
     await expect(rateLimitTooltip).toContainText(
       "API rate limit: 3,210 of 5,000 requests remaining",
     );
+    await expect(rateLimitTooltip).not.toContainText(/Retry after/);
 
     fixture.recoverPRDiscovery();
     await automation.getByRole("button", { name: "Refresh GitHub connection" }).click();

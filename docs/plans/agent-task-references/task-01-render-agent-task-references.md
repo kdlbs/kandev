@@ -255,3 +255,17 @@ Final affected checks: 54 frontend tests, backend sysprompt tests, four desktop
 browser tests, two phone browser tests, web typecheck, lint, translation checks,
 and specification checks passed. Fresh light, dark, and phone captures cover
 agent references and existing user mentions. No production data was changed.
+
+### PR integration validation
+
+PR #5361 initially inherited a failing bootstrap fixture from base `ea6af0d50`.
+`TestImproveBootstrapUsesUpgradedInstructions` reproduced the missing workflow
+step lister on that unchanged base. Merged upstream fix `8d30872f7` without
+conflicts. The same test passed with `go test -tags fts5 -race -p 1
+./internal/improvekandev -run '^TestImproveBootstrapUsesUpgradedInstructions$'
+-count=1 -timeout=4m`.
+
+After the merge, rebuilt the web, backend, and E2E helper binaries. Re-ran the
+54 focused frontend tests, sysprompt tests, typecheck, translation checks, four
+desktop and two phone browser tests, documentation catalog validation, and
+specification lint. All passed. The task-reference implementation is unchanged.

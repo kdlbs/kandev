@@ -941,16 +941,24 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 // when an agent advertises both transports the "first surviving entry wins" dedup keeps
 // the HTTP entry (modern streamable MCP); SSE remains as a fallback for SSE-only agents.
 // Any existing kandev server in the list is filtered out to avoid duplicates.
-func (s *Server) injectKandevMcpServers(mcpServers []types.McpServer) []types.McpServer {
+func (s *Server) injectKandevMcpServers(mcpServers []types.McpServer) ([]types.McpServer, error) {
+	sseURL, err := agentctlconfig.MCPServerURLForInstance(s.cfg.MCPHost, s.cfg.Port, s.cfg.InstanceID, s.cfg.ScopedMCPRoutes, mcpPathSSE)
+	if err != nil {
+		return nil, err
+	}
+	httpURL, err := agentctlconfig.MCPServerURLForInstance(s.cfg.MCPHost, s.cfg.Port, s.cfg.InstanceID, s.cfg.ScopedMCPRoutes, mcpPathHTTP)
+	if err != nil {
+		return nil, err
+	}
 	kandevMcpSse := types.McpServer{
 		Name: kandevMcpServerName,
 		Type: mcpTransportSSE,
-		URL:  agentctlconfig.MCPServerURL(s.cfg.MCPHost, s.cfg.Port, mcpPathSSE),
+		URL:  sseURL,
 	}
 	kandevMcpHttp := types.McpServer{
 		Name: kandevMcpServerName,
 		Type: mcpTransportHTTP,
-		URL:  agentctlconfig.MCPServerURL(s.cfg.MCPHost, s.cfg.Port, mcpPathHTTP),
+		URL:  httpURL,
 	}
 	filtered := make([]types.McpServer, 0, len(mcpServers)+2)
 	filtered = append(filtered, kandevMcpHttp, kandevMcpSse)
@@ -963,7 +971,7 @@ func (s *Server) injectKandevMcpServers(mcpServers []types.McpServer) []types.Mc
 		zap.String("http_url", kandevMcpHttp.URL),
 		zap.String("sse_url", kandevMcpSse.URL),
 		zap.Int("total_servers", len(filtered)))
-	return filtered
+	return filtered, nil
 }
 
 // sessionMCPServers applies the same managed-conversation admission to every
@@ -980,7 +988,10 @@ func (s *Server) sessionMCPServers(requested []types.McpServer) ([]types.McpServ
 		return nil, errors.New("managed conversation MCP broker is unavailable")
 	}
 	if s.mcpServer != nil {
-		servers = s.injectKandevMcpServers(servers)
+		servers, err = s.injectKandevMcpServers(servers)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return servers, nil
 }

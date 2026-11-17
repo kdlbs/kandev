@@ -7962,6 +7962,7 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 	if effect != nil && agentDeliveryEffectCarriesDeliveryIdentity(effect) && !isBoundAgentDeliveryWorkflowEffect(effect) {
 		s.logger.Warn("deferring workflow completion with incomplete delivery identity",
 			zap.String("task_id", taskID), zap.String("effect_key", effect.EffectKey))
+		s.surfaceDeferredOfficeCompletion(ctx, taskID, session.ID)
 		return false
 	}
 	if models.IsCompletionFollowUpSession(session.Metadata) {

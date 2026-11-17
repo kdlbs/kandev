@@ -246,3 +246,68 @@ Its additional fanout and load/import interleaving findings reproduced in new
 regressions and were fixed before repeating focused notification tests and the
 plugin's full private-source test target and packaged browser smoke. Full core
 suite attempts above preceded these final interleaving corrections.
+
+### Maintainer follow-up after the formatter merge
+
+PR #5141 merged the formatter implementation into `main`. The remaining
+follow-up prepares additive SDK `0.3.0` for the next Stable release.
+Both release records and the npm package version use `0.3.0`.
+The host version and minimum host version remain unstamped until publication.
+The release metadata check rejected the changed contract under SDK `0.2.1`.
+Independent plugin publication and operational upgrades remain separate work.
+
+Permanent PostgreSQL tests now share the SQLite ownership and revision checks.
+They cover stale activation, clear/reopen behavior, provider type changes, and
+concurrent activation with one successful writer.
+
+Historical validation on the combined source (2026-11-14):
+
+- The complete standalone SDK race suite passed.
+- Notification, plugin, HTTP middleware, and fixture package race suites passed.
+  The plugin-state PostgreSQL fixture rejects a URL DSN with appended keyword
+  options. Its rerun passed with the equivalent keyword DSN. The earlier
+  packaged executor failure did not reproduce in this run.
+- SQLite and real PostgreSQL 18 formatter store tests passed.
+- Eleven focused frontend suites passed, with 121 tests.
+- Web typechecking, Traditional Chinese generation, and the full i18n gate passed.
+- SQL guard and the complete store-conformance race suite passed on SQLite and
+  real PostgreSQL 18, including the tagged previous-Stable upgrade fixtures.
+- Twenty-six SDK metadata, packing, workspace, consumer, and protocol tests passed
+  with the required Node 24.19.0 and npm 11.21.0 toolchain.
+- Protocol regeneration matched the committed output. Clean Go and packed npm
+  consumers passed compatibility checks in NodeNext and Bundler modes.
+- Public documentation, specification structure, catalog, and delivery-coverage
+  checks passed. These results do not claim a complete core test-suite run.
+- The final managed Chromium run passed 10 scenarios. The mobile-chrome run
+  passed nine scenarios, including formatter preparation/activation/restoration,
+  Apprise rescan geometry, capacity grade editing, and nested drawer gestures.
+- The combined changed-file hook run passed Go and web lint, formatting,
+  translation, harness, architecture, catalog, specification, and copy guards.
+- Fresh isolated PR captures show the phone workspace sheet and both settings
+  surfaces on desktop and phone. The temporary capture test was removed after
+  inspection; compressed images remain outside the tracked source tree.
+
+### Local follow-up validation (2026-11-16)
+
+The branch starts from `main` after #5141 merged. Its formatter changes contain
+SDK release preparation, PostgreSQL regression coverage, and publication guidance.
+The formatter implementation and UI remain in the merged contribution.
+
+- The merged formatter baseline passed SDK and host race tests, SQLite and
+  PostgreSQL conformance, 83 frontend tests, and web typechecking.
+- The remaining admission, recovery, messaging, and formatter store race tests
+  passed with real PostgreSQL 18. Capacity and profile suites passed too.
+- The complete store-conformance race suite passed on SQLite and PostgreSQL 18.
+  SQL guard passed.
+- Four frontend suites passed 40 tests. Web typechecking and translation checks
+  passed.
+- All 26 SDK metadata, packing, workspace, consumer, and protocol tests passed.
+  Release planning rejected the unchanged published SDK record and accepted the
+  unstamped `0.3.0` draft. Both release records and the npm version matched.
+- Seven desktop and seven phone browser cases passed with retries disabled.
+  The managed runner rebuilt the desktop candidate before these checks.
+- Public documentation, catalog, specification, and delivery-coverage checks
+  passed. Seven changed work orders have complete document coverage.
+
+PR #5321 tracks post-push CI for the final commit. SDK publication remains part
+of the next Stable release.
