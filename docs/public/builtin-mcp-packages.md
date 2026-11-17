@@ -84,7 +84,7 @@ current turn, questions, tool calls, and provider background work have settled.
 The update preserves the conversation, task, workspace, and queued messages.
 Terminals, previews, and editor connections remain available during the update.
 
-Automatic application currently supports Codex app-server 0.166.0 on Linux with
+Automatic application currently supports Codex app-server 0.166.0 and 0.169.0 on Linux with
 a compatible retained helper. Other providers, versions, transports, and legacy
 helpers keep the saved change pending until a supported normal process start.
 Kandev does not cancel work or start a fresh conversation to apply settings.

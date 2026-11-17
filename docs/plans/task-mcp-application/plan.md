@@ -43,7 +43,7 @@ Reverting to an unchanged accepted selection avoids restart. Failures require ex
 Retry resolves saved choices under current workspace policy. It cannot supply package overrides.
 Uncertain acceptance parks after its deadline, preserving the operation and queued input for explicit recovery.
 
-Codex app-server 0.166.0 on Linux passed permanent native conformance.
+Codex app-server 0.166.0 and 0.169.0 on Linux passed permanent native conformance.
 Other providers, versions, transports, and incompatible helpers remain pending with a reason.
 An existing resume declaration alone does not enable application.
 
@@ -113,7 +113,7 @@ Final behavior checks on 2026-11-16:
 
 ### Reproduction commands
 
-Run backend commands from `apps/backend`. The native binary variable points to an isolated installed managed 0.166.0 binary, not a live session.
+Run backend commands from `apps/backend`. The native binary variable points to an isolated installed proven managed binary, not a live session.
 
 ```bash
 GOMEMLIMIT=12GiB GOMAXPROCS=2 go test -trimpath -race -p 1 \
@@ -123,7 +123,7 @@ GOMEMLIMIT=12GiB GOMAXPROCS=2 go test -trimpath -race -p 1 \
   ./internal/agent/runtime/lifecycle ./internal/mcp/server ./internal/agentctl/journal \
   ./internal/agent/runtime/agentctl ./internal/agentctl/server/adapter/transport/codexappserver \
   -run 'TestProvider|TestMCPProvider|TestBuiltin|TestYieldedSession|TestSessionAdmission' -count=1
-KANDEV_CODEX_MCP_CONFORMANCE_BIN=/path/to/managed-0.166.0-codex go test -trimpath -race \
+KANDEV_CODEX_MCP_CONFORMANCE_BIN=/path/to/proven-managed-codex go test -trimpath -race \
   ./internal/agentctl/server/api -run TestProviderReplacementManagedCodexConformance -timeout=120s -count=3
 ```
 
@@ -163,3 +163,9 @@ The full frontend suite has three unrelated failures in `lib/http-git-server.tes
 The automatic save caller is wired in code. No deployed runtime or live user session was changed.
 Public docs updated: `builtin-mcp-packages.md` (how-to), and the timing link in `agents-and-profiles.md` (reference).
 All task-defined feature checks are complete. The independent Docker/Git/LSP baseline limits above remain documented. PR delivery and current-head checks are tracked separately.
+
+## PR integration validation (2026-11-17)
+
+The branch is reconciled with current main, including immutable helper-instance MCP route prefixes and connection-scoped startup events. Generation endpoints retain `/i/<instance>` when that helper uses scoped routes; the private provider bearer remains separate from control credentials. A mismatched instance ID fails materialization. Full-stop accounting is preserved for provider-only stops. Backend application wiring uses the runtime facade.
+
+All 110 focused web/consumer tests, typecheck, and translation checks pass after reconciliation. Managed Codex 0.169.0 native conformance and the API provider family pass with race detection (81.472s), retaining the same conversation, one model call, terminal output, preview, and editor connection. All fifteen affected backend package groups pass with race detection after reconciliation. Screenshot, hook, and exact-PR-head checks are tracked in the delivery run. Earlier local full-suite baseline limits remain historical evidence, not a claim about the new PR head.

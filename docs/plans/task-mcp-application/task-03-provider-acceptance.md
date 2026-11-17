@@ -84,8 +84,10 @@ Sequential. No delegation is authorized.
 
 ## Results
 
-The Codex app-server adapter exposes the replacement capability only for managed version 0.166.0 on Linux. Source admission requires persisted settled history, known terminal child states, fresh background evidence, a complete connected catalog, no pending permissions, and settled durable delivery.
+The Codex app-server adapter exposes the replacement capability only for proven managed versions 0.166.0 and 0.169.0 on Linux. Source admission requires persisted settled history, known terminal child states, fresh background evidence, a complete connected catalog, no pending permissions, and settled durable delivery.
 
 `TestProviderReplacementManagedCodexConformance` passed against the actual managed binary with race detection. An isolated provider home and local model fixture create one completed turn. The retained helper then resumes the same native conversation, adds Configuration, removes Diagnostics, and verifies the complete live catalog. Model calls remain one. The retained PTY executes a command, the same preview URL returns the same content, and the original editor subprocess connection echoes data.
 
 Other provider versions and transports remain pending unsupported. Mock fixtures do not enable their capability. The native test needs `KANDEV_CODEX_MCP_CONFORMANCE_BIN`; it uses no live user conversation or external model endpoint. Final commands and browser limits are recorded in the plan.
+
+PR integration on 2026-11-17 preserves helper-instance MCP route scoping. Managed Codex 0.169.0, now pinned on the base branch, passes the native conformance fixture with race detection. Both proven versions remain accepted; unknown versions remain pending.

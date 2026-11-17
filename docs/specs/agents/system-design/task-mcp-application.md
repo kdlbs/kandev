@@ -270,7 +270,7 @@ Enable it only after provider-specific conformance tests pass. Unknown adapter v
 | Provider path | Current repository evidence | Required application proof | Fallback |
 | --- | --- | --- | --- |
 | Claude ACP | Native resume declaration and session resume flag | Exact conversation retained, fresh deferred tool discovery, no turn | Pending unsupported |
-| Codex app-server 0.166.0, Linux | Permanent native helper conformance passes | Same thread, fresh catalog, no turn, surviving workspace connections | Automatic application |
+| Codex app-server 0.166.0 and 0.169.0, Linux | Permanent native helper conformance passes | Same thread, fresh catalog, no turn, surviving workspace connections | Automatic application |
 | Codex ACP and other app-server versions | Resume declarations only | Each transport/version requires independent conformance | Pending unsupported |
 | Pi ACP | Native resume and prepared project delivery | Rewrite owned project attachment and observe its catalog after resume | Pending unsupported |
 | OpenCode / Cursor ACP | Resume declarations | Exact identity and authoritative new attachment for each adapter | Pending unsupported |
@@ -362,4 +362,4 @@ Explicit Retry resolves the latest saved task choices under current workspace po
 
 ### Permanent native conformance result
 
-`TestProviderReplacementManagedCodexConformance` uses the actual managed 0.166.0 binary with an isolated provider home and local model fixture. It creates one completed turn. The real helper then replaces the provider, resumes the same native thread, enables Configuration, removes Diagnostics, and verifies the live catalog. Model calls remain one. The same PTY, preview URL/content, and editor subprocess connection survive. The test requires `KANDEV_CODEX_MCP_CONFORMANCE_BIN`. No user account, conversation, or external model endpoint is used.
+`TestProviderReplacementManagedCodexConformance` uses an actual proven managed binary (0.166.0 or 0.169.0) with an isolated provider home and local model fixture. It creates one completed turn. The real helper then replaces the provider, resumes the same native thread, enables Configuration, removes Diagnostics, and verifies the live catalog. Model calls remain one. The same PTY, preview URL/content, and editor subprocess connection survive. The 0.169.0 run also verifies generation URLs beneath the immutable `/i/<instance>` route prefix. The test requires `KANDEV_CODEX_MCP_CONFORMANCE_BIN`. No user account, conversation, or external model endpoint is used.
