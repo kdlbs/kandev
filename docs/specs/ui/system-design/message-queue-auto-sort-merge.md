@@ -19,17 +19,44 @@ Those documents stay authoritative. This design describes only the parts that
 are added or differ.
 
 It does not change the Auto-merge compatibility predicate
-(`buildAutoMergedEntry`), the manual merge, reorder, Send Now, or Auto-run. The
-only Auto-merge behaviour it changes is that a session Auto-merge OFF-to-ON
-write can now trigger a compaction pass
+(`buildAutoMergedEntry`, unchanged from before this feature), Send Now, or
+Auto-run. With Auto-sort-merge OFF (the default), the only behaviour changes are
+the always-active queue corrections below and that a session Auto-merge
+OFF-to-ON write can trigger a compaction pass when the session's
+Auto-sort-merge preference is ON
 (`AC-UI-MESSAGE-QUEUE-AUTO-SORT-MERGE-001.10`).
+
+## Always-active queue corrections
+
+Sorted folds and compaction need one unambiguous queue order and a safe lock
+order. These invariants apply to every session whatever its policies:
+
+- **Total FIFO order.** A session's rows are ordered by `(position, id)`.
+  Positions can tie because a restored reservation keeps its old slot. Every
+  SQL read that orders rows (listing, reserve/drain, predecessor and tail
+  reads, reorder, compaction, managed-input head and coalesce reads, durable
+  recovery listings) uses this key, and the memory repository orders by the
+  same key (`queueOrderLess`). The tie-break was engine-defined before.
+- **Tied predecessor.** The row above a source is the previous row in that
+  order, including a row tied with it at the same position
+  (`(position, id) < (sourcePosition, sourceID)`). This governs automatic
+  folds and manual **Merge with above**, which previously skipped a tied row.
+- **Order index.** `idx_queued_messages_session_order` on
+  `(session_id, position, id)` replaces `idx_queued_messages_session_position`
+  through a replay-safe `DROP INDEX IF EXISTS` and `CREATE INDEX IF NOT EXISTS`
+  at schema initialization.
+- **Edit-lease lock order.** `editLeaseMu` is always taken before the
+  repository session fence or any repository write: `RenewEdit`, `EndEdit`, and
+  `EndEditAfterSave` acquire it before the fence, matching lease-guarded saves,
+  and fold paths read a lease snapshot taken under the admission gate instead
+  of locking it inside a repository transaction.
 
 ## Requirement mapping
 
 | Requirement | Design sections |
 | --- | --- |
 | `REQ-UI-MESSAGE-QUEUE-AUTO-SORT-MERGE-001` .1, .2, .3, .13 | [Policy model](#policy-model), [Persistence](#persistence), [Global settings](#global-settings) |
-| `REQ-UI-MESSAGE-QUEUE-AUTO-SORT-MERGE-001` .6, .7, .8, .9, .14 | [Target selection](#target-selection), [Admission flow](#admission-flow) |
+| `REQ-UI-MESSAGE-QUEUE-AUTO-SORT-MERGE-001` .6, .7, .8, .9, .14 | [Always-active queue corrections](#always-active-queue-corrections), [Target selection](#target-selection), [Admission flow](#admission-flow) |
 | `REQ-UI-MESSAGE-QUEUE-AUTO-SORT-MERGE-001` .10, .11, .12 | [Compaction pass](#compaction-pass), [Policy mutations](#policy-mutations) |
 | `REQ-UI-MESSAGE-QUEUE-AUTO-SORT-MERGE-001` .14, .15 | [Status contract](#status-contract), [Frontend state](#frontend-state) |
 | `REQ-UI-MESSAGE-QUEUE-AUTO-SORT-MERGE-001` .4, .5, .16 | [Queue header and settings UI](#queue-header-and-settings-ui) |

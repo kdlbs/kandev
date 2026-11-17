@@ -42,8 +42,11 @@ feature amends.
 - Moving messages that cannot merge, sorted folds for user messages, and
   child-only sender filtering.
 - Compaction on global setting changes.
-- Changes to Auto-merge compatibility, manual merge, reorder, Send Now,
-  Auto-run, append, coalescing, restore, or retry.
+- Changes to Auto-merge compatibility, Send Now, Auto-run, append,
+  coalescing, or retry semantics. The always-active ordering, tied-predecessor,
+  index, and edit-lease lock-order corrections that also affect manual merge,
+  reorder, and restore are defined in the design's "Always-active queue
+  corrections" section and must be called out in the PR description.
 
 ## Technical approach
 
