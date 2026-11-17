@@ -19,7 +19,10 @@ import {
   resolveEnvRightWidth,
   resolveResponsiveRightWidth,
 } from "@/lib/state/layout-manager/right-width";
-import { clearReusableRootGeometry } from "@/lib/state/layout-manager/pinned-targets";
+import {
+  clearReusableRootGeometry,
+  getReusableRightWidth,
+} from "@/lib/state/layout-manager/pinned-targets";
 import {
   restoreReusableRootGeometry,
   validateLiveRootGeometry,
@@ -370,7 +373,7 @@ export function setupContainerResizeSync(api: DockviewReadyEvent["api"]): () => 
     requestAnimationFrame(() => {
       refreshAutomaticRightTarget(api);
       const currentParent = getDockviewElement(api)?.parentElement;
-      if (currentParent) syncDockviewContainerSize(api, currentParent);
+      if (currentParent) syncDockviewContainerSize(api, currentParent, true);
     });
   };
   window.addEventListener("resize", onWindowResize);
@@ -385,18 +388,24 @@ export function setupContainerResizeSync(api: DockviewReadyEvent["api"]): () => 
  *
  * ResizeObserver normally owns this. Root-layout changes also call it from a
  * React layout effect so stale group coordinates cannot reach a painted frame.
+ * `refreshStockTarget` is reserved for actual viewport resizes; container-only
+ * changes must keep the current stock width stable.
  */
 export function syncDockviewContainerSize(
   api: DockviewReadyEvent["api"],
   container: HTMLElement,
+  refreshStockTarget = false,
 ): void {
   const width = container.clientWidth;
   const height = container.clientHeight;
   if (width <= 0 || height <= 0) return;
-  // Refresh automatic widths for both stock and reusable layouts. The resolver
-  // retains each layout's saved sizing policy, while explicit manual widths
-  // remain fixed in `refreshAutomaticRightTarget`.
-  refreshAutomaticRightTarget(api, width);
+  // Container-only changes include the app sidebar animation. Recalculate a
+  // right target here only when this environment owns reusable geometry;
+  // stock targets are refreshed by the window resize handler instead.
+  const envId = useDockviewStore.getState().currentLayoutEnvId;
+  if (refreshStockTarget || getReusableRightWidth(envId, width) !== null) {
+    refreshAutomaticRightTarget(api, width);
+  }
   if (width === api.width && height === api.height) {
     // Environment switches can replace pinned targets without changing the
     // container dimensions, so enforce even when Dockview's layout is a no-op.

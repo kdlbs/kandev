@@ -382,6 +382,28 @@ describe("fresh default geometry after a plugin-bearing environment switch", () 
   });
 });
 
+describe("stock right target viewport resizing", () => {
+  it("refreshes on viewport resize, not container-only resize", async () => {
+    startIn("env-stock", horizontalLayout({ bottom: [TERMINAL], rightWidth: 240 }), null);
+    setPinnedTarget("right", 240);
+    const container = document.createElement("div");
+    Object.defineProperties(container, {
+      clientWidth: { value: 1000 },
+      clientHeight: { value: HEIGHT },
+    });
+
+    syncDockviewContainerSize(api, container);
+    await settle();
+    expect(getPinnedTarget("right")).toBe(240);
+    expect(rootSizes(api)).toEqual([760, 240]);
+
+    syncDockviewContainerSize(api, container, true);
+    await settle();
+    expect(getPinnedTarget("right")).toBe(300);
+    expect(rootSizes(api)).toEqual([700, 300]);
+  });
+});
+
 /** @covers AC-UI-TASK-LAYOUT-PROFILES-001.10, AC-UI-TASK-LAYOUT-PROFILES-002.6 */
 describe.each(["slow", "fast", "explicit"])("unclamped reusable source geometry (%s)", (mode) => {
   it.each([
