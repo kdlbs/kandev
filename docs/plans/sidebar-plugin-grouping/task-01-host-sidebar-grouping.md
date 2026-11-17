@@ -282,3 +282,21 @@ passed. Native acceptance passed seven desktop and five phone scenarios, one
 worker and no retries. Exact persistence-failure scheduling is owned by the
 service regression, not a new runtime-only testing flag.
 Evidence is under the cache-drive `sidebar-grouping-review9-p3gv5v37` root.
+
+### Round 11 durable policy publication correction
+
+The status capture guard did not cover provisional config-policy publication.
+Pending policy Save exposed a generation that could later roll back without
+notification. Both commit/rollback cases reproduced the incorrect pending catalog.
+Policy rotation now saves its existing private record copy before publishing it
+to the registry, retaining the policy and record-persistence write serialization.
+The obsolete registry mutator was removed; no new lock or rollback event is added.
+The same channel barriers overlap resolver capture with the real dispatch lease:
+rollback keeps the unchanged healthy provider available; successful config change
+rejects the old in-flight generation. Failed policy persistence preserves the
+original catalog, including its invalidation epoch. Full plugin `-race` passed
+(`26.695s`), including policy and status completion/rollback cases.
+Required `make fmt`, changed Go lint and catalog/spec validation passed. All
+guarded runtime/helper/fixture artifacts rebuilt; native acceptance passed seven
+desktop and five phone scenarios with one worker and no retries.
+Evidence is under the cache-drive `sidebar-grouping-review11-3lkcw9vo` root.
