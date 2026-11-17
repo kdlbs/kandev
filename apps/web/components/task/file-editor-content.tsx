@@ -24,6 +24,8 @@ export type FileEditorContentProps = {
   repositoryId?: string | null;
   worktreePath?: string;
   repo?: string;
+  readOnly?: boolean;
+  showToolbar?: boolean;
   enableComments?: boolean;
   previewKind?: FilePreviewKind;
   renderedPreview?: boolean;

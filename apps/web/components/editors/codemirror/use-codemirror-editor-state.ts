@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, useRef, type RefObject } from "react";
 import type { ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { EditorView, gutter, GutterMarker, ViewPlugin, type ViewUpdate } from "@codemirror/view";
-import type { Extension } from "@codemirror/state";
+import { EditorState, type Extension } from "@codemirror/state";
 import { Decoration, type DecorationSet } from "@codemirror/view";
 import { getCodeMirrorExtensionFromPath } from "@/lib/languages";
 import { useCommentsStore } from "@/lib/state/slices/comments";
@@ -15,6 +15,7 @@ import { useCommandPanelOpen } from "@/lib/commands/command-registry";
 import { useTranslation } from "react-i18next";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { readCodeMirrorSelection, selectionEndPoint } from "./codemirror-selection";
+import { useCodeMirrorTouchSelection } from "./use-codemirror-touch-selection";
 // Resolved inside `toDOM()`, which is a CodeMirror gutter callback with no hook scope.
 import { t as moduleT } from "@/lib/i18n";
 
@@ -195,6 +196,7 @@ type UseCodeMirrorEditorStateOpts = {
   isDirty: boolean;
   isSaving: boolean;
   sessionId?: string;
+  readOnly?: boolean;
   enableComments: boolean;
   onChange: (newContent: string) => void;
   onSave: () => void;
@@ -212,6 +214,7 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
     isDirty,
     isSaving,
     sessionId,
+    readOnly = false,
     enableComments,
     onChange,
     onSave,
@@ -267,9 +270,22 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
     return () => document.removeEventListener("mousemove", handleMouseMove);
   }, []);
 
-  // Show floating button after selection ends
+  const readCurrentSelection = useCallback(
+    (view: EditorView) => readCodeMirrorSelection(view.state),
+    [],
+  );
+  const { touchSelectionActiveRef } = useCodeMirrorTouchSelection({
+    enabled: enableComments && Boolean(sessionId),
+    wrapperRef,
+    editorRef,
+    readCurrentSelection,
+    setCurrentSelection,
+    setFloatingButtonPos,
+  });
+
+  // Show the desktop button after a mouse selection ends.
   const handleSelectionEnd = useCallback(() => {
-    if (!enableComments || !sessionId) return;
+    if (!enableComments || !sessionId || touchSelectionActiveRef.current) return;
     const view = editorRef.current?.view;
     if (!view) return;
     const selection = readCodeMirrorSelection(view.state);
@@ -277,26 +293,19 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
     setFloatingButtonPos(
       selection ? { x: mousePositionRef.current.x, y: mousePositionRef.current.y } : null,
     );
-  }, [enableComments, sessionId, editorRef]);
+  }, [enableComments, sessionId, editorRef, touchSelectionActiveRef]);
 
   // Touch selections (including native handle drags) arrive as selection
-  // transactions without a mouseup, so follow them directly.
+  // transactions without a mouseup. Every selection transaction also refreshes
+  // the quote so keyboard extension cannot leave an older quote behind.
   const touch = useTouchDrawer();
-  const followTouchSelectionRef = useRef<(view: EditorView) => void>(() => {});
-  useEffect(() => {
-    followTouchSelectionRef.current = (view) => {
-      if (!touch || !enableComments || !sessionId) return;
-      const selection = readCodeMirrorSelection(view.state);
-      setCurrentSelection(selection);
-      setFloatingButtonPos(selection ? selectionEndPoint(view) : null);
-    };
-  }, [enableComments, sessionId, touch]);
 
   // Mouse listeners for selection
   useEffect(() => {
     const wrapper = wrapperRef.current;
     if (!wrapper || !enableComments || !sessionId) return;
     const handleMouseUp = (e: MouseEvent) => {
+      if (touchSelectionActiveRef.current) return;
       if ((e.target as HTMLElement).closest(".floating-comment-btn")) return;
       setTimeout(handleSelectionEnd, 10);
     };
@@ -321,14 +330,20 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
         setCurrentSelection(null);
         return;
       }
-      followTouchSelectionRef.current(update.view);
+      if (!enableComments || !sessionId) return;
+      const selection = readCodeMirrorSelection(update.state);
+      setCurrentSelection(selection);
+      if (touch) {
+        setFloatingButtonPos(selection ? selectionEndPoint(update.view) : null);
+      }
     });
-  }, []);
+  }, [enableComments, sessionId, touch]);
 
   // Extensions
   const extensions: Extension[] = useMemo(() => {
     const exts: Extension[] = [
-      EditorView.editable.of(true),
+      EditorView.editable.of(!readOnly),
+      EditorState.readOnly.of(readOnly),
       cmEditorTheme,
       commentGutter,
       commentPlugin,
@@ -337,7 +352,7 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
     if (wrapEnabled) exts.push(EditorView.lineWrapping);
     if (langExt) exts.push(langExt);
     return exts;
-  }, [langExt, wrapEnabled, commentGutter, commentPlugin, selectionUpdateExtension]);
+  }, [langExt, readOnly, wrapEnabled, commentGutter, commentPlugin, selectionUpdateExtension]);
 
   // Diff stats
   const [diffStats, setDiffStats] = useState<{ additions: number; deletions: number } | null>(null);
