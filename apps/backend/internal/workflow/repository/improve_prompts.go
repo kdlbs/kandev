@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	workflowcfg "github.com/kandev/kandev/config/workflows"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -232,6 +233,14 @@ func (r *Repository) updateImproveTemplateStepsIfUnchanged(before string, create
 }
 
 func (r *Repository) upgradeImproveWorkflowSteps(revisions map[string]promptRevision) (int, int, error) {
+	hasTemplateBinding, err := db.ColumnExists(r.db, "workflows", "workflow_template_id")
+	if err != nil {
+		return 0, 0, fmt.Errorf("inspect workflow template binding column: %w", err)
+	}
+	if !hasTemplateBinding {
+		return 0, 0, nil
+	}
+
 	byName := make(map[string]promptRevision, len(revisions))
 	for _, revision := range revisions {
 		byName[revision.name] = revision

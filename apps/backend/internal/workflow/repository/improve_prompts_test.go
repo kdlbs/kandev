@@ -565,6 +565,28 @@ func TestImprovePromptUpgrade(t *testing.T) {
 	}
 }
 
+func TestImprovePromptUpgradeAllowsWorkflowsWithoutTemplateBindingColumn(t *testing.T) {
+	database, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	database.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = database.Close() })
+	if _, err := database.Exec(`CREATE TABLE workflows (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
+	)`); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := NewWithDB(database, database, nil); err != nil {
+		t.Fatalf("initialize workflow repository without template binding column: %v", err)
+	}
+}
+
 func TestImprovePromptUpgradeConcurrentEdit(t *testing.T) {
 	previous := readPreviousImprovePrompts(t)
 	current := currentImprovePrompts(t)

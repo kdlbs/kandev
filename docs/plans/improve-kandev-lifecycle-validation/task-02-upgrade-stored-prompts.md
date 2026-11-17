@@ -114,3 +114,18 @@ Verification passed:
 PR fixup build passed:
 
 - `make -C apps/backend build`
+
+PR fixup CI remediation: the PostgreSQL package run exposed un-rebound `?`
+placeholders in the integration test; both reads now use `database.Rebind`.
+The backend shard exposed migration-lite workflow tables without
+`workflow_template_id`; startup now skips materialized-step inspection when
+that binding column is absent. A focused regression covers repository startup
+with that schema.
+
+Verification passed:
+
+- `(cd apps/backend && go test -trimpath -race ./internal/workflow/repository ./internal/improvekandev -run 'TestImprovePrompt|TestImproveBootstrap|TestImprovePromptUpgradeAllowsWorkflowsWithoutTemplateBindingColumn' -count=1)`
+- `(cd apps/backend && go test -trimpath -race ./internal/mcp/handlers -run '^TestHandleReorderWorkflowStepsOrderValidation$' -count=1)`
+- `make -C apps/backend build`
+- `bash scripts/lint-go-changed apps/backend/internal/workflow/repository/improve_prompts.go apps/backend/internal/workflow/repository/improve_prompts_test.go`
+- `git diff --check`
