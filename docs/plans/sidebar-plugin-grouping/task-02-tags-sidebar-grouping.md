@@ -1,7 +1,7 @@
 ---
 id: 02-tags-sidebar-grouping
 title: Tags complete grouping and real package proof
-status: in_progress
+status: done
 wave: 2
 depends_on:
   - 01-host-sidebar-grouping
@@ -235,3 +235,9 @@ The desktop collapsed-copy and both phone chooser PNGs were visually inspected.
 Evidence is under the cache-drive `sidebar-grouping-review2-rvznjn03` smoke root.
 This is fresh corrected-package proof, not a relabeling of the earlier 103/106
 scenario. It is phone emulation, not physical-device verification.
+
+Review closure: rounds 12/13/14 independently reported CLEAN with zero findings
+on Tags `b10662aa551dcd37d7186385cc378869a06c2149` and host
+`763babaf87d29b4e767f7285b409a80f792b713d`. No later plugin source or SDK change
+required a new package. Recorded package/runtime proof remains dated evidence,
+not a claim of fresh installation on every host-only review correction.

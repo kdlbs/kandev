@@ -1,7 +1,7 @@
 ---
 id: 01-host-sidebar-grouping
 title: Generic complete sidebar grouping
-status: in_progress
+status: done
 wave: 1
 depends_on: []
 plan: plan.md
@@ -300,3 +300,8 @@ Required `make fmt`, changed Go lint and catalog/spec validation passed. All
 guarded runtime/helper/fixture artifacts rebuilt; native acceptance passed seven
 desktop and five phone scenarios with one worker and no retries.
 Evidence is under the cache-drive `sidebar-grouping-review11-3lkcw9vo` root.
+
+Review closure: rounds 12/13/14 each reported CLEAN, zero findings, on host
+`763babaf87d29b4e767f7285b409a80f792b713d` and the unchanged Tags snapshot.
+The three-consecutive-clean gate is satisfied. The plan retains broad test
+limitations; completion here does not mean all repository tests are green.
