@@ -87,6 +87,10 @@ function controller(overrides: Partial<PreviewFeedbackController> = {}): Preview
     snapshot: { task_id: "task-1", revision: 3, items: [item] },
     mode: null,
     draft: null,
+    draftAnchor: { x: 40, y: 120 },
+    isDraftSurfaceOpen: false,
+    closeDraftSurface: vi.fn(),
+    resumeDraft: vi.fn(),
     draftComment: "",
     setDraftComment: vi.fn(),
     candidateLabel: null,
@@ -112,6 +116,7 @@ function controller(overrides: Partial<PreviewFeedbackController> = {}): Preview
   return value;
 }
 
+// eslint-disable-next-line max-lines-per-function -- One controller fixture serves every desktop and touch contract.
 describe("PreviewFeedbackControls", () => {
   afterEach(cleanup);
 
@@ -148,6 +153,7 @@ describe("PreviewFeedbackControls", () => {
     const capture = controller({
       items: [],
       snapshot: { task_id: "task-1", revision: 0, items: [] },
+      isDraftSurfaceOpen: true,
       draft: {
         kind: "screenshot",
         page_route: "/checkout",
@@ -169,10 +175,40 @@ describe("PreviewFeedbackControls", () => {
     expect(screen.getByText("600 × 360 · PNG")).toBeTruthy();
   });
 
+  // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-002.9
+  it("warns, without blocking Save, when a canvas capture came out one colour", () => {
+    const capture = controller({
+      items: [],
+      snapshot: { task_id: "task-1", revision: 0, items: [] },
+      draftComment: "The counter is missing",
+      isDraftSurfaceOpen: true,
+      draft: {
+        kind: "screenshot",
+        page_route: "/app",
+        page_title: "App",
+        capture_rect: { x: 0, y: 0, width: 400, height: 300 },
+        screenshot: {
+          blob: new Blob([], { type: "image/png" }),
+          width: 400,
+          height: 300,
+          previewUrl: "blob:uniform",
+          fileName: "preview.png",
+          uniformOverCanvas: true,
+        },
+      },
+    });
+    render(<PreviewFeedbackControls capture={capture} enabled />);
+
+    expect(screen.getByText(/Canvas content may not have been captured/i)).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Screenshot preview" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add" }).hasAttribute("disabled")).toBe(false);
+  });
+
   it("keeps the captured evidence while collecting the required comment", async () => {
     const capture = controller({
       items: [],
       snapshot: { task_id: "task-1", revision: 0, items: [] },
+      isDraftSurfaceOpen: true,
       draft: {
         kind: "text",
         page_route: "/checkout",
@@ -190,8 +226,36 @@ describe("PreviewFeedbackControls", () => {
     const comment = screen.getByLabelText("Comment on selection");
     fireEvent.change(comment, { target: { value: "Keep the generated total visible" } });
     rerender(<PreviewFeedbackControls capture={capture} enabled />);
-    fireEvent.click(screen.getByRole("button", { name: "Save feedback" }));
+    expect(screen.getByTestId("preview-feedback-draft").textContent).toContain("/checkout");
+    expect(screen.queryByRole("button", { name: /Run/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
     expect(capture.saveDraft).toHaveBeenCalledWith("Keep the generated total visible");
+  });
+
+  // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-004.7
+  it("keeps a dismissed draft resumable and blocks new captures until it is resolved", () => {
+    const capture = controller({
+      draft: {
+        kind: "text",
+        page_route: "/checkout",
+        page_title: "Checkout",
+        selected_text: "$42.00",
+        text_anchor: { start: { node_path: [0], offset: 0 }, end: { node_path: [0], offset: 6 } },
+      },
+      draftComment: "half-written",
+    });
+    render(<PreviewFeedbackControls capture={capture} enabled />);
+
+    expect(screen.queryByTestId("preview-feedback-draft")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Annotate.*1/i }));
+    const row = screen.getByTestId("preview-feedback-draft-row");
+    expect(row.textContent).toContain("/checkout");
+    expect(screen.getByRole("button", { name: "Select text" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    expect(capture.resumeDraft).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /Annotate.*1/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(capture.discardDraft).toHaveBeenCalled();
   });
 
   it("reuses the saved collection editor for item management", () => {
@@ -202,9 +266,10 @@ describe("PreviewFeedbackControls", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit feedback" }));
     const editor = screen.getByRole("textbox", { name: "Edit comment" });
     fireEvent.change(editor, { target: { value: "Keep the button aligned" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
 
     expect(capture.update).toHaveBeenCalledWith("feedback-1", "Keep the button aligned", 2);
+    expect(screen.getByTestId("preview-feedback-popover")).toBeTruthy();
   });
 
   it("uses a touch-sized drawer entry and exposes the same capture choices", () => {

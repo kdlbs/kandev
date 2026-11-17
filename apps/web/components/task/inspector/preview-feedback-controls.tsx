@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import {
   IconClick,
   IconMessagePlus,
@@ -10,20 +10,31 @@ import {
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
-import { Textarea } from "@kandev/ui/textarea";
 import { useTranslation } from "react-i18next";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import {
+  SelectionCommentSurface,
+  isInsideSelectionCommentSurface,
+} from "@/components/shared/selection-comment/selection-comment-surface";
 import type { PreviewCaptureMode } from "@/lib/preview-inspect-bridge";
 import type { PreviewFeedbackDraft } from "@/hooks/use-preview-capture";
 import {
   PreviewFeedbackCollection,
-  previewFeedbackElementLabel,
   type PreviewFeedbackCollectionController,
 } from "./preview-feedback-collection";
+import {
+  PreviewFeedbackEvidence,
+  evidenceForDraft,
+  evidenceText,
+} from "./preview-feedback-evidence";
 
 export type PreviewFeedbackController = PreviewFeedbackCollectionController & {
   mode: PreviewCaptureMode | null;
   draft: PreviewFeedbackDraft | null;
+  draftAnchor: { x: number; y: number } | null;
+  isDraftSurfaceOpen: boolean;
+  closeDraftSurface: () => void;
+  resumeDraft: () => void;
   draftComment: string;
   setDraftComment: (comment: string) => void;
   candidateLabel: string | null;
@@ -43,13 +54,7 @@ type PreviewFeedbackControlsProps = {
   enabled: boolean;
 };
 
-function draftEvidence(draft: PreviewFeedbackDraft) {
-  if (draft.kind === "text") return draft.selected_text ?? "";
-  if (draft.kind === "screenshot") return "";
-  const element = draft.element_snapshot;
-  if (!element) return "";
-  return previewFeedbackElementLabel({ kind: "element", element_snapshot: element });
-}
+const SURFACE_WIDTH = 340;
 
 function CaptureChoices({
   capture,
@@ -62,41 +67,49 @@ function CaptureChoices({
 }) {
   const { t } = useTranslation();
   const buttonClass = touch ? "h-11 min-w-0 gap-1 px-2 text-xs" : "h-8 min-w-0 gap-1 px-2 text-xs";
+  const blocked = capture.draft !== null;
+  const choices = [
+    {
+      mode: "text" as const,
+      icon: IconTextScan2,
+      label: t("task:previewCaptureText"),
+      name: t("task:previewSelectText"),
+    },
+    {
+      mode: "element" as const,
+      icon: IconClick,
+      label: t("task:previewCaptureElement"),
+      name: t("task:previewSelectElement"),
+    },
+    {
+      mode: "screenshot" as const,
+      icon: IconScreenshot,
+      label: t("task:previewCaptureScreenshot"),
+      name: t("task:previewSelectScreenshot"),
+    },
+  ];
   return (
     <div className="grid grid-cols-3 gap-1.5">
-      <Button
-        type="button"
-        variant="outline"
-        className={buttonClass}
-        aria-pressed={capture.mode === "text"}
-        onClick={() => onChoose("text")}
-        aria-label={t("task:previewSelectText")}
-      >
-        <IconTextScan2 className="h-4 w-4 shrink-0" aria-hidden="true" />
-        <span className="truncate">{t("task:previewCaptureText")}</span>
-      </Button>
-      <Button
-        type="button"
-        variant="outline"
-        className={buttonClass}
-        aria-pressed={capture.mode === "element"}
-        onClick={() => onChoose("element")}
-        aria-label={t("task:previewSelectElement")}
-      >
-        <IconClick className="h-4 w-4 shrink-0" aria-hidden="true" />
-        <span className="truncate">{t("task:previewCaptureElement")}</span>
-      </Button>
-      <Button
-        type="button"
-        variant="outline"
-        className={buttonClass}
-        aria-pressed={capture.mode === "screenshot"}
-        onClick={() => onChoose("screenshot")}
-        aria-label={t("task:previewSelectScreenshot")}
-      >
-        <IconScreenshot className="h-4 w-4 shrink-0" aria-hidden="true" />
-        <span className="truncate">{t("task:previewCaptureScreenshot")}</span>
-      </Button>
+      {choices.map(({ mode, icon: Icon, label, name }) => (
+        <Button
+          key={mode}
+          type="button"
+          variant="outline"
+          className={buttonClass}
+          aria-pressed={capture.mode === mode}
+          onClick={() => onChoose(mode)}
+          disabled={blocked}
+          aria-label={name}
+        >
+          <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="truncate">{label}</span>
+        </Button>
+      ))}
+      {blocked && (
+        <p className="col-span-3 text-xs text-muted-foreground">
+          {t("task:previewFinishDraftHint")}
+        </p>
+      )}
       {capture.mode && (
         <Button
           type="button"
@@ -112,66 +125,39 @@ function CaptureChoices({
   );
 }
 
-function DraftEditor({ capture, touch }: { capture: PreviewFeedbackController; touch: boolean }) {
+function DraftRow({
+  capture,
+  touch,
+  onResume,
+}: {
+  capture: PreviewFeedbackController;
+  touch: boolean;
+  onResume: () => void;
+}) {
   const { t } = useTranslation();
-  if (!capture.draft) return null;
-
+  if (!capture.draft || capture.isDraftSurfaceOpen) return null;
+  const actionClass = touch ? "h-11" : "h-7";
   return (
-    <section
-      className="space-y-2 rounded-md border bg-muted/30 p-3"
-      data-testid="preview-feedback-draft"
+    <div
+      className="flex items-center gap-2 rounded-md border bg-muted/30 p-2"
+      data-testid="preview-feedback-draft-row"
     >
-      <div className="min-w-0">
-        <p className="truncate text-xs text-muted-foreground">{capture.draft.page_route}</p>
-        {capture.draft.kind === "screenshot" ? (
-          <div className="mt-2 space-y-1">
-            <img
-              src={capture.draft.screenshot.previewUrl}
-              alt={t("task:previewScreenshotAlt")}
-              className="max-h-56 w-full rounded border bg-background object-contain"
-            />
-            <p className="text-xs text-muted-foreground">
-              {t("task:previewScreenshotDimensions", {
-                width: capture.draft.screenshot.width,
-                height: capture.draft.screenshot.height,
-              })}
-            </p>
-          </div>
-        ) : (
-          <p className="line-clamp-3 break-words font-mono text-xs">
-            {draftEvidence(capture.draft)}
-          </p>
-        )}
-      </div>
-      <Textarea
-        value={capture.draftComment}
-        onChange={(event) => capture.setDraftComment(event.target.value)}
-        aria-label={t("task:previewCommentSelection")}
-        placeholder={t("task:previewCommentPlaceholder")}
-        className="min-h-20 resize-y"
-      />
-      <div className="flex justify-end gap-2">
-        <Button
-          type="button"
-          variant="ghost"
-          className={touch ? "h-11" : "h-8"}
-          onClick={capture.discardDraft}
-          disabled={capture.isMutating}
-        >
-          {t("task:previewDiscardSelection")}
-        </Button>
-        <Button
-          type="button"
-          className={touch ? "h-11" : "h-8"}
-          onClick={() => void capture.saveDraft(capture.draftComment)}
-          disabled={!capture.draftComment.trim() || capture.isMutating || capture.isUploading}
-        >
-          {capture.isUploading
-            ? t("task:previewUploadingScreenshot")
-            : t("task:previewSaveFeedback")}
-        </Button>
-      </div>
-    </section>
+      <p className="min-w-0 flex-1 truncate text-xs">
+        {t("task:previewDraftPending", { route: capture.draft.page_route })}
+      </p>
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className={actionClass}
+        onClick={capture.discardDraft}
+      >
+        {t("task:previewDiscardSelection")}
+      </Button>
+      <Button type="button" size="sm" className={actionClass} onClick={onResume}>
+        {t("task:previewResumeDraft")}
+      </Button>
+    </div>
   );
 }
 
@@ -179,10 +165,12 @@ function FeedbackSurface({
   capture,
   touch,
   onChoose,
+  onResume,
 }: {
   capture: PreviewFeedbackController;
   touch: boolean;
   onChoose: (mode: PreviewCaptureMode) => void;
+  onResume: () => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -196,12 +184,10 @@ function FeedbackSurface({
           {t("task:previewRasterizing")}
         </p>
       )}
-      <DraftEditor capture={capture} touch={touch} />
-      {(capture.mutationError || capture.captureError) && (
+      <DraftRow capture={capture} touch={touch} onResume={onResume} />
+      {!capture.draft && capture.captureError && (
         <p role="alert" className="text-xs text-destructive">
-          {capture.captureError
-            ? t("task:previewScreenshotFailed")
-            : t("task:previewMutationFailed")}
+          {t("task:previewScreenshotFailed")}
         </p>
       )}
       <PreviewFeedbackCollection
@@ -211,6 +197,67 @@ function FeedbackSurface({
         showErrors={false}
       />
     </div>
+  );
+}
+
+function useDraftErrorMessage(capture: PreviewFeedbackController) {
+  const { t } = useTranslation();
+  if (capture.captureError) return t("task:previewScreenshotFailed");
+  if (capture.mutationError) return t("task:previewMutationFailed");
+  return null;
+}
+
+function fallbackAnchor(root: RefObject<HTMLElement | null>) {
+  const bounds = root.current?.getBoundingClientRect();
+  if (!bounds) return { x: 16, y: 16 };
+  return { x: bounds.right - SURFACE_WIDTH, y: bounds.bottom + 4 };
+}
+
+function DraftCommentSurface({
+  capture,
+  anchorRoot,
+}: {
+  capture: PreviewFeedbackController;
+  anchorRoot: RefObject<HTMLElement | null>;
+}) {
+  const { t } = useTranslation();
+  const errorMessage = useDraftErrorMessage(capture);
+  const draft = capture.draft;
+  if (!draft || !capture.isDraftSurfaceOpen) return null;
+  const evidence = evidenceForDraft(
+    draft,
+    draft.kind === "screenshot"
+      ? t("task:previewScreenshotDimensions", {
+          width: draft.screenshot.width,
+          height: draft.screenshot.height,
+        })
+      : "",
+  );
+  return (
+    <SelectionCommentSurface
+      selectedText={evidenceText(evidence) || draft.page_route}
+      contextLabel={draft.page_route}
+      evidence={
+        <>
+          <PreviewFeedbackEvidence evidence={evidence} />
+          {capture.isUploading && (
+            <p role="status" className="mt-1 text-xs text-muted-foreground">
+              {t("task:previewUploadingScreenshot")}
+            </p>
+          )}
+        </>
+      }
+      position={capture.draftAnchor ?? fallbackAnchor(anchorRoot)}
+      draftComment={capture.draftComment}
+      onDraftChange={capture.setDraftComment}
+      inputLabel={t("task:previewCommentSelection")}
+      errorMessage={errorMessage}
+      testId="preview-feedback-draft"
+      inputTestId="preview-feedback-draft-input"
+      addButtonTestId="preview-feedback-draft-save"
+      onAdd={(comment) => capture.saveDraft(comment)}
+      onClose={capture.closeDraftSurface}
+    />
   );
 }
 
@@ -247,29 +294,35 @@ function Trigger({
   );
 }
 
-export function PreviewFeedbackControls({ capture, enabled }: PreviewFeedbackControlsProps) {
-  const { t } = useTranslation();
-  const touch = useTouchDrawer();
+/** Opens the menu for capture progress and failures, and closes it while the draft surface is open. */
+function useMenuOpenState(capture: PreviewFeedbackController) {
   const [open, setOpen] = useState(false);
-  const desktopRootRef = useRef<HTMLDivElement>(null);
-  const [desktopMaxHeight, setDesktopMaxHeight] = useState(576);
-
   useEffect(() => {
-    if (capture.draft || capture.isRasterizing || capture.captureError) setOpen(true);
-  }, [capture.captureError, capture.draft, capture.isRasterizing]);
+    if (capture.isDraftSurfaceOpen) setOpen(false);
+    else if (capture.isRasterizing || capture.captureError) setOpen(true);
+  }, [capture.captureError, capture.isDraftSurfaceOpen, capture.isRasterizing]);
+  return [open, setOpen] as const;
+}
 
+function useDesktopMenuDismiss(
+  open: boolean,
+  touch: boolean,
+  root: RefObject<HTMLDivElement | null>,
+  setOpen: (open: boolean) => void,
+) {
+  const [maxHeight, setMaxHeight] = useState(576);
   useEffect(() => {
     if (!open || touch) return;
-    const root = desktopRootRef.current;
     const updateHeight = () => {
-      const bottom = root?.getBoundingClientRect().bottom ?? 0;
-      setDesktopMaxHeight(Math.max(96, window.innerHeight - bottom - 8));
+      const bottom = root.current?.getBoundingClientRect().bottom ?? 0;
+      setMaxHeight(Math.max(96, window.innerHeight - bottom - 8));
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape" && !isInsideSelectionCommentSurface(event.target)) setOpen(false);
     };
     const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (root && !event.composedPath().includes(root)) setOpen(false);
+      if (isInsideSelectionCommentSurface(event.target)) return;
+      if (root.current && !event.composedPath().includes(root.current)) setOpen(false);
     };
     updateHeight();
     window.addEventListener("resize", updateHeight);
@@ -280,11 +333,25 @@ export function PreviewFeedbackControls({ capture, enabled }: PreviewFeedbackCon
       document.removeEventListener("keydown", closeOnEscape);
       document.removeEventListener("pointerdown", closeOnOutsidePointer);
     };
-  }, [open, touch]);
+  }, [open, root, setOpen, touch]);
+  return maxHeight;
+}
+
+export function PreviewFeedbackControls({ capture, enabled }: PreviewFeedbackControlsProps) {
+  const { t } = useTranslation();
+  const touch = useTouchDrawer();
+  const [open, setOpen] = useMenuOpenState(capture);
+  const desktopRootRef = useRef<HTMLDivElement>(null);
+  const desktopMaxHeight = useDesktopMenuDismiss(open, touch, desktopRootRef, setOpen);
 
   function choose(mode: PreviewCaptureMode) {
     capture.startCapture(mode);
     setOpen(false);
+  }
+
+  function resume() {
+    setOpen(false);
+    capture.resumeDraft();
   }
 
   const candidateStatus = (
@@ -294,22 +361,26 @@ export function PreviewFeedbackControls({ capture, enabled }: PreviewFeedbackCon
         : ""}
     </span>
   );
+  const draftSurface = <DraftCommentSurface capture={capture} anchorRoot={desktopRootRef} />;
 
   if (touch) {
     return (
-      <Drawer open={open} onOpenChange={setOpen}>
-        <Trigger capture={capture} enabled={enabled} touch onClick={() => setOpen(true)} />
-        <DrawerContent
-          className="max-h-[80dvh] overflow-hidden pb-[env(safe-area-inset-bottom)]"
-          data-testid="preview-feedback-drawer"
-        >
-          <DrawerHeader className="border-b text-left">
-            <DrawerTitle>{t("task:previewFeedbackTitle")}</DrawerTitle>
-          </DrawerHeader>
-          <FeedbackSurface capture={capture} touch onChoose={choose} />
-        </DrawerContent>
-        {candidateStatus}
-      </Drawer>
+      <>
+        <Drawer open={open} onOpenChange={setOpen}>
+          <Trigger capture={capture} enabled={enabled} touch onClick={() => setOpen(true)} />
+          <DrawerContent
+            className="max-h-[80dvh] overflow-hidden pb-[env(safe-area-inset-bottom)]"
+            data-testid="preview-feedback-drawer"
+          >
+            <DrawerHeader className="border-b text-left">
+              <DrawerTitle>{t("task:previewFeedbackTitle")}</DrawerTitle>
+            </DrawerHeader>
+            <FeedbackSurface capture={capture} touch onChoose={choose} onResume={resume} />
+          </DrawerContent>
+          {candidateStatus}
+        </Drawer>
+        {draftSurface}
+      </>
     );
   }
 
@@ -332,9 +403,10 @@ export function PreviewFeedbackControls({ capture, enabled }: PreviewFeedbackCon
           <div className="border-b px-3 py-2">
             <h2 className="text-sm font-medium">{t("task:previewFeedbackTitle")}</h2>
           </div>
-          <FeedbackSurface capture={capture} touch={false} onChoose={choose} />
+          <FeedbackSurface capture={capture} touch={false} onChoose={choose} onResume={resume} />
         </div>
       )}
+      {draftSurface}
       {candidateStatus}
     </div>
   );

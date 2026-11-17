@@ -178,12 +178,26 @@ const runtimeShimTemplate = `(function(){` +
 	`function rwe(el){if(!el||el.nodeType!==1)return;for(var i=0;i<ATTRS.length;i++)rwa(el,ATTRS[i])}` +
 	`var OBS=['href','src','action','formaction','cite','data','poster','background','manifest','srcset','imagesrcset','ping','rel','style','content','http-equiv'];` +
 	`var MO=window.MutationObserver;if(MO&&document.documentElement){try{new MO(function(rs){for(var i=0;i<rs.length;i++){var rec=rs[i];if(rec.type==='attributes'){rwe(rec.target)}else{for(var j=0;j<rec.addedNodes.length;j++){var n=rec.addedNodes[j];rwe(n);if(n.querySelectorAll){var nl=n.querySelectorAll('[href],[src],[action],[formaction],[cite],[data],[poster],[background],[manifest],[srcset],[imagesrcset],[ping],[style],[content]');for(var k=0;k<nl.length;k++)rwe(nl[k])}}}}}).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:OBS})}catch(e){}}` +
+	webglPreserveShimJS +
 	// Console forwarding: announce readiness without console data, then bind to
 	// the parent origin from an explicit response. This supports a UI and gateway
 	// on different origins while keeping console data off wildcard messages.
 	`var PO='';window.addEventListener('message',function(e){try{var d=e.data;if(e.source===window.parent&&d&&d.source==='kandev-inspector'&&d.type==='console-bind'&&e.origin)PO=e.origin}catch(x){}});try{window.parent.postMessage({source:'kandev-inspector',type:'console-ready',payload:{}},'*')}catch(e){}` +
 	`var LV=['log','warn','error','info','debug'];LV.forEach(function(lv){var orig=console[lv];if(!orig)return;console[lv]=function(){try{var out=[];for(var i=0;i<arguments.length;i++){var a=arguments[i];if(a instanceof Error){out.push('Error: '+a.message+(a.stack?'\n'+a.stack:''))}else if(typeof a==='object'&&a!==null){try{out.push(JSON.parse(JSON.stringify(a)))}catch(e){out.push(String(a))}}else{out.push(a)}}if(PO)window.parent.postMessage({source:'kandev-inspector',type:'console',payload:{level:lv,args:out}},PO)}catch(e){}return orig.apply(console,arguments)}});` +
 	`})();`
+
+// webglPreserveShimJS makes WebGL contexts created on the page's main thread
+// keep their drawing buffer after compositing. Without it a DOM-based preview
+// screenshot reads a cleared buffer and every canvas comes out blank. Only the
+// preserveDrawingBuffer attribute changes; other context types and attributes
+// pass through, and the wrapper installs at most once per prototype. It must
+// not contain a '%' because it is part of a fmt template.
+const webglPreserveShimJS = `(function(){try{var G={webgl:1,webgl2:1,'experimental-webgl':1};` +
+	`function wrap(C){if(!C||!C.prototype||typeof C.prototype.getContext!=='function'||C.prototype.getContext.__kandevPreserve)return;` +
+	`var o=C.prototype.getContext;var w=function(t,a){if(typeof t==='string'&&Object.prototype.hasOwnProperty.call(G,t)){var c={};` +
+	`if(a&&typeof a==='object'){for(var k in a)c[k]=a[k]}c.preserveDrawingBuffer=true;return o.call(this,t,c)}return o.apply(this,arguments)};` +
+	`Object.defineProperty(w,'__kandevPreserve',{value:true});C.prototype.getContext=w}` +
+	`wrap(window.HTMLCanvasElement);wrap(window.OffscreenCanvas)}catch(e){}})();`
 
 // runtimeShim returns the runtime shim's JavaScript body with the given proxy
 // prefix baked in. %q produces a JS-safe double-quoted string literal (slashes

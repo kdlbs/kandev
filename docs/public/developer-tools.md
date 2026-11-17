@@ -386,11 +386,29 @@ Closing the preview, file tab, focused viewer, or optional Browser panel removes
 
 ### Comment on a rendered preview
 
-Select **Annotate** in a Browser panel or rendered HTML-file preview. Choose **Select text**, **Select element**, or **Select screenshot region**, make the selection in the page, enter a comment, and select **Save feedback**. Element mode outlines and labels the candidate under the pointer, keyboard focus, or active touch before selection. Text feedback keeps the exact selected text together with its containing element, DOM range endpoints, rendered rectangles, scroll position, viewport size, and device pixel ratio. This position data lets the agent identify text that JavaScript generated or that the live page no longer contains.
+Select **Annotate** in a Browser panel or rendered HTML-file preview. Choose **Select text**, **Select element**, or **Select screenshot region** and make the selection in the page. The same comment form used for plan, chat, and file comments opens next to the selection (a bottom sheet on touch devices). Enter a comment and select **Add**, or press Ctrl+Enter (⌘+Enter on macOS).
 
-Screenshot mode rasterizes the selected part of the rendered document and shows the PNG before saving. A screenshot is limited to 16 megapixels and 10 MiB, and one pending collection can contain up to 10 screenshots. Browser rendering features that cannot be read or reproduced by the rasterizer, including some canvas, video, font, and cross-origin resources, can look different or cause capture to fail. A failed capture or upload keeps a retryable draft; discarding it removes its staged image.
+If you close the comment form without adding, Kandev keeps the draft and its text. **Annotate** then shows the draft with **Resume** and **Discard**; finish or discard it before starting another capture.
 
-Saved feedback belongs to the task. It remains pending while you navigate between routes, close or reopen previews, switch task sessions, reload the browser, or restart Kandev. The active task composer shows the shared pending count. Review, edit, or delete items from **Annotate**. None of the captured content reaches an agent until you use the ordinary chat **Send** action.
+Element mode outlines and labels the candidate under the pointer, keyboard focus, or active touch before selection. Text feedback keeps the exact selected text together with its containing element, DOM range endpoints, rendered rectangles, scroll position, viewport size, and device pixel ratio. This position data lets the agent identify text that JavaScript generated or that the live page no longer contains.
+
+Screenshot mode rasterizes the selected part of the rendered document and shows the PNG before saving. A screenshot is limited to 16 megapixels and 10 MiB, and one pending collection can contain up to 10 screenshots. A failed capture or upload keeps a retryable draft; discarding it removes its staged image.
+
+Previewed pages keep their WebGL drawing buffers, so screenshots of WebGL content drawn on the page's main thread contain the rendered pixels. This includes Flutter web builds made with `flutter build web` and with `--wasm`. Content the rasterizer cannot read still comes out blank or different:
+
+- Canvases rendered inside a worker, such as Flutter's multi-threaded renderer on a cross-origin-isolated page. Kandev previews are not cross-origin isolated, so Flutter uses its single-threaded renderer there.
+- Some video, font, and cross-origin resources.
+
+When a capture over a canvas comes out as a single solid color, the comment form shows a warning under the thumbnail. Check the image before adding it: a genuinely solid area is fine to keep.
+
+<details>
+<summary>Flutter element feedback</summary>
+
+Flutter draws its UI on a canvas, so **Select element** only finds the whole `flutter-view` by default. Call `SemanticsBinding.instance.ensureSemantics()` in your app's `main()` to expose Flutter's semantics tree; element feedback then anchors to the individual `flt-semantics` nodes.
+
+</details>
+
+Saved feedback belongs to the task. It remains pending while you navigate between routes, close or reopen previews, switch task sessions, reload the browser, or restart Kandev. The active task composer shows the shared pending count. Review, edit, or delete items from **Annotate**; editing opens the same comment form. None of the captured content reaches an agent until you use the ordinary chat **Send** action.
 
 Send addresses the selected task session. An idle session receives the feedback directly; a busy session receives the same text, element metadata, and PNG attachments through its durable queue. Kandev removes only the exact saved versions accepted with that message. A validation, capacity, attachment, or version conflict leaves the feedback and composer draft available for correction and retry. The preview server and navigated page state remain ephemeral even though the saved feedback is durable.
 

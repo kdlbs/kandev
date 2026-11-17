@@ -126,7 +126,7 @@ describe("PreviewFeedbackControls with the capture controller", () => {
 
     const comment = screen.getByLabelText("Comment on selection");
     fireEvent.change(comment, { target: { value: screenshotComment } });
-    fireEvent.click(screen.getByRole("button", { name: "Save feedback" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(() =>
       expect(feedback.create).toHaveBeenCalledWith(
@@ -146,7 +146,7 @@ describe("PreviewFeedbackControls with the capture controller", () => {
     );
 
     feedback.create.mockResolvedValue(null);
-    fireEvent.click(screen.getByRole("button", { name: "Save feedback" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
     await waitFor(() => expect(feedback.create).toHaveBeenCalledTimes(2));
     expect(attachments.uploadAttachment).toHaveBeenCalledTimes(1);
     expect(feedback.create).toHaveBeenLastCalledWith(

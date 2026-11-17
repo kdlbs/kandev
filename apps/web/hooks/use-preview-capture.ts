@@ -16,6 +16,7 @@ import {
 } from "@/lib/preview-inspect-bridge";
 import { sanitizePreviewPageRoute } from "@/lib/preview-feedback-source";
 import { rasterizePreviewRegion } from "@/lib/preview-screenshot";
+import { anchorBelowRect, floatingBounds } from "@/components/task/floating-selection-position";
 import type { TaskPreviewFeedback } from "@/lib/types/http";
 
 export type PreviewCaptureSource = {
@@ -37,6 +38,8 @@ export type PreviewScreenshotDraft = PreviewScreenshotRegion & {
     previewUrl: string;
     fileName: string;
     attachmentId?: string;
+    /** The region covers a canvas but rasterized to one colour. */
+    uniformOverCanvas?: boolean;
   };
 };
 
@@ -183,32 +186,34 @@ function usePreviewDraftCleanup(
   );
 }
 
-function usePreviewDraftState(iframeRef: React.RefObject<HTMLIFrameElement | null>) {
-  const [draft, setDraft] = useState<PreviewFeedbackDraft | null>(null);
-  const [draftComment, setDraftComment] = useState("");
-  const [captureError, setCaptureError] = useState<PreviewCaptureError | null>(null);
-  const [isRasterizing, setIsRasterizing] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const generationRef = useRef(0);
-  const draftRef = useRef<PreviewFeedbackDraft | null>(null);
-  usePreviewDraftCleanup(generationRef, draftRef);
+function draftAnchorRect(draft: PreviewFeedbackDraft) {
+  if (draft.capture_rect) return draft.capture_rect;
+  const rects = draft.text_anchor?.rects;
+  return rects?.length ? rects[rects.length - 1] : null;
+}
 
-  const setNewDraft = useCallback((next: PreviewFeedbackDraft) => {
-    releaseScreenshotDraft(draftRef.current);
-    draftRef.current = next;
-    setDraft(next);
-    setDraftComment("");
-    generationRef.current += 1;
-  }, []);
+/** Viewport point below the captured region, clamped to the visible iframe. */
+function previewDraftAnchor(iframe: HTMLIFrameElement | null, draft: PreviewFeedbackDraft | null) {
+  if (!iframe || !draft) return null;
+  const rect = draftAnchorRect(draft);
+  if (!rect) return null;
+  const bounds = iframe.getBoundingClientRect();
+  return anchorBelowRect(rect, bounds, floatingBounds(bounds));
+}
 
-  const updateDraft = useCallback((next: React.SetStateAction<PreviewFeedbackDraft | null>) => {
-    const current = draftRef.current;
-    const updated = typeof next === "function" ? next(current) : next;
-    draftRef.current = updated;
-    setDraft(updated);
-  }, []);
+type ScreenshotCaptureSetters = {
+  setCaptureError: (error: PreviewCaptureError | null) => void;
+  setIsRasterizing: (rasterizing: boolean) => void;
+};
 
-  const captureScreenshot = useCallback(
+/** Rasterizes a selected region into a reviewable screenshot draft. */
+function useScreenshotCapture(
+  iframeRef: React.RefObject<HTMLIFrameElement | null>,
+  generationRef: { current: number },
+  setNewDraft: (next: PreviewFeedbackDraft) => void,
+  { setCaptureError, setIsRasterizing }: ScreenshotCaptureSetters,
+) {
+  return useCallback(
     (region: PreviewScreenshotRegion) => {
       const documentElement = iframeRef.current?.contentDocument?.documentElement;
       if (!documentElement) {
@@ -242,8 +247,41 @@ function usePreviewDraftState(iframeRef: React.RefObject<HTMLIFrameElement | nul
           if (generationRef.current === generation) setIsRasterizing(false);
         });
     },
-    [iframeRef, setNewDraft],
+    [generationRef, iframeRef, setCaptureError, setIsRasterizing, setNewDraft],
   );
+}
+
+function usePreviewDraftState(iframeRef: React.RefObject<HTMLIFrameElement | null>) {
+  const [draft, setDraft] = useState<PreviewFeedbackDraft | null>(null);
+  const [isDraftSurfaceOpen, setDraftSurfaceOpen] = useState(false);
+  const [draftComment, setDraftComment] = useState("");
+  const [captureError, setCaptureError] = useState<PreviewCaptureError | null>(null);
+  const [isRasterizing, setIsRasterizing] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const generationRef = useRef(0);
+  const draftRef = useRef<PreviewFeedbackDraft | null>(null);
+  usePreviewDraftCleanup(generationRef, draftRef);
+
+  const setNewDraft = useCallback((next: PreviewFeedbackDraft) => {
+    releaseScreenshotDraft(draftRef.current);
+    draftRef.current = next;
+    setDraft(next);
+    setDraftComment("");
+    setDraftSurfaceOpen(true);
+    generationRef.current += 1;
+  }, []);
+
+  const updateDraft = useCallback((next: React.SetStateAction<PreviewFeedbackDraft | null>) => {
+    const current = draftRef.current;
+    const updated = typeof next === "function" ? next(current) : next;
+    draftRef.current = updated;
+    setDraft(updated);
+  }, []);
+
+  const captureScreenshot = useScreenshotCapture(iframeRef, generationRef, setNewDraft, {
+    setCaptureError,
+    setIsRasterizing,
+  });
 
   const clearForCapture = useCallback(() => {
     generationRef.current += 1;
@@ -251,6 +289,7 @@ function usePreviewDraftState(iframeRef: React.RefObject<HTMLIFrameElement | nul
     draftRef.current = null;
     setDraft(null);
     setDraftComment("");
+    setDraftSurfaceOpen(false);
     setCaptureError(null);
     setIsRasterizing(false);
   }, []);
@@ -265,6 +304,7 @@ function usePreviewDraftState(iframeRef: React.RefObject<HTMLIFrameElement | nul
     draftRef.current = null;
     setDraft(null);
     setDraftComment("");
+    setDraftSurfaceOpen(false);
     setCaptureError(null);
     generationRef.current += 1;
     return true;
@@ -272,6 +312,8 @@ function usePreviewDraftState(iframeRef: React.RefObject<HTMLIFrameElement | nul
 
   return {
     draft,
+    isDraftSurfaceOpen,
+    setDraftSurfaceOpen: (open: boolean) => setDraftSurfaceOpen(open && draftRef.current !== null),
     draftComment,
     setDraftComment,
     setDraft: setNewDraft,
@@ -523,6 +565,10 @@ export function usePreviewCapture({
     ...feedback,
     mode,
     draft: draftState.draft,
+    draftAnchor: previewDraftAnchor(iframeRef.current, draftState.draft),
+    isDraftSurfaceOpen: draftState.isDraftSurfaceOpen,
+    closeDraftSurface: () => draftState.setDraftSurfaceOpen(false),
+    resumeDraft: () => draftState.setDraftSurfaceOpen(true),
     draftComment: draftState.draftComment,
     setDraftComment: draftState.setDraftComment,
     candidateLabel,

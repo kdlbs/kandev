@@ -27,9 +27,21 @@ const PREVIEW_HTML = `<!doctype html>
     <main id="route-content">
       <h1>Checkout</h1>
       <button id="save" class="primary" aria-label="Save order">Save order</button>
+      <canvas id="gl-canvas" width="160" height="80" style="display:block;margin-top:16px"></canvas>
       <span id="runtime-total" role="status" aria-label="Cart total"></span>
     </main>
     <script>
+      // WebGL draws once without preserveDrawingBuffer, like Flutter's CanvasKit.
+      const gl = document.querySelector('#gl-canvas').getContext('webgl');
+      window.__kandevFixtureWebGL = Boolean(gl);
+      if (gl) {
+        gl.clearColor(0.85, 0.1, 0.1, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.enable(gl.SCISSOR_TEST);
+        gl.scissor(0, 0, 80, 80);
+        gl.clearColor(0.1, 0.2, 0.85, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+      }
       const total = document.querySelector('#runtime-total');
       total.textContent = 'Generated total $42.00';
       document.querySelector('#details-route').addEventListener('click', () => {
@@ -132,11 +144,24 @@ export async function waitForScreenshotCaptureMode(frame: FrameLocator): Promise
     .toBe("crosshair");
 }
 
+/** The shared selection comment surface holding the current capture draft. */
+export function draftSurface(page: Page): Locator {
+  return page.getByTestId("preview-feedback-draft");
+}
+
+export async function fillDraftComment(page: Page, comment: string): Promise<void> {
+  await page.getByTestId("preview-feedback-draft-input").fill(comment);
+}
+
+export async function submitDraft(page: Page): Promise<void> {
+  await page.getByTestId("preview-feedback-draft-save").click();
+}
+
 export async function saveDraft(page: Page, comment: string): Promise<void> {
-  const draft = page.getByTestId("preview-feedback-draft");
+  const draft = draftSurface(page);
   await expect(draft).toBeVisible({ timeout: 15_000 });
-  await draft.getByRole("textbox", { name: "Comment on selection" }).fill(comment);
-  await draft.getByRole("button", { name: "Save feedback" }).click();
+  await fillDraftComment(page, comment);
+  await submitDraft(page);
   await expect(draft).toBeHidden({ timeout: 15_000 });
 }
 

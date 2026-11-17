@@ -1,5 +1,6 @@
 import type { ClarificationAnswerAnnotation } from "@/lib/types/http";
 import type { Point, ReviewView, Size } from "./viewport";
+import { pixelLimitFactor } from "@/lib/images/pixel-limit";
 
 export const MAX_REGIONS = 8;
 export const MAX_REGION_COMMENT = 500;
@@ -84,7 +85,7 @@ export function fitAnnotationToPixelLimit(
 ): ClarificationAnswerAnnotation {
   const { image_width: width, image_height: height } = annotation;
   if (width * height <= MAX_ANNOTATION_IMAGE_PIXELS) return annotation;
-  const factor = Math.sqrt(MAX_ANNOTATION_IMAGE_PIXELS / (width * height));
+  const factor = pixelLimitFactor(width, height, MAX_ANNOTATION_IMAGE_PIXELS);
   const scaledWidth = Math.max(1, Math.floor(width * factor));
   const scaledHeight = Math.max(1, Math.floor(height * factor));
   const x = scaleSpan(annotation.x, annotation.width, width, scaledWidth);

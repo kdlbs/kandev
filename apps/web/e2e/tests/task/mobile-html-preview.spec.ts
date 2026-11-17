@@ -233,12 +233,17 @@ test.describe("Mobile HTML preview", () => {
 
     const elementDraft = testPage.getByTestId("preview-feedback-draft");
     await expect(elementDraft).toContainText("<button#capture-button>");
-    await elementDraft
-      .getByRole("textbox", { name: "Comment on selection" })
+    await expect(drawer).toBeHidden();
+    await testPage
+      .getByTestId("preview-feedback-draft-input")
       .fill("Increase this touch target contrast");
-    await elementDraft.getByRole("button", { name: "Save feedback" }).tap();
+    const elementSave = testPage.getByTestId("preview-feedback-draft-save");
+    expect((await elementSave.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await elementSave.tap();
     await expect(elementDraft).toBeHidden({ timeout: 15_000 });
 
+    await trigger.tap();
+    await expect(drawer).toBeVisible();
     await drawer.getByRole("button", { name: "Select screenshot region", exact: true }).tap();
     await expect(trigger).toHaveAttribute("data-capture-mode", "screenshot");
     await waitForScreenshotCaptureMode(frame);
@@ -269,21 +274,19 @@ test.describe("Mobile HTML preview", () => {
     await expect(screenshotDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible({
       timeout: 15_000,
     });
-    await screenshotDraft
-      .getByRole("textbox", { name: "Comment on selection" })
+    await testPage
+      .getByTestId("preview-feedback-draft-input")
       .fill("Reduce the vertical space in this card");
     createFailure.failNextCreate();
-    await screenshotDraft.getByRole("button", { name: "Save feedback" }).tap();
+    await testPage.getByTestId("preview-feedback-draft-save").tap();
     await expect.poll(() => createFailure.failedCount()).toBe(1);
     await expect(screenshotDraft).toBeVisible();
-    await expect(
-      screenshotDraft.getByRole("textbox", { name: "Comment on selection" }),
-    ).toHaveValue("Reduce the vertical space in this card");
-    await expect(screenshotDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible();
-    await expect(testPage.getByTestId("preview-feedback-drawer").getByRole("alert")).toContainText(
-      "feedback could not be saved",
+    await expect(testPage.getByTestId("preview-feedback-draft-input")).toHaveValue(
+      "Reduce the vertical space in this card",
     );
-    await screenshotDraft.getByRole("button", { name: "Save feedback" }).tap();
+    await expect(screenshotDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible();
+    await expect(screenshotDraft.getByRole("alert")).toContainText("feedback could not be saved");
+    await testPage.getByTestId("preview-feedback-draft-save").tap();
     await expect(screenshotDraft).toBeHidden({ timeout: 15_000 });
     await expect(preview.getByTestId("preview-feedback-trigger")).toContainText("2");
     await assertNoDocumentHorizontalOverflow(testPage, "mobile preview feedback drawer");
@@ -342,10 +345,14 @@ test.describe("Mobile HTML preview", () => {
 
     const firstItem = collectionItems.nth(0);
     await firstItem.getByRole("button", { name: "Edit feedback" }).tap();
-    await firstItem
-      .getByRole("textbox", { name: "Edit comment" })
-      .fill("Keep this touch action clear");
-    await firstItem.getByRole("button", { name: "Save changes" }).tap();
+    const editDrawer = testPage.getByTestId("preview-feedback-edit");
+    await expect(editDrawer).toBeVisible();
+    await testPage.getByTestId("preview-feedback-edit-input").fill("Keep this touch action clear");
+    const editSave = testPage.getByTestId("preview-feedback-edit-save");
+    expect((await editSave.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await editSave.tap();
+    await expect(editDrawer).toBeHidden();
+    await expect(collectionDrawer).toBeVisible();
     await expect(firstItem).toContainText("Keep this touch action clear");
 
     await collectionItems.nth(1).getByRole("button", { name: "Delete feedback" }).tap();

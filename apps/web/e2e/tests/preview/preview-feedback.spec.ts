@@ -6,10 +6,12 @@ import { routeMainWebSocketWithPreviewFeedbackCreateFailure } from "../../helper
 import {
   chooseCapture,
   dragScreenshotRegion,
+  fillDraftComment,
   openBrowserPreview,
   saveDraft,
   selectGeneratedText,
   startPreviewServer,
+  submitDraft,
   waitForScreenshotCaptureMode,
 } from "./preview-feedback-helpers";
 
@@ -86,21 +88,17 @@ test.describe("Web preview feedback", () => {
       await expect(failedDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible({
         timeout: 15_000,
       });
-      await failedDraft
-        .getByRole("textbox", { name: "Comment on selection" })
-        .fill(failedScreenshotComment);
-      await failedDraft.getByRole("button", { name: "Save feedback" }).click();
+      await fillDraftComment(testPage, failedScreenshotComment);
+      await submitDraft(testPage);
       await expect.poll(() => createFailure.failedCount()).toBe(1);
       await expect(failedDraft).toBeVisible();
       await expect(failedDraft.getByRole("textbox", { name: "Comment on selection" })).toHaveValue(
         failedScreenshotComment,
       );
       await expect(failedDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible();
-      await expect(
-        testPage.getByTestId("preview-feedback-popover").getByRole("alert"),
-      ).toContainText("feedback could not be saved");
+      await expect(failedDraft.getByRole("alert")).toContainText("feedback could not be saved");
 
-      await failedDraft.getByRole("button", { name: "Save feedback" }).click();
+      await submitDraft(testPage);
       await expect(failedDraft).toBeHidden({ timeout: 15_000 });
       await expect(testPage.getByTestId("preview-feedback-trigger")).toContainText("4");
 
@@ -135,10 +133,9 @@ test.describe("Web preview feedback", () => {
 
       const firstItem = collectionItems.nth(0);
       await firstItem.getByRole("button", { name: "Edit feedback" }).click();
-      await firstItem
-        .getByRole("textbox", { name: "Edit comment" })
-        .fill("Make the action clearer");
-      await firstItem.getByRole("button", { name: "Save changes" }).click();
+      await testPage.getByTestId("preview-feedback-edit-input").fill("Make the action clearer");
+      await testPage.getByTestId("preview-feedback-edit-save").click();
+      await expect(testPage.getByTestId("preview-feedback-edit")).toBeHidden();
       await expect(firstItem).toContainText("Make the action clearer");
 
       await collectionItems.nth(1).getByRole("button", { name: "Delete feedback" }).click();

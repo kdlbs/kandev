@@ -5,12 +5,19 @@ import { IconEdit, IconMessageDots, IconTrash, IconX } from "@tabler/icons-react
 import { Button } from "@kandev/ui/button";
 import { DrawerClose } from "@kandev/ui/drawer";
 import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
-import { Textarea } from "@kandev/ui/textarea";
 import { useTranslation } from "react-i18next";
 import { createFocusReturnHandler } from "@/lib/dialog-focus-return";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { MobilePickerSheet } from "@/components/task/mobile/mobile-picker-sheet";
-import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
+import {
+  SelectionCommentSurface,
+  isInsideSelectionCommentSurface,
+} from "@/components/shared/selection-comment/selection-comment-surface";
+import {
+  PreviewFeedbackEvidence,
+  evidenceForItem,
+  evidenceText,
+} from "./preview-feedback-evidence";
 import type { TaskPreviewFeedback, TaskPreviewFeedbackSnapshot } from "@/lib/types/http";
 
 export type PreviewFeedbackCollectionController = {
@@ -29,38 +36,44 @@ export type PreviewFeedbackCollectionController = {
   clear: (expectedRevision: number) => Promise<TaskPreviewFeedbackSnapshot | null>;
 };
 
-export function previewFeedbackElementLabel(
-  item: Pick<TaskPreviewFeedback, "kind" | "element_snapshot">,
-) {
-  const element = item.element_snapshot;
-  if (!element) return "";
-  let label = element.tag;
-  if (element.id) label += `#${element.id}`;
-  else if (element.classes[0]) label += `.${element.classes[0]}`;
-  return `<${label}>`;
+/** Keeps the host Popover open while the user works in a floating comment surface. */
+function keepOpenForCommentSurface(event: {
+  target: EventTarget | null;
+  preventDefault: () => void;
+}) {
+  if (isInsideSelectionCommentSurface(event.target)) event.preventDefault();
 }
 
-function feedbackEvidence(item: TaskPreviewFeedback) {
-  if (item.kind === "text") return item.selected_text ?? "";
-  if (item.kind === "element") return previewFeedbackElementLabel(item);
-  return item.screenshot_attachment?.name ?? "";
-}
-
-function FeedbackEvidence({ item }: { item: TaskPreviewFeedback }) {
+function PendingFeedbackEditor({
+  item,
+  collection,
+  position,
+  onClose,
+}: {
+  item: TaskPreviewFeedback;
+  collection: PreviewFeedbackCollectionController;
+  position: { x: number; y: number };
+  onClose: () => void;
+}) {
   const { t } = useTranslation();
-  if (item.kind === "screenshot" && item.screenshot_attachment) {
-    return (
-      <div className="mt-1 space-y-1">
-        <img
-          src={attachmentContentUrl(item.screenshot_attachment.attachment_id)}
-          alt={t("task:previewScreenshotAlt")}
-          className="max-h-40 w-full rounded border bg-background object-contain"
-        />
-        <p className="truncate font-mono text-xs">{item.screenshot_attachment.name}</p>
-      </div>
-    );
-  }
-  return <p className="line-clamp-2 break-words font-mono text-xs">{feedbackEvidence(item)}</p>;
+  const evidence = evidenceForItem(item);
+  return (
+    <SelectionCommentSurface
+      selectedText={evidenceText(evidence) || item.page_route}
+      contextLabel={item.page_route}
+      evidence={<PreviewFeedbackEvidence evidence={evidence} />}
+      position={position}
+      editingComment={item.comment}
+      inputLabel={t("task:previewEditComment")}
+      errorMessage={collection.mutationError ? t("task:previewMutationFailed") : null}
+      testId="preview-feedback-edit"
+      inputTestId="preview-feedback-edit-input"
+      addButtonTestId="preview-feedback-edit-save"
+      onAdd={async (comment) => Boolean(await collection.update(item.id, comment, item.version))}
+      onDelete={async () => Boolean(await collection.remove(item.id, item.version))}
+      onClose={onClose}
+    />
+  );
 }
 
 function PendingFeedbackItem({
@@ -73,22 +86,8 @@ function PendingFeedbackItem({
   touch: boolean;
 }) {
   const { t } = useTranslation();
-  const [editing, setEditing] = useState(false);
-  const [editComment, setEditComment] = useState("");
+  const [editAnchor, setEditAnchor] = useState<{ x: number; y: number } | null>(null);
   const actionClass = touch ? "h-11 min-w-11" : "h-7 min-w-7";
-
-  function startEditing() {
-    if (collection.isMutating) return;
-    setEditing(true);
-    setEditComment(item.comment);
-  }
-
-  async function saveEditing() {
-    const comment = editComment.trim();
-    if (!comment || collection.isMutating) return;
-    const result = await collection.update(item.id, comment, item.version);
-    if (result) setEditing(false);
-  }
 
   return (
     <li className="rounded-md border p-3" data-testid="preview-feedback-item">
@@ -97,14 +96,19 @@ function PendingFeedbackItem({
           <p className="truncate text-xs text-muted-foreground">
             {item.source_label} · {item.page_route}
           </p>
-          <FeedbackEvidence item={item} />
+          <div className="mt-1">
+            <PreviewFeedbackEvidence evidence={evidenceForItem(item)} />
+          </div>
         </div>
         <Button
           type="button"
           size="sm"
           variant="ghost"
           className={actionClass}
-          onClick={startEditing}
+          onClick={(event) => {
+            const bounds = event.currentTarget.getBoundingClientRect();
+            setEditAnchor({ x: bounds.left, y: bounds.bottom });
+          }}
           disabled={collection.isMutating}
           aria-label={t("task:previewEditFeedback")}
         >
@@ -122,36 +126,14 @@ function PendingFeedbackItem({
           <IconX className="h-4 w-4" />
         </Button>
       </div>
-      {editing ? (
-        <div className="mt-2 space-y-2">
-          <Textarea
-            value={editComment}
-            onChange={(event) => setEditComment(event.target.value)}
-            aria-label={t("task:previewEditComment")}
-            className="min-h-20"
-          />
-          <div className="flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              className={actionClass}
-              onClick={() => setEditing(false)}
-              disabled={collection.isMutating}
-            >
-              {t("task:previewCancel")}
-            </Button>
-            <Button
-              type="button"
-              className={actionClass}
-              onClick={() => void saveEditing()}
-              disabled={!editComment.trim() || collection.isMutating}
-            >
-              {t("task:previewSaveChanges")}
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <p className="mt-2 break-words text-xs">{item.comment}</p>
+      <p className="mt-2 break-words text-xs">{item.comment}</p>
+      {editAnchor && (
+        <PendingFeedbackEditor
+          item={item}
+          collection={collection}
+          position={editAnchor}
+          onClose={() => setEditAnchor(null)}
+        />
       )}
     </li>
   );
@@ -397,6 +379,8 @@ function DesktopCollectionSurface({
           align="end"
           portal={false}
           onCloseAutoFocus={closeFocus}
+          onInteractOutside={keepOpenForCommentSurface}
+          onEscapeKeyDown={keepOpenForCommentSurface}
           className="w-96 max-w-[calc(100vw-1rem)] overflow-hidden p-0"
           data-testid="preview-feedback-collection-popover"
         >

@@ -1,4 +1,5 @@
 import type { PreviewCaptureRect } from "@/lib/types/http";
+import { pixelLimitFactor } from "@/lib/images/pixel-limit";
 
 export const MAX_PREVIEW_SCREENSHOT_PIXELS = 16_000_000;
 export const MAX_PREVIEW_SCREENSHOT_BYTES = 10 * 1024 * 1024;
@@ -32,7 +33,14 @@ export type RasterizedPreviewRegion = {
   blob: Blob;
   width: number;
   height: number;
+  /** The region covers a canvas yet rasterized to one colour; it may be unread canvas content. */
+  uniformOverCanvas: boolean;
 };
+
+/** Reports whether a canvas rendered to a single colour. */
+export type CanvasUniformitySampler = (canvas: HTMLCanvasElement) => boolean;
+
+const UNIFORMITY_SAMPLE_EDGE = 64;
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
@@ -68,9 +76,53 @@ export function normalizeScreenshotRect(
 }
 
 export function previewScreenshotScale(width: number, height: number, requestedScale: number) {
-  if (width <= 0 || height <= 0 || requestedScale <= 0) return 0;
-  const pixelBoundScale = Math.sqrt(MAX_PREVIEW_SCREENSHOT_PIXELS / (width * height));
-  return Math.min(requestedScale, pixelBoundScale);
+  if (requestedScale <= 0) return 0;
+  return Math.min(requestedScale, pixelLimitFactor(width, height, MAX_PREVIEW_SCREENSHOT_PIXELS));
+}
+
+/** True when every RGBA pixel in a non-empty buffer has the same value. */
+export function isUniformPixels(data: Uint8ClampedArray): boolean {
+  if (data.length < 4) return false;
+  for (let index = 4; index < data.length; index += 4) {
+    if (
+      data[index] !== data[0] ||
+      data[index + 1] !== data[1] ||
+      data[index + 2] !== data[2] ||
+      data[index + 3] !== data[3]
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** True when the capture rectangle (iframe viewport pixels) intersects any canvas. */
+export function regionOverlapsCanvas(documentElement: HTMLElement, rect: PreviewCaptureRect) {
+  const canvases = documentElement.ownerDocument?.querySelectorAll?.("canvas");
+  if (!canvases) return false;
+  const right = rect.x + rect.width;
+  const bottom = rect.y + rect.height;
+  return Array.from(canvases).some((canvas) => {
+    const bounds = canvas.getBoundingClientRect();
+    return (
+      bounds.left < right && bounds.right > rect.x && bounds.top < bottom && bounds.bottom > rect.y
+    );
+  });
+}
+
+/** Downsamples the rendered canvas and checks whether it is a single colour. */
+export function sampleCanvasUniformity(canvas: HTMLCanvasElement): boolean {
+  const sample = canvas.ownerDocument?.createElement("canvas") ?? document.createElement("canvas");
+  sample.width = Math.min(UNIFORMITY_SAMPLE_EDGE, canvas.width);
+  sample.height = Math.min(UNIFORMITY_SAMPLE_EDGE, canvas.height);
+  const context = sample.getContext("2d", { willReadFrequently: true });
+  if (!context) return false;
+  try {
+    context.drawImage(canvas, 0, 0, sample.width, sample.height);
+    return isUniformPixels(context.getImageData(0, 0, sample.width, sample.height).data);
+  } catch {
+    return false;
+  }
 }
 
 function canvasBlob(canvas: HTMLCanvasElement) {
@@ -106,6 +158,7 @@ export async function rasterizePreviewRegion(
   documentElement: HTMLElement,
   rect: PreviewCaptureRect,
   render: PreviewRasterRenderer,
+  sampleUniformity: CanvasUniformitySampler = sampleCanvasUniformity,
 ): Promise<RasterizedPreviewRegion> {
   const scale = previewScreenshotScale(
     rect.width,
@@ -132,5 +185,6 @@ export async function rasterizePreviewRegion(
   }
   const blob = await canvasBlob(canvas);
   await validatePNG(blob);
-  return { blob, width: canvas.width, height: canvas.height };
+  const uniformOverCanvas = regionOverlapsCanvas(documentElement, rect) && sampleUniformity(canvas);
+  return { blob, width: canvas.width, height: canvas.height, uniformOverCanvas };
 }

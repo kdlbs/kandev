@@ -485,3 +485,40 @@ describe("usePreviewCapture cancelled uploads", () => {
     rendered.unmount();
   });
 });
+
+// @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-004.6
+// @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-004.7
+describe("usePreviewCapture comment surface", () => {
+  it("opens the comment surface below the capture and keeps the draft when dismissed", () => {
+    const { iframe, result } = setup();
+    iframe.getBoundingClientRect = () =>
+      ({ left: 200, top: 100, right: 800, bottom: 700, width: 600, height: 600 }) as DOMRect;
+
+    act(() => dispatch(iframe.contentWindow, textCapture()));
+    expect(result.current.isDraftSurfaceOpen).toBe(true);
+    expect(result.current.draftAnchor).toEqual({ x: 210, y: 138 });
+
+    act(() => result.current.setDraftComment("half-written note"));
+    act(() => result.current.closeDraftSurface());
+    expect(result.current.isDraftSurfaceOpen).toBe(false);
+    expect(result.current.draft?.kind).toBe("text");
+    expect(result.current.draftComment).toBe("half-written note");
+
+    act(() => result.current.resumeDraft());
+    expect(result.current.isDraftSurfaceOpen).toBe(true);
+    expect(result.current.draftComment).toBe("half-written note");
+  });
+
+  it("closes the surface when the draft is discarded or saved", async () => {
+    const { iframe, result } = setup();
+    act(() => dispatch(iframe.contentWindow, textCapture()));
+    act(() => result.current.discardDraft());
+    expect(result.current.isDraftSurfaceOpen).toBe(false);
+    act(() => result.current.resumeDraft());
+    expect(result.current.isDraftSurfaceOpen).toBe(false);
+
+    act(() => dispatch(iframe.contentWindow, textCapture()));
+    await act(() => result.current.saveDraft("Saved"));
+    expect(result.current.isDraftSurfaceOpen).toBe(false);
+  });
+});

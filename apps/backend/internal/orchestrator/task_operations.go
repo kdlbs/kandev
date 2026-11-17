@@ -7919,10 +7919,12 @@ func (s *Service) validateAndRunDispatchBoundary(
 	}
 	boundaryErr := runBeforeDispatch()
 	if boundaryErr == nil {
-		boundaryErr = s.admitCeilingDispatch(promptCtx, taskID)
+		// Failures after the delivery boundary but before the executor call
+		// provably sent nothing.
+		boundaryErr = lifecycle.MarkPromptNotDispatched(s.admitCeilingDispatch(promptCtx, taskID))
 	}
 	if boundaryErr == nil {
-		boundaryErr = runAfterDispatchAdmission()
+		boundaryErr = lifecycle.MarkPromptNotDispatched(runAfterDispatchAdmission())
 	}
 	if boundaryErr != nil {
 		if releaseDispatchGuard != nil {
@@ -8515,10 +8517,10 @@ func (s *Service) attemptModelSwitchForPromptWithAdmission(
 		s.beginInitialPromptAttempt(ctx, sessionID, s.isDynamicPromptSession(session))
 		admissionErr := runBeforeDispatch()
 		if admissionErr == nil {
-			admissionErr = s.admitCeilingDispatch(ctx, taskID)
+			admissionErr = lifecycle.MarkPromptNotDispatched(s.admitCeilingDispatch(ctx, taskID))
 		}
 		if admissionErr == nil {
-			admissionErr = runAfterDispatchAdmission()
+			admissionErr = lifecycle.MarkPromptNotDispatched(runAfterDispatchAdmission())
 		}
 		if admissionErr != nil {
 			s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
