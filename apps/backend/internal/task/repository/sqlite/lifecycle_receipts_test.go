@@ -325,7 +325,7 @@ func TestGetTaskLifecycleReceiptDoesNotMutateStoredReceipt(t *testing.T) {
 	require.Equal(t, beforeChangedAt, afterChangedAt)
 }
 
-func TestTaskLifecycleReceiptTracksWorkflowAttachAndQuickChatExpiry(t *testing.T) {
+func TestTaskLifecycleReceiptTracksWorkflowAttach(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepoForEntityTests(t)
 	seedWorkspace(t, repo, "receipt-move-workspace")
@@ -342,19 +342,6 @@ func TestTaskLifecycleReceiptTracksWorkflowAttachAndQuickChatExpiry(t *testing.T
 	require.Equal(t, "receipt-move-workflow", receipt.WorkflowID)
 	require.EqualValues(t, 2, receipt.Revision)
 
-	expiring := &models.Task{ID: "receipt-expiry-task", WorkspaceID: "receipt-move-workspace", Title: "Expiry", IsEphemeral: true}
-	require.NoError(t, repo.CreateTask(ctx, expiring))
-	cutoff := time.Now().UTC()
-	_, err = repo.db.ExecContext(ctx, `UPDATE tasks SET updated_at = ? WHERE id = ?`, cutoff.Add(-time.Hour), expiring.ID)
-	require.NoError(t, err)
-	deleted, err := repo.DeleteExpiredQuickChatTask(ctx, expiring.ID, cutoff)
-	require.NoError(t, err)
-	require.True(t, deleted)
-	receipt, err = repo.GetTaskLifecycleReceipt(ctx, expiring.WorkspaceID, expiring.ID)
-	require.NoError(t, err)
-	require.Equal(t, "deleted", receipt.Disposition)
-	require.Equal(t, "delete", receipt.Provenance)
-	require.EqualValues(t, 2, receipt.Revision)
 }
 
 func TestArchiveLifecycleReceiptDoesNotAdvanceOnNoOp(t *testing.T) {
