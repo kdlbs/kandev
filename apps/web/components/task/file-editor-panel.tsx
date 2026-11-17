@@ -5,7 +5,7 @@ import { PanelRoot, PanelBody } from "./panel-primitives";
 import { FileEditorContent, type FileEditorContentProps } from "./file-editor-content";
 import { FileImageViewer } from "./file-image-viewer";
 import { FileBinaryViewer } from "./file-binary-viewer";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useDockviewStore, type FileEditorState } from "@/lib/state/dockview-store";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
@@ -218,9 +218,7 @@ function useFileLoader({
   // a fetch is running, the new effect run starts a fresh fetch (rather than
   // being silently blocked) and the stale response is dropped on arrival — so
   // content from the wrong session/repo can never land in the buffer.
-  const markdownPreviewByDefault = useAppStore(
-    (s) => s.userSettings?.markdownPreviewByDefault ?? true,
-  );
+  const store = useAppStoreApi();
   const inFlightKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (hasFile || !activeSessionId) return;
@@ -253,7 +251,8 @@ function useFileLoader({
         setFileState(fileKey, {
           ...state,
           renderedPreview:
-            getFilePreviewKind(path, response.is_binary) === "markdown" && markdownPreviewByDefault,
+            getFilePreviewKind(path, response.is_binary) === "markdown" &&
+            (store.getState().userSettings.markdownPreviewByDefault ?? true),
         });
       })
       .catch(() => {
@@ -262,7 +261,7 @@ function useFileLoader({
       .finally(() => {
         if (inFlightKeyRef.current === key) inFlightKeyRef.current = null;
       });
-  }, [hasFile, activeSessionId, fileKey, path, setFileState, repo, markdownPreviewByDefault]);
+  }, [hasFile, activeSessionId, fileKey, path, setFileState, repo, store]);
 }
 
 /**

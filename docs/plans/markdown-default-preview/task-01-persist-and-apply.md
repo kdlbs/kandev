@@ -79,7 +79,7 @@ Maps to AC-UI-MARKDOWN-DEFAULT-PREVIEW-001.1, .2, and .6. Both targeted browser 
 # Run from the isolated repository root. Product checks run during implementation.
 (cd apps && pnpm install --frozen-lockfile)
 (cd apps/backend && go test ./internal/user/... ./internal/backendapp/... ./internal/settingscatalog/...)
-(cd apps/web && pnpm exec vitest run components/settings/editors-settings-state.test.tsx components/settings/settings-dirty.test.ts hooks/use-ensure-user-settings.test.ts hooks/use-file-editors.open-action.test.tsx hooks/use-file-editors.build-state.test.ts components/task/file-editor-panel.workspace-sync.test.tsx components/task/mobile/mobile-file-viewer-panel.test.tsx lib/ssr/user-settings.test.ts lib/ws/handlers/users.test.ts lib/state/slices/settings/settings-slice.test.ts)
+(cd apps/web && pnpm exec vitest run components/settings/editors-settings-state.test.tsx components/settings/settings-dirty.test.ts hooks/use-ensure-user-settings.test.ts hooks/use-file-editors.open-action.test.tsx hooks/use-file-editors.build-state.test.ts components/task/file-editor-panel.workspace-sync.test.tsx components/task/file-editor-panel.image.test.tsx components/task/mobile/mobile-file-viewer-panel.test.tsx lib/ssr/user-settings.test.ts lib/ws/handlers/users.test.ts lib/state/slices/settings/settings-slice.test.ts)
 (cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check && pnpm run i18n:ratchet)
 pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/settings/markdown-default-preview.spec.ts
 pnpm --dir apps/web e2e:raw --project=mobile-chrome tests/settings/mobile-markdown-default-preview.spec.ts tests/task/mobile-file-viewer.spec.ts
@@ -123,3 +123,11 @@ Addressed Greptile's shared-row finding with `SettingsRow`: linked label/help, `
 Post-merge validation passed: the ten targeted frontend suites (191 tests), web typecheck, web lint, localization check, backend user/settings-catalog suites and boot projections, two desktop browser tests, 14 phone browser tests, public docs, catalog, spec lint, and diff checks. These results supersede the original 190-test frontend count. Desktop managed E2E rebuilt the runtime and assets; phone raw E2E reused that fresh build.
 
 Fresh CI and review evidence for the pushed remediation remains externally pending. Screenshots will be refreshed after the remediation commit.
+
+### Claude aggregate suggestions
+
+Corrected the phone mode-reset comment to describe the saved default and caller-supplied Preview mode. The desktop fallback loader now reads the current preference from the application store when the file read completes. Its effect no longer subscribes to preference changes.
+
+A regression failed with the previous captured preference and now passes: changing the saved default while an initial Markdown load is pending makes one read and initializes the completed buffer with the latest value. Updated the existing image-panel provider mock for the store API hook.
+
+Validation: eleven focused frontend suites passed (196 tests), typecheck passed, web lint passed, and both desktop opening/settings browser tests passed after rebuilding Vite assets. The prior 14-phone-test result remains applicable because the subsequent phone production change is a comment only. No rendered UI changed after the refreshed shared-row screenshots.

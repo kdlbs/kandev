@@ -53,6 +53,7 @@ Reuse existing focus, disabled, and pressed states. Add no new animation or over
 Use `getFilePreviewKind` from `lib/utils/file-types.ts`, including its binary exclusion, as the Markdown eligibility authority.
 Reuse `MarkdownPreviewContent` and existing `renderedPreview` state. Do not change rendering, editing, sanitization, or comment ownership.
 
+Read the saved preference when an initial read completes. A settings update during loading must not request the same file again.
 For desktop, initialize newly created file state in `hooks/file-editor-open-actions.ts` and the fallback loader in `components/task/file-editor-panel.tsx`.
 Keep initial-mode policy small and shared if needed. Do not read the store inside a generic file-content conversion helper.
 An existing buffer keeps its mode. Explicit Preview takes precedence. Current tab restoration in `hooks/use-file-editors.ts` remains authoritative.
