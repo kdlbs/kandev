@@ -197,4 +197,7 @@ A first normal-hook attempt surfaced a duplicated cleanup failure token in
 existing task-service code. Archive and delete paths now share the unchanged
 private string constant; literal persisted-token fixtures remain independent.
 The existing inspection/retained cleanup regression selection passed (`2.398s`).
-Normal-hook commits remain the delivery checkpoint.
+Host implementation commit:
+`c42775f671cef7532065c054669c62dbd5970275`.
+Normal signed commit passed every applicable pre-commit and commit-message hook.
+The plan records the remaining documentation-only delivery checkpoint.

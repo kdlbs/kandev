@@ -157,6 +157,13 @@ generation includes installation identity and a monotonic service epoch, so a
 disable/enable cycle cannot accept an older dispatch while persistence catches
 up. The browser additionally fences registry epochs, concrete stores, complete
 auth/workspace/query scope and each metadata request incarnation.
+Boot metadata is owned by its concrete store and scope. Context reconciliation
+clears it even while disconnected. Failed catalog transport reads do not publish
+an authoritative empty catalog: eligible same-context metadata is retained,
+with at most two retries after 1s and 2s admitted within a 5s retry budget.
+Server Retry-After is never shortened; delays beyond the remaining budget stop
+recovery. Authoritative empty reads and access denial clear metadata. Success,
+failure and queued retries all retain the request/store/scope fences.
 
 Loading, timeout, disabled/replaced plugin and incomplete snapshot are distinct
 from a successful empty classification. Retain same-context eligible pages
@@ -183,6 +190,12 @@ ownership and timestamps; equal human/agent memberships collapse to one pair.
 Short hex colors expand to the host's six-digit format. Bounds fail explicitly
 without a private-storage task cap or truncation. These are local integration
 artifacts, not a publication or deployment.
+
+Nullable application lists/rows and untyped classification fields are invalid,
+not empty classification. Both v1 and v2 count every raw application before
+legacy migration, inactive/deleted filtering or duplicate normalization; more
+than 10,000 fails explicitly. Typed inactive rows and valid empty arrays remain
+valid, and reads never rewrite shared state.
 
 The manifest exposes the new entry only for this action. Old hosts either
 reject the newer minimum host requirement at install or keep using their old

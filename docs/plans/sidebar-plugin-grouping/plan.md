@@ -145,7 +145,7 @@ fixture proof is not real-package proof.
 ## Work orders
 
 - [x] [Task 01: Generic complete sidebar grouping](task-01-host-sidebar-grouping.md)
-- [ ] [Task 02: Tags integration and real package proof](task-02-tags-sidebar-grouping.md)
+- [x] [Task 02: Tags integration and real package proof](task-02-tags-sidebar-grouping.md)
 
 Sequential: Task02 consumes Task01's verified contract and runtime. No agent or
 model assignments, parallel delegation, release or publication are implied.
@@ -203,11 +203,30 @@ checks were exercised, not skipped. Specs, all 55 published docs pages and
 complete locale checks passed.
 
 The requested broad test gate remains non-green for the backend and web failures
-above; focused passes do not replace that result. Normal-hook cross-repository
-commits are the remaining delivery checkpoint. Build outputs, logs, PNGs and
-temporary state stay on the findmnt-verified cache drive. Owned acceptance
-services were stopped; the original port 59390 runtime and primary instances
-were not touched.
+above; focused passes do not replace that result.
+
+## Delivery checkpoint
+
+Host: `c42775f671cef7532065c054669c62dbd5970275`, parent
+`b4c6a197129b5b4a5e99c3e1dab132ada9fb433f`.
+Tags: `2a122af6b5eb617b9e313c34b591cb2c15ef73da`, parent
+`61a7e99770801d7e4f027bbf1cee2d2154cee0d7`.
+Both are normal signed commits under the user's configured identity. All
+applicable host hooks passed; Tags has no active repository hooks. Host auto-GC
+reported shared remote-ref lock contention after commit success; no lock or
+remote ref was removed.
+
+The earlier 91% cache blocker cleared on November 17 (31% observed before
+review); no active runtime files or today's caches were deleted to resolve it.
+Sol review round 1 reported three defects: transient catalog failure erased
+eligible metadata, nullable application rows looked empty, and raw duplicate
+applications bypassed the limit. All three now have failing-before/passing-after
+regressions. The native desktop failure was also reproduced against a fresh
+pre-fix build; final corrected browser/package acceptance is being completed.
+
+The user authorized commit, rebase and push before continuing the Sol loop.
+Original port 59390 and primary instances remain untouched. Publication is
+authorized for the feature branches only, not a release or deployment.
 
 ## Risks
 

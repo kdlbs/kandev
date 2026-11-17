@@ -6,7 +6,10 @@ import { bootPlugins } from "./boot";
 import type { ActivePlugin } from "./types";
 import type { SidebarGroupingProvider } from "@kdlbs/plugin-sdk";
 import { sidebarTaskPageScope } from "@/lib/sidebar/sidebar-task-page-cache";
-import { refreshSidebarGroupingCatalog } from "./sidebar-grouping-catalog";
+import {
+  reconcileSidebarGroupingCatalogScope,
+  refreshSidebarGroupingCatalog,
+} from "./sidebar-grouping-catalog";
 import { pluginRegistry } from "./registry";
 
 type PluginBootBridgeProps = {
@@ -31,6 +34,7 @@ export function PluginBootBridge({ plugins, sidebarGroupings }: PluginBootBridge
   }, [plugins, sidebarGroupings, store]);
 
   useEffect(() => {
+    reconcileSidebarGroupingCatalogScope(store);
     if (connectionStatus !== "connected") return;
     pluginRegistry.invalidateSidebarGroupings();
     void refreshSidebarGroupingCatalog(store);

@@ -208,5 +208,9 @@ switcher, not agent startup: this repository-less fixture rejects automatic
 session creation, and the canonical task's workflow step stayed unchanged.
 Owned runtime, browser tab and PostgreSQL server were stopped after proof.
 The originating port 59390 instance and every primary instance were untouched.
-No publication, release, deployment or push occurred. Delivery commit identities
-and normal-hook receipts remain for the plan's final closure.
+No publication, release, deployment or push occurred. Dedicated signed commit:
+`2a122af6b5eb617b9e313c34b591cb2c15ef73da`.
+This repository has no active commit hooks; tests, vet, module-layout tidy and
+real package proof above were run separately. All three workflows pin matching
+host commit `c42775f671cef7532065c054669c62dbd5970275`.
+These commits remain local, so remote CI and publication were not exercised.

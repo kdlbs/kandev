@@ -8,7 +8,7 @@ import type { AppState } from "@/lib/state/store";
 import type { BootPayload } from "@/src/boot-payload";
 import { buildHostApi } from "./host-api";
 import { installPluginGlobal, loadPlugins, unloadPlugin } from "./host";
-import { pluginRegistry } from "./registry";
+import { seedSidebarGroupingCatalog } from "./sidebar-grouping-catalog";
 
 type PluginE2EWindow = Window & {
   __KANDEV_E2E_EXPOSE_STORE__?: boolean;
@@ -35,7 +35,7 @@ export function bootPlugins(
   if (bootedStores.has(storeApi)) return;
   bootedStores.add(storeApi);
   if (bootPayload.sidebarGroupings)
-    pluginRegistry.setSidebarGroupings(bootPayload.sidebarGroupings);
+    seedSidebarGroupingCatalog(storeApi, bootPayload.sidebarGroupings);
   if (!bootPayload.plugins || bootPayload.plugins.length === 0) return;
 
   installPluginGlobal();

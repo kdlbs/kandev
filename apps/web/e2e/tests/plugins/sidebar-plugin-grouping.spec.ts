@@ -64,6 +64,54 @@ test("complete plugin grouping is a normal saved sidebar view", async ({
     .toEqual([saved.views.length, saved.active_view_id]);
 });
 
+// @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.5
+test("retains boot groupings through a failed catalog read and recovers without reconnecting", async ({
+  testPage,
+  seedData,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await installFixturePlugin(testPage);
+  const releaseRetry = Promise.withResolvers<void>();
+  const catalogPath = "**/api/plugins/sidebar-groupings";
+  let reads = 0;
+  await testPage.route(catalogPath, async (route) => {
+    if (++reads === 1) {
+      await route.fulfill({ status: 503, json: { error: "temporary catalog failure" } });
+      return;
+    }
+    await releaseRetry.promise;
+    await route.continue();
+  });
+  try {
+    const failure = testPage.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/plugins/sidebar-groupings") && response.status() === 503,
+    );
+    await testPage.goto(`/?workspaceId=${seedData.workspaceId}`);
+    await failure;
+    await testPage.getByTestId("tasks-view-picker").click();
+    const option = testPage
+      .getByRole("group", { name: "Plugin groupings", exact: true })
+      .getByRole("menuitem", { name: "Fixture grouping", exact: true });
+    await expect(option).toBeVisible();
+    const recovery = testPage.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/plugins/sidebar-groupings") && response.status() === 200,
+    );
+    releaseRetry.resolve();
+    await recovery;
+    await option.click();
+    await expect(testPage.getByTestId("tasks-view-picker")).toContainText("Fixture grouping");
+    await testPage.screenshot({
+      path: testInfo.outputPath("catalog-recovery-desktop.png"),
+      animations: "disabled",
+    });
+  } finally {
+    releaseRetry.resolve();
+    await testPage.unroute(catalogPath);
+  }
+});
+
 // @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.3
 // @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.4
 // @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.5
