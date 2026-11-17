@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import type { Page } from "@playwright/test";
 
 // @covers AC-INTEGRATIONS-GITHUB-REPOSITORY-SCOPE-001.1 .2 .3 .9
@@ -30,13 +31,17 @@ test("saves owner and repository scope together", async ({ testPage, apiClient, 
   const scope = testPage.getByTestId("github-repo-scope-section");
   await expect(scope.getByTestId("github-repository-chip")).toHaveText(["outside/tool"]);
   await addScopeOrganization(testPage, "acme");
+  const selectedSettingsSaved = waitForHttp(
+    testPage,
+    "PUT",
+    /^\/api\/v1\/github\/workspace-settings$/,
+  );
   await testPage
     .getByTestId("settings-floating-save")
     .getByRole("button", { name: "Save changes" })
     .click();
-  await expect(testPage.getByText("GitHub workspace settings saved").last()).toBeVisible({
-    timeout: 10_000,
-  });
+  expect((await selectedSettingsSaved).status()).toBe(200);
+  await expect(testPage.getByText("GitHub workspace settings saved").last()).toBeVisible();
 
   const saved = await apiClient.rawRequest(
     "GET",
@@ -54,13 +59,13 @@ test("saves owner and repository scope together", async ({ testPage, apiClient, 
 
   const allRepositories = scope.getByRole("switch", { name: "All repositories" });
   await allRepositories.click();
+  const allSettingsSaved = waitForHttp(testPage, "PUT", /^\/api\/v1\/github\/workspace-settings$/);
   await testPage
     .getByTestId("settings-floating-save")
     .getByRole("button", { name: "Save changes" })
     .click();
-  await expect(testPage.getByText("GitHub workspace settings saved").last()).toBeVisible({
-    timeout: 10_000,
-  });
+  expect((await allSettingsSaved).status()).toBe(200);
+  await expect(testPage.getByText("GitHub workspace settings saved").last()).toBeVisible();
   const allSettings = await apiClient.rawRequest(
     "GET",
     `/api/v1/github/workspace-settings?workspace_id=${seedData.workspaceId}`,

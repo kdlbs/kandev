@@ -1,4 +1,5 @@
 import { expect, test } from "../fixtures/test-base";
+import { waitForHttp } from "../helpers/causal-waits";
 
 // @covers AC-INTEGRATIONS-GITHUB-REPOSITORY-SCOPE-001.3 .12
 test("edits and reloads mixed GitHub repository scope on mobile", async ({
@@ -45,10 +46,10 @@ test("edits and reloads mixed GitHub repository scope on mobile", async ({
     .getByTestId("settings-floating-save")
     .getByRole("button", { name: "Save changes" });
   expect((await save.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  const settingsSaved = waitForHttp(testPage, "PUT", /^\/api\/v1\/github\/workspace-settings$/);
   await save.tap();
-  await expect(testPage.getByText("GitHub workspace settings saved").last()).toBeVisible({
-    timeout: 10_000,
-  });
+  expect((await settingsSaved).status()).toBe(200);
+  await expect(testPage.getByText("GitHub workspace settings saved").last()).toBeVisible();
   await testPage.reload();
   await expect(scope.getByTestId("github-organization-chip")).toHaveText(["acme"]);
   await expect(scope.getByTestId("github-repository-chip")).toHaveText(["outside/tool"]);

@@ -235,6 +235,16 @@ func TestPostgresWorkspaceScopeUnion(t *testing.T) {
 	if err := store.migrateWorkspaceRepoScopes(); err != nil {
 		t.Fatalf("migrate PostgreSQL scope: %v", err)
 	}
+	migrated, err := store.GetWorkspaceSettings(t.Context(), "scope-postgres")
+	if err != nil {
+		t.Fatalf("read migrated PostgreSQL scope: %v", err)
+	}
+	if migrated.RepoScopeMode != "selected" ||
+		len(migrated.RepoScopeOrgs) != 1 ||
+		migrated.RepoScopeOrgs[0] != "Acme" ||
+		len(migrated.RepoScopeRepos) != 0 {
+		t.Fatalf("migrated PostgreSQL scope = %+v, want selected with Acme and no repositories", migrated)
+	}
 	mode := "selected"
 	orgs := []string{"Acme"}
 	repos := []RepoFilter{{Owner: "Outside", Name: "Tool"}}

@@ -485,9 +485,21 @@ test.describe("GitHub workspace settings", () => {
   });
 
   test("legacy scope writes stay exclusive and return canonical selected settings", async ({
+    testPage,
     apiClient,
     seedData,
   }) => {
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("scope-user");
+    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
+    await apiClient.mockGitHubAddOrgs([{ login: "kdlbs" }]);
+    await apiClient.mockGitHubAddRepos("outside", [
+      { full_name: "outside/tool", owner: "outside", name: "tool" },
+    ]);
+
     const organizations = await apiClient.rawRequest("PUT", "/api/v1/github/workspace-settings", {
       workspace_id: seedData.workspaceId,
       repo_scope_mode: "orgs",
@@ -499,6 +511,10 @@ test.describe("GitHub workspace settings", () => {
       repo_scope_orgs: ["kdlbs"],
       repo_scope_repos: [],
     });
+    await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations/github`);
+    const scope = testPage.getByTestId("github-repo-scope-section");
+    await expect(scope.getByTestId("github-organization-chip")).toHaveText(["kdlbs"]);
+    await expect(scope.getByTestId("github-repository-chip")).toHaveCount(0);
 
     const repositories = await apiClient.rawRequest("PUT", "/api/v1/github/workspace-settings", {
       workspace_id: seedData.workspaceId,
@@ -511,6 +527,9 @@ test.describe("GitHub workspace settings", () => {
       repo_scope_orgs: [],
       repo_scope_repos: [{ owner: "outside", name: "tool" }],
     });
+    await testPage.reload();
+    await expect(scope.getByTestId("github-organization-chip")).toHaveCount(0);
+    await expect(scope.getByTestId("github-repository-chip")).toHaveText(["outside/tool"]);
   });
 });
 
