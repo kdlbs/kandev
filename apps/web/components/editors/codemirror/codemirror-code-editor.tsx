@@ -191,7 +191,7 @@ function CodeMirrorEditorToolbar({
 }
 
 export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
-  const { content } = props;
+  const { content, readOnly } = props;
   const {
     wrapperRef,
     editorAreaRef,
@@ -215,6 +215,7 @@ export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
           value={content}
           height="100%"
           theme={vscodeDark}
+          readOnly={readOnly}
           extensions={[...state.extensions, codeMirrorCursorFlashExtension]}
           onChange={state.handleChange}
           basicSetup={{

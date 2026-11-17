@@ -34,6 +34,7 @@ type MonacoCodeEditorProps = {
   isSymlink?: boolean;
   repo?: string;
   readOnly?: boolean;
+  enableLsp?: boolean;
   showToolbar?: boolean;
   enableComments?: boolean;
   previewKind?: FilePreviewKind;
@@ -129,6 +130,7 @@ function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
     sessionId,
     worktreePath,
     repo,
+    enableLsp,
     enableComments = false,
     onChange,
     onSave,
@@ -158,6 +160,7 @@ function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
     contentRef,
     editorRef: state.editorRef,
     editorReady: state.editorInstance !== null,
+    enableLsp,
   });
   useMonacoCursorNavigation({
     editor: state.editorInstance,

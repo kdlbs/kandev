@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, useRef, type RefObject } from "react";
 import type { ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { EditorView, gutter, GutterMarker, ViewPlugin, type ViewUpdate } from "@codemirror/view";
-import { EditorState, type Extension } from "@codemirror/state";
+import type { Extension } from "@codemirror/state";
 import { Decoration, type DecorationSet } from "@codemirror/view";
 import { getCodeMirrorExtensionFromPath } from "@/lib/languages";
 import { useCommentsStore } from "@/lib/state/slices/comments";
@@ -343,7 +343,6 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   const extensions: Extension[] = useMemo(() => {
     const exts: Extension[] = [
       EditorView.editable.of(!readOnly),
-      EditorState.readOnly.of(readOnly),
       cmEditorTheme,
       commentGutter,
       commentPlugin,

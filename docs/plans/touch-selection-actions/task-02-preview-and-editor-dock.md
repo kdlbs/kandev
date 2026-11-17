@@ -154,3 +154,26 @@ Verification:
   unchanged layout bounds.
 - The managed E2E build completed for the backend and web assets. Native
   Android Chrome and iOS Safari were not exercised.
+
+### CI follow-up (2026-11-17)
+
+The mobile viewer assertions now accept both CodeMirror and Monaco markup.
+Read-only mobile viewers do not acquire LSP connections. Monaco lays out a
+newly mounted editor before revealing a pending cursor, including requests
+without a line flash. CodeMirror receives read-only mode through the editor
+component prop, avoiding a duplicate `@codemirror/state` extension instance.
+The PR popover geometry case waits for its finite menu animation before
+measuring the conflict glyph.
+
+Verification:
+
+- Focused Vitest for CodeMirror workspace sync and Monaco cursor/LSP navigation:
+  15 passed across three files.
+- Managed `mobile-chrome` E2E for eight changed mobile viewer specs:
+  14 passed in 1.6 minutes. This run built the backend and Vite assets.
+- Focused Chromium E2E for the conflicted PR row's 8 px glyph geometry:
+  1 passed after waiting for finite menu animations.
+- After the final Monaco session-identity adjustment, the focused Vitest set
+  passed again (15 tests) and the mobile LSP suppression/requested-line E2Es
+  passed again (2 tests).
+- Native Android Chrome and iOS Safari remain untested.

@@ -132,7 +132,9 @@ See each work order. The PR fixup also adds viewport-clipped final-line checks
 for Markdown, CodeMirror, and Monaco, CodeMirror touch-to-mouse ownership
 coverage, and pending Markdown selection-capture cancellation coverage. The
 managed mobile E2E runner builds the web assets and backend before its focused
-specs.
+specs. Follow-up CI remediation keeps mobile editor selection coverage valid
+for both providers, prevents read-only mobile viewers from acquiring LSP
+connections, and measures popover geometry after finite opening animations.
 
 ## Risks
 

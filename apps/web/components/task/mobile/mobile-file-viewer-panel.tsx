@@ -80,6 +80,7 @@ function MobileTextFileContent({
       repo={file.repo}
       enableComments
       readOnly
+      enableLsp={false}
       showToolbar={false}
       onChange={ignoreFileChange}
       onSave={ignoreFileChange}
