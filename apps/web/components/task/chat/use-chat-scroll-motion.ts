@@ -20,10 +20,20 @@ export function useChatScrollMotion(options: ChatScrollMotionOptions) {
   latest.current = options;
   const driver = useRef<ScrollMotion | null>(null);
   const userReading = useRef(false);
+  const pendingResize = useRef(false);
   const canFollow = useCallback(() => {
     const value = latest.current;
     return value.enabled && value.isVisible && !value.isBlocked() && value.isNearBottomRef.current;
   }, []);
+  const followPendingResize = useCallback(() => {
+    const element = latest.current.scrollRef.current;
+    if (!element || !pendingResize.current || !canFollow()) return;
+    pendingResize.current = false;
+    if (driver.current) driver.current.request();
+    else latest.current.instant(element);
+  }, [canFollow]);
+  // Loading can release its scroll guard without another content resize.
+  useLayoutEffect(followPendingResize);
   useLayoutEffect(() => {
     const element = options.scrollRef.current;
     if (!element || !options.enabled || !options.isVisible) return;
@@ -41,15 +51,15 @@ export function useChatScrollMotion(options: ChatScrollMotionOptions) {
       removeIntentListener = listenForScrollIntent(element, onUserScrollIntent);
     }
     const observer = new ResizeObserver(() => {
-      if (!canFollow()) return;
-      if (motion) motion.request();
-      else latest.current.instant(element);
+      pendingResize.current = true;
+      followPendingResize();
     });
     const content = element.querySelector("[data-chat-content]");
     if (content) observer.observe(content);
     return () => {
       const settle = Boolean(motion?.isRunning() && !latest.current.motionEnabled && canFollow());
       observer.disconnect();
+      pendingResize.current = false;
       removeIntentListener();
       motion?.dispose();
       if (driver.current === motion) driver.current = null;
@@ -62,6 +72,7 @@ export function useChatScrollMotion(options: ChatScrollMotionOptions) {
     options.isVisible,
     options.sessionId,
     canFollow,
+    followPendingResize,
   ]);
   const followBottom = useCallback(() => {
     const value = latest.current;

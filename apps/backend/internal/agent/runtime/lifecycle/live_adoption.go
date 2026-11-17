@@ -132,7 +132,7 @@ func (m *Manager) restoreExistingAgentDelivery(
 		}
 		return fmt.Errorf("existing agent delivery evidence is unavailable")
 	}
-	if status.Durable && status.Version == journal.CurrentVersion {
+	if status.Durable && journal.SupportsDeliveryVersion(status.Version) {
 		recovered.DeliveryStatus = status
 		if err := m.restoreRecoveredDelivery(ctx, execution, recovered); err != nil {
 			return fmt.Errorf("restore existing agent delivery state: %w", err)

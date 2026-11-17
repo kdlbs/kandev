@@ -639,8 +639,8 @@ func TestEnsureWorkspaceClonedUsesSelectedCredentialWithoutAmbientFallback(t *te
 	gitPath := filepath.Join(binDir, "git")
 	script := `#!/bin/sh
 printf '%s\n' "$@" > "$KANDEV_TEST_CAPTURE.args"
-helper=${GIT_CONFIG_VALUE_1#!}
-"$helper" get > "$KANDEV_TEST_CAPTURE.helper"
+helper_command=${GIT_CONFIG_VALUE_1#!}
+sh -c "$helper_command get" > "$KANDEV_TEST_CAPTURE.helper"
 printf '%s\n' "$GH_TOKEN|$GITHUB_TOKEN|$GIT_CONFIG_GLOBAL|$GIT_CONFIG_NOSYSTEM|$KANDEV_REPOCLONE_GITHUB_USERNAME|$KANDEV_REPOCLONE_GITHUB_TOKEN|$GIT_CONFIG_VALUE_1" > "$KANDEV_TEST_CAPTURE.env"
 `
 	if err := os.WriteFile(gitPath, []byte(script), 0o755); err != nil {
@@ -742,9 +742,9 @@ func TestWorkspaceCloneAuthPreservesNonGitHubURL(t *testing.T) {
 	t.Parallel()
 
 	cloner := NewCloner(Config{BasePath: t.TempDir()}, ProtocolSSH, "", logger.Default())
-	want := "git@ssh.dev.azure.com:v3/acme/Platform/api"
+	want := "git@gitlab.com:acme/platform/api.git"
 	got, auth, err := cloner.workspaceCloneAuth(
-		context.Background(), "workspace-a", "azure_devops", "", want, "Platform", "api", "", "",
+		context.Background(), "workspace-a", "gitlab", "", want, "acme/platform", "api", "", "",
 	)
 	if err != nil {
 		t.Fatalf("workspaceCloneAuth() unexpected error: %v", err)

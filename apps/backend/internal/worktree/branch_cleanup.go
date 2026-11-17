@@ -24,6 +24,7 @@ const (
 type BranchRetentionReason string
 
 const (
+	RetainedExplicitly              BranchRetentionReason = "explicit_retention"
 	RetainedUnknownOwner            BranchRetentionReason = "unknown_owner"
 	RetainedExternalOwner           BranchRetentionReason = "external_owner"
 	RetainedAmbiguousOwner          BranchRetentionReason = "ambiguous_owner"
@@ -114,6 +115,10 @@ func (m *Manager) compactManagedBranchWithMode(
 	receipt.Attempted = 1
 	branchCleanupMetrics.Add("attempted", 1)
 
+	if err := m.checkWorkspaceRetention(ctx, wt.TaskID, wt.ID, wt.Path); err != nil {
+		receipt.retain(RetainedExplicitly)
+		return receipt
+	}
 	metadataStore, reason := m.branchMetadataStoreForCleanup(ctx, wt)
 	if reason != "" {
 		receipt.retain(reason)

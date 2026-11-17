@@ -468,6 +468,7 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 		"description":        task.Description,
 		"state":              string(task.State),
 		"priority":           task.Priority,
+		"execution_grade":    task.ExecutionGrade,
 		"position":           task.Position,
 		"wip_admitted":       task.WIPAdmitted,
 		"created_at":         task.CreatedAt.Format(time.RFC3339Nano),
@@ -835,6 +836,9 @@ func serializeTaskRepositories(repos []*models.TaskRepository) []map[string]inte
 		if r.CheckoutBranch != "" {
 			serialized["checkout_branch"] = r.CheckoutBranch
 		}
+		if r.WorkspaceRelativePath != "" {
+			serialized["workspace_relative_path"] = r.WorkspaceRelativePath
+		}
 		if r.BranchPolicyID != "" {
 			serialized["branch_policy_id"] = r.BranchPolicyID
 		}
@@ -876,13 +880,14 @@ func serializeTaskWorkspaceFolders(folders []*models.TaskWorkspaceFolder) []map[
 	out := make([]map[string]interface{}, 0, len(folders))
 	for _, folder := range folders {
 		out = append(out, map[string]interface{}{
-			"id":           folder.ID,
-			"task_id":      folder.TaskID,
-			"local_path":   folder.LocalPath,
-			"display_name": folder.DisplayName,
-			"position":     folder.Position,
-			"created_at":   folder.CreatedAt.Format(time.RFC3339),
-			"updated_at":   folder.UpdatedAt.Format(time.RFC3339),
+			"id":                      folder.ID,
+			"task_id":                 folder.TaskID,
+			"local_path":              folder.LocalPath,
+			"display_name":            folder.DisplayName,
+			"workspace_relative_path": folder.WorkspaceRelativePath,
+			"position":                folder.Position,
+			"created_at":              folder.CreatedAt.Format(time.RFC3339),
+			"updated_at":              folder.UpdatedAt.Format(time.RFC3339),
 		})
 	}
 	return out
@@ -890,7 +895,7 @@ func serializeTaskWorkspaceFolders(folders []*models.TaskWorkspaceFolder) []map[
 
 // publishTaskMovedEvent publishes a task.moved event so the orchestrator can process
 // on_exit/on_enter actions for the new workflow step.
-func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, fromWorkflowID, fromStepID, toStepID, sessionID, moveID string) {
+func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, fromWorkflowID, fromStepID, toStepID, sessionID, moveID string, oldState v1.TaskState) {
 	if s.eventBus == nil {
 		return
 	}
@@ -900,6 +905,9 @@ func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, 
 	}
 	data := map[string]interface{}{
 		"task_id":                   task.ID,
+		"workspace_id":              task.WorkspaceID,
+		"old_state":                 string(oldState),
+		"new_state":                 string(task.State),
 		"step_transition_id":        task.WorkflowStepTransitionID,
 		"move_id":                   moveID,
 		"from_workflow_id":          fromWorkflowID,
@@ -1404,6 +1412,9 @@ func (s *Service) publishRepositoryEvent(ctx context.Context, eventType string, 
 		"secret_bindings":        bindings,
 		"created_at":             repository.CreatedAt.Format(time.RFC3339),
 		"updated_at":             repository.UpdatedAt.Format(time.RFC3339),
+	}
+	if remoteURL, ok := displayableRemoteURL(repository.RemoteURL); ok {
+		data["remote_url"] = remoteURL
 	}
 	event := bus.NewEvent(eventType, "task-service", data)
 	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {

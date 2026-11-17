@@ -63,6 +63,7 @@ func TestMessageTaskReadiness_PreparedBusySession(t *testing.T) {
 		session,
 		"prepared branch",
 		map[string]interface{}{"sender_task_id": "sender"},
+		false,
 	)
 
 	require.NoError(t, err)
@@ -220,6 +221,14 @@ type mcpReadinessAcceptedPrompt struct {
 type mcpReadinessAgentManager struct {
 	executor.AgentManagerClient
 	accepted chan<- mcpReadinessAcceptedPrompt
+}
+
+func (*mcpReadinessAgentManager) RequiresCloneURL(string) bool          { return false }
+func (*mcpReadinessAgentManager) ShouldApplyPreferredShell(string) bool { return false }
+func (*mcpReadinessAgentManager) ValidateExecutorRuntime(string) error  { return nil }
+
+func (*mcpReadinessAgentManager) ValidateExecutionRuntime(context.Context, string, string, string) error {
+	return nil
 }
 
 func (m *mcpReadinessAgentManager) IsAgentRunningForSession(context.Context, string) bool {

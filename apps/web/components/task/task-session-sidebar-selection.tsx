@@ -40,10 +40,18 @@ export function useBulkConfirmDialog(
       cascade,
       discardWorktreeChanges,
       confirmationId,
+      workspaceCleanup,
+      allowUnverifiedWorkspaceChanges,
     }: TaskActionOptions & { cascade: boolean }) => {
       if (!state) return;
       try {
-        await run(state.ids, { cascade, discardWorktreeChanges, confirmationId });
+        await run(state.ids, {
+          cascade,
+          discardWorktreeChanges,
+          confirmationId,
+          workspaceCleanup,
+          allowUnverifiedWorkspaceChanges,
+        });
       } catch (error) {
         console.error("Bulk action failed:", error);
       } finally {

@@ -76,11 +76,12 @@ an unauthenticated recovery path.
   lease for a credential. Its error code distinguishes lease-invalid,
   lease-expired, and lease-revoked responses so a helper can decide whether a
   reissue is eligible.
-- `POST /api/v1/github/credentials/reissue` accepts a reissue capability and
-  the helper's exact non-secret repository request. It returns a new opaque
-  lease and expiry, never a Git credential. The route is unauthenticated at
-  HTTP middleware level because the capability self-authenticates in the
-  handler.
+- `POST /api/v1/github/credentials/reissue` accepts a reissue capability in the
+  JSON field `reissue_capability`, the same name used by
+  `KANDEV_GITHUB_CREDENTIAL_SCOPES` entries, and the helper's exact non-secret
+  repository request. It returns a new opaque lease and expiry, never a Git
+  credential. The route is unauthenticated at HTTP middleware level because the
+  capability self-authenticates in the handler.
 - `KANDEV_GITHUB_CREDENTIAL_REISSUE_CAPABILITY` carries the default helper
   capability. Multi-repository `KANDEV_GITHUB_CREDENTIAL_SCOPES` entries carry
   the matching capability beside each lease.

@@ -26,6 +26,7 @@ const (
 		origin_turn_id TEXT NOT NULL DEFAULT '',
 		source_message_id TEXT NOT NULL DEFAULT '',
 		source_call_id TEXT NOT NULL DEFAULT '',
+		capabilities TEXT NOT NULL DEFAULT '',
 		exit_code INTEGER,
 		output TEXT NOT NULL DEFAULT '',
 		output_offset BIGINT NOT NULL DEFAULT 0,
@@ -87,6 +88,7 @@ const (
 		origin_turn_id TEXT NOT NULL DEFAULT '',
 		source_message_id TEXT NOT NULL DEFAULT '',
 		source_call_id TEXT NOT NULL DEFAULT '',
+		capabilities TEXT NOT NULL DEFAULT '',
 		exit_code INTEGER,
 		output TEXT NOT NULL DEFAULT '',
 		output_truncated INTEGER NOT NULL DEFAULT 0,
@@ -162,19 +164,20 @@ func (r *Repository) UpsertBackgroundWorkload(ctx context.Context, workload *mod
 
 	query := `INSERT INTO task_session_background_work (
 			id, task_id, session_id, kind, title, state, parent_work_id,
-			origin_turn_id, source_message_id, source_call_id, exit_code,
+			origin_turn_id, source_message_id, source_call_id, capabilities, exit_code,
 			output, output_truncated, output_offset, started_at, finished_at,
 			revision, created_at, updated_at
 		) VALUES (
-			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		) ON CONFLICT (session_id, id) DO UPDATE SET
 			title = excluded.title,
 			state = CASE WHEN task_session_background_work.state IN (?) AND excluded.state NOT IN (?)
   THEN task_session_background_work.state ELSE excluded.state END,
-			parent_work_id = excluded.parent_work_id,
+			parent_work_id = CASE WHEN excluded.parent_work_id IS NULL THEN task_session_background_work.parent_work_id ELSE excluded.parent_work_id END,
 			origin_turn_id = CASE WHEN task_session_background_work.origin_turn_id = '' THEN excluded.origin_turn_id ELSE task_session_background_work.origin_turn_id END,
-			source_message_id = excluded.source_message_id,
-			source_call_id = excluded.source_call_id,
+			source_message_id = CASE WHEN excluded.source_message_id = '' THEN task_session_background_work.source_message_id ELSE excluded.source_message_id END,
+			source_call_id = CASE WHEN excluded.source_call_id = '' THEN task_session_background_work.source_call_id ELSE excluded.source_call_id END,
+			capabilities = CASE WHEN excluded.capabilities = '' THEN task_session_background_work.capabilities ELSE excluded.capabilities END,
 			exit_code = CASE WHEN task_session_background_work.state IN (?) AND excluded.state NOT IN (?)
   THEN task_session_background_work.exit_code ELSE excluded.exit_code END,
 			output = excluded.output,
@@ -190,7 +193,7 @@ func (r *Repository) UpsertBackgroundWorkload(ctx context.Context, workload *mod
 	query, args, err := sqlx.In(query,
 		workload.ID, workload.TaskID, workload.SessionID, workload.Kind, workload.Title, workload.State,
 		workload.ParentWorkID, workload.OriginTurnID, workload.SourceMessageID, workload.SourceCallID,
-		workload.ExitCode, workload.Output, workload.OutputTruncated, workload.OutputOffset,
+		workload.Capabilities, workload.ExitCode, workload.Output, workload.OutputTruncated, workload.OutputOffset,
 		workload.StartedAt, workload.FinishedAt, workload.Revision, workload.CreatedAt, workload.UpdatedAt,
 		streams.TerminalRunStates, streams.TerminalRunStates,
 		streams.TerminalRunStates, streams.TerminalRunStates,
@@ -207,13 +210,13 @@ func (r *Repository) GetBackgroundWorkload(ctx context.Context, sessionID, id st
 	var query string
 	if dialect.IsPostgres(r.ro.DriverName()) {
 		query = `SELECT id, task_id, session_id, kind, title, state, parent_work_id,
-				origin_turn_id, source_message_id, source_call_id, exit_code,
+				origin_turn_id, source_message_id, source_call_id, capabilities, exit_code,
 				output, output_truncated, output_offset, started_at, finished_at,
 				revision, created_at, updated_at
 		   FROM task_session_background_work WHERE session_id = $1 AND id = $2`
 	} else {
 		query = `SELECT id, task_id, session_id, kind, title, state, parent_work_id,
-				origin_turn_id, source_message_id, source_call_id, exit_code,
+				origin_turn_id, source_message_id, source_call_id, capabilities, exit_code,
 				output, output_truncated, output_offset, started_at, finished_at,
 				revision, created_at, updated_at
 		   FROM task_session_background_work WHERE session_id = ? AND id = ?`
@@ -233,13 +236,13 @@ func (r *Repository) ListBackgroundWorkloadsBySession(ctx context.Context, sessi
 	var query string
 	if dialect.IsPostgres(r.ro.DriverName()) {
 		query = `SELECT id, task_id, session_id, kind, title, state, parent_work_id,
-				origin_turn_id, source_message_id, source_call_id, exit_code,
+				origin_turn_id, source_message_id, source_call_id, capabilities, exit_code,
 				output, output_truncated, output_offset, started_at, finished_at,
 				revision, created_at, updated_at
 		   FROM task_session_background_work WHERE session_id = $1 ORDER BY created_at ASC`
 	} else {
 		query = `SELECT id, task_id, session_id, kind, title, state, parent_work_id,
-				origin_turn_id, source_message_id, source_call_id, exit_code,
+				origin_turn_id, source_message_id, source_call_id, capabilities, exit_code,
 				output, output_truncated, output_offset, started_at, finished_at,
 				revision, created_at, updated_at
 		   FROM task_session_background_work WHERE session_id = ? ORDER BY created_at ASC`

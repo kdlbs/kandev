@@ -1,3 +1,4 @@
+import { requireRootSplitview as getRootSplitview } from "./layout-manager/dockview-test-host.test-helpers";
 import { describe, expect, it, vi } from "vitest";
 import {
   mergeGroup,
@@ -15,7 +16,6 @@ import {
   applyLayout,
   clearAllPinnedTargets,
   fromDockviewApi,
-  getRootSplitview,
   type LayoutState,
 } from "./layout-manager";
 import { clearReusableRootGeometry } from "./layout-manager/pinned-targets";

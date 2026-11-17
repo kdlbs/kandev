@@ -187,3 +187,27 @@ describe("createPersistentMotionVisibility", () => {
     expect(animation.play).not.toHaveBeenCalled();
   });
 });
+
+it("does not observe a hidden owner and ignores its retired observer", () => {
+  vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
+  const target = document.createElement("div");
+  const element = document.createElement("span");
+  const controller = createPersistentMotionVisibility(target, { ownerVisible: false });
+  controller.register(element);
+  try {
+    expect(intersectionObservers).toHaveLength(0);
+    expect(element.style.animationPlayState).toBe("paused");
+    controller.setOwnerVisible(true);
+    const first = intersectionObservers[0];
+    expect(first.observe).toHaveBeenCalledWith(target);
+    controller.setOwnerVisible(false);
+    expect(first.disconnect).toHaveBeenCalledOnce();
+    controller.setOwnerVisible(true);
+    expect(intersectionObservers).toHaveLength(2);
+    intersectionObservers[1].emit(true);
+    first.emit(false);
+    expect(element.style.animationPlayState).toBe("");
+  } finally {
+    controller.dispose();
+  }
+});

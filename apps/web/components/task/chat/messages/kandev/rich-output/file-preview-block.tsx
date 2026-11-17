@@ -4,7 +4,9 @@ import { useCallback, useId, useEffect } from "react";
 import { IconChevronDown, IconChevronRight, IconExternalLink, IconFile } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
+import { useOptionalAppStore } from "@/components/state-provider";
 import { GridSpinner } from "@/components/grid-spinner";
+import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
 import { getFileCategory, getImageMimeType } from "@/lib/utils/file-types";
 import {
   useWorkspaceFilePreview,
@@ -47,11 +49,10 @@ function FilePreviewContent({
     }
     return (
       <div className="flex justify-center py-2">
-        <img
+        <ImagePreviewDialog
           src={`data:${getImageMimeType(file.path)};base64,${state.response.content}`}
           alt={file.title || file.path}
-          className="max-h-64 max-w-full rounded-md object-contain ring-1 ring-black/10 dark:ring-white/10"
-          draggable={false}
+          thumbnailClassName="max-h-64 max-w-full rounded-md object-contain ring-1 ring-black/10 dark:ring-white/10"
         />
       </div>
     );
@@ -78,9 +79,13 @@ type NativeFilePreviewProps = FilePreviewProps & {
 export function FilePreview({ sessionId, onOpenFile, ...file }: NativeFilePreviewProps) {
   const { t } = useTranslation();
   const previewId = useId();
+  const defaultExpanded = useOptionalAppStore(
+    (store) => store.imagePreviewsExpandedByDefault,
+    true,
+  );
   const [expanded, setExpanded] = useRichOutputViewState(
     JSON.stringify([file.repo, file.path]),
-    getFileCategory(file.path) === "image",
+    getFileCategory(file.path) === "image" && defaultExpanded,
   );
   const { load, state } = useWorkspaceFilePreview(sessionId, file.path, file.repo);
 

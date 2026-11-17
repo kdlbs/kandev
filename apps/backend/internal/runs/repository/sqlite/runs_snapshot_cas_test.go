@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // TestUpdateRunRuntimeSnapshotCAS_WinsWhenPrevMatches covers the ordinary
@@ -13,7 +13,7 @@ import (
 func TestUpdateRunRuntimeSnapshotCAS_WinsWhenPrevMatches(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "run-cas-win", AgentProfileID: "agent-1", Reason: "heartbeat",
 		Capabilities: `{"task_scope_source":""}`,
 	})
@@ -40,7 +40,7 @@ func TestUpdateRunRuntimeSnapshotCAS_WinsWhenPrevMatches(t *testing.T) {
 func TestUpdateRunRuntimeSnapshotCAS_LosesWhenPrevStale(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "run-cas-lose", AgentProfileID: "agent-1", Reason: "heartbeat",
 		Capabilities: `{"task_scope_source":"runner_set","allowed_task_ids":["t1"]}`,
 	})
@@ -65,10 +65,10 @@ func TestUpdateRunRuntimeSnapshotCAS_LosesWhenPrevStale(t *testing.T) {
 func TestUpdateRunRuntimeSnapshotCAS_UnaffectedRunsUntouched(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "run-cas-a", AgentProfileID: "agent-1", Reason: "heartbeat", Capabilities: `{}`,
 	})
-	other := mustCreateRun(t, repo, &models.Run{
+	other := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "run-cas-b", AgentProfileID: "agent-2", Reason: "heartbeat", Capabilities: `{"untouched":true}`,
 	})
 

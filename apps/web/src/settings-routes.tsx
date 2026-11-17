@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- the settings route table is one public dispatch boundary. */
+
 import type { ReactNode } from "react";
 import { Trans, useTranslation } from "react-i18next";
 
@@ -19,6 +21,7 @@ import AutomationsPage from "@/app/settings/workspace/[id]/automations/page";
 import AutomationEditorPage from "@/app/settings/workspace/[id]/automations/[automationId]/page";
 import NewAutomationPage from "@/app/settings/workspace/[id]/automations/new/page";
 import WorkspaceEditPage from "@/app/settings/workspace/[id]/page";
+import WorkspaceMCPServersPage from "@/app/settings/workspace/[id]/mcp-servers/page";
 import WorkspacesPage from "@/app/settings/workspace/page";
 import Link from "@/components/routing/app-link";
 import { useAppStore } from "@/components/state-provider";
@@ -150,9 +153,6 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   // Integrations are per-workspace pages now; the old install-level paths
   // forward into the active workspace's Integrations tab.
   "/settings/integrations": () => <ActiveWorkspaceSectionRedirect section="integrations" />,
-  "/settings/integrations/azure-devops": () => (
-    <ActiveWorkspaceSectionRedirect section="integrations/azure-devops" />
-  ),
   "/settings/integrations/github": () => (
     <ActiveWorkspaceSectionRedirect section="integrations/github" />
   ),
@@ -373,13 +373,19 @@ function renderExecutorSettingsRoute(pathname: string): ReactNode {
 // chain: the nested version pushed the enclosing matcher over both the
 // cyclomatic and cognitive complexity limits.
 // Keep in step with the alternation in the sub-page pattern below.
-type WorkspaceSubpageSection = "repositories" | "workflows" | "automations" | "secrets";
+type WorkspaceSubpageSection =
+  | "repositories"
+  | "workflows"
+  | "automations"
+  | "secrets"
+  | "mcp-servers";
 
 const WORKSPACE_SUBPAGE_PAGES: Record<WorkspaceSubpageSection, (id: string) => ReactNode> = {
   repositories: (id) => <WorkspaceRepositoriesRoute workspaceId={id} />,
   workflows: (id) => <WorkspaceWorkflowsRoute workspaceId={id} />,
   automations: (id) => <AutomationsPage workspaceId={id} />,
   secrets: (id) => <SecretsSettings scope="workspace" workspaceId={id} />,
+  "mcp-servers": (id) => <WorkspaceMCPServersPage workspaceId={id} />,
 };
 
 function renderWorkspaceIntegrationRoute(match: RegExpMatchArray): ReactNode {
@@ -452,7 +458,7 @@ function renderWorkspaceSettingsRoute(pathname: string): ReactNode {
 
   const workspaceSubpage = matchDouble(
     pathname,
-    /^\/settings\/workspaces\/([^/]+)\/(repositories|workflows|automations|secrets)$/,
+    /^\/settings\/workspaces\/([^/]+)\/(repositories|workflows|automations|secrets|mcp-servers)$/,
   );
   if (workspaceSubpage) {
     const [id, section] = workspaceSubpage;

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { freezeCapacityRetries } from "./capacity-retry-clock";
 import path from "node:path";
 import { expect } from "@playwright/test";
 import type { BackendContext } from "../fixtures/backend";
@@ -25,7 +26,7 @@ export async function createRetainedCapacityFixture(
   apiClient: ApiClient,
   seedData: SeedData,
   scenario: string,
-  options: { initialPrompt?: string } = {},
+  options: { initialPrompt?: string; controlRetryClock?: boolean } = {},
 ) {
   const tracePath = path.join(backend.tmpDir, `retained-capacity-${Date.now()}.jsonl`);
   let profileId = "";
@@ -41,6 +42,7 @@ export async function createRetainedCapacityFixture(
   };
   try {
     await backend.restart({ KANDEV_DEBUG_PPROF_ENABLED: "true" });
+    if (options.controlRetryClock || scenario === "exhaust") await freezeCapacityRetries(backend);
     const { agents } = await apiClient.listAgents();
     const agent = agents.find((candidate) => candidate.name === "mock-agent");
     if (!agent) throw new Error("mock-agent was not registered");
@@ -55,7 +57,9 @@ export async function createRetainedCapacityFixture(
       `Retained capacity ${scenario}`,
       profile.id,
       {
-        description: options.initialPrompt ?? `/capacity-${scenario}`,
+        description:
+          options.initialPrompt ??
+          (scenario === "exhaust" ? "/capacity-exhaust:100" : `/capacity-${scenario}`),
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
         repository_ids: [seedData.repositoryId],
@@ -116,6 +120,47 @@ export function assertRetainedACPTrace(tracePath: string, expectedPrompts: numbe
   expect(records.filter((record) => record.event === "session_load")).toHaveLength(0);
   expect(records.filter((record) => record.event === "resume")).toHaveLength(0);
   expect(records.filter((record) => record.event === "prompt")).toHaveLength(expectedPrompts);
+}
+
+export function assertKnownFailedCommandCapacityACPTrace(tracePath: string) {
+  const records = readMockACPTrace(tracePath);
+  const prompts = records.filter((record) => record.event === "prompt");
+  assertRetainedACPTrace(tracePath, 2);
+  expect(
+    prompts.filter((record) => record.prompt?.includes("/capacity-known-failed-command")),
+  ).toHaveLength(1);
+  expect(records.filter((record) => record.event === "known_command_failure")).toHaveLength(1);
+}
+
+export async function expectKnownFailedCommandVisible(session: SessionPage) {
+  const group = session
+    .activeChat()
+    .getByRole("button", { name: /2 tool calls/ })
+    .first();
+  await expect(group).toBeVisible({ timeout: 30_000 });
+  const command = session.activeChat().getByText("go test ./focused", { exact: true }).first();
+  if (!(await command.isVisible())) {
+    await group.click();
+  }
+  await expect(command).toBeVisible();
+}
+
+export async function waitForKnownFailedCommandMessage(apiClient: ApiClient, sessionId: string) {
+  return pollUntil(
+    async () => {
+      const { messages } = await apiClient.listSessionMessages(sessionId);
+      return messages.find((message) => {
+        if (!message.type?.startsWith("tool_")) return false;
+        const status = message.metadata?.status;
+        if (status !== "error" && status !== "failed") return false;
+        const title = String(message.metadata?.title ?? message.content ?? "");
+        return /Run focused fixture command|go test \.\/focused/.test(title);
+      });
+    },
+    (message): message is SessionMessage => message !== undefined,
+    60_000,
+    "waiting for the failed command tool result",
+  );
 }
 
 export function assertCompletedCapacityACPTrace(tracePath: string, originalCommand: string) {

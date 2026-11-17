@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/retention"
 	"slices"
 
 	"github.com/google/uuid"
@@ -151,12 +152,12 @@ func (r *Repository) reserveManagedDeletionTx(ctx context.Context, tx *sqlx.Tx, 
 	}
 	now := r.nowUTC()
 	if previous == nil {
-		_, err = tx.ExecContext(ctx, tx.Rebind(`INSERT INTO task_resource_cleanup_jobs (`+taskResourceCleanupColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), claim.JobID, managed.DeleteOperationID(claim.OperationID), claim.TaskID, models.TaskResourceCleanupTriggerDelete,
-			models.TaskResourceCleanupStatePrepared, snapshot, 0, nil, "", now, now, nil)
+		_, err = tx.ExecContext(ctx, tx.Rebind(`INSERT INTO task_resource_cleanup_jobs (`+taskResourceCleanupColumns+`, workspace_protection) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), claim.JobID, managed.DeleteOperationID(claim.OperationID), claim.TaskID, models.TaskResourceCleanupTriggerDelete,
+			models.TaskResourceCleanupStatePrepared, snapshot, 0, nil, "", now, now, nil, retention.SnapshotProtection(snapshot))
 		return err
 	}
-	result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE task_resource_cleanup_jobs SET state = ?, resource_snapshot = ?, completed_at = NULL, next_attempt_at = NULL, last_error = '', updated_at = ? WHERE id = ? AND operation_id = ? AND state = ? AND resource_snapshot = ?`),
-		models.TaskResourceCleanupStatePrepared, snapshot, now, previous.ID, previous.OperationID, models.TaskResourceCleanupStateCancelled, previous.ResourceSnapshot)
+	result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE task_resource_cleanup_jobs SET state = ?, resource_snapshot = ?, workspace_protection = ?, completed_at = NULL, next_attempt_at = NULL, last_error = '', updated_at = ? WHERE id = ? AND operation_id = ? AND state = ? AND resource_snapshot = ?`),
+		models.TaskResourceCleanupStatePrepared, snapshot, retention.SnapshotProtection(snapshot), now, previous.ID, previous.OperationID, models.TaskResourceCleanupStateCancelled, previous.ResourceSnapshot)
 	if err != nil {
 		return err
 	}
@@ -248,8 +249,8 @@ func (r *Repository) PrepareManagedDeletion(ctx context.Context, expected manage
 }
 
 func (r *Repository) updateDeletionSnapshotTx(ctx context.Context, tx *sqlx.Tx, job *models.TaskResourceCleanupJob, snapshot string) error {
-	result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE task_resource_cleanup_jobs SET resource_snapshot = ?, updated_at = ? WHERE id = ? AND operation_id = ? AND state = ? AND resource_snapshot = ?`),
-		snapshot, r.nowUTC(), job.ID, job.OperationID, models.TaskResourceCleanupStatePrepared, job.ResourceSnapshot)
+	result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE task_resource_cleanup_jobs SET resource_snapshot = ?, workspace_protection = ?, updated_at = ? WHERE id = ? AND operation_id = ? AND state = ? AND resource_snapshot = ?`),
+		snapshot, retention.SnapshotProtection(snapshot), r.nowUTC(), job.ID, job.OperationID, models.TaskResourceCleanupStatePrepared, job.ResourceSnapshot)
 	if err != nil {
 		return err
 	}

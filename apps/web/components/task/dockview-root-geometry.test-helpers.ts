@@ -1,3 +1,4 @@
+import { requireRootSplitview as getRootSplitview } from "@/lib/state/layout-manager/dockview-test-host.test-helpers";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import type { DockviewApi } from "dockview-react";
 import { splitPanel } from "@/components/settings/layouts/layout-editor-actions";
@@ -12,7 +13,6 @@ import {
   applyLayout,
   clearAllPinnedTargets,
   fromDockviewApi,
-  getRootSplitview,
   type LayoutState,
 } from "@/lib/state/layout-manager";
 import {

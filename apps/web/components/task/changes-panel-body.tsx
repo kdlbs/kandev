@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { PanelBody } from "./panel-primitives";
@@ -10,6 +10,7 @@ import type { ChangesPanelBodyProps } from "./changes-panel-data";
 import { ChangesPanelTimelineContent } from "./changes-panel-timeline-content";
 import type { ChangesPanelTimelineContentProps } from "./changes-panel-timeline-types";
 import { WorkspaceUnavailable } from "./workspace-unavailable";
+import { ROOT_FOCUS_EVENT } from "./root-context-menu";
 
 function ComparisonTargetNotice({
   comparisonTargets,
@@ -73,24 +74,50 @@ function ChangesPanelDialogsSection({
   );
 }
 
-function EmptyChangesPanel() {
+function EmptyChangesPanel({ loading = false }: { loading?: boolean }) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
-      {t("task:yourChangedFilesWillAppearHere")}
+    <div
+      role={loading ? "status" : undefined}
+      className="flex items-center justify-center h-full text-muted-foreground text-xs"
+    >
+      {loading ? t("task:loadingChanges") : t("task:yourChangedFilesWillAppearHere")}
     </div>
   );
 }
 
 function ChangesPanelTimeline(
-  props: ChangesPanelTimelineContentProps & Pick<ChangesPanelBodyProps, "gitStatus">,
+  props: ChangesPanelTimelineContentProps &
+    Pick<ChangesPanelBodyProps, "gitStatus" | "commitsInitialLoading">,
 ) {
-  if (!props.hasAnything) return props.gitStatus.membershipReady ? <EmptyChangesPanel /> : null;
+  if (!props.hasAnything) {
+    // Only the first commits result controls loading; diff retries keep their prior data.
+    if (props.commitsInitialLoading) return <EmptyChangesPanel loading />;
+    return props.gitStatus.membershipReady ? <EmptyChangesPanel /> : null;
+  }
   return <ChangesPanelTimelineContent {...props} />;
 }
 
 export function ChangesPanelBody(props: ChangesPanelBodyProps) {
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const handleRootFocus = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{ surface?: string; repositoryName?: string; trackerName?: string }>
+      ).detail;
+      if (detail?.surface !== "changes") return;
+      const groups = document.querySelectorAll("[data-repository-name]");
+      const target =
+        Array.from(groups).find(
+          (group) =>
+            group.getAttribute("data-repository-name") === detail.repositoryName ||
+            group.getAttribute("data-repository-name") === detail.trackerName,
+        ) ?? (groups.length === 1 ? groups[0] : null);
+      target?.scrollIntoView({ block: "nearest" });
+    };
+    window.addEventListener(ROOT_FOCUS_EVENT, handleRootFocus);
+    return () => window.removeEventListener(ROOT_FOCUS_EVENT, handleRootFocus);
+  }, []);
   const workspaceBlocked =
     props.workspaceRestoration && props.workspaceRestoration.status !== "ready";
   const beforeLayoutKey = [

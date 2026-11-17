@@ -9,7 +9,6 @@ const mocks = vi.hoisted(() => ({
   listWorkflows: vi.fn(),
   listAutomations: vi.fn(),
   listSecrets: vi.fn(),
-  getAzureDevOpsConfig: vi.fn(),
   fetchGitHubStatus: vi.fn(),
   getGitLabConfig: vi.fn(),
   getJiraConfig: vi.fn(),
@@ -34,9 +33,6 @@ vi.mock("@/lib/api/domains/automation-api", () => ({
 }));
 vi.mock("@/lib/api/domains/secrets-api", () => ({
   listSecrets: mocks.listSecrets,
-}));
-vi.mock("@/lib/api/domains/azure-devops-api", () => ({
-  getAzureDevOpsConfig: mocks.getAzureDevOpsConfig,
 }));
 vi.mock("@/lib/api/domains/github-auth-api", () => ({
   fetchGitHubStatus: mocks.fetchGitHubStatus,
@@ -90,7 +86,6 @@ function resetApiMocks() {
   mocks.listWorkflows.mockReset().mockResolvedValue({ workflows: [] });
   mocks.listAutomations.mockReset().mockResolvedValue([]);
   mocks.listSecrets.mockReset().mockResolvedValue([]);
-  mocks.getAzureDevOpsConfig.mockReset().mockResolvedValue(null);
   mocks.fetchGitHubStatus.mockReset().mockResolvedValue({ authenticated: false });
   mocks.getGitLabConfig.mockReset().mockResolvedValue(null);
   mocks.getJiraConfig.mockReset().mockResolvedValue(null);

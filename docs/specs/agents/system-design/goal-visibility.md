@@ -119,6 +119,11 @@ Preserve whitespace where useful, wrap long tokens, and do not render objective 
 
 Fine-pointer desktop uses a controlled popover above the trigger. Hover, focus,
 and click open the same content; pointer movement into the content keeps it open.
+A trigger click requests the open state rather than toggling it. Consume the
+popover primitive's default trigger toggle so a preceding hover or focus does
+not make that click close the details. Escape and outside interaction retain
+their existing dismissal and focus behavior; the touch drawer keeps its native
+trigger interaction.
 Escape dismisses it without closing Quick Chat. Avoid simultaneous tooltip/popover
 copies or a focus-dismiss/reopen loop. Match the surrounding compact status-chip density.
 

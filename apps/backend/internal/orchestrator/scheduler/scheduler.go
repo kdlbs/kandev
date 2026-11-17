@@ -275,8 +275,8 @@ func (s *Scheduler) processLoop(ctx context.Context) {
 
 // processTasks processes pending tasks from the queue
 func (s *Scheduler) processTasks(ctx context.Context) {
-	// Process tasks while we have capacity
-	for s.executor.CanExecute() {
+	// Drain queued tasks until cancellation or an empty queue.
+	for {
 		// Check if we should stop
 		select {
 		case <-ctx.Done():

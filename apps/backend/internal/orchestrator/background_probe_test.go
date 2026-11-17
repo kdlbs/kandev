@@ -24,7 +24,7 @@ func TestProbeBackgroundWorkloads_AuthorizedCallReachesExecutor(t *testing.T) {
 	s := &Service{
 		logger:                testLogger(),
 		sessionAccessCheck:    func(context.Context, string) error { return nil },
-		executor:              executor.NewExecutor(mgr, nil, testLogger(), executor.ExecutorConfig{}),
+		executor:              withTestCapabilities(executor.NewExecutor(mgr, nil, testLogger(), executor.ExecutorConfig{})),
 		backgroundProbeConfig: BackgroundProbeConfig{Budget: defaultParkedProbeBudget, Interval: defaultParkedProbeInterval},
 	}
 
@@ -56,7 +56,7 @@ func TestProbeBackgroundWorkloads_ZeroConfigFallsBackToDefaultBudget(t *testing.
 	s := &Service{
 		logger:             testLogger(),
 		sessionAccessCheck: func(context.Context, string) error { return nil },
-		executor:           executor.NewExecutor(mgr, nil, testLogger(), executor.ExecutorConfig{}),
+		executor:           withTestCapabilities(executor.NewExecutor(mgr, nil, testLogger(), executor.ExecutorConfig{})),
 	}
 
 	if _, err := s.ProbeBackgroundWorkloads(context.Background(), "sess-1"); err != nil {

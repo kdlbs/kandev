@@ -339,6 +339,7 @@ function DesktopFiltersGroup({
   const { t } = useTranslation();
   const showRepository = settings.currentPage !== "threads";
   const showPriority = settings.currentPage === "kanban";
+  const showListScope = settings.currentPage !== "tasks";
   const visiblePluginFilters =
     settings.currentPage === "threads" ? [] : (settings.pluginFilters ?? []);
   return (
@@ -349,11 +350,11 @@ function DesktopFiltersGroup({
         t,
         activeWorkflowId: settings.activeWorkflowId,
         workflows: settings.workflows,
-        showWorkflow: true,
+        showWorkflow: showListScope,
         repositoryValue: settings.repositoryValue,
         repositories: settings.repositories,
         repositoriesLoading: settings.repositoriesLoading,
-        showRepository,
+        showRepository: showRepository && showListScope,
         priorityFilterTokens: settings.priorityFilterTokens,
         showPriority,
         pluginFilters: visiblePluginFilters,
@@ -362,20 +363,24 @@ function DesktopFiltersGroup({
       expanded={expanded}
       onExpandedChange={onExpandedChange}
     >
-      <WorkflowSection
-        activeWorkflowId={settings.activeWorkflowId}
-        workflows={settings.workflows}
-        onWorkflowChange={settings.onWorkflowChange}
-      />
+      {showListScope && (
+        <WorkflowSection
+          activeWorkflowId={settings.activeWorkflowId}
+          workflows={settings.workflows}
+          onWorkflowChange={settings.onWorkflowChange}
+        />
+      )}
       {showRepository && (
         <>
           <DropdownMenuSeparator />
-          <RepositorySection
-            repositoryValue={settings.repositoryValue}
-            repositories={settings.repositories}
-            repositoriesLoading={settings.repositoriesLoading}
-            onRepositoryChange={settings.onRepositoryChange}
-          />
+          {showListScope && (
+            <RepositorySection
+              repositoryValue={settings.repositoryValue}
+              repositories={settings.repositories}
+              repositoriesLoading={settings.repositoriesLoading}
+              onRepositoryChange={settings.onRepositoryChange}
+            />
+          )}
           {showPriority && (
             <>
               <DropdownMenuSeparator />
@@ -411,11 +416,13 @@ function DropdownSections(props: DropdownSectionsProps) {
   const showPriority = props.currentPage === "kanban";
   return (
     <div className="space-y-3">
-      <DesktopFiltersGroup
-        settings={props}
-        expanded={props.expandedGroups.filters}
-        onExpandedChange={(expanded) => props.onExpandedChange("filters", expanded)}
-      />
+      {(props.currentPage !== "tasks" || Boolean(props.pluginFilters?.length)) && (
+        <DesktopFiltersGroup
+          settings={props}
+          expanded={props.expandedGroups.filters}
+          onExpandedChange={(expanded) => props.onExpandedChange("filters", expanded)}
+        />
+      )}
       {showPriority && (
         <DisplaySettingsGroup
           group="sort"

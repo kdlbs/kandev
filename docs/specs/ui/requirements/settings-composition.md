@@ -38,6 +38,7 @@ It preserves [manual saving](settings-manual-save.md), [discovery](settings-disc
 - **AC-UI-SETTINGS-COMPOSITION-001.3:** Forms shall group related fields. Resource lists shall use consistent headings and actions while retaining their list, table, or editor interaction.
 - **AC-UI-SETTINGS-COMPOSITION-001.4:** The change shall preserve existing page destinations, sidebar entries, and settings-search targets. Task behavior may add the header tabs defined below.
 - **AC-UI-SETTINGS-COMPOSITION-001.5:** Equivalent content shall use the existing typography and control-size roles. Technical editors, diagnostics, and tables shall retain documented specialized layouts.
+- **AC-UI-SETTINGS-COMPOSITION-001.6:** Bordered preference groups shall have one effective padding layer. First and last rows shall retain the same outer inset in single-row and multiple-row groups.
 
 ### REQ-UI-SETTINGS-COMPOSITION-002: Task behavior organization
 
@@ -51,6 +52,8 @@ It preserves [manual saving](settings-manual-save.md), [discovery](settings-disc
 - **AC-UI-SETTINGS-COMPOSITION-002.4:** Runtime shall contain session capacity, message queue limits and merging, and sleep prevention. All settings sections shall remain expanded within their tab.
 - **AC-UI-SETTINGS-COMPOSITION-002.5:** Runtime shall show effective limits beside their controls when these differ from drafts or saved values. Loading and unavailable values shall remain explicit.
 - **AC-UI-SETTINGS-COMPOSITION-002.6:** Runtime settings shall identify their instance scope. Sleep prevention shall identify the host computer, including when the user connects remotely.
+- **AC-UI-SETTINGS-COMPOSITION-002.7:** Task behavior shall use a bounded content width. Its heading, tabs, groups, and controls shall share that boundary on wide displays.
+- **AC-UI-SETTINGS-COMPOSITION-002.8:** Profile choices shall appear below their setting label and description. Choices shall share a row when space permits and stack on phones.
 
 ### REQ-UI-SETTINGS-COMPOSITION-003: Concise descriptions and optional information
 
@@ -103,3 +106,5 @@ It preserves [manual saving](settings-manual-save.md), [discovery](settings-disc
 ## Implementation plan
 
 See [Settings composition](../../../plans/settings-composition/plan.md). The latest refinement is [Task 06](../../../plans/settings-composition/task-06-concise-help-and-tabs.md).
+
+The spacing correction is in [Task behavior spacing](../../../plans/task-behavior-spacing/plan.md).

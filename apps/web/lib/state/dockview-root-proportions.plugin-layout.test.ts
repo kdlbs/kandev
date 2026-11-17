@@ -1,3 +1,4 @@
+import { requireRootSplitview as getRootSplitview } from "./layout-manager/dockview-test-host.test-helpers";
 import { describe, expect, it, vi } from "vitest";
 import { movePanelToGroup } from "@/components/settings/layouts/layout-editor-actions";
 import {
@@ -7,12 +8,7 @@ import {
 import { setupSashDragCapToggle } from "@/components/task/dockview-layout-setup";
 import { getManualRightWidth, setManualRightWidth } from "@/lib/local-storage";
 import { resolveCustomLayoutPinnedWidths, useDockviewStore } from "./dockview-store";
-import {
-  applyLayout,
-  clearAllPinnedTargets,
-  getRootSplitview,
-  setReusableRightTarget,
-} from "./layout-manager";
+import { applyLayout, clearAllPinnedTargets, setReusableRightTarget } from "./layout-manager";
 import {
   ENV,
   HEIGHT,

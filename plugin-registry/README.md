@@ -6,8 +6,9 @@ Browse** inside Kandev.
 
 It is deliberately minimal. It records *which repositories* are in the official
 catalog and registry-owned preview images. Release metadata (display name,
-description, author, version, tarball URL, package digest, stars) is read from
-the package and GitHub release when the catalog index is built.
+description, version, tarball URL, package digest, stars) is read from the
+package and GitHub release when the catalog index is built. Catalog attribution
+comes from the curated repository owner, not the package manifest.
 
 ## Files
 
@@ -94,6 +95,27 @@ usage telemetry** — there is no "most installed" metric, by design.
    star counts. The canvas inspector validates the exact release asset,
    identity, source mode, permissions, and archive digest without executing
    package code.
+
+## Catalog attribution
+
+The catalog attributes a native plugin to the **owner of its curated
+repository** in `plugins.yaml`, not to the `author` field in its manifest. A
+plugin curated under `Fclem/kandev-plugin-prompt-history` shows **by Fclem**
+even when its manifest declares `author: "kandev"`, and first-party
+`kdlbs/kandev-plugin-*` entries show **by kdlbs**.
+
+The manifest `author` is declared package data. An installed plugin's Manifest
+card shows it as **Declared author**. That label does not make the author a
+verified publisher: trust still comes from the marketplace source you enabled,
+and a custom source's metadata is only as trustworthy as its maintainer.
+
+The curated owner is a listing identity. It changes through a reviewed pointer
+update, not through a plugin release, and a successful rebuild applies it to a
+retained record without changing that record's package version, URL, or digest.
+After the index workflow publishes, readers see the new identity when the
+catalog refreshes or its five-minute cache expires. A failed build publishes
+nothing, so the previous catalog keeps its existing attribution until a later
+build succeeds.
 
 ## Publication security and failure behavior
 

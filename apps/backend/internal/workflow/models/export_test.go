@@ -101,7 +101,7 @@ func TestBuildWorkflowExport(t *testing.T) {
 		assert.Equal(t, 0, *export.Workflows[0].Steps[1].PullFromStepPosition)
 	})
 
-	t.Run("exports explicit target as version two portable position", func(t *testing.T) {
+	t.Run("exports explicit target as portable position", func(t *testing.T) {
 		wf := &taskmodels.Workflow{ID: "wf-1", Name: "Targeted Workflow"}
 		steps := []*WorkflowStep{
 			{ID: "source", Name: "Source", Position: 0, AgentProfileID: "profile-a"},
@@ -111,7 +111,7 @@ func TestBuildWorkflowExport(t *testing.T) {
 		export := BuildWorkflowExport([]*taskmodels.Workflow{wf}, map[string][]*WorkflowStep{"wf-1": steps}, func(profileID string) *AgentProfilePortable {
 			return &AgentProfilePortable{AgentName: profileID}
 		})
-		require.Equal(t, ExportVersion, export.Version)
+		require.Equal(t, ProfileOptionsExportVersion, export.Version)
 		require.NotNil(t, export.Workflows[0].Steps[1].SessionTarget)
 		assert.Equal(t, WorkflowSessionTargetStep, export.Workflows[0].Steps[1].SessionTarget.Kind)
 		require.NotNil(t, export.Workflows[0].Steps[1].SessionTarget.StepPosition)
@@ -458,7 +458,7 @@ func TestConvertPositionToStepID(t *testing.T) {
 func TestConvertPositionToStepID_PhaseTwoTriggers(t *testing.T) {
 	posToID := map[int]string{0: "new-a", 1: "new-b"}
 
-	t.Run("all seven Phase-2 GenericAction triggers survive conversion", func(t *testing.T) {
+	t.Run("all GenericAction triggers survive conversion", func(t *testing.T) {
 		moveTo := func(pos int) []GenericAction {
 			return []GenericAction{{Type: GenericActionMoveToStep, Config: map[string]any{"step_position": pos}}}
 		}
@@ -470,6 +470,8 @@ func TestConvertPositionToStepID_PhaseTwoTriggers(t *testing.T) {
 			OnHeartbeat:         moveTo(0),
 			OnBudgetAlert:       moveTo(0),
 			OnAgentError:        moveTo(0),
+			OnPRMerged:          moveTo(0),
+			OnPRClosed:          moveTo(0),
 		}
 		result := ConvertPositionToStepID(events, posToID)
 
@@ -481,6 +483,8 @@ func TestConvertPositionToStepID_PhaseTwoTriggers(t *testing.T) {
 			"on_heartbeat":          result.OnHeartbeat,
 			"on_budget_alert":       result.OnBudgetAlert,
 			"on_agent_error":        result.OnAgentError,
+			"on_pr_merged":          result.OnPRMerged,
+			"on_pr_closed":          result.OnPRClosed,
 		}
 		for name, actions := range triggers {
 			require.Lenf(t, actions, 1, "%s dropped during ConvertPositionToStepID", name)

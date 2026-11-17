@@ -70,6 +70,10 @@ RULES
 
 <!-- Optional: one line on risk level and what could go wrong. Remove section if not needed. -->
 
+## Screenshots
+
+<!-- UI candidate PRs need at least one HTTPS Markdown image with descriptive alt text here. This also applies to fork PRs. A maintainer may use no-screenshots-allow for a false positive or an explained capture limitation. -->
+
 ## Checklist
 
 - [ ] If I do not have repository write access and this is a large architectural change, I discussed the direction in a linked issue before opening this PR.

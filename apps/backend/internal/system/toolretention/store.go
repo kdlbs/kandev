@@ -5,10 +5,16 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"time"
+
 	"github.com/jmoiron/sqlx"
 )
 
 const settingsKey = "tool_payload_retention"
+
+// recordVersion 2 is the combined tool-detail and historical-content scope.
+// Version 1 tool-only approvals must not authorize the wider destructive scope.
+const recordVersion = 2
 
 func readRecord(ctx context.Context, q sqlx.QueryerContext) (record, error) {
 	var raw string
@@ -20,7 +26,12 @@ func readRecord(ctx context.Context, q sqlx.QueryerContext) (record, error) {
 		return record{}, err
 	}
 	var r record
-	if json.Unmarshal([]byte(raw), &r) != nil || r.Version != 1 || r.Policy.Age.Validate() != nil || r.Policy.Revision < 0 {
+	if json.Unmarshal([]byte(raw), &r) != nil || (r.Version != 1 && r.Version != recordVersion) ||
+		r.Policy.Age.Validate() != nil || r.Policy.Revision < 0 {
+		return record{}, errors.New("invalid_stored_policy")
+	}
+	legacyApproval := r.Version == 1
+	if legacyApproval && validateRecord(r) != nil {
 		return record{}, errors.New("invalid_stored_policy")
 	}
 	switch r.Preparation.State {
@@ -31,11 +42,32 @@ func readRecord(ctx context.Context, q sqlx.QueryerContext) (record, error) {
 	if err := validateRecord(r); err != nil {
 		return record{}, err
 	}
+	if legacyApproval {
+		r = migrateToolOnlyRecord(r)
+	}
 	r.Supported = true
 	if r.Operation != nil && r.Operation.Skipped == nil {
 		r.Operation.Skipped = map[string]int64{}
 	}
 	return r, nil
+}
+
+// migrateToolOnlyRecord preserves the selected period and revision but clears
+// the old approval. The wider scope requires the existing preparation choice
+// once before any destructive work.
+func migrateToolOnlyRecord(r record) record {
+	r.Version = recordVersion
+	r.Policy.Enabled = false
+	r.Preparation = Preparation{State: stateNone}
+	r.PreparationDetail = ""
+	r.ApprovedRevision = 0
+	r.Receipt = ""
+	r.FirstMutation = false
+	r.NextDueAt = nil
+	if r.Operation != nil && r.Operation.State == stateRunning {
+		finishOperation(&r, stateCancelled, "scope_migrated", time.Now())
+	}
+	return r
 }
 
 func validateRecord(r record) error {

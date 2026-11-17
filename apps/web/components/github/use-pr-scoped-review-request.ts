@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { githubResourceKey } from "@/lib/github/host";
 import { t } from "@/lib/i18n";
 import { requestPRReviewers } from "@/lib/api/domains/github-review-api";
 import type { PRReview, RequestedReviewer, TaskPR } from "@/lib/types/github";
@@ -47,7 +48,7 @@ function prIdentity(workspaceId: string | null, taskPR: TaskPR) {
   if (!workspaceId) return null;
   const normalizedWorkspaceId = normalizeWorkspaceId(workspaceId);
   if (!normalizedWorkspaceId) return null;
-  return `${normalizedWorkspaceId}:${taskPR.owner.toLowerCase()}:${taskPR.repo.toLowerCase()}:${taskPR.pr_number}`;
+  return `${normalizedWorkspaceId}:${githubResourceKey(taskPR.owner.toLowerCase(), taskPR.repo.toLowerCase(), taskPR.pr_number, taskPR.github_host)}`;
 }
 
 function entryKey(identity: string, reviewer: string) {
@@ -219,13 +220,10 @@ export function usePRScopedReviewRequest(
       const operationId = beginRequest(identity, reviewer, baseline);
       if (operationId === null) return;
       try {
-        await requestPRReviewers(
-          taskPR.owner,
-          taskPR.repo,
-          taskPR.pr_number,
-          [reviewer],
+        await requestPRReviewers(taskPR.owner, taskPR.repo, taskPR.pr_number, [reviewer], {
           workspaceId,
-        );
+          expectedHost: taskPR.github_host ?? "github.com",
+        });
       } catch (error) {
         finishRequest(identity, reviewer, operationId, false);
         toast({

@@ -14,7 +14,6 @@ import {
   releaseFakeLspInitialization,
 } from "./lsp-e2e-helpers";
 import { dwell } from "../../helpers/causal-waits";
-import { SessionPage } from "../../pages/session-page";
 
 function isProcessAlive(pid: number): boolean {
   try {
@@ -228,10 +227,8 @@ test.describe("Mobile LSP boundaries", () => {
 
       await testPage.reload();
       await testPage.setViewportSize({ width: 820, height: 900 });
-      const reopenedSession = new SessionPage(testPage);
-      await reopenedSession.waitForLoad(45_000);
       testPage.setDefaultTimeout(15_000);
-      await expect(testPage.getByTestId("tablet-task-layout")).toBeVisible();
+      await expect(testPage.getByTestId("tablet-task-layout")).toBeVisible({ timeout: 45_000 });
       const reopenedFileNode = testPage.locator(
         `[data-testid="file-tree-node"][data-path="${task.filePaths[0]}"]`,
       );

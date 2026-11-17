@@ -1,3 +1,4 @@
+import { readResizableRootSplitview, type RootSplitview } from "../dockview-internals";
 import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
 import type { LayoutOrientation, LayoutState } from "./types";
 import { readRootOrientation, toSerializedDockview } from "./serializer";
@@ -21,11 +22,8 @@ export type LayoutGroupIds = {
   sidebarGroupId: string;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function getRootSplitview(api: DockviewApi): any | null {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sv = (api as any).component?.gridview?.root?.splitview;
-  return sv?.resizeView && sv?.getViewSize ? sv : null;
+export function getRootSplitview(api: DockviewApi): RootSplitview | null {
+  return readResizableRootSplitview(api);
 }
 
 /**

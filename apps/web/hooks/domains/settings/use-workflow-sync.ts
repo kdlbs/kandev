@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { t } from "@/lib/i18n";
 import { useWorkflowSyncLifetime, type WorkflowSyncLifetime } from "./use-workflow-sync-lifetime";
 import { useToast } from "@/components/toast-provider";
@@ -17,10 +18,12 @@ import type {
   WorkflowSyncProvider,
   WorkflowSyncSetConfigRequest,
 } from "@/lib/types/workflow-sync";
+import { PUBLIC_GITHUB_HOST } from "@/lib/github/host";
 import { buildGitHubRepoUrl, parseGitHubRepoUrl } from "@/lib/utils/github-repo-url";
 import { parseGitLabProjectUrl } from "@/lib/utils/gitlab-repo-url";
 
 export type WorkflowSyncFormState = {
+  github_host: string;
   provider: WorkflowSyncProvider;
   repo_owner: string;
   repo_name: string;
@@ -32,6 +35,7 @@ export type WorkflowSyncFormState = {
 };
 
 const DEFAULT_FORM: WorkflowSyncFormState = {
+  github_host: PUBLIC_GITHUB_HOST,
   provider: "github",
   repo_owner: "",
   repo_name: "",
@@ -46,6 +50,7 @@ function configToForm(cfg: WorkflowSyncConfig | null): WorkflowSyncFormState {
   if (!cfg) return DEFAULT_FORM;
   return {
     provider: cfg.provider,
+    github_host: cfg.provider === "gitlab" ? "" : (cfg.github_host ?? PUBLIC_GITHUB_HOST),
     repo_owner: cfg.repo_owner,
     repo_name: cfg.repo_name,
     project_path: cfg.project_path,
@@ -66,18 +71,21 @@ function configToForm(cfg: WorkflowSyncConfig | null): WorkflowSyncFormState {
 // would let it silently disagree with the authoritative Branch/Directory
 // fields after a direct edit.
 function displayUrl(
-  form: Pick<WorkflowSyncFormState, "provider" | "repo_owner" | "repo_name" | "project_path">,
+  form: Pick<
+    WorkflowSyncFormState,
+    "provider" | "repo_owner" | "repo_name" | "project_path" | "github_host"
+  >,
 ): string {
   if (form.provider === "gitlab") {
     return form.project_path;
   }
   return form.repo_owner
-    ? buildGitHubRepoUrl({ owner: form.repo_owner, repo: form.repo_name })
+    ? buildGitHubRepoUrl({ owner: form.repo_owner, repo: form.repo_name, host: form.github_host })
     : "";
 }
 
-function parseRepoUrl(provider: WorkflowSyncProvider, value: string) {
-  return provider === "gitlab" ? parseGitLabProjectUrl(value) : parseGitHubRepoUrl(value);
+function parseRepoUrl(provider: WorkflowSyncProvider, value: string, host?: string) {
+  return provider === "gitlab" ? parseGitLabProjectUrl(value) : parseGitHubRepoUrl(value, host);
 }
 
 // Background refresh so the status banner picks up new poller results
@@ -128,8 +136,14 @@ function draftFromConfig(cfg: WorkflowSyncConfig | null): WorkflowSyncDraft {
   return { form, url: displayUrl(form) };
 }
 
-function formFromUrl(form: WorkflowSyncFormState, url: string): WorkflowSyncFormState {
-  const parsed = parseRepoUrl(form.provider, url);
+function formFromUrl(
+  form: WorkflowSyncFormState,
+  url: string,
+  configuredHost?: string,
+): WorkflowSyncFormState {
+  const parsed =
+    parseRepoUrl(form.provider, url, configuredHost) ??
+    parseRepoUrl(form.provider, url, form.github_host);
   if (!parsed) return form;
   if (form.provider === "gitlab" && "projectPath" in parsed) {
     return {
@@ -142,6 +156,7 @@ function formFromUrl(form: WorkflowSyncFormState, url: string): WorkflowSyncForm
   if (form.provider === "github" && "owner" in parsed) {
     return {
       ...form,
+      github_host: parsed.host ?? PUBLIC_GITHUB_HOST,
       repo_owner: parsed.owner,
       repo_name: parsed.repo,
       branch: parsed.branch ?? form.branch,
@@ -151,7 +166,7 @@ function formFromUrl(form: WorkflowSyncFormState, url: string): WorkflowSyncForm
   return form;
 }
 
-function useWorkflowSyncForm(lifetime: WorkflowSyncLifetime) {
+function useWorkflowSyncForm(lifetime: WorkflowSyncLifetime, configuredHost?: string) {
   const [draft, setDraft] = useState<WorkflowSyncDraft>(() => draftFromConfig(null));
   const latest = useRef(draft);
   // Admitted edits and resets publish atomically, including before a batched render.
@@ -159,6 +174,13 @@ function useWorkflowSyncForm(lifetime: WorkflowSyncLifetime) {
     latest.current = next;
     setDraft(next);
   }, []);
+
+  useEffect(() => {
+    if (!configuredHost || !lifetime.active) return;
+    const current = latest.current;
+    const next = { ...current, form: formFromUrl(current.form, current.url, configuredHost) };
+    if (!draftsEqual(current, next)) publish(next);
+  }, [configuredHost, lifetime, publish]);
 
   const update = useCallback(
     <K extends keyof WorkflowSyncFormState>(key: K, value: WorkflowSyncFormState[K]) => {
@@ -172,9 +194,9 @@ function useWorkflowSyncForm(lifetime: WorkflowSyncLifetime) {
   const setUrlInput = useCallback(
     (value: string) => {
       if (!lifetime.active) return;
-      publish({ form: formFromUrl(latest.current.form, value), url: value });
+      publish({ form: formFromUrl(latest.current.form, value, configuredHost), url: value });
     },
-    [lifetime, publish],
+    [configuredHost, lifetime, publish],
   );
 
   // Switching providers changes what the link/project-path field means, so
@@ -186,10 +208,17 @@ function useWorkflowSyncForm(lifetime: WorkflowSyncLifetime) {
       if (!lifetime.active) return;
       publish({
         url: "",
-        form: { ...latest.current.form, provider, repo_owner: "", repo_name: "", project_path: "" },
+        form: {
+          ...latest.current.form,
+          provider,
+          github_host: provider === "gitlab" ? "" : (configuredHost ?? PUBLIC_GITHUB_HOST),
+          repo_owner: "",
+          repo_name: "",
+          project_path: "",
+        },
       });
     },
-    [lifetime, publish],
+    [configuredHost, lifetime, publish],
   );
 
   // reset re-derives both the structured form and the displayed link from a
@@ -214,7 +243,10 @@ function useWorkflowSyncForm(lifetime: WorkflowSyncLifetime) {
   );
 
   const { form, url } = draft;
-  const urlInvalid = !!url.trim() && !parseRepoUrl(form.provider, url);
+  const urlInvalid =
+    !!url.trim() &&
+    !parseRepoUrl(form.provider, url, configuredHost) &&
+    !parseRepoUrl(form.provider, url, form.github_host);
   return { draft, form, url, urlInvalid, update, setUrlInput, setProvider, reset, acknowledgeSave };
 }
 
@@ -275,12 +307,14 @@ function useWorkflowSyncInitialLoad(
 }
 
 export function useWorkflowSync(workspaceId: string) {
+  const { status: githubStatus } = useGitHubStatus(workspaceId);
+  const configuredHost = githubStatus?.automation?.github_host;
   const lifetime = useWorkflowSyncLifetime(workspaceId);
   const { toast } = useToast();
   const router = useRouter();
   const [config, setConfig] = useState<WorkflowSyncConfig | null>(null);
   const { draft, form, url, urlInvalid, update, setUrlInput, setProvider, reset, acknowledgeSave } =
-    useWorkflowSyncForm(lifetime);
+    useWorkflowSyncForm(lifetime, configuredHost);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -341,6 +375,7 @@ function savePayload(form: WorkflowSyncFormState): WorkflowSyncSetConfigRequest 
       }
     : {
         provider: "github",
+        github_host: form.github_host,
         repo_owner: form.repo_owner.trim(),
         repo_name: form.repo_name.trim(),
         branch: form.branch.trim(),

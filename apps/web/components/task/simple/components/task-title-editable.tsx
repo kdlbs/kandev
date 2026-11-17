@@ -5,6 +5,7 @@ import type { KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Input } from "@kandev/ui/input";
 import { useCommitTaskTitle } from "@/hooks/use-optimistic-task-mutation";
+import { useInlineEditFocus } from "@/hooks/use-inline-edit-focus";
 import { useTaskTitleSelectionRestore } from "@/hooks/use-task-title-selection-restore";
 import { closeFieldEditor, openFieldEditor } from "@/lib/state/office-task-content-sync";
 
@@ -19,7 +20,6 @@ type TaskTitleEditableProps = {
  * Escape/blur cancel. No archived-task or status gate (AC-30, AC-47).
  */
 export function TaskTitleEditable({ taskId, title }: TaskTitleEditableProps) {
-  const { t } = useTranslation();
   const commitTitle = useCommitTaskTitle();
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -49,6 +49,16 @@ export function TaskTitleEditable({ taskId, title }: TaskTitleEditableProps) {
     closeFieldEditor(taskId, "title");
     setIsEditing(false);
   }, [taskId]);
+
+  const { onBlur, cancelPendingBlur } = useInlineEditFocus({
+    active: isEditing,
+    identity: taskId,
+    inputRef,
+    onLeave: closeEditor,
+  });
+  useEffect(() => {
+    if (isEditing) inputRef.current?.select();
+  }, [isEditing, inputRef]);
 
   const activate = useCallback(() => {
     setBaseline(title);
@@ -88,18 +98,20 @@ export function TaskTitleEditable({ taskId, title }: TaskTitleEditableProps) {
         e.preventDefault();
         const trimmed = draft.trim();
         if (!trimmed) return; // AC-7: invalid, stays open, no request
+        cancelPendingBlur();
         if (trimmed === baseline) {
           closeEditor(); // AC-8
           return;
         }
         commit(trimmed); // AC-3
       } else if (e.key === "Escape") {
+        cancelPendingBlur();
         e.preventDefault();
         e.stopPropagation();
         closeEditor(); // AC-4
       }
     },
-    [baseline, closeEditor, commit, draft],
+    [baseline, closeEditor, commit, draft, cancelPendingBlur],
   );
 
   if (!isEditing) {
@@ -116,6 +128,31 @@ export function TaskTitleEditable({ taskId, title }: TaskTitleEditableProps) {
     );
   }
 
+  return (
+    <TitleInput
+      draft={draft}
+      inputRef={inputRef}
+      onChange={(e) => setDraft(clampChange(e))}
+      onBlur={onBlur}
+      onKeyDown={handleInputKeyDown}
+    />
+  );
+}
+
+function TitleInput({
+  draft,
+  inputRef,
+  onChange,
+  onBlur,
+  onKeyDown,
+}: {
+  draft: string;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  onChange: React.ChangeEventHandler<HTMLInputElement>;
+  onBlur: React.FocusEventHandler<HTMLInputElement>;
+  onKeyDown: React.KeyboardEventHandler<HTMLInputElement>;
+}) {
+  const { t } = useTranslation();
   const trimmedDraft = draft.trim();
   const isInvalid = trimmedDraft.length === 0;
 
@@ -128,10 +165,9 @@ export function TaskTitleEditable({ taskId, title }: TaskTitleEditableProps) {
         aria-invalid={isInvalid}
         autoFocus
         value={draft}
-        onChange={(e) => setDraft(clampChange(e))}
-        onFocus={(e) => e.target.select()}
-        onBlur={closeEditor}
-        onKeyDown={handleInputKeyDown}
+        onChange={onChange}
+        onBlur={onBlur}
+        onKeyDown={onKeyDown}
         className="text-xl font-semibold h-auto py-1"
       />
       {isInvalid && (

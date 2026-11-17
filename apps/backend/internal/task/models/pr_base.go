@@ -8,6 +8,10 @@ import "fmt"
 type PRBase struct {
 	Target ComparisonTarget `json:"target"`
 	OID    string           `json:"oid,omitempty"`
+
+	// HeadRepositoryNodeID is a live GitHub alias for Target.HeadRepository.ProviderID.
+	// It is used only during launch identity checks and is never persisted.
+	HeadRepositoryNodeID string `json:"-"`
 }
 
 // Validate rejects malformed target identity and provider object IDs.

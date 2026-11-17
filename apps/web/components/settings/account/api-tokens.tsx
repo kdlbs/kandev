@@ -163,6 +163,11 @@ function MintTokenDialog({
     setCopied(false);
   };
 
+  const handleOpenChange = (next: boolean) => {
+    if (!next) reset();
+    onOpenChange(next);
+  };
+
   const onSubmit = async () => {
     setError(null);
     setSubmitting(true);
@@ -178,13 +183,7 @@ function MintTokenDialog({
   };
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next) reset();
-        onOpenChange(next);
-      }}
-    >
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent data-testid="api-tokens-mint-dialog">
         {rawToken ? (
           <MintTokenResult
@@ -195,7 +194,7 @@ function MintTokenDialog({
                 if (success) setCopied(true);
               });
             }}
-            onDone={() => onOpenChange(false)}
+            onDone={() => handleOpenChange(false)}
           />
         ) : (
           <MintTokenForm
@@ -203,7 +202,7 @@ function MintTokenDialog({
             setName={setName}
             error={error}
             submitting={submitting}
-            onCancel={() => onOpenChange(false)}
+            onCancel={() => handleOpenChange(false)}
             onSubmit={() => void onSubmit()}
           />
         )}

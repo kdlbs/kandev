@@ -2,7 +2,9 @@ package orchestrator
 
 import (
 	"context"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"go.uber.org/zap"
 
@@ -86,6 +88,27 @@ func interpolateLinearPrompt(template string, i *linear.LinearIssue) string {
 		"{{issue.assignee}}", i.AssigneeName,
 		"{{issue.creator}}", i.CreatorName,
 		"{{issue.description}}", i.Description,
+		"{{issue.project.name}}", i.ProjectName,
+		"{{issue.project.url}}", i.ProjectURL,
+		"{{issue.project.summary}}", i.ProjectSummary,
+		linear.ProjectDescriptionPlaceholder, truncateProjectDescription(i.ProjectDescription),
 	)
 	return r.Replace(template)
+}
+
+// linearProjectDescriptionMaxRunes bounds the project description rendered
+// into a watch prompt so a long project brief cannot dominate every task
+// created from the project.
+const linearProjectDescriptionMaxRunes = 4000
+
+// linearProjectDescriptionTruncated is appended when the project description
+// exceeds linearProjectDescriptionMaxRunes.
+var linearProjectDescriptionTruncated = "\n\n[Project description truncated to " +
+	strconv.Itoa(linearProjectDescriptionMaxRunes) + " characters; see the project page for the full text.]"
+
+func truncateProjectDescription(s string) string {
+	if utf8.RuneCountInString(s) <= linearProjectDescriptionMaxRunes {
+		return s
+	}
+	return string([]rune(s)[:linearProjectDescriptionMaxRunes]) + linearProjectDescriptionTruncated
 }

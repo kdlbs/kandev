@@ -1,3 +1,4 @@
+import { requireRootSplitview as getRootSplitview } from "./layout-manager/dockview-test-host.test-helpers";
 /* eslint-disable max-lines -- One real-Dockview fixture shared by every environment-switch scenario. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DockviewApi } from "dockview-react";
@@ -10,7 +11,6 @@ import {
   clearAllPinnedTargets,
   fromDockviewApi,
   getPinnedTarget,
-  getRootSplitview,
   setPinnedTarget,
   setReusableRightTarget,
   toSerializedDockview,

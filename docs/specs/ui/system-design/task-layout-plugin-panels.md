@@ -165,7 +165,9 @@ split-axis extent, which is a height for a `VERTICAL` root. Task 01 makes
 `toSerializedDockview` use height as the vertical root's available axis and
 width as its orthogonal extent, including nested tree recursion. Complete
 captured root extents scale proportionally along that axis; incomplete
-geometry retains the existing explicit/flexible distribution rules. Vertical
+geometry retains the existing explicit/flexible distribution rules. When
+incomplete vertical extents exceed the available height, scale their allocation
+to fit, distributing integer rounding without exceeding that height. Vertical
 rows do not consume horizontal pinned overrides, sidebar preferences, or
 min/max width caps, even if an older snapshot carries `pinned: true`.
 Capture must not infer horizontal width pinning merely from Files/Changes in
@@ -445,4 +447,3 @@ host revision, isolation, and teardown. The fixture is not real-package proof.
 - [Authoritative contribution lifecycle](../../../decisions/2026-08-04-plugin-contribution-lifecycle-authority.md)
 - [Backend-owned portable settings](../../../decisions/0041-backend-owned-portable-user-settings.md)
 - [Draft implementation package](../../../plans/plugin-task-layout-profiles/plan.md)
-

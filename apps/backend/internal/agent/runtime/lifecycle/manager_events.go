@@ -11,7 +11,6 @@ import (
 	"go.uber.org/zap"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
-	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
@@ -52,6 +51,7 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 			event.Text,
 			event.CanonicalMessageAppend,
 			false,
+			decodeCanonicalConversationReceipt(event.CanonicalConversationReceipt),
 		)
 		return
 	}
@@ -97,6 +97,7 @@ func (m *Manager) publishStreamEvidence(execution *AgentExecution, event agentct
 		event.Text = event.ReasoningText
 	}
 	event.CanonicalProjection = false
+	event.CanonicalConversationReceipt = nil
 	event.CanonicalMessageID = ""
 	event.CanonicalMessageAppend = false
 	m.eventPublisher.PublishAgentStreamEvent(execution, event)
@@ -120,6 +121,7 @@ func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl
 			event.ReasoningText,
 			event.CanonicalMessageAppend,
 			false,
+			decodeCanonicalConversationReceipt(event.CanonicalConversationReceipt),
 		)
 		return
 	}
@@ -295,6 +297,13 @@ func (m *Manager) claimPromptCompletion(
 		}
 		return claim, true
 	}
+	if deliverySubmissionIdentityMismatch(execution, event.DeliverySubmissionID) {
+		m.logger.Debug("ignoring completion for superseded prompt submission",
+			zap.String("execution_id", execution.ID),
+			zap.String("event_submission_id", event.DeliverySubmissionID),
+			zap.String("current_submission_id", currentDeliverySubmissionID(execution)))
+		return claim, false
+	}
 
 	execution.promptLifecycleMu.Lock()
 	claim.locked = true
@@ -340,9 +349,17 @@ func (m *Manager) claimPromptCompletion(
 		current.Status = v1.AgentStatusReady
 		claim.readyPayload = newAgentEventPayloadWithTurnID(current, event.TurnID)
 		claim.readyPayload.AttemptID = event.AttemptID
-		copyDeliveryTerminalIdentity(&claim.readyPayload, event)
+		copyDeliveryTerminalIdentity(&claim.readyPayload, event, current)
+		// The Office cause belongs to the launch's first turn. Preserve it on
+		// that completion event, then clear it so later user turns on this
+		// session cannot inherit stale run causation.
+		current.CausingRunID = ""
+		current.deleteMetadataValues(MetadataKeyCausingRunID)
 	})
 	if err == nil && claimed {
+		if m.turnChangeCaptureHandler != nil && eligibleTurnChangeExecution(execution) && event.TurnID != "" {
+			beginTurnChangeCaptureLocked(execution, event.PromptGeneration)
+		}
 		return claim, true
 	}
 
@@ -379,6 +396,7 @@ func (m *Manager) finishPromptCompletion(
 	if claim.locked && event.PromptGeneration != 0 && isError {
 		setProviderError(execution, event.ProviderError)
 		if payload, retained := m.retainPromptFailureRuntime(execution, event, failureEvidence); retained {
+			finishTurnChangeCaptureLocked(execution, event.PromptGeneration)
 			// Keep the prompt generation fenced through durable owner settlement,
 			// but do not hold the lifecycle lock across publication: explicit
 			// cancellation reads this generation while it owns the session guard.
@@ -425,6 +443,7 @@ func (m *Manager) finishPromptCompletion(
 			}
 			return
 		}
+		m.finishTurnChangeCapture(execution, event, isError, toolStatusError)
 		publication, err := m.preparePromptErrorCompletion(execution, event, failureEvidence)
 		if err != nil {
 			m.logger.Error("failed to mark execution as failed after error completion",
@@ -444,6 +463,7 @@ func (m *Manager) finishPromptCompletion(
 		return
 	}
 
+	m.startTurnChangeCapture(execution, event, isError, completeEventStopReason(event))
 	handleCompleteEventSignalLeased(execution, event, isError)
 	if claim.locked && event.PromptGeneration != 0 {
 		// Finalization and signal delivery are complete, so a later prompt can
@@ -467,10 +487,23 @@ func (m *Manager) finishPromptCompletion(
 		m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentRunning, claim.runningPayload)
 	}
 	m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentReady, claim.readyPayload)
+	// A session MCP selection may have arrived while this turn was active. The
+	// completion path transitions to Ready directly instead of going through
+	// MarkReady, so explicitly retry any deferred idle-session reconfiguration.
+	m.RequestSessionMCPReconfiguration(context.Background(), claim.execution.SessionID)
+}
+
+func completeEventStopReason(event *agentctl.AgentEvent) string {
+	if event == nil {
+		return "end_turn"
+	}
+	_, reason := completeEventResult(event)
+	return reason
 }
 
 const claudeACPAgentID = "claude-acp"
 const codexACPAgentID = "codex-acp"
+const openCodeACPAgentID = "opencode-acp"
 
 func (m *Manager) retainPromptFailureRuntime(
 	execution *AgentExecution,
@@ -493,7 +526,7 @@ func (m *Manager) retainPromptFailureRuntime(
 		current.ErrorMessage = ""
 		current.promptSettlementGeneration = event.PromptGeneration
 		payload = newAgentEventPayloadWithTurnIDAndEvidence(current, event.TurnID, failureEvidence)
-		copyDeliveryTerminalIdentity(&payload, event)
+		copyDeliveryTerminalIdentity(&payload, event, current)
 		payload.ErrorMessage = extractErrorMessage(event)
 		payload.PromptFailureDisposition = event.PromptFailureDisposition
 		if event.AttemptID != "" {
@@ -525,8 +558,7 @@ func retainedPromptFailureExecutionEligible(execution *AgentExecution) bool {
 	return execution.isSessionInitialized() && client.HasAgentStream() &&
 		execution.TaskScope == TaskLaunchScopeTask &&
 		!execution.IsPassthrough && execution.TaskID != "" && execution.SessionID != "" &&
-		execution.AgentProfileID != "" && retainedTurnTaskOwnerMatches(execution) &&
-		isRetainableACPAgent(execution.AgentID)
+		execution.AgentProfileID != "" && retainedTurnTaskOwnerMatches(execution)
 }
 
 func retainedPromptFailureExecutionMatches(
@@ -555,15 +587,6 @@ func retainedTurnTaskOwnerMatches(execution *AgentExecution) bool {
 	}
 	return (execution.Owner.TaskID == "" || execution.Owner.TaskID == execution.TaskID) &&
 		(execution.Owner.SessionID == "" || execution.Owner.SessionID == execution.SessionID)
-}
-
-func isRetainableACPAgent(agentID string) bool {
-	switch agentID {
-	case claudeACPAgentID, codexACPAgentID, acpcompat.CursorAgentID, "mock-agent":
-		return true
-	default:
-		return false
-	}
 }
 
 func setProviderError(execution *AgentExecution, providerError *streams.ProviderError) {
@@ -823,6 +846,17 @@ func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
 	}
 }
 
+// isStatuslessToolUpdate reports a tool_update whose ACP wire status was
+// missing. The adapter synthesizes in_progress for an update with a title,
+// input, content, or recognized shell output, so real progress still reaches
+// the finalizer. The lifecycle boundary must use the same evidence as the
+// finalizer, which ignores ToolStatusMissing updates: an empty or missing
+// status may not start a turn the finalizer will never close.
+func isStatuslessToolUpdate(event agentctl.AgentEvent) bool {
+	return event.Type == "tool_update" &&
+		(event.ToolStatus == "" || event.ToolStatusMissing)
+}
+
 // recordActivity updates the last-activity timestamp and, on the very first
 // event from an execution, publishes AgentRunning to transition STARTING → RUNNING.
 //
@@ -837,7 +871,9 @@ func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
 //
 // The flip is gated on `turnContentEventTypes` so post-boot metadata events
 // (available_commands_update arriving 50ms after MarkBootReady, etc.) don't
-// accidentally re-arm a freshly-booted no-prompt session as Running.
+// accidentally re-arm a freshly-booted no-prompt session as Running. A
+// tool_update with no status carries metadata only and is treated like a
+// terminal update here: the finalizer ignores it, so it must not start a turn.
 func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.AgentEvent) {
 	promptLifecycleLocked := false
 	unlockPromptLifecycle := func() {
@@ -900,7 +936,7 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 		unlockPromptLifecycle()
 		return
 	}
-	if isTerminalToolUpdate(event) {
+	if isTerminalToolUpdate(event) || isStatuslessToolUpdate(event) {
 		unlockPromptLifecycle()
 		return
 	}
@@ -1044,6 +1080,17 @@ func (m *Manager) handleStreamDisconnectWithAttempt(
 			execution.promptLifecycleMu.Unlock()
 			m.publishStreamDisconnectErrorWithAttempt(execution, errors.Join(ErrUncertainPromptDelivery, err), attemptID)
 			return
+		}
+		var terminal *agentctl.AgentEvent
+		turnID := execution.promptTurnIDs[promptGeneration]
+		if turnID != "" && execution.promptCompletionGeneration != promptGeneration &&
+			m.turnChangeCaptureHandler != nil && eligibleTurnChangeExecution(execution) {
+			execution.promptCompletionGeneration = promptGeneration
+			beginTurnChangeCaptureLocked(execution, promptGeneration)
+			terminal = &agentctl.AgentEvent{PromptGeneration: promptGeneration, TurnID: turnID}
+		}
+		if terminal != nil {
+			m.finishTurnChangeCapture(execution, terminal, true, "stream_disconnected")
 		}
 		execution.promptLifecycleMu.Unlock()
 		if completionErr := m.markCompletedWithTurnIDAndAttempt(
@@ -1312,10 +1359,6 @@ func canUpdateDeliveryReconciliationFailure(
 	}
 }
 
-func (m *Manager) publishStreamDisconnectError(execution *AgentExecution, err error) {
-	m.publishStreamDisconnectErrorWithAttempt(execution, err, "")
-}
-
 func (m *Manager) publishStreamDisconnectErrorWithAttempt(
 	execution *AgentExecution,
 	err error,
@@ -1524,6 +1567,7 @@ func (m *Manager) handleMCPAttachmentEvent(
 		attempt.SessionID = execution.SessionID
 		attempt.ExecutionID = execution.ID
 		attempt.AgentID = execution.AgentID
+		attempt.BuiltinPackages = execution.builtinMCPManifestSnapshot()
 		event.MCPAttachmentAttempt = &attempt
 	}
 	// Attachment diagnostics must not count as model activity or alter turn
@@ -1567,6 +1611,11 @@ func (m *Manager) handleAgentEventWithoutPublication(execution *AgentExecution, 
 
 func (m *Manager) handleAgentEventState(execution *AgentExecution, event agentctl.AgentEvent) agentctl.AgentEvent {
 	switch event.Type {
+	case streams.EventTypePromptSuggestion:
+		// Bound only to its originating prompt; an unknown origin gets no turn.
+		if event.TurnID == "" {
+			event.TurnID = execution.promptTurnIDForGeneration(event.PromptGeneration)
+		}
 	case streams.EventTypeUsageObservation:
 		if event.TurnID == "" {
 			if event.PromptGeneration != 0 {
@@ -1731,6 +1780,15 @@ func (m *Manager) handleFileChangeNotification(execution *AgentExecution, notifi
 		return
 	}
 	m.eventPublisher.PublishFileChange(execution, notification)
+}
+
+// handleWorktreeInventory publishes a linked-worktree snapshot from a live,
+// current execution. Detection never starts, resumes, or prompts an agent.
+func (m *Manager) handleWorktreeInventory(execution *AgentExecution, inventory *agentctl.WorktreeInventory) {
+	if execution == nil || inventory == nil || !m.runtimeExecutionCurrent(execution) {
+		return
+	}
+	m.eventPublisher.PublishWorktreeInventory(execution, inventory)
 }
 
 // handleShellOutput processes shell output from the workspace stream

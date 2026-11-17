@@ -255,10 +255,11 @@ def entry_for_path(
         entry["reason"] = "binary"
         return entry, materialized_bytes
 
-    destination = root / Path(*path.split("/"))
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    # Neutral names prevent agent discovery of PR-owned instructions or configuration.
+    destination = root / f"{object_id}.txt"
     destination.write_bytes(content)
     entry["materialized"] = True
+    entry["context_path"] = f"head/files/{destination.name}"
     materialized_bytes += size
     return entry, materialized_bytes
 
@@ -290,7 +291,7 @@ def prepare(repo: str, base_sha: str, head_sha: str, output_dir: Path) -> Path:
             manifest_files.append(entry)
 
     manifest: dict[str, object] = {
-        "version": 1,
+        "version": 2,
         "base_sha": base_sha,
         "head_sha": head_sha,
         "merge_base": merge_base,

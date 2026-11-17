@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	officemodels "github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
@@ -17,7 +19,7 @@ import (
 // row at seq 1 so HandlePostStartFailure can find the candidate. The
 // returned run struct carries the routing columns in memory, mirroring how
 // the scheduler receives a freshly-loaded run row.
-func seedRoutedRun(t *testing.T, repo *officesqlite.Repository) *officemodels.Run {
+func seedRoutedRun(t *testing.T, repo *officesqlite.Repository) *runsmodels.Run {
 	t.Helper()
 	seedRoutingConfig(t, repo, []routing.ProviderID{"claude-acp"})
 	run := seedRun(t, repo, `{"task_id":"t-1"}`)

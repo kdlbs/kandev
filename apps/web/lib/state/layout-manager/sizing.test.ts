@@ -84,6 +84,19 @@ describe("computeRootAxisSizes", () => {
     expect(sized.sizes).toEqual([300, 400]);
   });
 
+  it.each([
+    { widths: [600, 600, undefined], expected: [350, 350, 0] },
+    { widths: [600, 600, 600, undefined], expected: [233, 234, 233, 0] },
+  ])(
+    "fits oversubscribed incomplete vertical rows into the available height: $widths",
+    ({ widths, expected }) => {
+      const columns = widths.map((width) => center({ width }));
+      expect(computeRootAxisSizes(columns, "VERTICAL", 1400, 700, new Map()).sizes).toEqual(
+        expected,
+      );
+    },
+  );
+
   it.each([["HORIZONTAL" as const], [undefined]])(
     "keeps the pinned width policy for a %s root",
     (orientation) => {

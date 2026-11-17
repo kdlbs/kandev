@@ -16,6 +16,13 @@ into across the deck, then slides it back when the turn ends. The E2E
 `holds a column's slot and the deck's scroll while you reply to it` fails if this
 is undone.
 
+The stable order lives in memory, so a reload ranks the deck again. The only
+order that survives a reload is the `selection` sort: it ranks a
+selected-scope view by the persisted `taskScope.taskIds` array, which the
+picker appends to in click order. With the `all` scope it resolves to
+ascending attention in `queryThreadView`, and the editor resets it in the same
+draft update when the scope changes (`threadTaskScopeModeUpdate`).
+
 A task reaches the deck through its **primary** session, matching the backend's
 `GetPrimarySessionIDsByTaskIDs`. Once that task column is present, the Threads
 switcher can select any existing sibling session, including a settled one.

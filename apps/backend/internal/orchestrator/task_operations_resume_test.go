@@ -45,7 +45,7 @@ func TestGetTaskSessionStatus_NoAutoResumeOnErrorRecovery(t *testing.T) {
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateReview}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil {
@@ -94,7 +94,7 @@ func TestGetTaskSessionStatus_AutoResumesNormalWaitingSession(t *testing.T) {
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateInProgress}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil {
@@ -126,7 +126,7 @@ func TestGetTaskSessionStatus_ReportsIdleSuspensionWithoutResuming(t *testing.T)
 	}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resp, err := svc.GetTaskSessionStatus(ctx, "task-idle-suspended", "session-idle-suspended")
 	if err != nil {
@@ -162,7 +162,7 @@ func TestGetTaskSessionStatus_RecoversSweptSessionWithoutExecutorRow(t *testing.
 
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil {
 		t.Fatalf("GetTaskSessionStatus: %v", err)
@@ -346,7 +346,7 @@ func TestGetTaskSessionStatus_AutoResumesFailedSessionWithResumeToken(t *testing
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateReview}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil {
@@ -412,7 +412,7 @@ func TestGetTaskSessionStatus_FailedSessionWithoutResumableFlagFallsBack(t *test
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateReview}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil {
@@ -469,7 +469,7 @@ func TestGetTaskSessionStatus_CancelledSessionStaysWorkspaceRestore(t *testing.T
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateReview}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil {
@@ -521,7 +521,7 @@ func TestGetTaskSessionStatus_ArchiveCancelledSessionWithTokenAutoResumes(t *tes
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateReview}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil {
@@ -578,7 +578,7 @@ func TestGetTaskSessionStatus_OrphanCancelledSessionAutoResumes(t *testing.T) {
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateReview}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil {
@@ -642,7 +642,7 @@ func TestGetTaskSessionStatus_ArchiveCancelledSessionWithNonResumableTokenFreshS
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateReview}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil {
@@ -692,7 +692,7 @@ func TestGetTaskSessionStatus_ArchiveCancelledSessionWithoutRunningRowResumes(t 
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateReview}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil {
@@ -725,7 +725,7 @@ func TestGetTaskSessionStatus_PlainCancelledSessionWithoutRunningRowStaysStopped
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateReview}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil {
@@ -773,7 +773,7 @@ func TestGetTaskSessionStatus_NoAutoResumeWithResumeTokenOnError(t *testing.T) {
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateReview}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil {
@@ -854,7 +854,7 @@ func TestResumeTaskSession_WaitsForPromptReady(t *testing.T) {
 		State: v1.TaskStateInProgress,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	done := make(chan struct {
 		exec *executor.TaskExecution
@@ -963,7 +963,7 @@ func TestResumeTaskSession_RecoversSweptSessionWithoutExecutorRow(t *testing.T) 
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateInProgress}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	status, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil || !status.NeedsResume || !status.IsResumable {
@@ -1080,7 +1080,7 @@ func TestResumeTaskSession_ReapsPromptDeadExecutionAndRelaunches(t *testing.T) {
 		State: v1.TaskStateInProgress,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	exec, err := svc.ResumeTaskSession(ctx, "task1", "session1")
 	if err != nil {
@@ -1176,7 +1176,7 @@ func TestResumeTaskSession_ReapStopFailureDoesNotFailTask(t *testing.T) {
 		State: v1.TaskStateInProgress,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	exec, err := svc.ResumeTaskSession(ctx, "task1", "session1")
 	if err == nil {
@@ -1262,7 +1262,7 @@ func TestResumeTaskSession_SurvivesCallerContextCancellationDuringReadyWait(t *t
 		State: v1.TaskStateInProgress,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	exec, err := svc.ResumeTaskSession(ctx, "task1", "session1")
 	if err != nil {
@@ -1314,7 +1314,7 @@ func TestResumeTaskSession_AlreadyRunningReadyWaitSurvivesCancelledCallerContext
 		State: v1.TaskStateInProgress,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	exec, err := svc.ResumeTaskSession(ctx, "task1", "session1")
 	if err != nil {

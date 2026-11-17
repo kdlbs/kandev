@@ -109,6 +109,9 @@ contracts are independent.
 
 ### 4. Write system design
 
+Apply the [solution simplicity (KISS) rules](../plan/SKILL.md#solution-simplicity-kiss)
+to technical choices.
+
 Create or update this file when the change needs a technical design:
 
 ```text
@@ -122,6 +125,10 @@ requirement.
 Describe stable components, models, contracts, flow, failure behavior,
 persistence, security, and observability when they apply. Link to global ADRs.
 Do not copy requirement or ADR text.
+
+For shared blocking or coalesced work, specify who executes the operation, what
+cancellation of that caller does, and how other waiters proceed. Name a
+verification case for the cancellation boundary.
 
 Cover all runtime boundaries that implement the owned outcome. A provider-owned
 design can include backend services, storage, projections, frontend components,

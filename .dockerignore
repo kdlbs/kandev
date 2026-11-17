@@ -26,6 +26,7 @@ apps/backend/acp-debug
 
 # Dependencies (rebuilt in Docker)
 **/node_modules
+**/.tools
 
 # IDE and editor files
 .vscode/

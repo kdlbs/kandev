@@ -24,7 +24,7 @@ func TestPromptTask_AutomaticOverCeilingDefersPromptEnsure(t *testing.T) {
 
 	agentMgr := &mockAgentManager{isAgentRunning: false}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
 	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "filler"})
 
@@ -53,56 +53,60 @@ func TestPromptTask_AutomaticOverCeilingDefersPromptEnsure(t *testing.T) {
 	}
 }
 
-// TestPromptTask_ManualOverCeilingIsAdmitted covers AC-14 through the real
-// promptTask entry point: PromptTask's own public wrapper always hardcodes
-// manual, so it must be admitted even at the ceiling, and never write a
-// deferral record.
-func TestPromptTask_ManualOverCeilingIsAdmitted(t *testing.T) {
+// TestPromptTask_OrdinaryOverCeilingIsRefused covers the changed ordinary
+// message contract: PromptTask's public wrapper represents a normal message
+// turn, so it is bounded even though its launch origin stays manual. It must
+// return the typed capacity refusal and never write a deferral record; the
+// producer owns durable pending input instead.
+func TestPromptTask_OrdinaryOverCeilingIsRefused(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
 
 	agentMgr := &mockAgentManager{isAgentRunning: false}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
 	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "filler"})
 
 	_, err := svc.PromptTask(ctx, "task1", "session1", "hello", "", false, nil, false)
-	if err == nil {
-		t.Fatal("expected an error (no resumable executor), but not a ceiling refusal")
+	if !IsMessageTurnCapacityRefusal(err) {
+		t.Fatalf("ordinary message over the ceiling = %v, want the typed capacity refusal", err)
 	}
 	if _, ok := isSeam3Refusal(err); ok {
-		t.Fatalf("a manual prompt must never be refused by the ceiling, got: %v", err)
+		t.Fatalf("bounded admission must decide before seam 3, got: %v", err)
 	}
 	if record := deferredLaunchOf(t, svc, "task1"); record != nil {
-		t.Fatalf("a manual prompt must never write a ceiling_deferred record: %+v", record)
+		t.Fatalf("the message producer, not promptTask, owns pending input: %+v", record)
+	}
+	if len(agentMgr.capturedPrompts) != 0 {
+		t.Fatalf("provider received %d prompts while capacity was full", len(agentMgr.capturedPrompts))
 	}
 }
 
-// TestPromptTask_ManualOverCeilingIsAuditedEvenWhenTheResumeFails pins
-// AC-14/AC-53's unconditional audit contract at seam 3's own gate
-// (ensureSessionRunning's admitSeam3): the record must be written once the
+// TestPromptTask_ManualOverrideIsAuditedEvenWhenTheResumeFails pins
+// AC-14/AC-53's unconditional audit contract for an explicit execution
+// override (Send Now/Start/Resume intent): the record must be written once the
 // reservation is admitted, not only once the subsequent resume attempt has
 // also succeeded. A resume failure right after admission (no executors_running
 // row for the session) must not erase the only evidence a ceiling override
 // happened.
-func TestPromptTask_ManualOverCeilingIsAuditedEvenWhenTheResumeFails(t *testing.T) {
+func TestPromptTask_ManualOverrideIsAuditedEvenWhenTheResumeFails(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "seam3-fail-task", "seam3-fail-session", models.TaskSessionStateWaitingForInput)
 
 	agentMgr := &mockAgentManager{isAgentRunning: false}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
 	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "filler"})
 
-	// PromptTask's public wrapper hardcodes manual origin (AC-14), so this
-	// resume is admitted over the ceiling's only slot. No executors_running row
-	// exists for the session, so attemptColdResume fails synchronously and
+	// An explicit execution control requests the override. No executors_running
+	// row exists for the session, so attemptColdResume fails synchronously and
 	// deterministically before seam3Res.consume() is ever reached.
-	_, err := svc.PromptTask(ctx, "seam3-fail-task", "seam3-fail-session", "hello", "", false, nil, false)
+	_, err := svc.promptTask(ctx, "seam3-fail-task", "seam3-fail-session", "hello", "", false, nil, false,
+		launchOriginManual, promptTaskOptions{capacityIntent: turnCapacityOverride})
 	require.Error(t, err, "the resume must still fail: no executors_running row exists for the session")
 
 	session, getErr := repo.GetTaskSession(ctx, "seam3-fail-session")
@@ -157,7 +161,7 @@ func TestStartSessionForWorkflowStep_PreConsultationRefusalOverCeiling(t *testin
 // pre-consult gate (admitOrDeferWorkflowStepEnsure): that commit moved this
 // call site's recordManualOverrideIfAdmitted audit next to admission, mirroring
 // ensureSessionRunning's own move, but only ensureSessionRunning's half was
-// covered by a regression test (TestPromptTask_ManualOverCeilingIsAuditedEvenWhenTheResumeFails,
+// covered by a regression test (TestPromptTask_ManualOverrideIsAuditedEvenWhenTheResumeFails,
 // reached through PromptTask's hardcoded manual origin).
 //
 // The pre-consult gate itself always admits with launchOriginAutomatic
@@ -179,7 +183,7 @@ func TestStartSessionForWorkflowStep_PreConsultReservationReleasedWhenResumeFail
 	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{ID: "step2", WorkflowID: "wf1"}
 	agentMgr := &mockAgentManager{isAgentRunning: false}
 	svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
 
 	err := svc.StartSessionForWorkflowStep(ctx, "wfstep-fail-task", "wfstep-fail-session", "step2")
@@ -203,7 +207,7 @@ func TestTryEnsureExecution_ViewingShapeSwallowsRefusal(t *testing.T) {
 
 	agentMgr := &mockAgentManager{isAgentRunning: false}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
 	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "filler"})
 
@@ -225,7 +229,7 @@ func TestTryEnsureExecution_QueueDrainShapeDefersRefusal(t *testing.T) {
 
 	agentMgr := &mockAgentManager{isAgentRunning: false}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
 	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "filler"})
 
@@ -254,7 +258,7 @@ func TestTryEnsureExecution_UnrecognizedShapeDefaultsToDeferring(t *testing.T) {
 
 	agentMgr := &mockAgentManager{isAgentRunning: false}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
 	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "filler"})
 
@@ -278,7 +282,7 @@ func TestQueueAutoStartPrompt_ThreadsQueuedMessageIDToDeferral(t *testing.T) {
 
 	agentMgr := &mockAgentManager{isAgentRunning: false}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
 	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "filler"})
 

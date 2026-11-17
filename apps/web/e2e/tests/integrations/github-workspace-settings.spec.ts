@@ -1,4 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
+import { seedAccessibleRepositories } from "../../helpers/github-repository-picker";
+import type { Page } from "@playwright/test";
 import { stubGitHubRateLimits } from "./github-rate-limit-fixture";
 import { dwell } from "../../helpers/causal-waits";
 
@@ -12,18 +14,27 @@ test.describe("GitHub workspace settings", () => {
     apiClient,
     seedData,
   }) => {
+    await testPage.clock.install({ time: new Date("2030-01-01T00:00:00Z") });
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
       source: "legacy_shared",
       status: "active",
     });
-    const fixture = await stubGitHubRateLimits(testPage, seedData.workspaceId);
+    const fixture = await stubGitHubRateLimits(testPage, seedData.workspaceId, {
+      retryAt: "2030-01-01T00:01:00Z",
+    });
     await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations/github`);
 
     const automation = testPage.getByTestId("github-workspace-automation");
-    await expect(automation.getByTestId("github-pr-discovery-health").first()).toContainText(
-      "PR discovery failed",
-    );
+    const warning = automation.getByTestId("github-pr-discovery-health");
+    await expect(warning).toHaveCount(1);
+    await expect(warning).toContainText("PR discovery failed");
+    await expect(warning).toContainText(/Retry after/);
+    await testPage.clock.setFixedTime(new Date("2030-01-01T00:02:00Z"));
+    await automation.getByRole("button", { name: "Refresh GitHub connection" }).click();
+    await expect(warning).toContainText("PR discovery failed");
+    await expect(warning).not.toContainText(/Retry after/);
+
     const rateLimitHelp = automation.getByRole("button", { name: "Show GitHub API limits" });
     await rateLimitHelp.hover();
     const rateLimitTooltip = testPage
@@ -34,10 +45,51 @@ test.describe("GitHub workspace settings", () => {
     await expect(rateLimitTooltip).toContainText(
       "API rate limit: 3,210 of 5,000 requests remaining",
     );
+    await expect(rateLimitTooltip).not.toContainText(/Retry after/);
 
     fixture.recoverPRDiscovery();
     await automation.getByRole("button", { name: "Refresh GitHub connection" }).click();
     await expect(automation.getByTestId("github-pr-discovery-health")).toHaveCount(0);
+  });
+
+  // @covers AC-INTEGRATIONS-GITHUB-REPOSITORY-PICKER-001.2 .4
+  test("keeps Enter inside the repository picker of a watch dialog", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedAccessibleRepositories(apiClient, seedData.workspaceId);
+    const watch = await apiClient.createReviewWatch(
+      seedData.workspaceId,
+      seedData.workflowId,
+      seedData.startStepId,
+      seedData.agentProfileId,
+      // A prompt keeps Update enabled, so a leaked Enter would save and close the dialog.
+      { repos: [{ owner: "mock-user", name: "alpha" }], prompt: "Review this pull request." },
+    );
+    try {
+      await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations/github`);
+      await testPage.getByRole("row").filter({ hasText: "mock-user/alpha" }).click();
+      const dialog = testPage.getByRole("dialog", { name: "Edit Review Watch" });
+      await expect(dialog.getByRole("button", { name: "Update" })).toBeEnabled();
+      await dialog.getByTestId("github-repository-add").click();
+      const input = dialog.getByTestId("remote-repo-input");
+      await input.fill("beta");
+      await input.press("Enter");
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId("github-repository-picker")).toBeVisible();
+
+      await input.press("ArrowDown");
+      await expect(dialog.getByTestId("remote-repo-option").first()).toBeFocused();
+      await testPage.keyboard.press("Enter");
+      await expect(dialog.getByTestId("github-repository-chip")).toHaveText([
+        "mock-user/alpha",
+        "mock-user/beta",
+      ]);
+      await expect(dialog).toBeVisible();
+    } finally {
+      await apiClient.deleteReviewWatch(watch.id, seedData.workspaceId);
+    }
   });
 
   test("keeps review watch pause and resume visible after save", async ({
@@ -320,6 +372,20 @@ test.describe("GitHub workspace settings", () => {
 
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetUser("test-user");
+    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
+    await apiClient.mockGitHubAddRepos("test-user", [
+      { full_name: "kdlbs/kandev", owner: "kdlbs", name: "kandev", private: false },
+      { full_name: "other/repo", owner: "other", name: "repo", private: false },
+    ]);
+    const initialSettings = await apiClient.rawRequest("PUT", "/api/v1/github/workspace-settings", {
+      workspace_id: seedData.workspaceId,
+      repo_scope_mode: "repos",
+      repo_scope_repos: [{ owner: "kdlbs", name: "kandev" }],
+    });
+    expect(initialSettings.status).toBe(200);
     await apiClient.mockGitHubAddPRs([
       {
         number: 6101,
@@ -334,12 +400,23 @@ test.describe("GitHub workspace settings", () => {
       },
       {
         number: 6102,
-        title: "Out of scope PR",
+        title: "Added repository PR",
         state: "open",
         head_branch: "feature/out-of-scope",
         base_branch: "main",
         author_login: "contributor",
         repo_owner: "other",
+        repo_name: "repo",
+        requested_reviewers: [{ login: "test-user", type: "User" }],
+      },
+      {
+        number: 6103,
+        title: "Out of scope PR",
+        state: "open",
+        head_branch: "feature/not-allowed",
+        base_branch: "main",
+        author_login: "contributor",
+        repo_owner: "blocked",
         repo_name: "repo",
         requested_reviewers: [{ login: "test-user", type: "User" }],
       },
@@ -366,9 +443,8 @@ test.describe("GitHub workspace settings", () => {
       "Limits the GitHub pull requests and issues Kandev discovers for this workspace",
     );
 
-    await testPage.getByTestId("github-scope-mode").click();
-    await testPage.getByRole("option", { name: "Selected repositories" }).click();
-    await testPage.getByTestId("github-scope-repos-input").fill("kdlbs/kandev");
+    await expect(testPage.getByTestId("github-scope-repos")).toContainText("kdlbs/kandev");
+    await addListedScopeRepository(testPage, "other/repo");
     await testPage
       .getByTestId("settings-floating-save")
       .getByRole("button", { name: "Save changes" })
@@ -387,7 +463,10 @@ test.describe("GitHub workspace settings", () => {
       repo_scope_repos: Array<{ owner: string; name: string }>;
     };
     expect(settings.repo_scope_mode).toBe("repos");
-    expect(settings.repo_scope_repos).toEqual([{ owner: "kdlbs", name: "kandev" }]);
+    expect(settings.repo_scope_repos).toEqual([
+      { owner: "kdlbs", name: "kandev" },
+      { owner: "other", name: "repo" },
+    ]);
 
     await testPage.goto("/github");
 
@@ -395,8 +474,9 @@ test.describe("GitHub workspace settings", () => {
       timeout: 15_000,
     });
     await expect(testPage.getByText("kdlbs/kandev#6101")).toBeVisible();
+    await expect(testPage.getByText("other/repo#6102")).toBeVisible();
     await expect(testPage.getByText("Out of scope PR")).toHaveCount(0);
-    await expect(testPage.getByText("other/repo#6102")).toHaveCount(0);
+    await expect(testPage.getByText("blocked/repo#6103")).toHaveCount(0);
   });
 
   test("repository scope save only submits fields for the active mode", async ({
@@ -417,10 +497,10 @@ test.describe("GitHub workspace settings", () => {
 
     await testPage.getByTestId("github-scope-mode").click();
     await testPage.getByRole("option", { name: "Selected repositories" }).click();
-    await testPage.getByTestId("github-scope-repos-input").fill("kdlbs/kandev");
+    await addScopeRepository(testPage, "kdlbs/kandev");
     await testPage.getByTestId("github-scope-mode").click();
     await testPage.getByRole("option", { name: "Organizations" }).click();
-    await testPage.getByTestId("github-scope-orgs-input").fill("kdlbs");
+    await addScopeOrganization(testPage, "kdlbs");
     await testPage
       .getByTestId("settings-floating-save")
       .getByRole("button", { name: "Save changes" })
@@ -445,7 +525,7 @@ test.describe("GitHub workspace settings", () => {
 
     await testPage.getByTestId("github-scope-mode").click();
     await testPage.getByRole("option", { name: "Selected repositories" }).click();
-    await testPage.getByTestId("github-scope-repos-input").fill("not-a-repo");
+    await addScopeRepository(testPage, "other/repo");
     await testPage.getByTestId("github-scope-mode").click();
     await testPage.getByRole("option", { name: "Organizations" }).click();
     await testPage
@@ -471,3 +551,34 @@ test.describe("GitHub workspace settings", () => {
     expect(secondSettings.repo_scope_repos).toEqual([]);
   });
 });
+
+async function addScopeRepository(page: Page, repository: string): Promise<void> {
+  const field = page.getByTestId("github-scope-repos");
+  await field.getByRole("button", { name: "Add repository" }).click();
+  const input = field.getByTestId("remote-repo-input");
+  await input.fill(repository);
+  await input.press("Enter");
+  await expect(
+    field.getByTestId("github-repository-chip").filter({ hasText: repository }),
+  ).toBeVisible();
+}
+
+async function addListedScopeRepository(page: Page, repository: string): Promise<void> {
+  const field = page.getByTestId("github-scope-repos");
+  await field.getByRole("button", { name: "Add repository" }).click();
+  const option = field.getByTestId("remote-repo-option").filter({ hasText: repository });
+  await expect(option).toBeVisible();
+  await option.click();
+  await expect(
+    field.getByTestId("github-repository-chip").filter({ hasText: repository }),
+  ).toBeVisible();
+}
+
+async function addScopeOrganization(page: Page, login: string): Promise<void> {
+  const field = page.getByTestId("github-scope-orgs");
+  await field.getByRole("button", { name: "Add organization" }).click();
+  const input = field.getByTestId("github-organization-input");
+  await input.fill(login);
+  await input.press("Enter");
+  await expect(field.getByTestId("github-organization-chip")).toHaveText([login]);
+}

@@ -1,11 +1,15 @@
+import { visitOtherBrowserTab } from "../../helpers/external-focus";
 import { type Page } from "@playwright/test";
 import path from "node:path";
 import fs from "node:fs";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
+import { waitForSessionGitHydration } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import { dwell, watchWs } from "../../helpers/causal-waits";
+
+test.use({ channel: "chromium" });
 
 // Inline rename lives in file-context-menu.tsx (useFileRename + TreeNodeName).
 // Entry points (today, in product code):
@@ -57,6 +61,8 @@ async function setupTask(args: {
   await testPage.reload();
   await session.waitForLoad();
   await treeResponse;
+  // Initial commit discovery can activate Changes after the tree read settles.
+  await waitForSessionGitHydration(testPage, task.session_id!);
   await session.clickTab("Files");
   return session;
 }
@@ -107,17 +113,26 @@ test.describe("File tree inline rename", () => {
     // doing it explicitly is robust against focus-timing edge cases).
     await input.press("ControlOrMeta+A");
     await input.fill("renamed.ts");
+    // @covers AC-UI-EDIT-FOCUS-001.1
+    await visitOtherBrowserTab(testPage, async () => {
+      await expect(input).toHaveValue("renamed.ts");
+      expect(fs.existsSync(path.join(repoDir, "renamed.ts"))).toBe(false);
+    });
     await input.press("Enter");
 
-    // Old node disappears from the tree, new node appears.
-    await expect(session.fileTreeNode("rename-me.ts")).toHaveCount(0, { timeout: 10_000 });
-    await session.fileTree.waitForFileTreeNode("renamed.ts");
-
-    // And the rename hit the file system.
+    // The rename makes the worktree dirty, which activates Changes. Prove the
+    // rename on disk first, then select Files before asserting the tree.
     await expect
       .poll(() => fs.existsSync(path.join(repoDir, "renamed.ts")), { timeout: 10_000 })
       .toBe(true);
     expect(fs.existsSync(path.join(repoDir, "rename-me.ts"))).toBe(false);
+
+    // Wait for the Git update that activates Changes before selecting Files.
+    await expect(session.changesFileRow("renamed.ts")).toBeVisible();
+    // Old node disappears from the tree, new node appears.
+    await session.clickTab("Files");
+    await session.fileTree.waitForFileTreeNode("renamed.ts");
+    await expect(session.fileTreeNode("rename-me.ts")).toHaveCount(0, { timeout: 10_000 });
   });
 
   test("rename cancels on Escape and leaves the tree and disk untouched", async ({
@@ -206,6 +221,9 @@ test.describe("File tree inline rename", () => {
       .poll(() => fs.existsSync(path.join(repoDir, "blur-final.ts")), { timeout: 10_000 })
       .toBe(true);
     expect(fs.existsSync(path.join(repoDir, "blur-original.ts"))).toBe(false);
+    // The disk write can precede the Git update that activates Changes.
+    await expect(session.changesFileRow("blur-final.ts")).toBeVisible();
+    await session.clickTab("Files");
     await session.fileTree.waitForFileTreeNode("blur-final.ts");
     await expect(session.fileTreeNode("blur-original.ts")).toHaveCount(0);
   });

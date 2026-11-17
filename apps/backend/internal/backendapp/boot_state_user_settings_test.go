@@ -347,3 +347,14 @@ func TestMapUserSettingsStateIncludesSystemMetricsDisplayPreference(t *testing.T
 		t.Fatalf("simplified = %#v, want true", got["simplified"])
 	}
 }
+
+// TestMapUserSettingsStateIncludesPromptSuggestions verifies boot state carries the prompt suggestion flag.
+func TestMapUserSettingsStateIncludesPromptSuggestions(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{
+		Settings: userdto.UserSettingsDTO{PromptSuggestions: true},
+	}, "workspace-1")
+
+	if got, ok := state["promptSuggestions"].(bool); !ok || !got {
+		t.Fatalf("promptSuggestions = %#v, want true", state["promptSuggestions"])
+	}
+}

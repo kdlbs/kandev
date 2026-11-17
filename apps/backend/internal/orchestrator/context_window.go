@@ -30,6 +30,15 @@ func (s *Service) captureContextWindowGeneration(sessionID string) uint64 {
 	return guard.generation
 }
 
+// contextWindowGenerationCurrent reports whether an observed generation is
+// still current. It lets publication revalidate after releasing the write lock.
+func (s *Service) contextWindowGenerationCurrent(sessionID string, generation uint64) bool {
+	guard := s.contextWindowGuard(sessionID)
+	guard.mu.Lock()
+	defer guard.mu.Unlock()
+	return guard.generation == generation
+}
+
 // clearContextWindowForReset advances the session's context generation while
 // holding the same lock used by asynchronous context-window persistence.
 func (s *Service) clearContextWindowForReset(ctx context.Context, sessionID string) error {

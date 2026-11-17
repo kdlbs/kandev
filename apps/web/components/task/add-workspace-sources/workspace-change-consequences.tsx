@@ -3,6 +3,13 @@ import { Trans, useTranslation } from "react-i18next";
 
 export function WorkspaceChangeConsequences({ restartsWorkspace }: { restartsWorkspace: boolean }) {
   const { t } = useTranslation();
+  if (!restartsWorkspace) {
+    return (
+      <p data-testid="workspace-source-continuity" className="text-xs text-muted-foreground">
+        {t("task:workspaceSourcePlacementUnchanged")}
+      </p>
+    );
+  }
   return (
     <section
       role="note"
@@ -18,21 +25,19 @@ export function WorkspaceChangeConsequences({ restartsWorkspace }: { restartsWor
         <div className="min-w-0 space-y-2.5">
           <div className="space-y-1">
             <h3 id="workspace-change-consequences-title" className="font-medium text-foreground">
-              {restartsWorkspace
-                ? t("task:thisRestartsTheTaskWorkspace")
-                : t("task:thisUpdatesTheLiveTaskWorkspace")}
+              {t("task:thisRestartsTheTaskWorkspace")}
             </h3>
             <p className="text-muted-foreground">
               {t("task:reviewTheseChangesBeforeAddingSources")}
             </p>
           </div>
-          {restartsWorkspace ? <RestartSummary /> : <LiveUpdateSummary />}
+          <RestartSummary />
           <details className="group">
             <summary className="flex min-h-11 cursor-pointer items-center font-medium text-foreground">
               {t("task:fullImpactDetails")}
             </summary>
             <div className="pb-1">
-              {restartsWorkspace ? <RestartConsequences /> : <LiveUpdateConsequences />}
+              <RestartConsequences />
             </div>
           </details>
           <p className="border-t border-amber-500/20 pt-2 text-muted-foreground">
@@ -56,16 +61,6 @@ function RestartSummary() {
     <ul className="list-disc space-y-1.5 pl-4 text-muted-foreground">
       <li>{t("task:theIdleAgentRestartsAtThe")}</li>
       <li>{t("task:providerPrivateContextThatKandevDid")}</li>
-    </ul>
-  );
-}
-
-function LiveUpdateSummary() {
-  const { t } = useTranslation();
-  return (
-    <ul className="list-disc space-y-1.5 pl-4 text-muted-foreground">
-      <li>{t("task:repositoriesAreAddedAsTopLevel")}</li>
-      <li>{t("task:theAgentAndRunningWorkspaceProcesses")}</li>
     </ul>
   );
 }
@@ -97,28 +92,6 @@ function RestartConsequences() {
           terminals, dev servers, and other workspace processes stop. This includes the task editor
           server. Save unsaved work, then reopen or restart those processes after the sources are
           attached.
-        </Trans>
-      </li>
-    </ul>
-  );
-}
-
-function LiveUpdateConsequences() {
-  return (
-    <ul className="list-disc space-y-1.5 pl-4 text-muted-foreground">
-      <li>
-        <Trans i18nKey="task:liveUpdateConsequenceWorkspace">
-          <strong className="font-medium text-foreground">Workspace:</strong> Repositories are
-          cloned as named top-level entries under the current remote workspace. The agent&apos;s
-          working directory does not change, and existing files and Git changes are not moved or
-          discarded.
-        </Trans>
-      </li>
-      <li>
-        <Trans i18nKey="task:liveUpdateConsequenceSessionAndProcesses">
-          <strong className="font-medium text-foreground">Session and processes:</strong> The agent
-          and running workspace processes continue while Kandev rescans the workspace. The task,
-          session, task state, messages, plan, attached sources, model, and mode remain in place.
         </Trans>
       </li>
     </ul>

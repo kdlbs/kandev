@@ -20,7 +20,7 @@
 import type { ReactNode } from "react";
 
 export type WorkflowStyle = "kanban" | "office" | "custom";
-export type StageType = "work" | "review" | "approval" | "custom";
+export type StageType = "work" | "review" | "approval" | "custom" | "hold";
 
 export type TaskMetaRailProps = {
   workflowStyle?: WorkflowStyle | null;

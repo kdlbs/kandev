@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import type { DockviewApi } from "dockview-react";
 
 // Dedicated file for `applyLayoutFixups` pinned-target capture. Mocks
@@ -53,11 +53,11 @@ const SIDEBAR_GROUP = "group-sidebar";
 const CENTER_GROUP = "group-center";
 const RIGHT_BOTTOM_GROUP = "group-right-bottom";
 
-let mockResizeView: ReturnType<typeof vi.fn>;
+let mockResizeView: Mock<(index: number, size: number) => void>;
 let mockRootSplitview: NonNullable<ReturnType<typeof getRootSplitview>>;
 
 function mockSplitview(sizesByIndex: number[]): void {
-  mockResizeView = vi.fn();
+  mockResizeView = vi.fn<(index: number, size: number) => void>();
   mockRootSplitview = {
     length: sizesByIndex.length,
     getViewSize: (idx: number) => sizesByIndex[idx],

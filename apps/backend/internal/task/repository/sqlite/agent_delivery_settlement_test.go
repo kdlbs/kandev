@@ -90,6 +90,69 @@ func TestDeliveryTerminalBeforeRecoveryBlockResolvesExactSubmission(t *testing.T
 	}
 }
 
+func TestUpsertProjectedTerminalResolvesExistingOpenBlock(t *testing.T) {
+	testUpsertProjectedTerminalResolvesExistingOpenBlock(t, newRepoForSessionTests(t))
+}
+
+func TestPostgresUpsertProjectedTerminalResolvesExistingOpenBlock(t *testing.T) {
+	testUpsertProjectedTerminalResolvesExistingOpenBlock(t, newPostgresRetentionTestRepo(t))
+}
+
+func testUpsertProjectedTerminalResolvesExistingOpenBlock(t *testing.T, repo *Repository) {
+	t.Helper()
+	ctx := context.Background()
+	seedDeliverySettlement(t, repo, ctx, "resolved-upsert", "submission-resolved-upsert")
+	event := terminalDeliveryEvent("resolved-upsert", "submission-resolved-upsert", "stream-resolved-upsert", 1, "complete")
+	projectDeliveryEvent(t, repo, ctx, event)
+	completedAt := time.Now().UTC()
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`UPDATE agent_delivery_effects
+		SET state = ?, completed_at = ? WHERE stream_id = ? AND sequence = ? AND effect_type = ?`),
+		models.DeliveryEffectCompleted, completedAt, event.StreamID, event.Sequence, models.DeliveryTerminalEffectType); err != nil {
+		t.Fatalf("mark projected terminal effect completed: %v", err)
+	}
+
+	replayed := &models.SessionRecoveryBlock{
+		ID: "replayed-terminal-block", SessionID: event.SessionID, IncarnationID: event.IncarnationID,
+		ExpectedGeneration: 1, Reason: "unknown_prompt_outcome", State: models.RecoveryBlockOpen,
+		ConsumerReference: "agent_delivery", DeliverySubmissionID: event.SubmissionID,
+	}
+	if err := repo.UpsertSessionRecoveryBlock(ctx, replayed); err != nil {
+		t.Fatalf("upsert terminal-bound recovery block: %v", err)
+	}
+
+	var count int
+	if err := repo.db.GetContext(ctx, &count, repo.db.Rebind(`SELECT COUNT(*) FROM session_recovery_blocks
+		WHERE session_id = ? AND incarnation_id = ? AND expected_generation = ? AND reason = ?`),
+		event.SessionID, event.IncarnationID, 1, "unknown_prompt_outcome"); err != nil {
+		t.Fatalf("count terminal-bound recovery blocks: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("terminal-bound recovery block count = %d, want one", count)
+	}
+	if replayed.ID != "block-delivery-resolved-upsert" {
+		t.Fatalf("canonical recovery block ID = %q, want existing open block", replayed.ID)
+	}
+	block, err := repo.GetSessionRecoveryBlock(ctx, replayed.ID)
+	if err != nil {
+		t.Fatalf("get canonical recovery block: %v", err)
+	}
+	if block.State != models.RecoveryBlockResolved || block.DeliveryStreamID != event.StreamID ||
+		block.DeliverySequence != event.Sequence || block.DeliveryOutcome != string(models.DeliverySubmissionCompleted) {
+		t.Fatalf("canonical recovery block = %+v, want the projected terminal binding", block)
+	}
+	if err := repo.UpsertSessionRecoveryBlock(ctx, replayed); err != nil {
+		t.Fatalf("repeat resolved recovery block upsert: %v", err)
+	}
+	if err := repo.db.GetContext(ctx, &count, repo.db.Rebind(`SELECT COUNT(*) FROM session_recovery_blocks
+		WHERE session_id = ? AND incarnation_id = ? AND expected_generation = ? AND reason = ?`),
+		event.SessionID, event.IncarnationID, 1, "unknown_prompt_outcome"); err != nil {
+		t.Fatalf("recount terminal-bound recovery blocks: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("repeated terminal-bound recovery block count = %d, want one", count)
+	}
+}
+
 func TestDeliveryTerminalJournalEvidenceProjectsIntoSQLSettlement(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

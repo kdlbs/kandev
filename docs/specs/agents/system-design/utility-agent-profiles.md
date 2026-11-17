@@ -31,6 +31,8 @@ Implementation plan: [utility-agent-profiles](../../../plans/utility-agent-profi
 
 Latest repair plan: [utility-agent-unavailable-repair](../../../plans/utility-agent-unavailable-repair/plan.md)
 
+Custom utility admission repair: [disabled-custom-utility-admission](../../../plans/disabled-custom-utility-admission/plan.md)
+
 ## Why
 
 Utility agents run unattended one-shot jobs, but choosing only an agent family and model omits the
@@ -122,6 +124,17 @@ legacy values remain available to a later retry or diagnostic report, but the ne
 authoritative after the migration.
 
 ## API surface
+
+For `AC-AGENTS-UTILITY-AGENT-PROFILES-001.9`, `Service.PreparePromptRequest` checks
+the loaded row immediately after lookup. A non-built-in row with `Enabled == false`
+returns a typed `ErrAgentDisabled` before template or profile resolution, including
+dynamic routing. The same boundary serves both execution branches; built-in rows
+retain their existing disabled/default/inheritance behavior. The enabled value read
+at admission is the snapshot for that invocation: a subsequent disable does not
+cancel or recheck an admitted call. This does not add serialization with updates.
+The execute handler maps this error to HTTP 400 with `error: "utility agent is disabled"`
+and no `call_id`, before call creation or either executor. Keep the existing missing
+agent response and all other preparation/profile error handling unchanged.
 
 - `GET /api/v1/utility/agents` and `GET /api/v1/utility/agents/:id` return
   `agent_profile_id` and `profile_binding_state` on every utility agent.

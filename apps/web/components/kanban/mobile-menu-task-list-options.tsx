@@ -1,6 +1,5 @@
 "use client";
 
-import { Checkbox } from "@kandev/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import {
   GROUP_OPTION_LABEL_KEYS,
@@ -11,8 +10,6 @@ import {
 import { useTranslation } from "react-i18next";
 
 export type TasksListDisplayOptions = {
-  showArchived: boolean;
-  onShowArchivedChange: (show: boolean) => void;
   sort: string;
   onSortChange: (sort: string) => void;
   group: string;
@@ -90,14 +87,6 @@ export function MobileTasksListOptions({ options }: { options: TasksListDisplayO
             {t("kanban:groupTasksIntoSectionsByWorkflowStep")}
           </p>
         </div>
-        <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-0 text-sm font-medium">
-          <Checkbox
-            checked={options.showArchived}
-            onCheckedChange={(checked) => options.onShowArchivedChange(checked === true)}
-            data-testid="mobile-tasks-list-show-archived"
-          />
-          <span>{t("kanban:showArchived")}</span>
-        </label>
       </div>
     </div>
   );

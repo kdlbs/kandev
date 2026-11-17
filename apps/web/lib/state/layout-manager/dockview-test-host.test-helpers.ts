@@ -1,4 +1,16 @@
 import { createDockview, type DockviewApi } from "dockview-react";
+import { readResizableRootSplitview, type RootSplitview } from "../dockview-internals";
+
+/** Geometry probes require a mounted root and real DOM sash containers. */
+export function requireRootSplitview(
+  api: DockviewApi,
+): RootSplitview & { sashes: readonly { container: HTMLElement }[] } {
+  const root = readResizableRootSplitview(api);
+  if (!root?.sashes || root.sashes.some((sash) => !sash.container)) {
+    throw new Error("Mounted Dockview root and sash containers are required");
+  }
+  return root as RootSplitview & { sashes: readonly { container: HTMLElement }[] };
+}
 
 /**
  * A real Dockview instance laid out at a fixed size in jsdom. Layout geometry is

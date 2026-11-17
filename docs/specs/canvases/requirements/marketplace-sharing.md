@@ -100,6 +100,10 @@ task, executor, or workspace.
   create a repository, push code, publish a release, submit a pull request, or
   share the author's live canvas instance. Closing or retrying shall preserve
   the canvas and its active release.
+- **AC-CANVASES-MARKETPLACE-003.5:** On desktop and phone, the registry example
+  shall be copyable with its displayed content. If the modern clipboard write
+  fails and a legacy copy succeeds, the action shall report success. If copying
+  fails, it shall not report success or leave an unhandled rejection.
 
 ### REQ-CANVASES-MARKETPLACE-004: Reviewed workspace installation
 

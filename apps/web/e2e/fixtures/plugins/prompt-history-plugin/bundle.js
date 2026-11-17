@@ -22,8 +22,8 @@
  * (get on mount, debounced set, subscribe to pick up a write from another
  * tab/surface), task-card indicator/tag components, generic task-row metadata,
  * and task-menu actions under the "edit" and "primary" groups. It registers a
- * task-list facet (registerTaskListFacet) whose values a spec drives through
- * `window.__e2eFacetValues`, so /tasks facet sort and grouping can be exercised
+ * task-list facet (registerTaskListFacet) whose values come from a workspace
+ * user-state document, so /tasks facet sort and grouping can be exercised
  * against real plugin registrations. It also
  * registers one composer action on all three composer slots
  * (chat-input-actions, task-create-input-actions, new-session-input-actions),
@@ -38,12 +38,18 @@
 (function () {
   var moduleCount = 0;
   var listeners = new Set();
-  // Task-list facet plumbing. Values come from `window.__e2eFacetValues`
-  // (taskId -> [{value,label,color}]) so a spec can drive multi-value
-  // membership, colors, and the untagged fallback against task ids the
-  // fixture cannot know ahead of time. `window.__e2eFacetNotify()` fires
-  // the subscription so the reactive re-read path is exercised for real.
+  // Synchronous facet reads use a per-workspace cache, hydrated and refreshed
+  // through host.storage. The browser hook is only for getValues failure tests.
+  // The cache itself lives inside initialize(): the host revokes this plugin's
+  // storage subscriptions on disable, so a cache that outlived a re-enable would
+  // never be re-read or re-subscribed.
   var facetListeners = new Set();
+
+  function notifyFacetListeners() {
+    facetListeners.forEach(function (fn) {
+      fn();
+    });
+  }
 
   function emit() {
     listeners.forEach(function (fn) {
@@ -115,6 +121,75 @@
 
   window.registerKandevPlugin("kandev-plugin-e2e", {
     initialize: function (registry, host) {
+      registry.registerComponent(
+        "notification-formatter",
+        function FixtureFormatter({ slotProps: props }) {
+          const h = host.jsx;
+          const { t } = host.i18n.useTranslation();
+          const [notice, setNotice] = host.React.useState(null);
+          const [prepared, setPrepared] = host.React.useState(null);
+          const prepare = async () => {
+            const receipt = await host.api.invokeAction("notification.prepare", {
+              notificationProviderId: props.provider.id,
+              notificationFormatter: {
+                installationId: props.formatter.installation_id,
+                formatterKey: props.formatter.key,
+                expectedBindingRevision: props.binding?.revision ?? "",
+                mode: "candidate",
+              },
+              body: {},
+            });
+            setPrepared(receipt);
+            setNotice({ kind: "formatterPrepared" });
+            return receipt;
+          };
+          host.useSettingsSaveContributor({
+            id: `fixture-formatter:${props.provider.id}`,
+            order: 40,
+            revision: JSON.stringify([props.selectionChanged, prepared?.revision]),
+            isDirty: Boolean(props.selectionChanged && !prepared),
+            save: prepare,
+            discard: () => {
+              setPrepared(null);
+              setNotice(null);
+            },
+          });
+          let noticeText = "";
+          if (notice) noticeText = notice.kind === "preview" ? notice.title : t(notice.kind);
+          return h(
+            "div",
+            { "data-testid": "fixture-notification-formatter", className: "space-y-3" },
+            h(
+              host.ui.Button,
+              {
+                type: "button",
+                className: "cursor-pointer [@media(pointer:coarse)]:min-h-11",
+                "data-testid": "fixture-formatter-preview",
+                onClick: async () => {
+                  const result = await props.previewConfiguration({}, "session.failed", "normal");
+                  setNotice({ kind: "preview", title: result.title });
+                },
+              },
+              t("formatterPreview"),
+            ),
+            h(
+              host.ui.Button,
+              {
+                type: "button",
+                className: "cursor-pointer [@media(pointer:coarse)]:min-h-11",
+                "data-testid": "fixture-formatter-activate",
+                onClick: async () => {
+                  const receipt = prepared ?? (await prepare());
+                  await props.activateConfiguration(receipt, props.binding?.revision ?? "");
+                  setNotice({ kind: "formatterActive" });
+                },
+              },
+              t("formatterActivate"),
+            ),
+            h("p", { role: "status", "data-testid": "fixture-formatter-status" }, noticeText),
+          );
+        },
+      );
       var React = host.React;
       var jsx = host.jsx;
       var ui = host.ui;
@@ -1647,6 +1722,10 @@
 
       registry.registerTranslations({
         en: {
+          formatterPreview: "Preview fixture formatter",
+          formatterActivate: "Activate fixture formatter",
+          formatterActive: "Fixture formatter active",
+          formatterPrepared: "Configuration prepared. Activate it explicitly.",
           promptHistoryTitle: "Prompt history fixture",
           loading: "Loading prompt history",
           retry: "Retry",
@@ -1669,7 +1748,48 @@
           profileWorkspaceLabelDescription:
             "A long optional label that verifies narrow form layouts.",
         },
+        ko: {
+          formatterPreview: "예제 포매터 미리보기",
+          formatterActivate: "예제 포매터 활성화",
+          formatterActive: "예제 포매터 활성화됨",
+          formatterPrepared: "설정이 준비됐습니다. 명시적으로 활성화하세요.",
+        },
+        ja: {
+          formatterPreview: "サンプルフォーマッターをプレビュー",
+          formatterActivate: "サンプルフォーマッターを有効化",
+          formatterActive: "サンプルフォーマッターは有効です",
+          formatterPrepared: "設定を準備しました。明示的に有効化してください。",
+        },
+        "pt-pt": {
+          formatterPreview: "Pré-visualizar o formatador de exemplo",
+          formatterActivate: "Ativar o formatador de exemplo",
+          formatterActive: "Formatador de exemplo ativo",
+          formatterPrepared: "Configuração preparada. Ative-a explicitamente.",
+        },
+        "zh-cn": {
+          formatterPreview: "预览示例格式器",
+          formatterActivate: "启用示例格式器",
+          formatterActive: "示例格式器已启用",
+          formatterPrepared: "配置已准备。请明确启用。",
+        },
+        // Generated from zh-cn with the shared OpenCC/glossary converter.
+        "zh-tw": {
+          formatterPreview: "預覽示例格式器",
+          formatterActivate: "啟用示例格式器",
+          formatterActive: "示例格式器已啟用",
+          formatterPrepared: "設定已準備。請明確啟用。",
+        },
+        "zh-hk": {
+          formatterPreview: "預覽示例格式器",
+          formatterActivate: "啓用示例格式器",
+          formatterActive: "示例格式器已啓用",
+          formatterPrepared: "設定已準備。請明確啓用。",
+        },
         pseudo: {
+          formatterPreview: "Ƥřḗṽīḗẇ ƒīẋŧŭřḗ ƒǿřḿȧŧŧḗř",
+          formatterActivate: "Ȧƈŧīṽȧŧḗ ƒīẋŧŭřḗ ƒǿřḿȧŧŧḗř",
+          formatterActive: "Ƒīẋŧŭřḗ ƒǿřḿȧŧŧḗř ȧƈŧīṽḗ",
+          formatterPrepared: "Ƈǿƞƒīɠŭřȧŧīǿƞ ƥřḗƥȧřḗḓ. Ȧƈŧīṽȧŧḗ īŧ ḗẋƥŀīƈīŧŀẏ.",
           promptHistoryTitle: "Ƥřǿɱƥŧ ħīşŧǿřẏ ƒīẋŧŭřḗ",
           loading: "Ŀǿȧḓīƞɠ ƥřǿɱƥŧ ħīşŧǿřẏ",
           retry: "Řḗŧřẏ",
@@ -1712,21 +1832,46 @@
         Component: NotesPanel,
         mobileEnabled: true,
       });
+      var facetByWorkspace = new Map();
+      function ensureFacetWorkspace(workspaceId) {
+        var cached = facetByWorkspace.get(workspaceId);
+        if (cached) return cached;
+        cached = { values: {}, generation: 0 };
+        facetByWorkspace.set(workspaceId, cached);
+        function refresh() {
+          var generation = ++cached.generation;
+          host.storage.get("workspace", workspaceId, "facet-values").then(
+            function (entry) {
+              if (generation !== cached.generation) return;
+              cached.values = entry ? entry.value : {};
+              notifyFacetListeners();
+            },
+            function () {
+              // Preserve the last available document if a refresh fails.
+            },
+          );
+        }
+        host.storage.subscribe(
+          { scope: "workspace", scopeId: workspaceId, key: "facet-values" },
+          refresh,
+        );
+        refresh();
+        return cached;
+      }
+
       registry.registerTaskListFacet({
         id: "fixture-tags",
         label: "Fixture tag",
         getValues: function (context) {
-          var byTask = window.__e2eFacetValues || {};
-          if (byTask.__throwFor === context.taskId) throw new Error("fixture facet boom");
-          return byTask[context.taskId] || [];
+          if (window.__e2eFacetValues?.__throwFor === context.taskId) {
+            throw new Error("fixture facet boom");
+          }
+          if (!context.workspaceId) return [];
+          return ensureFacetWorkspace(context.workspaceId).values[context.taskId] || [];
         },
         subscribe: function (listener) {
           facetListeners.add(listener);
-          window.__e2eFacetNotify = function () {
-            facetListeners.forEach(function (fn) {
-              fn();
-            });
-          };
+          window.__e2eFacetNotify = notifyFacetListeners;
           return function () {
             facetListeners.delete(listener);
           };

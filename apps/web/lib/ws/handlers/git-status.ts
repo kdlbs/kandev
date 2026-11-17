@@ -12,6 +12,10 @@ import type {
 import { invalidateCumulativeDiffCache } from "@/hooks/domains/session/use-cumulative-diff";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { acceptsGitStatusOrdering } from "@/lib/state/slices/session-runtime/git-status-state";
+import {
+  isRetiredGitStatusScope,
+  isUnknownGitStatusScope,
+} from "@/lib/state/slices/session-runtime/git-status-inventory";
 
 const debug = createDebugLogger("git-status:ws");
 
@@ -100,6 +104,22 @@ export function applyGitStatusUpdate(
   store: StoreApi<AppState>,
   event: GitStatusUpdateEvent,
 ): boolean {
+  const state = store.getState();
+  const environmentId = event.task_environment_id;
+  if (!environmentId) return false;
+  const repositoryName = event.status.repository_name;
+  // Once an authoritative aggregate read has established the current Git
+  // scopes, late streaming frames from a retired tracker cannot recreate the
+  // empty-name failure or another stale repository.
+  if (isRetiredGitStatusScope(state, environmentId, repositoryName)) {
+    return false;
+  }
+  // A tracker can discover a scope (for example a submodule) without an
+  // attachment event. Accept its first frame and invalidate inventory so the
+  // next aggregate read includes it instead of hiding the change.
+  if (isUnknownGitStatusScope(state, environmentId, repositoryName)) {
+    store.getState().invalidateGitStatusInventory(event.session_id);
+  }
   return applyGitStatusUpdateWithOutcome(store, event).changed;
 }
 

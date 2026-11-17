@@ -108,10 +108,10 @@ describe("getCleanupSummary (single task)", () => {
 });
 
 describe("archive cleanup summaries", () => {
-  it("explains conditional worktree removal and branch retention", () => {
+  it("explains immediate worktree removal and branch retention", () => {
     const { effects, notes } = getArchiveCleanupSummary("worktree");
-    expect(effects[0]).toMatch(/clean Git worktrees are removed/i);
-    expect(effects[0]).toMatch(/Git changes stays until it is clean/i);
+    expect(effects[0]).toMatch(/Git worktrees and local changes are deleted on archive/i);
+    expect(effects[0]).toMatch(/local changes are deleted on archive/i);
     expect(notes.join(" ")).toMatch(/unpublished local branches remain available/i);
     expect(notes.join(" ")).not.toMatch(/all branches/i);
   });
@@ -123,7 +123,7 @@ describe("archive cleanup summaries", () => {
   it("groups bulk archive worktrees without promising branch deletion", () => {
     const { effects, notes } = getBulkArchiveCleanupSummary(["worktree", "worktree", "local"]);
     expect(effects[0]).toMatch(/2 Git worktree tasks/);
-    expect(effects[0]).toMatch(/checkouts with Git changes stay until they are clean/i);
+    expect(effects[0]).toMatch(/worktrees and local changes are deleted on archive/i);
     expect(notes.join(" ")).toMatch(/unpublished local branches remain available/i);
     expect(effects).toContain(AGENT_STOP_EFFECT);
   });

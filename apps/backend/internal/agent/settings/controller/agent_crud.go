@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 )
 
 func (c *Controller) GetAgent(ctx context.Context, id string) (*dto.AgentDTO, error) {
@@ -129,6 +130,7 @@ type CreateAgentRequest struct {
 }
 
 type CreateAgentProfileRequest struct {
+	ExecutionGrade          string
 	Name                    string
 	Model                   string
 	FallbackModel           string
@@ -142,6 +144,9 @@ type CreateAgentProfileRequest struct {
 	// by default) so a fresh profile opens with the agent's suggestions.
 	CLIFlags []dto.CLIFlagDTO
 	EnvVars  []dto.ProfileEnvVarDTO
+	// DevinSandboxInherited marks an explicit "Use CLI settings" choice on a
+	// new Devin profile.
+	DevinSandboxInherited bool
 	// CommandPrefix is an optional launcher prefix prepended to the agent
 	// command (e.g. "greywall --"). Shell-tokenised at launch time.
 	CommandPrefix string
@@ -179,6 +184,13 @@ func (c *Controller) CreateAgent(ctx context.Context, req CreateAgentRequest) (*
 	// leaving an orphaned agent behind.
 	for i := range req.Profiles {
 		if err := validateCreateProfileRequest(req.Profiles[i]); err != nil {
+			return nil, err
+		}
+		mode, envVars := devinProfilePermissionDefaults(
+			req.Name, req.Profiles[i].Mode, req.Profiles[i].EnvVars,
+			!req.Profiles[i].DevinSandboxInherited,
+		)
+		if err := validateDevinProfilePermissionIntent(req.Name, mode, envVars); err != nil {
 			return nil, err
 		}
 	}
@@ -256,6 +268,9 @@ func (c *Controller) findMatchedAvailability(name string, results []discovery.Av
 // agent-create profile. Kept separate so CreateAgent can validate every profile
 // before inserting the agent row (avoiding an orphaned agent on a bad profile).
 func validateCreateProfileRequest(p CreateAgentProfileRequest) error {
+	if err := sessioncapacity.ValidateGrade(p.ExecutionGrade); err != nil {
+		return err
+	}
 	if err := validateRequireExactModelPolicy(p.Model, p.RequireExactModel, false, false); err != nil {
 		return err
 	}
@@ -276,11 +291,19 @@ func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayNa
 		if err := validateCreateProfileRequest(profileReq); err != nil {
 			return nil, err
 		}
+		mode, envVars := devinProfilePermissionDefaults(
+			agentConfig.ID(), profileReq.Mode, profileReq.EnvVars,
+			!profileReq.DevinSandboxInherited,
+		)
+		if err := validateDevinProfilePermissionIntent(agentConfig.ID(), mode, envVars); err != nil {
+			return nil, err
+		}
 		cliFlags := cliFlagsFromDTO(profileReq.CLIFlags)
 		if profileReq.CLIFlags == nil {
 			cliFlags = seedCLIFlags(agentConfig)
 		}
 		profile := &models.AgentProfile{
+			ExecutionGrade:          profileReq.ExecutionGrade,
 			AgentID:                 agentID,
 			Name:                    profileReq.Name,
 			AgentDisplayName:        displayName,
@@ -290,9 +313,9 @@ func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayNa
 			RequireExactModel:       profileReq.RequireExactModel,
 			CursorMCPAuthEnabled:    cursorMCPAuthEnabled(profileReq.CursorMCPAuthEnabled),
 			CursorPluginsMCPEnabled: cursorPluginsMCPEnabled(profileReq.CursorPluginsMCPEnabled),
-			Mode:                    profileReq.Mode,
+			Mode:                    mode,
 			CLIFlags:                cliFlags,
-			EnvVars:                 envVarsFromDTO(profileReq.EnvVars),
+			EnvVars:                 envVarsFromDTO(envVars),
 			CommandPrefix:           strings.TrimSpace(profileReq.CommandPrefix),
 		}
 		if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {

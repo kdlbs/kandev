@@ -14,7 +14,7 @@ import (
 )
 
 func processRoots(p Plan) []string {
-	var roots []string
+	roots := append([]string{}, p.ExpectedConsumerPaths...)
 	for _, r := range p.Repairs {
 		roots = append(roots, filepath.Dir(r.SourcePath), filepath.Dir(r.Path), p.ExpectedGit[r.WorktreeID].GitDir)
 	}

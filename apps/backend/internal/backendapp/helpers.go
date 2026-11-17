@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/loginpty"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	mcpregistry "github.com/kandev/kandev/internal/agent/mcpconfig/registry"
 	"github.com/kandev/kandev/internal/agent/registry"
 	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -36,7 +37,6 @@ import (
 	authhttpapi "github.com/kandev/kandev/internal/auth/httpapi"
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/automation"
-	"github.com/kandev/kandev/internal/azuredevops"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -68,6 +68,7 @@ import (
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
+	"github.com/kandev/kandev/internal/notifications/webpush"
 	officeagents "github.com/kandev/kandev/internal/office/agents"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/retention"
@@ -90,6 +91,7 @@ import (
 	sshhandlers "github.com/kandev/kandev/internal/ssh"
 	"github.com/kandev/kandev/internal/startup"
 	systemsvc "github.com/kandev/kandev/internal/system"
+	"github.com/kandev/kandev/internal/system/maintenance"
 	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
@@ -140,6 +142,7 @@ func buildSessionDataProvider(
 	taskRepo *sqliterepo.Repository,
 	lifecycleMgr *lifecycle.Manager,
 	cancellationProvider taskdto.CancellationPendingProvider,
+	runtimeStorageProvider taskdto.RuntimeStorageHealthProvider,
 	log *logger.Logger,
 ) func(context.Context, string) ([]*ws.Message, error) {
 	return func(ctx context.Context, sessionID string) ([]*ws.Message, error) {
@@ -149,7 +152,9 @@ func buildSessionDataProvider(
 		}
 
 		var result []*ws.Message
-		result = appendSessionStateMessageWithCancellation(sessionID, session, cancellationProvider, result)
+		result = appendSessionStateMessageWithCancellation(
+			sessionID, session, cancellationProvider, runtimeStorageProvider, result,
+		)
 		result = appendAgentctlStatusMessage(ctx, lifecycleMgr, sessionID, result, log)
 		result = appendLiveGitStatusMessage(ctx, taskRepo, lifecycleMgr, sessionID, session, result, log)
 		result = appendContextWindowMessage(sessionID, session, result)
@@ -210,6 +215,11 @@ func refreshGitStatusFromSources(ctx context.Context, taskRepo *sqliterepo.Repos
 	rpcCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	live := false
+	// Every accepted aggregate response must describe one selected source's
+	// complete repository set. Concatenating a failed sibling-source attempt
+	// with a later successful source would mix inventories, so keep the first
+	// failed attempt only as the no-success fallback.
+	var failedSource *gateways.SessionGitRefreshResult
 	for _, sourceSessionID := range sources.sessionIDs {
 		if rpcCtx.Err() != nil {
 			break
@@ -219,10 +229,30 @@ func refreshGitStatusFromSources(ctx context.Context, taskRepo *sqliterepo.Repos
 		if multi == nil {
 			continue
 		}
-		appendGitStatusRefreshSnapshots(&result, sources, sessionID, multi)
-		if result.Success {
-			return result
+		attempt := gateways.SessionGitRefreshResult{
+			SessionID:         result.SessionID,
+			Mode:              result.Mode,
+			TaskEnvironmentID: result.TaskEnvironmentID,
+			StatusState:       "unavailable",
+			Snapshots:         []*ws.Message{},
 		}
+		appendGitStatusRefreshSnapshots(&attempt, sources, sessionID, multi)
+		if attempt.Success {
+			// A sibling execution can retain the pre-attachment tracker graph.
+			// Its aggregate then describes only that checkout, not the whole
+			// environment. Only a source covering every registered repository
+			// may define the complete inventory.
+			if len(multi.Repos) < sources.repositoryCount {
+				continue
+			}
+			return attempt
+		}
+		if failedSource == nil {
+			failedSource = &attempt
+		}
+	}
+	if failedSource != nil {
+		return *failedSource
 	}
 	if live && rpcCtx.Err() != nil {
 		result.ErrorCode = "status_timeout"
@@ -445,7 +475,7 @@ func appendAgentctlStatusMessage(
 // (page reload, task switch, WS reconnect) can seed environmentIdBySessionId
 // — without it, env-routed shell terminals stall on "Connecting terminal...".
 func appendSessionStateMessage(sessionID string, session *models.TaskSession, result []*ws.Message) []*ws.Message {
-	return appendSessionStateMessageWithCancellation(sessionID, session, nil, result)
+	return appendSessionStateMessageWithCancellation(sessionID, session, nil, nil, result)
 }
 
 func cancellationPendingSnapshot(
@@ -462,6 +492,7 @@ func appendSessionStateMessageWithCancellation(
 	sessionID string,
 	session *models.TaskSession,
 	cancellationProvider taskdto.CancellationPendingProvider,
+	runtimeStorageProvider taskdto.RuntimeStorageHealthProvider,
 	result []*ws.Message,
 ) []*ws.Message {
 	payload := map[string]interface{}{
@@ -477,6 +508,11 @@ func appendSessionStateMessageWithCancellation(
 		pending, revision := cancellationPendingSnapshot(cancellationProvider, sessionID)
 		payload["cancellation_pending"] = pending
 		payload["cancellation_revision"] = revision
+	}
+	if runtimeStorageProvider != nil {
+		if health := runtimeStorageProvider.RuntimeStorageHealth(sessionID); health != nil {
+			payload["runtime_storage_health"] = health
+		}
 	}
 	if session.ReviewStatus != models.ReviewStatusNone {
 		payload["review_status"] = string(session.ReviewStatus)
@@ -1195,6 +1231,9 @@ func registerRoutes(p routeParams) {
 		p.orchestratorSvc.HandleClarificationPrimaryAnswered,
 		p.log,
 	)
+	clarificationResolver.SetAnswerAttachmentMaterializer(
+		&clarificationAnswerAttachmentMaterializer{runtime: p.lifecycleMgr},
+	)
 
 	// Wire pending clarification requests into the office inbox.
 	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {
@@ -1281,9 +1320,6 @@ func registerRoutes(p routeParams) {
 	if p.services.GitLab != nil {
 		p.services.GitLab.SetCascadeTaskDeleter(handoffSvc)
 	}
-	if p.services.AzureDevOps != nil {
-		p.services.AzureDevOps.SetCascadeTaskDeleter(handoffSvc)
-	}
 	// repoLookup validates a watcher's optional repository binding (workspace
 	// ownership + default-branch fill) on create/update. Shared across the three
 	// repo-less watchers; one concrete adapter satisfies each package's
@@ -1295,12 +1331,6 @@ func registerRoutes(p routeParams) {
 			tasks: p.taskSvc, workflows: p.services.Workflow, agents: p.agentSettingsRepo,
 		})
 		p.services.GitLab.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
-	}
-	if p.services.AzureDevOps != nil {
-		p.services.AzureDevOps.SetWatchRepositoryLookup(repoLookup)
-		p.services.AzureDevOps.SetWatchDependencyValidator(&gitLabWatchDependencyValidator{
-			tasks: p.taskSvc, workflows: p.services.Workflow, agents: p.agentSettingsRepo,
-		})
 	}
 	if p.services.Jira != nil {
 		p.services.Jira.SetTaskDeleter(handoffSvc)
@@ -1728,6 +1758,9 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		p.log.Warn("prompt attachment routes disabled: attachment service is unavailable")
 	}
 	taskhandlers.RegisterWorkspaceRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
+	if p.features.WorkspaceCollaboration {
+		taskhandlers.RegisterWorkspaceCollaborationRoutes(p.router, p.gateway.Dispatcher, p.taskSvc)
+	}
 	taskhandlers.RegisterMemberRoutes(p.router, p.taskSvc, p.log)
 	if p.services != nil && p.services.Org != nil {
 		org.NewController(p.services.Org, p.log).RegisterRoutes(p.router)
@@ -1790,6 +1823,12 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		&orchestratorWrapper{svc: p.orchestratorSvc}, p.log, referenceValidators...,
 	)
 	processHandlers := taskhandlers.RegisterProcessRoutes(p.router, p.taskSvc, p.lifecycleMgr, p.log)
+	if p.agentSettingsController != nil && p.taskSvc != nil {
+		processHandlers.SetSessionModelConfigResolver(&sessionModelConfigResolver{
+			sessions: p.taskSvc,
+			settings: p.agentSettingsController,
+		})
+	}
 	if p.services != nil && p.services.Terminal != nil {
 		processHandlers.SetTerminalService(p.services.Terminal)
 	}
@@ -1801,6 +1840,50 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		p.log.Debug("Registered Public Share Links handlers (HTTP)")
 	}
 	p.log.Debug("Registered Task Service handlers (HTTP + WebSocket)")
+}
+
+// configureMCPServices installs workspace authorization, selection ownership, and automation usage
+// readers.
+func configureMCPServices(
+	p routeParams,
+) (mcpconfig.CatalogRepository, *mcpconfig.CatalogService, *mcpconfig.SelectionService) {
+	configureBuiltinMCPServices(p)
+	catalogRepo, ok := p.agentSettingsRepo.(mcpconfig.CatalogRepository)
+	if !ok {
+		return nil, nil, nil
+	}
+	mcpCatalog := mcpconfig.NewCatalogService(catalogRepo)
+	mcpCatalog.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
+	selectionRepo, ok := p.agentSettingsRepo.(mcpconfig.SelectionRepository)
+	if !ok {
+		return catalogRepo, mcpCatalog, nil
+	}
+	mcpSelectionService := mcpconfig.NewSelectionService(selectionRepo, catalogRepo)
+	mcpSelectionService.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
+	mcpSelectionService.SetOwnerValidator(mcpSelectionOwnerValidator(p))
+	if profileReader, ok := p.agentSettingsRepo.(mcpUsageProfileReader); ok {
+		mcpSelectionService.SetUsageOwnerReader(mcpUsageOwnerReader(profileReader, p.taskSvc))
+	}
+	mcpSelectionService.SetAdditionValidator(mcpSelectionAdditionValidator(p))
+	mcpSelectionService.SetSessionResolutionContext(mcpSessionResolutionContext(p))
+	if stateRepo, ok := p.agentSettingsRepo.(mcpconfig.SessionMCPSelectionStateRepository); ok {
+		mcpSelectionService.SetSessionMCPStateRepository(stateRepo)
+	}
+	if p.lifecycleMgr != nil {
+		mcpSelectionService.SetSessionMCPChangeNotifier(func(ctx context.Context, sessionID string) {
+			p.lifecycleMgr.RequestSessionMCPReconfiguration(ctx, sessionID)
+		})
+	}
+	mcpCatalog.SetSelectionRepository(selectionRepo)
+	if p.services != nil && p.services.Automation != nil {
+		mcpCatalog.SetAutomationUsageReader(p.services.Automation.Service.MCPDefinitionSelectionCounts)
+		mcpSelectionService.SetAutomationUsageReader(p.services.Automation.Service.MCPDefinitionSelectionCounts)
+	}
+	p.taskSvc.SetMCPSelectionWriter(mcpSelectionService)
+	if p.orchestratorSvc != nil {
+		p.orchestratorSvc.SetMCPSelectionWriter(mcpSelectionService)
+	}
+	return catalogRepo, mcpCatalog, mcpSelectionService
 }
 
 // registerSecondaryRoutes registers workflow, agent settings, user, notification, editor,
@@ -1817,7 +1900,34 @@ func registerSecondaryRoutes(
 	workflowhandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, workflowCtrl, p.eventBus, p.log)
 	p.log.Info("Registered Workflow handlers (HTTP + WebSocket)")
 
-	agentsettingshandlers.RegisterRoutes(p.router, p.agentSettingsController, p.gateway.Hub, p.log, p.interimSettingsInterlockToken)
+	mcpCatalogRepo, mcpCatalog, mcpSelectionService := configureMCPServices(p)
+	var marketplace *mcpregistry.MarketplaceService
+	if cache, ok := p.agentSettingsRepo.(mcpregistry.CacheStore); ok && mcpCatalogRepo != nil {
+		client, clientErr := mcpregistry.NewClient(mcpregistry.DefaultRegistryURL, nil)
+		if clientErr == nil {
+			syncer := mcpregistry.NewSyncService(client, cache)
+			marketplace = mcpregistry.NewMarketplaceService(syncer, mcpCatalog)
+			if p.addCleanup != nil {
+				marketplaceCtx, cancelMarketplace := context.WithCancel(context.Background())
+				syncer.Start(marketplaceCtx, time.Hour)
+				p.addCleanup(func() error {
+					cancelMarketplace()
+					return nil
+				})
+			}
+		}
+	}
+	agentsettingshandlers.RegisterRoutesWithMCPCatalogAndMarketplaceAndSelections(
+		p.router,
+		p.agentSettingsController,
+		p.gateway.Hub,
+		p.log,
+		p.interimSettingsInterlockToken,
+		mcpCatalogRepo,
+		p.taskSvc.AuthorizeWorkspaceAccess,
+		marketplace,
+		mcpSelectionService,
+	)
 	p.log.Debug("Registered Agent Settings handlers (HTTP)")
 
 	// Login PTY: spawns agent login commands under a PTY on the kandev host
@@ -1840,6 +1950,11 @@ func registerSecondaryRoutes(
 	p.log.Debug("Registered User handlers (HTTP + WebSocket)")
 
 	notificationhandlers.RegisterRoutes(p.router, p.notificationCtrl, p.log)
+	if p.notificationCtrl != nil {
+		if pushSvc := p.notificationCtrl.WebPush(); pushSvc != nil {
+			webpush.RegisterRoutes(p.router, pushSvc, p.notificationCtrl, notificationcontroller.CallerUserID, p.log)
+		}
+	}
 	p.log.Debug("Registered Notification handlers (HTTP)")
 
 	editorhandlers.RegisterRoutes(p.router, p.editorCtrl, p.log)
@@ -1851,7 +1966,7 @@ func registerSecondaryRoutes(
 	utilityhandlers.RegisterRoutes(p.router, p.utilityCtrl, p.lifecycleMgr, p.hostUtilityMgr, p.services.User, p.log)
 	p.log.Debug("Registered Utility Agents handlers (HTTP)")
 
-	agentcapabilities.RegisterRoutes(p.router, p.hostUtilityMgr, p.log)
+	agentcapabilities.RegisterRoutes(p.router, p.hostUtilityMgr, p.log, p.interimSettingsInterlockToken)
 	p.log.Debug("Registered Agent Capabilities handlers (HTTP)")
 
 	clarification.RegisterRoutes(
@@ -1866,6 +1981,7 @@ func registerSecondaryRoutes(
 		p.taskSvc,
 		p.taskRepo,
 		p.features.NeedsYouInbox,
+		&questionImageReaderAdapter{lifecycle: p.lifecycleMgr},
 	)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
 
@@ -1949,12 +2065,6 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered GitLab handlers (HTTP)")
 	}
 
-	if p.services.AzureDevOps != nil {
-		azuredevops.RegisterRoutes(p.router, p.services.AzureDevOps, p.log)
-		azuredevops.RegisterMockRoutes(p.router, p.services.AzureDevOps, p.log)
-		p.log.Debug("Registered Azure DevOps handlers (HTTP)")
-	}
-
 	if p.services.Jira != nil {
 		jira.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Jira, p.log)
 		jira.RegisterMockRoutes(p.router, p.services.Jira, p.log)
@@ -1979,8 +2089,13 @@ func registerSecondaryRoutes(
 	}
 
 	if p.services.Automation != nil {
+		definitions, _ := p.agentSettingsRepo.(automation.MCPDefinitionReader)
+		policy, _ := p.agentSettingsRepo.(automation.MCPBuiltinPolicyReader)
+		p.services.Automation.Service.SetMCPSelectionReaders(definitions, policy)
 		if p.services.Plugins != nil {
 			p.services.Automation.Service.SetPluginAutomationProvider(p.services.Plugins)
+			p.services.Automation.Service.SetPluginToolOptionsProvider(p.services.Plugins)
+			p.services.Automation.Service.SetPluginToolCatalogNotifier(p.services.Plugins.NotifyAgentToolCatalogChanged)
 			p.services.Plugins.SetAutomationRevoker(p.services.Automation.Service.CancelPluginWebhookDeliveries)
 		}
 		automation.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Automation.Service, p.log)
@@ -2070,6 +2185,7 @@ func registerSecondaryRoutes(
 		p.router, p.agentSettingsController, p.runtimeUpdateNotifier, p.e2eRuntimeUpdateHooks, p.log,
 	)
 	registerE2EStartupPageFixtureRoute(p.router, p.log)
+	registerE2ECapacityRetryClockRoutes(p.router, p.services.capacityRetryClock)
 
 	if officetestharness.Enabled() {
 		var officeAgentSvc *officeagents.AgentService
@@ -2123,7 +2239,7 @@ func newSSHAgentctlResolver(p routeParams) *lifecycle.AgentctlResolver {
 // authorizes ownership for them when auth is enabled.
 var integrationWorkspacePrefixes = []string{
 	"/api/v1/jira/", "/api/v1/linear/", "/api/v1/sentry/",
-	"/api/v1/azure-devops/", "/api/v1/gitlab/", "/api/v1/github/", "/api/v1/workflow-sync/",
+	"/api/v1/gitlab/", "/api/v1/github/", "/api/v1/workflow-sync/",
 }
 
 // integrationWorkspaceScopeMiddleware enforces workspace ownership on the
@@ -2485,6 +2601,7 @@ func registerMCPAndDebugRoutes(
 		clarificationStore, clarificationCanceller, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, walkthroughService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
 	)
 	mcpHandlers.SetPluginService(p.services.Plugins)
+	mcpHandlers.SetPluginToolAuthEnabled(func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled })
 	if p.features.Canvases && p.services != nil && p.services.Canvas != nil && p.services.Plugins != nil {
 		mcpHandlers.SetCanvasAuthoringService(newCanvasAuthoringService(
 			p.services.Canvas, p.services.Plugins, p.taskSvc,
@@ -2499,6 +2616,7 @@ func registerMCPAndDebugRoutes(
 	}
 	if p.services.Automation != nil {
 		mcpHandlers.SetAutomationCreator(p.services.Automation.Service)
+		mcpHandlers.SetAutomationPluginTools(p.services.Automation.Service)
 	}
 	mcpHandlers.SetSettingsBroadcaster(p.gateway.Hub)
 	if settingsRegistry, err := buildSettingsRegistry(); err != nil {
@@ -2532,13 +2650,31 @@ func registerMCPAndDebugRoutes(
 				sentry:        settingsSentryServiceFromPointer(p.services.Sentry),
 				github:        settingsGitHubServiceFromPointer(p.services.GitHub),
 				gitlab:        settingsGitLabServiceFromPointer(p.services.GitLab),
-				azureDevOps:   settingsAzureDevOpsServiceFromPointer(p.services.AzureDevOps),
 			},
 		))
 	}
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
 	mcpHandlers.SetSessionCeilingReleaser(p.orchestratorSvc)
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
+	if p.taskRepo != nil {
+		mcpHandlers.SetSendOperationStore(p.taskRepo)
+	}
+	if p.taskRepo != nil && p.dbPool != nil {
+		taskRepo, pool, log := p.taskRepo, p.dbPool, p.log
+		stopRetention := mcpHandlers.SetSendOperationRetention(p.ctx, func(ctx context.Context) {
+			release, admitted := maintenance.ForPool(pool).TryAcquire()
+			if !admitted {
+				return
+			}
+			defer release()
+			if _, _, err := taskRepo.PruneSendOperations(ctx, sqliterepo.SendOperationPruneBatch); err != nil {
+				log.Warn("send-operation retention batch failed", zap.Error(err))
+			}
+		})
+		if p.addCleanup != nil {
+			p.addCleanup(func() error { stopRetention(); return nil })
+		}
+	}
 	mcpHandlers.SetPromptReader(p.services.Prompts)
 	mcpHandlers.SetPromptWriter(p.services.Prompts, func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled })
 	mcpHandlers.SetTaskStopper(p.orchestratorSvc)
@@ -2594,7 +2730,11 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetReviewService(reviewParts.service)
 	mcpHandlers.SetReviewRunner(reviewParts.runner)
 	p.orchestratorSvc.SetReviewRunner(reviewParts.runner)
-	reviewParts.runner.Start(context.Background())
+	reviewCtx := p.ctx
+	if reviewCtx == nil {
+		reviewCtx = context.Background()
+	}
+	startup.AfterReady(reviewCtx, func() { reviewParts.runner.Start(reviewCtx) })
 	if p.addCleanup != nil {
 		p.addCleanup(func() error {
 			reviewParts.runner.Stop()
@@ -2644,6 +2784,7 @@ func registerMCPAndDebugRoutes(
 		mcpScopeResolver.SetCoordinatorLookup(p.services.Coordinator)
 	}
 	p.lifecycleMgr.SetMCPPrincipalScoper(mcpScopeResolver.ScopePrincipal)
+	wireBuiltinMCPActions(p)
 	if p.authSvc != nil {
 		p.lifecycleMgr.SetMCPIdentityScoper(mcpScopeResolver.Scope)
 		p.log.Debug("In-session MCP dispatch scoped to task owner")
@@ -2678,8 +2819,13 @@ func registerExternalMCP(p routeParams) {
 	srv := mcpserver.NewExternal(backendClient, p.log, "")
 	mcpGroup := p.router.Group("", externalMCPAuthMiddleware(p.authSvc))
 	srv.RegisterBackendRoutes(mcpGroup)
+	unsubscribe := func() {}
+	if p.services != nil && p.services.PluginToolCatalog != nil {
+		unsubscribe = p.services.PluginToolCatalog.Subscribe(srv)
+	}
 	if p.addCleanup != nil {
 		p.addCleanup(func() error {
+			unsubscribe()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			return srv.Close(ctx)

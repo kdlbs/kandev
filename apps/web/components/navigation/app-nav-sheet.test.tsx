@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { JSX } from "react";
+import type { Automation, AutomationRun } from "@/lib/types/automation";
 import { defaultState } from "@/lib/state/default-state";
 import { AppNavSheet } from "./app-nav-sheet";
 import { AppNavSections, useAppNavDialogs } from "./app-nav-sections";
@@ -12,6 +13,12 @@ const mocks = vi.hoisted(() => ({
   setTheme: vi.fn(),
 }));
 
+const automationApi = vi.hoisted(() => ({
+  listAutomations: vi.fn().mockResolvedValue([]),
+  listAutomationSummaries: vi.fn().mockResolvedValue([]),
+}));
+vi.mock("@/lib/api/domains/automation-api", () => automationApi);
+
 let pathname = "/settings";
 let inOffice = false;
 
@@ -19,6 +26,7 @@ let resolvedTheme: "light" | "dark" = "light";
 const THEME_TOGGLE_TEST_ID = "mobile-theme-toggle-button";
 const NAV_TRIGGER = "app-nav-trigger";
 const ARIA_LABEL = "aria-label";
+const OFFICE_WORKFLOW_ID = "office-workflow";
 
 const state = {
   ...defaultState,
@@ -104,7 +112,6 @@ vi.mock("@/lib/plugins/registry", () => ({
 
 vi.mock("@/hooks/use-nav-availability", () => ({
   useNavAvailability: () => ({
-    "azure-devops": false,
     github: false,
     gitlab: false,
     jira: false,
@@ -147,7 +154,21 @@ vi.mock("@/components/system-health/health-indicator", () => ({
 }));
 
 vi.mock("@/components/integrations/integrations-menu", () => ({
-  MobileIntegrationsSection: () => <div data-testid="mobile-integrations-section" />,
+  MobileIntegrationsSection: ({
+    pluginDestinations = [],
+    collapsible = false,
+  }: {
+    collapsible?: boolean;
+    pluginDestinations?: { id: string; label: string; href: string }[];
+  }) => (
+    <div data-testid="mobile-integrations-section" data-collapsible={String(collapsible)}>
+      {pluginDestinations.map((item) => (
+        <a key={item.id} href={item.href}>
+          {item.label}
+        </a>
+      ))}
+    </div>
+  ),
 }));
 
 vi.mock("./mobile-coordinators-section", () => ({
@@ -163,7 +184,9 @@ type SectionsProps = Parameters<typeof AppNavSections>[0];
 function SectionsHost({
   omitSections,
   omitDestinations,
+  phoneNavigation,
 }: {
+  phoneNavigation?: boolean;
   omitSections?: SectionsProps["omitSections"];
   omitDestinations?: SectionsProps["omitDestinations"];
 }) {
@@ -175,6 +198,7 @@ function SectionsHost({
         omitSections={omitSections}
         omitDestinations={omitDestinations}
         controls={controls}
+        phoneNavigation={phoneNavigation}
       />
       {controls.dialogs}
     </>
@@ -220,7 +244,7 @@ describe("AppNavSheet", () => {
   it("offers task views for Kanban, not Office workspaces", () => {
     const host = render(<SectionsHost />);
     expect(screen.getByRole("button", { name: "Task views" })).not.toBeNull();
-    state.workspaces.items[0].office_workflow_id = "office-workflow";
+    state.workspaces.items[0].office_workflow_id = OFFICE_WORKFLOW_ID;
     host.rerender(<SectionsHost />);
     expect(screen.queryByRole("button", { name: "Task views" })).toBeNull();
   });
@@ -274,7 +298,7 @@ describe("AppNavSheet", () => {
 
   it("does not offer Kanban destinations from an Office workspace on a shared page", () => {
     inOffice = true;
-    state.workspaces.items[0].office_workflow_id = "office-workflow";
+    state.workspaces.items[0].office_workflow_id = OFFICE_WORKFLOW_ID;
     render(<AppNavSheet />);
     fireEvent.click(screen.getByTestId(NAV_TRIGGER));
     expect(screen.queryByRole("link", { name: "Tasks" })).toBeNull();
@@ -435,7 +459,7 @@ describe("AppNavSections", () => {
 
   it("omits regular-workspace integrations from an Office layout", () => {
     inOffice = true;
-    state.workspaces.items[0].office_workflow_id = "office-workflow";
+    state.workspaces.items[0].office_workflow_id = OFFICE_WORKFLOW_ID;
 
     render(<SectionsHost />);
 
@@ -544,5 +568,109 @@ describe("AppNavSections theme toggle", () => {
 
     fireEvent.click(toggle);
     expect(mocks.setTheme).toHaveBeenCalledWith("light");
+  });
+});
+
+vi.mock("@/components/navigation/mobile-task-search-action", () => ({
+  MobileTaskSearchAction: () => null,
+}));
+
+describe("integration plugin grouping", () => {
+  afterEach(cleanup);
+  it.each([true, false])(
+    "limits the collapsed disclosure to phoneNavigation=%s",
+    (phoneNavigation) => {
+      render(<SectionsHost phoneNavigation={phoneNavigation} />);
+      expect(
+        screen.getByTestId("mobile-integrations-section").getAttribute("data-collapsible"),
+      ).toBe(String(phoneNavigation));
+    },
+  );
+  // @covers AC-UI-SIDEBAR-CUSTOMIZATION-001.10
+  it.each([false, true])("places an original integration plugin once with Office=%s", (office) => {
+    inOffice = office;
+    state.workspaces.items[0].office_workflow_id = office ? OFFICE_WORKFLOW_ID : null;
+    navRegistrations = [
+      {
+        pluginId: "youtrack",
+        id: "issues",
+        label: "YouTrack",
+        path: "/youtrack",
+        section: "integrations",
+      },
+    ];
+    render(<SectionsHost />);
+    const links = screen.getAllByRole("link", { name: "YouTrack" });
+    expect(links).toHaveLength(1);
+    if (office) {
+      expect(screen.queryByTestId("mobile-integrations-section")).toBeNull();
+    } else {
+      expect(links[0].closest('[data-testid="mobile-integrations-section"]')).not.toBeNull();
+    }
+  });
+});
+
+// @covers AC-OFFICE-AUTOMATION-RUNS-001.22
+describe("saved-layout automation outcomes", () => {
+  afterEach(() => {
+    cleanup();
+    automationApi.listAutomations.mockReset().mockResolvedValue([]);
+    automationApi.listAutomationSummaries.mockReset().mockResolvedValue([]);
+  });
+  it("saved-layout automation row exposes latest failure through the real activity projection", async () => {
+    automationApi.listAutomations.mockResolvedValue([
+      {
+        id: "failed-automation",
+        workspace_id: "ws-1",
+        name: "Nightly audit",
+        enabled: true,
+        max_concurrent_runs: 1,
+        triggers: [],
+        description: "",
+        workflow_id: "",
+        workflow_step_id: "",
+        agent_profile_id: "",
+        executor_profile_id: "",
+        repository_ids: [],
+        prompt: "",
+        task_title_template: "",
+        last_triggered_at: null,
+        created_at: "2026-11-05T10:00:00Z",
+        updated_at: "2026-11-05T10:00:00Z",
+      } satisfies Automation,
+    ]);
+    automationApi.listAutomationSummaries.mockResolvedValue([
+      {
+        automation_id: "failed-automation",
+        open_runs: 0,
+        last_run: {
+          id: "failed-run",
+          automation_id: "failed-automation",
+          trigger_id: "",
+          trigger_type: "manual",
+          task_id: "",
+          status: "failed",
+          dedup_key: "",
+          trigger_data: {},
+          error_message: "",
+          created_at: "2026-11-05T10:00:00Z",
+        } satisfies AutomationRun,
+      },
+    ]);
+    render(<AppNavSheet />);
+    fireEvent.click(screen.getByTestId(NAV_TRIGGER));
+    fireEvent.click(screen.getByRole("button", { name: "Automations" }));
+    const row = await screen.findByRole("link", { name: "Nightly audit" });
+    await waitFor(() => expect(row.textContent).toContain("Failed"));
+    expect(row.querySelector(".bg-red-500")).not.toBeNull();
+    const description = document.getElementById(row.getAttribute("aria-describedby")!);
+    expect(description?.textContent).toContain("Failed");
+    expect(description?.textContent).not.toContain("Idle");
+    expect(row.closest('[data-testid="mobile-sidebar-layout-navigation"]')).not.toBeNull();
+    expect(row.getAttribute("href")).toBe("/automations/failed-automation");
+    fireEvent.click(row);
+    await waitFor(() =>
+      expect(screen.getByTestId(NAV_TRIGGER).getAttribute("aria-expanded")).toBe("false"),
+    );
   });
 });

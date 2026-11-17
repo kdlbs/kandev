@@ -3341,3 +3341,27 @@ func TestHasActiveTaskSessionsByEnvironmentKeysOffEnvironmentIDNotTaskEnvironmen
 		t.Error("HasActiveTaskSessionsByEnvironment = false for a value present in environment_id, want true")
 	}
 }
+
+func TestListFixedProfileWaitSessions(t *testing.T) {
+	fixture := seedSessionBatchFixture(t)
+	ctx := context.Background()
+	if err := fixture.repo.SetSessionMetadataKey(ctx, "session-b1-primary", "fixed_profile_resource_wait", map[string]interface{}{"incarnation_id": "one"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.repo.SetSessionMetadataKey(ctx, "session-b1-secondary", "fixed_profile_automation_wait", map[string]interface{}{"incarnation_id": "two"}); err != nil {
+		t.Fatal(err)
+	}
+	reader, ok := any(fixture.repo).(interface {
+		ListFixedProfileWaitSessions(context.Context) ([]*models.TaskSession, error)
+	})
+	if !ok {
+		t.Fatal("repository cannot select circuit wait sessions")
+	}
+	got, err := reader.ListFixedProfileWaitSessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "session-b1-primary" {
+		t.Fatalf("wait sessions = %+v", got)
+	}
+}

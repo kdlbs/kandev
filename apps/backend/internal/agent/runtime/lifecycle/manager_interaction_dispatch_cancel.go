@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/events"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -73,6 +74,7 @@ func (m *Manager) cancelDispatchOnlyPrompt(
 	execution *AgentExecution,
 	snapshot cancelPromptSnapshot,
 	immediate bool,
+	client *agentctl.Client,
 ) error {
 	if immediate {
 		if !execution.promptMu.TryLock() {
@@ -86,7 +88,7 @@ func (m *Manager) cancelDispatchOnlyPrompt(
 			execution.dispatchedPromptPending.Store(false)
 			return nil
 		}
-		return m.escalateStuckCancel(ctx, execution, snapshot.finished)
+		return m.escalateStuckCancel(ctx, execution, snapshot.finished, client)
 	}
 
 	deadline := time.Now().Add(cancelWaitTimeout)
@@ -98,7 +100,7 @@ func (m *Manager) cancelDispatchOnlyPrompt(
 		return m.escalateCapturedDispatchWithoutPromptLock(ctx, execution, snapshot)
 	}
 	defer execution.promptMu.Unlock()
-	return m.waitForCapturedDispatchCompletion(ctx, execution, snapshot.prompt.generation, deadline)
+	return m.waitForCapturedDispatchCompletion(ctx, execution, snapshot.prompt.generation, deadline, client)
 }
 
 func lockPromptUntil(ctx context.Context, mutex *sync.Mutex, deadline time.Time) (bool, error) {
@@ -256,6 +258,7 @@ func (m *Manager) waitForPromptFinishedAfterCancel(
 	ctx context.Context,
 	execution *AgentExecution,
 	snapshot cancelPromptSnapshot,
+	client *agentctl.Client,
 ) error {
 	deadline := time.Now().Add(cancelWaitTimeout)
 	timer := time.NewTimer(time.Until(deadline))
@@ -274,7 +277,7 @@ func (m *Manager) waitForPromptFinishedAfterCancel(
 		if snapshot.prompt.generation != 0 && !m.ownsCapturedPrompt(execution, snapshot.prompt.generation) {
 			return ErrPromptActivityNotOwned
 		}
-		return m.escalateStuckCancel(ctx, execution, snapshot.finished)
+		return m.escalateStuckCancel(ctx, execution, snapshot.finished, client)
 	}
 }
 
@@ -298,6 +301,7 @@ func (m *Manager) waitForCapturedDispatchCompletion(
 	execution *AgentExecution,
 	generation uint64,
 	deadline time.Time,
+	client *agentctl.Client,
 ) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -310,7 +314,7 @@ func (m *Manager) waitForCapturedDispatchCompletion(
 		return nil
 	}
 	if !execution.dispatchedPromptPending.Load() {
-		return m.escalateStuckCancel(ctx, execution, nil)
+		return m.escalateStuckCancel(ctx, execution, nil, client)
 	}
 
 	timer := time.NewTimer(time.Until(deadline))
@@ -332,7 +336,7 @@ func (m *Manager) waitForCapturedDispatchCompletion(
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-timer.C:
-			return m.finishDispatchCancelTimeout(ctx, execution, generation, transportFailure)
+			return m.finishDispatchCancelTimeout(ctx, execution, generation, transportFailure, client)
 		}
 	}
 }
@@ -342,6 +346,7 @@ func (m *Manager) finishDispatchCancelTimeout(
 	execution *AgentExecution,
 	generation uint64,
 	transportFailure error,
+	client *agentctl.Client,
 ) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -362,7 +367,7 @@ func (m *Manager) finishDispatchCancelTimeout(
 			return nil
 		}
 	}
-	escalationErr := m.escalateStuckCancel(ctx, execution, nil)
+	escalationErr := m.escalateStuckCancel(ctx, execution, nil, client)
 	if transportFailure == nil {
 		return escalationErr
 	}

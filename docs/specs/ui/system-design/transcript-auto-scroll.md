@@ -4,7 +4,7 @@ system: ui
 requirements:
   - REQ-UI-TRANSCRIPT-AUTO-SCROLL-001
 created: 2026-08-27
-updated: 2026-09-26
+updated: 2026-11-08
 owners:
   - kandev
 ---
@@ -105,6 +105,26 @@ place.
 The visibility lifecycle uses component refs only. It does not add persisted
 scroll state or change the existing per-session disabled-position storage.
 
+## Scroll-position persistence
+
+Each native transcript producer defers its scroll-position capture by one
+animation frame. The capture uses the current visible position or its existing
+frozen or remembered position, then calls the synchronous
+`setTranscriptScrollTop` action with the existing per-session storage key.
+Producers keep independent frame queues.
+
+Cancelling or flushing a queue invalidates its scheduled callback. A late
+callback cannot capture a detached position, consume a replacement frame or
+repeat a synchronous flush. Cancellation drops the pending capture without
+publishing. A later schedule can create a new frame normally.
+
+Detaching a confirmed placement synchronously flushes its current position,
+including an unscheduled final capture. Detaching an unfinished initial
+placement for the same session cancels its pending capture. Session replacement
+retains the outgoing session's existing final-capture rule. Message delivery,
+permissions, turn completion, reader intent, native following and the generic
+panel offset restore retain their current owners and timing.
+
 ## Environment-change rebuild lifecycle
 
 `buildEnvSwitchAction` distinguishes an environment-changing task switch from
@@ -185,10 +205,12 @@ owner, including ordinary visits without an environment-switch token.
 
 The existing bottom-follow lifecycle also handles content-size changes. A
 content ResizeObserver can wake the guarded controller when asynchronous rows
-change size. It preserves previously established bottom-follow intent, rather
-than interpreting content growth as user navigation. It stops automatic writes
-on reader interaction, disabled auto-scroll, explicit navigation, hidden panels,
-or session replacement. It disconnects on cleanup. Initial placement stays
+change size. The follow-intent observer also records geometry on content resize,
+including changes that emit no scroll event. Content growth preserves follow for
+native restoration in either direction within the size change. Content shrinkage
+preserves follow only for matching upward anchoring within the size change.
+Automatic writes stop on reader interaction, disabled auto-scroll, explicit
+navigation, hidden panels, or session replacement. It disconnects on cleanup. Initial placement stays
 immediate. Normal append commits retain the write-only path and chat-motion
 contract. No unbounded frame retry loop is introduced.
 
@@ -229,6 +251,42 @@ running-status render must not remain clipped merely because message identity
 and `isWorking` did not change. Scheduled correction rechecks user intent and
 session identity before writing. Motion settings choose the movement style,
 not whether reader gestures are respected.
+
+## Quick Chat history and resize settlement
+
+Quick Chat uses the same initial-placement lifecycle as task Chat.
+`QuickChatMessageSurface` forwards `panelState.historyRefreshPending` to
+`MessageList`, separately from `messagesLoading`. Cached rows can remain visible
+while a latest-window refresh is pending. Their placement is provisional until
+that refresh settles. Automatic agent recovery does not own transcript placement.
+The Tasks [resumption design](../../tasks/system-design/quick-chat-session-resumption.md)
+continues to own recovery policy and session identity.
+
+Content resize and native scroll notifications can arrive in either order.
+`useFollowIntent` retains the immediately preceding measurement, the
+pre-reflow baseline, and the interval's peak geometry needed to attribute
+native movement to content reflow until that movement is reconciled, including
+growth followed by shrinkage across multiple resizes. A content measurement
+alone must not erase that evidence while automatic placement is blocked.
+Blocker release retains the existing guarded correction for pending content
+growth. Explicit reader input still cancels following immediately. Disabled
+auto-scroll, unread targets, navigation, and session replacement retain their
+existing guards. The correction adds no timer loop or synchronous measurement
+to message commits.
+
+A connection change invalidates an in-flight cached refresh. Its provisional
+placement settles immediately instead of waiting for a request whose
+generation can no longer commit; the reconnect recovery path owns subsequent
+history updates.
+
+Desktop Quick Chat retains its floating dialog and expanded view. Phone Quick
+Chat retains the full-height dialog, safe-area clearance, and fixed composer.
+The native transcript remains the single vertical scroll owner in each view.
+History settlement and delayed footer layout keep the latest row and active
+`AgentStatus` within that viewport while bottom-follow intent remains active.
+Required tests cover a disposable backend restart, cached refresh, both notification
+orders, and reader cancellation on desktop and phone. These cases map to
+`AC-UI-TRANSCRIPT-AUTO-SCROLL-001.16`, `.17`, `.19`, and `.20`.
 
 ## Interaction boundaries
 
@@ -311,8 +369,28 @@ intersection. Message content and saved offsets are not logged.
 
 ## Implementation plans
 
+- [Quick Chat restart scroll](../../../plans/quick-chat-restart-scroll/plan.md)
 - [Initial history placement and latest navigation](../../../plans/transcript-initial-history-placement/plan.md)
 - [Earlier task-switch continuity](../../../plans/transcript-task-switch-continuity/plan.md)
 
 The new package extends ordinary entry and completion handling. Earlier completed
 packages remain historical delivery records, not evidence for the new criteria.
+
+
+## Native input settlement
+
+Pending upward intent belongs to its session and observed scroll origin.
+An old-edge scroll event cannot consume that intent while the reader remains
+at the old bottom. An away-from-bottom observation clears the pending origin
+but preserves reading mode. A later return to the measured bottom resumes
+following. Fresh downward keys (End, PageDown, ArrowDown, and unshifted Space),
+downward touch movement, and explicit latest navigation supersede pending
+upward intent. Keys handled by nested editable controls or prevented events
+do not.
+
+A recent positive pixel wheel may record the bottom that its delta can reach.
+When its native scroll reaches that observed edge within the existing input
+window, the follow owner can catch up to content that grew after the wheel.
+Partial wheels, zoom gestures, competing input, inactive owners, and disabled
+following do not authorize that catch-up. Current content-reflow safeguards
+continue to preserve following independently of reader input.

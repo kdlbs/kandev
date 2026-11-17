@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	officemodels "github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
@@ -21,12 +23,12 @@ func (h *testHarness) seedWakeupWithCausation(id, source, payload, causationID s
 
 func (h *testHarness) seedRunWithReasonAndCausation(id, status, reason, causationID string) {
 	h.t.Helper()
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		ID:              id,
 		AgentProfileID:  h.agentID,
 		Reason:          reason,
 		Payload:         "{}",
-		Status:          officemodels.RunStatus(status),
+		Status:          runsmodels.RunStatus(status),
 		CoalescedCount:  1,
 		ContextSnapshot: `{"prior":"snapshot"}`,
 		CausationID:     causationID,
@@ -126,6 +128,11 @@ func TestDispatch_SkipLeavesWakeupCausationIDUntouched(t *testing.T) {
 func TestDispatch_PromotionDoesNotChangeRunCausationID(t *testing.T) {
 	h := newHarness(t, wakeup.PolicyCoalesceIfActive)
 	h.seedRunWithReasonAndCausation("run-cron", "queued", shared.RunReasonRoutineDispatchCron, "cause-cron-original")
+	if _, err := h.repo.ExecRaw(context.Background(),
+		`UPDATE runs SET routine_id = ?, context_snapshot = ? WHERE id = ?`,
+		"r-1", `{"routine_id":"r-1"}`, "run-cron"); err != nil {
+		t.Fatalf("seed run routine identity: %v", err)
+	}
 	h.seedWakeupWithCausation("w-event", wakeup.SourceRoutine, `{"routine_id":"r-1"}`, "cause-event-1")
 	// Give the event wakeup an event-classified reason so promotion fires.
 	if _, err := h.repo.ExecRaw(context.Background(),

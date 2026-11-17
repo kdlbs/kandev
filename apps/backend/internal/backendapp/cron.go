@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"fmt"
+	"github.com/kandev/kandev/internal/startup"
 	"time"
 
 	"go.uber.org/zap"
@@ -53,7 +54,7 @@ func startCronScheduler(
 	// office_loop_cron_tick_total is distinguishable from a restarted
 	// process versus a genuinely stopped loop.
 	officeservice.RecordLoopProcessStarted(time.Now().UTC().Format(time.RFC3339))
-	loop.Start(ctx)
+	startup.AfterReady(ctx, func() { loop.Start(ctx) })
 	log.Info("phase 5 cron loop started",
 		zap.Duration("interval", schedulercron.DefaultTickInterval))
 	return loop

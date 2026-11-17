@@ -1,6 +1,6 @@
 import { payloadRetentionMarker } from "@/lib/utils/tool-payload-retention";
 import type { Message } from "@/lib/types/http";
-import { messageTimestampNanoseconds } from "./message-timestamp";
+import { messageTimestampNanoseconds, compareMessageTimestamps } from "./message-timestamp";
 
 const SEP = "\u0000";
 const signatureCache = new WeakMap<Message, string>();
@@ -93,6 +93,12 @@ export function reconcileMessages(prev: Message[] | undefined, next: Message[]):
   // Carry forward a known prompt_index when the incoming payload omits it.
   const carried = next.map((message) => {
     const previous = prevById.get(message.id);
+    // A stale snapshot (for example an HTTP response computed before a live
+    // permission update) must not reverse the newer row. Equal timestamps stay
+    // incoming so a same-tick payload can still settle other fields.
+    if (previous && compareMessageTimestamps(previous.updated_at, message.updated_at) === 1) {
+      return previous;
+    }
     if (
       previous?.metadata?.running_notice_resolved === true &&
       message.metadata?.running_notice_resolved !== true

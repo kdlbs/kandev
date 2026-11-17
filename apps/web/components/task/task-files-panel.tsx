@@ -3,6 +3,8 @@
 import { memo, useRef, useState, type Ref } from "react";
 import { SessionPanel, SessionPanelContent } from "@kandev/ui/pannel-session";
 import { FileBrowser } from "@/components/task/file-browser";
+import type { RenameAdapter } from "@/hooks/file-rename-continuity";
+import type { RefObject } from "react";
 import type { OpenFileTab } from "@/lib/types/backend";
 import { useFilesPanelData } from "./task-files-panel-hooks";
 import { useAppStore } from "@/components/state-provider";
@@ -64,13 +66,14 @@ function FilesTabContent({
 type TaskFilesPanelProps = {
   onOpenFile: (file: OpenFileTab) => void;
   activeFilePath?: string | null;
+  renameAdapter?: RefObject<RenameAdapter | null>;
 };
 
 const TaskFilesPanel = memo(function TaskFilesPanel({
   onOpenFile,
   activeFilePath,
+  renameAdapter,
 }: TaskFilesPanelProps) {
-  const { t } = useTranslation();
   const [addSourcesOpen, setAddSourcesOpen] = useState(false);
   const [addSourcesOpener, setAddSourcesOpener] = useState<HTMLElement | null>(null);
   const addSourcesButtonRef = useRef<HTMLButtonElement>(null);
@@ -79,7 +82,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({
     state.kanban.tasks.find((task) => task.id === state.tasks.activeTaskId),
   );
   const { activeSessionId, hookDeleteFile, hookRenameFile, hookDownloadFile, handleCreateFile } =
-    useFilesPanelData(onOpenFile);
+    useFilesPanelData(onOpenFile, renameAdapter);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const hasActiveTaskSourceWork = useAppStore((state) => {
     if (!activeTask) return false;
@@ -99,10 +102,6 @@ const TaskFilesPanel = memo(function TaskFilesPanel({
     isLoading: sourceStateLoading,
     hasActiveTurn: hasActiveTaskSourceWork,
   });
-  const hasRepository = Boolean(activeTask?.repositoryId || activeTask?.repositories?.length);
-  const resolvedAddSourcesDisabledReason = hasRepository
-    ? addSourcesDisabledReason
-    : t("task:taskNeedsRepositoryForSources");
   if (isArchived) return <ArchivedPanelPlaceholder />;
   return (
     <SessionPanel borderSide="left">
@@ -115,19 +114,15 @@ const TaskFilesPanel = memo(function TaskFilesPanel({
           hookRenameFile={hookRenameFile}
           hookDownloadFile={hookDownloadFile}
           activeFilePath={activeFilePath}
-          onAddSources={
-            hasRepository
-              ? (opener) => {
-                  setAddSourcesOpener(opener);
-                  setAddSourcesOpen(true);
-                }
-              : undefined
-          }
+          onAddSources={(opener) => {
+            setAddSourcesOpener(opener);
+            setAddSourcesOpen(true);
+          }}
           addSourcesButtonRef={addSourcesButtonRef}
-          addSourcesDisabledReason={resolvedAddSourcesDisabledReason}
+          addSourcesDisabledReason={addSourcesDisabledReason}
         />
       </SessionPanelContent>
-      {activeTask && hasRepository ? (
+      {activeTask ? (
         <AddWorkspaceSourcesDialog
           open={addSourcesOpen}
           onOpenChange={setAddSourcesOpen}

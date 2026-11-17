@@ -76,6 +76,7 @@ test.describe("mobile PR re-request review", () => {
       checks_total: 1,
       checks_passing: 1,
     };
+    await apiClient.mockGitHubSetRepositoryDetails(OWNER, REPO, true);
     await apiClient.mockGitHubAssociateTaskPR(mergeReadyPR);
     await apiClient.mockGitHubSeedPRFeedback({
       owner: OWNER,

@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/components/state-provider", () => ({
+  useOptionalAppStoreApi: () => mocks,
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
       agentProfiles: { items: mocks.agentProfiles },
@@ -58,7 +59,7 @@ vi.mock("react-i18next", () => ({
         "task:newAgent": "New Agent",
         "task:agentHasStopped": "This agent has stopped.",
         "task:durableDeliveryUncertain":
-          "Delivery was interrupted. The prompt outcome is uncertain.",
+          "The connection was interrupted. Kandev cannot confirm whether the agent processed your message.",
         "task:durableDeliveryReconnecting":
           "Reconnecting to the agent. Your prompt will not be sent again.",
         "task:deliveryStopOutcomeUnconfirmed":
@@ -245,7 +246,9 @@ describe("SessionStoppedBanner delivery recovery", () => {
     render(<BannerHarness mode="recoverable" uncertainDelivery />);
 
     expect(
-      screen.getByText("Delivery was interrupted. The prompt outcome is uncertain."),
+      screen.getByText(
+        "The connection was interrupted. Kandev cannot confirm whether the agent processed your message.",
+      ),
     ).toBeTruthy();
     expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(FRESH_BUTTON_TEST_ID)).toBeNull();

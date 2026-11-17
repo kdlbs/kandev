@@ -1,11 +1,21 @@
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/office-fixture";
 import { officeTopbarTitle } from "../../helpers/office-topbar";
 import { makeGitEnv } from "../../helpers/git-helper";
-import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { assertNoDocumentHorizontalOverflow, requireBox } from "../../helpers/layout-assertions";
+import {
+  addCustomRepository,
+  expectRepositoryPickerWithinViewport,
+  installRepositoryDiscoveryRoute,
+  openCreateProjectDialog,
+  openRepositoryPicker,
+  pickerCommandList,
+  pickerOptions,
+  pickerSearchInput,
+  repositoryPickerTrigger,
+} from "../../helpers/project-repository-picker";
 
 /**
  * Project page — repository picker (chip-style, popover-driven).
@@ -33,18 +43,6 @@ async function createProject(
   );
   const body = (await res.json()) as { project?: { id?: string }; id?: string };
   return (body.project?.id ?? body.id) as string;
-}
-
-async function addCustomRepository(dialog: Locator, value: string): Promise<void> {
-  await dialog.getByTestId("project-add-repository").click();
-  const searchInput = dialog.getByPlaceholder(/Search or paste a URL/i);
-  await expect(searchInput).toBeVisible();
-  await searchInput.fill(value);
-  const customRow = dialog.getByTestId("project-add-custom");
-  await expect(customRow).toBeVisible({ timeout: 5_000 });
-  const customRowBox = await customRow.boundingBox();
-  if (!customRowBox) throw new Error("custom repository option has no layout box");
-  await customRow.click({ position: { x: 24, y: customRowBox.height / 2 } });
 }
 
 test.describe("Project repository picker", () => {
@@ -289,5 +287,167 @@ test.describe("Project repository picker", () => {
     await cancel.click();
     await expect(dialog).toHaveCount(0);
     await assertNoDocumentHorizontalOverflow(testPage, "create-project dialog");
+  });
+
+  test("create-project dialog: repository picker escapes the dialog without clipping", async ({
+    testPage,
+    prCapture,
+    officeSeed: _,
+  }) => {
+    test.setTimeout(120_000);
+    await testPage.setViewportSize({ width: 1280, height: 720 });
+    const suggestions = await installRepositoryDiscoveryRoute(testPage);
+    const dialog = await openCreateProjectDialog(testPage);
+    const projectName = `Floating Picker ${Date.now()}`;
+    await dialog.locator("#project-name").fill(projectName);
+
+    // One long chip moves the trigger right, so the 420px picker must extend
+    // past the dialog's right edge.
+    await addCustomRepository(
+      dialog,
+      "https://github.com/example/very-long-repository-name-for-picker-clipping.git",
+    );
+
+    const trigger = repositoryPickerTrigger(dialog);
+    const picker = await openRepositoryPicker(trigger);
+    const dialogBox = await requireBox(dialog, "create-project dialog");
+    const pickerBox = await requireBox(picker, "repository picker");
+    expect(pickerBox.width).toBeGreaterThanOrEqual(419);
+    expect(pickerBox.width).toBeLessThanOrEqual(421);
+    expect(pickerBox.x + pickerBox.width).toBeGreaterThan(dialogBox.x + dialogBox.width + 1);
+    await expectRepositoryPickerWithinViewport(picker);
+    await assertNoDocumentHorizontalOverflow(testPage, "create-project dialog with open picker");
+
+    const options = pickerOptions(picker);
+    const discoveredOptions = picker.locator('[data-value^="/srv/repositories/"]');
+    await expect(discoveredOptions).toHaveCount(suggestions.length);
+    await expect(options.first()).toBeVisible();
+    const hit = await discoveredOptions.first().evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      const point = { x: rect.right - 6, y: rect.top + rect.height / 2 };
+      const element = document.elementFromPoint(point.x, point.y);
+      const resolvedSlot =
+        element?.closest("[data-slot]")?.getAttribute("data-slot") ??
+        element?.tagName.toLowerCase() ??
+        null;
+      return {
+        point,
+        resolved: Boolean(element && (element === node || node.contains(element))),
+        resolvedSlot,
+      };
+    });
+    expect(hit.point.x).toBeGreaterThan(dialogBox.x + dialogBox.width);
+    expect(
+      hit.resolved,
+      `right-side point (${hit.point.x.toFixed(1)}, ${hit.point.y.toFixed(1)}) resolved to ${hit.resolvedSlot}`,
+    ).toBe(true);
+
+    if (prCapture.capturing) {
+      await prCapture.screenshot("floating-create-project-picker", {
+        caption:
+          "The Create Project repository picker extends beyond the dialog border and remains fully interactive.",
+      });
+    }
+
+    // Real pointer selection inside the previously clipped region.
+    await testPage.mouse.click(hit.point.x, hit.point.y);
+    await expect(
+      dialog.locator('[data-testid="project-repo-chip"]'),
+      "selecting beyond the dialog adds the repository chip",
+    ).toHaveCount(2);
+    await expect(
+      dialog.locator(`[data-repository-value="${suggestions[0].path}"]`),
+      "the picked suggestion is the one attached",
+    ).toHaveCount(1);
+    await expect(picker).toHaveCount(0);
+    await expect(dialog.locator("#project-name")).toHaveValue(projectName);
+    await expect(dialog.getByTestId("create-project-dialog-footer")).toBeVisible();
+
+    await dialog
+      .getByTestId("create-project-dialog-footer")
+      .getByRole("button", { name: "Cancel" })
+      .click();
+    await expect(dialog).toHaveCount(0);
+  });
+
+  test("create-project dialog: repository picker scrolling and keyboard dismissal preserve the form", async ({
+    testPage,
+    officeSeed: _,
+  }) => {
+    test.setTimeout(120_000);
+    await testPage.setViewportSize({ width: 1280, height: 720 });
+    const suggestions = await installRepositoryDiscoveryRoute(testPage);
+    const dialog = await openCreateProjectDialog(testPage);
+    const projectName = `Keyboard Picker ${Date.now()}`;
+    await dialog.locator("#project-name").fill(projectName);
+    const customRepository = "https://github.com/example/scroll-and-keyboard.git";
+    await addCustomRepository(dialog, customRepository);
+
+    const trigger = repositoryPickerTrigger(dialog);
+    let picker = await openRepositoryPicker(trigger);
+    const searchInput = pickerSearchInput(picker);
+    await expect(searchInput).toBeFocused();
+
+    // Wheel input over the portalled surface must reach the command list even
+    // though the picker paints outside the dialog shell.
+    await expect(picker.locator('[data-value^="/srv/repositories/"]')).toHaveCount(
+      suggestions.length,
+    );
+    const list = pickerCommandList(picker);
+    const pickerBox = await requireBox(picker, "repository picker");
+    await testPage.mouse.move(
+      pickerBox.x + pickerBox.width / 2,
+      pickerBox.y + pickerBox.height / 2,
+    );
+    await testPage.mouse.wheel(0, 240);
+    await expect
+      .poll(() => list.evaluate((node) => (node as HTMLElement).scrollTop))
+      .toBeGreaterThan(0);
+    await assertNoDocumentHorizontalOverflow(
+      testPage,
+      "create-project dialog with scrolled picker",
+    );
+
+    await testPage.keyboard.press("Escape");
+    await expect(picker).toHaveCount(0);
+    await expect(dialog).toBeVisible();
+    await expect(trigger).toBeFocused();
+
+    // Keyboard selection from the real opener: search receives focus, typing
+    // an exact suggestion path leaves only that option, and Enter selects it
+    // instead of submitting the project.
+    picker = await openRepositoryPicker(trigger);
+    await expect(pickerSearchInput(picker)).toBeFocused();
+    const keyboardTarget = suggestions[7];
+    await testPage.keyboard.type(keyboardTarget.path);
+    const matchedOptions = picker.locator('[data-value^="/srv/repositories/"]');
+    await expect(matchedOptions).toHaveCount(1);
+    await testPage.keyboard.press("ArrowDown");
+    await testPage.keyboard.press("Enter");
+    await expect(picker).toHaveCount(0);
+    await expect(dialog.locator('[data-testid="project-repo-chip"]')).toHaveCount(2);
+    await expect(dialog.locator(`[data-repository-value="${keyboardTarget.path}"]`)).toHaveCount(1);
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator("#project-name")).toHaveValue(projectName);
+    await expect(
+      dialog.getByTestId("create-project-dialog-footer").getByRole("button", {
+        name: "Create Project",
+      }),
+    ).toBeVisible();
+
+    // Outside interaction dismisses only the picker.
+    picker = await openRepositoryPicker(trigger);
+    await dialog.locator('[data-slot="dialog-title"]').click();
+    await expect(picker).toHaveCount(0);
+    await expect(dialog).toBeVisible();
+    await expect(
+      dialog.locator('[data-testid="project-repo-chip"]', { hasText: customRepository }),
+    ).toHaveCount(1);
+
+    await dialog
+      .getByTestId("create-project-dialog-footer")
+      .getByRole("button", { name: "Cancel" })
+      .click();
+    await expect(dialog).toHaveCount(0);
   });
 });

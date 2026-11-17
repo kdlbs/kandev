@@ -130,7 +130,7 @@ async function withArchivedRead(run: (fixture: Fixture) => Promise<void>, reside
     fixture.resolve(olderArchivedPage());
     fixture.request.release();
     fixture.cache.clear();
-    await fixture.request.promise;
+    await fixture.request.promise.catch(() => undefined);
     fixture.store.getState().releaseTaskOverviews(DISPLAY_OWNER);
   }
 }
@@ -294,7 +294,7 @@ function registerSummaryTests() {
       fixture.handlers["task.updated"]!(event);
       dispatchSummary(fixture, summary(5, 99));
       fixture.resolve(olderArchivedPage({ status_summary: summary(1, 99) }));
-      await fixture.request.promise;
+      await fixture.request.promise.catch(() => undefined);
       expect(fixture.store.getState().taskOverview.byId[TASK]).toMatchObject({
         title: LATEST_TITLE,
         updatedAt: NEWER_EVENT_TIME,
@@ -349,7 +349,7 @@ function registerPartialAndTimestampTests() {
         expect(Object.hasOwn(patch, "position")).toBe(false);
         expect(Object.hasOwn(patch, "statusSummary")).toBe(false);
         resolve(olderArchivedPage());
-        await request.promise;
+        await request.promise.catch(() => undefined);
         expect(store.getState().taskOverview.byId[TASK]).toMatchObject({
           description: clear ? "" : "Keep description",
           parentTaskId: undefined,
@@ -449,7 +449,7 @@ function registerBudgetTests() {
             ),
         ).toBe(false);
         resolve(olderArchivedPage());
-        await request.promise;
+        await request.promise.catch(() => undefined);
         expect(store.getState().taskOverview.byId[TASK]).toBeUndefined();
         expect(cache.get(VIEW)).toBeNull();
       });
@@ -473,7 +473,7 @@ function registerIsolationTests() {
             : { auth: { ...state.auth, authenticated: !state.auth.authenticated } },
         );
         resolve(olderArchivedPage());
-        await request.promise;
+        await request.promise.catch(() => undefined);
         expect(store.getState().taskOverview.byId[TASK]).toBeUndefined();
         expect(cache.get(VIEW)).toBeNull();
       });
@@ -511,7 +511,7 @@ function registerIsolationTests() {
       } finally {
         resolveSecond({ ...olderArchivedPage(), page: 2 });
         second.release();
-        await second.promise;
+        await second.promise.catch(() => undefined);
       }
     });
   });

@@ -40,15 +40,19 @@ function useFeedbackFetch(workspaceId: string | null, pr: TaskPR | null) {
   const owner = pr?.owner;
   const repo = pr?.repo;
   const prNumber = pr?.pr_number;
+  const host = pr?.github_host ?? "github.com";
   const key =
     workspaceId && owner && repo && prNumber
-      ? scope.key({ workspaceId, owner, repo, prNumber })
+      ? scope.key({ workspaceId, owner, repo, prNumber, host })
       : null;
   const snapshot = usePRFeedbackResourceSnapshot(scope, key);
   const fetch = useCallback(() => {
     if (!workspaceId || !owner || !repo || !prNumber) return Promise.reject();
-    return getPRFeedback(workspaceId, owner, repo, prNumber, { cache: "no-store" });
-  }, [owner, prNumber, repo, workspaceId]);
+    return getPRFeedback(workspaceId, owner, repo, prNumber, {
+      expectedHost: host,
+      cache: "no-store",
+    });
+  }, [host, owner, prNumber, repo, workspaceId]);
   const refetch = useCallback(() => {
     if (key) void scope.invalidate(key, fetch);
   }, [fetch, key, scope]);

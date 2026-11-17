@@ -213,6 +213,10 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 	// Prepare the prompt request (resolve template, get agent/model info)
 	prepared, err := h.controller.PreparePromptRequest(ctx, req, defaults, sessionless)
 	if err != nil {
+		if errors.Is(err, service.ErrAgentDisabled) {
+			c.JSON(http.StatusBadRequest, dto.ExecutePromptResponse{Error: service.ErrAgentDisabled.Error()})
+			return
+		}
 		status := http.StatusInternalServerError
 		if errors.Is(err, service.ErrAgentNotFound) {
 			status = http.StatusNotFound

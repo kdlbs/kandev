@@ -54,7 +54,7 @@ describe("resumeWithSilentFallback recovery guard refusals", () => {
     expect(mockRequest).toHaveBeenCalledTimes(1);
     expect(calls.resumptionStates.at(-1)).toBe("error");
     expect(calls.errors.at(-1)).toBe(
-      "This session's agent is still being reconciled after the backend restarted. This clears automatically; try again in a few seconds.",
+      "Kandev is checking the agent after a restart. Wait for this check to finish before resuming.",
     );
   });
 

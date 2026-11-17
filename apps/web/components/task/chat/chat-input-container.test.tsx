@@ -1,8 +1,15 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render as renderBase, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { StateProvider } from "@/components/state-provider";
+import { defaultSettingsState } from "@/lib/state/slices/settings/settings-slice";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatInputContainer } from "./chat-input-container";
 
 const SESSION_ID = "session-1";
+
+function render(ui: ReactElement) {
+  return renderBase(ui, { wrapper: StateProvider });
+}
 
 const { bodyProps, containerState, composerRecovery, testIds } = vi.hoisted(() => ({
   testIds: {
@@ -98,6 +105,10 @@ vi.mock("@/lib/i18n", async (original) => ({
   t: (key: string) => key,
 }));
 
+vi.mock("@/hooks/domains/session/use-task-session-mcp-selection", () => ({
+  useTaskSessionMCPSelection: () => null,
+}));
+
 const baseProps = {
   onSubmit: vi.fn(),
   sessionId: SESSION_ID,
@@ -151,6 +162,21 @@ describe("ChatInputContainer launch-error ownership", () => {
 });
 
 describe("ChatInputContainer cancellation availability", () => {
+  it("passes the saved Escape preference to the composer", () => {
+    renderBase(
+      <StateProvider
+        initialState={{
+          userSettings: { ...defaultSettingsState.userSettings, escapeCancelsAgent: true },
+        }}
+      >
+        <ChatInputContainer {...baseProps} isWorking />
+      </StateProvider>,
+    );
+    expect(bodyProps.current?.editorAreaProps).toEqual(
+      expect.objectContaining({ escapeCancelsAgent: true }),
+    );
+  });
+
   it("shows cancel for a working direct-input session", () => {
     render(<ChatInputContainer {...baseProps} isWorking />);
 

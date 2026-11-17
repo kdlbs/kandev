@@ -41,18 +41,26 @@ func TestStartupAttemptGenerationRejectsStaleEventsAfterRecovery(t *testing.T) {
 	execution.finishStartupRecovery()
 }
 
+func TestStartupRecoveryCannotBeginAfterExecutionStop(t *testing.T) {
+	execution := &AgentExecution{}
+	execution.cancelStartupRecovery()
+	if _, ok := execution.beginStartupRecovery(); ok {
+		t.Fatal("stopped execution started managed runtime recovery")
+	}
+}
+
 func TestOnlineManagedRuntimeArgsPreserveTrustedLaunchIdentity(t *testing.T) {
 	spec := agents.ManagedNPMRuntimeSpec{
 		Package: "@scope/managed-acp",
 		ACPArgs: []string{"--acp", "--model", "fast"},
 	}
-	initial := []string{"greywall", "--", "npx", "--yes", managedRuntimePreferOfflineArg, "--prefix", "~/.kandev/managed-npm-runtime", "@scope/managed-acp@1.2.3", "--acp", "--model", "fast"}
+	initial := []string{"npx", "--yes", managedRuntimePreferOfflineArg, "--prefix", "~/.kandev/managed-npm-runtime", "@scope/managed-acp@1.2.3", "--acp", "--model", "fast", "--profile-flag", "ordered-value"}
 
 	got, packageSpec, ok := onlineManagedRuntimeArgs(initial, spec)
 	if !ok {
 		t.Fatal("expected managed runtime recovery command")
 	}
-	want := []string{"greywall", "--", "npx", "--yes", "--prefer-online", "--prefix", "~/.kandev/managed-npm-runtime", "@scope/managed-acp@1.2.3", "--acp", "--model", "fast"}
+	want := []string{"npx", "--yes", "--prefer-online", "--prefix", "~/.kandev/managed-npm-runtime", "@scope/managed-acp@1.2.3", "--acp", "--model", "fast", "--profile-flag", "ordered-value"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("online args = %#v, want %#v", got, want)
 	}
@@ -65,6 +73,7 @@ func TestOnlineManagedRuntimeArgsRejectsNonManagedCommands(t *testing.T) {
 	spec := agents.ManagedNPMRuntimeSpec{Package: "managed-acp"}
 	for _, args := range [][]string{
 		{"native-agent", "--acp"},
+		{"greywall", "--", "npx", "--yes", managedRuntimePreferOfflineArg, "--prefix", "~/.kandev/managed-npm-runtime", "managed-acp@1.2.3", "--acp"},
 		{"npx", "--yes", managedRuntimePreferOfflineArg, "--prefix", "~/.kandev/managed-npm-runtime", "other-agent@1.2.3"},
 		{"npx", "--yes", managedRuntimePreferOfflineArg, "managed-acp@1.2.3"},
 	} {
@@ -280,6 +289,47 @@ func TestManagedStartupRecoveryCancellationDuringCleanupPreventsReplacement(t *t
 	}
 	if got := mock.getHTTPActions(); !slices.Equal(got, []string{"stop"}) {
 		t.Fatalf("HTTP actions = %#v, want cleanup only", got)
+	}
+}
+
+func TestManagedStartupRecoveryCancellationByStopPreventsReplacement(t *testing.T) {
+	mgr, execution, mock, agentConfig := newManagedRuntimeRetryFixture(t, false)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	delaySelected := make(chan struct{})
+	mgr.startupRecoveryDelay = func() time.Duration {
+		close(delaySelected)
+		return time.Hour
+	}
+	type result struct {
+		attempted bool
+		err       error
+	}
+	done := make(chan result, 1)
+	go func() {
+		attempted, err := mgr.retryManagedRuntimeStartup(
+			ctx, execution, managedACPInitializeFailure("ACP initialize failed"), agentConfig, "", nil, nil,
+		)
+		done <- result{attempted: attempted, err: err}
+	}()
+	select {
+	case <-delaySelected:
+	case <-time.After(time.Second):
+		t.Fatal("recovery did not reach its backoff")
+	}
+	if err := mgr.StopAgentWithReason(context.Background(), execution.ID, "user stop", true); err != nil {
+		t.Fatalf("stop execution: %v", err)
+	}
+	select {
+	case got := <-done:
+		if got.attempted || !errors.Is(got.err, context.Canceled) {
+			t.Fatalf("recovery result = (%v, %v), want cancellation before replacement", got.attempted, got.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("startup recovery did not stop after the execution was stopped")
+	}
+	if got := mock.getHTTPActions(); !slices.Equal(got, []string{"stop"}) {
+		t.Fatalf("HTTP actions = %#v, want confirmed stop only", got)
 	}
 }
 

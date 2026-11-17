@@ -35,7 +35,7 @@ func NegotiateDurableDelivery(local journal.StorageCapability, peerVersion uint3
 		}
 		return DurableDeliveryDecision{Mode: DurableDeliveryBlocked, Reason: local.Reason}
 	}
-	if local.Version != journal.CurrentVersion || peerVersion != journal.CurrentVersion || !peerDurable {
+	if !journal.SupportsDeliveryVersion(local.Version) || !journal.SupportsDeliveryVersion(peerVersion) || !peerDurable {
 		if peerVersion == 0 && !peerDurable {
 			if unresolved {
 				return DurableDeliveryDecision{Mode: DurableDeliveryBlocked, Reason: "unresolved_durable_work"}

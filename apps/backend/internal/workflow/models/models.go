@@ -102,7 +102,8 @@ type OnExitAction struct {
 // GenericActionType represents the type of a Phase 2 (ADR-0004) action that
 // can appear under any of the new event-driven triggers (on_comment,
 // on_blocker_resolved, on_children_completed, on_approval_resolved,
-// on_heartbeat, on_budget_alert, on_agent_error). Actions are compiled into
+// on_heartbeat, on_budget_alert, on_agent_error, on_pr_merged,
+// on_pr_closed). Actions are compiled into
 // the engine's typed Action structs by engine.CompileStep.
 type GenericActionType string
 
@@ -158,6 +159,11 @@ type StepEvents struct {
 	OnHeartbeat         []GenericAction `json:"on_heartbeat,omitempty" yaml:"on_heartbeat,omitempty"`
 	OnBudgetAlert       []GenericAction `json:"on_budget_alert,omitempty" yaml:"on_budget_alert,omitempty"`
 	OnAgentError        []GenericAction `json:"on_agent_error,omitempty" yaml:"on_agent_error,omitempty"`
+	// OnPRMerged runs when every pull request linked to the task is merged.
+	// OnPRClosed runs when a linked pull request is closed without merging.
+	// Both are raised by the PR poller, never by an agent turn.
+	OnPRMerged []GenericAction `json:"on_pr_merged,omitempty" yaml:"on_pr_merged,omitempty"`
+	OnPRClosed []GenericAction `json:"on_pr_closed,omitempty" yaml:"on_pr_closed,omitempty"`
 }
 
 // ReviewStatus represents the review state of a session
@@ -204,8 +210,8 @@ type StepDefinition struct {
 	WIPLimit                    int                                          `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
 	PullFromStepID              string                                       `json:"pull_from_step_id,omitempty" yaml:"pull_from_step_id,omitempty"`
 	// StageType mirrors WorkflowStep.StageType for templates so the office
-	// default + coordination workflows can declare their UX role
-	// ("work", "review", "approval", "custom") in YAML.
+	// default + coordination workflows can declare their step nature
+	// ("work", "review", "approval", "custom", "hold") in YAML.
 	StageType StageType `json:"stage_type,omitempty"`
 	// AutoAdvanceRequiresSignal gates on_turn_complete transitions on an
 	// explicit `step_complete_kandev` MCP signal from the agent (ADR 0015).
@@ -237,10 +243,11 @@ type WorkflowStep struct {
 	SessionTarget               *WorkflowSessionTarget                       `json:"session_target,omitempty"`
 	WIPLimit                    int                                          `json:"wip_limit,omitempty"`
 	PullFromStepID              string                                       `json:"pull_from_step_id,omitempty"`
-	// StageType is a Phase 2 (ADR-0004) semantic hint for the frontend
-	// ("work", "review", "approval", "custom"). The engine does not branch
-	// on it. Stored as TEXT in workflow_steps.stage_type, defaulting to
-	// "custom" so existing rows remain unchanged.
+	// StageType is a Phase 2 (ADR-0004) statement of the step's nature
+	// ("work", "review", "approval", "custom", "hold"). The execution engine
+	// does not branch on it; the frontend reads it to choose presentation.
+	// Stored as TEXT in workflow_steps.stage_type, defaulting to "custom" so
+	// existing rows remain unchanged.
 	StageType StageType `json:"stage_type,omitempty"`
 	// AutoAdvanceRequiresSignal gates on_turn_complete transitions on an
 	// explicit `step_complete_kandev` MCP signal from the agent (ADR 0015).
@@ -407,6 +414,12 @@ const (
 	// caused by the on_agent_error workflow event, distinguishing a recovery
 	// move from a routine auto_complete one.
 	StepTransitionTriggerAgentError StepTransitionTrigger = "on_agent_error"
+	// StepTransitionTriggerPRMerged identifies an automatic transition caused
+	// by the on_pr_merged workflow event. No agent turn is involved.
+	StepTransitionTriggerPRMerged StepTransitionTrigger = "on_pr_merged"
+	// StepTransitionTriggerPRClosed identifies an automatic transition caused
+	// by the on_pr_closed workflow event. No agent turn is involved.
+	StepTransitionTriggerPRClosed StepTransitionTrigger = "on_pr_closed"
 )
 
 // StepTransitionActor identifies the source of a move. Human identity is
@@ -470,6 +483,7 @@ func CollectStepEventReferences(events StepEvents) StepEventReferences {
 	for _, actions := range [][]GenericAction{
 		events.OnComment, events.OnBlockerResolved, events.OnChildrenCompleted,
 		events.OnApprovalResolved, events.OnHeartbeat, events.OnBudgetAlert, events.OnAgentError,
+		events.OnPRMerged, events.OnPRClosed,
 	} {
 		for _, a := range actions {
 			switch a.Type {
@@ -534,6 +548,8 @@ func RemapStepEvents(events StepEvents, idMap map[string]string) StepEvents {
 	result.OnHeartbeat = remapGenericStepEvents(events.OnHeartbeat, idMap)
 	result.OnBudgetAlert = remapGenericStepEvents(events.OnBudgetAlert, idMap)
 	result.OnAgentError = remapGenericStepEvents(events.OnAgentError, idMap)
+	result.OnPRMerged = remapGenericStepEvents(events.OnPRMerged, idMap)
+	result.OnPRClosed = remapGenericStepEvents(events.OnPRClosed, idMap)
 	return result
 }
 

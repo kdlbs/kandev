@@ -192,8 +192,72 @@ Session state records the container ID, the SSH target, and the published
 ports, so a backend restart can rebuild forwards without recreating the
 container.
 
+### Recoverable failure and failed resume
+
+`AC-EXECUTORS-REMOTE-DOCKER-001.12` also governs cleanup after a recoverable
+agent error. A waiting session must retain the workspace that Resume targets.
+This applies to an established execution and to bootstrap of a retained
+container. Fresh allocation rollback remains separate.
+
+The lifecycle stop policy uses the recorded runtime and workspace-reuse provenance.
+Capture reuse when the executor attaches to an existing container, including
+workspace reuse without a previous execution ID. A container ID alone does
+not distinguish reused compute from a new allocation. Conversation-resume
+state must not supply destructive cleanup authority.
+`StopReasonRecoverableAgentFailure` preserves an established remote container.
+`StopReasonAgentBootstrapFailed` preserves a container reused by that attempt.
+Registered-launch rollback preserves the same retained runtime and inventory.
+An explicit reset, archive, delete, or fresh-allocation rollback retains its
+existing destructive authority and ownership checks.
+
+Stop the exact failed agent instance with a bounded cleanup context before
+releasing its execution slot. A failed or unconfirmed agent stop must retain
+the container, credentials, and cleanup ownership. Report the stop error and
+keep recovery blocked. `AgentStopFailed` must not turn a recoverable failure
+into container removal. A later retry can finish the same cleanup.
+
+Preserve the authoritative environment binding and the evidence needed to
+reconnect after a backend restart. Close attempt-local forwards and clients
+only after their ownership and stop postconditions permit it. Delayed cleanup
+must not stop a successor execution. Keep the existing exact-execution cleanup
+claim and dispatch workflow recovery only after successful cleanup.
+
+Reconnection separates the requested execution ID from the prior journal
+owner. A new execution ID alone does not authorize another journal open.
+The [journal ownership design](../../platform/system-design/durable-agent-journal-ownership.md)
+defines authenticated reuse, exact-instance disposal, and blocked outcomes.
+The shared Docker reconnect path must preserve distinct-session creation in
+the same container. Remote lookup and control traffic still use SSH forwards.
+
 Transport liveness reuses the SSH executor's keepalive so a dead connection
 surfaces as a failure rather than a hung session, satisfying `AC-…-001.13`.
+
+The [recoverable resume package](../../../plans/remote-docker-recoverable-resume/plan.md)
+records implementation and regression evidence for these failure paths.
+
+### Retained multi-repository verification
+
+The resume guarantee in `AC-EXECUTORS-REMOTE-DOCKER-001.12` includes unpublished
+commits already in the retained checkout. For remote-Docker instances carrying
+`ExecutorInstance.ReusedWorkspace`, launch verifies every projected repository
+instead of materializing it. Require a valid HEAD, the expected origin and the
+expected checkout branch (or base branch when no checkout branch is supplied).
+Do not require equality with a remote-tracking commit or clone, fetch, checkout,
+reset or remove an existing repository. A missing or mismatched repository
+aborts launch while preserving existing files and runtime.
+
+Only executor-recorded attachment provenance selects verification. Fresh
+instances and other providers retain their existing materialization behavior;
+ordinary materialization's exact-commit collision checks are unchanged.
+The lifecycle manager uses the retained authenticated agentctl client and a
+bounded read-only command with existing shell quoting. It reads an explicit
+unique completion marker before stopping only its owned probe process, so
+immediate helper process expiry cannot hide the result. Cancellation and
+unobservable results fail closed without fallback materialization. Existing
+rollback and exact-cleanup ownership remain unchanged.
+
+No database schema, public API, profile setting or UI changes. See the
+[verification package](../../../plans/retained-repository-verification/plan.md).
 
 ## Failure taxonomy
 

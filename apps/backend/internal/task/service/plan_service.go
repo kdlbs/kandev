@@ -257,11 +257,6 @@ const (
 	planRevisionUnknown
 )
 
-func (s *PlanService) readLatestRevision(ctx context.Context, taskID string) (*models.TaskPlanRevision, planRevisionState) {
-	rev, state, _ := s.readLatestRevisionDetailed(ctx, taskID)
-	return rev, state
-}
-
 // CreatePlan upserts a plan and appends or coalesces a revision.
 func (s *PlanService) CreatePlan(ctx context.Context, req CreatePlanRequest) (PlanWriteResult, error) {
 	if req.TaskID == "" {

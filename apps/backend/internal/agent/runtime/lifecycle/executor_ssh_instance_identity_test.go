@@ -75,7 +75,7 @@ func TestSSHNewControllerRecordsItsOwnIdentity(t *testing.T) {
 		}},
 		&SSHTarget{Host: "ssh.example", Port: 22, User: "agent"},
 		&SSHPortForwarder{localPort: 43124},
-		"/remote/task", "/remote/session", 43123, 43122, 99, "/home/agent/.kandev", "token",
+		"/remote/task", "/remote/session", 43123, 43122, 99, "/home/agent/.kandev", "token", nil,
 	)
 	require.Equal(t, "new-instance", instance.Metadata["ssh_remote_agentctl_instance_id"])
 	require.Equal(t, "43122", instance.Metadata[MetadataKeySSHRemoteControlPort])

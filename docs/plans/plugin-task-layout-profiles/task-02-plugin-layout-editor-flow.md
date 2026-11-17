@@ -1906,3 +1906,44 @@ Round 8 accepted automatic all-root geometry remediation (2026-10-24, Sol 6.1):
   `rich-output:check` plus `tsc --noEmit --incremental` completed successfully
   with a longer deadline, 10GiB heap and cache-drive `--tsBuildInfoFile`.
   Documentation catalog/specification lint and whitespace checks passed.
+
+### PR 5354 integration remediation
+
+- Merged the authoritative main revision while retaining generated-root
+  geometry, both adjacent sashes, and actual sidebar measurement. Preserved
+  main's typed splitview reader and task-scoped ordinary-terminal cleanup.
+- Confirmed the review-summary partial-vertical overflow: explicit rows
+  600/600 plus a flexible row produced 600/600/0 at height 700.
+  Added two failing sizing regressions, then bounded vertical allocation
+  with cumulative rounding; horizontal policy is unchanged.
+- Clarified public lifecycle guidance: loading/failed registration retains
+  already-open panels; definitive removal closes them.
+- Cache-safe focused geometry integration: 5 files / 185 tests passed.
+  Sizing/serializer/terminal cleanup/internals/revocation: 5 files / 48 passed.
+  Changed-file Prettier and ESLint passed. A throwaway public serializer smoke
+  produced vertical 350/350/0 within height 700; no browser proof is claimed.
+- Screenshot publication remains externally blocked: native fork-scoped
+  upload to `uploads.github.com:443` returned connection refused. The current
+  screenshot evaluator failed; fetching its log also failed at the external
+  Actions log host. No CI pass, attachment publication, or merge readiness
+  is claimed by this local remediation evidence.
+- Final typed-root adaptations retain runtime assertions for mounted roots and
+  sash containers, rather than weakening main's nullable splitview contract.
+  Final focused integration verification passed 7 files / 208 tests.
+- Initial owning typecheck found stale workspace dependencies and typed
+  splitview fixtures; fixtures were narrowed without changing geometry
+  assertions. Frozen cache-workspace install failed fetching pinned archives
+  from `codeload.github.com`. Exact missing dependency versions and main's
+  `oxlint 1.91.0` / `tsrs 0.20.1-ts7.1.0-beta` were recovered from npm in an
+  isolated cache directory. `rich-output:check` and the owning `tsrs --noEmit
+  --fast` passed with external type-resolution mappings; tracked compiler
+  configuration and dependency locks are unchanged. The legacy `tsc` attempt
+  was superseded by main's owning compiler, not counted as a passing run.
+- The normal web lint hook passed using that exact cache-local oxlint.
+  Harness lint (206 files), harness tests (19), spec-linter tests (36), docs
+  catalog (455 decisions / 2031 specs), specification lint and public-doc
+  validation (55 pages) passed. Full staged whitespace includes pre-existing
+  incoming-main diagnostics; PR-owned changed-path whitespace is checked
+  against the authoritative base instead.
+- Rebuilt browser integration remains blocked by the pinned-archive dependency
+  fetch failure; no post-merge Chromium or real-package smoke is claimed.

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
@@ -61,24 +63,23 @@ type Repository interface {
 	ListActivityEntriesByAction(ctx context.Context, workspaceID, action string, limit int) ([]*models.ActivityEntry, error)
 	ListActivityEntriesByTarget(ctx context.Context, workspaceID, targetID string, limit int) ([]*models.ActivityEntry, error)
 	ListPendingApprovals(ctx context.Context, workspaceID string) ([]*models.Approval, error)
-	ListRuns(ctx context.Context, workspaceID string) ([]*models.Run, error)
+	ListRuns(ctx context.Context, workspaceID string) ([]*runsmodels.Run, error)
 	SearchTasks(ctx context.Context, workspaceID, query string, limit int) ([]*sqlite.TaskSearchResult, error)
 	ListActivityEntriesByType(ctx context.Context, workspaceID, filterType string, limit int) ([]*models.ActivityEntry, error)
 	ListTasksByWorkspace(ctx context.Context, workspaceID string, includeSystem bool) ([]*sqlite.TaskRow, error)
 	ListTasksFiltered(ctx context.Context, workspaceID string, opts sqlite.ListTasksOptions) (*sqlite.ListTasksFilteredResult, error)
 	GetTaskByID(ctx context.Context, taskID string) (*sqlite.TaskRow, error)
+	GetTaskIDByIdentifier(ctx context.Context, workspaceID, identifier string) (string, error)
 	ListChildTasks(ctx context.Context, parentID string) ([]*sqlite.TaskRow, error)
 	ListBlockersForTasks(ctx context.Context, taskIDs []string) (map[string][]string, error)
 	ListTaskComments(ctx context.Context, taskID string) ([]*models.TaskComment, error)
 	CreateTaskComment(ctx context.Context, comment *models.TaskComment) error
 	GetRunsByCommentIDs(ctx context.Context, commentIDs []string) (map[string]sqlite.CommentRunStatus, error)
-	UpdateTaskState(ctx context.Context, taskID, state string) error
 	GetTaskExecutionFields(ctx context.Context, taskID string) (*sqlite.TaskExecutionFields, error)
 	// UpdateTaskAssignee returns the task's assignment_generation after the
 	// bump, read back inside the same transaction that wrote the runner
 	// seat (see the sqlite implementation's doc comment).
 	UpdateTaskAssignee(ctx context.Context, taskID, assigneeID string) (int64, error)
-	UpdateTaskStateIfWorkflowStep(ctx context.Context, taskID, expectedStepID, state string) (bool, error)
 	UpdateTaskPriority(ctx context.Context, taskID, priority string) error
 	UpdateTaskProjectID(ctx context.Context, taskID, projectID string) error
 	GetTaskProjectID(ctx context.Context, taskID string) (string, error)
@@ -97,7 +98,13 @@ type Repository interface {
 	DeleteTaskBlocker(ctx context.Context, taskID, blockerTaskID string) error
 	ListTaskBlockers(ctx context.Context, taskID string) ([]*models.TaskBlocker, error)
 	ListTaskParticipants(ctx context.Context, taskID, role string) ([]sqlite.Participant, error)
+	ListTaskParticipantsAtStep(ctx context.Context, taskID, stepID, role string) ([]sqlite.Participant, error)
 	ListAllTaskParticipants(ctx context.Context, taskID string) ([]sqlite.Participant, error)
+	// ListTaskParticipantsAtCurrentStep is the step-scoped seat read
+	// AC-OFFICE-SESSION-TERM-002.3 requires for session-termination
+	// capacity — distinct from the workflow-scoped ListAllTaskParticipants
+	// used everywhere else (see sqlite.Repository's doc comments on both).
+	ListTaskParticipantsAtCurrentStep(ctx context.Context, taskID string) ([]sqlite.Participant, error)
 	AddTaskParticipant(ctx context.Context, taskID, agentID, role string) (sqlite.ParticipantWriteResult, error)
 	RemoveTaskParticipant(ctx context.Context, taskID, agentID, role string) error
 	GetTaskWorkflowStepID(ctx context.Context, taskID string) (string, error)
@@ -109,7 +116,7 @@ type Repository interface {
 	CancelDisplacedParticipantRun(
 		ctx context.Context, taskID, stepID, agentProfileID string,
 	) ([]runssqlite.CancelledRun, error)
-	IsTaskWorkflowStepTerminal(ctx context.Context, taskID string) (terminal, hasStep bool, err error)
+	IsTaskOnFinalStep(ctx context.Context, taskID string) (final, hasStep bool, err error)
 }
 
 // DecisionStore is the workflow-domain decisions interface required by
@@ -286,6 +293,9 @@ type TaskReactivityChange struct {
 	// the caller could not supply one (e.g. the read-back itself failed);
 	// the pipeline then enqueues the task_assigned wake keyless.
 	AssignmentGeneration *int64
+	// BlockerFailureOccurrenceID carries the identity assigned to this
+	// committed failure transition into Office reactivity.
+	BlockerFailureOccurrenceID string
 	// PrevAssigneeID is the assignee BEFORE the mutation. Required when
 	// NewAssigneeID is set so the pipeline can detect a real change and
 	// hand off the previous assignee's session.
@@ -438,6 +448,9 @@ type DashboardService struct {
 	runEvents             RunEventAppender                // optional; nil means a refused agent comment read is not recorded on its run
 	assigneeWriter        HumanAssigneeWriter             // optional; nil rejects human-assignee writes rather than skipping authorization
 	projectBudget         ProjectBudgetEvaluator          // optional; nil means reassignment doesn't re-evaluate the destination project's budget policies
+	taskStateWriter       shared.TaskStateWriter          // task repository owns transactional state changes and completion guards
+	humanDoneCompleter    TaskHumanDoneCompleter
+	finalStepMover        TaskFinalStepMover // optional; nil keeps the in_review redirect for human Done on a non-final step
 }
 
 // SetRoutingProvider wires the provider-routing seam used by the
@@ -570,7 +583,7 @@ func (s *DashboardService) appendDeniedCommentReadEvent(
 	if s.runEvents == nil || runID == "" {
 		return
 	}
-	s.runEvents.AppendRunEvent(ctx, runID, string(models.RunEventTypeRuntimeDenied), string(models.RunEventLevelWarn), map[string]interface{}{
+	s.runEvents.AppendRunEvent(ctx, runID, string(runsmodels.RunEventTypeRuntimeDenied), string(runsmodels.RunEventLevelWarn), map[string]interface{}{
 		"action":      "read_comments",
 		"target_type": "task",
 		"target_id":   targetTaskID,
@@ -649,6 +662,12 @@ func (s *DashboardService) SetHumanAssigneeWriter(w HumanAssigneeWriter) {
 // Office parent picker selects "No parent".
 func (s *DashboardService) SetTaskDetacher(d TaskDetacher) {
 	s.taskDetacher = d
+}
+
+// SetTaskStateWriter wires the task repository that owns transactional state
+// changes and completion guards.
+func (s *DashboardService) SetTaskStateWriter(w shared.TaskStateWriter) {
+	s.taskStateWriter = w
 }
 
 // SetTaskLifecyclePublisher wires the canonical task.updated publisher used
@@ -817,7 +836,7 @@ func (s *DashboardService) ListActivityForTarget(ctx context.Context, wsID, targ
 }
 
 // ListRuns returns run requests for a workspace.
-func (s *DashboardService) ListRuns(ctx context.Context, wsID string) ([]*models.Run, error) {
+func (s *DashboardService) ListRuns(ctx context.Context, wsID string) ([]*runsmodels.Run, error) {
 	return s.repo.ListRuns(ctx, wsID)
 }
 
@@ -846,6 +865,12 @@ func (s *DashboardService) ListTasksFiltered(
 // GetTask returns a single task by ID. Returns nil, nil when not found.
 func (s *DashboardService) GetTask(ctx context.Context, taskID string) (*sqlite.TaskRow, error) {
 	return s.repo.GetTaskByID(ctx, taskID)
+}
+
+// ResolveTaskIdentifier returns the task id for a workspace-scoped identifier
+// such as "KAN-11". Returns "", nil when no task matches.
+func (s *DashboardService) ResolveTaskIdentifier(ctx context.Context, workspaceID, identifier string) (string, error) {
+	return s.repo.GetTaskIDByIdentifier(ctx, workspaceID, identifier)
 }
 
 // ListChildTasks returns direct child tasks of a parent task.

@@ -8,8 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 )
 
 func serverGet(t *testing.T, srv *Server, path string) *httptest.ResponseRecorder {
@@ -120,6 +122,42 @@ func TestHandleStart_WithoutConfiguredCommandIs500(t *testing.T) {
 	}
 	if body.Error == "" {
 		t.Errorf("error is empty; the launch failure must reach the caller")
+	}
+}
+
+func TestHandleStart_EmptyBodyRetainsOrdinaryStartBehavior(t *testing.T) {
+	srv := newTestServer(t)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/start", nil)
+	srv.Router().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d (body %s), want ordinary launch failure 500", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestHandleStart_DispatchesPreparationDirective(t *testing.T) {
+	srv := newTestServer(t)
+	body, err := json.Marshal(StartRequest{Preparation: &agentctltypes.ManagedRuntimePreparationDirective{
+		Condition:               agentctltypes.ManagedRuntimeCacheRootManifestMissing,
+		PackageSpec:             "@agentclientprotocol/claude-agent-acp@1.2.3",
+		FailedProcessGeneration: 17,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, authenticated := range []bool{false, true} {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/start", strings.NewReader(string(body)))
+		c.Set(authenticatedControlContextKey, authenticated)
+		srv.handleStart(c)
+		if !authenticated {
+			if recorder.Code != http.StatusForbidden {
+				t.Fatalf("unauthenticated preparation = %d %s", recorder.Code, recorder.Body.String())
+			}
+		} else if recorder.Code != http.StatusInternalServerError || !strings.Contains(recorder.Body.String(), "managed runtime preparation evidence is stale") {
+			t.Fatalf("directive response = %d %s, want stale-evidence start failure", recorder.Code, recorder.Body.String())
+		}
 	}
 }
 

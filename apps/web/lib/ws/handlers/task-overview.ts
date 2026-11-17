@@ -14,6 +14,16 @@ export function applyTaskOverviewEvent(state: AppState, payload: TaskEventPayloa
   const patch = taskOverviewPatch(payload);
   if (previous) {
     const task = mergeTaskUpdate(previous, { ...previous, ...patch }, payload);
+    if (task === previous) {
+      if (!Object.hasOwn(patch, "statusSummary")) return state;
+      return {
+        ...state,
+        taskOverview: recordTaskOverviewChange(state.taskOverview, id, {
+          id,
+          statusSummary: patch.statusSummary,
+        }),
+      };
+    }
     for (const key of Object.keys(patch) as Array<keyof TaskOverviewPatch>) {
       if (key === "statusSummary") continue;
       Object.assign(patch, { [key]: task[key] });

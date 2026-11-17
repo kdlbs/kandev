@@ -88,7 +88,7 @@ test.describe("Runner switch before materialization", () => {
     await expect(executorSelector).toContainText(first.name);
 
     await executorSelector.click();
-    await testPage.getByRole("option", { name: new RegExp(second.name) }).click();
+    await testPage.locator(`[role="option"][data-value="${second.id}"]`).click();
 
     const switched = ws.waitForResponse("task.runner");
     await saveEditWithoutStartingAgent(testPage, dialog);
@@ -147,7 +147,7 @@ test.describe("Runner switch before materialization", () => {
 
     const executorSelector = dialog.getByTestId("executor-profile-selector");
     await executorSelector.click();
-    await testPage.getByRole("option", { name: new RegExp(second.name) }).click();
+    await testPage.locator(`[role="option"][data-value="${second.id}"]`).click();
 
     // Simulate a concurrent change that makes the task ineligible between the
     // dialog opening (with a stale eligible snapshot) and Save: the server

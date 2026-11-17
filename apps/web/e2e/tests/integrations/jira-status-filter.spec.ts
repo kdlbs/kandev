@@ -54,9 +54,12 @@ test.describe("Jira status filter", () => {
     await testPage.goto("/jira");
 
     // Pick the seeded project.
-    await testPage.getByTestId("jira-filter-pill-project").click();
+    const projectPill = testPage.getByTestId("jira-filter-pill-project");
+    await projectPill.click();
     await testPage.getByTestId(`jira-project-option-${PROJECT_KEY}`).click();
     await testPage.keyboard.press("Escape");
+    // Finish focus restoration before opening the next popover.
+    await expect(projectPill).toBeFocused();
 
     // Status pill is now enabled and offers the project's real statuses.
     const statusPill = testPage.getByTestId("jira-filter-pill-status");

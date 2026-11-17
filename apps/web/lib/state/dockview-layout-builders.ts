@@ -207,8 +207,7 @@ function captureRightTarget(
   }
 }
 
-/** Emit the `fixups-capture` width snapshot. Pulled out of `applyLayoutFixups`
- *  to keep that function under the complexity limit; no-op in prod. */
+/** Emit the debug width snapshot for layout fixups. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function logFixupsCapture(api: DockviewApi, sv: any): void {
   if (!isDebug()) return;

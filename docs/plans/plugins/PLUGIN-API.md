@@ -70,7 +70,7 @@ host before any bundle loads. Bundles are authored with React as an **external**
 they must use `host.React` (NOT bundle their own React) to share the host instance.
 
 The independently consumable frontend type contract is the runtime-free
-`@kandev/plugin-sdk` package in `apps/packages/plugin-sdk`. Official plugins import
+`@kdlbs/plugin-sdk` package in `apps/packages/plugin-sdk`. Official plugins import
 these types instead of re-declaring this document or importing `apps/web` internals.
 The host has a compile-time assignability test, and the real Bitbucket package is a
 required exact-head compatibility consumer.
@@ -98,7 +98,7 @@ interface PluginHostApi {
     resolveRepositoryId(identity: RepositoryIdentityInput): string | undefined;
   };
   // Compatibility only for older bundles. Deliberately absent from
-  // @kandev/plugin-sdk; new/official plugins must use host.context.
+  // @kdlbs/plugin-sdk; new/official plugins must use host.context.
   store: Pick<StoreApi<AppState>, "getState" | "setState" | "subscribe">;
   api: {
     // Low-level request scoped to this plugin's host path. It MUST NOT target a
@@ -361,6 +361,10 @@ When both session and repository selectors are present, the host resolves the ex
 non-empty worktree branch and exposes it only in the backend verified action context.
 Resource selectors never become part of the untrusted action body.
 
+Notification-provider actions use the dedicated context described in
+[Notification content formatters](#notification-content-formatters), rather
+than workspace, task, or repository selectors.
+
 An action handler may return an HTTP status from 200 through 599; zero preserves the
 legacy 200 response. The host forwards only safe response headers (`Content-Type`,
 `Cache-Control`, `ETag`, and `Retry-After`). Invalid statuses become 502, while
@@ -387,6 +391,83 @@ provider-neutral code-host dashboard set: `ChangeRequestList`,
 `SettingsCard`, and `WorkspaceScopedSection`. The authoritative list is
 `apps/web/lib/plugins/host-api.ts` (`PLUGIN_UI`).
 
+### Notification content formatters
+
+This additive extension is under development. Published SDK `0.1.0` and its
+host-wide minimum version do not establish formatter compatibility. Validate
+against a host and SDK that implement the extension before distribution.
+
+The host owns recipients, provider credentials, subscriptions, delivery claims,
+default copy, and transport. A formatter only returns an optional complete
+title/body pair. Register `notification_formatters` with `contract_version: 1`,
+supported `provider_types`, and explicitly declared `management_actions`.
+Those actions require manifest scope `notification_provider`.
+
+The `notification-formatter` component slot is isolated to the plugin selected
+for that provider. Its `NotificationFormatterSlotProps` contains the owned
+provider's ID/name/type/subscriptions, event catalog, exact installation/key,
+and canonical binding. It excludes provider config and credentials. Use the
+host's React/UI components and `useSettingsSaveContributor` for editor drafts.
+The optional `selectionChanged` flag also marks a selection-only draft. Editors
+must register that draft with shared Save (order below 50); Save prepares a first
+configuration, while its first activation still requires the explicit activation
+control. The host keeps selection changes dirty for navigation/discard until an
+authoritative binding matches; it never assumes a plugin registered a writer or
+implicitly activates an unknown revision. Callbacks captured by a removed editor
+are invalidated before dispatch, including a select-away/select-back cycle.
+
+For each management call, forward the observed context outside `body`:
+
+```ts
+await host.api.invokeAction("templates.prepare", {
+  notificationProviderId: props.provider.id,
+  notificationFormatter: {
+    installationId: props.formatter.installation_id,
+    formatterKey: props.formatter.key,
+    expectedBindingRevision: props.binding?.revision ?? "",
+    mode: "candidate",
+  },
+  body: { configuration: draft },
+}, { signal });
+```
+
+`candidate` prepares or inspects a potential selection without activation.
+`active` additionally requires that the canonical selected binding matches this
+plugin, installation, and formatter key. Both modes require the observed
+binding revision, including an empty string before any binding exists. The
+formatter key must be nonempty. The Go action context exposes the host-verified
+`NotificationFormatterKey`, so shared management actions can distinguish keys;
+body fields do not select the authorized formatter. The
+host checks ownership, manifest declaration, installation, and binding revision
+before dispatch and again before publishing a response. Missing context is
+400; a changed binding/installation is 409; configuration capture or unavailable
+runtime is 503. Do not retry uncertain mutation results with a new operation.
+
+Save immutable plugin data first, then call
+`activateConfiguration({ revision, digest }, expectedBindingRevision)` to CAS
+the host binding. Update the editor's observed revision from the returned
+binding for subsequent management calls. First activation must be explicit.
+`readActiveBinding()` returns authoritative state for reconciling lost
+acknowledgements; readback must succeed before retrying an uncertain activation.
+`reload()` refreshes host selection state. Clear-to-default uses the same host
+CAS and readback discipline. Preserve later edits when an earlier Save returns.
+
+`previewConfiguration(draft, event, sample, signal)` uses synthetic host context
+and never sends a notification or mutates the active binding. Abort pending
+work on unmount and selection changes; reject late responses and stale
+installation/binding generations, including after effect restart. Use the
+existing 44px coarse-pointer targets and shared settings Save/Reset behavior.
+
+Backend plugins implement optional `pluginsdk.NotificationFormatter`; legacy
+plugins need not implement it. Each admitted delivery captures its immutable
+binding once, formats under a shared one-second fanout budget, and uses the complete
+default pair on unsupported context, cancellation, invalid output, or failure.
+Configuration inspection and binding commit retain one installation lease.
+Management inspection is bounded to five seconds. The request limit is 128 KiB;
+custom output limits are 2 KiB title and 64 KiB body, with UTF-8, nonempty text,
+no NUL, and no CR/LF in the title. A formatter must not introduce another sender
+or subscribe to delivery events to send the same occurrence separately.
+
 ### Standard actions in existing slots
 
 The SDK exports these additive host-owned controls. `PluginActionProps` has a
@@ -409,7 +490,7 @@ interface PluginUIShape {
 ```
 
 The complete `PluginActionProps`, including exact event/ref field types, is exported from
-`@kandev/plugin-sdk` and defined in `apps/packages/plugin-sdk/src/index.ts`.
+`@kdlbs/plugin-sdk` and defined in `apps/packages/plugin-sdk/src/index.ts`.
 `Action` renders one native button. The host owns its outer geometry, icon box,
 state styling, tooltip behavior, and responsive presentation. It does not
 accept `className`, `style`, `size`, `variant`, `asChild`, arbitrary props, or
@@ -1923,16 +2004,22 @@ logged (mirroring `TaskMenuActionRegistration.visible`'s error handling).
 
 ### Task-list facets
 
-`registerTaskListFacet({ id, label, getValues, subscribe? })` adds a choice to `/tasks` Sort and
-Group controls. `getValues({ taskId, workspaceId })` synchronously returns `{ value, label,
-color? }[]`; `subscribe` invalidates the loaded page. Return each value at most once for a task,
-and keep one label and color for a value across all tasks. Facet sorting uses the first value label
-after a case-insensitive alphabetical comparison. Facets are page-local: no facet selection is
-persisted or sent to the backend. The host catches callback errors and revokes registrations and
-active subscriptions when the owning plugin unloads. A task with multiple values appears in each
-matching group; a task without a value appears in the host's `Ungrouped` section. Parent/child
-indentation is preserved only within a group both tasks match, so a matching child without its
-parent is rendered at that group's root.
+`registerTaskListFacet({ id, label, getValues, subscribe? })` adds a choice after the built-in
+`/tasks` Sort and Group options. `getValues(context: TaskListFacetContext)` synchronously returns
+`{ value, label, color? }[]` for `{ taskId, workspaceId? }`; `subscribe` invalidates the loaded
+page. The facet label and value labels come from the plugin verbatim. Return each value at most
+once for a task, and keep one label and color for a value across all tasks. An entry with an
+empty label or value is ignored. Facet sorting orders the loaded page by each task's alphabetically first
+value label, case-insensitively, with tasks without values last. A task with multiple values
+appears in each matching group; a task without a value appears in the trailing `Unassigned`
+section. Parent/child indentation is rebuilt within each section.
+
+The host stores a facet selection as `facet:<pluginId>:<facetId>` in the existing
+`tasks_list_sort` or `tasks_list_group` user preference and the `/tasks` query. A facet identifier
+is never sent to a task-list query; ordering and grouping by values remain page-local. If the
+plugin is unavailable, the list and controls temporarily use their built-in defaults while
+the saved selection remains intact and resumes when the plugin registers again. The host
+catches callback errors and revokes registrations and active subscriptions on unload.
 
 ## Registry internals (host side)
 
@@ -1944,8 +2031,8 @@ re-render when registrations change. Every registration records the owning
 `getSettingsRoutes()`, `getSlotComponents(slot)`, `getWsHandlers(action)`,
 `getPluginName(pluginId)` (display name recorded by `forPlugin(id, name)`, used
 for derived page-chrome titles), `getTaskPanels()` / `getTaskPanel(pluginId, id)`,
-and `getTaskMenuActions(group?)`. `unregisterWsHandler(pluginId, action, handler)`
-removes exactly one WS handler (used by `host.storage.subscribe`'s returned
+and `getTaskMenuActions(group?)`, and `getTaskListFacets()` (each facet with its owning plugin id).
+`unregisterWsHandler(pluginId, action, handler)` removes exactly one WS handler (used by `host.storage.subscribe`'s returned
 unsubscribe) without disturbing the plugin's other registrations.
 
 Before `initialize`, the loader records `ActivePlugin.repositoryProviderIds` for the

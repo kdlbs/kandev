@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-07-14
-updated: 2026-08-09
+updated: 2026-10-26
 owners:
   - kandev
 ---
@@ -28,6 +28,7 @@ Settings pages currently mix immediate persistence, section-level Save buttons, 
 - **AC-UI-SETTINGS-MANUAL-SAVE-001.6:** Existing page-level and section-level Save buttons move to the shared floating action when their fields belong to the route. Dialog and sheet forms keep their own explicit Create or Save button.
 - **AC-UI-SETTINGS-MANUAL-SAVE-001.7:** A draftable reset-to-default action, including keyboard shortcut, feature-toggle, query, and preset resets, updates the draft and requires Save. It is not treated as an immediate command.
 - **AC-UI-SETTINGS-MANUAL-SAVE-001.8:** A visual preview may react immediately when that is the purpose of the setting, such as changing the color theme, but the durable value is not updated until Save. Reloading or discarding before Save restores the saved value.
+- **AC-UI-SETTINGS-MANUAL-SAVE-001.9:** A settings page shows and saves the server's current value for every field the user did not edit. Navigating to it from another route, then saving an unrelated change, never clears a value such as a workflow prompt or description that the server still holds.
 
 ## Migrated source detail
 
@@ -110,6 +111,25 @@ Route navigation with dirty contributors opens an in-app confirmation with `Save
 - If a server or websocket refresh arrives while a contributor is clean, it may replace the baseline and draft. If it arrives while dirty, it must not overwrite the user's draft.
 - A partially created workflow stays represented by the user's draft. Save retries only missing or still-dirty operations and must not create a duplicate workflow.
 - Existing API authorization and validation errors are surfaced beside the shared action and by the relevant field or section when available.
+
+### Mounted Linear connection refreshes
+
+For AC-UI-SETTINGS-MANUAL-SAVE-001.4, an acknowledged Linear Save or confirmed
+Remove remains visible when an earlier configuration read completes. Overlapping
+reads publish only the latest admitted result for the mounted workspace. Later
+health and absent-configuration results remain visible; transient read failures
+retain the accepted configuration. Same-route Save and confirmed Remove cannot
+submit overlapping configuration
+mutations; the pending action disables conflicting submissions and releases the
+gate after success or failure. Initial loading still seeds the form before
+background refreshes begin. Locale changes preserve that initial-load lifetime
+and any raw draft; they do not restart form seeding. Test connection cannot
+start during a pending Save or Remove.
+Background health refreshes do not replace the draft
+or its Reset baseline. Failed writes retain the draft and accepted baseline.
+Successful Remove clears
+only its unchanged submitted draft; edits made while removal is pending remain
+dirty against the new absent-configuration baseline.
 
 ## Persistence Guarantees
 

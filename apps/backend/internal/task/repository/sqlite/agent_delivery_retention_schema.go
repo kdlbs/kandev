@@ -52,6 +52,11 @@ var agentDeliveryRetentionColumns = []agentDeliveryRetentionColumn{
 	{table: "agent_delivery_cursors", column: "retired_sequence", definition: "BIGINT NOT NULL DEFAULT 0 CHECK (retired_sequence >= 0)"},
 }
 
+var agentDeliverySegmentationColumns = []agentDeliveryRetentionColumn{
+	{table: "agent_delivery_inbox", column: "canonical_message_id", definition: "TEXT NOT NULL DEFAULT ''"},
+	{table: "agent_delivery_cursors", column: "message_segment_boundary_sequence", definition: "BIGINT CHECK (message_segment_boundary_sequence IS NULL OR message_segment_boundary_sequence >= 0)"},
+}
+
 var agentDeliveryRetentionIndexes = []struct {
 	name  string
 	query string
@@ -73,6 +78,11 @@ var agentDeliveryRetentionIndexes = []struct {
 		name: "idx_agent_delivery_inbox_terminal_sequence",
 		query: `CREATE INDEX IF NOT EXISTS idx_agent_delivery_inbox_terminal_sequence
 			ON agent_delivery_inbox(stream_id, sequence) WHERE terminal <> 0`,
+	},
+	{
+		name: "idx_agent_delivery_inbox_submission_terminal",
+		query: `CREATE INDEX IF NOT EXISTS idx_agent_delivery_inbox_submission_terminal
+			ON agent_delivery_inbox(submission_id, stream_id) WHERE terminal <> 0`,
 	},
 	{
 		name: "idx_agent_delivery_inbox_retirement",
@@ -149,7 +159,6 @@ func (r *Repository) initAgentDeliveryRetentionSchema() error {
 			return err
 		}
 	}
-
 	if err := r.migrate.Apply("agent_delivery_cleanup_jobs.table", `
 		CREATE TABLE IF NOT EXISTS agent_delivery_cleanup_jobs (
 			session_id TEXT NOT NULL,

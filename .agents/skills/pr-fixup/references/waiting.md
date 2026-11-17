@@ -1,6 +1,8 @@
 # Waiting for PR checks
 
 Load this reference when checks are pending or a user requests PR monitoring.
+Before waiting, handle `approval_required_runs` as described in
+[PR Fixup](../SKILL.md#1-gather-pr-state).
 Use `scripts/pr-await <PR>` for the wait. It owns the polling loop and returns
 one report. Do not run `pr-state` on a timer in the primary conversation.
 
@@ -93,6 +95,9 @@ unconfirmed work, and 3 for blocked evidence.
 Exit 3 includes approval-required runs, access errors, unknown mergeability,
 incomplete snapshots, and unknown required-check policy. The reported toolchain
 versions are diagnostic context, not substitute evidence.
+For `blocked-approval`, follow the CI approval instructions in
+[PR Fixup](../SKILL.md#1-gather-pr-state).
+Do not repeatedly restart the waiter while CI authorization remains pending.
 If a transient `pr-state` or GitHub API timeout causes exit 3 or populates
 `errors` while checks are still progressing, treat the result as unavailable
 evidence. Rerun `scripts/pr-await` after transport recovers and require a
@@ -121,10 +126,6 @@ head. Inspect and revalidate each hidden thread, reply/resolve it, then run
 
 If a job exceeds its configured timeout or contradicts the rollup, query its
 exact job/run before diagnosing a hang. Verify that its SHA matches the PR head.
-For fork workflow approval, inspect `approval_required_runs`.
-An authorized fixup can approve the exact run through
-`gh api --method POST repos/<owner>/<repo>/actions/runs/<run-id>/approve`.
-Then refresh state and wait for jobs to appear. `gh run approve` is invalid.
 
 If the PR becomes `MERGED` or `CLOSED`, stop. For a merge, report `mergedAt`
 and `mergeCommit.oid`. Do not recreate, update, or re-enqueue its stale branch.

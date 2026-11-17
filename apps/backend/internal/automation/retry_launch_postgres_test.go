@@ -18,7 +18,8 @@ func postgresRetryLaunchStore(t *testing.T) (*Store, *sqlx.DB) {
  CREATE TABLE task_sessions(id TEXT PRIMARY KEY,task_id TEXT,is_primary INTEGER DEFAULT 0,state TEXT DEFAULT 'RUNNING',queue_incarnation_id TEXT DEFAULT '',metadata TEXT DEFAULT '{}');
  CREATE TABLE task_session_turns(id TEXT PRIMARY KEY,task_id TEXT,task_session_id TEXT,metadata TEXT DEFAULT '{}');
  CREATE TABLE harness_session_generations(session_id TEXT,incarnation_id TEXT,generation BIGINT);
- CREATE TABLE session_recovery_blocks(id TEXT PRIMARY KEY,session_id TEXT,incarnation_id TEXT,expected_generation BIGINT,reason TEXT,state TEXT,consumer_reference TEXT,created_at TIMESTAMPTZ,updated_at TIMESTAMPTZ,UNIQUE(session_id,incarnation_id,expected_generation,reason));`)
+ CREATE TABLE session_recovery_blocks(id TEXT PRIMARY KEY,session_id TEXT,incarnation_id TEXT,expected_generation BIGINT,reason TEXT,state TEXT,consumer_reference TEXT,created_at TIMESTAMPTZ,updated_at TIMESTAMPTZ);
+ CREATE UNIQUE INDEX session_recovery_blocks_open_reason ON session_recovery_blocks(session_id,incarnation_id,expected_generation,reason) WHERE state='open';`)
 	require.NoError(t, err)
 	store, err := NewStore(database, database)
 	require.NoError(t, err)

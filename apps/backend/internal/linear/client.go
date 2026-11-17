@@ -20,6 +20,8 @@ type Client interface {
 	ListTeams(ctx context.Context) ([]LinearTeam, error)
 	ListLabels(ctx context.Context, teamKey string) ([]LinearLabel, error)
 	ListUsers(ctx context.Context, teamKey string) ([]LinearUser, error)
+	ListProjects(ctx context.Context, teamKey string) ([]LinearProject, error)
+	GetProjectContents(ctx context.Context, projectIDs []string) (map[string]string, error)
 	SearchIssues(ctx context.Context, filter SearchFilter, pageToken string, maxResults int) (*SearchResult, error)
 }
 

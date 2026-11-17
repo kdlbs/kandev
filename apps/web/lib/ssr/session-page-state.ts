@@ -29,7 +29,7 @@ import { latestIncompleteTurnId } from "@/lib/state/slices/session/turn-actions"
 import type { SessionPrepareState } from "@/lib/state/slices/session-runtime/types";
 import type { AppState } from "@/lib/state/store";
 import { beginOptionalHydration, type OptionalHydrationResult } from "@/lib/ssr/optional-hydration";
-import { mapWorkspaceItem } from "@/lib/routing/route-bootstrap";
+import { mapWorkflowItem, mapWorkspaceItem } from "@/lib/routing/route-bootstrap";
 import type { TaskNavigationIdentity } from "@/lib/state/task-navigation-reads";
 import type { StoreApi } from "zustand";
 import {
@@ -180,13 +180,7 @@ function buildResourceState(p: BuildSessionPageStateParams) {
     // Don't write activeId — null means "All Workflows"; task context lives in kanban.workflowId.
     ...optionalState(workflows, (value) => ({
       workflows: {
-        items: value.map((w) => ({
-          id: w.id as string,
-          workspaceId: w.workspace_id as string,
-          name: w.name,
-          hidden: w.hidden,
-          style: w.style,
-        })),
+        items: value.map(mapWorkflowItem),
       } as Partial<AppState>["workflows"],
     })),
     ...optionalState(repositories, (value) => ({
@@ -440,19 +434,35 @@ export async function fetchTaskNavigationEnrichment(
   const loadAgentList = options.store
     ? () => getAgentListResourceScope(options.store!).ensure()
     : () => listAgents({ cache: "no-store" });
-  if (!sessionId) return fetchTaskDataOnly(task, allSessionsResponse, loadAgentList, options.store);
-
-  const optionalHydration = beginOptionalHydration();
-  const { fetchTaskSession } = await import("@/lib/api");
-  const activeSessionResponse = optionalHydration.load("active session snapshot", () =>
-    fetchTaskSession(sessionId, { cache: "no-store" }),
-  );
-  return fetchSessionDataFromTask(task, sessionId, allSessionsResponse, {
-    activeSessionResponse,
-    optionalHydration,
-    loadAgentList,
-    store: options.store,
-  });
+  let data: FetchedSessionData;
+  if (!sessionId) {
+    data = await fetchTaskDataOnly(task, allSessionsResponse, loadAgentList, options.store);
+  } else {
+    const optionalHydration = beginOptionalHydration();
+    const { fetchTaskSession } = await import("@/lib/api");
+    const activeSessionResponse = optionalHydration.load("active session snapshot", () =>
+      fetchTaskSession(sessionId, { cache: "no-store" }),
+    );
+    data = await fetchSessionDataFromTask(task, sessionId, allSessionsResponse, {
+      activeSessionResponse,
+      optionalHydration,
+      loadAgentList,
+      store: options.store,
+    });
+  }
+  // Only recovery of an unavailable identity list owns new selection/membership.
+  return {
+    ...data,
+    initialState: {
+      ...data.initialState,
+      tasks: identity.sessionListUnavailable ? data.initialState.tasks : undefined,
+      taskSessions:
+        !sessionId && !identity.sessionListUnavailable ? undefined : data.initialState.taskSessions,
+      taskSessionsByTask: identity.sessionListUnavailable
+        ? data.initialState.taskSessionsByTask
+        : undefined,
+    },
+  };
 }
 
 /**

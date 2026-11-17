@@ -18,13 +18,18 @@ import (
 type captureExecutorRunningWriter struct {
 	prior       *models.ExecutorRunning
 	running     *models.ExecutorRunning
+	readErr     error
 	upsertErr   error
 	deleteCalls int
+	repairCalls int
 }
 
 func (w *captureExecutorRunningWriter) GetExecutorRunningBySessionID(
 	context.Context, string,
 ) (*models.ExecutorRunning, error) {
+	if w.readErr != nil {
+		return nil, w.readErr
+	}
 	if w.prior == nil {
 		return nil, models.ErrExecutorRunningNotFound
 	}
@@ -42,6 +47,7 @@ func (w *captureExecutorRunningWriter) DeleteExecutorRunningBySessionID(_ contex
 }
 
 func (w *captureExecutorRunningWriter) RepairExecutorRunningDead(_ context.Context, _ string) error {
+	w.repairCalls++
 	return nil
 }
 
@@ -81,6 +87,22 @@ func TestBuildRunningFromExecutionPersistsFreshExecutorIdentity(t *testing.T) {
 
 	if running.ExecutorID != "executor-1" {
 		t.Fatalf("ExecutorID = %q, want executor-1", running.ExecutorID)
+	}
+}
+
+func TestBuildRunningFromExecutionPersistsTaskEnvironmentIdentity(t *testing.T) {
+	running := buildRunningFromExecution(&AgentExecution{
+		ID: "exec-env-identity", TaskID: "task-env-identity", SessionID: "session-env-identity",
+		TaskEnvironmentID: "environment-original",
+	}, nil)
+	if got := getMetadataString(running.Metadata, "task_environment_id"); got != "environment-original" {
+		t.Fatalf("persisted task environment identity = %q, want environment-original", got)
+	}
+	if !ShouldPersistMetadataKey(MetadataKeyTaskEnvironmentID) {
+		t.Fatal("task environment identity is not retained in executor runtime inventory")
+	}
+	if !IsSessionScopedMetadataKey(MetadataKeyTaskEnvironmentID) {
+		t.Fatal("task environment identity is not scoped to the runtime session")
 	}
 }
 

@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"net/url"
 	"strconv"
 	"strings"
@@ -123,6 +124,12 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		Metadata:           FilterPersistentMetadata(metadata),
 		LastSeenAt:         lastSeenAt,
 	}
+	if execution.TaskEnvironmentID != "" {
+		if running.Metadata == nil {
+			running.Metadata = make(map[string]interface{})
+		}
+		running.Metadata[MetadataKeyTaskEnvironmentID] = execution.TaskEnvironmentID
+	}
 	if officeProfileID := strings.TrimSpace(execution.OfficeAgentProfileID); officeProfileID != "" {
 		if running.Metadata == nil {
 			running.Metadata = make(map[string]interface{})
@@ -154,9 +161,12 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 			running.Metadata = make(map[string]interface{})
 		}
 		for k, v := range prior.Metadata {
-			if k == metadataKeyPassthroughMCPClaims || k == idleActivityMetadataKey {
+			if k == metadataKeyPassthroughMCPClaims || k == idleActivityMetadataKey || k == mcpprofile.BuiltinBindingMetadataKey ||
+				k == MetadataKeySSHLaunchReceipt {
 				// Current execution metadata owns claim state. Copying an absent
-				// claim or clock from a prior row would undo its removal.
+				// claim or clock from a prior row would undo its removal. The SSH
+				// launch receipt is the same shape of fact: a replacement launch
+				// that cleared it must never inherit the predecessor's proof.
 				continue
 			}
 			if _, ok := running.Metadata[k]; !ok {
@@ -598,5 +608,24 @@ type executorRunningCASWriter interface {
 		ctx context.Context,
 		sessionID, expectedExecutionID string,
 		expectedUpdatedAt time.Time,
+	) error
+}
+
+type executorRunningOwnerCASWriter interface {
+	RepairExecutorRunningDeadIfOwnerCurrent(
+		ctx context.Context,
+		sessionID, expectedExecutionID string,
+		expectedUpdatedAt time.Time,
+		owner models.RemoteRecoveryOwnerLockIDs,
+		validateOwner func(context.Context) error,
+	) error
+}
+
+type executorRunningOwnerAbsentWriter interface {
+	ConfirmExecutorRunningAbsentIfOwnerCurrent(
+		ctx context.Context,
+		sessionID string,
+		owner models.RemoteRecoveryOwnerLockIDs,
+		validateOwner func(context.Context) error,
 	) error
 }

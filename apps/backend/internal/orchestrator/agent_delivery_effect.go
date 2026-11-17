@@ -46,6 +46,16 @@ func withWorkflowEffect(ctx context.Context, effect *models.AgentDeliveryEffect)
 	return context.WithValue(ctx, workflowEffectContextKey{}, effect)
 }
 
+// withoutWorkflowEffect drops the workflow delivery effect from ctx. Use it
+// before driving another task's transition from inside a turn: the effect
+// belongs to the task whose turn produced it.
+func withoutWorkflowEffect(ctx context.Context) context.Context {
+	if workflowEffectFromContext(ctx) == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, workflowEffectContextKey{}, (*models.AgentDeliveryEffect)(nil))
+}
+
 func workflowEffectFromContext(ctx context.Context) *models.AgentDeliveryEffect {
 	if ctx == nil {
 		return nil
@@ -82,6 +92,18 @@ func workflowEffectForEvent(data watcher.AgentEventData) *models.AgentDeliveryEf
 		effect.Sequence = int64(data.DeliverySequence)
 	}
 	return effect
+}
+
+// workflowEffectForCompletion builds the workflow effect for a terminal event
+// that the caller has already resolved to closingTurnID. A durable delivery
+// terminal can arrive without a turn ID when its prompt was dispatched without
+// one; its delivery identity is otherwise complete, so it is bound to the turn
+// it closes instead of being deferred with an empty effect key.
+func workflowEffectForCompletion(data watcher.AgentEventData, closingTurnID string) *models.AgentDeliveryEffect {
+	if data.TurnID == "" && closingTurnID != "" && agentDeliveryEventIdentityPresent(data) {
+		data.TurnID = closingTurnID
+	}
+	return workflowEffectForEvent(data)
 }
 
 func workflowEffectForTurn(turnID string) *models.AgentDeliveryEffect {
@@ -321,4 +343,21 @@ func taskIDOrEmpty(task *models.Task) string {
 		return ""
 	}
 	return task.ID
+}
+
+// completedEventClosingTurn names the turn an agent.completed event closes when
+// the event carries delivery identity but no turn ID: the session's active turn,
+// which the turn-ID-less branch below completes. Lookup failures leave it
+// empty, so the completion keeps its fail-closed deferral.
+func (s *Service) completedEventClosingTurn(ctx context.Context, data watcher.AgentEventData) string {
+	if data.TurnID != "" || !agentDeliveryEventIdentityPresent(data) {
+		return data.TurnID
+	}
+	turnID, err := s.peekActiveTurnID(ctx, data.SessionID)
+	if err != nil {
+		s.logger.Warn("could not resolve the turn closed by a turn-less delivery completion",
+			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
+		return ""
+	}
+	return turnID
 }

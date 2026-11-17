@@ -11,6 +11,17 @@ LINT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "lint-action-pinning.yml"
 
 
 class OpenCodeCodeReviewWorkflowContractTest(unittest.TestCase):
+    # @covers AC-CI-ACTIONS-SECURITY-001.1, AC-CI-ACTIONS-SECURITY-001.3
+    def test_privileged_review_uses_trusted_execution_and_default_deny_tools(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertEqual(workflow.count("ref: ${{ github.workflow_sha }}"), 2)
+        self.assertNotIn("ref: ${{ github.event.pull_request.head.sha }}", workflow)
+        self.assertEqual(workflow.count("bash .github/scripts/prepare-pr-review.sh"), 2)
+        self.assertEqual(workflow.count("uses: ./.github/actions/setup-opencode"), 2)
+        self.assertEqual(workflow.count('            "*": deny\n            read: allow'), 2)
+        self.assertEqual(workflow.count("            external_directory: deny"), 2)
+        self.assertIn("python3 .github/scripts/automatic-review-inputs_test.py", LINT_WORKFLOW.read_text())
+
     def test_safe_to_review_approval_survives_follow_up_pushes(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         _, separator, fork_job = workflow.partition("  opencode-review-fork:")

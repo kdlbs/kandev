@@ -8,8 +8,8 @@ import (
 )
 
 func TestNativeResumeProofRejectsConcurrentStreamProgress(t *testing.T) {
-	before := &agentctl.DeliveryStatus{StreamID: "stream", Stream: &journal.Stream{StreamID: "stream", HighWater: 5, Acknowledged: 5, FirstRetained: 6}}
-	for _, condition := range []string{"unchanged", "late terminal", "acknowledged", "pruned", "unresolved", "owner", "missing stream"} {
+	before := &agentctl.DeliveryStatus{StreamID: "stream", Stream: &journal.Stream{StreamID: "stream", HighWater: 5, Acknowledged: 4, FirstRetained: 3, Bytes: 100}}
+	for _, condition := range []string{"unchanged", "late terminal", "acknowledged", "pruned", "bytes increased", "bytes decreased", "unresolved", "owner", "stream owner", "sealed", "missing stream"} {
 		t.Run(condition, func(t *testing.T) {
 			after := *before
 			stream := *before.Stream
@@ -21,14 +21,25 @@ func TestNativeResumeProofRejectsConcurrentStreamProgress(t *testing.T) {
 				after.Stream.Acknowledged++
 			case "pruned":
 				after.Stream.FirstRetained++
+				after.Stream.Bytes -= 10
+			case "bytes increased":
+				after.Stream.Bytes += 10
+			case "bytes decreased":
+				after.Stream.Bytes -= 10
 			case "unresolved":
 				after.Unresolved = true
 			case "owner":
 				after.StreamID = "foreign"
+			case "stream owner":
+				after.Stream.SessionID = "foreign"
+			case "sealed":
+				after.Stream.Sealed = true
 			case "missing stream":
 				after.Stream = nil
 			}
 			require.Equal(t, condition == "unchanged", sameNativeResumeProofStatus(before, &after))
+			retryable := condition == "late terminal" || condition == "acknowledged" || condition == "pruned"
+			require.Equal(t, retryable, nativeResumeStreamAdvanced(before, &after))
 		})
 	}
 }

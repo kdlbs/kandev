@@ -32,6 +32,7 @@ const ERROR_TESTID = "office-task-title-error";
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.restoreAllMocks();
   __resetOfficeTaskContentSyncForTests();
 });
 
@@ -192,7 +193,7 @@ describe("TaskTitleEditable cancel", () => {
     renderEditable();
     const input = openEditor();
     fireEvent.change(input, { target: { value: "Changed but not saved" } });
-    fireEvent.blur(input);
+    fireEvent.blur(input, { relatedTarget: document.body });
     expect(mockedUpdateTask).not.toHaveBeenCalled();
     expect(screen.queryByTestId(INPUT_TESTID)).toBeNull();
   });
@@ -275,4 +276,17 @@ describe("TaskTitleEditable taskId change while editing (P1 review fix, COR-002)
     expect(screen.queryByTestId(INPUT_TESTID)).toBeNull();
     expect(screen.getByTestId(HEADING_TESTID).textContent).toBe("Other task title");
   });
+});
+
+// @covers AC-UI-EDIT-FOCUS-001.1
+it("retains the draft and Office field guard when the document loses focus", () => {
+  vi.spyOn(document, "hasFocus").mockReturnValue(false);
+  renderEditable();
+  const input = openEditor() as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "Unfinished title" } });
+  fireEvent.blur(input);
+  expect(screen.queryByTestId(INPUT_TESTID)).toBe(input);
+  expect(input.value).toBe("Unfinished title");
+  expect(isFieldGuarded("t-1", "title")).toBe(true);
+  expect(mockedUpdateTask).not.toHaveBeenCalled();
 });

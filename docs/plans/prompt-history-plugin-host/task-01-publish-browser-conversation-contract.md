@@ -67,7 +67,7 @@ Do not implement routes, hooks, panel plumbing, or fixture UI in this task.
 ## Result
 
 Published the runtime-free conversation, panel-context, navigation, favorite,
-mention-rendering, and lifecycle types in `@kandev/plugin-sdk`; internal web
+mention-rendering, and lifecycle types in `@kdlbs/plugin-sdk`; internal web
 types alias that declaration. Assignability coverage preserves existing
 registrations and verifies the new Host surface.
 

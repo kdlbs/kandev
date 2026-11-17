@@ -77,17 +77,23 @@ func TestStopAgentWithReasonDetachesOnBackendShutdownWhenSurvivalEnabled(t *test
 // every other stop reason -- user stops, rollback cleanup, task deletion --
 // keeps today's terminating semantics even when the capability is enabled.
 func TestStopAgentWithReasonTerminatesForNonShutdownReasonEvenWhenSurvivalEnabled(t *testing.T) {
-	mgr, mockExecutor := newDetachTestManager(t, true)
-	execution := newDetachTestExecution("exec-terminate", "session-terminate")
-	require.NoError(t, mgr.executionStore.Add(execution))
-
-	err := mgr.StopAgentWithReason(context.Background(), execution.ID, StopReasonTaskDeleted, false)
-	require.NoError(t, err)
-
-	require.Len(t, mockExecutor.stopInstanceCalls, 1, "a non-shutdown reason must still stop the runtime instance")
-
-	eventBus := mgr.eventBus.(*MockEventBus)
-	require.True(t, hasAgentStoppedEvent(eventBus.PublishedEvents), "a terminating stop must still publish agent.stopped")
+	for _, reason := range []string{StopReasonTaskDeleted, StopReasonLaunchRollback, ""} {
+		t.Run(reason, func(t *testing.T) {
+			mgr, mockExecutor := newDetachTestManager(t, true)
+			execution := newDetachTestExecution("exec-terminate", "session-terminate")
+			require.NoError(t, mgr.executionStore.Add(execution))
+			var err error
+			if reason == "" {
+				err = mgr.StopAgent(context.Background(), execution.ID, false)
+			} else {
+				err = mgr.StopAgentWithReason(context.Background(), execution.ID, reason, false)
+			}
+			require.NoError(t, err)
+			require.Len(t, mockExecutor.stopInstanceCalls, 1, "an explicit stop or rollback must terminate the runtime instance")
+			eventBus := mgr.eventBus.(*MockEventBus)
+			require.True(t, hasAgentStoppedEvent(eventBus.PublishedEvents), "a terminating stop must publish agent.stopped")
+		})
+	}
 }
 
 // TestStopAgentWithReasonTerminatesOnBackendShutdownWhenSurvivalDisabled

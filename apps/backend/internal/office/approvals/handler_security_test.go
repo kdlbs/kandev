@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -84,7 +86,7 @@ func (s *silentActivityLogger) LogActivityWithRun(_ context.Context, _, _, _, _,
 type silentRunQueuer struct{}
 
 func (s *silentRunQueuer) QueueRunWithActor(
-	_ context.Context, _, _, _, _ string, _ models.ActorKind, _ string, _ string,
+	_ context.Context, _, _, _, _ string, _ runsmodels.ActorKind, _ string, _ string,
 ) (runsservice.QueueOutcome, error) {
 	return runsservice.QueueOutcomeQueued, nil
 }
@@ -264,8 +266,8 @@ func TestDecideApproval_AgentCallerQueuesRunAsActorKindAgent(t *testing.T) {
 	if !queuer.called {
 		t.Fatal("QueueRunWithActor was not called")
 	}
-	if queuer.actorKind != models.ActorKindAgent {
-		t.Errorf("actorKind = %q, want %q", queuer.actorKind, models.ActorKindAgent)
+	if queuer.actorKind != runsmodels.ActorKindAgent {
+		t.Errorf("actorKind = %q, want %q", queuer.actorKind, runsmodels.ActorKindAgent)
 	}
 	if queuer.actorID != ceo.ID {
 		t.Errorf("actorID = %q, want %q", queuer.actorID, ceo.ID)
@@ -293,8 +295,8 @@ func TestDecideApproval_UnauthenticatedCallerQueuesRunAsActorKindSystem(t *testi
 	if !queuer.called {
 		t.Fatal("QueueRunWithActor was not called")
 	}
-	if queuer.actorKind != models.ActorKindSystem {
-		t.Errorf("actorKind = %q, want %q (unverified caller must never be human-rooted)", queuer.actorKind, models.ActorKindSystem)
+	if queuer.actorKind != runsmodels.ActorKindSystem {
+		t.Errorf("actorKind = %q, want %q (unverified caller must never be human-rooted)", queuer.actorKind, runsmodels.ActorKindSystem)
 	}
 	if queuer.actorID != "ui" {
 		t.Errorf("actorID = %q, want ui", queuer.actorID)
@@ -320,7 +322,7 @@ func TestDecideApproval_UnauthenticatedCallerWithSpoofedDecidedByStaysActorKindS
 	if !queuer.called {
 		t.Fatal("QueueRunWithActor was not called")
 	}
-	if queuer.actorKind != models.ActorKindSystem {
-		t.Errorf("actorKind = %q, want %q (spoofed decided_by must not drive actor kind)", queuer.actorKind, models.ActorKindSystem)
+	if queuer.actorKind != runsmodels.ActorKindSystem {
+		t.Errorf("actorKind = %q, want %q (spoofed decided_by must not drive actor kind)", queuer.actorKind, runsmodels.ActorKindSystem)
 	}
 }

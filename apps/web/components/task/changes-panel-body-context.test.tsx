@@ -123,6 +123,7 @@ function panelProps(): BodyTestProps {
     hasUnstaged: false,
     hasStaged: false,
     hasCommits: true,
+    commitsInitialLoading: false,
     hasPRFiles: false,
     hasPRCommits: false,
     relation: { presentation: "combined" } as unknown as ChangesPanelBodyProps["relation"],
@@ -230,7 +231,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("ChangesPanelBody environment session ownership", () => {
-  it("keeps inline commit details on the environment session across tab switches", async () => {
+  it("keeps cached details and uses the selected session for new requests", async () => {
     render(
       <TooltipProvider>
         <StateProvider>
@@ -254,6 +255,45 @@ describe("ChangesPanelBody environment session ownership", () => {
     expect(expandedCommit(FRONTEND_COMMIT).getAttribute(ARIA_EXPANDED)).toBe(EXPANDED);
     expect(screen.getByTestId(INLINE_FILE)).toBeTruthy();
     expect(mocks.requestCommitDetail).toHaveBeenCalledOnce();
+
+    act(() => {
+      appStore.setState((state) => ({
+        ...state,
+        sessionAgentctl: {
+          ...state.sessionAgentctl,
+          itemsBySessionId: {
+            ...state.sessionAgentctl.itemsBySessionId,
+            "session-a": { status: "error" },
+            "session-a-sibling": { status: "ready", agentExecutionId: "execution-sibling" },
+          },
+        },
+      }));
+    });
+
+    mocks.requestCommitDetail.mockResolvedValueOnce({
+      source: "local",
+      success: true,
+      files: {
+        "backend/file.ts": {
+          path: "backend/file.ts",
+          status: "modified",
+          staged: false,
+          additions: 1,
+          deletions: 0,
+        },
+      },
+    });
+    fireEvent.click(expandedCommit("backend-commit"));
+    expect(await screen.findByTestId("commit-file-backend-file.ts")).toBeTruthy();
+    expect(mocks.requestCommitDetail).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        local: {
+          sessionId: "session-a-sibling",
+          taskId: "task-a",
+          agentctlReady: true,
+        },
+      }),
+    );
   });
 });
 
@@ -354,6 +394,7 @@ describe("ChangesPanelBody history context ownership", () => {
 });
 
 describe("ChangesPanelBody Git status presentation", () => {
+  const EMPTY_MESSAGE = "Your changed files will appear here";
   it("keeps refresh failure feedback out of the Changes body", () => {
     render(
       <TooltipProvider>
@@ -369,11 +410,11 @@ describe("ChangesPanelBody Git status presentation", () => {
 
     expect(screen.queryByTestId("git-status-notice")).toBeNull();
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
-    expect(screen.queryByText("Your changed files will appear here")).toBeNull();
+    expect(screen.queryByText(EMPTY_MESSAGE)).toBeNull();
   });
 
-  it("shows the clean message only after complete membership is ready", () => {
-    const renderPanel = (gitStatusMembershipReady: boolean) =>
+  it("shows the clean message only after initial commits and membership are ready", () => {
+    const renderPanel = (gitStatusMembershipReady: boolean, commitsInitialLoading = false) =>
       render(
         <TooltipProvider>
           <StateProvider>
@@ -381,6 +422,7 @@ describe("ChangesPanelBody Git status presentation", () => {
               {...panelProps()}
               hasAnything={false}
               hasCommits={false}
+              commitsInitialLoading={commitsInitialLoading}
               gitStatus={{
                 ...panelProps().gitStatus,
                 membershipReady: gitStatusMembershipReady,
@@ -393,11 +435,16 @@ describe("ChangesPanelBody Git status presentation", () => {
       );
 
     const view = renderPanel(false);
-    expect(screen.queryByText("Your changed files will appear here")).toBeNull();
+    expect(screen.queryByText(EMPTY_MESSAGE)).toBeNull();
     view.unmount();
 
+    const pending = renderPanel(true, true);
+    expect(screen.queryByText(EMPTY_MESSAGE)).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Loading changes...");
+    pending.unmount();
+
     renderPanel(true);
-    expect(screen.getByText("Your changed files will appear here")).toBeTruthy();
+    expect(screen.getByText(EMPTY_MESSAGE)).toBeTruthy();
   });
 });
 

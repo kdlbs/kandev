@@ -1,6 +1,7 @@
 import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 import type { DockviewApi } from "dockview-react";
-import { applyLayout, getRootOrientation, getRootSplitview, resolveGroupIds } from "./applier";
+import { applyLayout, getRootOrientation, resolveGroupIds } from "./applier";
+import { requireRootSplitview as getRootSplitview } from "./dockview-test-host.test-helpers";
 import { disposeDockview, mountDockview } from "./dockview-test-host.test-helpers";
 import { getPinnedTarget, clearAllPinnedTargets } from "./pinned-targets";
 import type { LayoutState } from "./types";

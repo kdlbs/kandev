@@ -180,7 +180,7 @@ describe("GridSpinner", () => {
         iterations: Infinity,
       })),
     );
-    expect(cubes.every((cube) => cube.style.animation === "none")).toBe(true);
+    expect(cubes.every((cube) => cube.style.animationName === "none")).toBe(true);
   });
 
   it("keeps the CSS animations when Web Animations is unavailable", () => {

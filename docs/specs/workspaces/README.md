@@ -20,6 +20,9 @@ This system owns workspace creation and deletion, repository attachment,
 repository sets, local repositories, branch templates, secrets, and workspace
 Git state.
 
+System-supplied Improve Kandev workflow instructions and their stored upgrades
+also belong here.
+
 Workspace context identity, cached collection isolation, and navigation recovery
 after failed reads also belong here.
 

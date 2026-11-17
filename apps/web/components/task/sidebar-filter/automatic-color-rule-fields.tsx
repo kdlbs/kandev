@@ -11,10 +11,7 @@ import {
   FIXED_AUTOMATIC_TASK_COLORS,
   AUTOMATIC_TASK_COLOR_DIMENSIONS,
 } from "@/lib/task-color-automation-settings";
-import {
-  fixedAutomaticTaskColor,
-  type TaskMarkerPresentation,
-} from "@/lib/task-color-presentation";
+import { taskColorPresentation, type TaskMarkerPresentation } from "@/lib/task-color-presentation";
 import { cn } from "@/lib/utils";
 import type { RepositoryRuleCatalogOption } from "@/lib/sidebar/repository-rule-catalog";
 import { RepositoryConditionField, type Translate } from "./automatic-color-repository-picker";
@@ -239,7 +236,7 @@ export function AutomaticColorOutputField({
           {FIXED_AUTOMATIC_TASK_COLORS.map((color) => (
             <SelectItem key={color} value={color} className="text-xs">
               <span className="flex items-center gap-2">
-                <ColorSwatch marker={fixedAutomaticTaskColor(color)} />
+                <ColorSwatch marker={taskColorPresentation(color)} />
                 {t(AUTOMATIC_COLOR_LABEL_KEYS[color])}
               </span>
             </SelectItem>

@@ -33,12 +33,15 @@ func TestRemoteControlHandshake(t *testing.T) {
 		server := newFakeSSHServer(t, nil)
 		server.forwardTo(strings.TrimPrefix(httpServer.URL, "http://"))
 
-		token, err := remoteControlHandshake(context.Background(), server.dial(t), 39429, "nonce-abc")
+		result, err := remoteControlHandshake(context.Background(), server.dial(t), 39429, "nonce-abc")
 		if err != nil {
 			t.Fatalf("remoteControlHandshake: %v", err)
 		}
-		if token != "handshake-token" {
-			t.Fatalf("token = %q", token)
+		if result.Token != "handshake-token" {
+			t.Fatalf("token = %q", result.Token)
+		}
+		if result.Launch != nil {
+			t.Fatalf("launch receipt = %#v, want nil for a launch that did not request proof", result.Launch)
 		}
 		if gotPath != "/auth/handshake" {
 			t.Fatalf("path = %q", gotPath)
@@ -121,7 +124,7 @@ func TestCreateRemoteAgentInstancePostsTheBuiltRequest(t *testing.T) {
 		gotPath = r.URL.Path
 		gotAuth = r.Header.Get("Authorization")
 		_ = json.NewDecoder(r.Body).Decode(&gotReq)
-		_, _ = io.WriteString(w, `{"id":"instance-1","port":41234}`)
+		_, _ = io.WriteString(w, `{"id":"instance-1","port":41234,"scoped_mcp_routes":true}`)
 	}))
 	defer httpServer.Close()
 
@@ -141,13 +144,13 @@ func TestCreateRemoteAgentInstancePostsTheBuiltRequest(t *testing.T) {
 		},
 	}
 
-	port, err := createRemoteAgentInstance(context.Background(), server.dial(t),
+	response, err := createRemoteAgentInstance(context.Background(), server.dial(t),
 		39429, "/remote/task", "/remote/agentctl", req, "bearer-token", newTestLogger())
 	if err != nil {
 		t.Fatalf("createRemoteAgentInstance: %v", err)
 	}
-	if port != 41234 {
-		t.Fatalf("port = %d, want 41234", port)
+	if response.Port != 41234 || !response.ScopedMCPRoutes {
+		t.Fatalf("response = %+v, want accepted scoped mode and port 41234", response)
 	}
 	if gotPath != "/api/v1/instances" {
 		t.Fatalf("path = %q", gotPath)
@@ -160,6 +163,9 @@ func TestCreateRemoteAgentInstancePostsTheBuiltRequest(t *testing.T) {
 	}
 	if gotReq.WorkspacePath != "/remote/task" {
 		t.Fatalf("WorkspacePath = %q, want the remote task dir (never the host path)", gotReq.WorkspacePath)
+	}
+	if !gotReq.ScopedMCPRoutes {
+		t.Fatal("SSH create did not request scoped built-in MCP routes")
 	}
 	if gotReq.AgentType != "claude-code" || gotReq.Protocol != "acp" || gotReq.McpMode != "task" {
 		t.Fatalf("agent routing fields = %+v", gotReq)

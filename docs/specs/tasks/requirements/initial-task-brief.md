@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-09-12
-updated: 2026-10-07
+updated: 2026-11-08
 owners:
   - kandev
 ---
@@ -28,6 +28,9 @@ transcript contract owns history windows and the synthetic description row.
   (`WAITING_FOR_INPUT`). Readiness can result from recovery without prior input.
   Office, ephemeral Quick Chat, and configuration sessions are excluded.
 - **Additional instruction:** A direct user message that starts or prompts an eligible session.
+- **Explicit launch instruction:** Nonempty user input supplied to
+  `session.launch` with `intent: start_created`. This input is distinct from an
+  internal task-description fallback or an automatic workflow-entry prompt.
 
 ## Requirements
 
@@ -51,6 +54,22 @@ that the task already contains.
 - **AC-TASKS-INITIAL-TASK-BRIEF-001.11:** When an eligible session becomes ready for input without accepting or reserving a prompt, including after a backend restart, its first subsequent direct message shall preserve the brief and instruction in both stored history and agent input. Creating or restoring the agent conversation alone shall not consume eligibility.
 - **AC-TASKS-INITIAL-TASK-BRIEF-001.12:** Opening, preparing, or recovering an eligible session shall not send the brief solely to preserve first-message context. Existing explicit-start, workflow-entry, and recovery admission rules shall retain their authority.
 
+#### Explicit prepared-session launch clarification
+
+The following criteria extend the same initial-input preservation contract to
+the launch surface. They do not add Chat's brief enrichment to every launch.
+Implementation is recorded in the
+[prompt integrity package](../../../plans/workflow-prompt-handoff-integrity/plan.md).
+
+- **AC-TASKS-INITIAL-TASK-BRIEF-001.13:** When an explicit launch instruction starts a prepared session, its first agent input shall retain that instruction and applicable workflow guidance.
+  This includes step templates that omit `{{task_prompt}}` and tasks with a retained plan.
+- **AC-TASKS-INITIAL-TASK-BRIEF-001.14:** The corresponding stored user prompt, visible content, and raw content shall retain the explicit instruction.
+  Server context shall preserve existing saved-prompt and attachment rules without duplicate workflow, plan-mode, canvas, or saved-prompt blocks.
+- **AC-TASKS-INITIAL-TASK-BRIEF-001.15:** When admission defers an explicit launch, replay shall retain the same instruction and its explicit-input semantics.
+  Existing cancellation, supersession, and provider-admission rules shall still apply.
+- **AC-TASKS-INITIAL-TASK-BRIEF-001.16:** Empty launch input, internal task-description input, and automatic composed prompts shall retain their existing fallback and replacement rules.
+  A request for no initial prompt shall create no prompt turn. Preserving explicit input shall not authorize a new task-description dispatch.
+
 ## Exclusions
 
 - Rewriting old conversations or recovering previously omitted prompts automatically.
@@ -68,3 +87,5 @@ that the task already contains.
 [Initial task brief fix package](../../../plans/initial-task-brief/plan.md)
 
 [Initial task brief after recovery](../../../plans/initial-task-brief-after-recovery/plan.md)
+
+[Workflow prompt and handoff integrity](../../../plans/workflow-prompt-handoff-integrity/plan.md)

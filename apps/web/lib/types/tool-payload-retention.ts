@@ -10,6 +10,13 @@ export type ToolPayloadOperation = {
   eligible_messages: number;
   removed_messages: number;
   payload_bytes: number;
+  history_tasks?: number;
+  history_snapshots?: number;
+  history_sql_bytes?: number;
+  history_git_bytes?: number;
+  expired_change_sets?: number;
+  deleted_archive_refs?: number;
+  archive_failures?: number;
   skipped: Record<string, number>;
   cutoff: string;
   started_at: string;

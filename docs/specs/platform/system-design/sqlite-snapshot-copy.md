@@ -40,6 +40,15 @@ existing pool while application mutation is gated. The native backup API owns WA
 consistency and writer coordination. Never copy the live main/WAL files directly.
 Keep existing shared maintenance admission for backup versus retention.
 
+For an autocommit WAL source connection, establish a deferred read transaction
+and read the schema before starting the copy. This pins one committed snapshot
+while independent WAL writers continue to commit. Without the read transaction,
+each independent commit can restart the incremental copy, leaving the same page
+counts until the existing stall bound expires. Release only the transaction opened
+by the copy, using a cleanup context independent of cancellation, before returning
+the connection to its pool. Preserve already-open caller transactions, non-WAL
+journal modes, the bounded step size and the existing contention timeout.
+
 ## Consumer migration and compaction
 
 Switch backup-only calls in persistence/provider.go, persistence/sqlite_selection.go,
@@ -60,6 +69,49 @@ rotation. Copy success alone cannot release startup's migration/readiness gate.
 No new schema, settings, runtime flag or backup format is needed. Existing startup
 phase reporting continues; do not invent percentages or ETA from file size.
 
+## Stored version compatibility
+
+The stored `kandev_meta.kandev_version` value is opaque version metadata.
+Historical local builds can contain namespaced Git descriptions such as
+`pluginsdk/v0.1.0-16-gbe9d2485554`. Persistence must accept these values without
+changing the metadata or skipping the required upgrade backup.
+
+`snapshotPath` formats the version as one portable filename component before
+it joins the component to the backup directory. Preserve ASCII letters,
+digits, dots, underscores, hyphens and plus signs. Replace every other
+character with an underscore. The empty version keeps the `pre-meta` fallback.
+Reserve eight bytes for SQLite's `-journal` sidecar suffix. Bound the database
+filename to 247 ASCII bytes, including its fixed prefix, separator, timestamp
+and extension. Both database and journal components then fit within 255 bytes.
+For an oversized version component, keep
+a readable prefix and append a short SHA-256 digest of the original version.
+The stored value remains unchanged, and atomic no-replace publication still
+protects against any collision.
+The `kandev-` prefix, UTC timestamp and `.db` suffix remain unchanged.
+
+The result remains a direct child of the backup directory on Linux, macOS
+and Windows. A separator or traversal-shaped version cannot create a nested
+path. Backup discovery and pruning continue to use their existing filename
+shape. Normalization can produce identical version components, so the existing
+atomic no-replace installation remains mandatory.
+
+Keep the existing private staging, integrity check and atomic installation in
+`createPreMigrationBackup`. Do not create version-derived directories as a
+workaround. A publication error still prevents application migrations.
+
+The root `Makefile` and `apps/backend/Makefile` produce version metadata for
+local runtime builds. Their default Git descriptions match only `v[0-9]*`
+tags and exclude all namespaced tags with `--exclude "*/*"`. Use double
+quotes for POSIX and native Windows shells. SDK tags such
+as `pluginsdk/v0.1.0` cannot become runtime version defaults. Preserve explicit
+version overrides, commit-hash fallback, the dirty suffix and the existing
+`dev` fallback outside a Git repository. Build filtering cannot repair values
+already stored in a user's database, so persistence normalization is required.
+
+This repair implements AC-PLATFORM-SQLITE-SNAPSHOT-001.3,
+AC-PLATFORM-SQLITE-SNAPSHOT-001.4 and AC-PLATFORM-STARTUP-LIFECYCLE-001.7.
+The pending work package owns regression and implementation evidence.
+
 ## Compatibility and requirement mapping
 
 | Boundary | Behavior and evidence |
@@ -74,3 +126,5 @@ phase reporting continues; do not invent percentages or ETA from file size.
 ## Implementation plans
 
 [Database maintenance throughput](../../../plans/database-maintenance-throughput/plan.md).
+
+[Stored version compatibility repair](../../../plans/upgrade-backup-version-paths/plan.md).

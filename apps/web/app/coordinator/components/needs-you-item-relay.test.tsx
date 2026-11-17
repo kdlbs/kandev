@@ -306,7 +306,7 @@ describe("question card", () => {
     await expandQuestion();
     const props = mocks.panelProps.current!;
     expect(props.pending).toBe(true);
-    expect(props.maxHeightVh).toBe(50);
+    expect(props.initialMaxHeightVh).toBe(50);
     expect(props.onLateAnswer).toBeUndefined();
     expect(props.lateAnswerState).toBeUndefined();
     expect(typeof props.onResolved).toBe("function");

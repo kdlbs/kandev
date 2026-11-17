@@ -103,11 +103,12 @@ type SessionWorktreeReader interface {
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskEnvironmentRepo, error)
 	GetTask(ctx context.Context, id string) (*models.Task, error)
-	// HasExecutorRunningRow tells cleanup whether a session still has
-	// an executors_running row. Cleanup must refuse to delete a
-	// materialized workspace while any member session remains active,
-	// otherwise the agent's writes could be destroyed.
-	HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error)
+	// HasActiveExecutorRunningRow tells cleanup whether an executor row still
+	// permits a session to own a live runtime. Failed rows remain active until
+	// the lifecycle owner confirms termination. Cleanup must refuse to delete a
+	// materialized workspace while any member session remains active, otherwise
+	// the agent's writes could be destroyed.
+	HasActiveExecutorRunningRow(ctx context.Context, sessionID string) (bool, error)
 }
 
 // RunCanceller stops active sessions / runs for a task before a
@@ -277,7 +278,7 @@ type HandoffService struct {
 	sessionCeilingReleaser SessionCeilingReleaser
 	logger                 *logger.Logger
 	parentLock             parentMutex
-	archiveCascadeLock     parentMutex
+	archiveCascadeLock     sync.Map
 	partialArchiveMu       sync.Mutex
 	partialArchiveIDs      map[string]string
 	workspaceGroupLock     parentMutex
@@ -472,7 +473,6 @@ func NewHandoffService(
 		parentLock: parentMutex{
 			locks: make(map[string]*sync.Mutex),
 		},
-		archiveCascadeLock: parentMutex{locks: make(map[string]*sync.Mutex)},
 		partialArchiveIDs:  make(map[string]string),
 		workspaceGroupLock: parentMutex{locks: make(map[string]*sync.Mutex)},
 	}
@@ -772,6 +772,13 @@ func (s *HandoffService) GetDocumentForCaller(ctx context.Context, currentTaskID
 	return s.docs.GetDocument(ctx, targetTaskID, key)
 }
 
+// CanReadTask reports whether currentTaskID may read targetTaskID under the
+// shared read relation that document and comment reads apply. A missing or
+// foreign-workspace task is a plain false, never an error naming it.
+func (s *HandoffService) CanReadTask(ctx context.Context, currentTaskID, targetTaskID string) (bool, error) {
+	return canReadDocuments(ctx, repoTaskLookupAdapter{r: s.tasks}, blockerLookupAdapter{repo: s.blockers}, currentTaskID, targetTaskID)
+}
+
 // ListDocumentsForCaller returns the document HEADs (no content) for
 // targetTaskID after the read-access guard.
 func (s *HandoffService) ListDocumentsForCaller(ctx context.Context, currentTaskID, targetTaskID string) ([]*models.TaskDocument, error) {
@@ -869,4 +876,8 @@ func (s *HandoffService) toRelatedByIDs(ctx context.Context, ids []string) []*Re
 		out = append(out, &rt)
 	}
 	return out
+}
+
+type taskResourceRetentionCoordinator interface {
+	PrepareTaskResourceCleanupWithDeleteOptions(context.Context, string, models.TaskResourceCleanupTrigger, string, bool, DeleteTaskOptions) error
 }

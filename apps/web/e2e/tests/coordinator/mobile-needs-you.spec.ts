@@ -9,6 +9,7 @@
 // The accessibility scan (AC .008.2) lives in mobile-needs-you-a11y.spec.ts,
 // kept separate so it can be dropped independently of this file's coverage.
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { waitForSessionState } from "../../helpers/session";
 import { linkToCoordinator, linkToCoordinatorNeedsYou } from "../../../lib/coordinator/links";
 
@@ -229,11 +230,17 @@ test.describe("Coordinator screens on a phone viewport", () => {
       await expect(
         section.getByTestId(`mobile-sidebar-coordinator-${coordinator.id}`),
       ).toBeVisible();
-      const sectionBox = await section.boundingBox();
-      const automationsBox = await menu.getByTestId("mobile-automations-section").boundingBox();
-      expect(sectionBox).not.toBeNull();
-      expect(automationsBox).not.toBeNull();
-      expect(sectionBox!.y).toBeLessThan(automationsBox!.y);
+      await expect(menu.getByTestId("mobile-automations-section")).toBeVisible();
+      await waitForFiniteAnimations(menu);
+      const positions = await menu.evaluate((element) => ({
+        coordinators: element
+          .querySelector('[data-testid="mobile-coordinators-section"]')!
+          .getBoundingClientRect().y,
+        automations: element
+          .querySelector('[data-testid="mobile-automations-section"]')!
+          .getBoundingClientRect().y,
+      }));
+      expect(positions.coordinators).toBeLessThan(positions.automations);
     } finally {
       await apiClient.deleteWorkspace(workspace.id, workspace.name);
     }

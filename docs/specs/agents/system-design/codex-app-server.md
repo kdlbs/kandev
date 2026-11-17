@@ -50,7 +50,7 @@ References:
 
 Add `agents.CodexAppServer` with ID `codex-app-server` and display name `Codex app server`.
 Keep `CodexACP` unchanged. Add `agent.ProtocolCodexAppServer` and one factory case in `server/adapter/factory.go`.
-Use the existing managed runtime catalogue for `@openai/codex@0.154.0`, with `app-server` as its command argument.
+Use the existing managed runtime catalogue for `@openai/codex@0.166.0`, with `app-server` as its command argument.
 Generalize the ACP-named managed command helpers where necessary without changing ACP command output.
 Do not silently launch an arbitrary PATH version instead of the effective selected version.
 Discovery, login, and runtime installation must report which binary/version the native session uses.
@@ -94,7 +94,7 @@ Never automatically retry `turn/start` or `thread/fork` after an ambiguous respo
 Admission for server-request handlers is bounded. Each admitted request has one terminal reply owner; user answers, `serverRequest/resolved`, cancellation, and close cannot produce a second reply.
 Resolving a request cancels its handler without blocking ordered notification dispatch. Overload returns an explicit JSON-RPC error.
 Approval options preserve the exact offered provider decisions, including structured values, and only the selected offered value is returned.
-The pinned v0.154.0 server-request method inventory is recorded separately from the CLI-generated v2 schema because that generated schema omits the server-to-client request union.
+The v0.154.0 server-request method inventory captured for this design is recorded separately from the CLI-generated v2 schema because that generated schema omits the server-to-client request union.
 Every inventory entry is classified as supported or deliberately rejected by the adapter and debugger.
 
 Initialize with Kandev client identity, then send `initialized`.
@@ -187,6 +187,26 @@ Hydrate inherited messages with original provider identity and a history-only ma
 Initialize usage at the fork baseline so copied history produces no ledger events.
 Use existing session concurrency and workspace ownership rules when the user later starts either session.
 
+### Browser request identity
+
+`ForkConversationAction` in `apps/web/components/task/chat/messages/message-actions.tsx`
+uses `generateUUID()` from `apps/web/lib/uuid.ts` for the client request identity.
+Browser availability of `crypto.randomUUID` is not an additional native-fork
+capability gate. The existing helper covers its absence on the documented
+[single-user encrypted-VPN HTTP access path](../../../public/mobile-remote-access.md).
+This identity is a non-security deduplication key, not an authentication token.
+
+Retain the component's request ID across failed requests and explicit retries;
+clear it only after accepted success and destination selection. Keep the
+`session.fork` envelope (`task_id`, `session_id`, `turn_id`, `request_id`) and
+backend/adapter idempotency unchanged. The real desktop dialog and touch drawer
+share this handler, including pending state, localized failure feedback, and
+selection through `setActiveSession(response.task_id, response.session_id)`.
+
+The [browser-capability repair plan](../../../plans/native-fork-browser-capability/plan.md)
+maps this constraint to AC-AGENTS-CODEX-NATIVE-004.1 and
+AC-AGENTS-CODEX-NATIVE-006.1. It does not alter native opt-in or provider support.
+
 ## Inspection CLI and skill
 
 Proposed binary: `apps/backend/bin/codexdbg`, built by `make -C apps/backend build-codexdbg`.
@@ -244,7 +264,7 @@ The [plan previews](../../../plans/codex-app-server/plan.md#ascii-ui-preview) de
 ## Validation and rollout
 
 Start with fake-server protocol tests, then normalized replay fixtures and targeted executor tests.
-Capture real 0.154.0 events in a disposable workdir before marking optional capabilities available.
+Capture real events from the current managed pin in a disposable workdir before marking optional capabilities available.
 Keep actual authentication-dependent checks explicit in results. Mocks do not establish upstream availability.
 Retain the flag until chat, children, accounting, forks, resume, and disabled paths have evidence.
 No automatic ACP migration is part of this plan.

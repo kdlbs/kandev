@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -24,7 +26,7 @@ import (
 // Returns (handled bool, err error). handled=true means the routing
 // path took over (caller should NOT run the legacy failure escalation).
 func (ss *SchedulerService) HandlePostStartFailure(
-	ctx context.Context, run *models.Run, agent *models.AgentInstance, errorMessage string,
+	ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance, errorMessage string,
 	providerError *streams.ProviderError,
 ) (bool, error) {
 	if ss.resolver == nil || run == nil || agent == nil {
@@ -45,12 +47,9 @@ func (ss *SchedulerService) HandlePostStartFailure(
 		}
 		resetHint = providerError.ResetAt
 	}
-	classified := routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhaseStreaming,
-		ProviderID: string(candidate.ProviderID),
-		Stderr:     message,
-		ResetHint:  resetHint,
-	})
+	input := providerError.RoutingInput(routingerr.PhaseStreaming, string(candidate.ProviderID), message)
+	input.ResetHint = resetHint
+	classified := routingerr.Classify(input)
 	if !classified.FallbackAllowed {
 		return false, nil
 	}
@@ -109,7 +108,7 @@ func officeShortRetryDelay(attempt int, e *routingerr.Error, now time.Time) time
 }
 
 func (ss *SchedulerService) shortRouteRetryCount(
-	ctx context.Context, run *models.Run, candidate routing.Candidate,
+	ctx context.Context, run *runsmodels.Run, candidate routing.Candidate,
 ) (int, error) {
 	attempts, err := ss.repo.ListRouteAttempts(ctx, run.ID)
 	if err != nil {
@@ -129,7 +128,7 @@ func (ss *SchedulerService) shortRouteRetryCount(
 
 func (ss *SchedulerService) applyShortRouteRetry(
 	ctx context.Context,
-	run *models.Run,
+	run *runsmodels.Run,
 	agent *models.AgentInstance,
 	candidate routing.Candidate,
 	classified *routingerr.Error,
@@ -189,7 +188,7 @@ func (ss *SchedulerService) markShortProviderCooldown(
 // inflightCandidate returns the provider/model/tier for the run's
 // CurrentRouteAttemptSeq row.
 func (ss *SchedulerService) inflightCandidate(
-	ctx context.Context, run *models.Run,
+	ctx context.Context, run *runsmodels.Run,
 ) (routing.Candidate, error) {
 	attempts, err := ss.repo.ListRouteAttempts(ctx, run.ID)
 	if err != nil {
@@ -213,7 +212,7 @@ func (ss *SchedulerService) inflightCandidate(
 // the run. The next dispatch picks the next candidate via the resolver's
 // ExcludeProviders option.
 func (ss *SchedulerService) applyPostStartFallback(
-	ctx context.Context, run *models.Run,
+	ctx context.Context, run *runsmodels.Run,
 	agent *models.AgentInstance, candidate routing.Candidate,
 	classified *routingerr.Error,
 ) error {
@@ -242,7 +241,7 @@ func (ss *SchedulerService) RequeueForNextCandidate(
 // healthy. Called from the AgentCompleted subscriber to honour the
 // spec's "successful prompt completion → health restored" rule.
 func (ss *SchedulerService) MarkRunSuccessHealth(
-	ctx context.Context, run *models.Run, agent *models.AgentInstance,
+	ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance,
 ) {
 	if run == nil || agent == nil {
 		return
@@ -400,7 +399,7 @@ func (ss *SchedulerService) LiftParkedRuns(ctx context.Context, now time.Time) (
 // parked-run wake-up, while a later launch/failure outcome permits the next
 // deliberate route cycle to reset its baseline.
 func (ss *SchedulerService) hasPendingShortRetryPhase(
-	ctx context.Context, run models.Run,
+	ctx context.Context, run runsmodels.Run,
 ) (bool, error) {
 	attempts, err := ss.repo.ListRouteAttempts(ctx, run.ID)
 	if err != nil {

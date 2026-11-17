@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
@@ -1123,8 +1125,8 @@ func TestActionsSpawnAgentRunThreadsInvokingAgentAsActor(t *testing.T) {
 	if call.AgentID != "agent-2" {
 		t.Errorf("agent_id = %q, want agent-2", call.AgentID)
 	}
-	if call.ActorKind != models.ActorKindAgent {
-		t.Errorf("actorKind = %q, want %q", call.ActorKind, models.ActorKindAgent)
+	if call.ActorKind != runsmodels.ActorKindAgent {
+		t.Errorf("actorKind = %q, want %q", call.ActorKind, runsmodels.ActorKindAgent)
 	}
 	if call.ActorID != "agent-1" {
 		t.Errorf("actorID = %q, want agent-1 (the invoking agent)", call.ActorID)
@@ -1350,11 +1352,12 @@ func (c *recordingTaskCreator) CreateOfficeTaskAsAgent(
 	title string,
 	description string,
 	causingRunID string,
+	relations shared.AgentTaskRelations,
 ) (string, error) {
 	c.calls = append(c.calls, createTaskCall{
 		CallerAgentID: callerAgentID, WorkspaceID: workspaceID, ProjectID: projectID,
 		AssigneeAgentID: assigneeAgentID, Title: title, Description: description, Root: true,
-		CausingRunID: causingRunID,
+		CausingRunID: causingRunID, Relations: relations,
 	})
 	if c.taskID != "" {
 		return c.taskID, nil
@@ -1372,6 +1375,7 @@ type createTaskCall struct {
 	Description     string
 	Root            bool
 	CausingRunID    string
+	Relations       shared.AgentTaskRelations
 }
 
 func (c *recordingTaskCreator) GetTaskWorkspaceID(_ context.Context, taskID string) (string, error) {
@@ -1402,6 +1406,7 @@ func (c *recordingTaskCreator) CreateOfficeSubtaskAsAgent(
 	title string,
 	description string,
 	causingRunID string,
+	relations shared.AgentTaskRelations,
 ) (string, error) {
 	c.calls = append(c.calls, createTaskCall{
 		CallerAgentID:   callerAgentID,
@@ -1410,6 +1415,7 @@ func (c *recordingTaskCreator) CreateOfficeSubtaskAsAgent(
 		Title:           title,
 		Description:     description,
 		CausingRunID:    causingRunID,
+		Relations:       relations,
 	})
 	if c.taskID != "" {
 		return c.taskID, nil
@@ -1496,7 +1502,7 @@ type spawnRunCall struct {
 	Reason         string
 	Payload        string
 	IdempotencyKey string
-	ActorKind      models.ActorKind
+	ActorKind      runsmodels.ActorKind
 	ActorID        string
 	CausingRunID   string
 }
@@ -1504,7 +1510,7 @@ type spawnRunCall struct {
 func (r *recordingRunSpawner) QueueRunWithActor(
 	_ context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
-	actorKind models.ActorKind, actorID string,
+	actorKind runsmodels.ActorKind, actorID string,
 	causingRunID string,
 ) (runsservice.QueueOutcome, error) {
 	r.calls = append(r.calls, spawnRunCall{

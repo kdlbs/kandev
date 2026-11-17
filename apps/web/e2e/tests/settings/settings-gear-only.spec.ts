@@ -1,9 +1,57 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { waitForStableActiveSession } from "../../helpers/session-store";
 
 // Settings has no nav "Settings" section; direct settings routes keep the
 // gear-gated tree open so a hard refresh preserves settings navigation context.
 test.describe("Settings sidebar takeover", () => {
+  // @covers AC-UI-SETTINGS-RETURN-001.1, AC-UI-SETTINGS-RETURN-001.2
+  test("returns to the originating task and session after closing settings", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.seedTask(seedData.workspaceId, "Settings return task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await apiClient.seedTaskSession(task.task_id, {
+      state: "WAITING_FOR_INPUT",
+      agentProfileId: seedData.agentProfileId,
+    });
+    const selected = await apiClient.seedTaskSession(task.task_id, {
+      state: "WAITING_FOR_INPUT",
+      agentProfileId: seedData.agentProfileId,
+    });
+    await apiClient.seedSessionMessage(selected.session_id, {
+      type: "message",
+      authorType: "agent",
+      content: "Selected session return marker",
+    });
+    const href = `/t/${task.task_id}?sessionId=${selected.session_id}`;
+    await testPage.goto(href);
+    await waitForStableActiveSession(testPage, selected.session_id);
+    const marker = new SessionPage(testPage).chat.getByText("Selected session return marker");
+    await expect(marker).toBeVisible();
+    await testPage.evaluate(() => Reflect.set(window, "settingsReturnDocument", "same-document"));
+
+    const gear = testPage.getByTestId("sidebar-settings-gear");
+    await gear.click();
+    await expect(testPage).toHaveURL(/\/settings\//);
+    const takeover = testPage.getByTestId("app-sidebar-settings-mode");
+    await takeover.locator('a[href="/settings/agents"]').first().click();
+    await expect(testPage).toHaveURL(/\/settings\/agents$/);
+    await gear.click();
+
+    await expect(testPage).toHaveURL(href);
+    await waitForStableActiveSession(testPage, selected.session_id);
+    await expect(marker).toBeVisible();
+    await expect(takeover).toHaveCount(0);
+    expect(await testPage.evaluate(() => Reflect.get(window, "settingsReturnDocument"))).toBe(
+      "same-document",
+    );
+  });
+
   test("direct settings routes open the tree, and the gear can close it", async ({ testPage }) => {
     await testPage.goto("/settings");
 

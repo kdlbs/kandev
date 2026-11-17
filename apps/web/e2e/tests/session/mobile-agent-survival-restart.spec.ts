@@ -1,3 +1,4 @@
+import { verifyAutomaticRestartReconciliation } from "../../helpers/restart-reconciliation";
 // Filename starts with "mobile-" so this runs on the mobile-chrome project.
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
@@ -9,6 +10,9 @@ import {
   expectRestartConversationIdentity,
 } from "../../helpers/silent-restart-recovery";
 import { SessionPage } from "../../pages/session-page";
+import { mockTurnGate } from "../../helpers/mock-turn-gate";
+
+test.use({ trace: "retain-on-failure" });
 // The mobile surface uses the same recovery state as desktop. This test keeps
 // the touch path in the real session chat while proving that backend restart
 // does not replace a surviving worktree agent or expose a recovery action.
@@ -29,13 +33,15 @@ test.describe("mobile: agent survival across backend restart", () => {
       KANDEV_FEATURES_AGENT_SURVIVAL: "true",
     });
 
+    const turn = mockTurnGate(backend.tmpDir, "Slow response complete");
+
     try {
       const task = await apiClient.createTaskWithAgent(
         seedData.workspaceId,
         "Mobile Agent Survival Restart Task",
         seedData.agentProfileId,
         {
-          description: "/slow 12",
+          description: turn.prompt,
           workflow_id: seedData.workflowId,
           workflow_step_id: seedData.startStepId,
           repository_ids: [seedData.repositoryId],
@@ -49,7 +55,11 @@ test.describe("mobile: agent survival across backend restart", () => {
       await expect(session.chat.getByText(/Started agent|Resumed agent/i)).toBeVisible({
         timeout: 30_000,
       });
-      await expect(session.chat.getByText("Running slow response", { exact: false })).toBeVisible({
+      await expect(
+        session.chat
+          .locator("[data-agent-message-body]")
+          .getByText("Queue blocking turn started", { exact: true }),
+      ).toBeVisible({
         timeout: 30_000,
       });
       const liveSessionID = (await apiClient.listTaskSessions(task.id)).sessions.find(
@@ -90,13 +100,15 @@ test.describe("mobile: agent survival across backend restart", () => {
       await expect(session.chat.getByText(/Started agent|Resumed agent/i)).toHaveCount(1);
       await expect(session.recoveryFreshButton()).toHaveCount(0);
       await expect(session.recoveryResumeButton()).toHaveCount(0);
-      await expect(session.chat.getByText("Slow response complete", { exact: false })).toBeVisible({
+      await turn.release();
+      const completion = session.chat
+        .locator("[data-agent-message-body]")
+        .getByText("Slow response complete", { exact: false });
+      await expect(completion).toBeVisible({
         timeout: 30_000,
       });
       await session.waitForChatIdle({ timeout: 15_000 });
-      await expect(session.chat.getByText("Slow response complete", { exact: false })).toHaveCount(
-        1,
-      );
+      await expect(completion).toHaveCount(1);
 
       await session.sendMessageViaButton("/e2e:simple-message");
       await session.expectChatResponseVisible("simple mock response", 0, { timeout: 30_000 });
@@ -106,7 +118,22 @@ test.describe("mobile: agent survival across backend restart", () => {
       );
       await assertNoDocumentHorizontalOverflow(testPage, "mobile agent survival recovery");
     } finally {
-      await releaseFeature();
+      try {
+        await turn.release();
+      } finally {
+        await releaseFeature();
+      }
     }
   });
+});
+
+// @covers AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.4
+test("slow native restore preserves the conversation and accepts a new instruction", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.setTimeout(180_000);
+  await verifyAutomaticRestartReconciliation(testPage, apiClient, seedData, backend, "40s");
 });

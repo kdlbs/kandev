@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useState, type ComponentType } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import type { Component as PluginSDKComponent, PluginActionProps } from "@kandev/plugin-sdk";
+import type { Component as PluginSDKComponent, PluginActionProps } from "@kdlbs/plugin-sdk";
 import { createAppStore } from "@/lib/state/store";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
 import { pluginRegistry } from "./registry";

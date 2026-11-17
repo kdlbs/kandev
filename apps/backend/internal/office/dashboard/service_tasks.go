@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/taskdependencies"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -586,7 +587,13 @@ type TaskStatusUpdateRequest struct {
 	// the canonical task.state_changed event that owns the activity row. Gate
 	// redirects still log here because they do not publish that event.
 	SuppressStatusActivity bool
+	// Automatic terminal writes must not overwrite a later business-state change.
+	ExpectedCurrentState   string
+	ExpectedWorkflowStepID string
 }
+
+// ErrAutomaticCompletionStale means a newer task state owns the outcome.
+var ErrAutomaticCompletionStale = errors.New("task changed before automatic completion")
 
 // UpdateTaskStatus persists a new task status, optionally creates a comment,
 // and publishes an office.task.status_changed event so execution policy
@@ -612,6 +619,9 @@ func (s *DashboardService) UpdateTaskStatus(ctx context.Context, req TaskStatusU
 	if dbState == "" {
 		return &InvalidTaskStatusError{Status: req.NewStatus}
 	}
+	if s.taskStateWriter == nil {
+		return errors.New("task status writer is not configured")
+	}
 
 	preStatus := ""
 	if exec, err := s.repo.GetTaskExecutionFields(ctx, req.TaskID); err == nil && exec != nil {
@@ -625,16 +635,8 @@ func (s *DashboardService) UpdateTaskStatus(ctx context.Context, req TaskStatusU
 		return gateErr
 	}
 
-	if dbState == stateCompleted {
-		updated, err := s.repo.UpdateTaskStateIfWorkflowStep(ctx, req.TaskID, expectedStepID, dbState)
-		if err != nil {
-			return fmt.Errorf("update task state: %w", err)
-		}
-		if !updated {
-			return &WorkflowStepChangedError{TaskID: req.TaskID}
-		}
-	} else if err := s.repo.UpdateTaskState(ctx, req.TaskID, dbState); err != nil {
-		return fmt.Errorf("update task state: %w", err)
+	if err := s.persistTaskStatus(ctx, req, dbState, expectedStepID); err != nil {
+		return err
 	}
 
 	commentID := s.maybeCreateStatusComment(ctx, req)
@@ -707,8 +709,8 @@ func (s *DashboardService) logTaskStatusChangeActivity(ctx context.Context, req 
 // through to the approver check exactly like a terminal-step task rather
 // than being redirected forever.
 //
-// The step-position check fails CLOSED, but a lookup error is not the same
-// as a confirmed non-terminal step: it aborts the whole update (a plain,
+// The final-step check fails CLOSED, but a lookup error is not the same
+// as a confirmed non-final step: it aborts the whole update (a plain,
 // non-ApprovalsPendingError error, leaving dbState/apiStatus untouched) so
 // the caller persists nothing rather than writing a redirect it cannot
 // justify. Only a successful read reporting "not terminal" persists the
@@ -724,11 +726,11 @@ func (s *DashboardService) applyApprovalGate(
 		return fmt.Errorf("approval gate: resolve task workflow step: %w", err)
 	}
 	*expectedStepID = currentStepID
-	terminal, hasStep, err := s.repo.IsTaskWorkflowStepTerminal(ctx, taskID)
+	final, hasStep, err := s.repo.IsTaskOnFinalStep(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("approval gate: resolve workflow step: %w", err)
 	}
-	if hasStep && !terminal {
+	if hasStep && !final {
 		*dbState = stateInReview
 		*apiStatus = statusInReviewLowercase
 		return &ApprovalsPendingError{Reason: ApprovalGateReasonWorkflowStep}
@@ -805,6 +807,9 @@ func (s *DashboardService) runReactivityForStatus(
 		ActorType:    actorType,
 		ReopenIntent: req.ReopenIntent,
 		ResumeIntent: req.ResumeIntent,
+	}
+	if normaliseStatus(req.NewStatus) == "CANCELLED" {
+		change.BlockerFailureOccurrenceID = "office-status:" + uuid.NewString()
 	}
 	if commentID != "" {
 		change.Comment = &TaskReactivityComment{
@@ -1005,12 +1010,17 @@ var sessionCapacityReadHook func(taskID, agentProfileID string)
 // read of runner seats, say — answers a different question, because the
 // projection's last tier deliberately reads runner rows across every step.
 //
-// The seat half reads the effective slate at the task's current step, which
-// already merges template-level rows under per-task precedence and already
-// spans every role. The step scope is load-bearing: seats are keyed
+// The seat half reads the effective slate at the task's current step via
+// ListTaskParticipantsAtCurrentStep, which already merges template-level
+// rows under per-task precedence and already spans every role. The step
+// scope is load-bearing (AC-OFFICE-SESSION-TERM-002.3): seats are keyed
 // (step, task, role, agent) and survive a step change, so an unscoped read
 // would find a seat naming a previous occupant and suppress every future
-// termination for the pair.
+// termination for the pair. This is deliberately NOT
+// ListAllTaskParticipants: that method became workflow-scoped under
+// AC-OFFICE-SEAT-READ-SCOPE-001.1 for the read projections named there (task
+// DTO, inbox, decision authorization, approver gate, review fan-out), a list
+// that does not include this capacity determination.
 //
 // Both reads run on the read pool and take no lock. The determination is not
 // atomic with the mutation that preceded it and does not need to be: each
@@ -1027,7 +1037,7 @@ func (s *DashboardService) retainsTaskCapacity(
 	if exec != nil && exec.AssigneeAgentProfileID == agentProfileID {
 		return capacityRunner, nil
 	}
-	seats, err := s.repo.ListAllTaskParticipants(ctx, taskID)
+	seats, err := s.repo.ListTaskParticipantsAtCurrentStep(ctx, taskID)
 	if err != nil {
 		return capacityNone, fmt.Errorf("read task participant slate: %w", err)
 	}

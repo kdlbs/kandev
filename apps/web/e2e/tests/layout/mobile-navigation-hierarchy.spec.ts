@@ -2,6 +2,10 @@ import { test, expect } from "../../fixtures/test-base";
 import { expectTouchControl } from "../../helpers/control-sizing";
 import { MobileGitHubPage } from "../../pages/mobile-github-page";
 import { closeQuickTerminalTab } from "../terminal/terminal-test-helpers";
+import { watchWs } from "../../helpers/causal-waits";
+import type { AutomationRun } from "@/lib/types/automation";
+import { summaryHasRun } from "../../helpers/automation-summary-waits";
+import ptAutomations from "../../../src/locales/pt-pt/automations.json";
 
 function rightEdge(box: { x: number; width: number }): number {
   return box.x + box.width;
@@ -221,4 +225,189 @@ test("phone drawer actions keep touch targets, focus handoff, and direct Stats a
   expect(await testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
     true,
   );
+});
+
+// @covers AC-OFFICE-AUTOMATION-RUNS-001.20 AC-OFFICE-AUTOMATION-RUNS-001.21 AC-OFFICE-AUTOMATION-RUNS-001.22
+test("phone automation rows expose latest failure and keep row-tap navigation", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  const automations = [];
+  for (const name of ["PR tagging", "Paused monitor", "Long localized retry outcome"]) {
+    automations.push(
+      await apiClient.seedAutomation({
+        workspaceId: seedData.workspaceId,
+        name,
+        workflowId: seedData.workflowId,
+        workflowStepId: seedData.startStepId,
+      }),
+    );
+  }
+  const [automation, paused, retry] = automations;
+  await apiClient.wsRequest("automation.update", { id: paused.id, enabled: false });
+  const failed = await apiClient.seedAutomationRun(automation.id, "failed");
+  await apiClient.seedAutomationRun(paused.id, "failed");
+  await apiClient.seedAutomationRun(retry.id, "retry_scheduling_failed");
+  const ws = watchWs(testPage);
+  await testPage.goto("/tasks");
+  const loaded = ws.waitForResponse("automation.summaries", {
+    where: (payload) => summaryHasRun(payload, failed.id),
+  });
+  await testPage.getByTestId("app-nav-trigger").tap();
+  const menu = testPage.getByTestId("app-nav-sheet");
+  const group = menu.getByTestId("mobile-automations-section");
+  await group.getByRole("button", { name: "Automations", exact: true }).tap();
+  await loaded;
+  const row = group.getByRole("link", { name: "PR tagging", exact: true });
+  await expect(row.locator(".bg-red-500")).toBeVisible();
+  await expect(row).toContainText("Failed");
+  await expect(row).toHaveAccessibleDescription("Failed.");
+  const pausedRow = group.getByRole("link", { name: "Paused monitor", exact: true });
+  await expect(pausedRow.locator(".bg-muted-foreground\\/50")).toBeVisible();
+  await expect(pausedRow).toContainText("Paused");
+  await expect(pausedRow).toContainText("Failed");
+  await expectTouchControl(row);
+  await group.getByRole("link", { name: "Open automations", exact: true }).scrollIntoViewIfNeeded();
+  await prCapture.screenshot("automation-latest-failure-phone", {
+    caption: "UI-03: active saved-layout phone rows expose failure, including a paused-gray row",
+  });
+  const original = await menu.elementHandle();
+  const timeOrigin = await testPage.evaluate(() => performance.timeOrigin);
+  const runs = await apiClient.wsRequest<AutomationRun[]>("automation.runs.list", {
+    automation_id: automation.id,
+  });
+  await expect.poll(() => Date.now()).toBeGreaterThan(Date.parse(runs[0].created_at) + 1000);
+  let successId = "";
+  const refreshed = ws.waitForResponse("automation.summaries", {
+    where: (payload) => summaryHasRun(payload, successId, "succeeded"),
+  });
+  successId = (await apiClient.seedAutomationRun(automation.id, "succeeded")).id;
+  await refreshed;
+  await expect(menu).toBeVisible();
+  await expect(row.locator(".bg-emerald-500")).toBeVisible();
+  await expect(row).toContainText("Succeeded");
+  await expect(row).not.toContainText("Failed");
+  expect(await menu.evaluate((element, previous) => element === previous, original)).toBe(true);
+  expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(timeOrigin);
+  await expect(row).toHaveAttribute("href", `/automations/${automation.id}`);
+  const newest = await apiClient.wsRequest<AutomationRun[]>("automation.runs.list", {
+    automation_id: automation.id,
+  });
+  expect(newest[0].id).toBe(successId);
+  expect(Date.parse(newest[0].created_at)).toBeGreaterThan(Date.parse(runs[0].created_at));
+  await original?.dispose();
+  await row.tap();
+  await expect(menu).toBeHidden();
+  await expect(testPage).toHaveURL(new RegExp(`/automations/${automation.id}$`));
+  await testPage
+    .context()
+    .addCookies([
+      { name: "kandev_locale", value: "pt-pt", url: `${new URL(testPage.url()).origin}/` },
+    ]);
+  await testPage.goto("/tasks");
+  await expect(testPage.locator("html")).toHaveAttribute("lang", "pt-pt");
+  await testPage.getByTestId("app-nav-trigger").tap();
+  await group.getByRole("button", { name: ptAutomations.automations, exact: true }).tap();
+  const longRow = group.getByRole("link", { name: "Long localized retry outcome", exact: true });
+  const longStatus = longRow.getByText(ptAutomations.runStatusRetrySchedulingFailed, {
+    exact: true,
+  });
+  await longRow.scrollIntoViewIfNeeded();
+  await expect(longStatus).toBeVisible();
+  await expectTouchControl(longRow);
+  const geometry = await longRow.evaluate((element) => {
+    const status = element.querySelector('[data-testid="mobile-automation-status"]')!;
+    const name = element.querySelector('[data-testid="mobile-automation-name"]')!;
+    const box = element.getBoundingClientRect();
+    const statusBox = status.getBoundingClientRect();
+    const nameBox = name.getBoundingClientRect();
+    return {
+      height: box.height,
+      right: box.right,
+      statusRight: statusBox.right,
+      statusLeft: statusBox.left,
+      nameRight: nameBox.right,
+      statusWidth: status.clientWidth,
+      statusScrollWidth: status.scrollWidth,
+      statusHeight: statusBox.height,
+    };
+  });
+  expect(geometry.height).toBeGreaterThanOrEqual(44);
+  expect(geometry.statusScrollWidth).toBeLessThanOrEqual(geometry.statusWidth);
+  expect(geometry.statusRight).toBeLessThanOrEqual(geometry.right);
+  expect(geometry.nameRight).toBeLessThanOrEqual(geometry.statusLeft);
+  expect(geometry.statusHeight).toBeGreaterThan(20);
+  expect(await testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+    true,
+  );
+  await group
+    .getByRole("link", { name: ptAutomations.openAutomations, exact: true })
+    .scrollIntoViewIfNeeded();
+  await prCapture.screenshot("automation-latest-failure-phone-pt", {
+    caption: "UI-03: long Portuguese retry failure wraps within the phone row",
+  });
+});
+
+// @covers AC-OFFICE-AUTOMATION-RUNS-001.21 AC-OFFICE-AUTOMATION-RUNS-001.22
+test("phone agenda preserves automation names beside outcome metadata", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  const cases = [];
+  for (const [status, label] of [
+    ["scheduled_retry", "Retry scheduled"],
+    ["cancelled", "Cancelled"],
+  ]) {
+    const automation = await apiClient.seedAutomation({
+      workspaceId: seedData.workspaceId,
+      name: `Nightly dependency audit (${status})`,
+      workflowId: seedData.workflowId,
+      workflowStepId: seedData.startStepId,
+    });
+    await apiClient.seedTrigger({
+      automationId: automation.id,
+      type: "scheduled",
+      config: { cron_expression: "0 9 * * *", timezone: "UTC" },
+    });
+    const run = await apiClient.seedAutomationRun(automation.id, status);
+    cases.push({ automation, run, label });
+  }
+  const ws = watchWs(testPage);
+  const loaded = ws.waitForResponse("automation.summaries", {
+    where: (payload) => cases.every(({ run }) => summaryHasRun(payload, run.id)),
+  });
+  await testPage.goto("/automations");
+  await loaded;
+  for (const width of [360, 393, 767, 768]) {
+    await testPage.setViewportSize({ width, height: 851 });
+    for (const { automation, label } of cases) {
+      const row = testPage.getByTestId(`agenda-row-${automation.id}`);
+      await expect(row).toHaveCount(1);
+      const name = row.getByText(automation.name, { exact: true });
+      const outcome = row.getByText(label, { exact: true });
+      await expect(name).toBeVisible();
+      await expect(outcome).toBeVisible();
+      const nameBox = (await name.boundingBox())!;
+      const outcomeBox = (await outcome.boundingBox())!;
+      expect(
+        nameBox.width,
+        `${label} must leave a readable name at ${width}px`,
+      ).toBeGreaterThanOrEqual(64);
+      expect(
+        outcomeBox.y >= nameBox.y + nameBox.height - 1 ||
+          outcomeBox.x >= nameBox.x + nameBox.width - 1,
+      ).toBe(true);
+    }
+    expect(await testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  }
+  await testPage.setViewportSize({ width: 393, height: 851 });
+  await prCapture.screenshot("automation-agenda-readable-names-phone", {
+    caption: "UI-02: phone agenda preserves automation names and wraps non-success outcomes",
+  });
 });

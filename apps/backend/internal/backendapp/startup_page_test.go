@@ -49,6 +49,10 @@ func TestBuildStartupPageViewOpaqueStep(t *testing.T) {
 	}
 }
 
+// TestBuildStartupPageViewCountingStep covers AC-PLATFORM-STARTUP-PROGRESS-
+// 003.14 for a byte step: the count renders through the readable-size policy
+// instead of the singular unit noun. Plural unit coverage lives in
+// TestBuildStartupPageViewCountedStepSingularTotal (turns).
 func TestBuildStartupPageViewCountingStep(t *testing.T) {
 	snap := startup.Snapshot{
 		Phase: startup.BackingUpDatabase,
@@ -60,8 +64,8 @@ func TestBuildStartupPageViewCountingStep(t *testing.T) {
 		},
 	}
 	view := buildStartupPageView("en", snap)
-	if view.Step.Progress != "1 byte" {
-		t.Fatalf("counting progress = %q, want singular unit", view.Step.Progress)
+	if view.Step.Progress != "1 B" {
+		t.Fatalf("counting progress = %q, want a readable byte size", view.Step.Progress)
 	}
 	if view.Step.HasBar {
 		t.Fatal("counting step (no total) must render no bar")
@@ -258,5 +262,20 @@ func TestNewBootstrapHandlerKeepsJSONForNonGETMethod(t *testing.T) {
 
 	if got := w.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
 		t.Fatalf("Content-Type = %q, want JSON for a non-GET method", got)
+	}
+}
+
+func TestStartupPageRendersCompletedAndInterruptedTiming(t *testing.T) {
+	snap := startup.Snapshot{Phase: startup.RecoveringSessions, CompletedSteps: []startup.CompletedStepSnapshot{
+		{ID: startup.StepQueueReconciliation, LabelKey: "startup.step.queue_reconciliation", ActivationSeq: 1, Phase: startup.RecoveringSessions, ElapsedMS: 82, Completed: true},
+		{ID: startup.StepRouteReconciliation, LabelKey: "startup.step.route_reconciliation", ActivationSeq: 2, Phase: startup.RecoveringSessions, ElapsedMS: 1200, Completed: false},
+	}}
+	recorder := httptest.NewRecorder()
+	writeStartupPage(recorder, httptest.NewRequest("GET", "/", nil), snap)
+	html := recorder.Body.String()
+	for _, want := range []string{"startup-timings", "Queued messages", "82 milliseconds", "Timing incomplete"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("startup page omitted %q", want)
+		}
 	}
 }

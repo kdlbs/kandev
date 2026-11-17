@@ -88,26 +88,26 @@ func TestCleanupWorktreesPreservingBranches_RetainsBranchWhenReleaseFails(t *tes
 	assertCleanupBranchPresent(t, wt.RepositoryPath, wt.Branch)
 }
 
-func TestCleanupWorktreesPreservingBranchesChecksCleanlinessUnderCleanupLock(t *testing.T) {
+func TestCleanupWorktreesPreservingBranchesRemovesDirtyCheckout(t *testing.T) {
 	mgr, store := newReferenceCleanupTestManager(t)
 	ctx := context.Background()
 	seedReferenceCleanupSession(t, store, "task-archive-final-gate", "session-archive-final-gate", models.TaskSessionStateCompleted)
 	wt := createReferenceCleanupWorktree(t, mgr, "task-archive-final-gate", "session-archive-final-gate")
+	if err := os.WriteFile(filepath.Join(wt.Path, "committed.txt"), []byte("unpublished commit"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wt.Path, "add", "committed.txt")
+	runGit(t, wt.Path, "commit", "-m", "Unpublished work")
 	const contents = "keep this change"
 	if err := os.WriteFile(filepath.Join(wt.Path, "uncommitted.txt"), []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	err := mgr.CleanupWorktreesPreservingBranches(ctx, []*Worktree{wt})
-	if !errors.Is(err, ErrDirtyWorktreeCleanup) {
-		t.Fatalf("CleanupWorktreesPreservingBranches error = %v, want ErrDirtyWorktreeCleanup", err)
+	if err := mgr.CleanupWorktreesPreservingBranches(ctx, []*Worktree{wt}); err != nil {
+		t.Fatal(err)
 	}
-	got, err := os.ReadFile(filepath.Join(wt.Path, "uncommitted.txt"))
-	if err != nil || string(got) != contents {
-		t.Fatalf("uncommitted file = %q, %v, want preserved contents", got, err)
-	}
-	if _, err := mgr.GetByID(ctx, wt.ID); err != nil {
-		t.Fatalf("active worktree record was removed: %v", err)
+	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+		t.Fatalf("dirty checkout remains: %v", err)
 	}
 	assertCleanupBranchPresent(t, wt.RepositoryPath, wt.Branch)
 }

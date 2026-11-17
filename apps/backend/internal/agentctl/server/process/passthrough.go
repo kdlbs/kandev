@@ -5,13 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/types"
 )
 
@@ -75,7 +75,7 @@ func (o *PassthroughOwner) snapshotLocked() types.PassthroughSnapshot {
 	snapshot.InstanceID, snapshot.SessionID = cfg.InstanceID, cfg.SessionID
 	snapshot.WorkspacePath = cfg.WorkDir
 	snapshot.ConfigPath = filepath.Join(cfg.WorkDir, ".kandev", "sessions", cfg.SessionID, "passthrough", "mcp-"+strconv.FormatUint(snapshot.Generation+1, 10)+".json")
-	snapshot.MCPURL = fmt.Sprintf("http://127.0.0.1:%d/mcp", cfg.Port)
+	snapshot.MCPURL, _ = config.MCPServerURLForInstance("127.0.0.1", cfg.Port, cfg.InstanceID, cfg.ScopedMCPRoutes, "/mcp")
 	if info, ok := o.runner.Get(snapshot.ProcessID, false); ok {
 		snapshot.OSPID = info.OSPID
 	}

@@ -18,7 +18,11 @@ type MockClient struct {
 	statesByTeam map[string][]LinearWorkflowState
 	labelsByTeam map[string][]LinearLabel
 	usersByTeam  map[string][]LinearUser
-	issues       map[string]*LinearIssue // identifier (e.g. ENG-12) → issue
+	// projectsByTeam backs ListProjects; projectContents backs
+	// GetProjectContents, keyed by project ID.
+	projectsByTeam  map[string][]LinearProject
+	projectContents map[string]string
+	issues          map[string]*LinearIssue // identifier (e.g. ENG-12) → issue
 	// issueOrder preserves insertion order so SearchIssues returns a stable
 	// sequence — Go map range is randomised, which would make any future test
 	// that asserts on result position intermittently flaky.
@@ -54,6 +58,9 @@ func NewMockClient() *MockClient {
 		labelsByTeam: make(map[string][]LinearLabel),
 		usersByTeam:  make(map[string][]LinearUser),
 		issues:       make(map[string]*LinearIssue),
+
+		projectsByTeam:  make(map[string][]LinearProject),
+		projectContents: make(map[string]string),
 	}
 }
 
@@ -122,6 +129,27 @@ func (m *MockClient) ListUsers(_ context.Context, teamKey string) ([]LinearUser,
 	src := m.usersByTeam[teamKey]
 	out := make([]LinearUser, len(src))
 	copy(out, src)
+	return out, nil
+}
+
+func (m *MockClient) ListProjects(_ context.Context, teamKey string) ([]LinearProject, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	src := m.projectsByTeam[teamKey]
+	out := make([]LinearProject, len(src))
+	copy(out, src)
+	return out, nil
+}
+
+func (m *MockClient) GetProjectContents(_ context.Context, projectIDs []string) (map[string]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make(map[string]string, len(projectIDs))
+	for _, id := range projectIDs {
+		if content, ok := m.projectContents[id]; ok {
+			out[id] = content
+		}
+	}
 	return out, nil
 }
 
@@ -197,6 +225,19 @@ func (m *MockClient) SetUsers(teamKey string, users []LinearUser) {
 	m.usersByTeam[teamKey] = cp
 }
 
+// SetProjects replaces the projects returned by ListProjects for a team and
+// records each project's markdown content for GetProjectContents.
+func (m *MockClient) SetProjects(teamKey string, projects []LinearProject, contents map[string]string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]LinearProject, len(projects))
+	copy(cp, projects)
+	m.projectsByTeam[teamKey] = cp
+	for id, content := range contents {
+		m.projectContents[id] = content
+	}
+}
+
 // AddIssue inserts (or replaces) an issue keyed by its Identifier.
 func (m *MockClient) AddIssue(issue *LinearIssue) {
 	m.mu.Lock()
@@ -249,6 +290,8 @@ func (m *MockClient) Reset() {
 	m.statesByTeam = make(map[string][]LinearWorkflowState)
 	m.labelsByTeam = make(map[string][]LinearLabel)
 	m.usersByTeam = make(map[string][]LinearUser)
+	m.projectsByTeam = make(map[string][]LinearProject)
+	m.projectContents = make(map[string]string)
 	m.issues = make(map[string]*LinearIssue)
 	m.issueOrder = nil
 	m.getError = nil

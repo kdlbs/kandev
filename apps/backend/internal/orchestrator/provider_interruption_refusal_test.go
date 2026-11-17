@@ -34,6 +34,31 @@ func TestInterruptionContinuationManualReason(t *testing.T) {
 	}
 }
 
+func TestPendingToolContinuationExhaustionRequiresAcceptedRetainedPolicy(t *testing.T) {
+	data := watcher.AgentEventData{
+		AgentExecutionID: "execution-1", PromptGeneration: 8,
+		PromptFailureDisposition: streams.PromptFailureDispositionRetainRuntime,
+		ContinuationSafety: &streams.ContinuationSafetySnapshot{
+			Support: streams.ContinuationAgentManagedToolsV3, Known: true,
+			PromptGeneration: 8, Pending: true, PermissionsResolved: true,
+		},
+	}
+	require.False(t, continuationExhaustionEvidence(nil, data))
+	entry := &transientRetryEntry{
+		mode: recoveryModeContinue, continuationPolicy: continuationPolicyAgentManagedPendingLive,
+		continuation:    &continuationBinding{policy: continuationPolicyAgentManagedPendingLive},
+		retainedRuntime: &retainedRuntimeRetry{executionID: data.AgentExecutionID},
+		started:         5, acceptedExecution: data.AgentExecutionID, acceptedGeneration: data.PromptGeneration,
+	}
+	require.True(t, continuationExhaustionEvidence(entry, data))
+
+	data.PromptFailureDisposition = ""
+	require.False(t, continuationExhaustionEvidence(entry, data))
+	data.PromptFailureDisposition = streams.PromptFailureDispositionRetainRuntime
+	data.PromptGeneration++
+	require.False(t, continuationExhaustionEvidence(entry, data))
+}
+
 func TestInterruptionContinuationOwnershipAbsentSessionStillConfirmsExactRestoreTeardown(t *testing.T) {
 	svc, _, data := continuationFailureFixture(t)
 	mgr := svc.agentManager.(*mockAgentManager)

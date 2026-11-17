@@ -59,7 +59,7 @@ describe("resolveFileTreeEditorTarget", () => {
     ).toEqual({ filePath: README_PATH, worktreeId: "wt-3" });
   });
 
-  // Attaching any source through "Add Repositories to workspace" rebinds the
+  // Attaching any source through "Add repositories or folders" rebinds the
   // session to the task root even when it adds no worktree, so a single-worktree
   // task can still serve a task-rooted tree.
   it("returns null for an attached folder that belongs to no worktree", () => {

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -81,11 +82,22 @@ func (s *Service) GetPromptByName(ctx context.Context, name string) (*models.Pro
 	return prompt, nil
 }
 
-func (s *Service) CreatePrompt(ctx context.Context, name, content string) (*models.Prompt, error) {
-	return s.createPrompt(ctx, name, content, false)
+func (s *Service) GetPromptByID(ctx context.Context, id string) (*models.Prompt, error) {
+	prompt, err := s.repo.GetPromptByID(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && prompt == nil) {
+		return nil, ErrPromptNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return prompt, nil
 }
 
-func (s *Service) createPrompt(ctx context.Context, name, content string, allowAgentEdits bool) (*models.Prompt, error) {
+func (s *Service) CreatePrompt(ctx context.Context, name, content string) (*models.Prompt, error) {
+	return s.createPrompt(ctx, name, content)
+}
+
+func (s *Service) createPrompt(ctx context.Context, name, content string) (*models.Prompt, error) {
 	name = strings.TrimSpace(name)
 	content = strings.TrimSpace(content)
 	if !validPromptFields(name, content) {
@@ -95,9 +107,8 @@ func (s *Service) createPrompt(ctx context.Context, name, content string, allowA
 		return nil, err
 	}
 	prompt := &models.Prompt{
-		Name:            name,
-		Content:         content,
-		AllowAgentEdits: allowAgentEdits,
+		Name:    name,
+		Content: content,
 	}
 	if err := s.repo.CreatePrompt(ctx, prompt); err != nil {
 		if errors.Is(err, promptstore.ErrPromptListLimit) {
@@ -139,22 +150,28 @@ func (s *Service) assertNameAvailable(ctx context.Context, name, excludeID strin
 }
 
 func (s *Service) UpdatePrompt(ctx context.Context, promptID string, name *string, content *string) (*models.Prompt, error) {
-	return s.UpdatePromptWithPermission(ctx, promptID, name, content, nil)
+	return s.UpdatePromptAtRevision(ctx, promptID, nil, name, content)
 }
 
-func (s *Service) UpdatePromptWithPermission(ctx context.Context, promptID string, name, content *string, allowAgentEdits *bool) (*models.Prompt, error) {
-	prompt, err := s.repo.GetPromptByID(ctx, promptID)
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && prompt == nil) {
-		return nil, ErrPromptNotFound
+// UpdatePromptAtRevision rejects an operator save based on an obsolete prompt revision.
+func (s *Service) UpdatePromptAtRevision(
+	ctx context.Context,
+	promptID string,
+	expectedUpdatedAt *time.Time,
+	name, content *string,
+) (*models.Prompt, error) {
+	if name == nil && content == nil {
+		return s.GetPromptByID(ctx, promptID)
 	}
+	prompt, err := s.GetPromptByID(ctx, promptID)
 	if err != nil {
 		return nil, err
 	}
+	if expectedUpdatedAt != nil && !prompt.UpdatedAt.Equal(*expectedUpdatedAt) {
+		return nil, promptstore.ErrPromptWriteRejected
+	}
 	if err := s.applyPromptFields(ctx, prompt, name, content); err != nil {
 		return nil, err
-	}
-	if allowAgentEdits != nil {
-		prompt.AllowAgentEdits = *allowAgentEdits && !prompt.Builtin
 	}
 	if err := s.repo.UpdatePrompt(ctx, prompt); err != nil {
 		return nil, translateNameConflict(err)

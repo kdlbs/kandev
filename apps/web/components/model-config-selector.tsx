@@ -1,13 +1,25 @@
 "use client";
 
-import { memo, useState, type ReactNode } from "react";
+import { memo, useRef, useState, type ReactNode, type Ref } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { IconChevronDown } from "@tabler/icons-react";
 
 import { cn } from "@/lib/utils";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { settingsControlClassName } from "@/components/settings/settings-control";
 import { ModelConfigSelectorContent } from "@/components/model-config-selector-content";
+import { ModelConfigSheet } from "@/components/model-config-sheet";
+import type { ModelCatalog } from "@kandev/types/model-catalog";
+import { composedPairingLabel } from "@/lib/model-catalog-selection";
+import {
+  useModelCatalogNavigation,
+  type CompletedModelConfiguration,
+  type ModelCatalogNavigation,
+} from "@/hooks/use-model-catalog-navigation";
+
+export type { CompletedModelConfiguration, ModelCatalogNavigation };
+export type { CatalogGroupEntry } from "@/lib/model-catalog-selection";
 import { Button } from "@kandev/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -17,6 +29,8 @@ export type ModelSelectorOption = {
   id: string;
   name: string;
   description?: string;
+  /** Extra command-filter text, e.g. the full group path of a catalog leaf. */
+  keywords?: string[];
   usageMultiplier?: string;
   /** Unavailable models are dimmed and non-selectable with a reason tooltip. */
   disabled?: boolean;
@@ -31,6 +45,8 @@ export type DynamicConfigOption = {
   currentValue: string;
   category?: string;
   options?: { value: string; name: string; description?: string }[];
+  /** Bounded provider group structure and verified composition bindings. */
+  catalog?: ModelCatalog;
 };
 
 export type SelectConfigOption = DynamicConfigOption & {
@@ -120,8 +136,13 @@ export function triggerLabel(
   options?: TriggerLabelOptions,
 ): string {
   const modelConfig = configOptions.find(isModelConfigOption);
+  const pairing = composedPairingLabel(
+    modelConfig?.catalog,
+    currentModel || modelConfig?.currentValue || "",
+  );
   const modelValue =
     (modelConfig ? currentOptionName(modelConfig) : displayModelName(modelOptions, currentModel)) +
+    (pairing ? ` (${pairing})` : "") +
     (options?.currentModelSuffix ?? "");
   const baseline = options?.configBaseline;
   const extras = configOptions
@@ -187,6 +208,18 @@ export type ModelConfigSelectorProps = {
   configOptions?: DynamicConfigOption[];
   onModelChange: (modelId: string) => void;
   onConfigChange?: (configId: string, value: string) => void;
+  /**
+   * Receives the completed exact model plus the provider option values chosen
+   * for it. Without it the selector falls back to the ordinary model change
+   * callback and applies no options.
+   */
+  onConfigurationApply?: (selection: CompletedModelConfiguration) => void;
+  /**
+   * Resolves a candidate model's authoritative provider options without
+   * mutating the owning session or profile. Omit it on surfaces that cannot
+   * preview options; the focused view then applies the exact model only.
+   */
+  resolveConfigurationOptions?: (model: string) => Promise<DynamicConfigOption[] | undefined>;
   disabled?: boolean;
   placeholder?: string;
   ariaLabel?: string;
@@ -225,6 +258,9 @@ type ModelConfigSelectorTriggerProps = Pick<
 > & {
   label: string;
   details?: TriggerDetail[];
+  expanded?: boolean;
+  onOpen?: () => void;
+  triggerRef?: Ref<HTMLButtonElement>;
 };
 
 function ModelConfigSelectorTrigger({
@@ -237,28 +273,35 @@ function ModelConfigSelectorTrigger({
   triggerTitle,
   providerIcon,
   variant,
+  expanded,
+  onOpen,
+  triggerRef,
 }: ModelConfigSelectorTriggerProps) {
   const compact = variant === "compact";
   const baseClassName = compact
     ? "h-7 max-w-[min(18rem,70vw)] cursor-pointer gap-1 px-2 text-xs hover:bg-muted/40 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
     : settingsControlClassName("w-full justify-between font-normal cursor-pointer");
-  const trigger = (
-    <PopoverTrigger asChild>
-      <Button
-        type="button"
-        variant={compact ? "ghost" : "outline"}
-        size={compact ? "sm" : "default"}
-        className={cn(baseClassName, triggerClassName)}
-        aria-label={ariaLabel}
-        disabled={disabled}
-        title={triggerTitle}
-      >
-        {providerIcon}
-        <span className="truncate">{label || placeholder}</span>
-        <IconChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
-      </Button>
-    </PopoverTrigger>
+  const button = (
+    <Button
+      ref={triggerRef}
+      type="button"
+      variant={compact ? "ghost" : "outline"}
+      size={compact ? "sm" : "default"}
+      className={cn(baseClassName, triggerClassName)}
+      aria-label={ariaLabel}
+      data-testid="model-config-trigger"
+      aria-expanded={expanded}
+      aria-haspopup={onOpen ? "dialog" : undefined}
+      disabled={disabled}
+      title={triggerTitle}
+      onClick={onOpen}
+    >
+      {providerIcon}
+      <span className="truncate">{label || placeholder}</span>
+      <IconChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
+    </Button>
   );
+  const trigger = onOpen ? button : <PopoverTrigger asChild>{button}</PopoverTrigger>;
   if (!details?.length) return trigger;
   return (
     <Tooltip>
@@ -286,35 +329,101 @@ function triggerLabelOptions(
   return { summary: "changed", configBaseline, currentModelSuffix };
 }
 
-export const ModelConfigSelector = memo(function ModelConfigSelector({
+type SelectorPresentationProps = {
+  isMobile: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  trigger: ReactNode;
+  content: ReactNode;
+  triggerRef: Ref<HTMLButtonElement>;
+  align: "start" | "center" | "end";
+  side: "top" | "bottom";
+  title: string;
+};
+
+function SelectorPresentation({
+  isMobile,
+  open,
+  onOpenChange,
+  trigger,
+  content,
+  triggerRef,
+  align,
+  side,
+  title,
+}: SelectorPresentationProps) {
+  if (isMobile) {
+    return (
+      <>
+        {trigger}
+        <ModelConfigSheet
+          open={open}
+          onOpenChange={onOpenChange}
+          title={title}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const element = triggerRef as { current?: HTMLButtonElement | null };
+            element.current?.focus({ preventScroll: true });
+          }}
+        >
+          {content}
+        </ModelConfigSheet>
+      </>
+    );
+  }
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      {trigger}
+      <PopoverContent
+        align={align}
+        side={side}
+        className="w-[min(24rem,calc(100vw-1rem))] max-h-[min(32rem,calc(100vh-1rem))] gap-2 overflow-hidden p-2"
+      >
+        {content}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function useModelConfigSelectorController({
   modelOptions,
   currentModel,
   configOptions = [],
   onModelChange,
-  onConfigChange,
-  disabled,
-  placeholder,
-  ariaLabel,
-  variant = "field",
-  popoverAlign = "end",
-  popoverSide = "bottom",
-  triggerClassName: customTriggerClassName,
-  providerIcon,
+  onConfigurationApply,
   triggerSummary = "all",
   configBaseline,
   currentModelSuffix,
   configOptionsLoading = false,
   keepOpenOnModelChange = false,
-  allowCustomModel,
+  resolveConfigurationOptions,
 }: ModelConfigSelectorProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [activeConfigId, setActiveConfigId] = useState<string | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const selectConfigOptions = usableConfigOptions(configOptions);
   const modelConfig = selectConfigOptions.find(isModelConfigOption);
   const extraConfigOptions = selectConfigOptions.filter((option) => !isModelConfigOption(option));
   const activeConfig = extraConfigOptions.find((option) => option.id === activeConfigId);
   const currentModelValue = modelConfig?.currentValue || currentModel || "";
+  const catalog = modelConfig?.catalog;
+  const hasExtraConfigOptions = extraConfigOptions.length > 0;
+  const closeAfterApply = () => {
+    if (!keepOpenOnModelChange && !hasExtraConfigOptions && !configOptionsLoading) {
+      setOpen(false);
+    }
+  };
+  const navigation = useModelCatalogNavigation({
+    catalog,
+    currentModelValue,
+    onApply: (selection) => {
+      if (onConfigurationApply) onConfigurationApply(selection);
+      else onModelChange(selection.model);
+    },
+    onApplied: closeAfterApply,
+    resolveConfigurationOptions,
+  });
   const label = resolveTriggerLabel(
     modelOptions,
     currentModel,
@@ -329,7 +438,6 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   // The fallback marker is live-only, so explain when it is active.
   const triggerTitle = currentModelSuffix ? t("settings:fallbackNoteLive") : undefined;
 
-  const hasExtraConfigOptions = extraConfigOptions.length > 0;
   const onModelSelect = (value: string) => {
     if (!value) return;
     onModelChange(value);
@@ -345,38 +453,107 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
     }
   };
 
+  return {
+    triggerRef,
+    open,
+    setOpen,
+    onOpenChange,
+    activeConfig,
+    setActiveConfigId,
+    modelConfig,
+    extraConfigOptions,
+    currentModelValue,
+    catalog,
+    navigation,
+    label,
+    details,
+    triggerTitle,
+    onModelSelect,
+  };
+}
+
+export const ModelConfigSelector = memo(function ModelConfigSelector(
+  props: ModelConfigSelectorProps,
+) {
+  const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
+  const {
+    disabled,
+    placeholder,
+    ariaLabel,
+    variant = "field",
+    popoverAlign = "end",
+    popoverSide = "bottom",
+    triggerClassName: customTriggerClassName,
+    providerIcon,
+    allowCustomModel,
+    configOptionsLoading = false,
+    modelOptions,
+  } = props;
+  const {
+    triggerRef,
+    open,
+    setOpen,
+    onOpenChange,
+    activeConfig,
+    setActiveConfigId,
+    extraConfigOptions,
+    currentModelValue,
+    catalog,
+    navigation,
+    label,
+    details,
+    triggerTitle,
+    onModelSelect,
+  } = useModelConfigSelectorController(props);
+
+  const content = (
+    <ModelConfigSelectorContent
+      providerIcon={providerIcon}
+      activeConfig={activeConfig}
+      modelOptions={modelOptions}
+      currentModelValue={currentModelValue}
+      extraConfigOptions={extraConfigOptions}
+      onModelSelect={onModelSelect}
+      onConfigSelect={setActiveConfigId}
+      onConfigBack={() => setActiveConfigId(null)}
+      onConfigChange={props.onConfigChange}
+      configOptionsLoading={configOptionsLoading}
+      allowCustomModel={Boolean(allowCustomModel)}
+      catalog={catalog}
+      catalogNavigation={navigation}
+      embedded={isMobile}
+    />
+  );
+
+  const trigger = (
+    <ModelConfigSelectorTrigger
+      ariaLabel={ariaLabel ?? t("agents:modelSettings")}
+      details={details}
+      disabled={disabled}
+      label={label}
+      placeholder={placeholder ?? t("agents:selectModel")}
+      triggerClassName={customTriggerClassName}
+      triggerTitle={triggerTitle}
+      variant={variant}
+      providerIcon={providerIcon}
+      triggerRef={triggerRef}
+      expanded={open}
+      onOpen={isMobile ? () => setOpen(true) : undefined}
+    />
+  );
+
   return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      <ModelConfigSelectorTrigger
-        ariaLabel={ariaLabel ?? t("agents:modelSettings")}
-        details={details}
-        disabled={disabled}
-        label={label}
-        placeholder={placeholder ?? t("agents:selectModel")}
-        triggerClassName={customTriggerClassName}
-        triggerTitle={triggerTitle}
-        variant={variant}
-        providerIcon={providerIcon}
-      />
-      <PopoverContent
-        align={popoverAlign}
-        side={popoverSide}
-        className="w-[min(24rem,calc(100vw-1rem))] max-h-[min(32rem,calc(100vh-1rem))] gap-2 overflow-hidden p-2"
-      >
-        <ModelConfigSelectorContent
-          providerIcon={providerIcon}
-          activeConfig={activeConfig}
-          modelOptions={modelOptions}
-          currentModelValue={currentModelValue}
-          extraConfigOptions={extraConfigOptions}
-          onModelSelect={onModelSelect}
-          onConfigSelect={setActiveConfigId}
-          onConfigBack={() => setActiveConfigId(null)}
-          onConfigChange={onConfigChange}
-          configOptionsLoading={configOptionsLoading}
-          allowCustomModel={Boolean(allowCustomModel)}
-        />
-      </PopoverContent>
-    </Popover>
+    <SelectorPresentation
+      isMobile={isMobile}
+      open={open}
+      onOpenChange={onOpenChange}
+      trigger={trigger}
+      content={content}
+      triggerRef={triggerRef}
+      align={popoverAlign}
+      side={popoverSide}
+      title={t("agents:modelSettings")}
+    />
   );
 });

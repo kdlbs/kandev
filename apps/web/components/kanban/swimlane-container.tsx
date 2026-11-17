@@ -242,6 +242,7 @@ const WorkflowItemContent = memo(function WorkflowItemContent({
         steps={steps}
         moveTargetSteps={moveTargetSteps}
         tasks={tasks}
+        fillHeight={fillHeight}
         {...viewProps}
       />
     ) : (
@@ -610,7 +611,9 @@ export function SwimlaneContainer(containerProps: SwimlaneContainerProps) {
             hideHeaders={hideHeaders}
             onToggleStepVisibility={onToggleStepVisibility}
             onToggleAutoHideEmpty={onToggleAutoHideEmpty}
-            fillHeight={view.id === "kanban" && renderedWorkflows.length === 1}
+            fillHeight={
+              (view.id === "kanban" || view.id === "graph") && renderedWorkflows.length === 1
+            }
             compactHeight={view.id === "kanban" && !isMobile && renderedWorkflows.length > 1}
             isMobileKanban={isMobileKanban}
             canSortWorkflows={canSortWorkflows}

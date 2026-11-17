@@ -7,6 +7,7 @@
 package routingerr
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -122,6 +123,7 @@ const (
 // Error is the classifier's normalized output. It wraps stderr/stdout in
 // RawExcerpt after sanitization + truncation.
 type Error struct {
+	Keyword          *KeywordDecision
 	Code             Code
 	Class            Class
 	CatalogueVersion string
@@ -133,8 +135,11 @@ type Error struct {
 	ClassifierRule   string
 	ExitCode         *int
 	ResetHint        *time.Time
-	RawExcerpt       string
-	RemediationPath  string // path to clean before retry; only set for codes that have a known remediation
+	// ResetHintInferred marks a ResetHint derived from a clock-only notice
+	// rather than an explicit, dated provider reset time.
+	ResetHintInferred bool
+	RawExcerpt        string
+	RemediationPath   string // path to clean before retry; only set for codes that have a known remediation
 }
 
 // ClassForCode returns the policy class assigned by the provider-error
@@ -164,11 +169,15 @@ func (e *Error) ShouldShortRetry() bool {
 
 // Input is the raw signal bundle adapters pass to Classify.
 type Input struct {
+	KeywordContext            KeywordContext
 	Phase                     Phase
 	ProviderID                string
 	ExitCode                  *int
 	StructuredErr             error
 	HTTPStatus                int
+	ACPCode                   int // ACP JSON-RPC code, never an HTTP status
+	ErrorKind                 string
+	ProviderCode              string // opaque provider code; unknown namespaces are not inferred
 	ResetHint                 *time.Time
 	OccurredAt                time.Time // observation time for this provider diagnostic
 	Stderr                    string
@@ -186,23 +195,44 @@ const statusOverloaded = 529
 // Classify always returns a non-nil *Error, even for an unmatched or empty
 // input; callers may dereference the result without a nil check.
 func Classify(in Input) *Error {
+	var normalized *Error
+	if errors.As(in.StructuredErr, &normalized) && normalized != nil {
+		return normalized
+	}
 	e := classify(in)
+	observedAt := in.OccurredAt
+	if observedAt.IsZero() {
+		observedAt = time.Now()
+	}
 	if e.ResetHint == nil && (e.Code == CodeQuotaLimited || e.Code == CodeRateLimited) {
 		// Providers such as codex state the retry time only in the human
 		// notice, not in a structured field. Deriving it here lets every
 		// consumer (short retry, circuit breaker) honor it uniformly.
-		observedAt := in.OccurredAt
-		if observedAt.IsZero() {
-			observedAt = time.Now()
-		}
 		text := in.Stderr + "\n" + in.Stdout
+		if ruleUsesScopedTextReset(e.ClassifierRule) {
+			// The new notice rules reject fenced examples, so their reset
+			// hints must come from the unfenced line that classified, not
+			// from unrelated prose elsewhere in the diagnostic bundle.
+			if scoped, ok := providerRuleMatchedLine(in.ProviderID, e.ClassifierRule, text); ok {
+				text = scoped
+			} else {
+				text = ""
+			}
+		}
 		hint := parseResetHintAt(text, observedAt)
-		if hint == nil && e.ClassifierRule == "claude.stderr.session_limit.v1" {
+		if hint == nil && (e.ClassifierRule == ruleClaudeSessionLimit ||
+			e.ClassifierRule == ruleClaudeFiveHourLimit) {
 			hint = parseResetClockHintAt(text, observedAt)
+			e.ResetHintInferred = hint != nil
 		}
 		if hint != nil {
 			e.ResetHint = hint
 		}
+	}
+	if e.ResetHint == nil && e.ClassifierRule == RuleOpenCodeCapacityAdmission {
+		// A capacity hint is a floor for the host's nominal delay, never a
+		// replacement. Only the line that matched the signature can supply it.
+		e.ResetHint = parseOpenCodeCapacityResetHintAt(in.Stderr+"\n"+in.Stdout, observedAt)
 	}
 	return e
 }
@@ -214,7 +244,17 @@ func classify(in Input) *Error {
 		return e
 	}
 	if e := classifyStructured(in, excerpt); e != nil {
+		if e.Code == CodeRateLimited {
+			if quota, ok := matchProviderRules(in.ProviderID, excerpt, rawText); ok &&
+				quota.Code == CodeQuotaLimited && quota.Confidence == ConfHigh &&
+				hardQuotaRuleOutranksRateStatus(quota.ClassifierRule) {
+				e = quota
+			}
+		}
+		e.Phase = in.Phase
+		e.ExitCode = in.ExitCode
 		e.ResetHint = in.ResetHint
+		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
 	if e := classifyManagedRuntimeNpmPolicy(in, rawText); e != nil {
@@ -223,7 +263,7 @@ func classify(in Input) *Error {
 		e.ResetHint = in.ResetHint
 		return applyInvariants(e)
 	}
-	if e, ok := matchProviderRules(in.ProviderID, excerpt); ok {
+	if e, ok := matchProviderRules(in.ProviderID, excerpt, rawText); ok {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode
 		e.ResetHint = in.ResetHint
@@ -259,9 +299,33 @@ func classify(in Input) *Error {
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
+	if e := classifyKeywordContext(in, excerpt); e != nil {
+		return applyInvariants(e)
+	}
 	e := classifyByPhase(in, excerpt)
 	e.ResetHint = in.ResetHint
 	return applyInvariants(e)
+}
+
+// hardQuotaRuleOutranksRateStatus identifies the provider signatures that
+// prove an exhausted quota. Other quota-labeled diagnostics can describe a
+// rate limit, so a structured HTTP 429 remains authoritative for those rules.
+func hardQuotaRuleOutranksRateStatus(rule string) bool {
+	switch rule {
+	case "claude.stderr.quota.v1",
+		ruleClaudeSessionLimit,
+		ruleClaudeWeeklyLimit,
+		ruleClaudeFiveHourLimit,
+		ruleClaudeUsageLimit,
+		"codex.stderr.quota.v1",
+		ruleCodexOutOfCredits,
+		ruleOpenCodeUsageLimit,
+		ruleOpenCodeGoUsageLimit,
+		ruleOpenCodeCredit:
+		return true
+	default:
+		return false
+	}
 }
 
 func classifyInjection(in Input, excerpt string) *Error {
@@ -286,12 +350,12 @@ func classifyInjection(in Input, excerpt string) *Error {
 }
 
 func classifyStructured(in Input, excerpt string) *Error {
-	if c := httpStatusToCode(in.HTTPStatus); c != "" {
+	if c, rule := structuredProviderCode(in); c != "" {
 		return &Error{
 			Code:           c,
 			Confidence:     ConfHigh,
 			Phase:          in.Phase,
-			ClassifierRule: fmt.Sprintf("http.%d", in.HTTPStatus),
+			ClassifierRule: rule,
 			ExitCode:       in.ExitCode,
 			RawExcerpt:     excerpt,
 		}

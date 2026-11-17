@@ -124,6 +124,7 @@ export type MR = {
   body: string;
   draft: boolean;
   merge_status: string;
+  detailed_merge_status?: string;
   has_conflicts: boolean;
   additions: number;
   deletions: number;

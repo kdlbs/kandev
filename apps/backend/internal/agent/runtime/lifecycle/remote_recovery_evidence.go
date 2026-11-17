@@ -24,6 +24,17 @@ func recordedAgentctlInstanceID(runtime agentruntime.Runtime, backendExecutionID
 			return id, nil
 		}
 		return "", errors.New("kubernetes agentctl instance identity is missing")
+	case agentruntime.RuntimeDocker, agentruntime.RuntimeRemoteDocker:
+		// The shared Docker reconnect path can adopt a live agentctl process
+		// whose instance ID predates the backend execution ID. The recorded
+		// adopted identity is authoritative for both Docker runtimes.
+		if id := strings.TrimSpace(getMetadataString(metadata, MetadataKeyRemoteDockerAgentctlInstanceID)); id != "" {
+			return id, nil
+		}
+		if strings.TrimSpace(backendExecutionID) == "" {
+			return "", errors.New("docker agentctl instance identity is missing")
+		}
+		return backendExecutionID, nil
 	default:
 		if strings.TrimSpace(backendExecutionID) == "" {
 			return "", errors.New("backend execution identity is missing")
@@ -90,13 +101,13 @@ func (m *Manager) captureRemoteDeliveryEvidence(
 		return errors.New("authenticated remote delivery stream changed")
 	}
 	if status.Durable {
-		if status.Version != journal.CurrentVersion || status.StreamID == "" {
+		if !journal.SupportsDeliveryVersion(status.Version) || status.StreamID == "" {
 			return errors.New("remote agent advertises an unsupported durable delivery stream")
 		}
 		instance.DeliveryStatus = status
 		return nil
 	}
-	if status.Version != journal.CurrentVersion || status.Reason != "storage_not_durable" {
+	if !journal.SupportsDeliveryVersion(status.Version) || status.Reason != durableDeliveryStorageNotDurable {
 		return fmt.Errorf("remote retained delivery is unavailable: %s", status.Reason)
 	}
 	return m.acceptLegacyRemoteDelivery(ctx, instance, association)

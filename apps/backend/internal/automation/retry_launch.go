@@ -555,11 +555,13 @@ func (s *Service) dispatchRetryLaunch(ctx context.Context, run *AutomationRun, d
 	result, dispatchErr := dispatch()
 	receiptCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if errors.Is(dispatchErr, ErrRunDeferred) {
+	var admissionWait RunDispatchDeferred
+	fixedResourceWait := errors.As(dispatchErr, &admissionWait) && admissionWait.DispatchDeferred() == DispatchDeferredFixedProfileSuspended
+	if errors.Is(dispatchErr, ErrRunDeferred) || fixedResourceWait {
 		if err := s.store.DeferRetryLaunch(receiptCtx, launch); err != nil {
 			return errors.Join(ErrRetryLaunchUncertain, err)
 		}
-		return ErrRunDeferred
+		return dispatchErr
 	}
 	if dispatchErr == nil && result.TaskID == launch.TaskID && result.SessionID == launch.SessionID && result.TurnID == launch.TurnID {
 		accepted, err := s.store.GetRetryLaunch(receiptCtx, run.ID)

@@ -29,8 +29,10 @@ import { ClarificationRequestMessage } from "@/components/task/chat/messages/cla
 import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
 import { ToolSubagentMessage } from "@/components/task/chat/messages/tool-subagent-message";
 import { MonitorMessage } from "@/components/task/chat/messages/monitor-message";
+import { ContextCompactionMessage } from "@/components/task/chat/messages/context-compaction-message";
 import { AgentPlanMessage } from "@/components/task/chat/messages/agent-plan-message";
 import { ActionMessage } from "@/components/task/chat/messages/action-message";
+import { SessionRecoveryNotice } from "@/components/task/chat/messages/session-recovery-notice";
 import {
   KandevToolMessage,
   hasKandevRenderer,
@@ -258,6 +260,13 @@ function ClarificationRequestMessageAdapter({
 const adapters: MessageAdapter[] = [
   {
     matches: (comment) =>
+      comment.type === "status" &&
+      (comment.metadata as { kind?: unknown } | undefined)?.kind ===
+        "session_restored_after_interruption",
+    render: () => <SessionRecoveryNotice />,
+  },
+  {
+    matches: (comment) =>
       comment.type !== "tool_execute" && Boolean(payloadRetentionMarker(comment.metadata)),
     render: (comment) => <ToolPayloadRemovedMessage comment={comment} />,
   },
@@ -311,6 +320,23 @@ const adapters: MessageAdapter[] = [
     matches: (comment) => comment.type === "tool_execute",
     render: (comment, ctx) => (
       <ToolExecuteMessage comment={comment} worktreePath={ctx.worktreePath} />
+    ),
+  },
+  {
+    // ACP context compaction updates share the durable tool-call stream but
+    // need a focused timeline row with bounded summary details.
+    matches: (comment) => {
+      if (comment.type !== "tool_call") return false;
+      const metadata = comment.metadata as ToolCallMetadata | undefined;
+      return metadata?.normalized?.kind === "context_compaction";
+    },
+    render: (comment, ctx) => (
+      <ContextCompactionMessage
+        comment={comment}
+        isContainingTurnActive={ctx.isContainingTurnActive}
+        worktreePath={ctx.worktreePath}
+        onOpenFile={ctx.onOpenFile}
+      />
     ),
   },
   {

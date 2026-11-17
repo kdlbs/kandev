@@ -24,4 +24,6 @@ export type QueueMessageInput = {
   planCommentRefs?: TaskPlanCommentRef[];
   previewFeedbackRefs?: TaskPreviewFeedbackRef[];
   requirePrimarySession?: boolean;
+  /** Client-observed task turn-error stamp for this exact session. */
+  observedTurnErrorStamp?: string;
 };

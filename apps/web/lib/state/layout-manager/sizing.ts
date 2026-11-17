@@ -164,7 +164,19 @@ export function computeRootAxisSizes(
 ): { sizes: number[]; orthogonal: number } {
   if (rootOrientation === "VERTICAL") {
     const rows = columns.map((column) => ({ ...column, pinned: false }));
-    return { sizes: computeColumnWidths(rows, totalHeight, new Map()), orthogonal: totalWidth };
+    const sizes = computeColumnWidths(rows, totalHeight, new Map());
+    const used = sizes.reduce((sum, size) => sum + size, 0);
+    if (used > totalHeight) {
+      let sourceEnd = 0;
+      let allocated = 0;
+      for (let index = 0; index < sizes.length; index++) {
+        sourceEnd += sizes[index];
+        const end = Math.round((sourceEnd / used) * totalHeight);
+        sizes[index] = end - allocated;
+        allocated = end;
+      }
+    }
+    return { sizes, orthogonal: totalWidth };
   }
   return {
     sizes: computeColumnWidths(columns, totalWidth, pinnedWidths),

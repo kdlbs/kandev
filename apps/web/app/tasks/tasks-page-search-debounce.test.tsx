@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { ComponentProps } from "react";
-import { StateProvider, useAppStore } from "@/components/state-provider";
+import { StateProvider, useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { defaultSettingsState } from "@/lib/state/slices/settings/settings-slice";
-import { TaskSearchInput } from "@/components/kanban/task-search-input";
-import type { KanbanHeader } from "@/components/kanban/kanban-header";
 import type { TasksListViewProps } from "./tasks-list-view";
-import { taskId, type Task } from "@/lib/types/http";
+import { TasksListFilters } from "./tasks-list-filters";
+import { taskId, type Repository, type Task } from "@/lib/types/http";
+
+const UNAVAILABLE_FILTER_LABEL = "Unavailable filter";
 
 const controls = vi.hoisted(() => ({
   mobile: false,
@@ -18,14 +18,9 @@ const controls = vi.hoisted(() => ({
   },
   list: vi.fn(),
   toast: vi.fn(),
-  router: { push: vi.fn(), replace: vi.fn() },
   setView: vi.fn(),
 }));
 
-vi.mock("@/lib/routing/client-router", () => ({
-  useRouter: () => controls.router,
-  useSearchParams: () => new URLSearchParams(),
-}));
 vi.mock("@/lib/api", () => ({
   listTasksByWorkspace: controls.list,
   deleteTask: vi.fn(),
@@ -34,7 +29,20 @@ vi.mock("@/lib/api", () => ({
 }));
 vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: controls.toast }) }));
 vi.mock("@/hooks/use-kanban-display-settings", () => ({
-  useKanbanDisplaySettings: () => controls.display,
+  useKanbanDisplaySettings: () => ({
+    ...controls.display,
+    repositories: useAppStore(
+      (state) =>
+        state.repositories.itemsByWorkspaceId[controls.display.activeWorkspaceId] ??
+        controls.display.repositories,
+    ),
+  }),
+}));
+vi.mock("@/hooks/use-user-display-settings", () => ({
+  useUserDisplaySettings: () => ({
+    settings: useAppStore((state) => state.userSettings),
+    commitSettings: vi.fn(),
+  }),
 }));
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile: controls.mobile }),
@@ -53,17 +61,10 @@ vi.mock("@/hooks/use-task-list-workflow-steps", () => ({
 }));
 vi.mock("./mobile-tasks-actions", () => ({ MobileTasksActions: () => null }));
 
-// Keep TasksPageContent, MobileSearchBar, TaskSearchInput and page effects real.
-// Header chrome and row presentation are boundary observers, not query owners.
+// Keep List filters, URL state, debounce, and page effects real.
+// Header chrome and rows observe the query without owning it.
 vi.mock("@/components/kanban/kanban-header", () => ({
-  KanbanHeader: ({ searchQuery, onSearchChange }: ComponentProps<typeof KanbanHeader>) => {
-    const setOpen = useAppStore((state) => state.setMobileKanbanSearchOpen);
-    return controls.mobile ? (
-      <button onClick={() => setOpen(true)}>Reveal search</button>
-    ) : (
-      <TaskSearchInput value={searchQuery ?? ""} onChange={onSearchChange!} />
-    );
-  },
+  KanbanHeader: () => null,
 }));
 vi.mock("./tasks-list-view", () => ({
   TasksListView: ({
@@ -72,35 +73,67 @@ vi.mock("./tasks-list-view", () => ({
     isLoading,
     pagination,
     setPagination,
-    setShowArchived,
+    filters,
+    archiveMode,
+    setArchiveMode,
+    unavailableFilter,
   }: TasksListViewProps) => (
     <div>
+      <TasksListFilters
+        {...filters!}
+        archiveMode={archiveMode}
+        onArchiveModeChange={setArchiveMode}
+        displayOptions={null}
+        total={total}
+        isLoading={isLoading}
+      />
       <output aria-label="Rows">{tasks.map((task) => task.title).join(",")}</output>
       <output aria-label="Total">{total}</output>
       <output aria-label="Loading">{String(isLoading)}</output>
       <output aria-label="Page">{pagination.pageIndex + 1}</output>
-      <button onClick={() => setPagination({ pageIndex: 1, pageSize: 10 })}>Page two</button>
-      <button onClick={() => setShowArchived(true)}>Include archived</button>
+      <output aria-label={UNAVAILABLE_FILTER_LABEL}>{unavailableFilter ?? ""}</output>
+      <button onClick={() => setPagination((prev) => ({ ...prev, pageIndex: 1 }))}>Page two</button>
+      <button onClick={() => setPagination((prev) => ({ ...prev, pageSize: 10 }))}>Ten rows</button>
+      <button onClick={() => setArchiveMode("all")}>Include archived</button>
     </div>
   ),
 }));
 
 import { TasksPageClient } from "./tasks-page-client";
 
-function page() {
+let testStore: ReturnType<typeof useAppStoreApi>;
+function CaptureStore() {
+  testStore = useAppStoreApi();
+  return null;
+}
+
+function page(fromBoot = true, metadataLoaded = fromBoot) {
   return (
     <StateProvider
       initialState={{
         workspaces: { items: [], activeId: "ws1" },
-        userSettings: { ...defaultSettingsState.userSettings, loaded: true },
+        workflows: {
+          items: fromBoot ? [{ id: "wf1", workspaceId: "ws1", name: "Workflow" } as never] : [],
+          activeId: "wf1",
+        },
+        userSettings: {
+          ...defaultSettingsState.userSettings,
+          workspaceId: "ws1",
+          workflowId: "wf1",
+          repositoryIds: ["repo1"],
+          loaded: true,
+        },
       }}
     >
+      <CaptureStore />
       <TasksPageClient
         workspaces={[]}
-        initialRepositories={[]}
+        initialWorkspaceId="ws1"
+        initialRepositories={[{ id: "repo1", name: "Repository" } as Repository]}
         initialTasks={[]}
         initialTotal={0}
-        initialDataLoaded
+        initialDataLoaded={fromBoot}
+        initialMetadataLoaded={{ workflows: metadataLoaded, repositories: metadataLoaded }}
         initialSort="title_asc"
         initialGroup="none"
       />
@@ -148,10 +181,12 @@ beforeEach(() => {
   controls.display.activeWorkspaceId = "ws1";
   controls.list.mockReset().mockResolvedValue({ tasks: [], total: 0 });
   controls.toast.mockReset();
+  window.history.replaceState({}, "", "/tasks");
 });
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  window.history.replaceState({}, "", "/");
 });
 
 describe("List search admission", () => {
@@ -161,7 +196,6 @@ describe("List search admission", () => {
     async (mobile) => {
       controls.mobile = mobile;
       await mount();
-      if (mobile) fireEvent.click(screen.getByText("Reveal search"));
       expect(controls.list).not.toHaveBeenCalled();
       type("Alpha");
       expect(input().value).toBe("Alpha");
@@ -172,6 +206,7 @@ describe("List search admission", () => {
       expect(controls.list).toHaveBeenCalledWith(
         "ws1",
         expect.objectContaining({ query: "Alpha", page: 1 }),
+        { init: { signal: expect.any(AbortSignal) } },
       );
     },
   );
@@ -201,7 +236,7 @@ describe("List search admission", () => {
     clear();
     expect(input().value).toBe("");
     await advance(900);
-    expect(controls.list).not.toHaveBeenCalled();
+    expect(controls.list.mock.calls.map((call) => call[1].query)).toEqual([""]);
   });
 
   it.each(["button", "typing"])("clears an admitted query using %s", async (method) => {
@@ -217,7 +252,9 @@ describe("List search admission", () => {
       await advance(300);
     }
     expect(input().value).toBe("");
-    expect(controls.list).toHaveBeenCalledWith("ws1", expect.objectContaining({ query: "" }));
+    expect(controls.list).toHaveBeenCalledWith("ws1", expect.objectContaining({ query: "" }), {
+      init: { signal: expect.any(AbortSignal) },
+    });
     await advance(600);
     expect(controls.list).toHaveBeenCalledTimes(1);
   });
@@ -232,11 +269,71 @@ describe("List search admission", () => {
   });
 });
 
+// @covers AC-TASKS-LIST-ARCHIVE-FILTERS-004.5
+it("waits for metadata before treating a saved workflow as unavailable", async () => {
+  const view = render(page(false));
+  await act(async () => {});
+  expect(screen.getByLabelText(UNAVAILABLE_FILTER_LABEL).textContent).toBe("");
+  expect(screen.getByLabelText("Loading").textContent).toBe("true");
+  expect(controls.list).not.toHaveBeenCalled();
+
+  await act(async () => {
+    const state = testStore.getState();
+    const generation = state.workspaceContextGeneration;
+    state.setWorkspaceContextRead("workflows", "ws1", generation, "pending");
+    state.hydrate({
+      workflows: {
+        items: [{ id: "wf1", workspaceId: "ws1", name: "Workflow" } as never],
+        activeId: "wf1",
+      },
+    });
+    state.setWorkspaceContextRead("workflows", "ws1", generation, "success");
+    state.setRepositories("ws1", [{ id: "repo1", name: "Repository" } as Repository]);
+  });
+  view.rerender(page(false, true));
+  await act(async () => {});
+  expect(screen.getByLabelText(UNAVAILABLE_FILTER_LABEL).textContent).toBe("");
+  expect(screen.getByLabelText("Loading").textContent).toBe("false");
+  expect(controls.list).toHaveBeenCalledWith(
+    "ws1",
+    expect.objectContaining({ workflowId: "wf1", repositoryId: "repo1" }),
+    expect.anything(),
+  );
+});
+
+// @covers AC-TASKS-LIST-ARCHIVE-FILTERS-004.5
+it("waits for a fresh repository read before rejecting an ID absent from cached metadata", async () => {
+  window.history.replaceState({}, "", "/tasks?workflow=all&repository=repo2");
+  const view = render(page(false));
+  await act(async () => {
+    testStore.getState().setRepositories("ws1", []);
+  });
+  expect(screen.getByLabelText(UNAVAILABLE_FILTER_LABEL).textContent).toBe("");
+  expect(screen.getByLabelText("Loading").textContent).toBe("true");
+  expect(controls.list).not.toHaveBeenCalled();
+  await act(async () => {
+    testStore
+      .getState()
+      .setRepositories("ws1", [{ id: "repo2", name: "New repository" } as Repository]);
+  });
+  view.rerender(page(false, true));
+  await act(async () => {});
+  expect(screen.getByLabelText(UNAVAILABLE_FILTER_LABEL).textContent).toBe("");
+  expect(screen.getByLabelText("Loading").textContent).toBe("false");
+  expect(controls.list).toHaveBeenCalledWith(
+    "ws1",
+    expect.objectContaining({ workflowId: null, repositoryId: "repo2" }),
+    expect.anything(),
+  );
+});
+
 describe("List search scope and reply ownership", () => {
   // @covers AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-001.15
   it("resets to page one while retaining active scope and page size", async () => {
     await mount();
+    controls.list.mockResolvedValue({ tasks: [], total: 30 });
     fireEvent.click(screen.getByText("Include archived"));
+    fireEvent.click(screen.getByText("Ten rows"));
     fireEvent.click(screen.getByText("Page two"));
     await act(async () => {});
     expect(screen.getByLabelText("Page").textContent).toBe("2");
@@ -244,15 +341,19 @@ describe("List search scope and reply ownership", () => {
     type("Alpha");
     await advance(300);
     expect(screen.getByLabelText("Page").textContent).toBe("1");
-    expect(controls.list).toHaveBeenLastCalledWith("ws1", {
-      page: 1,
-      pageSize: 10,
-      query: "Alpha",
-      includeArchived: true,
-      workflowId: "wf1",
-      repositoryId: "repo1",
-      sort: "title_asc",
-    });
+    expect(controls.list).toHaveBeenLastCalledWith(
+      "ws1",
+      {
+        page: 1,
+        pageSize: 10,
+        query: "Alpha",
+        includeArchived: true,
+        workflowId: "wf1",
+        repositoryId: "repo1",
+        sort: "title_asc",
+      },
+      { init: { signal: expect.any(AbortSignal) } },
+    );
   });
 
   it.each(["success", "error"])(
