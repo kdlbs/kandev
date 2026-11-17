@@ -402,16 +402,8 @@ func writeGitHubOperationalAuthError(ctx *gin.Context, err error) bool {
 		return true
 	}
 	if errors.Is(err, ErrRepoOutsideWorkspaceScope) {
-		// A local policy rejection, not a GitHub outcome. The status stays 404,
-		// matching the plain ErrRepoNotResolvable branch below, so this endpoint
-		// keeps its no-leak contract: callers still cannot tell "this repository
-		// does not exist / is not visible to us" from "this workspace's scope
-		// policy declines to look at it". What changes is only the message,
-		// which now names the real cause instead of sending operators down the
-		// credential/App-install path for a workspace allowlist problem. The
-		// allowlist itself is never echoed back — only the fact that the
-		// requested repo is outside it. The distinct code keeps the two cases
-		// separable for server-side triage without widening the public contract.
+		// The public code and message identify the local policy rejection.
+		// Neither the requested repository identity nor the allowlist is returned.
 		ctx.JSON(http.StatusNotFound, gin.H{
 			"code":  "github_repository_out_of_scope",
 			"error": "This repository is outside the workspace's GitHub repository scope. Update the workspace repository scope in Settings to include it.",
