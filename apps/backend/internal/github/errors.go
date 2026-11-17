@@ -2,11 +2,8 @@ package github
 
 import (
 	"errors"
-<<<<<<< HEAD
-	"net/http"
-=======
 	"fmt"
->>>>>>> 616ae7c453c (fix(github): make out-of-scope repositories actionable without leaking scope)
+	"net/http"
 	"strings"
 
 	"github.com/kandev/kandev/internal/common/authcircuit"
