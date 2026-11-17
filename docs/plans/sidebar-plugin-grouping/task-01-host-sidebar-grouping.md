@@ -264,3 +264,21 @@ Rebuilt all guarded runtime/helper/fixture artifacts. Native acceptance passed
 seven desktop and five phone scenarios with one worker and no retries, including
 the existing unavailable/recovery and generation/pagination consumers.
 Evidence is under the cache-drive `sidebar-grouping-review6-5cq96b32` root.
+
+### Round 9 committed catalog snapshot correction
+
+Concurrent catalog reads previously exposed provisional registry status while its
+status Save was blocked, including values later rolled back. Six channel-barrier
+cases failed before correction: active to Disabled/Error and inactive to Active,
+each with successful and failed persistence. Catalog capture now holds the existing
+status-persistence mutex only while cloning registry records; projection and event
+callbacks remain outside that guard. Failed commits still publish no notification.
+The one-second bounded pending-write observation window rejects early authoritative
+membership; channels own the write/admission/release ordering, without sleeps.
+The complete owning plugin package passed `-race` (`28.877s`), including all six
+snapshot cases and previous completion-fence regressions. Changed Go lint passed.
+Required `make fmt`, catalog/spec validation and complete guarded artifact rebuild
+passed. Native acceptance passed seven desktop and five phone scenarios, one
+worker and no retries. Exact persistence-failure scheduling is owned by the
+service regression, not a new runtime-only testing flag.
+Evidence is under the cache-drive `sidebar-grouping-review9-p3gv5v37` root.

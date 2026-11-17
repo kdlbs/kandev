@@ -105,8 +105,11 @@ func (s *Service) sidebarGroupingGeneration(record *store.Record) string {
 // SidebarGroupingCatalog lists active compatible providers, including plugins
 // that do not ship a native browser bundle.
 func (s *Service) SidebarGroupingCatalog() []pluginsdk.SidebarGroupingProvider {
+	s.mu.Lock()
+	records := s.registry.List()
+	s.mu.Unlock()
 	providers := make([]pluginsdk.SidebarGroupingProvider, 0)
-	for _, record := range s.registry.List() {
+	for _, record := range records {
 		if record.Status != store.StatusActive {
 			continue
 		}

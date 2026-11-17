@@ -155,11 +155,11 @@ and provider generation, not only a component's mount state.
 Host workspace state mutations emit identity-only
 `plugins.sidebar-grouping.updated` events. The gateway exposes
 `plugin.sidebar-grouping.updated` only to authorized workspace subscribers;
-global catalog changes contain no workspace classification data. Catalog
-generation binds installation identity, config policy and a monotonic service
-epoch. Committed status changes invalidate even if cleanup fails; failed commits
-do not. Admitted config rotations invalidate at completion, including failures.
-The browser also fences registry epochs, stores, scope and metadata requests.
+global catalog changes contain no workspace classification data. Catalog records
+are captured under the persistence guard, then projected after releasing it.
+Generation binds installation identity, config policy and a monotonic epoch.
+Committed status changes invalidate even if cleanup fails; failed commits do not.
+Config completion, registry epochs, store/scope and metadata requests stay fenced.
 Boot metadata is owned by its concrete store and scope. Context reconciliation
 clears it even while disconnected. Failed catalog transport reads do not publish
 an authoritative empty catalog: eligible same-context metadata is retained,
