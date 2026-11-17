@@ -2,6 +2,7 @@ import { expect, test } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { openTaskSession, waitForSessionDone } from "../../helpers/session";
+import { assertVerticalCentersAligned } from "../../helpers/layout-assertions";
 import {
   createSettledHistoryTask,
   routeSessionEntryRecovery,
@@ -119,6 +120,55 @@ test.describe("session entry recovery", () => {
     await expect(session.activeChat()).toContainText("simple mock response", { timeout: 30_000 });
     expect(proxy.requestCount("message.list")).toBeGreaterThanOrEqual(2);
     expect(proxy.failedResponseCount("message.list")).toBeGreaterThan(0);
+  });
+
+  test("centers conversation progress during loading and retrying", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(150_000);
+    const proxy = await routeSessionEntryRecovery(testPage);
+    const task = await createSettledHistoryTask(
+      apiClient,
+      seedData,
+      `History progress alignment ${Date.now()}`,
+    );
+
+    proxy.dropNextResponses("message.list", 1, { sessionId: task.session_id });
+    const session = await openTaskSession(testPage, task.id);
+    const chat = session.activeChat();
+    const loading = chat.getByTestId("session-history-loading");
+    await expect.poll(() => proxy.droppedResponseCount("message.list")).toBe(1);
+    await expect(loading).toBeVisible();
+    await assertVerticalCentersAligned(
+      loading.locator(".spinner-grid"),
+      loading.locator(":scope > span").nth(1),
+      "loading conversation",
+    );
+
+    proxy.holdResponses("message.list", { sessionId: task.session_id });
+    try {
+      await expect
+        .poll(() => proxy.heldResponseCount("message.list"), {
+          timeout: 30_000,
+          message: "Waiting for the automatic history retry response to be held",
+        })
+        .toBeGreaterThan(0);
+      const retrying = chat.getByTestId("session-history-retrying");
+      await expect(retrying).toBeVisible();
+      await assertVerticalCentersAligned(
+        retrying.locator(".spinner-grid"),
+        retrying.locator(":scope > span").nth(1),
+        "retrying conversation",
+      );
+    } finally {
+      proxy.releaseHeldResponses("message.list");
+    }
+
+    await expect(chat).toContainText("simple mock response", { timeout: 30_000 });
+    expect(proxy.droppedResponseCount("message.list")).toBe(1);
+    expect(proxy.heldResponseCount("message.list")).toBeGreaterThan(0);
   });
 
   test("labels exhausted status checks accurately and retries only the status read", async ({
