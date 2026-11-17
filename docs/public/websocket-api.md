@@ -907,6 +907,9 @@ configuration and refetch their permitted catalogue, including when access was
 revoked. Failed eligibility resolution does not broadcast private executor
 configuration.
 
+Office task status updates and tree cancellation or restoration publish
+`task.state_changed` after the state commit. Unchanged states and rejected
+writes do not publish a transition.
 
 The following catalog lists actions with current non-test emission paths. It intentionally excludes constants for which no active emitter was found, including the old `acp.*` compatibility constants, `permission.requested`, `input.requested`, `agent.updated`, and `office.activity.created`. Permission and clarification state currently arrives through session message records instead.
 
