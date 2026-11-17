@@ -15,9 +15,26 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowrepository "github.com/kandev/kandev/internal/workflow/repository"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
+
+type bootstrapStepGetter struct{ *workflowrepository.Repository }
+
+func (g bootstrapStepGetter) GetNextStepByPosition(ctx context.Context, workflowID string, position int) (*workflowmodels.WorkflowStep, error) {
+	steps, err := g.ListStepsByWorkflow(ctx, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	var next *workflowmodels.WorkflowStep
+	for _, step := range steps {
+		if step.Position > position && (next == nil || step.Position < next.Position) {
+			next = step
+		}
+	}
+	return next, nil
+}
 
 func loadPreviousImprovePrompts(t *testing.T) map[string]string {
 	t.Helper()
@@ -159,6 +176,7 @@ func TestImproveBootstrapUsesUpgradedInstructions(t *testing.T) {
 	eventBus := bus.NewMemoryEventBus(log)
 	t.Cleanup(eventBus.Close)
 	taskSvc := taskservice.NewService(taskservice.Repos{Workflows: taskRepo}, eventBus, log, taskservice.RepositoryDiscoveryConfig{})
+	taskSvc.SetWorkflowStepGetter(bootstrapStepGetter{workflowRepo})
 	workflows, err := taskSvc.ListWorkflows(ctx, "ws-existing", true)
 	if err != nil {
 		t.Fatal(err)
