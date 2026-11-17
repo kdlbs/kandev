@@ -330,5 +330,12 @@
   "workflowSyncCompleted": "Workflow sync completed",
   "loadingSteps": "Loading steps…",
   "noStepsInThisWorkflow": "No steps in this workflow",
-  "selectAWorkflowFirst": "Select a workflow first"
+  "selectAWorkflowFirst": "Select a workflow first",
+  "authorExclusionWarningTitle": "Reviewer exclusion setup",
+  "authorExclusionRoutingDisabled": "{{workflow}} / {{step}} ({{role}}): routing is off, so the exclusion is not enforced.",
+  "authorExclusionSingleProvider": "{{workflow}} / {{step}} ({{role}}): only {{provider}} is configured, so review runs wait whenever the work ran on {{provider}}.",
+  "authorExclusionAgentSingleProvider": "{{workflow}} / {{step}} ({{role}}): agent \"{{agent}}\" can only use {{provider}}, so its review runs wait whenever the work ran on {{provider}}.",
+  "authorExclusionCheckFailed": "The reviewer exclusion setup could not be checked.",
+  "importReviewTitle": "Review imported workflows",
+  "importReviewDescription": "Check these notices before the workflows are created."
 }

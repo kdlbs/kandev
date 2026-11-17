@@ -33,6 +33,12 @@ type fakeRoutingProvider struct {
 	overridesErr         error
 	executionProfiles    []routing.ExecutionProfileSummary
 	executionProfilesErr error
+	setupWarnings        []routing.SetupWarning
+	setupErr             error
+}
+
+func (f *fakeRoutingProvider) StoredExclusionSetup(_ context.Context, _ string) ([]routing.SetupWarning, error) {
+	return f.setupWarnings, f.setupErr
 }
 
 func (f *fakeRoutingProvider) ListExecutionProfiles(

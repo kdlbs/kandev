@@ -330,5 +330,12 @@
   "workflowSyncCompleted": "ワークフロー同期完了",
   "loadingSteps": "ステップを読み込み中…",
   "noStepsInThisWorkflow": "このワークフローにステップなし",
-  "selectAWorkflowFirst": "先にワークフローを選択"
+  "selectAWorkflowFirst": "先にワークフローを選択",
+  "authorExclusionWarningTitle": "レビュアー除外の設定",
+  "authorExclusionRoutingDisabled": "{{workflow}} / {{step}}（{{role}}）: ルーティングがオフのため、除外は適用されません。",
+  "authorExclusionSingleProvider": "{{workflow}} / {{step}}（{{role}}）: {{provider}} のみが設定されているため、作業が {{provider}} で行われた場合、レビュー実行は待機します。",
+  "authorExclusionAgentSingleProvider": "{{workflow}} / {{step}}（{{role}}）: エージェント「{{agent}}」は {{provider}} しか使用できないため、作業が {{provider}} で行われた場合、そのレビュー実行は待機します。",
+  "authorExclusionCheckFailed": "レビュアー除外の設定を確認できませんでした。",
+  "importReviewTitle": "インポートするワークフローの確認",
+  "importReviewDescription": "ワークフローを作成する前に、これらの通知を確認してください。"
 }

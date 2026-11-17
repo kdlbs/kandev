@@ -46,6 +46,7 @@ func (h *Handler) getWorkspaceRouting(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, RoutingConfigResponse{
 		Config: cfg, KnownProviders: known, ExecutionProfiles: profiles,
+		AuthorExclusionWarnings: h.authorExclusionWarnings(c.Request.Context(), rp, c.Param("wsId")),
 	})
 }
 
@@ -69,7 +70,23 @@ func (h *Handler) updateWorkspaceRouting(c *gin.Context) {
 		return
 	}
 	h.publishRoutingSettingsUpdated(c.Request.Context(), wsID)
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	c.JSON(http.StatusOK, RoutingUpdateResponse{
+		OK:                      true,
+		AuthorExclusionWarnings: h.authorExclusionWarnings(c.Request.Context(), rp, wsID),
+	})
+}
+
+// authorExclusionWarnings evaluates the stored exclusion declarations. A
+// failed check is logged and reported as check_failed, never as an error.
+func (h *Handler) authorExclusionWarnings(
+	ctx context.Context, rp RoutingProvider, workspaceID string,
+) []AuthorExclusionWarningDTO {
+	warnings, err := rp.StoredExclusionSetup(ctx, workspaceID)
+	if err != nil && h.logger != nil {
+		h.logger.Warn("author exclusion setup check failed",
+			zap.String("workspace_id", workspaceID), zap.Error(err))
+	}
+	return AuthorExclusionWarningDTOs(warnings, err)
 }
 
 // retryWorkspaceProvider serves POST /workspaces/:wsId/routing/retry.

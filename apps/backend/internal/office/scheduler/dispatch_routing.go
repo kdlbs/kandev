@@ -99,14 +99,23 @@ func (ss *SchedulerService) DispatchWithRouting(
 		}
 		return false, true, nil
 	}
-	excluded := excludedFromAttempts(prior, run.RouteCycleBaselineSeq)
-	res, err := ss.resolver.Resolve(ctx, agent.WorkspaceID, *agent,
-		routing.ResolveOptions{
-			ExcludeProviders: excluded,
-			Reason:           run.Reason,
-		})
+	excl, err := ss.resolveAuthorExclusion(ctx, run, agent)
+	if err != nil {
+		return false, false, fmt.Errorf("dispatch: author exclusion: %w", err)
+	}
+	opts := routing.ResolveOptions{
+		ExcludeProviders: excludedFromAttempts(prior, run.RouteCycleBaselineSeq),
+		Reason:           run.Reason,
+	}
+	if excl.Applies {
+		opts.AuthorProvider = excl.AuthorProvider
+	}
+	res, err := ss.resolver.Resolve(ctx, agent.WorkspaceID, *agent, opts)
 	if err != nil {
 		return false, false, fmt.Errorf("dispatch: resolve: %w", err)
+	}
+	if excl.Applies {
+		ss.recordAuthorExclusion(ctx, run.ID, excl, res.Enabled)
 	}
 	if !res.Enabled && len(res.Candidates) == 0 {
 		if res.BlockReason.Status == routing.StatusWaitingForCapacity {
@@ -261,6 +270,8 @@ func skipOutcome(reason string) models.RouteAttemptOutcome {
 		return RouteAttemptOutcomeSkippedUserAction
 	case routing.SkipReasonMissingModelMapping:
 		return RouteAttemptOutcomeSkippedMissingMapping
+	case routing.SkipReasonAuthorProvider:
+		return RouteAttemptOutcomeSkippedAuthorProvider
 	}
 	return RouteAttemptOutcomeSkippedDegraded
 }

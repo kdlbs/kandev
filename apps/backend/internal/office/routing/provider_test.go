@@ -27,6 +27,15 @@ type fakeProviderRepo struct {
 	// the sequence is exhausted.
 	cfgSeq    []*WorkspaceConfig
 	cfgSeqIdx int
+
+	decls     []ExclusionDeclaration
+	declsErr  error
+	declReads int
+}
+
+func (f *fakeProviderRepo) ListAuthorExclusionDeclarations(_ context.Context, _ string) ([]ExclusionDeclaration, error) {
+	f.declReads++
+	return f.decls, f.declsErr
 }
 
 func (f *fakeProviderRepo) GetWorkspaceRouting(_ context.Context, _ string) (*WorkspaceConfig, error) {

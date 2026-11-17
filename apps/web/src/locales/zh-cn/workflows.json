@@ -330,5 +330,12 @@
   "workflowSyncCompleted": "工作流同步完成",
   "workflows": "工作流",
   "workflowsReadOnlyImprove": "此工作区中的工作流由 Improve Kandev 管理，无法更改。",
-  "workflowsSectionDescription": "创建带自动流转的自主流水线，或由你手动移动任务的手动工作流"
+  "workflowsSectionDescription": "创建带自动流转的自主流水线，或由你手动移动任务的手动工作流",
+  "authorExclusionWarningTitle": "评审者排除设置",
+  "authorExclusionRoutingDisabled": "{{workflow}} / {{step}}（{{role}}）：路由已关闭，因此不会执行排除。",
+  "authorExclusionSingleProvider": "{{workflow}} / {{step}}（{{role}}）：仅配置了 {{provider}}，因此只要工作在 {{provider}} 上完成，评审运行就会等待。",
+  "authorExclusionAgentSingleProvider": "{{workflow}} / {{step}}（{{role}}）：代理“{{agent}}”只能使用 {{provider}}，因此只要工作在 {{provider}} 上完成，其评审运行就会等待。",
+  "authorExclusionCheckFailed": "无法检查评审者排除设置。",
+  "importReviewTitle": "检查导入的工作流",
+  "importReviewDescription": "在创建工作流之前，请先查看这些提示。"
 }

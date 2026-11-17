@@ -1,0 +1,179 @@
+---
+created: 2026-11-16
+status: implemented
+requirements:
+  - REQ-OFFICE-REVIEW-AUTHOR-EXCL-001
+  - REQ-OFFICE-REVIEW-AUTHOR-EXCL-002
+  - REQ-OFFICE-REVIEW-AUTHOR-EXCL-003
+  - REQ-OFFICE-REVIEW-AUTHOR-EXCL-004
+  - REQ-OFFICE-REVIEW-AUTHOR-EXCL-005
+system_design:
+  - ../../specs/office/system-design/review-author-provider-exclusion.md
+legacy_specs: []
+---
+
+# Implementation Plan: Keep Office Reviewers off the Author's Provider
+
+## Overview
+
+Issue #5349. Add an opt-in `exclude_author_provider` setting to
+`ensure_participant_seat`. Seat runs at a declaring step then never launch on
+the provider that did the task's work. If excluding the author leaves no
+candidate, the run parks with a `skipped_author_provider` route attempt, and
+every resolution writes a `routing.author_exclusion` run event.
+
+Because this is the first release of the setting, it also lands with
+non-blocking setup warnings (REQ-OFFICE-REVIEW-AUTHOR-EXCL-005). Import preview
+and result, workflow sync, and the provider routing settings page warn when the
+current setup means a declaring step can park reviews (the workspace or a
+seat-pool agent has only one provider, so reviews wait whenever the work ran
+on it) or will not enforce the exclusion (routing off).
+
+The policy is evaluated in `DispatchWithRouting` on each resolution. Nothing
+is persisted on seats or runs, and no migration is needed. See the
+[system design](../../specs/office/system-design/review-author-provider-exclusion.md).
+
+## Delivery order
+
+| Wave | Work order | Result |
+|---|---|---|
+| 1 | [task-01-dispatch-author-exclusion](task-01-dispatch-author-exclusion.md) | Backend: config parse, repo reads, resolver skip, dispatcher wiring, run events |
+| 2 | [task-02-route-outcome-label](task-02-route-outcome-label.md) | Web: localized `skipped_author_provider` label, plus an E2E proving a reviewer run lands on a non-author provider |
+
+| 2 | [task-03-exclusion-setup-warnings-backend](task-03-exclusion-setup-warnings-backend.md) | Backend: setup evaluator, routing GET/PUT warnings, import preview/result warnings via a workflow-service port, sync warnings |
+| 3 | [task-04-exclusion-setup-warnings-web](task-04-exclusion-setup-warnings-web.md) | Web: routing settings banner, import dialog warnings, locales, desktop and phone E2E |
+
+Task 02 depends on Task 01, because its E2E needs the backend behavior. Task 03
+depends on Task 01 (the shared declaration helper). Task 04 depends on Task 03.
+Tasks 02 and 03 can run in parallel.
+
+## ASCII UI preview
+
+### UI-01: Run detail, Route attempts panel (parked seat run)
+
+Entry point: Office → Agents → reviewer agent → Runs → a parked review run.
+Only the outcome pill is new. The layout is unchanged and is the same on phone
+(the row wraps).
+
+```text
++-- Route attempts -----------------------------------------------+
+| Provider candidates tried for this run                          |
+|-----------------------------------------------------------------|
+| #1 (!) claude-acp/sonnet  [balanced] [skipped: wrote this task] |
+| #2 (!) codex-acp/gpt      [balanced] [skipped degraded]  ...    |
++-----------------------------------------------------------------+
++-- Events -------------------------------------------------------+
+| routing.author_exclusion  <ts>  {"applied":true,                |
+|                                  "author_provider_id":"claude-acp"}
++-----------------------------------------------------------------+
+```
+
+Required: the new outcome gets its own localized label with the `outline`
+variant. Illustrative: the label wording and the payload formatting (the
+Events log already renders payloads verbatim). Maps to
+AC-OFFICE-REVIEW-AUTHOR-EXCL-003.2 and AC-OFFICE-REVIEW-AUTHOR-EXCL-004.1.
+
+### UI-02: Provider routing settings, exclusion setup banner
+
+Entry point: Office → Workspace → Provider routing. State: one declaring step
+predicts a halt. The banner sits above the enable card and is absent when there
+is nothing to warn about.
+
+```text
+Desktop
++-----------------------------------------------------------------+
+| Provider routing                                                |
+| Map Office agents to providers and ...                          |
+| +-------------------------------------------------------------+ |
+| | /!\ Reviewer exclusion setup                                 | |
+| |  - Office Review / Review (reviewer): only claude-acp is     | |
+| |    configured, so review runs wait whenever the work ran on  | |
+| |    claude-acp.                                               | |
+| |  - Office Review / Review (reviewer): agent "QA" can only    | |
+| |    use codex-acp, so its review runs wait whenever the work  | |
+| |    ran on codex-acp.                                         | |
+| +-------------------------------------------------------------+ |
+| [Routing enabled  (o)]                                          |
+| ...                                                             |
++-----------------------------------------------------------------+
+
+Phone (same order; text wraps, no horizontal scroll)
++---------------------------+
+| Provider routing          |
+| +-----------------------+ |
+| | /!\ Reviewer exclusion | |
+| |    setup              | |
+| | - Office Review /     | |
+| |   Review (reviewer):  | |
+| |   only claude-acp is  | |
+| |   configured, so      | |
+| |   review runs wait    | |
+| |   whenever the work   | |
+| |   ran on claude-acp.  | |
+| +-----------------------+ |
+| [Routing enabled (o)]     |
++---------------------------+
+```
+
+When routing is off, the item reads "routing is off, so the exclusion is not
+enforced." Required: placement above the enable card, one item per warning,
+naming workflow, step, role, the one provider (and agent), and no horizontal
+scroll on phone.
+Illustrative: the wording. Maps to AC-OFFICE-REVIEW-AUTHOR-EXCL-005.5 to .7.
+
+### UI-03: Workflow import dialog, preview step
+
+Entry point: Settings → Workspace → Workflows → Import. State: the previewed
+document declares the exclusion and the setup predicts a halt.
+
+```text
++-- Import workflows ------------------------------------------+
+| (existing profile-selection content)                          |
+| +----------------------------------------------------------+ |
+| | /!\ Reviewer exclusion setup                              | |
+| |  - Office Review / Review (reviewer): routing is off, so  | |
+| |    the exclusion is not enforced.                         | |
+| +----------------------------------------------------------+ |
+|                                    [Cancel]  [Import]         |
++---------------------------------------------------------------+
+```
+
+Import stays enabled. Phone: the dialog already stacks full-width, and the
+list wraps the same way. Maps to AC-OFFICE-REVIEW-AUTHOR-EXCL-005.3 and .7.
+
+## Risks
+
+- **Routing disabled.** A seat run is not excluded when workspace routing is
+  disabled (AC-OFFICE-REVIEW-AUTHOR-EXCL-002.5). It is recorded, not blocked.
+  With routing disabled, the run launches on the agent's own execution profile
+  (or on only the first provider in the order), so there is no alternative to
+  move to, and blocking would park every such review.
+- **Single-provider routing.** Routing can be enabled with one provider in the
+  order, with a different model per tier. Once the setting is on, every seat
+  run in such a workspace parks as requiring operator action
+  (AC-OFFICE-REVIEW-AUTHOR-EXCL-003.4), because the comparison is by provider,
+  not by model.
+- **Author lookup scans by JSON payload.** `GetTaskAuthorProvider` filters
+  `runs` with `dialect.JSONExtract` on `task_id`, which matches the existing
+  `runs_inflight.go` predicate. It runs only for seat runs at declaring steps,
+  so its cost stays off every other dispatch.
+- **Legacy work runs.** Work-stage runs queued before payloads carried
+  `workflow_step_id` record no author. They fall under
+  AC-OFFICE-REVIEW-AUTHOR-EXCL-004.2.
+- **Same provider, different model** counts as the same author, by design.
+- **Warnings are a snapshot.** Provider health and later settings changes are
+  not predicted. Runtime parking with the `skipped_author_provider` outcome
+  remains the backstop.
+- **Seat-pool helper move.** Moving `seatRolePools` into `office/models` touches
+  the seat caster. Its existing tests must pass unchanged.
+
+## Verification strategy
+
+- Go unit tests in `routing`, `scheduler`, `office/repository/sqlite`
+  (SQLite, plus PostgreSQL when the fixture DSN is available), `workflow/engine`,
+  `workflow/models`, and `config/workflows`.
+- Web Vitest for the route-panel label, plus the i18n checks.
+- One Playwright spec in the routing harness (mock providers) for the
+  end-to-end routing evidence, plus desktop and phone specs for the routing
+  banner and the import-dialog warning.
+- Finish with `make fmt`, then `make typecheck test lint`.

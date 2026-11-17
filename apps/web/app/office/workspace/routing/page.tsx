@@ -29,6 +29,9 @@ import {
   WakeReasonTierCard,
 } from "./components";
 import { useTranslation } from "react-i18next";
+import { AuthorExclusionWarningList } from "@/components/author-exclusion-warning-list";
+import type { AuthorExclusionWarning } from "@/lib/types/author-exclusion";
+import { providerLabel } from "./components/provider-order-editor";
 
 const DEFAULT_PROFILE: ProviderProfile = { tier_map: {} };
 
@@ -76,9 +79,10 @@ export default function ProviderRoutingPage() {
     setSaving(true);
     setFieldErrors([]);
     try {
-      await routing.update(draft);
+      const warnings = await routing.update(draft);
       void preview.refresh();
-      toast.success(t("office:routingSettingsSaved"));
+      if (warnings.length > 0) toast.warning(t("office:routingSavedWithExclusionWarnings"));
+      else toast.success(t("office:routingSettingsSaved"));
     } catch (err) {
       const errs = extractValidationDetails(err);
       if (errs.length > 0) setFieldErrors(errs);
@@ -107,6 +111,7 @@ export default function ProviderRoutingPage() {
       onRetry={routing.retry}
       previewAgents={preview.agents}
       previewLoading={preview.isLoading}
+      authorExclusionWarnings={routing.authorExclusionWarnings}
     />
   );
 }
@@ -125,6 +130,7 @@ type PageBodyProps = {
   onRetry: ReturnType<typeof useWorkspaceRouting>["retry"];
   previewAgents: ReturnType<typeof useRoutingPreview>["agents"];
   previewLoading: boolean;
+  authorExclusionWarnings: AuthorExclusionWarning[];
 };
 
 function PageBody({
@@ -141,6 +147,7 @@ function PageBody({
   onRetry,
   previewAgents,
   previewLoading,
+  authorExclusionWarnings,
 }: PageBodyProps) {
   const { t } = useTranslation();
   const setEnabled = (v: boolean) => setDraft({ ...draft, enabled: v });
@@ -166,6 +173,11 @@ function PageBody({
         <h1 className="text-lg font-semibold">{t("office:providerRoutingHeading")}</h1>
         <p className="text-sm text-muted-foreground">{t("office:mapOfficeAgentsToProvidersAnd")}</p>
       </div>
+
+      <AuthorExclusionWarningList
+        warnings={authorExclusionWarnings}
+        formatProvider={providerLabel}
+      />
 
       <RoutingEnableCard enabled={draft.enabled} onChange={setEnabled} disabled={saving} />
 

@@ -330,5 +330,12 @@
   "workflowSyncCompleted": "Ŵōŕķƒĺōŵ śŷńć ćōḿƥĺēţēď",
   "loadingSteps": "Ĺōàďĩńĝ śţēƥś…",
   "noStepsInThisWorkflow": "Ńō śţēƥś ĩń ţĥĩś ŵōŕķƒĺōŵ",
-  "selectAWorkflowFirst": "Śēĺēćţ à ŵōŕķƒĺōŵ ƒĩŕśţ"
+  "selectAWorkflowFirst": "Śēĺēćţ à ŵōŕķƒĺōŵ ƒĩŕśţ",
+  "authorExclusionWarningTitle": "Ŕēvĩēŵēŕ ēxćĺũśĩōń śēţũƥ",
+  "authorExclusionRoutingDisabled": "{{workflow}} / {{step}} ({{role}}): ŕōũţĩńĝ ĩś ōƒƒ, śō ţĥē ēxćĺũśĩōń ĩś ńōţ ēńƒōŕćēď.",
+  "authorExclusionSingleProvider": "{{workflow}} / {{step}} ({{role}}): ōńĺŷ {{provider}} ĩś ćōńƒĩĝũŕēď, śō ŕēvĩēŵ ŕũńś ŵàĩţ ŵĥēńēvēŕ ţĥē ŵōŕķ ŕàń ōń {{provider}}.",
+  "authorExclusionAgentSingleProvider": "{{workflow}} / {{step}} ({{role}}): àĝēńţ \"{{agent}}\" ćàń ōńĺŷ ũśē {{provider}}, śō ĩţś ŕēvĩēŵ ŕũńś ŵàĩţ ŵĥēńēvēŕ ţĥē ŵōŕķ ŕàń ōń {{provider}}.",
+  "authorExclusionCheckFailed": "Ţĥē ŕēvĩēŵēŕ ēxćĺũśĩōń śēţũƥ ćōũĺď ńōţ ƀē ćĥēćķēď.",
+  "importReviewTitle": "Ŕēvĩēŵ ĩḿƥōŕţēď ŵōŕķƒĺōŵś",
+  "importReviewDescription": "Ćĥēćķ ţĥēśē ńōţĩćēś ƀēƒōŕē ţĥē ŵōŕķƒĺōŵś àŕē ćŕēàţēď."
 }

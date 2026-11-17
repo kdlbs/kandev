@@ -330,5 +330,12 @@
   "noStepsInThisWorkflow": "Este fluxo de trabalho não tem passos",
   "saveBeforeDuplicating": "Guarde o fluxo de trabalho antes de o duplicar.",
   "selectAWorkflowFirst": "Selecione primeiro um fluxo de trabalho",
-  "workflowMutationInProgress": "Aguarde que a alteração atual do fluxo de trabalho termine."
+  "workflowMutationInProgress": "Aguarde que a alteração atual do fluxo de trabalho termine.",
+  "authorExclusionWarningTitle": "Configuração da exclusão de revisores",
+  "authorExclusionRoutingDisabled": "{{workflow}} / {{step}} ({{role}}): o encaminhamento está desligado, por isso a exclusão não é aplicada.",
+  "authorExclusionSingleProvider": "{{workflow}} / {{step}} ({{role}}): só {{provider}} está configurado, por isso as execuções de revisão aguardam sempre que o trabalho foi feito em {{provider}}.",
+  "authorExclusionAgentSingleProvider": "{{workflow}} / {{step}} ({{role}}): o agente \"{{agent}}\" só pode usar {{provider}}, por isso as suas execuções de revisão aguardam sempre que o trabalho foi feito em {{provider}}.",
+  "authorExclusionCheckFailed": "Não foi possível verificar a configuração da exclusão de revisores.",
+  "importReviewTitle": "Rever fluxos de trabalho importados",
+  "importReviewDescription": "Verifique estes avisos antes de os fluxos de trabalho serem criados."
 }

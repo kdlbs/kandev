@@ -383,6 +383,9 @@ type RoutingProvider interface {
 	// to "inherit". Returns the zero blob when the agent has no
 	// overrides recorded; an error only on lookup / parse failures.
 	AgentOverrides(ctx context.Context, agentID string) (routing.AgentOverrides, error)
+	// StoredExclusionSetup predicts problems with the workspace's
+	// exclude_author_provider steps under the current routing setup.
+	StoredExclusionSetup(ctx context.Context, workspaceID string) ([]routing.SetupWarning, error)
 }
 
 // RouteAttemptLister is the narrow read-side seam used by the run-detail

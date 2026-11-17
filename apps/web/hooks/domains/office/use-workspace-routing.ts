@@ -8,16 +8,19 @@ import {
   updateWorkspaceRouting,
 } from "@/lib/api/domains/office-extended-api";
 import type { ExecutionProfileSummary, WorkspaceRouting } from "@/lib/state/slices/office/types";
+import type { AuthorExclusionWarning } from "@/lib/types/author-exclusion";
 import { t } from "@/lib/i18n";
 
 export type UseWorkspaceRoutingResult = {
   config: WorkspaceRouting | undefined;
   knownProviders: string[];
   executionProfiles: ExecutionProfileSummary[];
+  authorExclusionWarnings: AuthorExclusionWarning[];
   isLoading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
-  update: (cfg: WorkspaceRouting) => Promise<void>;
+  /** Saves cfg and resolves to the exclusion setup warnings computed after the save. */
+  update: (cfg: WorkspaceRouting) => Promise<AuthorExclusionWarning[]>;
   retry: (providerId: string) => Promise<void>;
 };
 
@@ -30,6 +33,9 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
   const setKnownProviders = useAppStore((s) => s.setKnownProviders);
   const [isLoading, setIsLoading] = useState(false);
   const [executionProfiles, setExecutionProfiles] = useState<ExecutionProfileSummary[]>([]);
+  const [authorExclusionWarnings, setAuthorExclusionWarnings] = useState<AuthorExclusionWarning[]>(
+    [],
+  );
   const [profilesWorkspace, setProfilesWorkspace] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const requestVersion = useRef(0);
@@ -45,6 +51,7 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
       if (res.config) setWorkspaceRouting(workspaceName, res.config);
       if (Array.isArray(res.known_providers)) setKnownProviders(res.known_providers);
       setExecutionProfiles(Array.isArray(res.execution_profiles) ? res.execution_profiles : []);
+      setAuthorExclusionWarnings(res.author_exclusion_warnings ?? []);
       setProfilesWorkspace(workspaceName);
     } catch (e) {
       if (version !== requestVersion.current) return;
@@ -58,6 +65,7 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
     if (!workspaceName) {
       requestVersion.current += 1;
       setExecutionProfiles([]);
+      setAuthorExclusionWarnings([]);
       setProfilesWorkspace(null);
       setIsLoading(false);
       return;
@@ -68,9 +76,12 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
 
   const update = useCallback(
     async (cfg: WorkspaceRouting) => {
-      if (!workspaceName) return;
-      await updateWorkspaceRouting(workspaceName, cfg);
+      if (!workspaceName) return [];
+      const res = await updateWorkspaceRouting(workspaceName, cfg);
       setWorkspaceRouting(workspaceName, cfg);
+      const warnings = res?.author_exclusion_warnings ?? [];
+      setAuthorExclusionWarnings(warnings);
+      return warnings;
     },
     [workspaceName, setWorkspaceRouting],
   );
@@ -83,5 +94,15 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
     [workspaceName],
   );
 
-  return { config, knownProviders, executionProfiles, isLoading, error, refresh, update, retry };
+  return {
+    config,
+    knownProviders,
+    executionProfiles,
+    authorExclusionWarnings,
+    isLoading,
+    error,
+    refresh,
+    update,
+    retry,
+  };
 }

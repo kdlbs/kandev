@@ -7,6 +7,7 @@ import type {
   ProviderHealth,
   WorkspaceRouting,
 } from "@/lib/state/slices/office/types";
+import type { AuthorExclusionWarning } from "@/lib/types/author-exclusion";
 
 const BASE = "/api/v1/office";
 
@@ -14,6 +15,12 @@ export type RoutingConfigResponse = {
   config: WorkspaceRouting | null;
   known_providers: string[];
   execution_profiles: ExecutionProfileSummary[];
+  author_exclusion_warnings?: AuthorExclusionWarning[];
+};
+
+export type RoutingUpdateResponse = {
+  ok: boolean;
+  author_exclusion_warnings?: AuthorExclusionWarning[];
 };
 
 export function getWorkspaceRouting(workspaceId: string, options?: ApiRequestOptions) {
@@ -25,7 +32,7 @@ export function updateWorkspaceRouting(
   cfg: WorkspaceRouting,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<{ ok: boolean }>(`${BASE}/workspaces/${workspaceId}/routing`, {
+  return fetchJson<RoutingUpdateResponse>(`${BASE}/workspaces/${workspaceId}/routing`, {
     ...options,
     init: { method: "PUT", body: JSON.stringify(cfg), ...options?.init },
   });
