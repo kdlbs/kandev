@@ -508,3 +508,29 @@ func personalBoundaryTestServiceWithClients(
 func testGitHubRepo(owner, name string) GitHubRepo {
 	return GitHubRepo{FullName: owner + "/" + name, Owner: owner, Name: name}
 }
+
+// A local repository-scope rejection must satisfy BOTH sentinels: HTTP
+// boundaries need ErrRepoOutsideWorkspaceScope to answer with an actionable
+// message under the same 404 as an unresolvable repository, while the "stop
+// hammering a dead repo" callers (isRepoNotResolvableErr,
+// wsSyncTaskPR) must keep seeing ErrRepoNotResolvable or they would start
+// retrying a pure policy rejection on every poll.
+func TestRepoOutsideScopeErrContract(t *testing.T) {
+	err := newRepoOutsideScopeErr("tenequm", "pond")
+
+	if !errors.Is(err, ErrRepoOutsideWorkspaceScope) {
+		t.Fatal("scope rejection must match ErrRepoOutsideWorkspaceScope")
+	}
+	if !errors.Is(err, ErrRepoNotResolvable) {
+		t.Fatal("scope rejection must keep matching ErrRepoNotResolvable for the negative-cache contract")
+	}
+	if !isRepoNotResolvableErr(err) {
+		t.Fatal("isRepoNotResolvableErr must classify a scope rejection as deterministic")
+	}
+	if !strings.Contains(err.Error(), "outside this workspace's scope") {
+		t.Fatalf("message must name the real failure, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "tenequm/pond") {
+		t.Fatalf("message must name the repository, got: %v", err)
+	}
+}
