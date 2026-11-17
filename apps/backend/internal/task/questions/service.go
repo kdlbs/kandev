@@ -581,6 +581,10 @@ func buildOutcome(questions []protocol.Question, input AnswerInput) (models.Asyn
 			return models.AsyncQuestionOutcome{}, fmt.Errorf("%w: answer references an unknown or repeated question id", ErrValidation)
 		}
 		seen[answer.QuestionID] = true
+		customText := strings.TrimSpace(answer.CustomText)
+		if err := validateAnswerContent(answer, customText); err != nil {
+			return models.AsyncQuestionOutcome{}, err
+		}
 		if len(answer.SelectedOptions) > 0 {
 			valid := make(map[string]bool, len(question.Options))
 			for _, option := range question.Options {
@@ -598,10 +602,17 @@ func buildOutcome(questions []protocol.Question, input AnswerInput) (models.Asyn
 		answers = append(answers, protocol.Answer{
 			QuestionID:      answer.QuestionID,
 			SelectedOptions: append([]string(nil), answer.SelectedOptions...),
-			CustomText:      strings.TrimSpace(answer.CustomText),
+			CustomText:      customText,
 		})
 	}
 	return models.AsyncQuestionOutcome{Answers: answers}, nil
+}
+
+func validateAnswerContent(answer Answer, customText string) error {
+	if len(answer.SelectedOptions) == 0 && customText == "" {
+		return fmt.Errorf("%w: each answer needs an option or text", ErrValidation)
+	}
+	return nil
 }
 
 // Withdraw closes a pending request without recording an answer.

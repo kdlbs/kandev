@@ -9,9 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/clarification/protocol"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/task/models"
+	taskquestions "github.com/kandev/kandev/internal/task/questions"
 	sqlitetaskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	userstore "github.com/kandev/kandev/internal/user/store"
 	"github.com/kandev/kandev/internal/webapp"
@@ -233,5 +237,66 @@ func TestBootNeedsYouInbox_FlagOnWithBundles_SeedsRealCounts(t *testing.T) {
 	// second granularity rather than requiring an exact instant match.
 	if !gotExpiry.Equal(snoozeUntil.Truncate(time.Second)) {
 		t.Errorf("nextSnoozeExpiry = %v, want %v", gotExpiry, snoozeUntil)
+	}
+}
+
+func TestBootNeedsYouInbox_HasMoreIncludesAsyncAndBlockingCounts(t *testing.T) {
+	const blockingCount = 30
+	const asyncCount = 30
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	if err := harness.taskRepo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Only"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	now := time.Now().UTC()
+	for i := 0; i < blockingCount; i++ {
+		seedInboxAnswerableBundle(t, harness.taskRepo, i, "ws-1", now.Add(time.Duration(i)*time.Second))
+	}
+
+	const taskID = "task-async-inbox-mixed"
+	const sessionID = "session-async-inbox-mixed"
+	const incarnationID = "inc-async-inbox-mixed"
+	if err := harness.taskRepo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: "ws-1", Title: taskID}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := harness.taskRepo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: taskID, State: models.TaskSessionStateRunning, QueueIncarnationID: incarnationID,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	for i := 0; i < asyncCount; i++ {
+		question := &models.AsyncQuestion{
+			ID: fmt.Sprintf("async-question-%d", i), TaskID: taskID, WorkspaceID: "ws-1",
+			SessionID: sessionID, SessionIncarnationID: incarnationID,
+			Recipient: models.AsyncQuestionRecipientUser,
+			Questions: []protocol.Question{{
+				ID: "choice", Prompt: "Which value?",
+				Options: []protocol.Option{{ID: "default", Label: "Default"}},
+			}},
+			RetryKey: fmt.Sprintf("async-question-retry-%d", i), PayloadDigest: fmt.Sprintf("digest-%d", i),
+			Status: models.AsyncQuestionStatusPending, Version: 1, CreatedAt: now.Add(time.Duration(i) * time.Second),
+		}
+		if _, _, err := harness.taskRepo.CreateAsyncQuestion(ctx, question, nil); err != nil {
+			t.Fatalf("CreateAsyncQuestion %d: %v", i, err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	params := routeParams{
+		taskSvc: harness.taskSvc, taskRepo: harness.taskRepo, userCtrl: harness.userCtrl,
+		services: &Services{AsyncQuestions: taskquestions.NewService(harness.taskRepo, nil, zap.NewNop())},
+		features: config.FeaturesConfig{NeedsYouInbox: true},
+	}
+	state := bootInitialState(t.Context(), req, params, webapp.RouteClassification{Route: webapp.RouteHome})
+
+	decoded := decodeNeedsYouInboxBoot(t, state)
+	if decoded.NeedsYouInboxBoot == nil {
+		t.Fatal("needsYouInboxBoot absent, want the combined blocking and async counts")
+	}
+	if decoded.NeedsYouInboxBoot.Count != blockingCount+asyncCount {
+		t.Errorf("count = %d, want %d", decoded.NeedsYouInboxBoot.Count, blockingCount+asyncCount)
+	}
+	if !decoded.NeedsYouInboxBoot.HasMore {
+		t.Error("hasMore = false, want true when the combined count exceeds the page limit")
 	}
 }

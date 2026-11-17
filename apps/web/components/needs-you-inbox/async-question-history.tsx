@@ -53,9 +53,7 @@ function AsyncQuestionHistoryView({
           onClick={onLoadMore}
           data-testid="async-question-history-load-more"
         >
-          {state.loadingMore
-            ? t("needsYouInbox:asyncSubmitting")
-            : t("needsYouInbox:asyncLoadMore")}
+          {state.loadingMore ? t("common:loading") : t("needsYouInbox:asyncLoadMore")}
         </Button>
       )}
       {state.loadMoreFailed && (

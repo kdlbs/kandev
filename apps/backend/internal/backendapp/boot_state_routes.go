@@ -655,9 +655,7 @@ func (b bootStateBuilder) addNeedsYouInboxState(
 			return
 		}
 		count += asyncCount
-		if asyncCount > bootInboxDefaultLimit {
-			hasMore = true
-		}
+		hasMore = hasMore || count > bootInboxDefaultLimit
 		_, _, asyncNext, asyncErr := b.p.services.AsyncQuestions.ListHiddenInboxAsyncQuestions(
 			ctx, workspaceID, clarification.InboxUserID(ctx), 1, time.Now().UTC(),
 		)

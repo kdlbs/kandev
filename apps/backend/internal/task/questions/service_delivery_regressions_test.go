@@ -30,6 +30,9 @@ func TestAsyncQuestionOperatorAnswerCreatesParentOutcomeDelivery(t *testing.T) {
 	require.NoError(t, err)
 	_, err = svc.Forward(ctx, result.Question.ID, "task-parent-outcome", "session-parent-outcome", "operator decision")
 	require.NoError(t, err)
+	forwardedQuestion, err := svc.Get(ctx, result.Question.ID)
+	require.NoError(t, err)
+	winningVersion := forwardedQuestion.Version + 1
 	_, won, err := svc.ResolveOperator(ctx, result.Question.ID, questions.AnswerInput{
 		Answers: []questions.Answer{{QuestionID: result.Question.Questions[0].ID, SelectedOptions: []string{"a"}}},
 	})
@@ -38,12 +41,42 @@ func TestAsyncQuestionOperatorAnswerCreatesParentOutcomeDelivery(t *testing.T) {
 	deliveries, err := repo.ListAsyncQuestionDeliveries(ctx, time.Now().UTC().Add(time.Hour), 20)
 	require.NoError(t, err)
 	parentOutcomes := 0
+	ownerOutcomes := 0
 	for _, delivery := range deliveries {
+		if delivery.Kind == models.AsyncQuestionDeliveryParentOutcome ||
+			delivery.Kind == models.AsyncQuestionDeliveryOwner {
+			require.Equal(t, winningVersion, delivery.OutcomeVersion)
+			require.Equal(t, float64(winningVersion), delivery.Metadata[questions.MetadataAsyncQuestionOutcomeVersion],
+				"correlated metadata must pin the persisted winning outcome version")
+		}
+		if delivery.Kind == models.AsyncQuestionDeliveryOwner {
+			ownerOutcomes++
+		}
 		if delivery.Kind == models.AsyncQuestionDeliveryParentOutcome {
 			parentOutcomes++
 		}
 	}
 	require.Equal(t, 1, parentOutcomes)
+	require.Equal(t, 1, ownerOutcomes)
+}
+
+func TestAsyncQuestionEmptyAnswerDoesNotResolve(t *testing.T) {
+	svc, repo := newQuestionsService(t)
+	created := createOperatorQuestion(t, svc, repo, "session-empty-answer")
+
+	_, won, err := svc.ResolveOperator(context.Background(), created.Question.ID, questions.AnswerInput{
+		Answers: []questions.Answer{{
+			QuestionID: created.Question.Questions[0].ID,
+			CustomText: " \n\t ",
+		}},
+	})
+
+	require.ErrorIs(t, err, questions.ErrValidation)
+	require.False(t, won)
+	current, getErr := svc.Get(context.Background(), created.Question.ID)
+	require.NoError(t, getErr)
+	require.Equal(t, models.AsyncQuestionStatusPending, current.Status)
+	require.Nil(t, current.Outcome)
 }
 
 func TestAsyncQuestionForwardOnlyNotifiesOnNewPendingTransition(t *testing.T) {
@@ -143,6 +176,76 @@ func TestAsyncQuestionDeliveryAdmissionContinuesAfterAuthoritySweepError(t *test
 	require.Equal(t, 2, admitted, "due transcript and answer deliveries must still be admitted")
 	require.Len(t, queue.deliveries, 1)
 	require.Equal(t, models.AsyncQuestionDeliveryOwner, queue.deliveries[0].Kind)
+}
+
+type failingDeliveryFailureStore struct {
+	questions.Store
+	markErr  error
+	listErr  error
+	listCall int
+}
+
+func (s *failingDeliveryFailureStore) MarkAsyncQuestionDeliveryFailed(
+	context.Context, string, int, time.Time, string,
+) error {
+	return s.markErr
+}
+
+func (s *failingDeliveryFailureStore) ListAsyncQuestionDeliveries(
+	ctx context.Context, now time.Time, limit int,
+) ([]*models.AsyncQuestionDelivery, error) {
+	s.listCall++
+	if s.listCall > 1 {
+		return nil, s.listErr
+	}
+	return s.Store.ListAsyncQuestionDeliveries(ctx, now, limit)
+}
+
+type failingDeliveryQueue struct {
+	err   error
+	calls int
+}
+
+func (q *failingDeliveryQueue) AdmitAsyncQuestionDelivery(
+	context.Context, *models.AsyncQuestionDelivery,
+) error {
+	q.calls++
+	return q.err
+}
+
+func (q *failingDeliveryQueue) RemoveAsyncQuestionDelivery(
+	context.Context, *models.AsyncQuestionDelivery,
+) error {
+	return nil
+}
+
+func TestAsyncQuestionDeliveryFailurePersistenceStopsReconcileLoop(t *testing.T) {
+	base, repo := newQuestionsService(t)
+	created := createOperatorQuestion(t, base, repo, "session-delivery-failure-persist")
+	_, won, err := base.ResolveOperator(context.Background(), created.Question.ID, questions.AnswerInput{
+		Answers: []questions.Answer{{
+			QuestionID:      created.Question.Questions[0].ID,
+			SelectedOptions: []string{"default"},
+		}},
+	})
+	require.NoError(t, err)
+	require.True(t, won)
+
+	markErr := errors.New("could not persist delivery retry")
+	store := &failingDeliveryFailureStore{
+		Store: repo, markErr: markErr, listErr: errors.New("second delivery page should not be read"),
+	}
+	queue := &failingDeliveryQueue{err: errors.New("queue unavailable")}
+	svc := questions.NewService(store, nil, zap.NewNop())
+	svc.SetTranscriptWriter(testTranscriptWriter{})
+	svc.SetDeliveryQueue(queue)
+
+	admitted, reconcileErr := svc.ReconcileOnce(context.Background())
+
+	require.ErrorIs(t, reconcileErr, markErr)
+	require.Equal(t, 1, admitted, "the transcript intent precedes the failed outcome admission")
+	require.Equal(t, 1, queue.calls)
+	require.Equal(t, 1, store.listCall, "a persistence failure must return before the due intent is re-listed")
 }
 
 func TestAsyncQuestionOwnerDeliveryOmitsSubmissionIdentity(t *testing.T) {

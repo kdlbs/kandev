@@ -95,9 +95,6 @@ func (r *Repository) staleAsyncQuestionByID(
 		return nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := r.acquireAsyncQuestionWriteLockTx(ctx, tx, id); err != nil {
-		return nil, false, err
-	}
 	question, err := r.lockAsyncQuestionTx(ctx, tx, id)
 	if err != nil || question == nil {
 		return nil, false, err
@@ -128,9 +125,6 @@ func (r *Repository) staleAsyncQuestionIfAuthorityChanged(
 		return nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := r.acquireAsyncQuestionWriteLockTx(ctx, tx, id); err != nil {
-		return nil, false, err
-	}
 	question, err := r.lockAsyncQuestionTx(ctx, tx, id)
 	if err != nil || question == nil {
 		return nil, false, err

@@ -91,8 +91,13 @@ export function AsyncQuestionActions({
         disabled={submitting}
         data-testid="async-question-submit"
       >
-        {submitting ? t("needsYouInbox:asyncSubmitting") : t("needsYouInbox:asyncSubmit")}
+        {t("needsYouInbox:asyncSubmit")}
       </Button>
+      {submitting && (
+        <span className="sr-only" role="status">
+          {t("needsYouInbox:asyncSubmitting")}
+        </span>
+      )}
     </div>
   );
 }

@@ -14,6 +14,8 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
+const taskTransferAdmissionLockKey = "task-transfer-relation-admission"
+
 func (r *Repository) lockTaskTransferRelations(
 	ctx context.Context,
 	tx *sqlx.Tx,
@@ -54,6 +56,18 @@ func (r *Repository) lockTaskTransferRelations(
 	if errors.As(err, &busy) && busy.Code == "55P03" {
 		return fmt.Errorf("%w: transfer relations busy", repoerrors.ErrTaskTransferConflict)
 	}
+	return err
+}
+
+func (r *Repository) lockTaskTransferAdmission(ctx context.Context, tx *sqlx.Tx) error {
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		return nil
+	}
+	// Transfers upgrade row locks to relation locks. Serialize transfer
+	// admission first so concurrent transfers do not each hold relation-level
+	// RowShare locks while trying to acquire the exclusive relation set.
+	_, err := tx.ExecContext(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, taskTransferAdmissionLockKey)
 	return err
 }
 

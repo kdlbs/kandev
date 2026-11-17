@@ -103,6 +103,7 @@ func (s *Service) transcriptDelivery(question *models.AsyncQuestion) *models.Asy
 func (s *Service) ownerOutcomeDelivery(question *models.AsyncQuestion, outcome models.AsyncQuestionOutcome) *models.AsyncQuestionDelivery {
 	content := formatOutcomeForOwner(question, outcome)
 	metadata := correlatedMetadata(question, models.AsyncQuestionDeliveryOwner)
+	metadata[MetadataAsyncQuestionOutcomeVersion] = question.Version + 1
 	metadata["async_question_responder"] = string(outcome.ResponderKind)
 	return s.newDelivery(question, models.AsyncQuestionDeliveryOwner,
 		question.TaskID, question.SessionID, content, metadata)
@@ -111,6 +112,7 @@ func (s *Service) ownerOutcomeDelivery(question *models.AsyncQuestion, outcome m
 func (s *Service) parentOutcomeDelivery(question *models.AsyncQuestion, outcome models.AsyncQuestionOutcome) *models.AsyncQuestionDelivery {
 	content := formatOutcomeForParent(question, outcome)
 	metadata := correlatedMetadata(question, models.AsyncQuestionDeliveryParentOutcome)
+	metadata[MetadataAsyncQuestionOutcomeVersion] = question.Version + 1
 	metadata[models.MetaKeyParentQuestionID] = question.ID
 	metadata[models.MetaKeyParentQuestion] = true
 	metadata[models.MetaKeyParentQuestionStatus] = asyncQuestionOutcomeStatus(outcome)
@@ -222,15 +224,13 @@ func (s *Service) admitTranscriptDelivery(ctx context.Context, delivery *models.
 	}
 	question, err := s.store.GetAsyncQuestion(ctx, delivery.QuestionID)
 	if err != nil {
-		s.recordDeliveryFailure(ctx, delivery, err)
-		return false, nil
+		return false, s.recordDeliveryFailure(ctx, delivery, err)
 	}
 	if question == nil {
 		return false, s.store.MarkAsyncQuestionDeliveryAbandoned(ctx, delivery.AdmissionID, "question no longer exists")
 	}
 	if err := s.transcript.WriteAsyncQuestionTranscriptEntry(ctx, delivery, question); err != nil {
-		s.recordDeliveryFailure(ctx, delivery, err)
-		return false, nil
+		return false, s.recordDeliveryFailure(ctx, delivery, err)
 	}
 	if err := s.store.MarkAsyncQuestionDeliveryAdmitted(ctx, delivery.AdmissionID, s.now()); err != nil {
 		return false, err
@@ -246,8 +246,7 @@ func (s *Service) admitQueuedDelivery(ctx context.Context, delivery *models.Asyn
 		if errors.Is(err, ErrDestinationTerminal) {
 			return false, s.store.MarkAsyncQuestionDeliveryAbandoned(ctx, delivery.AdmissionID, err.Error())
 		}
-		s.recordDeliveryFailure(ctx, delivery, err)
-		return false, nil
+		return false, s.recordDeliveryFailure(ctx, delivery, err)
 	}
 	if err := s.store.MarkAsyncQuestionDeliveryAdmitted(ctx, delivery.AdmissionID, s.now()); err != nil {
 		return false, err
@@ -255,7 +254,7 @@ func (s *Service) admitQueuedDelivery(ctx context.Context, delivery *models.Asyn
 	return true, nil
 }
 
-func (s *Service) recordDeliveryFailure(ctx context.Context, delivery *models.AsyncQuestionDelivery, admitErr error) {
+func (s *Service) recordDeliveryFailure(ctx context.Context, delivery *models.AsyncQuestionDelivery, admitErr error) error {
 	attempts := delivery.Attempts + 1
 	backoff := deliveryBackoffBase * time.Duration(1<<min(attempts, 6))
 	if backoff > deliveryBackoffMax {
@@ -264,10 +263,12 @@ func (s *Service) recordDeliveryFailure(ctx context.Context, delivery *models.As
 	if err := s.store.MarkAsyncQuestionDeliveryFailed(ctx, delivery.AdmissionID, attempts, s.now().Add(backoff), admitErr.Error()); err != nil {
 		s.logger.Warn("failed to record async question delivery failure",
 			zap.String("admission_id", delivery.AdmissionID), zap.Error(err))
+		return err
 	}
 	s.logger.Warn("async question delivery admission failed",
 		zap.String("admission_id", delivery.AdmissionID),
 		zap.String("question_id", delivery.QuestionID), zap.Error(admitErr))
+	return nil
 }
 
 // Start runs the cancellable reconciliation loop with a startup drain.

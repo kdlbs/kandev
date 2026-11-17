@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -141,6 +142,59 @@ func TestAsyncQuestionsResolutionWinner(t *testing.T) {
 	}
 	if len(deliveries) != 1 {
 		t.Fatalf("expected exactly one delivery intent, got %d", len(deliveries))
+	}
+}
+
+func TestAsyncQuestionsConcurrentResolutionHasOneWinner(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	question := newAsyncQuestionForTest(t, "q-concurrent-winner", "session-concurrent-winner")
+	createAsyncQuestionForTest(t, repo, question)
+
+	start := make(chan struct{})
+	type result struct {
+		won bool
+		err error
+	}
+	results := make(chan result, 2)
+	var writers sync.WaitGroup
+	for _, optionID := range []string{"a", "b"} {
+		writers.Add(1)
+		go func() {
+			defer writers.Done()
+			<-start
+			_, won, err := repo.ResolveAsyncQuestion(ctx, question.ID,
+				models.AsyncQuestionOutcome{Answers: []protocol.Answer{{QuestionID: "q1", SelectedOptions: []string{optionID}}}},
+				[]*models.AsyncQuestionDelivery{{
+					AdmissionID: "admission-concurrent-" + optionID, Kind: models.AsyncQuestionDeliveryOwner,
+					DestinationTaskID: question.TaskID, DestinationSession: question.SessionID,
+					Content: optionID,
+				}})
+			results <- result{won: won, err: err}
+		}()
+	}
+	close(start)
+	writers.Wait()
+	close(results)
+
+	winners := 0
+	for result := range results {
+		if result.err != nil {
+			t.Fatalf("concurrent resolve: %v", result.err)
+		}
+		if result.won {
+			winners++
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("winning resolutions = %d, want exactly 1", winners)
+	}
+	deliveries, err := repo.ListAsyncQuestionDeliveriesForQuestion(ctx, question.ID, models.AsyncQuestionDeliveryOwner)
+	if err != nil {
+		t.Fatalf("list owner deliveries: %v", err)
+	}
+	if len(deliveries) != 1 {
+		t.Fatalf("owner delivery intents = %d, want exactly 1", len(deliveries))
 	}
 }
 
@@ -284,6 +338,36 @@ func TestAsyncQuestionsOutboxCrashWindow(t *testing.T) {
 	}})
 	if err != nil || won {
 		t.Fatalf("expected losing replay, won=%v err=%v", won, err)
+	}
+}
+
+func TestAsyncQuestionExtraDeliveryPersistsDestinationIncarnation(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	question := newAsyncQuestionForTest(t, "q-extra-delivery-incarnation", "session-extra-delivery-incarnation")
+	createAsyncQuestionForTest(t, repo, question)
+
+	delivery := &models.AsyncQuestionDelivery{
+		AdmissionID: "admission-extra-delivery-incarnation", QuestionID: question.ID,
+		Kind: models.AsyncQuestionDeliveryWake, DestinationTaskID: question.TaskID,
+		DestinationSession: "destination-session", DestinationIncarnationID: "destination-incarnation",
+		Content: "resume after release",
+	}
+	if err := repo.CreateAsyncQuestionDelivery(ctx, delivery); err != nil {
+		t.Fatalf("CreateAsyncQuestionDelivery: %v", err)
+	}
+
+	deliveries, err := repo.ListAsyncQuestionDeliveriesForQuestion(
+		ctx, question.ID, models.AsyncQuestionDeliveryWake,
+	)
+	if err != nil {
+		t.Fatalf("ListAsyncQuestionDeliveriesForQuestion: %v", err)
+	}
+	if len(deliveries) != 1 {
+		t.Fatalf("deliveries = %d, want 1", len(deliveries))
+	}
+	if got := deliveries[0].DestinationIncarnationID; got != "destination-incarnation" {
+		t.Fatalf("destination incarnation = %q, want destination-incarnation", got)
 	}
 }
 

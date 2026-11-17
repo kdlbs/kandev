@@ -102,13 +102,13 @@ func (r *Repository) CreateAsyncQuestionDelivery(ctx context.Context, delivery *
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_async_question_deliveries
 			(admission_id, question_id, outcome_version, kind, destination_task_id,
-			 destination_session_id, content, metadata_json, state, attempts,
+			 destination_session_id, destination_incarnation_id, content, metadata_json, state, attempts,
 			 next_attempt_at, last_error, created_at, admitted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
 		ON CONFLICT (admission_id) DO NOTHING`),
 		delivery.AdmissionID, delivery.QuestionID, delivery.OutcomeVersion,
 		string(delivery.Kind), delivery.DestinationTaskID, delivery.DestinationSession,
-		delivery.Content, string(metadataJSON), string(delivery.State), delivery.Attempts,
+		delivery.DestinationIncarnationID, delivery.Content, string(metadataJSON), string(delivery.State), delivery.Attempts,
 		delivery.NextAttemptAt, delivery.LastError, delivery.CreatedAt,
 	)
 	return err

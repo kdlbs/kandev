@@ -110,6 +110,19 @@ describe("AsyncQuestionRow — presentation", () => {
   });
 });
 
+describe("AsyncQuestionActions — submission status", () => {
+  it("keeps the Submit name stable and announces progress in a status region", async () => {
+    mocks.respond.mockReturnValue(new Promise(() => {}));
+    renderRow();
+    fireEvent.click(screen.getByTestId(ROW_TOGGLE));
+    fireEvent.click(screen.getAllByTestId(OPTION)[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Submit" })).toBeTruthy());
+    expect(screen.getByRole("status").textContent).toBe("Submitting…");
+  });
+});
+
 describe("AsyncQuestionRow — answer flow", () => {
   it("submits the selected option and preserves the request identity", async () => {
     const { onSettled } = renderRow();

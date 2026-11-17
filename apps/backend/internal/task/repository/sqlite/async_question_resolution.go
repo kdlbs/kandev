@@ -69,10 +69,6 @@ func (r *Repository) closeAsyncQuestionWithWaits(
 		return nil, false, nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := r.acquireAsyncQuestionWriteLockTx(ctx, tx, id); err != nil {
-		return nil, false, nil, err
-	}
-
 	current, err := r.lockAsyncQuestionTx(ctx, tx, id)
 	if err != nil {
 		return nil, false, nil, err
@@ -186,18 +182,6 @@ const (
 	asyncQuestionAuthorityForward
 	asyncQuestionAuthorityWithdraw
 )
-
-// acquireAsyncQuestionWriteLockTx takes SQLite's write lock before the first
-// read-modify-write so a concurrent reparent/transfer cannot interleave
-// between the authority read and the terminal transition.
-func (r *Repository) acquireAsyncQuestionWriteLockTx(ctx context.Context, tx *sqlx.Tx, id string) error {
-	if dialect.IsPostgres(r.db.DriverName()) {
-		return nil
-	}
-	_, err := tx.ExecContext(ctx, r.db.Rebind(
-		`UPDATE task_async_questions SET updated_at = updated_at WHERE id = ?`), id)
-	return err
-}
 
 func (r *Repository) validateAsyncQuestionAuthorityTx(
 	ctx context.Context,
@@ -615,9 +599,6 @@ func (r *Repository) ForwardAsyncQuestionWithWakeAndTransition(
 		return nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := r.acquireAsyncQuestionWriteLockTx(ctx, tx, forward.QuestionID); err != nil {
-		return nil, false, err
-	}
 	question, err := r.lockAsyncQuestionTx(ctx, tx, forward.QuestionID)
 	if err != nil {
 		return nil, false, err

@@ -7127,6 +7127,21 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		manualTaskID = taskID
 	}
 	ctx = models.WithExplicitManualCreation(ctx, manualTaskID)
+	if s.asyncQuestionGate != nil {
+		gate := s.asyncQuestionGate
+		previousOnAccepted := options.onAccepted
+		options.onAccepted = func(turnID string) {
+			cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), promptFailureCleanupTimeout)
+			if err := gate.CancelActiveWait(cancelCtx, sessionID, "newer_prompt"); err != nil {
+				s.logger.Warn("failed to cancel superseded async question wait",
+					zap.String("session_id", sessionID), zap.Error(err))
+			}
+			cancel()
+			if previousOnAccepted != nil {
+				previousOnAccepted(turnID)
+			}
+		}
+	}
 
 	// Direct prompts must own the boundary; already-reserved queue work keeps its claim.
 	if s.isInitialTaskBriefDispatchPending(sessionID) &&
@@ -7226,16 +7241,6 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	)
 	if err != nil {
 		return nil, err
-	}
-	// A newer accepted prompt supersedes an older explicit question gate. The
-	// questions themselves stay open; only the captured wait is cancelled. This
-	// runs after all admission/rejection boundaries so a rejected prompt does
-	// not erase a wait that still owns the session.
-	if s.asyncQuestionGate != nil {
-		if err := s.asyncQuestionGate.CancelActiveWait(ctx, sessionID, "newer_prompt"); err != nil {
-			s.logger.Warn("failed to cancel superseded async question wait",
-				zap.String("session_id", sessionID), zap.Error(err))
-		}
 	}
 	if options.internalContinuation {
 		effectivePrompt = prompt
