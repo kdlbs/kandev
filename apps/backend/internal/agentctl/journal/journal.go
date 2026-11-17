@@ -286,10 +286,13 @@ func validateExistingJournal(tx *bolt.Tx, meta *bolt.Bucket, version []byte) err
 		return ErrJournalCorrupt
 	}
 	switch got := binary.BigEndian.Uint32(version); {
-	case got > CurrentVersion:
+	case got > providerMCPJournalVersion:
 		return ErrJournalNewerVersion
 	case got < 1:
 		return ErrJournalCorrupt
+	}
+	if err := validateProviderReaderRequirement(tx, binary.BigEndian.Uint32(version)); err != nil {
+		return err
 	}
 	if err := validateJournalBuckets(tx); err != nil {
 		return err
@@ -301,7 +304,11 @@ func validateExistingJournal(tx *bolt.Tx, meta *bolt.Bucket, version []byte) err
 		return err
 	}
 	var encoded [4]byte
-	binary.BigEndian.PutUint32(encoded[:], CurrentVersion)
+	required := CurrentVersion
+	if binary.BigEndian.Uint32(version) > required {
+		required = binary.BigEndian.Uint32(version)
+	}
+	binary.BigEndian.PutUint32(encoded[:], required)
 	return meta.Put(keyVersion, encoded[:])
 }
 
@@ -321,10 +328,13 @@ func validateExistingJournalReadOnly(tx *bolt.Tx, meta *bolt.Bucket, version []b
 		return ErrJournalCorrupt
 	}
 	switch got := binary.BigEndian.Uint32(version); {
-	case got > CurrentVersion:
+	case got > providerMCPJournalVersion:
 		return ErrJournalNewerVersion
 	case got < 1:
 		return ErrJournalCorrupt
+	}
+	if err := validateProviderReaderRequirement(tx, binary.BigEndian.Uint32(version)); err != nil {
+		return err
 	}
 	if err := validateJournalBuckets(tx); err != nil {
 		return err
@@ -367,6 +377,11 @@ func calculateJournalAccounting(tx *bolt.Tx) (total, legacyEventOnly int64, err 
 	}); err != nil {
 		return 0, 0, ErrJournalCorrupt
 	}
+	receipts, err := providerReceiptAccounting(tx)
+	if err != nil {
+		return 0, 0, err
+	}
+	total += receipts
 	return total, legacyEventOnly, nil
 }
 

@@ -920,10 +920,16 @@ type ExecutorInstance struct {
 func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentExecution {
 	metadata := make(map[string]interface{}, len(req.Metadata)+len(ri.Metadata)+1)
 	for k, v := range req.Metadata {
+		if mcpprofile.IsProviderMCPMetadataKey(k) {
+			continue
+		}
 		metadata[k] = v
 	}
 	// Merge runtime metadata
 	for k, v := range ri.Metadata {
+		if mcpprofile.IsProviderMCPMetadataKey(k) && !instanceReusesExistingProcess(ri) {
+			continue
+		}
 		metadata[k] = v
 	}
 	adoptedPeer := ri.RuntimeName == agentruntime.RuntimeStandalone && instanceReusesExistingProcess(ri)

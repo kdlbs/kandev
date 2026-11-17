@@ -64,3 +64,23 @@ export function saveBuiltinMCPPreferences(
     },
   );
 }
+
+export function retryBuiltinMCPApplication(
+  sessionId: string,
+  requestId: string,
+  rowVersion: number,
+) {
+  return fetchJson<BuiltinMCPSessionView>(
+    `/api/v1/task-sessions/${encodeURIComponent(sessionId)}/mcp-built-in/retry`,
+    {
+      init: {
+        method: "POST",
+        body: JSON.stringify({
+          version: 1,
+          request_id: requestId,
+          expected_row_version: rowVersion,
+        }),
+      },
+    },
+  );
+}

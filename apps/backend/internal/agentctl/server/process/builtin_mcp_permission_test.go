@@ -83,3 +83,24 @@ func TestBuiltinMCPInstancePackageApprovalUsesScopedEndpoint(t *testing.T) {
 	require.False(t, approved)
 	require.Nil(t, response)
 }
+
+func TestProviderReplacementPermissionRequiresCurrentScopedEndpoint(t *testing.T) {
+	ctx := profile.New(profile.SurfaceKanbanTask, nil, nil)
+	ctx.BuiltinPackages = &profile.BuiltinManifest{Version: 1, CatalogVersion: 1, WorkspaceID: "workspace", TaskID: "task", Surface: ctx.Surface, Packages: []profile.PackageID{profile.PackageCore}, Origins: map[profile.PackageID]string{profile.PackageCore: "required"}}
+	digest, err := profile.BuiltinBindingDigest(ctx)
+	require.NoError(t, err)
+	scope := profile.ProviderMCPScope{BindingID: "current", ExecutionID: "execution", HelperID: "helper", ProcessGeneration: 2, HarnessGeneration: 2, ProfileDigest: digest}
+	cfg := &config.InstanceConfig{TaskID: "task", McpProfile: &ctx, Port: 12345, ProviderMCP: &config.ProviderMCPConfig{Scope: scope, Credential: "01234567890123456789012345678901"}}
+	cfg.McpServers, err = config.ProviderBuiltinMCPServers(ctx, *cfg.ProviderMCP, cfg.MCPHost, cfg.Port)
+	require.NoError(t, err)
+	mgr := &Manager{cfg: cfg}
+	mgr.SetBuiltinToolCatalog(func() map[profile.PackageID][]string {
+		return map[profile.PackageID][]string{profile.PackageCore: {"step_complete_kandev"}}
+	})
+	require.True(t, mgr.builtinPermissionAllowed("kandev", "step_complete_kandev"))
+	cfg.McpServers[0].Headers = map[string]string{"Authorization": "Bearer retired-credential"}
+	require.False(t, mgr.builtinPermissionAllowed("kandev", "step_complete_kandev"))
+	cfg.McpServers[0].Headers = nil
+	cfg.McpServers[0].URL = config.MCPServerURL(cfg.MCPHost, cfg.Port, "/mcp")
+	require.False(t, mgr.builtinPermissionAllowed("kandev", "step_complete_kandev"), "legacy routes must not inherit the accepted catalog")
+}

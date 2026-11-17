@@ -73,7 +73,7 @@ func TestJournalOpenFailureClassification(t *testing.T) {
 		}
 		if err := db.Update(func(tx *bolt.Tx) error {
 			version := make([]byte, 4)
-			binary.BigEndian.PutUint32(version, CurrentVersion+1)
+			binary.BigEndian.PutUint32(version, providerMCPJournalVersion+1)
 			return tx.Bucket([]byte("meta")).Put([]byte("version"), version)
 		}); err != nil {
 			_ = db.Close()

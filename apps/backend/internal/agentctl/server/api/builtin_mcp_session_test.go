@@ -148,3 +148,17 @@ func TestBuiltinMCPInstanceScopedSessionDeliveryAndRoute(t *testing.T) {
 	s.router.ServeHTTP(stale, httptest.NewRequest(http.MethodPost, "/mcp/packages/configuration", nil))
 	require.Equal(t, http.StatusNotFound, stale.Code, stale.Body.String())
 }
+
+func TestProviderReplacementSourceTracksInitialRuntimeContext(t *testing.T) {
+	s, _ := newBuiltinSessionServer(t)
+	before, err := s.procMgr.ProviderReplacementSource()
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, setMcpMode(t, s, "task-title-pending").Code)
+	live := s.mcpServer.Profile()
+	digest, err := p.BuiltinBindingDigest(live)
+	require.NoError(t, err)
+	current, err := s.procMgr.ProviderReplacementSource()
+	require.NoError(t, err)
+	require.Equal(t, digest, current.ProfileDigest, "source fencing must include the current title context")
+	require.Greater(t, current.ConfigurationRevision, before.ConfigurationRevision)
+}

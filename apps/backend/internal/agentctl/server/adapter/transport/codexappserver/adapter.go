@@ -78,6 +78,8 @@ type Adapter struct {
 	mu                       sync.RWMutex
 	client                   *protocol.Client
 	info                     *AgentInfo
+	providerVersion          string
+	providerTurnStart        time.Time
 	threadID                 string
 	turnID                   string
 	promptPending            bool
@@ -180,6 +182,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	}
 	a.mu.Lock()
 	a.info = &AgentInfo{Name: name, Version: serverVersion}
+	a.providerVersion = response.UserAgent
 	a.models = models
 	a.mu.Unlock()
 	return nil
@@ -330,6 +333,7 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 	}
 	a.activeGeneration = generation
 	a.promptPending = true
+	a.providerTurnStart = time.Now()
 	a.mu.Unlock()
 	input := []protocol.UserInput{{Type: "text", Text: message}}
 	params := protocol.TurnStartParams{ThreadID: threadID, Input: input}

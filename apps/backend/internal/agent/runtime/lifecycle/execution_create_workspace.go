@@ -87,6 +87,9 @@ func (m *Manager) prepareExecutionWorkspace(ctx context.Context, info *Workspace
 func copyExecutionCreateMetadata(source map[string]interface{}) map[string]interface{} {
 	metadata := make(map[string]interface{}, len(source)+1)
 	for key, value := range source {
+		if mcpprofile.IsProviderMCPMetadataKey(key) {
+			continue
+		}
 		metadata[key] = value
 	}
 	delete(metadata, managedGoCacheMetadataKey)

@@ -3,6 +3,7 @@ package process
 import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/mcp/profile"
+	"maps"
 	"slices"
 )
 
@@ -25,16 +26,22 @@ func (m *Manager) builtinPermissionAllowed(name, tool string) bool {
 	if catalog == nil || !slices.Contains(catalog()[id], tool) {
 		return false
 	}
-	expected, err := config.BuiltinMCPServersForInstance(m.cfg.McpProfile.BuiltinPackages, m.cfg.MCPHost, m.cfg.Port, m.cfg.InstanceID, m.cfg.ScopedMCPRoutes)
+	var expected []config.McpServerConfig
+	var err error
+	if m.cfg.ProviderMCP != nil {
+		expected, err = config.ProviderBuiltinMCPServersForInstance(*m.cfg.McpProfile, *m.cfg.ProviderMCP, m.cfg.MCPHost, m.cfg.Port, m.cfg.InstanceID, m.cfg.ScopedMCPRoutes)
+	} else {
+		expected, err = config.BuiltinMCPServersForInstance(m.cfg.McpProfile.BuiltinPackages, m.cfg.MCPHost, m.cfg.Port, m.cfg.InstanceID, m.cfg.ScopedMCPRoutes)
+	}
 	if err != nil {
 		return false
 	}
 	for _, candidate := range m.cfg.McpServers {
-		if candidate.Name != name || !builtinEndpointOnly(candidate) {
+		if candidate.Name != name || candidate.Command != "" || len(candidate.Args) != 0 || len(candidate.Env) != 0 {
 			continue
 		}
 		for _, injected := range expected {
-			if candidate.Name == injected.Name && candidate.Type == injected.Type && candidate.URL == injected.URL {
+			if candidate.Name == injected.Name && candidate.Type == injected.Type && candidate.URL == injected.URL && maps.Equal(candidate.Headers, injected.Headers) {
 				return true
 			}
 		}

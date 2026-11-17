@@ -10446,6 +10446,9 @@ func (s *Service) drainQueuedMessageForPromptableSessionForIdentity(
 }
 
 func (s *Service) drainQueuedMessageForPromptableSessionLockedForIdentity(ctx context.Context, identity messagequeue.QueueSessionIdentity) (bool, error) {
+	if s.builtinApplicationBlocksQueue(ctx, identity.SessionID) {
+		return false, nil
+	}
 	if s.isCancelInFlight(identity.SessionID) || s.isQueuedDispatchInFlight(identity.SessionID) || s.isSteerInFlight(identity.SessionID) {
 		return false, nil
 	}

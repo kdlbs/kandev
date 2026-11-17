@@ -27,6 +27,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/opencodeplugin"
+	"github.com/kandev/kandev/internal/agentctl/server/process/probe"
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -43,6 +44,7 @@ import (
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	tools "github.com/kandev/kandev/internal/tools/installer"
+	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
 )
 
@@ -125,6 +127,10 @@ const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
+	providerAdmission        providerAdmission
+	providerScoped           atomic.Bool
+	providerScopeOnce        sync.Once
+	providerScopeActivated   chan struct{}
 	processManagerID         string
 	questionImageWorkDir     string
 	questionImageOnce        sync.Once
@@ -388,6 +394,7 @@ type Manager struct {
 	repairStore              *managedruntime.RepairStore
 	repairPublicationTimer   *time.Timer
 	configRevision           uint64
+	workspaceEnvironment     *providerWorkspaceEnvironment
 	preparedRuntimeRevision  uint64
 	preparedRepairContext    *managedruntime.RepairContext
 	preparedRepairEnv        []string
@@ -535,6 +542,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	lifetimeCtx, lifetimeCancel := context.WithCancel(context.Background())
 	m := &Manager{
 		processManagerID:           uuid.NewString(),
+		providerScopeActivated:     make(chan struct{}),
 		questionImageWorkDir:       imageWorkDir,
 		cfg:                        cfg,
 		logger:                     log.WithFields(zap.String("component", "process-manager")),
@@ -561,12 +569,18 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 			m.repairStore = store
 		}
 	}
+	if cfg.ProviderMCP != nil {
+		m.requireProviderMCPProtocol()
+	}
 	if cfg.DurableJournalPath != "" {
 		m.deliveryJournal, m.deliveryJournalErr = journal.Open(journal.Config{Path: cfg.DurableJournalPath})
 		if m.deliveryJournalErr == nil {
 			m.deliveryLimit = m.deliveryJournal.MaxEventBytes()
 			sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
 			m.deliveryJournalErr = m.deliveryJournal.ClassifyAbandonedDispatches(lifetimeCtx, sessionID, incarnationID, m.DeliveryStreamID(), generation)
+			if m.deliveryJournalErr == nil {
+				m.deliveryJournalErr = m.restoreProviderReplacementAdmission(lifetimeCtx)
+			}
 		}
 		if m.deliveryJournalErr != nil {
 			logDeliveryJournalOpenFailure(m.logger, cfg.InstanceID, cfg.SessionID, cfg.DurableJournalPath, m.deliveryJournalErr)
@@ -790,7 +804,16 @@ func (m *Manager) AbandonFailedBootstrapDeliveryStream(ctx context.Context, stre
 // instance IDs identify a process incarnation and may change during executor
 // replacement; the Kandev session owns the retained event stream.
 func (m *Manager) DeliveryStreamID() string {
-	if m == nil || m.cfg == nil {
+	if m == nil {
+		return ""
+	}
+	m.deliveryJournalMu.RLock()
+	defer m.deliveryJournalMu.RUnlock()
+	return m.deliveryStreamIDLocked()
+}
+
+func (m *Manager) deliveryStreamIDLocked() string {
+	if m.cfg == nil {
 		return ""
 	}
 	if m.cfg.DeliveryStreamID != "" {
@@ -836,20 +859,37 @@ func (m *Manager) RolloverDeliveryStream(ctx context.Context, replacementID stri
 // this agentctl instance. The stream ID fallback preserves legacy test and
 // standalone configurations that do not provide continuity metadata.
 func (m *Manager) DeliveryIncarnationID() string {
-	if m == nil || m.cfg == nil {
+	if m == nil {
+		return ""
+	}
+	m.deliveryJournalMu.RLock()
+	defer m.deliveryJournalMu.RUnlock()
+	return m.deliveryIncarnationIDLocked()
+}
+
+func (m *Manager) deliveryIncarnationIDLocked() string {
+	if m.cfg == nil {
 		return ""
 	}
 	if m.cfg.DeliveryIncarnationID != "" {
 		return m.cfg.DeliveryIncarnationID
 	}
-	return m.DeliveryStreamID()
+	return m.deliveryStreamIDLocked()
 }
 
 // DeliveryHarnessGeneration returns the native conversation generation for
-// durable owner fencing. A missing value is the first generation for legacy
-// configurations and is never treated as an unknown owner.
+// durable owner fencing. Legacy configurations start at generation one.
 func (m *Manager) DeliveryHarnessGeneration() uint64 {
-	if m == nil || m.cfg == nil || m.cfg.DeliveryHarnessGeneration == 0 {
+	if m == nil {
+		return 1
+	}
+	m.deliveryJournalMu.RLock()
+	defer m.deliveryJournalMu.RUnlock()
+	return m.deliveryHarnessGenerationLocked()
+}
+
+func (m *Manager) deliveryHarnessGenerationLocked() uint64 {
+	if m.cfg == nil || m.cfg.DeliveryHarnessGeneration == 0 {
 		return 1
 	}
 	return m.cfg.DeliveryHarnessGeneration
@@ -988,7 +1028,9 @@ func (m *Manager) DeliverySubmissionIdentity() (sessionID, incarnationID string,
 	if m == nil || m.cfg == nil {
 		return "", "", 0
 	}
-	return m.cfg.SessionID, m.DeliveryIncarnationID(), m.DeliveryHarnessGeneration()
+	m.deliveryJournalMu.RLock()
+	defer m.deliveryJournalMu.RUnlock()
+	return m.cfg.SessionID, m.deliveryIncarnationIDLocked(), m.deliveryHarnessGenerationLocked()
 }
 
 // RetireDeliverySubmission seals explicitly recovered work. A native resume
@@ -1989,11 +2031,7 @@ func (m *Manager) GitOperatorFor(subpath string) (*GitOperator, error) {
 	return op, nil
 }
 
-func (m *Manager) gitEnvironment() []string {
-	m.startMu.Lock()
-	defer m.startMu.Unlock()
-	return append([]string(nil), m.cfg.AgentEnv...)
-}
+func (m *Manager) gitEnvironment() []string { return m.workspaceEnvSnapshot() }
 
 func (m *Manager) trackerGitEnvironment() []string {
 	m.trackerGitEnvMu.RLock()
@@ -2184,6 +2222,11 @@ func (m *Manager) Start(ctx context.Context) error {
 // created by this call while startup remains serialized against replacement.
 // A compatible published repair is selected before the first attempt.
 func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
+	providerRelease, err := m.BeginProviderOperation("")
+	if err != nil {
+		return 0, err
+	}
+	defer providerRelease()
 	operationCtx, release, err := m.BeginOwnedOperation(ctx)
 	if err != nil {
 		return 0, err
@@ -2223,6 +2266,11 @@ func (m *Manager) StartWithManagedRuntimePreparation(
 	ctx context.Context,
 	directive types.ManagedRuntimePreparationDirective,
 ) (uint64, error) {
+	providerRelease, err := m.BeginProviderOperation("")
+	if err != nil {
+		return 0, err
+	}
+	defer providerRelease()
 	if directive.RemainingBudgetSeconds < 0 {
 		return 0, errors.New("managed runtime preparation budget is invalid")
 	}
@@ -2309,100 +2357,14 @@ func (m *Manager) startWithGeneration(
 	expectedStopGeneration *uint64,
 	expectedRepairContext *managedruntime.RepairContext,
 ) (uint64, error) {
-	m.startMu.Lock()
-	defer m.startMu.Unlock()
-	release, err := m.admitStart()
-	if err != nil {
-		return 0, err
-	}
-	defer release()
-	if m.passthrough.Live() {
-		return 0, fmt.Errorf("passthrough agent is already running")
-	}
-
-	if m.Status() == StatusRunning || m.Status() == StatusStarting {
-		return 0, fmt.Errorf("agent is already running")
-	}
-	if expectedRevision != nil && m.configRevision != *expectedRevision {
-		if prepared != nil {
-			_ = prepared.Close()
-		}
-		return 0, errors.New("managed runtime configuration changed during recovery")
-	}
-	if expectedStopGeneration != nil && m.stopGeneration != *expectedStopGeneration {
-		if prepared != nil {
-			_ = prepared.Close()
-		}
-		return 0, errors.New("managed runtime start was retired by a concurrent stop")
-	}
-	if prepared != nil && preparation == nil {
-		if expectedRepairContext == nil || m.repairStore == nil ||
-			!m.repairStore.MatchesRepairContext(prepared, *expectedRepairContext) {
-			if err := prepared.Close(); err != nil {
-				m.retainPreparedRuntime(prepared)
-			}
-			m.detachPreparedRuntimeLocked()
-			prepared = nil
-		}
-	}
-	if m.cfg.DurableJournalPath != "" && m.deliveryJournalErr != nil {
-		m.status.Store(StatusError)
-		return 0, fmt.Errorf("durable delivery journal unavailable: %w", m.deliveryJournalErr)
-	}
-	// Only an admitted stopped-process start may release an incompatible
-	// selected or pending handle. Every earlier rejection keeps the current
-	// process, publication ticket, deadline, and ledger ownership intact.
-	if prepared == nil && preparation == nil {
-		m.detachPreparedRuntimeLocked()
-	}
-
-	// A previous lifecycle may still be live: an agent that exited on its own
-	// never ran teardown, and Start is reachable without an intervening Stop.
-	m.finishPreviousLifecycle(ctx)
-	if prepared != nil {
-		if preparation != nil {
-			if _, err := m.validateManagedRuntimePreparationDirective(*preparation); err != nil {
-				return 0, err
-			}
-		}
-		if err := m.installPreparedRuntime(prepared); err != nil {
-			return 0, err
-		}
-	}
-	// Stop leaves every workspace tracker terminal. A retained manager that
-	// starts a replacement agent must replace them before the process reads or
-	// streams workspace state again.
-	m.renewWorkspaceTrackersForStart(ctx)
-
-	m.logger.Info("starting agent process",
-		zap.String("protocol", string(m.cfg.Protocol)),
-		zap.Strings("args", m.cfg.AgentArgs),
-		zap.String("workdir", m.cfg.WorkDir),
-		zap.Int("mcp_servers", len(m.cfg.McpServers)))
-
-	m.status.Store(StatusStarting)
-	m.exitCode.Store(-1)
-	m.exitErr.Store(errorWrapper{err: nil})
-
-	if err := config.ValidateCommandArgs(m.cfg.AgentArgs); err != nil {
-		m.status.Store(StatusError)
-		return 0, err
-	}
-
-	// Build adapter config and create protocol adapter
-	if err := m.buildAdapterConfig(); err != nil {
-		m.status.Store(StatusError)
-		return 0, err
-	}
-
-	return m.startConfiguredProcess()
+	return m.startGeneration(ctx, preparation, prepared, expectedRevision, expectedStopGeneration, expectedRepairContext, true)
 }
 
-func (m *Manager) startConfiguredProcess() (uint64, error) {
+func (m *Manager) startConfiguredProcess(workspace bool, reservedGeneration uint64) (uint64, error) {
 	// One-shot adapters manage their own subprocess per prompt.
 	// Skip process creation — the adapter spawns processes in Prompt().
 	if oneShotAdapter, ok := m.adapter.(adapter.OneShotAdapter); ok && oneShotAdapter.IsOneShot() {
-		if err := m.startOneShot(); err != nil {
+		if err := m.startOneShotWithWorkspace(workspace); err != nil {
 			return 0, err
 		}
 		return m.ProcessGeneration(), nil
@@ -2414,7 +2376,7 @@ func (m *Manager) startConfiguredProcess() (uint64, error) {
 		m.closeOpenCodePlugin(context.Background())
 		return 0, err
 	}
-	generation, err := m.startManagedProcess()
+	generation, err := m.startManagedProcessWithWorkspace(workspace, reservedGeneration)
 	if err != nil {
 		m.closeOpenCodePlugin(context.Background())
 	}
@@ -2469,123 +2431,13 @@ func (m *Manager) detachPreparedRuntimeLocked() {
 }
 
 func (m *Manager) startManagedProcess() (uint64, error) {
-	// Set up stdin/stdout/stderr pipes (must happen before process starts)
-	if err := m.startProcessPipes(); err != nil {
-		m.status.Store(StatusError)
-		return 0, err
-	}
-
-	m.ClearStderrBuffer()
-	// Start the subprocess now that pipes are connected
-	if err := m.cmd.Start(); err != nil {
-		_ = m.closeStderrPipe()
-		m.status.Store(StatusError)
-		if !m.cfg.LaunchWrapper.IsZero() {
-			return 0, errors.New("wrapped agent process failed to start")
-		}
-		return 0, formatAgentStartError(err, m.cfg.AgentEnv)
-	}
-	processGeneration := m.beginManagedStartupGeneration()
-	m.watchOpenCodePluginReadiness()
-	if err := m.closeStderrWriter(); err != nil {
-		m.logger.Debug("failed to close parent stderr pipe", zap.Error(err))
-	}
-	processLifecycle, err := installProcessLifecycle(m.cmd)
-	if err != nil {
-		reapErr := killAndWaitStartedCommand(m.cmd)
-		_ = m.closeStderrReader()
-		m.status.Store(StatusError)
-		return 0, errors.Join(fmt.Errorf("failed to install agent process lifecycle: %w", err), reapErr)
-	}
-	m.processLifecycle = processLifecycle
-
-	m.stopCh = make(chan struct{})
-	m.stopChSnapshot.Store(m.stopCh)
-	m.doneCh = make(chan struct{})
-	m.stopChClosed.Store(false)
-	m.shutdownIntent.Store(&atomic.Bool{})
-
-	// Connect adapter to the process stdin/stdout pipes
-	if err := m.adapter.Connect(m.stdin, m.stdout); err != nil {
-		reapErr, owned := m.reapMainProcessLifecycle()
-		switch {
-		case !owned:
-			reapErr = killAndWaitStartedCommand(m.cmd)
-		case reapErr != nil:
-			fallbackErr := killAndWaitStartedCommand(m.cmd)
-			reapErr = errors.Join(reapErr, fallbackErr)
-		default:
-			reapErr = killAndWaitStartedCommand(m.cmd)
-		}
-		_ = m.closeStderrReader()
-		m.status.Store(StatusError)
-		return 0, errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
-	}
-
-	m.recordAgentProcessIdentity(m.cmd.Process.Pid)
-
-	// Start stderr reader and exit waiter. Keep the completion channel local to
-	// this process generation so a delayed reader cannot signal a replacement.
-	stderrDone := make(chan stderrReadResult, 1)
-	m.wg.Add(2)
-	go m.readStderr(stderrDone)
-	go m.waitForExitGeneration(stderrDone, processGeneration)
-
-	// Forward adapter updates to our channel
-	m.wg.Add(1)
-	go m.forwardUpdates(m.adapter, m.stopCh)
-
-	// Start workspace tracker with background context (not tied to HTTP request)
-	root, trackers := m.snapshotTrackers()
-	root.Start(context.Background())
-	for _, t := range trackers {
-		t.Start(context.Background())
-	}
-
-	// Auto-create shell session if enabled
-	m.startAgentShell()
-
-	m.status.Store(StatusRunning)
-	m.logger.Info("agent process started", zap.Int("pid", m.cmd.Process.Pid))
-
-	return processGeneration, nil
+	return m.startManagedProcessWithWorkspace(true, 0)
 }
 
 // startOneShot initialises a one-shot adapter without spawning a long-lived subprocess.
 // The adapter manages its own per-prompt subprocess lifecycle internally.
 func (m *Manager) startOneShot() error {
-	m.cfg.AgentEnv = launchwrapper.StripControlCredentials(m.cfg.AgentEnv)
-	if err := m.prepareOneShotArgs(); err != nil {
-		m.status.Store(StatusError)
-		return err
-	}
-	if m.adapterCfg != nil && m.adapterCfg.OneShotConfig != nil {
-		m.adapterCfg.OneShotConfig.Env = m.cfg.AgentEnv
-	}
-
-	m.stopCh = make(chan struct{})
-	m.stopChSnapshot.Store(m.stopCh)
-	m.doneCh = make(chan struct{})
-	m.stopChClosed.Store(false)
-	m.shutdownIntent.Store(&atomic.Bool{})
-
-	// Forward adapter updates to our channel
-	m.wg.Add(1)
-	go m.forwardUpdates(m.adapter, m.stopCh)
-
-	// Start workspace tracker with background context (not tied to HTTP request)
-	root, trackers := m.snapshotTrackers()
-	root.Start(context.Background())
-	for _, t := range trackers {
-		t.Start(context.Background())
-	}
-
-	// Auto-create shell session if enabled
-	m.startAgentShell()
-
-	m.status.Store(StatusRunning)
-	m.logger.Info("one-shot adapter started (no persistent subprocess)")
-	return nil
+	return m.startOneShotWithWorkspace(true)
 }
 
 // buildAdapterConfig constructs the adapter configuration and initialises the
@@ -2683,7 +2535,7 @@ func (m *Manager) buildAdapterConfig() error {
 	if m.adapterCfg.OneShotConfig != nil {
 		m.adapterCfg.OneShotConfig.Env = m.cfg.AgentEnv
 	}
-	m.setTrackerGitEnvironment(m.cfg.AgentEnv)
+	m.publishWorkspaceEnvironmentLocked()
 	// The adapter owns the immutable copy from here; a replacement process
 	// must be configured with fresh evidence.
 	m.cfg.ProjectMCPDelivery = nil
@@ -2725,7 +2577,10 @@ func (m *Manager) buildFinalCommand() error {
 	// the HTTP request context to kill the agent process when the request completes.
 	m.cmd = exec.Command(finalArgs[0], cmdArgs...)
 	m.cmd.Dir = m.cfg.WorkDir
-	m.cmd.Env = m.cfg.AgentEnv
+	m.cmd.Env = append([]string(nil), m.cfg.AgentEnv...)
+	if m.cfg.Protocol == agent.ProtocolCodexAppServer {
+		m.cmd.Env = upsertEnvValue(m.cmd.Env, probe.ProviderWorkloadEnvKey, m.ProcessManagerID())
+	}
 	// Create a new process group so we can kill all child processes together.
 	// This is important for agents like OpenCode that spawn child processes
 	// (npx -> sh -> node -> opencode binary).
@@ -2894,7 +2749,7 @@ func (m *Manager) startAgentShell() {
 	}
 	// Start calls this while holding startMu. Copy AgentEnv directly instead of
 	// calling agentEnvSnapshot, which would attempt to acquire the same mutex.
-	shellCfg, err := m.buildShellConfigWithAgentEnv(append([]string(nil), m.cfg.AgentEnv...))
+	shellCfg, err := m.buildShellConfigWithAgentEnv(m.workspaceEnvLocked())
 	if err != nil {
 		m.logger.Warn("failed to prepare shell environment", zap.Error(err))
 		return
@@ -2923,13 +2778,13 @@ func (m *Manager) buildShellConfigWithAgentEnv(agentEnv []string) (shell.Config,
 // process request. Explicit request values remain authoritative.
 func (m *Manager) buildProcessRequest(req StartProcessRequest) (StartProcessRequest, error) {
 	var err error
-	req.Env, err = mergeAgentEnvIntoShellConfigWithError(m.agentEnvSnapshot(), req.Env)
+	req.Env, err = mergeAgentEnvIntoShellConfigWithError(m.workspaceEnvSnapshot(), req.Env)
 	return req, err
 }
 
 func (m *Manager) buildPipedProcessRequest(req PipedStartRequest) (PipedStartRequest, error) {
 	var err error
-	req.Env, err = mergeAgentEnvIntoShellConfigWithError(m.agentEnvSnapshot(), req.Env)
+	req.Env, err = mergeAgentEnvIntoShellConfigWithError(m.workspaceEnvSnapshot(), req.Env)
 	if err != nil {
 		return req, err
 	}
@@ -2995,76 +2850,6 @@ func (m *Manager) ConfigureWithEnvironmentAndProjectDelivery(command string, age
 // complete environment replacement with authenticated installer provenance.
 func (m *Manager) ConfigureWithEnvironmentAndProjectDeliveryAndInstallContext(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, delivery *types.ProjectMCPDelivery, installContext *types.ManagedRuntimeInstallContext, wrapper ...launchwrapper.Spec) error {
 	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, delivery, installContext, wrapper...)
-}
-
-func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, delivery *types.ProjectMCPDelivery, installContext *types.ManagedRuntimeInstallContext, wrapper ...launchwrapper.Spec) error {
-	m.startMu.Lock()
-	defer m.startMu.Unlock()
-
-	if m.Status() == StatusRunning || m.Status() == StatusStarting {
-		return ErrConfigureWhileRunning
-	}
-
-	spec, err := configuredLaunchWrapper(wrapper, agentArgsPresent)
-	if err != nil {
-		return err
-	}
-	args := agentArgs
-	if !agentArgsPresent {
-		args = config.ParseCommand(command)
-	}
-	if err := config.ValidateCommandArgs(args); err != nil {
-		return err
-	}
-	continueArgs, err = configuredContinueArgs(continueArgs, continueArgsPresent, continueCommand)
-	if err != nil {
-		return err
-	}
-
-	// Compose the environment before changing any other configuration so a
-	// malformed indexed Git block leaves the instance fully unchanged.
-	mergedEnv, err := composeConfiguredAgentEnvironmentWithManagedGitTools(m.cfg.AgentEnv, env, replaceEnv, m.managedGitTools)
-	if err != nil {
-		return fmt.Errorf("compose configured agent environment: %w", err)
-	}
-	// Delivery evidence is validated before any accepted state changes. An
-	// invalid explicit record fails configuration instead of replacing it.
-	acceptedDelivery, err := m.acceptProjectMCPDelivery(delivery)
-	if err != nil {
-		return err
-	}
-
-	if !sameManagedCommand(m.cfg.AgentArgs, args) || !sameManagedCommand(m.cfg.LaunchWrapper.Argv, spec.Argv) {
-		m.invalidateManagedStartupEvidence()
-		m.managedRuntimeCommand = nil
-	}
-	m.cfg.AgentCommand = command
-	m.cfg.AgentCommandConfigured = true
-	m.cfg.AgentArgs = args
-	m.cfg.LaunchWrapper = launchwrapper.Profile(spec.Argv)
-	m.cfg.LaunchWrapperRequired = !spec.IsZero()
-	m.cfg.ProjectMCPDelivery = acceptedDelivery
-
-	// Store continue command for one-shot adapters
-	if continueArgsPresent {
-		m.cfg.ContinueCommand = continueCommand
-		m.cfg.ContinueArgs = continueArgs
-	} else if continueCommand != "" {
-		m.cfg.ContinueCommand = continueCommand
-		m.cfg.ContinueArgs = continueArgs
-	}
-
-	m.cfg.AgentEnv = mergedEnv
-	m.cfg.ManagedRuntimeInstallContext = installContext.Clone()
-	if m.adapterCfg != nil && m.adapterCfg.OneShotConfig != nil {
-		m.adapterCfg.OneShotConfig.Env = append([]string(nil), m.cfg.AgentEnv...)
-	}
-	m.setTrackerGitEnvironment(m.cfg.AgentEnv)
-
-	m.configRevision++
-	m.logger.Info("agent configured", zap.Int("env_count", len(env)), zap.Bool("wrapped", !spec.IsZero()))
-
-	return nil
 }
 
 // configuredContinueArgs normalizes the optional continue command while
@@ -3215,7 +3000,7 @@ func (m *Manager) createAdapter() error {
 	// Set the permission handler
 	m.adapter.SetPermissionHandler(m.handlePermissionRequest)
 	if setter, ok := m.adapter.(adapter.UserInputRequestHandlerSetter); ok {
-		setter.SetUserInputRequestHandler(m.userInputRequestHandler)
+		setter.SetUserInputRequestHandler(m.providerUserInputHandler())
 	}
 
 	return nil
@@ -3346,6 +3131,9 @@ func (m *Manager) persistDeliveryEvent(update adapter.AgentEvent) (adapter.Agent
 func (m *Manager) persistDeliveryEventContext(ctx context.Context, update adapter.AgentEvent) (adapter.AgentEvent, error) {
 	if connectionScopedStartupControlEvent(update) {
 		return update, nil
+	}
+	if m.suppressProviderReplacementTerminal(update) {
+		return adapter.AgentEvent{}, nil
 	}
 	deliveryJournal, eventLimit, configured, writer := m.deliveryWriteState()
 	if eventLimit <= 0 {
@@ -3760,81 +3548,7 @@ func (m *Manager) closeDeliveryJournal() error {
 
 func (m *Manager) stop(ctx context.Context) error {
 	m.retireManagedRuntimeRepair()
-	m.stopInProgress.Add(1)
-	defer m.stopInProgress.Add(-1)
-	if err := m.passthrough.StopAll(ctx); err != nil {
-		return err
-	}
-	defer m.closeOpenCodePlugin(ctx)
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// Stop intentionally serializes the full teardown under m.mu. The shutdown
-	// path closes adapters, stdin, shell sessions, and process groups as one
-	// lifecycle transition; concurrent readers may briefly block while process
-	// group reaping finishes.
-
-	// Stop trackers before the status guard: passthrough never calls Start() so the early return below would otherwise leak them.
-	m.stopWorkspaceTrackers()
-	comparisonStopErr, comparisonTargetsDrained := m.stopComparisonTargetOperations(ctx)
-	if comparisonTargetsDrained {
-		defer m.reopenComparisonTargetOperations()
-	}
-
-	status := m.Status()
-	if status == StatusStopped || status == StatusStopping {
-		m.logger.Info("Stop called but already stopped/stopping",
-			zap.String("status", string(status)),
-			zap.Int("pid", m.agentPID()))
-		if status == StatusStopped {
-			// The agent process reaches StatusStopped on its own whenever the
-			// child exits without an explicit Stop (waitForExit stores it). The
-			// adapter and stopCh were never torn down in that case, so do it
-			// here — otherwise the adapter's update worker and forwardUpdates
-			// stay alive for the lifetime of the manager. The call is a no-op
-			// after a normal stop, in which case behaviour is unchanged.
-			tornDown := m.closeAdapterAndStdin()
-			if err := m.stopShellAndProcesses(ctx); err != nil {
-				return errors.Join(comparisonStopErr, err)
-			}
-			switch {
-			case m.mainReapPending.Load():
-				if err := m.waitForProcessExit(ctx); err != nil {
-					return errors.Join(comparisonStopErr, err)
-				}
-				m.mainReapPending.Store(false)
-			case tornDown:
-				m.drainAfterLateTeardown(ctx)
-			}
-			return comparisonStopErr
-		}
-		return nil
-	}
-
-	m.logger.Info("stopping agent process - START",
-		zap.Int("pid", m.agentPID()),
-		zap.String("protocol", m.agentProtocol()))
-	m.logger.Debug("agent process stop requested",
-		zap.Int("pid", m.agentPID()),
-		zap.String("protocol", m.agentProtocol()))
-	m.status.Store(StatusStopping)
-	if stopping := m.shutdownIntent.Load(); stopping != nil {
-		stopping.Store(true)
-	}
-
-	auxiliaryStopErr := errors.Join(comparisonStopErr, m.stopShellAndProcesses(ctx))
-	m.closeAdapterAndStdin()
-	m.killProcessGroupIfRequired()
-	mainStopErr := m.waitForProcessExit(ctx)
-
-	m.status.Store(StatusStopped)
-	m.logger.Info("stopping agent process - COMPLETE")
-	if stopErr := errors.Join(auxiliaryStopErr, mainStopErr); stopErr != nil {
-		m.mainReapPending.Store(mainStopErr != nil)
-		return stopErr
-	}
-	m.mainReapPending.Store(false)
-	return nil
+	return m.stopWithWorkspace(ctx, true)
 }
 
 func (m *Manager) agentPID() int {
@@ -4486,13 +4200,7 @@ func (m *Manager) waitForExitGeneration(stderrDone <-chan stderrReadResult, gene
 				"startup_evidence":   evidence,
 			},
 		}
-		m.recordTerminalOutcome(&event)
-		if persisted, persistErr := m.persistDeliveryEvent(event); persistErr != nil {
-			m.logger.Error("failed to commit durable exit error event", zap.Error(persistErr))
-		} else {
-			event = persisted
-			m.sendUpdateBlockingRecorded(event)
-		}
+		m.publishProviderExitError(event)
 	default:
 		m.exitCode.Store(0)
 		m.logger.Info("agent process exited successfully",
@@ -5135,7 +4843,7 @@ func (m *Manager) StartShell() error {
 	if !m.cfg.ShellEnabled {
 		return nil
 	}
-	shellCfg, err := m.buildShellConfigWithAgentEnv(m.cfg.AgentEnv)
+	shellCfg, err := m.buildShellConfigWithAgentEnv(m.workspaceEnvLocked())
 	if err != nil {
 		return fmt.Errorf("prepare shell environment: %w", err)
 	}
@@ -5159,7 +4867,7 @@ func (m *Manager) StartTerminalShell(terminalID string, cfg shell.Config) (*shel
 		return nil, err
 	}
 	defer release()
-	cfg.Env, err = mergeAgentEnvIntoShellConfigWithError(m.agentEnvSnapshot(), cfg.Env)
+	cfg.Env, err = mergeAgentEnvIntoShellConfigWithError(m.workspaceEnvSnapshot(), cfg.Env)
 	if err != nil {
 		return nil, fmt.Errorf("prepare terminal shell environment: %w", err)
 	}

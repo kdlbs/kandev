@@ -91,6 +91,9 @@ func (r *sqliteRepository) PutBuiltinTaskPreferences(ctx context.Context, candid
 	if err := writeBuiltinTaskPreferences(ctx, tx, next); err != nil {
 		return nil, err
 	}
+	if err := writeBuiltinApplicationIntents(ctx, tx, current, next, surface); err != nil {
+		return nil, err
+	}
 	current.Preferences = next
 	return current, tx.Commit()
 }

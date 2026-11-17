@@ -75,6 +75,10 @@ export type BuiltinMCPCreateDraft = {
   preferences: BuiltinMCPInitialPreferences;
 };
 export type BuiltinMCPSessionView = {
+  application?: BuiltinMCPApplication;
+  provider_binding?: BuiltinMCPProviderBinding;
+  provider_available?: boolean;
+  can_retry_application?: boolean;
   workspace_id: string;
   task_id: string;
   session_id: string;
@@ -84,4 +88,38 @@ export type BuiltinMCPSessionView = {
   binding_state: "unknown" | "accepted" | "legacy";
   history?: import("@/lib/state/slices/session-runtime/types").MCPAttachmentHistory;
   walkthrough_availability: "unknown" | "available" | "unavailable";
+};
+
+export type BuiltinMCPApplication = {
+  session_id: string;
+  task_id: string;
+  workspace_id: string;
+  target_revision: number;
+  request_id: string;
+  row_version: number;
+  stage:
+    | "pending"
+    | "preparing"
+    | "retiring"
+    | "starting"
+    | "verifying"
+    | "accepting"
+    | "applied"
+    | "failed"
+    | "superseded";
+  reason?: string;
+};
+export type BuiltinMCPProviderBinding = {
+  session_id: string;
+  scope: {
+    binding_id: string;
+    execution_id: string;
+    helper_id: string;
+    process_generation: number;
+    harness_generation: number;
+    profile_digest: string;
+  };
+  manifest: BuiltinMCPManifest;
+  catalog: Record<string, string[]>;
+  accepted_at: string;
 };

@@ -107,6 +107,9 @@ func (s *Server) registerBuiltinRoutes(router gin.IRouter) {
 
 func (s *Server) serveBuiltinPackage(id mcpprofile.PackageID, transport string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !s.allowGenerationTransport(c) {
+			return
+		}
 		s.mu.RLock()
 		view := s.builtinPackages[id]
 		s.mu.RUnlock()
@@ -164,7 +167,7 @@ func registeredPackageNames(registry *server.MCPServer) []string {
 
 func (s *Server) newBuiltinRegistry(id mcpprofile.PackageID) *server.MCPServer {
 	hooks := new(server.Hooks)
-	registry := server.NewMCPServer("kandev-"+string(id), "1.0.0", server.WithToolCapabilities(true), server.WithHooks(hooks))
+	registry := server.NewMCPServer("kandev-"+string(id), "1.0.0", server.WithToolCapabilities(true), server.WithHooks(hooks), server.WithInstructions(s.providerInstructions))
 	hooks.AddBeforeCallTool(func(_ context.Context, requestID any, request *mcp.CallToolRequest) {
 		s.restorePackageToolName(registry, request)
 		stampTransportRequestID(request, requestID)

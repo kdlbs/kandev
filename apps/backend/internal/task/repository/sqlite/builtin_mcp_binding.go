@@ -79,13 +79,19 @@ func (r *Repository) retainBuiltinBindingTx(ctx context.Context, tx *sqlx.Tx, ru
 	if err := json.Unmarshal([]byte(candidate), &next); err != nil {
 		return "", err
 	}
-	delete(next, p.BuiltinBindingMetadataKey)
-	if value, exists := prior[p.BuiltinBindingMetadataKey]; exists {
-		if next == nil {
-			next = make(map[string]json.RawMessage)
+	for _, key := range protectedBuiltinMetadataKeys {
+		delete(next, key)
+		if value, exists := prior[key]; exists {
+			if next == nil {
+				next = make(map[string]json.RawMessage)
+			}
+			next[key] = value
 		}
-		next[p.BuiltinBindingMetadataKey] = value
 	}
 	encoded, err := json.Marshal(next)
 	return string(encoded), err
+}
+
+var protectedBuiltinMetadataKeys = []string{
+	p.BuiltinBindingMetadataKey, p.ProviderMCPBindingMetadataKey, p.ProviderMCPRuntimeProfileMetadataKey, p.ProviderMCPEffectsClosedMetadataKey, p.ProviderMCPOperationMetadataKey,
 }

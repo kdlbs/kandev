@@ -100,7 +100,7 @@ func (s *Server) instanceAuth(staticToken string, exemptPaths ...string) gin.Han
 	}
 
 	return func(c *gin.Context) {
-		if exempt[c.Request.URL.Path] {
+		if exempt[c.Request.URL.Path] || strings.HasPrefix(c.Request.URL.Path, s.cfg.NativeMCPRoutePrefix+"/mcp/generations/") {
 			c.Next()
 			return
 		}

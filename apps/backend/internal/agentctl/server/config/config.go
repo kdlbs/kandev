@@ -408,7 +408,8 @@ type InstanceConfig struct {
 	McpProviders []string
 
 	// McpProfile is the backend-owned typed MCP tool profile.
-	McpProfile *mcpprofile.Context
+	McpProfile  *mcpprofile.Context
+	ProviderMCP *ProviderMCPConfig `json:"-"`
 
 	// ProjectMCPDelivery is execution-bound evidence that the host materialized
 	// the bound built-in packages into a project configuration file. It is

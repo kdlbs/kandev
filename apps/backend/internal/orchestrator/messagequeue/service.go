@@ -63,6 +63,7 @@ type sessionAdmissionToken struct {
 	service              *Service
 	sessionID            string
 	afterLifecycleUnlock *[]func()
+	lease                *sessionAdmissionLease
 }
 
 type queueAttachmentRepository interface {
@@ -337,7 +338,7 @@ func (s *Service) WithSessionAdmission(ctx context.Context, sessionID string, fn
 	}
 	if token, ok := ctx.Value(sessionAdmissionContextKey{}).(sessionAdmissionToken); ok &&
 		token.service == s {
-		if token.sessionID == sessionID {
+		if token.sessionID == sessionID && (token.lease == nil || !token.lease.released.Load()) {
 			return fn(ctx)
 		}
 		waitCtx, cancel, ownBudget := admissionWaitBudget(ctx)
@@ -424,18 +425,21 @@ func (s *Service) withSessionAdmissionLock(
 		s.admissionMu.Unlock()
 		return admissionWaitError(err, ownBudget)
 	}
-	defer func() {
+	lease := &sessionAdmissionLease{}
+	release := sync.OnceFunc(func() {
+		lease.released.Store(true)
 		entry.gate.unlock()
 		s.admissionMu.Lock()
+		defer s.admissionMu.Unlock()
 		entry.refs--
 		if entry.refs == 0 && entry.promptRefs == 0 && s.admissions[sessionID] == entry {
 			delete(s.admissions, sessionID)
 		}
-		s.admissionMu.Unlock()
-	}()
-
+	})
+	lease.release = release
+	defer release()
 	admittedCtx := context.WithValue(callbackCtx, sessionAdmissionContextKey{}, sessionAdmissionToken{
-		service: s, sessionID: sessionID, afterLifecycleUnlock: afterLifecycleUnlock,
+		service: s, sessionID: sessionID, afterLifecycleUnlock: afterLifecycleUnlock, lease: lease,
 	})
 	return fn(admittedCtx)
 }

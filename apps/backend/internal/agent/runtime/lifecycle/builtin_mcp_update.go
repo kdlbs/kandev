@@ -15,6 +15,12 @@ import (
 func (m *Manager) updateBuiltinProfile(ctx context.Context, execution *AgentExecution, change func(*p.Context) error, apply func() error) error {
 	execution.builtinMCPMu.Lock()
 	defer execution.builtinMCPMu.Unlock()
+	if execution.providerMCPEffectsClosed() {
+		return ErrProviderMCPApplicationPending
+	}
+	if value, present := execution.metadataValue(p.ProviderMCPBindingMetadataKey); present {
+		return m.updateProviderRuntimeProfile(ctx, execution, value, change, apply)
+	}
 	value, bound := execution.metadataValue(p.BuiltinBindingMetadataKey)
 	if !bound {
 		return apply()

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Dialog, DialogContent, DialogTrigger } from "@kandev/ui/dialog";
 import { Drawer, DrawerContent, DrawerTrigger } from "@kandev/ui/drawer";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -22,6 +22,8 @@ import { mcpSelectionInitialView } from "./mcp-selection-presentation";
 import { useBuiltinMCPManagement } from "@/hooks/domains/workspace/use-builtin-mcp-management";
 import { useBuiltinMCPSession } from "@/hooks/domains/session/use-builtin-mcp-session";
 import type { BuiltinMCPPackage } from "@/lib/types/builtin-mcp";
+
+import { providerAwareServers } from "./builtin-provider-binding";
 
 type Navigation = ReturnType<typeof useMcpExplorerNavigation>;
 
@@ -128,7 +130,7 @@ function DesktopExplorer({
 
 export function McpServerExplorer({
   trigger,
-  servers,
+  servers: observedServers,
   selection,
 }: {
   trigger: ReactNode;
@@ -141,6 +143,10 @@ export function McpServerExplorer({
   const [view, setView] = useState<"connections" | "customize">("connections");
   const [query, setQuery] = useState("");
   const { builtin, builtinSession, setBuiltinSelected } = useBuiltinExplorer(selection, open);
+  const servers = useMemo(
+    () => providerAwareServers(observedServers, builtinSession.view),
+    [observedServers, builtinSession.view],
+  );
   const handled = isHandledApiError(selection?.error);
   useEffect(() => {
     setOpen(false);

@@ -262,6 +262,16 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 		}()
 	}
 
+	if c.GetHeader(types.ProviderMCPReplacementHeader) != "1" {
+		go func() {
+			select {
+			case <-s.procMgr.ProviderMCPProtocolActivation():
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
+	}
+
 	// Use a mutex for writing to the WebSocket
 	var writeMu sync.Mutex
 	writeMessage := func(data []byte) error {
@@ -709,6 +719,13 @@ func (s *Server) writeAgentStreamMCPRequest(mcpReq *ws.Message, streamID string,
 
 // handleAgentStreamRequest dispatches agent operation requests received on the WebSocket stream.
 func (s *Server) handleAgentStreamRequest(ctx context.Context, msg *ws.Message) *ws.Message {
+	if providerActionNeedsAdmission(msg.Action) {
+		release, err := s.procMgr.BeginProviderOperation("")
+		if err != nil {
+			return s.providerAdmissionError(msg)
+		}
+		defer release()
+	}
 	// Extract remote trace context from WS message metadata for cross-process span linking
 	if len(msg.Metadata) > 0 {
 		ctx = otel.GetTextMapPropagator().Extract(ctx, propagation.MapCarrier(msg.Metadata))
@@ -737,7 +754,7 @@ func (s *Server) handleAgentStreamRequest(ctx context.Context, msg *ws.Message) 
 		return s.handleWSPermissionResolve(msg)
 	case "agent.permissions.cancel":
 		return s.handleWSPermissionCancel(msg)
-	case "agent.stderr":
+	case agentActionStderr:
 		return s.handleWSStderr(ctx, msg)
 	case "agent.background.probe":
 		return s.handleWSBackgroundProbe(ctx, msg)

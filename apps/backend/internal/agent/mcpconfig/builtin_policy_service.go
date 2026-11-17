@@ -46,6 +46,7 @@ type BuiltinPolicyService struct {
 	repo      BuiltinPolicyRepository
 	authorize BuiltinPolicyAuthorizer
 	taskScope BuiltinTaskScope
+	taskSaved func(string)
 }
 
 func NewBuiltinPolicyService(repo BuiltinPolicyRepository, authorize BuiltinPolicyAuthorizer, taskScope BuiltinTaskScope) *BuiltinPolicyService {
@@ -98,7 +99,11 @@ func (s *BuiltinPolicyService) UpdateTask(ctx context.Context, taskID string, ex
 			delete(preferences.Packages, id)
 		}
 	}
-	return s.repo.PutBuiltinTaskPreferences(ctx, preferences, expectedRevision, expectedPolicyRevision, surface)
+	snapshot, err := s.repo.PutBuiltinTaskPreferences(ctx, preferences, expectedRevision, expectedPolicyRevision, surface)
+	if err == nil && s.taskSaved != nil {
+		s.taskSaved(taskID)
+	}
+	return snapshot, err
 }
 
 func builtinHumanActor(ctx context.Context) (string, error) {
@@ -117,3 +122,11 @@ func (s *BuiltinPolicyService) authorizeWorkspace(ctx context.Context, workspace
 	}
 	return s.authorize(ctx, workspaceID, requested)
 }
+
+// SetTaskSavedCallback installs the coalesced application wake after commit.
+func (s *BuiltinPolicyService) SetTaskSavedCallback(callback func(string)) { s.taskSaved = callback }
+
+// BuiltinHumanActor is the management boundary for explicit application Retry.
+func BuiltinHumanActor(ctx context.Context) (string, error) { return builtinHumanActor(ctx) }
+
+var ErrBuiltinApplicationConflict = errors.New("built-in MCP application request changed")

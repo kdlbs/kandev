@@ -311,3 +311,8 @@ func parseFirstEnvVar(data []byte, name string) (string, bool) {
 func isLinuxProcessGone(err error) bool {
 	return os.IsNotExist(err) || errors.Is(err, syscall.ESRCH)
 }
+
+func (linuxProcessTableReader) HasProviderWorkloadID(pid int, owner string) (bool, error) {
+	value, ok, err := readLinuxEnvVar(pid, ProviderWorkloadEnvKey)
+	return ok && value == owner, err
+}

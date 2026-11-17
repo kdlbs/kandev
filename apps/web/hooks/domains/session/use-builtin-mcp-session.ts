@@ -34,6 +34,7 @@ export function useBuiltinMCPSession(
   const [loaded, setLoaded] = useState<{
     key: string;
     view?: BuiltinMCPSessionView;
+    application?: BuiltinMCPSessionView["application"];
     error?: unknown;
   }>();
   const refresh = useCallback(async () => {
@@ -50,9 +51,14 @@ export function useBuiltinMCPSession(
         view.workspace_id !== workspaceId
       )
         return;
-      setLoaded({ key, view });
+      setLoaded({ key, view, application: view.application });
     } catch (error) {
-      if (live()) setLoaded({ key, error });
+      if (live())
+        setLoaded((previous) => ({
+          key,
+          error,
+          application: previous?.key === key ? previous.application : undefined,
+        }));
     }
   }, [enabled, key, taskId, sessionId, workspaceId, refreshKey]);
   useEffect(() => {
@@ -61,9 +67,53 @@ export function useBuiltinMCPSession(
       current.current.sequence += 1;
     };
   }, [refresh]);
+  useApplicationPolling(
+    enabled,
+    loaded?.key === key ? loaded.application : undefined,
+    key,
+    refresh,
+  );
   return {
     view: enabled && loaded?.key === key ? loaded.view : undefined,
     error: loaded?.key === key ? loaded.error : undefined,
     refresh,
   };
+}
+
+function useApplicationPolling(
+  enabled: boolean,
+  application: BuiltinMCPSessionView["application"],
+  key: string,
+  refresh: () => Promise<void>,
+) {
+  useEffect(() => {
+    if (
+      !enabled ||
+      application?.reason === "acceptance_unconfirmed" ||
+      !application?.stage ||
+      ["applied", "failed", "superseded"].includes(application.stage)
+    )
+      return;
+    let busy = false;
+    const poll = async () => {
+      if (busy || document.visibilityState === "hidden") return;
+      busy = true;
+      try {
+        await refresh();
+      } finally {
+        busy = false;
+      }
+    };
+    const timer = setInterval(() => {
+      void poll();
+    }, 2000);
+    const foreground = () => {
+      if (document.visibilityState === "visible") void poll();
+    };
+    document.addEventListener("visibilitychange", foreground);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", foreground);
+    };
+  }, [enabled, application?.stage, application?.reason, key, refresh]);
 }

@@ -78,30 +78,49 @@ no unsaved edits. An unsaved draft stays intact when the explorer reopens.
 
 ## Check when changes apply
 
-Choices apply at the next normal agent-process start, across all normal sessions
-of the task. Saving, reconnecting, or continuing a retained process does not
-replace its accepted packages. Legacy retained processes keep their combined
-Kandev server until their next normal start.
+A human task save creates an update request for each existing session. A supported
+idle agent restarts only its provider process. A running agent waits until its
+current turn, questions, tool calls, and provider background work have settled.
+The update preserves the conversation, task, workspace, and queued messages.
+Terminals, previews, and editor connections remain available during the update.
 
-Open **Connections** and select a native server to compare **Next process start**
-with **Current process accepted**. These are separate from connection status and
-observed tools. A selected package is not proof of a healthy connection, and
-acceptance is not proof that `tools/list` succeeded. Missing tool counts are
-unknown, not zero. One package's evidence does not describe another package.
+Automatic application currently supports Codex app-server 0.166.0 on Linux with
+a compatible retained helper. Other providers, versions, transports, and legacy
+helpers keep the saved change pending until a supported normal process start.
+Kandev does not cancel work or start a fresh conversation to apply settings.
 
-Connections also lists pending package additions and removals under **Next process
-start**. Select a pending package to review its choice. An added package stays
-separate from the current process's connections until a new process accepts it.
-If the current agent's package set is unknown, the saved selections remain
-visible with an Unknown explanation. They are not reported as new connections.
+Workspace policy saves and automation edits still affect future process starts.
+They do not trigger this task update. If workspace policy changes while a task
+update is pending, save the task selection again to confirm the new effective set.
+
+Open the task MCP explorer to check the saved request:
+
+- **Saved and pending** means the selection is stored, but the current tools have not changed.
+- **Applying** means Kandev is replacing and checking the provider.
+- **Applied** requires a resumed conversation and a complete catalog for the saved selection.
+- **Failed** keeps the saved selection. The notice states whether tools remain available.
+  Select **Retry** to retry the current saved selection. Retry does not submit a chat turn.
+
+A failed update does not close workspace services or remove queued input.
+Kandev does not retry failed replacements in a loop. An uncertain final
+acceptance also requires explicit Retry after its verification deadline.
+Each session reports its own result, so one session can remain pending while
+another has applied the same task selection.
+
+In **Connections**, select a native server to compare the saved selection and
+current accepted packages. After application, Connections shows the verified
+current catalog. It removes tools from retired packages. While tools are
+unavailable, historical attachment evidence does not appear as active tools.
+A selected package alone does not prove a healthy connection. Missing tool
+counts remain unknown. One package's evidence does not describe another package.
 
 Walkthrough requests use the accepted packages while the agent process is live.
 After the process stops, requests use the saved choices for its next start. An
 unavailable runtime check leaves availability unknown.
 
 If a Walkthrough request is unavailable, inspect its task choice and current
-process acceptance. After changing the choice, start a new process. Refresh
-Connections to check again. Existing walkthroughs remain readable; queued
+process acceptance. After changing the choice, check the update status. Unsupported providers
+need a normal process start. Refresh Connections to check again. Existing walkthroughs remain readable; queued
 requests retain their Walkthrough requirement and do not bypass it on delivery.
 
 Kandev injects native packages separately from workspace MCP definitions. The

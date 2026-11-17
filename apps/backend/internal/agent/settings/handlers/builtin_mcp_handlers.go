@@ -50,6 +50,9 @@ func RegisterBuiltinMCPRoutes(router *gin.Engine, service *mcpconfig.BuiltinPoli
 	if interlock != nil {
 		mutations.Use(interlock)
 	}
+	if retrier, ok := sessions.(builtinSessionRetrier); ok {
+		mutations.POST("/task-sessions/:id/mcp-built-in/retry", builtinMCPRetryHandler(retrier))
+	}
 	mutations.PUT("/workspaces/:id/mcp-built-in/policy", h.updateWorkspace)
 	mutations.PUT("/tasks/:id/mcp-built-in/preferences", h.updateTask)
 }
@@ -115,6 +118,8 @@ func decodeBuiltinMCPWrite(c *gin.Context, task bool) (*builtinMCPWrite, error) 
 func writeBuiltinMCPError(c *gin.Context, err error) {
 	var conflict *mcpconfig.BuiltinPolicyConflictError
 	switch {
+	case errors.Is(err, mcpconfig.ErrBuiltinApplicationConflict):
+		c.JSON(http.StatusConflict, gin.H{"error_code": "builtin_mcp_application_conflict"})
 	case errors.As(err, &conflict):
 		c.JSON(http.StatusConflict, gin.H{"error_code": "builtin_mcp_conflict", "current": conflict.Current})
 	case errors.Is(err, mcpconfig.ErrBuiltinHumanRequired), errors.Is(err, mcpconfig.ErrMCPWorkspaceAccess), taskservice.IsForbidden(err):

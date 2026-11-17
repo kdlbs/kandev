@@ -83,3 +83,39 @@ func TestBuiltinManagementHTTPValidatesCompleteVersionedWrites(t *testing.T) {
 	request(http.MethodPut, "/api/v1/workspaces/workspace/mcp-built-in/policy", policy, 409)
 	require.Equal(t, 1, repo.writes)
 }
+
+type builtinRetryReader struct{ calls int }
+
+func (r *builtinRetryReader) ReadBuiltinSessionMCP(context.Context, string) (*mcpconfig.BuiltinSessionView, error) {
+	return &mcpconfig.BuiltinSessionView{SessionID: "session"}, nil
+}
+func (r *builtinRetryReader) RetryBuiltinSessionMCP(_ context.Context, session, request string, version int64) (*mcpconfig.BuiltinSessionView, error) {
+	r.calls++
+	return &mcpconfig.BuiltinSessionView{SessionID: session}, nil
+}
+
+func TestBuiltinApplicationRetryHTTPRequiresHumanAndCurrentRequest(t *testing.T) {
+	for _, human := range []bool{false, true} {
+		reader := &builtinRetryReader{}
+		router := gin.New()
+		if human {
+			router.Use(func(c *gin.Context) {
+				c.Request = c.Request.WithContext(authn.WithIdentity(c.Request.Context(), authn.Identity{UserID: "owner"}))
+				c.Next()
+			})
+		}
+		service := mcpconfig.NewBuiltinPolicyService(&builtinHandlerStore{}, func(context.Context, string, authz.Scope) error { return nil }, nil)
+		RegisterBuiltinMCPRoutes(router, service, nil, reader)
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/task-sessions/session/mcp-built-in/retry", strings.NewReader(`{"version":1,"request_id":"saved-request","expected_row_version":4}`))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if human {
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			require.Equal(t, 1, reader.calls)
+		} else {
+			require.Equal(t, http.StatusForbidden, response.Code)
+			require.Zero(t, reader.calls)
+		}
+	}
+}

@@ -47,6 +47,10 @@ func (e *AgentExecution) acquireContextResetOperation(ctx context.Context) (func
 	if err := waitForContextResetLease(ctx, e.contextResetAdmissionMu.TryRLock); err != nil {
 		return nil, err
 	}
+	if e.providerMCPEffectsClosed() {
+		e.contextResetAdmissionMu.RUnlock()
+		return nil, ErrProviderMCPApplicationPending
+	}
 	if e.idleSuspensionInProgress.Load() {
 		e.contextResetAdmissionMu.RUnlock()
 		return nil, ErrIdleSuspensionInProgress

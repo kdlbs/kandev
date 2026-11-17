@@ -120,6 +120,9 @@ func normalizeMode(mode string) string {
 
 // Server wraps the MCP server with backend client for communication.
 type Server struct {
+	generationGate             *builtinGenerationGate
+	generations                builtinGenerations
+	providerInstructions       string
 	builtinPackages            map[mcpprofile.PackageID]*builtinPackageServer
 	backend                    BackendClient
 	sessionID                  string
@@ -289,6 +292,7 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 		setter.SetSessionID(sessionID)
 	}
 	s := &Server{
+		generationGate:             &builtinGenerationGate{accepted: true},
 		backend:                    backend,
 		sessionID:                  sessionID,
 		taskID:                     taskID,
@@ -329,6 +333,7 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 		server.WithToolCapabilities(true),
 		server.WithCacheHints(0, mcp.CacheScopePrivate),
 		server.WithHooks(hooks),
+		server.WithInstructions(s.providerInstructions),
 	)
 	hooks.AddBeforeAny(func(ctx context.Context, _ any, _ mcp.MCPMethod, _ any) {
 		if server.IsModernRequest(ctx) {
@@ -518,7 +523,7 @@ func (s *Server) mcpHTTPContext(ctx context.Context, _ *http.Request) context.Co
 	s.attachmentMu.RLock()
 	attempt := s.attachmentAttempt
 	s.attachmentMu.RUnlock()
-	return context.WithValue(ctx, mcpAttachmentAttemptContextKey{}, attempt)
+	return s.generationContext(context.WithValue(ctx, mcpAttachmentAttemptContextKey{}, attempt))
 }
 
 func mcpAttachmentAttemptFromContext(ctx context.Context) (streams.MCPAttachmentAttempt, bool) {
@@ -759,8 +764,18 @@ func opaqueMCPConnectionID(connectionID string) string {
 // Used by agentctl which serves the MCP transport at /sse, /message, /mcp.
 func (s *Server) RegisterRoutes(router gin.IRouter) {
 	s.registerBuiltinRoutes(router)
-	router.GET("/sse", gin.WrapH(s.sseServer.SSEHandler()))
-	router.POST("/message", gin.WrapH(s.sseServer.MessageHandler()))
+	router.Any("/mcp/generations/:bindingID", s.serveBuiltinGeneration)
+	router.Any("/mcp/generations/:bindingID/*packagePath", s.serveBuiltinGeneration)
+	router.GET("/sse", func(c *gin.Context) {
+		if s.allowGenerationTransport(c) {
+			s.sseServer.SSEHandler().ServeHTTP(c.Writer, c.Request)
+		}
+	})
+	router.POST("/message", func(c *gin.Context) {
+		if s.allowGenerationTransport(c) {
+			s.sseServer.MessageHandler().ServeHTTP(c.Writer, c.Request)
+		}
+	})
 	router.Any("/mcp", s.serveCurrentStreamableHTTP)
 
 	s.logger.Info("registered MCP routes", zap.String("sse", "/sse"), zap.String("http", "/mcp"))
@@ -782,6 +797,9 @@ func (s *Server) RegisterBackendRoutes(router gin.IRouter) {
 
 // Close shuts down the MCP server.
 func (s *Server) Close(ctx context.Context) error {
+	if err := s.closeBuiltinGenerations(ctx); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -819,6 +837,12 @@ func (s *Server) wrapSensitiveHandler(toolName string, handler server.ToolHandle
 
 func (s *Server) wrapHandlerWithArgumentLogging(toolName string, handler server.ToolHandlerFunc, logArguments bool) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		release, admissionErr := s.beginGenerationEffect(ctx)
+		if admissionErr != nil {
+			return mcp.NewToolResultError(admissionErr.Error()), nil
+		}
+		defer release()
+		ctx = s.generationContext(ctx)
 		start := time.Now()
 
 		fields := []zap.Field{zap.String("tool", toolName)}

@@ -1495,6 +1495,9 @@ func (m *Manager) handleAgentEventAtContextResetBoundaryInternal(
 			zap.String("event_type", event.Type), zap.Uint64("runtime_epoch", execution.runtimeEpoch))
 		return
 	}
+	if execution.providerMCPEffectsClosed() && m.executionStore.ActivePromptGeneration(execution.ID) == 0 && (event.Type == streams.EventTypeError || event.Type == streams.EventTypeComplete) {
+		return
+	}
 	event.AttemptID = attemptID
 	if !idleSuspensionReplay && execution.bufferIdleSuspensionEvent(idleSuspensionEvent{
 		event: event, enforceResetBoundary: enforceResetBoundary, attemptID: attemptID,

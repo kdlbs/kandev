@@ -108,3 +108,18 @@ func TestBuiltinPolicyWritersRequireTheirResourceScope(t *testing.T) {
 	require.ErrorIs(t, err, ErrMCPWorkspaceAccess)
 	require.Nil(t, repo.snapshot.Preferences)
 }
+
+func TestBuiltinApplicationWakeFollowsHumanSave(t *testing.T) {
+	repo, service := builtinPolicyTestService()
+	calls := []string{}
+	hook, ok := any(service).(interface{ SetTaskSavedCallback(func(string)) })
+	require.True(t, ok, "the coordinator must wake only after a human preference commit")
+	hook.SetTaskSavedCallback(func(task string) { require.NotNil(t, repo.snapshot.Preferences); calls = append(calls, task) })
+	_, err := service.UpdateTask(context.Background(), "task", 0, 0, BuiltinPackageChoices{p.PackageConfiguration: "on"})
+	require.Error(t, err)
+	require.Empty(t, calls)
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "owner"})
+	_, err = service.UpdateTask(ctx, "task", 0, 0, BuiltinPackageChoices{p.PackageConfiguration: "on"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"task"}, calls)
+}

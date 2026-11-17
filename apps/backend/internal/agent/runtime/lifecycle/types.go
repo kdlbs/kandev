@@ -33,11 +33,13 @@ const AgentCtlPort = ports.AgentCtl
 
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
-	builtinMCPMu sync.Mutex
 	// registrationSettled closes after this newly created execution is either
 	// persisted as the session's current runtime or rolled back.
 	registrationSettled     chan struct{}
 	registrationSettledOnce sync.Once
+	builtinMCPMu            sync.Mutex
+	providerEffectMu        sync.Mutex
+	providerEffects         int
 	// projectMCP carries execution-bound evidence that the host materialized
 	// the selected built-in packages into a project configuration file. It is
 	// produced only after a successful write and never persisted.
