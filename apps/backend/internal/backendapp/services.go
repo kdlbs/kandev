@@ -27,6 +27,7 @@ import (
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	analyticsservice "github.com/kandev/kandev/internal/analytics/service"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/automation"
 	canvasservice "github.com/kandev/kandev/internal/canvas"
 	"github.com/kandev/kandev/internal/common/config"
@@ -109,7 +110,7 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 		enabled: cfg.Features.WorkspaceCollaboration, store: repos.Task,
 	}, repos.Task)
 
-	wireTaskWorkflowCrossReferences(taskSvc, workflowSvc, userSecretStore, repos, log)
+	wireTaskWorkflowCrossReferences(taskSvc, workflowSvc, core.editorSvc, userSecretStore, repos, log)
 
 	providers, err := initThirdPartyProviders(ctx, cfg, dbPool, eventBus, repos, storeTracker, taskSvc, promptSvc, workflowSvc, log)
 	if err != nil {
@@ -506,12 +507,12 @@ func initIntegrationWiring(
 	return wiring, nil
 }
 
-// wireTaskWorkflowCrossReferences wires the task and workflow services'
-// mutual dependencies: each owns a slice of behavior the other needs to call
-// through an adapter, since neither package may import the other directly.
+// wireTaskWorkflowCrossReferences wires the task, workflow, and editor
+// services at their shared authorization and lifecycle boundaries.
 func wireTaskWorkflowCrossReferences(
 	taskSvc *taskservice.Service,
 	workflowSvc *workflowservice.Service,
+	editorSvc *editorservice.Service,
 	userSecretStore secrets.SecretStore,
 	repos *Repositories,
 	log *logger.Logger,
@@ -536,6 +537,23 @@ func wireTaskWorkflowCrossReferences(
 	// Session history is owned by workflow service, but access is owned by the
 	// task service. Keep the authorization check at the service boundary.
 	workflowSvc.SetSessionAccessChecker(taskSvc.AuthorizeSessionAccess)
+	editorSvc.SetSessionAccessChecker(func(ctx context.Context, sessionID string) error {
+		session, err := repos.Task.GetTaskSession(ctx, sessionID)
+		if err != nil || session == nil {
+			return editorservice.ErrWorkspaceNotFound
+		}
+		// Editor launches run on the backend host, not through the session's
+		// executor. Check task reach and session.exec without executor admission:
+		// historical sessions can outlive their executor configuration.
+		err = taskSvc.AuthorizeTaskScope(ctx, session.TaskID, authz.ScopeSessionExec)
+		if taskservice.IsForbidden(err) {
+			return editorservice.ErrSessionForbidden
+		}
+		if err != nil {
+			return editorservice.ErrWorkspaceNotFound
+		}
+		return nil
+	})
 	// Same split for the rest of the workflow-step surface: the workflow
 	// package owns steps, templates and export/import, but a workflow's owner
 	// is its workspace's owner, which only the task service can resolve.

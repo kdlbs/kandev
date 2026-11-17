@@ -201,7 +201,7 @@ func (f *assignmentBlockerFixture) completedStateEvent(t *testing.T, id string) 
 	blockerMust(t, f.eb.Publish(context.Background(), events.TaskStateChanged, bus.NewEvent(events.TaskStateChanged, "orchestrator", data)))
 }
 
-func (f *assignmentBlockerFixture) dashboardComplete(t *testing.T, id, done string) {
+func (f *assignmentBlockerFixture) dashboardComplete(t *testing.T, ts *taskservice.Service, id, done string) {
 	t.Helper()
 	ctx := context.Background()
 	task, err := f.tasks.GetTask(ctx, id)
@@ -211,15 +211,14 @@ func (f *assignmentBlockerFixture) dashboardComplete(t *testing.T, id, done stri
 	log := logger.Default()
 	dash := dashboard.NewDashboardService(f.repo, log, shared.NewActivityLogger(f.repo, log), f.svc, nil)
 	dash.SetTaskStateWriter(f.tasks)
+	dash.SetTaskStateChangePublisher(ts)
 	dash.SetReactivityApplier(scheduler.NewDashboardReactivityAdapter(f.scheduler))
-	blockerMust(t, dash.UpdateTaskStatus(ctx, dashboard.TaskStatusUpdateRequest{TaskID: id, NewStatus: "done", SuppressStatusActivity: true}))
-	// Canonical terminal completion publishes this state transition after Dashboard.
-	f.completedStateEvent(t, id)
+	blockerMust(t, dash.UpdateTaskStatus(ctx, dashboard.TaskStatusUpdateRequest{TaskID: id, NewStatus: "done"}))
 }
 
 // @covers AC-OFFICE-SCHEDULER-002.7 AC-OFFICE-SCHEDULER-002.9
 func TestOfficeAssignmentBlockerCommittedCompletion(t *testing.T) {
-	for _, source := range []string{"move_office", "move_kanban_prerequisite", "dashboard_and_state_event"} {
+	for _, source := range []string{"move_office", "move_kanban_prerequisite", "dashboard"} {
 		t.Run(source, func(t *testing.T) {
 			f := newAssignmentBlockerFixture(t)
 			blockerMust(t, f.scheduler.RegisterTaskCompletionSubscriber(f.eb))
@@ -228,8 +227,8 @@ func TestOfficeAssignmentBlockerCommittedCompletion(t *testing.T) {
 			ids := f.heldCompletionTask(t, ts, work)
 			generation := f.generation(t, "dependent")
 			for i, id := range ids {
-				if source == "dashboard_and_state_event" {
-					f.dashboardComplete(t, id, done)
+				if source == "dashboard" {
+					f.dashboardComplete(t, ts, id, done)
 				} else {
 					step, err := f.workflows.GetStep(context.Background(), done)
 					blockerMust(t, err)
