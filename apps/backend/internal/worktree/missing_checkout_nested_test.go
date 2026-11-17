@@ -75,8 +75,9 @@ func TestRecoveryAdmissionNeverRecreatesMissingNestedWorktree(t *testing.T) {
 	nested := fixture.addNestedAdoptedSlot(t, false)
 
 	_, err := fixture.manager.AdmitRecovery(context.Background(), fixture.request)
-	if err == nil {
-		t.Fatal("AdmitRecovery succeeded for a missing nested checkout it cannot place")
+	const wantErr = "automatic recovery requires a persisted managed task-root identity"
+	if err == nil || !strings.Contains(err.Error(), wantErr) {
+		t.Fatalf("AdmitRecovery error = %v, want %q", err, wantErr)
 	}
 	if _, statErr := os.Lstat(nested.Path); !os.IsNotExist(statErr) {
 		t.Fatalf("missing nested checkout was recreated at %q (stat err %v)", nested.Path, statErr)
@@ -97,6 +98,8 @@ func TestMissingCheckoutLocationClassifiesTaskRootDescendants(t *testing.T) {
 		{name: "nested inside own task root", path: filepath.Join(fixture.worktreePath, ".tmp", "agent"), wantManaged: false},
 		{name: "outside tasks base", path: filepath.Join(t.TempDir(), "repo"), wantManaged: false},
 		{name: "another task root", path: filepath.Join(tasksBase, "other-task", "repo"), wantManaged: true,
+			wantErr: "does not match its managed task-root identity"},
+		{name: "nested inside another task root", path: filepath.Join(tasksBase, "other-task", "repo", ".tmp", "agent"), wantManaged: true,
 			wantErr: "does not match its managed task-root identity"},
 		{name: "task root itself", path: taskRoot, wantManaged: true,
 			wantErr: "does not match its managed task-root identity"},
