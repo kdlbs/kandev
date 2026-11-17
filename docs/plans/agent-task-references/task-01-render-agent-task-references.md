@@ -269,3 +269,11 @@ After the merge, rebuilt the web, backend, and E2E helper binaries. Re-ran the
 54 focused frontend tests, sysprompt tests, typecheck, translation checks, four
 desktop and two phone browser tests, documentation catalog validation, and
 specification lint. All passed. The task-reference implementation is unchanged.
+
+### Compact phone references
+
+User feedback replaced the 44px agent-reference minimum with a compact 24px
+minimum and snug line height. Existing user-mention sizing is unchanged.
+The updated mobile regression checks content-fit height, wrapping, and direct
+tap navigation. Both phone browser tests, 16 component tests, typecheck,
+production web build, and specification lint passed.

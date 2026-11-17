@@ -46,7 +46,8 @@ export const TaskMentionChip = forwardRef<HTMLAnchorElement, TaskMentionChipProp
           color
             ? TASK_REFERENCE_COLORS[color]
             : "border-primary/30 bg-primary/10 text-primary! hover:bg-primary/20",
-          isMobile || !isFinePointer ? "min-h-11" : "min-h-6",
+          prefix !== "" && (isMobile || !isFinePointer) ? "min-h-11" : "min-h-6",
+          prefix === "" && "leading-snug",
           className,
         )}
       >

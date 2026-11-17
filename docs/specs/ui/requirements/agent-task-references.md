@@ -50,7 +50,7 @@ an identifier or losing the surrounding sentence.
   Missing metadata shall show no invented status or workflow. Escape shall
   dismiss the disclosure without activating the link.
 - **AC-UI-AGENT-TASK-REFERENCE-001.4:** Phone and coarse-pointer chips shall have
-  at least 44px active height. Long titles and adjacent chips shall wrap within
+  a compact 24px minimum height that fits inline text. Long titles and adjacent chips shall wrap within
   the message without overlapping targets or document horizontal scrolling.
   A single tap shall navigate directly. The destination provides task details
   without a hover dependency or an intermediate drawer.

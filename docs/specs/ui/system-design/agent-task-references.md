@@ -113,8 +113,9 @@ activation. Escape dismisses the tooltip and focus stays on the anchor.
 
 On phones or coarse pointers, omit the tooltip and use direct navigation.
 The nearest shipped exemplar is `TaskMentionChip`, verified by
-`mobile-chat-task-mentions.spec.ts`. Use `useResponsiveBreakpoint`: phone width
-requires 44px sizing even with a fine pointer. Long and adjacent references wrap
+`mobile-chat-task-mentions.spec.ts`. Agent references use a 24px minimum height
+and snug line height on all viewports so inline text is not stretched. Existing
+user mentions keep their touch sizing. Long and adjacent references wrap
 with nonoverlapping hit areas. Keep the existing conversation scroller and
 destination safe-area behavior. No new fixed surface or persistent preference.
 

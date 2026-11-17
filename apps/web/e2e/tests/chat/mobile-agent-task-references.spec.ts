@@ -20,12 +20,19 @@ test("phone agent references wrap and open with one tap", async ({
   await expect
     .poll(() => targetLink.evaluate((element) => getComputedStyle(element).color))
     .not.toBe(accent);
+  await expect(targetLink).toHaveCSS("min-height", "24px");
+  const labelHeight = await targetLink
+    .locator("span")
+    .evaluate((el) => el.getBoundingClientRect().height);
+  expect((await targetLink.boundingBox())!.height).toBeLessThanOrEqual(
+    Math.max(24, labelHeight + 6) + 1,
+  );
   const bounds = await message.boundingBox();
   expect(bounds).not.toBeNull();
   const boxes = await Promise.all((await links.all()).map((link) => link.boundingBox()));
   for (const box of boxes) {
     expect(box).not.toBeNull();
-    expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(24);
     expect(box!.x).toBeGreaterThanOrEqual(bounds!.x);
     expect(box!.x + box!.width).toBeLessThanOrEqual(bounds!.x + bounds!.width);
   }
