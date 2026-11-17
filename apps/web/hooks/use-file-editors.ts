@@ -1,5 +1,7 @@
 "use client";
 
+import { shouldOpenFilePreview, previewFileState } from "@/lib/plugins/file-viewer-selection";
+
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   isFileRenameRetargeting,
@@ -151,6 +153,10 @@ async function loadRestoredTab(
   const { activeSessionId, activeSessionIdRef, setFileState } = params;
   try {
     const itemId = buildRepoScopedItemId(savedTab.path, savedTab.repo);
+    if (shouldOpenFilePreview(savedTab.path)) {
+      setFileState(itemId, previewFileState(savedTab.path, savedTab.repo));
+      return true;
+    }
     const response = await requestFileContent(
       client,
       activeSessionId,

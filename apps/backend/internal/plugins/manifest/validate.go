@@ -138,6 +138,7 @@ func (m *Manifest) Validate() error {
 	errs = append(errs, m.validateRepoURL()...)
 	errs = append(errs, m.validateUIPages()...)
 	errs = append(errs, m.validateUIBundle()...)
+	errs = append(errs, m.validateFileViewers()...)
 	errs = append(errs, m.validateWebApps()...)
 	errs = append(errs, m.validateUIKeybindings()...)
 	errs = append(errs, m.validateWebhooks()...)

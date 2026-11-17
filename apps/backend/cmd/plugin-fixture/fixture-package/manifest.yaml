@@ -246,6 +246,10 @@ webhooks:
     access: public
 
 ui:
+  file_viewers:
+    - id: stl
+      title: Fixture STL viewer
+      extensions: [stl]
   bundle: "/ui/bundle.js"
   keybindings:
     - id: open-demo

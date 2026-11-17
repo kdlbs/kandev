@@ -2057,3 +2057,31 @@ Ship a bundle that on `initialize` registers: a nav item "Hello" → route
 `/plugins/hello` rendering a native page (uses `host.jsx` + `host.ui`), a
 `task-sidebar` slot component, and a WS handler for `task.created` that updates a
 counter in its page via the plugin's own module state. No bundled React.
+
+### File viewers
+
+`registry.registerFileViewer({ id, Component })` registers a native component
+against `ui.file_viewers[].id`. The manifest owns `title` and `extensions`.
+Undeclared or duplicate runtime registrations fail. Only ready generations can
+be selected. Unload revokes registrations and aborts mounted preview work.
+
+```ts
+interface FileViewerProps {
+  file: { name: string; sizeBytes: number; generation: string };
+  readBytes(signal: AbortSignal): Promise<ArrayBuffer>;
+}
+```
+
+The host mounts a component only after applicable external-file consent and
+successful bounded byte delivery. Treat the buffer as owned by this preview;
+a worker may receive it by transfer. Do not retry a detached buffer. A new load
+requires a new user request. No raw body enters persisted editor or plugin state.
+The host byte protocol's completion marker is private to the host wrapper and
+never appears in `readBytes` output. The same component serves desktop and phone.
+
+See the [authoring guide](../../public/plugins-authoring.md#file-viewer-plugins)
+for permission, resource, and cleanup obligations. This additive contract has not
+yet been assigned a released SDK or minimum host version.
+
+File viewers also render rich-output `FilePreview` cards in chat through the
+same registration and permission checks. See the [authoring guide](../../public/plugins-authoring.md#reuse-viewers-in-rich-file-previews) for the agent payload and lifecycle.

@@ -63,7 +63,14 @@ export function PluginsSettings() {
       showSaveButton={false}
       contentFrame="none"
     >
-      <Tabs defaultValue="installed" className="space-y-4">
+      <Tabs
+        defaultValue={
+          new URLSearchParams(window.location.search).get("tab") === "browse"
+            ? "browse"
+            : "installed"
+        }
+        className="space-y-4"
+      >
         <TabsList>
           <TabsTrigger
             value="installed"

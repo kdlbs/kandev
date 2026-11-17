@@ -1,5 +1,8 @@
 "use client";
 
+import { FileViewerOptions } from "./file-viewer-options";
+import { PluginFilePreview } from "./plugin-file-preview";
+import { shouldOpenFilePreview } from "@/lib/plugins/file-viewer-selection";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { FileEditorContent, type FileEditorContentProps } from "./file-editor-content";
@@ -517,7 +520,7 @@ function LoadedFileEditorPanel({
   );
 }
 
-export const FileEditorPanel = memo(function FileEditorPanel({
+const TextFileEditorPanel = memo(function TextFileEditorPanel({
   panelId,
   params,
 }: FileEditorPanelProps) {
@@ -612,5 +615,20 @@ export const FileEditorPanel = memo(function FileEditorPanel({
         onDownload,
       }}
     />
+  );
+});
+
+export const FileEditorPanel = memo(function FileEditorPanel(props: FileEditorPanelProps) {
+  const path = props.params.path as string;
+  const repo = props.params.repo as string | undefined;
+  const key = buildRepoScopedItemId(path, repo);
+  const file = useDockviewStore((s) => s.openFiles.get(key));
+  const sessionId = useAppStore((s) => s.tasks.activeSessionId);
+  if (sessionId && (file?.previewOnly || (!file && shouldOpenFilePreview(path))))
+    return <PluginFilePreview path={path} repo={repo} sessionId={sessionId} />;
+  return (
+    <FileViewerOptions path={path} repo={repo} sessionId={sessionId}>
+      <TextFileEditorPanel {...props} />
+    </FileViewerOptions>
   );
 });
