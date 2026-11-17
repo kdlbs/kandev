@@ -7,6 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/task/repository"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -49,7 +50,7 @@ type mockAgentManager struct {
 	cleanupStaleExecutionCallCount     int
 	setExecutionEnvCallCount           int
 	setMcpModeCallCount                int
-	startAgentProcessCallCount         int
+	startAgentProcessCallCount         atomic.Int32
 	stopAgentCallCount                 int
 	isAgentRunningForSessionCallArgs   []string
 	promptAgentCallCount               int
@@ -108,8 +109,9 @@ func (m *mockAgentManager) SetMcpMode(_ context.Context, _ string, _ string) err
 	return nil
 }
 
+// StartAgentProcess counts asynchronous starts before invoking the configured handler.
 func (m *mockAgentManager) StartAgentProcess(ctx context.Context, agentExecutionID string) error {
-	m.startAgentProcessCallCount++
+	m.startAgentProcessCallCount.Add(1)
 	if m.startAgentProcessFunc != nil {
 		return m.startAgentProcessFunc(ctx, agentExecutionID)
 	}

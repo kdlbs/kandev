@@ -82,12 +82,6 @@ describe("workspace source state provider validation", () => {
         baseBranch: "main",
       },
       {
-        key: "azure-ssh",
-        kind: "repository" as const,
-        remoteUrl: "git@ssh.dev.azure.com:v3/acme/platform/api",
-        baseBranch: "main",
-      },
-      {
         key: "unsupported",
         kind: "repository" as const,
         remoteUrl: "https://bitbucket.org/acme/api.git",

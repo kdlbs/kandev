@@ -232,7 +232,7 @@ The standard Kanban editor exposes these events:
 | `on_turn_start` | A user sends a message, including the first non-empty prompt when a task is created with an explicit workflow step. The transition happens before that message is delivered. Prompts started automatically when a task enters a step do not run this event. | Move next, previous, or to a selected step. |
 | `on_turn_complete` | A normal agent turn finishes when its signal requirements are satisfied. An explicit user cancellation qualifies when the step enables its cancellation policy, even if the completion signal is absent. A pending clarification always blocks completion. | Move next, previous, or to a selected step; disable plan mode. |
 | `on_exit` | A task leaves a step. | Disable plan mode. |
-| `on_children_completed` | Every active direct child task of the task is terminal. | Move next, previous, or to a selected step. |
+| `on_children_completed` | Every counted active direct child task is `COMPLETED`. Failed or cancelled children do not trigger it. | Move next, previous, or to a selected step. |
 | `on_pr_merged` | The PR poller reports that every GitHub pull request linked to the task is merged. Runs once per merged set, without an agent turn. | Move next, previous, or to a selected step. |
 | `on_pr_closed` | The PR poller reports that a linked pull request was closed without merging. Runs once per close, without an agent turn. | Move next, previous, or to a selected step. |
 

@@ -168,6 +168,8 @@ func TestPiProjectMCPNewExecutionSurvivesPreviousCleanup(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 41007,
 	}
+	attachLegacyMCPRouteClient(oldExecution)
+	attachLegacyMCPRouteClient(newExecution)
 
 	require.NoError(t, mgr.materializeRuntimeProjectMCP(context.Background(), oldExecution, agentConfig, nil, ""))
 	require.NoError(t, mgr.materializeRuntimeProjectMCP(context.Background(), newExecution, agentConfig, nil, ""))
@@ -214,6 +216,7 @@ func TestPiProjectMCPUserFileSurvivesTeardown(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 41007,
 	}
+	attachLegacyMCPRouteClient(execution)
 
 	require.NoError(t, mgr.materializeRuntimeProjectMCP(context.Background(), execution, agentConfig, nil, ""))
 	mgr.cleanupPassthroughMCPConfig(execution)
@@ -310,6 +313,7 @@ func TestPiProjectMCPUserEditDisablesOwnedCleanup(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 41007,
 	}
+	attachLegacyMCPRouteClient(execution)
 
 	require.NoError(t, mgr.materializeRuntimeProjectMCP(context.Background(), execution, agentConfig, nil, ""))
 	require.NoError(t, os.WriteFile(path, []byte(`{"settings":{"owner":"user"}}`), 0o600))
@@ -339,6 +343,8 @@ func TestPiProjectMCPMaterializeAndCleanupAreSerialized(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 41007,
 	}
+	attachLegacyMCPRouteClient(oldExecution)
+	attachLegacyMCPRouteClient(newExecution)
 	require.NoError(t, mgr.materializeRuntimeProjectMCP(context.Background(), oldExecution, agentConfig, nil, ""))
 
 	start := make(chan struct{})
@@ -382,6 +388,7 @@ func TestPiProjectMCPRecoveredOwnershipProtectsSuccessor(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 41006,
 	}
+	attachLegacyMCPRouteClient(firstExecution)
 	require.NoError(t, firstManager.materializeRuntimeProjectMCP(context.Background(), firstExecution, firstAgent, nil, ""))
 
 	// Reconstruct the old execution from the persisted metadata that survives
@@ -408,6 +415,7 @@ func TestPiProjectMCPRecoveredOwnershipProtectsSuccessor(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 41007,
 	}
+	attachLegacyMCPRouteClient(newExecution)
 	require.NoError(t, secondManager.materializeRuntimeProjectMCP(context.Background(), newExecution, secondAgent, nil, ""))
 
 	secondManager.cleanupPassthroughMCPConfig(recovered)
@@ -437,6 +445,8 @@ func TestPiProjectMCPSuccessorCleanupCanFinishBeforePredecessor(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 41007,
 	}
+	attachLegacyMCPRouteClient(oldExecution)
+	attachLegacyMCPRouteClient(newExecution)
 	require.NoError(t, mgr.materializeRuntimeProjectMCP(context.Background(), oldExecution, agentConfig, nil, ""))
 	require.NoError(t, mgr.materializeRuntimeProjectMCP(context.Background(), newExecution, agentConfig, nil, ""))
 

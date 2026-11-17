@@ -109,6 +109,9 @@ contracts are independent.
 
 ### 4. Write system design
 
+Apply the [solution simplicity (KISS) rules](../plan/SKILL.md#solution-simplicity-kiss)
+to technical choices.
+
 Create or update this file when the change needs a technical design:
 
 ```text

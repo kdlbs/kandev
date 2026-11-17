@@ -33,8 +33,11 @@ func (s *Server) BindInitialProfile(profile p.Context, port int) error {
 		return errors.New("built-in MCP packages are already bound")
 	}
 	switch s.profile.Surface {
-	case p.SurfaceExternal, p.SurfaceAutomation, p.SurfaceCoordinator, p.SurfaceManagedConversation:
+	case p.SurfaceExternal, p.SurfaceCoordinator, p.SurfaceManagedConversation:
 		return errors.New("this helper surface cannot bind task packages")
+	}
+	if s.profile.Surface == p.SurfaceAutomation && profile.Surface != p.SurfaceAutomation {
+		return errors.New("built-in binding surface mismatch")
 	}
 	s.profile = profile
 	s.mode = modeForProfile(profile)
@@ -50,7 +53,7 @@ func (s *Server) BindInitialProfile(profile p.Context, port int) error {
 	s.initializeBuiltinTransports(port)
 	s.rebuildTools()
 	_ = s.httpServer.Shutdown(context.Background())
-	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer, server.WithEndpointPath("/mcp"), server.WithStateful(true), server.WithHTTPContextFunc(s.mcpHTTPContext))
+	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer, server.WithEndpointPath(s.nativeRoutePath("/mcp")), server.WithStateful(true), server.WithHTTPContextFunc(s.mcpHTTPContext))
 	return nil
 }
 

@@ -205,6 +205,8 @@ type ManagedConversationAutomationDelivery interface {
 
 // Service coordinates automation operations.
 type Service struct {
+	mcpDefinitions           MCPDefinitionReader
+	mcpBuiltinPolicy         MCPBuiltinPolicyReader
 	executorContext          func(context.Context, string, string) (context.Context, error)
 	pluginAutomation         PluginAutomationProvider
 	pluginToolOptions        PluginToolOptionsProvider
@@ -542,6 +544,9 @@ func (s *Service) createAutomation(ctx context.Context, req *CreateAutomationReq
 	if err := validateManagedDestination(taskMode, req.ManagedDestination); err != nil {
 		return nil, err
 	}
+	if err := s.validateMCPSelection(ctx, req.WorkspaceID, taskMode, req.MCPSelection); err != nil {
+		return nil, err
+	}
 	pluginTools, unlockPluginTools, err := s.pluginToolsForSave(ctx, req.WorkspaceID, req.PluginTools, hasNativePluginToolIntent(ctx), taskMode)
 	if err != nil {
 		return nil, err
@@ -612,6 +617,7 @@ func (s *Service) createAutomation(ctx context.Context, req *CreateAutomationReq
 		TaskTitleTemplate:                req.TaskTitleTemplate,
 		RetryPolicy:                      req.RetryPolicy,
 		PluginTools:                      pluginTools,
+		MCPSelection:                     req.MCPSelection.Clone(),
 		Enabled:                          true,
 		MaxConcurrentRuns:                maxRuns,
 		ContinuationPolicy:               continuationPolicy,
@@ -751,6 +757,9 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 	if err := validateManagedDestination(taskMode, managedDestination); err != nil {
 		return nil, err
 	}
+	if err := s.validateMCPSelection(ctx, existing.WorkspaceID, taskMode, req.MCPSelection); err != nil {
+		return nil, err
+	}
 	if req.PluginTools != nil {
 		if !hasNativePluginToolIntent(ctx) {
 			return nil, errors.New("plugin tools may only be changed by the native automation editor")
@@ -848,6 +857,9 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 		clone.RepositoryMode = &repositoryMode
 		storeReq = &clone
 	}
+	validated := *storeReq
+	validated.validatedTaskMode = &existing.TaskMode
+	storeReq = &validated
 	selectionChanged := req.PluginTools != nil || (req.TaskMode != nil && taskMode != existing.TaskMode)
 	notifySelectionChanged := func() {
 		if selectionChanged {
@@ -855,7 +867,8 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 		}
 	}
 	if req.Enabled != nil && !*req.Enabled {
-		if err := s.store.UpdateAutomation(ctx, id, storeReq); err != nil {
+		saved, err := s.store.updateAutomationReturning(ctx, id, storeReq)
+		if err != nil {
 			return nil, err
 		}
 		notifySelectionChanged()
@@ -868,13 +881,14 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 		if err := s.CancelAutomationRetries(ctx, id); err != nil {
 			return nil, err
 		}
-		return s.store.GetAutomation(ctx, id)
+		return saved, nil
 	}
-	if err := s.store.UpdateAutomation(ctx, id, storeReq); err != nil {
+	saved, err := s.store.updateAutomationReturning(ctx, id, storeReq)
+	if err != nil {
 		return nil, err
 	}
 	notifySelectionChanged()
-	return s.store.GetAutomation(ctx, id)
+	return saved, nil
 }
 
 // authorizeUpdatedReferences checks the fields of req that name something the

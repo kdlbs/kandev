@@ -74,12 +74,21 @@ Carry authenticated stream and exact submission identities into missing-binding
 resolution. Pin session/native generation, block identity and current SQL rows
 under existing turn/delivery locks; no derivation from a guessed canonical name.
 Absent metadata and an earlier already-resolved notice are presentation states,
-not new outcome authority. Restore the current notice and resolve only matching
-incident fences atomically. A changed source, independent fence, pending restore
+not new outcome authority. Verified silent-restore history follows the
+[repeated native recovery rules](interrupted-prompt-recovery.md#repeated-recovery-after-silent-restoration).
+Restore the current notice and resolve only matching
+incident fences atomically. A changed source, independent fence, pending restore that still owns its source,
 or unprojected receipt refuses resolution. A transaction rollback changes none
 of the binding, notice or fence. A retry reuses retired journal proof. Retained inspection has a separate
 metadata-only stored-submission request for unretired legacy history; retirement
 proof still requires the actual retired marker and preserves the original label.
+A recovery block remains as resolved history after settlement. Uniqueness applies
+to open blocks by session, incarnation, generation and reason, so a later
+same-reason incident can receive its own block. Restart repair does not recreate
+a block for a resolved bound submission. A generic block after a resolved
+generic fence requires retained current-generation interrupted work created
+after that fence resolved. Without that evidence, the old incident remains
+closed.
 A retained submission with an existing canonical SQL row can repair its recovery
 presentation without a user-message row, including initial prompts and internal
 continuations. It preserves the stored dispatch-attempt identity: an initial
@@ -88,8 +97,9 @@ request marks this as existing-record-only, and the SQL transaction refuses a
 missing or changed canonical row instead of inserting one. Reconstruction from
 journal-only evidence still requires the exact user-message association. A
 proven-dead dispatch records an unknown outcome when its prior outcome is empty.
-A matching prepared checkpoint with no candidate is completed in that transaction;
-an allocated/launching or unrelated attempt still blocks it. Legacy composer
+A matching prepared checkpoint with no candidate is completed in that transaction.
+An obsolete prepared attempt follows the verified historical-terminal exception
+below. Allocated, launching, and all other unrelated attempts still block it. Legacy composer
 uncertainty is cleared only for an exactly retired submission. An explicit null
 propagates that clearing to clients even when no recovery notice existed.
 
@@ -101,6 +111,137 @@ inventory, and cursor checks remain mandatory. The notice keeps its historical
 execution ID, submission, payload, and unknown outcome; only its phase, revision,
 and timestamp change. State-only Retry is unchanged.
 Delivery: [Recovered notice resume](../../../plans/resume-delivery-notices/plan.md).
+
+### Historical terminal incidents
+
+This extension covers AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.9 through
+002.11. It follows the existing outcome/admission decision. The repair package is
+[automatic restart recovery](../../../plans/automatic-restart-session-recovery/plan.md).
+
+Classify the notice's source before treating its phase as the current recovery
+owner. A `settled` notice can describe a different, earlier failed prompt.
+It cannot establish the outcome of a later interrupted prompt. Likewise, an
+unfinished restore attempt can reference an incident that terminal settlement
+already closed. Neither record supplies authority over a later incident.
+
+The repository verifies the historical source under session, turn, and delivery
+locks. Require its exact submission, incarnation, generation, payload identity,
+canonical terminal binding, completed settlement, and resolved delivery block.
+The current interrupted submission must be different. Verify current native
+lineage and the complete unresolved inventory independently. An old terminal
+label without its terminal evidence fails this classification.
+
+Only a `prepared` restore checkpoint without an allocated candidate can become
+obsolete through this rule. Keep its checkpoint and source outcome. Complete it
+with stage `terminal`, outcome `blocked`, and reason `source_terminal_settled`.
+This outcome records obsolete recovery work, never a successful native restore.
+Follow `completeSupersededContextAttemptTx` in `context_continuation_attempt.go`.
+Reuse the existing outcome vocabulary and add `SilentRestoreOutcomeBlocked` as
+a typed constant. Preserve an existing nonempty failure reason, as that helper does.
+Every attempt outside this verified exception remains a guard, including
+allocated, launching, changed, and unverifiable work.
+Apply the same rule during terminal settlement and recovery, so existing rows
+recover after upgrade without a bulk migration or manual database edits.
+
+`restoreAuthenticatedNativeNoticeTx` can pass a proven historical terminal notice
+while restoring the current incident. `finishPreparedNativeAttemptTx` handles
+only verified obsolete attempts before assessing the current checkpoint.
+Keep both changes inside the guarded recovery transaction. Crash recovery
+repeats the exact checks, including after journal retirement precedes SQL commit.
+Do not broaden the settled-current-notice exception or change historical labels.
+
+Automatic inventory already includes current dispatching and unknown rows.
+`repairRestartRecoveryPresentation`, `currentRestartRecoverySnapshot`, and
+`loadSilentRestoreSession` must classify historical terminal state before their
+phase-based early returns. Reconstruct the later incident through the existing
+authenticated record path, then use the bounded restart worker. It can reuse an
+idle matching native successor. This work cannot depend on task focus, a browser
+request, or a successful manual recovery action.
+
+The first startup after upgrade applies this path to existing persisted states.
+Include restart-interrupted sessions already marked `FAILED`, plus stranded
+`RUNNING`, `STARTING`, and `WAITING_FOR_INPUT` states. Do not restrict repair to
+incidents created by the upgraded binary. Reattach a surviving owner or resume
+the saved native conversation after confirmed owner termination. The saved ACP
+identity selects the conversation. Successful provider resume and the existing
+workspace, ownership, and delivery checks establish readiness. An identifier
+alone does not establish that provider state is still available.
+
+An upgrade regression seeds the old persisted state before the corrected backend
+starts. It performs no new interrupted turn and no recovery request after startup.
+Use both an already-failed session and a ready successor with a retired journal
+submission but an open SQL block. Assert automatic recovery before browser focus.
+Existing manual Stop, archive, Office, automation, and independent owner rules remain effective.
+
+Startup, runtime replacement, and explicit Resume retain restoration authority.
+Retry connection remains state-only: it queries or reconnects retained work and
+reads the committed disposition. It never schedules a native restore or launches
+a replacement. Automatic recovery already owns eligible dead-source restoration.
+Retry connection cannot report success merely because a replacement process is
+ready while the delivery block remains open. A blocked result keeps its specific
+cause. Recovery never resends the interrupted payload or drains a queued successor.
+A later explicit submission repeats normal admission. See the unchanged Retry
+contracts in [reattachment](durable-agent-reattachment.md) and
+[delivery failure](durable-delivery-failure.md).
+
+### Restored chat presentation
+
+Publish restored metadata and cleared matching blocks only after SQL commits.
+Persist one informational `status` message for every successfully restored
+interrupted incident. This applies to ordinary automatic restart recovery,
+historical-terminal recovery, and explicit native Resume, including criterion
+002.6. Reattachment of an uninterrupted live turn and ordinary Resume without
+an interrupted incident do not emit this notice.
+
+Follow `writeCeilingSurfaceNote` and `ceilingSurfaceMessageID` in
+`internal/orchestrator/ceiling_surface.go`: `uuid.NewSHA1` with
+`uuid.NameSpaceOID`, structured metadata, `MessageTypeStatus`, and
+`CreateSessionMessageIdempotent`. Hash the prefix
+`session-restored-after-interruption:` plus a stable JSON tuple of session ID,
+incarnation ID, source harness generation, and source submission ID. These source
+fields identify the interrupted incident across successor executions and retries.
+Do not include the current execution ID, recovery revision, mutable phase,
+resolution timestamp, action name, or a reconstructed block ID. Repeated recovery
+through automatic or explicit entry points therefore uses the same message ID.
+A later interrupted submission gets a different ID.
+
+Retry publication by that ID, including after a crash between resolution and
+message publication. Use the existing lifecycle-only turn convention, without
+inventing an agent completion.
+
+Store metadata `kind: session_restored_after_interruption` and its source
+identity. Persist this canonical English `content` fallback: "The session was
+interrupted. Your conversation is restored. You can continue." The shared
+transcript renderer selects translated copy by metadata kind rather than parsing
+or translating stored content. The locale key and English tests use that same
+canonical string. Keep the old prompt outcome unknown. The notice
+has no recovery actions and does not control composer admission. Existing error
+entries keep their historical details without reviving controls for this incident.
+
+The shared recovery model selects the ordinary composer from the committed
+disposition. Delayed metadata cannot revive an older block or local failure.
+An independent open block still owns its actual cause and supported actions.
+Keep the normal draft during pending recovery. Pending recovery can disable
+submission until proof commits, but it does not require a manual button click.
+
+Desktop uses the existing chat transcript and composer. Phone uses the existing
+`task-layout.tsx` chat surface, one transcript scroller, and its safe-area-aware
+composer. The notice wraps within that scroller. No dialog, drawer, extra toolbar,
+or alternate mobile state machine is required. The primary action is sending a
+new instruction through the normal touch control. Preserve keyboard behavior,
+drafts, and desktop layout preferences.
+
+Verification combines a real SQLite/PostgreSQL terminal-history fixture with
+the restart worker and authenticated bbolt evidence. Include separate stale
+notice, stale prepared attempt, combined, and clean control cases. Notice tests
+also cover an ordinary interrupted restart without earlier terminal history,
+explicit Resume of a recovered notice, and repeated restoration of one incident.
+Test startup without an open browser, a generic block without current notice, repeated
+restart, interruption between store commits, late publication, and later prompt
+admission. A mixed inventory contains eligible history plus independent live
+or unverifiable work. Desktop and phone E2E use the real recovery path and assert
+one notice, a usable composer, no required recovery buttons, stable native
+identity, preserved draft, and no old prompt dispatch.
 
 ## Entry points
 
@@ -140,8 +281,8 @@ Interrupt at dispatch-to-call, terminal-to-response, journal retirement-to-SQL
 resolution, SQL resolution-to-publication and ACK-to-prune boundaries. Include
 failed writes and cancellation, then repeat restart and recovery. Use real bbolt,
 SQLite, PostgreSQL conformance and a real isolated process-manager Stop. Existing
-hard-crash and gap tests remain relevant. Desktop and phone E2E run only in CI;
-no host shutdown, production mutation or local browser testing is authorized.
+hard-crash and gap tests remain relevant. Desktop and phone E2E use isolated
+fixtures. They must not stop or mutate a developer's runtime or database.
 
 ## Delivery
 

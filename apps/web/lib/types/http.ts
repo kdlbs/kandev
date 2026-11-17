@@ -652,9 +652,11 @@ export type TaskSessionWorktree = {
   worktree_id: string;
   repository_id?: RepositoryId;
   branch_slug?: string;
+  workspace_relative_path?: string;
   position: number;
   worktree_path?: string;
   worktree_branch?: string;
+  worktree_origin?: "kandev" | "adopted";
   created_at?: string;
 };
 

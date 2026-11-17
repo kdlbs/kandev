@@ -23,13 +23,15 @@ import (
 const statusClientClosedRequest = 499
 
 const (
-	moveConflictCodeActiveSession      = "task_move_active_session"
-	moveConflictCodeArchived           = "task_move_archived"
-	moveConflictCodeDifferentWorkspace = "task_move_different_workspace"
-	moveConflictCodeWorkflowStep       = "task_move_workflow_step"
-	moveConflictCodeWIPLimit           = "task_move_wip_limit"
-	moveConflictCodePending            = "task_move_pending"
-	moveConflictCodeWorkflowChange     = "workflow_change_conflict"
+	moveConflictCodeActiveSession       = "task_move_active_session"
+	moveConflictCodeArchived            = "task_move_archived"
+	moveConflictCodeDifferentWorkspace  = "task_move_different_workspace"
+	moveConflictCodeWorkflowStep        = "task_move_workflow_step"
+	moveConflictCodeWIPLimit            = "task_move_wip_limit"
+	moveConflictCodePending             = "task_move_pending"
+	moveConflictCodeExecutorUnavailable = "task_move_executor_unavailable"
+	moveConflictCodeWorkflowChange      = "workflow_change_conflict"
+	moveExecutorUnavailableMessage      = "The task's executor is no longer available for this step."
 )
 
 // errorDetailKeyErrorCode is the JSON key every machine-readable error detail
@@ -39,6 +41,11 @@ const errorDetailKeyErrorCode = "error_code"
 
 func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback string) {
 	if handleBuiltinCreationHTTPError(c, err) {
+		return
+	}
+	var approvalsErr *service.ApprovalsPendingMoveError
+	if errors.As(err, &approvalsErr) || errors.Is(err, service.ErrWorkflowChangeConflict) {
+		handleSelectedMoveError(c, log, err)
 		return
 	}
 	if isClientDisconnect(err) {
@@ -193,15 +200,23 @@ func repositorySelectionWSCode(err error) (string, bool) {
 }
 
 func handleSelectedMoveError(c *gin.Context, log *logger.Logger, err error) {
+	var approvalsErr *service.ApprovalsPendingMoveError
 	switch {
 	case isClientDisconnect(err):
 		abortClientDisconnect(c)
-	case errors.Is(err, taskrepository.ErrTaskCompletionGateBlocked):
-		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_gate_blocked"})
-	case errors.Is(err, taskrepository.ErrTaskCompletionCriteriaConflict):
-		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_criteria_conflict"})
-	case errors.Is(err, taskrepository.ErrTaskCompletionHumanConfirmationRequired):
-		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_human_confirmation_required"})
+	case errors.As(err, &approvalsErr):
+		c.JSON(http.StatusConflict, gin.H{
+			"code":              "task_approvals_pending",
+			"error":             approvalsErr.Error(),
+			"pending_approvers": pendingApproversBody(approvalsErr.Pending),
+		})
+	case CompletionGateCode(err) != "":
+		c.JSON(http.StatusConflict, gin.H{"code": CompletionGateCode(err)})
+	case errors.Is(err, workflowmove.ErrDestinationExecutorUnavailable):
+		c.JSON(http.StatusConflict, gin.H{
+			"code":  moveConflictCodeExecutorUnavailable,
+			"error": moveExecutorUnavailableMessage,
+		})
 	case isNotFound(err):
 		c.JSON(http.StatusNotFound, gin.H{"error": "task or workflow not found"})
 	case isMoveConflict(err):
@@ -264,6 +279,27 @@ func isNotFound(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "not found")
 }
 
+// CompletionGateCode returns the stable code for a move refused by the task
+// completion gate, or "" for any other error.
+func CompletionGateCode(err error) string {
+	switch {
+	case errors.Is(err, taskrepository.ErrTaskCompletionGateBlocked):
+		return "task_completion_gate_blocked"
+	case errors.Is(err, taskrepository.ErrTaskCompletionCriteriaConflict):
+		return "task_completion_criteria_conflict"
+	case errors.Is(err, taskrepository.ErrTaskCompletionHumanConfirmationRequired):
+		return "task_completion_human_confirmation_required"
+	default:
+		return ""
+	}
+}
+
+// MoveConflictCode returns the stable code for a refused task move, or ""
+// when the error is not a move conflict.
+func MoveConflictCode(err error) string {
+	return moveConflictCode(err)
+}
+
 func isMoveConflict(err error) bool {
 	return moveConflictCode(err) != ""
 }
@@ -295,22 +331,27 @@ func moveConflictCode(err error) string {
 	if err == nil {
 		return ""
 	}
+	if errors.Is(err, workflowmove.ErrDestinationExecutorUnavailable) {
+		return moveConflictCodeExecutorUnavailable
+	}
 	if errors.Is(err, workflowmove.ErrMoveConflict) {
 		return moveConflictCodePending
 	}
-	if errors.Is(err, service.ErrWorkflowChangeConflict) {
+	if errors.Is(err, service.ErrWorkflowChangeConflict) || errors.Is(err, service.ErrWorkflowResolutionConflict) {
 		return moveConflictCodeWorkflowChange
+	}
+	switch {
+	case errors.Is(err, service.ErrTaskMoveActiveSession):
+		return moveConflictCodeActiveSession
+	case errors.Is(err, service.ErrTaskMoveArchived):
+		return moveConflictCodeArchived
+	case errors.Is(err, service.ErrTaskMoveDifferentWorkspace):
+		return moveConflictCodeDifferentWorkspace
+	case errors.Is(err, service.ErrTaskMoveWorkflowStep):
+		return moveConflictCodeWorkflowStep
 	}
 	msg := strings.ToLower(err.Error())
 	switch {
-	case strings.Contains(msg, "active session"):
-		return moveConflictCodeActiveSession
-	case strings.Contains(msg, "archived tasks cannot be moved"):
-		return moveConflictCodeArchived
-	case strings.Contains(msg, "different workspace"):
-		return moveConflictCodeDifferentWorkspace
-	case strings.Contains(msg, "does not belong to target workflow"):
-		return moveConflictCodeWorkflowStep
 	case strings.Contains(msg, "wip limit exceeded"):
 		return moveConflictCodeWIPLimit
 	default:
@@ -355,4 +396,24 @@ func isTaskCreateValidationError(err error) bool {
 	}
 	return isValidationError(err) ||
 		strings.Contains(strings.ToLower(err.Error()), "workflow not found")
+}
+
+func pendingApproversBody(pending []service.PendingApprover) []gin.H {
+	out := make([]gin.H, 0, len(pending))
+	for _, p := range pending {
+		out = append(out, gin.H{"agent_profile_id": p.AgentProfileID, "name": p.Name})
+	}
+	return out
+}
+
+// humanCompletionWSError preserves the existing refusal shapes on state edits.
+func humanCompletionWSError(msg *ws.Message, err error) (*ws.Message, error) {
+	var approvals *service.ApprovalsPendingMoveError
+	if errors.As(err, &approvals) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, approvals.Error(), map[string]interface{}{"error_code": "task_approvals_pending", "pending_approvers": pendingApproversBody(approvals.Pending)})
+	}
+	if errors.Is(err, service.ErrWorkflowChangeConflict) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), map[string]interface{}{"error_code": moveConflictCodeWorkflowChange})
+	}
+	return nil, nil
 }

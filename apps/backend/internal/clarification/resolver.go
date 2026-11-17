@@ -635,6 +635,7 @@ func answerFromMessageMetadata(messageID string, meta map[string]any, log *logge
 		answer.CustomText = s
 	}
 	answer.Attachments = decodeAnswerAttachments(rawMap["attachments"])
+	answer.Annotations = decodeAnswerAnnotations(rawMap["annotations"])
 	return answer, true
 }
 
@@ -1257,10 +1258,10 @@ func buildAnswerSummary(questions []Question, answers []Answer, rejected bool, r
 
 func formatSingleAnswer(a Answer) string {
 	if a.CustomText != "" {
-		return withAnswerFiles(fmt.Sprintf("User answered: %s", a.CustomText), a)
+		return withAnswerEvidence(fmt.Sprintf("User answered: %s", a.CustomText), a)
 	}
 	if len(a.SelectedOptions) > 0 {
-		return withAnswerFiles(fmt.Sprintf("User selected: %v", a.SelectedOptions), a)
+		return withAnswerEvidence(fmt.Sprintf("User selected: %v", a.SelectedOptions), a)
 	}
 	return "User provided no specific answer."
 }
@@ -1272,21 +1273,21 @@ func formatAnswerBody(a Answer) string {
 	} else if len(a.SelectedOptions) > 0 {
 		body = fmt.Sprintf("%v", a.SelectedOptions)
 	}
-	return withAnswerFiles(body, a)
+	return withAnswerEvidence(body, a)
 }
 
-func withAnswerFiles(body string, a Answer) string {
-	if len(a.Attachments) == 0 {
-		return body
-	}
+// withAnswerEvidence appends attached file names and region annotations.
+func withAnswerEvidence(body string, a Answer) string {
+	lines := []string{body}
 	names := make([]string, 0, len(a.Attachments))
 	for _, attachment := range a.Attachments {
 		if name := strings.Join(strings.Fields(attachment.Name), " "); name != "" {
 			names = append(names, name)
 		}
 	}
-	if len(names) == 0 {
-		return body
+	if len(names) > 0 {
+		lines = append(lines, "Attached files: "+strings.Join(names, ", "))
 	}
-	return fmt.Sprintf("%s\nAttached files: %s", body, strings.Join(names, ", "))
+	lines = append(lines, formatAnnotationLines(a.Annotations)...)
+	return strings.Join(lines, "\n")
 }

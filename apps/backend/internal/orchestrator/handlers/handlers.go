@@ -415,7 +415,7 @@ func restoreRequiredRecoveryResponse(msg *ws.Message, err error, sessionID strin
 	}
 	reason := reasoner.RecoveryReason()
 	switch reason {
-	case "native_state_missing", "native_resume_unsupported", "workspace_incompatible", "unresolved_durable_work":
+	case "native_state_missing", "native_resume_unsupported", "workspace_incompatible", "unresolved_durable_work", "unknown_prompt_outcome":
 	default:
 		return nil, nil
 	}
@@ -428,6 +428,17 @@ func restoreRequiredRecoveryResponse(msg *ws.Message, err error, sessionID strin
 	if generationer, ok := reasoner.(interface{ RecoveryGeneration() int64 }); ok {
 		if generation := generationer.RecoveryGeneration(); generation > 0 {
 			details["generation"] = generation
+		}
+	}
+	if identity, ok := reasoner.(interface {
+		RecoveryBlockID() string
+		RecoveryIncarnationID() string
+	}); ok {
+		if blockID := identity.RecoveryBlockID(); blockID != "" {
+			details["block_id"] = blockID
+		}
+		if incarnationID := identity.RecoveryIncarnationID(); incarnationID != "" {
+			details["incarnation_id"] = incarnationID
 		}
 	}
 	return ws.NewError(

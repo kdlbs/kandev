@@ -157,6 +157,12 @@ func TestService_ApproveSessionRecordsApprovalStepHistoryNotManual(t *testing.T)
 	getter.steps["step-done"] = &wfmodels.WorkflowStep{
 		ID: "step-done", WorkflowID: "wf-source", Name: "Approved", Position: 2,
 	}
+	if _, err := repo.DB().ExecContext(ctx, `
+		INSERT INTO workflow_steps (id, workflow_id, name, position)
+		VALUES (?, ?, ?, ?)
+	`, "step-done", "wf-source", "Approved", 2); err != nil {
+		t.Fatalf("seed approval workflow step: %v", err)
+	}
 	recorder := &fakeStepHistoryRecorder{}
 	svc.SetStepHistoryRecorder(recorder)
 
@@ -195,6 +201,12 @@ func TestService_ApproveSessionRecordsApprovalStepHistoryForApprovedSessionNotPr
 	getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
 	getter.steps["step-done"] = &wfmodels.WorkflowStep{
 		ID: "step-done", WorkflowID: "wf-source", Name: "Approved", Position: 2,
+	}
+	if _, err := repo.DB().ExecContext(ctx, `
+		INSERT INTO workflow_steps (id, workflow_id, name, position)
+		VALUES (?, ?, ?, ?)
+	`, "step-done", "wf-source", "Approved", 2); err != nil {
+		t.Fatalf("seed approval workflow step: %v", err)
 	}
 	recorder := &fakeStepHistoryRecorder{}
 	svc.SetStepHistoryRecorder(recorder)

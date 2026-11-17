@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -245,6 +247,41 @@ func TestBuildBootstrapLastAgentErrorUsesSafeCorrelatedProjection(t *testing.T) 
 	if len(errorValue.Causes) != 1 || errorValue.Causes[0].Operation != models.AgentErrorCauseOperationResume ||
 		errorValue.Causes[0].Code != models.AgentErrorCauseCodePermissionDenied {
 		t.Fatalf("bootstrap causes = %#v", errorValue.Causes)
+	}
+}
+
+func TestBuildBootstrapLastAgentErrorProjectsAuthenticationCause(t *testing.T) {
+	failure := &lifecycle.BootstrapFailure{
+		Operation: models.AgentErrorCauseOperationResume,
+		Code:      models.AgentErrorCauseCodeAuthenticationRequired,
+		Detail:    "Agent authentication is required.",
+		SessionFailure: &agentctltypes.SessionOperationFailure{
+			Code:        agentctltypes.SessionOperationFailureCodeAuthenticationRequired,
+			AuthMethods: []streams.AuthMethodInfo{{ID: "cursor_login", Name: "Cursor login"}},
+		},
+		Cause: errors.New("private provider diagnostic"),
+	}
+
+	lastError := (&Executor{}).buildBootstrapLastAgentError(
+		context.Background(), "task-1", "session-1", "execution-1", failure, true,
+	)
+	if lastError.Code != models.LaunchErrorCategoryGenericLaunchFailure {
+		t.Fatalf("outer category = %q, want generic launch failure", lastError.Code)
+	}
+	if lastError.Phase != models.LaunchErrorPhaseBootstrap || lastError.ExecutionID != "execution-1" {
+		t.Fatalf("durable bootstrap identity = %+v", lastError)
+	}
+	if len(lastError.Causes) != 1 || lastError.Causes[0].Operation != models.AgentErrorCauseOperationResume ||
+		lastError.Causes[0].Code != models.AgentErrorCauseCodeAuthenticationRequired ||
+		lastError.Causes[0].Detail != "Agent authentication is required." {
+		t.Fatalf("durable authentication cause = %#v", lastError.Causes)
+	}
+	encoded, err := json.Marshal(lastError)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "cursor_login") || strings.Contains(string(encoded), "private provider diagnostic") {
+		t.Fatalf("durable error should not contain transient methods or raw diagnostics: %s", encoded)
 	}
 }
 

@@ -23,10 +23,21 @@ import (
 // The worktree still exists on disk; the next session relaunch will
 // rebuild trackers via prepareMultiRepo even when this call missed.
 func (c *Client) RescanWorkspace(ctx context.Context, workDir string, sourceRoots ...[]string) error {
+	return c.rescanWorkspace(ctx, workDir, firstSourceRoots(sourceRoots), nil)
+}
+
+// RescanWorkspaceWithExclusions also tells discovery to skip detached
+// checkouts that remain on disk for cleanup.
+func (c *Client) RescanWorkspaceWithExclusions(ctx context.Context, workDir string, sourceRoots, excludedRoots []string) error {
+	return c.rescanWorkspace(ctx, workDir, sourceRoots, excludedRoots)
+}
+
+func (c *Client) rescanWorkspace(ctx context.Context, workDir string, sourceRoots, excludedRoots []string) error {
 	return c.updateWorkspace(ctx, "/api/v1/workspace/rescan", "rescan", struct {
-		WorkDir              string   `json:"work_dir"`
-		WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
-	}{WorkDir: workDir, WorkspaceSourceRoots: firstSourceRoots(sourceRoots)})
+		WorkDir                string   `json:"work_dir"`
+		WorkspaceSourceRoots   []string `json:"workspace_source_roots,omitempty"`
+		WorkspaceExcludedRoots []string `json:"workspace_excluded_roots,omitempty"`
+	}{WorkDir: workDir, WorkspaceSourceRoots: sourceRoots, WorkspaceExcludedRoots: excludedRoots})
 }
 
 // ReconcileWorkspace prunes tracker state against the current root after a

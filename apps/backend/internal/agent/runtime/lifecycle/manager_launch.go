@@ -1,3 +1,4 @@
+//revive:disable:file-length-limit // Launch orchestration shares one preparation and admission boundary.
 package lifecycle
 
 import (
@@ -1526,6 +1527,8 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		DurableJournalHostRoot:           m.dataDir,
 		DurableJournalOwnerID:            journalOwnerID,
 		WorkspaceSourceRoots:             workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
+		WorkspaceExcludedRoots:           append([]string(nil), reqWithWorktree.DetachedWorkspaceRoots...),
+		TaskWorkspaceRoot:                m.taskWorkspaceRootForLaunch(reqWithWorktree),
 		Protocol:                         string(agentConfig.Runtime().Protocol),
 		CodexAppServerEnabled:            agentConfig.Enabled() && agentConfig.Runtime().Protocol == agent.ProtocolCodexAppServer,
 		Env:                              env,
@@ -3582,4 +3585,45 @@ func (m *Manager) initGitRepo(ctx context.Context, workspacePath string) error {
 	}
 
 	return excludeWorkspaceOwnershipMarker(gitDir)
+}
+
+// taskWorkspaceRootForLaunch resolves the containment boundary used by
+// agentctl's linked-worktree observer. Host worktree tasks always live under
+// the task root, even when the agent's CWD is a single repository checkout.
+func (m *Manager) taskWorkspaceRootForLaunch(req *LaunchRequest) string {
+	return launchTaskWorkspaceRoot(req)
+}
+
+func launchUsesTaskRoot(req *LaunchRequest) bool {
+	if req == nil {
+		return false
+	}
+	return req.WorkspaceLayout == workspaceLayoutTaskRoot ||
+		(req.WorkspaceLayout == "" && len(req.RepoSpecs()) > 1)
+}
+
+// launchTaskWorkspaceRoot returns the containing directory that is provably
+// owned by this task. A legacy flat worktree shares its parent with other
+// tasks, so containment stays at the primary checkout unless TaskDirName
+// matches the parent directory.
+func launchTaskWorkspaceRoot(req *LaunchRequest) string {
+	if req == nil || req.WorkspacePath == "" {
+		return ""
+	}
+	if req.ExecutorType == string(models.ExecutorTypeLocal) || req.ExecutorType == "local_pc" {
+		return req.WorkspacePath
+	}
+	if req.ExecutorType != string(models.ExecutorTypeWorktree) {
+		return ""
+	}
+	parentLayout := req.WorkspaceLayout == workspaceLayoutTaskRoot ||
+		(req.WorkspaceLayout == "" && len(req.RepoSpecs()) > 1)
+	if parentLayout {
+		return req.WorkspacePath
+	}
+	parent := filepath.Dir(req.WorkspacePath)
+	if parent == req.WorkspacePath || req.TaskDirName == "" || filepath.Base(parent) != req.TaskDirName {
+		return req.WorkspacePath
+	}
+	return parent
 }

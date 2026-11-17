@@ -146,8 +146,6 @@ type TaskRepository interface {
 	// sessions left stranded when finalizeCancelledSessions's bounded
 	// in-line retry was exhausted by sustained SQLite writer contention.
 	ListArchivedTasksWithActiveSessions(ctx context.Context) ([]string, error)
-	ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error)
-	DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error)
 	// ListCoordinatorOriginTasks returns every task with origin "coordinator"
 	// (all workspaces when workspaceID is empty), ordered by id
 	// (docs/specs/coordinator/system-design/copilot.md#conversation-cleanup).
@@ -741,6 +739,12 @@ type SessionRecoveryBlockListRepository interface {
 	ListOpenSessionRecoveryBlocks(ctx context.Context, sessionID, incarnationID string, expectedGeneration int64) ([]*models.SessionRecoveryBlock, error)
 }
 
+// RestartRecoveryBlockRepository ensures presentation repair preserves the
+// complete current-generation recovery fence inventory.
+type RestartRecoveryBlockRepository interface {
+	EnsureRestartRecoveryBlock(ctx context.Context, block *models.SessionRecoveryBlock) (*models.SessionRecoveryBlock, bool, error)
+}
+
 // AgentDeliveryRecoveryRepository persists the revisioned session notice for
 // an uncertain durable prompt outcome.
 type AgentDeliveryRecoveryRepository interface {
@@ -898,6 +902,8 @@ type RepositoryEntityRepository interface {
 	CreateRepository(ctx context.Context, repository *models.Repository) error
 	GetRepository(ctx context.Context, id string) (*models.Repository, error)
 	UpdateRepository(ctx context.Context, repository *models.Repository) error
+	// FillRepositoryRemoteURL sets remote_url only while it is still empty.
+	FillRepositoryRemoteURL(ctx context.Context, id, remoteURL string) (bool, error)
 	UpdateRepositoryWithCheckoutIntent(ctx context.Context, repository *models.Repository, intent RepositoryCheckoutIntent) error
 	DeleteRepository(ctx context.Context, id string) error
 	ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error)
@@ -1103,6 +1109,17 @@ type TaskEnvironmentRepository interface {
 	UpdateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
 	DeleteTaskEnvironmentRepo(ctx context.Context, id string) error
 	DeleteTaskEnvironmentReposByEnv(ctx context.Context, envID string) error
+}
+
+// TaskDetachedWorktreeRepository stores task-scoped suppression records for
+// worktrees the user removed. Detection never re-adopts a suppressed path;
+// an explicit agent report clears the record.
+type TaskDetachedWorktreeRepository interface {
+	MarkTaskWorktreeDetached(ctx context.Context, taskID, worktreePath string, detachedAt time.Time) error
+	ClearTaskWorktreeDetached(ctx context.Context, taskID, worktreePath string) error
+	IsTaskWorktreeDetached(ctx context.Context, taskID, worktreePath string) (bool, error)
+	DeleteTaskDetachedWorktreesByTask(ctx context.Context, taskID string) error
+	DetachTaskRepositoryAttachment(ctx context.Context, taskID, taskRepositoryID, environmentRepoID, worktreePath string, markDetached bool) error
 }
 
 // TaskEnvironmentRecoveryRepository is the optional durable authority

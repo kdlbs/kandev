@@ -60,6 +60,7 @@ type McpServerConfig struct {
 // CreateInstanceRequest contains the parameters for creating a new agent instance.
 type CreateInstanceRequest struct {
 	ID                         string              `json:"id,omitempty"`
+	ScopedMCPRoutes            bool                `json:"scoped_mcp_routes,omitempty"`
 	WorkspacePath              string              `json:"workspace_path"`
 	AgentCommand               string              `json:"agent_command,omitempty"`
 	Protocol                   string              `json:"protocol,omitempty"` // Protocol adapter to use (currently "acp")
@@ -120,6 +121,11 @@ type CreateInstanceRequest struct {
 	// workspace. Agentctl permits file operations through links only beneath
 	// these roots.
 	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
+	// WorkspaceExcludedRoots are detached checkouts that discovery must skip.
+	WorkspaceExcludedRoots []string `json:"workspace_excluded_roots,omitempty"`
+	// TaskWorkspaceRoot is the containment boundary for linked-worktree
+	// discovery. Empty falls back to the agent workspace.
+	TaskWorkspaceRoot string `json:"task_workspace_root,omitempty"`
 	// DurableJournalPath is an owner-scoped path on retained executor storage.
 	// Empty means the instance uses legacy delivery semantics.
 	DurableJournalPath string `json:"durable_journal_path,omitempty"`
@@ -138,13 +144,15 @@ type CreateInstanceRequest struct {
 
 // CreateInstanceResponse contains the result of creating a new agent instance.
 type CreateInstanceResponse struct {
-	ID   string `json:"id"`
-	Port int    `json:"port"`
+	ID              string `json:"id"`
+	Port            int    `json:"port"`
+	ScopedMCPRoutes bool   `json:"scoped_mcp_routes"`
 }
 
 // InstanceInfo contains information about an agent instance.
 type InstanceInfo struct {
 	ID              string            `json:"id"`
+	ScopedMCPRoutes bool              `json:"scoped_mcp_routes"`
 	Port            int               `json:"port"`
 	LeaseGeneration uint64            `json:"lease_generation"`
 	ListenerActive  bool              `json:"listener_active"`

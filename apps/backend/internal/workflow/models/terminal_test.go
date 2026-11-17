@@ -35,39 +35,47 @@ func TestIsTerminalStepName(t *testing.T) {
 	}
 }
 
-func TestIsTerminalStep(t *testing.T) {
-	t.Run("nil step", func(t *testing.T) {
-		if IsTerminalStep(nil, nil) {
-			t.Fatalf("nil step reported terminal")
-		}
-	})
+func TestFinalAndCompletingPredicates(t *testing.T) {
+	fixtures := completionPredicateFixtures()
+	for i := range fixtures {
+		step := &fixtures[i]
+		next := nextStepWithHigherPosition(fixtures, step)
+		t.Run(step.ID, func(t *testing.T) {
+			wantFinal := next == nil
+			if got := IsFinalStep(step, next); got != wantFinal {
+				t.Errorf("IsFinalStep() = %v, want %v", got, wantFinal)
+			}
+			wantCompleting := wantFinal && step.CompleteTaskOnEnter
+			if got := CompletesTaskOnEnter(step, next); got != wantCompleting {
+				t.Errorf("CompletesTaskOnEnter() = %v, want %v", got, wantCompleting)
+			}
+		})
+	}
 
-	t.Run("checked final step", func(t *testing.T) {
-		step := &WorkflowStep{Name: "Release", CompleteTaskOnEnter: true}
-		if !IsTerminalStep(step, nil) {
-			t.Fatalf("checked final step was not terminal")
-		}
-	})
+	if IsFinalStep(nil, nil) || CompletesTaskOnEnter(nil, nil) {
+		t.Fatal("nil step must not be final or completing")
+	}
+}
 
-	t.Run("unchecked final step", func(t *testing.T) {
-		step := &WorkflowStep{Name: "Done"}
-		if IsTerminalStep(step, nil) {
-			t.Fatalf("unchecked final step reported terminal")
-		}
-	})
+func completionPredicateFixtures() []WorkflowStep {
+	return []WorkflowStep{
+		{ID: "backlog", WorkflowID: "workflow", Position: 0},
+		{ID: "checked-nonfinal", WorkflowID: "workflow", Position: 2, CompleteTaskOnEnter: true},
+		{ID: "unchecked-final", WorkflowID: "workflow", Position: 4},
+		{ID: "checked-final-tie", WorkflowID: "workflow", Position: 4, CompleteTaskOnEnter: true},
+	}
+}
 
-	t.Run("checked non-final step", func(t *testing.T) {
-		step := &WorkflowStep{Name: "Release", CompleteTaskOnEnter: true}
-		nextStep := &WorkflowStep{Name: "Archive"}
-		if IsTerminalStep(step, nextStep) {
-			t.Fatalf("checked non-final step reported terminal")
+func nextStepWithHigherPosition(steps []WorkflowStep, step *WorkflowStep) *WorkflowStep {
+	var next *WorkflowStep
+	for i := range steps {
+		candidate := &steps[i]
+		if candidate.WorkflowID != step.WorkflowID || candidate.Position <= step.Position {
+			continue
 		}
-	})
-
-	t.Run("checked arbitrary final step", func(t *testing.T) {
-		step := &WorkflowStep{Name: "Ready for launch", CompleteTaskOnEnter: true}
-		if !IsTerminalStep(step, nil) {
-			t.Fatalf("checked arbitrary final step reported non-terminal")
+		if next == nil || candidate.Position < next.Position {
+			next = candidate
 		}
-	})
+	}
+	return next
 }

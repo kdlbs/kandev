@@ -98,6 +98,7 @@ type Repository interface {
 	DeleteTaskBlocker(ctx context.Context, taskID, blockerTaskID string) error
 	ListTaskBlockers(ctx context.Context, taskID string) ([]*models.TaskBlocker, error)
 	ListTaskParticipants(ctx context.Context, taskID, role string) ([]sqlite.Participant, error)
+	ListTaskParticipantsAtStep(ctx context.Context, taskID, stepID, role string) ([]sqlite.Participant, error)
 	ListAllTaskParticipants(ctx context.Context, taskID string) ([]sqlite.Participant, error)
 	// ListTaskParticipantsAtCurrentStep is the step-scoped seat read
 	// AC-OFFICE-SESSION-TERM-002.3 requires for session-termination
@@ -115,7 +116,7 @@ type Repository interface {
 	CancelDisplacedParticipantRun(
 		ctx context.Context, taskID, stepID, agentProfileID string,
 	) ([]runssqlite.CancelledRun, error)
-	IsTaskWorkflowStepTerminal(ctx context.Context, taskID string) (terminal, hasStep bool, err error)
+	IsTaskOnFinalStep(ctx context.Context, taskID string) (final, hasStep bool, err error)
 }
 
 // DecisionStore is the workflow-domain decisions interface required by
@@ -292,6 +293,9 @@ type TaskReactivityChange struct {
 	// the caller could not supply one (e.g. the read-back itself failed);
 	// the pipeline then enqueues the task_assigned wake keyless.
 	AssignmentGeneration *int64
+	// BlockerFailureOccurrenceID carries the identity assigned to this
+	// committed failure transition into Office reactivity.
+	BlockerFailureOccurrenceID string
 	// PrevAssigneeID is the assignee BEFORE the mutation. Required when
 	// NewAssigneeID is set so the pipeline can detect a real change and
 	// hand off the previous assignee's session.
@@ -445,6 +449,8 @@ type DashboardService struct {
 	assigneeWriter        HumanAssigneeWriter             // optional; nil rejects human-assignee writes rather than skipping authorization
 	projectBudget         ProjectBudgetEvaluator          // optional; nil means reassignment doesn't re-evaluate the destination project's budget policies
 	taskStateWriter       shared.TaskStateWriter          // task repository owns transactional state changes and completion guards
+	humanDoneCompleter    TaskHumanDoneCompleter
+	finalStepMover        TaskFinalStepMover // optional; nil keeps the in_review redirect for human Done on a non-final step
 }
 
 // SetRoutingProvider wires the provider-routing seam used by the

@@ -1040,8 +1040,9 @@ type Service struct {
 	// doc comment).
 	agentErrorDeps atomic.Pointer[agentErrorDispatchDeps]
 	// childCompletionLocks serializes duplicate on_children_completed deliveries.
-	childCompletionLocksMu sync.Mutex
-	childCompletionLocks   map[string]*childCompletionOperationLock
+	childCompletionLocksMu               sync.Mutex
+	childCompletionLocks                 map[string]*childCompletionOperationLock
+	parentChildrenCompletionWakeRecorder func(context.Context, string, string, string, string) error
 	// officeTerminalCompletionLocks serializes concurrent
 	// markOfficeTaskCompletedForTerminalStep deliveries for the same task, so
 	// two deliveries racing past the taskRuntimeStateMu check above cannot
@@ -1232,13 +1233,6 @@ type Service struct {
 	gitlabService      GitLabWatchService
 	gitlabReviewSource *GitLabReviewWatcherSource
 	gitlabIssueSource  *GitLabIssueWatcherSource
-	// Azure DevOps watcher service + sources for work-item and pull-request
-	// polling events. The integration publishes provider-native matches; the
-	// shared watcher coordinator owns task creation and throttling.
-	azureDevOpsService     AzureDevOpsWatchService
-	azureWorkItemSource    *AzureDevOpsWorkItemWatcherSource
-	azurePullRequestSource *AzureDevOpsPullRequestWatcherSource
-
 	// gitlabMRLinkService auto-links merge requests opened outside Kandev's
 	// Create-PR action, mirroring what githubService does for PRs. Separate
 	// from gitlabService (the review/issue watch surface) — see
@@ -1751,6 +1745,7 @@ func (s *Service) SetRouteActionHandler(handler func(context.Context, RouteActio
 // task and workflow launches.
 func (s *Service) SetProfileExecutionResolver(resolver *agentruntime.ProfileExecutionResolver) {
 	s.profileExecutionResolver = resolver
+	s.wireAdmissionGrade(resolver)
 	if resolver != nil {
 		resolver.SetKeywordContextEnabled(s.config.ProviderKeywordContext)
 	}
@@ -3574,9 +3569,6 @@ func (s *Service) subscribeStartupEvents() {
 	// Subscribe to GitLab integration events
 	s.subscribeGitLabEvents()
 
-	// Subscribe to Azure DevOps watcher events
-	s.subscribeAzureDevOpsEvents()
-
 	// Subscribe to JIRA integration events
 	s.subscribeJiraEvents()
 
@@ -4479,20 +4471,35 @@ func (s *Service) QueueUserPrompt(
 	metadata map[string]interface{},
 	userMessageRecorded bool,
 ) error {
+	_, err := s.QueueUserPromptWithReceipt(ctx, taskID, sessionID, prompt, model, planMode, attachments, metadata, userMessageRecorded)
+	return err
+}
+
+// QueueUserPromptWithReceipt retains the accepted queue identity under the
+// existing workflow admission and fast-path dispatch rules.
+func (s *Service) QueueUserPromptWithReceipt(
+	ctx context.Context,
+	taskID, sessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	metadata map[string]interface{},
+	userMessageRecorded bool,
+) (string, error) {
 	if s.messageQueue == nil {
-		return errors.New("message queue is not configured")
+		return "", errors.New("message queue is not configured")
 	}
 	queueMetadata := make(map[string]interface{}, len(metadata)+1)
 	for key, value := range metadata {
 		queueMetadata[key] = value
 	}
 	if err := retainBuiltinIntent(ctx, taskID, sessionID, queueMetadata); err != nil {
-		return err
+		return "", err
 	}
 	if userMessageRecorded {
 		queueMetadata[metaKeyUserMessageRecorded] = true
 	}
 	deferInitialBriefDrain := false
+	queuedEntryID := ""
 	if err := s.withSessionPromptAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		session, err := s.repo.GetTaskSession(admittedCtx, sessionID)
 		if err != nil {
@@ -4501,7 +4508,7 @@ func (s *Service) QueueUserPrompt(
 		if session == nil || isTerminalSessionState(session.State) {
 			return ErrSessionNotPromptable
 		}
-		if _, err := s.messageQueue.QueueMessageWithMetadata(
+		queued, err := s.messageQueue.QueueMessageWithMetadata(
 			admittedCtx,
 			sessionID,
 			taskID,
@@ -4511,20 +4518,22 @@ func (s *Service) QueueUserPrompt(
 			planMode,
 			toQueuedAttachments(attachments),
 			queueMetadata,
-		); err != nil {
+		)
+		if err != nil {
 			return fmt.Errorf("queue user prompt: %w", err)
 		}
+		queuedEntryID = queued.ID
 		deferInitialBriefDrain = s.isInitialTaskBriefDispatchPending(sessionID)
 		return nil
 	}); err != nil {
-		return err
+		return "", err
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
 	if deferInitialBriefDrain {
 		// A later first-message contender is already durably queued. Let the
 		// admitted candidate finish its first dispatch. Its turn-tail drain or
 		// CompleteInitialTaskBriefDispatch will deliver this entry in FIFO order.
-		return nil
+		return queuedEntryID, nil
 	}
 
 	// T2: enqueue-side fast-path drain. The user's WIP wait is a
@@ -4541,7 +4550,7 @@ func (s *Service) QueueUserPrompt(
 	// isCancelInFlight / isQueuedDispatchInFlight / isSteerInFlight
 	// in-flight checks (cheaper than the DB read).
 	s.tryFastPathDrainAfterEnqueue(ctx, taskID, sessionID)
-	return nil
+	return queuedEntryID, nil
 }
 
 // MaxQueuedPromptsPerSession exposes the active queue capacity to transaction

@@ -430,11 +430,9 @@ func conversationReceiptFromData(data any) (*models.ConversationMutationReceipt,
 		return &receipt, true
 	}
 	if payload, ok := data.(map[string]any); ok {
-		value, exists := payload["conversation_receipt"]
-		if !exists {
-			return nil, false
+		if value, exists := payload["conversation_receipt"]; exists {
+			return conversationReceiptFromData(value)
 		}
-		return conversationReceiptFromData(value)
 	}
 	encoded, err := json.Marshal(data)
 	if err != nil {

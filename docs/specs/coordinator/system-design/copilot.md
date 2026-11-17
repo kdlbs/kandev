@@ -149,12 +149,6 @@ CLI's own tools ([Residual](#residual-external-surface)).
 - `IsRestorableQuickChatTask` excludes origin `coordinator`, so the task never
   becomes a Quick Chat tab; board, list and snapshot queries already exclude
   ephemeral tasks.
-- Quick Chat idle expiry excludes origin `coordinator`:
-  `ListExpiredQuickChatTasks` and the re-check in
-  `DeleteExpiredQuickChatTask` (`internal/task/repository/sqlite/task.go`)
-  exclude origin `coordinator` beside their existing bound `automation_run`
-  exclusion (`COALESCE(t.origin, '') NOT IN (?, ?)`), so a conversation idle for
-  more than seven days is kept.
 
 ### Conversation lifecycle
 

@@ -34,6 +34,10 @@ const AgentCtlPort = ports.AgentCtl
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
 	builtinMCPMu sync.Mutex
+	// registrationSettled closes after this newly created execution is either
+	// persisted as the session's current runtime or rolled back.
+	registrationSettled     chan struct{}
+	registrationSettledOnce sync.Once
 	// projectMCP carries execution-bound evidence that the host materialized
 	// the selected built-in packages into a project configuration file. It is
 	// produced only after a successful write and never persisted.
@@ -491,6 +495,27 @@ type AgentExecution struct {
 	// callback cannot validate one generation and mutate another after the
 	// validation lock is released.
 	startupCallbackMu sync.RWMutex
+}
+
+func (e *AgentExecution) settleRegistration() {
+	if e == nil || e.registrationSettled == nil {
+		return
+	}
+	e.registrationSettledOnce.Do(func() {
+		close(e.registrationSettled)
+	})
+}
+
+func (e *AgentExecution) waitRegistrationSettled(ctx context.Context) error {
+	if e == nil || e.registrationSettled == nil {
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-e.registrationSettled:
+		return nil
+	}
 }
 
 // SessionSettingsPolicy controls whether startup restores the saved mode/model
@@ -1871,8 +1896,9 @@ type LaunchRequest struct {
 	// When non-empty it is the source of truth; the legacy single-repo top-level
 	// fields above are populated from Repositories[0] for callers that have not
 	// yet been updated.
-	Repositories     []RepoLaunchSpec
-	WorkspaceFolders []WorkspaceFolderSpec
+	Repositories           []RepoLaunchSpec
+	WorkspaceFolders       []WorkspaceFolderSpec
+	DetachedWorkspaceRoots []string
 
 	// managedGoCachePath is resolved once before local preparation so setup
 	// scripts and the runtime instance cannot observe different settings.
@@ -1948,7 +1974,7 @@ type CredentialsManager interface {
 
 // AgentProfileInfo contains resolved profile information
 type AgentProfileInfo struct {
-	ResourceCircuitKey string
+	ExecutionGrade     string
 	ProfileID          string
 	ProfileName        string
 	AgentID            string
@@ -1956,6 +1982,7 @@ type AgentProfileInfo struct {
 	Model              string // applied through ACP model selection at session start
 	Mode               string // applied via ACP session/set_mode at session start (empty = use agent default)
 	ConfigOptions      map[string]string
+	ResourceCircuitKey string
 	// FallbackModel is the optional single ACP model ID to switch to when
 	// Model is unavailable. Ignored when AutoFallback is enabled.
 	FallbackModel string
@@ -2066,16 +2093,17 @@ type WorkspaceInfo struct {
 	WorkspacePath          string // Path to the effective workspace root or repository
 	// WorkspaceLayout classifies WorkspacePath so repository-relative source
 	// destinations can be resolved after a restart. Empty is legacy data.
-	WorkspaceLayout       string
-	WorkspaceFolders      []WorkspaceFolderSpec
-	WorkspaceRepositories []WorkspaceRepositorySpec
-	TaskDirName           string
-	WorkspaceID           string
-	AgentProfileID        string // Stable Office agent identity (or the execution profile for legacy sessions)
-	ExecutionProfileID    string // Concrete CLI profile selected for this execution
-	ExecutorProfileID     string // Concrete executor profile selected for this execution
-	AgentID               string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
-	ACPSessionID          string // Agent's session ID for conversation resumption (from session metadata)
+	WorkspaceLayout        string
+	WorkspaceFolders       []WorkspaceFolderSpec
+	WorkspaceRepositories  []WorkspaceRepositorySpec
+	DetachedWorkspaceRoots []string
+	TaskDirName            string
+	WorkspaceID            string
+	AgentProfileID         string // Stable Office agent identity (or the execution profile for legacy sessions)
+	ExecutionProfileID     string // Concrete CLI profile selected for this execution
+	ExecutorProfileID      string // Concrete executor profile selected for this execution
+	AgentID                string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
+	ACPSessionID           string // Agent's session ID for conversation resumption (from session metadata)
 	// SessionMode is the persisted session permission mode (e.g. "acceptEdits")
 	// from session metadata, declared via the set_session_mode workflow action or
 	// a user toggle. Applied as a mode override at ACP session init so a fresh

@@ -39,6 +39,9 @@ type Instance struct {
 	// ID is the unique identifier for this instance
 	ID string
 
+	// ScopedMCPRoutes records the effective native MCP route mode.
+	ScopedMCPRoutes bool
+
 	// Port is the HTTP port this instance is listening on
 	Port int
 
@@ -152,6 +155,9 @@ type CreateRequest struct {
 	// ID is an optional identifier for the instance. If empty, one will be generated.
 	ID string `json:"id,omitempty"`
 
+	// ScopedMCPRoutes opts this helper into instance-scoped built-in MCP routes.
+	ScopedMCPRoutes bool `json:"scoped_mcp_routes,omitempty"`
+
 	// WorkspacePath is the required absolute path to the workspace directory.
 	WorkspacePath string `json:"workspace_path"`
 
@@ -249,6 +255,8 @@ type CreateRequest struct {
 	RemoteContributions       map[string]models.RemoteContribution      `json:"remote_contributions,omitempty"`
 	ContributionDestinations  map[string]models.ContributionDestination `json:"contribution_destinations,omitempty"`
 	WorkspaceSourceRoots      []string                                  `json:"workspace_source_roots,omitempty"`
+	WorkspaceExcludedRoots    []string                                  `json:"workspace_excluded_roots,omitempty"`
+	TaskWorkspaceRoot         string                                    `json:"task_workspace_root,omitempty"`
 	DurableJournalPath        string                                    `json:"durable_journal_path,omitempty"`
 	DeliveryStreamID          string                                    `json:"delivery_stream_id,omitempty"`
 	DeliveryIncarnationID     string                                    `json:"delivery_incarnation_id,omitempty"`
@@ -270,6 +278,9 @@ type CreateResponse struct {
 
 	// Port is the HTTP port the instance is listening on
 	Port int `json:"port"`
+
+	// ScopedMCPRoutes is the effective mode accepted by this helper.
+	ScopedMCPRoutes bool `json:"scoped_mcp_routes"`
 }
 
 // InstanceInfo contains serializable information about an instance for API responses.
@@ -277,6 +288,9 @@ type CreateResponse struct {
 type InstanceInfo struct {
 	// ID is the unique identifier for this instance
 	ID string `json:"id"`
+
+	// ScopedMCPRoutes is the retained helper's effective route mode.
+	ScopedMCPRoutes bool `json:"scoped_mcp_routes"`
 
 	// Port is the HTTP port this instance is listening on
 	Port int `json:"port"`
@@ -307,6 +321,8 @@ type InstanceInfo struct {
 
 	// TaskID is the task ID this instance was created for, if any.
 	TaskID string `json:"task_id,omitempty"`
+
+	WorkspaceExcludedRoots []string `json:"workspace_excluded_roots,omitempty"`
 
 	// WorkspaceSourceRoots is the live, current source-root allowlist this
 	// instance is enforcing right now -- a rescan or rebind can change it
@@ -354,6 +370,7 @@ func (i *Instance) Info() *InstanceInfo {
 
 	return &InstanceInfo{
 		ID:                         i.ID,
+		ScopedMCPRoutes:            i.ScopedMCPRoutes,
 		Port:                       i.Port,
 		LeaseGeneration:            i.lease.Generation,
 		ListenerActive:             i.listenerActive.Load(),

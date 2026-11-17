@@ -199,6 +199,7 @@ type SessionLauncher interface {
 	ResumeTaskSession(ctx context.Context, taskID, sessionID string) (*executor.TaskExecution, error)
 	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) (orchestrator.ProcessOnTurnStartResult, error)
 	QueueUserPrompt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) error
+	QueueUserPromptWithReceipt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) (string, error)
 	GetMessageQueue() *messagequeue.Service
 	// CheckQueueAdmissionReadiness rechecks automatic dispatch for the exact
 	// session incarnation admitted by a queue operation.
@@ -386,6 +387,9 @@ type Handlers struct {
 	// SetClarificationResolver).
 	clarificationResolver *clarification.Resolver
 	clarificationBundles  ClarificationBundleLister
+
+	sendOperationStore     SendOperationStore
+	sendOperationRetention *sendOperationRetentionWorker
 
 	// Optional list_pending_agent_permissions_kandev / resolve_agent_permission_kandev
 	// dependency (external MCP surface only, set via SetAgentPermissionService).
@@ -609,6 +613,7 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPGetTaskMRAutomation, h.handleGetTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskMRAutomation, h.handleUpdateTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
+	d.RegisterFunc(ws.ActionMCPGetTaskMessageOperation, h.handleGetTaskMessageOperation)
 	d.RegisterFunc(ws.ActionMCPListTaskSessions, h.handleListTaskSessions)
 	d.RegisterFunc(ws.ActionMCPListPendingAgentPermissions, h.handleListPendingAgentPermissions)
 	d.RegisterFunc(ws.ActionMCPResolveAgentPermission, h.handleResolveAgentPermission)
@@ -2286,6 +2291,7 @@ func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (
 		GitHubURL      string `json:"github_url"`
 		BaseBranch     string `json:"base_branch"`
 		CheckoutBranch string `json:"checkout_branch"`
+		WorktreePath   string `json:"worktree_path"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -2293,14 +2299,22 @@ func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
+	if req.WorktreePath != "" {
+		return h.handleReportedWorktreeAdoption(ctx, msg, req.TaskID, req.WorktreePath, req.BaseBranch, req.CheckoutBranch)
+	}
 	// Mutual exclusion across the three repo identifiers. resolveRepoInput
 	// applies a silent precedence (repository_id > github_url > local_path),
 	// so an agent that accidentally passes two of them gets a behaviour
 	// change with no signal. Reject early instead so the agent sees the
 	// mistake.
-	if locatorCount := boolCount(req.RepositoryID != "", req.LocalPath != "", req.GitHubURL != ""); locatorCount > 1 {
+	locatorCount := boolCount(req.RepositoryID != "", req.LocalPath != "", req.GitHubURL != "")
+	if locatorCount > 1 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
 			"pass at most one of repository_id, github_url, local_path", nil)
+	}
+	if req.WorktreePath != "" && locatorCount > 0 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"worktree_path cannot be combined with repository_id, github_url, or local_path", nil)
 	}
 	// repository_id / local_path / github_url are all optional: the service
 	// defaults to the task's only repository (or its primary row) when none
@@ -2336,6 +2350,42 @@ func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (
 	}
 	if taskRepo.TaskWorkspacePath != "" {
 		response["task_workspace_path"] = taskRepo.TaskWorkspacePath
+	}
+	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
+// handleReportedWorktreeAdoption attaches an existing linked worktree the
+// agent already created inside the task workspace. The backend validates the
+// path, repository, and branch; this handler only shapes the response.
+func (h *Handlers) handleReportedWorktreeAdoption(ctx context.Context, msg *ws.Message, taskID, worktreePath, baseBranch, checkoutBranch string) (*ws.Message, error) {
+	result, err := h.taskSvc.AdoptWorktree(ctx, service.AdoptWorktreeRequest{
+		TaskID:         taskID,
+		Path:           worktreePath,
+		BaseBranch:     baseBranch,
+		CheckoutBranch: checkoutBranch,
+		Source:         service.WorktreeAdoptionSourceReported,
+	})
+	if err != nil {
+		h.logger.Error("failed to adopt worktree", zap.Error(err))
+		code := classifyAddBranchError(err)
+		return ws.NewError(msg.ID, msg.Action, code, "Failed to add branch: "+err.Error(), nil)
+	}
+	response := map[string]interface{}{
+		"id":                result.ID,
+		keyTaskID:           result.TaskID,
+		keyRepositoryID:     result.RepositoryID,
+		keyBaseBranch:       result.BaseBranch,
+		keyCheckoutBranch:   result.WorktreeBranch,
+		keyPosition:         result.Position,
+		"agent_cwd_changed": false,
+		"adopted":           result.Adopted,
+		"already_attached":  result.AlreadyAttached,
+	}
+	if result.WorktreePath != "" {
+		response["worktree_path"] = result.WorktreePath
+	}
+	if result.TaskWorkspacePath != "" {
+		response["task_workspace_path"] = result.TaskWorkspacePath
 	}
 	return ws.NewResponse(msg.ID, msg.Action, response)
 }
@@ -2596,7 +2646,11 @@ func classifyAddBranchError(err error) string {
 	case strings.Contains(msg, "repository_id is required"),
 		strings.Contains(msg, "only supported on the worktree executor"),
 		strings.Contains(msg, "task_id is required"),
-		strings.Contains(msg, "cannot resolve base_branch"):
+		strings.Contains(msg, "cannot resolve base_branch"),
+		strings.Contains(msg, "is not adoptable"),
+		strings.Contains(msg, "does not support worktree adoption"),
+		strings.Contains(msg, "only supported on host Worktree and Local executors"),
+		strings.Contains(msg, "checkout_branch"):
 		return ws.ErrorCodeValidation
 	case strings.Contains(msg, "GitHub URL"),
 		strings.Contains(msg, "github.com/owner/repo"),
@@ -2918,6 +2972,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		SenderSessionID   string `json:"sender_session_id"`
 		DeliveryMode      string `json:"delivery_mode"`
 		ReplyToQuestionID string `json:"reply_to_question_id"`
+		OperationID       string `json:"operation_id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -2929,6 +2984,11 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "prompt is required", nil)
 	}
 	if req.DeliveryMode == "report" {
+		// A status report appends without a send operation; accepting an
+		// identity here would imply a replay guarantee the report path lacks.
+		if req.OperationID != "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "operation_id applies to queued or interrupt sends, not status reports", nil)
+		}
 		if req.ReplyToQuestionID != "" {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "report cannot answer a pending question", nil)
 		}
@@ -2962,6 +3022,15 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "sender task not found", nil)
 	}
 
+	operationRequest := sendOperationClaimRequest{
+		SenderTaskID: req.SenderTaskID, SenderSessionID: req.SenderSessionID,
+		TargetTaskID: req.TaskID, RequestedSession: req.SessionID,
+		RequestedQuestion: req.ReplyToQuestionID, Prompt: req.Prompt,
+		DeliveryMode: req.DeliveryMode, OperationID: req.OperationID,
+	}
+	if response := h.readExistingSendOperation(ctx, msg, operationRequest); response != nil {
+		return response, nil
+	}
 	// Verify the target task exists before looking up its session, so a bad
 	// task_id (e.g. a truncated UUID prefix) reports "task not found" instead
 	// of the misleading "no primary session" error from the session lookup.
@@ -3027,10 +3096,22 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
 			`delivery_mode="interrupt" is only allowed when the sender is the target task's direct parent`, nil)
 	}
+	claim, operationErr := h.claimSendOperation(ctx, msg, operationRequest)
+	if operationErr != nil {
+		return operationErr, nil
+	}
+	if claim.response != nil {
+		return claim.response, nil
+	}
+	if claim.operation != nil {
+		claim.operation.TargetSessionID = session.ID
+		senderMeta[models.MetaKeySendOperationID] = claim.operation.OperationID
+	}
 	if parentReply != nil {
 		// Claim the durable question before dispatch. A failed status update after
 		// delivery would make a retry send the same answer a second time.
 		if err := h.markParentQuestionAnswered(ctx, parentReply.message, req.Prompt); err != nil {
+			h.rejectSendOperationBeforeDispatch(ctx, claim.operation)
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "parent question could not be claimed: "+err.Error(), nil)
 		}
 	}
@@ -3060,6 +3141,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 					zap.String(parentQuestionIDKey, parentReply.message.ID), zap.Error(restoreErr))
 			}
 		}
+		h.settleSendOperation(ctx, claim.operation, result, err)
 		var qfErr *queueFullDispatchError
 		if errors.As(err, &qfErr) {
 			return ws.NewError(msg.ID, msg.Action, messagequeue.QueueFullErrorCode,
@@ -3068,11 +3150,10 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		"task_id":         req.TaskID,
-		"session_id":      result.sessionID,
-		stopTaskStatusKey: result.status,
-	})
+	h.settleSendOperation(ctx, claim.operation, result, nil)
+	payload := map[string]interface{}{"task_id": req.TaskID, "session_id": result.sessionID, stopTaskStatusKey: result.status}
+	decorateSendOperationReceipt(payload, claim.operation, result)
+	return ws.NewResponse(msg.ID, msg.Action, payload)
 }
 
 // lookupSenderSessionName resolves the sender session's user-supplied name for
@@ -3369,6 +3450,7 @@ type taskMessageDispatchResult struct {
 	status        string
 	sessionID     string
 	queuedEntryID string
+	messageID     string
 }
 
 type taskMessageReviewRollback struct {
@@ -3902,11 +3984,12 @@ func (h *Handlers) queueTaskMessageUntilWorkflowPromotion(
 	admission orchestrator.PeerMessageStartAdmission,
 ) (taskMessageDispatchResult, error) {
 	releasePeerMessageStartAdmission(admission)
-	if err := h.sessionLauncher.QueueUserPrompt(ctx, taskID, session.ID, prompt, "", false, nil, metadata, false); err != nil {
+	queuedEntryID, err := h.sessionLauncher.QueueUserPromptWithReceipt(ctx, taskID, session.ID, prompt, "", false, nil, metadata, false)
+	if err != nil {
 		h.restoreTaskReviewForTaskMessage(ctx, taskID, *reviewRollback)
 		return taskMessageDispatchResult{}, fmt.Errorf("failed to queue prompt until workflow promotion: %w", err)
 	}
-	return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID}, nil
+	return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queuedEntryID}, nil
 }
 
 func (h *Handlers) dispatchPreparedTaskMessageWithReviewRollback(
@@ -4063,7 +4146,7 @@ func (h *Handlers) startPreparedPeerTaskMessage(
 		return taskMessageDispatchResult{}, fmt.Errorf("failed to start session: %w", err)
 	}
 	releasePeerMessageStartAdmission(admission)
-	return taskMessageDispatchResult{status: "started", sessionID: session.ID}, nil
+	return taskMessageDispatchResult{status: "started", sessionID: session.ID, messageID: messageIDOf(recorded)}, nil
 }
 
 func (h *Handlers) admitPreparedPeerTaskMessage(
@@ -4133,7 +4216,7 @@ func (h *Handlers) promptPreparedTaskMessage(
 		h.deleteRecordedUserMessage(ctx, recorded)
 		return taskMessageDispatchResult{}, err
 	}
-	return taskMessageDispatchResult{status: status, sessionID: session.ID}, nil
+	return taskMessageDispatchResult{status: status, sessionID: session.ID, messageID: messageIDOf(recorded)}, nil
 }
 
 // queueRecordedTaskMessageForCapacity keeps an already-recorded agent message

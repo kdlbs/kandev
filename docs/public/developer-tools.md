@@ -92,13 +92,13 @@ Quick Chat is an agent conversation outside the board. Use it for repository ori
 
 ### Comment on an agent reply
 
-In Task Chat or Quick Chat, select text from a settled agent prose reply, then select the comment button that appears beside the selection. The editor works like plan comments: enter feedback and choose **Add** to keep it as pending context, or **Run** to send it immediately. Pending selections use the same inline highlight and comment badge as plans; select either one to update or delete the feedback. Pending message comments are kept for the current browser tab, appear as composer context chips, and are included in the next prompt as Markdown. If the agent is busy, **Run** queues the feedback for its next turn.
+In Task Chat or Quick Chat, select text from a settled agent prose reply, then select the comment button that appears beside the selection. On a phone or tablet, the comment button joins the row of icons above the composer instead, so your device's own selection menu cannot cover it. The same applies in Office threads, Markdown previews, and code files, where the button appears in the bottom-right corner. The editor works like plan comments: enter feedback and choose **Add** to keep it as pending context, or **Run** to send it immediately. Pending selections use the same inline highlight and comment badge as plans; select either one to update or delete the feedback. Pending message comments are kept for the current browser tab, appear as composer context chips, and are included in the next prompt as Markdown. If the agent is busy, **Run** queues the feedback for its next turn.
 
 Inline comments are available only on ordinary settled prose. Streaming replies, tool/thinking/status output, plans, rich-block content, raw views, and user messages do not accept inline comments.
 
 ### Reference tasks and work items
 
-In Task Chat or an ordinary structured Quick Chat, type `#` at the start of a line or after whitespace, then enter part of a title or key. Kandev searches the active workspace's tasks and connected Jira, Linear, GitHub, GitLab, Azure DevOps, and Sentry sources. Results stay grouped by provider and type; a disconnected or slow provider does not hide results from another source.
+In Task Chat or an ordinary structured Quick Chat, type `#` at the start of a line or after whitespace, then enter part of a title or key. Kandev searches the active workspace's tasks and connected Jira, Linear, GitHub, GitLab, and Sentry sources, plus plugin reference sources. Results stay grouped by provider and type; a disconnected or slow provider does not hide results from another source.
 
 Use the arrow keys and **Tab** or **Enter**, or select a row with pointer or touch. Selection inserts a chip without sending. The chip survives draft reloads and becomes a clickable reference after explicit send; messages queued while an agent is busy keep the same reference metadata. CLI-passthrough chat leaves `#` as literal text and does not search.
 
@@ -119,6 +119,15 @@ once for the next input, twice to keep it enabled, and again to turn it off.
 Shortcuts target the selected terminal and keep the keyboard focused. The row
 stays above the on-screen keyboard. Modifiers reset when you switch terminal
 tabs or close the view.
+
+### Recover a Quick Terminal
+
+After a shell exits or the backend restarts, the shell process and its state are gone. This includes environment changes, running commands, command history, and screen output.
+
+If Kandev requests a reload after restart, dismiss the Quick Terminal view.
+Select **Reload page**, then reopen Quick Terminal.
+
+To start a shell in the same tab, select the tab and then select **Start new shell**. Selecting or reopening a tab does not start a shell automatically. To open a separate shell, select **New Terminal**.
 
 ### Start a chat
 
@@ -155,7 +164,7 @@ or rename the chat first, the provisional or user-selected title remains authori
 
 Closing a real chat tab permanently deletes its conversation and hidden backing task data. By default, it also removes the associated worktree. If the worktree has local changes, select **Permanently discard tracked and untracked changes** to remove it, or select **Keep workspace files** to retain the files. There is no undo for the conversation or task.
 
-Kandev also deletes abandoned chats after seven days; cleanup runs when the backend starts and then once per day. Only chats whose session is `RUNNING` or `IDLE` are protected from age-based cleanup. Old `CREATED`, `STARTING`, or `WAITING_FOR_INPUT` chats can expire, so do not use Quick Chat for durable work.
+Quick Chat conversations remain available until you explicitly delete them or their workspace. Stopping an agent preserves its tab and conversation.
 
 If **Send** stays disabled, complete these steps:
 
@@ -222,9 +231,9 @@ The same settings page configures the **Configuration Chat Agent** for each work
 
 Open Configuration Chat from the floating chat button on Settings pages, turn on **Configuration chat** while creating a Quick Chat, or run **Configuration Chat** from the `Cmd/Ctrl+K` command menu. A workspace currently has one configuration conversation. The Settings panel shows that conversation without tabs; **Open in Quick Chat** moves the same setup or session into the larger tabbed dialog without copying it.
 
-Configuration Chat uses a repository-less ephemeral task. Its configuration-mode MCP can inspect and change workflows, agent profiles, and MCP configuration, and can read, create, and update saved prompts by exact name, subject to their agent-edit permission. The selected profile's model, credentials, permissions, and external MCP settings apply. Review requested configuration mutations before approving them.
+Configuration Chat uses a repository-less ephemeral task. Its configuration-mode MCP can inspect and change workflows, agent profiles, and MCP configuration, and can read, create, and update saved prompts by exact name. Every custom prompt is editable through these authorized tools; built-in prompts reject agent writes. The assistant should change a prompt only when the operator explicitly requests or agrees to the change, then read back the saved result. The selected profile's model, credentials, permissions, and external MCP settings apply. Review requested configuration mutations before approving them.
 
-Closing the floating Settings panel preserves the conversation. To delete it, open it in Quick Chat, close its tab, and confirm deletion. Configuration tasks are excluded from the seven-day Quick Chat sweeper and remain available until explicitly deleted or their workspace is deleted.
+Closing the floating Settings panel preserves the conversation. To delete it, open it in Quick Chat, close its tab, and confirm deletion. The conversation remains available until you delete it or its workspace.
 
 If the session is broken, choose **Restart session** in the Settings panel header and confirm. Kandev stops the current agent, deletes the conversation and unsent prompts, and starts a blank session with the same agent profile and executor. Configuration changes already made are kept. On phones, confirmation opens in a bottom drawer. If the connection drops during restart, use **Refresh status** in the panel or expanded Quick Chat to recover the result before starting again. If a worktree has uncommitted changes, commit them before restarting.
 
@@ -240,10 +249,10 @@ Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusab
 Shared prompt reads and reference use are available to org members. Creating,
 editing, or deleting prompts requires `org.config.manage` permission.
 
-To let the configuration assistant update an existing custom prompt, edit it,
-enable **Allow agent edits**, and choose **Save changes**. The control works on
-desktop and phone. Existing and Settings-created prompts default to human-only;
-MCP-created prompts allow later agent edits until you disable the permission.
+The configuration assistant should update a custom prompt only when you
+explicitly request or agree to the change. The backend does not verify that
+request or agreement. Authorized tools can update any custom prompt. There is no
+per-prompt agent-edit control, including for previously protected prompts.
 Built-in prompts always reject agent writes, while remaining editable by an
 operator. Changes affect every future reference to that prompt. See the
 [MCP write contract](automation-and-mcp.md#create-or-update-a-saved-prompt).

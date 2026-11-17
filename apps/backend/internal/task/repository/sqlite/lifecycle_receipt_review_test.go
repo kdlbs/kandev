@@ -30,7 +30,7 @@ func TestProfileCleanupRecordsDeletedLifecycleReceipt(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepoForSessionTests(t)
 	seedForMsgTest(t, repo, "profile-task", "profile-session", "profile-turn")
-	_, err := repo.db.ExecContext(ctx, repo.db.Rebind(`UPDATE tasks SET is_ephemeral = 1 WHERE id = ?`), "profile-task")
+	_, err := repo.db.ExecContext(ctx, repo.db.Rebind(`UPDATE tasks SET is_ephemeral = 1, metadata = '{"config_mode":true}' WHERE id = ?`), "profile-task")
 	require.NoError(t, err)
 	_, err = repo.db.ExecContext(ctx, repo.db.Rebind(`UPDATE task_sessions SET agent_profile_id = ? WHERE id = ?`), "profile-cleanup", "profile-session")
 	require.NoError(t, err)

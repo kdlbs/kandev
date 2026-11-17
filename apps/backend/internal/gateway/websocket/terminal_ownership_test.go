@@ -93,7 +93,7 @@ func TestOrdinaryTerminalLaunchUsesPersistedOwnerInSharedEnvironment(t *testing.
 				TaskEnvironmentID: sharedEnv, WorkspacePath: t.TempDir(),
 			}
 			c := sharedEnvironmentContext(t, sharedEnv, tc.terminalID)
-			label, command, once, httpErr := handler.resolveOrdinaryTerminalLaunch(
+			label, command, once, _, httpErr := handler.resolveOrdinaryTerminalLaunch(
 				c, execution, sharedEnv, tc.terminalID, "untrusted", "",
 			)
 			if httpErr != "" {
@@ -134,7 +134,7 @@ func TestOrdinaryTerminalLaunchDeniesBeforeClaimingSharedEnvironmentCommand(t *t
 	}
 
 	c := sharedEnvironmentContext(t, sharedEnv, term.ID)
-	label, initialCommand, once, httpErr := handler.resolveOrdinaryTerminalLaunch(
+	label, initialCommand, once, _, httpErr := handler.resolveOrdinaryTerminalLaunch(
 		c, execution, sharedEnv, term.ID, "untrusted", "",
 	)
 	if httpErr != "terminal not found" {
@@ -154,7 +154,7 @@ func TestOrdinaryTerminalLaunchDeniesBeforeClaimingSharedEnvironmentCommand(t *t
 	}
 
 	deny = false
-	label, initialCommand, once, httpErr = handler.resolveOrdinaryTerminalLaunch(
+	label, initialCommand, once, _, httpErr = handler.resolveOrdinaryTerminalLaunch(
 		sharedEnvironmentContext(t, sharedEnv, term.ID), execution, sharedEnv, term.ID, "untrusted", "",
 	)
 	if httpErr != "" {
@@ -194,7 +194,7 @@ func TestOrdinaryTerminalLaunchRejectsForeignSharedEnvironmentMetadata(t *testin
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := sharedEnvironmentContext(t, tc.environmentID, tc.terminalID)
-			label, command, once, httpErr := handler.resolveOrdinaryTerminalLaunch(
+			label, command, once, _, httpErr := handler.resolveOrdinaryTerminalLaunch(
 				c, execution, tc.environmentID, tc.terminalID, "untrusted", "",
 			)
 			if httpErr != "terminal not found" {

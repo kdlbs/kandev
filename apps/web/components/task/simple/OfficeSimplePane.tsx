@@ -502,7 +502,11 @@ export function OfficeSimplePane({
   return (
     <ActiveSessionRefProvider>
       <div className="flex h-full">
-        <div ref={setScrollParent} className="flex-1 min-w-0 overflow-y-auto p-6">
+        <div
+          ref={setScrollParent}
+          data-selection-dock-host=""
+          className="flex-1 min-w-0 overflow-y-auto p-6"
+        >
           <TaskHeaderRow task={task} activeHold={activeHold} />
           {task.executionPolicy && (
             <StageProgressBar

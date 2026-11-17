@@ -62,7 +62,8 @@ func (m *Manager) buildWorkspaceTrackerGraph(
 	includeAttachedRepos bool,
 	forceBareRoot bool,
 ) (*WorkspaceTracker, []*WorkspaceTracker) {
-	directRepos := scanRepositorySubdirs(workDir, roots)
+	directRepos := scanRepositorySubdirs(workDir, roots, m.workspaceExcludedRoots)
+	linkedRepos := scanLinkedWorktreeRoots(workDir, m.workspaceRootForDiscovery(), roots, directRepos)
 	rootIsGit := resolveGitIndexPath(workDir) != ""
 
 	if !rootIsGit && (len(directRepos) >= 2 || forceBareRoot) {
@@ -70,8 +71,11 @@ func (m *Manager) buildWorkspaceTrackerGraph(
 		root.suppressGitPublication = true
 		m.configureTracker(root, "", roots)
 
-		trackers := make([]*WorkspaceTracker, 0, len(directRepos))
+		trackers := make([]*WorkspaceTracker, 0, len(directRepos)+len(linkedRepos))
 		for _, repo := range directRepos {
+			trackers = append(trackers, m.buildRepositoryScopeTrackers(ctx, repo, roots, workDir)...)
+		}
+		for _, repo := range linkedRepos {
 			trackers = append(trackers, m.buildRepositoryScopeTrackers(ctx, repo, roots, workDir)...)
 		}
 		return root, trackers
@@ -92,12 +96,120 @@ func (m *Manager) buildWorkspaceTrackerGraph(
 			trackers = append(trackers, m.buildRepositoryScopeTrackers(ctx, repo, roots, workDir)...)
 		}
 	}
+	// Adopted worktrees are linked checkouts at arbitrary depth (for example
+	// .claude/worktrees/fix-b), so they are not direct children of the task
+	// root. Their canonical path arrives as an explicit workspace source root;
+	// stand up a tracker for each one that is not already covered by the graph.
+	known := make(map[string]struct{}, len(trackers)+len(directRepos))
+	for _, tracker := range trackers {
+		known[tracker.RepositoryName()] = struct{}{}
+	}
+	for _, repo := range directRepos {
+		known[repo.name] = struct{}{}
+	}
+	for _, repo := range linkedRepos {
+		if _, alreadyDiscovered := known[repo.name]; alreadyDiscovered {
+			continue
+		}
+		trackers = append(trackers, m.buildRepositoryScopeTrackers(ctx, repo, roots, workDir)...)
+	}
 	return root, trackers
+}
+
+// scanLinkedWorktreeRoots returns linked worktrees reachable through an
+// explicit workspace source root that are not already direct repository
+// children. The tracker name is the canonical task-relative path, which is
+// stable, collision-free, and the same identity the backend and web client
+// derive for the root.
+func scanLinkedWorktreeRoots(workDir, workspaceRoot string, roots []string, direct []repositorySubdir) []repositorySubdir {
+	if workDir == "" || workspaceRoot == "" || len(roots) == 0 {
+		return nil
+	}
+	rootAbs, err := filepath.Abs(filepath.Clean(workDir))
+	if err != nil {
+		return nil
+	}
+	if resolved, err := filepath.EvalSymlinks(rootAbs); err == nil {
+		rootAbs = resolved
+	}
+	workspaceAbs := filepath.Clean(workspaceRoot)
+	if resolved, err := filepath.EvalSymlinks(workspaceAbs); err == nil {
+		workspaceAbs = resolved
+	}
+	directPaths := make(map[string]struct{}, len(direct))
+	for _, repo := range direct {
+		directPath := filepath.Clean(repo.path)
+		if resolved, err := filepath.EvalSymlinks(directPath); err == nil {
+			directPath = resolved
+		}
+		directPaths[directPath] = struct{}{}
+	}
+	var linked []repositorySubdir
+	for _, root := range roots {
+		resolved, err := filepath.EvalSymlinks(filepath.Clean(root))
+		if err != nil {
+			continue
+		}
+		if resolved == rootAbs {
+			continue
+		}
+		if _, alreadyDirect := directPaths[resolved]; alreadyDirect {
+			continue
+		}
+		if !isLinkedWorktreeRoot(resolved) {
+			continue
+		}
+		name := linkedWorktreeTrackerName(workspaceAbs, resolved)
+		if name == "" {
+			continue
+		}
+		linked = append(linked, repositorySubdir{name: name, path: resolved})
+	}
+	sort.Slice(linked, func(i, j int) bool { return linked[i].path < linked[j].path })
+	return linked
+}
+
+func linkedWorktreeTrackerName(workspaceRoot, path string) string {
+	relative, err := filepath.Rel(filepath.Clean(workspaceRoot), filepath.Clean(path))
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	return filepath.ToSlash(relative)
+}
+
+// isLinkedWorktreeRoot recognizes the .git file a linked worktree carries.
+// Submodule checkouts also use a .git file, but their gitdir lives under
+// .git/modules rather than .git/worktrees.
+func isLinkedWorktreeRoot(path string) bool {
+	gitPath := filepath.Join(path, ".git")
+	info, err := os.Lstat(gitPath)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	data, err := os.ReadFile(gitPath)
+	if err != nil {
+		return false
+	}
+	line := strings.TrimSpace(string(data))
+	const prefix = "gitdir:"
+	if !strings.HasPrefix(line, prefix) {
+		return false
+	}
+	gitDir := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(path, gitDir)
+	}
+	return filepath.Base(filepath.Dir(gitDir)) == "worktrees"
 }
 
 func (m *Manager) configureTracker(tracker *WorkspaceTracker, repositoryName string, roots []string) {
 	if m.cfg != nil {
 		tracker.SetDiagnosticIdentity(m.cfg.TaskID, m.cfg.SessionID)
+		root := m.cfg.TaskWorkspaceRoot
+		if root == "" {
+			root = m.cfg.WorkDir
+		}
+		tracker.SetWorkspaceRoot(root)
 	}
 	tracker.SetGitEnvironment(m.trackerGitEnvironment())
 	tracker.SetAllowedSourceRoots(roots)

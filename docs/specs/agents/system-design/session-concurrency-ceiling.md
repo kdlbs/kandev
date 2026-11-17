@@ -6,6 +6,7 @@ requirements:
   - REQ-AGENTS-SESSION-CEILING-001
   - REQ-AGENTS-SESSION-CEILING-002
   - REQ-AGENTS-SESSION-CEILING-003
+  - REQ-AGENTS-SESSION-CEILING-005
 ---
 
 # Session Concurrency Ceiling System Design
@@ -35,6 +36,44 @@ in force when enabled.
 | `REQ-AGENTS-SESSION-CEILING-001` | [Admission and replay](#admission-and-replay), [Failure and recovery](#failure-and-recovery) |
 | `REQ-AGENTS-SESSION-CEILING-002` | [Settings contract](#settings-contract), [Settings surface](#settings-surface), [Persistence](#persistence) |
 | `REQ-AGENTS-SESSION-CEILING-003` | [Message-turn admission](#message-turn-admission) |
+| `REQ-AGENTS-SESSION-CEILING-005` | [Execution-grade capacity](#execution-grade-capacity) |
+
+## Execution-grade capacity
+
+The existing capacity setting also stores `policy` (`automatic` by default,
+or explicitly `all`) and `grade_limits`. Defaults remain disabled. The legacy
+environment override retains automatic-only behavior. Settings apply the total,
+policy and grade map together under the admission controller's existing lock.
+The 64-entry limit bounds task summaries and update events.
+
+The `execution_grade` profile and task field is an explicit, trimmed name of
+at most 64 Unicode characters without control characters. Empty is unconfigured.
+Omitted or null profile PATCH values retain the stored grade; an explicit empty
+string clears it. A nonempty task grade wins over the selected logical profile.
+Profile duplication and prepared execution snapshots preserve this classification.
+
+Admission persists `admitted_execution_grade` and its separate known bit.
+Active sessions retain their admitted grade across later profile/task edits.
+All-policy admission counts persisted active sessions and in-flight reservations
+once, and checks both the total and the selected grade's maximum. A zero grade
+maximum is valid. Unknown population and unconfigured grades have distinct
+refusal reasons; neither is treated as zero usage. Existing admitted work survives
+settings changes. Automatic-only policy preserves manual overrides.
+
+All-policy message turns check both capacity dimensions before warm dispatch
+or cold resume. Their tickets retain and persist the admitted grade. A nested
+resume uses that snapshot despite later profile or task edits. Count tickets,
+launch reservations, and admitted rows once per session under the same lock.
+A legacy ungraded ticket remains unknown until a counted row supplies its grade.
+Existing ownership survives settings changes; automatic-only overrides remain.
+
+Explicit workflow starts capture their selected destination before grade
+admission. A lost promotion releases only that launch's reservation and readmits
+against the current selection. Existing deferred records provide arrival order
+for all-policy replay; this adds no polling loop. Queue projection uses the same
+locked admission observation for total, per-grade usage and unavailable state.
+The Settings editor saves or resets its draft through the existing API and
+retains stale/conflict feedback rather than claiming an unapplied change.
 
 ## Components and responsibilities
 
