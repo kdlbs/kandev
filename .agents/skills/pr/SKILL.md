@@ -68,9 +68,12 @@ explicitly requests task tracking.
    on another viewport, record that rationale instead of capturing an unrelated
    screen.
    Use synthetic or redacted data, validate the assets, and compress PNGs using
-   the recipe in step 7. If capture is impossible, report the concrete blocker
-   and stop before PR publication. UI candidate PRs must include at least one
-   fresh HTTPS Markdown image with descriptive alt text in `## Screenshots`.
+   the recipe in step 7. If capture is impossible, document the concrete
+   blocker in the PR description and continue publication. The screenshot check
+   will fail until evidence is added or a maintainer applies
+   `no-screenshots-allow`. UI candidate PRs should include a fresh HTTPS
+   Markdown image with descriptive alt text in `## Screenshots` when capture is
+   possible.
    The `UI screenshots` status applies to fork PRs too and checks presence;
    reviewers assess freshness, visibility, relevance, and affected viewport
    coverage. Only a maintainer can apply the exact `no-screenshots-allow` label

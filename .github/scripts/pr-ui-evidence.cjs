@@ -7,6 +7,24 @@ const STATUS_CONTEXT = "UI screenshots";
 const EXCEPTION_LABEL = "no-screenshots-allow";
 const MAX_EVALUATION_ATTEMPTS = 3;
 const MAX_CHANGED_FILES = 3000;
+const MARKDOWN_ESCAPE_CHARACTERS = new Set([
+  "\\",
+  "`",
+  "*",
+  "_",
+  "{",
+  "}",
+  "[",
+  "]",
+  "(",
+  ")",
+  "#",
+  "+",
+  "-",
+  ".",
+  "!",
+  "|",
+]);
 const UI_ROOTS = ["apps/web/", "apps/packages/ui/", "apps/desktop/src/"];
 const UI_EXTENSIONS = new Set([
   ".apng",
@@ -19,6 +37,7 @@ const UI_EXTENSIONS = new Set([
   ".jpeg",
   ".jpg",
   ".js",
+  ".jsx",
   ".json",
   ".less",
   ".mjs",
@@ -72,6 +91,14 @@ function markdownSafe(value) {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 500);
+}
+
+function markdownEscaped(value) {
+  return [...markdownSafe(value)]
+    .map((character) =>
+      MARKDOWN_ESCAPE_CHARACTERS.has(character) ? `\\${character}` : character,
+    )
+    .join("");
 }
 
 function getChangedPaths(changedFiles) {
@@ -182,6 +209,60 @@ function classifyUIChanges(changedFiles) {
   };
 }
 
+function removeInlineCodeSpans(markdown) {
+  const characters = markdown.split("");
+  let cursor = 0;
+  while (cursor < markdown.length) {
+    const opener = markdown.indexOf("`", cursor);
+    if (opener < 0) {
+      break;
+    }
+    let openerBackslashes = 0;
+    for (
+      let index = opener - 1;
+      index >= 0 && markdown[index] === "\\";
+      index--
+    ) {
+      openerBackslashes++;
+    }
+    let openerEnd = opener + 1;
+    while (markdown[openerEnd] === "`") {
+      openerEnd++;
+    }
+    const delimiterLength = openerEnd - opener;
+    if (openerBackslashes % 2 === 1) {
+      cursor = openerEnd;
+      continue;
+    }
+
+    let closer = openerEnd;
+    while (closer < markdown.length) {
+      closer = markdown.indexOf("`", closer);
+      if (closer < 0) {
+        break;
+      }
+      let closerEnd = closer + 1;
+      while (markdown[closerEnd] === "`") {
+        closerEnd++;
+      }
+      if (closerEnd - closer === delimiterLength) {
+        for (let index = opener; index < closerEnd; index++) {
+          if (characters[index] !== "\n") {
+            characters[index] = " ";
+          }
+        }
+        cursor = closerEnd;
+        break;
+      }
+      closer = closerEnd;
+    }
+    if (closer < 0) {
+      cursor = openerEnd;
+    }
+  }
+  return characters.join("");
+}
+
 function withoutMarkdownNoise(body) {
   const withoutComments = body.replace(/<!--[\s\S]*?-->/g, "");
   const output = [];
@@ -205,9 +286,9 @@ function withoutMarkdownNoise(body) {
       output.push("");
       continue;
     }
-    output.push(line.replace(/(?<!\\)(`+)[^`]*?\1/g, ""));
+    output.push(line);
   }
-  return output.join("\n");
+  return removeInlineCodeSpans(output.join("\n"));
 }
 
 function screenshotSection(body) {
@@ -352,6 +433,7 @@ async function evaluateSnapshot({ client, pullRequest, pullNumber }) {
   }
   return {
     candidateCount: classification.candidatePaths.length,
+    candidatePaths: classification.candidatePaths,
     excludedCount: classification.excludedPaths.length,
     headSha: pullRequest.head.sha,
     message,
@@ -363,6 +445,7 @@ async function evaluateSnapshot({ client, pullRequest, pullNumber }) {
 function errorResult(message, pullNumber, headSha) {
   return {
     candidateCount: 0,
+    candidatePaths: [],
     excludedCount: 0,
     headSha,
     message:
@@ -394,6 +477,16 @@ function resultSummary(result) {
     "",
     markdownSafe(result.message),
   ];
+  if (
+    result.status === "screenshots_missing" &&
+    result.candidatePaths?.length
+  ) {
+    lines.push(
+      "",
+      "Files requiring screenshots:",
+      ...result.candidatePaths.map((pathname) => `- ${markdownEscaped(pathname)}`),
+    );
+  }
   return lines.join("\n");
 }
 

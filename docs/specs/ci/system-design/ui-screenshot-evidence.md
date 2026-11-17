@@ -37,7 +37,7 @@ False positives use the maintainer exception. Review catches UI changes outside 
 
 For a candidate UI PR, inspect only its `## Screenshots` section, ending at the next second-level heading.
 Require at least one inline Markdown image with nonempty alt text and an HTTPS URL.
-Ignore fenced examples and HTML comments. Existing owned section markers remain supported but are not required.
+Ignore fenced and indented code blocks, matched inline code spans, and HTML comments. Existing owned section markers remain supported but are not required.
 A bot badge elsewhere in the body does not qualify.
 
 ```markdown

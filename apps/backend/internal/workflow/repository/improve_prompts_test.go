@@ -132,6 +132,191 @@ func TestImprovePromptUpgradePreservesUnknownContentWithBoundedDiagnostic(t *tes
 	_ = reader.Close()
 }
 
+// @covers AC-WORKSPACES-IMPROVE-VALIDATION-002.1 AC-WORKSPACES-IMPROVE-VALIDATION-002.3
+func TestImprovePromptUpgradeMatchesNormalizedHistoricalContent(t *testing.T) {
+	previous := readPreviousImprovePrompts(t)
+	path := filepath.Join(t.TempDir(), "improve-prompts-normalized.db")
+	_, writer, reader := openImprovePromptRepo(t, path)
+	var templateJSON string
+	if err := writer.Get(&templateJSON, `SELECT steps FROM workflow_templates WHERE id = ?`, improveKandevTemplateID); err != nil {
+		t.Fatal(err)
+	}
+	stored := map[string]string{
+		"improve": " \n" + previous["improve"] + "\n ",
+		"test":    " \n" + previous["test"] + "\n ",
+	}
+	if _, err := writer.Exec(`UPDATE workflow_templates SET steps = ? WHERE id = ?`,
+		setPromptInRawTemplate(t, templateJSON, stored), improveKandevTemplateID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	insertImproveWorkflow(t, writer, "wf-normalized", improveKandevTemplateID, false, stored)
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	repo, writer, _ := openImprovePromptRepo(t, path)
+	current := currentImprovePrompts(t)
+	template, err := repo.GetTemplate(context.Background(), improveKandevTemplateID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range template.Steps {
+		if want, ok := current[step.ID]; ok && step.Prompt != want {
+			t.Fatalf("normalized template prompt %q = %q, want current prompt", step.ID, step.Prompt)
+		}
+	}
+	for _, key := range []string{"improve", "test"} {
+		var got string
+		if err := writer.Get(&got, `SELECT prompt FROM workflow_steps WHERE id = ?`, "wf-normalized-"+key); err != nil {
+			t.Fatal(err)
+		}
+		if got != current[key] {
+			t.Fatalf("normalized workflow prompt %q = %q, want current prompt", key, got)
+		}
+	}
+}
+
+// @covers AC-WORKSPACES-IMPROVE-VALIDATION-002.3 AC-WORKSPACES-IMPROVE-VALIDATION-002.5
+func TestImprovePromptUpgradePreservesTimestampedEdits(t *testing.T) {
+	previous := readPreviousImprovePrompts(t)
+	path := filepath.Join(t.TempDir(), "improve-prompts-timestamps.db")
+	_, writer, reader := openImprovePromptRepo(t, path)
+	var templateJSON string
+	if err := writer.Get(&templateJSON, `SELECT steps FROM workflow_templates WHERE id = ?`, improveKandevTemplateID); err != nil {
+		t.Fatal(err)
+	}
+	created := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+	updated := created.Add(time.Minute)
+	if _, err := writer.Exec(`UPDATE workflow_templates SET steps = ?, created_at = ?, updated_at = ? WHERE id = ?`,
+		setPromptInRawTemplate(t, templateJSON, previous), created, updated, improveKandevTemplateID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	insertImproveWorkflow(t, writer, "wf-edited", improveKandevTemplateID, false, previous)
+	insertImproveWorkflow(t, writer, "wf-unedited", improveKandevTemplateID, false, previous)
+	for _, key := range []string{"improve", "test"} {
+		if _, err := writer.Exec(`UPDATE workflow_steps SET updated_at = ? WHERE id = ?`, updated, "wf-edited-"+key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, writer, _ = openImprovePromptRepo(t, path)
+	current := currentImprovePrompts(t)
+	var storedTemplate string
+	if err := writer.Get(&storedTemplate, `SELECT steps FROM workflow_templates WHERE id = ?`, improveKandevTemplateID); err != nil {
+		t.Fatal(err)
+	}
+	var steps []map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(storedTemplate), &steps); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range steps {
+		var id, prompt string
+		if err := json.Unmarshal(step["id"], &id); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(step["prompt"], &prompt); err != nil {
+			t.Fatal(err)
+		}
+		if want, ok := previous[id]; ok && prompt != want {
+			t.Fatalf("timestamped template prompt %q = %q, want preserved historical text", id, prompt)
+		}
+	}
+	for _, workflow := range []string{"wf-edited", "wf-unedited"} {
+		for _, key := range []string{"improve", "test"} {
+			var got string
+			id := workflow + "-" + key
+			if err := writer.Get(&got, `SELECT prompt FROM workflow_steps WHERE id = ?`, id); err != nil {
+				t.Fatal(err)
+			}
+			want := previous[key]
+			if workflow == "wf-unedited" {
+				want = current[key]
+			}
+			if got != want {
+				t.Fatalf("workflow prompt %q = %q, want %q", id, got, want)
+			}
+		}
+	}
+}
+
+// @covers AC-WORKSPACES-IMPROVE-VALIDATION-002.1 AC-WORKSPACES-IMPROVE-VALIDATION-002.5
+func TestImprovePromptUpgradeRetriesTemplateAfterUnrelatedEdit(t *testing.T) {
+	previous := readPreviousImprovePrompts(t)
+	path := filepath.Join(t.TempDir(), "improve-prompts-retry.db")
+	_, writer, reader := openImprovePromptRepo(t, path)
+	var templateJSON string
+	if err := writer.Get(&templateJSON, `SELECT steps FROM workflow_templates WHERE id = ?`, improveKandevTemplateID); err != nil {
+		t.Fatal(err)
+	}
+	staleJSON := setPromptInRawTemplate(t, templateJSON, previous)
+	if _, err := writer.Exec(`UPDATE workflow_templates SET steps = ? WHERE id = ?`, staleJSON, improveKandevTemplateID); err != nil {
+		t.Fatal(err)
+	}
+	var concurrentSteps []map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(staleJSON), &concurrentSteps); err != nil {
+		t.Fatal(err)
+	}
+	concurrentSteps[0]["custom_extension"] = json.RawMessage(`{"preserved":true}`)
+	concurrentJSON, err := json.Marshal(concurrentSteps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Exec(`CREATE TABLE upgrade_retry (done INTEGER NOT NULL); INSERT INTO upgrade_retry VALUES (0)`); err != nil {
+		t.Fatal(err)
+	}
+	quotedJSON := strings.ReplaceAll(string(concurrentJSON), "'", "''")
+	trigger := fmt.Sprintf(`CREATE TRIGGER simulate_unrelated_template_edit
+		BEFORE UPDATE OF steps ON workflow_templates
+		WHEN (SELECT done FROM upgrade_retry) = 0
+		BEGIN
+			UPDATE upgrade_retry SET done = 1;
+			UPDATE workflow_templates SET steps = '%s' WHERE id = OLD.id;
+			SELECT RAISE(IGNORE);
+		END`, quotedJSON)
+	if _, err := writer.Exec(trigger); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	repo, writer, _ := openImprovePromptRepo(t, path)
+	current := currentImprovePrompts(t)
+	template, err := repo.GetTemplate(context.Background(), improveKandevTemplateID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range template.Steps {
+		if want, ok := current[step.ID]; ok && step.Prompt != want {
+			t.Fatalf("retried template prompt %q = %q, want current prompt", step.ID, step.Prompt)
+		}
+	}
+	var storedJSON string
+	if err := writer.Get(&storedJSON, `SELECT steps FROM workflow_templates WHERE id = ?`, improveKandevTemplateID); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(storedJSON), &concurrentSteps); err != nil {
+		t.Fatal(err)
+	}
+	if string(concurrentSteps[0]["custom_extension"]) != `{"preserved":true}` {
+		t.Fatalf("unrelated concurrent template property = %s, want preserved", concurrentSteps[0]["custom_extension"])
+	}
+}
+
 func setPromptInRawTemplate(t *testing.T, data string, prompts map[string]string) string {
 	t.Helper()
 	var steps []map[string]json.RawMessage
@@ -399,7 +584,16 @@ func TestImprovePromptUpgradeConcurrentEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 	proposedTemplateJSON := setPromptInRawTemplate(t, staleJSON, current)
-	updated, err := repo.updateImproveTemplateStepsIfUnchanged(staleJSON, proposedTemplateJSON)
+	var templateCreatedAt, templateUpdatedAt time.Time
+	if err := writer.Get(&templateCreatedAt, `SELECT created_at FROM workflow_templates WHERE id = ?`, improveKandevTemplateID); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Get(&templateUpdatedAt, `SELECT updated_at FROM workflow_templates WHERE id = ?`, improveKandevTemplateID); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := repo.updateImproveTemplateStepsIfUnchanged(
+		staleJSON, templateCreatedAt, templateUpdatedAt, proposedTemplateJSON,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +627,16 @@ func TestImprovePromptUpgradeConcurrentEdit(t *testing.T) {
 	if _, err := writer.ExecContext(ctx, `UPDATE workflow_steps SET prompt = ? WHERE id = ?`, "concurrent step edit", "wf-concurrent-improve"); err != nil {
 		t.Fatal(err)
 	}
-	updated, err = repo.updateImproveStepPromptIfUnchanged("wf-concurrent-improve", previous["improve"], current["improve"])
+	var stepCreatedAt, stepUpdatedAt time.Time
+	if err := writer.Get(&stepCreatedAt, `SELECT created_at FROM workflow_steps WHERE id = ?`, "wf-concurrent-improve"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Get(&stepUpdatedAt, `SELECT updated_at FROM workflow_steps WHERE id = ?`, "wf-concurrent-improve"); err != nil {
+		t.Fatal(err)
+	}
+	updated, err = repo.updateImproveStepPromptIfUnchanged(
+		"wf-concurrent-improve", previous["improve"], stepCreatedAt, stepUpdatedAt, current["improve"],
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

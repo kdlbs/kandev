@@ -95,6 +95,17 @@ test("classifies runtime UI files and both sides of a rename", () => {
   ]);
 });
 
+// @covers AC-CI-UI-SCREENSHOTS-001.1, AC-CI-UI-SCREENSHOTS-001.2
+test("classifies JSX runtime components as UI candidates", () => {
+  const result = evidence.classifyUIChanges([
+    uiFile("apps/web/src/components/example.jsx"),
+  ]);
+  assert.deepEqual(result.candidatePaths, [
+    "apps/web/src/components/example.jsx",
+  ]);
+  assert.equal(result.requiresEvidence, true);
+});
+
 // @covers AC-CI-UI-SCREENSHOTS-001.2
 test("excludes tests, docs, scripts, lockfiles, translation catalogs, and tool configuration", () => {
   const paths = [
@@ -200,6 +211,28 @@ test("ignores fenced examples, HTML comments, and content after the next second-
   assert.equal(evidence.hasScreenshotEmbed(body), false);
 });
 
+// @covers AC-CI-UI-SCREENSHOTS-001.4
+test("ignores multiline code spans but accepts a visible image outside them", () => {
+  const hidden = [
+    "## Screenshots",
+    "",
+    "`Example:",
+    "![Dialog](https://example.com/dialog.png)",
+    "`",
+  ].join("\n");
+  assert.equal(evidence.hasScreenshotEmbed(hidden), false);
+
+  const visible = [
+    "## Screenshots",
+    "",
+    "`Example:",
+    "![Hidden dialog](https://example.com/hidden.png)",
+    "`",
+    "![Visible dialog](https://example.com/visible.png)",
+  ].join("\n");
+  assert.equal(evidence.hasScreenshotEmbed(visible), true);
+});
+
 // @covers AC-CI-UI-SCREENSHOTS-001.1, AC-CI-UI-SCREENSHOTS-001.6
 test("non-UI PRs pass and UI PRs without an embed fail with a useful result", async () => {
   const nonUI = new FakeClient(
@@ -219,6 +252,21 @@ test("non-UI PRs pass and UI PRs without an embed fail with a useful result", as
   assert.equal(uiResult.result.status, "screenshots_missing");
   assert.match(uiResult.result.message, /## Screenshots/);
   assert.equal(ui.statuses[0].status.state, "failure");
+});
+
+// @covers AC-CI-UI-SCREENSHOTS-001.7
+test("names the candidate paths that require screenshot evidence", async () => {
+  const pathname = "apps/web/src/components/example.jsx";
+  const ui = new FakeClient(
+    [pullRequest()],
+    [{ filename: pathname, status: "modified" }],
+  );
+  const summaries = [];
+  const result = await run(ui, {
+    writeSummary: async (summary) => summaries.push(summary),
+  });
+  assert.equal(result.result.status, "screenshots_missing");
+  assert.match(summaries.join("\n"), /apps\/web\/src\/components\/example\\\.jsx/);
 });
 
 // @covers AC-CI-UI-SCREENSHOTS-001.3, AC-CI-UI-SCREENSHOTS-002.1, AC-CI-UI-SCREENSHOTS-002.2

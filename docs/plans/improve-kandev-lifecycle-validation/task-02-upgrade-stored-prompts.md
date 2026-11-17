@@ -90,12 +90,15 @@ Record the database identity without credentials. Do not mark PostgreSQL verific
 
 ## Results
 
-Completed. Startup now upgrades the two known historical Improve prompt revisions in the stored system template and in workflows bound to that template. Exact-value writes preserve concurrent edits; unknown prompts remain unchanged and produce one bounded diagnostic summary. Fresh instances read the upgraded template, and reused workflows retain their IDs and steps.
+Completed. Startup now upgrades the known preceding Improve prompt revision in the stored system template and in workflows bound to that template. It compares SHA-256 hashes after the embedded loader's trim normalization, requires matching creation and update timestamps, and conditions writes on the original row values. Unknown or edited prompts remain unchanged. A template compare conflict rereads once and preserves unrelated JSON fields; a second conflict fails repository construction. Fresh instances read the upgraded template, and reused workflows retain their IDs and steps.
 
 Review follow-up drains the first workflow service before closing the original
 database. It retains the reopened workflow service and event bus, registers
 cleanup immediately, and closes both before the reopened database cleanup.
 `TestImproveBootstrapUsesUpgradedInstructions` passes under `-race`.
+The PostgreSQL integration fixture rebinds both `?` lookups for the active
+database dialect. It remains environment-gated and was skipped because
+`KANDEV_TEST_POSTGRES_DSN` was unset.
 
 Verification passed:
 
@@ -107,3 +110,7 @@ Verification passed:
 - `python3 scripts/list-docs.py validate`
 - `python3 scripts/lint-spec-files.py --all`
 - `git diff --check`
+
+PR fixup build passed:
+
+- `make -C apps/backend build`

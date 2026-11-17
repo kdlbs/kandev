@@ -39,11 +39,11 @@ The [existing Improve contract](improve-kandev.md) retains ownership of report c
 
 - **AC-WORKSPACES-IMPROVE-VALIDATION-002.1:** On upgrade, known historical supplied prompts shall advance to the current revision before subsequent Improve task admission or step entry.
 - **AC-WORKSPACES-IMPROVE-VALIDATION-002.2:** Both new workflow creation and reuse of an existing workflow shall receive the updated instructions.
-- **AC-WORKSPACES-IMPROVE-VALIDATION-002.3:** A prompt with unknown or customized content shall remain unchanged and produce a bounded diagnostic.
+- **AC-WORKSPACES-IMPROVE-VALIDATION-002.3:** A prompt with unknown or customized content, or a row marked edited by differing creation and update timestamps, shall remain unchanged and produce a bounded diagnostic.
 - **AC-WORKSPACES-IMPROVE-VALIDATION-002.4:** An upgrade shall preserve workspace, workflow, step, task, and session identities and all unrelated workflow properties.
 - **AC-WORKSPACES-IMPROVE-VALIDATION-002.5:** Repeated startup shall be idempotent. A concurrent prompt edit shall not be overwritten by an upgrade based on an older read.
 - **AC-WORKSPACES-IMPROVE-VALIDATION-002.6:** The upgrade shall not restart agents, advance tasks, rewrite transcripts, or inject instructions into an accepted turn.
-- **AC-WORKSPACES-IMPROVE-VALIDATION-002.7:** An upgrade write failure shall prevent admission with falsely reported current instructions. Unknown content shall remain distinguishable from a failed upgrade.
+- **AC-WORKSPACES-IMPROVE-VALIDATION-002.7:** A failed write or an unresolved second template compare conflict shall prevent admission with falsely reported current instructions. Unknown content shall remain distinguishable from a failed upgrade.
 
 ## Exclusions
 

@@ -35,7 +35,7 @@ func TestImprovePromptPostgres(t *testing.T) {
 	previous := readPreviousImprovePrompts(t)
 	current := currentImprovePrompts(t)
 	var stepsJSON string
-	if err := database.Get(&stepsJSON, `SELECT steps FROM workflow_templates WHERE id = ?`, improveKandevTemplateID); err != nil {
+	if err := database.Get(&stepsJSON, database.Rebind(`SELECT steps FROM workflow_templates WHERE id = ?`), improveKandevTemplateID); err != nil {
 		t.Fatal(err)
 	}
 	stepsJSON = setPromptInRawTemplate(t, stepsJSON, previous)
@@ -73,7 +73,7 @@ func TestImprovePromptPostgres(t *testing.T) {
 	}
 	for _, step := range []string{"improve", "test"} {
 		var prompt string
-		if err := database.Get(&prompt, `SELECT prompt FROM workflow_steps WHERE id = ?`, "wf-postgres-"+step); err != nil {
+		if err := database.Get(&prompt, database.Rebind(`SELECT prompt FROM workflow_steps WHERE id = ?`), "wf-postgres-"+step); err != nil {
 			t.Fatal(err)
 		}
 		if prompt != current[step] {

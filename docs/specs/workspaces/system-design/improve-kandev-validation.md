@@ -86,7 +86,8 @@ Run it after system template insertion and before task intake can use those temp
 No application schema or migration-version table is required.
 
 Keep a small fixture with the preceding shipped prompt text for the changed Improve steps.
-Read it with the production YAML loader and compare exact prompt text.
+Read it with the production YAML loader, which trims prompt text, and compute its SHA-256 hash after applying the same normalization to stored text.
+Compute the current-prompt hash from the current embedded template. This is a bounded comparison against the known preceding revision, not a hash registry.
 Start with the pre-change `0f072479006f` revision. Add older text only for a demonstrated upgrade need.
 No hash registry, new version table, or general migration framework is needed.
 
@@ -99,8 +100,11 @@ Improve instances are not reliably marked `is_system`. Do not use that flag alon
 When the stored template changes, retain unknown JSON fields and unrelated step properties.
 Preserve IDs, ordering, events, profiles, workspace bindings, hidden state, and creation timestamps.
 
-Each update compares the exact previously read prompt or JSON value in its write predicate.
-When a concurrent edit wins, leave that row alone. No retry loop is needed.
+Only refresh a template or workflow step whose `created_at` equals `updated_at`.
+Each update also compares its original prompt or JSON value and timestamps in the write predicate.
+If the template compare fails, reread the row once. Retry the prompt-only merge against the new JSON only when its timestamps still match and the target prompt still hashes to the known preceding revision.
+Preserve unrelated fields from that reread. If the prompt changed, the row is marked edited, or the retry compare also fails, leave customized content untouched; an unresolved retry conflict fails repository construction.
+Workflow-step compare conflicts do not retry.
 Update timestamps only after an actual prompt change.
 An already current prompt is a no-op. Unknown content stays unchanged with an ID-only diagnostic, never prompt text.
 

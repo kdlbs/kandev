@@ -128,7 +128,7 @@ func TestImproveBootstrapUsesUpgradedInstructions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.ExecContext(ctx, `UPDATE workflow_templates SET steps = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, string(stepsJSON), improveTemplateID); err != nil {
+	if _, err := database.ExecContext(ctx, `UPDATE workflow_templates SET steps = ? WHERE id = ?`, string(stepsJSON), improveTemplateID); err != nil {
 		t.Fatal(err)
 	}
 	steps, err := workflowRepo.ListStepsByWorkflow(ctx, existingWorkflow.ID)
@@ -138,8 +138,7 @@ func TestImproveBootstrapUsesUpgradedInstructions(t *testing.T) {
 	for _, step := range steps {
 		promptID := improvePromptIDForStep(step.Name)
 		if prompt, ok := previous[promptID]; ok {
-			step.Prompt = prompt
-			if err := workflowRepo.UpdateStep(ctx, step); err != nil {
+			if _, err := database.ExecContext(ctx, `UPDATE workflow_steps SET prompt = ? WHERE id = ?`, prompt, step.ID); err != nil {
 				t.Fatal(err)
 			}
 		}

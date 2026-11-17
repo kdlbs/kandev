@@ -215,8 +215,9 @@ func TestOfficeBlockerFailureRestartReplay(t *testing.T) {
 				second.close(t)
 				second = openBlockerFailureRestartProcess(t, path, false, false)
 			}
+			recovery := service.NewOfficeRecoveryHandler(service.NewSchedulerIntegration(second.svc, 0))
 			if !resumeHook {
-				blockerMust(t, second.svc.ReplayPendingDeferredAssignments(context.Background()))
+				blockerMust(t, recovery.Tick(context.Background()))
 			}
 			runs := second.blockerFailureRuns(t)
 			if len(runs) != 1 {
@@ -226,7 +227,7 @@ func TestOfficeBlockerFailureRestartReplay(t *testing.T) {
 			if len(alerts) != 1 || alerts[occurrenceID].BlockerTaskID != restartBlockerID {
 				t.Fatalf("replayed alert occurrence %q was not retained: %+v", occurrenceID, alerts)
 			}
-			blockerMust(t, second.svc.ReplayPendingDeferredAssignments(context.Background()))
+			blockerMust(t, recovery.Tick(context.Background()))
 			if got := len(second.blockerFailureRuns(t)); got != 1 {
 				t.Fatalf("runs after repeated replay=%d, want one", got)
 			}

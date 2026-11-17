@@ -153,3 +153,15 @@ Follow-up verification passed:
 - `python3 scripts/list-docs.py validate`
 - `python3 scripts/lint-spec-files.py --all`
 - `git diff --check`
+
+Current-head review follow-up also includes `.jsx` components as UI candidates,
+lists safely escaped candidate paths when evidence is missing, and ignores
+matched inline code spans that cross line endings. It retains the escaped-image
+and indented-code exclusions. The system design now records the Markdown forms
+that the presence check ignores.
+
+PR fixup verification passed:
+
+- `node --test .github/scripts/pr-ui-evidence.test.cjs` (13 tests)
+- `python3 .github/scripts/pr-ui-evidence-workflow-contract_test.py` (7 tests)
+- `git diff --check`
