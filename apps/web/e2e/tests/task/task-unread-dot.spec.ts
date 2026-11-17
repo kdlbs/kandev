@@ -136,7 +136,10 @@ test.describe("Task unread dot", () => {
     seedData,
   }) => {
     test.setTimeout(150_000);
-    await apiClient.saveUserSettings({ unread_task_dot_hide_delay_seconds: 0 });
+    await apiClient.saveUserSettings({
+      unread_task_dot_hide_delay_seconds: 0,
+      agent_tab_close_behavior: "hide_panel",
+    });
     const seeded = await seedFailedSiblingTask(apiClient, seedData, "Failed sibling");
     const unreadIds = () => taskUnreadSessionIds(apiClient, seedData.workspaceId, seeded.taskId);
     const failedState = () => sessionReadState(apiClient, seeded.failedSessionId);
@@ -153,11 +156,31 @@ test.describe("Task unread dot", () => {
     await expect(taskRow).toBeVisible({ timeout: 15_000 });
     // Viewing the primary does not read its siblings.
     await expect(unreadDot(taskRow)).toBeVisible({ timeout: 15_000 });
+    // Hide the unread failed tab without activating or acknowledging it.
+    await expect(session.sessionTabCloseButton(seeded.failedSessionId)).toHaveAccessibleName(
+      "Hide panel",
+    );
+    await session.sessionTabCloseButton(seeded.failedSessionId).click();
+    await expect(session.sessionTabBySessionId(seeded.failedSessionId)).toHaveCount(0);
+    await expect(session.activeChat()).toHaveAttribute("data-session-id", seeded.primarySessionId);
+    expect((await failedState()).cursor).toBeNull();
+    expect(await unreadIds()).toEqual([seeded.failedSessionId, seeded.liveSessionId].sort());
+    await testPage.reload();
+    await session.waitForLoad();
+    // These agent-less seeds have no environment, so hide state is visit-local.
+    await expect(session.sessionTabBySessionId(seeded.failedSessionId)).toBeVisible();
+    expect((await failedState()).cursor).toBeNull();
+    expect(await unreadIds()).toEqual([seeded.failedSessionId, seeded.liveSessionId].sort());
+    await session.sessionTabCloseButton(seeded.failedSessionId).click();
+    await expect(session.sessionTabBySessionId(seeded.failedSessionId)).toHaveCount(0);
+    await expect(session.activeChat()).toHaveAttribute("data-session-id", seeded.primarySessionId);
     await dwell(testPage, 1_500, "negative-assertion", "primary visit must not read siblings");
     expect((await failedState()).cursor).toBeNull();
     expect(await unreadIds()).toEqual([seeded.failedSessionId, seeded.liveSessionId].sort());
 
-    await session.sessionTabBySessionId(seeded.failedSessionId).click();
+    await session.addPanelButton().click();
+    await session.sessionReopenItem(seeded.failedSessionId).click();
+    await expect(session.sessionTabBySessionId(seeded.failedSessionId)).toBeVisible();
     await expect(session.activeChat()).toHaveAttribute("data-session-id", seeded.failedSessionId);
     await expect(session.activeChat().getByText(FAILED_SESSION_ERROR)).toBeVisible();
     await expect
@@ -193,7 +216,7 @@ test.describe("Task unread dot", () => {
     expect(await unreadIds()).toEqual([seeded.liveSessionId]);
     expect((await failedState()).cursor).toBe(seeded.failedTailMessageId);
 
-    // Reading the remaining sibling through the reopen menu clears the task.
+    // Selecting the remaining sibling from the session menu clears the task.
     await taskRow.click();
     await expect(testPage).toHaveURL(new RegExp(`/t/${seeded.taskId}`));
     await session.waitForLoad();
@@ -201,12 +224,18 @@ test.describe("Task unread dot", () => {
     await session.sessionReopenItem(seeded.liveSessionId).click();
     await expect(session.activeChat()).toHaveAttribute("data-session-id", seeded.liveSessionId);
     await expect.poll(unreadIds, { timeout: 15_000 }).toEqual([]);
+    await expect
+      .poll(async () => (await sessionReadState(apiClient, seeded.liveSessionId)).cursor)
+      .toBe(seeded.liveTailMessageId);
     await navRow.click();
     await expect(testPage).toHaveURL(new RegExp(`/t/${seeded.navTaskId}`));
     await testPage.reload();
     await session.waitForLoad();
     await expect(taskRow).toBeVisible({ timeout: 15_000 });
     await expect(unreadDot(taskRow)).toHaveCount(0);
+    expect((await sessionReadState(apiClient, seeded.liveSessionId)).cursor).toBe(
+      seeded.liveTailMessageId,
+    );
     expect(traffic.agentStarts()).toEqual([]);
     expect((await failedState()).state).toBe("FAILED");
   });

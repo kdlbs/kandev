@@ -92,7 +92,6 @@ test.describe("Mobile task unread dot", () => {
 
   // @covers AC-TASKS-TASK-UNREAD-DOT-001.6
   // @covers AC-TASKS-TASK-UNREAD-DOT-001.9
-  // @covers AC-TASKS-TASK-UNREAD-DOT-001.12
   // @covers AC-TASKS-TASK-UNREAD-DOT-001.15
   // @covers AC-TASKS-TASK-UNREAD-DOT-001.17
   test("clears a cursorless failed sibling only after its transcript is read", async ({
@@ -157,12 +156,18 @@ test.describe("Mobile task unread dot", () => {
     await tapSessionRow(testPage, seeded.liveSessionId);
     await expect(session.activeChat()).toHaveAttribute("data-session-id", seeded.liveSessionId);
     await expect.poll(unreadIds, { timeout: 15_000 }).toEqual([]);
+    await expect
+      .poll(async () => (await sessionReadState(apiClient, seeded.liveSessionId)).cursor)
+      .toBe(seeded.liveTailMessageId);
     await (await openTaskSwitcherRow(testPage, seeded.navTitle)).tap();
     await expect(testPage).toHaveURL(new RegExp(`/t/${seeded.navTaskId}`));
     await testPage.reload();
     await session.waitForLoad();
     const clearedRow = await openTaskSwitcherRow(testPage, seeded.title);
     await expect(clearedRow.getByRole("img", { name: TASK_UNREAD_DOT_LABEL })).toHaveCount(0);
+    expect((await sessionReadState(apiClient, seeded.liveSessionId)).cursor).toBe(
+      seeded.liveTailMessageId,
+    );
     expect(traffic.agentStarts()).toEqual([]);
     expect((await failedState()).state).toBe("FAILED");
   });

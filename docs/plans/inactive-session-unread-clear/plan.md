@@ -136,7 +136,7 @@ product contract requires revising this package before implementation.
 | COMPLETED/CANCELLED/IDLE/WAITING_FOR_INPUT, no live execution | Same read boundary, no lifecycle exemption. | Exercise the state implicated by Task 01; existing agent-less waiting-session E2E remains a baseline. |
 | Read primary plus unread failed sibling | Reading primary leaves sibling unread; reading failed sibling removes only its ID. | Mixed-session UI flow plus cursor/summary assertions. |
 | Another unread sibling or a live sibling | Reading failed session must not clear the other contribution or change its execution. | Mixed-state regression. |
-| Hidden tab, visible reopen menu | Reopen and read using existing session identity. | Desktop reopen flow; phone picker equivalent. |
+| Hidden tab, visible reopen menu | Hide unread failed tab without activation, verify its null cursor/contribution across reload, hide again in the new visit, then explicitly reopen and acknowledge. | Desktop regression; these environment-less seeds have visit-local hiding. Environment-backed hide persistence is owned by session-tab-management E2E; phone picker covers selection only. |
 | Missing/deleted session or failed history read | No invented tail, no mark-read, preserve other unread contributions. | Existing error guards plus the defect's targeted regression where applicable. |
 
 ## ASCII UI preview
@@ -209,7 +209,8 @@ All abbreviated AC IDs below use prefix `AC-TASKS-TASK-UNREAD-DOT-001`.
 | .2, .4, .6 | Defect-specific transition in `apps/web/components/task/chat/use-session-read-tracking.test.ts` if the defect is in read ownership/readiness/correlation; use a persisted cursor assertion in E2E, not a mock echo alone. |
 | .6 | `apps/web/lib/session-unread-divider.test.ts` retains raw-tail acknowledgement coverage. Add a case only if Task 01 proves a missing eligibility boundary. |
 | .5, .9, .17 | Retain `task-unread-dot-visibility.test.ts`, particularly `keeps the open task's dot while another of its sessions is unread`. Do not re-pin its expectation to hide unread siblings. |
-| .6, .8, .9, .12 | Desktop and phone regression `clears a cursorless failed sibling only after its transcript is read` in the existing unread-dot spec files. |
+| .6, .8, .9 | Desktop and phone regression `clears a cursorless failed sibling only after its transcript is read` in the existing unread-dot spec files; final empty list is correlated with the remaining sibling's exact persisted tail before and after reload. |
+| .12 | Desktop variant hides the unread failed tab, verifies its null cursor/unread contribution across reload, hides it again in the new environment-less visit, and reopens through the session menu. Phone picker selection does not claim desktop hidden-tab coverage. |
 
 The first RED assertion must expose the actual failed boundary recorded by Task
 01. A test that is already green, a missing selector, or an intentionally unread
@@ -423,3 +424,33 @@ with no Go or production web source:
   Review loop stopped at the requested three-consecutive-clean condition.
   At the design checkpoint Task 01 was pending. Its subsequent implementation
   run completed with conformance; Task 02 remains blocked on causal reproduction.
+
+## Post-push review loop
+
+This is separate from the five design-only rounds above.
+
+- Round 1 reviewed `81e7284b9885b5489ee23183d64923cf5847734c` over
+  `75972b7e19fdaf80bedc3b76e20dfa25be7e19aa`: two P2 findings, accepted.
+- Authoritative readback now requires exactly one task and a non-null summary;
+  only omission of `unread_session_ids` normalizes to an empty list. Both
+  viewport scenarios verify the remaining sibling's exact persisted tail
+  immediately after reading and after navigation/reload.
+- Desktop now actually hides the unread failed tab before reading, verifies its
+  contribution across reload, hides the rematerialized tab in the new visit, and
+  explicitly reopens it. Environment-less seeds do not persist hide state:
+  `dockview-hidden-session-panels.ts` persists only with a layout environment.
+  Environment-backed hide persistence remains separately exercised.
+- Fault probes of the real helper: missing task, missing/null summary, and
+  duplicate task reject; a present summary with omitted unread IDs returns `[]`.
+  Before correction the first three missing-authority cases returned `[]`.
+- Initial combined desktop run: 10 passed, 1 failed because the new test wrongly
+  expected environment-less hide state to survive reload. The corrected test
+  preserves the unread contract without claiming environment-backed persistence.
+- Final commands (cache-backed snapshot, one worker, no retries):
+  `pnpm e2e:run --host --shards 1 --no-build --project chromium tests/task/task-unread-dot.spec.ts tests/session/session-tab-management.spec.ts -- --retries=0`:
+  11 passed.
+  `pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome tests/task/mobile-task-unread-dot.spec.ts -- --retries=0`:
+  2 passed. `--no-build` reused the fresh application/backend/fixture build from
+  the preceding run; only E2E tests/helpers changed afterward.
+- Completed post-push rounds: 1. Consecutive clean rounds: 0. Round 2 reviews
+  these corrections; stop after three consecutive clean rounds or 50 rounds.

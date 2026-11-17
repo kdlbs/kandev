@@ -235,13 +235,16 @@ and a separate navigation task. Both specs gained
 `clears a cursorless failed sibling only after its transcript is read`. Each
 proves, against persisted state rather than the selected row:
 
-- Opening the task shows the primary. After a 1.5 s negative-assertion dwell the
-  failed cursor is still `null` and the authoritative `unread_session_ids` is
-  still `[failed, live]` (.2, .9, .17).
-- Selecting the failed session (desktop tab `session-tab-<id>`; phone
-  `mobile-sessions-pill` then `mobile-session-row-<id>`) renders the stored
-  error. Its persisted cursor becomes the error row ID (the newest
-  acknowledgeable loaded row), and the unread list becomes `[live]` (.6, .12).
+- Opening the task shows the primary. Desktop hides the unread failed tab
+  through the shipped close button without activating it, then verifies its
+  null cursor and unread contribution. Reload preserves unread state; because
+  these agent-less seeds have no environment, hide state is visit-local and the
+  inactive tab rematerializes. Hide it again in the new visit before reopening.
+  A 1.5 s negative-assertion dwell confirms unread remains `[failed, live]`.
+- Reopening the hidden failed tab through the desktop `+` menu, or selecting it
+  through the phone picker, renders the stored error and persists its tail.
+  Only desktop claims the hidden-unread boundary (.12), not environment-backed
+  hide persistence (covered separately by session-tab-management E2E).
 - The page sent a mark-read request for the failed session with that ID and
   none for the live sibling. The live cursor stays `null`, and the primary
   cursor is unchanged. No `session.launch`, `session.ensure`, `session.recover`,

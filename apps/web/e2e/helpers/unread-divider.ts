@@ -158,6 +158,7 @@ export type UnreadSettings = {
   unread_divider?: boolean;
   unread_task_dot?: boolean;
   unread_task_dot_hide_delay_seconds?: number;
+  agent_tab_close_behavior?: "hide_panel" | "delete_session";
 };
 
 /** The unread settings a spec changes, captured so it can restore them. */
@@ -168,6 +169,10 @@ export async function captureUnreadSettings(apiClient: ApiClient): Promise<Unrea
     unread_task_dot: settings.unread_task_dot as boolean | undefined,
     unread_task_dot_hide_delay_seconds: settings.unread_task_dot_hide_delay_seconds as
       | number
+      | undefined,
+    agent_tab_close_behavior: settings.agent_tab_close_behavior as
+      | "hide_panel"
+      | "delete_session"
       | undefined,
   };
 }
@@ -289,8 +294,12 @@ export async function taskUnreadSessionIds(
   taskId: string,
 ): Promise<string[]> {
   const { tasks } = await apiClient.listTasks(workspaceId);
-  const summary = tasks.find((task) => task.id === taskId)?.status_summary;
-  return [...(summary?.unread_session_ids ?? [])].sort();
+  const matchingTasks = tasks.filter((task) => task.id === taskId);
+  if (matchingTasks.length !== 1)
+    throw new Error(`Expected exactly one authoritative task ${taskId}`);
+  const summary = matchingTasks[0].status_summary;
+  if (summary == null) throw new Error(`Missing authoritative summary for task ${taskId}`);
+  return [...(summary.unread_session_ids ?? [])].sort();
 }
 
 /** The persisted read cursor and lifecycle of one session. */
