@@ -159,13 +159,13 @@ func TestImproveBootstrapUsesUpgradedInstructions(t *testing.T) {
 	eventBus := bus.NewMemoryEventBus(log)
 	t.Cleanup(eventBus.Close)
 	taskSvc := taskservice.NewService(taskservice.Repos{Workflows: taskRepo}, eventBus, log, taskservice.RepositoryDiscoveryConfig{})
-	stepSvc := workflowservice.NewService(workflowRepo, log)
+	reopenedWorkflowSvc := workflowservice.NewService(workflowRepo, log)
 	t.Cleanup(func() {
-		if err := stepSvc.Close(); err != nil {
-			t.Errorf("close task workflow service: %v", err)
+		if err := reopenedWorkflowSvc.Close(); err != nil {
+			t.Errorf("close reopened workflow service: %v", err)
 		}
 	})
-	taskSvc.SetWorkflowStepGetter(stepSvc)
+	taskSvc.SetWorkflowStepGetter(reopenedWorkflowSvc)
 	workflows, err := taskSvc.ListWorkflows(ctx, "ws-existing", true)
 	if err != nil {
 		t.Fatal(err)
@@ -232,6 +232,9 @@ func TestImproveBootstrapUsesUpgradedInstructions(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventBus.Close()
+	if err := reopenedWorkflowSvc.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
