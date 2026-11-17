@@ -26,7 +26,12 @@ func runTurnChangeSetEnvironmentBinding(t *testing.T, repo *Repository) {
 	t.Helper()
 	ctx := context.Background()
 	for _, taskID := range []string{"owner", "member", "unrelated"} {
-		seedForMsgTest(t, repo, taskID, taskID+"-session", taskID+"-turn")
+		seedSessionForTurns(t, repo, taskID, taskID+"-session")
+		if err := repo.CreateTurn(ctx, &models.Turn{
+			ID: taskID + "-turn", TaskID: taskID, TaskSessionID: taskID + "-session",
+		}); err != nil {
+			t.Fatalf("create %s turn: %v", taskID, err)
+		}
 		if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
 			ID: taskID + "-environment", TaskID: taskID,
 		}); err != nil {

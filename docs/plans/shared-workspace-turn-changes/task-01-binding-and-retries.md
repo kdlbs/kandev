@@ -5,10 +5,14 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/requirements/turn-changed-files.md"
 requirements:
   - REQ-TASKS-TURN-CHANGES-003
   - REQ-TASKS-TURN-CHANGES-004
+acceptance_criteria:
+  - AC-TASKS-TURN-CHANGES-003.1
+  - AC-TASKS-TURN-CHANGES-003.6
+  - AC-TASKS-TURN-CHANGES-004.2
+  - AC-TASKS-TURN-CHANGES-004.4
 system_design:
   - ../../specs/tasks/system-design/turn-changed-files.md
 ---
@@ -16,6 +20,8 @@ system_design:
 # Task 01: Binding and retries
 
 ## Contract and acceptance
+
+Requirements: [Turn changed files](../../specs/tasks/requirements/turn-changed-files.md).
 
 - AC-TASKS-TURN-CHANGES-003.1: an admitted shared environment can persist its capture policy before dispatch.
 - AC-TASKS-TURN-CHANGES-003.6: permanent summary errors terminate independently of completion and capture fences.
@@ -69,8 +75,17 @@ No screenshots are required for these backend changes.
 
 RED: the ownership, permanent-error, and shutdown regressions fail on the baseline.
 GREEN: all named SQLite and lifecycle regressions passed with the race detector.
-The existing runtime summary test passed. PostgreSQL was skipped because
-`KANDEV_TEST_POSTGRES_DSN` is unset. Changed-package lint reported zero issues.
+The existing runtime summary test passed. PostgreSQL was initially skipped because
+`KANDEV_TEST_POSTGRES_DSN` was unset. Changed-package lint reported zero issues.
 Documentation catalog validation, specification lint, and `git diff --check` passed.
 The shared lint lock was allowed to finish before the local run. The installed
 Nix linter was added to the command PATH without changing repository tooling.
+
+PR remediation: declare acceptance criteria in frontmatter for the PR coverage validator.
+Use portable repository fixture methods for both SQLite and PostgreSQL.
+
+The original fixture failed against disposable PostgreSQL 17.11 with SQLSTATE
+42601 at `INSERT OR IGNORE`. After the correction, both SQLite and PostgreSQL
+binding matrices passed with `-race` and the exact binding-test command above.
+The PostgreSQL server and temporary data were removed. The local
+`validateCoverage` evaluation passed with the full linked documentation set.
