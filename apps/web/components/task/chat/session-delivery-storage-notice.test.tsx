@@ -33,7 +33,11 @@ const DETAILS_TEST_ID = "session-delivery-storage-details";
 const DETAILS_PANEL_TEST_ID = "session-delivery-storage-details-panel";
 const SETTINGS_TEST_ID = "session-delivery-storage-settings";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  window.sessionStorage.clear();
+  vi.restoreAllMocks();
+});
 
 describe("SessionDeliveryStorageNotice", () => {
   it("renders one compact local warning row with settings and details", () => {
@@ -278,5 +282,50 @@ describe("pressure age clock", () => {
     cleanup();
     render(<SessionDeliveryStorageNotice health={stale} />);
     expect(screen.getByTestId(NOTICE_TEST_ID).getAttribute(STALE_ATTRIBUTE)).toBe("true");
+  });
+});
+
+// @covers AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-004.1 through 004.5
+describe("Storage notice dismissal", () => {
+  it("hides details and remembers the task through updates, task switches, and remount", () => {
+    const { rerender, unmount } = render(
+      <SessionDeliveryStorageNotice taskId="task-a" health={health} />,
+    );
+    fireEvent.click(screen.getByTestId(DETAILS_TEST_ID));
+    fireEvent.click(screen.getByRole("button", { name: "task:dismiss" }));
+    expect(screen.queryByTestId(NOTICE_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(DETAILS_PANEL_TEST_ID)).toBeNull();
+    const pressure = { ...health, revision: 2, write_pressure: true };
+    rerender(<SessionDeliveryStorageNotice taskId="task-a" health={pressure} />);
+    expect(screen.queryByTestId(NOTICE_TEST_ID)).toBeNull();
+    rerender(<SessionDeliveryStorageNotice taskId="task-b" health={health} />);
+    expect(screen.getByTestId(NOTICE_TEST_ID)).toBeTruthy();
+    rerender(<SessionDeliveryStorageNotice taskId="task-a" health={health} />);
+    expect(screen.queryByTestId(NOTICE_TEST_ID)).toBeNull();
+    unmount();
+    render(<SessionDeliveryStorageNotice taskId="task-a" health={health} />);
+    expect(screen.queryByTestId(NOTICE_TEST_ID)).toBeNull();
+  });
+
+  it("dismisses locally when browser storage rejects reads and writes", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("denied");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("denied");
+    });
+    render(<SessionDeliveryStorageNotice taskId="task-a" health={health} />);
+    fireEvent.click(screen.getByRole("button", { name: "task:dismiss" }));
+    expect(screen.queryByTestId(NOTICE_TEST_ID)).toBeNull();
+  });
+
+  it("keeps identity-free dismissal local to the mounted notice", () => {
+    const { unmount } = render(<SessionDeliveryStorageNotice health={health} />);
+    fireEvent.click(screen.getByRole("button", { name: "task:dismiss" }));
+    expect(screen.queryByTestId(NOTICE_TEST_ID)).toBeNull();
+    unmount();
+    render(<SessionDeliveryStorageNotice health={health} />);
+    expect(screen.getByTestId(NOTICE_TEST_ID)).toBeTruthy();
+    expect(window.sessionStorage.length).toBe(0);
   });
 });

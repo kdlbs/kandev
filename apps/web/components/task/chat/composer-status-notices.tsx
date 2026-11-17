@@ -30,7 +30,10 @@ export function ComposerStatusNotices({
           {t("task:sessionActionRestart")}
         </p>
       )}
-      <SessionDeliveryStorageNotice health={panelState.session?.runtime_storage_health} />
+      <SessionDeliveryStorageNotice
+        taskId={panelState.taskId ?? panelState.session?.task_id}
+        health={panelState.session?.runtime_storage_health}
+      />
       <DynamicRouteRecovery session={panelState.session} />
       <ComposerAgentStartHint
         show={showAgentStartHint && !isRestarting}
