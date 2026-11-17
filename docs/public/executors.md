@@ -708,6 +708,15 @@ Default SSH preparation creates or reuses a standalone checkout at the task root
 
 The cached helper and checksum at `~/.kandev/bin/agentctl` and `agentctl.sha256` remain for later sessions. Periodically audit remote processes, session directories, and `<workdir-root>/tasks/`. An explicit resume reconnects to SSH and reuses a live recorded PID when possible. Otherwise Kandev starts a fresh remote controller and runs preparation again.
 
+When a receipt proves that the recorded controller is absent, Resume starts a
+new controller in the preserved task workspace. This also applies after a
+verified Linux host reboot. Resume uses the existing provider conversation and
+refreshes the managed credential broker lease. If process identity, boot
+evidence, or ownership is unknown or conflicting, Kandev blocks replacement
+until you resolve the host or credential problem. The old session-runtime
+directory can remain when the controller was already absent. Its receipt does
+not prove that a matching pidfile owns the directory.
+
 #### Controller recovery after session-directory loss
 
 A managed Linux SSH launch records the controller's own process identity during
