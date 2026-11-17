@@ -51,6 +51,14 @@ type failingRestoreTaskStateWriter struct {
 	failTaskID string
 }
 
+type driftedRestoreTaskStateWriter struct {
+	shared.TaskStateWriter
+	svc         *service.Service
+	t           *testing.T
+	driftTaskID string
+	drifted     bool
+}
+
 func (w failingRestoreTaskStateWriter) CommitTaskState(
 	ctx context.Context, taskID string, write taskmodels.TaskStateWrite,
 ) (taskmodels.TaskStateChange, error) {
@@ -58,6 +66,17 @@ func (w failingRestoreTaskStateWriter) CommitTaskState(
 		return taskmodels.TaskStateChange{}, errors.New("injected restore failure")
 	}
 	return w.TaskStateWriter.CommitTaskState(ctx, taskID, write)
+}
+
+func (w *driftedRestoreTaskStateWriter) CommitTaskState(
+	ctx context.Context, taskID string, write taskmodels.TaskStateWrite,
+) (taskmodels.TaskStateChange, error) {
+	change, err := w.TaskStateWriter.CommitTaskState(ctx, taskID, write)
+	if err == nil && taskID == "root" && !w.drifted {
+		w.svc.ExecSQL(w.t, `UPDATE tasks SET state = ? WHERE id = ?`, "IN_PROGRESS", w.driftTaskID)
+		w.drifted = true
+	}
+	return change, err
 }
 
 func newTreeStateEventFixture(t *testing.T, taskIDs ...string) (*service.Service, *treeStateEventRecorder, *[]string) {
@@ -299,6 +318,46 @@ func TestOfficeTreeStateEventsRestoreRetryAfterHoldReleaseFailure(t *testing.T) 
 	}
 	if preview.ActiveHold != nil {
 		t.Fatalf("active hold after release retry = %+v, want released", preview.ActiveHold)
+	}
+}
+
+func TestOfficeTreeStateEventsRestoreSkipsDriftedMemberAndReleasesHold(t *testing.T) {
+	ctx := context.Background()
+	svc, publication, _ := newTreeStateEventFixture(t, "root", "a-drifted", "z-later")
+	insertTreeControlTask(t, svc, "root", "", "IN_PROGRESS")
+	insertTreeControlTask(t, svc, "a-drifted", "root", "TODO")
+	insertTreeControlTask(t, svc, "z-later", "root", "TODO")
+	if _, err := svc.CancelTaskTree(ctx, "root", "user:test"); err != nil {
+		t.Fatalf("CancelTaskTree: %v", err)
+	}
+	publication.changes = nil
+	publication.activityHandled = nil
+	publication.observedStates = nil
+
+	taskWriter := treeControlTaskStateWriter{repo: svc.RepoForTest()}
+	svc.SetTaskStateWriter(&driftedRestoreTaskStateWriter{
+		TaskStateWriter: taskWriter,
+		svc:             svc,
+		t:               t,
+		driftTaskID:     "a-drifted",
+	})
+
+	if _, err := svc.RestoreTaskTree(ctx, "root", "user:test"); err != nil {
+		t.Fatalf("RestoreTaskTree: %v", err)
+	}
+	assertTreeStates(t, svc, map[string]string{
+		"root": "IN_PROGRESS", "a-drifted": "IN_PROGRESS", "z-later": "TODO",
+	})
+	if len(publication.changes) != 2 || publication.changes[0].Task.ID != "root" ||
+		publication.changes[1].Task.ID != "z-later" {
+		t.Fatalf("restore receipts = %+v, want root and later-member transitions", publication.changes)
+	}
+	preview, err := svc.PreviewTaskTree(ctx, "root")
+	if err != nil {
+		t.Fatalf("PreviewTaskTree: %v", err)
+	}
+	if preview.ActiveHold != nil {
+		t.Fatalf("active hold after restore = %+v, want released", preview.ActiveHold)
 	}
 }
 

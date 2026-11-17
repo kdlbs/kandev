@@ -450,7 +450,7 @@ func runIDs(runs []*runmodels.Run) []string {
 
 // officeStatus changes a task's status through the Office dashboard, the path
 // the Office UI and the agent runtime status action share. It writes through
-// the task repository and never publishes task.state_changed.
+// the task repository and publishes the committed state change.
 func (f *escalationFixture) officeStatus(t *testing.T, id, status, actorAgentID string) {
 	t.Helper()
 	log := logger.Default()
@@ -472,6 +472,9 @@ func TestOfficeBlockerFailureEscalatesFromOfficeStatusPath(t *testing.T) {
 			f.officeStatus(t, escalationBlocker, "cancelled", actor)
 			run := f.wantEscalations(t, 1, "office cancel")[0]
 			p := decodeEscalation(t, run)
+			if alerts := decodeEscalationAlerts(t, run); len(alerts) != 1 {
+				t.Fatalf("office cancel alerts=%v, want one occurrence for the committed transition", alerts)
+			}
 			if run.AgentProfileID != escalationRunner || p.TaskID != escalationParent ||
 				p.BlockerState != string(v1.TaskStateCancelled) || len(p.HeldDependentIDs) != 1 {
 				t.Fatalf("recipient=%q payload=%+v", run.AgentProfileID, p)
@@ -514,6 +517,9 @@ func TestOfficeBlockerFailureTreeCancelEscalatesOutsideDependents(t *testing.T) 
 	blockerMust(t, err)
 	run := f.wantEscalations(t, 1, "tree cancel")[0]
 	p := decodeEscalation(t, run)
+	if alerts := decodeEscalationAlerts(t, run); len(alerts) != 1 {
+		t.Fatalf("tree cancellation alerts=%v, want one occurrence for the blocker transition", alerts)
+	}
 	if run.AgentProfileID != escalationCEO || p.TaskID != "" || p.BlockerTaskID != escalationBlocker ||
 		p.BlockerState != string(v1.TaskStateCancelled) {
 		t.Fatalf("recipient=%q payload=%+v", run.AgentProfileID, p)
@@ -538,6 +544,9 @@ func TestOfficeBlockerFailureTreeCancelCoalescesEveryMemberAlert(t *testing.T) {
 	blockerMust(t, err)
 	runs := f.wantEscalations(t, 1, "tree blocker failures coalesce")[0]
 	alerts := decodeEscalationAlerts(t, runs)
+	if len(alerts) != 2 {
+		t.Fatalf("tree cancellation alerts=%v, want one occurrence for each of two blocker transitions", alerts)
+	}
 	seen := make(map[string]bool, len(alerts))
 	for _, alert := range alerts {
 		seen[alert.BlockerTaskID] = true

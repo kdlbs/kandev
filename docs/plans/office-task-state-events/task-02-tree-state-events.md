@@ -41,8 +41,9 @@ changes through the canonical seam from Task 01.
 - Retain successful receipts through post-commit run-cleanup errors. Publish
   before the tree-hold notification on success.
 - Restore each eligible member through the guarded receipt seam. Publish each
-  committed restore even if a later member fails. Release the hold only after
-  all required writes succeed.
+  committed restore even if a later member fails. Preserve and log members that
+  drifted from `CANCELLED`, then release the hold after all remaining restores
+  succeed. A write failure keeps the hold active for retry.
 - Let the canonical activity hook create one row per changed member.
 
 ## Out of scope
@@ -58,7 +59,8 @@ changes through the canonical seam from Task 01.
    complete committed batch.
 2. A failed batch produces no events. A post-commit cleanup error preserves all
    committed notifications. A partial restore preserves notifications for
-   successful members and keeps the hold active.
+   successful members and keeps the hold active. A drifted restore member is not
+   overwritten or published; later members restore and the hold is released.
 3. Pause/resume and repeated cancellation produce no state transition events.
    Checkout release, run cancellation, and terminal-shape tests still pass.
 
@@ -129,3 +131,14 @@ test DSN is unavailable, as required by the work order.
   15-minute timeout after the repository wrapper's 5-minute timeout expired.
 - The PostgreSQL state commit and batch race test was invoked; its assertions
   were skipped because `KANDEV_TEST_POSTGRES_DSN` is unset.
+
+Review-fixup verification:
+
+- The focused Office cancellation and restore regressions passed. The
+  `improvekandev` bootstrap test passed after its fixture wired the workflow
+  step service required by the production path.
+- `make test-backend` initially failed only at that missing test dependency;
+  the complete backend check on the fixup head remains the authoritative
+  rerun.
+- `make fmt-backend`, changed-Go lint across 35 PR files, `make build-backend`,
+  spec validation, and spec lint passed.

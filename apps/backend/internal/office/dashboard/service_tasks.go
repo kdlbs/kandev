@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/taskdependencies"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -817,9 +816,6 @@ func (s *DashboardService) runReactivityForStatus(
 		ActorType:    actorType,
 		ReopenIntent: req.ReopenIntent,
 		ResumeIntent: req.ResumeIntent,
-	}
-	if normaliseStatus(req.NewStatus) == "CANCELLED" {
-		change.BlockerFailureOccurrenceID = "office-status:" + uuid.NewString()
 	}
 	if commentID != "" {
 		change.Comment = &TaskReactivityComment{

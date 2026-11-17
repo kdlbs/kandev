@@ -156,7 +156,11 @@ func (s *Service) RestoreTaskTree(ctx context.Context, rootTaskID, restoredBy st
 			return nil, fmt.Errorf("restore task %s: %w", member.TaskID, err)
 		}
 		if !change.Matched {
-			return nil, fmt.Errorf("restore task %s: state changed since cancellation", member.TaskID)
+			s.logger.Warn("tree restore skipped a task changed since cancellation",
+				zap.String("hold_id", hold.ID),
+				zap.String("task_id", member.TaskID),
+				zap.String("saved_state", member.TaskStatus))
+			continue
 		}
 		if change.Changed {
 			s.taskStateChangeEvents.PublishCommittedTaskStateChange(ctx, change, false)
