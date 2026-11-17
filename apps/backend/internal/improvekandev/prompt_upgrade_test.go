@@ -159,6 +159,13 @@ func TestImproveBootstrapUsesUpgradedInstructions(t *testing.T) {
 	eventBus := bus.NewMemoryEventBus(log)
 	t.Cleanup(eventBus.Close)
 	taskSvc := taskservice.NewService(taskservice.Repos{Workflows: taskRepo}, eventBus, log, taskservice.RepositoryDiscoveryConfig{})
+	stepSvc := workflowservice.NewService(workflowRepo, log)
+	t.Cleanup(func() {
+		if err := stepSvc.Close(); err != nil {
+			t.Errorf("close task workflow service: %v", err)
+		}
+	})
+	taskSvc.SetWorkflowStepGetter(stepSvc)
 	workflows, err := taskSvc.ListWorkflows(ctx, "ws-existing", true)
 	if err != nil {
 		t.Fatal(err)
