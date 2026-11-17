@@ -16,6 +16,21 @@
       },
       "fields": [
         {
+          "key": "agent_profile.execution_grade",
+          "field_path": "execution_grade",
+          "label": "execution_grade",
+          "description": "Explicit execution classification; empty is unconfigured.",
+          "json_type": "string",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "agent-settings",
+          "writable": true,
+          "validator": "agent-settings.profile",
+          "authority": "org.config.manage",
+          "change_timing": "future_sessions",
+          "settings_href": "/settings/agents"
+        },
+        {
           "key": "agent_profile.name",
           "field_path": "name",
           "label": "name",
@@ -455,6 +470,7 @@
       "dynamic",
       "enabled",
       "env_vars",
+      "execution_grade",
       "fallback_model",
       "mcp_selected_servers",
       "mcp_selection_mode",
@@ -472,7 +488,6 @@
       "app_status_bar_enabled",
       "app_status_bar_order",
       "auto_focus_new_tasks",
-      "azure_devops_browse_preferences",
       "changes_panel_layout",
       "chat_submit_key",
       "confirm_task_archive",

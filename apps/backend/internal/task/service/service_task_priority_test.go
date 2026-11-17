@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -64,3 +66,33 @@ func TestUpdateTask_PriorityOnlyUsesFieldScopedRepositoryWrite(t *testing.T) {
 }
 
 var _ repository.TaskPriorityRepository = (*recordingPriorityTaskRepository)(nil)
+
+// @covers AC-AGENTS-SESSION-CEILING-005.2
+func TestUpdateTask_ExecutionGradePreservesFieldPresence(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	setupTestTask(t, repo)
+	ctx := context.Background()
+	grade, priority := "work", "high"
+	updated, err := svc.UpdateTask(ctx, "task-123", &UpdateTaskRequest{ExecutionGrade: &grade, Priority: &priority})
+	if err != nil || updated.ExecutionGrade != grade || updated.Priority != priority {
+		t.Fatalf("grade and priority update = %+v, %v", updated, err)
+	}
+	description := "unrelated edit"
+	updated, err = svc.UpdateTask(ctx, "task-123", &UpdateTaskRequest{Description: &description})
+	if err != nil || updated.ExecutionGrade != grade {
+		t.Fatalf("unrelated update lost grade: %+v, %v", updated, err)
+	}
+	invalid := "bad\x00grade"
+	if _, err := svc.UpdateTask(ctx, "task-123", &UpdateTaskRequest{ExecutionGrade: &invalid}); !errors.Is(err, sessioncapacity.ErrValidation) {
+		t.Fatalf("invalid grade update = %v, want validation refusal", err)
+	}
+	stored, err := repo.GetTask(ctx, "task-123")
+	if err != nil || stored.ExecutionGrade != grade {
+		t.Fatalf("invalid update changed stored grade: %+v, %v", stored, err)
+	}
+	grade = ""
+	updated, err = svc.UpdateTask(ctx, "task-123", &UpdateTaskRequest{ExecutionGrade: &grade})
+	if err != nil || updated.ExecutionGrade != "" {
+		t.Fatalf("explicit grade clear = %+v, %v", updated, err)
+	}
+}

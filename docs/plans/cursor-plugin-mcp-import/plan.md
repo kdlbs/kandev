@@ -83,6 +83,7 @@ All IDs in this table have prefix `AC-AGENTS-CURSOR-PLUGIN-MCP-`. Work-order fro
 - [x] [Task 04: Settings UI, localization, and end-to-end evidence](task-04-ui-and-i18n.md)
 
 - [x] [Task 05: Native identity and cache eligibility repair](task-05-native-identity.md)
+- [x] [Task 06: Keep manifest author URLs out of MCP endpoints](task-06-manifest-author-urls.md)
 
 Dependencies: 00 -> {01, 02} -> 03 -> 04. This graph does not authorize parallel agents; default execution is sequential.
 

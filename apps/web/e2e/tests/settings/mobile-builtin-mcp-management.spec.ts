@@ -5,6 +5,7 @@ import {
 } from "../../helpers/builtin-mcp-management";
 import { expect, test } from "../../fixtures/test-base";
 import {
+  checkBuiltinInheritance,
   checkBuiltinPendingAddition,
   checkBuiltinPackageDetail,
   checkBuiltinUnavailableAcceptance,
@@ -112,4 +113,13 @@ test("keeps a saved package visible without current acceptance", async ({
   await testPage
     .getByTestId("mcp-server-explorer")
     .screenshot({ path: testInfo.outputPath("configuration-saved-unknown.png") });
+});
+
+// @covers AC-AGENTS-BUILTIN-MCP-005.2
+test("restores inheritance when the effective switch value stays on", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await checkBuiltinInheritance(testPage, apiClient, seedData, true);
 });

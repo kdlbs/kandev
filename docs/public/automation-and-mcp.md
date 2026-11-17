@@ -129,6 +129,8 @@ The run destination and ordered repository/base-branch pairs are explicit saved 
 
 Selecting a run opens the complete shared transcript and focuses its exact turn. Replies sent from that transcript create a new turn in the same conversation and remain visible; run selection does not filter away newer replies.
 
+CLI passthrough output does not appear in the run transcript. You cannot recover this output from the run transcript. To record output in future sessions, disable CLI passthrough in the automation's agent profile.
+
 A run cannot wait for a permission response. Kandev rejects the request and marks the run failed. Use only a profile whose intended, constrained actions can complete without a prompt.
 
 For a managed-conversation destination, each firing is admitted as durable ordered
@@ -317,6 +319,8 @@ Trigger payloads are untrusted input. Do not let a PR body or webhook field sile
 
 **Automations** in the sidebar lists the workspace's automations with a health dot. Picking one opens it. **`/automations`** is the agenda across all of them, what fires next, and the recent runs of every automation in one feed. **`/automations/<id>`** is one automation's conversation: it opens on the newest run's transcript, carries the run's title snapshot and a reply box, and groups runs as Running / Completed in a rail or mobile drawer. A selected open run exposes **Stop current run**, which cancels its exact task, session, and turn without touching another run in a shared session. Configuration is behind **Details**, because an automation is configured once and read continuously.
 
+The Automations section, agenda, and phone navigation prioritize running work (blue), then a paused automation or disabled schedule (gray); otherwise the indicator follows the newest run: red for failure or a retry that could not be scheduled, green for success, amber for cancellation or a scheduled retry, and gray for skipped or archived runs. Non-success outcomes remain visible even when paused: the desktop sidebar shows the outcome before its age, such as **Failed, 4m ago**, while the agenda keeps its next-firing information and phone rows show status without adding an age. A newer success clears an earlier failure after refresh; an automation that has never run retains its idle or paused indication without an outcome label or last-run age.
+
 ![Kandev sidebar showing the Automations section with workspace automation shortcuts.](../screenshots/automation-sidebar.png)
 
 `/runs` still resolves to the same places, so older links keep working.
@@ -342,13 +346,15 @@ Private automation sessions receive required, workspace-scoped Core tools for co
 ### Choose MCP access
 
 1. Open **Settings > Workspaces > your workspace > Automations** and select an automation.
-2. Under **MCP access**, open a built-in package and choose **On** or **Off**. Use **Back to packages** to return to the list. Configuration, Rich Output, Walkthroughs, and Diagnostics are optional. Core stays required.
+2. Under **MCP access**, use the **On** or **Off** switch in each package row. Select a package name to read its details. Configuration, Rich Output, Walkthroughs, and Diagnostics are optional. Core stays required.
 3. Select additional **Workspace MCP servers** from that workspace's saved catalog. Repository and agent-profile inheritance remains additive.
 4. Use **Save changes**. Use **Reset** to remove unsaved edits.
 
 **Configuration grants mutation access** to authorized workflows, profiles, prompts, executors, and automations. The private run keeps its automation identity and workspace restrictions. Native Configuration tools cannot change package grants, automation MCP selections, plugin approvals, or profile MCP server access. Selected third-party servers use their own tools and credentials. The native dispatcher does not sandbox those servers.
 
-Private-run choices apply at the **next agent process start**. Saving does not restart a run. A new turn in a reused process keeps its accepted selection. A fresh process, including a retry or replacement, reads current choices. Run details distinguish desired packages, the current process binding, and observed tool catalogs. Unknown evidence stays Unknown.
+Private-run choices apply at the **next agent process start**. Saving does not restart a run. A new turn in a reused process keeps its accepted selection. A fresh process, including a retry or replacement, reads current choices. Use the MCP plug icon to inspect MCP information when the viewer is available. The run conversation has no separate MCP access summary.
+
+Built-in package switches use explicit **On** or **Off** selections directly in the package list. Select a package name to inspect its details. Automations do not offer a package inheritance action. Core remains required.
 
 For **normal task** automations, MCP choices form a template for newly created tasks. Workspace task-package limits still apply. Reusing an existing task preserves that task's later customization. Managed conversations use their destination's tool policy.
 
@@ -1337,7 +1343,7 @@ notifications sent when a client restores a conversation.
 Tool requests still require their normal metadata. Explicitly supplied metadata,
 duplicate JSON members, and noncanonical field spellings retain SDK validation.
 
-Agent-attached MCP servers keep `/mcp`, `/sse`, and `/message` on the agentctl port. The external server keeps `/mcp`, `/mcp/sse`, and `/mcp/message`.
+New managed agentctl instances negotiate helper-scoped native MCP routes during creation. Core routes use `/i/<helper-id>/mcp`, `/i/<helper-id>/sse`, and `/i/<helper-id>/message`; optional built-in package routes add `/packages/<package-id>` after the transport path. Older helpers that omit this mode continue to use the bare agentctl routes. The external server keeps `/mcp`, `/mcp/sse`, and `/mcp/message`.
 
 ### Configured third-party MCP servers
 

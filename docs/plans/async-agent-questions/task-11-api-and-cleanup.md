@@ -102,3 +102,7 @@ Passed:
 - `TestAsyncQuestionsHTTPOperatorScopeRequiresForwardForParentRequests`, `TestAsyncQuestionMCPViewOmitsSubmissionIdentity`, `TestAsyncQuestionOwnerDeliveryOmitsSubmissionIdentity`, and `TestAsyncQuestionDeliveryAdmissionContinuesAfterAuthoritySweepError` passed.
 - Focused Vitest regressions: 4 files, 25 tests passed, including payload-change submission retries.
 - Changed-file Go lint: `0 issues`.
+
+### Current-base review fixup (2026-11-17)
+
+On `origin/main` at `ea6af0d500e92a20420729a505c2b95c65707b36`, the backend question, SQLite async/pending-action, clarification, MCP server, and backendapp suites passed. These include `TestAsyncQuestionEmptyAnswerDoesNotResolve`, `TestAsyncQuestionForwardOnlyNotifiesOnNewPendingTransition`, `TestAsyncQuestionOperatorAnswerCreatesParentOutcomeDelivery`, `TestAsyncQuestionDeliveryFailurePersistenceStopsReconcileLoop`, `TestAsyncQuestionExtraDeliveryPersistsDestinationIncarnation`, `TestBootNeedsYouInbox_HasMoreIncludesAsyncAndBlockingCounts`, and `TestAsyncQuestionsTaskScopeHidesUnforwardedParent`. The focused UI suite passed 2 files and 15 tests, including the stable Submit status and history loading-label regressions.

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/kandev/kandev/internal/agentctl/journal"
 )
 
 // errDeliveryDurabilityBarrier marks a journal release that was refused
@@ -30,6 +32,10 @@ type deliveryRetirerClient interface {
 
 type deliveryInterruptedRetirerClient interface {
 	RetireInterruptedDeliverySubmission(ctx context.Context, id, streamID string, generation uint64) error
+}
+
+type deliveryMissingPeerRetirerClient interface {
+	RetireMissingUnknownDeliverySubmission(context.Context, journal.Submission) error
 }
 
 func (sm *StreamManager) deliveryJournalReleaser() deliveryJournalReleaser {
@@ -126,4 +132,14 @@ func (r deliveryJournalReleaser) retireInterrupted(
 		return err
 	}
 	return client.RetireInterruptedDeliverySubmission(ctx, id, streamID, generation)
+}
+
+func (r deliveryJournalReleaser) retireMissingUnknown(ctx context.Context, client deliveryMissingPeerRetirerClient, submission journal.Submission) error {
+	if client == nil {
+		return errors.New("agent delivery retirer is unavailable")
+	}
+	if err := r.await(ctx); err != nil {
+		return err
+	}
+	return client.RetireMissingUnknownDeliverySubmission(ctx, submission)
 }

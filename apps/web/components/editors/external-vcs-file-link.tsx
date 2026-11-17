@@ -4,7 +4,6 @@ import { IconBrandGithub, IconBrandGitlab } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { DropdownMenuItem } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 import { useExternalVcsFileLink } from "@/hooks/domains/workspace/use-external-vcs-file-link";
 import type { UseExternalVcsFileLinkInput } from "@/hooks/domains/workspace/use-external-vcs-file-link";
 import {
@@ -23,7 +22,6 @@ export type ExternalVcsFileMenuItemProps = UseExternalVcsFileLinkInput;
 const providerNames: Record<ExternalVcsProvider, string> = {
   github: "GitHub",
   gitlab: "GitLab",
-  azure_devops: "Azure DevOps",
 };
 
 const sizeClasses = {
@@ -36,10 +34,7 @@ function ProviderIcon({ provider }: { provider: ExternalVcsProvider }) {
   if (provider === "github") {
     return <IconBrandGithub data-testid="github-provider-icon" aria-hidden="true" />;
   }
-  if (provider === "gitlab") {
-    return <IconBrandGitlab data-testid="gitlab-provider-icon" aria-hidden="true" />;
-  }
-  return <AzureDevOpsIcon />;
+  return <IconBrandGitlab data-testid="gitlab-provider-icon" aria-hidden="true" />;
 }
 
 function buttonSize(size: NonNullable<ExternalVcsFileLinkProps["size"]>) {

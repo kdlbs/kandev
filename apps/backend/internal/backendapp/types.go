@@ -14,7 +14,6 @@ import (
 	"github.com/kandev/kandev/internal/auth/hostnames"
 	authstore "github.com/kandev/kandev/internal/auth/store"
 	"github.com/kandev/kandev/internal/automation"
-	"github.com/kandev/kandev/internal/azuredevops"
 	canvasservice "github.com/kandev/kandev/internal/canvas"
 	"github.com/kandev/kandev/internal/coordinator"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
@@ -107,7 +106,6 @@ type Services struct {
 	GitHub        *github.Service
 	GitLab        *gitlab.Service
 	GitLabCleanup func() error
-	AzureDevOps   *azuredevops.Service
 	Jira          *jira.Service
 	Linear        *linear.Service
 	Sentry        *sentry.Service

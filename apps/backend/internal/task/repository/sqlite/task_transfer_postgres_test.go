@@ -119,6 +119,16 @@ func TestPostgresTaskTransferRelationLockBlocksWriter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("init postgres schema: %v", err)
 	}
+	if err := repo.CreateWorkspace(context.Background(), &models.Workspace{
+		ID: "pg-transfer-lock-workspace", Name: "Lock", OwnerID: "owner-1",
+	}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkspace(context.Background(), &models.Workspace{
+		ID: "pg-transfer-lock-unrelated", Name: "Unrelated", OwnerID: "owner-1",
+	}); err != nil {
+		t.Fatalf("CreateWorkspace unrelated: %v", err)
+	}
 	if _, err := db.Exec(`CREATE TABLE pending_moves (
 		id TEXT PRIMARY KEY, task_id TEXT NOT NULL, workflow_id TEXT NOT NULL, workflow_step_id TEXT NOT NULL)`); err != nil {
 		t.Fatalf("create pending_moves: %v", err)
@@ -127,9 +137,27 @@ func TestPostgresTaskTransferRelationLockBlocksWriter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTxx: %v", err)
 	}
+	t.Cleanup(func() { _ = tx.Rollback() })
+	if err := repo.lockTaskHierarchy(context.Background(), tx, []string{"pg-transfer-lock-workspace"}, nil); err != nil {
+		t.Fatalf("lockTaskHierarchy: %v", err)
+	}
 	relations := []transferWorkspaceProjection{{table: "pending_moves", taskColumn: "task_id", identityColumn: "id"}}
+	contender, err := db.BeginTxx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BeginTxx contender: %v", err)
+	}
+	t.Cleanup(func() { _ = contender.Rollback() })
+	if _, err := contender.ExecContext(context.Background(), `LOCK TABLE workspaces IN ROW SHARE MODE`); err != nil {
+		t.Fatalf("lock workspace relation for contender: %v", err)
+	}
 	if err := repo.lockTaskTransferRelations(context.Background(), tx, nil, relations, transferRelationInventory{}); err != nil {
 		t.Fatalf("lockTaskTransferRelations: %v", err)
+	}
+	if err := repo.lockTaskTransferRelations(context.Background(), contender, nil, relations, transferRelationInventory{}); !errors.Is(err, repoerrors.ErrTaskTransferConflict) {
+		t.Fatalf("contending relation reservation error = %v, want task transfer conflict", err)
+	}
+	if err := contender.Rollback(); err != nil {
+		t.Fatalf("rollback contender: %v", err)
 	}
 	writerCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -137,6 +165,12 @@ func TestPostgresTaskTransferRelationLockBlocksWriter(t *testing.T) {
 		VALUES ('pending-race', 'task-race', 'workflow-source', 'step-source')`)
 	if !errors.Is(writeErr, context.DeadlineExceeded) {
 		t.Fatalf("writer error = %v, want deadline while relation lock held", writeErr)
+	}
+	workspaceWriteCtx, cancelWorkspaceWrite := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancelWorkspaceWrite()
+	_, writeErr = db.ExecContext(workspaceWriteCtx, `UPDATE workspaces SET name = 'Updated' WHERE id = 'pg-transfer-lock-unrelated'`)
+	if !errors.Is(writeErr, context.DeadlineExceeded) {
+		t.Fatalf("workspace writer error = %v, want deadline while relation lock held", writeErr)
 	}
 	if err := tx.Rollback(); err != nil {
 		t.Fatalf("Rollback: %v", err)

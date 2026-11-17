@@ -3,6 +3,7 @@ import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { expectConflictCornerGeometry } from "../../helpers/pr-badge-geometry";
 
 const OWNER = "testorg";
 const REPO = "testrepo";
@@ -79,13 +80,24 @@ test.describe("Mobile PR CI bubble", () => {
     await expect(row).toBeVisible();
     const icon = row.getByTestId(`pr-task-icon-${targetTaskId}`);
     await expect(icon).toBeVisible();
-    await expect(icon.getByTestId("pr-ci-bubble-failed")).toBeVisible();
+    await expect(icon.getByTestId("pr-ci-bubble-failed")).toHaveCount(0);
     await expect(icon.getByTestId("pr-merge-conflict-warning")).toBeVisible();
     await expect(icon).toHaveAttribute("aria-label", /Checks failed/);
     await expect(icon).toHaveAttribute("aria-label", /Conflicts/);
+    await expectConflictCornerGeometry(icon, 14);
+    const touchTarget = await icon.evaluate((element) => {
+      const style = getComputedStyle(element, "::after");
+      const box = element.getBoundingClientRect();
+      return {
+        width: box.width - Number.parseFloat(style.left) - Number.parseFloat(style.right),
+        height: box.height - Number.parseFloat(style.top) - Number.parseFloat(style.bottom),
+      };
+    });
+    expect(touchTarget.width).toBeGreaterThanOrEqual(44);
+    expect(touchTarget.height).toBeGreaterThanOrEqual(44);
     await assertNoDocumentHorizontalOverflow(testPage);
     await prCapture.screenshot("mobile-ci-bubble-before-tap", {
-      caption: "Phone task row shows the draft CI bubble and separate conflict triangle.",
+      caption: "Phone task row gives the corner to conflicts while retaining failed CI details.",
     });
 
     const rowURL = testPage.url();

@@ -56,6 +56,7 @@ func finalTaskEnvironmentsDDL(tableName string) string {
 			task_dir_name TEXT DEFAULT '',
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL,
+			retired_at TIMESTAMP,
 			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		)`, tableName)
 }
@@ -187,10 +188,10 @@ func (r *Repository) normalizeTaskWorktreeOwnership() error {
 }
 
 func (r *Repository) cutoverLegacyEnvironmentColumns(tx *sqlx.Tx) (map[string]bool, error) {
-	columns := make(map[string]bool, 6)
+	columns := make(map[string]bool, 7)
 	for _, column := range []string{
 		"repository_id", "worktree_id", "worktree_path", "worktree_branch",
-		"container_bootstrap_nonce_secret_id", "container_control_auth_token_secret_id",
+		"container_bootstrap_nonce_secret_id", "container_control_auth_token_secret_id", "retired_at",
 	} {
 		has, err := r.columnExists(tx, "task_environments", column)
 		if err != nil {

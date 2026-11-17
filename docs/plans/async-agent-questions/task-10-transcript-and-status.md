@@ -128,3 +128,7 @@ Passed:
 - `TestPostgresAsyncQuestionsParkedGateProjectsPendingAction` passed by name against PostgreSQL 16.
 - Chromium async-question E2E: 8 tests passed, including the live parked and released task state.
 - Specification validation: `python3 scripts/list-docs.py validate` and `python3 scripts/lint-spec-files.py --all` passed.
+
+### Current-base review fixup (2026-11-17)
+
+After merging `origin/main` at `ea6af0d500e92a20420729a505c2b95c65707b36`, `TestAsyncQuestionWaitProjectionPublishesParkAndRelease` and the full question race suite passed. The clarification, sysprompt, MCP server, and backendapp suites also passed; backendapp completed in 196.025 seconds. The parked pending-action projection passed by name against PostgreSQL 16.

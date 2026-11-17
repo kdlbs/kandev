@@ -1,13 +1,13 @@
 import { test, expect } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { waitForHttp, watchWs } from "../../helpers/causal-waits";
-import { waitForSessionDone } from "../../helpers/session";
 import { ChangeWorkflowPage } from "../../pages/change-workflow-page";
 import { KanbanPage } from "../../pages/kanban-page";
 import { seedRemainingStepColors } from "./change-workflow-color-helpers";
 import {
   seedWorkflowAgentOverrideFixture,
   waitForNewWorkflowProfileSession,
+  waitForWorkflowProfileSessionCreated,
   waitForWorkflowMoveLifecycle,
   waitForWorkflowStep,
 } from "./task-workflow-agent-overrides-helpers";
@@ -277,30 +277,37 @@ test.describe("Change workflow", () => {
           "Open task page showing the destination workflow and current step after migration.",
       });
     }
-    const destinationSessionId = await waitForNewWorkflowProfileSession(
+    const destinationSessionId = await waitForWorkflowProfileSessionCreated(
       apiClient,
       task.id,
       fixture.profileB.id,
       [existingSessionId],
     );
     await waitForWorkflowMoveLifecycle(apiClient, task.id);
+    await expect
+      .poll(
+        async () => {
+          const { session } = await apiClient.getTaskSession(destinationSessionId);
+          if (session.state === "FAILED" || session.state === "CANCELLED") {
+            throw new Error(`routed session entered ${session.state}`);
+          }
+          return (
+            session.agent_profile_snapshot?.model === "mock-slow" &&
+            ["STARTING", "RUNNING", "WAITING_FOR_INPUT", "COMPLETED"].includes(session.state)
+          );
+        },
+        {
+          timeout: 30_000,
+          message: "routed session did not launch with the replacement profile model",
+        },
+      )
+      .toBe(true);
     const { session: routedSession } = await apiClient.getTaskSession(destinationSessionId);
-    await waitForSessionDone(
-      apiClient,
-      task.id,
-      existingSessionId,
-      "source workflow session must settle before cleanup",
-      30_000,
-    );
-    await waitForSessionDone(
-      apiClient,
-      task.id,
-      destinationSessionId,
-      "destination workflow session must settle before cleanup",
-      30_000,
-    );
     expect(routedSession.agent_profile_id).toBe(fixture.profileB.id);
     expect(routedSession.agent_profile_snapshot?.model).toBe("mock-slow");
+    expect(["STARTING", "RUNNING", "WAITING_FOR_INPUT", "COMPLETED"]).toContain(
+      routedSession.state,
+    );
     const changed = await apiClient.getTask(task.id);
     expect(changed).toMatchObject({
       id: before.id,

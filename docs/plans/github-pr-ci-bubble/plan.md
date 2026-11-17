@@ -19,6 +19,11 @@ Then update the existing indicators and disclosures. Finally, prove the desktop 
 The integrations system owns the package because GitHub evidence determines every visible CI state.
 The work orders completed sequentially on 2026-11-10.
 
+Historical layout note, 2026-11-11: this package records the inline conflict layout delivered by PR #5244.
+Its Task 02/03 scope, previews, and results describe that delivery.
+The completed [corner-badge fix](../pr-conflict-corner-badge/plan.md) records the corrected priority and fresh verification separately.
+Keep these completed work orders and counts intact.
+
 ## Inputs and settled choices
 
 - [Requirements](../../specs/integrations/requirements/github-pr-ci-bubble.md): `REQ-INTEGRATIONS-GITHUB-PR-CI-BUBBLE-001`, criteria .1-.17.
@@ -34,7 +39,7 @@ Implementation details selected here: use a 10px wrapper, an inline conflict tri
 The completed [approval badge](../github-workflow-approval-badge/plan.md), [check results](../github-pr-check-results/plan.md),
 and [negative projection](../pr-task-disclosure-negative-projection/plan.md) packages are prerequisites and historical records.
 Their scenarios remain regression coverage. Do not reopen their completed work orders or rewrite their recorded counts.
-Task 02 reconciles active approval placement clauses with the new contract. Task 03 records fresh results in this package.
+Tasks 02 and 03 preserve the results of this original delivery. The later corner-badge behavior is recorded in its linked repair package.
 
 ## Scope
 

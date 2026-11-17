@@ -63,10 +63,6 @@ vi.mock("@/components/automations/automation-editor", () => ({
 
 // The transcript is the task chat stack. This suite is about which run the page
 // puts in the pane, so it asserts on the session the embed is handed.
-vi.mock("./automation-mcp-evidence", () => ({
-  AutomationMCPEvidence: () => <div data-testid="automation-mcp-evidence" />,
-}));
-
 vi.mock("./run-transcript", () => ({
   RunTranscript: ({ sessionId, turnId }: { sessionId: string; turnId?: string }) => (
     <div data-testid="run-transcript" data-session-id={sessionId} data-turn-id={turnId ?? ""} />

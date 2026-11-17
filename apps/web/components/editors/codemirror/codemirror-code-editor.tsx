@@ -1,10 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import type { EditorView } from "@codemirror/view";
-import { Button } from "@kandev/ui/button";
-import { IconMessagePlus } from "@tabler/icons-react";
 import { vscodeDark } from "@uiw/codemirror-theme-vscode";
 import { EditorCommentPopover } from "@/components/task/editor-comment-popover";
 import { CommentViewPopover } from "@/components/task/comment-view-popover";
@@ -19,7 +17,7 @@ import {
   revealCodeMirrorCursor,
   revealPendingCodeMirrorCursor,
 } from "./codemirror-cursor-navigation";
-import { useTranslation } from "react-i18next";
+import { EditorSelectionCommentTrigger } from "@/components/editors/editor-selection-comment-trigger";
 
 type FileEditorContentProps = {
   path: string;
@@ -49,22 +47,23 @@ type FileEditorContentProps = {
 
 type CodeMirrorEditorState = ReturnType<typeof useCodeMirrorEditorState>;
 
-function CodeMirrorOverlays({ state }: { state: CodeMirrorEditorState }) {
-  const { t } = useTranslation();
+function CodeMirrorOverlays({
+  state,
+  hostRef,
+}: {
+  state: CodeMirrorEditorState;
+  hostRef: RefObject<HTMLElement | null>;
+}) {
   return (
     <>
       {state.floatingButtonPos && !state.textSelection && (
-        <Button
-          size="sm"
-          variant="secondary"
-          className="floating-comment-btn fixed z-50 gap-1.5 shadow-lg animate-in fade-in-0 zoom-in-95 duration-100 cursor-pointer"
-          style={{ left: state.floatingButtonPos.x + 8, top: state.floatingButtonPos.y + 8 }}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={state.handleFloatingButtonClick}
-        >
-          <IconMessagePlus className="h-3.5 w-3.5" />
-          {t("editors:comment")}
-        </Button>
+        <EditorSelectionCommentTrigger
+          touch={state.touch}
+          position={{ left: state.floatingButtonPos.x + 8, top: state.floatingButtonPos.y + 8 }}
+          positioning="fixed"
+          hostRef={hostRef}
+          onOpen={() => state.handleFloatingButtonClick()}
+        />
       )}
       {state.textSelection && (
         <EditorCommentPopover
@@ -221,7 +220,7 @@ export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
             }}
           />
         ) : null}
-        <CodeMirrorOverlays state={state} />
+        <CodeMirrorOverlays state={state} hostRef={editorAreaRef} />
       </div>
     </div>
   );

@@ -93,7 +93,7 @@ describe("PRStatusChip draft CI bubble", () => {
     expect(screen.queryByTestId("pr-ci-bubble-failed")).toBeNull();
   });
 
-  it("keeps the conflict triangle beside the shared draft glyph", () => {
+  it("shows the conflict corner badge in the shared draft glyph", () => {
     renderWithStore(
       {
         taskPRs: {
@@ -110,7 +110,9 @@ describe("PRStatusChip draft CI bubble", () => {
       },
       <PRStatusChip taskId="task-1" />,
     );
-    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("draft");
+    const chip = screen.getByTestId(CHIP_TESTID);
+    expect(chip.getAttribute(ATTR_STATUS)).toBe("draft");
     expect(screen.getByTestId("pr-merge-conflict-warning")).not.toBeNull();
+    expect(screen.queryByTestId("pr-ci-bubble-failed")).toBeNull();
   });
 });

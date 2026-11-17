@@ -14,7 +14,6 @@ import (
 	"github.com/kandev/kandev/internal/auth/hostnames"
 	authstore "github.com/kandev/kandev/internal/auth/store"
 	"github.com/kandev/kandev/internal/automation"
-	"github.com/kandev/kandev/internal/azuredevops"
 	"github.com/kandev/kandev/internal/canvas"
 	"github.com/kandev/kandev/internal/common/authcircuit"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -188,7 +187,6 @@ func buildOwnerBehaviors() map[string]ownerBehavior {
 	behaviors["jira"] = ownerBehavior{actions: []apiAction{jiraAction()}}
 	behaviors["linear"] = ownerBehavior{actions: []apiAction{linearAction()}}
 	behaviors["sentry"] = ownerBehavior{actions: []apiAction{sentryAction()}}
-	behaviors["azure-devops"] = ownerBehavior{actions: []apiAction{azureDevOpsAction()}}
 	behaviors["workflow-sync"] = ownerBehavior{actions: []apiAction{workflowSyncAction()}}
 	behaviors["office-config-sync"] = ownerBehavior{actions: []apiAction{officeConfigSyncAction()}}
 	behaviors["automation"] = ownerBehavior{actions: []apiAction{automationAction()}}
@@ -356,10 +354,6 @@ func linearFactory(s testconformance.ScenarioContext) (any, error) {
 
 func sentryFactory(s testconformance.ScenarioContext) (any, error) {
 	return sentry.NewStore(s.DB, s.DB)
-}
-
-func azureDevOpsFactory(s testconformance.ScenarioContext) (any, error) {
-	return azuredevops.NewStore(s.DB, s.DB)
 }
 
 func workflowSyncFactory(s testconformance.ScenarioContext) (any, error) {
@@ -2828,87 +2822,6 @@ func sentryConfigRead(s testconformance.ScenarioContext, store *sentry.Store, id
 		return nil, err
 	}
 	return requireProviderConfig(cfg, "Sentry")
-}
-
-//nolint:funlen // This adapter enumerates every Azure DevOps store assertion.
-func azureDevOpsAction() apiAction {
-	action := apiAction{name: "azure_devops_configs", key: providerConfigKey}
-	action.create = func(s testconformance.ScenarioContext, _ string) (any, error) {
-		store, err := azureDevOpsFactory(s)
-		if err != nil {
-			return nil, err
-		}
-		workspaceID, err := conformanceWorkspaceID(s)
-		if err != nil {
-			return nil, err
-		}
-		cfg := &azuredevops.Config{WorkspaceID: workspaceID, OrganizationURL: "https://dev.azure.example.test", DefaultProjectID: "project", DefaultProjectName: "Conformance", AuthMethod: azuredevops.AuthMethodPAT}
-		if err := store.(*azuredevops.Store).UpsertConfig(s.Context, cfg); err != nil {
-			return nil, err
-		}
-		return azureDevOpsConfigRead(s, store.(*azuredevops.Store), workspaceID)
-	}
-	action.read = func(s testconformance.ScenarioContext, id string) (any, error) {
-		store, err := azureDevOpsFactory(s)
-		if err != nil {
-			return nil, err
-		}
-		return azureDevOpsConfigRead(s, store.(*azuredevops.Store), id)
-	}
-	action.update = func(s testconformance.ScenarioContext, id string, _ any) error {
-		store, err := azureDevOpsFactory(s)
-		if err != nil {
-			return err
-		}
-		cfg, err := azureDevOpsConfigRead(s, store.(*azuredevops.Store), id)
-		if err != nil {
-			return err
-		}
-		cfg.DefaultProjectName = "Updated"
-		return store.(*azuredevops.Store).UpsertConfig(s.Context, cfg)
-	}
-	action.delete = func(s testconformance.ScenarioContext, id string) error {
-		store, err := azureDevOpsFactory(s)
-		if err != nil {
-			return err
-		}
-		return store.(*azuredevops.Store).DeleteConfig(s.Context, id)
-	}
-	action.assertDeleted = func(s testconformance.ScenarioContext, id string, _ any) error {
-		store, err := azureDevOpsFactory(s)
-		if err != nil {
-			return err
-		}
-		cfg, err := store.(*azuredevops.Store).GetConfig(s.Context, id)
-		if err != nil {
-			return err
-		}
-		if cfg != nil {
-			return fmt.Errorf("azure DevOps config %q remains after delete", id)
-		}
-		return nil
-	}
-	action.setBoolean = func(s testconformance.ScenarioContext, id string, _ any, enabled bool) (any, error) {
-		store, err := azureDevOpsFactory(s)
-		if err != nil {
-			return nil, err
-		}
-		if err := store.(*azuredevops.Store).UpdateAuthHealth(s.Context, id, enabled, "", time.Now().UTC()); err != nil {
-			return nil, err
-		}
-		return azureDevOpsConfigRead(s, store.(*azuredevops.Store), id)
-	}
-	action.readBoolean = providerBoolean
-	action.conflict = action.update
-	return action
-}
-
-func azureDevOpsConfigRead(s testconformance.ScenarioContext, store *azuredevops.Store, workspaceID string) (*azuredevops.Config, error) {
-	cfg, err := store.GetConfig(s.Context, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	return requireProviderConfig(cfg, "Azure DevOps")
 }
 
 //nolint:funlen // This adapter enumerates every workflow-sync store assertion.

@@ -4,16 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/common/logger"
+	officecompletionpolicy "github.com/kandev/kandev/internal/office/completionpolicy"
+	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/completion"
 	"github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -51,19 +58,50 @@ func TestHandleSelectedMoveError_ApprovalsPending409(t *testing.T) {
 	}
 }
 
-type pendingMoveApprover struct{}
+type refusalMoveRepo struct{ *moveTaskConflictRepo }
 
-func (pendingMoveApprover) PendingApproversForCompletion(context.Context, string, string) ([]service.PendingApprover, error) {
-	return []service.PendingApprover{{AgentProfileID: "agent-ceo", Name: "CEO"}}, nil
+func (r *refusalMoveRepo) GetTask(ctx context.Context, id string) (*models.Task, error) {
+	task, err := r.moveTaskConflictRepo.GetTask(ctx, id)
+	if err != nil || task == nil {
+		return task, err
+	}
+	copy := *task
+	copy.Metadata = maps.Clone(task.Metadata)
+	return &copy, nil
+}
+
+func (r *refusalMoveRepo) UpdateTaskWithWorkflowStepAdmission(
+	context.Context, *models.Task, string, string, int,
+) (bool, error) {
+	return false, nil
+}
+
+func (r *refusalMoveRepo) UpdateTaskWithWorkflowStepAdmissionAndState(
+	context.Context, *models.Task, string, string, int, *v1.TaskState, bool, string,
+) (bool, error) {
+	return false, nil
+}
+
+func (r *refusalMoveRepo) UpdateTaskWithWorkflowStepAdmissionAndStateWithCompletionAdmission(
+	context.Context, *models.Task, string, string, int, *v1.TaskState, bool, string, *completion.Admission,
+) (bool, error) {
+	return false, &completion.RefusedError{Code: completion.CodeApprovalsPending, Subjects: []string{"agent-ceo"}}
+}
+
+type fixedApproverNameResolver struct{}
+
+func (fixedApproverNameResolver) ResolvePendingApproverNames(_ context.Context, ids []string) []service.PendingApprover {
+	return []service.PendingApprover{{AgentProfileID: ids[0], Name: "CEO"}}
 }
 
 func TestWSMoveTask_PendingApproversRefuseWithConflictDetails(t *testing.T) {
 	log := newTestLogger(t)
 	task := &models.Task{ID: "ws-office-done", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "work", State: v1.TaskStateTODO, IsFromOffice: true}
 	repo := &moveTaskConflictRepo{task: task}
-	svc := service.NewService(service.Repos{Workspaces: repo, Tasks: repo, TaskRepos: repo, Workflows: repo, Messages: repo, Turns: repo, Sessions: repo, GitSnapshots: repo, RepoEntities: repo, Executors: repo, Environments: repo, TaskEnvironments: repo, Reviews: repo}, nil, log, service.RepositoryDiscoveryConfig{})
+	refuser := &refusalMoveRepo{moveTaskConflictRepo: repo}
+	svc := service.NewService(service.Repos{Workspaces: repo, Tasks: refuser, TaskRepos: repo, Workflows: repo, Messages: repo, Turns: repo, Sessions: repo, GitSnapshots: repo, RepoEntities: repo, Executors: repo, Environments: repo, TaskEnvironments: repo, Reviews: repo}, nil, log, service.RepositoryDiscoveryConfig{})
 	svc.SetWorkflowStepGetter(&reorderHandlerStepGetter{steps: map[string]*wfmodels.WorkflowStep{"done": {ID: "done", WorkflowID: "wf-1", Name: "Done", CompleteTaskOnEnter: true}}})
-	svc.SetOfficeApprovalGuard(pendingMoveApprover{})
+	svc.SetApproverNameResolver(fixedApproverNameResolver{})
 	h := &TaskHandlers{service: svc, logger: log}
 	request, err := ws.NewRequest("move-office-done", ws.ActionTaskMove, map[string]any{"id": task.ID, "workflow_id": "wf-1", "workflow_step_id": "done"})
 	if err != nil {
@@ -107,6 +145,20 @@ func TestHTTPApproveSessionPendingOfficeApproversPreservesReview(t *testing.T) {
 	if _, err := repo.DB().Exec(`UPDATE workspaces SET owner_id = 'approval-owner', office_workflow_id = 'wf-reorder-http' WHERE id = 'ws-reorder-http'`); err != nil {
 		t.Fatal(err)
 	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := sqlx.NewDb(repo.DB(), "sqlite3")
+	office, err := officesqlite.NewWithDB(db, db, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow, err := workflowrepo.NewWithDB(db, db, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.SetCompletionPolicies(officecompletionpolicy.New(office, workflow))
 	task, err := repo.GetTask(ctx, "approval-task")
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +177,11 @@ func TestHTTPApproveSessionPendingOfficeApproversPreservesReview(t *testing.T) {
 		"approval-review": {ID: "approval-review", WorkflowID: task.WorkflowID, Position: 0},
 		"approval-done":   {ID: "approval-done", WorkflowID: task.WorkflowID, Position: 1, CompleteTaskOnEnter: true},
 	}}})
-	h.service.SetOfficeApprovalGuard(pendingMoveApprover{})
+	h.service.SetApproverNameResolver(fixedApproverNameResolver{})
+	participantID, err := workflow.UpsertTaskParticipant(ctx, "approval-done", task.ID, string(wfmodels.ParticipantRoleApprover), "agent-ceo")
+	if err != nil {
+		t.Fatal(err)
+	}
 	beforeTask, err := repo.GetTask(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -168,8 +224,12 @@ func TestHTTPApproveSessionPendingOfficeApproversPreservesReview(t *testing.T) {
 	if !reflect.DeepEqual(persisted, beforeTask) || !reflect.DeepEqual(session, beforeSession) {
 		t.Fatalf("refusal wrote task=%+v session=%+v", persisted, session)
 	}
-	// With the same move prerequisites and no pending guard, approval is reachable.
-	h.service.SetOfficeApprovalGuard(nil)
+	if err := workflow.RecordStepDecision(ctx, &wfmodels.WorkflowStepDecision{
+		TaskID: task.ID, StepID: "approval-done", ParticipantID: participantID,
+		Decision: "approved", DeciderType: "agent", DeciderID: "agent-ceo", Role: string(wfmodels.ParticipantRoleApprover),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	allowed, allowedRec := requestAs(t, "approval-owner", "approval-session")
 	h.httpApproveSession(allowed)
 	if allowedRec.Code != http.StatusOK {

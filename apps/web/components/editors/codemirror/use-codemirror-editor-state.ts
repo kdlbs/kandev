@@ -13,6 +13,8 @@ import { computeLineDiffStats } from "@/lib/diff";
 import { useToast } from "@/components/toast-provider";
 import { useCommandPanelOpen } from "@/lib/commands/command-registry";
 import { useTranslation } from "react-i18next";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { readCodeMirrorSelection, selectionEndPoint } from "./codemirror-selection";
 // Resolved inside `toDOM()`, which is a CodeMirror gutter callback with no hook scope.
 import { t as moduleT } from "@/lib/i18n";
 
@@ -270,23 +272,25 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
     if (!enableComments || !sessionId) return;
     const view = editorRef.current?.view;
     if (!view) return;
-    const selection = view.state.selection.main;
-    if (selection.empty) {
-      setFloatingButtonPos(null);
-      setCurrentSelection(null);
-      return;
-    }
-    const selectedText = view.state.sliceDoc(selection.from, selection.to);
-    if (!selectedText.trim()) {
-      setFloatingButtonPos(null);
-      setCurrentSelection(null);
-      return;
-    }
-    const startLine = view.state.doc.lineAt(selection.from).number;
-    const endLine = view.state.doc.lineAt(selection.to).number;
-    setCurrentSelection({ text: selectedText, startLine, endLine });
-    setFloatingButtonPos({ x: mousePositionRef.current.x, y: mousePositionRef.current.y });
+    const selection = readCodeMirrorSelection(view.state);
+    setCurrentSelection(selection);
+    setFloatingButtonPos(
+      selection ? { x: mousePositionRef.current.x, y: mousePositionRef.current.y } : null,
+    );
   }, [enableComments, sessionId, editorRef]);
+
+  // Touch selections (including native handle drags) arrive as selection
+  // transactions without a mouseup, so follow them directly.
+  const touch = useTouchDrawer();
+  const followTouchSelectionRef = useRef<(view: EditorView) => void>(() => {});
+  useEffect(() => {
+    followTouchSelectionRef.current = (view) => {
+      if (!touch || !enableComments || !sessionId) return;
+      const selection = readCodeMirrorSelection(view.state);
+      setCurrentSelection(selection);
+      setFloatingButtonPos(selection ? selectionEndPoint(view) : null);
+    };
+  }, [enableComments, sessionId, touch]);
 
   // Mouse listeners for selection
   useEffect(() => {
@@ -311,13 +315,13 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   // Clear floating button when selection cleared via keyboard
   const selectionUpdateExtension = useMemo(() => {
     return EditorView.updateListener.of((update) => {
-      if (update.selectionSet) {
-        const selection = update.state.selection.main;
-        if (selection.empty) {
-          setFloatingButtonPos(null);
-          setCurrentSelection(null);
-        }
+      if (!update.selectionSet) return;
+      if (update.state.selection.main.empty) {
+        setFloatingButtonPos(null);
+        setCurrentSelection(null);
+        return;
       }
+      followTouchSelectionRef.current(update.view);
     });
   }, []);
 
@@ -427,9 +431,9 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   );
 
   const handleFloatingButtonClick = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
+    (e?: React.MouseEvent) => {
+      e?.preventDefault();
+      e?.stopPropagation();
       if (!currentSelection || !floatingButtonPos) return;
       setTextSelection({ ...currentSelection, position: floatingButtonPos });
       setFloatingButtonPos(null);
@@ -546,6 +550,7 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   }, []);
 
   return {
+    touch,
     wrapEnabled,
     setWrapEnabled,
     extensions,

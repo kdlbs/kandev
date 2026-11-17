@@ -46,3 +46,24 @@ func TestBuiltinPreparationAllowsUnusedHelperWithDefaultCommand(t *testing.T) {
 		})
 	}
 }
+
+func TestBuiltinPreparationUsesScopedHelperInstanceURLs(t *testing.T) {
+	profile := p.New(p.SurfaceKanbanTask, nil, nil)
+	profile.BuiltinPackages = &p.BuiltinManifest{
+		Version: 1, CatalogVersion: 1, WorkspaceID: "workspace", TaskID: "task", Surface: profile.Surface,
+		Packages: []p.PackageID{p.PackageCore}, Origins: map[p.PackageID]string{p.PackageCore: "required"},
+	}
+	base := &config.Config{ListenHostOverride: "127.0.0.1"}
+	cfg, err := base.NewInstanceConfig(43210, &config.InstanceOverrides{
+		TaskID: "task", InstanceID: "helper-instance", ScopedMCPRoutes: true,
+	})
+	require.NoError(t, err)
+	manager := &Manager{cfg: cfg, logger: newTestLogger(t)}
+	manager.status.Store(StatusStopped)
+
+	err = manager.PrepareBuiltinProfile(profile, func(p.Context) error { return nil })
+	require.NoError(t, err)
+	require.Len(t, cfg.McpServers, 2)
+	require.Equal(t, "http://127.0.0.1:43210/i/helper-instance/mcp", cfg.McpServers[0].URL)
+	require.Equal(t, "http://127.0.0.1:43210/i/helper-instance/sse", cfg.McpServers[1].URL)
+}

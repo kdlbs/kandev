@@ -574,7 +574,7 @@ const taskSessionSelectCols = `ts.id, ts.task_id, ts.queue_incarnation_id,
 	ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
 	ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
 	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id, ts.name, ts.last_read_message_id,
-	ts.cost_subcents, ts.tokens_in, ts.tokens_cached_in, ts.tokens_out, ts.executor_actor_user_id`
+	ts.cost_subcents, ts.tokens_in, ts.tokens_cached_in, ts.tokens_out, ts.executor_actor_user_id, ts.admitted_execution_grade, ts.admitted_execution_grade_known`
 
 // taskSessionFromClause is the FROM clause that pairs with taskSessionSelectCols.
 // Always reference task_sessions as `ts` and executors_running as `er` in WHERE/ORDER.
@@ -749,18 +749,11 @@ func (r *Repository) createTaskSessionWithWorkspaceBinding(
 		return err
 	}
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT id, status, materialization_session_id, updated_at FROM task_environments WHERE task_id = ?
+		SELECT id, status, materialization_session_id, updated_at FROM task_environments WHERE task_id = ? AND retired_at IS NULL
 	`), session.TaskID).Scan(&envID, &status, &materializationSessionID, &claimUpdatedAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		if candidate.ID == "" {
-			candidate.ID = uuid.New().String()
-		}
-		candidate.Status = models.TaskEnvironmentStatusCreating
-		candidate.MaterializationSessionID = session.ID
-		candidate.CreatedAt = r.nowUTC()
-		candidate.UpdatedAt = candidate.CreatedAt
-		if err := r.insertCreatingWorkspaceEnvironment(ctx, tx, candidate); err != nil {
+		if err := r.reserveInitialWorkspaceEnvironmentTx(ctx, tx, candidate, session.ID); err != nil {
 			return err
 		}
 		session.TaskEnvironmentID = candidate.ID
@@ -784,10 +777,11 @@ func (r *Repository) createTaskSessionWithWorkspaceBinding(
 	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusReady || models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusStopped:
 		session.TaskEnvironmentID = envID
 	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusFailed:
-		if err := r.reelectFailedWorkspaceMaterializationTx(ctx, tx, envID, session.ID); err != nil {
+		selected, err := r.bindFailedWorkspaceEnvironmentTx(ctx, tx, envID, session.ID, candidate)
+		if err != nil {
 			return err
 		}
-		session.TaskEnvironmentID = envID
+		session.TaskEnvironmentID = selected
 	default:
 		return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
 	}
@@ -946,7 +940,7 @@ func (r *Repository) bindReadySharedGroupEnvironment(
 		FROM task_workspace_groups g
 		JOIN task_workspace_group_members m
 		  ON m.workspace_group_id = g.id AND m.task_id = ? AND m.released_at IS NULL
-		LEFT JOIN task_environments e ON e.id = g.materialized_environment_id
+		LEFT JOIN task_environments e ON e.id = g.materialized_environment_id AND e.retired_at IS NULL
 		WHERE g.id = ?
 	`), session.TaskID, groupID).Scan(
 		&environmentID, &status, &materializationSessionID, &claimUpdatedAt, &ownerID,
@@ -1091,7 +1085,7 @@ func (r *Repository) loadCanonicalTaskWorkspaceForSessionTx(
 			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''),
 			COALESCE(container_control_auth_token_secret_id, ''), sandbox_id,
 			status, COALESCE(materialization_session_id, ''), updated_at
-		FROM task_environments WHERE task_id = ?
+		FROM task_environments WHERE task_id = ? AND retired_at IS NULL
 	`), taskID).Scan(
 		&workspace.ID, &workspace.ExecutorType, &workspace.ExecutorID, &workspace.ExecutorProfileID,
 		&workspace.ContainerID, &workspace.ContainerBootstrapNonceSecretID,
@@ -1109,7 +1103,7 @@ func (r *Repository) loadCanonicalTaskWorkspaceForSessionTx(
 			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''),
 			COALESCE(container_control_auth_token_secret_id, ''), sandbox_id,
 			status, COALESCE(materialization_session_id, ''), updated_at
-		FROM task_environments WHERE id = ?
+		FROM task_environments WHERE id = ? AND retired_at IS NULL
 	`), workspace.ID).Scan(
 		&workspace.ExecutorType, &workspace.ExecutorID, &workspace.ExecutorProfileID,
 		&workspace.ContainerID, &workspace.ContainerBootstrapNonceSecretID,
@@ -1589,12 +1583,12 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 			repository_id, base_branch, base_commit_sha, workspace_path,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,
-			is_primary, review_status, is_passthrough, task_environment_id, name, executor_actor_user_id
+			is_primary, review_status, is_passthrough, task_environment_id, name, executor_actor_user_id, admitted_execution_grade, admitted_execution_grade_known
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-			?, ?
+			?, ?, ?, ?
 		)
 	`), session.ID, session.TaskID, session.QueueIncarnationID, agentProfileID,
 		session.ExecutionProfileID, session.RouteGeneration, session.RouteState, session.RouteReason, session.DownstreamACPSessionID,
@@ -1603,7 +1597,7 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		string(session.State), session.ErrorMessage, string(metadataJSON),
 		session.StartedAt, session.CompletedAt, session.UpdatedAt,
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
-		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name, session.ExecutorActorUserID)
+		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name, session.ExecutorActorUserID, session.AdmittedExecutionGrade, dialect.BoolToInt(session.AdmittedExecutionGradeKnown))
 
 	if err != nil {
 		return err
@@ -1870,7 +1864,7 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
-		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut, &session.ExecutorActorUserID,
+		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut, &session.ExecutorActorUserID, &session.AdmittedExecutionGrade, &session.AdmittedExecutionGradeKnown,
 	)
 
 	if err == sql.ErrNoRows {
@@ -3578,6 +3572,51 @@ func (r *Repository) SetSessionMetadataKeyIfJSONValue(
 	return rows > 0, nil
 }
 
+// ClearSessionMetadataKeyIfStringValue removes a string-valued metadata key
+// only when its complete value still matches expectedValue.
+func (r *Repository) ClearSessionMetadataKeyIfStringValue(
+	ctx context.Context,
+	sessionID, key, expectedValue string,
+) (bool, error) {
+	path := jsonPath(key)
+	query := `UPDATE task_sessions SET metadata = json_remove(
+		CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END,
+		?), updated_at = ?
+		WHERE id = ? AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) = 'text'
+		AND json_extract(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) = ?`
+	args := []interface{}{path, r.nowUTC(), sessionID, path, path, expectedValue}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `UPDATE task_sessions SET metadata = (
+			CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END - ?
+		)::text, updated_at = ?
+		WHERE id = ? AND (CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END ->> ?) = ?`
+		args = []interface{}{key, r.nowUTC(), sessionID, key, expectedValue}
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return false, err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, nil); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
 // SetSessionMetadataKeyIfState atomically sets one metadata key only while the
 // session remains in expectedState. Runtime recovery uses this to keep a
 // follow-up marker from being attached to a session that was stopped between
@@ -4682,9 +4721,9 @@ func (r *Repository) CountActiveTaskSessionsByRepository(ctx context.Context, re
 	return count, nil
 }
 
-// DeleteEphemeralTasksByAgentProfile deletes all ephemeral tasks (and their sessions)
-// that are using the specified agent profile. This is used during profile deletion
-// to clean up transient quick chat / config chat tasks.
+// DeleteEphemeralTasksByAgentProfile deletes configuration chats (and their
+// sessions) that use the specified agent profile. Ordinary Quick Chats remain
+// available after profile deletion.
 func (r *Repository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, agentProfileID string) (int64, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -4692,12 +4731,14 @@ func (r *Repository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, age
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	configChatPredicate := "NOT (" + excludeConfigModePredicate(r.db.DriverName(), "t.metadata") + ")"
 	var taskIDs []string
 	if err := tx.SelectContext(ctx, &taskIDs, r.db.Rebind(`
 		SELECT DISTINCT t.id
 		FROM tasks t
 		INNER JOIN task_sessions s ON s.task_id = t.id
 		WHERE t.is_ephemeral = 1
+		  AND `+configChatPredicate+`
 		  AND s.agent_profile_id = ?
 		ORDER BY t.id
 	`), agentProfileID); err != nil {
@@ -4725,7 +4766,7 @@ func (r *Repository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, age
 				SELECT 1
 				FROM tasks t
 				INNER JOIN task_sessions s ON s.task_id = t.id
-				WHERE t.id = ? AND t.is_ephemeral = 1 AND s.agent_profile_id = ?
+				WHERE t.id = ? AND t.is_ephemeral = 1 AND `+configChatPredicate+` AND s.agent_profile_id = ?
 			)
 		`), taskID, agentProfileID); err != nil {
 			return 0, err
@@ -4774,7 +4815,7 @@ func (r *Repository) deleteEphemeralTaskForProfileTx(
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM tasks
-		WHERE id = ? AND is_ephemeral = 1
+		WHERE id = ? AND is_ephemeral = 1 AND NOT (`+excludeConfigModePredicate(r.db.DriverName(), "metadata")+`)
 		  AND EXISTS (
 			SELECT 1 FROM task_sessions
 			WHERE task_id = ? AND agent_profile_id = ?
@@ -4836,7 +4877,7 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
-		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut, &session.ExecutorActorUserID,
+		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut, &session.ExecutorActorUserID, &session.AdmittedExecutionGrade, &session.AdmittedExecutionGradeKnown,
 	)
 	if err != nil {
 		return nil, err

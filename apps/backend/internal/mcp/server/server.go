@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/common/mcpurl"
 	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -127,6 +128,7 @@ type Server struct {
 	mode                       string // "task" (default), "task-title-pending", "config", "external", "office", or "automation"
 	mcpProviders               []string
 	sseBaseURL                 string
+	nativeRoutePrefix          string
 	profile                    mcpprofile.Context
 	legacyModeCapabilities     []mcpprofile.Capability
 	namespacesMCPToolsByServer bool
@@ -141,6 +143,9 @@ type Server struct {
 	attachmentAttempt          streams.MCPAttachmentAttempt
 	attachmentAttempts         map[string]streams.MCPAttachmentAttempt
 	attachmentReporter         func(streams.MCPAttachmentEvidence)
+	pendingAttachmentEvidence  map[string][]streams.MCPAttachmentEvidence
+	discardedAttachmentAttempt map[string]struct{}
+	discardedAttachmentOrder   []string
 	validatorMu                sync.RWMutex
 	toolValidators             map[string]toolArgumentValidator
 	pluginToolsUpdateMu        sync.Mutex
@@ -170,6 +175,22 @@ func WithSSEBaseURL(baseURL string) ServerOption {
 	return func(s *Server) {
 		s.sseBaseURL = strings.TrimSuffix(baseURL, "/")
 	}
+}
+
+// WithNativeRoutePrefix scopes the instance-owned MCP transports under one
+// helper path. External backend routes do not use this option.
+func WithNativeRoutePrefix(prefix string) ServerOption {
+	return func(s *Server) {
+		s.nativeRoutePrefix = prefix
+	}
+}
+
+func (s *Server) nativeRoutePath(endpoint string) string {
+	path, err := mcpurl.RoutePath(s.nativeRoutePrefix, endpoint)
+	if err != nil {
+		return ""
+	}
+	return path
 }
 
 type mcpAttachmentAttemptContextKey struct{}
@@ -209,11 +230,13 @@ func NewWithProfile(backend BackendClient, sessionID, taskID string, port int, l
 		profileContext = profileContext.WithoutCapability(mcpprofile.CapabilityUserQuestion)
 	}
 	s := newServerWithProfile(backend, sessionID, taskID, log, mcpLogFile, profileContext, options...)
-	s.sseServer = server.NewSSEServer(s.mcpServer,
-		server.WithBaseURL(s.sseBaseURLForPort(port)),
-	)
+	sseOptions := []server.SSEOption{server.WithBaseURL(s.sseBaseURLForPort(port))}
+	if s.nativeRoutePrefix != "" {
+		sseOptions = append(sseOptions, server.WithStaticBasePath(s.nativeRoutePrefix))
+	}
+	s.sseServer = server.NewSSEServer(s.mcpServer, sseOptions...)
 	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
-		server.WithEndpointPath("/mcp"),
+		server.WithEndpointPath(s.nativeRoutePath("/mcp")),
 		server.WithStateful(s.profile.BuiltinPackages != nil),
 		server.WithHTTPContextFunc(s.mcpHTTPContext),
 	)
@@ -266,16 +289,18 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 		setter.SetSessionID(sessionID)
 	}
 	s := &Server{
-		backend:                backend,
-		sessionID:              sessionID,
-		taskID:                 taskID,
-		disableAskQuestion:     !profileContext.HasCapability(mcpprofile.CapabilityUserQuestion),
-		mode:                   modeForProfile(profileContext),
-		mcpProviders:           mcpproviders.Normalize(profileContext.Providers),
-		profile:                profileContext,
-		legacyModeCapabilities: slices.Clone(profileContext.Capabilities),
-		logger:                 log.WithFields(zap.String("component", "mcp-server")),
-		attachmentAttempts:     make(map[string]streams.MCPAttachmentAttempt),
+		backend:                    backend,
+		sessionID:                  sessionID,
+		taskID:                     taskID,
+		disableAskQuestion:         !profileContext.HasCapability(mcpprofile.CapabilityUserQuestion),
+		mode:                       modeForProfile(profileContext),
+		mcpProviders:               mcpproviders.Normalize(profileContext.Providers),
+		profile:                    profileContext,
+		legacyModeCapabilities:     slices.Clone(profileContext.Capabilities),
+		logger:                     log.WithFields(zap.String("component", "mcp-server")),
+		attachmentAttempts:         make(map[string]streams.MCPAttachmentAttempt),
+		pendingAttachmentEvidence:  make(map[string][]streams.MCPAttachmentEvidence),
+		discardedAttachmentAttempt: make(map[string]struct{}),
 	}
 	for _, option := range options {
 		if option != nil {
@@ -424,6 +449,65 @@ func (s *Server) SetAttachmentAttempt(attempt streams.MCPAttachmentAttempt) {
 	s.attachmentMu.Lock()
 	defer s.attachmentMu.Unlock()
 	s.attachmentAttempt = attempt
+}
+
+// BeginAttachmentAttempt buffers observations until the owning ACP operation
+// publishes its attempt preamble. Authentication failures discard that buffer.
+func (s *Server) BeginAttachmentAttempt(attempt streams.MCPAttachmentAttempt) {
+	attempt.BuiltinPackages = s.Profile().BuiltinPackages
+	s.attachmentMu.Lock()
+	defer s.attachmentMu.Unlock()
+	s.attachmentAttempt = attempt
+	delete(s.discardedAttachmentAttempt, attempt.AttemptID)
+	s.pendingAttachmentEvidence[attempt.AttemptID] = nil
+}
+
+// CompleteAttachmentAttempt publishes buffered observations only after the
+// adapter has emitted its preamble for a non-authentication outcome.
+func (s *Server) CompleteAttachmentAttempt(attemptID string, publish bool) {
+	if attemptID == "" {
+		return
+	}
+	if !publish {
+		s.attachmentMu.Lock()
+		delete(s.pendingAttachmentEvidence, attemptID)
+		s.rememberDiscardedAttachmentAttemptLocked(attemptID)
+		s.attachmentMu.Unlock()
+		return
+	}
+
+	for {
+		s.attachmentMu.Lock()
+		evidence, pending := s.pendingAttachmentEvidence[attemptID]
+		if !pending || len(evidence) == 0 {
+			delete(s.pendingAttachmentEvidence, attemptID)
+			s.attachmentMu.Unlock()
+			return
+		}
+		s.pendingAttachmentEvidence[attemptID] = nil
+		reporter := s.attachmentReporter
+		s.attachmentMu.Unlock()
+
+		if reporter != nil {
+			for _, observation := range evidence {
+				reporter(observation)
+			}
+		}
+	}
+}
+
+func (s *Server) rememberDiscardedAttachmentAttemptLocked(attemptID string) {
+	if _, exists := s.discardedAttachmentAttempt[attemptID]; exists {
+		return
+	}
+	s.discardedAttachmentAttempt[attemptID] = struct{}{}
+	s.discardedAttachmentOrder = append(s.discardedAttachmentOrder, attemptID)
+	if len(s.discardedAttachmentOrder) <= streams.MaxMCPAttachmentAttempts*16 {
+		return
+	}
+	oldest := s.discardedAttachmentOrder[0]
+	s.discardedAttachmentOrder = s.discardedAttachmentOrder[1:]
+	delete(s.discardedAttachmentAttempt, oldest)
 }
 
 // mcpHTTPContext snapshots the backend-owned attachment attempt before the MCP
@@ -606,7 +690,7 @@ func (s *Server) reportMCPConnectionWithTools(
 		// a defense for any other evidence producer.
 		tools, _ = streams.NormalizeMCPToolCatalog(tools, toolCount)
 	}
-	reporter(streams.MCPAttachmentEvidence{
+	s.publishAttachmentEvidence(reporter, streams.MCPAttachmentEvidence{
 		BuiltinPackage:     builtinEvidencePackage(attempt.BuiltinPackages, mcpEvidenceServerName(serverNames...)),
 		AttemptID:          attempt.AttemptID,
 		ServerName:         mcpEvidenceServerName(serverNames...),
@@ -619,6 +703,31 @@ func (s *Server) reportMCPConnectionWithTools(
 		ToolTokenEstimator: toolTokenEstimator(tools),
 		Summary:            streams.SanitizeMCPErrorSummary(summary),
 	})
+}
+
+func (s *Server) publishAttachmentEvidence(
+	reporter func(streams.MCPAttachmentEvidence),
+	evidence streams.MCPAttachmentEvidence,
+) {
+	s.attachmentMu.Lock()
+	if _, discarded := s.discardedAttachmentAttempt[evidence.AttemptID]; discarded {
+		s.attachmentMu.Unlock()
+		return
+	}
+	if pending, ok := s.pendingAttachmentEvidence[evidence.AttemptID]; ok {
+		if len(pending) < streams.MaxMCPAttachmentEvidenceEvents {
+			s.pendingAttachmentEvidence[evidence.AttemptID] = append(pending, evidence)
+		}
+		s.attachmentMu.Unlock()
+		return
+	}
+	if s.attachmentReporter != nil {
+		reporter = s.attachmentReporter
+	}
+	s.attachmentMu.Unlock()
+	if reporter != nil {
+		reporter(evidence)
+	}
 }
 
 func toolTokenEstimator(tools []streams.MCPToolSummary) string {
@@ -1494,6 +1603,7 @@ func (s *Server) registerTaskExecutionTools() {
 				mcp.Description(`How to deliver this message if the target is currently running/starting. "queued" (default): wait for the current turn to finish, like any other peer message. "interrupt": cancel the target's current turn now and deliver this message immediately instead — only allowed when you are the target task's direct parent; requesting "interrupt" as a non-parent is rejected with an error rather than silently queued.`),
 			),
 			mcp.WithString("reply_to_question_id", mcp.Description("Optional question ID from an autopilot child. When set, the direct parent answer is recorded against that pending question and the delivery is idempotent.")),
+			mcp.WithString("operation_id", mcp.Description("Optional kanban task identity for one send (letters, digits, dot, underscore, colon, hyphen; 1-128 characters). After a timeout, read get_task_message_operation_kandev before deciding to resend. Replaying a retained identity returns its recorded outcome without delivering again; different target, prompt, mode, session, or question fields return operation_id_conflict. Not accepted with delivery_mode=\"report\".")),
 		),
 		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
 	)

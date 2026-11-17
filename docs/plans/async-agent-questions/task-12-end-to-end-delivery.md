@@ -163,3 +163,20 @@ Passed:
 - The combined three-package lint command exceeded its 5-minute context-loading deadline; the printed `0 issues` is not counted as a pass.
 
 PR checks and review status will be refreshed after the merge commit is pushed and the requested 15-minute wait completes.
+
+### Current-base review fixup (2026-11-17)
+
+Merged `origin/main` at `ea6af0d500e92a20420729a505c2b95c65707b36`, resolving the task-chat panel, required-store catalog, and MCP tool-count conflicts while preserving both branches' behavior. The task-transfer Postgres admission-lock fix also addresses the failing CI case `TestPostgresTransferTaskConcurrentCapacityAndChangedKey`.
+
+Passed on the merged tree:
+
+- `(cd apps/backend && go test -trimpath -race ./internal/task/questions -count=1)`.
+- `(cd apps/backend && go test -trimpath ./internal/clarification ./internal/sysprompt ./internal/mcp/server ./internal/backendapp -count=1)`; backendapp completed in 196.025 seconds.
+- `(cd apps/backend && KANDEV_TEST_POSTGRES_DSN='<local PostgreSQL 16 DSN>' go test -trimpath ./internal/task/repository/sqlite -run 'TestAsyncQuestions|PendingAction' -count=1 -v)`; all selected SQLite and PostgreSQL tests passed, including forwarded conversation visibility and the parked pending-action projection.
+- `(cd apps/backend && KANDEV_TEST_POSTGRES_DSN='<local PostgreSQL 16 DSN>' go test -trimpath -race ./internal/task/repository/sqlite -run '^(TestPostgresTransferTaskWaitsForAdmissionLock|TestPostgresTransferTaskConcurrentCapacityAndChangedKey)$' -count=5)`; passed in 52.321 seconds.
+- Focused Inbox Vitest regressions: 2 files, 15 tests passed.
+- `pnpm run typecheck`, `pnpm run lint`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet` passed.
+- Chromium async-question E2E: 8 passed; mobile Chrome async-question E2E: 2 passed.
+- Changed Go lint completed in five sequential package groups, each with `0 issues`.
+
+Refresh the exact pushed PR head, CI state, and review threads after the merge and documentation commits are pushed.

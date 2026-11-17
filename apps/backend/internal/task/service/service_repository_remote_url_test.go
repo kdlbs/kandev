@@ -102,38 +102,6 @@ func TestRepositoryRemoteURLValidation(t *testing.T) {
 	}
 }
 
-func TestRepositoryRemoteURLEncodedAzurePath(t *testing.T) {
-	svc, bus, repo, _ := seedRemoteURLRepository(t)
-	azure := &models.Repository{
-		ID: "azure-encoded", WorkspaceID: "remote-url-ws", Name: "project name/widget", SourceType: "provider",
-		Provider: providerAzureDevOps, ProviderHost: "https://dev.azure.com",
-		ProviderScope: "acme", ProviderRepoID: "1111", ProviderOwner: "project name", ProviderName: "widget",
-		RemoteURL: "https://dev.azure.com/acme/project%20name/_git/widget",
-	}
-	require.NoError(t, repo.CreateRepository(t.Context(), azure))
-
-	preview, err := svc.ValidateRepositoryRemoteURLUpdate(t.Context(), azure.ID,
-		"https://dev.azure.com/acme/project%20name/_git/widget")
-	require.NoError(t, err)
-	require.Equal(t, "https://dev.azure.com/acme/project%20name/_git/widget", preview.EffectiveRemoteURL)
-	require.Equal(t, "locator_identity", preview.ValidationScope)
-
-	updated, err := svc.UpdateRepository(t.Context(), azure.ID, &UpdateRepositoryRequest{
-		RemoteURL: stringPointer("https://dev.azure.com/acme/project%20name/_git/widget"),
-	})
-	require.NoError(t, err)
-	require.Equal(t, "https://dev.azure.com/acme/project%20name/_git/widget", updated.RemoteURL)
-	events := bus.GetPublishedEvents()
-	require.Len(t, events, 1)
-	require.Equal(t, "https://dev.azure.com/acme/project%20name/_git/widget", events[0].Data.(map[string]interface{})["remote_url"])
-
-	preview, err = svc.ValidateRepositoryRemoteURLUpdate(t.Context(), azure.ID,
-		"https://dev.azure.com/acme/project%20name/_git/widget")
-	require.NoError(t, err)
-	require.Equal(t, "https://dev.azure.com/acme/project%20name/_git/widget", preview.CurrentRemoteURL)
-	require.False(t, preview.CurrentRemoteURLRedacted)
-}
-
 func TestRepositoryRemoteURLPluginEncodedAndUnicodePath(t *testing.T) {
 	svc, _, repo, _ := seedRemoteURLRepository(t)
 	plugin := &models.Repository{
@@ -173,20 +141,6 @@ func TestRepositoryRemoteURLRejectsMissingOrConflictingSavedOrigin(t *testing.T)
 		require.Empty(t, bus.GetPublishedEvents())
 	})
 
-	t.Run("azure missing saved host", func(t *testing.T) {
-		svc, _, repo, _ := seedRemoteURLRepository(t)
-		azure := &models.Repository{
-			ID: "azure-missing-host", WorkspaceID: "remote-url-ws", Name: "project/widget", SourceType: "provider",
-			Provider: providerAzureDevOps, ProviderScope: "acme", ProviderRepoID: "1111",
-			ProviderOwner: "project", ProviderName: "widget",
-			RemoteURL: "https://dev.azure.com/acme/project/_git/widget",
-		}
-		require.NoError(t, repo.CreateRepository(t.Context(), azure))
-		_, err := svc.ValidateRepositoryRemoteURLUpdate(t.Context(), azure.ID,
-			"https://dev.azure.com/acme/project/_git/widget")
-		require.ErrorIs(t, err, ErrInvalidRepositorySettings)
-	})
-
 	t.Run("github conflicting legacy origin", func(t *testing.T) {
 		svc, bus, repo, row := seedRemoteURLRepository(t)
 		row.ProviderHost = "https://ghe.example.test"
@@ -200,19 +154,6 @@ func TestRepositoryRemoteURLRejectsMissingOrConflictingSavedOrigin(t *testing.T)
 		require.Empty(t, bus.GetPublishedEvents())
 	})
 
-	t.Run("azure conflicting legacy origin", func(t *testing.T) {
-		svc, _, repo, _ := seedRemoteURLRepository(t)
-		azure := &models.Repository{
-			ID: "azure-conflict", WorkspaceID: "remote-url-ws", Name: "project/widget", SourceType: "provider",
-			Provider: providerAzureDevOps, ProviderHost: "https://dev.azure.com",
-			ProviderOwner: "project", ProviderName: "widget",
-			RemoteURL: "https://other.example.test/acme/project/_git/widget",
-		}
-		require.NoError(t, repo.CreateRepository(t.Context(), azure))
-		_, err := svc.ValidateRepositoryRemoteURLUpdate(t.Context(), azure.ID,
-			"https://dev.azure.com/acme/project/_git/widget")
-		require.ErrorIs(t, err, ErrInvalidRepositorySettings)
-	})
 }
 
 func TestRepositoryRemoteURLUpdatePreservesExactSavedIdentity(t *testing.T) {
@@ -564,31 +505,6 @@ func TestRepositoryRemoteURLGitLabSelfManagedOrigin(t *testing.T) {
 	require.Equal(t, "git@gitlab.internal:group/subgroup/project.git", preview.EffectiveRemoteURL)
 
 	_, err = svc.ValidateRepositoryRemoteURLUpdate(t.Context(), gitlab.ID, "https://gitlab.internal/group/other/project.git")
-	require.ErrorIs(t, err, ErrInvalidRepositorySettings)
-}
-
-func TestRepositoryRemoteURLAzureRequiresOrganizationEvidence(t *testing.T) {
-	svc, _, repo, _ := seedRemoteURLRepository(t)
-	azure := &models.Repository{
-		ID: "azure-repo", WorkspaceID: "remote-url-ws", Name: "project/widget", SourceType: "provider",
-		Provider: providerAzureDevOps, ProviderHost: "https://dev.azure.com",
-		ProviderScope: "acme", ProviderRepoID: "1111",
-		ProviderOwner: "project", ProviderName: "widget",
-		RemoteURL: "https://dev.azure.com/acme/project/_git/widget",
-	}
-	require.NoError(t, repo.CreateRepository(t.Context(), azure))
-
-	preview, err := svc.ValidateRepositoryRemoteURLUpdate(t.Context(), azure.ID, "https://dev.azure.com/acme/project/_git/widget")
-	require.NoError(t, err)
-	require.Equal(t, "https://dev.azure.com/acme/project/_git/widget", preview.EffectiveRemoteURL)
-
-	_, err = svc.ValidateRepositoryRemoteURLUpdate(t.Context(), azure.ID, "https://dev.azure.com/other/project/_git/widget")
-	require.ErrorIs(t, err, ErrInvalidRepositorySettings)
-
-	azure.ProviderScope = ""
-	azure.RemoteURL = ""
-	require.NoError(t, repo.UpdateRepository(t.Context(), azure))
-	_, err = svc.ValidateRepositoryRemoteURLUpdate(t.Context(), azure.ID, "https://dev.azure.com/acme/project/_git/widget")
 	require.ErrorIs(t, err, ErrInvalidRepositorySettings)
 }
 

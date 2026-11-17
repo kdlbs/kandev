@@ -8,7 +8,6 @@ import {
   defaultUIState,
   defaultGitHubState,
   defaultGitLabState,
-  defaultAzureDevOpsState,
   defaultJiraState,
   defaultLinearState,
   defaultOfficeState,
@@ -141,8 +140,6 @@ export const defaultState = {
   prFeedbackCache: defaultGitHubState.prFeedbackCache,
   taskCIAutomation: defaultGitHubState.taskCIAutomation,
   taskMRs: defaultGitLabState.taskMRs,
-  azureDevOpsTaskPullRequests: defaultAzureDevOpsState.azureDevOpsTaskPullRequests,
-  azureDevOpsTaskWorkItems: defaultAzureDevOpsState.azureDevOpsTaskWorkItems,
   gitlabReviewWatches: defaultGitLabState.gitlabReviewWatches,
   gitlabIssueWatches: defaultGitLabState.gitlabIssueWatches,
   gitlabMRWatches: defaultGitLabState.gitlabMRWatches,
@@ -184,7 +181,7 @@ export const defaultState = {
 
 export type DefaultState = typeof defaultState;
 
-/** Merge the code-host slice fields (MRs, watches, presets, stats, status, Azure DevOps PRs/work items) from hydration state over defaults. */
+/** Merge the code-host slice fields (MRs, watches, presets, stats, status) from hydration state over defaults. */
 function mergeCodeHostFields(
   d: DefaultState,
   s: HydrationState,
@@ -196,8 +193,6 @@ function mergeCodeHostFields(
   | "gitlabMRWatches"
   | "gitlabActionPresets"
   | "gitlabStatus"
-  | "azureDevOpsTaskPullRequests"
-  | "azureDevOpsTaskWorkItems"
 > {
   return {
     taskMRs: { ...d.taskMRs, ...s.taskMRs },
@@ -206,14 +201,6 @@ function mergeCodeHostFields(
     gitlabMRWatches: { ...d.gitlabMRWatches, ...s.gitlabMRWatches },
     gitlabActionPresets: { ...d.gitlabActionPresets, ...s.gitlabActionPresets },
     gitlabStatus: { ...d.gitlabStatus, ...s.gitlabStatus },
-    azureDevOpsTaskPullRequests: {
-      ...d.azureDevOpsTaskPullRequests,
-      ...s.azureDevOpsTaskPullRequests,
-    },
-    azureDevOpsTaskWorkItems: {
-      ...d.azureDevOpsTaskWorkItems,
-      ...s.azureDevOpsTaskWorkItems,
-    },
   };
 }
 

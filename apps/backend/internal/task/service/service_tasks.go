@@ -28,8 +28,10 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/steptelemetry"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/completion"
 	"github.com/kandev/kandev/internal/task/repository/hierarchy"
 	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -51,11 +53,10 @@ func ValidateTaskPriority(priority string) error {
 }
 
 const (
-	providerAzureDevOps = "azure_devops"
-	providerGitHub      = "github"
-	providerGitLab      = "gitlab"
-	protocolHTTP        = "http"
-	protocolHTTPS       = "https"
+	providerGitHub = "github"
+	providerGitLab = "gitlab"
+	protocolHTTP   = "http"
+	protocolHTTPS  = "https"
 )
 
 const defaultKandevTaskWorktreePathSegment = "/.kandev/tasks/"
@@ -104,7 +105,7 @@ type pendingTaskTitleSetter interface {
 
 func isPriorityOnlyTaskUpdate(req *UpdateTaskRequest) bool {
 	return req != nil &&
-		req.Priority != nil &&
+		req.Priority != nil && req.ExecutionGrade == nil &&
 		req.Title == nil &&
 		req.Description == nil &&
 		req.State == nil &&
@@ -128,6 +129,7 @@ type taskStopTarget struct {
 
 type taskEnvironmentCleanup struct {
 	deferEnvironment                bool
+	deferInUseWorktrees             bool
 	retentionInventoryCaptured      bool
 	allowUnverifiedWorkspaceChanges bool
 	workspaceCleanup                models.WorkspaceCleanupMode
@@ -920,6 +922,9 @@ func (s *Service) inheritParentProject(ctx context.Context, req *CreateTaskReque
 
 // validateCreateTaskRequest validates constraints for task creation.
 func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
+	if err := sessioncapacity.ValidateGrade(req.ExecutionGrade); err != nil {
+		return err
+	}
 	if err := validateTaskTitle(req.Title); err != nil {
 		return err
 	}
@@ -1125,6 +1130,7 @@ func (s *Service) buildTask(ctx context.Context, req *CreateTaskRequest, workflo
 		Description:            req.Description,
 		State:                  state,
 		Priority:               priority,
+		ExecutionGrade:         req.ExecutionGrade,
 		Position:               req.Position,
 		Metadata:               metadata,
 		IsEphemeral:            req.IsEphemeral,
@@ -1543,6 +1549,7 @@ func (s *Service) safeRepositoryIDForTaskWorktree(ctx context.Context, workspace
 		return "", false, err
 	}
 	if existing != nil {
+		s.backfillReplacementRemoteURL(ctx, existing, repo)
 		return existing.ID, false, nil
 	}
 	created, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
@@ -1555,12 +1562,31 @@ func (s *Service) safeRepositoryIDForTaskWorktree(ctx context.Context, workspace
 		ProviderScope:  repo.ProviderScope,
 		ProviderOwner:  repo.ProviderOwner,
 		ProviderName:   repo.ProviderName,
+		RemoteURL:      repo.RemoteURL,
 		DefaultBranch:  repo.DefaultBranch,
 	})
 	if createErr != nil {
 		return "", false, fmt.Errorf("create provider repository for task worktree %q: %w", repo.ID, createErr)
 	}
 	return created.ID, true, nil
+}
+
+// backfillReplacementRemoteURL records the source's clone URL on a reused
+// provider replacement that has none; a recorded URL is never replaced.
+func (s *Service) backfillReplacementRemoteURL(ctx context.Context, replacement, source *models.Repository) {
+	if replacement.SourceType != sourceTypeProvider || replacement.RemoteURL != "" ||
+		strings.TrimSpace(source.RemoteURL) == "" {
+		return
+	}
+	filled, err := s.repoEntities.FillRepositoryRemoteURL(ctx, replacement.ID, strings.TrimSpace(source.RemoteURL))
+	if err != nil {
+		s.logger.Warn("failed to backfill the replacement repository clone URL",
+			zap.String("repository_id", replacement.ID), zap.Error(err))
+		return
+	}
+	if filled {
+		replacement.RemoteURL = strings.TrimSpace(source.RemoteURL)
+	}
 }
 
 func (s *Service) replaceTaskWorktreeRepositoryMatch(ctx context.Context, workspaceID string, repo *models.Repository) (*models.Repository, bool, error) {
@@ -1860,7 +1886,7 @@ func validateTrustedRemoteRepository(input TaskRepositoryInput) error {
 func validateRemoteRepositoryMetadata(
 	input TaskRepositoryInput, provider, owner, name string,
 ) (string, error) {
-	if input.ProviderOwner != "" && provider != providerAzureDevOps && input.ProviderOwner != owner {
+	if input.ProviderOwner != "" && input.ProviderOwner != owner {
 		return "", fmt.Errorf("remote_url owner %q does not match provider_owner %q", owner, input.ProviderOwner)
 	}
 	if input.ProviderName != "" && input.ProviderName != name {
@@ -1901,10 +1927,6 @@ func parseRemoteRepositoryURL(raw, providerHint string) (provider, owner, name, 
 		return parseGitHubRemote(host, parts, sshStyle)
 	case "gitlab.com", "www.gitlab.com":
 		return parseGitLabRemote(parsed.Scheme, strings.TrimPrefix(originHost, "www."), parts, sshStyle)
-	case "dev.azure.com":
-		return parseAzureHTTPSRemote(parts)
-	case "ssh.dev.azure.com":
-		return parseAzureSSHRemote(parts)
 	default:
 		if strings.EqualFold(providerHint, providerGitHub) {
 			return parseEnterpriseGitHubRemote(parsed, parts, sshStyle)
@@ -1992,24 +2014,6 @@ func remoteProviderHost(provider, remoteURL string) string {
 		return protocolHTTPS + "://" + sshHost
 	}
 	return ""
-}
-
-func parseAzureHTTPSRemote(parts []string) (string, string, string, string, error) {
-	if len(parts) != 4 || parts[2] != "_git" || parts[0] == "" || parts[1] == "" || parts[3] == "" {
-		return "", "", "", "", fmt.Errorf("invalid Azure DevOps repository URL: expected dev.azure.com/org/project/_git/repo")
-	}
-	owner, name := parts[1], parts[3]
-	canonical := fmt.Sprintf("https://dev.azure.com/%s/%s/_git/%s", parts[0], owner, name)
-	return providerAzureDevOps, owner, name, canonical, nil
-}
-
-func parseAzureSSHRemote(parts []string) (string, string, string, string, error) {
-	if len(parts) != 4 || parts[0] != "v3" || parts[1] == "" || parts[2] == "" || parts[3] == "" {
-		return "", "", "", "", fmt.Errorf("invalid Azure DevOps SSH URL: expected git@ssh.dev.azure.com:v3/org/project/repo")
-	}
-	owner, name := parts[2], parts[3]
-	canonical := fmt.Sprintf("git@ssh.dev.azure.com:v3/%s/%s/%s", parts[1], owner, name)
-	return providerAzureDevOps, owner, name, canonical, nil
 }
 
 // probeProviderDefaultBranchIfMissing returns a default_branch resolved via
@@ -2194,42 +2198,16 @@ func (s *Service) ListTaskRepositoryIDsByTaskIDs(ctx context.Context, taskIDs []
 
 // UpdateTask updates an existing task and publishes a task.updated event
 func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequest) (*models.Task, error) {
-	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
+	return s.updateTask(ctx, id, req, nil)
+}
+
+func (s *Service) updateTask(ctx context.Context, id string, req *UpdateTaskRequest, admission *completion.Admission) (*models.Task, error) {
+	if err := s.validateTaskUpdateInput(ctx, id, req); err != nil {
 		return nil, err
 	}
-	if err := refuseReservedMetadata(req.Metadata, req.AllowReservedMetadata); err != nil {
-		return nil, err
-	}
-	if req.Title != nil {
-		if err := validateTaskTitle(*req.Title); err != nil {
-			return nil, err
-		}
-	}
-	if req.Priority != nil {
-		if err := ValidateTaskPriority(*req.Priority); err != nil {
-			return nil, err
-		}
-	}
-	task, err := s.tasks.GetTask(ctx, id)
+	task, assignee, replacement, err := s.prepareTaskUpdate(ctx, id, req)
 	if err != nil {
 		return nil, err
-	}
-	if err := s.authorizeTaskExecutorMutation(ctx, task); err != nil {
-		return nil, executorMutationDenial(err)
-	}
-	if err := s.authorizeTaskExecutorSelection(ctx, task, req.Metadata); err != nil {
-		return nil, executorMutationDenial(err)
-	}
-	assignee, err := s.validateTaskUpdateReferences(ctx, task, req)
-	if err != nil {
-		return nil, err
-	}
-	var replacement *preparedRepositoryReplacement
-	if req.Repositories != nil {
-		replacement, err = s.prepareRepositoryReplacement(ctx, task.WorkspaceID, req.Repositories, task)
-		if err != nil {
-			return nil, err
-		}
 	}
 	if isPriorityOnlyTaskUpdate(req) {
 		updated, handled, err := s.tryUpdateTaskPriorityOnly(ctx, id, task, *req.Priority)
@@ -2237,8 +2215,77 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 			return updated, err
 		}
 	}
+	result, err := s.writeTaskUpdateFields(ctx, id, req, assignee, admission)
+	if err != nil {
+		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(err))
+		return nil, err
+	}
+	return s.finishTaskUpdate(ctx, id, req, replacement, result)
+}
+
+func (s *Service) validateTaskUpdateInput(ctx context.Context, id string, req *UpdateTaskRequest) error {
+	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
+		return err
+	}
+	if req.ExecutionGrade != nil {
+		if err := sessioncapacity.ValidateGrade(*req.ExecutionGrade); err != nil {
+			return err
+		}
+	}
+	if err := refuseReservedMetadata(req.Metadata, req.AllowReservedMetadata); err != nil {
+		return err
+	}
+	if req.Title != nil {
+		if err := validateTaskTitle(*req.Title); err != nil {
+			return err
+		}
+	}
+	if req.Priority != nil {
+		if err := ValidateTaskPriority(*req.Priority); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) prepareTaskUpdate(
+	ctx context.Context,
+	id string,
+	req *UpdateTaskRequest,
+) (*models.Task, string, *preparedRepositoryReplacement, error) {
+	task, err := s.tasks.GetTask(ctx, id)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if err := s.authorizeTaskExecutorMutation(ctx, task); err != nil {
+		return nil, "", nil, executorMutationDenial(err)
+	}
+	if err := s.authorizeTaskExecutorSelection(ctx, task, req.Metadata); err != nil {
+		return nil, "", nil, executorMutationDenial(err)
+	}
+	assignee, err := s.validateTaskUpdateReferences(ctx, task, req)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	var replacement *preparedRepositoryReplacement
+	if req.Repositories != nil {
+		replacement, err = s.prepareRepositoryReplacement(ctx, task.WorkspaceID, req.Repositories, task)
+		if err != nil {
+			return nil, "", nil, err
+		}
+	}
+	return task, assignee, replacement, nil
+}
+
+func (s *Service) writeTaskUpdateFields(
+	ctx context.Context,
+	id string,
+	req *UpdateTaskRequest,
+	assignee string,
+	admission *completion.Admission,
+) (*models.TaskFieldUpdateResult, error) {
 	update := models.TaskFieldUpdate{
-		Title: req.Title, Description: req.Description, Priority: req.Priority,
+		Title: req.Title, Description: req.Description, Priority: req.Priority, ExecutionGrade: req.ExecutionGrade,
 		State: req.State, WorkflowStepID: req.WorkflowStepID, Position: req.Position,
 		ParentID: req.ParentID, Metadata: req.Metadata,
 	}
@@ -2253,13 +2300,26 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 			Trigger: steptelemetry.TriggerTaskUpdate, ActorKind: actorKind, ActorID: actorID,
 		})
 	}
-	result, err := s.tasks.UpdateTaskFieldsWithParentAdmission(updateCtx, id, update, s.resolveParentWithReader)
-	if err != nil {
-		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(err))
-		return nil, err
+	if admission == nil {
+		return s.tasks.UpdateTaskFieldsWithParentAdmission(updateCtx, id, update, s.resolveParentWithReader)
 	}
-	ctx = models.WithOfficeHumanCompletionIntent(ctx, models.OfficeHumanCompletionIntent{})
-	task = result.Task
+	writer, ok := s.tasks.(interface {
+		UpdateTaskFieldsWithParentAdmissionAndCompletionAdmission(context.Context, string, models.TaskFieldUpdate, hierarchy.TaskParentValidator, *completion.Admission) (*models.TaskFieldUpdateResult, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("human task completion admission repository unavailable")
+	}
+	return writer.UpdateTaskFieldsWithParentAdmissionAndCompletionAdmission(updateCtx, id, update, s.resolveParentWithReader, admission)
+}
+
+func (s *Service) finishTaskUpdate(
+	ctx context.Context,
+	id string,
+	req *UpdateTaskRequest,
+	replacement *preparedRepositoryReplacement,
+	result *models.TaskFieldUpdateResult,
+) (*models.Task, error) {
+	task := result.Task
 	oldWorkflowStepID := result.PriorWorkflowStepID
 	oldState := result.PriorState
 	stateChanged := req.State != nil && oldState != task.State
@@ -3180,16 +3240,6 @@ func (s *Service) validateTaskDeleteWorktreeInventoryWithOptions(ctx context.Con
 	return newTaskDeleteDirtyWorktreeError(dirty)
 }
 
-func (s *Service) deleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
-	deleted, err := s.deleteTaskWithReasonAndDBDelete(ctx, id, "", models.TaskResourceCleanupTriggerQuickChatExpire, DeleteTaskOptions{}, func(ctx context.Context, id string) (bool, error) {
-		return s.tasks.DeleteExpiredQuickChatTask(ctx, id, cutoff)
-	})
-	if errors.Is(err, taskrepo.ErrTaskNotFound) {
-		return false, nil
-	}
-	return deleted, err
-}
-
 func (s *Service) deleteTaskWithReasonAndDBDelete(
 	ctx context.Context,
 	id string,
@@ -4069,6 +4119,21 @@ func (s *Service) performTaskCleanup(
 	}
 
 	sessionIDs := cleanupSessionIDs(sessions, stopTargets)
+	errs = append(errs, s.cleanupExecutorRuntimeRows(ctx, taskID, sessionIDs, preserveExecutorRows)...)
+
+	// Cleanup quick-chat workspace directories for all tasks (not just ephemeral).
+	// Non-ephemeral office tasks also get quick-chat dirs allocated by manager_launch.go;
+	// both cases must be cleaned up to avoid a disk leak.
+	if cause := context.Cause(ctx); cause != nil {
+		return append(errs, cause)
+	}
+	errs = append(errs, s.cleanupQuickChatDirs(ctx, taskID, sessionIDs, preserveExecutorRows)...)
+
+	return errs
+}
+
+func (s *Service) cleanupExecutorRuntimeRows(ctx context.Context, taskID string, sessionIDs []string, preserveExecutorRows map[string]struct{}) []error {
+	var errs []error
 	for _, sessionID := range sessionIDs {
 		if _, preserve := preserveExecutorRows[sessionID]; preserve {
 			s.logger.Warn("preserving executor runtime row after failed stop",
@@ -4090,14 +4155,6 @@ func (s *Service) performTaskCleanup(
 			errs = append(errs, fmt.Errorf("delete executor runtime for session %s: %w", sessionID, err))
 		}
 	}
-
-	// Cleanup quick-chat workspace directories for all tasks (not just ephemeral).
-	// Non-ephemeral office tasks also get quick-chat dirs allocated by manager_launch.go;
-	// both cases must be cleaned up to avoid a disk leak.
-	if cause := context.Cause(ctx); cause != nil {
-		return append(errs, cause)
-	}
-	errs = append(errs, s.cleanupQuickChatDirs(ctx, taskID, sessionIDs, preserveExecutorRows)...)
 
 	return errs
 }
@@ -4217,7 +4274,7 @@ func (s *Service) cleanupDestructiveTaskResources(
 			zap.String("env_id", taskEnvironmentID(envCleanup.env)))
 	}
 	if !currentOwnership {
-		if envCleanup.allowUnverifiedWorkspaceChanges {
+		if envCleanup.allowUnverifiedWorkspaceChanges || envCleanup.deferInUseWorktrees {
 			errs = append(errs, errors.New("workspace ownership changed; cleanup deferred"))
 		}
 		return errs
@@ -4241,7 +4298,7 @@ func (s *Service) cleanupDestructiveTaskResources(
 	var referenceErrs []error
 	worktrees, referenceErrs = s.filterSharedWorktreesForTaskCleanup(ctx, taskID, sessions, worktrees)
 	errs = append(errs, referenceErrs...)
-	if envCleanup.allowUnverifiedWorkspaceChanges && len(worktrees) != originalWorktreeCount {
+	if (envCleanup.allowUnverifiedWorkspaceChanges || envCleanup.deferInUseWorktrees) && len(worktrees) != originalWorktreeCount {
 		errs = append(errs, errors.New("workspace remains in use; cleanup deferred"))
 	}
 	if len(worktrees) == 0 {
@@ -4449,11 +4506,29 @@ func (s *Service) filterOwnedWorktreesForTaskCleanup(
 			continue
 		}
 		sess, sessionLoaded := bySession[wt.SessionID]
-		if s.taskOwnsSessionWorktree(ctx, taskID, wt.SessionID, sess, sessionLoaded, ownedEnv, skipOwnedEnvironment, envCache) {
+		if retainedEnvironmentWorktreeOwnedByTask(taskID, wt, sess, ownedEnv) ||
+			s.taskOwnsSessionWorktree(ctx, taskID, wt.SessionID, sess, sessionLoaded, ownedEnv, skipOwnedEnvironment, envCache) {
 			filtered = append(filtered, wt)
 		}
 	}
 	return filtered
+}
+
+// retainedEnvironmentWorktreeOwnedByTask uses the ownership captured with the
+// cleanup inventory. That inventory lists only checkouts whose environment
+// belonged to taskID, and the active owner is captured separately as
+// ownedEnv, so any other captured environment is one of the task's retired
+// environments. Retired environments are never transferred or inherited, and
+// their rows cascade with the task, so a post-delete lookup cannot prove what
+// the capture already did.
+func retainedEnvironmentWorktreeOwnedByTask(
+	taskID string, wt *worktree.Worktree, session *models.TaskSession, ownedEnv *models.TaskEnvironment,
+) bool {
+	if session == nil || wt.TaskID != taskID || wt.TaskEnvironmentID == "" ||
+		session.TaskEnvironmentID != wt.TaskEnvironmentID {
+		return false
+	}
+	return ownedEnv == nil || wt.TaskEnvironmentID != ownedEnv.ID
 }
 
 func (s *Service) taskOwnsSessionWorktree(

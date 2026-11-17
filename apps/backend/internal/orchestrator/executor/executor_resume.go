@@ -15,7 +15,6 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/common/gitref"
-	"github.com/kandev/kandev/internal/integrations/cloneauth"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
@@ -583,9 +582,6 @@ func (e *Executor) shouldRefreshRepositoryForSession(
 	if provider == gitLabProviderID {
 		return hasProviderRepositoryIdentity(repo), nil
 	}
-	if provider == providerAzureDevOps {
-		return strings.TrimSpace(repo.ProviderOwner) != "" && strings.TrimSpace(repo.ProviderName) != "", nil
-	}
 	if !isGitHubRepository(repo) {
 		return isPluginManagedRepository(repo), nil
 	}
@@ -605,7 +601,7 @@ func isPluginManagedRepository(repo *models.Repository) bool {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(repo.Provider)) {
-	case "", gitHubProviderID, gitLabProviderID, providerAzureDevOps:
+	case "", gitHubProviderID, gitLabProviderID:
 		return false
 	default:
 		return true
@@ -646,11 +642,6 @@ func (e *Executor) refreshManagedRepositoryForSessionWithState(
 			return repoclone.RemoteRefStateUnknown, fmt.Errorf("resolve GitLab refresh credentials: %w", err)
 		}
 	}
-	if provider == providerAzureDevOps && strings.HasPrefix(strings.ToLower(cloneURL), "https://") {
-		return e.refreshAzureDevOpsRepositoryForSessionWithState(
-			ctx, repo, cloneURL,
-		)
-	}
 	request := repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL)
 	if len(options) > 0 {
 		request.CheckoutOptions = options[0]
@@ -672,36 +663,6 @@ func (e *Executor) refreshManagedRepositoryForSessionWithState(
 		ctx, request, repo.LocalPath, credentialOrigin, token,
 	); err != nil {
 		return repoclone.RemoteRefStateUnknown, fmt.Errorf("refresh repository before worktree: %w", err)
-	}
-	return repoclone.RemoteRefStateHasRefs, nil
-}
-
-func (e *Executor) refreshAzureDevOpsRepositoryForSessionWithState(
-	ctx context.Context, repo *models.Repository, cloneURL string,
-) (repoclone.RemoteRefState, error) {
-	authCloner, ok := e.repoCloner.(strictAuthenticatedRepoCloner)
-	if !ok || e.secretStore == nil {
-		return repoclone.RemoteRefStateUnknown, errors.New("azure DevOps repository refresh authentication is unavailable")
-	}
-	pat, err := e.secretStore.Reveal(ctx, cloneauth.AzureDevOpsPATKey(repo.WorkspaceID))
-	if err != nil {
-		return repoclone.RemoteRefStateUnknown, fmt.Errorf("read Azure DevOps refresh credential: %w", err)
-	}
-	if stateCloner, ok := e.repoCloner.(remoteStateAuthenticatedRepoCloner); ok {
-		state, err := stateCloner.RefreshWorkspaceRepositoryWithBasicAuthAndState(
-			ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost, cloneURL,
-			repo.ProviderOwner, repo.ProviderName, repo.LocalPath, "kandev", pat,
-		)
-		if err != nil {
-			return repoclone.RemoteRefStateUnknown, fmt.Errorf("refresh Azure DevOps repository before worktree: %w", err)
-		}
-		return state, nil
-	}
-	if err := authCloner.RefreshWorkspaceRepositoryWithBasicAuth(
-		ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost, cloneURL,
-		repo.ProviderOwner, repo.ProviderName, repo.LocalPath, "kandev", pat,
-	); err != nil {
-		return repoclone.RemoteRefStateUnknown, fmt.Errorf("refresh Azure DevOps repository before worktree: %w", err)
 	}
 	return repoclone.RemoteRefStateHasRefs, nil
 }
@@ -1360,6 +1321,16 @@ func (e *Executor) resumeSession(
 	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
 		return nil, err
 	}
+	replacement, err := e.replaceFailedEnvironmentForResume(ctx, task, session, requestedExecutorType)
+	if err != nil {
+		return nil, err
+	}
+	replacementPublished := false
+	defer func() {
+		if !replacementPublished {
+			e.markTaskEnvironmentMaterializationFailed(context.WithoutCancel(ctx), replacement, session.ID)
+		}
+	}()
 	preflight := &resumePreflight{ctx: ctx, persistedEnvironmentID: session.TaskEnvironmentID}
 	defer func() {
 		_ = releaseSelectedWorktreeRecovery(resumeOwnedCleanupContext(ctx), &preflight.admission)
@@ -1495,6 +1466,7 @@ func (e *Executor) resumeSession(
 					resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
 				)
 			}
+			replacementPublished = true
 			return nil, ErrExecutionAlreadyRunning
 		}
 		e.logger.Info("cleaning up stale execution and retrying launch",
@@ -1566,6 +1538,7 @@ func (e *Executor) resumeSession(
 		}
 		return nil, err
 	}
+	replacementPublished = true
 	if err := e.persistResumeWorkspaceBinding(launchCtx, session, startAgent); err != nil {
 		e.cleanupUnstartedExecutionAfterPersistError(cleanupCtx, session.ID, resp.AgentExecutionID, err)
 		var superseded *SessionStateSupersededError
@@ -2563,6 +2536,9 @@ func (e *Executor) resolveResumeTaskEnvironmentForTask(ctx context.Context, task
 			inherited, inhErr := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
 			if inhErr != nil && !errors.Is(inhErr, repoerrors.ErrTaskEnvironmentNotFound) {
 				return nil, fmt.Errorf("lookup inherited task environment: %w", inhErr)
+			}
+			if inherited != nil && inherited.IsRetired() {
+				return nil, fmt.Errorf("%w: inherited task environment is retired", models.ErrWorkspaceReuseUnsafe)
 			}
 			if inherited != nil {
 				if err := e.validateInheritedEnvironmentOwner(ctx, task, inherited); err != nil {

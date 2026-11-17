@@ -260,7 +260,7 @@ func TestRetryCursorMCPConnectionLoadsSameACPSessionWithoutPromptReplay(t *testi
 	case <-time.After(time.Second):
 		t.Fatal("agent stream did not connect")
 	}
-	execution.agentctl = client
+	execution.replaceAgentctlClient(client)
 
 	result, err := manager.RetryCursorMCPConnection(context.Background(), execution.SessionID, "plugin-harness-figma")
 
@@ -303,7 +303,7 @@ func TestRetryCursorMCPConnectionDoesNotReportReadyWhenSameSessionLoadFails(t *t
 	case <-time.After(time.Second):
 		t.Fatal("agent stream did not connect")
 	}
-	execution.agentctl = client
+	execution.replaceAgentctlClient(client)
 
 	result, err := manager.RetryCursorMCPConnection(context.Background(), execution.SessionID, "plugin-harness-figma")
 
@@ -379,7 +379,7 @@ func TestRetryCursorMCPConnectionPreservesDiagnosticsWhenPromptStartsBeforeReloa
 	case <-time.After(time.Second):
 		t.Fatal("agent stream did not connect")
 	}
-	execution.agentctl = client
+	execution.replaceAgentctlClient(client)
 
 	_, err := manager.RetryCursorMCPConnection(context.Background(), execution.SessionID, "plugin-harness-figma")
 
@@ -708,8 +708,18 @@ func newCursorMCPRecoveryFixture(t *testing.T) (*Manager, *AgentExecution, *Agen
 	}
 	execution.setRuntimeEnvironment(map[string]string{"HOME": home})
 	execution.setMetadataValue("executor_mcp_policy", mcpconfig.Policy{AllowHTTP: true})
+	attachLegacyMCPRouteClient(execution)
 	require.NoError(t, manager.executionStore.Add(execution))
 	return manager, execution, profile
+}
+
+func attachLegacyMCPRouteClient(execution *AgentExecution) {
+	instanceID := execution.ID
+	if instanceID == "" {
+		instanceID = "cursor-test-instance"
+	}
+	execution.agentctl = agentctl.NewClient("127.0.0.1", 1, newTestLogger(),
+		agentctl.WithExecutionID(instanceID), agentctl.WithBuiltinMCPScopedRoutes(false))
 }
 
 func writeCursorMCPRecoveryPlugin(t *testing.T, cursorHome string) {
