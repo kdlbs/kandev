@@ -373,6 +373,12 @@ continues while the warning is shown. Open **Details** for measurements, or
 **Storage** for a local session. A remote warning names the executor and does
 not link to local cleanup.
 
+Select **Dismiss** (the × button) to hide the Storage row for this task until
+the browser tab session ends. The dismissal survives reloads and task switching.
+Later storage observations do not show the row again in that tab session.
+Dismissal does not stop monitoring, clear a storage problem, or remove session
+recovery controls.
+
 Capacity and delivery pressure keep separate observation times. A fresh disk
 measurement does not make an old delivery failure current. If no delivery
 status arrives for 90 seconds, the headline changes to **Last reported** and
