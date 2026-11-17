@@ -48,7 +48,11 @@ func newEscalationFixture(t *testing.T) *escalationFixture {
 	blockerMust(t, f.scheduler.RegisterBlockerFailureSubscriber(f.eb))
 	f.task(t, "dependent", "assignment-work", v1.TaskStateTODO, "assignment-worker")
 	f.blockers(t, "dependent", v1.TaskStateInProgress)
-	return &escalationFixture{assignmentBlockerFixture: f, ts: f.completionService(t), wakeupDispatcher: wakeupDispatcher}
+	ts := f.completionService(t)
+	f.svc.SetTaskStateWriter(f.tasks)
+	f.svc.SetTaskStateBatchWriter(f.tasks)
+	f.svc.SetTaskStateChangePublisher(ts)
+	return &escalationFixture{assignmentBlockerFixture: f, ts: ts, wakeupDispatcher: wakeupDispatcher}
 }
 
 func (f *escalationFixture) withParentRunner(t *testing.T) {
@@ -452,6 +456,7 @@ func (f *escalationFixture) officeStatus(t *testing.T, id, status, actorAgentID 
 	log := logger.Default()
 	dash := dashboard.NewDashboardService(f.repo, log, shared.NewActivityLogger(f.repo, log), f.svc, nil)
 	dash.SetTaskStateWriter(f.tasks)
+	dash.SetTaskStateChangePublisher(f.ts)
 	dash.SetReactivityApplier(scheduler.NewDashboardReactivityAdapter(f.scheduler))
 	blockerMust(t, dash.UpdateTaskStatusAsAgent(context.Background(), officeruntime.TaskStatusUpdate{
 		TaskID: id, NewStatus: status, ActorAgentID: actorAgentID,
