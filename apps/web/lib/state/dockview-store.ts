@@ -1901,8 +1901,12 @@ function resolveActiveFile(api: DockviewApi, panelId: string | undefined): Activ
   return activeFileState(null, null, activePanelComponent);
 }
 
-function buildSetApiAction(set: StoreSet): DockviewStore["setApi"] {
+function buildSetApiAction(set: StoreSet, get: StoreGet): DockviewStore["setApi"] {
   return (api) => {
+    // Reusable geometry belongs to the Dockview instance that claimed it.
+    // A later mount must restore from its saved layout instead of inheriting
+    // the previous instance's transient source.
+    if (api === null || get().api !== api) clearReusableRightTarget();
     set({
       api,
       activeFilePath: null,
@@ -1959,7 +1963,7 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
   activeFilePath: null,
   activeFileRepo: null,
   activePanelComponent: null,
-  setApi: buildSetApiAction(set),
+  setApi: buildSetApiAction(set, get),
   activeGroupId: null,
   selectedDiff: null,
   setSelectedDiff: (diff) => set({ selectedDiff: diff }),

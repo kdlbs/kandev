@@ -802,7 +802,7 @@ test.describe("Plugin task panels in reusable layout profiles", () => {
     });
     await filesGroup.locator(".dv-tab").first().click();
     await expect(layouts.actions).toBeVisible();
-    await layouts.actions.getByRole("button").nth(1).click();
+    await layouts.moveSelectedTabRight();
     await layouts.saveLocalized();
 
     const saved = await savedLayout(apiClient, "layout-override-default");
@@ -819,7 +819,7 @@ test.describe("Plugin task panels in reusable layout profiles", () => {
       has: testPage.locator(".dv-tab", { hasText: PROMPT_TITLE }),
     });
     await unavailableGroup.locator(".dv-tab").first().click();
-    await layouts.actions.getByRole("button").nth(1).click();
+    await layouts.moveSelectedTabRight();
     await layouts.saveLocalized();
     expect(savedPanel(await savedLayout(apiClient, "layout-override-default"), PROMPT_ID)).toEqual(
       pluginPanel(PROMPT_ID, PROMPT_TITLE),
@@ -904,8 +904,7 @@ test.describe("Plugin panel geometry in applied profiles", () => {
     const layouts = new LayoutSettingsPage(testPage);
     await layouts.open();
     await layouts.selectPanel(PROMPT_TITLE);
-    await layouts.actions.getByRole("button", { name: "Split tab", exact: true }).click();
-    await testPage.getByRole("menuitem", { name: "Below", exact: true }).click();
+    await layouts.splitSelectedTab("Below");
     await layouts.save();
     await testPage.reload();
     const saved = await savedLayout(apiClient, "generated-plugin");
@@ -967,8 +966,7 @@ test.describe("Plugin panel geometry in applied profiles", () => {
     const layouts = new LayoutSettingsPage(testPage);
     await layouts.open();
     await layouts.selectPanel(PROMPT_TITLE);
-    await layouts.actions.getByRole("button", { name: "Split tab", exact: true }).click();
-    await testPage.getByRole("menuitem", { name: "Right", exact: true }).click();
+    await layouts.splitSelectedTab("Right");
     await layouts.save();
     await testPage.reload();
     const saved = await savedLayout(apiClient, "three-root-plugin");
@@ -1071,8 +1069,7 @@ test.describe("Plugin panel geometry in applied profiles", () => {
     const layouts = new LayoutSettingsPage(testPage);
     await layouts.open();
     await layouts.selectPanel(PROMPT_TITLE);
-    await layouts.actions.getByRole("button", { name: "Split tab", exact: true }).click();
-    await testPage.getByRole("menuitem", { name: "Right", exact: true }).click();
+    await layouts.splitSelectedTab("Right");
     await layouts.save();
     const captured = await savedLayout(apiClient, "root-cap-release");
     expect(captured.columns.map((column) => column.id)).toEqual(["center", "right", PROMPT_ID]);
@@ -1137,8 +1134,7 @@ test.describe("Plugin panel geometry in applied profiles", () => {
     const layouts = new LayoutSettingsPage(testPage);
     await layouts.open();
     await layouts.selectPanel("Changes");
-    await layouts.actions.getByRole("button", { name: "Split tab", exact: true }).click();
-    await testPage.getByRole("menuitem", { name: "Right", exact: true }).click();
+    await layouts.splitSelectedTab("Right");
     await layouts.save();
     const source = await savedLayout(apiClient, "tool-roots");
     source.columns.forEach((column, index) => {
@@ -1205,8 +1201,7 @@ test.describe("Plugin panel geometry in applied profiles", () => {
       const layouts = new LayoutSettingsPage(testPage);
       await layouts.open();
       await layouts.selectPanel("Changes");
-      await layouts.actions.getByRole("button", { name: "Split tab", exact: true }).click();
-      await testPage.getByRole("menuitem", { name: "Right", exact: true }).click();
+      await layouts.splitSelectedTab("Right");
       await layouts.save();
       const source = await savedLayout(apiClient, "raw-builder");
       source.columns.forEach((column, index) => {
@@ -1275,8 +1270,7 @@ test.describe("Plugin panel geometry in applied profiles", () => {
       const layouts = new LayoutSettingsPage(testPage);
       await layouts.open();
       await layouts.selectPanel(PROMPT_TITLE);
-      await layouts.actions.getByRole("button", { name: "Split tab", exact: true }).click();
-      await testPage.getByRole("menuitem", { name: "Right", exact: true }).click();
+      await layouts.splitSelectedTab("Right");
       await layouts.save();
       const source = await savedLayout(apiClient, "ordinary-no-right");
       source.columns.forEach((column, index) => {
@@ -1358,8 +1352,7 @@ test.describe("Plugin panel geometry in applied profiles", () => {
     const layouts = new LayoutSettingsPage(testPage);
     await layouts.open();
     await layouts.selectPanel(PROMPT_TITLE);
-    await layouts.actions.getByRole("button", { name: "Split tab", exact: true }).click();
-    await testPage.getByRole("menuitem", { name: "Left", exact: true }).click();
+    await layouts.splitSelectedTab("Left");
     await layouts.save();
     const source = await savedLayout(apiClient, "hidden-pinned-last");
     source.columns.forEach((column, index) => {
@@ -1444,8 +1437,7 @@ test.describe("Plugin panel geometry in applied profiles", () => {
     const layouts = new LayoutSettingsPage(testPage);
     await layouts.open();
     await layouts.selectPanel(PROMPT_TITLE);
-    await layouts.actions.getByRole("button", { name: "Split tab", exact: true }).click();
-    await testPage.getByRole("menuitem", { name: "Right", exact: true }).click();
+    await layouts.splitSelectedTab("Right");
     await layouts.save();
     const source = await savedLayout(apiClient, "root-lifecycle");
     source.columns.forEach((column, index) => {

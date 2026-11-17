@@ -371,7 +371,10 @@ function canonicalLastSource(rightWidth = 400): LayoutState {
 
 const OTHER_ENV = "env-other-three-root";
 
-async function restoreSaved(api: DockviewApi, mode: "spa" | "cold"): Promise<DockviewApi> {
+async function restoreSaved(
+  api: DockviewApi,
+  mode: "spa" | "cold" | "same-env-teardown",
+): Promise<DockviewApi> {
   // A saved environment must not acquire a newly selected portable default's ratio.
   useDockviewStore.setState({ userDefaultLayout: canonicalLastSource(320) });
   setManualRightWidth(OTHER_ENV, 650);
@@ -385,14 +388,16 @@ async function restoreSaved(api: DockviewApi, mode: "spa" | "cold"): Promise<Doc
   }
   persistEnvLayoutNow(api, ENV, null);
   stops.splice(0).forEach((stop) => stop());
-  clearAllPinnedTargets();
+  if (mode === "cold") clearAllPinnedTargets();
+  else useDockviewStore.getState().setApi(null);
   const incoming = mount(1600);
   useDockviewStore.setState({
-    api: incoming,
     currentLayoutEnvId: ENV,
     pinnedWidths: new Map(),
     isRestoringLayout: false,
   });
+  if (mode === "cold") useDockviewStore.setState({ api: incoming });
+  else useDockviewStore.getState().setApi(incoming);
   expect(
     restoreEnvLayout(
       incoming,
@@ -405,6 +410,21 @@ async function restoreSaved(api: DockviewApi, mode: "spa" | "cold"): Promise<Doc
   await settle();
   return incoming;
 }
+
+it("releases reusable source geometry when Dockview leaves and restores the same environment", async () => {
+  let api = await build(splitRightSource(true), 1600);
+  stops.push(setupSashDragCapToggle(api));
+  expect(getReusableRightWidth(ENV, 1600)).not.toBeNull();
+
+  api = await restoreSaved(api, "same-env-teardown");
+
+  expect(getReusableRightWidth(ENV, 1600)).toBeNull();
+  expect(getManualRightWidth(ENV)).toBeNull();
+  expect(api.getPanel("files")!.group.width).toBe(450);
+  sync(api, 1200, "mounted");
+  await settle();
+  expect(api.getPanel("files")!.group.width).toBe(450);
+});
 
 /** @covers AC-UI-TASK-LAYOUT-PROFILES-002.6, AC-UI-TASK-LAYOUT-PROFILES-001.10 */
 describe.each(["spa", "cold"] as const)("saved right structure through %s restoration", (mode) => {

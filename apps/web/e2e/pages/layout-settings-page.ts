@@ -76,6 +76,13 @@ export class LayoutSettingsPage {
     await button.click();
   }
 
+  async splitSelectedTab(direction: "Above" | "Below" | "Left" | "Right"): Promise<void> {
+    const button = this.actions.getByRole("button", { name: "Split tab", exact: true });
+    await expect(button).toBeEnabled();
+    await button.click();
+    await this.page.getByRole("menuitem", { name: direction, exact: true }).click();
+  }
+
   /** Save through the floating bar's primary button, independent of the active locale. */
   async saveLocalized(): Promise<void> {
     const response = this.page.waitForResponse(
