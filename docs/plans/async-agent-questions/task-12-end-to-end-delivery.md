@@ -162,7 +162,7 @@ Passed:
 - Changed-file Go lint passed in separate `mcp/server`, `orchestrator`, and `task/handlers` runs, with 0 issues each.
 - The combined three-package lint command exceeded its 5-minute context-loading deadline; the printed `0 issues` is not counted as a pass.
 
-PR checks and review status will be refreshed after the merge commit is pushed and the requested 15-minute wait completes.
+The later 2026-11-17 current-head review-fixup results are recorded below.
 
 ### Current-base review fixup (2026-11-17)
 
@@ -179,15 +179,14 @@ Passed on the merged tree:
 - Chromium async-question E2E: 8 passed; mobile Chrome async-question E2E: 2 passed.
 - Changed Go lint completed in five sequential package groups, each with `0 issues`.
 
-### Review fixup on the next commit (2026-11-17)
+### Current-head review fixup (2026-11-17)
 
-The exact pushed head `d9d114d1398bd571bfe3a3bc1b6a7e2daaf11388` settled with 87 checks passed, 16 skipped, and 5 failed. The failing leaf checks were Backend Tests shard 3/4 and the two UI Screenshots runs; the Go aggregate also failed because of the shard failure. The screenshot check requires an image in the live PR description. The backend shard exposed a missing workflow-step getter in `TestImproveBootstrapUsesUpgradedInstructions`; a separate queued-admission worktree test also failed under CI load.
+On exact PR head `e183efc8b5f23d9b94823b77e58c9fcd31467ec3`, CI run `44078107332` attempt 1 reported 90 passed, 16 skipped, and 2 failed. `Run golangci-lint` in `Backend Static Checks` reached its 15-minute internal timeout after printing `0 issues`; the dependent `Run Backend Tests` aggregate failed because of that result. All other checks passed. Rerunning the failed jobs once (attempt 2) passed both checks. `scripts/pr-await 4980` then reported 92 passed, 16 skipped, 0 neutral, 0 failed, and 0 pending. `scripts/pr-state --compact 4980` confirmed the exact head, `MERGEABLE` / `CLEAN`, and 0 unresolved review threads.
 
-- Fixed the Improve test fixture by wiring the workflow-step getter. The focused `TestImproveBootstrapUsesUpgradedInstructions` first reproduced the CI error, then passed after the fixture fix; the full `internal/improvekandev` package passed.
-- Repeated `TestRefreshLockRetryBudget/queued_admission_does_not_consume_the_execution_budget` five times locally; all passed. This does not establish a CI pass, so the next PR run must confirm it.
+- Fixed the Improve test fixture by wiring the workflow-step getter. `TestImproveBootstrapUsesUpgradedInstructions` first reproduced the CI error, then passed after the fixture fix; the full `internal/improvekandev` package passed.
+- Repeated `TestRefreshLockRetryBudget/queued_admission_does_not_consume_the_execution_budget` five times locally; all passed. The earlier CI failure did not recur in the current-head backend test shards.
 - Added an image-bearing Inbox E2E assertion that the first child of the question fieldset is its `legend`, and moved the legend before the image section. Chromium async-question E2E passed 8 tests (2.2 minutes); mobile Chrome passed 2 tests (11 seconds).
-- Captured fresh desktop and mobile screenshots. They still need publication in the PR description before the screenshot check can pass.
-- Web typecheck, lint, i18n check, and i18n ratchet passed. Changed-file Go lint for `cmd/mock-agent` and `internal/improvekandev` passed with 0 issues. The question race suite, clarification/sysprompt/MCP/backendapp suites, and named SQLite/PostgreSQL async and pending-action cases passed.
+- Published fresh desktop and mobile screenshots under `## Screenshots`. Anonymous GET requests returned `200 image/png` for both embedded assets after temporary upload comments were deleted. The UI screenshot check passed.
+- Web typecheck, lint, i18n check, and i18n ratchet passed. Changed-file Go lint over all 111 PR Go files passed with 0 issues. The question race suite, clarification/sysprompt/MCP/backendapp suites, and named SQLite/PostgreSQL async and pending-action cases passed.
 - `python3 scripts/list-docs.py validate` validated 456 decisions and 2032 specifications; `python3 scripts/lint-spec-files.py --all` passed.
-
-The next pushed head, PR description, CI run, and review threads remain to be refreshed after this local fixup is committed.
+- Replied to and resolved all 11 review threads on the pushed head.
