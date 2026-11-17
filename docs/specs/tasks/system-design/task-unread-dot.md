@@ -181,6 +181,38 @@ passed through unchanged, which `findUnreadDividerItemId` already treats as
 "the whole loaded window is unread". A cursor outside the loaded window keeps
 that existing behavior.
 
+### Inactive-session acknowledgement
+
+Read acknowledgement is independent of agent execution. A stored session in
+`FAILED`, `COMPLETED`, `CANCELLED`, `IDLE`, or `WAITING_FOR_INPUT` follows the
+same loaded-transcript acknowledgement path as a running session (AC .6).
+Neither starting an agent nor receiving another live message is a prerequisite
+for reading its stored output. Session lifecycle state is not an unread filter.
+
+Desktop selects or reopens the session through `SessionReopenMenuItems` in
+`components/task/session-reopen-menu.tsx`; the phone uses
+`MobileSessionsPicker` in `components/task/mobile/mobile-sessions-section.tsx`.
+Both feed the existing `TaskChatPanel` and `useSessionReadTracking` path.
+Acknowledgement requires the session record, route hydration, its own task's
+visible panel, a visible browser page, and the initial message window to be
+ready. These guards prevent acknowledging another task or a partial transcript;
+they must not wait for executor or agent readiness.
+
+The acknowledgement target remains `newestAcknowledgeableMessageId(messages)`,
+including loaded rows omitted by render-time filtering. Successful
+`markSessionRead` persistence and `TaskSessionReadCursorChanged` remove only
+that session from `unread_session_ids`. The current summary and subsequent
+list-load reconciliation must agree. Verify the persisted cursor and the row
+after leaving and returning: hiding the displayed session's dot alone does not
+prove that acknowledgement succeeded.
+
+An unread failed sibling that was never displayed is not evidence of a failed
+cursor write. It remains unread under AC .2, .9, .12, and .17. Preserve this
+distinction when diagnosing a task with no running sessions: opening its
+primary session does not acknowledge other sessions. There is no task-wide
+mark-read operation, lifecycle-based suppression, or cursor backfill in this
+path.
+
 ## Restore and repair
 
 One repository read, `ListSessionUnreadState(ctx, sessionIDs)`, returns for each

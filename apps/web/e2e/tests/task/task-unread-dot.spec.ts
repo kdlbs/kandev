@@ -1,11 +1,18 @@
 import { expect, type Locator } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
-import { watchWs } from "../../helpers/causal-waits";
+import { dwell, watchWs } from "../../helpers/causal-waits";
 import {
+  FAILED_SESSION_ERROR,
   TASK_UNREAD_DOT_LABEL,
+  type UnreadSettings,
+  captureUnreadSettings,
+  observeReadTraffic,
   rowHeight,
+  seedFailedSiblingTask,
   seedUnreadDotTasks,
+  sessionReadState,
+  taskUnreadSessionIds,
   waitForTaskUnreadSummary,
 } from "../../helpers/unread-divider";
 
@@ -14,12 +21,19 @@ function unreadDot(row: Locator): Locator {
 }
 
 test.describe("Task unread dot", () => {
+  let baselineSettings: UnreadSettings = {};
+
   test.beforeEach(async ({ apiClient }) => {
+    baselineSettings = await captureUnreadSettings(apiClient);
     await apiClient.saveUserSettings({
       unread_divider: false,
       unread_task_dot: true,
       unread_task_dot_hide_delay_seconds: 3,
     });
+  });
+
+  test.afterEach(async ({ apiClient }) => {
+    await apiClient.saveUserSettings(baselineSettings);
   });
 
   // @covers AC-TASKS-TASK-UNREAD-DOT-001.1
@@ -110,5 +124,90 @@ test.describe("Task unread dot", () => {
     await expect(testPage).toHaveURL(new RegExp(`/t/${seeded.navTaskId}`));
     await expect(targetRow).toBeVisible();
     await expect(unreadDot(targetRow)).toHaveCount(0);
+  });
+
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.6
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.9
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.12
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.17
+  test("clears a cursorless failed sibling only after its transcript is read", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(150_000);
+    await apiClient.saveUserSettings({ unread_task_dot_hide_delay_seconds: 0 });
+    const seeded = await seedFailedSiblingTask(apiClient, seedData, "Failed sibling");
+    const unreadIds = () => taskUnreadSessionIds(apiClient, seedData.workspaceId, seeded.taskId);
+    const failedState = () => sessionReadState(apiClient, seeded.failedSessionId);
+    await expect
+      .poll(unreadIds, { timeout: 15_000 })
+      .toEqual([seeded.failedSessionId, seeded.liveSessionId].sort());
+
+    const traffic = observeReadTraffic(testPage);
+    await testPage.goto(`/t/${seeded.taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.activeChat()).toHaveAttribute("data-session-id", seeded.primarySessionId);
+    const taskRow = session.sidebarTaskItem(seeded.title);
+    await expect(taskRow).toBeVisible({ timeout: 15_000 });
+    // Viewing the primary does not read its siblings.
+    await expect(unreadDot(taskRow)).toBeVisible({ timeout: 15_000 });
+    await dwell(testPage, 1_500, "negative-assertion", "primary visit must not read siblings");
+    expect((await failedState()).cursor).toBeNull();
+    expect(await unreadIds()).toEqual([seeded.failedSessionId, seeded.liveSessionId].sort());
+
+    await session.sessionTabBySessionId(seeded.failedSessionId).click();
+    await expect(session.activeChat()).toHaveAttribute("data-session-id", seeded.failedSessionId);
+    await expect(session.activeChat().getByText(FAILED_SESSION_ERROR)).toBeVisible();
+    await expect
+      .poll(async () => (await failedState()).cursor, { timeout: 15_000 })
+      .toBe(seeded.failedTailMessageId);
+    await expect.poll(unreadIds, { timeout: 15_000 }).toEqual([seeded.liveSessionId]);
+    // The live sibling keeps its contribution, so the row keeps its dot.
+    await expect(unreadDot(taskRow)).toBeVisible();
+    expect((await sessionReadState(apiClient, seeded.liveSessionId)).cursor).toBeNull();
+    expect((await sessionReadState(apiClient, seeded.primarySessionId)).cursor).toBe(
+      seeded.primaryCursor,
+    );
+    expect(traffic.markReads.map((read) => read.sessionId)).not.toContain(seeded.liveSessionId);
+    expect(traffic.markReads).toContainEqual({
+      sessionId: seeded.failedSessionId,
+      messageId: seeded.failedTailMessageId,
+    });
+    // Reading stored output never starts the failed session's agent.
+    expect(traffic.sentFrameCount()).toBeGreaterThan(0);
+    expect(traffic.agentStarts()).toEqual([]);
+    expect(await failedState()).toEqual({
+      cursor: seeded.failedTailMessageId,
+      state: "FAILED",
+      executionId: null,
+    });
+
+    const navRow = session.sidebarTaskItem(seeded.navTitle);
+    await navRow.click();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${seeded.navTaskId}`));
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(unreadDot(taskRow)).toBeVisible({ timeout: 15_000 });
+    expect(await unreadIds()).toEqual([seeded.liveSessionId]);
+    expect((await failedState()).cursor).toBe(seeded.failedTailMessageId);
+
+    // Reading the remaining sibling through the reopen menu clears the task.
+    await taskRow.click();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${seeded.taskId}`));
+    await session.waitForLoad();
+    await session.addPanelButton().click();
+    await session.sessionReopenItem(seeded.liveSessionId).click();
+    await expect(session.activeChat()).toHaveAttribute("data-session-id", seeded.liveSessionId);
+    await expect.poll(unreadIds, { timeout: 15_000 }).toEqual([]);
+    await navRow.click();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${seeded.navTaskId}`));
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(taskRow).toBeVisible({ timeout: 15_000 });
+    await expect(unreadDot(taskRow)).toHaveCount(0);
+    expect(traffic.agentStarts()).toEqual([]);
+    expect((await failedState()).state).toBe("FAILED");
   });
 });

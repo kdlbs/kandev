@@ -1,0 +1,425 @@
+---
+created: 2026-11-16
+status: blocked
+requirements:
+  - REQ-TASKS-TASK-UNREAD-DOT-001
+system_design:
+  - ../../specs/tasks/system-design/task-unread-dot.md
+legacy_specs: []
+---
+
+# Implementation Plan: Clear unread state when reading inactive sessions
+
+## Overview
+
+Preserve per-session read semantics and make reading stored output independent
+of a live agent. Read an inactive session through the existing transcript and
+acknowledge its loaded tail without starting, resuming, or restarting it.
+Reading the primary session alone must not acknowledge an unread sibling.
+
+The requirements source is the existing active
+[task unread dot requirement](../../specs/tasks/requirements/task-unread-dot.md),
+especially AC-TASKS-TASK-UNREAD-DOT-001.2, .4, .6, .8, .9, .12, and .17.
+No requirement rewrite or new ID is needed: .6 already applies to every session,
+and .9/.17 explicitly preserve unread siblings. Tasks owns the package because
+it owns the task's unread aggregate; Office's
+[read cursor design](../../specs/office/system-design/unread-divider.md)
+remains the acknowledgement contract.
+
+First establish whether selecting the failed session actually fails to
+acknowledge it. Then repair only a demonstrated violation of .6. Production
+changes are blocked on that causal evidence, not on a requirement to redefine
+read scope. This package does not select an implicit task-wide mark-read
+behavior from the unanswered earlier clarification.
+
+## Evidence and confidence
+
+Prior read-only inspection of reported task
+`7b7c443a-f20a-40a5-ae4e-455022afef50` found:
+
+| Session | Persisted state | Read evidence |
+| --- | --- | --- |
+| `411dd59f-8fa3-4ea2-a8b7-2fb70937bdd0` | WAITING_FOR_INPUT | Primary; cursor equals newest message. |
+| `820cbaf7-10a2-45de-95f5-644835ecf398` | FAILED | Cursor equals newest row. |
+| `6ecceca2-ad50-494b-96c3-37b7dbc717ca` | FAILED | No cursor; stored agent output includes boot, status, and error rows. |
+
+The persisted task summary had `has_running_session: false` and exactly
+`["6ecceca2-ad50-494b-96c3-37b7dbc717ca"]` in `unread_session_ids`.
+This proves why the task is unread. A missing cursor does not prove whether
+the user previously opened that transcript. It does not establish a defective
+write, a visibility bug, or a dependence on agent execution.
+
+Source confirms that `useSessionReadTracking` has no agent-liveness guard.
+It requires visible ownership, route/session hydration, initial-message
+readiness, and a loaded acknowledgement target. The desktop reopen menu lists
+failed sessions without a lifecycle filter. The hook's default unit-test
+fixture is RUNNING; existing unread-dot E2E helpers already seed agent-less
+WAITING_FOR_INPUT sessions. Therefore adding only a lifecycle parameter to a
+mocked hook test is not a sufficient failing reproduction.
+
+The earlier frontend diagnostic bundle was partial; it is not UI reproduction
+evidence. No live database or task state was changed during diagnosis.
+
+Follow-up (Task 01, read-only): that cursorless snapshot predates
+`2026-11-07T16:23:25Z`, when `6ecceca2-…` was acknowledged up to its newest row.
+Its cursor and the empty summary have persisted through the 2026-11-10 and
+2026-11-15 backups to the current database. See
+[Task 01 Results](task-01-establish-failure-boundary.md#results).
+
+## Scope
+
+### In scope
+
+- Trace the failed sibling's real selection, transcript load, acknowledgement,
+  persisted cursor, projected summary, and subsequent navigation/reload.
+- Reproduce on disposable tasks with the same mixed-session shape, including
+  no runtime/execution backing the failed session.
+- Repair the first demonstrated broken boundary in the existing path.
+- Desktop and phone proof that reading the inactive session clears its own
+  contribution durably, while unread siblings remain unread.
+- Preserve cursor monotonicity, response correlation, divider first-visit
+  behavior, visibility guards, message eligibility, and presentation-only delay.
+
+### Out of scope
+
+- Clearing all sessions when a task is selected; ignoring stopped or failed
+  sessions; rewriting production cursors; deleting unread history.
+- New mark-all-read controls, per-session dots, counters, settings, or copy.
+- Changes to agent launch, execution recovery, session deletion, or Quick Chat.
+- New schema, endpoint, flag, metrics, polling, retry policy, or subscriptions.
+- Treating a task with only read primary output and unread sibling output as
+  a product defect merely because the sibling's agent is stopped.
+
+## Technical approach
+
+### Boundary and state flow
+
+1. Select the failed session explicitly. Desktop uses a session tab or
+   `SessionReopenMenuItems`; phone uses `MobileSessionsPicker`. A hidden tab is
+   reopened, not deleted. Selection must not launch an agent.
+2. Load its persisted session and message history through the existing session
+   hooks. `useSessionMessages` exposes `isInitialMessagesLoading`; runtime
+   availability must not substitute for history readiness.
+3. `TaskChatPanel` derives `newestAcknowledgeableMessageId(messages)` from the
+   raw loaded rows, not just rendered items. `isSessionReadableInPanel` proves
+   ownership of the shown task; route hydration proves the selected identity.
+4. `useSessionReadTracking` acknowledges once the existing visibility and
+   readiness conditions are met. It keeps the cursorless first visit divider-
+   ineligible, but still calls `markSessionRead` when either unread setting is
+   enabled. Retain per-session request generations and stale-response guards.
+5. The existing monotonic mark-read write emits
+   `TaskSessionReadCursorChanged`; the projector removes that session from
+   `unread_session_ids`. No frontend-only summary clearing is permitted.
+6. Navigate to another task, then return/reload. The persisted cursor and
+   authoritative summary must retain the read state without a new agent event.
+
+### Diagnosis gate
+
+Task 01 records the first failing boundary and an exact reproduction in its
+Results. Distinguish these outcomes before changing code:
+
+| Observed result | Required disposition |
+| --- | --- |
+| Failed sibling reads correctly when explicitly selected | No production fix is justified by the supplied task. Record contract conformance; keep Task 02 blocked pending evidence of the reported failure. |
+| Session cannot be selected or history never becomes ready without a runtime | Record the precise owner/guard that waits for runtime state. Repair only that selected stored-session path. |
+| Correct loaded session is visible but no mark-read is dispatched | Record the incorrect visibility, route identity, or readiness transition; cover that transition, not a hypothetical lifecycle check. |
+| Mark-read fails or cursor/summary remains stale after success | Record the HTTP/service/projector failure and applicable boundary. Do not conceal it with a display-rule change. Reconcile the work order's exact owned files before implementation. |
+
+No branch above permits inventing a root cause. A new persistence, API, or
+product contract requires revising this package before implementation.
+
+### Runtime compatibility
+
+| Shape | Intended outcome | Evidence |
+| --- | --- | --- |
+| Stored FAILED session, no execution, cursorless | View stored output and persist its loaded tail without launching. | Primary defect-specific desktop and phone scenario. |
+| COMPLETED/CANCELLED/IDLE/WAITING_FOR_INPUT, no live execution | Same read boundary, no lifecycle exemption. | Exercise the state implicated by Task 01; existing agent-less waiting-session E2E remains a baseline. |
+| Read primary plus unread failed sibling | Reading primary leaves sibling unread; reading failed sibling removes only its ID. | Mixed-session UI flow plus cursor/summary assertions. |
+| Another unread sibling or a live sibling | Reading failed session must not clear the other contribution or change its execution. | Mixed-state regression. |
+| Hidden tab, visible reopen menu | Reopen and read using existing session identity. | Desktop reopen flow; phone picker equivalent. |
+| Missing/deleted session or failed history read | No invented tail, no mark-read, preserve other unread contributions. | Existing error guards plus the defect's targeted regression where applicable. |
+
+## ASCII UI preview
+
+### UI-01: Desktop inactive-session read transition
+
+Entry: existing task sidebar and Dockview chat. Dot enabled, divider disabled,
+hide delay zero for the regression. The before state below is supported by the
+stored unread summary and source display rule; a failure after opening session
+#2 has not been observed yet.
+
+```text
+BEFORE: primary displayed; failed sibling unread
++----------------------+-----------------------------------------+
+| Tasks                | [#1 primary] [#2 failed] [+ reopen]      |
+| > Reported task  (*) | #1: previously read output               |
++----------------------+-----------------------------------------+
+
+EXPECTED: explicitly open #2 and load its stored transcript
++----------------------+-----------------------------------------+
+| Tasks                | [#1 primary] [#2 failed SELECTED] [+]     |
+| > Reported task      | #2: stored failure output                |
+|                      | Agent remains stopped. No resume needed. |
++----------------------+-----------------------------------------+
+```
+
+`(*)` represents the existing localized unread indicator, not a new badge.
+After persisted acknowledgement, returning to #1 or another task must not bring
+it back. If any other session is unread, the dot remains. Preserve existing
+row height, error indicator, tab ordering, focus, and transcript scroll owner.
+
+### UI-02: Phone inactive-session read transition
+
+Entry: the existing task picker leads to the task; its existing session pill
+opens `MobilePickerSheet`. Use that focused picker, not desktop Dockview.
+
+```text
+[Task picker: Reported task (*)]
+               | open task
+[Session: #1 v] | #1 transcript
+               | tap existing session pill
++-----------------------------------+
+| Sessions                          |
+| #1 Primary                        |
+| #2 Failed                  [tap]  |
++-----------------------------------+
+               | select #2; picker closes
+[Session: #2 v]
+| Stored failure output             |
+| Agent remains stopped.            |
+[Chat] [existing navigation]
+
+Reopen task picker: Reported task     (no dot if all sessions read)
+```
+
+The existing mobile picker/session transcript composition is retained. It uses
+one transcript scroll owner and existing dynamic viewport, safe-area, and touch
+handling; this repair adds no controls or geometry changes. The primary action
+is tapping the existing failed-session row. Shared session/read state determines
+both layouts. Check absence of document horizontal overflow and capture the
+rendered phone view. ASCII labels and spacing are illustrative, not new copy.
+Both previews map to .6/.9/.12/.14/.15/.16/.17.
+
+## Tests
+
+All abbreviated AC IDs below use prefix `AC-TASKS-TASK-UNREAD-DOT-001`.
+
+| AC | Evidence to retain or add after diagnosis |
+| --- | --- |
+| .2, .4, .6 | Defect-specific transition in `apps/web/components/task/chat/use-session-read-tracking.test.ts` if the defect is in read ownership/readiness/correlation; use a persisted cursor assertion in E2E, not a mock echo alone. |
+| .6 | `apps/web/lib/session-unread-divider.test.ts` retains raw-tail acknowledgement coverage. Add a case only if Task 01 proves a missing eligibility boundary. |
+| .5, .9, .17 | Retain `task-unread-dot-visibility.test.ts`, particularly `keeps the open task's dot while another of its sessions is unread`. Do not re-pin its expectation to hide unread siblings. |
+| .6, .8, .9, .12 | Desktop and phone regression `clears a cursorless failed sibling only after its transcript is read` in the existing unread-dot spec files. |
+
+The first RED assertion must expose the actual failed boundary recorded by Task
+01. A test that is already green, a missing selector, or an intentionally unread
+sibling is not RED. Never alter production behavior to force a hypothetical
+lifecycle defect to exist.
+
+## E2E tests
+
+Extend `apps/web/e2e/tests/task/task-unread-dot.spec.ts` (`chromium`) and
+`apps/web/e2e/tests/task/mobile-task-unread-dot.spec.ts` (`mobile-chrome`) with
+the same causal scenario after Task 01 proves a violation:
+
+- Seed a read primary and a cursorless FAILED sibling with representative stored
+  boot/status/error output and no execution. Enable dot only; use zero hide delay.
+- Open primary. Assert failed sibling still contributes, with unchanged cursor.
+- Select failed sibling through the real desktop tab/reopen menu or phone session
+  picker. Show its stored output; do not call mark-read directly from the test.
+- Assert its persisted cursor equals the newest acknowledgeable row and it leaves
+  the authoritative unread list. Assert no agent was started and lifecycle stayed
+  FAILED. Navigate away and reload to prove the dot stays clear.
+- Include another unread sibling (including a live sibling) and prove it is not
+  acknowledged by reading the failed session. Preserve existing suite scenarios.
+- Arm causal observers before actions; restoring modified user settings is
+  mandatory because worker state is shared. Inspect the phone rendering.
+
+## Work orders
+
+Execute sequentially. No subagent authorization is implied.
+
+- [x] [Task 01: Establish the inactive-session failure boundary](task-01-establish-failure-boundary.md) (done: conformance, no violation reproduced).
+- [ ] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (blocked: no demonstrated contract violation, causal owner, or regression command).
+
+The prior [task unread dot package](../task-unread-dot/plan.md) is historical
+completed delivery. The [visible-visit divider package](../unread-divider-visible-session-clear/plan.md)
+owns a different visit-anchor defect. Neither package's recorded checks are
+verification for this repair; retain their scopes and results unchanged.
+
+## Verification
+
+Use a fresh cache-backed copy of the **current working tree**, not committed
+HEAD. Run this Bash setup and the checks below in the same shell. It clones Git
+metadata for tools, then overlays tracked/untracked edits and deletions; existing
+node_modules and regenerable outputs are excluded. Inspect any unsafe symlink
+warnings from rsync and stop if a required source was skipped. Do not run builds
+during design/review. Refresh this snapshot after every source/test edit.
+
+All checks run inside the snapshot. Formatting changes stay there: apply any
+required source corrections back through normal repository edits, then refresh
+and reverify. Do not copy build products or dependencies back to the task tree.
+Retain only results in the work orders. Do not delete the snapshot while a process
+uses it. If cache space is insufficient, use the cache-full cleanup/alert procedure;
+never choose another drive.
+
+
+```bash
+set -euo pipefail
+SOURCE=$(git rev-parse --show-toplevel)
+CACHE=/home/clem/.cache/tmp
+case "$(findmnt -no SOURCE --target "$CACHE")" in /dev/sdd*) ;; *) exit 1 ;; esac
+python3 -c 'import shutil; u=shutil.disk_usage("/mnt/clem-cache"); assert u.used/u.total < .9, "Cache above 90%; follow cache-full procedure before continuing"'
+SNAPSHOT=$(mktemp -d "$CACHE/unread-verification.XXXXXX")
+VERIFY="$SNAPSHOT/repo"
+git clone --no-hardlinks "$SOURCE" "$VERIFY"
+rsync -a --safe-links --delete --exclude='/.git' --exclude='node_modules/' \
+  --exclude='/apps/web/dist/' --exclude='/apps/backend/bin/' \
+  --exclude='/apps/backend/.build/' --exclude='/apps/web/e2e/test-results*/' \
+  --exclude='/apps/web/e2e/blob-report/' --exclude='/apps/web/e2e/playwright-report/' \
+  --exclude='/apps/web/.pr-assets/' "$SOURCE/" "$VERIFY/"
+export TMPDIR="$SNAPSHOT/tmp" GOTMPDIR="$SNAPSHOT/tmp"
+export XDG_CACHE_HOME="$SNAPSHOT/cache" npm_config_cache="$SNAPSHOT/npm"
+export GOCACHE="$SNAPSHOT/go-build" GOMODCACHE="$SNAPSHOT/go-mod" GOPATH="$SNAPSHOT/go"
+export CARGO_HOME="$SNAPSHOT/cargo" CARGO_TARGET_DIR="$SNAPSHOT/target"
+export PLAYWRIGHT_BROWSERS_PATH=/home/clem/.cache/ms-playwright
+export PYTHONDONTWRITEBYTECODE=1
+mkdir -p "$TMPDIR" "$XDG_CACHE_HOME" "$npm_config_cache" "$GOCACHE" "$GOMODCACHE" "$GOPATH" "$CARGO_HOME" "$CARGO_TARGET_DIR"
+cache_only() {
+  local p
+  p=$(realpath -m "$1")
+  while [[ ! -e "$p" ]]; do p=$(dirname "$p"); done
+  case "$(findmnt -no SOURCE --target "$p")" in /dev/sdd*) ;; *) printf 'Unsafe output: %s\n' "$1" >&2; return 1 ;; esac
+}
+for p in "$VERIFY" "$VERIFY/apps/node_modules" "$VERIFY/apps/web/dist" \
+  "$VERIFY/apps/backend/bin" "$VERIFY/apps/backend/.build" \
+  "$VERIFY/apps/backend/cmd/plugin-fixture/fixture-package/ui" \
+  "$VERIFY/apps/web/e2e/test-results" "$VERIFY/apps/web/e2e/blob-report" \
+  "$VERIFY/apps/web/e2e/playwright-report" "$VERIFY/apps/web/.pr-assets" \
+  "$TMPDIR" "$XDG_CACHE_HOME" "$npm_config_cache" "$GOCACHE" "$GOMODCACHE" \
+  "$GOPATH" "$CARGO_HOME" "$CARGO_TARGET_DIR" "$PLAYWRIGHT_BROWSERS_PATH"; do cache_only "$p"; done
+cd "$VERIFY"
+(cd apps && pnpm install --frozen-lockfile --store-dir "$SNAPSHOT/pnpm-store")
+(cd apps/web && pnpm exec vitest run components/task/chat/use-session-read-tracking.test.ts components/task/task-unread-dot-visibility.test.ts lib/session-unread-divider.test.ts)
+(cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/task/task-unread-dot.spec.ts)
+(cd apps/web && pnpm e2e:run --host --shards 1 --project mobile-chrome tests/task/mobile-task-unread-dot.spec.ts)
+make fmt
+make typecheck test lint
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.test.py
+python3 scripts/lint-spec-files.py --all
+git diff --check -- docs/specs/tasks docs/plans/inactive-session-unread-clear
+```
+
+Force host mode and one shard: the multi-shard runner hardcodes logs under
+`/tmp`, while its single-shard branch writes directly to the console. Do not
+use the runner's `clean` command, which also addresses those `/tmp` paths.
+
+Managed E2E performs fresh builds; run desktop and mobile sequentially. Add the
+exact narrow regression command for any newly implicated boundary to Task 02
+before editing it. Browser smoke must exercise the selected stored transcript,
+then navigate away and observe durable dot clearing; tests alone do not replace
+that observation.
+
+## Verification results
+
+Design-package validation:
+
+- `python3 scripts/list-docs.py validate`: passed (436 decisions, 1931 specifications).
+- `python3 scripts/lint-spec-files.test.py`: passed (36 tests).
+- `python3 scripts/lint-spec-files.py --all`: passed.
+- `git diff --check -- docs/specs/tasks docs/plans/inactive-session-unread-clear`: passed.
+- `.github/scripts/pr-docs.cjs` `validateCoverage`: actual docs-only paths are
+  exempt. A prospective graph check including the candidate read-tracking source
+  path validates both work orders as covered, with zero reference errors. The
+  candidate path was supplied only to exercise graph validation; it was not edited.
+- Worktree status shows the modified system design and three new package files,
+  unstaged and uncommitted. The active requirement is reused unchanged.
+
+Product verification (implementation run, cache-backed snapshot): Task 01
+reproduced the reported shape on desktop and phone and found conformance;
+its Results record commands, statuses, a mutation check, and browser smoke.
+Task 02 remains blocked and no production code changed. The package is
+`blocked`, not `implemented`: the reported failure was not reproduced. Final
+checks for the retained E2E regressions are recorded below.
+
+These checks ran after the last source edit in snapshot
+`~/.cache/tmp/unread-verification.m9zRZH`, using the Task 01 environment
+deviations. Host `KANDEV_*`/`AGENTCTL_*` variables were unset because they
+leaked into config tests. The changed files are three E2E files and four docs,
+with no Go or production web source:
+
+- Focused `vitest run` (read tracking, dot visibility, divider): 3 files, 41
+  tests passed.
+- `pnpm e2e:run --host --shards 1 --project chromium tests/task/task-unread-dot.spec.ts`:
+  2 passed.
+- `... --project mobile-chrome tests/task/mobile-task-unread-dot.spec.ts`: 2
+  passed.
+- `make fmt`: exit 0. The prettier wrapping of two new E2E lines was applied
+  back by normal edits, and a second run was stable.
+- `make typecheck`: exit 0 with `NODE_OPTIONS=--max-old-space-size=8192`. The
+  default heap aborted with a `tsc` out-of-memory error. Ignored
+  `apps/web/generated/*.json` was first regenerated, because snapshot `rsync
+  --delete` removes it.
+- `make test`: exit 2 in `test-backend`, in unchanged Go packages (examples:
+  `task/handlers` and `task/service` report "parent directory cannot be
+  accessed" under the cache-drive `TMPDIR`; `executor_ssh_dial_test`
+  `bind: invalid argument` from an over-long unix socket path; `agentctl`
+  process timeouts; `task/repository/sqlite` 10-minute timeout).
+  `make test-web` was run separately: 38 failed files and 159 failed tests out
+  of 30223, from browser-mode timeouts and `ECONNREFUSED 127.0.0.1:3000`. No
+  vitest file imports the changed E2E files. `test-cli` passed. `test-scripts`
+  failed because `cargo` is not installed.
+- `make lint`: `lint-backend` failed on a pre-existing `goconst` finding in
+  the unchanged
+  `internal/agentctl/server/adapter/transport/acp/dialect_claude_prompt_suggestions.go:31`.
+  `lint-web` (oxlint `--deny-warnings`), `lint-harness`, `lint-specs`, and
+  `lint-architecture` passed.
+- `python3 scripts/list-docs.py validate` (436 decisions, 1931 specifications),
+  `lint-spec-files.test.py` (36 tests), `lint-spec-files.py --all`, and
+  `git diff --check` (docs and `apps/web/e2e`): passed.
+
+## Risks
+
+- The supplied task currently demonstrates valid unread-sibling behavior, not a
+  reproduced failure after reading the failed session. Task 01 can establish that
+  no repair is justified for that shape; do not manufacture one.
+- A selected row can hide a displayed session's dot before persistence succeeds.
+  Cursor and post-navigation assertions are required to detect this false pass.
+- Removing route/ownership guards can silently read a different task. Preserve
+  them and fix only the verified readiness or identity transition.
+- The original user might intend task-wide acknowledgement. That behavior was
+  not selected and is explicitly excluded, rather than silently changing .9/.17.
+- Repository build/E2E output defaults can target non-cache storage. Confirm and
+  relocate outputs before execution; never fall back to the live instance DB.
+
+## Adversarial review progress
+
+- Round 1 (OMP Sol 6.1): one P2 finding, accepted and addressed. All three
+  verification sections now include a cache-backed working-tree snapshot,
+  isolated dependency/tool caches, and fail-closed output mount assertions.
+  Host E2E is pinned to one shard to avoid hardcoded `/tmp` shard logs.
+- Remediation checks: all three Bash blocks pass `bash -n`; read-only mount
+  checks pass for every enumerated destination via its nearest existing
+  ancestor. No snapshot, dependency installation, build, or product test ran.
+  Specification catalog validation and whitespace checks passed.
+- Round 2 (OMP Sol 6.1): one P2 finding, accepted and addressed. Task 01 now
+  collects both desktop and phone diagnostic statuses/logs even when desktop
+  reproduces RED, then returns a nonzero aggregate for either failure.
+  Setup/install remain fail-fast; Task 02's GREEN checks remain fail-fast.
+- Round 2 remediation smoke: documented Bash syntax passed. Throwaway shell
+  control-flow simulations retained statuses for desktop failure/phone success
+  (7/0), desktop success/phone failure (0/9), and both success (0/0). Both
+  viewports ran in each case; setup failure aborted before either invocation.
+  Failed diagnostics returned aggregate 1, both-success returned 0. No E2E,
+  build, install, or product runtime was exercised by this shell-only check.
+- Round 3 (OMP Sol 6.1): zero actionable findings. Both prior P2 corrections
+  confirmed addressed; no product reproduction or implementation approval implied.
+- Round 4 (OMP Sol 6.1): zero actionable findings; prior corrections independently
+  confirmed addressed. No product checks or implementation approval implied.
+- Round 5 (OMP Sol 6.1): zero actionable findings; both prior corrections remain
+  resolved. No product reproduction or implementation approval implied.
+- Completed rounds: 5. Consecutive clean rounds: 3 (rounds 3, 4, and 5).
+  Review loop stopped at the requested three-consecutive-clean condition.
+  At the design checkpoint Task 01 was pending. Its subsequent implementation
+  run completed with conformance; Task 02 remains blocked on causal reproduction.
