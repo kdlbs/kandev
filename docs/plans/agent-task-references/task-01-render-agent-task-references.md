@@ -277,3 +277,11 @@ minimum and snug line height. Existing user-mention sizing is unchanged.
 The updated mobile regression checks content-fit height, wrapping, and direct
 tap navigation. Both phone browser tests, 16 component tests, typecheck,
 production web build, and specification lint passed.
+
+### Merge-readiness review
+
+Updated the remaining narrow-desktop assertion to the approved 24px contract.
+Keyboard coverage now reaches the link with Tab and scopes its tooltip to the
+reference title. All three desktop reference tests passed. Recorded the compact
+inline-link exception in the mobile sizing guide. Harness and spec validation
+passed. The parent-ID fallback remains the specified cache-only behavior.

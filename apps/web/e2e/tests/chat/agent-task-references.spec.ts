@@ -91,8 +91,13 @@ test("agent references preserve identity and navigate without reloading", async 
   expect(metadataReads).toEqual([]);
   testPage.off("request", observeMetadata);
   await testPage.mouse.move(0, 0);
-  await link.focus();
-  const tooltip = testPage.getByRole("tooltip");
+  await testPage.locator('[data-testid^="session-tab-"]:visible').first().click();
+  for (let step = 0; step < 100; step++) {
+    await testPage.keyboard.press("Tab");
+    if (await link.evaluate((el) => el === document.activeElement)) break;
+  }
+  await expect(link).toBeFocused();
+  const tooltip = testPage.getByRole("tooltip").filter({ hasText: REFERENCE_TITLE });
   await expect(tooltip).toContainText(REFERENCE_TITLE);
   await link.press("Escape");
   await expect(tooltip).toHaveCount(0);
@@ -136,7 +141,7 @@ test("agent references preserve identity and navigate without reloading", async 
   await testPage.goBack();
   await expect(testPage).toHaveURL(new RegExp(`/t/${source.id}(?:\\?|$)`));
   await testPage.setViewportSize({ width: 700, height: 900 });
-  await expect.poll(async () => (await link.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  await expect(link).toHaveCSS("min-height", "24px");
   await message.locator(`a[href="/t/${sibling.id}"]`).click();
   await expect(testPage).toHaveURL(new RegExp(`/t/${sibling.id}(?:\\?|$)`));
   await testPage.goBack();
