@@ -50,6 +50,7 @@ type userStateCleanupStore interface {
 //     (e.g. proxies checking a plugin's manifest/capabilities without
 //     going through Service's error-wrapping Get).
 type Service struct {
+	notificationProviders                 NotificationProviderAccess
 	hostCallContextEnabled                bool
 	hostCallContextValidator              func(context.Context, bool) error
 	automationRevoker                     func(string) error
@@ -87,7 +88,8 @@ type Service struct {
 	// dispatchLocks keep lifecycle replacement/disable boundaries from racing
 	// authenticated actions and reference RPCs. Dispatch holds a read lease for
 	// the full RPC; lifecycle mutation holds the write side.
-	dispatchLocks *keyedContextRWMutex
+	dispatchLocks           *keyedContextRWMutex
+	formatterLifecycleLocks keyedContextRWMutex
 
 	// agentToolInstallMu makes exposed-name collision validation and registry
 	// insertion one atomic catalog mutation across different plugin IDs.

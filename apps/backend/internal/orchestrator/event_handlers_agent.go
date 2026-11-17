@@ -1144,7 +1144,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 
 	// Complete the current turn
 	s.reconcileCompletedCIAutoFixTurn(ctx, data.TaskID, data.SessionID, turnAtEventFire)
-	completionCtx := withWorkflowEffect(ctx, workflowEffectForEvent(data))
+	completionCtx := withWorkflowEffect(ctx, workflowEffectForCompletion(data, turnAtEventFire))
 	if turnAtEventFire != "" {
 		fixedResourceKey := s.fixedResourceForCleanCompletion(completionCtx, data, turnAtEventFire)
 		if err := s.completeTurnForTaskSessionCheckedOwned(
@@ -2771,6 +2771,18 @@ func (s *Service) handleAgentCompletedAfterGuard(ctx context.Context, data watch
 	s.handleAgentCompletedLocked(ctx, data, guard)
 }
 
+func (s *Service) turnlessDeliveryCompletionOwnsPrompt(data watcher.AgentEventData) bool {
+	if data.SessionID == "" || data.AgentExecutionID == "" || data.PromptGeneration == 0 {
+		return false
+	}
+	generationOwner, ok := s.agentManager.(interface {
+		OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
+	})
+	return ok && generationOwner.OwnsPromptGeneration(
+		data.SessionID, data.AgentExecutionID, data.PromptGeneration,
+	)
+}
+
 // handleAgentCompletedLocked runs with the per-session cancel-in-flight guard
 // held, except around calls that themselves acquire the session lifecycle
 // lock (reclaimIdleSession, directly or via setSessionWaitingForInputIfRequested):
@@ -2785,6 +2797,15 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
 		zap.String("agent_execution_id", data.AgentExecutionID))
+	if data.TurnID == "" && agentDeliveryEventIdentityPresent(data) && !s.turnlessDeliveryCompletionOwnsPrompt(data) {
+		s.logger.Debug("ignoring turn-less delivery completion without current prompt ownership",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID),
+			zap.Uint64("event_prompt_generation", data.PromptGeneration),
+			zap.String("submission_id", data.DeliverySubmissionID))
+		return
+	}
 
 	s.markExecutionCompleted(data.SessionID, data.AgentExecutionID)
 	// agent.completed is terminal for this lifecycle execution. Retire its
@@ -2891,7 +2912,8 @@ func (s *Service) finishAgentCompleted(
 	if !completionFollowUp {
 		s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
 	}
-	completionCtx := withWorkflowEffect(context.WithoutCancel(ctx), workflowEffectForEvent(data))
+	closingTurnID := s.completedEventClosingTurn(ctx, data)
+	completionCtx := withWorkflowEffect(context.WithoutCancel(ctx), workflowEffectForCompletion(data, closingTurnID))
 	if data.TurnID != "" {
 		fixedResourceKey := s.fixedResourceForCleanCompletion(completionCtx, data, data.TurnID)
 		if err := s.completeTurnForTaskSessionCheckedOwned(
@@ -2906,6 +2928,20 @@ func (s *Service) finishAgentCompleted(
 			return
 		}
 		s.profileExecutionResolver.ResetFixedProfileCircuitFailures(completionCtx, fixedResourceKey)
+	} else if agentDeliveryEventIdentityPresent(data) {
+		if closingTurnID != "" {
+			if err := s.completeTurnForTaskSessionCheckedOwned(
+				completionCtx, data.TaskID, data.SessionID, closingTurnID,
+			); err != nil {
+				s.logger.Warn("ignoring turn-less delivery completion for superseded turn",
+					zap.String("task_id", data.TaskID),
+					zap.String("session_id", data.SessionID),
+					zap.String("turn_id", closingTurnID),
+					zap.Error(err))
+				go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+				return
+			}
+		}
 	} else {
 		s.completeTurnForSession(completionCtx, data.SessionID)
 	}

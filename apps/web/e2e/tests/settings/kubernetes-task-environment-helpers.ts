@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "../../helpers/node-sqlite";
 
 export function seedKubernetesTaskEnvironment(
@@ -11,7 +12,7 @@ export function seedKubernetesTaskEnvironment(
   if (values.some((value) => !/^[a-zA-Z0-9-]+$/.test(value))) {
     throw new Error("test fixture identities must be alphanumeric UUID-like values");
   }
-  const environmentId = `environment-${taskId}`;
+  const environmentId = `environment-${randomUUID()}`;
   const sqlite = new DatabaseSync(database);
   let transactionOpen = false;
   try {
@@ -22,7 +23,7 @@ export function seedKubernetesTaskEnvironment(
     sqlite.exec("PRAGMA busy_timeout = 10000");
     sqlite.exec("BEGIN IMMEDIATE");
     transactionOpen = true;
-    sqlite
+    const environment = sqlite
       .prepare(
         `INSERT INTO task_environments (
            id, task_id, executor_type, executor_id, executor_profile_id,
@@ -30,7 +31,7 @@ export function seedKubernetesTaskEnvironment(
            task_dir_name, created_at, updated_at
          ) VALUES (
            ?, ?, 'k8s', ?, ?, 8765, 'ready', '', '', '', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-         ) ON CONFLICT(task_id) DO UPDATE SET
+         ) ON CONFLICT(task_id) WHERE retired_at IS NULL DO UPDATE SET
            executor_type = excluded.executor_type,
            executor_id = excluded.executor_id,
            executor_profile_id = excluded.executor_profile_id,
@@ -40,12 +41,16 @@ export function seedKubernetesTaskEnvironment(
            container_id = excluded.container_id,
            sandbox_id = excluded.sandbox_id,
            task_dir_name = excluded.task_dir_name,
-           updated_at = CURRENT_TIMESTAMP`,
+           updated_at = CURRENT_TIMESTAMP
+         RETURNING id`,
       )
-      .run(environmentId, taskId, executorId, profileId);
+      .get(environmentId, taskId, executorId, profileId);
+    if (typeof environment?.id !== "string") {
+      throw new Error("test fixture did not resolve an active environment");
+    }
     sqlite
       .prepare("UPDATE task_sessions SET task_environment_id = ? WHERE id = ?")
-      .run(environmentId, sessionId);
+      .run(environment.id, sessionId);
     sqlite.exec("COMMIT");
     transactionOpen = false;
   } catch (error) {

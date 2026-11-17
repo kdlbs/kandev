@@ -1,4 +1,4 @@
-import { type Locator, type Page, expect } from "@playwright/test";
+import { type Locator, type Page, errors, expect } from "@playwright/test";
 import { FileTreePage } from "./file-tree-page";
 import { NewSessionDialogPage } from "./new-session-dialog-page";
 import { ChangeWorkflowPage } from "./change-workflow-page";
@@ -264,9 +264,9 @@ export class SessionPage {
 
       const resumeButton = this.recoveryResumeButton();
       if (await resumeButton.isVisible()) {
-        if (await resumeButton.isEnabled()) {
-          await resumeButton.click();
-        }
+        await resumeButton.click({ timeout: pollSlice }).catch((error: unknown) => {
+          if (!(error instanceof errors.TimeoutError)) throw error;
+        });
         await resumeButton.waitFor({ state: "hidden", timeout: pollSlice }).catch(() => undefined);
         continue;
       }

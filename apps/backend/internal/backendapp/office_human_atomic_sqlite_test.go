@@ -2,11 +2,12 @@ package backendapp
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/completion"
 	"github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -40,19 +41,14 @@ func TestOfficeHumanCompletionSQLiteAdmissionBeforeWriter(t *testing.T) {
 					close(resume)
 				}
 			}()
-			canonical := officeHumanCompletionPendingReader(f.office, f.workflow)
-			f.h.repo.SetOfficeHumanCompletionPendingReader(func(ctx context.Context, tx *sql.Tx, taskID, stepID string) ([]string, error) {
-				pending, err := canonical(ctx, tx, taskID, stepID)
-				if err != nil {
-					return nil, err
-				}
+			registerOfficeCompletionPolicyWithHook(f.h.repo, f.office, f.workflow, func(ctx context.Context, _ completion.Querier, _, _ *models.Task, _ completion.Admission) error {
 				close(read)
 				select {
 				case <-resume:
 				case <-ctx.Done():
-					return nil, ctx.Err()
+					return ctx.Err()
 				}
-				return pending, nil
+				return nil
 			})
 			done := make(chan error, 1)
 			go func() {

@@ -388,6 +388,12 @@ func initializeApplication(ctx context.Context, cfg *config.Config, log *logger.
 	return startServices(ctx, cfg, log, addCleanup, eventBus, runCleanups, workerCancelFromContext(ctx))
 }
 
+func startTaskBackgroundWorkers(ctx context.Context, taskSvc *taskservice.Service, stallDetectionThreshold time.Duration) {
+	startup.AfterReady(ctx, func() { taskSvc.StartAutoArchiveLoop(ctx) })
+	taskSvc.SetStallDetectionThreshold(stallDetectionThreshold)
+	startup.AfterReady(ctx, func() { taskSvc.StartSessionReconciliationLoop(ctx) })
+}
+
 // applyStartupRuntimeFlags resolves persisted runtime-flag overrides and
 // applies them to the config, returning false if resolution fails. It is a
 // no-op when no runtime-flag repository is configured.
@@ -1195,6 +1201,11 @@ func startGatewayAndServe(
 		log.Error("Failed to initialize WebSocket gateway", zap.Error(err))
 		return false
 	}
+	if services.Plugins != nil {
+		services.Plugins.SetNotificationProviderAccess(notificationSvc)
+		notificationSvc.SetFormatterRuntime(services.Plugins)
+	}
+	addCleanup(func() error { notificationSvc.CloseFormatterCaptures(); return nil })
 
 	gateways.RegisterSessionStreamNotifications(ctx, eventBus, gateway.Hub, log)
 	if cfg.Features.Canvases {
@@ -1544,10 +1555,7 @@ func startGatewayAndServe(
 		services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
 	}
 
-	startup.AfterReady(ctx, func() { services.Task.StartAutoArchiveLoop(ctx) })
-	services.Task.SetStallDetectionThreshold(cfg.Tasks.StallDetectionThreshold)
-	startup.AfterReady(ctx, func() { services.Task.StartSessionReconciliationLoop(ctx) })
-	startup.AfterReady(ctx, func() { services.Task.StartQuickChatExpirationLoop(ctx) })
+	startTaskBackgroundWorkers(ctx, services.Task, cfg.Tasks.StallDetectionThreshold)
 	hostUtilityCtx, hostUtilityCancel := context.WithCancel(ctx)
 	hostUtilityReady := make(chan struct{})
 	var hostUtilityWG sync.WaitGroup
@@ -1868,6 +1876,11 @@ func activateOfficeServices(
 		return false
 	}
 
+	if err := services.OfficeSvcs.Scheduler.RegisterBlockerFailureSubscriber(eventBus); err != nil {
+		log.Error("Failed to register office blocker failure subscriber", zap.Error(err))
+		return false
+	}
+
 	return true
 }
 
@@ -1882,7 +1895,7 @@ func newRunProcessorService(
 	agentctlBinaryPath string,
 	cfgLoader *configloader.ConfigLoader,
 	cfgWriter *configloader.FileWriter,
-	lifecycleMgr *lifecycle.Manager,
+	runtimeBackend officeRunProcessorRuntime,
 	log *logger.Logger,
 ) *officeservice.Service {
 	apiPort := cfg.Server.Port
@@ -1904,7 +1917,8 @@ func newRunProcessorService(
 		AgentctlBinaryPath: agentctlBinaryPath,
 		EventBus:           eventBus,
 	})
-	svc.SetRunSessionLauncher(newOfficeRunSessionLauncher(repos.Office, lifecycleMgr, services.DynamicProfileResolver, log))
+	svc.SetRunSessionLauncher(newOfficeRunSessionLauncher(repos.Office, runtimeBackend, services.DynamicProfileResolver, log))
+	wireOfficeRunClaimSessionProbe(svc, repos.Task, runtimeBackend)
 	return svc
 }
 
@@ -1921,8 +1935,15 @@ func wireOfficeSvcsDependencies(
 	// Wire the workflow-domain decisions store so approve/request-changes
 	// route to workflow_step_decisions (ADR 0005 Wave E).
 	services.OfficeSvcs.Dashboard.SetDecisionStore(repos.Workflow)
-	configureOfficeHumanCompletionGuard(repos.Task, repos.Office, repos.Workflow)
-	if !repos.Task.OfficeHumanCompletionGuardConfigured() {
+	registerOfficeCompletionPolicy(repos.Task, repos.Office, repos.Workflow)
+	if orchestratorSvc != nil && repos.Office != nil {
+		orchestratorSvc.SetParentChildrenCompletionWakeRecorder(func(
+			ctx context.Context, parentID, childSetKey, generation, operationID string,
+		) error {
+			return repos.Office.RecordWorkflowChildrenCompletedWake(ctx, parentID, childSetKey, generation, operationID)
+		})
+	}
+	if !repos.Task.CompletionPoliciesConfigured() {
 		panic("Office completion gate not configured")
 	}
 	services.OfficeSvcs.Dashboard.SetTaskHumanDoneCompleter(officeHumanDoneCompleterAdapter{tasks: services.Task})
@@ -1951,7 +1972,7 @@ func wireOfficeSvcsDependencies(
 	orchestratorSvc.SetOfficeTaskStatusUpdater(services.OfficeSvcs.Dashboard)
 	// A human move that would complete an Office task is refused while its
 	// approvers are pending.
-	services.Task.SetOfficeApprovalGuard(officeApprovalGuardAdapter{reader: services.OfficeSvcs.Dashboard})
+	services.Task.SetApproverNameResolver(officeApproverNameResolverAdapter{reader: services.OfficeSvcs.Dashboard})
 	// Wire the office service as the retry canceller for task reassignment.
 	services.OfficeSvcs.Dashboard.SetRetryCanceller(services.Office)
 	// Wire the office service as the terminal-shape recorder so a
@@ -2902,6 +2923,9 @@ func buildOfficeFeatureServices(
 	// that field when Dispatch is actually called, well after startup
 	// completes (AC-OFFICE-ENQUEUE-CONSOLIDATION-001.2).
 	routineWakeupDispatcher.SetRunQueuer(services.Office)
+	if services.Office != nil {
+		services.Office.SetWakeupRequestDispatcher(routineWakeupDispatcher)
+	}
 	routineSvc.SetWakeupEnqueuer(&routineWakeupAdapter{
 		repo:       repo,
 		dispatcher: routineWakeupDispatcher,
@@ -2913,6 +2937,7 @@ func buildOfficeFeatureServices(
 	// isn't gated by a task that already finished.
 	if services.Office != nil {
 		services.Office.SetRoutineRunSyncer(routineSvc)
+		services.Office.SetRoutineRunTaskStateReader(taskRepo)
 	}
 	approvalSvc := officeapprovals.NewApprovalService(repo, log, activity, services.Office)
 	approvalSvc.SetAgentWriter(agentSvc)

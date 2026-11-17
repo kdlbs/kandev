@@ -1330,6 +1330,13 @@ to review an action and return to your list.
 - Several archives can be pending at once. Each row keeps its own spinner and ignores repeated archive requests until its own request settles, and Kandev does not switch you to a task that is also being archived.
 - Runtime stop and cleanup run in the background with a 60-second timeout. Cleanup failure does not undo the archive. Kandev preserves a runtime or environment when it cannot stop a nonterminal session, or while another active task uses a shared environment or worktree.
 
+A damaged Git checkout or a timed-out workspace inspection does not block
+archiving the task or its selected subtasks. Kandev records the cleanup failure
+and preserves the affected workspace and enclosing task folder. Independently
+verified workspaces can still be cleaned up. Missing original identity evidence
+can require manual repair before cleanup is safe. Access checks and database
+writes must still succeed.
+
 For Git worktrees, archive deletes Kandev-owned checkouts and their local
 changes during background cleanup, including staged, unstaged, untracked, and
 ignored files. Commit and push work you need before archiving. Kandev does not
@@ -1351,7 +1358,7 @@ worktree keeps that task folder until reclamation can finish.
 | Kubernetes    | Deletes only the recorded Pod and Kandev-managed PVC after exact UID and ownership checks. An existing claim is retained.                                                                                             |
 | Remote Docker | Runtime create and stop are not implemented. This executor is in progress and cannot currently start a task, so it has no supported archive-cleanup flow.                                                             |
 | Sprites       | Attempts to destroy the sandbox; if cleanup succeeds, uncommitted sandbox work is lost.                                                                                                                               |
-| SSH           | Attempts to stop the remote session runtime, but the remote task directory remains. Audit and remove retained task directories manually after confirming that no session needs them.                                  |
+| SSH           | Attempts to stop the remote session runtime. The task directory stays by default; an enabled profile can reclaim it after terminal archive or delete. Reclamation can remove ignored files, including secrets. See [SSH cleanup](executors.md#repository-sources-and-cleanup). |
 
 The archive confirmation is on by default in **Settings → Preferences → Task Behavior → Tasks → Archiving**.
 
@@ -1396,8 +1403,7 @@ Unarchiving a task cancels a pending worktree recheck. If the recheck is already
 - If normal verified deletion cannot confirm that the agent stopped, the task remains available and deletion reports an error. Retry after resolving the reported problem.
 - When a task has a `RUNNING` agent, the dialog warns that deletion discards in-progress work. Delete always shows this warning. Archive shows it only when confirmation is on.
 
-Deleting or expiring an ordinary Quick Chat also attempts to remove its Claude Code or Codex
-session files for agents that ran on the Kandev host. Archiving keeps those files. Cleanup
+Deleting an ordinary Quick Chat also attempts to remove its Claude Code or Codex session files for agents that ran on the Kandev host. Archiving keeps those files. Cleanup
 leaves other conversations and the agent's shared indexes and history databases in place.
 It uses the host's home and config-directory settings; overrides set only in an agent or
 executor profile are outside this cleanup.

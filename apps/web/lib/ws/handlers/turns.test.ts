@@ -51,10 +51,11 @@ function turn(
   startedAt: string,
   completedAt?: string,
   evidence: Pick<TurnEventPayload, "metadata" | "had_output"> = {},
+  eventSessionId = SESSION_ID,
 ): TurnEventPayload {
   return {
     id,
-    session_id: SESSION_ID,
+    session_id: eventSessionId,
     task_id: TASK_ID,
     started_at: startedAt,
     completed_at: completedAt,
@@ -64,10 +65,14 @@ function turn(
   };
 }
 
-function addTurnUserPrompt(store: ReturnType<typeof makeStore>, turnId: string): void {
+function addTurnUserPrompt(
+  store: ReturnType<typeof makeStore>,
+  turnId: string,
+  sessionId = SESSION_ID,
+): void {
   store.getState().addMessage({
     id: `user-${turnId}`,
-    session_id: SESSION_ID,
+    session_id: sessionId,
     task_id: TASK_ID,
     turn_id: turnId,
     author_type: "user",
@@ -77,12 +82,16 @@ function addTurnUserPrompt(store: ReturnType<typeof makeStore>, turnId: string):
   } as never);
 }
 
-function emptyTurnNoticeCount(store: ReturnType<typeof makeStore>, turnId: string): number {
+function emptyTurnNoticeCount(
+  store: ReturnType<typeof makeStore>,
+  turnId: string,
+  sessionId = SESSION_ID,
+): number {
   return (
     store
       .getState()
       .messages.bySession[
-        SESSION_ID
+        sessionId
       ]?.filter((message) => message.turn_id === turnId && message.metadata?.empty_turn === true)
       .length ?? 0
   );
@@ -308,6 +317,44 @@ describe("session turn WebSocket handlers", () => {
     );
 
     expect(emptyTurnNoticeCount(store, "turn-new")).toBe(1);
+  });
+
+  it("suppresses empty-turn feedback for the completed event's passthrough session only", () => {
+    const store = makeStore();
+    const passthroughSessionId = "session-passthrough";
+    store.getState().setTaskSession({
+      id: passthroughSessionId,
+      task_id: TASK_ID,
+      is_passthrough: true,
+    } as never);
+    store.getState().setTaskSession({
+      id: SESSION_ID,
+      task_id: TASK_ID,
+      is_passthrough: false,
+      agent_profile_snapshot: { cli_passthrough: true },
+    } as never);
+    addTurnUserPrompt(store, "turn-passthrough", passthroughSessionId);
+    addTurnUserPrompt(store, "turn-structured");
+
+    send(
+      store,
+      TURN_COMPLETED,
+      turn(
+        "turn-passthrough",
+        TURN_STARTED_AT,
+        TURN_COMPLETED_AT,
+        { had_output: false },
+        passthroughSessionId,
+      ),
+    );
+    send(
+      store,
+      TURN_COMPLETED,
+      turn("turn-structured", TURN_STARTED_AT, TURN_COMPLETED_AT, { had_output: false }),
+    );
+
+    expect(emptyTurnNoticeCount(store, "turn-passthrough", passthroughSessionId)).toBe(0);
+    expect(emptyTurnNoticeCount(store, "turn-structured")).toBe(1);
   });
 
   it("preserves cancelled tool-call status when the containing turn completes", () => {

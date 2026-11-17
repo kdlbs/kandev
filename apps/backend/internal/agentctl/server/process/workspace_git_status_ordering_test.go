@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -280,7 +281,8 @@ func TestWorkspaceTrackerExpiredCallerStillPublishes(t *testing.T) {
 
 	tracker := NewWorkspaceTracker(repoDir, newTestLogger(t))
 	t.Cleanup(tracker.Stop)
-	started := make(chan struct{}, 1)
+	started := make(chan struct{})
+	var startedOnce sync.Once
 	release := make(chan struct{})
 	var released bool
 	defer func() {
@@ -289,11 +291,7 @@ func TestWorkspaceTrackerExpiredCallerStillPublishes(t *testing.T) {
 		}
 	}()
 	tracker.gitStatusBetweenQueries = func(context.Context) {
-		// Evidence-change recovery can invoke this checkpoint more than once.
-		select {
-		case started <- struct{}{}:
-		default:
-		}
+		startedOnce.Do(func() { close(started) })
 		<-release
 	}
 

@@ -993,8 +993,12 @@ func (h *TaskHandlers) httpBulkMoveTasks(c *gin.Context) {
 		wfmodels.StepTransitionActorHuman,
 	)
 	if err != nil {
+		if handleBulkMoveError(c, err) {
+			return
+		}
 		var approvals *service.ApprovalsPendingMoveError
-		if errors.As(err, &approvals) || errors.Is(err, service.ErrWorkflowChangeConflict) {
+		if errors.As(err, &approvals) || errors.Is(err, service.ErrWorkflowChangeConflict) ||
+			errors.Is(err, workflowmove.ErrDestinationExecutorUnavailable) {
 			handleSelectedMoveError(c, h.logger, err)
 			return
 		}
@@ -1002,7 +1006,7 @@ func (h *TaskHandlers) httpBulkMoveTasks(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to bulk move tasks"})
 		return
 	}
-	c.JSON(http.StatusOK, dto.BulkMoveTasksResponse{MovedCount: result.MovedCount})
+	c.JSON(http.StatusOK, dto.BulkMoveTasksResponse{MovedCount: result.MovedCount, MovedTaskIDs: result.MovedTaskIDs})
 }
 
 func (h *TaskHandlers) httpBulkMoveSelectedTasks(c *gin.Context, body httpBulkMoveTasksRequest) {
@@ -1014,10 +1018,13 @@ func (h *TaskHandlers) httpBulkMoveSelectedTasks(c *gin.Context, body httpBulkMo
 		wfmodels.StepTransitionActorHuman,
 	)
 	if err != nil {
+		if handleBulkMoveError(c, err) {
+			return
+		}
 		handleSelectedMoveError(c, h.logger, err)
 		return
 	}
-	c.JSON(http.StatusOK, dto.BulkMoveTasksResponse{MovedCount: result.MovedCount})
+	c.JSON(http.StatusOK, dto.BulkMoveTasksResponse{MovedCount: result.MovedCount, MovedTaskIDs: result.MovedTaskIDs})
 }
 
 type httpTaskRepositoryInput struct {
@@ -1064,15 +1071,16 @@ type httpCreateTaskRequest struct {
 	AutoTitle              bool                                  `json:"auto_title,omitempty"`
 	Autopilot              bool                                  `json:"autopilot,omitempty"`
 	Priority               string                                `json:"priority,omitempty"`
+	ExecutionGrade         string                                `json:"execution_grade,omitempty"`
 	State                  *v1.TaskState                         `json:"state,omitempty"`
 	Repositories           []httpTaskRepositoryInput             `json:"repositories,omitempty"`
 	Position               int                                   `json:"position,omitempty"`
 	Metadata               map[string]interface{}                `json:"metadata,omitempty"`
 	MCPServerIDs           []string                              `json:"mcp_server_ids,omitempty"`
-	BuiltinMCPPreferences  *mcpconfig.BuiltinCreationPreferences `json:"builtin_mcp_preferences,omitempty"`
 	StartAgent             bool                                  `json:"start_agent,omitempty"`
 	PrepareSession         bool                                  `json:"prepare_session,omitempty"`
 	AgentProfileID         string                                `json:"agent_profile_id,omitempty"`
+	BuiltinMCPPreferences  *mcpconfig.BuiltinCreationPreferences `json:"builtin_mcp_preferences,omitempty"`
 	// AssigneeAgentProfileID names an Office agent instance to seat as the
 	// task's runner at create time. Optional, and always workspace-scoped;
 	// see service.ValidateAssigneeAgentProfile for eligibility rules.
@@ -1303,6 +1311,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		AutoTitle:                             body.AutoTitle,
 		Autopilot:                             body.Autopilot,
 		Priority:                              body.Priority,
+		ExecutionGrade:                        body.ExecutionGrade,
 		State:                                 body.State,
 		Repositories:                          convertTaskRepositories(body.Repositories != nil, repos),
 		Position:                              body.Position,
@@ -1957,13 +1966,14 @@ func (h *TaskHandlers) recordSuccessfulTaskCreateProfile(ctx context.Context, pr
 }
 
 type httpUpdateTaskRequest struct {
-	Title        *string                   `json:"title,omitempty"`
-	Description  *string                   `json:"description,omitempty"`
-	Priority     *string                   `json:"priority,omitempty"`
-	State        *v1.TaskState             `json:"state,omitempty"`
-	Repositories []httpTaskRepositoryInput `json:"repositories,omitempty"`
-	Position     *int                      `json:"position,omitempty"`
-	Metadata     map[string]interface{}    `json:"metadata,omitempty"`
+	Title          *string                   `json:"title,omitempty"`
+	Description    *string                   `json:"description,omitempty"`
+	Priority       *string                   `json:"priority,omitempty"`
+	ExecutionGrade *string                   `json:"execution_grade,omitempty"`
+	State          *v1.TaskState             `json:"state,omitempty"`
+	Repositories   []httpTaskRepositoryInput `json:"repositories,omitempty"`
+	Position       *int                      `json:"position,omitempty"`
+	Metadata       map[string]interface{}    `json:"metadata,omitempty"`
 	// ParentID nests the task under another task. "" clears the parent.
 	ParentID *string `json:"parent_id,omitempty"`
 	// AssigneeUserID sets the human assignee. "" unassigns.
@@ -2046,6 +2056,7 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 		Title:          title,
 		Description:    description,
 		Priority:       body.Priority,
+		ExecutionGrade: body.ExecutionGrade,
 		State:          body.State,
 		Repositories:   convertTaskRepositories(body.Repositories != nil, repos),
 		Position:       body.Position,

@@ -150,6 +150,7 @@ func (r *Repository) workflowPolicyMatchesTx(
 func (r *Repository) agentDeliveryWorkflowTerminalMatchesTx(
 	ctx context.Context,
 	tx interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
 		QueryRowContext(context.Context, string, ...any) *sql.Row
 	},
 	effect *models.AgentDeliveryEffect,
@@ -216,30 +217,61 @@ func agentDeliveryWorkflowSubmissionMatches(
 func (r *Repository) agentDeliveryWorkflowCursorMatchesTx(
 	ctx context.Context,
 	tx interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
 		QueryRowContext(context.Context, string, ...any) *sql.Row
 	},
 	effect *models.AgentDeliveryEffect,
 ) (bool, error) {
 	var streamSessionID, streamIncarnationID string
+	var terminalTurnID, terminalState string
 	var streamGeneration, projectedSequence, terminalSequence int64
 	err := tx.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT c.session_id, c.incarnation_id, c.harness_generation, c.projected_sequence,
-		       t.sequence
+		       t.sequence, t.turn_id, t.state
 		FROM agent_delivery_effects t
 		JOIN agent_delivery_cursors c ON c.stream_id = t.stream_id
-		WHERE t.effect_key = ? AND t.turn_id = ? AND t.session_id = ?
-		  AND t.incarnation_id = ? AND t.harness_generation = ? AND t.submission_id = ?`),
-		fmt.Sprintf("agent_delivery.terminal:%s:%d", effect.StreamID, effect.Sequence), effect.TurnID,
-		effect.SessionID, effect.IncarnationID, effect.HarnessGeneration, effect.SubmissionID).Scan(
-		&streamSessionID, &streamIncarnationID, &streamGeneration, &projectedSequence, &terminalSequence)
+		WHERE t.effect_key = ? AND t.effect_type = ? AND t.stream_id = ? AND t.sequence = ?
+		  AND t.session_id = ? AND t.incarnation_id = ? AND t.harness_generation = ?
+		  AND t.submission_id = ?`),
+		fmt.Sprintf("agent_delivery.terminal:%s:%d", effect.StreamID, effect.Sequence),
+		models.DeliveryTerminalEffectType, effect.StreamID, effect.Sequence, effect.SessionID,
+		effect.IncarnationID, effect.HarnessGeneration, effect.SubmissionID).Scan(
+		&streamSessionID, &streamIncarnationID, &streamGeneration, &projectedSequence,
+		&terminalSequence, &terminalTurnID, &terminalState)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return streamSessionID == effect.SessionID && streamIncarnationID == effect.IncarnationID &&
-		streamGeneration == effect.HarnessGeneration && projectedSequence >= terminalSequence, nil
+	if streamSessionID != effect.SessionID || streamIncarnationID != effect.IncarnationID ||
+		streamGeneration != effect.HarnessGeneration || terminalSequence != effect.Sequence ||
+		projectedSequence < terminalSequence {
+		return false, nil
+	}
+	if terminalTurnID == effect.TurnID {
+		return true, nil
+	}
+	if terminalTurnID != "" ||
+		(terminalState != models.DeliveryEffectPending && terminalState != models.DeliveryEffectBlockResolved) {
+		return false, nil
+	}
+	updated, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE agent_delivery_effects SET turn_id = ?
+		WHERE effect_key = ? AND effect_type = ? AND stream_id = ? AND sequence = ?
+		  AND session_id = ? AND incarnation_id = ? AND harness_generation = ?
+		  AND submission_id = ? AND turn_id = '' AND state = ?`),
+		effect.TurnID, fmt.Sprintf("agent_delivery.terminal:%s:%d", effect.StreamID, effect.Sequence),
+		models.DeliveryTerminalEffectType, effect.StreamID, effect.Sequence, effect.SessionID,
+		effect.IncarnationID, effect.HarnessGeneration, effect.SubmissionID, terminalState)
+	if err != nil {
+		return false, err
+	}
+	rows, err := updated.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows == 1, nil
 }
 
 func (r *Repository) BackfillLegacyAgentDeliveryWorkflowEffect(
