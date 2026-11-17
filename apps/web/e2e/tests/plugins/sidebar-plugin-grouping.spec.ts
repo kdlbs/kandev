@@ -158,6 +158,66 @@ test("Save as preserves collapsed plugin groups through reload independently of 
   await expect(header).toHaveAttribute("aria-expanded", "false");
 });
 
+// @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.4
+test("successful config restart refreshes the saved page before its next navigation", async ({
+  testPage,
+  apiClient,
+  seedData,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await installFixturePlugin(testPage);
+  const data = await seedCompleteGrouping(apiClient, seedData);
+  await saveGroupingView(apiClient, seedData.workspaceId);
+  const before = await readGroupingPage(apiClient, seedData.workspaceId);
+  expect(before.grouping_generation).toEqual(expect.any(String));
+  await testPage.goto(`/?workspaceId=${seedData.workspaceId}`);
+  await testPage
+    .getByRole("separator", { name: "Resize sidebar navigation", exact: true })
+    .press("Home");
+  const sidebar = testPage.getByTestId("task-sidebar");
+  await expect(sidebar.getByTestId("sidebar-page-controls")).toContainText("Page 1 of 2");
+  const refreshed = testPage.waitForResponse(
+    async (response) => {
+      if (
+        !response.url().endsWith(`/workspaces/${seedData.workspaceId}/sidebar/query`) ||
+        response.status() !== 200 ||
+        response.request().postDataJSON()?.group !== SIDEBAR_GROUPING
+      ) {
+        return false;
+      }
+      await response.finished();
+      if (response.request().failure()) return false;
+      const snapshot = await response.json();
+      return (
+        typeof snapshot.grouping_generation === "string" &&
+        snapshot.grouping_generation !== before.grouping_generation
+      );
+    },
+    { timeout: 15_000 },
+  );
+  const changed = await apiClient.rawRequest("PATCH", `/api/plugins/${PLUGIN_ID}`, {
+    config: {
+      api_token: "sidebar-config-restart-fixture-token",
+      greeting: "after sidebar config restart",
+    },
+  });
+  expect(changed.ok, await changed.text()).toBe(true);
+  const current = await (await refreshed).json();
+  expect(current.page).toBe(1);
+  expect(current.grouping_generation).not.toBe(before.grouping_generation);
+  await sidebar.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(sidebar.getByTestId("sidebar-page-controls")).toContainText("Page 2 of 2");
+  await expect(sidebar).toContainText(data.untagged.title);
+  await testPage.screenshot({
+    path: testInfo.outputPath("config-restart-next-page.png"),
+    animations: "disabled",
+  });
+  expect(
+    (await apiClient.getUserSettings()).settings.sidebar_views_by_workspace[seedData.workspaceId]
+      .active_view_id,
+  ).toBe("complete-plugin-view");
+});
+
 // @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.3
 // @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.4
 // @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.5

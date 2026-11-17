@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 	"testing/synctest"
@@ -9,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/store"
+	"github.com/stretchr/testify/require"
 )
 
 // @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.4
@@ -58,4 +60,60 @@ func TestSidebarPluginGroupingStateInvalidatesWithoutPublishingValues(t *testing
 			t.Fatal("provider state deletion emitted no invalidation")
 		}
 	})
+}
+
+// @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.4
+func TestSidebarGroupingCatalogRefreshesAfterConfigRotation(t *testing.T) {
+	for _, outcome := range []string{"restart succeeds", "not running", "config write fails", "restart fails"} {
+		t.Run(outcome, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				svc, _, fsStore, rt := newTestServiceWithDir(t)
+				record := installTestPlugin(t, svc, "kandev-plugin-slack")
+				record.SidebarGroupings = []manifest.SidebarGrouping{{ID: "labels", Label: "Labels", Action: "labels.snapshot"}}
+				record.Actions = []manifest.Action{{Key: "labels.snapshot", ResourceScope: manifest.ActionScopeWorkspace}}
+				require.NoError(t, fsStore.Save(record))
+				svc.registry.Add(record)
+				before := svc.SidebarGroupingCatalog()
+				require.Len(t, before, 1)
+				switch outcome {
+				case "not running":
+					rt.Stop(record.ID)
+				case "config write fails":
+					svc.store = &failingStore{Store: fsStore, setConfigErr: errors.New("config commit refused")}
+				case "restart fails":
+					rt.setStartErr(record.ID, errors.New("restart refused"))
+				}
+				events := bus.NewMemoryEventBus(testLogger(t))
+				t.Cleanup(events.Close)
+				svc.eventBus = events
+				received := make(chan any, 4)
+				sub, err := events.Subscribe("plugins.sidebar-grouping.updated", func(_ context.Context, e *bus.Event) error {
+					received <- e.Data
+					return nil
+				})
+				require.NoError(t, err)
+				t.Cleanup(func() { _ = sub.Unsubscribe() })
+				err = svc.UpdateConfig(t.Context(), record.ID, map[string]any{"label": "Updated"})
+				if outcome == "config write fails" || outcome == "restart fails" {
+					require.Error(t, err)
+				} else {
+					require.NoError(t, err)
+				}
+				synctest.Wait()
+				select {
+				case payload := <-received:
+					require.Equal(t, map[string]any{"catalog": true}, payload)
+				default:
+					t.Fatal("admitted config rotation left connected sidebar consumers on the old catalog")
+				}
+				after := svc.SidebarGroupingCatalog()
+				if outcome == "restart fails" {
+					require.Empty(t, after, "a failed restart removes the unavailable provider")
+				} else {
+					require.Len(t, after, 1)
+					require.NotEqual(t, before[0].Generation, after[0].Generation)
+				}
+			})
+		})
+	}
 }

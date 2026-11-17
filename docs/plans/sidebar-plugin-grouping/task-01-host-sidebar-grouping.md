@@ -218,3 +218,30 @@ typecheck and document validation. Native browser suites passed with one worker
 and no retries: six desktop and five phone scenarios. The new Save as regression
 keeps the copied heading collapsed after save/reload and proves source independence.
 Fresh real Tags package proof is recorded in Task 02.
+
+### Round 4 configuration lifecycle correction
+
+The service regression reproduced missing catalog invalidation after a successful
+configuration restart, a save with a stopped runtime and a failed config commit.
+Restart failure was the positive control: its existing deliverer path notified.
+Every admitted policy rotation now defers sidebar catalog invalidation until the
+operation completes. Existing MCP timing, dispatch leases and locks are unchanged.
+
+AC-001.4 owns the lifecycle invariant: a connected saved view must stop using its
+old provider generation. The real service/FSStore/event-bus regression covers
+successful restart, stopped runtime, failed write and failed restart without
+depending on runtime health callbacks. The native scenario requires a completed
+fresh provider-generation response before one Next reaches page two, retaining
+the ordinary saved view. An unrelated or ungrouped response cannot satisfy it.
+Cross-generation reply and workspace fences retain their existing regressions;
+this change adds no task/session scheduling, ownership or replay mechanism.
+
+Final verification passed: `go test -race ./internal/plugins -count=1`
+(`23.762s`), required `make fmt`, changed-package Go lint and catalog/spec lint.
+Rebuilt the complete managed runtime/helper/fixture artifact set without
+bypassing timestamp guards. Native suites passed: seven desktop and five phone
+scenarios, one worker and no retries. The final config-transition scenario
+also passed separately after its observer explicitly waited for completed
+responses and rejected canceled stale reads. Its page-two PNG and the current
+phone pager/chooser PNGs were visually inspected. Evidence is retained under
+the cache-drive `sidebar-grouping-review4-4v7ftoo0` root.
