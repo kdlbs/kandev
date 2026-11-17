@@ -195,6 +195,10 @@ func scenarioAsyncQuestion(e *emitter) {
 	args := clarificationQuestionArgs()
 	args["async"] = true
 	args["request_id"] = "e2e-async-question-db"
+	questions := args["questions"].([]map[string]any)
+	questions[0]["images"] = []map[string]any{
+		{"id": "layout", "path": "question-preview.png", "alt": "Proposed layout"},
+	}
 	result, err := e.callMCPTool("kandev", "ask_user_question_kandev", args)
 	if err != nil {
 		e.text(fmt.Sprintf("Async question failed: %s", err))

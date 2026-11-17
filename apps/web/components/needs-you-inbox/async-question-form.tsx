@@ -128,13 +128,6 @@ function AsyncQuestionItem({
   const { t } = useTranslation();
   return (
     <fieldset className="space-y-2" data-testid="async-question-item">
-      <QuestionImages
-        pendingId={pendingId}
-        questionId={item.id}
-        sessionId={sessionId}
-        images={item.images}
-        apiPath="agent-questions"
-      />
       <legend className="text-sm font-medium">
         {total > 1 ? (
           <span className="mr-1 text-xs text-muted-foreground">
@@ -143,6 +136,13 @@ function AsyncQuestionItem({
         ) : null}
         {item.prompt}
       </legend>
+      <QuestionImages
+        pendingId={pendingId}
+        questionId={item.id}
+        sessionId={sessionId}
+        images={item.images}
+        apiPath="agent-questions"
+      />
       <div className="space-y-1.5">
         {item.options.map((option) => (
           <AsyncQuestionOption

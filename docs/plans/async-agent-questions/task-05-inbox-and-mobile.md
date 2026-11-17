@@ -209,6 +209,11 @@ scroll body. History has bounded load-more, terminal outcomes, and withdrawal
 reasons. Async rows render authorized saved images.
 
 Verification passed: focused Vitest suites, full web typecheck, full web lint,
-i18n check/ratchet, and public-doc validation. Mock scenarios and desktop/mobile
-Playwright specs remain unexecuted because the managed browser runner was not
-available.
+i18n check/ratchet, and public-doc validation. The earlier note that mock
+scenarios and browser specs were unexecuted is superseded by the current-base
+rerun:
+
+- `CAPTURE_PR_ASSETS=1 pnpm e2e:run --project chromium tests/chat/async-agent-questions.spec.ts` — 8 passed (2m12s). This includes the image-bearing Inbox regression: the fieldset legend is its first child.
+- `CAPTURE_PR_ASSETS=1 pnpm e2e:run --project mobile-chrome tests/chat/mobile-async-agent-questions.spec.ts` — 2 passed (11s).
+
+Both runs generated fresh desktop and phone screenshots for the PR description.

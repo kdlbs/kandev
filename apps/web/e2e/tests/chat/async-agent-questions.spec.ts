@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { openTaskSession, waitForAgentMessage, waitForSessionState } from "../../helpers/session";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
+import { seedQuestionImage } from "./question-image-helpers";
 
 async function createAsyncQuestionTask(
   apiClient: ApiClient,
@@ -9,6 +10,7 @@ async function createAsyncQuestionTask(
   title: string,
   scenario: string,
 ) {
+  if (scenario === "/e2e:async-question") seedQuestionImage(seedData.repositoryPath);
   return apiClient.createTaskWithAgent(seedData.workspaceId, title, seedData.agentProfileId, {
     description: scenario,
     workflow_id: seedData.workflowId,
@@ -22,6 +24,7 @@ test.describe("Async agent questions", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     test.setTimeout(120_000);
     const title = "Async Keep Working";
@@ -44,6 +47,17 @@ test.describe("Async agent questions", () => {
     await expect(row.getByText("Agent continues work")).toBeVisible({ timeout: 15_000 });
 
     await row.getByTestId("async-question-row-toggle").click();
+    await expect(row.getByTestId("question-images")).toBeVisible({ timeout: 20_000 });
+    await expect(row.getByRole("img", { name: "Proposed layout", exact: true })).toBeVisible({
+      timeout: 30_000,
+    });
+    const fieldset = row.locator("fieldset").first();
+    await expect
+      .poll(() => fieldset.evaluate((element) => element.firstElementChild?.tagName ?? ""))
+      .toBe("LEGEND");
+    await prCapture.screenshot("desktop-async-question-answer", {
+      caption: "Open async question with its saved image and answer choices",
+    });
     await row.getByTestId("async-question-option").filter({ hasText: "PostgreSQL" }).click();
     await row.getByTestId("async-question-submit").click();
 

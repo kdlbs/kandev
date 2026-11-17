@@ -1,11 +1,13 @@
 import { test, expect } from "../../fixtures/test-base";
 import { openTaskSession, waitForAgentMessage, waitForSessionState } from "../../helpers/session";
+import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 
 test.describe("Mobile async agent questions", () => {
   test("answers a waiting async request in one full-height surface", async ({
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     test.setTimeout(90_000);
     const title = "Mobile Async Waiting";
@@ -40,6 +42,10 @@ test.describe("Mobile async agent questions", () => {
     await row.getByTestId("async-question-row-toggle").tap();
     const surface = testPage.getByTestId("async-question-answer-surface");
     await expect(surface).toBeVisible({ timeout: 15_000 });
+    await waitForFiniteAnimations(surface);
+    await prCapture.screenshot("mobile-async-question-answer", {
+      caption: "Phone async question opened in its full-height answer surface",
+    });
 
     const overflow = await testPage.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
