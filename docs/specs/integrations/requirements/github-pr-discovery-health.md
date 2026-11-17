@@ -2,7 +2,7 @@
 status: draft
 system: integrations
 created: 2026-09-11
-updated: 2026-11-15
+updated: 2026-11-16
 owners:
   - kandev
 ---
@@ -87,6 +87,10 @@ Idle discovery and explicit refresh do not override retirement.
   be identified separately from a quota failure. It shall not trigger an
   immediate fallback using the same invalid query or an automatic retry more
   often than once per minute for that discovery target.
+- **AC-INTEGRATIONS-GITHUB-PR-DISCOVERY-HEALTH-001.8:** Whenever the warning
+  renders, it shall show a retry time only for a valid deadline in the future.
+  Missing, invalid, or expired deadlines shall not remove an unresolved failure
+  or imply recovery. Desktop and phone shall apply the same rule.
 
 ### REQ-INTEGRATIONS-GITHUB-PR-POLLING-001: Adaptive background discovery
 
@@ -115,9 +119,10 @@ Idle discovery and explicit refresh do not override retirement.
   preserve pending work without immediate REST fallback or a provider-failure
   diagnosis. Completed updates shall not consume another fallback opportunity.
 - **AC-INTEGRATIONS-GITHUB-PR-POLLING-002.6:** When local admission supplies a
-  retry boundary, automatic PR monitoring shall resume eligible pending work
-  at that boundary without an additional one-minute delay. Resumption shall
-  obey current admission and shall not block an independently eligible workspace.
+  retry boundary, automatic PR monitoring shall resume each pending target at
+  its own boundary without an additional one-minute delay. One target's
+  deferral shall not replace another target's boundary. Resumption shall obey
+  current admission and shall not block an independently eligible workspace.
 - **AC-INTEGRATIONS-GITHUB-PR-POLLING-002.7:** Resumed work shall use current
   workspace authorization and active watch lifetimes. Removed, retired,
   detached, or superseded targets shall not receive delayed writes or events.
@@ -137,6 +142,7 @@ runtime status, not a permanent incident archive.
 - [System design](../system-design/github-pr-discovery-health.md)
 - [Implementation package](../../../plans/github-pr-discovery-health/plan.md)
 - [Watch reconciliation repair](../../../plans/github-pr-watch-reconciliation/plan.md)
+- [Discovery deferral repair](../../../plans/github-pr-discovery-deferrals/plan.md)
 - [Unreadable fork parent repair](../../../plans/github-fork-parent-unreadable/plan.md)
 
 ## Polling efficiency package

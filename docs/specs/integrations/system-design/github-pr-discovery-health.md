@@ -7,7 +7,7 @@ requirements:
   - REQ-INTEGRATIONS-GITHUB-PR-DISCOVERY-001
   - REQ-INTEGRATIONS-GITHUB-PR-DISCOVERY-HEALTH-001
 created: 2026-09-11
-updated: 2026-11-15
+updated: 2026-11-16
 owners:
   - kandev
 ---
@@ -175,6 +175,15 @@ Drawer. This is the closest shipped mobile exemplar and matches the mobile
 language's temporary-details surface. Keep one internal scroll owner for long
 drawer content, safe-area spacing, focus return, and 44px touch targets.
 The inline warning wraps within the settings column on both viewports.
+
+Health AC .8 belongs in the shared `GitHubPRDiscoveryHealthWarning` component.
+Parse `retry_at` with `parseStrictRfc3339Timestamp` and show the existing retry
+line only when the result is later than the current render time. Compare parser
+nanoseconds to the current millisecond clock after converting units. Omit the
+line for missing, malformed, partial, timezone-less, or expired values. Keep the
+failure category, count, and failure time independent of this condition. Use
+existing status updates and renders, without a new timer or localization key.
+Keep the optional wire field and backend retry aggregation unchanged.
 
 ## Validation and operational boundaries
 
@@ -355,6 +364,9 @@ Do not add one goroutine per watch or wait for admission inside a workspace pass
 
 A pending entry records workspace, unfinished phase, watch IDs and target
 identities, credential scope/generation, and the original retry boundary.
+When one workspace pass defers multiple targets, retain each target's boundary
+independently, including resource-specific retry times. Coalesce consumers of
+the same target only; one target's first error must not set sibling deadlines.
 Unfinished phases include the workflow-attention phase described in the
 [workflow attention design](github-workflow-attention.md#monitored-workflow-phase).
 A wake for workflow-only work resumes that phase alone.
@@ -382,6 +394,17 @@ Local pacing, busy, reserve, and interactive-priority deferrals do not trigger
 REST fallback or authentication circuits. Keep the 5-target workspace and
 10-target cycle limits for genuine transport or unsupported-GraphQL fallback.
 Timer wakes do not replenish that cycle's fallback budget.
+
+This rule also applies after a successful branch batch, during fork-parent
+lookup in `applyBatchedSearchingWatch`. Preserve the typed deferral in the
+internal result before any watch timestamp write. Release the discovery attempt
+without a health success or failure, and report every affected consumer as pending.
+Pass the same error to joined attempts and the existing `prWatchSyncOutcome`.
+The PR monitor then uses its existing continuation timer and admission boundary.
+Keep completed sibling results and prior failure evidence intact.
+When a fork-parent result promotes the representative watch, fan it out to
+duplicate consumers under the immutable original batch target. Promotion mutates
+the representative watch's repository identity to the parent.
 
 Before a resumed provider read or retained-result application, resolve current
 authorization, host, credentials, active watch ID, repository, and target.
@@ -418,6 +441,9 @@ Mock publication in those browser tests proves delivery only.
 The service regression remains the RED test for pacing and batch coupling.
 
 Delivery: [sidebar freshness repair](../../../plans/github-sidebar-pr-freshness/plan.md).
+
+The [discovery deferral repair](../../../plans/github-pr-discovery-deferrals/plan.md)
+extends this path through fork-parent lookup and corrects expired retry text.
 
 ## Polling efficiency delivery
 
