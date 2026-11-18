@@ -50,6 +50,16 @@ func runNativeCheckHelper(mode string) int {
 			return 5
 		}
 		time.Sleep(time.Minute)
+	case "orphan-pipe":
+		// Reports success, then exits while a descendant still holds the
+		// output pipes, so the runner can only finish through WaitDelay.
+		child := exec.Command(os.Args[0])
+		child.Env = append(os.Environ(), nativeCheckHelperEnv+"=sleep")
+		child.Stdout, child.Stderr = os.Stdout, os.Stderr
+		if err := child.Start(); err != nil {
+			return 5
+		}
+		fmt.Println("Current version: 18.13.3\n✔ Already up to date")
 	case "heartbeat":
 		path := os.Getenv(nativeCheckHeartbeatEnv)
 		// Bounded so a regression cannot leave the helper running forever.
@@ -134,6 +144,17 @@ func TestNativeCheckRunnerOutputLimitStopsEarly(t *testing.T) {
 	}
 	if run.Output != (agents.NativeUpdateCheckOutput{}) {
 		t.Error("partial output was returned after overflow")
+	}
+}
+
+func TestNativeCheckRunnerRejectsOutputCutByWaitDelay(t *testing.T) {
+	t.Setenv(nativeCheckHelperEnv, "orphan-pipe")
+	run := execNativeUpdateCheckRunner{timeout: 30 * time.Second}.Run(context.Background(), nativeCheckHelperCommand())
+	if run.Reason != agents.NativeUpdateCheckReasonCheckFailed {
+		t.Fatalf("reason = %q, output = %+v; want check_failed for output closed by WaitDelay", run.Reason, run.Output)
+	}
+	if run.Output != (agents.NativeUpdateCheckOutput{}) {
+		t.Errorf("partial output = %+v, want none", run.Output)
 	}
 }
 

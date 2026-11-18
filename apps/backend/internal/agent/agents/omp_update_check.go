@@ -77,16 +77,18 @@ func scanOmpCheckOutput(text string) ompCheckScan {
 	return scan
 }
 
+// Lines that start with an outcome or version marker must match it exactly;
+// any other text is informational and ignored.
 func (s *ompCheckScan) line(line string) {
 	switch {
 	case line == "":
-	case ompCurrentVersion.MatchString(line):
-		s.current = s.record(s.current, ompCurrentVersion.FindStringSubmatch(line)[1], ompValidVersion)
-	case ompCurrentChannel.MatchString(line):
-		s.channel = s.record(s.channel, ompCurrentChannel.FindStringSubmatch(line)[1], ompChannelName.MatchString)
-	case ompNewVersion.MatchString(line):
+	case strings.HasPrefix(line, "Current version:"):
+		s.current = s.record(s.current, ompMarkerValue(ompCurrentVersion, line), ompValidVersion)
+	case strings.HasPrefix(line, "Current channel:"):
+		s.channel = s.record(s.channel, ompMarkerValue(ompCurrentChannel, line), ompChannelName.MatchString)
+	case strings.HasPrefix(line, "New version available:"):
 		s.available++
-		s.latest = s.record(s.latest, ompNewVersion.FindStringSubmatch(line)[1], ompValidVersion)
+		s.latest = s.record(s.latest, ompMarkerValue(ompNewVersion, line), ompValidVersion)
 	case ompAlreadyUpToDate.MatchString(line):
 		s.upToDate++
 	case ompManagedInstall.MatchString(line):
@@ -96,6 +98,15 @@ func (s *ompCheckScan) line(line string) {
 	case strings.HasPrefix(line, "Switching to "), strings.HasPrefix(line, "Forcing reinstall"):
 		s.transient = true
 	}
+}
+
+// ompMarkerValue returns the marker's captured value, or "" (invalid for every
+// validator) when a reserved line does not match its exact syntax.
+func ompMarkerValue(marker *regexp.Regexp, line string) string {
+	if match := marker.FindStringSubmatch(line); match != nil {
+		return match[1]
+	}
+	return ""
 }
 
 // record keeps the first valid value and flags malformed or conflicting ones.

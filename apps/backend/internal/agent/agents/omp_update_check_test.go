@@ -142,6 +142,21 @@ func TestParseOmpUpdateCheck(t *testing.T) {
 			want:   unknown(NativeUpdateCheckReasonUnrecognizedOutput, "", ""),
 		},
 		{
+			name:   "malformed latest line beside an up-to-date marker",
+			stdout: "Current version: 18.13.3\nNew version available: 18.14.0 extra\n✔ Already up to date\n",
+			want:   unknown(NativeUpdateCheckReasonUnrecognizedOutput, "", ""),
+		},
+		{
+			name:   "malformed duplicate current version line",
+			stdout: "Current version: 18.13.3\nCurrent version: invalid version\n✔ Already up to date\n",
+			want:   unknown(NativeUpdateCheckReasonUnrecognizedOutput, "", ""),
+		},
+		{
+			name:   "empty channel line",
+			stdout: "Current version: 18.13.3\nCurrent channel:\n✔ Already up to date\n",
+			want:   unknown(NativeUpdateCheckReasonUnrecognizedOutput, "", ""),
+		},
+		{
 			name:   "non-zero exit never upgrades an available marker",
 			stdout: "Current version: 18.13.3\nNew version available: 18.14.0\n",
 			exit:   2,

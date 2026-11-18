@@ -79,7 +79,7 @@ func (r execNativeUpdateCheckRunner) Run(ctx context.Context, command agents.Com
 	cmd.Env = r.Environment()
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	cmd.WaitDelay = nativeUpdateCheckWaitDelay
-	exitCode, started := runContainedCommand(cmd)
+	exitCode, started, waitErr := runContainedCommand(cmd)
 	run := nativeUpdateCheckRun{Executable: path}
 	switch {
 	case budget.exceeded():
@@ -90,6 +90,10 @@ func (r execNativeUpdateCheckRunner) Run(ctx context.Context, command agents.Com
 		run.Reason = agents.NativeUpdateCheckReasonCancelled
 	case !started:
 		run.Reason = agents.NativeUpdateCheckReasonNotInstalled
+	case waitErr != nil:
+		// The output was not captured completely (for example, WaitDelay closed
+		// pipes a descendant still held), so it must not be parsed.
+		run.Reason = agents.NativeUpdateCheckReasonCheckFailed
 	default:
 		run.Output = agents.NativeUpdateCheckOutput{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: exitCode}
 	}
@@ -98,8 +102,9 @@ func (r execNativeUpdateCheckRunner) Run(ctx context.Context, command agents.Com
 
 // runContainedCommand starts cmd in its own process tree, terminates the tree
 // on context cancellation, and releases it after every exit so descendants
-// never outlive the check.
-func runContainedCommand(cmd *exec.Cmd) (exitCode int, started bool) {
+// never outlive the check. waitErr reports a Wait failure other than a
+// non-zero exit, which means output capture was incomplete.
+func runContainedCommand(cmd *exec.Cmd) (exitCode int, started bool, waitErr error) {
 	var (
 		treeMu sync.Mutex
 		tree   proctree.Tree
@@ -113,26 +118,30 @@ func runContainedCommand(cmd *exec.Cmd) (exitCode int, started bool) {
 	}
 	proctree.Prepare(cmd)
 	if err := cmd.Start(); err != nil {
-		return -1, false
+		return -1, false, nil
 	}
 	captured, err := proctree.Capture(cmd)
 	if err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
-		return -1, false
+		return -1, false, nil
 	}
 	treeMu.Lock()
 	tree = captured
 	treeMu.Unlock()
-	_ = cmd.Wait()
+	err = cmd.Wait()
 	treeMu.Lock()
 	committed := tree
 	treeMu.Unlock()
 	committed.Kill(cmd)
-	if cmd.ProcessState == nil {
-		return -1, true
+	var exitErr *exec.ExitError
+	if err != nil && !errors.As(err, &exitErr) {
+		waitErr = err
 	}
-	return cmd.ProcessState.ExitCode(), true
+	if cmd.ProcessState == nil {
+		return -1, true, waitErr
+	}
+	return cmd.ProcessState.ExitCode(), true, waitErr
 }
 
 // nativeCheckOutputBudget is shared by stdout and stderr. The first write
