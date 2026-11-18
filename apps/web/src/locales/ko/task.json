@@ -3311,5 +3311,10 @@
   "rootDisabledNoTracker": "이 루트에는 아직 Git 추적기가 없습니다",
   "refreshRepositories": "리포지토리 새로 고침",
   "previewShowComments": "댓글 표시",
+  "previewMoveToolbar": "도구 모음 이동",
+  "previewMoveToolbarHint": "드래그하여 이동합니다. 두 번 클릭하면 맨 위로 돌아갑니다.",
+  "previewRegionDrifted": "이 캡처 이후 페이지 레이아웃이 변경되었습니다. 스크린샷에는 여전히 원래 영역이 표시됩니다. 이 영역을 이동하거나 크기를 조정하면 새 위치에서 다시 캡처합니다.",
+  "previewShowCapture": "캡처 표시",
+  "previewHideCapture": "캡처 숨기기",
   "previewHideComments": "댓글 숨기기"
 }

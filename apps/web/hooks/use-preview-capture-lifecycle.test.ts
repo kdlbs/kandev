@@ -212,12 +212,15 @@ describe("usePreviewCapture closing a comment", () => {
     window.localStorage.clear();
   });
 
-  it("writes comments in the docked panel, where page presses do not close them", () => {
+  it("treats a press inside the page as an outside click while the panel is open", () => {
     const { iframe, result } = setup();
     act(() => result.current.annotation.enter());
-    expect(result.current.inlineComments).toBe(true);
+    expect(result.current.commentPanel.open).toBe(true);
     act(() => dispatch(iframe.contentWindow, textCapture()));
-    expect(bridge.sendSetAnnotationActive).toHaveBeenLastCalledWith(iframe, true, false);
+    expect(bridge.sendSetAnnotationActive).toHaveBeenLastCalledWith(iframe, true, true);
+
+    act(() => dispatch(iframe.contentWindow, bridgeMessage("page-pointerdown", {})));
+    expect(result.current.drafts).toHaveLength(0);
   });
 });
 
@@ -280,11 +283,91 @@ describe("usePreviewCapture pausing the tool", () => {
     expect(bridge.sendSetPreviewCaptureMode).toHaveBeenLastCalledWith(iframe, "element");
   });
 
+  it("closes an open comment and resumes picking when another tool is chosen", () => {
+    const { iframe, result } = setup();
+    act(() => result.current.annotation.enter());
+    act(() => result.current.selectTool("text"));
+    act(() => dispatch(iframe.contentWindow, textCapture()));
+    act(() => result.current.setDraftComment("keep me"));
+    expect(bridge.sendSetPreviewCaptureMode).toHaveBeenLastCalledWith(iframe, null);
+
+    act(() => result.current.selectTool("region"));
+    expect(result.current.openDraft).toBeNull();
+    expect(result.current.drafts).toHaveLength(1);
+    expect(result.current.annotation.tool).toBe("region");
+    expect(bridge.sendSetPreviewCaptureMode).toHaveBeenLastCalledWith(iframe, "screenshot");
+  });
+
+  it("discards an empty capture when another tool is chosen", () => {
+    const { iframe, result } = setup();
+    act(() => result.current.annotation.enter());
+    act(() => result.current.selectTool("text"));
+    act(() => dispatch(iframe.contentWindow, textCapture()));
+    act(() => result.current.selectTool("element"));
+    expect(result.current.drafts).toHaveLength(0);
+    expect(bridge.sendSetPreviewCaptureMode).toHaveBeenLastCalledWith(iframe, "element");
+  });
+
+  it("keeps the open comment when the current tool is chosen again", () => {
+    const { iframe, result } = setup();
+    act(() => result.current.annotation.enter());
+    act(() => result.current.selectTool("text"));
+    act(() => dispatch(iframe.contentWindow, textCapture()));
+    act(() => result.current.selectTool("text"));
+    expect(result.current.openDraft).not.toBeNull();
+  });
+
   it("keeps the Region tool active while a region comment is open", () => {
     mockRaster();
     const { iframe, result } = setup();
     act(() => result.current.annotation.enter());
     act(() => dispatch(iframe.contentWindow, regionSelected()));
     expect(bridge.sendSetPreviewCaptureMode).toHaveBeenLastCalledWith(iframe, "screenshot");
+  });
+});
+
+describe("usePreviewCapture region alignment", () => {
+  const layoutRect = { x: 50, y: 60, width: 20, height: 20 };
+
+  it("marks a region drifted when the page reports it", async () => {
+    mockRaster();
+    const { iframe, result } = setup();
+    act(() => result.current.annotation.enter());
+    act(() =>
+      dispatch(
+        iframe.contentWindow,
+        bridgeMessage("route-changed", { page_route: "/", page_title: "" }),
+      ),
+    );
+    act(() => dispatch(iframe.contentWindow, regionSelected()));
+    const id = result.current.drafts[0].id;
+    act(() =>
+      dispatch(
+        iframe.contentWindow,
+        bridgeMessage("region-layout", {
+          regions: [{ id, rect: layoutRect, visible: true, drifted: true }],
+        }),
+      ),
+    );
+    expect(result.current.regions[0]).toMatchObject({ id, rect: layoutRect, drifted: true });
+  });
+
+  it("opens a saved item's editor beside its highlighted marker", () => {
+    feedback.items = [savedText("saved-1")];
+    const { iframe, result } = setup();
+    act(() => result.current.annotation.enter());
+    act(() => dispatch(iframe.contentWindow, bridgeMessage("marker-activated", { id: "saved-1" })));
+    expect(result.current.editingAnchor).toBeNull();
+
+    act(() =>
+      dispatch(
+        iframe.contentWindow,
+        bridgeMessage("region-layout", {
+          regions: [],
+          highlighted: { id: "saved-1", rect: layoutRect },
+        }),
+      ),
+    );
+    expect(result.current.editingAnchor).not.toBeNull();
   });
 });

@@ -33,6 +33,12 @@ const PREVIEW_HTML = `<!doctype html>
         <div id="scroll-target" style="height:60px;background:#fde68a">Scrollable panel</div>
         <div style="height:600px"></div>
       </div>
+      <section id="centered" style="width:240px;height:80px;margin:24px auto;background:#e0e7ff">
+        Centered card
+      </section>
+      <section id="fluid" style="width:60%;height:80px;margin-top:24px;background:#dcfce7">
+        Fluid card
+      </section>
     </main>
     <script>
       // WebGL draws once without preserveDrawingBuffer, like Flutter's CanvasKit.
@@ -209,6 +215,11 @@ export async function selectGeneratedText(frame: FrameLocator): Promise<void> {
     selection?.addRange(range);
     element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
   });
+}
+
+/** Region outlines drawn over the preview, in creation order. */
+export function regionOutlines(page: Page): Locator {
+  return page.getByTestId("preview-region");
 }
 
 export async function dragScreenshotRegion(

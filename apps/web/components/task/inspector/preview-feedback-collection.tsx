@@ -20,9 +20,9 @@ import {
   evidenceText,
 } from "./preview-feedback-evidence";
 import { PreviewUnsavedDrafts, type PreviewUnsavedDraftsProps } from "./preview-unsaved-drafts";
-import { CaptureNumber, type PreviewInlineComments } from "./preview-inline-comments";
+import { CaptureNumber, type PreviewCommentList } from "./preview-comment-list";
 
-export type { PreviewInlineComments } from "./preview-inline-comments";
+export type { PreviewCommentList } from "./preview-comment-list";
 import type { SelectionCommentComposerProps } from "@/components/shared/selection-comment/selection-comment-composer";
 import type { TaskPreviewFeedback, TaskPreviewFeedbackSnapshot } from "@/lib/types/http";
 
@@ -50,8 +50,8 @@ function keepOpenForCommentSurface(event: {
   if (isInsideSelectionCommentSurface(event.target)) event.preventDefault();
 }
 
-/** Comment form props for editing a saved item, shared by the floating and inline forms. */
-export function usePendingEditorProps(
+/** Comment form props for editing a saved item in the floating comment box. */
+function usePendingEditorProps(
   item: TaskPreviewFeedback,
   collection: PreviewFeedbackCollectionController,
   onClose: () => void,
@@ -94,31 +94,31 @@ function PendingFeedbackItem({
   item,
   collection,
   touch,
-  inline,
+  list,
 }: {
   item: TaskPreviewFeedback;
   collection: PreviewFeedbackCollectionController;
   touch: boolean;
-  inline?: PreviewInlineComments;
+  list?: PreviewCommentList;
 }) {
   const { t } = useTranslation();
   const [editAnchor, setEditAnchor] = useState<{ x: number; y: number } | null>(null);
   const actionClass = touch ? "h-11 min-w-11" : "h-7 min-w-7";
-  const editing = inline?.activeId === item.id;
 
   return (
     <li
       className={cn(
         "rounded-md border p-3",
-        inline && "cursor-pointer",
-        inline?.selectedId === item.id && "border-primary",
+        list && "cursor-pointer",
+        (list?.selectedId === item.id || list?.activeId === item.id) && "border-primary",
       )}
       data-testid="preview-feedback-item"
-      data-selected={inline?.selectedId === item.id ? "true" : undefined}
-      onClick={inline ? () => inline.onSelect(item.id) : undefined}
+      data-selected={list?.selectedId === item.id ? "true" : undefined}
+      data-active={list?.activeId === item.id ? "true" : undefined}
+      onClick={list ? () => list.onSelect(item.id) : undefined}
     >
       <div className="flex items-start gap-2">
-        {inline && <CaptureNumber value={inline.numbers.get(item.id)} />}
+        {list && <CaptureNumber value={list.numbers.get(item.id)} />}
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs text-muted-foreground">
             {item.source_label} · {item.page_route}
@@ -134,7 +134,7 @@ function PendingFeedbackItem({
           className={actionClass}
           onClick={(event) => {
             event.stopPropagation();
-            if (inline) return inline.onOpen(item.id);
+            if (list) return list.onOpen(item.id);
             const bounds = event.currentTarget.getBoundingClientRect();
             setEditAnchor({ x: bounds.left, y: bounds.bottom });
           }}
@@ -155,13 +155,7 @@ function PendingFeedbackItem({
           <IconX className="h-4 w-4" />
         </Button>
       </div>
-      {editing && inline ? (
-        <div className="mt-2" onClick={(event) => event.stopPropagation()}>
-          {inline.renderComposer(item.id)}
-        </div>
-      ) : (
-        <p className="mt-2 break-words text-xs">{item.comment}</p>
-      )}
+      <p className="mt-2 break-words text-xs">{item.comment}</p>
       {editAnchor && (
         <PendingFeedbackEditor
           item={item}
@@ -282,18 +276,18 @@ export function PreviewFeedbackCollection({
   showEmpty = true,
   showErrors = true,
   drafts,
-  inline,
+  list,
 }: {
   collection: PreviewFeedbackCollectionController;
   touch: boolean;
   showEmpty?: boolean;
   showErrors?: boolean;
   drafts?: PreviewUnsavedDraftsProps;
-  inline?: PreviewInlineComments;
+  list?: PreviewCommentList;
 }) {
   return (
     <section className="space-y-2" data-testid="preview-feedback-collection">
-      {drafts && <PreviewUnsavedDrafts {...drafts} touch={touch} inline={inline} />}
+      {drafts && <PreviewUnsavedDrafts {...drafts} touch={touch} list={list} />}
       <CollectionHeader collection={collection} touch={touch} />
       <CollectionStatus collection={collection} showEmpty={showEmpty} showErrors={showErrors} />
       <ul className="space-y-2">
@@ -303,7 +297,7 @@ export function PreviewFeedbackCollection({
             item={item}
             collection={collection}
             touch={touch}
-            inline={inline}
+            list={list}
           />
         ))}
       </ul>

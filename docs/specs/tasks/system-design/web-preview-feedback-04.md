@@ -20,6 +20,11 @@ exit, and Layout sections point here.
 Unchanged: the pending collection, composer delivery, the backend, the
 screenshot limit, and comment-on-selection outside the mode.
 
+[Part 5](web-preview-feedback-05.md) replaces this part's inline panel
+composer with floating comments only, makes the toolbar movable, closes an
+open comment on a tool change, and anchors region outlines to page content.
+Where the two differ, part 5 wins.
+
 ## Requirement mapping
 
 | Criterion | Section |

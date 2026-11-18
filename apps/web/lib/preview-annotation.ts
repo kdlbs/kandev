@@ -1,4 +1,4 @@
-import type { PreviewCaptureMode } from "@/lib/preview-inspect-bridge";
+import type { PreviewCaptureMode, PreviewContentAnchor } from "@/lib/preview-inspect-bridge";
 import type { PreviewCaptureRect } from "@/lib/types/http";
 
 export type PreviewAnnotationTool = "interact" | "text" | "element" | "region";
@@ -76,20 +76,36 @@ export type PreviewFrameMetrics = {
   containerScroll: (selector: string) => { x: number; y: number } | null;
 };
 
+/** The previous rectangle without its content anchor, which a move invalidates. */
+function withoutAnchor(rect: PreviewCaptureRect): PreviewCaptureRect {
+  const {
+    anchor_selector: _selector,
+    anchor_offset_x: _offsetX,
+    anchor_offset_y: _offsetY,
+    anchor_width: _width,
+    anchor_height: _height,
+    ...rest
+  } = rect;
+  return rest;
+}
+
 /**
  * Capture rectangle for a moved or resized region, anchored at the page's
- * current document and container scroll so the bridge keeps tracking it.
+ * current document and container scroll so the bridge keeps tracking it, and
+ * at the element the region now sits on when the page reports one.
  */
 export function recaptureRect(
   previous: PreviewCaptureRect,
   rect: ViewportRect,
   frame: PreviewFrameMetrics,
+  anchor: PreviewContentAnchor | null = null,
 ): PreviewCaptureRect {
   const container = previous.scroll_container_selector
     ? frame.containerScroll(previous.scroll_container_selector)
     : null;
   return {
-    ...previous,
+    ...withoutAnchor(previous),
+    ...anchor,
     ...rect,
     document_x: rect.x + frame.scrollX,
     document_y: rect.y + frame.scrollY,

@@ -1,19 +1,16 @@
 "use client";
 
-import type { ReactNode } from "react";
-
 /**
- * The annotation comment panel's list mode: entries are numbered like their
- * markers, and comments are written in place instead of in a floating form.
+ * The annotation comment panel's list: entries are numbered like their
+ * markers, and opening one edits it in the floating comment box.
  */
-export type PreviewInlineComments = {
+export type PreviewCommentList = {
   numbers: ReadonlyMap<string, number>;
-  /** The draft or saved item whose comment form is open. */
+  /** The draft or saved item whose comment is open in the floating box. */
   activeId: string | null;
   selectedId: string | null;
   onOpen: (id: string) => void;
   onSelect: (id: string) => void;
-  renderComposer: (id: string) => ReactNode;
 };
 
 export function CaptureNumber({ value }: { value: number | undefined }) {

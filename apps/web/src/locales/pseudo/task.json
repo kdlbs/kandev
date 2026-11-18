@@ -3311,5 +3311,10 @@
   "rootDisabledNoTracker": "Ţĥĩś ŕōōţ ĥàś ńō Ĝĩţ ţŕàćķēŕ ŷēţ",
   "refreshRepositories": "Ŕēƒŕēśĥ ŕēƥōśĩţōŕĩēś",
   "previewShowComments": "Śĥōŵ ćōḿḿēńţś",
+  "previewMoveToolbar": "Ḿōvē ţōōĺƀàŕ",
+  "previewRegionDrifted": "Ţĥē ƥàĝē ĺàŷōũţ ćĥàńĝēď śĩńćē ţĥĩś ćàƥţũŕē. Ţĥē śćŕēēńśĥōţ śţĩĺĺ śĥōŵś ţĥē ōŕĩĝĩńàĺ àŕēà. Ḿōvĩńĝ ōŕ ŕēśĩźĩńĝ ţĥĩś ŕēĝĩōń ćàƥţũŕēś ĩţ àĝàĩń ƒŕōḿ ĩţś ńēŵ ƥōśĩţĩōń.",
+  "previewShowCapture": "Śĥōŵ ćàƥţũŕē",
+  "previewHideCapture": "Ĥĩďē ćàƥţũŕē",
+  "previewMoveToolbarHint": "Ďŕàĝ ţō ḿōvē. Ďōũƀĺē-ćĺĩćķ ţō ƥũţ ĩţ ƀàćķ àţ ţĥē ţōƥ.",
   "previewHideComments": "Ĥĩďē ćōḿḿēńţś"
 }

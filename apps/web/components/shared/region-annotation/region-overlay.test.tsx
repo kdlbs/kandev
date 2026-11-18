@@ -100,3 +100,101 @@ describe("RegionOverlay", () => {
     expect(onHandlePointerDown).toHaveBeenCalledTimes(2);
   });
 });
+
+const CAPTURE_TOGGLE = "region-capture-toggle";
+const CAPTURE_IMAGE = "region-capture-image";
+
+const labels = {
+  drifted: "The page layout changed since this capture.",
+  showCapture: "Show capture",
+  hideCapture: "Hide capture",
+};
+
+describe("RegionOverlay alignment controls", () => {
+  const captured = [
+    { index: 0, rect: { x: 1, y: 2, width: 30, height: 20 }, imageUrl: "blob:one" },
+    { index: 1, rect: { x: 40, y: 10, width: 20, height: 20 } },
+  ];
+
+  it("draws a drifted region as a warning with an explanation", () => {
+    render(
+      <RegionOverlay
+        items={captured}
+        selectedIndex={null}
+        draft={null}
+        testId="region"
+        driftedIndexes={new Set([0])}
+        labels={labels}
+      />,
+    );
+    const [drifted, aligned] = screen.getAllByTestId("region");
+    expect(drifted.getAttribute("data-drifted")).toBe("true");
+    expect(drifted.className).toContain("border-amber-500");
+    expect(drifted.className).toContain("border-dashed");
+    expect(screen.getByRole("button", { name: labels.drifted })).toBeTruthy();
+    expect(aligned.getAttribute("data-drifted")).toBeNull();
+    expect(screen.getAllByTestId("region-drift-warning")).toHaveLength(1);
+  });
+
+  it("shows and hides the saved capture over a region with an image", () => {
+    render(
+      <RegionOverlay
+        items={captured}
+        selectedIndex={null}
+        draft={null}
+        testId="region"
+        labels={labels}
+      />,
+    );
+    const toggle = screen.getByRole("button", { name: labels.showCapture });
+    expect(screen.getAllByTestId(CAPTURE_TOGGLE)).toHaveLength(1);
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(toggle);
+    const shown = screen.getByRole("button", { name: labels.hideCapture });
+    expect(shown.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByTestId(CAPTURE_IMAGE).getAttribute("src")).toBe("blob:one");
+
+    fireEvent.click(shown);
+    expect(screen.queryByTestId(CAPTURE_IMAGE)).toBeNull();
+  });
+
+  it("shows the capture while the button is held", () => {
+    render(<RegionOverlay items={captured} selectedIndex={null} draft={null} labels={labels} />);
+    const toggle = screen.getByTestId(CAPTURE_TOGGLE);
+    fireEvent.pointerDown(toggle);
+    expect(screen.getByTestId(CAPTURE_IMAGE)).toBeTruthy();
+    fireEvent.pointerUp(toggle);
+    expect(screen.queryByTestId(CAPTURE_IMAGE)).toBeNull();
+  });
+
+  it("hides the capture when the region starts moving", () => {
+    render(
+      <RegionOverlay
+        items={captured}
+        selectedIndex={null}
+        draft={null}
+        testId="region"
+        labels={labels}
+        onHandlePointerDown={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(CAPTURE_TOGGLE));
+    expect(screen.getByTestId(CAPTURE_IMAGE)).toBeTruthy();
+    fireEvent.pointerDown(screen.getAllByTestId("region")[0]);
+    expect(screen.queryByTestId(CAPTURE_IMAGE)).toBeNull();
+  });
+
+  it("renders no alignment controls without labels", () => {
+    render(
+      <RegionOverlay
+        items={captured}
+        selectedIndex={null}
+        draft={null}
+        driftedIndexes={new Set([0])}
+      />,
+    );
+    expect(screen.queryByTestId(CAPTURE_TOGGLE)).toBeNull();
+    expect(screen.queryByTestId("region-drift-warning")).toBeNull();
+  });
+});

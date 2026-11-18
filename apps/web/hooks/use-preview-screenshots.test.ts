@@ -4,6 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const raster = vi.hoisted(() => ({ rasterizePreviewRegion: vi.fn() }));
 vi.mock("@/lib/preview-screenshot", () => raster);
 vi.mock("html2canvas-pro", () => ({ default: vi.fn() }));
+const anchorRequest = vi.hoisted(() => ({ requestRegionAnchor: vi.fn() }));
+vi.mock("@/lib/preview-inspect-bridge", async () => ({
+  ...(await vi.importActual<object>("@/lib/preview-inspect-bridge")),
+  ...anchorRequest,
+}));
 vi.mock("@/lib/api/domains/attachment-api", () => ({
   deleteAttachment: vi.fn(),
   uploadAttachment: vi.fn(),
@@ -107,5 +112,46 @@ describe("usePreviewScreenshots region capture", () => {
     await waitFor(() => expect(result.current.screenshots.isRasterizing).toBe(false));
     expect(result.current.drafts.drafts).toHaveLength(0);
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:capture");
+  });
+});
+
+describe("usePreviewScreenshots recapture", () => {
+  it("stores the anchor the page reports for a moved region", async () => {
+    raster.rasterizePreviewRegion.mockResolvedValue(image);
+    const anchor = {
+      anchor_selector: "section#card",
+      anchor_offset_x: 5,
+      anchor_offset_y: 6,
+      anchor_width: 300,
+      anchor_height: 200,
+    };
+    anchorRequest.requestRegionAnchor.mockResolvedValue(anchor);
+    const { result } = renderScreenshots();
+    act(() => result.current.screenshots.captureRegion(region));
+    await waitFor(() => expect(result.current.screenshots.isRasterizing).toBe(false));
+    const id = result.current.drafts.drafts[0].id;
+
+    let ok = false;
+    await act(async () => {
+      ok = await result.current.screenshots.recaptureRegion(id, {
+        x: 40,
+        y: 50,
+        width: 80,
+        height: 30,
+      });
+    });
+
+    expect(ok).toBe(true);
+    expect(anchorRequest.requestRegionAnchor).toHaveBeenCalledWith(expect.anything(), {
+      x: 40,
+      y: 50,
+      width: 80,
+      height: 30,
+    });
+    const payload = result.current.drafts.drafts[0].payload;
+    expect(payload.kind === "screenshot" && payload.capture_rect).toMatchObject({
+      x: 40,
+      ...anchor,
+    });
   });
 });

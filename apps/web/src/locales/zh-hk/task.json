@@ -3311,5 +3311,10 @@
   "rootDisabledNoTracker": "此根目錄還沒有 Git 跟蹤器",
   "refreshRepositories": "刷新儲存庫",
   "previewShowComments": "顯示評論",
+  "previewMoveToolbar": "移動工具欄",
+  "previewMoveToolbarHint": "拖動以移動。雙擊可將其放回頂部。",
+  "previewRegionDrifted": "自此次截取以來，頁面佈局已發生變化。截圖仍顯示原始區域。移動或調整此區域的大小會在新位置重新截取。",
+  "previewShowCapture": "顯示截取內容",
+  "previewHideCapture": "隱藏截取內容",
   "previewHideComments": "隱藏評論"
 }

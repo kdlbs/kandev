@@ -314,3 +314,50 @@ describe("preview inspector protocol 3", () => {
     ]);
   });
 });
+
+describe("preview region anchors", () => {
+  const region = { x: 10, y: 20, width: 100, height: 40 };
+  const anchor = {
+    anchor_selector: "section#card",
+    anchor_offset_x: 10,
+    anchor_offset_y: 20,
+    anchor_width: 300,
+    anchor_height: 200,
+  };
+
+  it("accepts drift, a highlighted marker, and anchored regions", () => {
+    const entry = { id: "r1", rect: region, visible: true, drifted: true };
+    expect(
+      isInspectorMessage(
+        message(REGION_LAYOUT, { regions: [entry], highlighted: { id: "m1", rect: region } }),
+      ),
+    ).toBe(true);
+    expect(
+      isInspectorMessage(message(REGION_LAYOUT, { regions: [entry], highlighted: null })),
+    ).toBe(true);
+    expect(
+      isInspectorMessage(message(REGION_LAYOUT, { regions: [{ ...entry, drifted: "yes" }] })),
+    ).toBe(false);
+    expect(
+      isInspectorMessage(message(REGION_LAYOUT, { regions: [], highlighted: { id: "m1" } })),
+    ).toBe(false);
+
+    const selected = (capture_rect: unknown) =>
+      message("screenshot-region-selected", { page_route: "/", page_title: "", capture_rect });
+    expect(isInspectorMessage(selected({ ...region, ...anchor }))).toBe(true);
+    expect(
+      isInspectorMessage(selected({ ...region, ...anchor, anchor_selector: "x".repeat(5000) })),
+    ).toBe(false);
+    expect(isInspectorMessage(selected({ ...region, ...anchor, anchor_width: "300" }))).toBe(false);
+  });
+
+  it("accepts anchor replies with an anchor or none", () => {
+    expect(isInspectorMessage(message("region-anchored", { request_id: "a", anchor }))).toBe(true);
+    expect(isInspectorMessage(message("region-anchored", { request_id: "a", anchor: null }))).toBe(
+      true,
+    );
+    expect(
+      isInspectorMessage(message("region-anchored", { request_id: "a", anchor: { x: 1 } })),
+    ).toBe(false);
+  });
+});

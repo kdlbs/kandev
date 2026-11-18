@@ -5,7 +5,6 @@ import type { PreviewCaptureController } from "@/hooks/use-preview-capture";
 const touch = vi.hoisted(() => ({ value: false }));
 vi.mock("@/hooks/use-compact-task-chrome", () => ({ useTouchDrawer: () => touch.value }));
 
-import { PreviewAnnotationLayer } from "./preview-annotation-layer";
 import { PreviewAnnotationHost } from "./preview-comment-panel";
 
 const screenshotDraft = (uniformOverCanvas = false) => ({
@@ -56,9 +55,9 @@ function controller(overrides: Record<string, unknown> = {}) {
     mutationError: null,
     acknowledgedMode: "screenshot",
     commentPanel: { open: false, setOpen: vi.fn(), toggle: vi.fn(), touch: false, docked: false },
-    inlineComments: false,
     selectedId: null,
     selectCapture: vi.fn(),
+    selectTool: vi.fn(),
     openCapture: vi.fn(),
     recaptureRegion: vi.fn(),
     captureSelection: vi.fn(),
@@ -79,7 +78,11 @@ function controller(overrides: Record<string, unknown> = {}) {
 }
 
 function renderLayer(capture: PreviewCaptureController) {
-  return render(<PreviewAnnotationLayer capture={capture} taskId="task-1" />);
+  return render(
+    <PreviewAnnotationHost capture={capture} showLayer taskId="task-1">
+      <iframe title="page" />
+    </PreviewAnnotationHost>,
+  );
 }
 
 beforeEach(() => {
@@ -99,9 +102,27 @@ describe("PreviewAnnotationLayer toolbar", () => {
     expect(screen.getByTestId("preview-annotation-count").textContent).toContain("2");
 
     fireEvent.click(screen.getByTestId("preview-tool-element"));
-    expect(capture.annotation.setTool).toHaveBeenCalledWith("element");
+    expect(capture.selectTool).toHaveBeenCalledWith("element");
     fireEvent.click(screen.getByTestId("preview-annotation-exit"));
     expect(capture.annotation.exit).toHaveBeenCalled();
+  });
+
+  it("offers a drag handle on fine pointers only", () => {
+    renderLayer(controller());
+    const handle = screen.getByTestId("preview-annotation-toolbar-handle");
+    expect(handle.getAttribute("aria-label")).toBe("Move toolbar");
+    cleanup();
+
+    touch.value = true;
+    renderLayer(controller());
+    expect(screen.queryByTestId("preview-annotation-toolbar-handle")).toBeNull();
+  });
+
+  it("stacks the toolbar above the overlay panel, outside the annotation layer", () => {
+    renderLayer(controller());
+    const toolbar = screen.getByTestId("preview-annotation-toolbar");
+    expect(screen.getByTestId("preview-annotation-layer").contains(toolbar)).toBe(false);
+    expect(screen.getByTestId("preview-annotation-frame").contains(toolbar)).toBe(true);
   });
 
   it("renders nothing of the mode while inactive", () => {
@@ -177,12 +198,37 @@ describe("PreviewAnnotationLayer regions", () => {
     expect(screen.getAllByTestId("region-handle")).toHaveLength(8);
 
     rerender(
-      <PreviewAnnotationLayer
+      <PreviewAnnotationHost
         capture={controller({ regions, annotation: { tool: "interact" } })}
+        showLayer
         taskId="task-1"
-      />,
+      >
+        <iframe title="page" />
+      </PreviewAnnotationHost>,
     );
     expect(screen.queryAllByTestId("region-handle")).toHaveLength(0);
+  });
+
+  // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-007.3
+  // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-007.4
+  it("warns about a drifted region and shows a saved capture on request", () => {
+    renderLayer(
+      controller({
+        regions: [
+          { ...regions[0], drifted: true, imageUrl: "blob:saved" },
+          { ...regions[1], drifted: false },
+        ],
+      }),
+    );
+    const [drifted, aligned] = screen.getAllByTestId("preview-region");
+    expect(drifted.getAttribute("data-drifted")).toBe("true");
+    expect(aligned.getAttribute("data-drifted")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /page layout changed since this capture/ }),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show capture" }));
+    expect(screen.getByTestId("region-capture-image").getAttribute("src")).toBe("blob:saved");
   });
 
   it("shows a recapture failure", () => {
@@ -261,22 +307,11 @@ function panelController(overrides: Record<string, unknown> = {}) {
       ["draft-1", 2],
     ]),
     commentPanel: { open: true, setOpen: vi.fn(), toggle: vi.fn(), touch: false, docked: true },
-    inlineComments: true,
     ...overrides,
   });
 }
 
-function renderHost(capture: PreviewCaptureController) {
-  return render(
-    <PreviewAnnotationHost
-      capture={capture}
-      showLayer
-      layer={<PreviewAnnotationLayer capture={capture} taskId="task-1" />}
-    >
-      <iframe title="page" />
-    </PreviewAnnotationHost>,
-  );
-}
+const renderHost = renderLayer;
 
 // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-006.1
 describe("PreviewAnnotationLayer comment panel toggle", () => {
@@ -304,23 +339,38 @@ describe("PreviewAnnotationLayer comment panel toggle", () => {
   });
 
   it("gives the page the full width when the panel is hidden", () => {
-    renderHost(panelController({ inlineComments: false }));
+    renderHost(
+      panelController({
+        commentPanel: {
+          open: false,
+          setOpen: vi.fn(),
+          toggle: vi.fn(),
+          touch: false,
+          docked: false,
+        },
+      }),
+    );
     expect(screen.queryByTestId(COMMENT_PANEL)).toBeNull();
   });
 });
 
 // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-006.2
 // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-006.3
-describe("PreviewAnnotationLayer inline comments", () => {
-  it("writes a new capture's comment in the panel instead of floating", () => {
+describe("PreviewAnnotationLayer comment list", () => {
+  it("writes a new capture's comment in the floating box while the panel is open", () => {
     const draft = screenshotDraft();
     renderHost(panelController({ drafts: [draft], openDraft: draft }));
     const panel = screen.getByTestId(COMMENT_PANEL);
-    expect(panel.querySelector('[data-testid="preview-feedback-draft-input"]')).not.toBeNull();
-    expect(screen.getAllByTestId("preview-feedback-draft")).toHaveLength(1);
+    expect(panel.querySelector('[data-testid="preview-feedback-draft-input"]')).toBeNull();
+    const surfaces = screen.getAllByTestId("preview-feedback-draft");
+    expect(surfaces).toHaveLength(1);
+    expect(panel.contains(surfaces[0])).toBe(false);
+    expect(
+      panel.querySelector('[data-testid="preview-unsaved-draft"]')?.getAttribute("data-active"),
+    ).toBe("true");
   });
 
-  it("numbers entries like their markers and edits a saved item in place", () => {
+  it("numbers entries like their markers and edits a saved item in the floating box", () => {
     const capture = panelController();
     const { rerender } = renderHost(capture);
     const item = screen.getByTestId("preview-feedback-item");
@@ -333,17 +383,17 @@ describe("PreviewAnnotationLayer inline comments", () => {
 
     const editing = panelController({ editingItem: savedItem });
     rerender(
-      <PreviewAnnotationHost
-        capture={editing}
-        showLayer
-        layer={<PreviewAnnotationLayer capture={editing} taskId="task-1" />}
-      >
+      <PreviewAnnotationHost capture={editing} showLayer taskId="task-1">
         <iframe title="page" />
       </PreviewAnnotationHost>,
     );
     const panel = screen.getByTestId(COMMENT_PANEL);
-    expect(panel.querySelector('[data-testid="preview-feedback-edit-input"]')).not.toBeNull();
-    expect(screen.getAllByTestId("preview-feedback-edit")).toHaveLength(1);
+    expect(panel.querySelector('[data-testid="preview-feedback-edit-input"]')).toBeNull();
+    const editors = screen.getAllByTestId("preview-feedback-edit");
+    expect(editors).toHaveLength(1);
+    expect(panel.contains(editors[0])).toBe(false);
+    expect(screen.getByTestId("preview-feedback-item").getAttribute("data-active")).toBe("true");
+    expect(screen.getByTestId("preview-feedback-item").textContent).toContain("Make it bigger");
   });
 
   it("hides the panel from its header", () => {

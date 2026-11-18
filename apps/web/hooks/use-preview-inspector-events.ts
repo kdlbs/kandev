@@ -6,6 +6,7 @@ import {
   type InspectorMessage,
   type PreviewCaptureDraft,
   type PreviewCaptureMode,
+  type PreviewHighlightedLayout,
   type PreviewRegionLayout,
   type PreviewScreenshotRegion,
 } from "@/lib/preview-inspect-bridge";
@@ -21,7 +22,10 @@ export type PreviewInspectorHandlers = {
   onCapture: (draft: PreviewCaptureDraft) => void;
   onRegionSelected: (region: PreviewScreenshotRegion) => void;
   onSelectionChanged: (rect: PreviewCaptureRect | null) => void;
-  onRegionLayout: (regions: PreviewRegionLayout[]) => void;
+  onRegionLayout: (
+    regions: PreviewRegionLayout[],
+    highlighted: PreviewHighlightedLayout | null,
+  ) => void;
   onEscape: () => void;
   onMarkerActivated: (id: string) => void;
   onPagePointerDown: () => void;
@@ -64,7 +68,7 @@ function dispatchInspectorMessage(data: unknown, handlers: PreviewInspectorHandl
       handlers.onSelectionChanged(handlers.enabled ? data.payload.rect : null);
       break;
     case "region-layout":
-      handlers.onRegionLayout(data.payload.regions);
+      handlers.onRegionLayout(data.payload.regions, data.payload.highlighted ?? null);
       break;
     case "escape":
       handlers.onEscape();

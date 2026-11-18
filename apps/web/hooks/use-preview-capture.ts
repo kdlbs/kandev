@@ -7,6 +7,7 @@ import {
   sendCaptureSelection,
   sendProjectPreviewMarkers,
   type PreviewCaptureMode,
+  type PreviewHighlightedLayout,
   type PreviewMarkerProjection,
   type PreviewRegionAnchor,
   type PreviewRegionLayout,
@@ -14,6 +15,7 @@ import {
 import {
   captureNumbers,
   closeCommentStep,
+  type PreviewAnnotationTool,
   isScreenshotLimitReached,
   nextEscapeStep,
 } from "@/lib/preview-annotation";
@@ -26,6 +28,13 @@ import { usePreviewDraftSave, type PreviewCaptureSource } from "./use-preview-dr
 import { usePreviewDrafts, type PreviewDraftEntry } from "./use-preview-drafts";
 import { usePreviewInspectorEvents } from "./use-preview-inspector-events";
 import { usePreviewScreenshots } from "./use-preview-screenshots";
+import {
+  editingItemRect,
+  openDraftRect,
+  regionSources,
+  regionViews,
+  type PreviewRegionView,
+} from "./preview-region-views";
 
 export type { PreviewCaptureSource } from "./use-preview-draft-save";
 export type {
@@ -34,25 +43,13 @@ export type {
   PreviewScreenshotDraft,
 } from "./use-preview-drafts";
 export type { PreviewCaptureError } from "./use-preview-screenshots";
+export type { PreviewRegionView } from "./preview-region-views";
 
 type UsePreviewCaptureOptions = {
   taskId: string | null | undefined;
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
   source: PreviewCaptureSource;
   enabled: boolean;
-};
-
-/** A screenshot region drawn over the preview, in iframe-viewport CSS pixels. */
-export type PreviewRegionView = {
-  id: string;
-  index: number;
-  rect: { x: number; y: number; width: number; height: number };
-  pending: boolean;
-  /** The image is still being captured. */
-  busy: boolean;
-  /** Shared with the in-page marker and the comment list. */
-  number: number;
-  title?: string;
 };
 
 function belongsToSource(item: TaskPreviewFeedback, source: PreviewCaptureSource) {
@@ -87,70 +84,6 @@ function draftMarker(draft: PreviewDraftEntry): PreviewMarkerProjection {
   };
 }
 
-type RegionSource = {
-  id: string;
-  route: string;
-  rect: PreviewCaptureRect;
-  pending: boolean;
-  busy: boolean;
-};
-
-function regionSources(items: TaskPreviewFeedback[], drafts: PreviewDraftEntry[]) {
-  const saved: RegionSource[] = items.flatMap((item) =>
-    item.kind === "screenshot" && item.capture_rect
-      ? [
-          {
-            id: item.id,
-            route: sanitizePreviewPageRoute(item.page_route),
-            rect: item.capture_rect,
-            pending: false,
-            busy: false,
-          },
-        ]
-      : [],
-  );
-  const unsaved: RegionSource[] = drafts.flatMap((draft) =>
-    draft.payload.kind === "screenshot"
-      ? [
-          {
-            id: draft.id,
-            route: draft.payload.page_route,
-            rect: draft.payload.capture_rect,
-            pending: true,
-            busy: draft.payload.screenshot === null,
-          },
-        ]
-      : [],
-  );
-  return [...saved, ...unsaved];
-}
-
-function regionViews(
-  sources: RegionSource[],
-  route: string,
-  layouts: Record<string, PreviewRegionLayout>,
-  labels: { comments: Record<string, string>; numbers: Map<string, number> },
-): PreviewRegionView[] {
-  return sources
-    .filter((region) => region.route === route)
-    .flatMap((region, index) => {
-      const layout = layouts[region.id];
-      if (layout && !layout.visible) return [];
-      const { x, y, width, height } = layout?.rect ?? region.rect;
-      return [
-        {
-          id: region.id,
-          index,
-          rect: { x, y, width, height },
-          pending: region.pending,
-          busy: region.busy,
-          number: labels.numbers.get(region.id) ?? index + 1,
-          title: labels.comments[region.id],
-        },
-      ];
-    });
-}
-
 function taskWorkspaceID(
   taskID: string | null | undefined,
   state: Parameters<Parameters<typeof useAppStore>[0]>[0],
@@ -162,11 +95,6 @@ function taskWorkspaceID(
       .flatMap((snapshot) => snapshot.tasks)
       .find((item) => item.id === taskID);
   return task?.workspaceId ?? state.workspaces.activeId ?? null;
-}
-
-function lastTextRect(draft: PreviewDraftEntry["payload"]) {
-  const rects = draft.text_anchor?.rects;
-  return rects?.length ? rects[rects.length - 1] : null;
 }
 
 /** Viewport point below a rectangle in iframe coordinates, clamped to the visible iframe. */
@@ -235,6 +163,7 @@ function usePreviewPageState() {
   const [acknowledgedMode, setAcknowledgedMode] = useState<PreviewCaptureMode | null>(null);
   const [selectionRect, setSelectionRect] = useState<PreviewCaptureRect | null>(null);
   const [layouts, setLayouts] = useState<Record<string, PreviewRegionLayout>>({});
+  const [highlighted, setHighlighted] = useState<PreviewHighlightedLayout | null>(null);
   return {
     pageRoute,
     pageTitle,
@@ -242,6 +171,8 @@ function usePreviewPageState() {
     acknowledgedMode,
     selectionRect,
     layouts,
+    highlighted,
+    setHighlighted,
     setCandidateLabel,
     setAcknowledgedMode,
     setSelectionRect,
@@ -303,12 +234,24 @@ function usePreviewSurfaces(
     [closeComment, drafts, setEditingItemId, setPanelOpen, touch],
   );
 
+  /** Choosing another tool closes the open comment, so the new tool works at once. */
+  const { tool, setTool } = annotation;
+  const selectTool = useCallback(
+    (next: PreviewAnnotationTool) => {
+      if (next === tool) return;
+      if (surfaceOpen) closeComment();
+      setTool(next);
+    },
+    [closeComment, setTool, surfaceOpen, tool],
+  );
+
   return {
     editingItem,
     closeItemEditor: () => setEditingItemId(null),
     closeComment,
     handleEscape,
     openCapture,
+    selectTool,
   };
 }
 
@@ -369,15 +312,6 @@ function useRegionProjection(
   return { projectMarkers, regions };
 }
 
-function openDraftRect(openDraft: PreviewDraftEntry | null, regions: PreviewRegionView[]) {
-  if (!openDraft) return null;
-  return (
-    regions.find((region) => region.id === openDraft.id)?.rect ??
-    openDraft.payload.capture_rect ??
-    lastTextRect(openDraft.payload)
-  );
-}
-
 type CaptureEventDeps = {
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
   enabled: boolean;
@@ -415,8 +349,10 @@ function useCaptureEvents(deps: CaptureEventDeps) {
       screenshots.captureRegion(region);
     },
     onSelectionChanged: page.setSelectionRect,
-    onRegionLayout: (regions) =>
-      page.setLayouts(Object.fromEntries(regions.map((region) => [region.id, region]))),
+    onRegionLayout: (regions, highlighted) => {
+      page.setLayouts(Object.fromEntries(regions.map((region) => [region.id, region])));
+      page.setHighlighted(highlighted);
+    },
     onEscape: surfaces.handleEscape,
     onMarkerActivated: surfaces.openCapture,
     onPagePointerDown: surfaces.closeComment,
@@ -438,7 +374,7 @@ function useAnnotationModes(options: {
     enabled: options.enabled,
     regionBlocked: options.regionBlocked,
     paused: isPausingComment(openDraft, editingItem),
-    surfaceOpen: (openDraft !== null || editingItem !== null) && !commentPanel.docked,
+    surfaceOpen: openDraft !== null || editingItem !== null,
   });
   return { commentPanel, annotation };
 }
@@ -504,7 +440,7 @@ export function usePreviewCapture({
 
   const { regions } = projection;
   const openDraft = drafts.openDraft;
-  const editingRect = regions.find((region) => region.id === surfaces.editingItem?.id)?.rect;
+  const editingRect = editingItemRect(surfaces.editingItem, regions, page.highlighted);
   return {
     ...feedback,
     ...surfaces,
@@ -522,14 +458,12 @@ export function usePreviewCapture({
     },
     captureNumbers: collections.numbers,
     commentPanel,
-    /** Comments are written in the docked panel instead of floating over the page. */
-    inlineComments: annotation.active && commentPanel.docked,
     selectedId,
     /** Highlights a capture's marker from the comment list. */
     selectCapture: setSelectedId,
     discardDraft: drafts.discard,
     saveDraft: save.saveDraft,
-    editingAnchor: anchorBelow(iframeRef.current, editingRect ?? null),
+    editingAnchor: anchorBelow(iframeRef.current, editingRect),
     regions,
     recaptureRegion: screenshots.recaptureRegion,
     recaptureFailed: screenshots.recaptureFailed,
@@ -543,6 +477,7 @@ export function usePreviewCapture({
     isUploading: save.isUploading,
     handleIframeLoad: () => {
       page.setLayouts({});
+      page.setHighlighted(null);
       annotation.resend();
       projection.projectMarkers();
     },

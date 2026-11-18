@@ -6,6 +6,10 @@
   var Z_INDEX = 2147483640;
   var MAX_OUTER_HTML = 65536;
   var MAX_REGIONS = 32;
+  // An anchor that changes size by more than this has probably reflowed its content.
+  var ANCHOR_TOLERANCE_PX = 8;
+  var ANCHOR_TOLERANCE_RATIO = 0.05;
+  var VIEWPORT_TOLERANCE_PX = 8;
   var mode = null;
   var annotationActive = false;
   var surfaceOpen = false;
@@ -25,6 +29,8 @@
   var lastSelectionRect = 'null';
   var selectionFrame = false;
   var layoutFrame = false;
+  var mutationObserver = null;
+  var resizeObserver = null;
   var originalCursor = document.documentElement.style.cursor;
   var originalTouchAction = document.documentElement.style.touchAction;
 
@@ -45,7 +51,7 @@
     try {
       var params = new URLSearchParams(location.search);
       params.forEach(function (value, name) {
-        if (sensitiveQueryParameter.test(name)) return;
+        if (sensitiveQueryParameter.test(name) || /^kandev_/.test(name)) return;
         kept.push(encodeURIComponent(name) + '=' + encodeURIComponent(value));
       });
     } catch (error) {}
@@ -413,7 +419,10 @@
     hideScreenshotOverlay();
     if (width < 5 || height < 5) return false;
     var identity = pageIdentity();
-    var captureRect = rectSnapshot({ left: left, top: top, width: width, height: height });
+    var viewportRect = { left: left, top: top, width: width, height: height };
+    var captureRect = rectSnapshot(viewportRect);
+    var anchor = regionAnchor(viewportRect);
+    if (anchor) Object.assign(captureRect, anchor);
     var container = screenshotContainer;
     screenshotContainer = null;
     var selector = container ? getSelector(container) : undefined;
@@ -531,9 +540,21 @@
     return scrollsY || scrollsX;
   }
 
+  // Topmost page element under a point, skipping Kandev's own markers and overlays.
+  function pageElementAt(x, y) {
+    if (typeof document.elementsFromPoint === 'function') {
+      var stack = document.elementsFromPoint(x, y);
+      for (var index = 0; index < stack.length; index += 1) {
+        if (!isInspectorNode(stack[index])) return stack[index];
+      }
+      return null;
+    }
+    return typeof document.elementFromPoint === 'function' ? document.elementFromPoint(x, y) : null;
+  }
+
   // Nearest scrollable ancestor under a point, or null for the document scroller.
   function scrollContainerAt(x, y) {
-    var current = typeof document.elementFromPoint === 'function' ? document.elementFromPoint(x, y) : null;
+    var current = pageElementAt(x, y);
     while (current && current !== document.body && current !== document.documentElement) {
       if (current.nodeType === Node.ELEMENT_NODE && !isInspectorNode(current) && isScrollable(current)) {
         return current;
@@ -543,51 +564,168 @@
     return null;
   }
 
+  function containsRect(outer, inner) {
+    return outer.width > 0 && outer.height > 0
+      && outer.left <= inner.left + 1 && outer.top <= inner.top + 1
+      && outer.left + outer.width >= inner.left + inner.width - 1
+      && outer.top + outer.height >= inner.top + inner.height - 1;
+  }
+
+  // The smallest page element containing a viewport rectangle, so the region
+  // can follow it when the layout changes. The document itself never anchors.
+  function regionAnchor(viewportRect) {
+    var current = pageElementAt(viewportRect.left + viewportRect.width / 2,
+      viewportRect.top + viewportRect.height / 2);
+    while (current && current !== document.body && current !== document.documentElement) {
+      if (current.nodeType === Node.ELEMENT_NODE && !isInspectorNode(current)) {
+        var bounds = current.getBoundingClientRect();
+        if (containsRect(bounds, viewportRect)) {
+          var selector = getSelector(current);
+          if (!selector) return null;
+          return {
+            anchor_selector: selector,
+            anchor_offset_x: viewportRect.left - bounds.left,
+            anchor_offset_y: viewportRect.top - bounds.top,
+            anchor_width: bounds.width,
+            anchor_height: bounds.height,
+          };
+        }
+      }
+      current = current.parentElement;
+    }
+    return null;
+  }
+
+  function sizeChanged(current, captured) {
+    if (typeof captured !== 'number' || !isFinite(captured)) return false;
+    return Math.abs(current - captured) > Math.max(ANCHOR_TOLERANCE_PX, captured * ANCHOR_TOLERANCE_RATIO);
+  }
+
+  function queryOrNull(selector) {
+    try { return document.querySelector(selector); } catch (error) { return null; }
+  }
+
   function finiteOr(value, fallback) {
     return typeof value === 'number' && isFinite(value) ? value : fallback;
   }
 
-  // Current viewport rectangle of a region: its capture position, minus the
-  // container and document scroll that happened since.
-  function regionLayout(region) {
-    var rect = region.capture_rect || {};
-    var dx = 0;
-    var dy = 0;
-    var visible = true;
-    if (rect.scroll_container_selector) {
-      var container = null;
-      try { container = document.querySelector(rect.scroll_container_selector); } catch (error) {}
-      if (container) {
-        dx = container.scrollLeft - finiteOr(rect.container_scroll_x, 0);
-        dy = container.scrollTop - finiteOr(rect.container_scroll_y, 0);
-      } else {
-        visible = false;
-      }
+  // Viewport position of an anchored region, or null when its anchor has no
+  // rendered box. The anchor's bounding box already includes every scroll.
+  function anchoredPosition(rect, container) {
+    var anchor = queryOrNull(rect.anchor_selector);
+    if (!anchor) return null;
+    var bounds = anchor.getBoundingClientRect();
+    if (!bounds.width && !bounds.height) return null;
+    observeAnchor(anchor);
+    var position = {
+      x: bounds.left + finiteOr(rect.anchor_offset_x, 0),
+      y: bounds.top + finiteOr(rect.anchor_offset_y, 0),
+      drifted: sizeChanged(bounds.width, rect.anchor_width) || sizeChanged(bounds.height, rect.anchor_height),
+    };
+    // Content inside the container scrolls without moving an anchor that holds the container.
+    if (container && anchor.contains(container)) {
+      position.x -= container.scrollLeft - finiteOr(rect.container_scroll_x, 0);
+      position.y -= container.scrollTop - finiteOr(rect.container_scroll_y, 0);
     }
+    return position;
+  }
+
+  // Capture position minus the container and document scroll that happened since.
+  function documentPosition(rect, container) {
+    var dx = container ? container.scrollLeft - finiteOr(rect.container_scroll_x, 0) : 0;
+    var dy = container ? container.scrollTop - finiteOr(rect.container_scroll_y, 0) : 0;
     var documentX = finiteOr(rect.document_x, finiteOr(rect.x, 0) + finiteOr(rect.scroll_x, 0));
     var documentY = finiteOr(rect.document_y, finiteOr(rect.y, 0) + finiteOr(rect.scroll_y, 0));
+    return { x: documentX - window.scrollX - dx, y: documentY - window.scrollY - dy };
+  }
+
+  function viewportWidthChanged(rect) {
+    return typeof rect.viewport_width === 'number'
+      && Math.abs(window.innerWidth - rect.viewport_width) > VIEWPORT_TOLERANCE_PX;
+  }
+
+  // Current viewport rectangle of a region, and whether it still lines up with
+  // the content it was drawn over.
+  function regionLayout(region) {
+    var rect = region.capture_rect || {};
+    var container = null;
+    var visible = true;
+    if (rect.scroll_container_selector) {
+      container = queryOrNull(rect.scroll_container_selector);
+      if (!container) visible = false;
+    }
+    var position = rect.anchor_selector ? anchoredPosition(rect, container) : null;
+    var drifted;
+    if (position) {
+      drifted = position.drifted;
+    } else {
+      position = documentPosition(rect, container);
+      drifted = rect.anchor_selector ? true : viewportWidthChanged(rect);
+    }
     return {
       id: region.id,
       rect: {
-        x: documentX - window.scrollX - dx,
-        y: documentY - window.scrollY - dy,
+        x: position.x,
+        y: position.y,
         width: finiteOr(rect.width, 0),
         height: finiteOr(rect.height, 0),
       },
       visible: visible,
+      drifted: drifted,
     };
+  }
+
+  // Where the highlighted marker is, so Kandev can open its comment beside it.
+  function highlightedLayout(route) {
+    if (!highlightedId) return null;
+    var marker = projectedMarkers.filter(function (candidate) {
+      return candidate.id === highlightedId && candidate.page_route === route;
+    })[0];
+    var rect = marker ? markerRect(marker) : null;
+    if (!rect) return null;
+    return {
+      id: marker.id,
+      rect: { x: rect.left, y: rect.top, width: rect.width || 0, height: rect.height || 0 },
+    };
+  }
+
+  function observeAnchor(anchor) {
+    if (resizeObserver) resizeObserver.observe(anchor);
+  }
+
+  // Layout changes that scroll and resize events miss: reflow and DOM changes.
+  function observeLayout(active) {
+    if (!active) {
+      if (mutationObserver) mutationObserver.disconnect();
+      if (resizeObserver) resizeObserver.disconnect();
+      mutationObserver = null;
+      resizeObserver = null;
+      return;
+    }
+    if (mutationObserver || !document.body) return;
+    if (typeof MutationObserver === 'function') {
+      mutationObserver = new MutationObserver(scheduleRegionLayout);
+      mutationObserver.observe(document.body, {
+        childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'],
+      });
+    }
+    if (typeof ResizeObserver === 'function') {
+      resizeObserver = new ResizeObserver(scheduleRegionLayout);
+      resizeObserver.observe(document.documentElement);
+      resizeObserver.observe(document.body);
+    }
   }
 
   function sendRegionLayout() {
     layoutFrame = false;
     var route = currentPageRoute();
-    var regions = projectedRegions
-      .filter(function (region) { return region.page_route === route; })
-      .map(regionLayout);
-    var serialized = JSON.stringify(regions);
+    var routeRegions = projectedRegions.filter(function (region) { return region.page_route === route; });
+    observeLayout(routeRegions.length > 0);
+    var payload = { regions: routeRegions.map(regionLayout), highlighted: highlightedLayout(route) };
+    var serialized = JSON.stringify(payload);
     if (serialized === lastRegionLayout) return;
     lastRegionLayout = serialized;
-    send('region-layout', { regions: regions });
+    send('region-layout', payload);
   }
 
   function scheduleRegionLayout() {
@@ -715,6 +853,17 @@
     scheduleRegionLayout();
   }
 
+  function answerAnchorRequest(payload) {
+    var rect = payload.rect || {};
+    var valid = ['x', 'y', 'width', 'height'].every(function (field) {
+      return typeof rect[field] === 'number' && isFinite(rect[field]);
+    });
+    var anchor = valid
+      ? regionAnchor({ left: rect.x, top: rect.y, width: rect.width, height: rect.height })
+      : null;
+    send('region-anchored', { request_id: String(payload.request_id || ''), anchor: anchor });
+  }
+
   function routeDidChange() {
     hideCandidate();
     var identity = pageIdentity();
@@ -775,6 +924,9 @@
         break;
       case 'capture-selection':
         captureTextSelection();
+        break;
+      case 'anchor-region':
+        answerAnchorRequest(message.payload || {});
         break;
       default:
         break;

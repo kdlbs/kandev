@@ -110,6 +110,14 @@ describe("inspector protocol 3", () => {
     expect(sentOfType(CAPTURE_MODE_CHANGED)).toHaveLength(0);
   });
 
+  it("leaves Kandev preview parameters out of the page route", () => {
+    postMessage.mockClear();
+
+    history.pushState({}, "", "/site/index.html?kandev_preview_version=7&tab=pro");
+
+    expect(sentOfType("route-changed").at(-1)?.payload.page_route).toBe("/site/index.html?tab=pro");
+  });
+
   it("keeps the mode across a same-document route change", () => {
     command(SET_CAPTURE_MODE, { mode: "screenshot" });
     postMessage.mockClear();
@@ -206,14 +214,14 @@ describe("inspector regions and markers", () => {
     });
     flushFrames();
     expect(sentOfType(REGION_LAYOUT).at(-1)?.payload.regions).toEqual([
-      { id: "r1", rect: { x: 10, y: 10, width: 100, height: 50 }, visible: true },
+      { id: "r1", rect: { x: 10, y: 10, width: 100, height: 50 }, visible: true, drifted: false },
     ]);
 
     list.scrollTop = 30;
     list.dispatchEvent(new Event("scroll"));
     flushFrames();
     expect(sentOfType(REGION_LAYOUT).at(-1)?.payload.regions).toEqual([
-      { id: "r1", rect: { x: 10, y: -20, width: 100, height: 50 }, visible: true },
+      { id: "r1", rect: { x: 10, y: -20, width: 100, height: 50 }, visible: true, drifted: false },
     ]);
 
     const layouts = sentOfType(REGION_LAYOUT).length;
@@ -341,5 +349,223 @@ describe("inspector region drags over markers", () => {
     pointer("pointermove", 120, 140);
     pointer("pointerup", 120, 140);
     expect(sentOfType("screenshot-region-selected")).toHaveLength(1);
+  });
+});
+
+const ANCHOR = "section#card";
+let restoreRects: Array<() => void> = [];
+
+function placeElement(id: string, box: DOMRect) {
+  const element = document.getElementById(id) as HTMLElement;
+  const spy = vi.spyOn(element, "getBoundingClientRect").mockReturnValue(box);
+  restoreRects.push(() => spy.mockRestore());
+  return element;
+}
+
+function lastLayout() {
+  return sentOfType(REGION_LAYOUT).at(-1)?.payload as {
+    regions: Array<Record<string, unknown>>;
+    highlighted: unknown;
+  };
+}
+
+function drawRegion() {
+  command(SET_CAPTURE_MODE, { mode: "screenshot" });
+  pointer("pointerdown", 110, 120);
+  pointer("pointermove", 210, 170);
+  pointer("pointerup", 210, 170);
+  return sentOfType("screenshot-region-selected").at(-1)?.payload as {
+    page_route: string;
+    capture_rect: Record<string, unknown>;
+  };
+}
+
+function project(captureRect: Record<string, unknown>) {
+  command(PROJECT_MARKERS, {
+    markers: [],
+    regions: [{ id: "r1", page_route: location.pathname, capture_rect: captureRect }],
+  });
+  flushFrames();
+}
+
+function setupAnchorFixture() {
+  beforeEach(() => {
+    document.body.innerHTML =
+      '<main id="page"><section id="card"><span id="label">Plan</span></section></main>' +
+      '<div id="list" style="overflow: auto"><span id="row">Row</span></div>';
+    document.elementFromPoint = () => document.getElementById("label");
+    placeElement("label", rect(120, 130, 40, 16));
+    placeElement("card", rect(100, 100, 300, 200));
+    placeElement("page", rect(0, 0, 1024, 900));
+  });
+
+  afterEach(() => {
+    restoreRects.forEach((restore) => restore());
+    restoreRects = [];
+  });
+}
+
+describe("inspector region anchors", () => {
+  setupAnchorFixture();
+
+  it("anchors a region to the smallest element that contains it", () => {
+    const selected = drawRegion();
+    expect(selected.capture_rect).toMatchObject({
+      anchor_selector: ANCHOR,
+      anchor_offset_x: 10,
+      anchor_offset_y: 20,
+      anchor_width: 300,
+      anchor_height: 200,
+    });
+  });
+
+  it("never anchors to the body", () => {
+    placeElement("card", rect(100, 100, 50, 50));
+    placeElement("page", rect(100, 100, 50, 50));
+    const selected = drawRegion();
+    expect(selected.capture_rect.anchor_selector).toBeUndefined();
+  });
+
+  it("follows its anchor when the layout moves it", () => {
+    const { capture_rect: captureRect } = drawRegion();
+    project(captureRect);
+    expect(lastLayout().regions[0]).toEqual({
+      id: "r1",
+      rect: { x: 110, y: 120, width: 100, height: 50 },
+      visible: true,
+      drifted: false,
+    });
+
+    placeElement("card", rect(40, 100, 300, 200));
+    window.dispatchEvent(new Event("resize"));
+    flushFrames();
+    expect(lastLayout().regions[0]).toMatchObject({
+      rect: { x: 50, y: 120, width: 100, height: 50 },
+      drifted: false,
+    });
+  });
+
+  it("lays out again after a DOM change", async () => {
+    const { capture_rect: captureRect } = drawRegion();
+    project(captureRect);
+    placeElement("card", rect(100, 160, 300, 200));
+    document.getElementById("page")?.prepend(document.createElement("p"));
+    await Promise.resolve();
+    flushFrames();
+    expect(lastLayout().regions[0]).toMatchObject({ rect: { x: 110, y: 180 } });
+  });
+});
+
+describe("inspector region drift", () => {
+  setupAnchorFixture();
+
+  it("flags drift when the anchor changes size and keeps following its corner", () => {
+    const { capture_rect: captureRect } = drawRegion();
+    placeElement("card", rect(100, 100, 200, 260));
+    project(captureRect);
+    expect(lastLayout().regions[0]).toMatchObject({
+      rect: { x: 110, y: 120 },
+      drifted: true,
+    });
+  });
+
+  it("tolerates small anchor size changes", () => {
+    const { capture_rect: captureRect } = drawRegion();
+    placeElement("card", rect(100, 100, 306, 204));
+    project(captureRect);
+    expect(lastLayout().regions[0]).toMatchObject({ drifted: false });
+  });
+
+  it("flags drift and falls back to document coordinates when the anchor is gone", () => {
+    const { capture_rect: captureRect } = drawRegion();
+    document.getElementById("card")?.remove();
+    project(captureRect);
+    expect(lastLayout().regions[0]).toMatchObject({
+      rect: { x: 110, y: 120, width: 100, height: 50 },
+      visible: true,
+      drifted: true,
+    });
+  });
+
+  it("flags drift for an unanchored region after a width change", () => {
+    project({
+      x: 10,
+      y: 10,
+      width: 50,
+      height: 50,
+      document_x: 10,
+      document_y: 10,
+      viewport_width: window.innerWidth + 200,
+    });
+    expect(lastLayout().regions[0]).toMatchObject({ drifted: true });
+  });
+
+  it("subtracts container scroll when the anchor is the scroll container", () => {
+    const list = placeElement("list", rect(0, 400, 300, 100));
+    project({
+      x: 10,
+      y: 410,
+      width: 50,
+      height: 20,
+      scroll_container_selector: "div#list",
+      container_scroll_x: 0,
+      container_scroll_y: 0,
+      anchor_selector: "div#list",
+      anchor_offset_x: 10,
+      anchor_offset_y: 10,
+      anchor_width: 300,
+      anchor_height: 100,
+    });
+    list.scrollTop = 30;
+    list.dispatchEvent(new Event("scroll"));
+    flushFrames();
+    expect(lastLayout().regions[0]).toMatchObject({ rect: { x: 10, y: 380 } });
+  });
+});
+
+describe("inspector anchor requests", () => {
+  setupAnchorFixture();
+
+  it("answers anchor requests for a moved region", () => {
+    command("anchor-region", {
+      request_id: "req-1",
+      rect: { x: 110, y: 120, width: 100, height: 50 },
+    });
+    expect(sentOfType("region-anchored").at(-1)?.payload).toEqual({
+      request_id: "req-1",
+      anchor: {
+        anchor_selector: ANCHOR,
+        anchor_offset_x: 10,
+        anchor_offset_y: 20,
+        anchor_width: 300,
+        anchor_height: 200,
+      },
+    });
+
+    document.elementFromPoint = () => document.body;
+    command("anchor-region", { request_id: "req-2", rect: { x: 1, y: 1, width: 5, height: 5 } });
+    expect(sentOfType("region-anchored").at(-1)?.payload).toEqual({
+      request_id: "req-2",
+      anchor: null,
+    });
+  });
+
+  it("reports where the highlighted marker is", () => {
+    command(PROJECT_MARKERS, {
+      markers: [
+        {
+          id: "m1",
+          kind: "text",
+          page_route: location.pathname,
+          capture_rect: { x: 5, y: 15, width: 10, height: 10, document_x: 5, document_y: 15 },
+        },
+      ],
+      highlighted_id: "m1",
+    });
+    flushFrames();
+    expect(lastLayout().highlighted).toEqual({
+      id: "m1",
+      rect: { x: 5, y: 15, width: 0, height: 0 },
+    });
   });
 });

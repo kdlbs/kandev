@@ -31,7 +31,7 @@ export function usePreviewCommentPanel() {
     setOpen,
     toggle: useCallback(() => setOpen(!open), [open, setOpen]),
     touch,
-    /** Docked beside the preview, where comments are written instead of floating. */
+    /** Shown beside or over the preview, rather than as the touch sheet. */
     docked: !touch && open,
   };
 }

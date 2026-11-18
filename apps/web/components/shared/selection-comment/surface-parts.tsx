@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useEffect, useReducer, useRef, type ReactNode } from "react";
+import React, { useState, useCallback, useEffect, useReducer, type ReactNode } from "react";
 import { IconPlus, IconTrash, IconPlayerPlay } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -8,55 +8,6 @@ import { DrawerDescription, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer"
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { SelectionCommentSurfaceProps } from "./surface-types";
-
-/**
- * A transparent layer over the whole viewport for the length of a drag, so
- * `mousemove` keeps reaching this document when the pointer crosses an iframe.
- */
-function createDragShield() {
-  const shield = document.createElement("div");
-  shield.setAttribute("data-selection-comment-drag-shield", "");
-  shield.style.cssText = "position:fixed;inset:0;z-index:2147483647;cursor:grabbing;";
-  document.body.appendChild(shield);
-  return shield;
-}
-
-/** Drag support for the popover. */
-export function useDrag() {
-  const [offset, setOffset] = useState({ dx: 0, dy: 0 });
-  const dragging = useRef(false);
-  const startPos = useRef({ x: 0, y: 0 });
-  const startOffset = useRef({ dx: 0, dy: 0 });
-
-  const onMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      dragging.current = true;
-      startPos.current = { x: e.clientX, y: e.clientY };
-      startOffset.current = { ...offset };
-
-      const onMouseMove = (ev: MouseEvent) => {
-        if (!dragging.current) return;
-        setOffset({
-          dx: startOffset.current.dx + ev.clientX - startPos.current.x,
-          dy: startOffset.current.dy + ev.clientY - startPos.current.y,
-        });
-      };
-      const shield = createDragShield();
-      const onMouseUp = () => {
-        dragging.current = false;
-        shield.remove();
-        document.removeEventListener("mousemove", onMouseMove);
-        document.removeEventListener("mouseup", onMouseUp);
-      };
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
-    },
-    [offset],
-  );
-
-  return { offset, onMouseDown };
-}
 
 export function usePopoverDismiss(
   onClose: () => void,

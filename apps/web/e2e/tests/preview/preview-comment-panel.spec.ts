@@ -76,7 +76,7 @@ test.describe("Web preview comment panel", () => {
   // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-006.3
   // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-006.4
   // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-006.5
-  test("writes region comments in the panel and removes an empty capture on Close", async ({
+  test("writes region comments in the floating box and removes an empty capture on Close", async ({
     testPage,
     apiClient,
     seedData,
@@ -93,27 +93,34 @@ test.describe("Web preview comment panel", () => {
       await chooseCapture(testPage, "Select screenshot region");
       await waitForScreenshotCaptureMode(frame);
       const panel = testPage.getByTestId(PANEL);
+      await expect(panel).toBeVisible();
       const regions = testPage.getByTestId("preview-region");
+      const draft = draftSurface(testPage);
 
       await dragScreenshotRegion(testPage, frame, frame.locator("#save"));
       await expect(regions).toHaveCount(1);
-      await expect(panel.getByTestId("preview-feedback-draft-input")).toBeFocused();
-      await expect(panel.getByRole("img", { name: "Screenshot preview" })).toBeVisible({
+      await expect(draft.getByTestId("preview-feedback-draft-input")).toBeFocused();
+      await expect(panel.getByTestId("preview-feedback-draft-input")).toHaveCount(0);
+      await expect(draft.getByRole("img", { name: "Screenshot preview" })).toBeVisible({
         timeout: 15_000,
       });
       await expect(regions.first()).not.toHaveAttribute("data-busy", "true");
-      await panel.getByRole("button", { name: "Close" }).click();
+      await draft.getByRole("button", { name: "Close" }).click();
       await expect(regions).toHaveCount(0);
       await expect(panel.getByTestId("preview-unsaved-draft")).toHaveCount(0);
 
       await dragScreenshotRegion(testPage, frame, frame.locator("h1"));
-      await panel.getByTestId("preview-feedback-draft-input").fill("Tighter heading");
-      await panel.getByRole("button", { name: "Close" }).click();
+      await draft.getByTestId("preview-feedback-draft-input").fill("Tighter heading");
+      await draft.getByRole("button", { name: "Close" }).click();
       await expect(regions).toHaveCount(1);
       await expect(regions.first()).toHaveAttribute("data-pending", "true");
       await expect(panel.getByTestId("preview-unsaved-draft")).toContainText("Tighter heading");
 
       await panel.getByTestId("preview-unsaved-resume").click();
+      await expect(panel.getByTestId("preview-unsaved-draft")).toHaveAttribute(
+        "data-active",
+        "true",
+      );
       await saveDraft(testPage, "Tighter heading");
       await expect(panel.getByTestId("preview-feedback-item")).toHaveCount(1);
       await expect(
@@ -155,7 +162,8 @@ test.describe("Web preview comment panel", () => {
       await expect(marker).toHaveText("1");
       await marker.click();
       const panel = testPage.getByTestId(PANEL);
-      await expect(panel.getByTestId("preview-feedback-edit-input")).toHaveValue(
+      await expect(panel.getByTestId("preview-feedback-edit-input")).toHaveCount(0);
+      await expect(testPage.getByTestId("preview-feedback-edit-input")).toHaveValue(
         "Make the button primary",
       );
     } finally {

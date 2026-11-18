@@ -13,6 +13,7 @@ import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
 import { Drawer, DrawerContent } from "@kandev/ui/drawer";
 import { useTranslation } from "react-i18next";
+import { useDrag } from "@/hooks/use-drag-offset";
 import { cn } from "@/lib/utils";
 import { floatingBounds, placeFloatingRect } from "@/components/task/floating-selection-position";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
@@ -20,7 +21,6 @@ import {
   CommentMutationMessages,
   SurfaceContextLabel,
   SurfaceDrawerHeader,
-  useDrag,
   useMutationProtectedClose,
   usePopoverDismiss,
   useViewportResizeRender,

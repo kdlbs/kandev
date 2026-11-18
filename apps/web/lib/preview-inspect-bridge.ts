@@ -3,6 +3,7 @@ import type {
   PreviewElementSnapshot,
   PreviewTextAnchor,
 } from "@/lib/types/http-agents";
+import { generateUUID } from "@/lib/uuid";
 
 export const INSPECTOR_SOURCE = "kandev-inspector" as const;
 export const INSPECTOR_PROTOCOL_VERSION = 3 as const;
@@ -55,7 +56,26 @@ export type PreviewRegionLayout = {
   id: string;
   rect: { x: number; y: number; width: number; height: number };
   visible: boolean;
+  /** The outline no longer lines up reliably with the content it was drawn over. */
+  drifted?: boolean;
 };
+
+/** Viewport rectangle of the highlighted marker, used to place its comment box. */
+export type PreviewHighlightedLayout = {
+  id: string;
+  rect: { x: number; y: number; width: number; height: number };
+};
+
+/** The element a region follows, as stored on its capture rectangle. */
+export type PreviewContentAnchor = Required<
+  Pick<
+    PreviewCaptureRect,
+    "anchor_selector" | "anchor_offset_x" | "anchor_offset_y" | "anchor_width" | "anchor_height"
+  >
+>;
+
+/** How long a moved region waits for its new anchor before saving without one. */
+export const REGION_ANCHOR_TIMEOUT_MS = 500;
 
 interface InspectorReadyMessage {
   source: typeof INSPECTOR_SOURCE;
@@ -124,7 +144,14 @@ interface PreviewRegionLayoutMessage {
   source: typeof INSPECTOR_SOURCE;
   version: typeof INSPECTOR_PROTOCOL_VERSION;
   type: "region-layout";
-  payload: { regions: PreviewRegionLayout[] };
+  payload: { regions: PreviewRegionLayout[]; highlighted?: PreviewHighlightedLayout | null };
+}
+
+interface PreviewRegionAnchoredMessage {
+  source: typeof INSPECTOR_SOURCE;
+  version: typeof INSPECTOR_PROTOCOL_VERSION;
+  type: "region-anchored";
+  payload: { request_id: string; anchor: PreviewContentAnchor | null };
 }
 
 export type PreviewScreenshotRegion = {
@@ -173,6 +200,7 @@ export type InspectorMessage =
   | PreviewPagePointerDownMessage
   | PreviewSelectionChangedMessage
   | PreviewRegionLayoutMessage
+  | PreviewRegionAnchoredMessage
   | PreviewScreenshotRegionSelectedMessage
   | PreviewConsoleReadyMessage
   | PreviewConsoleMessage;
@@ -223,7 +251,17 @@ const PAYLOAD_VALIDATORS = new Map<string, (payload: Record<string, unknown>) =>
   ],
   ["page-pointerdown", () => true],
   ["selection-changed", (payload) => payload.rect === null || isCaptureRect(payload.rect)],
-  ["region-layout", (payload) => isRegionLayoutList(payload.regions)],
+  [
+    "region-layout",
+    (payload) =>
+      isRegionLayoutList(payload.regions) && isOptionalHighlightedLayout(payload.highlighted),
+  ],
+  [
+    "region-anchored",
+    (payload) =>
+      isBoundedString(payload.request_id, MAX_REGION_ID_LENGTH) &&
+      (payload.anchor === null || isContentAnchor(payload.anchor)),
+  ],
   [
     "screenshot-region-selected",
     (payload) => isPageIdentity(payload) && isCaptureRect(payload.capture_rect),
@@ -290,7 +328,33 @@ function isCaptureRect(value: unknown): value is PreviewCaptureRect {
       "device_pixel_ratio",
       "container_scroll_x",
       "container_scroll_y",
-    ]) && isOptionalBoundedString(value.scroll_container_selector, MAX_SELECTOR_LENGTH)
+      "anchor_offset_x",
+      "anchor_offset_y",
+      "anchor_width",
+      "anchor_height",
+    ]) &&
+    isOptionalBoundedString(value.scroll_container_selector, MAX_SELECTOR_LENGTH) &&
+    isOptionalBoundedString(value.anchor_selector, MAX_SELECTOR_LENGTH)
+  );
+}
+
+function isContentAnchor(value: unknown): value is PreviewContentAnchor {
+  return (
+    isRecord(value) &&
+    isBoundedString(value.anchor_selector, MAX_SELECTOR_LENGTH) &&
+    hasFiniteNumberFields(value, [
+      "anchor_offset_x",
+      "anchor_offset_y",
+      "anchor_width",
+      "anchor_height",
+    ])
+  );
+}
+
+function isOptionalHighlightedLayout(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  return (
+    isRecord(value) && isBoundedString(value.id, MAX_REGION_ID_LENGTH) && isCaptureRect(value.rect)
   );
 }
 
@@ -299,6 +363,7 @@ function isRegionLayout(value: unknown): value is PreviewRegionLayout {
     isRecord(value) &&
     isBoundedString(value.id, MAX_REGION_ID_LENGTH) &&
     typeof value.visible === "boolean" &&
+    (value.drifted === undefined || typeof value.drifted === "boolean") &&
     isCaptureRect(value.rect)
   );
 }
@@ -458,6 +523,36 @@ export function sendProjectPreviewMarkers(
     } satisfies ProjectPreviewMarkersCommand,
     "*",
   );
+}
+
+/**
+ * Asks the page for the element a moved or resized region now sits on.
+ * Resolves `null` when the page has none or does not answer in time.
+ */
+export function requestRegionAnchor(
+  iframe: HTMLIFrameElement,
+  rect: { x: number; y: number; width: number; height: number },
+): Promise<PreviewContentAnchor | null> {
+  const target = iframe.contentWindow;
+  if (!target) return Promise.resolve(null);
+  const requestId = generateUUID();
+  return new Promise((resolve) => {
+    const finish = (anchor: PreviewContentAnchor | null) => {
+      window.removeEventListener("message", onMessage);
+      window.clearTimeout(timer);
+      resolve(anchor);
+    };
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== target || !isInspectorMessage(event.data)) return;
+      const data = event.data;
+      if (data.type === "region-anchored" && data.payload.request_id === requestId) {
+        finish(data.payload.anchor);
+      }
+    };
+    const timer = window.setTimeout(() => finish(null), REGION_ANCHOR_TIMEOUT_MS);
+    window.addEventListener("message", onMessage);
+    postCommand(iframe, "anchor-region", { request_id: requestId, rect });
+  });
 }
 
 export function sendConsoleBind(iframe: HTMLIFrameElement, targetOrigin: string): void {

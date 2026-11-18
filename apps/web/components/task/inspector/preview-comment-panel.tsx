@@ -4,16 +4,11 @@ import { useEffect, useRef, useState, type ReactNode, type RefObject } from "rea
 import { IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
-import { SelectionCommentComposer } from "@/components/shared/selection-comment/selection-comment-composer";
 import type { PreviewCaptureController } from "@/hooks/use-preview-capture";
 import { cn } from "@/lib/utils";
-import { useDraftCommentProps } from "./preview-annotation-surfaces";
-import {
-  PreviewFeedbackCollection,
-  usePendingEditorProps,
-  type PreviewInlineComments,
-} from "./preview-feedback-collection";
-import type { TaskPreviewFeedback } from "@/lib/types/http";
+import { PreviewAnnotationControls } from "./preview-annotation-controls";
+import { PreviewAnnotationLayer, useLayerEscape } from "./preview-annotation-layer";
+import { PreviewFeedbackCollection, type PreviewCommentList } from "./preview-feedback-collection";
 
 /**
  * Below this host width the panel overlays the page instead of narrowing it,
@@ -21,49 +16,25 @@ import type { TaskPreviewFeedback } from "@/lib/types/http";
  */
 export const PREVIEW_PANEL_DOCK_MIN_WIDTH = 720;
 
-function InlineDraftComposer({ capture }: { capture: PreviewCaptureController }) {
-  const props = useDraftCommentProps(capture);
-  if (!props) return null;
-  const { key, ...composer } = props;
-  return <SelectionCommentComposer key={key} {...composer} />;
-}
-
-function InlineItemEditor({
-  item,
-  capture,
-}: {
-  item: TaskPreviewFeedback;
-  capture: PreviewCaptureController;
-}) {
-  const props = usePendingEditorProps(item, capture, capture.closeItemEditor);
-  return <SelectionCommentComposer key={item.id} {...props} />;
-}
-
-function useInlineComments(capture: PreviewCaptureController): PreviewInlineComments {
-  const editingItem = capture.editingItem;
+function useCommentList(capture: PreviewCaptureController): PreviewCommentList {
   return {
     numbers: capture.captureNumbers,
-    activeId: capture.openDraft?.id ?? editingItem?.id ?? null,
+    activeId: capture.openDraft?.id ?? capture.editingItem?.id ?? null,
     selectedId: capture.selectedId,
     onOpen: (id) => {
       capture.selectCapture(id);
       capture.openCapture(id);
     },
     onSelect: capture.selectCapture,
-    renderComposer: (id) => {
-      if (capture.openDraft?.id === id) return <InlineDraftComposer capture={capture} />;
-      if (editingItem?.id === id) return <InlineItemEditor item={editingItem} capture={capture} />;
-      return null;
-    },
   };
 }
 
-/** Scrolls the entry whose comment form opened into view. */
+/** Scrolls the entry whose comment is open into view. */
 function useScrollActiveIntoView(activeId: string | null, body: RefObject<HTMLElement | null>) {
   useEffect(() => {
     if (!activeId) return;
-    const form = body.current?.querySelector("[data-selection-comment-surface]");
-    form?.scrollIntoView?.({ block: "nearest" });
+    const entry = body.current?.querySelector('[data-active="true"]');
+    entry?.scrollIntoView?.({ block: "nearest" });
   }, [activeId, body]);
 }
 
@@ -83,7 +54,7 @@ export function useNarrowHost(host: RefObject<HTMLElement | null>) {
   return narrow;
 }
 
-/** Comments for the annotation mode, docked beside the preview on fine pointers. */
+/** The annotation mode's comment list, docked beside the preview on fine pointers. */
 export function PreviewCommentPanel({
   capture,
   overlay,
@@ -93,8 +64,8 @@ export function PreviewCommentPanel({
 }) {
   const { t } = useTranslation();
   const bodyRef = useRef<HTMLDivElement>(null);
-  const inline = useInlineComments(capture);
-  useScrollActiveIntoView(inline.activeId, bodyRef);
+  const list = useCommentList(capture);
+  useScrollActiveIntoView(list.activeId, bodyRef);
   return (
     <aside
       aria-label={t("task:previewFeedbackTitle")}
@@ -122,7 +93,7 @@ export function PreviewCommentPanel({
         <PreviewFeedbackCollection
           collection={capture}
           touch={false}
-          inline={inline}
+          list={list}
           drafts={{
             entries: capture.drafts,
             onResume: capture.openCapture,
@@ -135,30 +106,40 @@ export function PreviewCommentPanel({
 }
 
 /**
- * The preview frame with its annotation layer, and the comment panel docked
- * beside it (or over its right edge when the host is narrow).
+ * The preview frame with its annotation layer and toolbar, and the comment
+ * panel docked beside it (or over its right edge when the host is narrow).
+ * The toolbar stacks above the overlay panel.
  */
 export function PreviewAnnotationHost({
   capture,
   showLayer,
-  layer,
+  taskId,
   children,
 }: {
   capture: PreviewCaptureController;
   showLayer: boolean;
-  layer: ReactNode;
+  taskId: string | null | undefined;
   children: ReactNode;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
   const narrow = useNarrowHost(hostRef);
-  const showPanel = showLayer && capture.inlineComments;
+  useLayerEscape(capture, frameRef);
+  const active = showLayer && capture.annotation.active;
   return (
     <div ref={hostRef} className="relative flex h-full w-full min-h-0">
-      <div className="relative h-full min-w-0 flex-1" data-testid="preview-annotation-frame">
+      <div
+        ref={frameRef}
+        className="relative h-full min-w-0 flex-1"
+        data-testid="preview-annotation-frame"
+      >
         {children}
-        {showLayer && layer}
+        {showLayer && <PreviewAnnotationLayer capture={capture} />}
+        {active && <PreviewAnnotationControls capture={capture} taskId={taskId} frame={frameRef} />}
       </div>
-      {showPanel && <PreviewCommentPanel capture={capture} overlay={narrow} />}
+      {active && capture.commentPanel.docked && (
+        <PreviewCommentPanel capture={capture} overlay={narrow} />
+      )}
     </div>
   );
 }

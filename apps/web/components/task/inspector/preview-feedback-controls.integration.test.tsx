@@ -64,7 +64,7 @@ function Harness({ iframeRef }: { iframeRef: React.RefObject<HTMLIFrameElement |
     source: { kind: "browser", sessionId: "session-1", label: "Local app" },
     enabled: true,
   });
-  return <PreviewAnnotationLayer capture={capture} taskId="task-1" />;
+  return <PreviewAnnotationLayer capture={capture} />;
 }
 
 function dispatch(iframe: HTMLIFrameElement, data: unknown) {

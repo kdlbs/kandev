@@ -20,7 +20,6 @@ import { toRelativePath } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { usePreviewCapture } from "@/hooks/use-preview-capture";
 import { PreviewFeedbackControls } from "./inspector/preview-feedback-controls";
-import { PreviewAnnotationLayer } from "./inspector/preview-annotation-layer";
 import { PreviewAnnotationHost } from "./inspector/preview-comment-panel";
 import type { PreviewCaptureController } from "@/hooks/use-preview-capture";
 
@@ -252,11 +251,7 @@ export const HtmlPreviewContent = memo(function HtmlPreviewContent({
         )}
         {!isLoading && errorText && <HtmlPreviewError message={errorText} onRetry={onRetry} />}
         {!isLoading && !errorText && previewUrl && (
-          <PreviewAnnotationHost
-            capture={capture}
-            showLayer
-            layer={<PreviewAnnotationLayer capture={capture} taskId={taskId} />}
-          >
+          <PreviewAnnotationHost capture={capture} showLayer taskId={taskId}>
             <iframe
               ref={iframeRef}
               data-testid="html-preview-frame"

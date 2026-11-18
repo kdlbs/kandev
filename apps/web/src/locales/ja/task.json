@@ -3311,5 +3311,10 @@
   "rootDisabledNoTracker": "このルートには Git トラッカーがまだありません",
   "refreshRepositories": "リポジトリを再読み込み",
   "previewShowComments": "コメントを表示",
+  "previewMoveToolbar": "ツールバーを移動",
+  "previewMoveToolbarHint": "ドラッグして移動します。ダブルクリックすると上部に戻ります。",
+  "previewRegionDrifted": "このキャプチャ以降にページのレイアウトが変わりました。スクリーンショットには元の範囲が表示されたままです。この領域を移動またはサイズ変更すると、新しい位置で再キャプチャされます。",
+  "previewShowCapture": "キャプチャを表示",
+  "previewHideCapture": "キャプチャを非表示",
   "previewHideComments": "コメントを非表示"
 }

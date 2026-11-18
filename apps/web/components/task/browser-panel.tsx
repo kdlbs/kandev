@@ -15,7 +15,6 @@ import { useAppStore } from "@/components/state-provider";
 import { detectPreviewUrlFromOutput, rewritePreviewUrlForProxy } from "@/lib/preview-url-detector";
 import { PreviewFeedbackControls } from "./inspector/preview-feedback-controls";
 import { usePreviewCapture } from "@/hooks/use-preview-capture";
-import { PreviewAnnotationLayer } from "./inspector/preview-annotation-layer";
 import { PreviewAnnotationHost } from "./inspector/preview-comment-panel";
 import { usePreviewConsoleForwarder } from "@/hooks/use-preview-console-forwarder";
 import { openExternalLink } from "@/lib/desktop/external-links";
@@ -178,7 +177,7 @@ export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelP
         <PreviewAnnotationHost
           capture={capture}
           showLayer={Boolean(showInspect && url.showIframeDelayed)}
-          layer={<PreviewAnnotationLayer capture={capture} taskId={activeTaskId} />}
+          taskId={activeTaskId}
         >
           <BrowserPanelContent
             showIframeDelayed={url.showIframeDelayed}

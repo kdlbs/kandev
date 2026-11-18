@@ -4,8 +4,9 @@ import { IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 import type { PreviewDraftEntry } from "@/hooks/use-preview-drafts";
+import { cn } from "@/lib/utils";
 import { PreviewFeedbackEvidence, evidenceForDraft } from "./preview-feedback-evidence";
-import { CaptureNumber, type PreviewInlineComments } from "./preview-inline-comments";
+import { CaptureNumber, type PreviewCommentList } from "./preview-comment-list";
 
 export type PreviewUnsavedDraftsProps = {
   entries: PreviewDraftEntry[];
@@ -19,8 +20,8 @@ export function PreviewUnsavedDrafts({
   onResume,
   onDiscard,
   touch,
-  inline,
-}: PreviewUnsavedDraftsProps & { touch: boolean; inline?: PreviewInlineComments }) {
+  list,
+}: PreviewUnsavedDraftsProps & { touch: boolean; list?: PreviewCommentList }) {
   const { t } = useTranslation();
   if (entries.length === 0) return null;
   const actionClass = touch ? "h-11 min-w-11" : "h-7";
@@ -31,20 +32,20 @@ export function PreviewUnsavedDrafts({
         {entries.map((entry) => (
           <li
             key={entry.id}
-            className="rounded-md border border-dashed p-3"
-            data-testid="preview-unsaved-draft"
-          >
-            {inline?.activeId === entry.id ? (
-              inline.renderComposer(entry.id)
-            ) : (
-              <DraftRow
-                entry={entry}
-                actionClass={actionClass}
-                number={inline?.numbers.get(entry.id)}
-                onResume={onResume}
-                onDiscard={onDiscard}
-              />
+            className={cn(
+              "rounded-md border border-dashed p-3",
+              list?.activeId === entry.id && "border-primary",
             )}
+            data-testid="preview-unsaved-draft"
+            data-active={list?.activeId === entry.id ? "true" : undefined}
+          >
+            <DraftRow
+              entry={entry}
+              actionClass={actionClass}
+              number={list?.numbers.get(entry.id)}
+              onResume={onResume}
+              onDiscard={onDiscard}
+            />
           </li>
         ))}
       </ul>

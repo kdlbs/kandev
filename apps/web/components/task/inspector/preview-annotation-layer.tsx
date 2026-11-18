@@ -2,28 +2,24 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { RegionOverlay } from "@/components/shared/region-annotation/region-overlay";
+import {
+  RegionOverlay,
+  type RegionOverlayLabels,
+} from "@/components/shared/region-annotation/region-overlay";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { PreviewCaptureController } from "@/hooks/use-preview-capture";
 import { MAX_PREVIEW_SCREENSHOTS } from "@/lib/preview-annotation";
-import { PreviewAnnotationToolbar } from "./preview-annotation-toolbar";
 import {
   PreviewDraftSurface,
   PreviewSavedRegionEditor,
   PreviewSelectionComment,
 } from "./preview-annotation-surfaces";
-import { PreviewFeedbackCollectionSurface } from "./preview-feedback-collection";
 import { useRegionDrag } from "./use-region-drag";
 
-type Props = {
-  capture: PreviewCaptureController;
-  taskId: string | null | undefined;
-};
-
-/** Escape typed in Kandev while the preview owns focus steps out of the mode. */
-function useLayerEscape(
+/** Escape typed in Kandev while the preview or its toolbar owns focus steps out of the mode. */
+export function useLayerEscape(
   capture: PreviewCaptureController,
-  root: React.RefObject<HTMLDivElement | null>,
+  root: React.RefObject<HTMLElement | null>,
 ) {
   const { active } = capture.annotation;
   const { handleEscape } = capture;
@@ -75,12 +71,22 @@ function AnnotationStatus({ capture }: { capture: PreviewCaptureController }) {
   );
 }
 
+function useRegionLabels(): RegionOverlayLabels {
+  const { t } = useTranslation();
+  return {
+    drifted: t("task:previewRegionDrifted"),
+    showCapture: t("task:previewShowCapture"),
+    hideCapture: t("task:previewHideCapture"),
+  };
+}
+
 function ActiveAnnotation({
   capture,
-  taskId,
   root,
-  touch,
-}: Props & { root: React.RefObject<HTMLDivElement | null>; touch: boolean }) {
+}: {
+  capture: PreviewCaptureController;
+  root: React.RefObject<HTMLDivElement | null>;
+}) {
   const { annotation } = capture;
   const bounds = useCallback(() => {
     const element = root.current;
@@ -100,7 +106,11 @@ function ActiveAnnotation({
     () => new Set(drag.regions.filter((region) => region.busy).map((region) => region.index)),
     [drag.regions],
   );
-  const pendingCount = capture.items.length + capture.drafts.length;
+  const driftedIndexes = useMemo(
+    () => new Set(drag.regions.filter((region) => region.drifted).map((region) => region.index)),
+    [drag.regions],
+  );
+  const labels = useRegionLabels();
   return (
     <>
       <div aria-hidden="true" className="absolute inset-0 ring-2 ring-primary ring-inset" />
@@ -110,46 +120,20 @@ function ActiveAnnotation({
           rect: region.rect,
           title: region.title,
           number: region.number,
+          imageUrl: region.imageUrl,
         }))}
         selectedIndex={null}
         draft={null}
         testId="preview-region"
         pendingIndexes={pendingIndexes}
         busyIndexes={busyIndexes}
+        driftedIndexes={driftedIndexes}
+        labels={labels}
         onSelect={(index) => {
           const region = drag.regions.find((candidate) => candidate.index === index);
           if (region) capture.openCapture(region.id);
         }}
         onHandlePointerDown={annotation.tool === "region" ? drag.onHandlePointerDown : undefined}
-      />
-      <PreviewAnnotationToolbar
-        touch={touch}
-        tool={annotation.tool}
-        acknowledgedMode={capture.acknowledgedMode}
-        pendingCount={pendingCount}
-        regionDisabled={capture.limitReached}
-        onToolChange={annotation.setTool}
-        onExit={annotation.exit}
-        panelOpen={capture.commentPanel.open}
-        onTogglePanel={capture.commentPanel.toggle}
-        renderCount={(button) =>
-          touch ? (
-            <PreviewFeedbackCollectionSurface
-              taskId={taskId}
-              collection={capture}
-              open={capture.commentPanel.open}
-              onOpenChange={capture.commentPanel.setOpen}
-              trigger={button}
-              drafts={{
-                entries: capture.drafts,
-                onResume: capture.openCapture,
-                onDiscard: capture.discardDraft,
-              }}
-            />
-          ) : (
-            button
-          )
-        }
       />
       <AnnotationStatus capture={capture} />
     </>
@@ -158,12 +142,11 @@ function ActiveAnnotation({
 
 /**
  * Overlay aligned with the preview iframe. It passes input through to the page
- * except on the toolbar, region handles, and the selection comment button.
+ * except on region handles, comment boxes, and the selection comment button.
  */
-export function PreviewAnnotationLayer({ capture, taskId }: Props) {
+export function PreviewAnnotationLayer({ capture }: { capture: PreviewCaptureController }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const touch = useTouchDrawer();
-  useLayerEscape(capture, rootRef);
   const active = capture.annotation.active;
   return (
     <div
@@ -172,16 +155,10 @@ export function PreviewAnnotationLayer({ capture, taskId }: Props) {
       data-testid="preview-annotation-layer"
       data-active={active ? "true" : "false"}
     >
-      {active && (
-        <ActiveAnnotation capture={capture} taskId={taskId} root={rootRef} touch={touch} />
-      )}
+      {active && <ActiveAnnotation capture={capture} root={rootRef} />}
       <PreviewSelectionComment capture={capture} touch={touch} host={rootRef} />
-      {!capture.inlineComments && (
-        <>
-          <PreviewDraftSurface capture={capture} host={rootRef} />
-          <PreviewSavedRegionEditor capture={capture} host={rootRef} />
-        </>
-      )}
+      <PreviewDraftSurface capture={capture} host={rootRef} />
+      <PreviewSavedRegionEditor capture={capture} host={rootRef} />
     </div>
   );
 }

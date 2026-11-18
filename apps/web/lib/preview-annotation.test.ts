@@ -91,6 +91,37 @@ describe("recaptureRect", () => {
     });
   });
 
+  it("replaces the previous anchor with the new one, or drops it", () => {
+    const frame = {
+      scrollX: 0,
+      scrollY: 0,
+      innerWidth: 800,
+      innerHeight: 600,
+      containerScroll: () => null,
+    };
+    const anchored = {
+      ...original,
+      anchor_selector: "section#old",
+      anchor_offset_x: 1,
+      anchor_offset_y: 2,
+      anchor_width: 30,
+      anchor_height: 40,
+    };
+    const anchor = {
+      anchor_selector: "section#card",
+      anchor_offset_x: 5,
+      anchor_offset_y: 6,
+      anchor_width: 300,
+      anchor_height: 200,
+    };
+    const moved = { x: 1, y: 2, width: 10, height: 10 };
+    expect(recaptureRect(anchored, moved, frame, anchor)).toMatchObject(anchor);
+
+    const unanchored = recaptureRect(anchored, moved, frame, null);
+    expect(unanchored.anchor_selector).toBeUndefined();
+    expect(unanchored.anchor_width).toBeUndefined();
+  });
+
   it("keeps the stored container offsets when the container is gone", () => {
     const frame = {
       scrollX: 0,

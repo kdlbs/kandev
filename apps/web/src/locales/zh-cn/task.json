@@ -3311,5 +3311,10 @@
   "rootDisabledNoTracker": "此根目录还没有 Git 跟踪器",
   "refreshRepositories": "刷新仓库",
   "previewShowComments": "显示评论",
+  "previewMoveToolbar": "移动工具栏",
+  "previewMoveToolbarHint": "拖动以移动。双击可将其放回顶部。",
+  "previewRegionDrifted": "自此次截取以来，页面布局已发生变化。截图仍显示原始区域。移动或调整此区域的大小会在新位置重新截取。",
+  "previewShowCapture": "显示截取内容",
+  "previewHideCapture": "隐藏截取内容",
   "previewHideComments": "隐藏评论"
 }

@@ -27,8 +27,8 @@ function fallbackAnchor(host: RefObject<HTMLElement | null>) {
   return bounds ? { x: bounds.left + 16, y: bounds.top + 16 } : { x: 16, y: 16 };
 }
 
-/** Comment form props for the open unsaved draft, shared by the floating and inline forms. */
-export function useDraftCommentProps(
+/** Comment form props for the open unsaved draft. */
+function useDraftCommentProps(
   capture: PreviewCaptureController,
 ): (SelectionCommentComposerProps & { key: string }) | null {
   const { t } = useTranslation();
@@ -93,7 +93,7 @@ export function PreviewDraftSurface({
   );
 }
 
-/** Edits the comment of a saved region opened from its outline. */
+/** Edits the comment of a saved item opened from its marker, outline, or list entry. */
 export function PreviewSavedRegionEditor({
   capture,
   host,

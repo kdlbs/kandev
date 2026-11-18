@@ -28,7 +28,9 @@ attachments, and direct or queued message admission remain adjacent contracts.
 - **Preview source:** The Browser-panel page or published HTML-file preview
   where a capture was made.
 - **Page identity:** Stable source metadata plus the navigated route at capture
-  time. It identifies context without making the ephemeral proxy URL durable.
+  time. It identifies context without making the ephemeral proxy URL durable,
+  and it excludes query parameters that Kandev adds to the preview URL, such as
+  an HTML preview's republish version.
 - **Capture draft:** A selection and comment that have not yet been accepted
   into the pending task collection.
 - **Pending collection:** The authoritative set of preview feedback that has
@@ -101,9 +103,11 @@ elements, or a page region, so that my feedback identifies what should change.
   non-blank user comment. Cancelling a capture or a failed save shall not add a
   pending item; a failed save shall preserve the capture draft for retry.
 - **AC-TASKS-WEB-PREVIEW-FEEDBACK-002.5:** After navigation, feedback from prior
-  pages shall remain in the pending collection. Returning to a matching page
-  shall restore resolvable text or element markers without changing or
-  deleting captures whose DOM anchors no longer resolve.
+  pages shall remain in the pending collection. Returning to a matching page,
+  including closing and reopening an HTML preview, shall restore resolvable
+  text or element markers, region outlines, and their numbers without changing
+  or deleting captures whose DOM anchors no longer resolve. A new capture on
+  that page shall continue the numbering.
 - **AC-TASKS-WEB-PREVIEW-FEEDBACK-002.6:** Captured page content shall be shown
   and delivered as quoted user context. Kandev shall not execute captured HTML
   in its own chrome or treat page text as system instructions.
@@ -205,112 +209,12 @@ workflow on either device.
   `AC-TASKS-WEB-PREVIEW-FEEDBACK-005.4`. It kept one dismissed draft and
   required discarding it before another capture.
 
-### REQ-TASKS-WEB-PREVIEW-FEEDBACK-005: Annotate a page in a persistent mode
+### Annotation mode
 
-**Intent:** Let a user make many annotations in one pass, with tools that stay
-selected, instead of reopening a one-shot menu for every capture.
-
-**User story:** As a user reviewing a page, I want to switch between annotation
-tools like in an image editor and comment on any text I select, so that
-reviewing a whole page takes few clicks.
-
-#### Acceptance criteria
-
-- **AC-TASKS-WEB-PREVIEW-FEEDBACK-005.1:** When feedback controls are enabled
-  and the user selects text in the preview outside annotation mode, Kandev
-  shall offer a comment action for that selection: a floating comment button
-  next to the selection on fine pointers, and the shared bottom selection dock
-  on coarse pointers, as in chat and plan comments. Activating it shall create
-  a text capture and open the comment surface. Clearing the selection shall
-  hide the action.
-- **AC-TASKS-WEB-PREVIEW-FEEDBACK-005.2:** Entering annotation mode shall
-  outline the preview area and show a toolbar with the Interact, Text, Element,
-  and Region tools, a comment panel toggle that shows the pending count, and
-  an Exit control. The toolbar and
-  Exit control shall stay visible for the whole mode. On fine pointers the
-  toolbar floats over the top of the preview; on coarse pointers it is a bottom
-  bar with 44-pixel controls.
-- **AC-TASKS-WEB-PREVIEW-FEEDBACK-005.3:** The selected tool shall stay active
-  after each capture is saved or dismissed, so the user can make any number of
-  captures without reopening a menu. Interact shall pass all page input
-  through while keeping existing annotations visible.
-- **AC-TASKS-WEB-PREVIEW-FEEDBACK-005.4:** A capture whose comment is closed
-  while it has typed text and has not been saved shall stay as an unsaved
-  draft. It is drawn dashed on the page, listed as unsaved in the comment
-  panel, and can be resumed or discarded. A capture closed with no text shall
-  be removed, together with its marker or outline. A new capture shall not
-  require discarding earlier drafts.
-  Unsaved and saved screenshot captures together shall stay within the pending
-  screenshot limit, with a visible message when the limit is reached.
-- **AC-TASKS-WEB-PREVIEW-FEEDBACK-005.5:** Escape shall step back one layer at
-  a time, whether focus is in Kandev or in the previewed page: close an open
-  comment (as in `005.4`), then switch the tool to Interact, then
-  exit annotation mode. The Exit control shall exit directly. Exiting shall
-  remove the outline, toolbar, region outlines, and gesture ownership, so the
-  page behaves as it did before the mode, and unsaved drafts shall remain
-  resumable.
-- **AC-TASKS-WEB-PREVIEW-FEEDBACK-005.6:** The Region tool shall let the user
-  draw any number of rectangles. Each rectangle shall be captured when the
-  drag ends and opens its comment surface. Unsaved and saved rectangles on the
-  current page shall show numbered outlines that can be moved and resized;
-  releasing a move or resize shall capture the region again, keep its comment,
-  and, for a saved item, replace its image in a version-checked update. A
-  failed recapture shall keep the previous image and position and show an
-  error.
-- **AC-TASKS-WEB-PREVIEW-FEEDBACK-005.7:** Region outlines shall follow the
-  page content as the document, or the scrollable element the rectangle was
-  drawn over, scrolls. When the page scrolls in a way the preview cannot
-  observe, such as inside a canvas, the outline shall stay where it was drawn.
-  Outlines for other routes shall be hidden after navigation while their items
-  remain in the pending collection. Sending feedback shall use the images
-  already captured and shall never capture at send time.
-
-### REQ-TASKS-WEB-PREVIEW-FEEDBACK-006: Review annotations in a comment panel
-
-**Intent:** Keep every annotation on the page in view and editable in one
-list, without comment boxes covering the page, while still allowing the full
-preview width.
-
-**User story:** As a user annotating a page, I want a comment list beside the
-preview that I can hide, so that I can write, find, and edit comments without
-losing the page under floating boxes.
-
-#### Acceptance criteria
-
-- **AC-TASKS-WEB-PREVIEW-FEEDBACK-006.1:** In annotation mode, a comment panel
-  shall list the saved items and unsaved drafts for the task. On fine pointers
-  it is docked beside the preview and is open the first time the mode is
-  entered on a device; on coarse pointers it is a bottom sheet that starts
-  hidden. The toolbar's panel toggle shall show and hide it without leaving
-  the mode, and hiding it shall return the full preview width to the page.
-  The device shall remember whether the panel was open or hidden.
-- **AC-TASKS-WEB-PREVIEW-FEEDBACK-006.2:** Panel entries and in-page markers
-  and region outlines for the current page shall share one number per
-  capture. In annotation mode, activating a marker or region number shall
-  open that capture's comment for editing or deletion: in the panel when it
-  is open, otherwise in the floating comment box. Selecting a panel entry
-  shall highlight its marker when the capture belongs to the current page.
-- **AC-TASKS-WEB-PREVIEW-FEEDBACK-006.3:** When the panel is open, a new
-  capture shall add an entry in the panel with its comment field focused,
-  instead of a floating box over the page. When the panel is hidden, the
-  capture shall open the shared floating comment box next to it.
-- **AC-TASKS-WEB-PREVIEW-FEEDBACK-006.4:** Every comment box and panel entry
-  being written shall have a visible close control that behaves as `005.4`,
-  without requiring text. Clicking into the previewed page shall count as an
-  outside click for an open floating comment box.
-- **AC-TASKS-WEB-PREVIEW-FEEDBACK-006.5:** After a region drag ends, its
-  outline shall stay visible with an animated border until the image is
-  captured. The image shall show the content that was under the rectangle when
-  the drag ended, even if the page or the scrollable element under it scrolls
-  before capture finishes, and the outline shall follow that content in the
-  meantime. A capture that fails or does not finish within a fixed time shall
-  remove the outline and show an error, and it shall never leave a capturing
-  state on screen.
-- **AC-TASKS-WEB-PREVIEW-FEEDBACK-006.6:** While a comment for a text or
-  element capture is open, the selected tool shall pause: the captured element
-  or text stays highlighted, and moving the pointer or dragging the comment
-  box shall not highlight or select other elements. The tool shall resume when
-  the comment closes.
+`REQ-TASKS-WEB-PREVIEW-FEEDBACK-005` to `007` (the persistent annotation mode,
+its comment panel, and region alignment) are in
+[Web Preview Annotation Mode Requirements](web-preview-annotation-mode.md).
+They share this document's terminology and ID sequence.
 
 ## Out of scope
 
@@ -327,8 +231,5 @@ losing the page under floating boxes.
   mode in cross-origin-isolated pages, and Kandev previews are not
   cross-origin isolated.
 - Capturing through a browser screen-capture permission prompt.
-- Freehand drawing, arrows, or shapes other than rectangles in annotation mode.
-- Moving or resizing text and element captures; only region captures change
-  geometry after capture.
 - Preserving ephemeral preview URLs or HTML preview execution state after the
   owning task runtime stops.

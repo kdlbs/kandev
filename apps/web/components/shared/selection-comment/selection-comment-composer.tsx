@@ -6,7 +6,6 @@ import { useTranslation } from "react-i18next";
 import {
   CommentMutationMessages,
   PopoverActions,
-  SurfaceContextLabel,
   isCommentMutationPending,
   useCommentDelete,
   usePopoverComposer,
@@ -61,7 +60,7 @@ function ComposerEvidence({
   );
 }
 
-/** Evidence, comment field, messages, and actions; the body of the popover and inline form. */
+/** Evidence, comment field, messages, and actions; the body of the popover and drawer. */
 export function CommentComposerBody({
   props,
   state,
@@ -108,31 +107,5 @@ export function CommentComposerBody({
         mutationPending={state.mutationPending}
       />
     </>
-  );
-}
-
-/** The comment form rendered in place, such as inside a list, instead of floating. */
-export function SelectionCommentComposer(props: SelectionCommentComposerProps) {
-  const state = useCommentComposerState(props);
-  const { onClose } = props;
-  const { mutationPending } = state;
-  return (
-    <div
-      data-testid={props.testId}
-      data-selection-comment-surface=""
-      className="min-w-0"
-      onKeyDown={(event) => {
-        if (event.key !== "Escape" || mutationPending) return;
-        event.stopPropagation();
-        onClose();
-      }}
-    >
-      {props.contextLabel && (
-        <div className="mb-2">
-          <SurfaceContextLabel label={props.contextLabel} />
-        </div>
-      )}
-      <CommentComposerBody props={props} state={state} />
-    </div>
   );
 }

@@ -3311,5 +3311,10 @@
   "rootDisabledNoTracker": "Esta raiz ainda não tem rastreador Git",
   "refreshRepositories": "Atualizar repositórios",
   "previewShowComments": "Mostrar comentários",
+  "previewMoveToolbar": "Mover barra de ferramentas",
+  "previewMoveToolbarHint": "Arraste para mover. Faça duplo clique para a repor no topo.",
+  "previewRegionDrifted": "O esquema da página mudou desde esta captura. A captura de ecrã continua a mostrar a área original. Mover ou redimensionar esta região captura-a novamente na nova posição.",
+  "previewShowCapture": "Mostrar captura",
+  "previewHideCapture": "Ocultar captura",
   "previewHideComments": "Ocultar comentários"
 }

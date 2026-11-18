@@ -3,6 +3,16 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { RegionCorner, RegionRect } from "@/lib/regions/geometry";
 import { cn } from "@/lib/utils";
+import {
+  CaptureImage,
+  CaptureToggle,
+  DriftWarning,
+  useCaptureView,
+  type CaptureView,
+  type RegionOverlayLabels,
+} from "./region-overlay-controls";
+
+export type { RegionOverlayLabels } from "./region-overlay-controls";
 
 export type RegionHandle = "move" | RegionCorner;
 
@@ -13,6 +23,8 @@ export type RegionOverlayItem = {
   title?: string;
   /** Label shown on the badge when the host numbers captures itself. */
   number?: number;
+  /** The saved capture, which the user can show in place of the live content. */
+  imageUrl?: string;
 };
 
 type Props = {
@@ -26,6 +38,10 @@ type Props = {
   pendingIndexes?: ReadonlySet<number>;
   /** Regions still being captured; drawn with an animated border. */
   busyIndexes?: ReadonlySet<number>;
+  /** Regions that no longer line up with their content; drawn as a warning. */
+  driftedIndexes?: ReadonlySet<number>;
+  /** Enables the drift warning and saved-capture controls, with the host's copy. */
+  labels?: RegionOverlayLabels;
   /** Makes each number badge clickable, independent of the move and resize handles. */
   onSelect?: (index: number) => void;
   /** Renders a move area and four corner handles that report presses. */
@@ -79,6 +95,8 @@ type OutlineProps = {
   selected: boolean;
   pending: boolean;
   busy: boolean;
+  drifted: boolean;
+  labels?: RegionOverlayLabels;
   onSelect?: Props["onSelect"];
   onHandlePointerDown?: Props["onHandlePointerDown"];
 };
@@ -107,6 +125,46 @@ function RegionBadge({ item, scale, onSelect }: Pick<OutlineProps, "item" | "sca
   );
 }
 
+const flag = (value: boolean) => (value ? "true" : undefined);
+
+function outlineClass(state: {
+  pending: boolean;
+  drifted: boolean;
+  selected: boolean;
+  movable: boolean;
+}) {
+  return cn(
+    "group absolute",
+    state.pending || state.drifted ? "border-dashed" : "border-solid",
+    state.selected || state.drifted ? "border-amber-500" : "border-primary",
+    state.movable ? "pointer-events-auto cursor-move touch-none" : "cursor-pointer",
+  );
+}
+
+/**
+ * The drift warning and saved-capture toggle, centered on the top edge so they
+ * never cover the number badge or a corner handle.
+ */
+function AlignmentControls({
+  item,
+  drifted,
+  labels,
+  view,
+}: {
+  item: RegionOverlayItem;
+  drifted: boolean;
+  labels: RegionOverlayLabels;
+  view: CaptureView;
+}) {
+  if (!drifted && !item.imageUrl) return null;
+  return (
+    <span className="absolute top-0 left-1/2 flex -translate-x-1/2 -translate-y-1/2 gap-1">
+      {drifted && <DriftWarning label={labels.drifted} />}
+      {item.imageUrl && <CaptureToggle view={view} labels={labels} />}
+    </span>
+  );
+}
+
 function RegionOutline({
   item,
   line,
@@ -115,24 +173,31 @@ function RegionOutline({
   selected,
   pending,
   busy,
+  drifted: driftedIndex,
+  labels,
   onSelect,
   onHandlePointerDown,
 }: OutlineProps) {
-  const { index, rect, title } = item;
+  const { index, rect } = item;
+  const view = useCaptureView();
+  const drifted = driftedIndex && Boolean(labels);
+  const imageUrl = labels && view.visible ? item.imageUrl : undefined;
+  const startMove = onHandlePointerDown
+    ? (event: ReactPointerEvent<HTMLElement>) => {
+        view.hide();
+        onHandlePointerDown(index, "move", event);
+      }
+    : undefined;
   return (
     <div
       data-testid={testId}
       data-region-index={index}
-      data-selected={selected ? "true" : undefined}
-      data-pending={pending ? "true" : undefined}
-      data-busy={busy ? "true" : undefined}
-      title={title || undefined}
-      className={cn(
-        "absolute",
-        pending ? "border-dashed" : "border-solid",
-        selected ? "border-amber-500" : "border-primary",
-        onHandlePointerDown ? "pointer-events-auto cursor-move touch-none" : "cursor-pointer",
-      )}
+      data-selected={flag(selected)}
+      data-pending={flag(pending)}
+      data-busy={flag(busy)}
+      data-drifted={flag(drifted)}
+      title={item.title || undefined}
+      className={outlineClass({ pending, drifted, selected, movable: Boolean(startMove) })}
       style={{
         left: rect.x,
         top: rect.y,
@@ -141,12 +206,12 @@ function RegionOutline({
         borderWidth: line,
         forcedColorAdjust: "none",
       }}
-      onPointerDown={
-        onHandlePointerDown ? (event) => onHandlePointerDown(index, "move", event) : undefined
-      }
-      onMouseDown={onHandlePointerDown ? (event) => event.stopPropagation() : undefined}
+      onPointerDown={startMove}
+      onMouseDown={startMove ? (event) => event.stopPropagation() : undefined}
     >
+      {imageUrl && <CaptureImage url={imageUrl} />}
       <RegionBadge item={item} scale={scale} onSelect={onSelect} />
+      {labels && <AlignmentControls item={item} drifted={drifted} labels={labels} view={view} />}
       {busy && (
         <span
           className="kandev-region-busy pointer-events-none absolute"
@@ -172,12 +237,14 @@ export function RegionOverlay({
   testId,
   pendingIndexes,
   busyIndexes,
+  driftedIndexes,
+  labels,
   onSelect,
   onHandlePointerDown,
 }: Props) {
   const line = 2 / scale;
   return (
-    <div className="absolute top-0 left-0" aria-hidden="true">
+    <div className="absolute top-0 left-0" aria-hidden={labels ? undefined : "true"}>
       {items.map((item) => (
         <RegionOutline
           key={item.index}
@@ -188,6 +255,8 @@ export function RegionOverlay({
           selected={item.index === selectedIndex}
           pending={pendingIndexes?.has(item.index) ?? false}
           busy={busyIndexes?.has(item.index) ?? false}
+          drifted={driftedIndexes?.has(item.index) ?? false}
+          labels={labels}
           onSelect={onSelect}
           onHandlePointerDown={onHandlePointerDown}
         />

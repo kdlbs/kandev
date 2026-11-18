@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import html2canvas from "html2canvas-pro";
 import { deleteAttachment, uploadAttachment } from "@/lib/api/domains/attachment-api";
 import { previewFrameMetrics, recaptureRect, type ViewportRect } from "@/lib/preview-annotation";
-import type { PreviewScreenshotRegion } from "@/lib/preview-inspect-bridge";
+import { requestRegionAnchor, type PreviewScreenshotRegion } from "@/lib/preview-inspect-bridge";
 import { rasterizePreviewRegion } from "@/lib/preview-screenshot";
 import type {
   PreviewCaptureRect,
@@ -56,15 +56,24 @@ export async function uploadPreviewScreenshot(
   return uploaded.attachment_id;
 }
 
-function currentRect(
+/**
+ * Rasterizes a moved or resized region at the page's current scroll, while
+ * asking the page which element the region now sits on.
+ */
+async function rasterizeMoved(
   iframe: HTMLIFrameElement | null,
   previous: PreviewCaptureRect,
   rect: ViewportRect,
 ) {
   const metrics = iframe ? previewFrameMetrics(iframe) : null;
   // i18n-exempt: internal raster failure; callers display localized recovery copy.
-  if (!metrics) throw new Error("Preview document is unavailable");
-  return recaptureRect(previous, rect, metrics);
+  if (!iframe || !metrics) throw new Error("Preview document is unavailable");
+  const unanchored = recaptureRect(previous, rect, metrics);
+  const [screenshot, anchor] = await Promise.all([
+    rasterize(iframe, unanchored),
+    requestRegionAnchor(iframe, rect),
+  ]);
+  return { screenshot, captureRect: recaptureRect(previous, rect, metrics, anchor) };
 }
 
 /** Region rasterization for new captures and for moved or resized regions. */
@@ -121,8 +130,9 @@ export function usePreviewScreenshots({
 
   const recaptureDraft = useCallback(
     async (draft: PreviewScreenshotDraft, id: string, rect: ViewportRect) => {
-      const captureRect = currentRect(iframeRef.current, draft.capture_rect, rect);
-      const screenshot = await track(() => rasterize(iframeRef.current, captureRect));
+      const { screenshot, captureRect } = await track(() =>
+        rasterizeMoved(iframeRef.current, draft.capture_rect, rect),
+      );
       drafts.replaceScreenshot(id, { ...draft, capture_rect: captureRect, screenshot });
       return true;
     },
@@ -131,9 +141,11 @@ export function usePreviewScreenshots({
 
   const recaptureItem = useCallback(
     async (item: TaskPreviewFeedback, rect: ViewportRect) => {
-      if (!workspaceId || !item.capture_rect) return false;
-      const captureRect = currentRect(iframeRef.current, item.capture_rect, rect);
-      const screenshot = await track(() => rasterize(iframeRef.current, captureRect));
+      const previous = item.capture_rect;
+      if (!workspaceId || !previous) return false;
+      const { screenshot, captureRect } = await track(() =>
+        rasterizeMoved(iframeRef.current, previous, rect),
+      );
       URL.revokeObjectURL(screenshot.previewUrl);
       const attachmentId = await uploadPreviewScreenshot(workspaceId, screenshot);
       const replaced = await replaceSaved(item.id, item.version, captureRect, attachmentId);

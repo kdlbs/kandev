@@ -3311,5 +3311,10 @@
   "rootDisabledNoTracker": "This root has no Git tracker yet",
   "refreshRepositories": "Refresh repositories",
   "previewShowComments": "Show comments",
+  "previewMoveToolbar": "Move toolbar",
+  "previewRegionDrifted": "The page layout changed since this capture. The screenshot still shows the original area. Moving or resizing this region captures it again from its new position.",
+  "previewShowCapture": "Show capture",
+  "previewHideCapture": "Hide capture",
+  "previewMoveToolbarHint": "Drag to move. Double-click to put it back at the top.",
   "previewHideComments": "Hide comments"
 }
