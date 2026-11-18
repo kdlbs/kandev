@@ -201,7 +201,17 @@ func TestFilePreviewHomeSelector(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = preview.Close() }()
-	if !preview.External || preview.Path != filepath.Join(home, "model.stl") {
-		t.Fatal("home resolved in wrong environment")
+	expected, err := os.Stat(filepath.Join(home, "model.stl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual, err := os.Stat(preview.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Windows can normalize the path's case or resolve a temporary-directory
+	// alias. Check the selected file's identity instead of its path spelling.
+	if !preview.External || !os.SameFile(expected, actual) {
+		t.Fatalf("home resolved to wrong file: %q", preview.Path)
 	}
 }
