@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { useShallow } from "zustand/react/shallow";
-import type { Options as MarkdownOptions } from "react-markdown";
+import ReactMarkdown, { type Options as MarkdownOptions } from "react-markdown";
 import { MarkdownImage } from "./markdown-image";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
@@ -259,6 +259,36 @@ function MarkdownCode({ className, children }: MarkdownCodeProps) {
   return <InlineCode>{content}</InlineCode>;
 }
 
+function renderFollowingMarkdown(source: string): ReactNode {
+  return (
+    <ReactMarkdown
+      remarkPlugins={remarkPlugins}
+      rehypePlugins={rehypePlugins}
+      components={markdownComponents}
+    >
+      {source}
+    </ReactMarkdown>
+  );
+}
+
+function MarkdownPre({ className, children }: { className?: string; children?: ReactNode }) {
+  const taskId = useContext(MarkdownTaskContext);
+  if (isValidElement(children)) {
+    const codeProps = children.props as MarkdownCodeProps;
+    const isExplicitMermaid = codeProps.className?.split(/\s+/).includes("language-mermaid");
+    if (isExplicitMermaid) {
+      return (
+        <MermaidBlock
+          code={getTextContent(codeProps.children).replace(/\n$/, "")}
+          taskId={taskId}
+          renderFollowingMarkdown={renderFollowingMarkdown}
+        />
+      );
+    }
+  }
+  return <pre className={className}>{children}</pre>;
+}
+
 /**
  * Shared markdown component overrides for ReactMarkdown.
  * Element styles (headings, lists, inline code, etc.) are handled by
@@ -266,6 +296,7 @@ function MarkdownCode({ className, children }: MarkdownCodeProps) {
  * (code routing, link target, table overflow wrapper) remain here.
  */
 export const markdownComponents = {
+  pre: MarkdownPre,
   code: MarkdownCode,
   a: MarkdownLink,
   img: MarkdownImage,
