@@ -86,7 +86,7 @@ test.describe("mobile session entry recovery", () => {
     expect(proxy.failedResponseCount("message.list")).toBeGreaterThan(0);
   });
 
-  test("centers conversation progress during loading and retrying", async ({
+  test("centers conversation progress during loading and manual recovery", async ({
     testPage,
     apiClient,
     seedData,
@@ -99,27 +99,33 @@ test.describe("mobile session entry recovery", () => {
       `Mobile history progress alignment ${Date.now()}`,
     );
 
-    proxy.dropNextResponses("message.list", 1, { sessionId: task.session_id });
     proxy.holdResponses("message.list", { sessionId: task.session_id });
     const session = await openTaskSession(testPage, task.id);
     const chat = session.activeChat();
-    const loading = chat.getByTestId("session-history-loading");
-    await expect.poll(() => proxy.droppedResponseCount("message.list")).toBe(1);
-    await expect(loading).toBeVisible();
-    await assertVerticalCentersAligned(
-      loading.locator(".spinner-grid"),
-      loading.locator(":scope > span").nth(1),
-      "mobile loading conversation",
-    );
-
     try {
-      await expect
-        .poll(() => proxy.heldResponseCount("message.list"), {
-          timeout: 30_000,
-          message: "Waiting for the automatic mobile history retry response to be held",
-        })
-        .toBeGreaterThan(0);
-      const retrying = chat.getByTestId("session-history-retrying");
+      const loading = chat.getByTestId("session-history-loading");
+      await expect(loading).toBeVisible();
+      await assertVerticalCentersAligned(
+        loading.locator(".spinner-grid"),
+        loading.locator(":scope > span").nth(1),
+        "mobile loading conversation",
+      );
+    } finally {
+      proxy.releaseHeldResponses("message.list");
+    }
+    await expect(chat.getByTestId("session-history-loading")).toHaveCount(0);
+    await expect(chat).toContainText("simple mock response", { timeout: 30_000 });
+
+    proxy.failResponses("message.list", "Injected alignment test history failure");
+    await testPage.reload();
+    const unavailable = chat.getByTestId("session-history-unavailable");
+    await expect(unavailable).toBeVisible();
+    await expect.poll(() => proxy.pendingRequestCount("message.list")).toBe(0);
+    proxy.allowResponses("message.list");
+    proxy.holdResponses("message.list", { sessionId: task.session_id });
+    try {
+      await unavailable.getByTestId("session-history-retry").click();
+      const retrying = chat.getByTestId("session-history-loading");
       await expect(retrying).toBeVisible();
       await assertVerticalCentersAligned(
         retrying.locator(".spinner-grid"),
@@ -130,9 +136,7 @@ test.describe("mobile session entry recovery", () => {
     } finally {
       proxy.releaseHeldResponses("message.list");
     }
-
+    await expect(chat.getByTestId("session-history-loading")).toHaveCount(0);
     await expect(chat).toContainText("simple mock response", { timeout: 30_000 });
-    expect(proxy.droppedResponseCount("message.list")).toBe(1);
-    expect(proxy.heldResponseCount("message.list")).toBeGreaterThan(0);
   });
 });
