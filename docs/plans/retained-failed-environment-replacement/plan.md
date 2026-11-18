@@ -5,6 +5,7 @@ requirements:
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004
 system_design:
   - ../../specs/tasks/system-design/task-launch-failure-recovery.md
+  - ../../specs/tasks/system-design/session-delete-resource-cleanup.md
 ---
 
 # fix(task): retain failed environments before reserving replacements

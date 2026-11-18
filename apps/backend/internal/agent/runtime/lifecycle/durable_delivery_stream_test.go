@@ -654,7 +654,10 @@ func deliveryProjectionFixture(t *testing.T, event agentctl.AgentEvent, ack *rec
 			t.Error(err)
 		}
 		w.WriteHeader(http.StatusNoContent)
-		acked <- struct{}{}
+		select {
+		case acked <- struct{}{}:
+		case <-r.Context().Done():
+		}
 	}))
 	t.Cleanup(server.Close)
 	endpoint, err := url.Parse(server.URL)

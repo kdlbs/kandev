@@ -1,4 +1,8 @@
 {
+  "notificationFormatterLabel": "Notification content",
+  "notificationFormatterDefault": "Use the original notification content",
+  "notificationFormatterUnavailable": "The formatter is unavailable. Notifications use their original content.",
+  "notificationFormatterDescription": "Choose an optional formatter for each provider. Formatting does not change subscriptions or delivery destinations.",
   "notificationEventPermissionRequested": "Agent needs permission",
   "notificationEventPermissionRequestedDescription": "Notify when the agent is waiting for you to approve an action.",
   "notificationEventSessionFailed": "Agent session failed",
@@ -382,7 +386,6 @@
   "inferenceAgentThisAgent": "this agent",
   "inferenceAgentUnavailable": "{{name}} is no longer available.",
   "installed": "Installed",
-  "integrationDescriptionAzureDevops": "Azure Boards work items and Azure Repos pull requests.",
   "integrationDescriptionGithub": "PR review queues, issue watchers, and OAuth credentials.",
   "integrationDescriptionGitlab": "Merge request creation, discussion replies, and self-managed hosts.",
   "integrationDescriptionJira": "Atlassian Cloud credentials and JQL issue watchers.",
@@ -1229,5 +1232,7 @@
   "builtinMcp.inheritedValue": "Inherited from workspace: {{value}}",
   "builtinMcp.overrideValue": "Task override: {{value}}. Workspace default: {{default}}.",
   "builtinMcp.useInherited": "Use inherited value",
-  "builtinMcp.allowTasks": "Allow tasks to use this package"
+  "builtinMcp.allowTasks": "Allow tasks to use this package",
+  "markdownPreviewByDefault": "Open Markdown files in Preview",
+  "markdownPreviewByDefaultDescription": "Choose the initial mode for newly opened Markdown files. You can switch modes at any time."
 }

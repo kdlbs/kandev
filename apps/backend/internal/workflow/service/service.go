@@ -377,8 +377,13 @@ func (s *Service) GetPreviousStepByPosition(ctx context.Context, workflowID stri
 
 // CreateStepsFromTemplate creates workflow steps for a workflow from a template.
 func (s *Service) CreateStepsFromTemplate(ctx context.Context, workflowID, templateID string) error {
-	if err := s.authorizeExecutorMutation(ctx, workflowID); err != nil {
+	if err := s.AuthorizeWorkflow(ctx, workflowID); err != nil {
 		return err
+	}
+	if s.executorMutationChecker != nil {
+		if err := s.executorMutationChecker(ctx, workflowID); err != nil {
+			return err
+		}
 	}
 	template, err := s.repo.GetTemplate(ctx, templateID)
 	if err != nil {

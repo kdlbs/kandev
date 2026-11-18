@@ -146,8 +146,6 @@ type TaskRepository interface {
 	// sessions left stranded when finalizeCancelledSessions's bounded
 	// in-line retry was exhausted by sustained SQLite writer contention.
 	ListArchivedTasksWithActiveSessions(ctx context.Context) ([]string, error)
-	ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error)
-	DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error)
 	// ListCoordinatorOriginTasks returns every task with origin "coordinator"
 	// (all workspaces when workspaceID is empty), ordered by id
 	// (docs/specs/coordinator/system-design/copilot.md#conversation-cleanup).
@@ -904,6 +902,8 @@ type RepositoryEntityRepository interface {
 	CreateRepository(ctx context.Context, repository *models.Repository) error
 	GetRepository(ctx context.Context, id string) (*models.Repository, error)
 	UpdateRepository(ctx context.Context, repository *models.Repository) error
+	// FillRepositoryRemoteURL sets remote_url only while it is still empty.
+	FillRepositoryRemoteURL(ctx context.Context, id, remoteURL string) (bool, error)
 	UpdateRepositoryWithCheckoutIntent(ctx context.Context, repository *models.Repository, intent RepositoryCheckoutIntent) error
 	DeleteRepository(ctx context.Context, id string) error
 	ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error)

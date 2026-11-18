@@ -51,6 +51,26 @@ func (m *Manager) ResolveRemoteDefaultBranch(ctx context.Context, repoPath strin
 	return branch, nil
 }
 
+func (m *Manager) resolveFreshRemoteDefaultBranch(ctx context.Context, repoPath string) (string, error) {
+	output, runErr := m.runBoundedGitInspect(ctx, repoPath, "ls-remote", "--symref", "origin", "HEAD")
+	if runErr != nil {
+		return "", classifyRemoteDefaultError(output, runErr)
+	}
+
+	const headPrefix = "ref: refs/heads/"
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		fields := strings.SplitN(line, "\t", 2)
+		if len(fields) != 2 || fields[1] != "HEAD" || !strings.HasPrefix(fields[0], headPrefix) {
+			continue
+		}
+		branch := strings.TrimPrefix(fields[0], headPrefix)
+		if branch != "" {
+			return branch, nil
+		}
+	}
+	return "", ErrRemoteDefaultUnresolved
+}
+
 func readRemoteDefaultBranch(repoPath string) (string, error) {
 	gitDir, err := gitref.ResolveGitDir(repoPath)
 	if err != nil {
@@ -654,6 +674,7 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 	warning = req.baseRefreshFallbackWarning
 	detail = req.baseRefreshFallbackDetail
 	resolvedFallback := ""
+	requiredFallbackRefresh := false
 	switch {
 	case req.baseRefreshFallback:
 		// The provider refresh already failed after verifying the local base.
@@ -695,7 +716,15 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 		}
 	}
 	if err != nil {
-		return "", "", "", err
+		if ctx.Err() == nil && strings.TrimSpace(req.BaseBranch) != "" && req.PullBeforeWorktree &&
+			req.PRNumber == 0 && req.RemoteRefState != repoclone.RemoteRefStateEmpty &&
+			!req.RemoteSyncHandled && req.BaseBranchFallbackPolicy.PermitsRepositoryDefaultSubstitution() &&
+			errors.Is(err, ErrRemoteRefMissing) {
+			baseRef = req.BaseBranch
+			requiredFallbackRefresh = true
+		} else {
+			return "", "", "", err
+		}
 	}
 	if resolvedFallback != "" {
 		return m.finishMissingRemoteBaseFallback(req, resolvedFallback, baseRef)
@@ -707,7 +736,7 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 		// real cause instead of pretending the branch is missing.
 		return "", "", "", fmt.Errorf("could not verify base branch %q: %w", baseRef, baseErr)
 	}
-	if baseExists {
+	if baseExists && !requiredFallbackRefresh {
 		return baseRef, warning, detail, nil
 	}
 	if !req.BaseBranchFallbackPolicy.PermitsRepositoryDefaultSubstitution() {
@@ -719,7 +748,7 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 
 	fallback := strings.TrimSpace(fallbackCandidate)
 	if fallback != "" && fallback != baseRef {
-		resolvedFallback, err = m.resolveFallbackRef(ctx, req, fallback)
+		resolvedFallback, err = m.resolveFallbackRef(ctx, req, fallback, requiredFallbackRefresh)
 		if err != nil {
 			return "", "", "", err
 		}
@@ -735,7 +764,13 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 	// The persisted repository default can be stale or absent. Resolve the
 	// live remote default only after the requested branch and stored fallback
 	// have both failed.
-	liveFallback, liveErr := m.ResolveRemoteDefaultBranch(ctx, req.RepositoryPath)
+	var liveFallback string
+	var liveErr error
+	if requiredFallbackRefresh {
+		liveFallback, liveErr = m.resolveFreshRemoteDefaultBranch(ctx, req.RepositoryPath)
+	} else {
+		liveFallback, liveErr = m.ResolveRemoteDefaultBranch(ctx, req.RepositoryPath)
+	}
 	if liveErr != nil {
 		if errors.Is(liveErr, ErrRemoteDefaultUnresolved) {
 			return "", "", "", fmt.Errorf("%w: %s (fallback %q also not found)", ErrInvalidBaseBranch, baseRef, fallback)
@@ -745,7 +780,7 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 	if liveFallback == baseRef {
 		return "", "", "", fmt.Errorf("%w: %s", ErrInvalidBaseBranch, baseRef)
 	}
-	resolvedFallback, err = m.resolveFallbackRef(ctx, req, liveFallback)
+	resolvedFallback, err = m.resolveFallbackRef(ctx, req, liveFallback, requiredFallbackRefresh)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -798,12 +833,17 @@ func (m *Manager) materializeQualifiedPRHead(ctx context.Context, req CreateRequ
 	return head.OID, nil
 }
 
-func (m *Manager) resolveFallbackRef(ctx context.Context, req *CreateRequest, fallback string) (string, error) {
+func (m *Manager) resolveFallbackRef(ctx context.Context, req *CreateRequest, fallback string, requiredRefresh bool) (string, error) {
 	if req.RemoteSyncHandled {
 		resolved, _, _, _, err := m.resolveRefreshedBaseRefWithFallback(ctx, req.RepositoryPath, fallback, "")
 		return resolved, err
 	}
 	if req.PullBeforeWorktree {
+		if requiredRefresh {
+			remoteFallback := "origin/" + normalizeOriginBranchName(fallback)
+			resolved, _, err := m.pullBaseBranchWithPolicy(ctx, req.RepositoryPath, remoteFallback, "", true, req.OnSyncProgress)
+			return resolved, err
+		}
 		return m.pullBaseBranch(ctx, req.RepositoryPath, fallback, nil)
 	}
 	return fallback, nil

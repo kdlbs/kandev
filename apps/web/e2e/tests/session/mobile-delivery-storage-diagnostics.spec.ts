@@ -1,7 +1,9 @@
+import { storageNoticeDismissalScenario } from "../../helpers/storage-notice-dismissal";
 import { expect, test } from "../../fixtures/test-base";
 import { deliveryStorageFailureScenario } from "../../helpers/delivery-storage-diagnostics-ui";
 
 deliveryStorageFailureScenario();
+storageNoticeDismissalScenario();
 
 test("keeps the phone advisory compact with 44px controls", async ({
   testPage,

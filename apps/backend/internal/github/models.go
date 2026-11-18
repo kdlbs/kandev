@@ -1476,6 +1476,7 @@ const (
 	RepoScopeModeAll               = "all"
 	RepoScopeModeOrgs              = "orgs"
 	RepoScopeModeRepos             = "repos"
+	RepoScopeModeSelected          = "selected"
 	TaskGitCredentialsModeManaged  = "managed"
 	TaskGitCredentialsModeExecutor = "executor"
 )

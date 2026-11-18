@@ -131,8 +131,7 @@ func repositorySelectionNeedsInspection(input TaskRepositoryInput) (bool, error)
 	provider := strings.TrimSpace(input.Provider)
 	if provider != "" &&
 		!strings.EqualFold(provider, providerGitHub) &&
-		!strings.EqualFold(provider, providerGitLab) &&
-		!strings.EqualFold(provider, providerAzureDevOps) {
+		!strings.EqualFold(provider, providerGitLab) {
 		return true, nil
 	}
 

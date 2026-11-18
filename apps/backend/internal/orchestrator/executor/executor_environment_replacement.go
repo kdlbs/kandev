@@ -23,21 +23,18 @@ func (e *Executor) replaceFailedEnvironmentForResume(ctx context.Context, task *
 	if !ok || !shouldUseWorktree(executorType) || taskUsesInheritedWorkspace(task) {
 		return nil, nil
 	}
-	var expected *models.TaskEnvironment
-	var err error
-	if session.TaskEnvironmentID != "" {
-		expected, err = e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
-	} else {
-		expected, err = e.repo.GetTaskEnvironmentByTaskID(ctx, task.ID)
-	}
-	if errors.Is(err, repoerrors.ErrTaskEnvironmentNotFound) {
-		return nil, nil
-	}
+	expected, err := e.loadExpectedEnvironmentForResume(ctx, task.ID, session)
 	if err != nil {
 		return nil, err
 	}
 	if expected == nil || expected.TaskID != task.ID {
 		return nil, nil
+	}
+	if !expected.IsRetired() && expected.Status == models.TaskEnvironmentStatusCreating &&
+		expected.MaterializationSessionID == session.ID {
+		bindSessionToTaskEnvironment(session, expected)
+		session.Worktrees = expected.Repos
+		return expected, nil
 	}
 	if !expected.IsRetired() && (expected.Status != models.TaskEnvironmentStatusFailed || !taskEnvironmentHasWorkspaceResources(expected)) {
 		return nil, nil
@@ -54,4 +51,18 @@ func (e *Executor) replaceFailedEnvironmentForResume(ctx context.Context, task *
 	bindSessionToTaskEnvironment(session, selected)
 	session.Worktrees = selected.Repos
 	return selected, nil
+}
+
+func (e *Executor) loadExpectedEnvironmentForResume(ctx context.Context, taskID string, session *models.TaskSession) (*models.TaskEnvironment, error) {
+	var expected *models.TaskEnvironment
+	var err error
+	if session.TaskEnvironmentID != "" {
+		expected, err = e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+	} else {
+		expected, err = e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
+	}
+	if errors.Is(err, repoerrors.ErrTaskEnvironmentNotFound) {
+		return nil, nil
+	}
+	return expected, err
 }

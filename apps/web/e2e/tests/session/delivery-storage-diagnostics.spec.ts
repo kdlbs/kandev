@@ -1,7 +1,9 @@
+import { storageNoticeDismissalScenario } from "../../helpers/storage-notice-dismissal";
 import { expect, test } from "../../fixtures/test-base";
 import { deliveryStorageFailureScenario } from "../../helpers/delivery-storage-diagnostics-ui";
 
 deliveryStorageFailureScenario();
+storageNoticeDismissalScenario();
 
 test("shows a live 90% advisory above the composer and clears below 85%", async ({
   testPage,

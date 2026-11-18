@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
@@ -13,34 +14,17 @@ import (
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
 )
 
-// Retirement is added after the legacy table rebuilds and ownership cutover.
-func (r *Repository) ensureTaskEnvironmentRetirementSchema() error {
-	tx, err := r.db.BeginTxx(r.migrationContext(), nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	exists, err := r.columnExists(tx, "task_environments", "retired_at")
-	if err != nil {
-		return err
-	}
-	if !exists {
-		if _, err := tx.ExecContext(r.migrationContext(), `ALTER TABLE task_environments ADD COLUMN retired_at TIMESTAMP`); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
+const replacementPreparingReason = "retry after replacement materialization completes"
 
 func (r *Repository) replacementEnvironmentIdentityTx(ctx context.Context, tx *sqlx.Tx, id string) (*models.TaskEnvironment, error) {
 	env := &models.TaskEnvironment{}
 	var retired sql.NullTime
 	err := tx.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, task_id, ownership_generation, status, COALESCE(materialization_session_id, ''),
-		       COALESCE(task_dir_name, ''), retired_at
+		       COALESCE(task_dir_name, ''), COALESCE(executor_type, ''), updated_at, retired_at
 		FROM task_environments WHERE id = ?
 	`), id).Scan(&env.ID, &env.TaskID, &env.OwnershipGeneration, &env.Status,
-		&env.MaterializationSessionID, &env.TaskDirName, &retired)
+		&env.MaterializationSessionID, &env.TaskDirName, &env.ExecutorType, &env.UpdatedAt, &retired)
 	if retired.Valid {
 		env.RetiredAt = &retired.Time
 	}
@@ -102,6 +86,9 @@ func (r *Repository) bindFailedWorkspaceEnvironmentTx(ctx context.Context, tx *s
 	}
 	if expected.TaskID != candidate.TaskID {
 		return "", models.ErrWorkspaceReuseUnsafe
+	}
+	if expected.ExecutorType != string(models.ExecutorTypeWorktree) || candidate.ExecutorType != string(models.ExecutorTypeWorktree) {
+		return "", models.ErrTaskEnvironmentResetRequired
 	}
 	retired, retireErr := r.retireFailedEnvironmentTx(ctx, tx, expected)
 	if retireErr != nil {
@@ -212,19 +199,46 @@ func (r *Repository) ReserveTaskEnvironmentReplacement(
 	if err != nil {
 		return nil, err
 	}
-	result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE task_sessions SET task_environment_id = ?, updated_at = ?
-		WHERE id = ? AND task_id = ? AND COALESCE(task_environment_id, '') = ? AND state = ?`),
-		selected.ID, r.nowUTC(), session.ID, session.TaskID, session.TaskEnvironmentID, string(session.State))
-	if err != nil {
+	if err := r.bindReplacementSessionTx(ctx, tx, session, selected.ID); err != nil {
 		return nil, err
-	}
-	if n, err := result.RowsAffected(); err != nil || n != 1 {
-		return nil, fmt.Errorf("replacement session binding changed: %w", models.ErrWorkspaceReuseUnsafe)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return r.GetTaskEnvironment(ctx, selected.ID)
+	reloaded, err := r.GetTaskEnvironment(ctx, selected.ID)
+	if err != nil {
+		return nil, errors.Join(err, r.releaseUnpublishedReplacement(ctx, selected, session.ID))
+	}
+	return reloaded, nil
+}
+
+func (r *Repository) bindReplacementSessionTx(ctx context.Context, tx *sqlx.Tx, session *models.TaskSession, environmentID string) error {
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE task_sessions SET task_environment_id = ?, updated_at = ?
+		WHERE id = ? AND task_id = ? AND COALESCE(task_environment_id, '') = ? AND state = ?`),
+		environmentID, r.nowUTC(), session.ID, session.TaskID, session.TaskEnvironmentID, string(session.State))
+	if err != nil {
+		return err
+	}
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		return fmt.Errorf("replacement session binding changed: %w", models.ErrWorkspaceReuseUnsafe)
+	}
+	return nil
+}
+
+// The committed reservation is invisible to a caller whose reload failed, so
+// the caller cannot arm its own failure release. Release the reservation this
+// session owns through the ordinary owner-checked failure path; a joined ready
+// environment is left unchanged.
+func (r *Repository) releaseUnpublishedReplacement(ctx context.Context, selected *models.TaskEnvironment, sessionID string) error {
+	if selected.Status != models.TaskEnvironmentStatusCreating || selected.MaterializationSessionID != sessionID {
+		return nil
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if _, err := r.ReleaseTaskEnvironmentReplacement(cleanupCtx, selected, sessionID); err != nil {
+		return fmt.Errorf("release unpublished replacement %s: %w", selected.ID, err)
+	}
+	return nil
 }
 
 func (r *Repository) validateReplacementSessionTx(ctx context.Context, tx *sqlx.Tx, expected *models.TaskEnvironment, session *models.TaskSession) error {
@@ -248,7 +262,7 @@ func (r *Repository) validateReplacementSessionTx(ctx context.Context, tx *sqlx.
 	case models.TaskSessionStateCompleted, models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
 		return nil
 	default:
-		return models.ErrWorkspaceReuseUnsafe
+		return models.ErrTaskEnvironmentResetRequired
 	}
 }
 
@@ -256,6 +270,9 @@ func (r *Repository) electReplacementEnvironmentTx(ctx context.Context, tx *sqlx
 	current, err := r.replacementEnvironmentIdentityTx(ctx, tx, expected.ID)
 	if err != nil {
 		return nil, err
+	}
+	if current.ExecutorType != string(models.ExecutorTypeWorktree) || candidate.ExecutorType != string(models.ExecutorTypeWorktree) {
+		return nil, models.ErrTaskEnvironmentResetRequired
 	}
 	if !current.IsRetired() {
 		retired, err := r.retireFailedEnvironmentTx(ctx, tx, expected)
@@ -280,11 +297,36 @@ func (r *Repository) electReplacementEnvironmentTx(ctx context.Context, tx *sqlx
 	if err != nil {
 		return nil, err
 	}
-	active, err := r.replacementEnvironmentIdentityTx(ctx, tx, activeID)
+	active, err := r.lockedActiveReplacementEnvironmentTx(ctx, tx, activeID, expected.TaskID, candidate.ExecutorType)
 	if err != nil {
 		return nil, err
 	}
 	return r.adoptReplacementReservationTx(ctx, tx, active, candidate, sessionID)
+}
+
+func (r *Repository) lockedActiveReplacementEnvironmentTx(ctx context.Context, tx *sqlx.Tx, activeID, taskID, executorType string) (*models.TaskEnvironment, error) {
+	if err := r.lockTaskEnvironmentMaterializationTx(ctx, tx, activeID); err != nil {
+		return nil, err
+	}
+	var currentActiveID string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT id FROM task_environments WHERE task_id = ? AND retired_at IS NULL`),
+		taskID).Scan(&currentActiveID); err != nil {
+		return nil, err
+	}
+	if currentActiveID != activeID {
+		return nil, ErrTaskEnvironmentOwnershipChanged
+	}
+	active, err := r.replacementEnvironmentIdentityTx(ctx, tx, activeID)
+	if err != nil {
+		return nil, err
+	}
+	if active.IsRetired() || active.TaskID != taskID {
+		return nil, ErrTaskEnvironmentOwnershipChanged
+	}
+	if active.ExecutorType != executorType {
+		return nil, models.ErrTaskEnvironmentResetRequired
+	}
+	return active, nil
 }
 
 func (r *Repository) adoptReplacementReservationTx(ctx context.Context, tx *sqlx.Tx, active, candidate *models.TaskEnvironment, sessionID string) (*models.TaskEnvironment, error) {
@@ -298,6 +340,27 @@ func (r *Repository) adoptReplacementReservationTx(ctx context.Context, tx *sqlx
 		if active.MaterializationSessionID == sessionID {
 			return active, nil
 		}
+		if err := r.guardReplacementMaterializerStartTx(ctx, tx, active); err != nil {
+			return nil, err
+		}
+		outcome, err := r.settleWorkspaceMaterializationClaim(
+			ctx, tx, active.ID, active.MaterializationSessionID, active.UpdatedAt, sessionID,
+		)
+		if err != nil {
+			return nil, err
+		}
+		switch outcome {
+		case materializationClaimTakenOver:
+			return r.replacementEnvironmentIdentityTx(ctx, tx, active.ID)
+		case materializationClaimFailed:
+			selectedID, err := r.bindFailedWorkspaceEnvironmentTx(ctx, tx, active.ID, sessionID, candidate)
+			if err != nil {
+				return nil, err
+			}
+			return r.replacementEnvironmentIdentityTx(ctx, tx, selectedID)
+		default:
+			return nil, &models.WorkspacePreparingError{EnvironmentID: active.ID, Reason: replacementPreparingReason}
+		}
 	case models.TaskEnvironmentStatusFailed:
 		selectedID, err := r.bindFailedWorkspaceEnvironmentTx(ctx, tx, active.ID, sessionID, candidate)
 		if err != nil {
@@ -305,5 +368,27 @@ func (r *Repository) adoptReplacementReservationTx(ctx context.Context, tx *sqlx
 		}
 		return r.replacementEnvironmentIdentityTx(ctx, tx, selectedID)
 	}
-	return nil, &models.WorkspacePreparingError{EnvironmentID: active.ID, Reason: "retry after replacement materialization completes"}
+	return nil, &models.WorkspacePreparingError{EnvironmentID: active.ID, Reason: replacementPreparingReason}
+}
+
+// A resumed materializer can still have its previous terminal state until launch
+// begins. Only a later completion or an expired launch budget abandons that claim.
+func (r *Repository) guardReplacementMaterializerStartTx(ctx context.Context, tx *sqlx.Tx, active *models.TaskEnvironment) error {
+	if !active.UpdatedAt.After(r.nowUTC().Add(-workspaceMaterializationAbandonAfter())) {
+		return nil
+	}
+	var state models.TaskSessionState
+	var completedAt sql.NullTime
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT state, completed_at FROM task_sessions WHERE id = ?`),
+		active.MaterializationSessionID).Scan(&state, &completedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("load replacement materializer: %w", err)
+	}
+	if isTerminalWorkspaceMaterializerState(state) && (!completedAt.Valid || !completedAt.Time.After(active.UpdatedAt)) {
+		return &models.WorkspacePreparingError{EnvironmentID: active.ID, Reason: replacementPreparingReason}
+	}
+	return nil
 }

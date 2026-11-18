@@ -1968,6 +1968,9 @@ func (e *Executor) validateInheritedEnvironmentOwner(
 	task *v1.Task,
 	env *models.TaskEnvironment,
 ) error {
+	if env.IsRetired() {
+		return fmt.Errorf("%w: task environment is retained as inactive history", models.ErrWorkspaceReuseUnsafe)
+	}
 	if env == nil || env.TaskID == "" || (task != nil && env.TaskID == task.ID) {
 		return nil
 	}
@@ -2016,6 +2019,7 @@ func (e *Executor) resolveAgentProfileSnapshot(ctx context.Context, agentProfile
 	}
 	return map[string]interface{}{
 		"id":                           profileInfo.ProfileID,
+		"execution_grade":              profileInfo.ExecutionGrade,
 		"name":                         profileInfo.ProfileName,
 		"agent_id":                     profileInfo.AgentID,
 		"agent_name":                   profileInfo.AgentName,

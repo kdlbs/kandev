@@ -249,6 +249,7 @@ test.describe("Multi-PR CI popover", () => {
     const conflicted = testPage.getByTestId(`pr-topbar-menu-item-${OWNER}-web-42`);
     const passing = testPage.getByTestId(`pr-topbar-menu-item-${OWNER}-api-77`);
     await expect(conflicted.getByTestId("pr-merge-conflict-warning")).toBeVisible();
+    await waitForFiniteAnimations(testPage.getByRole("menu"));
     await expectConflictTriangleSize(conflicted);
     await expect(passing.getByTestId("pr-merge-conflict-warning")).toHaveCount(0);
     await passing.click();

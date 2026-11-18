@@ -12,6 +12,9 @@ function errorMessage(error: unknown) {
 type UseAgentUpdateDialogStateOptions = {
   agentName: string;
   job?: AgentUpdateJob;
+  /** Externally owned presentation state. Omit for the standalone trigger. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   onPreview: (
     agentName: string,
     targetVersion?: string,
@@ -181,15 +184,6 @@ async function approveRuntimeUpdate({
   }
 }
 
-function handleDialogOpenChange(
-  nextOpen: boolean,
-  setOpen: (value: boolean) => void,
-  reset: () => void,
-) {
-  setOpen(nextOpen);
-  if (!nextOpen) reset();
-}
-
 type PreviewLoader = (
   targetVersion?: string,
   useDefault?: boolean,
@@ -343,13 +337,39 @@ function useRuntimeSelectors({
   return { selectTarget, selectDefault, selectMigration, selectCurrentRuntime };
 }
 
+function useControlledDialogOpen({
+  controlledOpen,
+  controlledOnOpenChange,
+  reset,
+}: {
+  controlledOpen?: boolean;
+  controlledOnOpenChange?: (open: boolean) => void;
+  reset: () => void;
+}) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const handleOpenChange = (nextOpen: boolean) => {
+    setInternalOpen(nextOpen);
+    controlledOnOpenChange?.(nextOpen);
+    if (!nextOpen) reset();
+  };
+  return { open, handleOpenChange };
+}
+
+function useOpenPreview(open: boolean, loadPreview: () => Promise<void>) {
+  useEffect(() => {
+    if (open) void loadPreview();
+  }, [loadPreview, open]);
+}
+
 export function useAgentUpdateDialogState({
   agentName,
   job,
   onPreview,
   onUpdate,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
 }: UseAgentUpdateDialogStateOptions) {
-  const [open, setOpen] = useState(false);
   const [preview, setPreview] = useState<AgentUpdatePreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [approveError, setApproveError] = useState<string | null>(null);
@@ -403,12 +423,12 @@ export function useAgentUpdateDialogState({
       setPreview,
     });
 
-  useEffect(() => {
-    if (open) void loadPreview();
-  }, [loadPreview, open]);
-
-  const handleOpenChange = (nextOpen: boolean) => handleDialogOpenChange(nextOpen, setOpen, reset);
-
+  const { open, handleOpenChange } = useControlledDialogOpen({
+    controlledOpen,
+    controlledOnOpenChange,
+    reset,
+  });
+  useOpenPreview(open, loadPreview);
   const approve = () =>
     approveRuntimeUpdate({
       requestID: previewRequestID.current,
@@ -423,10 +443,7 @@ export function useAgentUpdateDialogState({
       setApproveError,
       setActiveJobID,
       setTerminalJob,
-      onHandledError: () => {
-        setOpen(false);
-        reset();
-      },
+      onHandledError: () => handleOpenChange(false),
     });
 
   return {

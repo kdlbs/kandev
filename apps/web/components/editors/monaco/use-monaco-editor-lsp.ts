@@ -179,16 +179,18 @@ type UseMonacoLspOpts = {
   contentRef: RefObject<string>;
   editorRef: RefObject<monacoEditor.IStandaloneCodeEditor | null>;
   editorReady: boolean;
+  enableLsp?: boolean;
 };
 
 export function useMonacoEditorLsp(opts: UseMonacoLspOpts) {
-  const { sessionId, worktreePath, repo, language, path, contentRef, editorRef, editorReady } =
-    opts;
+  const { sessionId, worktreePath, repo, language, path } = opts;
+  const { contentRef, editorRef, editorReady, enableLsp = true } = opts;
   const { toast } = useToast();
   const { t } = useTranslation();
 
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const lspSessionId = sessionId ?? activeSessionId ?? null;
+  const modelSessionId = sessionId ?? activeSessionId ?? null;
+  const lspSessionId = enableLsp ? modelSessionId : null;
   const {
     status: lspStatus,
     progress: lspProgress,
@@ -196,8 +198,8 @@ export function useMonacoEditorLsp(opts: UseMonacoLspOpts) {
     toggle: toggleLsp,
   } = useLsp(lspSessionId, language);
   const hasLspActive = lspStatus.state === "ready" || lspStatus.state === "reconnecting";
-  const lspWorkspaceUri = lspSessionId
-    ? lspClientManager.getWorkspaceUriForSession(lspSessionId)
+  const lspWorkspaceUri = modelSessionId
+    ? lspClientManager.getWorkspaceUriForSession(modelSessionId)
     : null;
   let fallbackWorkspaceUri: string | null = null;
   try {
@@ -213,7 +215,7 @@ export function useMonacoEditorLsp(opts: UseMonacoLspOpts) {
     documentUri = null;
   }
   const monacoPath =
-    documentUri && lspSessionId ? modelUriForDocument(documentUri, lspSessionId) : path;
+    documentUri && modelSessionId ? modelUriForDocument(documentUri, modelSessionId) : path;
 
   // A definition/reference placeholder may be adopted by any real file tab,
   // including a language with no active LSP. Promote it before document sync.

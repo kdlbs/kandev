@@ -7,7 +7,10 @@ func TestInjectKandevMcpServersUsesConfiguredHost(t *testing.T) {
 	srv.cfg.MCPHost = "192.0.2.10"
 	srv.cfg.Port = 43210
 
-	got := srv.injectKandevMcpServers(nil)
+	got, err := srv.injectKandevMcpServers(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got[0].URL != "http://192.0.2.10:43210/mcp" {
 		t.Fatalf("injected HTTP URL = %q, want configured listener host", got[0].URL)
 	}

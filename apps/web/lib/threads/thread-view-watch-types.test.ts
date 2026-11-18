@@ -11,8 +11,11 @@ const cases: [string, Record<string, unknown> | null, string][] = [
   ["jira", { jira_issue_watch_id: "watch" }, "issue_watch"],
   ["linear", { linear_issue_watch_id: "watch" }, "issue_watch"],
   ["sentry", { sentry_issue_watch_id: "watch" }, "issue_watch"],
-  ["azure-issue", { azure_devops_work_item_watch_id: "watch" }, "issue_watch"],
-  ["azure-review", { azure_devops_pr_watch_id: "watch" }, "pull_request_review"],
+  [
+    "retired-azure",
+    { azure_devops_work_item_watch_id: "watch", azure_devops_pr_watch_id: "watch" },
+    "standard",
+  ],
   ["ordinary", null, "standard"],
   [
     "linked",

@@ -116,7 +116,7 @@ type Repository interface {
 	CancelDisplacedParticipantRun(
 		ctx context.Context, taskID, stepID, agentProfileID string,
 	) ([]runssqlite.CancelledRun, error)
-	IsTaskWorkflowStepTerminal(ctx context.Context, taskID string) (terminal, hasStep bool, err error)
+	IsTaskOnFinalStep(ctx context.Context, taskID string) (final, hasStep bool, err error)
 }
 
 // DecisionStore is the workflow-domain decisions interface required by
@@ -234,6 +234,10 @@ type TaskDetacher interface {
 type TaskLifecyclePublisher interface {
 	PublishTaskUpdatedByID(ctx context.Context, id string)
 }
+
+// TaskStateChangePublisher publishes the immutable receipt of a committed
+// task-state transition through the canonical task event path.
+type TaskStateChangePublisher = shared.TaskStateChangePublisher
 
 // SessionTerminator flips the (task, agent) office session row to a terminal
 // state. Used when an agent stops being a participant on a task — reassignment,
@@ -446,6 +450,7 @@ type DashboardService struct {
 	assigneeWriter        HumanAssigneeWriter             // optional; nil rejects human-assignee writes rather than skipping authorization
 	projectBudget         ProjectBudgetEvaluator          // optional; nil means reassignment doesn't re-evaluate the destination project's budget policies
 	taskStateWriter       shared.TaskStateWriter          // task repository owns transactional state changes and completion guards
+	taskStateChangeEvents TaskStateChangePublisher
 	humanDoneCompleter    TaskHumanDoneCompleter
 	finalStepMover        TaskFinalStepMover // optional; nil keeps the in_review redirect for human Done on a non-final step
 }
@@ -665,6 +670,11 @@ func (s *DashboardService) SetTaskDetacher(d TaskDetacher) {
 // changes and completion guards.
 func (s *DashboardService) SetTaskStateWriter(w shared.TaskStateWriter) {
 	s.taskStateWriter = w
+}
+
+// SetTaskStateChangePublisher wires the canonical task-state event publisher.
+func (s *DashboardService) SetTaskStateChangePublisher(p TaskStateChangePublisher) {
+	s.taskStateChangeEvents = p
 }
 
 // SetTaskLifecyclePublisher wires the canonical task.updated publisher used

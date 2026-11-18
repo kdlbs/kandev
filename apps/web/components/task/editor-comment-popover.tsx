@@ -133,7 +133,7 @@ export function EditorCommentPopover({
   const [comment, setComment] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
-  const { pos, onDragStart } = useDraggablePopover(position, getPopoverWidth(), 220);
+  const { pos, onDragStart } = useDraggablePopover(position, getPopoverWidth(), 220, popoverRef);
   usePopoverDismiss(onClose, popoverRef);
 
   useEffect(() => {

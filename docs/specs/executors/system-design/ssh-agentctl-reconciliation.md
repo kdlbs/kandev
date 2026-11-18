@@ -4,6 +4,7 @@ system: executors
 requirements:
   - REQ-EXECUTORS-SSH-EXECUTOR-001
 created: 2026-11-07
+updated: 2026-11-16
 owners:
   - kandev
 ---
@@ -27,6 +28,7 @@ All criteria below belong to `REQ-EXECUTORS-SSH-EXECUTOR-001`.
 
 | Criteria | Design section |
 | --- | --- |
+| AC-001.9, AC-001.10 | Boot-aware verification and managed credential-broker resume |
 | AC-001.18 | Launch receipt and persistence |
 | AC-001.19, AC-001.22 | Remote reconciliation |
 | AC-001.20, AC-001.24 | Ownership and race boundaries |
@@ -112,15 +114,35 @@ outcome and closed reason code. Missing support, malformed output, channel
 failure, and timeout are unknown outcomes. Never substitute a shell `kill`
 command after such an error.
 
-Two operations share the same admission and identity checks. `terminate` is the
-directory-loss route below. `verify` re-proves the live process and returns
-`verified` without signalling, removing, or settling anything; the caller uses
-it before its existing guarded pidfile stop or a recovery adoption. A present
-receipt therefore always receives a live birth/generation check before any
-destructive branch, and only an absent key is legacy evidence. A malformed,
-foreign, or PID-mismatched receipt never falls back to the legacy verdict.
+Both operations validate the receipt. `terminate` is the directory-loss route.
+`verify` reports a matching live controller or confirms the recorded launch
+absent. Verification never signals or removes anything.
+A live controller requires birth/generation proof before guarded stop or adoption.
+Only an absent receipt key is legacy evidence. A malformed, foreign, or
+PID-mismatched receipt never falls back to legacy proof.
 
-For a complete Linux receipt, the helper performs these steps:
+### Boot-aware verification
+
+In `reconcileProcess`, verify mode checks `BirthBootMatches` after receipt
+and helper-user validation, before opening or inspecting the recorded PID.
+A readable, different boot proves that the original launch and its children
+cannot still exist. Return the existing `OutcomeAbsent`.
+The current holder of a reused PID receives no signal and is never adopted.
+Existing session-directory contents remain untouched by verification.
+
+A matching boot continues through the existing process, generation, and
+child-drainage checks. Invalid or unreadable evidence returns an existing
+unresolved reason. No caller interprets error-detail text as proof.
+
+`SessionMembersRemain` already treats a different boot as proof that the
+old launch has no surviving children. Reuse that meaning without changing
+the common process-identity contract.
+
+Terminate mode retains its existing previous-boot refusal in `absentOutcome`.
+It does not receive a new right to signal or remove paths.
+The early boot comparison belongs only to non-destructive verification.
+
+For terminate mode with a complete Linux receipt, the helper performs these steps:
 
 1. Check the receipt schema, expected task/session/controller, SSH UID, and paths.
 2. Use `lstat`-style inspection of the canonical session path and its parents.
@@ -147,12 +169,12 @@ A directory that appears after final admission remains untouched. The pidfd
 cannot redirect a signal to its replacement process. Before admission, any
 observed replacement path prevents signalling the original process as well.
 
-An absent process plus an absent session directory returns success without a
-signal only when no recorded-session child remains. A reused PID, changed boot
-identity, or different generation returns an identity-conflict outcome. A birth
-token from a previous boot is an identity conflict even when the PID is absent,
-because the session path may belong to a replacement. A matching command alone
-never grants authority.
+An absent process plus an absent session directory completes termination only
+when no recorded-session child remains. Terminate mode still rejects changed
+boot identity. Same-boot PID reuse or a different launch generation remains
+an identity conflict. A matching command alone never grants authority.
+Verify mode can confirm previous-boot absence, but that result grants no
+ownership of a current process or directory.
 
 `internal/common/processidentity` already supplies capture, birth-token parsing,
 and pidfd signalling patterns. Add only the narrow single-process operation
@@ -171,8 +193,8 @@ PID, before every branch. A typed missing-directory result can select the
 terminate operation only when a complete receipt belongs to this stop target.
 A receipt-bearing stop with a matching pidfile uses the verify operation before
 its guarded legacy kill. A receipt-bearing abandoned branch uses the verify
-operation to prove both the recorded process and its session children absent
-before removing the session directory. Other verification errors retain their
+operation to prove the recorded process and its session children absent.
+It preserves the session directory. Other verification errors retain their
 current refusal behavior. Receipt-bearing recovery must check the stronger
 identity evidence for a candidate and cannot use PID similarity alone. An
 invalid or conflicting receipt never falls back to legacy proof. The caller
@@ -187,12 +209,69 @@ process and its session children absent; otherwise the resume fails and keeps
 the metadata. A conflicting receipt reaches neither a forwarder, an
 authenticated adoption, nor a numeric stop.
 
+### Managed credential-broker resume
+
+`resetManagedBrokerResume` and `resetTrackedManagedBrokerResume` replace the
+controller so the next launch receives a current credential lease. Their
+receipt-bearing branches interpret the validated `verify` response as follows:
+
+| Verify response | Resume action |
+| --- | --- |
+| `absent` | Skip remote stop and clear stale controller metadata |
+| `verified` | Use the existing guarded stop, then require `absent` |
+| `unresolved` | Retain metadata and return the outcome, reason, and detail |
+| `stopped`, unknown outcome, or malformed response | Retain metadata and return a protocol or reconciliation error |
+
+The `absent` response proves that the controller and every process in its
+recorded launch session are gone. It includes a positively verified boot change.
+A failed SSH request or a dead numeric PID alone does not supply that proof.
+
+Both broker paths use the same outcome policy. The tracked path retains its
+watchdog, forwarder, SSH client, runtime API tunnel, and probe teardown order.
+The `absent` branch skips both the numeric stop and the redundant post-stop
+probe. The `verified` branch still requires a separate absence result after
+the stop. Unconfirmed child drainage retains the receipt.
+
+`clearSSHResumeRuntimeMetadata` removes controller identity, ports, receipt,
+and forwarding state. It preserves the target connection and remote task
+directory. Normal creation then issues a new launch receipt. The current
+`buildRunningFromExecution` rule prevents prior metadata from restoring an
+old receipt.
+
+The live-only `verifyRecordedControllerIdentity` contract remains strict for
+adoption and destructive-stop callers. Broker reset does not broaden that
+contract or accept every `Terminal()` result. Verify mode cannot authorize
+replacement from an unexpected `stopped` response.
+
+Ordinary receipt-bearing SSH resume also accepts a verified absence result.
+It verifies the receipt before a numeric PID probe, so a reused PID that the
+login user cannot signal does not block reboot recovery. It clears stale
+runtime metadata before any forwarder or authenticated adoption. Only legacy
+resume uses the numeric liveness probe.
+
+Broker reachability preflight remains before any stop or metadata reset.
+Its failure, a lost tracked transport, invalid receipt, conflicting identity,
+or malformed helper result prevents replacement. Reconciliation errors retain
+`errSSHLaunchReconciliationUnresolved` for `errors.Is` and include the actual
+outcome. Valid responses without a reason cannot produce an empty ` ()` diagnostic.
+
+`resumeRemoteInstancePreflight` runs before `CreateInstance` for either
+recovery action. Resume keeps the existing provider-conversation policy.
+Fresh start keeps its existing conversation-replacement policy. Neither action
+discards an unresolved remote owner. This correction adds no SQL write during
+preflight and does not clear durable stop inventory merely because
+`StopInstance` returned success.
+
+### Stop ownership and races
+
 A tracked session with a receipt revalidates directory ownership and live
 launch proof immediately before its numeric stop. A missing directory routes
 through the pidfd helper; a conflicting process or directory returns
 unresolved without signalling or removing anything. A receipt-bearing
-abandoned record removes its session directory only when the directory's own
-pidfile still names the recorded PID; an unowned directory is preserved. A
+abandoned record preserves its session directory, even if the pidfile names
+the recorded PID. A numeric match cannot prove directory ownership across boots.
+This also preserves existing same-boot directories without a second proof protocol.
+Normal verified-live stops retain their existing directory cleanup. A
 failed archive-delta teardown keeps its pending recovery entry and guard so the
 retry poller can act again, including when the pinned snapshot is already
 archive-cancelled.
@@ -231,7 +310,9 @@ All contexts, process-directory handles, and pidfds close on every exit path.
 | --- | --- | --- |
 | Linux, valid receipt, absent directory, original process exits | `stopped` | Settle only the recorded owner |
 | Confirmed absent PID and absent directory | `absent` | No signal, idempotent completion |
-| Reused PID, changed boot/generation, replacement path | `unresolved: identity_conflict` | Preserve inventory, no signal or removal |
+| Verify mode, valid receipt, different confirmed boot | `absent` | Reset the old controller handle without signalling or path removal |
+| Terminate mode, changed boot | `unresolved: identity_conflict` | Preserve inventory, no signal or removal |
+| Same-boot PID reuse, changed generation, replacement path | `unresolved: identity_conflict` | Preserve inventory, no signal or removal |
 | Live legacy process with missing directory | `unresolved: launch_identity_missing` | Operator reconciliation required |
 | Darwin, old helper, or unavailable pidfd | `unresolved: unsupported_identity` | Existing guarded paths remain available |
 | Permission, SSH, invalid receipt, or procfs ambiguity | `unresolved: probe_unknown` | Retry evidence remains intact |
@@ -260,6 +341,8 @@ contents. No new metric family is required.
 
 Tests cover launch-to-SQL receipt production, same-controller resume, replacement
 resets, both signal races, lost responses, legacy records, and mixed targets.
+They also cover previous-boot verification with absent and reused PIDs,
+unchanged terminate-mode refusal, and directory preservation after verified absence.
 Run the real helper against owned Linux subprocesses and real SSH in the
 container E2E fixture. Fake SSH tests separately exercise exact command failures.
 
@@ -269,3 +352,4 @@ container E2E fixture. Fake SSH tests separately exercise exact command failures
 - [Runtime inventory ownership](../../../decisions/0025-runtime-cleanup-uses-executors-running.md)
 - [Fail-closed cleanup](../../../decisions/0009-fail-closed-gc-semantics.md)
 - [Fix package](../../../plans/ssh-controller-directory-loss/plan.md)
+- [Broker-backed resume fix package](../../../plans/ssh-broker-absent-controller-resume/plan.md)

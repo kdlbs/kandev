@@ -34,5 +34,5 @@ the owner, change unmanaged terminal routing, or recreate missing resources.
 ## Verification
 
 Run the existing terminal owner, environment authorization, one-shot command,
-and workspace admission checks. The implementation depends on #4713's retained
-environment retirement guard; review this task's own delta separately.
+and workspace admission checks. The retained-environment retirement guard is
+provided by #5321 on main; review this task's own delta separately.

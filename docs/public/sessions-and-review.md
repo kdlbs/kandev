@@ -245,6 +245,11 @@ the instance stopped, so Kandev keeps that owner protected. Missing native
 conversation or delivery evidence can still block Resume. Kandev does not resend
 an instruction whose outcome is uncertain.
 
+If Kandev can prove that a request failed before it was sent, it records a failed
+submission without creating an uncertain-delivery block. A lost reply does not
+prove non-delivery. Resolve any unknown-outcome recovery notice before sending
+new work; blocked messages do not create another delivery submission.
+
 If delivery is interrupted and the prompt outcome is uncertain, the recovery
 card shows **Retry connection** and **Stop**. Retry connection reconnects the
 original stream and replays committed output from its durable cursor. It does
@@ -367,6 +372,12 @@ appears above the chat composer at 90% disk usage and clears below 85%. Work
 continues while the warning is shown. Open **Details** for measurements, or
 **Storage** for a local session. A remote warning names the executor and does
 not link to local cleanup.
+
+Select **Dismiss** (the × button) to hide the Storage row for this task until
+the browser tab session ends. The dismissal survives reloads and task switching.
+Later storage observations do not show the row again in that tab session.
+Dismissal does not stop monitoring, clear a storage problem, or remove session
+recovery controls.
 
 Capacity and delivery pressure keep separate observation times. A fresh disk
 measurement does not make an old delivery failure current. If no delivery
@@ -607,6 +618,14 @@ and reset desktop tasks and scales them to the available workbench.
 
 Each desktop split's **+** menu lists a linked review only while that exact review panel is missing from the live layout. Select a missing review there to open it in the split whose **+** you used. To move an open review to another split, drag its Dockview tab. Use **Layouts** only to change the default placement for new or reset task layouts.
 
+**Plugin panels in a layout.** **Add panel** in the Layouts editor also lists every task panel from your installed and enabled [plugins](plugins.md), such as Prompt History, by its plugin-provided name. Select a split first to add the panel there; otherwise Kandev uses the active split. A panel that is already in the layout is not listed again, and **Add panel** stays available when plugin panels are the only ones left to add.
+
+- **Preview:** the editor shows a labelled placeholder for a plugin panel and never runs the plugin, so you can arrange it without opening a task.
+- **Save and apply:** a built-in override or custom profile saves the panel's placement, tab order, selected tab, nested splits, and proportions. Fresh tasks and **Reset Layout** open the real plugin panel in that place when the plugin is available.
+- **Availability:** if the plugin is disabled, uninstalled, or still loading, the profile stays editable and keeps the saved placement with its saved title. Its row is absent from **Add panel** while unregistered. Already-open task panels are retained while registration is loading or has failed; definitive removal closes them without automatically reopening them later. Re-enable the plugin and reselect the profile or **Reset Layout** to restore the placement.
+
+Existing task-specific layouts keep their saved panels until you reselect a profile or use **Reset Layout**. Phone settings edit the same desktop profiles; choose a row with a separate tap after opening **Add panel**.
+
 All panels for a task point at the same task environment. In a multi-repository task, check the repository label before editing, committing, or reviewing. A preview also requires the application to listen on a reachable interface and expose a forwarded port.
 
 When an agent creates a linked Git worktree inside the task workspace, Kandev attaches it as a repository root within about 30 seconds, or immediately when the agent reports it with `add_branch_to_task_kandev` and `worktree_path`. Each root gets its own Changes group and Files folder with the existing stage, commit, push, and pull-request actions. Right-click a root group or folder, or long-press it on touch layouts, to open the root menu: open in the editor, open a terminal at that root, jump between Files and Changes, copy the full path, relative path, or branch, push, create or open a pull request, and remove the root from the task. Remove from task is available for every non-primary root. It keeps the folder, branch, and pull requests, and passive detection does not add the same path again until the agent reports it.
@@ -763,7 +782,7 @@ available.
 
 ### Open a file in its external repository
 
-When Kandev has unambiguous repository context, file toolbars in Changes, Review, built-in viewers and editors, and their mobile layouts show **Open file in GitHub**, **Open file in GitLab**, or **Open file in Azure DevOps**. The action opens the provider page in a new browser tab. GitLab links support both `gitlab.com` and configured self-managed hosts.
+When Kandev has unambiguous repository context, file toolbars in Changes, Review, built-in viewers and editors, and their mobile layouts show **Open file in GitHub** or **Open file in GitLab**. The action opens the provider page in a new browser tab. GitLab links support both `gitlab.com` and configured self-managed hosts.
 
 The link uses the published source branch from a linked pull or merge request for that repository when available. For a merged GitHub pull request, Kandev uses its saved head commit so the link survives source-branch deletion and opens the reviewed task snapshot. Without a saved revision, the link falls back to the task repository's base branch. Added or untracked files require a published branch or saved head commit. Deleted files open their base-branch version, while renamed files open the new path at the published revision or the previous path on the base branch.
 
@@ -865,7 +884,7 @@ The creation dialog requires a title, defaults it from the task title, accepts a
 
 - GitHub uses `gh pr create` and requires an installed, authenticated GitHub CLI.
 - GitLab uses `glab mr create` when available or the matching workspace connection's token through GitLab REST. It supports `gitlab.com` and configured self-managed HTTPS or SSH remotes, resolves an omitted target from the project default, and attempts to link the resulting MR back to the task repository.
-- Azure Repos uses `az repos pr create` and requires Azure CLI, the `azure-devops` extension, and either `az login` or `AZURE_DEVOPS_EXT_PAT`.
+- Plugin-owned providers, such as Bitbucket and Azure DevOps, create pull requests through their plugin after Kandev pushes the branch.
 - Other Git hosts do not have a built-in creation path. Use that host's tooling from the terminal.
 
 GitHub has the complete in-app PR review path. A linked PR detail panel shows checks, reviews, comments, conflicts, and merge readiness. It can add PR feedback to agent context, submit an approval when allowed, ask an agent to address conflicts, and merge using a method allowed by the repository. On an open PR, use the reviews list to re-request a reviewer whose review was dismissed. On a phone, open **Review** from the task bottom navigation to reach the same PR detail. GitHub permissions and repository policy remain authoritative; merge is enabled only when required checks, review state, and mergeability are ready.

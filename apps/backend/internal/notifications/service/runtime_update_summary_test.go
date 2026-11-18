@@ -89,6 +89,7 @@ func TestRuntimeUpdateSummaryClaimsMembersAndRetriesFailedProvider(t *testing.T)
 
 // @covers AC-AGENTS-RUNTIME-NOTIFY-003.3, AC-AGENTS-RUNTIME-NOTIFY-003.5
 func TestRuntimeUpdateSummaryKeepsRecipientClaimsIsolated(t *testing.T) {
+	t.Setenv(desktopNativeNotificationsEnv, "true")
 	ctx := context.Background()
 	log, _ := logger.NewFromZap(zap.NewNop())
 	repo := newMultiUserRepository()
@@ -137,6 +138,7 @@ func TestRuntimeUpdateSummaryUsesNamedNoticeForOneClaimedMember(t *testing.T) {
 
 // @covers AC-AGENTS-RUNTIME-NOTIFY-003.3, AC-AGENTS-RUNTIME-NOTIFY-003.5
 func TestRuntimeUpdateSummaryOmitsFailedMemberClaimAndRetriesItAlone(t *testing.T) {
+	t.Setenv(desktopNativeNotificationsEnv, "true")
 	log, _ := logger.NewFromZap(zap.NewNop())
 	base := &notificationTestRepository{
 		providers: []*models.Provider{{ID: "local", UserID: "user-1", Type: models.ProviderTypeLocal, Enabled: true}},

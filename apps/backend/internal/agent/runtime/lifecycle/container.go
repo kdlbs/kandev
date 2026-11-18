@@ -131,6 +131,7 @@ func buildContainerCreateInstanceRequest(
 ) *agentctl.CreateInstanceRequest {
 	return &agentctl.CreateInstanceRequest{
 		ID:                    config.InstanceID,
+		ScopedMCPRoutes:       true,
 		WorkspacePath:         "/workspace",
 		AgentCommand:          "",
 		AgentType:             agentType,
@@ -395,7 +396,8 @@ func (cm *ContainerManager) createInstanceAndClient(
 	client := agentctl.NewClient(instanceHost, instancePort, cm.logger,
 		agentctl.WithExecutionID(config.InstanceID),
 		agentctl.WithSessionID(config.SessionID),
-		agentctl.WithAuthToken(ctl.AuthToken()))
+		agentctl.WithAuthToken(ctl.AuthToken()),
+		agentctl.WithBuiltinMCPScopedRoutes(resp.ScopedMCPRoutes))
 
 	return client, nil
 }

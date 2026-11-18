@@ -17,7 +17,7 @@ func TestStore_GitHubWorkspaceSettingsRoundTrip(t *testing.T) {
 
 	input := &WorkspaceSettings{
 		WorkspaceID:   "ws-1",
-		RepoScopeMode: RepoScopeModeRepos,
+		RepoScopeMode: RepoScopeModeSelected,
 		RepoScopeOrgs: []string{"kdlbs"},
 		RepoScopeRepos: []RepoFilter{
 			{Owner: "kdlbs", Name: "kandev"},
@@ -34,7 +34,7 @@ func TestStore_GitHubWorkspaceSettingsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get workspace settings: %v", err)
 	}
-	if got.WorkspaceID != "ws-1" || got.RepoScopeMode != RepoScopeModeRepos {
+	if got.WorkspaceID != "ws-1" || got.RepoScopeMode != RepoScopeModeSelected {
 		t.Fatalf("unexpected settings identity/scope: %+v", got)
 	}
 	if len(got.RepoScopeRepos) != 1 || got.RepoScopeRepos[0].Owner != "kdlbs" || got.RepoScopeRepos[0].Name != "kandev" {
