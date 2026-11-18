@@ -375,8 +375,11 @@ describe("AgentRuntimeUpdateControl reset state", () => {
     const defaultVersion = "0.71.0";
     const onPreview = vi.fn().mockResolvedValue(
       preview({
+        current_version: ACTIVE_VERSION,
         default_version: defaultVersion,
         target_version: defaultVersion,
+        active_version: ACTIVE_VERSION,
+        effective_version: ACTIVE_VERSION,
         operation: "use_default",
       }),
     );
@@ -386,7 +389,7 @@ describe("AgentRuntimeUpdateControl reset state", () => {
       agent_name: AGENT_NAME,
       status: "succeeded",
       operation: "use_default",
-      current_version: defaultVersion,
+      current_version: ACTIVE_VERSION,
       default_version: defaultVersion,
       effective_version: defaultVersion,
       target_version: defaultVersion,
@@ -428,6 +431,11 @@ describe("AgentRuntimeUpdateControl reset state", () => {
     const result = await screen.findByTestId(`agent-update-result-${AGENT_NAME}`);
     expect(result.textContent).toBe(`Runtime updated to ${defaultVersion}.`);
     expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Change version" })).toBeTruthy();
+    const details = screen.getByTestId(`agent-update-runtime-details-${AGENT_NAME}`);
+    fireEvent.click(details.querySelector("summary")!);
+    expect(screen.queryByText(`Active version: ${ACTIVE_VERSION}`, { exact: true })).toBeNull();
+    expect(screen.getByText(`Effective version: ${defaultVersion}`, { exact: true })).toBeTruthy();
   });
 });
 

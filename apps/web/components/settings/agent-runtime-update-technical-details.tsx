@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IconChevronDown } from "@tabler/icons-react";
+import { resolveRuntimeOperation } from "@/lib/agent-runtime-update";
 import type { AgentUpdateJob, AgentUpdatePreview, AgentUpdateStatus } from "@/lib/api";
 import { RuntimeGuidanceAction } from "./agent-runtime-policies";
 import { RuntimeVersionFacts } from "./runtime-version-summary";
@@ -22,7 +23,6 @@ function RuntimeUpdateDisclosure({
   return (
     <details className={className} data-testid={testId}>
       <summary
-        role="button"
         className={settingsActionClassName(
           "flex cursor-pointer list-none items-center justify-between gap-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden [details[open]>&>svg]:rotate-180",
         )}
@@ -57,6 +57,7 @@ export function RuntimeUpdateTechnicalDetails({
       className="border-t py-1"
     >
       <RuntimeTechnicalIdentity preview={preview} status={status} />
+      <RuntimeUpdateScopeNotes preview={preview} job={job} />
       {preview && (
         <div className="space-y-1 text-muted-foreground empty:hidden">
           <RuntimeVersionFacts preview={preview} job={job} />
@@ -91,6 +92,29 @@ export function RuntimeUpdateTechnicalDetails({
   );
 }
 
+function RuntimeUpdateScopeNotes({
+  preview,
+  job,
+}: {
+  preview: AgentUpdatePreview | null;
+  job?: AgentUpdateJob;
+}) {
+  const { t } = useTranslation();
+  if (
+    !preview ||
+    preview.update_mode !== "pinned" ||
+    resolveRuntimeOperation(preview, job) === "migrate" ||
+    preview.managed_fallback
+  )
+    return null;
+  return (
+    <div className="space-y-1 text-muted-foreground">
+      <p>{t("agents:runtimeUpdateExplainer")}</p>
+      <p>{t("agents:runtimeUpdateSessionsNote")}</p>
+    </div>
+  );
+}
+
 function RuntimeTechnicalIdentity({
   preview,
   status,
@@ -98,21 +122,62 @@ function RuntimeTechnicalIdentity({
   preview: AgentUpdatePreview | null;
   status?: AgentUpdateStatus;
 }) {
-  const { t } = useTranslation();
   const packageName = preview?.package || status?.package;
-  const source = packageName || status?.source || status?.runtime_id;
-  const kandevManaged = status?.owner === "kandev" || preview?.update_mode === "pinned";
-  if (!source) return null;
+  const source = status?.source || status?.runtime_id;
+  const managedFallback = Boolean(preview?.managed_fallback || status?.managed_fallback);
+  if (!packageName && !source) return null;
   return (
     <dl className="my-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2">
-      <dt className="text-muted-foreground">
-        {t(packageName ? "agents:runtimePackageLabel" : "agents:runtimeSourceLabel")}
-      </dt>
+      <RuntimePackageRow packageName={packageName} />
+      <RuntimeSourceRow
+        source={source}
+        packageName={packageName}
+        managedFallback={managedFallback}
+      />
+      <RuntimeOwnerRow owner={status?.owner} />
+    </dl>
+  );
+}
+
+function RuntimePackageRow({ packageName }: { packageName?: string }) {
+  const { t } = useTranslation();
+  if (!packageName) return null;
+  return (
+    <>
+      <dt className="text-muted-foreground">{t("agents:runtimePackageLabel")}</dt>
+      <dd className="wrap-anywhere text-end font-mono">{packageName}</dd>
+    </>
+  );
+}
+
+function RuntimeSourceRow({
+  source,
+  packageName,
+  managedFallback,
+}: {
+  source?: string;
+  packageName?: string;
+  managedFallback: boolean;
+}) {
+  const { t } = useTranslation();
+  if (!source || (source === packageName && !managedFallback)) return null;
+  return (
+    <>
+      <dt className="text-muted-foreground">{t("agents:runtimeSourceLabel")}</dt>
       <dd className="wrap-anywhere text-end font-mono">{source}</dd>
+    </>
+  );
+}
+
+function RuntimeOwnerRow({ owner }: { owner?: string }) {
+  const { t } = useTranslation();
+  if (!owner) return null;
+  return (
+    <>
       <dt className="text-muted-foreground">{t("agents:runtimeManagedByLabel")}</dt>
       <dd className="text-end">
-        {t(kandevManaged ? "agents:runtimeOwnerKandev" : "agents:runtimeExternalOwner")}
+        {t(owner === "kandev" ? "agents:runtimeOwnerKandev" : "agents:runtimeExternalOwner")}
       </dd>
-    </dl>
+    </>
   );
 }

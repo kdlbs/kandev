@@ -52,17 +52,24 @@ test.describe("managed agent runtime updates", () => {
       .toBe(true);
     await expectRuntimeVersions(dialog, "0.62.0", "0.63.0");
     await expect(dialog).toHaveAccessibleDescription(/Active sessions keep running/);
-    await expect(
-      dialog.getByTestId(`agent-update-runtime-details-${runtime.agentName}`),
-    ).not.toHaveAttribute("open");
-    await expect(
-      dialog.getByTestId(`agent-update-command-${runtime.agentName}`).locator("pre"),
-    ).toBeHidden();
+    const runtimeDetails = dialog.getByTestId(`agent-update-runtime-details-${runtime.agentName}`);
+    const commandDetails = dialog.getByTestId(`agent-update-command-${runtime.agentName}`);
+    const runtimeDetailsSummary = runtimeDetails.locator(":scope > summary");
+    await expect(runtimeDetailsSummary).toBeVisible();
+    await expect(runtimeDetails).not.toHaveAttribute("open");
+    await expect(commandDetails.locator("summary")).toBeHidden();
+    await expect(commandDetails.locator("pre")).toBeHidden();
     expect(runtime.previewCount()).toBe(1);
     expect(runtime.postCount()).toBe(0);
     await prCapture.screenshot("desktop-update-preview", {
       caption: "Desktop update preview before approval",
     });
+
+    await runtimeDetailsSummary.click();
+    await expect(commandDetails.locator("summary")).toBeVisible();
+    await expect(commandDetails.locator("pre")).toBeHidden();
+    await commandDetails.locator("summary").click();
+    await expect(commandDetails.locator("pre")).toBeVisible();
 
     await testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`).click();
     expect(runtime.postCount()).toBe(1);
@@ -116,9 +123,9 @@ test.describe("managed agent runtime updates", () => {
     await expect(testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`)).toHaveCount(0);
     await expect(testPage.getByTestId(`agent-update-result-${runtime.agentName}`)).toHaveCount(0);
     await trigger.click();
-    await expect(testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`)).toContainText(
-      "0.63.0",
-    );
+    const refreshedDialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
+    await expectRuntimeVersions(refreshedDialog, "0.63.0", "0.63.0");
+    await expect(refreshedDialog.getByText("Up to date", { exact: true })).toBeVisible();
   });
 
   test("requires a current runtime version before approval", async ({ testPage }) => {
@@ -491,7 +498,7 @@ test.describe("managed agent runtime updates", () => {
       postResponse: updateJob({
         status: "succeeded",
         operation: "use_default",
-        current_version: "0.64.0",
+        current_version: "0.62.0",
         default_version: "0.64.0",
         effective_version: "0.64.0",
         target_version: "0.64.0",
@@ -508,6 +515,12 @@ test.describe("managed agent runtime updates", () => {
     await expect(dialog.getByTestId(`agent-update-result-${runtime.agentName}`)).toHaveText(
       "Runtime updated to 0.64.0.",
     );
+    const details = dialog.getByTestId(`agent-update-runtime-details-${runtime.agentName}`);
+    const detailsSummary = details.locator(":scope > summary");
+    await expect(detailsSummary).toBeVisible();
+    await detailsSummary.click();
+    await expect(details).not.toContainText("Active version: 0.62.0");
+    await expect(details).toContainText("Effective version: 0.64.0");
   });
 
   test("keeps the previous active version after a failed activation", async ({ testPage }) => {

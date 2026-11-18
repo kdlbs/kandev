@@ -313,7 +313,7 @@ export function AgentRuntimeUpdateBody({
         approveError={approveError}
         onRetryPreview={onRetryPreview}
       />
-      {preview && (!completed || preview.update_mode === "self_update") && (
+      {preview && (
         <RuntimeUpdatePreviewDetails
           agentName={agentName}
           preview={preview}
@@ -339,14 +339,12 @@ export function AgentRuntimeUpdateBody({
       )}
       <RuntimeUpdateProgress agentName={agentName} job={job} />
       <UpdateResult agentName={agentName} job={job} />
-      {(!completed || Boolean(job.output)) && (
-        <RuntimeUpdateTechnicalDetails
-          agentName={agentName}
-          status={status}
-          preview={preview}
-          job={job}
-        />
-      )}
+      <RuntimeUpdateTechnicalDetails
+        agentName={agentName}
+        status={status}
+        preview={preview}
+        job={job}
+      />
     </div>
   );
 }

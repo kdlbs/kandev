@@ -1,9 +1,11 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import type { PrAssetCapture } from "../../helpers/pr-asset-capture";
 
 export async function expectRuntimeVersions(surface: Locator, current: string, target: string) {
   const summary = surface.locator('[data-testid^="agent-update-version-summary-"]');
-  await expect(summary.getByText(`Current version ${current}`, { exact: true })).toBeVisible();
+  if (current !== target)
+    await expect(summary.getByText(`Current version ${current}`, { exact: true })).toBeVisible();
   await expect(summary.getByText(target, { exact: true })).toBeVisible();
 }
 
@@ -13,6 +15,7 @@ export async function chooseKandevRuntimeDefault(page: Page, agentName: string) 
 }
 
 async function expectBackBesideTitle(surface: Locator, back: Locator, mobile: boolean) {
+  await waitForFiniteAnimations(surface);
   const title = surface.locator('[data-slot="dialog-title"], [data-slot="drawer-title"]');
   await expect(back).toHaveAccessibleName("Back to all runtimes");
   await expect(back).toBeInViewport({ ratio: 1 });
@@ -24,11 +27,12 @@ async function expectBackBesideTitle(surface: Locator, back: Locator, mobile: bo
   else expect(Math.max(width, height)).toBeLessThan(44);
 }
 
-async function expectCompactRuntimeDetail(detail: Locator, touch: boolean) {
+async function expectCompactRuntimeDetail(page: Page, detail: Locator, touch: boolean) {
   await expect(detail.getByText("Quick choices", { exact: true })).toBeHidden();
   const latest = detail.getByText("Latest version", { exact: true });
   const automatic = detail.getByText("Automatic updates", { exact: true });
-  const runtimeDetails = detail.getByText("Runtime details", { exact: true });
+  const runtimeDetails = detail.getByTestId(`agent-update-runtime-details-claude-acp`);
+  const runtimeDetailsSummary = runtimeDetails.locator(":scope > summary");
   const guidance = detail.getByRole("link", { name: "Manual update guidance" });
   const confirm = detail.getByRole("button", { name: "Update to 0.64.0" });
   await expect(detail.getByRole("button", { name: "Change version" })).toBeVisible();
@@ -43,13 +47,33 @@ async function expectCompactRuntimeDetail(detail: Locator, touch: boolean) {
   ]);
   expect(Math.abs(versionBox!.x - policyBox!.x)).toBeLessThan(1);
   expect(Math.abs(versionBox!.x - detailsBox!.x)).toBeLessThan(1);
-  if (touch) await runtimeDetails.tap();
-  else await runtimeDetails.press("Enter");
+  if (touch) {
+    await runtimeDetailsSummary.tap();
+  } else {
+    const versionPicker = detail.getByTestId("agent-update-version-claude-acp");
+    await versionPicker.click();
+    await page.keyboard.press("Escape");
+    await expect(versionPicker).toBeFocused();
+    for (let index = 0; index < 24; index += 1) {
+      if (await runtimeDetailsSummary.evaluate((element) => element === document.activeElement))
+        break;
+      await page.keyboard.press("Tab");
+    }
+    await expect(runtimeDetailsSummary).toBeFocused();
+    await page.keyboard.press("Enter");
+  }
   await expect(guidance).toBeVisible();
   const command = detail.getByTestId("agent-update-command-claude-acp");
+  const commandSummary = command.locator(":scope > summary");
+  await expect(commandSummary).toBeVisible();
   await expect(command.locator("pre")).toBeHidden();
-  if (touch) await command.locator("summary").tap();
-  else await command.locator("summary").press("Enter");
+  if (touch) {
+    await commandSummary.tap();
+  } else {
+    await page.keyboard.press("Tab");
+    await expect(commandSummary).toBeFocused();
+    await page.keyboard.press("Enter");
+  }
   await expect(command.locator("pre")).toContainText("@agentclientprotocol/claude-agent-acp");
   await expect(command.locator("pre")).toBeVisible();
   await expect(confirm).toBeInViewport();
@@ -102,7 +126,7 @@ export async function compactRuntimeSettings(
     ).toBeGreaterThanOrEqual(43.5);
   await expect(page.getByTestId("runtime-updates-count")).toHaveText("1");
 
-  await expectCompactRuntimeDetail(detail, touch);
+  await expectCompactRuntimeDetail(page, detail, touch);
   const back = detail.getByTestId("agent-update-back-claude-acp");
   await expectBackBesideTitle(detail, back, mobile);
   if (touch) await back.tap();

@@ -86,7 +86,7 @@ function RuntimeVersionBrowser({
               <CommandItem
                 value={DEFAULT_RUNTIME_TARGET}
                 keywords={[defaultVersion, t("agents:useKandevDefault")]}
-                className="min-h-11 cursor-pointer px-3 py-1.5 sm:min-h-10"
+                className="min-h-10 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11 cursor-pointer px-3 py-1.5"
                 aria-selected={selectedUseDefault}
                 data-checked={selectedUseDefault}
                 data-testid={`agent-update-version-default-${agentName}`}
@@ -101,7 +101,7 @@ function RuntimeVersionBrowser({
                 <CommandItem
                   key={version.version}
                   value={version.version}
-                  className="min-h-11 cursor-pointer px-3 py-1.5 sm:min-h-10"
+                  className="min-h-10 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11 cursor-pointer px-3 py-1.5"
                   aria-selected={isSelected}
                   data-checked={isSelected}
                   data-testid={`agent-update-version-option-${agentName}-${version.version}`}
@@ -172,7 +172,9 @@ export function RuntimeVersionPicker({
           <Button
             type="button"
             variant="outline"
-            className={settingsActionClassName("max-w-full")}
+            className={settingsActionClassName(
+              "max-w-full max-md:min-h-11 [@media(pointer:coarse)]:min-h-11",
+            )}
             aria-expanded={browseOpen}
             aria-controls={browserId}
             disabled={disabled}

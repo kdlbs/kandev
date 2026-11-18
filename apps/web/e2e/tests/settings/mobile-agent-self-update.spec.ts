@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { settledBoundingBox } from "../../helpers/settled-box";
 import { waitForHttp } from "../../helpers/causal-waits";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { installRuntimeUpdateFixture, updateJob } from "./agent-runtime-update-helpers";
 
 test.describe("OMP harness-owned updates on phones", () => {
@@ -55,8 +56,13 @@ test.describe("OMP harness-owned updates on phones", () => {
       .toBe(true);
     const close = drawer.getByRole("button", { name: "Close", exact: true });
     await expect(close).toBeVisible();
-    const closeBox = await settledBoundingBox(close);
-    expect(closeBox.y + closeBox.height).toBeLessThanOrEqual(viewport!.height);
+    await waitForFiniteAnimations(drawer);
+    const closeBox = await close.boundingBox();
+    expect(closeBox).not.toBeNull();
+    expect(closeBox!.x).toBeGreaterThanOrEqual(0);
+    expect(closeBox!.y).toBeGreaterThanOrEqual(0);
+    expect(closeBox!.x + closeBox!.width).toBeLessThanOrEqual(viewport!.width);
+    expect(closeBox!.y + closeBox!.height).toBeLessThanOrEqual(viewport!.height);
     expect((await settledBoundingBox(drawer)).height).toBeLessThanOrEqual(viewport!.height);
     await expect(testPage.locator("html")).toHaveJSProperty(
       "scrollWidth",

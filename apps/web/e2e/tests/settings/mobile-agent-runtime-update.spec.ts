@@ -3,6 +3,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { settledBoundingBox } from "../../helpers/settled-box";
 import { expectTouchDimension } from "../../helpers/touch-targets";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { installRuntimeUpdateFixture, updateJob } from "./agent-runtime-update-helpers";
 
 test.describe("managed agent runtime updates on mobile", () => {
@@ -98,19 +99,22 @@ test.describe("managed agent runtime updates on mobile", () => {
 
   test("selects an older stable version for rollback in the drawer", async ({ testPage }) => {
     const runtime = await installRuntimeUpdateFixture(testPage);
+    await testPage.setViewportSize({ width: 700, height: 900 });
 
     await testPage.goto("/settings/agents");
     await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).tap();
     const drawer = testPage.getByTestId(`agent-update-drawer-${runtime.agentName}`);
     const selector = drawer.getByTestId(`agent-update-version-${runtime.agentName}`);
-    const selectorBox = await selector.boundingBox();
-    expect(selectorBox).not.toBeNull();
-    expectTouchDimension(selectorBox!.height);
+    const selectorBox = await settledBoundingBox(selector);
+    expectTouchDimension(selectorBox.height);
     const drawerBefore = await settledBoundingBox(drawer);
     await selector.tap();
     const browser = testPage.getByTestId(`agent-update-version-browser-${runtime.agentName}`);
     await expect(browser).toBeVisible();
     await expect(browser).toHaveAttribute("data-slot", "popover-content");
+    const defaultOption = browser.getByTestId(`agent-update-version-default-${runtime.agentName}`);
+    const defaultOptionBox = await settledBoundingBox(defaultOption);
+    expectTouchDimension(defaultOptionBox.height);
     const browserBox = await settledBoundingBox(browser);
     const viewport = testPage.viewportSize();
     expect(viewport).not.toBeNull();
@@ -328,7 +332,7 @@ test("keeps policy detail and fixed actions reachable in a short phone viewport"
   testPage,
 }) => {
   await testPage.setViewportSize({ width: 390, height: 390 });
-  await installRuntimeUpdateFixture(testPage);
+  const runtime = await installRuntimeUpdateFixture(testPage);
   await testPage.goto("/settings/agents");
   await testPage.getByTestId("runtime-updates-button").tap();
   await testPage.getByTestId("runtime-manage-versions-claude-acp").tap();
@@ -343,12 +347,33 @@ test("keeps policy detail and fixed actions reachable in a short phone viewport"
   await expect
     .poll(() => body.evaluate((element) => element.scrollHeight > element.clientHeight))
     .toBe(true);
-  await body.evaluate((element) => {
-    element.scrollTop = element.scrollHeight;
+  const bodyBox = await body.boundingBox();
+  expect(bodyBox).not.toBeNull();
+  const touch = await testPage.context().newCDPSession(testPage);
+  const touchX = bodyBox!.x + bodyBox!.width / 2;
+  const touchStartY = bodyBox!.y + bodyBox!.height - 24;
+  const touchEndY = Math.max(bodyBox!.y + 24, touchStartY - 140);
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ id: 1, x: touchX, y: touchStartY, radiusX: 1, radiusY: 1, force: 1 }],
   });
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchMove",
+    touchPoints: [{ id: 1, x: touchX, y: touchEndY, radiusX: 1, radiusY: 1, force: 1 }],
+  });
+  await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await touch.detach();
+  await expect.poll(() => body.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  const command = drawer.getByTestId("agent-update-command-claude-acp").locator("pre");
+  await expect(command).toBeVisible();
+  await expect(command).toBeInViewport();
 
   const confirm = drawer.getByTestId("agent-update-confirm-claude-acp");
   await expect(confirm).toBeInViewport();
   const box = (await confirm.boundingBox())!;
   expect(box.y + box.height).toBeLessThanOrEqual(testPage.viewportSize()!.height);
+  const postResponse = waitForHttp(testPage, "POST", /\/api\/v1\/agent-update\/claude-acp$/);
+  await confirm.tap();
+  await postResponse;
+  expect(runtime.postBodies()).toHaveLength(1);
 });
