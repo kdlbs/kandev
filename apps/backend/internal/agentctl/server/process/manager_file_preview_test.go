@@ -76,7 +76,18 @@ func TestFilePreviewStillRejectsExcludedSymlinkTarget(t *testing.T) {
 	if err := os.Symlink(private, filepath.Join(dir, "recovery.stl")); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	if err := checkPreviewExclusions(dir, private, []string{"deleted.stl", "recovery.stl"}); err == nil {
+	m := NewManager(&config.InstanceConfig{WorkDir: dir}, logger.Default())
+	t.Cleanup(func() { _ = m.StopForTeardown(t.Context()) })
+	info, err := m.PrepareFilePreview(t.Context(), private, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.CancelFilePreview(info.Token)
+	m.GetWorkspaceTracker().SetRecoveryArtifactExclusions([]string{
+		filepath.Join(dir, "deleted.stl"),
+		filepath.Join(dir, "recovery.stl"),
+	})
+	if _, err := m.PrepareFilePreview(t.Context(), private, ""); err == nil {
 		t.Fatal("excluded symlink target admitted")
 	}
 }
