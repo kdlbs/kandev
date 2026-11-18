@@ -310,19 +310,28 @@ func repositoryInWorkspaceScope(settings *WorkspaceSettings, owner, repo string)
 	if settings == nil || settings.RepoScopeMode == "" || settings.RepoScopeMode == RepoScopeModeAll {
 		return true
 	}
+	owner = strings.TrimSpace(owner)
+	repo = strings.TrimSpace(repo)
 	switch settings.RepoScopeMode {
-	case RepoScopeModeOrgs:
+	case RepoScopeModeOrgs, RepoScopeModeSelected:
 		for _, org := range settings.RepoScopeOrgs {
 			if strings.EqualFold(strings.TrimSpace(org), strings.TrimSpace(owner)) {
 				return true
 			}
 		}
-	case RepoScopeModeRepos:
+	}
+	if settings.RepoScopeMode == RepoScopeModeRepos || settings.RepoScopeMode == RepoScopeModeSelected {
 		for _, candidate := range settings.RepoScopeRepos {
-			if strings.EqualFold(candidate.Owner, owner) && strings.EqualFold(candidate.Name, repo) {
+			if strings.EqualFold(strings.TrimSpace(candidate.Owner), owner) && strings.EqualFold(strings.TrimSpace(candidate.Name), repo) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// RepositoryInWorkspaceScope reports whether a repository matches the saved
+// workspace GitHub scope.
+func RepositoryInWorkspaceScope(settings *WorkspaceSettings, owner, repo string) bool {
+	return repositoryInWorkspaceScope(settings, owner, repo)
 }

@@ -1665,7 +1665,7 @@
           "key": "github_settings.repo_scope_mode",
           "field_path": "repo_scope_mode",
           "label": "Repository scope mode",
-          "description": "Repository scope selection mode.",
+          "description": "Choose all repositories or selected owners and exact repositories; legacy orgs/repos inputs stay exclusive.",
           "json_type": "string",
           "support": "supported",
           "classification": "writable",
