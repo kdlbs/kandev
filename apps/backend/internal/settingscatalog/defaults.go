@@ -614,7 +614,7 @@ func userSettingsDomain() DomainDescriptor {
 		"show_todo_list_panel_only_when_not_empty", "todo list empty state", "boolean", "show_turn_changed_files", "turn changed files", "boolean",
 		"show_release_notification", "release notification", "boolean", "release_notes_last_seen_version", "release notes version", "string",
 		"lsp_auto_start_languages", "LSP auto start", "array", "lsp_auto_install_languages", "LSP auto install", "array", "lsp_server_configs", "LSP server configs", "object",
-		"lsp_status_location", "LSP status location", "string", "saved_layouts", "saved layouts", "array", "sidebar_views", "sidebar views", "array", "sidebar_layout_state", "sidebar layout state", "object",
+		"markdown_preview_by_default", "Open Markdown files in Preview", "boolean", "lsp_status_location", "LSP status location", "string", "saved_layouts", "saved layouts", "array", "sidebar_views", "sidebar views", "array", "sidebar_layout_state", "sidebar layout state", "object",
 		"sidebar_active_view_id", "active sidebar view", "string", "sidebar_draft", "sidebar draft", "object", "thread_views", "thread views", "array",
 		"thread_active_view_id", "active thread view", "string", "thread_view_draft", "thread draft", "object", "sidebar_task_prefs", "sidebar task preferences", "object",
 		"sidebar_task_color_automation", "sidebar color automation", "object", "sidebar_task_colors", "sidebar task colors", "object", "sidebar_task_color_patch", "sidebar task color patch", "object", "task_create_last_used", "last task create values", "object",

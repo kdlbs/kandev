@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo } from "react";
 import { IconEdit, IconTrash, IconChevronDown, IconExternalLink } from "@tabler/icons-react";
+import { Switch } from "@kandev/ui/switch";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { Textarea } from "@kandev/ui/textarea";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
-import { SettingsGroup } from "@/components/settings/settings-group";
+import { SettingsGroup, SettingsRow } from "@/components/settings/settings-group";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { EditableCard } from "@/components/settings/editable-card";
@@ -420,8 +421,42 @@ function EditorsSection({
   );
 }
 
+function MarkdownPreviewSetting({ state }: { state: EditorsSettingsState }) {
+  const { t } = useTranslation();
+  return (
+    <SettingsRow
+      id="setting-markdown-preview"
+      label={t("settings:markdownPreviewByDefault")}
+      description={t("settings:markdownPreviewByDefaultDescription")}
+      controlId="markdown-preview-default"
+      touchTarget="switch"
+      controlWrapperTestId="markdown-preview-control"
+      discoveryTargetId="setting-markdown-preview"
+      isDirty={state.markdownPreviewByDefault !== state.baselineMarkdownPreviewByDefault}
+      control={
+        <Switch
+          id="markdown-preview-default"
+          checked={state.markdownPreviewByDefault}
+          onCheckedChange={state.setMarkdownPreviewByDefault}
+        />
+      }
+    />
+  );
+}
+
+function discardEditorsDraft(state: EditorsSettingsState) {
+  state.setMarkdownPreviewByDefault(state.baselineMarkdownPreviewByDefault);
+  state.setDefaultEditorId(state.baselineDefaultId);
+  state.setLspAutoStartLanguages([...state.baselineLspAutoStart]);
+  state.setLspAutoInstallLanguages([...state.baselineLspAutoInstall]);
+  state.setLspStatusLocation(state.baselineLspStatusLocation);
+  state.setLspConfigStrings({ ...state.baselineLspConfigStrings });
+  state.setLspConfigErrors({});
+}
+
 function getEditorsSaveRevision(state: EditorsSettingsState): string {
   return JSON.stringify({
+    markdownPreviewByDefault: state.markdownPreviewByDefault,
     defaultEditorId: state.defaultEditorId,
     lspAutoStartLanguages: state.lspAutoStartLanguages,
     lspAutoInstallLanguages: state.lspAutoInstallLanguages,
@@ -474,6 +509,7 @@ export function EditorsSettings({ embedded = false }: { embedded?: boolean }) {
       invalidReason={
         hasInvalidConfig ? t("settings:fixInvalidLspServerConfigurationBefore") : undefined
       }
+      onDiscard={() => discardEditorsDraft(state)}
       onSave={() => saveDefaultRequest.run()}
       showPageChrome={!embedded}
       contentFrame="none"
@@ -508,6 +544,7 @@ export function EditorsSettings({ embedded = false }: { embedded?: boolean }) {
         </SettingsGroup>
         <Separator />
         <SettingsGroup title={t(EDITORS_TITLE_KEY)} contentClassName="space-y-4 divide-y-0">
+          <MarkdownPreviewSetting state={state} />
           <EditorsSection
             embedded={embedded}
             showHeading={false}

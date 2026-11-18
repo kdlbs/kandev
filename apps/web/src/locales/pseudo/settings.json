@@ -1232,5 +1232,7 @@
   "builtinMcp.inheritedValue": "Ĩńĥēŕĩţēď ƒŕōḿ ŵōŕķśƥàćē: {{value}}",
   "builtinMcp.overrideValue": "Ţàśķ ōvēŕŕĩďē: {{value}}. Ŵōŕķśƥàćē ďēƒàũĺţ: {{default}}.",
   "builtinMcp.useInherited": "Ũśē ĩńĥēŕĩţēď vàĺũē",
-  "builtinMcp.allowTasks": "Àĺĺōŵ ţàśķś ţō ũśē ţĥĩś ƥàćķàĝē"
+  "builtinMcp.allowTasks": "Àĺĺōŵ ţàśķś ţō ũśē ţĥĩś ƥàćķàĝē",
+  "markdownPreviewByDefault": "Ōƥēń Ḿàŕķďōŵń ƒĩĺēś ĩń Ƥŕēvĩēŵ",
+  "markdownPreviewByDefaultDescription": "Ćĥōōśē ţĥē ĩńĩţĩàĺ ḿōďē ƒōŕ ńēŵĺŷ ōƥēńēď Ḿàŕķďōŵń ƒĩĺēś. Ŷōũ ćàń śŵĩţćĥ ḿōďēś àţ àńŷ ţĩḿē."
 }
