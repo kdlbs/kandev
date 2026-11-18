@@ -63,15 +63,20 @@ export async function checkMarkdownOpening({
       const file = await session.fileTree.waitForFileTreeNode(
         enabled ? "preview-on.md" : "preview-off.md",
       );
-      await file.click();
+      if (mobile) await file.tap();
+      else await file.click();
       const preview = testPage.getByTestId("markdown-preview");
       if (enabled) {
         await expect(preview).toBeVisible();
-        await preview.getByTestId("markdown-preview-toggle").click();
+        const sourceToggle = preview.getByTestId("markdown-preview-toggle");
+        if (mobile) await sourceToggle.tap();
+        else await sourceToggle.click();
       }
       await expect(preview).not.toBeVisible();
       await expect(testPage.locator(".cm-editor:visible, .monaco-editor:visible")).toBeVisible();
-      await testPage.getByTestId("markdown-preview-toggle").click();
+      const previewToggle = testPage.getByTestId("markdown-preview-toggle");
+      if (mobile) await previewToggle.tap();
+      else await previewToggle.click();
       await expect(preview).toBeVisible();
     }
   } finally {

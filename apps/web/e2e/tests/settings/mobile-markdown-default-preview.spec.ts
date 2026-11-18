@@ -24,12 +24,12 @@ test("persists and resets the Markdown initial-mode preference", async ({
     await testPage.screenshot({ path: testInfo.outputPath("markdown-preview-setting.png") });
     const row = testPage.getByTestId("markdown-preview-control");
     expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(44);
-    await toggle.click();
+    await toggle.tap();
     const save = testPage.getByTestId("settings-floating-save");
-    await save.getByRole("button", { name: "Reset", exact: true }).click();
+    await save.getByRole("button", { name: "Reset", exact: true }).tap();
     await expect(toggle).toBeChecked();
-    await toggle.click();
-    await save.getByRole("button", { name: "Save changes", exact: true }).click();
+    await toggle.tap();
+    await save.getByRole("button", { name: "Save changes", exact: true }).tap();
     await expect(save).not.toBeVisible();
     await testPage.reload();
     await expect(toggle).not.toBeChecked();

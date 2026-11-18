@@ -13,8 +13,10 @@ import {
 import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
-function activeMarkdownPreview(page: import("@playwright/test").Page) {
-  return page.getByTestId("markdown-preview").filter({ visible: true }).first();
+async function activeMarkdownPreview(page: import("@playwright/test").Page) {
+  const preview = page.getByTestId("markdown-preview").filter({ visible: true });
+  await expect(preview).toHaveCount(1);
+  return preview;
 }
 
 test.describe("Live repository attachment", () => {
@@ -126,7 +128,7 @@ test.describe("Live repository attachment", () => {
     await session.showSessionContext();
     const chat = session.activeChat();
     await chat.getByRole("link", { name: "primary after" }).click();
-    const preview = activeMarkdownPreview(testPage);
+    const preview = await activeMarkdownPreview(testPage);
     await expect(preview).toBeVisible({ timeout: 15_000 });
     await expect(preview).toContainText(LIVE_ATTACHMENT_WORK_ORDER.trim());
     await prCapture.screenshot("chat-link-primary-checkout", {
@@ -136,12 +138,12 @@ test.describe("Live repository attachment", () => {
     await session.showSessionContext();
     await chat.getByRole("link", { name: "primary qualified" }).click();
     await session.clickTab("Files");
-    await expect(activeMarkdownPreview(testPage)).toContainText("primary checkout readme");
+    await expect(await activeMarkdownPreview(testPage)).toContainText("primary checkout readme");
 
     await session.showSessionContext();
     await chat.getByRole("link", { name: "secondary README" }).click();
     await session.clickTab("Files");
-    await expect(activeMarkdownPreview(testPage)).toContainText("secondary checkout readme");
+    await expect(await activeMarkdownPreview(testPage)).toContainText("secondary checkout readme");
 
     const postReloadRefresh = watcher.waitForResponse("session.git.refresh", {
       timeout: 90_000,
@@ -159,11 +161,13 @@ test.describe("Live repository attachment", () => {
     const reloadedChat = session.activeChat();
     await reloadedChat.getByRole("link", { name: "primary after" }).click();
     await session.clickTab("Files");
-    await expect(activeMarkdownPreview(testPage)).toContainText(LIVE_ATTACHMENT_WORK_ORDER.trim());
+    await expect(await activeMarkdownPreview(testPage)).toContainText(
+      LIVE_ATTACHMENT_WORK_ORDER.trim(),
+    );
     await session.showSessionContext();
     await reloadedChat.getByRole("link", { name: "secondary README" }).click();
     await session.clickTab("Files");
-    await expect(activeMarkdownPreview(testPage)).toContainText("secondary checkout readme");
+    await expect(await activeMarkdownPreview(testPage)).toContainText("secondary checkout readme");
 
     await session.clickTab("Changes");
     await expect(session.changes.getByTestId("changes-repo-group")).toHaveCount(2, {

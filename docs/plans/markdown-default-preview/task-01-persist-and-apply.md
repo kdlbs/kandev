@@ -157,3 +157,16 @@ pnpm --dir apps/web e2e:raw --project=mobile-chrome tests/task/mobile-live-repos
 ```
 
 The first phone run passed seven cases and exposed one remaining source-view assertion after reload in the live-attachment case. Updated that assertion and reran its complete scenario; it passed. These tests retain the content, sanitization, source-line, repository identity, overflow, and mode-switch assertions. The session-title and phone keyboard-dock cases that flaked in CI both passed locally without retries. No production code changed in this browser compatibility correction. Web typecheck and lint passed. Browser subprocesses used the clean environment and Nix libraries described above. Fresh remote CI remains pending at the next pushed head.
+
+### CodeRabbit test review
+
+Addressed all three aggregate review suggestions from review 5949024478. The live-attachment helper now returns all visible Preview matches and requires exactly one before checking content. The source-view helper scopes its mode toggle to the one visible Preview and checks its count before activation. Phone settings controls, file selection, and mode switching use `tap()`; desktop interactions retain `click()`.
+
+Both affected browser runs passed with retries disabled (11 desktop and two phone cases):
+
+```sh
+pnpm --dir apps/web e2e:raw --project=chromium tests/chat/markdown-preview.spec.ts tests/task/live-repository-attachment.spec.ts tests/settings/markdown-default-preview.spec.ts --retries=0
+pnpm --dir apps/web e2e:raw --project=mobile-chrome tests/settings/mobile-markdown-default-preview.spec.ts --retries=0
+```
+
+Web typecheck, web lint, and diff checks passed. These changes affect tests only. The PR description now includes exact browser commands, explicitly identifies the local full-suite exclusion, and links the remaining commands. It retains the template's prose summary, optional-section policy, and unchanged checklist. Fresh remote CI is pending at the next pushed head.

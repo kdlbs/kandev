@@ -133,8 +133,12 @@ async function openFileInCode(
 
   const editorTab = testPage.locator(`.dv-default-tab:has-text('${fileName}')`);
   await expect(editorTab).toBeVisible({ timeout: 10_000 });
-  await expect(testPage.getByTestId("markdown-preview")).toBeVisible();
-  await testPage.getByTestId("markdown-preview-toggle").first().click();
+  const preview = testPage.getByTestId("markdown-preview").filter({ visible: true });
+  await expect(preview).toHaveCount(1);
+  await expect(preview).toBeVisible();
+  const toggle = preview.getByTestId("markdown-preview-toggle");
+  await expect(toggle).toHaveCount(1);
+  await toggle.click();
   await expect(testPage.locator(".monaco-editor").first()).toBeVisible({ timeout: 10_000 });
 }
 
