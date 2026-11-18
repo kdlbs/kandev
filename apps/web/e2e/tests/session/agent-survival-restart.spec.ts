@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "../../helpers/node-sqlite";
 import { attachMessageAddCapture } from "../../helpers/ws-capture";
 import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
+import type { ApiClient, MockGitHubWorkspaceConnection } from "../../helpers/api-client";
 import {
   captureSilentRestartSnapshot,
   countSessionMessageAdds,
@@ -51,6 +52,74 @@ type ManagedAgentctlIdentity = {
 };
 
 type AgentctlProcessIdentity = { pid: number; identity: string };
+
+type WorkspaceGitCredentialsBaseline = {
+  connection: MockGitHubWorkspaceConnection | null;
+  taskGitCredentialsMode: string;
+};
+
+async function captureWorkspaceGitCredentialsBaseline(
+  apiClient: ApiClient,
+  workspaceId: string,
+): Promise<WorkspaceGitCredentialsBaseline> {
+  const connectionResponse = await apiClient.rawRequest(
+    "GET",
+    `/api/v1/github/connections?workspace_id=${encodeURIComponent(workspaceId)}`,
+  );
+  if (!connectionResponse.ok) {
+    throw new Error(`workspace GitHub connection read failed (${connectionResponse.status})`);
+  }
+  const connectionStatus = (await connectionResponse.json()) as {
+    automation?: MockGitHubWorkspaceConnection | null;
+  };
+  const automation = connectionStatus.automation;
+  const connection = automation
+    ? {
+        source: automation.source,
+        status: automation.status,
+        github_host: automation.github_host,
+        login: automation.login,
+        installation_id: automation.installation_id,
+        installation_account_login: automation.installation_account_login,
+        installation_account_type: automation.installation_account_type,
+        app_registration_id: automation.app_registration_id,
+        capabilities: automation.capabilities,
+      }
+    : null;
+
+  const settingsResponse = await apiClient.rawRequest(
+    "GET",
+    `/api/v1/github/workspace-settings?workspace_id=${encodeURIComponent(workspaceId)}`,
+  );
+  if (!settingsResponse.ok) {
+    throw new Error(`workspace Git credential settings read failed (${settingsResponse.status})`);
+  }
+  const settings = (await settingsResponse.json()) as { task_git_credentials_mode?: string };
+  if (!settings.task_git_credentials_mode) {
+    throw new Error("workspace Git credential mode was not returned");
+  }
+  return { connection, taskGitCredentialsMode: settings.task_git_credentials_mode };
+}
+
+async function restoreWorkspaceGitCredentialsBaseline(
+  apiClient: ApiClient,
+  workspaceId: string,
+  baseline: WorkspaceGitCredentialsBaseline,
+): Promise<void> {
+  if (baseline.connection) {
+    await apiClient
+      .mockGitHubSetWorkspaceConnection(workspaceId, baseline.connection)
+      .catch(() => undefined);
+  } else {
+    await apiClient.mockGitHubDeleteWorkspaceConnection(workspaceId).catch(() => undefined);
+  }
+  await apiClient
+    .rawRequest("PUT", "/api/v1/github/workspace-settings", {
+      workspace_id: workspaceId,
+      task_git_credentials_mode: baseline.taskGitCredentialsMode,
+    })
+    .catch(() => undefined);
+}
 
 function managedAgentctlIdentity(
   tmpDir: string,
@@ -504,8 +573,14 @@ test.describe("Agent survival across backend restart", () => {
     const turn = survivalTurnGate(backend.tmpDir);
     let repositoryId: string | undefined;
     let sessionId: string | undefined;
+    let workspaceCredentialsBaseline: WorkspaceGitCredentialsBaseline | undefined;
 
     try {
+      workspaceCredentialsBaseline = await captureWorkspaceGitCredentialsBaseline(
+        apiClient,
+        seedData.workspaceId,
+      );
+
       await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
         source: "pat",
         status: "active",
@@ -614,19 +689,19 @@ test.describe("Agent survival across backend restart", () => {
 
       await session.sessionTabBySessionId(sessionId).click({ button: "right" });
       await testPage.getByRole("menuitem", { name: "Restart session", exact: true }).click();
-      await session.waitForChatIdle({ timeout: 45_000 });
       await expect
-        .poll(async () => (await apiClient.getTaskSession(sessionId!)).session.agent_execution_id, {
-          timeout: 30_000,
-          message: "Restart session did not create a fresh execution",
-        })
-        .toBeTruthy();
-      await expect
-        .poll(async () => (await apiClient.getTaskSession(sessionId!)).session.agent_execution_id, {
-          timeout: 30_000,
-          message: "Restart session did not create a fresh execution",
-        })
-        .not.toBe(before.agentExecutionId);
+        .poll(
+          async () => {
+            const executionId = (await apiClient.getTaskSession(sessionId!)).session
+              .agent_execution_id;
+            return Boolean(executionId) && executionId !== before.agentExecutionId;
+          },
+          {
+            timeout: 30_000,
+            message: "Restart session did not create a populated fresh execution",
+          },
+        )
+        .toBe(true);
       const relaunchedSession = (await apiClient.getTaskSession(sessionId)).session;
       expect(relaunchedSession.agent_execution_id).toBeTruthy();
       expect(relaunchedSession.agent_execution_id).not.toBe(before.agentExecutionId);
@@ -681,15 +756,13 @@ test.describe("Agent survival across backend restart", () => {
     } finally {
       await turn.release();
       if (sessionId) await apiClient.stopSession({ session_id: sessionId }).catch(() => undefined);
-      await apiClient
-        .mockGitHubDeleteWorkspaceConnection(seedData.workspaceId)
-        .catch(() => undefined);
-      await apiClient
-        .rawRequest("PUT", "/api/v1/github/workspace-settings", {
-          workspace_id: seedData.workspaceId,
-          task_git_credentials_mode: "executor",
-        })
-        .catch(() => undefined);
+      if (workspaceCredentialsBaseline) {
+        await restoreWorkspaceGitCredentialsBaseline(
+          apiClient,
+          seedData.workspaceId,
+          workspaceCredentialsBaseline,
+        );
+      }
       if (repositoryId) await apiClient.deleteRepository(repositoryId).catch(() => undefined);
       await releaseReissueEnabled();
       await releaseReissueDisable();

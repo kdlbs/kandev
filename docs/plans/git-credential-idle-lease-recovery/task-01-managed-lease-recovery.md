@@ -103,16 +103,65 @@ The four review findings are fixed. The shared scope authorizer now denies capab
 
 Implemented installation-derived signer selection in backend startup, preserving configured signing keys and honoring the optional disable setting. The selected source is logged once without sensitive values. Lease-only helper failures now retain their typed broker errors and advise **Restart session** for invalid or expired leases. The disabled broker rejects capability exchanges while continuing to issue redeemable leases.
 
-The retained-process E2E adopts a lease-only process across backend restart, confirms the same execution remains active, then uses **Restart session** and verifies the same task/session receive a fresh execution with a usable capability. Public documentation now describes the new-workspace credential default, automatic recovery, restart/resume behavior, and installation-key backup and rotation.
+The retained-process E2E adopts a lease-only process across backend restart, confirms the same execution remains active, then uses **Restart session** and verifies the same task/session receive a populated fresh execution with a usable capability. Its restart wait is passive, and its cleanup restores the exact workspace GitHub connection and credential mode captured before setup. Public documentation now describes the new-workspace credential default, automatic recovery, restart/resume behavior, and installation-key backup and rotation.
 
 Verification passed:
 
-- Focused Go tests across `backendapp`, `common/config`, `gitcredentials`, `github`, `orchestrator/executor`, and `cmd/agentctl`, including startup signer selection, fixed HKDF vector, disabled-route aliases, pruned-lease recovery, lease-only fallback, and Git/`gh` diagnostics. The exact command is above.
-- `bash scripts/lint-go-changed <changed-go-files>`: 0 issues.
-- Race-enabled focused coverage for archive denial, same-broker idle recovery, and helper diagnostics: passed.
-- `make -C apps/backend build`: passed, including native and cross-compiled helper targets.
-- `pnpm --dir apps/web e2e:raw --project=chromium tests/session/agent-survival-restart.spec.ts --grep 'adopted lease-only'`: 1 passed.
-- Focused Oxlint, E2E sleep lint, sleep ratchet, and Prettier checks for the retained-process test: passed.
-- `node --test scripts/validate-public-docs.test.mjs`: 63 passed.
-- `node scripts/validate-public-docs.mjs`: 55 public docs validated.
-- Specification validation, specification link checks, and `git diff --check`: passed.
+- Focused Go tests across `backendapp`, `common/config`, `gitcredentials`, `github`, `orchestrator/executor`, and `cmd/agentctl` passed, including startup signer selection, the fixed HKDF vector, disabled-route aliases, pruned-lease recovery, lease-only fallback, and Git/`gh` diagnostics. The exact command is in Verification above.
+- From `apps/backend`, the full configuration race tests and the focused archive, same-broker idle recovery, helper diagnostics, and executor fallback race tests passed:
+
+  ```sh
+  go test -race -trimpath -tags fts5 ./internal/common/config -count=1
+  go test -race -trimpath -tags fts5 ./internal/backendapp ./internal/gitcredentials ./cmd/agentctl ./internal/orchestrator/executor -run 'Test(GitHubCredentialReissueRejectsArchivedTaskWithLiveSession|BrokerReissueRecoversPrunedIdleLease|GitHubCredentialHelperReportsLeaseRelaunch|GitHubCLIShimReportsLeaseRelaunch|GitHubCredentialHelperKeepsOtherLeaseErrorsUnchanged|ConfigureGitHubCredentialBrokerFallsBackToLeaseOnlyWhenReissueUnavailable)$' -count=1
+  ```
+
+- From the repository root, `bash scripts/lint-go-changed` reported 0 issues for all changed Go files:
+
+  ```sh
+  bash scripts/lint-go-changed \
+    apps/backend/cmd/agentctl/github_credential.go \
+    apps/backend/cmd/agentctl/github_credential_recovery_test.go \
+    apps/backend/internal/backendapp/git_credential_reissue.go \
+    apps/backend/internal/backendapp/git_credential_reissue_startup_test.go \
+    apps/backend/internal/backendapp/git_credentials.go \
+    apps/backend/internal/backendapp/services.go \
+    apps/backend/internal/backendapp/services_github_broker_test.go \
+    apps/backend/internal/backendapp/storage.go \
+    apps/backend/internal/backendapp/types.go \
+    apps/backend/internal/common/config/catalog.go \
+    apps/backend/internal/common/config/catalog_test.go \
+    apps/backend/internal/common/config/config.go \
+    apps/backend/internal/common/config/git_credential_broker_test.go \
+    apps/backend/internal/gitcredentials/reissue_test.go \
+    apps/backend/internal/github/controller_auth.go \
+    apps/backend/internal/github/credential_broker.go \
+    apps/backend/internal/github/credential_broker_reissue_wire_test.go \
+    apps/backend/internal/orchestrator/executor/executor_credentials_reissue_test.go \
+    apps/backend/internal/orchestrator/executor/executor_credentials_test.go
+  ```
+
+- `make -C apps/backend build` passed, including native and cross-compiled helper targets. The managed E2E runner also rebuilt the backend and web assets successfully.
+- From `apps/web`, the retained-process test passed with retries disabled:
+
+  ```sh
+  pnpm e2e:run --project=chromium e2e/tests/session/agent-survival-restart.spec.ts -- --grep 'restarts an adopted lease-only session with a fresh managed Git capability' --retries=0
+  ```
+
+- From `apps/web`, Prettier, both focused Oxlint configurations, and the E2E sleep ratchet passed:
+
+  ```sh
+  pnpm exec prettier --check e2e/tests/session/agent-survival-restart.spec.ts
+  pnpm exec oxlint -c oxlint.config.mjs --deny-warnings e2e/tests/session/agent-survival-restart.spec.ts
+  pnpm exec oxlint -c oxlint.e2e-sleeps.config.mjs --deny-warnings e2e/tests/session/agent-survival-restart.spec.ts
+  pnpm run e2e:sleep-ratchet
+  ```
+
+- From the repository root, 63 public-doc tests passed, 55 public docs validated, specification validation and lint passed, and `git diff --check` passed:
+
+  ```sh
+  node --test scripts/validate-public-docs.test.mjs
+  node scripts/validate-public-docs.mjs
+  python3 scripts/list-docs.py validate
+  python3 scripts/lint-spec-files.py --all
+  git diff --check
+  ```
