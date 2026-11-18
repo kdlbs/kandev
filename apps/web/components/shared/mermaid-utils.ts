@@ -212,18 +212,19 @@ export type MermaidSourceSelection = {
 
 type MermaidSourceValidator = (source: string) => Promise<boolean>;
 
-function findMermaidFenceCandidate(
+function findMermaidFenceCandidates(
   source: string,
-): { diagramSource: string; followingMarkdown: string } | null {
-  const candidate = /(^|[\r\n])([ ]{0,3})(`{3,})(?!`)(?=[^\s`])[^\r\n]*/.exec(source);
-  if (!candidate) return null;
-
-  const lineStart = candidate.index + candidate[1].length;
-  const markerEnd = lineStart + candidate[2].length + candidate[3].length;
-  return {
-    diagramSource: source.slice(0, lineStart),
-    followingMarkdown: source.slice(markerEnd),
-  };
+): Array<{ diagramSource: string; followingMarkdown: string }> {
+  return [...source.matchAll(/(^|[\r\n])([ ]{0,3})(`{3,})(?!`)(?=[^\s`])[^\r\n]*/g)].map(
+    (candidate) => {
+      const lineStart = candidate.index + candidate[1].length;
+      const markerEnd = lineStart + candidate[2].length + candidate[3].length;
+      return {
+        diagramSource: source.slice(0, lineStart),
+        followingMarkdown: source.slice(markerEnd),
+      };
+    },
+  );
 }
 
 /** Select a verified diagram/prose boundary from an explicitly tagged Mermaid block. */
@@ -231,8 +232,8 @@ export async function selectMermaidSource(
   source: string,
   validate: MermaidSourceValidator,
 ): Promise<MermaidSourceSelection> {
-  const candidate = findMermaidFenceCandidate(source);
-  if (!candidate) return { diagramSource: source };
+  const candidates = findMermaidFenceCandidates(source);
+  if (candidates.length === 0) return { diagramSource: source };
 
   let sourceIsValid: boolean;
   try {
@@ -242,12 +243,14 @@ export async function selectMermaidSource(
   }
   if (sourceIsValid) return { diagramSource: source };
 
-  try {
-    if (await validate(sanitizeMermaidCode(candidate.diagramSource))) {
-      return candidate;
+  for (const candidate of candidates) {
+    try {
+      if (await validate(sanitizeMermaidCode(candidate.diagramSource))) {
+        return candidate;
+      }
+    } catch {
+      return { diagramSource: source };
     }
-  } catch {
-    return { diagramSource: source };
   }
   return { diagramSource: source };
 }

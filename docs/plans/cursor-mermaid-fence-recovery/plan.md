@@ -82,8 +82,8 @@ The existing [semicolon package](../mermaid-sequence-semicolon-rendering/plan.md
 2. In `mermaid-block.tsx`, run that helper inside the existing debounced render operation.
 3. In `markdown-components.tsx`, add the `pre` override and trailing-Markdown callback so recovered prose appears outside the diagram.
 
-The helper checks the first suspicious backtick line only.
-Valid complete source always wins. An invalid prefix or unexpected probe error retains the original path.
+After the full source fails, the helper checks suspicious backtick lines in source order and selects the first prefix that validates.
+Valid complete source always wins. If no candidate prefix validates or a probe unexpectedly rejects, the original source retains its existing path.
 Use the installed Mermaid parser and existing sanitizer/configuration.
 
 The initial draft proposed outer-fence metadata, a parser plugin module, and a separate recovery component.
@@ -176,6 +176,7 @@ Do not reuse its stricter outer-fence eligibility expectations.
 - Follow-up Oxlint passed for the changed frontend files, Prettier passed for all nine changed TypeScript/TSX files, and `git diff --check` passed.
 - The broad build, i18n, and desktop/phone browser projects were not rerun for the initial static-review corrections; their earlier results apply to that revision. Frontend typecheck was rerun after the PR review follow-up and passed below.
 - PR review follow-up: the reference-definition and latest-code-view regressions failed before correction. The final focused Mermaid suite passed 3 files and 94 tests; frontend typecheck, focused Oxlint, Prettier, and `git diff --check` passed.
+- Additional PR review follow-up: the multiline-label candidate and Mermaid initialization-order regressions failed before correction. The focused suite then passed 3 files and 95 tests, including validation of a later true closing candidate after an apparent label candidate.
 
 ## Risks
 

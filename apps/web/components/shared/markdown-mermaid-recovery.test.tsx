@@ -5,6 +5,7 @@ import { MemoizedMarkdown } from "./memoized-markdown";
 
 const mockToast = vi.hoisted(() => vi.fn());
 const renderInputs = vi.hoisted(() => [] as string[]);
+const mermaidOperationOrder = vi.hoisted(() => [] as string[]);
 const MERMAID_FENCE = "```mermaid";
 const FLOWCHART_LR = "flowchart LR";
 const renderControl = vi.hoisted(() => ({
@@ -22,9 +23,13 @@ vi.mock("@/components/toast-provider", () => ({
 
 vi.mock("mermaid", () => ({
   default: {
-    initialize: vi.fn(),
-    parse: vi.fn(async (code: string) => !code.includes("```") && !/A -->\s*$/.test(code)),
+    initialize: vi.fn(() => mermaidOperationOrder.push("initialize")),
+    parse: vi.fn(async (code: string) => {
+      mermaidOperationOrder.push("parse");
+      return !code.includes("```") && !/A -->\s*$/.test(code);
+    }),
     render: vi.fn(async (_id: string, code: string) => {
+      mermaidOperationOrder.push("render");
       renderInputs.push(code);
       if (code.includes("OldNode")) {
         renderControl.oldRenderStarted();
@@ -51,6 +56,7 @@ const GLUED_MESSAGE = [
 beforeEach(() => {
   vi.useFakeTimers();
   renderInputs.length = 0;
+  mermaidOperationOrder.length = 0;
   renderControl.resolveOld = null;
   renderControl.oldRenderStarted.mockClear();
   mockToast.mockClear();
@@ -93,6 +99,7 @@ describe("chat Markdown Mermaid boundary recovery", () => {
     expect(diagram?.closest("pre")).toBeNull();
     expect(diagram?.nextElementSibling?.tagName).toBe("P");
     expect(renderInputs).toEqual([`${FLOWCHART_LR}\n  A --> B\n`]);
+    expect(mermaidOperationOrder).toEqual(["parse", "parse", "initialize", "render"]);
     expect(mockToast).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByTitle("Show code"));

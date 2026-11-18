@@ -99,13 +99,13 @@ function useMermaidRender(
       const id = `mermaid-md-${++mermaidIdCounter}`;
       getMermaid()
         .then(async (mermaid) => {
-          mermaid.initialize({ startOnLoad: false, theme, securityLevel: "loose" });
           const selection = allowRecovery
             ? await selectMermaidSource(code, async (source) => {
                 return Boolean(await mermaid.parse(source, { suppressErrors: true }));
               })
             : { diagramSource: code };
           if (cancelled) return null;
+          mermaid.initialize({ startOnLoad: false, theme, securityLevel: "loose" });
           sanitizedCode = sanitizeMermaidCode(selection.diagramSource);
           const rendered = await mermaid.render(id, sanitizedCode);
           return { rendered, selection };

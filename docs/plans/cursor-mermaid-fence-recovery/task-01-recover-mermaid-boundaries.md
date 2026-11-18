@@ -68,15 +68,15 @@ Spacing is illustrative. Keep the existing diagram viewport and transcript scrol
 2. Mark the task `in_progress` and synchronize the plan.
 3. Add `recovers prose glued to a closing Mermaid fence` in `markdown-mermaid-recovery.test.tsx`.
 4. Run it before production edits and record the expected failure.
-5. Extend `mermaid-utils.test.ts` with real-parser recovery, valid-label, invalid-prefix, and no-candidate cases.
+5. Extend `mermaid-utils.test.ts` with real-parser recovery, valid-label candidate scanning, invalid-prefix, and no-candidate cases.
 6. Implement source selection in `mermaid-utils.ts` and call it from the current debounced render operation.
 7. Add the explicit Mermaid `pre` route and following-Markdown callback in `markdown-components.tsx`.
 8. Complete component assertions for sibling placement, inherited task/file context, quiet probes, and stale-result rejection.
 9. Extend the existing desktop/mobile fixture and specs with recovery, reload, and exact saved-content assertions.
 10. Run Verification, record results, and synchronize completed task/plan status.
 
-Only the first suspicious backtick line is considered.
-Complete valid source is preserved. Prefix failure or unexpected validation errors select the original source.
+After complete-source validation fails, candidate lines are checked in source order until the first prefix validates.
+Complete valid source is preserved. If no prefix validates or a probe unexpectedly rejects, the original source is selected.
 Publish the selected diagram and following text together through the existing render lifecycle.
 Use the selected source for the diagram's code view.
 Keep Mermaid loading, configuration, debounce, cancellation, and final-error behavior in their existing owner.
@@ -191,6 +191,7 @@ Implemented the bounded recovery for explicitly tagged Mermaid blocks. Source se
 - Initial implementation Oxlint, typecheck, `i18n:ratchet`, documentation checks, and the managed production Vite build passed. Desktop `chromium` Mermaid-fit passed 2/2; phone `mobile-chrome` Mermaid-fit passed 2/2.
 - Static-review follow-up: the file-preview Mermaid routing regression and five ineligible backtick-run cases were confirmed RED before correction. The focused rerun passed 3 files and 92 tests, covering parser selection, Markdown preview, and chat recovery.
 - PR review follow-up: the reference-definition and latest-code-view regressions were confirmed RED before correction. The focused rerun passed 3 files and 94 tests, covering parser selection, Markdown preview, reference-link recovery, and the latest code view after a failed update. Frontend typecheck, focused Oxlint, Prettier, and `git diff --check` passed.
+- Additional PR review follow-up: the multiline-label candidate and Mermaid initialization-order regressions were confirmed RED before correction. The focused rerun passed 3 files and 95 tests, covering later-candidate recovery and initialization immediately before render.
 - Follow-up Oxlint passed for the changed frontend files, Prettier passed for all nine changed TypeScript/TSX files, and `git diff --check` passed.
-- The broad build, typecheck, i18n, and desktop/phone browser projects were not rerun for the code-only review corrections. Their results above apply to the implementation before those corrections.
+- The broad build, i18n, and desktop/phone browser projects were not rerun for the review corrections. Their results above apply to the earlier implementation. Frontend typecheck was rerun after the PR review follow-ups and passed.
 - No dependencies, locales, backend code, public documentation, or persisted message formats changed.

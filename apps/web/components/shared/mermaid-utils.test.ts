@@ -36,6 +36,22 @@ describe("selectMermaidSource", () => {
     });
   });
 
+  // @covers AC-UI-MERMAID-RENDERING-002.2
+  it("skips a fence-shaped line inside a label and recovers at the glued closing run", async () => {
+    const source = [
+      "flowchart LR",
+      '  A["first line',
+      "```literal label text",
+      'last line"] --> B',
+      "```Following paragraph.",
+    ].join("\n");
+
+    await expect(selectMermaidSource(source, validateMermaidSource)).resolves.toEqual({
+      diagramSource: `flowchart LR\n  A["first line\n\`\`\`literal label text\nlast line"] --> B\n`,
+      followingMarkdown: "Following paragraph.",
+    });
+  });
+
   // @covers AC-UI-MERMAID-RENDERING-002.3
   it("keeps the original source when the candidate prefix is not a valid diagram", async () => {
     const source = "flowchart LR\n  A -->\n```Following paragraph.";

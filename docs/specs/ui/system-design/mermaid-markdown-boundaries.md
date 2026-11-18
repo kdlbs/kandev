@@ -43,23 +43,22 @@ Add a small helper in `components/shared/mermaid-utils.ts`.
 It receives the code text and the configured Mermaid syntax validator.
 It returns the selected diagram source and optional following Markdown.
 
-1. Find the first line with zero to three spaces, three or more backticks, and directly attached non-whitespace text.
-2. Without that shape, return the original diagram source.
+1. Find lines with zero to three spaces, three or more backticks, and directly attached non-whitespace text.
+2. Without a candidate, return the original diagram source.
 3. Parse the complete source with `mermaid.parse` and `{ suppressErrors: true }`.
 4. If the complete source is valid, return it unchanged.
-5. Otherwise, parse only the prefix before the first candidate.
-6. If that prefix is valid, select it as the diagram and preserve the text after the backticks as following Markdown.
-7. If validation fails or unexpectedly rejects, return the original source.
+5. Otherwise, parse candidate prefixes in source order.
+6. Select the first valid prefix as the diagram and preserve the text after that candidate's backticks as following Markdown.
+7. If no prefix is valid or validation unexpectedly rejects, return the original source.
 
-Apply `sanitizeMermaidCode` before both syntax probes, using the same configuration as rendering.
-There are at most two probes per candidate-bearing source revision.
-Do not scan later candidates or interpret prose by language, punctuation, or timing.
+Apply `sanitizeMermaidCode` before each syntax probe, using the same configuration as rendering.
+Probe the full source once and candidate prefixes only until one validates.
+Do not reorder candidates or interpret prose by language, punctuation, or timing.
 Preserve prefix and suffix characters apart from the interpreted backtick delimiter and its leading indentation.
 The extractor handles LF, CRLF, and lone CR.
 
-The complete-source check protects valid multiline labels containing apparent fence text.
-The prefix check rejects incomplete diagrams and boundaries inside unfinished quoted labels.
-These two checks provide the safety that a blind string rewrite lacks.
+The complete-source check protects valid diagrams containing apparent fence text.
+When a glued closing run makes the full source invalid, prefix validation skips apparent candidates inside unfinished labels and can reach the true closing run.
 
 Recovery works on a parsed code node. Its original outer fence length, closing state, and parent container are not needed.
 An invalid Mermaid block can recover the same malformed source whether its outer Markdown fence is closed or unclosed.
@@ -119,5 +118,6 @@ The bounded source-selection helper is integrated in the existing debounced rend
 Explicit Mermaid blocks render verified following prose through the existing Markdown components.
 The static-review regressions for file-preview routing and complete backtick-run matching pass in the focused suite.
 PR review follow-up also preserves document reference definitions and shows the latest failed Mermaid input in the code view while retaining the previous SVG.
+Additional PR review follow-up checks later candidates after invalid prefixes and initializes Mermaid after validation immediately before rendering.
 The earlier desktop and phone checks passed before those code-only corrections and were not rerun.
 Stored message content and provider segmentation remain unchanged.
