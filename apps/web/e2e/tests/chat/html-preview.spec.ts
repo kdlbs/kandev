@@ -298,9 +298,9 @@ test.describe("HTML preview", () => {
     await testPage.getByTestId("html-preview-toggle").first().click();
     await expect(frame.locator("#increment")).toBeVisible({ timeout: 15_000 });
     await expect(preview.locator("iframe")).not.toHaveAttribute("src", firstSrc ?? "");
+    await chooseCapture(testPage, "Select element", frame);
     await expect(markers).toHaveText(["1"], { timeout: 15_000 });
 
-    await chooseCapture(testPage, "Select element", frame);
     await frame.locator("#value").click();
     await saveDraft(testPage, "Show the count larger");
     await expect(markers).toHaveText(["1", "2"]);

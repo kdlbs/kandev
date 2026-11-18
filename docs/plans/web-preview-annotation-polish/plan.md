@@ -231,3 +231,6 @@ Delivered as planned, with these refinements recorded in part 5:
 - Mobile Chrome E2E keeps the existing bottom-bar and sheet coverage. The eye
   button's tap toggle is covered by Vitest and the coarse-pointer styles,
   because drawing a region by touch is not reliable in the emulated E2E device.
+- Test feedback: text and element markers stayed visible, but inert, after
+  leaving annotation mode. They are now hidden outside the mode, like region
+  outlines, except for the comment being written; `005.5` records this.

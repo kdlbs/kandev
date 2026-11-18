@@ -255,6 +255,34 @@ describe("usePreviewCapture markers", () => {
     expect(result.current.openDraft?.id).toBe(draftId);
     expect(result.current.editingItem).toBeNull();
   });
+
+  it("projects markers only in annotation mode, except the comment being written", async () => {
+    feedback.items = [savedText("saved-1")];
+    const { iframe, result } = setup();
+    const lastMarkers = () =>
+      (bridge.sendProjectPreviewMarkers.mock.lastCall?.[1] ?? []) as { id: string }[];
+    await waitFor(() => expect(bridge.sendProjectPreviewMarkers).toHaveBeenCalled());
+    expect(lastMarkers()).toEqual([]);
+
+    act(() => result.current.annotation.enter());
+    await waitFor(() =>
+      expect(lastMarkers()).toEqual([expect.objectContaining({ id: "saved-1", number: 1 })]),
+    );
+
+    act(() => result.current.annotation.exit());
+    await waitFor(() => expect(lastMarkers()).toEqual([]));
+
+    act(() => dispatch(iframe.contentWindow, textCapture()));
+    const draftId = result.current.openDraft?.id;
+    await waitFor(() =>
+      expect(lastMarkers()).toEqual([expect.objectContaining({ id: draftId, number: 2 })]),
+    );
+
+    act(() => result.current.annotation.enter());
+    await waitFor(() =>
+      expect(lastMarkers().map((marker) => marker.id)).toEqual(["saved-1", draftId]),
+    );
+  });
 });
 
 describe("usePreviewCapture pausing the tool", () => {

@@ -290,6 +290,7 @@ describe("usePreviewCapture marker projection", () => {
       },
     ];
     const { iframe, result } = setup();
+    act(() => result.current.annotation.enter());
 
     act(() =>
       dispatch(

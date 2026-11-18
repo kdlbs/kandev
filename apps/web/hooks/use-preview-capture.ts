@@ -290,11 +290,23 @@ function useRegionProjection(
         : [],
     [active, sources],
   );
+  // Outside annotation mode the page behaves as it would without Kandev, apart
+  // from the capture whose comment is being written.
+  const visibleMarkers = useMemo(
+    () => (active ? markers : markers.filter((marker) => marker.id === highlightedId)),
+    [active, highlightedId, markers],
+  );
   const projectMarkers = useCallback(() => {
     if (iframeRef.current) {
-      sendProjectPreviewMarkers(iframeRef.current, markers, anchors, highlightedId, revealId);
+      sendProjectPreviewMarkers(
+        iframeRef.current,
+        visibleMarkers,
+        anchors,
+        highlightedId,
+        revealId,
+      );
     }
-  }, [anchors, highlightedId, iframeRef, markers, revealId]);
+  }, [anchors, highlightedId, iframeRef, revealId, visibleMarkers]);
   useEffect(projectMarkers, [projectMarkers]);
 
   const comments = useMemo(

@@ -4,6 +4,7 @@ import {
   chooseCapture,
   draftSurface,
   dragScreenshotRegion,
+  exitAnnotation,
   openBrowserPreview,
   startWithCommentPanelHidden,
   saveDraft,
@@ -39,6 +40,7 @@ test.describe("Web preview annotation mode", () => {
   test.describe.configure({ retries: 0, timeout: 180_000 });
 
   // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-005.1
+  // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-005.5
   test("comments on selected text without entering annotation mode", async ({
     testPage,
     apiClient,
@@ -64,6 +66,14 @@ test.describe("Web preview annotation mode", () => {
       await saveDraft(testPage, "Use the product name in the heading");
       await expect(trigger).toContainText("1");
       await expect(trigger).toHaveAttribute("data-annotation-active", "false");
+
+      const markers = frame.locator("[data-kandev-inspector-marker]");
+      await expect(markers).toHaveCount(0);
+      await trigger.click();
+      await expect(trigger).toHaveAttribute("data-annotation-active", "true");
+      await expect(markers).toHaveText(["1"]);
+      await exitAnnotation(testPage);
+      await expect(markers).toHaveCount(0);
     } finally {
       await server.close();
     }

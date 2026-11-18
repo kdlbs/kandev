@@ -69,9 +69,12 @@ reviewing a whole page takes few clicks.
   a time, whether focus is in Kandev or in the previewed page: close an open
   comment (as in `005.4`), then switch the tool to Interact, then
   exit annotation mode. The Exit control shall exit directly. Exiting shall
-  remove the outline, toolbar, region outlines, and gesture ownership, so the
-  page behaves as it did before the mode, and unsaved drafts shall remain
-  resumable.
+  remove the outline, toolbar, text and element markers, region outlines, and
+  gesture ownership, so the page behaves as it did before the mode, and
+  unsaved drafts shall remain resumable. Outside annotation mode the only
+  marker shown is that of a comment being written; the pending count stays on
+  the annotation control, and entering the mode again restores every marker
+  and outline with its number.
 - **AC-TASKS-WEB-PREVIEW-FEEDBACK-005.6:** The Region tool shall let the user
   draw any number of rectangles. Each rectangle shall be captured when the
   drag ends and opens its comment surface. Unsaved and saved rectangles on the

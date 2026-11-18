@@ -84,6 +84,11 @@ On coarse pointers the same surface renders its drawer, as today.
   the viewport rectangle of the highlighted marker, and `editingAnchor` uses
   it. When the capture is on another route or its anchor does not resolve,
   the box opens at the frame's top-left fallback.
+- **Markers outside the mode.** `useRegionProjection` already sends no
+  region anchors while annotation mode is off; it now filters text and
+  element markers the same way, keeping only the marker of the comment being
+  written (`highlightedId`), so a selection commented outside the mode still
+  shows its target while the box is open (`005.5`).
 
 ## Toolbar
 
