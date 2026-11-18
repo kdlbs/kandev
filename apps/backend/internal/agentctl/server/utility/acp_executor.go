@@ -275,6 +275,9 @@ func (e *ACPInferenceExecutor) executeACPSession(
 			sessionResp.ConfigOptions = updated
 		}
 	}
+	if err := validateRequestedConfigOptions(modelConfigOptions, sessionResp.ConfigOptions); err != nil {
+		return "", fmt.Errorf("ACP model config selection failed: %w", err)
+	}
 	if updated, err := applyProbeConfigOptions(
 		ctx, conn, sessionID, modelConfigOptions, sessionResp.ConfigOptions, updates,
 	); err != nil {
@@ -441,6 +444,36 @@ func filterRequestedConfigOptions(
 		return nil
 	}
 	return filtered
+}
+
+func validateRequestedConfigOptions(
+	requested map[string]string,
+	available []acp.SessionConfigOption,
+) error {
+	availableValues := make(map[string]map[string]struct{}, len(available))
+	for _, option := range available {
+		if option.Select == nil {
+			continue
+		}
+		values := make(map[string]struct{})
+		for _, choice := range selectOptionsUngrouped(option.Select.Options) {
+			values[string(choice.Value)] = struct{}{}
+		}
+		availableValues[string(option.Select.Id)] = values
+	}
+	for id, value := range requested {
+		values, ok := availableValues[id]
+		if !ok {
+			return fmt.Errorf("requested model setting %q is not advertised", id)
+		}
+		if len(values) == 0 {
+			continue
+		}
+		if _, ok := values[value]; !ok {
+			return fmt.Errorf("requested model setting %q value %q is not advertised", id, value)
+		}
+	}
+	return nil
 }
 
 // toACPMcpServers converts the cross-process DTO list into the ACP SDK shape.
@@ -1541,7 +1574,7 @@ func modeOptionAdvertisesValue(option *acp.SessionConfigOptionSelect, mode strin
 func configModeValue(options []acp.SessionConfigOption, configID acp.SessionConfigId) (string, bool) {
 	for _, option := range options {
 		selectOption := option.Select
-		if selectOption == nil || selectOption.Category == nil || *selectOption.Category != acp.SessionConfigOptionCategoryMode {
+		if selectOption == nil {
 			continue
 		}
 		if selectOption.Id == configID {

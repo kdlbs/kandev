@@ -193,6 +193,27 @@ func TestIssue5364UtilityUsesTypedProfileMode(t *testing.T) {
 	}
 }
 
+func TestIssue5364UtilityAcceptsModeResponseWithoutCategory(t *testing.T) {
+	agent, clientWriter, clientReader := newIssue5364ACPAgent(t)
+	agent.omitModeCategoryInResponse = true
+	executor := NewACPInferenceExecutor(zap.NewNop())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := executor.executeACPSession(
+		ctx, clientWriter, clientReader, t.TempDir(), "fixture-acp", "first prompt", "", nil,
+		"session", nil, nil, nil,
+	); err != nil {
+		t.Fatalf("executeACPSession(): %v", err)
+	}
+	if calls := agent.recordedCalls(); !reflect.DeepEqual(calls, []string{"config:edit_approval_policy:session", "prompt"}) {
+		t.Fatalf("ACP calls = %v, want prompt after matching mode value without a category", calls)
+	}
+	if got := agent.promptMode(); got != "session" {
+		t.Fatalf("mode at first prompt = %q, want session", got)
+	}
+}
+
 func TestIssue5364UtilityRequiresExactModeConfirmationBeforePrompt(t *testing.T) {
 	agent, clientWriter, clientReader := newIssue5364ACPAgent(t)
 	agent.modeResponseValue = "workspace"
@@ -300,6 +321,26 @@ func TestIssue5364UtilityUsesModeCatalogFromModelConfigUpdate(t *testing.T) {
 	}
 }
 
+func TestIssue5364UtilityRejectsModelConfigValueMissingFromUpdatedCatalog(t *testing.T) {
+	agent, clientWriter, clientReader := newIssue5364ACPAgent(t)
+	agent.notifyModelCatalog = true
+	agent.includeReasoningOption = true
+	executor := NewACPInferenceExecutor(zap.NewNop())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := executor.executeACPSession(
+		ctx, clientWriter, clientReader, t.TempDir(), "fixture-acp", "first prompt", "next-model",
+		map[string]string{"reasoning_effort": "high"}, "", nil, nil, nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "not advertised") {
+		t.Fatalf("executeACPSession() error = %v, want unsupported explicit model setting", err)
+	}
+	if calls := agent.recordedCalls(); !reflect.DeepEqual(calls, []string{"config:model:next-model"}) {
+		t.Fatalf("ACP calls = %v, want prompt and unsupported setting blocked after model update", calls)
+	}
+}
+
 func TestIssue5364NotificationStateRetainsEmptyConfigSnapshot(t *testing.T) {
 	state := newACPProbeNotificationState("fixture-acp")
 	state.setSessionID("active-session")
@@ -364,23 +405,25 @@ func TestIssue5364UtilityRejectsSavedLegacyIDOutsideTypedCatalog(t *testing.T) {
 
 type issue5364ACPAgent struct {
 	*probeCaptureAgent
-	conn                      *acp.AgentSideConnection
-	mu                        sync.Mutex
-	calls                     []string
-	currentMode               string
-	currentModel              string
-	promptModeID              string
-	rejectLegacyMode          bool
-	emptyModeChoices          bool
-	includeConfigModeInLegacy bool
-	foreignModeSnapshot       bool
-	legacyOnlyMode            bool
-	legacyNoConfigUpdate      bool
-	notifyModelCatalog        bool
-	modeResponseValue         string
-	modeConfigErr             error
-	omitModeSnapshot          bool
-	notifyModeSnapshot        bool
+	conn                       *acp.AgentSideConnection
+	mu                         sync.Mutex
+	calls                      []string
+	currentMode                string
+	currentModel               string
+	promptModeID               string
+	rejectLegacyMode           bool
+	emptyModeChoices           bool
+	includeConfigModeInLegacy  bool
+	foreignModeSnapshot        bool
+	legacyOnlyMode             bool
+	legacyNoConfigUpdate       bool
+	notifyModelCatalog         bool
+	modeResponseValue          string
+	modeConfigErr              error
+	omitModeSnapshot           bool
+	omitModeCategoryInResponse bool
+	includeReasoningOption     bool
+	notifyModeSnapshot         bool
 }
 
 func newIssue5364ACPAgent(t *testing.T) (*issue5364ACPAgent, io.Writer, io.Reader) {
@@ -443,10 +486,6 @@ func (a *issue5364ACPAgent) SetSessionConfigOption(
 		}
 		fallthrough
 	case "approval_mode_v2":
-		if a.currentModel == "next-model" && configID != "approval_mode_v2" {
-			a.mu.Unlock()
-			return acp.SetSessionConfigOptionResponse{}, errors.New("stale mode config option")
-		}
 		if a.modeConfigErr != nil {
 			a.mu.Unlock()
 			return acp.SetSessionConfigOptionResponse{}, a.modeConfigErr
@@ -496,6 +535,16 @@ func (a *issue5364ACPAgent) SetSessionConfigOption(
 		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("unexpected config option %q", configID)
 	}
 	options := a.configOptionsLocked()
+	if configID == "edit_approval_policy" || configID == "approval_mode_v2" {
+		if a.omitModeCategoryInResponse {
+			for _, option := range options {
+				if option.Select != nil && option.Select.Id == request.ValueId.ConfigId {
+					option.Select.Category = nil
+					break
+				}
+			}
+		}
+	}
 	a.mu.Unlock()
 	return acp.SetSessionConfigOptionResponse{ConfigOptions: options}, nil
 }
@@ -578,6 +627,23 @@ func (a *issue5364ACPAgent) configOptionsLocked() []acp.SessionConfigOption {
 			{Name: "Fixture Model", Value: "fixture-model"},
 		}},
 	}})
+	if a.includeReasoningOption {
+		effortCategory := acp.SessionConfigOptionCategoryThoughtLevel
+		effortValue := acp.SessionConfigValueId("high")
+		if a.currentModel == "next-model" {
+			effortValue = "low"
+		}
+		options = append(options, acp.SessionConfigOption{Select: &acp.SessionConfigOptionSelect{
+			Id:           "reasoning_effort",
+			Name:         "Reasoning effort",
+			Category:     &effortCategory,
+			Type:         "select",
+			CurrentValue: effortValue,
+			Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
+				{Name: "Selected effort", Value: effortValue},
+			}},
+		}})
+	}
 	return options
 }
 
