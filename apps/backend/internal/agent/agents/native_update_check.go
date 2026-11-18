@@ -1,0 +1,154 @@
+package agents
+
+import (
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+)
+
+const (
+	envHome          = "HOME"
+	envXDGConfigHome = "XDG_CONFIG_HOME"
+)
+
+// NativeUpdateCheckState is the single outcome of one native update check.
+// The values match the runtime status check states.
+type NativeUpdateCheckState string
+
+const (
+	NativeUpdateCheckStateUpdateAvailable NativeUpdateCheckState = "update_available"
+	NativeUpdateCheckStateUpToDate        NativeUpdateCheckState = "up_to_date"
+	NativeUpdateCheckStateUnknown         NativeUpdateCheckState = "unknown"
+)
+
+// NativeUpdateCheckReason explains an unknown native result. The set is closed;
+// it is never derived from raw check output.
+type NativeUpdateCheckReason string
+
+const (
+	NativeUpdateCheckReasonCheckFailed        NativeUpdateCheckReason = "check_failed"
+	NativeUpdateCheckReasonUnsupported        NativeUpdateCheckReason = "unsupported"
+	NativeUpdateCheckReasonUnrecognizedOutput NativeUpdateCheckReason = "unrecognized_output"
+	NativeUpdateCheckReasonTimeout            NativeUpdateCheckReason = "timeout"
+	NativeUpdateCheckReasonOutputLimit        NativeUpdateCheckReason = "output_limit"
+	NativeUpdateCheckReasonNotInstalled       NativeUpdateCheckReason = "not_installed"
+	NativeUpdateCheckReasonRuntimeMismatch    NativeUpdateCheckReason = "runtime_mismatch"
+	NativeUpdateCheckReasonCancelled          NativeUpdateCheckReason = "cancelled"
+	NativeUpdateCheckReasonUnavailable        NativeUpdateCheckReason = "unavailable"
+)
+
+// NativeUpdateCheckOutput is the complete, bounded output of a finished check.
+type NativeUpdateCheckOutput struct {
+	Stdout   string
+	Stderr   string
+	ExitCode int
+}
+
+// NativeUpdateCheckResult is the normalized adapter result. Reason is set only
+// when State is unknown.
+type NativeUpdateCheckResult struct {
+	State          NativeUpdateCheckState
+	CurrentVersion string
+	LatestVersion  string
+	Channel        string
+	Reason         NativeUpdateCheckReason
+}
+
+// NativeUpdateCheckResolver supplies the inputs a context declaration may use
+// to locate configuration. Env is the check process environment ("KEY=value"
+// entries); Executable is the resolved check executable with symlinks
+// evaluated, or empty when it could not be resolved.
+type NativeUpdateCheckResolver struct {
+	Env        []string
+	WorkingDir string
+	HomeDir    string
+	Executable string
+}
+
+// NewNativeUpdateCheckResolver derives the home directory from the check
+// environment, the way the checker's own runtime does, and evaluates
+// executable symlinks so ownership manifests are found beside the real binary.
+func NewNativeUpdateCheckResolver(env []string, workingDir, executable string) NativeUpdateCheckResolver {
+	resolver := NativeUpdateCheckResolver{Env: env, WorkingDir: workingDir, Executable: executable}
+	homeKey, lookup := envHome, resolver.Getenv
+	if runtime.GOOS == osWindows {
+		homeKey, lookup = "USERPROFILE", resolver.GetenvFold
+	}
+	if home, ok := lookup(homeKey); ok && home != "" {
+		resolver.HomeDir = home
+	} else if home, err := os.UserHomeDir(); err == nil {
+		resolver.HomeDir = home
+	}
+	if executable != "" {
+		if real, err := filepath.EvalSymlinks(executable); err == nil {
+			resolver.Executable = real
+		}
+	}
+	return resolver
+}
+
+// Getenv returns the last exact match for key, matching process semantics.
+func (r NativeUpdateCheckResolver) Getenv(key string) (string, bool) {
+	value, found := "", false
+	for _, entry := range r.Env {
+		name, v, ok := strings.Cut(entry, "=")
+		if ok && name == key {
+			value, found = v, true
+		}
+	}
+	return value, found
+}
+
+// GetenvFold prefers an exact match and otherwise matches key
+// case-insensitively, as npm does for npm_config_* names.
+func (r NativeUpdateCheckResolver) GetenvFold(key string) (string, bool) {
+	if value, ok := r.Getenv(key); ok {
+		return value, true
+	}
+	value, found := "", false
+	for _, entry := range r.Env {
+		name, v, ok := strings.Cut(entry, "=")
+		if ok && strings.EqualFold(name, key) {
+			value, found = v, true
+		}
+	}
+	return value, found
+}
+
+// NativeUpdateCheckDir names a directory whose direct regular files are
+// fingerprinted. Match, when set, selects file names; nil selects every file.
+type NativeUpdateCheckDir struct {
+	Path  string
+	Match func(name string) bool
+}
+
+// NativeUpdateCheckSources lists configuration files and directories whose
+// metadata identifies the update configuration. Contents are never read.
+type NativeUpdateCheckSources struct {
+	Files []string
+	Dirs  []NativeUpdateCheckDir
+}
+
+// NativeUpdateCheckContext declares the update configuration used for cache
+// identity: environment keys (matched case-insensitively) and a pure source
+// resolver.
+type NativeUpdateCheckContext struct {
+	EnvKeys []string
+	Sources func(NativeUpdateCheckResolver) NativeUpdateCheckSources
+}
+
+// NativeUpdateCheckSpec is trusted built-in metadata for a read-only update
+// check. Command runs directly without a shell; Parse is a pure adapter.
+type NativeUpdateCheckSpec struct {
+	Command Command
+	Parse   func(NativeUpdateCheckOutput) NativeUpdateCheckResult
+	Context NativeUpdateCheckContext
+}
+
+// NativeUpdateCheckAgent reports update availability through the agent's own
+// checker. It is independent of HarnessUpdateAgent and never enables
+// automatic updates.
+type NativeUpdateCheckAgent interface {
+	NativeUpdateCheck() NativeUpdateCheckSpec
+}

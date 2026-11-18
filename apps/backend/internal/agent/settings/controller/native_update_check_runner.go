@@ -1,0 +1,180 @@
+package controller
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"os/exec"
+	"sync"
+	"time"
+
+	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/proctree"
+)
+
+const (
+	nativeUpdateCheckTimeout     = 30 * time.Second
+	nativeUpdateCheckOutputLimit = 64 * 1024
+	nativeUpdateCheckWaitDelay   = time.Second
+)
+
+var (
+	errNativeUpdateCheckTimeout     = errors.New("native update check timed out")
+	errNativeUpdateCheckOutputLimit = errors.New("native update check output limit exceeded")
+	errNativeUpdateCheckEmpty       = errors.New("native update check command is empty")
+)
+
+// nativeUpdateCheckRun is one finished check. Output is set only when Reason
+// is empty; a stopped or unstarted run never exposes partial output.
+type nativeUpdateCheckRun struct {
+	Output     agents.NativeUpdateCheckOutput
+	Executable string
+	Reason     agents.NativeUpdateCheckReason
+}
+
+// nativeUpdateCheckRunner executes trusted native check argv. Resolve and
+// Environment expose the inputs used for cache identity without starting a
+// process.
+type nativeUpdateCheckRunner interface {
+	Resolve(command agents.Command) (string, error)
+	Environment() []string
+	Run(ctx context.Context, command agents.Command) nativeUpdateCheckRun
+}
+
+// execNativeUpdateCheckRunner runs a check with the trusted updater's
+// environment and executable resolution, contained in a process tree.
+type execNativeUpdateCheckRunner struct {
+	timeout time.Duration
+}
+
+var _ nativeUpdateCheckRunner = execNativeUpdateCheckRunner{}
+
+func (execNativeUpdateCheckRunner) Resolve(command agents.Command) (string, error) {
+	argv := command.Args()
+	if len(argv) == 0 || argv[0] == "" {
+		return "", errNativeUpdateCheckEmpty
+	}
+	return exec.LookPath(argv[0])
+}
+
+func (execNativeUpdateCheckRunner) Environment() []string { return filteredInstallEnv() }
+
+func (r execNativeUpdateCheckRunner) Run(ctx context.Context, command agents.Command) nativeUpdateCheckRun {
+	path, err := r.Resolve(command)
+	if err != nil {
+		return nativeUpdateCheckRun{Reason: agents.NativeUpdateCheckReasonNotInstalled}
+	}
+	timeout := r.timeout
+	if timeout <= 0 {
+		timeout = nativeUpdateCheckTimeout
+	}
+	runCtx, cancelRun := context.WithTimeoutCause(ctx, timeout, errNativeUpdateCheckTimeout)
+	defer cancelRun()
+	limitCtx, cancelLimit := context.WithCancelCause(runCtx)
+	defer cancelLimit(nil)
+
+	budget := &nativeCheckOutputBudget{remaining: nativeUpdateCheckOutputLimit, exceed: func() { cancelLimit(errNativeUpdateCheckOutputLimit) }}
+	stdout, stderr := &nativeCheckOutputBuffer{budget: budget}, &nativeCheckOutputBuffer{budget: budget}
+	cmd := exec.CommandContext(limitCtx, path, command.Args()[1:]...)
+	cmd.Env = r.Environment()
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	cmd.WaitDelay = nativeUpdateCheckWaitDelay
+	exitCode, started := runContainedCommand(cmd)
+	run := nativeUpdateCheckRun{Executable: path}
+	switch {
+	case budget.exceeded():
+		run.Reason = agents.NativeUpdateCheckReasonOutputLimit
+	case errors.Is(context.Cause(runCtx), errNativeUpdateCheckTimeout):
+		run.Reason = agents.NativeUpdateCheckReasonTimeout
+	case ctx.Err() != nil:
+		run.Reason = agents.NativeUpdateCheckReasonCancelled
+	case !started:
+		run.Reason = agents.NativeUpdateCheckReasonNotInstalled
+	default:
+		run.Output = agents.NativeUpdateCheckOutput{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: exitCode}
+	}
+	return run
+}
+
+// runContainedCommand starts cmd in its own process tree, terminates the tree
+// on context cancellation, and releases it after every exit so descendants
+// never outlive the check.
+func runContainedCommand(cmd *exec.Cmd) (exitCode int, started bool) {
+	var (
+		treeMu sync.Mutex
+		tree   proctree.Tree
+	)
+	cmd.Cancel = func() error {
+		treeMu.Lock()
+		current := tree
+		treeMu.Unlock()
+		current.Kill(cmd)
+		return nil
+	}
+	proctree.Prepare(cmd)
+	if err := cmd.Start(); err != nil {
+		return -1, false
+	}
+	captured, err := proctree.Capture(cmd)
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return -1, false
+	}
+	treeMu.Lock()
+	tree = captured
+	treeMu.Unlock()
+	_ = cmd.Wait()
+	treeMu.Lock()
+	committed := tree
+	treeMu.Unlock()
+	committed.Kill(cmd)
+	if cmd.ProcessState == nil {
+		return -1, true
+	}
+	return cmd.ProcessState.ExitCode(), true
+}
+
+// nativeCheckOutputBudget is shared by stdout and stderr. The first write
+// over the budget records the overflow and stops the run.
+type nativeCheckOutputBudget struct {
+	mu        sync.Mutex
+	remaining int
+	over      bool
+	exceed    func()
+}
+
+func (b *nativeCheckOutputBudget) exceeded() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.over
+}
+
+type nativeCheckOutputBuffer struct {
+	budget *nativeCheckOutputBudget
+	buffer bytes.Buffer
+}
+
+func (w *nativeCheckOutputBuffer) Write(data []byte) (int, error) {
+	w.budget.mu.Lock()
+	if w.budget.over {
+		w.budget.mu.Unlock()
+		return len(data), nil
+	}
+	if len(data) > w.budget.remaining {
+		w.budget.over = true
+		w.budget.mu.Unlock()
+		w.budget.exceed()
+		return len(data), nil
+	}
+	w.budget.remaining -= len(data)
+	w.buffer.Write(data)
+	w.budget.mu.Unlock()
+	return len(data), nil
+}
+
+func (w *nativeCheckOutputBuffer) String() string {
+	w.budget.mu.Lock()
+	defer w.budget.mu.Unlock()
+	return w.buffer.String()
+}

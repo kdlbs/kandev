@@ -1,6 +1,8 @@
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import type { AgentUpdateJob, AgentUpdatePreview } from "@/lib/api";
 import {
+  nativeCheckReasonKey,
   resolveRuntimeActiveVersion,
   resolveRuntimeEffectiveVersion,
   resolveRuntimeOperation,
@@ -10,11 +12,79 @@ import {
 import { SettingsInfo } from "./settings-info";
 
 function updateExplainerKey(preview: AgentUpdatePreview): string {
-  if (preview.update_mode === "self_update") return "agents:harnessUpdateChannelNotice";
   if (preview.managed_fallback) return "agents:runtimeFallbackExplainer";
   return "agents:runtimeUpdateExplainer";
 }
 
+function nativeCheckResultText(preview: AgentUpdatePreview, t: TFunction): string {
+  if (preview.check_state === "update_available") {
+    return t("agents:nativeCheckLatest", {
+      version: preview.latest_version || t("common:unknown"),
+    });
+  }
+  if (preview.check_state === "up_to_date") return t("agents:runtimeUpToDate");
+  return t(nativeCheckReasonKey(preview.check_reason));
+}
+
+function NativeCheckResult({
+  agentName,
+  preview,
+}: {
+  agentName: string;
+  preview: AgentUpdatePreview;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <p className="break-words" data-testid={`agent-update-native-check-${agentName}`}>
+        {nativeCheckResultText(preview, t)}
+      </p>
+      {preview.update_channel && (
+        <p className="break-words" data-testid={`agent-update-channel-${agentName}`}>
+          {t("agents:nativeUpdateChannel", { channel: preview.update_channel })}
+        </p>
+      )}
+    </>
+  );
+}
+
+function SelfUpdateSummary({
+  agentName,
+  preview,
+  job,
+}: {
+  agentName: string;
+  preview: AgentUpdatePreview;
+  job?: AgentUpdateJob;
+}) {
+  const { t } = useTranslation();
+  const native = preview.check_source === "native";
+  const current = job?.current_version || preview.current_version || t("common:unknown");
+  return (
+    <div className="space-y-2" data-testid={`agent-update-version-summary-${agentName}`}>
+      <p className="font-medium">
+        {t(runtimeOperationLabelKey(resolveRuntimeOperation(preview, job)))}
+      </p>
+      <p className="text-xs text-muted-foreground">
+        {t(native ? "agents:nativeUpdateCheckNotice" : "agents:harnessUpdateChannelNotice")}
+      </p>
+      <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+        <p data-testid={`agent-update-current-${agentName}`}>
+          {t("agents:installedRuntimeVersion", { version: current })}
+        </p>
+        {native ? (
+          <NativeCheckResult agentName={agentName} preview={preview} />
+        ) : (
+          <p data-testid={`agent-update-stable-reference-${agentName}`}>
+            {t("agents:stableLatestReference", {
+              version: preview.stable_latest_version || t("common:unknown"),
+            })}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
 export function RuntimeVersionSummary({
   agentName,
   preview,
@@ -26,25 +96,7 @@ export function RuntimeVersionSummary({
 }) {
   const { t } = useTranslation();
   if (preview.update_mode === "self_update") {
-    const current = job?.current_version || preview.current_version || t("common:unknown");
-    return (
-      <div className="space-y-2" data-testid={`agent-update-version-summary-${agentName}`}>
-        <p className="font-medium">
-          {t(runtimeOperationLabelKey(resolveRuntimeOperation(preview, job)))}
-        </p>
-        <p className="text-xs text-muted-foreground">{t("agents:harnessUpdateChannelNotice")}</p>
-        <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
-          <p data-testid={`agent-update-current-${agentName}`}>
-            {t("agents:installedRuntimeVersion", { version: current })}
-          </p>
-          <p data-testid={`agent-update-stable-reference-${agentName}`}>
-            {t("agents:stableLatestReference", {
-              version: preview.stable_latest_version || t("common:unknown"),
-            })}
-          </p>
-        </div>
-      </div>
-    );
+    return <SelfUpdateSummary agentName={agentName} preview={preview} job={job} />;
   }
   const { currentVersion, targetVersion } = resolveRuntimeVersionPair(preview, job);
   const activeVersion = resolveRuntimeActiveVersion(preview, job);

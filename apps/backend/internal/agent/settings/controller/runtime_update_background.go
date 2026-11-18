@@ -25,6 +25,7 @@ func (c *Controller) StartRuntimeUpdateBackground(parent context.Context, readin
 	if c.runtimeBackground != nil {
 		return c.runtimeBackgroundStop(c.runtimeBackground)
 	}
+	c.renewNativeCheckLifetimeLocked()
 	ctx, cancel := context.WithCancel(parent)
 	worker := &runtimeUpdateBackground{
 		cancel:     cancel,
@@ -71,6 +72,8 @@ func (c *Controller) runtimeBackgroundStop(worker *runtimeUpdateBackground) func
 	return func() {
 		worker.once.Do(func() {
 			worker.cancel()
+			// Cancel and drain native checks before waiting for the pass.
+			c.closeNativeCheckLifetime()
 			worker.collector.close()
 			worker.deliveries.close()
 			worker.wg.Wait()

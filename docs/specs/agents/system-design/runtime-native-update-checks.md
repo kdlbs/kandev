@@ -1,0 +1,474 @@
+---
+status: draft
+system: agents
+requirements:
+  - REQ-AGENTS-RUNTIME-NATIVE-CHECK-001
+  - REQ-AGENTS-RUNTIME-NATIVE-CHECK-002
+created: 2026-11-17
+owners:
+  - Kandev
+---
+
+# Native Agent Update Checks Design
+
+## Boundary and requirement mapping
+
+The agents system owns native check declarations, result adapters, and runtime
+status projection. Notification service keeps recipient preferences and
+delivery claims. The web client consumes the existing status and preview
+projections. The design extends [runtime update notifications](runtime-update-notifications.md)
+and [harness self-update](harness-self-update.md). It does not add an update,
+selection, or automation path. Rationale is recorded in
+[ADR-2026-11-17](../../../decisions/2026-11-17-native-agent-update-checks.md).
+
+| Requirement | Design |
+| --- | --- |
+| REQ-AGENTS-RUNTIME-NATIVE-CHECK-001 | [Capability contract](#capability-contract), [Execution](#execution), [OMP adapter](#omp-adapter), [Normalization](#normalization) |
+| REQ-AGENTS-RUNTIME-NATIVE-CHECK-002 | [Status integration and cache](#status-integration-and-cache), [Preview and job](#preview-and-job), [Notifications](#notifications), [Web presentation](#web-presentation) |
+
+## Capability contract
+
+`internal/agent/agents` adds an optional capability next to
+`HarnessUpdateAgent`:
+
+- `NativeUpdateCheckAgent` exposes `NativeUpdateCheck() NativeUpdateCheckSpec`.
+- `NativeUpdateCheckSpec` contains `Command` (trusted direct argv), `Parse`,
+  a pure adapter from `NativeUpdateCheckOutput` to `NativeUpdateCheckResult`,
+  and `Context`, a `NativeUpdateCheckContext` that names the update
+  configuration used for cache identity.
+- `NativeUpdateCheckContext` contains `EnvKeys`, the environment variable
+  names whose values select the agent's configuration, matched
+  case-insensitively, and `Sources`, a pure function. `Sources` maps a
+  `NativeUpdateCheckResolver` to candidate configuration file paths and to
+  directories whose direct regular files are fingerprinted. The resolver is
+  built with `NewNativeUpdateCheckResolver(env, workingDir, executable)`.
+  It carries the check environment (`Getenv` and case-insensitive
+  `GetenvFold`), the working directory, the home directory (`HOME`, or
+  `USERPROFILE` on Windows), and the resolved executable path with symlinks
+  evaluated. `NativeUpdateCheckContext.Fingerprint(resolver)`, in
+  `internal/agent/agents`, computes the fingerprint.
+- `NativeUpdateCheckOutput` contains `Stdout`, `Stderr`, and `ExitCode`.
+- `NativeUpdateCheckResult` contains `State`, `CurrentVersion`,
+  `LatestVersion`, `Channel`, and `Reason`.
+
+`State` uses the existing check-state values `update_available`, `up_to_date`,
+and `unknown`. `Reason` is set only for `unknown` and uses this closed set:
+
+| Reason | Source |
+| --- | --- |
+| `check_failed` | The adapter recognizes a reported check failure, or the command exits non-zero. |
+| `unsupported` | The agent reports that another manager owns updates for the installation. |
+| `unrecognized_output` | The output is empty, malformed, or conflicting. A recognized line can also contain an invalid version. |
+| `timeout` | The 30-second execution limit expires. |
+| `output_limit` | Combined stdout and stderr exceed 64 KiB. |
+| `not_installed` | The executable cannot be resolved or started. |
+| `runtime_mismatch` | The check's current version differs from the runtime-reported version. |
+| `cancelled` | Shutdown stopped the check before it finished. Never cached. |
+| `unavailable` | The agent is disabled or discovery does not report it available, so no check ran. Never cached. |
+
+The capability is independent of `HarnessUpdateAgent`, automatic update
+support, and installation authority. Any built-in agent that implements
+`NativeUpdateCheckAgent` uses the native status source. Its install action,
+`management`, and manual guidance still come from `RuntimeUpdateCapabilities`
+and `HarnessUpdateAgent`, so a checker-only agent keeps its existing manual or
+external presentation. `RuntimeUpdateCapabilities` and
+`automaticUpdateSupported` do not inspect the native check, so declaring one
+never enables `auto_update_supported`. A `ManagedNPMRuntimeAgent` with an
+active managed capability cannot also declare a native check. Pinned updates
+need the npm version catalogue, so the registry coverage test rejects that
+combination.
+
+`OmpACP` declares `Command: NewCommand("omp", "update", "--check")`,
+`Parse: ParseOmpUpdateCheck`, and `Context: ompUpdateCheckContext`.
+`HarnessUpdate()`, `BuildCommand`, `Runtime()`, `InstallScript`, and
+passthrough configuration do not change.
+
+`ompUpdateCheckContext` declares the configuration sources that upstream
+`omp update --check` reads at commit `2b562c5b7e3f` to select its channel,
+installation ownership, and release feed. The sources are
+`packages/utils/src/dirs.ts`, `packages/utils/src/env.ts`,
+`packages/coding-agent/src/config/settings.ts`,
+`packages/coding-agent/src/cli/managed-install.ts`, and
+`packages/coding-agent/src/cli/npm-registry.ts`. Kandev resolves source paths
+from the check's process environment only and does not parse dotenv files.
+The dotenv files that upstream loads at startup are themselves fingerprinted
+(see below), so any edit to them changes the key. `TestOmpUpdateCheckContext`
+pins this list to that commit.
+
+These cases take effect no later than when the cache entry expires: edits to
+configuration files at a location chosen only through a dotenv value,
+environment values interpolated into `.npmrc`, and inputs that upstream adds
+after the pinned commit.
+
+- `EnvKeys`: `OMP_PROFILE`, `PI_PROFILE`, `PI_CODING_AGENT_DIR`,
+  `PI_CONFIG_DIR`, `PI_CONFIG_FILES`, `HOME`, `XDG_CONFIG_HOME`,
+  `npm_config_userconfig`, `npm_config_registry`, and `BUN_CONFIG_REGISTRY`.
+  Any change to these values changes the key.
+- Channel settings: the profile is `OMP_PROFILE` when that variable is
+  defined, even if it is empty, and otherwise `PI_PROFILE`. After trimming, an
+  empty or `default` value selects the default profile. The base root is
+  `<base>` = `$HOME/<PI_CONFIG_DIR or .omp>`. The active profile config root,
+  equivalent to upstream `getConfigRootDir()`, is `<root>` =
+  `<base>/profiles/<profile>` for a named profile and `<base>` for the default
+  profile. A named profile uses `<root>/agent`. The default profile uses
+  `$PI_CODING_AGENT_DIR` when it is set, unless that value equals the agent
+  directory derived from the normalized `PI_PROFILE`. In that case it uses
+  `<root>/agent`, matching upstream `resolvePreProfileAgentDir` and
+  `isProfileDerivedAgentDir`, so an inherited profile-derived directory is not
+  treated as an override. This applies both when `OMP_PROFILE` is explicitly
+  empty or `default` and `PI_PROFILE` names another profile. Without an
+  override, the default profile uses `<root>/agent`. An invalid profile name
+  is fingerprinted as the default profile, matching upstream's module-load
+  fallback. The check itself reports OMP's error.
+  - Global files: `<agentDir>/config.yml` and `<agentDir>/config.yaml`, which
+    are upstream `MAIN_CONFIG_FILENAMES`.
+  - Overlay files: `PI_CONFIG_FILES` split on the OS path-list separator. A
+    leading `~` expands to home, and relative paths resolve against the
+    working directory.
+  - Project files: the known project candidates are `<cwd>/.omp/config.yml`,
+    `<cwd>/.omp/settings.json`, `<cwd>/.claude/settings.json`, and
+    `<cwd>/.claude/settings.yml`. They are always fingerprinted individually.
+    Upstream project settings providers are open-ended, so every other regular
+    file directly inside `<cwd>/.omp` and `<cwd>/.claude` is also
+    fingerprinted, up to 256 entries per directory. Above that limit, the
+    directory's modification time records file creation and removal, and the
+    known candidates remain individually fingerprinted.
+- Installation ownership: `<dir(dir(realpath(executable)))>/manager.json`,
+  which is the manifest that `managedInstallName` reads before any lookup.
+- Release feed: `$npm_config_userconfig` or `$HOME/.npmrc`,
+  `$XDG_CONFIG_HOME/.bunfig.toml`, and `$HOME/.bunfig.toml`.
+- Startup dotenv files: `$HOME/.env`, `<root>/.env` (the active profile
+  config root), `<base>/.env`, `<agentDir>/.env`, and every regular file in
+  `<cwd>` named `.env` or starting with `.env.`. `$HOME/.env`, `<root>/.env`,
+  and `<agentDir>/.env` are the files `env.ts` applies before
+  `refreshDirsFromEnv()`. `<base>/.env` is also fingerprinted, which is
+  harmless when it equals `<root>/.env`.
+  The `<cwd>` files cover upstream's project `.env` and Bun's dotenv autoload.
+
+For every candidate file, the fingerprint records whether it exists, its size,
+and its modification time. Creating or removing a candidate, or changing its
+size or modification time, changes the key. Kandev never reads file contents,
+because `.npmrc` and `.env` files can hold credentials. An edit that keeps
+both size and modification time is therefore the one declared-file case
+bounded by the cache TTL (AC-AGENTS-RUNTIME-NATIVE-CHECK-002.2). Normal
+editors and atomic writes update the modification time.
+
+## Execution
+
+The controller owns a `nativeUpdateCheckRunner` seam: `Resolve(command)`
+resolves the executable, `Environment()` returns the check environment, and
+`Run(ctx, command)` executes. The cache key is therefore built without
+starting a process. Production uses `execNativeUpdateCheckRunner`. Tests
+inject a fake through `SetNativeUpdateCheckRunner`, matching
+`SetRuntimeUpdateStatusResolver`.
+
+`execNativeUpdateCheckRunner.Run(ctx, command)`:
+
+1. Resolves `argv[0]` with `exec.LookPath`. The production environment is
+   `filteredInstallEnv()`, the same environment that `runDirectCommand` uses
+   for the trusted update command. The working directory is also inherited
+   from the backend process, so both commands resolve the same executable and
+   project configuration. A resolution failure returns `not_installed` without
+   starting a process.
+2. Starts the resolved path directly with `exec.CommandContext`, no shell, the
+   same environment, and `WaitDelay` of one second. It does not add arguments.
+   Upstream check mode can start package-manager probes (`bun pm bin -g`,
+   `npm prefix -g`, `brew --prefix`, and `mise bin-paths`) before its check
+   returns (`update-cli.ts` lines 249-299 and 2348-2358). The runner therefore
+   contains the whole process tree with `internal/agent/proctree`: a process
+   group on Unix and a kill-on-close job object on Windows. Its
+   `cmd.Cancel` terminates the tree. It also releases the tree after every
+   exit, as `copilotplugins/runner.go` does.
+3. Captures stdout and stderr in separate buffers that share one 64 KiB budget.
+   The first write over the budget records `output_limit` and cancels the run
+   context, which terminates the tree immediately. Partial output is never
+   parsed.
+4. The first terminal cause takes precedence: `output_limit`, then `timeout`
+   on the run deadline, then `cancelled` on lifetime cancellation. A
+   non-`ExitError` start failure is `not_installed`. A non-zero exit returns the
+   output with its exit code so the adapter can distinguish known failures
+   from unrecognized text.
+5. Returns the resolved executable path for cache identity.
+
+`internal/agent/proctree` is the existing `copilotplugins`
+`prepareCommandTree`, `captureCommandTree`, and `commandTree.kill` code moved
+into a shared package as `Prepare`, `Capture`, and `Tree.Kill`.
+`copilotplugins` is migrated to the shared package in the same change.
+`acpdbg` and `codexdbg` keep their own debug-tool copies.
+
+Timeout is `nativeUpdateCheckTimeout = 30 * time.Second`. It is independent of
+`runtimeUpdateStatusLookupTimeout`, which continues to bound registry lookups.
+
+Cancellation and admission: the lookup context is derived from the caller with
+`context.WithoutCancel`, matching shared registry lookups, so one canceled
+subscriber does not stop shared work. Native lookups are also bound to a
+controller-owned `nativeCheckLifetime`, which holds `ctx`, `cancel`, `mu`,
+`closed`, and an in-flight `sync.WaitGroup`.
+
+- The controller creates an open lifetime at construction, so status works
+  before the background worker starts.
+- Admission happens once for each execution, at the start of the single-flight
+  function under `lifetime.mu`. Subscribers that join an existing flight do not
+  register again. If `closed` is set, the execution returns
+  `unknown` / `cancelled` without starting anything. Otherwise `wg.Add(1)` runs
+  while the mutex is still held, before the execution waits for a semaphore
+  slot. Slot waiters are therefore counted.
+- A lookup waits for its semaphore slot with `select` on `lifetime.ctx`. The
+  process context attaches `context.AfterFunc(lifetime.ctx, cancel)`.
+- The background stop function sets `closed`, cancels `lifetime.ctx` under
+  `lifetime.mu`, releases the mutex, and calls `wg.Wait()`. Because `Add` only
+  happens while the lifetime is open and under the same mutex, no lookup can
+  register after stop begins waiting. Every admitted lookup returns
+  `cancelled` at its slot wait or kills its process tree.
+- `StartRuntimeUpdateBackground` installs a fresh open lifetime when the
+  current one is closed. It never reopens a closed lifetime.
+
+A canceled check returns an `unknown` / `cancelled` entry to every waiting
+subscriber and is never written to the cache.
+
+## OMP adapter
+
+`ParseOmpUpdateCheck` is a pure function in `internal/agent/agents`. It
+removes ANSI escape sequences, splits stdout and stderr into trimmed lines, and
+recognizes only these upstream markers from `packages/coding-agent/src/cli/update-cli.ts`
+(upstream commit `2b562c5b7e3f`, installed `omp/18.13.3` confirmed the same
+strings):
+
+| Line | Meaning |
+| --- | --- |
+| `Current version: <v>` | Current version |
+| `Current channel: <name>` | Channel. Upstream prints it only for `canary`; absence leaves the channel unreported. |
+| `New version available: <v>` | `update_available`, latest `<v>` |
+| `<icon> Already up to date` (icon optional) | `up_to_date` |
+| `... is installed and kept up to date by <manager>; update it from <manager>.` | `unknown` / `unsupported` |
+| `Failed to check for updates: ...`, optionally prefixed with `Error: ` | `unknown` / `check_failed` |
+
+Rules:
+
+- Versions must parse with `semver.NewVersion` and contain no build metadata.
+  Prerelease versions are accepted. An invalid version is
+  `unrecognized_output`.
+- Exactly one outcome marker is required. Both available and up-to-date
+  markers, a channel-switch line such as `Switching to ...`, a forced
+  reinstall line, or no outcome marker produce `unrecognized_output`.
+- A non-zero exit without the failure marker is `check_failed`. A non-zero
+  exit with an available or up-to-date marker is `check_failed`; exit status
+  never upgrades a result.
+- `up_to_date` and `update_available` require a `Current version` line.
+- Unrecognized informational lines do not affect a recognized result. This
+  allows upstream to add text without breaking the check. Version and outcome
+  lines must still match exactly.
+
+## Normalization
+
+The controller applies one rule after the adapter: if the result has a current
+version and the target's ACP-reported `currentVersion` is known and different,
+the result becomes `unknown` / `runtime_mismatch`, and latest and channel are
+cleared. Native results never pass through `compareHarnessUpdateStatus`,
+`compareRuntimeUpdateStatus`, `validateRuntimeUpdateLatest`, or
+`managedruntime.ParseStableVersion`.
+
+## Status integration and cache
+
+`runtimeUpdateStatusTargets` records `nativeCheck *agents.NativeUpdateCheckSpec`
+for every agent that implements `NativeUpdateCheckAgent`. A harness agent
+keeps update mode `self_update`, and its `Package` and `Source` remain the
+harness package for display. A checker-only agent keeps its capability-derived
+mode, `management`, `source`, and guidance URL; only its check state comes from
+the native result.
+
+`ListAgentUpdateStatuses` groups targets by lookup key instead of package
+alone:
+
+- Registry targets keep `runtimeUpdateStatusCacheKey(packageName, mode)`.
+- Native targets resolve the executable and the context fingerprint first,
+  then use `nativeUpdateCheckCacheKey(agentID, generation, argv, resolvedPath,
+  currentVersion, contextFingerprint)`. It joins `native`, the agent ID, the
+  agent's current invalidation generation, NUL-separated argv, the resolved
+  path, the ACP-reported version, and the fingerprint.
+- `contextFingerprint` is a SHA-256 over sorted `EnvKeys` name/value pairs
+  from the check environment and, for each `Sources` candidate file and
+  enumerated directory entry, existence, size, and modification time from
+  `os.Stat`. File contents are never read, and the fingerprint is never logged
+  or exposed.
+
+Both kinds share `runtimeUpdateStatusCache`, `runtimeUpdateStatusFlight`, and
+the five-slot `runtimeUpdateStatusLookup` semaphore. A native lookup holds one
+slot for its full execution. The single-flight key equals the cache key, so a
+request after invalidation uses a new generation and cannot join an older
+flight. `runtimeUpdateStatusCacheEntry` gains `state`, `current`, `channel`,
+`reason`, and `native`. TTL selection is:
+
+- Six hours (`runtimeUpdateStatusSuccessTTL`) for `update_available`,
+  `up_to_date`, and `unsupported`.
+- Fifteen minutes (`runtimeUpdateStatusFailureTTL`) for every other reason
+  except `cancelled` and `unavailable`, which are never cached.
+
+Every native entry point uses one eligibility guard,
+`nativeUpdateCheckEligible(agent, available)`. It requires `agent.Enabled()`
+and discovery availability (`c.discovery == nil || available[agentID]`, the
+same rule as `runtimeUpdateStatusTargets`). The guard runs before executable
+resolution, fingerprinting, cache lookup, or execution. Status keeps
+ineligible targets in the response without a lookup. For an ineligible native
+agent it reports `check_source: "native"`, `check_state: "unknown"`, and
+`check_reason: "unavailable"`, matching preview. A resolution failure is cached under a
+key with an empty path and the failure TTL.
+
+The status DTO maps a native entry as follows: `CheckState` from the entry,
+`LatestVersion` only for `update_available`, `UpdateChannel` when reported,
+`CheckReason` for `unknown`, and `CheckSource: "native"`. `CheckedAt` is set
+for completed checks. `EffectiveVersion` remains the ACP-reported version.
+
+Invalidation:
+
+- Because the key includes the resolved path, runtime version, and context
+  fingerprint, a change to any of them misses the cache.
+- `InvalidateNativeUpdateCheck(agentName)` increments
+  `nativeUpdateCheckGeneration[agentName]` under `runtimeUpdateStatusMu` and
+  removes that agent's native cache entries. A native lookup records its
+  generation when admitted. It writes the cache only if that generation is
+  still current, under the same mutex. A check that was running during
+  invalidation can return its result to the subscribers that were already
+  waiting, but it never fills the cache for the new generation.
+- `AgentUpdateJobStore.SetStatusInvalidator` changes from `func(string)` to
+  `func(RuntimeStatusInvalidation)`, carrying `AgentName`, `Package`, and
+  `UpdateMode` from the job. All terminal call sites in `agent_update_job.go`
+  migrate:
+  - `finishActivatedWithRefreshError` (also reached through
+    `finishActivated`) and `finishRefresh` keep their existing conditions for
+    pinned jobs. The conditions are a non-empty package, and also `refreshed`
+    for `finishRefresh`. They now send the structured value.
+  - For `self_update` jobs only, `finishRefresh` sends it on every outcome and
+    `finishFailed` sends it on failure, because a failed updater can still have
+    changed the installation. `finishFailed` keeps its current
+    no-invalidation behavior for pinned jobs.
+  - Ordering for `self_update` jobs: the invalidation runs first in
+    `finishRefresh` and `finishFailed`. It runs before the job store takes
+    `s.mu` to set the terminal status, call `finishLocked`, or release the
+    maintenance claim, and before `complete` or the terminal broadcast. When a
+    terminal job or a released claim becomes observable, the agent's native
+    generation has therefore advanced, and no request can reuse or join a
+    pre-job entry. A check admitted between the invalidation and publication
+    belongs to the new generation and observes the installation after the
+    updater ran. Pinned-job package invalidation keeps its existing
+    post-publication position.
+  - Lock order: the invalidator is called with no job-store lock held, and it
+    takes only `runtimeUpdateStatusMu`. Status code never acquires the job
+    store's `s.mu` while holding `runtimeUpdateStatusMu`, so the two locks
+    have no inversion.
+  - `controller.go` wires `invalidateRuntimeUpdateStatusForJob`, which calls
+    `InvalidateRuntimeUpdateStatus(Package)` when `Package` is set, and
+    `InvalidateNativeUpdateCheck(AgentName)`.
+- `SetRuntimeUpdateStatusResolver` keeps clearing the whole cache.
+
+## Preview and job
+
+`previewHarnessUpdate` checks for a native declaration. When one exists, it
+does not call `resolveHarnessLatest`. It first runs discovery for the agent
+(`c.detectAgents`, as status does) and applies
+`nativeUpdateCheckEligible`. An ineligible agent gets `check_source: "native"`,
+`check_state: "unknown"`, and `check_reason: "unavailable"` without a lookup.
+An eligible agent obtains the native entry through the same cache and
+single-flight lookup as status. A cache hit is reused, and a miss runs one
+shared check. Preview returns `check_source`, `check_state`,
+`latest_version`, `update_channel`, and `check_reason` on
+`AgentUpdatePreviewDTO` and leaves `stable_latest_version` empty.
+`target_version`, `available_versions`, approval shape, and
+`harnessUpdateOperation` remain unchanged. Preview never bypasses the cache.
+
+Approval and `runHarness` remain unchanged except for terminal invalidation.
+The job still runs `HarnessUpdateSpec.UpdateCommand` (`omp update`), streams
+output, probes with `omp acp`, and fails an unchanged ACP version.
+
+## Notifications
+
+`publishRuntimeStatus` already notifies from `CheckState == update_available`,
+`LatestVersion`, and runtime identity, and does not parse versions. Native
+results therefore use the same availability collector, summary, delivery
+claims, and occurrence key (`runtimeNoticeKey(agent, runtime, latest,
+"available")`) without changes. Tests cover that a canary latest version
+reaches the notifier and that `up_to_date` and `unknown` do not.
+
+## Web presentation
+
+API types in `apps/web/lib/api/domains/agent-update-api.ts` add optional
+`check_source?: "native"`, `update_channel?: string`, and
+`check_reason?: AgentUpdateCheckReason` to `AgentUpdateStatus`. They add
+`check_source`, `check_state`, `latest_version`, `update_channel`, and
+`check_reason` to `AgentUpdatePreview`. `AgentUpdateCheckReason` mirrors the
+closed backend set. Unknown values fall back to the existing unknown copy.
+
+- `RuntimeOverviewRow` in `agent-runtime-update-rows.tsx` keeps its version
+  line and grouping. When `update_channel` is present, it adds a muted channel
+  label. `rowDescription` maps `check_reason` to a reason-specific locale key
+  before falling back to `agents:runtimeCheckUnknown`.
+- `RuntimeVersionSummary` renders the self-update branch for
+  `check_source === "native"` without `agent-update-stable-reference-*`. It
+  shows the installed version, then one native result line with test ID
+  `agent-update-native-check-<agent>`: the latest version, up to date, or the
+  reason explanation. It also shows the channel when reported. A native notice
+  replaces `agents:harnessUpdateChannelNotice` and states that the status comes
+  from the agent's own check of its configured channel. The confirm action,
+  log, and result states remain unchanged.
+- Existing grouping in `lib/agents/runtime-update-manager.ts` already maps
+  self-update states to available, up to date, and unknown. It keeps native
+  OMP out of bulk selection because bulk eligibility requires a pinned target.
+
+Desktop and phone share the dialog and drawer composition. Channel and reason
+text wrap within the existing columns and add no new controls or overlays.
+Phone keeps page-owned scrolling and the existing 44px actions. All new copy is
+in `agents` locale catalogs for all seven shipped locales. `canary` is shown
+verbatim as an upstream channel identifier.
+
+## Security
+
+Only built-in metadata supplies the check argv and adapter. Request fields
+cannot add a command, flag, path, or environment value. Execution uses direct
+argv, no shell, and the same filtered host environment as the existing trusted
+updater. The check mode returns before upstream acquires an install lock or
+changes the installation. Output is bounded, check reasons are fixed codes,
+and raw check output is not added to DTOs, notifications, logs, or metrics.
+
+## Observability
+
+Debug logs record agent ID, state, reason, and duration for each executed
+check. Do not log raw output, environment variables, or the executable path
+above debug level. Do not add a metric. The status DTO `checked_at` and
+`check_reason` provide operator-visible diagnostics.
+
+## Validation
+
+- Pure adapter table tests cover stable and canary availability, up to date
+  with and without a channel, both failure-prefix variants, managed
+  installation, ANSI output, conflicting markers, channel-switch and reinstall
+  lines, empty output, invalid versions, and non-zero exit with an outcome
+  marker.
+- Runner tests use the test binary as a helper process. They cover timeout,
+  output overflow followed by a long-lived process that is terminated before
+  the timeout, a long-lived descendant removed on both timeout and lifetime
+  cancellation, a missing executable, exit-code propagation, environment
+  parity with `filteredInstallEnv`, and the absence of added arguments.
+  `proctree` keeps the migrated `copilotplugins` runner tests passing.
+- Controller tests use a fake runner. They cover registry bypass, canary
+  latest preservation, runtime mismatch, TTLs, single-flight concurrency,
+  rechecks after path, version, and context-fingerprint changes. Fingerprint
+  cases edit the default, named-profile, and `PI_CONFIG_FILES` overlay
+  configuration, create a project `.omp` file, edit a known project candidate
+  in a directory over the entry limit, change the ownership manifest, and edit
+  `.npmrc`. Each case keeps the executable path
+  and version. They also cover terminal-job invalidation for successful and
+  failed harness jobs, and unchanged package invalidation for managed
+  activation. A barrier test blocks check A, invalidates the agent, starts a
+  post-invalidation request, releases A, and proves that only a fresh check
+  fills the cache. Lifetime barrier tests cover admission racing stop, slot
+  waiters released as `cancelled` when the semaphore is saturated, a live
+  subscriber receiving `cancelled`, and stop followed by restart. Other tests
+  cover disabled and unavailable skips in status and in direct preview requests,
+  where a discovery-unavailable fixture with a runnable executable must not
+  start the runner. They also cover preview fields without a stable lookup,
+  notifications, and a checker-only fixture agent with native status but no
+  install or automatic-update eligibility. They also cover unchanged results
+  for non-native harness and managed agents.
+- Web unit tests cover row channel and reason copy and the native dialog
+  summary. Desktop and phone Playwright tests cover native availability,
+  channel, unknown explanation, and the unchanged approval flow.

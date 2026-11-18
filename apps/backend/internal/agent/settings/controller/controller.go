@@ -108,6 +108,9 @@ type Controller struct {
 	runtimeUpdateStatusResolver RuntimeUpdateStatusResolver
 	runtimeUpdateStatusLookup   chan struct{}
 	runtimeUpdateStatusFlight   singleflight.Group
+	nativeUpdateCheckRunner     nativeUpdateCheckRunner
+	nativeUpdateCheckGeneration map[string]uint64
+	nativeCheckLifetime         *nativeCheckLifetime
 	runtimeAutoUpdateStore      *managedruntime.AutoUpdateStore
 	runtimeUpdateNotifier       RuntimeUpdateNotifier
 	runtimeBackgroundMu         sync.Mutex
@@ -306,6 +309,7 @@ func NewController(repo store.Repository, discoveryRegistry *discovery.Registry,
 		runtimeUpdateStatusCache:  make(map[string]runtimeUpdateStatusCacheEntry),
 		runtimeUpdateStatusNow:    time.Now,
 		runtimeUpdateStatusLookup: make(chan struct{}, runtimeUpdateStatusMaxConcurrent),
+		nativeCheckLifetime:       newNativeCheckLifetime(),
 		hostCLIRunner:             hostcli.ExecRunner{},
 		hostCLIModels:             make(map[string]hostCLIModelEntry),
 	}
@@ -503,7 +507,7 @@ func (c *Controller) initializeUpdateJobStore() {
 		c.BroadcastAvailableAgents,
 		c.managedRuntimeSelections,
 	)
-	c.updateJobStore.SetStatusInvalidator(c.InvalidateRuntimeUpdateStatus)
+	c.updateJobStore.SetStatusInvalidator(c.invalidateRuntimeUpdateStatusForJob)
 	if reader, ok := c.managedRuntimeSelections.(managedruntime.OpenCodeSelectionReader); ok {
 		c.updateJobStore.SetOpenCodeSelectionReader(reader)
 	}
