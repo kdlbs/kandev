@@ -4,7 +4,7 @@ import { waitForFiniteAnimations } from "../../helpers/animations";
 import { waitForHttp } from "../../helpers/causal-waits";
 import type { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import { installRuntimeUpdateFixture } from "./agent-runtime-update-helpers";
-import { compactRuntimeSettings } from "./agent-runtime-settings-helpers";
+import { compactRuntimeSettings, expectRuntimeVersions } from "./agent-runtime-settings-helpers";
 
 export async function localizedReleaseNotice(
   page: Page,
@@ -104,7 +104,7 @@ async function runtimeAwarenessDetails(
   });
   await expect(detail).toBeVisible();
   await waitForFiniteAnimations(detail);
-  await expect(detail).toContainText("0.62.0 → 0.64.0");
+  await expectRuntimeVersions(detail, "0.62.0", "0.64.0");
   await expect(detail).toContainText("claude-agent-acp@0.64.0");
   await capture?.screenshot("runtime-version-control", {
     caption: "Managed version selection retains the existing desktop dialog and phone drawer.",

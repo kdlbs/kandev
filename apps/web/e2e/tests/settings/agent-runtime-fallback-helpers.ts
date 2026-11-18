@@ -1,3 +1,4 @@
+import { expectRuntimeVersions } from "./agent-runtime-settings-helpers";
 import { expect, type Page } from "@playwright/test";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import type { PrAssetCapture } from "../../helpers/pr-asset-capture";
@@ -98,6 +99,7 @@ export async function managedFallbackAwareness(
   const surface = page.getByTestId(`agent-update-${mobile ? "drawer" : "dialog"}-opencode-acp`);
   await expect(surface).toContainText("Observed: 1.0.0");
   await expect(surface.getByRole("switch")).toHaveCount(0);
+  await surface.getByText("Runtime details", { exact: true }).click();
   const guidance = surface.getByRole("link", { name: "Manual update guidance" });
   await expect(guidance).toHaveAttribute("href", "https://opencode.ai/docs/cli/");
   if (mobile) expect((await guidance.boundingBox())!.height).toBeGreaterThanOrEqual(44);
@@ -109,7 +111,7 @@ export async function managedFallbackAwareness(
       );
     }),
   ).toBe(true);
-  await expect(surface).toContainText("Unknown → 9.0.0");
+  await expectRuntimeVersions(surface, "Unknown", "9.0.0");
   await expect(surface).toContainText("Active version: 8.0.0");
   await expect(surface).toContainText("Effective version: 8.0.0");
   const info = surface.getByTestId("agent-update-info-opencode-acp");

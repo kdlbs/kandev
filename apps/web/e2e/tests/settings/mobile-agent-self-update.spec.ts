@@ -53,10 +53,10 @@ test.describe("OMP harness-owned updates on phones", () => {
     await expect
       .poll(() => body.evaluate((element) => element.scrollHeight > element.clientHeight))
       .toBe(true);
-    const footerAction = drawer.getByRole("button", { name: "Cancel" });
-    await expect(footerAction).toBeVisible();
-    const footerBox = await settledBoundingBox(footerAction);
-    expect(footerBox.y + footerBox.height).toBeLessThanOrEqual(viewport!.height);
+    const close = drawer.getByRole("button", { name: "Close", exact: true });
+    await expect(close).toBeVisible();
+    const closeBox = await settledBoundingBox(close);
+    expect(closeBox.y + closeBox.height).toBeLessThanOrEqual(viewport!.height);
     expect((await settledBoundingBox(drawer)).height).toBeLessThanOrEqual(viewport!.height);
     await expect(testPage.locator("html")).toHaveJSProperty(
       "scrollWidth",

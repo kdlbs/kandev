@@ -1,3 +1,4 @@
+import { expectRuntimeVersions } from "./agent-runtime-settings-helpers";
 import { test, expect } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { settledBoundingBox } from "../../helpers/settled-box";
@@ -25,7 +26,7 @@ test.describe("managed agent runtime updates on mobile", () => {
 
     const drawer = testPage.getByTestId(`agent-update-drawer-${runtime.agentName}`);
     await expect(drawer).toBeVisible();
-    await expect(drawer).toContainText("0.62.0 → 0.63.0");
+    await expectRuntimeVersions(drawer, "0.62.0", "0.63.0");
     const body = drawer.getByTestId(`agent-update-dialog-body-${runtime.agentName}`);
     await expect
       .poll(() => body.evaluate((element) => element.scrollWidth <= element.clientWidth + 1))
@@ -87,8 +88,8 @@ test.describe("managed agent runtime updates on mobile", () => {
       }),
     ).toBeVisible();
     await expect(drawer.getByRole("status").filter({ hasText: "Up to date" })).toBeVisible();
-    await expect(drawer).not.toContainText("0.64.0 → 0.64.0");
-    await expect(testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`)).toBeDisabled();
+    await expect(drawer.getByRole("button", { name: "Done", exact: true })).toBeVisible();
+    await expect(testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`)).toHaveCount(0);
     expect(runtime.postCount()).toBe(0);
     await prCapture.screenshot("mobile-update-up-to-date", {
       caption: "Mobile update preview when the managed runtime is up to date",
@@ -131,7 +132,7 @@ test.describe("managed agent runtime updates on mobile", () => {
     expect(optionBox!.height).toBeGreaterThanOrEqual(44);
     await option.tap();
 
-    await expect(drawer).toContainText("0.62.0 → 0.61.0");
+    await expectRuntimeVersions(drawer, "0.62.0", "0.61.0");
     await expect(testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`)).toHaveText(
       "Roll back runtime",
     );
@@ -177,7 +178,7 @@ test.describe("managed agent runtime updates on mobile", () => {
       .poll(async () => Math.round((await option.boundingBox())?.height ?? 0))
       .toBeGreaterThanOrEqual(44);
     await option.tap();
-    await expect(drawer).toContainText("0.62.0 → 0.70.0");
+    await expectRuntimeVersions(drawer, "0.62.0", "0.70.0");
     expect(runtime.previewTargets()).toEqual(["", "0.70.0"]);
   });
 
@@ -264,7 +265,7 @@ test.describe("managed agent runtime updates on mobile", () => {
     expect(Math.round(choiceBox!.width)).toBeGreaterThanOrEqual(44);
     expect(runtime.postCount()).toBe(0);
     await migrationChoice.tap();
-    await expect(drawer).toContainText("1.18.32 → 2.0.18");
+    await expectRuntimeVersions(drawer, "1.18.32", "2.0.18");
     const info = drawer.getByTestId(`agent-update-info-${runtime.agentName}`);
     await expect(info).toHaveCSS("height", "44px");
     await expect(info).toHaveCSS("width", "44px");
@@ -296,6 +297,7 @@ test.describe("managed agent runtime updates on mobile", () => {
         caption: "Mobile OpenCode v1-to-v2 migration preview with details available on demand",
       });
     }
+    await drawer.getByText("Runtime details", { exact: true }).tap();
     await commandDetails.locator("summary").tap();
     await expect(commandDetails).toHaveAttribute("open", "");
     const command = body.locator("pre");
@@ -325,7 +327,7 @@ test.describe("managed agent runtime updates on mobile", () => {
 test("keeps policy detail and fixed actions reachable in a short phone viewport", async ({
   testPage,
 }) => {
-  await testPage.setViewportSize({ width: 390, height: 520 });
+  await testPage.setViewportSize({ width: 390, height: 390 });
   await installRuntimeUpdateFixture(testPage);
   await testPage.goto("/settings/agents");
   await testPage.getByTestId("runtime-updates-button").tap();
@@ -336,6 +338,8 @@ test("keeps policy detail and fixed actions reachable in a short phone viewport"
   await waitForFiniteAnimations(drawer);
   const body = drawer.getByTestId("agent-update-dialog-body-claude-acp");
   await expect(drawer.getByTestId("runtime-policy-detail-claude-acp")).toBeAttached();
+  await drawer.getByText("Runtime details", { exact: true }).tap();
+  await drawer.getByTestId("agent-update-command-claude-acp").locator("summary").tap();
   await expect
     .poll(() => body.evaluate((element) => element.scrollHeight > element.clientHeight))
     .toBe(true);

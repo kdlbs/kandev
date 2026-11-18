@@ -161,7 +161,7 @@ describe("AgentRuntimeUpdateControl OpenCode migration", () => {
     fireEvent.click(screen.getByTestId("agent-update-trigger-opencode-acp"));
     await waitFor(() => expect(onPreview).toHaveBeenCalledTimes(1));
     expect(screen.getByTestId("agent-update-confirm-opencode-acp").textContent).toBe(
-      "Update runtime",
+      `Update to ${ordinary.target_version}`,
     );
     fireEvent.click(screen.getByTestId("agent-update-migrate-family-opencode-acp"));
 
@@ -211,7 +211,7 @@ describe("AgentRuntimeUpdateControl version browsing", () => {
 
     fireEvent.click(screen.getByTestId(`agent-update-trigger-${AGENT_NAME}`));
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Browse all versions" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Change version" })).toBeTruthy();
     });
     expect(screen.queryByText("0.50.0")).toBeNull();
   });
@@ -244,10 +244,7 @@ describe("AgentRuntimeUpdateControl version browsing", () => {
     );
 
     fireEvent.click(screen.getByTestId(`agent-update-trigger-${AGENT_NAME}`));
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Browse all versions" })).toBeTruthy();
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Browse all versions" }));
+    fireEvent.click(await screen.findByTestId(`agent-update-version-${AGENT_NAME}`));
     const search = screen.getByPlaceholderText("Search versions");
     expect(screen.getByTestId(`agent-update-version-option-${AGENT_NAME}-0.50.0`)).toBeTruthy();
     fireEvent.change(search, { target: { value: "0.50" } });
@@ -329,8 +326,9 @@ describe("AgentRuntimeUpdateControl", () => {
     ).toBeTruthy();
     fireEvent.click(screen.getByTestId(`agent-update-trigger-${AGENT_NAME}`));
     await waitFor(() => expect(onPreview).toHaveBeenCalledWith(AGENT_NAME, undefined));
+    fireEvent.click(await screen.findByTestId(`agent-update-version-${AGENT_NAME}`));
     expect(
-      screen.getByRole("button", { name: `Use Kandev default (${ACTIVE_VERSION})` }),
+      screen.getByRole("option", { name: `Use Kandev default (${ACTIVE_VERSION})` }),
     ).toBeTruthy();
   });
 });
@@ -365,8 +363,9 @@ describe("AgentRuntimeUpdateControl unknown active version", () => {
 
     fireEvent.click(screen.getByTestId(`agent-update-trigger-${AGENT_NAME}`));
     await waitFor(() => expect(onPreview).toHaveBeenCalledWith(AGENT_NAME, undefined));
+    fireEvent.click(await screen.findByTestId(`agent-update-version-${AGENT_NAME}`));
     expect(
-      screen.getByRole("button", { name: `Use Kandev default (${ACTIVE_VERSION})` }),
+      screen.getByRole("option", { name: `Use Kandev default (${ACTIVE_VERSION})` }),
     ).toBeTruthy();
   });
 });
@@ -421,21 +420,14 @@ describe("AgentRuntimeUpdateControl reset state", () => {
 
     render(<StatefulControl />);
     fireEvent.click(screen.getByTestId(`agent-update-trigger-${AGENT_NAME}`));
-    await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: `Use Kandev default (${defaultVersion})` }),
-      ).toBeTruthy(),
-    );
-    fireEvent.click(screen.getByTestId(`agent-update-quick-default-${AGENT_NAME}`));
+    fireEvent.click(await screen.findByTestId(`agent-update-version-${AGENT_NAME}`));
+    fireEvent.click(screen.getByRole("option", { name: `Use Kandev default (${defaultVersion})` }));
     await waitFor(() => expect(onPreview).toHaveBeenLastCalledWith(AGENT_NAME, undefined, true));
     fireEvent.click(screen.getByTestId(`agent-update-confirm-${AGENT_NAME}`));
 
-    await waitFor(() => {
-      const dialog = screen.getByTestId(`agent-update-dialog-${AGENT_NAME}`);
-      const text = dialog.textContent ?? "";
-      expect(text).toContain(`Effective version: ${defaultVersion}`);
-      expect(text).not.toContain(`Active version: ${ACTIVE_VERSION}`);
-    });
+    const result = await screen.findByTestId(`agent-update-result-${AGENT_NAME}`);
+    expect(result.textContent).toBe(`Runtime updated to ${defaultVersion}.`);
+    expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
   });
 });
 
