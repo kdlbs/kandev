@@ -79,7 +79,7 @@ Maps to AC-UI-MARKDOWN-DEFAULT-PREVIEW-001.1, .2, and .6. Both targeted browser 
 # Run from the isolated repository root. Product checks run during implementation.
 (cd apps && pnpm install --frozen-lockfile)
 (cd apps/backend && go test ./internal/user/... ./internal/backendapp/... ./internal/settingscatalog/...)
-(cd apps/web && pnpm exec vitest run components/settings/editors-settings-state.test.tsx components/settings/settings-dirty.test.ts hooks/use-ensure-user-settings.test.ts hooks/use-file-editors.open-action.test.tsx hooks/use-file-editors.build-state.test.ts components/task/file-editor-panel.workspace-sync.test.tsx components/task/file-editor-panel.image.test.tsx components/task/mobile/mobile-file-viewer-panel.test.tsx lib/ssr/user-settings.test.ts lib/ws/handlers/users.test.ts lib/state/slices/settings/settings-slice.test.ts)
+(cd apps/web && pnpm exec vitest run components/settings/editors-settings-state.test.tsx components/settings/editors-settings-admin-gating.test.tsx components/settings/settings-dirty.test.ts hooks/use-ensure-user-settings.test.ts hooks/use-file-editors.open-action.test.tsx hooks/use-file-editors.build-state.test.ts components/task/file-editor-panel.workspace-sync.test.tsx components/task/file-editor-panel.image.test.tsx components/task/mobile/mobile-file-viewer-panel.test.tsx lib/ssr/user-settings.test.ts lib/ws/handlers/users.test.ts lib/state/slices/settings/settings-slice.test.ts)
 (cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check && pnpm run i18n:ratchet)
 pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/settings/markdown-default-preview.spec.ts
 pnpm --dir apps/web e2e:raw --project=mobile-chrome tests/settings/mobile-markdown-default-preview.spec.ts tests/task/mobile-file-viewer.spec.ts
@@ -131,3 +131,9 @@ Corrected the phone mode-reset comment to describe the saved default and caller-
 A regression failed with the previous captured preference and now passes: changing the saved default while an initial Markdown load is pending makes one read and initializes the completed buffer with the latest value. Updated the existing image-panel provider mock for the store API hook.
 
 Validation: eleven focused frontend suites passed (196 tests), typecheck passed, web lint passed, and both desktop opening/settings browser tests passed after rebuilding Vite assets. The prior 14-phone-test result remains applicable because the subsequent phone production change is a comment only. No rendered UI changed after the refreshed shared-row screenshots.
+
+### Frontend CI mock compatibility
+
+Frontend shard 1/2 exposed three failures in the existing editor admin-gating tests after adopting `SettingsRow`. The test replaced the entire settings-group module and did not provide that export. Reproduced the failure locally, retained the real module through a partial mock, and added the Markdown preference fields consumed by the mocked settings state. Admin and member permissions retain their existing assertions.
+
+The focused admin-gating, shared-row, settings-state, and dirty-state run passed (24 tests). The expanded twelve-suite work-order run passed (199 tests), and typecheck passed. No production or rendered UI changed in this CI correction. Fresh remote CI is pending at the next pushed head.

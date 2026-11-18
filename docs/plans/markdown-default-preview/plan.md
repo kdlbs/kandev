@@ -65,7 +65,7 @@ Maps to AC-UI-MARKDOWN-DEFAULT-PREVIEW-001.1, .2, and .6. Both targeted browser 
 # Run from the isolated repository root. Product checks run during implementation.
 (cd apps && pnpm install --frozen-lockfile)
 (cd apps/backend && go test ./internal/user/... ./internal/backendapp/... ./internal/settingscatalog/...)
-(cd apps/web && pnpm exec vitest run components/settings/editors-settings-state.test.tsx components/settings/settings-dirty.test.ts hooks/use-ensure-user-settings.test.ts hooks/use-file-editors.open-action.test.tsx hooks/use-file-editors.build-state.test.ts components/task/file-editor-panel.workspace-sync.test.tsx components/task/file-editor-panel.image.test.tsx components/task/mobile/mobile-file-viewer-panel.test.tsx lib/ssr/user-settings.test.ts lib/ws/handlers/users.test.ts lib/state/slices/settings/settings-slice.test.ts)
+(cd apps/web && pnpm exec vitest run components/settings/editors-settings-state.test.tsx components/settings/editors-settings-admin-gating.test.tsx components/settings/settings-dirty.test.ts hooks/use-ensure-user-settings.test.ts hooks/use-file-editors.open-action.test.tsx hooks/use-file-editors.build-state.test.ts components/task/file-editor-panel.workspace-sync.test.tsx components/task/file-editor-panel.image.test.tsx components/task/mobile/mobile-file-viewer-panel.test.tsx lib/ssr/user-settings.test.ts lib/ws/handlers/users.test.ts lib/state/slices/settings/settings-slice.test.ts)
 (cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check && pnpm run i18n:ratchet)
 pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/settings/markdown-default-preview.spec.ts
 pnpm --dir apps/web e2e:raw --project=mobile-chrome tests/settings/mobile-markdown-default-preview.spec.ts tests/task/mobile-file-viewer.spec.ts
@@ -86,6 +86,6 @@ No delegated implementation, parent branch imports, PR3113 dependency, or render
 
 Implemented on 2026-11-17. The work order is done. See its [verification results](task-01-persist-and-apply.md#results) for exact commands, environment setup, and evidence.
 
-Backend suites, 196 focused frontend tests, two desktop browser tests, and 14 phone browser tests passed after PR remediation.
+Backend suites, 199 focused frontend tests, two desktop browser tests, and 14 phone browser tests passed after PR remediation.
 Type checking, Go/web lint, localization, generated settings contracts, public docs, specification validation, documentation coverage, and diff checks passed.
 The phone setting screenshot was inspected. The user confirmed the isolated test worked and authorized a ready PR on `feat/markdown-preview-default`.
