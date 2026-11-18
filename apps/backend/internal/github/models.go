@@ -516,6 +516,7 @@ type PRStatus struct {
 	operationFence         *githubOperationFence
 	PR                     *PR                `json:"pr"`
 	WorkflowAttention      *WorkflowAttention `json:"workflow_attention,omitempty"`
+	CheckSummary           *CheckSummary      `json:"check_summary,omitempty"`
 	ReviewState            string             `json:"review_state"`    // "approved", "changes_requested", "pending", ""
 	ChecksState            string             `json:"checks_state"`    // "success", "failure", "pending", ""
 	MergeableState         string             `json:"mergeable_state"` // "clean", "blocked", "behind", "dirty", "has_hooks", "unstable", "draft", "unknown", ""
@@ -691,6 +692,12 @@ type TaskPR struct {
 	// the API-facing decoded form and is hydrated after database reads.
 	WorkflowAttentionJSON string             `json:"-" db:"workflow_attention"`
 	WorkflowAttention     *WorkflowAttention `json:"workflow_attention,omitempty" db:"-"`
+
+	// CheckSummaryJSON is the persisted wire value for the bounded selected
+	// check snapshot. CheckSummary is the API-facing decoded form and is
+	// hydrated after database reads. Empty means the snapshot is unknown.
+	CheckSummaryJSON string        `json:"-" db:"check_summary"`
+	CheckSummary     *CheckSummary `json:"check_summary,omitempty" db:"-"`
 
 	// --- PR outcome attribution (five nullable columns, never backfilled) ---
 	//

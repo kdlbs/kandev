@@ -32,7 +32,7 @@ func capacityTestService(
 	repo := setupTestRepo(t)
 	manager := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.sessionCeiling = newSessionCeilingController(ceiling, nil, nil)
 	return svc, manager, repo
 }

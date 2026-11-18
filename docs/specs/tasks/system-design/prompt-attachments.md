@@ -5,7 +5,7 @@ requirements:
   - REQ-TASKS-PROMPT-ATTACHMENTS-001
   - REQ-TASKS-PROMPT-ATTACHMENTS-002
 created: 2026-09-01
-updated: 2026-11-08
+updated: 2026-11-10
 owners:
   - Kandev team
 ---
@@ -88,6 +88,43 @@ lifecycle lock, because materialization streams file bytes over the network and
 the lock is held only for a bounded dispatch. A steer whose materialization
 fails does not dispatch and does not fall through to an ordinary prompt
 carrying unresolved descriptors.
+
+### Active agent directory and live workspace rescans
+
+This boundary implements AC-TASKS-PROMPT-ATTACHMENTS-001.1, .6, and .7.
+The materialization endpoint and attachment reader must use the same active
+agent directory and native session identity. The process manager supplies that
+directory through `WithAttachmentWorkDir`, using the active adapter configuration.
+It holds startup and stop synchronization only during local installation, after
+multipart parsing. Before the first adapter exists, the configured root remains
+available for compatible pre-start materialization. A stopped former adapter
+cannot receive another installation. Agent-state rejection returns HTTP 503 with
+an agent-unavailable diagnosis; storage failures retain their storage diagnosis.
+Shell startup and attachment installation acquire the startup lock before the
+process lock. Shell environment construction must not reacquire the startup lock.
+The endpoint must not derive it from the mutable workspace tracking root.
+
+A live repository rescan can promote the tracking root to the parent task
+directory. It preserves the running agent directory, as required by
+[the live-rescan decision](../../../decisions/2026-07-27-legacy-add-branch-live-rescan.md).
+Uploads after that rescan remain beneath the active agent directory. A stopped
+process rebind and subsequent adapter construction establish the replacement
+directory. Materialization must not select stale adapter state during replacement.
+Keep the selected directory stable for the admitted materialization operation.
+
+Native content construction must return an error when a claimed descriptor
+cannot resolve to its materialized file. Do not send an empty image or audio
+block, an empty resource, or a success-shaped path reference. Propagate the
+error through the existing prompt or steer failure path before provider dispatch.
+Validate before transferring a generating turn or consuming pending context.
+Preserve legacy inline delivery and the existing large-file path fallback when
+the materialized file is present. File names and session identity retain the
+existing containment checks. Do not serialize an absolute path into descriptors.
+
+Cover this boundary with a real materialization request after a live rescan,
+followed by adapter content capture. Check duplicate names, repeated rescans,
+replacement adapters, missing files, and both ordinary prompts and steers.
+Delivery is tracked in [Attachment delivery after live rescan](../../../plans/attachment-live-rescan/plan.md).
 
 ## Failure and recovery
 
@@ -481,3 +518,14 @@ Inspect the captured prompt descriptors and materialized bytes, not preview visi
 Desktop and phone browser tests must prove recovery, one user row, retained history,
 reload/reconnect convergence, and a restored editable composer. Runtime failure
 resolution follows the [startup recovery design](../../agents/system-design/session-startup-failure-explanations.md).
+
+## Composer attachment hover continuity
+
+For AC-TASKS-PROMPT-ATTACHMENTS-001.15, the shared `ContextChip` keeps its
+preview mounted and open while a fine pointer crosses the gap from the chip.
+Set the Radix HoverCard close delay explicitly to 300 ms. Preview entry cancels
+pending closure; pointer exit from both surfaces closes it after that delay.
+The existing 300 ms open delay, control layout, image inspection, and touch
+preview drawer remain unchanged. The component regression checks a 250 ms gap
+crossing, action activation, and eventual closure. Delivery is recorded in the
+[hover continuity work order](../../../plans/attachment-hover-continuity/task-01-preserve-hover-continuity.md).

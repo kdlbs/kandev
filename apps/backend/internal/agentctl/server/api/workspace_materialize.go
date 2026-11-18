@@ -16,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/gitbase"
+	"github.com/kandev/kandev/internal/common/gitlocator"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/gitcheckout"
@@ -205,6 +206,18 @@ func validateRepositoryLocator(locator string) error {
 	if filepath.IsAbs(locator) {
 		return errors.New("local locator is not allowed")
 	}
+	if strings.ContainsAny(locator, "?#\\") {
+		return errors.New("credentialed or malformed locator")
+	}
+	// Git's SCP-like syntax permits only the conventional git user and must be
+	// admitted before net/url, which rejects the colon form. A malformed git@
+	// locator is final: it must not fall through to another locator type.
+	if strings.HasPrefix(locator, "git@") {
+		if _, err := gitlocator.ParseConventionalSCP(locator); err != nil {
+			return errors.New("unsupported locator")
+		}
+		return nil
+	}
 	parsed, err := url.Parse(locator)
 	if err != nil || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return errors.New("credentialed or malformed locator")
@@ -212,16 +225,16 @@ func validateRepositoryLocator(locator string) error {
 	if isNetworkRepositoryScheme(parsed.Scheme) {
 		return validateNetworkRepositoryLocator(parsed)
 	}
-	// Git's SCP-like syntax permits only the conventional git user; accepting
-	// arbitrary users would make it impossible to distinguish credentials.
-	if strings.HasPrefix(locator, "git@") && strings.Count(locator, ":") == 1 && !strings.ContainsAny(locator, " \\t") {
-		return nil
-	}
 	return errors.New("unsupported locator")
 }
 
 func malformedRepositoryLocator(locator string) bool {
-	return locator == "" || strings.TrimSpace(locator) != locator || strings.IndexFunc(locator, unicode.IsControl) >= 0
+	if locator == "" {
+		return true
+	}
+	return strings.IndexFunc(locator, func(character rune) bool {
+		return unicode.IsSpace(character) || unicode.IsControl(character)
+	}) >= 0
 }
 
 func isNetworkRepositoryScheme(scheme string) bool {

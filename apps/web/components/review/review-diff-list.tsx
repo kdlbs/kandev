@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useEffectEvent, useMemo, useRef, useState, useCallback } from "react";
+import { memo, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import type { RevertBlockInfo } from "@/components/diff";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent, updateFileContent } from "@/lib/ws/workspace-files";
@@ -9,15 +9,19 @@ import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
 import { useBaseBranchByRepo } from "@/hooks/domains/session/use-base-branch-by-repo";
-import { ReviewFileComments } from "./review-file-comments";
 import type { DiffComment } from "@/lib/diff/types";
 import { reviewFileKey } from "./types";
 import type { ReviewFile } from "./types";
 import { ReviewDiffGroup } from "./review-diff-group";
-import { ReviewDiffHeader, type ReviewExternalLinkContext } from "./review-diff-header";
+import type { ReviewExternalLinkContext } from "./review-diff-header";
+import {
+  FileDiffSectionHeader,
+  useFileDiffDisplayControls,
+  useFileDiffHtmlPreview,
+  useFileDiffVisibility,
+} from "./review-file-diff-section-parts";
 import { extractReviewMarkdownPreview } from "./review-markdown-diff-preview";
-import { ReviewMarkdownDiffPreviewContent } from "./review-markdown-diff-preview-content";
-import { ReviewFileDiffContent } from "./review-file-diff-content";
+import { ReviewFileDiffBody } from "./review-file-diff-body";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useTranslation } from "react-i18next";
@@ -207,90 +211,6 @@ type FileDiffSectionProps = {
   externalLinkContext: ReviewExternalLinkContext;
 };
 
-function useLazyVisible(scrollContainer: React.RefObject<HTMLDivElement | null>) {
-  const [isVisible, setIsVisible] = useState(false);
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setIsVisible(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: "200px 0px", root: scrollContainer.current },
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [scrollContainer]);
-  return { isVisible, sentinelRef };
-}
-
-type AutoMarkArgs = {
-  autoMarkOnScroll: boolean;
-  isReviewed: boolean;
-  isStale: boolean;
-  /** Composite per-file key (matches what onToggleReviewed expects). */
-  fileKey: string;
-  onToggleReviewed: (key: string, reviewed: boolean) => void;
-  scrollContainer: React.RefObject<HTMLDivElement | null>;
-  suppressAutoMark: React.RefObject<boolean>;
-};
-
-function useAutoMarkOnScroll({
-  autoMarkOnScroll,
-  isReviewed,
-  isStale,
-  fileKey,
-  onToggleReviewed,
-  scrollContainer,
-  suppressAutoMark,
-}: AutoMarkArgs) {
-  const scrollSentinelRef = useRef<HTMLDivElement | null>(null);
-  const markIfEligible = useEffectEvent(() => {
-    if (!isReviewed && !isStale && !suppressAutoMark.current) {
-      onToggleReviewed(fileKey, true);
-    }
-  });
-  useEffect(() => {
-    if (!autoMarkOnScroll) return;
-    const sentinel = scrollSentinelRef.current;
-    const root = scrollContainer.current;
-    if (!sentinel || !root) return;
-    let active = true;
-    let previousAbove: boolean | null = null;
-    let previousOffset: number | null = null;
-    let previousScrollTop = root.scrollTop;
-    const updatePosition = (allowMark: boolean) => {
-      if (!active) return;
-      const offset = sentinel.getBoundingClientRect().top - root.getBoundingClientRect().top;
-      const above = offset < 0;
-      const scrollDelta = root.scrollTop - previousScrollTop;
-      // A scroll pass moves the marker by the scroll delta; layout shifts change that offset.
-      const movedWithScroll =
-        previousOffset !== null && Math.abs(previousOffset - offset - scrollDelta) < 1;
-      const crossed = previousAbove === false && above && scrollDelta > 0 && movedWithScroll;
-      previousAbove = above;
-      previousOffset = offset;
-      previousScrollTop = root.scrollTop;
-      if (allowMark && crossed) markIfEligible();
-    };
-    const handleScroll = () => updatePosition(true);
-    // Layout observations refresh the baseline without certifying a reading pass.
-    const observer = new IntersectionObserver(() => updatePosition(false), { threshold: 0, root });
-    observer.observe(sentinel);
-    root.addEventListener("scroll", handleScroll, { passive: true });
-    return () => {
-      active = false;
-      root.removeEventListener("scroll", handleScroll);
-      observer.disconnect();
-    };
-  }, [autoMarkOnScroll, fileKey, scrollContainer]);
-  return scrollSentinelRef;
-}
-
 function useCommentRunHandler(sessionId: string) {
   const { t } = useTranslation();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
@@ -350,25 +270,6 @@ async function revertBlock(
   }
 }
 
-function useScrollIntoViewOnSelect(
-  isSelected: boolean | undefined,
-  sectionRef: React.RefObject<HTMLDivElement | null> | undefined,
-  setCollapsed: React.Dispatch<React.SetStateAction<boolean>>,
-  suppressAutoMark: React.RefObject<boolean>,
-) {
-  useEffect(() => {
-    if (isSelected) {
-      suppressAutoMark.current = true;
-      setCollapsed(false);
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          sectionRef?.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-        });
-      });
-    }
-  }, [isSelected, sectionRef, setCollapsed, suppressAutoMark]);
-}
-
 /**
  * Decide whether a review row can expand its collapsed context, and which git
  * ref supplies the "old" side when reconstructing full file context.
@@ -419,6 +320,10 @@ export function resolveDiffExpansion(
   return { enableExpansion: true, baseRef: "HEAD" };
 }
 
+function getDiffExpansion(file: ReviewFile, context: ReviewExternalLinkContext) {
+  return resolveDiffExpansion(file, context.baseBranchByRepo, context.fallbackBaseBranch);
+}
+
 function useMarkdownPreview(
   file: ReviewFile,
   fileKey: string,
@@ -444,28 +349,6 @@ function useMarkdownPreview(
     onTogglePreview: handleToggleMarkdownPreview,
   });
   return { markdownPreview, markdownPreviewContent, onToggleMarkdownPreview };
-}
-
-function useFileDiffDisplayControls(wordWrap: boolean) {
-  const [collapsed, setCollapsed] = useState(false);
-  const [expandUnchanged, setExpandUnchanged] = useState(false);
-  const [localWordWrap, setLocalWordWrap] = useState<boolean | undefined>(undefined);
-  const effectiveWordWrap = localWordWrap ?? wordWrap;
-  const handleToggleCollapse = useCallback(() => setCollapsed((v) => !v), []);
-  const handleToggleExpandUnchanged = useCallback(() => setExpandUnchanged((v) => !v), []);
-  const handleToggleWordWrap = useCallback(
-    () => setLocalWordWrap((v) => !(v ?? wordWrap)),
-    [wordWrap],
-  );
-  return {
-    collapsed,
-    setCollapsed,
-    expandUnchanged,
-    effectiveWordWrap,
-    handleToggleCollapse,
-    handleToggleExpandUnchanged,
-    handleToggleWordWrap,
-  };
 }
 
 function getMarkdownPreviewToggle({
@@ -529,30 +412,6 @@ function useFileCommentEditor(
   };
 }
 
-function FileDiffSectionBody({
-  collapsed,
-  fileCommentsProps,
-  preview,
-  diffProps,
-}: {
-  collapsed: boolean;
-  fileCommentsProps: ReturnType<typeof useFileCommentEditor>["fileCommentsProps"];
-  preview: ReturnType<typeof useMarkdownPreview>;
-  diffProps: Parameters<typeof ReviewFileDiffContent>[0];
-}) {
-  if (collapsed) return null;
-  return (
-    <>
-      <ReviewFileComments {...fileCommentsProps} />
-      {preview.markdownPreview ? (
-        <ReviewMarkdownDiffPreviewContent preview={preview.markdownPreviewContent} />
-      ) : (
-        <ReviewFileDiffContent {...diffProps} />
-      )}
-    </>
-  );
-}
-
 function FileDiffSection({
   file,
   fileKey,
@@ -585,26 +444,29 @@ function FileDiffSection({
     previewedFiles,
     onToggleMarkdownPreviewForFile,
   );
-  const { isVisible, sentinelRef } = useLazyVisible(scrollContainer);
-  useScrollIntoViewOnSelect(isSelected, sectionRef, controls.setCollapsed, suppressAutoMark);
-  const scrollSentinelRef = useAutoMarkOnScroll({
-    autoMarkOnScroll:
-      autoMarkOnScroll && file.diff_state !== "pending" && file.diff_state !== "unavailable",
+  const htmlPreview = useFileDiffHtmlPreview(
+    file,
+    sessionId,
+    externalLinkContext.taskId,
+    controls.setCollapsed,
+    suppressAutoMark,
+  );
+  const { isVisible, sentinelRef, scrollSentinelRef } = useFileDiffVisibility({
+    scrollContainer,
+    sectionRef,
+    isSelected,
+    setCollapsed: controls.setCollapsed,
+    suppressAutoMark,
+    autoMarkOnScroll,
     isReviewed,
     isStale,
     fileKey,
+    file,
     onToggleReviewed,
-    scrollContainer,
-    suppressAutoMark,
   });
   const { handleCheckboxChange, handleDiscard, handleRevertBlock, handleCommentRun } =
     useFileDiffActions({ file, fileKey, sessionId, onToggleReviewed, onDiscard });
-  const { enableExpansion, baseRef } = resolveDiffExpansion(
-    file,
-    externalLinkContext.baseBranchByRepo,
-    externalLinkContext.fallbackBaseBranch,
-  );
-
+  const { enableExpansion, baseRef } = getDiffExpansion(file, externalLinkContext);
   return (
     <div
       ref={sectionRef}
@@ -612,14 +474,12 @@ function FileDiffSection({
       className={cn("border-b border-border", hasStickyRepoHeader && "scroll-mt-8")}
     >
       <div ref={scrollSentinelRef} className="h-0" />
-      <ReviewDiffHeader
+      <FileDiffSectionHeader
         file={file}
         isReviewed={isReviewed}
         isStale={isStale}
         sessionId={sessionId}
-        collapsed={controls.collapsed}
-        wordWrap={controls.effectiveWordWrap}
-        expandUnchanged={controls.expandUnchanged}
+        controls={controls}
         hasStickyRepoHeader={hasStickyRepoHeader}
         onCheckboxChange={handleCheckboxChange}
         onDiscard={handleDiscard}
@@ -627,29 +487,26 @@ function FileDiffSection({
         onOpenFile={onOpenFile}
         markdownPreview={!onPreviewMarkdown && preview.markdownPreview}
         onToggleMarkdownPreview={preview.onToggleMarkdownPreview}
-        onToggleCollapse={controls.handleToggleCollapse}
-        onToggleExpandUnchanged={controls.handleToggleExpandUnchanged}
-        onToggleWordWrap={controls.handleToggleWordWrap}
-        {...externalLinkContext}
+        {...htmlPreview.headerProps}
+        externalLinkContext={externalLinkContext}
       />
       <div ref={sentinelRef} />
-      <FileDiffSectionBody
+      <ReviewFileDiffBody
         collapsed={controls.collapsed}
-        fileCommentsProps={comments.fileCommentsProps}
-        preview={preview}
-        diffProps={{
-          shouldRender: isVisible || !!forceLoad,
-          file,
-          sessionId,
-          wordWrap: controls.effectiveWordWrap,
-          enableWalkthroughAnnotations,
-          expandUnchanged: controls.expandUnchanged,
-          enableExpansion,
-          baseRef,
-          onRevertBlock: handleRevertBlock,
-          onCommentRun: handleCommentRun,
-          onToggleExpandUnchanged: controls.handleToggleExpandUnchanged,
-        }}
+        file={file}
+        sessionId={sessionId}
+        fileComments={comments.fileCommentsProps}
+        shouldRender={isVisible || !!forceLoad}
+        wordWrap={controls.effectiveWordWrap}
+        enableWalkthroughAnnotations={enableWalkthroughAnnotations}
+        expandUnchanged={controls.expandUnchanged}
+        enableExpansion={enableExpansion}
+        baseRef={baseRef}
+        markdownPreview={preview.markdownPreview ? preview.markdownPreviewContent : null}
+        htmlPreview={htmlPreview.previewProps}
+        onRevertBlock={handleRevertBlock}
+        onCommentRun={handleCommentRun}
+        onToggleExpandUnchanged={controls.handleToggleExpandUnchanged}
       />
     </div>
   );

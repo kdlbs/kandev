@@ -361,6 +361,10 @@ When both session and repository selectors are present, the host resolves the ex
 non-empty worktree branch and exposes it only in the backend verified action context.
 Resource selectors never become part of the untrusted action body.
 
+Notification-provider actions use the dedicated context described in
+[Notification content formatters](#notification-content-formatters), rather
+than workspace, task, or repository selectors.
+
 An action handler may return an HTTP status from 200 through 599; zero preserves the
 legacy 200 response. The host forwards only safe response headers (`Content-Type`,
 `Cache-Control`, `ETag`, and `Retry-After`). Invalid statuses become 502, while
@@ -386,6 +390,83 @@ provider-neutral code-host dashboard set: `ChangeRequestList`,
 `IntegrationAuthStatusBanner`, `IntegrationEnabledControl`, `SettingsSection`,
 `SettingsCard`, and `WorkspaceScopedSection`. The authoritative list is
 `apps/web/lib/plugins/host-api.ts` (`PLUGIN_UI`).
+
+### Notification content formatters
+
+This additive extension is under development. Published SDK `0.1.0` and its
+host-wide minimum version do not establish formatter compatibility. Validate
+against a host and SDK that implement the extension before distribution.
+
+The host owns recipients, provider credentials, subscriptions, delivery claims,
+default copy, and transport. A formatter only returns an optional complete
+title/body pair. Register `notification_formatters` with `contract_version: 1`,
+supported `provider_types`, and explicitly declared `management_actions`.
+Those actions require manifest scope `notification_provider`.
+
+The `notification-formatter` component slot is isolated to the plugin selected
+for that provider. Its `NotificationFormatterSlotProps` contains the owned
+provider's ID/name/type/subscriptions, event catalog, exact installation/key,
+and canonical binding. It excludes provider config and credentials. Use the
+host's React/UI components and `useSettingsSaveContributor` for editor drafts.
+The optional `selectionChanged` flag also marks a selection-only draft. Editors
+must register that draft with shared Save (order below 50); Save prepares a first
+configuration, while its first activation still requires the explicit activation
+control. The host keeps selection changes dirty for navigation/discard until an
+authoritative binding matches; it never assumes a plugin registered a writer or
+implicitly activates an unknown revision. Callbacks captured by a removed editor
+are invalidated before dispatch, including a select-away/select-back cycle.
+
+For each management call, forward the observed context outside `body`:
+
+```ts
+await host.api.invokeAction("templates.prepare", {
+  notificationProviderId: props.provider.id,
+  notificationFormatter: {
+    installationId: props.formatter.installation_id,
+    formatterKey: props.formatter.key,
+    expectedBindingRevision: props.binding?.revision ?? "",
+    mode: "candidate",
+  },
+  body: { configuration: draft },
+}, { signal });
+```
+
+`candidate` prepares or inspects a potential selection without activation.
+`active` additionally requires that the canonical selected binding matches this
+plugin, installation, and formatter key. Both modes require the observed
+binding revision, including an empty string before any binding exists. The
+formatter key must be nonempty. The Go action context exposes the host-verified
+`NotificationFormatterKey`, so shared management actions can distinguish keys;
+body fields do not select the authorized formatter. The
+host checks ownership, manifest declaration, installation, and binding revision
+before dispatch and again before publishing a response. Missing context is
+400; a changed binding/installation is 409; configuration capture or unavailable
+runtime is 503. Do not retry uncertain mutation results with a new operation.
+
+Save immutable plugin data first, then call
+`activateConfiguration({ revision, digest }, expectedBindingRevision)` to CAS
+the host binding. Update the editor's observed revision from the returned
+binding for subsequent management calls. First activation must be explicit.
+`readActiveBinding()` returns authoritative state for reconciling lost
+acknowledgements; readback must succeed before retrying an uncertain activation.
+`reload()` refreshes host selection state. Clear-to-default uses the same host
+CAS and readback discipline. Preserve later edits when an earlier Save returns.
+
+`previewConfiguration(draft, event, sample, signal)` uses synthetic host context
+and never sends a notification or mutates the active binding. Abort pending
+work on unmount and selection changes; reject late responses and stale
+installation/binding generations, including after effect restart. Use the
+existing 44px coarse-pointer targets and shared settings Save/Reset behavior.
+
+Backend plugins implement optional `pluginsdk.NotificationFormatter`; legacy
+plugins need not implement it. Each admitted delivery captures its immutable
+binding once, formats under a shared one-second fanout budget, and uses the complete
+default pair on unsupported context, cancellation, invalid output, or failure.
+Configuration inspection and binding commit retain one installation lease.
+Management inspection is bounded to five seconds. The request limit is 128 KiB;
+custom output limits are 2 KiB title and 64 KiB body, with UTF-8, nonempty text,
+no NUL, and no CR/LF in the title. A formatter must not introduce another sender
+or subscribe to delivery events to send the same occurrence separately.
 
 ### Standard actions in existing slots
 

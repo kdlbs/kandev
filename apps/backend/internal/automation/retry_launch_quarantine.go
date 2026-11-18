@@ -22,7 +22,7 @@ const retryLegacyQuarantineSQL = `
  WHERE ar.retry_group_id <> '' AND ar.status IN ('triggered', 'task_created')
  AND NOT EXISTS (SELECT 1 FROM automation_retry_launch_protocols p WHERE p.run_id = ar.id AND p.version IN (1, -1))
  __RUN_FILTER__
- ON CONFLICT (session_id, incarnation_id, expected_generation, reason) DO NOTHING;
+ ON CONFLICT DO NOTHING;
 `
 
 func retryLegacyQuarantineQuery(driver, filter string) string {

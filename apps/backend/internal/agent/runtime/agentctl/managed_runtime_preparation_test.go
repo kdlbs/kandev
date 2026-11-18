@@ -107,3 +107,42 @@ func TestManagedRuntimePreparationStartRejectsOlderPeerBeforePost(t *testing.T) 
 		t.Fatalf("start error=%v posts=%d, want capability refusal before directive POST", err, posts)
 	}
 }
+
+func TestManagedRuntimeRepairReuseProbeNegotiatesCapability(t *testing.T) {
+	installContext := &types.ManagedRuntimeInstallContext{
+		InstallerEnvDigest: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		OwnerScope:         "agent-wide:owner-a",
+	}
+	for name, capabilities := range map[string]string{
+		"old peer": `{"capabilities":["agent-survival.v1"]}`,
+		"new peer": `{"capabilities":["managed_runtime_repair_reuse_v1"]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var received utility.ProbeRequest
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/identity":
+					_, _ = w.Write([]byte(capabilities))
+				case "/api/v1/inference/probe":
+					if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+						t.Errorf("decode probe: %v", err)
+					}
+					_, _ = w.Write([]byte(`{"success":true}`))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			client := newClient(server.URL, newTestLogger())
+			if _, err := client.Probe(context.Background(), &utility.ProbeRequest{InstallContext: installContext}); err != nil {
+				t.Fatalf("Probe: %v", err)
+			}
+			if name == "old peer" && received.InstallContext != nil {
+				t.Fatalf("old peer received an unsupported install context: %#v", received.InstallContext)
+			}
+			if name == "new peer" && (received.InstallContext == nil || *received.InstallContext != *installContext) {
+				t.Fatalf("new peer install context = %#v, want %#v", received.InstallContext, installContext)
+			}
+		})
+	}
+}

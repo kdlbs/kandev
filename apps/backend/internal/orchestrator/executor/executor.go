@@ -18,7 +18,6 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
-	"github.com/kandev/kandev/internal/integrations/cloneauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
@@ -258,6 +257,10 @@ var (
 	ErrTaskArchived            = errors.New("task is archived")
 	ErrStaleExecution          = errors.New("stale execution: no live execution in memory")
 	ErrAgentCommandMissing     = errors.New("existing execution has no agent command configured")
+	// ErrExecutorActorUnavailable means executor admission could not establish
+	// the user a resume must launch as, so the resume fails closed instead of
+	// launching without an identity.
+	ErrExecutorActorUnavailable = errors.New("resume requires an executor actor, but none is available")
 	// ErrSessionAdvancedToRunning reports that another launch advanced the
 	// session before this launch could persist its prepared runtime data.
 	ErrSessionAdvancedToRunning = errors.New("session state advanced to RUNNING before runtime persistence")
@@ -306,6 +309,10 @@ const (
 	ProbeResultSettled = client.ProbeResultSettled
 	ProbeResultUnknown = client.ProbeResultUnknown
 )
+
+// ErrAgentctlClientUnavailable indicates that a session's execution is being
+// replaced and its agentctl client is not currently available.
+var ErrAgentctlClientUnavailable = errors.New("agentctl client not available")
 
 // AgentManagerClient is an interface for the Agent Manager service
 // This will be implemented via gRPC or HTTP client
@@ -512,6 +519,7 @@ type RemoteStatusPollRequest struct {
 
 // AgentProfileInfo contains resolved profile information
 type AgentProfileInfo struct {
+	ExecutionGrade             string
 	ProfileID                  string
 	ProfileName                string
 	AgentID                    string
@@ -544,7 +552,11 @@ type LaunchAgentRequest struct {
 	CandidateExecutionID         string
 	OnExecutionAllocated         func(context.Context, string) error
 
-	TaskID                string
+	TaskID string
+	// OwnerUserID is the authenticated application owner used for reusable
+	// repair identity. It is resolved from the actor or workspace owner and is
+	// never derived from child environment values.
+	OwnerUserID           string
 	TaskScope             lifecycle.TaskLaunchScope
 	SessionSettingsPolicy ResumeSettingsPolicy
 	WorkspaceID           string // Kandev workspace ID — used to build scratch dir for repo-less tasks
@@ -1118,13 +1130,6 @@ type PrimarySessionSetFunc func(ctx context.Context, taskID, sessionID string)
 // and invalidates updates captured before the reset.
 type ContextWindowResetFunc func(ctx context.Context, sessionID string) error
 
-// ExecutorTypeCapabilities provides behavioral queries about executor types.
-// Implemented by the lifecycle manager using its backend registry.
-type ExecutorTypeCapabilities interface {
-	RequiresCloneURL(executorType string) bool
-	ShouldApplyPreferredShell(executorType string) bool
-}
-
 // AttachmentReader is the narrow attachment-store seam used to stream a
 // claimed descriptor into a passthrough workspace.
 type AttachmentReader interface {
@@ -1158,6 +1163,7 @@ type Executor struct {
 	repo                          executorStore
 	secretStore                   secrets.SecretStore
 	shellPrefs                    ShellPreferenceProvider
+	managedRuntimeSingleUserOwner func() (string, bool)
 	capabilities                  ExecutorTypeCapabilities
 	gitlabCredentials             GitLabCredentialResolver
 	logger                        *logger.Logger
@@ -1327,20 +1333,6 @@ type RepoCloner interface {
 	BuildCloneURLWithHost(ctx context.Context, provider, host, owner, name string) (string, error)
 }
 
-type authenticatedRepoCloner interface {
-	EnsureWorkspaceClonedWithBasicAuth(
-		ctx context.Context, workspaceID, provider, providerHost,
-		cloneURL, owner, name, username, password string,
-	) (string, error)
-}
-
-type strictAuthenticatedRepoCloner interface {
-	RefreshWorkspaceRepositoryWithBasicAuth(
-		ctx context.Context, workspaceID, provider, providerHost,
-		cloneURL, owner, name, repositoryPath, username, password string,
-	) error
-}
-
 type remoteStateRepoCloner interface {
 	EnsureWorkspaceClonedWithCredentialRequestAndState(
 		ctx context.Context, request repoclone.GitCredentialRequest,
@@ -1352,24 +1344,11 @@ type remoteStateRepoCloner interface {
 	) (repoclone.RemoteRefState, error)
 }
 
-type remoteStateAuthenticatedRepoCloner interface {
-	EnsureWorkspaceClonedWithBasicAuthAndState(
-		ctx context.Context, workspaceID, provider, providerHost,
-		cloneURL, owner, name, username, password string,
-	) (string, repoclone.RemoteRefState, error)
-	RefreshWorkspaceRepositoryWithBasicAuthAndState(
-		ctx context.Context, workspaceID, provider, providerHost,
-		cloneURL, owner, name, repositoryPath, username, password string,
-	) (repoclone.RemoteRefState, error)
-}
-
 type localRemoteStateRepoCloner interface {
 	InspectLocalRepositoryRemoteRefState(
 		ctx context.Context, repositoryPath string,
 	) (repoclone.RemoteRefState, error)
 }
-
-const providerAzureDevOps = "azure_devops"
 
 func (e *Executor) ensureClonedWithWorkspaceAuth(
 	ctx context.Context, repo *models.Repository, cloneURL string,
@@ -1392,36 +1371,14 @@ func (e *Executor) ensureClonedWithWorkspaceAuthForSessionAndState(
 	if strings.EqualFold(repo.Provider, "gitlab") && e.gitlabCredentials != nil {
 		credentialHost, token, _ = e.gitlabCredentials.ResolveGitLabExecutionCredentials(ctx, repo.WorkspaceID)
 	}
-	if repo.Provider != providerAzureDevOps || !strings.HasPrefix(cloneURL, "https://") {
-		request := repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL)
-		if stateCloner, ok := e.repoCloner.(remoteStateRepoCloner); ok {
-			return stateCloner.EnsureWorkspaceClonedWithCredentialRequestAndState(
-				ctx, request, credentialHost, token,
-			)
-		}
-		path, err := e.repoCloner.EnsureWorkspaceClonedWithCredentialRequest(
+	request := repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL)
+	if stateCloner, ok := e.repoCloner.(remoteStateRepoCloner); ok {
+		return stateCloner.EnsureWorkspaceClonedWithCredentialRequestAndState(
 			ctx, request, credentialHost, token,
 		)
-		return path, repoclone.RemoteRefStateHasRefs, err
 	}
-	authCloner, ok := e.repoCloner.(authenticatedRepoCloner)
-	if !ok || e.secretStore == nil {
-		return "", repoclone.RemoteRefStateUnknown, fmt.Errorf("azure DevOps repository clone authentication is unavailable")
-	}
-	pat, err := e.secretStore.Reveal(ctx, cloneauth.AzureDevOpsPATKey(repo.WorkspaceID))
-	if err != nil {
-		return "", repoclone.RemoteRefStateUnknown, fmt.Errorf("read Azure DevOps clone credential: %w", err)
-	}
-	// Azure DevOps PAT authentication ignores the username; any non-empty value works.
-	if stateCloner, ok := e.repoCloner.(remoteStateAuthenticatedRepoCloner); ok {
-		return stateCloner.EnsureWorkspaceClonedWithBasicAuthAndState(
-			ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost,
-			cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat,
-		)
-	}
-	path, err := authCloner.EnsureWorkspaceClonedWithBasicAuth(
-		ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost,
-		cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat,
+	path, err := e.repoCloner.EnsureWorkspaceClonedWithCredentialRequest(
+		ctx, request, credentialHost, token,
 	)
 	return path, repoclone.RemoteRefStateHasRefs, err
 }

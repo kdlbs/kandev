@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"github.com/kandev/kandev/internal/task/models"
 	"sync"
 	"time"
 )
@@ -16,6 +17,7 @@ type coalescedStreamChunk struct {
 	diagnostic          bool
 	promptGeneration    uint64
 	canonicalProjection bool
+	conversationReceipt *models.ConversationMutationReceipt
 }
 
 // streamCoalescer combines adjacent append chunks for one execution. The
@@ -89,6 +91,7 @@ func (c *streamCoalescer) add(chunk coalescedStreamChunk) {
 		c.pending.diagnostic == chunk.diagnostic && c.pending.promptGeneration == chunk.promptGeneration &&
 		c.pending.canonicalProjection == chunk.canonicalProjection:
 		c.pending.content += chunk.content
+		c.pending.conversationReceipt = mergeCanonicalConversationReceipts(c.pending.conversationReceipt, chunk.conversationReceipt)
 		c.coalesced++
 	default:
 		ready = c.detachLocked(ready)

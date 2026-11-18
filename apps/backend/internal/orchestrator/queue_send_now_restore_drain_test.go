@@ -50,7 +50,7 @@ func newSendNowRestoreDrainFixture(
 		},
 	}
 	fixture.svc = createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), fixture.agentMgr)
-	fixture.svc.executor = executor.NewExecutor(fixture.agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	fixture.svc.executor = withTestCapabilities(executor.NewExecutor(fixture.agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	fixture.svc.onQueuedMessageExecutionComplete = func() { close(fixture.workerDone) }
 	queueRepo := newAuthoritativeMemoryRepository(repo)
 	if decorate != nil {

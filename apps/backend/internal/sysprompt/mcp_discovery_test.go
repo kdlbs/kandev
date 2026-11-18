@@ -40,6 +40,16 @@ func TestFormatKandevContext_CanvasGuidanceFollowsCapability(t *testing.T) {
 	assert.NotContains(t, withCanvas, `"chart_type":"bar"`)
 }
 
+func TestFormatKandevContext_WorktreeAdoptionFollowsCapability(t *testing.T) {
+	without := FormatKandevContextWithOptions("task", "session", KandevContextOptions{})
+	assert.NotContains(t, without, "add_branch_to_task_kandev with worktree_path")
+
+	with := FormatKandevContextWithOptions("task", "session", KandevContextOptions{IncludeWorktreeAdoption: true})
+	assert.Contains(t, with, "create it inside the task workspace")
+	assert.Contains(t, with, "add_branch_to_task_kandev with worktree_path")
+	assert.Contains(t, with, "Kandev creates the worktree")
+}
+
 func TestKandevContextTemplate_IsCompactEnoughForEveryTask(t *testing.T) {
 	template := promptcfg.Get("kandev-context")
 

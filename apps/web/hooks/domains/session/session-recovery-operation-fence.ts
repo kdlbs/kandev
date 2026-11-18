@@ -73,6 +73,8 @@ export function recoveryFailureAssociation({
   isCurrentOperation,
   isCurrentSession,
   matchesLatestErrorStamp,
+  continuationMatchesCurrent = false,
+  continuationRequestKey,
 }: {
   cause: unknown;
   operation: RecoveryOperation;
@@ -82,6 +84,8 @@ export function recoveryFailureAssociation({
   isCurrentOperation: (operation: RecoveryOperation) => boolean;
   isCurrentSession: (operation: RecoveryOperation) => boolean;
   matchesLatestErrorStamp: (stamp: string | undefined) => boolean;
+  continuationMatchesCurrent?: boolean;
+  continuationRequestKey?: string;
 }): RecoveryFailureAssociation | null {
   const managedClone = managedCloneRelocationRecoveryDetails(cause);
   const currentOperation = isCurrentOperation(operation);
@@ -89,11 +93,16 @@ export function recoveryFailureAssociation({
   const isSuccessor = Boolean(
     responseStamp && isCurrentSession(operation) && matchesLatestErrorStamp(responseStamp),
   );
-  if (!currentOperation && !isSuccessor) return null;
+  const isMatchingContinuation = continuationMatchesCurrent && isCurrentSession(operation);
+  if (!currentOperation && !isSuccessor && !isMatchingContinuation) return null;
   const associatedStamp = responseStamp ?? errorStamp ?? null;
-  const requestKey = currentOperation
-    ? operation.requestKey
-    : `${taskId}\u0000${sessionId}\u0000${associatedStamp ?? ""}`;
+  let requestKey = operation.requestKey;
+  if (!currentOperation) {
+    requestKey =
+      isMatchingContinuation && continuationRequestKey
+        ? continuationRequestKey
+        : `${taskId}\u0000${sessionId}\u0000${associatedStamp ?? ""}`;
+  }
   return { managedClone, errorStamp: associatedStamp, requestKey };
 }
 

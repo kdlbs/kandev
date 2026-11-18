@@ -7,6 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/task/repository"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -47,6 +48,10 @@ type mockAgentManager struct {
 	resolvePassthroughConfigFunc       func(ctx context.Context, sessionID string) (agents.PassthroughConfig, error)
 	launchAgentCallCount               int
 	cleanupStaleExecutionCallCount     int
+	setExecutionEnvCallCount           int
+	setMcpModeCallCount                int
+	startAgentProcessCallCount         atomic.Int32
+	stopAgentCallCount                 int
 	isAgentRunningForSessionCallArgs   []string
 	promptAgentCallCount               int
 	writePassthroughStdinCalls         []passthroughStdinCall
@@ -85,6 +90,7 @@ func (m *mockAgentManager) SetInitialDeliverySubmissionID(ctx context.Context, a
 	return nil
 }
 func (m *mockAgentManager) SetExecutionEnv(ctx context.Context, executionID string, env map[string]string) error {
+	m.setExecutionEnvCallCount++
 	if m.setExecutionEnvFunc != nil {
 		return m.setExecutionEnvFunc(ctx, executionID, env)
 	}
@@ -99,10 +105,13 @@ func (m *mockAgentManager) ExecutorProfileEnvForSession(ctx context.Context, ses
 }
 
 func (m *mockAgentManager) SetMcpMode(_ context.Context, _ string, _ string) error {
+	m.setMcpModeCallCount++
 	return nil
 }
 
+// StartAgentProcess counts asynchronous starts before invoking the configured handler.
 func (m *mockAgentManager) StartAgentProcess(ctx context.Context, agentExecutionID string) error {
+	m.startAgentProcessCallCount.Add(1)
 	if m.startAgentProcessFunc != nil {
 		return m.startAgentProcessFunc(ctx, agentExecutionID)
 	}
@@ -124,6 +133,7 @@ func (m *mockAgentManager) IsAgentCommandConfigured(agentExecutionID string) boo
 }
 
 func (m *mockAgentManager) StopAgent(ctx context.Context, agentExecutionID string, force bool) error {
+	m.stopAgentCallCount++
 	if m.stopAgentFunc != nil {
 		return m.stopAgentFunc(ctx, agentExecutionID, force)
 	}
@@ -346,6 +356,7 @@ type mockRepository struct {
 	getTaskEnvironmentFunc         func(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	getTaskEnvironmentByTaskIDFunc func(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	getExecutorRunningFunc         func(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
+	getExecutorFunc                func(ctx context.Context, id string) (*models.Executor, error)
 	deleteExecutorRunningFunc      func(ctx context.Context, sessionID string) error
 	hasExecutorRunningFunc         func(ctx context.Context, sessionID string) (bool, error)
 	createTaskEnvironmentRepoErr   error
@@ -475,11 +486,31 @@ type setSessionMetadataKeyCall struct {
 
 func newMockRepository() *mockRepository {
 	return &mockRepository{
-		sessions:                       make(map[string]*models.TaskSession),
-		tasks:                          make(map[string]*models.Task),
-		taskRepositories:               make(map[string]*models.TaskRepository),
-		repositories:                   make(map[string]*models.Repository),
-		executors:                      make(map[string]*models.Executor),
+		sessions:         make(map[string]*models.TaskSession),
+		tasks:            make(map[string]*models.Task),
+		taskRepositories: make(map[string]*models.TaskRepository),
+		repositories:     make(map[string]*models.Repository),
+		executors: map[string]*models.Executor{
+			"executor-123":            {ID: "executor-123", Type: models.ExecutorTypeLocal},
+			"executor":                {ID: "executor", Type: models.ExecutorTypeLocal},
+			"exec-local":              {ID: "exec-local", Type: models.ExecutorTypeLocal},
+			"exec-1":                  {ID: "exec-1", Type: models.ExecutorTypeLocal},
+			"exec-special":            {ID: "exec-special", Type: models.ExecutorTypeLocal},
+			"executor-local":          {ID: "executor-local", Type: models.ExecutorTypeLocal},
+			"exec-worktree":           {ID: "exec-worktree", Type: models.ExecutorTypeWorktree},
+			"exec-local-docker":       {ID: "exec-local-docker", Type: models.ExecutorTypeLocalDocker},
+			"executor-1":              {ID: "executor-1", Type: models.ExecutorTypeLocal},
+			"executor-runner":         {ID: "executor-runner", Type: models.ExecutorTypeLocal},
+			"local-executor":          {ID: "local-executor", Type: models.ExecutorTypeLocal},
+			"executor-worktree":       {ID: "executor-worktree", Type: models.ExecutorTypeWorktree},
+			"executor-home":           {ID: "executor-home", Type: models.ExecutorTypeLocal},
+			"projection-executor":     {ID: "projection-executor", Type: models.ExecutorTypeLocal},
+			"workspace-same-executor": {ID: "workspace-same-executor", Type: models.ExecutorTypeLocal},
+			"stale-executor":          {ID: "stale-executor", Type: models.ExecutorTypeLocal},
+			"repointed-executor":      {ID: "repointed-executor", Type: models.ExecutorTypeLocal},
+			"executor-transition-ssh": {ID: "executor-transition-ssh", Type: models.ExecutorTypeSSH},
+			"executor-k8s":            {ID: "executor-k8s", Type: models.ExecutorTypeKubernetes},
+		},
 		executorProfiles:               make(map[string]*models.ExecutorProfile),
 		executorsRunning:               make(map[string]*models.ExecutorRunning),
 		taskEnvironments:               make(map[string]*models.TaskEnvironment),
@@ -995,6 +1026,9 @@ func (m *mockRepository) UpdateTaskSessionBaseCommit(ctx context.Context, sessio
 }
 
 func (m *mockRepository) GetExecutor(ctx context.Context, id string) (*models.Executor, error) {
+	if m.getExecutorFunc != nil {
+		return m.getExecutorFunc(ctx, id)
+	}
 	if exec, ok := m.executors[id]; ok {
 		return exec, nil
 	}
@@ -1940,6 +1974,14 @@ func (m *mockCapabilities) ShouldApplyPreferredShell(executorType string) bool {
 	default:
 		return false
 	}
+}
+
+func (m *mockCapabilities) ValidateExecutorRuntime(executorType string) error {
+	return nil
+}
+
+func (m *mockCapabilities) ValidateExecutionRuntime(context.Context, string, string, string) error {
+	return nil
 }
 
 // Helper to create a test executor

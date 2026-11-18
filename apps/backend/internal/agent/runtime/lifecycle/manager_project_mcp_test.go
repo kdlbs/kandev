@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentruntime"
 	p "github.com/kandev/kandev/internal/mcp/profile"
 )
 
@@ -29,6 +30,7 @@ func TestMaterializeRuntimeProjectMCPForPiWritesProjectFile(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 45678,
 	}
+	attachLegacyMCPRouteClient(execution)
 	agentConfig, ok := mgr.registry.Get("pi-acp")
 	if !ok {
 		t.Fatal("pi-acp agent missing from test registry")
@@ -72,6 +74,7 @@ func TestMaterializeRuntimeProjectMCPForCursorWritesProjectFile(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 45678,
 	}
+	attachLegacyMCPRouteClient(execution)
 	agentConfig, ok := mgr.registry.Get("cursor-acp")
 	if !ok {
 		t.Fatal("cursor-acp agent missing from test registry")
@@ -141,6 +144,7 @@ func TestPromoteWorkspaceExecutionResetsCommandWhenProjectMCPFails(t *testing.T)
 		metadata:             map[string]interface{}{},
 		standalonePort:       45678,
 	}
+	attachLegacyMCPRouteClient(execution)
 	writer := &captureExecutorRunningWriter{}
 	mgr.SetExecutorRunningWriter(writer)
 	req := &LaunchRequest{
@@ -222,9 +226,11 @@ func TestPromoteWorkspaceExecutionUsesResolvedExecutionProfileForCursorAuth(t *t
 		WorkspacePath:        workspace,
 		WorkspaceSourceRoots: []string{secondaryRepository},
 		ExecutorType:         "worktree",
+		RuntimeName:          agentruntime.RuntimeStandalone,
 		metadata:             map[string]interface{}{},
 		standalonePort:       45678,
 	}
+	attachLegacyMCPRouteClient(execution)
 	execution.setMetadataValue("executor_mcp_policy", mcpconfig.Policy{AllowHTTP: true})
 	req := &LaunchRequest{
 		TaskID:             "task-1",
@@ -291,6 +297,7 @@ func TestMaterializeRuntimeProjectMCP_DiscoversPluginServers(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 45678,
 	}
+	attachLegacyMCPRouteClient(execution)
 	agentConfig, ok := mgr.registry.Get("cursor-acp")
 	if !ok {
 		t.Fatal("cursor-acp agent missing from test registry")

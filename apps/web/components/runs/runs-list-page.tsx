@@ -11,7 +11,8 @@ import { useRouter } from "@/lib/routing/client-router";
 import { linkToTask } from "@/lib/links";
 import { cn } from "@/lib/utils";
 import type { WorkspaceAutomationRun } from "@/lib/types/automation";
-import { buildAgenda, STATE_DOT_CLASS } from "./automation-rows";
+import { buildAgenda } from "./automation-rows";
+import { automationRunPresentation } from "./automation-run-presentation";
 import type { AutomationRow } from "./automation-rows";
 import { RunFeedItem } from "./run-feed-item";
 import { AUTOMATIONS_HREF, RUNS_FEED_HREF } from "./runs-view";
@@ -64,33 +65,46 @@ function NoAutomationsYet() {
  * which is the fact only it can show.
  */
 function AgendaRow({ row, onOpen }: { row: AutomationRow; onOpen: (id: string) => void }) {
-  const { automation, state, next } = row;
+  const { automation, state, next, lastRun } = row;
+  const { t } = useTranslation();
+  const presentation = automationRunPresentation(state, lastRun);
   return (
     <button
       type="button"
       onClick={() => onOpen(automation.id)}
       data-testid={`agenda-row-${automation.id}`}
-      className="flex w-full items-baseline gap-3 rounded-md px-3 py-2 text-left transition-colors cursor-pointer hover:bg-muted/40"
+      className="flex w-full min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 rounded-md px-3 py-2 text-left transition-colors cursor-pointer hover:bg-muted/40"
     >
       <span
         className={cn(
           "h-1.5 w-1.5 shrink-0 translate-y-[-1px] rounded-full",
-          STATE_DOT_CLASS[state],
+          presentation.dotClass,
         )}
         aria-hidden="true"
       />
+      <span className="sr-only">
+        {presentation.labelKeys
+          .filter((key) => !presentation.showOutcome || key !== presentation.outcomeLabelKey)
+          .map((key) => `${t(key)}.`)
+          .join(" ")}
+      </span>
       <span
         className={cn(
-          "w-44 shrink-0 text-sm tabular-nums",
+          "min-w-0 w-44 max-w-[calc(100%-1.5rem)] shrink-0 wrap-anywhere text-sm tabular-nums",
           next.kind === "reason" ? "text-amber-600 dark:text-amber-500" : "text-foreground",
         )}
         data-testid="automation-next-run"
       >
         {next.text}
       </span>
-      <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+      <span className="min-w-24 flex-1 truncate text-sm text-muted-foreground">
         {automation.name}
       </span>
+      {presentation.showOutcome && (
+        <span className="min-w-0 max-w-full wrap-anywhere text-sm text-muted-foreground">
+          {t(presentation.outcomeLabelKey!)}
+        </span>
+      )}
     </button>
   );
 }

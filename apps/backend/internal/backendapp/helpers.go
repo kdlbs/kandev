@@ -37,7 +37,6 @@ import (
 	authhttpapi "github.com/kandev/kandev/internal/auth/httpapi"
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/automation"
-	"github.com/kandev/kandev/internal/azuredevops"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -92,6 +91,7 @@ import (
 	sshhandlers "github.com/kandev/kandev/internal/ssh"
 	"github.com/kandev/kandev/internal/startup"
 	systemsvc "github.com/kandev/kandev/internal/system"
+	"github.com/kandev/kandev/internal/system/maintenance"
 	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
@@ -1320,9 +1320,6 @@ func registerRoutes(p routeParams) {
 	if p.services.GitLab != nil {
 		p.services.GitLab.SetCascadeTaskDeleter(handoffSvc)
 	}
-	if p.services.AzureDevOps != nil {
-		p.services.AzureDevOps.SetCascadeTaskDeleter(handoffSvc)
-	}
 	// repoLookup validates a watcher's optional repository binding (workspace
 	// ownership + default-branch fill) on create/update. Shared across the three
 	// repo-less watchers; one concrete adapter satisfies each package's
@@ -1334,12 +1331,6 @@ func registerRoutes(p routeParams) {
 			tasks: p.taskSvc, workflows: p.services.Workflow, agents: p.agentSettingsRepo,
 		})
 		p.services.GitLab.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
-	}
-	if p.services.AzureDevOps != nil {
-		p.services.AzureDevOps.SetWatchRepositoryLookup(repoLookup)
-		p.services.AzureDevOps.SetWatchDependencyValidator(&gitLabWatchDependencyValidator{
-			tasks: p.taskSvc, workflows: p.services.Workflow, agents: p.agentSettingsRepo,
-		})
 	}
 	if p.services.Jira != nil {
 		p.services.Jira.SetTaskDeleter(handoffSvc)
@@ -1854,6 +1845,8 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	p.log.Debug("Registered Task Service handlers (HTTP + WebSocket)")
 }
 
+// configureMCPServices installs workspace authorization, selection ownership, and automation usage
+// readers.
 func configureMCPServices(
 	p routeParams,
 ) (mcpconfig.CatalogRepository, *mcpconfig.CatalogService, *mcpconfig.SelectionService) {
@@ -1885,6 +1878,10 @@ func configureMCPServices(
 		})
 	}
 	mcpCatalog.SetSelectionRepository(selectionRepo)
+	if p.services != nil && p.services.Automation != nil {
+		mcpCatalog.SetAutomationUsageReader(p.services.Automation.Service.MCPDefinitionSelectionCounts)
+		mcpSelectionService.SetAutomationUsageReader(p.services.Automation.Service.MCPDefinitionSelectionCounts)
+	}
 	p.taskSvc.SetMCPSelectionWriter(mcpSelectionService)
 	if p.orchestratorSvc != nil {
 		p.orchestratorSvc.SetMCPSelectionWriter(mcpSelectionService)
@@ -2071,12 +2068,6 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered GitLab handlers (HTTP)")
 	}
 
-	if p.services.AzureDevOps != nil {
-		azuredevops.RegisterRoutes(p.router, p.services.AzureDevOps, p.log)
-		azuredevops.RegisterMockRoutes(p.router, p.services.AzureDevOps, p.log)
-		p.log.Debug("Registered Azure DevOps handlers (HTTP)")
-	}
-
 	if p.services.Jira != nil {
 		jira.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Jira, p.log)
 		jira.RegisterMockRoutes(p.router, p.services.Jira, p.log)
@@ -2101,6 +2092,9 @@ func registerSecondaryRoutes(
 	}
 
 	if p.services.Automation != nil {
+		definitions, _ := p.agentSettingsRepo.(automation.MCPDefinitionReader)
+		policy, _ := p.agentSettingsRepo.(automation.MCPBuiltinPolicyReader)
+		p.services.Automation.Service.SetMCPSelectionReaders(definitions, policy)
 		if p.services.Plugins != nil {
 			p.services.Automation.Service.SetPluginAutomationProvider(p.services.Plugins)
 			p.services.Automation.Service.SetPluginToolOptionsProvider(p.services.Plugins)
@@ -2250,7 +2244,7 @@ func newSSHAgentctlResolver(p routeParams) *lifecycle.AgentctlResolver {
 // authorizes ownership for them when auth is enabled.
 var integrationWorkspacePrefixes = []string{
 	"/api/v1/jira/", "/api/v1/linear/", "/api/v1/sentry/",
-	"/api/v1/azure-devops/", "/api/v1/gitlab/", "/api/v1/github/", "/api/v1/workflow-sync/",
+	"/api/v1/gitlab/", "/api/v1/github/", "/api/v1/workflow-sync/",
 }
 
 // integrationWorkspaceScopeMiddleware enforces workspace ownership on the
@@ -2661,13 +2655,31 @@ func registerMCPAndDebugRoutes(
 				sentry:        settingsSentryServiceFromPointer(p.services.Sentry),
 				github:        settingsGitHubServiceFromPointer(p.services.GitHub),
 				gitlab:        settingsGitLabServiceFromPointer(p.services.GitLab),
-				azureDevOps:   settingsAzureDevOpsServiceFromPointer(p.services.AzureDevOps),
 			},
 		))
 	}
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
 	mcpHandlers.SetSessionCeilingReleaser(p.orchestratorSvc)
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
+	if p.taskRepo != nil {
+		mcpHandlers.SetSendOperationStore(p.taskRepo)
+	}
+	if p.taskRepo != nil && p.dbPool != nil {
+		taskRepo, pool, log := p.taskRepo, p.dbPool, p.log
+		stopRetention := mcpHandlers.SetSendOperationRetention(p.ctx, func(ctx context.Context) {
+			release, admitted := maintenance.ForPool(pool).TryAcquire()
+			if !admitted {
+				return
+			}
+			defer release()
+			if _, _, err := taskRepo.PruneSendOperations(ctx, sqliterepo.SendOperationPruneBatch); err != nil {
+				log.Warn("send-operation retention batch failed", zap.Error(err))
+			}
+		})
+		if p.addCleanup != nil {
+			p.addCleanup(func() error { stopRetention(); return nil })
+		}
+	}
 	mcpHandlers.SetPromptReader(p.services.Prompts)
 	mcpHandlers.SetPromptWriter(p.services.Prompts, func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled })
 	mcpHandlers.SetTaskStopper(p.orchestratorSvc)

@@ -162,6 +162,70 @@ func TestTaskStateActivityIsLoggedBeforeStateEvent(t *testing.T) {
 	}
 }
 
+func TestPublishCommittedTaskStateChangeUsesReceiptAndActivityOption(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		activityHandled bool
+		wantActivity    bool
+	}{
+		{name: "activity already recorded", activityHandled: true},
+		{name: "publisher owns activity", wantActivity: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, eventBus, _ := createTestService(t)
+			activity := &recordingTaskStateActivityLogger{eventBus: eventBus}
+			svc.SetTaskStateActivityLogger(activity)
+			change := models.TaskStateChange{
+				Matched:  true,
+				Changed:  true,
+				OldState: v1.TaskStateInProgress,
+				Task: &models.Task{
+					ID: "task-committed-state", WorkspaceID: "ws-committed-state",
+					State: v1.TaskStateCompleted,
+				},
+			}
+
+			svc.PublishCommittedTaskStateChange(context.Background(), change, tc.activityHandled)
+
+			if activity.called != tc.wantActivity {
+				t.Fatalf("activity called = %t, want %t", activity.called, tc.wantActivity)
+			}
+			published := eventBus.GetPublishedEvents()
+			if len(published) != 1 || published[0].Type != events.TaskStateChanged {
+				t.Fatalf("published events = %v, want one %s", eventTypes(published), events.TaskStateChanged)
+			}
+			data, ok := published[0].Data.(map[string]interface{})
+			if !ok {
+				t.Fatalf("event data = %T, want map payload", published[0].Data)
+			}
+			if data["task_id"] != "task-committed-state" || data["workspace_id"] != "ws-committed-state" ||
+				data["old_state"] != string(v1.TaskStateInProgress) ||
+				data["new_state"] != string(v1.TaskStateCompleted) ||
+				data["state"] != string(v1.TaskStateCompleted) {
+				t.Fatalf("state event payload = %#v", data)
+			}
+			if _, ok := data["activity_handled"]; ok {
+				t.Fatal("internal activity option leaked into event payload")
+			}
+		})
+	}
+}
+
+func TestPublishCommittedTaskStateChangeSkipsNonTransitions(t *testing.T) {
+	svc, eventBus, _ := createTestService(t)
+	activity := &recordingTaskStateActivityLogger{eventBus: eventBus}
+	svc.SetTaskStateActivityLogger(activity)
+	for _, change := range []models.TaskStateChange{
+		{Matched: false, Changed: false, Task: &models.Task{ID: "guard-rejected"}},
+		{Matched: true, Changed: false, Task: &models.Task{ID: "unchanged"}},
+	} {
+		svc.PublishCommittedTaskStateChange(context.Background(), change, false)
+	}
+	if len(eventBus.GetPublishedEvents()) != 0 || activity.called {
+		t.Fatalf("non-transition published events=%v activity_called=%t", eventTypes(eventBus.GetPublishedEvents()), activity.called)
+	}
+}
+
 func TestPublishAfterTaskEventsRunsCallback(t *testing.T) {
 	svc, _, _ := createTestService(t)
 	ctx := context.Background()

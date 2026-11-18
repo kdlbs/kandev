@@ -144,3 +144,5 @@ branch-loss, and provider identity rules remain in
 ## System design
 
 [Session recovery failures](../system-design/session-recovery-failures.md).
+
+[Blocked-session guidance package](../../../plans/blocked-session-recovery-guidance/plan.md).

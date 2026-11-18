@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ReleaseIO } from "./sdk-release-io.mjs";
+import { ReleaseIO, projectVerifiedRegistryState } from "./sdk-release-io.mjs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -125,4 +125,47 @@ test("public consumer visibility retries are bounded and never report exhausted 
     io.verifyConsumers({ integrity: "sha512-fixture" }, "oidc"),
   );
   assert.equal(attempts, 3);
+});
+
+test("registry observation clock and sleep are injectable", async () => {
+  let now = 100;
+  const waits = [];
+  const io = new ReleaseIO({
+    root: "/tmp/sdk-release-io",
+    directory: "/tmp/sdk-release-io/work",
+    repository: {},
+    source: {},
+    now: () => now,
+    registryWait: async (milliseconds) => {
+      waits.push(milliseconds);
+      now += milliseconds;
+    },
+  });
+  assert.equal(io.now(), 100);
+  await io.registryWait(30_000);
+  assert.equal(io.now(), 30_100);
+  assert.deepEqual(waits, [30_000]);
+});
+
+test("verified registry projection preserves the observed version", () => {
+  const projected = projectVerifiedRegistryState(
+    {
+      packageExists: true,
+      latest: "0.1.0",
+      version: {
+        version: "0.1.0",
+        dist: { integrity: "sha512-example" },
+      },
+    },
+    {
+      integrity: "sha512-example",
+      recordDigest: "a".repeat(64),
+      provenance: true,
+    },
+  );
+  assert.equal(projected.version.version, "0.1.0");
+  assert.equal(projected.version.integrity, "sha512-example");
+  assert.equal(projected.version.recordDigest, "a".repeat(64));
+  assert.equal(projected.version.provenance, true);
+  assert.equal(projected.latest, "0.1.0");
 });

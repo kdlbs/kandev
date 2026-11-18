@@ -217,6 +217,12 @@ func (m *ControlServer) handleCreateInstance(c *gin.Context) {
 		return
 	}
 
+	if req.ManagedRuntimeInstallContext != nil &&
+		(!c.GetBool(controlAuthorizationConsumedContextKey) || !req.ManagedRuntimeInstallContext.Valid()) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "authenticated installer provenance is required for reusable repairs"})
+		return
+	}
+
 	// Validate required fields
 	if req.WorkspacePath == "" {
 		c.JSON(http.StatusBadRequest, gin.H{

@@ -77,7 +77,7 @@ func TestMarkReadyDoesNotDeadlockWithPromptCompletion(t *testing.T) {
 			name:  "cancel escalation marks ready",
 			frame: "escalateStuckCancel",
 			run: func(m *Manager, execution *AgentExecution) lockOrderTransitionResult {
-				return lockOrderTransitionResult{err: m.escalateStuckCancel(context.Background(), execution, nil)}
+				return lockOrderTransitionResult{err: m.escalateStuckCancel(context.Background(), execution, nil, nil)}
 			},
 		},
 		{

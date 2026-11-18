@@ -41,6 +41,7 @@ func TestDeliveryStorageAdvisoryThresholdsUseHysteresis(t *testing.T) {
 				RuntimeStorageObservation{State: test.previous},
 				test.previous != "",
 				newRuntimeStorageProbeState(),
+				time.Now().UTC(),
 			)
 			if observation.State != test.want {
 				t.Fatalf("state = %q, want %q", observation.State, test.want)
@@ -64,6 +65,7 @@ func TestDeliveryStorageFailedSampleKeepsPriorCauseAndMeasurements(t *testing.T)
 		},
 		true,
 		newRuntimeStorageProbeState(),
+		time.Now().UTC(),
 	)
 	if observation.State != RuntimeStorageStateWarning {
 		t.Fatalf("failed sample invented a state: %+v", observation)
@@ -83,6 +85,7 @@ func TestDeliveryStorageUnknownMeasurementsStayUnknown(t *testing.T) {
 		RuntimeStorageObservation{},
 		false,
 		newRuntimeStorageProbeState(),
+		time.Now().UTC(),
 	)
 	if observation.State != RuntimeStorageStateUnavailable {
 		t.Fatalf("state = %q", observation.State)

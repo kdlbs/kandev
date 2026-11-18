@@ -3,7 +3,7 @@ import { getBackendConfig } from "@/lib/config";
 import { subscribeIntegrationAvailability } from "@/lib/integrations/integration-availability-events";
 import type { AppState } from "@/lib/state/store";
 
-export type IntegrationHealthProvider = "jira" | "linear" | "azure-devops" | "sentry";
+export type IntegrationHealthProvider = "jira" | "linear" | "sentry";
 
 export type IntegrationHealthSnapshot<T> = {
   value: T | null;

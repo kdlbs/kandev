@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -78,6 +79,11 @@ func (a *Adapter) sendPrompt(
 	promptGeneration uint64,
 	steer bool,
 ) error {
+	// Validate attachments before a steer can transfer the generating turn.
+	contentBlocks, contentErr := a.buildPromptContentBlocks(message, attachments)
+	if contentErr != nil {
+		return contentErr
+	}
 	humanPrompt := expectSession == ""
 	promptCtx, turn := newPromptTurnState(
 		ctx,
@@ -146,7 +152,7 @@ func (a *Adapter) sendPrompt(
 	defer a.settleUnverifiedOpenCodeBackgroundWork(sessionID)
 	a.markPromptSentForSuggestion(turn)
 
-	contentBlocks := a.buildPromptContentBlocks(finalMessage, attachments)
+	contentBlocks[0] = acp.TextBlock(finalMessage)
 
 	// Start prompt span — notification spans become children via getPromptTraceCtx()
 	traceCtx, promptSpan := shared.TraceProtocolRequest(
@@ -489,10 +495,18 @@ func isGenericCodexPromptError(err error) bool {
 		requestErr.Code == -32603 && requestErr.Message == "Internal error"
 }
 
-func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.MessageAttachment) []acp.ContentBlock {
+func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.MessageAttachment) ([]acp.ContentBlock, error) {
 	contentBlocks := []acp.ContentBlock{acp.TextBlock(message)}
 
 	for _, att := range attachments {
+		if att.AttachmentID != "" && att.Data == "" {
+			block, err := a.materializedAttachmentBlock(att)
+			if err != nil {
+				return nil, err
+			}
+			contentBlocks = append(contentBlocks, block)
+			continue
+		}
 		if att.DeliveryMode == "path" {
 			saved, saveErr := a.attachMgr.SaveAttachments([]v1.MessageAttachment{att})
 			if saveErr != nil || len(saved) == 0 {
@@ -504,20 +518,6 @@ func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.Mess
 			contentBlocks = append(contentBlocks, acp.TextBlock(shared.BuildAttachmentPrompt(saved, true)))
 			continue
 		}
-		if att.AttachmentID != "" && att.Data == "" && (att.Type == contentTypeImage || att.Type == contentTypeAudio) {
-			data, saved, ok := a.loadMaterializedAttachmentData(att)
-			switch {
-			case ok:
-				att.Data = data
-			case len(saved) > 0:
-				contentBlocks = append(contentBlocks, acp.TextBlock(shared.BuildAttachmentPrompt(saved, false)))
-				continue
-			default:
-				a.logger.Warn("failed to load materialized prompt attachment",
-					zap.String("attachment_id", att.AttachmentID), zap.String("name", att.Name))
-			}
-		}
-
 		switch att.Type {
 		case contentTypeImage:
 			contentBlocks = append(contentBlocks, acp.ImageBlock(att.Data, att.MimeType))
@@ -540,26 +540,53 @@ func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.Mess
 		}
 	}
 
-	return contentBlocks
+	return contentBlocks, nil
 }
 
-func (a *Adapter) loadMaterializedAttachmentData(att v1.MessageAttachment) (string, []shared.SavedAttachment, bool) {
+func (a *Adapter) materializedAttachmentBlock(att v1.MessageAttachment) (acp.ContentBlock, error) {
+	unavailable := fmt.Errorf("attachment %q could not be loaded for delivery", att.AttachmentID)
 	if a.attachMgr == nil {
-		return "", nil, false
+		return acp.ContentBlock{}, unavailable
 	}
 	saved, err := a.attachMgr.SaveAttachments([]v1.MessageAttachment{att})
 	if err != nil || len(saved) == 0 {
-		return "", nil, false
+		return acp.ContentBlock{}, unavailable
 	}
-	info, err := os.Stat(saved[0].AbsPath)
-	if err != nil || info.Size() > maxNativeAttachmentBytes {
-		return "", saved, false
-	}
-	data, err := os.ReadFile(saved[0].AbsPath)
+	file, err := os.Open(saved[0].AbsPath)
 	if err != nil {
-		return "", saved, false
+		return acp.ContentBlock{}, unavailable
 	}
-	return base64.StdEncoding.EncodeToString(data), saved, true
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+		return acp.ContentBlock{}, unavailable
+	}
+	if att.DeliveryMode == "path" || info.Size() > maxNativeAttachmentBytes ||
+		(att.Type == contentTypeResource && !a.capabilities.PromptCapabilities.EmbeddedContext) {
+		return acp.TextBlock(shared.BuildAttachmentPrompt(saved, att.DeliveryMode == "path")), nil
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxNativeAttachmentBytes+1))
+	if err != nil {
+		return acp.ContentBlock{}, unavailable
+	}
+	if int64(len(data)) != info.Size() {
+		return acp.ContentBlock{}, unavailable
+	}
+	att.Data = base64.StdEncoding.EncodeToString(data)
+	return buildNativeAttachmentBlock(att)
+}
+
+func buildNativeAttachmentBlock(att v1.MessageAttachment) (acp.ContentBlock, error) {
+	switch att.Type {
+	case contentTypeImage:
+		return acp.ImageBlock(att.Data, att.MimeType), nil
+	case contentTypeAudio:
+		return acp.AudioBlock(att.Data, att.MimeType), nil
+	case contentTypeResource:
+		return buildResourceBlock(att), nil
+	default:
+		return acp.ContentBlock{}, fmt.Errorf("attachment %q has unsupported type %q", att.AttachmentID, att.Type)
+	}
 }
 
 func buildAttachmentFallbackBlock(att v1.MessageAttachment) acp.ContentBlock {

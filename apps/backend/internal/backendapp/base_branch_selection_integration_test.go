@@ -114,6 +114,7 @@ func newBaseSelectionFixture(t *testing.T) *baseSelectionFixture {
 	orchestratorExecutor := executor.NewExecutor(
 		adapter, harness.taskRepo, log, executor.ExecutorConfig{},
 	)
+	orchestratorExecutor.SetCapabilities(adapter)
 	require.NoError(t, harness.taskRepo.CreateExecutor(ctx, &models.Executor{
 		ID: "base-selection-worktree", Name: "Worktree", Type: models.ExecutorTypeWorktree,
 		Status: models.ExecutorStatusActive,

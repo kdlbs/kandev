@@ -14,6 +14,18 @@ import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-
 import { selectMarkdownPreviewText } from "../../helpers/markdown-preview";
 import { waitForWorkspacePath } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
+import {
+  restoreCodeEditorProvider,
+  setCodeEditorProvider,
+} from "../../helpers/file-selection-comments";
+
+test.beforeEach(async ({ testPage }) => {
+  await setCodeEditorProvider(testPage, "codemirror");
+});
+
+test.afterEach(async ({ testPage }) => {
+  await restoreCodeEditorProvider(testPage);
+});
 
 function createLongFileContent(lines = 500): string {
   return Array.from(
@@ -348,11 +360,13 @@ test.describe("Mobile file viewer panel", () => {
       clientHeight: element.clientHeight,
       scrollHeight: element.scrollHeight,
       touchAction: getComputedStyle(element).touchAction,
+      overscrollBehavior: getComputedStyle(element).overscrollBehavior,
       overflowY: getComputedStyle(element).overflowY,
     }));
     expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
     // touch-action must allow vertical pan or mobile touch scroll won't work.
-    expect(metrics.touchAction).toMatch(/pan-y|auto/);
+    expect(metrics.touchAction).toContain("pan-y");
+    expect(metrics.overscrollBehavior).toContain("contain");
     expect(metrics.overflowY).toMatch(/auto|scroll/);
 
     const scrollTopAfterMove = await cmScroller.evaluate((element) => {

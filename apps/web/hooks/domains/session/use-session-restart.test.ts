@@ -1,7 +1,10 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAppStore } from "@/lib/state/store";
+import type { AppState } from "@/lib/state/store";
 import { sessionId, taskId } from "@/lib/types/http";
+import { WebSocketRequestError } from "@/lib/ws/client";
+import { useSessionRecoveryActions } from "./use-session-recovery-actions";
 import { useSessionRestart } from "./use-session-restart";
 
 const mockRequest = vi.fn();
@@ -11,6 +14,8 @@ let mockStore: ReturnType<typeof createAppStore>;
 
 vi.mock("@/components/state-provider", () => ({
   useAppStoreApi: () => mockStore,
+  useOptionalAppStoreApi: () => mockStore,
+  useAppStore: (selector: (state: AppState) => unknown) => selector(mockStore.getState()),
 }));
 
 vi.mock("@/components/toast-provider", () => ({
@@ -34,6 +39,45 @@ describe("restart selection ownership", () => {
       started_at: "2026-10-20T00:00:00Z",
       updated_at: "2026-10-20T00:00:00Z",
     });
+  });
+
+  it("Restart publishes continuation guidance after its menu unmounts", async () => {
+    const hint = new WebSocketRequestError("Saved history is available", "CONFLICT", {
+      kind: "session_restore_required",
+      recovery_action: "continue_from_history",
+      reason: "unresolved_durable_work",
+      session_id: "s1",
+      generation: 2,
+    });
+    let rejectLaunch!: (error: Error) => void;
+    mockRequest.mockImplementation((action: string) => {
+      if (action === "session.stop") return Promise.resolve(undefined);
+      return new Promise((_, reject) => {
+        rejectLaunch = reject;
+      });
+    });
+    const recovery = renderHook(() => useSessionRecoveryActions({ taskId: "t1", sessionId: "s1" }));
+    const menu = renderHook(() => useSessionRestart("s1", "t1"));
+    let restart!: Promise<boolean>;
+    act(() => {
+      restart = menu.result.current.restart();
+    });
+    await vi.waitFor(() => expect(rejectLaunch).toBeTypeOf("function"));
+
+    menu.unmount();
+    await act(async () => {
+      rejectLaunch(hint);
+      expect(await restart).toBe(false);
+    });
+
+    expect(recovery.result.current.continuationDetails).toMatchObject({
+      kind: "session_restore_required",
+      recovery_action: "continue_from_history",
+      session_id: "s1",
+      generation: 2,
+    });
+    expect(mockRequest).toHaveBeenCalledTimes(2);
+    recovery.unmount();
   });
 
   it.each([

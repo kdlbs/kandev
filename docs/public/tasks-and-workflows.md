@@ -34,6 +34,7 @@ The task carries the outcome through the workflow. The repository and session pr
 **Organize and review work**
 
 - [Task dependencies](#task-dependencies)
+- [See the dependency graph](#see-the-dependency-graph)
 - [Find and organize tasks](#find-and-organize-tasks)
 - [Use the task plan](#use-the-task-plan)
 - [Arrange task panels](#arrange-task-panels)
@@ -262,7 +263,7 @@ use a separate `Cmd/Ctrl+Enter` shortcut or the visible submit action.
    | Source     | Use it for                                        | Notes                                                                                                                                                                                                                                        |
    | ---------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
    | **Repo**   | A configured, discovered, or new local repository | Choose a branch or [branch policy](#branch-policies). Add more rows for a multi-repository task.                                                                                                                                             |
-   | **Remote** | A remote repository                               | Search GitHub, GitLab, or Azure DevOps, or paste a supported URL. Public GitHub reads and public `gitlab.com` branch discovery work without credentials. Private access and authenticated browse/write actions require provider credentials. |
+   | **Remote** | A remote repository                               | Search GitHub, GitLab, or a connected plugin provider, or paste a supported URL. Public GitHub reads and public `gitlab.com` branch discovery work without credentials. Private access and authenticated browse/write actions require provider credentials. |
    | **None**   | Planning, research, or work outside Git           | Use a scratch workspace or an optional folder on the Kandev host. Git worktree and repository-aware Changes, branch, and pull-request features are unavailable.                                                                              |
 
    In-app directory browsers list directories on the Kandev host. By default,
@@ -750,6 +751,11 @@ session only after it verifies the saved owner and native conversation. If the
 owner, conversation, or delivery evidence is missing or changed, that session
 stays blocked with its available recovery controls. See [Manage session state](sessions-and-review.md#manage-session-state) for those controls and recovery details.
 
+After a verified restore, the same conversation shows one informational
+interruption message and the normal composer. Kandev does not resend the
+interrupted prompt. Existing failed sessions that meet the same identity and
+delivery checks are included in the first startup after an upgrade.
+
 Restart recovery also checks automatic workflow starts that were accepted but
 never delivered their step prompt. It resumes that entry through normal capacity
 and dependency admission. A hold step, deferred start, workflow queue, or Office
@@ -890,10 +896,9 @@ you can see which link to drop.
 ### Declare dependencies
 
 Dependencies are declared in the **New Task** dialog under **Depends on**, or
-by an agent over MCP. There is deliberately no editor in the open task: a
-dependency records how the work was planned, so the surfaces that display it
-stay read-only. To change one after the fact, use the MCP tools or delete and
-recreate the task.
+by an agent over MCP. To change them later, open the task's **Edit** dialog
+and update its dependencies, or use the MCP tools. The dependency chip and the
+task graph only display dependencies; they do not edit them.
 
 ### What blocked means
 
@@ -944,6 +949,60 @@ unfinished work stays pending. Archiving does not remove the link.
 that was waiting only on it becomes unblocked. That dependent is not started:
 deletion is not success.
 
+### See the dependency graph
+
+The task graph draws tasks as cards and dependencies as arrows, so you can see
+what runs first, what waits, and what can run in parallel. It is read-only:
+change links in the task's **Edit** dialog or over MCP.
+
+There are two graphs:
+
+- **Task graph tab.** Inside a task, select the hierarchy icon at the right of
+  the status row above the chat box, after token stats and Share, or
+  **View graph** in the dependency chip. The icon appears only when the task
+  has a parent, subtasks, dependency links, or related tasks. The tab opens
+  beside the chat and follows the task you are viewing.
+- **Board Graph view.** On Home, select **Graph** in the view switcher, next
+  to **Pipeline**. Each workflow lane shows the tasks the board currently
+  shows, after filters and search, with subtasks framed by their parent.
+
+To jump to one task in the graph, right-click it in the sidebar or on a Kanban
+card and choose **Show in graph**. The board Graph view opens with that task
+selected and in view.
+
+Reading the graph:
+
+- Each card shows a **step** number. Step 1 waits on nothing shown in the
+  graph; every other task sits one step after its last predecessor.
+- Arrows run from a predecessor to the task that waits for it. A solid grey
+  line is done, a dashed line is waiting, and a red line means the predecessor
+  failed.
+- Turn on **Parallel steps** to lay tasks out by step. Each step gets a band
+  that says how many of its tasks can run in parallel.
+- Hover or focus a card to highlight everything it waits on and everything
+  waiting on it.
+
+In the task graph tab, **Subtasks** shows the task's subtasks (or its parent's,
+when the task is itself a subtask), and **Chain** shows everything the task
+waits on and everything waiting on it, across workflows. Select a card to open
+that task. On the board, a click selects a card and **Open task** goes into
+it; double-click opens it directly.
+
+<details>
+<summary>Limits and phones</summary>
+
+- The task graph tab shows at most 200 tasks and says so when it is cut short.
+- On the board, each workflow lane is its own graph. A dependency on a task in
+  another workflow is not drawn there, so the step and parallel counts only
+  reflect links inside the lane. Use the task graph's **Chain** mode to see
+  links across workflows.
+- On a phone, the graph icon and **Show in graph** open a full-screen sheet.
+  Pan with one finger, pinch to zoom, tap a card to open it, and long-press
+  to highlight its chain. The board Graph view, like Pipeline, is shown as
+  Kanban on a phone.
+
+</details>
+
 ## Find and organize tasks
 
 To include tasks without a repository, open the sidebar filters and select
@@ -977,12 +1036,13 @@ workspace lookup fails, select **Retry**. If the workspace no longer exists or
 is unavailable, select **Home** to return to your task overview.
 
 On desktop and tablet, the header switches between **Kanban**, **Pipeline**,
-**Threads**, and **List**. Kanban and Pipeline show the same workflow steps in
-different layouts. Threads shows agent conversations side by side. Kandev
+**Graph**, **Threads**, and **List**. Kanban and Pipeline show the same workflow
+steps in different layouts. Graph shows the board's tasks as a dependency graph;
+see [See the dependency graph](#see-the-dependency-graph). Threads shows agent conversations side by side. Kandev
 remembers the last selected view in that browser on the current device. Phones
 offer **Kanban**, **Threads**, and **List** under **View options**, with a native
-Threads deck showing one conversation at a time. A saved desktop Pipeline
-preference is kept but shown as Kanban on the phone.
+Threads deck showing one conversation at a time. A saved desktop Pipeline or
+Graph preference is kept but shown as Kanban on the phone.
 
 Kanban and List share a compact phone header showing the workspace and current
 mode. Tap the **Kanban**, **Threads**, or **List** title dropdown to open view options and change display settings, or tap the
@@ -1270,6 +1330,13 @@ to review an action and return to your list.
 - Several archives can be pending at once. Each row keeps its own spinner and ignores repeated archive requests until its own request settles, and Kandev does not switch you to a task that is also being archived.
 - Runtime stop and cleanup run in the background with a 60-second timeout. Cleanup failure does not undo the archive. Kandev preserves a runtime or environment when it cannot stop a nonterminal session, or while another active task uses a shared environment or worktree.
 
+A damaged Git checkout or a timed-out workspace inspection does not block
+archiving the task or its selected subtasks. Kandev records the cleanup failure
+and preserves the affected workspace and enclosing task folder. Independently
+verified workspaces can still be cleaned up. Missing original identity evidence
+can require manual repair before cleanup is safe. Access checks and database
+writes must still succeed.
+
 For Git worktrees, archive deletes Kandev-owned checkouts and their local
 changes during background cleanup, including staged, unstaged, untracked, and
 ignored files. Commit and push work you need before archiving. Kandev does not
@@ -1291,7 +1358,7 @@ worktree keeps that task folder until reclamation can finish.
 | Kubernetes    | Deletes only the recorded Pod and Kandev-managed PVC after exact UID and ownership checks. An existing claim is retained.                                                                                             |
 | Remote Docker | Runtime create and stop are not implemented. This executor is in progress and cannot currently start a task, so it has no supported archive-cleanup flow.                                                             |
 | Sprites       | Attempts to destroy the sandbox; if cleanup succeeds, uncommitted sandbox work is lost.                                                                                                                               |
-| SSH           | Attempts to stop the remote session runtime, but the remote task directory remains. Audit and remove retained task directories manually after confirming that no session needs them.                                  |
+| SSH           | Attempts to stop the remote session runtime. The task directory stays by default; an enabled profile can reclaim it after terminal archive or delete. Reclamation can remove ignored files, including secrets. See [SSH cleanup](executors.md#repository-sources-and-cleanup). |
 
 The archive confirmation is on by default in **Settings → Preferences → Task Behavior → Tasks → Archiving**.
 
@@ -1336,8 +1403,7 @@ Unarchiving a task cancels a pending worktree recheck. If the recheck is already
 - If normal verified deletion cannot confirm that the agent stopped, the task remains available and deletion reports an error. Retry after resolving the reported problem.
 - When a task has a `RUNNING` agent, the dialog warns that deletion discards in-progress work. Delete always shows this warning. Archive shows it only when confirmation is on.
 
-Deleting or expiring an ordinary Quick Chat also attempts to remove its Claude Code or Codex
-session files for agents that ran on the Kandev host. Archiving keeps those files. Cleanup
+Deleting an ordinary Quick Chat also attempts to remove its Claude Code or Codex session files for agents that ran on the Kandev host. Archiving keeps those files. Cleanup
 leaves other conversations and the agent's shared indexes and history databases in place.
 It uses the host's home and config-directory settings; overrides set only in an agent or
 executor profile are outside this cleanup.

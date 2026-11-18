@@ -35,6 +35,9 @@ export type {
   PluginTaskCreatedIdentity,
   PluginUIApi,
   RegisterPluginTaskCreatedHandler,
+  NotificationFormatterBinding,
+  NotificationFormatterChoice,
+  NotificationFormatterSlotProps,
 } from "@kdlbs/plugin-sdk";
 export type { PluginIcon } from "@kdlbs/plugin-sdk";
 

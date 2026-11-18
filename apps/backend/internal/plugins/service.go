@@ -54,6 +54,7 @@ type Service struct {
 	filePreviewPolicies                   *filePreviewPolicies
 	filePreviewBackend                    func(context.Context, string, string, string) (*FilePreviewSource, error)
 	filePreviewGrants                     *filePreviewGrants
+	notificationProviders                 NotificationProviderAccess
 	hostCallContextEnabled                bool
 	hostCallContextValidator              func(context.Context, bool) error
 	automationRevoker                     func(string) error
@@ -91,7 +92,8 @@ type Service struct {
 	// dispatchLocks keep lifecycle replacement/disable boundaries from racing
 	// authenticated actions and reference RPCs. Dispatch holds a read lease for
 	// the full RPC; lifecycle mutation holds the write side.
-	dispatchLocks *keyedContextRWMutex
+	dispatchLocks           *keyedContextRWMutex
+	formatterLifecycleLocks keyedContextRWMutex
 
 	// agentToolInstallMu makes exposed-name collision validation and registry
 	// insertion one atomic catalog mutation across different plugin IDs.

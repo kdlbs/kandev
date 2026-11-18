@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -87,6 +88,7 @@ type DefaultWorkspaceResolver func(ctx context.Context) (string, error)
 
 // Handler exposes the improve-kandev HTTP endpoints.
 type Handler struct {
+	workflowMu sync.Mutex
 	taskSvc    *taskservice.Service
 	cloner     Cloner
 	log        *logger.Logger
@@ -243,36 +245,10 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 		return
 	}
 
-	workflows, err := h.taskSvc.ListWorkflows(ctx, workspaceID, true)
+	workflow, issueWorkflow, err := h.ensureWorkflows(ctx, workspaceID)
 	if err != nil {
-		h.log.Error("improve-kandev: workflow list failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "failed to list improve-kandev workflows"})
-		return
-	}
-	workflow, err := h.ensureWorkflow(
-		ctx,
-		workspaceID,
-		workflows,
-		improveTemplateID,
-		improveWorkflowName,
-		improveWorkflowDesc,
-	)
-	if err != nil {
-		h.log.Error("improve-kandev: workflow upsert failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "failed to ensure improve-kandev workflow"})
-		return
-	}
-	issueWorkflow, err := h.ensureWorkflow(
-		ctx,
-		workspaceID,
-		workflows,
-		issueTemplateID,
-		issueWorkflowName,
-		issueWorkflowDesc,
-	)
-	if err != nil {
-		h.log.Error("improve-kandev: issue workflow upsert failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "failed to ensure report-kandev-issue workflow"})
+		h.log.Error("improve-kandev: workflow provisioning failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "failed to ensure improve-kandev workflows"})
 		return
 	}
 
@@ -295,6 +271,30 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 		ForkStatus:      access.forkStatus,
 		ForkReasonCode:  access.forkReasonCode,
 	})
+}
+
+func (h *Handler) ensureWorkflows(
+	ctx context.Context,
+	workspaceID string,
+) (*taskmodels.Workflow, *taskmodels.Workflow, error) {
+	h.workflowMu.Lock()
+	defer h.workflowMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	workflows, err := h.taskSvc.ListWorkflows(ctx, workspaceID, true)
+	if err != nil {
+		return nil, nil, err
+	}
+	workflow, err := h.ensureWorkflow(ctx, workspaceID, workflows, improveTemplateID, improveWorkflowName, improveWorkflowDesc)
+	if err != nil {
+		return nil, nil, err
+	}
+	issueWorkflow, err := h.ensureWorkflow(ctx, workspaceID, workflows, issueTemplateID, issueWorkflowName, issueWorkflowDesc)
+	if err != nil {
+		return nil, nil, err
+	}
+	return workflow, issueWorkflow, nil
 }
 
 func (h *Handler) createBundleDir(ctx context.Context, owner string) (string, error) {
@@ -661,7 +661,11 @@ func (h *Handler) ensureWorkflow(
 	name string,
 	description string,
 ) (*taskmodels.Workflow, error) {
-	if workflow := h.findAndHealWorkflow(ctx, existing, templateID); workflow != nil {
+	workflow, err := h.findAndHealWorkflow(ctx, existing, templateID)
+	if err != nil {
+		return nil, err
+	}
+	if workflow != nil {
 		return workflow, nil
 	}
 	tmplID := templateID
@@ -672,30 +676,23 @@ func (h *Handler) ensureWorkflow(
 		WorkflowTemplateID: &tmplID,
 		Hidden:             true,
 	})
-	if err == nil {
-		return created, nil
+	if err != nil {
+		return nil, err
 	}
-
-	// A concurrent bootstrap may have inserted the same template after the
-	// initial snapshot. Re-read after a uniqueness failure and converge on the
-	// row that won the race instead of surfacing a transient 500.
-	latest, listErr := h.taskSvc.ListWorkflows(ctx, workspaceID, true)
-	if listErr == nil {
-		if workflow := h.findAndHealWorkflow(ctx, latest, templateID); workflow != nil {
-			return workflow, nil
-		}
-	}
-	return nil, err
+	return created, nil
 }
 
 func (h *Handler) findAndHealWorkflow(
 	ctx context.Context,
 	workflows []*taskmodels.Workflow,
 	templateID string,
-) *taskmodels.Workflow {
+) (*taskmodels.Workflow, error) {
 	for _, workflow := range workflows {
 		if workflow.WorkflowTemplateID == nil || *workflow.WorkflowTemplateID != templateID {
 			continue
+		}
+		if err := h.taskSvc.EnsureWorkflowTemplateSteps(ctx, workflow.ID, templateID); err != nil {
+			return nil, err
 		}
 		// Heal records created before the workflow honored Hidden on insert.
 		// Best-effort: a DB failure here must not block the caller from getting
@@ -708,9 +705,9 @@ func (h *Handler) findAndHealWorkflow(
 				workflow.Hidden = true
 			}
 		}
-		return workflow
+		return workflow, nil
 	}
-	return nil
+	return nil, nil
 }
 
 const maxLeasedBundleBytes = int64(256 * 1024 * 1024)

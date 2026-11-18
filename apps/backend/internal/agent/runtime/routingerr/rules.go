@@ -23,6 +23,8 @@ type rule struct {
 // broad capacity phrase.
 const RuleOpenCodeCapacityAdmission = "opencode.capacity.admission_refused.v1"
 
+const ruleOpenCodeGoUsageLimit = "opencode.acp.go_usage_limit.v1"
+
 const openCodeAdmissionRefusedSignature = `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?` +
 	`upstream\s+request\s+failed:\s*\[ttft_admission_refused\]\s+the\s+cell\s+is\s+at\s+capacity\b`
 
@@ -76,10 +78,25 @@ const (
 )
 
 var providerRules = map[string][]rule{
-	"claude-acp": {
+	providerClaudeACP: {
 		mustRule("claude.stderr.quota.v1", `(?im)^\s*(?:(?:Error|Internal\s+error|API\s+Error):\s*)?(?:anthropic_quota_exceeded\b|(?:your\s+)?credit\s+balance\s+is\s+too\s+low\b|insufficient\s+credits\b)`, CodeQuotaLimited, ConfHigh),
-		mustRule("claude.stderr.session_limit.v1", `(?im)^\s*(?:(?:Internal\s+error|Error):\s*)?(?:you['’]ve|you\s+have)\s+hit\s+your\s+session\s+limit\b`, CodeQuotaLimited, ConfHigh),
-		mustRule("claude.stderr.weekly_limit.v1", `(?im)^\s*(?:(?:Internal\s+error|Error):\s*)?(?:you['’]ve|you\s+have)\s+hit\s+your\s+weekly\s+limit\b`, CodeQuotaLimited, ConfHigh),
+		mustRule(ruleClaudeSessionLimit, `(?im)^\s*(?:(?:Internal\s+error|Error):\s*)?(?:you['’]ve|you\s+have)\s+hit\s+your\s+session\s+limit\b`, CodeQuotaLimited, ConfHigh),
+		mustRule(ruleClaudeWeeklyLimit, `(?im)^\s*(?:(?:Internal\s+error|Error):\s*)?(?:you['’]ve|you\s+have)\s+hit\s+your\s+weekly\s+limit\b`, CodeQuotaLimited, ConfHigh),
+		// Only the five-hour wording names a renewal period, so Classify's
+		// clock-only reset inference is scoped to this exact rule. The
+		// generic usage notice keeps the existing backoff behavior.
+		mustRuleOutsideMarkdownFences(
+			ruleClaudeFiveHourLimit,
+			`(?im)^[ \t]*(?:(?:Internal[ \t]+error|Error|API[ \t]+Error):[ \t]*)?`+
+				`(?:you['’]ve|you[ \t]+have)[ \t]+hit[ \t]+your[ \t]+(?:5[- ]hour|five[- ]hour)[ \t]+limit\b`,
+			CodeQuotaLimited, ConfHigh,
+		),
+		mustRuleOutsideMarkdownFences(
+			ruleClaudeUsageLimit,
+			`(?im)^[ \t]*(?:(?:Internal[ \t]+error|Error|API[ \t]+Error):[ \t]*)?`+
+				`(?:you['’]ve|you[ \t]+have)[ \t]+hit[ \t]+your[ \t]+usage[ \t]+limit\b`,
+			CodeQuotaLimited, ConfHigh,
+		),
 		mustRule("claude.stderr.rate.v1", claudeRateLimitSignature, CodeRateLimited, ConfHigh),
 		// A proxy can reject every account credential before it sends a request
 		// upstream. This is a hard credential condition; a retry or a switch
@@ -99,19 +116,25 @@ var providerRules = map[string][]rule{
 				`(?im)^\s*\{[^\n]*"codexErrorInfo"\s*:\s*"usageLimitExceeded"`,
 			CodeQuotaLimited, ConfHigh,
 		),
+		mustRuleOutsideMarkdownFences(
+			ruleCodexOutOfCredits,
+			`(?im)^[ \t]*(?:(?:AI_APICallError|Error|Internal[ \t]+error|API[ \t]+Error):[ \t]*)?`+
+				`(?:your[ \t]+)?workspace[ \t]+is[ \t]+out[ \t]+of[ \t]+credits\b`,
+			CodeQuotaLimited, ConfHigh,
+		),
 		mustRule("codex.stderr.rate.retry_exhausted.v1", codexRetryExhaustedRateLimitSignature, CodeRateLimited, ConfHigh),
 		mustRule("codex.stderr.rate.v1", `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?(?:rate_limit_exceeded\b|too\s+many\s+requests\b)`, CodeRateLimited, ConfHigh),
 		mustRule("codex.stderr.auth.v1", `(?i)invalid api key|incorrect api key|missing api key`, CodeMissingCredentials, ConfHigh),
 		mustRule("codex.stderr.model.v1", `(?i)model_not_found`, CodeModelUnavailable, ConfHigh),
 	},
-	"opencode-acp": {
-		mustRule("opencode.stderr.usage_limit.v1", `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?\b(?:\d+[- ]hour(?:s)?|daily|weekly|monthly)\s+usage\s+limit\s+reached\b`, CodeQuotaLimited, ConfHigh),
+	providerOpenCodeACP: {
+		mustRule(ruleOpenCodeUsageLimit, `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?\b(?:\d+[- ]hour(?:s)?|daily|weekly|monthly)\s+usage\s+limit\s+reached\b`, CodeQuotaLimited, ConfHigh),
 		// OpenCode Go reports its subscription limit through the ACP prompt
 		// error without a reset time. A correlated period usage-limit notice,
 		// when present, matches the rule above first and keeps its reset hint.
-		mustRule("opencode.acp.go_usage_limit.v1", `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?go\s+usage\s+limit\s+exceeded\b`, CodeQuotaLimited, ConfHigh),
+		mustRule(ruleOpenCodeGoUsageLimit, `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?go\s+usage\s+limit\s+exceeded\b`, CodeQuotaLimited, ConfHigh),
 		// Explicit credit exhaustion takes precedence over generic payment wording.
-		mustRule("opencode.stderr.credit.v1", `(?im)^\s*(?:AI_APICallError:[^\n]*\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b|(?:(?:Error|Internal\s+error|API\s+Error):\s*)?\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b)`, CodeQuotaLimited, ConfHigh),
+		mustRule(ruleOpenCodeCredit, `(?im)^\s*(?:AI_APICallError:[^\n]*\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b|(?:(?:Error|Internal\s+error|API\s+Error):\s*)?\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b)`, CodeQuotaLimited, ConfHigh),
 		mustRule("opencode.stderr.subscription.v1", `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?payment\s+required\b`, CodeSubscriptionRequired, ConfHigh),
 		mustRule("opencode.stderr.quota.v1", genericQuotaSignature, CodeQuotaLimited, ConfMedium),
 		// Keep these provider-scoped signatures on one diagnostic line and
@@ -155,7 +178,7 @@ var providerRules = map[string][]rule{
 	// prefixes. Matching them lets the existing Kanban and Office consumers
 	// recover the same category from the message without re-reading private
 	// native evidence.
-	"antigravity-acp": {
+	providerAntigravityACP: {
 		mustRule("antigravity.native.auth.v1", antigravityMessageRule(AntigravityAuthMessage), CodeAuthRequired, ConfHigh),
 		mustRule("antigravity.native.subscription.v1", antigravityMessageRule(AntigravitySubscriptionMessage), CodeSubscriptionRequired, ConfHigh),
 		mustRule("antigravity.native.model_access.v1", antigravityMessageRule(AntigravityModelAccessMessage), CodeModelUnavailable, ConfHigh),
@@ -219,6 +242,49 @@ func matchProviderRules(providerID, excerpt, rawText string) (*Error, bool) {
 		}
 	}
 	return nil, false
+}
+
+// providerRuleMatchedLine returns the first raw diagnostic line that matches
+// the named provider rule after applying the same sanitization and fence
+// filtering as classification. Text-derived reset hints for a rule that
+// rejects fenced examples must not be read from an unrelated line.
+func providerRuleMatchedLine(providerID, ruleID, rawText string) (string, bool) {
+	rules, ok := providerRules[providerID]
+	if !ok {
+		return "", false
+	}
+	for _, r := range rules {
+		if r.id != ruleID {
+			continue
+		}
+		text := rawText
+		if r.ignoreMarkdownFences {
+			text = withoutMarkdownFencedCode(text)
+		}
+		for _, line := range strings.Split(text, "\n") {
+			matchText := Sanitize(line)
+			if r.rawText {
+				matchText = line
+			}
+			if r.pattern.MatchString(matchText) {
+				return line, true
+			}
+		}
+		return "", false
+	}
+	return "", false
+}
+
+// ruleUsesScopedTextReset reports whether text-derived reset hints for rule
+// must come only from its matched diagnostic line. The session, weekly, and
+// Codex usage-limit rules retain their whole-diagnostic compatibility.
+func ruleUsesScopedTextReset(rule string) bool {
+	switch rule {
+	case ruleClaudeFiveHourLimit, ruleClaudeUsageLimit, ruleCodexOutOfCredits:
+		return true
+	default:
+		return false
+	}
 }
 
 // withoutMarkdownFencedCode blanks fenced examples and preserves diagnostic lines.

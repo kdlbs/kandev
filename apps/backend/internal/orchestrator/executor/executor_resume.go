@@ -12,9 +12,9 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/common/gitref"
-	"github.com/kandev/kandev/internal/integrations/cloneauth"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
@@ -582,9 +582,6 @@ func (e *Executor) shouldRefreshRepositoryForSession(
 	if provider == gitLabProviderID {
 		return hasProviderRepositoryIdentity(repo), nil
 	}
-	if provider == providerAzureDevOps {
-		return strings.TrimSpace(repo.ProviderOwner) != "" && strings.TrimSpace(repo.ProviderName) != "", nil
-	}
 	if !isGitHubRepository(repo) {
 		return isPluginManagedRepository(repo), nil
 	}
@@ -604,7 +601,7 @@ func isPluginManagedRepository(repo *models.Repository) bool {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(repo.Provider)) {
-	case "", gitHubProviderID, gitLabProviderID, providerAzureDevOps:
+	case "", gitHubProviderID, gitLabProviderID:
 		return false
 	default:
 		return true
@@ -645,11 +642,6 @@ func (e *Executor) refreshManagedRepositoryForSessionWithState(
 			return repoclone.RemoteRefStateUnknown, fmt.Errorf("resolve GitLab refresh credentials: %w", err)
 		}
 	}
-	if provider == providerAzureDevOps && strings.HasPrefix(strings.ToLower(cloneURL), "https://") {
-		return e.refreshAzureDevOpsRepositoryForSessionWithState(
-			ctx, repo, cloneURL,
-		)
-	}
 	request := repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL)
 	if len(options) > 0 {
 		request.CheckoutOptions = options[0]
@@ -671,36 +663,6 @@ func (e *Executor) refreshManagedRepositoryForSessionWithState(
 		ctx, request, repo.LocalPath, credentialOrigin, token,
 	); err != nil {
 		return repoclone.RemoteRefStateUnknown, fmt.Errorf("refresh repository before worktree: %w", err)
-	}
-	return repoclone.RemoteRefStateHasRefs, nil
-}
-
-func (e *Executor) refreshAzureDevOpsRepositoryForSessionWithState(
-	ctx context.Context, repo *models.Repository, cloneURL string,
-) (repoclone.RemoteRefState, error) {
-	authCloner, ok := e.repoCloner.(strictAuthenticatedRepoCloner)
-	if !ok || e.secretStore == nil {
-		return repoclone.RemoteRefStateUnknown, errors.New("azure DevOps repository refresh authentication is unavailable")
-	}
-	pat, err := e.secretStore.Reveal(ctx, cloneauth.AzureDevOpsPATKey(repo.WorkspaceID))
-	if err != nil {
-		return repoclone.RemoteRefStateUnknown, fmt.Errorf("read Azure DevOps refresh credential: %w", err)
-	}
-	if stateCloner, ok := e.repoCloner.(remoteStateAuthenticatedRepoCloner); ok {
-		state, err := stateCloner.RefreshWorkspaceRepositoryWithBasicAuthAndState(
-			ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost, cloneURL,
-			repo.ProviderOwner, repo.ProviderName, repo.LocalPath, "kandev", pat,
-		)
-		if err != nil {
-			return repoclone.RemoteRefStateUnknown, fmt.Errorf("refresh Azure DevOps repository before worktree: %w", err)
-		}
-		return state, nil
-	}
-	if err := authCloner.RefreshWorkspaceRepositoryWithBasicAuth(
-		ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost, cloneURL,
-		repo.ProviderOwner, repo.ProviderName, repo.LocalPath, "kandev", pat,
-	); err != nil {
-		return repoclone.RemoteRefStateUnknown, fmt.Errorf("refresh Azure DevOps repository before worktree: %w", err)
 	}
 	return repoclone.RemoteRefStateHasRefs, nil
 }
@@ -1055,6 +1017,11 @@ type ResumeOptions struct {
 	// workspace idle policy. It protects focus recovery from reviving a manual
 	// stop, cancellation, archive, or workflow-owned session.
 	RequireIdleSuspensionProvenance bool
+	// RequireExecutorActor fails the resume closed when executor admission
+	// does not establish an identity to launch as. Internal callers that act
+	// for the session's durable actor set it so a missing actor never becomes
+	// an unscoped launch.
+	RequireExecutorActor bool
 	// NoInitialPrompt keeps the task description out of a fresh recovery boot;
 	// the owning continuation delivers the captured submission after readiness.
 	NoInitialPrompt bool
@@ -1294,6 +1261,11 @@ func (e *Executor) ResumeSessionWithOptions(
 			return nil, err
 		}
 	}
+	if session != nil && options.RequireExecutorActor {
+		if _, ok := authn.IdentityFromContext(ctx); !ok {
+			return nil, ErrExecutorActorUnavailable
+		}
+	}
 	if session != nil {
 		e.auditCeilingBypass(ctx, "ResumeSessionWithOptions", session.ID, false)
 	}
@@ -1323,6 +1295,19 @@ func (e *Executor) resumeSession(
 	completedResume := options.AllowCompletedSessionResume &&
 		resumeInitialState == models.TaskSessionStateCompleted
 	wasTerminalResume := isTerminalSessionState(resumeInitialState) || completedResume
+	// Required-runtime admission runs before stale-runtime cleanup, credential
+	// leases, and environment retirement. A runtime refusal must not destroy
+	// retained evidence or unrelated work.
+	requestedExecutorType, err := e.requestedResumeExecutorType(ctx, task, session, startAgent, options)
+	if err != nil {
+		return nil, err
+	}
+	if err := e.admitExecutorRuntime(requestedExecutorType); err != nil {
+		return nil, err
+	}
+	if err := e.admitRetainedExecutionRuntime(ctx, session, requestedExecutorType); err != nil {
+		return nil, err
+	}
 	// A terminal session may retain an unconfirmed runtime. Stop it before
 	// selected-environment admission can claim the environment.
 	if wasTerminalResume {
@@ -1336,10 +1321,16 @@ func (e *Executor) resumeSession(
 	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
 		return nil, err
 	}
-	requestedExecutorType, err := e.requestedResumeExecutorType(ctx, task, session, startAgent, options)
+	replacement, err := e.replaceFailedEnvironmentForResume(ctx, task, session, requestedExecutorType)
 	if err != nil {
 		return nil, err
 	}
+	replacementPublished := false
+	defer func() {
+		if !replacementPublished {
+			e.markTaskEnvironmentMaterializationFailed(context.WithoutCancel(ctx), replacement, session.ID)
+		}
+	}()
 	preflight := &resumePreflight{ctx: ctx, persistedEnvironmentID: session.TaskEnvironmentID}
 	defer func() {
 		_ = releaseSelectedWorktreeRecovery(resumeOwnedCleanupContext(ctx), &preflight.admission)
@@ -1475,6 +1466,7 @@ func (e *Executor) resumeSession(
 					resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
 				)
 			}
+			replacementPublished = true
 			return nil, ErrExecutionAlreadyRunning
 		}
 		e.logger.Info("cleaning up stale execution and retrying launch",
@@ -1546,6 +1538,7 @@ func (e *Executor) resumeSession(
 		}
 		return nil, err
 	}
+	replacementPublished = true
 	if err := e.persistResumeWorkspaceBinding(launchCtx, session, startAgent); err != nil {
 		e.cleanupUnstartedExecutionAfterPersistError(cleanupCtx, session.ID, resp.AgentExecutionID, err)
 		var superseded *SessionStateSupersededError
@@ -1655,7 +1648,7 @@ func (e *Executor) requestedResumeExecutorType(
 ) (string, error) {
 	requestSession := *session
 	requestSession.Metadata = cloneMetadata(session.Metadata)
-	req, metadata := newResumeLaunchRequest(task, &requestSession, startAgent, options)
+	req, metadata := newResumeLaunchRequest(task, &requestSession, startAgent, options, e.managedRuntimeOwnerUserID(ctx, task.WorkspaceID))
 	running, err := e.repo.GetExecutorRunningBySessionID(ctx, session.ID)
 	if err != nil && !errors.Is(err, models.ErrExecutorRunningNotFound) {
 		return "", fmt.Errorf("load runtime inventory for session %q: %w", session.ID, err)
@@ -1666,9 +1659,20 @@ func (e *Executor) requestedResumeExecutorType(
 		); err != nil {
 			return "", err
 		}
-		return req.ExecutorType, nil
+		return e.requireResolvedResumeExecutorType(req.ExecutorType, requestSession.ExecutorID)
 	}
-	return e.resolveExecutorConfig(ctx, requestSession.ExecutorID, task.WorkspaceID, metadata).ExecutorType, nil
+	config := e.resolveExecutorConfig(ctx, requestSession.ExecutorID, task.WorkspaceID, metadata)
+	if config.ResolutionErr != nil {
+		return "", fmt.Errorf("%w: %v", ErrExecutorRuntimeSelectionUnresolved, config.ResolutionErr)
+	}
+	return e.requireResolvedResumeExecutorType(config.ExecutorType, config.ExecutorID)
+}
+
+func (e *Executor) requireResolvedResumeExecutorType(executorType, executorID string) (string, error) {
+	if strings.TrimSpace(executorID) != "" && strings.TrimSpace(executorType) == "" {
+		return "", fmt.Errorf("%w: executor %q", ErrExecutorRuntimeSelectionUnresolved, executorID)
+	}
+	return executorType, nil
 }
 
 func (e *Executor) prepareResumePreflight(
@@ -2081,7 +2085,7 @@ func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
 	beforeCredentialLease func() error,
 	options ResumeOptions,
 ) (*LaunchAgentRequest, string, executorConfig, *models.TaskEnvironment, *models.ExecutorRunning, error) {
-	req, metadata := newResumeLaunchRequest(task, session, startAgent, options)
+	req, metadata := newResumeLaunchRequest(task, session, startAgent, options, e.managedRuntimeOwnerUserID(ctx, task.WorkspaceID))
 	if err := e.applyDeliveryIdentity(ctx, req, session); err != nil {
 		return nil, "", executorConfig{}, nil, nil, err
 	}
@@ -2110,7 +2114,17 @@ func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
 				fmt.Errorf("validate recorded Kubernetes runtime for resume: %w", err)
 		}
 	} else {
-		execConfig = e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
+		var configErr error
+		execConfig, configErr = e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
+		if configErr != nil {
+			return nil, "", executorConfig{}, nil, existingRunning, configErr
+		}
+		// A retained binding is selection evidence even when the persisted
+		// session omits its executor type. Resolve it through current provider
+		// rules and compare the recorded runtime before reuse.
+		if err := e.admitRetainedExecutionRuntime(ctx, session, execConfig.ExecutorType); err != nil {
+			return nil, "", execConfig, nil, existingRunning, err
+		}
 	}
 	repositoryID, existingEnv, allRepos, err := e.prepareResumeRepositorySettings(
 		ctx, task, session, req, options,
@@ -2189,7 +2203,12 @@ func newResumeLaunchRequest(
 	session *models.TaskSession,
 	startAgent bool,
 	options ResumeOptions,
+	ownerUserIDs ...string,
 ) (*LaunchAgentRequest, map[string]interface{}) {
+	ownerUserID := ""
+	if len(ownerUserIDs) > 0 {
+		ownerUserID = ownerUserIDs[0]
+	}
 	executionProfileID := session.ExecutionProfileID
 	if executionProfileID == "" {
 		executionProfileID = session.AgentProfileID
@@ -2198,6 +2217,7 @@ func newResumeLaunchRequest(
 		WorkspaceLayout:              task.InitialWorkspaceLayout,
 		ResumePassthrough:            startAgent && session.IsPassthrough && !options.ForceContextContinuation,
 		TaskID:                       task.ID,
+		OwnerUserID:                  ownerUserID,
 		SessionSettingsPolicy:        options.SettingsPolicy,
 		RequiredNativeConversationID: options.RequiredNativeConversationID,
 		ACPSessionID:                 options.RequiredNativeConversationID,
@@ -2517,6 +2537,9 @@ func (e *Executor) resolveResumeTaskEnvironmentForTask(ctx context.Context, task
 			if inhErr != nil && !errors.Is(inhErr, repoerrors.ErrTaskEnvironmentNotFound) {
 				return nil, fmt.Errorf("lookup inherited task environment: %w", inhErr)
 			}
+			if inherited != nil && inherited.IsRetired() {
+				return nil, fmt.Errorf("%w: inherited task environment is retired", models.ErrWorkspaceReuseUnsafe)
+			}
 			if inherited != nil {
 				if err := e.validateInheritedEnvironmentOwner(ctx, task, inherited); err != nil {
 					return nil, err
@@ -2537,9 +2560,14 @@ func (e *Executor) resolveResumeTaskEnvironmentForTask(ctx context.Context, task
 
 // applyExecutorConfigToResumeRequest resolves executor config and applies it to the
 // resume request, persisting executor assignment if newly resolved.
-func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *LaunchAgentRequest, task *v1.Task, session *models.TaskSession, metadata map[string]interface{}) executorConfig {
+func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *LaunchAgentRequest, task *v1.Task, session *models.TaskSession, metadata map[string]interface{}) (executorConfig, error) {
 	executorWasEmpty := session.ExecutorID == ""
 	execConfig := e.resolveExecutorConfig(ctx, session.ExecutorID, task.WorkspaceID, metadata)
+	// Required-runtime admission precedes credential leases, environment
+	// retirement, and any session mutation for this resume attempt.
+	if err := e.admitConcreteExecutorRuntime(execConfig); err != nil {
+		return execConfig, err
+	}
 	session.ExecutorID = execConfig.ExecutorID
 	req.ExecutorType = execConfig.ExecutorType
 	req.ExecutorConfig = execConfig.ExecutorCfg
@@ -2557,7 +2585,7 @@ func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *
 		req.Metadata = execConfig.Metadata
 	}
 
-	return execConfig
+	return execConfig, nil
 }
 
 // isRecoverableCancelledResumeSession reports whether session was cancelled by

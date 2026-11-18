@@ -136,6 +136,16 @@ describe("useWorkflowSnapshot — kanban.isLoading", () => {
     expect(mockState.kanban.isLoading).toBe(false);
   });
 
+  it("fetches when hydration contains only a partial task seed and skipping is disabled", async () => {
+    resetState({ workflowId: "wf-1", tasks: [{ id: "parent" }], isLoading: false });
+    mockFetchWorkflowSnapshot.mockResolvedValue({ tasks: [{ id: "parent" }, { id: "sibling" }] });
+    renderHook(() => useWorkflowSnapshot("wf-1", { skipIfHydrated: false }));
+    await waitFor(() =>
+      expect(mockFetchWorkflowSnapshot).toHaveBeenCalledWith("wf-1", expect.anything()),
+    );
+    await waitFor(() => expect(mockHydrate).toHaveBeenCalled());
+  });
+
   it("does not clear isLoading on settle when it didn't raise the flag (already-hydrated re-fetch)", async () => {
     // Mimic a workspace switch having set isLoading=true after the snapshot
     // hydrated for this workflowId. A silent re-fetch (e.g. WS reconnect)

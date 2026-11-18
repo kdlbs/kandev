@@ -369,10 +369,14 @@ func provideGateway(
 				}
 				observation, observationErr := orchestratorSvc.CurrentSessionCeilingObservation(ctx)
 				return statussummary.LaunchQueueSummaryFromTaskWithCapacity(task, &statussummary.LaunchQueueCapacityObservation{
-					InUse:      observation.InUse,
-					Limit:      observation.Limit,
-					ObservedAt: observation.ObservedAt,
-					Known:      observationErr == nil && observation.Known,
+					Policy:             observation.Policy,
+					GradeInUse:         observation.GradeInUse,
+					GradeLimits:        observation.GradeLimits,
+					NeedsConfiguration: observation.NeedsConfiguration,
+					InUse:              observation.InUse,
+					Limit:              observation.Limit,
+					ObservedAt:         observation.ObservedAt,
+					Known:              observationErr == nil && observation.Known,
 				}), nil
 			},
 			LoadCompletionGate: func(ctx context.Context, taskID string) (*statussummary.CompletionGateSummary, error) {
@@ -381,6 +385,9 @@ func provideGateway(
 					return nil, err
 				}
 				return statussummary.CompletionGateSummaryFromSnapshot(gate), nil
+			},
+			LoadQuotaWait: func(ctx context.Context, taskID string) (*statussummary.QuotaWaitSummary, error) {
+				return loadTaskQuotaWait(ctx, taskRepo, taskID)
 			},
 			ResolveWorkspace: func(ctx context.Context, taskID string) (string, error) {
 				task, err := taskRepo.GetTask(ctx, taskID)
@@ -525,6 +532,24 @@ func taskStatusRuntimeProviders(
 		return orchestratorSvc, nil
 	}
 	return orchestratorSvc, queue.CountPendingByTask
+}
+
+// loadTaskQuotaWait projects the task's live limit wait from the durable route
+// rows of its sessions, read in one query. The primary session is consulted
+// first because it is the one whose turn the task is presenting; the remaining
+// sessions follow in the order the repository lists them, so a task with more
+// than one parked session shows a stable one rather than whichever row the query
+// happened to return.
+func loadTaskQuotaWait(
+	ctx context.Context,
+	taskRepo *sqliterepo.Repository,
+	taskID string,
+) (*statussummary.QuotaWaitSummary, error) {
+	waits, err := taskRepo.LoadTaskStatusSummaryQuotaWaits(ctx, []string{taskID})
+	if err != nil {
+		return nil, err
+	}
+	return waits[taskID], nil
 }
 
 func loadTaskSessionObservations(

@@ -25,6 +25,32 @@ export function dockerState(containerID: string): string {
   return res.stdout.trim();
 }
 
+/** Returns the container's labels, or null when inspection fails. */
+export function dockerContainerLabels(containerID: string): Record<string, string> | null {
+  const res = spawnSync("docker", ["inspect", "-f", "{{json .Config.Labels}}", containerID], {
+    encoding: "utf8",
+  });
+  if (res.status !== 0) return null;
+  try {
+    return JSON.parse(res.stdout.trim()) as Record<string, string>;
+  } catch {
+    return null;
+  }
+}
+
+/** Returns the command lines of the container's running processes. */
+export function dockerTopCommandLines(containerID: string): string[] {
+  const res = spawnSync("docker", ["top", containerID, "-eo", "pid,args"], {
+    encoding: "utf8",
+  });
+  if (res.status !== 0) return [];
+  return res.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(1);
+}
+
 export function dockerCurrentBranch(containerID: string): string {
   const res = spawnSync(
     "docker",

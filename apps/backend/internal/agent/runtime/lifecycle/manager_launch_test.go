@@ -1453,8 +1453,10 @@ func TestLaunch_UsesPreparedWorkspacePathForWorktree(t *testing.T) {
 func TestLaunch_PublishesPrepareCompletionOnLegacyRouteEnvError(t *testing.T) {
 	log := newTestLogger()
 	eventBus := &MockEventBusWithTracking{}
+	execRegistry := NewExecutorRegistry(log)
+	execRegistry.Register(&MockExecutor{name: executor.NameStandalone})
 	mgr := NewManager(
-		newTestRegistry(), eventBus, nil,
+		newTestRegistry(), eventBus, execRegistry,
 		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
 		ExecutorFallbackWarn, "", log,
 	)
@@ -2333,6 +2335,7 @@ func TestLaunch_RollsBackWhenTaskCleanupBeginsDuringRegistration(t *testing.T) {
 		upserted: make(chan struct{}),
 		running: &models.ExecutorRunning{
 			SessionID: "session-cleanup-race", ExecutionProfileID: "profile-1", ResumeToken: "resume-token",
+			Runtime: agentruntime.RuntimeStandalone,
 		},
 	}
 	mgr.SetExecutorRunningWriter(writer)

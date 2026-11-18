@@ -1309,9 +1309,10 @@ func selectBatchedBranchPRNode(nodes []batchedBranchPRNode) (*batchedBranchPRNod
 }
 
 // graphqlBranchKey is the lookup key used in batched-branch result maps.
+// Repository identity is case-insensitive; branch names remain case-sensitive.
 // Named graphql* to avoid collision with the mock_client.go branchKey type.
 func graphqlBranchKey(owner, repo, branch string) string {
-	return owner + "/" + repo + "/" + branch
+	return strings.ToLower(owner) + "/" + strings.ToLower(repo) + "/" + branch
 }
 
 // Compile-time assertions that the existing CLI/PAT clients satisfy

@@ -558,6 +558,15 @@ app does not receive that API. Use the canvas state protocol instead.
 
 ## Authoritative contracts
 
+For the additive notification formatter extension, see the
+[notification content formatter contract](../plans/plugins/PLUGIN-API.md#notification-content-formatters).
+It covers the optional Go interface, provider-scoped management envelope,
+owner-isolated editor slot, immutable snapshots, activation CAS, cancellation,
+and default fallback. The source prepares SDK `0.3.0` for the next Stable
+release. Wait for verified host and SDK publication before using this extension
+in a released plugin. The release stamps its host floor into `sdk-release.json`;
+the metadata alone does not establish public availability.
+
 The guide summarizes the contract for discovery. These files remain the source
 of truth and must be updated together when the contract changes:
 

@@ -45,18 +45,11 @@ func managedRuntimeCacheEvidenceForFailure(
 }
 
 func exactManagedRuntimePackage(agentID string, command []string) (string, bool) {
-	for _, candidate := range command {
-		spec, ok := agents.BuiltinManagedNPMRuntimeForPackage(agentID, candidate)
-		if !ok || managedruntime.ValidateExactPackageSpec(candidate) != nil {
-			continue
-		}
-		prefix := spec.Package + "@"
-		version := strings.TrimPrefix(candidate, prefix)
-		if sameManagedCommand(command, spec.RuntimeCommand(version).Args()) {
-			return candidate, true
-		}
+	_, invocation, ok := agents.MatchBuiltinManagedNPMRuntime(agentID, command)
+	if !ok {
+		return "", false
 	}
-	return "", false
+	return invocation.PackageSpec, true
 }
 
 func sameManagedCommand(left, right []string) bool {
@@ -83,13 +76,34 @@ func (m *Manager) managedRuntimeCacheEvidence(
 		!looksLikeMissingExecutionRootDiagnostic(rawStderr) {
 		return nil
 	}
+	cacheRoot, ok := m.managedRuntimeEvidenceCacheRoot(snapshot)
+	if !ok {
+		return nil
+	}
+	return managedRuntimeCacheEvidenceForFailure(cacheRoot, snapshot.AgentID, snapshot.Command, failure, rawStderr)
+}
+
+// managedRuntimeEvidenceCacheRoot inspects the cache the failed process
+// actually used. A selected repair generation supplies its owned cache; a
+// normal launch resolves the effective default cache.
+func (m *Manager) managedRuntimeEvidenceCacheRoot(snapshot managedRuntimeStartupSnapshot) (string, bool) {
+	packageSpec, ok := exactManagedRuntimePackage(snapshot.AgentID, snapshot.Command)
+	if !ok {
+		return "", false
+	}
+	m.startMu.Lock()
+	prepared := m.preparedRuntime
+	m.startMu.Unlock()
+	if prepared != nil && prepared.PackageSpec() == packageSpec {
+		return prepared.CacheDirectory(), true
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), managedRuntimeCacheResolutionTimeout)
 	defer cancel()
 	cacheRoot, err := m.resolveManagedRuntimeCacheRoot(ctx, snapshot)
 	if err != nil {
-		return nil
+		return "", false
 	}
-	return managedRuntimeCacheEvidenceForFailure(cacheRoot, snapshot.AgentID, snapshot.Command, failure, rawStderr)
+	return cacheRoot, true
 }
 
 func looksLikeMissingExecutionRootDiagnostic(stderr string) bool {

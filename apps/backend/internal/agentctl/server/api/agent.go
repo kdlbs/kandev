@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/constants"
+	"github.com/kandev/kandev/internal/common/logger"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	protocol "github.com/kandev/kandev/pkg/codexappserver"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -900,6 +901,8 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 		return resp
 	}
 
+	s.procMgr.ManagedRuntimeInitialized(ctx, req.ProcessGeneration)
+
 	// Get agent info after successful initialization
 	var agentInfoResp *AgentInfoResponse
 	if info := adapter.GetAgentInfo(); info != nil {
@@ -938,16 +941,24 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 // when an agent advertises both transports the "first surviving entry wins" dedup keeps
 // the HTTP entry (modern streamable MCP); SSE remains as a fallback for SSE-only agents.
 // Any existing kandev server in the list is filtered out to avoid duplicates.
-func (s *Server) injectKandevMcpServers(mcpServers []types.McpServer) []types.McpServer {
+func (s *Server) injectKandevMcpServers(mcpServers []types.McpServer) ([]types.McpServer, error) {
+	sseURL, err := agentctlconfig.MCPServerURLForInstance(s.cfg.MCPHost, s.cfg.Port, s.cfg.InstanceID, s.cfg.ScopedMCPRoutes, mcpPathSSE)
+	if err != nil {
+		return nil, err
+	}
+	httpURL, err := agentctlconfig.MCPServerURLForInstance(s.cfg.MCPHost, s.cfg.Port, s.cfg.InstanceID, s.cfg.ScopedMCPRoutes, mcpPathHTTP)
+	if err != nil {
+		return nil, err
+	}
 	kandevMcpSse := types.McpServer{
 		Name: kandevMcpServerName,
 		Type: mcpTransportSSE,
-		URL:  agentctlconfig.MCPServerURL(s.cfg.MCPHost, s.cfg.Port, mcpPathSSE),
+		URL:  sseURL,
 	}
 	kandevMcpHttp := types.McpServer{
 		Name: kandevMcpServerName,
 		Type: mcpTransportHTTP,
-		URL:  agentctlconfig.MCPServerURL(s.cfg.MCPHost, s.cfg.Port, mcpPathHTTP),
+		URL:  httpURL,
 	}
 	filtered := make([]types.McpServer, 0, len(mcpServers)+2)
 	filtered = append(filtered, kandevMcpHttp, kandevMcpSse)
@@ -960,7 +971,7 @@ func (s *Server) injectKandevMcpServers(mcpServers []types.McpServer) []types.Mc
 		zap.String("http_url", kandevMcpHttp.URL),
 		zap.String("sse_url", kandevMcpSse.URL),
 		zap.Int("total_servers", len(filtered)))
-	return filtered
+	return filtered, nil
 }
 
 // sessionMCPServers applies the same managed-conversation admission to every
@@ -977,7 +988,10 @@ func (s *Server) sessionMCPServers(requested []types.McpServer) ([]types.McpServ
 		return nil, errors.New("managed conversation MCP broker is unavailable")
 	}
 	if s.mcpServer != nil {
-		servers = s.injectKandevMcpServers(servers)
+		servers, err = s.injectKandevMcpServers(servers)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return servers, nil
 }
@@ -997,10 +1011,10 @@ func (s *Server) startMCPAttachmentAttempt(ctx context.Context, servers []types.
 	if s.cfg.McpProfile != nil {
 		attempt.BuiltinPackages = s.cfg.McpProfile.BuiltinPackages.Clone()
 	}
-	s.procMgr.PublishMCPAttachmentAttempt(attempt)
 	if s.mcpServer != nil {
-		s.mcpServer.SetAttachmentAttempt(attempt)
+		s.mcpServer.BeginAttachmentAttempt(attempt)
 	}
+	var initialEvidence []streams.MCPAttachmentEvidence
 	var entries []streams.MCPResolutionEntry
 	if len(resolution) > 0 {
 		entries = streams.NormalizeMCPResolution(resolution[0])
@@ -1018,7 +1032,7 @@ func (s *Server) startMCPAttachmentAttempt(ctx context.Context, servers []types.
 			evidence.DefinitionRevision = entry.DefinitionRevision
 			evidence.Origins = entry.Origins
 		}
-		s.procMgr.PublishMCPAttachment(evidence)
+		initialEvidence = append(initialEvidence, evidence)
 	}
 	for index := range entries {
 		if entries[index].ReasonCode == "" && !delivered[entries[index].RuntimeName] {
@@ -1027,14 +1041,42 @@ func (s *Server) startMCPAttachmentAttempt(ctx context.Context, servers []types.
 	}
 	for _, evidence := range streams.MCPResolutionEvidence(attempt.AttemptID, entries, attempt.StartedAt) {
 		if !delivered[evidence.ServerName] {
-			s.procMgr.PublishMCPAttachment(evidence)
+			initialEvidence = append(initialEvidence, evidence)
 		}
 	}
-	return streams.WithMCPAttachmentContext(ctx, attempt)
+	return streams.WithMCPAttachmentContextAndEvidence(ctx, attempt, initialEvidence)
+}
+
+func (s *Server) publishMCPAttachmentStart(ctx context.Context) {
+	attachmentContext, ok := streams.MCPAttachmentContextFromContext(ctx)
+	if !ok {
+		return
+	}
+	s.procMgr.PublishMCPAttachmentAttempt(attachmentContext.Attempt)
+	for _, evidence := range attachmentContext.InitialEvidence {
+		s.procMgr.PublishMCPAttachment(evidence)
+	}
+}
+
+func (s *Server) finishMCPAttachmentAttempt(
+	ctx context.Context,
+	adapter adapter.AgentAdapter,
+	attemptID string,
+	servers []types.McpServer,
+	err error,
+) {
+	authenticationFailure := acptransport.ProjectSessionOperationFailure(err, nil) != nil
+	if !authenticationFailure && !adapterPublishesMCPAttachmentResults(adapter) {
+		s.publishMCPAttachmentStart(ctx)
+		s.publishMCPAttachmentResult(attemptID, servers, err)
+	}
+	if s.mcpServer != nil {
+		s.mcpServer.CompleteAttachmentAttempt(attemptID, !authenticationFailure)
+	}
 }
 
 func (s *Server) publishMCPAttachmentResult(attemptID string, servers []types.McpServer, err error) {
-	if adapter, ok := s.procMgr.GetAdapter().(mcpAttachmentResultPublisher); ok && adapter.PublishesMCPAttachmentResults() {
+	if adapterPublishesMCPAttachmentResults(s.procMgr.GetAdapter()) {
 		return
 	}
 	kind := streams.MCPAttachmentEvidenceSessionAccepted
@@ -1048,6 +1090,11 @@ func (s *Server) publishMCPAttachmentResult(attemptID string, servers []types.Mc
 	for _, mcpServer := range servers {
 		s.procMgr.PublishMCPAttachment(mcpAttachmentEvidence(attemptID, mcpServer, kind, reasonCode, summary))
 	}
+}
+
+func adapterPublishesMCPAttachmentResults(agentAdapter adapter.AgentAdapter) bool {
+	publisher, ok := agentAdapter.(mcpAttachmentResultPublisher)
+	return ok && publisher.PublishesMCPAttachmentResults()
 }
 
 // mcpAttachmentResultPublisher identifies adapters that emit per-server
@@ -1118,10 +1165,17 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 	ctx = s.startMCPAttachmentAttempt(ctx, mcpServers, req.MCPResolution)
 	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
 	sessionID, err := adapter.NewSession(ctx, mcpServers)
-	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
+	s.finishMCPAttachmentAttempt(ctx, adapter, attachmentContext.Attempt.AttemptID, mcpServers, err)
 	if err != nil {
-		s.logger.Error("new session failed", zap.Error(err))
-		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		logSessionOperationFailure(s.logger, "new session failed", "new", adapter, err)
+		details := sessionOperationErrorDetails(adapter, err, nil)
+		resp, _ := ws.NewError(
+			msg.ID,
+			msg.Action,
+			ws.ErrorCodeInternalError,
+			sessionOperationErrorMessage(adapter, err, err.Error()),
+			details,
+		)
 		return resp
 	}
 
@@ -1175,8 +1229,8 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
 	ctx = streams.WithSessionSettingsPolicy(ctx, req.SessionSettingsPolicy)
 	if err := adapter.LoadSession(ctx, req.SessionID, mcpServers); err != nil {
-		s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
-		s.logger.Error("load session failed", zap.Error(err))
+		s.finishMCPAttachmentAttempt(ctx, adapter, attachmentContext.Attempt.AttemptID, mcpServers, err)
+		logSessionOperationFailure(s.logger, "load session failed", "load", adapter, err)
 		code := ws.ErrorCodeInternalError
 		details := map[string]interface{}(nil)
 		var restoreErr *acptransport.SessionRestoreError
@@ -1193,11 +1247,22 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 				details["kind"] = "session_restore_required"
 				details["recovery_action"] = "continue_from_history"
 			}
+			if code == ws.ErrorCodeInternalError {
+				details = sessionOperationErrorDetails(adapter, err, details)
+			}
+		} else {
+			details = sessionOperationErrorDetails(adapter, err, details)
 		}
-		resp, _ := ws.NewError(msg.ID, msg.Action, code, err.Error(), details)
+		resp, _ := ws.NewError(
+			msg.ID,
+			msg.Action,
+			code,
+			sessionOperationErrorMessage(adapter, err, err.Error()),
+			details,
+		)
 		return resp
 	}
-	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, nil)
+	s.finishMCPAttachmentAttempt(ctx, adapter, attachmentContext.Attempt.AttemptID, mcpServers, nil)
 
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, LoadSessionResponse{
 		Success:             true,
@@ -1251,13 +1316,20 @@ func (s *Server) handleWSResumeSession(ctx context.Context, msg *ws.Message) *ws
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "agent adapter does not support session resume", nil)
 		return resp
 	}
-	if err := resumer.ResumeSession(ctx, req.SessionID, mcpServers); err != nil {
-		s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
-		s.logger.Error("resume session failed", zap.Error(err))
-		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "session resume failed", nil)
+	err = resumer.ResumeSession(ctx, req.SessionID, mcpServers)
+	s.finishMCPAttachmentAttempt(ctx, adapter, attachmentContext.Attempt.AttemptID, mcpServers, err)
+	if err != nil {
+		logSessionOperationFailure(s.logger, "resume session failed", "resume", adapter, err)
+		details := sessionOperationErrorDetails(adapter, err, nil)
+		resp, _ := ws.NewError(
+			msg.ID,
+			msg.Action,
+			ws.ErrorCodeInternalError,
+			sessionOperationErrorMessage(adapter, err, "session resume failed"),
+			details,
+		)
 		return resp
 	}
-	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, nil)
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, ResumeSessionResponse{
 		Success: true, SessionID: req.SessionID, ModelState: sessionModelState(adapter),
 		AttachmentAttemptID: attachmentContext.Attempt.AttemptID,
@@ -1743,10 +1815,17 @@ func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.
 	ctx = s.startMCPAttachmentAttempt(ctx, mcpServers, req.MCPResolution)
 	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
 	sessionID, err := sr.ResetSession(ctx, mcpServers)
-	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
+	s.finishMCPAttachmentAttempt(ctx, agentAdapter, attachmentContext.Attempt.AttemptID, mcpServers, err)
 	if err != nil {
-		s.logger.Error("session reset failed", zap.Error(err))
-		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		logSessionOperationFailure(s.logger, "session reset failed", "reset", agentAdapter, err)
+		details := sessionOperationErrorDetails(agentAdapter, err, nil)
+		resp, _ := ws.NewError(
+			msg.ID,
+			msg.Action,
+			ws.ErrorCodeInternalError,
+			sessionOperationErrorMessage(agentAdapter, err, err.Error()),
+			details,
+		)
 		return resp
 	}
 
@@ -1757,6 +1836,61 @@ func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.
 		AttachmentAttemptID: attachmentContext.Attempt.AttemptID,
 	})
 	return resp
+}
+
+func sessionOperationErrorDetails(
+	agentAdapter adapter.AgentAdapter,
+	err error,
+	details map[string]interface{},
+) map[string]interface{} {
+	failure := acptransport.ProjectSessionOperationFailure(err, sessionOperationAuthMethods(agentAdapter))
+	if failure == nil {
+		return details
+	}
+	if details == nil {
+		details = make(map[string]interface{})
+	}
+	details["session_failure"] = failure
+	return details
+}
+
+func sessionOperationAuthMethods(agentAdapter adapter.AgentAdapter) []streams.AuthMethodInfo {
+	provider, ok := agentAdapter.(adapter.SessionOperationAuthMethodsProvider)
+	if !ok {
+		return nil
+	}
+	return provider.GetSessionOperationAuthMethods()
+}
+
+func sessionOperationAuthenticationFailure(agentAdapter adapter.AgentAdapter, err error) bool {
+	return acptransport.ProjectSessionOperationFailure(err, sessionOperationAuthMethods(agentAdapter)) != nil
+}
+
+func sessionOperationErrorMessage(agentAdapter adapter.AgentAdapter, err error, fallback string) string {
+	if sessionOperationAuthenticationFailure(agentAdapter, err) {
+		return "authentication required"
+	}
+	if fallback != "" {
+		return fallback
+	}
+	return err.Error()
+}
+
+func logSessionOperationFailure(
+	log *logger.Logger,
+	message string,
+	operation string,
+	agentAdapter adapter.AgentAdapter,
+	err error,
+) {
+	if sessionOperationAuthenticationFailure(agentAdapter, err) {
+		log.Error(message,
+			zap.String("operation", operation),
+			zap.String("error_class", "authentication_required"),
+		)
+		return
+	}
+	log.Error(message, zap.Error(err))
 }
 
 func sessionModelState(agentAdapter adapter.AgentAdapter) *streams.SessionModelState {

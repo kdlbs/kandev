@@ -69,6 +69,7 @@ type Repository interface {
 	ListTasksByWorkspace(ctx context.Context, workspaceID string, includeSystem bool) ([]*sqlite.TaskRow, error)
 	ListTasksFiltered(ctx context.Context, workspaceID string, opts sqlite.ListTasksOptions) (*sqlite.ListTasksFilteredResult, error)
 	GetTaskByID(ctx context.Context, taskID string) (*sqlite.TaskRow, error)
+	GetTaskIDByIdentifier(ctx context.Context, workspaceID, identifier string) (string, error)
 	ListChildTasks(ctx context.Context, parentID string) ([]*sqlite.TaskRow, error)
 	ListBlockersForTasks(ctx context.Context, taskIDs []string) (map[string][]string, error)
 	ListTaskComments(ctx context.Context, taskID string) ([]*models.TaskComment, error)
@@ -97,6 +98,7 @@ type Repository interface {
 	DeleteTaskBlocker(ctx context.Context, taskID, blockerTaskID string) error
 	ListTaskBlockers(ctx context.Context, taskID string) ([]*models.TaskBlocker, error)
 	ListTaskParticipants(ctx context.Context, taskID, role string) ([]sqlite.Participant, error)
+	ListTaskParticipantsAtStep(ctx context.Context, taskID, stepID, role string) ([]sqlite.Participant, error)
 	ListAllTaskParticipants(ctx context.Context, taskID string) ([]sqlite.Participant, error)
 	// ListTaskParticipantsAtCurrentStep is the step-scoped seat read
 	// AC-OFFICE-SESSION-TERM-002.3 requires for session-termination
@@ -114,7 +116,7 @@ type Repository interface {
 	CancelDisplacedParticipantRun(
 		ctx context.Context, taskID, stepID, agentProfileID string,
 	) ([]runssqlite.CancelledRun, error)
-	IsTaskWorkflowStepTerminal(ctx context.Context, taskID string) (terminal, hasStep bool, err error)
+	IsTaskOnFinalStep(ctx context.Context, taskID string) (final, hasStep bool, err error)
 }
 
 // DecisionStore is the workflow-domain decisions interface required by
@@ -232,6 +234,10 @@ type TaskDetacher interface {
 type TaskLifecyclePublisher interface {
 	PublishTaskUpdatedByID(ctx context.Context, id string)
 }
+
+// TaskStateChangePublisher publishes the immutable receipt of a committed
+// task-state transition through the canonical task event path.
+type TaskStateChangePublisher = shared.TaskStateChangePublisher
 
 // SessionTerminator flips the (task, agent) office session row to a terminal
 // state. Used when an agent stops being a participant on a task — reassignment,
@@ -444,6 +450,9 @@ type DashboardService struct {
 	assigneeWriter        HumanAssigneeWriter             // optional; nil rejects human-assignee writes rather than skipping authorization
 	projectBudget         ProjectBudgetEvaluator          // optional; nil means reassignment doesn't re-evaluate the destination project's budget policies
 	taskStateWriter       shared.TaskStateWriter          // task repository owns transactional state changes and completion guards
+	taskStateChangeEvents TaskStateChangePublisher
+	humanDoneCompleter    TaskHumanDoneCompleter
+	finalStepMover        TaskFinalStepMover // optional; nil keeps the in_review redirect for human Done on a non-final step
 }
 
 // SetRoutingProvider wires the provider-routing seam used by the
@@ -663,6 +672,11 @@ func (s *DashboardService) SetTaskStateWriter(w shared.TaskStateWriter) {
 	s.taskStateWriter = w
 }
 
+// SetTaskStateChangePublisher wires the canonical task-state event publisher.
+func (s *DashboardService) SetTaskStateChangePublisher(p TaskStateChangePublisher) {
+	s.taskStateChangeEvents = p
+}
+
 // SetTaskLifecyclePublisher wires the canonical task.updated publisher used
 // after a status change persists a task row mutation.
 func (s *DashboardService) SetTaskLifecyclePublisher(p TaskLifecyclePublisher) {
@@ -858,6 +872,12 @@ func (s *DashboardService) ListTasksFiltered(
 // GetTask returns a single task by ID. Returns nil, nil when not found.
 func (s *DashboardService) GetTask(ctx context.Context, taskID string) (*sqlite.TaskRow, error) {
 	return s.repo.GetTaskByID(ctx, taskID)
+}
+
+// ResolveTaskIdentifier returns the task id for a workspace-scoped identifier
+// such as "KAN-11". Returns "", nil when no task matches.
+func (s *DashboardService) ResolveTaskIdentifier(ctx context.Context, workspaceID, identifier string) (string, error) {
+	return s.repo.GetTaskIDByIdentifier(ctx, workspaceID, identifier)
 }
 
 // ListChildTasks returns direct child tasks of a parent task.

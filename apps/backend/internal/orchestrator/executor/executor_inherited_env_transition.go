@@ -16,15 +16,26 @@ type staleExecutionByIdentityCleaner interface {
 	CleanupStaleExecutionBySessionIDIfCurrent(context.Context, string, string, time.Time) error
 }
 
+type inheritedTransitionClaimedKey struct{}
+
+func withInheritedTransitionClaimed(ctx context.Context) context.Context {
+	return context.WithValue(ctx, inheritedTransitionClaimedKey{}, true)
+}
+
+func inheritedTransitionClaimed(ctx context.Context) bool {
+	claimed, _ := ctx.Value(inheritedTransitionClaimedKey{}).(bool)
+	return claimed
+}
+
 func (e *Executor) claimInheritedEnvironmentTransition(
 	ctx context.Context,
 	task *v1.Task,
 	session *models.TaskSession,
 	executorID string,
 	running *models.ExecutorRunning,
-) error {
+) (bool, error) {
 	if !taskUsesInheritedWorkspace(task) {
-		return nil
+		return false, nil
 	}
 	metadata := cloneMetadata(task.Metadata)
 	if session.ExecutorProfileID != "" {
@@ -37,39 +48,39 @@ func (e *Executor) claimInheritedEnvironmentTransition(
 	if selected.ImplicitSelection && session.TaskEnvironmentID != "" {
 		environment, err := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
 		if err != nil {
-			return fmt.Errorf("%w: load inherited environment executor identity", models.ErrWorkspaceReuseUnsafe)
+			return false, fmt.Errorf("%w: load inherited environment executor identity", models.ErrWorkspaceReuseUnsafe)
 		}
 		selected, err = e.resolveImplicitExecutorForEnvironment(ctx, environment, selected)
 		if err != nil {
-			return err
+			return false, err
 		}
 	}
 	if selected.ExecutorType == "" {
-		return fmt.Errorf("%w: selected executor type could not be verified", models.ErrWorkspaceReuseUnsafe)
+		return false, fmt.Errorf("%w: selected executor type could not be verified", models.ErrWorkspaceReuseUnsafe)
 	}
 	if err := e.admitInheritedTransitionRuntime(ctx, task, session, selected.ExecutorType, running); err != nil {
-		return err
+		return false, err
 	}
 	claimer, ok := e.repo.(inheritedTaskEnvironmentTransitionClaimer)
 	if !ok {
-		return fmt.Errorf("%w: inherited workspace transition admission is unavailable", models.ErrWorkspaceReuseUnsafe)
+		return false, fmt.Errorf("%w: inherited workspace transition admission is unavailable", models.ErrWorkspaceReuseUnsafe)
 	}
 	environment, handled, _, err := claimer.ClaimInheritedTaskEnvironmentTransition(
 		ctx, task.ID, session.ID, session.TaskEnvironmentID,
 		selected.ExecutorType, selected.ExecutorID, session.ExecutorProfileID,
 	)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !handled {
-		return nil
+		return false, nil
 	}
 	if environment == nil {
-		return fmt.Errorf("%w: inherited workspace transition returned no canonical environment", models.ErrWorkspaceReuseUnsafe)
+		return false, fmt.Errorf("%w: inherited workspace transition returned no canonical environment", models.ErrWorkspaceReuseUnsafe)
 	}
 	session.TaskEnvironmentID = environment.ID
 	session.WorkspacePath = environment.WorkspacePath
-	return nil
+	return true, nil
 }
 
 func (e *Executor) admitInheritedTransitionRuntime(

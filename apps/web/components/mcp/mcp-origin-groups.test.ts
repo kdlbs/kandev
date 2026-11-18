@@ -101,3 +101,8 @@ describe("Customize origin sections", () => {
     expect(groupMCPOrigins([])).toEqual([]);
   });
 });
+
+it("groups automation contributions explicitly", () => {
+  const item = selection("server", [origin("automation")]);
+  expect(groupMCPOrigins([item])).toEqual([{ scope: "automation", items: [item] }]);
+});

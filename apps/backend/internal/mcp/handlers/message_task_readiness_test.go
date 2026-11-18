@@ -223,6 +223,14 @@ type mcpReadinessAgentManager struct {
 	accepted chan<- mcpReadinessAcceptedPrompt
 }
 
+func (*mcpReadinessAgentManager) RequiresCloneURL(string) bool          { return false }
+func (*mcpReadinessAgentManager) ShouldApplyPreferredShell(string) bool { return false }
+func (*mcpReadinessAgentManager) ValidateExecutorRuntime(string) error  { return nil }
+
+func (*mcpReadinessAgentManager) ValidateExecutionRuntime(context.Context, string, string, string) error {
+	return nil
+}
+
 func (m *mcpReadinessAgentManager) IsAgentRunningForSession(context.Context, string) bool {
 	return true
 }

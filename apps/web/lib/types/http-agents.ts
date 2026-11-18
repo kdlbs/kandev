@@ -385,6 +385,8 @@ export type QuestionImage = {
   path: string;
   repo?: string;
   alt: string;
+  /** Optional one-word name the agent chose for pickers, such as "before". */
+  label?: string;
 };
 
 export type ClarificationQuestion = {
@@ -426,11 +428,24 @@ export type ClarificationRequestMetadata = {
   agent_disconnected?: boolean;
 };
 
+/** A rectangle the operator marked on a question image, in that image's pixels. */
+export type ClarificationAnswerAnnotation = {
+  image_id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  image_width: number;
+  image_height: number;
+  comment: string;
+};
+
 export type ClarificationAnswer = {
   question_id: string;
   selected_options?: string[];
   custom_text?: string;
   attachments?: ClarificationAnswerAttachment[];
+  annotations?: ClarificationAnswerAnnotation[];
 };
 
 export type ClarificationResponse = {

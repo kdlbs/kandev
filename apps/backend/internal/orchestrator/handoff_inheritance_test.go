@@ -126,6 +126,7 @@ func TestPrepareSessionForStart_PropagatesInheritedEnvironment(t *testing.T) {
 
 func TestPrepareSessionForStart_InheritedWorkspaceMissingCompensatesSession(t *testing.T) {
 	repo := setupTestRepo(t)
+	seedExecutorRow(t, repo, "exec-1", models.ExecutorTypeLocal)
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{repoForExecutionLookup: repo})
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -434,7 +435,7 @@ func TestInheritedWorkspacePreparationKeepsDetachedChildCanonical(t *testing.T) 
 		t.Run(mode, func(t *testing.T) {
 			repo := setupTestRepo(t)
 			svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-			svc.executor = executor.NewExecutor(&mockAgentManager{}, repo, testLogger(), executor.ExecutorConfig{})
+			svc.executor = withTestCapabilities(executor.NewExecutor(&mockAgentManager{}, repo, testLogger(), executor.ExecutorConfig{}))
 			ctx := context.Background()
 			now := time.Now().UTC()
 			if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-detached", Name: "Workspace", CreatedAt: now, UpdatedAt: now}); err != nil {

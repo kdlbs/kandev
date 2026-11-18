@@ -341,6 +341,15 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	}
 	if sessionID != "" && (eventType == agentEventComplete || eventType == agentEventError) {
 		settlementCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		if streamGuard != nil && streamGuard.locked {
+			settlementCtx = withSettledDeliverySessionStateGuardHeld(settlementCtx)
+		}
+		if eventType == agentEventComplete {
+			// The streaming completion path defers the running->waiting
+			// decision to agent.ready. Changing it here would make that ready
+			// event look stale and skip its workflow and queue work.
+			settlementCtx = withSettledDeliverySessionStateConvergenceSkipped(settlementCtx)
+		}
 		if err := s.reconcileAgentDeliverySettlements(settlementCtx, sessionID); err != nil {
 			s.logger.Warn("failed to finish durable delivery terminal settlement",
 				zap.String("task_id", taskID),
@@ -541,12 +550,17 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 		executionID = payload.AgentID
 	}
 	if sessionID != "" {
+		// Opt-in diagnostics use the transport type; OFF retains legacy attribution.
+		agentType := payload.AgentID
+		if s.config.ProviderKeywordContext && payload.AgentType != "" {
+			agentType = payload.AgentType
+		}
 		failure := watcher.AgentEventData{
 			TaskID:             taskID,
 			SessionID:          sessionID,
 			OwnerKind:          string(payload.OwnerKind),
 			AgentExecutionID:   executionID,
-			AgentID:            payload.AgentID,
+			AgentID:            agentType,
 			AgentProfileID:     payload.AgentProfileID,
 			ExecutionProfileID: payload.ExecutionProfileID,
 			ResourceCircuitKey: payload.ResourceCircuitKey,
@@ -559,7 +573,7 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 		}
 		failure = s.withPromptAttemptEvidence(failure)
 		result := s.routeDynamicAgentFailureWithEvidence(
-			ctx, failure, classifyKanbanFailure(failure), nil, true,
+			ctx, failure, s.classifyKanbanFailure(failure), nil, true,
 		)
 		if result.handled && !result.manualRecovery {
 			return
@@ -882,7 +896,7 @@ func (s *Service) handleStreamingEventKind(
 }
 
 type canonicalMessageEventPublisher interface {
-	PublishMessageEvent(context.Context, string, *models.Message) error
+	PublishMessageEvent(context.Context, string, *models.Message, ...*models.ConversationMutationReceipt) error
 }
 
 type canonicalMessageReader interface {
@@ -911,7 +925,7 @@ func (s *Service) publishCanonicalMessageEvent(
 			zap.String("message_id", payload.Data.MessageID))
 		return
 	}
-	message, err := reader.GetMessage(ctx, payload.Data.MessageID)
+	message, receipt, err := canonicalMessageNotification(ctx, reader, payload)
 	if err != nil || message == nil {
 		s.logger.Warn("failed to load canonical message for notification",
 			zap.String("session_id", payload.SessionID),
@@ -923,7 +937,7 @@ func (s *Service) publishCanonicalMessageEvent(
 	if !payload.Data.IsAppend {
 		eventType = events.MessageAdded
 	}
-	if err := publisher.PublishMessageEvent(ctx, eventType, message); err != nil {
+	if err := publisher.PublishMessageEvent(ctx, eventType, message, receipt); err != nil {
 		s.logger.Warn("failed to publish canonical message notification",
 			zap.String("session_id", payload.SessionID),
 			zap.String("message_id", payload.Data.MessageID),
@@ -4269,6 +4283,7 @@ func (s *Service) handleSessionModeEvent(ctx context.Context, payload *lifecycle
 	defer settingsLock.Unlock()
 	identity := sessionSettingsEventIdentity{
 		AttemptID: payload.AttemptID, ExecutionID: payload.ExecutionID,
+		ExecutionProfileID: payload.ExecutionProfileID,
 		SourceGeneration:   payload.SessionSettingsSourceGeneration,
 		SettingsGeneration: payload.Data.SessionSettingsGeneration,
 	}
@@ -4381,6 +4396,7 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	defer settingsLock.Unlock()
 	identity := sessionSettingsEventIdentity{
 		AttemptID: payload.AttemptID, ExecutionID: payload.ExecutionID,
+		ExecutionProfileID: payload.ExecutionProfileID,
 		SourceGeneration:   payload.SessionSettingsSourceGeneration,
 		SettingsGeneration: payload.Data.SessionSettingsGeneration,
 	}
@@ -4481,6 +4497,7 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 type sessionSettingsEventIdentity struct {
 	AttemptID          string
 	ExecutionID        string
+	ExecutionProfileID string
 	SourceGeneration   uint64
 	SettingsGeneration uint64
 }
@@ -4539,6 +4556,12 @@ func sessionSettingsEventIsStale(
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {
 		return false
+	}
+	// A dynamic session that switched concrete candidates must not accept
+	// settings reported by the previous candidate's execution.
+	if identity.ExecutionProfileID != "" && session.ExecutionProfileID != "" &&
+		identity.ExecutionProfileID != session.ExecutionProfileID {
+		return true
 	}
 	snapshot, ok := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
 	if !ok {

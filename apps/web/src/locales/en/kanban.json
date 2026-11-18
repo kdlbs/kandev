@@ -133,5 +133,6 @@
   "bulkActions": "Actions",
   "selectTasks": "Select tasks",
   "cancelTaskSelection": "Cancel selection",
-  "groupTasksIntoSectionsByWorkflowStep": "Group tasks into sections by workflow step, workflow, repository, plugin-provided values, or none."
+  "groupTasksIntoSectionsByWorkflowStep": "Group tasks into sections by workflow step, workflow, repository, plugin-provided values, or none.",
+  "graph": "Graph"
 }

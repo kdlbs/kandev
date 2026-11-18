@@ -2,11 +2,16 @@ package api
 
 import (
 	"errors"
-	"github.com/kandev/kandev/internal/agentctl/types"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/agentctl/types"
+)
+
+const (
+	filePreviewComplete    = "complete"
+	filePreviewUnavailable = "unavailable"
 )
 
 type filePreviewRequest struct {
@@ -56,9 +61,9 @@ func (s *Server) handleReadFilePreview(c *gin.Context) {
 	c.Header("Trailer", "X-Kandev-Preview-Result")
 	c.Status(http.StatusOK)
 	c.Writer.WriteHeaderNow()
-	result := "complete"
+	result := filePreviewComplete
 	if err := s.procMgr.CopyFilePreview(c.Request.Context(), req.Token, c.Writer); err != nil {
-		result = "unavailable"
+		result = filePreviewUnavailable
 	}
 	c.Header("X-Kandev-Preview-Result", result)
 }
