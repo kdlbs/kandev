@@ -392,6 +392,24 @@ func TestNativeCheckPreviewSkipsStableReference(t *testing.T) {
 	}
 }
 
+// @covers AC-AGENTS-RUNTIME-NATIVE-CHECK-001.4
+func TestNativeCheckReportsCheckCurrentWhenRuntimeVersionUnknown(t *testing.T) {
+	h := newNativeCheckHarness(t, "", agents.NewOmpACP())
+	h.runner.setOutput(ompCanaryAvailable, 0)
+	status := h.status(t, ompAgentID)
+	preview, err := h.ctrl.PreviewAgentUpdate(context.Background(), ompAgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.CurrentVersion != "18.13.3" || preview.CurrentVersion != "18.13.3" {
+		t.Errorf("current version: status = %q, preview = %q; want the check-reported 18.13.3", status.CurrentVersion, preview.CurrentVersion)
+	}
+	if status.EffectiveVersion != "" || preview.EffectiveVersion != "" || preview.Operation != "repair" {
+		t.Errorf("effective/operation must stay runtime-owned: status effective = %q, preview effective = %q, operation = %q",
+			status.EffectiveVersion, preview.EffectiveVersion, preview.Operation)
+	}
+}
+
 // @covers AC-AGENTS-RUNTIME-NATIVE-CHECK-001.8
 func TestNativeCheckDoesNotEnableAutomaticUpdates(t *testing.T) {
 	h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())

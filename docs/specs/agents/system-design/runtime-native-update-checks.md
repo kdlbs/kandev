@@ -318,6 +318,9 @@ The status DTO maps a native entry as follows: `CheckState` from the entry,
 `LatestVersion` only for `update_available`, `UpdateChannel` when reported,
 `CheckReason` for `unknown`, and `CheckSource: "native"`. `CheckedAt` is set
 for completed checks. `EffectiveVersion` remains the ACP-reported version.
+Status and preview set `CurrentVersion` from the check's reported current
+version only when ACP has not reported one. When ACP reports a version, any
+disagreement with the check is already handled as `runtime_mismatch`.
 
 Invalidation:
 

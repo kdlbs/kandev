@@ -347,6 +347,7 @@ func (c *Controller) storeNativeUpdateCheckEntry(lookup nativeUpdateCheckLookup,
 type nativeUpdateCheckView struct {
 	state     dto.AgentUpdateCheckState
 	latest    string
+	current   string
 	channel   string
 	reason    dto.AgentUpdateCheckReason
 	checkedAt *time.Time
@@ -361,7 +362,7 @@ func nativeUpdateCheckViewFor(entry runtimeUpdateStatusCacheEntry, eligible bool
 	if !entry.native {
 		return view
 	}
-	view.state, view.channel = entry.state, entry.channel
+	view.state, view.channel, view.current = entry.state, entry.channel, entry.current
 	if entry.state == dto.AgentUpdateCheckStateUpdateAvailable {
 		view.latest = entry.latest
 	}
@@ -375,16 +376,24 @@ func nativeUpdateCheckViewFor(entry runtimeUpdateStatusCacheEntry, eligible bool
 	return view
 }
 
+// The check-reported current version fills CurrentVersion only when the
+// runtime has not reported one; EffectiveVersion stays runtime-owned.
 func (v nativeUpdateCheckView) applyStatus(status *dto.AgentUpdateStatusDTO) {
 	status.CheckSource = dto.AgentUpdateCheckSourceNative
 	status.CheckState, status.LatestVersion = v.state, v.latest
 	status.UpdateChannel, status.CheckReason, status.CheckedAt = v.channel, v.reason, v.checkedAt
+	if status.CurrentVersion == "" {
+		status.CurrentVersion = v.current
+	}
 }
 
 func (v nativeUpdateCheckView) applyPreview(preview *dto.AgentUpdatePreviewDTO) {
 	preview.CheckSource = dto.AgentUpdateCheckSourceNative
 	preview.CheckState, preview.LatestVersion = v.state, v.latest
 	preview.UpdateChannel, preview.CheckReason = v.channel, v.reason
+	if preview.CurrentVersion == "" {
+		preview.CurrentVersion = v.current
+	}
 }
 
 // previewNativeUpdateCheck applies the eligibility guard with fresh discovery
