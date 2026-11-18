@@ -3,7 +3,6 @@ import Link from "@/components/routing/app-link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -25,8 +24,7 @@ import { fileViewerCandidates } from "@/lib/plugins/file-viewer-selection";
 import { useAppStore } from "@/components/state-provider";
 import { PluginErrorBoundary } from "@/components/plugins/plugin-error-boundary";
 import { useFileViewerChoice } from "@/hooks/use-file-viewer-choice";
-import { useFileOperations } from "@/hooks/use-file-operations";
-import { FileViewerDownloadButton } from "./file-viewer-header";
+import { FilePreviewToolbar } from "./file-preview-toolbar";
 import { usePreviewAsText } from "@/hooks/use-preview-as-text";
 import { FileViewerContent } from "./file-viewer-content";
 import { FindFileViewer } from "./find-file-viewer";
@@ -45,11 +43,14 @@ export function PluginFilePreview({
 }) {
   const { t } = useTranslation();
   const text = usePreviewAsText(path, repo, sessionId);
-  const { downloadFile } = useFileOperations(sessionId);
   usePluginRegistry();
   const candidates = fileViewerCandidates(path);
   const [choice, setChoice] = useFileViewerChoice(sessionId, path, repo);
   const viewer = resolveViewerChoice(candidates, choice);
+  const selectViewer = (value: string) => {
+    text.clear();
+    setChoice(value);
+  };
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const container = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
@@ -64,34 +65,17 @@ export function PluginFilePreview({
   }, []);
   return (
     <div ref={container} className="flex h-full min-h-0 flex-col" data-testid="plugin-file-preview">
-      <div className="flex flex-wrap items-center gap-2 border-b p-2">
-        <span className="min-w-0 flex-1 break-all text-sm">{path}</span>
-        <FileViewerDownloadButton onDownload={() => void downloadFile(path, repo)} />
-        {candidates.length > 1 && (
-          <Select value={choice ?? ""} onValueChange={setChoice}>
-            <SelectTrigger aria-label={t("plugins:viewerOpenWith")} className="w-auto">
-              <SelectValue placeholder={t("plugins:viewerOpenWith")} />
-            </SelectTrigger>
-            <SelectContent>
-              {candidates.map((v) => (
-                <SelectItem key={`${v.pluginId}/${v.id}`} value={`${v.pluginId}/${v.id}`}>
-                  {v.title}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-        {
-          <Button
-            className="max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
-            variant="outline"
-            disabled={text.loading}
-            onClick={onOpenText ?? (() => void text.load())}
-          >
-            {t("plugins:viewerOpenText")}
-          </Button>
-        }
-      </div>
+      <FilePreviewToolbar
+        path={path}
+        repo={repo}
+        sessionId={sessionId}
+        candidates={candidates}
+        choice={choice}
+        viewerAvailable={!!viewer}
+        text={text}
+        onSelect={selectViewer}
+        onOpenText={onOpenText}
+      />
       {text.failed && <p role="alert">{t("plugins:viewerTextFailed")}</p>}
       {text.file ? (
         <FileViewerContent

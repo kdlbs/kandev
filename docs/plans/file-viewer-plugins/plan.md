@@ -108,7 +108,7 @@ restore, Ask/Allow/Deny, cancellation, revocation, and no bytes before consent.
 Add `tests/plugins/file-viewer-marketplace.spec.ts` and
 `tests/plugins/mobile-file-viewer-marketplace.spec.ts` for exact extension filters,
 install/return, and empty/error states. Executor integration tests live in
-`tests/plugins/file-viewer-executors.spec.ts` in the containers project.
+`tests/docker/file-viewer-executors.spec.ts` in the containers project.
 The plugin repo owns `e2e/stl-viewer.mjs` and `scripts/test-host.mjs`. The script
 generates temporary desktop/phone specs against an isolated compatible Kandev instance.
 The executor suite and the remaining lifecycle matrix are still required before release.

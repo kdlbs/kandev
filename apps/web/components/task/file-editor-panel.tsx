@@ -2,6 +2,7 @@
 
 import { FileViewerOptions } from "./file-viewer-options";
 import { PluginFilePreview } from "./plugin-file-preview";
+import { usePluginRegistry } from "@/lib/plugins/registry";
 import { shouldOpenFilePreview } from "@/lib/plugins/file-viewer-selection";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
@@ -619,6 +620,7 @@ const TextFileEditorPanel = memo(function TextFileEditorPanel({
 });
 
 export const FileEditorPanel = memo(function FileEditorPanel(props: FileEditorPanelProps) {
+  usePluginRegistry();
   const path = props.params.path as string;
   const repo = props.params.repo as string | undefined;
   const key = buildRepoScopedItemId(path, repo);

@@ -90,8 +90,14 @@ func (p *filePreviewPolicies) get(scope filePreviewScope) (filePreviewPolicy, er
 	if err != nil {
 		return filePreviewPolicy{}, err
 	}
+	return p.policyForDigest(rows, key, scope.Digest)
+}
+
+// policyForDigest runs under p.mu for both reads and writes. A package change
+// invalidates the prior revision before a caller can apply a policy decision.
+func (p *filePreviewPolicies) policyForDigest(rows map[string]filePreviewPolicyRow, key, digest string) (filePreviewPolicy, error) {
 	row := rows[key]
-	if row.Digest == scope.Digest {
+	if row.Digest == digest {
 		return row.filePreviewPolicy, nil
 	}
 	policy := filePreviewPolicy{Mode: filePreviewAsk, Revision: row.Revision}
@@ -102,7 +108,7 @@ func (p *filePreviewPolicies) get(scope filePreviewScope) (filePreviewPolicy, er
 		return filePreviewPolicy{}, errFilePreviewPolicy
 	}
 	policy.Revision++
-	rows[key] = filePreviewPolicyRow{filePreviewPolicy: policy, Digest: scope.Digest, Events: appendFilePreviewPolicyEvent(row.Events, policy)}
+	rows[key] = filePreviewPolicyRow{filePreviewPolicy: policy, Digest: digest, Events: appendFilePreviewPolicyEvent(row.Events, policy)}
 	if err := p.save(rows); err != nil {
 		return filePreviewPolicy{}, errFilePreviewPolicy
 	}
@@ -120,7 +126,11 @@ func (p *filePreviewPolicies) set(scope filePreviewScope, mode string, revision 
 	if err != nil {
 		return filePreviewPolicy{}, err
 	}
-	if rows[key].Revision != revision || revision == ^uint64(0) {
+	current, err := p.policyForDigest(rows, key, scope.Digest)
+	if err != nil {
+		return filePreviewPolicy{}, err
+	}
+	if current.Revision != revision || revision == ^uint64(0) {
 		return filePreviewPolicy{}, ErrApprovalRevisionConflict
 	}
 	policy := filePreviewPolicy{Mode: mode, Revision: revision + 1}

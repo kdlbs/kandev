@@ -85,7 +85,7 @@ are implementation deliverables, not existing test evidence.
 (cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/plugins/file-viewer.spec.ts)
 (cd apps/web && pnpm e2e:run --host --shards 1 --project mobile-chrome tests/plugins/mobile-file-viewer.spec.ts)
 # Required executor suite is not delivered or certified yet.
-(cd apps/web && KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --host --shards 1 --project containers tests/plugins/file-viewer-executors.spec.ts)
+(cd apps/web && KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --host --shards 1 --project containers tests/docker/file-viewer-executors.spec.ts)
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
 ```
@@ -121,3 +121,12 @@ Sequential. No delegation authorized.
 
 Implementation is present. See the [implementation record](../../reviews/file-viewers-implementation.md)
 for completed checks and remaining validation gates. No publication is authorized.
+
+### PR review follow-up
+
+Regression coverage now includes replacement of an unavailable saved viewer,
+returning from text to a single or multiple viewers, discarded late text reads,
+repository links on unsupported files, and late registration for restored tabs.
+Policy writes reset changed digests before revision validation. Lifecycle
+revocation preserves lock order. Missing unrelated exclusions do not prevent
+reads, while existing excluded symlink targets remain protected.

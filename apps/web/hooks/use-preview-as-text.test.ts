@@ -36,3 +36,26 @@ it("resets pending and failed text reads when the selected file changes", async 
   hook.rerender({ path: "three.stl" });
   expect(hook.result.current.failed).toBe(false);
 });
+it("discards a pending text read when returning to a viewer", async () => {
+  let resolve!: (value: unknown) => void;
+  mocks.request.mockReturnValueOnce(
+    new Promise((yes) => {
+      resolve = yes;
+    }),
+  );
+  mocks.build.mockResolvedValueOnce({ content: "late text" });
+  const hook = renderHook(() => usePreviewAsText("part.stl", undefined, "session"));
+  let pending!: Promise<void>;
+  act(() => {
+    pending = hook.result.current.load();
+  });
+  act(() => {
+    hook.result.current.clear();
+  });
+  await act(async () => {
+    resolve({ content: "late text" });
+    await pending;
+  });
+  expect(hook.result.current.file).toBeNull();
+  expect(hook.result.current.loading).toBe(false);
+});

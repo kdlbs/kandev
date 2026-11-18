@@ -44,3 +44,39 @@ func TestFilePreviewManagerReadAndProtectedFiles(t *testing.T) {
 		t.Fatal("exclusions bypassed after preparation")
 	}
 }
+
+func TestFilePreviewIgnoresMissingUnrelatedExclusions(t *testing.T) {
+	dir := t.TempDir()
+	model := filepath.Join(dir, "model.stl")
+	if err := os.WriteFile(model, []byte("model"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m := NewManager(&config.InstanceConfig{WorkDir: dir}, logger.Default())
+	t.Cleanup(func() { _ = m.StopForTeardown(t.Context()) })
+	m.GetWorkspaceTracker().SetRecoveryArtifactExclusions([]string{filepath.Join(dir, "deleted", "recovery.stl")})
+	info, err := m.PrepareFilePreview(t.Context(), "model.stl", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := m.CopyFilePreview(t.Context(), info.Token, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "model" {
+		t.Fatal("wrong selected bytes")
+	}
+}
+
+func TestFilePreviewStillRejectsExcludedSymlinkTarget(t *testing.T) {
+	dir := t.TempDir()
+	private := filepath.Join(t.TempDir(), "private.stl")
+	if err := os.WriteFile(private, []byte("private"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(private, filepath.Join(dir, "recovery.stl")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if err := checkPreviewExclusions(dir, private, []string{"deleted.stl", "recovery.stl"}); err == nil {
+		t.Fatal("excluded symlink target admitted")
+	}
+}

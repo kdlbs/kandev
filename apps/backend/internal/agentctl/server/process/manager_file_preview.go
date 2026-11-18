@@ -3,6 +3,7 @@ package process
 import (
 	"context"
 	"io"
+	"os"
 	"path/filepath"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -76,7 +77,16 @@ func checkPreviewExclusions(root, path string, exclusions []string) error {
 		return errFilePreviewUnavailable
 	}
 	for _, excluded := range exclusions {
-		target, err := filepath.EvalSymlinks(filepath.Join(root, excluded))
+		excludedPath := filepath.Join(base, excluded)
+		if relative, err := filepath.Rel(excludedPath, path); err == nil && !pathEscapesRoot(relative) {
+			return errFilePreviewUnavailable
+		}
+		target, err := filepath.EvalSymlinks(excludedPath)
+		// A deleted recovery artifact cannot expose bytes. Keep checking the
+		// other exclusions, including existing symlink targets.
+		if os.IsNotExist(err) {
+			continue
+		}
 		if err != nil {
 			return errFilePreviewUnavailable
 		}

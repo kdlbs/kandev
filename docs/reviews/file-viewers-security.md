@@ -137,3 +137,15 @@ The analysis uses these primary references:
 - [OWASP File Upload Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html): apply layered extension/content checks, authorization, and resource limits to untrusted model input. This feature reads files; it does not add uploads.
 - [MDN Web Workers](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers): background execution, network access, and transfer semantics. Workers are not a network sandbox.
 - [Three.js STLLoader](https://threejs.org/docs/pages/STLLoader.html): ASCII/binary geometry decoding. Loader support alone does not prove adversarial-input safety.
+
+## PR review corrections (2026-11-18)
+
+Policy writes now reset a changed package digest under the policy mutex before
+checking the supplied revision. A stale allowance cannot transfer to the changed
+package without a fresh decision. The regression test covers a write without an
+intervening policy read and verifies that a fresh revision can still be saved.
+Lifecycle transitions obtain the grant store before taking the status persistence
+locks. Revocation does not reacquire the service mutex in the opposite order.
+Missing recovery artifacts no longer block unrelated model files. Existing
+excluded paths and symlink targets remain blocked, and other resolution errors
+still fail closed. Focused race tests cover policy and exclusion behavior.

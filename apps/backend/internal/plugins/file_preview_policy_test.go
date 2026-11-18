@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -73,5 +74,25 @@ func TestFilePreviewPolicyUpgradeThenRollbackDoesNotRestoreAllow(t *testing.T) {
 	got, err := policies.get(scope)
 	if err != nil || got.Mode != "ask" {
 		t.Fatalf("rollback revived access: %+v %v", got, err)
+	}
+}
+
+func TestFilePreviewPolicyRejectsOldDigestWriteWithoutRead(t *testing.T) {
+	policies := newFilePreviewPolicies(t.TempDir())
+	scope := filePreviewScope{UserID: "user", WorkspaceID: "w", InstallationID: "i", Digest: "v1"}
+	old, err := policies.set(scope, filePreviewAllow, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope.Digest = "v2"
+	if _, err := policies.set(scope, filePreviewAllow, old.Revision); !errors.Is(err, ErrApprovalRevisionConflict) {
+		t.Fatalf("old digest write accepted: %v", err)
+	}
+	current, err := policies.get(scope)
+	if err != nil || current.Mode != filePreviewAsk || current.Revision <= old.Revision {
+		t.Fatalf("digest reset: %+v %v", current, err)
+	}
+	if _, err := policies.set(scope, filePreviewAllow, current.Revision); err != nil {
+		t.Fatalf("fresh decision rejected: %v", err)
 	}
 }

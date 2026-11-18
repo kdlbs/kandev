@@ -8,15 +8,18 @@ export function usePreviewAsText(path: string, repo: string | undefined, session
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(false);
   const generation = useRef<symbol>(Symbol());
-  useEffect(() => {
+  const clear = useCallback(() => {
     generation.current = Symbol();
     setFile(null);
     setFailed(false);
     setLoading(false);
+  }, []);
+  useEffect(() => {
+    clear();
     return () => {
       generation.current = Symbol();
     };
-  }, [path, repo, sessionId]);
+  }, [path, repo, sessionId, clear]);
   const load = useCallback(async () => {
     const client = getWebSocketClient();
     if (!client) return;
@@ -34,5 +37,5 @@ export function usePreviewAsText(path: string, repo: string | undefined, session
       if (generation.current === request) setLoading(false);
     }
   }, [path, repo, sessionId]);
-  return { file, failed, loading, load };
+  return { file, failed, loading, load, clear };
 }
