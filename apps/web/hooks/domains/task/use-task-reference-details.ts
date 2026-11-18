@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 
@@ -11,20 +12,29 @@ export function useTaskReferenceDetails(taskId: string) {
     task?.createdAt && parseTurnTimestamp(task.createdAt) !== null
       ? Date.parse(task.createdAt)
       : null;
-  const workflowName = useAppStore((state) => {
+  const workflows = useAppStore((state) => state.workflows.items);
+  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const board = useAppStore((state) => state.kanban);
+  const workflowName = useMemo(() => {
     if (!task) return null;
-    const snapshot = Object.values(state.kanbanMulti.snapshots).find((entry) =>
+    if (task.workflowId) {
+      return (
+        workflows.find((workflow) => workflow.id === task.workflowId)?.name ??
+        snapshots[task.workflowId]?.workflowName ??
+        null
+      );
+    }
+    const snapshot = Object.values(snapshots).find((entry) =>
       entry.tasks.some((item) => item.id === taskId),
     );
     const workflowId =
-      task.workflowId ??
       snapshot?.workflowId ??
-      (state.kanban.tasks.some((item) => item.id === taskId) ? state.kanban.workflowId : null);
+      (board.tasks.some((item) => item.id === taskId) ? board.workflowId : null);
     return (
-      state.workflows.items.find((workflow) => workflow.id === workflowId)?.name ??
+      workflows.find((workflow) => workflow.id === workflowId)?.name ??
       snapshot?.workflowName ??
       null
     );
-  });
+  }, [task, taskId, workflows, snapshots, board]);
   return { task, workflowName, parentTask, createdTimestamp };
 }

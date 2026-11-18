@@ -92,13 +92,16 @@ localized plural labels. Zero is a valid count. Omit unknown counts.
 Use labeled rows for creation date, workflow, and parent. Validate the creation
 timestamp with the shared RFC3339 parser, then format its date and time for the
 active locale. Omit invalid or missing dates. Resolve the parent title from the
-canonical overview, with its exact ID as fallback. Keep the parent row
+canonical overview. Omit the parent row until its title is available. Keep the parent row
 noninteractive so the tooltip retains its disclosure-only contract.
 Omit the task description from the disclosure. Keep the card focused on metadata.
 Display the task identifier when loaded. Use a 22rem-wide card constrained to
 the viewport, with wrapping badge and metadata rows.
 Read `taskOverview.byId` and loaded workflow state through a small domain hook.
 The canonical overview includes sidebar-owned tasks even when no board is open.
+Resolve a known workflow ID directly against loaded workflows or its keyed
+snapshot. Only legacy records without a workflow ID scan snapshot tasks. Memoize
+the lookup over its source slices so unrelated store updates do not repeat it.
 Do not limit the lookup to legacy board arrays. Shared mention chips use
 `primary` and `ring` theme tokens for color and focus treatment.
 Do not fetch, mount `useTask`, subscribe to task rooms, or poll for previews.

@@ -44,8 +44,8 @@ an identifier or losing the surrounding sentence.
   badges, creation date, workflow, and parent. The task description shall not
   appear in the disclosure.
   Unknown session counts shall not appear as zero. Invalid dates shall be
-  omitted. Parent titles shall use loaded records, with the exact parent ID
-  as fallback. Tasks loaded by the sidebar shall provide these
+  omitted. Parent titles shall use loaded records. Omit the parent row when its title
+  is unavailable. Tasks loaded by the sidebar shall provide these
   details without requiring a board or task page to open first.
   Missing metadata shall show no invented status or workflow. Escape shall
   dismiss the disclosure without activating the link.

@@ -97,12 +97,12 @@ export function AgentTaskReferenceDetails({ reference }: { reference: TaskMentio
             {workflowName}
           </DetailRow>
         )}
-        {task?.parentTaskId && (
+        {parentTask?.title && (
           <DetailRow
             label={t("task:parent")}
             icon={<IconSubtask className="size-3.5 shrink-0" aria-hidden="true" />}
           >
-            {parentTask?.title || task.parentTaskId}
+            {parentTask.title}
           </DetailRow>
         )}
       </dl>

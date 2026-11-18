@@ -285,3 +285,14 @@ Keyboard coverage now reaches the link with Tab and scopes its tooltip to the
 reference title. All three desktop reference tests passed. Recorded the compact
 inline-link exception in the mobile sizing guide. Harness and spec validation
 passed. The parent-ID fallback remains the specified cache-only behavior.
+
+### Complete Claude suggestions
+
+Hide the parent row until its title is loaded, with a regression for unavailable
+and loaded parents. Resolve known workflow IDs without scanning task snapshots;
+memoize legacy fallback lookup over source slices. Cover keyed-snapshot workflow resolution alongside the existing board tests. Clarify in the PR body that uncolored existing
+user mentions also use the primary accent. The keyboard, compact sizing, and
+stale viewport assertions were already addressed in the preceding commit.
+
+Validation: five hook/metadata regressions, all three desktop browser tests,
+web typecheck, production build, catalog validation, and spec lint passed.

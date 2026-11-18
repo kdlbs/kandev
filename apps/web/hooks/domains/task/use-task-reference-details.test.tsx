@@ -112,3 +112,31 @@ it("reads loaded metadata and follows rename/removal without fetching", () => {
   expect(result.current.details.task).toBeNull();
   expect(result.current.details.workflowName).toBeNull();
 });
+
+it.each(["workflow"])("resolves snapshot workflow names with workflow ID %s", (workflowId) => {
+  const task = { id: "target", title: "Target", workflowId, workflowStepId: "step", position: 0 };
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <StateProvider>{children}</StateProvider>
+  );
+  const { result } = renderHook(
+    () => ({ details: useTaskReferenceDetails("target"), store: useAppStoreApi() }),
+    { wrapper },
+  );
+  act(() =>
+    result.current.store.setState((state) => ({
+      kanban: { ...state.kanban, tasks: [task] },
+      kanbanMulti: {
+        ...state.kanbanMulti,
+        snapshots: {
+          workflow: {
+            workflowId: "workflow",
+            workflowName: "Snapshot board",
+            tasks: [task],
+            steps: [],
+          },
+        },
+      },
+    })),
+  );
+  expect(result.current.details.workflowName).toBe("Snapshot board");
+});
