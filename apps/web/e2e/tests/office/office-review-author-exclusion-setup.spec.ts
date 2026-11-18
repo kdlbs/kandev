@@ -43,9 +43,8 @@ test.describe("Office reviewer exclusion setup warnings", () => {
       const review = testPage.getByTestId("workflow-import-profile-selection");
       await expect(review.getByText("Review imported workflows")).toBeVisible();
       const importWarnings = review.getByTestId("author-exclusion-warnings");
-      await expect(importWarnings).toContainText(
-        `${name} workflow, Review step (Reviewer): Automatic provider fallback is off`,
-      );
+      await expect(importWarnings).toContainText("Automatic provider fallback is off");
+      await expect(importWarnings).toContainText(`${name} workflow, Review step (Reviewer)`);
       await expect(importWarnings).toContainText(
         "Turn on Automatic provider fallback in Office > Routing, or turn off Review on a different provider for this step there.",
       );
@@ -74,9 +73,19 @@ test.describe("Office reviewer exclusion setup warnings", () => {
         name: `Review on a different provider for ${name} workflow, Review step (Reviewer)`,
       });
       await expect(toggle).toHaveAttribute("aria-checked", "true");
+      const saveBar = testPage.getByTestId("settings-floating-save");
+      await expect(saveBar).toHaveCount(0);
+
+      // An unsaved change shows the shared save bar; Reset restores the stored value.
+      await toggle.click();
+      await expect(saveBar).toBeVisible();
+      await saveBar.getByRole("button", { name: "Reset" }).click();
+      await expect(toggle).toHaveAttribute("aria-checked", "true");
+      await expect(saveBar).toHaveCount(0);
+
       await toggle.click();
       const savedOff = waitForHttp(testPage, "PUT", /\/routing\/author-exclusion$/);
-      await testPage.getByRole("button", { name: "Save", exact: true }).click();
+      await saveBar.getByRole("button", { name: "Save changes" }).click();
       expect((await savedOff).ok()).toBe(true);
       await expect(banner).toHaveCount(0);
       await expect(toggle).toHaveAttribute("aria-checked", "false");
@@ -90,7 +99,7 @@ test.describe("Office reviewer exclusion setup warnings", () => {
 
       await toggle.click();
       const savedOn = waitForHttp(testPage, "PUT", /\/routing\/author-exclusion$/);
-      await testPage.getByRole("button", { name: "Save", exact: true }).click();
+      await saveBar.getByRole("button", { name: "Save changes" }).click();
       expect((await savedOn).ok()).toBe(true);
       await expect(banner).toContainText(`${name} workflow, Review step (Reviewer)`);
       expect(await reviewConfig()).toEqual({ role: "reviewer", exclude_author_provider: true });

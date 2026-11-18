@@ -33,5 +33,7 @@ export function useAuthorExclusionDraft(steps: AuthorExclusionStep[]) {
     [draft, steps],
   );
 
-  return { draft, setValue, changes };
+  const reset = useCallback(() => setDraft({}), []);
+
+  return { draft, setValue, changes, reset };
 }

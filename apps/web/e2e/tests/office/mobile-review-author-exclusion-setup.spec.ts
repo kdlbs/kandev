@@ -20,9 +20,9 @@ test.describe("Office reviewer exclusion setup warnings on mobile", () => {
       await dialog.getByRole("button", { name: "Import", exact: true }).tap();
 
       const review = testPage.getByTestId("workflow-import-profile-selection");
-      await expect(review.getByTestId("author-exclusion-warnings")).toContainText(
-        `${name} workflow, Review step (Reviewer): Automatic provider fallback is off`,
-      );
+      const importWarnings = review.getByTestId("author-exclusion-warnings");
+      await expect(importWarnings).toContainText("Automatic provider fallback is off");
+      await expect(importWarnings).toContainText(`${name} workflow, Review step (Reviewer)`);
       await assertNoDocumentHorizontalOverflow(testPage, "workflow import exclusion warnings");
       await review.getByTestId("workflow-import-profile-submit").tap();
       await expect(review).not.toBeVisible();
@@ -42,6 +42,15 @@ test.describe("Office reviewer exclusion setup warnings on mobile", () => {
       await toggle.scrollIntoViewIfNeeded();
       await expect(toggle).toHaveAttribute("aria-checked", "true");
       await assertNoDocumentHorizontalOverflow(testPage, "review on a different provider switches");
+
+      // A change shows the shared save bar inside the viewport without scrolling.
+      await toggle.tap();
+      const saveBar = testPage.getByTestId("settings-floating-save");
+      await expect(saveBar.getByRole("button", { name: "Save changes" })).toBeInViewport();
+      await assertNoDocumentHorizontalOverflow(testPage, "routing save bar");
+      await saveBar.getByRole("button", { name: "Reset" }).tap();
+      await expect(toggle).toHaveAttribute("aria-checked", "true");
+      await expect(saveBar).toHaveCount(0);
     } finally {
       if (workflowId) await apiClient.deleteWorkflow(workflowId);
     }

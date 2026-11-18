@@ -39,7 +39,7 @@ A launch rejected because its built agent or continue command is invalid fails t
 
 A review is an independent check only when the reviewer runs on a different provider from the one that did the work. Fallback can otherwise land the reviewer on that same provider. **Review on a different provider** prevents this for a reviewer or approver step.
 
-Turn it on under **Office > Routing > Review on a different provider**. The section lists every workflow step that seats a reviewer or approver, including the built-in Office workflow. Flip a step's switch and select **Save**. The setting is off by default.
+Turn it on under **Office > Routing > Review on a different provider**. The section lists every workflow step that seats a reviewer or approver, including the built-in Office workflow. Flip a step's switch, then select **Save changes** in the save bar at the bottom of the page. **Reset** discards unsaved changes. The setting is off by default.
 
 In workflow YAML, the same setting is `exclude_author_provider` on the step's seat action, so export, import, and sync carry it:
 
@@ -58,10 +58,10 @@ When it is on, routing for that seat's runs skips the provider of the task's mos
 
 Each run for such a seat records a `routing.author_exclusion` event in its run detail, saying whether a provider was excluded and why not when it was not.
 
-Kandev warns, without blocking, when the current setup cannot keep the promise. The warning appears at the top of **Office > Routing**, in the workflow import review, and in workflow sync results. Each warning names the workflow and step, says what will happen, and says how to fix it:
+Kandev warns, without blocking, when the current setup cannot keep the promise. The warning appears at the top of **Office > Routing**, in the workflow import review, and in workflow sync results. Each warning says what will happen, lists the affected workflow steps, and says how to fix it. Steps with the same problem share one warning:
 
 - **Automatic provider fallback is off:** reviews may run on the provider that did the work. Turn on **Automatic provider fallback**, or turn off **Review on a different provider** for the step.
-- **Only one provider is configured:** the reviewer can never use a different provider, so reviews wait until you act. Add a second provider, or turn the setting off.
+- **Only one provider is configured:** reviews can never run on a different provider, so they wait until you act. Add a second provider, or turn the setting off.
 - **A reviewer agent can only use one provider:** its reviews wait whenever the work ran on that provider. Give the agent another provider in its routing settings, or turn the setting off.
 
 ## What A Provider Switch Preserves

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -69,24 +70,60 @@ func selectedWorkflows(export *models.WorkflowExport, indexes []int) []models.Wo
 	return out
 }
 
-// syncWarningText renders an exclusion warning in the workflow-sync warning
-// format, which the sync status banner shows verbatim.
-func syncWarningText(w ImportWarning) string {
+// syncWarningTexts renders exclusion warnings in the workflow-sync warning
+// format, which the sync status banner shows verbatim. Warnings that share a
+// code, provider, and agent become one string: the problem, the affected
+// steps, then one fix.
+func syncWarningTexts(warnings []ImportWarning) []string {
+	type group struct {
+		first ImportWarning
+		steps []string
+	}
+	var order []string
+	groups := map[string]*group{}
+	for _, w := range warnings {
+		key := w.Code + "\x00" + w.ProviderID + "\x00" + w.AgentName
+		g, ok := groups[key]
+		if !ok {
+			g = &group{first: w}
+			groups[key] = g
+			order = append(order, key)
+		}
+		if w.WorkflowName != "" {
+			g.steps = append(g.steps, fmt.Sprintf("%s workflow, %s step (%s)", w.WorkflowName, w.StepName, w.Role))
+		}
+	}
+	out := make([]string, 0, len(order))
+	for _, key := range order {
+		g := groups[key]
+		out = append(out, syncWarningGroupText(g.first, g.steps))
+	}
+	return out
+}
+
+func syncWarningGroupText(w ImportWarning, steps []string) string {
 	const rule = "Review on a different provider"
-	subject := fmt.Sprintf("%s workflow, %s step (%s): ", w.WorkflowName, w.StepName, w.Role)
+	target, affected := "this step", ""
+	if len(steps) == 1 {
+		affected = " Affected step: " + steps[0] + "."
+	} else if len(steps) > 1 {
+		target = "these steps"
+		affected = " Affected steps: " + strings.Join(steps, "; ") + "."
+	}
 	switch w.Code {
 	case "routing_disabled":
-		return subject + "Automatic provider fallback is off, so " + rule + " is ignored." +
-			" Reviews may run on the provider that did the work, so they are not an independent check." +
-			" Turn on Automatic provider fallback in Office > Routing, or turn off " + rule + " for this step there."
+		return "Automatic provider fallback is off, so " + rule + " is ignored." +
+			" Reviews may run on the provider that did the work, so they are not an independent check." + affected +
+			" Turn on Automatic provider fallback in Office > Routing, or turn off " + rule + " for " + target + " there."
 	case "single_provider":
-		return subject + w.ProviderID + " is the only provider, so the reviewer can never use a different one from the work." +
-			" Reviews will wait until you act." +
-			" Add a second provider in Office > Routing, or turn off " + rule + " for this step there."
+		return w.ProviderID + " is the only provider, so reviews can never run on a different one from the work." +
+			" Reviews will wait until you act." + affected +
+			" Add a second provider in Office > Routing, or turn off " + rule + " for " + target + " there."
 	case "agent_single_provider":
-		return subject + fmt.Sprintf("Agent %q can only use %s, so its reviews wait whenever the work ran on %s."+
-			" Give %q another provider in its routing settings, or turn off "+rule+" for this step in Office > Routing.",
-			w.AgentName, w.ProviderID, w.ProviderID, w.AgentName)
+		return fmt.Sprintf("Agent %q can only use %s, so its reviews wait whenever the work ran on %s.",
+			w.AgentName, w.ProviderID, w.ProviderID) + affected +
+			fmt.Sprintf(" Give %q another provider in its routing settings, or turn off %s for %s in Office > Routing.",
+				w.AgentName, rule, target)
 	default:
 		return rule + " could not be checked. Open Office > Routing to check it."
 	}

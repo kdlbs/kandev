@@ -1,11 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { IconDeviceFloppy } from "@tabler/icons-react";
-import { toast } from "@/lib/toast/sonner";
-import { Button } from "@kandev/ui/button";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAppStore } from "@/components/state-provider";
-import { ApiError } from "@/lib/api/client";
 import { useWorkspaceRouting } from "@/hooks/domains/office/use-workspace-routing";
 import { useProviderHealth } from "@/hooks/domains/office/use-provider-health";
 import { useRoutingPreview } from "@/hooks/domains/office/use-routing-preview";
@@ -34,6 +30,7 @@ import { AuthorExclusionWarningList } from "@/components/author-exclusion-warnin
 import type { AuthorExclusionWarning } from "@/lib/types/author-exclusion";
 import { providerLabel } from "./components/provider-order-editor";
 import { useAuthorExclusionDraft } from "./use-author-exclusion-draft";
+import { useRoutingSave } from "./use-routing-save";
 
 const DEFAULT_PROFILE: ProviderProfile = { tier_map: {} };
 
@@ -63,43 +60,25 @@ export default function ProviderRoutingPage() {
   const preview = useRoutingPreview(workspaceId);
 
   const [draft, setDraft] = useState<WorkspaceRouting | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [fieldErrors, setFieldErrors] = useState<string[]>([]);
 
   useEffect(() => {
     if (routing.config) setDraft(routing.config);
     else if (!routing.isLoading && routing.config === undefined) setDraft(emptyConfig());
   }, [routing.config, routing.isLoading]);
 
+  const saved = useMemo(() => routing.config ?? emptyConfig(), [routing.config]);
   const exclusion = useAuthorExclusionDraft(routing.authorExclusionSteps);
-  const routingDirty = useMemo(
-    () => !!draft && JSON.stringify(draft) !== JSON.stringify(routing.config ?? emptyConfig()),
-    [draft, routing.config],
-  );
-  const dirty = routingDirty || exclusion.changes.length > 0;
-
-  const onSave = useCallback(async () => {
-    if (!draft || !workspaceId) return;
-    setSaving(true);
-    setFieldErrors([]);
-    try {
-      // Routing first, then the switches, so the warnings reflect both.
-      let warnings = routing.authorExclusionWarnings;
-      if (routingDirty) warnings = await routing.update(draft);
-      if (exclusion.changes.length > 0) {
-        warnings = await routing.updateAuthorExclusion(exclusion.changes);
-      }
-      void preview.refresh();
-      if (warnings.length > 0) toast.warning(t("office:routingSavedWithExclusionWarnings"));
-      else toast.success(t("office:routingSettingsSaved"));
-    } catch (err) {
-      const errs = extractValidationDetails(err);
-      if (errs.length > 0) setFieldErrors(errs);
-      toast.error(err instanceof Error ? err.message : t("office:failedToSave"));
-    } finally {
-      setSaving(false);
-    }
-  }, [draft, workspaceId, routing, routingDirty, exclusion.changes, preview, t]);
+  const { saving, fieldErrors } = useRoutingSave({
+    draft,
+    saved,
+    exclusionChanges: exclusion.changes,
+    currentWarnings: routing.authorExclusionWarnings,
+    setDraft,
+    resetExclusion: exclusion.reset,
+    updateRouting: routing.update,
+    updateAuthorExclusion: routing.updateAuthorExclusion,
+    onSaved: () => void preview.refresh(),
+  });
 
   if (!workspaceId || !draft) {
     return <div className="p-6 text-sm text-muted-foreground">{t("common:loading")}</div>;
@@ -113,9 +92,7 @@ export default function ProviderRoutingPage() {
       knownProviders={routing.knownProviders}
       executionProfiles={routing.executionProfiles}
       saving={saving}
-      dirty={dirty}
       fieldErrors={fieldErrors}
-      onSave={onSave}
       health={health.health}
       onRetry={routing.retry}
       previewAgents={preview.agents}
@@ -140,9 +117,7 @@ type PageBodyProps = {
   knownProviders: string[];
   executionProfiles: ExecutionProfileSummary[];
   saving: boolean;
-  dirty: boolean;
   fieldErrors: string[];
-  onSave: () => Promise<void>;
   health: ReturnType<typeof useProviderHealth>["health"];
   onRetry: ReturnType<typeof useWorkspaceRouting>["retry"];
   previewAgents: ReturnType<typeof useRoutingPreview>["agents"];
@@ -158,9 +133,7 @@ function PageBody({
   knownProviders,
   executionProfiles,
   saving,
-  dirty,
   fieldErrors,
-  onSave,
   health,
   onRetry,
   previewAgents,
@@ -187,7 +160,7 @@ function PageBody({
   const sectionsDisabled = saving;
 
   return (
-    <div className="max-w-4xl mx-auto p-6 space-y-4">
+    <div className="max-w-4xl mx-auto p-6 pb-32 space-y-4">
       <div>
         <h1 className="text-lg font-semibold">{t("office:providerRoutingHeading")}</h1>
         <p className="text-sm text-muted-foreground">{t("office:mapOfficeAgentsToProvidersAnd")}</p>
@@ -250,41 +223,6 @@ function PageBody({
           ))}
         </ul>
       )}
-
-      {dirty && (
-        <div className="flex justify-end">
-          <Button onClick={onSave} disabled={saving} className="cursor-pointer gap-1.5">
-            <IconDeviceFloppy className="h-4 w-4" />
-            {saving ? t("office:savingEllipsis") : t("common:save")}
-          </Button>
-        </div>
-      )}
     </div>
   );
-}
-
-/**
- * Composes the BACKEND's own field names and error messages. Protocol, not copy
- * — the strings here are echoed from the API response, never authored in the UI.
- */
-function extractValidationDetails(err: unknown): string[] {
-  if (!(err instanceof ApiError)) return [];
-  const body = err.body;
-  if (!body || typeof body !== "object") return [];
-  const out: string[] = [];
-  const obj = body as {
-    error?: string;
-    field?: string;
-    details?: Array<{ provider_id?: string; field?: string; message?: string }>;
-  };
-  if (obj.error && obj.field) out.push(`${obj.field}: ${obj.error}`);
-  if (Array.isArray(obj.details)) {
-    for (const d of obj.details) {
-      if (d?.message) {
-        const prefix = d.provider_id ? `${d.provider_id}: ` : "";
-        out.push(`${prefix}${d.message}`);
-      }
-    }
-  }
-  return out;
 }

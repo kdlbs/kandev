@@ -256,9 +256,11 @@ to the Office method through an adapter. When the port is unset, or when the
 document declares nothing, no warning is produced and nothing is read. A port
 error produces one `check_failed` warning; the import continues
 (AC-OFFICE-REVIEW-AUTHOR-EXCL-005.8). Workflow sync reuses the same port and
-renders each warning as one English sentence group in the
-AC-OFFICE-REVIEW-AUTHOR-EXCL-005.9 shape: the workflow and step named by type,
-the consequence, and the fix in Office > Routing.
+renders the warnings with `syncWarningTexts`: one English string per group of
+warnings sharing code, provider, and agent (AC-OFFICE-REVIEW-AUTHOR-EXCL-005.10),
+in the AC-OFFICE-REVIEW-AUTHOR-EXCL-005.9 shape: the consequence, then
+"Affected steps: <workflow> workflow, <step> step (<role>); ...", then the fix
+in Office > Routing for "this step" or "these steps".
 
 ### 9. Web
 
@@ -281,9 +283,14 @@ the consequence, and the fix in Office > Routing.
   the wire warnings (`lib/types/author-exclusion.ts`) and an optional provider
   formatter. The routing page passes `providerLabel`, and import shows raw
   provider IDs.
-- **Warning copy** (AC-OFFICE-REVIEW-AUTHOR-EXCL-005.9): each list item is a
-  bold "<workflow> workflow, <step> step (<role>)" lead, then a localized
-  problem-and-consequence sentence per code, then a fix sentence. The list
+- **Warning copy** (AC-OFFICE-REVIEW-AUTHOR-EXCL-005.9, .10):
+  `groupAuthorExclusionWarnings` (`lib/author-exclusion-warning-groups.ts`)
+  groups the wire warnings by code, provider, and agent, in first-seen order.
+  Each group renders the localized problem-and-consequence sentence once, then
+  a list of "<workflow> workflow, <step> step (<role>)" entries (the first
+  three, plus a "Show all N steps" toggle when there are more), then one fix
+  sentence whose "this step" or "these steps" wording uses i18next `count`
+  plurals. A `check_failed` group has no step list. The list
   takes a `surface` prop: `routing` fixes point at controls on the same page;
   `import` fixes add "in Office > Routing". Copy calls the setting **Review on
   a different provider** and the routing switch **Automatic provider
@@ -346,6 +353,15 @@ available, and one row per seat step with a role badge and a `Switch`
 (44px target on coarse pointers). The rows wrap on phone widths; there is no
 separate phone composition.
 
+**Save bar** (AC-OFFICE-REVIEW-AUTHOR-EXCL-006.7): the `/office/workspace/routing`
+route mounts `SettingsSaveProvider` with `placement="content"`, as
+`/office/workspace/settings` does. The page registers one
+`useSettingsSaveContributor` (`office-routing`) whose `isDirty` covers the
+routing draft and the switch changes, whose `save` runs the two writes in the
+order above and rethrows a failure so the bar shows the error, and whose
+`discard` resets both drafts. The page's own bottom Save button is removed;
+the provider's navigation guard covers leaving with unsaved changes.
+
 ## Failure and recovery
 
 - **Park lift.** Lifting a parked run bumps `route_cycle_baseline_seq` and
@@ -383,7 +399,8 @@ separate phone composition.
 | AC-005.5, .6 | §8 (routing GET/PUT), §9 (banner) |
 | AC-005.7 | §9 (locales, wrapping layout) |
 | AC-005.8 | §8 (`check_failed`) |
-| AC-005.9 | §8 (sync text), §9 (warning copy) |
+| AC-005.9, .10 | §8 (sync text), §9 (warning copy) |
 | AC-006.1, .5 | §10 (read, web) |
 | AC-006.2, .3, .4 | §10 (write) |
 | AC-006.6 | §10 (web), §9 (locales) |
+| AC-006.7 | §10 (save bar) |

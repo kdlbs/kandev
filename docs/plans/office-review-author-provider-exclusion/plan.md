@@ -47,12 +47,17 @@ is persisted on seats or runs, and no migration is needed. See the
 | 4 | [task-05-routing-control-backend](task-05-routing-control-backend.md) | Backend: list seat steps on routing GET, batch write endpoint through the workflow service, step events, three-part sync warning text |
 | 5 | [task-06-routing-control-web](task-06-routing-control-web.md) | Web: Review on a different provider section in the routing draft, three-part warning copy, import dialog submitting state, locales, desktop and phone E2E |
 
+| 6 | [task-07-grouped-warnings-save-bar](task-07-grouped-warnings-save-bar.md) | Backend and web: group warnings that share a cause and fix; floating settings save bar on the routing page |
+
 Task 02 depends on Task 01, because its E2E needs the backend behavior. Task 03
 depends on Task 01 (the shared declaration helper). Task 04 depends on Task 03.
 Tasks 02 and 03 can run in parallel. Tasks 05 and 06 come from the first
 manual test round: operators need to turn the setting off without editing
 YAML, and the warnings must say what is true, why it is bad, and how to fix
-it. Task 06 depends on Task 05.
+it. Task 06 depends on Task 05. Task 07 comes from the second manual test
+round: many steps with the same warning must read as one warning with a list
+of steps, and unsaved routing changes must be hard to miss. It depends on
+Task 06.
 
 ## ASCII UI preview
 
@@ -178,6 +183,55 @@ AC-OFFICE-REVIEW-AUTHOR-EXCL-005.9):
 |    second provider, or turn off Review on a different provider   |
 |    for this step.                                                |
 ```
+
+Grouped warning (replaces the per-step items above, per
+AC-OFFICE-REVIEW-AUTHOR-EXCL-005.10):
+
+```text
+Desktop
++-----------------------------------------------------------------+
+| /!\ Review on a different provider can't work as set up         |
+|  Claude (ACP) is the only provider, so reviews can never run on |
+|  a different one from the work. Reviews will wait until you act.|
+|   - Exclusion Check workflow, Review step (Reviewer)            |
+|   - Office Default workflow, Review step (Reviewer)             |
+|   - Probe A workflow, Review step (Reviewer)                    |
+|   [Show all 6 steps]                                            |
+|  Add a second provider, or turn off Review on a different       |
+|  provider for these steps.                                      |
++-----------------------------------------------------------------+
+
+Phone (same order; text wraps)
++---------------------------+
+| /!\ Review on a different |
+|    provider can't work as |
+|    set up                 |
+| Claude (ACP) is the only  |
+| provider, so reviews ...  |
+|  - Exclusion Check        |
+|    workflow, Review step  |
+|    (Reviewer)             |
+|  [Show all 6 steps]       |
+| Add a second provider ... |
++---------------------------+
+```
+
+### UI-05: Provider routing settings, floating save bar
+
+Same bar as Office > Workspace > Settings. It appears while the page has
+unsaved changes and stays above the page bottom while scrolling.
+
+```text
++-----------------------------------------------------------------+
+| ...page content scrolls under the bar...                        |
+|        +-----------------------------------------------+        |
+|        | Unsaved changes            [Discard]  [Save]  |        |
+|        +-----------------------------------------------+        |
++-----------------------------------------------------------------+
+```
+
+Required: shared `SettingsFloatingSave`, no separate bottom Save button,
+leave-page guard. Maps to AC-OFFICE-REVIEW-AUTHOR-EXCL-006.7.
 
 ### UI-03: Workflow import dialog, preview step
 

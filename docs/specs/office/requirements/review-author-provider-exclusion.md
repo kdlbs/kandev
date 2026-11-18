@@ -213,6 +213,13 @@ prediction uses the setup at that moment; it is a hint, not a guarantee.
   (**Automatic provider fallback**, **Review on a different provider**, or the
   provider order). A warning shown outside the routing page shall say where
   that control is (Office > Routing).
+- **AC-OFFICE-REVIEW-AUTHOR-EXCL-005.10:** Warnings that share a cause and a fix
+  (the same warning kind, provider, and agent) shall be shown as one warning:
+  the problem stated once, then the affected workflow and step pairs as a
+  list, then one fix that refers to those steps. This applies to the routing
+  settings banner, the import dialog, and workflow sync warnings. On the
+  banner and the import dialog, a list longer than three steps shall show the
+  first three with a control that reveals the rest.
 
 ### REQ-OFFICE-REVIEW-AUTHOR-EXCL-006: The setting is configurable on the routing page
 
@@ -244,6 +251,11 @@ YAML.
   every supported locale, describe what the setting does and when it waits,
   and be usable on desktop and phone widths, with touch-sized switches on
   coarse pointers.
+- **AC-OFFICE-REVIEW-AUTHOR-EXCL-006.7:** While the routing settings page has
+  unsaved changes (routing settings or switches), it shall show the shared
+  floating settings save bar, which stays visible without scrolling and
+  offers Save and Discard. Leaving the page with unsaved changes shall ask the
+  operator to save or discard them first.
 
 ## Exclusions
 

@@ -104,9 +104,7 @@ func (s *Service) ApplySyncedWorkflows(ctx context.Context, workspaceID string, 
 		}
 	}
 	s.deleteVanishedWorkflows(ctx, synced, desired, frozenPaths, result)
-	for _, w := range s.exclusionWarnings(ctx, workspaceID, applied) {
-		result.Warnings = append(result.Warnings, syncWarningText(w))
-	}
+	result.Warnings = append(result.Warnings, syncWarningTexts(s.exclusionWarnings(ctx, workspaceID, applied))...)
 
 	sort.Strings(result.Created)
 	sort.Strings(result.Updated)

@@ -112,16 +112,32 @@ func TestApplySyncedWorkflowsAppendsExclusionWarnings(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"Guarded"}, result.Created)
 	assert.Equal(t, []string{
-		`Guarded workflow, Review step (reviewer): Automatic provider fallback is off, so Review on a different provider is ignored. Reviews may run on the provider that did the work, so they are not an independent check. Turn on Automatic provider fallback in Office > Routing, or turn off Review on a different provider for this step there.`,
-		`Guarded workflow, Review step (reviewer): Agent "QA" can only use codex-acp, so its reviews wait whenever the work ran on codex-acp. Give "QA" another provider in its routing settings, or turn off Review on a different provider for this step in Office > Routing.`,
+		`Automatic provider fallback is off, so Review on a different provider is ignored. Reviews may run on the provider that did the work, so they are not an independent check. Affected step: Guarded workflow, Review step (reviewer). Turn on Automatic provider fallback in Office > Routing, or turn off Review on a different provider for this step there.`,
+		`Agent "QA" can only use codex-acp, so its reviews wait whenever the work ran on codex-acp. Affected step: Guarded workflow, Review step (reviewer). Give "QA" another provider in its routing settings, or turn off Review on a different provider for this step in Office > Routing.`,
 	}, result.Warnings)
 }
 
-func TestSyncWarningTextCoversEveryCode(t *testing.T) {
+func TestSyncWarningTextsGroupsSharedCauseAndFix(t *testing.T) {
+	single := func(wf string) ImportWarning {
+		return ImportWarning{Code: "single_provider", WorkflowName: wf, StepName: "Review", Role: "reviewer", ProviderID: "claude-acp"}
+	}
+	got := syncWarningTexts([]ImportWarning{
+		single("Alpha"),
+		{Code: "agent_single_provider", WorkflowName: "Alpha", StepName: "Review", Role: "reviewer", ProviderID: "codex-acp", AgentName: "QA"},
+		single("Beta"),
+		{Code: "single_provider", WorkflowName: "Gamma", StepName: "Approval", Role: "approver", ProviderID: "codex-acp"},
+	})
+
+	assert.Equal(t, []string{
+		`claude-acp is the only provider, so reviews can never run on a different one from the work. Reviews will wait until you act. Affected steps: Alpha workflow, Review step (reviewer); Beta workflow, Review step (reviewer). Add a second provider in Office > Routing, or turn off Review on a different provider for these steps there.`,
+		`Agent "QA" can only use codex-acp, so its reviews wait whenever the work ran on codex-acp. Affected step: Alpha workflow, Review step (reviewer). Give "QA" another provider in its routing settings, or turn off Review on a different provider for this step in Office > Routing.`,
+		`codex-acp is the only provider, so reviews can never run on a different one from the work. Reviews will wait until you act. Affected step: Gamma workflow, Approval step (approver). Add a second provider in Office > Routing, or turn off Review on a different provider for this step there.`,
+	}, got)
+}
+
+func TestSyncWarningTextsCheckFailedHasNoStepList(t *testing.T) {
 	assert.Equal(t,
-		`Guarded workflow, Review step (reviewer): claude-acp is the only provider, so the reviewer can never use a different one from the work. Reviews will wait until you act. Add a second provider in Office > Routing, or turn off Review on a different provider for this step there.`,
-		syncWarningText(ImportWarning{Code: "single_provider", WorkflowName: "Guarded", StepName: "Review", Role: "reviewer", ProviderID: "claude-acp"}))
-	assert.Equal(t,
-		`Review on a different provider could not be checked. Open Office > Routing to check it.`,
-		syncWarningText(ImportWarning{Code: ImportWarningCheckFailed}))
+		[]string{`Review on a different provider could not be checked. Open Office > Routing to check it.`},
+		syncWarningTexts([]ImportWarning{{Code: ImportWarningCheckFailed}}))
+	assert.Empty(t, syncWarningTexts(nil))
 }
