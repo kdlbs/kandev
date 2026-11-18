@@ -27,6 +27,12 @@ A long-running execution can outlive the in-memory Git credential lease held by 
 - **AC-PLATFORM-GIT-CREDENTIAL-LEASE-REISSUE-001.6:** Capabilities and leases are opaque bearer values. They SHALL never be logged, returned by browser-facing APIs, or stored with plaintext Git credentials.
 - **AC-PLATFORM-GIT-CREDENTIAL-LEASE-REISSUE-001.7:** **GIVEN** a running execution with a valid reissue capability, **WHEN** the workspace credential generation rotates and the old lease is redeemed, **THEN** the helper obtains one lease bound to the new generation and the same Git request succeeds.
 - **AC-PLATFORM-GIT-CREDENTIAL-LEASE-REISSUE-001.8:** **GIVEN** a running execution with a valid reissue capability, **WHEN** the backend restarts and has no prior lease records, **THEN** the helper obtains one newly issued lease and the same Git request succeeds.
+- **AC-PLATFORM-GIT-CREDENTIAL-LEASE-REISSUE-001.9:** When an idle managed lease expires and the broker removes it, a still-authorized execution with a valid reissue capability shall recover the Git or `gh` request with one replacement lease.
+- **AC-PLATFORM-GIT-CREDENTIAL-LEASE-REISSUE-001.10:** If the execution lacks a reissue capability and the broker returns HTTP 401 with a lease-invalid or lease-expired code, Git and `gh` shall preserve the broker error and advise using **Restart session** if access is still authorized. This applies to Git and GitHub code prefixes. A lease-revoked or other failure shall retain its existing handling. An eligible session that starts a fresh process after **Restart session** shall receive a new lease and, when reissue is enabled, a capability, including after adoption of a retained lease-only execution.
+- **AC-PLATFORM-GIT-CREDENTIAL-LEASE-REISSUE-001.11:** Backend startup shall report the selected signer source or the disabled state once. The diagnostic shall omit sensitive values.
+- **AC-PLATFORM-GIT-CREDENTIAL-LEASE-REISSUE-001.12:** Reissue shall be enabled by default for eligible managed launches with the existing workspace Git configuration. An operator signing key shall be optional. A valid default capability shall allow recovery after idle expiry and backend restart on the same installation with the same secrets master key.
+- **AC-PLATFORM-GIT-CREDENTIAL-LEASE-REISSUE-001.13:** When an operator signing key remains configured, its previously issued capabilities shall remain usable under the same eligibility rules. A default capability from an installation with a different secrets master key shall be rejected.
+- **AC-PLATFORM-GIT-CREDENTIAL-LEASE-REISSUE-001.14:** Operators shall be able to disable reissue at backend startup regardless of the configured signing key. With reissue disabled, eligible managed launches shall still receive redeemable leases. They shall receive no capabilities, and the broker shall reject exchanges of existing capabilities through both Git and GitHub routes.
 
 ## Migrated source detail
 
@@ -65,10 +71,10 @@ and an expiry. The capability is injected only into the managed runtime helper
 environment with the matching lease scope. No capability, lease, or credential
 plaintext is written to the task database.
 
-The capability signer uses a stable configured backend signing key. When no
-stable signer is configured, reissue capability issuance is unavailable and the
-existing managed-lease path remains fail-closed; a process restart does not gain
-an unauthenticated recovery path.
+The capability signer defaults to the installation's stable signing material.
+An explicit backend signing key overrides the installation default. Disabling
+reissue suspends issuance and exchange of capabilities. Reissue requires a
+valid capability regardless of the source of signing material.
 
 ## API surface
 
@@ -88,7 +94,8 @@ an unauthenticated recovery path.
 
 ## State machine
 
-1. Launch issues a scoped lease and a scoped reissue capability.
+1. Launch issues a scoped lease. When reissue is enabled, it also issues a
+   scoped reissue capability.
 2. Helper redeems the lease.
 3. On an eligible lease failure, helper validates its local Git input against
    the issued scope, exchanges the capability for one replacement lease, and
@@ -118,10 +125,9 @@ capability, or mismatched helper request is denied.
 ## Persistence guarantees
 
 Leases remain intentionally in-memory and disappear on backend restart.
-Reissue capabilities survive only in the still-running execution environment
-and remain verifiable across a backend restart when the configured signer is
-stable. They expire and are rendered useless by live authorization once their
-task/session/repository is no longer eligible.
+Reissue capabilities survive only in the still-running execution environment.
+They remain verifiable across backend restart with the same signer. The broker
+checks expiry and live task, session, and repository eligibility during reissue.
 
 ## Scenarios
 

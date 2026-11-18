@@ -228,7 +228,7 @@ To recover capacity in one session, expand its queue chip in the task workbench.
 | --- | --- |
 | `data/kandev.db`, `-wal`, `-shm` | Default SQLite database and transient WAL files |
 | `kandev.db`, `-wal`, `-shm` | Legacy default SQLite database checked during startup; Kandev retains it after adoption until you verify the current database |
-| `data/master.key` | Owner-only AES-256 key used to decrypt secrets stored in the database; a database copy without the matching key cannot recover those secret values |
+| `data/master.key` | Owner-only AES-256 key used to decrypt database secrets and derive the default managed Git reissue signer; losing it makes existing secrets unreadable and outstanding default capabilities unverifiable |
 | `data/backups/` | SQLite snapshots when the database uses the default path |
 | `tasks/` and legacy `worktrees/` | Managed Git worktrees and per-task files; may contain uncommitted or untracked work |
 | `repos/` | Kandev-managed source clones |
@@ -854,7 +854,7 @@ Open **Settings > System > Backups**.
 1. Click **Create snapshot**. Kandev runs SQLite `VACUUM INTO`, including committed WAL frames, writes into a private temporary directory, then atomically publishes the snapshot to `manual-<nanoseconds>.db`.
 2. Wait for the manual row to appear. The browser waits up to 15 seconds; on a large database the backend job can continue after that UI timeout, so reload before retrying.
 3. Download the snapshot and copy it off the host.
-4. Back up `<home>/data/master.key` with owner-only access if you need encrypted secrets to remain usable.
+4. Back up the matching `<home>/data/master.key` with owner-only access. It is required to decrypt stored secrets and verify outstanding default managed Git capabilities. If Kandev cannot load a valid 32-byte key at startup, it tries to generate and save a replacement; a replacement does not restore access to data signed or encrypted with the old key.
 5. If canvases are enabled, copy the matching `<home>/plugins/webapps/` artifact directory.
 6. Separately preserve unpushed Git work, executor/provider state, service configuration, and required CLI login files.
 7. Restore into an isolated instance and verify tasks, workflows, secrets, repository references, and canvas releases before calling the backup tested.
