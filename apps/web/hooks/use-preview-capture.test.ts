@@ -308,6 +308,8 @@ describe("usePreviewCapture marker projection", () => {
           expect.objectContaining({ kind: "text", pending: true }),
         ],
         [],
+        expect.any(String),
+        null,
       ),
     );
   });
@@ -337,11 +339,10 @@ describe("usePreviewCapture screenshots", () => {
       ),
     );
 
-    await waitFor(() => expect(result.current.openDraft?.payload.kind).toBe("screenshot"));
-    expect(result.current.isRasterizing).toBe(false);
+    await waitFor(() => expect(result.current.isRasterizing).toBe(false));
     const draft = result.current.openDraft?.payload;
     if (draft?.kind !== "screenshot") throw new Error("expected screenshot draft");
-    expect(draft.screenshot.previewUrl).toBe(PREVIEW_URL);
+    expect(draft.screenshot?.previewUrl).toBe(PREVIEW_URL);
     expect(html2canvas).toHaveBeenCalledWith(
       iframe.contentDocument?.documentElement,
       expect.objectContaining({ x: 20, y: 640, width: 300, height: 180 }),
@@ -413,11 +414,14 @@ describe("usePreviewCapture screenshot limits and failures", () => {
     feedback.create.mockResolvedValue(null);
     const { iframe, result } = setup();
     act(() => dispatch(iframe.contentWindow, regionSelected()));
-    await waitFor(() => expect(result.current.openDraft?.payload.kind).toBe("screenshot"));
+    await waitFor(() => {
+      const payload = result.current.openDraft?.payload;
+      expect(payload?.kind === "screenshot" && payload.screenshot).toBeTruthy();
+    });
     await act(() => result.current.saveDraft("Retry me"));
     const draft = result.current.openDraft?.payload;
     if (draft?.kind !== "screenshot") throw new Error("expected screenshot draft");
-    expect(draft.screenshot.attachmentId).toBe(SCREENSHOT_ATTACHMENT_ID);
+    expect(draft.screenshot?.attachmentId).toBe(SCREENSHOT_ATTACHMENT_ID);
     expect(attachments.deleteAttachment).not.toHaveBeenCalled();
   });
 
@@ -429,7 +433,10 @@ describe("usePreviewCapture screenshot limits and failures", () => {
     );
     const { iframe, result } = setup();
     act(() => dispatch(iframe.contentWindow, regionSelected()));
-    await waitFor(() => expect(result.current.openDraft?.payload.kind).toBe("screenshot"));
+    await waitFor(() => {
+      const payload = result.current.openDraft?.payload;
+      expect(payload?.kind === "screenshot" && payload.screenshot).toBeTruthy();
+    });
     const id = result.current.openDraft?.id ?? "";
 
     let saveResult: Promise<boolean> | undefined;
@@ -492,7 +499,7 @@ describe("usePreviewCapture region recapture", () => {
     mockRaster();
     const { iframe, result } = setup();
     act(() => dispatch(iframe.contentWindow, regionSelected()));
-    await waitFor(() => expect(result.current.drafts).toHaveLength(1));
+    await waitFor(() => expect(result.current.isRasterizing).toBe(false));
     const before = result.current.drafts[0].payload;
     html2canvas.mockRejectedValue(new Error("raster failed"));
 
@@ -555,6 +562,7 @@ describe("usePreviewCapture Escape", () => {
     act(() => dispatch(iframe.contentWindow, textCapture()));
     expect(result.current.openDraft).not.toBeNull();
 
+    act(() => result.current.setDraftComment("keep me"));
     act(() => dispatch(iframe.contentWindow, bridgeMessage("escape", {})));
     expect(result.current.openDraft).toBeNull();
     expect(result.current.drafts).toHaveLength(1);
@@ -582,11 +590,11 @@ describe("usePreviewCapture comment surface", () => {
     expect(result.current.draftAnchor).toEqual({ x: 210, y: 138 });
 
     act(() => result.current.setDraftComment("half-written note"));
-    act(() => result.current.closeDraftSurface());
+    act(() => result.current.closeComment());
     expect(result.current.openDraft).toBeNull();
     expect(result.current.drafts[0].comment).toBe("half-written note");
 
-    act(() => result.current.resumeDraft(result.current.drafts[0].id));
+    act(() => result.current.openCapture(result.current.drafts[0].id));
     expect(result.current.openDraft?.comment).toBe("half-written note");
   });
 

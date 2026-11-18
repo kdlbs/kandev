@@ -63,6 +63,9 @@ test.describe("Web preview feedback comment surface", () => {
       );
 
       await chooseCapture(testPage, "Select element");
+      // The floating surface is used while the comment panel is hidden.
+      await testPage.getByTestId("preview-annotation-count").click();
+      await expect(testPage.getByTestId("preview-comment-panel")).toBeHidden();
       const target = frame.locator("#save");
       await target.click();
       const surface = draftSurface(testPage);
@@ -86,6 +89,7 @@ test.describe("Web preview feedback comment surface", () => {
       const trigger = testPage.getByTestId("preview-feedback-trigger");
       await expect(testPage.getByTestId("preview-feedback-unsaved-indicator")).toBeVisible();
       await testPage.getByTestId("preview-annotation-count").click();
+      await expect(testPage.getByTestId("preview-comment-panel")).toBeVisible();
       const unsaved = testPage.getByTestId("preview-unsaved-draft");
       await expect(unsaved).toContainText("/");
       await unsaved.getByTestId("preview-unsaved-resume").click();

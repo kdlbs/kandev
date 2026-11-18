@@ -91,6 +91,8 @@ Tool behavior:
 
 ## Layout
 
+> [Part 4](web-preview-feedback-04.md) changes this layout: the count button becomes a comment panel toggle, and the panel docks beside the preview.
+
 `PreviewAnnotationLayer` is a new component mounted in the iframe's positioned
 container in `BrowserPanel` and `HtmlPreviewContent`. It is `absolute inset-0`
 and `pointer-events: none`. Only the toolbar, region handles, and selection
@@ -136,6 +138,8 @@ session exist and the page is proxied. Other pages never load the bridge.
 
 ## Drafts
 
+> [Part 4](web-preview-feedback-04.md) changes dismissal: a capture closed with no text is removed, and drafts are numbered and listed in the comment panel.
+
 `use-preview-capture` replaces its single `draft` with an ordered list of
 drafts, each with a client ID, capture payload, typed comment, optional PNG
 and upload ID, and an `open` flag. One draft at most is open. Opening a draft
@@ -161,6 +165,8 @@ closes the other surfaces without discarding them.
 The Resume and Discard row and the capture gating from part 2 are removed.
 
 ## Escape and exit
+
+> [Part 4](web-preview-feedback-04.md) changes step 1 to use its close reducer, which removes empty captures.
 
 The order is fixed (`AC-TASKS-WEB-PREVIEW-FEEDBACK-005.5`):
 
@@ -313,3 +319,4 @@ does not use it.
 ## Implementation plans
 
 - [Web preview annotation mode](../../../plans/web-preview-annotation-mode/plan.md)
+- [Web preview annotation review](../../../plans/web-preview-annotation-review/plan.md) (with part 4)

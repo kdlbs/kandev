@@ -89,11 +89,15 @@ function ActiveAnnotation({
   const drag = useRegionDrag({
     regions: capture.regions,
     bounds,
-    onOpen: capture.openRegion,
+    onOpen: capture.openCapture,
     onRecapture: capture.recaptureRegion,
   });
   const pendingIndexes = useMemo(
     () => new Set(drag.regions.filter((region) => region.pending).map((region) => region.index)),
+    [drag.regions],
+  );
+  const busyIndexes = useMemo(
+    () => new Set(drag.regions.filter((region) => region.busy).map((region) => region.index)),
     [drag.regions],
   );
   const pendingCount = capture.items.length + capture.drafts.length;
@@ -105,11 +109,17 @@ function ActiveAnnotation({
           index: region.index,
           rect: region.rect,
           title: region.title,
+          number: region.number,
         }))}
         selectedIndex={null}
         draft={null}
         testId="preview-region"
         pendingIndexes={pendingIndexes}
+        busyIndexes={busyIndexes}
+        onSelect={(index) => {
+          const region = drag.regions.find((candidate) => candidate.index === index);
+          if (region) capture.openCapture(region.id);
+        }}
         onHandlePointerDown={annotation.tool === "region" ? drag.onHandlePointerDown : undefined}
       />
       <PreviewAnnotationToolbar
@@ -120,23 +130,26 @@ function ActiveAnnotation({
         regionDisabled={capture.limitReached}
         onToolChange={annotation.setTool}
         onExit={annotation.exit}
-        onOpenPending={() => capture.setPendingPanelOpen(true)}
-        renderCount={(button) => (
-          <PreviewFeedbackCollectionSurface
-            taskId={taskId}
-            collection={capture}
-            open={capture.pendingPanelOpen}
-            onOpenChange={capture.setPendingPanelOpen}
-            trigger={button}
-            side={touch ? "top" : "bottom"}
-            portal
-            drafts={{
-              entries: capture.drafts,
-              onResume: capture.resumeDraft,
-              onDiscard: capture.discardDraft,
-            }}
-          />
-        )}
+        panelOpen={capture.commentPanel.open}
+        onTogglePanel={capture.commentPanel.toggle}
+        renderCount={(button) =>
+          touch ? (
+            <PreviewFeedbackCollectionSurface
+              taskId={taskId}
+              collection={capture}
+              open={capture.commentPanel.open}
+              onOpenChange={capture.commentPanel.setOpen}
+              trigger={button}
+              drafts={{
+                entries: capture.drafts,
+                onResume: capture.openCapture,
+                onDiscard: capture.discardDraft,
+              }}
+            />
+          ) : (
+            button
+          )
+        }
       />
       <AnnotationStatus capture={capture} />
     </>
@@ -163,8 +176,12 @@ export function PreviewAnnotationLayer({ capture, taskId }: Props) {
         <ActiveAnnotation capture={capture} taskId={taskId} root={rootRef} touch={touch} />
       )}
       <PreviewSelectionComment capture={capture} touch={touch} host={rootRef} />
-      <PreviewDraftSurface capture={capture} host={rootRef} />
-      <PreviewSavedRegionEditor capture={capture} host={rootRef} />
+      {!capture.inlineComments && (
+        <>
+          <PreviewDraftSurface capture={capture} host={rootRef} />
+          <PreviewSavedRegionEditor capture={capture} host={rootRef} />
+        </>
+      )}
     </div>
   );
 }

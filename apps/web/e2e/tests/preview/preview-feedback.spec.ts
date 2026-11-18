@@ -9,6 +9,7 @@ import {
   dragScreenshotRegion,
   fillDraftComment,
   openBrowserPreview,
+  startWithCommentPanelHidden,
   saveDraft,
   selectGeneratedText,
   startPreviewServer,
@@ -29,6 +30,7 @@ test.describe("Web preview feedback", () => {
     const busyTurn = mockTurnGate(backend.tmpDir, "Preview blocking turn completed");
     const createFailure = await routeMainWebSocketWithPreviewFeedbackCreateFailure(testPage);
     try {
+      await startWithCommentPanelHidden(testPage);
       const { session, frame } = await openBrowserPreview(
         testPage,
         apiClient,

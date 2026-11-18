@@ -11,11 +11,17 @@ import {
   type PreviewRegionAnchor,
   type PreviewRegionLayout,
 } from "@/lib/preview-inspect-bridge";
-import { isScreenshotLimitReached, nextEscapeStep } from "@/lib/preview-annotation";
+import {
+  captureNumbers,
+  closeCommentStep,
+  isScreenshotLimitReached,
+  nextEscapeStep,
+} from "@/lib/preview-annotation";
 import { sanitizePreviewPageRoute } from "@/lib/preview-feedback-source";
 import { anchorBelowRect, floatingBounds } from "@/components/task/floating-selection-position";
 import type { PreviewCaptureRect, TaskPreviewFeedback } from "@/lib/types/http";
 import { usePreviewAnnotationMode } from "./use-preview-annotation-mode";
+import { usePreviewCommentPanel } from "./use-preview-comment-panel";
 import { usePreviewDraftSave, type PreviewCaptureSource } from "./use-preview-draft-save";
 import { usePreviewDrafts, type PreviewDraftEntry } from "./use-preview-drafts";
 import { usePreviewInspectorEvents } from "./use-preview-inspector-events";
@@ -42,6 +48,10 @@ export type PreviewRegionView = {
   index: number;
   rect: { x: number; y: number; width: number; height: number };
   pending: boolean;
+  /** The image is still being captured. */
+  busy: boolean;
+  /** Shared with the in-page marker and the comment list. */
+  number: number;
   title?: string;
 };
 
@@ -77,7 +87,13 @@ function draftMarker(draft: PreviewDraftEntry): PreviewMarkerProjection {
   };
 }
 
-type RegionSource = { id: string; route: string; rect: PreviewCaptureRect; pending: boolean };
+type RegionSource = {
+  id: string;
+  route: string;
+  rect: PreviewCaptureRect;
+  pending: boolean;
+  busy: boolean;
+};
 
 function regionSources(items: TaskPreviewFeedback[], drafts: PreviewDraftEntry[]) {
   const saved: RegionSource[] = items.flatMap((item) =>
@@ -88,6 +104,7 @@ function regionSources(items: TaskPreviewFeedback[], drafts: PreviewDraftEntry[]
             route: sanitizePreviewPageRoute(item.page_route),
             rect: item.capture_rect,
             pending: false,
+            busy: false,
           },
         ]
       : [],
@@ -100,6 +117,7 @@ function regionSources(items: TaskPreviewFeedback[], drafts: PreviewDraftEntry[]
             route: draft.payload.page_route,
             rect: draft.payload.capture_rect,
             pending: true,
+            busy: draft.payload.screenshot === null,
           },
         ]
       : [],
@@ -111,7 +129,7 @@ function regionViews(
   sources: RegionSource[],
   route: string,
   layouts: Record<string, PreviewRegionLayout>,
-  comments: Record<string, string>,
+  labels: { comments: Record<string, string>; numbers: Map<string, number> },
 ): PreviewRegionView[] {
   return sources
     .filter((region) => region.route === route)
@@ -125,7 +143,9 @@ function regionViews(
           index,
           rect: { x, y, width, height },
           pending: region.pending,
-          title: comments[region.id],
+          busy: region.busy,
+          number: labels.numbers.get(region.id) ?? index + 1,
+          title: labels.comments[region.id],
         },
       ];
     });
@@ -165,15 +185,31 @@ function useSourceCollections(
     () => feedback.items.filter((item) => belongsToSource(item, source)),
     [feedback.items, source.kind, source.label, source.path, source.sessionId],
   );
-  const markers = useMemo(
-    () => [...sourceItems.map(itemMarker), ...drafts.map(draftMarker)],
+  const numbers = useMemo(
+    () =>
+      captureNumbers([
+        ...sourceItems.map((item) => ({
+          id: item.id,
+          route: sanitizePreviewPageRoute(item.page_route),
+        })),
+        ...drafts.map((draft) => ({ id: draft.id, route: draft.payload.page_route })),
+      ]),
     [drafts, sourceItems],
+  );
+  const markers = useMemo(
+    () =>
+      [...sourceItems.map(itemMarker), ...drafts.map(draftMarker)].map((marker) => ({
+        ...marker,
+        number: numbers.get(marker.id),
+      })),
+    [drafts, numbers, sourceItems],
   );
   const sources = useMemo(() => regionSources(sourceItems, drafts), [drafts, sourceItems]);
   const savedScreenshots = feedback.items.filter((item) => item.kind === "screenshot").length;
   const unsavedScreenshots = drafts.filter((draft) => draft.payload.kind === "screenshot").length;
   return {
     sourceItems,
+    numbers,
     markers,
     sources,
     limitReached: isScreenshotLimitReached(savedScreenshots, unsavedScreenshots),
@@ -219,52 +255,76 @@ function usePreviewPageState() {
   };
 }
 
-/** Which comment surface is open: a draft, a saved region's editor, or the pending panel. */
+/** Which comment is open: a draft or a saved item's editor. */
 function usePreviewSurfaces(
   drafts: ReturnType<typeof usePreviewDrafts>,
   annotation: ReturnType<typeof usePreviewAnnotationMode>,
-  sourceItems: TaskPreviewFeedback[],
+  editing: ReturnType<typeof useEditingItem>,
+  commentPanel: ReturnType<typeof usePreviewCommentPanel>,
 ) {
-  const [editingItemId, setEditingItemId] = useState<string | null>(null);
-  const [pendingPanelOpen, setPendingPanelOpen] = useState(false);
-  const editingItem = sourceItems.find((item) => item.id === editingItemId) ?? null;
-  const surfaceOpen = drafts.openDraft !== null || editingItem !== null || pendingPanelOpen;
+  const { editingItem, setEditingItemId } = editing;
+  const openDraft = drafts.openDraft;
+  const surfaceOpen = openDraft !== null || editingItem !== null;
+
+  const closeComment = useCallback(() => {
+    const step = closeCommentStep({
+      draftComment: openDraft ? openDraft.comment : null,
+      editing: editingItem !== null,
+    });
+    if (step === "discard-draft" && openDraft) drafts.discard(openDraft.id);
+    else if (step === "keep-draft") drafts.close();
+    else if (step === "close-editor") setEditingItemId(null);
+  }, [drafts, editingItem, openDraft, setEditingItemId]);
 
   const handleEscape = useCallback(() => {
     const step = nextEscapeStep({ surfaceOpen, tool: annotation.tool });
     if (step === "close-surface") {
-      drafts.close();
-      setEditingItemId(null);
-      setPendingPanelOpen(false);
+      closeComment();
     } else if (step === "interact") {
       annotation.setTool("interact");
     } else {
       annotation.exit();
     }
-  }, [annotation, drafts, surfaceOpen]);
+  }, [annotation, closeComment, surfaceOpen]);
 
-  const openRegion = useCallback(
+  /** Opens a draft or a saved item's comment, closing any other open comment. */
+  const { touch, setOpen: setPanelOpen } = commentPanel;
+  const openCapture = useCallback(
     (id: string) => {
-      setPendingPanelOpen(false);
+      if (touch) setPanelOpen(false);
       if (drafts.find(id)) {
         setEditingItemId(null);
         drafts.open(id);
       } else {
-        drafts.close();
+        closeComment();
         setEditingItemId(id);
       }
     },
-    [drafts],
+    [closeComment, drafts, setEditingItemId, setPanelOpen, touch],
   );
 
   return {
     editingItem,
     closeItemEditor: () => setEditingItemId(null),
-    pendingPanelOpen,
-    setPendingPanelOpen,
+    closeComment,
     handleEscape,
-    openRegion,
+    openCapture,
   };
+}
+
+function useEditingItem(sourceItems: TaskPreviewFeedback[]) {
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const editingItem = sourceItems.find((item) => item.id === editingItemId) ?? null;
+  return { editingItem, setEditingItemId };
+}
+
+/** A text or element comment pauses picking so the captured target stays highlighted. */
+function isPausingComment(
+  openDraft: PreviewDraftEntry | null,
+  editingItem: TaskPreviewFeedback | null,
+) {
+  const kind = openDraft?.payload.kind ?? editingItem?.kind;
+  return kind === "text" || kind === "element";
 }
 
 function useRegionProjection(
@@ -272,9 +332,10 @@ function useRegionProjection(
   collections: ReturnType<typeof useSourceCollections>,
   drafts: PreviewDraftEntry[],
   page: ReturnType<typeof usePreviewPageState>,
-  active: boolean,
+  view: { active: boolean; highlightedId: string | null; revealId: string | null },
 ) {
-  const { markers, sources, sourceItems } = collections;
+  const { markers, sources, sourceItems, numbers } = collections;
+  const { active, highlightedId, revealId } = view;
   const anchors = useMemo<PreviewRegionAnchor[]>(
     () =>
       active
@@ -287,8 +348,10 @@ function useRegionProjection(
     [active, sources],
   );
   const projectMarkers = useCallback(() => {
-    if (iframeRef.current) sendProjectPreviewMarkers(iframeRef.current, markers, anchors);
-  }, [anchors, iframeRef, markers]);
+    if (iframeRef.current) {
+      sendProjectPreviewMarkers(iframeRef.current, markers, anchors, highlightedId, revealId);
+    }
+  }, [anchors, highlightedId, iframeRef, markers, revealId]);
   useEffect(projectMarkers, [projectMarkers]);
 
   const comments = useMemo(
@@ -300,8 +363,8 @@ function useRegionProjection(
     [drafts, sourceItems],
   );
   const regions = useMemo(
-    () => (active ? regionViews(sources, page.pageRoute, page.layouts, comments) : []),
-    [active, comments, page.layouts, page.pageRoute, sources],
+    () => (active ? regionViews(sources, page.pageRoute, page.layouts, { comments, numbers }) : []),
+    [active, comments, numbers, page.layouts, page.pageRoute, sources],
   );
   return { projectMarkers, regions };
 }
@@ -355,7 +418,29 @@ function useCaptureEvents(deps: CaptureEventDeps) {
     onRegionLayout: (regions) =>
       page.setLayouts(Object.fromEntries(regions.map((region) => [region.id, region]))),
     onEscape: surfaces.handleEscape,
+    onMarkerActivated: surfaces.openCapture,
+    onPagePointerDown: surfaces.closeComment,
   });
+}
+
+/** The comment panel and annotation mode, which pauses while a text or element comment is open. */
+function useAnnotationModes(options: {
+  iframeRef: React.RefObject<HTMLIFrameElement | null>;
+  enabled: boolean;
+  regionBlocked: boolean;
+  openDraft: PreviewDraftEntry | null;
+  editingItem: TaskPreviewFeedback | null;
+}) {
+  const { openDraft, editingItem } = options;
+  const commentPanel = usePreviewCommentPanel();
+  const annotation = usePreviewAnnotationMode({
+    iframeRef: options.iframeRef,
+    enabled: options.enabled,
+    regionBlocked: options.regionBlocked,
+    paused: isPausingComment(openDraft, editingItem),
+    surfaceOpen: (openDraft !== null || editingItem !== null) && !commentPanel.docked,
+  });
+  return { commentPanel, annotation };
 }
 
 /** Connects one preview iframe to the task-owned pending feedback collection. */
@@ -370,11 +455,15 @@ export function usePreviewCapture({
   const drafts = usePreviewDrafts();
   const page = usePreviewPageState();
   const collections = useSourceCollections(feedback, drafts.drafts, source);
-  const annotation = usePreviewAnnotationMode({
+  const editing = useEditingItem(collections.sourceItems);
+  const { commentPanel, annotation } = useAnnotationModes({
     iframeRef,
     enabled,
     regionBlocked: collections.limitReached,
+    openDraft: drafts.openDraft,
+    editingItem: editing.editingItem,
   });
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   useResetDrafts(
     drafts,
     enabled,
@@ -394,14 +483,12 @@ export function usePreviewCapture({
     createFeedback: feedback.create,
     setCaptureError: screenshots.setCaptureError,
   });
-  const projection = useRegionProjection(
-    iframeRef,
-    collections,
-    drafts.drafts,
-    page,
-    annotation.active,
-  );
-  const surfaces = usePreviewSurfaces(drafts, annotation, collections.sourceItems);
+  const projection = useRegionProjection(iframeRef, collections, drafts.drafts, page, {
+    active: annotation.active,
+    highlightedId: drafts.openDraft?.id ?? editing.editingItem?.id ?? selectedId,
+    revealId: selectedId,
+  });
+  const surfaces = usePreviewSurfaces(drafts, annotation, editing, commentPanel);
 
   useCaptureEvents({
     iframeRef,
@@ -433,8 +520,13 @@ export function usePreviewCapture({
     setDraftComment: (comment: string) => {
       if (openDraft) drafts.setComment(openDraft.id, comment);
     },
-    closeDraftSurface: drafts.close,
-    resumeDraft: surfaces.openRegion,
+    captureNumbers: collections.numbers,
+    commentPanel,
+    /** Comments are written in the docked panel instead of floating over the page. */
+    inlineComments: annotation.active && commentPanel.docked,
+    selectedId,
+    /** Highlights a capture's marker from the comment list. */
+    selectCapture: setSelectedId,
     discardDraft: drafts.discard,
     saveDraft: save.saveDraft,
     editingAnchor: anchorBelow(iframeRef.current, editingRect ?? null),

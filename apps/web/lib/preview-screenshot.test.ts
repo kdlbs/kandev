@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   MAX_PREVIEW_SCREENSHOT_BYTES,
   MAX_PREVIEW_SCREENSHOT_PIXELS,
+  PREVIEW_CAPTURE_TIMEOUT_MS,
   normalizeScreenshotRect,
   isUniformPixels,
   previewScreenshotScale,
@@ -88,6 +89,50 @@ describe("preview screenshot rasterization", () => {
       expect.objectContaining({ x: 10, y: 420, width: 200, height: 100, scale: 2 }),
     );
     expect(result).toEqual({ blob, width: 400, height: 200, uniformOverCanvas: false });
+  });
+
+  it("renders an inner scroll container at the scroll position recorded at release", async () => {
+    const blob = pngBlob(128);
+    const canvas = {
+      width: 400,
+      height: 200,
+      toBlob: (callback: BlobCallback) => callback(blob),
+    } as HTMLCanvasElement;
+    const clone = document.implementation.createHTMLDocument("clone");
+    clone.body.innerHTML = '<ul id="scroller"></ul>';
+    const render = vi.fn(
+      async (_element: HTMLElement, options: { onclone?: (doc: Document) => void }) => {
+        options.onclone?.(clone);
+        return canvas;
+      },
+    );
+
+    await rasterizePreviewRegion(
+      {} as HTMLElement,
+      {
+        ...rect,
+        scroll_container_selector: "#scroller",
+        container_scroll_x: 4,
+        container_scroll_y: 160,
+      },
+      render,
+    );
+
+    const scroller = clone.getElementById("scroller")!;
+    expect(scroller.scrollTop).toBe(160);
+    expect(scroller.scrollLeft).toBe(4);
+  });
+
+  it("gives up on a render that never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = rasterizePreviewRegion({} as HTMLElement, rect, () => new Promise(() => {}));
+      const outcome = expect(pending).rejects.toThrow();
+      await vi.advanceTimersByTimeAsync(PREVIEW_CAPTURE_TIMEOUT_MS);
+      await outcome;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rejects empty canvases, non-PNG bytes, and encoded output above 10 MiB", async () => {

@@ -36,6 +36,47 @@ describe("RegionOverlay", () => {
     expect(pending.className).toContain("border-dashed");
   });
 
+  it("marks busy regions with an animated border", () => {
+    render(
+      <RegionOverlay
+        items={items}
+        selectedIndex={null}
+        draft={null}
+        testId="region"
+        busyIndexes={new Set([0])}
+      />,
+    );
+
+    const [busy, idle] = screen.getAllByTestId("region");
+    expect(busy.getAttribute("data-busy")).toBe("true");
+    expect(busy.querySelector(".kandev-region-busy")).not.toBeNull();
+    expect(idle.getAttribute("data-busy")).toBeNull();
+    expect(idle.querySelector(".kandev-region-busy")).toBeNull();
+  });
+
+  it("shows host numbers and reports badge clicks without starting a move", () => {
+    const onSelect = vi.fn();
+    const onHandlePointerDown = vi.fn();
+    render(
+      <RegionOverlay
+        items={[{ ...items[0], number: 4 }, items[1]]}
+        selectedIndex={null}
+        draft={null}
+        testId="region"
+        onSelect={onSelect}
+        onHandlePointerDown={onHandlePointerDown}
+      />,
+    );
+
+    const badge = screen.getAllByTestId("region")[0].querySelector("[data-region-badge]");
+    expect(badge?.textContent).toBe("4");
+    fireEvent.pointerDown(badge as Element);
+    fireEvent.click(badge as Element);
+
+    expect(onSelect).toHaveBeenCalledWith(0);
+    expect(onHandlePointerDown).not.toHaveBeenCalled();
+  });
+
   it("reports move and corner handle presses with the region index", () => {
     const onHandlePointerDown = vi.fn();
     render(

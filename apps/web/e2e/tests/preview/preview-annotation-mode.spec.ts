@@ -5,6 +5,7 @@ import {
   draftSurface,
   dragScreenshotRegion,
   openBrowserPreview,
+  startWithCommentPanelHidden,
   saveDraft,
   startPreviewServer,
   waitForScreenshotCaptureMode,
@@ -78,6 +79,7 @@ test.describe("Web preview annotation mode", () => {
   }) => {
     const server = await startPreviewServer();
     try {
+      await startWithCommentPanelHidden(testPage);
       const { frame } = await openBrowserPreview(
         testPage,
         apiClient,
@@ -111,11 +113,13 @@ test.describe("Web preview annotation mode", () => {
       await saveDraft(testPage, "First region");
       await expect(testPage.getByTestId("preview-feedback-trigger")).toContainText("2");
 
-      await testPage.getByTestId("preview-annotation-count").click();
-      const panel = testPage.getByTestId("preview-feedback-collection-popover");
+      const panel = testPage.getByTestId("preview-comment-panel");
+      const panelToggle = testPage.getByTestId("preview-annotation-count");
+      await panelToggle.click();
+      await expect(panel).toBeVisible();
       const thumbnail = panel.getByRole("img", { name: "Screenshot preview" }).first();
       const before = await thumbnail.getAttribute("src");
-      await testPage.keyboard.press("Escape");
+      await panelToggle.click();
       await expect(panel).toBeHidden();
 
       const savedRegion = regions.first();
@@ -132,7 +136,7 @@ test.describe("Web preview annotation mode", () => {
         .poll(async () => (await box(savedRegion)).width)
         .toBeGreaterThan(regionBox.width + 20);
 
-      await testPage.getByTestId("preview-annotation-count").click();
+      await panelToggle.click();
       await expect
         .poll(() =>
           panel.getByRole("img", { name: "Screenshot preview" }).first().getAttribute("src"),
@@ -196,6 +200,7 @@ test.describe("Web preview annotation mode", () => {
       await chooseCapture(testPage, "Select element");
       await frame.locator("#save").click();
       await expect(draftSurface(testPage)).toBeVisible({ timeout: 15_000 });
+      await testPage.getByTestId("preview-feedback-draft-input").fill("Keep as a draft");
 
       await frame
         .locator("h1")

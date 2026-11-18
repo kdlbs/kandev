@@ -18,6 +18,10 @@ export type SelectionCommentSurfaceProps = {
   onAdd: CommentCallback;
   onAddAndRun?: CommentCallback;
   onClose: () => void;
+  /** Opt-in Close control that leaves without saving; text is not required. */
+  onCancel?: () => void;
+  /** Keeps Add disabled, e.g. while the evidence is still being prepared. */
+  addDisabled?: boolean;
   editingComment?: string;
   onDelete?: () => boolean | void | Promise<boolean | void>;
   /** Short tag such as a line range or page route. */

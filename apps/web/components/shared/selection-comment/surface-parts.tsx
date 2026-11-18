@@ -9,6 +9,18 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { SelectionCommentSurfaceProps } from "./surface-types";
 
+/**
+ * A transparent layer over the whole viewport for the length of a drag, so
+ * `mousemove` keeps reaching this document when the pointer crosses an iframe.
+ */
+function createDragShield() {
+  const shield = document.createElement("div");
+  shield.setAttribute("data-selection-comment-drag-shield", "");
+  shield.style.cssText = "position:fixed;inset:0;z-index:2147483647;cursor:grabbing;";
+  document.body.appendChild(shield);
+  return shield;
+}
+
 /** Drag support for the popover. */
 export function useDrag() {
   const [offset, setOffset] = useState({ dx: 0, dy: 0 });
@@ -30,8 +42,10 @@ export function useDrag() {
           dy: startOffset.current.dy + ev.clientY - startPos.current.y,
         });
       };
+      const shield = createDragShield();
       const onMouseUp = () => {
         dragging.current = false;
+        shield.remove();
         document.removeEventListener("mousemove", onMouseMove);
         document.removeEventListener("mouseup", onMouseUp);
       };
@@ -269,12 +283,15 @@ export function PopoverActions({
   runButtonTestId,
   runDisabledReason,
   mutationPending,
+  onCancel,
 }: {
   isEditing: boolean;
   isDisabled: boolean;
   onSubmit: () => void;
   onSubmitAndRun?: () => void;
   onDelete?: () => void;
+  /** Shows a Close button that leaves without saving. */
+  onCancel?: () => void;
   addButtonTestId?: string;
   runButtonTestId?: string;
   runDisabledReason?: string | null;
@@ -295,34 +312,48 @@ export function PopoverActions({
         />
       </div>
       <TooltipProvider delayDuration={400}>
-        <div className="inline-flex">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="sm"
-                variant={splitAction ? "outline" : "default"}
-                onClick={onSubmit}
-                disabled={isDisabled}
-                data-testid={addButtonTestId}
-                className={cn(
-                  "h-7 gap-1 text-xs cursor-pointer [@media(pointer:coarse)]:h-11",
-                  splitAction && "rounded-r-none border-r-0",
-                )}
-              >
-                <IconPlus className="h-3 w-3" />
-                {isEditing ? t("task:update") : t("task:add")}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              <p>{isEditing ? t("task:updateComment") : t("task:saveCommentForReview")}</p>
-            </TooltipContent>
-          </Tooltip>
-          <RunCommentButton
-            onSubmitAndRun={splitAction ? onSubmitAndRun : undefined}
-            isDisabled={isDisabled}
-            runButtonTestId={runButtonTestId}
-            runDisabledReason={runDisabledReason}
-          />
+        <div className="inline-flex items-center gap-1">
+          {onCancel && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={onCancel}
+              disabled={mutationPending}
+              className="h-7 cursor-pointer text-xs [@media(pointer:coarse)]:h-11"
+            >
+              {t("task:close")}
+            </Button>
+          )}
+          <div className="inline-flex">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant={splitAction ? "outline" : "default"}
+                  onClick={onSubmit}
+                  disabled={isDisabled}
+                  data-testid={addButtonTestId}
+                  className={cn(
+                    "h-7 gap-1 text-xs cursor-pointer [@media(pointer:coarse)]:h-11",
+                    splitAction && "rounded-r-none border-r-0",
+                  )}
+                >
+                  <IconPlus className="h-3 w-3" />
+                  {isEditing ? t("task:update") : t("task:add")}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p>{isEditing ? t("task:updateComment") : t("task:saveCommentForReview")}</p>
+              </TooltipContent>
+            </Tooltip>
+            <RunCommentButton
+              onSubmitAndRun={splitAction ? onSubmitAndRun : undefined}
+              isDisabled={isDisabled}
+              runButtonTestId={runButtonTestId}
+              runDisabledReason={runDisabledReason}
+            />
+          </div>
         </div>
       </TooltipProvider>
     </div>

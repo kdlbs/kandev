@@ -3,6 +3,8 @@ import { pixelLimitFactor } from "@/lib/images/pixel-limit";
 
 export const MAX_PREVIEW_SCREENSHOT_PIXELS = 16_000_000;
 export const MAX_PREVIEW_SCREENSHOT_BYTES = 10 * 1024 * 1024;
+/** A render that has not settled by then is abandoned so the capture never hangs. */
+export const PREVIEW_CAPTURE_TIMEOUT_MS = 15_000;
 const MIN_SCREENSHOT_EDGE = 5;
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10] as const;
 
@@ -26,6 +28,7 @@ export type PreviewRasterRenderer = (
     useCORS: boolean;
     logging: boolean;
     backgroundColor: null;
+    onclone: (clone: Document) => void;
   },
 ) => Promise<HTMLCanvasElement>;
 
@@ -163,6 +166,32 @@ async function validatePNG(blob: Blob) {
   }
 }
 
+function withTimeout<T>(work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      // i18n-exempt: internal raster failure; callers display localized recovery copy.
+      () => reject(new Error("Screenshot capture timed out")),
+      PREVIEW_CAPTURE_TIMEOUT_MS,
+    );
+  });
+  return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
+}
+
+/** The clone renders the container as it was when the drag ended, not as it is now. */
+function restoreContainerScroll(clone: Document, rect: PreviewCaptureRect) {
+  if (!rect.scroll_container_selector) return;
+  let container: Element | null = null;
+  try {
+    container = clone.querySelector(rect.scroll_container_selector);
+  } catch {
+    return;
+  }
+  if (!container) return;
+  if (typeof rect.container_scroll_x === "number") container.scrollLeft = rect.container_scroll_x;
+  if (typeof rect.container_scroll_y === "number") container.scrollTop = rect.container_scroll_y;
+}
+
 export async function rasterizePreviewRegion(
   documentElement: HTMLElement,
   rect: PreviewCaptureRect,
@@ -178,16 +207,19 @@ export async function rasterizePreviewRegion(
     // i18n-exempt: internal raster failure; callers display localized recovery copy.
     throw new Error("Screenshot region is empty");
   }
-  const canvas = await render(documentElement, {
-    x: rect.document_x ?? rect.x + (rect.scroll_x ?? 0),
-    y: rect.document_y ?? rect.y + (rect.scroll_y ?? 0),
-    width: rect.width,
-    height: rect.height,
-    scale,
-    useCORS: true,
-    logging: false,
-    backgroundColor: null,
-  });
+  const canvas = await withTimeout(
+    render(documentElement, {
+      x: rect.document_x ?? rect.x + (rect.scroll_x ?? 0),
+      y: rect.document_y ?? rect.y + (rect.scroll_y ?? 0),
+      width: rect.width,
+      height: rect.height,
+      scale,
+      useCORS: true,
+      logging: false,
+      backgroundColor: null,
+      onclone: (clone) => restoreContainerScroll(clone, rect),
+    }),
+  );
   if (canvas.width <= 0 || canvas.height <= 0) {
     // i18n-exempt: internal raster failure; callers display localized recovery copy.
     throw new Error("Screenshot canvas is empty");

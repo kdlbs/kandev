@@ -16,6 +16,7 @@ import { detectPreviewUrlFromOutput, rewritePreviewUrlForProxy } from "@/lib/pre
 import { PreviewFeedbackControls } from "./inspector/preview-feedback-controls";
 import { usePreviewCapture } from "@/hooks/use-preview-capture";
 import { PreviewAnnotationLayer } from "./inspector/preview-annotation-layer";
+import { PreviewAnnotationHost } from "./inspector/preview-comment-panel";
 import { usePreviewConsoleForwarder } from "@/hooks/use-preview-console-forwarder";
 import { openExternalLink } from "@/lib/desktop/external-links";
 import { previewSourceLabel } from "@/lib/preview-feedback-source";
@@ -174,7 +175,11 @@ export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelP
       />
 
       <PanelBody padding={false} scroll={false}>
-        <div className="relative h-full w-full">
+        <PreviewAnnotationHost
+          capture={capture}
+          showLayer={Boolean(showInspect && url.showIframeDelayed)}
+          layer={<PreviewAnnotationLayer capture={capture} taskId={activeTaskId} />}
+        >
           <BrowserPanelContent
             showIframeDelayed={url.showIframeDelayed}
             iframeSrc={url.iframeSrc}
@@ -182,10 +187,7 @@ export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelP
             iframeRef={iframeRef}
             onIframeLoad={capture.handleIframeLoad}
           />
-          {showInspect && url.showIframeDelayed && (
-            <PreviewAnnotationLayer capture={capture} taskId={activeTaskId} />
-          )}
-        </div>
+        </PreviewAnnotationHost>
       </PanelBody>
     </PanelRoot>
   );

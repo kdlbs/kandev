@@ -29,10 +29,11 @@ async function ensureUploaded(
 ) {
   const payload = entry.payload;
   if (payload.kind !== "screenshot") return undefined;
+  if (!payload.screenshot) return null;
   if (payload.screenshot.attachmentId) return payload.screenshot.attachmentId;
   const attachmentId = await uploadPreviewScreenshot(workspaceId, payload.screenshot);
   const current = drafts.find(entry.id);
-  if (current?.payload.kind !== "screenshot") {
+  if (current?.payload.kind !== "screenshot" || !current.payload.screenshot) {
     void deleteAttachment(attachmentId).catch(() => undefined);
     return null;
   }

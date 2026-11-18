@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   bridgeModeForTool,
+  captureNumbers,
+  closeCommentStep,
   isScreenshotLimitReached,
   nextEscapeStep,
   recaptureRect,
@@ -99,5 +101,33 @@ describe("recaptureRect", () => {
     };
     const next = recaptureRect(original, { x: 1, y: 2, width: 10, height: 10 }, frame);
     expect(next.container_scroll_y).toBe(40);
+  });
+});
+
+describe("captureNumbers", () => {
+  it("numbers captures per route in list order", () => {
+    const numbers = captureNumbers([
+      { id: "a", route: "/" },
+      { id: "b", route: "/pricing" },
+      { id: "c", route: "/" },
+      { id: "d", route: "/pricing" },
+    ]);
+    expect(Object.fromEntries(numbers)).toEqual({ a: 1, b: 1, c: 2, d: 2 });
+  });
+});
+
+describe("closeCommentStep", () => {
+  it("discards an empty new capture and keeps a typed one", () => {
+    expect(closeCommentStep({ draftComment: "", editing: false })).toBe("discard-draft");
+    expect(closeCommentStep({ draftComment: "   ", editing: false })).toBe("discard-draft");
+    expect(closeCommentStep({ draftComment: "bigger", editing: false })).toBe("keep-draft");
+  });
+
+  it("closes a saved item's editor without saving", () => {
+    expect(closeCommentStep({ draftComment: null, editing: true })).toBe("close-editor");
+  });
+
+  it("does nothing when no comment is open", () => {
+    expect(closeCommentStep({ draftComment: null, editing: false })).toBe("none");
   });
 });

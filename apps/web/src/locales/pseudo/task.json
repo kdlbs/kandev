@@ -3309,5 +3309,7 @@
   "removeRootFailed": "Ćōũĺď ńōţ ŕēḿōvē ţĥē ŕōōţ ƒŕōḿ ţĥĩś ţàśķ",
   "removeFromTask": "Ŕēḿōvē ƒŕōḿ ţàśķ",
   "rootDisabledNoTracker": "Ţĥĩś ŕōōţ ĥàś ńō Ĝĩţ ţŕàćķēŕ ŷēţ",
-  "refreshRepositories": "Ŕēƒŕēśĥ ŕēƥōśĩţōŕĩēś"
+  "refreshRepositories": "Ŕēƒŕēśĥ ŕēƥōśĩţōŕĩēś",
+  "previewShowComments": "Śĥōŵ ćōḿḿēńţś",
+  "previewHideComments": "Ĥĩďē ćōḿḿēńţś"
 }

@@ -7,10 +7,12 @@ import { cn } from "@/lib/utils";
 export type RegionHandle = "move" | RegionCorner;
 
 export type RegionOverlayItem = {
-  /** Position in the host's full region list; shown as `index + 1`. */
+  /** Position in the host's full region list; shown as `index + 1` unless `number` is set. */
   index: number;
   rect: RegionRect;
   title?: string;
+  /** Label shown on the badge when the host numbers captures itself. */
+  number?: number;
 };
 
 type Props = {
@@ -22,6 +24,10 @@ type Props = {
   testId?: string;
   /** Regions drawn dashed, such as unsaved drafts. */
   pendingIndexes?: ReadonlySet<number>;
+  /** Regions still being captured; drawn with an animated border. */
+  busyIndexes?: ReadonlySet<number>;
+  /** Makes each number badge clickable, independent of the move and resize handles. */
+  onSelect?: (index: number) => void;
   /** Renders a move area and four corner handles that report presses. */
   onHandlePointerDown?: (
     index: number,
@@ -65,6 +71,95 @@ function CornerHandles({
   ));
 }
 
+type OutlineProps = {
+  item: RegionOverlayItem;
+  line: number;
+  scale: number;
+  testId?: string;
+  selected: boolean;
+  pending: boolean;
+  busy: boolean;
+  onSelect?: Props["onSelect"];
+  onHandlePointerDown?: Props["onHandlePointerDown"];
+};
+
+function RegionBadge({ item, scale, onSelect }: Pick<OutlineProps, "item" | "scale" | "onSelect">) {
+  return (
+    <span
+      data-region-badge=""
+      className={cn(
+        "absolute top-0 left-0 rounded-sm bg-primary leading-none text-primary-foreground",
+        onSelect && "pointer-events-auto cursor-pointer",
+      )}
+      style={{ fontSize: 12 / scale, padding: `${2 / scale}px ${4 / scale}px` }}
+      onPointerDown={onSelect ? (event) => event.stopPropagation() : undefined}
+      onClick={
+        onSelect
+          ? (event) => {
+              event.stopPropagation();
+              onSelect(item.index);
+            }
+          : undefined
+      }
+    >
+      {item.number ?? item.index + 1}
+    </span>
+  );
+}
+
+function RegionOutline({
+  item,
+  line,
+  scale,
+  testId,
+  selected,
+  pending,
+  busy,
+  onSelect,
+  onHandlePointerDown,
+}: OutlineProps) {
+  const { index, rect, title } = item;
+  return (
+    <div
+      data-testid={testId}
+      data-region-index={index}
+      data-selected={selected ? "true" : undefined}
+      data-pending={pending ? "true" : undefined}
+      data-busy={busy ? "true" : undefined}
+      title={title || undefined}
+      className={cn(
+        "absolute",
+        pending ? "border-dashed" : "border-solid",
+        selected ? "border-amber-500" : "border-primary",
+        onHandlePointerDown ? "pointer-events-auto cursor-move touch-none" : "cursor-pointer",
+      )}
+      style={{
+        left: rect.x,
+        top: rect.y,
+        width: rect.width,
+        height: rect.height,
+        borderWidth: line,
+        forcedColorAdjust: "none",
+      }}
+      onPointerDown={
+        onHandlePointerDown ? (event) => onHandlePointerDown(index, "move", event) : undefined
+      }
+      onMouseDown={onHandlePointerDown ? (event) => event.stopPropagation() : undefined}
+    >
+      <RegionBadge item={item} scale={scale} onSelect={onSelect} />
+      {busy && (
+        <span
+          className="kandev-region-busy pointer-events-none absolute"
+          style={{ inset: -line, padding: line * 1.5 }}
+        />
+      )}
+      {onHandlePointerDown && (
+        <CornerHandles index={index} onHandlePointerDown={onHandlePointerDown} />
+      )}
+    </div>
+  );
+}
+
 /**
  * Numbered region outlines in the host's coordinate space, plus an optional
  * dashed outline for a drag in progress.
@@ -76,52 +171,27 @@ export function RegionOverlay({
   scale = 1,
   testId,
   pendingIndexes,
+  busyIndexes,
+  onSelect,
   onHandlePointerDown,
 }: Props) {
   const line = 2 / scale;
   return (
     <div className="absolute top-0 left-0" aria-hidden="true">
-      {items.map(({ index, rect, title }) => {
-        const pending = pendingIndexes?.has(index) ?? false;
-        return (
-          <div
-            key={index}
-            data-testid={testId}
-            data-region-index={index}
-            data-selected={index === selectedIndex ? "true" : undefined}
-            data-pending={pending ? "true" : undefined}
-            title={title || undefined}
-            className={cn(
-              "absolute",
-              pending ? "border-dashed" : "border-solid",
-              index === selectedIndex ? "border-amber-500" : "border-primary",
-              onHandlePointerDown ? "pointer-events-auto cursor-move touch-none" : "cursor-pointer",
-            )}
-            style={{
-              left: rect.x,
-              top: rect.y,
-              width: rect.width,
-              height: rect.height,
-              borderWidth: line,
-              forcedColorAdjust: "none",
-            }}
-            onPointerDown={
-              onHandlePointerDown ? (event) => onHandlePointerDown(index, "move", event) : undefined
-            }
-            onMouseDown={onHandlePointerDown ? (event) => event.stopPropagation() : undefined}
-          >
-            <span
-              className="absolute top-0 left-0 rounded-sm bg-primary leading-none text-primary-foreground"
-              style={{ fontSize: 12 / scale, padding: `${2 / scale}px ${4 / scale}px` }}
-            >
-              {index + 1}
-            </span>
-            {onHandlePointerDown && (
-              <CornerHandles index={index} onHandlePointerDown={onHandlePointerDown} />
-            )}
-          </div>
-        );
-      })}
+      {items.map((item) => (
+        <RegionOutline
+          key={item.index}
+          item={item}
+          line={line}
+          scale={scale}
+          testId={testId}
+          selected={item.index === selectedIndex}
+          pending={pendingIndexes?.has(item.index) ?? false}
+          busy={busyIndexes?.has(item.index) ?? false}
+          onSelect={onSelect}
+          onHandlePointerDown={onHandlePointerDown}
+        />
+      ))}
       {draft && (
         <div
           className="pointer-events-none absolute border-dashed border-primary"

@@ -225,7 +225,8 @@ reviewing a whole page takes few clicks.
   hide the action.
 - **AC-TASKS-WEB-PREVIEW-FEEDBACK-005.2:** Entering annotation mode shall
   outline the preview area and show a toolbar with the Interact, Text, Element,
-  and Region tools, the pending count, and an Exit control. The toolbar and
+  and Region tools, a comment panel toggle that shows the pending count, and
+  an Exit control. The toolbar and
   Exit control shall stay visible for the whole mode. On fine pointers the
   toolbar floats over the top of the preview; on coarse pointers it is a bottom
   bar with 44-pixel controls.
@@ -233,15 +234,17 @@ reviewing a whole page takes few clicks.
   after each capture is saved or dismissed, so the user can make any number of
   captures without reopening a menu. Interact shall pass all page input
   through while keeping existing annotations visible.
-- **AC-TASKS-WEB-PREVIEW-FEEDBACK-005.4:** A capture whose comment surface is
-  dismissed without saving shall stay as an unsaved draft. It is drawn dashed
-  on the page, listed as unsaved in the pending panel, and can be resumed or
-  discarded. A new capture shall not require discarding earlier drafts.
+- **AC-TASKS-WEB-PREVIEW-FEEDBACK-005.4:** A capture whose comment is closed
+  while it has typed text and has not been saved shall stay as an unsaved
+  draft. It is drawn dashed on the page, listed as unsaved in the comment
+  panel, and can be resumed or discarded. A capture closed with no text shall
+  be removed, together with its marker or outline. A new capture shall not
+  require discarding earlier drafts.
   Unsaved and saved screenshot captures together shall stay within the pending
   screenshot limit, with a visible message when the limit is reached.
 - **AC-TASKS-WEB-PREVIEW-FEEDBACK-005.5:** Escape shall step back one layer at
   a time, whether focus is in Kandev or in the previewed page: close an open
-  comment surface (keeping its draft), then switch the tool to Interact, then
+  comment (as in `005.4`), then switch the tool to Interact, then
   exit annotation mode. The Exit control shall exit directly. Exiting shall
   remove the outline, toolbar, region outlines, and gesture ownership, so the
   page behaves as it did before the mode, and unsaved drafts shall remain
@@ -261,6 +264,53 @@ reviewing a whole page takes few clicks.
   Outlines for other routes shall be hidden after navigation while their items
   remain in the pending collection. Sending feedback shall use the images
   already captured and shall never capture at send time.
+
+### REQ-TASKS-WEB-PREVIEW-FEEDBACK-006: Review annotations in a comment panel
+
+**Intent:** Keep every annotation on the page in view and editable in one
+list, without comment boxes covering the page, while still allowing the full
+preview width.
+
+**User story:** As a user annotating a page, I want a comment list beside the
+preview that I can hide, so that I can write, find, and edit comments without
+losing the page under floating boxes.
+
+#### Acceptance criteria
+
+- **AC-TASKS-WEB-PREVIEW-FEEDBACK-006.1:** In annotation mode, a comment panel
+  shall list the saved items and unsaved drafts for the task. On fine pointers
+  it is docked beside the preview and is open the first time the mode is
+  entered on a device; on coarse pointers it is a bottom sheet that starts
+  hidden. The toolbar's panel toggle shall show and hide it without leaving
+  the mode, and hiding it shall return the full preview width to the page.
+  The device shall remember whether the panel was open or hidden.
+- **AC-TASKS-WEB-PREVIEW-FEEDBACK-006.2:** Panel entries and in-page markers
+  and region outlines for the current page shall share one number per
+  capture. In annotation mode, activating a marker or region number shall
+  open that capture's comment for editing or deletion: in the panel when it
+  is open, otherwise in the floating comment box. Selecting a panel entry
+  shall highlight its marker when the capture belongs to the current page.
+- **AC-TASKS-WEB-PREVIEW-FEEDBACK-006.3:** When the panel is open, a new
+  capture shall add an entry in the panel with its comment field focused,
+  instead of a floating box over the page. When the panel is hidden, the
+  capture shall open the shared floating comment box next to it.
+- **AC-TASKS-WEB-PREVIEW-FEEDBACK-006.4:** Every comment box and panel entry
+  being written shall have a visible close control that behaves as `005.4`,
+  without requiring text. Clicking into the previewed page shall count as an
+  outside click for an open floating comment box.
+- **AC-TASKS-WEB-PREVIEW-FEEDBACK-006.5:** After a region drag ends, its
+  outline shall stay visible with an animated border until the image is
+  captured. The image shall show the content that was under the rectangle when
+  the drag ended, even if the page or the scrollable element under it scrolls
+  before capture finishes, and the outline shall follow that content in the
+  meantime. A capture that fails or does not finish within a fixed time shall
+  remove the outline and show an error, and it shall never leave a capturing
+  state on screen.
+- **AC-TASKS-WEB-PREVIEW-FEEDBACK-006.6:** While a comment for a text or
+  element capture is open, the selected tool shall pause: the captured element
+  or text stays highlighted, and moving the pointer or dragging the comment
+  box shall not highlight or select other elements. The tool shall resume when
+  the comment closes.
 
 ## Out of scope
 

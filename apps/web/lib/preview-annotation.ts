@@ -34,6 +34,34 @@ export function nextEscapeStep(state: {
   return "exit";
 }
 
+export type CloseCommentStep = "discard-draft" | "keep-draft" | "close-editor" | "none";
+
+/**
+ * Closing a comment by Close, Escape, or an outside click: a new capture with
+ * no text is removed, one with text stays as an unsaved draft, and a saved
+ * item's editor closes without saving.
+ */
+export function closeCommentStep(state: {
+  draftComment: string | null;
+  editing: boolean;
+}): CloseCommentStep {
+  if (state.draftComment !== null)
+    return state.draftComment.trim() ? "keep-draft" : "discard-draft";
+  return state.editing ? "close-editor" : "none";
+}
+
+/** One number per capture, counted per route in list order; shared by markers and the list. */
+export function captureNumbers(entries: readonly { id: string; route: string }[]) {
+  const counts = new Map<string, number>();
+  const numbers = new Map<string, number>();
+  for (const entry of entries) {
+    const next = (counts.get(entry.route) ?? 0) + 1;
+    counts.set(entry.route, next);
+    numbers.set(entry.id, next);
+  }
+  return numbers;
+}
+
 export function isScreenshotLimitReached(saved: number, unsaved: number) {
   return saved + unsaved >= MAX_PREVIEW_SCREENSHOTS;
 }

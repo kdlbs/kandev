@@ -8,6 +8,10 @@
   var MAX_REGIONS = 32;
   var mode = null;
   var annotationActive = false;
+  var surfaceOpen = false;
+  var highlightedId = null;
+  var revealId = null;
+  var revealedId = null;
   var candidate = null;
   var candidateOverlay = null;
   var candidateLabel = null;
@@ -374,8 +378,14 @@
     window.setTimeout(captureTextSelection, 0);
   }
 
+  function isMarkerNode(element) {
+    return !!(element && element.closest && element.closest('[data-kandev-inspector-marker]'));
+  }
+
+  // A drag that starts on a marker still draws a region; a plain click opens the marker.
   function onScreenshotPointerDown(event) {
     if (mode !== 'screenshot') return;
+    if (isInspectorNode(event.target) && !isMarkerNode(event.target)) return;
     event.preventDefault();
     event.stopPropagation();
     screenshotStart = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
@@ -645,6 +655,49 @@
     return { left: documentX - window.scrollX, top: documentY - window.scrollY };
   }
 
+  function onMarkerClick(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    send('marker-activated', { id: event.currentTarget.getAttribute('data-kandev-inspector-marker') });
+  }
+
+  function markerNode(marker, index, rect) {
+    var node = document.createElement('div');
+    var highlighted = marker.id === highlightedId;
+    node.setAttribute('data-kandev-inspector-marker', marker.id);
+    node.setAttribute('data-kandev-inspector-ui', 'marker');
+    node.setAttribute('aria-hidden', 'true');
+    if (highlighted) node.setAttribute('data-highlighted', 'true');
+    var colors = marker.pending
+      ? 'background:#fff;color:#4f46e5;border:2px dashed #4f46e5;'
+      : 'background:#4f46e5;color:#fff;border:2px solid #4f46e5;';
+    var ring = highlighted ? '0 0 0 4px rgba(79,70,229,0.45),' : '';
+    node.style.cssText = 'position:fixed;left:' + (rect.left - 11) + 'px;top:' + (rect.top - 11)
+      + 'px;width:22px;height:22px;box-sizing:border-box;border-radius:50%;' + colors
+      + 'font:600 11px/18px system-ui,sans-serif;text-align:center;'
+      + (annotationActive ? 'pointer-events:auto;cursor:pointer;' : 'pointer-events:none;')
+      + 'box-shadow:' + ring + '0 1px 4px rgba(0,0,0,0.3);z-index:' + Z_INDEX + ';';
+    node.textContent = String(typeof marker.number === 'number' ? marker.number : index + 1);
+    if (annotationActive) node.addEventListener('click', onMarkerClick);
+    return node;
+  }
+
+  // Only a capture picked from the comment list scrolls the page; new captures never do.
+  function scrollRevealIntoView() {
+    if (!revealId || revealId === revealedId) return;
+    var node = document.querySelector('[data-kandev-inspector-marker="' + revealId.replace(/["\\]/g, '') + '"]');
+    if (!node) return;
+    revealedId = revealId;
+    var rect = node.getBoundingClientRect();
+    if (rect.top >= 0 && rect.bottom <= window.innerHeight) return;
+    window.scrollBy({ top: rect.top - window.innerHeight / 2, behavior: 'smooth' });
+  }
+
+  function onPagePointerDown(event) {
+    if (!annotationActive || !surfaceOpen || isInspectorNode(event.target)) return;
+    send('page-pointerdown', {});
+  }
+
   function renderMarkers() {
     clearMarkerNodes();
     var route = currentPageRoute();
@@ -656,19 +709,9 @@
     visible.forEach(function (marker, index) {
       var rect = markerRect(marker);
       if (!rect) return;
-      var node = document.createElement('div');
-      node.setAttribute('data-kandev-inspector-marker', marker.id);
-      node.setAttribute('aria-hidden', 'true');
-      var colors = marker.pending
-        ? 'background:#fff;color:#4f46e5;border:2px dashed #4f46e5;'
-        : 'background:#4f46e5;color:#fff;border:2px solid #4f46e5;';
-      node.style.cssText = 'position:fixed;left:' + (rect.left - 11) + 'px;top:' + (rect.top - 11)
-        + 'px;width:22px;height:22px;box-sizing:border-box;border-radius:50%;' + colors
-        + 'font:600 11px/18px system-ui,sans-serif;text-align:center;pointer-events:none;'
-        + 'box-shadow:0 1px 4px rgba(0,0,0,0.3);z-index:' + Z_INDEX + ';';
-      node.textContent = String(index + 1);
-      document.documentElement.appendChild(node);
+      document.documentElement.appendChild(markerNode(marker, index, rect));
     });
+    scrollRevealIntoView();
     scheduleRegionLayout();
   }
 
@@ -692,6 +735,7 @@
     return result;
   };
   document.addEventListener('keydown', onKeyDown, true);
+  document.addEventListener('pointerdown', onPagePointerDown, true);
   document.addEventListener('selectionchange', onSelectionChange);
   window.addEventListener('popstate', routeDidChange);
   window.addEventListener('hashchange', routeDidChange);
@@ -715,10 +759,19 @@
         projectedRegions = message.payload && Array.isArray(message.payload.regions)
           ? message.payload.regions.slice(0, MAX_REGIONS)
           : [];
+        highlightedId = message.payload && typeof message.payload.highlighted_id === 'string'
+          ? message.payload.highlighted_id
+          : null;
+        revealId = message.payload && typeof message.payload.reveal_id === 'string'
+          ? message.payload.reveal_id
+          : null;
+        if (!revealId) revealedId = null;
         renderMarkers();
         break;
       case 'set-annotation-active':
         annotationActive = !!(message.payload && message.payload.active);
+        surfaceOpen = annotationActive && !!(message.payload && message.payload.surface_open);
+        renderMarkers();
         break;
       case 'capture-selection':
         captureTextSelection();

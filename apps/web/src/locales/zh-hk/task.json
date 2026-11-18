@@ -3309,5 +3309,7 @@
   "removeRootFailed": "無法從此任務中移除該根目錄",
   "removeFromTask": "從任務中移除",
   "rootDisabledNoTracker": "此根目錄還沒有 Git 跟蹤器",
-  "refreshRepositories": "刷新儲存庫"
+  "refreshRepositories": "刷新儲存庫",
+  "previewShowComments": "顯示評論",
+  "previewHideComments": "隱藏評論"
 }

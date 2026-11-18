@@ -3,6 +3,7 @@
 import type { RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { SelectionCommentSurface } from "@/components/shared/selection-comment/selection-comment-surface";
+import type { SelectionCommentComposerProps } from "@/components/shared/selection-comment/selection-comment-composer";
 import { EditorSelectionCommentTrigger } from "@/components/editors/editor-selection-comment-trigger";
 import type { PreviewCaptureController } from "@/hooks/use-preview-capture";
 import { PendingFeedbackEditor } from "./preview-feedback-collection";
@@ -26,14 +27,10 @@ function fallbackAnchor(host: RefObject<HTMLElement | null>) {
   return bounds ? { x: bounds.left + 16, y: bounds.top + 16 } : { x: 16, y: 16 };
 }
 
-/** The shared comment surface for the open unsaved draft. */
-export function PreviewDraftSurface({
-  capture,
-  host,
-}: {
-  capture: PreviewCaptureController;
-  host: RefObject<HTMLElement | null>;
-}) {
+/** Comment form props for the open unsaved draft, shared by the floating and inline forms. */
+export function useDraftCommentProps(
+  capture: PreviewCaptureController,
+): (SelectionCommentComposerProps & { key: string }) | null {
   const { t } = useTranslation();
   const errorMessage = useDraftErrorMessage(capture);
   const entry = capture.openDraft;
@@ -41,38 +38,57 @@ export function PreviewDraftSurface({
   const draft = entry.payload;
   const evidence = evidenceForDraft(
     draft,
-    draft.kind === "screenshot"
+    draft.kind === "screenshot" && draft.screenshot
       ? t("task:previewScreenshotDimensions", {
           width: draft.screenshot.width,
           height: draft.screenshot.height,
         })
       : "",
   );
+  return {
+    key: entry.id,
+    selectedText: evidenceText(evidence) || draft.page_route,
+    contextLabel: draft.page_route,
+    evidence: (
+      <>
+        <PreviewFeedbackEvidence evidence={evidence} />
+        {capture.isUploading && (
+          <p role="status" className="mt-1 text-xs text-muted-foreground">
+            {t("task:previewUploadingScreenshot")}
+          </p>
+        )}
+      </>
+    ),
+    draftComment: entry.comment,
+    onDraftChange: capture.setDraftComment,
+    inputLabel: t("task:previewCommentSelection"),
+    errorMessage,
+    testId: "preview-feedback-draft",
+    inputTestId: "preview-feedback-draft-input",
+    addButtonTestId: "preview-feedback-draft-save",
+    addDisabled: draft.kind === "screenshot" && !draft.screenshot,
+    onAdd: (comment) => capture.saveDraft(comment),
+    onClose: capture.closeComment,
+    onCancel: capture.closeComment,
+  };
+}
+
+/** The floating comment surface for the open unsaved draft. */
+export function PreviewDraftSurface({
+  capture,
+  host,
+}: {
+  capture: PreviewCaptureController;
+  host: RefObject<HTMLElement | null>;
+}) {
+  const props = useDraftCommentProps(capture);
+  if (!props) return null;
+  const { key, ...surface } = props;
   return (
     <SelectionCommentSurface
-      key={entry.id}
-      selectedText={evidenceText(evidence) || draft.page_route}
-      contextLabel={draft.page_route}
-      evidence={
-        <>
-          <PreviewFeedbackEvidence evidence={evidence} />
-          {capture.isUploading && (
-            <p role="status" className="mt-1 text-xs text-muted-foreground">
-              {t("task:previewUploadingScreenshot")}
-            </p>
-          )}
-        </>
-      }
+      key={key}
+      {...surface}
       position={capture.draftAnchor ?? fallbackAnchor(host)}
-      draftComment={entry.comment}
-      onDraftChange={capture.setDraftComment}
-      inputLabel={t("task:previewCommentSelection")}
-      errorMessage={errorMessage}
-      testId="preview-feedback-draft"
-      inputTestId="preview-feedback-draft-input"
-      addButtonTestId="preview-feedback-draft-save"
-      onAdd={(comment) => capture.saveDraft(comment)}
-      onClose={capture.closeDraftSurface}
     />
   );
 }

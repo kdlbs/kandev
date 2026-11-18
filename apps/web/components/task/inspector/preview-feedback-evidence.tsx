@@ -11,7 +11,8 @@ export type PreviewFeedbackEvidenceValue =
   | { kind: "element"; text: string }
   | {
       kind: "screenshot";
-      imageUrl: string;
+      /** `null` while the region is still being captured. */
+      imageUrl: string | null;
       caption: string;
       uniformOverCanvas?: boolean;
     };
@@ -47,9 +48,9 @@ export function evidenceForDraft(
   if (draft.kind === "screenshot") {
     return {
       kind: "screenshot",
-      imageUrl: draft.screenshot.previewUrl,
+      imageUrl: draft.screenshot?.previewUrl ?? null,
       caption: dimensions,
-      uniformOverCanvas: draft.screenshot.uniformOverCanvas,
+      uniformOverCanvas: draft.screenshot?.uniformOverCanvas,
     };
   }
   if (draft.kind === "element")
@@ -69,11 +70,21 @@ export function PreviewFeedbackEvidence({ evidence }: { evidence: PreviewFeedbac
   }
   return (
     <div className="space-y-1">
-      <img
-        src={evidence.imageUrl}
-        alt={t("task:previewScreenshotAlt")}
-        className="max-h-40 w-full rounded border bg-background object-contain"
-      />
+      {evidence.imageUrl ? (
+        <img
+          src={evidence.imageUrl}
+          alt={t("task:previewScreenshotAlt")}
+          className="max-h-40 w-full rounded border bg-background object-contain"
+        />
+      ) : (
+        <p
+          role="status"
+          className="flex h-20 w-full animate-pulse items-center justify-center rounded border bg-muted text-xs text-muted-foreground"
+          data-testid="preview-feedback-evidence-capturing"
+        >
+          {t("task:previewRasterizing")}
+        </p>
+      )}
       <p className="truncate font-mono text-xs text-muted-foreground">{evidence.caption}</p>
       {evidence.uniformOverCanvas && (
         <p role="status" className="text-xs text-amber-600 dark:text-amber-400">

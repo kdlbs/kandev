@@ -7,6 +7,7 @@ import { DrawerClose } from "@kandev/ui/drawer";
 import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
 import { useTranslation } from "react-i18next";
 import { createFocusReturnHandler } from "@/lib/dialog-focus-return";
+import { cn } from "@/lib/utils";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { MobilePickerSheet } from "@/components/task/mobile/mobile-picker-sheet";
 import {
@@ -19,6 +20,10 @@ import {
   evidenceText,
 } from "./preview-feedback-evidence";
 import { PreviewUnsavedDrafts, type PreviewUnsavedDraftsProps } from "./preview-unsaved-drafts";
+import { CaptureNumber, type PreviewInlineComments } from "./preview-inline-comments";
+
+export type { PreviewInlineComments } from "./preview-inline-comments";
+import type { SelectionCommentComposerProps } from "@/components/shared/selection-comment/selection-comment-composer";
 import type { TaskPreviewFeedback, TaskPreviewFeedbackSnapshot } from "@/lib/types/http";
 
 export type PreviewFeedbackCollectionController = {
@@ -45,6 +50,31 @@ function keepOpenForCommentSurface(event: {
   if (isInsideSelectionCommentSurface(event.target)) event.preventDefault();
 }
 
+/** Comment form props for editing a saved item, shared by the floating and inline forms. */
+export function usePendingEditorProps(
+  item: TaskPreviewFeedback,
+  collection: PreviewFeedbackCollectionController,
+  onClose: () => void,
+): SelectionCommentComposerProps {
+  const { t } = useTranslation();
+  const evidence = evidenceForItem(item);
+  return {
+    selectedText: evidenceText(evidence) || item.page_route,
+    contextLabel: item.page_route,
+    evidence: <PreviewFeedbackEvidence evidence={evidence} />,
+    editingComment: item.comment,
+    inputLabel: t("task:previewEditComment"),
+    errorMessage: collection.mutationError ? t("task:previewMutationFailed") : null,
+    testId: "preview-feedback-edit",
+    inputTestId: "preview-feedback-edit-input",
+    addButtonTestId: "preview-feedback-edit-save",
+    onAdd: async (comment) => Boolean(await collection.update(item.id, comment, item.version)),
+    onDelete: async () => Boolean(await collection.remove(item.id, item.version)),
+    onClose,
+    onCancel: onClose,
+  };
+}
+
 export function PendingFeedbackEditor({
   item,
   collection,
@@ -56,43 +86,39 @@ export function PendingFeedbackEditor({
   position: { x: number; y: number };
   onClose: () => void;
 }) {
-  const { t } = useTranslation();
-  const evidence = evidenceForItem(item);
-  return (
-    <SelectionCommentSurface
-      selectedText={evidenceText(evidence) || item.page_route}
-      contextLabel={item.page_route}
-      evidence={<PreviewFeedbackEvidence evidence={evidence} />}
-      position={position}
-      editingComment={item.comment}
-      inputLabel={t("task:previewEditComment")}
-      errorMessage={collection.mutationError ? t("task:previewMutationFailed") : null}
-      testId="preview-feedback-edit"
-      inputTestId="preview-feedback-edit-input"
-      addButtonTestId="preview-feedback-edit-save"
-      onAdd={async (comment) => Boolean(await collection.update(item.id, comment, item.version))}
-      onDelete={async () => Boolean(await collection.remove(item.id, item.version))}
-      onClose={onClose}
-    />
-  );
+  const props = usePendingEditorProps(item, collection, onClose);
+  return <SelectionCommentSurface {...props} position={position} />;
 }
 
 function PendingFeedbackItem({
   item,
   collection,
   touch,
+  inline,
 }: {
   item: TaskPreviewFeedback;
   collection: PreviewFeedbackCollectionController;
   touch: boolean;
+  inline?: PreviewInlineComments;
 }) {
   const { t } = useTranslation();
   const [editAnchor, setEditAnchor] = useState<{ x: number; y: number } | null>(null);
   const actionClass = touch ? "h-11 min-w-11" : "h-7 min-w-7";
+  const editing = inline?.activeId === item.id;
 
   return (
-    <li className="rounded-md border p-3" data-testid="preview-feedback-item">
+    <li
+      className={cn(
+        "rounded-md border p-3",
+        inline && "cursor-pointer",
+        inline?.selectedId === item.id && "border-primary",
+      )}
+      data-testid="preview-feedback-item"
+      data-selected={inline?.selectedId === item.id ? "true" : undefined}
+      onClick={inline ? () => inline.onSelect(item.id) : undefined}
+    >
       <div className="flex items-start gap-2">
+        {inline && <CaptureNumber value={inline.numbers.get(item.id)} />}
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs text-muted-foreground">
             {item.source_label} · {item.page_route}
@@ -107,6 +133,8 @@ function PendingFeedbackItem({
           variant="ghost"
           className={actionClass}
           onClick={(event) => {
+            event.stopPropagation();
+            if (inline) return inline.onOpen(item.id);
             const bounds = event.currentTarget.getBoundingClientRect();
             setEditAnchor({ x: bounds.left, y: bounds.bottom });
           }}
@@ -127,7 +155,13 @@ function PendingFeedbackItem({
           <IconX className="h-4 w-4" />
         </Button>
       </div>
-      <p className="mt-2 break-words text-xs">{item.comment}</p>
+      {editing && inline ? (
+        <div className="mt-2" onClick={(event) => event.stopPropagation()}>
+          {inline.renderComposer(item.id)}
+        </div>
+      ) : (
+        <p className="mt-2 break-words text-xs">{item.comment}</p>
+      )}
       {editAnchor && (
         <PendingFeedbackEditor
           item={item}
@@ -248,21 +282,29 @@ export function PreviewFeedbackCollection({
   showEmpty = true,
   showErrors = true,
   drafts,
+  inline,
 }: {
   collection: PreviewFeedbackCollectionController;
   touch: boolean;
   showEmpty?: boolean;
   showErrors?: boolean;
   drafts?: PreviewUnsavedDraftsProps;
+  inline?: PreviewInlineComments;
 }) {
   return (
     <section className="space-y-2" data-testid="preview-feedback-collection">
-      {drafts && <PreviewUnsavedDrafts {...drafts} touch={touch} />}
+      {drafts && <PreviewUnsavedDrafts {...drafts} touch={touch} inline={inline} />}
       <CollectionHeader collection={collection} touch={touch} />
       <CollectionStatus collection={collection} showEmpty={showEmpty} showErrors={showErrors} />
       <ul className="space-y-2">
         {collection.items.map((item) => (
-          <PendingFeedbackItem key={item.id} item={item} collection={collection} touch={touch} />
+          <PendingFeedbackItem
+            key={item.id}
+            item={item}
+            collection={collection}
+            touch={touch}
+            inline={inline}
+          />
         ))}
       </ul>
     </section>

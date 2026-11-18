@@ -1,12 +1,10 @@
 "use client";
 
 import {
-  useEffect,
   useLayoutEffect,
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
-  type ReactNode,
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
@@ -20,18 +18,14 @@ import { floatingBounds, placeFloatingRect } from "@/components/task/floating-se
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import {
   CommentMutationMessages,
-  PopoverActions,
   SurfaceContextLabel,
   SurfaceDrawerHeader,
-  isCommentMutationPending,
-  useCommentDelete,
   useDrag,
   useMutationProtectedClose,
-  usePopoverComposer,
   usePopoverDismiss,
-  useSurfaceComment,
   useViewportResizeRender,
 } from "./surface-parts";
+import { CommentComposerBody, useCommentComposerState } from "./selection-comment-composer";
 import type { SelectionCommentSurfaceProps } from "./surface-types";
 
 export type { SelectionCommentSurfaceProps } from "./surface-types";
@@ -91,6 +85,7 @@ function DesktopSurfaceHeader({
   return (
     <div
       onMouseDown={onMouseDown}
+      data-selection-comment-drag-handle=""
       className={cn(
         "flex items-center gap-2 px-3 py-1.5 cursor-grab active:cursor-grabbing border-b border-border/30",
         contextLabel ? "justify-between" : "justify-center",
@@ -102,52 +97,13 @@ function DesktopSurfaceHeader({
   );
 }
 
-function DesktopEvidence({ evidence, previewText }: { evidence?: ReactNode; previewText: string }) {
-  if (evidence) return <div className="mb-2 min-w-0">{evidence}</div>;
-  return (
-    <p className="mb-2 text-xs text-muted-foreground line-clamp-2 leading-relaxed italic">
-      “{previewText}”
-    </p>
-  );
-}
-
-function DesktopSelectionCommentSurface({
-  selectedText,
-  position,
-  onAdd,
-  onAddAndRun,
-  onClose,
-  editingComment,
-  onDelete,
-  testId,
-  inputTestId,
-  addButtonTestId,
-  runButtonTestId,
-  portalContainer,
-  errorMessage,
-  runDisabledReason,
-  contextLabel,
-  evidence,
-  draftComment,
-  onDraftChange,
-  inputLabel,
-}: SelectionCommentSurfaceProps) {
-  const { t } = useTranslation();
-  const [comment, setComment] = useSurfaceComment(editingComment, draftComment, onDraftChange);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+function DesktopSelectionCommentSurface(props: SelectionCommentSurfaceProps) {
+  const { position, portalContainer, onClose, testId, contextLabel } = props;
+  const state = useCommentComposerState(props);
   const popoverRef = useRef<HTMLDivElement>(null);
   const { offset, onMouseDown } = useDrag();
   const placement = useDesktopPlacement(position, portalContainer, popoverRef);
-  const { isDeleting, deleteComment } = useCommentDelete(onDelete, onClose);
-
-  useEffect(() => {
-    textareaRef.current?.focus();
-  }, []);
-  const effectiveOnAddAndRun = editingComment ? undefined : onAddAndRun;
-  const { handleSubmit, handleSubmitAndRun, handleKeyDown, isDisabled, isSubmitting, previewText } =
-    usePopoverComposer(comment, selectedText, onAdd, onClose, effectiveOnAddAndRun);
-  const mutationPending = isCommentMutationPending(isSubmitting, isDeleting);
-  usePopoverDismiss(onClose, popoverRef, mutationPending);
+  usePopoverDismiss(onClose, popoverRef, state.mutationPending);
 
   return createPortal(
     <div
@@ -167,69 +123,19 @@ function DesktopSelectionCommentSurface({
     >
       <DesktopSurfaceHeader contextLabel={contextLabel} onMouseDown={onMouseDown} />
       <div className="p-3">
-        <DesktopEvidence evidence={evidence} previewText={previewText} />
-        <Textarea
-          ref={textareaRef}
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          onKeyDown={handleKeyDown}
-          disabled={isSubmitting || isDeleting}
-          placeholder={t("task:addYourCommentOrInstruction")}
-          className="min-h-[60px] resize-none text-sm border-border/50 focus:border-primary/50"
-          data-testid={inputTestId}
-          aria-label={inputLabel}
-        />
-        <CommentMutationMessages
-          errorMessage={errorMessage}
-          runDisabledReason={runDisabledReason}
-          canRun={Boolean(effectiveOnAddAndRun)}
-          className="mt-2 text-xs"
-        />
-        <PopoverActions
-          isEditing={!!editingComment}
-          isDisabled={isDisabled || isDeleting}
-          onSubmit={() => void handleSubmit()}
-          onSubmitAndRun={effectiveOnAddAndRun ? () => void handleSubmitAndRun() : undefined}
-          onDelete={deleteComment ? () => void deleteComment() : undefined}
-          addButtonTestId={addButtonTestId}
-          runButtonTestId={runButtonTestId}
-          runDisabledReason={runDisabledReason}
-          mutationPending={mutationPending}
-        />
+        <CommentComposerBody props={props} state={state} />
       </div>
     </div>,
     portalContainer ?? document.body,
   );
 }
 
-function SelectionCommentDrawer({
-  selectedText,
-  onAdd,
-  onAddAndRun,
-  onClose,
-  editingComment,
-  onDelete,
-  testId,
-  inputTestId,
-  addButtonTestId,
-  runButtonTestId,
-  errorMessage,
-  runDisabledReason,
-  contextLabel,
-  evidence,
-  draftComment,
-  onDraftChange,
-  inputLabel,
-}: SelectionCommentSurfaceProps) {
+function SelectionCommentDrawer(props: SelectionCommentSurfaceProps) {
   const { t } = useTranslation();
-  const [comment, setComment] = useSurfaceComment(editingComment, draftComment, onDraftChange);
-  const effectiveOnAddAndRun = editingComment ? undefined : onAddAndRun;
-  const { isDeleting, deleteComment } = useCommentDelete(onDelete, onClose);
-  const { handleSubmit, handleSubmitAndRun, handleKeyDown, isDisabled, isSubmitting } =
-    usePopoverComposer(comment, selectedText, onAdd, onClose, effectiveOnAddAndRun);
-  const disabled = isDisabled || isDeleting;
-  const mutationPending = isCommentMutationPending(isSubmitting, isDeleting);
-  const requestClose = useMutationProtectedClose(onClose, mutationPending);
+  const { selectedText, onClose, editingComment, testId, contextLabel, evidence } = props;
+  const state = useCommentComposerState(props);
+  const { deleteComment } = state;
+  const requestClose = useMutationProtectedClose(onClose, state.mutationPending);
 
   return (
     <Drawer open onOpenChange={(open) => !open && requestClose()}>
@@ -246,32 +152,33 @@ function SelectionCommentDrawer({
         />
         <div className="min-h-0 overflow-y-auto px-4 pb-2">
           <Textarea
-            value={comment}
-            onChange={(event) => setComment(event.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={isSubmitting || isDeleting}
+            value={state.comment}
+            onChange={(event) => state.setComment(event.target.value)}
+            onKeyDown={state.handleKeyDown}
+            disabled={state.isSubmitting || state.isDeleting}
             placeholder={t("task:addYourCommentOrInstruction")}
             className="mb-3 min-h-20 resize-none text-sm border-border/50 focus:border-primary/50"
-            data-testid={inputTestId}
-            aria-label={inputLabel}
+            data-testid={props.inputTestId}
+            aria-label={props.inputLabel}
             autoFocus
           />
           <CommentMutationMessages
-            errorMessage={errorMessage}
-            runDisabledReason={runDisabledReason}
-            canRun={Boolean(effectiveOnAddAndRun)}
+            errorMessage={props.errorMessage}
+            runDisabledReason={props.runDisabledReason}
+            canRun={Boolean(state.onAddAndRun)}
             className="mb-3 text-xs"
           />
           <DrawerActions
             isEditing={Boolean(editingComment)}
-            disabled={disabled}
-            mutationPending={mutationPending}
-            onSubmit={() => void handleSubmit()}
-            onSubmitAndRun={effectiveOnAddAndRun ? () => void handleSubmitAndRun() : undefined}
+            disabled={state.isDisabled}
+            mutationPending={state.mutationPending}
+            onSubmit={() => void state.handleSubmit()}
+            onSubmitAndRun={state.onAddAndRun ? () => void state.handleSubmitAndRun() : undefined}
             onDelete={editingComment && deleteComment ? () => void deleteComment() : undefined}
-            addButtonTestId={addButtonTestId}
-            runButtonTestId={runButtonTestId}
-            runDisabledReason={runDisabledReason}
+            onCancel={props.onCancel}
+            addButtonTestId={props.addButtonTestId}
+            runButtonTestId={props.runButtonTestId}
+            runDisabledReason={props.runDisabledReason}
           />
         </div>
       </DrawerContent>
@@ -289,6 +196,7 @@ function DrawerActions({
   addButtonTestId,
   runButtonTestId,
   runDisabledReason,
+  onCancel,
 }: {
   isEditing: boolean;
   disabled: boolean;
@@ -296,6 +204,7 @@ function DrawerActions({
   onSubmit: () => void;
   onSubmitAndRun?: () => void;
   onDelete?: () => void;
+  onCancel?: () => void;
   addButtonTestId?: string;
   runButtonTestId?: string;
   runDisabledReason?: string | null;
@@ -318,35 +227,49 @@ function DrawerActions({
       ) : (
         <span />
       )}
-      <div className="inline-flex">
-        <Button
-          type="button"
-          size="sm"
-          variant={onSubmitAndRun ? "outline" : "default"}
-          onClick={onSubmit}
-          disabled={disabled}
-          data-testid={addButtonTestId}
-          className={cn(
-            "min-h-11 cursor-pointer gap-1.5 px-4 active:scale-[0.96]",
-            onSubmitAndRun && "rounded-r-none border-r-0",
-          )}
-        >
-          <IconPlus className="h-4 w-4" />
-          {isEditing ? t("task:update") : t("task:add")}
-        </Button>
-        {onSubmitAndRun ? (
+      <div className="inline-flex items-center gap-2">
+        {onCancel && (
           <Button
             type="button"
             size="sm"
-            onClick={onSubmitAndRun}
-            disabled={disabled || !!runDisabledReason}
-            data-testid={runButtonTestId}
-            className="min-h-11 cursor-pointer gap-1.5 rounded-l-none px-4 active:scale-[0.96]"
+            variant="ghost"
+            onClick={onCancel}
+            disabled={mutationPending}
+            className="min-h-11 cursor-pointer px-4"
           >
-            <IconPlayerPlay className="h-4 w-4" />
-            {t("task:run")}
+            {t("task:close")}
           </Button>
-        ) : null}
+        )}
+        <div className="inline-flex">
+          <Button
+            type="button"
+            size="sm"
+            variant={onSubmitAndRun ? "outline" : "default"}
+            onClick={onSubmit}
+            disabled={disabled}
+            data-testid={addButtonTestId}
+            className={cn(
+              "min-h-11 cursor-pointer gap-1.5 px-4 active:scale-[0.96]",
+              onSubmitAndRun && "rounded-r-none border-r-0",
+            )}
+          >
+            <IconPlus className="h-4 w-4" />
+            {isEditing ? t("task:update") : t("task:add")}
+          </Button>
+          {onSubmitAndRun ? (
+            <Button
+              type="button"
+              size="sm"
+              onClick={onSubmitAndRun}
+              disabled={disabled || !!runDisabledReason}
+              data-testid={runButtonTestId}
+              className="min-h-11 cursor-pointer gap-1.5 rounded-l-none px-4 active:scale-[0.96]"
+            >
+              <IconPlayerPlay className="h-4 w-4" />
+              {t("task:run")}
+            </Button>
+          ) : null}
+        </div>
       </div>
     </div>
   );

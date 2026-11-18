@@ -56,9 +56,10 @@ type Props = {
   regionDisabled: boolean;
   onToolChange: (tool: PreviewAnnotationTool) => void;
   onExit: () => void;
-  /** Wraps the count button, so the host can anchor the pending panel to it. */
+  /** Wraps the panel toggle, so the host can anchor a sheet to it. */
   renderCount: (button: ReactNode) => ReactNode;
-  onOpenPending: () => void;
+  panelOpen: boolean;
+  onTogglePanel: () => void;
 };
 
 function ToolButton({
@@ -115,17 +116,22 @@ export function PreviewAnnotationToolbar(props: Props) {
   const { t } = useTranslation();
   const options = useToolOptions();
   const { touch } = props;
+  const panelLabel = props.panelOpen
+    ? t("task:previewHideComments")
+    : t("task:previewShowComments");
   const countButton = (
     <Button
       type="button"
       size="sm"
-      variant="ghost"
+      variant={props.panelOpen ? "secondary" : "ghost"}
       className={cn("cursor-pointer gap-1 rounded-full", touch ? "h-11 min-w-11 px-2" : "h-7 px-2")}
-      aria-label={t("task:previewFeedbackCount", { count: props.pendingCount })}
+      aria-pressed={props.panelOpen}
+      title={panelLabel}
       data-testid="preview-annotation-count"
-      onClick={props.onOpenPending}
+      onClick={props.onTogglePanel}
     >
       <IconMessageDots className="h-4 w-4 shrink-0" aria-hidden="true" />
+      <span className="sr-only">{panelLabel}</span>
       <span className="text-xs font-medium tabular-nums">{props.pendingCount}</span>
     </Button>
   );

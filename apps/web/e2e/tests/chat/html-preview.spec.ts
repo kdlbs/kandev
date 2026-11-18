@@ -260,7 +260,11 @@ test.describe("HTML preview", () => {
     await session.activeChat().getByRole("button", { name: "1 preview feedback item" }).click();
 
     await expect(session.browserPanel).toHaveCount(0);
-    await expect(testPage.getByText("Keep this HTML preview action visible")).toBeVisible();
+    await expect(
+      testPage
+        .getByTestId("preview-feedback-collection-popover")
+        .getByText("Keep this HTML preview action visible"),
+    ).toBeVisible();
   });
 
   test("shows a retryable error when the session publish endpoint fails", async ({

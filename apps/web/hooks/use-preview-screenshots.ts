@@ -79,12 +79,12 @@ export function usePreviewScreenshots({
   const [rasterizing, setRasterizing] = useState(0);
   const [recaptureFailed, setRecaptureFailed] = useState(false);
   const mountedRef = useRef(true);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
       mountedRef.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
 
   const track = useCallback(async <T>(work: () => Promise<T>) => {
     setRasterizing((count) => count + 1);
@@ -95,16 +95,25 @@ export function usePreviewScreenshots({
     }
   }, []);
 
+  /** Adds the region as a capturing draft at once, then fills its image or removes it. */
   const captureRegion = useCallback(
     (region: PreviewScreenshotRegion) => {
       setCaptureError(null);
+      const payload = { ...region, kind: "screenshot" as const, screenshot: null };
+      const id = drafts.add(payload);
       void track(() => rasterize(iframeRef.current, region.capture_rect))
         .then((screenshot) => {
-          if (!mountedRef.current) return URL.revokeObjectURL(screenshot.previewUrl);
-          drafts.add({ ...region, kind: "screenshot", screenshot });
+          const current = drafts.find(id)?.payload;
+          if (!mountedRef.current || current?.kind !== "screenshot") {
+            URL.revokeObjectURL(screenshot.previewUrl);
+            return;
+          }
+          drafts.update(id, (draft) => ({ ...draft, payload: { ...current, screenshot } }));
         })
         .catch(() => {
-          if (mountedRef.current) setCaptureError("raster");
+          if (!mountedRef.current) return;
+          drafts.discard(id);
+          setCaptureError("raster");
         });
     },
     [drafts, iframeRef, track],

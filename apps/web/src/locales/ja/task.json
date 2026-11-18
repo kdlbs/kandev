@@ -3309,5 +3309,7 @@
   "removeRootFailed": "このタスクからルートを削除できませんでした",
   "removeFromTask": "タスクから削除",
   "rootDisabledNoTracker": "このルートには Git トラッカーがまだありません",
-  "refreshRepositories": "リポジトリを再読み込み"
+  "refreshRepositories": "リポジトリを再読み込み",
+  "previewShowComments": "コメントを表示",
+  "previewHideComments": "コメントを非表示"
 }

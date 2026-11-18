@@ -3309,5 +3309,7 @@
   "removeRootFailed": "Could not remove the root from this task",
   "removeFromTask": "Remove from task",
   "rootDisabledNoTracker": "This root has no Git tracker yet",
-  "refreshRepositories": "Refresh repositories"
+  "refreshRepositories": "Refresh repositories",
+  "previewShowComments": "Show comments",
+  "previewHideComments": "Hide comments"
 }

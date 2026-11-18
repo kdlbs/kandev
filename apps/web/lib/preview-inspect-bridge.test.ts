@@ -188,7 +188,12 @@ describe("preview inspector commands", () => {
       expect.objectContaining({
         version: INSPECTOR_PROTOCOL_VERSION,
         type: "project-markers",
-        payload: { markers: [expect.objectContaining({ id: "feedback-1" })], regions: [] },
+        payload: {
+          markers: [expect.objectContaining({ id: "feedback-1" })],
+          regions: [],
+          highlighted_id: null,
+          reveal_id: null,
+        },
       }),
       "*",
     );
@@ -200,6 +205,7 @@ function message(type: string, payload: unknown, version: number = INSPECTOR_PRO
 }
 
 const REGION_LAYOUT = "region-layout";
+const MARKER_ACTIVATED = "marker-activated";
 
 describe("preview inspector protocol 3", () => {
   const region = { x: 10, y: 20, width: 100, height: 40 };
@@ -263,12 +269,48 @@ describe("preview inspector protocol 3", () => {
     sendProjectPreviewMarkers(iframe, [], [{ id: "r1", page_route: "/", capture_rect: region }]);
 
     expect(postMessage.mock.calls.map(([sent]) => [sent.type, sent.payload])).toEqual([
-      ["set-annotation-active", { active: true }],
+      ["set-annotation-active", { active: true, surface_open: false }],
       ["capture-selection", {}],
       [
         "project-markers",
-        { markers: [], regions: [{ id: "r1", page_route: "/", capture_rect: region }] },
+        {
+          markers: [],
+          regions: [{ id: "r1", page_route: "/", capture_rect: region }],
+          highlighted_id: null,
+          reveal_id: null,
+        },
       ],
+    ]);
+  });
+
+  it("accepts marker activation and page presses", () => {
+    expect(isInspectorMessage(message(MARKER_ACTIVATED, { id: "item-1" }))).toBe(true);
+    expect(isInspectorMessage(message(MARKER_ACTIVATED, { id: "" }))).toBe(false);
+    expect(isInspectorMessage(message(MARKER_ACTIVATED, { id: "x".repeat(200) }))).toBe(false);
+    expect(isInspectorMessage(message(MARKER_ACTIVATED, {}))).toBe(false);
+    expect(isInspectorMessage(message("page-pointerdown", {}))).toBe(true);
+  });
+
+  it("sends an open comment and a highlighted marker", () => {
+    const postMessage = vi.fn();
+    const iframe = { contentWindow: { postMessage } } as unknown as HTMLIFrameElement;
+
+    sendSetAnnotationActive(iframe, true, true);
+    sendProjectPreviewMarkers(
+      iframe,
+      [{ id: "m1", kind: "text", page_route: "/", number: 2 }],
+      [],
+      "m1",
+    );
+
+    expect(postMessage.mock.calls.map(([sent]) => sent.payload)).toEqual([
+      { active: true, surface_open: true },
+      {
+        markers: [{ id: "m1", kind: "text", page_route: "/", number: 2 }],
+        regions: [],
+        highlighted_id: "m1",
+        reveal_id: null,
+      },
     ]);
   });
 });

@@ -21,6 +21,7 @@ import { useTranslation } from "react-i18next";
 import { usePreviewCapture } from "@/hooks/use-preview-capture";
 import { PreviewFeedbackControls } from "./inspector/preview-feedback-controls";
 import { PreviewAnnotationLayer } from "./inspector/preview-annotation-layer";
+import { PreviewAnnotationHost } from "./inspector/preview-comment-panel";
 import type { PreviewCaptureController } from "@/hooks/use-preview-capture";
 
 type HtmlPreviewContentProps = {
@@ -251,19 +252,22 @@ export const HtmlPreviewContent = memo(function HtmlPreviewContent({
         )}
         {!isLoading && errorText && <HtmlPreviewError message={errorText} onRetry={onRetry} />}
         {!isLoading && !errorText && previewUrl && (
-          <iframe
-            ref={iframeRef}
-            data-testid="html-preview-frame"
-            src={previewUrl}
-            title={t("task:browserPreview")}
-            className="h-full w-full border-0"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-            referrerPolicy="no-referrer"
-            onLoad={capture.handleIframeLoad}
-          />
-        )}
-        {!isLoading && !errorText && previewUrl && (
-          <PreviewAnnotationLayer capture={capture} taskId={taskId} />
+          <PreviewAnnotationHost
+            capture={capture}
+            showLayer
+            layer={<PreviewAnnotationLayer capture={capture} taskId={taskId} />}
+          >
+            <iframe
+              ref={iframeRef}
+              data-testid="html-preview-frame"
+              src={previewUrl}
+              title={t("task:browserPreview")}
+              className="h-full w-full border-0"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+              referrerPolicy="no-referrer"
+              onLoad={capture.handleIframeLoad}
+            />
+          </PreviewAnnotationHost>
         )}
       </div>
     </div>

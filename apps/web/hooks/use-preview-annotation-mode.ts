@@ -9,24 +9,35 @@ type Options = {
   enabled: boolean;
   /** The screenshot limit is reached, so the Region tool cannot capture. */
   regionBlocked: boolean;
+  /** A text or element comment is open; the tool stays selected but stops picking. */
+  paused?: boolean;
+  /** A floating comment is open; page presses close it. */
+  surfaceOpen?: boolean;
 };
 
 /** Persistent annotation mode for one preview: active flag and the selected tool. */
-export function usePreviewAnnotationMode({ iframeRef, enabled, regionBlocked }: Options) {
+export function usePreviewAnnotationMode({
+  iframeRef,
+  enabled,
+  regionBlocked,
+  paused = false,
+  surfaceOpen = false,
+}: Options) {
   const [active, setActive] = useState(false);
   const [tool, setToolState] = useState<PreviewAnnotationTool>("region");
-  const bridgeMode = active ? bridgeModeForTool(tool, regionBlocked) : null;
-  const stateRef = useRef({ active, bridgeMode });
-  stateRef.current = { active, bridgeMode };
+  const bridgeMode = active && !paused ? bridgeModeForTool(tool, regionBlocked) : null;
+  const commentOpen = active && surfaceOpen;
+  const stateRef = useRef({ active, bridgeMode, commentOpen });
+  stateRef.current = { active, bridgeMode, commentOpen };
 
   const resend = useCallback(() => {
     const iframe = iframeRef.current;
     if (!iframe) return;
     sendSetPreviewCaptureMode(iframe, stateRef.current.bridgeMode);
-    sendSetAnnotationActive(iframe, stateRef.current.active);
+    sendSetAnnotationActive(iframe, stateRef.current.active, stateRef.current.commentOpen);
   }, [iframeRef]);
 
-  useEffect(resend, [resend, active, bridgeMode]);
+  useEffect(resend, [resend, active, bridgeMode, commentOpen]);
 
   useEffect(() => {
     if (!enabled) setActive(false);

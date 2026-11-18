@@ -3309,5 +3309,7 @@
   "removeRootFailed": "이 작업에서 루트를 제거할 수 없음",
   "removeFromTask": "작업에서 제거",
   "rootDisabledNoTracker": "이 루트에는 아직 Git 추적기가 없습니다",
-  "refreshRepositories": "리포지토리 새로 고침"
+  "refreshRepositories": "리포지토리 새로 고침",
+  "previewShowComments": "댓글 표시",
+  "previewHideComments": "댓글 숨기기"
 }

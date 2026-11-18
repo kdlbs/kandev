@@ -75,6 +75,19 @@ export async function startPreviewServer(): Promise<PreviewServer> {
   };
 }
 
+export const COMMENT_PANEL_STORAGE_KEY = "kandev:preview-comment-panel-open";
+
+/**
+ * The comment panel overlays narrow previews; flows that click under it start
+ * with it hidden. Call before the page loads.
+ */
+export async function startWithCommentPanelHidden(page: Page): Promise<void> {
+  await page.addInitScript(
+    (key) => window.localStorage.setItem(key, "false"),
+    COMMENT_PANEL_STORAGE_KEY,
+  );
+}
+
 export async function openBrowserPreview(
   page: Page,
   apiClient: ApiClient,

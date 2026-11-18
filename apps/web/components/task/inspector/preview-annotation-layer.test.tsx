@@ -6,6 +6,7 @@ const touch = vi.hoisted(() => ({ value: false }));
 vi.mock("@/hooks/use-compact-task-chrome", () => ({ useTouchDrawer: () => touch.value }));
 
 import { PreviewAnnotationLayer } from "./preview-annotation-layer";
+import { PreviewAnnotationHost } from "./preview-comment-panel";
 
 const screenshotDraft = (uniformOverCanvas = false) => ({
   id: "draft-1",
@@ -54,15 +55,18 @@ function controller(overrides: Record<string, unknown> = {}) {
     isMutating: false,
     mutationError: null,
     acknowledgedMode: "screenshot",
-    pendingPanelOpen: false,
-    setPendingPanelOpen: vi.fn(),
-    openRegion: vi.fn(),
+    commentPanel: { open: false, setOpen: vi.fn(), toggle: vi.fn(), touch: false, docked: false },
+    inlineComments: false,
+    selectedId: null,
+    selectCapture: vi.fn(),
+    openCapture: vi.fn(),
     recaptureRegion: vi.fn(),
     captureSelection: vi.fn(),
     setDraftComment: vi.fn(),
-    closeDraftSurface: vi.fn(),
+    closeComment: vi.fn(),
+    captureNumbers: new Map(),
     saveDraft: vi.fn(),
-    resumeDraft: vi.fn(),
+
     discardDraft: vi.fn(),
     closeItemEditor: vi.fn(),
     handleEscape: vi.fn(),
@@ -121,9 +125,50 @@ describe("PreviewAnnotationLayer toolbar", () => {
 // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-005.6
 describe("PreviewAnnotationLayer regions", () => {
   const regions = [
-    { id: "saved", index: 0, rect: { x: 1, y: 2, width: 30, height: 20 }, pending: false },
-    { id: "draft", index: 1, rect: { x: 40, y: 2, width: 30, height: 20 }, pending: true },
+    {
+      id: "saved",
+      index: 0,
+      number: 1,
+      rect: { x: 1, y: 2, width: 30, height: 20 },
+      pending: false,
+      busy: false,
+    },
+    {
+      id: "draft",
+      index: 1,
+      number: 3,
+      rect: { x: 40, y: 2, width: 30, height: 20 },
+      pending: true,
+      busy: true,
+    },
   ];
+
+  it("numbers regions like the list and opens one from its badge in any tool", () => {
+    const capture = controller({ regions, annotation: { tool: "interact" } });
+    renderLayer(capture);
+    const outlines = screen.getAllByTestId("preview-region");
+    expect(outlines[1].getAttribute("data-busy")).toBe("true");
+    const badge = outlines[1].querySelector("[data-region-badge]") as HTMLElement;
+    expect(badge.textContent).toBe("3");
+
+    fireEvent.click(badge);
+    expect(capture.openCapture).toHaveBeenCalledWith("draft");
+  });
+
+  it("disables Add while the region is still being captured", () => {
+    const draft = screenshotDraft();
+    const capturing = { ...draft, payload: { ...draft.payload, screenshot: null } };
+    renderLayer(controller({ openDraft: capturing }));
+    expect(screen.getByTestId("preview-feedback-evidence-capturing")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("offers Close on a new capture's comment", () => {
+    const capture = controller({ openDraft: screenshotDraft() });
+    renderLayer(capture);
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(capture.closeComment).toHaveBeenCalled();
+  });
 
   it("draws regions with handles only in the Region tool", () => {
     const { rerender } = renderLayer(controller({ regions }));
@@ -193,5 +238,118 @@ describe("PreviewAnnotationLayer comment on selection", () => {
       }),
     );
     expect(screen.queryByTestId("preview-selection-comment")).toBeNull();
+  });
+});
+
+const COMMENT_PANEL = "preview-comment-panel";
+
+const savedItem = {
+  id: "saved-1",
+  kind: "text",
+  comment: "Make it bigger",
+  page_route: "/checkout",
+  source_label: "localhost",
+  selected_text: "Buy now",
+  version: 1,
+};
+
+function panelController(overrides: Record<string, unknown> = {}) {
+  return controller({
+    items: [savedItem],
+    captureNumbers: new Map([
+      ["saved-1", 1],
+      ["draft-1", 2],
+    ]),
+    commentPanel: { open: true, setOpen: vi.fn(), toggle: vi.fn(), touch: false, docked: true },
+    inlineComments: true,
+    ...overrides,
+  });
+}
+
+function renderHost(capture: PreviewCaptureController) {
+  return render(
+    <PreviewAnnotationHost
+      capture={capture}
+      showLayer
+      layer={<PreviewAnnotationLayer capture={capture} taskId="task-1" />}
+    >
+      <iframe title="page" />
+    </PreviewAnnotationHost>,
+  );
+}
+
+// @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-006.1
+describe("PreviewAnnotationLayer comment panel toggle", () => {
+  it("toggles the panel from a pressed count button", () => {
+    const capture = panelController();
+    renderLayer(capture);
+    const toggle = screen.getByTestId("preview-annotation-count");
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(toggle.textContent).toContain("Hide comments");
+
+    fireEvent.click(toggle);
+    expect(capture.commentPanel.toggle).toHaveBeenCalled();
+  });
+
+  it("docks the panel beside the page, or overlays it on a narrow host", () => {
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1000);
+    const { unmount } = renderHost(panelController());
+    expect(screen.getByTestId(COMMENT_PANEL).getAttribute("data-overlay")).toBe("false");
+    unmount();
+
+    width.mockReturnValue(500);
+    renderHost(panelController());
+    expect(screen.getByTestId(COMMENT_PANEL).getAttribute("data-overlay")).toBe("true");
+    width.mockRestore();
+  });
+
+  it("gives the page the full width when the panel is hidden", () => {
+    renderHost(panelController({ inlineComments: false }));
+    expect(screen.queryByTestId(COMMENT_PANEL)).toBeNull();
+  });
+});
+
+// @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-006.2
+// @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-006.3
+describe("PreviewAnnotationLayer inline comments", () => {
+  it("writes a new capture's comment in the panel instead of floating", () => {
+    const draft = screenshotDraft();
+    renderHost(panelController({ drafts: [draft], openDraft: draft }));
+    const panel = screen.getByTestId(COMMENT_PANEL);
+    expect(panel.querySelector('[data-testid="preview-feedback-draft-input"]')).not.toBeNull();
+    expect(screen.getAllByTestId("preview-feedback-draft")).toHaveLength(1);
+  });
+
+  it("numbers entries like their markers and edits a saved item in place", () => {
+    const capture = panelController();
+    const { rerender } = renderHost(capture);
+    const item = screen.getByTestId("preview-feedback-item");
+    expect(item.querySelector('[data-testid="preview-capture-number"]')?.textContent).toBe("1");
+
+    fireEvent.click(item);
+    expect(capture.selectCapture).toHaveBeenCalledWith("saved-1");
+    fireEvent.click(screen.getByRole("button", { name: "Edit feedback" }));
+    expect(capture.openCapture).toHaveBeenCalledWith("saved-1");
+
+    const editing = panelController({ editingItem: savedItem });
+    rerender(
+      <PreviewAnnotationHost
+        capture={editing}
+        showLayer
+        layer={<PreviewAnnotationLayer capture={editing} taskId="task-1" />}
+      >
+        <iframe title="page" />
+      </PreviewAnnotationHost>,
+    );
+    const panel = screen.getByTestId(COMMENT_PANEL);
+    expect(panel.querySelector('[data-testid="preview-feedback-edit-input"]')).not.toBeNull();
+    expect(screen.getAllByTestId("preview-feedback-edit")).toHaveLength(1);
+  });
+
+  it("hides the panel from its header", () => {
+    const capture = panelController();
+    renderHost(capture);
+    fireEvent.click(screen.getByTestId("preview-comment-panel-hide"));
+    expect(capture.commentPanel.setOpen).toHaveBeenCalledWith(false);
   });
 });

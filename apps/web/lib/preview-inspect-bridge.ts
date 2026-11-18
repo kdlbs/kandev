@@ -40,6 +40,8 @@ export type PreviewMarkerProjection = {
   capture_rect?: PreviewCaptureRect;
   /** Unsaved draft, drawn dashed. */
   pending?: boolean;
+  /** Label on the badge, shared with the comment list. */
+  number?: number;
 };
 
 /** A screenshot region the bridge tracks through document and container scrolling. */
@@ -94,6 +96,20 @@ interface PreviewEscapeMessage {
   source: typeof INSPECTOR_SOURCE;
   version: typeof INSPECTOR_PROTOCOL_VERSION;
   type: "escape";
+  payload: Record<string, never>;
+}
+
+interface PreviewMarkerActivatedMessage {
+  source: typeof INSPECTOR_SOURCE;
+  version: typeof INSPECTOR_PROTOCOL_VERSION;
+  type: "marker-activated";
+  payload: { id: string };
+}
+
+interface PreviewPagePointerDownMessage {
+  source: typeof INSPECTOR_SOURCE;
+  version: typeof INSPECTOR_PROTOCOL_VERSION;
+  type: "page-pointerdown";
   payload: Record<string, never>;
 }
 
@@ -153,6 +169,8 @@ export type InspectorMessage =
   | PreviewCaptureModeChangedMessage
   | PreviewCaptureCompletedMessage
   | PreviewEscapeMessage
+  | PreviewMarkerActivatedMessage
+  | PreviewPagePointerDownMessage
   | PreviewSelectionChangedMessage
   | PreviewRegionLayoutMessage
   | PreviewScreenshotRegionSelectedMessage
@@ -199,6 +217,11 @@ const PAYLOAD_VALIDATORS = new Map<string, (payload: Record<string, unknown>) =>
   ["capture-mode-changed", (payload) => isCaptureModePayload(payload)],
   ["capture-completed", (payload) => isCaptureDraft(payload)],
   ["escape", () => true],
+  [
+    "marker-activated",
+    (payload) => isBoundedString(payload.id, MAX_REGION_ID_LENGTH) && payload.id.length > 0,
+  ],
+  ["page-pointerdown", () => true],
   ["selection-changed", (payload) => payload.rect === null || isCaptureRect(payload.rect)],
   ["region-layout", (payload) => isRegionLayoutList(payload.regions)],
   [
@@ -366,7 +389,13 @@ interface ProjectPreviewMarkersCommand {
   source: typeof INSPECTOR_SOURCE;
   version: typeof INSPECTOR_PROTOCOL_VERSION;
   type: "project-markers";
-  payload: { markers: PreviewMarkerProjection[]; regions: PreviewRegionAnchor[] };
+  payload: {
+    markers: PreviewMarkerProjection[];
+    regions: PreviewRegionAnchor[];
+    highlighted_id: string | null;
+    /** Scrolled into view once; set only when a capture is picked from the list. */
+    reveal_id: string | null;
+  };
 }
 
 function postCommand(iframe: HTMLIFrameElement, type: string, payload: Record<string, unknown>) {
@@ -376,9 +405,16 @@ function postCommand(iframe: HTMLIFrameElement, type: string, payload: Record<st
   );
 }
 
-/** Tells the bridge whether Escape inside the page belongs to Kandev. */
-export function sendSetAnnotationActive(iframe: HTMLIFrameElement, active: boolean): void {
-  postCommand(iframe, "set-annotation-active", { active });
+/**
+ * Tells the bridge whether Escape inside the page belongs to Kandev, and
+ * whether page presses should be reported as outside clicks for an open comment.
+ */
+export function sendSetAnnotationActive(
+  iframe: HTMLIFrameElement,
+  active: boolean,
+  surfaceOpen = false,
+): void {
+  postCommand(iframe, "set-annotation-active", { active, surface_open: surfaceOpen });
 }
 
 /** Captures the page's current text selection as a text draft. */
@@ -405,13 +441,20 @@ export function sendProjectPreviewMarkers(
   iframe: HTMLIFrameElement,
   markers: PreviewMarkerProjection[],
   regions: PreviewRegionAnchor[] = [],
+  highlightedId: string | null = null,
+  revealId: string | null = null,
 ): void {
   iframe.contentWindow?.postMessage(
     {
       source: INSPECTOR_SOURCE,
       version: INSPECTOR_PROTOCOL_VERSION,
       type: "project-markers",
-      payload: { markers, regions: regions.slice(0, MAX_PROJECTED_REGIONS) },
+      payload: {
+        markers,
+        regions: regions.slice(0, MAX_PROJECTED_REGIONS),
+        highlighted_id: highlightedId,
+        reveal_id: revealId,
+      },
     } satisfies ProjectPreviewMarkersCommand,
     "*",
   );

@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import {
   isInspectorMessage,
+  type InspectorMessage,
   type PreviewCaptureDraft,
   type PreviewCaptureMode,
   type PreviewRegionLayout,
@@ -22,10 +23,20 @@ export type PreviewInspectorHandlers = {
   onSelectionChanged: (rect: PreviewCaptureRect | null) => void;
   onRegionLayout: (regions: PreviewRegionLayout[]) => void;
   onEscape: () => void;
+  onMarkerActivated: (id: string) => void;
+  onPagePointerDown: () => void;
 };
 
 function withSanitizedRoute<T extends { page_route: string }>(payload: T): T {
   return { ...payload, page_route: sanitizePreviewPageRoute(payload.page_route) };
+}
+
+function dispatchCapture(data: InspectorMessage, handlers: PreviewInspectorHandlers) {
+  if (!handlers.enabled) return;
+  if (data.type === "capture-completed") handlers.onCapture(withSanitizedRoute(data.payload));
+  if (data.type === "screenshot-region-selected") {
+    handlers.onRegionSelected(withSanitizedRoute(data.payload));
+  }
 }
 
 function dispatchInspectorMessage(data: unknown, handlers: PreviewInspectorHandlers) {
@@ -46,10 +57,8 @@ function dispatchInspectorMessage(data: unknown, handlers: PreviewInspectorHandl
       handlers.onModeAcknowledged(data.payload.mode);
       break;
     case "capture-completed":
-      if (handlers.enabled) handlers.onCapture(withSanitizedRoute(data.payload));
-      break;
     case "screenshot-region-selected":
-      if (handlers.enabled) handlers.onRegionSelected(withSanitizedRoute(data.payload));
+      dispatchCapture(data, handlers);
       break;
     case "selection-changed":
       handlers.onSelectionChanged(handlers.enabled ? data.payload.rect : null);
@@ -59,6 +68,12 @@ function dispatchInspectorMessage(data: unknown, handlers: PreviewInspectorHandl
       break;
     case "escape":
       handlers.onEscape();
+      break;
+    case "marker-activated":
+      handlers.onMarkerActivated(data.payload.id);
+      break;
+    case "page-pointerdown":
+      handlers.onPagePointerDown();
       break;
     default:
       break;

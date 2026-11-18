@@ -219,6 +219,22 @@ test.describe("Mobile HTML preview", () => {
       (await toolbar.getByTestId("preview-annotation-exit").boundingBox())?.height,
     ).toBeGreaterThanOrEqual(44);
 
+    // Coarse pointers keep the comment list in a bottom sheet that starts hidden.
+    await expect(testPage.getByTestId("preview-comment-panel")).toHaveCount(0);
+    const commentsToggle = toolbar.getByTestId("preview-annotation-count");
+    await expect(commentsToggle).toHaveAttribute("aria-pressed", "false");
+    await commentsToggle.tap();
+    const commentsSheet = testPage.getByTestId("preview-feedback-collection-body");
+    await expect(commentsSheet).toBeVisible();
+    await testPage
+      .getByRole("dialog")
+      .filter({ has: commentsSheet })
+      .getByRole("button", {
+        name: "Close",
+      })
+      .tap();
+    await expect(commentsSheet).toBeHidden();
+
     await toolbar.getByTestId("preview-tool-element").tap();
     await expect(trigger).toHaveAttribute("data-capture-mode", "element");
     await frame.locator("#capture-button").tap();
@@ -263,6 +279,8 @@ test.describe("Mobile HTML preview", () => {
     await expect(screenshotDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible({
       timeout: 15_000,
     });
+    const draftClose = screenshotDraft.getByRole("button", { name: "Close" });
+    expect((await draftClose.boundingBox())?.height).toBeGreaterThanOrEqual(44);
     await testPage
       .getByTestId("preview-feedback-draft-input")
       .fill("Reduce the vertical space in this card");

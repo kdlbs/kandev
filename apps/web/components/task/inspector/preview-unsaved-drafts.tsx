@@ -5,6 +5,7 @@ import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 import type { PreviewDraftEntry } from "@/hooks/use-preview-drafts";
 import { PreviewFeedbackEvidence, evidenceForDraft } from "./preview-feedback-evidence";
+import { CaptureNumber, type PreviewInlineComments } from "./preview-inline-comments";
 
 export type PreviewUnsavedDraftsProps = {
   entries: PreviewDraftEntry[];
@@ -18,7 +19,8 @@ export function PreviewUnsavedDrafts({
   onResume,
   onDiscard,
   touch,
-}: PreviewUnsavedDraftsProps & { touch: boolean }) {
+  inline,
+}: PreviewUnsavedDraftsProps & { touch: boolean; inline?: PreviewInlineComments }) {
   const { t } = useTranslation();
   if (entries.length === 0) return null;
   const actionClass = touch ? "h-11 min-w-11" : "h-7";
@@ -32,38 +34,70 @@ export function PreviewUnsavedDrafts({
             className="rounded-md border border-dashed p-3"
             data-testid="preview-unsaved-draft"
           >
-            <div className="flex items-start gap-2">
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs text-muted-foreground">{entry.payload.page_route}</p>
-                <div className="mt-1">
-                  <PreviewFeedbackEvidence evidence={evidenceForDraft(entry.payload, "")} />
-                </div>
-              </div>
-              <Button
-                type="button"
-                size="sm"
-                className={actionClass}
-                data-testid="preview-unsaved-resume"
-                onClick={() => onResume(entry.id)}
-              >
-                {t("task:previewResumeDraft")}
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className={actionClass}
-                aria-label={t("task:previewDiscardSelection")}
-                data-testid="preview-unsaved-discard"
-                onClick={() => onDiscard(entry.id)}
-              >
-                <IconX className="h-4 w-4" />
-              </Button>
-            </div>
-            {entry.comment && <p className="mt-2 break-words text-xs">{entry.comment}</p>}
+            {inline?.activeId === entry.id ? (
+              inline.renderComposer(entry.id)
+            ) : (
+              <DraftRow
+                entry={entry}
+                actionClass={actionClass}
+                number={inline?.numbers.get(entry.id)}
+                onResume={onResume}
+                onDiscard={onDiscard}
+              />
+            )}
           </li>
         ))}
       </ul>
     </div>
+  );
+}
+
+function DraftRow({
+  entry,
+  actionClass,
+  number,
+  onResume,
+  onDiscard,
+}: {
+  entry: PreviewDraftEntry;
+  actionClass: string;
+  number: number | undefined;
+  onResume: (id: string) => void;
+  onDiscard: (id: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <div className="flex items-start gap-2">
+        <CaptureNumber value={number} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs text-muted-foreground">{entry.payload.page_route}</p>
+          <div className="mt-1">
+            <PreviewFeedbackEvidence evidence={evidenceForDraft(entry.payload, "")} />
+          </div>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          className={actionClass}
+          data-testid="preview-unsaved-resume"
+          onClick={() => onResume(entry.id)}
+        >
+          {t("task:previewResumeDraft")}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className={actionClass}
+          aria-label={t("task:previewDiscardSelection")}
+          data-testid="preview-unsaved-discard"
+          onClick={() => onDiscard(entry.id)}
+        >
+          <IconX className="h-4 w-4" />
+        </Button>
+      </div>
+      {entry.comment && <p className="mt-2 break-words text-xs">{entry.comment}</p>}
+    </>
   );
 }

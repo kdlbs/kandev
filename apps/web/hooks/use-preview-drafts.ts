@@ -10,16 +10,19 @@ export type PreviewScreenshotDraft = PreviewScreenshotRegion & {
   selected_text?: undefined;
   text_anchor?: undefined;
   element_snapshot?: undefined;
-  screenshot: {
-    blob: Blob;
-    width: number;
-    height: number;
-    previewUrl: string;
-    fileName: string;
-    attachmentId?: string;
-    /** The region covers a canvas but rasterized to one colour. */
-    uniformOverCanvas?: boolean;
-  };
+  /** `null` while the region is still being captured. */
+  screenshot: PreviewDraftScreenshot | null;
+};
+
+export type PreviewDraftScreenshot = {
+  blob: Blob;
+  width: number;
+  height: number;
+  previewUrl: string;
+  fileName: string;
+  attachmentId?: string;
+  /** The region covers a canvas but rasterized to one colour. */
+  uniformOverCanvas?: boolean;
 };
 
 export type PreviewFeedbackDraft = PreviewCaptureDraft | PreviewScreenshotDraft;
@@ -33,7 +36,7 @@ export type PreviewDraftEntry = {
 };
 
 function releaseImage(payload: PreviewFeedbackDraft, deleteUpload: boolean) {
-  if (payload.kind !== "screenshot") return;
+  if (payload.kind !== "screenshot" || !payload.screenshot) return;
   URL.revokeObjectURL(payload.screenshot.previewUrl);
   if (deleteUpload && payload.screenshot.attachmentId) {
     void deleteAttachment(payload.screenshot.attachmentId).catch(() => undefined);
