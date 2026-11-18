@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -82,7 +83,11 @@ func TestFilePreviewExternalClassification(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = preview.Close() }()
-	if !preview.External || preview.Path != external {
+	expected, err := filepath.EvalSymlinks(external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !preview.External || preview.Path != expected {
 		t.Fatal("external target not identified")
 	}
 }
@@ -169,7 +174,7 @@ func FuzzFilePreviewPath(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, path string) {
 		// Keep arbitrary fuzzer inputs inside the disposable fixture namespace.
-		if filepath.IsAbs(path) {
+		if filepath.IsAbs(path) || strings.HasPrefix(path, "~/") || strings.HasPrefix(path, "~\\") {
 			return
 		}
 		p, err := prepareFilePreview(dir, path)

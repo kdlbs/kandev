@@ -32,7 +32,7 @@ export function previewFileState(path: string, repo?: string) {
   return {
     path,
     repo,
-    name: path.split("/").pop() ?? path,
+    name: path.replaceAll("\\", "/").split("/").pop() ?? path,
     content: "",
     originalContent: "",
     originalHash: "preview-only",

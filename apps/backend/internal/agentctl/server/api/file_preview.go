@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -44,8 +45,16 @@ func (s *Server) handlePrepareFilePreview(c *gin.Context) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "file_preview_unavailable"})
 		return
 	}
+	if c.Request.Context().Err() != nil {
+		s.procMgr.CancelFilePreview(meta.Token)
+		return
+	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, meta)
+	c.Header("Content-Type", "application/json; charset=utf-8")
+	c.Status(http.StatusOK)
+	if err := json.NewEncoder(c.Writer).Encode(meta); err != nil || c.Request.Context().Err() != nil {
+		s.procMgr.CancelFilePreview(meta.Token)
+	}
 }
 
 func (s *Server) handleReadFilePreview(c *gin.Context) {

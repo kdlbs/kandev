@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -64,5 +65,26 @@ func TestFilePreviewHTTPTooLarge(t *testing.T) {
 	server.Router().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/workspace/file-preview/prepare", bytes.NewBufferString(`{"path":"large.stl"}`)))
 	if response.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+type failedPreviewWriter struct{ *httptest.ResponseRecorder }
+
+func (w failedPreviewWriter) Write(_ []byte) (int, error) { return 0, errors.New("disconnected") }
+
+func TestFilePreviewHTTPFailedMetadataWritesReleasePool(t *testing.T) {
+	server, manager, root := newWorkspacePreviewServer(t)
+	t.Cleanup(func() { _ = manager.StopForTeardown(context.Background()) })
+	if err := os.WriteFile(filepath.Join(root, "model.stl"), []byte("mesh"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for range 5 {
+		writer := failedPreviewWriter{httptest.NewRecorder()}
+		server.Router().ServeHTTP(writer, httptest.NewRequest(http.MethodPost, "/api/v1/workspace/file-preview/prepare", bytes.NewBufferString(`{"path":"model.stl"}`)))
+	}
+	response := httptest.NewRecorder()
+	server.Router().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/workspace/file-preview/prepare", bytes.NewBufferString(`{"path":"model.stl"}`)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("orphaned metadata filled the pool: %d %s", response.Code, response.Body.String())
 	}
 }

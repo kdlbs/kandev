@@ -16,6 +16,7 @@ acceptance_criteria:
   - AC-PLUGINS-FILE-VIEWERS-001.3
   - AC-PLUGINS-FILE-VIEWERS-001.4
   - AC-PLUGINS-FILE-VIEWERS-001.5
+  - AC-PLUGINS-FILE-VIEWERS-001.6
   - AC-PLUGINS-FILE-VIEWERS-003.4
   - AC-PLUGINS-FILE-VIEWERS-003.5
   - AC-PLUGINS-FILE-VIEWERS-005.3
@@ -130,3 +131,16 @@ repository links on unsupported files, and late registration for restored tabs.
 Policy writes reset changed digests before revision validation. Lifecycle
 revocation preserves lock order. Missing unrelated exclusions do not prevent
 reads, while existing excluded symlink targets remain protected.
+
+Desktop discovery return uses the persisted environment layout, including the
+active file panel and its repository parameters. It does not enqueue a second
+file selection. The phone layout uses the expiring pending selection because it
+has no dockview API. The return helper tests cover both branches, and the browser
+flow checks the marketplace round trip on desktop and phone.
+
+Review follow-up also covers read-failure restoration, viewer preferences that
+do not add file tabs, policy reload after uncertain writes, and metadata-response
+failure cleanup. Marketplace tests use a controlled external registry with the
+real Kandev catalog endpoint. Shared repository and policy state is restored in
+failure-safe cleanup. AC-PLUGINS-FILE-VIEWERS-001.6 is verified by the shared rich
+preview tests and installed-package desktop/phone tests.

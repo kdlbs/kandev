@@ -38,7 +38,14 @@ export function useFilePreviewPolicy(pluginId: string, workspaceId: string | nul
         const next = await setPreviewPolicy({ pluginId, workspaceId }, mode, policy.revision);
         if (request === generation.current) setPolicy(next);
       } catch {
-        if (request === generation.current) setFailed(true);
+        if (request !== generation.current) return;
+        setFailed(true);
+        try {
+          const current = await getPreviewPolicy({ pluginId, workspaceId });
+          if (request === generation.current) setPolicy(current);
+        } catch {
+          if (request === generation.current) setPolicy(null);
+        }
       } finally {
         if (request === generation.current) setSaving(false);
       }

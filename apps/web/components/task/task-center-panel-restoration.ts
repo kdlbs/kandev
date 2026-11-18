@@ -1,6 +1,10 @@
 "use client";
 
-import { shouldOpenFilePreview, previewFileState } from "@/lib/plugins/file-viewer-selection";
+import {
+  shouldOpenFilePreview,
+  previewFileState,
+  canOfferViewerAfterReadFailure,
+} from "@/lib/plugins/file-viewer-selection";
 
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
@@ -81,7 +85,9 @@ export async function loadSavedFileTabs(sessionId: string, savedTabs: StoredFile
               : undefined,
         });
       } catch {
-        /* skip failed tabs */
+        if (canOfferViewerAfterReadFailure(savedTab.path)) {
+          loadedTabs[index] = installFileEditorTab(previewFileState(savedTab.path, savedTab.repo));
+        }
       }
     }
   };

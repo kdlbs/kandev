@@ -21,3 +21,7 @@ it("preserves built-in and source defaults while bypassing text reads for binary
   expect(canOfferViewerAfterReadFailure("large.custom-format")).toBe(true);
   expect(canOfferViewerAfterReadFailure("source.ts")).toBe(false);
 });
+it("extracts the preview name from Windows paths", async () => {
+  const { previewFileState } = await import("./file-viewer-selection");
+  expect(previewFileState("C:\\models\\part.stl").name).toBe("part.stl");
+});

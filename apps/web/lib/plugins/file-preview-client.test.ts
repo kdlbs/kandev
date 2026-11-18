@@ -30,3 +30,20 @@ it("does not allocate from an unsafe advertised length", async () => {
     consumePreviewResponse(new Response(), Number.NaN, new AbortController().signal),
   ).rejects.toThrow();
 });
+it("validates completion and exact size across stream chunk boundaries", async () => {
+  const response = (chunks: number[][]) =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          for (const chunk of chunks) controller.enqueue(new Uint8Array(chunk));
+          controller.close();
+        },
+      }),
+    );
+  const signal = new AbortController().signal;
+  expect([
+    ...new Uint8Array(await consumePreviewResponse(response([[1], [2], [0]]), 2, signal)),
+  ]).toEqual([1, 2]);
+  expect((await consumePreviewResponse(response([[0]]), 0, signal)).byteLength).toBe(0);
+  await expect(consumePreviewResponse(response([[1], [2], [0], [3]]), 2, signal)).rejects.toThrow();
+});

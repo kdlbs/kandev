@@ -35,3 +35,24 @@ it("ignores a policy write response after the selected workspace changes", async
   expect(hook.result.current.policy).toEqual({ mode: "ask", revision: 0 });
   expect(hook.result.current.saving).toBe(false);
 });
+it("reloads the authoritative revision after an uncertain write and permits retry", async () => {
+  const hook = renderHook(() => useFilePreviewPolicy("plugin", "workspace"));
+  await waitFor(() => expect(hook.result.current.policy).not.toBeNull());
+  api.set.mockRejectedValueOnce(Error("conflict or lost response"));
+  api.get.mockResolvedValueOnce({ mode: "deny", revision: 4 });
+  await act(async () => {
+    await hook.result.current.update("allow");
+  });
+  expect(hook.result.current.failed).toBe(true);
+  expect(hook.result.current.policy).toEqual({ mode: "deny", revision: 4 });
+  api.set.mockResolvedValueOnce({ mode: "allow", revision: 5 });
+  await act(async () => {
+    await hook.result.current.update("allow");
+  });
+  expect(api.set).toHaveBeenLastCalledWith(
+    { pluginId: "plugin", workspaceId: "workspace" },
+    "allow",
+    4,
+  );
+  expect(hook.result.current.failed).toBe(false);
+});

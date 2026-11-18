@@ -3,7 +3,11 @@ import { persistEnvLayoutNow, useDockviewStore } from "@/lib/state/dockview-stor
 type ViewerReturn = { sessionId: string; path: string; repo?: string; expires: number };
 let pending: ViewerReturn | null = null;
 
-/** Retain navigation metadata only. A return never retains bytes or approval. */
+/**
+ * Desktop restores the active panel and its path/repo from the persisted layout.
+ * Phone layouts have no dockview API, so they consume the expiring metadata below.
+ * Neither route retains file bytes or approval.
+ */
 export function rememberFileViewerReturn(sessionId: string, path: string, repo?: string) {
   const state = useDockviewStore.getState();
   if (state.api && !state.isRestoringLayout) {

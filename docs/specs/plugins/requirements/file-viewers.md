@@ -86,7 +86,7 @@ verification and remaining release gates.
   dimensions. Invalid, empty, non-finite, or unsupported geometry shall show a
   recoverable error before rendering.
 - **AC-PLUGINS-FILE-VIEWERS-003.4:** Phones shall support one-finger orbit, pinch
-  zoom, and two-finger pan. Fit, zoom controls, and unit selection shall remain
+  zoom, and two-finger pan. Fit and zoom controls shall remain
   accessible with touch targets of at least 44px.
 - **AC-PLUGINS-FILE-VIEWERS-003.5:** Controls shall have accessible names, visible
   focus, and keyboard alternatives for orbit, zoom, pan, and reset. Dimensions

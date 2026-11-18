@@ -149,3 +149,9 @@ locks. Revocation does not reacquire the service mutex in the opposite order.
 Missing recovery artifacts no longer block unrelated model files. Existing
 excluded paths and symlink targets remain blocked, and other resolution errors
 still fail closed. Focused race tests cover policy and exclusion behavior.
+
+Cancelled preparations close their selected file before publication. Failed or
+cancelled metadata responses release the executor token. A regression test
+performs five failed response writes, then proves the bounded pool can still
+admit a valid request. Fuzz input excludes home selectors so the fuzzer cannot
+open files outside its disposable fixture through home expansion.

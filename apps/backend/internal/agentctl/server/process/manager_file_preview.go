@@ -59,6 +59,10 @@ func (m *Manager) PrepareFilePreview(ctx context.Context, path, repo string) (*t
 		_ = preview.Close()
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		_ = preview.Close()
+		return nil, err
+	}
 	token, err := m.filePreviewStore().add(preview)
 	if err != nil {
 		_ = preview.Close()

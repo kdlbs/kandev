@@ -146,7 +146,7 @@ function SelectedPreview(input: PluginPreviewInput) {
         <PluginErrorBoundary context="file viewer" fallback={fallback}>
           <Component
             file={{
-              name: input.path.split("/").pop() ?? input.path,
+              name: input.path.replaceAll("\\", "/").split("/").pop() ?? input.path,
               sizeBytes: state.selection.size_bytes,
               generation: state.selection.id,
             }}

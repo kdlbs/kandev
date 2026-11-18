@@ -1,11 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { expect, type Page } from "@playwright/test";
+import { expect, type Page, type Request } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
-import type { SeedData } from "../../fixtures/test-base";
+import { resetSeedRepositoryCheckout, type SeedData } from "../../fixtures/test-base";
 import type { BackendContext } from "../../fixtures/backend";
 import { installFixturePlugin } from "../../helpers/plugin-fixture";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
+import { dwell } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 
 export async function fileViewerFlow({
@@ -40,94 +41,110 @@ export async function fileViewerFlow({
   const repo = path.join(backend.tmpDir, "repos", "e2e-repo");
   const git = new GitHelper(repo, makeGitEnv(backend.tmpDir));
   const external = path.join(backend.tmpDir, "outside-model.stl");
-  const model = viewer?.bytes ?? Buffer.alloc(11 * 1024 * 1024, 1);
-  fs.writeFileSync(external, model);
-  fs.writeFileSync(path.join(repo, "workspace-model.stl"), model);
-  fs.symlinkSync(external, path.join(repo, "external-model.stl"));
-  fs.writeFileSync(path.join(repo, "unsupported.pdf"), Buffer.from([0, 255, 0]));
-  git.stageAll();
-  git.commit("add external model selection");
-  const profile = await createStandardProfile(apiClient, "File viewer test");
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    "File preview approval",
-    profile.id,
-    {
-      description: `e2e:mcp:kandev-rich-output:show_rich_output_kandev(${JSON.stringify({
-        version: 2,
-        catalog_version: 1,
-        title: "Model preview",
-        spec: {
-          root: "model",
-          elements: {
-            model: { type: "FilePreview", props: { path: "workspace-model.stl" }, children: [] },
-          },
-        },
-      })})`,
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
-  await expect
-    .poll(
-      async () => {
-        const env = await apiClient.getTaskEnvironment(task.id);
-        const paths = [
-          env?.workspace_path,
-          env?.worktree_path,
-          ...(env?.repos ?? []).map((r) => r.worktree_path),
-        ];
-        return paths.some((root) => root && fs.existsSync(path.join(root, "external-model.stl")));
-      },
-      { timeout: 30000 },
-    )
-    .toBe(true);
-  await testPage.goto(`/t/${task.id}`);
-  const session = new SessionPage(testPage);
-  await session.waitForLoad();
-  await session.waitForChatIdle();
-  const card = testPage.getByTestId("rich-output-file");
-  await expect(card).toBeVisible();
-  if (viewer) await viewer.verify(testPage, mobile);
-  else await expect(card.getByTestId("fixture-file-preview")).toHaveText(String(model.length));
-  await card.getByTestId("rich-output-file-preview-toggle").click();
-  await expect(card.getByTestId("plugin-file-preview")).toHaveCount(0);
-  if (mobile) await testPage.getByRole("button", { name: "Files", exact: true }).tap();
-  await (await session.fileTree.waitForFileTreeNode("workspace-model.stl")).click();
-  const preview = testPage.getByTestId("plugin-file-preview");
-  if (viewer) await expect(preview.locator(".stl-viewport canvas")).toBeVisible();
-  else await expect(preview.getByTestId("fixture-file-preview")).toHaveText(String(model.length));
-  await expect(preview.getByRole("button", { name: "Request preview", exact: true })).toHaveCount(
-    0,
-  );
-  await expect(preview.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0);
-  await expect(testPage.getByRole("dialog")).toHaveCount(0);
-  if (mobile) await testPage.getByRole("button", { name: "Close", exact: true }).click();
   let readRequests = 0;
-  testPage.on("request", (request) => {
+  const observeRead = (request: Request) => {
     if (/file-previews\/[^/]+\/read/.test(request.url())) readRequests++;
-  });
-  await (await session.fileTree.waitForFileTreeNode("external-model.stl")).click();
-  await expect(preview).toBeVisible();
-  const dialog = testPage.getByRole("dialog");
-  await expect(dialog.getByText(external, { exact: true })).toBeVisible();
-  await expect(testPage.getByTestId("fixture-file-preview")).toHaveCount(0);
-  expect(readRequests).toBe(0);
-  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
-  await preview.getByRole("button", { name: "Retry preview", exact: true }).click();
-  await dialog.getByRole("button", { name: "Preview once", exact: true }).click();
-  if (viewer) await viewer.verify(testPage, mobile);
-  else
-    await expect(testPage.getByTestId("fixture-file-preview")).toHaveText(String(11 * 1024 * 1024));
-  expect(readRequests).toBe(1);
-  if (!viewer) {
-    await assertExternalPolicies(testPage, apiClient, seedData.workspaceId);
-    await assertDiscoveryReturn(testPage, session, mobile);
+  };
+  try {
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
+    const model = viewer?.bytes ?? Buffer.alloc(11 * 1024 * 1024, 1);
+    fs.writeFileSync(external, model);
+    fs.writeFileSync(path.join(repo, "workspace-model.stl"), model);
+    fs.symlinkSync(external, path.join(repo, "external-model.stl"));
+    fs.writeFileSync(path.join(repo, "unsupported.pdf"), Buffer.from([0, 255, 0]));
+    git.stageAll();
+    git.commit("add external model selection");
+    const profile = await createStandardProfile(apiClient, "File viewer test");
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "File preview approval",
+      profile.id,
+      {
+        description: `e2e:mcp:kandev-rich-output:show_rich_output_kandev(${JSON.stringify({
+          version: 2,
+          catalog_version: 1,
+          title: "Model preview",
+          spec: {
+            root: "model",
+            elements: {
+              model: { type: "FilePreview", props: { path: "workspace-model.stl" }, children: [] },
+            },
+          },
+        })})`,
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await expect
+      .poll(
+        async () => {
+          const env = await apiClient.getTaskEnvironment(task.id);
+          const paths = [
+            env?.workspace_path,
+            env?.worktree_path,
+            ...(env?.repos ?? []).map((r) => r.worktree_path),
+          ];
+          return paths.some((root) => root && fs.existsSync(path.join(root, "external-model.stl")));
+        },
+        { timeout: 30000 },
+      )
+      .toBe(true);
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle();
+    const card = testPage.getByTestId("rich-output-file");
+    await expect(card).toBeVisible();
+    if (viewer) await viewer.verify(testPage, mobile);
+    else await expect(card.getByTestId("fixture-file-preview")).toHaveText(String(model.length));
+    await card.getByTestId("rich-output-file-preview-toggle").click();
+    await expect(card.getByTestId("plugin-file-preview")).toHaveCount(0);
+    if (mobile) await testPage.getByRole("button", { name: "Files", exact: true }).tap();
+    await (await session.fileTree.waitForFileTreeNode("workspace-model.stl")).click();
+    const preview = testPage.getByTestId("plugin-file-preview");
+    if (viewer) await expect(preview.locator(".stl-viewport canvas")).toBeVisible();
+    else await expect(preview.getByTestId("fixture-file-preview")).toHaveText(String(model.length));
+    await expect(preview.getByRole("button", { name: "Request preview", exact: true })).toHaveCount(
+      0,
+    );
+    await expect(preview.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0);
+    await expect(testPage.getByRole("dialog")).toHaveCount(0);
+    if (mobile) await testPage.getByRole("button", { name: "Close", exact: true }).click();
+    testPage.on("request", observeRead);
+    await (await session.fileTree.waitForFileTreeNode("external-model.stl")).click();
+    await expect(preview).toBeVisible();
+    const dialog = testPage.getByRole("dialog");
+    await expect(dialog.getByText(external, { exact: true })).toBeVisible();
+    await expect(testPage.getByTestId("fixture-file-preview")).toHaveCount(0);
+    await dwell(
+      testPage,
+      250,
+      "negative-assertion",
+      "external preview must not read bytes before consent",
+    );
+    expect(readRequests).toBe(0);
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await preview.getByRole("button", { name: "Retry preview", exact: true }).click();
+    await dialog.getByRole("button", { name: "Preview once", exact: true }).click();
+    if (viewer) await viewer.verify(testPage, mobile);
+    else
+      await expect(testPage.getByTestId("fixture-file-preview")).toHaveText(
+        String(11 * 1024 * 1024),
+      );
+    expect(readRequests).toBe(1);
+    if (!viewer) {
+      await assertExternalPolicies(testPage, apiClient, seedData.workspaceId);
+      await assertDiscoveryReturn(testPage, session, mobile);
+    }
+    expect(await testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  } finally {
+    testPage.off("request", observeRead);
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
+    fs.rmSync(external, { force: true });
   }
-  expect(await testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
-    true,
-  );
 }
 
 async function assertExternalPolicies(page: Page, api: ApiClient, workspace: string) {
@@ -140,24 +157,29 @@ async function assertExternalPolicies(page: Page, api: ApiClient, workspace: str
     });
     expect(response.ok).toBe(true);
   };
-  await change("deny");
-  await expect(page.getByTestId("fixture-file-preview")).toHaveCount(0);
-  await page.getByRole("button", { name: "Retry preview", exact: true }).click();
-  await expect(
-    page.getByText(
-      "Preview access was denied. Check the external file setting and your file permissions.",
-      { exact: true },
-    ),
-  ).toBeVisible();
-  await change("allow");
-  await page.getByRole("button", { name: "Retry preview", exact: true }).click();
-  await expect(page.getByTestId("fixture-file-preview")).toHaveText(String(11 * 1024 * 1024));
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await change("ask");
-  await expect(page.getByTestId("fixture-file-preview")).toHaveCount(0);
-  await page.getByRole("button", { name: "Retry preview", exact: true }).click();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();
+  const baseline = await (await api.rawRequest("GET", endpoint)).json();
+  try {
+    await change("deny");
+    await expect(page.getByTestId("fixture-file-preview")).toHaveCount(0);
+    await page.getByRole("button", { name: "Retry preview", exact: true }).click();
+    await expect(
+      page.getByText(
+        "Preview access was denied. Check the external file setting and your file permissions.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await change("allow");
+    await page.getByRole("button", { name: "Retry preview", exact: true }).click();
+    await expect(page.getByTestId("fixture-file-preview")).toHaveText(String(11 * 1024 * 1024));
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await change("ask");
+    await expect(page.getByTestId("fixture-file-preview")).toHaveCount(0);
+    await page.getByRole("button", { name: "Retry preview", exact: true }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();
+  } finally {
+    await change(baseline.mode);
+  }
 }
 
 async function assertDiscoveryReturn(page: Page, session: SessionPage, mobile: boolean) {

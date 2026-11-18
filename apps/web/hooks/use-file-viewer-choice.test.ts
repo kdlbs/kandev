@@ -2,7 +2,10 @@ import { act, renderHook } from "@testing-library/react";
 import { beforeEach, expect, it } from "vitest";
 import { getOpenFileTabs, setOpenFileTabs } from "@/lib/local-storage";
 import { useFileViewerChoice } from "./use-file-viewer-choice";
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  localStorage.clear();
+  sessionStorage.clear();
+});
 it("keeps a viewer choice when tab persistence rewrites the tab", () => {
   const tab = { path: "model.stl", name: "model.stl", pinned: true, repo: "one" };
   setOpenFileTabs("session", [tab]);
@@ -20,4 +23,16 @@ it("keeps a viewer choice when tab persistence rewrites the tab", () => {
   expect(
     renderHook(() => useFileViewerChoice("session", tab.path, "two")).result.current[0],
   ).toBeNull();
+});
+it("saves a rich preview preference without changing file-tab membership", () => {
+  const session = "rich-session";
+  const tab = { path: "editor.ts", name: "editor.ts", pinned: false };
+  setOpenFileTabs(session, [tab]);
+  const hook = renderHook(() => useFileViewerChoice(session, "chat.shape"));
+  act(() => hook.result.current[1]("plugin/shape"));
+  expect(getOpenFileTabs("rich-session")).toEqual([tab]);
+  hook.unmount();
+  expect(renderHook(() => useFileViewerChoice(session, "chat.shape")).result.current[0]).toBe(
+    "plugin/shape",
+  );
 });
