@@ -112,7 +112,16 @@ func TestApplySyncedWorkflowsAppendsExclusionWarnings(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"Guarded"}, result.Created)
 	assert.Equal(t, []string{
-		`Guarded/Review: reviewer author-provider exclusion is not enforced because provider routing is off`,
-		`Guarded/Review: reviewer author-provider exclusion can hold reviews: agent "QA" can only use codex-acp, so its review runs wait whenever the work ran on codex-acp`,
+		`Guarded workflow, Review step (reviewer): Automatic provider fallback is off, so Review on a different provider is ignored. Reviews may run on the provider that did the work, so they are not an independent check. Turn on Automatic provider fallback in Office > Routing, or turn off Review on a different provider for this step there.`,
+		`Guarded workflow, Review step (reviewer): Agent "QA" can only use codex-acp, so its reviews wait whenever the work ran on codex-acp. Give "QA" another provider in its routing settings, or turn off Review on a different provider for this step in Office > Routing.`,
 	}, result.Warnings)
+}
+
+func TestSyncWarningTextCoversEveryCode(t *testing.T) {
+	assert.Equal(t,
+		`Guarded workflow, Review step (reviewer): claude-acp is the only provider, so the reviewer can never use a different one from the work. Reviews will wait until you act. Add a second provider in Office > Routing, or turn off Review on a different provider for this step there.`,
+		syncWarningText(ImportWarning{Code: "single_provider", WorkflowName: "Guarded", StepName: "Review", Role: "reviewer", ProviderID: "claude-acp"}))
+	assert.Equal(t,
+		`Review on a different provider could not be checked. Open Office > Routing to check it.`,
+		syncWarningText(ImportWarning{Code: ImportWarningCheckFailed}))
 }

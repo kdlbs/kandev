@@ -2,7 +2,11 @@ package backendapp
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/office/routing"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
@@ -47,4 +51,59 @@ func (a *importExclusionAdvisorAdapter) AdviseExclusionSetup(
 		})
 	}
 	return out, nil
+}
+
+// seatExclusionSetter is the workflow service write used by the routing
+// settings page's Review on a different provider switches.
+type seatExclusionSetter interface {
+	SetSeatAuthorExclusion(ctx context.Context, workspaceID string,
+		changes []workflowservice.SeatAuthorExclusionChange) ([]*workflowmodels.WorkflowStep, error)
+}
+
+// stepUpdatePublisher publishes workflow step lifecycle events.
+type stepUpdatePublisher interface {
+	PublishAll(ctx context.Context, eventType string, steps []*workflowmodels.WorkflowStep)
+}
+
+// seatExclusionWriterAdapter satisfies dashboard.SeatAuthorExclusionWriter
+// over the workflow service, so the Office dashboard writes steps through the
+// same authorization and mutability checks as every other step mutation, and
+// publishes the same workflow_step.updated events.
+type seatExclusionWriterAdapter struct {
+	workflow  seatExclusionSetter
+	publisher stepUpdatePublisher
+}
+
+// SetSeatAuthorExclusion implements dashboard.SeatAuthorExclusionWriter.
+func (a *seatExclusionWriterAdapter) SetSeatAuthorExclusion(
+	ctx context.Context, workspaceID string, changes []dashboard.SeatAuthorExclusionChange,
+) error {
+	wfChanges := make([]workflowservice.SeatAuthorExclusionChange, 0, len(changes))
+	for _, ch := range changes {
+		wfChanges = append(wfChanges, workflowservice.SeatAuthorExclusionChange{
+			StepID: ch.StepID, Role: ch.Role, Enabled: ch.Enabled,
+		})
+	}
+	steps, err := a.workflow.SetSeatAuthorExclusion(ctx, workspaceID, wfChanges)
+	if err != nil {
+		return seatChangeError(err)
+	}
+	a.publisher.PublishAll(ctx, events.WorkflowStepUpdated, steps)
+	return nil
+}
+
+// seatChangeError wraps a workflow service error in the dashboard sentinel
+// that selects its HTTP status. A step in another workspace reads exactly
+// like one the caller cannot see.
+func seatChangeError(err error) error {
+	switch {
+	case errors.Is(err, workflowservice.ErrSeatRoleNotFound):
+		return fmt.Errorf("%w: %w", dashboard.ErrSeatChangeInvalid, err)
+	case errors.Is(err, workflowservice.ErrSeatStepNotInWorkspace), errors.Is(err, workflowservice.ErrNotVisible):
+		return fmt.Errorf("%w: %w", dashboard.ErrSeatChangeNotFound, err)
+	case errors.Is(err, workflowservice.ErrWorkflowReadOnly), errors.Is(err, workflowservice.ErrWorkflowWorkspaceReadOnly):
+		return fmt.Errorf("%w: %w", dashboard.ErrSeatChangeReadOnly, err)
+	default:
+		return err
+	}
 }

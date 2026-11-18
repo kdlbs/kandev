@@ -21,7 +21,7 @@ test.describe("Office reviewer exclusion setup warnings on mobile", () => {
 
       const review = testPage.getByTestId("workflow-import-profile-selection");
       await expect(review.getByTestId("author-exclusion-warnings")).toContainText(
-        "routing is off, so the exclusion is not enforced.",
+        `${name} workflow, Review step (Reviewer): Automatic provider fallback is off`,
       );
       await assertNoDocumentHorizontalOverflow(testPage, "workflow import exclusion warnings");
       await review.getByTestId("workflow-import-profile-submit").tap();
@@ -34,8 +34,14 @@ test.describe("Office reviewer exclusion setup warnings on mobile", () => {
 
       await testPage.goto("/office/workspace/routing");
       const banner = testPage.getByTestId("author-exclusion-warnings");
-      await expect(banner).toContainText(`${name} / Review (Reviewer)`);
+      await expect(banner).toContainText(`${name} workflow, Review step (Reviewer)`);
       await assertNoDocumentHorizontalOverflow(testPage, "routing exclusion warning banner");
+      const toggle = testPage.getByRole("switch", {
+        name: `Review on a different provider for ${name} workflow, Review step (Reviewer)`,
+      });
+      await toggle.scrollIntoViewIfNeeded();
+      await expect(toggle).toHaveAttribute("aria-checked", "true");
+      await assertNoDocumentHorizontalOverflow(testPage, "review on a different provider switches");
     } finally {
       if (workflowId) await apiClient.deleteWorkflow(workflowId);
     }

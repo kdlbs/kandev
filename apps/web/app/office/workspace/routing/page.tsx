@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { IconDeviceFloppy } from "@tabler/icons-react";
 import { toast } from "@/lib/toast/sonner";
 import { Button } from "@kandev/ui/button";
@@ -19,6 +19,7 @@ import type {
   WorkspaceRouting,
 } from "@/lib/state/slices/office/types";
 import {
+  AuthorExclusionStepsCard,
   AgentPreviewTable,
   DefaultTierSelector,
   ProviderHealthBanner,
@@ -32,6 +33,7 @@ import { useTranslation } from "react-i18next";
 import { AuthorExclusionWarningList } from "@/components/author-exclusion-warning-list";
 import type { AuthorExclusionWarning } from "@/lib/types/author-exclusion";
 import { providerLabel } from "./components/provider-order-editor";
+import { useAuthorExclusionDraft } from "./use-author-exclusion-draft";
 
 const DEFAULT_PROFILE: ProviderProfile = { tier_map: {} };
 
@@ -69,17 +71,24 @@ export default function ProviderRoutingPage() {
     else if (!routing.isLoading && routing.config === undefined) setDraft(emptyConfig());
   }, [routing.config, routing.isLoading]);
 
-  const dirty = useMemo(
-    () => draft && JSON.stringify(draft) !== JSON.stringify(routing.config ?? emptyConfig()),
+  const exclusion = useAuthorExclusionDraft(routing.authorExclusionSteps);
+  const routingDirty = useMemo(
+    () => !!draft && JSON.stringify(draft) !== JSON.stringify(routing.config ?? emptyConfig()),
     [draft, routing.config],
   );
+  const dirty = routingDirty || exclusion.changes.length > 0;
 
   const onSave = useCallback(async () => {
     if (!draft || !workspaceId) return;
     setSaving(true);
     setFieldErrors([]);
     try {
-      const warnings = await routing.update(draft);
+      // Routing first, then the switches, so the warnings reflect both.
+      let warnings = routing.authorExclusionWarnings;
+      if (routingDirty) warnings = await routing.update(draft);
+      if (exclusion.changes.length > 0) {
+        warnings = await routing.updateAuthorExclusion(exclusion.changes);
+      }
       void preview.refresh();
       if (warnings.length > 0) toast.warning(t("office:routingSavedWithExclusionWarnings"));
       else toast.success(t("office:routingSettingsSaved"));
@@ -90,7 +99,7 @@ export default function ProviderRoutingPage() {
     } finally {
       setSaving(false);
     }
-  }, [draft, workspaceId, routing, preview, t]);
+  }, [draft, workspaceId, routing, routingDirty, exclusion.changes, preview, t]);
 
   if (!workspaceId || !draft) {
     return <div className="p-6 text-sm text-muted-foreground">{t("common:loading")}</div>;
@@ -104,7 +113,7 @@ export default function ProviderRoutingPage() {
       knownProviders={routing.knownProviders}
       executionProfiles={routing.executionProfiles}
       saving={saving}
-      dirty={!!dirty}
+      dirty={dirty}
       fieldErrors={fieldErrors}
       onSave={onSave}
       health={health.health}
@@ -112,6 +121,14 @@ export default function ProviderRoutingPage() {
       previewAgents={preview.agents}
       previewLoading={preview.isLoading}
       authorExclusionWarnings={routing.authorExclusionWarnings}
+      exclusionSteps={
+        <AuthorExclusionStepsCard
+          steps={routing.authorExclusionSteps}
+          draft={exclusion.draft}
+          onChange={exclusion.setValue}
+          disabled={saving}
+        />
+      }
     />
   );
 }
@@ -131,6 +148,7 @@ type PageBodyProps = {
   previewAgents: ReturnType<typeof useRoutingPreview>["agents"];
   previewLoading: boolean;
   authorExclusionWarnings: AuthorExclusionWarning[];
+  exclusionSteps: ReactNode;
 };
 
 function PageBody({
@@ -148,6 +166,7 @@ function PageBody({
   previewAgents,
   previewLoading,
   authorExclusionWarnings,
+  exclusionSteps,
 }: PageBodyProps) {
   const { t } = useTranslation();
   const setEnabled = (v: boolean) => setDraft({ ...draft, enabled: v });
@@ -177,6 +196,7 @@ function PageBody({
       <AuthorExclusionWarningList
         warnings={authorExclusionWarnings}
         formatProvider={providerLabel}
+        surface="routing"
       />
 
       <RoutingEnableCard enabled={draft.enabled} onChange={setEnabled} disabled={saving} />
@@ -216,6 +236,8 @@ function PageBody({
           disabled={saving}
         />
       ))}
+
+      {exclusionSteps}
 
       <AgentPreviewTable agents={previewAgents} isLoading={previewLoading} />
 

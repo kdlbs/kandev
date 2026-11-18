@@ -44,9 +44,15 @@ func (h *Handler) getWorkspaceRouting(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	steps, err := h.seatSteps(c.Request.Context(), rp, c.Param("wsId"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(http.StatusOK, RoutingConfigResponse{
 		Config: cfg, KnownProviders: known, ExecutionProfiles: profiles,
 		AuthorExclusionWarnings: h.authorExclusionWarnings(c.Request.Context(), rp, c.Param("wsId")),
+		AuthorExclusionSteps:    steps,
 	})
 }
 

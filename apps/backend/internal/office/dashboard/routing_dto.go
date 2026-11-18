@@ -18,6 +18,27 @@ type RoutingConfigResponse struct {
 	// will not be enforced or can park their reviews
 	// (REQ-OFFICE-REVIEW-AUTHOR-EXCL-005). Never null.
 	AuthorExclusionWarnings []AuthorExclusionWarningDTO `json:"author_exclusion_warnings"`
+	// AuthorExclusionSteps lists every ensure_participant_seat action in the
+	// workspace with whether it keeps reviews off the author's provider
+	// (REQ-OFFICE-REVIEW-AUTHOR-EXCL-006). Never null.
+	AuthorExclusionSteps []AuthorExclusionStepDTO `json:"author_exclusion_steps"`
+}
+
+// AuthorExclusionStepDTO is one seat step row on the routing settings page.
+type AuthorExclusionStepDTO struct {
+	WorkflowID   string `json:"workflow_id"`
+	WorkflowName string `json:"workflow_name"`
+	StepID       string `json:"step_id"`
+	StepName     string `json:"step_name"`
+	Role         string `json:"role"`
+	Enabled      bool   `json:"enabled"`
+}
+
+// SeatAuthorExclusionResponse is the PUT /workspaces/:wsId/routing/author-exclusion
+// payload: the seat steps and setup warnings after the write.
+type SeatAuthorExclusionResponse struct {
+	AuthorExclusionSteps    []AuthorExclusionStepDTO    `json:"author_exclusion_steps"`
+	AuthorExclusionWarnings []AuthorExclusionWarningDTO `json:"author_exclusion_warnings"`
 }
 
 // RoutingUpdateResponse is the PUT /workspaces/:wsId/routing payload. The

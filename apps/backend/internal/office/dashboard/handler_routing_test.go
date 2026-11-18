@@ -35,6 +35,11 @@ type fakeRoutingProvider struct {
 	executionProfilesErr error
 	setupWarnings        []routing.SetupWarning
 	setupErr             error
+	seatSteps            []routing.SeatStep
+}
+
+func (f *fakeRoutingProvider) SeatSteps(_ context.Context, _ string) ([]routing.SeatStep, error) {
+	return f.seatSteps, nil
 }
 
 func (f *fakeRoutingProvider) StoredExclusionSetup(_ context.Context, _ string) ([]routing.SetupWarning, error) {

@@ -72,17 +72,22 @@ func selectedWorkflows(export *models.WorkflowExport, indexes []int) []models.Wo
 // syncWarningText renders an exclusion warning in the workflow-sync warning
 // format, which the sync status banner shows verbatim.
 func syncWarningText(w ImportWarning) string {
-	subject := fmt.Sprintf("%s/%s: %s author-provider exclusion", w.WorkflowName, w.StepName, w.Role)
+	const rule = "Review on a different provider"
+	subject := fmt.Sprintf("%s workflow, %s step (%s): ", w.WorkflowName, w.StepName, w.Role)
 	switch w.Code {
 	case "routing_disabled":
-		return subject + " is not enforced because provider routing is off"
+		return subject + "Automatic provider fallback is off, so " + rule + " is ignored." +
+			" Reviews may run on the provider that did the work, so they are not an independent check." +
+			" Turn on Automatic provider fallback in Office > Routing, or turn off " + rule + " for this step there."
 	case "single_provider":
-		return fmt.Sprintf("%s can hold reviews: only %s is configured, so review runs wait whenever the work ran on %s",
-			subject, w.ProviderID, w.ProviderID)
+		return subject + w.ProviderID + " is the only provider, so the reviewer can never use a different one from the work." +
+			" Reviews will wait until you act." +
+			" Add a second provider in Office > Routing, or turn off " + rule + " for this step there."
 	case "agent_single_provider":
-		return fmt.Sprintf("%s can hold reviews: agent %q can only use %s, so its review runs wait whenever the work ran on %s",
-			subject, w.AgentName, w.ProviderID, w.ProviderID)
+		return subject + fmt.Sprintf("Agent %q can only use %s, so its reviews wait whenever the work ran on %s."+
+			" Give %q another provider in its routing settings, or turn off "+rule+" for this step in Office > Routing.",
+			w.AgentName, w.ProviderID, w.ProviderID, w.AgentName)
 	default:
-		return "author-provider exclusion setup could not be checked"
+		return rule + " could not be checked. Open Office > Routing to check it."
 	}
 }

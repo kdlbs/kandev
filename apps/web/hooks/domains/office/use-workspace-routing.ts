@@ -5,10 +5,15 @@ import { useAppStore } from "@/components/state-provider";
 import {
   getWorkspaceRouting,
   retryProvider,
+  updateSeatAuthorExclusion,
   updateWorkspaceRouting,
 } from "@/lib/api/domains/office-extended-api";
 import type { ExecutionProfileSummary, WorkspaceRouting } from "@/lib/state/slices/office/types";
-import type { AuthorExclusionWarning } from "@/lib/types/author-exclusion";
+import type {
+  AuthorExclusionStep,
+  AuthorExclusionStepChange,
+  AuthorExclusionWarning,
+} from "@/lib/types/author-exclusion";
 import { t } from "@/lib/i18n";
 
 export type UseWorkspaceRoutingResult = {
@@ -16,11 +21,17 @@ export type UseWorkspaceRoutingResult = {
   knownProviders: string[];
   executionProfiles: ExecutionProfileSummary[];
   authorExclusionWarnings: AuthorExclusionWarning[];
+  /** Seat steps with their Review on a different provider setting. */
+  authorExclusionSteps: AuthorExclusionStep[];
   isLoading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
   /** Saves cfg and resolves to the exclusion setup warnings computed after the save. */
   update: (cfg: WorkspaceRouting) => Promise<AuthorExclusionWarning[]>;
+  /** Saves seat switch changes and resolves to the warnings computed after the save. */
+  updateAuthorExclusion: (
+    changes: AuthorExclusionStepChange[],
+  ) => Promise<AuthorExclusionWarning[]>;
   retry: (providerId: string) => Promise<void>;
 };
 
@@ -36,6 +47,7 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
   const [authorExclusionWarnings, setAuthorExclusionWarnings] = useState<AuthorExclusionWarning[]>(
     [],
   );
+  const [authorExclusionSteps, setAuthorExclusionSteps] = useState<AuthorExclusionStep[]>([]);
   const [profilesWorkspace, setProfilesWorkspace] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const requestVersion = useRef(0);
@@ -52,6 +64,7 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
       if (Array.isArray(res.known_providers)) setKnownProviders(res.known_providers);
       setExecutionProfiles(Array.isArray(res.execution_profiles) ? res.execution_profiles : []);
       setAuthorExclusionWarnings(res.author_exclusion_warnings ?? []);
+      setAuthorExclusionSteps(res.author_exclusion_steps ?? []);
       setProfilesWorkspace(workspaceName);
     } catch (e) {
       if (version !== requestVersion.current) return;
@@ -66,6 +79,7 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
       requestVersion.current += 1;
       setExecutionProfiles([]);
       setAuthorExclusionWarnings([]);
+      setAuthorExclusionSteps([]);
       setProfilesWorkspace(null);
       setIsLoading(false);
       return;
@@ -86,6 +100,18 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
     [workspaceName, setWorkspaceRouting],
   );
 
+  const updateAuthorExclusion = useCallback(
+    async (changes: AuthorExclusionStepChange[]) => {
+      if (!workspaceName || changes.length === 0) return [];
+      const res = await updateSeatAuthorExclusion(workspaceName, changes);
+      setAuthorExclusionSteps(res.author_exclusion_steps ?? []);
+      const warnings = res.author_exclusion_warnings ?? [];
+      setAuthorExclusionWarnings(warnings);
+      return warnings;
+    },
+    [workspaceName],
+  );
+
   const retry = useCallback(
     async (providerId: string) => {
       if (!workspaceName) return;
@@ -99,10 +125,12 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
     knownProviders,
     executionProfiles,
     authorExclusionWarnings,
+    authorExclusionSteps,
     isLoading,
     error,
     refresh,
     update,
+    updateAuthorExclusion,
     retry,
   };
 }

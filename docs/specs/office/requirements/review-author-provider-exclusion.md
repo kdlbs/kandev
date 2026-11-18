@@ -22,6 +22,11 @@ it is set, runs for that seat never launch on the provider that did the task's
 work. If no other provider is available, the run waits instead of reviewing
 its own work. The run detail shows whether the exclusion applied.
 
+Operators turn the setting on or off per step on the Office provider routing
+settings page, under the name **Review on a different provider**. The control
+lives there until the editable Office workflow surface (issue #5347) exists;
+it then moves into that editor.
+
 Because the setting can halt a review flow, the system also warns, without
 blocking, when the workspace's current setup predicts that a declaring step
 can park reviews (whenever the work ran on a reviewer's only provider) or
@@ -61,6 +66,8 @@ This document owns only the author-independence contract for Office seat runs.
   as defined by AC-OFFICE-REVIEW-SEATS-002.1 and .2.
 - **Exclusion setup warning**: a non-blocking, localized notice that names a
   declaring workflow step, its participant role, and a predicted problem.
+- **Review on a different provider**: the on-screen name of the setting. User
+  copy uses this name, never "exclusion" or the config key.
 
 ## Requirements
 
@@ -198,6 +205,45 @@ prediction uses the setup at that moment; it is a hint, not a guarantee.
 - **AC-OFFICE-REVIEW-AUTHOR-EXCL-005.8:** When the prediction cannot be computed
   because of a storage error, the import, sync, or save shall proceed, and the
   surface shall state that the exclusion setup could not be checked.
+- **AC-OFFICE-REVIEW-AUTHOR-EXCL-005.9:** Each exclusion setup warning shall
+  state, in as few words as possible: what is true now, naming the workflow
+  and the step by type (for example "Office Default workflow, Review step");
+  why that state is bad, as its concrete consequence for reviews; and the
+  change that clears it, naming each control by its on-screen label
+  (**Automatic provider fallback**, **Review on a different provider**, or the
+  provider order). A warning shown outside the routing page shall say where
+  that control is (Office > Routing).
+
+### REQ-OFFICE-REVIEW-AUTHOR-EXCL-006: The setting is configurable on the routing page
+
+An operator shall be able to turn the setting on and off for each seat-ensuring
+step from the Office provider routing settings page, without editing workflow
+YAML.
+
+#### Acceptance criteria
+
+- **AC-OFFICE-REVIEW-AUTHOR-EXCL-006.1:** The routing settings page shall list,
+  under **Review on a different provider**, one row per seat-ensuring action in
+  the workspace's workflows (hidden workflows included), naming the workflow,
+  the step, and the participant role, with a switch showing whether the
+  setting is on. Rows follow workflow name, then step position.
+- **AC-OFFICE-REVIEW-AUTHOR-EXCL-006.2:** When an operator changes a switch and
+  saves the page, the system shall set `exclude_author_provider` to `true` on
+  that seat-ensuring action, or remove it, and shall leave every other action
+  and step setting unchanged. The change shall be published as a workflow
+  step update.
+- **AC-OFFICE-REVIEW-AUTHOR-EXCL-006.3:** After the save, the page's exclusion
+  setup warnings shall reflect the new settings.
+- **AC-OFFICE-REVIEW-AUTHOR-EXCL-006.4:** The system shall reject a change for a
+  step outside the workspace, a step without a seat-ensuring action for the
+  given role, or a read-only workflow, and shall apply none of the request's
+  changes.
+- **AC-OFFICE-REVIEW-AUTHOR-EXCL-006.5:** When no workflow in the workspace has a
+  seat-ensuring action, the section shall say so instead of listing rows.
+- **AC-OFFICE-REVIEW-AUTHOR-EXCL-006.6:** The section shall be localized in
+  every supported locale, describe what the setting does and when it waits,
+  and be usable on desktop and phone widths, with touch-sized switches on
+  coarse pointers.
 
 ## Exclusions
 
@@ -208,10 +254,10 @@ prediction uses the setup at that moment; it is a hint, not a guarantee.
 - A list of steps or a policy expression selecting which providers to exclude.
 - Turning the setting on in the built-in `office-default` workflow.
 - A workflow-editor control for the setting. The editable Office workflow
-  surface (issue #5347) is separate work; this capability is configured
-  through workflow templates, import, and sync. When that editor adds the
-  control, it is expected to reuse the REQ-OFFICE-REVIEW-AUTHOR-EXCL-005
-  prediction.
+  surface (issue #5347) is separate work. Until it ships, the control lives on
+  the routing page (REQ-OFFICE-REVIEW-AUTHOR-EXCL-006). When #5347 lands, the
+  control moves into that editor, and it is expected to reuse the
+  REQ-OFFICE-REVIEW-AUTHOR-EXCL-005 prediction.
 - Blocking any save, import, or sync because of a predicted halt.
 - Warnings on the per-agent routing override form. Its effect appears on the
   provider routing settings banner (AC-OFFICE-REVIEW-AUTHOR-EXCL-005.5).

@@ -7,6 +7,7 @@ requirements:
   - REQ-OFFICE-REVIEW-AUTHOR-EXCL-003
   - REQ-OFFICE-REVIEW-AUTHOR-EXCL-004
   - REQ-OFFICE-REVIEW-AUTHOR-EXCL-005
+  - REQ-OFFICE-REVIEW-AUTHOR-EXCL-006
 system_design:
   - ../../specs/office/system-design/review-author-provider-exclusion.md
 legacy_specs: []
@@ -43,9 +44,15 @@ is persisted on seats or runs, and no migration is needed. See the
 | 2 | [task-03-exclusion-setup-warnings-backend](task-03-exclusion-setup-warnings-backend.md) | Backend: setup evaluator, routing GET/PUT warnings, import preview/result warnings via a workflow-service port, sync warnings |
 | 3 | [task-04-exclusion-setup-warnings-web](task-04-exclusion-setup-warnings-web.md) | Web: routing settings banner, import dialog warnings, locales, desktop and phone E2E |
 
+| 4 | [task-05-routing-control-backend](task-05-routing-control-backend.md) | Backend: list seat steps on routing GET, batch write endpoint through the workflow service, step events, three-part sync warning text |
+| 5 | [task-06-routing-control-web](task-06-routing-control-web.md) | Web: Review on a different provider section in the routing draft, three-part warning copy, import dialog submitting state, locales, desktop and phone E2E |
+
 Task 02 depends on Task 01, because its E2E needs the backend behavior. Task 03
 depends on Task 01 (the shared declaration helper). Task 04 depends on Task 03.
-Tasks 02 and 03 can run in parallel.
+Tasks 02 and 03 can run in parallel. Tasks 05 and 06 come from the first
+manual test round: operators need to turn the setting off without editing
+YAML, and the warnings must say what is true, why it is bad, and how to fix
+it. Task 06 depends on Task 05.
 
 ## ASCII UI preview
 
@@ -121,6 +128,57 @@ naming workflow, step, role, the one provider (and agent), and no horizontal
 scroll on phone.
 Illustrative: the wording. Maps to AC-OFFICE-REVIEW-AUTHOR-EXCL-005.5 to .7.
 
+### UI-04: Provider routing settings, Review on a different provider
+
+Entry point: Office → Workspace → Provider routing. The section sits under the
+provider order and is part of the page draft, so the existing Save applies it.
+Until issue #5347 ships an Office workflow editor, this is the control's home.
+
+```text
+Desktop
++-- Review on a different provider -------------------------------+
+| Keep a step's reviewer or approver off the provider that did    |
+| the task's work, so the review is an independent check. If no   |
+| other provider is available, the review waits.                  |
+|-----------------------------------------------------------------|
+| Office Default workflow, Review step     [Reviewer]      ( o)   |
+| Office Default workflow, Approval step   [Approver]      (o )   |
++-----------------------------------------------------------------+
+                                                         [Save]
+
+Phone (rows wrap; 44px switch targets)
++---------------------------+
+| Review on a different     |
+| provider                  |
+| Keep a step's reviewer... |
+|---------------------------|
+| Office Default workflow,  |
+| Review step               |
+| [Reviewer]          ( o)  |
+|---------------------------|
+| Office Default workflow,  |
+| Approval step             |
+| [Approver]          (o )  |
++---------------------------+
+```
+
+Empty state: "No workflow in this workspace has a reviewer or approver step."
+Required: one row per seat action, workflow and step named by type, role
+badge, switch in the page draft. Illustrative: the description wording. Maps
+to AC-OFFICE-REVIEW-AUTHOR-EXCL-006.1, .5 and .6.
+
+Revised warning item (replaces the UI-02 and UI-03 wording, per
+AC-OFFICE-REVIEW-AUTHOR-EXCL-005.9):
+
+```text
+| /!\ Review on a different provider can't work as set up          |
+|  - Office Default workflow, Review step (Reviewer): Claude (ACP) |
+|    is the only provider, so the reviewer can't use a different   |
+|    one from the work. Reviews will wait until you act. Add a     |
+|    second provider, or turn off Review on a different provider   |
+|    for this step.                                                |
+```
+
 ### UI-03: Workflow import dialog, preview step
 
 Entry point: Settings → Workspace → Workflows → Import. State: the previewed
@@ -164,6 +222,13 @@ list wraps the same way. Maps to AC-OFFICE-REVIEW-AUTHOR-EXCL-005.3 and .7.
 - **Warnings are a snapshot.** Provider health and later settings changes are
   not predicted. Runtime parking with the `skipped_author_provider` outcome
   remains the backstop.
+- **Two writes per save.** The routing page saves routing first and the
+  switches second. If the second request fails, routing stays saved and the
+  switch changes stay in the draft with an error toast. Each request is
+  validated before it writes.
+- **Hidden Office workflow.** The built-in Office workflow is hidden from the
+  workflow settings list, so the routing page is the only UI for its seat
+  steps until #5347.
 - **Seat-pool helper move.** Moving `seatRolePools` into `office/models` touches
   the seat caster. Its existing tests must pass unchanged.
 

@@ -31,6 +31,11 @@ type fakeProviderRepo struct {
 	decls     []ExclusionDeclaration
 	declsErr  error
 	declReads int
+	seatSteps []SeatStep
+}
+
+func (f *fakeProviderRepo) ListSeatSteps(_ context.Context, _ string) ([]SeatStep, error) {
+	return f.seatSteps, nil
 }
 
 func (f *fakeProviderRepo) ListAuthorExclusionDeclarations(_ context.Context, _ string) ([]ExclusionDeclaration, error) {

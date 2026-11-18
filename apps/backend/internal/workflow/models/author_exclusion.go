@@ -59,3 +59,54 @@ func AuthorExclusionDeclarationsFor(workflows []WorkflowPortable) []AuthorExclus
 	}
 	return out
 }
+
+// ParticipantSeatRoles returns each role that has an ensure_participant_seat
+// action on the step, mapped to whether that action sets
+// exclude_author_provider. Seat actions without a role are ignored.
+func ParticipantSeatRoles(events StepEvents) map[string]bool {
+	roles := map[string]bool{}
+	for _, action := range events.OnEnter {
+		if action.Type != OnEnterEnsureParticipantSeat {
+			continue
+		}
+		if role, _ := action.Config["role"].(string); role != "" {
+			roles[role] = roles[role] || ExcludesAuthorProvider(action.Config)
+		}
+	}
+	return roles
+}
+
+// SetExcludeAuthorProvider returns a copy of events whose
+// ensure_participant_seat actions for role set exclude_author_provider to
+// true (enabled) or drop the key (disabled). Every other action and config key
+// is copied unchanged, and events itself is not modified. The boolean reports
+// whether any seat action matched role.
+func SetExcludeAuthorProvider(events StepEvents, role string, enabled bool) (StepEvents, bool) {
+	out := events
+	out.OnEnter = make([]OnEnterAction, len(events.OnEnter))
+	found := false
+	for i, action := range events.OnEnter {
+		out.OnEnter[i] = action
+		if action.Type != OnEnterEnsureParticipantSeat {
+			continue
+		}
+		if actionRole, _ := action.Config["role"].(string); actionRole != role || role == "" {
+			continue
+		}
+		found = true
+		config := make(map[string]interface{}, len(action.Config)+1)
+		for k, v := range action.Config {
+			config[k] = v
+		}
+		if enabled {
+			config[ExcludeAuthorProviderConfigKey] = true
+		} else {
+			delete(config, ExcludeAuthorProviderConfigKey)
+		}
+		out.OnEnter[i].Config = config
+	}
+	if events.OnEnter == nil {
+		out.OnEnter = nil
+	}
+	return out, found
+}

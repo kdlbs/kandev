@@ -14,3 +14,20 @@ export type AuthorExclusionWarning = {
   provider_id?: string;
   agent_name?: string;
 };
+
+// One ensure_participant_seat action listed on the Office routing settings
+// page, with whether Review on a different provider is on for it.
+export type AuthorExclusionStep = {
+  workflow_id: string;
+  workflow_name: string;
+  step_id: string;
+  step_name: string;
+  role: string;
+  enabled: boolean;
+};
+
+export type AuthorExclusionStepChange = {
+  step_id: string;
+  role: string;
+  enabled: boolean;
+};

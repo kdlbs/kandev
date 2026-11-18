@@ -70,6 +70,7 @@ type ProviderRepo interface {
 	// runs unstick on the next scheduler tick.
 	ClearAllParkedRoutingForWorkspace(ctx context.Context, workspaceID string) error
 	ListAuthorExclusionDeclarations(ctx context.Context, workspaceID string) ([]ExclusionDeclaration, error)
+	ListSeatSteps(ctx context.Context, workspaceID string) ([]SeatStep, error)
 }
 
 // RetryRunner runs a provider retry. Pulled out so the Provider depends

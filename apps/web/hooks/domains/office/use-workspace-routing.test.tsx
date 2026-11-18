@@ -6,12 +6,14 @@ const mocks = vi.hoisted(() => ({
   getWorkspaceRouting: vi.fn(),
   retryProvider: vi.fn(),
   updateWorkspaceRouting: vi.fn(),
+  updateSeatAuthorExclusion: vi.fn(),
 }));
 
 vi.mock("@/lib/api/domains/office-extended-api", () => ({
   getWorkspaceRouting: mocks.getWorkspaceRouting,
   retryProvider: mocks.retryProvider,
   updateWorkspaceRouting: mocks.updateWorkspaceRouting,
+  updateSeatAuthorExclusion: mocks.updateSeatAuthorExclusion,
 }));
 
 const setKnownProviders = vi.fn();
@@ -123,5 +125,61 @@ describe("useWorkspaceRouting", () => {
     });
     expect(returned).toEqual(saved);
     expect(result.current.authorExclusionWarnings).toEqual(saved);
+  });
+});
+
+describe("useWorkspaceRouting seat steps", () => {
+  beforeEach(() => {
+    routingByWorkspace = {};
+    mocks.getWorkspaceRouting.mockReset();
+  });
+
+  it("exposes seat steps and saves switch changes", async () => {
+    const step = {
+      workflow_id: "wf-1",
+      workflow_name: "Office Default",
+      step_id: "step-review",
+      step_name: "Review",
+      role: "reviewer",
+      enabled: false,
+    };
+    const warnings = [
+      {
+        code: "single_provider",
+        workflow_name: "Office Default",
+        step_name: "Review",
+        role: "reviewer",
+        provider_id: "codex-acp",
+      },
+    ];
+    mocks.getWorkspaceRouting.mockResolvedValue({
+      config: {
+        enabled: true,
+        provider_order: [],
+        default_tier: "frontier",
+        provider_profiles: {},
+      },
+      known_providers: [],
+      author_exclusion_steps: [step],
+    });
+    mocks.updateSeatAuthorExclusion.mockResolvedValue({
+      author_exclusion_steps: [{ ...step, enabled: true }],
+      author_exclusion_warnings: warnings,
+    });
+    const { result } = renderHook(() => useWorkspaceRouting("ws-1"));
+    await waitFor(() => expect(result.current.authorExclusionSteps).toEqual([step]));
+
+    let returned: unknown;
+    await act(async () => {
+      returned = await result.current.updateAuthorExclusion([
+        { step_id: "step-review", role: "reviewer", enabled: true },
+      ]);
+    });
+    expect(mocks.updateSeatAuthorExclusion).toHaveBeenCalledWith("ws-1", [
+      { step_id: "step-review", role: "reviewer", enabled: true },
+    ]);
+    expect(returned).toEqual(warnings);
+    expect(result.current.authorExclusionSteps).toEqual([{ ...step, enabled: true }]);
+    expect(result.current.authorExclusionWarnings).toEqual(warnings);
   });
 });

@@ -7,6 +7,7 @@ requirements:
   - REQ-OFFICE-REVIEW-AUTHOR-EXCL-003
   - REQ-OFFICE-REVIEW-AUTHOR-EXCL-004
   - REQ-OFFICE-REVIEW-AUTHOR-EXCL-005
+  - REQ-OFFICE-REVIEW-AUTHOR-EXCL-006
 ---
 
 # Office Review Author-Provider Exclusion System Design
@@ -255,8 +256,9 @@ to the Office method through an adapter. When the port is unset, or when the
 document declares nothing, no warning is produced and nothing is read. A port
 error produces one `check_failed` warning; the import continues
 (AC-OFFICE-REVIEW-AUTHOR-EXCL-005.8). Workflow sync reuses the same port and
-renders each warning as
-`"<workflow>/<step>: author-provider exclusion for <role> <predicted problem>"`.
+renders each warning as one English sentence group in the
+AC-OFFICE-REVIEW-AUTHOR-EXCL-005.9 shape: the workflow and step named by type,
+the consequence, and the fix in Office > Routing.
 
 ### 9. Web
 
@@ -279,10 +281,70 @@ renders each warning as
   the wire warnings (`lib/types/author-exclusion.ts`) and an optional provider
   formatter. The routing page passes `providerLabel`, and import shows raw
   provider IDs.
-- **Locales:** one `workflows:` key per code (`routing_disabled`,
-  `single_provider`, `agent_single_provider`, `check_failed`), the banner
-  title, the review-view title and description, and
+- **Warning copy** (AC-OFFICE-REVIEW-AUTHOR-EXCL-005.9): each list item is a
+  bold "<workflow> workflow, <step> step (<role>)" lead, then a localized
+  problem-and-consequence sentence per code, then a fix sentence. The list
+  takes a `surface` prop: `routing` fixes point at controls on the same page;
+  `import` fixes add "in Office > Routing". Copy calls the setting **Review on
+  a different provider** and the routing switch **Automatic provider
+  fallback**, never "exclusion" or "routing is off".
+- **Locales:** `workflows:` keys for each code's problem sentence and each
+  code-and-surface fix sentence, the item lead, the banner title, the
+  review-view title and description, the routing-page section copy (§10), and
   `office:routingSavedWithExclusionWarnings`, in all seven catalogs.
+- **Import while submitting:** the review view renders only in the `resolving`
+  phase or while submitting from it. An import that auto-submits (nothing to
+  review) keeps the YAML dialog with its importing state, so an empty review
+  view with disabled actions is never shown.
+
+### 10. Routing-page control (REQ-OFFICE-REVIEW-AUTHOR-EXCL-006)
+
+This is the control's home until issue #5347 ships an editable Office workflow
+surface; the control then moves there and reuses this write path.
+
+**Models** (`internal/workflow/models/author_exclusion.go`):
+`ParticipantSeatRoles(events) map[string]bool` returns each
+`ensure_participant_seat` role with whether it sets the flag.
+`SetExcludeAuthorProvider(events, role, enabled) (StepEvents, bool)` returns a
+copy whose matching seat actions set `exclude_author_provider: true` or drop
+the key, and reports whether any action matched. Other actions and config
+keys are untouched.
+
+**Read:** the Office repository's `ListSeatSteps(ctx, workspaceID)` selects the
+workspace's steps (hidden workflows included) whose events mention
+`ensure_participant_seat`, decodes them, and returns one
+`routing.SeatStep{WorkflowID, WorkflowName, StepID, StepName, Role,
+ExcludeAuthorProvider}` per seat action, ordered by workflow name, step
+position, and role. `GET /workspaces/:wsId/routing` adds
+`author_exclusion_steps` (never null).
+
+**Write:** `workflow/service.SetSeatAuthorExclusion(ctx, workspaceID, changes)`
+takes `[]SeatAuthorExclusionChange{StepID, Role, Enabled}`. It first
+authorizes and validates every change: the step is visible and belongs to a
+workflow in the workspace, the workflow is mutable, and the step has a seat
+action for the role. Any failure returns before a write
+(AC-OFFICE-REVIEW-AUTHOR-EXCL-006.4). It then updates each changed step
+through `UpdateStepWithStartStepIntent(ctx, step, nil)` and returns the
+updated steps. The Office dashboard reaches it through a port that
+`internal/backendapp` wires to the workflow service plus a
+`stepevents.Publisher` with source `office-routing`, so every update publishes
+`workflow_step.updated` (AC-OFFICE-REVIEW-AUTHOR-EXCL-006.2).
+
+`PUT /workspaces/:wsId/routing/author-exclusion` takes
+`{changes: [{step_id, role, enabled}]}` and returns
+`{author_exclusion_steps, author_exclusion_warnings}` computed after the
+write. An invalid change is a 400, a step the caller cannot see is a 404, and
+a read-only workflow is a 409.
+
+**Web:** `useWorkspaceRouting` exposes `authorExclusionSteps` and
+`updateAuthorExclusion(changes)`. The routing page keeps the switches in its
+existing draft, so one Save applies routing changes first and then the
+switch changes; the warnings come from the last response. The section is an
+`AuthorExclusionStepsCard` under the provider order: a title, a description
+of what the setting does and that reviews wait when no other provider is
+available, and one row per seat step with a role badge and a `Switch`
+(44px target on coarse pointers). The rows wrap on phone widths; there is no
+separate phone composition.
 
 ## Failure and recovery
 
@@ -321,3 +383,7 @@ renders each warning as
 | AC-005.5, .6 | §8 (routing GET/PUT), §9 (banner) |
 | AC-005.7 | §9 (locales, wrapping layout) |
 | AC-005.8 | §8 (`check_failed`) |
+| AC-005.9 | §8 (sync text), §9 (warning copy) |
+| AC-006.1, .5 | §10 (read, web) |
+| AC-006.2, .3, .4 | §10 (write) |
+| AC-006.6 | §10 (web), §9 (locales) |
