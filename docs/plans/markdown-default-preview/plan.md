@@ -87,5 +87,6 @@ No delegated implementation, parent branch imports, PR3113 dependency, or render
 Implemented on 2026-11-17. The work order is done. See its [verification results](task-01-persist-and-apply.md#results) for exact commands, environment setup, and evidence.
 
 Backend suites, 199 focused frontend tests, two desktop browser tests, and 14 phone browser tests passed after PR remediation.
+An additional 15 desktop and eight phone browser regression cases passed with retries disabled after CI test compatibility corrections. Exact commands and results are in the work order.
 Type checking, Go/web lint, localization, generated settings contracts, public docs, specification validation, documentation coverage, and diff checks passed.
 The phone setting screenshot was inspected. The user confirmed the isolated test worked and authorized a ready PR on `feat/markdown-preview-default`.

@@ -137,3 +137,23 @@ Validation: eleven focused frontend suites passed (196 tests), typecheck passed,
 Frontend shard 1/2 exposed three failures in the existing editor admin-gating tests after adopting `SettingsRow`. The test replaced the entire settings-group module and did not provide that export. Reproduced the failure locally, retained the real module through a partial mock, and added the Markdown preference fields consumed by the mocked settings state. Admin and member permissions retain their existing assertions.
 
 The focused admin-gating, shared-row, settings-state, and dirty-state run passed (24 tests). The expanded twelve-suite work-order run passed (199 tests), and typecheck passed. No production or rendered UI changed in this CI correction. Fresh remote CI is pending at the next pushed head.
+
+### Browser CI opening-mode compatibility
+
+CI exposed 17 failures across eight browser shards because existing tests assumed source-first Markdown opening. Reproduced the Preview-toggle failure locally before changing the tests. Preview, math, local-link, touch-comment, and live-repository attachment checks now assert the saved default mode. The source-comment helper switches to source explicitly. The LSP active-editor scenario saves Off for its unsupported Markdown source editor and restores the original preference in `finally`.
+
+The following desktop commands passed with retries disabled (15 tests):
+
+```sh
+pnpm --dir apps/web e2e:raw --project=chromium tests/chat/markdown-preview.spec.ts tests/chat/local-markdown-links.spec.ts --retries=0
+pnpm --dir apps/web e2e:raw --project=chromium tests/chat/markdown-math.spec.ts tests/task/live-repository-attachment.spec.ts tests/lsp/lsp-file-intelligence.spec.ts tests/session/session-resume.spec.ts -g 'Markdown math|Live repository attachment|persists status-bar placement|keeps distinct model titles' --retries=0
+```
+
+Phone verification used these commands with retries disabled (eight cases):
+
+```sh
+pnpm --dir apps/web e2e:raw --project=mobile-chrome tests/chat/mobile-local-markdown-links.spec.ts tests/chat/mobile-markdown-math.spec.ts tests/task/mobile-markdown-selection-comments.spec.ts tests/task/mobile-live-repository-attachment.spec.ts tests/task/mobile-file-selection-comments.spec.ts --retries=0
+pnpm --dir apps/web e2e:raw --project=mobile-chrome tests/task/mobile-live-repository-attachment.spec.ts --retries=0
+```
+
+The first phone run passed seven cases and exposed one remaining source-view assertion after reload in the live-attachment case. Updated that assertion and reran its complete scenario; it passed. These tests retain the content, sanitization, source-line, repository identity, overflow, and mode-switch assertions. The session-title and phone keyboard-dock cases that flaked in CI both passed locally without retries. No production code changed in this browser compatibility correction. Web typecheck and lint passed. Browser subprocesses used the clean environment and Nix libraries described above. Fresh remote CI remains pending at the next pushed head.

@@ -99,7 +99,7 @@ async function taskRepositoryWorktreePath(
   );
 }
 
-/** Open a markdown file from the Files panel and enable preview mode. */
+/** Open a Markdown file in its default Preview mode. */
 async function openFileInPreview(
   testPage: Page,
   session: SessionPage,
@@ -116,7 +116,6 @@ async function openFileInPreview(
 
   const previewToggle = testPage.getByTestId("markdown-preview-toggle").first();
   await expect(previewToggle).toBeVisible({ timeout: 10_000 });
-  await previewToggle.click();
 
   await expect(testPage.getByTestId("markdown-preview")).toBeVisible({ timeout: 5_000 });
 }
@@ -134,6 +133,8 @@ async function openFileInCode(
 
   const editorTab = testPage.locator(`.dv-default-tab:has-text('${fileName}')`);
   await expect(editorTab).toBeVisible({ timeout: 10_000 });
+  await expect(testPage.getByTestId("markdown-preview")).toBeVisible();
+  await testPage.getByTestId("markdown-preview-toggle").first().click();
   await expect(testPage.locator(".monaco-editor").first()).toBeVisible({ timeout: 10_000 });
 }
 
@@ -178,7 +179,10 @@ test.describe("Markdown preview", () => {
     const previewToggle = testPage.getByTestId("markdown-preview-toggle").first();
     await expect(previewToggle).toBeVisible({ timeout: 10_000 });
 
-    // Click to enable markdown preview
+    // New Markdown files start in Preview. Both mode switches remain available.
+    await expect(testPage.getByTestId("markdown-preview")).toBeVisible();
+    await previewToggle.click();
+    await expect(testPage.locator(".monaco-editor").first()).toBeVisible();
     await previewToggle.click();
 
     // The markdown preview should be visible with rendered content
