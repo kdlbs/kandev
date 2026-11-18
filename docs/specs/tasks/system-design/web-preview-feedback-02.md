@@ -22,7 +22,7 @@ not change.
 | Criterion | Section |
 | --- | --- |
 | `AC-TASKS-WEB-PREVIEW-FEEDBACK-002.8`, `.9` | [Canvas pixel readability](#canvas-pixel-readability) |
-| `AC-TASKS-WEB-PREVIEW-FEEDBACK-004.6`, `.7` | [Comment surface](#comment-surface) |
+| `AC-TASKS-WEB-PREVIEW-FEEDBACK-004.6` | [Comment surface](#comment-surface) |
 
 ## Canvas pixel readability
 
@@ -104,14 +104,9 @@ the inline textarea editor in `preview-feedback-collection.tsx`
   `onDraftChange` from `use-preview-capture`. `onAdd` calls `saveDraft` and
   returns its boolean, so a failed upload or create keeps the surface open with
   `errorMessage`. Dismissal calls only `closeDraftSurface`, so the logical
-  draft, PNG, and upload ID survive (`AC-TASKS-WEB-PREVIEW-FEEDBACK-004.7`).
-  While a draft exists and the surface is closed, the Annotate menu or Drawer
-  shows a draft row with **Resume** and **Discard**, and the three capture
-  modes are disabled with a visible hint. The hook exposes `draftAnchor`,
-  `isDraftSurfaceOpen`, `closeDraftSurface`, and `resumeDraft`. A new draft
-  opens the surface, and discard or save closes it. The Annotate menu closes
-  while the surface is open and reopens for rasterizing progress or capture
-  errors.
+  draft, PNG, and upload ID survive (`AC-TASKS-WEB-PREVIEW-FEEDBACK-005.4`).
+  [Part 3](web-preview-feedback-03.md#drafts) replaces the single resumable
+  draft and its capture gating with a list of drafts.
 - **Editing saved items:** the Edit action opens the surface with
   `editingComment` and `onDelete`. `onAdd` calls the collection update with the
   rendered version and returns `false` on conflict or failure. On coarse

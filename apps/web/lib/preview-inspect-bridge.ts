@@ -5,7 +5,7 @@ import type {
 } from "@/lib/types/http-agents";
 
 export const INSPECTOR_SOURCE = "kandev-inspector" as const;
-export const INSPECTOR_PROTOCOL_VERSION = 2 as const;
+export const INSPECTOR_PROTOCOL_VERSION = 3 as const;
 
 const MAX_ROUTE_LENGTH = 4_096;
 const MAX_TITLE_LENGTH = 1_024;
@@ -16,6 +16,8 @@ const MAX_ELEMENT_TEXT_LENGTH = 16_384;
 const MAX_SELECTOR_LENGTH = 4_096;
 const MAX_RECTS = 512;
 const MAX_NODE_PATH_LENGTH = 128;
+const MAX_REGION_ID_LENGTH = 128;
+export const MAX_PROJECTED_REGIONS = 32;
 
 export type PreviewCaptureMode = "text" | "element" | "screenshot";
 
@@ -36,6 +38,21 @@ export type PreviewMarkerProjection = {
   text_anchor?: PreviewTextAnchor;
   element_snapshot?: PreviewElementSnapshot;
   capture_rect?: PreviewCaptureRect;
+  /** Unsaved draft, drawn dashed. */
+  pending?: boolean;
+};
+
+/** A screenshot region the bridge tracks through document and container scrolling. */
+export type PreviewRegionAnchor = {
+  id: string;
+  page_route: string;
+  capture_rect: PreviewCaptureRect;
+};
+
+export type PreviewRegionLayout = {
+  id: string;
+  rect: { x: number; y: number; width: number; height: number };
+  visible: boolean;
 };
 
 interface InspectorReadyMessage {
@@ -73,11 +90,25 @@ interface PreviewCaptureCompletedMessage {
   payload: PreviewCaptureDraft;
 }
 
-interface PreviewCaptureCancelledMessage {
+interface PreviewEscapeMessage {
   source: typeof INSPECTOR_SOURCE;
   version: typeof INSPECTOR_PROTOCOL_VERSION;
-  type: "capture-cancelled";
+  type: "escape";
   payload: Record<string, never>;
+}
+
+interface PreviewSelectionChangedMessage {
+  source: typeof INSPECTOR_SOURCE;
+  version: typeof INSPECTOR_PROTOCOL_VERSION;
+  type: "selection-changed";
+  payload: { rect: PreviewCaptureRect | null };
+}
+
+interface PreviewRegionLayoutMessage {
+  source: typeof INSPECTOR_SOURCE;
+  version: typeof INSPECTOR_PROTOCOL_VERSION;
+  type: "region-layout";
+  payload: { regions: PreviewRegionLayout[] };
 }
 
 export type PreviewScreenshotRegion = {
@@ -121,7 +152,9 @@ export type InspectorMessage =
   | PreviewCandidateChangedMessage
   | PreviewCaptureModeChangedMessage
   | PreviewCaptureCompletedMessage
-  | PreviewCaptureCancelledMessage
+  | PreviewEscapeMessage
+  | PreviewSelectionChangedMessage
+  | PreviewRegionLayoutMessage
   | PreviewScreenshotRegionSelectedMessage
   | PreviewConsoleReadyMessage
   | PreviewConsoleMessage;
@@ -151,25 +184,28 @@ export function isInspectorMessage(data: unknown): data is InspectorMessage {
   // Keep accepting its narrow legacy messages until both scripts share a version.
   if (LEGACY_INSPECTOR_TYPES.has(data.type)) return isLegacyInspectorMessage(data);
 
-  if (data.version !== INSPECTOR_PROTOCOL_VERSION) return false;
-  switch (data.type) {
-    case "inspector-ready":
-    case "route-changed":
-      return isPageIdentity(data.payload);
-    case "candidate-changed":
-      return data.payload.label === null || isBoundedString(data.payload.label, MAX_LABEL_LENGTH);
-    case "capture-mode-changed":
-      return isCaptureModePayload(data.payload);
-    case "capture-completed":
-      return isCaptureDraft(data.payload);
-    case "capture-cancelled":
-      return true;
-    case "screenshot-region-selected":
-      return isPageIdentity(data.payload) && isCaptureRect(data.payload.capture_rect);
-    default:
-      return false;
-  }
+  if (data.version !== INSPECTOR_PROTOCOL_VERSION || typeof data.type !== "string") return false;
+  const validate = PAYLOAD_VALIDATORS.get(data.type);
+  return validate ? validate(data.payload) : false;
 }
+
+const PAYLOAD_VALIDATORS = new Map<string, (payload: Record<string, unknown>) => boolean>([
+  ["inspector-ready", (payload) => isPageIdentity(payload)],
+  ["route-changed", (payload) => isPageIdentity(payload)],
+  [
+    "candidate-changed",
+    (payload) => payload.label === null || isBoundedString(payload.label, MAX_LABEL_LENGTH),
+  ],
+  ["capture-mode-changed", (payload) => isCaptureModePayload(payload)],
+  ["capture-completed", (payload) => isCaptureDraft(payload)],
+  ["escape", () => true],
+  ["selection-changed", (payload) => payload.rect === null || isCaptureRect(payload.rect)],
+  ["region-layout", (payload) => isRegionLayoutList(payload.regions)],
+  [
+    "screenshot-region-selected",
+    (payload) => isPageIdentity(payload) && isCaptureRect(payload.capture_rect),
+  ],
+]);
 
 function isLegacyInspectorMessage(data: Record<string, unknown>): boolean {
   if (data.type === "console-ready") return true;
@@ -220,15 +256,34 @@ function isCaptureRect(value: unknown): value is PreviewCaptureRect {
   if (!isRecord(value)) return false;
   if (!hasFiniteNumberFields(value, ["x", "y", "width", "height"])) return false;
   if ((value.width as number) < 0 || (value.height as number) < 0) return false;
-  return hasOptionalFiniteNumberFields(value, [
-    "document_x",
-    "document_y",
-    "scroll_x",
-    "scroll_y",
-    "viewport_width",
-    "viewport_height",
-    "device_pixel_ratio",
-  ]);
+  return (
+    hasOptionalFiniteNumberFields(value, [
+      "document_x",
+      "document_y",
+      "scroll_x",
+      "scroll_y",
+      "viewport_width",
+      "viewport_height",
+      "device_pixel_ratio",
+      "container_scroll_x",
+      "container_scroll_y",
+    ]) && isOptionalBoundedString(value.scroll_container_selector, MAX_SELECTOR_LENGTH)
+  );
+}
+
+function isRegionLayout(value: unknown): value is PreviewRegionLayout {
+  return (
+    isRecord(value) &&
+    isBoundedString(value.id, MAX_REGION_ID_LENGTH) &&
+    typeof value.visible === "boolean" &&
+    isCaptureRect(value.rect)
+  );
+}
+
+function isRegionLayoutList(value: unknown): value is PreviewRegionLayout[] {
+  return (
+    Array.isArray(value) && value.length <= MAX_PROJECTED_REGIONS && value.every(isRegionLayout)
+  );
 }
 
 function isOptionalBoundedString(value: unknown, maximum: number) {
@@ -311,7 +366,24 @@ interface ProjectPreviewMarkersCommand {
   source: typeof INSPECTOR_SOURCE;
   version: typeof INSPECTOR_PROTOCOL_VERSION;
   type: "project-markers";
-  payload: { markers: PreviewMarkerProjection[] };
+  payload: { markers: PreviewMarkerProjection[]; regions: PreviewRegionAnchor[] };
+}
+
+function postCommand(iframe: HTMLIFrameElement, type: string, payload: Record<string, unknown>) {
+  iframe.contentWindow?.postMessage(
+    { source: INSPECTOR_SOURCE, version: INSPECTOR_PROTOCOL_VERSION, type, payload },
+    "*",
+  );
+}
+
+/** Tells the bridge whether Escape inside the page belongs to Kandev. */
+export function sendSetAnnotationActive(iframe: HTMLIFrameElement, active: boolean): void {
+  postCommand(iframe, "set-annotation-active", { active });
+}
+
+/** Captures the page's current text selection as a text draft. */
+export function sendCaptureSelection(iframe: HTMLIFrameElement): void {
+  postCommand(iframe, "capture-selection", {});
 }
 
 export function sendSetPreviewCaptureMode(
@@ -332,13 +404,14 @@ export function sendSetPreviewCaptureMode(
 export function sendProjectPreviewMarkers(
   iframe: HTMLIFrameElement,
   markers: PreviewMarkerProjection[],
+  regions: PreviewRegionAnchor[] = [],
 ): void {
   iframe.contentWindow?.postMessage(
     {
       source: INSPECTOR_SOURCE,
       version: INSPECTOR_PROTOCOL_VERSION,
       type: "project-markers",
-      payload: { markers },
+      payload: { markers, regions: regions.slice(0, MAX_PROJECTED_REGIONS) },
     } satisfies ProjectPreviewMarkersCommand,
     "*",
   );

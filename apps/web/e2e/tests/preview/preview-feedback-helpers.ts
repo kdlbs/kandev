@@ -29,6 +29,10 @@ const PREVIEW_HTML = `<!doctype html>
       <button id="save" class="primary" aria-label="Save order">Save order</button>
       <canvas id="gl-canvas" width="160" height="80" style="display:block;margin-top:16px"></canvas>
       <span id="runtime-total" role="status" aria-label="Cart total"></span>
+      <div id="scroller" style="height:160px;overflow:auto;margin-top:24px;border:1px solid #ccc">
+        <div id="scroll-target" style="height:60px;background:#fde68a">Scrollable panel</div>
+        <div style="height:600px"></div>
+      </div>
     </main>
     <script>
       // WebGL draws once without preserveDrawingBuffer, like Flutter's CanvasKit.
@@ -105,30 +109,43 @@ export async function openBrowserPreview(
   return { session, frame };
 }
 
-export async function chooseCapture(page: Page, name: string): Promise<void> {
-  const captureMode = {
-    "Select text": "text",
-    "Select element": "element",
-    "Select screenshot region": "screenshot",
-  }[name as "Select text" | "Select element" | "Select screenshot region"];
-  if (!captureMode) throw new Error(`unsupported preview capture choice: ${name}`);
+const CAPTURE_TOOLS = {
+  "Select text": { tool: "text", mode: "text" },
+  "Select element": { tool: "element", mode: "element" },
+  "Select screenshot region": { tool: "region", mode: "screenshot" },
+} as const;
 
+/** Enters annotation mode if needed and selects a tool on the preview toolbar. */
+export async function chooseCapture(
+  page: Page,
+  name: string,
+  _frame?: FrameLocator,
+): Promise<void> {
+  const choice = CAPTURE_TOOLS[name as keyof typeof CAPTURE_TOOLS];
+  if (!choice) throw new Error(`unsupported preview capture choice: ${name}`);
   const trigger = page.getByTestId("preview-feedback-trigger");
-  const popover = page.getByTestId("preview-feedback-popover");
   await expect(async () => {
-    if ((await trigger.getAttribute("data-capture-mode")) === captureMode) return;
-    if (!(await popover.isVisible())) await trigger.click();
-    await expect(popover).toBeVisible({ timeout: 500 });
-    const choice = popover.getByRole("button", { name, exact: true });
-    await expect(choice).toBeVisible({ timeout: 500 });
-    const box = await choice.boundingBox();
-    const viewport = page.viewportSize();
-    if (!box || !viewport || box.y < 0 || box.y + box.height > viewport.height) {
-      throw new Error(`capture choice is outside viewport: ${JSON.stringify({ box, viewport })}`);
-    }
-    await choice.click();
-    await expect(trigger).toHaveAttribute("data-capture-mode", captureMode, { timeout: 750 });
+    if ((await trigger.getAttribute("data-capture-mode")) === choice.mode) return;
+    if ((await trigger.getAttribute("data-annotation-active")) !== "true") await trigger.click();
+    await page.getByTestId(`preview-tool-${choice.tool}`).click({ timeout: 1_000 });
+    await expect(trigger).toHaveAttribute("data-capture-mode", choice.mode, { timeout: 1_000 });
   }).toPass({ timeout: 12_000, intervals: [250, 500, 1_000] });
+}
+
+/** Switches the toolbar to Interact so page input passes through. */
+export async function chooseInteract(page: Page): Promise<void> {
+  const trigger = page.getByTestId("preview-feedback-trigger");
+  await page.getByTestId("preview-tool-interact").click();
+  await expect(trigger).toHaveAttribute("data-capture-mode", "none");
+}
+
+/** Leaves annotation mode with the toolbar's Exit button. */
+export async function exitAnnotation(page: Page): Promise<void> {
+  await page.getByTestId("preview-annotation-exit").click();
+  await expect(page.getByTestId("preview-feedback-trigger")).toHaveAttribute(
+    "data-annotation-active",
+    "false",
+  );
 }
 
 /** Wait until the iframe has applied screenshot mode before dispatching a drag. */

@@ -10,6 +10,7 @@ const feedback = vi.hoisted(() => ({
   snapshot: { task_id: "task-1", revision: 0, items: [] as TaskPreviewFeedback[] },
   create: vi.fn(),
   update: vi.fn(),
+  replaceScreenshot: vi.fn(),
   remove: vi.fn(),
   clear: vi.fn(),
   isMutating: false,
@@ -38,6 +39,8 @@ vi.mock("html2canvas-pro", () => ({ default: html2canvas }));
 
 const bridge = vi.hoisted(() => ({
   sendSetPreviewCaptureMode: vi.fn(),
+  sendSetAnnotationActive: vi.fn(),
+  sendCaptureSelection: vi.fn(),
   sendProjectPreviewMarkers: vi.fn(),
 }));
 vi.mock("@/lib/preview-inspect-bridge", async () => {
@@ -51,7 +54,7 @@ vi.mock("@/hooks/use-compact-task-chrome", () => ({
   useTouchDrawer: () => false,
 }));
 
-import { PreviewFeedbackControls } from "./preview-feedback-controls";
+import { PreviewAnnotationLayer } from "./preview-annotation-layer";
 import { usePreviewCapture } from "@/hooks/use-preview-capture";
 
 function Harness({ iframeRef }: { iframeRef: React.RefObject<HTMLIFrameElement | null> }) {
@@ -61,14 +64,14 @@ function Harness({ iframeRef }: { iframeRef: React.RefObject<HTMLIFrameElement |
     source: { kind: "browser", sessionId: "session-1", label: "Local app" },
     enabled: true,
   });
-  return <PreviewFeedbackControls capture={capture} enabled />;
+  return <PreviewAnnotationLayer capture={capture} taskId="task-1" />;
 }
 
 function dispatch(iframe: HTMLIFrameElement, data: unknown) {
   window.dispatchEvent(new MessageEvent("message", { source: iframe.contentWindow, data }));
 }
 
-describe("PreviewFeedbackControls with the capture controller", () => {
+describe("PreviewAnnotationLayer with the capture controller", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     vi.clearAllMocks();

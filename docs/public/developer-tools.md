@@ -386,13 +386,24 @@ Closing the preview, file tab, focused viewer, or optional Browser panel removes
 
 ### Comment on a rendered preview
 
-Select **Annotate** in a Browser panel or rendered HTML-file preview. Choose **Select text**, **Select element**, or **Select screenshot region** and make the selection in the page. The same comment form used for plan, chat, and file comments opens next to the selection (a bottom sheet on touch devices). Enter a comment and select **Add**, or press Ctrl+Enter (⌘+Enter on macOS).
+Select text in a Browser panel or rendered HTML-file preview to comment on it directly: a **Comment** button appears beside the selection, or in the bottom selection bar on touch devices. The same comment form used for plan, chat, and file comments opens next to the selection (a bottom sheet on touch devices). Enter a comment and select **Add**, or press Ctrl+Enter (⌘+Enter on macOS).
 
-If you close the comment form without adding, Kandev keeps the draft and its text. **Annotate** then shows the draft with **Resume** and **Discard**; finish or discard it before starting another capture.
+For more than one comment, select **Annotate** to enter annotation mode. The preview gets an outline and a toolbar, floating at the top on desktop and docked at the bottom on touch devices:
+
+- **Interact** uses the page normally, including commenting on a text selection.
+- **Text** captures each text selection.
+- **Element** outlines the candidate under the pointer and captures the element you click.
+- **Region** captures each rectangle you drag. Drag an outline to move it, or drag a corner to resize it; the image is recaptured and the comment kept.
+
+The selected tool stays active after each capture, so you can mark several places in a row. Leave the mode with **Exit**, or press Escape: it first closes an open comment form, then switches to **Interact**, then exits. Escape works whether focus is in Kandev or inside the page.
+
+If you close a comment form without adding, Kandev keeps the draft and its text. Unsaved regions show as dashed outlines, and **Annotate** shows a dot while drafts exist. Select a dashed outline, or open the count on the toolbar and use **Resume** or **Discard** under **Unsaved**. Drafts last until you add or discard them, or close the preview.
 
 Element mode outlines and labels the candidate under the pointer, keyboard focus, or active touch before selection. Text feedback keeps the exact selected text together with its containing element, DOM range endpoints, rendered rectangles, scroll position, viewport size, and device pixel ratio. This position data lets the agent identify text that JavaScript generated or that the live page no longer contains.
 
-Screenshot mode rasterizes the selected part of the rendered document and shows the PNG before saving. A screenshot is limited to 16 megapixels and 10 MiB, and one pending collection can contain up to 10 screenshots. A failed capture or upload keeps a retryable draft; discarding it removes its staged image.
+The Region tool rasterizes the selected part of the rendered document and shows the PNG before saving. A screenshot is limited to 16 megapixels and 10 MiB. Saved and unsaved screenshots together are limited to 10 per task; at the limit the Region tool is disabled with a message until you send or delete some. A failed capture or upload keeps a retryable draft; discarding it removes its staged image. If a moved or resized region cannot be recaptured, the previous outline and image stay.
+
+Region outlines follow the page and any inner panel they were drawn in as you scroll. Content that scrolls inside a canvas, such as a Flutter app, does not move the outline; the captured image is unaffected.
 
 Previewed pages keep their WebGL drawing buffers, so screenshots of WebGL content drawn on the page's main thread contain the rendered pixels. This includes Flutter web builds made with `flutter build web` and with `--wasm`. Content the rasterizer cannot read still comes out blank or different:
 
@@ -404,11 +415,11 @@ When a capture over a canvas comes out as a single solid color, the comment form
 <details>
 <summary>Flutter element feedback</summary>
 
-Flutter draws its UI on a canvas, so **Select element** only finds the whole `flutter-view` by default. Call `SemanticsBinding.instance.ensureSemantics()` in your app's `main()` to expose Flutter's semantics tree; element feedback then anchors to the individual `flt-semantics` nodes.
+Flutter draws its UI on a canvas, so the **Element** tool only finds the whole `flutter-view` by default. Call `SemanticsBinding.instance.ensureSemantics()` in your app's `main()` to expose Flutter's semantics tree; element feedback then anchors to the individual `flt-semantics` nodes.
 
 </details>
 
-Saved feedback belongs to the task. It remains pending while you navigate between routes, close or reopen previews, switch task sessions, reload the browser, or restart Kandev. The active task composer shows the shared pending count. Review, edit, or delete items from **Annotate**; editing opens the same comment form. None of the captured content reaches an agent until you use the ordinary chat **Send** action.
+Saved feedback belongs to the task. It remains pending while you navigate between routes, close or reopen previews, switch task sessions, reload the browser, or restart Kandev. The active task composer shows the shared pending count. Review, edit, or delete items from the toolbar's count, or select a saved region's outline to edit its comment; editing opens the same comment form. None of the captured content reaches an agent until you use the ordinary chat **Send** action.
 
 Send addresses the selected task session. An idle session receives the feedback directly; a busy session receives the same text, element metadata, and PNG attachments through its durable queue. Kandev removes only the exact saved versions accepted with that message. A validation, capacity, attachment, or version conflict leaves the feedback and composer draft available for correction and retry. The preview server and navigated page state remain ephemeral even though the saved feedback is durable.
 

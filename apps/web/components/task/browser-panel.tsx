@@ -15,6 +15,7 @@ import { useAppStore } from "@/components/state-provider";
 import { detectPreviewUrlFromOutput, rewritePreviewUrlForProxy } from "@/lib/preview-url-detector";
 import { PreviewFeedbackControls } from "./inspector/preview-feedback-controls";
 import { usePreviewCapture } from "@/hooks/use-preview-capture";
+import { PreviewAnnotationLayer } from "./inspector/preview-annotation-layer";
 import { usePreviewConsoleForwarder } from "@/hooks/use-preview-console-forwarder";
 import { openExternalLink } from "@/lib/desktop/external-links";
 import { previewSourceLabel } from "@/lib/preview-feedback-source";
@@ -173,13 +174,18 @@ export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelP
       />
 
       <PanelBody padding={false} scroll={false}>
-        <BrowserPanelContent
-          showIframeDelayed={url.showIframeDelayed}
-          iframeSrc={url.iframeSrc}
-          refreshKey={url.refreshKey}
-          iframeRef={iframeRef}
-          onIframeLoad={capture.handleIframeLoad}
-        />
+        <div className="relative h-full w-full">
+          <BrowserPanelContent
+            showIframeDelayed={url.showIframeDelayed}
+            iframeSrc={url.iframeSrc}
+            refreshKey={url.refreshKey}
+            iframeRef={iframeRef}
+            onIframeLoad={capture.handleIframeLoad}
+          />
+          {showInspect && url.showIframeDelayed && (
+            <PreviewAnnotationLayer capture={capture} taskId={activeTaskId} />
+          )}
+        </div>
       </PanelBody>
     </PanelRoot>
   );

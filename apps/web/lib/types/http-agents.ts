@@ -508,6 +508,10 @@ export type PreviewCaptureRect = {
   viewport_width?: number;
   viewport_height?: number;
   device_pixel_ratio?: number;
+  /** Nearest scrollable ancestor when a region was drawn; absent for the document. */
+  scroll_container_selector?: string;
+  container_scroll_x?: number;
+  container_scroll_y?: number;
 };
 
 export type PreviewElementSnapshot = {

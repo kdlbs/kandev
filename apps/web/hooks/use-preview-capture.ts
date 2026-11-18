@@ -1,50 +1,33 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import html2canvas from "html2canvas-pro";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { usePreviewFeedback } from "@/hooks/domains/comments/use-preview-feedback";
-import { deleteAttachment, uploadAttachment } from "@/lib/api/domains/attachment-api";
 import {
-  isInspectorMessage,
+  sendCaptureSelection,
   sendProjectPreviewMarkers,
-  sendSetPreviewCaptureMode,
-  type PreviewCaptureDraft,
   type PreviewCaptureMode,
   type PreviewMarkerProjection,
-  type PreviewScreenshotRegion,
+  type PreviewRegionAnchor,
+  type PreviewRegionLayout,
 } from "@/lib/preview-inspect-bridge";
+import { isScreenshotLimitReached, nextEscapeStep } from "@/lib/preview-annotation";
 import { sanitizePreviewPageRoute } from "@/lib/preview-feedback-source";
-import { rasterizePreviewRegion } from "@/lib/preview-screenshot";
 import { anchorBelowRect, floatingBounds } from "@/components/task/floating-selection-position";
-import type { TaskPreviewFeedback } from "@/lib/types/http";
+import type { PreviewCaptureRect, TaskPreviewFeedback } from "@/lib/types/http";
+import { usePreviewAnnotationMode } from "./use-preview-annotation-mode";
+import { usePreviewDraftSave, type PreviewCaptureSource } from "./use-preview-draft-save";
+import { usePreviewDrafts, type PreviewDraftEntry } from "./use-preview-drafts";
+import { usePreviewInspectorEvents } from "./use-preview-inspector-events";
+import { usePreviewScreenshots } from "./use-preview-screenshots";
 
-export type PreviewCaptureSource = {
-  kind: "browser" | "html_file";
-  label: string;
-  sessionId?: string;
-  path?: string;
-};
-
-export type PreviewScreenshotDraft = PreviewScreenshotRegion & {
-  kind: "screenshot";
-  selected_text?: undefined;
-  text_anchor?: undefined;
-  element_snapshot?: undefined;
-  screenshot: {
-    blob: Blob;
-    width: number;
-    height: number;
-    previewUrl: string;
-    fileName: string;
-    attachmentId?: string;
-    /** The region covers a canvas but rasterized to one colour. */
-    uniformOverCanvas?: boolean;
-  };
-};
-
-export type PreviewFeedbackDraft = PreviewCaptureDraft | PreviewScreenshotDraft;
-export type PreviewCaptureError = "raster" | "upload" | "workspace";
+export type { PreviewCaptureSource } from "./use-preview-draft-save";
+export type {
+  PreviewDraftEntry,
+  PreviewFeedbackDraft,
+  PreviewScreenshotDraft,
+} from "./use-preview-drafts";
+export type { PreviewCaptureError } from "./use-preview-screenshots";
 
 type UsePreviewCaptureOptions = {
   taskId: string | null | undefined;
@@ -53,83 +36,14 @@ type UsePreviewCaptureOptions = {
   enabled: boolean;
 };
 
-type InspectorEventOptions = {
-  iframeRef: React.RefObject<HTMLIFrameElement | null>;
-  enabled: boolean;
-  projectMarkers: () => void;
-  setMode: React.Dispatch<React.SetStateAction<PreviewCaptureMode | null>>;
-  setDraft: (draft: PreviewFeedbackDraft) => void;
-  setCandidateLabel: React.Dispatch<React.SetStateAction<string | null>>;
-  setPageRoute: React.Dispatch<React.SetStateAction<string>>;
-  setPageTitle: React.Dispatch<React.SetStateAction<string>>;
-  captureScreenshot: (region: PreviewScreenshotRegion) => void;
+/** A screenshot region drawn over the preview, in iframe-viewport CSS pixels. */
+export type PreviewRegionView = {
+  id: string;
+  index: number;
+  rect: { x: number; y: number; width: number; height: number };
+  pending: boolean;
+  title?: string;
 };
-
-function applyCaptureModeAcknowledgement(
-  mode: PreviewCaptureMode | null,
-  options: InspectorEventOptions,
-) {
-  if (mode !== null && !options.enabled) return;
-  options.setMode(mode);
-  if (mode === null) options.setCandidateLabel(null);
-}
-
-function usePreviewInspectorEvents(options: InspectorEventOptions) {
-  const optionsRef = useRef(options);
-  optionsRef.current = options;
-
-  useEffect(() => {
-    function handleMessage(event: MessageEvent) {
-      const current = optionsRef.current;
-      if (
-        event.source !== current.iframeRef.current?.contentWindow ||
-        !isInspectorMessage(event.data)
-      ) {
-        return;
-      }
-      const message = event.data;
-      switch (message.type) {
-        case "inspector-ready":
-        case "route-changed":
-          current.setPageRoute(sanitizePreviewPageRoute(message.payload.page_route));
-          current.setPageTitle(message.payload.page_title);
-          current.projectMarkers();
-          break;
-        case "candidate-changed":
-          current.setCandidateLabel(message.payload.label);
-          break;
-        case "capture-mode-changed":
-          applyCaptureModeAcknowledgement(message.payload.mode, current);
-          break;
-        case "capture-completed":
-          if (!current.enabled) return;
-          current.setDraft({
-            ...message.payload,
-            page_route: sanitizePreviewPageRoute(message.payload.page_route),
-          });
-          current.setMode(null);
-          current.setCandidateLabel(null);
-          break;
-        case "capture-cancelled":
-          current.setMode(null);
-          current.setCandidateLabel(null);
-          break;
-        case "screenshot-region-selected":
-          if (current.enabled) {
-            current.captureScreenshot({
-              ...message.payload,
-              page_route: sanitizePreviewPageRoute(message.payload.page_route),
-            });
-          }
-          break;
-        default:
-          break;
-      }
-    }
-    window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
-  }, []);
-}
 
 function belongsToSource(item: TaskPreviewFeedback, source: PreviewCaptureSource) {
   return (
@@ -140,7 +54,7 @@ function belongsToSource(item: TaskPreviewFeedback, source: PreviewCaptureSource
   );
 }
 
-function markerProjection(item: TaskPreviewFeedback): PreviewMarkerProjection {
+function itemMarker(item: TaskPreviewFeedback): PreviewMarkerProjection {
   return {
     id: item.id,
     kind: item.kind,
@@ -149,6 +63,72 @@ function markerProjection(item: TaskPreviewFeedback): PreviewMarkerProjection {
     element_snapshot: item.element_snapshot,
     capture_rect: item.capture_rect,
   };
+}
+
+function draftMarker(draft: PreviewDraftEntry): PreviewMarkerProjection {
+  return {
+    id: draft.id,
+    kind: draft.payload.kind,
+    page_route: draft.payload.page_route,
+    text_anchor: draft.payload.text_anchor,
+    element_snapshot: draft.payload.element_snapshot,
+    capture_rect: draft.payload.capture_rect,
+    pending: true,
+  };
+}
+
+type RegionSource = { id: string; route: string; rect: PreviewCaptureRect; pending: boolean };
+
+function regionSources(items: TaskPreviewFeedback[], drafts: PreviewDraftEntry[]) {
+  const saved: RegionSource[] = items.flatMap((item) =>
+    item.kind === "screenshot" && item.capture_rect
+      ? [
+          {
+            id: item.id,
+            route: sanitizePreviewPageRoute(item.page_route),
+            rect: item.capture_rect,
+            pending: false,
+          },
+        ]
+      : [],
+  );
+  const unsaved: RegionSource[] = drafts.flatMap((draft) =>
+    draft.payload.kind === "screenshot"
+      ? [
+          {
+            id: draft.id,
+            route: draft.payload.page_route,
+            rect: draft.payload.capture_rect,
+            pending: true,
+          },
+        ]
+      : [],
+  );
+  return [...saved, ...unsaved];
+}
+
+function regionViews(
+  sources: RegionSource[],
+  route: string,
+  layouts: Record<string, PreviewRegionLayout>,
+  comments: Record<string, string>,
+): PreviewRegionView[] {
+  return sources
+    .filter((region) => region.route === route)
+    .flatMap((region, index) => {
+      const layout = layouts[region.id];
+      if (layout && !layout.visible) return [];
+      const { x, y, width, height } = layout?.rect ?? region.rect;
+      return [
+        {
+          id: region.id,
+          index,
+          rect: { x, y, width, height },
+          pending: region.pending,
+          title: comments[region.id],
+        },
+      ];
+    });
 }
 
 function taskWorkspaceID(
@@ -164,317 +144,218 @@ function taskWorkspaceID(
   return task?.workspaceId ?? state.workspaces.activeId ?? null;
 }
 
-function releaseScreenshotDraft(draft: PreviewFeedbackDraft | null) {
-  if (draft?.kind !== "screenshot") return;
-  URL.revokeObjectURL(draft.screenshot.previewUrl);
-  if (draft.screenshot.attachmentId) {
-    void deleteAttachment(draft.screenshot.attachmentId).catch(() => undefined);
-  }
-}
-
-function usePreviewDraftCleanup(
-  generationRef: { current: number },
-  draftRef: { current: PreviewFeedbackDraft | null },
-) {
-  useEffect(
-    () => () => {
-      generationRef.current += 1;
-      releaseScreenshotDraft(draftRef.current);
-      draftRef.current = null;
-    },
-    [draftRef, generationRef],
-  );
-}
-
-function draftAnchorRect(draft: PreviewFeedbackDraft) {
-  if (draft.capture_rect) return draft.capture_rect;
+function lastTextRect(draft: PreviewDraftEntry["payload"]) {
   const rects = draft.text_anchor?.rects;
   return rects?.length ? rects[rects.length - 1] : null;
 }
 
-/** Viewport point below the captured region, clamped to the visible iframe. */
-function previewDraftAnchor(iframe: HTMLIFrameElement | null, draft: PreviewFeedbackDraft | null) {
-  if (!iframe || !draft) return null;
-  const rect = draftAnchorRect(draft);
-  if (!rect) return null;
+/** Viewport point below a rectangle in iframe coordinates, clamped to the visible iframe. */
+function anchorBelow(iframe: HTMLIFrameElement | null, rect: PreviewRegionView["rect"] | null) {
+  if (!iframe || !rect) return null;
   const bounds = iframe.getBoundingClientRect();
   return anchorBelowRect(rect, bounds, floatingBounds(bounds));
 }
 
-type ScreenshotCaptureSetters = {
-  setCaptureError: (error: PreviewCaptureError | null) => void;
-  setIsRasterizing: (rasterizing: boolean) => void;
-};
-
-/** Rasterizes a selected region into a reviewable screenshot draft. */
-function useScreenshotCapture(
-  iframeRef: React.RefObject<HTMLIFrameElement | null>,
-  generationRef: { current: number },
-  setNewDraft: (next: PreviewFeedbackDraft) => void,
-  { setCaptureError, setIsRasterizing }: ScreenshotCaptureSetters,
+function useSourceCollections(
+  feedback: ReturnType<typeof usePreviewFeedback>,
+  drafts: PreviewDraftEntry[],
+  source: PreviewCaptureSource,
 ) {
-  return useCallback(
-    (region: PreviewScreenshotRegion) => {
-      const documentElement = iframeRef.current?.contentDocument?.documentElement;
-      if (!documentElement) {
-        setCaptureError("raster");
-        return;
-      }
-      const generation = ++generationRef.current;
-      setCaptureError(null);
-      setIsRasterizing(true);
-      void rasterizePreviewRegion(documentElement, region.capture_rect, (element, options) =>
-        html2canvas(element, options),
-      )
-        .then((image) => {
-          if (generationRef.current !== generation) return;
-          const previewUrl = URL.createObjectURL(image.blob);
-          setIsRasterizing(false);
-          setNewDraft({
-            ...region,
-            kind: "screenshot",
-            screenshot: {
-              ...image,
-              previewUrl,
-              fileName: `preview-${Date.now()}.png`,
-            },
-          });
-        })
-        .catch(() => {
-          if (generationRef.current === generation) setCaptureError("raster");
-        })
-        .finally(() => {
-          if (generationRef.current === generation) setIsRasterizing(false);
-        });
-    },
-    [generationRef, iframeRef, setCaptureError, setIsRasterizing, setNewDraft],
+  const sourceItems = useMemo(
+    () => feedback.items.filter((item) => belongsToSource(item, source)),
+    [feedback.items, source.kind, source.label, source.path, source.sessionId],
   );
-}
-
-function usePreviewDraftState(iframeRef: React.RefObject<HTMLIFrameElement | null>) {
-  const [draft, setDraft] = useState<PreviewFeedbackDraft | null>(null);
-  const [isDraftSurfaceOpen, setDraftSurfaceOpen] = useState(false);
-  const [draftComment, setDraftComment] = useState("");
-  const [captureError, setCaptureError] = useState<PreviewCaptureError | null>(null);
-  const [isRasterizing, setIsRasterizing] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const generationRef = useRef(0);
-  const draftRef = useRef<PreviewFeedbackDraft | null>(null);
-  usePreviewDraftCleanup(generationRef, draftRef);
-
-  const setNewDraft = useCallback((next: PreviewFeedbackDraft) => {
-    releaseScreenshotDraft(draftRef.current);
-    draftRef.current = next;
-    setDraft(next);
-    setDraftComment("");
-    setDraftSurfaceOpen(true);
-    generationRef.current += 1;
-  }, []);
-
-  const updateDraft = useCallback((next: React.SetStateAction<PreviewFeedbackDraft | null>) => {
-    const current = draftRef.current;
-    const updated = typeof next === "function" ? next(current) : next;
-    draftRef.current = updated;
-    setDraft(updated);
-  }, []);
-
-  const captureScreenshot = useScreenshotCapture(iframeRef, generationRef, setNewDraft, {
-    setCaptureError,
-    setIsRasterizing,
-  });
-
-  const clearForCapture = useCallback(() => {
-    generationRef.current += 1;
-    releaseScreenshotDraft(draftRef.current);
-    draftRef.current = null;
-    setDraft(null);
-    setDraftComment("");
-    setDraftSurfaceOpen(false);
-    setCaptureError(null);
-    setIsRasterizing(false);
-  }, []);
-
-  const discardDraft = clearForCapture;
-
-  const completeDraft = useCallback((savedGeneration: number) => {
-    if (generationRef.current !== savedGeneration || !draftRef.current) return false;
-    if (draftRef.current.kind === "screenshot") {
-      URL.revokeObjectURL(draftRef.current.screenshot.previewUrl);
-    }
-    draftRef.current = null;
-    setDraft(null);
-    setDraftComment("");
-    setDraftSurfaceOpen(false);
-    setCaptureError(null);
-    generationRef.current += 1;
-    return true;
-  }, []);
-
+  const markers = useMemo(
+    () => [...sourceItems.map(itemMarker), ...drafts.map(draftMarker)],
+    [drafts, sourceItems],
+  );
+  const sources = useMemo(() => regionSources(sourceItems, drafts), [drafts, sourceItems]);
+  const savedScreenshots = feedback.items.filter((item) => item.kind === "screenshot").length;
+  const unsavedScreenshots = drafts.filter((draft) => draft.payload.kind === "screenshot").length;
   return {
-    draft,
-    isDraftSurfaceOpen,
-    setDraftSurfaceOpen: (open: boolean) => setDraftSurfaceOpen(open && draftRef.current !== null),
-    draftComment,
-    setDraftComment,
-    setDraft: setNewDraft,
-    updateDraft,
-    captureError,
-    setCaptureError,
-    isRasterizing,
-    isUploading,
-    setIsUploading,
-    generationRef,
-    captureScreenshot,
-    clearForCapture,
-    discardDraft,
-    completeDraft,
+    sourceItems,
+    markers,
+    sources,
+    limitReached: isScreenshotLimitReached(savedScreenshots, unsavedScreenshots),
   };
 }
 
-type SaveDraftOptions = {
-  draftState: ReturnType<typeof usePreviewDraftState>;
-  workspaceId: string | null;
-  source: PreviewCaptureSource;
-  createFeedback: ReturnType<typeof usePreviewFeedback>["create"];
-  projectMarkers: () => void;
-};
+function useResetDrafts(
+  drafts: ReturnType<typeof usePreviewDrafts>,
+  enabled: boolean,
+  resetKey: string,
+) {
+  const { clear } = drafts;
+  useEffect(() => {
+    if (!enabled) clear();
+  }, [clear, enabled]);
+  useEffect(() => clear, [clear, resetKey]);
+}
 
-function useSavePreviewDraft({
-  draftState,
-  workspaceId,
-  source,
-  createFeedback,
-  projectMarkers,
-}: SaveDraftOptions) {
-  return useCallback(
-    async (comment: string) => {
-      const draft = draftState.draft;
-      if (!draft || !comment.trim()) return false;
-      const saveGeneration = draftState.generationRef.current;
-      let screenshotAttachmentId: string | undefined;
-      if (draft.kind === "screenshot") {
-        if (!workspaceId) {
-          draftState.setCaptureError("workspace");
-          return false;
-        }
-        screenshotAttachmentId = draft.screenshot.attachmentId;
-        if (!screenshotAttachmentId) {
-          draftState.setIsUploading(true);
-          draftState.setCaptureError(null);
-          try {
-            const file = new File([draft.screenshot.blob], draft.screenshot.fileName, {
-              type: "image/png",
-            });
-            const uploaded = await uploadAttachment(file, {
-              workspaceId,
-              kind: "image",
-              deliveryMode: "prompt",
-            });
-            screenshotAttachmentId = uploaded.attachment_id;
-            if (draftState.generationRef.current !== saveGeneration) {
-              void deleteAttachment(uploaded.attachment_id).catch(() => undefined);
-              return false;
-            }
-            draftState.updateDraft((current) =>
-              current?.kind === "screenshot"
-                ? {
-                    ...current,
-                    screenshot: { ...current.screenshot, attachmentId: uploaded.attachment_id },
-                  }
-                : current,
-            );
-          } catch {
-            draftState.setCaptureError("upload");
-            return false;
-          } finally {
-            draftState.setIsUploading(false);
-          }
-        }
-      }
-      const result = await createFeedback({
-        kind: draft.kind,
-        comment: comment.trim(),
-        sourceKind: source.kind,
-        sourceSessionId: source.sessionId,
-        sourceLabel: source.label,
-        sourcePath: source.path,
-        pageRoute: draft.page_route,
-        pageTitle: draft.page_title,
-        selectedText: draft.selected_text,
-        textAnchor: draft.text_anchor,
-        elementSnapshot: draft.element_snapshot,
-        captureRect: draft.capture_rect,
-        screenshotAttachmentId,
-      });
-      if (!result) return false;
-      if (draftState.completeDraft(saveGeneration)) projectMarkers();
-      return true;
+function usePreviewPageState() {
+  const [pageRoute, setPageRoute] = useState("");
+  const [pageTitle, setPageTitle] = useState("");
+  const [candidateLabel, setCandidateLabel] = useState<string | null>(null);
+  const [acknowledgedMode, setAcknowledgedMode] = useState<PreviewCaptureMode | null>(null);
+  const [selectionRect, setSelectionRect] = useState<PreviewCaptureRect | null>(null);
+  const [layouts, setLayouts] = useState<Record<string, PreviewRegionLayout>>({});
+  return {
+    pageRoute,
+    pageTitle,
+    candidateLabel,
+    acknowledgedMode,
+    selectionRect,
+    layouts,
+    setCandidateLabel,
+    setAcknowledgedMode,
+    setSelectionRect,
+    setLayouts,
+    changePage: (route: string, title: string) => {
+      setPageRoute(route);
+      setPageTitle(title);
+      setSelectionRect(null);
+      setCandidateLabel(null);
     },
-    [createFeedback, draftState, projectMarkers, source, workspaceId],
+  };
+}
+
+/** Which comment surface is open: a draft, a saved region's editor, or the pending panel. */
+function usePreviewSurfaces(
+  drafts: ReturnType<typeof usePreviewDrafts>,
+  annotation: ReturnType<typeof usePreviewAnnotationMode>,
+  sourceItems: TaskPreviewFeedback[],
+) {
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [pendingPanelOpen, setPendingPanelOpen] = useState(false);
+  const editingItem = sourceItems.find((item) => item.id === editingItemId) ?? null;
+  const surfaceOpen = drafts.openDraft !== null || editingItem !== null || pendingPanelOpen;
+
+  const handleEscape = useCallback(() => {
+    const step = nextEscapeStep({ surfaceOpen, tool: annotation.tool });
+    if (step === "close-surface") {
+      drafts.close();
+      setEditingItemId(null);
+      setPendingPanelOpen(false);
+    } else if (step === "interact") {
+      annotation.setTool("interact");
+    } else {
+      annotation.exit();
+    }
+  }, [annotation, drafts, surfaceOpen]);
+
+  const openRegion = useCallback(
+    (id: string) => {
+      setPendingPanelOpen(false);
+      if (drafts.find(id)) {
+        setEditingItemId(null);
+        drafts.open(id);
+      } else {
+        drafts.close();
+        setEditingItemId(id);
+      }
+    },
+    [drafts],
+  );
+
+  return {
+    editingItem,
+    closeItemEditor: () => setEditingItemId(null),
+    pendingPanelOpen,
+    setPendingPanelOpen,
+    handleEscape,
+    openRegion,
+  };
+}
+
+function useRegionProjection(
+  iframeRef: React.RefObject<HTMLIFrameElement | null>,
+  collections: ReturnType<typeof useSourceCollections>,
+  drafts: PreviewDraftEntry[],
+  page: ReturnType<typeof usePreviewPageState>,
+  active: boolean,
+) {
+  const { markers, sources, sourceItems } = collections;
+  const anchors = useMemo<PreviewRegionAnchor[]>(
+    () =>
+      active
+        ? sources.map((region) => ({
+            id: region.id,
+            page_route: region.route,
+            capture_rect: region.rect,
+          }))
+        : [],
+    [active, sources],
+  );
+  const projectMarkers = useCallback(() => {
+    if (iframeRef.current) sendProjectPreviewMarkers(iframeRef.current, markers, anchors);
+  }, [anchors, iframeRef, markers]);
+  useEffect(projectMarkers, [projectMarkers]);
+
+  const comments = useMemo(
+    () =>
+      Object.fromEntries([
+        ...sourceItems.map((item) => [item.id, item.comment] as const),
+        ...drafts.map((draft) => [draft.id, draft.comment] as const),
+      ]),
+    [drafts, sourceItems],
+  );
+  const regions = useMemo(
+    () => (active ? regionViews(sources, page.pageRoute, page.layouts, comments) : []),
+    [active, comments, page.layouts, page.pageRoute, sources],
+  );
+  return { projectMarkers, regions };
+}
+
+function openDraftRect(openDraft: PreviewDraftEntry | null, regions: PreviewRegionView[]) {
+  if (!openDraft) return null;
+  return (
+    regions.find((region) => region.id === openDraft.id)?.rect ??
+    openDraft.payload.capture_rect ??
+    lastTextRect(openDraft.payload)
   );
 }
 
-function requestPreviewCaptureMode(
-  iframe: HTMLIFrameElement,
-  mode: PreviewCaptureMode,
-  clearDraft: () => void,
-  setMode: React.Dispatch<React.SetStateAction<PreviewCaptureMode | null>>,
-  setCandidateLabel: React.Dispatch<React.SetStateAction<string | null>>,
-) {
-  clearDraft();
-  setMode(null);
-  setCandidateLabel(null);
-  sendSetPreviewCaptureMode(iframe, mode);
-}
-
-type PreviewCaptureLifecycleOptions = {
-  taskId: string | null | undefined;
-  source: PreviewCaptureSource;
+type CaptureEventDeps = {
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
   enabled: boolean;
-  draftState: ReturnType<typeof usePreviewDraftState>;
+  page: ReturnType<typeof usePreviewPageState>;
+  annotation: ReturnType<typeof usePreviewAnnotationMode>;
+  drafts: ReturnType<typeof usePreviewDrafts>;
+  surfaces: ReturnType<typeof usePreviewSurfaces>;
+  screenshots: ReturnType<typeof usePreviewScreenshots>;
   projectMarkers: () => void;
-  setMode: React.Dispatch<React.SetStateAction<PreviewCaptureMode | null>>;
-  setCandidateLabel: React.Dispatch<React.SetStateAction<string | null>>;
+  limitReached: boolean;
 };
 
-function usePreviewCaptureLifecycle({
-  taskId,
-  source,
-  iframeRef,
-  enabled,
-  draftState,
-  projectMarkers,
-  setMode,
-  setCandidateLabel,
-}: PreviewCaptureLifecycleOptions) {
-  useEffect(projectMarkers, [projectMarkers]);
-
-  useEffect(() => {
-    if (enabled) return;
-    draftState.clearForCapture();
-    setMode(null);
-    setCandidateLabel(null);
-    setPreviewCaptureMode(iframeRef, null);
-  }, [draftState.clearForCapture, enabled, iframeRef, setCandidateLabel, setMode]);
-
-  useEffect(() => {
-    draftState.clearForCapture();
-  }, [
-    draftState.clearForCapture,
-    taskId,
-    source.kind,
-    source.label,
-    source.path,
-    source.sessionId,
-  ]);
-}
-
-function setPreviewCaptureMode(
-  iframeRef: React.RefObject<HTMLIFrameElement | null>,
-  mode: PreviewCaptureMode | null,
-) {
-  if (iframeRef.current) sendSetPreviewCaptureMode(iframeRef.current, mode);
+function useCaptureEvents(deps: CaptureEventDeps) {
+  const { page, annotation, drafts, surfaces, screenshots } = deps;
+  usePreviewInspectorEvents({
+    iframeRef: deps.iframeRef,
+    enabled: deps.enabled,
+    onPageChanged: (route, title, bridgeReloaded) => {
+      page.changePage(route, title);
+      deps.projectMarkers();
+      if (bridgeReloaded) annotation.resend();
+    },
+    onCandidate: page.setCandidateLabel,
+    onModeAcknowledged: (mode) => {
+      page.setAcknowledgedMode(mode);
+      if (mode === null) page.setCandidateLabel(null);
+    },
+    onCapture: (draft) => {
+      surfaces.closeItemEditor();
+      drafts.add(draft);
+    },
+    onRegionSelected: (region) => {
+      if (deps.limitReached) return;
+      surfaces.closeItemEditor();
+      screenshots.captureRegion(region);
+    },
+    onSelectionChanged: page.setSelectionRect,
+    onRegionLayout: (regions) =>
+      page.setLayouts(Object.fromEntries(regions.map((region) => [region.id, region]))),
+    onEscape: surfaces.handleEscape,
+  });
 }
 
 /** Connects one preview iframe to the task-owned pending feedback collection. */
@@ -486,102 +367,94 @@ export function usePreviewCapture({
 }: UsePreviewCaptureOptions) {
   const feedback = usePreviewFeedback(taskId);
   const workspaceId = useAppStore((state) => taskWorkspaceID(taskId, state));
-  const [mode, setMode] = useState<PreviewCaptureMode | null>(null);
-  const [candidateLabel, setCandidateLabel] = useState<string | null>(null);
-  const [pageRoute, setPageRoute] = useState("");
-  const [pageTitle, setPageTitle] = useState("");
-  const draftState = usePreviewDraftState(iframeRef);
-
-  const markers = useMemo(
-    () => feedback.items.filter((item) => belongsToSource(item, source)).map(markerProjection),
-    [feedback.items, source.kind, source.label, source.path, source.sessionId],
-  );
-
-  const projectMarkers = useCallback(() => {
-    if (iframeRef.current) sendProjectPreviewMarkers(iframeRef.current, markers);
-  }, [iframeRef, markers]);
-
-  usePreviewCaptureLifecycle({
-    taskId,
-    source,
+  const drafts = usePreviewDrafts();
+  const page = usePreviewPageState();
+  const collections = useSourceCollections(feedback, drafts.drafts, source);
+  const annotation = usePreviewAnnotationMode({
     iframeRef,
     enabled,
-    draftState,
-    projectMarkers,
-    setMode,
-    setCandidateLabel,
+    regionBlocked: collections.limitReached,
   });
-
-  usePreviewInspectorEvents({
-    iframeRef,
+  useResetDrafts(
+    drafts,
     enabled,
-    projectMarkers,
-    setMode,
-    setDraft: draftState.setDraft,
-    setCandidateLabel,
-    setPageRoute,
-    setPageTitle,
-    captureScreenshot: (region) => {
-      setMode(null);
-      draftState.captureScreenshot(region);
-    },
-  });
-
-  const startCapture = useCallback(
-    (nextMode: PreviewCaptureMode) => {
-      if (!enabled || !iframeRef.current) return;
-      requestPreviewCaptureMode(
-        iframeRef.current,
-        nextMode,
-        draftState.clearForCapture,
-        setMode,
-        setCandidateLabel,
-      );
-    },
-    [draftState, enabled, iframeRef],
+    [taskId, source.kind, source.label, source.path, source.sessionId].join("\u0000"),
   );
-
-  const cancelCapture = useCallback(() => {
-    setMode(null);
-    setCandidateLabel(null);
-    if (iframeRef.current) sendSetPreviewCaptureMode(iframeRef.current, null);
-  }, [iframeRef]);
-
-  const saveDraft = useSavePreviewDraft({
-    draftState,
+  const screenshots = usePreviewScreenshots({
+    iframeRef,
+    drafts,
+    workspaceId,
+    items: collections.sourceItems,
+    replaceSaved: feedback.replaceScreenshot,
+  });
+  const save = usePreviewDraftSave({
+    drafts,
     workspaceId,
     source,
     createFeedback: feedback.create,
-    projectMarkers,
+    setCaptureError: screenshots.setCaptureError,
+  });
+  const projection = useRegionProjection(
+    iframeRef,
+    collections,
+    drafts.drafts,
+    page,
+    annotation.active,
+  );
+  const surfaces = usePreviewSurfaces(drafts, annotation, collections.sourceItems);
+
+  useCaptureEvents({
+    iframeRef,
+    enabled,
+    page,
+    annotation,
+    drafts,
+    surfaces,
+    screenshots,
+    projectMarkers: projection.projectMarkers,
+    limitReached: collections.limitReached,
   });
 
-  const handleIframeLoad = useCallback(() => {
-    if (!iframeRef.current) return;
-    sendSetPreviewCaptureMode(iframeRef.current, enabled ? mode : null);
-    sendProjectPreviewMarkers(iframeRef.current, markers);
-  }, [enabled, iframeRef, markers, mode]);
-
+  const { regions } = projection;
+  const openDraft = drafts.openDraft;
+  const editingRect = regions.find((region) => region.id === surfaces.editingItem?.id)?.rect;
   return {
     ...feedback,
-    mode,
-    draft: draftState.draft,
-    draftAnchor: previewDraftAnchor(iframeRef.current, draftState.draft),
-    isDraftSurfaceOpen: draftState.isDraftSurfaceOpen,
-    closeDraftSurface: () => draftState.setDraftSurfaceOpen(false),
-    resumeDraft: () => draftState.setDraftSurfaceOpen(true),
-    draftComment: draftState.draftComment,
-    setDraftComment: draftState.setDraftComment,
-    candidateLabel,
-    captureError: draftState.captureError,
-    isRasterizing: draftState.isRasterizing,
-    isUploading: draftState.isUploading,
-    pageRoute,
-    pageTitle,
-    markers,
-    startCapture,
-    cancelCapture,
-    discardDraft: draftState.discardDraft,
-    saveDraft,
-    handleIframeLoad,
+    ...surfaces,
+    annotation,
+    acknowledgedMode: page.acknowledgedMode,
+    candidateLabel: page.candidateLabel,
+    pageRoute: page.pageRoute,
+    pageTitle: page.pageTitle,
+    markers: collections.markers,
+    drafts: drafts.drafts,
+    openDraft,
+    draftAnchor: anchorBelow(iframeRef.current, openDraftRect(openDraft, regions)),
+    setDraftComment: (comment: string) => {
+      if (openDraft) drafts.setComment(openDraft.id, comment);
+    },
+    closeDraftSurface: drafts.close,
+    resumeDraft: surfaces.openRegion,
+    discardDraft: drafts.discard,
+    saveDraft: save.saveDraft,
+    editingAnchor: anchorBelow(iframeRef.current, editingRect ?? null),
+    regions,
+    recaptureRegion: screenshots.recaptureRegion,
+    recaptureFailed: screenshots.recaptureFailed,
+    limitReached: collections.limitReached,
+    selectionRect: enabled ? page.selectionRect : null,
+    captureSelection: () => {
+      if (iframeRef.current) sendCaptureSelection(iframeRef.current);
+    },
+    captureError: screenshots.captureError,
+    isRasterizing: screenshots.isRasterizing,
+    isUploading: save.isUploading,
+    handleIframeLoad: () => {
+      page.setLayouts({});
+      annotation.resend();
+      projection.projectMarkers();
+    },
   };
 }
+
+export type PreviewCaptureController = ReturnType<typeof usePreviewCapture>;

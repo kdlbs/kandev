@@ -2,10 +2,12 @@
   'use strict';
 
   var SOURCE = 'kandev-inspector';
-  var PROTOCOL_VERSION = 2;
+  var PROTOCOL_VERSION = 3;
   var Z_INDEX = 2147483640;
   var MAX_OUTER_HTML = 65536;
+  var MAX_REGIONS = 32;
   var mode = null;
+  var annotationActive = false;
   var candidate = null;
   var candidateOverlay = null;
   var candidateLabel = null;
@@ -13,6 +15,12 @@
   var screenshotStart = null;
   var screenshotCurrent = null;
   var projectedMarkers = [];
+  var projectedRegions = [];
+  var screenshotContainer = null;
+  var lastRegionLayout = '';
+  var lastSelectionRect = 'null';
+  var selectionFrame = false;
+  var layoutFrame = false;
   var originalCursor = document.documentElement.style.cursor;
   var originalTouchAction = document.documentElement.style.touchAction;
 
@@ -231,7 +239,7 @@
         containing_element: element,
       },
     });
-    setMode(null);
+    selection.removeAllRanges();
     return true;
   }
 
@@ -323,7 +331,6 @@
       element_snapshot: snapshot,
       capture_rect: rectSnapshot(element.getBoundingClientRect()),
     });
-    setMode(null);
   }
 
   function onElementPointerMove(event) {
@@ -372,6 +379,7 @@
     event.preventDefault();
     event.stopPropagation();
     screenshotStart = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
+    screenshotContainer = scrollContainerAt(event.clientX, event.clientY);
     screenshotCurrent = { x: event.clientX, y: event.clientY };
     positionScreenshotOverlay(screenshotStart, screenshotStart);
   }
@@ -395,12 +403,20 @@
     hideScreenshotOverlay();
     if (width < 5 || height < 5) return false;
     var identity = pageIdentity();
+    var captureRect = rectSnapshot({ left: left, top: top, width: width, height: height });
+    var container = screenshotContainer;
+    screenshotContainer = null;
+    var selector = container ? getSelector(container) : undefined;
+    if (selector) {
+      captureRect.scroll_container_selector = selector;
+      captureRect.container_scroll_x = container.scrollLeft;
+      captureRect.container_scroll_y = container.scrollTop;
+    }
     send('screenshot-region-selected', {
       page_route: identity.page_route,
       page_title: identity.page_title,
-      capture_rect: rectSnapshot({ left: left, top: top, width: width, height: height }),
+      capture_rect: captureRect,
     });
-    setMode(null);
     return true;
   }
 
@@ -419,7 +435,15 @@
     hideScreenshotOverlay();
   }
 
-  function onCaptureKeyDown(event) {
+  function onKeyDown(event) {
+    if (event.key === 'Escape') {
+      if (!mode && !annotationActive) return;
+      event.preventDefault();
+      event.stopPropagation();
+      hideScreenshotOverlay();
+      send('escape', {});
+      return;
+    }
     if (!mode) return;
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
@@ -429,12 +453,7 @@
       } else if (mode === 'screenshot') {
         completeScreenshot(screenshotCurrent);
       }
-      return;
     }
-    if (event.key !== 'Escape') return;
-    event.preventDefault();
-    setMode(null);
-    send('capture-cancelled', {});
   }
 
   function removeCaptureListeners() {
@@ -449,7 +468,6 @@
     document.removeEventListener('pointermove', onScreenshotPointerMove, true);
     document.removeEventListener('pointerup', onScreenshotPointerUp, true);
     document.removeEventListener('pointercancel', onScreenshotPointerCancel, true);
-    document.removeEventListener('keydown', onCaptureKeyDown, true);
   }
 
   function setMode(nextMode) {
@@ -463,9 +481,13 @@
     document.documentElement.style.touchAction = mode === 'screenshot' ? 'none' : originalTouchAction;
     if (!mode) {
       send('capture-mode-changed', { mode: null });
+      onSelectionChange();
       return;
     }
-    document.addEventListener('keydown', onCaptureKeyDown, true);
+    if (lastSelectionRect !== 'null') {
+      lastSelectionRect = 'null';
+      send('selection-changed', { rect: null });
+    }
     switch (mode) {
       case 'element':
         document.addEventListener('mousemove', onElementPointerMove, true);
@@ -488,6 +510,113 @@
         break;
     }
     send('capture-mode-changed', { mode: mode });
+  }
+
+  function isScrollable(element) {
+    var style = window.getComputedStyle(element);
+    var scrollsY = /(auto|scroll|overlay)/.test(style.overflowY || style.overflow || '')
+      && element.scrollHeight > element.clientHeight;
+    var scrollsX = /(auto|scroll|overlay)/.test(style.overflowX || style.overflow || '')
+      && element.scrollWidth > element.clientWidth;
+    return scrollsY || scrollsX;
+  }
+
+  // Nearest scrollable ancestor under a point, or null for the document scroller.
+  function scrollContainerAt(x, y) {
+    var current = typeof document.elementFromPoint === 'function' ? document.elementFromPoint(x, y) : null;
+    while (current && current !== document.body && current !== document.documentElement) {
+      if (current.nodeType === Node.ELEMENT_NODE && !isInspectorNode(current) && isScrollable(current)) {
+        return current;
+      }
+      current = current.parentElement;
+    }
+    return null;
+  }
+
+  function finiteOr(value, fallback) {
+    return typeof value === 'number' && isFinite(value) ? value : fallback;
+  }
+
+  // Current viewport rectangle of a region: its capture position, minus the
+  // container and document scroll that happened since.
+  function regionLayout(region) {
+    var rect = region.capture_rect || {};
+    var dx = 0;
+    var dy = 0;
+    var visible = true;
+    if (rect.scroll_container_selector) {
+      var container = null;
+      try { container = document.querySelector(rect.scroll_container_selector); } catch (error) {}
+      if (container) {
+        dx = container.scrollLeft - finiteOr(rect.container_scroll_x, 0);
+        dy = container.scrollTop - finiteOr(rect.container_scroll_y, 0);
+      } else {
+        visible = false;
+      }
+    }
+    var documentX = finiteOr(rect.document_x, finiteOr(rect.x, 0) + finiteOr(rect.scroll_x, 0));
+    var documentY = finiteOr(rect.document_y, finiteOr(rect.y, 0) + finiteOr(rect.scroll_y, 0));
+    return {
+      id: region.id,
+      rect: {
+        x: documentX - window.scrollX - dx,
+        y: documentY - window.scrollY - dy,
+        width: finiteOr(rect.width, 0),
+        height: finiteOr(rect.height, 0),
+      },
+      visible: visible,
+    };
+  }
+
+  function sendRegionLayout() {
+    layoutFrame = false;
+    var route = currentPageRoute();
+    var regions = projectedRegions
+      .filter(function (region) { return region.page_route === route; })
+      .map(regionLayout);
+    var serialized = JSON.stringify(regions);
+    if (serialized === lastRegionLayout) return;
+    lastRegionLayout = serialized;
+    send('region-layout', { regions: regions });
+  }
+
+  function scheduleRegionLayout() {
+    if (layoutFrame) return;
+    layoutFrame = true;
+    window.requestAnimationFrame(sendRegionLayout);
+  }
+
+  function isEditable(node) {
+    var element = node && node.nodeType === Node.ELEMENT_NODE ? node : node && node.parentElement;
+    if (!element || !element.closest) return false;
+    return !!element.closest('input, textarea, [contenteditable=""], [contenteditable="true"]');
+  }
+
+  function currentSelectionRect() {
+    var selection = window.getSelection();
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+    var range = selection.getRangeAt(0);
+    var container = commonElement(range);
+    if (!container || isInspectorNode(container) || isEditable(container)) return null;
+    if (!selection.toString().trim()) return null;
+    var rects = range.getClientRects();
+    if (!rects || !rects.length) return null;
+    return rectSnapshot(rects[rects.length - 1]);
+  }
+
+  function sendSelectionChange() {
+    selectionFrame = false;
+    var rect = mode ? null : currentSelectionRect();
+    var serialized = JSON.stringify(rect);
+    if (serialized === lastSelectionRect) return;
+    lastSelectionRect = serialized;
+    send('selection-changed', { rect: rect });
+  }
+
+  function onSelectionChange() {
+    if (mode || selectionFrame) return;
+    selectionFrame = true;
+    window.requestAnimationFrame(sendSelectionChange);
   }
 
   function clearMarkerNodes() {
@@ -519,29 +648,32 @@
   function renderMarkers() {
     clearMarkerNodes();
     var route = currentPageRoute();
-    var visible = projectedMarkers.filter(function (marker) { return marker.page_route === route; });
+    var regionIds = {};
+    projectedRegions.forEach(function (region) { regionIds[region.id] = true; });
+    var visible = projectedMarkers.filter(function (marker) {
+      return marker.page_route === route && !regionIds[marker.id];
+    });
     visible.forEach(function (marker, index) {
       var rect = markerRect(marker);
       if (!rect) return;
       var node = document.createElement('div');
       node.setAttribute('data-kandev-inspector-marker', marker.id);
       node.setAttribute('aria-hidden', 'true');
+      var colors = marker.pending
+        ? 'background:#fff;color:#4f46e5;border:2px dashed #4f46e5;'
+        : 'background:#4f46e5;color:#fff;border:2px solid #4f46e5;';
       node.style.cssText = 'position:fixed;left:' + (rect.left - 11) + 'px;top:' + (rect.top - 11)
-        + 'px;width:22px;height:22px;border-radius:50%;background:#4f46e5;color:#fff;'
-        + 'font:600 11px/22px system-ui,sans-serif;text-align:center;pointer-events:none;'
+        + 'px;width:22px;height:22px;box-sizing:border-box;border-radius:50%;' + colors
+        + 'font:600 11px/18px system-ui,sans-serif;text-align:center;pointer-events:none;'
         + 'box-shadow:0 1px 4px rgba(0,0,0,0.3);z-index:' + Z_INDEX + ';';
       node.textContent = String(index + 1);
       document.documentElement.appendChild(node);
     });
+    scheduleRegionLayout();
   }
 
   function routeDidChange() {
-    if (mode) {
-      setMode(null);
-      send('capture-cancelled', {});
-    } else {
-      hideCandidate();
-    }
+    hideCandidate();
     var identity = pageIdentity();
     send('route-changed', identity);
     renderMarkers();
@@ -559,6 +691,8 @@
     routeDidChange();
     return result;
   };
+  document.addEventListener('keydown', onKeyDown, true);
+  document.addEventListener('selectionchange', onSelectionChange);
   window.addEventListener('popstate', routeDidChange);
   window.addEventListener('hashchange', routeDidChange);
   window.addEventListener('scroll', renderMarkers, true);
@@ -578,7 +712,16 @@
         projectedMarkers = message.payload && Array.isArray(message.payload.markers)
           ? message.payload.markers.slice()
           : [];
+        projectedRegions = message.payload && Array.isArray(message.payload.regions)
+          ? message.payload.regions.slice(0, MAX_REGIONS)
+          : [];
         renderMarkers();
+        break;
+      case 'set-annotation-active':
+        annotationActive = !!(message.payload && message.payload.active);
+        break;
+      case 'capture-selection':
+        captureTextSelection();
         break;
       default:
         break;

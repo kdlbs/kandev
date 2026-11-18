@@ -18,6 +18,7 @@ import {
   evidenceForItem,
   evidenceText,
 } from "./preview-feedback-evidence";
+import { PreviewUnsavedDrafts, type PreviewUnsavedDraftsProps } from "./preview-unsaved-drafts";
 import type { TaskPreviewFeedback, TaskPreviewFeedbackSnapshot } from "@/lib/types/http";
 
 export type PreviewFeedbackCollectionController = {
@@ -44,7 +45,7 @@ function keepOpenForCommentSurface(event: {
   if (isInsideSelectionCommentSurface(event.target)) event.preventDefault();
 }
 
-function PendingFeedbackEditor({
+export function PendingFeedbackEditor({
   item,
   collection,
   position,
@@ -246,14 +247,17 @@ export function PreviewFeedbackCollection({
   touch,
   showEmpty = true,
   showErrors = true,
+  drafts,
 }: {
   collection: PreviewFeedbackCollectionController;
   touch: boolean;
   showEmpty?: boolean;
   showErrors?: boolean;
+  drafts?: PreviewUnsavedDraftsProps;
 }) {
   return (
     <section className="space-y-2" data-testid="preview-feedback-collection">
+      {drafts && <PreviewUnsavedDrafts {...drafts} touch={touch} />}
       <CollectionHeader collection={collection} touch={touch} />
       <CollectionStatus collection={collection} showEmpty={showEmpty} showErrors={showErrors} />
       <ul className="space-y-2">
@@ -271,6 +275,12 @@ type CollectionSurfaceProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   showTrigger?: boolean;
+  /** Replaces the default trigger button; the host opens the surface itself. */
+  trigger?: ReactNode;
+  side?: "top" | "bottom";
+  /** Renders the desktop popover in a portal, outside clipping or pointer-transparent hosts. */
+  portal?: boolean;
+  drafts?: PreviewUnsavedDraftsProps;
 };
 
 function CollectionTrigger({
@@ -317,12 +327,14 @@ function TouchCollectionSurface({
   onOpenChange,
   title,
   closeFocus,
+  drafts,
 }: {
   collection: PreviewFeedbackCollectionController;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
   closeFocus: (event: Event) => void;
+  drafts?: PreviewUnsavedDraftsProps;
 }) {
   const { t } = useTranslation();
   return (
@@ -346,7 +358,7 @@ function TouchCollectionSurface({
         </DrawerClose>
       }
     >
-      <PreviewFeedbackCollection collection={collection} touch />
+      <PreviewFeedbackCollection collection={collection} touch drafts={drafts} />
     </MobilePickerSheet>
   );
 }
@@ -358,6 +370,9 @@ function DesktopCollectionSurface({
   title,
   closeFocus,
   trigger,
+  side,
+  portal,
+  drafts,
 }: {
   collection: PreviewFeedbackCollectionController;
   open: boolean;
@@ -365,6 +380,9 @@ function DesktopCollectionSurface({
   title: string;
   closeFocus: (event: Event) => void;
   trigger: ReactNode;
+  side: "top" | "bottom";
+  portal: boolean;
+  drafts?: PreviewUnsavedDraftsProps;
 }) {
   const { t } = useTranslation();
   return (
@@ -375,9 +393,9 @@ function DesktopCollectionSurface({
           <span aria-hidden="true" className="absolute bottom-0 right-0 h-px w-px" />
         </PopoverAnchor>
         <PopoverContent
-          side="top"
+          side={side}
           align="end"
-          portal={false}
+          portal={portal}
           onCloseAutoFocus={closeFocus}
           onInteractOutside={keepOpenForCommentSurface}
           onEscapeKeyDown={keepOpenForCommentSurface}
@@ -397,7 +415,7 @@ function DesktopCollectionSurface({
             </Button>
           </div>
           <div className="max-h-[min(36rem,calc(100dvh-1rem))] overflow-y-auto p-3">
-            <PreviewFeedbackCollection collection={collection} touch={false} />
+            <PreviewFeedbackCollection collection={collection} touch={false} drafts={drafts} />
           </div>
         </PopoverContent>
       </div>
@@ -411,6 +429,10 @@ export function PreviewFeedbackCollectionSurface({
   open,
   onOpenChange,
   showTrigger = false,
+  trigger: customTrigger,
+  side = "top",
+  portal = false,
+  drafts,
 }: CollectionSurfaceProps) {
   const { t } = useTranslation();
   const touch = useTouchDrawer();
@@ -433,7 +455,7 @@ export function PreviewFeedbackCollectionSurface({
     }
     onOpenChange(true);
   };
-  const trigger = (
+  const trigger = customTrigger ?? (
     <CollectionTrigger
       collection={collection}
       touch={touch}
@@ -456,6 +478,7 @@ export function PreviewFeedbackCollectionSurface({
           onOpenChange={onOpenChange}
           title={title}
           closeFocus={closeFocus}
+          drafts={drafts}
         />
       </>
     );
@@ -470,6 +493,9 @@ export function PreviewFeedbackCollectionSurface({
         title={title}
         closeFocus={closeFocus}
         trigger={trigger}
+        side={side}
+        portal={portal}
+        drafts={drafts}
       />
     </>
   );

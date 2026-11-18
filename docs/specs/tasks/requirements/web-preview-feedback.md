@@ -201,10 +201,66 @@ workflow on either device.
   shall be a bottom Drawer. The surface shall show the capture evidence (the
   selected text, element label, or screenshot thumbnail) and the page route,
   and it shall not offer a Run action.
-- **AC-TASKS-WEB-PREVIEW-FEEDBACK-004.7:** Dismissing the capture-comment
-  surface without saving shall keep the capture draft and its typed comment.
-  The Annotate control shall offer to resume or discard that draft, and starting
-  another capture shall require discarding it first.
+- **AC-TASKS-WEB-PREVIEW-FEEDBACK-004.7:** Superseded by
+  `AC-TASKS-WEB-PREVIEW-FEEDBACK-005.4`. It kept one dismissed draft and
+  required discarding it before another capture.
+
+### REQ-TASKS-WEB-PREVIEW-FEEDBACK-005: Annotate a page in a persistent mode
+
+**Intent:** Let a user make many annotations in one pass, with tools that stay
+selected, instead of reopening a one-shot menu for every capture.
+
+**User story:** As a user reviewing a page, I want to switch between annotation
+tools like in an image editor and comment on any text I select, so that
+reviewing a whole page takes few clicks.
+
+#### Acceptance criteria
+
+- **AC-TASKS-WEB-PREVIEW-FEEDBACK-005.1:** When feedback controls are enabled
+  and the user selects text in the preview outside annotation mode, Kandev
+  shall offer a comment action for that selection: a floating comment button
+  next to the selection on fine pointers, and the shared bottom selection dock
+  on coarse pointers, as in chat and plan comments. Activating it shall create
+  a text capture and open the comment surface. Clearing the selection shall
+  hide the action.
+- **AC-TASKS-WEB-PREVIEW-FEEDBACK-005.2:** Entering annotation mode shall
+  outline the preview area and show a toolbar with the Interact, Text, Element,
+  and Region tools, the pending count, and an Exit control. The toolbar and
+  Exit control shall stay visible for the whole mode. On fine pointers the
+  toolbar floats over the top of the preview; on coarse pointers it is a bottom
+  bar with 44-pixel controls.
+- **AC-TASKS-WEB-PREVIEW-FEEDBACK-005.3:** The selected tool shall stay active
+  after each capture is saved or dismissed, so the user can make any number of
+  captures without reopening a menu. Interact shall pass all page input
+  through while keeping existing annotations visible.
+- **AC-TASKS-WEB-PREVIEW-FEEDBACK-005.4:** A capture whose comment surface is
+  dismissed without saving shall stay as an unsaved draft. It is drawn dashed
+  on the page, listed as unsaved in the pending panel, and can be resumed or
+  discarded. A new capture shall not require discarding earlier drafts.
+  Unsaved and saved screenshot captures together shall stay within the pending
+  screenshot limit, with a visible message when the limit is reached.
+- **AC-TASKS-WEB-PREVIEW-FEEDBACK-005.5:** Escape shall step back one layer at
+  a time, whether focus is in Kandev or in the previewed page: close an open
+  comment surface (keeping its draft), then switch the tool to Interact, then
+  exit annotation mode. The Exit control shall exit directly. Exiting shall
+  remove the outline, toolbar, region outlines, and gesture ownership, so the
+  page behaves as it did before the mode, and unsaved drafts shall remain
+  resumable.
+- **AC-TASKS-WEB-PREVIEW-FEEDBACK-005.6:** The Region tool shall let the user
+  draw any number of rectangles. Each rectangle shall be captured when the
+  drag ends and opens its comment surface. Unsaved and saved rectangles on the
+  current page shall show numbered outlines that can be moved and resized;
+  releasing a move or resize shall capture the region again, keep its comment,
+  and, for a saved item, replace its image in a version-checked update. A
+  failed recapture shall keep the previous image and position and show an
+  error.
+- **AC-TASKS-WEB-PREVIEW-FEEDBACK-005.7:** Region outlines shall follow the
+  page content as the document, or the scrollable element the rectangle was
+  drawn over, scrolls. When the page scrolls in a way the preview cannot
+  observe, such as inside a canvas, the outline shall stay where it was drawn.
+  Outlines for other routes shall be hidden after navigation while their items
+  remain in the pending collection. Sending feedback shall use the images
+  already captured and shall never capture at send time.
 
 ## Out of scope
 
@@ -221,5 +277,8 @@ workflow on either device.
   mode in cross-origin-isolated pages, and Kandev previews are not
   cross-origin isolated.
 - Capturing through a browser screen-capture permission prompt.
+- Freehand drawing, arrows, or shapes other than rectangles in annotation mode.
+- Moving or resizing text and element captures; only region captures change
+  geometry after capture.
 - Preserving ephemeral preview URLs or HTML preview execution state after the
   owning task runtime stops.

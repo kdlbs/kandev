@@ -20,7 +20,8 @@ import { toRelativePath } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { usePreviewCapture } from "@/hooks/use-preview-capture";
 import { PreviewFeedbackControls } from "./inspector/preview-feedback-controls";
-import type { PreviewFeedbackController } from "./inspector/preview-feedback-controls";
+import { PreviewAnnotationLayer } from "./inspector/preview-annotation-layer";
+import type { PreviewCaptureController } from "@/hooks/use-preview-capture";
 
 type HtmlPreviewContentProps = {
   path: string;
@@ -62,7 +63,7 @@ function HtmlPreviewContentToolbar({
   toggleLabel,
   capture,
 }: Omit<HtmlPreviewContentProps, "previewUrl" | "error" | "onRetry" | "errorMessage"> & {
-  capture: PreviewFeedbackController;
+  capture: PreviewCaptureController;
 }) {
   const { t } = useTranslation();
   const fileStatus = useExternalVcsFileStatus(path, sessionId, repositoryName);
@@ -239,7 +240,7 @@ export const HtmlPreviewContent = memo(function HtmlPreviewContent({
       >
         {t("task:htmlPreviewTrustedCode")}
       </p>
-      <div className="min-h-0 flex-1 overflow-hidden">
+      <div className="relative min-h-0 flex-1 overflow-hidden">
         {isLoading && (
           <div
             data-testid="html-preview-loading"
@@ -260,6 +261,9 @@ export const HtmlPreviewContent = memo(function HtmlPreviewContent({
             referrerPolicy="no-referrer"
             onLoad={capture.handleIframeLoad}
           />
+        )}
+        {!isLoading && !errorText && previewUrl && (
+          <PreviewAnnotationLayer capture={capture} taskId={taskId} />
         )}
       </div>
     </div>

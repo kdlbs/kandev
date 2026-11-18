@@ -3,7 +3,9 @@ import {
   INSPECTOR_PROTOCOL_VERSION,
   INSPECTOR_SOURCE,
   isInspectorMessage,
+  sendCaptureSelection,
   sendProjectPreviewMarkers,
+  sendSetAnnotationActive,
   sendSetPreviewCaptureMode,
 } from "./preview-inspect-bridge";
 
@@ -186,9 +188,87 @@ describe("preview inspector commands", () => {
       expect.objectContaining({
         version: INSPECTOR_PROTOCOL_VERSION,
         type: "project-markers",
-        payload: { markers: [expect.objectContaining({ id: "feedback-1" })] },
+        payload: { markers: [expect.objectContaining({ id: "feedback-1" })], regions: [] },
       }),
       "*",
     );
+  });
+});
+
+function message(type: string, payload: unknown, version: number = INSPECTOR_PROTOCOL_VERSION) {
+  return { source: INSPECTOR_SOURCE, version, type, payload };
+}
+
+const REGION_LAYOUT = "region-layout";
+
+describe("preview inspector protocol 3", () => {
+  const region = { x: 10, y: 20, width: 100, height: 40 };
+
+  it("uses version 3", () => {
+    expect(INSPECTOR_PROTOCOL_VERSION).toBe(3);
+    expect(isInspectorMessage(message("escape", {}, 2))).toBe(false);
+  });
+
+  it("accepts selection changes with a rectangle or null", () => {
+    expect(isInspectorMessage(message("selection-changed", { rect: region }))).toBe(true);
+    expect(isInspectorMessage(message("selection-changed", { rect: null }))).toBe(true);
+    expect(isInspectorMessage(message("selection-changed", { rect: { x: "1" } }))).toBe(false);
+  });
+
+  it("accepts escape and rejects the retired capture-cancelled event", () => {
+    expect(isInspectorMessage(message("escape", {}))).toBe(true);
+    expect(isInspectorMessage(message("capture-cancelled", {}))).toBe(false);
+    expect(isInspectorMessage(message("toString", {}))).toBe(false);
+  });
+
+  it("accepts bounded region layouts", () => {
+    const entry = { id: "r1", rect: region, visible: true };
+    expect(isInspectorMessage(message(REGION_LAYOUT, { regions: [entry] }))).toBe(true);
+    expect(isInspectorMessage(message(REGION_LAYOUT, { regions: Array(33).fill(entry) }))).toBe(
+      false,
+    );
+    expect(
+      isInspectorMessage(message(REGION_LAYOUT, { regions: [{ ...entry, visible: "yes" }] })),
+    ).toBe(false);
+    expect(
+      isInspectorMessage(message(REGION_LAYOUT, { regions: [{ ...entry, id: "x".repeat(200) }] })),
+    ).toBe(false);
+  });
+
+  it("accepts scroll-container anchors on a selected region", () => {
+    const selected = (capture_rect: unknown) =>
+      message("screenshot-region-selected", { page_route: "/", page_title: "", capture_rect });
+    expect(
+      isInspectorMessage(
+        selected({
+          ...region,
+          scroll_container_selector: "div#list",
+          container_scroll_x: 0,
+          container_scroll_y: 120,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isInspectorMessage(selected({ ...region, scroll_container_selector: "x".repeat(5000) })),
+    ).toBe(false);
+    expect(isInspectorMessage(selected({ ...region, container_scroll_y: Number.NaN }))).toBe(false);
+  });
+
+  it("sends annotation state, selection capture, and region anchors", () => {
+    const postMessage = vi.fn();
+    const iframe = { contentWindow: { postMessage } } as unknown as HTMLIFrameElement;
+
+    sendSetAnnotationActive(iframe, true);
+    sendCaptureSelection(iframe);
+    sendProjectPreviewMarkers(iframe, [], [{ id: "r1", page_route: "/", capture_rect: region }]);
+
+    expect(postMessage.mock.calls.map(([sent]) => [sent.type, sent.payload])).toEqual([
+      ["set-annotation-active", { active: true }],
+      ["capture-selection", {}],
+      [
+        "project-markers",
+        { markers: [], regions: [{ id: "r1", page_route: "/", capture_rect: region }] },
+      ],
+    ]);
   });
 });

@@ -319,11 +319,10 @@ or preview URL does not grant access to another task's feedback.
 
 ### Desktop
 
-Browser and HTML-preview toolbars expose one **Annotate** control with the
-pending count. Its menu offers Text, Element, and Screenshot region modes and
-opens the pending panel. Choosing a mode closes the menu and puts the iframe in
-that single active mode. A completed capture opens the shared
-[selection comment surface](#comment-surface) next to the captured region.
+Browser and HTML-preview toolbars expose one **Annotate** toggle with the
+pending count. It enters the persistent annotation mode designed in
+[part 3](web-preview-feedback-03.md#mode-and-tools). A completed capture opens
+the shared [selection comment surface](#comment-surface) next to the capture.
 
 The pending panel lists every page group in stable order and supports inspect,
 comment edit, and delete. **Clear all** uses a destructive confirmation and the
@@ -354,6 +353,7 @@ capture and mutation hooks own behavior; responsive wrappers own arrangement.
 
 Capture comments and pending-item edits use the shared selection comment
 surface. See [web preview feedback part 2](web-preview-feedback-02.md#comment-surface).
+Annotation mode, drafts, and region editing are in [part 3](web-preview-feedback-03.md).
 
 ## Accessibility
 
@@ -606,3 +606,4 @@ shows a need for rates such as capture failure or stale-send conflict.
 - [Interactive web preview feedback](../../../plans/web-preview-feedback/plan.md)
 - [PR review fixes](../../../plans/web-preview-feedback-review-fixes/plan.md)
 - [Web preview feedback and comment surface](../../../plans/web-preview-feedback-comment-surface/plan.md)
+- [Web preview annotation mode](../../../plans/web-preview-annotation-mode/plan.md)

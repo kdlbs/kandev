@@ -5,6 +5,7 @@ import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-whil
 import { routeMainWebSocketWithPreviewFeedbackCreateFailure } from "../../helpers/ws-drop";
 import {
   chooseCapture,
+  chooseInteract,
   dragScreenshotRegion,
   fillDraftComment,
   openBrowserPreview,
@@ -41,18 +42,18 @@ test.describe("Web preview feedback", () => {
       expect(triggerBox?.height).toBeLessThanOrEqual(30);
       expect(triggerBox?.width).toBeLessThanOrEqual(48);
       await trigger.click();
-      const choices = [
-        { name: "Select text", label: "Text" },
-        { name: "Select element", label: "Element" },
-        { name: "Select screenshot region", label: "Screenshot" },
-      ];
-      const choiceBoxes = [];
-      for (const choice of choices) {
-        const button = testPage.getByRole("button", { name: choice.name, exact: true });
-        await expect(button).toHaveText(choice.label);
-        choiceBoxes.push(await button.boundingBox());
+      const toolbar = testPage.getByTestId("preview-annotation-toolbar");
+      await expect(toolbar).toBeVisible();
+      const tools = ["interact", "text", "element", "region"];
+      const toolBoxes = [];
+      for (const tool of tools) {
+        toolBoxes.push(await toolbar.getByTestId(`preview-tool-${tool}`).boundingBox());
       }
-      expect(new Set(choiceBoxes.map((box) => Math.round(box?.y ?? -1))).size).toBe(1);
+      expect(new Set(toolBoxes.map((box) => Math.round(box?.y ?? -1))).size).toBe(1);
+      await expect(toolbar.getByTestId("preview-tool-region")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
 
       await chooseCapture(testPage, "Select element", frame);
       await frame.locator("#save").hover();
@@ -62,6 +63,7 @@ test.describe("Web preview feedback", () => {
       await frame.locator("#save").click();
       await saveDraft(testPage, "Make the primary action more prominent");
 
+      await chooseInteract(testPage);
       await frame.locator("#details-route").click();
       await expect(frame.locator("h1")).toHaveText("Order details");
       await chooseCapture(testPage, "Select text", frame);
@@ -83,7 +85,8 @@ test.describe("Web preview feedback", () => {
       createFailure.failNextCreate();
       await chooseCapture(testPage, "Select screenshot region");
       await waitForScreenshotCaptureMode(frame);
-      await dragScreenshotRegion(testPage, frame, frame.locator("#save"));
+      // The first region's outline covers #save and takes the pointer to move it.
+      await dragScreenshotRegion(testPage, frame, frame.locator("h1"));
       const failedDraft = testPage.getByTestId("preview-feedback-draft");
       await expect(failedDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible({
         timeout: 15_000,

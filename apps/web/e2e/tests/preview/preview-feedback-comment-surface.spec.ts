@@ -46,7 +46,7 @@ test.describe("Web preview feedback comment surface", () => {
   test.describe.configure({ retries: 0, timeout: 120_000 });
 
   // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-004.6
-  // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-004.7
+  // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-005.4
   test("opens the shared comment surface at the capture and resumes a dismissed draft", async ({
     testPage,
     apiClient,
@@ -67,7 +67,7 @@ test.describe("Web preview feedback comment surface", () => {
       await target.click();
       const surface = draftSurface(testPage);
       await expect(surface).toBeVisible({ timeout: 15_000 });
-      await expect(testPage.getByTestId("preview-feedback-popover")).toBeHidden();
+      await expect(testPage.getByTestId("preview-annotation-toolbar")).toBeVisible();
       await expect(surface.getByTestId("selection-comment-context-label")).toHaveText("/");
       await expect(surface.getByRole("button", { name: /Run/ })).toHaveCount(0);
 
@@ -84,11 +84,11 @@ test.describe("Web preview feedback comment surface", () => {
       await expect(surface).toBeHidden();
 
       const trigger = testPage.getByTestId("preview-feedback-trigger");
-      await trigger.click();
-      const menu = testPage.getByTestId("preview-feedback-popover");
-      await expect(menu.getByTestId("preview-feedback-draft-row")).toContainText("/");
-      await expect(menu.getByRole("button", { name: "Select text", exact: true })).toBeDisabled();
-      await menu.getByRole("button", { name: "Resume", exact: true }).click();
+      await expect(testPage.getByTestId("preview-feedback-unsaved-indicator")).toBeVisible();
+      await testPage.getByTestId("preview-annotation-count").click();
+      const unsaved = testPage.getByTestId("preview-unsaved-draft");
+      await expect(unsaved).toContainText("/");
+      await unsaved.getByTestId("preview-unsaved-resume").click();
       await expect(testPage.getByTestId("preview-feedback-draft-input")).toHaveValue(
         "Half-written note",
       );

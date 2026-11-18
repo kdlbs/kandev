@@ -163,7 +163,9 @@ test.describe("Mobile HTML preview", () => {
     await expect(preview).toBeHidden();
   });
 
-  test("captures touch feedback in the native HTML preview drawer", async ({
+  // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-005.1
+  // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-005.2
+  test("captures touch feedback from the native HTML preview toolbar", async ({
     testPage,
     apiClient,
     seedData,
@@ -195,45 +197,34 @@ test.describe("Mobile HTML preview", () => {
     expect(triggerBox?.height).toBeGreaterThanOrEqual(44);
     await trigger.tap();
 
-    const drawer = testPage.getByTestId("preview-feedback-drawer");
-    await expect(drawer).toBeVisible();
+    const toolbar = preview.getByTestId("preview-annotation-toolbar");
+    await expect(toolbar).toBeVisible();
     const viewport = testPage.viewportSize();
     expect(viewport).not.toBeNull();
-    await expect
-      .poll(async () => {
-        const box = await drawer.boundingBox();
-        return box ? box.y + box.height : Number.POSITIVE_INFINITY;
-      })
-      .toBeLessThanOrEqual(viewport!.height);
-    const drawerBox = await drawer.boundingBox();
-    expect(drawerBox).not.toBeNull();
-    expect(drawerBox!.x).toBeGreaterThanOrEqual(0);
-    expect(drawerBox!.x + drawerBox!.width).toBeLessThanOrEqual(viewport!.width);
-    expect(drawerBox!.y + drawerBox!.height).toBeLessThanOrEqual(viewport!.height);
+    const toolbarBox = await toolbar.boundingBox();
+    expect(toolbarBox).not.toBeNull();
+    expect(toolbarBox!.x).toBeGreaterThanOrEqual(0);
+    expect(toolbarBox!.x + toolbarBox!.width).toBeLessThanOrEqual(viewport!.width);
+    expect(toolbarBox!.y + toolbarBox!.height).toBeLessThanOrEqual(viewport!.height);
 
-    const captureChoices = [
-      { name: "Select text", label: "Text" },
-      { name: "Select element", label: "Element" },
-      { name: "Select screenshot region", label: "Screenshot" },
-    ];
-    const captureChoiceBoxes = [];
-    for (const choice of captureChoices) {
-      const button = drawer.getByRole("button", { name: choice.name, exact: true });
-      await expect(button).toHaveText(choice.label);
-      captureChoiceBoxes.push(await button.boundingBox());
+    const toolBoxes = [];
+    for (const tool of ["interact", "text", "element", "region"]) {
+      const box = await toolbar.getByTestId(`preview-tool-${tool}`).boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+      expect(box?.width).toBeGreaterThanOrEqual(44);
+      toolBoxes.push(box);
     }
-    expect(new Set(captureChoiceBoxes.map((box) => Math.round(box?.y ?? -1))).size).toBe(1);
+    expect(new Set(toolBoxes.map((box) => Math.round(box?.y ?? -1))).size).toBe(1);
+    expect(
+      (await toolbar.getByTestId("preview-annotation-exit").boundingBox())?.height,
+    ).toBeGreaterThanOrEqual(44);
 
-    const elementChoice = drawer.getByRole("button", { name: "Select element", exact: true });
-    const elementChoiceBox = await elementChoice.boundingBox();
-    expect(elementChoiceBox?.height).toBeGreaterThanOrEqual(44);
-    await elementChoice.tap();
+    await toolbar.getByTestId("preview-tool-element").tap();
     await expect(trigger).toHaveAttribute("data-capture-mode", "element");
     await frame.locator("#capture-button").tap();
 
     const elementDraft = testPage.getByTestId("preview-feedback-draft");
     await expect(elementDraft).toContainText("<button#capture-button>");
-    await expect(drawer).toBeHidden();
     await testPage
       .getByTestId("preview-feedback-draft-input")
       .fill("Increase this touch target contrast");
@@ -242,9 +233,7 @@ test.describe("Mobile HTML preview", () => {
     await elementSave.tap();
     await expect(elementDraft).toBeHidden({ timeout: 15_000 });
 
-    await trigger.tap();
-    await expect(drawer).toBeVisible();
-    await drawer.getByRole("button", { name: "Select screenshot region", exact: true }).tap();
+    await toolbar.getByTestId("preview-tool-region").tap();
     await expect(trigger).toHaveAttribute("data-capture-mode", "screenshot");
     await waitForScreenshotCaptureMode(frame);
     const screenshotTarget = frame.locator("#capture-card");
@@ -289,10 +278,30 @@ test.describe("Mobile HTML preview", () => {
     await testPage.getByTestId("preview-feedback-draft-save").tap();
     await expect(screenshotDraft).toBeHidden({ timeout: 15_000 });
     await expect(preview.getByTestId("preview-feedback-trigger")).toContainText("2");
-    await assertNoDocumentHorizontalOverflow(testPage, "mobile preview feedback drawer");
+    await expect(preview.getByTestId("preview-region")).toHaveCount(1);
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile preview annotation toolbar");
 
-    await testPage.keyboard.press("Escape");
-    await expect(drawer).toBeHidden();
+    await toolbar.getByTestId("preview-annotation-exit").tap();
+    await expect(trigger).toHaveAttribute("data-annotation-active", "false");
+    await expect(toolbar).toBeHidden();
+
+    await frame.locator("#capture-card").evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
+    const selectionComment = testPage.getByTestId("preview-selection-comment");
+    await expect(selectionComment).toBeVisible();
+    expect((await selectionComment.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await selectionComment.tap();
+    const selectionDraft = testPage.getByTestId("preview-feedback-draft");
+    await expect(selectionDraft).toContainText("Generated order summary");
+    await testPage.getByTestId("preview-feedback-draft-input").fill("Explain this summary");
+    await testPage.getByTestId("preview-feedback-draft-save").tap();
+    await expect(selectionDraft).toBeHidden({ timeout: 15_000 });
+    await expect(trigger).toContainText("3");
     await preview.getByRole("button", { name: "Show code" }).tap();
     await expect(viewer.locator(".cm-content")).toContainText("Generated order summary");
     await expect(preview).toBeHidden();
@@ -338,7 +347,7 @@ test.describe("Mobile HTML preview", () => {
       ),
     ).toBeGreaterThanOrEqual(16);
     const collectionItems = collectionBody.getByTestId("preview-feedback-item");
-    await expect(collectionItems).toHaveCount(2);
+    await expect(collectionItems).toHaveCount(3);
     await expect(
       collectionItems.nth(1).getByRole("img", { name: "Screenshot preview" }),
     ).toBeVisible();
@@ -356,7 +365,7 @@ test.describe("Mobile HTML preview", () => {
     await expect(firstItem).toContainText("Keep this touch action clear");
 
     await collectionItems.nth(1).getByRole("button", { name: "Delete feedback" }).tap();
-    await expect(collectionItems).toHaveCount(1);
+    await expect(collectionItems).toHaveCount(2);
     expect(await session.activeChat().getByTestId("user-message-bubble").count()).toBe(
       userMessageCount,
     );
@@ -376,7 +385,7 @@ test.describe("Mobile HTML preview", () => {
     ).toBeVisible();
     await testPage.getByRole("navigation").getByRole("button", { name: "Chat", exact: true }).tap();
     const restoredTrigger = testPage.getByTestId("preview-feedback-collection-trigger");
-    await expect(restoredTrigger).toContainText("1");
+    await expect(restoredTrigger).toContainText("2");
     await restoredTrigger.tap();
     await expect(testPage.getByTestId("preview-feedback-collection-body")).toContainText(
       "Keep this touch action clear",
