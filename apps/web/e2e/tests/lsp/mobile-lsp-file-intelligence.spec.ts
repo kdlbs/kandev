@@ -68,7 +68,7 @@ test.describe("Mobile LSP boundaries", () => {
 
       const viewer = testPage.getByTestId("mobile-file-viewer-panel");
       await expect(viewer).toBeVisible();
-      await expect(viewer.locator(".cm-editor")).toBeVisible();
+      await expect(viewer.locator(".cm-editor, .monaco-editor")).toBeVisible();
       await expect(viewer.getByTestId("lsp-status-button")).toHaveCount(0);
       await expect(testPage.getByTestId("app-status-lsp")).toHaveCount(0);
       await dwell(

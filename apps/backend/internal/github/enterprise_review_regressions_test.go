@@ -82,8 +82,12 @@ func TestEnterpriseReconnectUsesRetainedSettingsHost(t *testing.T) {
 				require.NoError(t, err)
 			}
 			connect("git.example.com")
-			all := RepoScopeModeAll
-			_, err := service.UpdateWorkspaceSettings(withExpectedGitHubHost(t.Context(), "git.example.com"), &UpdateWorkspaceSettingsRequest{WorkspaceID: "ws-1", RepoScopeMode: &all})
+			selected := RepoScopeModeSelected
+			orgs := []string{"acme"}
+			repos := []RepoFilter{{Owner: "outside", Name: "tool"}}
+			_, err := service.UpdateWorkspaceSettings(withExpectedGitHubHost(t.Context(), "git.example.com"), &UpdateWorkspaceSettingsRequest{
+				WorkspaceID: "ws-1", RepoScopeMode: &selected, RepoScopeOrgs: &orgs, RepoScopeRepos: &repos,
+			})
 			require.NoError(t, err)
 			require.NoError(t, service.DeleteWorkspaceConnection(t.Context(), "ws-1"))
 			connect(host)
@@ -91,10 +95,15 @@ func TestEnterpriseReconnectUsesRetainedSettingsHost(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, host, settings.GitHubHost)
 			if host == "git.example.com" {
-				require.Equal(t, RepoScopeModeAll, settings.RepoScopeMode)
+				require.Equal(t, RepoScopeModeSelected, settings.RepoScopeMode)
+				require.Equal(t, orgs, settings.RepoScopeOrgs)
+				require.Equal(t, repos, settings.RepoScopeRepos)
 			} else {
-				require.Equal(t, RepoScopeModeRepos, settings.RepoScopeMode)
+				require.Equal(t, RepoScopeModeSelected, settings.RepoScopeMode)
+				require.Empty(t, settings.RepoScopeOrgs)
+				require.Empty(t, settings.RepoScopeRepos)
 			}
+			all := RepoScopeModeAll
 			_, err = service.UpdateWorkspaceSettings(withExpectedGitHubHost(t.Context(), settings.GitHubHost), &UpdateWorkspaceSettingsRequest{WorkspaceID: "ws-1", RepoScopeMode: &all})
 			require.NoError(t, err)
 			_, err = service.UpdateActionPresets(withExpectedGitHubHost(t.Context(), settings.GitHubHost), &UpdateActionPresetsRequest{WorkspaceID: "ws-1"})

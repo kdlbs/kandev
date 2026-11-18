@@ -1,6 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 import type { DockviewApi } from "dockview-react";
-import { applyLayout, resolveGroupIds } from "./applier";
+import { applyLayout, getRootOrientation, resolveGroupIds } from "./applier";
+import { requireRootSplitview as getRootSplitview } from "./dockview-test-host.test-helpers";
+import { disposeDockview, mountDockview } from "./dockview-test-host.test-helpers";
 import { getPinnedTarget, clearAllPinnedTargets } from "./pinned-targets";
 import type { LayoutState } from "./types";
 import { SIDEBAR_GROUP, CENTER_GROUP, RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP } from "./constants";
@@ -160,4 +162,91 @@ describe("applyLayout — pinned target capture with no override", () => {
     expect(resizeView).toHaveBeenCalledWith(0, 350);
     expect(resizeView).toHaveBeenCalledWith(2, 450);
   });
+});
+
+/** @covers AC-UI-TASK-LAYOUT-PROFILES-002.6, AC-UI-TASK-LAYOUT-PROFILES-001.9 */
+describe("applyLayout — root axis in a real Dockview", () => {
+  const PLUGIN_PANEL = {
+    id: "plugin:kandev-plugin-prompt-history:prompt-history",
+    component: "plugin-panel",
+    title: "Prompt History",
+    tabComponent: "pluginPanelTab",
+    params: { pluginId: "kandev-plugin-prompt-history", panelKey: "prompt-history" },
+  };
+  const UNCONSTRAINED = 1_000_000;
+  let api: DockviewApi | null = null;
+
+  beforeEach(() => {
+    clearAllPinnedTargets();
+  });
+
+  afterEach(() => {
+    if (api) disposeDockview(api);
+    api = null;
+  });
+
+  /** An Agent row above a canonical Files/Changes/plugin right row, with historical pin metadata. */
+  function rootLayout(rootOrientation: LayoutState["rootOrientation"]): LayoutState {
+    return {
+      rootOrientation,
+      columns: [
+        {
+          id: "center",
+          width: 300,
+          groups: [
+            { id: CENTER_GROUP, panels: [{ id: "chat", component: "chat", title: "Agent" }] },
+          ],
+        },
+        {
+          id: "right",
+          pinned: true,
+          width: 400,
+          ...(rootOrientation === "VERTICAL" ? { maxWidth: 120 } : {}),
+          groups: [
+            {
+              id: RIGHT_TOP_GROUP,
+              panels: [
+                { id: "files", component: "files", title: "Files" },
+                { id: "changes", component: "changes", title: "Changes" },
+              ],
+              activePanel: "changes",
+            },
+            { id: RIGHT_BOTTOM_GROUP, panels: [PLUGIN_PANEL] },
+          ],
+        },
+      ],
+    };
+  }
+
+  function rootSizes(dockview: DockviewApi): number[] {
+    const sv = getRootSplitview(dockview);
+    return [0, 1].map((index) => sv.getViewSize(index));
+  }
+
+  it("keeps VERTICAL row extents and applies no horizontal pin, target, or width cap", () => {
+    api = mountDockview(1400, 700);
+
+    applyLayout(api, rootLayout("VERTICAL"), new Map([["right", 250]]), 1400, 700);
+
+    expect(getRootOrientation(api)).toBe("VERTICAL");
+    expect(rootSizes(api)).toEqual([300, 400]);
+    expect(getPinnedTarget("right")).toBeUndefined();
+    expect(api.getPanel("files")!.group.maximumWidth).toBeGreaterThan(UNCONSTRAINED);
+    expect(api.getPanel(PLUGIN_PANEL.id)!.group.maximumWidth).toBeGreaterThan(UNCONSTRAINED);
+    expect(api.getPanel("changes")!.group.activePanel?.id).toBe("changes");
+  });
+
+  it.each([["HORIZONTAL" as const], [undefined]])(
+    "still pins the right column of a %s root to its target and cap",
+    (rootOrientation) => {
+      api = mountDockview(1400, 700);
+
+      applyLayout(api, rootLayout(rootOrientation), new Map([["right", 250]]), 1400, 700);
+
+      expect(getRootOrientation(api)).toBe("HORIZONTAL");
+      expect(getPinnedTarget("right")).toBe(250);
+      expect(rootSizes(api)[1]).toBe(250);
+      expect(api.getPanel("files")!.group.maximumWidth).toBeLessThan(UNCONSTRAINED);
+    },
+  );
 });

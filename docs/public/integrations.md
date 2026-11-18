@@ -121,6 +121,14 @@ A workspace has one active automation connection at a time. Replacing it changes
 
 New workspaces created by an operator or an internal trusted flow start with **Inherit executor Git credentials** for task Git access when the settings write succeeds. When the backend host has an authenticated active `gh` account, the new workspace also snapshots that exact host/login as its named GitHub CLI automation connection; Kandev stores the selection, never the CLI token. If `gh` is unavailable or unauthenticated, creation still succeeds with executor inheritance and no automation connection. If the settings write itself fails, workspace creation remains available but the existing managed compatibility fallback applies until the workspace is configured or retried. Authenticated non-admin members receive the executor default but never the operator's host identity.
 
+### Set repository scope
+
+Open the workspace GitHub settings and find **Repository Scope**. Turn on **All repositories** to include every repository available to the workspace's GitHub connection.
+
+Turn the switch off to select owners, exact repositories, or both. An owner selection includes all repositories owned by that account. An exact selection includes only that `owner/name`. With both lists empty, Kandev uses no repositories for GitHub discovery.
+
+Save the settings to apply the selection to GitHub searches, watches, and background automations. Scope does not change permissions granted by GitHub or the selected connection.
+
 Workspaces migrated from an older Kandev release may temporarily use a compatibility connection
 named `legacy_shared`. It continues using the deployment's existing authenticated `gh` account,
 `GITHUB_TOKEN`/`GH_TOKEN`, or legacy stored PAT for both GitHub API calls and workspace-isolated

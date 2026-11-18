@@ -155,7 +155,7 @@ func githubSettingsDomain() DomainDescriptor {
 	owner := "github"
 	return integrationDomain("code_host_integrations", "github_settings", "GitHub settings", "Noncredential GitHub scope and query preferences for one workspace.", owner, workspaceIntegrationTarget(),
 		domainWritable("github_settings", "task_git_credentials_mode", "Task Git credentials", "Credential routing mode for task worktrees.", "string", owner, "workspace.manage"),
-		domainWritable("github_settings", "repo_scope_mode", "Repository scope mode", "Repository scope selection mode.", "string", owner, "workspace.manage"),
+		domainWritable("github_settings", "repo_scope_mode", "Repository scope mode", "Choose all repositories or selected owners and exact repositories; legacy orgs/repos inputs stay exclusive.", "string", owner, "workspace.manage"),
 		domainWritable("github_settings", "repo_scope_orgs", "Organizations", "Organization allowlist for repository scope.", "array", owner, "workspace.manage"),
 		domainWritable("github_settings", "repo_scope_repos", "Repositories", "Repository allowlist for repository scope.", "array", owner, "workspace.manage"),
 		domainWritable("github_settings", "saved_presets", "Saved presets", "Workspace-scoped GitHub action presets.", "object", owner, "workspace.manage"),

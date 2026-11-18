@@ -410,6 +410,42 @@ func TestPersonalSearchAndStatusResultsIntersectAutomationVisibility(t *testing.
 	}
 }
 
+// @covers AC-INTEGRATIONS-GITHUB-REPOSITORY-SCOPE-001.5
+func TestPersonalSearchScopeUnionDoesNotExpandAutomationVisibility(t *testing.T) {
+	service := personalBoundaryTestServiceWithClients(t,
+		map[string]GitHubRepo{"acme/allowed": testGitHubRepo("acme", "allowed")},
+		map[string]GitHubRepo{
+			"acme/allowed":       testGitHubRepo("acme", "allowed"),
+			"outside/tool":       testGitHubRepo("outside", "tool"),
+			"personal-only/repo": testGitHubRepo("personal-only", "repo"),
+		},
+		[]*PR{
+			{RepoOwner: "acme", RepoName: "allowed", Number: 1},
+			{RepoOwner: "outside", RepoName: "tool", Number: 2},
+			{RepoOwner: "personal-only", RepoName: "repo", Number: 3},
+		},
+		[]*Issue{
+			{RepoOwner: "acme", RepoName: "allowed", Number: 1},
+			{RepoOwner: "outside", RepoName: "tool", Number: 2},
+			{RepoOwner: "personal-only", RepoName: "repo", Number: 3},
+		}, false,
+	)
+	if err := service.store.UpsertWorkspaceSettings(context.Background(), &WorkspaceSettings{
+		WorkspaceID: "workspace-1", RepoScopeMode: RepoScopeModeSelected,
+		RepoScopeOrgs: []string{"acme"}, RepoScopeRepos: []RepoFilter{{Owner: "outside", Name: "tool"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	prs, err := service.SearchUserPRsPagedForWorkspaceUser(context.Background(), "workspace-1", "user-1", "", "", 1, 25)
+	if err != nil || len(prs.PRs) != 1 || prs.PRs[0].RepoOwner != "acme" || prs.TotalCount != 1 {
+		t.Fatalf("personal PR search escaped workspace automation visibility: %+v, %v", prs, err)
+	}
+	issues, err := service.SearchUserIssuesPagedForWorkspaceUser(context.Background(), "workspace-1", "user-1", "", "", 1, 25)
+	if err != nil || len(issues.Issues) != 1 || issues.Issues[0].RepoOwner != "acme" || issues.TotalCount != 1 {
+		t.Fatalf("personal issue search escaped workspace automation visibility: %+v, %v", issues, err)
+	}
+}
+
 func TestPersonalSearchPaginatesAfterAutomationVisibilityFiltering(t *testing.T) {
 	personalPRs := make([]*PR, 100, 101)
 	personalIssues := make([]*Issue, 100, 101)
@@ -507,4 +543,30 @@ func personalBoundaryTestServiceWithClients(
 
 func testGitHubRepo(owner, name string) GitHubRepo {
 	return GitHubRepo{FullName: owner + "/" + name, Owner: owner, Name: name}
+}
+
+// A local repository-scope rejection must satisfy BOTH sentinels: HTTP
+// boundaries need ErrRepoOutsideWorkspaceScope to answer with an actionable
+// message under the same 404 as an unresolvable repository, while the "stop
+// hammering a dead repo" callers (isRepoNotResolvableErr,
+// wsSyncTaskPR) must keep seeing ErrRepoNotResolvable or they would start
+// retrying a pure policy rejection on every poll.
+func TestRepoOutsideScopeErrContract(t *testing.T) {
+	err := newRepoOutsideScopeErr("tenequm", "pond")
+
+	if !errors.Is(err, ErrRepoOutsideWorkspaceScope) {
+		t.Fatal("scope rejection must match ErrRepoOutsideWorkspaceScope")
+	}
+	if !errors.Is(err, ErrRepoNotResolvable) {
+		t.Fatal("scope rejection must keep matching ErrRepoNotResolvable for the negative-cache contract")
+	}
+	if !isRepoNotResolvableErr(err) {
+		t.Fatal("isRepoNotResolvableErr must classify a scope rejection as deterministic")
+	}
+	if !strings.Contains(err.Error(), "outside this workspace's scope") {
+		t.Fatalf("message must name the real failure, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "tenequm/pond") {
+		t.Fatalf("message must name the repository, got: %v", err)
+	}
 }

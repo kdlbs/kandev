@@ -7,6 +7,7 @@ import { IconEye, IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { PanelBody, PanelHeaderBarSplit, PanelRoot } from "../panel-primitives";
 import { FileViewerContent } from "../file-viewer-content";
+import { FileEditorContent } from "../file-editor-content";
 import { HtmlPreviewContent } from "../html-preview-content";
 import { MarkdownPreviewContent } from "../markdown-preview-content";
 import { FileImageViewer } from "../file-image-viewer";
@@ -34,9 +35,57 @@ type MobileFileViewerPanelProps = {
   initialRenderedPreview?: boolean;
 };
 
+const ignoreFileChange = () => {};
+
 function resolveViewerKind(file: OpenFileTab): "image" | "binary" | "text" {
   if (!file.isBinary) return "text";
   return getFileCategory(file.path) === "image" ? "image" : "binary";
+}
+
+function MobileTextFileContent({
+  file,
+  worktreePath,
+  sessionId,
+  taskId,
+  repositoryId,
+}: {
+  file: OpenFileTab;
+  worktreePath?: string;
+  sessionId: string | null;
+  taskId: string | null;
+  repositoryId?: string;
+}) {
+  if (!sessionId) {
+    return (
+      <FileViewerContent
+        path={file.path}
+        repo={file.repo}
+        content={file.content}
+        sessionId={undefined}
+      />
+    );
+  }
+
+  return (
+    <FileEditorContent
+      path={file.path}
+      content={file.content}
+      originalContent={file.originalContent}
+      isDirty={false}
+      isSaving={false}
+      sessionId={sessionId}
+      taskId={taskId}
+      repositoryId={repositoryId}
+      worktreePath={worktreePath}
+      repo={file.repo}
+      enableComments
+      readOnly
+      enableLsp={false}
+      showToolbar={false}
+      onChange={ignoreFileChange}
+      onSave={ignoreFileChange}
+    />
+  );
 }
 
 function MobileViewerBody({
@@ -107,17 +156,21 @@ function MobileViewerBody({
     );
   } else {
     viewerContent = (
-      <FileViewerContent
-        path={file.path}
-        repo={file.repo}
-        content={file.content}
-        sessionId={sessionId ?? undefined}
+      <MobileTextFileContent
+        file={file}
+        worktreePath={worktreePath}
+        sessionId={sessionId}
+        taskId={taskId}
+        repositoryId={repositoryId}
       />
     );
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="mobile-file-viewer-content">
+    <div
+      className="flex h-full min-h-0 flex-col [&_.cm-scroller]:touch-pan-y [&_.cm-scroller]:overscroll-contain"
+      data-testid="mobile-file-viewer-content"
+    >
       {viewerContent}
     </div>
   );

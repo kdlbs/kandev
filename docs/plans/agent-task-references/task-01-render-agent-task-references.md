@@ -296,3 +296,18 @@ stale viewport assertions were already addressed in the preceding commit.
 
 Validation: five hook/metadata regressions, all three desktop browser tests,
 web typecheck, production build, catalog validation, and spec lint passed.
+
+### CI session-recovery alignment correction
+
+E2E shard 9 failed in the base branch's mobile progress-alignment test. A held
+message-list response did not identify an automatic retry: background history
+reads can also be held, while core recovery still displays Loading conversation.
+Merged the current base without conflicts to reproduce the combined code.
+
+The desktop and phone alignment tests now hold initial loading, inject a history
+failure, and click the visible Retry action before measuring manual core recovery.
+They assert the existing loading status for this core-owned path, release every
+held response in finally blocks, and verify completion. Production behavior is
+unchanged. The phone alignment check passed three consecutive runs with retries
+disabled. All eight desktop recovery/reference tests and typecheck passed.
+All four phone recovery/reference tests also passed after the correction.
