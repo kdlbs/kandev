@@ -158,8 +158,8 @@ test.describe("Mobile HTML preview", () => {
     });
 
     await preview.getByRole("button", { name: "Show code" }).tap();
-    await expect(viewer.locator(".cm-editor:visible")).toBeVisible();
-    await expect(viewer.locator(".cm-content")).toContainText("Mobile native preview");
+    await expect(viewer.getByRole("textbox", { name: "Editor content" })).toBeVisible();
+    await expect(viewer.getByText("Mobile native preview", { exact: true })).toBeVisible();
     await expect(preview).toBeHidden();
   });
 
@@ -291,7 +291,9 @@ test.describe("Mobile HTML preview", () => {
     await testPage.keyboard.press("Escape");
     await expect(drawer).toBeHidden();
     await preview.getByRole("button", { name: "Show code" }).tap();
-    await expect(viewer.locator(".cm-content")).toContainText("Generated order summary");
+    await expect(viewer.locator(".cm-content, .monaco-editor .view-lines")).toContainText(
+      "Generated order summary",
+    );
     await expect(preview).toBeHidden();
 
     await testPage.getByRole("navigation").getByRole("button", { name: "Chat", exact: true }).tap();
@@ -416,6 +418,6 @@ test.describe("Mobile HTML preview", () => {
       timeout: 15_000,
     });
     await preview.getByRole("button", { name: "Show code" }).tap();
-    await expect(viewer.locator(".cm-content")).toContainText("Mobile native preview");
+    await expect(viewer.getByText("Mobile native preview", { exact: true })).toBeVisible();
   });
 });

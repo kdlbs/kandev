@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { CardContent } from "@kandev/ui/card";
+import { Switch } from "@kandev/ui/switch";
 import {
   Drawer,
   DrawerContent,
@@ -12,11 +13,9 @@ import {
   DrawerTitle,
   DrawerTrigger,
 } from "@kandev/ui/drawer";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
 import { SettingsFieldLabel } from "@/components/settings/settings-typography";
-import { settingsControlClassName } from "@/components/settings/settings-control";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
@@ -51,8 +50,6 @@ function draftRevision(draft: ScopeDraft): string {
   return JSON.stringify([draft.mode, orgListKey(draft.orgs), repoListKey(draft.repos)]);
 }
 
-// Only the list matching the selected mode is sent; the other stays untouched
-// server-side.
 function scopePayload({
   workspaceId,
   mode,
@@ -67,9 +64,9 @@ function scopePayload({
   const payload: UpdateGitHubWorkspaceSettingsRequest = {
     workspace_id: workspaceId,
     repo_scope_mode: mode,
+    repo_scope_orgs: mode === "all" ? [] : orgs,
+    repo_scope_repos: mode === "all" ? [] : repos,
   };
-  if (mode === "orgs") payload.repo_scope_orgs = orgs;
-  if (mode === "repos") payload.repo_scope_repos = repos;
   return payload;
 }
 
@@ -143,54 +140,49 @@ function RepositoryScopeFields({
   const reposDirty = repoListKey(repos) !== repoListKey(baseline.repos);
   return (
     <SettingsCard isDirty={mode !== baseline.mode || orgsDirty || reposDirty}>
-      <CardContent className="grid gap-4 py-4 md:grid-cols-[220px_minmax(0,1fr)]">
-        <div className="space-y-1.5">
-          <SettingsFieldLabel htmlFor="github-scope-mode">{t("github:mode")}</SettingsFieldLabel>
-          <Select
-            value={mode}
-            onValueChange={(value) => onModeChange(value as GitHubRepoScopeMode)}
+      <CardContent className="space-y-4 py-4">
+        <div className="flex items-center gap-2" data-settings-dirty={mode !== baseline.mode}>
+          <Switch
+            id="github-scope-all-repositories"
+            checked={mode === "all"}
+            onCheckedChange={(checked) => onModeChange(checked ? "all" : "selected")}
             disabled={loading}
+            data-testid="github-scope-all-toggle"
+          />
+          <SettingsFieldLabel
+            htmlFor="github-scope-all-repositories"
+            className="cursor-pointer font-normal max-md:min-h-11 [@media(any-pointer:coarse)]:min-h-11"
           >
-            <SelectTrigger
-              id="github-scope-mode"
-              data-testid="github-scope-mode"
-              data-settings-dirty={mode !== baseline.mode}
-              className={settingsControlClassName()}
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t("github:allRepositories")}</SelectItem>
-              <SelectItem value="orgs">{t("github:organizations")}</SelectItem>
-              <SelectItem value="repos">{t("github:selectedRepositories")}</SelectItem>
-            </SelectContent>
-          </Select>
+            {t("github:allRepositories")}
+          </SettingsFieldLabel>
         </div>
-        <div className="grid gap-3">
-          <div className="space-y-1.5" data-settings-dirty={orgsDirty}>
-            <SettingsFieldLabel>{t("github:organizations")}</SettingsFieldLabel>
-            <div data-testid="github-scope-orgs">
-              <GitHubOrganizationMultiSelect
-                workspaceId={workspaceId}
-                selected={orgs}
-                onChange={onOrgsChange}
-                disabled={loading || mode !== "orgs"}
-              />
+        {mode === "selected" && (
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-1.5" data-settings-dirty={orgsDirty}>
+              <SettingsFieldLabel>{t("github:organizations")}</SettingsFieldLabel>
+              <div data-testid="github-scope-orgs">
+                <GitHubOrganizationMultiSelect
+                  workspaceId={workspaceId}
+                  selected={orgs}
+                  onChange={onOrgsChange}
+                  disabled={loading}
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5" data-settings-dirty={reposDirty}>
+              <SettingsFieldLabel>{t("github:repositories")}</SettingsFieldLabel>
+              <div data-testid="github-scope-repos">
+                <GitHubRepositoryMultiSelect
+                  workspaceId={workspaceId}
+                  selected={repos}
+                  onChange={onReposChange}
+                  repositorySource="scope-editor"
+                  disabled={loading}
+                />
+              </div>
             </div>
           </div>
-          <div className="space-y-1.5" data-settings-dirty={reposDirty}>
-            <SettingsFieldLabel>{t("github:repositories")}</SettingsFieldLabel>
-            <div data-testid="github-scope-repos">
-              <GitHubRepositoryMultiSelect
-                workspaceId={workspaceId}
-                selected={repos}
-                onChange={onReposChange}
-                repositorySource="scope-editor"
-                disabled={loading || mode !== "repos"}
-              />
-            </div>
-          </div>
-        </div>
+        )}
       </CardContent>
     </SettingsCard>
   );
@@ -201,12 +193,25 @@ function useGitHubRepoScopeDraft(workspaceId: string) {
   const { toast } = useToast();
   const [draftHost, setDraftHost] = useState("github.com");
   const captureRequest = useConnectionRequestGuard(`${workspaceId}:${draftHost}`);
-  const [mode, setMode] = useState<GitHubRepoScopeMode>("all");
-  const [orgs, setOrgs] = useState<string[]>([]);
-  const [repos, setRepos] = useState<RepoFilter[]>([]);
+  const [mode, setModeState] = useState<GitHubRepoScopeMode>("all");
+  const [orgs, setOrgsState] = useState<string[]>([]);
+  const [repos, setReposState] = useState<RepoFilter[]>([]);
+  const draftRef = useRef<ScopeDraft>({ mode: "all", orgs: [], repos: [] });
   const [baseline, setBaseline] = useState<ScopeDraft>({ mode: "all", orgs: [], repos: [] });
   const [loading, setLoading] = useState(true);
 
+  const setMode = useCallback((next: GitHubRepoScopeMode) => {
+    draftRef.current = { ...draftRef.current, mode: next };
+    setModeState(next);
+  }, []);
+  const setOrgs = useCallback((next: string[]) => {
+    draftRef.current = { ...draftRef.current, orgs: next };
+    setOrgsState(next);
+  }, []);
+  const setRepos = useCallback((next: RepoFilter[]) => {
+    draftRef.current = { ...draftRef.current, repos: next };
+    setReposState(next);
+  }, []);
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -215,16 +220,14 @@ function useGitHubRepoScopeDraft(workspaceId: string) {
         if (cancelled) return;
         const next = settingsScopeDraft(settings);
         setDraftHost(settings.github_host ?? "github.com");
+        draftRef.current = next;
         setBaseline(next);
-        setMode(next.mode);
-        setOrgs(next.orgs);
-        setRepos(next.repos);
+        setModeState(next.mode);
+        setOrgsState(next.orgs);
+        setReposState(next.repos);
       })
       .catch(() => {
-        // The module-level `t` resolves at call time, so this follows the active
-        // locale without putting the hook's `t` in the effect deps — that would
-        // refetch on every locale switch and overwrite the user's unsaved edits
-        // via the setMode/setOrgs/setRepos calls above.
+        // Resolve at call time so locale changes do not rerun this effect and overwrite drafts.
         if (!cancelled)
           toast({
             description: translate("github:failedToLoadGithubWorkspaceSettings"),
@@ -238,10 +241,9 @@ function useGitHubRepoScopeDraft(workspaceId: string) {
       cancelled = true;
     };
   }, [toast, workspaceId]);
-
   const save = useCallback(async () => {
     const isCurrent = captureRequest();
-    const submitted = { mode, orgs, repos };
+    const submittedRevision = draftRevision({ mode, orgs, repos });
     try {
       const updated = await updateGitHubWorkspaceSettings({
         ...scopePayload({ workspaceId, mode, orgs, repos }),
@@ -250,25 +252,24 @@ function useGitHubRepoScopeDraft(workspaceId: string) {
       if (!isCurrent()) return;
       const saved = settingsScopeDraft(updated);
       setBaseline(saved);
-      setMode((current) => (current === submitted.mode ? saved.mode : current));
-      setOrgs((current) =>
-        orgListKey(current) === orgListKey(submitted.orgs) ? saved.orgs : current,
-      );
-      setRepos((current) =>
-        repoListKey(current) === repoListKey(submitted.repos) ? saved.repos : current,
-      );
+      if (draftRevision(draftRef.current) === submittedRevision) {
+        setMode(saved.mode);
+        setOrgs(saved.orgs);
+        setRepos(saved.repos);
+      }
       toast({ description: t("github:githubWorkspaceSettingsSaved"), variant: "success" });
     } catch {
       if (!isCurrent()) return;
       toast({ description: t("github:failedToSaveGithubWorkspaceSettings"), variant: "error" });
       throw new Error("Failed to save GitHub workspace settings");
     }
-  }, [draftHost, mode, orgs, repos, t, toast, workspaceId]);
+  }, [draftHost, mode, orgs, repos, setMode, setOrgs, setRepos, t, toast, workspaceId]);
+
   const discard = useCallback(() => {
     setMode(baseline.mode);
     setOrgs(baseline.orgs);
     setRepos(baseline.repos);
-  }, [baseline]);
+  }, [baseline, setMode, setOrgs, setRepos]);
   const revision = draftRevision({ mode, orgs, repos });
   const dirty = revision !== draftRevision(baseline);
 
@@ -303,17 +304,19 @@ export function GitHubRepoScopeSection({ workspaceId }: { workspaceId: string })
       titleAccessory={<RepositoryScopeHelp />}
       description={t("github:limitsGithubPullRequestsAndIssues")}
     >
-      <RepositoryScopeFields
-        workspaceId={workspaceId}
-        mode={draft.mode}
-        orgs={draft.orgs}
-        repos={draft.repos}
-        baseline={draft.baseline}
-        loading={draft.loading}
-        onModeChange={draft.setMode}
-        onOrgsChange={draft.setOrgs}
-        onReposChange={draft.setRepos}
-      />
+      <div data-testid="github-repo-scope-section">
+        <RepositoryScopeFields
+          workspaceId={workspaceId}
+          mode={draft.mode}
+          orgs={draft.orgs}
+          repos={draft.repos}
+          baseline={draft.baseline}
+          loading={draft.loading}
+          onModeChange={draft.setMode}
+          onOrgsChange={draft.setOrgs}
+          onReposChange={draft.setRepos}
+        />
+      </div>
     </SettingsSection>
   );
 }
@@ -322,7 +325,7 @@ function settingsScopeDraft(
   settings: Awaited<ReturnType<typeof fetchGitHubWorkspaceSettings>>,
 ): ScopeDraft {
   return {
-    mode: settings.repo_scope_mode ?? "all",
+    mode: settings.repo_scope_mode === "all" ? "all" : "selected",
     orgs: settings.repo_scope_orgs ?? [],
     repos: settings.repo_scope_repos ?? [],
   };

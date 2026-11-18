@@ -301,22 +301,5 @@ func githubSettingsAllowRepository(
 	if settings == nil || strings.TrimSpace(settings.WorkspaceID) != workspaceID {
 		return false
 	}
-	switch strings.ToLower(strings.TrimSpace(settings.RepoScopeMode)) {
-	case github.RepoScopeModeAll:
-		return true
-	case github.RepoScopeModeOrgs:
-		for _, org := range settings.RepoScopeOrgs {
-			if strings.EqualFold(strings.TrimSpace(org), owner) {
-				return true
-			}
-		}
-	case github.RepoScopeModeRepos:
-		for _, candidate := range settings.RepoScopeRepos {
-			if strings.EqualFold(strings.TrimSpace(candidate.Owner), owner) &&
-				strings.EqualFold(strings.TrimSpace(candidate.Name), repo) {
-				return true
-			}
-		}
-	}
-	return false
+	return github.RepositoryInWorkspaceScope(settings, owner, repo)
 }

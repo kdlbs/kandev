@@ -256,7 +256,23 @@ func prMonitorPendingFromOutcome(
 		workflowBoundary, workflowOK = statusBoundary, statusOK
 	}
 	targets := make(map[string]*prMonitorPendingTarget, len(outcome.unfinished)+len(outcome.workflowUnfinished))
-	if statusOK {
+	statusPending := false
+	for _, pending := range outcome.statusPending {
+		if pending.WorkflowOnly {
+			continue
+		}
+		statusPending = true
+		// A grouped branch lookup may defer on a different resource than its
+		// siblings, so preserve its own admission boundary when retaining work.
+		boundary, ok := prMonitorPendingBoundary(pending.Deferred, outcome.err, now)
+		if !ok {
+			boundary, ok = statusBoundary, statusOK
+		}
+		if ok {
+			addPRMonitorPendingWatches(targets, pending.Watches, false, boundary)
+		}
+	}
+	if !statusPending && statusOK {
 		addPRMonitorPendingWatches(targets, outcome.unfinished, false, statusBoundary)
 	}
 	if workflowOK {

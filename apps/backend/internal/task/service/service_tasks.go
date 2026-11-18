@@ -3229,16 +3229,6 @@ func (s *Service) validateTaskDeleteWorktreeInventoryWithOptions(ctx context.Con
 	return newTaskDeleteDirtyWorktreeError(dirty)
 }
 
-func (s *Service) deleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
-	deleted, err := s.deleteTaskWithReasonAndDBDelete(ctx, id, "", models.TaskResourceCleanupTriggerQuickChatExpire, DeleteTaskOptions{}, func(ctx context.Context, id string) (bool, error) {
-		return s.tasks.DeleteExpiredQuickChatTask(ctx, id, cutoff)
-	})
-	if errors.Is(err, taskrepo.ErrTaskNotFound) {
-		return false, nil
-	}
-	return deleted, err
-}
-
 func (s *Service) deleteTaskWithReasonAndDBDelete(
 	ctx context.Context,
 	id string,

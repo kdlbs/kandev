@@ -5,6 +5,7 @@ requirements:
   - REQ-OFFICE-STALL-VISIBILITY-001
   - REQ-OFFICE-STALL-VISIBILITY-002
   - REQ-OFFICE-STALL-VISIBILITY-003
+  - REQ-OFFICE-STALL-VISIBILITY-004
 ---
 
 # Office Stall Visibility System Design
@@ -42,6 +43,7 @@ steps), and co-locating keeps one place to look for stall detection.
 | `REQ-OFFICE-STALL-VISIBILITY-001` | [Splitting detection from recovery](#splitting-detection-from-recovery) |
 | `REQ-OFFICE-STALL-VISIBILITY-002` | [Decision-waiting detector](#decision-waiting-detector) |
 | `REQ-OFFICE-STALL-VISIBILITY-003` | [Failure and recovery](#failure-and-recovery) |
+| `REQ-OFFICE-STALL-VISIBILITY-004` | [Dynamic successor completion](#dynamic-successor-completion) |
 
 ## Components and responsibilities
 
@@ -209,9 +211,49 @@ The asymmetry with the existing watchdog is deliberate. The reclaim path fails
 closed because a wrong reclaim corrupts a live session; these passes fail closed
 because a wrong alert trains operators to ignore the signal.
 
+## Dynamic successor completion
+
+A durable delivery terminal is bound to a workflow effect keyed by its turn ID.
+An Office dynamic successor launched through `launchPreparedDynamicRelaunch`
+used to start without a turn, so its terminal carried full delivery identity
+and no turn ID; `processOnTurnCompleteViaEngineWithCause` then deferred
+`on_turn_complete` with an empty effect key, and the Office session parked
+`IDLE`, which neither watchdog gate scans.
+
+- `officeDynamicRelaunchOptions` starts a turn with
+  `startTurnForSessionWithOwnershipChecked` and passes its ID in `LaunchOptions`.
+  A turn lookup or write error prevents dispatch.
+  An absent durable turn also prevents dispatch.
+  A failed launch completes only the turn it created.
+  This cleanup uses a bounded context independent from launch cancellation.
+- `workflowEffectForCompletion` binds a turn-less terminal with delivery identity
+  to the turn its handler closes: `turnAtEventFire` for `agent.ready`, and the
+  session's active turn (`completedEventClosingTurn`) for `agent.completed`.
+  Before the latter closes a turn, the handler requires a non-zero prompt
+  generation that `OwnsPromptGeneration` confirms for the same session and
+  execution. It closes only the captured turn. A stale or unverified event
+  cannot close a successor turn or write a workflow receipt.
+- The repository binds the saved terminal's empty turn ID in the same
+  transaction as its exact workflow receipt. The write requires a matching
+  stream, sequence, session, incarnation, harness generation, submission, and
+  projected cursor. A conflicting saved turn or an unprojected terminal stays
+  pending. Settlement copies the bound turn into the submission's terminal
+  identity, so retention and resume keep their existing exact-match checks.
+- An unresolved closing turn leaves the effect unbound, so the deferral stays
+  fail-closed.
+- A deferral that remains calls `surfaceDeferredOfficeCompletion`, which reports
+  a stranded Office signal through `surfaceOfficeStalledSignal` with gate
+  `deferred_completion`. Like the watchdog gates, it reports only
+  (REQ-OFFICE-STALL-VISIBILITY-003).
+
+The narrow watchdog query includes `IDLE` sessions with a pending signal.
+This observation preserves the report key during deduplication cleanup.
+The existing recovery gates continue to exclude `IDLE` sessions.
+
 ## Persistence
 
-No schema change. No migration. No new table.
+No schema change. No migration. No new table. The guarded terminal-turn binding
+uses the existing terminal effect row.
 
 The stranded-signal dedupe key is in-memory on `orchestrator.Service`, keyed by
 session ID, step ID, and the signal's `SignaledAt`, and dropped when the signal
@@ -234,8 +276,7 @@ prompt text, agent output, or decision notes.
 Structured logs, at `Warn`, on the existing watchdog logger:
 
 - `office stall watchdog: Office task holds a stranded completion signal` with
-  `task_id`, `session_id`, `step_id`, `signal_age`, and `gate` (which of the two
-  sites observed it).
+  `task_id`, `session_id`, `step_id`, `signal_age`, and `gate` (the report path).
 - `office stall watchdog: Office task is waiting on a decision that has not
   been recorded` with `task_id`, `step_id`, `task_updated_at`, `quiet_for`, and
   `threshold`.

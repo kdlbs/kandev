@@ -133,7 +133,15 @@ func loadTemplate(filename string) (*models.WorkflowTemplate, error) {
 	if err != nil {
 		return nil, err
 	}
+	template, err := LoadTemplateYAML(data)
+	if err != nil {
+		return nil, err
+	}
+	return template, nil
+}
 
+// LoadTemplateYAML parses a workflow template with the same rules as embedded templates.
+func LoadTemplateYAML(data []byte) (*models.WorkflowTemplate, error) {
 	var raw templateYAML
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)

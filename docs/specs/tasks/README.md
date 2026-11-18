@@ -85,7 +85,7 @@ ordered executor access.
 - [Prevent Agent Auto-Start On Open](requirements/prevent-agent-autostart-on-open.md)
 - [Prompt attachments](requirements/prompt-attachments.md)
 - [Saved Prompt Delivery](requirements/saved-prompt-delivery.md)
-- [Quick Chat Sessions, Persistence, and Expiration](requirements/quick-chat-expiration.md)
+- [Quick Chat Sessions and Persistence](requirements/quick-chat-expiration.md)
 - [Quick Chat Agent Titles](requirements/quick-chat-agent-titles.md)
 - [Quick Chat Repository Context](requirements/quick-chat-repository-context.md)
 - [Remote Contribution Tasks](requirements/remote-contribution-tasks.md)

@@ -54,6 +54,16 @@ GitHub, GitLab, Jira, and Linear configuration are workspace-specific. GitHub su
 
 Provider secrets saved by these forms use Kandev's encrypted secret store. The backend must still decrypt them to make API requests. Limit access to settings and the Kandev data directory, and use the narrowest provider scope that works.
 
+### Watch task profiles and launch errors
+
+Jira, Linear, Sentry, and GitLab issue and review watches use the same task-start rules:
+
+- An explicit workflow session target keeps routing authority and can select the source step's profile. Otherwise, an omitted watch profile follows current task and workflow rules: task-specific step replacement, step profile, workflow default, saved watch or task selection, task assignee, then workspace default.
+- A watch profile remains subject to step and workflow rules. A blank executor profile keeps the saved task selection and workspace executor choice.
+- When an automatic start fails and no task session is active, the task card shows **Auto-start failed**. A later session clears this marker when it reaches `STARTING` or `RUNNING`.
+- A start queued for session capacity remains queued and does not show this marker.
+- Provider polling errors stay with the watch. A task start error does not change poll status or disable the watch.
+
 ### Author prompt fields
 
 Quick actions and provider watch prompts use the same inline prompt editor. Type `{{` to open the provider's placeholder list, or type `@` after whitespace to find a [saved prompt](developer-tools.md#saved-prompts). Select an item to insert it into the draft. The menu shows the exact tokens supported by that provider and prompt type.
@@ -111,6 +121,14 @@ A workspace has one active automation connection at a time. Replacing it changes
 
 New workspaces created by an operator or an internal trusted flow start with **Inherit executor Git credentials** for task Git access when the settings write succeeds. When the backend host has an authenticated active `gh` account, the new workspace also snapshots that exact host/login as its named GitHub CLI automation connection; Kandev stores the selection, never the CLI token. If `gh` is unavailable or unauthenticated, creation still succeeds with executor inheritance and no automation connection. If the settings write itself fails, workspace creation remains available but the existing managed compatibility fallback applies until the workspace is configured or retried. Authenticated non-admin members receive the executor default but never the operator's host identity.
 
+### Set repository scope
+
+Open the workspace GitHub settings and find **Repository Scope**. Turn on **All repositories** to include every repository available to the workspace's GitHub connection.
+
+Turn the switch off to select owners, exact repositories, or both. An owner selection includes all repositories owned by that account. An exact selection includes only that `owner/name`. With both lists empty, Kandev uses no repositories for GitHub discovery.
+
+Save the settings to apply the selection to GitHub searches, watches, and background automations. Scope does not change permissions granted by GitHub or the selected connection.
+
 Workspaces migrated from an older Kandev release may temporarily use a compatibility connection
 named `legacy_shared`. It continues using the deployment's existing authenticated `gh` account,
 `GITHUB_TOKEN`/`GH_TOKEN`, or legacy stored PAT for both GitHub API calls and workspace-isolated
@@ -126,10 +144,11 @@ The **PR discovery failed** warning is separate from the quota values:
 
 - A full quota report does not prove that PR discovery works. Check the warning's reason and last failure time.
 - **Invalid query** means Kandev rejected the provider request. The warning remains until a newer discovery attempt succeeds.
-- **Rate limited** means the provider delayed discovery. Kandev waits for the reported or calculated retry time instead of repeating the same request.
+- **Rate limited** means the provider delayed discovery. Kandev waits until the reported or calculated retry time before another attempt.
+- A retry time shows when another attempt can start. When that time passes, the warning stays until discovery succeeds.
 - A warning for one workspace or repository does not mark another workspace healthy or unhealthy. Replacing the workspace connection starts a new credential-scoped health state.
 
-When discovery succeeds, the warning clears and the status revision advances. If the warning remains after a quota refresh, wait for the retry time or verify the selected connection and repository scope.
+When discovery succeeds, the warning clears and the status revision advances. A quota refresh does not clear the warning. If it remains, verify the selected connection and repository scope.
 
 When the workspace credential cannot read the private parent repository of a fork, GitHub can report that parent as missing. This response does not cause a discovery warning. Discovery still searches for pull requests in the fork.
 
@@ -694,7 +713,7 @@ When editing, a blank secret preserves the saved credential only if the URL, acc
 
 ### Jira issue watches
 
-Create a watch with JQL, test the query, then choose a workflow and starting step. A new watch starts with `project = PROJ AND status = "Open" ORDER BY created DESC`; replace `PROJ` before testing. Repository selection is optional: leaving it blank creates repo-less tasks. When a repository is selected, choose its default branch, a local branch such as `main`, or a qualified remote branch such as `origin/main`. Kandev saves the remote name with the selected branch. Before a watcher-created task worktree is made, branch freshness follows the repository's [worktree and branch lifecycle](git-operations.md#managed-worktree-and-branch-lifecycle) policy. **Always pull before creating a new worktree** controls that refresh; selecting `origin/main` does not enable a pull for this watcher. Blank agent and executor profile fields inherit the starting step's defaults. Customize the task prompt and set a poll interval, which defaults to 300 seconds and accepts 60–3,600 seconds.
+Create a watch with JQL, test the query, then choose a workflow and starting step. A new watch starts with `project = PROJ AND status = "Open" ORDER BY created DESC`; replace `PROJ` before testing. Repository selection is optional: leaving it blank creates repo-less tasks. When a repository is selected, choose its default branch, a local branch such as `main`, or a qualified remote branch such as `origin/main`. Kandev saves the remote name with the selected branch. Before a watcher-created task worktree is made, branch freshness follows the repository's [worktree and branch lifecycle](git-operations.md#managed-worktree-and-branch-lifecycle) policy. **Always pull before creating a new worktree** controls that refresh; selecting `origin/main` does not enable a pull for this watcher. Blank agent and executor profile fields follow the [watch task profiles and launch rules](#watch-task-profiles-and-launch-errors). Customize the task prompt and set a poll interval, which defaults to 300 seconds and accepts 60–3,600 seconds.
 
 The maximum in-flight value defaults to 5. Leave it blank for no cap. A cap defers remaining matches rather than importing them all at once. Each poll fetches only the first 50 JQL matches and does not paginate. Already-seen issues still occupy that provider result window, so a stable broad query can leave later matches unseen indefinitely; narrow the JQL enough that every important issue can enter the first page. Pause the watch before changing a broad query. Jira task-preset prompts can use ticket key, URL, title, and description placeholders from the preset editor.
 

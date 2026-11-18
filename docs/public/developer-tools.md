@@ -164,7 +164,7 @@ or rename the chat first, the provisional or user-selected title remains authori
 
 Closing a real chat tab permanently deletes its conversation and hidden backing task data. By default, it also removes the associated worktree. If the worktree has local changes, select **Permanently discard tracked and untracked changes** to remove it, or select **Keep workspace files** to retain the files. There is no undo for the conversation or task.
 
-Kandev also deletes abandoned chats after seven days; cleanup runs when the backend starts and then once per day. Only chats whose session is `RUNNING` or `IDLE` are protected from age-based cleanup. Old `CREATED`, `STARTING`, or `WAITING_FOR_INPUT` chats can expire, so do not use Quick Chat for durable work.
+Quick Chat conversations remain available until you explicitly delete them or their workspace. Stopping an agent preserves its tab and conversation.
 
 If **Send** stays disabled, complete these steps:
 
@@ -233,7 +233,7 @@ Open Configuration Chat from the floating chat button on Settings pages, turn on
 
 Configuration Chat uses a repository-less ephemeral task. Its configuration-mode MCP can inspect and change workflows, agent profiles, and MCP configuration, and can read, create, and update saved prompts by exact name. Every custom prompt is editable through these authorized tools; built-in prompts reject agent writes. The assistant should change a prompt only when the operator explicitly requests or agrees to the change, then read back the saved result. The selected profile's model, credentials, permissions, and external MCP settings apply. Review requested configuration mutations before approving them.
 
-Closing the floating Settings panel preserves the conversation. To delete it, open it in Quick Chat, close its tab, and confirm deletion. Configuration tasks are excluded from the seven-day Quick Chat sweeper and remain available until explicitly deleted or their workspace is deleted.
+Closing the floating Settings panel preserves the conversation. To delete it, open it in Quick Chat, close its tab, and confirm deletion. The conversation remains available until you delete it or its workspace.
 
 If the session is broken, choose **Restart session** in the Settings panel header and confirm. Kandev stops the current agent, deletes the conversation and unsent prompts, and starts a blank session with the same agent profile and executor. Configuration changes already made are kept. On phones, confirmation opens in a bottom drawer. If the connection drops during restart, use **Refresh status** in the panel or expanded Quick Chat to recover the result before starting again. If a worktree has uncommitted changes, commit them before restarting.
 
@@ -345,6 +345,9 @@ re-picks their engine and language: preferences are not carried over.
 
 ## Files and editor integrations
 
+Markdown files open in Preview by default on desktop and phones. To start new files in the source view, turn off **Open Markdown files in Preview** in **Settings > Preferences > Terminal & Editors > Editors**, then save. You can switch modes in an open file at any time. The setting applies to newly opened files and preserves the mode of files already open.
+
+
 To open a task folder in your file manager, open the **Open in editor** dropdown in the task toolbar and select **Open folder**. On a phone, use **Files → Workspace actions → Open workspace folder**. For tasks with several worktrees, choose the repository and branch to open.
 
 This opens Finder on macOS, the default file manager on Linux, or Explorer on Windows on the machine running Kandev. A browser connected to a remote Kandev instance does not open that folder on your own device. The host needs a desktop session and an available file manager.
@@ -416,7 +419,7 @@ You can add:
 - VS Code Remote SSH with a required host and optional user and URI scheme;
 - a hosted editor base URL, to which Kandev adds file or folder query parameters.
 
-Desktop editor discovery and custom commands run on the Kandev backend host. The executable must be installed there and visible in its `PATH`; in a remote browser deployment, a local-editor command may therefore launch on the server rather than your laptop. Remote SSH needs a reachable SSH host and a registered VS Code URI handler. Hosted URLs need an accessible service and receive the absolute backend-host path in their `file` or folder query parameter. Configure only trusted custom commands because invoking one executes it on the host.
+Only organization administrators can add or change custom editors when authentication is enabled. Desktop editor discovery and custom commands run on the Kandev backend host. The executable must be installed there and visible in its `PATH`; in a remote browser deployment, a local-editor command may therefore launch on the server rather than your laptop. Remote SSH needs a reachable SSH host and a registered VS Code URI handler. Hosted URLs need an accessible service and receive the absolute backend-host path in their `file` or folder query parameter. Configure only trusted custom commands because invoking one executes it on the host.
 
 ## Language servers
 
