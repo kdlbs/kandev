@@ -5978,6 +5978,10 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 	identity *messagequeue.QueueSessionIdentity,
 	completionEffect *models.AgentDeliveryEffect,
 ) queueDrainOutcome {
+	if s.builtinApplicationBlocksQueue(ctx, sessionID) {
+		return queueDrainPaused
+	}
+
 	if s.messageQueue == nil || s.isCancelInFlight(sessionID) ||
 		s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
 		return queueDrainSkipped

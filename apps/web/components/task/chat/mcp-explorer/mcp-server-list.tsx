@@ -45,7 +45,7 @@ export function McpServerList({
   return (
     <div
       data-testid="mcp-server-list"
-      className="h-full min-h-0 overflow-y-auto text-[13px] leading-5"
+      className="h-full min-h-0 overflow-y-auto overscroll-contain text-[13px] leading-5"
     >
       <BuiltinPendingPackages />
       <div className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">

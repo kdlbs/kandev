@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
+	p "github.com/kandev/kandev/internal/mcp/profile"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -166,6 +168,16 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 	msg, err := ws.NewRequest(id, action, payload)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
+	}
+	if scope, present := streams.ProviderMCPScopeFromContext(ctx); present {
+		if err := scope.Validate(); err != nil {
+			return fmt.Errorf("invalid provider MCP scope: %w", err)
+		}
+		encoded, err := json.Marshal(scope)
+		if err != nil {
+			return err
+		}
+		msg.EnsureMetadata()[p.ProviderMCPScopeMetadataKey] = string(encoded)
 	}
 	if mcporigin.IsTrustedInternalCall(ctx) {
 		mcporigin.AttachTrustedInternalCall(msg)

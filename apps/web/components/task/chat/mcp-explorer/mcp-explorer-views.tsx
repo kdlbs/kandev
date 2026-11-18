@@ -9,7 +9,10 @@ import { McpSelectionNotice } from "./mcp-selection-notice";
 import { mcpSelectionMarker } from "./mcp-selection-presentation";
 import { cn } from "@/lib/utils";
 import { BuiltinPackageSelector, type BuiltinPackageSelection } from "./builtin-package-selector";
-import { BuiltinSessionEvidenceProvider } from "./builtin-session-evidence";
+import {
+  BuiltinApplicationFeedback,
+  BuiltinSessionEvidenceProvider,
+} from "./builtin-session-evidence";
 import type { BuiltinMCPSessionView } from "@/lib/types/builtin-mcp";
 import { BuiltinPackageSave } from "./builtin-package-save";
 
@@ -71,6 +74,7 @@ export function ExplorerViews({
             {t("task:mcpCustomizeView")}
           </TabsTrigger>
         </TabsList>
+        <BuiltinApplicationFeedback />
         <TabsContent
           value="connections"
           forceMount

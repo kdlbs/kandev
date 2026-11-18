@@ -19,6 +19,12 @@ type builtinDispatchState struct {
 func (e *AgentExecution) builtinMCPAuthority(resolve BuiltinActionResolver) streams.BuiltinMCPAuthority {
 	e.builtinMCPMu.Lock()
 	defer e.builtinMCPMu.Unlock()
+	if e.providerMCPEffectsClosed() {
+		return streams.BuiltinMCPAuthority{Required: true}
+	}
+	if value, present := e.metadataValue(p.ProviderMCPBindingMetadataKey); present {
+		return e.providerMCPAuthority(value, resolve)
+	}
 	value, required := e.metadataValue(p.BuiltinBindingMetadataKey)
 	if !required {
 		return streams.BuiltinMCPAuthority{}

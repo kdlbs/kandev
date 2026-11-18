@@ -24,6 +24,11 @@ selection and delivery. Platform retains ownership of session observations.
 The completed built-in management plan records the original implementation.
 The switch controls follow-up preserves package boundaries and defaults.
 
+## Task application lifecycle
+
+[Task MCP application](task-mcp-application.md) defines safe provider replacement after human task saves.
+It owns the exception to next-start-only timing for supported retained sessions. Workspace policy and automation saves retain next-start timing.
+
 ## Automation extension
 
 [Automation MCP selection](../../office/requirements/automation-mcp-selection.md) owns the extension to the Automation surface.
@@ -109,7 +114,7 @@ Other restricted surfaces retain this document's existing boundaries. The extens
 - **AC-AGENTS-BUILTIN-MCP-003.1:** Saving policy or preferences shall not start,
   stop, reset, reconnect, or alter a running agent. Changes shall apply at the
   next normal agent process start. Idle, a new turn, and backend adoption shall
-  not count as a new process start. The UI shall state this timing.
+  not count as a new process start. The UI shall state this timing. Human task saves can use the safe replacement exception in [task application](task-mcp-application.md).
 - **AC-AGENTS-BUILTIN-MCP-003.2:** Each start shall bind one validated package
   manifest to injection, registration, dispatch authorization, and generated
   guidance. Existing executions shall retain it through title/capability changes,
@@ -122,7 +127,7 @@ Other restricted surfaces retain this document's existing boundaries. The extens
   preserve the stated default tool capabilities. Invalid or unreadable explicit
   state shall fail a new start closed. Retained legacy executions shall keep
   their existing monolithic catalog and show unavailable historical selection
-  evidence as Unknown. No automatic restart or fabricated snapshot is permitted.
+  evidence as Unknown. No upgrade-triggered restart or fabricated snapshot is permitted. Explicit human task saves follow [task application](task-mcp-application.md).
 - **AC-AGENTS-BUILTIN-MCP-003.5:** A helper or adapter that cannot enforce the
   package contract shall report an explicit unsupported state before a new
   package-mode start. A collision with a user-defined server identity shall

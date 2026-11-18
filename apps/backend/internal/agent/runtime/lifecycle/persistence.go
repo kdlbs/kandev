@@ -161,7 +161,7 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 			running.Metadata = make(map[string]interface{})
 		}
 		for k, v := range prior.Metadata {
-			if k == metadataKeyPassthroughMCPClaims || k == idleActivityMetadataKey || k == mcpprofile.BuiltinBindingMetadataKey ||
+			if mcpprofile.IsProviderMCPMetadataKey(k) || k == metadataKeyPassthroughMCPClaims || k == idleActivityMetadataKey || k == mcpprofile.BuiltinBindingMetadataKey ||
 				k == MetadataKeySSHLaunchReceipt {
 				// Current execution metadata owns claim state. Copying an absent
 				// claim or clock from a prior row would undo its removal. The SSH

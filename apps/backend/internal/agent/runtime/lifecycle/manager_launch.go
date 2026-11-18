@@ -347,6 +347,9 @@ func hasCompleteKubernetesRecordedResumeMetadata(metadata map[string]interface{}
 func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktreeBranch string) map[string]interface{} {
 	metadata := make(map[string]interface{})
 	for k, v := range req.Metadata {
+		if mcpprofile.IsProviderMCPMetadataKey(k) {
+			continue
+		}
 		metadata[k] = v
 	}
 	if req.CausingRunID != "" {
@@ -384,7 +387,7 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 			metadata[k] = v
 			continue
 		}
-		if k == mcpprofile.CoordinatorToolPolicyMetadataKey || k == mcpprofile.BuiltinBindingMetadataKey {
+		if mcpprofile.IsProviderMCPMetadataKey(k) || k == mcpprofile.CoordinatorToolPolicyMetadataKey || k == mcpprofile.BuiltinBindingMetadataKey {
 			continue
 		}
 		if _, exists := metadata[k]; !exists {
@@ -2628,6 +2631,11 @@ func (m *Manager) buildExecutionFromInstance(
 	execution.ResumeAttemptID = ResumeAttemptIDFromContext(ctx)
 	execution.RuntimeName = rt.Name()
 	execution.WorkspaceID = req.WorkspaceID
+	if instanceReusesExistingProcess(execInstance) {
+		if err := m.restoreProviderMCPMetadata(ctx, execution); err != nil {
+			return nil, err
+		}
+	}
 	execution.RunID = req.Owner.RunID
 	execution.RunSessionID = req.Owner.RunSessionID
 	execution.RunAttempt = req.Owner.Attempt

@@ -11,6 +11,7 @@ type mcpExecutionContextKey struct{}
 // MCPExecutionContext identifies the backend-owned execution behind one
 // in-session MCP stream. Agent-controlled request payloads cannot override it.
 type MCPExecutionContext struct {
+	ProviderScope             *mcpprofile.ProviderMCPScope
 	BuiltinAuthority          BuiltinMCPAuthority
 	ExecutionID               string
 	TaskID                    string
@@ -28,6 +29,10 @@ type MCPExecutionContext struct {
 
 // WithMCPExecutionContext attaches trusted execution identity to a dispatch.
 func WithMCPExecutionContext(ctx context.Context, execution MCPExecutionContext) context.Context {
+	if execution.ProviderScope != nil {
+		copy := *execution.ProviderScope
+		execution.ProviderScope = &copy
+	}
 	if execution.ManagedToolPolicy != nil {
 		policy := *execution.ManagedToolPolicy
 		policy.AgentToolNames = append([]string(nil), execution.ManagedToolPolicy.AgentToolNames...)

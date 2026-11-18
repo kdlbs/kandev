@@ -11,7 +11,7 @@ import (
 // MaterializationGitEnvironment returns one detached current-instance snapshot.
 // Only installed tooling may fall back to startup state; authorization may not.
 func (m *Manager) MaterializationGitEnvironment() ([]string, error) {
-	env := environmentMapFromSlice(m.agentEnvSnapshot())
+	env := environmentMapFromSlice(m.workspaceEnvSnapshot())
 	if _, err := gitconfigenv.EnvironmentEntries(env); err != nil {
 		return nil, errors.New("invalid materialization Git environment")
 	}

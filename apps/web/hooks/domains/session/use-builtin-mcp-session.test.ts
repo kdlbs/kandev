@@ -73,3 +73,84 @@ it("refreshes open evidence when activity polling returns a new snapshot", async
   rerender({ activity: {} });
   await waitFor(() => expect(result.current.view?.execution_id).toBe("replacement"));
 });
+
+it("polls an open pending application and stops after application or close", async () => {
+  vi.useFakeTimers();
+  try {
+    const pending = {
+      ...view(),
+      application: {
+        session_id: "session",
+        task_id: "task",
+        workspace_id: "ws",
+        stage: "pending" as const,
+        target_revision: 1,
+        request_id: "saved",
+        row_version: 1,
+      },
+    };
+    fixture.read.mockResolvedValue(pending);
+    const { result, rerender } = renderHook(
+      ({ open }) => useBuiltinMCPSession("task", "session", "ws", open),
+      { initialProps: { open: true } },
+    );
+    await act(async () => {});
+    expect(result.current.view?.application?.stage).toBe("pending");
+    fixture.read.mockResolvedValue({
+      ...pending,
+      application: { ...pending.application, stage: "applied" },
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(result.current.view?.application?.stage).toBe("applied");
+    const calls = fixture.read.mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+    expect(fixture.read).toHaveBeenCalledTimes(calls);
+    rerender({ open: false });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+    expect(fixture.read).toHaveBeenCalledTimes(calls);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("continues polling pending application after a transient read failure", async () => {
+  vi.useFakeTimers();
+  try {
+    const pending = {
+      ...view(),
+      application: {
+        session_id: "session",
+        task_id: "task",
+        workspace_id: "ws",
+        stage: "pending" as const,
+        target_revision: 1,
+        request_id: "saved",
+        row_version: 1,
+      },
+    };
+    fixture.read
+      .mockResolvedValueOnce(pending)
+      .mockRejectedValueOnce(new Error("temporary connection failure"))
+      .mockResolvedValue({ ...pending, application: { ...pending.application, stage: "applied" } });
+    const { result } = renderHook(() => useBuiltinMCPSession("task", "session", "ws", true));
+    await act(async () => {});
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(result.current.error).toBeDefined();
+    expect(result.current.view).toBeUndefined();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(result.current.view?.application?.stage).toBe("applied");
+    expect(fixture.read).toHaveBeenCalledTimes(3);
+  } finally {
+    vi.useRealTimers();
+  }
+});

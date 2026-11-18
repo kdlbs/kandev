@@ -65,6 +65,14 @@ type currentMCPHandler struct {
 }
 
 func (h *currentMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	release, providerScope, scopeErr := h.execution.beginProviderMCPEffect(msg)
+	if scopeErr != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, "provider MCP scope is not current", nil)
+	}
+	defer release()
+	if providerScope != nil {
+		ctx = streams.WithProviderMCPScope(ctx, *providerScope)
+	}
 	if h.execution != nil {
 		if _, bound := h.execution.metadataValue(mcpprofile.BuiltinBindingMetadataKey); bound &&
 			(h.taskID == "" || h.sessionID == "" || h.execution.ID != h.executionID || h.execution.TaskID != h.taskID || h.execution.SessionID != h.sessionID ||
@@ -102,7 +110,12 @@ func (h *taskScopedMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*
 	if mcporigin.MessageCarriesTrustedInternalCall(msg) {
 		ctx = mcporigin.WithTrustedInternalCall(ctx)
 	}
+	var providerScope *mcpprofile.ProviderMCPScope
+	if scope, present := streams.ProviderMCPScopeFromContext(ctx); present {
+		providerScope = &scope
+	}
 	ctx = streams.WithMCPExecutionContext(ctx, streams.MCPExecutionContext{
+		ProviderScope:             providerScope,
 		ExecutionID:               h.executionID,
 		BuiltinAuthority:          h.builtinAuthority,
 		TaskID:                    h.taskID,

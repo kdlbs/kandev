@@ -11,6 +11,7 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -45,6 +46,7 @@ type Server struct {
 	metricsCollector              *metrics.Collector
 	lspInstaller                  lspInstallerRegistry
 	builtinMCPRejectionLogLimiter builtinMCPRejectionLogLimiter
+	providerReplacementMu         sync.Mutex
 
 	// credentialSource, when set via SetCredentialSource, authenticates this
 	// instance's requests and streams against the control server's single
@@ -110,6 +112,7 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	// backward compatibility with curl/tests; mismatch is rejected.
 	s.router.Use(instanceIDGuard(cfg.InstanceID))
 	s.router.Use(s.deliveryProtocolGuard())
+	s.router.Use(s.providerProtocolGuard())
 
 	s.setupRoutes()
 	return s
@@ -137,12 +140,14 @@ func (s *Server) setupRoutes() {
 		api.GET("/system/metrics", s.handleSystemMetrics)
 
 		// Process control
-		api.POST("/agent/configure", s.handleAgentConfigure)
+		api.POST("/agent/configure", s.providerAdmissionMiddleware(), s.handleAgentConfigure)
 		api.GET("/agent/launch-wrapper", s.handleLaunchWrapper)
-		api.POST("/agent/managed-runtime/cache-repair", s.handleManagedRuntimeCacheRepair)
-		api.POST("/agent/background-work/action", s.handleBackgroundWorkAction)
-		api.POST("/start", s.handleStart)
+		api.POST("/agent/managed-runtime/cache-repair", s.providerAdmissionMiddleware(), s.handleManagedRuntimeCacheRepair)
+		api.POST("/agent/background-work/action", s.providerAdmissionMiddleware(), s.handleBackgroundWorkAction)
+		api.POST("/start", s.providerAdmissionMiddleware(), s.handleStart)
 		api.POST("/stop", s.handleStop)
+		api.GET("/agent/provider-replacement", s.handleProviderReplacement)
+		api.POST("/agent/provider-replacement", s.handleProviderReplacement)
 
 		// Agent stream: bidirectional WebSocket for agent events, MCP, and agent operations
 		// (initialize, session/new, session/load, prompt, cancel, stderr, permissions/respond)
@@ -152,7 +157,7 @@ func (s *Server) setupRoutes() {
 		api.GET("/agent/delivery/successors", s.handleDeliverySuccessorStreams)
 		api.POST("/agent/delivery/stream/abandon", s.handleDeliverySuccessorAbandon)
 		api.POST("/agent/delivery/stream/abandon-bootstrap", s.handleFailedBootstrapDeliveryAbandon)
-		api.POST("/agent/submissions", s.handleDeliverySubmission)
+		api.POST("/agent/submissions", s.providerAdmissionMiddleware(), s.handleDeliverySubmission)
 		api.GET("/agent/submissions", s.handleDeliverySubmissions)
 		api.GET("/agent/submissions/:id", s.handleDeliverySubmissionByID)
 		api.POST("/agent/submissions/:id/cancel", s.handleDeliverySubmissionCancel)
@@ -294,10 +299,10 @@ func (s *Server) setupRoutes() {
 			nativeRoutes = s.router.Group(s.cfg.NativeMCPRoutePrefix)
 		}
 		s.mcpServer.RegisterRoutes(nativeRoutes)
-		api.PUT("/mcp/mode", s.handleSetMcpMode)
-		api.PUT("/mcp/builtin-binding", s.handlePrepareBuiltinMCP)
-		api.GET("/mcp/builtin-binding", func(c *gin.Context) { c.JSON(http.StatusOK, s.mcpServer.Profile()) })
-		api.PUT("/mcp/providers", s.handleSetMcpProviders)
+		api.PUT("/mcp/mode", s.providerAdmissionMiddleware(), s.handleSetMcpMode)
+		api.PUT("/mcp/builtin-binding", s.providerAdmissionMiddleware(), s.handlePrepareBuiltinMCP)
+		api.GET("/mcp/builtin-binding", s.handleGetBuiltinContext)
+		api.PUT("/mcp/providers", s.providerAdmissionMiddleware(), s.handleSetMcpProviders)
 		api.PUT("/mcp/plugin-tools", s.handleSetPluginTools)
 	}
 
@@ -414,12 +419,19 @@ func (s *Server) handleSetMcpMode(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', 'office', 'automation', or 'coordinator'"})
 		return
 	}
-	current := s.mcpServer.Profile()
+	current, err := s.currentBuiltinContext()
+	if err != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "bound built-in MCP context is unavailable"})
+		return
+	}
 	if current.BuiltinPackages != nil && mcpprofile.Legacy(req.Mode, false, nil).Surface != current.Surface {
 		c.JSON(http.StatusForbidden, gin.H{"error": "built-in MCP surface is bound until the next process start"})
 		return
 	}
-	s.mcpServer.SetMode(req.Mode)
+	if err := s.setBuiltinContextMode(req.Mode); err != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "built-in MCP context could not change"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"mode": req.Mode})
 }
 
@@ -434,7 +446,10 @@ func (s *Server) handleSetMcpProviders(c *gin.Context) {
 		return
 	}
 	providers := mcpproviders.Normalize(req.Providers)
-	s.mcpServer.SetProviders(providers)
+	if err := s.setBuiltinContextProviders(providers); err != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "built-in MCP context could not change"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"mcp_providers": providers})
 }
 

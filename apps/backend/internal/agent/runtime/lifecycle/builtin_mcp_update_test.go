@@ -82,3 +82,36 @@ func TestBuiltinUpdatePersistenceFencesRemoteChange(t *testing.T) {
 		require.Equal(t, failAt == 0, execution.builtinMCPAuthority(builtinTestActions).Allows(ws.ActionMCPSetTaskTitle))
 	}
 }
+
+func TestProviderReplacementContextUpdateKeepsImmutableBindings(t *testing.T) {
+	helper := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer helper.Close()
+	mgr, execution := workspaceSourceTestManager(t, helper.URL, nil)
+	execution.TaskID = "task-a"
+	execution.WorkspaceID = "workspace"
+	execution.DeliveryHarnessGeneration = 1
+	initial, err := p.MarshalBuiltinBinding(builtinDispatchProfile(p.PackageCore, p.PackageDiagnostics))
+	require.NoError(t, err)
+	execution.setMetadataValue(p.BuiltinBindingMetadataKey, initial)
+	profile := builtinDispatchProfile(p.PackageCore, p.PackageConfiguration)
+	sealed, err := p.MarshalBuiltinBinding(profile)
+	require.NoError(t, err)
+	digest, err := p.BuiltinBindingDigest(profile)
+	require.NoError(t, err)
+	binding := p.ProviderMCPBinding{Scope: p.ProviderMCPScope{BindingID: "current", ExecutionID: execution.ID, HelperID: "helper", ProcessGeneration: 2, HarnessGeneration: 1, ProfileDigest: digest}, Profile: sealed}
+	execution.setMetadataValue(p.ProviderMCPBindingMetadataKey, binding)
+	require.NoError(t, mgr.SetMcpMode(context.Background(), execution.ID, mcpmode.TaskTitlePending))
+	require.True(t, execution.builtinMCPAuthority(builtinTestActions).Allows(ws.ActionMCPSetTaskTitle), "runtime title updates must affect the current provider")
+	original, _ := execution.metadataValue(p.BuiltinBindingMetadataKey)
+	require.Equal(t, initial, original)
+	accepted, _ := execution.metadataValue(p.ProviderMCPBindingMetadataKey)
+	require.Equal(t, binding, accepted, "context changes cannot rewrite an accepted scope")
+	runtimeProfile, present := execution.metadataValue("kandev.provider_mcp_runtime_profile")
+	require.True(t, present)
+	live, err := p.ParseBuiltinBindingMetadata(runtimeProfile)
+	require.NoError(t, err)
+	frozen, err := p.ParseBuiltinBindingMetadata(sealed)
+	require.NoError(t, err)
+	require.Equal(t, frozen.BuiltinPackages, live.BuiltinPackages)
+	require.True(t, live.HasCapability(p.CapabilityTaskTitle))
+}

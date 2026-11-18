@@ -140,7 +140,7 @@ export async function checkBuiltinTask(page: Page, api: ApiClient, seed: SeedDat
   await expect
     .poll(async () => (await builtinView(api, "tasks", task.id)).preferences?.packages.walkthroughs)
     .toBe("off");
-  await expect(explorer).toContainText("Running or resumed agents keep their current tools");
+  await expect(explorer).toContainText("Saved task changes apply automatically");
   const { sessions } = await api.listTaskSessions(task.id);
   const current = sessions.find((entry) => entry.is_primary)!;
   const evidenceResponse = await api.rawRequest(

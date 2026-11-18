@@ -577,6 +577,7 @@ type authTransport struct {
 func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	r := req.Clone(req.Context())
 	r.Header.Set("Authorization", "Bearer "+t.token)
+	r.Header.Set(types.ProviderMCPReplacementHeader, "1")
 	base := t.base
 	if base == nil {
 		base = http.DefaultTransport
@@ -606,6 +607,7 @@ func (t *instanceIDTransport) RoundTrip(req *http.Request) (*http.Response, erro
 func (c *Client) wsAuthHeaders() http.Header {
 	h := http.Header{}
 	h.Set("X-Kandev-Delivery-Version", "2")
+	h.Set(types.ProviderMCPReplacementHeader, "1")
 	if c.authToken != "" {
 		h.Set("Authorization", "Bearer "+c.authToken)
 	}

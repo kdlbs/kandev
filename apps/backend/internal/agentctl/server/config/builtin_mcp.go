@@ -21,7 +21,13 @@ func injectInstanceBuiltinMCP(cfg *InstanceConfig) ([]McpServerConfig, error) {
 			return nil, fmt.Errorf("reserved built-in MCP name %q must be renamed", server.Name)
 		}
 	}
-	servers, err := BuiltinMCPServersForInstance(manifest, cfg.MCPHost, cfg.Port, cfg.InstanceID, cfg.ScopedMCPRoutes)
+	var servers []McpServerConfig
+	var err error
+	if cfg.ProviderMCP != nil {
+		servers, err = ProviderBuiltinMCPServersForInstance(*cfg.McpProfile, *cfg.ProviderMCP, cfg.MCPHost, cfg.Port, cfg.InstanceID, cfg.ScopedMCPRoutes)
+	} else {
+		servers, err = BuiltinMCPServersForInstance(manifest, cfg.MCPHost, cfg.Port, cfg.InstanceID, cfg.ScopedMCPRoutes)
+	}
 	if err != nil {
 		return nil, err
 	}

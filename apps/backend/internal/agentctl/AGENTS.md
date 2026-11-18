@@ -292,3 +292,8 @@ mode read is an adoption error. Scoped Core and package routes use the helper's
 instance ID under `/i/<id>`; package routes keep their existing package suffixes.
 The helper ID scopes accidental routing only and does not replace authenticated
 task-owner checks.
+
+Provider-only task MCP refresh retains the helper, workspace services, and
+native conversation. Generation routes stay under the helper's accepted
+instance prefix and use a separate provider credential. Never reuse a
+retired generation or treat its old catalog as current.

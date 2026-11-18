@@ -58,6 +58,9 @@ func (s *Server) BindInitialProfile(profile p.Context, port int) error {
 }
 
 func (s *Server) serveCurrentStreamableHTTP(c *gin.Context) {
+	if !s.allowGenerationTransport(c) {
+		return
+	}
 	s.mu.RLock()
 	transport := s.httpServer
 	s.mu.RUnlock()

@@ -63,6 +63,15 @@ func (s *Service) ReadBuiltinSessionMCP(ctx context.Context, sessionID string) (
 	}
 	profile, desiredErr := s.executor.PrepareTaskSessionMCPProfile(ctx, task.ID, session, false)
 	view := &mcpconfig.BuiltinSessionView{WorkspaceID: task.WorkspaceID, TaskID: task.ID, SessionID: sessionID, BindingState: builtinStateUnknown, WalkthroughAvailability: builtinStateUnknown}
+	if reader, ok := s.repo.(interface {
+		GetBuiltinMCPApplication(context.Context, string) (*models.BuiltinMCPApplication, error)
+	}); ok {
+		view.Application, err = reader.GetBuiltinMCPApplication(ctx, sessionID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	view.CanRetryApplication = s.canRetryBuiltinApplication(ctx, view, session)
 	if desiredErr == nil {
 		view.Desired = profile.BuiltinPackages
 	}
@@ -83,12 +92,22 @@ func (s *Service) ReadBuiltinSessionMCP(ctx context.Context, sessionID string) (
 	if running != nil {
 		view.ExecutionID = running.AgentExecutionID
 		applyBuiltinSessionEvidence(view, running)
+		if err := s.loadBuiltinProviderView(ctx, view, running); err != nil {
+			return nil, err
+		}
 	}
 	live, probeErr := s.probeAgentRunning(ctx, sessionID)
 	if probeErr != nil {
 		view.WalkthroughAvailability = builtinStateUnknown
 	} else if !live {
 		view.WalkthroughAvailability = builtinSelectionAvailability(view.Desired)
+	}
+	if running != nil && builtinProviderEffectsClosed(running) {
+		unavailable := false
+		view.ProviderAvailable = &unavailable
+		view.WalkthroughAvailability = builtinUnavailable
+	} else if (view.ProviderBinding != nil || view.Application != nil) && probeErr == nil {
+		view.ProviderAvailable = &live
 	}
 	return view, nil
 }

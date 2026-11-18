@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"io"
+	"maps"
 	"net/http"
 	"reflect"
 	"strings"
@@ -19,7 +20,18 @@ import (
 
 func (s *Server) builtinSessionMCPServers(requested []types.McpServer) ([]types.McpServer, error) {
 	manifest := s.cfg.McpProfile.BuiltinPackages
-	if s.mcpServer == nil || !reflect.DeepEqual(s.mcpServer.Profile().BuiltinPackages, manifest) {
+	if s.mcpServer == nil {
+		return nil, errors.New("bound built-in MCP package host is unavailable")
+	}
+	bound := s.mcpServer.Profile()
+	if s.cfg.ProviderMCP != nil {
+		var err error
+		bound, err = s.mcpServer.BuiltinGenerationProfile(s.cfg.ProviderMCP.Scope.BindingID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if !reflect.DeepEqual(bound.BuiltinPackages, manifest) {
 		return nil, errors.New("bound built-in MCP package host is unavailable")
 	}
 	for _, server := range requested {
@@ -27,13 +39,19 @@ func (s *Server) builtinSessionMCPServers(requested []types.McpServer) ([]types.
 			return nil, fmt.Errorf("reserved built-in MCP name %q must be renamed", server.Name)
 		}
 	}
-	injected, err := config.BuiltinMCPServersForInstance(manifest, s.cfg.MCPHost, s.cfg.Port, s.cfg.InstanceID, s.cfg.ScopedMCPRoutes)
+	var injected []config.McpServerConfig
+	var err error
+	if s.cfg.ProviderMCP != nil {
+		injected, err = config.ProviderBuiltinMCPServersForInstance(bound, *s.cfg.ProviderMCP, s.cfg.MCPHost, s.cfg.Port, s.cfg.InstanceID, s.cfg.ScopedMCPRoutes)
+	} else {
+		injected, err = config.BuiltinMCPServersForInstance(manifest, s.cfg.MCPHost, s.cfg.Port, s.cfg.InstanceID, s.cfg.ScopedMCPRoutes)
+	}
 	if err != nil {
 		return nil, err
 	}
 	servers := make([]types.McpServer, 0, len(injected)+len(requested))
 	for _, server := range injected {
-		servers = append(servers, types.McpServer{Name: server.Name, Type: server.Type, URL: server.URL, BuiltinPackage: p.BuiltinPackageForRuntimeName(server.Name)})
+		servers = append(servers, types.McpServer{Name: server.Name, Type: server.Type, URL: server.URL, Headers: maps.Clone(server.Headers), BuiltinPackage: p.BuiltinPackageForRuntimeName(server.Name)})
 	}
 	return append(servers, requested...), nil
 }

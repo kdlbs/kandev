@@ -43,9 +43,10 @@ func TestNewClient_BuildsBaseURLAndTimeouts(t *testing.T) {
 }
 
 func TestNewClient_OptionsInstallAuthAndInstanceHeaders(t *testing.T) {
-	var gotAuth, gotInstance string
+	var gotAuth, gotInstance, gotProviderProtocol string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
+		gotProviderProtocol = r.Header.Get(types.ProviderMCPReplacementHeader)
 		gotInstance = r.Header.Get("X-Instance-ID")
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -67,6 +68,9 @@ func TestNewClient_OptionsInstallAuthAndInstanceHeaders(t *testing.T) {
 
 	if err := c.Health(context.Background()); err != nil {
 		t.Fatalf("Health: %v", err)
+	}
+	if gotProviderProtocol != "1" {
+		t.Errorf("provider replacement protocol = %q, want 1", gotProviderProtocol)
 	}
 	if gotAuth != "Bearer secret-token" {
 		t.Errorf("Authorization = %q, want Bearer secret-token", gotAuth)
@@ -122,6 +126,9 @@ func TestWsAuthHeaders(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := &Client{authToken: tc.token, executionID: tc.executionID}
 			headers := c.wsAuthHeaders()
+			if got := headers.Get(types.ProviderMCPReplacementHeader); got != "1" {
+				t.Errorf("provider replacement protocol = %q, want 1", got)
+			}
 			if headers == nil {
 				t.Fatal("headers = nil, want a populated header set")
 			}

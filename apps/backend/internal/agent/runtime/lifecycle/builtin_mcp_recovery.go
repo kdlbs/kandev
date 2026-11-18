@@ -22,6 +22,11 @@ func (m *Manager) restoreBuiltinExecution(ctx context.Context, execution *AgentE
 		return nil
 	}
 	err := m.restoreBuiltinOwner(ctx, execution)
+	if err == nil && execution.providerMCPEffectsClosed() {
+		// Retain the authenticated workspace for operation reconciliation. All
+		// provider prompt and MCP admission stays closed until durable acceptance.
+		return nil
+	}
 	if err == nil {
 		err = m.verifyBuiltinExecution(ctx, execution)
 	}

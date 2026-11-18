@@ -38,6 +38,9 @@ func (s *Service) PrepareBuiltinIntent(ctx context.Context, taskID, sessionID, v
 	if session == nil || session.TaskID != taskID {
 		return ctx, ErrTaskSessionPairMismatch
 	}
+	if blocked, err := s.BuiltinMCPDispatchBlocked(ctx, sessionID); err != nil || blocked {
+		return ctx, errors.Join(builtinintent.ErrUnavailable, err)
+	}
 	binding := builtinintent.Binding{Intent: intent, TaskID: taskID, SessionID: sessionID}
 	if session.State != models.TaskSessionStateCreated {
 		binding.ExecutionID, err = s.builtinIntentExecution(ctx, taskID, session)
@@ -76,6 +79,13 @@ func (s *Service) builtinIntentExecution(ctx context.Context, taskID string, ses
 }
 
 func (s *Service) retainedBuiltinIntentExecution(ctx context.Context, taskID string, session *models.TaskSession, running *models.ExecutorRunning) (string, error) {
+	if _, scoped := running.Metadata[p.ProviderMCPBindingMetadataKey]; scoped {
+		id, err := s.retainedProviderBuiltinIntent(ctx, taskID, session.ID, running)
+		if err != nil {
+			return "", errors.Join(builtinintent.ErrUnavailable, err)
+		}
+		return id, nil
+	}
 	history, ok := runtime.LoadMCPAttachmentHistory(session.Metadata[models.SessionMetaKeyMCPAttachmentState])
 	if !ok {
 		return "", builtinintent.ErrUnavailable

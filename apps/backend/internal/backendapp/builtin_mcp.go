@@ -29,6 +29,12 @@ func configureBuiltinMCPServices(params routeParams) {
 		params.orchestratorSvc.SetBuiltinPolicyReader(repo)
 	}
 	service := mcpconfig.NewBuiltinPolicyService(repo, params.taskSvc.AuthorizeWorkspaceScope, params.orchestratorSvc.BuiltinTaskScope)
+	var accounts builtinApplicationAccounts
+	if params.services != nil && params.services.Auth != nil {
+		accounts = params.services.Auth
+	}
+	params.orchestratorSvc.SetBuiltinApplicationAuthorizer(builtinApplicationAuthorizer(accounts, params.taskSvc.AuthorizeWorkspaceScope))
+	service.SetTaskSavedCallback(params.orchestratorSvc.WakeBuiltinMCPApplications)
 	params.taskSvc.SetBuiltinCreationWriter(service)
 	agentsettingshandlers.RegisterBuiltinMCPRoutes(params.router, service, httpmw.InterimSettingsInterlock(params.interimSettingsInterlockToken), params.orchestratorSvc)
 }

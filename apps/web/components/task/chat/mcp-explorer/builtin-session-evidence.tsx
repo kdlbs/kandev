@@ -1,10 +1,13 @@
 import {
+  builtinApplicationStatus,
   builtinPackageState,
   builtinPendingPackages,
   builtinSelectionKey,
   isReservedBuiltinName,
 } from "./builtin-mcp-view-model";
-import { createContext, useContext } from "react";
+import { createContext, useContext, useRef, useState } from "react";
+import { IconAlertCircle, IconCheck, IconLoader2, IconClock } from "@tabler/icons-react";
+import { retryBuiltinMCPApplication } from "@/lib/api/domains/builtin-mcp-api";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
@@ -33,15 +36,21 @@ export function BuiltinPendingPackages() {
   return (
     <section className="mb-4 space-y-2" data-testid="builtin-mcp-pending-changes">
       <h3 className="px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-        {t("settings:builtinMcp.desired")}
-      </h3>
-      <p className="px-2 text-xs text-muted-foreground">
         {t(
-          changes.some(({ action }) => action === "selected")
-            ? "settings:builtinMcp.currentUnknown"
-            : "settings:builtinMcp.pending",
+          context?.view?.application
+            ? "settings:builtinMcp.savedSelection"
+            : "settings:builtinMcp.desired",
         )}
-      </p>
+      </h3>
+      {!context.view?.application && (
+        <p className="px-2 text-xs text-muted-foreground">
+          {t(
+            changes.some(({ action }) => action === "selected")
+              ? "settings:builtinMcp.currentUnknown"
+              : "settings:builtinMcp.pending",
+          )}
+        </p>
+      )}
       {changes.map(({ id, action }) => (
         <Button
           key={id}
@@ -103,12 +112,26 @@ function AcceptedPackageEvidence({
       </p>
       <p className="text-xs text-muted-foreground">{t("settings:builtinMcp.owner")}</p>
       <dl className="grid grid-cols-2 gap-2 text-xs">
-        <dt>{t("settings:builtinMcp.desired")}</dt>
+        <dt>
+          {t(
+            context?.view?.application
+              ? "settings:builtinMcp.savedSelection"
+              : "settings:builtinMcp.desired",
+          )}
+        </dt>
         <dd>{t(builtinSelectionKey(desired))}</dd>
         <dt>{t("settings:builtinMcp.bound")}</dt>
-        <dd>{t(builtinSelectionKey(bound))}</dd>
+        <dd>
+          {t(
+            context?.view?.provider_available === false
+              ? "settings:builtinMcp.applicationToolsUnavailable"
+              : builtinSelectionKey(bound),
+          )}
+        </dd>
       </dl>
-      {pending && <p className="text-xs">{t("settings:builtinMcp.pending")}</p>}
+      {pending && !context?.view?.application && (
+        <p className="text-xs">{t("settings:builtinMcp.pending")}</p>
+      )}
       <p className="text-xs text-muted-foreground">{t("settings:builtinMcp.evidenceOnly")}</p>
       {context && (
         <div className="flex flex-wrap gap-2">
@@ -130,4 +153,93 @@ function AcceptedPackageEvidence({
       )}
     </div>
   );
+}
+
+export function BuiltinApplicationFeedback() {
+  const { t } = useTranslation();
+  const context = useContext(Context);
+  const view = context?.view;
+  const application = view?.application;
+  const status = builtinApplicationStatus(view);
+  const action = useApplicationRetry(context);
+  if (!context || !view || !application || status.state === "unknown") return null;
+  const { pending, failed, retry } = action;
+  const spinning = pending || status.state === "applying";
+  const Icon = applicationIcon(status.state, spinning);
+  const messageKey = applicationMessage(status.messageKey, pending, failed);
+  return (
+    <section
+      className="shrink-0 space-y-3 border-b border-border/70 pb-3"
+      data-testid="builtin-mcp-application"
+      data-state={status.state}
+    >
+      <div className="flex items-start gap-2" role="status" aria-live="polite" aria-atomic="true">
+        <Icon
+          aria-hidden
+          className={`mt-0.5 size-4 shrink-0 ${spinning ? "motion-safe:animate-spin" : ""}`}
+        />
+        <p className="min-w-0 text-xs leading-5">{t(messageKey)}</p>
+      </div>
+      {status.retry && (
+        <Button
+          type="button"
+          variant="outline"
+          disabled={pending}
+          onClick={() => void retry()}
+          className={controlSizingClassName("standard", "w-full md:w-auto")}
+          data-testid="builtin-mcp-application-retry"
+        >
+          {t("settings:builtinMcp.applicationRetry")}
+        </Button>
+      )}
+    </section>
+  );
+}
+
+function applicationIcon(state: string, spinning: boolean) {
+  if (spinning) return IconLoader2;
+  if (state === "failed") return IconAlertCircle;
+  if (state === "applied") return IconCheck;
+  return IconClock;
+}
+function applicationMessage(key: string, pending: boolean, failed: boolean) {
+  if (failed) return "settings:builtinMcp.applicationRetryFailed";
+  if (pending) return "settings:builtinMcp.applicationRetrying";
+  return key;
+}
+function useApplicationRetry(context: EvidenceContext | null) {
+  const view = context?.view;
+  const application = view?.application;
+  const owner = JSON.stringify([
+    view?.workspace_id,
+    view?.task_id,
+    view?.session_id,
+    view?.execution_id,
+    application?.request_id,
+  ]);
+  const currentOwner = useRef(owner);
+  currentOwner.current = owner;
+  const [action, setAction] = useState({ owner: "", pending: false, error: false });
+  const pending = action.owner === owner && action.pending;
+  const failed = action.owner === owner && action.error;
+  const retry = async () => {
+    if (!context || !view || !application) return;
+    setAction({ owner, pending: true, error: false });
+    try {
+      await retryBuiltinMCPApplication(
+        view.session_id,
+        application.request_id,
+        application.row_version,
+      );
+      if (currentOwner.current === owner) context.refresh();
+    } catch {
+      if (currentOwner.current === owner) {
+        setAction({ owner, pending: false, error: true });
+        context.refresh();
+      }
+      return;
+    }
+    if (currentOwner.current === owner) setAction({ owner, pending: false, error: false });
+  };
+  return { pending, failed, retry };
 }

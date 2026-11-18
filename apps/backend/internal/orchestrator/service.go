@@ -24,6 +24,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -1485,7 +1486,10 @@ type Service struct {
 	// the old token while a workflow reset is clearing it.
 	// Entries are not deleted: deleting a lock can let a new caller create a
 	// second mutex while an existing waiter still owns the old one.
-	sessionLifecycleLocks sync.Map // map[sessionID]*sync.Mutex
+	builtinApplicationAuthorize mcpconfig.BuiltinPolicyAuthorizer
+	builtinApplicationWake      chan struct{}
+	builtinApplicationWorkers   sync.WaitGroup
+	sessionLifecycleLocks       sync.Map // map[sessionID]*sync.Mutex
 	// turnCompletionLocks serializes processOnTurnCompleteViaEngineWithCause
 	// per session. Several independent event sources (normal agent turn
 	// completion, agent-exit, step_complete_kandev's out-of-band signal,
@@ -3558,6 +3562,7 @@ func (s *Service) startWatcherAndScheduler(ctx context.Context) error {
 		// docs/specs/startup-listener-before-recovery/spec.md. Service.Stop
 		// joins this goroutine (bounded) via stopLifecycleSweepAsync.
 		s.startLifecycleSweepAsync(ctx)
+		s.startBuiltinMCPApplications(s.recoveryLifecycleContext())
 		return nil
 	})
 }
@@ -3670,6 +3675,7 @@ func (s *Service) Stop() error {
 		recoveryLifecycleCancel()
 	}
 
+	s.builtinApplicationWorkers.Wait()
 	s.logger.Info("stopping orchestrator service")
 	// Stop owns every in-flight resume attempt. Its detached request context
 	// must not let startup callbacks outlive the service generation.
