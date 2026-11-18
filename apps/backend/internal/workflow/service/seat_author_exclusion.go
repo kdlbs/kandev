@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/repository"
 )
 
 // ErrSeatStepNotInWorkspace rejects a change for a step whose workflow belongs
@@ -24,11 +25,57 @@ type SeatAuthorExclusionChange struct {
 	Enabled bool
 }
 
+// seatExclusionWriteAttempts bounds retries when another writer changes a step
+// between the read and the guarded write.
+const seatExclusionWriteAttempts = 3
+
 // SetSeatAuthorExclusion applies changes to steps of workspaceID's workflows
 // and returns the updated steps. Every change is authorized and validated
-// before the first write, so a rejected batch changes nothing. Callers publish
-// the returned steps as workflow step updates.
+// before anything is written, and the steps are written in one transaction
+// that only succeeds if none of them changed after they were read, so a
+// rejected or failed batch changes nothing. When another writer got there
+// first, the batch is re-read and re-applied. Callers publish the returned
+// steps as workflow step updates.
 func (s *Service) SetSeatAuthorExclusion(
+	ctx context.Context, workspaceID string, changes []SeatAuthorExclusionChange,
+) ([]*models.WorkflowStep, error) {
+	var err error
+	for attempt := 0; attempt < seatExclusionWriteAttempts; attempt++ {
+		var steps []*models.WorkflowStep
+		steps, err = s.applySeatAuthorExclusion(ctx, workspaceID, changes)
+		if !errors.Is(err, models.ErrWorkflowStepChanged) {
+			return steps, err
+		}
+	}
+	return nil, err
+}
+
+func (s *Service) applySeatAuthorExclusion(
+	ctx context.Context, workspaceID string, changes []SeatAuthorExclusionChange,
+) ([]*models.WorkflowStep, error) {
+	pending, err := s.prepareSeatAuthorExclusion(ctx, workspaceID, changes)
+	if err != nil {
+		return nil, err
+	}
+	updates := make([]repository.StepEventsUpdate, 0, len(pending))
+	for _, step := range pending {
+		updates = append(updates, repository.StepEventsUpdate{
+			StepID: step.ID, WorkflowID: step.WorkflowID, Events: step.Events, ExpectedUpdatedAt: step.UpdatedAt,
+		})
+	}
+	saved, err := s.repo.UpdateStepEventsIfUnchanged(ctx, updates)
+	if err != nil {
+		return nil, err
+	}
+	for i, version := range saved {
+		pending[i].UpdatedAt = version.UpdatedAt
+	}
+	return pending, nil
+}
+
+// prepareSeatAuthorExclusion loads each changed step once, applies its
+// changes in memory, and runs every check a step write needs.
+func (s *Service) prepareSeatAuthorExclusion(
 	ctx context.Context, workspaceID string, changes []SeatAuthorExclusionChange,
 ) ([]*models.WorkflowStep, error) {
 	pending := make([]*models.WorkflowStep, 0, len(changes))
@@ -49,16 +96,16 @@ func (s *Service) SetSeatAuthorExclusion(
 		byID[step.ID] = step
 	}
 	for _, step := range pending {
-		if _, err := s.UpdateStepWithStartStepIntent(ctx, step, nil); err != nil {
-			return nil, fmt.Errorf("update workflow step %s: %w", step.ID, err)
+		if err := models.ValidateWorkflowStep(step); err != nil {
+			return nil, err
 		}
 	}
 	return pending, nil
 }
 
 // seatStepForChange loads stepID once per batch after checking that the caller
-// may see it, that its workflow is in workspaceID, and that the workflow is
-// mutable.
+// may see it, that its workflow is in workspaceID, and that the workflow and
+// its executor allow the change.
 func (s *Service) seatStepForChange(
 	ctx context.Context, workspaceID, stepID string, loaded map[string]*models.WorkflowStep,
 ) (*models.WorkflowStep, error) {
@@ -79,7 +126,7 @@ func (s *Service) seatStepForChange(
 	if err != nil || wf == nil || wf.WorkspaceID != workspaceID {
 		return nil, fmt.Errorf("%w: step %s", ErrSeatStepNotInWorkspace, stepID)
 	}
-	if err := s.EnsureWorkflowMutable(ctx, step.WorkflowID); err != nil {
+	if err := s.authorizeExecutorMutation(ctx, step.WorkflowID); err != nil {
 		return nil, err
 	}
 	return step, nil

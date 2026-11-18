@@ -51,7 +51,7 @@ func (l RunEventLevel) String() string { return string(l) }
 // deliberately not workflow_step_id: that key opts a run into step-change
 // staleness cancellation, which runs without it are exempt from. Office's
 // exclude_author_provider reads it to recognize work-stage runs whatever path
-// queued them (REQ-OFFICE-REVIEW-AUTHOR-EXCL-002).
+// queued them.
 const QueuedWorkflowStepPayloadKey = "queued_workflow_step_id"
 
 // RunEventType is the kind of a RunEvent. Open set (init, step,

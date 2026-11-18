@@ -17,6 +17,7 @@ var (
 	ErrSeatChangeInvalid  = errors.New("invalid seat exclusion change")
 	ErrSeatChangeNotFound = errors.New("workflow step not found")
 	ErrSeatChangeReadOnly = errors.New("workflow is read-only")
+	ErrSeatChangeConflict = errors.New("workflow step changed while saving; try again")
 )
 
 // SeatAuthorExclusionChange turns exclude_author_provider on or off for one
@@ -28,7 +29,7 @@ type SeatAuthorExclusionChange struct {
 }
 
 // SeatAuthorExclusionWriter applies seat exclusion changes to a workspace's
-// workflow steps. A rejected batch writes nothing.
+// workflow steps. A rejected or failed batch writes nothing.
 type SeatAuthorExclusionWriter interface {
 	SetSeatAuthorExclusion(ctx context.Context, workspaceID string, changes []SeatAuthorExclusionChange) error
 }
@@ -78,6 +79,9 @@ func (h *Handler) updateSeatAuthorExclusion(c *gin.Context) {
 		c.JSON(seatChangeStatus(err), gin.H{"error": err.Error()})
 		return
 	}
+	if anySeatChangeDisables(changes) {
+		h.releaseParkedRuns(ctx, rp, wsID)
+	}
 	steps, err := h.seatSteps(ctx, rp, wsID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -89,13 +93,34 @@ func (h *Handler) updateSeatAuthorExclusion(c *gin.Context) {
 	})
 }
 
+// anySeatChangeDisables reports whether a change turns the setting off, which
+// can unblock a review parked because only the author's provider was left.
+func anySeatChangeDisables(changes []SeatAuthorExclusionChange) bool {
+	for _, ch := range changes {
+		if !ch.Enabled {
+			return true
+		}
+	}
+	return false
+}
+
+// releaseParkedRuns re-queues parked runs after the switches are saved. The
+// save already succeeded, so a failure here is logged rather than returned;
+// the operator can still retry a parked run from its detail page.
+func (h *Handler) releaseParkedRuns(ctx context.Context, rp RoutingProvider, workspaceID string) {
+	if err := rp.ReleaseParkedRuns(ctx, workspaceID); err != nil && h.logger != nil {
+		h.logger.Warn("release parked runs after seat exclusion change failed",
+			zap.String("workspace_id", workspaceID), zap.Error(err))
+	}
+}
+
 func seatChangeStatus(err error) int {
 	switch {
 	case errors.Is(err, ErrSeatChangeInvalid):
 		return http.StatusBadRequest
 	case errors.Is(err, ErrSeatChangeNotFound):
 		return http.StatusNotFound
-	case errors.Is(err, ErrSeatChangeReadOnly):
+	case errors.Is(err, ErrSeatChangeReadOnly), errors.Is(err, ErrSeatChangeConflict):
 		return http.StatusConflict
 	default:
 		return http.StatusInternalServerError

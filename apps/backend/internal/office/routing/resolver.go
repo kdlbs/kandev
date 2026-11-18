@@ -45,7 +45,7 @@ const (
 	// SkipReasonAuthorProvider marks the provider that did the task's work,
 	// skipped for a seat run whose step declares exclude_author_provider.
 	// It is never auto-retryable: only another provider recovering frees
-	// the run (REQ-OFFICE-REVIEW-AUTHOR-EXCL-003).
+	// the run.
 	SkipReasonAuthorProvider = "author_provider"
 )
 

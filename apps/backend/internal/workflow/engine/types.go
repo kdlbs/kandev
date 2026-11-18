@@ -213,8 +213,7 @@ type QueueRunForEachParticipantAction struct {
 // empty or unrecognized Role is a runtime condition the callback reports and
 // skips, not a build-time compile failure. ExcludeAuthorProvider is read from
 // "exclude_author_provider"; the engine does not act on it. Office routing
-// applies it when dispatching the seat's runs
-// (REQ-OFFICE-REVIEW-AUTHOR-EXCL-002).
+// applies it when dispatching the seat's runs.
 type EnsureParticipantSeatAction struct {
 	Role                  string
 	ExcludeAuthorProvider bool

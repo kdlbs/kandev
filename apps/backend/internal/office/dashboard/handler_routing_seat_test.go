@@ -113,6 +113,7 @@ func TestRouting_PutSeatExclusionMapsErrors(t *testing.T) {
 		{"invalid change", fmt.Errorf("wrap: %w", dashboard.ErrSeatChangeInvalid), http.StatusBadRequest},
 		{"step not visible", fmt.Errorf("wrap: %w", dashboard.ErrSeatChangeNotFound), http.StatusNotFound},
 		{"read-only workflow", fmt.Errorf("wrap: %w", dashboard.ErrSeatChangeReadOnly), http.StatusConflict},
+		{"step changed concurrently", fmt.Errorf("wrap: %w", dashboard.ErrSeatChangeConflict), http.StatusConflict},
 		{"storage failure", errors.New("db down"), http.StatusInternalServerError},
 	}
 	for _, tc := range cases {

@@ -68,7 +68,8 @@ type stepUpdatePublisher interface {
 // seatExclusionWriterAdapter satisfies dashboard.SeatAuthorExclusionWriter
 // over the workflow service, so the Office dashboard writes steps through the
 // same authorization and mutability checks as every other step mutation, and
-// publishes the same workflow_step.updated events.
+// publishes the same workflow_step.updated events. A failed batch writes
+// nothing, so there is nothing to publish.
 type seatExclusionWriterAdapter struct {
 	workflow  seatExclusionSetter
 	publisher stepUpdatePublisher
@@ -103,6 +104,8 @@ func seatChangeError(err error) error {
 		return fmt.Errorf("%w: %w", dashboard.ErrSeatChangeNotFound, err)
 	case errors.Is(err, workflowservice.ErrWorkflowReadOnly), errors.Is(err, workflowservice.ErrWorkflowWorkspaceReadOnly):
 		return fmt.Errorf("%w: %w", dashboard.ErrSeatChangeReadOnly, err)
+	case errors.Is(err, workflowmodels.ErrWorkflowStepChanged):
+		return fmt.Errorf("%w: %w", dashboard.ErrSeatChangeConflict, err)
 	default:
 		return err
 	}

@@ -389,6 +389,9 @@ type RoutingProvider interface {
 	// SeatSteps lists the workspace's ensure_participant_seat actions with
 	// their exclude_author_provider setting.
 	SeatSteps(ctx context.Context, workspaceID string) ([]routing.SeatStep, error)
+	// ReleaseParkedRuns re-queues the workspace's runs parked by routing so
+	// they resolve again under the current settings.
+	ReleaseParkedRuns(ctx context.Context, workspaceID string) error
 }
 
 // RouteAttemptLister is the narrow read-side seam used by the run-detail

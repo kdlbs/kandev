@@ -160,7 +160,9 @@ handle. Run events already appear in the run detail Events log.
 `skipped_author_provider`. `parkRunBlocked` then writes the attempt row
 (AC-OFFICE-REVIEW-AUTHOR-EXCL-003.2). When other candidates exist,
 `tryCandidates` never sees the author provider, because `Resolve` did not
-return it.
+return it. If every remaining candidate then fails and the run parks through
+`exhaustedCandidates`, `tryCandidates` first writes the author provider's
+`skipped_author_provider` attempt, so every park keeps that history entry.
 
 ### 6. Web: route-attempt outcome
 
@@ -328,11 +330,17 @@ position, and role. `GET /workspaces/:wsId/routing` adds
 **Write:** `workflow/service.SetSeatAuthorExclusion(ctx, workspaceID, changes)`
 takes `[]SeatAuthorExclusionChange{StepID, Role, Enabled}`. It first
 authorizes and validates every change: the step is visible and belongs to a
-workflow in the workspace, the workflow is mutable, and the step has a seat
-action for the role. Any failure returns before a write
-(AC-OFFICE-REVIEW-AUTHOR-EXCL-006.4). It then updates each changed step
-through `UpdateStepWithStartStepIntent(ctx, step, nil)` and returns the
-updated steps. The Office dashboard reaches it through a port that
+workflow in the workspace, the workflow and its executor allow the change
+(`authorizeExecutorMutation`), the step has a seat action for the role, and
+the edited step passes `ValidateWorkflowStep`. Any failure returns before a
+write (AC-OFFICE-REVIEW-AUTHOR-EXCL-006.4). It then writes every changed step
+in one transaction through the workflow repository's
+`UpdateStepEventsIfUnchanged`, which sets only `events` and `updated_at`, and
+only where `updated_at` still equals the version that was read. If any step
+changed after the read, nothing is written and the error wraps
+`models.ErrWorkflowStepChanged`; the service then re-reads and re-applies the
+batch, up to three attempts (AC-OFFICE-REVIEW-AUTHOR-EXCL-006.9). It returns
+the updated steps with their new versions. The Office dashboard reaches it through a port that
 `internal/backendapp` wires to the workflow service plus a
 `stepevents.Publisher` with source `office-routing`, so every update publishes
 `workflow_step.updated` (AC-OFFICE-REVIEW-AUTHOR-EXCL-006.2).
@@ -341,10 +349,20 @@ updated steps. The Office dashboard reaches it through a port that
 `{changes: [{step_id, role, enabled}]}` and returns
 `{author_exclusion_steps, author_exclusion_warnings}` computed after the
 write. An invalid change is a 400, a step the caller cannot see is a 404, and
-a read-only workflow is a 409.
+a read-only workflow, or a step that kept changing through every attempt, is
+a 409. A failed request writes nothing, so it publishes nothing. When any
+change turns the setting off, the handler then calls the routing provider's
+`ReleaseParkedRuns`, which re-queues the workspace's routing-parked runs the
+same way a material routing settings change does
+(`ClearAllParkedRoutingForWorkspace`). A run that is still blocked parks
+again. A failure to release is logged, because the switches are already
+saved (AC-OFFICE-REVIEW-AUTHOR-EXCL-006.8).
 
 **Web:** `useWorkspaceRouting` exposes `authorExclusionSteps` and
-`updateAuthorExclusion(changes)`. The routing page keeps the switches in its
+`updateAuthorExclusion(changes)`. It returns steps, warnings, and execution
+profiles only once they were loaded for the current workspace, and ignores a
+save response that arrives after the operator switched workspace
+(AC-OFFICE-REVIEW-AUTHOR-EXCL-006.10). The routing page keeps the switches in its
 existing draft, so one Save applies routing changes first and then the
 switch changes; the warnings come from the last response. The section is an
 `AuthorExclusionStepsCard` under the provider order: a title, a description
@@ -404,3 +422,5 @@ the provider's navigation guard covers leaving with unsaved changes.
 | AC-006.2, .3, .4 | §10 (write) |
 | AC-006.6 | §10 (web), §9 (locales) |
 | AC-006.7 | §10 (save bar) |
+| AC-006.8, .9 | §10 (write) |
+| AC-006.10 | §10 (web) |

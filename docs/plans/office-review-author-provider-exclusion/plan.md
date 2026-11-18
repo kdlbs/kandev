@@ -48,6 +48,7 @@ is persisted on seats or runs, and no migration is needed. See the
 | 5 | [task-06-routing-control-web](task-06-routing-control-web.md) | Web: Review on a different provider section in the routing draft, three-part warning copy, import dialog submitting state, locales, desktop and phone E2E |
 
 | 6 | [task-07-grouped-warnings-save-bar](task-07-grouped-warnings-save-bar.md) | Backend and web: group warnings that share a cause and fix; floating settings save bar on the routing page |
+| 7 | [task-08-seat-write-integrity](task-08-seat-write-integrity.md) | Backend and web: all-or-nothing, version-guarded switch saves; release parked runs when a switch turns off; author skip on exhausted fallback; no stale switches after a workspace change |
 
 Task 02 depends on Task 01, because its E2E needs the backend behavior. Task 03
 depends on Task 01 (the shared declaration helper). Task 04 depends on Task 03.
@@ -57,7 +58,10 @@ YAML, and the warnings must say what is true, why it is bad, and how to fix
 it. Task 06 depends on Task 05. Task 07 comes from the second manual test
 round: many steps with the same warning must read as one warning with a list
 of steps, and unsaved routing changes must be hard to miss. It depends on
-Task 06.
+Task 06. Task 08 comes from PR review: switch saves must be all-or-nothing
+and must not lose a concurrent change, turning a switch off must release
+reviews it parked, and every park must record the author skip. It depends on
+Task 07.
 
 ## ASCII UI preview
 

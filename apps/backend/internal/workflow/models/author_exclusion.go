@@ -3,8 +3,7 @@ package models
 import "sort"
 
 // ExcludeAuthorProviderConfigKey is the ensure_participant_seat config key
-// that keeps the seat's runs off the provider that did the task's work
-// (REQ-OFFICE-REVIEW-AUTHOR-EXCL-001).
+// that keeps the seat's runs off the provider that did the task's work.
 const ExcludeAuthorProviderConfigKey = "exclude_author_provider"
 
 // ExcludesAuthorProvider reports whether an ensure_participant_seat config

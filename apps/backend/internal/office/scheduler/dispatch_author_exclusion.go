@@ -13,7 +13,7 @@ import (
 
 // RouteAttemptOutcomeSkippedAuthorProvider records the provider that did the
 // task's work, skipped for a seat run at a step declaring
-// exclude_author_provider (REQ-OFFICE-REVIEW-AUTHOR-EXCL-003).
+// exclude_author_provider.
 const RouteAttemptOutcomeSkippedAuthorProvider = "skipped_author_provider"
 
 // runEventAuthorExclusion is the run event written on every resolution of a
@@ -79,8 +79,7 @@ func (ss *SchedulerService) agentHoldsSeatInRoles(
 	return false, nil
 }
 
-// recordAuthorExclusion writes one run event per resolution of a seat run
-// (REQ-OFFICE-REVIEW-AUTHOR-EXCL-004).
+// recordAuthorExclusion writes one run event per resolution of a seat run.
 func (ss *SchedulerService) recordAuthorExclusion(
 	ctx context.Context, runID string, excl authorExclusion, routingEnabled bool,
 ) {

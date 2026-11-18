@@ -15,12 +15,10 @@ type RoutingConfigResponse struct {
 	KnownProviders    []routing.ProviderID              `json:"known_providers"`
 	ExecutionProfiles []routing.ExecutionProfileSummary `json:"execution_profiles"`
 	// AuthorExclusionWarnings predicts which exclude_author_provider steps
-	// will not be enforced or can park their reviews
-	// (REQ-OFFICE-REVIEW-AUTHOR-EXCL-005). Never null.
+	// will not be enforced or can park their reviews. Never null.
 	AuthorExclusionWarnings []AuthorExclusionWarningDTO `json:"author_exclusion_warnings"`
 	// AuthorExclusionSteps lists every ensure_participant_seat action in the
-	// workspace with whether it keeps reviews off the author's provider
-	// (REQ-OFFICE-REVIEW-AUTHOR-EXCL-006). Never null.
+	// workspace with whether it keeps reviews off the author's provider. Never null.
 	AuthorExclusionSteps []AuthorExclusionStepDTO `json:"author_exclusion_steps"`
 }
 
@@ -62,7 +60,7 @@ type AuthorExclusionWarningDTO struct {
 
 // AuthorExclusionWarningDTOs converts setup warnings for the wire. A
 // non-nil err becomes a single check_failed warning, so a failed check is
-// visible without failing the request (AC-OFFICE-REVIEW-AUTHOR-EXCL-005.8).
+// visible without failing the request.
 func AuthorExclusionWarningDTOs(warnings []routing.SetupWarning, err error) []AuthorExclusionWarningDTO {
 	if err != nil {
 		return []AuthorExclusionWarningDTO{{Code: string(routing.SetupWarningCheckFailed)}}

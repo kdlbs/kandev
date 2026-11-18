@@ -36,6 +36,13 @@ type fakeRoutingProvider struct {
 	setupWarnings        []routing.SetupWarning
 	setupErr             error
 	seatSteps            []routing.SeatStep
+	releasedParked       []string
+	releaseErr           error
+}
+
+func (f *fakeRoutingProvider) ReleaseParkedRuns(_ context.Context, workspaceID string) error {
+	f.releasedParked = append(f.releasedParked, workspaceID)
+	return f.releaseErr
 }
 
 func (f *fakeRoutingProvider) SeatSteps(_ context.Context, _ string) ([]routing.SeatStep, error) {

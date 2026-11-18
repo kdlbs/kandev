@@ -229,10 +229,29 @@ func (ss *SchedulerService) parkRunBlocked(
 	ctx context.Context, run *runsmodels.Run, workspaceID string, res *routing.Resolution,
 ) (bool, *routing.BlockReason, error) {
 	br := res.BlockReason
-	for _, sk := range res.SkippedDegraded {
+	if err := ss.recordSkippedAttempts(ctx, run, res, res.SkippedDegraded); err != nil {
+		return false, nil, err
+	}
+	if err := ss.repo.ParkRunForProviderCapacity(ctx,
+		run.ID, br.Status, br.EarliestRetry); err != nil {
+		return false, nil, err
+	}
+	ss.logger.Info("run parked for provider capacity",
+		zap.String("run_id", run.ID),
+		zap.String("status", br.Status),
+		zap.Time("earliest_retry_at", br.EarliestRetry))
+	ss.recordRouteParked(workspaceID, run.ID, br.Status)
+	return false, &br, nil
+}
+
+// recordSkippedAttempts appends one route attempt per skipped provider.
+func (ss *SchedulerService) recordSkippedAttempts(
+	ctx context.Context, run *runsmodels.Run, res *routing.Resolution, skipped []routing.SkippedCandidate,
+) error {
+	for _, sk := range skipped {
 		seq, err := ss.repo.IncrementRouteAttemptSeq(ctx, run.ID)
 		if err != nil {
-			return false, nil, err
+			return err
 		}
 		attempt := models.RouteAttempt{
 			RunID:      run.ID,
@@ -246,20 +265,22 @@ func (ss *SchedulerService) parkRunBlocked(
 			StartedAt:  time.Now().UTC(),
 		}
 		if err := ss.repo.AppendRouteAttempt(ctx, &attempt); err != nil {
-			return false, nil, err
+			return err
 		}
 		ss.publishRouteAttemptAppended(ctx, run.ID, attempt)
 	}
-	if err := ss.repo.ParkRunForProviderCapacity(ctx,
-		run.ID, br.Status, br.EarliestRetry); err != nil {
-		return false, nil, err
+	return nil
+}
+
+// authorSkips returns the resolver's skip entries for the author's provider.
+func authorSkips(res *routing.Resolution) []routing.SkippedCandidate {
+	var out []routing.SkippedCandidate
+	for _, sk := range res.SkippedDegraded {
+		if sk.Reason == routing.SkipReasonAuthorProvider {
+			out = append(out, sk)
+		}
 	}
-	ss.logger.Info("run parked for provider capacity",
-		zap.String("run_id", run.ID),
-		zap.String("status", br.Status),
-		zap.Time("earliest_retry_at", br.EarliestRetry))
-	ss.recordRouteParked(workspaceID, run.ID, br.Status)
-	return false, &br, nil
+	return out
 }
 
 func skipOutcome(reason string) models.RouteAttemptOutcome {
@@ -363,6 +384,11 @@ func (ss *SchedulerService) tryCandidates(
 		// the fallback hop on success.
 		c := candidate
 		prev = &c
+	}
+	// Every launched candidate failed and the run parks, so its history must
+	// still show that the author's provider was skipped rather than tried.
+	if err := ss.recordSkippedAttempts(ctx, run, res, authorSkips(res)); err != nil {
+		return false, nil, err
 	}
 	return ss.exhaustedCandidates(ctx, run, agent, res.RequestedTier)
 }

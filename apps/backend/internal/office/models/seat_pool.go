@@ -3,7 +3,7 @@ package models
 import wfmodels "github.com/kandev/kandev/internal/workflow/models"
 
 // seatRolePools maps a participant role to the agent roles eligible for its
-// seat, per AC-OFFICE-REVIEW-SEATS-002.1: approver draws from `ceo`; reviewer
+// seat: approver draws from `ceo`; reviewer
 // draws from `ceo` and `specialist`, and only those two. Any other
 // participant role (watcher, collaborator, ...) keeps ceo-only behavior; the
 // pool must not be widened without an amended AC.
@@ -29,7 +29,7 @@ func SeatPoolAgentRoles(participantRole string) map[AgentRole]bool {
 
 // IsSeatPoolEligible reports whether agent can fill participantRole's seat:
 // its role is in the pool and its status is neither `stopped` nor
-// `pending_approval` (AC-OFFICE-REVIEW-SEATS-002.1, -002.2). Seat casting and
+// `pending_approval`. Seat casting and
 // the author-exclusion setup check share it so they cannot disagree.
 func IsSeatPoolEligible(participantRole string, agent *AgentInstance) bool {
 	if agent == nil || !SeatPoolAgentRoles(participantRole)[agent.Role] {

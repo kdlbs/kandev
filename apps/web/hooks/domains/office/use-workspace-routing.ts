@@ -35,6 +35,8 @@ export type UseWorkspaceRoutingResult = {
   retry: (providerId: string) => Promise<void>;
 };
 
+const EMPTY: never[] = [];
+
 export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceRoutingResult {
   const config = useAppStore((s) =>
     workspaceName ? s.office.routing.byWorkspace[workspaceName] : undefined,
@@ -51,6 +53,8 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
   const [profilesWorkspace, setProfilesWorkspace] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const requestVersion = useRef(0);
+  const currentWorkspace = useRef(workspaceName);
+  currentWorkspace.current = workspaceName;
 
   const refresh = useCallback(async () => {
     if (!workspaceName) return;
@@ -94,7 +98,7 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
       const res = await updateWorkspaceRouting(workspaceName, cfg);
       setWorkspaceRouting(workspaceName, cfg);
       const warnings = res?.author_exclusion_warnings ?? [];
-      setAuthorExclusionWarnings(warnings);
+      if (currentWorkspace.current === workspaceName) setAuthorExclusionWarnings(warnings);
       return warnings;
     },
     [workspaceName, setWorkspaceRouting],
@@ -104,9 +108,11 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
     async (changes: AuthorExclusionStepChange[]) => {
       if (!workspaceName || changes.length === 0) return [];
       const res = await updateSeatAuthorExclusion(workspaceName, changes);
-      setAuthorExclusionSteps(res.author_exclusion_steps ?? []);
       const warnings = res.author_exclusion_warnings ?? [];
-      setAuthorExclusionWarnings(warnings);
+      if (currentWorkspace.current === workspaceName) {
+        setAuthorExclusionSteps(res.author_exclusion_steps ?? []);
+        setAuthorExclusionWarnings(warnings);
+      }
       return warnings;
     },
     [workspaceName],
@@ -120,12 +126,15 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
     [workspaceName],
   );
 
+  // Per-workspace data from an earlier workspace is never shown, even while
+  // the new workspace's read is in flight or after it fails.
+  const loadedForWorkspace = workspaceName !== null && profilesWorkspace === workspaceName;
   return {
     config,
     knownProviders,
-    executionProfiles,
-    authorExclusionWarnings,
-    authorExclusionSteps,
+    executionProfiles: loadedForWorkspace ? executionProfiles : EMPTY,
+    authorExclusionWarnings: loadedForWorkspace ? authorExclusionWarnings : EMPTY,
+    authorExclusionSteps: loadedForWorkspace ? authorExclusionSteps : EMPTY,
     isLoading,
     error,
     refresh,

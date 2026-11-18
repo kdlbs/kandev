@@ -18,8 +18,7 @@ type ExclusionDeclaration struct {
 	Role         string
 }
 
-// SetupWarningCode is the closed set of author-exclusion setup predictions
-// (REQ-OFFICE-REVIEW-AUTHOR-EXCL-005).
+// SetupWarningCode is the closed set of author-exclusion setup predictions.
 type SetupWarningCode string
 
 const (

@@ -66,6 +66,7 @@ func TestSeatExclusionWriterAdapterMapsErrors(t *testing.T) {
 		{workflowservice.ErrNotVisible, dashboard.ErrSeatChangeNotFound},
 		{workflowservice.ErrWorkflowReadOnly, dashboard.ErrSeatChangeReadOnly},
 		{workflowservice.ErrWorkflowWorkspaceReadOnly, dashboard.ErrSeatChangeReadOnly},
+		{fmt.Errorf("x: %w", workflowmodels.ErrWorkflowStepChanged), dashboard.ErrSeatChangeConflict},
 	}
 	for _, tc := range cases {
 		publisher := &fakeStepPublisher{}

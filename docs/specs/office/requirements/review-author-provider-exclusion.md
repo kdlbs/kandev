@@ -243,8 +243,9 @@ YAML.
   setup warnings shall reflect the new settings.
 - **AC-OFFICE-REVIEW-AUTHOR-EXCL-006.4:** The system shall reject a change for a
   step outside the workspace, a step without a seat-ensuring action for the
-  given role, or a read-only workflow, and shall apply none of the request's
-  changes.
+  given role, a read-only workflow, or a workflow whose executor the caller
+  may not change, and shall apply none of the request's changes. A request
+  that fails for any other reason shall also apply none of its changes.
 - **AC-OFFICE-REVIEW-AUTHOR-EXCL-006.5:** When no workflow in the workspace has a
   seat-ensuring action, the section shall say so instead of listing rows.
 - **AC-OFFICE-REVIEW-AUTHOR-EXCL-006.6:** The section shall be localized in
@@ -256,6 +257,18 @@ YAML.
   floating settings save bar, which stays visible without scrolling and
   offers Save and Discard. Leaving the page with unsaved changes shall ask the
   operator to save or discard them first.
+- **AC-OFFICE-REVIEW-AUTHOR-EXCL-006.8:** When a save turns a switch off, runs
+  that routing parked in the workspace shall resolve their route again under
+  the saved settings, so a review that waited only because the author's
+  provider was excluded can launch without a manual retry.
+- **AC-OFFICE-REVIEW-AUTHOR-EXCL-006.9:** When two saves change the same step at
+  the same time, neither save shall overwrite the other's change. The system
+  shall apply each save to the step's current state, or reject it with a
+  conflict that changes nothing.
+- **AC-OFFICE-REVIEW-AUTHOR-EXCL-006.10:** After the operator switches to
+  another workspace, the page shall not show the previous workspace's
+  switches or warnings, including while the new workspace loads or after its
+  load fails.
 
 ## Exclusions
 

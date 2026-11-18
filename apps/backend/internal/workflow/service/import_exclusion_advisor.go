@@ -16,8 +16,7 @@ const ImportWarningCheckFailed = "check_failed"
 
 // ImportWarning is a non-blocking notice about an imported or synced
 // workflow. Code is a closed set the client localizes:
-// routing_disabled, single_provider, agent_single_provider, check_failed
-// (REQ-OFFICE-REVIEW-AUTHOR-EXCL-005).
+// routing_disabled, single_provider, agent_single_provider, check_failed.
 type ImportWarning struct {
 	Code         string `json:"code"`
 	WorkflowName string `json:"workflow_name,omitempty"`
