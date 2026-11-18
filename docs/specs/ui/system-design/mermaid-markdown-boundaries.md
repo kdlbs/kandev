@@ -18,8 +18,8 @@ UI owns the reusable presentation of Mermaid diagrams embedded in Markdown.
 The [fix package](../../../plans/cursor-mermaid-fence-recovery/plan.md) records incident evidence and delivery checks.
 
 The correction stays in three existing frontend files.
-It adds a small source-selection helper and extends the current render path.
-No parser plugin, source-position metadata, recovery component, cache, setting, dependency, or backend change is needed.
+It adds a small source-selection helper, extends the current render path, and uses the shared remark pipeline to preserve document reference definitions for recovered prose.
+No fence-position metadata, recovery component, cache, setting, dependency, or backend change is needed.
 
 ## Requirement mapping
 
@@ -70,6 +70,8 @@ Valid diagrams and literal wrappers remain protected by syntax validation and ex
 Add a small `MarkdownPre` override to `markdown-components.tsx`.
 For an explicit `language-mermaid` code child, render `MermaidBlock` directly at block level.
 Pass the owning task ID and a callback that renders following text through the existing Markdown plugins and component overrides.
+The shared remark pipeline attaches the original source for Markdown reference definitions to explicit Mermaid code nodes.
+The callback prepends those definitions while parsing recovered prose, so reference links keep the owning document's scope.
 Other languages and inline code keep their existing routes. Untagged diagram detection remains unchanged and does not opt into recovery.
 
 Extend `MermaidBlock` with that optional callback.
@@ -116,5 +118,6 @@ Their ordinary diagram cases continue to protect viewport behavior.
 The bounded source-selection helper is integrated in the existing debounced render lifecycle.
 Explicit Mermaid blocks render verified following prose through the existing Markdown components.
 The static-review regressions for file-preview routing and complete backtick-run matching pass in the focused suite.
+PR review follow-up also preserves document reference definitions and shows the latest failed Mermaid input in the code view while retaining the previous SVG.
 The earlier desktop and phone checks passed before those code-only corrections and were not rerun.
 Stored message content and provider segmentation remain unchanged.

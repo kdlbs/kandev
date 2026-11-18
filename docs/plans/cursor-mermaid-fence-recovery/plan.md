@@ -31,7 +31,7 @@ The [system design](../../specs/ui/system-design/mermaid-markdown-boundaries.md)
 ### Out of scope
 
 - Provider reply reconstruction, separators between chunks, SQL projection, and stored-message rewrites.
-- New parser plugins, source-position metadata, recovery components, timers, caches, or dependencies.
+- Standalone parser-plugin modules, fence-position metadata, recovery components, timers, caches, or dependencies.
 - Untagged diagram recovery, task-plan rich-text changes, and arbitrary Mermaid syntax repair.
 - New controls, styling, copy, settings, or public APIs.
 
@@ -86,9 +86,10 @@ The helper checks the first suspicious backtick line only.
 Valid complete source always wins. An invalid prefix or unexpected probe error retains the original path.
 Use the installed Mermaid parser and existing sanitizer/configuration.
 
-The initial draft proposed source metadata, a parser plugin, and a separate recovery component.
-This revision removes them at the user's request to keep the fix simple.
-The checks concern diagram validity, so carrying outer Markdown fence metadata is unnecessary.
+The initial draft proposed outer-fence metadata, a parser plugin module, and a separate recovery component.
+Those pieces were removed to keep boundary selection inside the existing render lifecycle.
+The PR review follow-up adds a small transform to the shared remark pipeline in `markdown-components.tsx` so recovered prose retains reference definitions from the owning Markdown document.
+This transform does not select boundaries or inspect outer-fence metadata.
 
 ### Provider compatibility
 
@@ -130,7 +131,7 @@ Keep the transcript scroll owner and the existing responsive diagram viewport.
 | `AC-UI-MERMAID-RENDERING-002.4` | Browser reads verify exact fixture content before and after reload |
 | `AC-UI-MERMAID-RENDERING-002.5` | Existing desktop/mobile specs gain the recovery and reload case |
 | `AC-UI-MERMAID-RENDERING-002.6` | Component checks reuse the existing cancellation and toast path |
-| `AC-UI-MERMAID-RENDERING-002.7` | Component checks prove sibling placement and current task/file-link context |
+| `AC-UI-MERMAID-RENDERING-002.7` | Component checks prove sibling placement, document references, and current task/file-link context |
 
 The named regression `recovers prose glued to a closing Mermaid fence` in `markdown-mermaid-recovery.test.tsx` failed against the original renderer and passes with the implementation.
 Keep real-parser preservation evidence rather than relying only on a mocked Mermaid API.
@@ -173,7 +174,8 @@ Do not reuse its stricter outer-fence eligibility expectations.
 - Initial implementation verification: the component and desktop/phone recovery cases passed after confirmed RED runs. Focused Vitest passed 5 files and 94 tests; Oxlint, typecheck, `i18n:ratchet`, Prettier, documentation checks, managed desktop build, and both browser projects passed.
 - Static-review follow-up: the file-preview routing regression and five false-candidate fence cases failed before correction. The focused suite then passed 3 files and 92 tests, covering real Mermaid parsing, file-preview routing, and chat recovery.
 - Follow-up Oxlint passed for the changed frontend files, Prettier passed for all nine changed TypeScript/TSX files, and `git diff --check` passed.
-- The broad build, typecheck, i18n, and desktop/phone browser projects were not rerun for the code-only review corrections; their earlier results apply to the implementation before those corrections.
+- The broad build, i18n, and desktop/phone browser projects were not rerun for the initial static-review corrections; their earlier results apply to that revision. Frontend typecheck was rerun after the PR review follow-up and passed below.
+- PR review follow-up: the reference-definition and latest-code-view regressions failed before correction. The final focused Mermaid suite passed 3 files and 94 tests; frontend typecheck, focused Oxlint, Prettier, and `git diff --check` passed.
 
 ## Risks
 

@@ -36,7 +36,7 @@ Reuse the current diagram renderer, parser, render timer, cancellation handling,
 ## Out of scope
 
 - Backend or transport changes, reply reconstruction, stored-message rewrites, or dependency updates.
-- New parser plugins, source metadata, recovery components, async controllers, caches, or timers.
+- Standalone parser-plugin modules, fence-position metadata, recovery components, async controllers, caches, or timers.
 - Untagged diagrams, task-plan rich text, arbitrary diagram repair, or new UI controls.
 
 ## Acceptance
@@ -190,6 +190,7 @@ Implemented the bounded recovery for explicitly tagged Mermaid blocks. Source se
 - Initial implementation TDD RED/GREEN: the named component regression and desktop/phone recovery cases failed before the fix and passed afterward. Focused Vitest passed 5 files and 94 tests, including real-parser source-selection cases and the Mermaid renderer suites.
 - Initial implementation Oxlint, typecheck, `i18n:ratchet`, documentation checks, and the managed production Vite build passed. Desktop `chromium` Mermaid-fit passed 2/2; phone `mobile-chrome` Mermaid-fit passed 2/2.
 - Static-review follow-up: the file-preview Mermaid routing regression and five ineligible backtick-run cases were confirmed RED before correction. The focused rerun passed 3 files and 92 tests, covering parser selection, Markdown preview, and chat recovery.
+- PR review follow-up: the reference-definition and latest-code-view regressions were confirmed RED before correction. The focused rerun passed 3 files and 94 tests, covering parser selection, Markdown preview, reference-link recovery, and the latest code view after a failed update. Frontend typecheck, focused Oxlint, Prettier, and `git diff --check` passed.
 - Follow-up Oxlint passed for the changed frontend files, Prettier passed for all nine changed TypeScript/TSX files, and `git diff --check` passed.
 - The broad build, typecheck, i18n, and desktop/phone browser projects were not rerun for the code-only review corrections. Their results above apply to the implementation before those corrections.
 - No dependencies, locales, backend code, public documentation, or persisted message formats changed.

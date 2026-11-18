@@ -147,7 +147,7 @@ function useMermaidRender(
   return {
     svg,
     error,
-    diagramSource: renderedSource?.diagramSource ?? code,
+    diagramSource: currentSource?.diagramSource ?? code,
     followingMarkdown: currentSource?.followingMarkdown,
   };
 }

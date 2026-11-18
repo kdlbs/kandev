@@ -44,7 +44,7 @@ It contains at least three backticks. The complete diagram must be invalid, and 
 - **AC-UI-MERMAID-RENDERING-002.4:** Recovery shall leave stored message content, transport chunks, and message identity unchanged.
 - **AC-UI-MERMAID-RENDERING-002.5:** The recovered diagram and prose shall appear in the same order on desktop, phone, and a subsequent page reload.
 - **AC-UI-MERMAID-RENDERING-002.6:** Superseded or cancelled recovery work shall not publish an earlier diagram or prose. Successful recovery shall not show a transient diagram-error notification from the failed full-source probe.
-- **AC-UI-MERMAID-RENDERING-002.7:** Recovered prose shall use the same Markdown formatting and link context as adjacent chat prose. Existing HTML and URL restrictions shall remain effective.
+- **AC-UI-MERMAID-RENDERING-002.7:** Recovered prose shall use the same Markdown formatting, document reference definitions, and task/file-link context as adjacent chat prose. Existing HTML and URL restrictions shall remain effective.
 
 ## Migrated source detail
 

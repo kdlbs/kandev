@@ -5,6 +5,8 @@ import { MemoizedMarkdown } from "./memoized-markdown";
 
 const mockToast = vi.hoisted(() => vi.fn());
 const renderInputs = vi.hoisted(() => [] as string[]);
+const MERMAID_FENCE = "```mermaid";
+const FLOWCHART_LR = "flowchart LR";
 const renderControl = vi.hoisted(() => ({
   resolveOld: null as ((result: { svg: string }) => void) | null,
   oldRenderStarted: vi.fn(),
@@ -40,8 +42,8 @@ vi.mock("mermaid", () => ({
 }));
 
 const GLUED_MESSAGE = [
-  "```mermaid",
-  "flowchart LR",
+  MERMAID_FENCE,
+  FLOWCHART_LR,
   "  A --> B",
   "```Following [guide](src/guide.md).",
 ].join("\n");
@@ -90,11 +92,11 @@ describe("chat Markdown Mermaid boundary recovery", () => {
     expect(diagram?.querySelector("svg")).not.toBeNull();
     expect(diagram?.closest("pre")).toBeNull();
     expect(diagram?.nextElementSibling?.tagName).toBe("P");
-    expect(renderInputs).toEqual(["flowchart LR\n  A --> B\n"]);
+    expect(renderInputs).toEqual([`${FLOWCHART_LR}\n  A --> B\n`]);
     expect(mockToast).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByTitle("Show code"));
-    expect(diagram?.querySelector("pre code")?.textContent).toBe("flowchart LR\n  A --> B\n");
+    expect(diagram?.querySelector("pre code")?.textContent).toBe(`${FLOWCHART_LR}\n  A --> B\n`);
 
     const guide = screen.getByRole("link", { name: "guide" });
     expect(guide.closest(".mermaid-block")).toBeNull();
@@ -105,7 +107,7 @@ describe("chat Markdown Mermaid boundary recovery", () => {
 
   // @covers AC-UI-MERMAID-RENDERING-002.6
   it("keeps task-scoped error suppression for an unrecoverable Mermaid block", async () => {
-    const content = "```mermaid\nflowchart LR\n  A -->\n```";
+    const content = [MERMAID_FENCE, FLOWCHART_LR, "  A -->", "```"].join("\n");
     const first = render(<MemoizedMarkdown content={content} taskId="mermaid-task-context" />);
     await flushRender();
     expect(mockToast).toHaveBeenCalledOnce();
@@ -119,17 +121,13 @@ describe("chat Markdown Mermaid boundary recovery", () => {
 
   // @covers AC-UI-MERMAID-RENDERING-002.6
   it("does not publish an older diagram or suffix after its render resolves late", async () => {
-    const oldMessage = ["```mermaid", "flowchart LR", "  OldNode --> B", "```Old prose."].join(
-      "\n",
-    );
-    const newMessage = ["```mermaid", "flowchart LR", "  NewNode --> B", "```New prose."].join(
-      "\n",
-    );
+    const oldMessage = [MERMAID_FENCE, FLOWCHART_LR, "  OldNode --> B", "```Old prose."].join("\n");
+    const newMessage = [MERMAID_FENCE, FLOWCHART_LR, "  NewNode --> B", "```New prose."].join("\n");
     const view = render(<MemoizedMarkdown content={oldMessage} taskId="mermaid-stale-task" />);
     await flushRender();
 
     expect(renderControl.oldRenderStarted).toHaveBeenCalledOnce();
-    expect(renderInputs).toEqual(["flowchart LR\n  OldNode --> B\n"]);
+    expect(renderInputs).toEqual([`${FLOWCHART_LR}\n  OldNode --> B\n`]);
 
     view.rerender(<MemoizedMarkdown content={newMessage} taskId="mermaid-stale-task" />);
     await flushRender();
@@ -137,8 +135,8 @@ describe("chat Markdown Mermaid boundary recovery", () => {
     expect(view.container.querySelector("svg")?.getAttribute("data-diagram")).toBe("new");
     expect(screen.getByText("New prose.", { exact: true })).toBeTruthy();
     expect(renderInputs).toEqual([
-      "flowchart LR\n  OldNode --> B\n",
-      "flowchart LR\n  NewNode --> B\n",
+      `${FLOWCHART_LR}\n  OldNode --> B\n`,
+      `${FLOWCHART_LR}\n  NewNode --> B\n`,
     ]);
 
     await act(async () => {
@@ -151,5 +149,47 @@ describe("chat Markdown Mermaid boundary recovery", () => {
     expect(view.container.querySelector("svg")?.getAttribute("data-diagram")).toBe("new");
     expect(screen.getByText("New prose.", { exact: true })).toBeTruthy();
     expect(screen.queryByText("Old prose.", { exact: true })).toBeNull();
+  });
+});
+
+describe("chat Markdown Mermaid review regressions", () => {
+  it("keeps document reference definitions available to recovered prose", async () => {
+    const content = [
+      "[guide]: https://example.com/guide",
+      "",
+      MERMAID_FENCE,
+      FLOWCHART_LR,
+      "  A --> B",
+      "```See [guide].",
+    ].join("\n");
+
+    render(
+      <MemoizedMarkdown content={content} taskId="mermaid-reference-task" onOpenFile={vi.fn()} />,
+    );
+    await flushRender();
+
+    expect(screen.getByRole("link", { name: "guide" }).getAttribute("href")).toBe(
+      "https://example.com/guide",
+    );
+  });
+
+  it("shows the current source after a newer render fails while retaining the prior SVG", async () => {
+    const validMessage = [MERMAID_FENCE, FLOWCHART_LR, "  A --> B", "```"].join("\n");
+    const invalidMessage = [MERMAID_FENCE, FLOWCHART_LR, "  A -->", "```"].join("\n");
+    const view = render(
+      <MemoizedMarkdown content={validMessage} taskId="mermaid-current-code-task" />,
+    );
+    await flushRender();
+
+    expect(view.container.querySelector("svg")).not.toBeNull();
+    view.rerender(<MemoizedMarkdown content={invalidMessage} taskId="mermaid-current-code-task" />);
+    await flushRender();
+
+    expect(view.container.querySelector("svg")).not.toBeNull();
+    expect(mockToast).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTitle("Show code"));
+    const codeView = view.container.querySelector(".mermaid-block pre code");
+    expect(codeView?.textContent).toContain("A -->");
+    expect(codeView?.textContent).not.toContain("A --> B");
   });
 });
