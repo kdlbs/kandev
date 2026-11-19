@@ -198,3 +198,54 @@ func TestNativeCheckBuildURLChangeRechecks(t *testing.T) {
 	_ = h.status(t, ompAgentID)
 	requireRuns(t, h.runner, 2, "after PI_BUILD_URL changed")
 }
+
+// Status and preview must show the runtime version that the native
+// observation used, even when the runtime reported it only after the
+// request's earlier read.
+func TestNativeCheckProjectsObservedRuntimeVersion(t *testing.T) {
+	h := newNativeCheckHarness(t, "", agents.NewOmpACP())
+	h.runner.setOutput(ompUpToDate, 0)
+	h.updater.sequenceACPVersions("", "18.13.3")
+	status := h.status(t, ompAgentID)
+	if status.CheckState != dto.AgentUpdateCheckStateUpToDate || status.CurrentVersion != "18.13.3" || status.EffectiveVersion != "18.13.3" {
+		t.Errorf("status = state %q current %q effective %q; want the observed 18.13.3", status.CheckState, status.CurrentVersion, status.EffectiveVersion)
+	}
+	h.updater.sequenceACPVersions("", "18.13.3")
+	preview, err := h.ctrl.PreviewAgentUpdate(context.Background(), ompAgentID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.CurrentVersion != "18.13.3" || preview.EffectiveVersion != "18.13.3" || preview.Operation != "update" {
+		t.Errorf("preview = current %q effective %q operation %q; want the observed 18.13.3 and update", preview.CurrentVersion, preview.EffectiveVersion, preview.Operation)
+	}
+}
+
+// A check that actually launched a different executable than the one
+// prepared must not fill the prepared identity's cache, even if the PATH is
+// restored before the post-run observation.
+func TestNativeCheckLaunchedExecutableMustMatchPreparedIdentity(t *testing.T) {
+	h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())
+	first := filepath.Join(h.home, "install", "a", "omp")
+	second := filepath.Join(h.home, "install", "b", "omp")
+	writeNativeCheckFile(t, first, "a")
+	writeNativeCheckFile(t, second, "b")
+	h.runner.setPath(first)
+	h.runner.queue(ompUpToDate, ompCanaryAvailable)
+	var switched atomic.Bool
+	h.runner.setEnvironmentHook(func() {
+		if switched.CompareAndSwap(false, true) {
+			h.runner.setPath(second)
+		}
+	})
+	started, release := h.runner.gated()
+	done := make(chan dto.AgentUpdateStatusDTO, 1)
+	go func() { done <- listStatus(t, h.ctrl, ompAgentID) }()
+	<-started
+	h.runner.setPath(first)
+	release()
+	<-done
+	if status := h.status(t, ompAgentID); status.CheckState != dto.AgentUpdateCheckStateUpdateAvailable {
+		t.Errorf("status at A = %+v; A reused the result launched from B", status)
+	}
+	requireRuns(t, h.runner, 2, "after a run launched a different executable")
+}

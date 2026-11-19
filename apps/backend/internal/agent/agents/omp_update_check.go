@@ -3,6 +3,7 @@ package agents
 import (
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
@@ -247,10 +248,53 @@ func ompExpandTilde(path, home string) string {
 }
 
 func (r NativeUpdateCheckResolver) absolute(path string) string {
-	if filepath.IsAbs(path) {
-		return filepath.Clean(path)
+	resolved := resolvePathAgainst(r.WorkingDir, path, runtime.GOOS == osWindows)
+	return filepath.Clean(resolved)
+}
+
+// resolvePathAgainst mirrors Node's path.resolve(cwd, path). On Windows a
+// root-relative path (`\dir`) keeps the working directory's drive, and a
+// drive-relative path (`E:dir`) resolves against that drive's root, or
+// against the working directory when it is on the same drive. Pure string
+// logic so the Windows rules are tested on every platform.
+func resolvePathAgainst(cwd, path string, windows bool) string {
+	if windows {
+		return resolveWindowsPath(cwd, path)
 	}
-	return filepath.Join(r.WorkingDir, path)
+	if strings.HasPrefix(path, "/") {
+		return path
+	}
+	return strings.TrimSuffix(cwd, "/") + "/" + path
+}
+
+func resolveWindowsPath(cwd, path string) string {
+	vol := windowsVolume(path)
+	switch {
+	case len(path) >= 2 && windowsSeparator(path[0]) && windowsSeparator(path[1]):
+		return path // UNC
+	case vol != "" && len(path) > 2 && windowsSeparator(path[2]):
+		return path
+	case vol == "" && len(path) > 0 && windowsSeparator(path[0]):
+		return windowsVolume(cwd) + path
+	case vol != "" && strings.EqualFold(vol, windowsVolume(cwd)):
+		return windowsJoin(cwd, path[2:])
+	case vol != "":
+		return windowsJoin(vol, path[2:])
+	}
+	return windowsJoin(cwd, path)
+}
+
+func windowsSeparator(b byte) bool { return b == '\\' || b == '/' }
+
+func windowsVolume(p string) string {
+	if len(p) >= 2 && p[1] == ':' && 'a' <= p[0]|0x20 && p[0]|0x20 <= 'z' {
+		return p[:2]
+	}
+	return ""
+}
+
+func windowsJoin(dir, rest string) string {
+	return strings.TrimRight(dir, `\/`) + `\` + rest
 }
 
 func ompDotenvName(name string) bool {

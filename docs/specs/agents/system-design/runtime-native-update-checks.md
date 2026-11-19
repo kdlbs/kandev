@@ -133,7 +133,11 @@ adds after the pinned commit.
     with empty entries dropped and others kept verbatim, whitespace
     included. Each entry is expanded like upstream `expandTilde`: `~`,
     `~/`, `~\`, and a bare `~name` meaning `<home>/name`. Relative paths
-    resolve against the working directory.
+    resolve against the working directory like Node `path.resolve`. On
+    Windows a root-relative path (`\dir`) keeps the working directory's
+    drive. A drive-relative path (`E:dir`) resolves against the working
+    directory on the same drive and against that drive's root otherwise
+    (`resolvePathAgainst`). The same rule applies to `npm_config_userconfig`.
   - Project files: the known project candidates are `<cwd>/.omp/config.yml`,
     `<cwd>/.omp/settings.json`, `<cwd>/.claude/settings.json`, and
     `<cwd>/.claude/settings.yml`. They are always fingerprinted individually.
@@ -341,10 +345,14 @@ key with an empty path and the failure TTL.
 The status DTO maps a native entry as follows: `CheckState` from the entry,
 `LatestVersion` only for `update_available`, `UpdateChannel` when reported,
 `CheckReason` for `unknown`, and `CheckSource: "native"`. `CheckedAt` is set
-for completed checks. `EffectiveVersion` remains the ACP-reported version.
-Status and preview set `CurrentVersion` from the check's reported current
-version only when ACP has not reported one. When ACP reports a version, any
-disagreement with the check is already handled as `runtime_mismatch`.
+for completed checks. `EffectiveVersion` and `CurrentVersion` are the ACP
+version read by the accepted native observation, which is the version that
+keyed and normalized the result. Status and preview both project it, and
+preview derives its operation from it. A version read earlier in the
+request is not used. Status and preview set `CurrentVersion` from the
+check's reported current version only when ACP has not reported one. When
+ACP reports a version, any disagreement with the check is already handled as
+`runtime_mismatch`.
 
 Invalidation:
 
@@ -367,11 +375,14 @@ Invalidation:
   up to three times, and then uses an isolated key that is neither shared nor
   cached. A paused, out-of-date request can therefore never evict, or
   restart, a newer identity's result.
-- After a check finishes, the identity is recomputed. The result is cached
-  only if the recomputed identity equals the prepared one, the identity and
-  epoch are still active, and the generation is unchanged. A result from an
-  executable or configuration that changed during the slot wait or the run is
-  returned to its waiting subscribers but never cached.
+- After a check finishes, the result is cached only if the executable the
+  runner actually launched (`nativeUpdateCheckRun.Executable`) is the
+  prepared launcher, the identity recomputed after the run equals the
+  prepared one, the identity and epoch are still active, and the generation
+  is unchanged. Otherwise, for example when an executable or configuration
+  changed during the slot wait or the run, even if PATH was restored before
+  the post-run observation, the result is returned to its waiting
+  subscribers but never cached.
 - Project directories are opened with `openFingerprintDir`. On Unix it uses
   `O_DIRECTORY|O_NONBLOCK`, so a FIFO or other non-directory, including one
   reached through a symlink, is rejected without blocking. On Windows it

@@ -360,7 +360,7 @@ func (c *Controller) executeNativeUpdateCheck(ctx context.Context, lifetime *nat
 		return entry
 	}
 	started := time.Now()
-	result := c.runNativeUpdateCheck(ctx, lifetime, lookup)
+	result, launched := c.runNativeUpdateCheck(ctx, lifetime, lookup)
 	entry := newNativeUpdateCheckEntry(result, now)
 	if c.logger != nil {
 		c.logger.Debug("native update check finished",
@@ -368,16 +368,21 @@ func (c *Controller) executeNativeUpdateCheck(ctx context.Context, lifetime *nat
 			zap.String("reason", string(result.Reason)), zap.Duration("duration", time.Since(started)))
 	}
 	// A result whose executable or configuration changed during the wait or
-	// the run describes another identity and is returned without caching.
-	if c.nativeUpdateCheckIdentity(lookup.agentName, lookup.currentVersion, lookup.spec).identity == lookup.identity {
+	// the run describes another identity and is returned without caching. The
+	// launched executable must be the prepared one, and the identity observed
+	// after the run must still match.
+	if launched == lookup.executable &&
+		c.nativeUpdateCheckIdentity(lookup.agentName, lookup.currentVersion, lookup.spec).identity == lookup.identity {
 		c.storeNativeUpdateCheckEntry(lookup, entry)
 	}
 	return entry
 }
 
-func (c *Controller) runNativeUpdateCheck(ctx context.Context, lifetime *nativeCheckLifetime, lookup nativeUpdateCheckLookup) agents.NativeUpdateCheckResult {
+// runNativeUpdateCheck returns the normalized result and the executable the
+// runner actually launched (empty when nothing was launched).
+func (c *Controller) runNativeUpdateCheck(ctx context.Context, lifetime *nativeCheckLifetime, lookup nativeUpdateCheckLookup) (agents.NativeUpdateCheckResult, string) {
 	if lookup.executable == "" {
-		return agents.NativeUpdateCheckResult{State: agents.NativeUpdateCheckStateUnknown, Reason: agents.NativeUpdateCheckReasonNotInstalled}
+		return agents.NativeUpdateCheckResult{State: agents.NativeUpdateCheckStateUnknown, Reason: agents.NativeUpdateCheckReasonNotInstalled}, ""
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -385,9 +390,9 @@ func (c *Controller) runNativeUpdateCheck(ctx context.Context, lifetime *nativeC
 	defer stop()
 	run := c.nativeRunner().Run(runCtx, lookup.spec.Command)
 	if run.Reason != "" {
-		return agents.NativeUpdateCheckResult{State: agents.NativeUpdateCheckStateUnknown, Reason: run.Reason}
+		return agents.NativeUpdateCheckResult{State: agents.NativeUpdateCheckStateUnknown, Reason: run.Reason}, run.Executable
 	}
-	return normalizeNativeUpdateCheck(lookup.spec.Parse(run.Output), lookup.currentVersion)
+	return normalizeNativeUpdateCheck(lookup.spec.Parse(run.Output), lookup.currentVersion), run.Executable
 }
 
 // normalizeNativeUpdateCheck rejects a result about another installation than
@@ -454,13 +459,17 @@ func (c *Controller) storeNativeUpdateCheckEntry(lookup nativeUpdateCheckLookup,
 }
 
 // nativeUpdateCheckView is the DTO projection shared by status and preview.
+// observed reports whether runtimeVersion is the version the accepted
+// observation used.
 type nativeUpdateCheckView struct {
-	state     dto.AgentUpdateCheckState
-	latest    string
-	current   string
-	channel   string
-	reason    dto.AgentUpdateCheckReason
-	checkedAt *time.Time
+	state          dto.AgentUpdateCheckState
+	latest         string
+	current        string
+	channel        string
+	reason         dto.AgentUpdateCheckReason
+	checkedAt      *time.Time
+	runtimeVersion string
+	observed       bool
 }
 
 func nativeUpdateCheckViewFor(entry runtimeUpdateStatusCacheEntry, eligible bool) nativeUpdateCheckView {
@@ -497,10 +506,16 @@ func (v nativeUpdateCheckView) applyStatus(status *dto.AgentUpdateStatusDTO) {
 	}
 }
 
+// When the preview made an observation, its runtime version is projected and
+// drives the operation, matching the version that keyed the result.
 func (v nativeUpdateCheckView) applyPreview(preview *dto.AgentUpdatePreviewDTO) {
 	preview.CheckSource = dto.AgentUpdateCheckSourceNative
 	preview.CheckState, preview.LatestVersion = v.state, v.latest
 	preview.UpdateChannel, preview.CheckReason = v.channel, v.reason
+	if v.observed {
+		preview.CurrentVersion, preview.EffectiveVersion = v.runtimeVersion, v.runtimeVersion
+		preview.Operation = harnessUpdateOperation(v.runtimeVersion)
+	}
 	if preview.CurrentVersion == "" {
 		preview.CurrentVersion = v.current
 	}
@@ -523,5 +538,7 @@ func (c *Controller) previewNativeUpdateCheck(ctx context.Context, ag agents.Age
 		return nativeUpdateCheckViewFor(runtimeUpdateStatusCacheEntry{}, false)
 	}
 	lookup := c.prepareNativeUpdateCheck(ag.ID(), spec)
-	return nativeUpdateCheckViewFor(c.nativeUpdateCheckEntry(ctx, lookup, c.runtimeUpdateStatusTime()), true)
+	view := nativeUpdateCheckViewFor(c.nativeUpdateCheckEntry(ctx, lookup, c.runtimeUpdateStatusTime()), true)
+	view.runtimeVersion, view.observed = lookup.currentVersion, true
+	return view
 }

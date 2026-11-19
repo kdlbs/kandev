@@ -148,7 +148,8 @@ func (r *fakeNativeCheckRunner) gated() (started <-chan struct{}, release func()
 // countingHarnessUpdater records stable-reference lookups.
 type countingHarnessUpdater struct {
 	harnessTestUpdater
-	stableLookups int
+	stableLookups   int
+	versionSequence []string
 }
 
 func (u *countingHarnessUpdater) ResolveHarnessLatest(ctx context.Context, pkg string) (string, error) {
@@ -169,6 +170,28 @@ func (u *countingHarnessUpdater) setACPVersion(version string) {
 	defer u.mu.Unlock()
 	u.current = hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: version}
 	u.currentFound = true
+}
+
+// sequenceACPVersions makes successive CurrentCapabilities calls report the
+// given versions; the last one repeats.
+func (u *countingHarnessUpdater) sequenceACPVersions(versions ...string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.versionSequence = versions
+}
+
+func (u *countingHarnessUpdater) CurrentCapabilities(agentName string) (hostutility.AgentCapabilities, bool) {
+	u.mu.Lock()
+	if len(u.versionSequence) > 0 {
+		version := u.versionSequence[0]
+		if len(u.versionSequence) > 1 {
+			u.versionSequence = u.versionSequence[1:]
+		}
+		u.current = hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: version}
+		u.currentFound = version != ""
+	}
+	u.mu.Unlock()
+	return u.harnessTestUpdater.CurrentCapabilities(agentName)
 }
 
 type nativeCheckHarness struct {

@@ -133,6 +133,9 @@ func (c *Controller) runtimeUpdateStatusEntries(
 				continue
 			}
 			lookup := c.prepareNativeUpdateCheck(target.agentName, *target.nativeCheck)
+			// Project the runtime version this observation used, so the DTO
+			// agrees with the version that keyed and normalized the result.
+			targets[i].currentVersion, targets[i].effectiveVersion = lookup.currentVersion, lookup.currentVersion
 			keys[i] = lookup.key
 			lookups[lookup.key] = func() runtimeUpdateStatusCacheEntry { return c.nativeUpdateCheckEntry(ctx, lookup, now) }
 		case target.packageName != "" && target.available && target.enabled:
