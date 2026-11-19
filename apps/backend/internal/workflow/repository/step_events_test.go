@@ -32,7 +32,15 @@ func reviewerExcluded(t *testing.T, repo *Repository, id string) bool {
 }
 
 func TestUpdateStepEventsIfUnchanged_WritesEventsOnlyAndReturnsNewVersion(t *testing.T) {
-	repo := setupTestRepo(t)
+	exerciseStepEventsWrite(t, setupTestRepo(t))
+}
+
+func TestUpdateStepEventsIfUnchanged_StaleStepWritesNothing(t *testing.T) {
+	exerciseStaleStepEventsWrite(t, setupTestRepo(t))
+}
+
+func exerciseStepEventsWrite(t *testing.T, repo *Repository) {
+	t.Helper()
 	ctx := context.Background()
 	step := seatEventsStep("step-a", "Review")
 	if err := repo.CreateStep(ctx, step); err != nil {
@@ -61,8 +69,8 @@ func TestUpdateStepEventsIfUnchanged_WritesEventsOnlyAndReturnsNewVersion(t *tes
 	}
 }
 
-func TestUpdateStepEventsIfUnchanged_StaleStepWritesNothing(t *testing.T) {
-	repo := setupTestRepo(t)
+func exerciseStaleStepEventsWrite(t *testing.T, repo *Repository) {
+	t.Helper()
 	ctx := context.Background()
 	for _, s := range []*models.WorkflowStep{seatEventsStep("step-a", "A"), seatEventsStep("step-b", "B")} {
 		if err := repo.CreateStep(ctx, s); err != nil {

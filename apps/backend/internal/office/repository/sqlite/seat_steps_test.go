@@ -36,11 +36,11 @@ func exerciseSeatSteps(t *testing.T, repo *sqlite.Repository) {
 	now := time.Now().UTC()
 	for _, wf := range []struct {
 		id, ws, name string
-		hidden       bool
+		hidden       int // workflows.hidden is an integer column on both databases.
 	}{
-		{"wf-office", "ws-a", "Office Default", true},
-		{"wf-custom", "ws-a", "Custom", false},
-		{"wf-other", "ws-b", "Elsewhere", false},
+		{"wf-office", "ws-a", "Office Default", 1},
+		{"wf-custom", "ws-a", "Custom", 0},
+		{"wf-other", "ws-b", "Elsewhere", 0},
 	} {
 		if _, err := repo.ExecRaw(ctx,
 			`INSERT INTO workflows (id, workspace_id, name, hidden, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
