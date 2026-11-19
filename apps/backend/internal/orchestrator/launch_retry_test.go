@@ -236,6 +236,84 @@ func TestTransientLaunchRetry_RealRecoverSessionPreservesResumeToken(t *testing.
 		"a retried launch that fails again is not retried a second time")
 }
 
+func TestTransientLaunchRetryWaitsForFreshAgentStart(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	const taskID, sessionID = "task-retry-fresh", "session-retry-fresh"
+	seedRetryableResumeSession(t, repo, taskID, sessionID, "")
+	require.NoError(t, repo.UpdateTaskState(ctx, taskID, v1.TaskStateFailed))
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateFailed
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	taskRepo.tasks[taskID] = &v1.Task{
+		ID: taskID, WorkspaceID: "ws1", WorkflowID: "wf1", State: v1.TaskStateFailed,
+	}
+	taskRepo.updateIfSessionState = func(updateCtx context.Context, id, _ string, _ models.TaskSessionState, state v1.TaskState) (bool, error) {
+		taskRepo.mu.Lock()
+		taskRepo.tasks[id].State = state
+		taskRepo.mu.Unlock()
+		return true, repo.UpdateTaskState(updateCtx, id, state)
+	}
+
+	startEntered := make(chan context.Context, 1)
+	startResult := make(chan error, 1)
+	releaseStart := make(chan struct{})
+	var releaseStartOnce sync.Once
+	defer releaseStartOnce.Do(func() { close(releaseStart) })
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-fresh-retry", Status: v1.AgentStatusStarting}, nil
+		},
+		startAgentProcessFunc: func(startCtx context.Context, _ string) error {
+			session, getErr := repo.GetTaskSession(context.Background(), sessionID)
+			if getErr != nil {
+				startResult <- getErr
+				return getErr
+			}
+			session.State = models.TaskSessionStateWaitingForInput
+			session.UpdatedAt = time.Now().UTC()
+			if updateErr := repo.UpdateTaskSession(context.Background(), session); updateErr != nil {
+				startResult <- updateErr
+				return updateErr
+			}
+			// Readiness can be visible before the asynchronous start call returns.
+			startEntered <- startCtx
+			select {
+			case <-releaseStart:
+				startResult <- nil
+				return nil
+			case <-startCtx.Done():
+				startResult <- startCtx.Err()
+				return startCtx.Err()
+			}
+		},
+		isAgentReadyFn: func(context.Context, string) bool { return true },
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
+	svc.launchRetryDelay = time.Millisecond
+	svc.scheduleTransientLaunchRetry(ctx, taskID, sessionID, errors.New("agentctl not ready"))
+
+	var startCtx context.Context
+	select {
+	case startCtx = <-startEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("automatic fresh-start retry did not start the agent process")
+	}
+	require.Never(t, func() bool { return startCtx.Err() != nil }, 100*time.Millisecond, 5*time.Millisecond,
+		"the retry worker must keep startup context alive until StartAgentProcess returns")
+	releaseStartOnce.Do(func() { close(releaseStart) })
+	select {
+	case startErr := <-startResult:
+		require.NoError(t, startErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("agent startup did not settle")
+	}
+	svc.launchRetries.Wait()
+}
+
 func seedRetryableResumeSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, resumeToken string) {
 	t.Helper()
 	ctx := context.Background()

@@ -81,3 +81,9 @@ bash scripts/lint-go-changed $(git diff --name-only origin/main -- 'apps/backend
   passed with and without `-race`. Specification validation and specification
   lint passed. The changed-package Go lint passed for the orchestrator and
   executor packages. Focused executor launch-failure tests passed.
+- Review follow-up: tests confirm that a transient `LaunchAgent` error during
+  workspace-only preparation records both failed states without scheduling an
+  agent retry. A fresh-start retry also retains its startup context until the
+  agent start settles. The focused retry suite passed with and without `-race`.
+  `scripts/lint-go-changed` reported no issues. Specification validation and
+  specification lint passed.

@@ -2396,7 +2396,7 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 			}
 			e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
 			repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, err)
-			return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
+			return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, startAgent, err)
 		}
 
 		// Create or update the task environment with launch results
@@ -2404,7 +2404,7 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 			e.cleanupUnstartedExecutionAfterPersistError(launchCtx, sessionID, resp.AgentExecutionID, err)
 			e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
 			repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, err)
-			return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
+			return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, startAgent, err)
 		}
 		if startAgent && req.BeforeAgentStart != nil {
 			if err := req.BeforeAgentStart(launchCtx, resp.AgentExecutionID, req.TaskDescription); err != nil {
@@ -2651,6 +2651,7 @@ func resumeTokenForExecutionProfile(running *models.ExecutorRunning, profileID s
 func (e *Executor) handleLaunchFailure(
 	ctx context.Context,
 	taskID, sessionID, repositoryID, taskRepositoryID string,
+	startAgent bool,
 	launchErr error,
 ) error {
 	// Detach from caller context so failure bookkeeping completes even if the
@@ -2664,7 +2665,7 @@ func (e *Executor) handleLaunchFailure(
 			e.logger.Warn("failed to mark task as failed after launch error",
 				zap.String("task_id", taskID),
 				zap.Error(updateErr))
-		} else if e.onLaunchFailureRecorded != nil {
+		} else if startAgent && e.onLaunchFailureRecorded != nil {
 			e.onLaunchFailureRecorded(failCtx, taskID, sessionID, safeErr, failureStamp)
 		}
 	}

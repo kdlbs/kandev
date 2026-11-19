@@ -1198,8 +1198,8 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		DeferInitialPrompt:               req.DeferRecoveryResolution,
 		RecoveryAction:                   req.RecoveryAction,
 		InitialPromptOverride:            req.InitialPromptOverride,
-		StartAgentSynchronously: req.DeferRecoveryResolution &&
-			(req.ForceContextContinuation || req.RecoveryAction == recoveryActionResume),
+		StartAgentSynchronously: req.transientLaunchFailure != nil ||
+			(req.DeferRecoveryResolution && (req.ForceContextContinuation || req.RecoveryAction == recoveryActionResume)),
 	}
 	if req.transientLaunchFailure != nil {
 		resumeOptions.TransientRetryAttemptID = req.transientLaunchFailure.attemptID

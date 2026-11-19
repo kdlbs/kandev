@@ -58,7 +58,9 @@ The worker runs under a service-owned context (`launchRetryCtx`).
 `Service.Stop` cancels and waits for that worker generation. `Service.Start`
 opens a new generation. The retry deadline remains attached to the resume
 attempt, so shutdown can cancel a launch already in progress. A second failure
-is logged and leaves the task `FAILED`.
+is logged and leaves the task `FAILED`. The automatic retry starts the agent
+synchronously. The worker therefore keeps its deadline until startup settles,
+while the resume attempt still accepts shutdown cancellation.
 
 ## Failure and recovery
 
