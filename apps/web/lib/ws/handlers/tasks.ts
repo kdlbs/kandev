@@ -360,6 +360,10 @@ function handleTaskUpsert(
   }
 
   const beforeState = store.getState();
+  const previousPrimary =
+    action === "task.state_changed"
+      ? (findTaskInState(beforeState, message.payload.task_id)?.primarySessionId ?? null)
+      : null;
   store.setState((state) =>
     bumpSidebarTaskQueryRevision(
       upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload),
@@ -370,6 +374,8 @@ function handleTaskUpsert(
     ),
   );
   logTaskMerge(action, beforeState, store.getState(), message.payload);
+  store.getState().reconcileWorkflowSessionFocus?.(message.payload.task_id);
+  followUpdatedTaskPrimary(store, message.payload.task_id, previousPrimary);
 }
 
 export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {

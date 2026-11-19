@@ -33,14 +33,13 @@ Task 02 repairs both automatic selection paths, retaining the failed view and
 its recovery controls while normal acknowledgement catches up. Unread scope,
 backend primary promotion, and completed/cancelled handoff remain unchanged.
 
-Generic primary-follow verifies the previous session's authoritative state
-before changing focus; a matching accepted completion/cancellation can settle
-the same owned target first. This does not depend on primary/failure frame order:
-hub routing and session-message barriers can invert an ordered callback stream.
-Verification owns a navigation/selection intent, aborts when superseded, and
-never hydrates session/cursor state from its response. The tradeoff is one
-session GET for an eligible generic primary change; explicit workflow focus
-still applies immediately through its existing committed-recipient path.
+Generic primary-follow reads authoritative predecessor state before changing
+focus. Terminal snapshots and unseen siblings defer to an owned authoritative check.
+Accepted primary projections retarget the owned decision even when another
+event cached the target first. A 404 needs task-scoped membership proof of
+removal, not a generic error fallback. Superseded reads cannot hydrate session
+or cursor state, displace a newer pin, or select an older target. Explicit
+workflow focus still owns its existing committed-recipient path.
 
 ## Evidence and confidence
 
@@ -273,7 +272,7 @@ the same causal scenario after Task 01 proves a violation:
 Execute sequentially. No subagent authorization is implied.
 
 - [x] [Task 01: Establish the inactive-session failure boundary](task-01-establish-failure-boundary.md) (done: conformance, no violation reproduced).
-- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: FAILED state handoff is retained and generic primary-follow verifies authoritative previous-session state. R1 changed Go gateway routing and added queue-model evidence; R2 superseded that transport-only experiment with consumer-side verification. Scoped Go race checks are recorded in Results; no live NATS-server validation or clean broad backend suite is claimed).
+- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: retain failed focus, verify predecessor state/removal, and retarget owned primary changes. See Results for scoped checks; broad suites and live NATS-server ordering remain uncertified).
 
 The prior [task unread dot package](../task-unread-dot/plan.md) is historical
 completed delivery. The [visible-visit divider package](../unread-divider-visible-session-clear/plan.md)
@@ -516,5 +515,12 @@ fix. It is separate from the five design-only rounds above.
   runnable narrow command omits the deterministic regression), accepted.
   R3 coordinates accepted terminal notifications with the owned target and makes
   empty workflow cancellation a no-op; see Task 02 Results.
-- Completed rounds: 3. Consecutive clean: 0. The stop condition is three
+- Round 4: Sol child `354fcc20-781c-4a11-b795-11803504f45c` reviewed
+  `4874a000ca`. Three P2 findings (old terminal snapshots bypass authority;
+  another accepted primary strands an owned follow; removed predecessors stay
+  selected after a 404), accepted and remediated. R4 withdraws the terminal
+  shortcut, reconciles primary projections, and proves removal through scoped
+  membership. Author checks: 804 focused tests, final authority replay 50,
+  desktop selection/unread/removal 34 and phone unread 3; see Task 02 Results.
+- Completed rounds: 4. Consecutive clean: 0. The stop condition is three
   consecutive clean rounds or 50 rounds. No earlier loop counts toward it.

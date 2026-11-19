@@ -1,17 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAppStore, type AppState } from "@/lib/state/store";
 import type { StoreApi } from "zustand";
-import type { TaskSession, TaskSessionResponse } from "@/lib/types/http";
+import type { TaskSession, TaskSessionResponse, TaskSessionsResponse } from "@/lib/types/http";
 import type * as SessionApi from "@/lib/api/domains/session-api";
-import { fetchTaskSession } from "@/lib/api/domains/session-api";
+import { fetchTaskSession, listTaskSessions } from "@/lib/api/domains/session-api";
+import { ApiError } from "@/lib/api/client";
 import { getSessionRestartStore } from "@/lib/session/session-restart-state";
 import { registerTaskSessionHandlers } from "./agent-session";
 import { registerTasksHandlers } from "./tasks";
-import { makeMessage, makeTask } from "./tasks.test-helpers";
+import { makeMessage, makeStateChangedMessage, makeTask } from "./tasks.test-helpers";
+
+const SESSION_STATE_CHANGED = "session.state_changed";
 
 vi.mock("@/lib/api/domains/session-api", async (original) => ({
   ...(await original<typeof SessionApi>()),
   fetchTaskSession: vi.fn(),
+  listTaskSessions: vi.fn(),
 }));
 
 function response(state: TaskSession["state"], id = "old", taskId = "t1"): TaskSessionResponse {
@@ -53,15 +57,58 @@ function promote(store: StoreApi<AppState>, sessionId = "next") {
   registerTasksHandlers(store)["task.updated"]!(makeMessage(makeTask("t1", sessionId)));
 }
 function fail(store: StoreApi<AppState>) {
-  registerTaskSessionHandlers(store)["session.state_changed"]!({
+  registerTaskSessionHandlers(store)[SESSION_STATE_CHANGED]!({
     id: "failed",
     type: "notification",
-    action: "session.state_changed",
+    action: SESSION_STATE_CHANGED,
     payload: { task_id: "t1", session_id: "old", new_state: "FAILED" },
   });
 }
 
-beforeEach(() => vi.clearAllMocks());
+function notifyState(
+  store: StoreApi<AppState>,
+  state: NonNullable<TaskSession["state"]>,
+  updatedAt: string,
+) {
+  registerTaskSessionHandlers(store)[SESSION_STATE_CHANGED]!({
+    id: "state",
+    type: "notification",
+    action: SESSION_STATE_CHANGED,
+    payload: { task_id: "t1", session_id: "old", new_state: state, updated_at: updatedAt },
+  });
+}
+
+function notifySibling(store: StoreApi<AppState>) {
+  registerTaskSessionHandlers(store)[SESSION_STATE_CHANGED]!({
+    id: "new-session",
+    type: "notification",
+    action: SESSION_STATE_CHANGED,
+    payload: { task_id: "t1", session_id: "latest", new_state: "WAITING_FOR_INPUT" },
+  });
+}
+
+function membership(...ids: string[]): TaskSessionsResponse {
+  return {
+    sessions: ids.map((id) => response("WAITING_FOR_INPUT", id).session),
+    total: ids.length,
+  };
+}
+
+// Resolved HTTP chains settle before assertions of no selection change.
+async function flushFocusWork(): Promise<void> {
+  vi.useFakeTimers();
+  try {
+    await vi.advanceTimersByTimeAsync(0);
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(fetchTaskSession).mockReset();
+  vi.mocked(listTaskSessions).mockReset();
+});
 
 // @covers AC-TASKS-TASK-UNREAD-DOT-001.6
 // @covers AC-TASKS-TASK-UNREAD-DOT-001.8
@@ -261,13 +308,13 @@ describe("primary follow coordination", () => {
       const read = deferred();
       vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
       if (pending) promote(store);
-      registerTaskSessionHandlers(store)["session.state_changed"]!({
+      registerTaskSessionHandlers(store)[SESSION_STATE_CHANGED]!({
         id: "terminal",
         type: "notification",
-        action: "session.state_changed",
+        action: SESSION_STATE_CHANGED,
         payload: { task_id: "t1", session_id: "old", new_state: terminal },
       });
-      expect(store.getState().tasks.activeSessionId).toBe(expected);
+      expect(store.getState().tasks.activeSessionId).toBe(pending ? "old" : expected);
       read.resolve(response(terminal));
       await read.promise;
       expect(store.getState().tasks.activeSessionId).toBe(expected);
@@ -302,6 +349,253 @@ describe("primary follow coordination", () => {
     });
     expect(store.getState().tasks.activeTaskId).toBe("t1");
     read.resolve(response("WAITING_FOR_INPUT"));
+    await read.promise;
+    expect(store.getState().tasks.activeSessionId).toBe("next");
+  });
+});
+
+describe("primary follow durable authority", () => {
+  it.each([
+    ["COMPLETED", "terminal-first"],
+    ["CANCELLED", "terminal-first"],
+    ["COMPLETED", "read-first"],
+    ["CANCELLED", "read-first"],
+  ] as const)(
+    "keeps a failed predecessor after an old %s snapshot, %s",
+    async (terminal, order) => {
+      const store = selectedStore(terminal);
+      const oldTime = "2026-11-19T12:00:00Z";
+      const failedTime = "2026-11-19T12:00:02Z";
+      store.getState().setTaskSession({
+        ...response(terminal).session,
+        started_at: oldTime,
+        updated_at: oldTime,
+      });
+      store.setState(({ taskSessions, taskSessionsByTask }) => ({
+        taskSessionsByTask: {
+          ...taskSessionsByTask,
+          itemsByTaskId: {
+            ...taskSessionsByTask.itemsByTaskId,
+            t1: ["old", "next", "latest"].map((id) => taskSessions.items[id]),
+          },
+        },
+      }));
+      const read = deferred();
+      vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
+      promote(store);
+      if (order === "read-first") {
+        read.resolve({ session: { ...response("FAILED").session, updated_at: failedTime } });
+        await read.promise;
+      }
+      notifyState(store, terminal, oldTime);
+      expect(store.getState().tasks.activeSessionId).toBe("old");
+      notifyState(store, "STARTING", "2026-11-19T12:00:01Z");
+      notifyState(store, "FAILED", failedTime);
+      if (order === "terminal-first") {
+        read.resolve({ session: { ...response("FAILED").session, updated_at: failedTime } });
+      }
+      await read.promise;
+      await flushFocusWork();
+      expect(store.getState().tasks.activeSessionId).toBe("old");
+    },
+  );
+
+  it("does not follow an older healthy response after FAILED was accepted", async () => {
+    const store = selectedStore();
+    const read = deferred();
+    vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
+    promote(store);
+    notifyState(store, "FAILED", "2026-11-19T12:00:02Z");
+    read.resolve(response("WAITING_FOR_INPUT"));
+    await read.promise;
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+  });
+});
+
+describe("primary projection reconciliation", () => {
+  it.each([false, true])("targets the latest state projection, newer pin=%s", async (pinned) => {
+    const store = selectedStore();
+    const first = deferred();
+    const latest = deferred();
+    vi.mocked(fetchTaskSession).mockReturnValueOnce(first.promise).mockReturnValue(latest.promise);
+    promote(store);
+    const projection = {
+      ...makeTask("t1", "latest"),
+      updated_at: "2026-11-19T12:00:03Z",
+    };
+    const handlers = registerTasksHandlers(store);
+    handlers["task.state_changed"]!(makeStateChangedMessage(projection));
+    handlers["task.updated"]!(makeMessage(projection));
+    if (pinned) store.getState().setActiveSession("t1", "next");
+    latest.resolve(response("WAITING_FOR_INPUT"));
+    await latest.promise;
+    expect(store.getState().tasks.activeSessionId).toBe(pinned ? "next" : "latest");
+    first.resolve(response("WAITING_FOR_INPUT"));
+    await first.promise;
+    expect(store.getState().tasks.activeSessionId).toBe(pinned ? "next" : "latest");
+  });
+
+  it("retargets an owned follow when a creation snapshot refreshes its primary", async () => {
+    const store = selectedStore();
+    const first = deferred();
+    const latest = deferred();
+    vi.mocked(fetchTaskSession).mockReturnValueOnce(first.promise).mockReturnValue(latest.promise);
+    promote(store);
+    const projection = makeTask("t1", "latest");
+    registerTasksHandlers(store)["task.created"]!({
+      ...makeMessage(projection),
+      action: "task.created",
+    });
+    latest.resolve(response("WAITING_FOR_INPUT"));
+    await latest.promise;
+    expect(store.getState().tasks.activeSessionId).toBe("latest");
+    first.resolve(response("WAITING_FOR_INPUT"));
+    await first.promise;
+    expect(store.getState().tasks.activeSessionId).toBe("latest");
+  });
+
+  it("does not initiate a follow from a creation snapshot alone", async () => {
+    const store = selectedStore();
+    const read = deferred();
+    vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
+    registerTasksHandlers(store)["task.created"]!({
+      ...makeMessage(makeTask("t1", "latest")),
+      action: "task.created",
+    });
+    read.resolve(response("WAITING_FOR_INPUT"));
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+  });
+});
+
+describe("confirmed primary removal", () => {
+  it("follows only after task-scoped membership proves the old session is absent", async () => {
+    const store = selectedStore("COMPLETED");
+    const read = deferred();
+    const members = Promise.withResolvers<TaskSessionsResponse>();
+    vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
+    vi.mocked(listTaskSessions).mockReturnValue(members.promise);
+    promote(store);
+    read.reject(new ApiError("", 404, null));
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+    members.resolve(membership("next", "latest"));
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("next");
+    expect(store.getState().taskSessions.items.old).toBeUndefined();
+  });
+
+  it.each([
+    membership("old", "next"),
+    membership("latest"),
+    { ...membership("next"), total: 2 },
+    membership("next", "next"),
+    { sessions: [response("WAITING_FOR_INPUT", "next", "foreign").session], total: 1 },
+  ])("retains the view for incomplete or ambiguous membership: %j", async (members) => {
+    const store = selectedStore();
+    const read = deferred();
+    vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
+    vi.mocked(listTaskSessions).mockResolvedValue(members);
+    promote(store);
+    read.reject(new ApiError("", 404, null));
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+    expect(store.getState().taskSessions.items.old?.id).toBe("old");
+  });
+
+  it("does not mistake a generic read failure for removal", async () => {
+    const store = selectedStore();
+    const read = deferred();
+    vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
+    vi.mocked(listTaskSessions).mockResolvedValue(membership("next"));
+    promote(store);
+    read.reject(new ApiError("server unavailable", 503, null));
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+  });
+
+  it("does not displace a newer pin with a delayed absence proof", async () => {
+    const store = selectedStore();
+    const read = deferred();
+    const members = Promise.withResolvers<TaskSessionsResponse>();
+    vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
+    vi.mocked(listTaskSessions).mockReturnValue(members.promise);
+    promote(store);
+    read.reject(new ApiError("", 404, null));
+    await flushFocusWork();
+    store.getState().setActiveSession("t1", "latest");
+    members.resolve(membership("next"));
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("latest");
+  });
+});
+
+describe("removed primary proof ownership", () => {
+  it("preserves the view when membership cannot be read", async () => {
+    const store = selectedStore();
+    const read = deferred();
+    vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
+    vi.mocked(listTaskSessions).mockRejectedValue(new ApiError("unavailable", 503, null));
+    promote(store);
+    read.reject(new ApiError("", 404, null));
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+    expect(store.getState().taskSessions.items.old?.id).toBe("old");
+  });
+
+  it.each(["old-first", "new-first"])(
+    "keeps retargeted absence proofs scoped: %s",
+    async (order) => {
+      const store = selectedStore();
+      const oldMembers = Promise.withResolvers<TaskSessionsResponse>();
+      const newMembers = Promise.withResolvers<TaskSessionsResponse>();
+      vi.mocked(fetchTaskSession).mockRejectedValue(new ApiError("", 404, null));
+      vi.mocked(listTaskSessions)
+        .mockReturnValueOnce(oldMembers.promise)
+        .mockReturnValue(newMembers.promise);
+      promote(store);
+      await flushFocusWork();
+      registerTasksHandlers(store)["task.state_changed"]!(
+        makeStateChangedMessage(makeTask("t1", "latest")),
+      );
+      await flushFocusWork();
+      if (order === "old-first") {
+        oldMembers.resolve(membership("next", "latest"));
+        await flushFocusWork();
+        expect(store.getState().tasks.activeSessionId).toBe("old");
+      }
+      newMembers.resolve(membership("latest", "next"));
+      await flushFocusWork();
+      expect(store.getState().tasks.activeSessionId).toBe("latest");
+      if (order === "new-first") {
+        oldMembers.resolve(membership("next", "latest"));
+        await flushFocusWork();
+        expect(store.getState().tasks.activeSessionId).toBe("latest");
+      }
+    },
+  );
+});
+
+describe("newly observed sessions", () => {
+  it.each(["FAILED", "COMPLETED", "CANCELLED", "IDLE"] as const)(
+    "preserves failed focus but retains normal adoption after %s",
+    (state) => {
+      const store = selectedStore(state);
+      store.getState().removeTaskSession("t1", "latest");
+      notifySibling(store);
+      expect(store.getState().tasks.activeSessionId).toBe(state === "FAILED" ? "old" : "latest");
+    },
+  );
+
+  it("does not let an unseen sibling bypass an owned authoritative read", async () => {
+    const store = selectedStore("COMPLETED");
+    store.getState().removeTaskSession("t1", "latest");
+    const read = deferred();
+    vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
+    promote(store);
+    notifySibling(store);
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+    read.resolve(response("COMPLETED"));
     await read.promise;
     expect(store.getState().tasks.activeSessionId).toBe("next");
   });

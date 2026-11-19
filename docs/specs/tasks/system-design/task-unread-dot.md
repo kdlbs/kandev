@@ -206,35 +206,45 @@ list-load reconciliation must agree. Verify the persisted cursor and the row
 after leaving and returning: hiding the displayed session's dot alone does not
 prove that acknowledgement succeeded.
 
-A displayed session that fails keeps focus. Opening a task can resume its
-displayed session; a failed resume writes a qualifying resume boot row and a
-recovery card, then the backend promotes another active session to primary.
-`maybeAdoptSessionOnTransition` (`lib/ws/handlers/agent-session.ts`) does not
-hand off from a session entering `FAILED`, and `task.updated` primary-follow
-(`lib/ws/handlers/tasks.ts`) does not leave a `FAILED` previous primary.
-Generic primary-follow verifies the previously displayed session through the
-existing session GET endpoint with `cache: "no-store"`, unless a matching
-accepted non-failed terminal notification settles the same pending target first.
-Its task/session identity must match and its authoritative state must not be
-`FAILED`. Cached non-failed state is insufficient: workspace fan-out and client
-message barriers can deliver a primary update before the failed-state frame.
-Missing or failed readback preserves the current view without retries.
-The pending read belongs to the current navigation, pin, workflow-focus intent,
-and selected session. Departure, selection changes (including away and back),
-restart, or a newer workflow intent aborts it. Successive primary changes replace
-the pending target and invalidate earlier responses. Readback is used only for
-focus eligibility, never to overwrite session/cursor state. Explicit committed
-workflow focus still precedes generic following; completed/cancelled handoff
-retains its behavior. This costs one session read for an eligible generic
-primary switch and needs neither a new payload schema nor transport ordering.
+A displayed session that fails keeps focus unless the user changes the view or
+the session is authoritatively removed. Opening a task can resume its displayed
+session; a failed resume writes a qualifying resume boot row and a recovery
+card, then the backend promotes another active session to primary.
+`maybeAdoptSessionOnTransition` (`lib/ws/handlers/agent-session.ts`) neither
+hands off from `FAILED` nor adopts an unseen sibling over a failed view.
 
-A matching accepted `COMPLETED`/`CANCELLED` notification consumes the still-owned
-promoted target before the ended-session handler's list fallback, then aborts
-the pending read. This also applies to accepted terminal replays. An unrelated
-eligible sibling cannot steal that selection. Without a pending follow, the
-existing terminal fallback remains unchanged; `FAILED` never settles a follow.
-An empty workflow-focus cancellation preserves state identity, so deletion of an
-unrelated task does not invalidate an otherwise healthy pending follow.
+Generic primary-follow (`lib/ws/handlers/task-primary-focus.ts`) verifies the
+previously displayed session through the existing session GET with
+`cache: "no-store"`. Identity must match, the returned state must not be `FAILED`,
+and the check must not override a cached FAILED observation.
+Workspace fan-out and client barriers can reorder a primary update and lifecycle
+frames. Even an accepted terminal snapshot can predate the durable resume failure.
+Terminal notifications and newly observed siblings defer automatic selection
+to the owned primary check and restart verification. They never authorize it
+themselves while that check is owned.
+
+The guard belongs to navigation, pin, workflow-focus intent, restart state and
+the selected session. A denied or uncertain read preserves both the view and
+the guard until ownership changes. There is no timer/retry loop. A new accepted
+primary or terminal observation starts fresh verification and invalidates older
+responses. Explicit committed workflow focus still precedes generic following.
+
+Primary projections accepted through `task.updated` or `task.state_changed`
+reconcile an existing follow against the latest target and original predecessor.
+Creation snapshots can retarget an already-owned follow but do not initiate one.
+An already-cached primary must not strand an older target. Without an owned
+follow, the normal terminal list fallback remains unchanged. Empty workflow
+cancellation preserves identity, so unrelated task deletion does not invalidate
+the selected task's follow.
+
+A session GET returning 404 is not proof that the predecessor was deleted.
+The existing task-scoped session list must succeed with a complete count,
+task-matching rows, no predecessor, and exactly one projected replacement.
+Only that absence proof permits selection and retirement/eviction of the removed
+session's cached resources. Generic errors and ambiguous membership preserve
+the view. Remaining session/cursor data is never hydrated from these reads.
+The cost is one session GET per relevant observation and, after a 404, one
+membership read; no payload schema, unread predicate, or transport ordering change.
 
 An unread failed sibling that was never displayed is not evidence of a failed
 cursor write. It remains unread under AC .2, .9, .12, and .17. Preserve this

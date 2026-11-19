@@ -195,8 +195,8 @@ cd "$VERIFY"
   lib/ws/handlers/tasks.test.ts \
   lib/state/workflow-session-focus.test.ts \
   lib/task-agent-error.test.ts)
-(cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/task/task-unread-dot.spec.ts)
-(cd apps/web && pnpm e2e:run --host --shards 1 --project mobile-chrome tests/task/mobile-task-unread-dot.spec.ts)
+(cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/task/task-unread-dot.spec.ts tests/session/session-primary-removal.spec.ts -- --retries=0)
+(cd apps/web && pnpm e2e:run --host --shards 1 --project mobile-chrome tests/task/mobile-task-unread-dot.spec.ts -- --retries=0)
 make fmt
 make typecheck test lint
 python3 scripts/list-docs.py validate
@@ -240,6 +240,8 @@ Shared verification and delivery records:
 - `apps/web/e2e/helpers/unread-divider.ts`
 - `apps/web/e2e/tests/task/task-unread-dot.spec.ts`
 - `apps/web/e2e/tests/task/mobile-task-unread-dot.spec.ts`
+- `apps/web/e2e/tests/session/session-primary-removal.spec.ts`
+  (real two-context deletion and no-reload follow).
 - `docs/specs/tasks/system-design/task-unread-dot.md` (failed-session focus).
 - This work order and `plan.md` statuses/results.
 - `docs/public/operations.md` (failed startup/resume stays visible).
@@ -440,6 +442,9 @@ R2 verification, in the cache-backed working-tree snapshot:
 
 ### Production-fix review round 3 remediation
 
+The terminal-frame shortcut recorded below was withdrawn in R4. The other R3
+corrections remain; these results describe that earlier snapshot.
+
 F1: with a healthy predecessor and a held verification GET, a terminal frame
 could select the last eligible sibling instead of the already-promoted primary.
 The real-handler/store regression seeded a third eligible session and failed
@@ -497,6 +502,94 @@ pnpm run build:vite
 pnpm e2e:run --host --no-build --shards 1 --project chromium tests/task/task-unread-dot.spec.ts -- --retries=0 --output "$SNAPSHOT/r3-desktop-results"
 pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome tests/task/mobile-task-unread-dot.spec.ts -- --retries=0 --output "$SNAPSHOT/r3-mobile-results"
 pnpm e2e:run --host --no-build --shards 1 --project chromium tests/session/session-handoff.spec.ts -- --retries=0 --output "$SNAPSHOT/r3-handoff-results"
+```
+
+### Production-fix review round 4 remediation
+
+F1: an accepted terminal snapshot can still precede the server's resume failure.
+It now defers the legacy list fallback and starts fresh no-store verification,
+never selecting the projected sibling by itself. A denied/uncertain read keeps
+the view-owned guard, so a later old snapshot cannot bypass a completed FAILED
+read. Navigation, a newer pin/workflow intent, restart, task departure and a
+successful selection still release it. There is no retry timer.
+The unseen-sibling adoption branch also defers to an owned check and does not
+replace a cached FAILED view. Two additional RED cases (`r4-adoption-red.log`)
+exposed those bypasses; healthy completion/cancellation/idle adoption controls
+still passed.
+
+F2: every accepted primary projection reconciles an already-owned target using
+the original displayed predecessor, before considering equality with the
+immediately previous cached primary. `task.state_changed` can start a related
+follow when it actually changes that primary; creation snapshots only retarget
+existing follows. Superseding a target aborts its old read and starts a fresh
+one after the new projection. Duplicate updates do not create another follow.
+
+F3: on a session GET 404, a complete authenticated task-scoped membership read
+must exclude the predecessor and contain exactly one projected replacement,
+with matching task IDs and total count. Only then does the controller follow
+the still-current target, retire the old session's reads, and evict its caches.
+Generic errors, unreadable/incomplete/foreign membership, a still-present
+predecessor and newer user ownership all preserve the view. This does not rely
+on `session.removed` versus promotion delivery order: deletion commits before
+the promotion, and the query proves the current membership.
+
+The real-store RED run had 10 failures/30 passes (`r4-red.log`): old-snapshot
+selection, stranded retargeting, absent-session follow, and corrected
+terminal-before-read contract assertions. The new two-context browser case
+also failed against the R3 frontend: after the other client deleted the FAILED
+primary and the backend promoted its waiting sibling, the observer still
+displayed the removed ID (`r4-removal-red.log`). The test also requires a
+stable document time origin on success, excluding a reload as the repair.
+
+The runnable desktop commands include
+`tests/session/session-primary-removal.spec.ts`. R4 uses a fresh frontend with
+the unchanged recorded backend/plugin artifacts; regenerate ignored JSON through
+`pnpm run typecheck` before `pnpm run build:vite` when refreshing the snapshot.
+
+R4 verification:
+
+- The WS handlers plus workflow-focus, agent-error and focused read regressions
+  passed: 78 files / 804 tests (`r4-final-unit.log`). The final authority file
+  passed all 50 tests after fixture/lint cleanup (`r4-final-authority.log`).
+- Configured changed-file Oxlint with warnings denied, Prettier, typecheck,
+  fresh Vite build, i18n ratchet and architecture lint passed
+  (`r4-lint.log`, `r4-format.log`, `r4-typecheck.log`, `r4-build.log`,
+  `r4-i18n.log`, `r4-architecture.log`).
+- Docs catalog validation and full spec lint passed. Broad backend/frontend
+  suites and live NATS-server ordering are not certified by these checks.
+
+The exact expanded unit invocation was:
+
+```bash
+cd "$VERIFY/apps/web"
+pnpm exec vitest run lib/ws/handlers \
+  lib/state/workflow-session-focus.test.ts lib/task-agent-error.test.ts \
+  components/task/chat/use-session-read-tracking.test.ts \
+  components/task/task-unread-dot-visibility.test.ts \
+  lib/session-unread-divider.test.ts
+```
+
+Desktop E2E passed all 34 cases (`r4-desktop.log`), including the two-client
+removal regression, unread-dot, handoff, tab management, multi-session UX and
+session recovery. Phone unread-dot passed all 3 cases (`r4-phone.log`).
+Both used one worker, no retries, a fresh R4 frontend and unchanged recorded
+backend/plugin artifacts. The retained `phone-failed-resume.png` was inspected:
+the failure entry and recovery controls remain visible within the viewport.
+
+```bash
+cd "$VERIFY/apps/web"
+export TMPDIR=/home/clem/.cache/tmp GOTMPDIR=/home/clem/.cache/tmp
+pnpm e2e:run --host --no-build --shards 1 --project chromium \
+  tests/task/task-unread-dot.spec.ts \
+  tests/session/session-primary-removal.spec.ts \
+  tests/session/session-handoff.spec.ts \
+  tests/session/session-tab-management.spec.ts \
+  tests/session/multi-session-ux.spec.ts \
+  tests/session/session-recovery.spec.ts \
+  -- --retries=0 --output "$SNAPSHOT/r4-desktop-results"
+pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome \
+  tests/task/mobile-task-unread-dot.spec.ts \
+  -- --retries=0 --output "$SNAPSHOT/r4-phone-results"
 ```
 
 ## New reported incident: existing cursor behind a failed resume
@@ -618,6 +711,6 @@ pnpm exec vitest run \
   lib/ws/handlers/tasks.test.ts \
   lib/state/workflow-session-focus.test.ts \
   lib/task-agent-error.test.ts
-pnpm e2e:run --host --shards 1 --project chromium tests/task/task-unread-dot.spec.ts
-pnpm e2e:run --host --shards 1 --project mobile-chrome tests/task/mobile-task-unread-dot.spec.ts
+pnpm e2e:run --host --shards 1 --project chromium tests/task/task-unread-dot.spec.ts tests/session/session-primary-removal.spec.ts -- --retries=0
+pnpm e2e:run --host --shards 1 --project mobile-chrome tests/task/mobile-task-unread-dot.spec.ts -- --retries=0
 ```

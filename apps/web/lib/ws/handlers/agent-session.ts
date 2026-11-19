@@ -44,7 +44,7 @@ import {
   isTerminalSessionState,
   shouldPreservePinnedSessionForTask,
 } from "./session-selection";
-import { finishPrimaryFollowFromTerminal } from "./task-primary-focus";
+import { deferOwnedPrimaryFollow } from "./task-primary-focus";
 
 const debug = createDebugLogger("session:state");
 
@@ -106,9 +106,7 @@ function maybePromoteAgentctlReady(
  * as the task's active session.
  *
  * Adopts only when the current active session is missing, cross-task, parked
- * IDLE, or already terminal — not while a live session for the same task is
- * still running. A parked IDLE session has no live process, so a newly started
- * workflow session should replace it just like a terminal session.
+ * IDLE, completed, or cancelled. Failed sessions retain their recovery view.
  */
 export function shouldAdoptNewSession(
   state: AppState,
@@ -122,8 +120,8 @@ export function shouldAdoptNewSession(
     const activeSession = state.taskSessions.items[activeSessionId];
     if (
       activeSession?.task_id === taskId &&
-      activeSession.state !== "IDLE" &&
-      !isTerminalSessionState(activeSession.state)
+      (activeSession.state === "FAILED" ||
+        (activeSession.state !== "IDLE" && !isTerminalSessionState(activeSession.state)))
     ) {
       return false;
     }
@@ -362,6 +360,7 @@ function maybeAdoptSessionOnTransition(
   if (shouldPreserveSessionSelection(store, taskId, { sessionId, newState })) return;
 
   if (!wasKnownToStore && shouldAdoptNewSession(state, taskId, newState)) {
+    if (deferOwnedPrimaryFollow(store, taskId)) return;
     const oldSessionId = state.tasks.activeSessionId;
     if (oldSessionId) inheritAgentctlStatus(state, oldSessionId, sessionId);
     clearPinnedSessionIfOverridden(store, sessionId);
@@ -401,7 +400,7 @@ function handOffFromEndedSession(
     isTerminalSessionState(previousState)
   )
     return;
-  if (finishPrimaryFollowFromTerminal(store, taskId, sessionId)) return;
+  if (deferOwnedPrimaryFollow(store, taskId)) return;
   // Prefer a non-terminal session already in the per-task list; fall back to
   // the task's promoted primary when the switch's new session hasn't landed
   // there yet (task.updated beats the old session's terminal state_changed).
