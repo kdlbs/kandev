@@ -78,6 +78,7 @@ func (m *Manager) buildWorkspaceTrackerGraph(
 		for _, repo := range linkedRepos {
 			trackers = append(trackers, m.buildRepositoryScopeTrackers(ctx, repo, roots, workDir)...)
 		}
+		root.SetCheckoutRoots(workspaceCheckoutRoots(workDir, trackers))
 		return root, trackers
 	}
 
@@ -421,6 +422,7 @@ func (m *Manager) publishWorkspaceTrackerGraph(
 
 func syncTrackerConfiguration(target, source *WorkspaceTracker, roots []string) {
 	target.SetAllowedSourceRoots(roots)
+	target.SetCheckoutRoots(source.checkoutRootSnapshot())
 	targetComparison := source.ComparisonTargetSnapshot()
 	sourceComparison := source.ComparisonResolution()
 	if targetComparison != nil && sourceComparison.Status == comparisonTargetStatusReady && sourceComparison.Ref != "" {

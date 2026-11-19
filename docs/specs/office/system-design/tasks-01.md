@@ -59,7 +59,7 @@ schema change is part of the current design.
 - When a user creates a subtask from a Kanban task detail dialog, the dialog lets them choose to inherit the parent materialized workspace or create a new workspace from repositories, local folders, or remote URLs.
 - When the user chooses to inherit the parent workspace, the dialog can identify the parent session branch because the child shares that worktree and file state.
 - When the user chooses a new workspace, the dialog shows only the selected source and base-branch controls. It does not present the parent session branch as the branch of the isolated child workspace.
-- When an agent creates a subtask through `create_task_kandev`, the MCP surface mirrors that choice: subtasks inherit the parent materialized workspace by default, and `workspace_mode="new_workspace"` requests a fresh materialized workspace/worktree.
+- The task system defines caller eligibility and the materialization choices for [MCP subtask creation](../../tasks/requirements/mcp-workspace-mode.md).
 - Subtasks inheriting a parent materialized workspace are represented through the same **shared workspace group** model used by Office-created tasks.
 - Shared workspaces are visible in the UI: source task, member tasks, materialized path/environment, and whether tasks are ordered by dependencies.
 - Workspace sharing does not lock execution in v1. Sequential behavior is expressed through task blocker / dependency edges.

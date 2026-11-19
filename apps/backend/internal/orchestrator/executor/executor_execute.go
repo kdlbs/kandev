@@ -2968,6 +2968,9 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	repoBacked := e.taskIsRepoBacked(ctx, task.ID)
 	workspaceReuseRequired = workspaceReuseAllowed(existingEnv, req.ExecutorType, workspaceReuseRequired, repoBacked)
 	req.WorkspaceReuseRequired = workspaceReuseRequired
+	if !workspaceReuseRequired {
+		prepareFreshInheritedCheckoutMaterialization(allRepos)
+	}
 
 	// For remote executors (containerized *and* SSH), resolve only explicitly
 	// selected profile auth secrets. Workspace GitHub automation is configured
@@ -2985,6 +2988,9 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	metadata, err := e.applyRepositoryConfig(req, task, repoInfo, execConfig, metadata)
 	if err != nil {
 		return nil, execConfig, err
+	}
+	if req.UseWorktree && !req.WorkspaceReuseRequired {
+		applyFreshInheritedCheckoutIdentity(req, repoInfo.RepositoryID, allRepos)
 	}
 	// Multi-repo: when more than one repository is associated with the task,
 	// populate req.Repositories so the lifecycle preparer creates one worktree
@@ -3146,6 +3152,13 @@ func buildRepoBranchPlans(allRepos []*repoInfo) map[*repoInfo]repoBranchPlan {
 		if info == nil || info.RepositoryID == "" {
 			continue
 		}
+		if info.MaterializationBranchPlanReady {
+			plans[info] = repoBranchPlan{
+				identitySlug: info.MaterializationBranchIdentitySlug,
+				pathSlug:     info.MaterializationBranchPathSlug,
+			}
+			continue
+		}
 		defaultBranch := ""
 		if info.Repository != nil {
 			defaultBranch = info.Repository.DefaultBranch
@@ -3160,6 +3173,26 @@ func buildRepoBranchPlans(allRepos []*repoInfo) map[*repoInfo]repoBranchPlan {
 		plans[infos[index]] = repoBranchPlan{identitySlug: plan.IdentitySlug, pathSlug: plan.PathSlug}
 	}
 	return plans
+}
+
+func prepareFreshInheritedCheckoutMaterialization(allRepos []*repoInfo) {
+	plans := buildRepoBranchPlans(allRepos)
+	for _, info := range allRepos {
+		if info == nil {
+			continue
+		}
+		plan, ok := plans[info]
+		if !ok {
+			continue
+		}
+		info.MaterializationBranchPlanReady = true
+		info.MaterializationBranchIdentitySlug = plan.identitySlug
+		info.MaterializationBranchPathSlug = plan.pathSlug
+		if info.InheritedCheckoutReuseOnly {
+			info.CheckoutBranch = ""
+			info.PRNumber = 0
+		}
+	}
 }
 
 // applyRepositoryConfig sets repository-related fields on the request and resolves clone URLs.

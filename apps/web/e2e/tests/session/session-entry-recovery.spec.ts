@@ -152,8 +152,15 @@ test.describe("session entry recovery", () => {
     await expect(chat.getByTestId("session-history-loading")).toHaveCount(0);
     await expect(chat).toContainText("simple mock response", { timeout: 30_000 });
 
+    const failedResponsesBeforeReload = proxy.failedResponseCount("message.list");
     proxy.failResponses("message.list", "Injected alignment test history failure");
     await testPage.reload();
+    await expect
+      .poll(() => proxy.failedResponseCount("message.list"), {
+        timeout: 30_000,
+        message: "Waiting for the reloaded history request to receive the injected failure",
+      })
+      .toBeGreaterThan(failedResponsesBeforeReload);
     const unavailable = chat.getByTestId("session-history-unavailable");
     await expect(unavailable).toBeVisible();
     await expect.poll(() => proxy.pendingRequestCount("message.list")).toBe(0);
