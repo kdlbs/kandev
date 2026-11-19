@@ -77,10 +77,14 @@ cd ../.. && python3 scripts/list-docs.py validate && python3 scripts/lint-spec-f
 
 ## Results
 
-- Desktop and phone Prompt Sync specs pass; the extended Workflow Sync GitLab
-  spec passes (6 tests), as do the related mobile workflow/prompt settings
-  specs (11 tests) and desktop prompt settings specs (10 tests).
-- Spec checks pass. Requirement promoted to `active`, design to `current`.
+- `pnpm e2e:run --host -- tests/settings/prompt-sync.spec.ts`: 1 passed.
+- `pnpm e2e:run --host --no-build --project mobile-chrome -- tests/settings/mobile-prompt-sync.spec.ts`: 1 passed.
+- `pnpm e2e:run --host --no-build -- tests/workflow/workflow-sync-gitlab.spec.ts`: 6 passed.
+- Related specs: mobile workflow and prompt settings (11 passed) and desktop
+  prompt settings (10 passed).
+- `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`,
+  and `node scripts/validate-public-docs.mjs`: pass.
+- Requirement promoted to `active`, design to `current`.
 - AC-INTEGRATIONS-PROMPT-SYNC-005.3 was clarified during implementation:
   GitLab credential failures keep Workflow Sync's bounded circuit retries; a
   missing credential workspace suspends for both providers.

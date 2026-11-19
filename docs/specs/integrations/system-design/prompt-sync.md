@@ -158,12 +158,15 @@ Poller (60s tick) ──────┼─► promptsync.Service.Sync (install l
                         │     5. parse files → desired{name→content,path}, frozen names, warnings
                         │     6. workflow repo ListPromptReferenceTexts → texts
                         │     7. prompts.ApplySyncedPrompts(desired, frozen, texts)
-                        │     8. prompts.UnresolvedPromptReferences per synced prompt
+                        │     8. UnresolvedPromptReferences over every remaining synced prompt
                         └─►   9. record status, return result
 ```
 
 One process-wide mutex serializes sync runs, config saves, and removal,
-mirroring the per-workspace lock in Workflow Sync. The GitHub apply step runs
+mirroring the per-workspace lock in Workflow Sync. **Sync now** and removal read
+and authorize the configuration under that mutex, and the run uses that same
+snapshot rather than reloading it, so a concurrent save cannot substitute a
+workspace the caller was never checked against. The GitHub apply step runs
 inside `CommitWorkspaceGitHubHost`, so files fetched under a replaced
 connection cannot be applied. Automatic runs use the GitHub background work
 class with blocking admission; with only one source, no continuation or
@@ -177,10 +180,18 @@ deferral queue is needed.
   (AC-INTEGRATIONS-PROMPT-SYNC-002.3).
 - Content: `utf8.Valid` check, then `strings.TrimSpace`, then the
   saved-prompt limits (name ≤ 512 bytes, content ≤ 1 MiB). Provider reads
-  already cap a file at 1 MiB plus one byte.
-- An invalid file adds its derived name (when non-empty) to `frozenNames`.
-  Duplicate names add the name to `frozenNames` and drop every file that
-  produced it.
+  share one oversize contract: GitLab returns `gitlab.ErrRepoFileTooLarge`
+  above 1 MiB and GitHub returns `github.ErrRepoFileTooLarge` when the
+  contents API reports `encoding: none`. Workflow Sync keeps treating either as
+  a read failure.
+- Files are grouped by derived name before content validation. A name claimed
+  by two or more files is frozen and every file that produced it is dropped,
+  even if one of them is invalid. An invalid single file adds its name to
+  `frozenNames`.
+- A read that fails with `reposync.IsFileTooLarge` (GitLab
+  `ErrRepoFileTooLarge` over 1 MiB; GitHub `ErrRepoFileTooLarge` for the
+  contents API's `encoding: none`) is recorded as a too-large file and frozen
+  with a warning instead of failing the run.
 
 ### Reconciliation
 
@@ -195,12 +206,19 @@ in its `WHERE` clause:
 | sync | yes, identical | none |
 | manual or built-in | yes | Skip and warn (AC-INTEGRATIONS-PROMPT-SYNC-003.3) |
 | sync | no, name frozen | none |
-| sync | no | `ReferencedPromptNames`: if count > 0, keep and warn; else `DELETE … WHERE id=? AND source='sync'` |
+| sync | no | Referenced by a workflow text or a surviving saved prompt (followed to a fixpoint through prompts kept this way): keep and warn; else `DELETE … WHERE id=? AND source='sync'` |
 
 The method returns sorted `created`, `updated`, `deleted`, and `warnings`. It
 publishes the existing `prompts changed` event once when anything changed,
+including when a later step returns an error after earlier writes were saved,
 which drives AC-INTEGRATIONS-PROMPT-SYNC-003.6 through the current WS
-refresh path. `ReleaseSyncedPrompts` runs one statement,
+refresh path. Removal releases prompts before deleting the configuration, in two
+statements owned by different stores. If the delete fails after the release,
+the configuration remains while its prompts are already manual; later syncs
+report clash warnings for those files instead of updating them. The caller
+receives the error, and a retried removal releases nothing and deletes the
+configuration, so the state recovers without losing prompt content.
+`ReleaseSyncedPrompts` runs one statement,
 `UPDATE custom_prompts SET source='manual', source_path='' WHERE
 source='sync'`, and publishes once when any row changed.
 
@@ -239,6 +257,10 @@ list, the `unchanged` flag, and the stored status match the current output
 
 ## Persistence
 
+- Count-limited inserts (manual and synced creation) run under one
+  transaction-scoped `pg_advisory_xact_lock` on PostgreSQL, so concurrent
+  creates cannot both pass the 2,000-prompt limit. SQLite's single writer
+  already serializes the statement.
 - `custom_prompts` gains `source TEXT NOT NULL DEFAULT 'manual'` and
   `source_path TEXT NOT NULL DEFAULT ''`. These are idempotent `ADD COLUMN`
   migrations in the prompt store's `initSchema`, run after `CREATE TABLE`,

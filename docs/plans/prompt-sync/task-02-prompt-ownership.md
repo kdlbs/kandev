@@ -87,3 +87,14 @@ go run ./cmd/sqlguard ./internal
   never touch `source`.
 - `ListPromptsForReferenceExpansion` must keep its byte budgets after the
   columns are added.
+
+## Results
+
+- `go test -trimpath ./internal/prompts/... -count=1`: pass.
+- `go test -trimpath ./internal/mcp/handlers -run Prompt -count=1`: pass.
+- `go test -trimpath ./internal/prompts/store -run Postgres -count=1`: skipped;
+  `KANDEV_TEST_POSTGRES_DSN` was not set locally.
+- `go run ./cmd/sqlguard ./internal`: pass.
+- `go test -race ./internal/persistence/storeconformance -count=1`: pass.
+- `python3 scripts/list-docs.py validate` and
+  `python3 scripts/lint-spec-files.py --all`: pass.

@@ -58,6 +58,13 @@ func (s *Service) ApplySyncedPrompts(ctx context.Context, input SyncApplyInput) 
 		byName[prompt.Name] = prompt
 	}
 	result := &SyncApplyResult{}
+	// Writes are individual statements, so a later failure can leave earlier
+	// ones saved; publish whenever anything was written, including on error.
+	defer func() {
+		if result.changed() {
+			s.publishChanged(ctx)
+		}
+	}()
 	desired := make(map[string]bool, len(input.Desired))
 	for _, file := range input.Desired {
 		desired[file.Name] = true
@@ -71,9 +78,6 @@ func (s *Service) ApplySyncedPrompts(ctx context.Context, input SyncApplyInput) 
 	sort.Strings(result.Created)
 	sort.Strings(result.Updated)
 	sort.Strings(result.Deleted)
-	if result.changed() {
-		s.publishChanged(ctx)
-	}
 	return result, nil
 }
 
@@ -119,25 +123,25 @@ func (s *Service) removeVanishedSyncedPrompts(
 	ctx context.Context, existing []*models.Prompt, desired map[string]bool, input SyncApplyInput, result *SyncApplyResult,
 ) error {
 	var vanished []*models.Prompt
-	var names []string
+	var survivors []*models.Prompt
 	for _, prompt := range existing {
-		if !prompt.IsSynced() || desired[prompt.Name] || input.FrozenNames[prompt.Name] {
+		if prompt.IsSynced() && !desired[prompt.Name] && !input.FrozenNames[prompt.Name] {
+			vanished = append(vanished, prompt)
 			continue
 		}
-		vanished = append(vanished, prompt)
-		names = append(names, prompt.Name)
+		survivors = append(survivors, prompt)
 	}
 	if len(vanished) == 0 {
 		return nil
 	}
-	references, err := s.ReferencedPromptNames(ctx, input.ReferenceTexts, names)
+	references, err := s.vanishedPromptReferences(ctx, vanished, survivors, input.ReferenceTexts)
 	if err != nil {
 		return err
 	}
 	for _, prompt := range vanished {
 		if count := references[prompt.Name]; count > 0 {
 			result.Warnings = append(result.Warnings, fmt.Sprintf(
-				"prompt %q was removed from the sync source but is still referenced by %d workflow(s); it was kept. Remove the references, then sync again",
+				"prompt %q was removed from the sync source but is still referenced by %d workflow(s) or saved prompt(s); it was kept. Remove the references, then sync again",
 				prompt.Name, count))
 			continue
 		}
@@ -150,6 +154,51 @@ func (s *Service) removeVanishedSyncedPrompts(
 		}
 	}
 	return nil
+}
+
+// vanishedPromptReferences counts the referrers of each vanished prompt. A
+// vanished prompt is kept when a workflow text or a surviving saved prompt
+// references it; a kept prompt survives too, so its own references are
+// followed until no further prompt is kept. Expansion follows nested
+// references, so deleting a prompt reached only through another saved prompt
+// would silently drop content a workflow depends on.
+func (s *Service) vanishedPromptReferences(
+	ctx context.Context, vanished, survivors []*models.Prompt, workflowTexts []PromptReferenceText,
+) (map[string]int, error) {
+	texts := append([]PromptReferenceText(nil), workflowTexts...)
+	for _, prompt := range survivors {
+		texts = append(texts, promptReferenceText(prompt))
+	}
+	pending := vanished
+	counts := map[string]int{}
+	for len(pending) > 0 {
+		names := make([]string, len(pending))
+		for i, prompt := range pending {
+			names[i] = prompt.Name
+		}
+		found, err := s.ReferencedPromptNames(ctx, texts, names)
+		if err != nil {
+			return nil, err
+		}
+		var next []*models.Prompt
+		for _, prompt := range pending {
+			if found[prompt.Name] == 0 {
+				next = append(next, prompt)
+				continue
+			}
+			counts[prompt.Name] = found[prompt.Name]
+			texts = append(texts, promptReferenceText(prompt))
+		}
+		if len(next) == len(pending) {
+			break
+		}
+		pending = next
+	}
+	return counts, nil
+}
+
+func promptReferenceText(prompt *models.Prompt) PromptReferenceText {
+	return PromptReferenceText{Owner: "prompt:" + prompt.Name, Text: prompt.Content}
 }
 
 // ReleaseSyncedPrompts converts every synced prompt into a manual, editable

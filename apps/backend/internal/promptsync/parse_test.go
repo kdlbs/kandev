@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/reposync"
@@ -17,8 +18,10 @@ func TestSelectPromptFilesKeepsImmediateMarkdownFiles(t *testing.T) {
 		{Name: "notes.txt", Path: "p/notes.txt", IsFile: true},
 		{Name: "nested.md", Path: "p/nested.md", IsDir: true},
 		{Name: "md", Path: "p/md", IsFile: true},
+		{Name: ".md", Path: "p/.md", IsFile: true},
 	}
-	assert.Equal(t, []string{"p/A.MD", "p/b.md"}, selectPromptFiles(entries))
+	assert.Equal(t, []string{"p/.md", "p/A.MD", "p/b.md"}, selectPromptFiles(entries),
+		"an empty-name .md file is selected so validation can warn about it")
 }
 
 func TestParsePromptFiles(t *testing.T) {
@@ -45,4 +48,39 @@ func TestParsePromptFiles(t *testing.T) {
 	assert.True(t, frozen["dup"])
 	assert.False(t, frozen[longName], "an invalid name cannot own a prompt")
 	assert.Len(t, warnings, 8)
+}
+
+func TestParsePromptFilesInvalidDuplicateFreezesValidTwin(t *testing.T) {
+	desired, frozen, warnings := parsePromptFiles([]fetchedFile{
+		{path: "p/review.md", content: []byte("valid")},
+		{path: "p/review.MD", content: []byte("   ")},
+	})
+	assert.Empty(t, desired, "a frozen name must not be applied")
+	assert.True(t, frozen["review"])
+	joined := strings.Join(warnings, "\n")
+	assert.Contains(t, joined, "another file also defines prompt")
+}
+
+func TestParsePromptFilesTooLargeFileIsFrozenWithWarning(t *testing.T) {
+	desired, frozen, warnings := parsePromptFiles([]fetchedFile{
+		{path: "p/big.md", tooLarge: true},
+		{path: "p/ok.md", content: []byte("fine")},
+	})
+	assert.Len(t, desired, 1)
+	assert.True(t, frozen["big"])
+	require.Len(t, warnings, 1)
+	assert.Contains(t, warnings[0], "p/big.md")
+}
+
+func TestParsePromptFilesInvalidDuplicateFreezesInEitherOrder(t *testing.T) {
+	desired, frozen, _ := parsePromptFiles([]fetchedFile{
+		{path: "p/review.MD", content: []byte("   ")},
+		{path: "p/review.md", content: []byte("valid")},
+	})
+	assert.Empty(t, desired)
+	assert.True(t, frozen["review"])
+
+	desired, frozen, _ = parsePromptFiles([]fetchedFile{{path: "p/review.md", content: []byte("valid")}})
+	assert.Len(t, desired, 1, "a single valid file still applies")
+	assert.False(t, frozen["review"])
 }

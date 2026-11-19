@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { expect } from "../fixtures/test-base";
 import { waitForHttp } from "./causal-waits";
 import type { ApiClient } from "./api-client";
@@ -36,16 +36,18 @@ export async function syncNow(page: Page) {
   expect((await response).ok()).toBe(true);
 }
 
+// configureThroughDialog sets up a GitLab source. With tap, every activation
+// uses touch input so the phone path is exercised end to end.
 export async function configureThroughDialog(page: Page, tap: boolean) {
-  const open = page.getByTestId("prompt-sync-open");
-  await (tap ? open.tap() : open.click());
+  const activate = (target: Locator) => (tap ? target.tap() : target.click());
+  await activate(page.getByTestId("prompt-sync-open"));
   const dialog = page.getByTestId("prompt-sync-dialog");
   await expect(dialog).toBeVisible();
-  await dialog.getByRole("tab", { name: "GitLab" }).click();
+  await activate(dialog.getByRole("tab", { name: "GitLab" }));
   await dialog.getByTestId("prompt-sync-url-input").fill(GITLAB_PROJECT);
-  await dialog.getByTestId("prompt-sync-poll-toggle").click();
+  await activate(dialog.getByTestId("prompt-sync-poll-toggle"));
   const saved = waitForHttp(page, "POST", /^\/api\/v1\/prompt-sync\/config$/);
-  await dialog.getByTestId("prompt-sync-save").click();
+  await activate(dialog.getByTestId("prompt-sync-save"));
   expect((await saved).ok()).toBe(true);
   await expect(dialog).toHaveCount(0);
 }

@@ -223,7 +223,11 @@ func (r *sqliteRepository) CreatePrompt(ctx context.Context, prompt *models.Prom
 		`
 		args = append(args, maxPromptListItems)
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	exec := r.db.ExecContext
+	if !prompt.Builtin {
+		exec = r.countGuardedExec
+	}
+	result, err := exec(ctx, r.db.Rebind(query), args...)
 	if err == nil && !prompt.Builtin {
 		rows, rowsErr := result.RowsAffected()
 		if rowsErr != nil {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/github"
+	promptmodels "github.com/kandev/kandev/internal/prompts/models"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/reposync"
 )
@@ -23,6 +24,7 @@ type PromptApplier interface {
 	ApplySyncedPrompts(ctx context.Context, input promptservice.SyncApplyInput) (*promptservice.SyncApplyResult, error)
 	ReleaseSyncedPrompts(ctx context.Context) (int64, error)
 	UnresolvedPromptReferences(ctx context.Context, texts []string) ([][]string, error)
+	ListPrompts(ctx context.Context) ([]*promptmodels.Prompt, error)
 }
 
 // ReferenceSource lists the workflow and step prompts that can reference a
@@ -87,6 +89,14 @@ func (s *Service) SetWorkspaceExists(exists func(context.Context, string) (bool,
 	s.workspaceExists = exists
 }
 
+// RunExclusive runs fn while holding the service lock, so cleanup that
+// bypasses the service (E2E reset) cannot interleave with a sync.
+func (s *Service) RunExclusive(fn func() error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return fn()
+}
+
 // Store exposes the config store (E2E reset).
 func (s *Service) Store() *Store { return s.store }
 
@@ -137,6 +147,8 @@ func (s *Service) SetConfig(ctx context.Context, req *SetConfigRequest) (*Config
 // DeleteConfig releases every synced prompt to manual ownership, then removes
 // the configuration. A failed release keeps the configuration for a retry.
 func (s *Service) DeleteConfig(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	cfg, err := s.store.Get(ctx)
 	if err != nil {
 		return err
@@ -146,8 +158,6 @@ func (s *Service) DeleteConfig(ctx context.Context) error {
 			return err
 		}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	released, err := s.prompts.ReleaseSyncedPrompts(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to release synced prompts: %w", err)
@@ -159,7 +169,12 @@ func (s *Service) DeleteConfig(ctx context.Context) error {
 }
 
 // Sync runs one sync immediately, bypassing the automatic schedule.
+// The configuration is read and authorized under the service lock, and that
+// same snapshot drives the run, so a concurrent save cannot swap in a
+// workspace the caller was never checked against.
 func (s *Service) Sync(ctx context.Context) (*SyncResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	cfg, err := s.store.Get(ctx)
 	if err != nil {
 		return nil, err
@@ -170,9 +185,7 @@ func (s *Service) Sync(ctx context.Context) (*SyncResult, error) {
 	if err := s.authorize(ctx, cfg.WorkspaceID); err != nil {
 		return nil, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.syncLocked(ctx, syncManual)
+	return s.syncLocked(ctx, syncManual, cfg)
 }
 
 // SyncIfDue runs an automatic sync when the configuration is due. Failures
@@ -198,7 +211,7 @@ func (s *Service) SyncIfDue(ctx context.Context) {
 	if !cfg.due(s.now().UTC()) {
 		return
 	}
-	_, _ = s.syncLocked(ctx, syncAutomatic)
+	_, _ = s.syncLocked(ctx, syncAutomatic, cfg)
 }
 
 // refreshCredentialFingerprint resumes a suspended or backed-off config as
@@ -233,15 +246,11 @@ func (s *Service) fingerprintProvider(provider string) (CredentialFingerprintPro
 	return p, ok
 }
 
-func (s *Service) syncLocked(ctx context.Context, mode syncMode) (*SyncResult, error) {
-	cfg, err := s.store.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if cfg == nil {
-		return nil, ErrNotConfigured
-	}
-	if err := s.checkWorkspace(ctx, cfg.WorkspaceID); err != nil {
+// syncLocked runs one sync for cfg. The caller holds s.mu and passes the
+// configuration snapshot it loaded (and, for manual runs, authorized).
+func (s *Service) syncLocked(ctx context.Context, mode syncMode, cfg *Config) (*SyncResult, error) {
+	var err error
+	if err = s.checkWorkspace(ctx, cfg.WorkspaceID); err != nil {
 		s.recordFailure(ctx, cfg, err)
 		return nil, err
 	}
@@ -310,6 +319,10 @@ func (s *Service) fetch(ctx context.Context, cfg *Config) ([]fetchedFile, error)
 	files := make([]fetchedFile, 0, len(paths))
 	for _, path := range paths {
 		content, err := get(ctx, path)
+		if reposync.IsFileTooLarge(err) {
+			files = append(files, fetchedFile{path: path, tooLarge: true})
+			continue
+		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch %s: %w", path, err)
 		}
@@ -334,7 +347,7 @@ func (s *Service) apply(ctx context.Context, files []fetchedFile) (*SyncResult, 
 		return nil, err
 	}
 	warnings = append(warnings, applied.Warnings...)
-	unresolved, err := s.unresolvedReferenceWarnings(ctx, desired)
+	unresolved, err := s.unresolvedReferenceWarnings(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -345,10 +358,21 @@ func (s *Service) apply(ctx context.Context, files []fetchedFile) (*SyncResult, 
 	}, nil
 }
 
-func (s *Service) unresolvedReferenceWarnings(ctx context.Context, desired []promptservice.SyncedPromptFile) ([]string, error) {
-	texts := make([]string, len(desired))
-	for i, file := range desired {
-		texts[i] = file.Content
+// unresolvedReferenceWarnings checks every prompt still owned by sync after
+// the apply, including frozen prompts and prompts kept because a workflow
+// references them, for @name references that resolve to no saved prompt.
+func (s *Service) unresolvedReferenceWarnings(ctx context.Context) ([]string, error) {
+	all, err := s.prompts.ListPrompts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list prompts: %w", err)
+	}
+	var synced []*promptmodels.Prompt
+	var texts []string
+	for _, prompt := range all {
+		if prompt.IsSynced() {
+			synced = append(synced, prompt)
+			texts = append(texts, prompt.Content)
+		}
 	}
 	missing, err := s.prompts.UnresolvedPromptReferences(ctx, texts)
 	if err != nil {
@@ -357,7 +381,7 @@ func (s *Service) unresolvedReferenceWarnings(ctx context.Context, desired []pro
 	var warnings []string
 	for i, names := range missing {
 		for _, name := range names {
-			warnings = append(warnings, fmt.Sprintf("%s: prompt %q references @%s, which is not a saved prompt", desired[i].Path, desired[i].Name, name))
+			warnings = append(warnings, fmt.Sprintf("%s: prompt %q references @%s, which is not a saved prompt", synced[i].SourcePath, synced[i].Name, name))
 		}
 	}
 	return warnings, nil

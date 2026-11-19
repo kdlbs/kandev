@@ -49,6 +49,12 @@ test.describe("Prompt Sync", () => {
     await principles.getByTestId("prompt-view-button").click();
     await expect(principles.getByTestId("prompt-view-content")).toHaveCount(0);
 
+    // Synced state and ownership survive a reload (hydration, not local state).
+    await testPage.reload();
+    await expect(principles.getByTestId("prompt-synced-badge")).toBeVisible();
+    await expect(principles.getByTestId("prompt-edit-button")).toHaveCount(0);
+    await expect(testPage.getByTestId("prompt-sync-status")).toBeVisible();
+
     await seedPromptFiles(apiClient, seedData.workspaceId, {
       "principles.md": "Prefer the simplest design. rev 2",
     });
@@ -65,6 +71,10 @@ test.describe("Prompt Sync", () => {
     expect((await removed).ok()).toBe(true);
     await expect(principles.getByTestId("prompt-synced-badge")).toHaveCount(0);
     await expect(principles.getByTestId("prompt-edit-button")).toBeVisible();
+    await testPage.reload();
+    await expect(principles.getByTestId("prompt-synced-badge")).toHaveCount(0);
+    await expect(principles.getByTestId("prompt-edit-button")).toBeVisible();
+    await expect(testPage.getByTestId("prompt-sync-status")).toHaveCount(0);
     await apiClient.deleteWorkflow(workflow.id);
   });
 });

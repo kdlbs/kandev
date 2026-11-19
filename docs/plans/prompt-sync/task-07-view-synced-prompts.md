@@ -62,4 +62,6 @@ pnpm e2e:run --host --no-build --project mobile-chrome -- tests/settings/mobile-
 ## Results
 
 - RED: the component test could not find `prompt-view-button`.
-- GREEN: component tests (26), the desktop spec, and the phone spec pass.
+- `pnpm exec vitest run components/settings/prompts-settings`: 26 passed.
+- `pnpm e2e:run --host -- tests/settings/prompt-sync.spec.ts`: 1 passed.
+- `pnpm e2e:run --host --no-build --project mobile-chrome -- tests/settings/mobile-prompt-sync.spec.ts tests/settings/mobile-prompts-settings.spec.ts`: 3 passed.

@@ -32,17 +32,17 @@ Saving stores the configuration only. Use **Sync now** for the first sync, or wa
 
 - Only immediate files ending in `.md` (any letter case) are read. Subdirectories and other files are ignored.
 - The prompt name is the file name without `.md`. The content is the file text with leading and trailing whitespace trimmed.
-- A file is invalid when its name is empty, longer than 512 bytes, or starts or ends with whitespace; or when its content is not UTF-8, is empty, or is longer than 1 MiB. An invalid file produces a warning, and the prompt last synced under that name stays unchanged.
-- Two files that resolve to the same name (for example `review.md` and `review.MD`) are both skipped with a warning.
+- A file is invalid when its name is empty, longer than 512 bytes, or starts or ends with whitespace; or when its content is not UTF-8, is empty, longer than 1 MiB, or too large for the provider to return. An invalid file produces a warning, and the prompt last synced under that name stays unchanged; other files still sync.
+- Two files that resolve to the same name (for example `review.md` and `review.MD`) are both skipped with a warning, even if one of them is invalid.
 
 ## Reconciliation rules
 
 Every sync compares the files with the prompts Prompt Sync owns:
 
 - A new file creates a synced prompt. A changed file updates it. An unchanged file writes nothing.
-- A removed file deletes its prompt only when no workflow prompt or step prompt, in any workspace, still references it. A prompt that is still referenced is kept, and the sync reports which prompt and how many workflows use it. Remove the references, then sync again.
+- A removed file deletes its prompt only when nothing still references it: no workflow prompt or step prompt in any workspace, and no remaining saved prompt (including prompts kept by this rule). A prompt that is still referenced is kept, and the sync reports which prompt and how many workflows or prompts use it. Remove the references, then sync again.
 - A file whose name matches a prompt created in Kandev, or a built-in prompt, is skipped with a warning. Prompt Sync never takes over a prompt it did not create.
-- After applying changes, Prompt Sync warns about any `@name` inside a synced prompt that does not resolve to a saved prompt.
+- After applying changes, Prompt Sync warns about any `@name` inside a remaining synced prompt (including kept and unchanged ones) that does not resolve to a saved prompt.
 - A successful listing with no prompt files is an empty source and removes unreferenced synced prompts.
 - A listing or download failure fails the run before anything changes.
 
@@ -110,7 +110,7 @@ A completed sync returns HTTP `200` even when the response contains `error`; ins
 ## Troubleshooting
 
 - **A prompt was skipped as a name clash:** a prompt with that name was created in Kandev. Rename the file, or delete or rename the Kandev prompt, then sync again.
-- **A removed prompt is still listed:** a workflow still references it. The warning gives the number of workflows; remove the references and sync again.
+- **A removed prompt is still listed:** a workflow or another saved prompt still references it. The warning gives the number of referrers; remove the references and sync again.
 - **Suspended after deleting a workspace:** choose another credential workspace and save.
 - **Edits revert:** synced prompts are repository-owned. Change the file instead.
 

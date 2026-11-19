@@ -2,7 +2,10 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"testing"
+
+	"github.com/kandev/kandev/internal/prompts/models"
 
 	"github.com/kandev/kandev/internal/testutil"
 )
@@ -54,5 +57,35 @@ func TestPostgresRepository_SyncedPromptOwnership(t *testing.T) {
 	}
 	if deleted, err := repo.DeleteSyncedPrompt(ctx, created.ID); err != nil || deleted {
 		t.Fatalf("delete released prompt = %v, %v", deleted, err)
+	}
+}
+
+func TestPostgresRepository_PromptCountLimitHoldsUnderConcurrentCreates(t *testing.T) {
+	database := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := newSQLiteRepositoryWithDB(database, database)
+	if err != nil {
+		t.Fatalf("initialize prompts repository: %v", err)
+	}
+	ctx := context.Background()
+	var existing int
+	if err := database.GetContext(ctx, &existing, `SELECT COUNT(*) FROM custom_prompts`); err != nil {
+		t.Fatal(err)
+	}
+	for i := existing; i < maxPromptListItems-1; i++ {
+		if err := repo.CreatePrompt(ctx, &models.Prompt{Name: fmt.Sprintf("seed-%d", i), Content: "x"}); err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+	}
+	errs := make(chan error, 2)
+	go func() { errs <- repo.CreatePrompt(ctx, &models.Prompt{Name: "race-manual", Content: "x"}) }()
+	go func() { _, err := repo.CreateSyncedPrompt(ctx, "race-synced", "x", "p/race.md"); errs <- err }()
+	<-errs
+	<-errs
+	var total int
+	if err := database.GetContext(ctx, &total, `SELECT COUNT(*) FROM custom_prompts`); err != nil {
+		t.Fatal(err)
+	}
+	if total > maxPromptListItems {
+		t.Fatalf("prompt count = %d, want at most %d", total, maxPromptListItems)
 	}
 }

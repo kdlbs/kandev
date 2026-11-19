@@ -50,6 +50,7 @@ Each layer is shippable on its own:
 | 3 | [Task 05: Prompt Sync settings UI](task-05-prompt-sync-ui.md) | 02, 03 |
 | 4 | [Task 06: E2E coverage and public docs](task-06-e2e-and-docs.md) | 03, 04, 05 |
 | 5 | [Task 07: View synced prompt content](task-07-view-synced-prompts.md) | 05, 06 |
+| 6 | [Task 08: Review remediation](task-08-review-remediation.md) | 03, 05 |
 
 Tasks 01 and 02 touch separate packages and can run in parallel, as can 03
 and 04. Waves mark parallel-safe candidates only; they do not authorize

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import type { PromptSyncController } from "@/hooks/domains/settings/use-prompt-sync";
@@ -106,7 +106,7 @@ describe("PromptSyncSection", () => {
     expect(save.disabled).toBe(false);
     fireEvent.click(save);
     expect(mocks.controller.handleSave).toHaveBeenCalled();
-    await screen.findByTestId(OPEN_TEST_ID);
+    await waitFor(() => expect(screen.queryByTestId("prompt-sync-dialog")).toBeNull());
   });
 
   it("shows status, warnings, and Sync now when configured", () => {

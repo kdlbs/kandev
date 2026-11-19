@@ -2,6 +2,7 @@ package reposync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/github"
@@ -113,6 +114,12 @@ func (r Reader) listGitLab(ctx context.Context, src Source, path string) ([]Entr
 		}
 	}
 	return entries, nil
+}
+
+// IsFileTooLarge reports whether a file read failed only because the provider
+// refused to return a file of that size.
+func IsFileTooLarge(err error) bool {
+	return errors.Is(err, github.ErrRepoFileTooLarge) || errors.Is(err, gitlab.ErrRepoFileTooLarge)
 }
 
 // Getter returns a FileGetter bound to src's provider, workspace, and ref.

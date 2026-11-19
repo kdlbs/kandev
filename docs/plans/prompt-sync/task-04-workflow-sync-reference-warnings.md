@@ -61,3 +61,9 @@ go test -trimpath -race ./internal/workflowsync -run 'Reference|Apply' -count=1
 - `@` tokens that are not prompt references (for example `@claude`) will
   warn. This is accepted by AC-INTEGRATIONS-PROMPT-SYNC-006.1; keep the
   message precise so users can tell why.
+
+## Results
+
+- `go test -trimpath ./internal/workflowsync -count=1`: pass.
+- `go test -trimpath -race ./internal/workflowsync -run 'Reference|Apply' -count=1`: pass.
+- `pnpm e2e:run --host -- tests/workflow/workflow-sync-gitlab.spec.ts`: 6 passed.

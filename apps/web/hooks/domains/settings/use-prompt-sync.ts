@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useToast } from "@/components/toast-provider";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
@@ -19,6 +19,7 @@ import {
   formForProvider,
   formFromUrl,
   repoSyncPayload,
+  repoTargetMissing,
   repoUrlInvalid,
   type RepoSyncFormState,
 } from "@/lib/settings/repo-sync-form";
@@ -59,18 +60,54 @@ function draftFromConfig(cfg: PromptSyncConfig | null, workspaceId: string): Dra
   return { form, url: displayUrl(form) };
 }
 
-function useConfigRefresh(enabled: boolean, setConfig: (cfg: PromptSyncConfig | null) => void) {
+// RequestFence lets a mutation invalidate configuration reads that started
+// before it: a read applies its reply only if no mutation began or is still
+// running since the read started.
+type RequestFence = { epoch: number; mutating: number };
+
+function useRequestFence() {
+  const fence = useRef<RequestFence>({ epoch: 0, mutating: 0 });
+  return useMemo(
+    () => ({
+      begin: () => {
+        fence.current.epoch += 1;
+        fence.current.mutating += 1;
+      },
+      end: () => {
+        fence.current.mutating -= 1;
+      },
+      snapshot: () => fence.current.epoch,
+      current: (epoch: number) => fence.current.epoch === epoch && fence.current.mutating === 0,
+    }),
+    [],
+  );
+}
+
+type Fence = ReturnType<typeof useRequestFence>;
+
+function useConfigRefresh(
+  enabled: boolean,
+  setConfig: (cfg: PromptSyncConfig | null) => void,
+  fence: Fence,
+) {
   useEffect(() => {
     if (!enabled) return;
+    let cancelled = false;
     const id = setInterval(() => {
+      const epoch = fence.snapshot();
       getPromptSyncConfig()
-        .then(setConfig)
+        .then((cfg) => {
+          if (!cancelled && fence.current(epoch)) setConfig(cfg);
+        })
         .catch(() => {
           /* transient failures are fine; the next tick retries */
         });
     }, INTEGRATION_STATUS_REFRESH_MS);
-    return () => clearInterval(id);
-  }, [enabled, setConfig]);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [enabled, setConfig, fence]);
 }
 
 function useInitialLoad(
@@ -78,6 +115,7 @@ function useInitialLoad(
   reset: (cfg: PromptSyncConfig | null) => void,
   setLoading: (loading: boolean) => void,
   toast: ReturnType<typeof useToast>["toast"],
+  fence: Fence,
 ) {
   const resetRef = useRef(reset);
   useEffect(() => {
@@ -85,9 +123,10 @@ function useInitialLoad(
   }, [reset]);
   useEffect(() => {
     let cancelled = false;
+    const epoch = fence.snapshot();
     getPromptSyncConfig()
       .then((cfg) => {
-        if (cancelled) return;
+        if (cancelled || !fence.current(epoch)) return;
         setConfig(cfg);
         resetRef.current(cfg);
       })
@@ -104,13 +143,29 @@ function useInitialLoad(
     return () => {
       cancelled = true;
     };
-  }, [setConfig, setLoading, toast]);
+  }, [setConfig, setLoading, toast, fence]);
 }
 
 function useDraft(defaultWorkspaceId: string) {
   const [draft, setDraft] = useState<Draft>(() => draftFromConfig(null, defaultWorkspaceId));
   const { status } = useGitHubStatus(draft.form.workspace_id || null);
   const configuredHost = status?.automation?.github_host;
+  const latest = useRef(draft);
+  useLayoutEffect(() => {
+    latest.current = draft;
+  }, [draft]);
+  // A link pasted before the workspace's GitHub host was known is parsed
+  // again once it is, so the user does not have to retype it.
+  // Only a link that has not produced repository coordinates is re-parsed,
+  // so fields edited after a successful parse keep their values.
+  useEffect(() => {
+    if (!configuredHost) return;
+    setDraft((current) => {
+      if (!repoTargetMissing(current.form)) return current;
+      const form = formFromUrl(current.form, current.url, configuredHost);
+      return form === current.form ? current : { ...current, form };
+    });
+  }, [configuredHost]);
   const update = useCallback(
     <K extends keyof PromptSyncFormState>(key: K, value: PromptSyncFormState[K]) =>
       setDraft((current) => ({ ...current, form: { ...current.form, [key]: value } })),
@@ -119,7 +174,9 @@ function useDraft(defaultWorkspaceId: string) {
   const setUrlInput = useCallback(
     (value: string) =>
       setDraft((current) => ({
-        form: formFromUrl(current.form, value, configuredHost),
+        form: value.trim()
+          ? formFromUrl(current.form, value, configuredHost)
+          : { ...current.form, repo_owner: "", repo_name: "", project_path: "" },
         url: value,
       })),
     [configuredHost],
@@ -137,7 +194,11 @@ function useDraft(defaultWorkspaceId: string) {
     [defaultWorkspaceId],
   );
   const urlInvalid = repoUrlInvalid(draft.form, draft.url, configuredHost);
-  return { draft, urlInvalid, update, setUrlInput, setProvider, reset };
+  return { draft, latest, urlInvalid, update, setUrlInput, setProvider, reset };
+}
+
+function draftsEqual(left: Draft, right: Draft): boolean {
+  return left.url === right.url && JSON.stringify(left.form) === JSON.stringify(right.form);
 }
 
 function syncToast(error?: string, warnings?: string[]) {
@@ -161,21 +222,27 @@ export function usePromptSync(defaultWorkspaceId: string) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const { draft, urlInvalid, update, setUrlInput, setProvider, reset } =
+  const { draft, latest, urlInvalid, update, setUrlInput, setProvider, reset } =
     useDraft(defaultWorkspaceId);
-  useInitialLoad(setConfig, reset, setLoading, toast);
-  useConfigRefresh(!!config, setConfig);
+  const fence = useRequestFence();
+  useInitialLoad(setConfig, reset, setLoading, toast, fence);
+  useConfigRefresh(!!config, setConfig, fence);
 
+  // handleSave resolves true only when the saved draft is still the one on
+  // screen; edits made while the request was in flight are kept, not reset.
   const handleSave = useCallback(async () => {
+    const submitted = draft;
     setSaving(true);
+    fence.begin();
     try {
       const saved = await setPromptSyncConfig({
-        ...repoSyncPayload(draft.form),
-        workspace_id: draft.form.workspace_id,
+        ...repoSyncPayload(submitted.form),
+        workspace_id: submitted.form.workspace_id,
       });
       setConfig(saved);
-      reset(saved);
       toast({ description: t("settings:promptSyncSaved"), variant: "success" });
+      if (!draftsEqual(latest.current, submitted)) return false;
+      reset(saved);
       return true;
     } catch (err) {
       toast({
@@ -184,11 +251,13 @@ export function usePromptSync(defaultWorkspaceId: string) {
       });
       return false;
     } finally {
+      fence.end();
       setSaving(false);
     }
-  }, [draft.form, reset, toast]);
+  }, [draft, latest, reset, toast, fence]);
 
   const handleDelete = useCallback(async () => {
+    fence.begin();
     try {
       await deletePromptSyncConfig();
       setConfig(null);
@@ -201,11 +270,14 @@ export function usePromptSync(defaultWorkspaceId: string) {
         variant: "error",
       });
       return false;
+    } finally {
+      fence.end();
     }
-  }, [reset, toast]);
+  }, [reset, toast, fence]);
 
   const handleSyncNow = useCallback(async () => {
     setSyncing(true);
+    fence.begin();
     try {
       const res = await runPromptSync();
       setConfig(res.config);
@@ -216,9 +288,10 @@ export function usePromptSync(defaultWorkspaceId: string) {
         variant: "error",
       });
     } finally {
+      fence.end();
       setSyncing(false);
     }
-  }, [toast]);
+  }, [toast, fence]);
 
   return {
     config,

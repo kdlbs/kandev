@@ -2,11 +2,13 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/prompts/models"
 )
 
@@ -30,6 +32,33 @@ func (r *sqliteRepository) addSourceColumns() error {
 		}
 	}
 	return nil
+}
+
+// promptCountLockKey names the advisory lock shared by every count-limited
+// prompt insert.
+const promptCountLockKey = "custom_prompts:count-limit"
+
+// countGuardedExec runs a count-limited INSERT. On PostgreSQL the count and
+// insert run under one transaction-scoped advisory lock shared by manual and
+// synced creation, so concurrent creates cannot both pass the limit; SQLite's
+// single writer already serializes the statement.
+func (r *sqliteRepository) countGuardedExec(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		return r.db.ExecContext(ctx, query, args...)
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, promptCountLockKey); err != nil {
+		return nil, err
+	}
+	result, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	return result, tx.Commit()
 }
 
 type promptScanner interface {
@@ -59,7 +88,7 @@ func (r *sqliteRepository) CreateSyncedPrompt(ctx context.Context, name, content
 		ID: uuid.New().String(), Name: name, Content: content,
 		Source: models.PromptSourceSync, SourcePath: sourcePath, CreatedAt: now, UpdatedAt: now,
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := r.countGuardedExec(ctx, r.db.Rebind(`
 		INSERT INTO custom_prompts (id, name, content, builtin, source, source_path, created_at, updated_at)
 		SELECT ?, ?, ?, 0, ?, ?, ?, ?
 		WHERE (SELECT COUNT(*) FROM custom_prompts) < ?

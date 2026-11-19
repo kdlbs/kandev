@@ -106,16 +106,19 @@ file, so that prompt changes are easy to review in a pull request.
   - its name is empty or longer than the saved-prompt name limit;
   - its content is not valid UTF-8;
   - its content is empty after trimming;
-  - its content is longer than the saved-prompt content limit.
+  - its content is longer than the saved-prompt content limit;
+  - the provider refuses to return it because of its size.
 
   An invalid file shall produce a warning. A synced prompt with that name
   shall stay unchanged for that run.
 - **AC-INTEGRATIONS-PROMPT-SYNC-002.4:** When two prompt files resolve to the
   same name (for example `review.md` and `review.MD`), the sync shall report a
   warning, apply neither file, and keep any existing synced prompt with that
-  name unchanged.
+  name unchanged, even when one of the files is invalid.
 - **AC-INTEGRATIONS-PROMPT-SYNC-002.5:** A directory listing or file download
-  failure shall fail the run before any saved prompt changes.
+  failure shall fail the run before any saved prompt changes. A file refused
+  only for its size is not a download failure; it follows
+  AC-INTEGRATIONS-PROMPT-SYNC-002.3.
 
 ### REQ-INTEGRATIONS-PROMPT-SYNC-003: Reconciliation
 
@@ -133,10 +136,11 @@ installation automatically, so that agents act on the reviewed text.
   already matches shall not be written, and no change event shall be
   published for it.
 - **AC-INTEGRATIONS-PROMPT-SYNC-003.2:** When a synced prompt's file is no
-  longer in the source, the sync shall delete it only when no workflow prompt
-  or workflow step prompt in any workspace references it. Otherwise the prompt
-  shall be kept and the sync shall report a warning that names the prompt and
-  the number of referencing workflows.
+  longer in the source, the sync shall delete it only when nothing still
+  references it. A reference is a workflow prompt or workflow step prompt in
+  any workspace, or a surviving saved prompt; a prompt kept by this rule
+  survives too, so its own references are followed. A kept prompt shall be
+  reported with a warning that names it and the number of referrers.
 - **AC-INTEGRATIONS-PROMPT-SYNC-003.3:** When a prompt file's name matches an
   existing manual or built-in prompt, the sync shall skip that file and report
   a warning. The existing prompt shall keep its content, ownership, and
@@ -145,10 +149,12 @@ installation automatically, so that agents act on the reviewed text.
   files shall be treated as an empty source. It shall remove unreferenced
   synced prompts under REQ-INTEGRATIONS-PROMPT-SYNC-003.2.
 - **AC-INTEGRATIONS-PROMPT-SYNC-003.5:** After applying changes, the sync
-  shall report a warning for each prompt reference in a synced prompt's
-  content that does not resolve to a saved prompt.
+  shall report a warning for each prompt reference that does not resolve to a
+  saved prompt in the content of every prompt still owned by sync, including
+  frozen prompts and prompts kept because a workflow references them.
 - **AC-INTEGRATIONS-PROMPT-SYNC-003.6:** Prompt changes made by a sync shall
-  show up in an open Settings > Prompts page without a reload. Later `@name`
+  show up in an open Settings > Prompts page without a reload, including
+  changes saved before a later step of the same run failed. Later `@name`
   expansion shall use them. Unsaved editor drafts shall be preserved.
 - **AC-INTEGRATIONS-PROMPT-SYNC-003.7:** A sync result shall report created,
   updated, and deleted prompt names, warnings, and whether nothing changed.
@@ -255,5 +261,6 @@ run.
 - Installation-level GitHub or GitLab credentials.
 - Renaming detection: a renamed file is a delete of the old name and a create
   of the new one.
-- Blocking deletion on references from saved prompts, Office skills, or chat
-  history. Only workflow and workflow step prompts block deletion.
+- Blocking deletion on references from Office skills or chat history. Only
+  workflow prompts, workflow step prompts, and surviving saved prompts block
+  deletion.

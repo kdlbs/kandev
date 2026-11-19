@@ -98,3 +98,12 @@ pnpm run i18n:check
   own file to stay within the lint limits.
 - The workspace select must list only workspaces the user can see. Use the
   existing workspaces store slice.
+
+## Results
+
+- `pnpm exec vitest run components/settings/prompt-sync components/settings/prompts-settings components/settings/workflow-sync`: pass.
+- `pnpm run typecheck`: pass (classic `tsc` needs
+  `NODE_OPTIONS=--max-old-space-size=8192` on the development host).
+- `pnpm run lint`: pass.
+- `pnpm run i18n:check`: pass.
+- `pnpm run i18n:ratchet`: pass.

@@ -102,3 +102,11 @@ go build -trimpath ./cmd/kandev
   env-gated PostgreSQL store test.
 - Hold the install mutex across fetch and apply, as Workflow Sync does, so a
   removal cannot interleave with an in-flight apply.
+
+## Results
+
+- `go test -trimpath ./internal/promptsync ./internal/workflow/repository/... -count=1`: pass.
+- `go test -trimpath -race ./internal/promptsync ./internal/persistence/storeconformance -count=1`: pass.
+- `go run ./cmd/sqlguard ./internal`: pass.
+- `go build -trimpath ./cmd/kandev`: pass.
+- `go test -trimpath ./internal/backendapp -count=1`: pass.

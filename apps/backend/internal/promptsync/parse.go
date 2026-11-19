@@ -13,22 +13,31 @@ import (
 
 const promptFileExtension = ".md"
 
-// fetchedFile is one prompt file read from the repository.
+// fetchedFile is one prompt file read from the repository. tooLarge marks a
+// file the provider refused to return because of its size.
 type fetchedFile struct {
-	path    string
-	content []byte
+	path     string
+	content  []byte
+	tooLarge bool
 }
 
 // selectPromptFiles returns the paths of immediate Markdown files, sorted.
 func selectPromptFiles(entries []reposync.Entry) []string {
 	var paths []string
 	for _, entry := range entries {
-		if entry.IsFile && promptName(entry.Name) != "" {
+		if entry.IsFile && hasPromptExtension(entry.Name) {
 			paths = append(paths, entry.Path)
 		}
 	}
 	sort.Strings(paths)
 	return paths
+}
+
+// hasPromptExtension reports whether a file name ends in .md, compared
+// case-insensitively. A bare ".md" qualifies so validation can report it.
+func hasPromptExtension(fileName string) bool {
+	return len(fileName) >= len(promptFileExtension) &&
+		strings.EqualFold(fileName[len(fileName)-len(promptFileExtension):], promptFileExtension)
 }
 
 // promptName derives a prompt name from a file name, or "" when the file is
@@ -41,39 +50,42 @@ func promptName(fileName string) string {
 	return fileName[:len(fileName)-len(promptFileExtension)]
 }
 
-// parsePromptFiles validates fetched files. Valid files become desired
-// prompts; an invalid or duplicated name is frozen so its existing synced
-// prompt stays unchanged, and every problem is reported as a warning.
+// parsePromptFiles validates fetched files. Files are grouped by prompt name
+// before validation, so two files claiming one name freeze it even when one of
+// them is invalid. Valid single files become desired prompts; an invalid or
+// duplicated name is frozen so its existing synced prompt stays unchanged.
 func parsePromptFiles(files []fetchedFile) ([]promptservice.SyncedPromptFile, map[string]bool, []string) {
 	frozen := map[string]bool{}
 	var warnings []string
-	byName := map[string][]promptservice.SyncedPromptFile{}
+	groups := map[string][]fetchedFile{}
 	var order []string
 	for _, file := range files {
 		name := promptName(path.Base(file.path))
-		content, problem := validatePromptFile(name, file.content)
-		if problem != "" {
+		if _, seen := groups[name]; !seen {
+			order = append(order, name)
+		}
+		groups[name] = append(groups[name], file)
+	}
+	var desired []promptservice.SyncedPromptFile
+	for _, name := range order {
+		group := groups[name]
+		if len(group) > 1 && validPromptName(name) {
+			frozen[name] = true
+			for _, file := range group {
+				warnings = append(warnings, fmt.Sprintf("%s: another file also defines prompt %q; neither file was applied", file.path, name))
+			}
+			continue
+		}
+		for _, file := range group {
+			content, problem := validatePromptFile(name, file)
+			if problem == "" {
+				desired = append(desired, promptservice.SyncedPromptFile{Name: name, Content: content, Path: file.path})
+				continue
+			}
 			warnings = append(warnings, fmt.Sprintf("%s: %s; the prompt was left unchanged", file.path, problem))
 			if validPromptName(name) {
 				frozen[name] = true
 			}
-			continue
-		}
-		if _, seen := byName[name]; !seen {
-			order = append(order, name)
-		}
-		byName[name] = append(byName[name], promptservice.SyncedPromptFile{Name: name, Content: content, Path: file.path})
-	}
-	var desired []promptservice.SyncedPromptFile
-	for _, name := range order {
-		candidates := byName[name]
-		if len(candidates) == 1 {
-			desired = append(desired, candidates[0])
-			continue
-		}
-		frozen[name] = true
-		for _, candidate := range candidates {
-			warnings = append(warnings, fmt.Sprintf("%s: another file also defines prompt %q; neither file was applied", candidate.Path, name))
 		}
 	}
 	return desired, frozen, warnings
@@ -83,7 +95,8 @@ func validPromptName(name string) bool {
 	return name != "" && len(name) <= promptservice.MaxPromptNameBytes
 }
 
-func validatePromptFile(name string, raw []byte) (string, string) {
+func validatePromptFile(name string, file fetchedFile) (string, string) {
+	raw := file.content
 	if name == "" {
 		return "", "the file name has no prompt name before the .md extension"
 	}
@@ -92,6 +105,9 @@ func validatePromptFile(name string, raw []byte) (string, string) {
 	}
 	if strings.TrimSpace(name) != name {
 		return "", "the prompt name starts or ends with whitespace"
+	}
+	if file.tooLarge {
+		return "", fmt.Sprintf("the file is larger than the %d byte limit for repository reads", promptservice.MaxPromptContentBytes)
 	}
 	if !utf8.Valid(raw) {
 		return "", "the file is not valid UTF-8 text"
