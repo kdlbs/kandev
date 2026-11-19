@@ -239,6 +239,11 @@ path on desktop hover or focus and in a touch-accessible drawer on mobile.
   through Kandev's task/repository-scoped broker. Kandev provides a short-lived Git helper and `gh`
   shim; stored PATs and App private keys are not exposed to the task. An executor-profile
   `GH_TOKEN` or `GITHUB_TOKEN` takes precedence.
+- Managed leases expire after 12 hours without use. Eligible launches receive a 30-day bearer
+  capability for automatic lease recovery by default. The signer is derived from the installation's
+  `master.key`; configuration, backup, and retained-process recovery guidance is in
+  [Managed GitHub credentials](executors.md#managed-github-credentials). Use **Restart session**
+  when a retained process needs fresh launch credentials.
 - **Inherit executor Git credentials** does not install Kandev's helper or `gh` shim. Local and
   Worktree tasks use host Git credentials. For GitHub HTTPS remotes, Kandev checks the host
   account's `gh` login for each attached GitHub host. When `gh auth token` succeeds, Kandev adds a

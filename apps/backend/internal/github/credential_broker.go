@@ -22,6 +22,7 @@ var (
 	ErrCredentialScopeDenied              = gitcredentials.ErrScopeDenied
 	ErrCredentialReissueCapabilityInvalid = gitcredentials.ErrReissueCapabilityInvalid
 	ErrCredentialReissueCapabilityExpired = gitcredentials.ErrReissueCapabilityExpired
+	ErrCredentialReissueUnavailable       = gitcredentials.ErrReissueUnavailable
 )
 
 // BrokerScopeAuthorizer verifies task/workspace/repository ownership. It is

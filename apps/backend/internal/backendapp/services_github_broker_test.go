@@ -271,6 +271,54 @@ func TestGitHubBrokerScopeAuthorizerValidatesSessionOwnershipAndState(t *testing
 	}
 }
 
+func TestGitHubCredentialReissueRejectsArchivedTaskWithLiveSession(t *testing.T) {
+	archivedAt := time.Date(2026, time.November, 18, 12, 0, 0, 0, time.UTC)
+	repo := &fakeGitHubBrokerTaskRepository{
+		task:       &taskmodels.Task{ID: "task-1", WorkspaceID: "workspace-1"},
+		session:    &taskmodels.TaskSession{ID: "session-1", TaskID: "task-1", State: taskmodels.TaskSessionStateRunning},
+		repository: &taskmodels.Repository{ID: "repository-1", WorkspaceID: "workspace-1", Provider: "github", ProviderHost: "https://github.com", ProviderOwner: "kdlbs", ProviderName: kandevName},
+		links:      []*taskmodels.TaskRepository{{TaskID: "task-1", RepositoryID: "repository-1"}},
+	}
+	signer, err := gitcredentials.NewReissueCapabilitySigner("archived-task-test-key")
+	if err != nil {
+		t.Fatalf("NewReissueCapabilitySigner() error = %v", err)
+	}
+	broker := gitcredentials.NewBroker(factoryTestGitCredentialResolver{}, &githubBrokerScopeAuthorizer{repo: repo})
+	broker.SetReissueCapabilitySigner(signer)
+	scope := gitcredentials.Scope{
+		ProviderID: "github", WorkspaceID: "workspace-1", TaskID: "task-1", SessionID: "session-1",
+		RepositoryID: "repository-1", Host: "github.com", Path: "/kdlbs/kandev.git",
+	}
+	lease, capability, err := broker.IssueWithReissueCapability(t.Context(), scope)
+	if err != nil {
+		t.Fatalf("IssueWithReissueCapability() error = %v", err)
+	}
+
+	// Archive commits the task flag before session cancellation can complete.
+	repo.task.ArchivedAt = &archivedAt
+	if repo.session.State != taskmodels.TaskSessionStateRunning {
+		t.Fatalf("session state = %q, want nonterminal RUNNING", repo.session.State)
+	}
+	broker.RevokeTask("task-1")
+	if got := broker.ActiveLeaseCount(); got != 0 {
+		t.Fatalf("active lease count after archive revocation = %d, want 0", got)
+	}
+	if _, err := broker.Redeem(t.Context(), gitcredentials.Redemption{
+		Lease: lease.Token, TaskID: scope.TaskID, SessionID: scope.SessionID, RepositoryID: scope.RepositoryID,
+		Host: scope.Host, Path: scope.Path,
+	}); err == nil {
+		t.Fatal("revoked lease redeemed after archive")
+	}
+
+	_, err = broker.Reissue(t.Context(), gitcredentials.ReissueRequest{
+		Capability: capability.Token, TaskID: scope.TaskID, SessionID: scope.SessionID,
+		RepositoryID: scope.RepositoryID, Host: scope.Host, Path: scope.Path,
+	})
+	if err == nil || !strings.Contains(err.Error(), "task is archived") {
+		t.Fatalf("Reissue() error = %v, want archived-task denial", err)
+	}
+}
+
 func TestGitHubBrokerScopeAuthorizerAllowsOnlyTheBoundContributionFork(t *testing.T) {
 	binding := taskmodels.RemoteContribution{
 		Version:              taskmodels.RemoteContributionVersion,
@@ -407,7 +455,7 @@ func TestGitCredentialBrokerFactoryWiresGitHubDestinationVerifier(t *testing.T) 
 		links:      []*taskmodels.TaskRepository{{TaskID: "task-factory", RepositoryID: "repository-factory", Metadata: metadata}},
 	}
 	verifier := &fakeContributionDestinationVerifier{}
-	broker := newGitCredentialBroker(&factoryTestGitHubCredentialSource{verifier: verifier}, nil, repo, "")
+	broker := newGitCredentialBroker(&factoryTestGitHubCredentialSource{verifier: verifier}, nil, repo, nil)
 
 	if _, err := broker.Issue(context.Background(), gitcredentials.Scope{
 		ProviderID: "github", WorkspaceID: "workspace-factory", TaskID: "task-factory", SessionID: "session-factory",

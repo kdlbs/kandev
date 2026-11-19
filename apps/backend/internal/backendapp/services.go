@@ -819,7 +819,7 @@ func initGitCredentialAndRemoteWiring(
 	version string,
 	log *logger.Logger,
 ) (*gitcredentials.Broker, *share.HTTPHandlers, error) {
-	gitCredentialBroker := newGitCredentialBroker(githubSvc, pluginsSvc, repos.Task, cfg.GitHubCredentialBroker.ReissueSigningKey)
+	gitCredentialBroker := newGitCredentialBroker(githubSvc, pluginsSvc, repos.Task, repos.gitCredentialReissueSigner)
 	if pluginsSvc != nil {
 		pluginsSvc.SetGitCredentialLeaseRevoker(gitCredentialBroker.RevokeProvider)
 	}
@@ -1254,6 +1254,9 @@ func (a *githubBrokerScopeAuthorizer) authorizeTaskSession(
 	}
 	if task == nil || task.WorkspaceID != workspaceID {
 		return fmt.Errorf("task does not belong to workspace")
+	}
+	if task.ArchivedAt != nil {
+		return fmt.Errorf("task is archived")
 	}
 	session, err := a.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
