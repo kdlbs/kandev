@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -335,14 +336,26 @@ func TestNativeCheckOverlayResolvesAgainstPhysicalWorkingDir(t *testing.T) {
 // A fixture backend with canned release lookups must never run a host agent
 // CLI for a native check, even when one is on PATH.
 func TestNativeCheckDisabledExecutionNeverRunsHostBinary(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell script helper")
+	}
 	h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())
 	marker := filepath.Join(h.home, "ran")
 	binary := filepath.Join(h.home, "bin", "omp")
-	writeNativeCheckFile(t, binary, "#!/bin/sh\ntouch "+marker+"\n")
+	writeNativeCheckFile(t, binary, "#!/bin/sh\n: > "+marker+"\n")
 	if err := os.Chmod(binary, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", filepath.Dir(binary))
+	// Positive control: the process runner does run this helper.
+	h.ctrl.SetNativeUpdateCheckRunner(nil)
+	_ = h.status(t, ompAgentID)
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("positive control: the helper did not run: %v", err)
+	}
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
 	h.ctrl.DisableNativeUpdateCheckExecution()
 	status := h.status(t, ompAgentID)
 	if status.CheckState != dto.AgentUpdateCheckStateUnknown || status.CheckReason != dto.AgentUpdateCheckReason(agents.NativeUpdateCheckReasonNotInstalled) {

@@ -95,7 +95,7 @@ resolves the executable, `Environment()` returns the check environment, and
 starting a process. Production uses `execNativeUpdateCheckRunner`. Tests
 inject a fake through `SetNativeUpdateCheckRunner`, matching
 `SetRuntimeUpdateStatusResolver`. A fixture backend with canned release
-lookups (the E2E runtime-update hooks) calls
+lookups and every E2E backend (`KANDEV_E2E_MOCK=true`) calls
 `DisableNativeUpdateCheckExecution`, so native checks report `not_installed`
 without running a host agent CLI or contacting a real release feed.
 
