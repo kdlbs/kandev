@@ -61,10 +61,10 @@ func tableExists(db *sqlx.DB, name string) (bool, error) {
 		err := db.Get(&exists, `
 			SELECT EXISTS (
 				SELECT 1
-				FROM information_schema.tables
-				WHERE table_schema = current_schema()
-					AND table_name = $1
-					AND table_type = 'BASE TABLE'
+				FROM pg_catalog.pg_class AS relation
+				WHERE relation.relname = $1
+					AND relation.relkind IN ('r', 'p')
+					AND pg_catalog.pg_table_is_visible(relation.oid)
 			)`, name)
 		return exists, err
 	}

@@ -1341,6 +1341,13 @@ func registerRoutes(p routeParams) {
 		p.services.Linear.SetTaskDeleter(handoffSvc)
 		p.services.Linear.SetRepositoryLookup(repoLookup)
 		p.services.Linear.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
+		p.services.Linear.SetWorkspaceWriteAuthorizer(func(ctx context.Context, workspaceID string) error {
+			err := p.taskSvc.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeTaskWrite)
+			if taskservice.IsForbidden(err) {
+				return linear.ErrWorkspaceWriteForbidden
+			}
+			return err
+		})
 	}
 	if p.services.Sentry != nil {
 		p.services.Sentry.SetTaskDeleter(handoffSvc)

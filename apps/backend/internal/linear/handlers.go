@@ -363,7 +363,7 @@ func (c *Controller) httpSetIssueState(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "stateId required"})
 		return
 	}
-	if err := c.service.SetIssueStateForWorkspace(ctx.Request.Context(), c.workspaceID(ctx), id, req.StateID); err != nil {
+	if err := c.service.SetIssueStateForWorkspaceAsUser(ctx.Request.Context(), c.workspaceID(ctx), id, req.StateID); err != nil {
 		c.writeClientError(ctx, err)
 		return
 	}
@@ -388,6 +388,10 @@ func (c *Controller) writeClientError(ctx *gin.Context, err error) {
 		// missing one — 404, not 403/500. Covers data-plane reads (via clientFor)
 		// and watch create/update (via writeIssueWatchError's fall-through).
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		return
+	}
+	if errors.Is(err, ErrWorkspaceWriteForbidden) {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
 	if errors.Is(err, ErrNotConfigured) {
@@ -446,6 +450,12 @@ func wsReply(msg *ws.Message, payload interface{}) (*ws.Message, error) {
 func wsFail(msg *ws.Message, err error) (*ws.Message, error) {
 	if errors.Is(err, ErrNotConfigured) {
 		return ws.NewError(msg.ID, msg.Action, errCodeLinearNotConfigured, err.Error(), nil)
+	}
+	if workspaceDenied(err) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "workspace not found", nil)
+	}
+	if errors.Is(err, ErrWorkspaceWriteForbidden) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, err.Error(), nil)
 	}
 	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 }
@@ -531,7 +541,7 @@ func wsSetIssueState(svc *Service) func(ctx context.Context, msg *ws.Message) (*
 		if p.IssueID == "" || p.StateID == "" {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "issueId and stateId required", nil)
 		}
-		if err := svc.SetIssueState(ctx, p.IssueID, p.StateID); err != nil {
+		if err := svc.SetIssueStateForWorkspaceAsUser(ctx, "", p.IssueID, p.StateID); err != nil {
 			return wsFail(msg, err)
 		}
 		return wsReply(msg, gin.H{"transitioned": true})
