@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -121,9 +122,15 @@ func TestNativeCheckRunnerMissingExecutable(t *testing.T) {
 // unreachable storage before a process exists. Cancellation must return at
 // once without starting the process, even after the resolution completes.
 func TestNativeCheckRunnerCancelDuringBlockedLaunchResolution(t *testing.T) {
-	t.Setenv(nativeCheckHelperEnv, "update-available")
-	entered, gate := make(chan struct{}), make(chan struct{})
+	marker := filepath.Join(t.TempDir(), "started")
+	t.Setenv(nativeCheckHelperEnv, "heartbeat")
+	t.Setenv(nativeCheckHeartbeatEnv, marker)
+	entered, gate, resolved := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(gate) }) }
+	t.Cleanup(release)
 	runner := execNativeUpdateCheckRunner{resolveLaunch: func(command agents.Command) (string, string, error) {
+		defer close(resolved)
 		close(entered)
 		<-gate
 		return execNativeUpdateCheckRunner{}.resolveLaunchPaths(command)
@@ -141,7 +148,14 @@ func TestNativeCheckRunnerCancelDuringBlockedLaunchResolution(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("cancellation waited for blocked launch resolution")
 	}
-	close(gate)
+	// Resolution recovers after cancellation; nothing may start from it. A
+	// started helper writes the marker within milliseconds.
+	release()
+	<-resolved
+	time.Sleep(500 * time.Millisecond)
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("the check started after its resolution recovered")
+	}
 }
 
 func TestNativeCheckRunnerTimeout(t *testing.T) {
