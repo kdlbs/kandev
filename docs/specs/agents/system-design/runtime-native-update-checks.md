@@ -198,6 +198,13 @@ into a shared package as `Prepare`, `Capture`, and `Tree.Kill`.
 
 Timeout is `nativeUpdateCheckTimeout = 30 * time.Second`. It is independent of
 `runtimeUpdateStatusLookupTimeout`, which continues to bound registry lookups.
+The check timeout equals the server's default 30-second write timeout. The
+synchronous `GET /api/v1/agent-update/status` and
+`GET /api/v1/agent-update/:agentName/preview` handlers therefore extend their
+write deadline with `http.ResponseController` to
+`controller.UpdateStatusResponseBudget` (90 seconds). That covers discovery,
+one slot wait behind another check, the check timeout, and process cleanup,
+so a timed-out check still delivers `unknown` / `timeout`.
 
 Cancellation and admission: the lookup context is derived from the caller with
 `context.WithoutCancel`, matching shared registry lookups, so one canceled

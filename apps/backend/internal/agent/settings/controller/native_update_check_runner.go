@@ -18,6 +18,12 @@ const (
 	nativeUpdateCheckWaitDelay   = time.Second
 )
 
+// UpdateStatusResponseBudget is the write deadline that synchronous status and
+// preview routes need. It covers discovery, one wait for a lookup slot held by
+// another check, the native check timeout, and process cleanup. This exceeds
+// the server's default 30-second write timeout.
+const UpdateStatusResponseBudget = 2*nativeUpdateCheckTimeout + 30*time.Second
+
 var (
 	errNativeUpdateCheckTimeout     = errors.New("native update check timed out")
 	errNativeUpdateCheckOutputLimit = errors.New("native update check output limit exceeded")
