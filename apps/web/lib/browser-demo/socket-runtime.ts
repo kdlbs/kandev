@@ -40,6 +40,7 @@ import {
   routeWorkspaceFileRename,
   routeWorkspaceFilesSearch,
   routeWorkspaceFileUpdate,
+  routeWorkspaceRootFilesList,
   routeWorkspaceTreeGet,
 } from "./socket-workspace-runtime";
 
@@ -94,6 +95,7 @@ export function routeSocketRequest(
     routeSessionFileReviewUpdate,
     routeSessionFileReviewReset,
     routeWorkspaceTreeGet,
+    routeWorkspaceRootFilesList,
     routeWorkspaceFileGet,
     routeWorkspaceFilesSearch,
     routeWorkspaceFileUpdate,
