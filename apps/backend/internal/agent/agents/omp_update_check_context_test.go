@@ -159,6 +159,24 @@ func TestOmpUpdateCheckContextConfigDirAndOverlays(t *testing.T) {
 	})
 }
 
+// Windows environment lookup is case-insensitive, so a mixed-case declared key
+// still selects OMP's configuration; an empty value still masks a fallback.
+func TestOmpUpdateCheckContextFoldsKeyCaseOnWindows(t *testing.T) {
+	f := newOmpContextFixture(t)
+	overlay := filepath.Join(f.root, "channel.yml")
+	resolver := NativeUpdateCheckResolver{Env: []string{"pi_config_files=" + overlay}, WorkingDir: f.cwd, HomeDir: f.home, Executable: f.exe, FoldCase: true}
+	got := NewOmpACP().NativeUpdateCheck().Context.Sources(resolver)
+	assertSourceFiles(t, got, append(f.defaultFiles(filepath.Join(f.home, ".omp", "agent"), filepath.Join(f.home, ".omp")), overlay))
+	resolver.FoldCase = false
+	if got := NewOmpACP().NativeUpdateCheck().Context.Sources(resolver); slices.Contains(got.Files, overlay) {
+		t.Errorf("POSIX lookup matched a differently cased key: %v", got.Files)
+	}
+	masked := NativeUpdateCheckResolver{Env: []string{"omp_profile=", "PI_PROFILE=work"}, FoldCase: true}
+	if value, ok := masked.Getenv("OMP_PROFILE"); !ok || value != "" {
+		t.Errorf("Getenv(OMP_PROFILE) = %q, %v; want a present empty value", value, ok)
+	}
+}
+
 func (f ompContextFixture) defaultFilesWithBase(base, agentDir, root string) []string {
 	files := f.defaultFiles(agentDir, root)
 	for i, path := range files {

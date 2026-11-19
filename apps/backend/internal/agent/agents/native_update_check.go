@@ -68,13 +68,16 @@ type NativeUpdateCheckResolver struct {
 	HomeDir    string
 	Launcher   string
 	Executable string
+	// FoldCase makes Getenv case-insensitive, as process environment lookup
+	// is on Windows.
+	FoldCase bool
 }
 
 // NewNativeUpdateCheckResolver derives the home directory from the check
 // environment, the way the checker's own runtime does, and evaluates
 // executable symlinks so ownership manifests are found beside the real binary.
 func NewNativeUpdateCheckResolver(env []string, workingDir, executable string) NativeUpdateCheckResolver {
-	resolver := NativeUpdateCheckResolver{Env: env, WorkingDir: workingDir, Launcher: executable, Executable: executable}
+	resolver := NativeUpdateCheckResolver{Env: env, WorkingDir: workingDir, Launcher: executable, Executable: executable, FoldCase: runtime.GOOS == osWindows}
 	homeKey, lookup := envHome, resolver.Getenv
 	if runtime.GOOS == osWindows {
 		homeKey, lookup = "USERPROFILE", resolver.GetenvFold
@@ -104,12 +107,18 @@ func accountHomeDir() string {
 	return ""
 }
 
-// Getenv returns the last exact match for key, matching process semantics.
+// Getenv returns the last match for key, matching process semantics: exact
+// on POSIX, case-insensitive when FoldCase (Windows). A present empty value
+// is found, so it still masks a fallback key.
 func (r NativeUpdateCheckResolver) Getenv(key string) (string, bool) {
+	return r.lookupEnv(key, r.FoldCase)
+}
+
+func (r NativeUpdateCheckResolver) lookupEnv(key string, fold bool) (string, bool) {
 	value, found := "", false
 	for _, entry := range r.Env {
 		name, v, ok := strings.Cut(entry, "=")
-		if ok && name == key {
+		if ok && (name == key || fold && strings.EqualFold(name, key)) {
 			value, found = v, true
 		}
 	}
@@ -119,7 +128,7 @@ func (r NativeUpdateCheckResolver) Getenv(key string) (string, bool) {
 // GetenvFold mirrors OMP's envLookup: a nonempty exact match wins; otherwise
 // the first nonempty case-insensitive match. Empty values never match.
 func (r NativeUpdateCheckResolver) GetenvFold(key string) (string, bool) {
-	if value, ok := r.Getenv(key); ok && value != "" {
+	if value, ok := r.lookupEnv(key, false); ok && value != "" {
 		return value, true
 	}
 	for _, entry := range r.Env {
