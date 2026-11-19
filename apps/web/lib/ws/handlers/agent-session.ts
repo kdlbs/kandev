@@ -17,6 +17,7 @@ import type {
   TaskSessionActivityChangedPayload,
   TaskSessionAgentctlPayload,
 } from "@/lib/types/backend";
+import { isConfirmedSessionRemoved } from "@/lib/state/session-removal";
 import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
 import {
   mergeCompactionCountValue,
@@ -315,14 +316,6 @@ function extractContextWindow(store: StoreApi<AppState>, sessionId: string, payl
   }
 }
 
-/** Copy agentctl "ready" status from one session to another (same-task switch). */
-function inheritAgentctlStatus(state: AppState, fromSessionId: string, toSessionId: string): void {
-  const oldAgentctl = state.sessionAgentctl?.itemsBySessionId?.[fromSessionId];
-  if (oldAgentctl?.status === "ready") {
-    state.setSessionAgentctlStatus(toSessionId, oldAgentctl);
-  }
-}
-
 /** Retains the active restart target or a protected user pin during automatic adoption. */
 function shouldPreserveSessionSelection(
   store: StoreApi<AppState>,
@@ -357,8 +350,6 @@ function maybeAdoptSessionOnTransition(
 
   if (!wasKnownToStore && shouldAdoptNewSession(state, taskId, newState)) {
     if (followSessionTransition(store, taskId, sessionId, "new-session")) return;
-    const oldSessionId = state.tasks.activeSessionId;
-    if (oldSessionId) inheritAgentctlStatus(state, oldSessionId, sessionId);
     clearPinnedSessionIfOverridden(store, sessionId);
     state.setActiveSessionAuto(taskId, sessionId);
     return;
@@ -903,7 +894,8 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       const { task_id: rawTaskId, session_id: rawSessionId } = payload;
       const newState = payload.new_state as TaskSessionState | undefined;
 
-      if (!rawSessionId) return;
+      if (!rawSessionId || isConfirmedSessionRemoved(store.getState().taskSessions, rawSessionId))
+        return;
       const taskId = toTaskId(rawTaskId);
       const sessionId = toSessionId(rawSessionId);
 
@@ -991,7 +983,11 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       handleCancellationPendingMessage(store, message.payload),
     "session.agentctl_starting": (message) => {
       const payload = message.payload;
-      if (!payload?.session_id) return;
+      if (
+        !payload?.session_id ||
+        isConfirmedSessionRemoved(store.getState().taskSessions, payload.session_id)
+      )
+        return;
       store
         .getState()
         .invalidateConfirmedConfigOptions(payload.session_id, payload.agent_execution_id);
@@ -1004,7 +1000,11 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
     },
     "session.agentctl_ready": (message) => {
       const payload = message.payload;
-      if (!payload?.session_id) return;
+      if (
+        !payload?.session_id ||
+        isConfirmedSessionRemoved(store.getState().taskSessions, payload.session_id)
+      )
+        return;
       const sessionBeforeSync = store.getState().taskSessions.items[payload.session_id];
       store.getState().setSessionAgentctlStatus(payload.session_id, {
         status: "ready",
@@ -1017,7 +1017,11 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
     },
     "session.agentctl_error": (message) => {
       const payload = message.payload;
-      if (!payload?.session_id) return;
+      if (
+        !payload?.session_id ||
+        isConfirmedSessionRemoved(store.getState().taskSessions, payload.session_id)
+      )
+        return;
       store.getState().setSessionAgentctlStatus(payload.session_id, {
         status: "error",
         agentExecutionId: payload.agent_execution_id,

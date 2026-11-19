@@ -1339,6 +1339,10 @@ describe("session.state_changed → active session handoff on terminal", () => {
   it("hands off after confirming completion, inheriting readiness before focus", async () => {
     const store = withSiblings("RUNNING");
     store.getState().removeTaskSession("t1", "latest");
+    store
+      .getState()
+      .setTaskSession({ ...store.getState().taskSessions.items.next, state: "STARTING" });
+    store.setState({ sessionAgentctl: { itemsBySessionId: {} } });
     store.getState().setSessionAgentctlStatus("old", {
       status: "ready",
       agentExecutionId: "old-execution",
@@ -1347,6 +1351,7 @@ describe("session.state_changed → active session handoff on terminal", () => {
     vi.mocked(fetchTaskSession).mockResolvedValue(response("COMPLETED"));
     notifyState(store, "COMPLETED", "2026-11-19T12:00:00Z");
     expect(store.getState().tasks.activeSessionId).toBe("old");
+    expect(store.getState().sessionAgentctl.itemsBySessionId.next).toBeUndefined();
     let readyAtSelection: boolean | undefined;
     const stop = store.subscribe((state) => {
       if (state.tasks.activeSessionId === "next" && readyAtSelection === undefined)
@@ -1356,6 +1361,9 @@ describe("session.state_changed → active session handoff on terminal", () => {
       await flushFocusWork();
       expect(store.getState().tasks.activeSessionId).toBe("next");
       expect(readyAtSelection).toBe(true);
+      expect(
+        store.getState().sessionAgentctl.itemsBySessionId.next?.agentExecutionId,
+      ).toBeUndefined();
     } finally {
       stop();
     }

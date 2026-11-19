@@ -55,7 +55,8 @@ not authorize this production change.
   write, and summary event. Do not clear a task summary optimistically.
 - Preserve cursorless first-visit divider behavior and latest-request correlation
   by session, including valid responses after navigation/unmount and same-session
-  supersession. Do not add polling or new automatic retry behavior.
+  supersession. Do not add polling or error retries; only membership invalidation
+  revalidates a still-owned removal proof.
 - Finish the desktop and phone regression in the existing unread-dot specs,
   including durable read state after navigation/reload and an unread sibling
   that must retain its contribution. Include a mixed live/failed case.
@@ -191,6 +192,8 @@ cd "$VERIFY"
 (cd apps/web && pnpm exec vitest run \
   lib/ws/handlers/task-primary-focus.test.ts \
   lib/ws/handlers/task-primary-lifecycle.test.ts \
+  lib/ws/handlers/task-primary-removal-admission.test.ts \
+  lib/ws/handlers/tasks.deleted.test.ts \
   lib/ws/handlers/agent-session.test.ts \
   lib/ws/handlers/agent-session-pure.test.ts \
   lib/ws/handlers/tasks.test.ts \
@@ -200,6 +203,8 @@ cd "$VERIFY"
   hooks/use-task-sessions.removal.test.ts \
   hooks/use-task-removal-session-loading.test.ts \
   hooks/domains/session/use-session-actions.test.ts \
+  hooks/domains/session/use-session-actions.removal-proof.test.ts \
+  src/task-detail-route-recovery.test.tsx \
   lib/task-agent-error.test.ts)
 (cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/task/task-unread-dot.spec.ts tests/session/session-primary-removal.spec.ts -- --retries=0)
 (cd apps/web && pnpm e2e:run --host --shards 1 --project mobile-chrome tests/task/mobile-task-unread-dot.spec.ts -- --retries=0)
@@ -699,6 +704,122 @@ two-client case adds the distinct committed-removal boundary. No layout, touch
 surface or copy changed. R5 uses a fresh frontend over the recorded unchanged
 backend/plugin artifacts. No broad-suite or live NATS certification is implied.
 
+### Production-fix review round 6 remediation
+
+Accepted source-traced races extend the same .6/.8/.9/.12/.17 repair:
+
+- Fence confirmed-deleted IDs at session admission, including late lifecycle
+  frames and optional route enrichment. Preserve ordinary cache eviction,
+  in-place session reincarnation, surviving siblings and store/backend scope.
+- Bind removal proof to the task membership generation; a second confirmed
+  deletion must refresh the still-owned original proof before choosing a recipient.
+- Preserve recipient-owned readiness/execution after a delayed predecessor GET.
+  Inheritance is only a fallback, never authority over an independent execution.
+
+Owners: session slice/types and admission guard, hydration, session WS handlers,
+primary-focus controller and confirmed-deletion callers. Add real-store ordering
+regressions and the existing SPA route-enrichment consumer test. No layout, touch
+composition, server promotion, unread predicate, cursor writer or wire change.
+
+Narrow regression command (cache snapshot, `apps/web`):
+
+```bash
+pnpm exec vitest run lib/ws/handlers/task-primary-removal-admission.test.ts \
+  lib/ws/handlers/task-primary-lifecycle.test.ts lib/ws/handlers/agent-session.test.ts \
+  lib/ws/handlers/tasks.deleted.test.ts \
+  hooks/domains/session/use-session-actions.removal-proof.test.ts \
+  src/task-detail-route-recovery.test.tsx
+```
+
+R6 implementation and evidence:
+
+- Confirmed backend deletion, not ordinary cache eviction, records a client-only
+  UUID fence scoped to the store/backend. Session UUID deletion cannot be undone
+  by an unproven queue-incarnation change. New backend admission and ordinary
+  in-place reincarnation remain usable. Canonical/list/single/event/route writers
+  share the guard; hydration cannot replace the evidence. A stale membership
+  merges surviving rows instead of dropping siblings learned since its snapshot.
+  Per-reader generations alone cannot fence an admitted navigation identity or
+  late lifecycle snapshot, so confirmed absence also gates final admission.
+- Removal proof retains the task read key and checks its generation in the same
+  continuation that publishes selection. Invalidation refreshes under the original
+  still-owned removal, without a timer or steady-state error retry.
+- Delayed readiness preserves the recipient's accepted projection, including its
+  error and execution. Independent execution or environment metadata blocks fallback.
+  An unknown recipient execution never receives the predecessor's execution ID.
+  Initial adoption no longer copies readiness from a foreign task.
+- `r6-red.log`: 10 behavioral failures/17 controls passed across late admission,
+  stale proof and execution overwrite. `r6-red-inactive-delete.log` proves the
+  real inactive-session deletion hook selected the deleted B after A's old proof.
+  `r6-red-execution.log` and `r6-red-initial-execution.log` isolate predecessor
+  identity leakage. Recipient assertions preserve the accepted reducer projection:
+  a starting observation can legitimately derive ready from cached live state.
+- `r6-red-task-delete.log`: one late-admission failure after task deletion and
+  one new-backend control passed. The task deletion caller now records confirmed
+  deletion for every known session source. Its old mock-call test was replaced
+  with real-store eviction/admission and untouched-foreign-session assertions.
+- Intermediate GREEN: admission/nearby store 61, route/admission 13, authority plus
+  public deletion hook 52, removal cases 9, then six focused files/149 tests.
+  Final change-aware checks are recorded below; intermediate runs are not their
+  substitute. Two obsolete internal call-signature assertions were deleted, not
+  repinned. No user-visible copy, layout or pointer/touch composition changed.
+- Additional boundary proof: `r6-red-environment.log` rejected readiness borrowed
+  into a different recipient environment. `r6-red-selection.log` proved recovered
+  enrichment could restore the deleted active ID even with clean session indexes.
+  Task-UI fragments targeting a confirmed-deleted ID are now rejected while other
+  hydration continues. The readiness positive control starts with an unobserved
+  recipient so it exercises actual fallback, not pre-existing recipient readiness.
+- Final unit/type/build: `r6-final-unit-v5.log`, 154 files/1620 tests passed;
+  `r6-final-typecheck-v5.log` passed with the documented 8 GiB Node heap;
+  `r6-final-build-v3.log` is a fresh frontend build. Configured changed-file
+  Oxlint and formatting passed after extracting task-selection hydration and
+  splitting the admission test group to meet the existing complexity/size limits.
+  The intermediate lint and type failures were corrected, not waived.
+- Final i18n ratchet and architecture checks passed (`r6-final-i18n.log`,
+  `r6-final-architecture.log`). Rename-detection warnings remain reported;
+  neither check certifies the known-failing broad suites.
+- The first normal pre-commit attempt applied a lifecycle-test Prettier wrap.
+  The working tree retained that formatting for the retry; no logic changed.
+- Final runtime: `r6-final-desktop.log`, 35 passed; `r6-final-phone.log`,
+  3 passed. Both full unread files, removal, tab management, handoff, multi-session
+  UX and recovery ran with one worker and retries 0 against the fresh frontend.
+  The phone capture was inspected: the failed session, resume failure entry and
+  recovery controls remain visible; the card reflects read-only restoration.
+  These checks do not reproduce the deleted historical incident or certify
+  broad backend/web suites. List readback remains convergence evidence, not
+  isolated cursor-event delivery proof.
+
+Expanded final unit invocation, from the cache snapshot's `apps/web`:
+
+```bash
+pnpm exec vitest run lib/ws/handlers lib/state/slices/session \
+  lib/state/hydration lib/ssr/session-page src/task-detail-route \
+  hooks/use-task-sessions hooks/use-task-removal \
+  hooks/domains/session/use-session-actions \
+  hooks/domains/session/use-workspace-restoration.test.ts \
+  lib/state/task-session-reads.test.ts lib/state/shared-resource-reads.test.ts \
+  lib/state/workflow-session-focus.test.ts lib/task-agent-error.test.ts \
+  components/task/chat/use-session-read-tracking.test.ts \
+  components/task/task-unread-dot-visibility.test.ts lib/session-unread-divider.test.ts
+```
+
+Runtime invocation after that fresh frontend build, from the same cache snapshot.
+`--no-build` reuses the recorded R02 backend/plugin artifacts; it is not a new
+backend build or live NATS validation. A clean snapshot must first build through
+the managed recipe above.
+
+```bash
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  tests/task/task-unread-dot.spec.ts tests/session/session-primary-removal.spec.ts \
+  tests/session/session-tab-management.spec.ts tests/session/session-handoff.spec.ts \
+  tests/session/multi-session-ux.spec.ts tests/session/session-recovery.spec.ts \
+  -- --workers=1 --retries=0
+pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome \
+  tests/task/mobile-task-unread-dot.spec.ts -- --workers=1 --retries=0
+```
+
+
+
 ## New reported incident: existing cursor behind a failed resume
 
 The user supplied task `eae34524-3f77-45ef-9d72-677f11d03cd4` ("Add message
@@ -814,6 +935,8 @@ unread contract are unchanged. Narrow commands, from `apps/web`:
 pnpm exec vitest run \
   lib/ws/handlers/task-primary-focus.test.ts \
   lib/ws/handlers/task-primary-lifecycle.test.ts \
+  lib/ws/handlers/task-primary-removal-admission.test.ts \
+  lib/ws/handlers/tasks.deleted.test.ts \
   lib/ws/handlers/agent-session.test.ts \
   lib/ws/handlers/agent-session-pure.test.ts \
   lib/ws/handlers/tasks.test.ts \
@@ -823,6 +946,8 @@ pnpm exec vitest run \
   hooks/use-task-sessions.removal.test.ts \
   hooks/use-task-removal \
   hooks/domains/session/use-session-actions.test.ts \
+  hooks/domains/session/use-session-actions.removal-proof.test.ts \
+  src/task-detail-route-recovery.test.tsx \
   lib/task-agent-error.test.ts
 pnpm e2e:run --host --shards 1 --project chromium tests/task/task-unread-dot.spec.ts tests/session/session-primary-removal.spec.ts -- --retries=0
 pnpm e2e:run --host --shards 1 --project mobile-chrome tests/task/mobile-task-unread-dot.spec.ts -- --retries=0

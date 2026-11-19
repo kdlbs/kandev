@@ -168,7 +168,7 @@ export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActio
       }
 
       invalidateTaskSessionMembership(appStoreApi, taskId);
-      removeTaskSession(taskId, sessionId);
+      removeTaskSession(taskId, sessionId, { confirmed: true });
       removeQuickChatSession(sessionId);
       onDeleted?.();
       return true;

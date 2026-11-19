@@ -17,6 +17,9 @@ import { sessionId, taskId, workspaceId, workflowId } from "@/lib/types/ids";
 import type { Task, TaskSession } from "@/lib/types/http";
 import type { FetchedSessionData } from "@/lib/ssr/session-page-state";
 import { TaskDetailRoute } from "./task-detail-route";
+import { listTaskSessions } from "@/lib/api/domains/session-api";
+import type * as SessionApi from "@/lib/api/domains/session-api";
+import { registerTaskSessionHandlers } from "@/lib/ws/handlers/agent-session";
 
 const TASK_ID = taskId("task-recovery");
 const SHELL_TEST_ID = "kanban-task-shell";
@@ -24,6 +27,7 @@ const SHELL_TASK_ID_ATTRIBUTE = "data-task-id";
 const LOAD_ERROR_TEST_ID = "task-load-error-state";
 const PRIMARY_SESSION_ID = sessionId("session-primary");
 const SECONDARY_SESSION_ID = sessionId("session-secondary");
+const SESSION_OBSERVATION_TIME = "2026-11-19T12:00:00Z";
 
 const mocks = vi.hoisted(() => ({
   beginTaskNavigation: vi.fn(),
@@ -145,6 +149,11 @@ vi.mock("@/lib/state/task-navigation-reads", async (importOriginal) => {
     },
   };
 });
+
+vi.mock("@/lib/api/domains/session-api", async (original) => ({
+  ...(await original<typeof SessionApi>()),
+  listTaskSessions: vi.fn(),
+}));
 
 function makeTask(): Task {
   return {
@@ -281,6 +290,76 @@ beforeEach(() => {
     cycle: 0,
     identity: undefined,
   };
+});
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6
+it("does not readmit a removed session when soft-navigation enrichment completes", async () => {
+  const identity = makeIdentity();
+  identity.task.archived_at = undefined;
+  identity.task.state = "CREATED";
+  const [removed, survivor] = identity.allSessionsResponse.sessions;
+  Object.assign(removed, {
+    state: "FAILED",
+    started_at: SESSION_OBSERVATION_TIME,
+    updated_at: SESSION_OBSERVATION_TIME,
+  });
+  Object.assign(survivor, {
+    state: "WAITING_FOR_INPUT",
+    started_at: SESSION_OBSERVATION_TIME,
+    updated_at: SESSION_OBSERVATION_TIME,
+  });
+  const enrichment = Promise.withResolvers<FetchedSessionData>();
+  mocks.fetchTaskNavigationEnrichment.mockReturnValue(enrichment.promise);
+  createNavigationHarness(async () => identity);
+  const storeRef: { current: StoreApi<AppState> | null } = { current: null };
+  renderTaskRoute(
+    <TaskDetailRoute taskId={TASK_ID} />,
+    {
+      tasks: {
+        activeTaskId: TASK_ID,
+        activeSessionId: PRIMARY_SESSION_ID,
+        pinnedSessionId: null,
+        lastSessionByTaskId: {},
+        resumeSkippedSessionIds: {},
+      },
+    },
+    storeRef,
+  );
+  await waitFor(() => {
+    expect(mocks.fetchTaskNavigationEnrichment).toHaveBeenCalled();
+    expect(storeRef.current?.getState().taskSessions.items[PRIMARY_SESSION_ID]?.id).toBe(
+      PRIMARY_SESSION_ID,
+    );
+  });
+  const store = storeRef.current!;
+  vi.mocked(listTaskSessions).mockResolvedValue({
+    sessions: [{ ...survivor, is_primary: true }],
+    total: 1,
+  });
+  await act(async () => {
+    registerTaskSessionHandlers(store)["session.removed"]!({
+      id: "removed",
+      type: "notification",
+      action: "session.removed",
+      payload: { session_id: PRIMARY_SESSION_ID, task_id: TASK_ID },
+    });
+  });
+  await waitFor(() => expect(store.getState().tasks.activeSessionId).toBe(SECONDARY_SESSION_ID));
+  await act(async () => {
+    enrichment.resolve({
+      ...makeEnrichedData(identity),
+      sessionId: PRIMARY_SESSION_ID,
+      initialState: { taskSessions: { items: { [PRIMARY_SESSION_ID]: removed } } },
+    });
+  });
+  expect(store.getState().taskSessions.items[PRIMARY_SESSION_ID]).toBeUndefined();
+  expect(store.getState().taskSessionsByTask.itemsByTaskId[TASK_ID].map((row) => row.id)).toEqual([
+    SECONDARY_SESSION_ID,
+  ]);
+  expect(store.getState().tasks.activeSessionId).toBe(SECONDARY_SESSION_ID);
+  expect(store.getState().taskSessions.items[SECONDARY_SESSION_ID].last_read_message_id).toBe(
+    survivor.last_read_message_id,
+  );
 });
 
 describe("task-detail route recovery", () => {

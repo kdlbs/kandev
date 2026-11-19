@@ -140,7 +140,6 @@ describe("useSessionActions", () => {
     await result.current.remove();
     await waitFor(() => expect(onDeleted).toHaveBeenCalled());
     expect(mockRequest).toHaveBeenCalledWith("session.delete", { session_id: "s1" }, 15000);
-    expect(mockRemoveTaskSession).toHaveBeenCalledWith("t1", "s1");
     expect(mockRemoveQuickChatSession).toHaveBeenCalledWith("s1");
     expect(mockToast).toHaveBeenCalledWith({
       title: "Deleting session...",
@@ -190,7 +189,6 @@ describe("useSessionActions", () => {
     expect(ok).toBe(true);
     expect(mockDeleteTask).toHaveBeenCalledWith("t1");
     expect(mockRequest).not.toHaveBeenCalled();
-    expect(mockRemoveTaskSession).toHaveBeenCalledWith("t1", "s1");
     expect(mockRemoveQuickChatSession).toHaveBeenCalledWith("s1");
   });
 

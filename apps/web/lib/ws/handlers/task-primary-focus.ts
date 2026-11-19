@@ -4,7 +4,11 @@ import { fetchTaskSession, listTaskSessions } from "@/lib/api/domains/session-ap
 import { ApiError } from "@/lib/api/client";
 import type { TaskSession, TaskSessionsResponse } from "@/lib/types/http";
 import { retireSessionReads } from "@/lib/state/session-read-coordinator";
-import { invalidateTaskSessionMembership } from "@/lib/state/task-session-reads";
+import {
+  getTaskSessionReads,
+  invalidateTaskSessionMembership,
+} from "@/lib/state/task-session-reads";
+import { isConfirmedSessionRemoved } from "@/lib/state/session-removal";
 import { createDebugLogger } from "@/lib/debug/log";
 import {
   getSessionRestartStore,
@@ -60,13 +64,22 @@ function ownsSelection(store: StoreApi<AppState>, pending: FollowOwner): boolean
   );
 }
 
+function ownsPendingFollow(store: StoreApi<AppState>, pending: PendingFollow): boolean {
+  return pendingByStore.get(store) === pending && ownsSelection(store, pending);
+}
+
 function prepareFollowTarget(
   state: AppState,
   pending: FollowOwner,
   removedTarget?: RemovalTarget,
 ): string | null {
   const target = removedTarget?.id ?? pending.targetSessionId;
-  if (!target || target === pending.previousSessionId) return null;
+  if (
+    !target ||
+    target === pending.previousSessionId ||
+    isConfirmedSessionRemoved(state.taskSessions, target)
+  )
+    return null;
   if (removedTarget && !state.taskSessions.items[target]) {
     state.upsertTaskSessionFromEvent(pending.taskId, {
       id: removedTarget.id,
@@ -79,25 +92,44 @@ function prepareFollowTarget(
   return target;
 }
 
+function inheritFallbackReadiness(state: AppState, predecessor: string, target: string): void {
+  const previous = state.sessionAgentctl.itemsBySessionId[predecessor];
+  const current = state.sessionAgentctl.itemsBySessionId[target];
+  const executionId = state.taskSessions.items[target]?.agent_execution_id;
+  if (
+    previous?.status !== "ready" ||
+    current ||
+    (executionId && executionId !== previous.agentExecutionId)
+  )
+    return;
+  const targetEnvironment =
+    state.environmentIdBySessionId?.[target] ??
+    state.taskSessions.items[target]?.task_environment_id;
+  const previousEnvironment =
+    state.environmentIdBySessionId?.[predecessor] ??
+    state.taskSessions.items[predecessor]?.task_environment_id;
+  if (targetEnvironment && targetEnvironment !== previousEnvironment) return;
+  state.setSessionAgentctlStatus(target, {
+    status: "ready",
+    agentExecutionId: executionId,
+    updatedAt: previous.updatedAt,
+  });
+}
+
 function completePendingFollow(
   store: StoreApi<AppState>,
   pending: PendingFollow,
   removedTarget?: RemovalTarget,
 ): boolean {
-  if (pendingByStore.get(store) !== pending || !ownsSelection(store, pending)) return false;
+  if (!ownsPendingFollow(store, pending)) return false;
   const state = store.getState();
   if (findTaskInState(state, pending.taskId)?.primarySessionId !== pending.projectedPrimaryId)
     return false;
   const target = prepareFollowTarget(state, pending, removedTarget);
   if (!target) return false;
-  const previousAgentctl = state.sessionAgentctl?.itemsBySessionId?.[pending.previousSessionId];
   pending.cancel();
-  if (
-    !removedTarget &&
-    (pending.source === "terminal" || pending.source === "new-session") &&
-    previousAgentctl?.status === "ready"
-  ) {
-    state.setSessionAgentctlStatus(target, previousAgentctl);
+  if (!removedTarget && (pending.source === "terminal" || pending.source === "new-session")) {
+    inheritFallbackReadiness(state, pending.previousSessionId, target);
   }
   clearPinnedSessionIfOverridden(store, target);
   store.getState().setActiveSessionAuto(pending.taskId, target);
@@ -130,21 +162,52 @@ function allowsFollowState(source: FollowSource, state: TaskSession["state"]): b
   );
 }
 
+function commitRemovalMembership(
+  store: StoreApi<AppState>,
+  pending: PendingFollow,
+  membership: TaskSessionsResponse,
+) {
+  const target = provenRemovalTarget(membership, pending);
+  if (target && completePendingFollow(store, pending, target)) {
+    invalidateTaskSessionMembership(store, pending.taskId);
+    retireSessionReads(store, pending.previousSessionId);
+    store
+      .getState()
+      .removeTaskSession(pending.taskId, pending.previousSessionId, { confirmed: true });
+  }
+}
+
 async function verifyRemoval(
   store: StoreApi<AppState>,
   pending: PendingFollow,
   signal: AbortSignal,
 ) {
-  if (pendingByStore.get(store) !== pending || !ownsSelection(store, pending)) return;
-  const membership = await listTaskSessions(pending.taskId, {
-    cache: "no-store",
-    init: { signal },
-  });
-  const target = provenRemovalTarget(membership, pending);
-  if (target && completePendingFollow(store, pending, target)) {
-    invalidateTaskSessionMembership(store, pending.taskId);
-    retireSessionReads(store, pending.previousSessionId);
-    store.getState().removeTaskSession(pending.taskId, pending.previousSessionId);
+  if (!ownsPendingFollow(store, pending)) return;
+  const reads = getTaskSessionReads(store);
+  const release = reads.retain(pending.taskId);
+  try {
+    while (
+      !signal.aborted &&
+      reads.isCurrent(pending.taskId) &&
+      ownsPendingFollow(store, pending)
+    ) {
+      const generation = reads.generation(pending.taskId);
+      let membership: TaskSessionsResponse;
+      try {
+        membership = await listTaskSessions(pending.taskId, {
+          cache: "no-store",
+          init: { signal },
+        });
+      } catch (error) {
+        if (reads.isCurrent(pending.taskId, generation)) throw error;
+        continue;
+      }
+      if (!reads.isCurrent(pending.taskId, generation)) continue;
+      commitRemovalMembership(store, pending, membership);
+      return;
+    }
+  } finally {
+    release();
   }
 }
 

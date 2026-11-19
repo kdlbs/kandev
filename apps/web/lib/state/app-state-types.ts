@@ -540,7 +540,7 @@ export type AppState = KanbanSlice & {
     sessionIds: string[],
     projection: WorkspaceRecoveryProjection,
   ) => void;
-  removeTaskSession: (taskId: string, sessionId: string) => void;
+  removeTaskSession: (taskId: string, sessionId: string, options?: { confirmed?: boolean }) => void;
   setTaskSessionsForTask: (
     taskId: string,
     sessions: TaskSession[],

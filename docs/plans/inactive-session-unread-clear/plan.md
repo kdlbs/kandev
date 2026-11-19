@@ -532,5 +532,13 @@ fix. It is separate from the five design-only rounds above.
   1019 focused tests, 22 retirement-consumer tests, final desktop unread/removal
   5 and phone unread 3 passed; the earlier related desktop run passed 35.
   See Task 02 Results for exact commands, bundle provenance and limitations.
-- Completed rounds: 5. Consecutive clean: 0. The stop condition is three
+- Round 6: Sol child `fb78eae7-2e1c-4d70-9f55-b1bcf209a9a1` reviewed
+  `70c33e2e0f`. Three P2 findings accepted: independent route/lifecycle admission
+  resurrects removed rows; an older removal proof can select a second deleted
+  recipient; delayed readiness inheritance overwrites recipient-owned execution.
+  R6 adds confirmed-removal admission, membership-owned proof and recipient-owned
+  readiness. Final author checks: 1620 focused tests, full desktop selection/
+  unread/removal 35 and phone unread 3 passed. Task 02 records exact commands,
+  frontend/backend provenance and limits. This review loop remains open.
+- Completed rounds: 6. Consecutive clean: 0. The stop condition is three
   consecutive clean rounds or 50 rounds. No earlier loop counts toward it.

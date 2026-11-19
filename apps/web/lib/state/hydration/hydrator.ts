@@ -22,6 +22,7 @@ import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revis
 import { mergeAgentProfileRecentUseState } from "@/lib/agent-profile-recent-use";
 import { mergeRuntimeStorageHealth } from "@/lib/session-delivery-storage";
 import type { RuntimeStorageHealth } from "@/lib/types/http";
+import { admitTaskSessionRows, isConfirmedSessionRemoved } from "@/lib/state/session-removal";
 import {
   captureActiveTurnWindowObservation,
   mergeTurnRows,
@@ -160,6 +161,12 @@ function seedOrderRevisionsFromSteps(
   );
 }
 
+function hydrateTaskSelection(draft: Draft<AppState>, incoming: HydrationState["tasks"]): void {
+  if (incoming && !isConfirmedSessionRemoved(draft.taskSessions, incoming.activeSessionId ?? "")) {
+    deepMerge(draft.tasks, incoming);
+  }
+}
+
 /** Hydrate kanban and workspace slices. */
 function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: HydrationState): void {
   if (state.kanban) {
@@ -177,7 +184,7 @@ function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: HydrationState
   }
   if (state.workflows) deepMerge(draft.workflows, state.workflows);
   if (state.workspaceContextRead) deepMerge(draft.workspaceContextRead, state.workspaceContextRead);
-  if (state.tasks) deepMerge(draft.tasks, state.tasks);
+  hydrateTaskSelection(draft, state.tasks);
   if (state.workspaces) deepMerge(draft.workspaces, state.workspaces);
   if (state.repositories) deepMerge(draft.repositories, state.repositories);
   if (state.repositoryBranchPolicies)
@@ -590,7 +597,8 @@ function hydrateTaskSessions(
     incomingStorage,
   });
 
-  deepMerge(draft.taskSessions, { ...incoming, items });
+  const { confirmedRemovals: _ignoredRemovals, ...snapshot } = incoming;
+  deepMerge(draft.taskSessions, { ...snapshot, items });
   applyHydratedRuntimeStorage(draft, previousStorage, incomingStorage);
 
   for (const [sessionId, previousCursor] of previousCursors) {
@@ -614,7 +622,10 @@ function prepareHydratedSessionItems(
   const items = { ...incomingItems };
   for (const [sessionId, session] of Object.entries(incomingItems)) {
     const existing = draft.taskSessions.items[sessionId];
-    if (isStaleSessionStateEvent(existing, session.updated_at)) {
+    if (
+      isConfirmedSessionRemoved(draft.taskSessions, sessionId) ||
+      isStaleSessionStateEvent(existing, session.updated_at)
+    ) {
       delete items[sessionId];
       continue;
     }
@@ -656,7 +667,11 @@ function hydrateTaskSessionsByTask(
   const itemsByTaskId = Object.fromEntries(
     Object.entries(incoming.itemsByTaskId ?? {}).map(([taskId, sessions]) => [
       taskId,
-      sessions.map((session) => {
+      admitTaskSessionRows(
+        draft.taskSessions,
+        draft.taskSessionsByTask.itemsByTaskId[taskId] ?? [],
+        sessions,
+      ).map((session) => {
         const canonical = draft.taskSessions.items[session.id];
         return canonical &&
           (hydratedSessionIds.has(session.id) ||
