@@ -29,6 +29,20 @@ func TestResolvePathAgainstWindowsSemantics(t *testing.T) {
 	}
 }
 
+// A root-relative entry keeps the UNC server and share of a UNC working
+// directory, as Node path.win32.resolve does.
+func TestResolvePathAgainstWindowsUNCWorkingDir(t *testing.T) {
+	cwd := `\\server\share\work\repo`
+	for _, tc := range []struct{ entry, want string }{
+		{`\config\channel.yml`, `\\server\share\config\channel.yml`},
+		{`rel\channel.yml`, `\\server\share\work\repo\rel\channel.yml`},
+	} {
+		if got := resolvePathAgainst(cwd, tc.entry, true); got != tc.want {
+			t.Errorf("resolvePathAgainst(%q) = %q, want %q", tc.entry, got, tc.want)
+		}
+	}
+}
+
 // OMP reads npm_config_userconfig with fs.readFile, so the filesystem follows
 // a symlink before "..". The fingerprint must stat that same file.
 func TestOmpFingerprintFollowsNpmUserconfigThroughSymlink(t *testing.T) {

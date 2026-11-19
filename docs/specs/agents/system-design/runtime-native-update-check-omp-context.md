@@ -71,7 +71,8 @@ list to that commit.
     included. Each entry is expanded like upstream `expandTilde`: `~`, `~/`,
     `~\`, and a bare `~name` meaning `<home>/name`. Relative paths resolve
     against the working directory like Node `path.resolve`. On Windows a
-    root-relative path (`\dir`) keeps the working directory's drive. A
+    root-relative path (`\dir`) keeps the working directory's drive or UNC
+    share (`\\server\share`). A
     drive-relative path (`E:dir`) resolves against the working directory on
     the same drive and against that drive's root otherwise
     (`resolvePathAgainst`).

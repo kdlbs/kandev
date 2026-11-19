@@ -277,7 +277,7 @@ func resolveWindowsPath(cwd, path string) string {
 	case vol != "" && len(path) > 2 && windowsSeparator(path[2]):
 		return path
 	case vol == "" && len(path) > 0 && windowsSeparator(path[0]):
-		return windowsVolume(cwd) + path
+		return windowsRootVolume(cwd) + path
 	case vol != "" && strings.EqualFold(vol, windowsVolume(cwd)):
 		return windowsJoin(cwd, path[2:])
 	case vol != "":
@@ -293,6 +293,22 @@ func windowsVolume(p string) string {
 		return p[:2]
 	}
 	return ""
+}
+
+// windowsRootVolume returns the drive (`D:`) or UNC share (`\\server\share`)
+// that a root-relative path keeps from the working directory.
+func windowsRootVolume(p string) string {
+	if vol := windowsVolume(p); vol != "" {
+		return vol
+	}
+	if len(p) < 2 || !windowsSeparator(p[0]) || !windowsSeparator(p[1]) {
+		return ""
+	}
+	parts := strings.FieldsFunc(p[2:], func(r rune) bool { return r == '\\' || r == '/' })
+	if len(parts) < 2 {
+		return ""
+	}
+	return p[:2] + parts[0] + `\` + parts[1]
 }
 
 func windowsJoin(dir, rest string) string {
