@@ -1356,6 +1356,8 @@
   "previewAnnotate": "注釈を付ける",
   "previewAnnotateWithCount_one": "注釈を付ける ({{count}})",
   "previewAnnotateWithCount_other": "注釈を付ける ({{count}})",
+  "previewCommentSaved_one": "コメントを保存しました。保留中: {{count}} 件。",
+  "previewCommentSaved_other": "コメントを保存しました。保留中: {{count}} 件。",
   "previewCancel": "キャンセル",
   "previewCandidate": "選択候補: {{candidate}}",
   "previewClearAll": "すべてクリア",

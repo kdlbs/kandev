@@ -54,6 +54,7 @@ export function usePreviewDraftSave({
   setCaptureError,
 }: Options) {
   const [isUploading, setIsUploading] = useState(false);
+  const [saveCount, setSaveCount] = useState(0);
   const openDraft = drafts.openDraft;
 
   const saveDraft = useCallback(
@@ -97,10 +98,11 @@ export function usePreviewDraftSave({
       });
       if (!result) return false;
       drafts.complete(entry.id);
+      setSaveCount((count) => count + 1);
       return true;
     },
     [createFeedback, drafts, openDraft, setCaptureError, source, workspaceId],
   );
 
-  return { saveDraft, isUploading };
+  return { saveDraft, isUploading, saveCount };
 }

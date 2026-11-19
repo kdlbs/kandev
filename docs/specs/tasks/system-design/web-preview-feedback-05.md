@@ -84,11 +84,16 @@ On coarse pointers the same surface renders its drawer, as today.
   the viewport rectangle of the highlighted marker, and `editingAnchor` uses
   it. When the capture is on another route or its anchor does not resolve,
   the box opens at the frame's top-left fallback.
-- **Markers outside the mode.** `useRegionProjection` already sends no
-  region anchors while annotation mode is off; it now filters text and
-  element markers the same way, keeping only the marker of the comment being
-  written (`highlightedId`), so a selection commented outside the mode still
-  shows its target while the box is open (`005.5`).
+- **Markers outside the mode.** `useRegionProjection` sends no region
+  anchors while annotation mode is off and drops screenshot markers, so only
+  text and element markers stay. The inspector makes every marker clickable
+  and reports `marker-activated` in either mode; `openCapture` opens the
+  floating editor, anchored by the `highlighted` layout as in the mode.
+  `set-annotation-active` carries `surface_open` whenever a comment is open,
+  in or out of the mode, so a press in the page closes it (`005.5`).
+- **Save announcement.** `usePreviewDraftSave` counts successful saves, and
+  the annotation trigger renders a polite `role="status"` region that
+  announces "Comment saved. N pending." once per save (`005.5`).
 
 ## Toolbar
 

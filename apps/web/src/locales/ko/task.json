@@ -1332,6 +1332,8 @@
   "previewAnnotate": "주석 달기",
   "previewAnnotateWithCount_one": "주석 달기 ({{count}})",
   "previewAnnotateWithCount_other": "주석 달기 ({{count}})",
+  "previewCommentSaved_one": "댓글을 저장했습니다. 대기 중 {{count}}개.",
+  "previewCommentSaved_other": "댓글을 저장했습니다. 대기 중 {{count}}개.",
   "previewCancel": "취소",
   "previewCandidate": "선택 후보: {{candidate}}",
   "previewClearAll": "모두 지우기",

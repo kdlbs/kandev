@@ -271,32 +271,22 @@ describe("inspector marker interaction", () => {
     expect(markerNode()?.textContent).toBe("4");
   });
 
-  it("keeps markers pointer-transparent outside annotation mode", () => {
-    command(PROJECT_MARKERS, { markers: [marker()] });
-    expect(markerNode()?.style.pointerEvents).toBe("none");
-    markerNode()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    expect(sentOfType("marker-activated")).toHaveLength(0);
-  });
+  it.each([false, true])(
+    "reports marker clicks without passing them to the page (annotation mode %s)",
+    (active) => {
+      const pageClick = vi.fn();
+      document.addEventListener("click", pageClick);
+      command(SET_ANNOTATION_ACTIVE, { active });
+      command(PROJECT_MARKERS, { markers: [marker()] });
 
-  it("reports marker clicks in annotation mode without passing them to the page", () => {
-    const pageClick = vi.fn();
-    document.addEventListener("click", pageClick);
-    command(SET_ANNOTATION_ACTIVE, { active: true });
-    command(PROJECT_MARKERS, { markers: [marker()] });
+      expect(markerNode()?.style.pointerEvents).toBe("auto");
+      markerNode()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
-    expect(markerNode()?.style.pointerEvents).toBe("auto");
-    markerNode()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-
-    expect(sentOfType("marker-activated").map((m) => m.payload)).toEqual([{ id: "m1" }]);
-    expect(pageClick).not.toHaveBeenCalled();
-    document.removeEventListener("click", pageClick);
-  });
-
-  it("re-renders markers when annotation mode changes", () => {
-    command(PROJECT_MARKERS, { markers: [marker()] });
-    command(SET_ANNOTATION_ACTIVE, { active: true });
-    expect(markerNode()?.style.pointerEvents).toBe("auto");
-  });
+      expect(sentOfType("marker-activated").map((m) => m.payload)).toEqual([{ id: "m1" }]);
+      expect(pageClick).not.toHaveBeenCalled();
+      document.removeEventListener("click", pageClick);
+    },
+  );
 
   it("scrolls only a revealed marker into view", () => {
     const scrollBy = vi.spyOn(window, "scrollBy").mockImplementation(() => undefined);
@@ -325,6 +315,10 @@ describe("inspector marker interaction", () => {
     command(SET_ANNOTATION_ACTIVE, { active: true, surface_open: true });
     pointer("pointerdown", 50, 50);
     expect(sentOfType("page-pointerdown")).toHaveLength(1);
+
+    command(SET_ANNOTATION_ACTIVE, { active: false, surface_open: true });
+    pointer("pointerdown", 50, 50);
+    expect(sentOfType("page-pointerdown")).toHaveLength(2);
   });
 });
 

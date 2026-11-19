@@ -26,18 +26,17 @@ export function usePreviewAnnotationMode({
   const [active, setActive] = useState(false);
   const [tool, setToolState] = useState<PreviewAnnotationTool>("region");
   const bridgeMode = active && !paused ? bridgeModeForTool(tool, regionBlocked) : null;
-  const commentOpen = active && surfaceOpen;
-  const stateRef = useRef({ active, bridgeMode, commentOpen });
-  stateRef.current = { active, bridgeMode, commentOpen };
+  const stateRef = useRef({ active, bridgeMode, surfaceOpen });
+  stateRef.current = { active, bridgeMode, surfaceOpen };
 
   const resend = useCallback(() => {
     const iframe = iframeRef.current;
     if (!iframe) return;
     sendSetPreviewCaptureMode(iframe, stateRef.current.bridgeMode);
-    sendSetAnnotationActive(iframe, stateRef.current.active, stateRef.current.commentOpen);
+    sendSetAnnotationActive(iframe, stateRef.current.active, stateRef.current.surfaceOpen);
   }, [iframeRef]);
 
-  useEffect(resend, [resend, active, bridgeMode, commentOpen]);
+  useEffect(resend, [resend, active, bridgeMode, surfaceOpen]);
 
   useEffect(() => {
     if (!enabled) setActive(false);

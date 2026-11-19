@@ -12,6 +12,7 @@ function controller(overrides: Record<string, unknown> = {}) {
     drafts: [],
     candidateLabel: null,
     acknowledgedMode: null,
+    saveCount: 0,
     annotation: { active: false, toggle: vi.fn() },
     ...overrides,
   } as unknown as PreviewCaptureController;
@@ -47,6 +48,16 @@ describe("PreviewFeedbackControls", () => {
       "true",
     );
     expect(screen.getByTestId("preview-feedback-unsaved-indicator")).toBeTruthy();
+  });
+
+  it("announces each saved comment with the pending count", () => {
+    const { rerender } = render(<PreviewFeedbackControls capture={controller()} enabled />);
+    const status = screen.getByTestId("preview-feedback-saved-status");
+    expect(status.textContent).toBe("");
+
+    rerender(<PreviewFeedbackControls capture={controller({ saveCount: 1 })} enabled />);
+    expect(status.getAttribute("role")).toBe("status");
+    expect(status.textContent).toBe("Comment saved. 2 pending.");
   });
 
   it("is disabled without a task and session", () => {

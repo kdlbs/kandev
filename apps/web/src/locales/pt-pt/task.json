@@ -1280,6 +1280,8 @@
   "previewAnnotate": "Anotar",
   "previewAnnotateWithCount_one": "Anotar ({{count}})",
   "previewAnnotateWithCount_other": "Anotar ({{count}})",
+  "previewCommentSaved_one": "Comentário guardado. {{count}} pendente.",
+  "previewCommentSaved_other": "Comentário guardado. {{count}} pendentes.",
   "previewCancel": "Cancelar",
   "previewCandidate": "Candidato da seleção: {{candidate}}",
   "previewClearAll": "Limpar tudo",

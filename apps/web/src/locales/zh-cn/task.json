@@ -1279,6 +1279,8 @@
   "previewAnnotate": "标注",
   "previewAnnotateWithCount_one": "标注（{{count}}）",
   "previewAnnotateWithCount_other": "标注（{{count}}）",
+  "previewCommentSaved_one": "评论已保存。{{count}} 条待发送。",
+  "previewCommentSaved_other": "评论已保存。{{count}} 条待发送。",
   "previewCancel": "取消",
   "previewCandidate": "待选对象：{{candidate}}",
   "previewClearAll": "全部清除",

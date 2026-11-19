@@ -8,6 +8,7 @@ const TOTAL_SELECTOR = "#total";
 const SCREENSHOT_ATTACHMENT_ID = "screenshot-attachment-1";
 const PNG_MIME_TYPE = "image/png";
 const SCREENSHOT_EVENT_TYPE = "screenshot-region-selected";
+const MARKER_ACTIVATED = "marker-activated";
 const PREVIEW_URL = "blob:preview-screenshot";
 const SOURCE_LABEL = "http://localhost:3000";
 const CREATED_AT = "2026-09-15T00:00:00Z";
@@ -247,41 +248,50 @@ describe("usePreviewCapture markers", () => {
     );
     expect(result.current.captureNumbers.get("saved-1")).toBe(1);
 
-    act(() => dispatch(iframe.contentWindow, bridgeMessage("marker-activated", { id: "saved-1" })));
+    act(() => dispatch(iframe.contentWindow, bridgeMessage(MARKER_ACTIVATED, { id: "saved-1" })));
     expect(result.current.editingItem?.id).toBe("saved-1");
 
     const draftId = result.current.drafts[0].id;
-    act(() => dispatch(iframe.contentWindow, bridgeMessage("marker-activated", { id: draftId })));
+    act(() => dispatch(iframe.contentWindow, bridgeMessage(MARKER_ACTIVATED, { id: draftId })));
     expect(result.current.openDraft?.id).toBe(draftId);
     expect(result.current.editingItem).toBeNull();
   });
 
-  it("projects markers only in annotation mode, except the comment being written", async () => {
-    feedback.items = [savedText("saved-1")];
+  it("keeps text and element markers outside annotation mode, and regions inside it", async () => {
+    const screenshot: TaskPreviewFeedback = {
+      ...savedText("shot-1"),
+      kind: "screenshot",
+      selected_text: undefined,
+      capture_rect: { x: 0, y: 0, width: 40, height: 40 },
+    };
+    feedback.items = [savedText("saved-1"), screenshot];
     const { iframe, result } = setup();
-    const lastMarkers = () =>
-      (bridge.sendProjectPreviewMarkers.mock.lastCall?.[1] ?? []) as { id: string }[];
-    await waitFor(() => expect(bridge.sendProjectPreviewMarkers).toHaveBeenCalled());
-    expect(lastMarkers()).toEqual([]);
+    const lastMarkerIds = () =>
+      ((bridge.sendProjectPreviewMarkers.mock.lastCall?.[1] ?? []) as { id: string }[]).map(
+        (marker) => marker.id,
+      );
+    await waitFor(() => expect(lastMarkerIds()).toEqual(["saved-1"]));
 
     act(() => result.current.annotation.enter());
-    await waitFor(() =>
-      expect(lastMarkers()).toEqual([expect.objectContaining({ id: "saved-1", number: 1 })]),
-    );
+    await waitFor(() => expect(lastMarkerIds()).toEqual(["saved-1", "shot-1"]));
 
     act(() => result.current.annotation.exit());
-    await waitFor(() => expect(lastMarkers()).toEqual([]));
+    await waitFor(() => expect(lastMarkerIds()).toEqual(["saved-1"]));
 
-    act(() => dispatch(iframe.contentWindow, textCapture()));
-    const draftId = result.current.openDraft?.id;
-    await waitFor(() =>
-      expect(lastMarkers()).toEqual([expect.objectContaining({ id: draftId, number: 2 })]),
-    );
+    act(() => dispatch(iframe.contentWindow, bridgeMessage(MARKER_ACTIVATED, { id: "saved-1" })));
+    expect(result.current.editingItem?.id).toBe("saved-1");
+    expect(result.current.annotation.active).toBe(false);
+  });
 
-    act(() => result.current.annotation.enter());
-    await waitFor(() =>
-      expect(lastMarkers().map((marker) => marker.id)).toEqual(["saved-1", draftId]),
-    );
+  it("closes a comment opened outside annotation mode on a press in the page", () => {
+    feedback.items = [savedText("saved-1")];
+    const { iframe, result } = setup();
+    act(() => dispatch(iframe.contentWindow, bridgeMessage(MARKER_ACTIVATED, { id: "saved-1" })));
+    expect(bridge.sendSetAnnotationActive).toHaveBeenLastCalledWith(iframe, false, true);
+
+    act(() => dispatch(iframe.contentWindow, bridgeMessage("page-pointerdown", {})));
+    expect(result.current.editingItem).toBeNull();
+    expect(bridge.sendSetAnnotationActive).toHaveBeenLastCalledWith(iframe, false, false);
   });
 });
 
@@ -384,7 +394,7 @@ describe("usePreviewCapture region alignment", () => {
     feedback.items = [savedText("saved-1")];
     const { iframe, result } = setup();
     act(() => result.current.annotation.enter());
-    act(() => dispatch(iframe.contentWindow, bridgeMessage("marker-activated", { id: "saved-1" })));
+    act(() => dispatch(iframe.contentWindow, bridgeMessage(MARKER_ACTIVATED, { id: "saved-1" })));
     expect(result.current.editingAnchor).toBeNull();
 
     act(() =>

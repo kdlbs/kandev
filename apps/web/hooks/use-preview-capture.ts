@@ -290,11 +290,11 @@ function useRegionProjection(
         : [],
     [active, sources],
   );
-  // Outside annotation mode the page behaves as it would without Kandev, apart
-  // from the capture whose comment is being written.
+  // Region captures are drawn and edited only in annotation mode; text and
+  // element markers stay on the page so their comments can be reopened.
   const visibleMarkers = useMemo(
-    () => (active ? markers : markers.filter((marker) => marker.id === highlightedId)),
-    [active, highlightedId, markers],
+    () => (active ? markers : markers.filter((marker) => marker.kind !== "screenshot")),
+    [active, markers],
   );
   const projectMarkers = useCallback(() => {
     if (iframeRef.current) {
@@ -474,7 +474,7 @@ export function usePreviewCapture({
     /** Highlights a capture's marker from the comment list. */
     selectCapture: setSelectedId,
     discardDraft: drafts.discard,
-    saveDraft: save.saveDraft,
+    ...save,
     editingAnchor: anchorBelow(iframeRef.current, editingRect),
     regions,
     recaptureRegion: screenshots.recaptureRegion,
@@ -486,7 +486,6 @@ export function usePreviewCapture({
     },
     captureError: screenshots.captureError,
     isRasterizing: screenshots.isRasterizing,
-    isUploading: save.isUploading,
     handleIframeLoad: () => {
       page.setLayouts({});
       page.setHighlighted(null);

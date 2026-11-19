@@ -813,10 +813,10 @@
     node.style.cssText = 'position:fixed;left:' + (rect.left - 11) + 'px;top:' + (rect.top - 11)
       + 'px;width:22px;height:22px;box-sizing:border-box;border-radius:50%;' + colors
       + 'font:600 11px/18px system-ui,sans-serif;text-align:center;'
-      + (annotationActive ? 'pointer-events:auto;cursor:pointer;' : 'pointer-events:none;')
+      + 'pointer-events:auto;cursor:pointer;'
       + 'box-shadow:' + ring + '0 1px 4px rgba(0,0,0,0.3);z-index:' + Z_INDEX + ';';
     node.textContent = String(typeof marker.number === 'number' ? marker.number : index + 1);
-    if (annotationActive) node.addEventListener('click', onMarkerClick);
+    node.addEventListener('click', onMarkerClick);
     return node;
   }
 
@@ -832,7 +832,7 @@
   }
 
   function onPagePointerDown(event) {
-    if (!annotationActive || !surfaceOpen || isInspectorNode(event.target)) return;
+    if (!surfaceOpen || isInspectorNode(event.target)) return;
     send('page-pointerdown', {});
   }
 
@@ -919,7 +919,7 @@
         break;
       case 'set-annotation-active':
         annotationActive = !!(message.payload && message.payload.active);
-        surfaceOpen = annotationActive && !!(message.payload && message.payload.surface_open);
+        surfaceOpen = !!(message.payload && message.payload.surface_open);
         renderMarkers();
         break;
       case 'capture-selection':

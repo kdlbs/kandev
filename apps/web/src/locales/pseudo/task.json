@@ -1363,6 +1363,8 @@
   "previewAnnotate": "Àńńōţàţē",
   "previewAnnotateWithCount_one": "Àńńōţàţē ({{count}})",
   "previewAnnotateWithCount_other": "Àńńōţàţē ({{count}})",
+  "previewCommentSaved_one": "Ćōḿḿēńţ śàvēď. {{count}} ƥēńďĩńĝ.",
+  "previewCommentSaved_other": "Ćōḿḿēńţ śàvēď. {{count}} ƥēńďĩńĝ.",
   "previewCancel": "Ćàńćēĺ",
   "previewCandidate": "Śēĺēćţĩōń ćàńďĩďàţē: {{candidate}}",
   "previewClearAll": "Ćĺēàŕ àĺĺ",

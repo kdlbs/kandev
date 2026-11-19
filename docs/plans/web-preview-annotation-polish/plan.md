@@ -232,5 +232,7 @@ Delivered as planned, with these refinements recorded in part 5:
   button's tap toggle is covered by Vitest and the coarse-pointer styles,
   because drawing a region by touch is not reliable in the emulated E2E device.
 - Test feedback: text and element markers stayed visible, but inert, after
-  leaving annotation mode. They are now hidden outside the mode, like region
-  outlines, except for the comment being written; `005.5` records this.
+  leaving annotation mode. Following the chat and plan pattern, they stay
+  visible and are now clickable outside the mode, opening the comment in the
+  floating box; region outlines and their markers stay mode-only, and each
+  save is announced to screen readers. `005.5` records this.

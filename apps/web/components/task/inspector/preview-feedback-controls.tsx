@@ -55,6 +55,16 @@ export function PreviewFeedbackControls({ capture, enabled }: PreviewFeedbackCon
           ? t("task:previewCandidate", { candidate: capture.candidateLabel })
           : ""}
       </span>
+      <span
+        className="sr-only"
+        role="status"
+        aria-live="polite"
+        data-testid="preview-feedback-saved-status"
+      >
+        {capture.saveCount > 0 && (
+          <span key={capture.saveCount}>{t("task:previewCommentSaved", { count })}</span>
+        )}
+      </span>
     </>
   );
 }

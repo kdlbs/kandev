@@ -40,7 +40,6 @@ test.describe("Web preview annotation mode", () => {
   test.describe.configure({ retries: 0, timeout: 180_000 });
 
   // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-005.1
-  // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-005.5
   test("comments on selected text without entering annotation mode", async ({
     testPage,
     apiClient,
@@ -67,13 +66,19 @@ test.describe("Web preview annotation mode", () => {
       await expect(trigger).toContainText("1");
       await expect(trigger).toHaveAttribute("data-annotation-active", "false");
 
-      const markers = frame.locator("[data-kandev-inspector-marker]");
-      await expect(markers).toHaveCount(0);
-      await trigger.click();
-      await expect(trigger).toHaveAttribute("data-annotation-active", "true");
-      await expect(markers).toHaveText(["1"]);
-      await exitAnnotation(testPage);
-      await expect(markers).toHaveCount(0);
+      await expect(testPage.getByTestId("preview-feedback-saved-status")).toHaveText(
+        "Comment saved. 1 pending.",
+      );
+
+      const marker = frame.locator("[data-kandev-inspector-marker]");
+      await expect(marker).toHaveText("1");
+      await marker.click();
+      const editor = testPage.getByTestId("preview-feedback-edit-input");
+      await expect(editor).toHaveValue("Use the product name in the heading");
+      await expect(trigger).toHaveAttribute("data-annotation-active", "false");
+      await frame.locator("#save").dispatchEvent("pointerdown");
+      await expect(editor).toBeHidden();
+      await expect(marker).toHaveText("1");
     } finally {
       await server.close();
     }
@@ -81,6 +86,7 @@ test.describe("Web preview annotation mode", () => {
 
   // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-005.3
   // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-005.4
+  // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-005.5
   // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-005.6
   test("draws several regions in a row, resumes a dismissed one, and resizes a saved one", async ({
     testPage,
@@ -153,6 +159,10 @@ test.describe("Web preview annotation mode", () => {
         )
         .not.toBe(before);
       await expect(panel).toContainText("First region");
+
+      await exitAnnotation(testPage);
+      await expect(regions).toHaveCount(0);
+      await expect(frame.locator("[data-kandev-inspector-marker]")).toHaveCount(0);
     } finally {
       await server.close();
     }

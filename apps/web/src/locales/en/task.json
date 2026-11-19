@@ -1363,6 +1363,8 @@
   "previewAnnotate": "Annotate",
   "previewAnnotateWithCount_one": "Annotate ({{count}})",
   "previewAnnotateWithCount_other": "Annotate ({{count}})",
+  "previewCommentSaved_one": "Comment saved. {{count}} pending.",
+  "previewCommentSaved_other": "Comment saved. {{count}} pending.",
   "previewCancel": "Cancel",
   "previewCandidate": "Selection candidate: {{candidate}}",
   "previewClearAll": "Clear all",

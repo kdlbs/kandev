@@ -217,6 +217,7 @@ describe("usePreviewCapture text", () => {
       }),
     );
     expect(result.current.drafts).toHaveLength(0);
+    expect(result.current.saveCount).toBe(1);
   });
 
   it("ignores valid captures from any window except its iframe", () => {
@@ -231,6 +232,7 @@ describe("usePreviewCapture text", () => {
     act(() => dispatch(iframe.contentWindow, textCapture()));
     await act(() => result.current.saveDraft("Retry this"));
     expect(result.current.openDraft?.payload.selected_text).toBe("$42.00");
+    expect(result.current.saveCount).toBe(0);
   });
 
   it("sanitizes page routes before retaining or saving captured evidence", async () => {
@@ -290,7 +292,6 @@ describe("usePreviewCapture marker projection", () => {
       },
     ];
     const { iframe, result } = setup();
-    act(() => result.current.annotation.enter());
 
     act(() =>
       dispatch(
