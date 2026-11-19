@@ -22,6 +22,34 @@ This design preserves the technical source detail for `REQ-AGENTS-DYNAMIC-AGENT-
 | ------------------------------------------------------- | ------------------------------------------------- |
 | `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001`                  | [Migrated source detail](#migrated-source-detail) |
 | `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-ROLLOUT-BLOCKERS-001` | [Failure modes](#failure-modes)                   |
+| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001` (`AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.32`) | [Candidate references from dynamic profiles](#candidate-references-from-dynamic-profiles) |
+
+## Candidate references from dynamic profiles
+
+`ListDynamicProfileReferencesByExecutionProfile` (`internal/agent/settings/store`)
+joins `dynamic_agent_routes` to `agent_profiles` and returns only parents with
+`deleted_at IS NULL`. A soft-deleted dynamic profile keeps its route rows, but
+the router never selects a deleted profile, so those rows are not a dependency
+of the candidate. Before this rule, a candidate referenced only by a deleted
+dynamic profile could not be deleted or disabled without force, and the web
+dialog did not render the `dynamic_profiles` list, so the user saw a conflict
+with nothing to resolve.
+
+`Controller.prepareProfileDeletion` collects live dynamic profiles, routing
+tiers, utility agents, active sessions, watchers, and enabled automations
+before deciding, and returns one `ErrProfileInUseDetail`. Routing tiers block
+even with `force`; every other reference is a soft blocker that `force`
+skips. After the profile row is deleted, `removeStaleDynamicRoutes` calls
+`DeleteDynamicAgentRoutesForDeletedProfiles`, which removes only the routes
+that point at the deleted candidate from soft-deleted parents. It is
+best-effort and logged, because the row is already gone. Routes of live
+dynamic profiles stay, so the user can repair them.
+
+The disable path keeps its order: live dynamic profiles first, then utility
+agents. The web reads `dynamic_profiles` from both 409 bodies.
+`AgentProfileDeleteConflictDialog` adds a dynamic profile section next to the
+existing ones, and `AgentProfileDisableConflictDialog` lists dynamic profiles
+with their own warning; both keep their existing confirm-with-force actions.
 
 ## Migrated source detail
 

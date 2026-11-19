@@ -20,6 +20,7 @@ import { useAppStore } from "@/components/state-provider";
 import type {
   ActiveSessionInfo,
   AutomationReference,
+  DynamicProfileReference,
   RoutingTierReference,
   WatcherReference,
   UtilityAgentReference,
@@ -115,17 +116,20 @@ export function AgentProfileDeleteConfirmation({
 
 export function AgentProfileDisableConflictDialog({
   agents,
+  dynamicProfiles = [],
   onCancel,
   onConfirm,
 }: {
   agents: UtilityAgentReference[];
+  dynamicProfiles?: DynamicProfileReference[];
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   const { t } = useTranslation();
+  const hasConflict = agents.length > 0 || dynamicProfiles.length > 0;
   return (
     <AlertDialog
-      open={agents.length > 0}
+      open={hasConflict}
       onOpenChange={(open) => {
         if (!open) onCancel();
       }}
@@ -134,14 +138,31 @@ export function AgentProfileDisableConflictDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>{t("agents:disableProfile")}</AlertDialogTitle>
           <AlertDialogDescription>
-            {t("agents:disableProfileUtilityWarning")}
+            {[
+              agents.length > 0 ? t("agents:disableProfileUtilityWarning") : "",
+              dynamicProfiles.length > 0 ? t("agents:disableProfileDynamicWarning") : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <ul className="list-disc list-inside max-h-40 overflow-y-auto">
-          {agents.map((agent) => (
-            <li key={agent.id}>{agent.name || agent.id}</li>
-          ))}
-        </ul>
+        {agents.length > 0 ? (
+          <ul className="list-disc list-inside max-h-40 overflow-y-auto">
+            {agents.map((agent) => (
+              <li key={agent.id}>{agent.name || agent.id}</li>
+            ))}
+          </ul>
+        ) : null}
+        {dynamicProfiles.length > 0 ? (
+          <div className="space-y-1" data-testid="disable-conflict-dynamic-profiles">
+            <p className="font-medium text-sm">{t("agents:conflictDynamicProfilesTitle")}</p>
+            <ul className="list-disc list-inside max-h-40 overflow-y-auto">
+              {dynamicProfiles.map((profile) => (
+                <li key={profile.id}>{profile.name || profile.id}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         <AlertDialogFooter>
           <AlertDialogCancel className="cursor-pointer">{t(CANCEL_LABEL_KEY)}</AlertDialogCancel>
           <AlertDialogAction onClick={onConfirm} className="cursor-pointer">
@@ -162,6 +183,7 @@ export type AgentProfileDeleteConflict = {
   routingTiers: RoutingTierReference[];
   automations: AutomationReference[];
   utilityAgents?: UtilityAgentReference[];
+  dynamicProfiles?: DynamicProfileReference[];
 };
 
 type AgentProfileDeleteConflictDialogProps = {
@@ -183,6 +205,7 @@ export function AgentProfileDeleteConflictDialog({
   const routingTiers = conflict?.routingTiers ?? [];
   const automations = conflict?.automations ?? [];
   const utilityAgents = conflict?.utilityAgents ?? [];
+  const dynamicProfiles = conflict?.dynamicProfiles ?? [];
   const hasHardBlockers = routingTiers.length > 0;
   const watchersByKind = groupWatchersByKind(watchers);
   const workspaces = useAppStore((s) => s.workspaces.items);
@@ -230,6 +253,7 @@ export function AgentProfileDeleteConflictDialog({
               automations={automations}
               workspaceLabels={workspaceLabels}
             />
+            <DynamicProfileConflictSection dynamicProfiles={dynamicProfiles} />
             <UtilityAgentConflictSection utilityAgents={utilityAgents} />
             {hasHardBlockers ? (
               <p>{t("agents:changeTierMappingsFirst")}</p>
@@ -255,6 +279,30 @@ export function AgentProfileDeleteConflictDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+// Dynamic profiles route through this profile as one of their candidates.
+// Deleting it leaves those routes pointing at a profile that no longer
+// exists, so the user must see them before choosing "Delete Anyway".
+function DynamicProfileConflictSection({
+  dynamicProfiles,
+}: {
+  dynamicProfiles: DynamicProfileReference[];
+}) {
+  const { t } = useTranslation();
+  if (dynamicProfiles.length === 0) return null;
+  return (
+    <div className="space-y-1" data-testid="profile-conflict-dynamic-profiles">
+      <p className="font-medium text-sm">{t("agents:conflictDynamicProfilesTitle")}</p>
+      <ul className="list-disc list-inside space-y-0.5">
+        {dynamicProfiles.map((profile) => (
+          <li key={profile.id} className="text-sm">
+            {profile.name || profile.id}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
