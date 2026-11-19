@@ -124,6 +124,8 @@ func (h *nativeInferenceHarness) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		status := h.status
 		_ = json.NewEncoder(w).Encode(utility.PromptResponse{Success: false, Error: "fixture failure", Attempt: &status})
+	case r.Method == http.MethodPost && r.URL.Path == "/api/v1/inference/attempts/"+h.status.AttemptID+"/admit":
+		_ = json.NewEncoder(w).Encode(h.status)
 	case r.Method == http.MethodPost && r.URL.Path == "/api/v1/inference/attempts/"+h.status.AttemptID+"/cancel":
 		if h.status.State == utility.AttemptPrepared {
 			h.status.State = utility.AttemptNotStarted

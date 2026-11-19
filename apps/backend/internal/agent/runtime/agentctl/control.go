@@ -419,7 +419,7 @@ func (c *ControlClient) DeleteInstance(ctx context.Context, instanceID string) e
 
 	if resp.StatusCode == http.StatusOK {
 		if err := observeDeletedInference(ctx, instanceID, resp.Body); err != nil {
-			return fmt.Errorf("settle stopped instance inference: %w", err)
+			return fmt.Errorf("%w: %w", ErrInferenceStopSettlement, err)
 		}
 	}
 	c.logger.Info("deleted agent instance", zap.String("instance_id", instanceID))

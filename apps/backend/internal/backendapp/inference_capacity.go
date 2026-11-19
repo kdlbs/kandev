@@ -97,7 +97,7 @@ func (b *sharedInferenceConsumer) executeSharedInference(ctx context.Context, cl
 		b.cancelAndSettle(client, binding)
 		return nil, &agentruntime.InferenceCapacityError{Reason: "provider_allowance", Cause: err}
 	}
-	if err := client.AdmitInferenceCapacityAttempt(ctx, binding.AttemptID); err != nil && !errors.Is(err, agentruntime.ErrInferenceOwnershipUnsupported) {
+	if err := client.AdmitInferenceCapacityAttempt(ctx, binding.AttemptID); err != nil {
 		b.cancelAndSettle(client, binding)
 		return nil, &agentruntime.InferenceCapacityError{Reason: "reservation_unconfirmed", Cause: err}
 	}

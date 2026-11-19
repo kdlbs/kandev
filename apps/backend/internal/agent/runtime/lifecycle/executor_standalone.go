@@ -168,8 +168,8 @@ func (r *StandaloneExecutor) stopWithRetryClient(ctx context.Context, control *a
 		attemptCtx, cancel := context.WithTimeout(ctx, timeout)
 		lastErr = control.DeleteInstance(attemptCtx, instanceID)
 		cancel()
-		if lastErr == nil {
-			return nil
+		if lastErr == nil || errors.Is(lastErr, agentctl.ErrInferenceStopSettlement) {
+			return lastErr
 		}
 	}
 	return lastErr
