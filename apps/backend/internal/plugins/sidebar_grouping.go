@@ -30,23 +30,24 @@ func (s *Service) resolveSidebarGrouping(ctx context.Context, workspaceID, refer
 	if !authenticated || identity.UserID == "" || !valid || !s.sidebarGroupingWorkspaceVisible(ctx, workspaceID) {
 		return nil, unavailable
 	}
-	record, err := s.Get(pluginID)
-	if err != nil || record.Status != store.StatusActive {
+	captured := s.captureSidebarGroupingRecord(pluginID)
+	record := captured.record
+	if record == nil || record.Status != store.StatusActive {
 		return nil, unavailable
 	}
 	action, found := sidebarGroupingAction(record, groupID)
 	if !found {
 		return nil, unavailable
 	}
-	generation := s.sidebarGroupingGeneration(record)
+	generation := captured.generation()
 	response, err := invokeSidebarGroupingAction(ctx, record, action, pluginsdk.VerifiedActionContext{
 		ActorID: identity.UserID, WorkspaceID: workspaceID,
 	}, invoke)
 	if err != nil {
 		return nil, err
 	}
-	current, err := s.Get(pluginID)
-	if err != nil || current.Status != store.StatusActive || s.sidebarGroupingGeneration(current) != generation {
+	current := s.captureSidebarGroupingRecord(pluginID)
+	if current.record == nil || current.record.Status != store.StatusActive || current.generation() != generation {
 		return nil, unavailable
 	}
 	snapshot, err := pluginsdk.DecodeSidebarGroupingSnapshot(response.Body)
@@ -96,11 +97,21 @@ func sidebarGroupingAction(record *store.Record, groupID string) (string, bool) 
 	return "", false
 }
 
-func (s *Service) sidebarGroupingGeneration(record *store.Record) string {
+type sidebarGroupingRecordSnapshot struct {
+	record *store.Record
+	epoch  uint64
+}
+
+func (s *Service) captureSidebarGroupingRecord(id string) sidebarGroupingRecordSnapshot {
 	s.mu.Lock()
-	epoch := s.sidebarGroupingCatalogGenerations[record.ID]
-	s.mu.Unlock()
-	value, _ := json.Marshal([]any{record.InstallationID, record.Version, record.InstallPath, record.InstalledAt, record.AgentToolPolicyVersion, epoch})
+	defer s.mu.Unlock()
+	record, _ := s.registry.Get(id)
+	return sidebarGroupingRecordSnapshot{record: record, epoch: s.sidebarGroupingCatalogGenerations[id]}
+}
+
+func (captured sidebarGroupingRecordSnapshot) generation() string {
+	record := captured.record
+	value, _ := json.Marshal([]any{record.InstallationID, record.Version, record.InstallPath, record.InstalledAt, record.AgentToolPolicyVersion, captured.epoch})
 	digest := sha256.Sum256(value)
 	return hex.EncodeToString(digest[:])
 }
@@ -108,15 +119,28 @@ func (s *Service) sidebarGroupingGeneration(record *store.Record) string {
 // SidebarGroupingCatalog lists active compatible providers, including plugins
 // that do not ship a native browser bundle.
 func (s *Service) SidebarGroupingCatalog() []pluginsdk.SidebarGroupingProvider {
+	return projectSidebarGroupingCatalog(s.captureSidebarGroupingCatalog())
+}
+
+func (s *Service) captureSidebarGroupingCatalog() []sidebarGroupingRecordSnapshot {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	records := s.registry.List()
-	s.mu.Unlock()
+	captured := make([]sidebarGroupingRecordSnapshot, len(records))
+	for i, record := range records {
+		captured[i] = sidebarGroupingRecordSnapshot{record: record, epoch: s.sidebarGroupingCatalogGenerations[record.ID]}
+	}
+	return captured
+}
+
+func projectSidebarGroupingCatalog(captured []sidebarGroupingRecordSnapshot) []pluginsdk.SidebarGroupingProvider {
 	providers := make([]pluginsdk.SidebarGroupingProvider, 0)
-	for _, record := range records {
+	for _, snapshot := range captured {
+		record := snapshot.record
 		if record.Status != store.StatusActive {
 			continue
 		}
-		generation := s.sidebarGroupingGeneration(record)
+		generation := snapshot.generation()
 		for _, group := range record.SidebarGroupings {
 			if _, found := sidebarGroupingAction(record, group.ID); !found {
 				continue
