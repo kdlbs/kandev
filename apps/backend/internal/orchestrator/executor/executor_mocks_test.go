@@ -726,11 +726,39 @@ func (m *mockRepository) UpdateTaskSessionIfCurrentStateWithStartAttempt(
 	expected models.TaskSessionState,
 	attemptID string,
 ) (bool, error) {
-	if session.Metadata == nil {
-		session.Metadata = make(map[string]interface{})
+	return m.UpdateTaskSessionIfCurrentStateForLaunch(ctx, session, expected, attemptID)
+}
+
+func (m *mockRepository) UpdateTaskSessionIfCurrentStateForLaunch(
+	_ context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	attemptID string,
+) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current, ok := m.sessions[session.ID]
+	if !ok {
+		return false, models.ErrTaskSessionNotFound
 	}
-	session.Metadata[models.SessionMetaKeyAgentStartAttemptID] = attemptID
-	return m.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+	if current.State != expected || models.WorkflowParkingSupersedesLaunch(session, current, expected) {
+		return false, nil
+	}
+	if attemptID != "" {
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]interface{})
+		}
+		session.Metadata[models.SessionMetaKeyAgentStartAttemptID] = attemptID
+	}
+	m.updateTaskSessionIfCurrentCalls++
+	if m.updateTaskSessionIfCurrentFailOn > 0 &&
+		m.updateTaskSessionIfCurrentCalls == m.updateTaskSessionIfCurrentFailOn {
+		return false, m.updateTaskSessionIfCurrentFailErr
+	}
+	m.updateTaskSessionSnapshots = append(m.updateTaskSessionSnapshots, cloneMockTaskSession(session))
+	m.updateTaskSessionCalls = append(m.updateTaskSessionCalls, session)
+	m.sessions[session.ID] = cloneMockTaskSession(session)
+	return true, nil
 }
 
 func (m *mockRepository) UpdateTaskSessionWorkspaceBindingIfCurrentAttempt(

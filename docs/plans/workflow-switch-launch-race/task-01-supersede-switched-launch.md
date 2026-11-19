@@ -37,12 +37,14 @@ superseded, and the switch completes on the step's profile.
 
 ## Acceptance
 
-1. With a launch blocked in `LaunchAgent` and a concurrent park, the source
-   session stays `WAITING_FOR_INPUT`, the task is not `FAILED`, the old
-   execution is stopped, and the destination session is primary with the
-   step's profile.
-2. An unexpected state without a parking record, or with a record for another
-   session, is still a launch failure.
+1. With a real task move while a launch is blocked at its runtime persistence,
+   the source session stays `WAITING_FOR_INPUT`, the task is not `FAILED`, and
+   the destination session is primary with the step's profile. The replacement
+   agent starts.
+2. A launch that returns an error after a new source parking stamp keeps the
+   workspace claim and yields as superseded.
+3. An unexpected state without a valid source parking record, or with a record
+   for another session, remains a launch failure.
 
 ## Verification
 
@@ -76,3 +78,10 @@ bash scripts/lint-go-changed $(git diff --name-only origin/main -- 'apps/backend
   fixtures in the executor package; two passthrough-attachment tests in the
   orchestrator package). `TestCompleteTurnsExceptReportsIterationExhaustion`
   and `TestFreshStartWorkflowContext` fail intermittently on both sides.
+- The launch ownership regressions pass on the Linux workspace, including the
+  late `LaunchAgent` failure path, unchanged `WAITING_FOR_INPUT` parking stamp,
+  MCP/WS handoff, and the real task move with replacement agent start.
+- `go test -trimpath -tags fts5 -count=1 ./internal/task/repository/sqlite`
+  passed. `python3 scripts/list-docs.py validate`,
+  `python3 scripts/lint-spec-files.py --all`, `git diff --check`, and changed
+  Go file lint passed.

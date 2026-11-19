@@ -1595,12 +1595,41 @@ func (s *Service) transitionTaskSessionState(
 			return changed, finalState, err
 		}
 	}
+	launchFailureSession, hasLaunchFailureOwnership := executor.WorkflowLaunchFailureOwnershipFromContext(ctx)
+	var launchFailureGuard *cancelInFlightMutex
+	var releaseLaunchFailureGuard func()
+	launchFailureGuardHeld := false
+	if nextState == models.TaskSessionStateFailed && hasLaunchFailureOwnership &&
+		launchFailureSession.ID == sessionID && !workflowProfileSwitchGuardIsHeld(ctx, sessionID) {
+		launchFailureGuard, releaseLaunchFailureGuard = s.acquireCancelInFlightGuard(sessionID)
+		launchFailureGuard.Lock()
+		launchFailureGuardHeld = true
+		ctx = withWorkflowProfileSwitchGuardHeld(ctx, sessionID, "")
+	}
+	releaseLaunchFailureGuardIfHeld := func() {
+		if !launchFailureGuardHeld {
+			return
+		}
+		ctx = withoutWorkflowProfileSwitchGuard(ctx)
+		launchFailureGuard.Unlock()
+		releaseLaunchFailureGuard()
+		launchFailureGuardHeld = false
+	}
+	defer releaseLaunchFailureGuardIfHeld()
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return false, "", fmt.Errorf("get session before state transition: %w", err)
 	}
 	if session == nil {
 		return false, "", fmt.Errorf("get session before state transition: session %q is nil", sessionID)
+	}
+	if nextState == models.TaskSessionStateFailed && hasLaunchFailureOwnership &&
+		launchFailureSession.ID == sessionID {
+		if models.WorkflowParkingSupersedesLaunch(launchFailureSession, session, launchFailureSession.State) {
+			return false, session.State, &executor.SessionStateSwitchedError{SessionID: sessionID, State: session.State}
+		}
+		expected := launchFailureSession.State
+		expectedState = &expected
 	}
 	if expectedState != nil && session.State != *expectedState {
 		return false, session.State, nil
@@ -1613,6 +1642,7 @@ func (s *Service) transitionTaskSessionState(
 	changed, refreshed, authoritativeUpdatedAt, err := s.persistStrictTaskSessionState(
 		ctx, sessionID, session, nextState, errorMessage,
 	)
+	releaseLaunchFailureGuardIfHeld()
 	if err != nil {
 		return false, oldState, err
 	}
@@ -2045,15 +2075,6 @@ type bootstrapFailureAttemptCommitter interface {
 		expectedStartAttemptID string,
 		errorValue models.LastAgentError,
 	) (changed bool, updatedAt time.Time, err error)
-}
-
-type startAttemptSessionUpdater interface {
-	UpdateTaskSessionIfCurrentStateWithStartAttempt(
-		context.Context,
-		*models.TaskSession,
-		models.TaskSessionState,
-		string,
-	) (bool, error)
 }
 
 type conditionalTaskSessionStateUpdater interface {
@@ -2674,15 +2695,19 @@ func (s *Service) persistFullTaskSessionIfCurrent(
 ) error {
 	var changed bool
 	var err error
-	if attemptID := models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]); attemptID != "" {
-		updater, ok := s.repo.(startAttemptSessionUpdater)
-		if !ok {
-			return fmt.Errorf("session start requires a startup-attempt-aware repository write")
-		}
-		changed, err = updater.UpdateTaskSessionIfCurrentStateWithStartAttempt(ctx, session, expected, attemptID)
-	} else {
-		changed, err = s.repo.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+	updater, ok := s.repo.(interface {
+		UpdateTaskSessionIfCurrentStateForLaunch(
+			context.Context,
+			*models.TaskSession,
+			models.TaskSessionState,
+			string,
+		) (bool, error)
+	})
+	if !ok {
+		return fmt.Errorf("session start requires parking-aware repository writes")
 	}
+	attemptID := models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID])
+	changed, err = updater.UpdateTaskSessionIfCurrentStateForLaunch(ctx, session, expected, attemptID)
 	if err != nil {
 		return err
 	}
@@ -2699,15 +2724,8 @@ func (s *Service) persistFullTaskSessionIfCurrent(
 	if isTerminalSessionState(latest.State) {
 		return &executor.SessionStateSupersededError{SessionID: session.ID, State: latest.State}
 	}
-	// A workflow profile switch parks its source session in WAITING_FOR_INPUT
-	// while a replacement session takes over. The parking marker is the durable
-	// proof of that deliberate takeover; without it an unexpected state remains
-	// a real launch failure.
-	if latest.State == models.TaskSessionStateWaitingForInput {
-		if parking, ok := models.LoadWorkflowParking(latest.Metadata); ok &&
-			parking.SourceSessionID == session.ID {
-			return &executor.SessionStateSwitchedError{SessionID: session.ID, State: latest.State}
-		}
+	if models.WorkflowParkingSupersedesLaunch(session, latest, expected) {
+		return &executor.SessionStateSwitchedError{SessionID: session.ID, State: latest.State}
 	}
 	if latest.State == models.TaskSessionStateRunning {
 		return fmt.Errorf(

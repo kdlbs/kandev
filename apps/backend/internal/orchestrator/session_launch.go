@@ -431,6 +431,13 @@ func IsBenignLaunchTeardownErr(err error) bool {
 		strings.Contains(msg, sessionTerminalErrText)
 }
 
+// IsWorkflowSwitchLaunchSuperseded reports whether a launch yielded ownership
+// to a workflow profile switch. Launch consumers should treat this as a
+// neutral handoff, not as a failed task start.
+func IsWorkflowSwitchLaunchSuperseded(err error) bool {
+	return executor.IsSessionStateSwitched(err)
+}
+
 func (s *Service) prepareLaunchRequest(
 	ctx context.Context,
 	req *LaunchSessionRequest,

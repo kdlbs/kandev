@@ -24,8 +24,9 @@ the step's profile never completes. This package implements
 
 ## Scope
 
-In scope: classifying a launch that lost its session to a parking switch as
-superseded in both persistence paths and in every launch-failure consumer.
+In scope: atomically detecting a newer source parking stamp in both launch
+persistence paths, preserving the launch ownership boundary for late launch
+errors, and handling the superseded outcome in every launch-failure consumer.
 
 Out of scope: switch and parking policy, recovery actions, automatic retries
 of failed launches, new settings, and any frontend change.
@@ -39,17 +40,18 @@ boundary.
 
 ## Verification strategy
 
-Orchestrator and executor unit tests: the parking classification and its
-negatives in both persistence paths, the launch-failure handler, and a real
-`PrepareTaskSession` race with a blocked launch and a concurrent park. No
-end-to-end test: the race needs a launch blocked at a precise point, which the
-browser suite cannot hold.
+Orchestrator and executor tests: parking classification and negative cases in
+both persistence paths, a real task move while a launch is blocked at runtime
+persistence, and the replacement agent start. Cover late `LaunchAgent` errors
+after a new parking stamp and the launch-failure consumers. No browser test is
+needed because the race needs a backend launch held at a precise point.
 
 ## Risks
 
 - A switch that classification misses keeps the previous failure path.
-- A parking record is the only accepted proof, so an unrelated state change
-  still fails the launch.
+- A parking record naming the launch's session is the only accepted proof. A
+  fresh stamp supersedes a stale launch even when the state remains waiting; a
+  launch that observed the current stamp remains valid.
 
 ## References
 

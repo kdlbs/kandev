@@ -2361,12 +2361,28 @@ func (r *Repository) UpdateTaskSessionIfCurrentStateWithStartAttempt(
 	expected models.TaskSessionState,
 	attemptID string,
 ) (bool, error) {
-	if attemptID == "" {
-		return false, nil
+	return r.UpdateTaskSessionIfCurrentStateForLaunch(ctx, session, expected, attemptID)
+}
+
+// UpdateTaskSessionIfCurrentStateForLaunch atomically persists launch state,
+// its optional startup attempt, and the parking stamp observed by the launch.
+// A newer park for this session prevents the stale launch from committing.
+func (r *Repository) UpdateTaskSessionIfCurrentStateForLaunch(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	attemptID string,
+) (bool, error) {
+	if session == nil {
+		return false, fmt.Errorf("session is required for launch state update")
 	}
-	payload, err := json.Marshal(attemptID)
-	if err != nil {
-		return false, fmt.Errorf("serialize start attempt identity: %w", err)
+	var payload string
+	if attemptID != "" {
+		encoded, err := json.Marshal(attemptID)
+		if err != nil {
+			return false, fmt.Errorf("serialize start attempt identity: %w", err)
+		}
+		payload = string(encoded)
 	}
 	session.UpdatedAt = r.nowUTC()
 	tx, err := r.db.BeginTxx(ctx, nil)
@@ -2374,38 +2390,45 @@ func (r *Repository) UpdateTaskSessionIfCurrentStateWithStartAttempt(
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	changed, err := r.updateTaskSessionWithStateGuard(ctx, tx, session, &expected)
+	expectedParkingStamp := models.WorkflowParkingSourceStamp(session)
+	changed, err := r.updateTaskSessionWithSnapshotGuard(
+		ctx, tx, session, &expected, nil, &expectedParkingStamp,
+	)
 	if err != nil || !changed {
 		return changed, err
 	}
-	result, err := tx.ExecContext(
-		ctx,
-		r.db.Rebind(metadataKeyUpdateQuery("task_sessions", r.db.DriverName())),
-		metadataKeyUpdateArgs(
-			r.db.DriverName(),
-			models.SessionMetaKeyAgentStartAttemptID,
-			string(payload),
-			session.UpdatedAt,
-			session.ID,
-		)...,
-	)
-	if err != nil {
-		return false, err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	if rows == 0 {
-		return false, fmt.Errorf("agent session not found: %s", session.ID)
+	if attemptID != "" {
+		result, err := tx.ExecContext(
+			ctx,
+			r.db.Rebind(metadataKeyUpdateQuery("task_sessions", r.db.DriverName())),
+			metadataKeyUpdateArgs(
+				r.db.DriverName(),
+				models.SessionMetaKeyAgentStartAttemptID,
+				payload,
+				session.UpdatedAt,
+				session.ID,
+			)...,
+		)
+		if err != nil {
+			return false, err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return false, err
+		}
+		if rows == 0 {
+			return false, fmt.Errorf("agent session not found: %s", session.ID)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
-	if session.Metadata == nil {
-		session.Metadata = make(map[string]interface{})
+	if attemptID != "" {
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]interface{})
+		}
+		session.Metadata[models.SessionMetaKeyAgentStartAttemptID] = attemptID
 	}
-	session.Metadata[models.SessionMetaKeyAgentStartAttemptID] = attemptID
 	return true, nil
 }
 
@@ -2567,7 +2590,7 @@ func (r *Repository) updateTaskSessionWithStateGuard(
 	session *models.TaskSession,
 	expected *models.TaskSessionState,
 ) (bool, error) {
-	return r.updateTaskSessionWithSnapshotGuard(ctx, exec, session, expected, nil)
+	return r.updateTaskSessionWithSnapshotGuard(ctx, exec, session, expected, nil, nil)
 }
 
 func (r *Repository) updateTaskSessionWithRevisionGuard(
@@ -2577,7 +2600,7 @@ func (r *Repository) updateTaskSessionWithRevisionGuard(
 	expected models.TaskSessionState,
 	expectedUpdatedAt time.Time,
 ) (bool, error) {
-	return r.updateTaskSessionWithSnapshotGuard(ctx, exec, session, &expected, &expectedUpdatedAt)
+	return r.updateTaskSessionWithSnapshotGuard(ctx, exec, session, &expected, &expectedUpdatedAt, nil)
 }
 
 func (r *Repository) updateTaskSessionWithSnapshotGuard(
@@ -2586,6 +2609,7 @@ func (r *Repository) updateTaskSessionWithSnapshotGuard(
 	session *models.TaskSession,
 	expected *models.TaskSessionState,
 	expectedUpdatedAt *time.Time,
+	expectedWorkflowParkingStamp *string,
 ) (bool, error) {
 	if tx, ok := exec.(*sqlx.Tx); ok {
 		if err := r.ensureTaskSessionEnvironmentAvailableTx(ctx, tx, session.ID, session.TaskEnvironmentID); err != nil {
@@ -2657,6 +2681,13 @@ func (r *Repository) updateTaskSessionWithSnapshotGuard(
 	if expectedUpdatedAt != nil {
 		query += optimisticUpdatedAtPredicate
 		args = append(args, *expectedUpdatedAt)
+	}
+	if expectedWorkflowParkingStamp != nil {
+		query += ` AND NOT (
+			COALESCE(json_extract(metadata, '$.workflow_parking.source_session_id'), '') = ?
+			AND COALESCE(json_extract(metadata, '$.workflow_parking.stamp'), '') != ?
+		)`
+		args = append(args, session.ID, *expectedWorkflowParkingStamp)
 	}
 	// Primary selection belongs to the task-scoped SetSessionPrimary transaction.
 	// Lifecycle writes return that stored selection without reclaiming it;

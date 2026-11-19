@@ -35,10 +35,19 @@ stopped the switch.
 `executor.SessionStateSwitchedError` (sentinel `ErrSessionStateSwitched`,
 helper `IsSessionStateSwitched`) classifies that state. Both persistence paths
 return it: `Executor.persistSessionFullRowIfCurrentState` and the orchestrator
-callback `Service.persistFullTaskSessionIfCurrent`. The durable proof is a
-valid `workflow_parking` record whose `SourceSessionID` is the launching
-session while the session is `WAITING_FOR_INPUT`; a state change alone, or a
-record naming another session, stays a launch failure.
+callback `Service.persistFullTaskSessionIfCurrent`. A shared model predicate
+checks that a valid `workflow_parking` record names the launching session as
+its source. When a switch changes the session to `WAITING_FOR_INPUT`, that
+record proves the handover. When the state is already `WAITING_FOR_INPUT`, the
+record supersedes a launch only if its stamp differs from the stamp in the
+launch snapshot. This also makes a later explicit resume valid when it observed
+the current stamp.
+
+The SQLite full-row update compares the observed parking stamp with the stored
+stamp in the same conditional write. This prevents a switch from recording a
+new stamp between launch classification and persistence, including when the
+session state stays `WAITING_FOR_INPUT`. The late `LaunchAgent` error path
+checks the same ownership before it marks workspace materialization failed.
 
 Consumers treat the error as a handover:
 
@@ -46,6 +55,9 @@ Consumers treat the error as a handover:
   at info level and return it without failure bookkeeping.
 - `Executor.launchPreparedSession` does not release the task environment
   materialization, which the destination session reuses.
+- MCP auto-start does not record an auto-start failure for a superseded launch.
+- The WebSocket launch API returns a suppressed activation outcome instead of
+  reporting an internal error.
 - `Service.handleSessionLaunchFailure` returns before recording a recovery
   block or a failed state, so no failure toast is published.
 - The background launch in `PrepareTaskSession` keeps route ownership instead

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -12,8 +13,10 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -55,6 +58,30 @@ func TestPersistFullTaskSessionIfCurrent_UnexpectedStateWithoutSwitchIsError(t *
 	}
 }
 
+func TestPersistFullTaskSessionIfCurrent_NewParkingStampSupersedesUnchangedWaitingState(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	require.NoError(t, repo.SetSessionMetadataKey(
+		ctx, "session1", models.SessionMetaKeyWorkflowParking,
+		models.WorkflowParking{
+			Stamp:           "park-new",
+			ParkedAt:        time.Now().UTC(),
+			SourceSessionID: "session1",
+		},
+	))
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	stale := &models.TaskSession{
+		ID: "session1", TaskID: "task1", State: models.TaskSessionStateStarting,
+	}
+
+	err := svc.persistFullTaskSessionIfCurrent(ctx, stale, models.TaskSessionStateWaitingForInput)
+	require.True(t, executor.IsSessionStateSwitched(err), "new parking stamp must supersede the launch")
+	current, getErr := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, getErr)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, current.State)
+}
+
 // A losing launch must not mark the task FAILED or the session FAILED: the
 // workflow switch still owns the session and will launch the replacement.
 func TestHandleSessionLaunchFailure_WorkflowSwitchSupersededKeepsTaskActive(t *testing.T) {
@@ -88,19 +115,46 @@ func TestHandleSessionLaunchFailure_WorkflowSwitchSupersededKeepsTaskActive(t *t
 	require.Zero(t, taskRepo.stateWrites["task1"], "a superseded launch must not write a task state")
 }
 
+func TestTransitionTaskSessionState_LateLaunchFailureYieldsToNewParkingStamp(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	launchSnapshot, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "session1", models.SessionMetaKeyWorkflowParking, models.WorkflowParking{
+		Stamp: "park-new", ParkedAt: time.Now().UTC(), SourceSessionID: "session1",
+	}))
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	expected := models.TaskSessionStateWaitingForInput
+	failureCtx := executor.WithWorkflowLaunchFailureOwnership(ctx, launchSnapshot)
+
+	changed, finalState, err := svc.transitionTaskSessionState(
+		failureCtx, "task1", "session1", &expected, models.TaskSessionStateFailed, "agent launch failed", nil,
+	)
+
+	require.True(t, executor.IsSessionStateSwitched(err), "the new source stamp must supersede launch failure bookkeeping")
+	require.False(t, changed)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, finalState)
+	current, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, current.State)
+}
+
 // gatedSessionPersistRepo holds the first launch-state write of one session
 // until released, modelling a launch whose workspace is already materialized
 // while its session row is not yet persisted (the incident window).
 type gatedSessionPersistRepo struct {
 	*sqliterepo.Repository
-	sessionID atomic.Value
-	once      sync.Once
-	reached   chan struct{}
-	release   chan struct{}
+	sessionID   atomic.Value
+	once        sync.Once
+	releaseOnce sync.Once
+	reached     chan struct{}
+	release     chan struct{}
 }
 
-func (r *gatedSessionPersistRepo) UpdateTaskSessionIfCurrentState(
+func (r *gatedSessionPersistRepo) UpdateTaskSessionIfCurrentStateForLaunch(
 	ctx context.Context, session *models.TaskSession, expected models.TaskSessionState,
+	attemptID string,
 ) (bool, error) {
 	if id, _ := r.sessionID.Load().(string); id != "" && session.ID == id {
 		r.once.Do(func() {
@@ -108,36 +162,60 @@ func (r *gatedSessionPersistRepo) UpdateTaskSessionIfCurrentState(
 			<-r.release
 		})
 	}
-	return r.Repository.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+	return r.Repository.UpdateTaskSessionIfCurrentStateForLaunch(ctx, session, expected, attemptID)
+}
+
+func (r *gatedSessionPersistRepo) releaseGate() {
+	r.releaseOnce.Do(func() { close(r.release) })
 }
 
 // A launch that was still persisting its runtime when the real workflow
 // profile switch parked its session must exit silently: the switch completes,
 // the replacement session owns the step profile, the parked source stays
 // answerable, and the task is never written FAILED.
-func TestPrepareTaskSession_RealWorkflowSwitchDuringLaunchCompletes(t *testing.T) {
+func TestLaunchSession_RealWorkflowMoveDuringLaunchCompletes(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "task1", "existing-session", models.TaskSessionStateCreated)
+	seedTaskAndSession(t, repo, "task1", "existing-session", models.TaskSessionStateWaitingForInput)
+	task, err := repo.GetTask(ctx, "task1")
+	require.NoError(t, err)
+	task.WorkflowStepID = "step-source"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+	source, err := repo.GetTaskSession(ctx, "existing-session")
+	require.NoError(t, err)
+	source.AgentProfileID = "profile-old"
+	source.ExecutorID = models.ExecutorIDLocal
+	source.TaskEnvironmentID = "env-task1"
+	require.NoError(t, repo.UpdateTaskSession(ctx, source))
+	require.NoError(t, repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-task1", TaskID: "task1", ExecutorType: string(models.ExecutorTypeLocal),
+		Status: models.TaskEnvironmentStatusReady,
+	}))
 
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["task1"] = &v1.Task{
 		ID: "task1", WorkspaceID: "ws1", WorkflowID: "wf1",
-		Title: "Test Task", Description: "prepare", State: v1.TaskStateInProgress,
+		Title: "Test Task", Description: "move task", State: v1.TaskStateInProgress,
+	}
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-source"] = &wfmodels.WorkflowStep{
+		ID: "step-source", WorkflowID: "wf1", Name: "Source", Position: 0,
+		AgentProfileID:          "profile-old",
+		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyPark,
+	}
+	stepGetter.steps["step-target"] = &wfmodels.WorkflowStep{
+		ID: "step-target", WorkflowID: "wf1", Name: "Target", Position: 1,
+		AgentProfileID: "profile-step",
+		Events:         wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}}},
 	}
 
 	gated := &gatedSessionPersistRepo{Repository: repo, reached: make(chan struct{}), release: make(chan struct{})}
-	stopCalled := make(chan struct{})
-	var launches atomic.Int32
-	var stopCalledOnce sync.Once
+	gated.sessionID.Store("existing-session")
+	replacementStart := make(chan string, 1)
 	agentMgr := &mockAgentManager{
 		repoForExecutionLookup: repo,
 		launchAgentFunc: func(launchCtx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
-			executionID := "exec-step-" + req.SessionID
-			if launches.Add(1) == 1 {
-				gated.sessionID.Store(req.SessionID)
-				executionID = "exec-old"
-			}
+			executionID := "exec-" + req.SessionID
 			// The lifecycle registers the runtime as soon as it launches.
 			now := time.Now().UTC()
 			if err := repo.UpsertExecutorRunning(launchCtx, &models.ExecutorRunning{
@@ -148,71 +226,96 @@ func TestPrepareTaskSession_RealWorkflowSwitchDuringLaunchCompletes(t *testing.T
 			}
 			return &executor.LaunchAgentResponse{AgentExecutionID: executionID}, nil
 		},
-		stopAgentWithReasonFunc: func(_ context.Context, executionID string, _ string, _ bool) error {
-			if executionID == "exec-old" {
-				stopCalledOnce.Do(func() { close(stopCalled) })
+		startAgentProcessFunc: func(_ context.Context, executionID string) error {
+			if executionID != "exec-existing-session" {
+				replacementStart <- executionID
 			}
 			return nil
 		},
 	}
-	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
 	exec := withTestExecutorActor(executor.NewExecutor(agentMgr, gated, testLogger(), executor.ExecutorConfig{}))
 	svc.executor = exec
 	svc.scheduler = scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, testLogger(), scheduler.SchedulerConfig{})
 
-	sourceID, err := svc.PrepareTaskSession(ctx, "task1", "profile-old", "", "", "step1", true)
-	require.NoError(t, err)
+	type launchResult struct {
+		response *LaunchSessionResponse
+		err      error
+	}
+	result := make(chan launchResult, 1)
+	launchDone := make(chan struct{})
+	release := gated.releaseGate
+	launchCtx, cancelLaunch := context.WithCancel(ctx)
+	t.Cleanup(func() {
+		release()
+		cancelLaunch()
+		select {
+		case <-launchDone:
+		case <-time.After(5 * time.Second):
+			t.Error("launch did not finish after releasing the test gate")
+		}
+	})
+	go func() {
+		defer close(launchDone)
+		response, launchErr := svc.LaunchSession(launchCtx, &LaunchSessionRequest{
+			TaskID: "task1", Intent: IntentStartCreated, SessionID: "existing-session",
+			AgentProfileID: "profile-old", WorkflowStepID: "step-source",
+		})
+		result <- launchResult{response: response, err: launchErr}
+	}()
 	select {
 	case <-gated.reached:
 	case <-time.After(5 * time.Second):
-		t.Fatal("prepared launch did not reach runtime persistence")
+		t.Fatal("launch did not reach runtime persistence")
 	}
 
-	// The step's profile differs from the launching session's: run the real
-	// switch with the park end policy while the first launch is in flight.
-	source, err := repo.GetTaskSession(ctx, sourceID)
+	// A real task move changes the destination step and enters its profile while
+	// the original LaunchSession call is still persisting its start state.
+	task, err = repo.GetTask(ctx, "task1")
 	require.NoError(t, err)
-	replacement, err := svc.switchSessionForStepWithPolicies(
-		ctx, "task1", source, "profile-step",
-		models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark,
-	)
-	require.NoError(t, err)
-	require.NotNil(t, replacement)
-	require.NotEqual(t, sourceID, replacement.ID)
+	task.WorkflowStepID = "step-target"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+	svc.handleTaskMoved(ctx, watcher.TaskMovedEventData{
+		TaskID: "task1", WorkflowID: "wf1", FromStepID: "step-source", ToStepID: "step-target",
+		SessionID: "existing-session", TaskDescription: "move task",
+	})
+	var replacementExecutionID string
+	select {
+	case replacementExecutionID = <-replacementStart:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the moved-to step did not start its replacement agent")
+	}
 
-	parked, err := repo.GetTaskSession(ctx, sourceID)
+	parked, err := repo.GetTaskSession(ctx, "existing-session")
 	require.NoError(t, err)
 	require.Equal(t, models.TaskSessionStateWaitingForInput, parked.State)
 	marker, ok := models.LoadWorkflowParking(parked.Metadata)
 	require.True(t, ok, "the real switch records the parking marker")
-	require.Equal(t, sourceID, marker.SourceSessionID)
+	require.Equal(t, "existing-session", marker.SourceSessionID)
 
-	// Let the stale launch persist into the parked session.
-	close(gated.release)
+	// Release and join the stale launch before the repository's test cleanup.
+	release()
+	var oldLaunch launchResult
 	select {
-	case <-stopCalled:
+	case oldLaunch = <-result:
 	case <-time.After(5 * time.Second):
-		t.Fatal("the stale launch's runtime was not stopped")
+		t.Fatal("superseded launch did not finish")
 	}
+	require.True(t, executor.IsSessionStateSwitched(oldLaunch.err),
+		"the stale start must return the typed workflow-switch outcome")
+	require.Nil(t, oldLaunch.response)
 
-	require.Never(t, func() bool {
-		taskRepo.mu.Lock()
-		defer taskRepo.mu.Unlock()
-		for _, state := range taskRepo.stateHistory["task1"] {
-			if state == v1.TaskStateFailed {
-				return true
-			}
-		}
-		return false
-	}, 500*time.Millisecond, 10*time.Millisecond, "the superseded launch must not fail the task")
-
-	parked, err = repo.GetTaskSession(ctx, sourceID)
+	parked, err = repo.GetTaskSession(ctx, "existing-session")
 	require.NoError(t, err)
 	require.Equal(t, models.TaskSessionStateWaitingForInput, parked.State,
 		"the parked source stays answerable instead of FAILED")
-	stepSession, err := repo.GetTaskSession(ctx, replacement.ID)
+	stepSessionID := strings.TrimPrefix(replacementExecutionID, "exec-")
+	stepSession, err := repo.GetTaskSession(ctx, stepSessionID)
 	require.NoError(t, err)
 	require.Equal(t, "profile-step", stepSession.AgentProfileID)
 	require.True(t, stepSession.IsPrimary, "the step profile session owns the task")
 	require.NotEqual(t, models.TaskSessionStateFailed, stepSession.State)
+	updatedTask, err := repo.GetTask(ctx, "task1")
+	require.NoError(t, err)
+	require.Equal(t, v1.TaskStateInProgress, updatedTask.State)
 }
