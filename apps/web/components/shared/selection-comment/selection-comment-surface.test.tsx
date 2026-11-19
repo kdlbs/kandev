@@ -348,4 +348,23 @@ describe("SelectionCommentSurface placement", () => {
       if (previous) Object.defineProperty(window, "innerHeight", previous);
     }
   });
+
+  it("animates in by default and can appear in place without animation", () => {
+    const surface = (animated?: boolean) =>
+      render(
+        <SelectionCommentSurface
+          selectedText="target"
+          position={{ x: 10, y: 10 }}
+          onAdd={() => {}}
+          onClose={() => {}}
+          testId="surface"
+          animated={animated}
+        />,
+      );
+    surface();
+    expect(screen.getByTestId("surface").className).toContain("animate-in");
+    cleanup();
+    surface(false);
+    expect(screen.getByTestId("surface").className).not.toContain("animate-in");
+  });
 });

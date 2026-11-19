@@ -43,6 +43,8 @@ export type PreviewMarkerProjection = {
   pending?: boolean;
   /** Label on the badge, shared with the comment list. */
   number?: number;
+  /** Start of a text comment's selection, to check its text is still on the page. */
+  selected_text?: string;
 };
 
 /** A screenshot region the bridge tracks through document and container scrolling. */
@@ -123,7 +125,8 @@ interface PreviewMarkerActivatedMessage {
   source: typeof INSPECTOR_SOURCE;
   version: typeof INSPECTOR_PROTOCOL_VERSION;
   type: "marker-activated";
-  payload: { id: string };
+  /** The rect is where the marker's target is, so its comment opens beside it at once. */
+  payload: { id: string; rect?: PreviewHighlightedLayout["rect"] };
 }
 
 interface PreviewPagePointerDownMessage {
@@ -247,7 +250,10 @@ const PAYLOAD_VALIDATORS = new Map<string, (payload: Record<string, unknown>) =>
   ["escape", () => true],
   [
     "marker-activated",
-    (payload) => isBoundedString(payload.id, MAX_REGION_ID_LENGTH) && payload.id.length > 0,
+    (payload) =>
+      isBoundedString(payload.id, MAX_REGION_ID_LENGTH) &&
+      payload.id.length > 0 &&
+      (payload.rect === undefined || isCaptureRect(payload.rect)),
   ],
   ["page-pointerdown", () => true],
   ["selection-changed", (payload) => payload.rect === null || isCaptureRect(payload.rect)],

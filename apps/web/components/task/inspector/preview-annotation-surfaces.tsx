@@ -89,6 +89,7 @@ export function PreviewDraftSurface({
       key={key}
       {...surface}
       position={capture.draftAnchor ?? fallbackAnchor(host)}
+      animated={false}
     />
   );
 }

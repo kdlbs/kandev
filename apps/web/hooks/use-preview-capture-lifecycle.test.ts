@@ -408,4 +408,56 @@ describe("usePreviewCapture region alignment", () => {
     );
     expect(result.current.editingAnchor).not.toBeNull();
   });
+
+  it("opens a comment from its marker beside the target it reports, and keeps it there", () => {
+    feedback.items = [savedText("saved-1")];
+    const { iframe, result } = setup();
+    iframe.getBoundingClientRect = () =>
+      ({ left: 200, top: 100, right: 800, bottom: 700, width: 600, height: 600 }) as DOMRect;
+    const clicked = bridgeMessage(MARKER_ACTIVATED, { id: "saved-1", rect: layoutRect });
+    act(() => dispatch(iframe.contentWindow, clicked));
+    const opened = result.current.editingAnchor;
+    expect(opened).not.toBeNull();
+
+    const layout = (highlighted: unknown) =>
+      bridgeMessage("region-layout", { regions: [], highlighted });
+    act(() => dispatch(iframe.contentWindow, layout(null)));
+    expect(result.current.editingAnchor).toEqual(opened);
+    act(() => dispatch(iframe.contentWindow, layout({ id: "saved-1", rect: layoutRect })));
+    expect(result.current.editingAnchor).toEqual(opened);
+  });
+
+  it("reopens a draft from its marker beside the target it reports", () => {
+    const { iframe, result } = setup();
+    iframe.getBoundingClientRect = () =>
+      ({ left: 200, top: 100, right: 800, bottom: 700, width: 600, height: 600 }) as DOMRect;
+    act(() => dispatch(iframe.contentWindow, textCapture()));
+    act(() => result.current.setDraftComment("note"));
+    act(() => result.current.closeComment());
+    const atCapture = result.current.drafts[0];
+
+    const moved = { ...layoutRect, y: layoutRect.y + 200 };
+    act(() =>
+      dispatch(
+        iframe.contentWindow,
+        bridgeMessage(MARKER_ACTIVATED, { id: atCapture.id, rect: moved }),
+      ),
+    );
+    expect(result.current.openDraft?.id).toBe(atCapture.id);
+    expect(result.current.draftAnchor?.y).toBe(100 + moved.y + moved.height);
+  });
+
+  it("tells the page each text comment's text so it can find it again", async () => {
+    feedback.items = [savedText("saved-1")];
+    const { iframe } = setup();
+    await waitFor(() =>
+      expect(bridge.sendProjectPreviewMarkers).toHaveBeenLastCalledWith(
+        iframe,
+        [expect.objectContaining({ id: "saved-1", selected_text: "$42.00" })],
+        [],
+        null,
+        null,
+      ),
+    );
+  });
 });

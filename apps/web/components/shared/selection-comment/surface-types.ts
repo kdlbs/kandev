@@ -38,6 +38,8 @@ export type SelectionCommentSurfaceProps = {
   addButtonTestId?: string;
   runButtonTestId?: string;
   portalContainer?: HTMLElement | null;
+  /** Fades and zooms in on open; false appears in place at once. Defaults to true. */
+  animated?: boolean;
   errorMessage?: string | null;
   runDisabledReason?: string | null;
 };

@@ -288,6 +288,11 @@ describe("preview inspector protocol 3", () => {
     expect(isInspectorMessage(message(MARKER_ACTIVATED, { id: "" }))).toBe(false);
     expect(isInspectorMessage(message(MARKER_ACTIVATED, { id: "x".repeat(200) }))).toBe(false);
     expect(isInspectorMessage(message(MARKER_ACTIVATED, {}))).toBe(false);
+    const markerRect = { x: 5, y: 6, width: 0, height: 0 };
+    expect(isInspectorMessage(message(MARKER_ACTIVATED, { id: "a", rect: markerRect }))).toBe(true);
+    expect(
+      isInspectorMessage(message(MARKER_ACTIVATED, { id: "a", rect: { ...markerRect, x: "5" } })),
+    ).toBe(false);
     expect(isInspectorMessage(message("page-pointerdown", {}))).toBe(true);
   });
 

@@ -61,6 +61,9 @@ function belongsToSource(item: TaskPreviewFeedback, source: PreviewCaptureSource
   );
 }
 
+/** Enough of a comment's text for the page to recognize it again. */
+const MARKER_TEXT_LIMIT = 4096;
+
 function itemMarker(item: TaskPreviewFeedback): PreviewMarkerProjection {
   return {
     id: item.id,
@@ -69,6 +72,7 @@ function itemMarker(item: TaskPreviewFeedback): PreviewMarkerProjection {
     text_anchor: item.text_anchor,
     element_snapshot: item.element_snapshot,
     capture_rect: item.capture_rect,
+    selected_text: item.selected_text?.slice(0, MARKER_TEXT_LIMIT),
   };
 }
 
@@ -80,6 +84,7 @@ function draftMarker(draft: PreviewDraftEntry): PreviewMarkerProjection {
     text_anchor: draft.payload.text_anchor,
     element_snapshot: draft.payload.element_snapshot,
     capture_rect: draft.payload.capture_rect,
+    selected_text: draft.payload.selected_text?.slice(0, MARKER_TEXT_LIMIT),
     pending: true,
   };
 }
@@ -102,6 +107,28 @@ function anchorBelow(iframe: HTMLIFrameElement | null, rect: PreviewRegionView["
   if (!iframe || !rect) return null;
   const bounds = iframe.getBoundingClientRect();
   return anchorBelowRect(rect, bounds, floatingBounds(bounds));
+}
+
+/** Where the open draft's and the saved item's comment boxes are anchored. */
+type CommentAnchorPage = {
+  highlighted: PreviewHighlightedLayout | null;
+  activated: PreviewHighlightedLayout | null;
+};
+
+function commentAnchors(
+  iframeRef: React.RefObject<HTMLIFrameElement | null>,
+  page: CommentAnchorPage,
+  regions: PreviewRegionView[],
+  openDraft: PreviewDraftEntry | null,
+  editingItem: TaskPreviewFeedback | null,
+) {
+  const { highlighted, activated } = page;
+  const iframe = iframeRef.current;
+  const editingRect = editingItemRect(editingItem, regions, highlighted, activated);
+  return {
+    draftAnchor: anchorBelow(iframe, openDraftRect(openDraft, regions, activated)),
+    editingAnchor: anchorBelow(iframe, editingRect),
+  };
 }
 
 function useSourceCollections(
@@ -164,6 +191,7 @@ function usePreviewPageState() {
   const [selectionRect, setSelectionRect] = useState<PreviewCaptureRect | null>(null);
   const [layouts, setLayouts] = useState<Record<string, PreviewRegionLayout>>({});
   const [highlighted, setHighlighted] = useState<PreviewHighlightedLayout | null>(null);
+  const [activated, setActivated] = useState<PreviewHighlightedLayout | null>(null);
   return {
     pageRoute,
     pageTitle,
@@ -173,10 +201,19 @@ function usePreviewPageState() {
     layouts,
     highlighted,
     setHighlighted,
+    /** Where the last clicked marker's target was, until the page reports its layout. */
+    activated,
+    setActivated,
     setCandidateLabel,
     setAcknowledgedMode,
     setSelectionRect,
     setLayouts,
+    /** A new document has none of the old page's layout. */
+    resetLayout: () => {
+      setLayouts({});
+      setHighlighted(null);
+      setActivated(null);
+    },
     changePage: (route: string, title: string) => {
       setPageRoute(route);
       setPageTitle(title);
@@ -366,7 +403,10 @@ function useCaptureEvents(deps: CaptureEventDeps) {
       page.setHighlighted(highlighted);
     },
     onEscape: surfaces.handleEscape,
-    onMarkerActivated: surfaces.openCapture,
+    onMarkerActivated: (id, rect) => {
+      page.setActivated(rect ? { id, rect } : null);
+      surfaces.openCapture(id);
+    },
     onPagePointerDown: surfaces.closeComment,
   });
 }
@@ -452,7 +492,6 @@ export function usePreviewCapture({
 
   const { regions } = projection;
   const openDraft = drafts.openDraft;
-  const editingRect = editingItemRect(surfaces.editingItem, regions, page.highlighted);
   return {
     ...feedback,
     ...surfaces,
@@ -464,7 +503,7 @@ export function usePreviewCapture({
     markers: collections.markers,
     drafts: drafts.drafts,
     openDraft,
-    draftAnchor: anchorBelow(iframeRef.current, openDraftRect(openDraft, regions)),
+    ...commentAnchors(iframeRef, page, regions, openDraft, surfaces.editingItem),
     setDraftComment: (comment: string) => {
       if (openDraft) drafts.setComment(openDraft.id, comment);
     },
@@ -475,7 +514,6 @@ export function usePreviewCapture({
     selectCapture: setSelectedId,
     discardDraft: drafts.discard,
     ...save,
-    editingAnchor: anchorBelow(iframeRef.current, editingRect),
     regions,
     recaptureRegion: screenshots.recaptureRegion,
     recaptureFailed: screenshots.recaptureFailed,
@@ -487,8 +525,7 @@ export function usePreviewCapture({
     captureError: screenshots.captureError,
     isRasterizing: screenshots.isRasterizing,
     handleIframeLoad: () => {
-      page.setLayouts({});
-      page.setHighlighted(null);
+      page.resetLayout();
       annotation.resend();
       projection.projectMarkers();
     },

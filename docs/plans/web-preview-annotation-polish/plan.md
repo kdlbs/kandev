@@ -236,3 +236,11 @@ Delivered as planned, with these refinements recorded in part 5:
   visible and are now clickable outside the mode, opening the comment in the
   floating box; region outlines and their markers stay mode-only, and each
   save is announced to screen readers. `005.5` records this.
+- Test feedback: a marker's comment box first rendered at the fallback
+  corner, then jumped beside the marker when the page reported its layout,
+  replaying the open animation. The click now carries the target's position,
+  and the preview's boxes do not animate (`005.8`). Hovering a marker now
+  highlights the commented text or element, and the highlight stays while
+  the comment is open (`005.9`). The inspector script test harness moved to
+  `lib/preview-inspector-script.test-helpers.ts` so the new highlight suite
+  can share it.

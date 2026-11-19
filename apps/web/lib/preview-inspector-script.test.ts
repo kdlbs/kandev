@@ -1,54 +1,20 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  CAPTURE_MODE_CHANGED,
+  PROJECT_MARKERS,
+  REGION_LAYOUT,
+  SET_ANNOTATION_ACTIVE,
+  SET_CAPTURE_MODE,
+  command,
+  flushFrames,
+  pointer,
+  postMessage,
+  rect,
+  sentOfType,
+  useInspectorPage,
+} from "./preview-inspector-script.test-helpers";
 
-const SCRIPT_PATH = path.resolve(
-  __dirname,
-  "../../backend/internal/agentctl/server/api/scripts/inspector.js",
-);
-const SOURCE = "kandev-inspector";
-const VERSION = 3;
-
-const SET_CAPTURE_MODE = "set-capture-mode";
-const CAPTURE_MODE_CHANGED = "capture-mode-changed";
-const REGION_LAYOUT = "region-layout";
-const SET_ANNOTATION_ACTIVE = "set-annotation-active";
-const PROJECT_MARKERS = "project-markers";
-
-type Sent = { source: string; version: number; type: string; payload: Record<string, unknown> };
-
-const postMessage = vi.fn<(message: Sent) => void>();
-let frames: FrameRequestCallback[] = [];
-
-function flushFrames() {
-  const pending = frames;
-  frames = [];
-  pending.forEach((callback) => callback(0));
-}
-
-function command(type: string, payload: Record<string, unknown> = {}) {
-  window.dispatchEvent(
-    new MessageEvent("message", { data: { source: SOURCE, version: VERSION, type, payload } }),
-  );
-}
-
-function sentOfType(type: string) {
-  return postMessage.mock.calls.map(([message]) => message).filter((m) => m.type === type);
-}
-
-function rect(left: number, top: number, width: number, height: number): DOMRect {
-  return {
-    left,
-    top,
-    width,
-    height,
-    right: left + width,
-    bottom: top + height,
-    x: left,
-    y: top,
-    toJSON: () => ({}),
-  } as DOMRect;
-}
+useInspectorPage();
 
 function selectText(node: Node, start: number, end: number) {
   const range = document.createRange();
@@ -58,40 +24,6 @@ function selectText(node: Node, start: number, end: number) {
   selection?.removeAllRanges();
   selection?.addRange(range);
 }
-
-function pointer(type: string, x: number, y: number) {
-  document.body.dispatchEvent(
-    new PointerEvent(type, { clientX: x, clientY: y, pointerId: 1, bubbles: true }),
-  );
-}
-
-beforeAll(() => {
-  Object.defineProperty(window, "parent", { value: { postMessage }, configurable: true });
-  window.requestAnimationFrame = (callback) => {
-    frames.push(callback);
-    return frames.length;
-  };
-  vi.spyOn(Range.prototype, "getClientRects").mockReturnValue([
-    rect(20, 30, 80, 16),
-  ] as unknown as DOMRectList);
-  new Function(readFileSync(SCRIPT_PATH, "utf8"))();
-});
-
-beforeEach(() => {
-  document.body.innerHTML =
-    '<p id="copy">Lorem ipsum dolor</p><button id="buy">Buy</button>' +
-    '<div id="list" style="overflow: auto"><span id="row">Row</span></div>';
-  postMessage.mockClear();
-  frames = [];
-});
-
-afterEach(() => {
-  command(SET_CAPTURE_MODE, { mode: null });
-  command(SET_ANNOTATION_ACTIVE, { active: false });
-  command(PROJECT_MARKERS, { markers: [] });
-  window.getSelection()?.removeAllRanges();
-  flushFrames();
-});
 
 describe("inspector protocol 3", () => {
   it("declares protocol version 3", () => {
@@ -282,7 +214,7 @@ describe("inspector marker interaction", () => {
       expect(markerNode()?.style.pointerEvents).toBe("auto");
       markerNode()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
-      expect(sentOfType("marker-activated").map((m) => m.payload)).toEqual([{ id: "m1" }]);
+      expect(sentOfType("marker-activated").map((m) => m.payload.id)).toEqual(["m1"]);
       expect(pageClick).not.toHaveBeenCalled();
       document.removeEventListener("click", pageClick);
     },

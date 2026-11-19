@@ -98,7 +98,7 @@ function DesktopSurfaceHeader({
 }
 
 function DesktopSelectionCommentSurface(props: SelectionCommentSurfaceProps) {
-  const { position, portalContainer, onClose, testId, contextLabel } = props;
+  const { position, portalContainer, onClose, testId, contextLabel, animated = true } = props;
   const state = useCommentComposerState(props);
   const popoverRef = useRef<HTMLDivElement>(null);
   const { offset, onMouseDown } = useDrag();
@@ -110,7 +110,7 @@ function DesktopSelectionCommentSurface(props: SelectionCommentSurfaceProps) {
       ref={popoverRef}
       className={cn(
         "pointer-events-auto z-[60] max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-xl border border-border/50 bg-popover/95 backdrop-blur-sm shadow-xl",
-        "animate-in fade-in-0 zoom-in-95 duration-150",
+        animated && "animate-in fade-in-0 zoom-in-95 duration-150",
         portalContainer ? "absolute" : "fixed",
       )}
       data-testid={testId}

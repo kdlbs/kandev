@@ -1,4 +1,4 @@
-import { expect, type FrameLocator, type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import {
   chooseCapture,
@@ -8,19 +8,10 @@ import {
   openBrowserPreview,
   startWithCommentPanelHidden,
   saveDraft,
+  selectText,
   startPreviewServer,
   waitForScreenshotCaptureMode,
 } from "./preview-feedback-helpers";
-
-async function selectText(frame: FrameLocator, selector: string) {
-  await frame.locator(selector).evaluate((element) => {
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-  });
-}
 
 async function box(locator: Locator) {
   const value = await locator.boundingBox();

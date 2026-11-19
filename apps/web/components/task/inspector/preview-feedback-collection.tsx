@@ -87,7 +87,7 @@ export function PendingFeedbackEditor({
   onClose: () => void;
 }) {
   const props = usePendingEditorProps(item, collection, onClose);
-  return <SelectionCommentSurface {...props} position={position} />;
+  return <SelectionCommentSurface {...props} position={position} animated={false} />;
 }
 
 function PendingFeedbackItem({

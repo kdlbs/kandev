@@ -365,6 +365,7 @@ describe("PreviewAnnotationLayer comment list", () => {
     const surfaces = screen.getAllByTestId("preview-feedback-draft");
     expect(surfaces).toHaveLength(1);
     expect(panel.contains(surfaces[0])).toBe(false);
+    expect(surfaces[0].className).not.toContain("animate-in");
     expect(
       panel.querySelector('[data-testid="preview-unsaved-draft"]')?.getAttribute("data-active"),
     ).toBe("true");
@@ -392,6 +393,7 @@ describe("PreviewAnnotationLayer comment list", () => {
     const editors = screen.getAllByTestId("preview-feedback-edit");
     expect(editors).toHaveLength(1);
     expect(panel.contains(editors[0])).toBe(false);
+    expect(editors[0].className).not.toContain("animate-in");
     expect(screen.getByTestId("preview-feedback-item").getAttribute("data-active")).toBe("true");
     expect(screen.getByTestId("preview-feedback-item").textContent).toContain("Make it bigger");
   });

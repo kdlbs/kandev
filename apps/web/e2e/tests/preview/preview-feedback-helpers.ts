@@ -201,6 +201,17 @@ export async function saveDraft(page: Page, comment: string): Promise<void> {
   await expect(draft).toBeHidden({ timeout: 15_000 });
 }
 
+/** Selects all of an element's text in the page, as a user's drag would. */
+export async function selectText(frame: FrameLocator, selector: string): Promise<void> {
+  await frame.locator(selector).evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+}
+
 export async function selectGeneratedText(frame: FrameLocator): Promise<void> {
   await frame.locator("#runtime-total").evaluate((element) => {
     const text = element.firstChild;

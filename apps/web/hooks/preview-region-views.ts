@@ -97,22 +97,35 @@ function lastTextRect(draft: PreviewDraftEntry["payload"]) {
   return rects?.length ? rects[rects.length - 1] : null;
 }
 
-/** A saved item's editor opens beside its region outline, or its highlighted marker. */
+function targetRect(id: string, target: PreviewHighlightedLayout | null) {
+  return target?.id === id ? target.rect : null;
+}
+
+/**
+ * A saved item's editor opens beside its region outline, then its highlighted
+ * marker, then where its marker was when clicked, so it never waits for the page.
+ */
 export function editingItemRect(
   item: TaskPreviewFeedback | null,
   regions: PreviewRegionView[],
   highlighted: PreviewHighlightedLayout | null,
+  activated: PreviewHighlightedLayout | null = null,
 ) {
   if (!item) return null;
   const region = regions.find((candidate) => candidate.id === item.id);
   if (region) return region.rect;
-  return highlighted?.id === item.id ? highlighted.rect : null;
+  return targetRect(item.id, highlighted) ?? targetRect(item.id, activated);
 }
 
-export function openDraftRect(openDraft: PreviewDraftEntry | null, regions: PreviewRegionView[]) {
+export function openDraftRect(
+  openDraft: PreviewDraftEntry | null,
+  regions: PreviewRegionView[],
+  activated: PreviewHighlightedLayout | null = null,
+) {
   if (!openDraft) return null;
   return (
     regions.find((region) => region.id === openDraft.id)?.rect ??
+    targetRect(openDraft.id, activated) ??
     openDraft.payload.capture_rect ??
     lastTextRect(openDraft.payload)
   );

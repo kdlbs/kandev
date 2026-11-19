@@ -10,10 +10,16 @@
   var ANCHOR_TOLERANCE_PX = 8;
   var ANCHOR_TOLERANCE_RATIO = 0.05;
   var VIEWPORT_TOLERANCE_PX = 8;
+  var HIGHLIGHT_NAME = 'kandev-comment-target';
+  var HIGHLIGHT_COLOR = 'rgba(99,102,241,0.28)';
+  var MAX_COMPARED_TEXT = 4096;
   var mode = null;
   var annotationActive = false;
   var surfaceOpen = false;
   var highlightedId = null;
+  var hoveredId = null;
+  var targetBoxes = [];
+  var highlightStyle = null;
   var revealId = null;
   var revealedId = null;
   var candidate = null;
@@ -675,18 +681,25 @@
     };
   }
 
-  // Where the highlighted marker is, so Kandev can open its comment beside it.
-  function highlightedLayout(route) {
-    if (!highlightedId) return null;
-    var marker = projectedMarkers.filter(function (candidate) {
-      return candidate.id === highlightedId && candidate.page_route === route;
-    })[0];
+  function routeMarker(id, route) {
+    if (!id) return null;
+    return projectedMarkers.filter(function (candidate) {
+      return candidate.id === id && candidate.page_route === route;
+    })[0] || null;
+  }
+
+  // Where a marker's target is, so Kandev can open its comment beside it.
+  function markerLayout(marker) {
     var rect = marker ? markerRect(marker) : null;
     if (!rect) return null;
     return {
       id: marker.id,
       rect: { x: rect.left, y: rect.top, width: rect.width || 0, height: rect.height || 0 },
     };
+  }
+
+  function highlightedLayout(route) {
+    return markerLayout(routeMarker(highlightedId, route));
   }
 
   function observeAnchor(anchor) {
@@ -774,15 +787,13 @@
     }
   }
 
-  function markerRect(marker) {
+  function markerElement(marker) {
     var selector = marker.element_snapshot && marker.element_snapshot.selector;
-    if (selector) {
-      try {
-        var element = document.querySelector(selector);
-        if (element) return element.getBoundingClientRect();
-      } catch (error) {}
-    }
-    var rect = marker.capture_rect || (marker.text_anchor && marker.text_anchor.union_rect);
+    return selector ? queryOrNull(selector) : null;
+  }
+
+  // A saved rectangle's current viewport position, from its document coordinates.
+  function savedViewportRect(rect) {
     if (!rect) return null;
     var documentX = typeof rect.document_x === 'number'
       ? rect.document_x
@@ -790,13 +801,162 @@
     var documentY = typeof rect.document_y === 'number'
       ? rect.document_y
       : rect.y + (typeof rect.scroll_y === 'number' ? rect.scroll_y : 0);
-    return { left: documentX - window.scrollX, top: documentY - window.scrollY };
+    return {
+      left: documentX - window.scrollX,
+      top: documentY - window.scrollY,
+      width: rect.width,
+      height: rect.height,
+    };
+  }
+
+  function markerRect(marker) {
+    var element = markerElement(marker);
+    if (element) return element.getBoundingClientRect();
+    var saved = savedViewportRect(marker.capture_rect || (marker.text_anchor && marker.text_anchor.union_rect));
+    return saved ? { left: saved.left, top: saved.top } : null;
   }
 
   function onMarkerClick(event) {
     event.preventDefault();
     event.stopPropagation();
-    send('marker-activated', { id: event.currentTarget.getAttribute('data-kandev-inspector-marker') });
+    var id = event.currentTarget.getAttribute('data-kandev-inspector-marker');
+    var layout = markerLayout(routeMarker(id, currentPageRoute()));
+    send('marker-activated', layout ? { id: id, rect: layout.rect } : { id: id });
+  }
+
+  function endpointNode(endpoint) {
+    var root = endpoint && endpoint.selector ? queryOrNull(endpoint.selector) : null;
+    if (!root || !Array.isArray(endpoint.node_path)) return null;
+    var node = root;
+    for (var index = 0; index < endpoint.node_path.length && node; index += 1) {
+      node = node.childNodes[endpoint.node_path[index]];
+    }
+    return node || null;
+  }
+
+  function comparableText(value) {
+    return String(value).replace(/\s+/g, ' ').trim();
+  }
+
+  // The commented text as it is on the page now, or null when it has changed.
+  function textRange(marker) {
+    var anchor = marker.text_anchor;
+    var expected = typeof marker.selected_text === 'string'
+      ? comparableText(marker.selected_text.slice(0, MAX_COMPARED_TEXT))
+      : '';
+    if (!anchor || !expected) return null;
+    var start = endpointNode(anchor.start);
+    var end = endpointNode(anchor.end);
+    if (!start || !end) return null;
+    var range = document.createRange();
+    try {
+      range.setStart(start, anchor.start.offset);
+      range.setEnd(end, anchor.end.offset);
+    } catch (error) {
+      return null;
+    }
+    return comparableText(range.toString()).indexOf(expected) === 0 ? range : null;
+  }
+
+  function highlightRegistry() {
+    if (typeof Highlight !== 'function' || typeof CSS === 'undefined' || !CSS.highlights) return null;
+    return CSS.highlights;
+  }
+
+  function ensureHighlightStyle() {
+    if (highlightStyle) return;
+    highlightStyle = document.createElement('style');
+    highlightStyle.setAttribute('data-kandev-inspector-ui', 'highlight-style');
+    highlightStyle.textContent = '::highlight(' + HIGHLIGHT_NAME + '){background-color:' + HIGHLIGHT_COLOR + ';}';
+    (document.head || document.documentElement).appendChild(highlightStyle);
+  }
+
+  function drawTargetBox(rect, outlined) {
+    var box = document.createElement('div');
+    box.setAttribute('data-kandev-inspector-ui', 'target-highlight');
+    box.setAttribute('aria-hidden', 'true');
+    box.style.cssText = 'position:fixed;pointer-events:none;box-sizing:border-box;border-radius:2px;'
+      + 'background:' + HIGHLIGHT_COLOR + ';'
+      + (outlined ? 'border:2px solid #6366f1;' : '')
+      + 'z-index:' + (Z_INDEX - 1) + ';';
+    box.style.left = rect.left + 'px';
+    box.style.top = rect.top + 'px';
+    box.style.width = rect.width + 'px';
+    box.style.height = rect.height + 'px';
+    document.documentElement.appendChild(box);
+    targetBoxes.push(box);
+  }
+
+  function clearTargetHighlight() {
+    targetBoxes.forEach(function (box) {
+      if (box.parentNode) box.parentNode.removeChild(box);
+    });
+    targetBoxes = [];
+    var registry = highlightRegistry();
+    if (registry) registry.delete(HIGHLIGHT_NAME);
+  }
+
+  // Adds what a text or element comment points at: live text, the live element,
+  // or the boxes saved at capture time when the page no longer has them.
+  function collectTarget(marker, target) {
+    if (marker.kind === 'text') {
+      var range = textRange(marker);
+      if (range) {
+        target.ranges.push(range);
+        return;
+      }
+      var saved = marker.text_anchor && Array.isArray(marker.text_anchor.rects) ? marker.text_anchor.rects : [];
+      saved.map(savedViewportRect).forEach(function (rect) {
+        if (rect) target.boxes.push({ rect: rect, outlined: false });
+      });
+      return;
+    }
+    var element = markerElement(marker);
+    var rect = element ? element.getBoundingClientRect() : savedViewportRect(marker.capture_rect);
+    if (rect) target.boxes.push({ rect: rect, outlined: true });
+  }
+
+  // Highlights the hovered marker's target and the target of the open comment.
+  function renderTargetHighlight() {
+    clearTargetHighlight();
+    var route = currentPageRoute();
+    var target = { ranges: [], boxes: [] };
+    [hoveredId, highlightedId].forEach(function (id, index, ids) {
+      if (!id || ids.indexOf(id) !== index) return;
+      var marker = routeMarker(id, route);
+      if (marker && marker.kind !== 'screenshot') collectTarget(marker, target);
+    });
+    var registry = highlightRegistry();
+    if (registry && target.ranges.length) {
+      ensureHighlightStyle();
+      var highlight = new Highlight();
+      target.ranges.forEach(function (range) { highlight.add(range); });
+      registry.set(HIGHLIGHT_NAME, highlight);
+    } else {
+      target.ranges.forEach(function (range) {
+        Array.prototype.forEach.call(range.getClientRects(), function (rect) {
+          target.boxes.push({ rect: rect, outlined: false });
+        });
+      });
+    }
+    target.boxes.forEach(function (box) { drawTargetBox(box.rect, box.outlined); });
+  }
+
+  function setHoveredMarker(id) {
+    if (id === hoveredId) return;
+    hoveredId = id;
+    renderTargetHighlight();
+  }
+
+  function onMarkerHover(event) {
+    var node = event.target && event.target.closest
+      ? event.target.closest('[data-kandev-inspector-marker]')
+      : null;
+    setHoveredMarker(node ? node.getAttribute('data-kandev-inspector-marker') : null);
+  }
+
+  function onPointerLeavePage(event) {
+    if (!event.relatedTarget) setHoveredMarker(null);
   }
 
   function markerNode(marker, index, rect) {
@@ -849,6 +1009,7 @@
       if (!rect) return;
       document.documentElement.appendChild(markerNode(marker, index, rect));
     });
+    renderTargetHighlight();
     scrollRevealIntoView();
     scheduleRegionLayout();
   }
@@ -885,6 +1046,8 @@
   };
   document.addEventListener('keydown', onKeyDown, true);
   document.addEventListener('pointerdown', onPagePointerDown, true);
+  document.addEventListener('mouseover', onMarkerHover, true);
+  document.addEventListener('mouseout', onPointerLeavePage, true);
   document.addEventListener('selectionchange', onSelectionChange);
   window.addEventListener('popstate', routeDidChange);
   window.addEventListener('hashchange', routeDidChange);

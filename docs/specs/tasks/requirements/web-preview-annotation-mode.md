@@ -92,6 +92,20 @@ reviewing a whole page takes few clicks.
   Outlines for other routes shall be hidden after navigation while their items
   remain in the pending collection. Sending feedback shall use the images
   already captured and shall never capture at send time.
+- **AC-TASKS-WEB-PREVIEW-FEEDBACK-005.8:** Activating a marker shall open its
+  comment beside the marker in its first rendered frame, with no opening
+  animation and no later movement while the page does not scroll or reflow.
+  The preview's floating comment boxes appear in place rather than animating
+  in.
+- **AC-TASKS-WEB-PREVIEW-FEEDBACK-005.9:** With a fine pointer, hovering a
+  text or element marker shall highlight what its comment points at: the
+  commented text, or the commented element's outline. The highlight shall
+  clear when the pointer leaves the marker, and shall stay while that
+  comment is open. When the commented text is no longer on the page, the
+  highlight shall use the text's boxes from capture time, or show nothing
+  when those are unknown, rather than highlight other text. Highlighting
+  shall not change the page's layout. Region markers are not highlighted,
+  because their outline already shows the region.
 
 ### REQ-TASKS-WEB-PREVIEW-FEEDBACK-006: Review annotations in a comment panel
 

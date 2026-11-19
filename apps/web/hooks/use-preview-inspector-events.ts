@@ -27,7 +27,8 @@ export type PreviewInspectorHandlers = {
     highlighted: PreviewHighlightedLayout | null,
   ) => void;
   onEscape: () => void;
-  onMarkerActivated: (id: string) => void;
+  /** The rect is where the page reports the marker's target, when it knows. */
+  onMarkerActivated: (id: string, rect?: PreviewHighlightedLayout["rect"]) => void;
   onPagePointerDown: () => void;
 };
 
@@ -74,7 +75,7 @@ function dispatchInspectorMessage(data: unknown, handlers: PreviewInspectorHandl
       handlers.onEscape();
       break;
     case "marker-activated":
-      handlers.onMarkerActivated(data.payload.id);
+      handlers.onMarkerActivated(data.payload.id, data.payload.rect);
       break;
     case "page-pointerdown":
       handlers.onPagePointerDown();

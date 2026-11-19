@@ -94,6 +94,26 @@ On coarse pointers the same surface renders its drawer, as today.
 - **Save announcement.** `usePreviewDraftSave` counts successful saves, and
   the annotation trigger renders a polite `role="status"` region that
   announces "Comment saved. N pending." once per save (`005.5`).
+- **Opening in place.** `marker-activated` carries the marker target's
+  viewport rect, computed by the same `markerLayout` that fills the
+  `highlighted` layout. `usePreviewCapture` keeps it as `activated`, and
+  `editingItemRect` and `openDraftRect` use it until a matching `highlighted`
+  layout arrives, so the box is placed in its first frame and the later
+  layout lands on the same point. The preview's `SelectionCommentSurface`
+  instances render with `animated={false}`; other surfaces keep the fade
+  and zoom (`005.8`).
+- **Target highlight.** The inspector tracks the hovered marker from
+  document `mouseover` and `mouseout` events, because markers are redrawn on
+  every scroll. It highlights the hovered marker's target and the
+  `highlighted_id` target together. Text resolves its saved endpoints to a
+  `Range` and is accepted only when the range's whitespace-normalized text
+  starts with the marker's `selected_text`, which Kandev sends truncated to
+  4,096 characters. Accepted ranges are painted through `CSS.highlights`
+  where the browser has it, otherwise as fixed boxes from the range's client
+  rects. A changed text falls back to the saved `text_anchor.rects`; an
+  element uses its live bounding box, then its `capture_rect`. Boxes are
+  pointer-transparent and appended outside `body`, so they never affect
+  layout or the layout observers (`005.9`).
 
 ## Toolbar
 
