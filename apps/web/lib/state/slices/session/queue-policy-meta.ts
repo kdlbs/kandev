@@ -49,7 +49,7 @@ function shouldPreserveQueuePolicy(
   );
 }
 
-/** Each preference has its own irreversible session source and revision. */
+/** A session-sourced policy never reverts to global, and revisions only move forward. */
 export function mergeQueuePolicyMeta(
   previous: QueueMeta | undefined,
   incoming: Partial<QueueMeta>,
