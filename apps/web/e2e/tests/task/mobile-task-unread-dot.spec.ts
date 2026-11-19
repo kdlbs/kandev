@@ -8,7 +8,8 @@ import {
   type UnreadSettings,
   captureUnreadSettings,
   cleanupFailingResumeTask,
-  newestStoredMessageId,
+  failedResumeTail,
+  waitForFailedResume,
   observeReadTraffic,
   rowHeight,
   seedFailedSiblingTask,
@@ -193,10 +194,21 @@ test.describe("Mobile task unread dot", () => {
     try {
       const unreadIds = () => taskUnreadSessionIds(apiClient, seedData.workspaceId, seeded.taskId);
       const failingState = () => sessionReadState(apiClient, seeded.failingSessionId);
+      expect((await failingState()).cursor).toBe(seeded.failingCursor);
+      expect(
+        (await apiClient.listTaskSessions(seeded.taskId)).sessions.find((item) => item.is_primary)
+          ?.id,
+      ).toBe(seeded.failingSessionId);
       const traffic = observeReadTraffic(testPage);
+      const settled = waitForFailedResume(watchWs(testPage), seeded);
       await testPage.goto(`/t/${seeded.taskId}`);
       const session = new SessionPage(testPage);
-      await session.waitForLoad();
+      await expect(session.activeChat()).toBeVisible({ timeout: 30_000 });
+      await settled;
+      expect(
+        (await apiClient.listTaskSessions(seeded.taskId)).sessions.find((item) => item.is_primary)
+          ?.id,
+      ).toBe(seeded.siblingSessionId);
       await expect
         .poll(async () => (await failingState()).state, { timeout: 60_000 })
         .toBe("FAILED");
@@ -205,7 +217,17 @@ test.describe("Mobile task unread dot", () => {
         "data-session-id",
         seeded.failingSessionId,
       );
-      const failureTail = await newestStoredMessageId(apiClient, seeded.failingSessionId);
+      const failureTail = await failedResumeTail(apiClient, seeded);
+      await expect(session.activeChat().getByTestId("session-recovery-card")).toBeVisible();
+      await expect(
+        session
+          .activeChat()
+          .getByTestId("session-recovery-card")
+          .getByRole("button", { name: "Start fresh session", exact: true }),
+      ).toBeVisible();
+      await expect(
+        session.activeChat().getByText("Failed to resume agent Mock", { exact: false }).first(),
+      ).toBeVisible();
       await expect
         .poll(async () => (await failingState()).cursor, { timeout: 15_000 })
         .toBe(failureTail);

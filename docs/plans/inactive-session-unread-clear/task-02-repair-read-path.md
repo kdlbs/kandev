@@ -213,6 +213,8 @@ Production ownership narrowed by the failed-resume reproduction (see
 
 - `apps/web/lib/ws/handlers/agent-session.ts` and `agent-session.test.ts`
 - `apps/web/lib/ws/handlers/tasks.ts` and `tasks.test.ts`
+- `apps/backend/internal/gateway/websocket/task_notifications.go` and
+  `task_notifications_test.go` (ordered failure/primary notification delivery).
 
 Shared verification and delivery records:
 
@@ -254,6 +256,8 @@ production owners, and regression commands; it unblocks this repair.
 - Existing hook tests and desktop/phone unread-dot fixtures.
 
 ## Results
+
+### Initial implementation checkpoint (before production-fix review)
 
 Before the new incident this order was blocked: Task 01 found conformance for
 a cursorless `FAILED` sibling, and its desktop/phone regressions remain.
@@ -313,8 +317,10 @@ the failure the user is viewing. Existing completed/cancelled handoff remains.
 The failed-resume fixture intentionally launches the target to reproduce its
 resume failure; the correction introduces no launch and does not start its
 sibling. Earlier stored-session coverage still proves reading without launch.
-This order is done based on the focused results above, not a claim of a clean
-broad suite. Changes remain uncommitted and unpushed.
+At the initial implementation checkpoint this order was complete based on the
+focused results above, not a clean broad suite; its edits were then uncommitted.
+That production fix was subsequently pushed as `e4e01b8b35`. Its independent
+failed-resume review and remediation are recorded in the plan's new loop.
 
 Parent documentation checks passed: `list-docs.py validate` (455 decisions,
 2037 specifications), `lint-spec-files.py --all`, public-doc validator tests
@@ -322,6 +328,61 @@ Parent documentation checks passed: `list-docs.py validate` (455 decisions,
 updated in `docs/public/operations.md`; its primary content type is a how-to
 guide. Parent inspected the retained desktop/phone and related-selection E2E
 logs; their results are 3, 3, and 30 passed, respectively.
+
+### Production-fix review round 1 remediation
+
+F1: retain the publisher's ordering rather than introduce a new payload schema.
+`TaskEventBroadcaster` now routes `task.updated` through the existing lifecycle
+wildcard alongside session/task state changes. The orchestrator publishes the
+failed state before promoting a sibling; NATS callbacks on separate subscriptions
+could invert those notifications. A single callback queue prevents that inversion.
+No workflow focus, primary promotion, or unread predicate changes are needed.
+
+`TestTaskEventBroadcaster_OrdersFailureBeforePrimaryPromotion` exercises both
+the memory bus and the existing deterministic NATS-style callback-queue fake.
+Before the fix, the fake's task-first scheduling produced `task.updated` before
+`session.state_changed`; the memory counterpart passed. After the fix both
+preserve order and deliver exactly once. The obsolete hard-coded subscription
+count/counter test was removed rather than re-pinned to another count.
+
+Final backend command in the cache snapshot:
+`go test -race ./internal/gateway/websocket ./internal/events/bus -count=1`:
+both packages passed. An initial green assertion run exposed a goroutine leak
+in the new test's uncancellable background context; cancelling that test context
+fixed the fixture, and the final race/goleak run passed. This is NATS queue-model
+coverage, not a claim of a live NATS-server integration run.
+
+F2: both layouts now arm FAILED and sibling-primary notification waits before
+navigation, use a non-reloading initial readiness check, verify authoritative
+primary identity before/after, and require the new failed resume `agent_boot`
+followed by a recovery-status tail after the seed cursor. The selected chat must
+show the recovery card and failure cause before cursor/reload assertions.
+
+Final E2E commands used `--host --no-build --shards 1`, owning projects, and
+`--retries=0`, after a fresh managed backend/web/plugin build:
+
+- Full desktop unread-dot spec: 3 passed (`r1-desktop-confirmed.log`).
+- Full phone unread-dot spec: 3 passed (`r1-mobile-confirmed.log`).
+- A separate cache-backed copy, `~/.cache/tmp/unread-r1-mutation.Qi8fHD`,
+  removed both FAILED focus guards and rebuilt its frontend. Both strengthened
+  failed-resume cases then failed on the active chat being the sibling instead
+  of the failed session (desktop/mobile exit 1). These are behavioral REDs,
+  not setup failures (`r1-mutant-desktop.log`, `r1-mutant-mobile.log`).
+- The initial stronger assertions incorrectly expected provider detail in the
+  stored recovery-card text and the obsolete bootstrap-card component. Current
+  storage uses a safe generic startup summary; the active composer uses
+  `SessionRecoveryCard`. Those assertion failures were corrected against source
+  and the rendered page, not counted as product RED. The final cases assert
+  structured boot/card identities, the visible failed-resume transcript entry,
+  and the current recovery card's Start fresh action.
+- Parent inspected the passing phone capture: failed session 1/2 remains
+  displayed, failure entry and recovery controls visible, no horizontal overflow.
+- Logs and retained result directories are under
+  `~/.cache/tmp/unread-verification.zWhGjx/`. The final `--no-build` runs reused
+  the managed build; subsequent edits were confined to test assertions/docs.
+
+F3: delivery-time statements and earlier reviews are labelled historical.
+The plan records the actual pushed production head and a separate review ledger.
 
 ## New reported incident: existing cursor behind a failed resume
 

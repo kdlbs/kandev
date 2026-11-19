@@ -8,7 +8,8 @@ import {
   type UnreadSettings,
   captureUnreadSettings,
   cleanupFailingResumeTask,
-  newestStoredMessageId,
+  failedResumeTail,
+  waitForFailedResume,
   observeReadTraffic,
   rowHeight,
   seedFailedSiblingTask,
@@ -264,11 +265,22 @@ test.describe("Task unread dot", () => {
       const unreadIds = () => taskUnreadSessionIds(apiClient, seedData.workspaceId, seeded.taskId);
       const failingState = () => sessionReadState(apiClient, seeded.failingSessionId);
       expect(await unreadIds()).toEqual([]);
+      expect((await failingState()).cursor).toBe(seeded.failingCursor);
+      expect(
+        (await apiClient.listTaskSessions(seeded.taskId)).sessions.find((item) => item.is_primary)
+          ?.id,
+      ).toBe(seeded.failingSessionId);
 
       const traffic = observeReadTraffic(testPage);
+      const settled = waitForFailedResume(watchWs(testPage), seeded);
       await testPage.goto(`/t/${seeded.taskId}`);
       const session = new SessionPage(testPage);
-      await session.waitForLoad();
+      await expect(session.activeChat()).toBeVisible({ timeout: 30_000 });
+      await settled;
+      expect(
+        (await apiClient.listTaskSessions(seeded.taskId)).sessions.find((item) => item.is_primary)
+          ?.id,
+      ).toBe(seeded.siblingSessionId);
       // Opening the task resumes the displayed session; its saved agent refuses.
       await expect
         .poll(async () => (await failingState()).state, { timeout: 60_000 })
@@ -280,8 +292,17 @@ test.describe("Task unread dot", () => {
       );
       // The failure stored a resume boot row after the old cursor; reading the
       // transcript to its end acknowledges it and the recovery card after it.
-      const failureTail = await newestStoredMessageId(apiClient, seeded.failingSessionId);
-      expect(failureTail).not.toBe(seeded.failingCursor);
+      const failureTail = await failedResumeTail(apiClient, seeded);
+      await expect(session.activeChat().getByTestId("session-recovery-card")).toBeVisible();
+      await expect(
+        session
+          .activeChat()
+          .getByTestId("session-recovery-card")
+          .getByRole("button", { name: "Start fresh session", exact: true }),
+      ).toBeVisible();
+      await expect(
+        session.activeChat().getByText("Failed to resume agent Mock", { exact: false }).first(),
+      ).toBeVisible();
       await expect
         .poll(async () => (await failingState()).cursor, { timeout: 15_000 })
         .toBe(failureTail);

@@ -211,10 +211,17 @@ displayed session; a failed resume writes a qualifying resume boot row and a
 recovery card, then the backend promotes another active session to primary.
 `maybeAdoptSessionOnTransition` (`lib/ws/handlers/agent-session.ts`) does not
 hand off from a session entering `FAILED`, and `task.updated` primary-follow
-(`lib/ws/handlers/tasks.ts`) does not leave a `FAILED` previous primary. The
-failed panel stays visible until its history loads, so the normal path above
-acknowledges the failure. Handing focus away there would leave the boot row
-unread behind the old cursor and hide the recovery actions.
+(`lib/ws/handlers/tasks.ts`) does not leave a `FAILED` previous primary.
+The orchestrator publishes the failed session state before promoting a sibling.
+The gateway routes `task.updated` through the same ordered lifecycle subscription
+as `session.state_changed` and `task.state_changed`. A separate NATS subscription
+could otherwise deliver the promoted primary first, before the cached session
+state becomes `FAILED`. One subscription preserves publisher order without
+new payload fields or client-side retries. Gateway regressions cover synchronous
+in-memory delivery and independent NATS-style callback queues. Explicit workflow
+focus and completed/cancelled handoff retain their existing behavior. The failed
+panel stays visible while history loads, allowing normal acknowledgement without
+hiding recovery actions or reading a sibling.
 
 An unread failed sibling that was never displayed is not evidence of a failed
 cursor write. It remains unread under AC .2, .9, .12, and .17. Preserve this

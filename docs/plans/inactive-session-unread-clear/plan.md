@@ -372,8 +372,9 @@ it preserves loaded-transcript acknowledgement (AC .6) and the visible recovery
 error required by
 [launch failure recovery AC .8](../../specs/tasks/requirements/task-launch-failure-recovery.md).
 This is not task-wide read authorization or a change to workflow recipients.
-The package is implemented; the new fix is uncommitted and has not undergone
-the earlier post-push review loop.
+The first production fix was pushed as `e4e01b8b35` after rebasing onto
+`7087545475`. Its distinct failed-resume review loop is recorded below; earlier
+design and diagnostic reviews did not cover that fix.
 Final checks for the retained E2E regressions from the first run are below.
 
 These checks ran after the last source edit in snapshot
@@ -458,9 +459,10 @@ with no Go or production web source:
   found conformance; the later failed-resume reproduction and Task 02 repair
   are separate evidence, not findings certified by these design reviews.
 
-## Post-push review loop
+## Historical diagnostic-only post-push review loop
 
-This is separate from the five design-only rounds above.
+This ledger covers the diagnostic E2E delivery, not the failed-resume production
+fix. It is separate from the five design-only rounds above.
 
 - Round 1 reviewed `81e7284b9885b5489ee23183d64923cf5847734c` over
   `75972b7e19fdaf80bedc3b76e20dfa25be7e19aa`: two P2 findings, accepted.
@@ -485,5 +487,14 @@ This is separate from the five design-only rounds above.
   `pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome tests/task/mobile-task-unread-dot.spec.ts -- --retries=0`:
   2 passed. `--no-build` reused the fresh application/backend/fixture build from
   the preceding run; only E2E tests/helpers changed afterward.
-- Completed post-push rounds: 1. Consecutive clean rounds: 0. Round 2 reviews
-  these corrections; stop after three consecutive clean rounds or 50 rounds.
+- Rounds 2, 3, and 4 reviewed `b9494eca21`: no actionable findings in each.
+  Completed diagnostic post-push rounds: 4. Consecutive clean: 3. Loop stopped.
+
+## Failed-resume production-fix review loop
+
+- Round 1: Sol child `1914c408-35bf-438f-b76e-c5fbf93c31a4` reviewed
+  `e4e01b8b35` over `7087545475`. Two P2 findings (promotion-first delivery
+  and incomplete E2E causal assertions) and one P3 finding (stale delivery
+  status/diagnostic ledger), accepted for remediation.
+- Completed rounds: 1. Consecutive clean: 0. The stop condition is three
+  consecutive clean rounds or 50 rounds. No earlier loop counts toward it.

@@ -410,6 +410,51 @@ export async function newestStoredMessageId(
   return newest.id;
 }
 
+/** Readback must contain the new failed resume boot followed by its recovery card. */
+export async function failedResumeTail(
+  apiClient: ApiClient,
+  seeded: FailingResumeTask,
+): Promise<string> {
+  const { messages } = await apiClient.listSessionMessages(seeded.failingSessionId);
+  const cursorIndex = messages.findIndex((message) => message.id === seeded.failingCursor);
+  expect(cursorIndex).toBeGreaterThanOrEqual(0);
+  const added = messages.slice(cursorIndex + 1);
+  const bootIndex = added.findIndex(
+    (message) =>
+      message.type === "script_execution" &&
+      message.metadata?.script_type === "agent_boot" &&
+      message.metadata?.is_resuming === true &&
+      message.metadata?.status === "failed",
+  );
+  expect(bootIndex).toBeGreaterThanOrEqual(0);
+  const card = added.at(-1);
+  expect(added.length - 1).toBeGreaterThan(bootIndex);
+  expect(card?.type).toBe("status");
+  expect(card?.metadata?.recovery_actions).toBe(true);
+  return card!.id;
+}
+
+/** Arm both independent notification streams before opening the task. */
+export function waitForFailedResume(
+  watcher: WsWatcher,
+  seeded: FailingResumeTask,
+): Promise<WsFrame[]> {
+  return Promise.all([
+    watcher.waitForEvent("session.state_changed", {
+      timeout: 60_000,
+      where: (payload) =>
+        payload.task_id === seeded.taskId &&
+        payload.session_id === seeded.failingSessionId &&
+        payload.new_state === "FAILED",
+    }),
+    watcher.waitForEvent("task.updated", {
+      timeout: 60_000,
+      where: (payload) =>
+        payload.task_id === seeded.taskId && payload.primary_session_id === seeded.siblingSessionId,
+    }),
+  ]);
+}
+
 /** The authoritative (backend-projected) unread session IDs for a task, sorted. */
 export async function taskUnreadSessionIds(
   apiClient: ApiClient,
