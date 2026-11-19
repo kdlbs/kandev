@@ -43,8 +43,10 @@ request path and one verification boundary.
 
 Backend unit tests for truncation, prompt refresh (shipped, dotted-placeholder,
 unknown, customized, and profile-only-updated rows), and call settlement through
-the production router; Vitest for the hook payload; and a Quick Chat browser
-check that the active-session Enhance action omits the diff from its request.
+the production router; Vitest for the hook payload; a Quick Chat browser
+check that the active-session Enhance action omits the diff from its request;
+and a task-session browser test with 205 changed files that checks the request
+lists 200 names plus the remaining count.
 
 ## Risks
 

@@ -66,6 +66,7 @@ the new template, and a call abandoned by its caller ends as `cancelled`.
 (cd apps/web && pnpm exec vitest run hooks/use-utility-agent-generator.test.tsx)
 (cd apps/web && pnpm run i18n:check && pnpm run typecheck)
 (cd apps/web && pnpm e2e:run tests/chat/quick-chat.spec.ts -- --grep "keeps an edited active-session prompt and offers recovery")
+(cd apps/web && pnpm e2e:run tests/task/enhance-prompt-session-context.spec.ts)
 bash scripts/lint-go-changed $(git diff --name-only origin/main -- 'apps/backend/*.go')
 ```
 
@@ -110,3 +111,7 @@ bash scripts/lint-go-changed $(git diff --name-only origin/main -- 'apps/backend
   Quick Chat Enhance request in a browser test. The refresh fixture now applies
   the profile edit before replay, and its call repository returns independent
   snapshots so rejected writes cannot look persisted.
+- Contributor follow-up: `enhance-prompt-session-context.spec.ts` runs Enhance
+  in a task session whose workspace has 205 changed files and checks the request:
+  200 names, the remaining count, and no `git_diff`. It passes on chromium
+  together with `enhance-prompt.spec.ts`.
