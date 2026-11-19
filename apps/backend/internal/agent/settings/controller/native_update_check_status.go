@@ -413,8 +413,8 @@ func (c *Controller) executeNativeUpdateCheck(ctx context.Context, lifetime *nat
 			zap.String("agent", lookup.agentName), zap.String("state", string(result.State)),
 			zap.String("reason", string(result.Reason)), zap.Duration("duration", time.Since(started)))
 	}
-	// An uncacheable entry (cancelled, timed out) returns at once: the post-run
-	// identity does filesystem I/O that must not delay shutdown.
+	// An uncacheable entry (cancelled, unavailable) returns at once: the
+	// post-run identity does filesystem I/O that must not delay shutdown.
 	// A result whose executable or configuration changed during the wait or
 	// the run describes another identity and is returned without caching. The
 	// launched launcher and its real executable at launch must be the
