@@ -410,3 +410,121 @@ test("narrow fine-pointer grouping chooser stays reachable and returns keyboard 
     await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
   ).toBe(true);
 });
+
+// @covers AC-UI-SIDEBAR-MULTI-TAG-001.2
+// @covers AC-UI-SIDEBAR-MULTI-TAG-001.3
+// @covers AC-UI-SIDEBAR-MULTI-TAG-001.4
+test("overlapping combination values repeat whole trees before pagination", async ({
+  testPage,
+  apiClient,
+  seedData,
+}, testInfo) => {
+  test.setTimeout(180_000);
+  await installFixturePlugin(testPage);
+  const data = await seedCompleteGrouping(apiClient, seedData);
+  const root = data.roots[0];
+  const combinations = {
+    version: 1,
+    revision: "combinations-r1",
+    complete: true,
+    groups: [
+      { id: "set-b", label: '"Beta"', color: "#22aa66" },
+      { id: "set-ab", label: '"Alpha" + "Beta"' },
+      { id: "set-a", label: '"Alpha"', color: "#00aaff" },
+    ],
+    memberships: [
+      { task_id: root.id, group_id: "set-a" },
+      { task_id: root.id, group_id: "set-ab" },
+      ...data.roots.map((task) => ({ task_id: task.id, group_id: "set-b" })),
+    ],
+  };
+  await writeGroupingState(apiClient, seedData.workspaceId, { snapshot: combinations });
+  await saveGroupingView(apiClient, seedData.workspaceId);
+  const plain = await readGroupingPage(apiClient, seedData.workspaceId, { group: "none" });
+  const grouped = await readGroupingPage(apiClient, seedData.workspaceId);
+  expect(grouped.total_tasks).toBe(plain.total_tasks);
+  // The root tree (root and child) repeats under A, A+B and B; Untagged follows.
+  expect(grouped.total_visible_tasks).toBe(2 + 2 + (data.roots.length + 1) + 1);
+
+  await testPage.goto(`/?workspaceId=${seedData.workspaceId}`);
+  const sidebar = testPage.getByTestId("task-sidebar");
+  const group = (id: string) =>
+    sidebar.locator(
+      `[data-testid="sidebar-group"][data-group-key="${SIDEBAR_GROUPING}:value:${id}"]`,
+    );
+  const rootRows = sidebar.locator(`[data-task-row-id="${root.id}"]`);
+  const childRows = sidebar.locator(`[data-task-row-id="${data.child.id}"]`);
+  await expect(sidebar.getByTestId("sidebar-task-item")).toHaveCount(100);
+  expect(
+    await sidebar
+      .getByTestId("sidebar-group-header")
+      .evaluateAll((headers) => headers.map((header) => header.getAttribute("data-group-key"))),
+  ).toEqual(["set-a", "set-ab", "set-b"].map((id) => `${SIDEBAR_GROUPING}:value:${id}`));
+  await expect(group("set-ab").getByTestId("sidebar-group-header")).toContainText(
+    '"Alpha" + "Beta"',
+  );
+  await expect(group("set-ab").getByTestId("sidebar-group-color")).toHaveCount(0);
+  await expect(group("set-a").getByTestId("sidebar-group-color")).toHaveCount(1);
+  await expect(rootRows).toHaveCount(3);
+  await expect(childRows).toHaveCount(3);
+  await expect(sidebar.getByTestId("sidebar-page-controls")).toContainText(
+    `${plain.total_tasks} unique tasks. Page 1 of 2 (occurrences).`,
+  );
+  await group("set-ab")
+    .locator(`[data-task-row-id="${root.id}"]`)
+    .click({ modifiers: ["Control"] });
+  await expect
+    .poll(() =>
+      rootRows.evaluateAll((rows) => rows.map((row) => row.getAttribute("aria-selected"))),
+    )
+    .toEqual(["true", "true", "true"]);
+  await sidebar.getByRole("button", { name: "Clear selection", exact: true }).click();
+  await testPage.screenshot({
+    path: testInfo.outputPath("overlapping-combinations-desktop.png"),
+    animations: "disabled",
+  });
+
+  const combined = group("set-ab").getByTestId("sidebar-group-header");
+  await combined.click();
+  await expect(combined).toHaveAttribute("aria-expanded", "false");
+  await expect(childRows).toHaveCount(2);
+  await expect
+    .poll(async () => {
+      const state = (await apiClient.getUserSettings()).settings.sidebar_views_by_workspace[
+        seedData.workspaceId
+      ];
+      return state.views.find((view) => view.id === state.active_view_id)?.collapsed_groups;
+    })
+    .toEqual([`${SIDEBAR_GROUPING}:value:set-ab`]);
+  await testPage.reload();
+  await expect(combined).toHaveAttribute("aria-expanded", "false");
+
+  // Removing B from the root drops it from B and A+B; the unchanged A survives.
+  await writeGroupingState(apiClient, seedData.workspaceId, {
+    snapshot: {
+      ...combinations,
+      revision: "combinations-r2",
+      groups: combinations.groups.filter((value) => value.id !== "set-ab"),
+      memberships: [
+        { task_id: root.id, group_id: "set-a" },
+        ...data.roots.slice(1).map((task) => ({ task_id: task.id, group_id: "set-b" })),
+      ],
+    },
+  });
+  await expect(group("set-ab")).toHaveCount(0);
+  await expect(rootRows).toHaveCount(1);
+  await expect(group("set-a").locator(`[data-task-row-id="${data.child.id}"]`)).toHaveCount(1);
+  await expect(group("set-b").getByTestId("sidebar-task-item").first()).toHaveAttribute(
+    "data-task-row-id",
+    data.roots[1].id,
+  );
+  await sidebar.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(sidebar).toContainText(data.untagged.title);
+
+  const other = await apiClient.createWorkspace("Foreign combination workspace");
+  await apiClient.createWorkflow(other.id, "Foreign combination workflow", "simple");
+  await writeGroupingState(apiClient, other.id, { snapshot: combinations });
+  const foreign = await readGroupingPage(apiClient, other.id);
+  expect(foreign.total_tasks).toBe(0);
+  expect(foreign.entries.some((entry) => entry.task_id === root.id)).toBe(false);
+});
