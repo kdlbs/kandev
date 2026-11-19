@@ -86,12 +86,9 @@ func (s *Service) ReserveInferenceCapacity(ctx context.Context, binding sessionc
 		req := admissionRequest{grade: binding.Grade, gradeKnown: binding.GradeKnown}
 		p, err := c.readGradedPopulationLocked(ctx, req.grade)
 		populationKnown := err == nil && !p.unknown
-		maximum, configured := c.requestedGradeLimitLocked(req)
-		if reason := c.allAdmissionRejection(p, req, configured, populationKnown); reason != "" {
-			return false, reason, nil
-		}
-		if reason := c.allCapacityLimitReason(p, maximum); reason != "" {
-			return false, reason, nil
+		decision := c.gradeCapacityDecisionLocked(req, p, populationKnown)
+		if !decision.admitted {
+			return false, decision.reasonCode, nil
 		}
 	}
 	return c.persistInferenceBindingLocked(ctx, binding)

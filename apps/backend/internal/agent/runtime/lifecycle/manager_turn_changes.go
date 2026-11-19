@@ -6,6 +6,7 @@ import (
 	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"go.uber.org/zap"
 )
 
@@ -144,6 +145,10 @@ func (m *Manager) processTurnChangeSummaryBeforeTeardown(execution *AgentExecuti
 	ctx, cancel := m.turnChangeAttemptContext(turnChangeSummaryTimeout)
 	defer cancel()
 	if err := processor.ProcessTurnChanges(ctx, terminal, client); err != nil {
+		if reason := turnChangeSummaryStopReason(err); reason != "" {
+			m.logTurnChangeSummaryStopped(execution, terminal, err, reason, 1)
+			return
+		}
 		m.logger.Warn("failed to process turn-change summary before executor teardown",
 			zap.String("execution_id", execution.ID),
 			zap.Uint64("prompt_generation", terminal.PromptGeneration),
@@ -262,7 +267,7 @@ func (m *Manager) scheduleTurnChangeSummary(execution *AgentExecution, terminal 
 	go func() {
 		defer m.wg.Done()
 		delay := time.Duration(0)
-		for {
+		for attempt := 1; ; attempt++ {
 			if delay > 0 {
 				timer := time.NewTimer(delay)
 				select {
@@ -277,7 +282,16 @@ func (m *Manager) scheduleTurnChangeSummary(execution *AgentExecution, terminal 
 			err := processor.ProcessTurnChanges(ctx, terminal, client)
 			cancel()
 			release()
+			select {
+			case <-m.stopCh:
+				return
+			default:
+			}
 			if err == nil {
+				return
+			}
+			if reason := turnChangeSummaryStopReason(err); reason != "" {
+				m.logTurnChangeSummaryStopped(execution, terminal, err, reason, attempt)
 				return
 			}
 			m.logger.Warn("retrying turn-change summary processing",
@@ -294,6 +308,24 @@ func (m *Manager) scheduleTurnChangeSummary(execution *AgentExecution, terminal 
 			}
 		}
 	}()
+}
+
+func turnChangeSummaryStopReason(err error) string {
+	switch {
+	case errors.Is(err, repoerrors.ErrTurnChangeSetNotFound):
+		return "change_set_missing"
+	case errors.Is(err, repoerrors.ErrTurnChangeRelationship):
+		return "ownership_invalid"
+	default:
+		return ""
+	}
+}
+
+func (m *Manager) logTurnChangeSummaryStopped(execution *AgentExecution, terminal TurnChangeTerminal, err error, reason string, attempts int) {
+	m.logger.Warn("stopped turn-change summary processing",
+		zap.String("execution_id", execution.ID),
+		zap.Uint64("prompt_generation", terminal.PromptGeneration),
+		zap.String("reason", reason), zap.Int("attempts", attempts), zap.Error(err))
 }
 
 func (m *Manager) turnChangeAttemptContext(timeout time.Duration) (context.Context, context.CancelFunc) {

@@ -322,13 +322,59 @@ func TestPersonalAccessibleReposIntersectAutomationVisibility(t *testing.T) {
 	)
 
 	repos, err := service.ListAccessibleReposForWorkspace(
-		context.Background(), "workspace-1", "user-1", "", 50,
+		context.Background(), "workspace-1", "user-1", "", 50, false,
 	)
 	if err != nil {
 		t.Fatalf("ListAccessibleReposForWorkspace() error = %v", err)
 	}
 	if len(repos) != 1 || repos[0].FullName != "acme/allowed" {
 		t.Fatalf("accessible repositories = %+v, want only automation-visible repository", repos)
+	}
+}
+
+func TestScopeEditorReposIgnoreSavedScopeAndKeepAutomationVisibility(t *testing.T) {
+	service := personalBoundaryTestService(t,
+		map[string]GitHubRepo{
+			"acme/allowed": testGitHubRepo("acme", "allowed"),
+			"acme/addable": testGitHubRepo("acme", "addable"),
+		},
+		map[string]GitHubRepo{
+			"acme/allowed":       testGitHubRepo("acme", "allowed"),
+			"acme/addable":       testGitHubRepo("acme", "addable"),
+			"personal-only/repo": testGitHubRepo("personal-only", "repo"),
+		},
+	)
+	ctx := context.Background()
+	if err := service.store.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
+		WorkspaceID:   "workspace-1",
+		RepoScopeMode: RepoScopeModeRepos,
+		RepoScopeRepos: []RepoFilter{
+			{Owner: "acme", Name: "allowed"},
+		},
+	}); err != nil {
+		t.Fatalf("set restricted workspace scope: %v", err)
+	}
+
+	ordinary, err := service.ListAccessibleReposForWorkspace(ctx, "workspace-1", "user-1", "", 50, false)
+	if err != nil {
+		t.Fatalf("ListAccessibleReposForWorkspace() error = %v", err)
+	}
+	if len(ordinary) != 1 || ordinary[0].FullName != "acme/allowed" {
+		t.Fatalf("ordinary repositories = %+v, want only saved-scope repository", ordinary)
+	}
+
+	scopeOptions, err := service.ListScopeEditorReposForWorkspace(ctx, "workspace-1", "user-1", "", 50, false)
+	if err != nil {
+		t.Fatalf("ListScopeEditorReposForWorkspace() error = %v", err)
+	}
+	got := repositorySet(scopeOptions)
+	for _, want := range []string{"acme/allowed", "acme/addable"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("scope-editor repositories = %+v, missing %q", scopeOptions, want)
+		}
+	}
+	if _, ok := got["personal-only/repo"]; ok {
+		t.Errorf("scope-editor repositories include a repository outside automation visibility: %+v", scopeOptions)
 	}
 }
 
@@ -361,6 +407,42 @@ func TestPersonalSearchAndStatusResultsIntersectAutomationVisibility(t *testing.
 	}
 	if len(statuses) != 1 || statuses[prStatusCacheKey("acme", "allowed", 1)] == nil {
 		t.Fatalf("status batch = %+v, want only automation-visible repository", statuses)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-REPOSITORY-SCOPE-001.5
+func TestPersonalSearchScopeUnionDoesNotExpandAutomationVisibility(t *testing.T) {
+	service := personalBoundaryTestServiceWithClients(t,
+		map[string]GitHubRepo{"acme/allowed": testGitHubRepo("acme", "allowed")},
+		map[string]GitHubRepo{
+			"acme/allowed":       testGitHubRepo("acme", "allowed"),
+			"outside/tool":       testGitHubRepo("outside", "tool"),
+			"personal-only/repo": testGitHubRepo("personal-only", "repo"),
+		},
+		[]*PR{
+			{RepoOwner: "acme", RepoName: "allowed", Number: 1},
+			{RepoOwner: "outside", RepoName: "tool", Number: 2},
+			{RepoOwner: "personal-only", RepoName: "repo", Number: 3},
+		},
+		[]*Issue{
+			{RepoOwner: "acme", RepoName: "allowed", Number: 1},
+			{RepoOwner: "outside", RepoName: "tool", Number: 2},
+			{RepoOwner: "personal-only", RepoName: "repo", Number: 3},
+		}, false,
+	)
+	if err := service.store.UpsertWorkspaceSettings(context.Background(), &WorkspaceSettings{
+		WorkspaceID: "workspace-1", RepoScopeMode: RepoScopeModeSelected,
+		RepoScopeOrgs: []string{"acme"}, RepoScopeRepos: []RepoFilter{{Owner: "outside", Name: "tool"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	prs, err := service.SearchUserPRsPagedForWorkspaceUser(context.Background(), "workspace-1", "user-1", "", "", 1, 25)
+	if err != nil || len(prs.PRs) != 1 || prs.PRs[0].RepoOwner != "acme" || prs.TotalCount != 1 {
+		t.Fatalf("personal PR search escaped workspace automation visibility: %+v, %v", prs, err)
+	}
+	issues, err := service.SearchUserIssuesPagedForWorkspaceUser(context.Background(), "workspace-1", "user-1", "", "", 1, 25)
+	if err != nil || len(issues.Issues) != 1 || issues.Issues[0].RepoOwner != "acme" || issues.TotalCount != 1 {
+		t.Fatalf("personal issue search escaped workspace automation visibility: %+v, %v", issues, err)
 	}
 }
 
@@ -461,4 +543,30 @@ func personalBoundaryTestServiceWithClients(
 
 func testGitHubRepo(owner, name string) GitHubRepo {
 	return GitHubRepo{FullName: owner + "/" + name, Owner: owner, Name: name}
+}
+
+// A local repository-scope rejection must satisfy BOTH sentinels: HTTP
+// boundaries need ErrRepoOutsideWorkspaceScope to answer with an actionable
+// message under the same 404 as an unresolvable repository, while the "stop
+// hammering a dead repo" callers (isRepoNotResolvableErr,
+// wsSyncTaskPR) must keep seeing ErrRepoNotResolvable or they would start
+// retrying a pure policy rejection on every poll.
+func TestRepoOutsideScopeErrContract(t *testing.T) {
+	err := newRepoOutsideScopeErr("tenequm", "pond")
+
+	if !errors.Is(err, ErrRepoOutsideWorkspaceScope) {
+		t.Fatal("scope rejection must match ErrRepoOutsideWorkspaceScope")
+	}
+	if !errors.Is(err, ErrRepoNotResolvable) {
+		t.Fatal("scope rejection must keep matching ErrRepoNotResolvable for the negative-cache contract")
+	}
+	if !isRepoNotResolvableErr(err) {
+		t.Fatal("isRepoNotResolvableErr must classify a scope rejection as deterministic")
+	}
+	if !strings.Contains(err.Error(), "outside this workspace's scope") {
+		t.Fatalf("message must name the real failure, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "tenequm/pond") {
+		t.Fatalf("message must name the repository, got: %v", err)
+	}
 }

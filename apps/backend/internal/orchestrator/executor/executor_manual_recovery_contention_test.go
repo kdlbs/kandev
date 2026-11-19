@@ -27,7 +27,7 @@ func TestManualRecoveryPreflightRequestsInspectionWaitWithoutDirtyAuthorization(
 	defer cancel()
 	callerDeadline, ok := ctx.Deadline()
 	require.True(t, ok)
-	_, err := executor.PreflightSessionWorktreeRecovery(ctx, session.TaskID, session, false)
+	_, _, err := executor.PreflightSessionWorktreeRecovery(ctx, session.TaskID, session, false)
 	require.NoError(t, err)
 	require.NotEmpty(t, got.Slots)
 	require.True(t, got.SelectionSnapshot.Valid())

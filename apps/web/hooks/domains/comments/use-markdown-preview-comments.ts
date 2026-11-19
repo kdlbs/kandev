@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type Dispatch,
+  type MutableRefObject,
   type RefObject,
   type SetStateAction,
 } from "react";
@@ -20,6 +21,8 @@ import {
 import { buildMarkdownPreviewComment, commentsOverlapRange } from "@/lib/markdown/preview-comments";
 import { useDiffFileComments } from "./use-diff-comments";
 import { useRunComment } from "./use-run-comment";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { useTouchSelectionTracking } from "@/hooks/use-touch-selection-tracking";
 
 export type MarkdownCommentView = {
   comments: DiffComment[];
@@ -66,20 +69,155 @@ function isCommentShortcut(event: KeyboardEvent): boolean {
   );
 }
 
+function useMarkdownSelectionCaptureEvents({
+  enabled,
+  touchTracking,
+  rootRef,
+  onSelectionStart,
+  cancelPendingSelection,
+  scheduleSelection,
+  stopTouchCapture,
+  setCurrentSelection,
+  touchCaptureActiveRef,
+}: {
+  enabled: boolean;
+  touchTracking: boolean;
+  rootRef: RefObject<HTMLDivElement | null>;
+  onSelectionStart: () => void;
+  cancelPendingSelection: () => void;
+  scheduleSelection: (requiresTouchOwnership: boolean) => void;
+  stopTouchCapture: () => void;
+  setCurrentSelection: Dispatch<SetStateAction<MarkdownPreviewSelection | null>>;
+  touchCaptureActiveRef: MutableRefObject<boolean>;
+}) {
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || !enabled) {
+      stopTouchCapture();
+      return;
+    }
+
+    const handleSelectionEnd = (event: MouseEvent | TouchEvent) => {
+      if (isIgnoredTarget(event.target)) return;
+      scheduleSelection(event.type === "touchend");
+    };
+    const handleSelectionStart = (event: MouseEvent | TouchEvent) => {
+      if (isIgnoredTarget(event.target)) {
+        stopTouchCapture();
+        if (
+          !(event.target instanceof Element) ||
+          !event.target.closest(
+            ".floating-comment-btn, [data-selection-action-dock], [data-markdown-comment-popover]",
+          )
+        ) {
+          setCurrentSelection(null);
+        }
+        return;
+      }
+      cancelPendingSelection();
+      touchCaptureActiveRef.current = event.type === "touchstart";
+      // Touch selections follow selectionchange; a swipe over selected text must keep the dock.
+      if (touchTracking && event.type === "touchstart") return;
+      setCurrentSelection(null);
+      onSelectionStart();
+    };
+    const handleOutsidePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && root.contains(target)) return;
+      stopTouchCapture();
+      if (
+        target instanceof Element &&
+        target.closest(
+          ".floating-comment-btn, [data-selection-action-dock], [data-markdown-comment-popover]",
+        )
+      ) {
+        return;
+      }
+      setCurrentSelection(null);
+    };
+
+    root.addEventListener("mouseup", handleSelectionEnd);
+    root.addEventListener("touchend", handleSelectionEnd);
+    root.addEventListener("mousedown", handleSelectionStart);
+    root.addEventListener("touchstart", handleSelectionStart);
+    root.ownerDocument.addEventListener("pointerdown", handleOutsidePointerDown, true);
+    return () => {
+      root.removeEventListener("mouseup", handleSelectionEnd);
+      root.removeEventListener("touchend", handleSelectionEnd);
+      root.removeEventListener("mousedown", handleSelectionStart);
+      root.removeEventListener("touchstart", handleSelectionStart);
+      root.ownerDocument.removeEventListener("pointerdown", handleOutsidePointerDown, true);
+      stopTouchCapture();
+    };
+  }, [
+    cancelPendingSelection,
+    enabled,
+    onSelectionStart,
+    rootRef,
+    scheduleSelection,
+    setCurrentSelection,
+    stopTouchCapture,
+    touchCaptureActiveRef,
+    touchTracking,
+  ]);
+}
+
 function useMarkdownSelectionCapture({
   content,
   enabled,
+  touchTracking,
   rootRef,
   onSelectionStart,
 }: {
   content: string;
   enabled: boolean;
+  touchTracking: boolean;
   rootRef: RefObject<HTMLDivElement | null>;
   onSelectionStart: () => void;
 }) {
   const [currentSelection, setCurrentSelection] = useState<MarkdownPreviewSelection | null>(null);
+  const touchCaptureActiveRef = useRef(true);
+  const followTouchSelection = useCallback(
+    (selection: Selection | null) => {
+      if (!touchCaptureActiveRef.current) return;
+      const root = rootRef.current;
+      setCurrentSelection(
+        root && selection ? resolveMarkdownDomSelection(root, content, selection) : null,
+      );
+    },
+    [content, rootRef],
+  );
+  useTouchSelectionTracking(rootRef, enabled && touchTracking, followTouchSelection);
   const resolveSelectionRef = useRef<() => void>(() => {});
   const timeoutRef = useRef<number | null>(null);
+  const captureGenerationRef = useRef(0);
+
+  const cancelPendingSelection = useCallback(() => {
+    captureGenerationRef.current += 1;
+    if (timeoutRef.current !== null) {
+      window.clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  }, []);
+
+  const stopTouchCapture = useCallback(() => {
+    touchCaptureActiveRef.current = false;
+    cancelPendingSelection();
+  }, [cancelPendingSelection]);
+
+  const scheduleSelection = useCallback(
+    (requiresTouchOwnership: boolean) => {
+      cancelPendingSelection();
+      const generation = ++captureGenerationRef.current;
+      timeoutRef.current = window.setTimeout(() => {
+        timeoutRef.current = null;
+        if (generation !== captureGenerationRef.current) return;
+        if (requiresTouchOwnership && !touchCaptureActiveRef.current) return;
+        resolveSelectionRef.current();
+      }, 10);
+    },
+    [cancelPendingSelection],
+  );
 
   const resolveSelection = useCallback(() => {
     if (!enabled) return;
@@ -94,41 +232,21 @@ function useMarkdownSelectionCapture({
     resolveSelectionRef.current = resolveSelection;
   }, [resolveSelection]);
 
-  useEffect(() => {
-    const root = rootRef.current;
-    if (!root || !enabled) return;
+  useMarkdownSelectionCaptureEvents({
+    enabled,
+    touchTracking,
+    rootRef,
+    onSelectionStart,
+    cancelPendingSelection,
+    scheduleSelection,
+    stopTouchCapture,
+    setCurrentSelection,
+    touchCaptureActiveRef,
+  });
 
-    const handleSelectionEnd = (event: MouseEvent | TouchEvent) => {
-      if (isIgnoredTarget(event.target)) return;
-      if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
-      timeoutRef.current = window.setTimeout(() => {
-        timeoutRef.current = null;
-        resolveSelectionRef.current();
-      }, 10);
-    };
-    const handleSelectionStart = (event: MouseEvent | TouchEvent) => {
-      if (isIgnoredTarget(event.target)) return;
-      setCurrentSelection(null);
-      onSelectionStart();
-    };
+  useEffect(() => stopTouchCapture, [stopTouchCapture]);
 
-    root.addEventListener("mouseup", handleSelectionEnd);
-    root.addEventListener("touchend", handleSelectionEnd);
-    root.addEventListener("mousedown", handleSelectionStart);
-    root.addEventListener("touchstart", handleSelectionStart);
-    return () => {
-      root.removeEventListener("mouseup", handleSelectionEnd);
-      root.removeEventListener("touchend", handleSelectionEnd);
-      root.removeEventListener("mousedown", handleSelectionStart);
-      root.removeEventListener("touchstart", handleSelectionStart);
-      if (timeoutRef.current !== null) {
-        window.clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
-      }
-    };
-  }, [enabled, onSelectionStart, rootRef]);
-
-  return { currentSelection, setCurrentSelection };
+  return { currentSelection, setCurrentSelection, stopTouchCapture };
 }
 
 function useMarkdownCommentShortcut({
@@ -154,6 +272,31 @@ function useMarkdownCommentShortcut({
     root.addEventListener("keydown", handleKeyDown, true);
     return () => root.removeEventListener("keydown", handleKeyDown, true);
   }, [currentSelection, enabled, onOpenSelection, rootRef]);
+}
+
+function useMarkdownCommentDismissals({
+  touch,
+  closeCommentView,
+  setCurrentSelection,
+  setTextSelection,
+}: {
+  touch: boolean;
+  closeCommentView: () => void;
+  setCurrentSelection: Dispatch<SetStateAction<MarkdownPreviewSelection | null>>;
+  setTextSelection: Dispatch<SetStateAction<MarkdownPreviewSelection | null>>;
+}) {
+  const dismissForResize = useCallback(() => {
+    if (!touch) setCurrentSelection(null);
+    closeCommentView();
+  }, [closeCommentView, setCurrentSelection, touch]);
+  const dismissOverlays = useCallback(() => {
+    if (!touch) {
+      setCurrentSelection(null);
+      setTextSelection(null);
+    }
+    closeCommentView();
+  }, [closeCommentView, setCurrentSelection, setTextSelection, touch]);
+  return { dismissForResize, dismissOverlays };
 }
 
 function useMarkdownCommentSubmitters({
@@ -268,18 +411,21 @@ function useClearDisabledMarkdownComments({
   clearCurrentSelection,
   clearTextSelection,
   closeCommentView,
+  stopTouchCapture,
 }: {
   enabled: boolean;
   clearCurrentSelection: (selection: MarkdownPreviewSelection | null) => void;
   clearTextSelection: (selection: MarkdownPreviewSelection | null) => void;
   closeCommentView: () => void;
+  stopTouchCapture: () => void;
 }) {
   useEffect(() => {
     if (enabled) return;
+    stopTouchCapture();
     clearCurrentSelection(null);
     clearTextSelection(null);
     closeCommentView();
-  }, [clearCurrentSelection, clearTextSelection, closeCommentView, enabled]);
+  }, [clearCurrentSelection, clearTextSelection, closeCommentView, enabled, stopTouchCapture]);
 }
 
 function useVisibleMarkdownCommentActions({
@@ -323,64 +469,53 @@ function useVisibleMarkdownCommentActions({
   return { removeVisibleComment, updateVisibleComment };
 }
 
-export function useMarkdownPreviewComments({
+function useResetMarkdownSelectionOnIdentity({
+  identity,
+  stopTouchCapture,
+  setCurrentSelection,
+  setTextSelection,
+  setCommentView,
+}: {
+  identity: string;
+  stopTouchCapture: () => void;
+  setCurrentSelection: Dispatch<SetStateAction<MarkdownPreviewSelection | null>>;
+  setTextSelection: Dispatch<SetStateAction<MarkdownPreviewSelection | null>>;
+  setCommentView: Dispatch<SetStateAction<MarkdownCommentView>>;
+}) {
+  const previousIdentityRef = useRef(identity);
+  useEffect(() => {
+    if (previousIdentityRef.current === identity) return;
+    previousIdentityRef.current = identity;
+    stopTouchCapture();
+    setCurrentSelection(null);
+    setTextSelection(null);
+    setCommentView(null);
+    clearBrowserSelection();
+  }, [identity, setCurrentSelection, setCommentView, setTextSelection, stopTouchCapture]);
+}
+
+function useMarkdownPreviewActions({
   path,
   repositoryId,
   repositoryName,
-  content,
   sessionId,
   taskId,
-  enabled,
-  rootRef,
-}: UseMarkdownPreviewCommentsArgs) {
-  const [textSelection, setTextSelection] = useState<MarkdownPreviewSelection | null>(null);
-  const [commentView, setCommentView] = useState<MarkdownCommentView>(null);
-  const comments = useDiffFileComments(
-    sessionId ?? "",
-    path,
-    repositoryId ?? undefined,
-    repositoryName ?? "",
-  );
-
-  const closeCommentView = useCallback(() => setCommentView(null), []);
-  const { currentSelection, setCurrentSelection } = useMarkdownSelectionCapture({
-    content,
-    enabled,
-    rootRef,
-    onSelectionStart: closeCommentView,
-  });
-
-  const openComposer = useCallback(() => {
-    if (!currentSelection) return;
-    setTextSelection(currentSelection);
-    setCurrentSelection(null);
-  }, [currentSelection, setCurrentSelection]);
-
-  useMarkdownCommentShortcut({
-    currentSelection,
-    enabled,
-    rootRef,
-    onOpenSelection: openComposer,
-  });
-
-  useClearDisabledMarkdownComments({
-    enabled,
-    clearCurrentSelection: setCurrentSelection,
-    clearTextSelection: setTextSelection,
-    closeCommentView,
-  });
-
-  const closeComposer = useCallback(() => {
-    setTextSelection(null);
-    clearBrowserSelection();
-  }, []);
-  const dismissOverlays = useCallback(() => {
-    setCurrentSelection(null);
-    setTextSelection(null);
-    closeCommentView();
-  }, [closeCommentView, setCurrentSelection]);
-
-  const { submitComment, submitAndRunComment } = useMarkdownCommentSubmitters({
+  comments,
+  textSelection,
+  closeComposer,
+  setCommentView,
+}: {
+  path: string;
+  repositoryId?: string | null;
+  repositoryName?: string;
+  sessionId?: string;
+  taskId?: string | null;
+  comments: DiffComment[];
+  textSelection: MarkdownPreviewSelection | null;
+  closeComposer: () => void;
+  setCommentView: Dispatch<SetStateAction<MarkdownCommentView>>;
+}) {
+  const submitters = useMarkdownCommentSubmitters({
     path,
     repositoryId,
     repositoryName,
@@ -396,20 +531,114 @@ export function useMarkdownPreviewComments({
   const { removeVisibleComment, updateVisibleComment } = useVisibleMarkdownCommentActions({
     setCommentView,
   });
+  return {
+    ...submitters,
+    showCommentsForRange,
+    removeComment: removeVisibleComment,
+    updateComment: updateVisibleComment,
+  };
+}
+
+export function useMarkdownPreviewComments({
+  path,
+  repositoryId,
+  repositoryName,
+  content,
+  sessionId,
+  taskId,
+  enabled,
+  rootRef,
+}: UseMarkdownPreviewCommentsArgs) {
+  const touch = useTouchDrawer();
+  const [textSelection, setTextSelection] = useState<MarkdownPreviewSelection | null>(null);
+  const [commentView, setCommentView] = useState<MarkdownCommentView>(null);
+  const comments = useDiffFileComments(
+    sessionId ?? "",
+    path,
+    repositoryId ?? undefined,
+    repositoryName ?? "",
+  );
+
+  const closeCommentView = useCallback(() => setCommentView(null), []);
+  const { currentSelection, setCurrentSelection, stopTouchCapture } = useMarkdownSelectionCapture({
+    content,
+    enabled,
+    touchTracking: touch && !textSelection,
+    rootRef,
+    onSelectionStart: closeCommentView,
+  });
+
+  const identity = JSON.stringify([
+    path,
+    repositoryId ?? "",
+    repositoryName ?? "",
+    sessionId ?? "",
+  ]);
+  useResetMarkdownSelectionOnIdentity({
+    identity,
+    stopTouchCapture,
+    setCurrentSelection,
+    setTextSelection,
+    setCommentView,
+  });
+
+  const openComposer = useCallback(() => {
+    if (!currentSelection) return;
+    stopTouchCapture();
+    setTextSelection(currentSelection);
+    setCurrentSelection(null);
+  }, [currentSelection, setCurrentSelection, stopTouchCapture]);
+
+  useMarkdownCommentShortcut({
+    currentSelection,
+    enabled,
+    rootRef,
+    onOpenSelection: openComposer,
+  });
+
+  useClearDisabledMarkdownComments({
+    enabled,
+    clearCurrentSelection: setCurrentSelection,
+    clearTextSelection: setTextSelection,
+    closeCommentView,
+    stopTouchCapture,
+  });
+
+  const closeComposer = useCallback(() => {
+    stopTouchCapture();
+    setTextSelection(null);
+    clearBrowserSelection();
+  }, [stopTouchCapture]);
+  const { dismissForResize, dismissOverlays } = useMarkdownCommentDismissals({
+    touch,
+    closeCommentView,
+    setCurrentSelection,
+    setTextSelection,
+  });
+
+  const actions = useMarkdownPreviewActions({
+    path,
+    repositoryId,
+    repositoryName,
+    sessionId,
+    taskId,
+    comments,
+    textSelection,
+    closeComposer,
+    setCommentView,
+  });
 
   return {
+    touch,
     comments,
     currentSelection,
     textSelection,
     commentView,
     openComposer,
     closeComposer,
-    submitComment,
-    submitAndRunComment,
-    removeComment: removeVisibleComment,
-    updateComment: updateVisibleComment,
-    showCommentsForRange,
+    ...actions,
     closeCommentView,
     dismissOverlays,
+    dismissForResize,
   };
 }

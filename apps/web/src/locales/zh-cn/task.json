@@ -413,6 +413,7 @@
   "commentCount_other": "{{count}} 条评论",
   "commentOnAgentResponse": "对智能体回复发表评论",
   "commentOnSelection": "对选中内容发表评论",
+  "selectionActions": "选中内容操作",
   "comments": "评论",
   "commentsOnFiles_one": "{{files}} 上有 {{count}} 条评论",
   "commentsOnFiles_other": "{{files}} 上有 {{count}} 条评论",
@@ -3303,5 +3304,8 @@
   "removeRootBody": "文件夹、分支和拉取请求都会保留。Kandev 将不再在更改和文件中显示它们。",
   "removeRootFailed": "无法从此任务中移除该根目录",
   "removeFromTask": "从任务中移除",
-  "rootDisabledNoTracker": "此根目录还没有 Git 跟踪器"
+  "rootDisabledNoTracker": "此根目录还没有 Git 跟踪器",
+  "refreshRepositories": "刷新仓库",
+  "referenceCurrentTitle": "当前标题：{{title}}",
+  "referenceOpenForDetails": "打开任务以查看详情。"
 }

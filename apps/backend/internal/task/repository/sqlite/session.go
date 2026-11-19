@@ -749,18 +749,11 @@ func (r *Repository) createTaskSessionWithWorkspaceBinding(
 		return err
 	}
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT id, status, materialization_session_id, updated_at FROM task_environments WHERE task_id = ?
+		SELECT id, status, materialization_session_id, updated_at FROM task_environments WHERE task_id = ? AND retired_at IS NULL
 	`), session.TaskID).Scan(&envID, &status, &materializationSessionID, &claimUpdatedAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		if candidate.ID == "" {
-			candidate.ID = uuid.New().String()
-		}
-		candidate.Status = models.TaskEnvironmentStatusCreating
-		candidate.MaterializationSessionID = session.ID
-		candidate.CreatedAt = r.nowUTC()
-		candidate.UpdatedAt = candidate.CreatedAt
-		if err := r.insertCreatingWorkspaceEnvironment(ctx, tx, candidate); err != nil {
+		if err := r.reserveInitialWorkspaceEnvironmentTx(ctx, tx, candidate, session.ID); err != nil {
 			return err
 		}
 		session.TaskEnvironmentID = candidate.ID
@@ -784,10 +777,11 @@ func (r *Repository) createTaskSessionWithWorkspaceBinding(
 	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusReady || models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusStopped:
 		session.TaskEnvironmentID = envID
 	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusFailed:
-		if err := r.reelectFailedWorkspaceMaterializationTx(ctx, tx, envID, session.ID); err != nil {
+		selected, err := r.bindFailedWorkspaceEnvironmentTx(ctx, tx, envID, session.ID, candidate)
+		if err != nil {
 			return err
 		}
-		session.TaskEnvironmentID = envID
+		session.TaskEnvironmentID = selected
 	default:
 		return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
 	}
@@ -946,7 +940,7 @@ func (r *Repository) bindReadySharedGroupEnvironment(
 		FROM task_workspace_groups g
 		JOIN task_workspace_group_members m
 		  ON m.workspace_group_id = g.id AND m.task_id = ? AND m.released_at IS NULL
-		LEFT JOIN task_environments e ON e.id = g.materialized_environment_id
+		LEFT JOIN task_environments e ON e.id = g.materialized_environment_id AND e.retired_at IS NULL
 		WHERE g.id = ?
 	`), session.TaskID, groupID).Scan(
 		&environmentID, &status, &materializationSessionID, &claimUpdatedAt, &ownerID,
@@ -1091,7 +1085,7 @@ func (r *Repository) loadCanonicalTaskWorkspaceForSessionTx(
 			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''),
 			COALESCE(container_control_auth_token_secret_id, ''), sandbox_id,
 			status, COALESCE(materialization_session_id, ''), updated_at
-		FROM task_environments WHERE task_id = ?
+		FROM task_environments WHERE task_id = ? AND retired_at IS NULL
 	`), taskID).Scan(
 		&workspace.ID, &workspace.ExecutorType, &workspace.ExecutorID, &workspace.ExecutorProfileID,
 		&workspace.ContainerID, &workspace.ContainerBootstrapNonceSecretID,
@@ -1109,7 +1103,7 @@ func (r *Repository) loadCanonicalTaskWorkspaceForSessionTx(
 			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''),
 			COALESCE(container_control_auth_token_secret_id, ''), sandbox_id,
 			status, COALESCE(materialization_session_id, ''), updated_at
-		FROM task_environments WHERE id = ?
+		FROM task_environments WHERE id = ? AND retired_at IS NULL
 	`), workspace.ID).Scan(
 		&workspace.ExecutorType, &workspace.ExecutorID, &workspace.ExecutorProfileID,
 		&workspace.ContainerID, &workspace.ContainerBootstrapNonceSecretID,
@@ -4727,9 +4721,9 @@ func (r *Repository) CountActiveTaskSessionsByRepository(ctx context.Context, re
 	return count, nil
 }
 
-// DeleteEphemeralTasksByAgentProfile deletes all ephemeral tasks (and their sessions)
-// that are using the specified agent profile. This is used during profile deletion
-// to clean up transient quick chat / config chat tasks.
+// DeleteEphemeralTasksByAgentProfile deletes configuration chats (and their
+// sessions) that use the specified agent profile. Ordinary Quick Chats remain
+// available after profile deletion.
 func (r *Repository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, agentProfileID string) (int64, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -4737,12 +4731,14 @@ func (r *Repository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, age
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	configChatPredicate := "NOT (" + excludeConfigModePredicate(r.db.DriverName(), "t.metadata") + ")"
 	var taskIDs []string
 	if err := tx.SelectContext(ctx, &taskIDs, r.db.Rebind(`
 		SELECT DISTINCT t.id
 		FROM tasks t
 		INNER JOIN task_sessions s ON s.task_id = t.id
 		WHERE t.is_ephemeral = 1
+		  AND `+configChatPredicate+`
 		  AND s.agent_profile_id = ?
 		ORDER BY t.id
 	`), agentProfileID); err != nil {
@@ -4770,7 +4766,7 @@ func (r *Repository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, age
 				SELECT 1
 				FROM tasks t
 				INNER JOIN task_sessions s ON s.task_id = t.id
-				WHERE t.id = ? AND t.is_ephemeral = 1 AND s.agent_profile_id = ?
+				WHERE t.id = ? AND t.is_ephemeral = 1 AND `+configChatPredicate+` AND s.agent_profile_id = ?
 			)
 		`), taskID, agentProfileID); err != nil {
 			return 0, err
@@ -4819,7 +4815,7 @@ func (r *Repository) deleteEphemeralTaskForProfileTx(
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM tasks
-		WHERE id = ? AND is_ephemeral = 1
+		WHERE id = ? AND is_ephemeral = 1 AND NOT (`+excludeConfigModePredicate(r.db.DriverName(), "metadata")+`)
 		  AND EXISTS (
 			SELECT 1 FROM task_sessions
 			WHERE task_id = ? AND agent_profile_id = ?

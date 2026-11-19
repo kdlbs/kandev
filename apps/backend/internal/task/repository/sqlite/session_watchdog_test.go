@@ -75,7 +75,7 @@ func assertWatchdogSignalShapes(t *testing.T, repo *Repository) {
 	}
 }
 
-func assertWatchdogProjection(t *testing.T, repo *Repository) {
+func seedWatchdogProjection(t *testing.T, repo *Repository) {
 	t.Helper()
 	ctx := t.Context()
 	if err := repo.CreateTask(ctx, &models.Task{
@@ -104,10 +104,21 @@ func assertWatchdogProjection(t *testing.T, repo *Repository) {
 			t.Fatal(err)
 		}
 	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "watchdog-idle-without-signal", TaskID: "watchdog-task", State: models.TaskSessionStateIdle,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	// Task archival is not a session-state filter for this scanner.
 	if _, err := repo.db.Exec(`UPDATE tasks SET archived_at = CURRENT_TIMESTAMP WHERE id = 'watchdog-task'`); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func assertWatchdogProjection(t *testing.T, repo *Repository) {
+	t.Helper()
+	ctx := t.Context()
+	seedWatchdogProjection(t, repo)
 	full, err := repo.ListActiveTaskSessions(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -120,11 +131,24 @@ func assertWatchdogProjection(t *testing.T, repo *Repository) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 4 || len(full) != len(got) {
-		t.Fatalf("active scope: full=%d projected=%d, want four active states including archived tasks", len(full), len(got))
+	if len(got) != 5 || len(full) != 4 {
+		t.Fatalf("observation scope: full=%d projected=%d, want four active states and one idle signal", len(full), len(got))
 	}
-	for i, row := range got {
-		want := full[i]
+	wantByID := make(map[string]*models.TaskSession, len(got))
+	for _, row := range full {
+		wantByID[row.ID] = row
+	}
+	idle, err := repo.GetTaskSession(ctx, "watchdog-4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantByID[idle.ID] = idle
+	for _, row := range got {
+		want := wantByID[row.ID]
+		if want == nil {
+			t.Fatalf("unexpected or duplicate watchdog observation: %s", row.ID)
+		}
+		delete(wantByID, row.ID)
 		if row.ID != want.ID || row.TaskID != want.TaskID || row.State != want.State || row.IsPassthrough != want.IsPassthrough {
 			t.Fatalf("scan identity changed: %+v vs %+v", row, want)
 		}

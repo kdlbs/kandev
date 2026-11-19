@@ -265,8 +265,11 @@ See [delivery retention operations](operations.md#backend-delivery-retention) fo
 Settings > Task Behavior keeps session capacity disabled by default. Its
 automatic-only policy preserves manual-start overrides. Administrators can
 explicitly select the all-execution policy and save a total maximum plus
-per-grade limits; existing admitted work continues while later launches wait.
-A grade maximum of zero pauses new admissions for that grade.
+per-grade limits, up to 64 grades; existing admitted work continues while later
+launches wait.
+A grade maximum of zero pauses new admissions for that grade. Ordinary message
+turns use both limits before warm dispatch or a cold resume. Their admitted grade
+is retained through the resume.
 
 Profiles and tasks expose an optional `execution_grade` through their existing
 APIs. A nonempty task grade takes precedence over its selected logical profile.

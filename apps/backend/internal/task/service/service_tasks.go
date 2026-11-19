@@ -129,6 +129,7 @@ type taskStopTarget struct {
 
 type taskEnvironmentCleanup struct {
 	deferEnvironment                bool
+	deferInUseWorktrees             bool
 	retentionInventoryCaptured      bool
 	allowUnverifiedWorkspaceChanges bool
 	workspaceCleanup                models.WorkspaceCleanupMode
@@ -3228,16 +3229,6 @@ func (s *Service) validateTaskDeleteWorktreeInventoryWithOptions(ctx context.Con
 	return newTaskDeleteDirtyWorktreeError(dirty)
 }
 
-func (s *Service) deleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
-	deleted, err := s.deleteTaskWithReasonAndDBDelete(ctx, id, "", models.TaskResourceCleanupTriggerQuickChatExpire, DeleteTaskOptions{}, func(ctx context.Context, id string) (bool, error) {
-		return s.tasks.DeleteExpiredQuickChatTask(ctx, id, cutoff)
-	})
-	if errors.Is(err, taskrepo.ErrTaskNotFound) {
-		return false, nil
-	}
-	return deleted, err
-}
-
 func (s *Service) deleteTaskWithReasonAndDBDelete(
 	ctx context.Context,
 	id string,
@@ -4112,6 +4103,21 @@ func (s *Service) performTaskCleanup(
 	}
 
 	sessionIDs := cleanupSessionIDs(sessions, stopTargets)
+	errs = append(errs, s.cleanupExecutorRuntimeRows(ctx, taskID, sessionIDs, preserveExecutorRows)...)
+
+	// Cleanup quick-chat workspace directories for all tasks (not just ephemeral).
+	// Non-ephemeral office tasks also get quick-chat dirs allocated by manager_launch.go;
+	// both cases must be cleaned up to avoid a disk leak.
+	if cause := context.Cause(ctx); cause != nil {
+		return append(errs, cause)
+	}
+	errs = append(errs, s.cleanupQuickChatDirs(ctx, taskID, sessionIDs, preserveExecutorRows)...)
+
+	return errs
+}
+
+func (s *Service) cleanupExecutorRuntimeRows(ctx context.Context, taskID string, sessionIDs []string, preserveExecutorRows map[string]struct{}) []error {
+	var errs []error
 	for _, sessionID := range sessionIDs {
 		if _, preserve := preserveExecutorRows[sessionID]; preserve {
 			s.logger.Warn("preserving executor runtime row after failed stop",
@@ -4133,14 +4139,6 @@ func (s *Service) performTaskCleanup(
 			errs = append(errs, fmt.Errorf("delete executor runtime for session %s: %w", sessionID, err))
 		}
 	}
-
-	// Cleanup quick-chat workspace directories for all tasks (not just ephemeral).
-	// Non-ephemeral office tasks also get quick-chat dirs allocated by manager_launch.go;
-	// both cases must be cleaned up to avoid a disk leak.
-	if cause := context.Cause(ctx); cause != nil {
-		return append(errs, cause)
-	}
-	errs = append(errs, s.cleanupQuickChatDirs(ctx, taskID, sessionIDs, preserveExecutorRows)...)
 
 	return errs
 }
@@ -4260,7 +4258,7 @@ func (s *Service) cleanupDestructiveTaskResources(
 			zap.String("env_id", taskEnvironmentID(envCleanup.env)))
 	}
 	if !currentOwnership {
-		if envCleanup.allowUnverifiedWorkspaceChanges {
+		if envCleanup.allowUnverifiedWorkspaceChanges || envCleanup.deferInUseWorktrees {
 			errs = append(errs, errors.New("workspace ownership changed; cleanup deferred"))
 		}
 		return errs
@@ -4284,7 +4282,7 @@ func (s *Service) cleanupDestructiveTaskResources(
 	var referenceErrs []error
 	worktrees, referenceErrs = s.filterSharedWorktreesForTaskCleanup(ctx, taskID, sessions, worktrees)
 	errs = append(errs, referenceErrs...)
-	if envCleanup.allowUnverifiedWorkspaceChanges && len(worktrees) != originalWorktreeCount {
+	if (envCleanup.allowUnverifiedWorkspaceChanges || envCleanup.deferInUseWorktrees) && len(worktrees) != originalWorktreeCount {
 		errs = append(errs, errors.New("workspace remains in use; cleanup deferred"))
 	}
 	if len(worktrees) == 0 {
@@ -4492,11 +4490,29 @@ func (s *Service) filterOwnedWorktreesForTaskCleanup(
 			continue
 		}
 		sess, sessionLoaded := bySession[wt.SessionID]
-		if s.taskOwnsSessionWorktree(ctx, taskID, wt.SessionID, sess, sessionLoaded, ownedEnv, skipOwnedEnvironment, envCache) {
+		if retainedEnvironmentWorktreeOwnedByTask(taskID, wt, sess, ownedEnv) ||
+			s.taskOwnsSessionWorktree(ctx, taskID, wt.SessionID, sess, sessionLoaded, ownedEnv, skipOwnedEnvironment, envCache) {
 			filtered = append(filtered, wt)
 		}
 	}
 	return filtered
+}
+
+// retainedEnvironmentWorktreeOwnedByTask uses the ownership captured with the
+// cleanup inventory. That inventory lists only checkouts whose environment
+// belonged to taskID, and the active owner is captured separately as
+// ownedEnv, so any other captured environment is one of the task's retired
+// environments. Retired environments are never transferred or inherited, and
+// their rows cascade with the task, so a post-delete lookup cannot prove what
+// the capture already did.
+func retainedEnvironmentWorktreeOwnedByTask(
+	taskID string, wt *worktree.Worktree, session *models.TaskSession, ownedEnv *models.TaskEnvironment,
+) bool {
+	if session == nil || wt.TaskID != taskID || wt.TaskEnvironmentID == "" ||
+		session.TaskEnvironmentID != wt.TaskEnvironmentID {
+		return false
+	}
+	return ownedEnv == nil || wt.TaskEnvironmentID != ownedEnv.ID
 }
 
 func (s *Service) taskOwnsSessionWorktree(

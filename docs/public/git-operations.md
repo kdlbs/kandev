@@ -172,7 +172,13 @@ For a new task branch, the repository default template is:
 feature/{title}-{suffix}
 ```
 
-`{title}` is an ASCII-safe, lower-case task-title slug and `{suffix}` is a short collision-avoidance value. Repository settings can change the template. When registering a repository, an omitted `pull_before_worktree` defaults to `true`: Kandev attempts to refresh and verify the base branch before creating or recreating the worktree. Later repository settings saves preserve the current default branch and refresh choice when those fields are omitted, including when another save changes them before a rename finishes. The public configuration defaults both fetch and fast-forward pull timeouts to 60 seconds. When a usable local base exists, authentication, network, timeout, missing-ref, divergent-ref, and uncertain-ancestry errors produce a credential-safe warning and Kandev creates the worktree from that local base. The warning states that remote changes may be missing. When no usable local base exists, Kandev must materialize the requested branch from the remote; a failed refresh or missing remote ref stops task preparation with a repository-specific launch error. Explicit remote-only refs and remote executors keep this strict materialization behavior.
+`{title}` is an ASCII-safe, lower-case task-title slug and `{suffix}` is a short collision-avoidance value. Repository settings can change the template.
+
+When repository registration omits `pull_before_worktree`, Kandev uses `true`. Kandev then refreshes and verifies the base before it creates or recreates a worktree. Later settings saves keep the existing default branch and refresh choice when the request omits either field. This also applies when another save changes those values during a rename. Fetch and fast-forward pull timeouts default to 60 seconds.
+
+When a usable local base exists, Kandev can use it after a refresh error. Authentication, network, timeout, missing-ref, divergent-ref, and uncertain-ancestry errors produce a credential-safe warning. The warning states that the worktree can lack remote changes.
+
+When no usable local base exists, Kandev must materialize the requested branch from the remote. If Git confirms that its ref is absent, Kandev can use a configured fallback or live remote default for an inherited or automatic host base. Kandev refreshes and verifies the fallback, then warns with both branch names. Authentication, network, timeout, cancellation, lock, and verification errors stop preparation. Other unproven errors also stop preparation. Explicit remote-only refs and remote executors keep strict materialization behavior.
 Without an explicit cross-repository target, Kandev uses the current base branch for a numbered GitHub PR. If Git proves that the requested base branch was deleted, Kandev can use a configured fallback branch, often the repository default, only for an inherited or automatically selected base. It refreshes and verifies that fallback first, and shows a warning with both branch names. An explicit or manually changed PR base remains strict. Other PR refresh errors stop preparation.
 
 When a backend refresh fetch or fast-forward pull fails because Git reports recognized repository-lock contention, Kandev retries that command up to four attempts within the same execution deadline and with short increasing delays. Unrecognized or localized lock wording may not trigger a retry. A pull that updated files but could not move the branch ref can complete on retry, and independent staged or unstaged changes are preserved. A permission error that prevents creating a lock is not treated as retryable contention. If the execution deadline expires during backoff, a required refresh reports a timeout instead. Otherwise persistent contention remains visible: a required refresh stops preparation with a launch error that names lock contention and the attempt count, and a best-effort local refresh still uses the verified local base with its warning. Kandev never deletes an unknown lock, resets the checkout, or force-updates a branch to recover. Retry the launch after the lock becomes available.
@@ -195,6 +201,13 @@ Recovery to the repository default remains available only for a base that Kandev
 selected automatically, such as an inherited subtask base or an omitted base
 resolved from repository settings. A manual base selection removes that recovery
 permission, including when you select the same branch again.
+
+With refresh enabled, Git-confirmed loss of the remote ref for an inherited or
+automatic host base with no usable local ref can use a fallback. Kandev uses the configured
+branch first, then the live remote default. Kandev refreshes and verifies the
+fallback before it creates the worktree. Authentication, network, timeout,
+cancellation, lock, and verification errors remain fatal. Other unproven errors
+also remain fatal.
 
 With **Always pull before creating a new worktree** disabled, a missing explicit
 base stops preparation without a remote-default lookup or extra fetch. Refresh a

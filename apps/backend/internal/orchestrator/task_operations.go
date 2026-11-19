@@ -2058,8 +2058,12 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	isPassthrough = launchSession.IsPassthrough
 
 	skipStepPrompt := opts.EntryOptions != nil && opts.EntryOptions.SkipStepPrompt
+	promptWorkflowStepID := workflowStepID
+	if promptWorkflowStepID == "" && !isOfficeTask && !opts.PreserveWorkflowSourceBinding {
+		promptWorkflowStepID = workflowSessionConfigStepID
+	}
 	effectivePrompt, planModeActive, promptReferenceContext := s.applyWorkflowAndPlanMode(
-		ctx, effectivePrompt, task.ID, sessionID, workflowStepID,
+		ctx, effectivePrompt, task.ID, sessionID, promptWorkflowStepID,
 		planMode, task.IsEphemeral, isPassthrough, skipStepPrompt,
 	)
 
@@ -5154,6 +5158,14 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 	if exec, ok := s.executor.GetExecutionBySession(sessionID); ok && exec != nil {
 		resp.IsAgentRunning = true
 		resp.IsIdleSuspended = false
+		resp.NeedsResume = false
+		return resp, nil
+	}
+	if session.State == models.TaskSessionStateStarting && running != nil &&
+		running.Status == models.ExecutorRunningStatusPrepared &&
+		time.Since(session.UpdatedAt) < executor.AgentStartupGracePeriod {
+		// A prepared runtime is normally workspace-only. STARTING records that
+		// agent launch has claimed it, so passive recovery must wait for startup.
 		resp.NeedsResume = false
 		return resp, nil
 	}

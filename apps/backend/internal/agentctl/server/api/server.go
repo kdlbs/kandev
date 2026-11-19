@@ -35,15 +35,16 @@ import (
 
 // Server is the HTTP API server for a single agent instance.
 type Server struct {
-	cfg              *config.InstanceConfig
-	procMgr          *process.Manager
-	mcpServer        *mcp.Server
-	mcpBackendClient *mcp.ChannelBackendClient
-	logger           *logger.Logger
-	router           *gin.Engine
-	portProxies      *portProxyCache
-	metricsCollector *metrics.Collector
-	lspInstaller     lspInstallerRegistry
+	cfg                           *config.InstanceConfig
+	procMgr                       *process.Manager
+	mcpServer                     *mcp.Server
+	mcpBackendClient              *mcp.ChannelBackendClient
+	logger                        *logger.Logger
+	router                        *gin.Engine
+	portProxies                   *portProxyCache
+	metricsCollector              *metrics.Collector
+	lspInstaller                  lspInstallerRegistry
+	builtinMCPRejectionLogLimiter builtinMCPRejectionLogLimiter
 
 	// credentialSource, when set via SetCredentialSource, authenticates this
 	// instance's requests and streams against the control server's single
@@ -96,6 +97,7 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	}
 
 	s.router.Use(httpmw.RequestLogger(s.logger, "agentctl-instance"))
+	s.router.Use(s.rejectUnboundBuiltinMCPRoutes())
 	// Exempt paths from auth:
 	// - /health: liveness probe
 	// - /sse, /message, /mcp: MCP endpoints used by the agent subprocess which
@@ -287,7 +289,11 @@ func (s *Server) setupRoutes() {
 
 	// MCP routes (if MCP server is configured)
 	if s.mcpServer != nil {
-		s.mcpServer.RegisterRoutes(s.router)
+		nativeRoutes := gin.IRouter(s.router)
+		if s.cfg.NativeMCPRoutePrefix != "" {
+			nativeRoutes = s.router.Group(s.cfg.NativeMCPRoutePrefix)
+		}
+		s.mcpServer.RegisterRoutes(nativeRoutes)
 		api.PUT("/mcp/mode", s.handleSetMcpMode)
 		api.PUT("/mcp/builtin-binding", s.handlePrepareBuiltinMCP)
 		api.GET("/mcp/builtin-binding", func(c *gin.Context) { c.JSON(http.StatusOK, s.mcpServer.Profile()) })

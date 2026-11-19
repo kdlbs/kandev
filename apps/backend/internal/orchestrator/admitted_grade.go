@@ -112,6 +112,12 @@ func (c *sessionCeilingController) resolveAdmissionGradeLocked(ctx context.Conte
 		req.grade, req.gradeKnown, req.gradeHeld = held.grade, held.gradeKnown, true
 		return req
 	}
+	for _, turn := range c.turnReservations {
+		if req.sessionID != "" && turn.sessionID == req.sessionID && (turn.gradeKnown || c.policy == sessioncapacity.PolicyAll) {
+			req.grade, req.gradeKnown, req.gradeHeld = turn.grade, turn.gradeKnown, true
+			return req
+		}
+	}
 	if c.resolveGrade != nil {
 		grade, err := c.resolveGrade(ctx, req)
 		if err == nil {

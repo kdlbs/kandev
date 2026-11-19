@@ -444,6 +444,7 @@
   "commentCount_other": "{{count}}件のコメント",
   "commentOnAgentResponse": "エージェント応答にコメント",
   "commentOnSelection": "選択範囲にコメント",
+  "selectionActions": "選択範囲の操作",
   "comments": "コメント",
   "commentsOnFiles_one": "{{files}}に{{count}}件のコメント",
   "commentsOnFiles_other": "{{files}}に{{count}}件のコメント",
@@ -3303,5 +3304,8 @@
   "removeRootBody": "フォルダー、ブランチ、プルリクエストは保持されます。Kandev は変更とファイルに表示しなくなります。",
   "removeRootFailed": "このタスクからルートを削除できませんでした",
   "removeFromTask": "タスクから削除",
-  "rootDisabledNoTracker": "このルートには Git トラッカーがまだありません"
+  "rootDisabledNoTracker": "このルートには Git トラッカーがまだありません",
+  "refreshRepositories": "リポジトリを再読み込み",
+  "referenceCurrentTitle": "現在のタイトル：{{title}}",
+  "referenceOpenForDetails": "タスクを開いて詳細を確認してください。"
 }

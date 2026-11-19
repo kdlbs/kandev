@@ -397,7 +397,15 @@ equivalent GitHub SSH access, known-hosts entry, and agent or key on that execut
 
 Worktree creates a dedicated host Git worktree and runs the standalone `agentctl` service against it. It separates branches and files between tasks, but the process still has the Kandev user's host permissions, network access, and readable credentials.
 
-Repository settings control base branch, branch naming, pull-before-create, repository setup/cleanup scripts, and optional copies of ignored files. With **Always pull before creating a new worktree** enabled, a host Worktree refresh is best effort when the selected local base exists. An authentication, network, timeout, missing-ref, divergent-ref, or uncertain-ancestry error produces a credential-safe warning and the host worktree uses the verified local base. The warning states that remote changes may be missing. For a numbered GitHub PR, the current PR base is used when available. A proven deleted remote base can use a separately refreshed configured fallback branch, often the repository default, and produces a warning; authentication, network, timeout, and other unproven PR refresh failures remain fatal. If no usable local base exists, or if the executor must materialize the repository remotely, refresh and checkout remain required and a failure stops the launch. Disable this setting only for an intentional offline local workflow. Copy ignored files narrowly: `.env` and similar files often contain production secrets. Multi-repository tasks receive one materialized worktree per attachment; use the per-repository setup scripts because the profile-level prepare script is currently skipped for that path.
+Repository settings control the base branch, branch naming, pull-before-create, setup and cleanup scripts, and optional copies of ignored files.
+
+With **Always pull before creating a new worktree** enabled, a host Worktree refresh is best effort when the selected local base exists. Authentication, network, timeout, missing-ref, divergent-ref, and uncertain-ancestry errors produce a credential-safe warning. The host worktree then uses its verified local base. The warning states that remote changes can be absent from the worktree.
+
+For a numbered GitHub PR, Kandev uses the current PR base when it can verify that base. Git-confirmed deletion of that remote base permits a separately refreshed configured fallback. The fallback often names the repository default branch. Kandev warns about both branch names. Authentication, network, timeout, and other unproven PR refresh errors remain fatal.
+
+When no local ref exists, an inherited or automatic host base can use a fallback after Git confirms that the requested ref is absent. Kandev refreshes and verifies the configured fallback or live remote default before it creates the worktree. Explicit base selections and unproven refresh errors remain fatal. Remote executors require the requested branch to materialize successfully.
+
+Disable this setting only for an intentional offline local workflow. Copy ignored files narrowly because `.env` and similar files often contain production secrets. Multi-repository tasks get one materialized worktree per attachment. Use per-repository setup scripts because the profile-level prepare script is skipped for that path.
 
 Worktree tasks normally start inside their first repository. In **Advanced settings**, a task with one
 initial repository can opt into a parent workspace folder so later repositories are siblings and the
@@ -707,6 +715,15 @@ Task-directory reclamation stays off by default. When enabled, terminal archive/
 Default SSH preparation creates or reuses a standalone checkout at the task root. Custom scripts or existing repositories can use linked worktrees. For a linked worktree, Git checks the task's `HEAD` and stashes whose recorded branch matches its current branch. Reclamation leaves the shared repository and other worktrees intact. For a standalone clone, Git checks every local branch and stash. Unknown layouts, nested repositories, unknown stash attribution, locked worktrees, and checkouts with submodules stay on disk. Reclamation requires Git 2.36 or later for its complete probe set; safe path detection alone requires 2.31. Older Git preserves the directory but does not affect SSH launch support. Kandev does not sweep old task directories.
 
 The cached helper and checksum at `~/.kandev/bin/agentctl` and `agentctl.sha256` remain for later sessions. Periodically audit remote processes, session directories, and `<workdir-root>/tasks/`. An explicit resume reconnects to SSH and reuses a live recorded PID when possible. Otherwise Kandev starts a fresh remote controller and runs preparation again.
+
+When a receipt proves that the recorded controller is absent, Resume starts a
+new controller in the preserved task workspace. This also applies after a
+verified Linux host reboot. Resume uses the existing provider conversation and
+refreshes the managed credential broker lease. If process identity, boot
+evidence, or ownership is unknown or conflicting, Kandev blocks replacement
+until you resolve the host or credential problem. The old session-runtime
+directory can remain when the controller was already absent. Its receipt does
+not prove that a matching pidfile owns the directory.
 
 #### Controller recovery after session-directory loss
 

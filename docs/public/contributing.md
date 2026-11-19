@@ -151,7 +151,12 @@ The complete source and Landing build contract is in the [public docs contributi
 - Persistence changes include fresh-schema and upgrade-path tests.
 - Credentials, external text, shell arguments, URLs, paths, and logs respect their trust boundary.
 - Exact automated and manual checks are recorded; skipped suites have a reason.
-- UI changes include Playwright coverage plus screenshots or a short recording.
+- UI candidate PRs must include a fresh screenshot as an HTTPS Markdown image
+  with descriptive alt text under `## Screenshots`. This rule also applies to
+  fork PRs. The check verifies presence. Reviewers assess freshness, visibility,
+  relevance, and viewport coverage. Ask a maintainer to apply
+  `no-screenshots-allow` only for a nonvisual path match or an explained capture
+  limitation. Keep the Playwright coverage required for UI changes.
 - Generated artifacts, local databases, recordings, and unrelated formatting are absent.
 - You understand and can explain all submitted code, including agent-generated code.
 

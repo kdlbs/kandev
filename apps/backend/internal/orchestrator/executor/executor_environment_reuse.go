@@ -29,6 +29,9 @@ func (e *Executor) validateReuseEnvironmentInventory(ctx context.Context, req *L
 func (e *Executor) validateReuseEnvironmentInventoryWithIdentity(
 	ctx context.Context, req *LaunchAgentRequest, env *models.TaskEnvironment, preserveCanonicalIdentity bool,
 ) error {
+	if env != nil && env.IsRetired() {
+		return fmt.Errorf("%w: task environment is retained as inactive history", models.ErrWorkspaceReuseUnsafe)
+	}
 	if !req.WorkspaceReuseRequired || env == nil || env.ID == "" || e.repo == nil {
 		return nil
 	}

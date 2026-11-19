@@ -413,6 +413,7 @@
   "commentCount_other": "{{count}} comentários",
   "commentOnAgentResponse": "Comentar a resposta do agente",
   "commentOnSelection": "Comentar a seleção",
+  "selectionActions": "Ações da seleção",
   "comments": "Comentários",
   "commentsOnFiles_one": "{{count}} comentário em {{files}}",
   "commentsOnFiles_other": "{{count}} comentários em {{files}}",
@@ -3303,5 +3304,8 @@
   "removeRootBody": "A pasta, o ramo e os pull requests permanecem. O Kandev deixa de os mostrar em Alterações e Ficheiros.",
   "removeRootFailed": "Não foi possível remover a raiz desta tarefa",
   "removeFromTask": "Remover da tarefa",
-  "rootDisabledNoTracker": "Esta raiz ainda não tem rastreador Git"
+  "rootDisabledNoTracker": "Esta raiz ainda não tem rastreador Git",
+  "refreshRepositories": "Atualizar repositórios",
+  "referenceCurrentTitle": "Título atual: {{title}}",
+  "referenceOpenForDetails": "Abra a tarefa para ver os detalhes."
 }

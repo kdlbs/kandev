@@ -845,7 +845,7 @@
   "sessionCapacityGradeName": "執行等級",
   "sessionCapacityGradeNew": "新等級",
   "sessionCapacityGradeRemove": "移除 {{grade}}",
-  "sessionCapacityGradeValidation": "請輸入不重複且不超過 64 個字符的等級名稱，上限為 0 到 2147483647 的整數。全執行範圍至少需要一個等級。切換到自動範圍前請明確移除等級上限。",
+  "sessionCapacityGradeValidation": "請輸入不重複且不超過 64 個字符的等級名稱，上限為 0 到 2147483647 的整數。最多可設定 64 個執行等級。全執行範圍至少需要一個等級。切換到自動範圍前請明確移除等級上限。",
   "sessionCapacityGradesUnavailable": "此後端不提供等級上限。",
   "sessionCapacityTotalHelp": "總上限獨立於各等級上限之和。在此範圍內，手動啓動也適用兩類上限。",
   "sessionCapacityTotalLabel": "最大併發執行數",

@@ -102,7 +102,7 @@ func testPreflightLegacyCloneRecovery(t *testing.T, recordedAlias bool) {
 	before, err := repo.GetTaskEnvironment(ctx, wt.TaskEnvironmentID)
 	require.NoError(t, err)
 	head := strings.TrimSpace(runExecutorRecoveryGit(t, checkout, "rev-parse", "HEAD"))
-	admission, err := executor.PreflightSessionWorktreeRecovery(ctx, wt.TaskID, session, false)
+	admission, _, err := executor.PreflightSessionWorktreeRecovery(ctx, wt.TaskID, session, false)
 	require.NoError(t, err)
 	require.Nil(t, admission)
 	after, err := repo.GetTaskEnvironment(ctx, wt.TaskEnvironmentID)

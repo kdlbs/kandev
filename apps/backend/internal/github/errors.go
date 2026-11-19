@@ -2,6 +2,7 @@ package github
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -73,6 +74,27 @@ var ErrPRWatchRetired = errors.New("GitHub PR watch target is retired")
 
 // ErrPRWatchTargetIneligible reports a retired target that cannot be resumed.
 var ErrPRWatchTargetIneligible = errors.New("GitHub PR watch target is not eligible for resumption")
+
+// ErrRepoOutsideWorkspaceScope identifies a local repository-scope rejection
+// before a GitHub call. HTTP responses distinguish this cause from an upstream
+// lookup failure without returning the configured allowlist.
+var ErrRepoOutsideWorkspaceScope = errors.New("github: repository is outside this workspace's scope")
+
+// repoOutsideScopeErr preserves ErrRepoNotResolvable classification for retry
+// callers while exposing the specific policy rejection to HTTP handlers.
+type repoOutsideScopeErr struct{ owner, repo string }
+
+func (e *repoOutsideScopeErr) Error() string {
+	return fmt.Sprintf("%s: %s/%s", ErrRepoOutsideWorkspaceScope, e.owner, e.repo)
+}
+
+func (e *repoOutsideScopeErr) Is(target error) bool {
+	return target == ErrRepoOutsideWorkspaceScope || target == ErrRepoNotResolvable
+}
+
+func newRepoOutsideScopeErr(owner, repo string) error {
+	return &repoOutsideScopeErr{owner: owner, repo: repo}
+}
 
 // errStoreUnavailable is returned from service methods when no Store is
 // wired (Provide can return a Service with store == nil when the SQLite

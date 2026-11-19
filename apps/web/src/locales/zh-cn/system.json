@@ -845,7 +845,7 @@
   "sessionCapacityGradeName": "执行等级",
   "sessionCapacityGradeNew": "新等级",
   "sessionCapacityGradeRemove": "移除 {{grade}}",
-  "sessionCapacityGradeValidation": "请输入不重复且不超过 64 个字符的等级名称，上限为 0 到 2147483647 的整数。全执行范围至少需要一个等级。切换到自动范围前请明确移除等级上限。",
+  "sessionCapacityGradeValidation": "请输入不重复且不超过 64 个字符的等级名称，上限为 0 到 2147483647 的整数。最多可配置 64 个执行等级。全执行范围至少需要一个等级。切换到自动范围前请明确移除等级上限。",
   "sessionCapacityGradesUnavailable": "此后端不提供等级上限。",
   "sessionCapacityTotalHelp": "总上限独立于各等级上限之和。在此范围内，手动启动也适用两类上限。",
   "sessionCapacityTotalLabel": "最大并发执行数",

@@ -284,3 +284,11 @@ Both accept any value `time.ParseDuration` accepts (`30m`, `2h`, `500ms`, …). 
 
 See [MCP delivery](MCP_DELIVERY.md) for the configure record, helper capability,
 remote project-file endpoints, and per-process evidence rules.
+
+Native MCP route mode is immutable for one helper. A create response supplies
+the accepted `scoped_mcp_routes` value; retained helpers supply it through
+authenticated `InstanceInfo`. Missing fields mean legacy mode, while a failed
+mode read is an adoption error. Scoped Core and package routes use the helper's
+instance ID under `/i/<id>`; package routes keep their existing package suffixes.
+The helper ID scopes accidental routing only and does not replace authenticated
+task-owner checks.
