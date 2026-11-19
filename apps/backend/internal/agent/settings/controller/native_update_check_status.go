@@ -413,11 +413,13 @@ func (c *Controller) executeNativeUpdateCheck(ctx context.Context, lifetime *nat
 			zap.String("agent", lookup.agentName), zap.String("state", string(result.State)),
 			zap.String("reason", string(result.Reason)), zap.Duration("duration", time.Since(started)))
 	}
+	// An uncacheable entry (cancelled, timed out) returns at once: the post-run
+	// identity does filesystem I/O that must not delay shutdown.
 	// A result whose executable or configuration changed during the wait or
 	// the run describes another identity and is returned without caching. The
 	// launched launcher and its real executable at launch must be the
 	// prepared ones, and the identity observed after the run must still match.
-	if launched.Executable == lookup.executable && launched.RealExecutable == lookup.realExecutable &&
+	if !entry.expiresAt.IsZero() && launched.Executable == lookup.executable && launched.RealExecutable == lookup.realExecutable &&
 		c.nativeUpdateCheckIdentity(lookup.agentName, lookup.currentVersion, lookup.spec).identity == lookup.identity {
 		c.storeNativeUpdateCheckEntry(lookup, entry)
 	}

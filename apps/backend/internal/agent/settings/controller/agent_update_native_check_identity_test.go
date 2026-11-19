@@ -387,6 +387,11 @@ func TestNativeCheckParentCancellationCancelsRunningCheck(t *testing.T) {
 		result <- dto.AgentUpdateStatusDTO{}
 	}()
 	<-started
+	// A post-run fingerprint can block on unreachable storage. A cancelled
+	// run must publish and release without one.
+	fingerprintGate := make(chan struct{})
+	defer close(fingerprintGate)
+	h.runner.setEnvironmentHook(func() { <-fingerprintGate })
 	cancelParent()
 	select {
 	case status := <-result:
@@ -395,5 +400,12 @@ func TestNativeCheckParentCancellationCancelsRunningCheck(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("parent cancellation did not cancel the running native check")
+	}
+	stopped := make(chan struct{})
+	go func() { stop(); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop did not join the cancelled check")
 	}
 }
