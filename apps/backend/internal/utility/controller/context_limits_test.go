@@ -1,0 +1,92 @@
+package controller
+
+import (
+	"fmt"
+	"strings"
+	"testing"
+	"unicode/utf8"
+)
+
+func TestTruncateContextLeavesShortValuesAlone(t *testing.T) {
+	const value = "short diff"
+	if got := truncateContext(value, MaxGitDiffBytes); got != value {
+		t.Fatalf("truncateContext() = %q, want %q", got, value)
+	}
+}
+
+func TestTruncateContextCutsAndMarks(t *testing.T) {
+	value := strings.Repeat("a", 120)
+
+	got := truncateContext(value, 100)
+
+	if !strings.HasPrefix(got, strings.Repeat("a", 100)) {
+		t.Fatalf("truncated value does not keep the leading 100 bytes: %q", got)
+	}
+	if !strings.Contains(got, "[... truncated 20 bytes ...]") {
+		t.Fatalf("truncated value is missing the marker: %q", got)
+	}
+	if len(got) <= 100 {
+		t.Fatalf("truncated value = %d bytes, want more than the cap for the marker", len(got))
+	}
+}
+
+func TestTruncateContextKeepsUTF8Valid(t *testing.T) {
+	// Two bytes per rune: a 101-byte cut lands inside the 51st character and
+	// must back off to the previous rune boundary.
+	value := strings.Repeat("é", 60)
+
+	got := truncateContext(value, 101)
+
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncateContext() produced invalid UTF-8: %q", got)
+	}
+	body, marker, found := strings.Cut(got, "\n[... truncated")
+	if !found {
+		t.Fatalf("truncated value is missing the marker: %q", got)
+	}
+	if utf8.RuneCountInString(body) != 50 {
+		t.Fatalf("kept %d runes, want 50 whole runes", utf8.RuneCountInString(body))
+	}
+	if !strings.HasPrefix(marker, " 20 bytes ...]") {
+		t.Fatalf("marker = %q, want the 20 dropped bytes (10 runes)", marker)
+	}
+}
+
+// browserTruncatedGitDiff mirrors truncateGitDiff in
+// apps/web/hooks/use-utility-agent-generator.ts: the browser cuts an oversized
+// diff at the backend cap minus a 64-byte marker reserve, backs off to a UTF-8
+// boundary, and appends its own marker.
+func browserTruncatedGitDiff(diff string) string {
+	const markerReserveBytes = 64
+	if len(diff) <= MaxGitDiffBytes {
+		return diff
+	}
+	cut := MaxGitDiffBytes - markerReserveBytes
+	for cut > 0 && !utf8.RuneStart(diff[cut]) {
+		cut--
+	}
+	return diff[:cut] + fmt.Sprintf(truncationMarkerFormat, len(diff)-cut)
+}
+
+// A diff the browser already cut must reach the template with the browser's
+// marker and its real count, not a second marker that counts only the first.
+func TestTruncateContextKeepsBrowserTruncationMarker(t *testing.T) {
+	sent := browserTruncatedGitDiff(strings.Repeat("x", 3_000_000))
+
+	got := truncateContext(sent, MaxGitDiffBytes)
+
+	if got != sent {
+		t.Fatalf("server re-truncated the browser diff: got %d bytes ending %q", len(got), got[len(got)-40:])
+	}
+	if !strings.HasSuffix(got, "\n[... truncated 2900064 bytes ...]") {
+		t.Fatalf("browser marker lost: ends with %q", got[len(got)-40:])
+	}
+}
+
+func TestTruncateContextKeepsUncutBrowserDiff(t *testing.T) {
+	diff := strings.Repeat("x", MaxGitDiffBytes)
+
+	if got := truncateContext(browserTruncatedGitDiff(diff), MaxGitDiffBytes); got != diff {
+		t.Fatalf("an uncut %d-byte diff changed to %d bytes", len(diff), len(got))
+	}
+}

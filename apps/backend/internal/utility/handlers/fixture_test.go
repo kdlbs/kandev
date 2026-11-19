@@ -204,7 +204,10 @@ func (r *fakeUtilityRepo) ListCalls(_ context.Context, utilityID string, limit i
 	return out, nil
 }
 
-func (r *fakeUtilityRepo) GetCallByID(_ context.Context, id string) (*models.UtilityAgentCall, error) {
+func (r *fakeUtilityRepo) GetCallByID(ctx context.Context, id string) (*models.UtilityAgentCall, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if c, ok := r.calls[id]; ok {
@@ -228,7 +231,10 @@ func (r *fakeUtilityRepo) CreateCall(_ context.Context, call *models.UtilityAgen
 	return nil
 }
 
-func (r *fakeUtilityRepo) UpdateCall(_ context.Context, call *models.UtilityAgentCall) error {
+func (r *fakeUtilityRepo) UpdateCall(ctx context.Context, call *models.UtilityAgentCall) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls[call.ID] = call
@@ -267,6 +273,7 @@ func (r stubProfileResolver) MatchLegacy(
 // store under the real service and controller, with every route from
 // RegisterRoutes wired to stub executors.
 type utilityFixture struct {
+	router   *gin.Engine
 	server   *httptest.Server
 	repo     *fakeUtilityRepo
 	service  *service.Service
@@ -336,6 +343,7 @@ func newUtilityFixture(t *testing.T, opts utilityFixtureOptions) *utilityFixture
 	t.Cleanup(server.Close)
 
 	return &utilityFixture{
+		router:   router,
 		server:   server,
 		repo:     repo,
 		service:  svc,

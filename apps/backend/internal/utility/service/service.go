@@ -562,6 +562,20 @@ func (s *Service) FailCall(ctx context.Context, callID, errorMessage string, dur
 	return s.repo.UpdateCall(ctx, call)
 }
 
+// CancelCall marks a call as cancelled by the client. The terminal fields match
+// FailCall so a cancelled invocation leaves no pending row behind.
+func (s *Service) CancelCall(ctx context.Context, callID string, durationMs int) error {
+	call, err := s.repo.GetCallByID(ctx, callID)
+	if err != nil {
+		return ErrCallNotFound
+	}
+	now := time.Now().UTC()
+	call.DurationMs = durationMs
+	call.Status = models.CallStatusCancelled
+	call.CompletedAt = &now
+	return s.repo.UpdateCall(ctx, call)
+}
+
 // ListCalls returns the call history for a utility agent.
 func (s *Service) ListCalls(ctx context.Context, utilityID string, limit int) ([]*models.UtilityAgentCall, error) {
 	return s.repo.ListCalls(ctx, utilityID, limit)

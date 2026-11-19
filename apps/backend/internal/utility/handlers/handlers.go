@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -20,6 +21,35 @@ import (
 	"github.com/kandev/kandev/internal/utility/profilebinding"
 	"github.com/kandev/kandev/internal/utility/service"
 )
+
+// statusClientClosedRequest is nginx's 499. Go defines no constant for it and
+// no standard 4xx says "the client hung up", which is what actually happened.
+const statusClientClosedRequest = 499
+
+// callSettlementTimeout bounds the terminal write for a call whose request
+// context can no longer carry it.
+const callSettlementTimeout = 5 * time.Second
+
+// settleFailedCall records the terminal state of a call that produced no
+// result, and reports whether the client cancelled it.
+//
+// A cancelled request also cancels its context, so writing the terminal state
+// through that context would fail and leave the row pending forever. The write
+// therefore runs detached, with its own deadline.
+func (h *Handlers) settleFailedCall(ctx context.Context, callID string, cause error, durationMs int) bool {
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), callSettlementTimeout)
+	defer cancel()
+	if errors.Is(ctx.Err(), context.Canceled) || errors.Is(cause, context.Canceled) {
+		if err := h.controller.CancelCall(writeCtx, callID, durationMs); err != nil {
+			h.logger.Warn("failed to mark cancelled call", zap.Error(err), zap.String("call_id", callID))
+		}
+		return true
+	}
+	if err := h.controller.FailCall(writeCtx, callID, cause.Error(), durationMs); err != nil {
+		h.logger.Warn("failed to mark failed call", zap.Error(err), zap.String("call_id", callID))
+	}
+	return false
+}
 
 // InferenceExecutor executes inference prompts via agentctl.
 type InferenceExecutor interface {
@@ -267,7 +297,13 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 	}
 	if err != nil {
 		h.logger.Error("failed to execute prompt", zap.Error(err), zap.String("call_id", callID))
-		_ = h.controller.FailCall(ctx, callID, err.Error(), 0)
+		if h.settleFailedCall(ctx, callID, err, 0) {
+			c.JSON(statusClientClosedRequest, dto.ExecutePromptResponse{
+				CallID: callID,
+				Error:  "utility execution cancelled",
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{
 			CallID: callID,
 			Error:  "failed to execute prompt: " + err.Error(),
@@ -276,14 +312,17 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 	}
 	if resp == nil {
 		const message = "utility executor returned no response"
-		_ = h.controller.FailCall(ctx, callID, message, 0)
+		h.settleFailedCall(ctx, callID, errors.New(message), 0)
 		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{CallID: callID, Error: message})
 		return
 	}
 
 	if !resp.Success {
-		_ = h.controller.FailCall(ctx, callID, resp.Error, resp.DurationMs)
-		c.JSON(http.StatusOK, dto.ExecutePromptResponse{
+		status := http.StatusOK
+		if h.settleFailedCall(ctx, callID, errors.New(resp.Error), resp.DurationMs) {
+			status = statusClientClosedRequest
+		}
+		c.JSON(status, dto.ExecutePromptResponse{
 			CallID:     callID,
 			Error:      resp.Error,
 			DurationMs: resp.DurationMs,
@@ -333,7 +372,13 @@ func (h *Handlers) executeSessionless(c *gin.Context, ctx context.Context, prepa
 	}
 	if err != nil {
 		h.logger.Error("failed to execute sessionless prompt", zap.Error(err), zap.String("call_id", callID))
-		_ = h.controller.FailCall(ctx, callID, err.Error(), 0)
+		if h.settleFailedCall(ctx, callID, err, 0) {
+			c.JSON(statusClientClosedRequest, dto.ExecutePromptResponse{
+				CallID: callID,
+				Error:  "utility execution cancelled",
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{
 			CallID: callID,
 			Error:  "failed to execute prompt: " + err.Error(),
@@ -342,7 +387,7 @@ func (h *Handlers) executeSessionless(c *gin.Context, ctx context.Context, prepa
 	}
 	if result == nil {
 		const message = "host utility returned no response"
-		_ = h.controller.FailCall(ctx, callID, message, 0)
+		h.settleFailedCall(ctx, callID, errors.New(message), 0)
 		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{CallID: callID, Error: message})
 		return
 	}
