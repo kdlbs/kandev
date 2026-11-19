@@ -1296,23 +1296,26 @@ func (s *Service) handleSessionLaunchFailure(
 	// replay payload here so an early admission or startup failure does not keep
 	// attachment data alive until a later session event.
 	s.clearTransientRetryState(sessionID)
-	_ = s.recordSessionLaunchFailure(
+	sessionFailed, taskFailed := s.recordSessionLaunchFailure(
 		failureCtx, taskID, sessionID, safeErr, preloadedSession...,
 	)
+	if sessionFailed && taskFailed {
+		s.scheduleTransientLaunchRetry(failureCtx, taskID, sessionID, safeErr)
+	}
 	return safeErr
 }
 
 // recordSessionLaunchFailure transitions a still-active session to FAILED and
 // updates the task only while the same failed session still owns it. Typed
 // launch-error persistence belongs to the executor's session transition.
-// Returns whether the session itself was durably transitioned to FAILED.
-func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error, preloadedSession ...*models.TaskSession) bool {
+// It reports whether the session and the task were durably transitioned.
+func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error, preloadedSession ...*models.TaskSession) (sessionFailed, taskFailed bool) {
 	_, changed := s.updateTaskSessionStateWithHook(
 		ctx, taskID, sessionID, models.TaskSessionStateFailed, launchErr.Error(), false,
 		nil, preloadedSession...,
 	)
 	if !changed {
-		return false
+		return false, false
 	}
 	updated, err := s.updateTaskStateForEarlyLaunchFailure(ctx, taskID, sessionID)
 	if err != nil {
@@ -1320,13 +1323,13 @@ func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessio
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return true
+		return true, false
 	}
 	if !updated {
-		return true
+		return true, false
 	}
 	s.processParentChildrenCompletedForTaskState(ctx, taskID, v1.TaskStateFailed)
-	return true
+	return true, true
 }
 
 func (s *Service) updateTaskStateForEarlyLaunchFailure(

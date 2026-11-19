@@ -1461,6 +1461,23 @@ type Service struct {
 	// duplicate-delivery optimization; the durable consumed tombstone lives in
 	// session metadata.
 	parkedProfileSwitchStops sync.Map
+	// transientLaunchRetries records the timestamp of the last automatic retry
+	// per session. Entries live for transientLaunchRetryTTL, so a retried
+	// launch is never retried twice, and expired entries are swept, so the map
+	// neither grows without bound nor blocks self-healing forever.
+	transientLaunchRetries sync.Map
+	// launchRetryMu guards the automatic retry workers' lifecycle:
+	// launchRetryCtx is cancelled by Stop, after which no retry is scheduled,
+	// and launchRetries tracks the workers so Stop and tests can wait for
+	// them. launchRetryDelay and launchRetry are test seams; production leaves
+	// both zero-valued.
+	launchRetryMu      sync.Mutex
+	launchRetryCtx     context.Context
+	launchRetryCancel  context.CancelFunc
+	launchRetryStopped bool
+	launchRetries      sync.WaitGroup
+	launchRetryDelay   time.Duration
+	launchRetry        func(context.Context, string, string) error
 
 	// steerInFlight tracks sessions with an unacknowledged mid-turn steer.
 	// The spec allows at most one in-flight steer per session; a second attempt
@@ -3679,6 +3696,7 @@ func (s *Service) Stop() error {
 	// workers can otherwise observe the shutdown only after those components
 	// have already stopped, and may launch or recover a session during teardown.
 	s.stopDynamicSuccessorWorkers()
+	s.stopTransientLaunchRetries()
 	s.stopBackgroundWorkSettleWorkers()
 	s.stopDynamicPolicyRecovery()
 	s.stopLifecycleSweepAsync()
