@@ -162,7 +162,7 @@ func ompUpdateCheckSources(r NativeUpdateCheckResolver) NativeUpdateCheckSources
 	} else {
 		files = append(files, filepath.Join(r.HomeDir, ".npmrc"))
 	}
-	if xdg, ok := r.Getenv(envXDGConfigHome); ok && xdg != "" {
+	if xdg, ok := r.GetenvFold(envXDGConfigHome); ok && xdg != "" {
 		files = append(files, filepath.Join(xdg, ".bunfig.toml"))
 	}
 	return NativeUpdateCheckSources{

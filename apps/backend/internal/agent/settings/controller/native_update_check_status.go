@@ -188,14 +188,15 @@ func (c *Controller) prepareNativeUpdateCheck(agentName, currentVersion string, 
 		executable = ""
 	}
 	workingDir, _ := os.Getwd()
-	fingerprint := spec.Context.Fingerprint(agents.NewNativeUpdateCheckResolver(runner.Environment(), workingDir, executable))
+	resolver := agents.NewNativeUpdateCheckResolver(runner.Environment(), workingDir, executable)
+	fingerprint := spec.Context.Fingerprint(resolver)
 	c.runtimeUpdateStatusMu.Lock()
 	generation := c.nativeUpdateCheckGeneration[agentName]
 	c.runtimeUpdateStatusMu.Unlock()
 	return nativeUpdateCheckLookup{
 		agentName: agentName, currentVersion: currentVersion, executable: executable,
 		generation: generation, spec: spec,
-		key: nativeUpdateCheckCacheKey(agentName, generation, spec.Command.Args(), executable, currentVersion, fingerprint),
+		key: nativeUpdateCheckCacheKey(agentName, generation, spec.Command.Args(), resolver.Executable, currentVersion, fingerprint),
 	}
 }
 
