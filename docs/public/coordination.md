@@ -116,7 +116,7 @@ Detaching changes task hierarchy only. An inherited workspace remains shared wit
 
 ### Create a subtask from an agent
 
-Call `create_task_kandev` with `parent_id: "self"`. Omit `workspace_mode` to inherit the parent's materialized workspace/worktree, or set it to `new_workspace` for a separate workspace/worktree. The only explicit values are `inherit_parent` and `new_workspace`; `inherit_parent` requires `parent_id`. Send an exact value or omit the field: empty, whitespace-only, and padded strings fail MCP schema validation.
+Call `create_task_kandev` with `parent_id: "self"`. Omit `workspace_mode` to give the subtask a separate workspace/worktree. Set it to `inherit_parent` to share the parent's exact existing checkout(s) and files; `inherit_parent` requires `parent_id`. The only explicit values are `inherit_parent` and `new_workspace`. Send an exact value or omit the field: empty, whitespace-only, and padded strings fail MCP schema validation.
 
 When the calling task is already a regular Kanban child, `parent_id: "self"` resolves one hop to the direct parent and creates a sibling under that common parent. The tool result identifies the requested and resolved parent and explains the depth-limit resolution. The common parent owns completion, parent questions, interrupt, and stop controls; the creating child keeps ordinary task messaging. An explicit child task ID keeps the strict one-level depth error, and this behavior does not change Office's deeper task trees.
 
