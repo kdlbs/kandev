@@ -164,7 +164,14 @@ describe("RuntimeVersionSummary after a finished native update job", () => {
         current_version: "18.23.0",
         started_at: "2026-11-17T12:00:00Z",
       };
-      render(<RuntimeVersionSummary agentName={AGENT} preview={nativePreview()} job={job} />);
+      render(
+        <RuntimeVersionSummary
+          agentName={AGENT}
+          preview={nativePreview()}
+          job={job}
+          changeVersion={null}
+        />,
+      );
       expect(screen.queryByTestId(NATIVE_LINE)).toBeNull();
       expect(screen.queryByTestId(CHANNEL_LINE)).toBeNull();
       if (status === "succeeded") {
@@ -183,7 +190,14 @@ describe("RuntimeVersionSummary after a finished native update job", () => {
       status: "updating",
       started_at: "2026-11-17T12:00:00Z",
     };
-    render(<RuntimeVersionSummary agentName={AGENT} preview={nativePreview()} job={job} />);
+    render(
+      <RuntimeVersionSummary
+        agentName={AGENT}
+        preview={nativePreview()}
+        job={job}
+        changeVersion={null}
+      />,
+    );
     expect(screen.getByTestId(NATIVE_LINE).textContent).toContain(CANARY_LATEST);
   });
 });
